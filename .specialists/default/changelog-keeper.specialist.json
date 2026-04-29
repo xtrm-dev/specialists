@@ -1,0 +1,131 @@
+{
+  "specialist": {
+    "metadata": {
+      "name": "changelog-keeper",
+      "version": "1.0.0",
+      "description": "Drafts release changelog sections from git history and bead closures between tags.",
+      "category": "documentation/release",
+      "updated": "2026-04-29",
+      "tags": [
+        "changelog",
+        "release-notes",
+        "automation",
+        "docs"
+      ]
+    },
+    "execution": {
+      "mode": "tool",
+      "model": "anthropic/claude-sonnet-4-6",
+      "fallback_model": "google-gemini-cli/gemini-3.1-pro-preview",
+      "timeout_ms": 120000,
+      "stall_timeout_ms": 120000,
+      "max_retries": 0,
+      "interactive": false,
+      "response_format": "markdown",
+      "output_type": "synthesis",
+      "permission_required": "READ_ONLY",
+      "requires_worktree": false
+    },
+    "prompt": {
+      "system": "You are changelog-keeper.\n\nJob: draft one release section for CHANGELOG.md from git history and bead closures between two tags.\n\nRules:\n- Stay deterministic. Use only evidence from the injected pre-script output and prompt variables.\n- Prefer user-facing release language. No internal implementation jargon.\n- Group entries by Keep-a-Changelog sections.\n- Map commit intent to sections using changelog-conventions.\n- Preserve one-line bullets with bead references in parentheses when helpful.\n- Produce markdown ready to paste directly above the previous release section.\n- If a section is empty, omit it.\n- Do not mutate tags, files, or beads. Read only.\n\nOutput contract:\n- First emit a complete markdown release section headed `## [$next_tag] — <YYYY-MM-DD>`\n- Then emit structured data for downstream consumers when requested by the runner.\n- Keep section bullets short and consistent across repeated runs.\n",
+      "task_template": "Draft changelog section for range `$prev_tag`..`$next_tag`.\n\nWorking directory: $cwd\nPrevious tag: $prev_tag\nNext tag: $next_tag\n\nPre-script evidence:\n$pre_script_output\n\nInstructions:\n1. Read git log and bead closures from pre-script output only.\n2. Infer release date from `$next_tag` or the tagged commit date when available.\n3. Produce a ready-to-paste markdown section headed `## [$next_tag] — <YYYY-MM-DD>`.\n4. Include only applicable sections from Added, Changed, Fixed, Removed, Deprecated, Security.\n5. Keep each bullet one line and add bead-id refs in parentheses when helpful.\n6. Match conventional-commit hint mapping: feat -> Added, fix -> Fixed, refactor/perf -> Changed, docs/chore -> Changed unless clearly user-facing, revert -> Removed, sec/security -> Security.\n7. Avoid duplicate bullets. Prefer merged bullets when history repeats same fix.\n8. Keep output deterministic in structure for the same input range.\n",
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "unreleased_summary": {
+            "type": "string"
+          },
+          "sections": {
+            "type": "object",
+            "properties": {
+              "added": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "changed": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "fixed": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "removed": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "deprecated": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "security": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "added",
+              "changed",
+              "fixed",
+              "removed",
+              "deprecated",
+              "security"
+            ]
+          }
+        },
+        "required": [
+          "unreleased_summary",
+          "sections"
+        ]
+      }
+    },
+    "skills": {
+      "paths": [],
+      "scripts": [
+        {
+          "run": "bash -lc 'git log --pretty=format:%H||%s||%b -- $prev_tag..$next_tag'",
+          "phase": "pre",
+          "inject_output": true
+        },
+        {
+          "run": "bash -lc 'prev_tag_date=$(git log -1 --format=%cI $prev_tag 2>/dev/null || git log -1 --format=%ci $prev_tag 2>/dev/null || true); bd query \"closed_at >= $prev_tag_date\"'",
+          "phase": "pre",
+          "inject_output": true
+        }
+      ]
+    },
+    "capabilities": {
+      "external_commands": [
+        "git",
+        "bd"
+      ],
+      "required_tools": []
+    },
+    "validation": {
+      "files_to_watch": [
+        "CHANGELOG.md",
+        "config/mandatory-rules/changelog-conventions.md"
+      ],
+      "stale_threshold_days": 30
+    },
+    "beads_integration": "auto",
+    "beads_write_notes": true,
+    "mandatory_rules": {
+      "template_sets": [
+        "changelog-conventions"
+      ]
+    }
+  }
+}

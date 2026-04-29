@@ -80,6 +80,7 @@ specialists doctor
 |---|---|
 | Install and bootstrap a project | [docs/bootstrap.md](docs/bootstrap.md) |
 | Release notes and version history | [CHANGELOG.md](CHANGELOG.md) |
+| Changelog drafting specialist | [config/specialists/changelog-keeper.specialist.json](config/specialists/changelog-keeper.specialist.json) |
 | Run a script-class specialist over HTTP (`sp serve`) — overview & contract | [docs/specialists-service.md](docs/specialists-service.md) |
 | Install `sp serve` in another project (sidecar Docker / Podman) | [docs/specialists-service-install.md](docs/specialists-service-install.md) |
 | Build & publish the specialists-service image | [docs/release-image.md](docs/release-image.md) |
