@@ -183,7 +183,11 @@ sp stop <job-id>                             # Terminate
 sp merge <chain-root-bead>                   # Standalone chain
 sp epic status <epic-id>                     # Epic readiness check
 sp epic merge <epic-id>                      # Multi-chain epic publication
+sp release prepare [--major|--minor|--patch] # Draft CHANGELOG section + bump package.json (operator commits)
+sp release publish                           # Validate staged release commit, tag, push, optional GH release
 ```
+
+`sp release prepare` invokes the READ_ONLY `changelog-keeper` specialist; the CLI is the file mutator. Format conforms to Keep-a-Changelog v1.0.0. See `docs/release.md`.
 
 ## Review & Fix Loop
 

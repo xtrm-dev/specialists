@@ -191,6 +191,7 @@ Run `specialists list` if you need the live registry. Choose by task, not by hab
 | Docs audit/sync | `sync-docs` | Docs may be stale or need targeted synchronization. |
 | External/live research | `researcher` | Current library/docs/media lookup is needed. |
 | Specialist config | `specialists-creator` | Creating or changing specialist JSON/config. |
+| Release changelog drafting | `changelog-keeper` | A new tag is being cut and a `[X.Y.Z] - YYYY-MM-DD` section is needed. Driven by `sp release prepare`, not invoked directly. |
 
 Selection rules:
 
@@ -516,6 +517,21 @@ Rules:
 - Do not merge within a chain between executor and reviewer.
 - Merge between stages only when later stages need the code on the main line.
 - Run or confirm required gates before closing the root bead or epic.
+
+## Release Publication
+
+Tagged releases go through `sp release`, not manual `git tag`:
+
+```bash
+sp release prepare [--major | --minor | --patch]   # default: --patch
+sp release publish
+```
+
+`prepare` invokes the `changelog-keeper` specialist to draft a Keep-a-Changelog section between the previous tag and the next tag, bumps `package.json`, and stages `CHANGELOG.md` + `package.json` + `dist/index.js`. It does not commit — operator reviews and commits with `release: v<version>`.
+
+`publish` validates the staged commit (dirty-tree refusal, HEAD message match, version match, top-section match in `CHANGELOG.md`), creates the annotated tag, pushes to origin, and optionally creates a GitHub release via `gh`. Re-emits the empty `[Unreleased]` placeholder for the next cycle.
+
+The `changelog-keeper` specialist is READ_ONLY; the CLI is the file mutator. See `docs/release.md` for the operator runbook.
 
 ## Epic Lifecycle
 

@@ -36,6 +36,7 @@ Mirror source is `config/specialists/*.specialist.json` during `specialists init
 | `planner` | v1.1 | `openai-codex/gpt-5.4` | HIGH | task decomposition, phased bd issue board, test-planning per layer |
 | `researcher` | v1.1 | `dashscope/qwen3.5-plus` | MEDIUM | library docs lookup + GitHub code discovery, keep-alive |
 | `reviewer` | v1.0 | `openai-codex/gpt-5.3-codex` | MEDIUM | post-run requirement compliance audit |
+| `changelog-keeper` | v1.0 | `anthropic/claude-sonnet-4-6` | READ_ONLY | draft Keep-a-Changelog section between two tags from git log + closed beads |
 | `specialists-creator` | v1.2 | `anthropic/claude-sonnet-4-6` | HIGH | create/fix specialist JSONs |
 | `sync-docs` | v2.0 | `dashscope/glm-5` | MEDIUM | documentation drift sync, 3-mode routing |
 | `test-runner` | v1.0 | `anthropic/claude-haiku-4-5` | LOW | test execution + summary |
@@ -63,6 +64,7 @@ All specialists now have GitNexus skills wired for code intelligence:
 | `specialists-creator` | `specialists-creator` |
 | `sync-docs` | `sync-docs`, `gitnexus-exploring` |
 | `xt-merge` | `xt-merge` |
+| `changelog-keeper` | (none — pre-script driven) |
 
 ## Version highlights
 
@@ -77,6 +79,14 @@ All specialists now have GitNexus skills wired for code intelligence:
 - **Mode**: keep-alive (interactive)
 - **Workflow**: GitNexus codebase exploration → phased bd issue board → test-planning per layer → epic ID output
 - **Skills**: `planning`, `test-planning`, `gitnexus-exploring`
+
+### changelog-keeper v1.0
+- **Permission**: READ_ONLY
+- **Output**: `output_type=synthesis`, `response_format=markdown` plus structured JSON (`{unreleased_summary, sections:{added/changed/fixed/removed/deprecated/security}}`)
+- **Pre-scripts**: `git log --pretty=format:%H||%s||%b -- $prev_tag..$next_tag` and a bd-query for beads closed since the previous tag, both `inject_output: true`
+- **Mandatory rules**: `changelog-conventions` (Keep-a-Changelog v1.0.0 sections, conventional-commit mapping, one-line bullets, bead-id refs)
+- **Consumed by**: `sp release prepare` — see `docs/release.md`
+- **Drafts only.** The specialist never writes to `CHANGELOG.md`; the CLI is the file mutator. Operator gates the release.
 
 ### specialists-creator v1.2
 - **Permission**: HIGH

@@ -1351,3 +1351,41 @@ Diagnostics: beadId=unitAI-sync jobId=d4e5f6 branch=feature/unitAI-sync total=5 
 - **New behavior**: noise-aware preview — allows docs, config, skills, any substantive content
 
 This enables doc-sync specialists and workflow-only changes to merge without false positives.
+
+## `specialists release`
+
+### Synopsis
+
+```bash
+specialists release prepare [--major | --minor | --patch]
+specialists release publish
+```
+
+### Behavior
+
+**`prepare`** — drafts the next release section in `CHANGELOG.md` and bumps `package.json`.
+
+1. Resolves `$prev_tag` from the most recent `vX.Y.Z` git tag and `$next_tag` from the bump flag (default `--patch`).
+2. Spawns `changelog-keeper` via `runScriptSpecialist` (same code path as `sp script`).
+3. Renders the structured JSON into the xtrm-tools bullet style (`- **Scope**: detail`).
+4. Replaces the `[Unreleased]` body in `CHANGELOG.md` with a new `## [vX.Y.Z] - YYYY-MM-DD` section above the previous release. Idempotent on re-run.
+5. Bumps `package.json` `version`. Stages `CHANGELOG.md`, `package.json`, `dist/index.js`. **Does not commit** — operator reviews and commits manually.
+6. Prints next-step instructions.
+
+**`publish`** — verifies the staged release commit and publishes the tag.
+
+1. Refuses if working tree is dirty beyond the post-release `[Unreleased]` reset.
+2. Validates HEAD commit message matches `release: v<version>`.
+3. Validates `package.json` version matches the commit.
+4. Validates the FIRST `## [vX.Y.Z]` header after `[Unreleased]` equals `v<version>` (top-section gate, not just existence).
+5. Creates annotated `vX.Y.Z` tag with the CHANGELOG section as the tag message body.
+6. Pushes the tag to `origin`.
+7. If `gh` CLI is authenticated, optionally creates a GitHub Release. Otherwise prints the `gh` command for manual run.
+8. Re-emits the empty `[Unreleased]` placeholder for the next cycle (staged, not committed).
+
+### Notes
+
+- The specialist drafts; the CLI mutates files. The specialist is READ_ONLY by design.
+- Format conforms to Keep-a-Changelog v1.0.0 with `---` separators between versions.
+- See `docs/release.md` for the operator runbook and `config/specialists/changelog-keeper.specialist.json` for the underlying spec.
+- Source: `src/cli/release.ts`
