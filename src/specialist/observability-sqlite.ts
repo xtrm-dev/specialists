@@ -181,22 +181,23 @@ function migrateToV3(db: BunDb): void {
 
 function migrateToV11(db: BunDb): void {
   const hasV11 = db.query('SELECT 1 FROM schema_version WHERE version = 11 LIMIT 1').get() as { 1?: number } | undefined;
-  const metricsColumns = new Set(
-    (db.query('PRAGMA table_info(specialist_job_metrics)').all() as Array<{ name?: string }>)
-      .map((column) => column.name)
-      .filter((name): name is string => typeof name === 'string' && name.length > 0),
-  );
-
-  for (const column of [
-    { name: 'active_runtime_ms', definition: 'INTEGER' },
-    { name: 'waiting_ms', definition: 'INTEGER' },
-  ]) {
-    if (!metricsColumns.has(column.name)) {
-      db.run(`ALTER TABLE specialist_job_metrics ADD COLUMN ${column.name} ${column.definition}`);
-    }
-  }
 
   if (hasV11) {
+    const metricsColumns = new Set(
+      (db.query('PRAGMA table_info(specialist_job_metrics)').all() as Array<{ name?: string }>)
+        .map((column) => column.name)
+        .filter((name): name is string => typeof name === 'string' && name.length > 0),
+    );
+
+    for (const column of [
+      { name: 'active_runtime_ms', definition: 'INTEGER' },
+      { name: 'waiting_ms', definition: 'INTEGER' },
+    ]) {
+      if (!metricsColumns.has(column.name)) {
+        db.run(`ALTER TABLE specialist_job_metrics ADD COLUMN ${column.name} ${column.definition}`);
+      }
+    }
+
     db.run('CREATE INDEX IF NOT EXISTS idx_job_metrics_spec_model_updated ON specialist_job_metrics(specialist, model, updated_at_ms DESC)');
     db.run('CREATE INDEX IF NOT EXISTS idx_job_metrics_updated ON specialist_job_metrics(updated_at_ms DESC)');
     return;
@@ -1973,7 +1974,7 @@ class SqliteClient implements ObservabilitySqliteClient {
           started_at_ms, completed_at_ms, elapsed_ms, active_runtime_ms, waiting_ms, total_turns, total_tools,
           tool_call_counts_json, token_trajectory_json, context_trajectory_json, stall_gaps_json,
           run_complete_json, updated_at_ms
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(job_id) DO UPDATE SET
           specialist = excluded.specialist,
           model = excluded.model,

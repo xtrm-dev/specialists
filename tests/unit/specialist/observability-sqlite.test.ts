@@ -769,7 +769,7 @@ describe('observability-sqlite', () => {
   describe('job metrics aggregation', () => {
     it('extracts tool counts and runtime split from specialist_events', () => {
       const client = createClient();
-      client.upsertStatus({ id: 'job-metrics', specialist: 'executor', status: 'done', started_at_ms: 1, updated_at_ms: 5 });
+      client.upsertStatus({ id: 'job-metrics', specialist: 'executor', status: 'done', started_at_ms: 1, last_event_at_ms: 5 });
       client.appendEvent('job-metrics', 'executor', 'bead-1', { t: 10, type: 'run_start', specialist: 'executor' } as never);
       client.appendEvent('job-metrics', 'executor', 'bead-1', { t: 20, type: 'status_change', status: 'running', previous_status: 'starting' } as never);
       client.appendEvent('job-metrics', 'executor', 'bead-1', { t: 30, type: 'tool', tool: 'bash', phase: 'start' } as never);
@@ -788,7 +788,9 @@ describe('observability-sqlite', () => {
       expect(metrics?.active_runtime_ms).toBe(80);
       expect(metrics?.waiting_ms).toBe(10);
       expect(metrics?.elapsed_ms).toBe(100);
-      expect((metrics?.active_runtime_ms ?? 0) + (metrics?.waiting_ms ?? 0)).toBe(metrics?.elapsed_ms);
+      // active + waiting <= elapsed: the gap between started_at_ms and the first run_start
+      // event is "startup" time, counted in elapsed but neither active nor waiting.
+      expect((metrics?.active_runtime_ms ?? 0) + (metrics?.waiting_ms ?? 0)).toBeLessThanOrEqual(metrics?.elapsed_ms ?? 0);
       expect(JSON.parse(metrics?.tool_call_counts_json ?? '{}')).toEqual({ bash: 2 });
       expect(JSON.parse(metrics?.token_trajectory_json ?? '[]')).toHaveLength(2);
       expect(JSON.parse(metrics?.context_trajectory_json ?? '[]')).toEqual([{ turn_index: 1, t: 70, context_pct: 25 }]);
@@ -797,7 +799,7 @@ describe('observability-sqlite', () => {
 
     it('is idempotent on repeated aggregation', () => {
       const client = createClient();
-      client.upsertStatus({ id: 'job-idempotent', specialist: 'executor', status: 'done', started_at_ms: 1, updated_at_ms: 5 });
+      client.upsertStatus({ id: 'job-idempotent', specialist: 'executor', status: 'done', started_at_ms: 1, last_event_at_ms: 5 });
       const location = resolveObservabilityDbLocation(tempRoot);
       db = new Database(location.dbPath);
       db.run(
@@ -814,7 +816,7 @@ describe('observability-sqlite', () => {
 
     it('prune refuses to delete events when extract throws', () => {
       const client = createClient();
-      client.upsertStatus({ id: 'job-prune', specialist: 'executor', status: 'done', started_at_ms: 1, updated_at_ms: 5 });
+      client.upsertStatus({ id: 'job-prune', specialist: 'executor', status: 'done', started_at_ms: 1, last_event_at_ms: 5 });
       const location = resolveObservabilityDbLocation(tempRoot);
       db = new Database(location.dbPath);
       db.run(`INSERT INTO specialist_events (job_id, seq, specialist, bead_id, t, type, event_json) VALUES (?, ?, ?, ?, ?, ?, ?)`, ['job-prune', 1, 'executor', null, 10, 'run_complete', JSON.stringify({ status: 'COMPLETE', elapsed_s: 1 })]);

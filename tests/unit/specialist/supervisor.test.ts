@@ -17,10 +17,7 @@ import * as childProcess from 'node:child_process';
 // vi.mock at module scope makes the ESM namespace mutable so vi.spyOn works.
 // Without this, vi.spyOn(childProcess, 'spawnSync') throws
 // "Cannot replace module namespace object's binding's value".
-vi.mock('node:child_process', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('node:child_process')>();
-  return { ...actual };
-});
+vi.mock('node:child_process', () => ({}));
 import { Supervisor } from '../../../src/specialist/supervisor.js';
 import type { SupervisorStatus } from '../../../src/specialist/supervisor.js';
 import { createObservabilitySqliteClient } from '../../../src/specialist/observability-sqlite.js';
