@@ -513,7 +513,7 @@ interface MergePreviewDelta {
 
 interface MergeWorthinessDecision {
   shouldMerge: boolean;
-  reason: 'ok' | 'empty-delta' | 'noise-only-delta';
+  reason: 'ok' | 'already-published' | 'empty-delta' | 'noise-only-delta';
 }
 
 const NOISE_PATH_PREFIXES = ['.xtrm/reports/', '.wolf/', '.specialists/jobs/'] as const;
@@ -574,6 +574,22 @@ function isNoisePath(path: string): boolean {
   return NOISE_PATH_PREFIXES.some(prefix => path.startsWith(prefix));
 }
 
+function isBranchAlreadyPublished(branch: string, cwd = process.cwd()): boolean {
+  const baseBranch = resolveDefaultBranchName(cwd);
+
+  const ancestorCheck = runCommand('git', ['merge-base', '--is-ancestor', branch, baseBranch], cwd);
+  if (ancestorCheck.status === 0) {
+    return true;
+  }
+
+  const cherryPickCount = runCommand('git', ['rev-list', '--right-only', '--cherry-pick', '--no-merges', '--count', `${baseBranch}...${branch}`], cwd);
+  if (cherryPickCount.status !== 0) {
+    return false;
+  }
+
+  return cherryPickCount.stdout.trim() === '0';
+}
+
 export function previewBranchMergeDelta(branch: string, cwd = process.cwd()): MergePreviewDelta {
   const baseBranch = resolveDefaultBranchName(cwd);
   const mergeBase = runCommand('git', ['merge-base', baseBranch, branch], cwd);
@@ -607,13 +623,17 @@ export function previewBranchMergeDelta(branch: string, cwd = process.cwd()): Me
   };
 }
 
-export function evaluateMergeWorthiness(preview: MergePreviewDelta): MergeWorthinessDecision {
+export function evaluateMergeWorthiness(preview: MergePreviewDelta, branch: string, cwd = process.cwd()): MergeWorthinessDecision {
   if (preview.files.length === 0) {
-    return { shouldMerge: false, reason: 'empty-delta' };
+    return isBranchAlreadyPublished(branch, cwd)
+      ? { shouldMerge: false, reason: 'already-published' }
+      : { shouldMerge: false, reason: 'empty-delta' };
   }
 
   if (preview.substantiveFiles.length === 0) {
-    return { shouldMerge: false, reason: 'noise-only-delta' };
+    return isBranchAlreadyPublished(branch, cwd)
+      ? { shouldMerge: false, reason: 'already-published' }
+      : { shouldMerge: false, reason: 'noise-only-delta' };
   }
 
   return { shouldMerge: true, reason: 'ok' };
@@ -639,10 +659,10 @@ function throwWorthinessBlockError(target: ChainMergeTarget, preview: MergePrevi
   );
 }
 
-function assertBranchMergeWorthiness(target: ChainMergeTarget, cwd = process.cwd()): void {
+function assertBranchMergeWorthiness(target: ChainMergeTarget, cwd = process.cwd()): MergeWorthinessDecision {
   const preview = previewBranchMergeDelta(target.branch, cwd);
-  const decision = evaluateMergeWorthiness(preview);
-  if (decision.shouldMerge) return;
+  const decision = evaluateMergeWorthiness(preview, target.branch, cwd);
+  if (decision.reason === 'already-published' || decision.shouldMerge) return decision;
   throwWorthinessBlockError(target, preview, decision);
 }
 
@@ -765,8 +785,17 @@ export function runMergePlan(
   const mergedSteps: MergeStepResult[] = [];
 
   for (const target of targets) {
+    const worthiness = assertBranchMergeWorthiness(target, mainRepoRoot);
+    if (worthiness.reason === 'already-published') {
+      mergedSteps.push({
+        beadId: target.beadId,
+        branch: target.branch,
+        changedFiles: [],
+      });
+      continue;
+    }
+
     rebaseBranchOntoMaster(target.branch, target.worktreePath);
-    assertBranchMergeWorthiness(target, mainRepoRoot);
     mergeBranch(target.branch, mainRepoRoot);
     runTypecheckGate(mainRepoRoot);
     mergedSteps.push({
