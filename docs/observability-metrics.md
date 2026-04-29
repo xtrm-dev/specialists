@@ -12,7 +12,7 @@ summary: "Defines additive metrics from Pi RPC surfaced via specialists status/f
 
 # RPC Observability Metrics Contract
 
-This document defines additive, backward-compatible metrics captured from Pi RPC and surfaced through specialists status/feed/timeline.
+This document defines additive, backward-compatible metrics captured from Pi RPC and surfaced through specialists status/feed/timeline. For KPI analysis recipes, see `.xtrm/skills/default/using-kpi/SKILL.md`.
 
 ## Metric Source Map
 

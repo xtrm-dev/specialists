@@ -94,7 +94,7 @@ function parseBeforeArgument(raw: string): number {
 function printDbHelp(): void {
   console.log([
     '',
-    'Usage: specialists db <setup|backfill|vacuum|prune> (legacy/migration tooling)',
+    'Usage: specialists db <setup|backfill|vacuum|prune|extract|stats|benchmark-export>',
     '',
     'Human-only commands for shared observability SQLite database maintenance and migration.',
     '',
@@ -105,8 +105,8 @@ function printDbHelp(): void {
     '  [MIGRATION] vacuum                 Run SQLite VACUUM (refuses when running/starting jobs exist)',
     '  [MIGRATION] prune --before <iso|duration>      Prune old rows (default dry-run)',
     '              [--dry-run] [--apply] [--include-epics] [--skip-extract]',
-    '  [MIGRATION] extract [--job <id>] [--all-missing] [--since <dur>]',
-    '  [QUERY] stats [--spec <name>] [--model <glob>] [--since <dur>] [--format json|table]',
+    '  [MIGRATION] extract [--job <id>] [--all-missing] [--since <dur>] [--help]',
+    '  [QUERY] stats [--spec <name>] [--model <glob>] [--since <dur>] [--format json|table] [--with-payload] [--help]',
     '  [ANALYSIS] benchmark-export [--output <path>] [--include-prep-jobs] [--epic-id <id>]',
     '',
     'Behavior:',
@@ -227,7 +227,26 @@ function parsePruneOptions(argv: readonly string[]): PruneOptions {
   };
 }
 
+function printExtractHelp(): void {
+  console.log([
+    '',
+    'Usage: specialists db extract [--job <id>] [--all-missing] [--since <dur>] [--backfill]',
+    '',
+    'Options:',
+    '  --job <id>        Recompute one job',
+    '  --all-missing     Recompute every status row missing KPI metrics',
+    '  --since <dur>     Limit by started_at_ms, duration like 1h or 7d',
+    '  --backfill        Alias for --all-missing',
+    '',
+  ].join('\n'));
+}
+
 function parseExtractOptions(argv: readonly string[]): ExtractOptions {
+  if (argv.includes('--help') || argv.includes('-h')) {
+    printExtractHelp();
+    process.exit(0);
+  }
+
   let jobId: string | undefined;
   let allMissing = false;
   let sinceMs: number | undefined;
@@ -256,7 +275,27 @@ function parseExtractOptions(argv: readonly string[]): ExtractOptions {
   return { jobId, allMissing, sinceMs };
 }
 
+function printStatsHelp(): void {
+  console.log([
+    '',
+    'Usage: specialists db stats [--spec <name>] [--model <glob>] [--since <dur>] [--format json|table] [--with-payload]',
+    '',
+    'Options:',
+    '  --spec <name>        Filter by specialist name',
+    '  --model <glob>       Filter by model glob',
+    '  --since <dur>        Filter by start time, duration like 1h or 7d',
+    '  --format <json|table> Output format',
+    '  --with-payload       Include payload_kb and payload_tokens columns',
+    '',
+  ].join('\n'));
+}
+
 function parseStatsOptions(argv: readonly string[]): StatsOptions {
+  if (argv.includes('--help') || argv.includes('-h')) {
+    printStatsHelp();
+    process.exit(0);
+  }
+
   let spec: string | undefined;
   let model: string | undefined;
   let sinceMs: number | undefined;

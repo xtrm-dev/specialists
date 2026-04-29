@@ -210,7 +210,7 @@ async function run() {
     if (wantsHelp()) {
       console.log([
         '',
-        'Usage: specialists db <setup|backfill|vacuum|prune> (legacy/migration tooling)',
+        'Usage: specialists db <setup|backfill|vacuum|prune|extract|stats|benchmark-export>',
         '',
         'Provision the shared observability SQLite database maintenance and migration (human-only).',
         '',
@@ -222,6 +222,9 @@ async function run() {
         '  [MIGRATION] vacuum     Run SQLite VACUUM (refuses when active jobs running/starting)',
         '  [MIGRATION] prune      Prune old rows: requires --before <iso|duration>, dry-run by default',
         '                       Use --apply to execute; --include-epics to also prune epic_runs',
+        '  [MIGRATION] extract    Recompute KPI rows from specialist_events',
+        '                       Use --job, --all-missing, --since, or --backfill',
+        '  [QUERY] stats          Query KPI rows; use --with-payload for payload columns',
         '',
         'Notes:',
         '  - TTY required for legacy migration tooling (blocked in agent/non-interactive sessions)',
@@ -237,6 +240,8 @@ async function run() {
         '  specialists db prune --before 2026-01-01T00:00:00Z --apply --include-epics',
         '  sp db setup',
         '  sp db backfill',
+        '  sp db extract --all-missing',
+        '  sp db stats --with-payload',
         '',
       ].join('\n'));
       return;
