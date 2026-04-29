@@ -131,6 +131,28 @@ Loader unions indexes from three paths and probes set files in reverse precedenc
 | Index files (`index.json`) | Any of the three tiers may define `required_template_sets` / `default_template_sets`; loader unions + dedups |
 | Prompt injection behavior | Runner appends resolved `MANDATORY_RULES` block at end of prompt; supervisor emits `mandatory_rules_injection` meta event |
 
+## Discover Latest Release
+
+Before reconciling, determine whether a newer release is published. Compare local `package.json` version to the most recent `vX.Y.Z` tag on `origin`:
+
+```bash
+LOCAL=$(node -p "require('./package.json').version")
+LATEST=$(git ls-remote --tags --refs origin | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 | sed 's/^v//')
+echo "local: $LOCAL  latest: $LATEST"
+```
+
+If `LATEST > LOCAL`, read the corresponding `CHANGELOG.md` section to summarize what shipped:
+
+```bash
+awk -v ver="$LATEST" '/^## \[v?'"$LATEST"'\]/,/^## \[/{print}' CHANGELOG.md | head -60
+```
+
+Surface a one-line summary to the user (Added/Changed/Fixed counts plus the headline) and **ask before pulling**. The reconcile flow below applies regardless of whether the user pulls a new release first or stays on the current version — drift detection is independent of release version.
+
+Skip this discovery step entirely when `SPECIALISTS_OFFLINE=1` is set, when offline, or when the user already specified the version. The `using-specialists-v2` skill performs the same lightweight check on session-load and may have already surfaced the notice; do not repeat it.
+
+After the user confirms a pull (e.g. `git fetch && git pull origin master`), proceed with detection below to catch any drift introduced by the new release.
+
 ## Detection
 
 Run these in order. Report which checks pass and which drift.

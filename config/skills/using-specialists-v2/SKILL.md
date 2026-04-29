@@ -19,6 +19,20 @@ Use this skill for substantial work: codebase exploration, debugging, implementa
 
 For one-shot synchronous specialist invocations from services or scripts (template + variables, READ_ONLY, JSON out), use `using-script-specialists` instead. That runtime (`sp script` / `sp serve`) is unrelated to bead-first orchestration.
 
+## Update Awareness On Skill Load
+
+On first activation in a session, before substantial work, check whether the local specialists install is current:
+
+```bash
+LOCAL=$(node -p "require('./package.json').version" 2>/dev/null)
+LATEST=$(git ls-remote --tags --refs origin 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 | sed 's/^v//')
+[ -n "$LATEST" ] && [ "$LOCAL" != "$LATEST" ] && echo "specialists v$LOCAL is local; v$LATEST published — consider /update-specialists before substantial work."
+```
+
+Skip the check entirely when `SPECIALISTS_OFFLINE=1` is set, when stdin is not a TTY (specialist-spawned subagent context), or when the previous turn already surfaced this notice. Surface at most one line — never block, never spam, never auto-update. The operator decides whether to run `/update-specialists`.
+
+When the local version is behind, the latest CHANGELOG entry can be summarized via `head -50 CHANGELOG.md` to anchor what changed; cross-link to the `update-specialists` skill for the actual reconcile flow.
+
 ## Hard Rules
 
 1. `--bead` is the prompt for tracked work.
