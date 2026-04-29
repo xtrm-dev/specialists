@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { createObservabilitySqliteClient } from '../specialist/observability-sqlite.js';
-import { formatVersionCheckNudge, getVersionCheckResult } from './version-check.js';
+import { formatVersionCheckNudge, getVersionCheckResult, localVersion, readCachedVersionCheck } from './version-check.js';
 
 const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
 const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
@@ -203,19 +203,25 @@ function checkMCP(): boolean {
 function checkVersion(): boolean {
   section('Version check');
   const result = getVersionCheckResult();
-  if (!result) {
-    ok('version check skipped');
+  if (result) {
+    const nudge = formatVersionCheckNudge(result);
+    if (!nudge) {
+      ok(`specialists v${result.localVersion} is current`);
+      return true;
+    }
+
+    warn(nudge);
+    return false;
+  }
+
+  const cached = readCachedVersionCheck();
+  if (!cached) {
+    warn('cache empty — skipped');
     return true;
   }
 
-  const nudge = formatVersionCheckNudge(result);
-  if (!nudge) {
-    ok(`specialists v${result.localVersion} is current`);
-    return true;
-  }
-
-  warn(nudge);
-  return false;
+  ok(`specialists v${localVersion} is local; ${cached.latest_tag} cached on ${new Date(cached.checked_at_ms).toISOString()}`);
+  return true;
 }
 
 function hashFile(path: string): string {
