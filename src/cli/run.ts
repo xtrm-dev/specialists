@@ -230,7 +230,7 @@ function assertNoStaleBaseSiblings(beadId: string, forceStaleBase: boolean): voi
 
       try {
         const preview = previewBranchMergeDelta(branch);
-        const decision = evaluateMergeWorthiness(preview);
+        const decision = evaluateMergeWorthiness(preview, branch);
         if (!decision.shouldMerge) continue;
 
         staleSiblings.push({

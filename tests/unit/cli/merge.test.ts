@@ -12,7 +12,7 @@ vi.mock('node:child_process', () => ({
 
 import { spawnSync } from 'node:child_process';
 import * as observabilitySqlite from '../../../src/specialist/observability-sqlite.js';
-import { resolveChainEpicMembership, resolveMergeTargets, topologicallySortChains, run, checkEpicUnresolvedGuard } from '../../../src/cli/merge.js';
+import { evaluateMergeWorthiness, resolveChainEpicMembership, resolveMergeTargets, topologicallySortChains, run, checkEpicUnresolvedGuard, runMergePlan } from '../../../src/cli/merge.js';
 
 function asSpawnResult(partial: Partial<SpawnSyncReturns<string>>): SpawnSyncReturns<string> {
   return {
@@ -99,6 +99,24 @@ describe('merge CLI', () => {
     });
 
     expect(resolveChainEpicMembership('unitAI-chain')).toEqual({ source: 'none' });
+  });
+
+  it('classifies empty delta as already published when branch is contained in default branch', () => {
+    (spawnSync as unknown as ReturnType<typeof vi.fn>).mockImplementation((command: string, args: string[]) => {
+      if (command === 'git' && args[0] === 'symbolic-ref') {
+        return asSpawnResult({ stdout: 'origin/main\n' });
+      }
+      if (command === 'git' && args[0] === 'merge-base' && args.includes('--is-ancestor')) {
+        return asSpawnResult({ status: 0 });
+      }
+      if (command === 'git' && args[0] === 'diff' && args.includes('--name-status')) {
+        return asSpawnResult({ stdout: '' });
+      }
+      return asSpawnResult({ status: 1, stderr: 'unexpected command' });
+    });
+
+    const decision = evaluateMergeWorthiness({ branch: 'feature/already-merged', files: [], substantiveFiles: [], noiseFiles: [] }, 'feature/already-merged');
+    expect(decision).toEqual({ shouldMerge: false, reason: 'already-published' });
   });
 
   it('resolves chain-root target to one branch', () => {
@@ -192,6 +210,61 @@ describe('merge CLI', () => {
     expect(targets.map(target => target.branch)).toEqual(['feature/c', 'feature/b', 'feature/a']);
     expect(sqliteClient.listEpicChains).toHaveBeenCalledWith('unitAI-epic');
     expect(sqliteClient.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips already published chains during epic merge plan', () => {
+    mkdirSync(join(testRoot, '.specialists', 'jobs', 'job-1'), { recursive: true });
+    writeFileSync(
+      join(testRoot, '.specialists', 'jobs', 'job-1', 'status.json'),
+      JSON.stringify({
+        id: 'job-1',
+        bead_id: 'unitAI-chain-merged',
+        status: 'done',
+        branch: 'feature/already-merged',
+        worktree_path: '/tmp/wt',
+        started_at_ms: 1,
+      }),
+      'utf-8',
+    );
+
+    (spawnSync as unknown as ReturnType<typeof vi.fn>).mockImplementation((command: string, args: string[]) => {
+      if (command === 'git' && args[0] === 'worktree') {
+        return asSpawnResult({ stdout: `worktree ${testRoot}\n` });
+      }
+      if (command === 'git' && args[0] === 'status') {
+        return asSpawnResult({ stdout: '' });
+      }
+      if (command === 'git' && args[0] === 'symbolic-ref') {
+        return asSpawnResult({ stdout: 'origin/main\n' });
+      }
+      if (command === 'git' && args[0] === 'merge-base' && args.includes('--is-ancestor')) {
+        return asSpawnResult({ status: 0 });
+      }
+      if (command === 'git' && args[0] === 'merge-base') {
+        return asSpawnResult({ stdout: 'base-sha\n' });
+      }
+      if (command === 'git' && args[0] === 'diff' && args.includes('--name-status')) {
+        return asSpawnResult({ stdout: '' });
+      }
+      if (command === 'git' && args[0] === 'rev-list' && args.includes('--count')) {
+        return asSpawnResult({ stdout: '0\n' });
+      }
+      if (command === 'git' && args[0] === 'merge') {
+        throw new Error('merge should be skipped for already published chain');
+      }
+      if (command === 'bd' && args[0] === 'show') {
+        return asSpawnResult({ stdout: JSON.stringify([{ id: 'unitAI-chain-merged', title: 'merged chain', issue_type: 'task' }]) });
+      }
+      return asSpawnResult({ status: 1, stderr: 'unexpected command' });
+    });
+
+    const steps = runMergePlan([
+      { beadId: 'unitAI-chain-merged', branch: 'feature/already-merged', jobId: 'job-1', jobStatus: 'done', worktreePath: '/tmp/wt', startedAtMs: 1 },
+    ], { rebuild: false });
+
+    expect(steps).toEqual([
+      { beadId: 'unitAI-chain-merged', branch: 'feature/already-merged', changedFiles: [] },
+    ]);
   });
 
   it('stops on merge conflict and reports conflicting files', async () => {
