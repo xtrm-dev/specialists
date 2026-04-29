@@ -639,9 +639,12 @@ Do not silently fall back to doing substantial specialist work yourself unless t
 Dead or zombie process:
 
 ```bash
-sp stop <job-id>
-specialists clean --processes
+sp stop <job-id>                                # explicit single-job stop
+sp clean --processes --dry-run                  # preview stale non-terminal cancellations (PID-dead OR > --stale-after, default 24h)
+sp clean --processes                            # apply: cancel stale rows in observability.db
 ```
+
+`sp clean --processes` reads from `observability.db` (DB-first) and uses PID liveness as the primary gate — alive PIDs are never cancelled regardless of age. The `--stale-after <hours>` fallback applies only when a row has no recorded PID. `sp clean` with no flags purges terminal rows older than `SPECIALISTS_JOB_TTL_DAYS` (7d default); `--all` purges all terminals; `--keep <n>` retains the N most recent.
 
 Epic state unclear:
 
