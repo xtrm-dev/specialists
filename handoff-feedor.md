@@ -7,6 +7,7 @@ operator work in the darth-feedor repo on the VPS.
 For the full plan see [`docs/darth-feedor-migration.md`](docs/darth-feedor-migration.md).
 For the canonical service contract see [`docs/specialists-service.md`](docs/specialists-service.md).
 For the install path see [`docs/specialists-service-install.md`](docs/specialists-service-install.md).
+For release notes see [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Ready on this side (specialists repo)
 
