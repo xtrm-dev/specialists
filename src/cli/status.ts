@@ -19,6 +19,7 @@ import {
   magenta,
   formatCostUsd,
 } from './format-helpers.js';
+import { formatVersionCheckNudge, getVersionCheckResult, markVersionCheckNotified } from './version-check.js';
 
 function ok(msg: string)   { console.log(`  ${green('✓')} ${msg}`); }
 function warn(msg: string) { console.log(`  ${yellow('○')} ${msg}`); }
@@ -471,6 +472,15 @@ export async function run(): Promise<void> {
       console.log(
         `  ${dim(job.id)}  ${job.specialist.padEnd(20)}  ${statusColor(job).padEnd(7)}  ${elapsed.padStart(6)}  ${detail}`
       );
+    }
+  }
+
+  const versionCheck = getVersionCheckResult();
+  if (versionCheck) {
+    const nudge = formatVersionCheckNudge(versionCheck);
+    if (nudge) {
+      info(nudge);
+      markVersionCheckNotified(versionCheck);
     }
   }
 

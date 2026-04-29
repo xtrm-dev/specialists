@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { createObservabilitySqliteClient } from '../specialist/observability-sqlite.js';
+import { formatVersionCheckNudge, getVersionCheckResult } from './version-check.js';
 
 const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
 const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
@@ -197,6 +198,24 @@ function checkMCP(): boolean {
   }
   ok(`MCP server 'specialists' registered in ${MCP_FILE}`);
   return true;
+}
+
+function checkVersion(): boolean {
+  section('Version check');
+  const result = getVersionCheckResult();
+  if (!result) {
+    ok('version check skipped');
+    return true;
+  }
+
+  const nudge = formatVersionCheckNudge(result);
+  if (!nudge) {
+    ok(`specialists v${result.localVersion} is current`);
+    return true;
+  }
+
+  warn(nudge);
+  return false;
 }
 
 function hashFile(path: string): string {
@@ -770,6 +789,7 @@ export async function run(argv: readonly string[] = process.argv.slice(3)): Prom
   const xtOk = checkXt();
   const hooksOk = checkHooks();
   const mcpOk = checkMCP();
+  const versionOk = checkVersion();
   const skillDriftOk = checkSkillDrift();
   const mirrorOk = checkManagedAssetMirrors();
   const userOverlayOk = checkUserOverlayDrift();
@@ -777,7 +797,7 @@ export async function run(argv: readonly string[] = process.argv.slice(3)): Prom
   const jobsOk = checkZombieJobs();
   const fragmentsOk = checkClaudeMdFragments();
 
-  const allOk = piOk && spOk && bdOk && xtOk && hooksOk && mcpOk && skillDriftOk && mirrorOk && userOverlayOk && dirsOk && jobsOk && fragmentsOk;
+  const allOk = piOk && spOk && bdOk && xtOk && hooksOk && mcpOk && versionOk && skillDriftOk && mirrorOk && userOverlayOk && dirsOk && jobsOk && fragmentsOk;
   console.log('');
   if (allOk) {
     console.log(`  ${green('✓')} ${bold('All checks passed')}  — specialists is healthy`);
