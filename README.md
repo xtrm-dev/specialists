@@ -84,6 +84,7 @@ specialists doctor
 | Run a script-class specialist over HTTP (`sp serve`) — overview & contract | [docs/specialists-service.md](docs/specialists-service.md) |
 | Install `sp serve` in another project (sidecar Docker / Podman) | [docs/specialists-service-install.md](docs/specialists-service-install.md) |
 | Build & publish the specialists-service image | [docs/release-image.md](docs/release-image.md) |
+| Tag-driven release flow | [docs/release.md](docs/release.md) |
 | Bead-first workflow and semantics | [docs/workflow.md](docs/workflow.md) |
 | CLI commands and flags | [docs/cli-reference.md](docs/cli-reference.md) |
 | Background jobs, feed, result, stop | [docs/background-jobs.md](docs/background-jobs.md) |

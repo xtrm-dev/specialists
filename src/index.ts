@@ -3,7 +3,7 @@
 /**
  * Specialists MCP Server — entry point
  * Subcommands: install, version, list, view, models, init, db, validate, edit, config, run,
- *              status, ps, result, feed, poll, clean, merge, epic, end, stop, attach, quickstart, serve, script, help
+ *              status, ps, result, feed, poll, clean, merge, epic, end, stop, attach, quickstart, serve, script, release, help
  */
 
 // Suppress EBADF errors from bun's internal fd handling on named pipes.
@@ -996,6 +996,27 @@ async function run() {
       return;
     }
     const { run: handler } = await import('./cli/script.js');
+    return handler(process.argv.slice(3));
+  }
+
+  if (sub === 'release') {
+    if (wantsHelp()) {
+      console.log([
+        '',
+        'Usage: specialists release <prepare|publish> [--major|--minor|--patch]',
+        '',
+        'Two-step tag-driven release flow.',
+        '',
+        'Commands:',
+        '  prepare   Draft CHANGELOG.md + bump package.json + stage release files',
+        '  publish   Tag HEAD, push tag, and optionally create GitHub Release',
+        '',
+        'Default bump: --patch',
+        '',
+      ].join('\n'));
+      return;
+    }
+    const { run: handler } = await import('./cli/release.js');
     return handler(process.argv.slice(3));
   }
 
