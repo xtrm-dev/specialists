@@ -1632,7 +1632,6 @@ class SqliteClient implements ObservabilitySqliteClient {
         SELECT chain_id, epic_id, chain_root_bead_id, chain_root_job_id, updated_at_ms
         FROM epic_chain_membership
         WHERE epic_id = ?
-          AND (chain_root_job_id IS NULL OR chain_root_job_id != chain_id)
         ORDER BY updated_at_ms DESC
       `).all(epicId) as EpicChainRecord[];
     }, 'listEpicChains');

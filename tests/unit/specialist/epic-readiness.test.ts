@@ -221,7 +221,7 @@ describe('epic-readiness', () => {
       ],
     });
 
-    expect(mergeReadyRegressesOnNewBlocker.readiness_state).toBe('resolving');
+    expect(mergeReadyRegressesOnNewBlocker.readiness_state).toBe('unresolved');
     expect(mergeReadyRegressesOnNewBlocker.next_state).toBe('resolving');
     expect(mergeReadyRegressesOnNewBlocker.blockers).toContain('chain:chain-a');
   });

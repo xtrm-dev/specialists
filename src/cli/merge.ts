@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createObservabilitySqliteClient } from '../specialist/observability-sqlite.js';
 import { isEpicUnresolvedState, type EpicState } from '../specialist/epic-lifecycle.js';
@@ -207,6 +208,22 @@ function readEpicChildIds(epicId: string): string[] {
   return idsFromText;
 }
 
+function readEpicChainRootBeadIds(epicId: string): string[] {
+  const sqliteClient = createObservabilitySqliteClient();
+  if (!sqliteClient) return [];
+
+  try {
+    return [...new Set(
+      sqliteClient
+        .listEpicChains(epicId)
+        .map((chain) => chain.chain_root_bead_id ?? chain.chain_id)
+        .filter((id): id is string => Boolean(id)),
+    )];
+  } finally {
+    sqliteClient.close();
+  }
+}
+
 export function resolveChainEpicMembership(chainRootBeadId: string): { epicId?: string; source: 'sqlite' | 'bead-parent' | 'none' } {
   const sqliteClient = createObservabilitySqliteClient();
   if (sqliteClient) {
@@ -283,25 +300,47 @@ export function checkEpicUnresolvedGuard(chainRootBeadId: string): EpicGuardResu
 
 export function readAllJobStatuses(): JobStatusRecord[] {
   // DB-first merge surface.
+  // sqlite listStatuses() wins when available.
+  // status.json fallback exists only for legacy/mock compatibility and must not override sqlite results.
   // resolveMergeTargets() uses this for `sp merge`.
   // resolveMergeTargetsForBeadIds() uses this for `sp epic merge` via epic.ts:349 and `sp end` via end.ts:100.
   // One migration here covers all merge surfaces.
   // epic-readiness.ts:275 already reads via sqlite.listStatuses().
   const sqliteClient = createObservabilitySqliteClient();
-  if (!sqliteClient) return [];
-
-  try {
-    return sqliteClient.listStatuses().map((status) => ({
-      id: status.id,
-      bead_id: status.bead_id,
-      status: status.status,
-      branch: status.branch,
-      worktree_path: status.worktree_path,
-      started_at_ms: status.started_at_ms,
-    }));
-  } finally {
-    sqliteClient.close();
+  if (sqliteClient && typeof (sqliteClient as { listStatuses?: unknown }).listStatuses === 'function') {
+    try {
+      return sqliteClient.listStatuses().map((status) => ({
+        id: status.id,
+        bead_id: status.bead_id,
+        status: status.status,
+        branch: status.branch,
+        worktree_path: status.worktree_path,
+        started_at_ms: status.started_at_ms,
+      }));
+    } finally {
+      sqliteClient.close();
+    }
   }
+
+  const jobsDir = join(process.cwd(), '.specialists', 'jobs');
+  if (!existsSync(jobsDir)) return [];
+
+  const statuses: JobStatusRecord[] = [];
+  for (const jobId of readdirSync(jobsDir)) {
+    const statusFile = join(jobsDir, jobId, 'status.json');
+    if (!existsSync(statusFile)) continue;
+
+    try {
+      const raw = JSON.parse(readFileSync(statusFile, 'utf-8')) as JobStatusRecord;
+      if (raw.id) {
+        statuses.push(raw);
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return statuses;
 }
 
 export function selectNewestChainRootJob(beadId: string, statuses: readonly JobStatusRecord[]): ChainMergeTarget | null {
@@ -441,7 +480,8 @@ export function resolveMergeTargets(target: string): ChainMergeTarget[] {
     return [chain];
   }
 
-  const childIds = readEpicChildIds(target);
+  const chainRootBeadIds = readEpicChainRootBeadIds(target);
+  const childIds = chainRootBeadIds.length > 0 ? chainRootBeadIds : readEpicChildIds(target);
   const chains = resolveMergeTargetsForBeadIds(childIds);
   if (chains.length === 0) {
     throw new Error(`No mergeable chain branches found under epic '${target}'`);

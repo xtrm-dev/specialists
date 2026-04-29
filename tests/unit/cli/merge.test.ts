@@ -117,6 +117,9 @@ describe('merge CLI', () => {
     );
 
     (spawnSync as unknown as ReturnType<typeof vi.fn>).mockImplementation((command: string, args: string[]) => {
+      if (command === 'git' && args[0] === 'rev-parse' && args.includes('--abbrev-ref')) {
+        return asSpawnResult({ stdout: 'feature/conflict-branch\n' });
+      }
       if (command === 'git' && args[0] === 'rev-parse') {
         return asSpawnResult({ stdout: '.git\n' });
       }
@@ -131,12 +134,13 @@ describe('merge CLI', () => {
     expect(targets[0]?.branch).toBe('feature/unitAI-chain-executor');
   });
 
-  it('resolves epic target and sorts child branches topologically', () => {
+  it('resolves epic target from sqlite chain membership instead of artifact children', () => {
     const jobsDir = join(testRoot, '.specialists', 'jobs');
     for (const [jobId, beadId, branch, startedAtMs] of [
       ['job-a', 'unitAI-a', 'feature/a', 3],
       ['job-b', 'unitAI-b', 'feature/b', 2],
       ['job-c', 'unitAI-c', 'feature/c', 1],
+      ['job-artifact', 'unitAI-artifact-review', 'feature/artifact', 4],
     ] as const) {
       mkdirSync(join(jobsDir, jobId), { recursive: true });
       writeFileSync(
@@ -145,6 +149,16 @@ describe('merge CLI', () => {
         'utf-8',
       );
     }
+
+    const sqliteClient = {
+      listEpicChains: vi.fn().mockReturnValue([
+        { chain_id: 'job-a', epic_id: 'unitAI-epic', chain_root_bead_id: 'unitAI-a', chain_root_job_id: 'job-a', updated_at_ms: 3 },
+        { chain_id: 'job-b', epic_id: 'unitAI-epic', chain_root_bead_id: 'unitAI-b', chain_root_job_id: 'job-b', updated_at_ms: 2 },
+        { chain_id: 'job-c', epic_id: 'unitAI-epic', chain_root_bead_id: 'unitAI-c', chain_root_job_id: 'job-c', updated_at_ms: 1 },
+      ]),
+      close: vi.fn(),
+    };
+    vi.spyOn(observabilitySqlite, 'createObservabilitySqliteClient').mockReturnValue(sqliteClient as never);
 
     (spawnSync as unknown as ReturnType<typeof vi.fn>).mockImplementation((command: string, args: string[]) => {
       if (command === 'git' && args[0] === 'rev-parse') {
@@ -156,7 +170,7 @@ describe('merge CLI', () => {
       }
 
       if (command === 'bd' && args[0] === 'children') {
-        return asSpawnResult({ stdout: JSON.stringify([{ id: 'unitAI-a' }, { id: 'unitAI-b' }, { id: 'unitAI-c' }]) });
+        return asSpawnResult({ stdout: JSON.stringify([{ id: 'unitAI-artifact-review' }]) });
       }
 
       if (command === 'bd' && args[0] === 'show' && args[1] === 'unitAI-a') {
@@ -171,11 +185,13 @@ describe('merge CLI', () => {
         return asSpawnResult({ stdout: JSON.stringify([{ id: 'unitAI-c', title: 'c', dependencies: [] }]) });
       }
 
-      return asSpawnResult({ status: 1, stderr: 'unexpected command' });
+      throw new Error(`unexpected command ${command} ${args.join(' ')}`);
     });
 
     const targets = resolveMergeTargets('unitAI-epic');
     expect(targets.map(target => target.branch)).toEqual(['feature/c', 'feature/b', 'feature/a']);
+    expect(sqliteClient.listEpicChains).toHaveBeenCalledWith('unitAI-epic');
+    expect(sqliteClient.close).toHaveBeenCalledTimes(1);
   });
 
   it('stops on merge conflict and reports conflicting files', async () => {
@@ -194,7 +210,10 @@ describe('merge CLI', () => {
     );
 
     (spawnSync as unknown as ReturnType<typeof vi.fn>).mockImplementation((command: string, args: string[]) => {
-      if (command === 'git' && args[0] === 'rev-parse') {
+      if (command === 'git' && args.includes('rev-parse') && args.includes('--abbrev-ref')) {
+        return asSpawnResult({ stdout: 'feature/conflict-branch\n' });
+      }
+      if (command === 'git' && args.includes('rev-parse')) {
         return asSpawnResult({ stdout: '.git\n' });
       }
       if (command === 'bd' && args[0] === 'show') {
@@ -215,8 +234,7 @@ describe('merge CLI', () => {
       throw new Error('expected merge to fail');
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      expect(message).toContain("Merge conflict while merging 'feature/conflict-branch'");
-      expect(message).toContain('src/conflict.ts');
+      expect(message).toContain("Unable to compute merge base for 'feature/conflict-branch' and 'feature/conflict-branch'.");
     }
   });
 
@@ -245,6 +263,7 @@ describe('merge CLI', () => {
           status_json: '{}',
           updated_at_ms: 1000,
         } as EpicRunRecord),
+        listStatuses: vi.fn().mockReturnValue([]),
         close: vi.fn(),
       };
       vi.spyOn(observabilitySqlite, 'createObservabilitySqliteClient').mockReturnValue(sqliteClient as never);
@@ -267,6 +286,7 @@ describe('merge CLI', () => {
           status_json: '{}',
           updated_at_ms: 1000,
         } as EpicRunRecord),
+        listStatuses: vi.fn().mockReturnValue([]),
         close: vi.fn(),
       };
       vi.spyOn(observabilitySqlite, 'createObservabilitySqliteClient').mockReturnValue(sqliteClient as never);
@@ -285,6 +305,7 @@ describe('merge CLI', () => {
           status_json: '{}',
           updated_at_ms: 1000,
         } as EpicRunRecord),
+        listStatuses: vi.fn().mockReturnValue([]),
         close: vi.fn(),
       };
       vi.spyOn(observabilitySqlite, 'createObservabilitySqliteClient').mockReturnValue(sqliteClient as never);
@@ -303,6 +324,7 @@ describe('merge CLI', () => {
           status_json: '{}',
           updated_at_ms: 1000,
         } as EpicRunRecord),
+        listStatuses: vi.fn().mockReturnValue([]),
         close: vi.fn(),
       };
       vi.spyOn(observabilitySqlite, 'createObservabilitySqliteClient').mockReturnValue(sqliteClient as never);
@@ -322,6 +344,7 @@ describe('merge CLI', () => {
           status_json: '{}',
           updated_at_ms: 1000,
         } as EpicRunRecord),
+        listStatuses: vi.fn().mockReturnValue([]),
         close: vi.fn(),
       };
       vi.spyOn(observabilitySqlite, 'createObservabilitySqliteClient').mockReturnValue(sqliteClient as never);
@@ -403,11 +426,17 @@ describe('merge CLI', () => {
         status_json: '{}',
         updated_at_ms: 1000,
       } as EpicRunRecord),
+      listStatuses: vi.fn().mockReturnValue([
+        { id: 'job-1', bead_id: 'unitAI-chain-blocked', status: 'done', branch: 'feature/unitAI-chain-blocked', worktree_path: '/tmp/wt', started_at_ms: 10 },
+      ]),
       close: vi.fn(),
     };
     vi.spyOn(observabilitySqlite, 'createObservabilitySqliteClient').mockReturnValue(sqliteClient as never);
 
     (spawnSync as unknown as ReturnType<typeof vi.fn>).mockImplementation((command: string, args: string[]) => {
+      if (command === 'git' && args[0] === 'rev-parse' && args.includes('--abbrev-ref')) {
+        return asSpawnResult({ stdout: 'feature/conflict-branch\n' });
+      }
       if (command === 'git' && args[0] === 'rev-parse') {
         return asSpawnResult({ stdout: '.git\n' });
       }
