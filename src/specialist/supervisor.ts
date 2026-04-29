@@ -1521,8 +1521,15 @@ export class Supervisor {
               }
             : undefined;
 
-          if (parsedMeta?.payload_breakdown) {
-            setStatus({ startup_payload_json: JSON.stringify(parsedMeta.payload_breakdown) });
+          const payloadBreakdown = parsedMeta?.payload_breakdown?.components && parsedMeta.payload_breakdown.totals
+            ? {
+                components: parsedMeta.payload_breakdown.components,
+                totals: parsedMeta.payload_breakdown.totals,
+              }
+            : undefined;
+
+          if (payloadBreakdown) {
+            setStatus({ startup_payload_json: JSON.stringify(payloadBreakdown) });
           }
 
           if (memoryInjection || mandatoryRulesInjection) {
@@ -1567,6 +1574,7 @@ export class Supervisor {
               extension: details?.extension,
               errorMessage: details?.errorMessage,
             },
+            payloadBreakdown,
             memoryInjection,
             metaPayload: eventType === 'meta' ? {
               model: details?.model,
