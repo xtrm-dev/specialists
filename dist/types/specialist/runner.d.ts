@@ -48,12 +48,14 @@ export interface RunResult {
     permissionRequired?: 'READ_ONLY' | 'LOW' | 'MEDIUM' | 'HIGH';
     autoCommit?: 'never' | 'checkpoint_on_waiting' | 'checkpoint_on_terminal';
     outputType?: string;
+    payloadBreakdown?: PayloadBreakdown;
 }
 type SessionLike = Pick<PiAgentSession, 'start' | 'prompt' | 'waitForDone' | 'getLastOutput' | 'getState' | 'close' | 'kill' | 'meta' | 'steer' | 'resume'> & {
     getMetrics?: () => SessionRunMetrics;
 };
 export type SessionFactory = (opts: PiSessionOptions) => Promise<SessionLike>;
 import { type BeadsClient as BeadsClientType } from './beads.js';
+import { type PayloadBreakdown } from './payload-measure.js';
 interface RunnerDeps {
     loader: SpecialistLoader;
     hooks: HookEmitter;

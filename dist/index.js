@@ -17786,16 +17786,23 @@ import { spawn } from "child_process";
 import { existsSync as existsSync2, mkdirSync, writeFileSync } from "fs";
 import { homedir, tmpdir } from "os";
 import { isAbsolute, resolve, sep, join as join2, dirname } from "path";
+function joinTools(...groups) {
+  return groups.flat().join(",");
+}
 function mapPermissionToTools(level) {
+  const readOnlyTools = ["read", "grep", "find", "ls"];
+  const lowTools = ["bash"];
+  const mediumTools = ["edit"];
+  const highTools = ["write"];
   switch (level?.toUpperCase()) {
     case "READ_ONLY":
-      return "read,grep,find,ls";
+      return joinTools(readOnlyTools, GITNEXUS_READ_TOOLS, SERENA_READ_TOOLS);
     case "LOW":
-      return "read,bash,grep,find,ls";
+      return joinTools(readOnlyTools, lowTools, GITNEXUS_READ_TOOLS, SERENA_READ_TOOLS, SERENA_LOW_TOOLS);
     case "MEDIUM":
-      return "read,bash,edit,grep,find,ls";
+      return joinTools(readOnlyTools, lowTools, mediumTools, GITNEXUS_READ_TOOLS, SERENA_READ_TOOLS, SERENA_LOW_TOOLS, SERENA_WRITE_TOOLS, GITNEXUS_WRITE_TOOLS);
     case "HIGH":
-      return "read,bash,edit,write,grep,find,ls";
+      return joinTools(readOnlyTools, lowTools, mediumTools, highTools, GITNEXUS_READ_TOOLS, SERENA_READ_TOOLS, SERENA_LOW_TOOLS, SERENA_WRITE_TOOLS, GITNEXUS_WRITE_TOOLS);
     default:
       return;
   }
@@ -18625,7 +18632,7 @@ class PiAgentSession {
     await this.waitForDone(timeout);
   }
 }
-var SessionKilledError, StallTimeoutError, TEST_COMMAND_STALL_TIMEOUT_MS = 300000, TEST_COMMAND_PATTERNS, WRITE_BOUNDARY_TOOL_NAMES, WORKTREE_BOUNDARY_ENV_KEY = "SPECIALISTS_WORKTREE_BOUNDARY";
+var SessionKilledError, StallTimeoutError, TEST_COMMAND_STALL_TIMEOUT_MS = 300000, TEST_COMMAND_PATTERNS, GITNEXUS_READ_TOOLS, SERENA_READ_TOOLS, SERENA_LOW_TOOLS, SERENA_WRITE_TOOLS, GITNEXUS_WRITE_TOOLS, WRITE_BOUNDARY_TOOL_NAMES, WORKTREE_BOUNDARY_ENV_KEY = "SPECIALISTS_WORKTREE_BOUNDARY";
 var init_session = __esm(() => {
   init_backendMap();
   SessionKilledError = class SessionKilledError extends Error {
@@ -18647,6 +18654,66 @@ var init_session = __esm(() => {
     /(?:^|\s)(?:pnpm|yarn)\s+test(?:\s|$)/i,
     /(?:^|\s)(?:node\s+)?jest(?:\s|$)/i,
     /(?:^|\s)pytest(?:\s|$)/i
+  ];
+  GITNEXUS_READ_TOOLS = [
+    "gitnexus_list_repos",
+    "gitnexus_query",
+    "gitnexus_context",
+    "gitnexus_impact",
+    "gitnexus_detect_changes"
+  ];
+  SERENA_READ_TOOLS = [
+    "serena_list_tools",
+    "find_symbol",
+    "find_referencing_symbols",
+    "read_file",
+    "get_symbols_overview",
+    "jet_brains_get_symbols_overview",
+    "jet_brains_find_symbol",
+    "jet_brains_find_referencing_symbols",
+    "jet_brains_type_hierarchy",
+    "search_for_pattern",
+    "list_dir",
+    "find_file",
+    "get_current_config",
+    "activate_project",
+    "check_onboarding_performed",
+    "initial_instructions",
+    "think_about_collected_information",
+    "think_about_task_adherence",
+    "think_about_whether_you_are_done",
+    "list_memories",
+    "read_memory"
+  ];
+  SERENA_LOW_TOOLS = [
+    "execute_shell_command"
+  ];
+  SERENA_WRITE_TOOLS = [
+    "insert_after_symbol",
+    "replace_symbol_body",
+    "insert_before_symbol",
+    "rename_symbol",
+    "restart_language_server",
+    "create_text_file",
+    "replace_content",
+    "delete_lines",
+    "replace_lines",
+    "insert_at_line",
+    "remove_project",
+    "switch_modes",
+    "open_dashboard",
+    "onboarding",
+    "prepare_for_new_conversation",
+    "summarize_changes",
+    "write_memory",
+    "delete_memory",
+    "rename_memory",
+    "edit_memory",
+    "serena_mcp_reset"
+  ];
+  GITNEXUS_WRITE_TOOLS = [
+    "gitnexus_rename",
+    "gitnexus_cypher"
   ];
   WRITE_BOUNDARY_TOOL_NAMES = new Set(["edit", "write", "multiEdit", "notebookEdit"]);
 });
@@ -18935,7 +19002,8 @@ function migrateToV2(db) {
       status_json     TEXT NOT NULL,
       bead_id         TEXT,
       updated_at_ms   INTEGER NOT NULL,
-      last_output     TEXT
+      last_output     TEXT,
+      startup_payload_json TEXT
     );
     INSERT OR IGNORE INTO specialist_jobs_v2
       SELECT
@@ -18999,6 +19067,15 @@ function migrateToV3(db) {
 function migrateToV11(db) {
   const hasV11 = db.query("SELECT 1 FROM schema_version WHERE version = 11 LIMIT 1").get();
   if (hasV11) {
+    const metricsColumns = new Set(db.query("PRAGMA table_info(specialist_job_metrics)").all().map((column) => column.name).filter((name) => typeof name === "string" && name.length > 0));
+    for (const column of [
+      { name: "active_runtime_ms", definition: "INTEGER" },
+      { name: "waiting_ms", definition: "INTEGER" }
+    ]) {
+      if (!metricsColumns.has(column.name)) {
+        db.run(`ALTER TABLE specialist_job_metrics ADD COLUMN ${column.name} ${column.definition}`);
+      }
+    }
     db.run("CREATE INDEX IF NOT EXISTS idx_job_metrics_spec_model_updated ON specialist_job_metrics(specialist, model, updated_at_ms DESC)");
     db.run("CREATE INDEX IF NOT EXISTS idx_job_metrics_updated ON specialist_job_metrics(updated_at_ms DESC)");
     return;
@@ -19017,6 +19094,8 @@ function migrateToV11(db) {
       started_at_ms INTEGER,
       completed_at_ms INTEGER,
       elapsed_ms INTEGER,
+      active_runtime_ms INTEGER,
+      waiting_ms INTEGER,
       total_turns INTEGER NOT NULL DEFAULT 0,
       total_tools INTEGER NOT NULL DEFAULT 0,
       tool_call_counts_json TEXT NOT NULL,
@@ -19185,7 +19264,8 @@ function initSchema(db) {
     { name: "chain_root_bead_id", definition: "TEXT" },
     { name: "epic_id", definition: "TEXT" },
     { name: "status", definition: "TEXT NOT NULL DEFAULT 'starting'" },
-    { name: "last_output", definition: "TEXT" }
+    { name: "last_output", definition: "TEXT" },
+    { name: "startup_payload_json", definition: "TEXT" }
   ].filter(({ name }) => !specialistJobsColumns.has(name));
   for (const missingColumn of missingSpecialistJobsColumns) {
     db.run(`ALTER TABLE specialist_jobs ADD COLUMN ${missingColumn.name} ${missingColumn.definition}`);
@@ -19207,7 +19287,8 @@ function initSchema(db) {
         status          TEXT NOT NULL,
         status_json     TEXT NOT NULL,
         updated_at_ms   INTEGER NOT NULL,
-        last_output     TEXT
+        last_output     TEXT,
+        startup_payload_json TEXT
       );
       INSERT OR IGNORE INTO specialist_jobs_new
         SELECT
@@ -19457,8 +19538,8 @@ class SqliteClient {
   writeStatusRow(status, lastOutput) {
     const statusJson = JSON.stringify(status);
     this.db.run(`
-      INSERT INTO specialist_jobs (job_id, specialist, worktree_column, bead_id, node_id, chain_kind, chain_id, chain_root_job_id, chain_root_bead_id, epic_id, status, status_json, updated_at_ms, last_output)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO specialist_jobs (job_id, specialist, worktree_column, bead_id, node_id, chain_kind, chain_id, chain_root_job_id, chain_root_bead_id, epic_id, status, status_json, updated_at_ms, last_output, startup_payload_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(job_id) DO UPDATE SET
         specialist = excluded.specialist,
         worktree_column = excluded.worktree_column,
@@ -19472,7 +19553,8 @@ class SqliteClient {
         status = excluded.status,
         status_json = excluded.status_json,
         updated_at_ms = excluded.updated_at_ms,
-        last_output = COALESCE(excluded.last_output, specialist_jobs.last_output);
+        last_output = COALESCE(excluded.last_output, specialist_jobs.last_output),
+        startup_payload_json = COALESCE(excluded.startup_payload_json, specialist_jobs.startup_payload_json);
     `, [
       status.id,
       status.specialist,
@@ -19487,7 +19569,8 @@ class SqliteClient {
       status.status,
       statusJson,
       Date.now(),
-      lastOutput ?? null
+      lastOutput ?? null,
+      status.startup_payload_json ?? null
     ]);
   }
   writeEpicRunRow(epic) {
@@ -20022,7 +20105,6 @@ class SqliteClient {
         SELECT chain_id, epic_id, chain_root_bead_id, chain_root_job_id, updated_at_ms
         FROM epic_chain_membership
         WHERE epic_id = ?
-          AND (chain_root_job_id IS NULL OR chain_root_job_id != chain_id)
         ORDER BY updated_at_ms DESC
       `).all(epicId);
     }, "listEpicChains");
@@ -20196,7 +20278,7 @@ class SqliteClient {
   aggregateJobMetrics(jobId) {
     return withRetry(() => {
       const jobRow = this.db.query(`
-        SELECT job_id, specialist, status, chain_kind, chain_id, bead_id, node_id, epic_id, updated_at_ms
+        SELECT job_id, specialist, status, chain_kind, chain_id, bead_id, node_id, epic_id, updated_at_ms, startup_payload_json
         FROM specialist_jobs
         WHERE job_id = ?
       `).get(jobId);
@@ -20214,9 +20296,22 @@ class SqliteClient {
       let runCompleteJson = null;
       let model = null;
       let elapsedMs = null;
+      let activeRuntimeMs = 0;
+      let waitingMs = 0;
+      let phase = null;
+      let phaseStartedAtMs = null;
+      const closePhase = (endAtMs) => {
+        if (phase === null || phaseStartedAtMs === null || endAtMs < phaseStartedAtMs)
+          return;
+        const durationMs = endAtMs - phaseStartedAtMs;
+        if (phase === "running") {
+          activeRuntimeMs += durationMs;
+        } else {
+          waitingMs += durationMs;
+        }
+      };
       for (const event of events) {
         startedAtMs = startedAtMs === null ? event.t : Math.min(startedAtMs, event.t);
-        completedAtMs = completedAtMs === null ? event.t : Math.max(completedAtMs, event.t);
         if (event.type === "tool") {
           totalTools += 1;
           toolCallCounts[event.tool] = (toolCallCounts[event.tool] ?? 0) + 1;
@@ -20234,15 +20329,44 @@ class SqliteClient {
           tokenTrajectory.push({ t: event.t, source: event.source, token_usage: event.token_usage });
           continue;
         }
+        if (event.type === "run_start") {
+          phase = "running";
+          phaseStartedAtMs = event.t;
+          continue;
+        }
+        if (event.type === "status_change") {
+          if (event.status === "running" || event.status === "waiting") {
+            closePhase(event.t);
+            phase = event.status;
+            phaseStartedAtMs = event.t;
+            continue;
+          }
+          if (event.status === "done" || event.status === "error" || event.status === "cancelled") {
+            closePhase(event.t);
+            phase = null;
+            phaseStartedAtMs = null;
+          }
+          continue;
+        }
         if (event.type === "run_complete") {
+          closePhase(event.t);
+          completedAtMs = event.t;
           runCompleteJson = JSON.stringify(event);
           model = event.model ?? model;
           elapsedMs = Math.round(event.elapsed_s * 1000);
+          phase = null;
+          phaseStartedAtMs = null;
           continue;
         }
         if (event.type === "stale_warning" && event.reason === "tool_duration") {
           stallGaps.push({ t: event.t, tool: event.tool ?? null, silence_ms: event.silence_ms, threshold_ms: event.threshold_ms });
         }
+      }
+      if (startedAtMs !== null && completedAtMs === null) {
+        completedAtMs = events.length > 0 ? events[events.length - 1].t : startedAtMs;
+      }
+      if (elapsedMs === null && startedAtMs !== null && completedAtMs !== null) {
+        elapsedMs = Math.max(0, completedAtMs - startedAtMs);
       }
       const record3 = {
         job_id: jobRow.job_id,
@@ -20257,6 +20381,8 @@ class SqliteClient {
         started_at_ms: startedAtMs,
         completed_at_ms: completedAtMs,
         elapsed_ms: elapsedMs,
+        active_runtime_ms: activeRuntimeMs,
+        waiting_ms: waitingMs,
         total_turns: totalTurns,
         total_tools: totalTools,
         tool_call_counts_json: stringifyJson(toolCallCounts),
@@ -20264,15 +20390,16 @@ class SqliteClient {
         context_trajectory_json: stringifyJson(contextTrajectory),
         stall_gaps_json: stringifyJson(stallGaps),
         run_complete_json: runCompleteJson,
+        startup_payload_json: jobRow.startup_payload_json ?? null,
         updated_at_ms: jobRow.updated_at_ms
       };
       this.db.run(`
         INSERT INTO specialist_job_metrics (
           job_id, specialist, model, status, chain_kind, chain_id, bead_id, node_id, epic_id,
-          started_at_ms, completed_at_ms, elapsed_ms, total_turns, total_tools,
+          started_at_ms, completed_at_ms, elapsed_ms, active_runtime_ms, waiting_ms, total_turns, total_tools,
           tool_call_counts_json, token_trajectory_json, context_trajectory_json, stall_gaps_json,
           run_complete_json, updated_at_ms
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(job_id) DO UPDATE SET
           specialist = excluded.specialist,
           model = excluded.model,
@@ -20285,6 +20412,8 @@ class SqliteClient {
           started_at_ms = excluded.started_at_ms,
           completed_at_ms = excluded.completed_at_ms,
           elapsed_ms = excluded.elapsed_ms,
+          active_runtime_ms = excluded.active_runtime_ms,
+          waiting_ms = excluded.waiting_ms,
           total_turns = excluded.total_turns,
           total_tools = excluded.total_tools,
           tool_call_counts_json = excluded.tool_call_counts_json,
@@ -20306,6 +20435,8 @@ class SqliteClient {
         record3.started_at_ms,
         record3.completed_at_ms,
         record3.elapsed_ms,
+        record3.active_runtime_ms,
+        record3.waiting_ms,
         record3.total_turns,
         record3.total_tools,
         record3.tool_call_counts_json,
@@ -21361,6 +21492,28 @@ function shouldCreateBead(beadsIntegration, permissionRequired) {
 }
 var init_beads = () => {};
 
+// src/specialist/payload-measure.ts
+function estimateTokens2(text) {
+  if (!text)
+    return 0;
+  return Math.max(1, Math.ceil(text.length / 4));
+}
+function measureUtf8Bytes(text) {
+  return Buffer.byteLength(text, "utf8");
+}
+function measurePayloadComponent(kind, name, text) {
+  return { kind, name, tokens: estimateTokens2(text), bytes: measureUtf8Bytes(text) };
+}
+function summarizePayloadBreakdown(components) {
+  return {
+    components,
+    totals: {
+      tokens: components.reduce((sum, component) => sum + component.tokens, 0),
+      bytes: components.reduce((sum, component) => sum + component.bytes, 0)
+    }
+  };
+}
+
 // src/specialist/runner.ts
 import { createHash as createHash2 } from "crypto";
 import { writeFile } from "fs/promises";
@@ -21858,7 +22011,17 @@ ${buildBeadBoundaryInstruction(runCwd, options.worktreeBoundary)}`.trim();
     const preScripts = spec.specialist.skills?.scripts?.filter((s) => s.phase === "pre") ?? [];
     const preResults = preScripts.map((s) => runScript(s.run ?? s.path, runCwd)).filter((_, i) => preScripts[i].inject_output);
     const preScriptOutput = formatScriptOutput(preResults);
-    const resolvedPrompt = this.resolvePromptWithBeadContext(options, runCwd, beadsClient);
+    const payloadComponents = [];
+    const beadReader = beadsClient ?? new BeadsClient;
+    const bead = options.inputBeadId ? beadReader.readBead(options.inputBeadId) : null;
+    const completedBlockers = options.inputBeadId && Math.max(0, Math.trunc(options.contextDepth ?? 3)) > 0 ? beadReader.getCompletedBlockers(options.inputBeadId, Math.max(0, Math.trunc(options.contextDepth ?? 3))) : [];
+    const beadContextText = bead ? buildBeadContext(bead, completedBlockers) : "";
+    const beadContextOwn = beadContextText ? measurePayloadComponent("bead_context", "own", beadContextText) : null;
+    const beadContextParent = bead?.parent?.trim() ? measurePayloadComponent("bead_context", "parent", bead.parent.trim()) : null;
+    const beadContextBlockers = completedBlockers.map((blocker) => measurePayloadComponent("bead_context", blocker.id, buildBeadContext(blocker, [])));
+    const resolvedPrompt = options.inputBeadId && beadContextText ? `${beadContextText}
+
+${buildBeadBoundaryInstruction(runCwd, options.worktreeBoundary)}`.trim() : this.resolvePromptWithBeadContext(options, runCwd, beadsClient);
     const beadVariables = options.inputBeadId ? { bead_context: resolvedPrompt, bead_id: options.inputBeadId } : {};
     const lineageVariables = {
       ...options.reusedFromJobId ? { reused_from_job_id: options.reusedFromJobId } : {},
@@ -21879,6 +22042,7 @@ ${buildBeadBoundaryInstruction(runCwd, options.worktreeBoundary)}`.trim();
       ...beadVariables
     };
     const taskTemplate = options.inputBeadId ? renderTemplate(prompt.task_template, beadTemplateVariables) : prompt.task_template;
+    payloadComponents.push(measurePayloadComponent("task_template", "task_template", renderTemplate(taskTemplate, variables)));
     let renderedTask = renderTemplate(taskTemplate, variables);
     let mandatoryRulesBlock = "";
     let mandatoryRulesInjection = null;
@@ -22082,6 +22246,35 @@ ${summaries.join(`
     if (prompt.skill_inherit)
       skillPaths.push(prompt.skill_inherit);
     skillPaths.push(...spec.specialist.skills?.paths ?? []);
+    if (mandatoryRulesInjection) {
+      for (const setId of mandatoryRulesInjection.setsLoaded) {
+        payloadComponents.push(measurePayloadComponent("mandatory_rule", setId, `${setId}
+${mandatoryRulesBlock}`));
+      }
+    }
+    for (const skillPath of skillPaths) {
+      payloadComponents.push(measurePayloadComponent("skill", skillPath, skillPath));
+    }
+    if (preScriptOutput) {
+      payloadComponents.push(measurePayloadComponent("pre_script_output", "pre_script_output", preScriptOutput));
+    }
+    if (beadContextOwn)
+      payloadComponents.push(beadContextOwn);
+    if (beadContextParent)
+      payloadComponents.push(beadContextParent);
+    for (const component of beadContextBlockers)
+      payloadComponents.push(component);
+    payloadComponents.push(measurePayloadComponent("system_prompt", "system_prompt", agentsMd));
+    if (staticTokens > 0)
+      payloadComponents.push(measurePayloadComponent("memory", "static", STATIC_WORKFLOW_RULES_BLOCK));
+    if (memoryTokens > 0)
+      payloadComponents.push(measurePayloadComponent("memory", "dynamic", beadContextText || ""));
+    if (gitnexusTokens > 0)
+      payloadComponents.push(measurePayloadComponent("memory", "gitnexus", agentsMd.includes("GitNexus") ? "GitNexus" : ""));
+    const payloadBreakdown = summarizePayloadBreakdown(payloadComponents);
+    onEvent?.("payload_breakdown", {
+      summary: JSON.stringify({ payload_breakdown: payloadBreakdown })
+    });
     if (skillPaths.length > 0 || preScripts.length > 0) {
       const line = "\u2501".repeat(56);
       onProgress?.(`
@@ -22267,7 +22460,8 @@ ${outputContractWarnings.map((msg) => `  \u26A0 ${msg}`).join(`
       metrics: runMetrics,
       permissionRequired: execution.permission_required,
       autoCommit: execution.auto_commit,
-      outputType
+      outputType,
+      payloadBreakdown: summarizePayloadBreakdown(payloadComponents)
     };
   }
   async startAsync(options, registry2) {
@@ -22834,6 +23028,8 @@ function summarizeToolResult(resultContent) {
 function mapCallbackEventToTimelineEvent(callbackEvent, context) {
   const t = Date.now();
   switch (callbackEvent) {
+    case "payload_breakdown":
+      return { t, type: "payload_breakdown", payload_breakdown: context.payloadBreakdown ?? { components: [], totals: { tokens: 0, bytes: 0 } } };
     case "thinking":
       return {
         t,
@@ -23131,6 +23327,7 @@ var init_timeline_events = __esm(() => {
   TIMELINE_EVENT_TYPES = {
     RUN_START: "run_start",
     META: "meta",
+    PAYLOAD_BREAKDOWN: "payload_breakdown",
     THINKING: "thinking",
     TOOL: "tool",
     TEXT: "text",
@@ -24131,6 +24328,13 @@ class Supervisor {
     this.writeStatusFile(id, updatedStatus);
     return this.withComputedLiveness(updatedStatus);
   }
+  aggregateJobMetricsBestEffort(jobId) {
+    try {
+      this.withSqliteOperation("aggregateJobMetrics", (client) => client.aggregateJobMetrics(jobId));
+    } catch (error2) {
+      console.warn(`[supervisor] Failed to aggregate job metrics for ${jobId}: ${String(error2)}`);
+    }
+  }
   listJobs() {
     try {
       if (this.isDisposed) {
@@ -24769,7 +24973,7 @@ ${appendError}
         const toolCallId = details?.toolCallId;
         const toolState = toolCallId ? activeToolCalls.get(toolCallId) : latestUncorrelatedToolState;
         const parsedMeta = (() => {
-          if (eventType !== "memory_injection" && eventType !== "meta" || !details?.summary)
+          if (eventType !== "memory_injection" && eventType !== "meta" && eventType !== "payload_breakdown" || !details?.summary)
             return;
           try {
             return JSON.parse(details.summary);
@@ -24791,6 +24995,13 @@ ${appendError}
           globals_disabled: parsedMeta.data.globals_disabled ?? false,
           token_estimate: parsedMeta.data.token_estimate ?? 0
         } : undefined;
+        const payloadBreakdown = parsedMeta?.payload_breakdown?.components && parsedMeta.payload_breakdown.totals ? {
+          components: parsedMeta.payload_breakdown.components,
+          totals: parsedMeta.payload_breakdown.totals
+        } : undefined;
+        if (payloadBreakdown) {
+          setStatus({ startup_payload_json: JSON.stringify(payloadBreakdown) });
+        }
         if (memoryInjection || mandatoryRulesInjection) {
           setStatus({
             startup_context: {
@@ -24828,6 +25039,7 @@ ${appendError}
             extension: details?.extension,
             errorMessage: details?.errorMessage
           },
+          payloadBreakdown,
           memoryInjection,
           metaPayload: eventType === "meta" ? {
             model: details?.model,
@@ -25121,6 +25333,7 @@ ${appendError}
         model: finalResult.model,
         backend: finalResult.backend,
         bead_id: finalResult.beadId,
+        startup_payload_json: finalResult.payloadBreakdown ? JSON.stringify(finalResult.payloadBreakdown) : statusSnapshot.startup_payload_json,
         metrics: enrichedRunMetrics,
         ...finalResult.outputType ? { output_type: finalResult.outputType } : {}
       };
@@ -25149,6 +25362,7 @@ ${appendError}
       if (completePersisted === undefined) {
         throw new Error("[supervisor] SQLite upsertStatusWithEventAndResult failed: database client unavailable");
       }
+      this.aggregateJobMetricsBestEffort(id);
       if (isGitnexusAnalyzeRequired(finalResult.permissionRequired)) {
         try {
           startDetachedGitnexusAnalyze(runOptions.workingDirectory ?? process.cwd());
@@ -25208,6 +25422,7 @@ ${appendError}
       if (errorPersisted === undefined) {
         throw new Error("[supervisor] SQLite upsertStatusWithEvent failed during error completion: database client unavailable");
       }
+      this.aggregateJobMetricsBestEffort(id);
       appendResultToInputBead({
         output: latestOutput || errorMsg,
         model: statusSnapshot.model ?? "unknown",
@@ -26842,7 +27057,7 @@ function parseExtractOptions(argv) {
       index += 1;
       continue;
     }
-    if (argument === "--all-missing") {
+    if (argument === "--all-missing" || argument === "--backfill") {
       allMissing = true;
       continue;
     }
@@ -26863,6 +27078,7 @@ function parseStatsOptions(argv) {
   let model;
   let sinceMs;
   let format = "table";
+  let withPayload = false;
   for (let index = 0;index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--spec" && argv[index + 1]) {
@@ -26891,9 +27107,13 @@ function parseStatsOptions(argv) {
       index += 1;
       continue;
     }
+    if (argument === "--with-payload") {
+      withPayload = true;
+      continue;
+    }
     throw new Error(`Unknown option for db stats: '${argument}'`);
   }
-  return { spec, model, sinceMs, format };
+  return { spec, model, sinceMs, format, withPayload };
 }
 function parseStatusFile(jobDirectoryPath, fallbackJobId) {
   const statusPath = join12(jobDirectoryPath, "status.json");
@@ -27088,8 +27308,23 @@ ${bold7("specialists db extract")}
     sqliteClient.close();
   }
 }
-function formatStatsTable(rows) {
-  const headers = ["job_id", "specialist", "model", "status", "elapsed_ms", "total_tools", "total_turns"];
+function formatPayloadMetric(payloadJson) {
+  if (!payloadJson)
+    return { payload_kb: "", payload_tokens: "" };
+  try {
+    const payload = JSON.parse(payloadJson);
+    const bytes = payload.totals?.bytes;
+    const tokens = payload.totals?.tokens;
+    return {
+      payload_kb: Number.isFinite(bytes) ? `${((bytes ?? 0) / 1024).toFixed(1)}kb` : "",
+      payload_tokens: Number.isFinite(tokens) ? `${Math.round(tokens ?? 0)}t` : ""
+    };
+  } catch {
+    return { payload_kb: "", payload_tokens: "" };
+  }
+}
+function formatStatsTable(rows, withPayload) {
+  const headers = withPayload ? ["job_id", "specialist", "model", "status", "payload_kb", "payload_tokens", "active_s", "waiting_s", "total_s", "elapsed_ms", "total_tools", "total_turns"] : ["job_id", "specialist", "model", "status", "active_s", "waiting_s", "total_s", "elapsed_ms", "total_tools", "total_turns"];
   const tableRows = rows.map((row) => headers.map((header) => String(row[header] ?? "")));
   const widths = headers.map((header, index) => Math.max(header.length, ...tableRows.map((row) => row[index].length)));
   const line = (cells) => `| ${cells.map((cell, index) => cell.padEnd(widths[index])).join(" | ")} |`;
@@ -27103,14 +27338,21 @@ function runStats(options) {
   }
   try {
     const rows = sqliteClient.listJobMetrics({ spec: options.spec, model: options.model, sinceMs: options.sinceMs });
+    const displayRows = rows.map((row) => ({
+      ...row,
+      active_s: row.active_runtime_ms === null ? "" : (row.active_runtime_ms / 1000).toFixed(1),
+      waiting_s: row.waiting_ms === null ? "" : (row.waiting_ms / 1000).toFixed(1),
+      total_s: row.elapsed_ms === null ? "" : (row.elapsed_ms / 1000).toFixed(1),
+      ...options.withPayload ? formatPayloadMetric(row.startup_payload_json) : {}
+    }));
     if (options.format === "json") {
-      console.log(JSON.stringify({ rows, count: rows.length }, null, 2));
+      console.log(JSON.stringify({ rows: displayRows, count: rows.length }, null, 2));
       return;
     }
     console.log(`
 ${bold7("specialists db stats")}
 `);
-    console.log(formatStatsTable(rows));
+    console.log(formatStatsTable(displayRows, options.withPayload));
     console.log("");
   } finally {
     sqliteClient.close();
@@ -28540,8 +28782,8 @@ __export(exports_merge, {
   checkEpicUnresolvedGuard: () => checkEpicUnresolvedGuard,
   assertMainRepoCleanForMerge: () => assertMainRepoCleanForMerge
 });
-import { existsSync as existsSync16, readdirSync as readdirSync6, readFileSync as readFileSync13 } from "fs";
 import { spawnSync as spawnSync11 } from "child_process";
+import { existsSync as existsSync16, readFileSync as readFileSync13, readdirSync as readdirSync6 } from "fs";
 import { join as join15 } from "path";
 function parseOptions(argv) {
   let target = "";
@@ -28663,6 +28905,16 @@ function readEpicChildIds(epicId) {
   }
   return idsFromText;
 }
+function readEpicChainRootBeadIds(epicId) {
+  const sqliteClient = createObservabilitySqliteClient();
+  if (!sqliteClient)
+    return [];
+  try {
+    return [...new Set(sqliteClient.listEpicChains(epicId).map((chain) => chain.chain_root_bead_id ?? chain.chain_id).filter((id) => Boolean(id)))];
+  } finally {
+    sqliteClient.close();
+  }
+}
 function resolveChainEpicMembership(chainRootBeadId) {
   const sqliteClient = createObservabilitySqliteClient();
   if (sqliteClient) {
@@ -28719,21 +28971,37 @@ Use 'sp epic merge ${membership.epicId}' to publish all chains together, or 'sp 
   }
 }
 function readAllJobStatuses() {
-  const jobsDir = resolveJobsDir();
+  const sqliteClient = createObservabilitySqliteClient();
+  if (sqliteClient && typeof sqliteClient.listStatuses === "function") {
+    try {
+      return sqliteClient.listStatuses().map((status) => ({
+        id: status.id,
+        bead_id: status.bead_id,
+        status: status.status,
+        branch: status.branch,
+        worktree_path: status.worktree_path,
+        started_at_ms: status.started_at_ms
+      }));
+    } finally {
+      sqliteClient.close();
+    }
+  }
+  const jobsDir = join15(process.cwd(), ".specialists", "jobs");
   if (!existsSync16(jobsDir))
     return [];
-  const entries = readdirSync6(jobsDir, { withFileTypes: true });
   const statuses = [];
-  for (const entry of entries) {
-    if (!entry.isDirectory())
+  for (const jobId of readdirSync6(jobsDir)) {
+    const statusFile = join15(jobsDir, jobId, "status.json");
+    if (!existsSync16(statusFile))
       continue;
-    const statusPath = join15(jobsDir, entry.name, "status.json");
-    if (!existsSync16(statusPath))
+    try {
+      const raw = JSON.parse(readFileSync13(statusFile, "utf-8"));
+      if (raw.id) {
+        statuses.push(raw);
+      }
+    } catch {
       continue;
-    const parsed = readJson(readFileSync13(statusPath, "utf-8"));
-    if (!parsed || typeof parsed !== "object")
-      continue;
-    statuses.push(parsed);
+    }
   }
   return statuses;
 }
@@ -28843,7 +29111,8 @@ function resolveMergeTargets(target) {
     ensureTerminalJobs([chain]);
     return [chain];
   }
-  const childIds = readEpicChildIds(target);
+  const chainRootBeadIds = readEpicChainRootBeadIds(target);
+  const childIds = chainRootBeadIds.length > 0 ? chainRootBeadIds : readEpicChildIds(target);
   const chains = resolveMergeTargetsForBeadIds(childIds);
   if (chains.length === 0) {
     throw new Error(`No mergeable chain branches found under epic '${target}'`);
@@ -29143,7 +29412,6 @@ async function run13() {
 }
 var TERMINAL_STATUSES, NOISE_PATH_PREFIXES, MERGE_DIRTY_IGNORE_PREFIXES;
 var init_merge = __esm(() => {
-  init_job_root();
   init_observability_sqlite();
   init_epic_lifecycle();
   TERMINAL_STATUSES = new Set(["done", "error", "cancelled"]);
@@ -29664,8 +29932,18 @@ function resolveWorkingDirectory(args, jobsDir, permissionRequired, readStatus) 
 }
 function startEventTailer(jobId, jobsDir, mode, specialist, beadId) {
   const eventsPath = join16(jobsDir, jobId, "events.jsonl");
+  const statusPath = join16(jobsDir, jobId, "status.json");
   let linesRead = 0;
   let activeInlinePhase = null;
+  const readPayloadBreakdown = () => {
+    try {
+      const statusRaw = readFileSync14(statusPath, "utf-8");
+      const status = JSON.parse(statusRaw);
+      return status.startup_payload_json ? JSON.parse(status.startup_payload_json) : undefined;
+    } catch {
+      return;
+    }
+  };
   const drain = () => {
     let content;
     try {
@@ -29694,7 +29972,8 @@ function startEventTailer(jobId, jobsDir, mode, specialist, beadId) {
         continue;
       }
       if (mode === "json") {
-        process.stdout.write(JSON.stringify({ jobId, specialist, beadId, ...event }) + `
+        const payloadBreakdown = event.type === "run_start" ? readPayloadBreakdown() : undefined;
+        process.stdout.write(JSON.stringify({ jobId, specialist, beadId, ...payloadBreakdown ? { payload_breakdown: payloadBreakdown } : {}, ...event }) + `
 `);
       } else {
         if (event.type === "run_complete" && event.output) {
@@ -34724,6 +35003,7 @@ function toJobNode(job) {
     context_pct: job.context_pct,
     context_health: job.context_health,
     metrics: job.metrics,
+    startup_payload_json: job.startup_payload_json ?? null,
     children: []
   };
 }
@@ -34957,6 +35237,23 @@ function formatElapsed3(seconds) {
   const remainder = seconds % 60;
   return `${minutes}m${String(remainder).padStart(2, "0")}s`;
 }
+function formatPayloadStats(payloadJson) {
+  if (!payloadJson)
+    return { payload_kb: "--", payload_tokens: "--" };
+  try {
+    const payload = JSON.parse(payloadJson);
+    const bytes = payload.totals?.bytes;
+    const tokens = payload.totals?.tokens;
+    if (!Number.isFinite(bytes) || !Number.isFinite(tokens))
+      return { payload_kb: "--", payload_tokens: "--" };
+    return {
+      payload_kb: `${((bytes ?? 0) / 1024).toFixed(1)}kb`,
+      payload_tokens: `${Math.round(tokens ?? 0)}t`
+    };
+  } catch {
+    return { payload_kb: "--", payload_tokens: "--" };
+  }
+}
 function getBeadTitleFromBd(beadId) {
   const result = spawnSync16("bd", ["show", beadId, "--json"], {
     encoding: "utf-8",
@@ -35054,13 +35351,16 @@ function renderJobLine(job, beadTitles, prefix, connector) {
   const totalTokens = job.metrics?.token_usage?.total_tokens;
   if (totalTokens)
     metricParts.push(`${totalTokens}tok`);
+  const payloadStats = formatPayloadStats(job.startup_payload_json);
   const elapsed = metricParts.length > 0 ? dim8(`${elapsedBase} ${metricParts.join("\xB7")}`) : dim8(elapsedBase);
   const beadTitle = job.bead_id ? beadTitles.get(job.bead_id) : undefined;
+  const payloadKbCol = dim8(payloadStats.payload_kb.padEnd(8));
+  const payloadTokensCol = dim8(payloadStats.payload_tokens.padEnd(8));
   const beadCol = dim8((job.bead_id ? job.bead_id : "").padEnd(14));
   const action = getNextAction(job);
   const actionCol = job.is_dead ? red2(action) : dim8(action);
   const titleSuffix = beadTitle ? dim8(` ${beadTitle.slice(0, 40)}`) : "";
-  return `${prefix}${connector}${icon} ${id} ${spec} ${status} ${ctx} ${elapsed} ${beadCol} ${actionCol}${titleSuffix}`;
+  return `${prefix}${connector}${icon} ${id} ${spec} ${status} ${ctx} ${elapsed} ${payloadKbCol} ${payloadTokensCol} ${beadCol} ${actionCol}${titleSuffix}`;
 }
 function renderTreeNodes(nodes, beadTitles, prefix, renderedJobIds) {
   for (let i = 0;i < nodes.length; i++) {
@@ -35267,7 +35567,10 @@ function renderJson(jobs, nodes, trees, _all, epicReadiness, args) {
       started_at_ms: job.started_at_ms,
       elapsed_s: job.elapsed_s,
       context_pct: job.context_pct,
-      context_health: job.context_health
+      context_health: job.context_health,
+      startup_payload_json: job.startup_payload_json ?? null,
+      payload_kb: formatPayloadStats(job.startup_payload_json).payload_kb,
+      payload_tokens: formatPayloadStats(job.startup_payload_json).payload_tokens
     })),
     nodes,
     trees,
@@ -35530,6 +35833,27 @@ function deriveApiError(events) {
   const errorEvent = [...events].reverse().find((event) => event.type === "error");
   return errorEvent?.error_message ?? null;
 }
+function formatPayloadPreamble(payloadJson) {
+  if (!payloadJson)
+    return null;
+  try {
+    const payload = JSON.parse(payloadJson);
+    const bytes = payload.totals?.bytes;
+    const tokens = payload.totals?.tokens;
+    if (!Number.isFinite(bytes) || !Number.isFinite(tokens))
+      return null;
+    const topComponents = (payload.components ?? []).filter((component) => Number.isFinite(component.tokens) && (component.tokens ?? 0) > 0).sort((a, b) => (b.tokens ?? 0) - (a.tokens ?? 0)).slice(0, 3).map((component) => `${component.name ?? "unknown"} (${((component.tokens ?? 0) / 1000).toFixed(1)}kt)`);
+    return [
+      `
+--- payload: ${((bytes ?? 0) / 1024).toFixed(1)} kB \xB7 ~${((tokens ?? 0) / 1000).toFixed(1)}k tokens (${payload.components?.length ?? 0} components) ---`,
+      ...topComponents.length > 0 ? [`top-3: ${topComponents.join(" \xB7 ")}`] : []
+    ].join(`
+`) + `
+`;
+  } catch {
+    return null;
+  }
+}
 function formatStartupSnapshot(snapshot) {
   if (!snapshot)
     return null;
@@ -35594,7 +35918,8 @@ async function run17() {
   const sqliteClient = createObservabilitySqliteClient();
   const emitHumanResult = (output2, status, startupContext, trailingFooter) => {
     const startupBlock = formatStartupSnapshot(startupContext);
-    process.stdout.write(startupBlock ? `${startupBlock}${output2}` : output2);
+    const payloadBlock = formatPayloadPreamble(status.startup_payload_json);
+    process.stdout.write(`${startupBlock ?? ""}${payloadBlock ?? ""}${output2}`);
     const tokenSummaryParts = formatTokenUsageSummary(status.metrics?.token_usage).filter((part) => !part.startsWith("cost="));
     const formattedCost = formatCostUsd(status.metrics?.token_usage?.cost_usd);
     if (tokenSummaryParts.length === 0 && !formattedCost) {
@@ -35851,20 +36176,22 @@ function readJobEventsById(jobsDir, jobId) {
 }
 function readAllJobEvents(jobsDir) {
   const sqliteClient = createObservabilitySqliteClient();
-  const statuses = sqliteClient?.listStatuses() ?? [];
-  if (statuses.length > 0 && sqliteClient) {
-    return statuses.flatMap((status) => {
-      const events = sqliteClient.readEvents(status.id);
-      if (events.length === 0)
-        return [];
-      return [{
-        jobId: status.id,
-        specialist: status.specialist ?? "unknown",
-        beadId: status.bead_id,
-        events
-      }];
-    });
-  }
+  try {
+    const statuses = typeof sqliteClient?.listStatuses === "function" ? sqliteClient.listStatuses() : [];
+    if (statuses.length > 0 && sqliteClient) {
+      return statuses.flatMap((status) => {
+        const events = sqliteClient.readEvents(status.id);
+        if (events.length === 0)
+          return [];
+        return [{
+          jobId: status.id,
+          specialist: status.specialist ?? "unknown",
+          beadId: status.bead_id,
+          events
+        }];
+      });
+    }
+  } catch {}
   if (process.env.SPECIALISTS_JOB_FILE_OUTPUT !== "on")
     return [];
   if (!existsSync22(jobsDir))
@@ -36059,6 +36386,17 @@ function formatWaitingBanner(jobId, specialist) {
   const prefix = magenta3(bold10("WAIT"));
   return `${prefix} ${specialist} (${jobId}) is waiting for input. Use: specialists resume ${jobId} "..."`;
 }
+function formatPayloadBreakdownSummary(payloadBreakdown) {
+  if (!payloadBreakdown)
+    return null;
+  const totals = payloadBreakdown.totals;
+  if (!totals)
+    return null;
+  const components = (payloadBreakdown.components ?? []).filter((component) => Number.isFinite(component.tokens) && component.tokens > 0);
+  const kb = (totals.bytes / 1024).toFixed(1);
+  const kt = (totals.tokens / 1000).toFixed(1);
+  return `payload: ${kb}kb \xB7 ${kt}kt across ${components.length} components`;
+}
 function formatStartupContextLine(event) {
   if (event.type === "run_start") {
     const snapshot = event.startup_snapshot;
@@ -36096,6 +36434,12 @@ function formatStartupContextLine(event) {
     if (snapshot.skills)
       parts.push(`skills=${snapshot.skills.count}`);
     return parts.length > 0 ? dim8(`  \u21B3 startup ${parts.join(" ")}`) : null;
+  }
+  if (event.type === "payload_breakdown") {
+    const summary = formatPayloadBreakdownSummary(event.payload_breakdown);
+    if (!summary)
+      return null;
+    return dim8(`  \u21B3 ${summary}`);
   }
   if (event.type === "meta" && event.source === "mandatory_rules_injection" && event.data) {
     const data = event.data;
@@ -36582,9 +36926,15 @@ async function followMerged(sqliteClient, jobsDir, options) {
             console.log(startupContextLine);
         }
       }
-      if (!options.forever && trackedJobs.size > 0 && completedJobs.size === trackedJobs.size) {
-        clearInterval(interval);
-        resolve10();
+      if (!options.forever && trackedJobs.size > 0) {
+        const allTrackedTerminal = [...trackedJobs].every((jobId) => {
+          const status = statusByJobId.get(jobId) ?? readStatusJson(sqliteClient, jobsDir, jobId);
+          return status?.status === "done" || status?.status === "error" || status?.status === "cancelled";
+        });
+        if (completedJobs.size === trackedJobs.size || allTrackedTerminal) {
+          clearInterval(interval);
+          resolve10();
+        }
       }
     }, 750);
   });
@@ -37434,12 +37784,14 @@ async function run25() {
     const isAlreadyDead = !isProcessAlive(pid, status.started_at_ms);
     if (force && isAlreadyDead) {
       supervisor.updateJobStatus(jobId, "error");
+      supervisor.aggregateJobMetricsBestEffort(jobId);
       tryKillProcessGroup(pid);
       process.stdout.write(`${green12("\u2713")} Marked ${jobId} as error (PID ${pid} already dead)
 `);
     } else {
       const terminalStatus = resolveTerminalStatus(jobId);
       supervisor.updateJobStatus(jobId, terminalStatus);
+      supervisor.aggregateJobMetricsBestEffort(jobId);
       try {
         process.kill(pid, "SIGTERM");
         process.stdout.write(`${green12("\u2713")} Marked ${jobId} as ${terminalStatus} and sent SIGTERM to PID ${pid}
@@ -38207,6 +38559,63 @@ function checkRuntimeDirs() {
   }
   return allOk;
 }
+function checkClaudeMdFragments() {
+  section3("CLAUDE.md fragments");
+  const projectRoot = process.cwd();
+  const claudeMd = join29(projectRoot, "CLAUDE.md");
+  if (!existsSync27(claudeMd)) {
+    warn3("No CLAUDE.md in project root \u2014 skipping fragment check");
+    return true;
+  }
+  if (!isInstalled3("xt")) {
+    warn3("xt not on PATH \u2014 skipping fragment drift check");
+    hint("install xtrm-tools to enable: xt claude-sync --check");
+    return true;
+  }
+  const result = spawnSync20("xt", ["claude-sync", "--check", "--json", "--cwd", projectRoot], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  if (result.error) {
+    warn3(`xt claude-sync failed to launch: ${result.error.message}`);
+    return true;
+  }
+  let parsed = null;
+  try {
+    parsed = JSON.parse(result.stdout);
+  } catch {
+    warn3(`xt claude-sync produced unparseable JSON (exit ${result.status})`);
+    return true;
+  }
+  const sections = parsed?.managed_sections ?? [];
+  const drift = parsed?.drift ?? [];
+  if (sections.length === 0) {
+    warn3("CLAUDE.md has no XTRM-MANAGED sentinels \u2014 fragments not initialized");
+    fix("xt claude-sync --add bd-workflow  (and other fragments)");
+    return false;
+  }
+  const driftByName = new Map(drift.map((d) => [d.name, d]));
+  let allOk = true;
+  for (const s of sections) {
+    const d = driftByName.get(s.name);
+    if (!d) {
+      ok3(`${s.name.padEnd(20)} current (v${s.version})`);
+      continue;
+    }
+    allOk = false;
+    if (d.kind === "version-mismatch") {
+      warn3(`${s.name.padEnd(20)} project v${d.current_version}; canonical v${d.canonical_version}`);
+      fix("xt claude-sync --apply --accept-overwrite");
+    } else if (d.kind === "body-mismatch") {
+      warn3(`${s.name.padEnd(20)} body diverges from canonical v${d.canonical_version}`);
+      fix("xt claude-sync --apply --accept-overwrite");
+    } else if (d.kind === "unknown-fragment") {
+      warn3(`${s.name.padEnd(20)} not a known canonical fragment`);
+      hint("this CLAUDE.md may have been written by a newer xt; consider updating xtrm-tools");
+    }
+  }
+  return allOk;
+}
 function parseVersionTuple(value) {
   const normalized = value.trim().replace(/^v/i, "");
   const match = normalized.match(/^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
@@ -38415,7 +38824,8 @@ ${bold13("specialists doctor")}
   const userOverlayOk = checkUserOverlayDrift();
   const dirsOk = checkRuntimeDirs();
   const jobsOk = checkZombieJobs();
-  const allOk = piOk && spOk && bdOk && xtOk && hooksOk && mcpOk && skillDriftOk && mirrorOk && userOverlayOk && dirsOk && jobsOk;
+  const fragmentsOk = checkClaudeMdFragments();
+  const allOk = piOk && spOk && bdOk && xtOk && hooksOk && mcpOk && skillDriftOk && mirrorOk && userOverlayOk && dirsOk && jobsOk && fragmentsOk;
   console.log("");
   if (allOk) {
     console.log(`  ${green14("\u2713")} ${bold13("All checks passed")}  \u2014 specialists is healthy`);
@@ -47506,6 +47916,7 @@ async function run33() {
         "  5. .specialists/ runtime directories",
         "  6. hook wiring expectations",
         "  7. zombie job detection",
+        "  8. CLAUDE.md fragments (XTRM-MANAGED sentinels) \u2014 delegates to xt claude-sync",
         "",
         "Behavior:",
         "  - prints fix hints for failing checks",

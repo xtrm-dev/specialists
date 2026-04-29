@@ -116,6 +116,21 @@ export interface TimelineEventRunStart extends TimelineEventBase {
  * Model/backend metadata event.
  * Emitted when the first assistant message_start reveals provider info.
  */
+export interface TimelineEventPayloadBreakdown extends TimelineEventBase {
+    type: 'payload_breakdown';
+    payload_breakdown: {
+        components: Array<{
+            kind: string;
+            name: string;
+            tokens: number;
+            bytes: number;
+        }>;
+        totals: {
+            tokens: number;
+            bytes: number;
+        };
+    };
+}
 export interface TimelineEventMeta extends TimelineEventBase {
     type: 'meta';
     /** Resolved model ID (e.g., 'claude-sonnet-4-6') */
@@ -347,10 +362,11 @@ export interface TimelineEventLegacyComplete extends TimelineEventBase {
  * Union of all timeline event types.
  * This is the canonical type for events.jsonl records.
  */
-export type TimelineEvent = TimelineEventRunStart | TimelineEventMeta | TimelineEventThinking | TimelineEventTool | TimelineEventText | TimelineEventMessage | TimelineEventTurn | TimelineEventStatusChange | TimelineEventRunComplete | TimelineEventStaleWarning | TimelineEventTokenUsage | TimelineEventFinishReason | TimelineEventTurnSummary | TimelineEventCompaction | TimelineEventRetry | TimelineEventModelChange | TimelineEventExtensionError | TimelineEventApiError | TimelineEventAutoCommit | TimelineEventLegacyComplete;
+export type TimelineEvent = TimelineEventRunStart | TimelineEventPayloadBreakdown | TimelineEventMeta | TimelineEventThinking | TimelineEventTool | TimelineEventText | TimelineEventMessage | TimelineEventTurn | TimelineEventStatusChange | TimelineEventRunComplete | TimelineEventStaleWarning | TimelineEventTokenUsage | TimelineEventFinishReason | TimelineEventTurnSummary | TimelineEventCompaction | TimelineEventRetry | TimelineEventModelChange | TimelineEventExtensionError | TimelineEventApiError | TimelineEventAutoCommit | TimelineEventLegacyComplete;
 export declare const TIMELINE_EVENT_TYPES: {
     readonly RUN_START: "run_start";
     readonly META: "meta";
+    readonly PAYLOAD_BREAKDOWN: "payload_breakdown";
     readonly THINKING: "thinking";
     readonly TOOL: "tool";
     readonly TEXT: "text";
@@ -404,6 +420,18 @@ export declare function mapCallbackEventToTimelineEvent(callbackEvent: string, c
     apiError?: {
         source: 'rpc' | 'stderr';
         errorMessage: string;
+    };
+    payloadBreakdown?: {
+        components: Array<{
+            kind: string;
+            name: string;
+            tokens: number;
+            bytes: number;
+        }>;
+        totals: {
+            tokens: number;
+            bytes: number;
+        };
     };
     memoryInjection?: {
         static_tokens: number;

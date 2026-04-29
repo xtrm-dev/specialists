@@ -153,13 +153,92 @@ export interface PiSessionOptions {
  *  MEDIUM    : + edit                          — can edit existing files
  *  HIGH      : + write                         — full access, can create new files
  */
+const GITNEXUS_READ_TOOLS = [
+  'gitnexus_list_repos',
+  'gitnexus_query',
+  'gitnexus_context',
+  'gitnexus_impact',
+  'gitnexus_detect_changes',
+] as const;
+
+const SERENA_READ_TOOLS = [
+  'serena_list_tools',
+  'find_symbol',
+  'find_referencing_symbols',
+  'read_file',
+  'get_symbols_overview',
+  'jet_brains_get_symbols_overview',
+  'jet_brains_find_symbol',
+  'jet_brains_find_referencing_symbols',
+  'jet_brains_type_hierarchy',
+  'search_for_pattern',
+  'list_dir',
+  'find_file',
+  'get_current_config',
+  'activate_project',
+  'check_onboarding_performed',
+  'initial_instructions',
+  'think_about_collected_information',
+  'think_about_task_adherence',
+  'think_about_whether_you_are_done',
+  'list_memories',
+  'read_memory',
+] as const;
+
+const SERENA_LOW_TOOLS = [
+  'execute_shell_command',
+] as const;
+
+const SERENA_WRITE_TOOLS = [
+  'insert_after_symbol',
+  'replace_symbol_body',
+  'insert_before_symbol',
+  'rename_symbol',
+  'restart_language_server',
+  'create_text_file',
+  'replace_content',
+  'delete_lines',
+  'replace_lines',
+  'insert_at_line',
+  'remove_project',
+  'switch_modes',
+  'open_dashboard',
+  'onboarding',
+  'prepare_for_new_conversation',
+  'summarize_changes',
+  'write_memory',
+  'delete_memory',
+  'rename_memory',
+  'edit_memory',
+  'serena_mcp_reset',
+] as const;
+
+const GITNEXUS_WRITE_TOOLS = [
+  'gitnexus_rename',
+  'gitnexus_cypher',
+] as const;
+
+function joinTools(...groups: readonly (readonly string[])[]): string {
+  return groups.flat().join(',');
+}
+
 function mapPermissionToTools(level?: string): string | undefined {
+  const readOnlyTools = ['read', 'grep', 'find', 'ls'] as const;
+  const lowTools = ['bash'] as const;
+  const mediumTools = ['edit'] as const;
+  const highTools = ['write'] as const;
+
   switch (level?.toUpperCase()) {
-    case 'READ_ONLY': return 'read,grep,find,ls';
-    case 'LOW':       return 'read,bash,grep,find,ls';
-    case 'MEDIUM':    return 'read,bash,edit,grep,find,ls';
-    case 'HIGH':      return 'read,bash,edit,write,grep,find,ls';
-    default:          return undefined;
+    case 'READ_ONLY':
+      return joinTools(readOnlyTools, GITNEXUS_READ_TOOLS, SERENA_READ_TOOLS);
+    case 'LOW':
+      return joinTools(readOnlyTools, lowTools, GITNEXUS_READ_TOOLS, SERENA_READ_TOOLS, SERENA_LOW_TOOLS);
+    case 'MEDIUM':
+      return joinTools(readOnlyTools, lowTools, mediumTools, GITNEXUS_READ_TOOLS, SERENA_READ_TOOLS, SERENA_LOW_TOOLS, SERENA_WRITE_TOOLS, GITNEXUS_WRITE_TOOLS);
+    case 'HIGH':
+      return joinTools(readOnlyTools, lowTools, mediumTools, highTools, GITNEXUS_READ_TOOLS, SERENA_READ_TOOLS, SERENA_LOW_TOOLS, SERENA_WRITE_TOOLS, GITNEXUS_WRITE_TOOLS);
+    default:
+      return undefined;
   }
 }
 
