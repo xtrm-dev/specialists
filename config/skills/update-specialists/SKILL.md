@@ -6,8 +6,8 @@ description: >
   "sp is out of date", "hooks not firing", "skills not loading after update",
   or when drift is detected in installed specialists config, hooks, jobs, DB,
   extensions, or worktree cleanup.
-version: 1.3
-synced_at: 2026-04-25
+version: 1.4
+synced_at: 2026-04-29
 ---
 
 # update-specialists
@@ -91,13 +91,18 @@ looks like.
 | Check | Expected value |
 |-------|----------------|
 | specialists DB | Opens cleanly (`.specialists/db/observability.db`) |
-| Schema version | Matches runtime expectation (current: v11) |
+| Schema version | Matches runtime expectation (current: v11; auto-migrates on next runtime startup) |
 | `specialist_job_metrics` table | Present at v11+ — holds aggregated per-job metrics |
+| `specialist_job_metrics` columns | Includes `active_runtime_ms` + `waiting_ms` (drs41.1 — auto-added by idempotent `migrateToV11` ALTER TABLE on first start of upgraded runtime; pre-existing rows get NULL until next aggregate) |
+| Auto-aggregation hook | Supervisor + `sp stop` invoke `aggregateJobMetricsBestEffort` after terminal-status persistence (drs41.1) — table populates without manual `sp db extract` under normal operation |
+| Merge target lookup | DB-first (post-ofjvj): `readAllJobStatuses()` reads `specialist_jobs` via `listStatuses()`. `sp merge` no longer reads `.specialists/jobs/<id>/status.json`. Older versions silently failed after `sp stop` cleaned status.json. |
 | WAL / busy timeout settings | Present when runtime uses SQLite |
 | Corruption / lock errors | None in `sp doctor` |
 | Pre-prune extract | `sp db prune --apply` extracts metrics to `specialist_job_metrics` before deleting events |
-| Extract backfill | `sp db extract --all-missing` populates metrics for jobs whose events still exist |
-| Historical stats query | `sp db stats [--spec <name>] [--model <glob>] [--since <dur>]` reads the aggregated table |
+| Extract backfill | `sp db extract --all-missing` populates metrics for jobs whose events still exist (still useful for backfilling historical jobs that ran before the auto-aggregate hook landed) |
+| Historical stats query | `sp db stats [--spec <name>] [--model <glob>] [--since <dur>]` reads the aggregated table; output includes `active_s`, `waiting_s`, `total_s` (drs41.1) |
+
+**Safety: `sp init` and `sp init --sync-defaults` do NOT touch `.specialists/db/observability.db`.** Init checks file existence and skips with "observability database already exists (not touched)" when present. Schema migrations run on next runtime startup (any `sp` invocation that opens the DB), additively via `ALTER TABLE ADD COLUMN`. No data loss path during a normal package upgrade.
 
 ### Skills + extensions parity
 
@@ -182,8 +187,8 @@ find .worktrees -maxdepth 2 -mindepth 1 -type d 2>/dev/null || true
 # 12. Extension registration
 node -e "const fs=require('fs'); const p='.pi/settings.json'; if (fs.existsSync(p)) console.log(JSON.stringify(JSON.parse(fs.readFileSync(p,'utf8')).skills ?? JSON.parse(fs.readFileSync(p,'utf8')).extensions ?? {}, null, 2)); else console.log('MISSING .pi/settings.json')"
 
-# 13a. Observability schema + metrics coverage
-node -e "const {Database} = require('bun:sqlite'); const p='.specialists/db/observability.db'; const fs=require('fs'); if (!fs.existsSync(p)) { console.log('NO_DB'); process.exit(0); } const db=new Database(p,{readonly:true}); const v=db.query(\"SELECT value FROM schema_meta WHERE key='version'\").get(); const has=db.query(\"SELECT name FROM sqlite_master WHERE type='table' AND name='specialist_job_metrics'\").get(); const jobs=db.query('SELECT COUNT(*) c FROM specialist_jobs').get(); const metrics=has ? db.query('SELECT COUNT(*) c FROM specialist_job_metrics').get() : null; console.log(JSON.stringify({schema_version: v?.value, has_metrics_table: !!has, jobs: jobs.c, metrics_rows: metrics?.c ?? 0, metrics_coverage: metrics ? (metrics.c/jobs.c).toFixed(2) : null}, null, 2));" 2>/dev/null || echo "REQUIRES_BUN_RUNTIME"
+# 13a. Observability schema + metrics coverage + drs41.1 column presence
+node -e "const {Database} = require('bun:sqlite'); const p='.specialists/db/observability.db'; const fs=require('fs'); if (!fs.existsSync(p)) { console.log('NO_DB'); process.exit(0); } const db=new Database(p,{readonly:true}); const v=db.query(\"SELECT value FROM schema_meta WHERE key='version'\").get(); const has=db.query(\"SELECT name FROM sqlite_master WHERE type='table' AND name='specialist_job_metrics'\").get(); const jobs=db.query('SELECT COUNT(*) c FROM specialist_jobs').get(); const metrics=has ? db.query('SELECT COUNT(*) c FROM specialist_job_metrics').get() : null; const cols=has ? new Set(db.query('PRAGMA table_info(specialist_job_metrics)').all().map(r=>r.name)) : new Set(); const drs41Cols={active_runtime_ms: cols.has('active_runtime_ms'), waiting_ms: cols.has('waiting_ms')}; console.log(JSON.stringify({schema_version: v?.value, has_metrics_table: !!has, drs41_columns_present: drs41Cols, jobs: jobs.c, metrics_rows: metrics?.c ?? 0, metrics_coverage: metrics ? (metrics.c/jobs.c).toFixed(2) : null}, null, 2));" 2>/dev/null || echo "REQUIRES_BUN_RUNTIME"
 
 # 13. Mandatory-rules template tiers + reference checks (three-tier resolution)
 find .specialists/default/mandatory-rules -maxdepth 1 -type f 2>/dev/null || true
@@ -213,6 +218,9 @@ Use targeted fixes first. Escalate to full sync only if needed.
 | Orphaned `.worktrees/` entries | `specialists clean` |
 | SQLite schema/version mismatch | `sp doctor` first, then `specialists init --sync-defaults` or runtime migration command |
 | Schema below v11 (no `specialist_job_metrics`) | Reinstall / upgrade runtime; table is created by initSchema / migrateToV11. No data loss — raw events untouched. |
+| `specialist_job_metrics` missing `active_runtime_ms` / `waiting_ms` columns (post-drs41.1) | Open any `sp` command — `migrateToV11` is idempotent and ALTERs the table to add the columns. No reinstall needed. Pre-existing rows show NULL until next aggregate or `sp db extract --all-missing`. |
+| Auto-aggregate hook absent (older runtime) — empty `specialist_job_metrics` despite job activity | Upgrade `@jaggerxtrm/specialists` package. Post-drs41.1, supervisor + `sp stop` invoke `aggregateJobMetricsBestEffort` on every terminal status, so the table fills under normal operation. Backfill historical with `sp db extract --all-missing`. |
+| `sp merge` fails after `sp stop` (older runtime) — "No chain-root job with worktree metadata found" | Upgrade `@jaggerxtrm/specialists` past ofjvj fix. Merge lookup is now DB-first via `readAllJobStatuses()` / `listStatuses()`. Pre-fix workaround was manual `git merge --no-ff feature/<branch>` (skips tsc + conflict gates). |
 | Events about to be pruned but never aggregated | `sp db extract --all-missing` BEFORE `sp db prune --apply`. Prune refuses when extract fails (safe by design). |
 | Emergency: need to prune but extract is wedged | `sp db prune --apply --skip-extract` — raw events deleted without aggregation. Use only when data loss is acceptable. |
 | Historical per-job stats needed | `sp db stats` reads `specialist_job_metrics`. Replaces ad-hoc `status.json` scans. Supports `--format json\|table`. |
@@ -299,6 +307,10 @@ If doctor reports DB version mismatch or recovery issue:
 1. Run `sp doctor` and capture exact schema error.
 2. Apply runtime migration command if available.
 3. If no automated migration exists, flag manual intervention.
+
+For additive schema bumps (e.g. drs41.1 added `active_runtime_ms` / `waiting_ms` columns within v11): just open any `sp` command in the repo. `initSchema()` runs every migrate-up function on every startup; `migrateToV11` is idempotent — it detects existing v11 schema and `ALTER TABLE ADD COLUMN`s the missing fields. Existing rows are preserved (new fields = NULL until next aggregate). No data loss, no manual SQL.
+
+`sp init` and `sp init --sync-defaults` skip the DB entirely when it exists — the only way to wipe `.specialists/db/observability.db` is to delete the file manually.
 
 ### Fix: metrics aggregation missing or stale
 
