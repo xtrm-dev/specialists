@@ -31,6 +31,7 @@ export interface SupervisorStatus {
     chain_root_bead_id?: string;
     epic_id?: string;
     branch?: string;
+    startup_payload_json?: string;
     startup_context?: {
         job_id?: string;
         specialist_name?: string;
@@ -123,6 +124,7 @@ export declare class Supervisor {
     private withComputedLiveness;
     readStatus(id: string): SupervisorStatusView | null;
     updateJobStatus(id: string, status: Extract<SupervisorJobStatus, 'done' | 'cancelled' | 'error' | 'waiting' | 'running' | 'starting'>, error?: string): SupervisorStatusView | null;
+    aggregateJobMetricsBestEffort(jobId: string): void;
     /** List all jobs sorted newest-first. */
     listJobs(): SupervisorStatusView[];
     private withStatusLineageDefaults;

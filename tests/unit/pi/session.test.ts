@@ -497,34 +497,52 @@ describe('PiAgentSession', () => {
     await expect(closePromise).resolves.toBeUndefined();
   });
 
-  it("mapPermissionToTools('LOW') passes 'read,bash,grep,find,ls' to --tools", async () => {
+  it("mapPermissionToTools('LOW') includes built-in, GitNexus, and non-mutating Serena tools", async () => {
     const session = await PiAgentSession.create({ model: 'gemini', permissionLevel: 'LOW' });
     await session.start();
 
     const args: string[] = mockSpawn.mock.calls[0][1];
     const toolsIdx = args.indexOf('--tools');
     expect(toolsIdx).toBeGreaterThan(-1);
-    expect(args[toolsIdx + 1]).toBe('read,bash,grep,find,ls');
+    const tools = args[toolsIdx + 1].split(',');
+    expect(tools).toEqual(expect.arrayContaining(['read', 'bash', 'grep', 'find', 'ls']));
+    expect(tools).toEqual(expect.arrayContaining(['gitnexus_query', 'gitnexus_context', 'gitnexus_impact']));
+    expect(tools).toEqual(expect.arrayContaining(['read_file', 'search_for_pattern', 'find_symbol', 'list_dir']));
+    expect(tools).toContain('execute_shell_command');
+    expect(tools).not.toContain('write');
+    expect(tools).not.toContain('create_text_file');
   });
 
-  it("mapPermissionToTools('READ_ONLY') passes 'read,grep,find,ls' to --tools", async () => {
+  it("mapPermissionToTools('READ_ONLY') includes Serena/GitNexus read tools without mutating tools", async () => {
     const session = await PiAgentSession.create({ model: 'gemini', permissionLevel: 'READ_ONLY' });
     await session.start();
 
     const args: string[] = mockSpawn.mock.calls[0][1];
     const toolsIdx = args.indexOf('--tools');
     expect(toolsIdx).toBeGreaterThan(-1);
-    expect(args[toolsIdx + 1]).toBe('read,grep,find,ls');
+    const tools = args[toolsIdx + 1].split(',');
+    expect(tools).toEqual(expect.arrayContaining(['read', 'grep', 'find', 'ls']));
+    expect(tools).toEqual(expect.arrayContaining(['gitnexus_query', 'gitnexus_context', 'gitnexus_detect_changes']));
+    expect(tools).toEqual(expect.arrayContaining(['read_file', 'search_for_pattern', 'find_symbol', 'list_dir']));
+    expect(tools).not.toContain('bash');
+    expect(tools).not.toContain('edit');
+    expect(tools).not.toContain('write');
+    expect(tools).not.toContain('execute_shell_command');
+    expect(tools).not.toContain('create_text_file');
+    expect(tools).not.toContain('gitnexus_rename');
   });
 
-  it("mapPermissionToTools('HIGH') passes 'read,bash,edit,write,grep,find,ls' to --tools", async () => {
+  it("mapPermissionToTools('HIGH') includes built-in write and Serena/GitNexus mutating tools", async () => {
     const session = await PiAgentSession.create({ model: 'gemini', permissionLevel: 'HIGH' });
     await session.start();
 
     const args: string[] = mockSpawn.mock.calls[0][1];
     const toolsIdx = args.indexOf('--tools');
     expect(toolsIdx).toBeGreaterThan(-1);
-    expect(args[toolsIdx + 1]).toBe('read,bash,edit,write,grep,find,ls');
+    const tools = args[toolsIdx + 1].split(',');
+    expect(tools).toEqual(expect.arrayContaining(['read', 'bash', 'edit', 'write', 'grep', 'find', 'ls']));
+    expect(tools).toEqual(expect.arrayContaining(['gitnexus_query', 'gitnexus_rename', 'gitnexus_cypher']));
+    expect(tools).toEqual(expect.arrayContaining(['read_file', 'create_text_file', 'replace_content', 'execute_shell_command']));
   });
 
   it('injects npm extensions by default when installed', async () => {

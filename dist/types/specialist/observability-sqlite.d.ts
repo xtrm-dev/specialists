@@ -106,6 +106,8 @@ export interface JobMetricsRecord {
     started_at_ms: number | null;
     completed_at_ms: number | null;
     elapsed_ms: number | null;
+    active_runtime_ms: number | null;
+    waiting_ms: number | null;
     total_turns: number;
     total_tools: number;
     tool_call_counts_json: string;
@@ -113,6 +115,7 @@ export interface JobMetricsRecord {
     context_trajectory_json: string;
     stall_gaps_json: string;
     run_complete_json: string | null;
+    startup_payload_json: string | null;
     updated_at_ms: number;
 }
 export interface PruneObservabilityReport {

@@ -7045,7 +7045,8 @@ function migrateToV2(db) {
       status_json     TEXT NOT NULL,
       bead_id         TEXT,
       updated_at_ms   INTEGER NOT NULL,
-      last_output     TEXT
+      last_output     TEXT,
+      startup_payload_json TEXT
     );
     INSERT OR IGNORE INTO specialist_jobs_v2
       SELECT
@@ -7109,6 +7110,15 @@ function migrateToV3(db) {
 function migrateToV11(db) {
   const hasV11 = db.query("SELECT 1 FROM schema_version WHERE version = 11 LIMIT 1").get();
   if (hasV11) {
+    const metricsColumns = new Set(db.query("PRAGMA table_info(specialist_job_metrics)").all().map((column) => column.name).filter((name) => typeof name === "string" && name.length > 0));
+    for (const column of [
+      { name: "active_runtime_ms", definition: "INTEGER" },
+      { name: "waiting_ms", definition: "INTEGER" }
+    ]) {
+      if (!metricsColumns.has(column.name)) {
+        db.run(`ALTER TABLE specialist_job_metrics ADD COLUMN ${column.name} ${column.definition}`);
+      }
+    }
     db.run("CREATE INDEX IF NOT EXISTS idx_job_metrics_spec_model_updated ON specialist_job_metrics(specialist, model, updated_at_ms DESC)");
     db.run("CREATE INDEX IF NOT EXISTS idx_job_metrics_updated ON specialist_job_metrics(updated_at_ms DESC)");
     return;
@@ -7127,6 +7137,8 @@ function migrateToV11(db) {
       started_at_ms INTEGER,
       completed_at_ms INTEGER,
       elapsed_ms INTEGER,
+      active_runtime_ms INTEGER,
+      waiting_ms INTEGER,
       total_turns INTEGER NOT NULL DEFAULT 0,
       total_tools INTEGER NOT NULL DEFAULT 0,
       tool_call_counts_json TEXT NOT NULL,
@@ -7295,7 +7307,8 @@ function initSchema(db) {
     { name: "chain_root_bead_id", definition: "TEXT" },
     { name: "epic_id", definition: "TEXT" },
     { name: "status", definition: "TEXT NOT NULL DEFAULT 'starting'" },
-    { name: "last_output", definition: "TEXT" }
+    { name: "last_output", definition: "TEXT" },
+    { name: "startup_payload_json", definition: "TEXT" }
   ].filter(({ name }) => !specialistJobsColumns.has(name));
   for (const missingColumn of missingSpecialistJobsColumns) {
     db.run(`ALTER TABLE specialist_jobs ADD COLUMN ${missingColumn.name} ${missingColumn.definition}`);
@@ -7317,7 +7330,8 @@ function initSchema(db) {
         status          TEXT NOT NULL,
         status_json     TEXT NOT NULL,
         updated_at_ms   INTEGER NOT NULL,
-        last_output     TEXT
+        last_output     TEXT,
+        startup_payload_json TEXT
       );
       INSERT OR IGNORE INTO specialist_jobs_new
         SELECT
@@ -7567,8 +7581,8 @@ class SqliteClient {
   writeStatusRow(status, lastOutput) {
     const statusJson = JSON.stringify(status);
     this.db.run(`
-      INSERT INTO specialist_jobs (job_id, specialist, worktree_column, bead_id, node_id, chain_kind, chain_id, chain_root_job_id, chain_root_bead_id, epic_id, status, status_json, updated_at_ms, last_output)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO specialist_jobs (job_id, specialist, worktree_column, bead_id, node_id, chain_kind, chain_id, chain_root_job_id, chain_root_bead_id, epic_id, status, status_json, updated_at_ms, last_output, startup_payload_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(job_id) DO UPDATE SET
         specialist = excluded.specialist,
         worktree_column = excluded.worktree_column,
@@ -7582,7 +7596,8 @@ class SqliteClient {
         status = excluded.status,
         status_json = excluded.status_json,
         updated_at_ms = excluded.updated_at_ms,
-        last_output = COALESCE(excluded.last_output, specialist_jobs.last_output);
+        last_output = COALESCE(excluded.last_output, specialist_jobs.last_output),
+        startup_payload_json = COALESCE(excluded.startup_payload_json, specialist_jobs.startup_payload_json);
     `, [
       status.id,
       status.specialist,
@@ -7597,7 +7612,8 @@ class SqliteClient {
       status.status,
       statusJson,
       Date.now(),
-      lastOutput ?? null
+      lastOutput ?? null,
+      status.startup_payload_json ?? null
     ]);
   }
   writeEpicRunRow(epic) {
@@ -8132,7 +8148,6 @@ class SqliteClient {
         SELECT chain_id, epic_id, chain_root_bead_id, chain_root_job_id, updated_at_ms
         FROM epic_chain_membership
         WHERE epic_id = ?
-          AND (chain_root_job_id IS NULL OR chain_root_job_id != chain_id)
         ORDER BY updated_at_ms DESC
       `).all(epicId);
     }, "listEpicChains");
@@ -8306,7 +8321,7 @@ class SqliteClient {
   aggregateJobMetrics(jobId) {
     return withRetry(() => {
       const jobRow = this.db.query(`
-        SELECT job_id, specialist, status, chain_kind, chain_id, bead_id, node_id, epic_id, updated_at_ms
+        SELECT job_id, specialist, status, chain_kind, chain_id, bead_id, node_id, epic_id, updated_at_ms, startup_payload_json
         FROM specialist_jobs
         WHERE job_id = ?
       `).get(jobId);
@@ -8324,9 +8339,22 @@ class SqliteClient {
       let runCompleteJson = null;
       let model = null;
       let elapsedMs = null;
+      let activeRuntimeMs = 0;
+      let waitingMs = 0;
+      let phase = null;
+      let phaseStartedAtMs = null;
+      const closePhase = (endAtMs) => {
+        if (phase === null || phaseStartedAtMs === null || endAtMs < phaseStartedAtMs)
+          return;
+        const durationMs = endAtMs - phaseStartedAtMs;
+        if (phase === "running") {
+          activeRuntimeMs += durationMs;
+        } else {
+          waitingMs += durationMs;
+        }
+      };
       for (const event of events) {
         startedAtMs = startedAtMs === null ? event.t : Math.min(startedAtMs, event.t);
-        completedAtMs = completedAtMs === null ? event.t : Math.max(completedAtMs, event.t);
         if (event.type === "tool") {
           totalTools += 1;
           toolCallCounts[event.tool] = (toolCallCounts[event.tool] ?? 0) + 1;
@@ -8344,15 +8372,44 @@ class SqliteClient {
           tokenTrajectory.push({ t: event.t, source: event.source, token_usage: event.token_usage });
           continue;
         }
+        if (event.type === "run_start") {
+          phase = "running";
+          phaseStartedAtMs = event.t;
+          continue;
+        }
+        if (event.type === "status_change") {
+          if (event.status === "running" || event.status === "waiting") {
+            closePhase(event.t);
+            phase = event.status;
+            phaseStartedAtMs = event.t;
+            continue;
+          }
+          if (event.status === "done" || event.status === "error" || event.status === "cancelled") {
+            closePhase(event.t);
+            phase = null;
+            phaseStartedAtMs = null;
+          }
+          continue;
+        }
         if (event.type === "run_complete") {
+          closePhase(event.t);
+          completedAtMs = event.t;
           runCompleteJson = JSON.stringify(event);
           model = event.model ?? model;
           elapsedMs = Math.round(event.elapsed_s * 1000);
+          phase = null;
+          phaseStartedAtMs = null;
           continue;
         }
         if (event.type === "stale_warning" && event.reason === "tool_duration") {
           stallGaps.push({ t: event.t, tool: event.tool ?? null, silence_ms: event.silence_ms, threshold_ms: event.threshold_ms });
         }
+      }
+      if (startedAtMs !== null && completedAtMs === null) {
+        completedAtMs = events.length > 0 ? events[events.length - 1].t : startedAtMs;
+      }
+      if (elapsedMs === null && startedAtMs !== null && completedAtMs !== null) {
+        elapsedMs = Math.max(0, completedAtMs - startedAtMs);
       }
       const record = {
         job_id: jobRow.job_id,
@@ -8367,6 +8424,8 @@ class SqliteClient {
         started_at_ms: startedAtMs,
         completed_at_ms: completedAtMs,
         elapsed_ms: elapsedMs,
+        active_runtime_ms: activeRuntimeMs,
+        waiting_ms: waitingMs,
         total_turns: totalTurns,
         total_tools: totalTools,
         tool_call_counts_json: stringifyJson(toolCallCounts),
@@ -8374,15 +8433,16 @@ class SqliteClient {
         context_trajectory_json: stringifyJson(contextTrajectory),
         stall_gaps_json: stringifyJson(stallGaps),
         run_complete_json: runCompleteJson,
+        startup_payload_json: jobRow.startup_payload_json ?? null,
         updated_at_ms: jobRow.updated_at_ms
       };
       this.db.run(`
         INSERT INTO specialist_job_metrics (
           job_id, specialist, model, status, chain_kind, chain_id, bead_id, node_id, epic_id,
-          started_at_ms, completed_at_ms, elapsed_ms, total_turns, total_tools,
+          started_at_ms, completed_at_ms, elapsed_ms, active_runtime_ms, waiting_ms, total_turns, total_tools,
           tool_call_counts_json, token_trajectory_json, context_trajectory_json, stall_gaps_json,
           run_complete_json, updated_at_ms
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(job_id) DO UPDATE SET
           specialist = excluded.specialist,
           model = excluded.model,
@@ -8395,6 +8455,8 @@ class SqliteClient {
           started_at_ms = excluded.started_at_ms,
           completed_at_ms = excluded.completed_at_ms,
           elapsed_ms = excluded.elapsed_ms,
+          active_runtime_ms = excluded.active_runtime_ms,
+          waiting_ms = excluded.waiting_ms,
           total_turns = excluded.total_turns,
           total_tools = excluded.total_tools,
           tool_call_counts_json = excluded.tool_call_counts_json,
@@ -8416,6 +8478,8 @@ class SqliteClient {
         record.started_at_ms,
         record.completed_at_ms,
         record.elapsed_ms,
+        record.active_runtime_ms,
+        record.waiting_ms,
         record.total_turns,
         record.total_tools,
         record.tool_call_counts_json,
