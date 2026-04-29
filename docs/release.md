@@ -15,6 +15,8 @@ What it does:
 - runs `changelog-keeper` via `runScriptSpecialist`
 - prefers structured JSON output, falls back to markdown body if needed
 - renders Keep-a-Changelog section format
+- wraps `Scope: detail` entries as `- **Scope**: detail`
+- passes through entries without `: ` unchanged
 - inserts new release section above previous release in `CHANGELOG.md`
 - bumps `package.json` version
 - stages `CHANGELOG.md`, `package.json`, and `dist/index.js`

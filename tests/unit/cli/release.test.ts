@@ -58,7 +58,7 @@ describe('release CLI', () => {
       output: JSON.stringify({
         unreleased_summary: 'Draft summary',
         sections: {
-          added: ['Prepare flow: single command entry point'],
+          added: ['Scope: single command entry point'],
           changed: [],
           fixed: [],
           removed: [],
@@ -87,7 +87,9 @@ describe('release CLI', () => {
 
     expect(runScript).toHaveBeenCalledWith(expect.objectContaining({ specialist: 'changelog-keeper', variables: { prev_tag: 'v3.8.0', next_tag: 'v3.8.1' } }), expect.anything());
     expect(readFileSync(join(root, 'package.json'), 'utf-8')).toContain('3.8.1');
-    expect(readFileSync(join(root, 'CHANGELOG.md'), 'utf-8')).toContain('## [v3.8.1] - 2026-04-30');
+    const changelog = readFileSync(join(root, 'CHANGELOG.md'), 'utf-8');
+    expect(changelog).toContain('## [v3.8.1] - 2026-04-30');
+    expect(changelog).toContain('- **Scope**: single command entry point');
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('git commit -m "release: v3.8.1"'));
     expect(log).toContain('add:CHANGELOG.md package.json dist/index.js');
   });

@@ -114,7 +114,14 @@ export function parseReleaseSection(changelog: string, version: string): { date:
 function appendSection(lines: string[], title: string, entries: string[]): void {
   if (!entries.length) return;
   lines.push(`### ${title}`);
-  for (const entry of entries) lines.push(`- **${entry}`);
+  for (const entry of entries) {
+    const separatorIndex = entry.indexOf(': ');
+    if (separatorIndex > 0) {
+      lines.push(`- **${entry.slice(0, separatorIndex)}**: ${entry.slice(separatorIndex + 2)}`);
+    } else {
+      lines.push(`- ${entry}`);
+    }
+  }
   lines.push('');
 }
 
