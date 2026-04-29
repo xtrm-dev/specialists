@@ -964,6 +964,7 @@ export interface ObservabilitySqliteClient {
   queryMemberContextHealth(jobId: string): number | null;
   readStatus(jobId: string): SupervisorStatus | null;
   listStatuses(): SupervisorStatus[];
+  removeJobs(jobIds: readonly string[]): number;
   readEpicRun(epicId: string): EpicRunRecord | null;
   listEpicRuns(): EpicRunRecord[];
   resolveEpicByChainId(chainId: string): EpicChainRecord | null;
@@ -1597,6 +1598,15 @@ class SqliteClient implements ObservabilitySqliteClient {
       }
       return statuses;
     }, 'listStatuses');
+  }
+
+  removeJobs(jobIds: readonly string[]): number {
+    return withRetry(() => {
+      if (jobIds.length === 0) return 0;
+      const placeholders = jobIds.map(() => '?').join(', ');
+      const result = this.db.query(`DELETE FROM specialist_jobs WHERE job_id IN (${placeholders})`).run(...jobIds);
+      return result.changes ?? 0;
+    }, 'removeJobs');
   }
 
   readEpicRun(epicId: string): EpicRunRecord | null {

@@ -444,6 +444,47 @@ specialists status --job=a1b2c3 --json
 
 ---
 
+## `specialists clean`
+
+### Synopsis
+
+```bash
+specialists clean [--all] [--keep <n>] [--processes] [--stale-after <hours>] [--dry-run]
+```
+
+### Flags
+
+- `--all`: Remove every completed job row, regardless of age.
+- `--keep <n>`: Keep N newest completed job rows, remove rest.
+- `--processes`: Cancel stale non-terminal jobs (`running`, `starting`, `waiting`) when PID is dead or `updated_at_ms` is older than `--stale-after`.
+- `--stale-after <hours>`: Staleness threshold for `--processes` mode. Default `24`.
+- `--dry-run`: Show plan only. No DB writes, no directory deletes.
+
+### Behavior
+
+- Default mode is DB-first. Completed jobs are read from `observability.db` via `specialist_jobs`.
+- Terminal cleanup still best-effort removes job directories when present.
+- Missing job directories no longer crash clean.
+- Legacy file-mode fallback stays available when `SPECIALISTS_JOB_FILE_OUTPUT=on` and SQLite has no rows.
+
+### Examples
+
+```bash
+specialists clean
+specialists clean --all
+specialists clean --keep 25
+specialists clean --processes
+specialists clean --processes --stale-after 48
+specialists clean --dry-run
+```
+
+### Exit codes
+
+- `0`: Success.
+- `1`: Invalid args or runtime failure.
+
+---
+
 ## `specialists attach`
 
 ### Synopsis
