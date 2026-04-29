@@ -73,12 +73,49 @@ export function buildReleaseSection(version: string, date: string, draft: Releas
 
 export function extractReleaseDraft(output: string): ReleaseDraft | undefined {
   const jsonText = output.match(/\{[\s\S]*\}/)?.[0];
-  if (!jsonText) return undefined;
-  try {
-    return JSON.parse(jsonText) as ReleaseDraft;
-  } catch {
-    return undefined;
+  if (jsonText) {
+    try {
+      return JSON.parse(jsonText) as ReleaseDraft;
+    } catch {
+      // fall through to markdown parse
+    }
   }
+  return parseMarkdownDraft(output);
+}
+
+function parseMarkdownDraft(output: string): ReleaseDraft | undefined {
+  const sections: ReleaseDraft['sections'] = { added: [], changed: [], fixed: [], removed: [], deprecated: [], security: [] };
+  const sectionMap: Record<string, keyof ReleaseDraft['sections']> = {
+    Added: 'added', Changed: 'changed', Fixed: 'fixed', Removed: 'removed', Deprecated: 'deprecated', Security: 'security',
+  };
+  const lines = output.split('\n');
+  let current: keyof ReleaseDraft['sections'] | null = null;
+  let lastEntry: string | null = null;
+  for (const raw of lines) {
+    const line = raw.replace(/^\s+/, '');
+    const heading = line.match(/^### (Added|Changed|Fixed|Removed|Deprecated|Security)\b/);
+    if (heading) {
+      current = sectionMap[heading[1]];
+      lastEntry = null;
+      continue;
+    }
+    if (!current) continue;
+    const bullet = line.match(/^[-*]\s+(.*)$/);
+    if (bullet) {
+      const entry = bullet[1].replace(/^\*\*([^*]+)\*\*:\s*/, '$1: ').trim();
+      sections[current].push(entry);
+      lastEntry = entry;
+      continue;
+    }
+    if (lastEntry && line.trim()) {
+      sections[current][sections[current].length - 1] = `${lastEntry} ${line.trim()}`;
+    } else if (!line.trim()) {
+      lastEntry = null;
+    }
+  }
+  const total = Object.values(sections).reduce((n, arr) => n + arr.length, 0);
+  if (total === 0) return undefined;
+  return { unreleased_summary: '', sections };
 }
 
 export function insertReleaseSection(changelog: string, section: string): string {
@@ -163,12 +200,32 @@ function writePackageVersion(cwd: string, version: string, readFile: typeof read
   writeFile(packagePath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf-8');
 }
 
+function collectPreScriptOutput(projectDir: string, prevTag: string, nextTag: string, deps: GitDeps): string {
+  const sections: string[] = [];
+  try {
+    const log = deps.exec('git', ['log', '--pretty=format:%H||%s||%b', `${prevTag}..${nextTag === 'HEAD' ? 'HEAD' : 'HEAD'}`], { cwd: projectDir, encoding: 'utf-8' }) as string;
+    sections.push(`git log:\n${log}`);
+  } catch {
+    sections.push('git log: <unavailable>');
+  }
+  try {
+    const dateRaw = deps.exec('git', ['log', '-1', '--format=%cI', prevTag], { cwd: projectDir, encoding: 'utf-8' }) as string;
+    const date = dateRaw.trim();
+    const beads = deps.exec('bd', ['query', `closed_at >= "${date}"`], { cwd: projectDir, encoding: 'utf-8' }) as string;
+    sections.push(`bd query (closed_at >= ${date}):\n${beads}`);
+  } catch {
+    sections.push('bd query: <unavailable>');
+  }
+  return sections.join('\n\n');
+}
+
 async function runKeeper(projectDir: string, prevTag: string, nextTag: string, deps: GitDeps): Promise<string> {
+  const preScriptOutput = collectPreScriptOutput(projectDir, prevTag, nextTag, deps);
   const result = await deps.runScript({
     specialist: DEFAULT_RELEASE_SPECIALIST,
-    variables: { prev_tag: prevTag, next_tag: nextTag },
+    variables: { prev_tag: prevTag, next_tag: nextTag, cwd: projectDir, pre_script_output: preScriptOutput },
     trace: true,
-  }, { loader: deps.loader(projectDir), projectDir, observabilityDbPath: projectDir });
+  }, { loader: deps.loader(projectDir), projectDir, observabilityDbPath: projectDir, trust: { allowLocalScripts: true } });
   if (!result.success) throw new Error(result.error ?? 'changelog-keeper failed');
   return result.output;
 }
