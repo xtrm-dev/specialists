@@ -926,6 +926,7 @@ async function run() {
         '  5. .specialists/ runtime directories',
         '  6. hook wiring expectations',
         '  7. zombie job detection',
+        '  8. CLAUDE.md fragments (XTRM-MANAGED sentinels) — delegates to xt claude-sync',
         '',
         'Behavior:',
         '  - prints fix hints for failing checks',
