@@ -700,6 +700,14 @@ export class Supervisor {
     return this.withComputedLiveness(updatedStatus);
   }
 
+  aggregateJobMetricsBestEffort(jobId: string): void {
+    try {
+      this.withSqliteOperation('aggregateJobMetrics', (client) => client.aggregateJobMetrics(jobId));
+    } catch (error: unknown) {
+      console.warn(`[supervisor] Failed to aggregate job metrics for ${jobId}: ${String(error)}`);
+    }
+  }
+
   /** List all jobs sorted newest-first. */
   listJobs(): SupervisorStatusView[] {
     try {
@@ -1959,6 +1967,8 @@ export class Supervisor {
         throw new Error('[supervisor] SQLite upsertStatusWithEventAndResult failed: database client unavailable');
       }
 
+      this.aggregateJobMetricsBestEffort(id);
+
       if (isGitnexusAnalyzeRequired(finalResult.permissionRequired)) {
         try {
           startDetachedGitnexusAnalyze(runOptions.workingDirectory ?? process.cwd());
@@ -2027,6 +2037,8 @@ export class Supervisor {
       if (errorPersisted === undefined) {
         throw new Error('[supervisor] SQLite upsertStatusWithEvent failed during error completion: database client unavailable');
       }
+
+      this.aggregateJobMetricsBestEffort(id);
 
       appendResultToInputBead({
         output: latestOutput || errorMsg,

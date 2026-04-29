@@ -181,6 +181,21 @@ function migrateToV3(db: BunDb): void {
 
 function migrateToV11(db: BunDb): void {
   const hasV11 = db.query('SELECT 1 FROM schema_version WHERE version = 11 LIMIT 1').get() as { 1?: number } | undefined;
+  const metricsColumns = new Set(
+    (db.query('PRAGMA table_info(specialist_job_metrics)').all() as Array<{ name?: string }>)
+      .map((column) => column.name)
+      .filter((name): name is string => typeof name === 'string' && name.length > 0),
+  );
+
+  for (const column of [
+    { name: 'active_runtime_ms', definition: 'INTEGER' },
+    { name: 'waiting_ms', definition: 'INTEGER' },
+  ]) {
+    if (!metricsColumns.has(column.name)) {
+      db.run(`ALTER TABLE specialist_job_metrics ADD COLUMN ${column.name} ${column.definition}`);
+    }
+  }
+
   if (hasV11) {
     db.run('CREATE INDEX IF NOT EXISTS idx_job_metrics_spec_model_updated ON specialist_job_metrics(specialist, model, updated_at_ms DESC)');
     db.run('CREATE INDEX IF NOT EXISTS idx_job_metrics_updated ON specialist_job_metrics(updated_at_ms DESC)');
@@ -201,6 +216,8 @@ function migrateToV11(db: BunDb): void {
       started_at_ms INTEGER,
       completed_at_ms INTEGER,
       elapsed_ms INTEGER,
+      active_runtime_ms INTEGER,
+      waiting_ms INTEGER,
       total_turns INTEGER NOT NULL DEFAULT 0,
       total_tools INTEGER NOT NULL DEFAULT 0,
       tool_call_counts_json TEXT NOT NULL,
@@ -884,6 +901,8 @@ export interface JobMetricsRecord {
   started_at_ms: number | null;
   completed_at_ms: number | null;
   elapsed_ms: number | null;
+  active_runtime_ms: number | null;
+  waiting_ms: number | null;
   total_turns: number;
   total_tools: number;
   tool_call_counts_json: string;
@@ -1843,10 +1862,23 @@ class SqliteClient implements ObservabilitySqliteClient {
       let runCompleteJson: string | null = null;
       let model: string | null = null;
       let elapsedMs: number | null = null;
+      let activeRuntimeMs = 0;
+      let waitingMs = 0;
+      let phase: 'running' | 'waiting' | null = null;
+      let phaseStartedAtMs: number | null = null;
+
+      const closePhase = (endAtMs: number): void => {
+        if (phase === null || phaseStartedAtMs === null || endAtMs < phaseStartedAtMs) return;
+        const durationMs = endAtMs - phaseStartedAtMs;
+        if (phase === 'running') {
+          activeRuntimeMs += durationMs;
+        } else {
+          waitingMs += durationMs;
+        }
+      };
 
       for (const event of events) {
         startedAtMs = startedAtMs === null ? event.t : Math.min(startedAtMs, event.t);
-        completedAtMs = completedAtMs === null ? event.t : Math.max(completedAtMs, event.t);
 
         if (event.type === 'tool') {
           totalTools += 1;
@@ -1866,16 +1898,48 @@ class SqliteClient implements ObservabilitySqliteClient {
           continue;
         }
 
+        if (event.type === 'run_start') {
+          phase = 'running';
+          phaseStartedAtMs = event.t;
+          continue;
+        }
+
+        if (event.type === 'status_change') {
+          if (event.status === 'running' || event.status === 'waiting') {
+            closePhase(event.t);
+            phase = event.status;
+            phaseStartedAtMs = event.t;
+            continue;
+          }
+          if (event.status === 'done' || event.status === 'error' || event.status === 'cancelled') {
+            closePhase(event.t);
+            phase = null;
+            phaseStartedAtMs = null;
+          }
+          continue;
+        }
+
         if (event.type === 'run_complete') {
+          closePhase(event.t);
+          completedAtMs = event.t;
           runCompleteJson = JSON.stringify(event);
           model = event.model ?? model;
           elapsedMs = Math.round(event.elapsed_s * 1000);
+          phase = null;
+          phaseStartedAtMs = null;
           continue;
         }
 
         if (event.type === 'stale_warning' && event.reason === 'tool_duration') {
           stallGaps.push({ t: event.t, tool: event.tool ?? null, silence_ms: event.silence_ms, threshold_ms: event.threshold_ms });
         }
+      }
+
+      if (startedAtMs !== null && completedAtMs === null) {
+        completedAtMs = events.length > 0 ? events[events.length - 1]!.t : startedAtMs;
+      }
+      if (elapsedMs === null && startedAtMs !== null && completedAtMs !== null) {
+        elapsedMs = Math.max(0, completedAtMs - startedAtMs);
       }
 
       const record: JobMetricsRecord = {
@@ -1891,6 +1955,8 @@ class SqliteClient implements ObservabilitySqliteClient {
         started_at_ms: startedAtMs,
         completed_at_ms: completedAtMs,
         elapsed_ms: elapsedMs,
+        active_runtime_ms: activeRuntimeMs,
+        waiting_ms: waitingMs,
         total_turns: totalTurns,
         total_tools: totalTools,
         tool_call_counts_json: stringifyJson(toolCallCounts),
@@ -1904,7 +1970,7 @@ class SqliteClient implements ObservabilitySqliteClient {
       this.db.run(`
         INSERT INTO specialist_job_metrics (
           job_id, specialist, model, status, chain_kind, chain_id, bead_id, node_id, epic_id,
-          started_at_ms, completed_at_ms, elapsed_ms, total_turns, total_tools,
+          started_at_ms, completed_at_ms, elapsed_ms, active_runtime_ms, waiting_ms, total_turns, total_tools,
           tool_call_counts_json, token_trajectory_json, context_trajectory_json, stall_gaps_json,
           run_complete_json, updated_at_ms
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1920,6 +1986,8 @@ class SqliteClient implements ObservabilitySqliteClient {
           started_at_ms = excluded.started_at_ms,
           completed_at_ms = excluded.completed_at_ms,
           elapsed_ms = excluded.elapsed_ms,
+          active_runtime_ms = excluded.active_runtime_ms,
+          waiting_ms = excluded.waiting_ms,
           total_turns = excluded.total_turns,
           total_tools = excluded.total_tools,
           tool_call_counts_json = excluded.tool_call_counts_json,
@@ -1930,7 +1998,7 @@ class SqliteClient implements ObservabilitySqliteClient {
           updated_at_ms = excluded.updated_at_ms;
       `, [
         record.job_id, record.specialist, record.model, record.status, record.chain_kind, record.chain_id, record.bead_id, record.node_id, record.epic_id,
-        record.started_at_ms, record.completed_at_ms, record.elapsed_ms, record.total_turns, record.total_tools,
+        record.started_at_ms, record.completed_at_ms, record.elapsed_ms, record.active_runtime_ms, record.waiting_ms, record.total_turns, record.total_tools,
         record.tool_call_counts_json, record.token_trajectory_json, record.context_trajectory_json, record.stall_gaps_json,
         record.run_complete_json, record.updated_at_ms,
       ]);

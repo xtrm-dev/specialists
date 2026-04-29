@@ -100,11 +100,13 @@ export async function run(): Promise<void> {
 
     if (force && isAlreadyDead) {
       supervisor.updateJobStatus(jobId, 'error');
+      supervisor.aggregateJobMetricsBestEffort(jobId);
       tryKillProcessGroup(pid);
       process.stdout.write(`${green('✓')} Marked ${jobId} as error (PID ${pid} already dead)\n`);
     } else {
       const terminalStatus = resolveTerminalStatus(jobId);
       supervisor.updateJobStatus(jobId, terminalStatus);
+      supervisor.aggregateJobMetricsBestEffort(jobId);
 
       try {
         process.kill(pid, 'SIGTERM');

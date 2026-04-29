@@ -101,6 +101,15 @@ describe('Supervisor', () => {
     expect(existsSync(join(jobDir, 'result.txt'))).toBe(true);
   });
 
+  it('run() aggregates job metrics after terminal persistence', async () => {
+    const aggregateSpy = vi.spyOn(Supervisor.prototype, 'aggregateJobMetricsBestEffort').mockImplementation(() => undefined);
+    const sup = createSupervisor({ jobsDir, runner: makeMockRunner(), runOptions: makeRunOptions() });
+    const id = await sup.run();
+
+    expect(aggregateSpy).toHaveBeenCalledTimes(1);
+    expect(aggregateSpy).toHaveBeenCalledWith(id);
+  });
+
   it('status.json has all expected fields after successful run', async () => {
     const sup = createSupervisor({
       jobsDir,

@@ -238,7 +238,7 @@ function parseExtractOptions(argv: readonly string[]): ExtractOptions {
       index += 1;
       continue;
     }
-    if (argument === '--all-missing') {
+    if (argument === '--all-missing' || argument === '--backfill') {
       allMissing = true;
       continue;
     }
@@ -516,7 +516,7 @@ function runExtract(options: ExtractOptions): void {
 }
 
 function formatStatsTable(rows: Array<Record<string, unknown>>): string {
-  const headers = ['job_id', 'specialist', 'model', 'status', 'elapsed_ms', 'total_tools', 'total_turns'];
+  const headers = ['job_id', 'specialist', 'model', 'status', 'active_s', 'waiting_s', 'total_s', 'elapsed_ms', 'total_tools', 'total_turns'];
   const tableRows = rows.map((row) => headers.map((header) => String(row[header] ?? '')));
   const widths = headers.map((header, index) => Math.max(header.length, ...tableRows.map((row) => row[index].length)));
   const line = (cells: string[]) => `| ${cells.map((cell, index) => cell.padEnd(widths[index])).join(' | ')} |`;
@@ -531,13 +531,19 @@ function runStats(options: StatsOptions): void {
 
   try {
     const rows = sqliteClient.listJobMetrics({ spec: options.spec, model: options.model, sinceMs: options.sinceMs });
+    const displayRows = rows.map((row) => ({
+      ...row,
+      active_s: row.active_runtime_ms === null ? '' : (row.active_runtime_ms / 1000).toFixed(1),
+      waiting_s: row.waiting_ms === null ? '' : (row.waiting_ms / 1000).toFixed(1),
+      total_s: row.elapsed_ms === null ? '' : (row.elapsed_ms / 1000).toFixed(1),
+    }));
     if (options.format === 'json') {
-      console.log(JSON.stringify({ rows, count: rows.length }, null, 2));
+      console.log(JSON.stringify({ rows: displayRows, count: rows.length }, null, 2));
       return;
     }
 
     console.log(`\n${bold('specialists db stats')}\n`);
-    console.log(formatStatsTable(rows as unknown as Array<Record<string, unknown>>));
+    console.log(formatStatsTable(displayRows as unknown as Array<Record<string, unknown>>));
     console.log('');
   } finally {
     sqliteClient.close();

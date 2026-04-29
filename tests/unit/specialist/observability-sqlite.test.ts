@@ -767,24 +767,32 @@ describe('observability-sqlite', () => {
   });
 
   describe('job metrics aggregation', () => {
-    it('extracts tool counts and trajectories from specialist_events', () => {
+    it('extracts tool counts and runtime split from specialist_events', () => {
       const client = createClient();
       client.upsertStatus({ id: 'job-metrics', specialist: 'executor', status: 'done', started_at_ms: 1, updated_at_ms: 5 });
-      client.appendEvent('job-metrics', 'executor', 'bead-1', { t: 10, type: 'tool', tool: 'bash', phase: 'start' } as never);
-      client.appendEvent('job-metrics', 'executor', 'bead-1', { t: 20, type: 'tool', tool: 'bash', phase: 'end' } as never);
-      client.appendEvent('job-metrics', 'executor', 'bead-1', { t: 30, type: 'turn_summary', turn_index: 1, token_usage: { input_tokens: 10, output_tokens: 20, total_tokens: 30 }, context_pct: 25 } as never);
-      client.appendEvent('job-metrics', 'executor', 'bead-1', { t: 40, type: 'token_usage', token_usage: { input_tokens: 11, output_tokens: 22, total_tokens: 33 }, source: 'turn_end' } as never);
-      client.appendEvent('job-metrics', 'executor', 'bead-1', { t: 50, type: 'stale_warning', reason: 'tool_duration', silence_ms: 9000, threshold_ms: 5000, tool: 'read' } as never);
-      client.appendEvent('job-metrics', 'executor', 'bead-1', { t: 60, type: 'run_complete', status: 'COMPLETE', elapsed_s: 0.06, model: 'gpt-5', token_usage: { input_tokens: 1, output_tokens: 2, total_tokens: 3 } } as never);
+      client.appendEvent('job-metrics', 'executor', 'bead-1', { t: 10, type: 'run_start', specialist: 'executor' } as never);
+      client.appendEvent('job-metrics', 'executor', 'bead-1', { t: 20, type: 'status_change', status: 'running', previous_status: 'starting' } as never);
+      client.appendEvent('job-metrics', 'executor', 'bead-1', { t: 30, type: 'tool', tool: 'bash', phase: 'start' } as never);
+      client.appendEvent('job-metrics', 'executor', 'bead-1', { t: 40, type: 'status_change', status: 'waiting', previous_status: 'running' } as never);
+      client.appendEvent('job-metrics', 'executor', 'bead-1', { t: 50, type: 'status_change', status: 'running', previous_status: 'waiting' } as never);
+      client.appendEvent('job-metrics', 'executor', 'bead-1', { t: 60, type: 'tool', tool: 'bash', phase: 'end' } as never);
+      client.appendEvent('job-metrics', 'executor', 'bead-1', { t: 70, type: 'turn_summary', turn_index: 1, token_usage: { input_tokens: 10, output_tokens: 20, total_tokens: 30 }, context_pct: 25 } as never);
+      client.appendEvent('job-metrics', 'executor', 'bead-1', { t: 80, type: 'token_usage', token_usage: { input_tokens: 11, output_tokens: 22, total_tokens: 33 }, source: 'turn_end' } as never);
+      client.appendEvent('job-metrics', 'executor', 'bead-1', { t: 90, type: 'stale_warning', reason: 'tool_duration', silence_ms: 9000, threshold_ms: 5000, tool: 'read' } as never);
+      client.appendEvent('job-metrics', 'executor', 'bead-1', { t: 100, type: 'run_complete', status: 'COMPLETE', elapsed_s: 0.1, model: 'gpt-5', token_usage: { input_tokens: 1, output_tokens: 2, total_tokens: 3 } } as never);
 
       const metrics = client.aggregateJobMetrics('job-metrics');
       expect(metrics).not.toBeNull();
       expect(metrics?.total_tools).toBe(2);
       expect(metrics?.total_turns).toBe(1);
+      expect(metrics?.active_runtime_ms).toBe(80);
+      expect(metrics?.waiting_ms).toBe(10);
+      expect(metrics?.elapsed_ms).toBe(100);
+      expect((metrics?.active_runtime_ms ?? 0) + (metrics?.waiting_ms ?? 0)).toBe(metrics?.elapsed_ms);
       expect(JSON.parse(metrics?.tool_call_counts_json ?? '{}')).toEqual({ bash: 2 });
       expect(JSON.parse(metrics?.token_trajectory_json ?? '[]')).toHaveLength(2);
-      expect(JSON.parse(metrics?.context_trajectory_json ?? '[]')).toEqual([{ turn_index: 1, t: 30, context_pct: 25 }]);
-      expect(JSON.parse(metrics?.stall_gaps_json ?? '[]')).toEqual([{ t: 50, tool: 'read', silence_ms: 9000, threshold_ms: 5000 }]);
+      expect(JSON.parse(metrics?.context_trajectory_json ?? '[]')).toEqual([{ turn_index: 1, t: 70, context_pct: 25 }]);
+      expect(JSON.parse(metrics?.stall_gaps_json ?? '[]')).toEqual([{ t: 90, tool: 'read', silence_ms: 9000, threshold_ms: 5000 }]);
     });
 
     it('is idempotent on repeated aggregation', () => {
