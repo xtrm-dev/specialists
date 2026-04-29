@@ -87,6 +87,7 @@ export interface SupervisorStatus {
   chain_root_bead_id?: string;
   epic_id?: string;
   branch?: string;
+  startup_payload_json?: string;
   startup_context?: {
     job_id?: string;
     specialist_name?: string;
@@ -1461,7 +1462,7 @@ export class Supervisor {
             : latestUncorrelatedToolState;
 
           const parsedMeta = (() => {
-            if (eventType !== 'memory_injection' && eventType !== 'meta' || !details?.summary) return undefined;
+            if ((eventType !== 'memory_injection' && eventType !== 'meta' && eventType !== 'payload_breakdown') || !details?.summary) return undefined;
             try {
               return JSON.parse(details.summary) as {
                 memory_injection?: {
@@ -1469,6 +1470,10 @@ export class Supervisor {
                   memory_tokens?: number;
                   gitnexus_tokens?: number;
                   total_tokens?: number;
+                };
+                payload_breakdown?: {
+                  components?: Array<{ kind: string; name: string; tokens: number; bytes: number }>;
+                  totals?: { tokens: number; bytes: number };
                 };
                 kind?: 'meta';
                 source?: string;
@@ -1515,6 +1520,10 @@ export class Supervisor {
                 token_estimate: parsedMeta.data.token_estimate ?? 0,
               }
             : undefined;
+
+          if (parsedMeta?.payload_breakdown) {
+            setStatus({ startup_payload_json: JSON.stringify(parsedMeta.payload_breakdown) });
+          }
 
           if (memoryInjection || mandatoryRulesInjection) {
             setStatus({
@@ -1934,6 +1943,7 @@ export class Supervisor {
         model: finalResult.model,
         backend: finalResult.backend,
         bead_id: finalResult.beadId,
+        startup_payload_json: finalResult.payloadBreakdown ? JSON.stringify(finalResult.payloadBreakdown) : statusSnapshot.startup_payload_json,
         metrics: enrichedRunMetrics,
         ...(finalResult.outputType ? { output_type: finalResult.outputType } : {}),
       };

@@ -62,6 +62,7 @@ export interface RunResult {
   permissionRequired?: 'READ_ONLY' | 'LOW' | 'MEDIUM' | 'HIGH';
   autoCommit?: 'never' | 'checkpoint_on_waiting' | 'checkpoint_on_terminal';
   outputType?: string;
+  payloadBreakdown?: PayloadBreakdown;
 }
 
 type SessionLike = Pick<PiAgentSession, 'start' | 'prompt' | 'waitForDone' | 'getLastOutput' | 'getState' | 'close' | 'kill' | 'meta' | 'steer' | 'resume'>
@@ -75,6 +76,12 @@ import {
   buildFilteredMemoryInjection,
   estimateInjectedTokens,
 } from './memory-retrieval.js';
+import {
+  measurePayloadComponent,
+  summarizePayloadBreakdown,
+  type PayloadBreakdown,
+  type PayloadComponentMeasurement,
+} from './payload-measure.js';
 
 import { execSync, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
@@ -903,9 +910,24 @@ export class SpecialistRunner {
       .map(s => runScript(s.run ?? (s as unknown as { path?: string }).path, runCwd))
       .filter((_, i) => preScripts[i].inject_output);
     const preScriptOutput = formatScriptOutput(preResults);
+    const payloadComponents: PayloadComponentMeasurement[] = [];
+
+    const beadReader = beadsClient ?? new BeadsClient();
+    const bead = options.inputBeadId ? beadReader.readBead(options.inputBeadId) : null;
+    const completedBlockers = options.inputBeadId && Math.max(0, Math.trunc(options.contextDepth ?? 3)) > 0
+      ? beadReader.getCompletedBlockers(options.inputBeadId, Math.max(0, Math.trunc(options.contextDepth ?? 3)))
+      : [];
+    const beadContextText = bead ? buildBeadContext(bead, completedBlockers) : '';
+    const beadContextOwn = beadContextText ? measurePayloadComponent('bead_context', 'own', beadContextText) : null;
+    const beadContextParent = bead?.parent?.trim()
+      ? measurePayloadComponent('bead_context', 'parent', bead.parent.trim())
+      : null;
+    const beadContextBlockers = completedBlockers.map((blocker) => measurePayloadComponent('bead_context', blocker.id, buildBeadContext(blocker, [])));
 
     // Render task template (pre_script_output is '' when no scripts ran)
-    const resolvedPrompt = this.resolvePromptWithBeadContext(options, runCwd, beadsClient);
+    const resolvedPrompt = options.inputBeadId && beadContextText
+      ? `${beadContextText}\n\n${buildBeadBoundaryInstruction(runCwd, options.worktreeBoundary)}`.trim()
+      : this.resolvePromptWithBeadContext(options, runCwd, beadsClient);
     const beadVariables: Record<string, string> = options.inputBeadId
       ? { bead_context: resolvedPrompt, bead_id: options.inputBeadId }
       : {};
@@ -930,6 +952,7 @@ export class SpecialistRunner {
     const taskTemplate = options.inputBeadId
       ? renderTemplate(prompt.task_template, beadTemplateVariables)
       : prompt.task_template;
+    payloadComponents.push(measurePayloadComponent('task_template', 'task_template', renderTemplate(taskTemplate, variables)));
     let renderedTask = renderTemplate(taskTemplate, variables);
 
     let mandatoryRulesBlock = '';
@@ -1150,6 +1173,30 @@ _This project is indexed by GitNexus. You MUST use these tools — do NOT fall b
     if (prompt.skill_inherit) skillPaths.push(prompt.skill_inherit);
     skillPaths.push(...(spec.specialist.skills?.paths ?? []));
 
+    if (mandatoryRulesInjection) {
+      for (const setId of mandatoryRulesInjection.setsLoaded) {
+        payloadComponents.push(measurePayloadComponent('mandatory_rule', setId, `${setId}\n${mandatoryRulesBlock}`));
+      }
+    }
+    for (const skillPath of skillPaths) {
+      payloadComponents.push(measurePayloadComponent('skill', skillPath, skillPath));
+    }
+    if (preScriptOutput) {
+      payloadComponents.push(measurePayloadComponent('pre_script_output', 'pre_script_output', preScriptOutput));
+    }
+    if (beadContextOwn) payloadComponents.push(beadContextOwn);
+    if (beadContextParent) payloadComponents.push(beadContextParent);
+    for (const component of beadContextBlockers) payloadComponents.push(component);
+    payloadComponents.push(measurePayloadComponent('system_prompt', 'system_prompt', agentsMd));
+    if (staticTokens > 0) payloadComponents.push(measurePayloadComponent('memory', 'static', STATIC_WORKFLOW_RULES_BLOCK));
+    if (memoryTokens > 0) payloadComponents.push(measurePayloadComponent('memory', 'dynamic', beadContextText || ''));
+    if (gitnexusTokens > 0) payloadComponents.push(measurePayloadComponent('memory', 'gitnexus', agentsMd.includes('GitNexus') ? 'GitNexus' : ''));
+
+    const payloadBreakdown = summarizePayloadBreakdown(payloadComponents);
+    onEvent?.('payload_breakdown', {
+      summary: JSON.stringify({ payload_breakdown: payloadBreakdown }),
+    });
+
     // AUTO INJECTED banner — printed before session starts so the user can see what was loaded
     if (skillPaths.length > 0 || preScripts.length > 0) {
       const line = '━'.repeat(56);
@@ -1347,6 +1394,7 @@ _This project is indexed by GitNexus. You MUST use these tools — do NOT fall b
       permissionRequired: execution.permission_required,
       autoCommit: execution.auto_commit,
       outputType,
+      payloadBreakdown: summarizePayloadBreakdown(payloadComponents),
     };
   }
 

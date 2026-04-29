@@ -115,7 +115,8 @@ function migrateToV2(db: BunDb): void {
       status_json     TEXT NOT NULL,
       bead_id         TEXT,
       updated_at_ms   INTEGER NOT NULL,
-      last_output     TEXT
+      last_output     TEXT,
+      startup_payload_json TEXT
     );
     INSERT OR IGNORE INTO specialist_jobs_v2
       SELECT
@@ -418,6 +419,7 @@ export function initSchema(db: BunDb): void {
     { name: 'epic_id', definition: 'TEXT' },
     { name: 'status', definition: "TEXT NOT NULL DEFAULT 'starting'" },
     { name: 'last_output', definition: 'TEXT' },
+    { name: 'startup_payload_json', definition: 'TEXT' },
   ].filter(({ name }) => !specialistJobsColumns.has(name));
 
   for (const missingColumn of missingSpecialistJobsColumns) {
@@ -445,7 +447,8 @@ export function initSchema(db: BunDb): void {
         status          TEXT NOT NULL,
         status_json     TEXT NOT NULL,
         updated_at_ms   INTEGER NOT NULL,
-        last_output     TEXT
+        last_output     TEXT,
+        startup_payload_json TEXT
       );
       INSERT OR IGNORE INTO specialist_jobs_new
         SELECT
@@ -911,6 +914,7 @@ export interface JobMetricsRecord {
   context_trajectory_json: string;
   stall_gaps_json: string;
   run_complete_json: string | null;
+  startup_payload_json: string | null;
   updated_at_ms: number;
 }
 
@@ -1009,8 +1013,8 @@ class SqliteClient implements ObservabilitySqliteClient {
   private writeStatusRow(status: SupervisorStatus, lastOutput?: string): void {
     const statusJson = JSON.stringify(status);
     this.db.run(`
-      INSERT INTO specialist_jobs (job_id, specialist, worktree_column, bead_id, node_id, chain_kind, chain_id, chain_root_job_id, chain_root_bead_id, epic_id, status, status_json, updated_at_ms, last_output)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO specialist_jobs (job_id, specialist, worktree_column, bead_id, node_id, chain_kind, chain_id, chain_root_job_id, chain_root_bead_id, epic_id, status, status_json, updated_at_ms, last_output, startup_payload_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(job_id) DO UPDATE SET
         specialist = excluded.specialist,
         worktree_column = excluded.worktree_column,
@@ -1024,7 +1028,8 @@ class SqliteClient implements ObservabilitySqliteClient {
         status = excluded.status,
         status_json = excluded.status_json,
         updated_at_ms = excluded.updated_at_ms,
-        last_output = COALESCE(excluded.last_output, specialist_jobs.last_output);
+        last_output = COALESCE(excluded.last_output, specialist_jobs.last_output),
+        startup_payload_json = COALESCE(excluded.startup_payload_json, specialist_jobs.startup_payload_json);
     `, [
       status.id,
       status.specialist,
@@ -1040,6 +1045,7 @@ class SqliteClient implements ObservabilitySqliteClient {
       statusJson,
       Date.now(),
       lastOutput ?? null,
+      status.startup_payload_json ?? null,
     ]);
   }
 
@@ -1834,7 +1840,7 @@ class SqliteClient implements ObservabilitySqliteClient {
   aggregateJobMetrics(jobId: string): JobMetricsRecord | null {
     return withRetry(() => {
       const jobRow = this.db.query(`
-        SELECT job_id, specialist, status, chain_kind, chain_id, bead_id, node_id, epic_id, updated_at_ms
+        SELECT job_id, specialist, status, chain_kind, chain_id, bead_id, node_id, epic_id, updated_at_ms, startup_payload_json
         FROM specialist_jobs
         WHERE job_id = ?
       `).get(jobId) as {
@@ -1847,6 +1853,7 @@ class SqliteClient implements ObservabilitySqliteClient {
         node_id?: string | null;
         epic_id?: string | null;
         updated_at_ms: number;
+        startup_payload_json?: string | null;
       } | undefined;
 
       if (!jobRow) return null;
@@ -1965,6 +1972,7 @@ class SqliteClient implements ObservabilitySqliteClient {
         context_trajectory_json: stringifyJson(contextTrajectory),
         stall_gaps_json: stringifyJson(stallGaps),
         run_complete_json: runCompleteJson,
+        startup_payload_json: jobRow.startup_payload_json ?? null,
         updated_at_ms: jobRow.updated_at_ms,
       };
 

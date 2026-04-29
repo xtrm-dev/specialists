@@ -124,6 +124,14 @@ export interface TimelineEventRunStart extends TimelineEventBase {
  * Model/backend metadata event.
  * Emitted when the first assistant message_start reveals provider info.
  */
+export interface TimelineEventPayloadBreakdown extends TimelineEventBase {
+  type: 'payload_breakdown';
+  payload_breakdown: {
+    components: Array<{ kind: string; name: string; tokens: number; bytes: number }>;
+    totals: { tokens: number; bytes: number };
+  };
+}
+
 export interface TimelineEventMeta extends TimelineEventBase {
   type: 'meta';
   /** Resolved model ID (e.g., 'claude-sonnet-4-6') */
@@ -378,6 +386,7 @@ export interface TimelineEventLegacyComplete extends TimelineEventBase {
  */
 export type TimelineEvent =
   | TimelineEventRunStart
+  | TimelineEventPayloadBreakdown
   | TimelineEventMeta
   | TimelineEventThinking
   | TimelineEventTool
@@ -405,6 +414,7 @@ export type TimelineEvent =
 export const TIMELINE_EVENT_TYPES = {
   RUN_START: 'run_start',
   META: 'meta',
+  PAYLOAD_BREAKDOWN: 'payload_breakdown',
   THINKING: 'thinking',
   TOOL: 'tool',
   TEXT: 'text',
@@ -493,6 +503,10 @@ export function mapCallbackEventToTimelineEvent(
       source: 'rpc' | 'stderr';
       errorMessage: string;
     };
+    payloadBreakdown?: {
+      components: Array<{ kind: string; name: string; tokens: number; bytes: number }>;
+      totals: { tokens: number; bytes: number };
+    };
     memoryInjection?: {
       static_tokens: number;
       memory_tokens: number;
@@ -510,6 +524,9 @@ export function mapCallbackEventToTimelineEvent(
   const t = Date.now();
 
   switch (callbackEvent) {
+    case 'payload_breakdown':
+      return { t, type: 'payload_breakdown', payload_breakdown: context.payloadBreakdown ?? { components: [], totals: { tokens: 0, bytes: 0 } } };
+
     case 'thinking':
       return {
         t,
