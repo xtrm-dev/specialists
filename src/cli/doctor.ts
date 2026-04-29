@@ -488,6 +488,64 @@ function checkRuntimeDirs(): boolean {
   return allOk;
 }
 
+function checkClaudeMdFragments(): boolean {
+  section('CLAUDE.md fragments');
+  const projectRoot = process.cwd();
+  const claudeMd = join(projectRoot, 'CLAUDE.md');
+  if (!existsSync(claudeMd)) {
+    warn('No CLAUDE.md in project root — skipping fragment check');
+    return true;
+  }
+  if (!isInstalled('xt')) {
+    warn('xt not on PATH — skipping fragment drift check');
+    hint('install xtrm-tools to enable: xt claude-sync --check');
+    return true;
+  }
+  const result = spawnSync('xt', ['claude-sync', '--check', '--json', '--cwd', projectRoot], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.error) {
+    warn(`xt claude-sync failed to launch: ${result.error.message}`);
+    return true;
+  }
+  let parsed: { managed_sections?: Array<{ name: string; version: string; canonical_version: string | null }>; drift?: Array<{ name: string; kind: string; current_version: string | null; canonical_version: string | null }>; known_fragments?: string[] } | null = null;
+  try {
+    parsed = JSON.parse(result.stdout);
+  } catch {
+    warn(`xt claude-sync produced unparseable JSON (exit ${result.status})`);
+    return true;
+  }
+  const sections = parsed?.managed_sections ?? [];
+  const drift = parsed?.drift ?? [];
+  if (sections.length === 0) {
+    warn('CLAUDE.md has no XTRM-MANAGED sentinels — fragments not initialized');
+    fix('xt claude-sync --add bd-workflow  (and other fragments)');
+    return false;
+  }
+  const driftByName = new Map(drift.map(d => [d.name, d]));
+  let allOk = true;
+  for (const s of sections) {
+    const d = driftByName.get(s.name);
+    if (!d) {
+      ok(`${s.name.padEnd(20)} current (v${s.version})`);
+      continue;
+    }
+    allOk = false;
+    if (d.kind === 'version-mismatch') {
+      warn(`${s.name.padEnd(20)} project v${d.current_version}; canonical v${d.canonical_version}`);
+      fix('xt claude-sync --apply --accept-overwrite');
+    } else if (d.kind === 'body-mismatch') {
+      warn(`${s.name.padEnd(20)} body diverges from canonical v${d.canonical_version}`);
+      fix('xt claude-sync --apply --accept-overwrite');
+    } else if (d.kind === 'unknown-fragment') {
+      warn(`${s.name.padEnd(20)} not a known canonical fragment`);
+      hint('this CLAUDE.md may have been written by a newer xt; consider updating xtrm-tools');
+    }
+  }
+  return allOk;
+}
+
 export function parseVersionTuple(value: string): [number, number, number] | null {
   const normalized = value.trim().replace(/^v/i, '');
   const match = normalized.match(/^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
@@ -717,8 +775,9 @@ export async function run(argv: readonly string[] = process.argv.slice(3)): Prom
   const userOverlayOk = checkUserOverlayDrift();
   const dirsOk = checkRuntimeDirs();
   const jobsOk = checkZombieJobs();
+  const fragmentsOk = checkClaudeMdFragments();
 
-  const allOk = piOk && spOk && bdOk && xtOk && hooksOk && mcpOk && skillDriftOk && mirrorOk && userOverlayOk && dirsOk && jobsOk;
+  const allOk = piOk && spOk && bdOk && xtOk && hooksOk && mcpOk && skillDriftOk && mirrorOk && userOverlayOk && dirsOk && jobsOk && fragmentsOk;
   console.log('');
   if (allOk) {
     console.log(`  ${green('✓')} ${bold('All checks passed')}  — specialists is healthy`);
