@@ -9,13 +9,33 @@
 // Hook type: SessionStart
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 
 const cwd     = process.env.CLAUDE_PROJECT_DIR ?? process.cwd();
 const HOME    = homedir();
 const jobsDir = join(cwd, '.specialists', 'jobs');
 const lines   = [];
+
+// Resolve specialists package version for hot-tips header.
+function readSpecialistsVersion() {
+  // Walk up from this hook's location looking for package.json with name=@jaggerxtrm/specialists or name=specialists.
+  let dir = dirname(fileURLToPath(import.meta.url));
+  for (let i = 0; i < 8; i++) {
+    const pkg = join(dir, 'package.json');
+    if (existsSync(pkg)) {
+      try {
+        const j = JSON.parse(readFileSync(pkg, 'utf-8'));
+        if (j?.name && j.name.includes('specialists')) return j.version ?? 'unknown';
+      } catch { /* skip */ }
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return 'unknown';
+}
 
 // ── 1. Active background jobs ──────────────────────────────────────────────
 if (existsSync(jobsDir)) {
@@ -95,6 +115,18 @@ lines.push('specialists doctor                                 # troubleshoot is
 lines.push('```');
 lines.push('');
 lines.push('MCP tools: use_specialist (foreground only)');
+lines.push('');
+
+// ── 4. Hot tips (version-pinned, current sp release) ───────────────────────
+const spVersion = readSpecialistsVersion();
+lines.push(`## Specialists — Hot Tips (sp v${spVersion})`);
+lines.push('');
+lines.push('- `--bead` on edit-capable specialists auto-provisions worktree');
+lines.push('- Reviewer enters with `--job <exec-job>`; `--worktree`/`--job` exclusive');
+lines.push('- `sp epic merge <epic>` for epic chains; `sp merge <chain>` for standalone');
+lines.push('- `sp ps`/`sp feed`/`sp result` (sp poll deprecated)');
+lines.push('- `--keep-alive` required so reviewer/overthinker can be `sp resume`d');
+lines.push('- `sp merge` fails after `sp stop` cleans status.json — see unitAI-ofjvj');
 
 // ── Output ─────────────────────────────────────────────────────────────────
 if (lines.length === 0) process.exit(0);
