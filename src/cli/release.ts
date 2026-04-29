@@ -97,7 +97,7 @@ export function insertReleaseSection(changelog: string, section: string): string
   return [before, section.trimEnd(), after].filter(Boolean).join('\n\n').replace(/\n{3,}/g, '\n\n') + '\n';
 }
 
-export function parseReleaseSection(changelog: string, version: string): { date: string; body: string } | undefined {
+export function parseReleaseSection(changelog: string, version: string): { date: string; body: string; start: number; end: number; section: string } | undefined {
   const normalized = changelog.replace(/\r\n/g, '\n');
   const header = `## [${version}] - `;
   const start = normalized.indexOf(header);
@@ -108,7 +108,8 @@ export function parseReleaseSection(changelog: string, version: string): { date:
   const rest = normalized.slice(bodyStart + 1);
   const nextHeader = rest.search(/^## \[/m);
   const body = (nextHeader >= 0 ? rest.slice(0, nextHeader) : rest).trimEnd();
-  return { date, body: body.trim() };
+  const end = nextHeader >= 0 ? bodyStart + 1 + nextHeader : normalized.length;
+  return { date, body: body.trim(), start, end, section: normalized.slice(start, end).trimEnd() };
 }
 
 function appendSection(lines: string[], title: string, entries: string[]): void {
@@ -205,6 +206,8 @@ export async function publishRelease(_argv: string[] = process.argv.slice(3), in
   const changelog = deps.readFile(changelogPath, 'utf-8');
   const section = parseReleaseSection(changelog, `v${version}`);
   if (!section) throw new Error('CHANGELOG.md must contain top release section');
+  const topRelease = validateTopReleaseSection(changelog, version);
+  if (!topRelease) throw new Error(`CHANGELOG.md must have v${version} as first release after [Unreleased]`);
 
   gitSpawn(['tag', '-a', `v${version}`, '-m', section.body], cwd, deps.spawn);
   gitSpawn(['push', 'origin', `v${version}`], cwd, deps.spawn);
@@ -217,7 +220,7 @@ export async function publishRelease(_argv: string[] = process.argv.slice(3), in
     console.log(`gh release create v${version} --notes-file -`);
   }
 
-  deps.writeFile(changelogPath, changelog.replace(section.body, '').replace(/\n{3,}/g, '\n\n'), 'utf-8');
+  deps.writeFile(changelogPath, replaceReleaseSection(changelog, section), 'utf-8');
   console.log(`Published v${version}`);
 }
 
@@ -232,4 +235,21 @@ export async function run(argv: string[] = process.argv.slice(3)): Promise<void>
   throw new Error(`Unknown release mode: ${mode}`);
 }
 
+function validateTopReleaseSection(changelog: string, version: string): boolean {
+  const normalized = changelog.replace(/\r\n/g, '\n');
+  const unreleasedIndex = normalized.indexOf('## [Unreleased]');
+  if (unreleasedIndex < 0) return false;
+  const afterUnreleased = normalized.slice(unreleasedIndex + '## [Unreleased]'.length);
+  const firstReleaseHeader = afterUnreleased.match(/^## \[(v?\d+\.\d+\.\d+)\] - /m)?.[1];
+  return firstReleaseHeader === `v${version}`;
+}
+
+function replaceReleaseSection(changelog: string, section: { start: number; end: number; section: string }): string {
+  const normalized = changelog.replace(/\r\n/g, '\n');
+  const before = normalized.slice(0, section.start);
+  const after = normalized.slice(section.end);
+  return `${before}${section.section}${after}`.replace(/\n{3,}/g, '\n\n');
+}
+
 export const releaseCli = { parseBumpKind, getMostRecentSemverTag, computeNextTag, buildReleaseSection, extractReleaseDraft, insertReleaseSection, parseReleaseSection };
+
