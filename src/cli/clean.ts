@@ -201,32 +201,39 @@ function selectJobsToRemove(completedJobs: readonly CompletedJobRecord[], option
   return jobsByNewest.filter(job => job.completedAtMs < cutoffMs);
 }
 
-function getProcessLiveness(status: SupervisorStatus): StaleProcessCandidate | null {
-  const typedStatus = status as SupervisorStatus & { pid?: number; updated_at_ms?: number };
-  const pid = typeof typedStatus.pid === 'number' ? typedStatus.pid : null;
-  if (pid !== null && pid > 0) {
-    try {
-      process.kill(pid, 0);
-    } catch (error: unknown) {
-      if (error instanceof Error && 'code' in error && (error as { code?: string }).code === 'ESRCH') {
-        return { status, reason: 'dead-pid' };
-      }
+function getProcessLiveness(status: SupervisorStatus): 'alive' | 'dead' | 'invalid' {
+  const typedStatus = status as SupervisorStatus & { pid?: number };
+  const pid = typedStatus.pid;
+  if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0) return 'invalid';
+
+  try {
+    process.kill(pid, 0);
+    return 'alive';
+  } catch (error: unknown) {
+    if (error instanceof Error && 'code' in error && (error as { code?: string }).code === 'ESRCH') {
+      return 'dead';
     }
+    return 'invalid';
   }
-  return null;
 }
 
 function selectStaleProcesses(statuses: readonly SupervisorStatus[], staleAfterHours: number): StaleProcessCandidate[] {
   const cutoffMs = Date.now() - staleAfterHours * 60 * 60 * 1000;
-  return statuses
-    .filter(status => STALE_PROCESS_STATUSES.has(status.status))
-    .map(status => {
-      const liveness = getProcessLiveness(status);
-      if (liveness) return liveness;
-      const updatedAtMs = (status as SupervisorStatus & { updated_at_ms?: number }).updated_at_ms ?? 0;
-      return updatedAtMs < cutoffMs ? { status, reason: 'stale-update' } : null;
-    })
-    .filter((candidate): candidate is StaleProcessCandidate => candidate !== null);
+  const staleJobs: StaleProcessCandidate[] = [];
+  for (const status of statuses) {
+    if (!STALE_PROCESS_STATUSES.has(status.status)) continue;
+
+    const liveness = getProcessLiveness(status);
+    if (liveness === 'alive') continue;
+    if (liveness === 'dead') {
+      staleJobs.push({ status, reason: 'dead-pid' });
+      continue;
+    }
+
+    const updatedAtMs = (status as SupervisorStatus & { updated_at_ms?: number }).updated_at_ms ?? 0;
+    if (updatedAtMs < cutoffMs) staleJobs.push({ status, reason: 'stale-update' });
+  }
+  return staleJobs;
 }
 
 function formatBytes(bytes: number): string {

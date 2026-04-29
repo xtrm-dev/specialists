@@ -179,10 +179,23 @@ describe('clean CLI — run()', () => {
 
     const logs = await invokeClean(['--processes']);
 
-    expect(logs.join('\n')).toContain('Removed 2 job directories');
-    expect(mockUpsertedStatuses.map((status) => status.id)).toEqual(expect.arrayContaining(['dead-job', 'stale-job']));
+    expect(logs.join('\n')).toContain('Removed 1 job directory');
+    expect(mockUpsertedStatuses.map((status) => status.id)).toEqual(['dead-job']);
     expect(mockUpsertedStatuses.every((status) => status.status === 'cancelled')).toBe(true);
     expect(mockUpsertedStatuses.some((status) => status.id === 'active-job')).toBe(false);
+    expect(mockUpsertedStatuses.some((status) => status.id === 'stale-job')).toBe(false);
+  });
+
+  it('--processes skips live PID even when updated_at_ms is stale', async () => {
+    const now = Date.now();
+    createRunningJob(jobsDirectory, 'live-job', now - 30 * 60 * 60 * 1000, process.pid);
+    mockStatuses = [{ id: 'live-job', specialist: 'tester', status: 'waiting', updated_at_ms: now - 30 * 60 * 60 * 1000, pid: process.pid }];
+
+    const logs = await invokeClean(['--processes', '--dry-run']);
+
+    expect(logs.join('\n')).not.toContain('live-job');
+    expect(mockUpsertedStatuses).toHaveLength(0);
+    expect(readFileSync(join(jobsDirectory, 'live-job', 'status.json'), 'utf-8')).toContain('running');
   });
 
   it('--processes --dry-run is read-only', async () => {
@@ -192,7 +205,7 @@ describe('clean CLI — run()', () => {
 
     const logs = await invokeClean(['--processes', '--dry-run']);
 
-    expect(logs.join('\n')).toContain('Would cancel:');
+    expect(logs.join('\n')).toContain('Would remove 0 job directories');
     expect(mockUpsertedStatuses).toHaveLength(0);
     expect(readFileSync(join(jobsDirectory, 'stale-job', 'status.json'), 'utf-8')).toContain('running');
   });
