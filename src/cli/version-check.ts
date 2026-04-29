@@ -6,6 +6,8 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { version: packageVersion } = require('../../package.json') as { version: string };
 
+export const localVersion = packageVersion;
+
 const CACHE_PATH = join(process.cwd(), '.specialists', 'version-check.json');
 const CACHE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 const NETWORK_TIMEOUT_MS = 2000;
@@ -36,6 +38,10 @@ function readCache(): VersionCheckCache | null {
   } catch {
     return null;
   }
+}
+
+export function readCachedVersionCheck(): VersionCheckCache | null {
+  return readCache();
 }
 
 function writeCache(cache: VersionCheckCache): void {

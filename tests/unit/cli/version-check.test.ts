@@ -53,6 +53,11 @@ describe('version-check CLI', () => {
     process.env.SPECIALISTS_JOB_ID = 'job-1';
     mod = await loadModule();
     expect(mod.shouldRunVersionCheck()).toBe(false);
+
+    delete process.env.SPECIALISTS_JOB_ID;
+    process.env.PI_SESSION_ID = 'session-1';
+    mod = await loadModule();
+    expect(mod.shouldRunVersionCheck()).toBe(false);
   });
 
   it('reads cache when fresh', async () => {
@@ -83,6 +88,29 @@ describe('version-check CLI', () => {
 
     expect(result?.latestTag).toBe('v3.11.0');
     expect(spawnSync).not.toHaveBeenCalled();
+  });
+
+  it('returns null on spawn timeout error without throwing', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'version-check-'));
+    process.chdir(tempDir);
+    setupTty();
+
+    vi.doMock('node:child_process', () => ({
+      spawnSync: vi.fn(() => ({ error: new Error('timeout'), status: null })),
+    }));
+    vi.doMock('node:fs', async () => {
+      const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+      return {
+        ...actual,
+        existsSync: vi.fn(() => false),
+        readFileSync: vi.fn(),
+        writeFileSync: vi.fn(),
+        mkdirSync: vi.fn(),
+      };
+    });
+
+    const { getVersionCheckResult } = await loadModule();
+    expect(getVersionCheckResult()).toBeNull();
   });
 
   it('parses remote tags, caches result, and nudges on newer release', async () => {

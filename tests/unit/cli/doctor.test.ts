@@ -65,6 +65,29 @@ describe('doctor CLI — run()', () => {
       combined.includes('All checks passed');
     expect(hasHintOrPass).toBe(true);
   });
+
+  it('shows cached version state when version check skips network', async () => {
+    vi.doMock('../../../src/cli/version-check.js', () => ({
+      getVersionCheckResult: () => null,
+      readCachedVersionCheck: () => ({
+        checked_at_ms: Date.parse('2026-04-30T00:00:00.000Z'),
+        latest_tag: 'v3.11.0',
+        notified_for_tag: '',
+      }),
+      formatVersionCheckNudge: () => null,
+      localVersion: '3.10.0',
+    }));
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: false, configurable: true });
+
+    const output: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((msg: string) => output.push(msg ?? ''));
+    const { run } = await import('../../../src/cli/doctor.js');
+    await run();
+
+    const combined = output.join('\n');
+    expect(combined).toContain('specialists v3.10.0 is local; v3.11.0 cached on 2026-04-30T00:00:00.000Z');
+  });
 });
 
 describe('doctor process cleanup helpers', () => {
