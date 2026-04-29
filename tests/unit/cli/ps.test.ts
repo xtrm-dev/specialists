@@ -188,7 +188,22 @@ describe('ps CLI — run()', () => {
       pid: process.pid,
       context_pct: 54.2,
       context_health: 'MONITOR',
+      startup_payload_json: JSON.stringify({ totals: { bytes: 12288, tokens: 3400 } }),
     });
+    writeFileSync(join(tempDir, '.specialists', 'jobs', 'ctx01', 'status.json'), JSON.stringify({
+      id: 'ctx01',
+      specialist: 'explorer',
+      status: 'running',
+      model: 'anthropic/claude-sonnet-4-6',
+      backend: 'anthropic',
+      elapsed_s: 60,
+      started_at_ms: Date.now() + 60_000,
+      pid: process.pid,
+      metrics: { turns: 3, tool_calls: 5 },
+      context_pct: 54.2,
+      context_health: 'MONITOR',
+      startup_payload_json: JSON.stringify({ totals: { bytes: 12288, tokens: 3400 } }),
+    }), 'utf-8');
     process.argv = ['node', 'specialists', 'ps'];
     const output: string[] = [];
     vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
@@ -198,6 +213,8 @@ describe('ps CLI — run()', () => {
     await run();
     const clean = stripAnsi(output.join('\n'));
     expect(clean).toContain('54');
+    expect(clean).toContain('12.0kb');
+    expect(clean).toContain('3400');
   }, TEST_TIMEOUT_MS);
 
   it('groups jobs by worktree_owner_job_id', async () => {

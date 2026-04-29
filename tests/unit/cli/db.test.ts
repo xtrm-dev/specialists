@@ -81,18 +81,20 @@ describe('db CLI — setup', () => {
     );
     const now = Date.now();
     db.run(
-      `INSERT INTO specialist_job_metrics (job_id, specialist, model, status, chain_kind, chain_id, bead_id, node_id, epic_id, started_at_ms, completed_at_ms, elapsed_ms, total_turns, total_tools, tool_call_counts_json, token_trajectory_json, context_trajectory_json, stall_gaps_json, run_complete_json, updated_at_ms)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ['job-stats', 'executor', 'gpt-5', 'done', 'chain', 'chain-1', 'bead-1', null, null, now - 20, now - 10, 10, 1, 2, '{}', '[]', '[]', '[]', null, now],
+      `INSERT INTO specialist_job_metrics (job_id, specialist, model, status, chain_kind, chain_id, bead_id, node_id, epic_id, started_at_ms, completed_at_ms, elapsed_ms, active_runtime_ms, waiting_ms, total_turns, total_tools, tool_call_counts_json, token_trajectory_json, context_trajectory_json, stall_gaps_json, run_complete_json, startup_payload_json, updated_at_ms)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ['job-stats', 'executor', 'gpt-5', 'done', 'chain', 'chain-1', 'bead-1', null, null, now - 20, now - 10, 10, 7, 3, 1, 2, '{}', '[]', '[]', '[]', null, JSON.stringify({ totals: { bytes: 1024, tokens: 2048 } }), now],
     );
 
     const logs: string[] = [];
     vi.spyOn(console, 'log').mockImplementation((line: string) => { logs.push(String(line)); });
-    await run(['stats', '--spec', 'executor', '--model', 'gpt-*', '--since', '1d', '--format', 'json']);
+    await run(['stats', '--spec', 'executor', '--model', 'gpt-*', '--since', '1d', '--format', 'json', '--with-payload']);
 
-    const parsed = JSON.parse(logs.at(-1) ?? '{}') as { rows?: Array<{ job_id: string }>; count?: number };
+    const parsed = JSON.parse(logs.at(-1) ?? '{}') as { rows?: Array<{ job_id: string; payload_kb?: string; payload_tokens?: string }>; count?: number };
     expect(parsed.count).toBe(1);
     expect(parsed.rows?.[0]?.job_id).toBe('job-stats');
+    expect(parsed.rows?.[0]?.payload_kb).toBe('1.0kb');
+    expect(parsed.rows?.[0]?.payload_tokens).toBe('2048t');
     db.close();
   });
 });

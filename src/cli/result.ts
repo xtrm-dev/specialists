@@ -195,6 +195,33 @@ function deriveApiError(events: TimelineEvent[]): string | null {
   return errorEvent?.error_message ?? null;
 }
 
+function formatPayloadPreamble(payloadJson: string | null | undefined): string | null {
+  if (!payloadJson) return null;
+
+  try {
+    const payload = JSON.parse(payloadJson) as {
+      totals?: { bytes?: number; tokens?: number };
+      components?: Array<{ name?: string; tokens?: number }>;
+    };
+    const bytes = payload.totals?.bytes;
+    const tokens = payload.totals?.tokens;
+    if (!Number.isFinite(bytes) || !Number.isFinite(tokens)) return null;
+
+    const topComponents = (payload.components ?? [])
+      .filter((component) => Number.isFinite(component.tokens) && (component.tokens ?? 0) > 0)
+      .sort((a, b) => (b.tokens ?? 0) - (a.tokens ?? 0))
+      .slice(0, 3)
+      .map((component) => `${component.name ?? 'unknown'} (${((component.tokens ?? 0) / 1000).toFixed(1)}kt)`);
+
+    return [
+      `\n--- payload: ${((bytes ?? 0) / 1024).toFixed(1)} kB · ~${((tokens ?? 0) / 1000).toFixed(1)}k tokens (${payload.components?.length ?? 0} components) ---`,
+      ...(topComponents.length > 0 ? [`top-3: ${topComponents.join(' · ')}`] : []),
+    ].join('\n') + '\n';
+  } catch {
+    return null;
+  }
+}
+
 function formatStartupSnapshot(snapshot: StartupSnapshot | null): string | null {
   if (!snapshot) return null;
   const lines: string[] = ['\n--- startup context ---'];
@@ -272,7 +299,8 @@ export async function run(): Promise<void> {
     trailingFooter?: string,
   ): void => {
     const startupBlock = formatStartupSnapshot(startupContext);
-    process.stdout.write(startupBlock ? `${startupBlock}${output}` : output);
+    const payloadBlock = formatPayloadPreamble(status.startup_payload_json);
+    process.stdout.write(`${startupBlock ?? ''}${payloadBlock ?? ''}${output}`);
 
     const tokenSummaryParts = formatTokenUsageSummary(status.metrics?.token_usage).filter((part) => !part.startsWith('cost='));
     const formattedCost = formatCostUsd(status.metrics?.token_usage?.cost_usd);

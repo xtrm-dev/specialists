@@ -42,6 +42,9 @@ interface JobNode {
   context_pct?: number;
   context_health?: SupervisorStatus['context_health'];
   metrics?: SupervisorStatus['metrics'];
+  startup_payload_json?: string | null;
+  payload_kb?: string;
+  payload_tokens?: string;
   children: JobNode[];
 }
 
@@ -245,6 +248,7 @@ function toJobNode(job: SupervisorStatus & { is_dead?: boolean }): JobNode {
     context_pct: job.context_pct,
     context_health: job.context_health,
     metrics: job.metrics,
+    startup_payload_json: job.startup_payload_json ?? null,
     children: [],
   };
 }
@@ -499,6 +503,21 @@ function formatElapsed(seconds: number | undefined): string {
   return `${minutes}m${String(remainder).padStart(2, '0')}s`;
 }
 
+function formatPayloadStats(payloadJson: string | null | undefined): { payload_kb: string; payload_tokens: string } {
+  if (!payloadJson) return { payload_kb: '--', payload_tokens: '--' };
+  try {
+    const payload = JSON.parse(payloadJson) as { totals?: { bytes?: number; tokens?: number } };
+    const bytes = payload.totals?.bytes;
+    const tokens = payload.totals?.tokens;
+    if (!Number.isFinite(bytes) || !Number.isFinite(tokens)) return { payload_kb: '--', payload_tokens: '--' };
+    return {
+      payload_kb: `${((bytes ?? 0) / 1024).toFixed(1)}kb`,
+      payload_tokens: `${Math.round(tokens ?? 0)}t`,
+    };
+  } catch {
+    return { payload_kb: '--', payload_tokens: '--' };
+  }
+}
 
 function getBeadTitleFromBd(beadId: string): string | null {
   const result = spawnSync('bd', ['show', beadId, '--json'], {
@@ -601,13 +620,16 @@ function renderJobLine(
   if (job.metrics?.tool_calls) metricParts.push(`${job.metrics.tool_calls}tc`);
   const totalTokens = job.metrics?.token_usage?.total_tokens;
   if (totalTokens) metricParts.push(`${totalTokens}tok`);
+  const payloadStats = formatPayloadStats(job.startup_payload_json);
   const elapsed = metricParts.length > 0 ? dim(`${elapsedBase} ${metricParts.join('·')}`) : dim(elapsedBase);
   const beadTitle = job.bead_id ? beadTitles.get(job.bead_id) : undefined;
+  const payloadKbCol = dim(payloadStats.payload_kb.padEnd(8));
+  const payloadTokensCol = dim(payloadStats.payload_tokens.padEnd(8));
   const beadCol = dim((job.bead_id ? job.bead_id : '').padEnd(14));
   const action = getNextAction(job);
   const actionCol = job.is_dead ? red(action) : dim(action);
   const titleSuffix = beadTitle ? dim(` ${beadTitle.slice(0, 40)}`) : '';
-  return `${prefix}${connector}${icon} ${id} ${spec} ${status} ${ctx} ${elapsed} ${beadCol} ${actionCol}${titleSuffix}`;
+  return `${prefix}${connector}${icon} ${id} ${spec} ${status} ${ctx} ${elapsed} ${payloadKbCol} ${payloadTokensCol} ${beadCol} ${actionCol}${titleSuffix}`;
 }
 
 function renderTreeNodes(
@@ -847,6 +869,9 @@ function renderJson(
       elapsed_s: job.elapsed_s,
       context_pct: job.context_pct,
       context_health: job.context_health,
+      startup_payload_json: job.startup_payload_json ?? null,
+      payload_kb: formatPayloadStats(job.startup_payload_json).payload_kb,
+      payload_tokens: formatPayloadStats(job.startup_payload_json).payload_tokens,
     })),
     nodes,
     trees,

@@ -375,8 +375,19 @@ function startEventTailer(
   beadId?: string,
 ): () => void {
   const eventsPath = join(jobsDir, jobId, 'events.jsonl');
+  const statusPath = join(jobsDir, jobId, 'status.json');
   let linesRead = 0;
   let activeInlinePhase: InlineIndicatorPhase = null;
+
+  const readPayloadBreakdown = (): unknown => {
+    try {
+      const statusRaw = readFileSync(statusPath, 'utf-8');
+      const status = JSON.parse(statusRaw) as { startup_payload_json?: string | null };
+      return status.startup_payload_json ? JSON.parse(status.startup_payload_json) : undefined;
+    } catch {
+      return undefined;
+    }
+  };
 
   const drain = () => {
     let content: string;
@@ -397,7 +408,8 @@ function startEventTailer(
       try { event = JSON.parse(line) as TimelineEvent; } catch { continue; }
 
       if (mode === 'json') {
-        process.stdout.write(JSON.stringify({ jobId, specialist, beadId, ...event }) + '\n');
+        const payloadBreakdown = event.type === 'run_start' ? readPayloadBreakdown() : undefined;
+        process.stdout.write(JSON.stringify({ jobId, specialist, beadId, ...(payloadBreakdown ? { payload_breakdown: payloadBreakdown } : {}), ...event }) + '\n');
       } else {
         // human mode: print output text from run_complete, debounce noisy phase indicators
         if (event.type === 'run_complete' && (event as any).output) {

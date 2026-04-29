@@ -148,6 +148,25 @@ function formatWaitingBanner(jobId: string, specialist: string): string {
   return `${prefix} ${specialist} (${jobId}) is waiting for input. Use: specialists resume ${jobId} "..."`;
 }
 
+function formatPayloadBreakdownSummary(payloadBreakdown: { components?: Array<{ name: string; tokens: number; bytes: number }>; totals?: { tokens: number; bytes: number } } | null | undefined): string | null {
+  if (!payloadBreakdown) return null;
+  const totals = payloadBreakdown.totals;
+  if (!totals) return null;
+  const components = (payloadBreakdown.components ?? []).filter((component) => Number.isFinite(component.tokens) && component.tokens > 0);
+  const kb = (totals.bytes / 1024).toFixed(1);
+  const kt = (totals.tokens / 1000).toFixed(1);
+  return `payload: ${kb}kb · ${kt}kt across ${components.length} components`;
+}
+
+function formatPayloadBreakdownTopComponents(payloadBreakdown: { components?: Array<{ name: string; tokens: number; bytes: number }>; totals?: { tokens: number; bytes: number } } | null | undefined): string | null {
+  const components = (payloadBreakdown?.components ?? [])
+    .filter((component) => Number.isFinite(component.tokens) && component.tokens > 0)
+    .sort((a, b) => b.tokens - a.tokens)
+    .slice(0, 3)
+    .map((component) => `${component.name} (${(component.tokens / 1000).toFixed(1)}kt)`);
+  return components.length > 0 ? `top-3: ${components.join(' · ')}` : null;
+}
+
 function formatStartupContextLine(event: TimelineEvent): string | null {
   if (event.type === 'run_start') {
     const snapshot = event.startup_snapshot;
@@ -171,6 +190,12 @@ function formatStartupContextLine(event: TimelineEvent): string | null {
     if (snapshot.skills) parts.push(`skills=${snapshot.skills.count}`);
 
     return parts.length > 0 ? dim(`  ↳ startup ${parts.join(' ')}`) : null;
+  }
+
+  if (event.type === 'payload_breakdown') {
+    const summary = formatPayloadBreakdownSummary(event.payload_breakdown);
+    if (!summary) return null;
+    return dim(`  ↳ ${summary}`);
   }
 
   if (event.type === 'meta' && event.source === 'mandatory_rules_injection' && event.data) {
@@ -806,9 +831,15 @@ async function followMerged(
         }
       }
 
-      if (!options.forever && trackedJobs.size > 0 && completedJobs.size === trackedJobs.size) {
-        clearInterval(interval);
-        resolve();
+      if (!options.forever && trackedJobs.size > 0) {
+        const allTrackedTerminal = [...trackedJobs].every((jobId) => {
+          const status = statusByJobId.get(jobId) ?? readStatusJson(sqliteClient, jobsDir, jobId);
+          return status?.status === 'done' || status?.status === 'error' || status?.status === 'cancelled';
+        });
+        if (completedJobs.size === trackedJobs.size || allTrackedTerminal) {
+          clearInterval(interval);
+          resolve();
+        }
       }
     }, 750);
   });

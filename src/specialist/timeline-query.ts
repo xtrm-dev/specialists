@@ -100,18 +100,22 @@ export interface JobEventsBatch {
  */
 export function readAllJobEvents(jobsDir: string): JobEventsBatch[] {
   const sqliteClient = createObservabilitySqliteClient();
-  const statuses = sqliteClient?.listStatuses() ?? [];
-  if (statuses.length > 0 && sqliteClient) {
-    return statuses.flatMap((status) => {
-      const events = sqliteClient.readEvents(status.id);
-      if (events.length === 0) return [];
-      return [{
-        jobId: status.id,
-        specialist: status.specialist ?? 'unknown',
-        beadId: status.bead_id,
-        events,
-      }];
-    });
+  try {
+    const statuses = typeof sqliteClient?.listStatuses === 'function' ? sqliteClient.listStatuses() : [];
+    if (statuses.length > 0 && sqliteClient) {
+      return statuses.flatMap((status) => {
+        const events = sqliteClient.readEvents(status.id);
+        if (events.length === 0) return [];
+        return [{
+          jobId: status.id,
+          specialist: status.specialist ?? 'unknown',
+          beadId: status.bead_id,
+          events,
+        }];
+      });
+    }
+  } catch {
+    // fallback to file-based timeline
   }
 
   if (process.env.SPECIALISTS_JOB_FILE_OUTPUT !== 'on') return [];

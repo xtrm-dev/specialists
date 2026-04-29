@@ -21,11 +21,13 @@ describe('feed CLI', () => {
     specialistsDir = join(tempRoot, '.specialists');
     jobsDir = join(specialistsDir, 'jobs');
     mkdirSync(jobsDir, { recursive: true });
+    process.env.SPECIALISTS_JOB_FILE_OUTPUT = 'on';
     vi.spyOn(process, 'cwd').mockReturnValue(tempRoot);
   });
 
   afterEach(() => {
     process.argv = originalArgv;
+    delete process.env.SPECIALISTS_JOB_FILE_OUTPUT;
     if (existsSync(tempRoot)) rmSync(tempRoot, { recursive: true, force: true });
     vi.doUnmock('../../../src/specialist/observability-sqlite.js');
     vi.resetModules();
@@ -251,8 +253,10 @@ describe('feed CLI', () => {
 
   it('outputs JSON with --json flag', async () => {
     createJobDir('job1', 'test', [
+      { t: Date.now(), type: 'run_start', startup_snapshot: { job_id: 'job1' } },
+      { t: Date.now(), type: 'payload_breakdown', payload_breakdown: { components: [{ name: 'skill', tokens: 1200, bytes: 2048 }], totals: { tokens: 1200, bytes: 2048 } } },
       { t: Date.now(), type: 'run_complete', status: 'COMPLETE', elapsed_s: 5 },
-    ]);
+    ], { startup_payload_json: JSON.stringify({ components: [{ name: 'skill', tokens: 1200, bytes: 2048 }], totals: { tokens: 1200, bytes: 2048 } }), started_at_ms: Date.now() + 60_000 });
 
     process.argv = ['node', 'specialists', 'feed', '--json'];
 
@@ -265,13 +269,11 @@ describe('feed CLI', () => {
     await run();
 
     // Output should be valid JSON
-    for (const line of logs) {
-      if (line.trim()) {
-        expect(() => JSON.parse(line)).not.toThrow();
-        const parsed = JSON.parse(line);
-        expect(parsed.type).toBe('run_complete');
-      }
-    }
+    const parsedLines = logs.filter((line) => line.trim()).map((line) => JSON.parse(line) as { type: string; payload_breakdown?: { totals: { bytes: number; tokens: number } } });
+    expect(parsedLines[0]?.type).toBe('run_start');
+    expect(parsedLines[1]?.type).toBe('payload_breakdown');
+    expect(parsedLines[1]?.payload_breakdown?.totals.bytes).toBe(2048);
+    expect(parsedLines[2]?.type).toBe('run_complete');
   });
 
   it('--json envelope includes model, backend, beadId, elapsed_ms from status.json', async () => {
