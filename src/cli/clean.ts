@@ -1,11 +1,4 @@
-import {
-  Dirent,
-  existsSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  statSync,
-} from 'node:fs';
+import { existsSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { SupervisorStatus } from '../specialist/supervisor.js';
 import { resolveJobsDir } from '../specialist/job-root.js';
@@ -20,9 +13,11 @@ interface CleanOptions {
   removeAllCompleted: boolean;
   dryRun: boolean;
   keepRecentCount: number | null;
+  staleProcessesOnly: boolean;
+  staleAfterHours: number;
 }
 
-interface CompletedJobDirectory {
+interface CompletedJobRecord {
   id: string;
   directoryPath: string;
   completedAtMs: number;
@@ -30,9 +25,16 @@ interface CompletedJobDirectory {
   sizeBytes: number;
 }
 
+interface StaleProcessCandidate {
+  status: SupervisorStatus;
+  reason: 'dead-pid' | 'stale-update';
+}
+
 const MS_PER_DAY = 86_400_000;
 const DEFAULT_TTL_DAYS = 7;
-const COMPLETED_STATUSES = new Set<SupervisorStatus['status']>(['done', 'error']);
+const DEFAULT_STALE_AFTER_HOURS = 24;
+const COMPLETED_STATUSES = new Set<SupervisorStatus['status']>(['done', 'error', 'cancelled']);
+const STALE_PROCESS_STATUSES = new Set<SupervisorStatus['status']>(['running', 'starting', 'waiting']);
 const PROTECTED_SQLITE_SUFFIXES = ['.db', '.db-wal', '.db-shm'] as const;
 
 function parseTtlDaysFromEnvironment(): number {
@@ -49,6 +51,8 @@ function parseOptions(argv: readonly string[]): CleanOptions {
   let removeAllCompleted = false;
   let dryRun = false;
   let keepRecentCount: number | null = null;
+  let staleProcessesOnly = false;
+  let staleAfterHours = DEFAULT_STALE_AFTER_HOURS;
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -63,18 +67,34 @@ function parseOptions(argv: readonly string[]): CleanOptions {
       continue;
     }
 
+    if (argument === '--processes') {
+      staleProcessesOnly = true;
+      continue;
+    }
+
+    if (argument === '--stale-after') {
+      const value = argv[index + 1];
+      if (!value) throw new Error('Missing value for --stale-after');
+      const parsedValue = Number(value);
+      if (!Number.isFinite(parsedValue) || parsedValue < 0) throw new Error('--stale-after must be a non-negative number');
+      staleAfterHours = parsedValue;
+      index += 1;
+      continue;
+    }
+
+    if (argument.startsWith('--stale-after=')) {
+      const value = argument.slice('--stale-after='.length);
+      const parsedValue = Number(value);
+      if (!Number.isFinite(parsedValue) || parsedValue < 0) throw new Error('--stale-after must be a non-negative number');
+      staleAfterHours = parsedValue;
+      continue;
+    }
+
     if (argument === '--keep') {
       const value = argv[index + 1];
-      if (!value) {
-        throw new Error('Missing value for --keep');
-      }
-
+      if (!value) throw new Error('Missing value for --keep');
       const parsedValue = Number(value);
-      const isInteger = Number.isInteger(parsedValue);
-      if (!isInteger || parsedValue < 0) {
-        throw new Error('--keep must be a non-negative integer');
-      }
-
+      if (!Number.isInteger(parsedValue) || parsedValue < 0) throw new Error('--keep must be a non-negative integer');
       keepRecentCount = parsedValue;
       index += 1;
       continue;
@@ -83,11 +103,7 @@ function parseOptions(argv: readonly string[]): CleanOptions {
     if (argument.startsWith('--keep=')) {
       const value = argument.slice('--keep='.length);
       const parsedValue = Number(value);
-      const isInteger = Number.isInteger(parsedValue);
-      if (!isInteger || parsedValue < 0) {
-        throw new Error('--keep must be a non-negative integer');
-      }
-
+      if (!Number.isInteger(parsedValue) || parsedValue < 0) throw new Error('--keep must be a non-negative integer');
       keepRecentCount = parsedValue;
       continue;
     }
@@ -95,64 +111,47 @@ function parseOptions(argv: readonly string[]): CleanOptions {
     throw new Error(`Unknown option: ${argument}`);
   }
 
-  return { removeAllCompleted, dryRun, keepRecentCount };
+  if (staleProcessesOnly && (removeAllCompleted || keepRecentCount !== null)) {
+    throw new Error('--processes cannot be combined with --all or --keep');
+  }
+
+  return { removeAllCompleted, dryRun, keepRecentCount, staleProcessesOnly, staleAfterHours };
 }
 
 function readDirectorySizeBytes(directoryPath: string): number {
   let totalBytes = 0;
-  const entries = readdirSync(directoryPath, { withFileTypes: true });
-
-  for (const entry of entries) {
+  for (const entry of readdirSync(directoryPath, { withFileTypes: true })) {
     const entryPath = join(directoryPath, entry.name);
     const stats = statSync(entryPath);
-
-    if (stats.isDirectory()) {
-      totalBytes += readDirectorySizeBytes(entryPath);
-      continue;
-    }
-
-    totalBytes += stats.size;
+    totalBytes += stats.isDirectory() ? readDirectorySizeBytes(entryPath) : stats.size;
   }
-
   return totalBytes;
 }
 
 function containsProtectedSqliteArtifact(directoryPath: string): boolean {
-  const entries = readdirSync(directoryPath, { withFileTypes: true });
-
-  for (const entry of entries) {
+  for (const entry of readdirSync(directoryPath, { withFileTypes: true })) {
     const entryPath = join(directoryPath, entry.name);
-
     if (entry.isDirectory()) {
       if (containsProtectedSqliteArtifact(entryPath)) return true;
       continue;
     }
-
-    if (PROTECTED_SQLITE_SUFFIXES.some(suffix => entry.name.endsWith(suffix))) {
-      return true;
-    }
+    if (PROTECTED_SQLITE_SUFFIXES.some(suffix => entry.name.endsWith(suffix))) return true;
   }
-
   return false;
 }
 
-function getJobTimestamps(status: SupervisorStatus): { createdAtMs: number; completedAtMs: number } {
-  const typedStatus = status as SupervisorStatus & {
-    created_at_ms?: number;
-    completed_at_ms?: number;
-    updated_at_ms?: number;
-  };
+function getJobTimestamps(status: SupervisorStatus): { createdAtMs: number; completedAtMs: number; updatedAtMs: number } {
+  const typedStatus = status as SupervisorStatus & { created_at_ms?: number; completed_at_ms?: number; updated_at_ms?: number };
   const createdAtMs = typedStatus.started_at_ms ?? typedStatus.created_at_ms ?? typedStatus.updated_at_ms ?? 0;
-  const completedAtMs = typedStatus.completed_at_ms ?? typedStatus.updated_at_ms ?? createdAtMs;
-  return { createdAtMs, completedAtMs };
+  const updatedAtMs = typedStatus.updated_at_ms ?? createdAtMs;
+  const completedAtMs = typedStatus.completed_at_ms ?? updatedAtMs;
+  return { createdAtMs, completedAtMs, updatedAtMs };
 }
 
-function readCompletedJobDirectory(baseDirectory: string, entry: Dirent): CompletedJobDirectory | null {
+function readCompletedJobDirectory(baseDirectory: string, entry: { name: string; isDirectory(): boolean }): CompletedJobRecord | null {
   if (!entry.isDirectory()) return null;
-
   const directoryPath = join(baseDirectory, entry.name);
   if (containsProtectedSqliteArtifact(directoryPath)) return null;
-
   const statusFilePath = join(directoryPath, 'status.json');
   if (!existsSync(statusFilePath)) return null;
 
@@ -164,95 +163,88 @@ function readCompletedJobDirectory(baseDirectory: string, entry: Dirent): Comple
   }
 
   if (!COMPLETED_STATUSES.has(statusData.status)) return null;
-
   const { createdAtMs, completedAtMs } = getJobTimestamps(statusData);
-
-  return {
-    id: entry.name,
-    directoryPath,
-    completedAtMs,
-    createdAtMs,
-    sizeBytes: readDirectorySizeBytes(directoryPath),
-  };
+  return { id: entry.name, directoryPath, completedAtMs, createdAtMs, sizeBytes: readDirectorySizeBytes(directoryPath) };
 }
 
-function collectCompletedJobDirectoriesFromDb(jobsDirectoryPath: string): CompletedJobDirectory[] {
-  const sqliteClient = createObservabilitySqliteClient();
-  const statuses = sqliteClient?.listStatuses() ?? [];
-  const completedJobs = statuses
-    .filter(status => COMPLETED_STATUSES.has(status.status))
-    .map(status => {
-      const directoryPath = join(jobsDirectoryPath, status.id);
-      if (containsProtectedSqliteArtifact(directoryPath)) return null;
-      if (!existsSync(directoryPath)) return null;
-
-      const { createdAtMs, completedAtMs } = getJobTimestamps(status);
-      return {
-        id: status.id,
-        directoryPath,
-        completedAtMs,
-        createdAtMs,
-        sizeBytes: readDirectorySizeBytes(directoryPath),
-      } satisfies CompletedJobDirectory;
-    })
-    .filter((job): job is CompletedJobDirectory => job !== null);
-
-  return completedJobs;
-}
-
-function collectCompletedJobDirectories(jobsDirectoryPath: string): CompletedJobDirectory[] {
+function collectCompletedJobs(jobsDirectoryPath: string): CompletedJobRecord[] {
   const sqliteClient = createObservabilitySqliteClient();
   const statuses = sqliteClient?.listStatuses() ?? [];
   if (statuses.length > 0) {
-    return collectCompletedJobDirectoriesFromDb(jobsDirectoryPath);
+    return statuses
+      .filter(status => COMPLETED_STATUSES.has(status.status))
+      .map(status => {
+        const directoryPath = join(jobsDirectoryPath, status.id);
+        if (!existsSync(directoryPath) || containsProtectedSqliteArtifact(directoryPath)) return null;
+        const { createdAtMs, completedAtMs } = getJobTimestamps(status);
+        return { id: status.id, directoryPath, completedAtMs, createdAtMs, sizeBytes: readDirectorySizeBytes(directoryPath) };
+      })
+      .filter((job): job is CompletedJobRecord => job !== null);
   }
 
   if (process.env.SPECIALISTS_JOB_FILE_OUTPUT !== 'on') return [];
-
-  const entries = readdirSync(jobsDirectoryPath, { withFileTypes: true });
-  const completedJobs: CompletedJobDirectory[] = [];
-
-  for (const entry of entries) {
-    const completedJob = readCompletedJobDirectory(jobsDirectoryPath, entry);
-    if (completedJob) completedJobs.push(completedJob);
-  }
-
-  return completedJobs;
+  return readdirSync(jobsDirectoryPath, { withFileTypes: true })
+    .map(entry => readCompletedJobDirectory(jobsDirectoryPath, entry))
+    .filter((job): job is CompletedJobRecord => job !== null);
 }
 
-function selectJobsToRemove(completedJobs: readonly CompletedJobDirectory[], options: CleanOptions): CompletedJobDirectory[] {
+function selectJobsToRemove(completedJobs: readonly CompletedJobRecord[], options: CleanOptions): CompletedJobRecord[] {
   const jobsByNewest = [...completedJobs].sort((left, right) => {
-    if (right.createdAtMs !== left.createdAtMs) {
-      return right.createdAtMs - left.createdAtMs;
-    }
+    if (right.createdAtMs !== left.createdAtMs) return right.createdAtMs - left.createdAtMs;
     return right.completedAtMs - left.completedAtMs;
   });
 
-  if (options.keepRecentCount !== null) {
-    return jobsByNewest.slice(options.keepRecentCount);
-  }
+  if (options.keepRecentCount !== null) return jobsByNewest.slice(options.keepRecentCount);
+  if (options.removeAllCompleted) return jobsByNewest;
 
-  if (options.removeAllCompleted) {
-    return jobsByNewest;
-  }
-
-  const ttlDays = parseTtlDaysFromEnvironment();
-  const cutoffMs = Date.now() - ttlDays * MS_PER_DAY;
+  const cutoffMs = Date.now() - parseTtlDaysFromEnvironment() * MS_PER_DAY;
   return jobsByNewest.filter(job => job.completedAtMs < cutoffMs);
+}
+
+function getProcessLiveness(status: SupervisorStatus): 'alive' | 'dead' | 'invalid' {
+  const typedStatus = status as SupervisorStatus & { pid?: number };
+  const pid = typedStatus.pid;
+  if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0) return 'invalid';
+
+  try {
+    process.kill(pid, 0);
+    return 'alive';
+  } catch (error: unknown) {
+    if (error instanceof Error && 'code' in error && (error as { code?: string }).code === 'ESRCH') {
+      return 'dead';
+    }
+    return 'invalid';
+  }
+}
+
+function selectStaleProcesses(statuses: readonly SupervisorStatus[], staleAfterHours: number): StaleProcessCandidate[] {
+  const cutoffMs = Date.now() - staleAfterHours * 60 * 60 * 1000;
+  const staleJobs: StaleProcessCandidate[] = [];
+  for (const status of statuses) {
+    if (!STALE_PROCESS_STATUSES.has(status.status)) continue;
+
+    const liveness = getProcessLiveness(status);
+    if (liveness === 'alive') continue;
+    if (liveness === 'dead') {
+      staleJobs.push({ status, reason: 'dead-pid' });
+      continue;
+    }
+
+    const updatedAtMs = (status as SupervisorStatus & { updated_at_ms?: number }).updated_at_ms ?? 0;
+    if (updatedAtMs < cutoffMs) staleJobs.push({ status, reason: 'stale-update' });
+  }
+  return staleJobs;
 }
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
-
   const units = ['KB', 'MB', 'GB', 'TB'];
   let value = bytes / 1024;
   let unitIndex = 0;
-
   while (value >= 1024 && unitIndex < units.length - 1) {
     value /= 1024;
     unitIndex += 1;
   }
-
   return `${value.toFixed(1)} ${units[unitIndex]}`;
 }
 
@@ -262,13 +254,16 @@ function renderSummary(removedCount: number, freedBytes: number, dryRun: boolean
   return `${action} ${removedCount} job ${noun} (${formatBytes(freedBytes)} freed)`;
 }
 
-function printDryRunPlan(jobs: readonly CompletedJobDirectory[]): void {
+function printDryRunPlan(jobs: readonly CompletedJobRecord[]): void {
   if (jobs.length === 0) return;
-
   console.log('Would remove:');
-  for (const job of jobs) {
-    console.log(`  - ${job.id}`);
-  }
+  for (const job of jobs) console.log(`  - ${job.id}`);
+}
+
+function printProcessPlan(jobs: readonly StaleProcessCandidate[]): void {
+  if (jobs.length === 0) return;
+  console.log('Would cancel:');
+  for (const job of jobs) console.log(`  - ${job.status.id} (${job.reason})`);
 }
 
 function printWorktreeDryRunPlan(candidates: readonly WorktreeGcCandidate[]): void {
@@ -280,10 +275,7 @@ function printWorktreeDryRunPlan(candidates: readonly WorktreeGcCandidate[]): vo
   }
 }
 
-function printWorktreeGcSummary(
-  removed: readonly WorktreeGcCandidate[],
-  skipped: readonly WorktreeGcCandidate[],
-): void {
+function printWorktreeGcSummary(removed: readonly WorktreeGcCandidate[], skipped: readonly WorktreeGcCandidate[]): void {
   if (removed.length === 0 && skipped.length === 0) return;
   const noun = removed.length === 1 ? 'worktree' : 'worktrees';
   console.log(`Removed ${removed.length} ${noun}` + (skipped.length > 0 ? ` (${skipped.length} skipped)` : '') + '.');
@@ -291,8 +283,35 @@ function printWorktreeGcSummary(
 
 function printUsageAndExit(message: string): never {
   console.error(message);
-  console.error('Usage: specialists|sp clean [--all] [--keep <n>] [--dry-run]');
+  console.error('Usage: specialists|sp clean [--all] [--keep <n>] [--processes [--stale-after <hours>]] [--dry-run]');
   process.exit(1);
+}
+
+function deleteJobDirectories(jobs: readonly CompletedJobRecord[]): number {
+  for (const job of jobs) {
+    rmSync(job.directoryPath, { recursive: true, force: true });
+  }
+  return jobs.length;
+}
+
+function removeStaleProcesses(statuses: readonly StaleProcessCandidate[], dryRun: boolean): number {
+  const sqliteClient = createObservabilitySqliteClient();
+  if (!sqliteClient) return 0;
+  if (dryRun) return statuses.length;
+
+  let updatedCount = 0;
+  for (const candidate of statuses) {
+    const typedStatus = candidate.status as SupervisorStatus & { completed_at_ms?: number; updated_at_ms?: number };
+    const cancelledStatus: SupervisorStatus = {
+      ...candidate.status,
+      status: 'cancelled',
+      completed_at_ms: typedStatus.completed_at_ms ?? Date.now(),
+      updated_at_ms: Date.now(),
+    } as SupervisorStatus;
+    sqliteClient.upsertStatus(cancelledStatus);
+    updatedCount += 1;
+  }
+  return updatedCount;
 }
 
 export async function run(): Promise<void> {
@@ -310,11 +329,32 @@ export async function run(): Promise<void> {
     return;
   }
 
-  const completedJobs = collectCompletedJobDirectories(jobsDirectoryPath);
+  const sqliteClient = createObservabilitySqliteClient();
+  const statuses = sqliteClient?.listStatuses() ?? [];
+  const worktreeCandidates = collectWorktreeGcCandidates(jobsDirectoryPath);
+
+  if (options.staleProcessesOnly) {
+    const staleJobs = selectStaleProcesses(statuses, options.staleAfterHours);
+    if (options.dryRun) {
+      printProcessPlan(staleJobs);
+      console.log(renderSummary(staleJobs.length, 0, true));
+      printWorktreeDryRunPlan(worktreeCandidates);
+      return;
+    }
+
+    const cancelledCount = removeStaleProcesses(staleJobs, false);
+    console.log(renderSummary(cancelledCount, 0, false));
+
+    if (worktreeCandidates.length > 0) {
+      const worktreeResult = pruneWorktrees(worktreeCandidates);
+      printWorktreeGcSummary(worktreeResult.removed, worktreeResult.skipped);
+    }
+    return;
+  }
+
+  const completedJobs = collectCompletedJobs(jobsDirectoryPath);
   const jobsToRemove = selectJobsToRemove(completedJobs, options);
   const freedBytes = jobsToRemove.reduce((total, job) => total + job.sizeBytes, 0);
-
-  const worktreeCandidates = collectWorktreeGcCandidates(jobsDirectoryPath);
 
   if (options.dryRun) {
     printDryRunPlan(jobsToRemove);
@@ -323,10 +363,7 @@ export async function run(): Promise<void> {
     return;
   }
 
-  for (const job of jobsToRemove) {
-    rmSync(job.directoryPath, { recursive: true, force: true });
-  }
-
+  deleteJobDirectories(jobsToRemove);
   console.log(renderSummary(jobsToRemove.length, freedBytes, false));
 
   if (worktreeCandidates.length > 0) {
