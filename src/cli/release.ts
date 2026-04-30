@@ -6,6 +6,13 @@ import { runScriptSpecialist } from '../specialist/script-runner.js';
 
 type BumpKind = 'major' | 'minor' | 'patch';
 
+type PrepareReleaseArgs = {
+  bump: BumpKind;
+  fromTag?: string;
+  toTag?: string;
+  insertAfter?: string;
+};
+
 type ReleaseDraft = {
   unreleased_summary: string;
   sections: {
@@ -47,6 +54,15 @@ export function parseBumpKind(argv: string[]): BumpKind {
   if (argv.includes('--major')) return 'major';
   if (argv.includes('--minor')) return 'minor';
   return 'patch';
+}
+
+export function parseArgs(argv: string[]): PrepareReleaseArgs {
+  const bump = parseBumpKind(argv);
+  const fromTag = readFlagValue(argv, '--from');
+  const toTag = readFlagValue(argv, '--to');
+  const insertAfter = readFlagValue(argv, '--insert-after');
+  validateReleaseRangeArgs({ bump, fromTag, toTag });
+  return { bump, fromTag, toTag, insertAfter };
 }
 
 export function getMostRecentSemverTag(tags: string[]): string | undefined {
@@ -118,7 +134,7 @@ function parseMarkdownDraft(output: string): ReleaseDraft | undefined {
   return { unreleased_summary: '', sections };
 }
 
-export function insertReleaseSection(changelog: string, section: string): string {
+export function insertReleaseSection(changelog: string, section: string, insertAfter?: string): string {
   const normalized = changelog.replace(/\r\n/g, '\n');
   const version = section.match(/^## \[(v?\d+\.\d+\.\d+)\]/m)?.[1];
   if (!version) throw new Error('Release section must start with version header');
@@ -127,8 +143,13 @@ export function insertReleaseSection(changelog: string, section: string): string
   const lines = withoutDuplicate.split('\n');
   const unreleasedIndex = lines.findIndex((line) => line.trim() === '## [Unreleased]');
   if (unreleasedIndex < 0) throw new Error('Missing [Unreleased] section in CHANGELOG.md');
-  const nextVersionIndex = lines.findIndex((line, index) => index > unreleasedIndex && RELEASE_HEADER.test(line));
-  const insertIndex = nextVersionIndex >= 0 ? nextVersionIndex : lines.length - 1;
+  const releaseHeaders = lines
+    .map((line, index) => ({ line, index }))
+    .filter(({ index }) => index > unreleasedIndex && RELEASE_HEADER.test(lines[index]));
+  const anchorIndex = insertAfter
+    ? releaseHeaders.find(({ line }) => line.includes(`[${insertAfter}]`))?.index
+    : releaseHeaders[0]?.index;
+  const insertIndex = anchorIndex !== undefined ? anchorIndex : lines.length - 1;
   const before = lines.slice(0, insertIndex).join('\n').replace(/\n*$/, '');
   const after = lines.slice(insertIndex).join('\n').replace(/^\n*/, '');
   return [before, section.trimEnd(), after].filter(Boolean).join('\n\n').replace(/\n{3,}/g, '\n\n') + '\n';
@@ -147,6 +168,16 @@ export function parseReleaseSection(changelog: string, version: string): { date:
   const body = (nextHeader >= 0 ? rest.slice(0, nextHeader) : rest).trimEnd();
   const end = nextHeader >= 0 ? bodyStart + 1 + nextHeader : normalized.length;
   return { date, body: body.trim(), start, end, section: normalized.slice(start, end).trimEnd() };
+}
+
+function validateReleaseRangeArgs(args: Pick<PrepareReleaseArgs, 'bump' | 'fromTag' | 'toTag'>): void {
+  const hasRange = Boolean(args.fromTag || args.toTag);
+  if ((args.fromTag && !args.toTag) || (!args.fromTag && args.toTag)) {
+    throw new Error('--from and --to must be used together');
+  }
+  if (hasRange && args.bump !== 'patch') {
+    throw new Error('--from/--to cannot be combined with --major/--minor/--patch');
+  }
 }
 
 function appendSection(lines: string[], title: string, entries: string[]): void {
@@ -233,10 +264,10 @@ async function runKeeper(projectDir: string, prevTag: string, nextTag: string, d
 export async function prepareRelease(argv: string[] = process.argv.slice(3), injected: Partial<GitDeps> = {}): Promise<void> {
   const deps = { ...DEFAULT_DEPS, ...injected };
   const cwd = deps.cwd();
-  const bump = parseBumpKind(argv);
+  const args = parseArgs(argv);
   const tags = git(['tag', '--list', 'v*'], cwd, deps.exec).split('\n').filter(Boolean);
-  const prevTag = getMostRecentSemverTag(tags);
-  const nextTag = computeNextTag(prevTag, bump);
+  const prevTag = args.fromTag ?? getMostRecentSemverTag(tags);
+  const nextTag = args.toTag ?? computeNextTag(prevTag, args.bump);
   const output = await runKeeper(cwd, prevTag ?? 'v0.0.0', nextTag, deps);
   const draft = extractReleaseDraft(output);
   if (!draft) throw new Error('Could not parse changelog-keeper JSON output');
@@ -244,10 +275,11 @@ export async function prepareRelease(argv: string[] = process.argv.slice(3), inj
   const changelogPath = join(cwd, 'CHANGELOG.md');
   const changelog = deps.readFile(changelogPath, 'utf-8');
   const section = buildReleaseSection(nextTag, deps.now().toISOString().slice(0, 10), draft);
-  deps.writeFile(changelogPath, insertReleaseSection(changelog, section), 'utf-8');
-  writePackageVersion(cwd, nextTag.slice(1), deps.readFile, deps.writeFile);
-  gitSpawn(['add', 'CHANGELOG.md', 'package.json', 'dist/index.js'], cwd, deps.spawn);
-  console.log(`Review staged changes, commit with: git commit -m "release: ${nextTag}" then run sp release publish`);
+  deps.writeFile(changelogPath, insertReleaseSection(changelog, section, args.insertAfter), 'utf-8');
+  if (!args.fromTag && !args.toTag) writePackageVersion(cwd, nextTag.slice(1), deps.readFile, deps.writeFile);
+  if (!args.fromTag && !args.toTag) gitSpawn(['add', 'CHANGELOG.md', 'package.json', 'dist/index.js'], cwd, deps.spawn);
+  else gitSpawn(['add', 'CHANGELOG.md', 'dist/index.js'], cwd, deps.spawn);
+  console.log(args.fromTag || args.toTag ? `Review staged changes, backfill with: git commit -m "release: ${nextTag}"` : `Review staged changes, commit with: git commit -m "release: ${nextTag}" then run sp release publish`);
 }
 
 export async function publishRelease(_argv: string[] = process.argv.slice(3), injected: Partial<GitDeps> = {}): Promise<void> {
@@ -308,5 +340,13 @@ function replaceReleaseSection(changelog: string, section: { start: number; end:
   return `${before}${section.section}${after}`.replace(/\n{3,}/g, '\n\n');
 }
 
-export const releaseCli = { parseBumpKind, getMostRecentSemverTag, computeNextTag, buildReleaseSection, extractReleaseDraft, insertReleaseSection, parseReleaseSection };
+function readFlagValue(argv: string[], flag: string): string | undefined {
+  const index = argv.indexOf(flag);
+  if (index < 0) return undefined;
+  const value = argv[index + 1];
+  if (!value || value.startsWith('--')) throw new Error(`Missing value for ${flag}`);
+  return value;
+}
+
+export const releaseCli = { parseBumpKind, parseArgs, getMostRecentSemverTag, computeNextTag, buildReleaseSection, extractReleaseDraft, insertReleaseSection, parseReleaseSection };
 
