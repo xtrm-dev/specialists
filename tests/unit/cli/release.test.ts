@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { prepareRelease, publishRelease } from '../../../src/cli/release.js';
+import { parseArgs, prepareRelease, publishRelease } from '../../../src/cli/release.js';
 
 const ORIGINAL_CWD = process.cwd();
 
@@ -53,6 +53,15 @@ describe('release CLI', () => {
     vi.restoreAllMocks();
   });
 
+  it('parses backfill args', () => {
+    expect(parseArgs(['--from', 'v3.8.0', '--to', 'v3.9.0', '--insert-after', 'v3.8.0'])).toEqual({
+      bump: 'patch',
+      fromTag: 'v3.8.0',
+      toTag: 'v3.9.0',
+      insertAfter: 'v3.8.0',
+    });
+  });
+
   it('prepares release draft, bumps version, stages files, and stays idempotent on rerun', async () => {
     const root = makeRepo();
     process.chdir(root);
@@ -99,6 +108,72 @@ describe('release CLI', () => {
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('git commit -m "release: v3.8.1"'));
     expect(deps.addCalls).toContain('add:CHANGELOG.md package.json dist/index.js');
     expect(deps.runScript).toHaveBeenCalledTimes(2);
+  });
+
+  it('backfills changelog sections from explicit tag range without bumping package version', async () => {
+    const root = makeRepo();
+    process.chdir(root);
+
+    const deps = createPrepareDeps(
+      root,
+      'v3.8.0\nv3.9.0',
+      JSON.stringify({ unreleased_summary: 'Draft summary', sections: { added: ['Scope: historical release'], changed: [], fixed: [], removed: [], deprecated: [], security: [] } }),
+    );
+
+    await prepareRelease(['--from', 'v3.8.0', '--to', 'v3.9.0'], {
+      cwd: () => root,
+      now: () => new Date('2026-04-30T00:00:00Z'),
+      spawn: deps.spawn as any,
+      exec: vi.fn((cmd: string, args: string[]) => {
+        if (cmd === 'git' && args[0] === 'tag' && args[1] === '--list') return 'v3.8.0\nv3.9.0';
+        if (cmd === 'git' && args[0] === 'log') return 'hash||msg||body';
+        if (cmd === 'bd' && args[0] === 'query') return 'closed issues';
+        throw new Error(`unexpected exec ${cmd} ${args.join(' ')}`);
+      }) as any,
+      readFile: readFileSync as any,
+      writeFile: writeFileSync as any,
+      loader: () => ({}) as any,
+      runScript: deps.runScript as any,
+    });
+
+    const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
+    expect(packageJson.version).toBe('3.8.0');
+    const changelog = readFileSync(join(root, 'CHANGELOG.md'), 'utf-8');
+    expect(changelog).toContain('## [v3.9.0] - 2026-04-30');
+    expect(deps.addCalls).toContain('add:CHANGELOG.md dist/index.js');
+  });
+
+  it('inserts backfill section above named release header', async () => {
+    const root = makeRepo();
+    process.chdir(root);
+    writeFileSync(join(root, 'CHANGELOG.md'), [
+      '# Changelog', '', 'All notable changes to this project will be documented in this file.', '', '---', '', '## [Unreleased]', '', '---', '', '## [v3.10.0] - 2026-04-30', '', '### Added', '- **New**: latest', '', '## [v3.9.0] - 2026-04-29', '', '### Added', '- **Old**: older', '', '[Unreleased]: https://example.com/compare/v3.10.0...HEAD', '[v3.10.0]: https://example.com/releases/tag/v3.10.0', '[v3.9.0]: https://example.com/releases/tag/v3.9.0',
+    ].join('\n'));
+
+    const spawn = vi.fn((cmd: string, args: string[]) => {
+      if (cmd === 'git' && args[0] === 'tag' && args[1] === '--list') return { status: 0, stdout: 'v3.8.0\nv3.9.0\nv3.10.0\n', stderr: '' };
+      if (cmd === 'git' && args[0] === 'add') return { status: 0, stdout: '', stderr: '' };
+      return { status: 0, stdout: '', stderr: '' };
+    });
+
+    await prepareRelease(['--from', 'v3.8.0', '--to', 'v3.8.0', '--insert-after', 'v3.9.0'], {
+      cwd: () => root,
+      now: () => new Date('2026-04-30T00:00:00Z'),
+      spawn: spawn as any,
+      exec: vi.fn((cmd: string, args: string[]) => {
+        if (cmd === 'git' && args[0] === 'tag' && args[1] === '--list') return 'v3.8.0\nv3.9.0\nv3.10.0';
+        if (cmd === 'git' && args[0] === 'log') return 'hash||msg||body';
+        if (cmd === 'bd' && args[0] === 'query') return 'closed issues';
+        throw new Error(`unexpected exec ${cmd} ${args.join(' ')}`);
+      }) as any,
+      readFile: readFileSync as any,
+      writeFile: writeFileSync as any,
+      loader: () => ({}) as any,
+      runScript: vi.fn().mockResolvedValue({ success: true, output: JSON.stringify({ unreleased_summary: 'Draft summary', sections: { added: ['Scope: backfill'], changed: [], fixed: [], removed: [], deprecated: [], security: [] } }) }) as any,
+    });
+
+    const changelog = readFileSync(join(root, 'CHANGELOG.md'), 'utf-8');
+    expect(changelog.indexOf('## [v3.8.0] - 2026-04-30')).toBeLessThan(changelog.indexOf('## [v3.9.0] - 2026-04-29'));
   });
 
   it('publishes tag from committed release and emits gh fallback command when unauthenticated', async () => {
