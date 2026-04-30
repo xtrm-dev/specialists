@@ -228,6 +228,17 @@ function writeTraceRow(client: ReturnType<typeof createObservabilitySqliteClient
   }
 }
 
+export const DEFAULT_STDOUT_LIMIT_BYTES = 32 * 1024 * 1024;
+
+export function resolveStdoutLimitBytes(spec: Specialist): number {
+  return spec.specialist.execution.stdout_limit_bytes ?? resolveEnvStdoutLimitBytes() ?? DEFAULT_STDOUT_LIMIT_BYTES;
+}
+
+function resolveEnvStdoutLimitBytes(): number | undefined {
+  const envLimit = Number(process.env.SPECIALISTS_SCRIPT_STDOUT_LIMIT_BYTES);
+  return Number.isFinite(envLimit) && envLimit > 0 ? Math.floor(envLimit) : undefined;
+}
+
 function openObservabilityClient(options: ScriptRunnerOptions): ReturnType<typeof createObservabilitySqliteClient> {
   const dbPath = options.observabilityDbPath ?? options.projectDir;
   return createObservabilitySqliteClient(dbPath);
@@ -245,10 +256,11 @@ export async function runScriptSpecialist(input: ScriptGenerateRequest, options:
     const prompt = renderTaskTemplate(template, input.variables ?? {});
     const timeoutMs = input.timeout_ms ?? spec.specialist.execution.timeout_ms ?? 120_000;
     const modelCandidates = collectModelCandidates(input, spec, options);
+    const stdoutLimitBytes = resolveStdoutLimitBytes(spec);
     const attempts: Array<{ model: string; text: string; stderr: string }> = [];
 
     for (const model of modelCandidates) {
-      const attempt = await runSingleAttempt(prompt, model, input.thinking_level ?? spec.specialist.execution.thinking_level, timeoutMs, options);
+      const attempt = await runSingleAttempt(prompt, model, input.thinking_level ?? spec.specialist.execution.thinking_level, timeoutMs, stdoutLimitBytes, options);
       attempts.push(attempt);
       const parsed = classifyAttempt(attempt);
       if (parsed.retryable) continue;
@@ -294,7 +306,7 @@ export function collectModelCandidates(input: ScriptGenerateRequest, spec: Speci
   return [...new Set(candidates)];
 }
 
-function runSingleAttempt(prompt: string, model: string, thinkingLevel: string | undefined, timeoutMs: number, options: ScriptRunnerOptions): Promise<{ model: string; text: string; stderr: string; exitCode: number; timedOut: boolean; outputTooLarge: boolean }> {
+function runSingleAttempt(prompt: string, model: string, thinkingLevel: string | undefined, timeoutMs: number, stdoutLimitBytes: number, options: ScriptRunnerOptions): Promise<{ model: string; text: string; stderr: string; exitCode: number; timedOut: boolean; outputTooLarge: boolean }> {
   return new Promise((resolve, reject) => {
     const args = ['--mode', 'json', '--no-session', '--no-extensions', '--no-tools', '--model', model];
     if (thinkingLevel) args.push('--thinking', thinkingLevel);
@@ -307,7 +319,6 @@ function runSingleAttempt(prompt: string, model: string, thinkingLevel: string |
     let stderr = '';
     let timedOut = false;
     let outputTooLarge = false;
-    const stdoutLimit = 4 * 1024 * 1024;
     let stdoutBytes = 0;
 
     const timer = setTimeout(() => {
@@ -320,7 +331,7 @@ function runSingleAttempt(prompt: string, model: string, thinkingLevel: string |
       const buffer = Buffer.from(chunk);
       chunks.push(buffer);
       stdoutBytes += buffer.length;
-      if (stdoutBytes > stdoutLimit && !outputTooLarge) {
+      if (stdoutBytes > stdoutLimitBytes && !outputTooLarge) {
         outputTooLarge = true;
         pi.kill('SIGTERM');
         setTimeout(() => pi.kill('SIGKILL'), 2000);
@@ -344,7 +355,7 @@ function runSingleAttempt(prompt: string, model: string, thinkingLevel: string |
 }
 
 export function classifyAttempt(attempt: { text: string; stderr: string; exitCode: number; timedOut: boolean; outputTooLarge: boolean }): { retryable: boolean; kind: 'success' | 'failure'; error: string; errorType: ScriptSpecialistErrorType; text: string } {
-  if (attempt.outputTooLarge) return { retryable: false, kind: 'failure', error: 'stdout exceeded 4MB cap', errorType: 'output_too_large', text: attempt.text };
+  if (attempt.outputTooLarge) return { retryable: false, kind: 'failure', error: 'stdout exceeded cap', errorType: 'output_too_large', text: attempt.text };
   if (attempt.timedOut) return { retryable: false, kind: 'failure', error: attempt.stderr || 'timed out', errorType: 'timeout', text: attempt.text };
   const retryable = isRetryableModelFailure(attempt.stderr, attempt.text);
   if (attempt.exitCode !== 0) {

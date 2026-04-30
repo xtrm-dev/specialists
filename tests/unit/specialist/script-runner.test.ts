@@ -1,12 +1,9 @@
-import { EventEmitter } from 'node:events';
-import { describe, expect, it, vi } from 'vitest';
-import { compatGuard, collectModelCandidates, classifyAttempt, isRetryableModelFailure, renderTaskTemplate } from '../../../src/specialist/script-runner.js';
+import { afterEach, describe, expect, it } from 'vitest';
+import { DEFAULT_STDOUT_LIMIT_BYTES, collectModelCandidates, classifyAttempt, compatGuard, isRetryableModelFailure, renderTaskTemplate, resolveStdoutLimitBytes } from '../../../src/specialist/script-runner.js';
 
-const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }));
-
-vi.mock('node:child_process', () => ({
-  spawn: spawnMock,
-}));
+afterEach(() => {
+  delete process.env.SPECIALISTS_SCRIPT_STDOUT_LIMIT_BYTES;
+});
 
 const baseSpec = {
   specialist: {
@@ -27,18 +24,6 @@ const baseSpec = {
     skills: { scripts: [] },
   },
 } as const;
-
-class FakeChild extends EventEmitter {
-  stdout = new EventEmitter();
-  stderr = new EventEmitter();
-  kill = vi.fn();
-}
-
-function makeLoader() {
-  return {
-    get: vi.fn().mockResolvedValue(baseSpec),
-  };
-}
 
 describe('script-runner compat guard', () => {
   it('rejects interactive specialist', () => {
@@ -95,5 +80,26 @@ describe('runScriptSpecialist fallback chain', () => {
     expect(isRetryableModelFailure('quota exceeded', '')).toBe(true);
     expect(isRetryableModelFailure('rate limit', '')).toBe(true);
     expect(classifyAttempt({ text: '', stderr: '429 insufficient_quota quota exceeded', exitCode: 1, timedOut: false, outputTooLarge: false })).toMatchObject({ retryable: true });
+  });
+});
+
+describe('stdout limit resolution', () => {
+  it('defaults to 32MB', () => {
+    delete process.env.SPECIALISTS_SCRIPT_STDOUT_LIMIT_BYTES;
+    expect(resolveStdoutLimitBytes(baseSpec as never)).toBe(DEFAULT_STDOUT_LIMIT_BYTES);
+  });
+
+  it('uses env override when spec has no override', () => {
+    process.env.SPECIALISTS_SCRIPT_STDOUT_LIMIT_BYTES = String(2 * 1024);
+    expect(resolveStdoutLimitBytes(baseSpec as never)).toBe(2 * 1024);
+  });
+
+  it('uses spec override over env override', () => {
+    process.env.SPECIALISTS_SCRIPT_STDOUT_LIMIT_BYTES = String(1024);
+    expect(resolveStdoutLimitBytes({ ...baseSpec, specialist: { ...baseSpec.specialist, execution: { ...baseSpec.specialist.execution, stdout_limit_bytes: 3 * 1024 } } } as never)).toBe(3 * 1024);
+  });
+
+  it('classifyAttempt reports overflow as output_too_large', () => {
+    expect(classifyAttempt({ text: 'done', stderr: '', exitCode: 0, timedOut: false, outputTooLarge: true })).toMatchObject({ retryable: false, kind: 'failure', errorType: 'output_too_large', error: 'stdout exceeded cap' });
   });
 });
