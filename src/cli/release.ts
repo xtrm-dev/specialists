@@ -61,6 +61,7 @@ export function parseArgs(argv: string[]): PrepareReleaseArgs {
   const fromTag = readFlagValue(argv, '--from');
   const toTag = readFlagValue(argv, '--to');
   const insertAfter = readFlagValue(argv, '--insert-after');
+  validateReleaseRangeArgs({ bump, fromTag, toTag });
   return { bump, fromTag, toTag, insertAfter };
 }
 
@@ -167,6 +168,16 @@ export function parseReleaseSection(changelog: string, version: string): { date:
   const body = (nextHeader >= 0 ? rest.slice(0, nextHeader) : rest).trimEnd();
   const end = nextHeader >= 0 ? bodyStart + 1 + nextHeader : normalized.length;
   return { date, body: body.trim(), start, end, section: normalized.slice(start, end).trimEnd() };
+}
+
+function validateReleaseRangeArgs(args: Pick<PrepareReleaseArgs, 'bump' | 'fromTag' | 'toTag'>): void {
+  const hasRange = Boolean(args.fromTag || args.toTag);
+  if ((args.fromTag && !args.toTag) || (!args.fromTag && args.toTag)) {
+    throw new Error('--from and --to must be used together');
+  }
+  if (hasRange && args.bump !== 'patch') {
+    throw new Error('--from/--to cannot be combined with --major/--minor/--patch');
+  }
 }
 
 function appendSection(lines: string[], title: string, entries: string[]): void {

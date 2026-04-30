@@ -62,6 +62,18 @@ describe('release CLI', () => {
     });
   });
 
+  it('rejects from-only release args', () => {
+    expect(() => parseArgs(['--from', 'v1.0.0'])).toThrow('--from and --to must be used together');
+  });
+
+  it('rejects to-only release args', () => {
+    expect(() => parseArgs(['--to', 'v2.0.0'])).toThrow('--from and --to must be used together');
+  });
+
+  it('rejects range args with bump flags', () => {
+    expect(() => parseArgs(['--major', '--from', 'v1', '--to', 'v2'])).toThrow('--from/--to cannot be combined with --major/--minor/--patch');
+  });
+
   it('prepares release draft, bumps version, stages files, and stays idempotent on rerun', async () => {
     const root = makeRepo();
     process.chdir(root);
