@@ -40,6 +40,7 @@ Model tiers:
 Rules:
 - Always pick the **highest version** in a family (`claude-sonnet-4-6` not `4-5`, `gemini-3.1-pro-preview` not `gemini-2.5-pro`)
 - `model` and `fallback_model` must be **different providers**
+- If a specialist needs a longer fallback chain, keep first fallback in `fallback_model` and let runtime supply any extra retry tier.
 - Never write a model string you have not pinged in this session
 
 ---
@@ -213,7 +214,7 @@ bun config/skills/specialists-creator/scripts/validate-specialist.ts config/spec
 | Field | Type | Default | Notes |
 |-------|------|---------|-------|
 | `model` | string | — | required — ping before using |
-| `fallback_model` | string | — | must be a different provider |
+| `fallback_model` | string | — | first fallback only; runtime may append more tiers |
 | `mode` | enum | `auto` | `tool` \| `skill` \| `auto` |
 | `timeout_ms` | number | `120000` | ms |
 | `stall_timeout_ms` | number | — | kill if no event for N ms |

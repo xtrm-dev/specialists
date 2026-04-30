@@ -64,4 +64,15 @@ describe('changelog-keeper specialist', () => {
     expect(rendered).toContain('git log:');
     expect(rendered).toContain('unitAI-42 closed_at=2026-04-29');
   });
+
+  it('locks output to markdown body plus JSON tail and strict deprecated semantics', async () => {
+    const result = await loadChangelogKeeperSpec();
+    const { system, task_template: taskTemplate } = result.specialist.prompt;
+
+    expect(system).toContain('No meta-commentary');
+    expect(system).toContain('Deprecated is only for explicit sunset/removal notices');
+    expect(system).toContain('No prose outside markdown release section and JSON tail');
+    expect(taskTemplate).toContain('Default to Changed for ordinary implementation work');
+    expect(taskTemplate).toContain('Append JSON tail matching output_schema after markdown body');
+  });
 });

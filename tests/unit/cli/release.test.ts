@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { parseArgs, prepareRelease, publishRelease } from '../../../src/cli/release.js';
+import { extractReleaseDraft, parseArgs, prepareRelease, publishRelease } from '../../../src/cli/release.js';
 
 const ORIGINAL_CWD = process.cwd();
 
@@ -59,6 +59,15 @@ describe('release CLI', () => {
       fromTag: 'v3.8.0',
       toTag: 'v3.9.0',
       insertAfter: 'v3.8.0',
+    });
+  });
+
+  it('extracts release draft from markdown body with JSON tail', () => {
+    const draft = extractReleaseDraft(['## [v3.9.0] - 2026-04-30', '', '### Added', '- Scope: single command entry point', '', '{"unreleased_summary":"Draft summary","sections":{"added":["Scope: single command entry point"],"changed":[],"fixed":[],"removed":[],"deprecated":[],"security":[]}}'].join('\n'));
+
+    expect(draft).toEqual({
+      unreleased_summary: 'Draft summary',
+      sections: { added: ['Scope: single command entry point'], changed: [], fixed: [], removed: [], deprecated: [], security: [] },
     });
   });
 

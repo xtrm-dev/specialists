@@ -240,11 +240,60 @@ export async function runScriptSpecialist(input: ScriptGenerateRequest, options:
 
     const template = input.template ?? spec.specialist.prompt.task_template;
     const prompt = renderTaskTemplate(template, input.variables ?? {});
-    const model = input.model_override ?? spec.specialist.execution.model ?? options.fallbackModel ?? 'unknown';
     const timeoutMs = input.timeout_ms ?? spec.specialist.execution.timeout_ms ?? 120_000;
+    const modelCandidates = collectModelCandidates(input, spec, options);
+    const attempts: Array<{ model: string; text: string; stderr: string }> = [];
 
+    for (const model of modelCandidates) {
+      const attempt = await runSingleAttempt(prompt, model, input.thinking_level ?? spec.specialist.execution.thinking_level, timeoutMs, options);
+      attempts.push(attempt);
+      const parsed = classifyAttempt(attempt);
+      if (parsed.retryable) continue;
+
+      const durationMs = Date.now() - startedAt;
+      const observability = openObservabilityClient(options);
+      if (input.trace !== false && observability) writeTraceRow(observability, input.specialist, model, traceId, parsed.text, durationMs, skillSources, options.onAuditFailure);
+
+      if (parsed.kind === 'success') {
+        let parsed_json: unknown;
+        if (spec.specialist.execution.response_format === 'json') {
+          try {
+            parsed_json = JSON.parse(stripMarkdownFences(parsed.text));
+            const required = Array.isArray(spec.specialist.prompt.output_schema?.required)
+              ? spec.specialist.prompt.output_schema.required.filter((value): value is string => typeof value === 'string')
+              : [];
+            for (const key of required) {
+              if (parsed_json === null || typeof parsed_json !== 'object' || !(key in parsed_json)) throw new Error(`Missing required output field: ${key}`);
+            }
+          } catch (error) {
+            return { success: false, error: error instanceof Error ? error.message : String(error), error_type: 'invalid_json', meta: { specialist: input.specialist, model, duration_ms: durationMs, trace_id: traceId } };
+          }
+        }
+        return { success: true, output: parsed.text, parsed_json, meta: { specialist: input.specialist, model, duration_ms: durationMs, trace_id: traceId } };
+      }
+      return { success: false, error: parsed.error, error_type: parsed.errorType, meta: { specialist: input.specialist, model, duration_ms: durationMs, trace_id: traceId } };
+    }
+
+    const lastAttempt = attempts.at(-1);
+    const durationMs = Date.now() - startedAt;
+    const observability = openObservabilityClient(options);
+    if (input.trace !== false && observability) writeTraceRow(observability, input.specialist, modelCandidates.at(-1) ?? 'unknown', traceId, lastAttempt?.text ?? '', durationMs, skillSources, options.onAuditFailure);
+    return { success: false, error: lastAttempt?.stderr || 'pi produced no assistant text', error_type: 'internal', meta: { specialist: input.specialist, model: modelCandidates.at(-1) ?? 'unknown', duration_ms: durationMs, trace_id: traceId } };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { success: false, error: message, error_type: mapErrorType(message), meta: { specialist: input.specialist, duration_ms: Date.now() - startedAt, trace_id: traceId } };
+  }
+}
+
+function collectModelCandidates(input: ScriptGenerateRequest, spec: Specialist, options: ScriptRunnerOptions): string[] {
+  const candidates = [input.model_override, spec.specialist.execution.model, spec.specialist.execution.fallback_model, options.fallbackModel]
+    .filter((value): value is string => typeof value === 'string' && value.length > 0);
+  return [...new Set(candidates)];
+}
+
+function runSingleAttempt(prompt: string, model: string, thinkingLevel: string | undefined, timeoutMs: number, options: ScriptRunnerOptions): Promise<{ model: string; text: string; stderr: string; exitCode: number; timedOut: boolean; outputTooLarge: boolean }> {
+  return new Promise((resolve, reject) => {
     const args = ['--mode', 'json', '--no-session', '--no-extensions', '--no-tools', '--model', model];
-    const thinkingLevel = input.thinking_level ?? spec.specialist.execution.thinking_level;
     if (thinkingLevel) args.push('--thinking', thinkingLevel);
     args.push(prompt);
 
@@ -276,55 +325,35 @@ export async function runScriptSpecialist(input: ScriptGenerateRequest, options:
     });
     pi.stderr.on('data', chunk => { stderr += String(chunk); });
 
-    const exitCode = await new Promise<number>((resolve, reject) => {
-      pi.on('error', reject);
-      pi.on('close', code => resolve(code ?? 0));
-    }).finally(() => clearTimeout(timer));
+    pi.on('error', reject);
+    pi.on('close', code => {
+      clearTimeout(timer);
+      resolve({
+        model,
+        text: extractAssistantText(Buffer.concat(chunks).toString('utf-8').split(/\r?\n/)),
+        stderr,
+        exitCode: code ?? 0,
+        timedOut,
+        outputTooLarge,
+      });
+    });
+  });
+}
 
-    const stdout = Buffer.concat(chunks).toString('utf-8');
-    const text = extractAssistantText(stdout.split(/\r?\n/));
-    const durationMs = Date.now() - startedAt;
-    const observability = openObservabilityClient(options);
-    if (input.trace !== false && observability) writeTraceRow(observability, input.specialist, model, traceId, text, durationMs, skillSources, options.onAuditFailure);
-
-    if (outputTooLarge) {
-      return { success: false, error: 'stdout exceeded 4MB cap', error_type: 'output_too_large', meta: { specialist: input.specialist, model, duration_ms: durationMs, trace_id: traceId } };
-    }
-    if (timedOut) {
-      return { success: false, error: stderr || 'timed out', error_type: 'timeout', meta: { specialist: input.specialist, model, duration_ms: durationMs, trace_id: traceId } };
-    }
-    if (exitCode !== 0) {
-      return { success: false, error: stderr || `pi exit ${exitCode}`, error_type: mapErrorType(stderr), meta: { specialist: input.specialist, model, duration_ms: durationMs, trace_id: traceId } };
-    }
-
-    if (!text) {
-      const piError = extractPiErrorMessage(stdout.split(/\r?\n/));
-      if (piError) {
-        return { success: false, error: piError, error_type: mapErrorType(piError), meta: { specialist: input.specialist, model, duration_ms: durationMs, trace_id: traceId } };
-      }
-      return { success: false, error: 'pi produced no assistant text', error_type: 'internal', meta: { specialist: input.specialist, model, duration_ms: durationMs, trace_id: traceId } };
-    }
-
-    let parsed_json: unknown;
-    if (spec.specialist.execution.response_format === 'json') {
-      try {
-        parsed_json = JSON.parse(stripMarkdownFences(text));
-        const required = Array.isArray(spec.specialist.prompt.output_schema?.required)
-          ? spec.specialist.prompt.output_schema.required.filter((value): value is string => typeof value === 'string')
-          : [];
-        for (const key of required) {
-          if (parsed_json === null || typeof parsed_json !== 'object' || !(key in parsed_json)) {
-            throw new Error(`Missing required output field: ${key}`);
-          }
-        }
-      } catch (error) {
-        return { success: false, error: error instanceof Error ? error.message : String(error), error_type: 'invalid_json', meta: { specialist: input.specialist, model, duration_ms: durationMs, trace_id: traceId } };
-      }
-    }
-
-    return { success: true, output: text, parsed_json, meta: { specialist: input.specialist, model, duration_ms: durationMs, trace_id: traceId } };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return { success: false, error: message, error_type: mapErrorType(message), meta: { specialist: input.specialist, duration_ms: Date.now() - startedAt, trace_id: traceId } };
+function classifyAttempt(attempt: { text: string; stderr: string; exitCode: number; timedOut: boolean; outputTooLarge: boolean }): { retryable: boolean; kind: 'success' | 'failure'; error: string; errorType: ScriptSpecialistErrorType; text: string } {
+  if (attempt.outputTooLarge) return { retryable: false, kind: 'failure', error: 'stdout exceeded 4MB cap', errorType: 'output_too_large', text: attempt.text };
+  if (attempt.timedOut) return { retryable: false, kind: 'failure', error: attempt.stderr || 'timed out', errorType: 'timeout', text: attempt.text };
+  const retryable = isRetryableModelFailure(attempt.stderr, attempt.text);
+  if (attempt.exitCode !== 0) {
+    const errorType = mapErrorType(attempt.stderr);
+    return { retryable, kind: 'failure', error: attempt.stderr || `pi exit ${attempt.exitCode}`, errorType, text: attempt.text };
   }
+  if (!attempt.text) {
+    return { retryable, kind: 'failure', error: attempt.stderr || 'pi produced no assistant text', errorType: mapErrorType(attempt.stderr), text: attempt.text };
+  }
+  return { retryable: false, kind: 'success', error: '', errorType: 'internal', text: attempt.text };
+}
+
+function isRetryableModelFailure(stderr: string, text: string): boolean {
+  return stderr.includes('0 tokens') || stderr.includes('quota') || stderr.includes('rate limit') || stderr.includes('403') || stderr.includes('401') || stderr.includes('insufficient_quota') || (!text && !stderr.trim());
 }
