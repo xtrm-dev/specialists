@@ -66,9 +66,13 @@ export interface ScriptRunnerOptions {
   trust?: TrustOptions;
 }
 
-function hasUnsubstitutedVariables(template: string): string | null {
-  const match = template.match(/\$([a-zA-Z_][a-zA-Z0-9_]*)/);
-  return match?.[1] ?? null;
+function hasUnsubstitutedVariables(template: string, variables: Record<string, string>): string | null {
+  const matches = template.match(/\$([a-zA-Z_][a-zA-Z0-9_]*)/g) ?? [];
+  for (const match of matches) {
+    const key = match.slice(1);
+    if (variables[key] === undefined) return key;
+  }
+  return null;
 }
 
 export function compatGuard(spec: Specialist, trust?: TrustOptions): void {
@@ -115,10 +119,9 @@ export function computeSkillSources(spec: Specialist): SkillSource[] {
 }
 
 export function renderTaskTemplate(template: string, variables: Record<string, string>): string {
-  const output = renderTemplate(template, variables);
-  const missing = hasUnsubstitutedVariables(output);
+  const missing = hasUnsubstitutedVariables(template, variables);
   if (missing) throw new Error(`Missing template variable: ${missing}`);
-  return output;
+  return renderTemplate(template, variables);
 }
 
 function mapErrorType(message: string): ScriptSpecialistErrorType {

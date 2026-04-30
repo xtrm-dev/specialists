@@ -62,6 +62,14 @@ describe('template render', () => {
   it('throws on missing variable', () => {
     expect(() => renderTaskTemplate('hello $name', {})).toThrow('Missing template variable: name');
   });
+
+  it('ignores literal $tokens in substituted values', () => {
+    expect(renderTaskTemplate('release $name', { name: 'notes with $prev_tag and $next_tag' })).toBe('release notes with $prev_tag and $next_tag');
+  });
+
+  it('still throws when template references unknown variable', () => {
+    expect(() => renderTaskTemplate('hello $name and $missing', { name: 'world' })).toThrow('Missing template variable: missing');
+  });
 });
 
 describe('runScriptSpecialist fallback chain', () => {
