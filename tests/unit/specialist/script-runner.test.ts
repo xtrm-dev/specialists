@@ -1,9 +1,21 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { DEFAULT_STDOUT_LIMIT_BYTES, collectModelCandidates, classifyAttempt, compatGuard, isRetryableModelFailure, renderTaskTemplate, resolveStdoutLimitBytes } from '../../../src/specialist/script-runner.js';
+import { EventEmitter } from 'node:events';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  DEFAULT_STDOUT_LIMIT_BYTES,
+  collectModelCandidates,
+  classifyAttempt,
+  compatGuard,
+  isRetryableModelFailure,
+  renderTaskTemplate,
+  resolveStdoutLimitBytes,
+  runScriptSpecialist,
+} from '../../../src/specialist/script-runner.js';
 
-afterEach(() => {
-  delete process.env.SPECIALISTS_SCRIPT_STDOUT_LIMIT_BYTES;
-});
+const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }));
+
+vi.mock('node:child_process', () => ({
+  spawn: spawnMock,
+}));
 
 const baseSpec = {
   specialist: {
@@ -24,6 +36,29 @@ const baseSpec = {
     skills: { scripts: [] },
   },
 } as const;
+
+afterEach(() => {
+  spawnMock.mockReset();
+  delete process.env.SPECIALISTS_SCRIPT_STDOUT_LIMIT_BYTES;
+});
+
+class FakeChild extends EventEmitter {
+  stdout = new EventEmitter();
+  stderr = new EventEmitter();
+  kill = vi.fn();
+}
+
+function makeLoader(spec = baseSpec) {
+  return {
+    get: vi.fn().mockResolvedValue(spec),
+  };
+}
+
+function createSpawnMock(): FakeChild {
+  const child = new FakeChild();
+  spawnMock.mockReturnValue(child as never);
+  return child;
+}
 
 describe('script-runner compat guard', () => {
   it('rejects interactive specialist', () => {
@@ -98,8 +133,24 @@ describe('stdout limit resolution', () => {
     process.env.SPECIALISTS_SCRIPT_STDOUT_LIMIT_BYTES = String(1024);
     expect(resolveStdoutLimitBytes({ ...baseSpec, specialist: { ...baseSpec.specialist, execution: { ...baseSpec.specialist.execution, stdout_limit_bytes: 3 * 1024 } } } as never)).toBe(3 * 1024);
   });
+});
 
-  it('classifyAttempt reports overflow as output_too_large', () => {
-    expect(classifyAttempt({ text: 'done', stderr: '', exitCode: 0, timedOut: false, outputTooLarge: true })).toMatchObject({ retryable: false, kind: 'failure', errorType: 'output_too_large', error: 'stdout exceeded cap' });
+describe('runScriptSpecialist stdout overflow', () => {
+  it('kills pi on stdout cap overflow and returns output_too_large', async () => {
+    const child = createSpawnMock();
+    const resultPromise = runScriptSpecialist(
+      { specialist: 'changelog-keeper', variables: { name: 'release notes' } },
+      { loader: makeLoader({ ...baseSpec, specialist: { ...baseSpec.specialist, execution: { ...baseSpec.specialist.execution, stdout_limit_bytes: 1024 } } }), projectDir: '.' },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    child.stdout.emit('data', Buffer.from('x'.repeat(600)));
+    child.stdout.emit('data', Buffer.from('y'.repeat(600)));
+    child.emit('close', 0);
+
+    const result = await resultPromise;
+
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(result).toMatchObject({ success: false, error_type: 'output_too_large' });
   });
 });
