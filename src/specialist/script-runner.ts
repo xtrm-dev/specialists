@@ -285,7 +285,7 @@ export async function runScriptSpecialist(input: ScriptGenerateRequest, options:
   }
 }
 
-function collectModelCandidates(input: ScriptGenerateRequest, spec: Specialist, options: ScriptRunnerOptions): string[] {
+export function collectModelCandidates(input: ScriptGenerateRequest, spec: Specialist, options: ScriptRunnerOptions): string[] {
   const candidates = [input.model_override, spec.specialist.execution.model, spec.specialist.execution.fallback_model, options.fallbackModel]
     .filter((value): value is string => typeof value === 'string' && value.length > 0);
   return [...new Set(candidates)];
@@ -340,7 +340,7 @@ function runSingleAttempt(prompt: string, model: string, thinkingLevel: string |
   });
 }
 
-function classifyAttempt(attempt: { text: string; stderr: string; exitCode: number; timedOut: boolean; outputTooLarge: boolean }): { retryable: boolean; kind: 'success' | 'failure'; error: string; errorType: ScriptSpecialistErrorType; text: string } {
+export function classifyAttempt(attempt: { text: string; stderr: string; exitCode: number; timedOut: boolean; outputTooLarge: boolean }): { retryable: boolean; kind: 'success' | 'failure'; error: string; errorType: ScriptSpecialistErrorType; text: string } {
   if (attempt.outputTooLarge) return { retryable: false, kind: 'failure', error: 'stdout exceeded 4MB cap', errorType: 'output_too_large', text: attempt.text };
   if (attempt.timedOut) return { retryable: false, kind: 'failure', error: attempt.stderr || 'timed out', errorType: 'timeout', text: attempt.text };
   const retryable = isRetryableModelFailure(attempt.stderr, attempt.text);
@@ -354,6 +354,6 @@ function classifyAttempt(attempt: { text: string; stderr: string; exitCode: numb
   return { retryable: false, kind: 'success', error: '', errorType: 'internal', text: attempt.text };
 }
 
-function isRetryableModelFailure(stderr: string, text: string): boolean {
+export function isRetryableModelFailure(stderr: string, text: string): boolean {
   return stderr.includes('0 tokens') || stderr.includes('quota') || stderr.includes('rate limit') || stderr.includes('403') || stderr.includes('401') || stderr.includes('insufficient_quota') || (!text && !stderr.trim());
 }
