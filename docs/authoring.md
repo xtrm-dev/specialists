@@ -77,6 +77,7 @@ This guide is the user-facing reference for authoring `.specialist.json` files. 
 | `stall_timeout_ms` | number | unset | kill if no event for N ms |
 | `max_retries` | number | `0` | retry count on failure |
 | `interactive` | boolean | `false` | keep-alive by default for multi-turn specialists |
+| `stdout_limit_bytes` | number | `33554432` | per-run stdout cap for script-class runtime; env `SPECIALISTS_SCRIPT_STDOUT_LIMIT_BYTES` overrides default, spec value overrides env |
 | `response_format` | `"text" \| "json" \| "markdown"` | `"text"` | output contract hint |
 | `output_type` | enum | `"custom"` | semantic archetype: `"codegen"`, `"analysis"`, `"review"`, `"synthesis"`, `"orchestration"`, `"workflow"`, `"research"`, `"custom"` |
 | `permission_required` | `"READ_ONLY" \| "LOW" \| "MEDIUM" \| "HIGH"` | `"READ_ONLY"` | tool-access tier |

@@ -240,6 +240,7 @@ Reference schema and examples: [`docs/authoring.md`](authoring.md)
 - same fallback-model behavior
 - same thinking-level forwarding
 - same output-schema validation behavior
+- stdout cap defaults to 32MB; override with `SPECIALISTS_SCRIPT_STDOUT_LIMIT_BYTES` or `execution.stdout_limit_bytes`
 - `template_variable_missing` if template references missing `$var`
 
 ### What this doc does not cover
