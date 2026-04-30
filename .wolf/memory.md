@@ -86,3 +86,5 @@
 - 2026-04-22T16:54:34.011270+00:00: specialists init auto-rewires legacy root symlinks from active/claude or active/pi to flattened active root during init.
 
 - 2026-04-22T22:27:13.340618+00:00: --sync-defaults must overwrite stale canonical files in .specialists/default/; copy-once semantics are wrong for an explicit sync command.
+
+- 2026-04-30T21:01:17+00:00: Updated docs/design/gzrx-tool-catalog.md with in-pi tool catalog evidence, tier policy, fallback semantics, and migration plan for unitAI-gzrx.
