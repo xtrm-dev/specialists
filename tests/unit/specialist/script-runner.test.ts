@@ -1,13 +1,15 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 import {
-  DEFAULT_STDOUT_LIMIT_BYTES,
+  DEFAULT_ASSISTANT_TEXT_LIMIT_BYTES,
+  DEFAULT_PENDING_LINE_LIMIT_BYTES,
+  DEFAULT_STDERR_LIMIT_BYTES,
   collectModelCandidates,
   classifyAttempt,
   compatGuard,
   isRetryableModelFailure,
   renderTaskTemplate,
-  resolveStdoutLimitBytes,
+  resolveAssistantTextLimitBytes,
   runScriptSpecialist,
 } from '../../../src/specialist/script-runner.js';
 
@@ -107,6 +109,7 @@ describe('runScriptSpecialist fallback chain', () => {
       'nano-gpt/moonshotai/kimi-k2.5',
     ]);
     expect(classifyAttempt({ text: '', stderr: '', exitCode: 0, timedOut: false, outputTooLarge: false })).toMatchObject({ retryable: true });
+    expect(classifyAttempt({ text: '', stderr: '', exitCode: 0, timedOut: false, outputTooLarge: true, outputTooLargeReason: 'assistant_text_too_large' })).toMatchObject({ error: 'assistant message too large' });
     expect(isRetryableModelFailure('', '')).toBe(true);
   });
 
@@ -119,39 +122,77 @@ describe('runScriptSpecialist fallback chain', () => {
 });
 
 describe('stdout limit resolution', () => {
-  it('defaults stdout limit to 128MB', () => {
-    expect(DEFAULT_STDOUT_LIMIT_BYTES).toBe(128 * 1024 * 1024);
+  it('defaults retained-state caps', () => {
+    expect(DEFAULT_PENDING_LINE_LIMIT_BYTES).toBe(16 * 1024 * 1024);
+    expect(DEFAULT_ASSISTANT_TEXT_LIMIT_BYTES).toBe(4 * 1024 * 1024);
+    expect(DEFAULT_STDERR_LIMIT_BYTES).toBe(1 * 1024 * 1024);
     delete process.env.SPECIALISTS_SCRIPT_STDOUT_LIMIT_BYTES;
-    expect(resolveStdoutLimitBytes(baseSpec as never)).toBe(DEFAULT_STDOUT_LIMIT_BYTES);
+    expect(resolveAssistantTextLimitBytes(baseSpec as never)).toBe(DEFAULT_ASSISTANT_TEXT_LIMIT_BYTES);
   });
 
   it('uses env override when spec has no override', () => {
     process.env.SPECIALISTS_SCRIPT_STDOUT_LIMIT_BYTES = String(2 * 1024);
-    expect(resolveStdoutLimitBytes(baseSpec as never)).toBe(2 * 1024);
+    expect(resolveAssistantTextLimitBytes(baseSpec as never)).toBe(2 * 1024);
   });
 
   it('uses spec override over env override', () => {
     process.env.SPECIALISTS_SCRIPT_STDOUT_LIMIT_BYTES = String(1024);
-    expect(resolveStdoutLimitBytes({ ...baseSpec, specialist: { ...baseSpec.specialist, execution: { ...baseSpec.specialist.execution, stdout_limit_bytes: 3 * 1024 } } } as never)).toBe(3 * 1024);
+    expect(resolveAssistantTextLimitBytes({ ...baseSpec, specialist: { ...baseSpec.specialist, execution: { ...baseSpec.specialist.execution, stdout_limit_bytes: 3 * 1024 } } } as never)).toBe(3 * 1024);
   });
 });
 
-describe('runScriptSpecialist stdout overflow', () => {
-  it('kills pi on stdout cap overflow and returns output_too_large', async () => {
+describe('runScriptSpecialist retained-state caps', () => {
+  it('keeps huge token-delta stream and returns final assistant text', async () => {
     const child = createSpawnMock();
     const resultPromise = runScriptSpecialist(
       { specialist: 'changelog-keeper', variables: { name: 'release notes' } },
-      { loader: makeLoader({ ...baseSpec, specialist: { ...baseSpec.specialist, execution: { ...baseSpec.specialist.execution, stdout_limit_bytes: 1024 } } }), projectDir: '.' },
+      { loader: makeLoader(), projectDir: '.' },
     );
 
     await new Promise((resolve) => setTimeout(resolve, 0));
-    child.stdout.emit('data', Buffer.from('x'.repeat(600)));
-    child.stdout.emit('data', Buffer.from('y'.repeat(600)));
+    const deltaLine = Buffer.from(`${JSON.stringify({ type: 'token_delta', data: { text: 'x'.repeat(1024) } })}\n`);
+    for (let i = 0; i < 204_800; i++) child.stdout.emit('data', deltaLine);
+    child.stdout.emit('data', Buffer.from(`${JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'final output' }] } })}\n`));
+    child.emit('close', 0);
+
+    const result = await resultPromise;
+
+    expect(child.kill).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ success: true, output: 'final output' });
+  });
+
+  it('truncates oversized malformed line and returns malformed line error', async () => {
+    const child = createSpawnMock();
+    const resultPromise = runScriptSpecialist(
+      { specialist: 'changelog-keeper', variables: { name: 'release notes' } },
+      { loader: makeLoader(), projectDir: '.' },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    child.stdout.emit('data', Buffer.from('{"type":"assistant","data":{"text":"'));
+    child.stdout.emit('data', Buffer.alloc(DEFAULT_PENDING_LINE_LIMIT_BYTES + 1, 'a'));
     child.emit('close', 0);
 
     const result = await resultPromise;
 
     expect(child.kill).toHaveBeenCalledWith('SIGTERM');
-    expect(result).toMatchObject({ success: false, error_type: 'output_too_large' });
+    expect(result).toMatchObject({ success: false, error_type: 'output_too_large', error: 'malformed line too large' });
+  });
+
+  it('truncates stderr and returns stderr error', async () => {
+    const child = createSpawnMock();
+    const resultPromise = runScriptSpecialist(
+      { specialist: 'changelog-keeper', variables: { name: 'release notes' } },
+      { loader: makeLoader(), projectDir: '.' },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    child.stderr.emit('data', Buffer.alloc(DEFAULT_STDERR_LIMIT_BYTES + 1, 'e'));
+    child.emit('close', 0);
+
+    const result = await resultPromise;
+
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(result).toMatchObject({ success: false, error_type: 'output_too_large', error: 'stderr too large' });
   });
 });

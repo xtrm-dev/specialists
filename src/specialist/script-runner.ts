@@ -186,6 +186,23 @@ function extractAssistantText(lines: string[]): string {
   return '';
 }
 
+function extractAssistantTextFromEvent(event: PiEvent): string | undefined {
+  if (event.type === 'message_end') {
+    const text = textFromMessage(event.message);
+    if (text) return text;
+  }
+  if (event.type === 'agent_end' && Array.isArray(event.messages)) {
+    for (let j = event.messages.length - 1; j >= 0; j--) {
+      const text = textFromMessage(event.messages[j]);
+      if (text) return text;
+    }
+  }
+  if (event.type === 'assistant' && typeof event.data?.text === 'string') return event.data.text;
+  const legacyContent = event.data?.content?.[0]?.text;
+  if (typeof legacyContent === 'string') return legacyContent;
+  return undefined;
+}
+
 function stripMarkdownFences(text: string): string {
   const trimmed = text.trim();
   const fenced = trimmed.match(/^```(?:json|JSON)?\s*\n?([\s\S]*?)\n?```\s*$/);
@@ -228,19 +245,21 @@ function writeTraceRow(client: ReturnType<typeof createObservabilitySqliteClient
   }
 }
 
-// pi-mode-json emits dense per-token-delta + assistant-message events. Even with --no-extensions --no-tools,
-// a moderate changelog-keeper range (~40 commits, ~38KB pre-script injection) exceeds 32MB. 128MB gives
-// headroom for typical release ranges without env override. Cap is on raw bytes received from pipe — stream
-// compaction in parser does not lower this number.
-export const DEFAULT_STDOUT_LIMIT_BYTES = 128 * 1024 * 1024;
+export const DEFAULT_PENDING_LINE_LIMIT_BYTES = 16 * 1024 * 1024;
+export const DEFAULT_ASSISTANT_TEXT_LIMIT_BYTES = 4 * 1024 * 1024;
+export const DEFAULT_STDERR_LIMIT_BYTES = 1 * 1024 * 1024;
 
-export function resolveStdoutLimitBytes(spec: Specialist): number {
-  return spec.specialist.execution.stdout_limit_bytes ?? resolveEnvStdoutLimitBytes() ?? DEFAULT_STDOUT_LIMIT_BYTES;
+export function resolveAssistantTextLimitBytes(spec: Specialist): number {
+  return spec.specialist.execution.stdout_limit_bytes ?? resolveEnvAssistantTextLimitBytes() ?? DEFAULT_ASSISTANT_TEXT_LIMIT_BYTES;
 }
 
-function resolveEnvStdoutLimitBytes(): number | undefined {
-  const envLimit = Number(process.env.SPECIALISTS_SCRIPT_STDOUT_LIMIT_BYTES);
-  return Number.isFinite(envLimit) && envLimit > 0 ? Math.floor(envLimit) : undefined;
+function resolveEnvAssistantTextLimitBytes(): number | undefined {
+  const raw = process.env.SPECIALISTS_SCRIPT_STDOUT_LIMIT_BYTES;
+  if (raw === undefined) return undefined;
+  const envLimit = Number(raw);
+  if (!Number.isFinite(envLimit) || envLimit <= 0) return undefined;
+  process.stderr.write('warning: SPECIALISTS_SCRIPT_STDOUT_LIMIT_BYTES is deprecated; applies to assistant text cap\n');
+  return Math.floor(envLimit);
 }
 
 function openObservabilityClient(options: ScriptRunnerOptions): ReturnType<typeof createObservabilitySqliteClient> {
@@ -260,11 +279,11 @@ export async function runScriptSpecialist(input: ScriptGenerateRequest, options:
     const prompt = renderTaskTemplate(template, input.variables ?? {});
     const timeoutMs = input.timeout_ms ?? spec.specialist.execution.timeout_ms ?? 120_000;
     const modelCandidates = collectModelCandidates(input, spec, options);
-    const stdoutLimitBytes = resolveStdoutLimitBytes(spec);
+    const assistantTextLimitBytes = resolveAssistantTextLimitBytes(spec);
     const attempts: Array<{ model: string; text: string; stderr: string }> = [];
 
     for (const model of modelCandidates) {
-      const attempt = await runSingleAttempt(prompt, model, input.thinking_level ?? spec.specialist.execution.thinking_level, timeoutMs, stdoutLimitBytes, options);
+      const attempt = await runSingleAttempt(prompt, model, input.thinking_level ?? spec.specialist.execution.thinking_level, timeoutMs, assistantTextLimitBytes, options);
       attempts.push(attempt);
       const parsed = classifyAttempt(attempt);
       if (parsed.retryable) continue;
@@ -310,7 +329,9 @@ export function collectModelCandidates(input: ScriptGenerateRequest, spec: Speci
   return [...new Set(candidates)];
 }
 
-function runSingleAttempt(prompt: string, model: string, thinkingLevel: string | undefined, timeoutMs: number, stdoutLimitBytes: number, options: ScriptRunnerOptions): Promise<{ model: string; text: string; stderr: string; exitCode: number; timedOut: boolean; outputTooLarge: boolean }> {
+type AttemptFailureReason = 'assistant_text_too_large' | 'stderr_too_large' | 'malformed_line_too_large';
+
+function runSingleAttempt(prompt: string, model: string, thinkingLevel: string | undefined, timeoutMs: number, assistantTextLimitBytes: number, options: ScriptRunnerOptions): Promise<{ model: string; text: string; stderr: string; exitCode: number; timedOut: boolean; outputTooLarge: boolean; outputTooLargeReason?: AttemptFailureReason }> {
   return new Promise((resolve, reject) => {
     const args = ['--mode', 'json', '--no-session', '--no-extensions', '--no-tools', '--model', model];
     if (thinkingLevel) args.push('--thinking', thinkingLevel);
@@ -322,9 +343,11 @@ function runSingleAttempt(prompt: string, model: string, thinkingLevel: string |
     let stderr = '';
     let timedOut = false;
     let outputTooLarge = false;
-    let stdoutBytes = 0;
+    let outputTooLargeReason: AttemptFailureReason | undefined;
     let pending = '';
     let assistantText = '';
+    let pendingBytes = 0;
+    let stderrBytes = 0;
 
     const timer = setTimeout(() => {
       timedOut = true;
@@ -333,45 +356,55 @@ function runSingleAttempt(prompt: string, model: string, thinkingLevel: string |
     }, timeoutMs);
 
     pi.stdout.on('data', chunk => {
+      if (outputTooLarge) return;
       const buffer = Buffer.from(chunk);
-      stdoutBytes += buffer.length;
-      if (stdoutBytes > stdoutLimitBytes && !outputTooLarge) {
+      pending += buffer.toString('utf-8');
+      pendingBytes += buffer.length;
+      if (pendingBytes > DEFAULT_PENDING_LINE_LIMIT_BYTES) {
         outputTooLarge = true;
+        outputTooLargeReason = 'malformed_line_too_large';
         pi.kill('SIGTERM');
         setTimeout(() => pi.kill('SIGKILL'), 2000);
         return;
       }
 
-      pending += buffer.toString('utf-8');
       const lines = pending.split(/\r?\n/);
       pending = lines.pop() ?? '';
+      pendingBytes = Buffer.byteLength(pending);
       for (const rawLine of lines) {
         const line = rawLine.trim();
         if (!line) continue;
         try {
           const event = JSON.parse(line) as PiEvent;
-          if (event.type === 'message_end') {
-            const text = textFromMessage(event.message);
-            if (text) assistantText = text;
-          }
-          if (event.type === 'agent_end' && Array.isArray(event.messages)) {
-            for (let j = event.messages.length - 1; j >= 0; j--) {
-              const text = textFromMessage(event.messages[j]);
-              if (text) {
-                assistantText = text;
-                break;
-              }
+          const nextAssistantText = extractAssistantTextFromEvent(event);
+          if (nextAssistantText !== undefined) {
+            if (Buffer.byteLength(nextAssistantText, 'utf8') > assistantTextLimitBytes) {
+              outputTooLarge = true;
+              outputTooLargeReason = 'assistant_text_too_large';
+              pi.kill('SIGTERM');
+              setTimeout(() => pi.kill('SIGKILL'), 2000);
+              return;
             }
+            assistantText = nextAssistantText;
           }
-          if (event.type === 'assistant' && typeof event.data?.text === 'string') assistantText = event.data.text;
-          const legacyContent = event.data?.content?.[0]?.text;
-          if (typeof legacyContent === 'string') assistantText = legacyContent;
         } catch {
           continue;
         }
       }
     });
-    pi.stderr.on('data', chunk => { stderr += String(chunk); });
+    pi.stderr.on('data', chunk => {
+      if (outputTooLarge) return;
+      const text = String(chunk);
+      stderr += text;
+      stderrBytes += Buffer.byteLength(text, 'utf8');
+      if (stderrBytes > DEFAULT_STDERR_LIMIT_BYTES) {
+        outputTooLarge = true;
+        outputTooLargeReason = 'stderr_too_large';
+        stderr = stderr.slice(0, DEFAULT_STDERR_LIMIT_BYTES);
+        pi.kill('SIGTERM');
+        setTimeout(() => pi.kill('SIGKILL'), 2000);
+      }
+    });
 
     pi.on('error', reject);
     pi.on('close', code => {
@@ -383,13 +416,19 @@ function runSingleAttempt(prompt: string, model: string, thinkingLevel: string |
         exitCode: code ?? 0,
         timedOut,
         outputTooLarge,
+        outputTooLargeReason,
       });
     });
   });
 }
 
-export function classifyAttempt(attempt: { text: string; stderr: string; exitCode: number; timedOut: boolean; outputTooLarge: boolean }): { retryable: boolean; kind: 'success' | 'failure'; error: string; errorType: ScriptSpecialistErrorType; text: string } {
-  if (attempt.outputTooLarge) return { retryable: false, kind: 'failure', error: 'stdout exceeded cap', errorType: 'output_too_large', text: attempt.text };
+export function classifyAttempt(attempt: { text: string; stderr: string; exitCode: number; timedOut: boolean; outputTooLarge: boolean; outputTooLargeReason?: AttemptFailureReason }): { retryable: boolean; kind: 'success' | 'failure'; error: string; errorType: ScriptSpecialistErrorType; text: string } {
+  if (attempt.outputTooLarge) {
+    if (attempt.outputTooLargeReason === 'assistant_text_too_large') return { retryable: false, kind: 'failure', error: 'assistant message too large', errorType: 'output_too_large', text: attempt.text };
+    if (attempt.outputTooLargeReason === 'stderr_too_large') return { retryable: false, kind: 'failure', error: 'stderr too large', errorType: 'output_too_large', text: attempt.text };
+    if (attempt.outputTooLargeReason === 'malformed_line_too_large') return { retryable: false, kind: 'failure', error: 'malformed line too large', errorType: 'output_too_large', text: attempt.text };
+    return { retryable: false, kind: 'failure', error: 'output exceeded cap', errorType: 'output_too_large', text: attempt.text };
+  }
   if (attempt.timedOut) return { retryable: false, kind: 'failure', error: attempt.stderr || 'timed out', errorType: 'timeout', text: attempt.text };
   const retryable = isRetryableModelFailure(attempt.stderr, attempt.text);
   if (attempt.exitCode !== 0) {
