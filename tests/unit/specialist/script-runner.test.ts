@@ -119,7 +119,8 @@ describe('runScriptSpecialist fallback chain', () => {
 });
 
 describe('stdout limit resolution', () => {
-  it('defaults to 32MB', () => {
+  it('defaults stdout limit to 128MB', () => {
+    expect(DEFAULT_STDOUT_LIMIT_BYTES).toBe(128 * 1024 * 1024);
     delete process.env.SPECIALISTS_SCRIPT_STDOUT_LIMIT_BYTES;
     expect(resolveStdoutLimitBytes(baseSpec as never)).toBe(DEFAULT_STDOUT_LIMIT_BYTES);
   });

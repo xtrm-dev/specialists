@@ -228,7 +228,11 @@ function writeTraceRow(client: ReturnType<typeof createObservabilitySqliteClient
   }
 }
 
-export const DEFAULT_STDOUT_LIMIT_BYTES = 32 * 1024 * 1024;
+// pi-mode-json emits dense per-token-delta + assistant-message events. Even with --no-extensions --no-tools,
+// a moderate changelog-keeper range (~40 commits, ~38KB pre-script injection) exceeds 32MB. 128MB gives
+// headroom for typical release ranges without env override. Cap is on raw bytes received from pipe — stream
+// compaction in parser does not lower this number.
+export const DEFAULT_STDOUT_LIMIT_BYTES = 128 * 1024 * 1024;
 
 export function resolveStdoutLimitBytes(spec: Specialist): number {
   return spec.specialist.execution.stdout_limit_bytes ?? resolveEnvStdoutLimitBytes() ?? DEFAULT_STDOUT_LIMIT_BYTES;
@@ -315,11 +319,12 @@ function runSingleAttempt(prompt: string, model: string, thinkingLevel: string |
     const pi = spawn('pi', args, { stdio: ['ignore', 'pipe', 'pipe'] });
     options.onChild?.(pi);
 
-    const chunks: Buffer[] = [];
     let stderr = '';
     let timedOut = false;
     let outputTooLarge = false;
     let stdoutBytes = 0;
+    let pending = '';
+    let assistantText = '';
 
     const timer = setTimeout(() => {
       timedOut = true;
@@ -329,12 +334,41 @@ function runSingleAttempt(prompt: string, model: string, thinkingLevel: string |
 
     pi.stdout.on('data', chunk => {
       const buffer = Buffer.from(chunk);
-      chunks.push(buffer);
       stdoutBytes += buffer.length;
       if (stdoutBytes > stdoutLimitBytes && !outputTooLarge) {
         outputTooLarge = true;
         pi.kill('SIGTERM');
         setTimeout(() => pi.kill('SIGKILL'), 2000);
+        return;
+      }
+
+      pending += buffer.toString('utf-8');
+      const lines = pending.split(/\r?\n/);
+      pending = lines.pop() ?? '';
+      for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line) continue;
+        try {
+          const event = JSON.parse(line) as PiEvent;
+          if (event.type === 'message_end') {
+            const text = textFromMessage(event.message);
+            if (text) assistantText = text;
+          }
+          if (event.type === 'agent_end' && Array.isArray(event.messages)) {
+            for (let j = event.messages.length - 1; j >= 0; j--) {
+              const text = textFromMessage(event.messages[j]);
+              if (text) {
+                assistantText = text;
+                break;
+              }
+            }
+          }
+          if (event.type === 'assistant' && typeof event.data?.text === 'string') assistantText = event.data.text;
+          const legacyContent = event.data?.content?.[0]?.text;
+          if (typeof legacyContent === 'string') assistantText = legacyContent;
+        } catch {
+          continue;
+        }
       }
     });
     pi.stderr.on('data', chunk => { stderr += String(chunk); });
@@ -344,7 +378,7 @@ function runSingleAttempt(prompt: string, model: string, thinkingLevel: string |
       clearTimeout(timer);
       resolve({
         model,
-        text: extractAssistantText(Buffer.concat(chunks).toString('utf-8').split(/\r?\n/)),
+        text: assistantText,
         stderr,
         exitCode: code ?? 0,
         timedOut,

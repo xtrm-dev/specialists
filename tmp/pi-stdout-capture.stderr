@@ -1,0 +1,2 @@
+Warning: dolt auto-push failed: failed to push to origin/main: Error 1105 (HY000): failed to get remote db; the remote: origin 'https://doltremoteapi.dolthub.com/jaggerxtrm/specialists' could not be accessed; could not access dolt url 'https://doltremoteapi.dolthub.com/jaggerxtrm/specialists': rpc error: code = PermissionDenied desc = permission denied
+[specialists] [ERROR] Fatal error: Error: stdout exceeded cap
