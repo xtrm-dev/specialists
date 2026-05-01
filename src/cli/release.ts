@@ -91,7 +91,8 @@ export function extractReleaseDraft(output: string): ReleaseDraft | undefined {
   const jsonText = output.match(/\{[\s\S]*\}/)?.[0];
   if (jsonText) {
     try {
-      return normalizeReleaseDraft(JSON.parse(jsonText));
+      const fromJson = normalizeReleaseDraft(JSON.parse(jsonText));
+      if (fromJson) return fromJson;
     } catch {
       // fall through to markdown parse
     }
@@ -99,20 +100,50 @@ export function extractReleaseDraft(output: string): ReleaseDraft | undefined {
   return parseMarkdownDraft(output);
 }
 
+const SECTION_KEY_MAP: Record<string, keyof ReleaseDraft['sections']> = {
+  added: 'added', add: 'added',
+  changed: 'changed', change: 'changed',
+  fixed: 'fixed', fix: 'fixed', fixes: 'fixed',
+  removed: 'removed', remove: 'removed',
+  deprecated: 'deprecated', deprecate: 'deprecated',
+  security: 'security',
+};
+
+function emptySections(): ReleaseDraft['sections'] {
+  return { added: [], changed: [], fixed: [], removed: [], deprecated: [], security: [] };
+}
+
+function toStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
+}
+
 function normalizeReleaseDraft(raw: unknown): ReleaseDraft | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const obj = raw as Record<string, unknown>;
-  const sectionsRaw = (obj.sections && typeof obj.sections === 'object' ? obj.sections : {}) as Record<string, unknown>;
-  const toStringArray = (value: unknown): string[] =>
-    Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
-  const sections: ReleaseDraft['sections'] = {
-    added: toStringArray(sectionsRaw.added),
-    changed: toStringArray(sectionsRaw.changed),
-    fixed: toStringArray(sectionsRaw.fixed),
-    removed: toStringArray(sectionsRaw.removed),
-    deprecated: toStringArray(sectionsRaw.deprecated),
-    security: toStringArray(sectionsRaw.security),
-  };
+  const sectionsRaw = obj.sections;
+  const sections = emptySections();
+
+  if (Array.isArray(sectionsRaw)) {
+    for (const item of sectionsRaw) {
+      if (!item || typeof item !== 'object') continue;
+      const entry = item as Record<string, unknown>;
+      const name = typeof entry.name === 'string' ? entry.name.trim().toLowerCase() : '';
+      const key = SECTION_KEY_MAP[name];
+      if (!key) continue;
+      const bullets = toStringArray(entry.bullets ?? entry.entries ?? entry.items);
+      sections[key].push(...bullets);
+    }
+  } else if (sectionsRaw && typeof sectionsRaw === 'object') {
+    const record = sectionsRaw as Record<string, unknown>;
+    for (const [rawKey, value] of Object.entries(record)) {
+      const key = SECTION_KEY_MAP[rawKey.trim().toLowerCase()];
+      if (!key) continue;
+      sections[key].push(...toStringArray(value));
+    }
+  } else {
+    return undefined;
+  }
+
   const total = Object.values(sections).reduce((n, arr) => n + arr.length, 0);
   if (total === 0) return undefined;
   const summary = typeof obj.unreleased_summary === 'string' ? obj.unreleased_summary : '';
