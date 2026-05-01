@@ -319,18 +319,19 @@ export async function prepareRelease(argv: string[] = process.argv.slice(3), inj
   const tags = git(['tag', '--list', 'v*'], cwd, deps.exec).split('\n').filter(Boolean);
   const prevTag = args.fromTag ?? getMostRecentSemverTag(tags);
   const nextTag = args.toTag ?? computeNextTag(prevTag, args.bump);
+  const sectionLabel = SEMVER_TAG.test(nextTag) ? nextTag : computeNextTag(prevTag, args.bump);
   const output = await runKeeper(cwd, prevTag ?? 'v0.0.0', nextTag, deps);
   const draft = extractReleaseDraft(output);
   if (!draft) throw new Error('Could not parse changelog-keeper JSON output');
 
   const changelogPath = join(cwd, 'CHANGELOG.md');
   const changelog = deps.readFile(changelogPath, 'utf-8');
-  const section = buildReleaseSection(nextTag, deps.now().toISOString().slice(0, 10), draft);
+  const section = buildReleaseSection(sectionLabel, deps.now().toISOString().slice(0, 10), draft);
   deps.writeFile(changelogPath, insertReleaseSection(changelog, section, args.insertAfter), 'utf-8');
   if (!args.fromTag && !args.toTag) writePackageVersion(cwd, nextTag.slice(1), deps.readFile, deps.writeFile);
   if (!args.fromTag && !args.toTag) gitSpawn(['add', 'CHANGELOG.md', 'package.json', 'dist/index.js'], cwd, deps.spawn);
   else gitSpawn(['add', 'CHANGELOG.md', 'dist/index.js'], cwd, deps.spawn);
-  console.log(args.fromTag || args.toTag ? `Review staged changes, backfill with: git commit -m "release: ${nextTag}"` : `Review staged changes, commit with: git commit -m "release: ${nextTag}" then run sp release publish`);
+  console.log(args.fromTag || args.toTag ? `Review staged changes, backfill with: git commit -m "release: ${sectionLabel}"` : `Review staged changes, commit with: git commit -m "release: ${sectionLabel}" then run sp release publish`);
 }
 
 export async function publishRelease(_argv: string[] = process.argv.slice(3), injected: Partial<GitDeps> = {}): Promise<void> {
