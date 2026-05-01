@@ -91,12 +91,32 @@ export function extractReleaseDraft(output: string): ReleaseDraft | undefined {
   const jsonText = output.match(/\{[\s\S]*\}/)?.[0];
   if (jsonText) {
     try {
-      return JSON.parse(jsonText) as ReleaseDraft;
+      return normalizeReleaseDraft(JSON.parse(jsonText));
     } catch {
       // fall through to markdown parse
     }
   }
   return parseMarkdownDraft(output);
+}
+
+function normalizeReleaseDraft(raw: unknown): ReleaseDraft | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const obj = raw as Record<string, unknown>;
+  const sectionsRaw = (obj.sections && typeof obj.sections === 'object' ? obj.sections : {}) as Record<string, unknown>;
+  const toStringArray = (value: unknown): string[] =>
+    Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
+  const sections: ReleaseDraft['sections'] = {
+    added: toStringArray(sectionsRaw.added),
+    changed: toStringArray(sectionsRaw.changed),
+    fixed: toStringArray(sectionsRaw.fixed),
+    removed: toStringArray(sectionsRaw.removed),
+    deprecated: toStringArray(sectionsRaw.deprecated),
+    security: toStringArray(sectionsRaw.security),
+  };
+  const total = Object.values(sections).reduce((n, arr) => n + arr.length, 0);
+  if (total === 0) return undefined;
+  const summary = typeof obj.unreleased_summary === 'string' ? obj.unreleased_summary : '';
+  return { unreleased_summary: summary, sections };
 }
 
 function parseMarkdownDraft(output: string): ReleaseDraft | undefined {

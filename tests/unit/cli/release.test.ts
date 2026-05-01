@@ -71,6 +71,19 @@ describe('release CLI', () => {
     });
   });
 
+  it('normalizes JSON drafts missing some section keys', () => {
+    const draft = extractReleaseDraft('{"unreleased_summary":"x","sections":{"fixed":["a: b"]}}');
+    expect(draft).toEqual({
+      unreleased_summary: 'x',
+      sections: { added: [], changed: [], fixed: ['a: b'], removed: [], deprecated: [], security: [] },
+    });
+  });
+
+  it('drops non-string entries from JSON drafts', () => {
+    const draft = extractReleaseDraft('{"sections":{"added":["ok",42,null,"also ok"]}}');
+    expect(draft?.sections.added).toEqual(['ok', 'also ok']);
+  });
+
   it('rejects from-only release args', () => {
     expect(() => parseArgs(['--from', 'v1.0.0'])).toThrow('--from and --to must be used together');
   });
