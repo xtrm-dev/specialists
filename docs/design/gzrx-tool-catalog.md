@@ -62,7 +62,7 @@ visible to the agent as a normal tool error, not silently hidden.
 
 ### 1.2 Serena tool universe (via `pi-serena-tools` extension)
 
-`pi-serena-tools` registers these 42 tools in
+`pi-serena-tools` registers these 43 tools in
 `pi-serena-tools/serenaTools.ts:25-695`:
 
 - Meta / lifecycle: `serena_list_tools`, `get_current_config`,
@@ -83,10 +83,78 @@ visible to the agent as a normal tool error, not silently hidden.
 - Memory: `read_memory`, `write_memory`, `list_memories`, `delete_memory`,
   `rename_memory`, `edit_memory`
 
-Comparison with `src/pi/session.ts:164-214`: no drift found. The source map
-contains the same 42 names split as 21 READ_ONLY, 1 LOW, and 20 WRITE tools.
-The split is policy, not package capability: the extension registers the whole
-surface; `--tools` chooses which names are advertised/allowed.
+Comparison with `src/pi/session.ts:164-214`: no drift in tool *names*. The
+source map contains the same 43 names split as 21 READ_ONLY, 1 LOW, and 21
+WRITE tools. The split is policy, not package capability: the extension
+registers the whole surface; `--tools` chooses which names are
+advertised/allowed.
+
+The capability-taxonomy grouping above (Meta / Symbol-nav / Writes / Shell /
+Memory) is *not* the same axis as source's READ/LOW/WRITE tier-allowlist
+grouping. The source treats anything that mutates Serena state — including
+admin/lifecycle ops and memory mutators — as WRITE-tier, not READ-tier.
+Capability taxonomy is for manifest design (§2-3); the table below is the
+authoritative source-tier assignment per tool.
+
+#### 1.2.1 Source-tier cross-reference
+
+Tools where the doc's capability-group differs from the source-tier are
+flagged ⚠. They remain mutating ops in source policy regardless of
+capability label; the design must preserve the source split in default
+output (§7 step 2: byte-equivalent snapshot tests).
+
+| Tool | Doc group | Source tier (`pi/session.ts:164-214`) | Note |
+|------|-----------|---------------------------------------|------|
+| `serena_list_tools` | Meta | READ_ONLY | |
+| `get_current_config` | Meta | READ_ONLY | |
+| `activate_project` | Meta | READ_ONLY | |
+| `check_onboarding_performed` | Meta | READ_ONLY | |
+| `initial_instructions` | Meta | READ_ONLY | |
+| `think_about_collected_information` | Meta | READ_ONLY | |
+| `think_about_task_adherence` | Meta | READ_ONLY | |
+| `think_about_whether_you_are_done` | Meta | READ_ONLY | |
+| `remove_project` | Meta | **WRITE** | ⚠ admin/lifecycle treated as mutation |
+| `switch_modes` | Meta | **WRITE** | ⚠ admin/lifecycle |
+| `open_dashboard` | Meta | **WRITE** | ⚠ admin/lifecycle |
+| `onboarding` | Meta | **WRITE** | ⚠ admin/lifecycle |
+| `prepare_for_new_conversation` | Meta | **WRITE** | ⚠ admin/lifecycle |
+| `summarize_changes` | Meta | **WRITE** | ⚠ admin/lifecycle |
+| `serena_mcp_reset` | Meta | **WRITE** | ⚠ admin/lifecycle |
+| `find_symbol` | Symbol/nav | READ_ONLY | |
+| `find_referencing_symbols` | Symbol/nav | READ_ONLY | |
+| `read_file` | Symbol/nav | READ_ONLY | |
+| `get_symbols_overview` | Symbol/nav | READ_ONLY | |
+| `jet_brains_get_symbols_overview` | Symbol/nav | READ_ONLY | |
+| `jet_brains_find_symbol` | Symbol/nav | READ_ONLY | |
+| `jet_brains_find_referencing_symbols` | Symbol/nav | READ_ONLY | |
+| `jet_brains_type_hierarchy` | Symbol/nav | READ_ONLY | |
+| `search_for_pattern` | Symbol/nav | READ_ONLY | |
+| `list_dir` | Symbol/nav | READ_ONLY | |
+| `find_file` | Symbol/nav | READ_ONLY | |
+| `execute_shell_command` | Shell | LOW | |
+| `insert_after_symbol` | Writes | WRITE | |
+| `replace_symbol_body` | Writes | WRITE | |
+| `insert_before_symbol` | Writes | WRITE | |
+| `rename_symbol` | Writes | WRITE | |
+| `restart_language_server` | Writes | WRITE | mutates LSP state |
+| `create_text_file` | Writes | WRITE | |
+| `replace_content` | Writes | WRITE | |
+| `delete_lines` | Writes | WRITE | |
+| `replace_lines` | Writes | WRITE | |
+| `insert_at_line` | Writes | WRITE | |
+| `list_memories` | Memory | READ_ONLY | |
+| `read_memory` | Memory | READ_ONLY | |
+| `write_memory` | Memory | **WRITE** | ⚠ memory mutator |
+| `delete_memory` | Memory | **WRITE** | ⚠ memory mutator |
+| `rename_memory` | Memory | **WRITE** | ⚠ memory mutator |
+| `edit_memory` | Memory | **WRITE** | ⚠ memory mutator |
+
+Implication for §3 tier capabilities: `memory` capability cannot be a
+single bucket. It must split into `memory.read` (READ_ONLY+) and
+`memory.write` (WRITE+). The same applies to `admin.serena` — must split
+into read-only meta probes (config/onboarding/think_*) and lifecycle
+mutators (remove_project/switch_modes/open_dashboard/onboarding/
+prepare_for_new_conversation/summarize_changes/serena_mcp_reset).
 
 ### 1.3 GitNexus tool universe (via `pi-gitnexus` extension)
 
@@ -179,9 +247,11 @@ from. Proposed capability tags:
 | `write.create` | Create new files | native `write`, serena `create_text_file` |
 | `mutate.rename` | Project-wide rename | serena `rename_symbol`, gitnexus `gitnexus_rename` |
 | `mutate.graph` | Mutate the graph store | gitnexus `gitnexus_cypher` (when used as write) |
-| `admin.serena` | Serena lifecycle | `restart_language_server`, `serena_mcp_reset`, `switch_modes` |
-| `memory` | Serena memory store | `read_memory`, `write_memory`, `list_memories`, etc. |
-| `meta` | Self-introspection | `serena_list_tools`, `gitnexus_list_repos`, `get_current_config` |
+| `admin.serena.read` | Read-only Serena meta probes | `get_current_config`, `check_onboarding_performed`, `initial_instructions`, `think_about_*` |
+| `admin.serena.write` | Serena lifecycle mutators | `restart_language_server`, `serena_mcp_reset`, `switch_modes`, `remove_project`, `open_dashboard`, `onboarding`, `prepare_for_new_conversation`, `summarize_changes` |
+| `memory.read` | Serena memory readers | `read_memory`, `list_memories` |
+| `memory.write` | Serena memory mutators | `write_memory`, `delete_memory`, `rename_memory`, `edit_memory` |
+| `meta` | Self-introspection | `serena_list_tools`, `gitnexus_list_repos` |
 
 > Decision: model `memory` as a normal READ_ONLY+ capability. It is currently
 > available whenever `pi-serena-tools` is loaded, but explicit cataloging keeps
@@ -210,7 +280,8 @@ READ_ONLY:
     - analyze.graph
     - analyze.refs
     - nav.fs
-    - memory
+    - memory.read
+    - admin.serena.read
     - meta
   denied_natives_when_extension:
     read: [read_file]
@@ -232,7 +303,10 @@ MEDIUM:
     - write.text
     - write.symbol
     - mutate.rename
-    - admin.serena
+    - admin.serena.write    # restart_language_server, serena_mcp_reset, switch_modes,
+                            # remove_project, open_dashboard, onboarding,
+                            # prepare_for_new_conversation, summarize_changes
+    - memory.write          # write_memory, delete_memory, rename_memory, edit_memory
   denied_natives_when_extension:
     edit: [replace_content, replace_lines, replace_symbol_body]
   denied_natives_mode: soft
@@ -246,6 +320,11 @@ HIGH:
     write: [create_text_file]
   denied_natives_mode: soft
 ```
+
+The `memory.write` and `admin.serena.write` capabilities are gated to MEDIUM+
+because their tools live in `SERENA_WRITE_TOOLS` per source policy. Promoting
+them to READ_ONLY would be a behavior change and must not happen by default.
+The byte-equivalent snapshot test in §7 step 2 enforces this.
 
 Specialists can opt into harder policy. Recommended first override:
 `explorer.denied_natives_mode = hard` for `grep`, `find`, and `ls` while keeping
