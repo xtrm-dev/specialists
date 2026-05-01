@@ -90,6 +90,39 @@ describe('release CLI', () => {
     expect(draft?.sections.fixed).toEqual(['b', 'c']);
   });
 
+  it('derives semver section label when --to is HEAD', async () => {
+    const root = makeRepo();
+    process.chdir(root);
+
+    const deps = createPrepareDeps(
+      root,
+      'v3.10.0',
+      JSON.stringify({ sections: [{ name: 'Fixed', bullets: ['hot patch'] }] }),
+    );
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    await prepareRelease(['--from', 'v3.10.0', '--to', 'HEAD'], {
+      cwd: () => root,
+      now: () => new Date('2026-05-01T00:00:00Z'),
+      spawn: deps.spawn as any,
+      exec: vi.fn((cmd: string, args: string[]) => {
+        if (cmd === 'git' && args[0] === 'tag' && args[1] === '--list') return 'v3.10.0';
+        if (cmd === 'git' && args[0] === 'log') return 'hash||msg||body';
+        if (cmd === 'bd' && args[0] === 'query') return 'closed issues';
+        throw new Error(`unexpected exec ${cmd} ${args.join(' ')}`);
+      }) as any,
+      readFile: readFileSync as any,
+      writeFile: writeFileSync as any,
+      loader: () => ({}) as any,
+      runScript: deps.runScript as any,
+    });
+
+    const changelog = readFileSync(join(root, 'CHANGELOG.md'), 'utf-8');
+    expect(changelog).toContain('## [v3.10.1] - 2026-05-01');
+    expect(changelog).not.toContain('## [HEAD]');
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('release: v3.10.1'));
+  });
+
   it('falls through to markdown when JSON has unknown shape', () => {
     const output = ['### Added', '- alpha', '', '### Fixed', '- beta', '', '{"unrelated":"shape"}'].join('\n');
     const draft = extractReleaseDraft(output);
