@@ -84,6 +84,19 @@ describe('release CLI', () => {
     expect(draft?.sections.added).toEqual(['ok', 'also ok']);
   });
 
+  it('accepts array-shape sections (name/bullets)', () => {
+    const draft = extractReleaseDraft('{"sections":[{"name":"Added","bullets":["a"]},{"name":"Fixed","bullets":["b","c"]}]}');
+    expect(draft?.sections.added).toEqual(['a']);
+    expect(draft?.sections.fixed).toEqual(['b', 'c']);
+  });
+
+  it('falls through to markdown when JSON has unknown shape', () => {
+    const output = ['### Added', '- alpha', '', '### Fixed', '- beta', '', '{"unrelated":"shape"}'].join('\n');
+    const draft = extractReleaseDraft(output);
+    expect(draft?.sections.added).toEqual(['alpha']);
+    expect(draft?.sections.fixed).toContain('beta');
+  });
+
   it('rejects from-only release args', () => {
     expect(() => parseArgs(['--from', 'v1.0.0'])).toThrow('--from and --to must be used together');
   });
