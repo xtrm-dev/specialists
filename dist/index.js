@@ -17523,6 +17523,7 @@ var init_schema = __esm(() => {
     stall_timeout_ms: numberType().optional(),
     max_retries: numberType().int().min(0).default(0),
     interactive: booleanType().default(false),
+    stdout_limit_bytes: numberType().int().positive().optional(),
     response_format: enumType(["text", "json", "markdown"]).default("text"),
     output_type: enumType(["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]).default("custom"),
     permission_required: enumType(["READ_ONLY", "LOW", "MEDIUM", "HIGH"]).default("READ_ONLY"),
@@ -20075,6 +20076,15 @@ class SqliteClient {
       }
       return statuses;
     }, "listStatuses");
+  }
+  removeJobs(jobIds) {
+    return withRetry(() => {
+      if (jobIds.length === 0)
+        return 0;
+      const placeholders = jobIds.map(() => "?").join(", ");
+      const result = this.db.query(`DELETE FROM specialist_jobs WHERE job_id IN (${placeholders})`).run(...jobIds);
+      return result.changes ?? 0;
+    }, "removeJobs");
   }
   readEpicRun(epicId) {
     return withRetry(() => {
@@ -26936,7 +26946,7 @@ function parseBeforeArgument(raw) {
 function printDbHelp() {
   console.log([
     "",
-    "Usage: specialists db <setup|backfill|vacuum|prune> (legacy/migration tooling)",
+    "Usage: specialists db <setup|backfill|vacuum|prune|extract|stats|benchmark-export>",
     "",
     "Human-only commands for shared observability SQLite database maintenance and migration.",
     "",
@@ -26947,8 +26957,8 @@ function printDbHelp() {
     "  [MIGRATION] vacuum                 Run SQLite VACUUM (refuses when running/starting jobs exist)",
     "  [MIGRATION] prune --before <iso|duration>      Prune old rows (default dry-run)",
     "              [--dry-run] [--apply] [--include-epics] [--skip-extract]",
-    "  [MIGRATION] extract [--job <id>] [--all-missing] [--since <dur>]",
-    "  [QUERY] stats [--spec <name>] [--model <glob>] [--since <dur>] [--format json|table]",
+    "  [MIGRATION] extract [--job <id>] [--all-missing] [--since <dur>] [--help]",
+    "  [QUERY] stats [--spec <name>] [--model <glob>] [--since <dur>] [--format json|table] [--with-payload] [--help]",
     "  [ANALYSIS] benchmark-export [--output <path>] [--include-prep-jobs] [--epic-id <id>]",
     "",
     "Behavior:",
@@ -27046,7 +27056,25 @@ function parsePruneOptions(argv) {
     skipExtract
   };
 }
+function printExtractHelp() {
+  console.log([
+    "",
+    "Usage: specialists db extract [--job <id>] [--all-missing] [--since <dur>] [--backfill]",
+    "",
+    "Options:",
+    "  --job <id>        Recompute one job",
+    "  --all-missing     Recompute every status row missing KPI metrics",
+    "  --since <dur>     Limit by started_at_ms, duration like 1h or 7d",
+    "  --backfill        Alias for --all-missing",
+    ""
+  ].join(`
+`));
+}
 function parseExtractOptions(argv) {
+  if (argv.includes("--help") || argv.includes("-h")) {
+    printExtractHelp();
+    process.exit(0);
+  }
   let jobId;
   let allMissing = false;
   let sinceMs;
@@ -27073,7 +27101,26 @@ function parseExtractOptions(argv) {
   }
   return { jobId, allMissing, sinceMs };
 }
+function printStatsHelp() {
+  console.log([
+    "",
+    "Usage: specialists db stats [--spec <name>] [--model <glob>] [--since <dur>] [--format json|table] [--with-payload]",
+    "",
+    "Options:",
+    "  --spec <name>        Filter by specialist name",
+    "  --model <glob>       Filter by model glob",
+    "  --since <dur>        Filter by start time, duration like 1h or 7d",
+    "  --format <json|table> Output format",
+    "  --with-payload       Include payload_kb and payload_tokens columns",
+    ""
+  ].join(`
+`));
+}
 function parseStatsOptions(argv) {
+  if (argv.includes("--help") || argv.includes("-h")) {
+    printStatsHelp();
+    process.exit(0);
+  }
   let spec;
   let model;
   let sinceMs;
@@ -27605,9 +27652,14 @@ var init_db = __esm(() => {
 import { spawn as spawn3 } from "child_process";
 import { createHash as createHash3, randomUUID } from "crypto";
 import { readFileSync as readFileSync11 } from "fs";
-function hasUnsubstitutedVariables(template) {
-  const match = template.match(/\$([a-zA-Z_][a-zA-Z0-9_]*)/);
-  return match?.[1] ?? null;
+function hasUnsubstitutedVariables(template, variables) {
+  const matches = template.match(/\$([a-zA-Z_][a-zA-Z0-9_]*)/g) ?? [];
+  for (const match of matches) {
+    const key = match.slice(1);
+    if (variables[key] === undefined)
+      return key;
+  }
+  return null;
 }
 function compatGuard(spec, trust) {
   const execution = spec.specialist.execution;
@@ -27651,11 +27703,10 @@ function computeSkillSources(spec) {
   return sources;
 }
 function renderTaskTemplate(template, variables) {
-  const output2 = renderTemplate(template, variables);
-  const missing = hasUnsubstitutedVariables(output2);
+  const missing = hasUnsubstitutedVariables(template, variables);
   if (missing)
     throw new Error(`Missing template variable: ${missing}`);
-  return output2;
+  return renderTemplate(template, variables);
 }
 function mapErrorType(message) {
   if (message.includes("Specialist not found"))
@@ -27685,57 +27736,30 @@ function textFromMessage(message) {
     return "";
   return message.content.filter((part) => part.type === "text" && typeof part.text === "string").map((part) => part.text).join("");
 }
-function extractAssistantText(lines) {
-  for (let i = lines.length - 1;i >= 0; i--) {
-    const line = lines[i].trim();
-    if (!line)
-      continue;
-    let event;
-    try {
-      event = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    if (event.type === "message_end") {
-      const text = textFromMessage(event.message);
+function extractAssistantTextFromEvent(event) {
+  if (event.type === "message_end") {
+    const text = textFromMessage(event.message);
+    if (text)
+      return text;
+  }
+  if (event.type === "agent_end" && Array.isArray(event.messages)) {
+    for (let j = event.messages.length - 1;j >= 0; j--) {
+      const text = textFromMessage(event.messages[j]);
       if (text)
         return text;
     }
-    if (event.type === "agent_end" && Array.isArray(event.messages)) {
-      for (let j = event.messages.length - 1;j >= 0; j--) {
-        const text = textFromMessage(event.messages[j]);
-        if (text)
-          return text;
-      }
-    }
-    if (event.type === "assistant" && typeof event.data?.text === "string")
-      return event.data.text;
-    const legacyContent = event.data?.content?.[0]?.text;
-    if (typeof legacyContent === "string")
-      return legacyContent;
   }
-  return "";
+  if (event.type === "assistant" && typeof event.data?.text === "string")
+    return event.data.text;
+  const legacyContent = event.data?.content?.[0]?.text;
+  if (typeof legacyContent === "string")
+    return legacyContent;
+  return;
 }
 function stripMarkdownFences(text) {
   const trimmed = text.trim();
   const fenced = trimmed.match(/^```(?:json|JSON)?\s*\n?([\s\S]*?)\n?```\s*$/);
   return fenced ? fenced[1].trim() : trimmed;
-}
-function extractPiErrorMessage(lines) {
-  for (let i = lines.length - 1;i >= 0; i--) {
-    const line = lines[i].trim();
-    if (!line)
-      continue;
-    try {
-      const event = JSON.parse(line);
-      const errMsg = event.message?.errorMessage;
-      if (typeof errMsg === "string" && errMsg.length > 0)
-        return errMsg;
-    } catch {
-      continue;
-    }
-  }
-  return null;
 }
 function writeTraceRow(client, specialist, model, traceId, output2, durationMs, skillSources, onAuditFailure) {
   if (!client)
@@ -27758,6 +27782,20 @@ function writeTraceRow(client, specialist, model, traceId, output2, durationMs, 
     onAuditFailure?.(error2);
   }
 }
+function resolveAssistantTextLimitBytes(spec) {
+  return spec.specialist.execution.stdout_limit_bytes ?? resolveEnvAssistantTextLimitBytes() ?? DEFAULT_ASSISTANT_TEXT_LIMIT_BYTES;
+}
+function resolveEnvAssistantTextLimitBytes() {
+  const raw = process.env.SPECIALISTS_SCRIPT_STDOUT_LIMIT_BYTES;
+  if (raw === undefined)
+    return;
+  const envLimit = Number(raw);
+  if (!Number.isFinite(envLimit) || envLimit <= 0)
+    return;
+  process.stderr.write(`warning: SPECIALISTS_SCRIPT_STDOUT_LIMIT_BYTES is deprecated; applies to assistant text cap
+`);
+  return Math.floor(envLimit);
+}
 function openObservabilityClient(options) {
   const dbPath = options.observabilityDbPath ?? options.projectDir;
   return createObservabilitySqliteClient(dbPath);
@@ -27771,87 +27809,172 @@ async function runScriptSpecialist(input2, options) {
     const skillSources = options.trust?.allowSkills ? computeSkillSources(spec) : undefined;
     const template = input2.template ?? spec.specialist.prompt.task_template;
     const prompt = renderTaskTemplate(template, input2.variables ?? {});
-    const model = input2.model_override ?? spec.specialist.execution.model ?? options.fallbackModel ?? "unknown";
     const timeoutMs = input2.timeout_ms ?? spec.specialist.execution.timeout_ms ?? 120000;
+    const modelCandidates = collectModelCandidates(input2, spec, options);
+    const assistantTextLimitBytes = resolveAssistantTextLimitBytes(spec);
+    const attempts = [];
+    for (const model of modelCandidates) {
+      const attempt = await runSingleAttempt(prompt, model, input2.thinking_level ?? spec.specialist.execution.thinking_level, timeoutMs, assistantTextLimitBytes, options);
+      attempts.push(attempt);
+      const parsed = classifyAttempt(attempt);
+      if (parsed.retryable)
+        continue;
+      const durationMs2 = Date.now() - startedAt;
+      const observability2 = openObservabilityClient(options);
+      if (input2.trace !== false && observability2)
+        writeTraceRow(observability2, input2.specialist, model, traceId, parsed.text, durationMs2, skillSources, options.onAuditFailure);
+      if (parsed.kind === "success") {
+        let parsed_json;
+        if (spec.specialist.execution.response_format === "json") {
+          try {
+            parsed_json = JSON.parse(stripMarkdownFences(parsed.text));
+            const required2 = Array.isArray(spec.specialist.prompt.output_schema?.required) ? spec.specialist.prompt.output_schema.required.filter((value) => typeof value === "string") : [];
+            for (const key of required2) {
+              if (parsed_json === null || typeof parsed_json !== "object" || !(key in parsed_json))
+                throw new Error(`Missing required output field: ${key}`);
+            }
+          } catch (error2) {
+            return { success: false, error: error2 instanceof Error ? error2.message : String(error2), error_type: "invalid_json", meta: { specialist: input2.specialist, model, duration_ms: durationMs2, trace_id: traceId } };
+          }
+        }
+        return { success: true, output: parsed.text, parsed_json, meta: { specialist: input2.specialist, model, duration_ms: durationMs2, trace_id: traceId } };
+      }
+      return { success: false, error: parsed.error, error_type: parsed.errorType, meta: { specialist: input2.specialist, model, duration_ms: durationMs2, trace_id: traceId } };
+    }
+    const lastAttempt = attempts.at(-1);
+    const durationMs = Date.now() - startedAt;
+    const observability = openObservabilityClient(options);
+    if (input2.trace !== false && observability)
+      writeTraceRow(observability, input2.specialist, modelCandidates.at(-1) ?? "unknown", traceId, lastAttempt?.text ?? "", durationMs, skillSources, options.onAuditFailure);
+    return { success: false, error: lastAttempt?.stderr || "pi produced no assistant text", error_type: "internal", meta: { specialist: input2.specialist, model: modelCandidates.at(-1) ?? "unknown", duration_ms: durationMs, trace_id: traceId } };
+  } catch (error2) {
+    const message = error2 instanceof Error ? error2.message : String(error2);
+    return { success: false, error: message, error_type: mapErrorType(message), meta: { specialist: input2.specialist, duration_ms: Date.now() - startedAt, trace_id: traceId } };
+  }
+}
+function collectModelCandidates(input2, spec, options) {
+  const candidates = [input2.model_override, spec.specialist.execution.model, spec.specialist.execution.fallback_model, options.fallbackModel].filter((value) => typeof value === "string" && value.length > 0);
+  return [...new Set(candidates)];
+}
+function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assistantTextLimitBytes, options) {
+  return new Promise((resolve8, reject) => {
     const args = ["--mode", "json", "--no-session", "--no-extensions", "--no-tools", "--model", model];
-    const thinkingLevel = input2.thinking_level ?? spec.specialist.execution.thinking_level;
     if (thinkingLevel)
       args.push("--thinking", thinkingLevel);
     args.push(prompt);
     const pi = spawn3("pi", args, { stdio: ["ignore", "pipe", "pipe"] });
     options.onChild?.(pi);
-    const chunks = [];
     let stderr = "";
     let timedOut = false;
     let outputTooLarge = false;
-    const stdoutLimit = 4 * 1024 * 1024;
-    let stdoutBytes = 0;
+    let outputTooLargeReason;
+    let pending = "";
+    let assistantText = "";
+    let pendingBytes = 0;
+    let stderrBytes = 0;
     const timer = setTimeout(() => {
       timedOut = true;
       pi.kill("SIGTERM");
       setTimeout(() => pi.kill("SIGKILL"), 2000);
     }, timeoutMs);
     pi.stdout.on("data", (chunk) => {
+      if (outputTooLarge)
+        return;
       const buffer = Buffer.from(chunk);
-      chunks.push(buffer);
-      stdoutBytes += buffer.length;
-      if (stdoutBytes > stdoutLimit && !outputTooLarge) {
+      pending += buffer.toString("utf-8");
+      pendingBytes += buffer.length;
+      if (pendingBytes > DEFAULT_PENDING_LINE_LIMIT_BYTES) {
         outputTooLarge = true;
+        outputTooLargeReason = "malformed_line_too_large";
+        pi.kill("SIGTERM");
+        setTimeout(() => pi.kill("SIGKILL"), 2000);
+        return;
+      }
+      const lines = pending.split(/\r?\n/);
+      pending = lines.pop() ?? "";
+      pendingBytes = Buffer.byteLength(pending);
+      for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line)
+          continue;
+        try {
+          const event = JSON.parse(line);
+          const nextAssistantText = extractAssistantTextFromEvent(event);
+          if (nextAssistantText !== undefined) {
+            if (Buffer.byteLength(nextAssistantText, "utf8") > assistantTextLimitBytes) {
+              outputTooLarge = true;
+              outputTooLargeReason = "assistant_text_too_large";
+              pi.kill("SIGTERM");
+              setTimeout(() => pi.kill("SIGKILL"), 2000);
+              return;
+            }
+            assistantText = nextAssistantText;
+          }
+        } catch {
+          continue;
+        }
+      }
+    });
+    pi.stderr.on("data", (chunk) => {
+      if (outputTooLarge)
+        return;
+      const text = String(chunk);
+      stderr += text;
+      stderrBytes += Buffer.byteLength(text, "utf8");
+      if (stderrBytes > DEFAULT_STDERR_LIMIT_BYTES) {
+        outputTooLarge = true;
+        outputTooLargeReason = "stderr_too_large";
+        stderr = stderr.slice(0, DEFAULT_STDERR_LIMIT_BYTES);
         pi.kill("SIGTERM");
         setTimeout(() => pi.kill("SIGKILL"), 2000);
       }
     });
-    pi.stderr.on("data", (chunk) => {
-      stderr += String(chunk);
+    pi.on("error", reject);
+    pi.on("close", (code) => {
+      clearTimeout(timer);
+      resolve8({
+        model,
+        text: assistantText,
+        stderr,
+        exitCode: code ?? 0,
+        timedOut,
+        outputTooLarge,
+        outputTooLargeReason
+      });
     });
-    const exitCode = await new Promise((resolve8, reject) => {
-      pi.on("error", reject);
-      pi.on("close", (code) => resolve8(code ?? 0));
-    }).finally(() => clearTimeout(timer));
-    const stdout = Buffer.concat(chunks).toString("utf-8");
-    const text = extractAssistantText(stdout.split(/\r?\n/));
-    const durationMs = Date.now() - startedAt;
-    const observability = openObservabilityClient(options);
-    if (input2.trace !== false && observability)
-      writeTraceRow(observability, input2.specialist, model, traceId, text, durationMs, skillSources, options.onAuditFailure);
-    if (outputTooLarge) {
-      return { success: false, error: "stdout exceeded 4MB cap", error_type: "output_too_large", meta: { specialist: input2.specialist, model, duration_ms: durationMs, trace_id: traceId } };
-    }
-    if (timedOut) {
-      return { success: false, error: stderr || "timed out", error_type: "timeout", meta: { specialist: input2.specialist, model, duration_ms: durationMs, trace_id: traceId } };
-    }
-    if (exitCode !== 0) {
-      return { success: false, error: stderr || `pi exit ${exitCode}`, error_type: mapErrorType(stderr), meta: { specialist: input2.specialist, model, duration_ms: durationMs, trace_id: traceId } };
-    }
-    if (!text) {
-      const piError = extractPiErrorMessage(stdout.split(/\r?\n/));
-      if (piError) {
-        return { success: false, error: piError, error_type: mapErrorType(piError), meta: { specialist: input2.specialist, model, duration_ms: durationMs, trace_id: traceId } };
-      }
-      return { success: false, error: "pi produced no assistant text", error_type: "internal", meta: { specialist: input2.specialist, model, duration_ms: durationMs, trace_id: traceId } };
-    }
-    let parsed_json;
-    if (spec.specialist.execution.response_format === "json") {
-      try {
-        parsed_json = JSON.parse(stripMarkdownFences(text));
-        const required2 = Array.isArray(spec.specialist.prompt.output_schema?.required) ? spec.specialist.prompt.output_schema.required.filter((value) => typeof value === "string") : [];
-        for (const key of required2) {
-          if (parsed_json === null || typeof parsed_json !== "object" || !(key in parsed_json)) {
-            throw new Error(`Missing required output field: ${key}`);
-          }
-        }
-      } catch (error2) {
-        return { success: false, error: error2 instanceof Error ? error2.message : String(error2), error_type: "invalid_json", meta: { specialist: input2.specialist, model, duration_ms: durationMs, trace_id: traceId } };
-      }
-    }
-    return { success: true, output: text, parsed_json, meta: { specialist: input2.specialist, model, duration_ms: durationMs, trace_id: traceId } };
-  } catch (error2) {
-    const message = error2 instanceof Error ? error2.message : String(error2);
-    return { success: false, error: message, error_type: mapErrorType(message), meta: { specialist: input2.specialist, duration_ms: Date.now() - startedAt, trace_id: traceId } };
-  }
+  });
 }
+function classifyAttempt(attempt) {
+  if (attempt.outputTooLarge) {
+    if (attempt.outputTooLargeReason === "assistant_text_too_large")
+      return { retryable: false, kind: "failure", error: "assistant message too large", errorType: "output_too_large", text: attempt.text };
+    if (attempt.outputTooLargeReason === "stderr_too_large")
+      return { retryable: false, kind: "failure", error: "stderr too large", errorType: "output_too_large", text: attempt.text };
+    if (attempt.outputTooLargeReason === "malformed_line_too_large")
+      return { retryable: false, kind: "failure", error: "malformed line too large", errorType: "output_too_large", text: attempt.text };
+    return { retryable: false, kind: "failure", error: "output exceeded cap", errorType: "output_too_large", text: attempt.text };
+  }
+  if (attempt.timedOut)
+    return { retryable: false, kind: "failure", error: attempt.stderr || "timed out", errorType: "timeout", text: attempt.text };
+  const retryable = isRetryableModelFailure(attempt.stderr, attempt.text);
+  if (attempt.exitCode !== 0) {
+    const errorType = mapErrorType(attempt.stderr);
+    return { retryable, kind: "failure", error: attempt.stderr || `pi exit ${attempt.exitCode}`, errorType, text: attempt.text };
+  }
+  if (!attempt.text) {
+    return { retryable, kind: "failure", error: attempt.stderr || "pi produced no assistant text", errorType: mapErrorType(attempt.stderr), text: attempt.text };
+  }
+  return { retryable: false, kind: "success", error: "", errorType: "internal", text: attempt.text };
+}
+function isRetryableModelFailure(stderr, text) {
+  return stderr.includes("0 tokens") || stderr.includes("quota") || stderr.includes("rate limit") || stderr.includes("403") || stderr.includes("401") || stderr.includes("insufficient_quota") || !text && !stderr.trim();
+}
+var DEFAULT_PENDING_LINE_LIMIT_BYTES, DEFAULT_ASSISTANT_TEXT_LIMIT_BYTES, DEFAULT_STDERR_LIMIT_BYTES;
 var init_script_runner = __esm(() => {
   init_observability_sqlite();
+  DEFAULT_PENDING_LINE_LIMIT_BYTES = 16 * 1024 * 1024;
+  DEFAULT_ASSISTANT_TEXT_LIMIT_BYTES = 4 * 1024 * 1024;
+  DEFAULT_STDERR_LIMIT_BYTES = 1 * 1024 * 1024;
 });
 
 // src/cli/validate.ts
@@ -29167,6 +29290,18 @@ function parseNameStatusLine(line) {
 function isNoisePath(path) {
   return NOISE_PATH_PREFIXES.some((prefix) => path.startsWith(prefix));
 }
+function isBranchAlreadyPublished(branch, cwd = process.cwd()) {
+  const baseBranch = resolveDefaultBranchName(cwd);
+  const ancestorCheck = runCommand("git", ["merge-base", "--is-ancestor", branch, baseBranch], cwd);
+  if (ancestorCheck.status === 0) {
+    return true;
+  }
+  const cherryPickCount = runCommand("git", ["rev-list", "--right-only", "--cherry-pick", "--no-merges", "--count", `${baseBranch}...${branch}`], cwd);
+  if (cherryPickCount.status !== 0) {
+    return false;
+  }
+  return cherryPickCount.stdout.trim() === "0";
+}
 function previewBranchMergeDelta(branch, cwd = process.cwd()) {
   const baseBranch = resolveDefaultBranchName(cwd);
   const mergeBase = runCommand("git", ["merge-base", baseBranch, branch], cwd);
@@ -29192,12 +29327,12 @@ function previewBranchMergeDelta(branch, cwd = process.cwd()) {
     substantiveFiles
   };
 }
-function evaluateMergeWorthiness(preview) {
+function evaluateMergeWorthiness(preview, branch, cwd = process.cwd()) {
   if (preview.files.length === 0) {
-    return { shouldMerge: false, reason: "empty-delta" };
+    return isBranchAlreadyPublished(branch, cwd) ? { shouldMerge: false, reason: "already-published" } : { shouldMerge: false, reason: "empty-delta" };
   }
   if (preview.substantiveFiles.length === 0) {
-    return { shouldMerge: false, reason: "noise-only-delta" };
+    return isBranchAlreadyPublished(branch, cwd) ? { shouldMerge: false, reason: "already-published" } : { shouldMerge: false, reason: "noise-only-delta" };
   }
   return { shouldMerge: true, reason: "ok" };
 }
@@ -29216,9 +29351,9 @@ function throwWorthinessBlockError(target, preview, decision) {
 }
 function assertBranchMergeWorthiness(target, cwd = process.cwd()) {
   const preview = previewBranchMergeDelta(target.branch, cwd);
-  const decision = evaluateMergeWorthiness(preview);
-  if (decision.shouldMerge)
-    return;
+  const decision = evaluateMergeWorthiness(preview, target.branch, cwd);
+  if (decision.reason === "already-published" || decision.shouldMerge)
+    return decision;
   throwWorthinessBlockError(target, preview, decision);
 }
 function getConflictFiles(cwd = process.cwd()) {
@@ -29320,8 +29455,16 @@ function runMergePlan(targets, options) {
   assertMainRepoCleanForMerge(mainRepoRoot);
   const mergedSteps = [];
   for (const target of targets) {
+    const worthiness = assertBranchMergeWorthiness(target, mainRepoRoot);
+    if (worthiness.reason === "already-published") {
+      mergedSteps.push({
+        beadId: target.beadId,
+        branch: target.branch,
+        changedFiles: []
+      });
+      continue;
+    }
     rebaseBranchOntoMaster(target.branch, target.worktreePath);
-    assertBranchMergeWorthiness(target, mainRepoRoot);
     mergeBranch(target.branch, mainRepoRoot);
     runTypecheckGate(mainRepoRoot);
     mergedSteps.push({
@@ -29849,7 +29992,7 @@ function assertNoStaleBaseSiblings(beadId, forceStaleBase) {
         continue;
       try {
         const preview = previewBranchMergeDelta(branch);
-        const decision = evaluateMergeWorthiness(preview);
+        const decision = evaluateMergeWorthiness(preview, branch);
         if (!decision.shouldMerge)
           continue;
         staleSiblings.push({
@@ -34451,15 +34594,133 @@ var init_epic = __esm(() => {
   RUNNING_STATUSES = new Set(["starting", "running", "waiting", "degraded"]);
 });
 
+// src/cli/version-check.ts
+import { spawnSync as spawnSync15 } from "child_process";
+import { existsSync as existsSync19, mkdirSync as mkdirSync9, readFileSync as readFileSync18, writeFileSync as writeFileSync9 } from "fs";
+import { dirname as dirname7, join as join20 } from "path";
+import { createRequire as createRequire2 } from "module";
+function shouldRunVersionCheck() {
+  if (process.env.SPECIALISTS_OFFLINE === "1")
+    return false;
+  if (process.env.SPECIALISTS_JOB_ID || process.env.PI_SESSION_ID)
+    return false;
+  if (!process.stdin.isTTY || !process.stdout.isTTY)
+    return false;
+  return true;
+}
+function readCache() {
+  if (!existsSync19(CACHE_PATH))
+    return null;
+  try {
+    return JSON.parse(readFileSync18(CACHE_PATH, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function readCachedVersionCheck() {
+  return readCache();
+}
+function writeCache(cache) {
+  mkdirSync9(dirname7(CACHE_PATH), { recursive: true });
+  writeFileSync9(CACHE_PATH, `${JSON.stringify(cache, null, 2)}
+`, "utf8");
+}
+function isFresh(cache) {
+  return Date.now() - cache.checked_at_ms < CACHE_MAX_AGE_MS2;
+}
+function parseLatestTag(stdout) {
+  const tags = stdout.split(`
+`).map((line) => line.trim().split(/\s+/).at(-1) ?? "").filter((line) => /^refs\/tags\/v\d+\.\d+\.\d+$/.test(line)).map((line) => line.slice("refs/tags/".length)).sort((left, right) => compareVersions(left, right));
+  return tags.at(-1) ?? null;
+}
+function compareVersions(left, right) {
+  const parse5 = (value) => {
+    const match = value.match(/^v?(\d+)\.(\d+)\.(\d+)$/);
+    if (!match)
+      return null;
+    return [Number(match[1]), Number(match[2]), Number(match[3])];
+  };
+  const a = parse5(left);
+  const b = parse5(right);
+  if (!a || !b)
+    return 0;
+  for (let index = 0;index < 3; index += 1) {
+    if (a[index] > b[index])
+      return 1;
+    if (a[index] < b[index])
+      return -1;
+  }
+  return 0;
+}
+function runRemoteTagLookup() {
+  const result = spawnSync15("git", ["ls-remote", "--tags", "--refs", "origin"], {
+    encoding: "utf8",
+    stdio: "pipe",
+    timeout: NETWORK_TIMEOUT_MS
+  });
+  if (result.status !== 0 || result.error)
+    return null;
+  return parseLatestTag(result.stdout ?? "");
+}
+function getVersionCheckResult() {
+  if (!shouldRunVersionCheck())
+    return null;
+  const cached2 = readCache();
+  if (cached2 && isFresh(cached2)) {
+    return {
+      latestTag: cached2.latest_tag,
+      localVersion: packageVersion,
+      cache: cached2
+    };
+  }
+  const latestTag = runRemoteTagLookup();
+  if (!latestTag)
+    return null;
+  const cache = {
+    checked_at_ms: Date.now(),
+    latest_tag: latestTag,
+    notified_for_tag: cached2?.notified_for_tag ?? ""
+  };
+  writeCache(cache);
+  return {
+    latestTag,
+    localVersion: packageVersion,
+    cache
+  };
+}
+function formatVersionCheckNudge(result) {
+  if (compareVersions(result.latestTag, `v${result.localVersion}`) <= 0)
+    return null;
+  if (result.cache.notified_for_tag === result.latestTag)
+    return null;
+  return `specialists v${result.localVersion} is local; ${result.latestTag} published \u2014 consider /update-specialists before substantial work.`;
+}
+function markVersionCheckNotified(result) {
+  if (result.cache.notified_for_tag === result.latestTag)
+    return;
+  writeCache({
+    ...result.cache,
+    notified_for_tag: result.latestTag
+  });
+}
+var require2, packageVersion, localVersion, CACHE_PATH, CACHE_MAX_AGE_MS2, NETWORK_TIMEOUT_MS = 2000;
+var init_version_check = __esm(() => {
+  require2 = createRequire2(import.meta.url);
+  ({ version: packageVersion } = require2("../../package.json"));
+  localVersion = packageVersion;
+  CACHE_PATH = join20(process.cwd(), ".specialists", "version-check.json");
+  CACHE_MAX_AGE_MS2 = 6 * 60 * 60 * 1000;
+});
+
 // src/cli/status.ts
 var exports_status = {};
 __export(exports_status, {
   run: () => run15,
   detectJobOutputMode: () => detectJobOutputMode
 });
-import { spawnSync as spawnSync15 } from "child_process";
-import { existsSync as existsSync19, readFileSync as readFileSync18 } from "fs";
-import { join as join20 } from "path";
+import { spawnSync as spawnSync16 } from "child_process";
+import { existsSync as existsSync20, readFileSync as readFileSync19 } from "fs";
+import { join as join21 } from "path";
 function ok2(msg) {
   console.log(`  ${green8("\u2713")} ${msg}`);
 }
@@ -34478,7 +34739,7 @@ function section(label) {
 ${bold10(`\u2500\u2500 ${label} ${line}`)}`);
 }
 function cmd(bin, args) {
-  const r = spawnSync15(bin, args, {
+  const r = spawnSync16(bin, args, {
     encoding: "utf8",
     stdio: "pipe",
     timeout: 5000
@@ -34486,7 +34747,7 @@ function cmd(bin, args) {
   return { ok: r.status === 0 && !r.error, stdout: (r.stdout ?? "").trim() };
 }
 function isInstalled2(bin) {
-  return spawnSync15("which", [bin], { encoding: "utf8", timeout: 2000 }).status === 0;
+  return spawnSync16("which", [bin], { encoding: "utf8", timeout: 2000 }).status === 0;
 }
 function formatElapsed2(s) {
   if (s.elapsed_s === undefined)
@@ -34556,10 +34817,10 @@ function countJobEvents(sqliteClient, jobsDir, jobId) {
   if (detectJobOutputMode() !== "on") {
     return 0;
   }
-  const eventsFile = join20(jobsDir, jobId, "events.jsonl");
-  if (!existsSync19(eventsFile))
+  const eventsFile = join21(jobsDir, jobId, "events.jsonl");
+  if (!existsSync20(eventsFile))
     return 0;
-  const raw = readFileSync18(eventsFile, "utf-8").trim();
+  const raw = readFileSync19(eventsFile, "utf-8").trim();
   if (!raw)
     return 0;
   return raw.split(`
@@ -34593,10 +34854,10 @@ function getLatestContextSnapshot(sqliteClient, jobsDir, jobId) {
   if (detectJobOutputMode() !== "on") {
     return null;
   }
-  const eventsFile = join20(jobsDir, jobId, "events.jsonl");
-  if (!existsSync19(eventsFile))
+  const eventsFile = join21(jobsDir, jobId, "events.jsonl");
+  if (!existsSync20(eventsFile))
     return null;
-  const lines = readFileSync18(eventsFile, "utf-8").split(`
+  const lines = readFileSync19(eventsFile, "utf-8").split(`
 `);
   for (let index = lines.length - 1;index >= 0; index -= 1) {
     const line = lines[index].trim();
@@ -34701,12 +34962,12 @@ async function run15() {
 `).slice(1).map((line) => line.split(/\s+/)[0]).filter(Boolean)) : new Set;
     const bdInstalled = isInstalled2("bd");
     const bdVersion = bdInstalled ? cmd("bd", ["--version"]) : null;
-    const beadsPresent = existsSync19(join20(process.cwd(), ".beads"));
+    const beadsPresent = existsSync20(join21(process.cwd(), ".beads"));
     const specialistsBin = cmd("which", ["specialists"]);
     const jobsDir = resolveJobsDir();
     const jobFileOutputMode = detectJobFileOutputMode();
     let jobs = [];
-    if (existsSync19(jobsDir)) {
+    if (existsSync20(jobsDir)) {
       supervisor = new Supervisor({
         runner: null,
         runOptions: null,
@@ -34849,6 +35110,14 @@ ${bold10("specialists status")}
         console.log(`  ${dim8(job.id)}  ${job.specialist.padEnd(20)}  ${statusColor(job).padEnd(7)}  ${elapsed.padStart(6)}  ${detail}`);
       }
     }
+    const versionCheck = getVersionCheckResult();
+    if (versionCheck) {
+      const nudge = formatVersionCheckNudge(versionCheck);
+      if (nudge) {
+        info(nudge);
+        markVersionCheckNotified(versionCheck);
+      }
+    }
     console.log();
   } finally {
     sqliteClient?.close();
@@ -34861,6 +35130,7 @@ var init_status = __esm(() => {
   init_job_root();
   init_observability_sqlite();
   init_format_helpers();
+  init_version_check();
 });
 
 // src/cli/ps.ts
@@ -34868,9 +35138,9 @@ var exports_ps = {};
 __export(exports_ps, {
   run: () => run16
 });
-import { spawnSync as spawnSync16 } from "child_process";
-import { existsSync as existsSync20, readdirSync as readdirSync8, readFileSync as readFileSync19 } from "fs";
-import { join as join21 } from "path";
+import { spawnSync as spawnSync17 } from "child_process";
+import { existsSync as existsSync21, readdirSync as readdirSync8, readFileSync as readFileSync20 } from "fs";
+import { join as join22 } from "path";
 function parseArgs8(argv) {
   let nodeId;
   const positional = [];
@@ -34900,25 +35170,25 @@ function isVisibleStatus(status, all) {
   return ACTIVE_STATES.includes(status);
 }
 function readStatusesFromFiles(jobsDir) {
-  if (!existsSync20(jobsDir))
+  if (!existsSync21(jobsDir))
     return [];
   const statuses = [];
   for (const entry of readdirSync8(jobsDir)) {
-    const statusPath = join21(jobsDir, entry, "status.json");
-    if (!existsSync20(statusPath))
+    const statusPath = join22(jobsDir, entry, "status.json");
+    if (!existsSync21(statusPath))
       continue;
     try {
-      statuses.push(JSON.parse(readFileSync19(statusPath, "utf-8")));
+      statuses.push(JSON.parse(readFileSync20(statusPath, "utf-8")));
     } catch {}
   }
   return statuses.sort((a, b) => b.started_at_ms - a.started_at_ms);
 }
 function readLastToolEventFromFile(jobsDir, jobId) {
-  const eventsPath = join21(jobsDir, jobId, "events.jsonl");
-  if (!existsSync20(eventsPath))
+  const eventsPath = join22(jobsDir, jobId, "events.jsonl");
+  if (!existsSync21(eventsPath))
     return;
   try {
-    const lines = readFileSync19(eventsPath, "utf-8").split(`
+    const lines = readFileSync20(eventsPath, "utf-8").split(`
 `);
     for (let index = lines.length - 1;index >= 0; index -= 1) {
       const line = lines[index]?.trim();
@@ -35255,7 +35525,7 @@ function formatPayloadStats(payloadJson) {
   }
 }
 function getBeadTitleFromBd(beadId) {
-  const result = spawnSync16("bd", ["show", beadId, "--json"], {
+  const result = spawnSync17("bd", ["show", beadId, "--json"], {
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "ignore"],
     timeout: 1500
@@ -35700,8 +35970,8 @@ var exports_result = {};
 __export(exports_result, {
   run: () => run17
 });
-import { existsSync as existsSync21, readFileSync as readFileSync20 } from "fs";
-import { join as join22 } from "path";
+import { existsSync as existsSync22, readFileSync as readFileSync21 } from "fs";
+import { join as join23 } from "path";
 function parseArgs9(argv) {
   let jobId;
   let nodeId;
@@ -35791,10 +36061,10 @@ function readTimelineEventsForResult(sqliteClient, jobsDir, jobId) {
       return sqliteClient.readEvents(jobId);
     } catch {}
   }
-  const eventsPath = join22(jobsDir, jobId, "events.jsonl");
-  if (!existsSync21(eventsPath))
+  const eventsPath = join23(jobsDir, jobId, "events.jsonl");
+  if (!existsSync22(eventsPath))
     return [];
-  return readFileSync20(eventsPath, "utf-8").split(`
+  return readFileSync21(eventsPath, "utf-8").split(`
 `).map((line) => line.trim()).filter(Boolean).map((line) => parseTimelineEvent(line)).filter((event) => event !== null);
 }
 function deriveStartupSnapshot(status, events) {
@@ -35913,7 +36183,7 @@ async function run17() {
       error: error2
     }, null, 2));
   };
-  const jobsDir = join22(process.cwd(), ".specialists", "jobs");
+  const jobsDir = join23(process.cwd(), ".specialists", "jobs");
   const supervisor = new Supervisor({ runner: null, runOptions: null, jobsDir });
   const sqliteClient = createObservabilitySqliteClient();
   const emitHumanResult = (output2, status, startupContext, trailingFooter) => {
@@ -35948,7 +36218,7 @@ async function run17() {
       const resolvedNodeId = args.nodeId ? resolveNodeRefWithClient(args.nodeId, sqliteClient) : resolveSingleActiveNodeRef(sqliteClient);
       return resolveJobIdFromNodeMember(sqliteClient, resolvedNodeId, args.memberKey);
     })();
-    const resultPath = join22(jobsDir, jobId, "result.txt");
+    const resultPath = join23(jobsDir, jobId, "result.txt");
     const readResultOutput = () => {
       try {
         const sqliteResult = sqliteClient?.readResult(jobId) ?? null;
@@ -35957,8 +36227,8 @@ async function run17() {
       } catch (error2) {
         console.warn(`SQLite result read failed for job ${jobId}; falling back to result.txt`, error2);
       }
-      if (existsSync21(resultPath)) {
-        return readFileSync20(resultPath, "utf-8");
+      if (existsSync22(resultPath)) {
+        return readFileSync21(resultPath, "utf-8");
       }
       try {
         const events2 = readTimelineEventsForResult(sqliteClient, jobsDir, jobId);
@@ -36143,8 +36413,8 @@ var init_result = __esm(() => {
 });
 
 // src/specialist/timeline-query.ts
-import { existsSync as existsSync22, readdirSync as readdirSync9, readFileSync as readFileSync21 } from "fs";
-import { basename as basename6, join as join23 } from "path";
+import { existsSync as existsSync23, readdirSync as readdirSync9, readFileSync as readFileSync22 } from "fs";
+import { basename as basename6, join as join24 } from "path";
 function readJobEvents(jobDir) {
   const jobId = basename6(jobDir);
   try {
@@ -36156,10 +36426,10 @@ function readJobEvents(jobDir) {
   } catch {}
   if (process.env.SPECIALISTS_JOB_FILE_OUTPUT !== "on")
     return [];
-  const eventsPath = join23(jobDir, "events.jsonl");
-  if (!existsSync22(eventsPath))
+  const eventsPath = join24(jobDir, "events.jsonl");
+  if (!existsSync23(eventsPath))
     return [];
-  const content = readFileSync21(eventsPath, "utf-8");
+  const content = readFileSync22(eventsPath, "utf-8");
   const lines = content.split(`
 `).filter(Boolean);
   const events = [];
@@ -36172,7 +36442,7 @@ function readJobEvents(jobDir) {
   return events;
 }
 function readJobEventsById(jobsDir, jobId) {
-  return readJobEvents(join23(jobsDir, jobId));
+  return readJobEvents(join24(jobsDir, jobId));
 }
 function readAllJobEvents(jobsDir) {
   const sqliteClient = createObservabilitySqliteClient();
@@ -36194,12 +36464,12 @@ function readAllJobEvents(jobsDir) {
   } catch {}
   if (process.env.SPECIALISTS_JOB_FILE_OUTPUT !== "on")
     return [];
-  if (!existsSync22(jobsDir))
+  if (!existsSync23(jobsDir))
     return [];
   const batches = [];
   const entries = readdirSync9(jobsDir);
   for (const entry of entries) {
-    const jobDir = join23(jobsDir, entry);
+    const jobDir = join24(jobsDir, entry);
     try {
       const stat2 = __require("fs").statSync(jobDir);
       if (!stat2.isDirectory())
@@ -36208,12 +36478,12 @@ function readAllJobEvents(jobsDir) {
       continue;
     }
     const jobId = entry;
-    const statusPath = join23(jobDir, "status.json");
+    const statusPath = join24(jobDir, "status.json");
     let specialist = "unknown";
     let beadId;
-    if (existsSync22(statusPath)) {
+    if (existsSync23(statusPath)) {
       try {
-        const status = JSON.parse(readFileSync21(statusPath, "utf-8"));
+        const status = JSON.parse(readFileSync22(statusPath, "utf-8"));
         specialist = status.specialist ?? "unknown";
         beadId = status.bead_id;
       } catch {}
@@ -36310,13 +36580,13 @@ __export(exports_feed, {
 });
 import {
   closeSync as closeSync2,
-  existsSync as existsSync23,
+  existsSync as existsSync24,
   openSync as openSync3,
-  readFileSync as readFileSync22,
+  readFileSync as readFileSync23,
   readdirSync as readdirSync10,
   statSync as statSync3
 } from "fs";
-import { join as join24 } from "path";
+import { join as join25 } from "path";
 function getHumanEventKey(event) {
   switch (event.type) {
     case "meta":
@@ -36478,7 +36748,7 @@ function readFileFresh(filePath) {
   let fd = null;
   try {
     fd = openSync3(filePath, "r");
-    return readFileSync22(fd, "utf-8");
+    return readFileSync23(fd, "utf-8");
   } catch {
     return null;
   } finally {
@@ -36495,7 +36765,7 @@ function readStatusJson(sqliteClient, jobsDir, jobId) {
   } catch (error2) {
     console.warn(`SQLite status read failed for job ${jobId}; falling back to status.json`, error2);
   }
-  const statusPath = join24(jobsDir, jobId, "status.json");
+  const statusPath = join25(jobsDir, jobId, "status.json");
   const raw = readFileFresh(statusPath);
   if (!raw)
     return null;
@@ -36704,11 +36974,11 @@ function filterMergedEventsByNode(sqliteClient, jobsDir, merged, nodeId) {
   });
 }
 function listMatchingJobIds(sqliteClient, jobsDir, options) {
-  if (!existsSync23(jobsDir))
+  if (!existsSync24(jobsDir))
     return [];
   const jobIds = [];
   for (const entry of readdirSync10(jobsDir)) {
-    const jobDir = join24(jobsDir, entry);
+    const jobDir = join25(jobsDir, entry);
     try {
       if (!statSync3(jobDir).isDirectory())
         continue;
@@ -36745,7 +37015,7 @@ function readJobEventsFresh(sqliteClient, jobsDir, jobId) {
   } catch (error2) {
     console.warn(`SQLite events read failed for job ${jobId}; falling back to events.jsonl`, error2);
   }
-  const eventsPath = join24(jobsDir, jobId, "events.jsonl");
+  const eventsPath = join25(jobsDir, jobId, "events.jsonl");
   const content = readFileFresh(eventsPath);
   if (!content)
     return [];
@@ -36769,7 +37039,7 @@ function readJobEventsIncremental(sqliteClient, jobsDir, jobId, afterSeq, fileCa
   } catch (error2) {
     console.warn(`SQLite incremental events read failed for job ${jobId}; falling back to events.jsonl`, error2);
   }
-  const eventsPath = join24(jobsDir, jobId, "events.jsonl");
+  const eventsPath = join25(jobsDir, jobId, "events.jsonl");
   let stats;
   try {
     stats = statSync3(eventsPath);
@@ -36943,8 +37213,8 @@ async function run18() {
   const options = parseArgs10(process.argv.slice(3));
   const sqliteClient = createObservabilitySqliteClient();
   try {
-    const jobsDir = join24(process.cwd(), ".specialists", "jobs");
-    if (!existsSync23(jobsDir)) {
+    const jobsDir = join25(process.cwd(), ".specialists", "jobs");
+    if (!existsSync24(jobsDir)) {
       console.log(dim8("No jobs directory found."));
       return;
     }
@@ -36983,8 +37253,8 @@ var exports_poll = {};
 __export(exports_poll, {
   run: () => run19
 });
-import { existsSync as existsSync24, readFileSync as readFileSync23 } from "fs";
-import { join as join25 } from "path";
+import { existsSync as existsSync25, readFileSync as readFileSync24 } from "fs";
+import { join as join26 } from "path";
 function parseArgs11(argv) {
   let jobId;
   let cursor = 0;
@@ -37021,19 +37291,19 @@ function parseArgs11(argv) {
   return { jobId, cursor, outputCursor };
 }
 function readJobState(jobsDir, jobId, cursor, outputCursor) {
-  const jobDir = join25(jobsDir, jobId);
-  const statusPath = join25(jobDir, "status.json");
+  const jobDir = join26(jobsDir, jobId);
+  const statusPath = join26(jobDir, "status.json");
   let status = null;
-  if (existsSync24(statusPath)) {
+  if (existsSync25(statusPath)) {
     try {
-      status = JSON.parse(readFileSync23(statusPath, "utf-8"));
+      status = JSON.parse(readFileSync24(statusPath, "utf-8"));
     } catch {}
   }
-  const resultPath = join25(jobDir, "result.txt");
+  const resultPath = join26(jobDir, "result.txt");
   let fullOutput = "";
-  if (existsSync24(resultPath)) {
+  if (existsSync25(resultPath)) {
     try {
-      fullOutput = readFileSync23(resultPath, "utf-8");
+      fullOutput = readFileSync24(resultPath, "utf-8");
     } catch {}
   }
   const events = readJobEventsById(jobsDir, jobId);
@@ -37067,9 +37337,9 @@ async function run19() {
   process.stderr.write(`[DEPRECATED] 'specialists poll' is scheduled for removal. Use 'sp ps <id> --json' for status and 'sp feed <id>' for events.
 `);
   const { jobId, cursor, outputCursor } = parseArgs11(process.argv.slice(3));
-  const jobsDir = join25(process.cwd(), ".specialists", "jobs");
-  const jobDir = join25(jobsDir, jobId);
-  if (!existsSync24(jobDir)) {
+  const jobsDir = join26(process.cwd(), ".specialists", "jobs");
+  const jobDir = join26(jobsDir, jobId);
+  if (!existsSync25(jobDir)) {
     const result2 = {
       job_id: jobId,
       status: "error",
@@ -37100,7 +37370,7 @@ var exports_steer = {};
 __export(exports_steer, {
   run: () => run20
 });
-import { writeFileSync as writeFileSync9 } from "fs";
+import { writeFileSync as writeFileSync10 } from "fs";
 async function run20() {
   const jobId = process.argv[3];
   const message = process.argv[4];
@@ -37131,7 +37401,7 @@ async function run20() {
     try {
       const payload = JSON.stringify({ type: "steer", message }) + `
 `;
-      writeFileSync9(status.fifo_path, payload, { flag: "a" });
+      writeFileSync10(status.fifo_path, payload, { flag: "a" });
       process.stdout.write(`${green10("\u2713")} Steer message sent to job ${jobId}
 `);
     } catch (err) {
@@ -37154,7 +37424,7 @@ var exports_resume = {};
 __export(exports_resume, {
   run: () => run21
 });
-import { writeFileSync as writeFileSync10 } from "fs";
+import { writeFileSync as writeFileSync11 } from "fs";
 async function run21() {
   const jobId = process.argv[3];
   const task = process.argv[4];
@@ -37185,7 +37455,7 @@ async function run21() {
     try {
       const payload = JSON.stringify({ type: "resume", task }) + `
 `;
-      writeFileSync10(status.fifo_path, payload, { flag: "a" });
+      writeFileSync11(status.fifo_path, payload, { flag: "a" });
       process.stdout.write(`${green11("\u2713")} Resume sent to job ${jobId}
 `);
       process.stdout.write(`  Use 'specialists feed ${jobId} --follow' to watch the response.
@@ -37217,15 +37487,15 @@ async function run22() {
 }
 
 // src/specialist/worktree-gc.ts
-import { existsSync as existsSync25, readdirSync as readdirSync11, readFileSync as readFileSync24 } from "fs";
-import { join as join26 } from "path";
-import { spawnSync as spawnSync17 } from "child_process";
+import { existsSync as existsSync26, readdirSync as readdirSync11, readFileSync as readFileSync25 } from "fs";
+import { join as join27 } from "path";
+import { spawnSync as spawnSync18 } from "child_process";
 function readJobStatus2(jobDir) {
-  const statusPath = join26(jobDir, "status.json");
-  if (!existsSync25(statusPath))
+  const statusPath = join27(jobDir, "status.json");
+  if (!existsSync26(statusPath))
     return null;
   try {
-    return JSON.parse(readFileSync24(statusPath, "utf-8"));
+    return JSON.parse(readFileSync25(statusPath, "utf-8"));
   } catch {
     return null;
   }
@@ -37247,7 +37517,7 @@ function collectWorktreeGcCandidates(jobsDir) {
       const worktreePath = status.worktree_path;
       if (!worktreePath)
         return null;
-      if (!existsSync25(worktreePath))
+      if (!existsSync26(worktreePath))
         return null;
       return {
         jobId: status.id,
@@ -37259,13 +37529,13 @@ function collectWorktreeGcCandidates(jobsDir) {
   }
   if (!getFileFallbackEnabled())
     return [];
-  if (!existsSync25(jobsDir))
+  if (!existsSync26(jobsDir))
     return [];
   const candidates = [];
   for (const entry of readdirSync11(jobsDir, { withFileTypes: true })) {
     if (!entry.isDirectory())
       continue;
-    const status = readJobStatus2(join26(jobsDir, entry.name));
+    const status = readJobStatus2(join27(jobsDir, entry.name));
     if (!status)
       continue;
     if (isActive(status.status))
@@ -37275,7 +37545,7 @@ function collectWorktreeGcCandidates(jobsDir) {
     const { worktree_path: worktreePath, branch } = status;
     if (!worktreePath)
       continue;
-    if (!existsSync25(worktreePath))
+    if (!existsSync26(worktreePath))
       continue;
     candidates.push({
       jobId: status.id,
@@ -37287,7 +37557,7 @@ function collectWorktreeGcCandidates(jobsDir) {
   return candidates;
 }
 function removeWorktreeDirectory(worktreePath) {
-  const result = spawnSync17("git", ["worktree", "remove", "--force", worktreePath], {
+  const result = spawnSync18("git", ["worktree", "remove", "--force", worktreePath], {
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -37321,14 +37591,8 @@ var exports_clean = {};
 __export(exports_clean, {
   run: () => run23
 });
-import {
-  existsSync as existsSync26,
-  readdirSync as readdirSync12,
-  readFileSync as readFileSync25,
-  rmSync as rmSync3,
-  statSync as statSync4
-} from "fs";
-import { join as join27 } from "path";
+import { existsSync as existsSync27, readFileSync as readFileSync26, readdirSync as readdirSync12, rmSync as rmSync3, statSync as statSync4 } from "fs";
+import { join as join28 } from "path";
 function parseTtlDaysFromEnvironment() {
   const rawValue = process.env.SPECIALISTS_JOB_TTL_DAYS ?? process.env.JOB_TTL_DAYS;
   if (!rawValue)
@@ -37342,6 +37606,8 @@ function parseOptions2(argv) {
   let removeAllCompleted = false;
   let dryRun = false;
   let keepRecentCount = null;
+  let staleProcessesOnly = false;
+  let staleAfterHours = DEFAULT_STALE_AFTER_HOURS;
   for (let index = 0;index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--all") {
@@ -37352,16 +37618,36 @@ function parseOptions2(argv) {
       dryRun = true;
       continue;
     }
+    if (argument === "--processes") {
+      staleProcessesOnly = true;
+      continue;
+    }
+    if (argument === "--stale-after") {
+      const value = argv[index + 1];
+      if (!value)
+        throw new Error("Missing value for --stale-after");
+      const parsedValue = Number(value);
+      if (!Number.isFinite(parsedValue) || parsedValue < 0)
+        throw new Error("--stale-after must be a non-negative number");
+      staleAfterHours = parsedValue;
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--stale-after=")) {
+      const value = argument.slice("--stale-after=".length);
+      const parsedValue = Number(value);
+      if (!Number.isFinite(parsedValue) || parsedValue < 0)
+        throw new Error("--stale-after must be a non-negative number");
+      staleAfterHours = parsedValue;
+      continue;
+    }
     if (argument === "--keep") {
       const value = argv[index + 1];
-      if (!value) {
+      if (!value)
         throw new Error("Missing value for --keep");
-      }
       const parsedValue = Number(value);
-      const isInteger = Number.isInteger(parsedValue);
-      if (!isInteger || parsedValue < 0) {
+      if (!Number.isInteger(parsedValue) || parsedValue < 0)
         throw new Error("--keep must be a non-negative integer");
-      }
       keepRecentCount = parsedValue;
       index += 1;
       continue;
@@ -37369,131 +37655,129 @@ function parseOptions2(argv) {
     if (argument.startsWith("--keep=")) {
       const value = argument.slice("--keep=".length);
       const parsedValue = Number(value);
-      const isInteger = Number.isInteger(parsedValue);
-      if (!isInteger || parsedValue < 0) {
+      if (!Number.isInteger(parsedValue) || parsedValue < 0)
         throw new Error("--keep must be a non-negative integer");
-      }
       keepRecentCount = parsedValue;
       continue;
     }
     throw new Error(`Unknown option: ${argument}`);
   }
-  return { removeAllCompleted, dryRun, keepRecentCount };
+  if (staleProcessesOnly && (removeAllCompleted || keepRecentCount !== null)) {
+    throw new Error("--processes cannot be combined with --all or --keep");
+  }
+  return { removeAllCompleted, dryRun, keepRecentCount, staleProcessesOnly, staleAfterHours };
 }
 function readDirectorySizeBytes(directoryPath) {
   let totalBytes = 0;
-  const entries = readdirSync12(directoryPath, { withFileTypes: true });
-  for (const entry of entries) {
-    const entryPath = join27(directoryPath, entry.name);
+  for (const entry of readdirSync12(directoryPath, { withFileTypes: true })) {
+    const entryPath = join28(directoryPath, entry.name);
     const stats = statSync4(entryPath);
-    if (stats.isDirectory()) {
-      totalBytes += readDirectorySizeBytes(entryPath);
-      continue;
-    }
-    totalBytes += stats.size;
+    totalBytes += stats.isDirectory() ? readDirectorySizeBytes(entryPath) : stats.size;
   }
   return totalBytes;
 }
 function containsProtectedSqliteArtifact(directoryPath) {
-  const entries = readdirSync12(directoryPath, { withFileTypes: true });
-  for (const entry of entries) {
-    const entryPath = join27(directoryPath, entry.name);
+  for (const entry of readdirSync12(directoryPath, { withFileTypes: true })) {
+    const entryPath = join28(directoryPath, entry.name);
     if (entry.isDirectory()) {
       if (containsProtectedSqliteArtifact(entryPath))
         return true;
       continue;
     }
-    if (PROTECTED_SQLITE_SUFFIXES.some((suffix) => entry.name.endsWith(suffix))) {
+    if (PROTECTED_SQLITE_SUFFIXES.some((suffix) => entry.name.endsWith(suffix)))
       return true;
-    }
   }
   return false;
 }
 function getJobTimestamps(status) {
   const typedStatus = status;
   const createdAtMs = typedStatus.started_at_ms ?? typedStatus.created_at_ms ?? typedStatus.updated_at_ms ?? 0;
-  const completedAtMs = typedStatus.completed_at_ms ?? typedStatus.updated_at_ms ?? createdAtMs;
-  return { createdAtMs, completedAtMs };
+  const updatedAtMs = typedStatus.updated_at_ms ?? createdAtMs;
+  const completedAtMs = typedStatus.completed_at_ms ?? updatedAtMs;
+  return { createdAtMs, completedAtMs, updatedAtMs };
 }
 function readCompletedJobDirectory(baseDirectory, entry) {
   if (!entry.isDirectory())
     return null;
-  const directoryPath = join27(baseDirectory, entry.name);
+  const directoryPath = join28(baseDirectory, entry.name);
   if (containsProtectedSqliteArtifact(directoryPath))
     return null;
-  const statusFilePath = join27(directoryPath, "status.json");
-  if (!existsSync26(statusFilePath))
+  const statusFilePath = join28(directoryPath, "status.json");
+  if (!existsSync27(statusFilePath))
     return null;
   let statusData;
   try {
-    statusData = JSON.parse(readFileSync25(statusFilePath, "utf-8"));
+    statusData = JSON.parse(readFileSync26(statusFilePath, "utf-8"));
   } catch {
     return null;
   }
   if (!COMPLETED_STATUSES.has(statusData.status))
     return null;
   const { createdAtMs, completedAtMs } = getJobTimestamps(statusData);
-  return {
-    id: entry.name,
-    directoryPath,
-    completedAtMs,
-    createdAtMs,
-    sizeBytes: readDirectorySizeBytes(directoryPath)
-  };
+  return { id: entry.name, directoryPath, completedAtMs, createdAtMs, sizeBytes: readDirectorySizeBytes(directoryPath) };
 }
-function collectCompletedJobDirectoriesFromDb(jobsDirectoryPath) {
-  const sqliteClient = createObservabilitySqliteClient();
-  const statuses = sqliteClient?.listStatuses() ?? [];
-  const completedJobs = statuses.filter((status) => COMPLETED_STATUSES.has(status.status)).map((status) => {
-    const directoryPath = join27(jobsDirectoryPath, status.id);
-    if (containsProtectedSqliteArtifact(directoryPath))
-      return null;
-    if (!existsSync26(directoryPath))
-      return null;
-    const { createdAtMs, completedAtMs } = getJobTimestamps(status);
-    return {
-      id: status.id,
-      directoryPath,
-      completedAtMs,
-      createdAtMs,
-      sizeBytes: readDirectorySizeBytes(directoryPath)
-    };
-  }).filter((job) => job !== null);
-  return completedJobs;
-}
-function collectCompletedJobDirectories(jobsDirectoryPath) {
+function collectCompletedJobs(jobsDirectoryPath) {
   const sqliteClient = createObservabilitySqliteClient();
   const statuses = sqliteClient?.listStatuses() ?? [];
   if (statuses.length > 0) {
-    return collectCompletedJobDirectoriesFromDb(jobsDirectoryPath);
+    return statuses.filter((status) => COMPLETED_STATUSES.has(status.status)).map((status) => {
+      const directoryPath = join28(jobsDirectoryPath, status.id);
+      if (!existsSync27(directoryPath) || containsProtectedSqliteArtifact(directoryPath))
+        return null;
+      const { createdAtMs, completedAtMs } = getJobTimestamps(status);
+      return { id: status.id, directoryPath, completedAtMs, createdAtMs, sizeBytes: readDirectorySizeBytes(directoryPath) };
+    }).filter((job) => job !== null);
   }
   if (process.env.SPECIALISTS_JOB_FILE_OUTPUT !== "on")
     return [];
-  const entries = readdirSync12(jobsDirectoryPath, { withFileTypes: true });
-  const completedJobs = [];
-  for (const entry of entries) {
-    const completedJob = readCompletedJobDirectory(jobsDirectoryPath, entry);
-    if (completedJob)
-      completedJobs.push(completedJob);
-  }
-  return completedJobs;
+  return readdirSync12(jobsDirectoryPath, { withFileTypes: true }).map((entry) => readCompletedJobDirectory(jobsDirectoryPath, entry)).filter((job) => job !== null);
 }
 function selectJobsToRemove(completedJobs, options) {
   const jobsByNewest = [...completedJobs].sort((left, right) => {
-    if (right.createdAtMs !== left.createdAtMs) {
+    if (right.createdAtMs !== left.createdAtMs)
       return right.createdAtMs - left.createdAtMs;
-    }
     return right.completedAtMs - left.completedAtMs;
   });
-  if (options.keepRecentCount !== null) {
+  if (options.keepRecentCount !== null)
     return jobsByNewest.slice(options.keepRecentCount);
-  }
-  if (options.removeAllCompleted) {
+  if (options.removeAllCompleted)
     return jobsByNewest;
-  }
-  const ttlDays = parseTtlDaysFromEnvironment();
-  const cutoffMs = Date.now() - ttlDays * MS_PER_DAY;
+  const cutoffMs = Date.now() - parseTtlDaysFromEnvironment() * MS_PER_DAY;
   return jobsByNewest.filter((job) => job.completedAtMs < cutoffMs);
+}
+function getProcessLiveness(status) {
+  const typedStatus = status;
+  const pid = typedStatus.pid;
+  if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0)
+    return "invalid";
+  try {
+    process.kill(pid, 0);
+    return "alive";
+  } catch (error2) {
+    if (error2 instanceof Error && "code" in error2 && error2.code === "ESRCH") {
+      return "dead";
+    }
+    return "invalid";
+  }
+}
+function selectStaleProcesses(statuses, staleAfterHours) {
+  const cutoffMs = Date.now() - staleAfterHours * 60 * 60 * 1000;
+  const staleJobs = [];
+  for (const status of statuses) {
+    if (!STALE_PROCESS_STATUSES.has(status.status))
+      continue;
+    const liveness = getProcessLiveness(status);
+    if (liveness === "alive")
+      continue;
+    if (liveness === "dead") {
+      staleJobs.push({ status, reason: "dead-pid" });
+      continue;
+    }
+    const updatedAtMs = status.updated_at_ms ?? 0;
+    if (updatedAtMs < cutoffMs)
+      staleJobs.push({ status, reason: "stale-update" });
+  }
+  return staleJobs;
 }
 function formatBytes2(bytes) {
   if (bytes < 1024)
@@ -37516,9 +37800,15 @@ function printDryRunPlan(jobs) {
   if (jobs.length === 0)
     return;
   console.log("Would remove:");
-  for (const job of jobs) {
+  for (const job of jobs)
     console.log(`  - ${job.id}`);
-  }
+}
+function printProcessPlan(jobs) {
+  if (jobs.length === 0)
+    return;
+  console.log("Would cancel:");
+  for (const job of jobs)
+    console.log(`  - ${job.status.id} (${job.reason})`);
 }
 function printWorktreeDryRunPlan(candidates) {
   if (candidates.length === 0)
@@ -37537,8 +37827,34 @@ function printWorktreeGcSummary(removed, skipped) {
 }
 function printUsageAndExit2(message) {
   console.error(message);
-  console.error("Usage: specialists|sp clean [--all] [--keep <n>] [--dry-run]");
+  console.error("Usage: specialists|sp clean [--all] [--keep <n>] [--processes [--stale-after <hours>]] [--dry-run]");
   process.exit(1);
+}
+function deleteJobDirectories(jobs) {
+  for (const job of jobs) {
+    rmSync3(job.directoryPath, { recursive: true, force: true });
+  }
+  return jobs.length;
+}
+function removeStaleProcesses(statuses, dryRun) {
+  const sqliteClient = createObservabilitySqliteClient();
+  if (!sqliteClient)
+    return 0;
+  if (dryRun)
+    return statuses.length;
+  let updatedCount = 0;
+  for (const candidate of statuses) {
+    const typedStatus = candidate.status;
+    const cancelledStatus = {
+      ...candidate.status,
+      status: "cancelled",
+      completed_at_ms: typedStatus.completed_at_ms ?? Date.now(),
+      updated_at_ms: Date.now()
+    };
+    sqliteClient.upsertStatus(cancelledStatus);
+    updatedCount += 1;
+  }
+  return updatedCount;
 }
 async function run23() {
   let options;
@@ -37549,35 +37865,52 @@ async function run23() {
     printUsageAndExit2(message);
   }
   const jobsDirectoryPath = resolveJobsDir();
-  if (!existsSync26(jobsDirectoryPath)) {
+  if (!existsSync27(jobsDirectoryPath)) {
     console.log("No jobs directory found.");
     return;
   }
-  const completedJobs = collectCompletedJobDirectories(jobsDirectoryPath);
+  const sqliteClient = createObservabilitySqliteClient();
+  const statuses = sqliteClient?.listStatuses() ?? [];
+  const worktreeCandidates = collectWorktreeGcCandidates(jobsDirectoryPath);
+  if (options.staleProcessesOnly) {
+    const staleJobs = selectStaleProcesses(statuses, options.staleAfterHours);
+    if (options.dryRun) {
+      printProcessPlan(staleJobs);
+      console.log(renderSummary(staleJobs.length, 0, true));
+      printWorktreeDryRunPlan(worktreeCandidates);
+      return;
+    }
+    const cancelledCount = removeStaleProcesses(staleJobs, false);
+    console.log(renderSummary(cancelledCount, 0, false));
+    if (worktreeCandidates.length > 0) {
+      const worktreeResult = pruneWorktrees(worktreeCandidates);
+      printWorktreeGcSummary(worktreeResult.removed, worktreeResult.skipped);
+    }
+    return;
+  }
+  const completedJobs = collectCompletedJobs(jobsDirectoryPath);
   const jobsToRemove = selectJobsToRemove(completedJobs, options);
   const freedBytes = jobsToRemove.reduce((total, job) => total + job.sizeBytes, 0);
-  const worktreeCandidates = collectWorktreeGcCandidates(jobsDirectoryPath);
   if (options.dryRun) {
     printDryRunPlan(jobsToRemove);
     console.log(renderSummary(jobsToRemove.length, freedBytes, true));
     printWorktreeDryRunPlan(worktreeCandidates);
     return;
   }
-  for (const job of jobsToRemove) {
-    rmSync3(job.directoryPath, { recursive: true, force: true });
-  }
+  deleteJobDirectories(jobsToRemove);
   console.log(renderSummary(jobsToRemove.length, freedBytes, false));
   if (worktreeCandidates.length > 0) {
     const worktreeResult = pruneWorktrees(worktreeCandidates);
     printWorktreeGcSummary(worktreeResult.removed, worktreeResult.skipped);
   }
 }
-var MS_PER_DAY = 86400000, DEFAULT_TTL_DAYS = 7, COMPLETED_STATUSES, PROTECTED_SQLITE_SUFFIXES;
+var MS_PER_DAY = 86400000, DEFAULT_TTL_DAYS = 7, DEFAULT_STALE_AFTER_HOURS = 24, COMPLETED_STATUSES, STALE_PROCESS_STATUSES, PROTECTED_SQLITE_SUFFIXES;
 var init_clean = __esm(() => {
   init_job_root();
   init_observability_sqlite();
   init_worktree_gc();
-  COMPLETED_STATUSES = new Set(["done", "error"]);
+  COMPLETED_STATUSES = new Set(["done", "error", "cancelled"]);
+  STALE_PROCESS_STATUSES = new Set(["running", "starting", "waiting"]);
   PROTECTED_SQLITE_SUFFIXES = [".db", ".db-wal", ".db-shm"];
 });
 
@@ -37586,7 +37919,7 @@ var exports_end = {};
 __export(exports_end, {
   run: () => run24
 });
-import { spawnSync as spawnSync18 } from "child_process";
+import { spawnSync as spawnSync19 } from "child_process";
 function parseOptions3(argv) {
   let beadId;
   let epicId;
@@ -37621,7 +37954,7 @@ function parseOptions3(argv) {
   return { beadId, epicId, rebuild, pr };
 }
 function runCommand3(command, args) {
-  const result = spawnSync18(command, args, { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
+  const result = spawnSync19(command, args, { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
   return {
     status: result.status,
     stdout: result.stdout ?? "",
@@ -37855,16 +38188,16 @@ var exports_attach = {};
 __export(exports_attach, {
   run: () => run26
 });
-import { execFileSync as execFileSync3, spawnSync as spawnSync19 } from "child_process";
-import { readFileSync as readFileSync26 } from "fs";
-import { join as join28 } from "path";
+import { execFileSync as execFileSync3, spawnSync as spawnSync20 } from "child_process";
+import { readFileSync as readFileSync27 } from "fs";
+import { join as join29 } from "path";
 function exitWithError(message) {
   console.error(message);
   process.exit(1);
 }
 function readStatus(statusPath, jobId) {
   try {
-    return JSON.parse(readFileSync26(statusPath, "utf-8"));
+    return JSON.parse(readFileSync27(statusPath, "utf-8"));
   } catch (error2) {
     if (error2 && typeof error2 === "object" && "code" in error2 && error2.code === "ENOENT") {
       exitWithError(`Job \`${jobId}\` not found. Run \`specialists status\` to see active jobs in current mode.`);
@@ -37878,8 +38211,8 @@ async function run26() {
   if (!jobId) {
     exitWithError("Usage: specialists attach <job-id>  (normal runtime is DB-backed; job files are legacy/operator-only)");
   }
-  const jobsDir = join28(process.cwd(), ".specialists", "jobs");
-  const statusPath = join28(jobsDir, jobId, "status.json");
+  const jobsDir = join29(process.cwd(), ".specialists", "jobs");
+  const statusPath = join29(jobsDir, jobId, "status.json");
   const status = readStatus(statusPath, jobId);
   if (status.status === "done" || status.status === "error") {
     exitWithError(`Job \`${jobId}\` has already completed (status: ${status.status}). Use \`specialists result ${jobId}\` to read output.`);
@@ -37888,7 +38221,7 @@ async function run26() {
   if (!sessionName) {
     exitWithError("Job `" + jobId + "` has no tmux session. It may have been started without tmux or tmux was not installed.");
   }
-  const whichTmux = spawnSync19("which", ["tmux"], { stdio: "ignore" });
+  const whichTmux = spawnSync20("which", ["tmux"], { stdio: "ignore" });
   if (whichTmux.status !== 0) {
     exitWithError("tmux is not installed. Install tmux to use `specialists attach`.");
   }
@@ -38135,13 +38468,13 @@ __export(exports_doctor, {
   run: () => run28,
   renderProcessSummary: () => renderProcessSummary,
   parseVersionTuple: () => parseVersionTuple,
-  compareVersions: () => compareVersions,
+  compareVersions: () => compareVersions2,
   cleanupProcesses: () => cleanupProcesses
 });
 import { createHash as createHash5 } from "crypto";
-import { spawnSync as spawnSync20 } from "child_process";
-import { existsSync as existsSync27, lstatSync as lstatSync2, mkdirSync as mkdirSync9, readdirSync as readdirSync13, readFileSync as readFileSync27, readlinkSync as readlinkSync2, writeFileSync as writeFileSync11 } from "fs";
-import { dirname as dirname7, join as join29, relative as relative2, resolve as resolve10 } from "path";
+import { spawnSync as spawnSync21 } from "child_process";
+import { existsSync as existsSync28, lstatSync as lstatSync2, mkdirSync as mkdirSync10, readdirSync as readdirSync13, readFileSync as readFileSync28, readlinkSync as readlinkSync2, writeFileSync as writeFileSync12 } from "fs";
+import { dirname as dirname8, join as join30, relative as relative2, resolve as resolve10 } from "path";
 function ok3(msg) {
   console.log(`  ${green14("\u2713")} ${msg}`);
 }
@@ -38163,17 +38496,17 @@ function section3(label) {
 ${bold13(`\u2500\u2500 ${label} ${line}`)}`);
 }
 function sp(bin, args) {
-  const r = spawnSync20(bin, args, { encoding: "utf8", stdio: "pipe", timeout: 5000 });
+  const r = spawnSync21(bin, args, { encoding: "utf8", stdio: "pipe", timeout: 5000 });
   return { ok: r.status === 0 && !r.error, stdout: (r.stdout ?? "").trim() };
 }
 function isInstalled3(bin) {
-  return spawnSync20("which", [bin], { encoding: "utf8", timeout: 2000 }).status === 0;
+  return spawnSync21("which", [bin], { encoding: "utf8", timeout: 2000 }).status === 0;
 }
 function loadJson2(path) {
-  if (!existsSync27(path))
+  if (!existsSync28(path))
     return null;
   try {
-    return JSON.parse(readFileSync27(path, "utf8"));
+    return JSON.parse(readFileSync28(path, "utf8"));
   } catch {
     return null;
   }
@@ -38216,7 +38549,7 @@ function checkBd() {
     return false;
   }
   ok3(`bd installed  ${dim13(sp("bd", ["--version"]).stdout || "")}`);
-  if (existsSync27(join29(CWD, ".beads")))
+  if (existsSync28(join30(CWD, ".beads")))
     ok3(".beads/ present in project");
   else
     warn3(".beads/ not found in project");
@@ -38236,18 +38569,18 @@ function checkHooks() {
   section3("Claude Code hooks  (2 expected)");
   let allPresent = true;
   for (const name of HOOK_NAMES) {
-    const canonicalPath = join29(HOOKS_DIR, name);
-    if (!existsSync27(canonicalPath)) {
+    const canonicalPath = join30(HOOKS_DIR, name);
+    if (!existsSync28(canonicalPath)) {
       fail4(`${relative2(CWD, canonicalPath)}  ${red7("missing")}`);
       fix("specialists init");
       allPresent = false;
     } else {
       ok3(relative2(CWD, canonicalPath));
     }
-    const claudeHookPath = join29(CLAUDE_HOOKS_DIR, name);
+    const claudeHookPath = join30(CLAUDE_HOOKS_DIR, name);
     const symlinkState = isSymlinkTo(claudeHookPath, canonicalPath);
     if (symlinkState.ok) {
-      ok3(`${relative2(CWD, claudeHookPath)} -> ${relative2(dirname7(claudeHookPath), canonicalPath)}`);
+      ok3(`${relative2(CWD, claudeHookPath)} -> ${relative2(dirname8(claudeHookPath), canonicalPath)}`);
       continue;
     }
     allPresent = false;
@@ -38297,16 +38630,36 @@ function checkMCP() {
   ok3(`MCP server 'specialists' registered in ${MCP_FILE2}`);
   return true;
 }
+function checkVersion() {
+  section3("Version check");
+  const result = getVersionCheckResult();
+  if (result) {
+    const nudge = formatVersionCheckNudge(result);
+    if (!nudge) {
+      ok3(`specialists v${result.localVersion} is current`);
+      return true;
+    }
+    warn3(nudge);
+    return false;
+  }
+  const cached2 = readCachedVersionCheck();
+  if (!cached2) {
+    warn3("cache empty \u2014 skipped");
+    return true;
+  }
+  ok3(`specialists v${localVersion} is local; ${cached2.latest_tag} cached on ${new Date(cached2.checked_at_ms).toISOString()}`);
+  return true;
+}
 function hashFile(path) {
   const hash = createHash5("sha256");
-  hash.update(readFileSync27(path));
+  hash.update(readFileSync28(path));
   return hash.digest("hex");
 }
 function collectFileHashes(rootDir) {
   const hashes = new Map;
   const visit2 = (dir) => {
     for (const entry of readdirSync13(dir, { withFileTypes: true })) {
-      const fullPath = join29(dir, entry.name);
+      const fullPath = join30(dir, entry.name);
       if (entry.isDirectory()) {
         visit2(fullPath);
         continue;
@@ -38317,12 +38670,12 @@ function collectFileHashes(rootDir) {
       hashes.set(relPath, hashFile(fullPath));
     }
   };
-  if (existsSync27(rootDir))
+  if (existsSync28(rootDir))
     visit2(rootDir);
   return hashes;
 }
 function isSymlinkTo(linkPath, expectedTargetPath) {
-  if (!existsSync27(linkPath))
+  if (!existsSync28(linkPath))
     return { ok: false, reason: "missing" };
   let stats;
   try {
@@ -38334,7 +38687,7 @@ function isSymlinkTo(linkPath, expectedTargetPath) {
     return { ok: false, reason: "not-symlink" };
   try {
     const rawTarget = readlinkSync2(linkPath);
-    const resolvedTarget = resolve10(dirname7(linkPath), rawTarget);
+    const resolvedTarget = resolve10(dirname8(linkPath), rawTarget);
     const resolvedExpected = resolve10(expectedTargetPath);
     if (resolvedTarget !== resolvedExpected) {
       return { ok: false, reason: "wrong-target", target: rawTarget };
@@ -38346,12 +38699,12 @@ function isSymlinkTo(linkPath, expectedTargetPath) {
 }
 function checkSkillDrift() {
   section3("Skill drift  (.xtrm skill sync)");
-  if (!existsSync27(CONFIG_SKILLS_DIR)) {
+  if (!existsSync28(CONFIG_SKILLS_DIR)) {
     fail4("config/skills/ missing");
     fix("restore config/skills/ from git");
     return false;
   }
-  if (!existsSync27(XTRM_DEFAULT_SKILLS_DIR)) {
+  if (!existsSync28(XTRM_DEFAULT_SKILLS_DIR)) {
     fail4(".xtrm/skills/default/ missing");
     fix("specialists init --sync-skills");
     return false;
@@ -38393,8 +38746,8 @@ function checkSkillDrift() {
   }
   let linksOk = true;
   for (const scope of ["claude", "pi"]) {
-    const activeRoot = join29(XTRM_ACTIVE_SKILLS_DIR, scope);
-    if (!existsSync27(activeRoot)) {
+    const activeRoot = join30(XTRM_ACTIVE_SKILLS_DIR, scope);
+    if (!existsSync28(activeRoot)) {
       fail4(`${relative2(CWD, activeRoot)}/ missing`);
       fix("specialists init --sync-skills");
       linksOk = false;
@@ -38402,8 +38755,8 @@ function checkSkillDrift() {
     }
     const defaultSkills = readdirSync13(XTRM_DEFAULT_SKILLS_DIR, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
     for (const skillName of defaultSkills) {
-      const activeLinkPath = join29(activeRoot, skillName);
-      const expectedTarget = join29(XTRM_DEFAULT_SKILLS_DIR, skillName);
+      const activeLinkPath = join30(activeRoot, skillName);
+      const expectedTarget = join30(XTRM_DEFAULT_SKILLS_DIR, skillName);
       const state = isSymlinkTo(activeLinkPath, expectedTarget);
       if (state.ok)
         continue;
@@ -38422,14 +38775,14 @@ function checkSkillDrift() {
     }
   }
   const skillRootChecks = [
-    { root: join29(CLAUDE_DIR, "skills"), expected: ACTIVE_CLAUDE_SKILLS_DIR },
-    { root: join29(PI_DIR, "skills"), expected: ACTIVE_PI_SKILLS_DIR }
+    { root: join30(CLAUDE_DIR, "skills"), expected: ACTIVE_CLAUDE_SKILLS_DIR },
+    { root: join30(PI_DIR, "skills"), expected: ACTIVE_PI_SKILLS_DIR }
   ];
   let rootLinksOk = true;
   for (const check2 of skillRootChecks) {
     const state = isSymlinkTo(check2.root, check2.expected);
     if (state.ok) {
-      ok3(`${relative2(CWD, check2.root)} -> ${relative2(dirname7(check2.root), check2.expected)}`);
+      ok3(`${relative2(CWD, check2.root)} -> ${relative2(dirname8(check2.root), check2.expected)}`);
       continue;
     }
     rootLinksOk = false;
@@ -38448,12 +38801,12 @@ function checkSkillDrift() {
   return drifted.length === 0 && missingInDefault.length === 0 && linksOk && rootLinksOk;
 }
 function checkManagedMirror(label, sourceDir, mirrorDir, fixHint) {
-  if (!existsSync27(sourceDir)) {
+  if (!existsSync28(sourceDir)) {
     warn3(`${label} source missing: ${relative2(CWD, sourceDir)}`);
     fix(fixHint);
     return false;
   }
-  if (!existsSync27(mirrorDir)) {
+  if (!existsSync28(mirrorDir)) {
     fail4(`${label} mirror missing: ${relative2(CWD, mirrorDir)}`);
     fix(fixHint);
     return false;
@@ -38485,13 +38838,13 @@ function checkManagedMirror(label, sourceDir, mirrorDir, fixHint) {
 function checkManagedAssetMirrors() {
   section3("Managed mirrors  (specialists / mandatory-rules / nodes)");
   const specialistsOk = checkManagedMirror("specialists", CONFIG_SPECIALISTS_DIR, DEFAULT_SPECIALISTS_DIR, "specialists init --sync-defaults");
-  const rulesOk = checkManagedMirror("mandatory-rules", CONFIG_MANDATORY_RULES_DIR, join29(DEFAULT_SPECIALISTS_DIR, "mandatory-rules"), "specialists init --sync-defaults");
-  const nodesOk = checkManagedMirror("nodes", CONFIG_NODES_DIR, join29(DEFAULT_SPECIALISTS_DIR, "nodes"), "specialists init --sync-defaults");
+  const rulesOk = checkManagedMirror("mandatory-rules", CONFIG_MANDATORY_RULES_DIR, join30(DEFAULT_SPECIALISTS_DIR, "mandatory-rules"), "specialists init --sync-defaults");
+  const nodesOk = checkManagedMirror("nodes", CONFIG_NODES_DIR, join30(DEFAULT_SPECIALISTS_DIR, "nodes"), "specialists init --sync-defaults");
   return specialistsOk && rulesOk && nodesOk;
 }
 function checkUserOverlayDrift() {
   section3("User specialist overlays");
-  if (!existsSync27(USER_SPECIALISTS_DIR)) {
+  if (!existsSync28(USER_SPECIALISTS_DIR)) {
     ok3("no user overlays present");
     return true;
   }
@@ -38502,14 +38855,14 @@ function checkUserOverlayDrift() {
   }
   let allOk = true;
   for (const name of overlays) {
-    const userPath = join29(USER_SPECIALISTS_DIR, name);
-    const defaultPath = join29(DEFAULT_SPECIALISTS_DIR, name);
+    const userPath = join30(USER_SPECIALISTS_DIR, name);
+    const defaultPath = join30(DEFAULT_SPECIALISTS_DIR, name);
     const userSpec = loadJson2(userPath);
     if (!userSpec) {
       warn3(`${name}: failed to parse \u2014 skipping drift check`);
       continue;
     }
-    if (!existsSync27(defaultPath)) {
+    if (!existsSync28(defaultPath)) {
       ok3(`${name}: user-only overlay (no default to drift from)`);
       continue;
     }
@@ -38537,20 +38890,20 @@ function checkUserOverlayDrift() {
 }
 function checkRuntimeDirs() {
   section3(".specialists/ runtime directories");
-  const rootDir = join29(CWD, ".specialists");
-  const jobsDir = join29(rootDir, "jobs");
-  const readyDir = join29(rootDir, "ready");
+  const rootDir = join30(CWD, ".specialists");
+  const jobsDir = join30(rootDir, "jobs");
+  const readyDir = join30(rootDir, "ready");
   let allOk = true;
-  if (!existsSync27(rootDir)) {
+  if (!existsSync28(rootDir)) {
     warn3(".specialists/ not found in current project");
     fix("specialists init");
     allOk = false;
   } else {
     ok3(".specialists/ present");
     for (const [subDir, label] of [[jobsDir, "jobs"], [readyDir, "ready"]]) {
-      if (!existsSync27(subDir)) {
+      if (!existsSync28(subDir)) {
         warn3(`.specialists/${label}/ missing \u2014 auto-creating`);
-        mkdirSync9(subDir, { recursive: true });
+        mkdirSync10(subDir, { recursive: true });
         ok3(`.specialists/${label}/ created`);
       } else {
         ok3(`.specialists/${label}/ present`);
@@ -38562,8 +38915,8 @@ function checkRuntimeDirs() {
 function checkClaudeMdFragments() {
   section3("CLAUDE.md fragments");
   const projectRoot = process.cwd();
-  const claudeMd = join29(projectRoot, "CLAUDE.md");
-  if (!existsSync27(claudeMd)) {
+  const claudeMd = join30(projectRoot, "CLAUDE.md");
+  if (!existsSync28(claudeMd)) {
     warn3("No CLAUDE.md in project root \u2014 skipping fragment check");
     return true;
   }
@@ -38572,7 +38925,7 @@ function checkClaudeMdFragments() {
     hint("install xtrm-tools to enable: xt claude-sync --check");
     return true;
   }
-  const result = spawnSync20("xt", ["claude-sync", "--check", "--json", "--cwd", projectRoot], {
+  const result = spawnSync21("xt", ["claude-sync", "--check", "--json", "--cwd", projectRoot], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -38623,7 +38976,7 @@ function parseVersionTuple(value) {
     return null;
   return [Number(match[1]), Number(match[2]), Number(match[3])];
 }
-function compareVersions(left, right) {
+function compareVersions2(left, right) {
   const leftTuple = parseVersionTuple(left);
   const rightTuple = parseVersionTuple(right);
   if (!leftTuple || !rightTuple)
@@ -38638,10 +38991,10 @@ function compareVersions(left, right) {
 }
 function setStatusError(statusPath) {
   try {
-    const raw = readFileSync27(statusPath, "utf8");
+    const raw = readFileSync28(statusPath, "utf8");
     const status = JSON.parse(raw);
     status.status = "error";
-    writeFileSync11(statusPath, `${JSON.stringify(status, null, 2)}
+    writeFileSync12(statusPath, `${JSON.stringify(status, null, 2)}
 `, "utf8");
   } catch {}
 }
@@ -38692,11 +39045,11 @@ function cleanupProcesses(jobsDir, dryRun) {
     zombieJobIds: []
   };
   for (const jobId of entries) {
-    const statusPath = join29(jobsDir, jobId, "status.json");
-    if (!existsSync27(statusPath))
+    const statusPath = join30(jobsDir, jobId, "status.json");
+    if (!existsSync28(statusPath))
       continue;
     try {
-      const status = JSON.parse(readFileSync27(statusPath, "utf8"));
+      const status = JSON.parse(readFileSync28(statusPath, "utf8"));
       result.total += 1;
       if (status.status !== "running" && status.status !== "starting")
         continue;
@@ -38781,8 +39134,8 @@ function resolveWatchdogMode() {
 function checkZombieJobs() {
   section3("Background jobs");
   hint(`watchdog mode: ${resolveWatchdogMode()}`);
-  const jobsDir = join29(CWD, ".specialists", "jobs");
-  if (!existsSync27(jobsDir)) {
+  const jobsDir = join30(CWD, ".specialists", "jobs");
+  if (!existsSync28(jobsDir)) {
     hint("No .specialists/jobs/ \u2014 skipping");
     return true;
   }
@@ -38819,13 +39172,14 @@ ${bold13("specialists doctor")}
   const xtOk = checkXt();
   const hooksOk = checkHooks();
   const mcpOk = checkMCP();
+  const versionOk = checkVersion();
   const skillDriftOk = checkSkillDrift();
   const mirrorOk = checkManagedAssetMirrors();
   const userOverlayOk = checkUserOverlayDrift();
   const dirsOk = checkRuntimeDirs();
   const jobsOk = checkZombieJobs();
   const fragmentsOk = checkClaudeMdFragments();
-  const allOk = piOk && spOk && bdOk && xtOk && hooksOk && mcpOk && skillDriftOk && mirrorOk && userOverlayOk && dirsOk && jobsOk && fragmentsOk;
+  const allOk = piOk && spOk && bdOk && xtOk && hooksOk && mcpOk && versionOk && skillDriftOk && mirrorOk && userOverlayOk && dirsOk && jobsOk && fragmentsOk;
   console.log("");
   if (allOk) {
     console.log(`  ${green14("\u2713")} ${bold13("All checks passed")}  \u2014 specialists is healthy`);
@@ -38838,25 +39192,26 @@ ${bold13("specialists doctor")}
 var bold13 = (s) => `\x1B[1m${s}\x1B[0m`, dim13 = (s) => `\x1B[2m${s}\x1B[0m`, green14 = (s) => `\x1B[32m${s}\x1B[0m`, yellow12 = (s) => `\x1B[33m${s}\x1B[0m`, red7 = (s) => `\x1B[31m${s}\x1B[0m`, CWD, CLAUDE_DIR, PI_DIR, XTRM_SKILLS_DIR, XTRM_DEFAULT_SKILLS_DIR, XTRM_ACTIVE_SKILLS_DIR, ACTIVE_CLAUDE_SKILLS_DIR, ACTIVE_PI_SKILLS_DIR, CONFIG_SKILLS_DIR, CONFIG_SPECIALISTS_DIR, CONFIG_MANDATORY_RULES_DIR, CONFIG_NODES_DIR, SPECIALISTS_DIR, DEFAULT_SPECIALISTS_DIR, USER_SPECIALISTS_DIR, HOOKS_DIR, CLAUDE_HOOKS_DIR, SETTINGS_FILE, MCP_FILE2, HOOK_NAMES;
 var init_doctor = __esm(() => {
   init_observability_sqlite();
+  init_version_check();
   CWD = process.cwd();
-  CLAUDE_DIR = join29(CWD, ".claude");
-  PI_DIR = join29(CWD, ".pi");
-  XTRM_SKILLS_DIR = join29(CWD, ".xtrm", "skills");
-  XTRM_DEFAULT_SKILLS_DIR = join29(XTRM_SKILLS_DIR, "default");
-  XTRM_ACTIVE_SKILLS_DIR = join29(XTRM_SKILLS_DIR, "active");
-  ACTIVE_CLAUDE_SKILLS_DIR = join29(XTRM_ACTIVE_SKILLS_DIR, "claude");
-  ACTIVE_PI_SKILLS_DIR = join29(XTRM_ACTIVE_SKILLS_DIR, "pi");
-  CONFIG_SKILLS_DIR = join29(CWD, "config", "skills");
-  CONFIG_SPECIALISTS_DIR = join29(CWD, "config", "specialists");
-  CONFIG_MANDATORY_RULES_DIR = join29(CWD, "config", "mandatory-rules");
-  CONFIG_NODES_DIR = join29(CWD, "config", "nodes");
-  SPECIALISTS_DIR = join29(CWD, ".specialists");
-  DEFAULT_SPECIALISTS_DIR = join29(SPECIALISTS_DIR, "default");
-  USER_SPECIALISTS_DIR = join29(SPECIALISTS_DIR, "user");
-  HOOKS_DIR = join29(CWD, ".xtrm", "hooks", "specialists");
-  CLAUDE_HOOKS_DIR = join29(CLAUDE_DIR, "hooks");
-  SETTINGS_FILE = join29(CLAUDE_DIR, "settings.json");
-  MCP_FILE2 = join29(CWD, ".mcp.json");
+  CLAUDE_DIR = join30(CWD, ".claude");
+  PI_DIR = join30(CWD, ".pi");
+  XTRM_SKILLS_DIR = join30(CWD, ".xtrm", "skills");
+  XTRM_DEFAULT_SKILLS_DIR = join30(XTRM_SKILLS_DIR, "default");
+  XTRM_ACTIVE_SKILLS_DIR = join30(XTRM_SKILLS_DIR, "active");
+  ACTIVE_CLAUDE_SKILLS_DIR = join30(XTRM_ACTIVE_SKILLS_DIR, "claude");
+  ACTIVE_PI_SKILLS_DIR = join30(XTRM_ACTIVE_SKILLS_DIR, "pi");
+  CONFIG_SKILLS_DIR = join30(CWD, "config", "skills");
+  CONFIG_SPECIALISTS_DIR = join30(CWD, "config", "specialists");
+  CONFIG_MANDATORY_RULES_DIR = join30(CWD, "config", "mandatory-rules");
+  CONFIG_NODES_DIR = join30(CWD, "config", "nodes");
+  SPECIALISTS_DIR = join30(CWD, ".specialists");
+  DEFAULT_SPECIALISTS_DIR = join30(SPECIALISTS_DIR, "default");
+  USER_SPECIALISTS_DIR = join30(SPECIALISTS_DIR, "user");
+  HOOKS_DIR = join30(CWD, ".xtrm", "hooks", "specialists");
+  CLAUDE_HOOKS_DIR = join30(CLAUDE_DIR, "hooks");
+  SETTINGS_FILE = join30(CLAUDE_DIR, "settings.json");
+  MCP_FILE2 = join30(CWD, ".mcp.json");
   HOOK_NAMES = [
     "specialists-complete.mjs",
     "specialists-session-start.mjs"
@@ -38889,20 +39244,20 @@ async function run29() {
 var bold14 = (s) => `\x1B[1m${s}\x1B[0m`, yellow13 = (s) => `\x1B[33m${s}\x1B[0m`, dim14 = (s) => `\x1B[2m${s}\x1B[0m`;
 
 // src/cli/serve-hot-reload.ts
-import { existsSync as existsSync28, readdirSync as readdirSync14, statSync as statSync5, watch as fsWatch } from "fs";
-import { join as join30 } from "path";
+import { existsSync as existsSync29, readdirSync as readdirSync14, statSync as statSync5, watch as fsWatch } from "fs";
+import { join as join31 } from "path";
 function specialistNameFromFile(file) {
   const match = file.match(/^(.+)\.specialist\.(json|yaml)$/);
   return match ? match[1] : null;
 }
 function snapshotMtimes(dir) {
   const out = new Map;
-  if (!existsSync28(dir))
+  if (!existsSync29(dir))
     return out;
   const entries = readdirSync14(dir).filter((name) => specialistNameFromFile(name) !== null);
   for (const name of entries) {
     try {
-      out.set(name, statSync5(join30(dir, name)).mtimeMs);
+      out.set(name, statSync5(join31(dir, name)).mtimeMs);
     } catch {}
   }
   return out;
@@ -38959,7 +39314,7 @@ function createUserDirWatcher(opts) {
       for (const file of changed)
         queue(file);
     }, opts.pollMs);
-  } else if (existsSync28(opts.userDir)) {
+  } else if (existsSync29(opts.userDir)) {
     try {
       watcher = fsWatch(opts.userDir, { persistent: false }, (_eventType, filename) => {
         queue(filename ? String(filename) : null);
@@ -38999,9 +39354,9 @@ __export(exports_serve, {
 import { createServer } from "http";
 import { once } from "events";
 import { access, readdir as readdir2, readFile as readFile4, constants } from "fs/promises";
-import { existsSync as existsSync29 } from "fs";
+import { existsSync as existsSync30 } from "fs";
 import { homedir as homedir3 } from "os";
-import { join as join31 } from "path";
+import { join as join32 } from "path";
 function createReadinessState() {
   return { shuttingDown: false, auditFailures: [], dbWriteFailuresTotal: 0 };
 }
@@ -39017,7 +39372,7 @@ function pruneAuditFailures(state, now = Date.now()) {
   }
 }
 async function checkUserDirSpecs(userDir) {
-  if (!existsSync29(userDir))
+  if (!existsSync30(userDir))
     return "empty";
   const entries = await readdir2(userDir).catch(() => []);
   const specFiles = entries.filter((name) => name.endsWith(".specialist.json") || name.endsWith(".specialist.yaml"));
@@ -39026,7 +39381,7 @@ async function checkUserDirSpecs(userDir) {
   let validCount = 0;
   for (const file of specFiles) {
     try {
-      const content = await readFile4(join31(userDir, file), "utf-8");
+      const content = await readFile4(join32(userDir, file), "utf-8");
       const json = file.endsWith(".json") ? content : null;
       if (!json)
         continue;
@@ -39044,7 +39399,7 @@ async function evaluateReadiness2(opts) {
   if (opts.state.auditFailures.length > opts.auditFailureThreshold) {
     return { ready: false, reason: "degraded:audit" };
   }
-  const piConfigPath = opts.piConfigPath ?? join31(homedir3(), ".pi", "agent", "auth.json");
+  const piConfigPath = opts.piConfigPath ?? join32(homedir3(), ".pi", "agent", "auth.json");
   try {
     await access(piConfigPath, constants.R_OK);
   } catch {
@@ -39055,7 +39410,7 @@ async function evaluateReadiness2(opts) {
   } catch {
     return { ready: false, reason: "db_not_writable" };
   }
-  const userDir = join31(opts.projectDir, ".specialists", "user");
+  const userDir = join32(opts.projectDir, ".specialists", "user");
   const userDirResult = await checkUserDirSpecs(userDir);
   if (userDirResult === "empty")
     return { ready: false, reason: "empty_user_dir" };
@@ -39131,7 +39486,7 @@ async function startServe(argv = process.argv.slice(3)) {
   ensureObservabilityDbFile(dbLocation);
   const db = createObservabilitySqliteClient(args.projectDir);
   const readinessState = createReadinessState();
-  const userDir = join31(args.projectDir, ".specialists", "user");
+  const userDir = join32(args.projectDir, ".specialists", "user");
   const hotReload = createUserDirWatcher({ loader, userDir, pollMs: args.reloadPollMs });
   let active = 0;
   const children = new Set;
@@ -39237,7 +39592,7 @@ __export(exports_script, {
   parseArgs: () => parseArgs13,
   mapExitCode: () => mapExitCode
 });
-import { spawnSync as spawnSync21 } from "child_process";
+import { spawnSync as spawnSync22 } from "child_process";
 function parseVar(entry) {
   const index = entry.indexOf("=");
   if (index <= 0)
@@ -39339,7 +39694,7 @@ function printResult(result, json) {
   console.error(result.error);
 }
 function runUnderLock(lockPath, argv) {
-  const flock = spawnSync21("flock", ["-n", lockPath, "env", "SP_SCRIPT_NO_LOCK=1", process.execPath, process.argv[1], "script", ...argv], {
+  const flock = spawnSync22("flock", ["-n", lockPath, "env", "SP_SCRIPT_NO_LOCK=1", process.execPath, process.argv[1], "script", ...argv], {
     encoding: "utf-8",
     stdio: "inherit"
   });
@@ -47201,7 +47556,7 @@ async function run33() {
     if (wantsHelp()) {
       console.log([
         "",
-        "Usage: specialists db <setup|backfill|vacuum|prune> (legacy/migration tooling)",
+        "Usage: specialists db <setup|backfill|vacuum|prune|extract|stats|benchmark-export>",
         "",
         "Provision the shared observability SQLite database maintenance and migration (human-only).",
         "",
@@ -47213,6 +47568,9 @@ async function run33() {
         "  [MIGRATION] vacuum     Run SQLite VACUUM (refuses when active jobs running/starting)",
         "  [MIGRATION] prune      Prune old rows: requires --before <iso|duration>, dry-run by default",
         "                       Use --apply to execute; --include-epics to also prune epic_runs",
+        "  [MIGRATION] extract    Recompute KPI rows from specialist_events",
+        "                       Use --job, --all-missing, --since, or --backfill",
+        "  [QUERY] stats          Query KPI rows; use --with-payload for payload columns",
         "",
         "Notes:",
         "  - TTY required for legacy migration tooling (blocked in agent/non-interactive sessions)",
@@ -47228,6 +47586,8 @@ async function run33() {
         "  specialists db prune --before 2026-01-01T00:00:00Z --apply --include-epics",
         "  sp db setup",
         "  sp db backfill",
+        "  sp db extract --all-missing",
+        "  sp db stats --with-payload",
         ""
       ].join(`
 `));

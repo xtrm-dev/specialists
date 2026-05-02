@@ -62,11 +62,11 @@ interface MergePreviewDelta {
 }
 interface MergeWorthinessDecision {
     shouldMerge: boolean;
-    reason: 'ok' | 'empty-delta' | 'noise-only-delta';
+    reason: 'ok' | 'already-published' | 'empty-delta' | 'noise-only-delta';
 }
 export declare function assertMainRepoCleanForMerge(cwd: string): void;
 export declare function previewBranchMergeDelta(branch: string, cwd?: string): MergePreviewDelta;
-export declare function evaluateMergeWorthiness(preview: MergePreviewDelta): MergeWorthinessDecision;
+export declare function evaluateMergeWorthiness(preview: MergePreviewDelta, branch: string, cwd?: string): MergeWorthinessDecision;
 export declare function rebaseBranchOntoMaster(branch: string, worktreePath: string): void;
 export declare function mergeBranch(branch: string, cwd?: string): void;
 export declare function runTypecheckGate(cwd?: string): void;

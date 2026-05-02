@@ -8119,6 +8119,15 @@ class SqliteClient {
       return statuses;
     }, "listStatuses");
   }
+  removeJobs(jobIds) {
+    return withRetry(() => {
+      if (jobIds.length === 0)
+        return 0;
+      const placeholders = jobIds.map(() => "?").join(", ");
+      const result = this.db.query(`DELETE FROM specialist_jobs WHERE job_id IN (${placeholders})`).run(...jobIds);
+      return result.changes ?? 0;
+    }, "removeJobs");
+  }
   readEpicRun(epicId) {
     return withRetry(() => {
       const row = this.db.query("SELECT epic_id, status, status_json, updated_at_ms FROM epic_runs WHERE epic_id = ? LIMIT 1").get(epicId);
@@ -8912,9 +8921,14 @@ function createObservabilitySqliteClient(cwd = process.cwd()) {
 }
 
 // src/specialist/script-runner.ts
-function hasUnsubstitutedVariables(template) {
-  const match = template.match(/\$([a-zA-Z_][a-zA-Z0-9_]*)/);
-  return match?.[1] ?? null;
+function hasUnsubstitutedVariables(template, variables) {
+  const matches = template.match(/\$([a-zA-Z_][a-zA-Z0-9_]*)/g) ?? [];
+  for (const match of matches) {
+    const key = match.slice(1);
+    if (variables[key] === undefined)
+      return key;
+  }
+  return null;
 }
 function compatGuard(spec, trust) {
   const execution = spec.specialist.execution;
@@ -8958,11 +8972,10 @@ function computeSkillSources(spec) {
   return sources;
 }
 function renderTaskTemplate(template, variables) {
-  const output = renderTemplate(template, variables);
-  const missing = hasUnsubstitutedVariables(output);
+  const missing = hasUnsubstitutedVariables(template, variables);
   if (missing)
     throw new Error(`Missing template variable: ${missing}`);
-  return output;
+  return renderTemplate(template, variables);
 }
 function mapErrorType(message) {
   if (message.includes("Specialist not found"))
@@ -8992,57 +9005,30 @@ function textFromMessage(message) {
     return "";
   return message.content.filter((part) => part.type === "text" && typeof part.text === "string").map((part) => part.text).join("");
 }
-function extractAssistantText(lines) {
-  for (let i = lines.length - 1;i >= 0; i--) {
-    const line = lines[i].trim();
-    if (!line)
-      continue;
-    let event;
-    try {
-      event = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    if (event.type === "message_end") {
-      const text = textFromMessage(event.message);
+function extractAssistantTextFromEvent(event) {
+  if (event.type === "message_end") {
+    const text = textFromMessage(event.message);
+    if (text)
+      return text;
+  }
+  if (event.type === "agent_end" && Array.isArray(event.messages)) {
+    for (let j = event.messages.length - 1;j >= 0; j--) {
+      const text = textFromMessage(event.messages[j]);
       if (text)
         return text;
     }
-    if (event.type === "agent_end" && Array.isArray(event.messages)) {
-      for (let j = event.messages.length - 1;j >= 0; j--) {
-        const text = textFromMessage(event.messages[j]);
-        if (text)
-          return text;
-      }
-    }
-    if (event.type === "assistant" && typeof event.data?.text === "string")
-      return event.data.text;
-    const legacyContent = event.data?.content?.[0]?.text;
-    if (typeof legacyContent === "string")
-      return legacyContent;
   }
-  return "";
+  if (event.type === "assistant" && typeof event.data?.text === "string")
+    return event.data.text;
+  const legacyContent = event.data?.content?.[0]?.text;
+  if (typeof legacyContent === "string")
+    return legacyContent;
+  return;
 }
 function stripMarkdownFences(text) {
   const trimmed = text.trim();
   const fenced = trimmed.match(/^```(?:json|JSON)?\s*\n?([\s\S]*?)\n?```\s*$/);
   return fenced ? fenced[1].trim() : trimmed;
-}
-function extractPiErrorMessage(lines) {
-  for (let i = lines.length - 1;i >= 0; i--) {
-    const line = lines[i].trim();
-    if (!line)
-      continue;
-    try {
-      const event = JSON.parse(line);
-      const errMsg = event.message?.errorMessage;
-      if (typeof errMsg === "string" && errMsg.length > 0)
-        return errMsg;
-    } catch {
-      continue;
-    }
-  }
-  return null;
 }
 function writeTraceRow(client, specialist, model, traceId, output, durationMs, skillSources, onAuditFailure) {
   if (!client)
@@ -9065,6 +9051,23 @@ function writeTraceRow(client, specialist, model, traceId, output, durationMs, s
     onAuditFailure?.(error);
   }
 }
+var DEFAULT_PENDING_LINE_LIMIT_BYTES = 16 * 1024 * 1024;
+var DEFAULT_ASSISTANT_TEXT_LIMIT_BYTES = 4 * 1024 * 1024;
+var DEFAULT_STDERR_LIMIT_BYTES = 1 * 1024 * 1024;
+function resolveAssistantTextLimitBytes(spec) {
+  return spec.specialist.execution.stdout_limit_bytes ?? resolveEnvAssistantTextLimitBytes() ?? DEFAULT_ASSISTANT_TEXT_LIMIT_BYTES;
+}
+function resolveEnvAssistantTextLimitBytes() {
+  const raw = process.env.SPECIALISTS_SCRIPT_STDOUT_LIMIT_BYTES;
+  if (raw === undefined)
+    return;
+  const envLimit = Number(raw);
+  if (!Number.isFinite(envLimit) || envLimit <= 0)
+    return;
+  process.stderr.write(`warning: SPECIALISTS_SCRIPT_STDOUT_LIMIT_BYTES is deprecated; applies to assistant text cap
+`);
+  return Math.floor(envLimit);
+}
 function openObservabilityClient(options) {
   const dbPath = options.observabilityDbPath ?? options.projectDir;
   return createObservabilitySqliteClient(dbPath);
@@ -9078,84 +9081,165 @@ async function runScriptSpecialist(input, options) {
     const skillSources = options.trust?.allowSkills ? computeSkillSources(spec) : undefined;
     const template = input.template ?? spec.specialist.prompt.task_template;
     const prompt = renderTaskTemplate(template, input.variables ?? {});
-    const model = input.model_override ?? spec.specialist.execution.model ?? options.fallbackModel ?? "unknown";
     const timeoutMs = input.timeout_ms ?? spec.specialist.execution.timeout_ms ?? 120000;
+    const modelCandidates = collectModelCandidates(input, spec, options);
+    const assistantTextLimitBytes = resolveAssistantTextLimitBytes(spec);
+    const attempts = [];
+    for (const model of modelCandidates) {
+      const attempt = await runSingleAttempt(prompt, model, input.thinking_level ?? spec.specialist.execution.thinking_level, timeoutMs, assistantTextLimitBytes, options);
+      attempts.push(attempt);
+      const parsed = classifyAttempt(attempt);
+      if (parsed.retryable)
+        continue;
+      const durationMs2 = Date.now() - startedAt;
+      const observability2 = openObservabilityClient(options);
+      if (input.trace !== false && observability2)
+        writeTraceRow(observability2, input.specialist, model, traceId, parsed.text, durationMs2, skillSources, options.onAuditFailure);
+      if (parsed.kind === "success") {
+        let parsed_json;
+        if (spec.specialist.execution.response_format === "json") {
+          try {
+            parsed_json = JSON.parse(stripMarkdownFences(parsed.text));
+            const required = Array.isArray(spec.specialist.prompt.output_schema?.required) ? spec.specialist.prompt.output_schema.required.filter((value) => typeof value === "string") : [];
+            for (const key of required) {
+              if (parsed_json === null || typeof parsed_json !== "object" || !(key in parsed_json))
+                throw new Error(`Missing required output field: ${key}`);
+            }
+          } catch (error) {
+            return { success: false, error: error instanceof Error ? error.message : String(error), error_type: "invalid_json", meta: { specialist: input.specialist, model, duration_ms: durationMs2, trace_id: traceId } };
+          }
+        }
+        return { success: true, output: parsed.text, parsed_json, meta: { specialist: input.specialist, model, duration_ms: durationMs2, trace_id: traceId } };
+      }
+      return { success: false, error: parsed.error, error_type: parsed.errorType, meta: { specialist: input.specialist, model, duration_ms: durationMs2, trace_id: traceId } };
+    }
+    const lastAttempt = attempts.at(-1);
+    const durationMs = Date.now() - startedAt;
+    const observability = openObservabilityClient(options);
+    if (input.trace !== false && observability)
+      writeTraceRow(observability, input.specialist, modelCandidates.at(-1) ?? "unknown", traceId, lastAttempt?.text ?? "", durationMs, skillSources, options.onAuditFailure);
+    return { success: false, error: lastAttempt?.stderr || "pi produced no assistant text", error_type: "internal", meta: { specialist: input.specialist, model: modelCandidates.at(-1) ?? "unknown", duration_ms: durationMs, trace_id: traceId } };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { success: false, error: message, error_type: mapErrorType(message), meta: { specialist: input.specialist, duration_ms: Date.now() - startedAt, trace_id: traceId } };
+  }
+}
+function collectModelCandidates(input, spec, options) {
+  const candidates = [input.model_override, spec.specialist.execution.model, spec.specialist.execution.fallback_model, options.fallbackModel].filter((value) => typeof value === "string" && value.length > 0);
+  return [...new Set(candidates)];
+}
+function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assistantTextLimitBytes, options) {
+  return new Promise((resolve, reject) => {
     const args = ["--mode", "json", "--no-session", "--no-extensions", "--no-tools", "--model", model];
-    const thinkingLevel = input.thinking_level ?? spec.specialist.execution.thinking_level;
     if (thinkingLevel)
       args.push("--thinking", thinkingLevel);
     args.push(prompt);
     const pi = spawn("pi", args, { stdio: ["ignore", "pipe", "pipe"] });
     options.onChild?.(pi);
-    const chunks = [];
     let stderr = "";
     let timedOut = false;
     let outputTooLarge = false;
-    const stdoutLimit = 4 * 1024 * 1024;
-    let stdoutBytes = 0;
+    let outputTooLargeReason;
+    let pending = "";
+    let assistantText = "";
+    let pendingBytes = 0;
+    let stderrBytes = 0;
     const timer = setTimeout(() => {
       timedOut = true;
       pi.kill("SIGTERM");
       setTimeout(() => pi.kill("SIGKILL"), 2000);
     }, timeoutMs);
     pi.stdout.on("data", (chunk) => {
+      if (outputTooLarge)
+        return;
       const buffer = Buffer.from(chunk);
-      chunks.push(buffer);
-      stdoutBytes += buffer.length;
-      if (stdoutBytes > stdoutLimit && !outputTooLarge) {
+      pending += buffer.toString("utf-8");
+      pendingBytes += buffer.length;
+      if (pendingBytes > DEFAULT_PENDING_LINE_LIMIT_BYTES) {
         outputTooLarge = true;
+        outputTooLargeReason = "malformed_line_too_large";
+        pi.kill("SIGTERM");
+        setTimeout(() => pi.kill("SIGKILL"), 2000);
+        return;
+      }
+      const lines = pending.split(/\r?\n/);
+      pending = lines.pop() ?? "";
+      pendingBytes = Buffer.byteLength(pending);
+      for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line)
+          continue;
+        try {
+          const event = JSON.parse(line);
+          const nextAssistantText = extractAssistantTextFromEvent(event);
+          if (nextAssistantText !== undefined) {
+            if (Buffer.byteLength(nextAssistantText, "utf8") > assistantTextLimitBytes) {
+              outputTooLarge = true;
+              outputTooLargeReason = "assistant_text_too_large";
+              pi.kill("SIGTERM");
+              setTimeout(() => pi.kill("SIGKILL"), 2000);
+              return;
+            }
+            assistantText = nextAssistantText;
+          }
+        } catch {
+          continue;
+        }
+      }
+    });
+    pi.stderr.on("data", (chunk) => {
+      if (outputTooLarge)
+        return;
+      const text = String(chunk);
+      stderr += text;
+      stderrBytes += Buffer.byteLength(text, "utf8");
+      if (stderrBytes > DEFAULT_STDERR_LIMIT_BYTES) {
+        outputTooLarge = true;
+        outputTooLargeReason = "stderr_too_large";
+        stderr = stderr.slice(0, DEFAULT_STDERR_LIMIT_BYTES);
         pi.kill("SIGTERM");
         setTimeout(() => pi.kill("SIGKILL"), 2000);
       }
     });
-    pi.stderr.on("data", (chunk) => {
-      stderr += String(chunk);
+    pi.on("error", reject);
+    pi.on("close", (code) => {
+      clearTimeout(timer);
+      resolve({
+        model,
+        text: assistantText,
+        stderr,
+        exitCode: code ?? 0,
+        timedOut,
+        outputTooLarge,
+        outputTooLargeReason
+      });
     });
-    const exitCode = await new Promise((resolve, reject) => {
-      pi.on("error", reject);
-      pi.on("close", (code) => resolve(code ?? 0));
-    }).finally(() => clearTimeout(timer));
-    const stdout = Buffer.concat(chunks).toString("utf-8");
-    const text = extractAssistantText(stdout.split(/\r?\n/));
-    const durationMs = Date.now() - startedAt;
-    const observability = openObservabilityClient(options);
-    if (input.trace !== false && observability)
-      writeTraceRow(observability, input.specialist, model, traceId, text, durationMs, skillSources, options.onAuditFailure);
-    if (outputTooLarge) {
-      return { success: false, error: "stdout exceeded 4MB cap", error_type: "output_too_large", meta: { specialist: input.specialist, model, duration_ms: durationMs, trace_id: traceId } };
-    }
-    if (timedOut) {
-      return { success: false, error: stderr || "timed out", error_type: "timeout", meta: { specialist: input.specialist, model, duration_ms: durationMs, trace_id: traceId } };
-    }
-    if (exitCode !== 0) {
-      return { success: false, error: stderr || `pi exit ${exitCode}`, error_type: mapErrorType(stderr), meta: { specialist: input.specialist, model, duration_ms: durationMs, trace_id: traceId } };
-    }
-    if (!text) {
-      const piError = extractPiErrorMessage(stdout.split(/\r?\n/));
-      if (piError) {
-        return { success: false, error: piError, error_type: mapErrorType(piError), meta: { specialist: input.specialist, model, duration_ms: durationMs, trace_id: traceId } };
-      }
-      return { success: false, error: "pi produced no assistant text", error_type: "internal", meta: { specialist: input.specialist, model, duration_ms: durationMs, trace_id: traceId } };
-    }
-    let parsed_json;
-    if (spec.specialist.execution.response_format === "json") {
-      try {
-        parsed_json = JSON.parse(stripMarkdownFences(text));
-        const required = Array.isArray(spec.specialist.prompt.output_schema?.required) ? spec.specialist.prompt.output_schema.required.filter((value) => typeof value === "string") : [];
-        for (const key of required) {
-          if (parsed_json === null || typeof parsed_json !== "object" || !(key in parsed_json)) {
-            throw new Error(`Missing required output field: ${key}`);
-          }
-        }
-      } catch (error) {
-        return { success: false, error: error instanceof Error ? error.message : String(error), error_type: "invalid_json", meta: { specialist: input.specialist, model, duration_ms: durationMs, trace_id: traceId } };
-      }
-    }
-    return { success: true, output: text, parsed_json, meta: { specialist: input.specialist, model, duration_ms: durationMs, trace_id: traceId } };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return { success: false, error: message, error_type: mapErrorType(message), meta: { specialist: input.specialist, duration_ms: Date.now() - startedAt, trace_id: traceId } };
+  });
+}
+function classifyAttempt(attempt) {
+  if (attempt.outputTooLarge) {
+    if (attempt.outputTooLargeReason === "assistant_text_too_large")
+      return { retryable: false, kind: "failure", error: "assistant message too large", errorType: "output_too_large", text: attempt.text };
+    if (attempt.outputTooLargeReason === "stderr_too_large")
+      return { retryable: false, kind: "failure", error: "stderr too large", errorType: "output_too_large", text: attempt.text };
+    if (attempt.outputTooLargeReason === "malformed_line_too_large")
+      return { retryable: false, kind: "failure", error: "malformed line too large", errorType: "output_too_large", text: attempt.text };
+    return { retryable: false, kind: "failure", error: "output exceeded cap", errorType: "output_too_large", text: attempt.text };
   }
+  if (attempt.timedOut)
+    return { retryable: false, kind: "failure", error: attempt.stderr || "timed out", errorType: "timeout", text: attempt.text };
+  const retryable = isRetryableModelFailure(attempt.stderr, attempt.text);
+  if (attempt.exitCode !== 0) {
+    const errorType = mapErrorType(attempt.stderr);
+    return { retryable, kind: "failure", error: attempt.stderr || `pi exit ${attempt.exitCode}`, errorType, text: attempt.text };
+  }
+  if (!attempt.text) {
+    return { retryable, kind: "failure", error: attempt.stderr || "pi produced no assistant text", errorType: mapErrorType(attempt.stderr), text: attempt.text };
+  }
+  return { retryable: false, kind: "success", error: "", errorType: "internal", text: attempt.text };
+}
+function isRetryableModelFailure(stderr, text) {
+  return stderr.includes("0 tokens") || stderr.includes("quota") || stderr.includes("rate limit") || stderr.includes("403") || stderr.includes("401") || stderr.includes("insufficient_quota") || !text && !stderr.trim();
 }
 // src/specialist/loader.ts
 import { readdir, readFile, stat } from "node:fs/promises";
@@ -13038,6 +13122,7 @@ var ExecutionSchema = objectType({
   stall_timeout_ms: numberType().optional(),
   max_retries: numberType().int().min(0).default(0),
   interactive: booleanType().default(false),
+  stdout_limit_bytes: numberType().int().positive().optional(),
   response_format: enumType(["text", "json", "markdown"]).default("text"),
   output_type: enumType(["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]).default("custom"),
   permission_required: enumType(["READ_ONLY", "LOW", "MEDIUM", "HIGH"]).default("READ_ONLY"),

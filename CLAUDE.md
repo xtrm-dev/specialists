@@ -330,11 +330,9 @@ sp stop <job-id>                             # Terminate
 sp merge <chain-root-bead>                   # Standalone chain
 sp epic status <epic-id>                     # Epic readiness check
 sp epic merge <epic-id>                      # Multi-chain epic publication
-sp release prepare [--major|--minor|--patch] # Draft CHANGELOG section + bump package.json (operator commits)
-sp release publish                           # Validate staged release commit, tag, push, optional GH release
 ```
 
-`sp release prepare` invokes the READ_ONLY `changelog-keeper` specialist; the CLI is the file mutator. Format conforms to Keep-a-Changelog v1.0.0. See `docs/release.md`.
+For releases: use the `releasing` skill (invokes the `changelog-keeper` MEDIUM specialist directly — drafts CHANGELOG section from xt reports, bumps package.json, rebuilds dist, commits, tags, pushes). Operator gate is a single `git diff --stat HEAD~1 HEAD` check after the specialist finishes. See `config/skills/releasing/SKILL.md`.
 
 ## Review & Fix Loop
 
@@ -817,7 +815,7 @@ To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **specialists** (4623 symbols, 10018 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **specialists** (4639 symbols, 10045 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

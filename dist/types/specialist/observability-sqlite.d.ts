@@ -176,6 +176,7 @@ export interface ObservabilitySqliteClient {
     queryMemberContextHealth(jobId: string): number | null;
     readStatus(jobId: string): SupervisorStatus | null;
     listStatuses(): SupervisorStatus[];
+    removeJobs(jobIds: readonly string[]): number;
     readEpicRun(epicId: string): EpicRunRecord | null;
     listEpicRuns(): EpicRunRecord[];
     resolveEpicByChainId(chainId: string): EpicChainRecord | null;

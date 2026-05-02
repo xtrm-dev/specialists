@@ -31,6 +31,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             stall_timeout_ms: z.ZodOptional<z.ZodNumber>;
             max_retries: z.ZodDefault<z.ZodNumber>;
             interactive: z.ZodDefault<z.ZodBoolean>;
+            stdout_limit_bytes: z.ZodOptional<z.ZodNumber>;
             response_format: z.ZodDefault<z.ZodEnum<["text", "json", "markdown"]>>;
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
@@ -65,6 +66,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             stall_timeout_ms: z.ZodOptional<z.ZodNumber>;
             max_retries: z.ZodDefault<z.ZodNumber>;
             interactive: z.ZodDefault<z.ZodBoolean>;
+            stdout_limit_bytes: z.ZodOptional<z.ZodNumber>;
             response_format: z.ZodDefault<z.ZodEnum<["text", "json", "markdown"]>>;
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
@@ -99,6 +101,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             stall_timeout_ms: z.ZodOptional<z.ZodNumber>;
             max_retries: z.ZodDefault<z.ZodNumber>;
             interactive: z.ZodDefault<z.ZodBoolean>;
+            stdout_limit_bytes: z.ZodOptional<z.ZodNumber>;
             response_format: z.ZodDefault<z.ZodEnum<["text", "json", "markdown"]>>;
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
@@ -347,6 +350,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             stall_timeout_ms: z.ZodOptional<z.ZodNumber>;
             max_retries: z.ZodDefault<z.ZodNumber>;
             interactive: z.ZodDefault<z.ZodBoolean>;
+            stdout_limit_bytes: z.ZodOptional<z.ZodNumber>;
             response_format: z.ZodDefault<z.ZodEnum<["text", "json", "markdown"]>>;
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
@@ -381,6 +385,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             stall_timeout_ms: z.ZodOptional<z.ZodNumber>;
             max_retries: z.ZodDefault<z.ZodNumber>;
             interactive: z.ZodDefault<z.ZodBoolean>;
+            stdout_limit_bytes: z.ZodOptional<z.ZodNumber>;
             response_format: z.ZodDefault<z.ZodEnum<["text", "json", "markdown"]>>;
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
@@ -415,6 +420,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             stall_timeout_ms: z.ZodOptional<z.ZodNumber>;
             max_retries: z.ZodDefault<z.ZodNumber>;
             interactive: z.ZodDefault<z.ZodBoolean>;
+            stdout_limit_bytes: z.ZodOptional<z.ZodNumber>;
             response_format: z.ZodDefault<z.ZodEnum<["text", "json", "markdown"]>>;
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
@@ -663,6 +669,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             stall_timeout_ms: z.ZodOptional<z.ZodNumber>;
             max_retries: z.ZodDefault<z.ZodNumber>;
             interactive: z.ZodDefault<z.ZodBoolean>;
+            stdout_limit_bytes: z.ZodOptional<z.ZodNumber>;
             response_format: z.ZodDefault<z.ZodEnum<["text", "json", "markdown"]>>;
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
@@ -697,6 +704,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             stall_timeout_ms: z.ZodOptional<z.ZodNumber>;
             max_retries: z.ZodDefault<z.ZodNumber>;
             interactive: z.ZodDefault<z.ZodBoolean>;
+            stdout_limit_bytes: z.ZodOptional<z.ZodNumber>;
             response_format: z.ZodDefault<z.ZodEnum<["text", "json", "markdown"]>>;
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
@@ -731,6 +739,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             stall_timeout_ms: z.ZodOptional<z.ZodNumber>;
             max_retries: z.ZodDefault<z.ZodNumber>;
             interactive: z.ZodDefault<z.ZodBoolean>;
+            stdout_limit_bytes: z.ZodOptional<z.ZodNumber>;
             response_format: z.ZodDefault<z.ZodEnum<["text", "json", "markdown"]>>;
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
@@ -981,6 +990,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             stall_timeout_ms: z.ZodOptional<z.ZodNumber>;
             max_retries: z.ZodDefault<z.ZodNumber>;
             interactive: z.ZodDefault<z.ZodBoolean>;
+            stdout_limit_bytes: z.ZodOptional<z.ZodNumber>;
             response_format: z.ZodDefault<z.ZodEnum<["text", "json", "markdown"]>>;
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
@@ -1015,6 +1025,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             stall_timeout_ms: z.ZodOptional<z.ZodNumber>;
             max_retries: z.ZodDefault<z.ZodNumber>;
             interactive: z.ZodDefault<z.ZodBoolean>;
+            stdout_limit_bytes: z.ZodOptional<z.ZodNumber>;
             response_format: z.ZodDefault<z.ZodEnum<["text", "json", "markdown"]>>;
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
@@ -1049,6 +1060,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             stall_timeout_ms: z.ZodOptional<z.ZodNumber>;
             max_retries: z.ZodDefault<z.ZodNumber>;
             interactive: z.ZodDefault<z.ZodBoolean>;
+            stdout_limit_bytes: z.ZodOptional<z.ZodNumber>;
             response_format: z.ZodDefault<z.ZodEnum<["text", "json", "markdown"]>>;
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
@@ -1297,6 +1309,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             stall_timeout_ms: z.ZodOptional<z.ZodNumber>;
             max_retries: z.ZodDefault<z.ZodNumber>;
             interactive: z.ZodDefault<z.ZodBoolean>;
+            stdout_limit_bytes: z.ZodOptional<z.ZodNumber>;
             response_format: z.ZodDefault<z.ZodEnum<["text", "json", "markdown"]>>;
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
@@ -1331,6 +1344,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             stall_timeout_ms: z.ZodOptional<z.ZodNumber>;
             max_retries: z.ZodDefault<z.ZodNumber>;
             interactive: z.ZodDefault<z.ZodBoolean>;
+            stdout_limit_bytes: z.ZodOptional<z.ZodNumber>;
             response_format: z.ZodDefault<z.ZodEnum<["text", "json", "markdown"]>>;
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
@@ -1365,6 +1379,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             stall_timeout_ms: z.ZodOptional<z.ZodNumber>;
             max_retries: z.ZodDefault<z.ZodNumber>;
             interactive: z.ZodDefault<z.ZodBoolean>;
+            stdout_limit_bytes: z.ZodOptional<z.ZodNumber>;
             response_format: z.ZodDefault<z.ZodEnum<["text", "json", "markdown"]>>;
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
@@ -1613,6 +1628,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             stall_timeout_ms: z.ZodOptional<z.ZodNumber>;
             max_retries: z.ZodDefault<z.ZodNumber>;
             interactive: z.ZodDefault<z.ZodBoolean>;
+            stdout_limit_bytes: z.ZodOptional<z.ZodNumber>;
             response_format: z.ZodDefault<z.ZodEnum<["text", "json", "markdown"]>>;
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
@@ -1647,6 +1663,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             stall_timeout_ms: z.ZodOptional<z.ZodNumber>;
             max_retries: z.ZodDefault<z.ZodNumber>;
             interactive: z.ZodDefault<z.ZodBoolean>;
+            stdout_limit_bytes: z.ZodOptional<z.ZodNumber>;
             response_format: z.ZodDefault<z.ZodEnum<["text", "json", "markdown"]>>;
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
@@ -1681,6 +1698,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             stall_timeout_ms: z.ZodOptional<z.ZodNumber>;
             max_retries: z.ZodDefault<z.ZodNumber>;
             interactive: z.ZodDefault<z.ZodBoolean>;
+            stdout_limit_bytes: z.ZodOptional<z.ZodNumber>;
             response_format: z.ZodDefault<z.ZodEnum<["text", "json", "markdown"]>>;
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
@@ -1931,6 +1949,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             stall_timeout_ms: z.ZodOptional<z.ZodNumber>;
             max_retries: z.ZodDefault<z.ZodNumber>;
             interactive: z.ZodDefault<z.ZodBoolean>;
+            stdout_limit_bytes: z.ZodOptional<z.ZodNumber>;
             response_format: z.ZodDefault<z.ZodEnum<["text", "json", "markdown"]>>;
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
@@ -1965,6 +1984,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             stall_timeout_ms: z.ZodOptional<z.ZodNumber>;
             max_retries: z.ZodDefault<z.ZodNumber>;
             interactive: z.ZodDefault<z.ZodBoolean>;
+            stdout_limit_bytes: z.ZodOptional<z.ZodNumber>;
             response_format: z.ZodDefault<z.ZodEnum<["text", "json", "markdown"]>>;
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
@@ -1999,6 +2019,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             stall_timeout_ms: z.ZodOptional<z.ZodNumber>;
             max_retries: z.ZodDefault<z.ZodNumber>;
             interactive: z.ZodDefault<z.ZodBoolean>;
+            stdout_limit_bytes: z.ZodOptional<z.ZodNumber>;
             response_format: z.ZodDefault<z.ZodEnum<["text", "json", "markdown"]>>;
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
@@ -2247,6 +2268,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             stall_timeout_ms: z.ZodOptional<z.ZodNumber>;
             max_retries: z.ZodDefault<z.ZodNumber>;
             interactive: z.ZodDefault<z.ZodBoolean>;
+            stdout_limit_bytes: z.ZodOptional<z.ZodNumber>;
             response_format: z.ZodDefault<z.ZodEnum<["text", "json", "markdown"]>>;
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
@@ -2281,6 +2303,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             stall_timeout_ms: z.ZodOptional<z.ZodNumber>;
             max_retries: z.ZodDefault<z.ZodNumber>;
             interactive: z.ZodDefault<z.ZodBoolean>;
+            stdout_limit_bytes: z.ZodOptional<z.ZodNumber>;
             response_format: z.ZodDefault<z.ZodEnum<["text", "json", "markdown"]>>;
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
@@ -2315,6 +2338,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             stall_timeout_ms: z.ZodOptional<z.ZodNumber>;
             max_retries: z.ZodDefault<z.ZodNumber>;
             interactive: z.ZodDefault<z.ZodBoolean>;
+            stdout_limit_bytes: z.ZodOptional<z.ZodNumber>;
             response_format: z.ZodDefault<z.ZodEnum<["text", "json", "markdown"]>>;
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
@@ -2563,6 +2587,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             stall_timeout_ms: z.ZodOptional<z.ZodNumber>;
             max_retries: z.ZodDefault<z.ZodNumber>;
             interactive: z.ZodDefault<z.ZodBoolean>;
+            stdout_limit_bytes: z.ZodOptional<z.ZodNumber>;
             response_format: z.ZodDefault<z.ZodEnum<["text", "json", "markdown"]>>;
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
@@ -2597,6 +2622,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             stall_timeout_ms: z.ZodOptional<z.ZodNumber>;
             max_retries: z.ZodDefault<z.ZodNumber>;
             interactive: z.ZodDefault<z.ZodBoolean>;
+            stdout_limit_bytes: z.ZodOptional<z.ZodNumber>;
             response_format: z.ZodDefault<z.ZodEnum<["text", "json", "markdown"]>>;
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
@@ -2631,6 +2657,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             stall_timeout_ms: z.ZodOptional<z.ZodNumber>;
             max_retries: z.ZodDefault<z.ZodNumber>;
             interactive: z.ZodDefault<z.ZodBoolean>;
+            stdout_limit_bytes: z.ZodOptional<z.ZodNumber>;
             response_format: z.ZodDefault<z.ZodEnum<["text", "json", "markdown"]>>;
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;

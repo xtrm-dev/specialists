@@ -55,5 +55,27 @@ export interface ScriptRunnerOptions {
 export declare function compatGuard(spec: Specialist, trust?: TrustOptions): void;
 export declare function computeSkillSources(spec: Specialist): SkillSource[];
 export declare function renderTaskTemplate(template: string, variables: Record<string, string>): string;
+export declare const DEFAULT_PENDING_LINE_LIMIT_BYTES: number;
+export declare const DEFAULT_ASSISTANT_TEXT_LIMIT_BYTES: number;
+export declare const DEFAULT_STDERR_LIMIT_BYTES: number;
+export declare function resolveAssistantTextLimitBytes(spec: Specialist): number;
 export declare function runScriptSpecialist(input: ScriptGenerateRequest, options: ScriptRunnerOptions): Promise<ScriptGenerateResult>;
+export declare function collectModelCandidates(input: ScriptGenerateRequest, spec: Specialist, options: ScriptRunnerOptions): string[];
+type AttemptFailureReason = 'assistant_text_too_large' | 'stderr_too_large' | 'malformed_line_too_large';
+export declare function classifyAttempt(attempt: {
+    text: string;
+    stderr: string;
+    exitCode: number;
+    timedOut: boolean;
+    outputTooLarge: boolean;
+    outputTooLargeReason?: AttemptFailureReason;
+}): {
+    retryable: boolean;
+    kind: 'success' | 'failure';
+    error: string;
+    errorType: ScriptSpecialistErrorType;
+    text: string;
+};
+export declare function isRetryableModelFailure(stderr: string, text: string): boolean;
+export {};
 //# sourceMappingURL=script-runner.d.ts.map
