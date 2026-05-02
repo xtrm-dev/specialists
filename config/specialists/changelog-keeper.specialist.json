@@ -19,13 +19,14 @@
       "timeout_ms": 0,
       "stall_timeout_ms": 120000,
       "response_format": "markdown",
-      "output_type": "release",
+      "output_type": "workflow",
       "permission_required": "MEDIUM",
       "thinking_level": "low",
-      "auto_commit": "checkpoint_on_waiting",
+      "auto_commit": "never",
       "interactive": true,
       "max_retries": 0,
-      "mode": "auto"
+      "mode": "auto",
+      "requires_worktree": false
     },
     "mandatory_rules": {
       "template_sets": [
