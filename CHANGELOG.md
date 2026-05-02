@@ -11,6 +11,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v3.11.0] — 2026-05-03
+
+### Added
+- `changelog-keeper` specialist v1 for release-note synthesis from curated xt reports (unitAI-znkgi.2)
+- Releasing skill workflow for prepare/publish release flow after CLI removal (unitAI-fhbf4)
+- `sp doctor` / `sp status` version-check nudges with cached tag awareness and per-tag dedupe (unitAI-znkgi.9)
+- `using-kpi` skill for KPI analysis and payload/runtime observability recipes (unitAI-drs41.4)
+- `sp db extract` / `sp db stats` surfaces for KPI extraction and analysis help (unitAI-drs41.4; unitAI-svnft)
+- GitNexus-required new-file escape hatch rule for additive specialist/doc changes (unitAI-znkgi.7)
+- `sp release prepare` range flags `--from` / `--to` for explicit backfill windows (unitAI-1evl2)
+- `sp release` publish-time validation for top-section gating, annotated tag creation, and push flow (unitAI-znkgi.3)
+
+### Changed
+- `sp release prepare` now accepts markdown-only specialist output, normalizes missing section keys, and keeps section replacement bounded (unitAI-8elrc; unitAI-1avsn; unitAI-a3s9a)
+- `changelog-keeper` output tightened with fallback chain and stricter section fidelity for release drafts (unitAI-8elrc; unitAI-khlqj)
+- `sp clean` migrated to DB-first job selection with PID-primary stale-process cleanup (`--processes`) (unitAI-ltwme)
+- `sp script` stdout cap raised to 128MB with incremental parse for oversized streams (unitAI-9cygd; unitAI-a47ub)
+- `sp script` retained cap handling fixed so overflow recovery stays stable under repeated reads (unitAI-1avsn; unitAI-a47ub)
+- `sp script` template-check / compat guard fix for spec loading under release-related flows (unitAI-r7zte)
+- `sp release` semver section label now derives from `--to HEAD` correctly (unitAI-7qu0t)
+- `sp release` draft parser now accepts array-shape sections and markdown fallback (unitAI-a3s9a)
+- Release parser now accepts JSON drafts missing section keys and backfills empty buckets (unitAI-1avsn)
+- `using-specialists-v2`, `update-specialists`, `CLAUDE.md`, `AGENTS.md`, and related docs synced for release awareness and update checks (unitAI-znkgi.5; unitAI-jhhu4.1; unitAI-c190df90)
+- `docs/design/gzrx-tool-catalog.md` aligned with source policy for centralized tool catalog design (unitAI-gzrx)
+- `src/cli/doctor.ts` drift check now warns on stale user-overlay specialists before they shadow defaults (unitAI-bb3h6)
+- `src/specialist/script-runner.ts` and tests got stdout-cap, parse, and tool-allowlist fixes across release/debugger work (unitAI-9cygd; unitAI-1avsn; unitAI-a47ub; unitAI-c6he0)
+- `src/cli/release.ts` / `src/cli/version-check.ts` / `src/cli/clean.ts` got the release, version-check, and DB-first cleanup flow updates (unitAI-znkgi.3; unitAI-znkgi.9; unitAI-ltwme)
+- `docs/observability-metrics.md`, `docs/cli-reference.md`, and skill mirrors updated for KPI and release workflow drift (unitAI-drs41.4; unitAI-znkgi.5)
+
+### Fixed
+- Release draft rendering now handles markdown-only output and JSON drafts missing section keys without losing bullets (unitAI-8elrc; unitAI-1avsn)
+- `sp script` overflow handling now preserves retained caps across parse retries and large stdout bursts (unitAI-a47ub)
+- `sp release` publish/prepare validation now rejects section-label and array-shape edge cases before bad tags land (unitAI-7qu0t; unitAI-a3s9a)
+- `sp clean` no longer depends on file-era job dirs and survives deleted process state (unitAI-ltwme)
+
+### Removed
+- `sp release` CLI path replaced by releasing skill workflow for publishing releases (unitAI-fhbf4)
+
 ## [3.8.0] - 2026-04-26
 
 `specialists-service` v1 — HTTP and CLI surfaces for script-class specialists, plus a strict 1:1 schema cut so every JSON field maps to a runtime consumer.
@@ -47,5 +85,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`parallel-review` specialist files**: Removed from canonical and mirror (renamed to `parallel-runner` in 3.4.0; spec files lingered until this cleanup).
 - **11 declarative-only schema fields**: See Changed → strict 1:1 schema cut. None had a runtime consumer.
 
-[Unreleased]: https://github.com/Jaggerxtrm/specialists/compare/v3.8.0...HEAD
+[Unreleased]: https://github.com/Jaggerxtrm/specialists/compare/v3.11.0...HEAD
+[v3.11.0]: https://github.com/Jaggerxtrm/specialists/releases/tag/v3.11.0
 [3.8.0]: https://github.com/Jaggerxtrm/specialists/releases/tag/v3.8.0
