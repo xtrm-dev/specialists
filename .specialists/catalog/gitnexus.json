@@ -1,0 +1,12 @@
+{
+  "catalog": "gitnexus",
+  "package": "pi-gitnexus",
+  "version": "0.6.1",
+  "precedence": 1,
+  "source_tiers": {
+    "READ_ONLY": ["gitnexus_list_repos", "gitnexus_query", "gitnexus_context", "gitnexus_impact", "gitnexus_detect_changes"],
+    "LOW": ["gitnexus_list_repos", "gitnexus_query", "gitnexus_context", "gitnexus_impact", "gitnexus_detect_changes"],
+    "MEDIUM": ["gitnexus_list_repos", "gitnexus_query", "gitnexus_context", "gitnexus_impact", "gitnexus_detect_changes", "gitnexus_rename", "gitnexus_cypher"],
+    "HIGH": ["gitnexus_list_repos", "gitnexus_query", "gitnexus_context", "gitnexus_impact", "gitnexus_detect_changes", "gitnexus_rename", "gitnexus_cypher"]
+  }
+}
