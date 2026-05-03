@@ -8,7 +8,7 @@ const SPECIALIST = {
     permissions: {
       HIGH: {
         denied_natives_when_extension: ['write'],
-        denied_natives_mode: 'hard',
+        denied_natives_mode: 'soft',
       },
     },
   },
@@ -71,6 +71,8 @@ describe('config CLI resolved output', () => {
     expect(output).toContain('specialist: executor');
     expect(output).toContain('layer attribution:');
     expect(output).toContain('extension availability:');
+    expect(output).toContain('deny mode: soft');
+    expect(output).toContain('preference signals: soft deny prefers extension tools for: write');
     expect(output).toContain('--tools:');
   });
 });
