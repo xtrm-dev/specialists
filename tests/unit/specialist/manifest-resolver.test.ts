@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { LEGACY_PERMISSION_TOOL_STRINGS, resolveManifestTools, type ToolCatalog, type ToolTier } from '../../../src/specialist/manifest-resolver.js';
 
@@ -88,6 +89,46 @@ describe('manifest resolver', () => {
       expect(restored.downgradeReasons.join(' ')).toContain('restored native fallback');
       expect(restored.warnings.join(' ')).toContain('hard deny restored native fallback');
     }
+  });
+
+  it('enables explorer hard deny for grep, find, and ls only when replacement extensions are healthy', async () => {
+    const catalogs = await loadCatalogs();
+    const explorer = JSON.parse(await readFile(join(process.cwd(), 'config', 'specialists', 'explorer.specialist.json'), 'utf8')) as {
+      specialist?: { permissions?: { READ_ONLY?: { denied_natives_when_extension?: readonly string[]; denied_natives_mode?: 'soft' | 'hard' } } };
+    };
+    const policy = explorer.specialist?.permissions;
+    expect(policy?.READ_ONLY?.denied_natives_when_extension).toEqual(['grep', 'find', 'ls']);
+    expect(policy?.READ_ONLY?.denied_natives_mode).toBe('hard');
+
+    const healthy = resolveManifestTools({
+      tier: 'READ_ONLY',
+      catalogs,
+      manifestPolicy: policy ? { permissions: policy } : undefined,
+      extensionState: makeHealthyState(),
+    });
+
+    expect(healthy.toolsList).not.toContain('grep');
+    expect(healthy.toolsList).not.toContain('find');
+    expect(healthy.toolsList).not.toContain('ls');
+    expect(healthy.toolsList).toContain('read');
+    expect(healthy.deniedNatives).toEqual(['grep', 'find', 'ls']);
+
+    const restored = resolveManifestTools({
+      tier: 'READ_ONLY',
+      catalogs,
+      manifestPolicy: policy ? { permissions: policy } : undefined,
+      extensionState: {
+        gitnexus: { health: 'loaded_unhealthy' as const },
+        serena: { health: 'loaded_healthy' as const, catalogCompatible: true },
+      },
+    });
+
+    expect(restored.tools).toContain('grep');
+    expect(restored.tools).toContain('find');
+    expect(restored.tools).toContain('ls');
+    expect(restored.tools).toContain('read');
+    expect(restored.deniedNatives).toEqual([]);
+    expect(restored.downgradeReasons.join(' ')).toContain('restored native fallback');
   });
 
   it('tracks extension state, specialist override, and yaml exclusions in resolved output', async () => {
