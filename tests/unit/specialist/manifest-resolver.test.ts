@@ -1,16 +1,8 @@
-import { describe, expect, it } from 'vitest';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import {
-  LEGACY_PERMISSION_TOOL_STRINGS,
-  resolveManifestTools,
-  type ToolCatalog,
-  type ToolTier,
-} from '../../../src/specialist/manifest-resolver.js';
+import { LEGACY_PERMISSION_TOOL_STRINGS, resolveManifestTools, type ToolCatalog, type ToolTier } from '../../../src/specialist/manifest-resolver.js';
 
 const TIERS: readonly ToolTier[] = ['READ_ONLY', 'LOW', 'MEDIUM', 'HIGH'];
-const HEALTHS = ['loaded_healthy', 'loaded_unhealthy', 'not_installed', 'unknown'] as const;
-
 async function loadCatalogs(): Promise<readonly ToolCatalog[]> {
   const index = JSON.parse(await readFile(join(process.cwd(), '.specialists/catalog/index.json'), 'utf8')) as { catalogs: ToolCatalog[] };
   return index.catalogs;
@@ -18,8 +10,8 @@ async function loadCatalogs(): Promise<readonly ToolCatalog[]> {
 
 function makeHealthyState() {
   return {
-    gitnexus: { health: 'loaded_healthy' as const },
-    serena: { health: 'loaded_healthy' as const },
+    gitnexus: { health: 'loaded_healthy' as const, catalogCompatible: true },
+    serena: { health: 'loaded_healthy' as const, catalogCompatible: true },
   };
 }
 
@@ -51,48 +43,50 @@ describe('manifest resolver', () => {
     expect(resolved.deniedNatives).toEqual([]);
     expect(resolved.deniedNativesMode).toBe('soft');
     expect(resolved.preferenceSignals).toEqual(['soft deny prefers extension tools for: grep,find,ls']);
+    expect(resolved.downgradeReasons).toEqual([]);
   });
 
   it('hard deny strips natives only when replacement extensions are healthy', async () => {
     const catalogs = await loadCatalogs();
+    const policy = {
+      permissions: {
+        READ_ONLY: {
+          denied_natives_when_extension: ['grep', 'find', 'ls'],
+          denied_natives_mode: 'hard' as const,
+        },
+      },
+    };
+
     const healthy = resolveManifestTools({
       tier: 'READ_ONLY',
       catalogs,
-      manifestPolicy: {
-        permissions: {
-          READ_ONLY: {
-            denied_natives_when_extension: ['grep', 'find', 'ls'],
-            denied_natives_mode: 'hard',
-          },
-        },
-      },
+      manifestPolicy: policy,
       extensionState: makeHealthyState(),
     });
 
     expect(healthy.tools).not.toContain('grep');
     expect(healthy.deniedNatives).toEqual(['grep', 'find', 'ls']);
+    expect(healthy.downgradeReasons).toEqual([]);
 
-    for (const health of HEALTHS) {
-      if (health === 'loaded_healthy') continue;
-      const degraded = resolveManifestTools({
+    const restoreStates = [
+      { extensionState: { gitnexus: { health: 'loaded_unhealthy' as const }, serena: { health: 'loaded_healthy' as const, catalogCompatible: true } } },
+      { extensionState: { gitnexus: { health: 'loaded_healthy' as const, catalogCompatible: false }, serena: { health: 'loaded_healthy' as const, catalogCompatible: true } } },
+      { extensionState: { gitnexus: { health: 'unknown' as const }, serena: { health: 'loaded_healthy' as const, catalogCompatible: true } } },
+      { extensionState: { gitnexus: { health: 'disabled' as const }, serena: { health: 'loaded_healthy' as const, catalogCompatible: true } } },
+    ] as const;
+
+    for (const { extensionState } of restoreStates) {
+      const restored = resolveManifestTools({
         tier: 'READ_ONLY',
         catalogs,
-        manifestPolicy: {
-          permissions: {
-            READ_ONLY: {
-              denied_natives_when_extension: ['grep', 'find', 'ls'],
-              denied_natives_mode: 'hard',
-            },
-          },
-        },
-        extensionState: {
-          gitnexus: { health },
-          serena: { health },
-        },
+        manifestPolicy: policy,
+        extensionState,
       });
 
-      expect(degraded.tools).toBe(LEGACY_PERMISSION_TOOL_STRINGS.READ_ONLY);
-      expect(degraded.deniedNatives).toEqual([]);
+      expect(restored.tools).toBe(LEGACY_PERMISSION_TOOL_STRINGS.READ_ONLY);
+      expect(restored.deniedNatives).toEqual([]);
+      expect(restored.downgradeReasons.join(' ')).toContain('restored native fallback');
+      expect(restored.warnings.join(' ')).toContain('hard deny restored native fallback');
     }
   });
 
@@ -118,7 +112,7 @@ describe('manifest resolver', () => {
         deniedNatives: ['ls'],
       },
       extensionState: {
-        gitnexus: { health: 'loaded_healthy' },
+        gitnexus: { health: 'loaded_healthy', catalogCompatible: true },
         serena: { health: 'disabled' },
       },
     });

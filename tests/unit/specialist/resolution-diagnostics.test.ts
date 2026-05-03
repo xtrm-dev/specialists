@@ -32,6 +32,9 @@ describe('resolution diagnostics', () => {
         tools: 'read,ls,serena_list_tools',
         toolsList: ['read', 'ls', 'serena_list_tools'],
         deniedNatives: [],
+        deniedNativesMode: 'soft',
+        preferenceSignals: [],
+        downgradeReasons: ['restored native fallback for read due to loaded_unhealthy'],
         warnings: [],
         attribution: [{ layer: 'tier_policy', source: 'manifest policy', tools: ['read', 'ls'] }],
       },
@@ -39,6 +42,7 @@ describe('resolution diagnostics', () => {
 
     expect(output).toContain('specialist: executor');
     expect(output).toContain('layer attribution:');
+    expect(output).toContain('downgrade reasons: restored native fallback for read due to loaded_unhealthy');
     expect(output).toContain('--tools: read,ls,serena_list_tools');
   });
 });

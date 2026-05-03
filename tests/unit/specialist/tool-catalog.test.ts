@@ -3,7 +3,7 @@ import { loadToolCatalogIndex, SPECIALIST_TOOL_PRECEDENCE } from '../../../src/s
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-const EXPECTED_CONFLICT_SEMANTICS = '(1) most restrictive wins for tool inclusion\n * (2) exception: runtime health degradation restores native fallbacks\n * (3) hard-deny in specialist override does not override runtime health downgrade';
+const EXPECTED_CONFLICT_SEMANTICS = '(1) most restrictive wins for tool inclusion\n * (2) exception: runtime health degradation or catalog incompatibility restores native fallbacks\n * (3) hard-deny in specialist override does not override runtime health downgrade';
 
 const EXPECTED_NATIVE = {
   READ_ONLY: ['read', 'grep', 'find', 'ls'],
