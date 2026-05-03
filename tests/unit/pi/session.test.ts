@@ -89,6 +89,11 @@ function emitLine(fake: ReturnType<typeof makeFakeProc>, obj: object) {
   fake.stdoutHandlers['data']?.(Buffer.from(JSON.stringify(obj) + '\n'));
 }
 
+function getToolsArg(args: readonly string[]): string | undefined {
+  const toolsIdx = args.indexOf('--tools');
+  return toolsIdx >= 0 ? args[toolsIdx + 1] : undefined;
+}
+
 // ── RPC protocol parsing tests ────────────────────────────────────────────────
 
 describe('validateWriteToolPathAgainstBoundary', () => {
@@ -495,6 +500,20 @@ describe('PiAgentSession', () => {
 
     // close() should now resolve (no throw)
     await expect(closePromise).resolves.toBeUndefined();
+  });
+
+  it('shared resolver flag keeps LOW parity with legacy tools', async () => {
+    const legacySession = await PiAgentSession.create({ model: 'gemini', permissionLevel: 'LOW' });
+    await legacySession.start();
+    const legacyTools = getToolsArg(mockSpawn.mock.calls[0][1] as string[]);
+
+    mockSpawn.mockClear();
+
+    const flaggedSession = await PiAgentSession.create({ model: 'gemini', permissionLevel: 'LOW', useSharedToolResolver: true });
+    await flaggedSession.start();
+    const flaggedTools = getToolsArg(mockSpawn.mock.calls[0][1] as string[]);
+
+    expect(flaggedTools).toBe(legacyTools);
   });
 
   it("mapPermissionToTools('LOW') includes built-in, GitNexus, and non-mutating Serena tools", async () => {

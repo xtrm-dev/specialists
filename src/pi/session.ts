@@ -39,10 +39,12 @@ export class StallTimeoutError extends Error {
 //
 import { createHash } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { isAbsolute, resolve, sep, join, dirname } from 'node:path';
 import { mapSpecialistBackend, getProviderArgs } from './backendMap.js';
+import { resolveManifestTools } from '../specialist/manifest-resolver.js';
+import { loadToolCatalogIndex, type ToolCatalogIndex } from '../specialist/tool-catalog.js';
 
 const TEST_COMMAND_STALL_TIMEOUT_MS = 300_000;
 const TEST_COMMAND_PATTERNS: ReadonlyArray<RegExp> = [
@@ -99,6 +101,8 @@ export interface PiSessionOptions {
   worktreeBoundary?: string;
   /** Permission level from specialist YAML — controls which pi tools are enabled */
   permissionLevel?: string;
+  /** Internal rollout switch for shared resolver path; keeps legacy fallback intact. */
+  useSharedToolResolver?: boolean;
   /** Skill files loaded via pi --skill (injected into system prompt natively) */
   skillPaths?: string[];
   /** Thinking level passed as pi --thinking <level> */
@@ -220,6 +224,37 @@ const GITNEXUS_WRITE_TOOLS = [
 
 function joinTools(...groups: readonly (readonly string[])[]): string {
   return groups.flat().join(',');
+}
+
+let cachedToolCatalogIndex: ToolCatalogIndex | undefined;
+
+function loadSharedToolCatalogIndex(): ToolCatalogIndex | undefined {
+  if (cachedToolCatalogIndex) return cachedToolCatalogIndex;
+
+  try {
+    const indexPath = resolve(process.cwd(), '.specialists', 'catalog', 'index.json');
+    cachedToolCatalogIndex = loadToolCatalogIndex(readFileSync(indexPath, 'utf8')) as ToolCatalogIndex;
+    return cachedToolCatalogIndex;
+  } catch {
+    return undefined;
+  }
+}
+
+function resolvePermissionTools(level?: string): string | undefined {
+  const catalogIndex = loadSharedToolCatalogIndex();
+  if (!catalogIndex) return undefined;
+
+  const tier = level?.toUpperCase();
+  if (tier !== 'READ_ONLY' && tier !== 'LOW' && tier !== 'MEDIUM' && tier !== 'HIGH') return undefined;
+
+  return resolveManifestTools({
+    tier,
+    catalogs: catalogIndex.catalogs as any,
+    extensionState: {
+      gitnexus: { enabled: true, health: 'loaded_healthy' },
+      serena: { enabled: true, health: 'loaded_healthy' },
+    },
+  }).tools || undefined;
 }
 
 function mapPermissionToTools(level?: string): string | undefined {
@@ -627,7 +662,9 @@ export class PiAgentSession {
     ];
 
     // Enforce permission level via --tools flag
-    const toolsFlag = mapPermissionToTools(this.options.permissionLevel);
+    const toolsFlag = this.options.useSharedToolResolver
+      ? resolvePermissionTools(this.options.permissionLevel) ?? mapPermissionToTools(this.options.permissionLevel)
+      : mapPermissionToTools(this.options.permissionLevel);
     if (toolsFlag) args.push('--tools', toolsFlag);
 
     // Thinking level (models that don't support it ignore the flag)
