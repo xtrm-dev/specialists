@@ -331,6 +331,9 @@ Specialists can opt into harder policy. Recommended first override:
 `read` soft until Serena `read_file` output behavior is verified across large
 files and non-code files.
 
+Rollout note: explorer hard-deny is isolated in specialist permissions only. Revert by
+removing explorer permissions block; generic deny engine stays unchanged.
+
 ### 3.2 "Denied native when extension available" semantics
 
 This is the core behavioral change. The explorer-uses-grep problem stems from
