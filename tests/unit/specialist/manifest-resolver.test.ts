@@ -8,6 +8,11 @@ async function loadCatalogs(): Promise<readonly ToolCatalog[]> {
   return index.catalogs;
 }
 
+async function loadCatalogDefaults(): Promise<Record<string, { denied_natives_when_extension?: readonly string[]; denied_natives_mode?: 'soft' | 'hard' }>> {
+  const index = JSON.parse(await readFile(join(process.cwd(), '.specialists/catalog/index.json'), 'utf8')) as { default_overrides?: Record<string, { denied_natives_when_extension?: readonly string[]; denied_natives_mode?: 'soft' | 'hard' }> };
+  return index.default_overrides ?? {};
+}
+
 function makeHealthyState() {
   return {
     gitnexus: { health: 'loaded_healthy' as const, catalogCompatible: true },
@@ -16,18 +21,67 @@ function makeHealthyState() {
 }
 
 describe('manifest resolver', () => {
-  it.each(TIERS)('matches legacy tools byte-for-byte for %s', async tier => {
+  it.each(TIERS)('applies catalog default hard deny for %s', async tier => {
     const catalogs = await loadCatalogs();
-    const resolved = resolveManifestTools({ tier, catalogs, extensionState: makeHealthyState() });
-    expect(resolved.tools).toBe(LEGACY_PERMISSION_TOOL_STRINGS[tier]);
-    expect(resolved.deniedNatives).toEqual([]);
+    const defaults = await loadCatalogDefaults();
+    const resolved = resolveManifestTools({ tier, catalogs, catalogDefaultOverrides: defaults, extensionState: makeHealthyState() });
+    const tools = resolved.toolsList;
+    expect(tools).not.toContain('read');
+    expect(tools).not.toContain('grep');
+    expect(tools).not.toContain('find');
+    expect(tools).not.toContain('ls');
+    expect(resolved.deniedNatives).toEqual(['read', 'grep', 'find', 'ls']);
+    expect(resolved.attribution.some(entry => entry.layer === 'catalog_default')).toBe(true);
   });
 
-  it('keeps soft deny from changing --tools', async () => {
+  it('specialist override replaces catalog default', async () => {
+    const catalogs = await loadCatalogs();
+    const defaults = await loadCatalogDefaults();
+    const resolved = resolveManifestTools({
+      tier: 'READ_ONLY',
+      catalogs,
+      catalogDefaultOverrides: defaults,
+      specialistOverride: {
+        denied_natives_when_extension: ['read'],
+        denied_natives_mode: 'hard',
+      },
+      extensionState: makeHealthyState(),
+    });
+
+    expect(resolved.deniedNatives).toEqual(['read']);
+    expect(resolved.toolsList).not.toContain('read');
+    expect(resolved.toolsList).toContain('grep');
+    expect(resolved.toolsList).toContain('find');
+    expect(resolved.toolsList).toContain('ls');
+  });
+
+  it('specialist override can remove default deny with empty array', async () => {
     const catalogs = await loadCatalogs();
     const resolved = resolveManifestTools({
       tier: 'READ_ONLY',
       catalogs,
+      catalogDefaultOverrides: {
+        READ_ONLY: { denied_natives_when_extension: ['read', 'grep'], denied_natives_mode: 'hard' },
+      },
+      specialistOverride: {
+        denied_natives_when_extension: [],
+        denied_natives_mode: 'soft',
+      },
+      extensionState: makeHealthyState(),
+    });
+
+    expect(resolved.deniedNatives).toEqual([]);
+    expect(resolved.tools).toContain('read');
+    expect(resolved.tools).toContain('grep');
+  });
+
+  it('keeps soft deny from changing --tools', async () => {
+    const catalogs = await loadCatalogs();
+    const defaults = await loadCatalogDefaults();
+    const resolved = resolveManifestTools({
+      tier: 'READ_ONLY',
+      catalogs,
+      catalogDefaultOverrides: defaults,
       manifestPolicy: {
         permissions: {
           READ_ONLY: {
@@ -39,7 +93,10 @@ describe('manifest resolver', () => {
       extensionState: makeHealthyState(),
     });
 
-    expect(resolved.tools).toBe(LEGACY_PERMISSION_TOOL_STRINGS.READ_ONLY);
+    expect(resolved.toolsList).toContain('read');
+    expect(resolved.toolsList).toContain('grep');
+    expect(resolved.toolsList).toContain('find');
+    expect(resolved.toolsList).toContain('ls');
     expect(resolved.deniedNatives).toEqual([]);
     expect(resolved.deniedNativesMode).toBe('soft');
     expect(resolved.preferenceSignals).toEqual(['soft deny prefers extension tools for: grep,find,ls']);
@@ -57,9 +114,11 @@ describe('manifest resolver', () => {
       },
     };
 
+    const defaults = await loadCatalogDefaults();
     const healthy = resolveManifestTools({
       tier: 'READ_ONLY',
       catalogs,
+      catalogDefaultOverrides: defaults,
       manifestPolicy: policy,
       extensionState: makeHealthyState(),
     });

@@ -167,6 +167,7 @@ export async function loadResolvedConfigReport(args: {
   const resolverInput: ResolverInput = {
     tier,
     catalogs,
+    catalogDefaultOverrides: index.default_overrides,
     specialistOverride,
     extensionState,
   };
