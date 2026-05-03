@@ -43,7 +43,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { isAbsolute, resolve, sep, join, dirname } from 'node:path';
 import { mapSpecialistBackend, getProviderArgs } from './backendMap.js';
-import { resolveManifestTools } from '../specialist/manifest-resolver.js';
+import { resolveManifestTools, type ManifestPolicy, type ManifestPolicyTier } from '../specialist/manifest-resolver.js';
 import { loadToolCatalogIndex, type ToolCatalogIndex } from '../specialist/tool-catalog.js';
 
 const TEST_COMMAND_STALL_TIMEOUT_MS = 300_000;
@@ -101,8 +101,10 @@ export interface PiSessionOptions {
   worktreeBoundary?: string;
   /** Permission level from specialist YAML — controls which pi tools are enabled */
   permissionLevel?: string;
-  /** Internal rollout switch for shared resolver path; keeps legacy fallback intact. */
-  useSharedToolResolver?: boolean;
+  /** Specialist name for per-specialist policy overrides. */
+  specialistName?: string;
+  /** Specialist manifest permissions for resolver overrides. */
+  specialistPermissions?: ManifestPolicy['permissions'];
   /** Skill files loaded via pi --skill (injected into system prompt natively) */
   skillPaths?: string[];
   /** Thinking level passed as pi --thinking <level> */
@@ -150,82 +152,6 @@ export interface PiSessionOptions {
   testCommandStallTimeoutMs?: number;
 }
 
-/** Maps specialist permission_required to pi --tools argument.
- *
- *  READ_ONLY : read, grep, find, ls           — no bash, no writes
- *  LOW       : + bash                          — inspect/run commands, no file edits
- *  MEDIUM    : + edit                          — can edit existing files
- *  HIGH      : + write                         — full access, can create new files
- */
-const GITNEXUS_READ_TOOLS = [
-  'gitnexus_list_repos',
-  'gitnexus_query',
-  'gitnexus_context',
-  'gitnexus_impact',
-  'gitnexus_detect_changes',
-] as const;
-
-const SERENA_READ_TOOLS = [
-  'serena_list_tools',
-  'find_symbol',
-  'find_referencing_symbols',
-  'read_file',
-  'get_symbols_overview',
-  'jet_brains_get_symbols_overview',
-  'jet_brains_find_symbol',
-  'jet_brains_find_referencing_symbols',
-  'jet_brains_type_hierarchy',
-  'search_for_pattern',
-  'list_dir',
-  'find_file',
-  'get_current_config',
-  'activate_project',
-  'check_onboarding_performed',
-  'initial_instructions',
-  'think_about_collected_information',
-  'think_about_task_adherence',
-  'think_about_whether_you_are_done',
-  'list_memories',
-  'read_memory',
-] as const;
-
-const SERENA_LOW_TOOLS = [
-  'execute_shell_command',
-] as const;
-
-const SERENA_WRITE_TOOLS = [
-  'insert_after_symbol',
-  'replace_symbol_body',
-  'insert_before_symbol',
-  'rename_symbol',
-  'restart_language_server',
-  'create_text_file',
-  'replace_content',
-  'delete_lines',
-  'replace_lines',
-  'insert_at_line',
-  'remove_project',
-  'switch_modes',
-  'open_dashboard',
-  'onboarding',
-  'prepare_for_new_conversation',
-  'summarize_changes',
-  'write_memory',
-  'delete_memory',
-  'rename_memory',
-  'edit_memory',
-  'serena_mcp_reset',
-] as const;
-
-const GITNEXUS_WRITE_TOOLS = [
-  'gitnexus_rename',
-  'gitnexus_cypher',
-] as const;
-
-function joinTools(...groups: readonly (readonly string[])[]): string {
-  return groups.flat().join(',');
-}
-
 let cachedToolCatalogIndex: ToolCatalogIndex | undefined;
 
 function loadSharedToolCatalogIndex(): ToolCatalogIndex | undefined {
@@ -248,41 +174,27 @@ function probeExtensionHealth(packageName: string): 'loaded_healthy' | 'not_inst
   return 'not_installed';
 }
 
-function resolvePermissionTools(level?: string): string | undefined {
+function resolvePermissionTools(options: {
+  level?: string;
+  specialistName?: string;
+  specialistPermissions?: ManifestPolicy['permissions'];
+}): string | undefined {
   const catalogIndex = loadSharedToolCatalogIndex();
   if (!catalogIndex) return undefined;
 
-  const tier = level?.toUpperCase();
+  const tier = options.level?.toUpperCase();
   if (tier !== 'READ_ONLY' && tier !== 'LOW' && tier !== 'MEDIUM' && tier !== 'HIGH') return undefined;
 
+  const specialistOverride: ManifestPolicyTier | undefined = options.specialistPermissions?.[tier];
   return resolveManifestTools({
     tier,
     catalogs: catalogIndex.catalogs as any,
+    specialistOverride,
     extensionState: {
       gitnexus: { enabled: true, health: probeExtensionHealth('pi-gitnexus') },
       serena: { enabled: true, health: probeExtensionHealth('pi-serena-tools') },
     },
   }).tools || undefined;
-}
-
-function mapPermissionToTools(level?: string): string | undefined {
-  const readOnlyTools = ['read', 'grep', 'find', 'ls'] as const;
-  const lowTools = ['bash'] as const;
-  const mediumTools = ['edit'] as const;
-  const highTools = ['write'] as const;
-
-  switch (level?.toUpperCase()) {
-    case 'READ_ONLY':
-      return joinTools(readOnlyTools, GITNEXUS_READ_TOOLS, SERENA_READ_TOOLS);
-    case 'LOW':
-      return joinTools(readOnlyTools, lowTools, GITNEXUS_READ_TOOLS, SERENA_READ_TOOLS, SERENA_LOW_TOOLS);
-    case 'MEDIUM':
-      return joinTools(readOnlyTools, lowTools, mediumTools, GITNEXUS_READ_TOOLS, SERENA_READ_TOOLS, SERENA_LOW_TOOLS, SERENA_WRITE_TOOLS, GITNEXUS_WRITE_TOOLS);
-    case 'HIGH':
-      return joinTools(readOnlyTools, lowTools, mediumTools, highTools, GITNEXUS_READ_TOOLS, SERENA_READ_TOOLS, SERENA_LOW_TOOLS, SERENA_WRITE_TOOLS, GITNEXUS_WRITE_TOOLS);
-    default:
-      return undefined;
-  }
 }
 
 function resolveGlobalNodeModulesDir(): string | undefined {
@@ -670,10 +582,11 @@ export class PiAgentSession {
     ];
 
     // Enforce permission level via --tools flag
-    const useResolver = this.options.useSharedToolResolver ?? process.env.SPECIALISTS_USE_RESOLVER === '1';
-    const toolsFlag = useResolver
-      ? resolvePermissionTools(this.options.permissionLevel) ?? mapPermissionToTools(this.options.permissionLevel)
-      : mapPermissionToTools(this.options.permissionLevel);
+    const toolsFlag = resolvePermissionTools({
+      level: this.options.permissionLevel,
+      specialistName: this.options.specialistName,
+      specialistPermissions: this.options.specialistPermissions,
+    });
     if (toolsFlag) args.push('--tools', toolsFlag);
 
     // Thinking level (models that don't support it ignore the flag)

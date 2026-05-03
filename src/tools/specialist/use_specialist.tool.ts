@@ -58,6 +58,8 @@ export function createUseSpecialistTool(runner: SpecialistRunner) {
         variables,
         backendOverride: input.backend_override,
         autonomyLevel: input.autonomy_level,
+        specialistName: input.name,
+        specialistPermissions: undefined,
         inputBeadId: input.bead_id,
       }, onProgress);
     },

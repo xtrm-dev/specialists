@@ -21,6 +21,8 @@ export interface RunOptions {
   variables?: Record<string, string>;
   backendOverride?: string;
   autonomyLevel?: string;
+  specialistName?: string;
+  specialistPermissions?: PiSessionOptions['specialistPermissions'];
   /** Working directory for local scripts and the pi session. */
   workingDirectory?: string;
   /** Absolute write-boundary for write-side tools inside pi session. */
@@ -1252,6 +1254,8 @@ _This project is indexed by GitNexus. You MUST use these tools — do NOT fall b
         skillPaths: skillPaths.length > 0 ? skillPaths : undefined,
         thinkingLevel: execution.thinking_level,
         permissionLevel,
+        specialistName: options.specialistName ?? metadata.name,
+        specialistPermissions: options.specialistPermissions ?? (spec.specialist.permissions as PiSessionOptions['specialistPermissions']),
         stallTimeoutMs: execution.stall_timeout_ms,
         cwd: runCwd,
         worktreeBoundary: options.worktreeBoundary,
