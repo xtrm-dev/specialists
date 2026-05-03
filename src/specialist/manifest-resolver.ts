@@ -147,7 +147,21 @@ export function resolveManifestTools(input: ResolverInput): ResolverResult {
     attribution.push({ layer: 'yaml_exclusion', source: 'specialist.yaml', tools: [] });
   }
 
-  attribution.push({ layer: 'tier_policy', source: 'manifest policy', tools: toolsList });
+  attribution.push({ layer: 'catalog', source: 'tool catalogs', tools: nativeTools });
+  if (input.manifestPolicy?.permissions?.[input.tier]) {
+    attribution.push({
+      layer: 'tier_policy',
+      source: 'manifest policy',
+      tools: input.manifestPolicy.permissions[input.tier]?.denied_natives_when_extension ?? [],
+    });
+  }
+  if (input.specialistOverride) {
+    attribution.push({
+      layer: 'specialist_override',
+      source: 'specialist YAML',
+      tools: input.specialistOverride.denied_natives_when_extension ?? [],
+    });
+  }
   if (!hardDenyAllowed && policy.denied_natives_mode === 'hard' && effectiveDenied.size > 0) {
     const restoredNatives = nativeTools.filter(tool => effectiveDenied.has(tool));
     const reasonParts = [gitnexusState, serenaState]

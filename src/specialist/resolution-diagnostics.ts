@@ -1,12 +1,44 @@
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 
 import { loadToolCatalogIndex } from './tool-catalog.js';
-import { resolveManifestTools, type ExtensionState, type ResolverInput, type ResolverResult, type ToolCatalogName } from './manifest-resolver.js';
+import {
+  resolveManifestTools,
+  type ExtensionState,
+  type ManifestPolicyTier,
+  type ResolverInput,
+  type ResolverResult,
+  type ToolCatalogName,
+  type ToolTier,
+} from './manifest-resolver.js';
 
 const require = createRequire(import.meta.url);
+
+let cachedGlobalNodeModules: string | undefined;
+function globalNodeModules(): string | undefined {
+  if (cachedGlobalNodeModules !== undefined) return cachedGlobalNodeModules;
+  try {
+    cachedGlobalNodeModules = execSync('npm root -g', { encoding: 'utf-8' }).trim();
+  } catch {
+    cachedGlobalNodeModules = '';
+  }
+  return cachedGlobalNodeModules || undefined;
+}
+
+function resolveAcrossGlobals(packageName: string, ...subpaths: string[]): string | undefined {
+  const target = subpaths.length > 0 ? `${packageName}/${subpaths.join('/')}` : packageName;
+  const paths: string[] = [];
+  const globalRoot = globalNodeModules();
+  if (globalRoot) paths.push(globalRoot);
+  try {
+    return require.resolve(target, paths.length > 0 ? { paths } : undefined);
+  } catch {
+    return undefined;
+  }
+}
 
 export interface ExtensionProbe {
   name: ToolCatalogName;
@@ -39,8 +71,9 @@ function readJsonFile(path: string): unknown {
 }
 
 function resolvePackageVersion(packageName: string): string | undefined {
+  const packageJsonPath = resolveAcrossGlobals(packageName, 'package.json');
+  if (!packageJsonPath) return undefined;
   try {
-    const packageJsonPath = require.resolve(`${packageName}/package.json`);
     const pkg = readJsonFile(packageJsonPath) as { version?: string };
     return pkg.version;
   } catch {
@@ -93,8 +126,19 @@ export function classifyExtensionProbe(catalog: CatalogRecord, input: { installe
 }
 
 function probeHealth(catalog: CatalogRecord): ExtensionProbe {
+  if (catalog.catalog === 'native') {
+    return {
+      name: catalog.catalog,
+      package: catalog.package,
+      version: catalog.version,
+      health: 'loaded_healthy',
+      drift: 'none',
+      reason: 'built-in',
+    };
+  }
   const installedVersion = resolvePackageVersion(catalog.package);
-  const entrypointExists = installedVersion ? existsSync(require.resolve(catalog.package)) : false;
+  const entrypoint = installedVersion ? resolveAcrossGlobals(catalog.package) : undefined;
+  const entrypointExists = entrypoint !== undefined && existsSync(entrypoint);
   return classifyExtensionProbe(catalog, { installedVersion, entrypointExists });
 }
 
@@ -111,17 +155,24 @@ export async function loadResolvedConfigReport(args: {
     probes.map(probe => [probe.name, { health: probe.health, catalogCompatible: probe.drift === 'none' }]),
   ) as Partial<Record<ToolCatalogName, ExtensionState>>;
   type ManifestPermissions = NonNullable<ResolverInput['manifestPolicy']>['permissions'];
-  const specialistManifest = manifest as { specialist?: { permissions?: ManifestPermissions } };
+  const specialistManifest = manifest as {
+    specialist?: {
+      execution?: { permission_required?: ToolTier };
+      permissions?: ManifestPermissions;
+    };
+  };
+  const tier: ToolTier = specialistManifest.specialist?.execution?.permission_required ?? 'READ_ONLY';
+  const specialistOverride: ManifestPolicyTier | undefined = specialistManifest.specialist?.permissions?.[tier];
   const resolverInput: ResolverInput = {
-    tier: 'HIGH',
+    tier,
     catalogs,
-    manifestPolicy: specialistManifest.specialist?.permissions ? { permissions: specialistManifest.specialist.permissions } : undefined,
+    specialistOverride,
     extensionState,
   };
   const resolver = resolveManifestTools(resolverInput);
   const catalogCompatibility = probes
-    .filter(probe => probe.drift !== 'none')
-    .map(probe => `${probe.name}: ${probe.reason}`);
+    .filter(probe => probe.drift !== 'none' || probe.health !== 'loaded_healthy')
+    .map(probe => `${probe.name}: ${probe.health} (${probe.reason})`);
 
   return {
     specialist: args.specialistName,

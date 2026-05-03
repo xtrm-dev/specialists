@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 const SPECIALIST = {
   specialist: {
     metadata: { name: 'executor' },
+    execution: { permission_required: 'HIGH' },
     permissions: {
       HIGH: {
         denied_natives_when_extension: ['write'],
