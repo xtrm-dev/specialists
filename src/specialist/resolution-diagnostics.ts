@@ -108,7 +108,7 @@ export async function loadResolvedConfigReport(args: {
   const catalogs = index.catalogs as readonly CatalogRecord[];
   const probes = catalogs.map(probeHealth);
   const extensionState: Partial<Record<ToolCatalogName, ExtensionState>> = Object.fromEntries(
-    probes.map(probe => [probe.name, { health: probe.health }]),
+    probes.map(probe => [probe.name, { health: probe.health, catalogCompatible: probe.drift === 'none' }]),
   ) as Partial<Record<ToolCatalogName, ExtensionState>>;
   type ManifestPermissions = NonNullable<ResolverInput['manifestPolicy']>['permissions'];
   const specialistManifest = manifest as { specialist?: { permissions?: ManifestPermissions } };
@@ -155,6 +155,7 @@ export function formatResolvedConfigReport(report: ResolvedConfigReport): string
   lines.push(`denied natives: ${report.resolver.deniedNatives.join(',') || '(none)'}`);
   lines.push(`deny mode: ${report.resolver.deniedNativesMode}`);
   lines.push(`preference signals: ${(report.resolver.preferenceSignals ?? []).join(' | ') || '(none)'}`);
+  lines.push(`downgrade reasons: ${(report.resolver.downgradeReasons ?? []).join(' | ') || '(none)'}`);
   lines.push(`--tools: ${report.resolver.tools}`);
   if (report.resolver.warnings.length > 0) {
     lines.push('warnings:');

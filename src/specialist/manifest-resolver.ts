@@ -22,6 +22,7 @@ export interface ManifestPolicy {
 export interface ExtensionState {
   health: ExtensionHealth;
   enabled?: boolean;
+  catalogCompatible?: boolean;
 }
 
 export interface ResolverInput {
@@ -48,6 +49,7 @@ export interface ResolverResult {
   deniedNatives: readonly string[];
   deniedNativesMode: DeniedNativesMode;
   preferenceSignals: readonly string[];
+  downgradeReasons: readonly string[];
   warnings: readonly string[];
   attribution: readonly ToolLayerAttribution[];
 }
@@ -99,13 +101,15 @@ function getTierTools(catalogs: readonly ToolCatalog[], name: ToolCatalogName, t
 
 function canEnforceHardDeny(state: ExtensionState | undefined): boolean {
   if (!state) return true;
-  return HEALTHY.includes(state.health);
+  if (!HEALTHY.includes(state.health)) return false;
+  return state.catalogCompatible !== false;
 }
 
 export function resolveManifestTools(input: ResolverInput): ResolverResult {
   const policy = mergeTierPolicy(input);
   const warnings: string[] = [];
   const attribution: ToolLayerAttribution[] = [];
+  const downgradeReasons: string[] = [];
   const effectiveDenied = new Set(policy.denied_natives_when_extension ?? []);
   const deniedNatives: string[] = [];
 
@@ -116,8 +120,10 @@ export function resolveManifestTools(input: ResolverInput): ResolverResult {
     : [];
   const serenaTools = getTierTools(input.catalogs, 'serena', input.tier);
 
-  const healthyGitnexus = canEnforceHardDeny(input.extensionState?.gitnexus);
-  const healthySerena = canEnforceHardDeny(input.extensionState?.serena);
+  const gitnexusState = input.extensionState?.gitnexus;
+  const serenaState = input.extensionState?.serena;
+  const healthyGitnexus = canEnforceHardDeny(gitnexusState);
+  const healthySerena = canEnforceHardDeny(serenaState);
   const hardDenyAllowed = policy.denied_natives_mode === 'hard' && healthyGitnexus && healthySerena;
 
   const finalNativeTools = nativeTools.filter(tool => {
@@ -143,8 +149,18 @@ export function resolveManifestTools(input: ResolverInput): ResolverResult {
 
   attribution.push({ layer: 'tier_policy', source: 'manifest policy', tools: toolsList });
   if (!hardDenyAllowed && policy.denied_natives_mode === 'hard' && effectiveDenied.size > 0) {
-    warnings.push('hard deny requested but extension health not healthy; native fallback restored');
-    attribution.push({ layer: 'runtime_health', source: 'fallback', tools: nativeTools.filter(tool => effectiveDenied.has(tool)) });
+    const restoredNatives = nativeTools.filter(tool => effectiveDenied.has(tool));
+    const reasonParts = [gitnexusState, serenaState]
+      .filter((state): state is ExtensionState => Boolean(state))
+      .flatMap(state => {
+        if (!HEALTHY.includes(state.health)) return [state.health];
+        if (state.catalogCompatible === false) return ['catalog_incompatible'];
+        return [];
+      });
+    const reason = reasonParts.length > 0 ? reasonParts.join(',') : 'unknown';
+    warnings.push(`hard deny restored native fallback: ${reason}`);
+    downgradeReasons.push(`restored native fallback for ${restoredNatives.join(',') || '(none)'} due to ${reason}`);
+    attribution.push({ layer: 'runtime_health', source: 'fallback', tools: restoredNatives });
   }
 
   const preferenceSignals = policy.denied_natives_mode === 'soft' && effectiveDenied.size > 0
@@ -157,6 +173,7 @@ export function resolveManifestTools(input: ResolverInput): ResolverResult {
     deniedNatives,
     deniedNativesMode: policy.denied_natives_mode ?? 'soft',
     preferenceSignals,
+    downgradeReasons,
     warnings,
     attribution,
   };
