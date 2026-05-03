@@ -154,7 +154,7 @@ export function formatResolvedConfigReport(report: ResolvedConfigReport): string
   }
   lines.push(`denied natives: ${report.resolver.deniedNatives.join(',') || '(none)'}`);
   lines.push(`deny mode: ${report.resolver.deniedNativesMode}`);
-  lines.push(`preference signals: ${report.resolver.preferenceSignals.join(' | ') || '(none)'}`);
+  lines.push(`preference signals: ${(report.resolver.preferenceSignals ?? []).join(' | ') || '(none)'}`);
   lines.push(`--tools: ${report.resolver.tools}`);
   if (report.resolver.warnings.length > 0) {
     lines.push('warnings:');
