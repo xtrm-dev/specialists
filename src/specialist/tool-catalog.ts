@@ -21,6 +21,12 @@ export const ToolCatalogIndexSchema = z.object({
 export type ToolCatalog = z.infer<typeof ToolCatalogSchema>;
 export type ToolCatalogIndex = z.infer<typeof ToolCatalogIndexSchema>;
 
+/**
+ * §3.0 conflict resolution:
+ * (1) most restrictive wins for tool inclusion
+ * (2) exception: runtime health degradation restores native fallbacks
+ * (3) hard-deny in specialist override does not override runtime health downgrade
+ */
 export const SPECIALIST_TOOL_PRECEDENCE = ['native', 'gitnexus', 'serena'] as const;
 
 export function validateToolCatalogIndex(value: unknown): ToolCatalogIndex {

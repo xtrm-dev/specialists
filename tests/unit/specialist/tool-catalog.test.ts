@@ -3,6 +3,8 @@ import { loadToolCatalogIndex, SPECIALIST_TOOL_PRECEDENCE } from '../../../src/s
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
+const EXPECTED_CONFLICT_SEMANTICS = '(1) most restrictive wins for tool inclusion\n * (2) exception: runtime health degradation restores native fallbacks\n * (3) hard-deny in specialist override does not override runtime health downgrade';
+
 const EXPECTED_NATIVE = {
   READ_ONLY: ['read', 'grep', 'find', 'ls'],
   LOW: ['read', 'grep', 'find', 'ls', 'bash'],
@@ -33,6 +35,11 @@ describe('tool catalog foundation', () => {
     const index = await readCatalog('.specialists/catalog/index.json');
     expect(index.precedence_order).toEqual(SPECIALIST_TOOL_PRECEDENCE);
     expect(index.catalogs.map(c => c.catalog)).toEqual(['native', 'gitnexus', 'serena']);
+  });
+
+  it('documents conflict resolution semantics', async () => {
+    const content = await readFile(join(process.cwd(), 'src/specialist/tool-catalog.ts'), 'utf8');
+    expect(content).toContain(EXPECTED_CONFLICT_SEMANTICS);
   });
 
   it('validates native catalog content', async () => {
