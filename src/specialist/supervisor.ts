@@ -48,6 +48,7 @@ import { resolveChainId } from './epic-lifecycle.js';
 import { loadEpicReadinessSummary, syncEpicStateFromReadiness } from './epic-readiness.js';
 import { derivePersistedChainIdentity } from './chain-identity.js';
 import { isTmuxSessionAlive } from '../cli/tmux-utils.js';
+import { parsePorcelainStatus } from './porcelain-parser.js';
 
 const JOB_TTL_DAYS = Number(process.env.SPECIALISTS_JOB_TTL_DAYS ?? 7);
 
@@ -301,17 +302,7 @@ function listSubstantiveWorktreeFiles(worktreePath: string): string[] {
     throw new Error((status.stderr ?? status.stdout ?? 'git status failed').trim());
   }
 
-  return (status.stdout ?? '')
-    .split('\n')
-    .map((line) => line.trimEnd())
-    .filter((line) => line.length >= 3)
-    .map((line) => {
-      const payload = line.slice(3);
-      if (!payload) return '';
-      const renamed = payload.includes(' -> ') ? payload.split(' -> ').at(-1) ?? '' : payload;
-      return renamed.trim().replace(/^"|"$/g, '');
-    })
-    .filter((path) => path.length > 0)
+  return parsePorcelainStatus(status.stdout ?? '')
     .filter((path) => !isAutoCommitNoisePath(path));
 }
 
