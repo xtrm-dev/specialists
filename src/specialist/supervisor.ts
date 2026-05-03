@@ -303,10 +303,10 @@ function listSubstantiveWorktreeFiles(worktreePath: string): string[] {
 
   return (status.stdout ?? '')
     .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
+    .map((line) => line.trimEnd())
+    .filter((line) => line.length >= 3)
     .map((line) => {
-      const payload = line.length > 3 ? line.slice(3).trim() : '';
+      const payload = line.slice(3);
       if (!payload) return '';
       const renamed = payload.includes(' -> ') ? payload.split(' -> ').at(-1) ?? '' : payload;
       return renamed.trim().replace(/^"|"$/g, '');
