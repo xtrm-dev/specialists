@@ -49,6 +49,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - `sp release` CLI path replaced by releasing skill workflow for publishing releases (unitAI-fhbf4)
 
+---
+
+## [3.10.0] - 2026-04-27
+
+Reviewer traceability, hook DB migration, `/lib` export, `list-rules` CLI, and the `serena-cheatsheet` mandatory rule.
+
+### Added
+- `sp list-rules` — rule × specialist matrix CLI for inspecting which mandatory rules each specialist loads (unitAI-wv3l9)
+- `/lib` subpath export for Node consumers embedding the runner library (unitAI-rw13n)
+- `serena-cheatsheet` mandatory rule providing per-specialist Serena-tool guidance, opt-in via `template_sets` (unitAI-acb59b59)
+- Auto-close linked bead on terminal job status (cancelled/done/error) — supervisor closes the bead when the job ends (unitAI-9truh)
+- PID-liveness inference for zombie job visibility in readers (unitAI-zw9w1)
+- `output_type` surfaced in `SupervisorStatus` and `run_complete` events (unitAI-e90j)
+
+### Changed
+- Default `--context-depth` raised from 1 to 3 — chained specialists now see own bead + predecessor + parent task by default (unitAI-231x)
+- `sp poll` deprecated in favor of `sp ps` (state) + `sp feed` (stream) (unitAI-zjhsj)
+- Reviewer prompts now include diff context wired through cleanly (unitAI-18d1d)
+- `serena-cheatsheet` removed from `default_template_sets`; specialists must opt in explicitly (unitAI-49188)
+
+### Fixed
+- `specialists-complete` hook reads job state via `sp ps` (DB-first) instead of stale file paths (unitAI-q5k2p)
+- `specialists-creator` spec now includes `fallback_model` field as required (unitAI-9ilgw)
+- Reviewer traceability gaps for GitNexus invocation evidence and injected diff context (unitAI-ctkk9)
+- CLI help test stabilized for bun spawn behavior (unitAI-56f98)
+
+---
+
+## [3.9.0] - 2026-04-26
+
+`fln4q-epic` SQLite observability migration, `specialists-service` v1 (HTTP + CLI surfaces for script-class specialists), `sp script` CLI, and a strict 1:1 schema-to-runtime cut.
+
+### Added
+- `sp script` CLI — synchronous one-shot specialist invocation (READ_ONLY, template + variables, JSON out) for service/script consumers (unitAI-2cbbae)
+- `specialists-service` v1 — HTTP and CLI surfaces for script-class specialists (`sp serve` + `sp script`) (unitAI-fln4q)
+- Script target validate mode for pre-run validation of scripts/commands/tools/shebangs (unitAI-4b591)
+- Pre-flight `pi-coding-agent` compat regression CI workflow (unitAI-5077f)
+- Mercury atomic-summarizer schema-target PoC example (unitAI-f2075)
+- Python adapter reference for `darth-feedor` migration (unitAI-f98788)
+
+### Changed
+- **Strict 1:1 schema-to-runtime cut**: every JSON field must map to a runtime consumer. Dropped `CommunicationSchema` (`next_specialists`, `publishes`), `capabilities.diagnostic_scripts`, `prompt.normalize_template`, `prompt.examples`, `execution.preferred_profile`, `execution.approval_mode`, `metadata.author`, `metadata.created`, root `heartbeat`, deprecated `ScriptEntry.path` alias. 26 specs + `docs/authoring.md` + `config/skills/specialists-creator/SKILL.md` + `src/cli/view.ts` + `scaffold-specialist.ts` updated in lockstep (unitAI-68edd, unitAI-8n0aa)
+- Schema validation now uniform across all 26 specs; `xt-merge` `output_to` → `output_file` (typo'd dead alias was silently dropping merge result writes) (unitAI-02deb, unitAI-yb9qu)
+- Schema preserves unknown keys via `.passthrough()` on every nested `SpecialistSchema` object — fixes silent acceptance of typo'd fields (unitAI-f27c8)
+- `--user-dir` → `--project-dir` rename in `sp script` and `sp serve` with deprecated alias retained (unitAI-rfjbd)
+- Pi 0.70.x compatibility — dropped `args.push('--', prompt)` option terminator in `script-runner.ts`; image base unpinned to `@latest` (unitAI-w0h7z)
+- `fln4q-A`: env-gated file fallback for `attach`/`list`/`poll`/`status`/`feed_specialist` with `SPECIALISTS_JOB_FILE_OUTPUT` (unitAI-5521c)
+- `fln4q-B`: detached watchdog DB-backed child read path; `cleanupProcesses` file fallback gated by env (unitAI-50283, unitAI-91cfea)
+- `fln4q-B2` v2: Bun runtime helper, mode-split watchdog, read-only DB child (unitAI-73c1d)
+- DB-first job reads, crash recovery, event reads, job cleanup readers (multiple commits, fln4q-epic)
+- Supervisor file writes gated behind `SPECIALISTS_JOB_FILE_OUTPUT` env (unitAI-ppkdg)
+- README documentation map points to specialists-service docs
+- `sp serve` and `sp script` surfaced in core commands list (unitAI-2f8f4)
+- `db` legacy migration tooling clarified; canonical store is SQLite (unitAI-23a1c, unitAI-3425a)
+
+### Fixed
+- NDJSON parser handles pi's real `message_end` and `agent_end` shapes (prior parser matched a fictional shape that the test mock perpetuated) (unitAI-68owr)
+- Pi `errorMessage` surfacing — when content is empty, `message.errorMessage` flows through error taxonomy so quota/auth errors no longer silently return success-with-empty-output (unitAI-68owr)
+- JSON-mode markdown fence stripping — `stripMarkdownFences()` runs before `JSON.parse` for `response_format=json` so kimi-style fenced output parses (unitAI-68owr)
+- `specialists-creator` JSON corruption — zsh prompt artifact had been pasted into the file as a JSON key; only caught after `.passthrough()` exposed the silent survival of unknown keys (unitAI-826wl)
+- Stale `.xtrm/skills/active/pi/<name>/` skill paths bulk-swept across canonical and mirror specs (`pi/` subdirectory removed in prior layout migration but references lingered) (unitAI-826wl)
+- `withSqliteOperation` callbacks now return non-undefined sentinel (unitAI-f30e56)
+
+### Removed
+- `parallel-review` specialist files (renamed to `parallel-runner` in 3.4.0; spec files lingered until cleanup)
+- 11 declarative-only schema fields (no runtime consumer — see Changed → strict 1:1 schema cut)
+
+---
+
 ## [3.8.0] - 2026-04-26
 
 `specialists-service` v1 — HTTP and CLI surfaces for script-class specialists, plus a strict 1:1 schema cut so every JSON field maps to a runtime consumer.
@@ -87,4 +156,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [Unreleased]: https://github.com/Jaggerxtrm/specialists/compare/v3.11.0...HEAD
 [v3.11.0]: https://github.com/Jaggerxtrm/specialists/releases/tag/v3.11.0
+[3.10.0]: https://github.com/Jaggerxtrm/specialists/releases/tag/v3.10.0
+[3.9.0]: https://github.com/Jaggerxtrm/specialists/releases/tag/v3.9.0
 [3.8.0]: https://github.com/Jaggerxtrm/specialists/releases/tag/v3.8.0
