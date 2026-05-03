@@ -110,9 +110,12 @@ export async function loadResolvedConfigReport(args: {
   const extensionState: Partial<Record<ToolCatalogName, ExtensionState>> = Object.fromEntries(
     probes.map(probe => [probe.name, { health: probe.health }]),
   ) as Partial<Record<ToolCatalogName, ExtensionState>>;
+  type ManifestPermissions = NonNullable<ResolverInput['manifestPolicy']>['permissions'];
+  const specialistManifest = manifest as { specialist?: { permissions?: ManifestPermissions } };
   const resolverInput: ResolverInput = {
     tier: 'HIGH',
     catalogs,
+    manifestPolicy: specialistManifest.specialist?.permissions ? { permissions: specialistManifest.specialist.permissions } : undefined,
     extensionState,
   };
   const resolver = resolveManifestTools(resolverInput);
@@ -150,6 +153,8 @@ export function formatResolvedConfigReport(report: ResolvedConfigReport): string
     for (const item of report.catalogCompatibility) lines.push(`  - ${item}`);
   }
   lines.push(`denied natives: ${report.resolver.deniedNatives.join(',') || '(none)'}`);
+  lines.push(`deny mode: ${report.resolver.deniedNativesMode}`);
+  lines.push(`preference signals: ${report.resolver.preferenceSignals.join(' | ') || '(none)'}`);
   lines.push(`--tools: ${report.resolver.tools}`);
   if (report.resolver.warnings.length > 0) {
     lines.push('warnings:');

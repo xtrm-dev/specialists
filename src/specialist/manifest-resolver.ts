@@ -46,6 +46,8 @@ export interface ResolverResult {
   tools: string;
   toolsList: readonly string[];
   deniedNatives: readonly string[];
+  deniedNativesMode: DeniedNativesMode;
+  preferenceSignals: readonly string[];
   warnings: readonly string[];
   attribution: readonly ToolLayerAttribution[];
 }
@@ -145,10 +147,16 @@ export function resolveManifestTools(input: ResolverInput): ResolverResult {
     attribution.push({ layer: 'runtime_health', source: 'fallback', tools: nativeTools.filter(tool => effectiveDenied.has(tool)) });
   }
 
+  const preferenceSignals = policy.denied_natives_mode === 'soft' && effectiveDenied.size > 0
+    ? [`soft deny prefers extension tools for: ${Array.from(effectiveDenied).join(',')}`]
+    : [];
+
   return {
     tools: toolsList.join(','),
     toolsList,
     deniedNatives,
+    deniedNativesMode: policy.denied_natives_mode ?? 'soft',
+    preferenceSignals,
     warnings,
     attribution,
   };

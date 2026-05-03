@@ -49,6 +49,8 @@ describe('manifest resolver', () => {
 
     expect(resolved.tools).toBe(LEGACY_PERMISSION_TOOL_STRINGS.READ_ONLY);
     expect(resolved.deniedNatives).toEqual([]);
+    expect(resolved.deniedNativesMode).toBe('soft');
+    expect(resolved.preferenceSignals).toEqual(['soft deny prefers extension tools for: grep,find,ls']);
   });
 
   it('hard deny strips natives only when replacement extensions are healthy', async () => {
