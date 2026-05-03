@@ -27,8 +27,8 @@ The current runtime has hardcoded tier→tool mappings in
   **fallback**.
 - There is no concept of "deny native `grep` when GitNexus is loaded" —
   explorer can still reach for `grep` instead of `gitnexus_query`.
-- Specialists cannot override tier policy without forking the YAML or hacking
-  `excludeExtensions`.
+- Specialists cannot override tier policy without forking the JSON config or
+  hacking `excludeExtensions`.
 - There is no `sp config show <name> --resolved` to debug what a specialist
   *actually* gets at runtime.
 
@@ -278,8 +278,8 @@ them in this fixed order, lowest-to-highest precedence:
    `.specialists/config.json`.
 4. **Specialist manifest overrides** — `specialists.<name>` block in
    `.specialists/config.json`.
-5. **Specialist YAML availability** — `execution.extensions.{serena,gitnexus}`,
-   `execution.permission`.
+5. **Specialist JSON availability** — `execution.extensions.{serena,gitnexus}`,
+   `execution.permission` in `config/specialists/<name>.specialist.json`.
 6. **Runtime health downgrade** — health probes can downgrade `hard` →
    `soft` and restore native fallbacks.
 
@@ -397,7 +397,7 @@ Per-capability state machine:
 | State | Meaning | Policy |
 |-------|---------|--------|
 | `not_installed` | package/extension path absent | warn in `--resolved`; remove its tools; do not deny native fallbacks |
-| `disabled` | specialist YAML or manifest excludes it | show disabled source; remove its tools; do not deny native fallbacks |
+| `disabled` | specialist JSON or project manifest excludes it | show disabled source; remove its tools; do not deny native fallbacks |
 | `loaded_healthy` | extension registered and capability probe passed | apply preferred/denied-native policy |
 | `loaded_degraded` | capability probe partially failed (e.g. some Serena tools work, others don't) | keep tools; downgrade hard-deny → soft for affected capabilities; print warning |
 | `loaded_unhealthy` | capability probe failed completely | keep tools if self-recovery possible; downgrade hard-deny → soft; print warning |
@@ -552,7 +552,7 @@ sources:
   manifest_defaults:        .specialists/config.json
   tier_policy:              .specialists/config.json#permissions.READ_ONLY
   specialist_override:      .specialists/config.json#specialists.explorer
-  yaml:                     config/specialists/explorer.specialist.json
+  specialist_json:          config/specialists/explorer.specialist.json
 
 extensions:
   pi-gitnexus              loaded   (via npm global)
@@ -607,7 +607,7 @@ fires, halt the migration and resolve the regression before continuing.
 
 3. **Implement resolver as a pure library** (`src/specialist/manifest.ts` or
    `tool-manifest.ts`). Inputs: tier, catalogs, manifest, specialist override,
-   YAML exclusions, extension state. Outputs: final `--tools`, denied natives
+   specialist exclusions, extension state. Outputs: final `--tools`, denied natives
    with reason, warnings, per-layer attribution. **No `src/pi/session.ts`
    threading yet.**
 
@@ -615,7 +615,7 @@ fires, halt the migration and resolve the regression before continuing.
    - Byte-equivalence snapshots for `READ_ONLY/LOW/MEDIUM/HIGH` (default
      config) vs current `mapPermissionToTools` output.
    - Matrix tests across **(tier × extension health × specialist override ×
-     YAML exclusion)**. Per-tier snapshots alone do not catch interaction
+     specialist exclusion)**. Per-tier snapshots alone do not catch interaction
      bugs.
    - Invariants:
      - Soft mode never changes final `--tools`.
@@ -717,7 +717,7 @@ Items previously open or under-specified that are now closed:
   lands resolved-debug *before* step 7 runtime threading. Original §7 had
   this reversed and would have shipped a resolver with no diagnostic surface.
 - **Snapshot-only test sufficiency** — §7 step 4 requires the
-  (tier × health × override × YAML) matrix; per-tier snapshots alone are
+  (tier × health × override × specialist exclusion) matrix; per-tier snapshots alone are
   insufficient.
 - **Soft-vs-hard deny effectiveness** — §3.2 + §7 step 8/9 split: soft
   is preference/debug only and does not change `--tools`; hard is the only
@@ -727,9 +727,9 @@ Items previously open or under-specified that are now closed:
 
 ## 9. Non-goals
 
-- No change to specialist YAML schema for `model`, `prompt`, `output_schema`,
-  metadata.
-- No replacement of the YAML-as-identity model. Manifest is overlay.
+- No change to specialist JSON schema (`*.specialist.json`) for `model`,
+  `prompt`, `output_schema`, metadata.
+- No replacement of the JSON-as-identity model. Manifest is overlay.
 - No new CLI surface beyond `sp config show <name> --resolved` and the
   catalog files.
 - No change to mandatory rules system or beads context loading.

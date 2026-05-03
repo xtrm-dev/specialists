@@ -30,7 +30,7 @@ export interface ResolverInput {
   catalogs: readonly ToolCatalog[];
   manifestPolicy?: ManifestPolicy;
   specialistOverride?: ManifestPolicyTier;
-  yamlExclusions?: {
+  specialistExclusions?: {
     disabledExtensions?: readonly ToolCatalogName[];
     deniedNatives?: readonly string[];
   };
@@ -38,7 +38,7 @@ export interface ResolverInput {
 }
 
 export interface ToolLayerAttribution {
-  layer: 'tier_policy' | 'specialist_override' | 'yaml_exclusion' | 'runtime_health' | 'catalog';
+  layer: 'tier_policy' | 'specialist_override' | 'specialist_exclusion' | 'runtime_health' | 'catalog';
   source?: string;
   tools: readonly string[];
 }
@@ -75,19 +75,19 @@ function getCatalog(catalogs: readonly ToolCatalog[], name: ToolCatalogName): To
 function mergeTierPolicy(input: ResolverInput): ManifestPolicyTier {
   const tierPolicy = input.manifestPolicy?.permissions?.[input.tier] ?? {};
   const overridePolicy = input.specialistOverride ?? {};
-  const yamlDenied = input.yamlExclusions?.deniedNatives ?? [];
+  const specialistDenied = input.specialistExclusions?.deniedNatives ?? [];
   return {
     denied_natives_when_extension: uniqueOrdered([
       ...(tierPolicy.denied_natives_when_extension ?? []),
       ...(overridePolicy.denied_natives_when_extension ?? []),
-      ...yamlDenied,
+      ...specialistDenied,
     ]),
     denied_natives_mode: overridePolicy.denied_natives_mode ?? tierPolicy.denied_natives_mode ?? 'soft',
   };
 }
 
 function shouldIncludeExtensionTools(name: ToolCatalogName, input: ResolverInput): boolean {
-  if (input.yamlExclusions?.disabledExtensions?.includes(name)) return false;
+  if (input.specialistExclusions?.disabledExtensions?.includes(name)) return false;
   const state = input.extensionState?.[name];
   if (!state) return true;
   if (state.enabled === false) return false;
@@ -135,16 +135,16 @@ export function resolveManifestTools(input: ResolverInput): ResolverResult {
 
   const toolsList = uniqueOrdered([
     ...finalNativeTools,
-    ...((input.yamlExclusions?.disabledExtensions?.includes('gitnexus') ? [] : gitnexusBase)),
-    ...((input.yamlExclusions?.disabledExtensions?.includes('serena') ? [] : serenaTools)),
-    ...((input.yamlExclusions?.disabledExtensions?.includes('gitnexus') ? [] : gitnexusExtras)),
+    ...((input.specialistExclusions?.disabledExtensions?.includes('gitnexus') ? [] : gitnexusBase)),
+    ...((input.specialistExclusions?.disabledExtensions?.includes('serena') ? [] : serenaTools)),
+    ...((input.specialistExclusions?.disabledExtensions?.includes('gitnexus') ? [] : gitnexusExtras)),
   ]);
 
   if (!shouldIncludeExtensionTools('gitnexus', input)) warnings.push('gitnexus tools excluded by extension state');
   if (!shouldIncludeExtensionTools('serena', input)) warnings.push('serena tools excluded by extension state');
-  if ((input.yamlExclusions?.disabledExtensions ?? []).length > 0) {
-    warnings.push(`yaml exclusions: ${(input.yamlExclusions?.disabledExtensions ?? []).join(', ')}`);
-    attribution.push({ layer: 'yaml_exclusion', source: 'specialist.yaml', tools: [] });
+  if ((input.specialistExclusions?.disabledExtensions ?? []).length > 0) {
+    warnings.push(`specialist exclusions: ${(input.specialistExclusions?.disabledExtensions ?? []).join(', ')}`);
+    attribution.push({ layer: 'specialist_exclusion', source: 'specialist.json', tools: [] });
   }
 
   attribution.push({ layer: 'catalog', source: 'tool catalogs', tools: nativeTools });

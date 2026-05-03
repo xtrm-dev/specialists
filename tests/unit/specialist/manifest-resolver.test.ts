@@ -1,5 +1,4 @@
 import { readFile } from 'node:fs/promises';
-import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { LEGACY_PERMISSION_TOOL_STRINGS, resolveManifestTools, type ToolCatalog, type ToolTier } from '../../../src/specialist/manifest-resolver.js';
 
@@ -131,7 +130,7 @@ describe('manifest resolver', () => {
     expect(restored.downgradeReasons.join(' ')).toContain('restored native fallback');
   });
 
-  it('tracks extension state, specialist override, and yaml exclusions in resolved output', async () => {
+  it('tracks extension state, specialist override, and specialist exclusions in resolved output', async () => {
     const catalogs = await loadCatalogs();
     const resolved = resolveManifestTools({
       tier: 'READ_ONLY',
@@ -148,7 +147,7 @@ describe('manifest resolver', () => {
         denied_natives_when_extension: ['find'],
         denied_natives_mode: 'hard',
       },
-      yamlExclusions: {
+      specialistExclusions: {
         disabledExtensions: ['serena'],
         deniedNatives: ['ls'],
       },
@@ -158,8 +157,8 @@ describe('manifest resolver', () => {
       },
     });
 
-    expect(resolved.warnings.some(w => w.includes('yaml exclusions'))).toBe(true);
-    expect(resolved.attribution.some(entry => entry.layer === 'yaml_exclusion')).toBe(true);
+    expect(resolved.warnings.some(w => w.includes('specialist exclusions'))).toBe(true);
+    expect(resolved.attribution.some(entry => entry.layer === 'specialist_exclusion')).toBe(true);
     expect(resolved.tools).toContain('gitnexus_query');
     expect(resolved.tools).not.toContain('find_file');
   });
