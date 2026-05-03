@@ -1,0 +1,12 @@
+{
+  "catalog": "native",
+  "package": "specialists",
+  "version": "3.11.0",
+  "precedence": 0,
+  "source_tiers": {
+    "READ_ONLY": ["read", "grep", "find", "ls"],
+    "LOW": ["read", "grep", "find", "ls", "bash"],
+    "MEDIUM": ["read", "grep", "find", "ls", "bash", "edit"],
+    "HIGH": ["read", "grep", "find", "ls", "bash", "edit", "write"]
+  }
+}
