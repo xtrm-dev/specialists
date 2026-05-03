@@ -86,10 +86,11 @@ function mergeTierPolicy(input: ResolverInput): ManifestPolicyTier {
   const tierPolicy = input.manifestPolicy?.permissions?.[input.tier];
   const overridePolicy = input.specialistOverride;
   const specialistDenied = input.specialistExclusions?.deniedNatives ?? [];
-  const basePolicy = overridePolicy ?? (hasPolicyFields(tierPolicy) ? tierPolicy : catalogPolicy) ?? {};
   return {
     denied_natives_when_extension: uniqueOrdered([
-      ...(basePolicy.denied_natives_when_extension ?? []),
+      ...(catalogPolicy?.denied_natives_when_extension ?? []),
+      ...(tierPolicy?.denied_natives_when_extension ?? []),
+      ...(overridePolicy?.denied_natives_when_extension ?? []),
       ...specialistDenied,
     ]),
     denied_natives_mode: overridePolicy?.denied_natives_mode ?? tierPolicy?.denied_natives_mode ?? catalogPolicy?.denied_natives_mode ?? 'soft',
