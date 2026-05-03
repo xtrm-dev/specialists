@@ -89,14 +89,49 @@ This guide is the user-facing reference for authoring `.specialist.json` files. 
 
 ### Permission tiers
 
-| Level | Tools |
+The tier coarse-grains the native pi tools your specialist gets. The full resolved tool list also includes GitNexus and Serena tools per the catalog at `.specialists/catalog/index.json` — see [manifest.md](manifest.md) for the complete picture.
+
+| Level | Native tools added (cumulative) |
 |---|---|
 | `"READ_ONLY"` | `read, grep, find, ls` |
 | `"LOW"` | `+ bash` |
 | `"MEDIUM"` | `+ edit` |
 | `"HIGH"` | `+ write` |
 
+Each tier also brings tier-appropriate GitNexus and Serena tools from the catalog. To see exactly what your specialist will receive at runtime:
+
+```bash
+sp config show <name> --resolved
+```
+
 > `READ_WRITE` is **not** a valid permission value.
+
+### Per-specialist permissions override (optional)
+
+For most specialists the tier defaults are correct and you should not declare an override. When a specialist's policy genuinely diverges from its tier — currently only `explorer` does — add a top-level `permissions` block (sibling to `execution`):
+
+```jsonc
+{
+  "specialist": {
+    "execution": { "permission_required": "READ_ONLY", "...": "..." },
+    "permissions": {
+      "READ_ONLY": {
+        "denied_natives_when_extension": ["grep", "find", "ls"],
+        "denied_natives_mode": "hard"
+      }
+    }
+  }
+}
+```
+
+| Field | Type | Default | Effect |
+|-------|------|---------|--------|
+| `denied_natives_when_extension` | `string[]` | `[]` | Native tools to deny only when a replacement extension (gitnexus/serena) is healthy. |
+| `denied_natives_mode` | `"soft"` \| `"hard"` | `"soft"` | `soft` keeps the tool but emits a preference hint; `hard` removes it (with health-gated restore). |
+
+The example above is explorer's actual block: when `pi-serena-tools` and `pi-gitnexus` are loaded, native `grep`/`find`/`ls` are stripped to force the model toward `search_for_pattern`, `find_file`, `gitnexus_query`. If either extension degrades, the natives are restored automatically.
+
+See [manifest.md](manifest.md) for full semantics, the canonical example, and when to *not* add an override.
 
 ### Interactive precedence
 

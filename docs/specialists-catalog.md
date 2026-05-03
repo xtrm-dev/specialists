@@ -146,7 +146,20 @@ specialists list
 specialists list --json
 ```
 
+## Tool resolution
+
+The `Permission` column above is the input tier to the manifest-driven tool resolver. Each specialist's actual `--tools` set at runtime is computed from the tier plus the catalog at `.specialists/catalog/index.json` plus any per-specialist `permissions[<TIER>]` override block. Today only `explorer` declares an override (hard-deny on native `grep`/`find`/`ls`).
+
+To see the resolved tool set for any specialist:
+
+```bash
+specialists config show <name> --resolved
+```
+
+See [manifest.md](manifest.md) for the resolution semantics and how to declare an override when a specialist's policy diverges from the tier default.
+
 ## See also
 
+- [manifest.md](manifest.md) — tool catalog, resolver, `permissions[<TIER>]` override blocks
 - [authoring.md](authoring.md)
 - [workflow.md](workflow.md)

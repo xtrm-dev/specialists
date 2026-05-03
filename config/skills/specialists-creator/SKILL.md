@@ -235,16 +235,57 @@ bun config/skills/specialists-creator/scripts/validate-specialist.ts config/spec
   - MCP `start_specialist`: `keep_alive` enables, `no_keep_alive` disables.
 - Effective precedence: explicit disable (`--no-keep-alive` / `no_keep_alive`) → explicit enable (`--keep-alive` / `keep_alive`) → `execution.interactive` → one-shot default.
 
-**Permission tiers** — controls which pi tools are available:
+**Permission tiers** — controls the *native* pi tools the specialist gets. The full resolved tool set also includes catalog-defined GitNexus and Serena tools per tier; see [docs/manifest.md](../../../docs/manifest.md) for the complete picture.
 
-| Level | pi --tools | Use when |
-|-------|-----------|----------|
-| `READ_ONLY` | `read,grep,find,ls` | Read-only analysis, no bash |
-| `LOW` | `+bash` | Inspect/run commands, no file edits |
-| `MEDIUM` | `+edit` | Can edit existing files |
-| `HIGH` | `+write` | Full access — can create new files |
+| Level | Native tools (cumulative) | Use when |
+|-------|---------------------------|----------|
+| `READ_ONLY` | `read, grep, find, ls` | Read-only analysis, no bash |
+| `LOW` | `+ bash` | Inspect/run commands, no file edits |
+| `MEDIUM` | `+ edit` | Can edit existing files |
+| `HIGH` | `+ write` | Full access — can create new files |
+
+After choosing a tier, verify the resolved tool list before dispatching:
+
+```bash
+sp config show <name> --resolved
+```
 
 **Common pitfall:** `READ_WRITE` is **not** a valid value — use `LOW` or higher.
+
+### Per-specialist `permissions[<TIER>]` override (rarely needed)
+
+Most specialists use the catalog tier defaults. **Do not declare an override unless this specialist's policy genuinely diverges from its tier.** Today only `explorer` declares one (hard-deny on native `grep`/`find`/`ls` to force symbolic search via gitnexus/serena).
+
+If divergence is real, add a top-level `permissions` block (sibling to `execution`):
+
+```jsonc
+{
+  "specialist": {
+    "execution": { "permission_required": "READ_ONLY" },
+    "permissions": {
+      "READ_ONLY": {
+        "denied_natives_when_extension": ["grep", "find", "ls"],
+        "denied_natives_mode": "hard"
+      }
+    }
+  }
+}
+```
+
+| Field | Type | Default | Effect |
+|-------|------|---------|--------|
+| `denied_natives_when_extension` | `string[]` | `[]` | Native tools to deny only when a replacement extension is healthy |
+| `denied_natives_mode` | `"soft"` \| `"hard"` | `"soft"` | `soft` keeps the tool with a preference hint; `hard` removes it (with auto-restore if the extension degrades) |
+
+The override block can only *deny* natives — it cannot add new tools beyond the catalog tier. To add tools, change the tier or update the catalog file.
+
+**Decision rule when authoring:**
+1. Pick the lowest tier that satisfies the specialist's actual capability needs.
+2. Run `sp config show <name> --resolved` and inspect the `--tools` line.
+3. If the tools are right, you're done — no override needed.
+4. If a native tool is genuinely worse than an extension equivalent for this specialist's task, declare a soft-deny first to observe behavior, then promote to hard-deny once you trust it.
+
+See [docs/manifest.md](../../../docs/manifest.md) for full deny-mode semantics, extension health gating, and the canonical explorer example.
 
 **Per-specialist extension opt-out**
 

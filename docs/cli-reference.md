@@ -891,6 +891,51 @@ The `specialists config` command is a deprecated alias for `specialists edit`. I
 
 The new `edit` command supports full dot-path syntax, presets, array operations, and file-based input.
 
+### `specialists config show <name> --resolved` (still canonical)
+
+While `config get`/`config set` are deprecated aliases of `edit`, the `config show <name> --resolved` subcommand has **no equivalent on `edit`** and remains the only surface for inspecting how a specialist's `--tools` argument is computed at session start.
+
+```bash
+specialists config show <name> --resolved
+```
+
+Output sections (in order):
+
+| Section | Meaning |
+|---------|---------|
+| Resolved JSON | The fully-merged specialist spec with defaults applied |
+| `layer attribution` | Which layer (`catalog`, `specialist_override`, `runtime_health`) contributed which tools |
+| `extension availability` | Live health probe per extension (`pi-gitnexus`, `pi-serena-tools`, native): `loaded_healthy` / `not_installed` / `disabled` / `loaded_unhealthy` / `unknown` |
+| `catalog compatibility` | `ok` if catalog schema version matches |
+| `denied natives` | Tools removed by the specialist's `permissions[<TIER>]` override block (or `(none)`) |
+| `deny mode` | `soft` (preference hint only) or `hard` (tool removed) |
+| `preference signals` | Populated when soft-deny is active |
+| `downgrade reasons` | Populated when hard-deny had to restore natives because an extension was unhealthy |
+| `--tools` | The literal comma-joined string passed to `pi --tools` |
+
+Example for `explorer` (READ_ONLY with hard-deny override on natives):
+
+```text
+layer attribution:
+  - catalog (tool catalogs): read,grep,find,ls
+  - specialist_override (specialist YAML): grep,find,ls
+extension availability:
+  - native: loaded_healthy [none] built-in
+  - gitnexus: loaded_healthy [none] loaded
+  - serena: loaded_healthy [none] loaded
+catalog compatibility:
+  - ok
+denied natives: grep,find,ls
+deny mode: hard
+preference signals: (none)
+downgrade reasons: (none)
+--tools: read,gitnexus_list_repos,gitnexus_query,gitnexus_context,gitnexus_impact,gitnexus_detect_changes,serena_list_tools,find_symbol,...
+```
+
+Use this command after editing a specialist's `permission_required` tier, its `permissions[<TIER>]` override block, or after installing/uninstalling `pi-gitnexus` or `pi-serena-tools` — to confirm the runtime tool set before dispatching a real specialist run.
+
+See [manifest.md](manifest.md) for the full resolution semantics.
+
 ---
 
 ## `specialists init`

@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Manifest-driven tool resolver: `.specialists/catalog/{native,gitnexus,serena}.json` declare per-tier tool sets; `src/specialist/manifest-resolver.ts` is the canonical resolver consumed by `PiAgentSession.start()` (unitAI-8vb65, unitAI-qujxo)
+- `permissions[<TIER>]` override block on specialist JSON for per-specialist policy divergence; `denied_natives_when_extension` + `denied_natives_mode: soft|hard` semantics with health-gated native restore (unitAI-qujxo.2)
+- `specialists config show <name> --resolved` surface for layer attribution, extension health, deny mode, downgrade reasons, and final `--tools` inspection (unitAI-8vb65)
+- `PiSessionOptions.specialistName` and `PiSessionOptions.specialistPermissions` threaded from `SpecialistRunner` and `use_specialist` MCP tool into the session (unitAI-qujxo.2)
+- `docs/manifest.md` reference for the catalog/resolver/override system; `docs/design/gzrx-tool-catalog.md` design doc and `docs/design/gzrx-completion-critique.md` gap analysis (unitAI-qujxo, unitAI-qujxo.1)
+
+### Changed
+- Resolver is the only path for computing specialist `--tools`; no env-flag opt-in (unitAI-qujxo.2)
+- `docs/authoring.md` and `config/skills/specialists-creator/SKILL.md` updated to teach the override block decision; `specialists-creator` v1.3.0 prompts the agent to verify resolved tools via `sp config show --resolved` before declaring overrides (unitAI-x5auj)
+- Explorer hard-denies native `grep`/`find`/`ls` to force symbolic search via `gitnexus_query`/`search_for_pattern`/`find_file` when both extensions are healthy; auto-restores natives if either degrades (unitAI-8vb65.7)
+
+### Removed
+- `mapPermissionToTools` and the five hardcoded tier→tool arrays (`GITNEXUS_READ_TOOLS`, `SERENA_READ_TOOLS`, `SERENA_LOW_TOOLS`, `SERENA_WRITE_TOOLS`, `GITNEXUS_WRITE_TOOLS`) from `src/pi/session.ts` — superseded by the manifest resolver (unitAI-qujxo.2)
+- `SPECIALISTS_USE_RESOLVER` env-flag opt-in — resolver is now default-on with no fallback (unitAI-qujxo.2)
+- `PiSessionOptions.useSharedToolResolver` rollout switch (unitAI-qujxo.2)
+
 ---
 
 ## [v3.11.0] — 2026-05-03

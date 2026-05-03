@@ -1431,6 +1431,55 @@ Commit: `4c3eeb36`
 
 ---
 
+## 30) Manifest-driven tool resolver
+
+Each specialist's `--tools` argument is computed at session start by `resolvePermissionTools` from a JSON tool catalog plus an optional per-specialist override block. There are no hardcoded tier→tool arrays in source: the catalog is the only source of truth.
+
+### Inputs
+
+1. The specialist's tier from `execution.permission_required` (`READ_ONLY`/`LOW`/`MEDIUM`/`HIGH`)
+2. The catalog index at `.specialists/catalog/index.json` (with `native.json` / `gitnexus.json` / `serena.json` siblings)
+3. Live extension health probe of `pi-gitnexus` and `pi-serena-tools` in the global npm modules directory
+4. Optional `permissions[<TIER>]` override block on the specialist JSON
+
+### Resolution layers (in order)
+
+| Layer | Effect |
+|-------|--------|
+| `catalog` | Tier defaults from each catalog (native + gitnexus + serena) |
+| `specialist_override` | The specialist's `permissions[<TIER>]` block strips natives via `denied_natives_when_extension` |
+| `runtime_health` | Tools belonging to unhealthy extensions are dropped; if a hard-deny had stripped natives whose replacement extension is now unhealthy, those natives are restored automatically |
+
+### Deny modes
+
+- `soft` (default): native tool stays in `--tools`; resolver emits a `preference signals` line as a hint
+- `hard`: native tool is removed when the replacement extension is healthy; restored when it isn't
+
+### Override example: explorer
+
+`config/specialists/explorer.specialist.json` is the only specialist with an override today:
+
+```json
+"permissions": {
+  "READ_ONLY": {
+    "denied_natives_when_extension": ["grep", "find", "ls"],
+    "denied_natives_mode": "hard"
+  }
+}
+```
+
+Result at runtime when both extensions are healthy: explorer's `--tools` excludes native `grep`/`find`/`ls`, includes `gitnexus_query` + `search_for_pattern` + `find_file` + symbol-graph tools. If `pi-serena-tools` becomes unhealthy mid-run, the natives are restored.
+
+### Inspection
+
+```bash
+sp config show <name> --resolved
+```
+
+Prints layer attribution, extension health, denied natives, deny mode, downgrade reasons, and the final `--tools` string. See [manifest.md](manifest.md) for the full reference and [cli-reference.md](cli-reference.md#specialists-config) for the CLI surface.
+
+---
+
 ## Quick reference flows
 
 ### CLI async observation flow
