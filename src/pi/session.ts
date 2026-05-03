@@ -189,6 +189,7 @@ function resolvePermissionTools(options: {
   return resolveManifestTools({
     tier,
     catalogs: catalogIndex.catalogs as any,
+    catalogDefaultOverrides: catalogIndex.default_overrides,
     specialistOverride,
     extensionState: {
       gitnexus: { enabled: true, health: probeExtensionHealth('pi-gitnexus') },

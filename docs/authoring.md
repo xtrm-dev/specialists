@@ -98,7 +98,7 @@ The tier coarse-grains the native pi tools your specialist gets. The full resolv
 | `"MEDIUM"` | `+ edit` |
 | `"HIGH"` | `+ write` |
 
-Each tier also brings tier-appropriate GitNexus and Serena tools from the catalog. To see exactly what your specialist will receive at runtime:
+Each tier also brings tier-appropriate GitNexus and Serena tools from the catalog. Catalog `default_overrides` may also remove native tools at runtime when extensions are healthy. To see exactly what your specialist will receive:
 
 ```bash
 sp config show <name> --resolved

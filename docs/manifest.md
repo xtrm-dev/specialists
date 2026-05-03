@@ -89,7 +89,7 @@ Probes inspect `pi-gitnexus` and `pi-serena-tools` in the global npm modules dir
 
 ## Per-specialist override block
 
-Most specialists need nothing special — the catalog tier defaults are correct. When a specialist's policy genuinely diverges, declare a `permissions[<TIER>]` block at the top level of the specialist JSON (sibling to `execution`, not nested inside it).
+Most specialists need nothing special — catalog `default_overrides` define runtime-native deny defaults, and tier-local `permissions[<TIER>]` blocks only appear when a specialist must diverge from that baseline. Put specialist overrides at top level of specialist JSON (sibling to `execution`, not nested inside it).
 
 ### Schema
 
@@ -109,7 +109,7 @@ Most specialists need nothing special — the catalog tier defaults are correct.
 
 | Field | Type | Default | Notes |
 |-------|------|---------|-------|
-| `denied_natives_when_extension` | `string[]` | `[]` | Native tools to deny **only when a replacement extension is healthy**. Order doesn't matter. |
+| `denied_natives_when_extension` | `string[]` | `[]` | Native tools to deny **only when a replacement extension is healthy**. Order doesn't matter. Catalog defaults apply first, specialist overrides replace them when present. |
 | `denied_natives_mode` | `"soft"` \| `"hard"` | `"soft"` | Whether the denial actually removes the tool (`hard`) or only emits a preference signal (`soft`). |
 
 Only the tier matching the specialist's `execution.permission_required` is consulted. Unused tiers in the block are silently ignored.

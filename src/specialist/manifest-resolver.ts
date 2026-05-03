@@ -9,6 +9,10 @@ export interface ToolCatalog {
   source_tiers: Record<ToolTier, readonly string[]>;
 }
 
+export interface CatalogDefaultOverrides {
+  default_overrides?: Partial<Record<ToolTier, ManifestPolicyTier>>;
+}
+
 export interface ManifestPolicyTier {
   denied_natives_when_extension?: readonly string[];
   denied_natives_mode?: DeniedNativesMode;
@@ -28,6 +32,7 @@ export interface ExtensionState {
 export interface ResolverInput {
   tier: ToolTier;
   catalogs: readonly ToolCatalog[];
+  catalogDefaultOverrides?: Partial<Record<ToolTier, ManifestPolicyTier>>;
   manifestPolicy?: ManifestPolicy;
   specialistOverride?: ManifestPolicyTier;
   specialistExclusions?: {
@@ -38,7 +43,7 @@ export interface ResolverInput {
 }
 
 export interface ToolLayerAttribution {
-  layer: 'tier_policy' | 'specialist_override' | 'specialist_exclusion' | 'runtime_health' | 'catalog';
+  layer: 'catalog_default' | 'tier_policy' | 'specialist_override' | 'specialist_exclusion' | 'runtime_health' | 'catalog';
   source?: string;
   tools: readonly string[];
 }
@@ -72,17 +77,23 @@ function getCatalog(catalogs: readonly ToolCatalog[], name: ToolCatalogName): To
   return catalogs.find(catalog => catalog.catalog === name);
 }
 
+function hasPolicyFields(policy: ManifestPolicyTier | undefined): boolean {
+  return Boolean(policy?.denied_natives_mode || (policy?.denied_natives_when_extension?.length ?? 0) > 0);
+}
+
 function mergeTierPolicy(input: ResolverInput): ManifestPolicyTier {
-  const tierPolicy = input.manifestPolicy?.permissions?.[input.tier] ?? {};
-  const overridePolicy = input.specialistOverride ?? {};
+  const catalogPolicy = input.catalogDefaultOverrides?.[input.tier];
+  const tierPolicy = input.manifestPolicy?.permissions?.[input.tier];
+  const overridePolicy = input.specialistOverride;
   const specialistDenied = input.specialistExclusions?.deniedNatives ?? [];
   return {
     denied_natives_when_extension: uniqueOrdered([
-      ...(tierPolicy.denied_natives_when_extension ?? []),
-      ...(overridePolicy.denied_natives_when_extension ?? []),
+      ...(catalogPolicy?.denied_natives_when_extension ?? []),
+      ...(tierPolicy?.denied_natives_when_extension ?? []),
+      ...(overridePolicy?.denied_natives_when_extension ?? []),
       ...specialistDenied,
     ]),
-    denied_natives_mode: overridePolicy.denied_natives_mode ?? tierPolicy.denied_natives_mode ?? 'soft',
+    denied_natives_mode: overridePolicy?.denied_natives_mode ?? tierPolicy?.denied_natives_mode ?? catalogPolicy?.denied_natives_mode ?? 'soft',
   };
 }
 
@@ -148,6 +159,13 @@ export function resolveManifestTools(input: ResolverInput): ResolverResult {
   }
 
   attribution.push({ layer: 'catalog', source: 'tool catalogs', tools: nativeTools });
+  if (input.catalogDefaultOverrides?.[input.tier]) {
+    attribution.push({
+      layer: 'catalog_default',
+      source: 'tool catalog defaults',
+      tools: input.catalogDefaultOverrides[input.tier]?.denied_natives_when_extension ?? [],
+    });
+  }
   if (input.manifestPolicy?.permissions?.[input.tier]) {
     attribution.push({
       layer: 'tier_policy',

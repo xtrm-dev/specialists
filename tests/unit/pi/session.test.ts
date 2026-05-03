@@ -513,9 +513,11 @@ describe('PiAgentSession', () => {
     expect(resolvedTools).toContain('find_file');
     expect(resolvedTools).toContain('read_file');
     expect(resolvedTools).toContain('list_dir');
-    expect(resolvedTools).toContain('grep');
-    expect(resolvedTools).toContain('find');
-    expect(resolvedTools).toContain('ls');
+    const resolvedToolNames = resolvedTools.split(',');
+    expect(resolvedToolNames).not.toContain('read');
+    expect(resolvedToolNames).not.toContain('grep');
+    expect(resolvedToolNames).not.toContain('find');
+    expect(resolvedToolNames).not.toContain('ls');
   });
 
   it("resolver LOW path keeps GitNexus/Serena parity with legacy tools", async () => {
@@ -526,7 +528,11 @@ describe('PiAgentSession', () => {
     const toolsIdx = args.indexOf('--tools');
     expect(toolsIdx).toBeGreaterThan(-1);
     const tools = args[toolsIdx + 1].split(',');
-    expect(tools).toEqual(expect.arrayContaining(['read', 'bash', 'grep', 'find', 'ls']));
+    expect(tools).toEqual(expect.arrayContaining(['bash']));
+    expect(tools).not.toContain('read');
+    expect(tools).not.toContain('grep');
+    expect(tools).not.toContain('find');
+    expect(tools).not.toContain('ls');
     expect(tools).toEqual(expect.arrayContaining(['gitnexus_query', 'gitnexus_context', 'gitnexus_impact']));
     expect(tools).toEqual(expect.arrayContaining(['read_file', 'search_for_pattern', 'find_symbol', 'list_dir']));
     expect(tools).toContain('execute_shell_command');
@@ -568,7 +574,11 @@ describe('PiAgentSession', () => {
     const toolsIdx = args.indexOf('--tools');
     expect(toolsIdx).toBeGreaterThan(-1);
     const tools = args[toolsIdx + 1].split(',');
-    expect(tools).toEqual(expect.arrayContaining(['read', 'bash', 'edit', 'write', 'grep', 'find', 'ls']));
+    expect(tools).toEqual(expect.arrayContaining(['bash', 'edit', 'write']));
+    expect(tools).not.toContain('read');
+    expect(tools).not.toContain('grep');
+    expect(tools).not.toContain('find');
+    expect(tools).not.toContain('ls');
     expect(tools).toEqual(expect.arrayContaining(['gitnexus_query', 'gitnexus_rename', 'gitnexus_cypher']));
     expect(tools).toEqual(expect.arrayContaining(['read_file', 'create_text_file', 'replace_content', 'execute_shell_command']));
   });

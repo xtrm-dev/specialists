@@ -254,7 +254,7 @@ sp config show <name> --resolved
 
 ### Per-specialist `permissions[<TIER>]` override (rarely needed)
 
-Most specialists use the catalog tier defaults. **Do not declare an override unless this specialist's policy genuinely diverges from its tier.** Today only `explorer` declares one (hard-deny on native `grep`/`find`/`ls` to force symbolic search via gitnexus/serena).
+Most specialists use the catalog default deny baseline. **Do not declare an override unless this specialist's policy genuinely diverges from its tier.** When you do override, remember the specialist block replaces catalog defaults for that tier.
 
 If divergence is real, add a top-level `permissions` block (sibling to `execution`):
 
@@ -274,7 +274,7 @@ If divergence is real, add a top-level `permissions` block (sibling to `executio
 
 | Field | Type | Default | Effect |
 |-------|------|---------|--------|
-| `denied_natives_when_extension` | `string[]` | `[]` | Native tools to deny only when a replacement extension is healthy |
+| `denied_natives_when_extension` | `string[]` | `[]` | Native tools to deny only when a replacement extension is healthy. Catalog defaults apply first; specialist override replaces them for that tier. |
 | `denied_natives_mode` | `"soft"` \| `"hard"` | `"soft"` | `soft` keeps the tool with a preference hint; `hard` removes it (with auto-restore if the extension degrades) |
 
 The override block can only *deny* natives — it cannot add new tools beyond the catalog tier. To add tools, change the tier or update the catalog file.

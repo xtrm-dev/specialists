@@ -13,8 +13,14 @@ export const ToolCatalogSchema = z.object({
   source_tiers: ToolTierMapSchema,
 }).passthrough();
 
+const ManifestPolicyTierSchema = z.object({
+  denied_natives_when_extension: z.array(z.string()).optional(),
+  denied_natives_mode: z.enum(['soft', 'hard']).optional(),
+}).passthrough();
+
 export const ToolCatalogIndexSchema = z.object({
   precedence_order: z.array(LayerSchema),
+  default_overrides: z.record(TierSchema, ManifestPolicyTierSchema).optional(),
   catalogs: z.array(ToolCatalogSchema),
 }).passthrough();
 
