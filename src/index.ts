@@ -333,7 +333,7 @@ async function run() {
     if (wantsHelp()) {
       console.log([
         '',
-        'Usage: specialists config <get|set> <key> [value] [options]',
+        'Usage: specialists config <get|set|show> <key|specialist> [value] [options]',
         '',
         '⚠ DEPRECATED: use specialists edit instead.',
         '',
@@ -342,10 +342,12 @@ async function run() {
         '  specialists edit --all --set <key> <value>',
         '  specialists edit <name> --get <key>',
         '  specialists edit <name> --set <key> <value>',
+        '  specialists config show <specialist> --resolved',
         '',
         'Options:',
         '  --all                     Target all specialists',
         '  --name <specialist>       Target one specialist',
+        '  --resolved                Show resolved manifest and tool attribution',
         '',
       ].join('\n'));
       return;
