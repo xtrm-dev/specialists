@@ -1,8 +1,10 @@
 # gzrx — Centralized Specialists Manifest + Tool Catalog Design
 
-> Status: **DRAFT — design phase**. Implementation tracked under `unitAI-gzrx`.
-> Author: Pi in-pi coding agent (evidence-driven).
-> Last updated: 2026-04-30.
+> Status: **DRAFT — design phase**. Implementation tracked under `unitAI-8vb65`.
+> Author: Pi in-pi coding agent (evidence-driven), with research overlay
+> (`gzrx-research-notes.md`) and overthinker critique (`unitAI-o6icy`) folded
+> into §3.0 (precedence), §3.3 (health), §7 (migration), §8 (open questions).
+> Last updated: 2026-05-03.
 
 This document is the canonical design for `unitAI-gzrx`. The design is split
 into the **manifest overlay** (transport) and the **tool catalog + capability
@@ -264,6 +266,39 @@ from. Proposed capability tags:
 A tier is **a set of capability tags** plus **deny rules**. Concrete tools are
 derived from `(catalog filter capabilities ∩ tier.capabilities) − tier.denied`.
 
+### 3.0 Precedence and conflict resolution
+
+Six layers can each express an opinion on a single tool. The resolver merges
+them in this fixed order, lowest-to-highest precedence:
+
+1. **Catalog metadata** — tool exists, capabilities declared.
+2. **Default tier policy** — `READ_ONLY/LOW/MEDIUM/HIGH` capability sets and
+   denied-natives rules.
+3. **Project manifest tier overrides** — `permissions.<TIER>` block in
+   `.specialists/config.json`.
+4. **Specialist manifest overrides** — `specialists.<name>` block in
+   `.specialists/config.json`.
+5. **Specialist YAML availability** — `execution.extensions.{serena,gitnexus}`,
+   `execution.permission`.
+6. **Runtime health downgrade** — health probes can downgrade `hard` →
+   `soft` and restore native fallbacks.
+
+Conflict rules:
+
+- **Most restrictive wins** for tool inclusion (any layer that denies a tool
+  removes it).
+- **Exception:** runtime health degradation (layer 6) **restores** native
+  fallbacks even if higher layers denied them, because availability of a
+  replacement is the precondition for denying its native equivalent.
+- Hard-deny in layer 4 (specialist override) does **not** override layer 6
+  health. If GitNexus is `loaded_unhealthy`, explorer's `hard-deny grep` is
+  downgraded to `soft` until GitNexus recovers.
+- Layer attribution is preserved through resolution. `sp config show
+  --resolved` (§6) prints which layer set each final value.
+
+Inspired by Gemini CLI's `PolicyEngine` priority tiers
+(`packages/core/src/policy/policy.ts`); see `gzrx-research-notes.md`.
+
 ### 3.1 Proposed tier capability sets
 
 Default policy must be backward-compatible: if no catalog/manifest is present,
@@ -353,30 +388,47 @@ manifest exposes both modes.
 
 ### 3.3 Fallback behavior
 
-Represent extension state explicitly in the resolver:
+Extension state is **per-capability**, not extension-wide on/off. A single
+extension can have some capabilities healthy and others degraded
+simultaneously (Serena LSP partial outage; GitNexus stale-but-callable).
+
+Per-capability state machine:
 
 | State | Meaning | Policy |
 |-------|---------|--------|
 | `not_installed` | package/extension path absent | warn in `--resolved`; remove its tools; do not deny native fallbacks |
 | `disabled` | specialist YAML or manifest excludes it | show disabled source; remove its tools; do not deny native fallbacks |
-| `loaded_healthy` | extension registered and probe passed | apply preferred/denied-native policy |
-| `loaded_unhealthy` | extension registered but health probe failed | keep tools if calls may self-recover, but downgrade hard denies to soft and print warning |
+| `loaded_healthy` | extension registered and capability probe passed | apply preferred/denied-native policy |
+| `loaded_degraded` | capability probe partially failed (e.g. some Serena tools work, others don't) | keep tools; downgrade hard-deny → soft for affected capabilities; print warning |
+| `loaded_unhealthy` | capability probe failed completely | keep tools if self-recovery possible; downgrade hard-deny → soft; print warning |
+| `version_mismatch` | package installed but version drifts from catalog | treat as `loaded_degraded`; emit catalog-drift warning; defer to drift policy (§6.1) |
 
 Specifics:
 
-- GitNexus missing index: `pi-gitnexus` returns visible text
+- **GitNexus missing index:** `pi-gitnexus` returns visible text
   `No GitNexus index found. Run: /gitnexus analyze`. Treat as
-  `loaded_unhealthy` for the repo. Native `grep`/`find` must remain available
-  unless the specialist explicitly sets `fallback_on_extension_failure: error`.
-- GitNexus stale index: if a tool returns a stale-index warning, keep the graph
-  tools but add a prompt-visible warning and allow native fallback for that turn.
-- Serena LSP offline: health probe should call `get_current_config` or
-  `check_onboarding_performed`. Failure marks Serena `loaded_unhealthy`; native
-  `read`, `grep`, `find`, `ls`, and `edit` are not hard-denied.
-- Package not installed: current code silently skips packages via
-  `existsSync(...)` in `src/pi/session.ts:657-672`. New resolver should make
-  that visible in `sp config show --resolved` but should not fail session start
-  unless manifest says `fallback_on_extension_failure: error`.
+  `loaded_unhealthy` for `analyze.graph` and `search.symbol` capabilities.
+  Native `grep`/`find` remain available unless the specialist explicitly sets
+  `fallback_on_extension_failure: error`.
+- **GitNexus stale-but-callable index:** if a tool returns a stale-index
+  warning but still produces output, classify as `loaded_degraded` for the
+  affected capability. Keep graph tools, add prompt-visible warning, allow
+  native fallback for that turn. Do not promote to `loaded_unhealthy` —
+  callable-with-warning is materially different from unusable.
+- **Serena LSP offline:** per-capability probes (not extension-wide). Probe
+  `find_symbol` for `search.symbol`; probe `read_file` for `read`; probe
+  `replace_symbol_body` for `write.symbol`. Each capability gets its own
+  state. Native `read`/`grep`/`find`/`ls`/`edit` are not hard-denied while any
+  Serena capability is `loaded_unhealthy` or `loaded_degraded`.
+- **Package not installed:** current code silently skips packages via
+  `existsSync(...)` in `src/pi/session.ts:657-672`. New resolver makes that
+  visible in `sp config show --resolved` and emits a single startup line. Does
+  not fail session start unless manifest says
+  `fallback_on_extension_failure: error`.
+- **Package version mismatch:** if an installed extension's manifest version
+  drifts from the catalog file's `expected_version`, treat as
+  `version_mismatch`. Drift detection (§6.1) decides whether to warn-only or
+  hard-fail per project policy.
 
 ---
 
@@ -454,6 +506,32 @@ Per-specialist override extends the same shape:
 
 ---
 
+### 5.1 Drift detection
+
+Hand-edited JSON catalogs drift from the live extension surface. The resolver
+runs a startup drift check:
+
+- For each catalog entry, verify the tool name still exists in the loaded
+  extension's registered tool set.
+- For each loaded extension tool, verify it exists in the catalog (warn on
+  unknown tools).
+- Compare catalog `expected_version` against the installed package version.
+
+Drift policy is set per project in manifest:
+
+```json
+"drift_policy": {
+  "mode": "warn|error|ignore",
+  "downgrade_hard_deny_on_drift": true
+}
+```
+
+Default `warn`: log to `--resolved` output, downgrade affected hard-denies to
+soft. `error` fails session start. Drift is not the same as `version_mismatch`
+on a single package — drift is a catalog↔extension shape mismatch.
+
+---
+
 ## 6. Resolved-debug surface
 
 `sp config show <name> --resolved` must print:
@@ -505,35 +583,95 @@ behavior:
 
 ## 7. Migration plan
 
-1. Add catalog files only, with no runtime behavior change:
+This ordering is the post-overthinker revision. The original §7 placed runtime
+threading before resolved-debug; that order made the resolver impossible to
+diagnose in production. Resolved-debug and per-capability health probes now
+land **before** runtime threading.
+
+Each behavior-changing step has explicit abort criteria. If any criterion
+fires, halt the migration and resolve the regression before continuing.
+
+1. **Specify precedence in design + code comments.** Document the six-layer
+   precedence (§3.0) as a header comment in `src/specialist/manifest.ts` and
+   in inline commentary on the resolver entry point. No code behavior yet.
+
+2. **Add catalog files + JSON schema validation.**
    - `.specialists/catalog/native.json`
    - `.specialists/catalog/serena.json`
    - `.specialists/catalog/gitnexus.json`
-   - Optional package-side `pi-catalog.json` discovery for future extensions.
-2. Implement `src/specialist/manifest.ts` (or `tool-manifest.ts`) that loads
-   catalogs and the default permission manifest, then emits the exact same
-   tool strings as `src/pi/session.ts:225-243` for the default configuration.
-   Add snapshot tests for READ_ONLY/LOW/MEDIUM/HIGH byte equivalence.
-3. Thread manifest resolution into `src/pi/session.ts` behind a feature flag or
-   internal option. Keep the hardcoded arrays as fallback for one release.
-4. Add `sp config show <specialist> --resolved` beside existing
-   `src/cli/config.ts` get/set commands. It should print effective manifest,
-   layer attribution, extension health, denied natives, and final `--tools`.
-5. Add health probes for GitNexus and Serena. Show `not_installed`, `disabled`,
-   `loaded_healthy`, and `loaded_unhealthy` in resolved output.
-6. Enable `denied_natives_when_extension` in soft mode for all tiers. Validate
-   no behavior break: tools remain callable, but prompts/debug output express
-   preferences.
-7. Add hard-deny support in resolver. Smoke-test with explorer: verify `grep`,
-   `find`, and `ls` are removed from final `--tools` when GitNexus/Serena are
-   healthy, and restored when they are unhealthy.
-8. Add per-specialist overrides. First migration candidate: explorer hard-deny
-   `grep/find/ls`; keep `read` soft until large-file/non-code Serena behavior
-   is verified.
-9. Move docs from this design into `docs/manifest.md` and link from
-   `docs/cli-reference.md` under `sp config show --resolved`.
-10. Remove old hardcoded arrays from `src/pi/session.ts` after one release with
-    resolved-debug output available.
+   - Validate tool names, capabilities, source-tier, package/version metadata.
+   - Optional package-side `pi-catalog.json` discovery is **deferred** — first
+     PR ships hand-edited JSON only.
+   - **Abort if** catalog schema fails or any catalog tool's source-tier
+     differs from the §1.2.1/§1.3 cross-reference.
+
+3. **Implement resolver as a pure library** (`src/specialist/manifest.ts` or
+   `tool-manifest.ts`). Inputs: tier, catalogs, manifest, specialist override,
+   YAML exclusions, extension state. Outputs: final `--tools`, denied natives
+   with reason, warnings, per-layer attribution. **No `src/pi/session.ts`
+   threading yet.**
+
+4. **Tests before integration:**
+   - Byte-equivalence snapshots for `READ_ONLY/LOW/MEDIUM/HIGH` (default
+     config) vs current `mapPermissionToTools` output.
+   - Matrix tests across **(tier × extension health × specialist override ×
+     YAML exclusion)**. Per-tier snapshots alone do not catch interaction
+     bugs.
+   - Invariants:
+     - Soft mode never changes final `--tools`.
+     - Hard mode restores natives when replacement capability is
+       `loaded_unhealthy`, `loaded_degraded`, `version_mismatch`, or unknown.
+   - **Abort if** any default tier output differs byte-for-byte from legacy.
+
+5. **Add `sp config show <specialist> --resolved`** in `src/cli/config.ts`.
+   Must use the **same** resolver library as the future runtime path. Print
+   effective manifest, per-layer attribution, per-capability extension
+   health, catalog drift, hard-deny downgrades, denied natives with reason,
+   final `--tools`. **Abort if** any tool inclusion/exclusion lacks layer
+   attribution.
+
+6. **Add per-capability health probes + drift detection.**
+   - GitNexus: missing index, stale-but-callable, callable/degraded.
+   - Serena: per-capability probes (`search.symbol`, `read`, `write.symbol`,
+     etc.), not extension-wide on/off.
+   - Package version vs catalog `expected_version`.
+   - Catalog↔extension shape drift (§5.1).
+   - Drift or degraded forces hard-deny → soft (per layer 6 in §3.0).
+   - **Abort if** drift detector cannot distinguish `loaded_degraded` from
+     `loaded_unhealthy`.
+
+7. **Thread resolver into `src/pi/session.ts`** behind a feature flag.
+   Flag-off = legacy hardcoded arrays. Flag-on + default config =
+   byte-equivalent to legacy. Keep hardcoded arrays as fallback for one
+   release. **Abort if** flag-off output differs from legacy in any tier.
+
+8. **Enable `denied_natives_when_extension` in soft mode** for all tiers.
+   Tools remain callable; prompts and resolved-debug output express
+   preferences. **Abort if** soft mode changes final `--tools` for any tier.
+
+9. **Add hard-deny support in resolver.** Verify natives are removed from
+   `--tools` when replacement capability is healthy, and restored when
+   unhealthy/degraded/unknown/catalog-incompatible. **Abort if** natives are
+   not restored on any unhealthy state.
+
+10. **Enable explorer hard-deny for `grep`/`find`/`ls`.** Keep `read` soft
+    pending Serena `read_file` large-file and non-code verification. Gated on
+    healthy GitNexus + Serena replacements. Monitor via `--resolved` output
+    for one week minimum.
+
+11. **Remove old hardcoded arrays** from `src/pi/session.ts`. **Abort until**
+    one release has shipped with parity verified and resolved-debug output
+    available in production.
+
+### 7.1 Defer to follow-up beads
+
+- Package-side `pi-catalog.json` discovery for arbitrary extensions.
+- Catalog codegen from extension source (first PR ships hand JSON + drift
+  detector; codegen is a separate optimization).
+- Full migration of this design to `docs/manifest.md` and cross-link from
+  `docs/cli-reference.md`.
+- Hard-deny `read` (waits on Serena large-file/non-code verification).
+- Per-tool health beyond the minimum per-capability probes in step 6.
 
 ---
 
@@ -557,6 +695,33 @@ behavior:
 5. Keep `meta` tools on for READ_ONLY+ by default. They are essential for
    debugging loaded/unhealthy extension states. If security becomes a concern,
    add a separate `meta` deny list rather than hiding them implicitly.
+6. `loaded_degraded` vs `loaded_unhealthy` boundary is sometimes fuzzy
+   (e.g. GitNexus index present but 30+ days stale). Default rule: a tool that
+   still returns useful output with a warning is `loaded_degraded`; a tool
+   that errors or returns "unavailable" text is `loaded_unhealthy`. Drift
+   detector (§5.1) escalation policy refines this per project.
+7. `version_mismatch` policy default: `warn-only` for catalog-vs-package skew
+   on minor/patch; `error` on major skew. Manifest can override per
+   extension. Concrete thresholds to be set during step 6 of §7.
+
+### 8.1 Resolved by the post-overthinker revision
+
+Items previously open or under-specified that are now closed:
+
+- **Precedence order across the six layers** — locked in §3.0.
+- **Per-capability health vs extension-wide** — §3.3 splits state into
+  per-capability with explicit `loaded_degraded`.
+- **Drift between hand-edited catalog and live extension surface** — §5.1
+  adds startup drift detection with project-level policy.
+- **Order of `--resolved` debug surface vs runtime threading** — §7 step 5
+  lands resolved-debug *before* step 7 runtime threading. Original §7 had
+  this reversed and would have shipped a resolver with no diagnostic surface.
+- **Snapshot-only test sufficiency** — §7 step 4 requires the
+  (tier × health × override × YAML) matrix; per-tier snapshots alone are
+  insufficient.
+- **Soft-vs-hard deny effectiveness** — §3.2 + §7 step 8/9 split: soft
+  is preference/debug only and does not change `--tools`; hard is the only
+  mode that fixes the explorer-grep problem, gated on replacement health.
 
 ---
 
@@ -568,3 +733,28 @@ behavior:
 - No new CLI surface beyond `sp config show <name> --resolved` and the
   catalog files.
 - No change to mandatory rules system or beads context loading.
+
+---
+
+## 10. References
+
+- `docs/design/gzrx-research-notes.md` — survey of pi-mono, Gemini CLI, Claude
+  Code, VS Code, Aider, OpenHands. Source of the precedence-engine pattern
+  (Gemini `PolicyEngine`), per-capability health model (Gemini
+  `McpClientManager`), and extension-prefixed tool naming (VS Code
+  `extensionPrefixedIdentifier`).
+- Bead `unitAI-gzrx` — original design bead (closed).
+- Bead `unitAI-6b821` — researcher chain (closed).
+- Bead `unitAI-o6icy` — overthinker critique that produced the §7 reorder,
+  precedence rules, per-capability health, drift detection, and abort
+  criteria (closed).
+- Bead `unitAI-8vb65` — implementation bead carrying the same refined
+  ordering as the in-doc §7. Notes mirror this doc; the doc is canonical.
+
+---
+
+## 11. Drift policy for this document
+
+If §7 ordering or abort criteria change, update this doc **first**, then
+sync `unitAI-8vb65` notes. The bead notes are a copy; the doc is canonical.
+Any executor work that diverges from §7 must amend the doc in the same PR.
