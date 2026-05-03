@@ -240,6 +240,14 @@ function loadSharedToolCatalogIndex(): ToolCatalogIndex | undefined {
   }
 }
 
+function probeExtensionHealth(packageName: string): 'loaded_healthy' | 'not_installed' {
+  const globalDir = resolveGlobalNodeModulesDir();
+  if (globalDir && existsSync(join(globalDir, packageName, 'package.json'))) {
+    return 'loaded_healthy';
+  }
+  return 'not_installed';
+}
+
 function resolvePermissionTools(level?: string): string | undefined {
   const catalogIndex = loadSharedToolCatalogIndex();
   if (!catalogIndex) return undefined;
@@ -251,8 +259,8 @@ function resolvePermissionTools(level?: string): string | undefined {
     tier,
     catalogs: catalogIndex.catalogs as any,
     extensionState: {
-      gitnexus: { enabled: true, health: 'loaded_healthy' },
-      serena: { enabled: true, health: 'loaded_healthy' },
+      gitnexus: { enabled: true, health: probeExtensionHealth('pi-gitnexus') },
+      serena: { enabled: true, health: probeExtensionHealth('pi-serena-tools') },
     },
   }).tools || undefined;
 }
@@ -662,7 +670,8 @@ export class PiAgentSession {
     ];
 
     // Enforce permission level via --tools flag
-    const toolsFlag = this.options.useSharedToolResolver
+    const useResolver = this.options.useSharedToolResolver ?? process.env.SPECIALISTS_USE_RESOLVER === '1';
+    const toolsFlag = useResolver
       ? resolvePermissionTools(this.options.permissionLevel) ?? mapPermissionToTools(this.options.permissionLevel)
       : mapPermissionToTools(this.options.permissionLevel);
     if (toolsFlag) args.push('--tools', toolsFlag);

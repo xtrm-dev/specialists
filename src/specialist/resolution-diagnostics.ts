@@ -1,4 +1,3 @@
-import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { execSync } from 'node:child_process';
@@ -137,8 +136,10 @@ function probeHealth(catalog: CatalogRecord): ExtensionProbe {
     };
   }
   const installedVersion = resolvePackageVersion(catalog.package);
-  const entrypoint = installedVersion ? resolveAcrossGlobals(catalog.package) : undefined;
-  const entrypointExists = entrypoint !== undefined && existsSync(entrypoint);
+  // pi extension packages may not declare a `main` field — they're loaded by
+  // path convention. Treat package.json presence as sufficient evidence the
+  // extension is installed; entrypoint check is best-effort.
+  const entrypointExists = installedVersion !== undefined;
   return classifyExtensionProbe(catalog, { installedVersion, entrypointExists });
 }
 
