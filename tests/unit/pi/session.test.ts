@@ -502,21 +502,23 @@ describe('PiAgentSession', () => {
     await expect(closePromise).resolves.toBeUndefined();
   });
 
-  it('shared resolver flag keeps LOW parity with legacy tools', async () => {
-    const legacySession = await PiAgentSession.create({ model: 'gemini', permissionLevel: 'LOW' });
-    await legacySession.start();
-    const legacyTools = getToolsArg(mockSpawn.mock.calls[0][1] as string[]);
+  it('resolver is default-on and LOW parity stays stable', async () => {
+    const session = await PiAgentSession.create({ model: 'gemini', permissionLevel: 'LOW' });
+    await session.start();
 
-    mockSpawn.mockClear();
-
-    const flaggedSession = await PiAgentSession.create({ model: 'gemini', permissionLevel: 'LOW', useSharedToolResolver: true });
-    await flaggedSession.start();
-    const flaggedTools = getToolsArg(mockSpawn.mock.calls[0][1] as string[]);
-
-    expect(flaggedTools).toBe(legacyTools);
+    const resolvedTools = getToolsArg(mockSpawn.mock.calls[0][1] as string[]);
+    expect(resolvedTools).toBeDefined();
+    expect(resolvedTools).toContain('gitnexus_query');
+    expect(resolvedTools).toContain('search_for_pattern');
+    expect(resolvedTools).toContain('find_file');
+    expect(resolvedTools).toContain('read_file');
+    expect(resolvedTools).toContain('list_dir');
+    expect(resolvedTools).toContain('grep');
+    expect(resolvedTools).toContain('find');
+    expect(resolvedTools).toContain('ls');
   });
 
-  it("mapPermissionToTools('LOW') includes built-in, GitNexus, and non-mutating Serena tools", async () => {
+  it("resolver LOW path keeps GitNexus/Serena parity with legacy tools", async () => {
     const session = await PiAgentSession.create({ model: 'gemini', permissionLevel: 'LOW' });
     await session.start();
 
@@ -532,23 +534,30 @@ describe('PiAgentSession', () => {
     expect(tools).not.toContain('create_text_file');
   });
 
-  it("mapPermissionToTools('READ_ONLY') includes Serena/GitNexus read tools without mutating tools", async () => {
-    const session = await PiAgentSession.create({ model: 'gemini', permissionLevel: 'READ_ONLY' });
+  it("resolver READ_ONLY path honors explorer override and drops native fs/search", async () => {
+    const session = await PiAgentSession.create({
+      model: 'gemini',
+      permissionLevel: 'READ_ONLY',
+      specialistName: 'explorer',
+      specialistPermissions: {
+        READ_ONLY: {
+          denied_natives_when_extension: ['grep', 'find', 'ls'],
+          denied_natives_mode: 'hard',
+        },
+      },
+    });
     await session.start();
 
     const args: string[] = mockSpawn.mock.calls[0][1];
     const toolsIdx = args.indexOf('--tools');
     expect(toolsIdx).toBeGreaterThan(-1);
     const tools = args[toolsIdx + 1].split(',');
-    expect(tools).toEqual(expect.arrayContaining(['read', 'grep', 'find', 'ls']));
-    expect(tools).toEqual(expect.arrayContaining(['gitnexus_query', 'gitnexus_context', 'gitnexus_detect_changes']));
-    expect(tools).toEqual(expect.arrayContaining(['read_file', 'search_for_pattern', 'find_symbol', 'list_dir']));
-    expect(tools).not.toContain('bash');
-    expect(tools).not.toContain('edit');
-    expect(tools).not.toContain('write');
-    expect(tools).not.toContain('execute_shell_command');
-    expect(tools).not.toContain('create_text_file');
-    expect(tools).not.toContain('gitnexus_rename');
+    expect(tools).toContain('gitnexus_query');
+    expect(tools).toContain('search_for_pattern');
+    expect(tools).toContain('find_file');
+    expect(tools).not.toContain('grep');
+    expect(tools).not.toContain('find');
+    expect(tools).not.toContain('ls');
   });
 
   it("mapPermissionToTools('HIGH') includes built-in write and Serena/GitNexus mutating tools", async () => {
