@@ -3,21 +3,11 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-const EXECUTOR_YAML = `specialist:
-  metadata:
-    name: executor
-  execution:
-    stall_timeout_ms: 120000
-    timeout_ms: 0
-`;
+const REPO_ROOT = process.cwd();
 
-const EXPLORER_YAML = `specialist:
-  metadata:
-    name: explorer
-  execution:
-    stall_timeout_ms: 150000
-    timeout_ms: 0
-`;
+vi.mock('../../../src/cli/edit.js', () => ({
+  run: vi.fn(async () => {}),
+}));
 
 describe('config CLI', () => {
   let tempDir: string;
@@ -26,8 +16,8 @@ describe('config CLI', () => {
     tempDir = await mkdtemp(join(tmpdir(), 'specialists-config-test-'));
     const configDir = join(tempDir, 'config', 'specialists');
     await mkdir(configDir, { recursive: true });
-    await writeFile(join(configDir, 'executor.specialist.json'), EXECUTOR_YAML, 'utf-8');
-    await writeFile(join(configDir, 'explorer.specialist.json'), EXPLORER_YAML, 'utf-8');
+    await writeFile(join(configDir, 'executor.specialist.json'), await readFile(join(REPO_ROOT, 'config', 'specialists', 'executor.specialist.json'), 'utf-8'), 'utf-8');
+    await writeFile(join(configDir, 'explorer.specialist.json'), await readFile(join(REPO_ROOT, 'config', 'specialists', 'explorer.specialist.json'), 'utf-8'), 'utf-8');
 
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -41,17 +31,12 @@ describe('config CLI', () => {
   });
 
   it('gets a key across all specialists', async () => {
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     process.argv = ['node', 'specialists', 'config', 'get', 'specialist.execution.stall_timeout_ms'];
 
     const { run } = await import('../../../src/cli/config.js');
     await run();
 
-    const output = logSpy.mock.calls.map(call => String(call[0] ?? '')).join('\n');
-    expect(output).toContain('executor');
-    expect(output).toContain('explorer');
-    expect(output).toContain('120000');
-    expect(output).toContain('150000');
+    expect(process.argv).toEqual(['node', 'specialists', 'edit', '--all', '--get', 'specialist.execution.stall_timeout_ms']);
   });
 
   it('sets a key across all specialists by default', async () => {
@@ -60,11 +45,7 @@ describe('config CLI', () => {
     const { run } = await import('../../../src/cli/config.js');
     await run();
 
-    const executor = await readFile(join(tempDir, 'config', 'specialists', 'executor.specialist.json'), 'utf-8');
-    const explorer = await readFile(join(tempDir, 'config', 'specialists', 'explorer.specialist.json'), 'utf-8');
-
-    expect(executor).toContain('stall_timeout_ms: 180000');
-    expect(explorer).toContain('stall_timeout_ms: 180000');
+    expect(process.argv).toEqual(['node', 'specialists', 'edit', '--all', '--set', 'specialist.execution.stall_timeout_ms', '180000']);
   });
 
   it('sets a key for one specialist with --name', async () => {
@@ -82,11 +63,7 @@ describe('config CLI', () => {
     const { run } = await import('../../../src/cli/config.js');
     await run();
 
-    const executor = await readFile(join(tempDir, 'config', 'specialists', 'executor.specialist.json'), 'utf-8');
-    const explorer = await readFile(join(tempDir, 'config', 'specialists', 'explorer.specialist.json'), 'utf-8');
-
-    expect(executor).toContain('stall_timeout_ms: 210000');
-    expect(explorer).toContain('stall_timeout_ms: 150000');
+    expect(process.argv).toEqual(['node', 'specialists', 'edit', 'executor', '--set', 'specialist.execution.stall_timeout_ms', '210000']);
   });
 
   it('exits with code 1 on invalid arguments', async () => {

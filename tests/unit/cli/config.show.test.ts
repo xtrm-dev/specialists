@@ -1,0 +1,76 @@
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+
+const SPECIALIST = {
+  specialist: {
+    metadata: { name: 'executor' },
+    permissions: {
+      HIGH: {
+        denied_natives_when_extension: ['write'],
+        denied_natives_mode: 'hard',
+      },
+    },
+  },
+};
+
+const CATALOG_INDEX = {
+  precedence_order: ['native', 'gitnexus', 'serena'],
+  catalogs: [
+    {
+      catalog: 'native',
+      package: 'specialists',
+      version: '3.11.0',
+      precedence: 0,
+      source_tiers: { READ_ONLY: ['read'], LOW: ['read'], MEDIUM: ['read'], HIGH: ['read', 'write'] },
+    },
+    {
+      catalog: 'gitnexus',
+      package: 'pi-gitnexus',
+      version: '0.6.1',
+      precedence: 1,
+      source_tiers: { READ_ONLY: ['gitnexus_list_repos'], LOW: ['gitnexus_list_repos'], MEDIUM: ['gitnexus_list_repos'], HIGH: ['gitnexus_list_repos'] },
+    },
+    {
+      catalog: 'serena',
+      package: 'pi-serena-tools',
+      version: '0.1.0',
+      precedence: 2,
+      source_tiers: { READ_ONLY: ['serena_list_tools'], LOW: ['serena_list_tools'], MEDIUM: ['serena_list_tools'], HIGH: ['serena_list_tools'] },
+    },
+  ],
+};
+
+describe('config CLI resolved output', () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'specialists-config-resolved-'));
+    await mkdir(join(tempDir, 'config', 'specialists'), { recursive: true });
+    await mkdir(join(tempDir, '.specialists', 'catalog'), { recursive: true });
+    await writeFile(join(tempDir, 'config', 'specialists', 'executor.specialist.json'), JSON.stringify(SPECIALIST), 'utf-8');
+    await writeFile(join(tempDir, '.specialists', 'catalog', 'index.json'), JSON.stringify(CATALOG_INDEX), 'utf-8');
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(process, 'cwd').mockReturnValue(tempDir);
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    vi.resetModules();
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it('shows resolved manifest and tools', async () => {
+    process.argv = ['node', 'specialists', 'config', 'show', 'executor', '--resolved'];
+
+    const { run } = await import('../../../src/cli/config.js');
+    await run();
+
+    const output = vi.mocked(console.log).mock.calls.map(call => String(call[0] ?? '')).join('\n');
+    expect(output).toContain('specialist: executor');
+    expect(output).toContain('layer attribution:');
+    expect(output).toContain('extension availability:');
+    expect(output).toContain('--tools:');
+  });
+});

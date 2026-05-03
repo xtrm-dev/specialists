@@ -1,4 +1,7 @@
+import { join } from 'node:path';
+
 import { run as runEdit } from './edit.js';
+import { formatResolvedConfigReport, loadResolvedConfigReport } from '../specialist/resolution-diagnostics.js';
 
 const yellow = (s: string) => `\x1b[33m${s}\x1b[0m`;
 
@@ -7,6 +10,7 @@ function usage(): string {
     'Usage:',
     '  specialists config get <key> [--all] [--name <specialist>]',
     '  specialists config set <key> <value> [--all] [--name <specialist>]',
+    '  specialists config show <specialist> [--resolved]',
     '',
     'Deprecated alias of specialists edit:',
     '  specialists edit --all --get <key>',
@@ -78,10 +82,33 @@ function buildEditArgv(argv: string[]): string[] {
   return translated;
 }
 
+async function showResolvedConfig(argv: string[]): Promise<void> {
+  const specialistName = argv[0];
+  if (!specialistName || specialistName.startsWith('--')) {
+    fail(`Missing specialist name\n\n${usage()}`);
+  }
+
+  const resolved = argv.slice(1);
+  if (resolved.length !== 1 || resolved[0] !== '--resolved') {
+    fail(`Unknown option: ${resolved.join(' ')}\n\n${usage()}`);
+  }
+
+  const projectDir = process.cwd();
+  const catalogsPath = join(projectDir, '.specialists', 'catalog', 'index.json');
+  const report = await loadResolvedConfigReport({ specialistName, projectDir, catalogsPath });
+  console.log(formatResolvedConfigReport(report));
+}
+
 export async function run(): Promise<void> {
   const originalArgs = process.argv.slice(3);
-  const editArgs = buildEditArgv(originalArgs);
+  const command = originalArgs[0];
 
+  if (command === 'show') {
+    await showResolvedConfig(originalArgs.slice(1));
+    return;
+  }
+
+  const editArgs = buildEditArgv(originalArgs);
   console.error(`${yellow('⚠ DEPRECATED')} specialists config is deprecated. Use ${yellow('specialists edit')} instead.`);
 
   process.argv = [process.argv[0] ?? 'node', process.argv[1] ?? 'specialists', 'edit', ...editArgs];
