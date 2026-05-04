@@ -143,16 +143,28 @@ type ClaimJobStartResult = {
     existingJobId: string;
     existingStatus: string;
 };
+interface ActiveJobRow {
+    job_id?: string;
+    status?: string;
+    pid?: number;
+    updated_at_ms?: number;
+}
 interface ClaimJobStartStore {
     transaction<T>(callback: () => T): T;
-    findActiveJob(beadId: string | null, specialist: string): {
-        job_id?: string;
-        status?: string;
-    } | undefined;
+    findActiveJob(beadId: string | null, specialist: string): ActiveJobRow | undefined;
     writeStatusRow(status: SupervisorStatus): void;
     writeEventRow(jobId: string, specialist: string, beadId: string | undefined, event: TimelineEvent): void;
+    /** Mark a stale claim row as cancelled. Optional for backward-compat with simpler test stores. */
+    cancelStaleClaim?(jobId: string): void;
 }
-export declare function claimJobStartWithStore(store: ClaimJobStartStore, status: SupervisorStatus, event: TimelineEvent): ClaimJobStartResult;
+/** Minimum age for a 'starting'/'running' row to be considered orphaned and reclaim-eligible. */
+export declare const STALE_CLAIM_AGE_MS = 60000;
+export interface ClaimJobStartOptions {
+    isPidAlive?: (pid: number | undefined) => boolean;
+    nowMs?: () => number;
+    staleClaimAgeMs?: number;
+}
+export declare function claimJobStartWithStore(store: ClaimJobStartStore, status: SupervisorStatus, event: TimelineEvent, options?: ClaimJobStartOptions): ClaimJobStartResult;
 export interface ObservabilitySqliteClient {
     upsertStatus(status: SupervisorStatus): void;
     upsertEpicRun(epic: EpicRunRecord): void;

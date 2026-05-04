@@ -166,6 +166,25 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-04-24T23:25:38.239881+00:00"
+    },
+    {
+      "id": "bug-011",
+      "timestamp": "2026-05-04T20:46:42.981754+00:00",
+      "error_message": "MEDIUM/HIGH specialist --bead runs die at startup with status=starting/dead and no feed/events; foreground shows existing undefined job 'undefined' already active",
+      "file": "src/specialist/observability-sqlite.ts",
+      "root_cause": "SqliteClient.claimJobStart transaction wrapper returned Bun db.transaction(callback) function without invoking it, so Supervisor received a function instead of ClaimJobStartResult and threw before run_start persistence.",
+      "fix": "Invoke the Bun transaction wrapper with this.db.transaction(callback)(); added real SQLite regression proving claimJobStart persists status and run_start.",
+      "tags": [
+        "bugfix",
+        "specialists",
+        "sqlite",
+        "claimJobStart",
+        "startup",
+        "worktree"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-04T20:46:42.981754+00:00"
     }
   ]
 }

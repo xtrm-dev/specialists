@@ -1172,7 +1172,7 @@ class SqliteClient implements ObservabilitySqliteClient {
   claimJobStart(status: SupervisorStatus, event: TimelineEvent): { ok: true } | { ok: false; existingJobId: string; existingStatus: string } {
     return claimJobStartWithStore(
       {
-        transaction: <T>(callback: () => T) => this.db.transaction(callback),
+        transaction: <T>(callback: () => T) => this.db.transaction(callback)(),
         findActiveJob: (beadId, specialist) => this.db.query(`
           SELECT
             job_id,

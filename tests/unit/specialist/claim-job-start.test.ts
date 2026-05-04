@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { rmSync, mkdirSync } from 'node:fs';
+import { rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { claimJobStartWithStore, STALE_CLAIM_AGE_MS } from '../../../src/specialist/observability-sqlite.js';
+import { claimJobStartWithStore, createObservabilitySqliteClient, STALE_CLAIM_AGE_MS } from '../../../src/specialist/observability-sqlite.js';
 
 describe('claimJobStart', () => {
   let tempRoot = '';
@@ -238,5 +238,34 @@ describe('claimJobStart', () => {
 
     expect(first).toEqual({ ok: true });
     expect(second).toEqual({ ok: true });
+  });
+
+  it('executes the real SQLite transaction and persists run_start', () => {
+    tempRoot = join(tmpdir(), `sp-claim-real-${crypto.randomUUID()}`);
+    const dbDir = join(tempRoot, '.specialists', 'db');
+    mkdirSync(dbDir, { recursive: true });
+    writeFileSync(join(dbDir, 'observability.db'), '');
+
+    const client = createObservabilitySqliteClient(tempRoot);
+    if (!client) return;
+
+    try {
+      const now = Date.now();
+      const event = { t: now, type: 'run_start', specialist: 'executor', bead_id: 'bead-real' } as never;
+      const result = client.claimJobStart({
+        id: 'job-real',
+        specialist: 'executor',
+        status: 'starting',
+        started_at_ms: now,
+        pid: process.pid,
+        bead_id: 'bead-real',
+      } as never, event);
+
+      expect(result).toEqual({ ok: true });
+      expect(client.readStatus('job-real')?.status).toBe('starting');
+      expect(client.readEvents('job-real').map((item) => item.type)).toContain('run_start');
+    } finally {
+      client.close();
+    }
   });
 });

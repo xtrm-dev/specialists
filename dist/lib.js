@@ -7568,11 +7568,31 @@ function migrateToV10(db) {
       VALUES (10, strftime('%s', 'now') * 1000);
   `);
 }
-function claimJobStartWithStore(store, status, event) {
+var STALE_CLAIM_AGE_MS = 60000;
+function defaultIsPidAlive(pid) {
+  if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0)
+    return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function claimJobStartWithStore(store, status, event, options = {}) {
+  const isPidAlive = options.isPidAlive ?? defaultIsPidAlive;
+  const nowMs = options.nowMs ?? Date.now;
+  const staleAgeMs = options.staleClaimAgeMs ?? STALE_CLAIM_AGE_MS;
   return withRetry(() => store.transaction(() => {
     const existing = store.findActiveJob(status.bead_id ?? null, status.specialist);
     if (existing?.job_id && existing.job_id !== status.id) {
-      return { ok: false, existingJobId: existing.job_id, existingStatus: existing.status ?? "starting" };
+      const updatedAtMs = existing.updated_at_ms ?? 0;
+      const isStale = updatedAtMs > 0 && nowMs() - updatedAtMs > staleAgeMs && !isPidAlive(existing.pid);
+      if (isStale && store.cancelStaleClaim) {
+        store.cancelStaleClaim(existing.job_id);
+      } else {
+        return { ok: false, existingJobId: existing.job_id, existingStatus: existing.status ?? "starting" };
+      }
     }
     store.writeStatusRow(status);
     store.writeEventRow(status.id, status.specialist, status.bead_id, event);
@@ -7673,9 +7693,13 @@ class SqliteClient {
   }
   claimJobStart(status, event) {
     return claimJobStartWithStore({
-      transaction: (callback) => this.db.transaction(callback),
+      transaction: (callback) => this.db.transaction(callback)(),
       findActiveJob: (beadId, specialist) => this.db.query(`
-          SELECT job_id, status
+          SELECT
+            job_id,
+            status,
+            updated_at_ms,
+            CAST(JSON_EXTRACT(status_json, '$.pid') AS INTEGER) AS pid
           FROM specialist_jobs
           WHERE bead_id = ?
             AND specialist = ?
@@ -7684,7 +7708,17 @@ class SqliteClient {
           LIMIT 1
         `).get(beadId, specialist),
       writeStatusRow: (nextStatus) => this.writeStatusRow(nextStatus),
-      writeEventRow: (jobId, specialist, beadId, nextEvent) => this.writeEventRow(jobId, specialist, beadId, nextEvent)
+      writeEventRow: (jobId, specialist, beadId, nextEvent) => this.writeEventRow(jobId, specialist, beadId, nextEvent),
+      cancelStaleClaim: (jobId) => {
+        const nowMs = Date.now();
+        this.db.run(`
+            UPDATE specialist_jobs
+            SET status = 'cancelled',
+                status_json = JSON_PATCH(status_json, JSON_OBJECT('status', 'cancelled', 'cancelled_reason', 'orphan-claim-stale')),
+                updated_at_ms = ?
+            WHERE job_id = ?
+          `, [nowMs, jobId]);
+      }
     }, status, event);
   }
   writeResultRow(jobId, output) {
