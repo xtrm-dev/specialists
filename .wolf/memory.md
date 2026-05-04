@@ -102,3 +102,7 @@
 - 2026-05-04: Reworked specialist metadata descriptions to be truncation-first for `specialists list`: first visible words now carry role and task shape (Executor/Debugger/Explorer/etc.) before list ellipsis.
 
 - 2026-05-04: Created security-auditor specialist config: LOW permission permits safe audit commands while preventing edits; package updates are recommendations only and should be applied by executor in a separate bead.
+
+- 2026-05-04: Created code-sanity specialist config: READ_ONLY, small model, bounded OK/max-5 findings pass between executor and reviewer; final reviewer remains merge gate.
+
+- 2026-05-04: validate-specialist.ts import path must mirror scaffold-specialist.ts (../../../../src/...) from config/skills/specialists-creator/scripts.

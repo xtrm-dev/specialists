@@ -1225,3 +1225,7 @@
 - 2026-05-04: `config/specialists/*.specialist.json` and `.specialists/user` overlays now use truncation-first metadata descriptions for `specialists list`; package-owned configs require package release/update for other repos to receive them.
 
 - 2026-05-04: Added config/specialists/security-auditor.specialist.json — LOW-permission security audit specialist with safe local audit commands, dependency advisory triage, researcher-style current sources, and no-edit/no-exploit boundaries.
+
+- 2026-05-04: Added config/specialists/code-sanity.specialist.json — READ_ONLY bounded implementation sanity pass for executor diffs before reviewer, using GitNexus/Serena tool surface and clean-code guidance.
+
+- 2026-05-04: Fixed specialists-creator validate-specialist helper import path so documented project-root validation command works; logged as bug-012.

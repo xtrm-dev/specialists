@@ -185,6 +185,23 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-05-04T20:46:42.981754+00:00"
+    },
+    {
+      "id": "bug-012",
+      "timestamp": "2026-05-04T22:31:10.318698+00:00",
+      "error_message": "validate-specialist helper failed from project root with Cannot find module ../../../src/specialist/schema.ts",
+      "file": "config/skills/specialists-creator/scripts/validate-specialist.ts",
+      "root_cause": "helper lived one directory deeper than its relative import assumed; scaffold helper used ../../../../src while validator used ../../../src",
+      "fix": "changed parseSpecialist import to ../../../../src/specialist/schema.ts and verified bundled validator against security-auditor, code-sanity, and explorer configs",
+      "tags": [
+        "bugfix",
+        "specialists-creator",
+        "validation",
+        "import-path"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-04T22:31:10.318698+00:00"
     }
   ]
 }

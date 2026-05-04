@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { parseSpecialist } from "../../../src/specialist/schema.ts";
+import { parseSpecialist } from "../../../../src/specialist/schema.ts";
 
 function printUsage(): void {
   console.error("Usage: bun skills/specialist-author/scripts/validate-specialist.ts <path-to.specialist.yaml>");
