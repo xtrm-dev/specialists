@@ -158,6 +158,7 @@ export async function run(): Promise<void> {
         }
       } else {
         const message = `bead_close_skipped: sibling-jobs-active [${liveJobs.join(', ')}]`;
+        supervisor.emitMetaEvent(jobId, message, 'supervisor');
         process.stdout.write(`${dim(`  ${message}`)}\n`);
       }
     }

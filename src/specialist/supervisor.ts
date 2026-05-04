@@ -688,6 +688,19 @@ export class Supervisor {
     }
   }
 
+  emitMetaEvent(jobId: string, model: string, backend: string): void {
+    if (this.isDisposed) return;
+    const event = createMetaEvent(model, backend);
+    const persisted = this.withSqliteOperation('appendEvent', (client) => {
+      const status = this.readStatus(jobId);
+      client.appendEvent(jobId, status?.specialist ?? 'unknown', status?.bead_id, event);
+      return true;
+    });
+    if (persisted === undefined) {
+      throw new Error('[supervisor] SQLite appendEvent failed: database client unavailable');
+    }
+  }
+
   updateJobStatus(id: string, status: Extract<SupervisorJobStatus, 'done' | 'cancelled' | 'error' | 'waiting' | 'running' | 'starting'>, error?: string): SupervisorStatusView | null {
     const currentStatus = this.readStatus(id);
     if (!currentStatus) return null;
