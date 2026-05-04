@@ -40,9 +40,23 @@ describe('epic-lifecycle', () => {
 
       if (!terminal) continue;
       for (const next of EPIC_STATES) {
+        // failed is terminal but supports a single recovery transition to
+        // abandoned so the operator can clean up dead epics.
+        if (state === 'failed' && next === 'abandoned') {
+          expect(canTransitionEpicState(state, next)).toBe(true);
+          continue;
+        }
         expect(canTransitionEpicState(state, next)).toBe(false);
       }
     }
+  });
+
+  it('allows failed -> abandoned recovery transition only', () => {
+    expect(canTransitionEpicState('failed', 'abandoned')).toBe(true);
+    expect(canTransitionEpicState('failed', 'merged')).toBe(false);
+    expect(canTransitionEpicState('failed', 'merge_ready')).toBe(false);
+    expect(canTransitionEpicState('failed', 'resolving')).toBe(false);
+    expect(canTransitionEpicState('failed', 'open')).toBe(false);
   });
 
   it('resolves one canonical chain identifier with deterministic priority', () => {

@@ -480,9 +480,18 @@ Use `sp ps` instead of ad-hoc polling.
 sp ps
 sp ps <job-id>
 sp ps --follow
+sp ps --running                       # only starting/running/waiting jobs
+sp ps --bead <bead-id>                # only jobs linked to one bead
+sp ps --since 30m                     # only jobs started in the last 30 minutes
+sp ps --mine                          # only jobs whose bead is assigned to you
+sp ps --include-terminal              # include merged/abandoned epics (hidden by default)
 sp feed <job-id>
 sp result <job-id>
 ```
+
+Filter flags compose: `sp ps --running --bead <id>` is the canonical way to inspect "what's actively working on this issue right now". By default `sp ps` hides epics in `merged` or `abandoned` state to keep the snapshot focused; use `--include-terminal` (or `--all`) to bring them back.
+
+When dead epics pile up in `failed` state (sibling-chain conflicts, manual stops), recover with `sp epic abandon <epic-id> --reason "<text>"`. The `failed -> abandoned` transition is allowed specifically for cleanup; live members still require `--force`.
 
 Read results at every stage. Every specialist (not just READ_ONLY) auto-appends per-turn output to the input bead notes on each `run_complete`, with `[WAITING]` or `[DONE]` headers — `bd show <bead-id>` shows the full handoff trail. `sp result <job-id>` works on `waiting` jobs and returns the most recent turn plus a "Session is waiting for your input" footer; use it to decide whether to resume. If result is empty, inspect feed and rerun or switch specialists before relying on it.
 

@@ -252,9 +252,13 @@ export function abandonEpic(sqlite: ObservabilitySqliteClient, epicId: string, r
     throw new Error(`Epic ${epicId} already merged. Abandon blocked.`);
   }
 
-  if (fromState === 'failed' || fromState === 'abandoned') {
-    throw new Error(`Epic ${epicId} already terminal in state '${fromState}'.`);
+  if (fromState === 'abandoned') {
+    throw new Error(`Epic ${epicId} already abandoned.`);
   }
+  // failed -> abandoned is a valid recovery transition (see
+  // VALID_EPIC_TRANSITIONS in epic-lifecycle.ts) so the operator can clean up
+  // dead epics. No further state-machine guard here — abandon is unconditional
+  // beyond merged/abandoned and the live-member force gate below.
 
   const liveMemberJobIds = listLiveMemberJobIds(sqlite, epicId);
   if (!force && liveMemberJobIds.length > 0) {

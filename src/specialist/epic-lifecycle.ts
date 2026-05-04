@@ -18,7 +18,10 @@ export const VALID_EPIC_TRANSITIONS: Record<EpicState, readonly EpicState[]> = {
   resolving: ['merge_ready', 'failed', 'abandoned'],
   merge_ready: ['merged', 'failed', 'abandoned', 'resolving'],
   merged: [],
-  failed: [],
+  // failed is recoverable to abandoned: lets operators clean up dead epics
+  // (sibling-chain conflicts, transient supervisor crashes, manual stop) that
+  // ended up in failed without an explicit publish path.
+  failed: ['abandoned'],
   abandoned: [],
 };
 

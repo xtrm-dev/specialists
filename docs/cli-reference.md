@@ -1024,13 +1024,24 @@ Checks include:
 
 ```bash
 specialists ps [--json] [--all] [--follow | -f]
+                [--running] [--bead <id>] [--since <duration>]
+                [--mine] [--include-terminal] [--node <id>] [<job-id>]
 ```
 
 ### Flags
 
 - `--json`: Machine-readable JSON output (see [JSON output](#ps-json-output) below).
-- `--all`: Include terminal (`done`/`error`/`cancelled`) jobs in addition to active ones. Default shows only `starting`, `running`, and `waiting` jobs.
+- `--all`: Include terminal (`done`/`error`/`cancelled`) jobs **and** terminal epics (merged/abandoned) in addition to active ones. Default shows only `starting`, `running`, `waiting` jobs and non-terminal epics.
 - `--follow` / `-f`: Live-refresh mode — updates in place every 1 second using cursor repositioning (no screen flash).
+- `--running`: Hide jobs not in an active state (`starting`/`running`/`waiting`). Combine with `--all` to broaden the source set, then narrow.
+- `--bead <id>`: Show only jobs whose `bead_id` matches the given id exactly.
+- `--since <duration>`: Show only jobs that started within the last duration. Accepts `<n>s`, `<n>m`, `<n>h`, `<n>d` (e.g. `30m`, `2h`, `1d`).
+- `--mine`: Show only jobs whose linked bead is currently assigned to the current user (resolved via `bd query "assignee=me" --json`). Falls back to no-op if `bd` is unreachable.
+- `--include-terminal`: Show epics in `merged` or `abandoned` state. Default hides them to keep the view focused on active work. Legacy alias `--include-merged` is preserved (covers both states now).
+- `--node <id>`: Show only jobs that belong to the given node id.
+- Positional `<job-id>`: Inspect a single job (full status detail) instead of the snapshot.
+
+Filter flags compose: `--running --bead unitAI-fyih8 --since 1h` returns only active jobs on that bead started in the last hour.
 
 ### Description
 
@@ -1228,18 +1239,20 @@ specialists epic merge <epic-id> [--pr] [--rebuild] [--json]
 
 ```
 open → resolving → merge_ready → merged
-                  ↘ failed
+                  ↘ failed → abandoned
                   ↘ abandoned
 ```
 
-| State | Meaning | Can merge? |
-|-------|---------|:----------:|
-| `open` | Epic created, chains not yet dispatched | — |
-| `resolving` | Chains are actively running | ✗ |
-| `merge_ready` | All chains terminal, reviewer PASS | ✓ |
-| `merged` | Publication complete | — |
-| `failed` | One or more chains failed | — |
-| `abandoned` | Cancelled without merge | — |
+| State | Meaning | Can merge? | Recovery |
+|-------|---------|:----------:|----------|
+| `open` | Epic created, chains not yet dispatched | — | — |
+| `resolving` | Chains are actively running | ✗ | `sp epic abandon` |
+| `merge_ready` | All chains terminal, reviewer PASS | ✓ | `sp epic abandon` |
+| `merged` | Publication complete | — | terminal |
+| `failed` | One or more chains failed | — | `sp epic abandon` (recovery transition to `abandoned`) |
+| `abandoned` | Cancelled without merge | — | terminal |
+
+The `failed → abandoned` recovery path lets operators clean up dead epics (sibling-chain conflicts, transient supervisor crashes, manual stops) that would otherwise stay in `failed` indefinitely cluttering `sp ps`. Use `sp epic abandon <id> --reason "<text>"`; add `--force` only if `listLiveMemberJobIds` reports active members you accept overriding.
 
 ### `sp epic list` Output
 

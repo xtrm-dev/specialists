@@ -17,7 +17,11 @@ interface PsArgs {
   json: boolean;
   all: boolean;
   follow: boolean;
-  includeMerged: boolean;
+  includeTerminal: boolean;
+  running: boolean;
+  mine: boolean;
+  beadFilter?: string;
+  sinceMs?: number;
   nodeId?: string;
   inspectId?: string;
 }
@@ -92,8 +96,45 @@ const STATUS_PRIORITY: Readonly<Record<JobState, number>> = {
 };
 const SPINNER_FRAMES = ['⣾', '⣽', '⣻', '⣺', '⣹', '⣸', '⣷', '⣶'] as const;
 
+function loadBeadIdsForCurrentUser(): Set<string> {
+  // Shell out to `bd query` rather than re-implementing assignee resolution
+  // here. Returns an empty set on any failure so --mine becomes a no-op
+  // filter (everything visible) rather than crashing.
+  const ids = new Set<string>();
+  try {
+    const result = spawnSync('bd', ['query', 'assignee=me', '--json'], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 5_000,
+    });
+    if (result.status !== 0 || !result.stdout) return ids;
+    const parsed = JSON.parse(result.stdout) as Array<{ id?: string }>;
+    for (const row of parsed) {
+      if (row?.id) ids.add(row.id);
+    }
+  } catch {
+    // ignore
+  }
+  return ids;
+}
+
+function parseSinceArg(value: string): number | undefined {
+  const trimmed = value.trim();
+  const match = /^(\d+)([smhd])$/.exec(trimmed);
+  if (!match) return undefined;
+  const n = Number(match[1]);
+  const unit = match[2];
+  const ms = unit === 's' ? n * 1_000
+    : unit === 'm' ? n * 60_000
+    : unit === 'h' ? n * 3_600_000
+    : n * 86_400_000;
+  return Date.now() - ms;
+}
+
 function parseArgs(argv: string[]): PsArgs {
   let nodeId: string | undefined;
+  let beadFilter: string | undefined;
+  let sinceMs: number | undefined;
   const positional: string[] = [];
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -103,17 +144,35 @@ function parseArgs(argv: string[]): PsArgs {
       i += 1;
       continue;
     }
+    if (token === '--bead' && argv[i + 1]) {
+      beadFilter = argv[i + 1];
+      i += 1;
+      continue;
+    }
+    if (token === '--since' && argv[i + 1]) {
+      sinceMs = parseSinceArg(argv[i + 1]);
+      i += 1;
+      continue;
+    }
 
     if (!token.startsWith('-')) {
       positional.push(token);
     }
   }
 
+  // --include-merged is preserved as an alias for backward compatibility;
+  // --include-terminal is the canonical flag (covers merged + abandoned).
+  const includeTerminal = argv.includes('--include-terminal') || argv.includes('--include-merged');
+
   return {
     json: argv.includes('--json'),
     all: argv.includes('--all'),
     follow: argv.includes('--follow') || argv.includes('-f'),
-    includeMerged: argv.includes('--include-merged'),
+    includeTerminal,
+    running: argv.includes('--running'),
+    mine: argv.includes('--mine'),
+    beadFilter,
+    sinceMs,
     nodeId,
     inspectId: positional[0],
   };
@@ -840,8 +899,7 @@ function renderJson(
 ): void {
   console.log(JSON.stringify({
     generated_at_ms: Date.now(),
-    include_terminal: _all,
-    include_merged: args.includeMerged,
+    include_terminal: args.includeTerminal,
     counts: {
       jobs: jobs.length,
       nodes: nodes.length,
@@ -901,19 +959,32 @@ function render(args: PsArgs): void {
   const statusesWithLiveness = dedupeStatusesById(withPidLiveness(loadStatuses()));
   const epicReadiness = resolveEpicReadinessMap(statusesWithLiveness);
 
+  const mineBeadIds = args.mine ? loadBeadIdsForCurrentUser() : undefined;
+
   const visibleStatuses = statusesWithLiveness.filter((job) => {
     const readiness = job.epic_id ? epicReadiness.get(job.epic_id) : undefined;
     const readinessState = readiness?.readiness_state;
 
+    // Explicit filters: applied before the default visibility heuristics so
+    // they win over --all and the epic-grouping fallback at the bottom.
     if (args.nodeId && job.node_id !== args.nodeId) return false;
-    if (readinessState === 'merged' && !args.includeMerged && !args.all) return false;
+    if (args.beadFilter && job.bead_id !== args.beadFilter) return false;
+    if (args.sinceMs !== undefined && job.started_at_ms < args.sinceMs) return false;
+    if (args.running && !ACTIVE_STATES.includes(job.status)) return false;
+    if (mineBeadIds && (!job.bead_id || !mineBeadIds.has(job.bead_id))) return false;
+
+    // Hide terminal epics (merged + abandoned) by default; --include-terminal
+    // (or legacy --include-merged) opts back in. --all also reveals them.
+    const epicTerminal = readinessState === 'merged' || readinessState === 'abandoned';
+    if (epicTerminal && !args.includeTerminal && !args.all) return false;
+
     if (args.all) return true;
     if (job.is_dead) return false;
     if (isVisibleStatus(job.status, false)) return true;
 
     if (!job.epic_id) return false;
     if (!TERMINAL_STATES.includes(job.status)) return false;
-    if (readinessState === 'merged' || readinessState === 'abandoned') return false;
+    if (epicTerminal) return false;
     return true;
   });
 
