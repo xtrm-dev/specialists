@@ -3,7 +3,7 @@
     "metadata": {
       "name": "planner",
       "version": "1.1.0",
-      "description": "Planner: turn broad/vague work into phased bd issues, dependencies, and test plan. HIGH; use before multi-track implementation.",
+      "description": "Turns a broad feature or vague initiative into a phased bd issue board with dependencies and test planning. Use before implementation when scope spans multiple files/tracks. HIGH planning authority.",
       "category": "workflow",
       "tags": [
         "planning",

@@ -3,7 +3,7 @@
     "metadata": {
       "name": "explorer",
       "version": "1.1.0",
-      "description": "Explorer: READ_ONLY local code mapping for architecture, call flows, dependencies, and options. Not symptom debugging.",
+      "description": "READ_ONLY codebase mapper for unknown architecture, call flows, dependencies, and implementation options. Use before executor when you need evidence, not edits. Not for bugs with symptoms; use debugger.",
       "category": "analysis",
       "tags": [
         "codebase",

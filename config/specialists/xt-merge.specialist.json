@@ -3,7 +3,7 @@
     "metadata": {
       "name": "xt-merge",
       "version": "1.1.0",
-      "description": "xt-merge: drain xt PR queue FIFO with CI, rebase, push, and conflict handling. MEDIUM; not implementation.",
+      "description": "xt PR queue merger. Use to drain xt worktree PRs in FIFO order with CI, rebase, push, and conflict handling. MEDIUM; not for specialist worktree merges or implementation.",
       "category": "workflow",
       "tags": [
         "git",

@@ -216,28 +216,27 @@ bun config/skills/specialists-creator/scripts/validate-specialist.ts config/spec
 
 ### Description writing for `specialists list`
 
-`specialist.metadata.description` is the routing surface that orchestrators see in `specialists list`. Write it as an operational role definition, not marketing copy. The list truncates, so the first 60-70 visible characters must identify the role and task shape.
+`specialist.metadata.description` is the routing surface that orchestrators see in `specialists list`. Write it as an operational role definition, not marketing copy. Keep the first clause distinctive because list output may truncate.
 
 A good description answers, in this order:
 
-1. **Truncation-first prefix** — `<Role>: <task shape>` in the first few words.
-2. **Choose when** — the task shape that should route here.
-3. **Do not choose when** — adjacent roles that should win instead.
-4. **Distinctive capability** — what this specialist does that others do not.
-5. **Permission/risk note** — READ_ONLY/LOW/MEDIUM/HIGH implication when it affects orchestration.
+1. **Choose when** — the task shape that should route here.
+2. **Do not choose when** — adjacent roles that should win instead.
+3. **Distinctive capability** — what this specialist does that others do not.
+4. **Permission/risk note** — READ_ONLY/LOW/MEDIUM/HIGH implication when it affects orchestration.
 
 Pattern:
 
 ```text
-<Role>: <specific task shape>. Use when <conditions>. Not <near misses>. <permission/workflow distinction>.
+<role noun>. Use for <specific task shape>. Not for <near misses>; use <better roles>. <permission/workflow distinction>.
 ```
 
 Examples:
 
 ```text
-Executor: scoped implementation in a worktree. Use only when requirements/files/validation are clear. HIGH; not diagnosis or review.
+Scoped implementation only. Use when requirements, files/symbols, constraints, and validation are clear. Not diagnosis, planning, review, tests, release, or research. HIGH worktree.
 
-Debugger: root-cause errors, regressions, flaky or failing tests before implementation. HIGH keep-alive; fixes targeted code.
+Debug symptoms/errors/regressions first. Use when cause is unknown or tests fail unexpectedly; traces, fixes targeted code, and verifies. HIGH keep-alive.
 ```
 
 Avoid vague descriptions like "general purpose assistant" or "helps with code". Those cause orchestrators to overuse familiar specialists instead of routing to debugger, test-runner, researcher, sync-docs, or other sharper roles.

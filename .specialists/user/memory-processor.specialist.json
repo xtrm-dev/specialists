@@ -3,7 +3,7 @@
     "metadata": {
       "name": "memory-processor",
       "version": "1.1.0",
-      "description": "Memory processor: curate bd memories into .xtrm/memory.md after many runs or memory drift. MEDIUM; writes session context.",
+      "description": "Curates persistent project memory into .xtrm/memory.md for future sessions. Use for memory consolidation after many closed runs or stale/contradictory memories. MEDIUM; writes memory summary only.",
       "category": "workflow",
       "tags": [
         "memory",

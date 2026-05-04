@@ -3,7 +3,7 @@
     "metadata": {
       "name": "sync-docs",
       "version": "3.1.0",
-      "description": "Sync-docs: update exactly one doc from scoped report/commit context. MEDIUM; not broad rewrites or multi-doc audits.",
+      "description": "Single-document documentation synchronizer. Use when exactly one doc needs drift-aware updates from scoped report/commit context. MEDIUM; not for broad rewrites or multi-doc audits.",
       "category": "documentation",
       "updated": "2026-05-04",
       "tags": [

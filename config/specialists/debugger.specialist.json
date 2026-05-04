@@ -3,7 +3,7 @@
     "metadata": {
       "name": "debugger",
       "version": "2.0.0",
-      "description": "Debugger: root-cause errors, regressions, flaky or failing tests before implementation. HIGH keep-alive; fixes targeted code.",
+      "description": "Root-cause specialist for symptoms, errors, regressions, flaky or failing tests. Use before executor when cause is unknown. Traces, fixes targeted code, and verifies. HIGH keep-alive.",
       "category": "debugging",
       "tags": [
         "debugging",

@@ -3,7 +3,7 @@
     "metadata": {
       "name": "researcher",
       "version": "1.1.0",
-      "description": "Researcher: external/current evidence from docs, APIs, GitHub, media, and ecosystem behavior. Not local code mapping.",
+      "description": "External/current-information researcher for docs, APIs, GitHub examples, media, and ecosystem evidence. Use when answer depends on outside sources or recent behavior. Not for local code mapping.",
       "category": "analysis",
       "tags": [
         "docs",
