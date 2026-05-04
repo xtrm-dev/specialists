@@ -3,7 +3,9 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises
 import { execSync, spawnSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createObservabilitySqliteClient } from '../../../src/specialist/observability-sqlite.js';
+import { createObservabilitySqliteClient, initSchema } from '../../../src/specialist/observability-sqlite.js';
+import { ensureObservabilityDbFile, resolveObservabilityDbLocation } from '../../../src/specialist/observability-db.js';
+import { Database } from 'bun:sqlite';
 import type { SupervisorStatus } from '../../../src/specialist/supervisor.js';
 
 const repoRoot = resolve(import.meta.dirname, '../../..');
@@ -148,6 +150,12 @@ describe('integration: epic and merge CLI', () => {
       'utf-8',
     );
 
+    const dbLocation = resolveObservabilityDbLocation(tempDir);
+    ensureObservabilityDbFile(dbLocation);
+    const db = new Database(dbLocation.dbPath);
+    initSchema(db);
+    db.close();
+
     const sqlite = createObservabilitySqliteClient(tempDir);
     if (!sqlite) {
       throw new Error('failed to initialize observability sqlite in temp repo');
@@ -283,9 +291,11 @@ describe('integration: epic and merge CLI', () => {
     const bFile = await readFile(join(tempDir, 'b.txt'), 'utf-8');
     expect(aFile).toContain('feature/chain-a');
     expect(bFile).toContain('feature/chain-b');
-  });
 
-});
+  it('sp epic merge preserves unrelated dirty .wolf, .xtrm, and untracked report files', async () => {
+    const pathPrefix = `${join(tempDir, 'bin')}:${process.env.PATH ?? ''}`;
+
+    await mkdir(join(tempDir, '.wolf'), { recursive: true });
     await mkdir(join(tempDir, '.xtrm', 'reports'), { recursive: true });
     await writeFile(join(tempDir, '.wolf', 'notes.md'), 'local wolf note\n', 'utf-8');
     await writeFile(join(tempDir, '.xtrm', 'reports', 'agent.md'), 'local xtrm report\n', 'utf-8');
