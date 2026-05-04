@@ -73,8 +73,11 @@ function shouldWarnAboutSourceMode(projectDir: string): boolean {
   return Boolean(packageVersion && runtimeVersion && packageVersion !== runtimeVersion);
 }
 
-function showSourceRuntimeUnavailableError(): never {
-  fail('Unable to run source mode. Need bun + tsx in PATH. Try: bunx tsx src/index.ts config show <specialist> --resolved --from-source');
+function showSourceRuntimeUnavailableError(reason: 'bunx-missing' | 'tsx-missing'): never {
+  const detail = reason === 'bunx-missing'
+    ? 'bunx missing'
+    : 'tsx missing or failed';
+  fail(`Unable to run source mode (${detail}). Need bunx + tsx in PATH. Try: bunx tsx src/index.ts config show <specialist> --resolved --from-source`);
 }
 
 function buildEditArgv(argv: string[]): string[] {
@@ -161,15 +164,24 @@ async function showResolvedConfig(argv: string[]): Promise<void> {
     const result = spawnSync('bunx', ['tsx', 'src/index.ts', 'config', 'show', specialistName, '--resolved'], {
       cwd: projectDir,
       encoding: 'utf-8',
-      stdio: 'inherit',
+      stdio: 'pipe',
     });
 
     if (result.error instanceof Error && 'code' in result.error && (result.error as { code?: string }).code === 'ENOENT') {
-      showSourceRuntimeUnavailableError();
+      showSourceRuntimeUnavailableError('bunx-missing');
     }
+
+    const stderr = result.stderr?.toString() ?? '';
+    const tsxMissing = result.status !== 0 && (stderr.includes('tsx') || stderr.includes('Cannot find module') || stderr.includes('ERR_MODULE_NOT_FOUND'));
+    if (tsxMissing) {
+      showSourceRuntimeUnavailableError('tsx-missing');
+    }
+
     if (result.status !== 0) {
+      process.stderr.write(stderr);
       process.exit(result.status ?? 1);
     }
+    process.stdout.write(result.stdout?.toString() ?? '');
     return;
   }
 
