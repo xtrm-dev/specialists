@@ -3,9 +3,9 @@
     "metadata": {
       "name": "executor",
       "version": "1.0.0",
-      "description": "General-purpose code execution agent for heavy implementation work. Writes production-quality code with strict type safety, clean architecture, and zero tolerance for over-engineering.",
+      "description": "Scoped implementation only. Use when requirements, files/symbols, constraints, and validation are clear. Not diagnosis, planning, review, tests, release, or research. HIGH worktree.",
       "category": "codegen",
-      "updated": "2026-03-29",
+      "updated": "2026-05-04",
       "tags": [
         "implementation",
         "codegen",

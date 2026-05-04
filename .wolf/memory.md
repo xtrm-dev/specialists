@@ -96,3 +96,5 @@
 - 2026-05-04: Deepened using-specialists-v2 v1.3 from full latest xt report: added canonical-live Cat A, Cat B xtrm-tools boundary, prune-stale-defaults drift workflow, mandatory-rule fallback semantics, help side-effect safety, release xt-reports annotated-tag cautions, orphan starting-row triage, auto-checkpoint .xtrm caveat, and runner.test noisy-suite triage.
 
 - 2026-05-04: Canonicalized using-specialists-v2 v1.4 to final-state guidance only: removed changelog/gotcha/workaround framing, kept current operating model for Cat A/Cat B ownership, asset resolution, source verification, drift commands, epic publication, and release context.
+
+- 2026-05-04: Improved specialist metadata descriptions across config/specialists and user overlays for `specialists list` routing; updated specialists-creator skill/config to teach choose-when/do-not-choose-when/distinctive-capability/permission-note descriptions.

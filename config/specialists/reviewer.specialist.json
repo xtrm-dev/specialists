@@ -3,7 +3,7 @@
     "metadata": {
       "name": "reviewer",
       "version": "1.0.0",
-      "description": "Post-run requirement compliance auditor. Verifies specialist outputs against source requirements (bead-first when available), grades compliance, and reports evidence-backed gaps.",
+      "description": "Review completed specialist work. Compares diff/output to bead requirements, scope, and validation. Not implementation. MEDIUM verdict: PASS/PARTIAL/FAIL.",
       "category": "quality",
       "tags": [
         "audit",
@@ -12,7 +12,7 @@
         "bead",
         "post-run"
       ],
-      "updated": "2026-03-30"
+      "updated": "2026-05-04"
     },
     "execution": {
       "mode": "tool",

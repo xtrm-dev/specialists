@@ -5,7 +5,7 @@ description: >
   agent through writing a valid `.specialist.json`, choosing supported models,
   validating against the schema, and avoiding common specialist authoring
   mistakes.
-version: 1.1
+version: 1.2
 synced_at: 236ca5e6
 ---
 
@@ -206,12 +206,40 @@ bun config/skills/specialists-creator/scripts/validate-specialist.ts config/spec
 |-------|------|----------|-------|
 | `name` | string | yes | kebab-case: `[a-z][a-z0-9-]*` |
 | `version` | string | yes | semver: `1.0.0` |
-| `description` | string | yes | One sentence |
+| `description` | string | yes | Routing summary surfaced by `specialists list`; see Description writing below |
 | `category` | string | yes | Free text (e.g. `workflow`, `analysis`, `codegen`) |
 | `author` | string | no | Optional |
 | `created` | string | no | Optional date |
 | `updated` | string | no | Optional date, quote it: `"2026-03-22"` |
 | `tags` | string[] | no | Optional list |
+
+
+### Description writing for `specialists list`
+
+`specialist.metadata.description` is the routing surface that orchestrators see in `specialists list`. Write it as an operational role definition, not marketing copy. Keep the first clause distinctive because list output may truncate.
+
+A good description answers, in this order:
+
+1. **Choose when** — the task shape that should route here.
+2. **Do not choose when** — adjacent roles that should win instead.
+3. **Distinctive capability** — what this specialist does that others do not.
+4. **Permission/risk note** — READ_ONLY/LOW/MEDIUM/HIGH implication when it affects orchestration.
+
+Pattern:
+
+```text
+<role noun>. Use for <specific task shape>. Not for <near misses>; use <better roles>. <permission/workflow distinction>.
+```
+
+Examples:
+
+```text
+Scoped implementation only. Use when requirements, files/symbols, constraints, and validation are clear. Not diagnosis, planning, review, tests, release, or research. HIGH worktree.
+
+Debug symptoms/errors/regressions first. Use when cause is unknown or tests fail unexpectedly; traces, fixes targeted code, and verifies. HIGH keep-alive.
+```
+
+Avoid vague descriptions like "general purpose assistant" or "helps with code". Those cause orchestrators to overuse familiar specialists instead of routing to debugger, test-runner, researcher, sync-docs, or other sharper roles.
 
 ### `specialist.execution` (required)
 

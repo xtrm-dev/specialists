@@ -3,7 +3,7 @@
     "metadata": {
       "name": "explorer",
       "version": "1.1.0",
-      "description": "Explores the codebase structure, identifies patterns, and answers architecture questions using GitNexus knowledge graph for deep call-chain and execution-flow awareness.",
+      "description": "READ_ONLY local code mapping. Use for unknown architecture, call flows, dependencies, and implementation options. Not symptom debugging; use debugger.",
       "category": "analysis",
       "tags": [
         "codebase",
@@ -11,7 +11,7 @@
         "exploration",
         "gitnexus"
       ],
-      "updated": "2026-03-11"
+      "updated": "2026-05-04"
     },
     "execution": {
       "mode": "tool",

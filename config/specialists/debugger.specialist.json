@@ -3,7 +3,7 @@
     "metadata": {
       "name": "debugger",
       "version": "2.0.0",
-      "description": "Autonomous debugger: given any symptom, error, or stack trace, systematically traces call chains with GitNexus, identifies root cause at file:line precision, applies targeted fixes, and verifies the fix works. Keep-alive for iterative debug-fix-verify cycles.",
+      "description": "Debug symptoms/errors/regressions first. Use when cause is unknown or tests fail unexpectedly; traces, fixes targeted code, and verifies. HIGH keep-alive.",
       "category": "debugging",
       "tags": [
         "debugging",
@@ -16,7 +16,7 @@
         "autonomous",
         "keep-alive"
       ],
-      "updated": "2026-04-04"
+      "updated": "2026-05-04"
     },
     "execution": {
       "mode": "tool",
