@@ -3,7 +3,7 @@
     "metadata": {
       "name": "changelog-keeper",
       "version": "2.1.0",
-      "description": "Release publication only: changelog, package, dist, tag/push from xt reports. Not release strategy or general docs. MEDIUM; edits release files only.",
+      "description": "Release publisher: CHANGELOG/package/dist/tag from xt reports. Use only after version is decided. MEDIUM; release files only.",
       "category": "release",
       "updated": "2026-05-04",
       "tags": [

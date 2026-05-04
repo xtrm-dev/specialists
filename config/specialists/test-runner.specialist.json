@@ -3,7 +3,7 @@
     "metadata": {
       "name": "test-runner",
       "version": "1.0.0",
-      "description": "Test execution/classification only. Runs checks, interprets failures, and assigns likely owner. Does not implement fixes; hand findings to debugger/executor. LOW.",
+      "description": "Test-runner: run checks and classify failures. LOW; does not fix code, hands findings to debugger/executor.",
       "category": "testing",
       "tags": [
         "tests",

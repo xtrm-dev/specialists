@@ -3,7 +3,7 @@
     "metadata": {
       "name": "executor",
       "version": "1.0.0",
-      "description": "Scoped implementation only. Use when requirements, files/symbols, constraints, and validation are clear. Not diagnosis, planning, review, tests, release, or research. HIGH worktree.",
+      "description": "Executor: scoped implementation in a worktree. Use only when requirements/files/validation are clear. HIGH; not diagnosis or review.",
       "category": "codegen",
       "updated": "2026-05-04",
       "tags": [

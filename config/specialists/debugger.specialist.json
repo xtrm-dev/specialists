@@ -3,7 +3,7 @@
     "metadata": {
       "name": "debugger",
       "version": "2.0.0",
-      "description": "Debug symptoms/errors/regressions first. Use when cause is unknown or tests fail unexpectedly; traces, fixes targeted code, and verifies. HIGH keep-alive.",
+      "description": "Debugger: root-cause errors, regressions, flaky or failing tests before implementation. HIGH keep-alive; fixes targeted code.",
       "category": "debugging",
       "tags": [
         "debugging",

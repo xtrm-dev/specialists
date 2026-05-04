@@ -1221,3 +1221,5 @@
 - 2026-05-04: `config/skills/using-specialists-v2/SKILL.md` bumped to v1.4 and canonicalized to final-state guidance only; installed mirror copied to `.xtrm/skills/default/using-specialists-v2/SKILL.md`.
 
 - 2026-05-04: Updated config/specialists/*.specialist.json descriptions and .specialists/user overlays to improve `specialists list` routing; specialists-creator v1.2 now teaches list-friendly metadata.description authoring.
+
+- 2026-05-04: `config/specialists/*.specialist.json` and `.specialists/user` overlays now use truncation-first metadata descriptions for `specialists list`; package-owned configs require package release/update for other repos to receive them.

@@ -3,7 +3,7 @@
     "metadata": {
       "name": "node-coordinator",
       "version": "1.3.0",
-      "description": "Research-node coordinator only. Uses sp node commands to spawn, steer, wait, and complete node members. LOW; not standalone implementation.",
+      "description": "Node coordinator: LOW-permission sp node orchestrator for research-node members. Spawns, steers, waits, completes nodes.",
       "category": "orchestration",
       "tags": [
         "node",

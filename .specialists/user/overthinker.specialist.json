@@ -3,7 +3,7 @@
     "metadata": {
       "name": "overthinker",
       "version": "1.0.0",
-      "description": "READ_ONLY critique and deep reasoning. Use for risky designs, tradeoffs, premortems, architecture choices, or plans needing devil's advocate. Not implementation.",
+      "description": "Overthinker: READ_ONLY critique for risky designs, tradeoffs, premortems, and architecture choices. Not implementation.",
       "category": "workflow",
       "tags": [
         "reasoning",

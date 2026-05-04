@@ -98,3 +98,5 @@
 - 2026-05-04: Canonicalized using-specialists-v2 v1.4 to final-state guidance only: removed changelog/gotcha/workaround framing, kept current operating model for Cat A/Cat B ownership, asset resolution, source verification, drift commands, epic publication, and release context.
 
 - 2026-05-04: Improved specialist metadata descriptions across config/specialists and user overlays for `specialists list` routing; updated specialists-creator skill/config to teach choose-when/do-not-choose-when/distinctive-capability/permission-note descriptions.
+
+- 2026-05-04: Reworked specialist metadata descriptions to be truncation-first for `specialists list`: first visible words now carry role and task shape (Executor/Debugger/Explorer/etc.) before list ellipsis.

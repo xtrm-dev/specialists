@@ -3,7 +3,7 @@
     "metadata": {
       "name": "planner",
       "version": "1.1.0",
-      "description": "Planning and issue-board creation. Use when work is broad/vague or spans multiple tracks; creates phased bd issues, dependencies, and test plan. HIGH.",
+      "description": "Planner: turn broad/vague work into phased bd issues, dependencies, and test plan. HIGH; use before multi-track implementation.",
       "category": "workflow",
       "tags": [
         "planning",

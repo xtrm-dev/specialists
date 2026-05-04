@@ -3,7 +3,7 @@
     "metadata": {
       "name": "memory-processor",
       "version": "1.1.0",
-      "description": "Memory curation only. Synthesizes bd memories and code state into .xtrm/memory.md after many runs or memory drift. MEDIUM; writes summary context.",
+      "description": "Memory processor: curate bd memories into .xtrm/memory.md after many runs or memory drift. MEDIUM; writes session context.",
       "category": "workflow",
       "tags": [
         "memory",

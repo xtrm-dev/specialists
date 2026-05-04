@@ -3,7 +3,7 @@
     "metadata": {
       "name": "reviewer",
       "version": "1.0.0",
-      "description": "Review completed specialist work. Compares diff/output to bead requirements, scope, and validation. Not implementation. MEDIUM verdict: PASS/PARTIAL/FAIL.",
+      "description": "Reviewer: verify completed specialist diff/output against bead requirements and validation. MEDIUM verdict: PASS/PARTIAL/FAIL.",
       "category": "quality",
       "tags": [
         "audit",
