@@ -13,6 +13,7 @@ interface CleanOptions {
   removeAllCompleted: boolean;
   dryRun: boolean;
   keepRecentCount: number | null;
+  aggressivePrune: boolean;
   staleProcessesOnly: boolean;
   staleAfterHours: number;
 }
@@ -51,6 +52,7 @@ function parseOptions(argv: readonly string[]): CleanOptions {
   let removeAllCompleted = false;
   let dryRun = false;
   let keepRecentCount: number | null = null;
+  let aggressivePrune = false;
   let staleProcessesOnly = false;
   let staleAfterHours = DEFAULT_STALE_AFTER_HOURS;
 
@@ -69,6 +71,11 @@ function parseOptions(argv: readonly string[]): CleanOptions {
 
     if (argument === '--processes') {
       staleProcessesOnly = true;
+      continue;
+    }
+
+    if (argument === '--aggressive-prune') {
+      aggressivePrune = true;
       continue;
     }
 
@@ -115,7 +122,7 @@ function parseOptions(argv: readonly string[]): CleanOptions {
     throw new Error('--processes cannot be combined with --all or --keep');
   }
 
-  return { removeAllCompleted, dryRun, keepRecentCount, staleProcessesOnly, staleAfterHours };
+  return { removeAllCompleted, dryRun, keepRecentCount, aggressivePrune, staleProcessesOnly, staleAfterHours };
 }
 
 function readDirectorySizeBytes(directoryPath: string): number {
@@ -188,13 +195,21 @@ function collectCompletedJobs(jobsDirectoryPath: string): CompletedJobRecord[] {
     .filter((job): job is CompletedJobRecord => job !== null);
 }
 
-function selectJobsToRemove(completedJobs: readonly CompletedJobRecord[], options: CleanOptions): CompletedJobRecord[] {
+function selectJobsToRemove(
+  completedJobs: readonly CompletedJobRecord[],
+  options: CleanOptions,
+  protectedJobIds: ReadonlySet<string>,
+): CompletedJobRecord[] {
   const jobsByNewest = [...completedJobs].sort((left, right) => {
     if (right.createdAtMs !== left.createdAtMs) return right.createdAtMs - left.createdAtMs;
     return right.completedAtMs - left.completedAtMs;
   });
 
-  if (options.keepRecentCount !== null) return jobsByNewest.slice(options.keepRecentCount);
+  if (options.keepRecentCount !== null) {
+    const removable = jobsByNewest.slice(options.keepRecentCount);
+    if (options.aggressivePrune) return removable;
+    return removable.filter(job => !protectedJobIds.has(job.id));
+  }
   if (options.removeAllCompleted) return jobsByNewest;
 
   const cutoffMs = Date.now() - parseTtlDaysFromEnvironment() * MS_PER_DAY;
@@ -283,7 +298,7 @@ function printWorktreeGcSummary(removed: readonly WorktreeGcCandidate[], skipped
 
 function printUsageAndExit(message: string): never {
   console.error(message);
-  console.error('Usage: specialists|sp clean [--all] [--keep <n>] [--processes [--stale-after <hours>]] [--dry-run]');
+  console.error('Usage: specialists|sp clean [--all] [--keep <n>] [--aggressive-prune] [--processes [--stale-after <hours>]] [--dry-run]');
   process.exit(1);
 }
 
@@ -332,6 +347,9 @@ export async function run(): Promise<void> {
   const sqliteClient = createObservabilitySqliteClient();
   const statuses = sqliteClient?.listStatuses() ?? [];
   const worktreeCandidates = collectWorktreeGcCandidates(jobsDirectoryPath);
+  const protectedJobIds = options.keepRecentCount !== null && !options.aggressivePrune && sqliteClient
+    ? new Set(sqliteClient.listReferencedChainRootJobIds())
+    : new Set<string>();
 
   if (options.staleProcessesOnly) {
     const staleJobs = selectStaleProcesses(statuses, options.staleAfterHours);
@@ -353,7 +371,7 @@ export async function run(): Promise<void> {
   }
 
   const completedJobs = collectCompletedJobs(jobsDirectoryPath);
-  const jobsToRemove = selectJobsToRemove(completedJobs, options);
+  const jobsToRemove = selectJobsToRemove(completedJobs, options, protectedJobIds);
   const freedBytes = jobsToRemove.reduce((total, job) => total + job.sizeBytes, 0);
 
   if (options.dryRun) {

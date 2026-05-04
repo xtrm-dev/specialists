@@ -999,6 +999,7 @@ export interface ObservabilitySqliteClient {
   resolveEpicByChainRootBeadId(chainRootBeadId: string): EpicChainRecord | null;
   listEpicChains(epicId: string): EpicChainRecord[];
   deleteEpicChainMembership(epicId: string, chainIds: readonly string[]): string[];
+  listReferencedChainRootJobIds(): string[];
   listEpicChainsWithLatestJob(epicId: string): EpicChainLatestJobRecord[];
   readChainIdentity(jobId: string): PersistedChainIdentity | null;
   listChainJobIds(chainId: string): string[];
@@ -1716,6 +1717,20 @@ class SqliteClient implements ObservabilitySqliteClient {
         .run(epicId, ...removable);
       return removable;
     }, 'deleteEpicChainMembership');
+  }
+
+  listReferencedChainRootJobIds(): string[] {
+    return withRetry(() => {
+      const rows = this.db.query(`
+        SELECT DISTINCT chain_root_job_id
+        FROM epic_chain_membership
+        WHERE chain_root_job_id IS NOT NULL AND chain_root_job_id != ''
+      `).all() as Array<{ chain_root_job_id?: string | null }>;
+
+      return rows
+        .map((row) => row.chain_root_job_id)
+        .filter((jobId): jobId is string => typeof jobId === 'string' && jobId.length > 0);
+    }, 'listReferencedChainRootJobIds');
   }
 
   listEpicChainsWithLatestJob(epicId: string): EpicChainLatestJobRecord[] {
