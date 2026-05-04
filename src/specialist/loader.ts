@@ -4,6 +4,7 @@ import { basename, join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { parse as parseYaml } from 'yaml';
 import { parseSpecialist, type ScriptEntry, type Specialist } from './schema.js';
+import { resolveCanonicalAssetDir } from './canonical-asset-resolver.js';
 
 export interface StallDetectionConfig {
   running_silence_warn_ms?: number;
@@ -28,7 +29,7 @@ export interface SpecialistSummary {
    * Scope says where override came from.
    * user = repo authoring layer, default = repo-managed mirror, package = upstream fallback.
    */
-  source: 'user' | 'default-mirror' | 'package-fallback' | 'legacy';
+  source: 'user' | 'default-mirror' | 'package-fallback' | 'package-live' | 'legacy';
   filePath: string;
   updated?: string;
   filestoWatch?: string[];
@@ -84,13 +85,14 @@ export class SpecialistLoader {
 
       // Upstream source. Read-only fallback in runtime; not repo-authoring surface.
       { path: join(this.projectDir, 'config', 'specialists'), scope: 'package', source: 'package-fallback' },
+      { path: resolveCanonicalAssetDir('specialists') ?? '', scope: 'package', source: 'package-live' },
 
       // Legacy locations retained for compatibility, but never primary anymore.
       { path: join(this.projectDir, 'specialists'), scope: 'default', source: 'legacy' },
       { path: join(this.projectDir, '.claude', 'specialists'), scope: 'default', source: 'legacy' },
       { path: join(this.projectDir, '.agent-forge', 'specialists'), scope: 'default', source: 'legacy' },
     ];
-    return dirs.filter(d => existsSync(d.path));
+    return dirs.filter(d => d.path && existsSync(d.path));
   }
 
   private toJson(content: string, isYaml: boolean): string {

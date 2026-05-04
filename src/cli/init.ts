@@ -3,7 +3,6 @@
 import { copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { basename, dirname, join, relative, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   ensureObservabilityDbFile,
   ensureGitignoreHasObservabilityDbEntries,
@@ -12,6 +11,7 @@ import {
 } from '../specialist/observability-db.js';
 import { createObservabilitySqliteClient } from '../specialist/observability-sqlite.js';
 import { syncMemoriesCacheFromBd } from '../specialist/memory-retrieval.js';
+import { resolveCanonicalAssetDir } from '../specialist/canonical-asset-resolver.js';
 
 // ── ANSI helpers ───────────────────────────────────────────────────────────────
 const bold   = (s: string) => `\x1b[1m${s}\x1b[0m`;
@@ -106,24 +106,6 @@ function saveJson(path: string, value: Record<string, unknown>): void {
   writeFileSync(path, JSON.stringify(value, null, 2) + '\n', 'utf-8');
 }
 
-/**
- * Resolve a path relative to this package's installed location.
- * Handles both bundled (dist/index.js) and source (src/cli/init.ts) modes.
- */
-function resolvePackagePath(relativePath: string): string | null {
-  // All canonical assets now live in config/ directory
-  const configPath = `config/${relativePath}`;
-  
-  // Try from bundled location (dist/index.js -> ../config/relativePath)
-  let resolved = fileURLToPath(new URL(`../${configPath}`, import.meta.url));
-  if (existsSync(resolved)) return resolved;
-  
-  // Try from source location (src/cli/init.ts -> ../../config/relativePath)
-  resolved = fileURLToPath(new URL(`../../${configPath}`, import.meta.url));
-  if (existsSync(resolved)) return resolved;
-  
-  return null;
-}
 
 /**
  * Move legacy nested specialist files from .specialists/<scope>/specialists/
@@ -172,7 +154,7 @@ function migrateLegacySpecialists(cwd: string, scope: 'default' | 'user'): void 
  * Repo mirror only; package config stays upstream source.
  */
 function copyCanonicalSpecialists(cwd: string): void {
-  const sourceDir = resolvePackagePath('specialists');
+  const sourceDir = resolveCanonicalAssetDir('specialists');
 
   if (!sourceDir) {
     skip('no canonical specialists found in package');
@@ -220,7 +202,7 @@ function copyCanonicalSpecialists(cwd: string): void {
  * Repo mirror only; package config stays upstream source.
  */
 function copyCanonicalMandatoryRules(cwd: string): void {
-  const sourceDir = resolvePackagePath('mandatory-rules');
+  const sourceDir = resolveCanonicalAssetDir('mandatory-rules');
 
   if (!sourceDir) {
     skip('no canonical mandatory-rules found in package');
@@ -268,7 +250,7 @@ function copyCanonicalMandatoryRules(cwd: string): void {
  * Repo mirror only; package config stays upstream source.
  */
 function copyCanonicalNodeConfigs(cwd: string): void {
-  const sourceDir = resolvePackagePath('nodes');
+  const sourceDir = resolveCanonicalAssetDir('nodes');
 
   if (!sourceDir) {
     skip('no canonical node configs found in package');
@@ -316,7 +298,7 @@ function copyCanonicalNodeConfigs(cwd: string): void {
  * and expose .claude/hooks/* entries as symlinks into .xtrm/hooks/.
  */
 function installProjectHooks(cwd: string): void {
-  const sourceDir = resolvePackagePath('hooks');
+  const sourceDir = resolveCanonicalAssetDir('hooks');
 
   if (!sourceDir) {
     skip('no canonical hooks found in package');
@@ -517,7 +499,7 @@ function installProjectSkills(cwd: string, syncSkills: boolean): void {
     throw new Error('.xtrm/ is missing. Install xtrm first, then run specialists init.');
   }
 
-  const sourceDir = resolvePackagePath('skills');
+  const sourceDir = resolveCanonicalAssetDir('skills');
   if (!sourceDir) {
     skip('no canonical skills found in package');
     return;
