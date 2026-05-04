@@ -44,6 +44,8 @@ export interface MergeStepResult {
 
 export interface MergeExecutionOptions {
   rebuild: boolean;
+  mode?: PublicationMode;
+  publicationLabel?: string;
 }
 
 export type PublicationMode = 'direct' | 'pr';
@@ -524,33 +526,119 @@ const MERGE_DIRTY_IGNORE_PREFIXES = [
   'dist/',
 ] as const;
 
+interface DirtyPathState {
+  tracked: string[];
+  untracked: string[];
+}
+
+interface ShelvedMainState {
+  stashRef: string;
+  dirtyPaths: string[];
+}
+
 function isMergeDirtyIgnored(path: string): boolean {
   return MERGE_DIRTY_IGNORE_PREFIXES.some(prefix => path.startsWith(prefix));
 }
 
-export function assertMainRepoCleanForMerge(cwd: string): void {
-  const status = runCommand('git', ['status', '--porcelain', '--untracked-files=no'], cwd);
+function parseGitStatusPaths(stdout: string): DirtyPathState {
+  const tracked: string[] = [];
+  const untracked: string[] = [];
+
+  for (const rawLine of stdout.split('\n')) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    if (line.startsWith('?? ')) {
+      const path = line.slice(3).trim();
+      if (path && !isMergeDirtyIgnored(path)) untracked.push(path);
+      continue;
+    }
+
+    const match = /^..\s(.+?)(?:\s->\s(.+))?$/.exec(line);
+    const path = match ? (match[2] ?? match[1] ?? '') : line.slice(3).trim();
+    if (path && !isMergeDirtyIgnored(path)) tracked.push(path.trim());
+  }
+
+  return { tracked, untracked };
+}
+
+function getMainRepoDirtyPaths(cwd: string): DirtyPathState {
+  const status = runCommand('git', ['status', '--porcelain=v1'], cwd);
   if (status.status !== 0) {
     throw new Error(`Unable to read git status in '${cwd}'.`);
   }
 
-  const dirty = status.stdout
-    .split('\n')
-    .map(line => line.trim())
-    .filter(Boolean)
-    .map(line => {
-      const match = /^..\s(.+?)(?:\s->\s(.+))?$/.exec(line);
-      const path = match ? (match[2] ?? match[1] ?? '') : line.slice(3).trim();
-      return path.trim();
-    })
-    .filter(path => path && !isMergeDirtyIgnored(path));
+  return parseGitStatusPaths(status.stdout);
+}
 
-  if (dirty.length === 0) return;
+function getIncomingMergePaths(branches: readonly string[], cwd: string): Set<string> {
+  const incoming = new Set<string>();
 
-  const list = dirty.map(path => `- ${path}`).join('\n');
+  for (const branch of branches) {
+    const preview = previewBranchMergeDelta(branch, cwd);
+    for (const file of preview.files) {
+      if (!isMergeDirtyIgnored(file.path)) incoming.add(file.path);
+    }
+  }
+
+  return incoming;
+}
+
+function formatDirtyConflictMessage(paths: readonly string[]): string {
+  return paths.map(path => `- ${path}`).join('\n');
+}
+
+function classifyMainRepoDirtyState(branches: readonly string[], cwd: string): {
+  dirty: DirtyPathState;
+  overlappingPaths: string[];
+} {
+  const dirty = getMainRepoDirtyPaths(cwd);
+  const incoming = getIncomingMergePaths(branches, cwd);
+  const overlap = [...dirty.tracked, ...dirty.untracked].filter(path => incoming.has(path));
+  return { dirty, overlappingPaths: overlap };
+}
+
+function shelveMainRepoDirtyState(cwd: string, dirty: DirtyPathState, publicationLabel: string): ShelvedMainState | null {
+  const dirtyPaths = [...dirty.tracked, ...dirty.untracked];
+  if (dirtyPaths.length === 0) return null;
+
+  const message = `sp epic merge ${publicationLabel} auto-shelve`;
+  const stash = runCommand('git', ['stash', 'push', '--include-untracked', '--message', message], cwd);
+  if (stash.status !== 0) {
+    throw new Error(`Unable to shelve dirty main-tree state in '${cwd}'.\n${stash.stderr.trim() || stash.stdout.trim() || 'Unknown git error'}`);
+  }
+
+  return { stashRef: 'stash@{0}', dirtyPaths };
+}
+
+function restoreShelvedMainState(cwd: string, shelved: ShelvedMainState): void {
+  const apply = runCommand('git', ['stash', 'apply', '--index', shelved.stashRef], cwd);
+  if (apply.status === 0) {
+    const drop = runCommand('git', ['stash', 'drop', shelved.stashRef], cwd);
+    if (drop.status === 0) return;
+    throw new Error(`Restored shelved state but failed to drop stash '${shelved.stashRef}'.\n${drop.stderr.trim() || drop.stdout.trim() || 'Unknown git error'}`);
+  }
+
+  throw new Error(
+    `Merge succeeded, but restoring shelved dirty state failed for stash '${shelved.stashRef}'.\n` +
+    `Recovery:\n` +
+    `  git status\n` +
+    `  git stash list --grep "sp epic merge"\n` +
+    `  git stash apply --index ${shelved.stashRef}\n` +
+    `  git stash drop ${shelved.stashRef}\n` +
+    `Files:\n${formatDirtyConflictMessage(shelved.dirtyPaths)}\n` +
+    `Details: ${apply.stderr.trim() || apply.stdout.trim() || 'Unknown git error'}`,
+  );
+}
+
+export function assertMainRepoCleanForMerge(cwd: string): void {
+  const dirty = getMainRepoDirtyPaths(cwd);
+  const allDirty = [...dirty.tracked, ...dirty.untracked];
+  if (allDirty.length === 0) return;
+
+  const list = allDirty.map(path => `- ${path}`).join('\n');
   throw new Error(
     `Refusing merge: main repo '${cwd}' has uncommitted changes that could cause spurious conflicts.\n` +
-    `Dirty files (tracked, non-dist):\n${list}\n` +
+    `Dirty files (tracked + untracked, non-dist/wolf/xtrm):\n${list}\n` +
     `Resolve by committing, stashing, or reverting these changes, then retry merge.`,
   );
 }
@@ -796,36 +884,57 @@ export function runMergePlan(
   options: MergeExecutionOptions,
 ): MergeStepResult[] {
   const mainRepoRoot = resolveMainWorktreeRoot();
-  assertMainRepoCleanForMerge(mainRepoRoot);
+  const shelved = options.mode === 'direct'
+    ? (() => {
+      const dirtyState = classifyMainRepoDirtyState(targets.map((target) => target.branch), mainRepoRoot);
+      if (dirtyState.overlappingPaths.length > 0) {
+        throw new Error(
+          `Refusing merge: main repo '${mainRepoRoot}' has dirty files overlapping incoming epic changes.
+` +
+          `Overlap:
+${formatDirtyConflictMessage(dirtyState.overlappingPaths)}
+` +
+          `Resolve or move these changes, then retry merge.`,
+        );
+      }
+      return shelveMainRepoDirtyState(mainRepoRoot, dirtyState.dirty, options.publicationLabel ?? `epic-${targets[0]?.beadId ?? 'publication'}`);
+    })()
+    : null;
   const mergedSteps: MergeStepResult[] = [];
 
-  for (const target of targets) {
-    const worthiness = assertBranchMergeWorthiness(target, mainRepoRoot);
-    if (worthiness.reason === 'already-published') {
+  try {
+    for (const target of targets) {
+      const worthiness = assertBranchMergeWorthiness(target, mainRepoRoot);
+      if (worthiness.reason === 'already-published') {
+        mergedSteps.push({
+          beadId: target.beadId,
+          branch: target.branch,
+          changedFiles: [],
+        });
+        continue;
+      }
+
+      rebaseBranchOntoMaster(target.branch, target.worktreePath);
+      mergeBranch(target.branch, mainRepoRoot);
+      runTypecheckGate(mainRepoRoot);
+      syncEpicStateAfterMerge(target);
       mergedSteps.push({
         beadId: target.beadId,
         branch: target.branch,
-        changedFiles: [],
+        changedFiles: readChangedFilesForLastMerge(mainRepoRoot),
       });
-      continue;
     }
 
-    rebaseBranchOntoMaster(target.branch, target.worktreePath);
-    mergeBranch(target.branch, mainRepoRoot);
-    runTypecheckGate(mainRepoRoot);
-    syncEpicStateAfterMerge(target);
-    mergedSteps.push({
-      beadId: target.beadId,
-      branch: target.branch,
-      changedFiles: readChangedFilesForLastMerge(mainRepoRoot),
-    });
-  }
+    if (options.rebuild) {
+      runRebuild(mainRepoRoot);
+    }
 
-  if (options.rebuild) {
-    runRebuild(mainRepoRoot);
+    return mergedSteps;
+  } finally {
+    if (shelved) {
+      restoreShelvedMainState(mainRepoRoot, shelved);
+    }
   }
-
-  return mergedSteps;
 }
 
 function getCurrentBranchName(): string {

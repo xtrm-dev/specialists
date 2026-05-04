@@ -284,4 +284,36 @@ describe('integration: epic and merge CLI', () => {
     expect(aFile).toContain('feature/chain-a');
     expect(bFile).toContain('feature/chain-b');
   });
+
+});
+    await mkdir(join(tempDir, '.xtrm', 'reports'), { recursive: true });
+    await writeFile(join(tempDir, '.wolf', 'notes.md'), 'local wolf note\n', 'utf-8');
+    await writeFile(join(tempDir, '.xtrm', 'reports', 'agent.md'), 'local xtrm report\n', 'utf-8');
+    await writeFile(join(tempDir, 'local-report.md'), 'untracked report\n', 'utf-8');
+
+    const resolve = runCli(tempDir, ['epic', 'resolve', 'unitAI-epic1'], { PATH: pathPrefix });
+    expect(resolve.status).toBe(0);
+
+    const merge = runCli(tempDir, ['epic', 'merge', 'unitAI-epic1'], { PATH: pathPrefix });
+    expect(merge.status).toBe(0);
+
+    expect(await readFile(join(tempDir, '.wolf', 'notes.md'), 'utf-8')).toContain('local wolf note');
+    expect(await readFile(join(tempDir, '.xtrm', 'reports', 'agent.md'), 'utf-8')).toContain('local xtrm report');
+    expect(await readFile(join(tempDir, 'local-report.md'), 'utf-8')).toContain('untracked report');
+  });
+
+  it('sp epic merge fails safely on dirty incoming path overlap', async () => {
+    const pathPrefix = `${join(tempDir, 'bin')}:${process.env.PATH ?? ''}`;
+
+    await writeFile(join(tempDir, 'a.txt'), 'local overlap\n', 'utf-8');
+
+    const resolve = runCli(tempDir, ['epic', 'resolve', 'unitAI-epic1'], { PATH: pathPrefix });
+    expect(resolve.status).toBe(0);
+
+    const merge = runCli(tempDir, ['epic', 'merge', 'unitAI-epic1'], { PATH: pathPrefix });
+    expect(merge.status).not.toBe(0);
+    expect(merge.stderr).toContain('dirty files overlapping incoming epic changes');
+    expect(merge.stderr).toContain('a.txt');
+    expect(await readFile(join(tempDir, 'a.txt'), 'utf-8')).toContain('local overlap');
+  });
 });
