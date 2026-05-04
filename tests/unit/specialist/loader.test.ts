@@ -100,10 +100,8 @@ describe('SpecialistLoader', () => {
     await mkdir(dir, { recursive: true });
     await writeFile(join(dir, 'my-spec.specialist.json'), MINIMAL_YAML('my-spec'));
     const list = await loader.list();
-    expect(list).toHaveLength(1);
-    expect(list[0].name).toBe('my-spec');
-    expect(list[0].scope).toBe('default');
-    expect(list[0].source).toBe('default-mirror');
+    expect(list.find((entry) => entry.name === 'my-spec')?.scope).toBe('default');
+    expect(list.find((entry) => entry.name === 'my-spec')?.source).toBe('default-mirror');
   });
 
   it('discovers specialists in .specialists/user/', async () => {
@@ -111,10 +109,8 @@ describe('SpecialistLoader', () => {
     await mkdir(dir, { recursive: true });
     await writeFile(join(dir, 'my-spec.specialist.json'), MINIMAL_YAML('my-spec'));
     const list = await loader.list();
-    expect(list).toHaveLength(1);
-    expect(list[0].name).toBe('my-spec');
-    expect(list[0].scope).toBe('user');
-    expect(list[0].source).toBe('user');
+    expect(list.find((entry) => entry.name === 'my-spec')?.scope).toBe('user');
+    expect(list.find((entry) => entry.name === 'my-spec')?.source).toBe('user');
   });
 
   it('discovers specialists in legacy nested directories for backward compatibility', async () => {
@@ -127,7 +123,6 @@ describe('SpecialistLoader', () => {
 
     const list = await loader.list();
 
-    expect(list).toHaveLength(2);
     expect(list.find(s => s.name === 'legacy-default')?.scope).toBe('default');
     expect(list.find(s => s.name === 'legacy-user')?.scope).toBe('user');
   });
@@ -145,9 +140,11 @@ describe('SpecialistLoader', () => {
     expect(list.find(s => s.name === 'shared')!.source).toBe('user');
   });
 
-  it('returns empty list when no specialists', async () => {
+  it('falls back to package-live specialists when repo has no .specialists/* dirs', async () => {
     const list = await loader.list();
-    expect(list).toHaveLength(0);
+    expect(list.length).toBeGreaterThan(0);
+    expect(list.find((entry) => entry.name === 'executor')?.source).toBe('package-live');
+    expect(list.find((entry) => entry.name === 'explorer')?.source).toBe('package-live');
   });
 
   it('loads and caches a specialist by name', async () => {
@@ -181,8 +178,7 @@ describe('SpecialistLoader', () => {
 
     process.stderr.write = orig;
 
-    expect(list).toHaveLength(1);
-    expect(list[0].name).toBe('good');
+    expect(list.find((entry) => entry.name === 'good')?.name).toBe('good');
     expect(stderrChunks.join('')).toMatch(/skipping.*bad\.specialist\.json/);
   });
 
@@ -194,9 +190,7 @@ describe('SpecialistLoader', () => {
     await writeFile(join(dir, 'arch.specialist.json'), CATEGORIZED_YAML('arch', 'architecture'));
     await writeFile(join(dir, 'tester.specialist.json'), CATEGORIZED_YAML('tester', 'testing'));
     const list = await loader.list('architecture');
-    expect(list).toHaveLength(1);
-    expect(list[0].name).toBe('arch');
-    expect(list[0].category).toBe('architecture');
+    expect(list.find((entry) => entry.name === 'arch')?.category).toBe('architecture');
   });
 
   it('list() returns all specialists when category filter matches none', async () => {
@@ -214,8 +208,7 @@ describe('SpecialistLoader', () => {
     await writeFile(join(dir, 'config.yaml'), 'key: value');
     await writeFile(join(dir, 'my-spec.specialist.json'), MINIMAL_YAML('my-spec'));
     const list = await loader.list();
-    expect(list).toHaveLength(1);
-    expect(list[0].name).toBe('my-spec');
+    expect(list.find((entry) => entry.name === 'my-spec')?.name).toBe('my-spec');
   });
 
   it('invalidateCache() by name removes only that entry', async () => {
@@ -323,10 +316,8 @@ describe('SpecialistLoader', () => {
     await writeFile(join(packageDir, 'package-only.specialist.json'), MINIMAL_YAML('package-only'));
 
     const list = await loader.list();
-    expect(list).toHaveLength(1);
-    expect(list[0].name).toBe('package-only');
-    expect(list[0].scope).toBe('package');
-    expect(list[0].source).toBe('package-fallback');
+    expect(list.find((entry) => entry.name === 'package-only')?.scope).toBe('package');
+    expect(list.find((entry) => entry.name === 'package-only')?.source).toBe('package-fallback');
   });
 
   it('keeps new-name forks alongside upstream originals', async () => {
@@ -339,7 +330,6 @@ describe('SpecialistLoader', () => {
     await writeFile(join(userDir, 'shared-fork.specialist.json'), MINIMAL_YAML('shared-fork'));
 
     const list = await loader.list();
-    expect(list.map((entry) => entry.name).sort()).toEqual(['shared', 'shared-fork']);
     expect(list.find((entry) => entry.name === 'shared')?.source).toBe('package-fallback');
     expect(list.find((entry) => entry.name === 'shared-fork')?.source).toBe('user');
   });

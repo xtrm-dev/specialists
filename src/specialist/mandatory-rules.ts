@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { STATIC_WORKFLOW_RULES_BLOCK } from './memory-retrieval.js';
+import { resolveCanonicalAssetDir } from './canonical-asset-resolver.js';
 
 export interface MandatoryRule {
   id: string;
@@ -56,10 +57,12 @@ function mergeIndex(base: MandatoryRulesIndex, overlay: MandatoryRulesIndex): Ma
 export function loadMandatoryRulesIndex(cwd: string): MandatoryRulesIndex | null {
   const sourcePath = resolve(cwd, 'config/mandatory-rules/index.json');
   const canonicalCopyPath = resolve(cwd, '.specialists/default/mandatory-rules/index.json');
+  const packageLivePath = resolveCanonicalAssetDir('mandatory-rules');
   const overlayPath = resolve(cwd, '.specialists/mandatory-rules/index.json');
 
+  const packageLiveIndexPath = packageLivePath ? resolve(packageLivePath, 'index.json') : null;
   const tiers: MandatoryRulesIndex[] = [];
-  for (const path of [sourcePath, canonicalCopyPath, overlayPath]) {
+  for (const path of [sourcePath, canonicalCopyPath, packageLiveIndexPath, overlayPath].filter((value): value is string => Boolean(value))) {
     if (existsSync(path)) tiers.push(readJsonFile<MandatoryRulesIndex>(path));
   }
 
