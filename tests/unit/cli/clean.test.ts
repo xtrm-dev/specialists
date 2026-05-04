@@ -6,10 +6,12 @@ import { join } from 'node:path';
 const removedJobIds: string[] = [];
 let mockStatuses: any[] = [];
 let mockUpsertedStatuses: any[] = [];
+let mockReferencedChainRootJobIds: string[] = [];
 
 vi.mock('../../../src/specialist/observability-sqlite.js', () => ({
   createObservabilitySqliteClient: () => ({
     listStatuses: () => mockStatuses,
+    listReferencedChainRootJobIds: () => mockReferencedChainRootJobIds,
     removeJobs: (jobIds: readonly string[]) => {
       removedJobIds.push(...jobIds);
       return jobIds.length;
@@ -49,6 +51,7 @@ describe('clean CLI — run()', () => {
     delete process.env.SPECIALISTS_JOB_FILE_OUTPUT;
     mockStatuses = [];
     mockUpsertedStatuses = [];
+    mockReferencedChainRootJobIds = [];
     removedJobIds.length = 0;
   });
 
@@ -118,6 +121,33 @@ describe('clean CLI — run()', () => {
     expect(existsSync(join(jobsDirectory, 'job-3'))).toBe(true);
     expect(existsSync(join(jobsDirectory, 'job-2'))).toBe(false);
     expect(existsSync(join(jobsDirectory, 'job-1'))).toBe(false);
+  });
+
+  it('--keep preserves chain-root jobs referenced by epic membership', async () => {
+    const now = Date.now();
+    createCompletedJob(jobsDirectory, 'chain-root', now - 3_000, now - 3_000);
+    createCompletedJob(jobsDirectory, 'free-job', now - 2_000, now - 2_000);
+    mockStatuses = [
+      { id: 'chain-root', specialist: 'tester', status: 'done', started_at_ms: now - 3_000, completed_at_ms: now - 3_000 },
+      { id: 'free-job', specialist: 'tester', status: 'done', started_at_ms: now - 2_000, completed_at_ms: now - 2_000 },
+    ];
+    mockReferencedChainRootJobIds = ['chain-root'];
+
+    await invokeClean(['--keep', '0']);
+
+    expect(existsSync(join(jobsDirectory, 'chain-root'))).toBe(true);
+    expect(existsSync(join(jobsDirectory, 'free-job'))).toBe(false);
+  });
+
+  it('--aggressive-prune bypasses chain-root protection', async () => {
+    const now = Date.now();
+    createCompletedJob(jobsDirectory, 'chain-root', now - 3_000, now - 3_000);
+    mockStatuses = [{ id: 'chain-root', specialist: 'tester', status: 'done', started_at_ms: now - 3_000, completed_at_ms: now - 3_000 }];
+    mockReferencedChainRootJobIds = ['chain-root'];
+
+    await invokeClean(['--keep', '0', '--aggressive-prune']);
+
+    expect(existsSync(join(jobsDirectory, 'chain-root'))).toBe(false);
   });
 
   it('--dry-run prints plan and does not delete directories', async () => {

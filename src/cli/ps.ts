@@ -714,14 +714,20 @@ function renderTreeNodes(
   }
 }
 
-function resolveEpicReadinessMap(jobs: readonly SupervisorStatus[]): EpicReadinessMap {
-  const epicIds = [...new Set(jobs.map((job) => job.epic_id).filter((epicId): epicId is string => Boolean(epicId)))];
-  if (epicIds.length === 0) return new Map();
-
+function resolveEpicReadinessMap(jobs: readonly SupervisorStatus[], includeTerminal: boolean): EpicReadinessMap {
+  const epicIds = new Set(jobs.map((job) => job.epic_id).filter((epicId): epicId is string => Boolean(epicId)));
   const sqlite = createObservabilitySqliteClient();
   if (!sqlite) return new Map();
 
   try {
+    if (includeTerminal) {
+      for (const epicRun of sqlite.listEpicRuns()) {
+        if (epicRun.status === 'merged' || epicRun.status === 'failed' || epicRun.status === 'abandoned') {
+          epicIds.add(epicRun.epic_id);
+        }
+      }
+    }
+
     const readinessMap: EpicReadinessMap = new Map();
     for (const epicId of epicIds) {
       const summary = loadEpicReadinessSummary(sqlite, epicId);
@@ -736,10 +742,11 @@ function resolveEpicReadinessMap(jobs: readonly SupervisorStatus[]): EpicReadine
   }
 }
 
-function renderHuman(jobs: SupervisorStatus[], nodes: NodeTree[], trees: WorktreeTree[], all: boolean, epicReadiness: EpicReadinessMap): void {
+function renderHuman(jobs: SupervisorStatus[], nodes: NodeTree[], trees: WorktreeTree[], all: boolean, includeTerminal: boolean, epicReadiness: EpicReadinessMap): void {
   const beadTitles = buildBeadTitleCache(jobs);
   const renderedJobIds = new Set<string>();
   const epicGroups = buildEpicGroups(jobs, epicReadiness);
+  const renderedEpicIds = new Set(epicGroups.map((epic) => epic.epic_id));
 
   console.log('');
 
@@ -793,6 +800,29 @@ function renderHuman(jobs: SupervisorStatus[], nodes: NodeTree[], trees: Worktre
     console.log('');
   }
 
+  if (includeTerminal) {
+    for (const [epicId, readiness] of epicReadiness.entries()) {
+      if (renderedEpicIds.has(epicId)) continue;
+
+      const chainCount = readiness.chains.length;
+      const epicBanner = bold(cyan(`┏━ EPIC ${epicId} ━ ${String(readiness.readiness_state).toUpperCase()} ━ prep 0 ━ chains ${chainCount}`));
+      console.log(epicBanner);
+      console.log(`  ${dim(`state:${readiness.persisted_state}`)} · ${epicStateLabel(readiness.readiness_state)}`);
+      console.log(`  ${bold('Prep')}`);
+      console.log(dim('    (none retained)'));
+      console.log(`  ${bold('Chains')}`);
+      if (readiness.chains.length === 0) {
+        console.log(dim('    (none)'));
+      } else {
+        for (const chain of readiness.chains) {
+          const rootBeadSuffix = chain.chain_root_bead_id ? ` · root:${chain.chain_root_bead_id}` : '';
+          console.log(`    ${bold(chain.chain_id)}${dim(rootBeadSuffix)}${dim(' · no retained jobs')}`);
+        }
+      }
+      console.log('');
+    }
+  }
+
   const legacyNodes = nodes.filter((node) => !node.members.some((member) => member.epic_id));
   const legacyTrees = trees.filter((tree) => !tree.children.some((child) => child.epic_id));
 
@@ -831,7 +861,7 @@ function renderHuman(jobs: SupervisorStatus[], nodes: NodeTree[], trees: Worktre
 
 function renderInspect(jobId: string): void {
   const statuses = withPidLiveness(loadStatuses());
-  const epicReadiness = resolveEpicReadinessMap(statuses);
+  const epicReadiness = resolveEpicReadinessMap(statuses, false);
   const job = statuses.find((s) => s.id.startsWith(jobId));
   if (!job) {
     console.error(`Job not found: ${jobId}`);
@@ -957,7 +987,7 @@ function dedupeStatusesById(statuses: Array<SupervisorStatus & { is_dead: boolea
 
 function render(args: PsArgs): void {
   const statusesWithLiveness = dedupeStatusesById(withPidLiveness(loadStatuses()));
-  const epicReadiness = resolveEpicReadinessMap(statusesWithLiveness);
+  const epicReadiness = resolveEpicReadinessMap(statusesWithLiveness, args.includeTerminal);
 
   const mineBeadIds = args.mine ? loadBeadIdsForCurrentUser() : undefined;
 
@@ -996,7 +1026,7 @@ function render(args: PsArgs): void {
     return;
   }
 
-  renderHuman(visibleStatuses, nodes, trees, args.all, epicReadiness);
+  renderHuman(visibleStatuses, nodes, trees, args.all, args.includeTerminal, epicReadiness);
 }
 
 function renderBuffered(args: PsArgs): string {
