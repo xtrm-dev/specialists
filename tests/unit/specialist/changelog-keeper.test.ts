@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { buildReportBundle } from '../../../scripts/release/xt-reports.ts';
 import { parseSpecialist } from '../../../src/specialist/schema.js';
 import { renderTaskTemplate } from '../../../src/specialist/script-runner.js';
 
@@ -12,67 +13,67 @@ describe('changelog-keeper specialist', () => {
     const result = await loadChangelogKeeperSpec();
     const specialist = result.specialist;
 
-    expect(specialist.execution.permission_required).toBe('READ_ONLY');
+    expect(specialist.execution.permission_required).toBe('MEDIUM');
     expect(specialist.execution.response_format).toBe('markdown');
-    expect(specialist.execution.output_type).toBe('synthesis');
+    expect(specialist.execution.output_type).toBe('workflow');
     expect(specialist.mandatory_rules?.template_sets).toContain('changelog-conventions');
 
-    const outputSchema = specialist.prompt.output_schema as {
-      type?: string;
-      properties?: { sections?: { properties?: Record<string, unknown> } };
-      required?: string[];
-    };
-
-    expect(outputSchema.type).toBe('object');
-    expect(outputSchema.required).toEqual(['unreleased_summary', 'sections']);
-    expect(Object.keys(outputSchema.properties?.sections?.properties ?? {})).toEqual([
-      'added',
-      'changed',
-      'fixed',
-      'removed',
-      'deprecated',
-      'security',
-    ]);
+    expect(specialist.prompt.output_schema).toBeUndefined();
   });
 
-  it('defines pre-scripts for git log and bead query with injected output', async () => {
+  it('injects report bundle pre-script output with cap control', async () => {
     const result = await loadChangelogKeeperSpec();
     const scripts = result.specialist.skills?.scripts ?? [];
 
-    expect(scripts).toHaveLength(2);
+    expect(scripts).toHaveLength(1);
     expect(scripts.every((script) => script.phase === 'pre' && script.inject_output === true)).toBe(true);
-    expect(scripts[0]?.run).toContain('git log --pretty=format:%H||%s||%b -- $prev_tag..$next_tag');
-    expect(scripts[1]?.run).toContain('bd query "closed_at >= $prev_tag_date"');
+    expect(scripts[0]?.run).toContain('scripts/release/xt-reports.ts');
+    expect(scripts[0]?.run).toContain('$prev_tag');
+    expect(scripts[0]?.run).toContain('$next_tag');
   });
 
-  it('renders task template with injected pre-script evidence', async () => {
+  it('renders task template with injected report bundle', async () => {
     const result = await loadChangelogKeeperSpec();
     const rendered = renderTaskTemplate(result.specialist.prompt.task_template, {
       prompt: 'Draft release notes',
       cwd: '/tmp/project',
       prev_tag: 'v3.8.0',
       next_tag: 'v3.9.0',
+      reused_worktree_awareness: '',
+      bead_context: '',
       pre_script_output: [
-        'git log:',
-        'abc123||feat: ship release drafter||',
-        'bd query:',
-        'unitAI-42 closed_at=2026-04-29',
+        '# xt reports document intent and post-mortem context for sessions that contributed to this release.',
+        '## .xtrm/reports/2026-05-03-aa.md',
+        '## .xtrm/reports/2026-05-04-bb.md',
       ].join('\n'),
     });
 
-    expect(rendered).toContain('Draft changelog section for range `v3.8.0`..`v3.9.0`.');
-    expect(rendered).toContain('git log:');
-    expect(rendered).toContain('unitAI-42 closed_at=2026-04-29');
+    expect(rendered).toContain('Inject xt report bundle first, then draft.');
+    expect(rendered).toContain('Keep bundle capped; if note says older reports dropped, trust the bundle and continue.');
   });
 
   it('locks output to markdown body plus JSON tail and strict deprecated semantics', async () => {
     const result = await loadChangelogKeeperSpec();
     const { system, task_template: taskTemplate } = result.specialist.prompt;
 
+    expect(system).toContain('Use those reports to write WHY-grounded entries instead of pure WHAT diffs');
     expect(system).toContain('No meta-commentary');
-    expect(system).toContain('Deprecated is only for explicit sunset/removal notices');
-    expect(system).toContain('No prose outside markdown release section and JSON tail');
-    expect(taskTemplate).toContain('Default to Changed for ordinary implementation work');
-    expect(taskTemplate).toContain('Append JSON tail matching output_schema after markdown body');
+    expect(taskTemplate).toContain('Keep bundle capped; if note says older reports dropped, trust the bundle and continue.');
+  });
+
+  it('drops oldest reports once bundle cap is hit', () => {
+    const bundle = buildReportBundle(
+      Array.from({ length: 5 }, (_, index) => ({
+        file: `.xtrm/reports/2026-05-0${index + 1}-r${index + 1}.md`,
+        date: `2026-05-0${index + 1}`,
+        bytes: 2000,
+        content: `report ${index + 1}\n${'x'.repeat(1800)}`,
+      })),
+      5000,
+    );
+
+    expect(bundle.capped).toBe(true);
+    expect(bundle.reports.length).toBeLessThan(5);
+    expect(bundle.output.startsWith('# xt reports capped at 5000 bytes; oldest reports dropped')).toBe(true);
   });
 });
