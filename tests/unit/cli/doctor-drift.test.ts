@@ -66,6 +66,29 @@ describe('doctor drift detection', () => {
     expect(report.summary.redundant_defaults).toBe(3);
   });
 
+
+  it('emits JSON drift payload when --json passed', async () => {
+    const root = join(tmpdir(), `doctor-drift-json-${crypto.randomUUID()}`);
+    roots.push(root);
+    seedRepo(root);
+    copyCanonical('config/specialists/executor.specialist.json', join(root, 'config', 'specialists', 'executor.specialist.json'));
+    copyCanonical('config/specialists/executor.specialist.json', join(root, '.specialists', 'default', 'executor.specialist.json'));
+
+    const logs: string[] = [];
+    const writes: string[] = [];
+    const originalWrite = process.stdout.write.bind(process.stdout);
+    // @ts-expect-error test spy
+    process.stdout.write = ((chunk: string | Uint8Array) => { writes.push(String(chunk)); return true; }) as typeof process.stdout.write;
+
+    const { run } = await import('../../../src/cli/doctor.js');
+    await run(['--check-drift', '--json', '--root', root]);
+
+    process.stdout.write = originalWrite;
+    const payload = JSON.parse(writes.join('')) as { drift_findings: Array<{ status: string }> };
+    expect(Array.isArray(payload.drift_findings)).toBe(true);
+    expect(payload.drift_findings.some((finding) => finding.status === 'redundant-safe-to-prune')).toBe(true);
+  });
+
   it('pruneStaleDefaults dry-run lists targets without writing', () => {
     const root = join(tmpdir(), `doctor-prune-${crypto.randomUUID()}`);
     roots.push(root);

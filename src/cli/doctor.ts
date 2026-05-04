@@ -593,11 +593,13 @@ function parseDoctorArgs(argv: readonly string[]): DoctorOptions {
   return opts;
 }
 
-function renderDriftTable(root: string): void {
+function renderDriftTable(root: string, json = false): void {
   const report = detectDriftUnderRoot(root);
-  console.log(`
-${bold('specialists doctor drift')}
-`);
+  if (json) {
+    process.stdout.write(`${JSON.stringify({ drift_findings: report.repos.flatMap((repo) => repo.findings) }, null, 2)}\n`);
+    return;
+  }
+  console.log(`\n${bold('specialists doctor drift')}\n`);
   if (report.summary.findings === 0) {
     ok('No drift found');
     return;
@@ -828,7 +830,7 @@ export async function run(argv: readonly string[] = process.argv.slice(3)): Prom
 
   const opts = parseDoctorArgs(argv);
   if (opts.drift) {
-    renderDriftTable(opts.root ?? process.cwd());
+    renderDriftTable(opts.root ?? process.cwd(), opts.json);
     return;
   }
 
