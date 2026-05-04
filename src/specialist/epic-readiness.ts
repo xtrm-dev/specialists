@@ -189,7 +189,9 @@ function toReadinessState(
   const hasFailedChain = chains.some((chain) => chain.state === 'failed');
   const allChainsPass = chains.length === 0 || chains.every((chain) => chain.state === 'pass');
 
-  if (hasFailedPrep || hasFailedChain || persistedState === 'failed') return 'failed';
+  if (hasFailedPrep || hasFailedChain) return 'failed';
+  if (persistedState === 'failed' && allChainsPass) return 'merge_ready';
+  if (persistedState === 'failed') return 'failed';
   if (hasBlockingPrep || hasPendingChain) return persistedState === 'resolving' ? 'resolving' : 'unresolved';
   if (hasBlockedChain) return persistedState === 'resolving' ? 'resolving' : 'blocked';
   if (allChainsPass) return 'merge_ready';
@@ -210,6 +212,7 @@ function toNextState(persistedState: EpicState, readinessState: EpicReadinessSta
   }
 
   if (readinessState === 'merge_ready') {
+    if (persistedState === 'failed') return 'merge_ready';
     if (persistedState === 'open') return transitionEpicState('open', 'resolving');
     if (persistedState === 'resolving') return transitionEpicState('resolving', 'merge_ready');
     return persistedState;
@@ -315,6 +318,8 @@ export function loadEpicReadinessSummary(sqlite: ObservabilitySqliteClient, epic
 
 export function syncEpicStateFromReadiness(sqlite: ObservabilitySqliteClient, summary: EpicReadinessSummary): EpicRunRecord {
   const now = Date.now();
+  const existing = sqlite.readEpicRun(summary.epic_id);
+  const healedFromFailed = summary.persisted_state === 'failed' && summary.readiness_state === 'merge_ready';
   const nextRecord: EpicRunRecord = {
     epic_id: summary.epic_id,
     status: summary.next_state,
@@ -329,10 +334,11 @@ export function syncEpicStateFromReadiness(sqlite: ObservabilitySqliteClient, su
       chains: summary.chains,
       summary: summary.summary,
       evaluated_at_ms: now,
+      note: healedFromFailed ? 'epic reconciler: healed failed -> merge_ready after chain merge' : undefined,
     }),
   };
 
-  if (summary.can_transition || !sqlite.readEpicRun(summary.epic_id)) {
+  if (summary.can_transition || healedFromFailed || !existing) {
     sqlite.upsertEpicRun(nextRecord);
   }
 
