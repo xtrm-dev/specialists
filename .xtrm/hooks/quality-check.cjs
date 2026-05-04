@@ -1234,6 +1234,12 @@ async function main() {
     console.log(
       `${colors.yellow}  3. Continue with your original task once all checks pass${colors.reset}`,
     );
+    // Mirror a concise blocking reason to stderr so Claude Code's harness has something
+    // to report instead of "blocking error / no stderr". The full details are on stdout above.
+    process.stderr.write(
+      `quality-check: ${editedFileErrors.length} blocking issue(s) in ${path.basename(filePath)}\n`,
+    );
+    editedFileErrors.forEach((e) => process.stderr.write(`  - ${e}\n`));
     process.exit(2);
   } else if (dependencyWarnings.length > 0) {
     // Warning - shows but doesn't block
