@@ -67,6 +67,16 @@ describe('script-runner compat guard', () => {
     expect(() => compatGuard({ ...baseSpec, specialist: { ...baseSpec.specialist, execution: { ...baseSpec.specialist.execution, interactive: true } } } as never)).toThrow('interactive');
   });
 
+  it('labels compat guard failure with offending field', () => {
+    try {
+      compatGuard({ ...baseSpec, specialist: { ...baseSpec.specialist, execution: { ...baseSpec.specialist.execution, interactive: true } } } as never);
+      throw new Error('expected compatGuard to throw');
+    } catch (error) {
+      expect(error).toMatchObject({ field: 'execution.interactive' });
+      expect(error).toBeInstanceOf(Error);
+    }
+  });
+
   it('rejects worktree specialist', () => {
     expect(() => compatGuard({ ...baseSpec, specialist: { ...baseSpec.specialist, execution: { ...baseSpec.specialist.execution, requires_worktree: true } } } as never)).toThrow('worktree');
   });

@@ -51,6 +51,16 @@ export interface TrustOptions {
   allowLocalScripts?: boolean;
 }
 
+export class CompatGuardError extends Error {
+  constructor(
+    public readonly field: 'execution.interactive' | 'execution.requires_worktree' | 'execution.permission_required' | 'skills.scripts' | 'skills.paths' | 'prompt.skill_inherit',
+    message: string,
+  ) {
+    super(message);
+    this.name = 'CompatGuardError';
+  }
+}
+
 export interface SkillSource {
   path: string;
   sha256: string;
@@ -77,19 +87,22 @@ function hasUnsubstitutedVariables(template: string, variables: Record<string, s
 
 export function compatGuard(spec: Specialist, trust?: TrustOptions): void {
   const execution = spec.specialist.execution;
-  if (execution.interactive) throw new Error('interactive specialists are not allowed');
-  if (execution.requires_worktree) throw new Error('worktree specialists are not allowed');
-  if (execution.permission_required !== 'READ_ONLY') throw new Error('permission_required must be READ_ONLY');
+  if (execution.interactive) throw new CompatGuardError('execution.interactive', 'interactive specialists are not allowed');
+  if (execution.requires_worktree) throw new CompatGuardError('execution.requires_worktree', 'worktree specialists are not allowed');
+  if (execution.permission_required !== 'READ_ONLY') throw new CompatGuardError('execution.permission_required', 'permission_required must be READ_ONLY');
 
   const hasScripts = (spec.specialist.skills?.scripts?.length ?? 0) > 0;
   if (hasScripts && !trust?.allowLocalScripts) {
-    throw new Error('scripts not allowed (enable with --allow-local-scripts)');
+    throw new CompatGuardError('skills.scripts', 'scripts not allowed (enable with --allow-local-scripts)');
   }
 
   const hasPaths = (spec.specialist.skills?.paths?.length ?? 0) > 0;
   const hasSkillInherit = Boolean(spec.specialist.prompt.skill_inherit);
-  if ((hasPaths || hasSkillInherit) && !trust?.allowSkills) {
-    throw new Error('skills not allowed (enable with --allow-skills)');
+  if (hasPaths && !trust?.allowSkills) {
+    throw new CompatGuardError('skills.paths', 'skills not allowed (enable with --allow-skills)');
+  }
+  if (hasSkillInherit && !trust?.allowSkills) {
+    throw new CompatGuardError('prompt.skill_inherit', 'skills not allowed (enable with --allow-skills)');
   }
 
   if (hasPaths && trust?.allowSkills && trust.allowSkillsRoots && trust.allowSkillsRoots.length > 0) {
@@ -97,7 +110,7 @@ export function compatGuard(spec: Specialist, trust?: TrustOptions): void {
     for (const path of paths) {
       const allowed = trust.allowSkillsRoots.some((root) => path.startsWith(root));
       if (!allowed) {
-        throw new Error(`skill path '${path}' not under any --allow-skills-roots entry`);
+        throw new CompatGuardError('skills.paths', `skill path '${path}' not under any --allow-skills-roots entry`);
       }
     }
   }
