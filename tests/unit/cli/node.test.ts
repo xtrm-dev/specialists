@@ -146,9 +146,25 @@ describe('node CLI run wiring', () => {
       await rm(cwd, { recursive: true, force: true });
     }
 
-    expect(stdoutSpy).toHaveBeenCalledWith('node resolution order: explicit path -> config/nodes -> .specialists/default/nodes\ncustomize repo nodes in config/nodes; managed mirror lives in .specialists/default/nodes');
+    expect(stdoutSpy).toHaveBeenCalledWith('node resolution order: explicit path -> config/nodes -> .specialists/default/nodes -> package config/nodes\ncustomize repo nodes in config/nodes; managed mirror lives in .specialists/default/nodes; package config/nodes is read-only fallback');
     expect(stdoutSpy).toHaveBeenCalledWith(`research\trepo config/nodes\t${join(cwd, 'config', 'nodes', 'research.node.json')}`);
     expect(stdoutSpy).toHaveBeenCalledWith(`fallback\t.specialists/default/nodes\t${join(cwd, '.specialists', 'default', 'nodes', 'fallback.node.json')}`);
+  });
+
+  it('lists package-live node configs when repo dirs absent', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'sp-node-package-live-'));
+    const originalCwd = process.cwd();
+
+    process.chdir(cwd);
+    try {
+      const stdoutSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+      await handleNodeCommand(['list']);
+      expect(stdoutSpy).toHaveBeenCalledWith(expect.stringContaining('package config/nodes'));
+      expect(stdoutSpy).toHaveBeenCalledWith(expect.stringContaining('research.node.json'));
+    } finally {
+      process.chdir(originalCwd);
+      await rm(cwd, { recursive: true, force: true });
+    }
   });
 
   it('exits with code 1 when --context-depth value is missing', async () => {
