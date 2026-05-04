@@ -1,0 +1,68 @@
+{
+  "skill_name": "using-specialists-v3",
+  "evals": [
+    {
+      "id": 1,
+      "eval_name": "role-selection-implementation",
+      "prompt": "Need add one small feature in src/specialist/loader.ts, but I do not know exact path yet. Which specialist should handle discovery and implementation?",
+      "expected_output": "Agent selects explorer or debugger first, not self-investigate. It should mention specialists list --full and then dispatch bead-based specialist work.",
+      "assertions": [
+        {
+          "name": "selects_specialist_role",
+          "description": "Agent names a specialist role appropriate for unknown implementation work"
+        },
+        {
+          "name": "uses_live_registry",
+          "description": "Agent references specialists list --full instead of a static catalog"
+        },
+        {
+          "name": "does_not_self_investigate",
+          "description": "Agent does not read source files and solve it directly"
+        }
+      ],
+      "files": []
+    },
+    {
+      "id": 2,
+      "eval_name": "role-selection-debugging",
+      "prompt": "A specialist chain started failing with a stack trace and inconsistent result state. Who should inspect it, and what command surface should I use to check available flags?",
+      "expected_output": "Agent selects debugger or test-runner, and points to sp help / sp run --help / sp result --help rather than guessing flags.",
+      "assertions": [
+        {
+          "name": "selects_debugging_role",
+          "description": "Agent chooses debugger or test-runner for failure analysis"
+        },
+        {
+          "name": "uses_help_surface",
+          "description": "Agent references sp help or subcommand help for command details"
+        },
+        {
+          "name": "does_not_guess_flags",
+          "description": "Agent does not invent CLI flags from memory"
+        }
+      ],
+      "files": []
+    },
+    {
+      "id": 3,
+      "eval_name": "role-selection-review",
+      "prompt": "Executor finished a change and I need final verification before merge. Which specialist next, and what should it check?",
+      "expected_output": "Agent selects reviewer, explains it verifies executor output against bead contract and diff, and avoids rewriting code itself.",
+      "assertions": [
+        {
+          "name": "selects_reviewer_role",
+          "description": "Agent chooses reviewer for post-implementation verification"
+        },
+        {
+          "name": "checks_contract_and_diff",
+          "description": "Agent states reviewer checks bead contract and diff"
+        },
+        {
+          "name": "does_not_replace_reviewer_with_self",
+          "description": "Agent does not perform the review directly"
+        }
+      ],
+      "files": []
+    }
+  ]
+}
