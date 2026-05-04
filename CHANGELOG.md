@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `src/specialist/porcelain-parser.ts` pure helper extracted from `listSubstantiveWorktreeFiles`; correctly parses `git status --porcelain` v1 (XY+space+path with rename/quoted-path support) — fixes silent auto-commit path corruption that dropped the leading character of modified files (unitAI-fyih8)
 - `sp ps` filter flags: `--running`, `--bead <id>`, `--since <duration>`, `--mine`, `--include-terminal`. `--mine` resolves bead ownership via `bd query "assignee=me" --json`. Filters compose (unitAI-nui6g)
 - Epic state recovery transition: `failed → abandoned` is now allowed via `sp epic abandon` so operators can clean up dead epics without state-machine workarounds (unitAI-nui6g)
+- `claimJobStart` orphan recovery: a 'starting'/'running' row whose owning PID is dead and which hasn't been touched in >60s is auto-cancelled before the next dispatch is refused. Eliminates the manual `sqlite3 UPDATE` fallback after failed `--background` spawns (unitAI-5o6ih)
+- `sp clean --processes` now treats no-PID 'starting' rows as stale after 5 minutes (instead of the 24h `--stale-after` default) — matches the orphan profile of failed dispatches that never recorded a PID (unitAI-5o6ih)
 
 ### Changed
 - Resolver is the only path for computing specialist `--tools`; no env-flag opt-in (unitAI-qujxo.2)
