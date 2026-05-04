@@ -1,4 +1,6 @@
 // tests/unit/specialist/supervisor.test.ts
+// DO NOT add new tests to this file. It is excluded from default vitest run because of FIFO hang in worktree contexts.
+// Run via `npm run test:supervisor`. New tests covering pure functions should go in sibling file (e.g. supervisor-<topic>.test.ts) which IS in default run.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   mkdtempSync,
