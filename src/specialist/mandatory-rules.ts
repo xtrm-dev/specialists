@@ -57,13 +57,19 @@ function mergeIndex(base: MandatoryRulesIndex, overlay: MandatoryRulesIndex): Ma
 export function loadMandatoryRulesIndex(cwd: string): MandatoryRulesIndex | null {
   const sourcePath = resolve(cwd, 'config/mandatory-rules/index.json');
   const canonicalCopyPath = resolve(cwd, '.specialists/default/mandatory-rules/index.json');
+  const userOverlayPath = resolve(cwd, '.specialists/user/mandatory-rules/index.json');
   const packageLivePath = resolveCanonicalAssetDir('mandatory-rules');
   const overlayPath = resolve(cwd, '.specialists/mandatory-rules/index.json');
 
   const packageLiveIndexPath = packageLivePath ? resolve(packageLivePath, 'index.json') : null;
+  const tierPaths = [userOverlayPath, sourcePath, canonicalCopyPath, overlayPath].filter((value): value is string => Boolean(value));
   const tiers: MandatoryRulesIndex[] = [];
-  for (const path of [sourcePath, canonicalCopyPath, packageLiveIndexPath, overlayPath].filter((value): value is string => Boolean(value))) {
+  for (const path of tierPaths) {
     if (existsSync(path)) tiers.push(readJsonFile<MandatoryRulesIndex>(path));
+  }
+
+  if (tiers.length === 0 && packageLiveIndexPath && existsSync(packageLiveIndexPath)) {
+    tiers.push(readJsonFile<MandatoryRulesIndex>(packageLiveIndexPath));
   }
 
   if (tiers.length === 0) {
@@ -168,10 +174,12 @@ function parseMandatoryRulesFrontmatter(content: string, setId: string): Mandato
 }
 
 function readMandatoryRuleSet(cwd: string, id: string): MandatoryRuleSet | null {
+  const packageCanonicalDir = resolveCanonicalAssetDir('mandatory-rules');
   const candidates = [
-    resolve(cwd, `.specialists/mandatory-rules/${id}.md`),
+    resolve(cwd, `.specialists/user/mandatory-rules/${id}.md`),
     resolve(cwd, `.specialists/default/mandatory-rules/${id}.md`),
     resolve(cwd, `config/mandatory-rules/${id}.md`),
+    ...(packageCanonicalDir ? [resolve(packageCanonicalDir, `${id}.md`)] : []),
   ];
 
   const filePath = candidates.find(path => existsSync(path));

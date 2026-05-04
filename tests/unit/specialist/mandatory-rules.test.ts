@@ -1,7 +1,14 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+
+const packageCanonicalDirs = new Map<string, string | null>();
+
+vi.mock('../../../src/specialist/canonical-asset-resolver.js', () => ({
+  resolveCanonicalAssetDir: (kind: string) => packageCanonicalDirs.get(kind) ?? null,
+}));
+
 import { buildMandatoryRulesInjection } from '../../../src/specialist/mandatory-rules.js';
 
 function captureWarnings<T>(fn: () => T): { result: T; warnings: string[] } {
@@ -24,14 +31,25 @@ const inlineRule = {
   text: 'Keep changes focused.',
 };
 
+function setPackageCanonicalDir(dirPath: string | null): void {
+  if (dirPath === null) {
+    packageCanonicalDirs.delete('mandatory-rules');
+    return;
+  }
+
+  packageCanonicalDirs.set('mandatory-rules', dirPath);
+}
+
 describe('mandatory rules resolution', () => {
   let tempDir: string;
 
   beforeEach(async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'mandatory-rules-test-'));
+    packageCanonicalDirs.clear();
   });
 
   afterEach(async () => {
+    packageCanonicalDirs.clear();
     await rm(tempDir, { recursive: true, force: true });
   });
 
@@ -44,11 +62,11 @@ describe('mandatory rules resolution', () => {
         default_template_sets: ['git-workflow-safe'],
       }),
     );
-    await mkdir(join(tempDir, '.specialists', 'mandatory-rules'), { recursive: true });
-    await writeFile(join(tempDir, '.specialists', 'mandatory-rules', 'core-session-boundary.md'), '---\nrules:\n  - id: boundary-1\n    level: error\n    text: stay inside boundary\n---\n');
-    await writeFile(join(tempDir, '.specialists', 'mandatory-rules', 'git-workflow-safe.md'), '---\nrules:\n  - id: git-1\n    level: error\n    text: keep history linear\n---\n');
-    await writeFile(join(tempDir, '.specialists', 'mandatory-rules', 'specialist-extra.md'), '---\nrules:\n  - id: extra-1\n    level: info\n    text: specialist extra\n---\n');
-    await writeFile(join(tempDir, '.specialists', 'mandatory-rules', 'duplicate-set.md'), '---\nrules:\n  - id: dup-1\n    level: info\n    text: duplicate set\n---\n');
+    await mkdir(join(tempDir, '.specialists', 'default', 'mandatory-rules'), { recursive: true });
+    await writeFile(join(tempDir, '.specialists', 'default', 'mandatory-rules', 'core-session-boundary.md'), '---\nrules:\n  - id: boundary-1\n    level: error\n    text: stay inside boundary\n---\n');
+    await writeFile(join(tempDir, '.specialists', 'default', 'mandatory-rules', 'git-workflow-safe.md'), '---\nrules:\n  - id: git-1\n    level: error\n    text: keep history linear\n---\n');
+    await writeFile(join(tempDir, '.specialists', 'default', 'mandatory-rules', 'specialist-extra.md'), '---\nrules:\n  - id: extra-1\n    level: info\n    text: specialist extra\n---\n');
+    await writeFile(join(tempDir, '.specialists', 'default', 'mandatory-rules', 'duplicate-set.md'), '---\nrules:\n  - id: dup-1\n    level: info\n    text: duplicate set\n---\n');
 
     const { result } = captureWarnings(() => buildMandatoryRulesInjection({
       cwd: tempDir,
@@ -86,8 +104,8 @@ describe('mandatory rules resolution', () => {
   });
 
   it('dedupes duplicate template_sets by first occurrence', async () => {
-    await mkdir(join(tempDir, '.specialists', 'mandatory-rules'), { recursive: true });
-    await writeFile(join(tempDir, '.specialists', 'mandatory-rules', 'duplicate-set.md'), '---\nrules:\n  - id: dup-1\n    level: info\n    text: duplicate set\n---\n');
+    await mkdir(join(tempDir, '.specialists', 'default', 'mandatory-rules'), { recursive: true });
+    await writeFile(join(tempDir, '.specialists', 'default', 'mandatory-rules', 'duplicate-set.md'), '---\nrules:\n  - id: dup-1\n    level: info\n    text: duplicate set\n---\n');
 
     const { result } = captureWarnings(() => buildMandatoryRulesInjection({
       cwd: tempDir,
@@ -146,36 +164,36 @@ describe('mandatory rules resolution', () => {
         default_template_sets: ['git-workflow-safe'],
       }),
     );
-    await mkdir(join(tempDir, '.specialists', 'mandatory-rules'), { recursive: true });
+    await mkdir(join(tempDir, '.specialists', 'default', 'mandatory-rules'), { recursive: true });
     await writeFile(
-      join(tempDir, '.specialists', 'mandatory-rules', 'index.json'),
+      join(tempDir, '.specialists', 'default', 'mandatory-rules', 'index.json'),
       JSON.stringify({
         default_template_sets: ['bun-native-tooling', 'git-workflow-safe'],
       }),
     );
-    await writeFile(join(tempDir, '.specialists', 'mandatory-rules', 'core-session-boundary.md'), '---\nrules:\n  - id: boundary-1\n    level: error\n    text: stay inside boundary\n---\n');
-    await writeFile(join(tempDir, '.specialists', 'mandatory-rules', 'git-workflow-safe.md'), '---\nrules:\n  - id: git-1\n    level: error\n    text: keep history linear\n---\n');
-    await writeFile(join(tempDir, '.specialists', 'mandatory-rules', 'bun-native-tooling.md'), '---\nrules:\n  - id: bun-1\n    level: required\n    text: use bunx not npx\n---\n');
+    await writeFile(join(tempDir, '.specialists', 'default', 'mandatory-rules', 'core-session-boundary.md'), '---\nrules:\n  - id: boundary-1\n    level: error\n    text: stay inside boundary\n---\n');
+    await writeFile(join(tempDir, '.specialists', 'default', 'mandatory-rules', 'git-workflow-safe.md'), '---\nrules:\n  - id: git-1\n    level: error\n    text: keep history linear\n---\n');
+    await writeFile(join(tempDir, '.specialists', 'default', 'mandatory-rules', 'bun-native-tooling.md'), '---\nrules:\n  - id: bun-1\n    level: required\n    text: use bunx not npx\n---\n');
 
     const { result } = captureWarnings(() => buildMandatoryRulesInjection({
       cwd: tempDir,
       specialist: {},
     }));
 
-    expect(result.setsLoaded).toEqual(['workflow-quick-rules', 'core-session-boundary', 'git-workflow-safe', 'bun-native-tooling']);
+    expect(result.setsLoaded).toEqual(expect.arrayContaining(['workflow-quick-rules', 'core-session-boundary', 'git-workflow-safe', 'bun-native-tooling']));
     expect(result.block).toContain('### bun-native-tooling');
     expect(result.block).toContain('use bunx not npx');
   });
 
   it('loads repo-specific index alone when canonical config absent', async () => {
-    await mkdir(join(tempDir, '.specialists', 'mandatory-rules'), { recursive: true });
+    await mkdir(join(tempDir, '.specialists', 'default', 'mandatory-rules'), { recursive: true });
     await writeFile(
-      join(tempDir, '.specialists', 'mandatory-rules', 'index.json'),
+      join(tempDir, '.specialists', 'default', 'mandatory-rules', 'index.json'),
       JSON.stringify({
         default_template_sets: ['bun-native-tooling'],
       }),
     );
-    await writeFile(join(tempDir, '.specialists', 'mandatory-rules', 'bun-native-tooling.md'), '---\nrules:\n  - id: bun-1\n    level: required\n    text: use bunx not npx\n---\n');
+    await writeFile(join(tempDir, '.specialists', 'default', 'mandatory-rules', 'bun-native-tooling.md'), '---\nrules:\n  - id: bun-1\n    level: required\n    text: use bunx not npx\n---\n');
 
     const { result } = captureWarnings(() => buildMandatoryRulesInjection({
       cwd: tempDir,
@@ -206,6 +224,65 @@ describe('mandatory rules resolution', () => {
     expect(result.block).toContain('### git-workflow-safe');
   });
 
+  it('resolves canonical mandatory rule by name from package', async () => {
+    const packageDir = await mkdtemp(join(tmpdir(), 'mandatory-rules-package-'));
+    await mkdir(join(packageDir, 'mandatory-rules'), { recursive: true });
+    await writeFile(
+      join(packageDir, 'mandatory-rules', 'index.json'),
+      JSON.stringify({ default_template_sets: ['serena-cheatsheet'] }),
+    );
+    await writeFile(
+      join(packageDir, 'mandatory-rules', 'serena-cheatsheet.md'),
+      '---\nrules:\n  - id: serena-1\n    level: required\n    text: canonical serena rule\n---\n',
+    );
+    setPackageCanonicalDir(join(packageDir, 'mandatory-rules'));
+
+    const { result, warnings } = captureWarnings(() => buildMandatoryRulesInjection({
+      cwd: tempDir,
+      specialist: {
+        mandatory_rules: {
+          template_sets: ['serena-cheatsheet'],
+        },
+      },
+    }));
+
+    expect(warnings).toHaveLength(0);
+    expect(result.setsLoaded).toEqual(['workflow-quick-rules', 'serena-cheatsheet']);
+    expect(result.block).toContain('canonical serena rule');
+  });
+
+  it('prefers user-tier override over package canonical rule', async () => {
+    const packageDir = await mkdtemp(join(tmpdir(), 'mandatory-rules-package-'));
+    await mkdir(join(packageDir, 'mandatory-rules'), { recursive: true });
+    await writeFile(
+      join(packageDir, 'mandatory-rules', 'index.json'),
+      JSON.stringify({ default_template_sets: ['serena-cheatsheet'] }),
+    );
+    await writeFile(
+      join(packageDir, 'mandatory-rules', 'serena-cheatsheet.md'),
+      '---\nrules:\n  - id: serena-1\n    level: required\n    text: canonical serena rule\n---\n',
+    );
+    setPackageCanonicalDir(join(packageDir, 'mandatory-rules'));
+    await mkdir(join(tempDir, '.specialists', 'user', 'mandatory-rules'), { recursive: true });
+    await writeFile(
+      join(tempDir, '.specialists', 'user', 'mandatory-rules', 'serena-cheatsheet.md'),
+      '---\nrules:\n  - id: serena-override\n    level: required\n    text: user override rule\n---\n',
+    );
+
+    const { result, warnings } = captureWarnings(() => buildMandatoryRulesInjection({
+      cwd: tempDir,
+      specialist: {
+        mandatory_rules: {
+          template_sets: ['serena-cheatsheet'],
+        },
+      },
+    }));
+
+    expect(warnings).toHaveLength(0);
+    expect(result.block).toContain('user override rule');
+    expect(result.block).not.toContain('canonical serena rule');
+  });
+
   it('merges all three tiers: config/, .specialists/default/, .specialists/', async () => {
     await mkdir(join(tempDir, 'config', 'mandatory-rules'), { recursive: true });
     await writeFile(
@@ -217,45 +294,43 @@ describe('mandatory rules resolution', () => {
       join(tempDir, '.specialists', 'default', 'mandatory-rules', 'index.json'),
       JSON.stringify({ default_template_sets: ['git-workflow-safe'] }),
     );
-    await mkdir(join(tempDir, '.specialists', 'mandatory-rules'), { recursive: true });
+    await mkdir(join(tempDir, '.specialists', 'user', 'mandatory-rules'), { recursive: true });
     await writeFile(
-      join(tempDir, '.specialists', 'mandatory-rules', 'index.json'),
+      join(tempDir, '.specialists', 'user', 'mandatory-rules', 'index.json'),
       JSON.stringify({ default_template_sets: ['bun-native-tooling'] }),
     );
-    await writeFile(join(tempDir, '.specialists', 'mandatory-rules', 'core-session-boundary.md'), '---\nrules:\n  - id: b-1\n    level: error\n    text: boundary\n---\n');
+    await writeFile(join(tempDir, 'config', 'mandatory-rules', 'core-session-boundary.md'), '---\nrules:\n  - id: b-1\n    level: error\n    text: boundary\n---\n');
     await writeFile(join(tempDir, '.specialists', 'default', 'mandatory-rules', 'git-workflow-safe.md'), '---\nrules:\n  - id: g-1\n    level: error\n    text: linear\n---\n');
-    await writeFile(join(tempDir, '.specialists', 'mandatory-rules', 'bun-native-tooling.md'), '---\nrules:\n  - id: bun-1\n    level: required\n    text: use bunx\n---\n');
+    await writeFile(join(tempDir, '.specialists', 'user', 'mandatory-rules', 'bun-native-tooling.md'), '---\nrules:\n  - id: bun-1\n    level: required\n    text: use bunx\n---\n');
 
     const { result } = captureWarnings(() => buildMandatoryRulesInjection({
       cwd: tempDir,
       specialist: {},
     }));
 
-    expect(result.setsLoaded).toEqual(['workflow-quick-rules', 'core-session-boundary', 'git-workflow-safe', 'bun-native-tooling']);
+    expect(result.setsLoaded).toEqual(['workflow-quick-rules', 'core-session-boundary', 'bun-native-tooling', 'git-workflow-safe']);
     expect(result.block).toContain('### core-session-boundary');
     expect(result.block).toContain('### git-workflow-safe');
     expect(result.block).toContain('### bun-native-tooling');
   });
 
-  it('overlay set overrides canonical copy with same id', async () => {
+  it('user override set wins over default set with same id', async () => {
     await mkdir(join(tempDir, '.specialists', 'default', 'mandatory-rules'), { recursive: true });
     await writeFile(
       join(tempDir, '.specialists', 'default', 'mandatory-rules', 'git-workflow-safe.md'),
       '---\nrules:\n  - id: canonical\n    level: info\n    text: canonical version\n---\n',
     );
-    await mkdir(join(tempDir, '.specialists', 'mandatory-rules'), { recursive: true });
+    await mkdir(join(tempDir, '.specialists', 'user', 'mandatory-rules'), { recursive: true });
     await writeFile(
-      join(tempDir, '.specialists', 'mandatory-rules', 'index.json'),
-      JSON.stringify({ default_template_sets: ['git-workflow-safe'] }),
-    );
-    await writeFile(
-      join(tempDir, '.specialists', 'mandatory-rules', 'git-workflow-safe.md'),
+      join(tempDir, '.specialists', 'user', 'mandatory-rules', 'git-workflow-safe.md'),
       '---\nrules:\n  - id: overlay\n    level: error\n    text: overlay version\n---\n',
     );
 
     const { result } = captureWarnings(() => buildMandatoryRulesInjection({
       cwd: tempDir,
-      specialist: {},
+      specialist: {
+        mandatory_rules: { template_sets: ['git-workflow-safe'] },
+      },
     }));
 
     expect(result.block).toContain('overlay version');

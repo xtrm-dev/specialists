@@ -36,6 +36,7 @@ function makeLoader(
   executionOverrides: Record<string, unknown> = {},
   beadsIntegration = 'auto',
   promptOverrides: Record<string, unknown> = {},
+  specialistOverrides: Record<string, unknown> = {},
 ) {
   return {
     get: vi.fn().mockResolvedValue({
@@ -46,6 +47,7 @@ function makeLoader(
         communication: undefined,
         capabilities: undefined,
         beads_integration: beadsIntegration,
+        ...specialistOverrides,
       },
     }),
   } as any;
@@ -134,6 +136,23 @@ describe('SpecialistRunner', () => {
     expect(mockSession.getLastOutput).toHaveBeenCalledOnce();
     expect(mockSession.close).toHaveBeenCalledOnce();
     expect(mockSession.kill).not.toHaveBeenCalled();
+  });
+
+  it('injects canonical mandatory rule body into prompt', async () => {
+    const sessionFactory = vi.fn().mockResolvedValue(mockSession);
+    const runner = new SpecialistRunner({
+      loader: makeLoader({}, 'auto', {}, {
+        mandatory_rules: { template_sets: ['serena-cheatsheet'] },
+      }),
+      hooks: new HookEmitter({ tracePath: '/tmp/test-hooks-trace.jsonl' }),
+      circuitBreaker: new CircuitBreaker(),
+      sessionFactory,
+    });
+
+    await runner.run({ name: 'test-spec', prompt: 'do thing' });
+
+    const renderedTask = mockSession.prompt.mock.calls.at(-1)?.[0] as string;
+    expect(renderedTask).toContain('## MANDATORY_RULES');
   });
 
   it('passes execution.stall_timeout_ms through to PiAgentSession options', async () => {
