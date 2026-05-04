@@ -146,6 +146,8 @@ export declare class PiAgentSession {
     private _stallError?;
     private _testWindowToolCallIds;
     private _testWindowWithoutIdCount;
+    private _impactWindowToolCallIds;
+    private _impactWindowWithoutIdCount;
     private _metrics;
     readonly meta: AgentSessionMeta;
     private constructor();
@@ -153,9 +155,12 @@ export declare class PiAgentSession {
     start(): Promise<void>;
     private _clearStallTimer;
     private _isTestWindowActive;
+    private _isImpactWindowActive;
     private _resolveStallTimeoutMs;
     private _activateTestWindow;
     private _deactivateTestWindow;
+    private _activateImpactWindow;
+    private _deactivateImpactWindow;
     private _markActivity;
     private _updateTokenUsage;
     private _updateFinishReason;

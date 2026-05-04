@@ -123,6 +123,8 @@ export declare class Supervisor {
     private writeReadyMarker;
     private withComputedLiveness;
     readStatus(id: string): SupervisorStatusView | null;
+    listLiveJobsForBead(beadId: string): string[];
+    emitMetaEvent(jobId: string, model: string, backend: string): void;
     updateJobStatus(id: string, status: Extract<SupervisorJobStatus, 'done' | 'cancelled' | 'error' | 'waiting' | 'running' | 'starting'>, error?: string): SupervisorStatusView | null;
     aggregateJobMetricsBestEffort(jobId: string): void;
     /** List all jobs sorted newest-first. */

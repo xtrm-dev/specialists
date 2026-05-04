@@ -136,6 +136,23 @@ export interface OrphanScanFinding {
     message: string;
     details: Record<string, string | number | boolean | null>;
 }
+type ClaimJobStartResult = {
+    ok: true;
+} | {
+    ok: false;
+    existingJobId: string;
+    existingStatus: string;
+};
+interface ClaimJobStartStore {
+    transaction<T>(callback: () => T): T;
+    findActiveJob(beadId: string | null, specialist: string): {
+        job_id?: string;
+        status?: string;
+    } | undefined;
+    writeStatusRow(status: SupervisorStatus): void;
+    writeEventRow(jobId: string, specialist: string, beadId: string | undefined, event: TimelineEvent): void;
+}
+export declare function claimJobStartWithStore(store: ClaimJobStartStore, status: SupervisorStatus, event: TimelineEvent): ClaimJobStartResult;
 export interface ObservabilitySqliteClient {
     upsertStatus(status: SupervisorStatus): void;
     upsertEpicRun(epic: EpicRunRecord): void;
@@ -143,6 +160,13 @@ export interface ObservabilitySqliteClient {
     upsertStatusWithEvent(status: SupervisorStatus, event: TimelineEvent): void;
     upsertStatusWithEventAndResult(status: SupervisorStatus, event: TimelineEvent, output: string): void;
     appendEvent(jobId: string, specialist: string, beadId: string | undefined, event: TimelineEvent): void;
+    claimJobStart(status: SupervisorStatus, event: TimelineEvent): {
+        ok: true;
+    } | {
+        ok: false;
+        existingJobId: string;
+        existingStatus: string;
+    };
     upsertResult(jobId: string, output: string): void;
     bootstrapNode(nodeRunId: string, nodeName: string, memoryNamespace?: string): void;
     upsertNodeRun(nodeRun: NodeRunRow): void;
@@ -183,9 +207,11 @@ export interface ObservabilitySqliteClient {
     resolveEpicByChainRootBeadId(chainRootBeadId: string): EpicChainRecord | null;
     listEpicChains(epicId: string): EpicChainRecord[];
     deleteEpicChainMembership(epicId: string, chainIds: readonly string[]): string[];
+    listReferencedChainRootJobIds(): string[];
     listEpicChainsWithLatestJob(epicId: string): EpicChainLatestJobRecord[];
     readChainIdentity(jobId: string): PersistedChainIdentity | null;
     listChainJobIds(chainId: string): string[];
+    listLiveJobsForBead(beadId: string): string[];
     resolveChainEpicLinkByJobId(jobId: string): ChainEpicLinkRecord | null;
     readEvents(jobId: string): TimelineEvent[];
     readEventsAfterSeq(jobId: string, afterSeq: number): TimelineEvent[];

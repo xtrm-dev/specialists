@@ -7471,6 +7471,7 @@ function migrateToV8(db) {
   }
   db.run("CREATE INDEX IF NOT EXISTS idx_jobs_chain ON specialist_jobs(chain_id) WHERE chain_id IS NOT NULL");
   db.run("CREATE INDEX IF NOT EXISTS idx_jobs_epic ON specialist_jobs(epic_id) WHERE epic_id IS NOT NULL");
+  db.run("CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_active_bead_specialist ON specialist_jobs(bead_id, specialist) WHERE bead_id IS NOT NULL AND status IN ('starting', 'running')");
   db.run(`
     CREATE TABLE IF NOT EXISTS epic_runs (
       epic_id         TEXT PRIMARY KEY,
@@ -7567,6 +7568,17 @@ function migrateToV10(db) {
       VALUES (10, strftime('%s', 'now') * 1000);
   `);
 }
+function claimJobStartWithStore(store, status, event) {
+  return withRetry(() => store.transaction(() => {
+    const existing = store.findActiveJob(status.bead_id ?? null, status.specialist);
+    if (existing?.job_id && existing.job_id !== status.id) {
+      return { ok: false, existingJobId: existing.job_id, existingStatus: existing.status ?? "starting" };
+    }
+    store.writeStatusRow(status);
+    store.writeEventRow(status.id, status.specialist, status.bead_id, event);
+    return { ok: true };
+  }), "claimJobStart");
+}
 
 class SqliteClient {
   db;
@@ -7658,6 +7670,22 @@ class SqliteClient {
       INSERT INTO specialist_events (job_id, seq, specialist, bead_id, t, type, event_json)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `, [jobId, seq, specialist, beadId ?? null, event.t, event.type, eventJson]);
+  }
+  claimJobStart(status, event) {
+    return claimJobStartWithStore({
+      transaction: (callback) => this.db.transaction(callback),
+      findActiveJob: (beadId, specialist) => this.db.query(`
+          SELECT job_id, status
+          FROM specialist_jobs
+          WHERE bead_id = ?
+            AND specialist = ?
+            AND status IN ('starting', 'running')
+          ORDER BY updated_at_ms DESC
+          LIMIT 1
+        `).get(beadId, specialist),
+      writeStatusRow: (nextStatus) => this.writeStatusRow(nextStatus),
+      writeEventRow: (jobId, specialist, beadId, nextEvent) => this.writeEventRow(jobId, specialist, beadId, nextEvent)
+    }, status, event);
   }
   writeResultRow(jobId, output) {
     this.db.run(`
@@ -8174,6 +8202,16 @@ class SqliteClient {
       return removable;
     }, "deleteEpicChainMembership");
   }
+  listReferencedChainRootJobIds() {
+    return withRetry(() => {
+      const rows = this.db.query(`
+        SELECT DISTINCT chain_root_job_id
+        FROM epic_chain_membership
+        WHERE chain_root_job_id IS NOT NULL AND chain_root_job_id != ''
+      `).all();
+      return rows.map((row) => row.chain_root_job_id).filter((jobId) => typeof jobId === "string" && jobId.length > 0);
+    }, "listReferencedChainRootJobIds");
+  }
   listEpicChainsWithLatestJob(epicId) {
     return withRetry(() => {
       const rows = this.db.query(`
@@ -8250,6 +8288,18 @@ class SqliteClient {
       `).all(chainId);
       return rows.map((row) => row.job_id).filter((jobId) => typeof jobId === "string" && jobId.length > 0);
     }, "listChainJobIds");
+  }
+  listLiveJobsForBead(beadId) {
+    return withRetry(() => {
+      const rows = this.db.query(`
+        SELECT job_id
+        FROM specialist_jobs
+        WHERE bead_id = ?
+          AND status IN ('starting', 'running', 'waiting')
+        ORDER BY updated_at_ms ASC
+      `).all(beadId);
+      return rows.map((row) => row.job_id).filter((jobId) => typeof jobId === "string" && jobId.length > 0);
+    }, "listLiveJobsForBead");
   }
   resolveChainEpicLinkByJobId(jobId) {
     return withRetry(() => {
@@ -9244,7 +9294,7 @@ function isRetryableModelFailure(stderr, text) {
 // src/specialist/loader.ts
 import { readdir, readFile, stat } from "node:fs/promises";
 import { basename, join as join2 } from "node:path";
-import { existsSync as existsSync2 } from "node:fs";
+import { existsSync as existsSync3 } from "node:fs";
 
 // node_modules/yaml/dist/index.js
 var composer = require_composer();
@@ -13273,6 +13323,20 @@ ${result.warnings.map((w) => `  ⚠ ${w}`).join(`
   return SpecialistSchema.parseAsync(raw);
 }
 
+// src/specialist/canonical-asset-resolver.ts
+import { existsSync as existsSync2 } from "node:fs";
+import { fileURLToPath } from "node:url";
+function resolveCanonicalAssetDir(relativePath) {
+  const configPath = `config/${relativePath}`;
+  let resolved = fileURLToPath(new URL(`../${configPath}`, import.meta.url));
+  if (existsSync2(resolved))
+    return resolved;
+  resolved = fileURLToPath(new URL(`../../${configPath}`, import.meta.url));
+  if (existsSync2(resolved))
+    return resolved;
+  return null;
+}
+
 // src/specialist/loader.ts
 class SpecialistLoader {
   cache = new Map;
@@ -13287,11 +13351,12 @@ class SpecialistLoader {
       { path: join2(this.projectDir, ".specialists", "default"), scope: "default", source: "default-mirror" },
       { path: join2(this.projectDir, ".specialists", "default", "specialists"), scope: "default", source: "legacy" },
       { path: join2(this.projectDir, "config", "specialists"), scope: "package", source: "package-fallback" },
+      { path: resolveCanonicalAssetDir("specialists") ?? "", scope: "package", source: "package-live" },
       { path: join2(this.projectDir, "specialists"), scope: "default", source: "legacy" },
       { path: join2(this.projectDir, ".claude", "specialists"), scope: "default", source: "legacy" },
       { path: join2(this.projectDir, ".agent-forge", "specialists"), scope: "default", source: "legacy" }
     ];
-    return dirs.filter((d) => existsSync2(d.path));
+    return dirs.filter((d) => d.path && existsSync3(d.path));
   }
   toJson(content, isYaml) {
     if (!isYaml)
@@ -13300,11 +13365,11 @@ class SpecialistLoader {
   }
   resolveSpecialistPath(dirPath, specialistName) {
     const jsonPath = join2(dirPath, `${specialistName}.specialist.json`);
-    if (existsSync2(jsonPath)) {
+    if (existsSync3(jsonPath)) {
       return { filePath: jsonPath, deprecatedYaml: false };
     }
     const yamlPath = join2(dirPath, `${specialistName}.specialist.yaml`);
-    if (existsSync2(yamlPath)) {
+    if (existsSync3(yamlPath)) {
       return { filePath: yamlPath, deprecatedYaml: true };
     }
     return null;

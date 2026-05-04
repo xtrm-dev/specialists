@@ -4,8 +4,8 @@ export declare const feedSpecialistSchema: z.ZodObject<{
     cursor: z.ZodDefault<z.ZodOptional<z.ZodNumber>>;
     limit: z.ZodDefault<z.ZodOptional<z.ZodNumber>>;
 }, "strip", z.ZodTypeAny, {
-    limit: number;
     job_id: string;
+    limit: number;
     cursor: number;
 }, {
     job_id: string;
@@ -20,8 +20,8 @@ export declare function createFeedSpecialistTool(jobsDir: string): {
         cursor: z.ZodDefault<z.ZodOptional<z.ZodNumber>>;
         limit: z.ZodDefault<z.ZodOptional<z.ZodNumber>>;
     }, "strip", z.ZodTypeAny, {
-        limit: number;
         job_id: string;
+        limit: number;
         cursor: number;
     }, {
         job_id: string;

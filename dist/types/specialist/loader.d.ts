@@ -21,7 +21,7 @@ export interface SpecialistSummary {
      * Scope says where override came from.
      * user = repo authoring layer, default = repo-managed mirror, package = upstream fallback.
      */
-    source: 'user' | 'default-mirror' | 'package-fallback' | 'legacy';
+    source: 'user' | 'default-mirror' | 'package-fallback' | 'package-live' | 'legacy';
     filePath: string;
     updated?: string;
     filestoWatch?: string[];
