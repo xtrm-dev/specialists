@@ -759,6 +759,8 @@ export async function run(): Promise<void> {
       keepAlive: args.keepAlive,
       noKeepAlive: args.noKeepAlive,
       beadsWriteNotes,
+      forceJob: args.forceJob,
+      permissionRequired: perm,
       workingDirectory,
       reusedFromJobId,
       worktreeOwnerJobId,

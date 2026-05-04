@@ -1006,6 +1006,11 @@ export class Supervisor {
     this.opts.onJobStarted?.({ id });
 
     let statusSnapshot: SupervisorStatus = initialStatus;
+    let runStartClaimed = false;
+    const shouldClaimRunStart = runOptions.permissionRequired !== 'READ_ONLY'
+      && runOptions.permissionRequired !== undefined
+      && !runOptions.forceJob
+      && !!initialStatus.bead_id;
     const setStatus = (updates: Partial<SupervisorStatus>): void => {
       statusSnapshot = { ...statusSnapshot, ...updates };
       this.writeStatusFile(id, statusSnapshot);
@@ -1077,12 +1082,28 @@ export class Supervisor {
       runOptions.inputBeadId,
       statusSnapshot.startup_context,
     ));
-    const runStartPersisted = this.withSqliteOperation('upsertStatusWithEvent:run_start', (client) => {
-      client.upsertStatusWithEvent(statusSnapshot, runStartEvent);
-      return true;
-    });
-    if (runStartPersisted === undefined) {
-      throw new Error('[supervisor] SQLite upsertStatusWithEvent failed during run start: database client unavailable');
+    if (shouldClaimRunStart && this.sqliteClient) {
+      const claimResult = this.withSqliteOperation('claimJobStart', (client) => client.claimJobStart(statusSnapshot, runStartEvent));
+      if (!claimResult) {
+        throw new Error('[supervisor] SQLite claimJobStart failed: database client unavailable');
+      }
+      if (!claimResult.ok && claimResult.existingJobId !== id) {
+        throw new Error(
+          `Refusing job start for bead '${statusSnapshot.bead_id ?? 'unknown'}' specialist '${statusSnapshot.specialist}': ` +
+          `existing ${claimResult.existingStatus} job '${claimResult.existingJobId}' already active. ` +
+          `Wait for it to finish or rerun with --force-job.`,
+        );
+      }
+      runStartClaimed = true;
+    }
+    if (!runStartClaimed) {
+      const runStartPersisted = this.withSqliteOperation('upsertStatusWithEvent:run_start', (client) => {
+        client.upsertStatusWithEvent(statusSnapshot, runStartEvent);
+        return true;
+      });
+      if (runStartPersisted === undefined) {
+        throw new Error('[supervisor] SQLite upsertStatusWithEvent failed during run start: database client unavailable');
+      }
     }
 
     // Create a named FIFO for cross-process steering (e.g. `specialists steer <id> "msg"`)
