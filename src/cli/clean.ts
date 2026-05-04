@@ -232,8 +232,14 @@ function getProcessLiveness(status: SupervisorStatus): 'alive' | 'dead' | 'inval
   }
 }
 
+/** No-PID 'starting' rows are nearly always orphans from a failed dispatch.
+ * They never received a heartbeat, so the long --stale-after window is
+ * inappropriate. Shorten it so default `sp clean --processes` reclaims them. */
+const STARTING_NO_PID_STALE_MS = 5 * 60 * 1000;
+
 function selectStaleProcesses(statuses: readonly SupervisorStatus[], staleAfterHours: number): StaleProcessCandidate[] {
   const cutoffMs = Date.now() - staleAfterHours * 60 * 60 * 1000;
+  const startingNoPidCutoffMs = Date.now() - STARTING_NO_PID_STALE_MS;
   const staleJobs: StaleProcessCandidate[] = [];
   for (const status of statuses) {
     if (!STALE_PROCESS_STATUSES.has(status.status)) continue;
@@ -246,7 +252,8 @@ function selectStaleProcesses(statuses: readonly SupervisorStatus[], staleAfterH
     }
 
     const updatedAtMs = (status as SupervisorStatus & { updated_at_ms?: number }).updated_at_ms ?? 0;
-    if (updatedAtMs < cutoffMs) staleJobs.push({ status, reason: 'stale-update' });
+    const effectiveCutoff = status.status === 'starting' ? Math.max(startingNoPidCutoffMs, cutoffMs) : cutoffMs;
+    if (updatedAtMs < effectiveCutoff) staleJobs.push({ status, reason: 'stale-update' });
   }
   return staleJobs;
 }

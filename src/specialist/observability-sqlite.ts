@@ -941,22 +941,63 @@ export interface OrphanScanFinding {
 
 type ClaimJobStartResult = { ok: true } | { ok: false; existingJobId: string; existingStatus: string };
 
+interface ActiveJobRow {
+  job_id?: string;
+  status?: string;
+  pid?: number;
+  updated_at_ms?: number;
+}
+
 interface ClaimJobStartStore {
   transaction<T>(callback: () => T): T;
-  findActiveJob(beadId: string | null, specialist: string): { job_id?: string; status?: string } | undefined;
+  findActiveJob(beadId: string | null, specialist: string): ActiveJobRow | undefined;
   writeStatusRow(status: SupervisorStatus): void;
   writeEventRow(jobId: string, specialist: string, beadId: string | undefined, event: TimelineEvent): void;
+  /** Mark a stale claim row as cancelled. Optional for backward-compat with simpler test stores. */
+  cancelStaleClaim?(jobId: string): void;
+}
+
+/** Minimum age for a 'starting'/'running' row to be considered orphaned and reclaim-eligible. */
+export const STALE_CLAIM_AGE_MS = 60_000;
+
+function defaultIsPidAlive(pid: number | undefined): boolean {
+  if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export interface ClaimJobStartOptions {
+  isPidAlive?: (pid: number | undefined) => boolean;
+  nowMs?: () => number;
+  staleClaimAgeMs?: number;
 }
 
 export function claimJobStartWithStore(
   store: ClaimJobStartStore,
   status: SupervisorStatus,
   event: TimelineEvent,
+  options: ClaimJobStartOptions = {},
 ): ClaimJobStartResult {
+  const isPidAlive = options.isPidAlive ?? defaultIsPidAlive;
+  const nowMs = options.nowMs ?? Date.now;
+  const staleAgeMs = options.staleClaimAgeMs ?? STALE_CLAIM_AGE_MS;
+
   return withRetry(() => store.transaction(() => {
     const existing = store.findActiveJob(status.bead_id ?? null, status.specialist);
     if (existing?.job_id && existing.job_id !== status.id) {
-      return { ok: false as const, existingJobId: existing.job_id, existingStatus: existing.status ?? 'starting' };
+      const updatedAtMs = existing.updated_at_ms ?? 0;
+      const isStale = updatedAtMs > 0 && (nowMs() - updatedAtMs) > staleAgeMs && !isPidAlive(existing.pid);
+      if (isStale && store.cancelStaleClaim) {
+        // Orphan: dead/missing PID + row hasn't been touched in >staleAgeMs.
+        // Cancel it transactionally and proceed with the new claim.
+        store.cancelStaleClaim(existing.job_id);
+      } else {
+        return { ok: false as const, existingJobId: existing.job_id, existingStatus: existing.status ?? 'starting' };
+      }
     }
 
     store.writeStatusRow(status);
@@ -1133,16 +1174,30 @@ class SqliteClient implements ObservabilitySqliteClient {
       {
         transaction: <T>(callback: () => T) => this.db.transaction(callback),
         findActiveJob: (beadId, specialist) => this.db.query(`
-          SELECT job_id, status
+          SELECT
+            job_id,
+            status,
+            updated_at_ms,
+            CAST(JSON_EXTRACT(status_json, '$.pid') AS INTEGER) AS pid
           FROM specialist_jobs
           WHERE bead_id = ?
             AND specialist = ?
             AND status IN ('starting', 'running')
           ORDER BY updated_at_ms DESC
           LIMIT 1
-        `).get(beadId, specialist) as { job_id?: string; status?: string } | undefined,
+        `).get(beadId, specialist) as { job_id?: string; status?: string; pid?: number; updated_at_ms?: number } | undefined,
         writeStatusRow: (nextStatus) => this.writeStatusRow(nextStatus),
         writeEventRow: (jobId, specialist, beadId, nextEvent) => this.writeEventRow(jobId, specialist, beadId, nextEvent),
+        cancelStaleClaim: (jobId) => {
+          const nowMs = Date.now();
+          this.db.run(`
+            UPDATE specialist_jobs
+            SET status = 'cancelled',
+                status_json = JSON_PATCH(status_json, JSON_OBJECT('status', 'cancelled', 'cancelled_reason', 'orphan-claim-stale')),
+                updated_at_ms = ?
+            WHERE job_id = ?
+          `, [nowMs, jobId]);
+        },
       },
       status,
       event,
