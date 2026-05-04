@@ -90,3 +90,5 @@
 - 2026-04-30T21:01:17+00:00: Updated docs/design/gzrx-tool-catalog.md with in-pi tool catalog evidence, tier policy, fallback semantics, and migration plan for unitAI-gzrx.
 
 - 2026-05-04: Fixed specialist startup regression where Bun sqlite transaction wrapper in claimJobStart was returned instead of invoked; MEDIUM/HIGH --bead jobs now persist run_start again.
+
+- 2026-05-04: Updated config/skills/using-specialists-v2/SKILL.md and .xtrm mirror to reflect latest xt report orchestration lessons: nested sp run stall, --from-source evidence, GitNexus stall fallback, duplicate dispatch/stop safety, noisy test triage, epic abandon cleanup.

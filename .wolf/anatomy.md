@@ -1209,3 +1209,11 @@
 ## docs/design/
 
 - `docs/design/gzrx-tool-catalog.md` — Design for centralized specialists manifest, tool catalog, capability tier policy, fallback semantics, and resolved config debug surface (~5200 tok)
+
+## config/skills/using-specialists-v2/
+
+- `SKILL.md` — Canonical Specialists V2 orchestration skill; v1.2 includes latest xt report lessons for nested-sp-run stalls, --from-source verification, GitNexus stall fallback, dispatch/stop safety, test triage, and epic cleanup.
+
+## .xtrm/skills/default/using-specialists-v2/
+
+- `SKILL.md` — Installed mirror of canonical using-specialists-v2 skill; keep synced from config/skills/using-specialists-v2/SKILL.md.
