@@ -895,9 +895,13 @@ The new `edit` command supports full dot-path syntax, presets, array operations,
 
 While `config get`/`config set` are deprecated aliases of `edit`, the `config show <name> --resolved` subcommand has **no equivalent on `edit`** and remains the only surface for inspecting how a specialist's `--tools` argument is computed at session start.
 
+Use `--from-source` inside worktrees when you need resolver behavior from local source instead of installed dist:
+
 ```bash
-specialists config show <name> --resolved
+specialists config show <name> --resolved --from-source
 ```
+
+`--from-source` shells out through `bunx tsx src/index.ts ...` and does not need a rebuild. If `bunx` or `tsx` is unavailable, command exits with a clear error.
 
 Output sections (in order):
 
