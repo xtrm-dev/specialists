@@ -1231,3 +1231,6 @@
 - 2026-05-04: Fixed specialists-creator validate-specialist helper import path so documented project-root validation command works; logged as bug-012.
 
 - 2026-05-04: Fixed repo-local mandatory rule resolution: `.specialists/mandatory-rules/<id>.md` is now searched when `.specialists/mandatory-rules/index.json` references a set; `bun-native-tooling` stays repo-local, not canonical.
+
+- 2026-05-04: Updated config/skills/using-specialists-v2/SKILL.md to route code-sanity as optional pre-review implementation smell pass and security-auditor as LOW recommendation-only security/dependency audit in implementation chains.
+

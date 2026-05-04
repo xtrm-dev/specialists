@@ -214,11 +214,13 @@ Run `specialists list` if you need the live registry. Choose by task, not by hab
 | Planning/decomposition | `planner` | You need beads, dependencies, file scopes, or sequencing. |
 | Design/tradeoffs | `overthinker` | The approach is risky, ambiguous, or needs critique. |
 | Implementation | `executor` | The contract is clear enough to write code or docs. |
-| Compliance/code review | `reviewer` | An executor/debugger produced changes that need a verdict. |
+| Compliance/code review | `reviewer` | An executor/debugger produced changes that need the final PASS/PARTIAL/FAIL verdict. |
+| Implementation sanity | `code-sanity` | You want a cheap READ_ONLY smell pass for simplicity, type safety, dead code, brittle async/error handling, or maintainability before reviewer. |
+| Security/dependency audit | `security-auditor` | You need threat modeling, secure-code review, package advisory triage, or agent/config security scanning. LOW: scan/read/recommend only. |
 | Multiple review perspectives | `parallel-review` | A critical diff needs independent review passes. |
 | Test execution | `test-runner` | You need suites run and failures interpreted. |
 | Docs audit/sync | `sync-docs` | Docs may be stale or need targeted synchronization. |
-| External/live research | `researcher` | Current library/docs/media lookup is needed. |
+| External/live research | `researcher` | Current non-security library/docs/media lookup is needed. |
 | Specialist config | `specialists-creator` | Creating or changing specialist JSON/config. |
 | Release publication (end-to-end) | `changelog-keeper` | A new tag is being cut. MEDIUM specialist: drafts CHANGELOG section from xt reports, bumps package.json, rebuilds dist, commits, tags, pushes. Use the `releasing` skill to dispatch. |
 
@@ -227,7 +229,9 @@ Selection rules:
 - Explorer is READ_ONLY and should answer specific questions.
 - Debugger is better than explorer for failures because it traces causes and remediation.
 - Executor does not own full test validation; use reviewer/test-runner for that phase.
-- Reviewer always uses its own bead plus `--job <executor-job>`.
+- Code-sanity is optional and non-blocking by default: use it when a diff smells overcomplicated or type-risky, then resume executor with concrete findings. It is not a merge gate.
+- Security-auditor may run safe local audit commands and web/source research, but must not edit files, update dependencies, exfiltrate secrets, or run destructive/live-target exploit tests. Executor applies any recommended fixes in a separate bead.
+- Reviewer always uses its own bead plus `--job <executor-job>` and remains the final merge gate.
 - Sync-docs is for audit/sync; executor is for heavy doc rewrites.
 - Specialists-creator should precede specialist config/schema edits.
 
@@ -243,6 +247,8 @@ specialists doctor --check-drift                 # inspect stale .specialists/de
 sp prune-stale-defaults --dry-run                # preview redundant default snapshots
 specialists run <name> --bead <id> --background
 specialists run executor --bead <impl-bead> --background       # worktree auto-provisioned
+specialists run code-sanity --bead <sanity-bead> --job <exec-job> --keep-alive --background
+specialists run security-auditor --bead <security-bead> --job <exec-job> --keep-alive --background
 specialists run reviewer --bead <review-bead> --job <exec-job> --keep-alive --background
 specialists ps
 specialists ps <job-id>
@@ -336,6 +342,42 @@ bd dep add <impl> <explore-or-task>
 specialists run executor --worktree --bead <impl> --context-depth 3 --background
 specialists result <exec-job>
 ```
+
+Optional code-sanity pass for implementation smell checks (use when the diff is non-trivial or likely to accumulate agent-code complexity):
+
+```bash
+bd create --title "Code sanity check token refresh retry" --type task --priority 3 \
+  --description "PROBLEM: Cheap READ_ONLY sanity pass for executor implementation quality before final review.
+SUCCESS: Identify concrete simplicity/type-safety/maintainability findings, or return OK.
+SCOPE: executor job <exec-job>, implementation diff only.
+NON_GOALS: No requirements verdict, no security audit, no test execution, no edits.
+CONSTRAINTS: At most 5 concrete findings; cite files/symbols/lines where possible.
+VALIDATION: Findings are suitable to paste into specialists resume <exec-job>.
+OUTPUT: OK/FINDINGS/BLOCKED with handoff."
+bd dep add <sanity> <impl>
+specialists run code-sanity --bead <sanity> --job <exec-job> --context-depth 3 --keep-alive --background
+specialists result <sanity-job>
+```
+
+If code-sanity returns `FINDINGS`, resume executor with those concrete instructions, then rerun code-sanity only if the fixes were substantive. Do not treat code-sanity `OK` as reviewer PASS.
+
+Optional security pass when the task touches auth, secrets, input handling, dependency updates, package advisories, agent config, hooks, or exposed endpoints:
+
+```bash
+bd create --title "Security audit token refresh retry" --type task --priority 2 \
+  --description "PROBLEM: Scoped security/dependency/config audit for executor changes.
+SUCCESS: Identify evidence-backed security findings or return no findings.
+SCOPE: executor job <exec-job>, changed files, relevant manifests/config only.
+NON_GOALS: No edits, no package updates, no destructive scans, no live exploit testing.
+CONSTRAINTS: LOW permission; recommendations only. HN/social signals are not authoritative proof.
+VALIDATION: Findings cite local evidence or OSV/GHSA/NVD/vendor/package-audit sources.
+OUTPUT: Security audit summary, findings, dependency triage, residual risk."
+bd dep add <security> <impl>
+specialists run security-auditor --bead <security> --job <exec-job> --context-depth 3 --keep-alive --background
+specialists result <security-job>
+```
+
+If security-auditor recommends code or dependency changes, create/resume an executor fix bead. Do not let security-auditor apply updates.
 
 Create review bead:
 
@@ -450,6 +492,12 @@ Standard loop:
 ```text
 executor --worktree --bead impl
   -> waiting after turn
+optional code-sanity --bead sanity --job exec-job
+  -> OK: continue
+  -> FINDINGS: resume executor with exact sanity findings
+optional security-auditor --bead security --job exec-job
+  -> no findings: continue
+  -> findings: create/resume executor fix bead; auditor never edits
 reviewer --bead review --job exec-job
   -> PASS: verify commit, publish, stop members if needed
   -> PARTIAL: resume executor with exact findings
@@ -458,7 +506,7 @@ reviewer --bead review --job exec-job
 
 Prefer `sp resume <exec-job>` over a new fix executor when the original job is waiting and context is healthy. Use a new fix bead with `--job <exec-job>` only when the original executor is dead, context exhausted, or a separate audit trail is required.
 
-Reviewer output must be consumed before publishing. Do not treat job completion as equivalent to acceptance.
+Code-sanity and security-auditor outputs are advisory inputs to the chain; reviewer output must still be consumed before publishing. Do not treat job completion, code-sanity OK, or security no-findings as equivalent to reviewer acceptance.
 
 ## Dependency Mapping
 

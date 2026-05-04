@@ -108,3 +108,6 @@
 - 2026-05-04: validate-specialist.ts import path must mirror scaffold-specialist.ts (../../../../src/...) from config/skills/specialists-creator/scripts.
 
 - 2026-05-04: `bun-native-tooling` is repo-local policy only; loader must read `.specialists/mandatory-rules/<id>.md` so downstream projects do not inherit Bun-specific guidance.
+
+- 2026-05-04: using-specialists-v2 workflow now treats code-sanity/security-auditor as advisory stages before reviewer; reviewer remains final merge gate and security-auditor never edits/applies package updates.
+
