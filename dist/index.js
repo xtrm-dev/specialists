@@ -21532,6 +21532,7 @@ function readMandatoryRuleSet(cwd, id) {
   const packageCanonicalDir = resolveCanonicalAssetDir("mandatory-rules");
   const candidates = [
     resolve3(cwd, `.specialists/user/mandatory-rules/${id}.md`),
+    resolve3(cwd, `.specialists/mandatory-rules/${id}.md`),
     resolve3(cwd, `.specialists/default/mandatory-rules/${id}.md`),
     resolve3(cwd, `config/mandatory-rules/${id}.md`),
     ...packageCanonicalDir ? [resolve3(packageCanonicalDir, `${id}.md`)] : []

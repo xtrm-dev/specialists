@@ -1229,3 +1229,5 @@
 - 2026-05-04: Added config/specialists/code-sanity.specialist.json — READ_ONLY bounded implementation sanity pass for executor diffs before reviewer, using GitNexus/Serena tool surface and clean-code guidance.
 
 - 2026-05-04: Fixed specialists-creator validate-specialist helper import path so documented project-root validation command works; logged as bug-012.
+
+- 2026-05-04: Fixed repo-local mandatory rule resolution: `.specialists/mandatory-rules/<id>.md` is now searched when `.specialists/mandatory-rules/index.json` references a set; `bun-native-tooling` stays repo-local, not canonical.

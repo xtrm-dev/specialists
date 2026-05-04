@@ -106,3 +106,5 @@
 - 2026-05-04: Created code-sanity specialist config: READ_ONLY, small model, bounded OK/max-5 findings pass between executor and reviewer; final reviewer remains merge gate.
 
 - 2026-05-04: validate-specialist.ts import path must mirror scaffold-specialist.ts (../../../../src/...) from config/skills/specialists-creator/scripts.
+
+- 2026-05-04: `bun-native-tooling` is repo-local policy only; loader must read `.specialists/mandatory-rules/<id>.md` so downstream projects do not inherit Bun-specific guidance.

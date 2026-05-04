@@ -185,6 +185,29 @@ describe('mandatory rules resolution', () => {
     expect(result.block).toContain('use bunx not npx');
   });
 
+
+  it('loads repo-local .specialists/mandatory-rules set files referenced by repo-local index', async () => {
+    await mkdir(join(tempDir, '.specialists', 'mandatory-rules'), { recursive: true });
+    await writeFile(
+      join(tempDir, '.specialists', 'mandatory-rules', 'index.json'),
+      JSON.stringify({ default_template_sets: ['bun-native-tooling'] }),
+    );
+    await writeFile(
+      join(tempDir, '.specialists', 'mandatory-rules', 'bun-native-tooling.md'),
+      '---\nrules:\n  - id: bun-1\n    level: required\n    text: use bunx not npx\n---\n',
+    );
+
+    const { result, warnings } = captureWarnings(() => buildMandatoryRulesInjection({
+      cwd: tempDir,
+      specialist: {},
+    }));
+
+    expect(warnings).toHaveLength(0);
+    expect(result.setsLoaded).toEqual(['workflow-quick-rules', 'bun-native-tooling']);
+    expect(result.block).toContain('### bun-native-tooling');
+    expect(result.block).toContain('use bunx not npx');
+  });
+
   it('loads repo-specific index alone when canonical config absent', async () => {
     await mkdir(join(tempDir, '.specialists', 'default', 'mandatory-rules'), { recursive: true });
     await writeFile(
