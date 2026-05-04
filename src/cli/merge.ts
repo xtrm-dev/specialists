@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createObservabilitySqliteClient } from '../specialist/observability-sqlite.js';
+import { syncEpicState } from '../specialist/epic-reconciler.js';
 import { isEpicUnresolvedState, type EpicState } from '../specialist/epic-lifecycle.js';
 
 interface MergeCliOptions {
@@ -776,6 +777,20 @@ function printUsageAndExit(message: string): never {
   process.exit(1);
 }
 
+function syncEpicStateAfterMerge(target: ChainMergeTarget): void {
+  const sqliteClient = createObservabilitySqliteClient();
+  if (!sqliteClient) return;
+
+  try {
+    const membership = sqliteClient.resolveEpicByChainRootBeadId(target.beadId);
+    if (!membership?.epic_id) return;
+
+    syncEpicState(sqliteClient, membership.epic_id, true);
+  } finally {
+    sqliteClient.close();
+  }
+}
+
 export function runMergePlan(
   targets: readonly ChainMergeTarget[],
   options: MergeExecutionOptions,
@@ -798,6 +813,7 @@ export function runMergePlan(
     rebaseBranchOntoMaster(target.branch, target.worktreePath);
     mergeBranch(target.branch, mainRepoRoot);
     runTypecheckGate(mainRepoRoot);
+    syncEpicStateAfterMerge(target);
     mergedSteps.push({
       beadId: target.beadId,
       branch: target.branch,

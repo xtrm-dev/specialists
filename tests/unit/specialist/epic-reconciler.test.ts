@@ -79,6 +79,39 @@ describe('abandonEpic state recovery', () => {
     expect(() => abandonEpic(sqlite, 'unitAI-stuck', 'cleanup', false)).toThrow(/already abandoned/);
   });
 
+  it('heals failed epic to merge_ready after all chains pass', () => {
+    const epicRun: any = {
+      epic_id: 'unitAI-heal',
+      status: 'failed',
+      status_json: '{}',
+      updated_at_ms: 1,
+    };
+    const sqlite = {
+      readEpicRun: () => epicRun,
+      listEpicChains: () => [{ chain_id: 'chain-1', epic_id: 'unitAI-heal', chain_root_bead_id: 'chain-root-1', updated_at_ms: 1 }],
+      listChainJobIds: () => ['job-1'],
+      listStatuses: () => [
+        { id: 'job-1', specialist: 'reviewer', status: 'done', pid: 123, started_at_ms: 1, epic_id: 'unitAI-heal', chain_id: 'chain-1', chain_kind: 'chain', result_text: 'Verdict: PASS' },
+      ],
+      readResult: () => 'Verdict: PASS',
+      upsertStatus: () => undefined,
+      deleteEpicChainMembership: () => [],
+      upsertEpicRun: (next: any) => {
+        epicRun.status = next.status;
+        epicRun.status_json = next.status_json;
+        epicRun.updated_at_ms = next.updated_at_ms;
+      },
+    } as any;
+
+    const result = syncEpicState(sqlite, 'unitAI-heal', true);
+
+    expect(result.readiness_before.persisted_state).toBe('failed');
+    expect(result.readiness_before.readiness_state).toBe('merge_ready');
+    expect(result.readiness_after.persisted_state).toBe('merge_ready');
+    expect(epicRun.status).toBe('merge_ready');
+    expect(epicRun.status_json).toContain('healed failed -> merge_ready');
+  });
+
   it('refuses to abandon a merged epic', () => {
     const { sqlite } = makeMockSqlite('merged');
     expect(() => abandonEpic(sqlite, 'unitAI-stuck', 'cleanup', false)).toThrow(/already merged/);
