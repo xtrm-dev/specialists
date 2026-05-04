@@ -631,6 +631,7 @@ function migrateToV8(db: BunDb): void {
 
   db.run('CREATE INDEX IF NOT EXISTS idx_jobs_chain ON specialist_jobs(chain_id) WHERE chain_id IS NOT NULL');
   db.run('CREATE INDEX IF NOT EXISTS idx_jobs_epic ON specialist_jobs(epic_id) WHERE epic_id IS NOT NULL');
+  db.run("CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_active_bead_specialist ON specialist_jobs(bead_id, specialist) WHERE bead_id IS NOT NULL AND status IN ('starting', 'running')");
 
   db.run(`
     CREATE TABLE IF NOT EXISTS epic_runs (
@@ -938,6 +939,32 @@ export interface OrphanScanFinding {
   details: Record<string, string | number | boolean | null>;
 }
 
+type ClaimJobStartResult = { ok: true } | { ok: false; existingJobId: string; existingStatus: string };
+
+interface ClaimJobStartStore {
+  transaction<T>(callback: () => T): T;
+  findActiveJob(beadId: string | null, specialist: string): { job_id?: string; status?: string } | undefined;
+  writeStatusRow(status: SupervisorStatus): void;
+  writeEventRow(jobId: string, specialist: string, beadId: string | undefined, event: TimelineEvent): void;
+}
+
+export function claimJobStartWithStore(
+  store: ClaimJobStartStore,
+  status: SupervisorStatus,
+  event: TimelineEvent,
+): ClaimJobStartResult {
+  return withRetry(() => store.transaction(() => {
+    const existing = store.findActiveJob(status.bead_id ?? null, status.specialist);
+    if (existing?.job_id && existing.job_id !== status.id) {
+      return { ok: false as const, existingJobId: existing.job_id, existingStatus: existing.status ?? 'starting' };
+    }
+
+    store.writeStatusRow(status);
+    store.writeEventRow(status.id, status.specialist, status.bead_id, event);
+    return { ok: true as const };
+  }), 'claimJobStart');
+}
+
 export interface ObservabilitySqliteClient {
   upsertStatus(status: SupervisorStatus): void;
   upsertEpicRun(epic: EpicRunRecord): void;
@@ -945,6 +972,7 @@ export interface ObservabilitySqliteClient {
   upsertStatusWithEvent(status: SupervisorStatus, event: TimelineEvent): void;
   upsertStatusWithEventAndResult(status: SupervisorStatus, event: TimelineEvent, output: string): void;
   appendEvent(jobId: string, specialist: string, beadId: string | undefined, event: TimelineEvent): void;
+  claimJobStart(status: SupervisorStatus, event: TimelineEvent): { ok: true } | { ok: false; existingJobId: string; existingStatus: string };
   upsertResult(jobId: string, output: string): void;
   bootstrapNode(nodeRunId: string, nodeName: string, memoryNamespace?: string): void;
   upsertNodeRun(nodeRun: NodeRunRow): void;
@@ -1097,6 +1125,27 @@ class SqliteClient implements ObservabilitySqliteClient {
       INSERT INTO specialist_events (job_id, seq, specialist, bead_id, t, type, event_json)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `, [jobId, seq, specialist, beadId ?? null, event.t, event.type, eventJson]);
+  }
+
+  claimJobStart(status: SupervisorStatus, event: TimelineEvent): { ok: true } | { ok: false; existingJobId: string; existingStatus: string } {
+    return claimJobStartWithStore(
+      {
+        transaction: <T>(callback: () => T) => this.db.transaction(callback),
+        findActiveJob: (beadId, specialist) => this.db.query(`
+          SELECT job_id, status
+          FROM specialist_jobs
+          WHERE bead_id = ?
+            AND specialist = ?
+            AND status IN ('starting', 'running')
+          ORDER BY updated_at_ms DESC
+          LIMIT 1
+        `).get(beadId, specialist) as { job_id?: string; status?: string } | undefined,
+        writeStatusRow: (nextStatus) => this.writeStatusRow(nextStatus),
+        writeEventRow: (jobId, specialist, beadId, nextEvent) => this.writeEventRow(jobId, specialist, beadId, nextEvent),
+      },
+      status,
+      event,
+    );
   }
 
   private writeResultRow(jobId: string, output: string): void {

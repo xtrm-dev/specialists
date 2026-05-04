@@ -50,6 +50,10 @@ export interface RunOptions {
   maxRetries?: number;
   /** Whether external (input) bead notes should be written by Supervisor. */
   beadsWriteNotes?: boolean;
+  /** Force re-dispatch even if active same-bead specialist job exists. */
+  forceJob?: boolean;
+  /** Permission level used to decide concurrency guard scope. */
+  permissionRequired?: 'READ_ONLY' | 'LOW' | 'MEDIUM' | 'HIGH';
 }
 
 export interface RunResult {
