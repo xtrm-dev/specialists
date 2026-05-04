@@ -974,6 +974,7 @@ export interface ObservabilitySqliteClient {
   listEpicChainsWithLatestJob(epicId: string): EpicChainLatestJobRecord[];
   readChainIdentity(jobId: string): PersistedChainIdentity | null;
   listChainJobIds(chainId: string): string[];
+  listLiveJobsForBead(beadId: string): string[];
   resolveChainEpicLinkByJobId(jobId: string): ChainEpicLinkRecord | null;
   readEvents(jobId: string): TimelineEvent[];
   readEventsAfterSeq(jobId: string, afterSeq: number): TimelineEvent[];
@@ -1761,6 +1762,22 @@ class SqliteClient implements ObservabilitySqliteClient {
         .map((row) => row.job_id)
         .filter((jobId): jobId is string => typeof jobId === 'string' && jobId.length > 0);
     }, 'listChainJobIds');
+  }
+
+  listLiveJobsForBead(beadId: string): string[] {
+    return withRetry(() => {
+      const rows = this.db.query(`
+        SELECT job_id
+        FROM specialist_jobs
+        WHERE bead_id = ?
+          AND status IN ('starting', 'running', 'waiting')
+        ORDER BY updated_at_ms ASC
+      `).all(beadId) as Array<{ job_id?: string | null }>;
+
+      return rows
+        .map((row) => row.job_id)
+        .filter((jobId): jobId is string => typeof jobId === 'string' && jobId.length > 0);
+    }, 'listLiveJobsForBead');
   }
 
   resolveChainEpicLinkByJobId(jobId: string): ChainEpicLinkRecord | null {
