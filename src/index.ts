@@ -912,6 +912,11 @@ async function run() {
     return handler();
   }
 
+  if (sub === 'prune-stale-defaults') {
+    const { run: handler } = await import('./cli/prune-stale-defaults.js');
+    return handler();
+  }
+
   if (sub === 'quickstart') {
     const { run: handler } = await import('./cli/quickstart.js');
     return handler();
@@ -934,6 +939,7 @@ async function run() {
         '  6. hook wiring expectations',
         '  7. zombie job detection',
         '  8. CLAUDE.md fragments (XTRM-MANAGED sentinels) — delegates to xt claude-sync',
+        '  9. drift check for stale managed mirrors (--check-drift / --drift)',
         '',
         'Behavior:',
         '  - prints fix hints for failing checks',
@@ -941,6 +947,7 @@ async function run() {
         '',
         'Subcommands:',
         '  orphans   Read-only orphan scan: membership/jobs/epics/worktree pointers',
+        '  --check-drift, --drift   Report stale .specialists/default/ snapshots vs package canonical',
         '',
         'Examples:',
         '  specialists doctor',
