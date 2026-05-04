@@ -16,13 +16,19 @@ function resolveTerminalStatus(jobId: string): 'done' | 'cancelled' {
   return hasRunCompleteEvent(jobId) ? 'done' : 'cancelled';
 }
 
-function parseStopArgs(argv: readonly string[]): { jobId?: string; force: boolean } {
+function parseStopArgs(argv: readonly string[]): { jobId?: string; force: boolean; closeBeadAnyway: boolean } {
   let jobId: string | undefined;
   let force = false;
+  let closeBeadAnyway = false;
 
   for (const token of argv) {
     if (token === '--force') {
       force = true;
+      continue;
+    }
+
+    if (token === '--close-bead-anyway') {
+      closeBeadAnyway = true;
       continue;
     }
 
@@ -34,7 +40,7 @@ function parseStopArgs(argv: readonly string[]): { jobId?: string; force: boolea
     throw new Error(`Unknown option: ${token}`);
   }
 
-  return { jobId, force };
+  return { jobId, force, closeBeadAnyway };
 }
 
 async function waitForProcessExit(pid: number, timeoutMs: number): Promise<boolean> {
@@ -57,7 +63,7 @@ function tryKillProcessGroup(pid: number): void {
 }
 
 export async function run(): Promise<void> {
-  let parsed: { jobId?: string; force: boolean };
+  let parsed: { jobId?: string; force: boolean; closeBeadAnyway: boolean };
 
   try {
     parsed = parseStopArgs(process.argv.slice(3));
@@ -67,7 +73,7 @@ export async function run(): Promise<void> {
     process.exit(1);
   }
 
-  const { jobId, force } = parsed;
+  const { jobId, force, closeBeadAnyway } = parsed;
   if (!jobId) {
     console.error('Usage: specialists|sp stop <job-id> [--force]');
     process.exit(1);
@@ -145,8 +151,15 @@ export async function run(): Promise<void> {
     if (status.bead_id) {
       const finalStatus = supervisor.readStatus(jobId)?.status ?? 'cancelled';
       const beads = new BeadsClient();
-      if (beads.closeBeadIfInProgress(status.bead_id, `Job ${jobId} stopped (${finalStatus})`)) {
-        process.stdout.write(`${dim(`  bead ${status.bead_id} auto-closed`)}\n`);
+      const liveJobs = supervisor.listLiveJobsForBead(status.bead_id).filter((liveJobId) => liveJobId !== jobId);
+      if (closeBeadAnyway || liveJobs.length === 0) {
+        if (beads.closeBeadIfInProgress(status.bead_id, `Job ${jobId} stopped (${finalStatus})`)) {
+          process.stdout.write(`${dim(`  bead ${status.bead_id} auto-closed`)}\n`);
+        }
+      } else {
+        const message = `bead_close_skipped: sibling-jobs-active [${liveJobs.join(', ')}]`;
+        supervisor.emitMetaEvent(jobId, message, 'supervisor');
+        process.stdout.write(`${dim(`  ${message}`)}\n`);
       }
     }
   } finally {

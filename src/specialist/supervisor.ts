@@ -676,6 +676,31 @@ export class Supervisor {
     }
   }
 
+  listLiveJobsForBead(beadId: string): string[] {
+    try {
+      if (this.isDisposed) {
+        throw this.createDisposedSqliteError('listLiveJobsForBead');
+      }
+      return this.withSqliteOperation('listLiveJobsForBead', (client) => client.listLiveJobsForBead(beadId)) ?? [];
+    } catch (error: unknown) {
+      console.warn(`[supervisor] SQLite listLiveJobsForBead failed: ${String(error)}`);
+      return [];
+    }
+  }
+
+  emitMetaEvent(jobId: string, model: string, backend: string): void {
+    if (this.isDisposed) return;
+    const event = createMetaEvent(model, backend);
+    const persisted = this.withSqliteOperation('appendEvent', (client) => {
+      const status = this.readStatus(jobId);
+      client.appendEvent(jobId, status?.specialist ?? 'unknown', status?.bead_id, event);
+      return true;
+    });
+    if (persisted === undefined) {
+      throw new Error('[supervisor] SQLite appendEvent failed: database client unavailable');
+    }
+  }
+
   updateJobStatus(id: string, status: Extract<SupervisorJobStatus, 'done' | 'cancelled' | 'error' | 'waiting' | 'running' | 'starting'>, error?: string): SupervisorStatusView | null {
     const currentStatus = this.readStatus(id);
     if (!currentStatus) return null;
@@ -1921,7 +1946,15 @@ export class Supervisor {
       if (finalResult.beadId) {
         // Close owned beads with full COMPLETE/duration/model reason. Auto-close input beads
         // when still in_progress so terminal DONE status retires them (unitAI-9truh).
-        if (!inputBeadId) {
+        const liveJobs = this.listLiveJobsForBead(finalResult.beadId).filter((liveJobId) => liveJobId !== id);
+        if (liveJobs.length > 0) {
+          appendTimelineEvent({
+            t: Date.now(),
+            type: TIMELINE_EVENT_TYPES.META,
+            model: `bead_close_skipped: sibling-jobs-active [${liveJobs.join(', ')}]`,
+            backend: 'supervisor',
+          } as TimelineEvent);
+        } else if (!inputBeadId) {
           this.opts.beadsClient?.closeBead(finalResult.beadId, 'COMPLETE', finalResult.durationMs, finalResult.model);
         } else {
           this.opts.beadsClient?.closeBeadIfInProgress(
