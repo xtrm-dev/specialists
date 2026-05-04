@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as crypto from 'node:crypto';
 import * as childProcess from 'node:child_process';
@@ -34,6 +34,30 @@ import { run } from '../../../src/cli/run.js';
 describe('run CLI', () => {
   const originalArgv = process.argv;
   const originalIsTTY = process.stdin.isTTY;
+
+  // Default Supervisor mocks: bypass SQLite-required code paths and forward
+  // runOptions to SpecialistRunner.prototype.run (which individual tests spy on
+  // to assert what the runner received). Tests that need different supervisor
+  // behavior re-spy these methods locally.
+  beforeEach(() => {
+    vi.spyOn(Supervisor.prototype, 'run').mockImplementation(async function (this: any) {
+      const runner = this.opts?.runner;
+      const runOptions = this.opts?.runOptions ?? {};
+      if (runner && typeof runner.run === 'function') {
+        await runner.run(runOptions);
+      }
+      return 'job-test';
+    });
+    vi.spyOn(Supervisor.prototype, 'readStatus').mockReturnValue({
+      id: 'job-test',
+      specialist: 'code-review',
+      status: 'done',
+      started_at_ms: 0,
+      last_event_at_ms: 1000,
+      backend: 'google-gemini-cli',
+      model: 'gemini',
+    } as any);
+  });
 
   afterEach(() => {
     process.argv = originalArgv;
@@ -217,7 +241,8 @@ describe('run CLI', () => {
       last_event_at_ms: 1000,
       backend: 'anthropic',
       model: 'anthropic/claude-haiku-4-5',
-    });
+      is_dead: false,
+    } as any);
 
     vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     const stderrWrite = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
@@ -266,7 +291,8 @@ describe('run CLI', () => {
       last_event_at_ms: 1000,
       backend: 'anthropic',
       model: 'anthropic/claude-haiku-4-5',
-    });
+      is_dead: false,
+    } as any);
 
     vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
@@ -531,10 +557,10 @@ describe('run CLI', () => {
       reviewed_job_id: 'job-reviewed',
       reused_worktree_awareness: expect.stringContaining('Reused workspace awareness (from --job)'),
     }));
-    expect(runArgs.variables.reused_worktree_awareness).toContain('job-reviewed');
-    expect(runArgs.variables.reused_worktree_awareness).toContain('job-root-owner');
-    expect(runArgs.variables.reused_worktree_awareness).toContain('Workspace may contain uncommitted edits');
-    expect(runArgs.variables.reused_worktree_awareness).toContain('git status --short --branch');
+    expect(runArgs.variables?.reused_worktree_awareness).toContain('job-reviewed');
+    expect(runArgs.variables?.reused_worktree_awareness).toContain('job-root-owner');
+    expect(runArgs.variables?.reused_worktree_awareness).toContain('Workspace may contain uncommitted edits');
+    expect(runArgs.variables?.reused_worktree_awareness).toContain('git status --short --branch');
   });
 
   it('prefers explicit reviewed_job_id override from prompt over --job lineage', async () => {
