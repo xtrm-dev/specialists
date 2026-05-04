@@ -26,8 +26,7 @@ The beads gate hooks integrate the `bd` (beads) issue tracker directly into Clau
 - **`beads-edit-gate.mjs`** (PreToolUse) — Blocks writes/edits without an active issue claim.
 - **`beads-commit-gate.mjs`** (PreToolUse) — Blocks commits with an unresolved session claim.
 - **`beads-stop-gate.mjs`** (Stop) — Blocks session stop while a claim remains open.
-- **`beads-close-memory-gate.mjs`** (PreToolUse) — Blocks `bd close` until memory handoff is acknowledged per issue.
-- **`beads-memory-gate.mjs`** (Stop) — Fallback reminder if close-time memory acknowledgment is missing.
+- **`beads-memory-gate.mjs`** (Stop) — Blocks session stop after a successful `bd close` until memory handoff is acknowledged for resolved issue id.
 
 ### Compaction & State Preservation (v2.1.18+)
 - **`beads-pre-compact.mjs`** (PreCompact) — Saves the currently `in_progress` beads state before Claude clears context.
