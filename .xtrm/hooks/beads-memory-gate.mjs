@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // beads-memory-gate — Claude Code Stop hook
-// At session end, checks if the session's claimed issue was closed.
+// At session end, checks if this session closed a bead.
 // If so, hard-blocks until the agent persists insights via `bd remember`.
+// Contract: Stop hook only; bd close itself never blocks.
 // Self-contained: queries claim kv + bd show directly (no PostToolUse dependency).
 // Exit 0: allow stop  |  Exit 2: block stop (stderr shown to Claude)
 //
@@ -100,7 +101,8 @@ try {
   const issue = Array.isArray(parsed) ? parsed[0] : parsed;
   issueStatus = issue?.status;
 } catch {
-  process.exit(0); // fail open
+  // Fail open when bd unavailable; avoids trapping session on tracker outage.
+  process.exit(0);
 }
 
 if (issueStatus !== 'closed') process.exit(0);

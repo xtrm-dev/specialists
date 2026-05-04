@@ -84,7 +84,7 @@ Run `bd memories <keyword>` or `bd recall <key>` for prior insights before subst
 - **Stale-base guard** blocks worktree dispatch if sibling epic chains have unmerged substantive commits. Override with `--force-stale-base` only with cause.
 - **Manual `git merge` of feature branches breaks sp's epic bookkeeping.** Use `sp merge` / `sp epic merge` when possible.
 - **GitNexus index goes stale on commit.** PostToolUse hook normally re-indexes after `git commit`/`git merge`; if not, `npx gitnexus analyze` (add `--embeddings` only if `.gitnexus/meta.json` shows `stats.embeddings > 0`).
-- **`bd close` blocks until `memory-acked:<id>` kv exists.** Each id in a batch needs its own ack.
+- **`bd close` itself does not block.** Stop hook blocks only after a successful `bd close` in same session, and only when hook can resolve issue id from `claimed:<sessionId>`, `closed-this-session:<sessionId>`, or branch name. If `bd show` fails, gate fails open. Each id in batch needs its own ack before session stop.
 - **Specialists are JSON** (`config/specialists/<name>.specialist.json`) — YAML is a deprecated legacy fallback (`loader.ts:101 deprecatedYaml`).
 
 ## Project-specific

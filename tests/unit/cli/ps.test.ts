@@ -3,6 +3,18 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+const mockSqlite = {
+  listStatuses: vi.fn(() => []),
+  listEpicRuns: vi.fn(() => []),
+  readEpicRun: vi.fn(() => null),
+  listEpicChains: vi.fn(() => []),
+  close: vi.fn(),
+};
+
+vi.mock('../../../src/specialist/observability-sqlite.js', () => ({
+  createObservabilitySqliteClient: () => mockSqlite,
+}));
+
 function stripAnsi(input: string): string {
   return input.replace(/\x1b\[[0-9;]*m/g, '');
 }
@@ -43,6 +55,10 @@ describe('ps CLI — run()', () => {
     process.chdir(tempDir);
     // Ensure .specialists/jobs exists
     mkdirSync(join(tempDir, '.specialists', 'jobs'), { recursive: true });
+    mockSqlite.listStatuses.mockReturnValue([]);
+    mockSqlite.listEpicRuns.mockReturnValue([]);
+    mockSqlite.readEpicRun.mockReturnValue(null);
+    mockSqlite.listEpicChains.mockReturnValue([]);
   });
 
   afterEach(() => {
@@ -245,5 +261,28 @@ describe('ps CLI — run()', () => {
     expect(clean).toContain('child1');
     // Should be in same worktree section
     expect(clean).toContain('feature/test');
+  }, TEST_TIMEOUT_MS);
+
+  it('--include-terminal shows abandoned epic even after chain job purge', async () => {
+    mockSqlite.listEpicRuns.mockReturnValue([
+      { epic_id: 'epic-orphan', status: 'abandoned', status_json: '{}', updated_at_ms: Date.now() },
+    ]);
+    mockSqlite.readEpicRun.mockReturnValue({ epic_id: 'epic-orphan', status: 'abandoned', status_json: '{}', updated_at_ms: Date.now() });
+    mockSqlite.listEpicChains.mockReturnValue([
+      { chain_id: 'chain-a', epic_id: 'epic-orphan', chain_root_bead_id: 'bead-a', chain_root_job_id: 'job-a', updated_at_ms: Date.now() },
+      { chain_id: 'chain-b', epic_id: 'epic-orphan', chain_root_bead_id: 'bead-b', chain_root_job_id: 'job-b', updated_at_ms: Date.now() },
+    ]);
+    process.argv = ['node', 'specialists', 'ps', '--include-terminal'];
+    const output: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      output.push(args.map(String).join(' '));
+    });
+    const { run } = await import('../../../src/cli/ps.js');
+    await run();
+    const clean = stripAnsi(output.join('\n'));
+    expect(clean).toContain('EPIC epic-orphan');
+    expect(clean).toContain('chain-a');
+    expect(clean).toContain('chain-b');
+    expect(clean).toContain('no retained jobs');
   }, TEST_TIMEOUT_MS);
 });
