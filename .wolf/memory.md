@@ -115,3 +115,5 @@
 - 2026-05-05: Added and deepened `config/skills/using-specialists-v3/`: v3 is a clean orchestration skill that keeps live role registry (`specialists list --full`) and help-surface guidance (`sp help`) while restoring core v2 behavior for bead contracts, autonomous review/fix loops, monitoring, merge paths, epic flow, and failure recovery.
 
 - 2026-05-05: Activated using-specialists-v3 for Claude Code by adding `.xtrm/skills/active/using-specialists-v3` symlink to `../default/using-specialists-v3`; copied v3 SKILL.md/evals into xtrm default skill mirror for local evaluation.
+
+- 2026-05-05: Updated latest session report `.xtrm/reports/2026-05-04-2b52300a.md` with using-specialists-v3 follow-up: v3 merge, manual skills-creator expansion, activation symlink, pushed commits, and remaining xtrm-tools mirror decision.
