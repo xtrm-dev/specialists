@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { createObservabilitySqliteClient } from '../specialist/observability-sqlite.js';
+import { detectDriftUnderRoot } from '../specialist/drift-detector.js';
 import { formatVersionCheckNudge, getVersionCheckResult, localVersion, readCachedVersionCheck } from './version-check.js';
 
 const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
@@ -514,6 +515,7 @@ function checkRuntimeDirs(): boolean {
 }
 
 function checkClaudeMdFragments(): boolean {
+
   section('CLAUDE.md fragments');
   const projectRoot = process.cwd();
   const claudeMd = join(projectRoot, 'CLAUDE.md');
@@ -569,6 +571,49 @@ function checkClaudeMdFragments(): boolean {
     }
   }
   return allOk;
+}
+
+
+interface DoctorOptions {
+  json: boolean;
+  root?: string;
+  drift: boolean;
+}
+
+function parseDoctorArgs(argv: readonly string[]): DoctorOptions {
+  const opts: DoctorOptions = { json: false, drift: false };
+  for (let i = 0; i < argv.length; i += 1) {
+    const token = argv[i];
+    if (token === '--json') { opts.json = true; continue; }
+    if (token === '--check-drift' || token === '--drift') { opts.drift = true; continue; }
+    if (token === '--root') { const value = argv[i + 1]; if (!value || value.startsWith('--')) throw new Error('--root requires a value'); opts.root = resolve(value); i += 1; continue; }
+    if (token === '--help' || token === '-h') continue;
+    throw new Error(`Unknown argument: ${token}`);
+  }
+  return opts;
+}
+
+function renderDriftTable(root: string, json = false): void {
+  const report = detectDriftUnderRoot(root);
+  if (json) {
+    process.stdout.write(`${JSON.stringify({ drift_findings: report.repos.flatMap((repo) => repo.findings) }, null, 2)}\n`);
+    return;
+  }
+  console.log(`\n${bold('specialists doctor drift')}\n`);
+  if (report.summary.findings === 0) {
+    ok('No drift found');
+    return;
+  }
+  for (const repo of report.repos) {
+    console.log(`Repo: ${repo.root}`);
+    for (const finding of repo.findings) {
+      const status = finding.status.replaceAll('-', ' ');
+      console.log(`  ${finding.kind} ${finding.scope} | ${status} | ${finding.path}`);
+      console.log(`    action: ${finding.suggested_action}`);
+      console.log(`    cmd: ${finding.suggestion_command}`);
+    }
+  }
+  console.log(`Summary: ${report.summary.findings} findings across ${report.summary.repos} repo${report.summary.repos === 1 ? '' : 's'}`);
 }
 
 export function parseVersionTuple(value: string): [number, number, number] | null {
@@ -783,7 +828,13 @@ export async function run(argv: readonly string[] = process.argv.slice(3)): Prom
     return;
   }
 
-  if (subcommand && subcommand !== '--help' && subcommand !== '-h') {
+  const opts = parseDoctorArgs(argv);
+  if (opts.drift) {
+    renderDriftTable(opts.root ?? process.cwd(), opts.json);
+    return;
+  }
+
+  if (subcommand && subcommand !== '--help' && subcommand !== '-h' && !subcommand.startsWith('--')) {
     console.error(`Unknown doctor subcommand: '${subcommand}'`);
     process.exit(1);
   }
