@@ -163,6 +163,10 @@ specialists models  # confirm assignments look balanced
 
 ---
 
+## Canonical references
+
+Reference any canonical skill or rule by name; runtime finds it.
+
 ## Quick Start: Scaffold + `sp edit`
 
 ```bash

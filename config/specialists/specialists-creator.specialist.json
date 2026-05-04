@@ -66,9 +66,7 @@
     "stall_detection": {},
     "beads_write_notes": true,
     "mandatory_rules": {
-      "template_sets": [
-        "serena-cheatsheet"
-      ]
+      "template_sets": ["serena-cheatsheet"]
     }
   }
 }
