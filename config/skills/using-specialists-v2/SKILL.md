@@ -691,3 +691,9 @@ Inspect feed. If no usable final summary exists, rerun with a clearer explorer b
 ## What Not To Put In This Skill
 
 Do not add historical migration notes, stale model names, exhaustive command references, internal token counts, long stuck-state postmortems, or title-only examples. Put long reference material in docs and keep this skill focused on current canonical orchestration.
+
+
+## gitnexus_impact stall mitigation
+- Keep impact analysis requirement.
+- If `gitnexus_impact` stalls, use timeout-protected execution path.
+- On timeout, fall back to `gitnexus_query` + `gitnexus_context`, continue debugging, note degraded blast-radius confidence, file upstream repro.

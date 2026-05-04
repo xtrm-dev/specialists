@@ -47,6 +47,7 @@ import { resolveManifestTools, type ManifestPolicy, type ManifestPolicyTier } fr
 import { loadToolCatalogIndex, type ToolCatalogIndex } from '../specialist/tool-catalog.js';
 
 const TEST_COMMAND_STALL_TIMEOUT_MS = 300_000;
+const GITNEXUS_IMPACT_STALL_TIMEOUT_MS = 300_000;
 const TEST_COMMAND_PATTERNS: ReadonlyArray<RegExp> = [
   /(?:^|\s)(?:bun\s+--bun\s+)?vitest(?:\s|$)/i,
   /(?:^|\s)bun\s+test(?:\s|$)/i,
@@ -539,6 +540,8 @@ export class PiAgentSession {
   private _stallError?: Error;
   private _testWindowToolCallIds = new Set<string>();
   private _testWindowWithoutIdCount = 0;
+  private _impactWindowToolCallIds = new Set<string>();
+  private _impactWindowWithoutIdCount = 0;
   private _metrics: SessionRunMetrics = {
     turns: 0,
     tool_calls: 0,
@@ -712,12 +715,24 @@ export class PiAgentSession {
     return this._testWindowToolCallIds.size > 0 || this._testWindowWithoutIdCount > 0;
   }
 
+  private _isImpactWindowActive(): boolean {
+    return this._impactWindowToolCallIds.size > 0 || this._impactWindowWithoutIdCount > 0;
+  }
+
   private _resolveStallTimeoutMs(): number | undefined {
     const baseTimeoutMs = this.options.stallTimeoutMs;
     if (!baseTimeoutMs || baseTimeoutMs <= 0) return undefined;
-    if (!this._isTestWindowActive()) return baseTimeoutMs;
-    const testCommandTimeoutMs = this.options.testCommandStallTimeoutMs ?? TEST_COMMAND_STALL_TIMEOUT_MS;
-    return Math.max(baseTimeoutMs, testCommandTimeoutMs);
+
+    let timeoutMs = baseTimeoutMs;
+    if (this._isTestWindowActive()) {
+      const testCommandTimeoutMs = this.options.testCommandStallTimeoutMs ?? TEST_COMMAND_STALL_TIMEOUT_MS;
+      timeoutMs = Math.max(timeoutMs, testCommandTimeoutMs);
+    }
+    if (this._isImpactWindowActive()) {
+      timeoutMs = Math.max(timeoutMs, GITNEXUS_IMPACT_STALL_TIMEOUT_MS);
+    }
+
+    return timeoutMs;
   }
 
   private _activateTestWindow(toolCallId?: string): void {
@@ -735,6 +750,24 @@ export class PiAgentSession {
     }
     if (this._testWindowWithoutIdCount > 0) {
       this._testWindowWithoutIdCount -= 1;
+    }
+  }
+
+  private _activateImpactWindow(toolCallId?: string): void {
+    if (toolCallId) {
+      this._impactWindowToolCallIds.add(toolCallId);
+      return;
+    }
+    this._impactWindowWithoutIdCount += 1;
+  }
+
+  private _deactivateImpactWindow(toolCallId?: string): void {
+    if (toolCallId) {
+      this._impactWindowToolCallIds.delete(toolCallId);
+      return;
+    }
+    if (this._impactWindowWithoutIdCount > 0) {
+      this._impactWindowWithoutIdCount -= 1;
     }
   }
 
@@ -873,6 +906,10 @@ export class PiAgentSession {
         this._activateTestWindow(toolCallId);
         this._markActivity();
       }
+      if (toolName === 'gitnexus_impact') {
+        this._activateImpactWindow(toolCallId);
+        this._markActivity();
+      }
       this.options.onToolStart?.(
         toolName,
         toolArgs,
@@ -897,6 +934,10 @@ export class PiAgentSession {
       );
       if (toolName === 'bash') {
         this._deactivateTestWindow(toolCallId);
+        this._markActivity();
+      }
+      if (toolName === 'gitnexus_impact') {
+        this._deactivateImpactWindow(toolCallId);
         this._markActivity();
       }
       this.options.onEvent?.('tool_execution_end', { toolCallId });
