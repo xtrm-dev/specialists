@@ -1212,10 +1212,10 @@
 
 ## config/skills/using-specialists-v2/
 
-- `SKILL.md` — Canonical Specialists V2 orchestration skill; v1.2 includes latest xt report lessons for nested-sp-run stalls, --from-source verification, GitNexus stall fallback, dispatch/stop safety, test triage, and epic cleanup.
+- `SKILL.md` — Canonical Specialists V2 orchestration skill; v1.4 describes final-state bead-first orchestration, canonical-live Cat A asset resolution, Cat B xtrm-tools ownership, source verification, drift commands, and release context flow without changelog/gotcha framing.
 
 ## .xtrm/skills/default/using-specialists-v2/
 
 - `SKILL.md` — Installed mirror of canonical using-specialists-v2 skill; keep synced from config/skills/using-specialists-v2/SKILL.md.
 
-- 2026-05-04: `config/skills/using-specialists-v2/SKILL.md` bumped to v1.3 after full xt report pass; includes canonical-live/Cat B, release helper, drift cleanup, and failure triage updates. Installed mirror copied to `.xtrm/skills/default/using-specialists-v2/SKILL.md`.
+- 2026-05-04: `config/skills/using-specialists-v2/SKILL.md` bumped to v1.4 and canonicalized to final-state guidance only; installed mirror copied to `.xtrm/skills/default/using-specialists-v2/SKILL.md`.

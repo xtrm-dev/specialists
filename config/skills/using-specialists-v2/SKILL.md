@@ -8,7 +8,7 @@ description: >
   work without drift. Trigger for code review, debugging, implementation,
   planning, test generation, doc sync, multi-chain epics, and any question about
   specialist orchestration.
-version: 1.3
+version: 1.4
 ---
 
 # Specialists V2
@@ -51,26 +51,21 @@ When the local version is behind, the latest CHANGELOG entry can be summarized v
 14. Stale-base guard: dispatch refuses to provision a worktree when sibling epic chains have unmerged substantive commits. Override only with explicit `--force-stale-base` and a reason. Merge-time rebase happens automatically.
 15. Auto-checkpoint: executor and debugger commit substantive worktree changes on `waiting` by default (`auto_commit: checkpoint_on_waiting`). Noise paths (`.xtrm/`, `.wolf/`, `.specialists/jobs/`, `.beads/`) are filtered.
 16. Per-turn output appends to the input bead notes for **all** specialists on every `run_complete`, with `[WAITING — more output may follow]` or `[DONE]` headers. `bd show <bead-id>` is a valid path to read intermediate output.
-17. Do not ask specialists to spawn nested `sp run <specialist>` synchronously. That starves the parent supervisor and commonly ends in `StallTimeoutError`. Use static evidence such as `sp config show --resolved`, or dispatch nested specialists separately with `--background` and poll once.
-18. When a specialist reports test failures on known noisy files, first verify whether master already fails before treating the failure as that bead's regression. `tests/unit/cli/run.test.ts` recently had pre-existing failures; do not let executors thrash on unrelated master breakage.
+17. Specialist jobs do not orchestrate nested specialist chains. The top-level orchestrator dispatches specialists, collects results, and advances the workflow.
+18. Treat test failures as evidence to classify against the bead scope. Validate whether failures are in-scope, pre-existing, or infrastructure-related before sending an executor into a fix loop.
 
-## Recent Runtime Lessons
+## Canonical Runtime State
 
-These are current operating rules from the latest shipped orchestration work:
+These are current operating facts, not migration notes:
 
-- **Resolver/catalog reviews:** if resolver or catalog code is changed inside a specialist worktree, verify local behavior with `sp config show <name> --resolved --from-source`. Plain `sp config show --resolved` may read the installed global dist and produce stale evidence.
-- **GitNexus impact stalls:** keep the impact-analysis requirement, but if `gitnexus_impact` stalls or times out, fall back to `gitnexus_query` + `gitnexus_context`, note degraded blast-radius confidence, and file/append the upstream repro instead of blocking the chain forever.
-- **Duplicate dispatch protection:** if two edit-capable jobs land on the same bead, keep the most progressed job, stop the duplicate, and check sibling jobs before closing/reopening the bead. Newer runtime guards reduce the race but recovery still starts with `sp ps --running --bead <id>`.
-- **Stop safety:** before `sp stop` on a job linked to an implementation bead, check for sibling jobs on the same bead with `sp ps --running --bead <id>`. Use `--close-bead-anyway` only when you intentionally want the bead closed despite siblings.
-- **Epic failures:** failed epics can be cleaned up with `sp epic abandon <epic-id> --reason "..."`; use `--force` only when active pointers remain and you have verified no live work should continue.
-- **Worktree outputs:** after an executor reports success, verify both `git log master..HEAD` and `git status --short` inside its worktree. Specialists can leave staged or unstaged work behind despite a successful summary.
-- **Auto-checkpoint noise filter:** auto-commit filters `.xtrm/` paths as noise. If a specialist edits skills/hooks under `.xtrm/`, manually commit those files in the worktree before `sp epic merge`, or the rebase step can fail on unstaged changes.
-- **Canonical-live Cat A assets:** specialists, mandatory-rules, catalog, and nodes now resolve live from the package after user/default/config tiers. Do not require `sp init --sync-defaults` for those assets; use `sp doctor --check-drift` and `sp prune-stale-defaults --dry-run` to clean stale `.specialists/default/` snapshots.
-- **Cat B assets moved to xtrm-tools:** skills and hooks are filesystem-bound and owned by xtrm-tools (`.xtrm/skills/default`, `.xtrm/hooks/default`). Implementation work for skill/hook distribution belongs in xtrm-tools; this repo keeps only specialist-side wrapper/docs work such as `update-specialists` guidance.
-- **Mandatory-rule fallback semantics:** package-live mandatory-rule **index** is used only when no project tiers exist; per-id rule file fallback is allowed. Never stack package defaults into an existing project index, because that leaks canonical `default_template_sets` into customized repos.
-- **New CLI help safety:** any new `sp` subcommand must parse `--help`/`-h` before performing actions, with a test proving help is side-effect free. A destructive `sp prune-stale-defaults --help` regression deleted files before this rule was added.
-- **Pre-existing noisy tests:** besides `tests/unit/cli/run.test.ts`, `tests/unit/specialist/runner.test.ts` has known pre-existing failures. Verify pristine master before treating either suite as an executor regression.
-- **Orphan starting rows:** if dispatch fails after `claimJobStart`, a no-PID `starting` row can block future runs with `existing undefined job 'undefined' already active`. Prefer the tracked runtime fix when available; immediate triage is `sp ps --bead <id>`, `sp clean --processes --dry-run`, then explicit cancellation/stop rather than repeated redispatch.
+- **Asset ownership:** Cat A runtime assets — specialists, mandatory-rules, catalog, and nodes — resolve live from the specialists package after project tiers. Cat B filesystem assets — skills and hooks — are owned by xtrm-tools under `.xtrm/skills/default` and `.xtrm/hooks/default`.
+- **Resolution precedence:** project/user tiers win over managed defaults; package-live is the final fallback. Mandatory-rule indexes are not stacked across tiers; per-id mandatory-rule files may fall through to package canonical when absent locally.
+- **Drift surface:** use `sp doctor --check-drift` to inspect stale managed defaults and `sp prune-stale-defaults --dry-run` to preview cleanup.
+- **Source verification:** resolver/catalog changes in a worktree are verified with `sp config show <name> --resolved --from-source` so evidence comes from the checked-out source, not an installed dist.
+- **Worktree publication:** edit-capable specialists produce worktree branches. Before review or merge, verify the branch diff and status from that worktree.
+- **Epic publication:** epics are the merge-gated identity. Publish through `sp epic merge`; use `sp epic abandon` to deliberately close failed or cancelled epic bookkeeping.
+- **CLI safety:** command help paths are side-effect free. New commands must parse `--help`/`-h` before action and have a no-write help test.
+- **Release context:** changelog-keeper receives xt report context through the `releasing` skill's helper. Release-range logic supports annotated tags.
 
 ## Autonomous Drive
 
@@ -583,11 +578,10 @@ The `changelog-keeper-scope` mandatory rule enforces the edit whitelist at
 the specialist level. See `config/skills/releasing/SKILL.md` for the bead
 template, dispatch command, and recovery commands.
 
-Release helper cautions:
+Release helper contract:
 
-- The report helper belongs with the `releasing` skill, not as a cwd-relative repo script. Consumer repos may not have `scripts/release/xt-reports.ts`.
-- Date resolution for release ranges must use `git log -1 --format=%cs`; `git show -s` returns tag metadata for annotated tags and can silently produce empty report bundles.
-- After release-related changes, smoke the real annotated-tag path, not only SHA/branch unit fixtures.
+- Report extraction is provided by the `releasing` skill, so consumer repos do not need repo-local release helper scripts.
+- Release ranges support annotated tags and should be validated through the same path used by tagged releases.
 
 ## Epic Lifecycle
 
@@ -676,17 +670,6 @@ Then choose one action:
 
 Do not silently fall back to doing substantial specialist work yourself unless the user agrees or the work is genuinely small and deterministic.
 
-### Failure Triage Shortcuts
-
-- `StallTimeoutError` after nested specialist commands: remove the nested synchronous `sp run`; replace with static CLI evidence or an orchestrator-dispatched background job.
-- `gitnexus_impact` hang: use the fallback path from Recent Runtime Lessons and keep moving with degraded confidence recorded.
-- Reviewer says runtime evidence is stale: rerun evidence with `--from-source` from the worktree.
-- Executor loops on unrelated failing tests: verify pristine master or file a separate bug; narrow validation to the bead's focused tests.
-- Executor edits `.xtrm/` files and merge rebase refuses unstaged changes: manually commit those files in the worktree because auto-checkpoint treats `.xtrm/` as noise.
-- `sp epic merge` refuses due dirty tree or dependency-cycle from failed retry chains: verify reviewer PASS and targeted checks before any manual merge fallback, then clean the epic bookkeeping with `sp epic abandon`.
-- `sp run` reports `existing undefined job 'undefined' already active`: suspect an orphan no-PID `starting` row from a failed spawn; inspect with `sp ps --bead <id>` and clean/cancel deliberately before redispatch.
-- New command's `--help` performs work: stop immediately, file P0, restore changed files, and add a side-effect-free help test before retrying.
-
 ## Recovery Cheatsheet
 
 Dead or zombie process:
@@ -740,9 +723,3 @@ Inspect feed. If no usable final summary exists, rerun with a clearer explorer b
 ## What Not To Put In This Skill
 
 Do not add historical migration notes, stale model names, exhaustive command references, internal token counts, long stuck-state postmortems, or title-only examples. Put long reference material in docs and keep this skill focused on current canonical orchestration.
-
-Current cross-repo boundary reminders:
-
-- Cat A runtime-resolved assets live in specialists package and resolve via canonical-live fallback.
-- Cat B filesystem-bound assets (skills/hooks snapshots, `xt update`, `xt doctor` drift) live in xtrm-tools.
-- Release UX is moving toward `xt release`; specialists keeps the changelog-keeper/releasing pieces and deprecation/alias work for `sp release`.
