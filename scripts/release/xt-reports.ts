@@ -28,8 +28,9 @@ type ListReportsOptions = {
 const DEFAULT_CAP_BYTES = 50_000;
 const REPORT_DIR = '.xtrm/reports';
 
-function getCommitDate(ref: string): string {
-  return execFileSync('git', ['show', '-s', '--format=%cs', ref], {
+function getCommitDate(ref: string, cwd: string): string {
+  return execFileSync('git', ['log', '-1', '--format=%cs', ref], {
+    cwd,
     encoding: 'utf8',
   }).trim();
 }
@@ -47,8 +48,8 @@ function isDateInRange(date: string, since: string, to: string): boolean {
 
 export function listXtReports(options: ListReportsOptions): ReportRecord[] {
   const rootDir = options.rootDir ?? process.cwd();
-  const sinceDate = getCommitDate(options.since);
-  const toDate = getCommitDate(options.to);
+  const sinceDate = getCommitDate(options.since, rootDir);
+  const toDate = getCommitDate(options.to, rootDir);
 
   return listReportFiles(rootDir)
     .map((relativePath) => {

@@ -1,6 +1,9 @@
-import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { buildReportBundle } from '../../../scripts/release/xt-reports.ts';
+import { buildReportBundle, listXtReports } from '../../../scripts/release/xt-reports.ts';
 import { parseSpecialist } from '../../../src/specialist/schema.js';
 import { renderTaskTemplate } from '../../../src/specialist/script-runner.js';
 
@@ -59,6 +62,23 @@ describe('changelog-keeper specialist', () => {
     expect(system).toContain('Use those reports to write WHY-grounded entries instead of pure WHAT diffs');
     expect(system).toContain('No meta-commentary');
     expect(taskTemplate).toContain('Keep bundle capped; if note says older reports dropped, trust the bundle and continue.');
+  });
+
+  it('resolves annotated tags to commit dates when listing reports', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'xt-reports-tag-'));
+    const baseEnv = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' };
+    const git = (env: Record<string, string | undefined>, ...args: string[]) => execFileSync('git', args, { cwd: repo, env, encoding: 'utf8' });
+    git(baseEnv, 'init', '-q', '-b', 'main');
+    git({ ...baseEnv, GIT_COMMITTER_DATE: '2026-05-01T00:00:00Z' }, 'commit', '--allow-empty', '-m', 'init', '--date=2026-05-01T00:00:00Z');
+    git(baseEnv, 'tag', '-a', 'v1.0.0', '-m', 'v1.0.0');
+    git({ ...baseEnv, GIT_COMMITTER_DATE: '2026-05-04T00:00:00Z' }, 'commit', '--allow-empty', '-m', 'after', '--date=2026-05-04T00:00:00Z');
+    mkdirSync(path.join(repo, '.xtrm/reports'), { recursive: true });
+    writeFileSync(path.join(repo, '.xtrm/reports/2026-05-03-x.md'), '# in-range\n');
+    writeFileSync(path.join(repo, '.xtrm/reports/2026-04-30-y.md'), '# out-of-range\n');
+
+    const reports = listXtReports({ since: 'v1.0.0', to: 'HEAD', rootDir: repo });
+
+    expect(reports.map((r) => r.file)).toEqual(['.xtrm/reports/2026-05-03-x.md']);
   });
 
   it('drops oldest reports once bundle cap is hit', () => {
