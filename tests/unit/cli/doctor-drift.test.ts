@@ -8,6 +8,8 @@ const repoRoot = join(import.meta.dirname, '../../..');
 
 function seedRepo(root: string): void {
   mkdirSync(join(root, '.specialists', 'default'), { recursive: true });
+  mkdirSync(join(root, '.specialists', 'default', 'mandatory-rules'), { recursive: true });
+  mkdirSync(join(root, '.specialists', 'default', 'nodes'), { recursive: true });
   mkdirSync(join(root, '.specialists', 'user'), { recursive: true });
   mkdirSync(join(root, '.specialists', 'catalog'), { recursive: true });
   mkdirSync(join(root, 'config', 'specialists'), { recursive: true });
