@@ -40,10 +40,10 @@
       "task_template": "$prompt\n\n$reused_worktree_awareness\n\nWorking directory: $cwd\n\n$bead_context\n\nInject xt report bundle first, then draft. Use injected reports as intent context, not just diff context. Keep bundle capped; if note says older reports dropped, trust the bundle and continue. Proceed step-by-step. Read the bead, resolve the version + range, read relevant xt reports, draft the section, edit files, build, commit, tag, push, self-verify. Report final status.\n"
     },
     "skills": {
-      "paths": [],
+      "paths": ["releasing"],
       "scripts": [
         {
-          "run": "bunx tsx scripts/release/xt-reports.ts $prev_tag $next_tag 50000",
+          "run": "bunx tsx .xtrm/skills/default/releasing/scripts/xt-reports.ts $prev_tag $next_tag 50000",
           "phase": "pre",
           "inject_output": true
         }

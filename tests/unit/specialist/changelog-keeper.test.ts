@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { buildReportBundle, listXtReports } from '../../../scripts/release/xt-reports.ts';
+import { buildReportBundle, listXtReports } from '../../../.xtrm/skills/default/releasing/scripts/xt-reports.ts';
 import { parseSpecialist } from '../../../src/specialist/schema.js';
 import { renderTaskTemplate } from '../../../src/specialist/script-runner.js';
 
@@ -30,7 +30,7 @@ describe('changelog-keeper specialist', () => {
 
     expect(scripts).toHaveLength(1);
     expect(scripts.every((script) => script.phase === 'pre' && script.inject_output === true)).toBe(true);
-    expect(scripts[0]?.run).toContain('scripts/release/xt-reports.ts');
+    expect(scripts[0]?.run).toContain('.xtrm/skills/default/releasing/scripts/xt-reports.ts');
     expect(scripts[0]?.run).toContain('$prev_tag');
     expect(scripts[0]?.run).toContain('$next_tag');
   });
