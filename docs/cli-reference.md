@@ -1457,9 +1457,9 @@ This enables doc-sync specialists and workflow-only changes to merge without fal
 
 ## Releases (skill-driven)
 
-The `sp release prepare/publish` CLI was removed. Releases now flow through
-the `releasing` skill which dispatches the `changelog-keeper` MEDIUM
-specialist. The specialist:
+`sp release prepare/publish` remain as deprecated aliases. Releases now flow through
+`xt release`, which dispatches the `changelog-keeper` MEDIUM specialist via
+`sp script changelog-keeper`. The specialist:
 
 1. Reads relevant xt session reports under `.xtrm/reports/`.
 2. Drafts the new section directly into `CHANGELOG.md`.

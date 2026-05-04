@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `sp clean --processes` now treats no-PID 'starting' rows as stale after 5 minutes (instead of the 24h `--stale-after` default) — matches the orphan profile of failed dispatches that never recorded a PID (unitAI-5o6ih)
 
 ### Changed
+- `xt release` becomes canonical release surface; `sp release prepare/publish` stays as deprecated aliases for backward compatibility (unitAI-at4fm1)
 - Resolver is the only path for computing specialist `--tools`; no env-flag opt-in (unitAI-qujxo.2)
 - `docs/authoring.md` and `config/skills/specialists-creator/SKILL.md` updated to teach the override block decision; `specialists-creator` v1.3.0 prompts the agent to verify resolved tools via `sp config show --resolved` before declaring overrides (unitAI-x5auj)
 - Explorer hard-denies native `grep`/`find`/`ls` to force symbolic search via `gitnexus_query`/`search_for_pattern`/`find_file` when both extensions are healthy; auto-restores natives if either degrades (unitAI-8vb65.7)

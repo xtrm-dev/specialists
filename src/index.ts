@@ -3,7 +3,7 @@
 /**
  * Specialists MCP Server — entry point
  * Subcommands: install, version, list, view, models, init, db, validate, edit, config, run,
- *              status, ps, result, feed, poll, clean, merge, epic, end, stop, attach, quickstart, serve, script, help
+ *              status, ps, result, feed, poll, clean, merge, epic, end, stop, attach, quickstart, serve, script, release, help
  */
 
 // Suppress EBADF errors from bun's internal fd handling on named pipes.
@@ -13,6 +13,8 @@ process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
   console.error('[specialists] [ERROR] Fatal error:', err);
   process.exit(1);
 });
+
+import { spawnSync } from 'node:child_process';
 
 import { SpecialistsServer } from "./server.js";
 import { logger } from "./utils/logger.js";
@@ -24,6 +26,7 @@ const next = process.argv[3];
 function wantsHelp(): boolean {
   return next === '--help' || next === '-h';
 }
+
 
 async function run() {
   if (sub === 'install') {
@@ -1014,6 +1017,16 @@ async function run() {
     }
     const { run: handler } = await import('./cli/script.js');
     return handler(process.argv.slice(3));
+  }
+
+  if (sub === 'release') {
+    console.error('Deprecated. Use `xt release prepare/publish`. This alias will be removed in v4.0.');
+    const result = spawnSync('xt', ['release', ...process.argv.slice(3)], { stdio: 'inherit' });
+    if (result.error) {
+      console.error(`Failed to run xt release: ${result.error.message}`);
+      process.exit(1);
+    }
+    process.exit(result.status ?? 1);
   }
 
   if (sub === 'help' || sub === '--help' || sub === '-h') {
