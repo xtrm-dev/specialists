@@ -1214,6 +1214,12 @@
 
 - `SKILL.md` — Canonical Specialists V2 orchestration skill; v1.4 describes final-state bead-first orchestration, canonical-live Cat A asset resolution, Cat B xtrm-tools ownership, source verification, drift commands, and release context flow without changelog/gotcha framing.
 
+
+## config/skills/using-specialists-v3/
+
+- `SKILL.md` — Canonical Specialists V3 orchestration skill; clean self-contained bead-first workflow using live specialist registry and help surface while preserving core contract/review/merge/failure-recovery guidance.
+- `evals/evals.json` — Role-selection and merge-publication eval prompts for using-specialists-v3.
+
 ## .xtrm/skills/default/using-specialists-v2/
 
 - `SKILL.md` — Installed mirror of canonical using-specialists-v2 skill; keep synced from config/skills/using-specialists-v2/SKILL.md.

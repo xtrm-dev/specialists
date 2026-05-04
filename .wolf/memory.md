@@ -111,3 +111,5 @@
 
 - 2026-05-04: using-specialists-v2 workflow now treats code-sanity/security-auditor as advisory stages before reviewer; reviewer remains final merge gate and security-auditor never edits/applies package updates.
 
+
+- 2026-05-05: Added and deepened `config/skills/using-specialists-v3/`: v3 is a clean orchestration skill that keeps live role registry (`specialists list --full`) and help-surface guidance (`sp help`) while restoring core v2 behavior for bead contracts, autonomous review/fix loops, monitoring, merge paths, epic flow, and failure recovery.

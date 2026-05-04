@@ -5,7 +5,7 @@
       "id": 1,
       "eval_name": "role-selection-implementation",
       "prompt": "Need add one small feature in src/specialist/loader.ts, but I do not know exact path yet. Which specialist should handle discovery and implementation?",
-      "expected_output": "Agent selects explorer or debugger first, not self-investigate. It should mention specialists list --full and then dispatch bead-based specialist work.",
+      "expected_output": "Agent checks live registry if needed, creates/updates complete bead contracts, selects explorer for discovery then executor for implementation, and does not self-investigate substantial work.",
       "assertions": [
         {
           "name": "selects_specialist_role",
@@ -26,7 +26,7 @@
       "id": 2,
       "eval_name": "role-selection-debugging",
       "prompt": "A specialist chain started failing with a stack trace and inconsistent result state. Who should inspect it, and what command surface should I use to check available flags?",
-      "expected_output": "Agent selects debugger or test-runner, and points to sp help / sp run --help / sp result --help rather than guessing flags.",
+      "expected_output": "Agent selects debugger for root-cause analysis, may use test-runner for check execution, and points to sp help/subcommand help before relying on flags.",
       "assertions": [
         {
           "name": "selects_debugging_role",
@@ -47,7 +47,7 @@
       "id": 3,
       "eval_name": "role-selection-review",
       "prompt": "Executor finished a change and I need final verification before merge. Which specialist next, and what should it check?",
-      "expected_output": "Agent selects reviewer, explains it verifies executor output against bead contract and diff, and avoids rewriting code itself.",
+      "expected_output": "Agent selects reviewer with its own bead and --job <exec-job>, checks bead contract plus diff, and treats PASS as merge gate.",
       "assertions": [
         {
           "name": "selects_reviewer_role",
@@ -60,6 +60,27 @@
         {
           "name": "does_not_replace_reviewer_with_self",
           "description": "Agent does not perform the review directly"
+        }
+      ],
+      "files": []
+    },
+    {
+      "id": 4,
+      "eval_name": "merge-publication-flow",
+      "prompt": "Reviewer passed an executor chain. What should the orchestrator do next to publish the specialist work?",
+      "expected_output": "Agent uses sp merge <chain-root-bead> for standalone chains or sp epic merge <epic-id> for epic-owned work, avoids manual git merge, and closes the bead only after required gates are confirmed.",
+      "assertions": [
+        {
+          "name": "uses_specialist_merge",
+          "description": "Agent names sp merge or sp epic merge as the publication path"
+        },
+        {
+          "name": "avoids_manual_git_merge",
+          "description": "Agent explicitly avoids manual git merge for specialist-owned work"
+        },
+        {
+          "name": "honors_reviewer_gate",
+          "description": "Agent publishes only after reviewer PASS or explicit operator acceptance"
         }
       ],
       "files": []
