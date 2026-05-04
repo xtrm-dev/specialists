@@ -8,7 +8,7 @@ description: >
   work without drift. Trigger for code review, debugging, implementation,
   planning, test generation, doc sync, multi-chain epics, and any question about
   specialist orchestration.
-version: 1.2
+version: 1.3
 ---
 
 # Specialists V2
@@ -64,6 +64,13 @@ These are current operating rules from the latest shipped orchestration work:
 - **Stop safety:** before `sp stop` on a job linked to an implementation bead, check for sibling jobs on the same bead with `sp ps --running --bead <id>`. Use `--close-bead-anyway` only when you intentionally want the bead closed despite siblings.
 - **Epic failures:** failed epics can be cleaned up with `sp epic abandon <epic-id> --reason "..."`; use `--force` only when active pointers remain and you have verified no live work should continue.
 - **Worktree outputs:** after an executor reports success, verify both `git log master..HEAD` and `git status --short` inside its worktree. Specialists can leave staged or unstaged work behind despite a successful summary.
+- **Auto-checkpoint noise filter:** auto-commit filters `.xtrm/` paths as noise. If a specialist edits skills/hooks under `.xtrm/`, manually commit those files in the worktree before `sp epic merge`, or the rebase step can fail on unstaged changes.
+- **Canonical-live Cat A assets:** specialists, mandatory-rules, catalog, and nodes now resolve live from the package after user/default/config tiers. Do not require `sp init --sync-defaults` for those assets; use `sp doctor --check-drift` and `sp prune-stale-defaults --dry-run` to clean stale `.specialists/default/` snapshots.
+- **Cat B assets moved to xtrm-tools:** skills and hooks are filesystem-bound and owned by xtrm-tools (`.xtrm/skills/default`, `.xtrm/hooks/default`). Implementation work for skill/hook distribution belongs in xtrm-tools; this repo keeps only specialist-side wrapper/docs work such as `update-specialists` guidance.
+- **Mandatory-rule fallback semantics:** package-live mandatory-rule **index** is used only when no project tiers exist; per-id rule file fallback is allowed. Never stack package defaults into an existing project index, because that leaks canonical `default_template_sets` into customized repos.
+- **New CLI help safety:** any new `sp` subcommand must parse `--help`/`-h` before performing actions, with a test proving help is side-effect free. A destructive `sp prune-stale-defaults --help` regression deleted files before this rule was added.
+- **Pre-existing noisy tests:** besides `tests/unit/cli/run.test.ts`, `tests/unit/specialist/runner.test.ts` has known pre-existing failures. Verify pristine master before treating either suite as an executor regression.
+- **Orphan starting rows:** if dispatch fails after `claimJobStart`, a no-PID `starting` row can block future runs with `existing undefined job 'undefined' already active`. Prefer the tracked runtime fix when available; immediate triage is `sp ps --bead <id>`, `sp clean --processes --dry-run`, then explicit cancellation/stop rather than repeated redispatch.
 
 ## Autonomous Drive
 
@@ -237,6 +244,8 @@ Daily commands:
 specialists list
 specialists list-rules                          # rule × specialist matrix
 specialists doctor
+specialists doctor --check-drift                 # inspect stale .specialists/default snapshots
+sp prune-stale-defaults --dry-run                # preview redundant default snapshots
 specialists run <name> --bead <id> --background
 specialists run executor --bead <impl-bead> --background       # worktree auto-provisioned
 specialists run reviewer --bead <review-bead> --job <exec-job> --keep-alive --background
@@ -258,6 +267,7 @@ sp merge <chain-root-bead>
 sp epic status <epic-id>
 sp epic sync <epic-id> --apply
 sp epic merge <epic-id>
+sp epic abandon <epic-id> --reason "..."
 sp end
 ```
 
@@ -560,9 +570,10 @@ Rules:
 
 Tagged releases go through the `releasing` skill, which dispatches the
 `changelog-keeper` MEDIUM specialist. The specialist reads xt session
-reports, drafts the new section into `CHANGELOG.md`, bumps `package.json`,
-rebuilds `dist/`, commits with `release: vX.Y.Z`, tags, and pushes
-`--follow-tags`. Optional `gh release create` if the bead requests it.
+reports via the releasing skill's `xt-reports.ts` helper, drafts the new
+section into `CHANGELOG.md`, bumps `package.json`, rebuilds `dist/`, commits
+with `release: vX.Y.Z`, tags, and pushes `--follow-tags`. Optional
+`gh release create` if the bead requests it.
 
 Operator gate: a single `git diff --stat HEAD~1 HEAD` after the specialist
 finishes. Must show only `CHANGELOG.md`, `package.json`, `dist/`. Anything
@@ -571,6 +582,12 @@ else means scope was violated — revert and refile.
 The `changelog-keeper-scope` mandatory rule enforces the edit whitelist at
 the specialist level. See `config/skills/releasing/SKILL.md` for the bead
 template, dispatch command, and recovery commands.
+
+Release helper cautions:
+
+- The report helper belongs with the `releasing` skill, not as a cwd-relative repo script. Consumer repos may not have `scripts/release/xt-reports.ts`.
+- Date resolution for release ranges must use `git log -1 --format=%cs`; `git show -s` returns tag metadata for annotated tags and can silently produce empty report bundles.
+- After release-related changes, smoke the real annotated-tag path, not only SHA/branch unit fixtures.
 
 ## Epic Lifecycle
 
@@ -665,7 +682,10 @@ Do not silently fall back to doing substantial specialist work yourself unless t
 - `gitnexus_impact` hang: use the fallback path from Recent Runtime Lessons and keep moving with degraded confidence recorded.
 - Reviewer says runtime evidence is stale: rerun evidence with `--from-source` from the worktree.
 - Executor loops on unrelated failing tests: verify pristine master or file a separate bug; narrow validation to the bead's focused tests.
+- Executor edits `.xtrm/` files and merge rebase refuses unstaged changes: manually commit those files in the worktree because auto-checkpoint treats `.xtrm/` as noise.
 - `sp epic merge` refuses due dirty tree or dependency-cycle from failed retry chains: verify reviewer PASS and targeted checks before any manual merge fallback, then clean the epic bookkeeping with `sp epic abandon`.
+- `sp run` reports `existing undefined job 'undefined' already active`: suspect an orphan no-PID `starting` row from a failed spawn; inspect with `sp ps --bead <id>` and clean/cancel deliberately before redispatch.
+- New command's `--help` performs work: stop immediately, file P0, restore changed files, and add a side-effect-free help test before retrying.
 
 ## Recovery Cheatsheet
 
@@ -686,12 +706,16 @@ sp epic status <epic-id>
 sp epic sync <epic-id> --apply
 ```
 
-Specialist missing or config skipped:
+Specialist missing, config skipped, or stale default snapshots:
 
 ```bash
 specialists list
 specialists doctor
+specialists doctor --check-drift
+sp prune-stale-defaults --dry-run
 ```
+
+`sp prune-stale-defaults` is intentionally operator-facing. Always run `--dry-run` first unless the bead explicitly asks to apply cleanup.
 
 Worktree already exists:
 
@@ -716,3 +740,9 @@ Inspect feed. If no usable final summary exists, rerun with a clearer explorer b
 ## What Not To Put In This Skill
 
 Do not add historical migration notes, stale model names, exhaustive command references, internal token counts, long stuck-state postmortems, or title-only examples. Put long reference material in docs and keep this skill focused on current canonical orchestration.
+
+Current cross-repo boundary reminders:
+
+- Cat A runtime-resolved assets live in specialists package and resolve via canonical-live fallback.
+- Cat B filesystem-bound assets (skills/hooks snapshots, `xt update`, `xt doctor` drift) live in xtrm-tools.
+- Release UX is moving toward `xt release`; specialists keeps the changelog-keeper/releasing pieces and deprecation/alias work for `sp release`.

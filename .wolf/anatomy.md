@@ -1217,3 +1217,5 @@
 ## .xtrm/skills/default/using-specialists-v2/
 
 - `SKILL.md` — Installed mirror of canonical using-specialists-v2 skill; keep synced from config/skills/using-specialists-v2/SKILL.md.
+
+- 2026-05-04: `config/skills/using-specialists-v2/SKILL.md` bumped to v1.3 after full xt report pass; includes canonical-live/Cat B, release helper, drift cleanup, and failure triage updates. Installed mirror copied to `.xtrm/skills/default/using-specialists-v2/SKILL.md`.
