@@ -26036,6 +26036,14 @@ function parseArgs2(argv) {
       result.showDead = true;
       continue;
     }
+    if (token === "--compact") {
+      result.compact = true;
+      continue;
+    }
+    if (token === "--full" || token === "--no-truncate") {
+      result.full = true;
+      continue;
+    }
   }
   return result;
 }
@@ -26078,7 +26086,7 @@ ${bold2(`Specialists (${specialists.length})`)}
     const keepAliveTag = s.interactive ? `  ${yellow2("[keep-alive]")}` : "";
     const thinkingTag = s.thinking_level && s.thinking_level !== "off" ? `  ${dim2(`thinking:${s.thinking_level}`)}` : "";
     const model = dim2(s.model);
-    const desc = s.description.length > 80 ? s.description.slice(0, 79) + "\u2026" : s.description;
+    const desc = args.compact && s.description.length > 80 ? s.description.slice(0, 79) + "\u2026" : s.description;
     console.log(`  ${cyan(s.name)}  ${scopeTag}  ${permission}${keepAliveTag}${thinkingTag}  ${model}`);
     console.log(`  ${dim2(desc)}`);
     if (s.skills.length > 0) {
@@ -40788,7 +40796,7 @@ var bold15 = (s) => `\x1B[1m${s}\x1B[0m`, dim15 = (s) => `\x1B[2m${s}\x1B[0m`, C
 var init_help = __esm(() => {
   CORE_COMMANDS = [
     ["init", "Bootstrap a project: dirs, workflow injection, project MCP registration"],
-    ["list", "List specialists; --live for interactive tmux session picker"],
+    ["list", "List specialists with full descriptions; --compact truncates, --live opens tmux picker"],
     ["list-rules", "Show mandatory-rule \xD7 specialist matrix; --rule/--specialist filters, --json"],
     ["view", "Pretty-print specialist config with readable prompts; --section, --raw"],
     ["edit", "Edit specialist fields via dot-path: set/get/append/remove, --preset, --list-presets"],
@@ -48367,7 +48375,7 @@ async function run34() {
         "What it shows:",
         "  - specialist name",
         "  - model",
-        "  - short description",
+        "  - full description (use --compact to truncate)",
         "  - permission_required + interactive mode / active-mode detection",
         "  - version + optional thinking_level",
         "  - skills.paths and configured pre/post scripts",
@@ -48375,12 +48383,15 @@ async function run34() {
         "Options:",
         "  --category <name>   Filter by category tag",
         "  --json              Output as JSON array",
+        "  --compact           Truncate descriptions for a shorter list",
+        "  --full, --no-truncate  Show full descriptions (default)",
         "  --live              List running tmux-backed jobs; active jobs are DB-backed",
         "",
         "Examples:",
         "  specialists list",
         "  specialists list --category analysis",
         "  specialists list --json",
+        "  specialists list --compact",
         "  specialists list --live",
         "",
         "More help:",

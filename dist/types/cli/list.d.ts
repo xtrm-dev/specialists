@@ -4,6 +4,8 @@ export interface ParsedArgs {
     json?: boolean;
     live?: boolean;
     showDead?: boolean;
+    compact?: boolean;
+    full?: boolean;
 }
 export declare class ArgParseError extends Error {
     constructor(message: string);

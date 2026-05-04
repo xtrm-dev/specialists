@@ -25,6 +25,8 @@ export interface ParsedArgs {
   json?: boolean;
   live?: boolean;
   showDead?: boolean;
+  compact?: boolean;
+  full?: boolean;
 }
 
 interface LiveJob {
@@ -249,6 +251,16 @@ export function parseArgs(argv: string[]): ParsedArgs {
       continue;
     }
 
+    if (token === '--compact') {
+      result.compact = true;
+      continue;
+    }
+
+    if (token === '--full' || token === '--no-truncate') {
+      result.full = true;
+      continue;
+    }
+
     // Unknown flags: silently ignored
   }
 
@@ -300,7 +312,7 @@ export async function run(): Promise<void> {
     const thinkingTag = s.thinking_level && s.thinking_level !== 'off'
       ? `  ${dim(`thinking:${s.thinking_level}`)}` : '';
     const model = dim(s.model);
-    const desc = s.description.length > 80 ? s.description.slice(0, 79) + '…' : s.description;
+    const desc = args.compact && s.description.length > 80 ? s.description.slice(0, 79) + '…' : s.description;
 
     console.log(`  ${cyan(s.name)}  ${scopeTag}  ${permission}${keepAliveTag}${thinkingTag}  ${model}`);
     console.log(`  ${dim(desc)}`);

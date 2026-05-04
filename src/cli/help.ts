@@ -9,7 +9,7 @@ type CommandEntry = [string, string];
 
 const CORE_COMMANDS: CommandEntry[] = [
   ['init', 'Bootstrap a project: dirs, workflow injection, project MCP registration'],
-  ['list', 'List specialists; --live for interactive tmux session picker'],
+  ['list', 'List specialists with full descriptions; --compact truncates, --live opens tmux picker'],
   ['list-rules', 'Show mandatory-rule × specialist matrix; --rule/--specialist filters, --json'],
   ['view', 'Pretty-print specialist config with readable prompts; --section, --raw'],
   ['edit', 'Edit specialist fields via dot-path: set/get/append/remove, --preset, --list-presets'],

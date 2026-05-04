@@ -88,3 +88,14 @@ describe('list CLI — parseArgs --live', () => {
     expect(result.live).toBeUndefined();
   });
 });
+
+describe('list CLI — parseArgs description flags', () => {
+  it('parses --compact flag', () => {
+    expect(parseArgs(['--compact'])).toEqual({ compact: true });
+  });
+
+  it('parses full-description aliases', () => {
+    expect(parseArgs(['--full'])).toEqual({ full: true });
+    expect(parseArgs(['--no-truncate'])).toEqual({ full: true });
+  });
+});
