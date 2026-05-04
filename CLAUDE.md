@@ -102,6 +102,7 @@ This project is indexed by GitNexus as **specialists** (4635 symbols, 10050 rela
 ## Always Do
 
 - **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
+- If `gitnexus_impact` tool call shows no progress near 120s, treat as stall path: prefer session timeout-protected call; if timeout still hits, continue with `gitnexus_query` + `gitnexus_context`, report degraded impact coverage, and file upstream repro.
 - **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
 - **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
 - When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
