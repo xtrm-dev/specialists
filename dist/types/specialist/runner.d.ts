@@ -8,6 +8,8 @@ export interface RunOptions {
     variables?: Record<string, string>;
     backendOverride?: string;
     autonomyLevel?: string;
+    specialistName?: string;
+    specialistPermissions?: PiSessionOptions['specialistPermissions'];
     /** Working directory for local scripts and the pi session. */
     workingDirectory?: string;
     /** Absolute write-boundary for write-side tools inside pi session. */

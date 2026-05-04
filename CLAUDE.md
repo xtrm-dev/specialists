@@ -95,14 +95,13 @@ Run `bd memories <keyword>` or `bd recall <key>` for prior insights before subst
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **specialists** (4635 symbols, 10050 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **specialists** (4754 symbols, 10321 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
 ## Always Do
 
 - **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
-- If `gitnexus_impact` tool call shows no progress near 120s, treat as stall path: prefer session timeout-protected call; if timeout still hits, continue with `gitnexus_query` + `gitnexus_context`, report degraded impact coverage, and file upstream repro.
 - **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
 - **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
 - When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.

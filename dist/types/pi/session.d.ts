@@ -4,6 +4,7 @@ export declare class SessionKilledError extends Error {
 export declare class StallTimeoutError extends Error {
     constructor(timeoutMs: number);
 }
+import { type ManifestPolicy } from '../specialist/manifest-resolver.js';
 export interface AgentSessionMeta {
     backend: string;
     model: string;
@@ -76,6 +77,10 @@ export interface PiSessionOptions {
     worktreeBoundary?: string;
     /** Permission level from specialist YAML — controls which pi tools are enabled */
     permissionLevel?: string;
+    /** Specialist name for per-specialist policy overrides. */
+    specialistName?: string;
+    /** Specialist manifest permissions for resolver overrides. */
+    specialistPermissions?: ManifestPolicy['permissions'];
     /** Skill files loaded via pi --skill (injected into system prompt natively) */
     skillPaths?: string[];
     /** Thinking level passed as pi --thinking <level> */
