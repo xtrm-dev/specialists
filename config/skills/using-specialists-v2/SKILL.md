@@ -682,6 +682,8 @@ Reviewer cannot enter job workspace:
 Check target job status with sp ps. MEDIUM/HIGH jobs are blocked from entering a running write-capable workspace unless forced.
 ```
 
+When resolver/catalog changes are under review inside a worktree, run `sp config show <name> --resolved --from-source` so reviewer sees local source behavior, not installed dist.
+
 Explorer produced empty output:
 
 ```text

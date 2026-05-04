@@ -1,4 +1,7 @@
-import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { run as runEdit } from './edit.js';
 import { formatResolvedConfigReport, loadResolvedConfigReport } from '../specialist/resolution-diagnostics.js';
@@ -10,7 +13,7 @@ function usage(): string {
     'Usage:',
     '  specialists config get <key> [--all] [--name <specialist>]',
     '  specialists config set <key> <value> [--all] [--name <specialist>]',
-    '  specialists config show <specialist> [--resolved]',
+    '  specialists config show <specialist> [--resolved] [--from-source]',
     '',
     'Deprecated alias of specialists edit:',
     '  specialists edit --all --get <key>',
@@ -23,6 +26,58 @@ function usage(): string {
 function fail(message: string): never {
   console.error(message);
   process.exit(1);
+}
+
+function readPackageVersion(packageJsonPath: string): string | undefined {
+  try {
+    const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf-8')) as { version?: string };
+    return typeof pkg.version === 'string' ? pkg.version : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isInsideGitWorktree(projectDir: string): boolean {
+  const result = spawnSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd: projectDir, encoding: 'utf-8' });
+  return result.status === 0 && result.stdout.trim() === 'true';
+}
+
+function getGitCommonDir(projectDir: string): string | undefined {
+  const result = spawnSync('git', ['rev-parse', '--git-common-dir'], { cwd: projectDir, encoding: 'utf-8' });
+  if (result.status !== 0) return undefined;
+  return result.stdout.trim() || undefined;
+}
+
+function getGitTopLevel(projectDir: string): string | undefined {
+  const result = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: projectDir, encoding: 'utf-8' });
+  if (result.status !== 0) return undefined;
+  return result.stdout.trim() || undefined;
+}
+
+function getRuntimePackageVersion(): string | undefined {
+  const runtimeDir = dirname(fileURLToPath(import.meta.url));
+  const packageJsonPath = runtimeDir.includes('/dist/')
+    ? join(runtimeDir, '..', 'package.json')
+    : join(runtimeDir, '..', '..', 'package.json');
+  return readPackageVersion(packageJsonPath);
+}
+
+function shouldWarnAboutSourceMode(projectDir: string): boolean {
+  if (!isInsideGitWorktree(projectDir)) return false;
+  const topLevel = getGitTopLevel(projectDir);
+  const commonDir = getGitCommonDir(projectDir);
+  if (!topLevel || !commonDir || topLevel === commonDir) return false;
+
+  const packageVersion = readPackageVersion(join(projectDir, 'package.json'));
+  const runtimeVersion = getRuntimePackageVersion();
+  return Boolean(packageVersion && runtimeVersion && packageVersion !== runtimeVersion);
+}
+
+function showSourceRuntimeUnavailableError(reason: 'bunx-missing' | 'tsx-missing'): never {
+  const detail = reason === 'bunx-missing'
+    ? 'bunx missing'
+    : 'tsx missing or failed';
+  fail(`Unable to run source mode (${detail}). Need bunx + tsx in PATH. Try: bunx tsx src/index.ts config show <specialist> --resolved --from-source`);
 }
 
 function buildEditArgv(argv: string[]): string[] {
@@ -88,13 +143,48 @@ async function showResolvedConfig(argv: string[]): Promise<void> {
     fail(`Missing specialist name\n\n${usage()}`);
   }
 
-  const resolved = argv.slice(1);
-  if (resolved.length !== 1 || resolved[0] !== '--resolved') {
-    fail(`Unknown option: ${resolved.join(' ')}\n\n${usage()}`);
+  const flags = new Set(argv.slice(1));
+  for (const flag of flags) {
+    if (flag !== '--resolved' && flag !== '--from-source') {
+      fail(`Unknown option: ${flag}\n\n${usage()}`);
+    }
+  }
+  if (!flags.has('--resolved')) {
+    fail(`Unknown option: ${argv.slice(1).join(' ')}\n\n${usage()}`);
   }
 
   const projectDir = process.cwd();
   const catalogsPath = join(projectDir, '.specialists', 'catalog', 'index.json');
+
+  if (!flags.has('--from-source') && shouldWarnAboutSourceMode(projectDir)) {
+    console.error(yellow('⚠ hint: use --from-source for worktree-source resolver review'));
+  }
+
+  if (flags.has('--from-source') && !import.meta.url.includes('/src/')) {
+    const result = spawnSync('bunx', ['tsx', 'src/index.ts', 'config', 'show', specialistName, '--resolved'], {
+      cwd: projectDir,
+      encoding: 'utf-8',
+      stdio: 'pipe',
+    });
+
+    if (result.error instanceof Error && 'code' in result.error && (result.error as { code?: string }).code === 'ENOENT') {
+      showSourceRuntimeUnavailableError('bunx-missing');
+    }
+
+    const stderr = result.stderr?.toString() ?? '';
+    const tsxMissing = result.status !== 0 && (stderr.includes('tsx') || stderr.includes('Cannot find module') || stderr.includes('ERR_MODULE_NOT_FOUND'));
+    if (tsxMissing) {
+      showSourceRuntimeUnavailableError('tsx-missing');
+    }
+
+    if (result.status !== 0) {
+      process.stderr.write(stderr);
+      process.exit(result.status ?? 1);
+    }
+    process.stdout.write(result.stdout?.toString() ?? '');
+    return;
+  }
+
   const report = await loadResolvedConfigReport({ specialistName, projectDir, catalogsPath });
   console.log(formatResolvedConfigReport(report));
 }
