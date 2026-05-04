@@ -92,6 +92,7 @@ function makeBeadsClient(overrides: Partial<Record<string, unknown>> = {}): Bead
     closeBead: vi.fn(),
     auditBead: vi.fn(),
     updateBeadNotes: vi.fn(),
+    getCompletedBlockers: vi.fn().mockReturnValue([]),
     ...overrides,
   } as unknown as BeadsClient;
 }
@@ -217,22 +218,21 @@ describe('SpecialistRunner', () => {
       });
 
       const promptArg = mockSession.prompt.mock.calls.at(-1)?.[0] as string;
-      const sessionOptions = sessionFactory.mock.calls[0][0] as { systemPrompt?: string };
-      const systemPrompt = sessionOptions.systemPrompt ?? '';
       expect(promptArg).toContain('review $reviewed_job_id');
-      expect(systemPrompt).toContain('## Reviewer Diff Context');
-      expect(systemPrompt).toContain('Patch source:');
-      expect(systemPrompt).toContain('staged diff');
-      expect(systemPrompt).toContain('Diff stat:');
-      expect(systemPrompt).toContain('tracked.txt');
-      expect(systemPrompt).toContain('staged');
+      expect(promptArg).toContain('## Reviewer Diff Context');
+      expect(promptArg).toContain('Patch source:');
+      expect(promptArg).toContain('staged diff');
+      expect(promptArg).toContain('Diff stat:');
+      expect(promptArg).toContain('tracked.txt');
+      expect(promptArg).toContain('staged');
     } finally {
       repo.cleanup();
     }
   });
 
-  it('fails fast when reviewer patch sources all empty', async () => {
+  it('warns and continues when reviewer patch sources all empty', async () => {
     const repo = createEmptyReviewerRepo();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       const runner = new SpecialistRunner({
         loader: {
@@ -252,13 +252,20 @@ describe('SpecialistRunner', () => {
         sessionFactory: vi.fn().mockResolvedValue(mockSession),
       });
 
-      await expect(runner.run({
+      await runner.run({
         name: 'reviewer',
         prompt: 'review this',
         reusedFromJobId: 'job-reviewed',
         workingDirectory: repo.dir,
-      })).rejects.toThrow('Reviewer startup blocked: no patch context found in injected diff, unstaged diff, staged diff, or branch-vs-base diff.');
+      });
+
+      const warnings = warnSpy.mock.calls.map((c) => String(c[0]));
+      expect(warnings.some((w) => w.includes('Reviewer diff context unavailable'))).toBe(true);
+
+      const promptArg = mockSession.prompt.mock.calls.at(-1)?.[0] as string;
+      expect(promptArg).not.toContain('## Reviewer Diff Context');
     } finally {
+      warnSpy.mockRestore();
       repo.cleanup();
     }
   });
@@ -300,12 +307,11 @@ describe('SpecialistRunner', () => {
         },
       });
 
-      const sessionOptions = sessionFactory.mock.calls[0][0] as { systemPrompt?: string };
-      const systemPrompt = sessionOptions.systemPrompt ?? '';
-      expect(systemPrompt).toContain('Patch source:');
-      expect(systemPrompt).toContain('injected diff context');
-      expect(systemPrompt).toContain('tracked.txt');
-      expect(systemPrompt).toContain('+injected');
+      const promptArg = mockSession.prompt.mock.calls.at(-1)?.[0] as string;
+      expect(promptArg).toContain('Patch source:');
+      expect(promptArg).toContain('injected diff context');
+      expect(promptArg).toContain('tracked.txt');
+      expect(promptArg).toContain('+injected');
     } finally {
       repo.cleanup();
     }
@@ -859,20 +865,26 @@ describe('SpecialistRunner', () => {
         beadsClient: makeBeadsClient({ readBead: vi.fn().mockReturnValue(null) }),
       });
 
-      await runner.run({
-        name: 'reviewer',
-        prompt: 'review this',
-        variables: { reviewed_job_id: 'job-reviewed' },
-      });
+      const repo = createEmptyReviewerRepo();
+      try {
+        await runner.run({
+          name: 'reviewer',
+          prompt: 'review this',
+          variables: { reviewed_job_id: 'job-reviewed' },
+          workingDirectory: repo.dir,
+        });
 
-      const renderedTask = mockSession.prompt.mock.calls.at(-1)?.[0] as string;
-      expect(renderedTask).toContain('- reviewed_job_id: job-reviewed');
-      expect(renderedTask).not.toContain('$reviewed_job_id');
-      expect(renderedTask).not.toContain('Need reviewed_job_id');
+        const renderedTask = mockSession.prompt.mock.calls.at(-1)?.[0] as string;
+        expect(renderedTask).toContain('- reviewed_job_id: job-reviewed');
+        expect(renderedTask).not.toContain('$reviewed_job_id');
+        expect(renderedTask).not.toContain('Need reviewed_job_id');
+      } finally {
+        repo.cleanup();
+      }
     });
 
     it('defines authoritative review context rules in reviewer config prompt', async () => {
-      const reviewerConfigPath = '/home/dawid/dev/specialists/.worktrees/unitAI-xcaov/unitAI-xcaov-executor/config/specialists/reviewer.specialist.json';
+      const reviewerConfigPath = join(process.cwd(), 'config/specialists/reviewer.specialist.json');
       const reviewerConfig = JSON.parse(readFileSync(reviewerConfigPath, 'utf8'));
       const systemPrompt = reviewerConfig?.specialist?.prompt?.system ?? '';
       expect(systemPrompt).toContain('## AUTHORITATIVE REVIEW CONTEXT');
