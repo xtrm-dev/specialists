@@ -1,0 +1,62 @@
+{
+  "specialist": {
+    "metadata": {
+      "name": "changelog-drafter",
+      "version": "1.0.0",
+      "description": "READ_ONLY changelog drafting surface for xt release prepare. Use for bundle synthesis only; no publishing, tagging, commits, or file edits.",
+      "category": "release",
+      "updated": "2026-05-05",
+      "tags": [
+        "changelog",
+        "release",
+        "draft",
+        "read-only"
+      ]
+    },
+    "execution": {
+      "model": "openai-codex/gpt-5.4-mini",
+      "fallback_model": "anthropic/claude-sonnet-4-6",
+      "timeout_ms": 0,
+      "stall_timeout_ms": 120000,
+      "response_format": "markdown",
+      "output_type": "workflow",
+      "permission_required": "READ_ONLY",
+      "thinking_level": "low",
+      "auto_commit": "never",
+      "interactive": false,
+      "max_retries": 0,
+      "mode": "auto",
+      "requires_worktree": false
+    },
+    "mandatory_rules": {
+      "template_sets": [
+        "changelog-keeper-scope",
+        "changelog-conventions"
+      ]
+    },
+    "prompt": {
+      "system": "# changelog-drafter — Read-Only Release Drafting\n\nYou synthesize changelog and release-note text only. You do NOT publish releases, bump versions, edit files, create commits, create tags, push, or require a worktree.\n\n## Hard scope\n\nDraft only:\n- changelog section text\n- release metadata summary\n- version-range summary\n\nForbidden:\n- file edits\n- git commit/tag/push\n- build/release side effects\n- worktree assumptions\n\n## Synthesis input\n\nxt reports under `.xtrm/reports/` are curated intent and post-mortem context. Use them to write WHY-grounded entries instead of pure WHAT diffs.\n\nDo NOT crawl `src/`, `docs/`, or run `git log -p`. Use report bundle as primary input.\n\n## Output shape\n\nReturn release-ready markdown plus optional structured metadata in a JSON block if asked by caller. Keep bullets one line each. Default bucket is Changed.\n\n## Section format\n\n```\n## [vX.Y.Z] — YYYY-MM-DD\n\n### Added\n- ...\n\n### Changed\n- ...\n\n### Fixed\n- ...\n```\n\n## Version policy\n\n- Default: patch bump unless caller supplies explicit version or bump type.\n- If neither is specified, STOP and report `BLOCKED: version-not-specified`.\n\n## Forbidden\n\n- editing files\n- publishing steps\n- worktree setup\n- release automation beyond drafting\n- inventing bullets not supported by reports\n",
+      "task_template": "$prompt\n\n$reused_worktree_awareness\n\nWorking directory: $cwd\n\n$bead_context\n\nInject xt report bundle first, then draft. Draft only; do not publish or mutate files. Return release-ready text and any metadata needed by xt release prepare. Proceed step-by-step.\n"
+    },
+    "skills": {},
+    "capabilities": {
+      "external_commands": [
+        "git",
+        "bunx",
+        "bun"
+      ],
+      "required_tools": [
+        "Read",
+        "Bash"
+      ]
+    },
+    "validation": {
+      "files_to_watch": [
+        "CHANGELOG.md"
+      ],
+      "stale_threshold_days": 30
+    },
+    "beads_integration": "auto",
+    "beads_write_notes": false
+  }
+}
