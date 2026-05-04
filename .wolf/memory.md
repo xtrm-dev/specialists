@@ -100,3 +100,5 @@
 - 2026-05-04: Improved specialist metadata descriptions across config/specialists and user overlays for `specialists list` routing; updated specialists-creator skill/config to teach choose-when/do-not-choose-when/distinctive-capability/permission-note descriptions.
 
 - 2026-05-04: Reworked specialist metadata descriptions to be truncation-first for `specialists list`: first visible words now carry role and task shape (Executor/Debugger/Explorer/etc.) before list ellipsis.
+
+- 2026-05-04: Created security-auditor specialist config: LOW permission permits safe audit commands while preventing edits; package updates are recommendations only and should be applied by executor in a separate bead.

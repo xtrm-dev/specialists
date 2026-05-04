@@ -1223,3 +1223,5 @@
 - 2026-05-04: Updated config/specialists/*.specialist.json descriptions and .specialists/user overlays to improve `specialists list` routing; specialists-creator v1.2 now teaches list-friendly metadata.description authoring.
 
 - 2026-05-04: `config/specialists/*.specialist.json` and `.specialists/user` overlays now use truncation-first metadata descriptions for `specialists list`; package-owned configs require package release/update for other repos to receive them.
+
+- 2026-05-04: Added config/specialists/security-auditor.specialist.json — LOW-permission security audit specialist with safe local audit commands, dependency advisory triage, researcher-style current sources, and no-edit/no-exploit boundaries.
