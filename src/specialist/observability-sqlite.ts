@@ -126,7 +126,8 @@ function migrateToV2(db: BunDb): void {
         status_json,
         JSON_EXTRACT(status_json, '$.bead_id'),
         updated_at_ms,
-        last_output
+        last_output,
+        startup_payload_json
       FROM specialist_jobs;
     DROP TABLE IF EXISTS specialist_jobs;
     ALTER TABLE specialist_jobs_v2 RENAME TO specialist_jobs;
@@ -155,7 +156,8 @@ function migrateToV3(db: BunDb): void {
       status          TEXT NOT NULL,
       status_json     TEXT NOT NULL,
       updated_at_ms   INTEGER NOT NULL,
-      last_output     TEXT
+      last_output     TEXT,
+      startup_payload_json TEXT
     );
     INSERT OR IGNORE INTO specialist_jobs_v3
       SELECT
@@ -167,7 +169,8 @@ function migrateToV3(db: BunDb): void {
         COALESCE(JSON_EXTRACT(status_json, '$.status'), 'starting'),
         status_json,
         updated_at_ms,
-        last_output
+        last_output,
+        startup_payload_json
       FROM specialist_jobs;
     DROP TABLE IF EXISTS specialist_jobs;
     ALTER TABLE specialist_jobs_v3 RENAME TO specialist_jobs;
@@ -465,7 +468,8 @@ export function initSchema(db: BunDb): void {
           COALESCE(status, JSON_EXTRACT(status_json, '$.status'), 'starting'),
           status_json,
           updated_at_ms,
-          last_output
+          last_output,
+          startup_payload_json
         FROM specialist_jobs;
       DROP TABLE IF EXISTS specialist_jobs;
       ALTER TABLE specialist_jobs_new RENAME TO specialist_jobs;

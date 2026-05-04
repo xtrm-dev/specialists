@@ -4,6 +4,7 @@ import { execSync, spawnSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createObservabilitySqliteClient } from '../../../src/specialist/observability-sqlite.js';
+import { ensureObservabilityDbFile, resolveObservabilityDbLocation } from '../../../src/specialist/observability-db.js';
 import type { SupervisorStatus } from '../../../src/specialist/supervisor.js';
 
 const repoRoot = resolve(import.meta.dirname, '../../..');
@@ -19,6 +20,7 @@ function runCli(cwd: string, args: string[], env: NodeJS.ProcessEnv = {}) {
 
 async function initRepo(cwd: string): Promise<void> {
   execSync('git init', { cwd, stdio: 'ignore' });
+  execSync('git config extensions.worktreeConfig true', { cwd, stdio: 'ignore' });
   execSync('git config user.email "test@example.com"', { cwd });
   execSync('git config user.name "Test User"', { cwd });
   await writeFile(join(cwd, 'shared.txt'), 'base\n', 'utf-8');
@@ -92,6 +94,7 @@ function createStatus(options: {
   chainRootJobId: string;
   chainRootBeadId: string;
   epicId: string;
+  worktreePath: string;
 }): SupervisorStatus {
   return {
     id: options.id,
@@ -100,7 +103,7 @@ function createStatus(options: {
     started_at_ms: options.startedAtMs,
     bead_id: options.beadId,
     branch: options.branch,
-    worktree_path: `/tmp/${options.id}`,
+    worktree_path: options.worktreePath,
     chain_id: options.chainId,
     chain_root_job_id: options.chainRootJobId,
     chain_root_bead_id: options.chainRootBeadId,
@@ -110,14 +113,19 @@ function createStatus(options: {
 
 describe('integration: epic and merge CLI', () => {
   let tempDir = '';
+  let binDir = '';
 
   beforeEach(async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'sp-epic-integration-'));
+    binDir = await mkdtemp(join(tmpdir(), 'sp-epic-bin-'));
     await initRepo(tempDir);
 
     const baseBranch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: tempDir, encoding: 'utf-8' }).trim();
     await createBranchCommit(tempDir, baseBranch, 'feature/chain-b', 'b.txt');
     await createBranchCommit(tempDir, baseBranch, 'feature/chain-a', 'a.txt');
+    await mkdir(join(tempDir, '.worktrees'), { recursive: true });
+    execSync(`git worktree add ${join(tempDir, '.worktrees', 'chain-a')} feature/chain-a`, { cwd: tempDir, stdio: 'ignore' });
+    execSync(`git worktree add ${join(tempDir, '.worktrees', 'chain-b')} feature/chain-b`, { cwd: tempDir, stdio: 'ignore' });
 
     await mkdir(join(tempDir, '.specialists', 'jobs', 'job-chain-a'), { recursive: true });
     await mkdir(join(tempDir, '.specialists', 'jobs', 'job-chain-b'), { recursive: true });
@@ -129,7 +137,7 @@ describe('integration: epic and merge CLI', () => {
         bead_id: 'unitAI-chain-a',
         status: 'done',
         branch: 'feature/chain-a',
-        worktree_path: '/tmp/chain-a',
+        worktree_path: join(tempDir, '.worktrees', 'chain-a'),
         started_at_ms: 2,
       }),
       'utf-8',
@@ -142,11 +150,14 @@ describe('integration: epic and merge CLI', () => {
         bead_id: 'unitAI-chain-b',
         status: 'done',
         branch: 'feature/chain-b',
-        worktree_path: '/tmp/chain-b',
+        worktree_path: join(tempDir, '.worktrees', 'chain-b'),
         started_at_ms: 1,
       }),
       'utf-8',
     );
+
+    const dbLocation = resolveObservabilityDbLocation(tempDir);
+    ensureObservabilityDbFile(dbLocation);
 
     const sqlite = createObservabilitySqliteClient(tempDir);
     if (!sqlite) {
@@ -187,6 +198,7 @@ describe('integration: epic and merge CLI', () => {
       chainRootJobId: 'job-chain-a',
       chainRootBeadId: 'unitAI-chain-a',
       epicId: 'unitAI-epic1',
+      worktreePath: join(tempDir, '.worktrees', 'chain-a'),
     }));
 
     sqlite.upsertStatus(createStatus({
@@ -199,12 +211,11 @@ describe('integration: epic and merge CLI', () => {
       chainRootJobId: 'job-chain-b',
       chainRootBeadId: 'unitAI-chain-b',
       epicId: 'unitAI-epic1',
+      worktreePath: join(tempDir, '.worktrees', 'chain-b'),
     }));
 
     sqlite.close();
 
-    const binDir = join(tempDir, 'bin');
-    await mkdir(binDir, { recursive: true });
     await writeMockBd(binDir);
     await writeMockBunx(binDir);
   });
@@ -213,25 +224,28 @@ describe('integration: epic and merge CLI', () => {
     if (tempDir) {
       await rm(tempDir, { recursive: true, force: true });
     }
+    if (binDir) {
+      await rm(binDir, { recursive: true, force: true });
+    }
   });
 
   it('epic list/status/resolve produce operator-readable and JSON output', () => {
-    const pathPrefix = `${join(tempDir, 'bin')}:${process.env.PATH ?? ''}`;
+    const pathPrefix = `${binDir}:${process.env.PATH ?? ''}`;
 
     const listJson = runCli(tempDir, ['epic', 'list', '--json'], { PATH: pathPrefix });
     expect(listJson.status).toBe(0);
 
-    const listPayload = JSON.parse(listJson.stdout) as Array<{ epic_id: string; status: string }>;
-    expect(listPayload.some((row) => row.epic_id === 'unitAI-epic1')).toBe(true);
+    const listPayload = JSON.parse(listJson.stdout) as { epics: Array<{ epic_id: string; status: string }> };
+    expect(listPayload.epics.some((row) => row.epic_id === 'unitAI-epic1')).toBe(true);
 
     const resolveJson = runCli(tempDir, ['epic', 'resolve', 'unitAI-epic1', '--json'], { PATH: pathPrefix });
     expect(resolveJson.status).toBe(0);
 
-    const resolvePayload = JSON.parse(resolveJson.stdout) as { epic_id: string; from: string; to: string; changed: boolean };
+    const resolvePayload = JSON.parse(resolveJson.stdout) as { epic_id: string; from_state: string; to_state: string; dry_run: boolean };
     expect(resolvePayload.epic_id).toBe('unitAI-epic1');
-    expect(resolvePayload.from).toBe('open');
-    expect(resolvePayload.to).toBe('resolving');
-    expect(resolvePayload.changed).toBe(true);
+    expect(resolvePayload.from_state).toBe('open');
+    expect(resolvePayload.to_state).toBe('resolving');
+    expect(resolvePayload.dry_run).toBe(false);
 
     const statusHuman = runCli(tempDir, ['epic', 'status', 'unitAI-epic1'], { PATH: pathPrefix });
     expect(statusHuman.status).toBe(0);
@@ -244,12 +258,12 @@ describe('integration: epic and merge CLI', () => {
     expect(statusJson.status).toBe(0);
     const statusPayload = JSON.parse(statusJson.stdout) as { epic_id: string; status: string; chains: Array<{ chain_id: string }> };
     expect(statusPayload.epic_id).toBe('unitAI-epic1');
-    expect(statusPayload.status).toBe('resolving');
+    expect(statusPayload.state).toBe('resolving');
     expect(statusPayload.chains.map((chain) => chain.chain_id)).toEqual(expect.arrayContaining(['chain-a', 'chain-b']));
   });
 
   it('sp merge <chain> refuses bypass when chain belongs to unresolved epic', () => {
-    const pathPrefix = `${join(tempDir, 'bin')}:${process.env.PATH ?? ''}`;
+    const pathPrefix = `${binDir}:${process.env.PATH ?? ''}`;
 
     const result = runCli(tempDir, ['merge', 'unitAI-chain-a'], { PATH: pathPrefix });
 
@@ -260,7 +274,7 @@ describe('integration: epic and merge CLI', () => {
   });
 
   it('sp epic merge publishes chains in dependency order and persists merged lifecycle state', async () => {
-    const pathPrefix = `${join(tempDir, 'bin')}:${process.env.PATH ?? ''}`;
+    const pathPrefix = `${binDir}:${process.env.PATH ?? ''}`;
 
     const resolve = runCli(tempDir, ['epic', 'resolve', 'unitAI-epic1'], { PATH: pathPrefix });
     expect(resolve.status).toBe(0);
@@ -283,5 +297,42 @@ describe('integration: epic and merge CLI', () => {
     const bFile = await readFile(join(tempDir, 'b.txt'), 'utf-8');
     expect(aFile).toContain('feature/chain-a');
     expect(bFile).toContain('feature/chain-b');
+  });
+
+  it('sp epic merge preserves unrelated dirty .wolf, .xtrm, and untracked report files', async () => {
+    const pathPrefix = `${binDir}:${process.env.PATH ?? ''}`;
+
+    await mkdir(join(tempDir, '.wolf'), { recursive: true });
+    await mkdir(join(tempDir, '.xtrm', 'reports'), { recursive: true });
+    await writeFile(join(tempDir, '.wolf', 'notes.md'), 'local wolf note\n', 'utf-8');
+    await writeFile(join(tempDir, '.xtrm', 'reports', 'agent.md'), 'local xtrm report\n', 'utf-8');
+    await writeFile(join(tempDir, 'local-report.md'), 'untracked report\n', 'utf-8');
+
+    const resolve = runCli(tempDir, ['epic', 'resolve', 'unitAI-epic1'], { PATH: pathPrefix });
+    expect(resolve.status).toBe(0);
+
+    const merge = runCli(tempDir, ['epic', 'merge', 'unitAI-epic1'], { PATH: pathPrefix });
+    expect(merge.status).toBe(0);
+
+    expect(await readFile(join(tempDir, '.wolf', 'notes.md'), 'utf-8')).toContain('local wolf note');
+    expect(await readFile(join(tempDir, '.xtrm', 'reports', 'agent.md'), 'utf-8')).toContain('local xtrm report');
+    expect(await readFile(join(tempDir, 'local-report.md'), 'utf-8')).toContain('untracked report');
+  });
+
+  it('sp epic merge fails safely on dirty incoming path overlap', async () => {
+    const pathPrefix = `${binDir}:${process.env.PATH ?? ''}`;
+
+    await writeFile(join(tempDir, 'a.txt'), 'local overlap\n', 'utf-8');
+
+    const resolve = runCli(tempDir, ['epic', 'resolve', 'unitAI-epic1'], { PATH: pathPrefix });
+    expect(resolve.status).toBe(0);
+
+    const merge = runCli(tempDir, ['epic', 'merge', 'unitAI-epic1'], { PATH: pathPrefix });
+    expect(merge.status).not.toBe(0);
+    expect(`${merge.stdout}
+${merge.stderr}`).toContain('dirty files overlapping incoming epic changes');
+    expect(`${merge.stdout}
+${merge.stderr}`).toContain('a.txt');
+    expect(await readFile(join(tempDir, 'a.txt'), 'utf-8')).toContain('local overlap');
   });
 });
