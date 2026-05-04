@@ -1,9 +1,11 @@
 # Release inputs
 
-`changelog-keeper` now reads two synthesis inputs:
+`xt release` now reads two synthesis inputs:
 
 1. closed beads + git range signals
 2. xt session reports from `.xtrm/reports/` for same release window
+
+`sp release prepare` / `sp release publish` remain as deprecated aliases for backward compatibility. They proxy to the same release logic and print a deprecation notice on every invocation.
 
 The report layer is the higher-signal source. It captures intent, attempted approaches, discarded ideas, and post-mortem context. Use it to write WHY-grounded release bullets instead of file-diff summaries.
 

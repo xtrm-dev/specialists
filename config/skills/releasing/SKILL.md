@@ -1,11 +1,11 @@
 ---
 name: releasing
 description: >-
-  Cut a release end-to-end via the changelog-keeper specialist. Use when the
-  operator wants to publish a new tag (vX.Y.Z) — drafts CHANGELOG section
-  from xt reports, bumps package.json, rebuilds dist, commits, tags, pushes,
-  optional GH release. Strict scope: only CHANGELOG.md + package.json + dist/.
-version: 1.1.0
+  Cut a release end-to-end via xt release. Use when the operator wants to
+  publish a new tag (vX.Y.Z) — drafts CHANGELOG section from xt reports,
+  bumps package.json, rebuilds dist, commits, tags, pushes, optional GH
+  release. Strict scope: only CHANGELOG.md + package.json + dist/.
+version: 1.2.0
 ---
 
 # releasing
@@ -38,10 +38,12 @@ The operator wants to cut a release. They say "release it", "ship vX.Y.Z", "cut 
 4. Dispatch specialist:
 
    ```bash
-   sp run changelog-keeper --bead <bead-id> --background
+   xt release prepare --from <prev-tag> --to HEAD --patch
    ```
 
-   No worktree (release work is on active branch). No reviewer chain — verification is diff check below.
+   or `xt release publish` once draft is approved. `xt release` invokes
+   `sp script changelog-keeper` synchronously, READ_ONLY, template-driven.
+   No HTTP. No bead. No worktree.
 
 5. Verify diff after specialist completes.
 
@@ -75,6 +77,6 @@ Each orchestrator runs this skill in its own session. Specialist commits + tags 
 
 ## Don't
 
-- Don't manually `sp release prepare`/`publish` — those CLIs are removed in v3.X.Y (TBD).
-- Don't edit CHANGELOG.md outside specialist run — manual edits leak into next release diff and break scope verification.
+- Don't manually `sp release prepare`/`publish` — deprecated aliases only. Use `xt release prepare`/`publish`.
+- Don't edit CHANGELOG.md outside release flow — manual edits leak into next release diff and break scope verification.
 - Don't pre-stage files. Specialist stages exactly what it commits.
