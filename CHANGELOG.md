@@ -9,30 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [v3.12.0] — 2026-05-05
+
 ### Added
-- Manifest-driven tool resolver: `.specialists/catalog/{native,gitnexus,serena}.json` declare per-tier tool sets; `src/specialist/manifest-resolver.ts` is the canonical resolver consumed by `PiAgentSession.start()` (unitAI-8vb65, unitAI-qujxo)
-- `permissions[<TIER>]` override block on specialist JSON for per-specialist policy divergence; `denied_natives_when_extension` + `denied_natives_mode: soft|hard` semantics with health-gated native restore (unitAI-qujxo.2)
-- `specialists config show <name> --resolved` surface for layer attribution, extension health, deny mode, downgrade reasons, and final `--tools` inspection (unitAI-8vb65)
-- `PiSessionOptions.specialistName` and `PiSessionOptions.specialistPermissions` threaded from `SpecialistRunner` and `use_specialist` MCP tool into the session (unitAI-qujxo.2)
-- `docs/manifest.md` reference for the catalog/resolver/override system; `docs/design/gzrx-tool-catalog.md` design doc and `docs/design/gzrx-completion-critique.md` gap analysis (unitAI-qujxo, unitAI-qujxo.1)
-- Catalog-level `default_overrides` field on `.specialists/catalog/index.json` for per-tier tool deny policies that mirror Serena's runtime enforcement; resolver merges catalog defaults before specialist overrides; `catalog_default` distinct attribution layer in resolution diagnostics (unitAI-7ftju)
-- `src/specialist/porcelain-parser.ts` pure helper extracted from `listSubstantiveWorktreeFiles`; correctly parses `git status --porcelain` v1 (XY+space+path with rename/quoted-path support) — fixes silent auto-commit path corruption that dropped the leading character of modified files (unitAI-fyih8)
-- `sp ps` filter flags: `--running`, `--bead <id>`, `--since <duration>`, `--mine`, `--include-terminal`. `--mine` resolves bead ownership via `bd query "assignee=me" --json`. Filters compose (unitAI-nui6g)
-- Epic state recovery transition: `failed → abandoned` is now allowed via `sp epic abandon` so operators can clean up dead epics without state-machine workarounds (unitAI-nui6g)
-- `claimJobStart` orphan recovery: a 'starting'/'running' row whose owning PID is dead and which hasn't been touched in >60s is auto-cancelled before the next dispatch is refused. Eliminates the manual `sqlite3 UPDATE` fallback after failed `--background` spawns (unitAI-5o6ih)
-- `sp clean --processes` now treats no-PID 'starting' rows as stale after 5 minutes (instead of the 24h `--stale-after` default) — matches the orphan profile of failed dispatches that never recorded a PID (unitAI-5o6ih)
+- `specialists list --full` live registry surface now shows worktree behavior, chain position, median runtime, and role-specific mandatory rules for routing (unitAI-5ad59543)
+- `using-specialists-v3` skill adds live-registry orchestration guidance and keeps command discovery centered on `specialists list --full` and `sp help` (unitAI-3ecd8ddf; unitAI-d222b022)
+- `specialists list` routing descriptions now stay rich enough to support live role selection from registry output (unitAI-a1605ced; unitAI-0539c3cd)
 
 ### Changed
-- `xt release` becomes canonical release surface; `sp release prepare/publish` stays as deprecated aliases for backward compatibility (unitAI-at4fm1)
-- Resolver is the only path for computing specialist `--tools`; no env-flag opt-in (unitAI-qujxo.2)
-- `docs/authoring.md` and `config/skills/specialists-creator/SKILL.md` updated to teach the override block decision; `specialists-creator` v1.3.0 prompts the agent to verify resolved tools via `sp config show --resolved` before declaring overrides (unitAI-x5auj)
-- Explorer hard-denies native `grep`/`find`/`ls` to force symbolic search via `gitnexus_query`/`search_for_pattern`/`find_file` when both extensions are healthy; auto-restores natives if either degrades (unitAI-8vb65.7)
-- `sp ps` default view now hides terminal (merged/abandoned) epics; legacy `--include-merged` flag is preserved as an alias for the new `--include-terminal` and now covers both states (unitAI-nui6g)
+- `changelog-keeper` draft flow now uses script-safe changelog synthesis from curated xt reports (unitAI-0b179f8f)
+- `sp script` timeout and scope-bleed handling tightened so long-running script work does not bleed into adjacent worktree state (unitAI-22c0bf39)
+- Epic merge dirty-state integration tests stabilized after merge/publication edge cases (unitAI-eb68cf6c)
+- `sp release` / release-pipeline handoff and `using-specialists-v3` activation docs updated for v3 orchestration flow (unitAI-fc588ba4; unitAI-5677cce8; unitAI-fb0ed5ee)
+- Specialist metadata and mandatory rules refreshed so live registry output reflects current roles and policies (unitAI-5b3c3839; unitAI-77e21085; unitAI-d1ca9f96; unitAI-28781c48)
 
-### Removed
-- `mapPermissionToTools` and the five hardcoded tier→tool arrays (`GITNEXUS_READ_TOOLS`, `SERENA_READ_TOOLS`, `SERENA_LOW_TOOLS`, `SERENA_WRITE_TOOLS`, `GITNEXUS_WRITE_TOOLS`) from `src/pi/session.ts` — superseded by the manifest resolver (unitAI-qujxo.2)
-- `SPECIALISTS_USE_RESOLVER` env-flag opt-in — resolver is now default-on with no fallback (unitAI-qujxo.2)
-- `PiSessionOptions.useSharedToolResolver` rollout switch (unitAI-qujxo.2)
+### Fixed
+- Scope-bleed fix paired with raised script timeout to keep release drafting bounded (unitAI-22c0bf39)
+- `sp epic merge` dirty-tree publication path now survives unrelated dirty state and preserves merge-ready validation (unitAI-eb68cf6c)
+- `sp config show --resolved` and repo-local mandatory rules now resolve from current worktree instead of stale global dist (unitAI-77e21085)
 
 ---
 

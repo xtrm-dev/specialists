@@ -16,6 +16,7 @@ export interface SpecialistSummary {
     thinking_level?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
     skills: string[];
     scripts: ScriptEntry[];
+    mandatoryRuleTemplateSets: string[];
     scope: 'user' | 'default' | 'package';
     /**
      * Scope says where override came from.

@@ -7056,7 +7056,8 @@ function migrateToV2(db) {
         status_json,
         JSON_EXTRACT(status_json, '$.bead_id'),
         updated_at_ms,
-        last_output
+        last_output,
+        startup_payload_json
       FROM specialist_jobs;
     DROP TABLE IF EXISTS specialist_jobs;
     ALTER TABLE specialist_jobs_v2 RENAME TO specialist_jobs;
@@ -7083,7 +7084,8 @@ function migrateToV3(db) {
       status          TEXT NOT NULL,
       status_json     TEXT NOT NULL,
       updated_at_ms   INTEGER NOT NULL,
-      last_output     TEXT
+      last_output     TEXT,
+      startup_payload_json TEXT
     );
     INSERT OR IGNORE INTO specialist_jobs_v3
       SELECT
@@ -7095,7 +7097,8 @@ function migrateToV3(db) {
         COALESCE(JSON_EXTRACT(status_json, '$.status'), 'starting'),
         status_json,
         updated_at_ms,
-        last_output
+        last_output,
+        startup_payload_json
       FROM specialist_jobs;
     DROP TABLE IF EXISTS specialist_jobs;
     ALTER TABLE specialist_jobs_v3 RENAME TO specialist_jobs;
@@ -7348,7 +7351,8 @@ function initSchema(db) {
           COALESCE(status, JSON_EXTRACT(status_json, '$.status'), 'starting'),
           status_json,
           updated_at_ms,
-          last_output
+          last_output,
+          startup_payload_json
         FROM specialist_jobs;
       DROP TABLE IF EXISTS specialist_jobs;
       ALTER TABLE specialist_jobs_new RENAME TO specialist_jobs;
@@ -8605,6 +8609,29 @@ class SqliteClient {
       return this.db.query(`SELECT * FROM specialist_job_metrics ${where} ORDER BY updated_at_ms DESC, job_id DESC`).all(...params);
     }, "listJobMetrics");
   }
+  listElapsedMsBySpecialist(sinceMs, limitPerSpecialist = 200) {
+    return withRetry(() => {
+      const rows = this.db.query(`
+        WITH ranked AS (
+          SELECT specialist, elapsed_ms,
+                 ROW_NUMBER() OVER (PARTITION BY specialist ORDER BY updated_at_ms DESC) AS rn
+          FROM specialist_job_metrics
+          WHERE status = 'completed' AND updated_at_ms >= ? AND elapsed_ms IS NOT NULL
+        )
+        SELECT specialist, elapsed_ms
+        FROM ranked
+        WHERE rn <= ?
+        ORDER BY specialist, rn
+      `).all(sinceMs, limitPerSpecialist);
+      const bySpecialist = {};
+      for (const row of rows) {
+        if (!row.specialist || typeof row.elapsed_ms !== "number" || !Number.isFinite(row.elapsed_ms))
+          continue;
+        (bySpecialist[row.specialist] ??= []).push(row.elapsed_ms);
+      }
+      return bySpecialist;
+    }, "listElapsedMsBySpecialist");
+  }
   readResult(jobId) {
     return withRetry(() => {
       const row = this.db.query("SELECT output FROM specialist_results WHERE job_id = ? LIMIT 1").get(jobId);
@@ -9005,6 +9032,14 @@ function createObservabilitySqliteClient(cwd = process.cwd()) {
 }
 
 // src/specialist/script-runner.ts
+class CompatGuardError extends Error {
+  field;
+  constructor(field, message) {
+    super(message);
+    this.field = field;
+    this.name = "CompatGuardError";
+  }
+}
 function hasUnsubstitutedVariables(template, variables) {
   const matches = template.match(/\$([a-zA-Z_][a-zA-Z0-9_]*)/g) ?? [];
   for (const match of matches) {
@@ -9017,26 +9052,29 @@ function hasUnsubstitutedVariables(template, variables) {
 function compatGuard(spec, trust) {
   const execution = spec.specialist.execution;
   if (execution.interactive)
-    throw new Error("interactive specialists are not allowed");
+    throw new CompatGuardError("execution.interactive", "interactive specialists are not allowed");
   if (execution.requires_worktree)
-    throw new Error("worktree specialists are not allowed");
+    throw new CompatGuardError("execution.requires_worktree", "worktree specialists are not allowed");
   if (execution.permission_required !== "READ_ONLY")
-    throw new Error("permission_required must be READ_ONLY");
+    throw new CompatGuardError("execution.permission_required", "permission_required must be READ_ONLY");
   const hasScripts = (spec.specialist.skills?.scripts?.length ?? 0) > 0;
   if (hasScripts && !trust?.allowLocalScripts) {
-    throw new Error("scripts not allowed (enable with --allow-local-scripts)");
+    throw new CompatGuardError("skills.scripts", "scripts not allowed (enable with --allow-local-scripts)");
   }
   const hasPaths = (spec.specialist.skills?.paths?.length ?? 0) > 0;
   const hasSkillInherit = Boolean(spec.specialist.prompt.skill_inherit);
-  if ((hasPaths || hasSkillInherit) && !trust?.allowSkills) {
-    throw new Error("skills not allowed (enable with --allow-skills)");
+  if (hasPaths && !trust?.allowSkills) {
+    throw new CompatGuardError("skills.paths", "skills not allowed (enable with --allow-skills)");
+  }
+  if (hasSkillInherit && !trust?.allowSkills) {
+    throw new CompatGuardError("prompt.skill_inherit", "skills not allowed (enable with --allow-skills)");
   }
   if (hasPaths && trust?.allowSkills && trust.allowSkillsRoots && trust.allowSkillsRoots.length > 0) {
     const paths = spec.specialist.skills?.paths ?? [];
     for (const path of paths) {
       const allowed = trust.allowSkillsRoots.some((root) => path.startsWith(root));
       if (!allowed) {
-        throw new Error(`skill path '${path}' not under any --allow-skills-roots entry`);
+        throw new CompatGuardError("skills.paths", `skill path '${path}' not under any --allow-skills-roots entry`);
       }
     }
   }
@@ -9156,15 +9194,35 @@ function openObservabilityClient(options) {
   const dbPath = options.observabilityDbPath ?? options.projectDir;
   return createObservabilitySqliteClient(dbPath);
 }
+function resolveScriptSpecialistName(name) {
+  if (name === "changelog-keeper")
+    return "changelog-drafter";
+  return name;
+}
 async function runScriptSpecialist(input, options) {
   const traceId = randomUUID();
   const startedAt = Date.now();
   try {
-    const spec = await options.loader.get(input.specialist);
+    const resolvedSpecialist = resolveScriptSpecialistName(input.specialist);
+    const spec = await options.loader.get(resolvedSpecialist);
     compatGuard(spec, options.trust);
     const skillSources = options.trust?.allowSkills ? computeSkillSources(spec) : undefined;
     const template = input.template ?? spec.specialist.prompt.task_template;
     const prompt = renderTaskTemplate(template, input.variables ?? {});
+    if (process.env.SPECIALISTS_SCRIPT_STUB_OUTPUT) {
+      return {
+        success: true,
+        output: prompt,
+        meta: {
+          specialist: resolvedSpecialist,
+          requested_specialist: input.requested_specialist ?? input.specialist,
+          resolved_specialist: resolvedSpecialist,
+          model: "stub",
+          duration_ms: Date.now() - startedAt,
+          trace_id: traceId
+        }
+      };
+    }
     const timeoutMs = input.timeout_ms ?? spec.specialist.execution.timeout_ms ?? 120000;
     const modelCandidates = collectModelCandidates(input, spec, options);
     const assistantTextLimitBytes = resolveAssistantTextLimitBytes(spec);
@@ -9178,7 +9236,7 @@ async function runScriptSpecialist(input, options) {
       const durationMs2 = Date.now() - startedAt;
       const observability2 = openObservabilityClient(options);
       if (input.trace !== false && observability2)
-        writeTraceRow(observability2, input.specialist, model, traceId, parsed.text, durationMs2, skillSources, options.onAuditFailure);
+        writeTraceRow(observability2, resolvedSpecialist, model, traceId, parsed.text, durationMs2, skillSources, options.onAuditFailure);
       if (parsed.kind === "success") {
         let parsed_json;
         if (spec.specialist.execution.response_format === "json") {
@@ -9190,22 +9248,23 @@ async function runScriptSpecialist(input, options) {
                 throw new Error(`Missing required output field: ${key}`);
             }
           } catch (error) {
-            return { success: false, error: error instanceof Error ? error.message : String(error), error_type: "invalid_json", meta: { specialist: input.specialist, model, duration_ms: durationMs2, trace_id: traceId } };
+            return { success: false, error: error instanceof Error ? error.message : String(error), error_type: "invalid_json", meta: { specialist: resolvedSpecialist, requested_specialist: input.requested_specialist ?? input.specialist, resolved_specialist: resolvedSpecialist, model, duration_ms: durationMs2, trace_id: traceId } };
           }
         }
-        return { success: true, output: parsed.text, parsed_json, meta: { specialist: input.specialist, model, duration_ms: durationMs2, trace_id: traceId } };
+        return { success: true, output: parsed.text, parsed_json, meta: { specialist: resolvedSpecialist, requested_specialist: input.requested_specialist ?? input.specialist, resolved_specialist: resolvedSpecialist, model, duration_ms: durationMs2, trace_id: traceId } };
       }
-      return { success: false, error: parsed.error, error_type: parsed.errorType, meta: { specialist: input.specialist, model, duration_ms: durationMs2, trace_id: traceId } };
+      return { success: false, error: parsed.error, error_type: parsed.errorType, meta: { specialist: resolvedSpecialist, requested_specialist: input.requested_specialist ?? input.specialist, resolved_specialist: resolvedSpecialist, model, duration_ms: durationMs2, trace_id: traceId } };
     }
     const lastAttempt = attempts.at(-1);
     const durationMs = Date.now() - startedAt;
     const observability = openObservabilityClient(options);
     if (input.trace !== false && observability)
-      writeTraceRow(observability, input.specialist, modelCandidates.at(-1) ?? "unknown", traceId, lastAttempt?.text ?? "", durationMs, skillSources, options.onAuditFailure);
-    return { success: false, error: lastAttempt?.stderr || "pi produced no assistant text", error_type: "internal", meta: { specialist: input.specialist, model: modelCandidates.at(-1) ?? "unknown", duration_ms: durationMs, trace_id: traceId } };
+      writeTraceRow(observability, resolvedSpecialist, modelCandidates.at(-1) ?? "unknown", traceId, lastAttempt?.text ?? "", durationMs, skillSources, options.onAuditFailure);
+    return { success: false, error: lastAttempt?.stderr || "pi produced no assistant text", error_type: "internal", meta: { specialist: resolvedSpecialist, requested_specialist: input.requested_specialist ?? input.specialist, resolved_specialist: resolvedSpecialist, model: modelCandidates.at(-1) ?? "unknown", duration_ms: durationMs, trace_id: traceId } };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return { success: false, error: message, error_type: mapErrorType(message), meta: { specialist: input.specialist, duration_ms: Date.now() - startedAt, trace_id: traceId } };
+    const resolvedSpecialist = resolveScriptSpecialistName(input.specialist);
+    return { success: false, error: message, error_type: mapErrorType(message), meta: { specialist: resolvedSpecialist, requested_specialist: input.requested_specialist ?? input.specialist, resolved_specialist: resolvedSpecialist, duration_ms: Date.now() - startedAt, trace_id: traceId } };
   }
 }
 function collectModelCandidates(input, spec, options) {
@@ -13444,6 +13503,7 @@ class SpecialistLoader {
             thinking_level: spec.specialist.execution.thinking_level,
             skills: spec.specialist.skills?.paths ?? [],
             scripts: spec.specialist.skills?.scripts ?? [],
+            mandatoryRuleTemplateSets: spec.specialist.mandatory_rules?.template_sets ?? [],
             scope: dir.scope,
             source: dir.source,
             filePath: resolved.filePath,

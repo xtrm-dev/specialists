@@ -234,6 +234,7 @@ export interface ObservabilitySqliteClient {
         model?: string;
         sinceMs?: number;
     }): JobMetricsRecord[];
+    listElapsedMsBySpecialist(sinceMs: number, limitPerSpecialist?: number): Record<string, number[]>;
     readResult(jobId: string): string | null;
     syncMemoriesCache(memories: readonly MemoryCacheInputRecord[], syncedAtMs?: number): void;
     getMemoriesCacheState(): MemoryCacheState | null;
