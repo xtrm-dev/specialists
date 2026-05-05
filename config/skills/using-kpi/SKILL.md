@@ -143,6 +143,50 @@ sp db stats --with-payload --format json \
         end'
 ```
 
+## Recipe 7 — payload component breakdown per specialist
+
+**Truth source first.** The actual prompt size billed by the API is the first turn's `input_tokens` from `token_trajectory_json[0]`. Use it as the ground truth — `payload_breakdown` events undercount (tool definitions and harness framing are not captured) and historical rows before the rule N× fix overcount mandatory_rule by attached-rule count.
+
+```bash
+DB=.specialists/db/observability.db
+sqlite3 "$DB" "SELECT specialist, model, AVG(json_extract(token_trajectory_json, '\$[0].token_usage.input_tokens')) AS avg_first_in, COUNT(*) AS n FROM specialist_job_metrics WHERE token_trajectory_json IS NOT NULL AND status='done' GROUP BY specialist, model ORDER BY avg_first_in DESC"
+```
+
+Use this number for cost decisions. Use `payload_breakdown` only for *relative* component analysis (which knob to tune), not absolute sizing.
+
+`sp db stats --with-payload` only surfaces total `payload_kb` / `payload_tokens`. To audit *what* fills the prompt (system_prompt vs mandatory rules vs skills vs bead_context vs memory), query `payload_breakdown` events directly. Use this for eager-load bloat investigations, prompt/rule consolidation planning, or duplication hunts — but cross-check against the truth source above.
+
+```bash
+DB=.specialists/db/observability.db
+sqlite3 "$DB" "SELECT specialist, event_json FROM specialist_events WHERE type='payload_breakdown' GROUP BY specialist ORDER BY t DESC" \
+  | python3 -c '
+import json, sys
+rows = []
+for line in sys.stdin:
+    if "|" not in line: continue
+    spec, js = line.split("|", 1)
+    d = json.loads(js)
+    agg = {}
+    for c in d["payload_breakdown"]["components"]:
+        a = agg.setdefault(c["kind"], {"tokens":0,"n":0})
+        a["tokens"] += c["tokens"]; a["n"] += 1
+    rows.append((spec, d["payload_breakdown"]["totals"]["tokens"], agg))
+rows.sort(key=lambda r: -r[1])
+print(f"{\"specialist\":<22}{\"total\":>8}{\"rules\":>8}{\"rules_n\":>8}{\"sys\":>8}{\"skills\":>8}{\"bead\":>8}{\"mem\":>8}")
+for s, t, a in rows:
+    g = lambda k: a.get(k, {"tokens":0,"n":0})
+    print(f"{s:<22}{t:>8}{g(\"mandatory_rule\")[\"tokens\"]:>8}{g(\"mandatory_rule\")[\"n\"]:>8}{g(\"system_prompt\")[\"tokens\"]:>8}{g(\"skill\")[\"tokens\"]:>8}{g(\"bead_context\")[\"tokens\"]:>8}{g(\"memory\")[\"tokens\"]:>8}")
+'
+```
+
+Component kinds: `system_prompt`, `mandatory_rule` (one event entry per attached rule), `skill` (path reference, ~10 tokens — bodies are loaded on demand, not eagerly), `task_template`, `bead_context`, `memory`.
+
+Optimization signals:
+- `mandatory_rule` total dominates: audit wrapper inflation by comparing `bytes` per rule in the event vs `wc -c config/mandatory-rules/<id>.md`. Mismatch >5x means a wrapper or richer source is adding hidden cost — investigate `formatMandatoryRulesBlock` and `parseMandatoryRulesFrontmatter`.
+- `skill` total small (always): skills are reference-only at startup; inlining skill bodies into rules saves nothing.
+- `bead_context` huge: the bead description is bloated — orchestrator should write more concise contracts.
+- `memory` huge: stale or noisy memories — run `bd memories` cleanup or consolidation.
+
 ## References
 
 - `docs/observability-metrics.md`
