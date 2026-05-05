@@ -87,6 +87,14 @@ describe('mandatory rules resolution', () => {
     expect(result.block).toContain('### specialist-extra');
     expect(result.block).toContain('### specialist-inline-rules');
     expect((result.block.match(/^### /gm) ?? []).length).toBe(5);
+    expect(result.sections.map(section => section.setId)).toEqual([
+      'workflow-quick-rules',
+      'core-session-boundary',
+      'git-workflow-safe',
+      'specialist-extra',
+      'specialist-inline-rules',
+    ]);
+    expect(result.sections.every(section => section.block.length > 0)).toBe(true);
   });
 
   it('warns when requested set file missing', () => {

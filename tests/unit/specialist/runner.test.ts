@@ -1,6 +1,6 @@
 // tests/unit/specialist/runner.test.ts
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execSync } from 'node:child_process';
@@ -154,6 +154,42 @@ describe('SpecialistRunner', () => {
 
     const renderedTask = mockSession.prompt.mock.calls.at(-1)?.[0] as string;
     expect(renderedTask).toContain('## MANDATORY_RULES');
+  });
+
+  it('reports mandatory_rule payload bytes per rendered section', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'mandatory-rule-payload-'));
+    try {
+      mkdirSync(join(cwd, '.specialists', 'default', 'mandatory-rules'), { recursive: true });
+      mkdirSync(join(cwd, 'config', 'mandatory-rules'), { recursive: true });
+      writeFileSync(join(cwd, '.specialists', 'default', 'mandatory-rules', 'alpha.md'), '---\nrules:\n  - id: alpha-1\n    level: required\n    text: alpha rule\n---\n');
+      writeFileSync(join(cwd, '.specialists', 'default', 'mandatory-rules', 'beta.md'), '---\nrules:\n  - id: beta-1\n    level: warn\n    text: beta rule is longer\n---\n');
+      writeFileSync(join(cwd, 'config', 'mandatory-rules', 'index.json'), JSON.stringify({ default_template_sets: ['alpha', 'beta'] }));
+
+      const payloadEvents: unknown[] = [];
+      const runner = new SpecialistRunner({
+        loader: makeLoader({}, 'never', {}, {
+          mandatory_rules: { disable_default_globals: true },
+        }),
+        hooks: new HookEmitter({ tracePath: '/tmp/test-hooks-trace.jsonl' }),
+        circuitBreaker: new CircuitBreaker(),
+        sessionFactory: vi.fn().mockResolvedValue(mockSession),
+      });
+
+      await runner.run({ name: 'test-spec', prompt: 'do thing', workingDirectory: cwd }, undefined, (type, details) => {
+        if (type === 'payload_breakdown') payloadEvents.push(details);
+      });
+
+      const payloadSummary = JSON.parse((payloadEvents.at(0) as { summary: string }).summary) as { payload_breakdown: { components: Array<{ kind: string; name: string; bytes: number }>; totals: { bytes: number } } };
+      const mandatoryRuleComponents = payloadSummary.payload_breakdown.components.filter(component => component.kind === 'mandatory_rule');
+      expect(mandatoryRuleComponents.map(component => component.name)).toEqual(['alpha', 'beta']);
+      expect(mandatoryRuleComponents.map(component => component.bytes)).toEqual([
+        '### alpha\n- [required] alpha rule'.length,
+        '### beta\n- [warn] beta rule is longer'.length,
+      ]);
+      expect(mandatoryRuleComponents.reduce((sum, component) => sum + component.bytes, 0)).toBe(payloadSummary.payload_breakdown.totals.bytes - payloadSummary.payload_breakdown.components.filter(component => component.kind !== 'mandatory_rule').reduce((sum, component) => sum + component.bytes, 0));
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
   });
 
   it('passes execution.stall_timeout_ms through to PiAgentSession options', async () => {
