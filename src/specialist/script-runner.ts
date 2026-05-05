@@ -21,6 +21,7 @@ export type ScriptSpecialistErrorType =
 
 export interface ScriptGenerateRequest {
   specialist: string;
+  requested_specialist?: string;
   variables?: Record<string, string>;
   template?: string;
   model_override?: string;
@@ -33,14 +34,14 @@ export interface ScriptGenerateSuccess {
   success: true;
   output: string;
   parsed_json?: unknown;
-  meta: { specialist: string; model: string; duration_ms: number; trace_id: string };
+  meta: { specialist: string; requested_specialist?: string; resolved_specialist?: string; model: string; duration_ms: number; trace_id: string };
 }
 
 export interface ScriptGenerateFailure {
   success: false;
   error: string;
   error_type: ScriptSpecialistErrorType;
-  meta?: { specialist?: string; model?: string; duration_ms?: number; trace_id?: string };
+  meta?: { specialist?: string; requested_specialist?: string; resolved_specialist?: string; model?: string; duration_ms?: number; trace_id?: string };
 }
 
 export type ScriptGenerateResult = ScriptGenerateSuccess | ScriptGenerateFailure;
@@ -280,16 +281,36 @@ function openObservabilityClient(options: ScriptRunnerOptions): ReturnType<typeo
   return createObservabilitySqliteClient(dbPath);
 }
 
+function resolveScriptSpecialistName(name: string): string {
+  if (name === 'changelog-keeper') return 'changelog-drafter';
+  return name;
+}
+
 export async function runScriptSpecialist(input: ScriptGenerateRequest, options: ScriptRunnerOptions): Promise<ScriptGenerateResult> {
   const traceId = randomUUID();
   const startedAt = Date.now();
   try {
-    const spec = await options.loader.get(input.specialist);
+    const resolvedSpecialist = resolveScriptSpecialistName(input.specialist);
+    const spec = await options.loader.get(resolvedSpecialist);
     compatGuard(spec, options.trust);
     const skillSources = options.trust?.allowSkills ? computeSkillSources(spec) : undefined;
 
     const template = input.template ?? spec.specialist.prompt.task_template;
     const prompt = renderTaskTemplate(template, input.variables ?? {});
+    if (process.env.SPECIALISTS_SCRIPT_STUB_OUTPUT) {
+      return {
+        success: true,
+        output: prompt,
+        meta: {
+          specialist: resolvedSpecialist,
+          requested_specialist: input.requested_specialist ?? input.specialist,
+          resolved_specialist: resolvedSpecialist,
+          model: 'stub',
+          duration_ms: Date.now() - startedAt,
+          trace_id: traceId,
+        },
+      };
+    }
     const timeoutMs = input.timeout_ms ?? spec.specialist.execution.timeout_ms ?? 120_000;
     const modelCandidates = collectModelCandidates(input, spec, options);
     const assistantTextLimitBytes = resolveAssistantTextLimitBytes(spec);
@@ -303,7 +324,7 @@ export async function runScriptSpecialist(input: ScriptGenerateRequest, options:
 
       const durationMs = Date.now() - startedAt;
       const observability = openObservabilityClient(options);
-      if (input.trace !== false && observability) writeTraceRow(observability, input.specialist, model, traceId, parsed.text, durationMs, skillSources, options.onAuditFailure);
+      if (input.trace !== false && observability) writeTraceRow(observability, resolvedSpecialist, model, traceId, parsed.text, durationMs, skillSources, options.onAuditFailure);
 
       if (parsed.kind === 'success') {
         let parsed_json: unknown;
@@ -317,22 +338,23 @@ export async function runScriptSpecialist(input: ScriptGenerateRequest, options:
               if (parsed_json === null || typeof parsed_json !== 'object' || !(key in parsed_json)) throw new Error(`Missing required output field: ${key}`);
             }
           } catch (error) {
-            return { success: false, error: error instanceof Error ? error.message : String(error), error_type: 'invalid_json', meta: { specialist: input.specialist, model, duration_ms: durationMs, trace_id: traceId } };
+            return { success: false, error: error instanceof Error ? error.message : String(error), error_type: 'invalid_json', meta: { specialist: resolvedSpecialist, requested_specialist: input.requested_specialist ?? input.specialist, resolved_specialist: resolvedSpecialist, model, duration_ms: durationMs, trace_id: traceId } };
           }
         }
-        return { success: true, output: parsed.text, parsed_json, meta: { specialist: input.specialist, model, duration_ms: durationMs, trace_id: traceId } };
+        return { success: true, output: parsed.text, parsed_json, meta: { specialist: resolvedSpecialist, requested_specialist: input.requested_specialist ?? input.specialist, resolved_specialist: resolvedSpecialist, model, duration_ms: durationMs, trace_id: traceId } };
       }
-      return { success: false, error: parsed.error, error_type: parsed.errorType, meta: { specialist: input.specialist, model, duration_ms: durationMs, trace_id: traceId } };
+      return { success: false, error: parsed.error, error_type: parsed.errorType, meta: { specialist: resolvedSpecialist, requested_specialist: input.requested_specialist ?? input.specialist, resolved_specialist: resolvedSpecialist, model, duration_ms: durationMs, trace_id: traceId } };
     }
 
     const lastAttempt = attempts.at(-1);
     const durationMs = Date.now() - startedAt;
     const observability = openObservabilityClient(options);
-    if (input.trace !== false && observability) writeTraceRow(observability, input.specialist, modelCandidates.at(-1) ?? 'unknown', traceId, lastAttempt?.text ?? '', durationMs, skillSources, options.onAuditFailure);
-    return { success: false, error: lastAttempt?.stderr || 'pi produced no assistant text', error_type: 'internal', meta: { specialist: input.specialist, model: modelCandidates.at(-1) ?? 'unknown', duration_ms: durationMs, trace_id: traceId } };
+    if (input.trace !== false && observability) writeTraceRow(observability, resolvedSpecialist, modelCandidates.at(-1) ?? 'unknown', traceId, lastAttempt?.text ?? '', durationMs, skillSources, options.onAuditFailure);
+    return { success: false, error: lastAttempt?.stderr || 'pi produced no assistant text', error_type: 'internal', meta: { specialist: resolvedSpecialist, requested_specialist: input.requested_specialist ?? input.specialist, resolved_specialist: resolvedSpecialist, model: modelCandidates.at(-1) ?? 'unknown', duration_ms: durationMs, trace_id: traceId } };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return { success: false, error: message, error_type: mapErrorType(message), meta: { specialist: input.specialist, duration_ms: Date.now() - startedAt, trace_id: traceId } };
+    const resolvedSpecialist = resolveScriptSpecialistName(input.specialist);
+    return { success: false, error: message, error_type: mapErrorType(message), meta: { specialist: resolvedSpecialist, requested_specialist: input.requested_specialist ?? input.specialist, resolved_specialist: resolvedSpecialist, duration_ms: Date.now() - startedAt, trace_id: traceId } };
   }
 }
 

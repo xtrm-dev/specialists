@@ -65,6 +65,7 @@ export function parseArgs(argv: string[]): ScriptArgs {
 function buildRequest(args: ScriptArgs): ScriptGenerateRequest {
   return {
     specialist: args.specialist,
+    requested_specialist: args.specialist,
     variables: args.variables,
     template: args.template,
     model_override: args.modelOverride,

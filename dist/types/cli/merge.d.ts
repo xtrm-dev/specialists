@@ -22,6 +22,8 @@ export interface MergeStepResult {
 }
 export interface MergeExecutionOptions {
     rebuild: boolean;
+    mode?: PublicationMode;
+    publicationLabel?: string;
 }
 export type PublicationMode = 'direct' | 'pr';
 export interface PublicationExecutionOptions extends MergeExecutionOptions {

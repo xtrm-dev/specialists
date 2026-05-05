@@ -104,6 +104,30 @@ describe('template render', () => {
   });
 });
 
+describe('runScriptSpecialist aliasing', () => {
+  it('routes changelog-keeper requests to changelog-drafter in script mode', async () => {
+    const child = createSpawnMock();
+    const loader = makeLoader();
+    const resultPromise = runScriptSpecialist(
+      { specialist: 'changelog-keeper', requested_specialist: 'changelog-keeper', template: 'draft' },
+      { loader: loader as never, projectDir: '.' },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    child.stdout.emit('data', Buffer.from(`${JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }] } })}
+`));
+    child.emit('close', 0);
+
+    const result = await resultPromise;
+
+    expect(loader.get).toHaveBeenCalledWith('changelog-drafter');
+    expect(result).toMatchObject({ success: true });
+    if (result.success) {
+      expect(result.meta).toMatchObject({ specialist: 'changelog-drafter', requested_specialist: 'changelog-keeper', resolved_specialist: 'changelog-drafter' });
+    }
+  });
+});
+
 describe('runScriptSpecialist fallback chain', () => {
   it('advances to fallback_model after empty assistant output', () => {
     const spec = baseSpec as never;
