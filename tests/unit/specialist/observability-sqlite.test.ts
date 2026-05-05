@@ -150,6 +150,28 @@ describe('observability-sqlite', () => {
     });
   });
 
+
+  describe('listElapsedMsBySpecialist', () => {
+    it('returns bounded elapsed ms per specialist', () => {
+      const client = createClient();
+      const location = resolveObservabilityDbLocation(tempRoot);
+      db = new Database(location.dbPath);
+
+      db.run(`
+        INSERT INTO specialist_job_metrics (job_id, specialist, status, elapsed_ms, updated_at_ms, tool_call_counts_json, token_trajectory_json, context_trajectory_json, stall_gaps_json, total_turns, total_tools) VALUES
+        ('job-1', 'alpha', 'completed', 100, 1000, '{}', '{}', '{}', '[]', 0, 0),
+        ('job-2', 'alpha', 'completed', 200, 2000, '{}', '{}', '{}', '[]', 0, 0),
+        ('job-3', 'alpha', 'completed', 300, 3000, '{}', '{}', '{}', '[]', 0, 0),
+        ('job-4', 'beta', 'completed', 400, 4000, '{}', '{}', '{}', '[]', 0, 0),
+        ('job-5', 'beta', 'running', 500, 5000, '{}', '{}', '{}', '[]', 0, 0)
+      `);
+
+      const result = client.listElapsedMsBySpecialist(0, 2);
+      expect(result.alpha).toEqual([300, 200]);
+      expect(result.beta).toEqual([400]);
+    });
+  });
+
   describe('upsertNodeRun', () => {
     it('inserts and updates node_runs rows (status/error/update fields)', () => {
       const client = createClient();

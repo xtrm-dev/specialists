@@ -1055,6 +1055,7 @@ export interface ObservabilitySqliteClient {
   readLatestToolEvent(jobId: string): TimelineEventTool | null;
   aggregateJobMetrics(jobId: string): JobMetricsRecord | null;
   listJobMetrics(filters?: { spec?: string; model?: string; sinceMs?: number }): JobMetricsRecord[];
+  listElapsedMsBySpecialist(sinceMs: number, limitPerSpecialist?: number): Record<string, number[]>;
   readResult(jobId: string): string | null;
   syncMemoriesCache(memories: readonly MemoryCacheInputRecord[], syncedAtMs?: number): void;
   getMemoriesCacheState(): MemoryCacheState | null;
@@ -2175,6 +2176,30 @@ class SqliteClient implements ObservabilitySqliteClient {
       const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
       return this.db.query(`SELECT * FROM specialist_job_metrics ${where} ORDER BY updated_at_ms DESC, job_id DESC`).all(...params) as JobMetricsRecord[];
     }, 'listJobMetrics');
+  }
+
+  listElapsedMsBySpecialist(sinceMs: number, limitPerSpecialist: number = 200): Record<string, number[]> {
+    return withRetry(() => {
+      const rows = this.db.query(`
+        WITH ranked AS (
+          SELECT specialist, elapsed_ms,
+                 ROW_NUMBER() OVER (PARTITION BY specialist ORDER BY updated_at_ms DESC) AS rn
+          FROM specialist_job_metrics
+          WHERE status = 'completed' AND updated_at_ms >= ? AND elapsed_ms IS NOT NULL
+        )
+        SELECT specialist, elapsed_ms
+        FROM ranked
+        WHERE rn <= ?
+        ORDER BY specialist, rn
+      `).all(sinceMs, limitPerSpecialist) as Array<{ specialist?: string; elapsed_ms?: number }>;
+
+      const bySpecialist: Record<string, number[]> = {};
+      for (const row of rows) {
+        if (!row.specialist || typeof row.elapsed_ms !== 'number' || !Number.isFinite(row.elapsed_ms)) continue;
+        (bySpecialist[row.specialist] ??= []).push(row.elapsed_ms);
+      }
+      return bySpecialist;
+    }, 'listElapsedMsBySpecialist');
   }
 
   readResult(jobId: string): string | null {

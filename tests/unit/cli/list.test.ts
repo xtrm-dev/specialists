@@ -1,6 +1,6 @@
 // tests/unit/cli/list.test.ts
 import { describe, it, expect } from 'vitest';
-import { parseArgs, ArgParseError } from '../../../src/cli/list.js';
+import { parseArgs, ArgParseError, computeMedianElapsedMs, getChainPositionBadge } from '../../../src/cli/list.js';
 
 describe('list CLI — parseArgs', () => {
   it('returns empty object for no args', () => {
@@ -97,5 +97,23 @@ describe('list CLI — parseArgs description flags', () => {
   it('parses full-description aliases', () => {
     expect(parseArgs(['--full'])).toEqual({ full: true });
     expect(parseArgs(['--no-truncate'])).toEqual({ full: true });
+  });
+});
+
+
+describe('list CLI — helpers', () => {
+  it('maps chain positions inline', () => {
+    expect(getChainPositionBadge('explorer')).toBe('[pre-impl]');
+    expect(getChainPositionBadge('executor')).toBe('[impl]');
+    expect(getChainPositionBadge('reviewer')).toBe('[post-impl]');
+    expect(getChainPositionBadge('changelog-keeper')).toBe('[merge]');
+    expect(getChainPositionBadge('node-coordinator')).toBe('[standalone]');
+    expect(getChainPositionBadge('unknown')).toBeNull();
+  });
+
+  it('computes median elapsed ms', () => {
+    expect(computeMedianElapsedMs([300, 100, 200])).toBe(200);
+    expect(computeMedianElapsedMs([100, 400, 200, 300])).toBe(250);
+    expect(computeMedianElapsedMs([])).toBeNull();
   });
 });

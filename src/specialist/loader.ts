@@ -24,6 +24,7 @@ export interface SpecialistSummary {
   thinking_level?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
   skills: string[];
   scripts: ScriptEntry[];
+  mandatoryRuleTemplateSets: string[];
   scope: 'user' | 'default' | 'package';
   /**
    * Scope says where override came from.
@@ -148,6 +149,7 @@ export class SpecialistLoader {
             thinking_level: spec.specialist.execution.thinking_level,
             skills: spec.specialist.skills?.paths ?? [],
             scripts: spec.specialist.skills?.scripts ?? [],
+            mandatoryRuleTemplateSets: spec.specialist.mandatory_rules?.template_sets ?? [],
             scope: dir.scope,
             source: dir.source,
             filePath: resolved.filePath,

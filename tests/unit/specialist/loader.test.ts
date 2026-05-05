@@ -102,6 +102,7 @@ describe('SpecialistLoader', () => {
     const list = await loader.list();
     expect(list.find((entry) => entry.name === 'my-spec')?.scope).toBe('default');
     expect(list.find((entry) => entry.name === 'my-spec')?.source).toBe('default-mirror');
+    expect(list.find((entry) => entry.name === 'my-spec')?.mandatoryRuleTemplateSets).toEqual([]);
   });
 
   it('discovers specialists in .specialists/user/', async () => {

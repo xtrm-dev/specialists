@@ -18,6 +18,91 @@ const yellow = (s: string) => `\x1b[33m${s}\x1b[0m`;
 const blue = (s: string) => `\x1b[34m${s}\x1b[0m`;
 const magenta = (s: string) => `\x1b[35m${s}\x1b[0m`;
 
+
+const CHAIN_POSITION_BY_NAME: Readonly<Record<string, string>> = {
+  explorer: 'pre-impl',
+  planner: 'pre-impl',
+  overthinker: 'pre-impl',
+  researcher: 'pre-impl',
+  executor: 'impl',
+  debugger: 'impl',
+  reviewer: 'post-impl',
+  'code-sanity': 'post-impl',
+  'security-auditor': 'post-impl',
+  'test-runner': 'post-impl',
+  'sync-docs': 'post-impl',
+  'changelog-keeper': 'merge',
+  'xt-merge': 'merge',
+  'memory-processor': 'standalone',
+  'specialists-creator': 'standalone',
+  'node-coordinator': 'standalone',
+};
+
+const INLINE_RULE_GLOBAL_SET_IDS = new Set([
+  'workflow-quick-rules',
+  'core-session-boundary',
+  'git-workflow-safe',
+  'bun-native-tooling',
+  'gitnexus-required',
+  'serena-cheatsheet',
+]);
+
+interface SpecialistRuntimeStats {
+  medianMs?: number;
+  n?: number;
+}
+
+function loadRuntimeStatsBySpecialist(full: boolean): Record<string, SpecialistRuntimeStats> {
+  if (!full) return {};
+  const client = createObservabilitySqliteClient();
+  if (!client) return {};
+
+  const sinceMs = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const elapsedBySpecialist = client.listElapsedMsBySpecialist(sinceMs, 200);
+  const stats: Record<string, SpecialistRuntimeStats> = {};
+
+  for (const [specialist, elapsedMs] of Object.entries(elapsedBySpecialist)) {
+    if (elapsedMs.length < 3) continue;
+    const medianMs = computeMedianElapsedMs(elapsedMs);
+    if (medianMs === null) continue;
+    stats[specialist] = { medianMs, n: elapsedMs.length };
+  }
+
+  return stats;
+}
+
+export function getChainPositionBadge(name: string): string | null {
+  const position = CHAIN_POSITION_BY_NAME[name];
+  return position ? `[${position}]` : null;
+}
+
+export function computeMedianElapsedMs(elapsedMs: readonly number[]): number | null {
+  if (elapsedMs.length === 0) return null;
+  const sorted = [...elapsedMs].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 1) return sorted[mid] ?? null;
+  const lower = sorted[mid - 1];
+  const upper = sorted[mid];
+  return ((lower ?? 0) + (upper ?? 0)) / 2;
+}
+
+function formatDuration(ms: number): string {
+  const totalSeconds = Math.max(0, Math.round(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}m ${seconds}s`;
+}
+
+function formatRuntimeStats(stats: SpecialistRuntimeStats): string | null {
+  if (stats.medianMs === undefined || stats.n === undefined) return null;
+  return `[median ${formatDuration(stats.medianMs)}, n=${stats.n}]`;
+}
+
+function getRuleSetLine(templateSets: readonly string[]): string | null {
+  const ownSets = templateSets.filter((setId) => !INLINE_RULE_GLOBAL_SET_IDS.has(setId));
+  return ownSets.length > 0 ? `rules: ${ownSets.join(', ')}` : null;
+}
+
 // ── Types ──────────────────────────────────────────────────────────────────────
 export interface ParsedArgs {
   category?: string;
@@ -289,6 +374,7 @@ export async function run(): Promise<void> {
 
   const loader = new SpecialistLoader();
   let specialists = await loader.list(args.category);
+  const runtimeStatsBySpecialist = loadRuntimeStatsBySpecialist(Boolean(args.full));
 
   if (args.scope) {
     specialists = specialists.filter(s => s.scope === args.scope);
@@ -313,12 +399,20 @@ export async function run(): Promise<void> {
       ? `  ${dim(`thinking:${s.thinking_level}`)}` : '';
     const model = dim(s.model);
     const desc = args.compact && s.description.length > 80 ? s.description.slice(0, 79) + '…' : s.description;
+    const chainPosition = args.full ? getChainPositionBadge(s.name) : null;
+    const worktreeTag = args.full ? (s.permission_required === 'MEDIUM' || s.permission_required === 'HIGH' ? '[worktree:auto]' : '[worktree:none]') : '';
+    const runtimeStats = args.full ? formatRuntimeStats(runtimeStatsBySpecialist[s.name] ?? {}) : null;
 
-    console.log(`  ${cyan(s.name)}  ${scopeTag}  ${permission}${keepAliveTag}${thinkingTag}  ${model}`);
+    console.log(`  ${cyan(s.name)}  ${scopeTag}  ${permission}${keepAliveTag}${thinkingTag}  ${model}${worktreeTag ? `  ${worktreeTag}` : ''}${chainPosition ? `  ${chainPosition}` : ''}${runtimeStats ? `  ${runtimeStats}` : ''}`);
     console.log(`  ${dim(desc)}`);
 
     if (s.skills.length > 0) {
       console.log(`  ${dim('skills: ' + s.skills.join('  '))}`);
+    }
+
+    const rulesLine = args.full ? getRuleSetLine(s.mandatoryRuleTemplateSets) : null;
+    if (rulesLine) {
+      console.log(`  ${dim(rulesLine)}`);
     }
 
     if (s.scripts.length > 0) {
