@@ -179,13 +179,55 @@ for s, t, a in rows:
 '
 ```
 
-Component kinds: `system_prompt`, `mandatory_rule` (one event entry per attached rule), `skill` (path reference, ~10 tokens — bodies are loaded on demand, not eagerly), `task_template`, `bead_context`, `memory`.
+Component kinds: `system_prompt`, `mandatory_rule` (one event entry per attached rule), `skill` (path/description label only — full bodies are eagerly injected at runtime but NOT counted here), `task_template`, `bead_context`, `memory`.
 
-Optimization signals:
-- `mandatory_rule` total dominates: audit wrapper inflation by comparing `bytes` per rule in the event vs `wc -c config/mandatory-rules/<id>.md`. Mismatch >5x means a wrapper or richer source is adding hidden cost — investigate `formatMandatoryRulesBlock` and `parseMandatoryRulesFrontmatter`.
-- `skill` total small (always): skills are reference-only at startup; inlining skill bodies into rules saves nothing.
-- `bead_context` huge: the bead description is bloated — orchestrator should write more concise contracts.
+**Important:** `skill` entries in `payload_breakdown` show only the path/description label (~10-40 tokens). The full skill body is forcefully injected via `skills.paths` on every run and IS billed as input tokens. To measure the real eager-skill cost, see Recipe 8.
+
+Optimization signals (from breakdown alone):
+- `mandatory_rule` total dominates: audit wrapper inflation by comparing `bytes` per rule in the event vs `wc -c config/mandatory-rules/<id>.md`. Mismatch >5x means a wrapper or richer source is adding hidden cost.
+- `bead_context` huge: bead description is bloated — orchestrator should write more concise contracts.
 - `memory` huge: stale or noisy memories — run `bd memories` cleanup or consolidation.
+
+## Recipe 8 — eager skill-body cost per specialist
+
+`skills.paths` are eagerly injected on every run; the bodies appear in the API-billed prompt but the `payload_breakdown` event records only the path label. To derive the real eager-skill cost:
+
+```
+eager_skill_cost ≈ first_turn_input_tokens − sum(payload_breakdown non-skill components)
+                   − constant per-specialist framing/tool-defs overhead
+```
+
+Two-step audit:
+
+```bash
+# Step 1: real first-turn input tokens per specialist (truth)
+DB=.specialists/db/observability.db
+sqlite3 "$DB" "
+  SELECT specialist, AVG(json_extract(token_trajectory_json, '\$[0].token_usage.input_tokens')) AS avg_first_in, COUNT(*) AS n
+  FROM specialist_job_metrics
+  WHERE token_trajectory_json IS NOT NULL AND status='done'
+  GROUP BY specialist ORDER BY avg_first_in DESC"
+
+# Step 2: per-specialist measured non-skill components (post-kdl4n)
+sqlite3 "$DB" "SELECT specialist, event_json FROM specialist_events WHERE type='payload_breakdown' GROUP BY specialist ORDER BY t DESC" \
+  | python3 -c '
+import json, sys
+for line in sys.stdin:
+    if "|" not in line: continue
+    spec, js = line.split("|", 1)
+    d = json.loads(js)
+    non_skill = sum(c["tokens"] for c in d["payload_breakdown"]["components"] if c["kind"] != "skill")
+    print(f"{spec:<22}{non_skill:>10}")
+'
+```
+
+Then `delta = first_in − non_skill_total`. The framing/tool-defs constant is roughly the same across specialists with the same model — you can estimate it by running a specialist with NO `skills.paths` attached as a baseline.
+
+Per-skill body weight: `wc -c <skill-path>/SKILL.md` divided by 4 (cl100k_base approximation). High-frequency, large-body skills are the inlining candidates; low-frequency or small ones stay attached.
+
+Optimization signals (skills):
+- `delta` >> sum of attached skill body bytes/4: framing/tool defs are the bulk — leave skills alone.
+- `delta` ≈ sum of skill body weights: skills dominate eager cost — inline frequently-used hot guidance into `system_prompt`, keep rare deep references as skills, consider splitting big mixed skills.
 
 ## References
 
