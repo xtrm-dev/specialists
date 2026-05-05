@@ -26,8 +26,14 @@ interface MandatoryRulesIndex {
   default_template_sets?: string[];
 }
 
+export interface MandatoryRulesSection {
+  setId: string;
+  block: string;
+}
+
 export interface MandatoryRulesInjection {
   block: string;
+  sections: MandatoryRulesSection[];
   setsLoaded: string[];
   ruleCount: number;
   inlineRulesCount: number;
@@ -201,22 +207,25 @@ function readMandatoryRuleSet(cwd: string, id: string): MandatoryRuleSet | null 
   };
 }
 
-function formatMandatoryRulesBlock(sets: MandatoryRuleSet[], inlineRules: MandatoryRule[] = []): string {
-  if (sets.length === 0 && inlineRules.length === 0) return '';
+function formatMandatoryRulesBlock(sets: MandatoryRuleSet[], inlineRules: MandatoryRule[] = []): { block: string; sections: MandatoryRulesSection[] } {
+  if (sets.length === 0 && inlineRules.length === 0) return { block: '', sections: [] };
 
   const sections = [
     ...sets.map(set => {
       const rules = set.rules.map(rule => `- [${rule.level}] ${rule.text}`).join('\n');
-      return `### ${set.id}\n${rules}`;
+      return { setId: set.id, block: `### ${set.id}\n${rules}` };
     }),
     ...(inlineRules.length > 0
       ? [
-          `### specialist-inline-rules\n${inlineRules.map((rule, index) => `- [${rule.level}] ${rule.text}${rule.id ? ` (id: ${rule.id})` : ` (id: inline-${index + 1})`}`).join('\n')}`,
+          {
+            setId: 'specialist-inline-rules',
+            block: `### specialist-inline-rules\n${inlineRules.map((rule, index) => `- [${rule.level}] ${rule.text}${rule.id ? ` (id: ${rule.id})` : ` (id: inline-${index + 1})`}`).join('\n')}`,
+          },
         ]
       : []),
   ];
 
-  return `## MANDATORY_RULES\n${sections.join('\n\n')}`;
+  return { block: `## MANDATORY_RULES\n${sections.map(section => section.block).join('\n\n')}`, sections };
 }
 
 function collectMandatoryRuleSets(cwd: string, setIds: string[]): MandatoryRuleSet[] {
@@ -261,9 +270,10 @@ export function buildMandatoryRulesInjection(
         rules: [{ id: 'workflow-quick-rules-1', level: 'required', text: STATIC_WORKFLOW_RULES_BLOCK.trim().replace(/^##\s+Beads Workflow Quick Rules\n/, '') }],
       }];
 
-  const block = formatMandatoryRulesBlock([...globals, ...sets], inlineRules);
+  const formatted = formatMandatoryRulesBlock([...globals, ...sets], inlineRules);
   return {
-    block,
+    block: formatted.block,
+    sections: formatted.sections,
     setsLoaded: [...globals.map((set) => set.id), ...sets.map((set) => set.id)],
     ruleCount: [...globals, ...sets].reduce((count, set) => count + set.rules.length, 0) + inlineRules.length,
     inlineRulesCount: inlineRules.length,

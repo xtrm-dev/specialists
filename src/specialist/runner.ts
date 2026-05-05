@@ -1180,8 +1180,8 @@ _This project is indexed by GitNexus. You MUST use these tools — do NOT fall b
     skillPaths.push(...(spec.specialist.skills?.paths ?? []));
 
     if (mandatoryRulesInjection) {
-      for (const setId of mandatoryRulesInjection.setsLoaded) {
-        payloadComponents.push(measurePayloadComponent('mandatory_rule', setId, `${setId}\n${mandatoryRulesBlock}`));
+      for (const section of mandatoryRulesInjection.sections) {
+        payloadComponents.push(measurePayloadComponent('mandatory_rule', section.setId, section.block));
       }
     }
     for (const skillPath of skillPaths) {
