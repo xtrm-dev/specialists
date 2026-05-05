@@ -26,7 +26,7 @@
 | **Edit** | Write/Edit without active claim | `bd update <id> --claim` |
 | **Commit** | `git commit` while claim is open | `bd close <id>` first, then commit |
 | **Stop** | Session end with unclosed claim | `bd close <id>` |
-| **Memory** | `bd close <id>` without issue ack | `bd close` itself does not block. Stop hook blocks only after a successful close in same session, and only when it can resolve issue id from `claimed:<sessionId>`, `closed-this-session:<sessionId>`, or branch name. If `bd show` fails, gate fails open. Run `bd remember "<insight>"` then `bd kv set "memory-acked:<id>" "saved:<key>"` or `"nothing novel:<reason>"` before session stop. |
+| **Memory** | `bd close <id>` without issue ack | First run `bd remember "<insight>"` (or decide nothing novel), then `bd kv set "memory-acked:<id>" "saved:<key>"` or `"nothing novel:<reason>"`, then retry `bd close <id> --reason="..."` |
 
 ## bd Command Reference
 
@@ -53,7 +53,7 @@ bd create --title="..." --description="..." --type=task --priority=2
 # Closing
 # Memory gate: ack per issue before close
 #   bd kv set "memory-acked:<id>" "saved:<key>"  OR  "nothing novel:<reason>"
-bd close <id>                          # Close issue; stop hook may block later if session has closed bead and no ack
+bd close <id>                          # Close issue (blocked until memory-acked:<id> exists)
 bd close <id> --reason="Done: ..."     # Close with context
 bd close <id1> <id2> <id3>            # Batch close (each id needs its own memory ack)
 
@@ -152,7 +152,7 @@ bv --robot-insights | jq '.Cycles'               # Circular deps — must fix
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **specialists** (4807 symbols, 10438 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **specialists** (4835 symbols, 10437 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
