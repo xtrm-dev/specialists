@@ -317,7 +317,8 @@ export async function runScriptSpecialist(input: ScriptGenerateRequest, options:
     const attempts: Array<{ model: string; text: string; stderr: string }> = [];
 
     for (const model of modelCandidates) {
-      const attempt = await runSingleAttempt(prompt, model, input.thinking_level ?? spec.specialist.execution.thinking_level, timeoutMs, assistantTextLimitBytes, options);
+      const systemPrompt = spec.specialist.prompt.system || undefined;
+      const attempt = await runSingleAttempt(prompt, model, input.thinking_level ?? spec.specialist.execution.thinking_level, timeoutMs, assistantTextLimitBytes, options, systemPrompt);
       attempts.push(attempt);
       const parsed = classifyAttempt(attempt);
       if (parsed.retryable) continue;
@@ -366,10 +367,11 @@ export function collectModelCandidates(input: ScriptGenerateRequest, spec: Speci
 
 type AttemptFailureReason = 'assistant_text_too_large' | 'stderr_too_large' | 'malformed_line_too_large';
 
-function runSingleAttempt(prompt: string, model: string, thinkingLevel: string | undefined, timeoutMs: number, assistantTextLimitBytes: number, options: ScriptRunnerOptions): Promise<{ model: string; text: string; stderr: string; exitCode: number; timedOut: boolean; outputTooLarge: boolean; outputTooLargeReason?: AttemptFailureReason }> {
+function runSingleAttempt(prompt: string, model: string, thinkingLevel: string | undefined, timeoutMs: number, assistantTextLimitBytes: number, options: ScriptRunnerOptions, systemPrompt?: string): Promise<{ model: string; text: string; stderr: string; exitCode: number; timedOut: boolean; outputTooLarge: boolean; outputTooLargeReason?: AttemptFailureReason }> {
   return new Promise((resolve, reject) => {
     const args = ['--mode', 'json', '--no-session', '--no-extensions', '--no-tools', '--offline', '--model', model];
     if (thinkingLevel) args.push('--thinking', thinkingLevel);
+    if (systemPrompt) args.push('--system-prompt', systemPrompt);
     args.push(prompt);
 
     const pi = spawn('pi', args, { stdio: ['ignore', 'pipe', 'pipe'] });

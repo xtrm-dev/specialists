@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_ASSISTANT_TEXT_LIMIT_BYTES,
   DEFAULT_PENDING_LINE_LIMIT_BYTES,
@@ -134,7 +134,7 @@ describe('runScriptSpecialist fallback chain', () => {
     const candidates = collectModelCandidates(
       { specialist: 'changelog-keeper' },
       spec,
-      { fallbackModel: 'nano-gpt/moonshotai/kimi-k2.5' },
+      { fallbackModel: 'nano-gpt/moonshotai/kimi-k2.5' } as never,
     );
 
     expect(candidates).toEqual([
@@ -180,7 +180,7 @@ describe('runScriptSpecialist retained-state caps', () => {
     const child = createSpawnMock();
     const resultPromise = runScriptSpecialist(
       { specialist: 'changelog-keeper', variables: { name: 'release notes' } },
-      { loader: makeLoader(), projectDir: '.' },
+      { loader: makeLoader() as never, projectDir: '.' },
     );
 
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -199,7 +199,7 @@ describe('runScriptSpecialist retained-state caps', () => {
     const child = createSpawnMock();
     const resultPromise = runScriptSpecialist(
       { specialist: 'changelog-keeper', variables: { name: 'release notes' } },
-      { loader: makeLoader(), projectDir: '.' },
+      { loader: makeLoader() as never, projectDir: '.' },
     );
 
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -217,7 +217,7 @@ describe('runScriptSpecialist retained-state caps', () => {
     const child = createSpawnMock();
     const resultPromise = runScriptSpecialist(
       { specialist: 'changelog-keeper', variables: { name: 'release notes' } },
-      { loader: makeLoader(), projectDir: '.' },
+      { loader: makeLoader() as never, projectDir: '.' },
     );
 
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -228,5 +228,53 @@ describe('runScriptSpecialist retained-state caps', () => {
 
     expect(child.kill).toHaveBeenCalledWith('SIGTERM');
     expect(result).toMatchObject({ success: false, error_type: 'output_too_large', error: 'stderr too large' });
+  });
+});
+
+describe('runScriptSpecialist system prompt forwarding', () => {
+  it('passes --system-prompt to pi when spec.prompt.system is set', async () => {
+    const specWithSystem = {
+      ...baseSpec,
+      specialist: {
+        ...baseSpec.specialist,
+        prompt: {
+          ...baseSpec.specialist.prompt,
+          system: 'You are a financial data extractor. Return only JSON.',
+        },
+      },
+    };
+    const child = createSpawnMock();
+    const resultPromise = runScriptSpecialist(
+      { specialist: 'changelog-keeper', variables: { name: 'release notes' } },
+      { loader: makeLoader(specWithSystem as never) as never, projectDir: '.' },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    child.stdout.emit('data', Buffer.from(`${JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'output' }] } })}\n`));
+    child.emit('close', 0);
+
+    await resultPromise;
+
+    const spawnArgs: string[] = spawnMock.mock.calls[0][1];
+    const idx = spawnArgs.indexOf('--system-prompt');
+    expect(idx).toBeGreaterThan(-1);
+    expect(spawnArgs[idx + 1]).toBe('You are a financial data extractor. Return only JSON.');
+  });
+
+  it('omits --system-prompt when spec.prompt.system is absent', async () => {
+    const child = createSpawnMock();
+    const resultPromise = runScriptSpecialist(
+      { specialist: 'changelog-keeper', variables: { name: 'release notes' } },
+      { loader: makeLoader() as never, projectDir: '.' },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    child.stdout.emit('data', Buffer.from(`${JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'output' }] } })}\n`));
+    child.emit('close', 0);
+
+    await resultPromise;
+
+    const spawnArgs: string[] = spawnMock.mock.calls[0][1];
+    expect(spawnArgs).not.toContain('--system-prompt');
   });
 });
