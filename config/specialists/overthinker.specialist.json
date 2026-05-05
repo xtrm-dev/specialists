@@ -29,7 +29,8 @@
     "mandatory_rules": {
       "template_sets": [
         "overthinker-4phase",
-        "serena-cheatsheet"
+        "serena-cheatsheet",
+        "per-turn-handoff-schema"
       ]
     },
     "prompt": {

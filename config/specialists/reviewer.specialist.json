@@ -30,7 +30,8 @@
       "template_sets": [
         "reviewer-verdict-format",
         "gitnexus-required",
-        "serena-cheatsheet"
+        "serena-cheatsheet",
+        "per-turn-handoff-schema"
       ]
     },
     "prompt": {

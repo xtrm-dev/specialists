@@ -29,7 +29,8 @@
       "template_sets": [
         "explorer-readonly",
         "gitnexus-required",
-        "serena-cheatsheet"
+        "serena-cheatsheet",
+        "per-turn-handoff-schema"
       ]
     },
     "permissions": {

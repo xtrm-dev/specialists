@@ -32,7 +32,8 @@
         "executor-delivery",
         "git-workflow-safe",
         "gitnexus-required",
-        "serena-cheatsheet"
+        "serena-cheatsheet",
+        "per-turn-handoff-schema"
       ]
     },
     "prompt": {
