@@ -318,7 +318,7 @@ Use for one implementation branch.
 
 ```bash
 # 1. Create or claim root task bead with complete contract
-bd create --title "..." --type task --priority 2 --description "PROBLEM: ... SUCCESS: ... SCOPE: ... NON_GOALS: ... CONSTRAINTS: ... VALIDATION: ... OUTPUT: ..."
+bd create --title "Fix token refresh retry" --type task --priority 2 --description "PROBLEM: login and refresh flow have a retry bug when transient token refresh fails before backoff clears stale state. SUCCESS: token refresh retries once, login survives transient failure, and terminal failure stays clear. SCOPE: src/auth/refresh.ts, src/cli/login.ts, tests/unit/auth/refresh.test.ts. NON_GOALS: no auth provider redesign, no storage migration, no UI changes. CONSTRAINTS: preserve token format, keep error text backward-compatible, avoid broad retry changes outside auth flow. VALIDATION: add regression test for fail-then-succeed path and run targeted auth tests. OUTPUT: changed files, test proof, residual risks."
 bd update <task> --claim
 
 # 2. Optional discovery when path is unknown
