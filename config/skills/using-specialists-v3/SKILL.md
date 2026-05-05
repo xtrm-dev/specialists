@@ -125,10 +125,20 @@ Task/epic bead:
 PROBLEM: User-facing or project-facing objective.
 SUCCESS: End-state across all child beads.
 SCOPE: Area of project affected.
+REFERENCES: Optional files, skills, or docs specialist reads only if work needs them.
 NON_GOALS: Boundaries for entire effort.
 CONSTRAINTS: Sequencing, compatibility, branch/merge rules.
 VALIDATION: Final checks before close.
 OUTPUT: What orchestrator reports back.
+```
+
+`SCOPE` is always loaded as context. `REFERENCES` is progressive disclosure: name what exists, but do not force load unless task needs it. Use this when a file would bloat payload today, like citing a huge skill file in scope and dragging in all lines before specialist even knows it must read them.
+
+Example:
+
+```text
+SCOPE: config/skills/using-specialists-v3/SKILL.md, docs/specialists/handoff-schema.md
+REFERENCES: config/skills/prompt-improving/SKILL.md (xml_core conventions), sibling beads per-turn-handoff-schema and bead-id-verbatim once landed
 ```
 
 Explorer bead:
@@ -205,6 +215,8 @@ OUTPUT: Updated doc, drift evidence, remaining doc gaps.
 
 What differs: orchestrator gives each specialist a contract shape that matches job, so role stays narrow and reviewable.
 
+For evidence-heavy or multi-item beads, let `SCOPE`, `CONSTRAINTS`, and `EXAMPLES` carry opt-in XML tags. Follow prompt-improving `xml_core` style: wrap only the subpart that needs structure, not whole bead. Example: a debugger bead can put stack trace lines in `<evidence>` and do-not-touch items in `<constraints>`, so specialist can scan facts fast without turning every field into markup.
+
 ## Choosing The Specialist
 
 Run `specialists list` if you need live registry. Choose by task, not habit.
@@ -231,7 +243,9 @@ Selection rules:
 - Explorer is READ_ONLY and should answer specific questions.
 - Debugger beats explorer for failures because it traces causes and remediation.
 - Planner shapes epic/task graph before executor starts.
-- Overthinker defends risky design before code locks in.
+- Overthinker defends risky design before code locks in. It is CoT specialist by design, so thinking-heavy turns and `<thinking>` tags fit there.
+- Reviewer already uses structured evidence/gap matrices, which is CoT in disguise; keep that structure, do not add freeform `<thinking>` blocks.
+- Executor, debugger, changelog-keeper, sync-docs, and test-runner should not carry mandatory `<thinking>` blocks. That bloats output without payoff and hides the real contract.
 - Executor does not own full test validation; use reviewer/test-runner for that phase.
 - Sync-docs is for audit/sync; executor is for heavy doc rewrites.
 - Researcher is for current external info, not repo archaeology.
