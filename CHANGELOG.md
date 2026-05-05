@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Documented the canonical-live Category A and xtrm-managed Category B distribution model, including installation, skill/hook drift, and operator refresh commands (`unitAI-o4khi`).
+
+### Changed
+- `update-specialists` guidance now wraps `xt doctor` / `xt update` for all xtrm-managed asset drift, and specialist authoring docs now prefer canonical rule/skill references over copied defaults (`unitAI-tsnwh.5`, `unitAI-o4khi`).
+
 ---
 
 ## [v3.12.0] — 2026-05-05

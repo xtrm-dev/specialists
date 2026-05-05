@@ -947,20 +947,23 @@ See [manifest.md](manifest.md) for the full resolution semantics.
 ### Synopsis
 
 ```bash
-specialists init [--sync-defaults]
+specialists init [--sync-defaults] [--sync-skills] [--no-xtrm-check]
 ```
 
 ### Flags
 
 | Flag | Description |
 |------|-------------|
-| `--sync-defaults` | Refresh managed mirror into `.specialists/default/` for specialists, mandatory-rules, and nodes. Human-only. |
+| `--sync-defaults` | Compatibility/operator path: copy canonical Category A assets into `.specialists/default/`. Not the default install model. |
+| `--sync-skills` | Re-sync skills only through the xtrm-managed skill surface. |
+| `--no-xtrm-check` | Skip `.xtrm/` / `xt` prerequisite checks for CI or tests. |
 
 ### Examples
 
 ```bash
-specialists init                 # human-only bootstrap (interactive terminal)
-specialists init --sync-defaults # human-only: refresh managed mirror
+specialists init                  # full bootstrap
+specialists init --sync-defaults  # compatibility snapshot only when deliberately needed
+specialists init --sync-skills    # skill-only refresh path
 ```
 
 ### Exit codes
@@ -996,17 +999,22 @@ With `--sync-defaults` only:
 ### Synopsis
 
 ```bash
-specialists doctor
+specialists doctor [orphans] [--check-drift | --drift]
 ```
 
-### Flags
+### Flags and subcommands
 
-No flags.
+| Flag / subcommand | Description |
+|---|---|
+| `orphans` | Read-only orphan scan for membership, jobs, epics, and worktree pointers. |
+| `--check-drift`, `--drift` | Report stale `.specialists/default/` snapshots against package canonical assets. |
 
 ### Examples
 
 ```bash
 specialists doctor
+specialists doctor orphans
+specialists doctor --check-drift
 ```
 
 ### Exit codes
@@ -1019,6 +1027,40 @@ Checks include:
 - MCP registration
 - runtime directory health
 - zombie running-job detection
+
+---
+
+## `sp prune-stale-defaults`
+
+### Synopsis
+
+```bash
+sp prune-stale-defaults [--dry-run] [--root <path>]
+```
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--dry-run` | List stale default snapshots without deleting files. |
+| `--root <path>` | Repo root to scan; defaults to current repo. |
+
+Use this after `sp doctor --check-drift` to remove redundant `.specialists/default/` snapshots. Review `diverged` findings before pruning; user-owned overlays belong in `.specialists/user/`.
+
+---
+
+## xtrm-managed asset commands
+
+Specialists docs reference these xtrm-tools commands for Category B skills/hooks drift:
+
+```bash
+xt doctor --cwd <repo-or-root> --json
+xt doctor --cwd <repo-or-root> --check-drift
+xt update --repo <repo> --apply
+xt update --root <projects-root> --apply
+```
+
+Omit `--apply` for a dry run. `xt doctor` uses `--cwd`; `xt update` uses `--repo` for one repository or `--root` for many.
 
 ---
 

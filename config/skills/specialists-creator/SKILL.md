@@ -13,6 +13,22 @@ synced_at: 236ca5e6
 
 > Source of truth: `src/specialist/schema.ts` | Runtime: `src/specialist/runner.ts`
 
+
+## Canonical References
+
+When a custom specialist needs a standard rule or skill, reference the canonical asset by name instead of copying its file into the repo. Runtime/package fallback resolves canonical mandatory rules and skills when no project-local override exists.
+
+Example:
+
+```json
+{
+  "mandatory_rules": { "template_sets": ["serena-cheatsheet"] },
+  "skills": { "paths": ["releasing"] }
+}
+```
+
+Only create project-local copies when intentionally changing canonical behavior. After setting references, run `sp config show <name> --resolved` to verify the resolved runtime surface.
+
 ---
 
 ## ACTION REQUIRED BEFORE ANYTHING ELSE

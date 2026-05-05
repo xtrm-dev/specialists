@@ -26,6 +26,21 @@ domain:
 
 Skills are prompt packages that add focused guidance to specialist runs.
 
+
+## Managed skill distribution
+
+Skills are Category B filesystem-bound assets. External agent runtimes discover skills from disk, so xtrm-tools maintains the canonical snapshot under `.xtrm/skills/default/` and exposes active links through `.claude/skills` / `.pi/skills`.
+
+Use:
+
+```bash
+xt doctor --cwd <repo> --json
+xt update --repo <repo> --apply
+xt update --root <projects-root> --apply
+```
+
+User-authored skills belong in the user/active layer used by the local agent setup, not in `.xtrm/skills/default/`. Treat `.xtrm/skills/default/` as managed output.
+
 ## Repo-local skills
 
 ### `using-specialists`
@@ -75,9 +90,10 @@ Location: `config/skills/update-specialists/SKILL.md`
 
 Purpose:
 
-- reconcile installed specialists runtime state against canonical install expectations
-- start with `sp doctor` as primary detection command
-- check specialist configs, hooks, CLI reachability, job dirs, SQLite schema, extensions, and worktree GC state
+- guide operators through all xtrm-managed asset drift across one repo or many
+- distinguish Category A runtime assets (loader-live; verify only) from Category B filesystem snapshots (refresh with `xt update`)
+- run `xt doctor --cwd <root> --json`, summarize drift, ask for confirmation, run `xt update --apply`, and re-check
+- fall back gracefully to repo-local guidance when `xt` is unavailable
 - map each drift class to targeted fix commands before falling back to full re-init
 - verify repair with `sp doctor` and report manual intervention when auto-fix is unsafe
 

@@ -133,6 +133,26 @@ The example above is explorer's actual block: when `pi-serena-tools` and `pi-git
 
 See [manifest.md](manifest.md) for full semantics, the canonical example, and when to *not* add an override.
 
+
+### Referencing canonical assets
+
+Custom specialists can reference package-canonical rules and skills by name instead of copying files into the repo. The runtime resolves canonical assets from the installed package when no project-local copy exists.
+
+```jsonc
+{
+  "specialist": {
+    "mandatory_rules": {
+      "template_sets": ["serena-cheatsheet"]
+    },
+    "skills": {
+      "paths": ["releasing"]
+    }
+  }
+}
+```
+
+Use this for stable shared guidance. Create a project-local file only when the repo intentionally changes the canonical behavior. Project/user layers still win over package canonical, so custom overlays remain explicit. See [installation.md](installation.md) for the Category A / Category B distribution split.
+
 ### Interactive precedence
 
 Effective keep-alive order is:

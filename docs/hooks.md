@@ -59,9 +59,16 @@ Behavior:
 
 ## Installation notes
 
-The current canonical bootstrap is `specialists init`. It manages project dirs, workflow injection, and MCP registration.
+Hook distribution is Category B: hook files and `.claude/settings.json` wiring must exist on disk, so xtrm-tools owns the managed mirror under `.xtrm/hooks/default/` and refreshes it with `xt update`.
 
-Use `specialists doctor` to verify runtime health and hook expectations in your environment.
+Use:
+
+```bash
+xt doctor --cwd <repo> --json
+xt update --repo <repo> --apply
+```
+
+`specialists init` still manages specialists-specific runtime dirs, MCP registration, and specialists hook wiring. Use `specialists doctor` for runtime health; use `xt doctor` / `xt update` for xtrm-managed hook drift.
 
 ## Beads hooks
 

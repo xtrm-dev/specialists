@@ -33,6 +33,9 @@ When a specialist is dispatched, `PiAgentSession.start()` produces a comma-joine
 
 The resolver is the only path. There is no env-flag fallback. There are no hardcoded tool arrays in source.
 
+
+Catalog files are Category A assets in the distribution model: the runtime resolves them from the installed package when the repo has no intentional local catalog override. New repos do not need a copied `.specialists/catalog/` snapshot just to get current policy. Pin policy by pinning the specialists package version; override locally only when the project deliberately diverges. See [installation.md](installation.md).
+
 ## Catalog architecture
 
 `.specialists/catalog/index.json` declares the precedence order and inlines per-catalog tier policies:

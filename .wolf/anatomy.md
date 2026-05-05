@@ -1248,3 +1248,15 @@
 
 
 - 2026-05-05: Updated `.xtrm/reports/2026-05-04-2b52300a.md` addendum with npm audit triage: @modelcontextprotocol/sdk/yaml safe bumps, audit reduction, security-auditor stall, and Vitest 4 follow-up.
+
+## docs/installation.md
+
+- New installation/distribution guide for Specialists two-category model: Category A runtime-resolved package assets, Category B xtrm-managed filesystem assets, migration steps, and cross-links.
+
+## docs distribution references
+
+- `docs/authoring.md` — adds canonical rule/skill reference pattern for user specialists.
+- `docs/manifest.md` — notes tool catalog as Category A package-live asset.
+- `docs/skills.md` — documents skill snapshots as Category B managed by `xt doctor` / `xt update`.
+- `docs/hooks.md` — documents hook snapshots as Category B and separates `specialists doctor` from `xt doctor` drift checks.
+- `docs/cli-reference.md` — updates `sp init`, `sp doctor --check-drift`, `sp prune-stale-defaults`, and xtrm-managed `xt doctor` / `xt update` references.

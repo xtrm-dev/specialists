@@ -1,0 +1,80 @@
+---
+title: Installation and Distribution
+scope: installation
+category: guide
+version: 1.0.0
+updated: 2026-05-05
+description: Canonical-from-package install model, user overlays, and managed xtrm assets.
+source_of_truth_for:
+  - package.json
+  - src/specialist/canonical-asset-resolver.ts
+  - src/cli/init.ts
+  - docs/skills.md
+  - docs/hooks.md
+domain:
+  - installation
+  - distribution
+---
+
+# Installation and Distribution
+
+Specialists now uses a two-category distribution model. Install or upgrade the npm package to choose the canonical Specialist runtime version; do not copy default files into every repository as the normal path.
+
+## Category A: runtime-resolved package assets
+
+Category A assets are read by the `sp` runtime itself:
+
+- specialist definitions from `config/specialists/`
+- mandatory rules from `config/mandatory-rules/`
+- tool catalog files from `.specialists/catalog/` / package catalog
+- node configs
+
+The loader resolves them live from the installed package when a repo has no intentional override. Precedence is:
+
+```text
+.specialists/user/ > .specialists/default/ > config/<kind>/ > package canonical > legacy
+```
+
+For new repositories this means no default snapshot is required. Pin the canonical version with `package.json` / lockfile by depending on the desired `@jaggerxtrm/specialists` version. Put custom project definitions in `.specialists/user/`; they intentionally outrank package canonical assets.
+
+`sp init --sync-defaults` is no longer the default bootstrap flow. Use it only as a human/operator compatibility action when a repo deliberately needs a local `.specialists/default/` snapshot.
+
+## Category B: filesystem-bound xtrm-managed assets
+
+Category B assets must exist on disk because external tools read them directly:
+
+- skills under `.xtrm/skills/default/` and the active `.claude/skills` / `.pi/skills` surfaces
+- hooks under `.xtrm/hooks/default/` and `.claude/settings.json` hook wiring
+
+xtrm-tools owns these snapshots. Check drift with:
+
+```bash
+xt doctor --cwd <repo-or-root> --json
+```
+
+Refresh one repo or many with:
+
+```bash
+xt update --repo <repo> --apply
+xt update --root <projects-root> --apply
+```
+
+Omit `--apply` for a dry run. See [skills.md](skills.md), [hooks.md](hooks.md), and the `update-specialists` skill for the operator-facing flow.
+
+## Migrating existing repositories
+
+1. Upgrade the `@jaggerxtrm/specialists` package version you want to run.
+2. Run `sp doctor --check-drift` to find stale Category A snapshots in `.specialists/default/`.
+3. Run `sp prune-stale-defaults --dry-run` and remove redundant snapshots only after reviewing diverged files.
+4. Run `xt doctor --cwd <repo> --json` for Category B drift.
+5. Run `xt update --repo <repo> --apply` or `xt update --root <projects-root> --apply` after operator confirmation.
+
+Do not move user-authored specialists, skills, or hooks into default mirrors. User-owned layers are custom policy, not drift.
+
+## See also
+
+- [authoring.md](authoring.md)
+- [manifest.md](manifest.md)
+- [skills.md](skills.md)
+- [hooks.md](hooks.md)
+- [cli-reference.md](cli-reference.md)

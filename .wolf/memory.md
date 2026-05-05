@@ -119,3 +119,5 @@
 - 2026-05-05: Updated latest session report `.xtrm/reports/2026-05-04-2b52300a.md` with using-specialists-v3 follow-up: v3 merge, manual skills-creator expansion, activation symlink, pushed commits, and remaining xtrm-tools mirror decision.
 
 - 2026-05-05: Updated `.xtrm/reports/2026-05-04-2b52300a.md` with npm audit triage addendum: safe runtime dependency bumps, audit reduced from 18/6-high to 6/0-high, and Vitest 4 follow-up `unitAI-zxz9f` remains.
+
+- 2026-05-05: Updated canonical-live / xtrm-managed distribution docs for unitAI-o4khi: new docs/installation.md plus docs/authoring.md, manifest.md, skills.md, hooks.md, cli-reference.md, specialists-creator skill/config, and CHANGELOG entries.
