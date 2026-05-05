@@ -9,7 +9,6 @@ description: Practical guides for structured output, job observation, bead-linke
 source_of_truth_for:
   - "src/cli/run.ts"
   - "src/cli/feed.ts"
-  - "src/cli/poll.ts"
   - "src/cli/result.ts"
   - "src/cli/resume.ts"
   - "src/specialist/supervisor.ts"
@@ -74,7 +73,7 @@ sp run executor --prompt "Investigate failing tests" --raw
 
 ---
 
-## 2) Job observation: `feed`, `poll`, `result`
+## 2) Job observation: `feed`, `ps`, `result`
 
 All observation reads DB-backed runtime state first. Legacy/operator mirrors under:
 
@@ -113,19 +112,6 @@ sp feed --json --since 5m --limit 200
 - **Text preview**: `TURN+` lines show 80-char preview of accumulated text content
 - **Context warnings**: feed displays context utilization warnings at WARN/CRITICAL thresholds
 - **Startup context lines**: on `run_start` events with `startup_snapshot`, emits dimmed `↳ startup` summary (job, specialist, bead, worktree, branch, vars, skills); on `meta` events with `memory_injection`, emits `↳ memory` token accounting line (static, dynamic, gitnexus, total)
-
-### `poll` (DEPRECATED — do not use)
-
-> **DEPRECATED** — scheduled for removal. Use `sp ps <id> --json` for status and `sp feed <id>` for events.
-
-`sp poll` is file-based (`status.json`) and returns stale data under the v3.9.0 SQLite-first default. It offers no advantage over `sp ps --json` (DB-canonical status) and `sp feed` (DB-canonical events).
-
-**Replacements:**
-- Status snapshot: `sp ps <id> --json` — reads from SQLite, includes `current_tool`, `context_pct`, `chain_kind`
-- Event stream: `sp feed <id> --follow` — DB-first timeline with `--json` mode
-- Final output: `sp result <id>` — reads `last_output` column from SQLite
-
-Deprecation tracked in unitAI-kbxu7.
 
 ### `result` (final text)
 

@@ -11,7 +11,6 @@ source_of_truth_for:
   - src/cli/run.ts
   - src/cli/node.ts
   - src/cli/feed.ts
-  - src/cli/poll.ts
   - src/cli/result.ts
   - src/cli/status.ts
   - src/cli/attach.ts
@@ -38,7 +37,6 @@ source_of_truth_for:
 | [`specialists node`](#specialists-node) | NodeSupervisor control surface: run/list/promote/members/memory/stop |
 | [`specialists epic`](#specialists-epic) | Epic lifecycle: list/status/resolve/merge (canonical publication path) |
 | [`specialists feed`](#specialists-feed) | `--job <id>`: Filter by job ID |
-| [`specialists poll`](#specialists-poll) | `--cursor <n>`: Event cursor offset (default `0`) |
 | [`specialists result`](#specialists-result) | `--wait`: Poll until terminal state |
 | [`specialists status`](#specialists-status) | `--json`: Machine-readable status |
 | [`specialists attach`](#specialists-attach) | No flags |
@@ -284,42 +282,6 @@ On `meta` events with `memory_injection`, feed emits a memory token accounting l
 
 - `0`: Success (including no events found).
 - `1`: Unhandled runtime error.
-
----
-
-## `specialists poll` *(deprecated)*
-
-> **DEPRECATED** — scheduled for removal. Use `sp ps <id> --json` for status and `sp feed <id>` for events. The current implementation is file-based and will return stale data when `SPECIALISTS_JOB_FILE_OUTPUT=off` (the default since v3.9.0).
-
-### Synopsis
-
-```bash
-specialists poll <job-id> [--cursor N] [--output-cursor N] [--json]
-```
-
-### Flags
-
-- `--cursor <n>`: Event cursor offset (default `0`).
-- `--output-cursor <n>`: Output text cursor offset (default `0`).
-- `--json`: Accepted and ignored (JSON is always returned).
-
-### Examples
-
-```bash
-specialists poll a1b2c3
-specialists poll a1b2c3 --cursor 10
-specialists poll a1b2c3 --cursor 10 --output-cursor 2048
-specialists poll a1b2c3 --json
-```
-
-### Exit codes
-
-- `0`: Job found and polled.
-- `1`: Missing/invalid args, job not found, or use of removed `--follow`.
-
-Notes:
-- `--follow`/`-f` is removed from `poll`; use `specialists feed --follow`.
-- `poll` reads from SQLite first and falls back to runtime files when SQLite data is unavailable.
 
 ---
 

@@ -304,7 +304,7 @@ function resolveWorkingDirectory(
     if (!targetStatus) {
       console.error(
         `Error: cannot read status for job '${args.reuseJobId}'. ` +
-        `Check the job id with: specialists poll ${args.reuseJobId} --json`,
+        `Check the job id with: specialists ps ${args.reuseJobId} --json`,
       );
       process.exit(1);
     }
@@ -844,7 +844,8 @@ export async function run(): Promise<void> {
   ].filter(Boolean).join('  ');
 
   process.stderr.write(`\n${green('✓')} ${footer}\n\n`);
-  process.stderr.write(dim(`Poll: specialists poll ${jobId} --json\n\n`));
+  process.stderr.write(dim(`Status: specialists ps ${jobId} --json\n`));
+  process.stderr.write(dim(`Events: specialists feed ${jobId}\n\n`));
 
   // Exit immediately - all work is done
   process.exit(0);

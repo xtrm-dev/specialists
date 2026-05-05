@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 function captureIndexHelp(args: string[]): string {
   const entry = join(process.cwd(), 'dist', 'index.js');
-  return execFileSync(process.execPath, [entry, ...args], { encoding: 'utf-8' });
+  return execFileSync('bun', [entry, ...args], { encoding: 'utf-8' });
 }
 
 describe('command-specific --help', () => {
@@ -54,7 +54,7 @@ describe('command-specific --help', () => {
 
   it('db --help documents legacy migration scope', () => {
     const out = captureIndexHelp(['db', '--help']);
-    expect(out).toContain('legacy/migration tooling');
+    expect(out).toContain('maintenance and migration');
     expect(out).toContain('human-only');
     expect(out).toContain('XDG_DATA_HOME');
   });
@@ -75,9 +75,9 @@ describe('command-specific --help', () => {
 
   it('config --help documents get/set and targeting flags', () => {
     const out = captureIndexHelp(['config', '--help']);
-    expect(out).toContain('config <get|set>');
-    expect(out).toContain('config/specialists/');
+    expect(out).toContain('config <get|set|show>');
+    expect(out).toContain('specialists edit');
     expect(out).toContain('--name <specialist>');
-    expect(out).toContain('stall_timeout_ms');
+    expect(out).toContain('--resolved');
   });
 });

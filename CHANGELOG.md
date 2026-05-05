@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Documented the canonical-live Category A and xtrm-managed Category B distribution model, including installation, skill/hook drift, and operator refresh commands (`unitAI-o4khi`).
 
 ### Changed
+- Removed deprecated `sp poll`; use `sp ps <id> --json` for status, `sp feed <id>` for events, and `sp result <id>` for final output (unitAI-kbxu7).
 - `update-specialists` guidance now wraps `xt doctor` / `xt update` for all xtrm-managed asset drift, and specialist authoring docs now prefer canonical rule/skill references over copied defaults (`unitAI-tsnwh.5`, `unitAI-o4khi`).
 
 ---

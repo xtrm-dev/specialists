@@ -272,7 +272,7 @@ sp epic abandon <epic-id> --reason "..."
 sp end
 ```
 
-`sp result <job-id>` returns the most recent completed turn for `waiting` jobs with a `Session is waiting for your input` footer — use it to inspect a keep-alive job before deciding whether to resume. For `running` jobs, `sp feed <job-id>` is the right tool; `sp poll` is deprecated. Avoid `specialists status --job` for normal monitoring; prefer `sp ps <job-id>`.
+`sp result <job-id>` returns the most recent completed turn for `waiting` jobs with a `Session is waiting for your input` footer — use it to inspect a keep-alive job before deciding whether to resume. For `running` jobs, `sp feed <job-id>` is the right tool. Avoid `specialists status --job` for normal monitoring; prefer `sp ps <job-id>`.
 
 ## Flag Semantics
 

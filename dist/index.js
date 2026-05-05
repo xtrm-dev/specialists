@@ -7790,7 +7790,7 @@ var require_core = __commonJS((exports) => {
     constructor(opts = {}) {
       this.schemas = {};
       this.refs = {};
-      this.formats = {};
+      this.formats = Object.create(null);
       this._compilations = new Set;
       this._loading = {};
       this._cache = new Map;
@@ -11014,6 +11014,8 @@ var require_Alias = __commonJS((exports) => {
       });
     }
     resolve(doc2, ctx) {
+      if (ctx?.maxAliasCount === 0)
+        throw new ReferenceError("Alias resolution is disabled");
       let nodes;
       if (ctx?.aliasResolveCache) {
         nodes = ctx.aliasResolveCache;
@@ -11793,6 +11795,7 @@ var require_stringify = __commonJS((exports) => {
       nullStr: "null",
       simpleKeys: false,
       singleQuote: null,
+      trailingComma: false,
       trueStr: "true",
       verifyAliasOrder: true
     }, doc2.schema.toStringOptions, options);
@@ -12062,18 +12065,18 @@ var require_merge = __commonJS((exports) => {
   };
   var isMergeKey = (ctx, key) => (merge2.identify(key) || identity.isScalar(key) && (!key.type || key.type === Scalar.Scalar.PLAIN) && merge2.identify(key.value)) && ctx?.doc.schema.tags.some((tag) => tag.tag === merge2.tag && tag.default);
   function addMergeToJSMap(ctx, map2, value) {
-    value = ctx && identity.isAlias(value) ? value.resolve(ctx.doc) : value;
-    if (identity.isSeq(value))
-      for (const it of value.items)
+    const source = resolveAliasValue(ctx, value);
+    if (identity.isSeq(source))
+      for (const it of source.items)
         mergeValue(ctx, map2, it);
-    else if (Array.isArray(value))
-      for (const it of value)
+    else if (Array.isArray(source))
+      for (const it of source)
         mergeValue(ctx, map2, it);
     else
-      mergeValue(ctx, map2, value);
+      mergeValue(ctx, map2, source);
   }
   function mergeValue(ctx, map2, value) {
-    const source = ctx && identity.isAlias(value) ? value.resolve(ctx.doc) : value;
+    const source = resolveAliasValue(ctx, value);
     if (!identity.isMap(source))
       throw new Error("Merge sources must be maps or map aliases");
     const srcMap = source.toJSON(null, ctx, Map);
@@ -12093,6 +12096,9 @@ var require_merge = __commonJS((exports) => {
       }
     }
     return map2;
+  }
+  function resolveAliasValue(ctx, value) {
+    return ctx && identity.isAlias(value) ? value.resolve(ctx.doc, ctx) : value;
   }
   exports.addMergeToJSMap = addMergeToJSMap;
   exports.isMergeKey = isMergeKey;
@@ -12301,13 +12307,20 @@ ${indent}${line}` : `
       if (comment)
         reqNewline = true;
       let str = stringify.stringify(item, itemCtx, () => comment = null);
-      if (i < items.length - 1)
+      reqNewline || (reqNewline = lines.length > linesAtValue || str.includes(`
+`));
+      if (i < items.length - 1) {
         str += ",";
+      } else if (ctx.options.trailingComma) {
+        if (ctx.options.lineWidth > 0) {
+          reqNewline || (reqNewline = lines.reduce((sum, line) => sum + line.length + 2, 2) + (str.length + 2) > ctx.options.lineWidth);
+        }
+        if (reqNewline) {
+          str += ",";
+        }
+      }
       if (comment)
         str += stringifyComment.lineComment(str, itemIndent, commentString(comment));
-      if (!reqNewline && (lines.length > linesAtValue || str.includes(`
-`)))
-        reqNewline = true;
       lines.push(str);
       linesAtValue = lines.length;
     }
@@ -12662,7 +12675,7 @@ var require_stringifyNumber = __commonJS((exports) => {
     if (!isFinite(num))
       return isNaN(num) ? ".nan" : num < 0 ? "-.inf" : ".inf";
     let n = Object.is(value, -0) ? "-0" : JSON.stringify(value);
-    if (!format && minFractionDigits && (!tag || tag === "tag:yaml.org,2002:float") && /^\d/.test(n)) {
+    if (!format && minFractionDigits && (!tag || tag === "tag:yaml.org,2002:float") && /^-?\d/.test(n) && !n.includes("e")) {
       let i = n.indexOf(".");
       if (i < 0) {
         i = n.length;
@@ -14887,7 +14900,7 @@ var require_resolve_flow_scalar = __commonJS((exports) => {
           while (next === " " || next === "\t")
             next = source[++i + 1];
         } else if (next === "x" || next === "u" || next === "U") {
-          const length = { x: 2, u: 4, U: 8 }[next];
+          const length = next === "x" ? 2 : next === "u" ? 4 : 8;
           res += parseCharCode(source, i + 1, length, onError);
           i += length;
         } else {
@@ -14956,12 +14969,13 @@ var require_resolve_flow_scalar = __commonJS((exports) => {
     const cc = source.substr(offset, length);
     const ok = cc.length === length && /^[0-9a-fA-F]+$/.test(cc);
     const code = ok ? parseInt(cc, 16) : NaN;
-    if (isNaN(code)) {
+    try {
+      return String.fromCodePoint(code);
+    } catch {
       const raw = source.substr(offset - 2, length + 2);
       onError(offset - 2, "BAD_DQ_ESCAPE", `Invalid escape sequence ${raw}`);
       return raw;
     }
-    return String.fromCodePoint(code);
   }
   exports.resolveFlowScalar = resolveFlowScalar;
 });
@@ -15102,17 +15116,22 @@ var require_compose_node = __commonJS((exports) => {
       case "block-map":
       case "block-seq":
       case "flow-collection":
-        node = composeCollection.composeCollection(CN, ctx, token, props, onError);
-        if (anchor)
-          node.anchor = anchor.source.substring(1);
+        try {
+          node = composeCollection.composeCollection(CN, ctx, token, props, onError);
+          if (anchor)
+            node.anchor = anchor.source.substring(1);
+        } catch (error2) {
+          const message = error2 instanceof Error ? error2.message : String(error2);
+          onError(token, "RESOURCE_EXHAUSTION", message);
+        }
         break;
       default: {
         const message = token.type === "error" ? token.message : `Unsupported token (type: ${token.type})`;
         onError(token, "UNEXPECTED_TOKEN", message);
-        node = composeEmptyNode(ctx, token.offset, undefined, null, props, onError);
         isSrcToken = false;
       }
     }
+    node ?? (node = composeEmptyNode(ctx, token.offset, undefined, null, props, onError));
     if (anchor && node.anchor === "")
       onError(anchor, "BAD_ALIAS", "Anchor cannot be an empty string");
     if (atKey && ctx.options.stringKeys && (!identity.isScalar(node) || typeof node.value !== "string" || node.tag && node.tag !== "tag:yaml.org,2002:str")) {
@@ -21582,24 +21601,27 @@ function readMandatoryRuleSet(cwd, id) {
 }
 function formatMandatoryRulesBlock(sets, inlineRules = []) {
   if (sets.length === 0 && inlineRules.length === 0)
-    return "";
+    return { block: "", sections: [] };
   const sections = [
     ...sets.map((set2) => {
       const rules = set2.rules.map((rule) => `- [${rule.level}] ${rule.text}`).join(`
 `);
-      return `### ${set2.id}
-${rules}`;
+      return { setId: set2.id, block: `### ${set2.id}
+${rules}` };
     }),
     ...inlineRules.length > 0 ? [
-      `### specialist-inline-rules
+      {
+        setId: "specialist-inline-rules",
+        block: `### specialist-inline-rules
 ${inlineRules.map((rule, index) => `- [${rule.level}] ${rule.text}${rule.id ? ` (id: ${rule.id})` : ` (id: inline-${index + 1})`}`).join(`
 `)}`
+      }
     ] : []
   ];
-  return `## MANDATORY_RULES
-${sections.join(`
+  return { block: `## MANDATORY_RULES
+${sections.map((section) => section.block).join(`
 
-`)}`;
+`)}`, sections };
 }
 function collectMandatoryRuleSets(cwd, setIds) {
   const seen = new Set;
@@ -21633,9 +21655,10 @@ function buildMandatoryRulesInjection(specialistConfig) {
     id: "workflow-quick-rules",
     rules: [{ id: "workflow-quick-rules-1", level: "required", text: STATIC_WORKFLOW_RULES_BLOCK.trim().replace(/^##\s+Beads Workflow Quick Rules\n/, "") }]
   }];
-  const block = formatMandatoryRulesBlock([...globals, ...sets], inlineRules);
+  const formatted = formatMandatoryRulesBlock([...globals, ...sets], inlineRules);
   return {
-    block,
+    block: formatted.block,
+    sections: formatted.sections,
     setsLoaded: [...globals.map((set2) => set2.id), ...sets.map((set2) => set2.id)],
     ruleCount: [...globals, ...sets].reduce((count, set2) => count + set2.rules.length, 0) + inlineRules.length,
     inlineRulesCount: inlineRules.length,
@@ -22565,9 +22588,8 @@ ${summaries.join(`
       skillPaths.push(prompt.skill_inherit);
     skillPaths.push(...spec.specialist.skills?.paths ?? []);
     if (mandatoryRulesInjection) {
-      for (const setId of mandatoryRulesInjection.setsLoaded) {
-        payloadComponents.push(measurePayloadComponent("mandatory_rule", setId, `${setId}
-${mandatoryRulesBlock}`));
+      for (const section of mandatoryRulesInjection.sections) {
+        payloadComponents.push(measurePayloadComponent("mandatory_rule", section.setId, section.block));
       }
     }
     for (const skillPath of skillPaths) {
@@ -31105,7 +31127,7 @@ function resolveWorkingDirectory(args, jobsDir, permissionRequired, readStatus) 
   if (args.reuseJobId !== undefined) {
     const targetStatus = readStatus(args.reuseJobId);
     if (!targetStatus) {
-      console.error(`Error: cannot read status for job '${args.reuseJobId}'. ` + `Check the job id with: specialists poll ${args.reuseJobId} --json`);
+      console.error(`Error: cannot read status for job '${args.reuseJobId}'. ` + `Check the job id with: specialists ps ${args.reuseJobId} --json`);
       process.exit(1);
     }
     const targetJobStatus = targetStatus.status;
@@ -31553,7 +31575,9 @@ ${bold11(`Running ${cyan6(args.name)}`)}
 ${green9("\u2713")} ${footer}
 
 `);
-  process.stderr.write(dim9(`Poll: specialists poll ${jobId} --json
+  process.stderr.write(dim9(`Status: specialists ps ${jobId} --json
+`));
+  process.stderr.write(dim9(`Events: specialists feed ${jobId}
 
 `));
   process.exit(0);
@@ -37382,9 +37406,6 @@ function readJobEvents(jobDir) {
   events.sort(compareTimelineEvents);
   return events;
 }
-function readJobEventsById(jobsDir, jobId) {
-  return readJobEvents(join26(jobsDir, jobId));
-}
 function readAllJobEvents(jobsDir) {
   const sqliteClient = createObservabilitySqliteClient();
   try {
@@ -38189,130 +38210,13 @@ var init_feed = __esm(() => {
   init_format_helpers();
 });
 
-// src/cli/poll.ts
-var exports_poll = {};
-__export(exports_poll, {
-  run: () => run19
-});
-import { existsSync as existsSync26, readFileSync as readFileSync26 } from "fs";
-import { join as join28 } from "path";
-function parseArgs11(argv) {
-  let jobId;
-  let cursor = 0;
-  let outputCursor = 0;
-  for (let i = 0;i < argv.length; i++) {
-    if (argv[i] === "--cursor" && argv[i + 1]) {
-      cursor = parseInt(argv[++i], 10);
-      if (isNaN(cursor) || cursor < 0)
-        cursor = 0;
-      continue;
-    }
-    if (argv[i] === "--output-cursor" && argv[i + 1]) {
-      outputCursor = parseInt(argv[++i], 10);
-      if (isNaN(outputCursor) || outputCursor < 0)
-        outputCursor = 0;
-      continue;
-    }
-    if (argv[i] === "--json") {
-      continue;
-    }
-    if (argv[i] === "--follow" || argv[i] === "-f") {
-      process.stderr.write(`--follow removed from poll. Use 'specialists feed --follow' for live human-readable output.
-`);
-      process.exit(1);
-    }
-    if (!argv[i].startsWith("-")) {
-      jobId = argv[i];
-    }
-  }
-  if (!jobId) {
-    console.error("Usage: specialists poll <job-id> [--cursor N] [--output-cursor N]");
-    process.exit(1);
-  }
-  return { jobId, cursor, outputCursor };
-}
-function readJobState(jobsDir, jobId, cursor, outputCursor) {
-  const jobDir = join28(jobsDir, jobId);
-  const statusPath = join28(jobDir, "status.json");
-  let status = null;
-  if (existsSync26(statusPath)) {
-    try {
-      status = JSON.parse(readFileSync26(statusPath, "utf-8"));
-    } catch {}
-  }
-  const resultPath = join28(jobDir, "result.txt");
-  let fullOutput = "";
-  if (existsSync26(resultPath)) {
-    try {
-      fullOutput = readFileSync26(resultPath, "utf-8");
-    } catch {}
-  }
-  const events = readJobEventsById(jobsDir, jobId);
-  const newEvents = events.slice(cursor);
-  const nextCursor = events.length;
-  const startedAt = status?.started_at_ms ?? Date.now();
-  const lastEvent = status?.last_event_at_ms ?? Date.now();
-  const elapsedMs = status?.status === "done" || status?.status === "error" ? lastEvent - startedAt : Date.now() - startedAt;
-  const isDone = status?.status === "done";
-  const output2 = isDone ? fullOutput : "";
-  const outputDelta = fullOutput.length > outputCursor ? fullOutput.slice(outputCursor) : "";
-  const nextOutputCursor = fullOutput.length;
-  return {
-    job_id: jobId,
-    status: status?.status ?? "starting",
-    elapsed_ms: elapsedMs,
-    cursor: nextCursor,
-    output_cursor: nextOutputCursor,
-    output: output2,
-    output_delta: outputDelta,
-    events: newEvents,
-    current_event: status?.current_event,
-    current_tool: status?.current_tool,
-    model: status?.model,
-    backend: status?.backend,
-    bead_id: status?.bead_id,
-    error: status?.error
-  };
-}
-async function run19() {
-  process.stderr.write(`[DEPRECATED] 'specialists poll' is scheduled for removal. Use 'sp ps <id> --json' for status and 'sp feed <id>' for events.
-`);
-  const { jobId, cursor, outputCursor } = parseArgs11(process.argv.slice(3));
-  const jobsDir = join28(process.cwd(), ".specialists", "jobs");
-  const jobDir = join28(jobsDir, jobId);
-  if (!existsSync26(jobDir)) {
-    const result2 = {
-      job_id: jobId,
-      status: "error",
-      elapsed_ms: 0,
-      cursor: 0,
-      output_cursor: 0,
-      output: "",
-      output_delta: "",
-      events: [],
-      error: `Job not found: ${jobId}`
-    };
-    console.log(JSON.stringify(result2));
-    process.exit(1);
-  }
-  const result = readJobState(jobsDir, jobId, cursor, outputCursor);
-  if (result.status !== "done" && result.status !== "error" && !result.output_delta) {
-    process.stderr.write(`Tip: use 'specialists feed --follow' for live human-readable output.
-`);
-  }
-  console.log(JSON.stringify(result));
-}
-var init_poll = __esm(() => {
-  init_timeline_query();
-});
-
 // src/cli/steer.ts
 var exports_steer = {};
 __export(exports_steer, {
-  run: () => run20
+  run: () => run19
 });
 import { writeFileSync as writeFileSync10 } from "fs";
-async function run20() {
+async function run19() {
   const jobId = process.argv[3];
   const message = process.argv[4];
   if (!jobId || !message) {
@@ -38363,10 +38267,10 @@ var init_steer = __esm(() => {
 // src/cli/resume.ts
 var exports_resume = {};
 __export(exports_resume, {
-  run: () => run21
+  run: () => run20
 });
 import { writeFileSync as writeFileSync11 } from "fs";
-async function run21() {
+async function run20() {
   const jobId = process.argv[3];
   const task = process.argv[4];
   if (!jobId || !task) {
@@ -38419,24 +38323,24 @@ var init_resume = __esm(() => {
 // src/cli/follow-up.ts
 var exports_follow_up = {};
 __export(exports_follow_up, {
-  run: () => run22
+  run: () => run21
 });
-async function run22() {
+async function run21() {
   process.stderr.write("\x1B[33m\u26A0 DEPRECATED:\x1B[0m `specialists follow-up` is deprecated. Use `specialists resume` instead.\n\n");
   const { run: resumeRun } = await Promise.resolve().then(() => (init_resume(), exports_resume));
   return resumeRun();
 }
 
 // src/specialist/worktree-gc.ts
-import { existsSync as existsSync27, readdirSync as readdirSync11, readFileSync as readFileSync27 } from "fs";
-import { join as join29 } from "path";
+import { existsSync as existsSync26, readdirSync as readdirSync11, readFileSync as readFileSync26 } from "fs";
+import { join as join28 } from "path";
 import { spawnSync as spawnSync19 } from "child_process";
 function readJobStatus2(jobDir) {
-  const statusPath = join29(jobDir, "status.json");
-  if (!existsSync27(statusPath))
+  const statusPath = join28(jobDir, "status.json");
+  if (!existsSync26(statusPath))
     return null;
   try {
-    return JSON.parse(readFileSync27(statusPath, "utf-8"));
+    return JSON.parse(readFileSync26(statusPath, "utf-8"));
   } catch {
     return null;
   }
@@ -38458,7 +38362,7 @@ function collectWorktreeGcCandidates(jobsDir) {
       const worktreePath = status.worktree_path;
       if (!worktreePath)
         return null;
-      if (!existsSync27(worktreePath))
+      if (!existsSync26(worktreePath))
         return null;
       return {
         jobId: status.id,
@@ -38470,13 +38374,13 @@ function collectWorktreeGcCandidates(jobsDir) {
   }
   if (!getFileFallbackEnabled())
     return [];
-  if (!existsSync27(jobsDir))
+  if (!existsSync26(jobsDir))
     return [];
   const candidates = [];
   for (const entry of readdirSync11(jobsDir, { withFileTypes: true })) {
     if (!entry.isDirectory())
       continue;
-    const status = readJobStatus2(join29(jobsDir, entry.name));
+    const status = readJobStatus2(join28(jobsDir, entry.name));
     if (!status)
       continue;
     if (isActive(status.status))
@@ -38486,7 +38390,7 @@ function collectWorktreeGcCandidates(jobsDir) {
     const { worktree_path: worktreePath, branch } = status;
     if (!worktreePath)
       continue;
-    if (!existsSync27(worktreePath))
+    if (!existsSync26(worktreePath))
       continue;
     candidates.push({
       jobId: status.id,
@@ -38530,10 +38434,10 @@ var init_worktree_gc = __esm(() => {
 // src/cli/clean.ts
 var exports_clean = {};
 __export(exports_clean, {
-  run: () => run23
+  run: () => run22
 });
-import { existsSync as existsSync28, readFileSync as readFileSync28, readdirSync as readdirSync12, rmSync as rmSync3, statSync as statSync4 } from "fs";
-import { join as join30 } from "path";
+import { existsSync as existsSync27, readFileSync as readFileSync27, readdirSync as readdirSync12, rmSync as rmSync3, statSync as statSync4 } from "fs";
+import { join as join29 } from "path";
 function parseTtlDaysFromEnvironment() {
   const rawValue = process.env.SPECIALISTS_JOB_TTL_DAYS ?? process.env.JOB_TTL_DAYS;
   if (!rawValue)
@@ -38616,7 +38520,7 @@ function parseOptions2(argv) {
 function readDirectorySizeBytes(directoryPath) {
   let totalBytes = 0;
   for (const entry of readdirSync12(directoryPath, { withFileTypes: true })) {
-    const entryPath = join30(directoryPath, entry.name);
+    const entryPath = join29(directoryPath, entry.name);
     const stats = statSync4(entryPath);
     totalBytes += stats.isDirectory() ? readDirectorySizeBytes(entryPath) : stats.size;
   }
@@ -38624,7 +38528,7 @@ function readDirectorySizeBytes(directoryPath) {
 }
 function containsProtectedSqliteArtifact(directoryPath) {
   for (const entry of readdirSync12(directoryPath, { withFileTypes: true })) {
-    const entryPath = join30(directoryPath, entry.name);
+    const entryPath = join29(directoryPath, entry.name);
     if (entry.isDirectory()) {
       if (containsProtectedSqliteArtifact(entryPath))
         return true;
@@ -38645,15 +38549,15 @@ function getJobTimestamps(status) {
 function readCompletedJobDirectory(baseDirectory, entry) {
   if (!entry.isDirectory())
     return null;
-  const directoryPath = join30(baseDirectory, entry.name);
+  const directoryPath = join29(baseDirectory, entry.name);
   if (containsProtectedSqliteArtifact(directoryPath))
     return null;
-  const statusFilePath = join30(directoryPath, "status.json");
-  if (!existsSync28(statusFilePath))
+  const statusFilePath = join29(directoryPath, "status.json");
+  if (!existsSync27(statusFilePath))
     return null;
   let statusData;
   try {
-    statusData = JSON.parse(readFileSync28(statusFilePath, "utf-8"));
+    statusData = JSON.parse(readFileSync27(statusFilePath, "utf-8"));
   } catch {
     return null;
   }
@@ -38667,8 +38571,8 @@ function collectCompletedJobs(jobsDirectoryPath) {
   const statuses = sqliteClient?.listStatuses() ?? [];
   if (statuses.length > 0) {
     return statuses.filter((status) => COMPLETED_STATUSES.has(status.status)).map((status) => {
-      const directoryPath = join30(jobsDirectoryPath, status.id);
-      if (!existsSync28(directoryPath) || containsProtectedSqliteArtifact(directoryPath))
+      const directoryPath = join29(jobsDirectoryPath, status.id);
+      if (!existsSync27(directoryPath) || containsProtectedSqliteArtifact(directoryPath))
         return null;
       const { createdAtMs, completedAtMs } = getJobTimestamps(status);
       return { id: status.id, directoryPath, completedAtMs, createdAtMs, sizeBytes: readDirectorySizeBytes(directoryPath) };
@@ -38808,7 +38712,7 @@ function removeStaleProcesses(statuses, dryRun) {
   }
   return updatedCount;
 }
-async function run23() {
+async function run22() {
   let options;
   try {
     options = parseOptions2(process.argv.slice(3));
@@ -38817,7 +38721,7 @@ async function run23() {
     printUsageAndExit2(message);
   }
   const jobsDirectoryPath = resolveJobsDir();
-  if (!existsSync28(jobsDirectoryPath)) {
+  if (!existsSync27(jobsDirectoryPath)) {
     console.log("No jobs directory found.");
     return;
   }
@@ -38871,7 +38775,7 @@ var init_clean = __esm(() => {
 // src/cli/end.ts
 var exports_end = {};
 __export(exports_end, {
-  run: () => run24
+  run: () => run23
 });
 import { spawnSync as spawnSync20 } from "child_process";
 function parseOptions3(argv) {
@@ -38955,7 +38859,7 @@ async function publishChain(beadId, options) {
     console.log("Publication mode: direct merge");
   }
 }
-async function run24() {
+async function run23() {
   let options;
   try {
     options = parseOptions3(process.argv.slice(3));
@@ -38996,7 +38900,7 @@ var init_end = __esm(() => {
 // src/cli/stop.ts
 var exports_stop = {};
 __export(exports_stop, {
-  run: () => run25
+  run: () => run24
 });
 function resolveTerminalStatus(jobId) {
   return hasRunCompleteEvent(jobId) ? "done" : "cancelled";
@@ -39039,7 +38943,7 @@ function tryKillProcessGroup(pid) {
       throw err;
   }
 }
-async function run25() {
+async function run24() {
   let parsed;
   try {
     parsed = parseStopArgs(process.argv.slice(3));
@@ -39153,18 +39057,18 @@ var init_stop = __esm(() => {
 // src/cli/attach.ts
 var exports_attach = {};
 __export(exports_attach, {
-  run: () => run26
+  run: () => run25
 });
 import { execFileSync as execFileSync3, spawnSync as spawnSync21 } from "child_process";
-import { readFileSync as readFileSync29 } from "fs";
-import { join as join31 } from "path";
+import { readFileSync as readFileSync28 } from "fs";
+import { join as join30 } from "path";
 function exitWithError(message) {
   console.error(message);
   process.exit(1);
 }
 function readStatus(statusPath, jobId) {
   try {
-    return JSON.parse(readFileSync29(statusPath, "utf-8"));
+    return JSON.parse(readFileSync28(statusPath, "utf-8"));
   } catch (error2) {
     if (error2 && typeof error2 === "object" && "code" in error2 && error2.code === "ENOENT") {
       exitWithError(`Job \`${jobId}\` not found. Run \`specialists status\` to see active jobs in current mode.`);
@@ -39173,13 +39077,13 @@ function readStatus(statusPath, jobId) {
     exitWithError(`Failed to read status for job \`${jobId}\`: ${details}`);
   }
 }
-async function run26() {
+async function run25() {
   const [jobId] = process.argv.slice(3);
   if (!jobId) {
     exitWithError("Usage: specialists attach <job-id>  (normal runtime is DB-backed; job files are legacy/operator-only)");
   }
-  const jobsDir = join31(process.cwd(), ".specialists", "jobs");
-  const statusPath = join31(jobsDir, jobId, "status.json");
+  const jobsDir = join30(process.cwd(), ".specialists", "jobs");
+  const statusPath = join30(jobsDir, jobId, "status.json");
   const status = readStatus(statusPath, jobId);
   if (status.status === "done" || status.status === "error") {
     exitWithError(`Job \`${jobId}\` has already completed (status: ${status.status}). Use \`specialists result ${jobId}\` to read output.`);
@@ -39201,15 +39105,15 @@ async function run26() {
 var init_attach = () => {};
 
 // src/specialist/drift-detector.ts
-import { existsSync as existsSync29, readFileSync as readFileSync30, readdirSync as readdirSync13, rmSync as rmSync4 } from "fs";
-import { join as join32, resolve as resolve10, relative as relative2 } from "path";
+import { existsSync as existsSync28, readFileSync as readFileSync29, readdirSync as readdirSync13, rmSync as rmSync4 } from "fs";
+import { join as join31, resolve as resolve10, relative as relative2 } from "path";
 function listFiles(root) {
-  if (!existsSync29(root))
+  if (!existsSync28(root))
     return [];
   const out = [];
   const visit2 = (dir) => {
     for (const entry of readdirSync13(dir, { withFileTypes: true })) {
-      const full = join32(dir, entry.name);
+      const full = join31(dir, entry.name);
       if (entry.isDirectory()) {
         visit2(full);
         continue;
@@ -39244,14 +39148,14 @@ function detectDriftForRepo(repoRoot) {
       { scope: "user", dir: resolve10(repoRoot, ".specialists/user") }
     ];
     for (const { scope, dir } of scopes) {
-      if (!existsSync29(dir))
+      if (!existsSync28(dir))
         continue;
       for (const file of listFiles(dir)) {
         const rel = relPath(file, dir);
-        const canonicalPath = join32(asset.canonicalDir, rel);
-        if (!existsSync29(canonicalPath))
+        const canonicalPath = join31(asset.canonicalDir, rel);
+        if (!existsSync28(canonicalPath))
           continue;
-        const bytesEqual = readFileSync30(file).equals(readFileSync30(canonicalPath));
+        const bytesEqual = readFileSync29(file).equals(readFileSync29(canonicalPath));
         findings.push(makeFinding(repoRoot, asset.kind, scope, file, canonicalPath, bytesEqual));
       }
     }
@@ -39275,7 +39179,7 @@ function detectDriftUnderRoot(root) {
         continue;
       if (entry.name === "node_modules" || entry.name === ".git")
         continue;
-      visit2(join32(dir, entry.name));
+      visit2(join31(dir, entry.name));
     }
   };
   visit2(resolve10(root));
@@ -39315,10 +39219,10 @@ var init_drift_detector = __esm(() => {
 // src/cli/prune-stale-defaults.ts
 var exports_prune_stale_defaults = {};
 __export(exports_prune_stale_defaults, {
-  run: () => run27
+  run: () => run26
 });
 import { resolve as resolve11 } from "path";
-function parseArgs12(argv) {
+function parseArgs11(argv) {
   let dryRun = false;
   let root = process.cwd();
   let help = false;
@@ -39349,8 +39253,8 @@ function printHelp() {
   console.log("  --dry-run  List stale default snapshots without pruning");
   console.log("  --root     Repo root to scan");
 }
-async function run27(argv = process.argv.slice(3)) {
-  const { dryRun, root, help } = parseArgs12(argv);
+async function run26(argv = process.argv.slice(3)) {
+  const { dryRun, root, help } = parseArgs11(argv);
   if (help) {
     printHelp();
     return;
@@ -39376,7 +39280,7 @@ var init_prune_stale_defaults = __esm(() => {
 // src/cli/quickstart.ts
 var exports_quickstart = {};
 __export(exports_quickstart, {
-  run: () => run28
+  run: () => run27
 });
 function section2(title) {
   const bar = "\u2500".repeat(60);
@@ -39390,7 +39294,7 @@ function cmd2(s) {
 function flag(s) {
   return green13(s);
 }
-async function run28() {
+async function run27() {
   const lines = [
     "",
     bold12("specialists  \xB7  Quick Start Guide"),
@@ -39605,7 +39509,7 @@ var bold12 = (s) => `\x1B[1m${s}\x1B[0m`, dim12 = (s) => `\x1B[2m${s}\x1B[0m`, y
 var exports_doctor = {};
 __export(exports_doctor, {
   setStatusError: () => setStatusError,
-  run: () => run29,
+  run: () => run28,
   renderProcessSummary: () => renderProcessSummary,
   parseVersionTuple: () => parseVersionTuple,
   compareVersions: () => compareVersions2,
@@ -39613,8 +39517,8 @@ __export(exports_doctor, {
 });
 import { createHash as createHash5 } from "crypto";
 import { spawnSync as spawnSync22 } from "child_process";
-import { existsSync as existsSync30, lstatSync as lstatSync2, mkdirSync as mkdirSync10, readdirSync as readdirSync14, readFileSync as readFileSync31, readlinkSync as readlinkSync2, writeFileSync as writeFileSync12 } from "fs";
-import { dirname as dirname9, join as join33, relative as relative3, resolve as resolve12 } from "path";
+import { existsSync as existsSync29, lstatSync as lstatSync2, mkdirSync as mkdirSync10, readdirSync as readdirSync14, readFileSync as readFileSync30, readlinkSync as readlinkSync2, writeFileSync as writeFileSync12 } from "fs";
+import { dirname as dirname9, join as join32, relative as relative3, resolve as resolve12 } from "path";
 function ok3(msg) {
   console.log(`  ${green14("\u2713")} ${msg}`);
 }
@@ -39643,10 +39547,10 @@ function isInstalled3(bin) {
   return spawnSync22("which", [bin], { encoding: "utf8", timeout: 2000 }).status === 0;
 }
 function loadJson2(path) {
-  if (!existsSync30(path))
+  if (!existsSync29(path))
     return null;
   try {
-    return JSON.parse(readFileSync31(path, "utf8"));
+    return JSON.parse(readFileSync30(path, "utf8"));
   } catch {
     return null;
   }
@@ -39689,7 +39593,7 @@ function checkBd() {
     return false;
   }
   ok3(`bd installed  ${dim13(sp("bd", ["--version"]).stdout || "")}`);
-  if (existsSync30(join33(CWD, ".beads")))
+  if (existsSync29(join32(CWD, ".beads")))
     ok3(".beads/ present in project");
   else
     warn3(".beads/ not found in project");
@@ -39709,15 +39613,15 @@ function checkHooks() {
   section3("Claude Code hooks  (2 expected)");
   let allPresent = true;
   for (const name of HOOK_NAMES) {
-    const canonicalPath = join33(HOOKS_DIR, name);
-    if (!existsSync30(canonicalPath)) {
+    const canonicalPath = join32(HOOKS_DIR, name);
+    if (!existsSync29(canonicalPath)) {
       fail4(`${relative3(CWD, canonicalPath)}  ${red7("missing")}`);
       fix("specialists init");
       allPresent = false;
     } else {
       ok3(relative3(CWD, canonicalPath));
     }
-    const claudeHookPath = join33(CLAUDE_HOOKS_DIR, name);
+    const claudeHookPath = join32(CLAUDE_HOOKS_DIR, name);
     const symlinkState = isSymlinkTo(claudeHookPath, canonicalPath);
     if (symlinkState.ok) {
       ok3(`${relative3(CWD, claudeHookPath)} -> ${relative3(dirname9(claudeHookPath), canonicalPath)}`);
@@ -39792,14 +39696,14 @@ function checkVersion() {
 }
 function hashFile(path) {
   const hash = createHash5("sha256");
-  hash.update(readFileSync31(path));
+  hash.update(readFileSync30(path));
   return hash.digest("hex");
 }
 function collectFileHashes(rootDir) {
   const hashes = new Map;
   const visit2 = (dir) => {
     for (const entry of readdirSync14(dir, { withFileTypes: true })) {
-      const fullPath = join33(dir, entry.name);
+      const fullPath = join32(dir, entry.name);
       if (entry.isDirectory()) {
         visit2(fullPath);
         continue;
@@ -39810,12 +39714,12 @@ function collectFileHashes(rootDir) {
       hashes.set(relPath2, hashFile(fullPath));
     }
   };
-  if (existsSync30(rootDir))
+  if (existsSync29(rootDir))
     visit2(rootDir);
   return hashes;
 }
 function isSymlinkTo(linkPath, expectedTargetPath) {
-  if (!existsSync30(linkPath))
+  if (!existsSync29(linkPath))
     return { ok: false, reason: "missing" };
   let stats;
   try {
@@ -39839,12 +39743,12 @@ function isSymlinkTo(linkPath, expectedTargetPath) {
 }
 function checkSkillDrift() {
   section3("Skill drift  (.xtrm skill sync)");
-  if (!existsSync30(CONFIG_SKILLS_DIR)) {
+  if (!existsSync29(CONFIG_SKILLS_DIR)) {
     fail4("config/skills/ missing");
     fix("restore config/skills/ from git");
     return false;
   }
-  if (!existsSync30(XTRM_DEFAULT_SKILLS_DIR)) {
+  if (!existsSync29(XTRM_DEFAULT_SKILLS_DIR)) {
     fail4(".xtrm/skills/default/ missing");
     fix("specialists init --sync-skills");
     return false;
@@ -39886,8 +39790,8 @@ function checkSkillDrift() {
   }
   let linksOk = true;
   for (const scope of ["claude", "pi"]) {
-    const activeRoot = join33(XTRM_ACTIVE_SKILLS_DIR, scope);
-    if (!existsSync30(activeRoot)) {
+    const activeRoot = join32(XTRM_ACTIVE_SKILLS_DIR, scope);
+    if (!existsSync29(activeRoot)) {
       fail4(`${relative3(CWD, activeRoot)}/ missing`);
       fix("specialists init --sync-skills");
       linksOk = false;
@@ -39895,8 +39799,8 @@ function checkSkillDrift() {
     }
     const defaultSkills = readdirSync14(XTRM_DEFAULT_SKILLS_DIR, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
     for (const skillName of defaultSkills) {
-      const activeLinkPath = join33(activeRoot, skillName);
-      const expectedTarget = join33(XTRM_DEFAULT_SKILLS_DIR, skillName);
+      const activeLinkPath = join32(activeRoot, skillName);
+      const expectedTarget = join32(XTRM_DEFAULT_SKILLS_DIR, skillName);
       const state = isSymlinkTo(activeLinkPath, expectedTarget);
       if (state.ok)
         continue;
@@ -39915,8 +39819,8 @@ function checkSkillDrift() {
     }
   }
   const skillRootChecks = [
-    { root: join33(CLAUDE_DIR, "skills"), expected: ACTIVE_CLAUDE_SKILLS_DIR },
-    { root: join33(PI_DIR, "skills"), expected: ACTIVE_PI_SKILLS_DIR }
+    { root: join32(CLAUDE_DIR, "skills"), expected: ACTIVE_CLAUDE_SKILLS_DIR },
+    { root: join32(PI_DIR, "skills"), expected: ACTIVE_PI_SKILLS_DIR }
   ];
   let rootLinksOk = true;
   for (const check2 of skillRootChecks) {
@@ -39941,12 +39845,12 @@ function checkSkillDrift() {
   return drifted.length === 0 && missingInDefault.length === 0 && linksOk && rootLinksOk;
 }
 function checkManagedMirror(label, sourceDir, mirrorDir, fixHint) {
-  if (!existsSync30(sourceDir)) {
+  if (!existsSync29(sourceDir)) {
     warn3(`${label} source missing: ${relative3(CWD, sourceDir)}`);
     fix(fixHint);
     return false;
   }
-  if (!existsSync30(mirrorDir)) {
+  if (!existsSync29(mirrorDir)) {
     fail4(`${label} mirror missing: ${relative3(CWD, mirrorDir)}`);
     fix(fixHint);
     return false;
@@ -39978,13 +39882,13 @@ function checkManagedMirror(label, sourceDir, mirrorDir, fixHint) {
 function checkManagedAssetMirrors() {
   section3("Managed mirrors  (specialists / mandatory-rules / nodes)");
   const specialistsOk = checkManagedMirror("specialists", CONFIG_SPECIALISTS_DIR, DEFAULT_SPECIALISTS_DIR, "specialists init --sync-defaults");
-  const rulesOk = checkManagedMirror("mandatory-rules", CONFIG_MANDATORY_RULES_DIR, join33(DEFAULT_SPECIALISTS_DIR, "mandatory-rules"), "specialists init --sync-defaults");
-  const nodesOk = checkManagedMirror("nodes", CONFIG_NODES_DIR, join33(DEFAULT_SPECIALISTS_DIR, "nodes"), "specialists init --sync-defaults");
+  const rulesOk = checkManagedMirror("mandatory-rules", CONFIG_MANDATORY_RULES_DIR, join32(DEFAULT_SPECIALISTS_DIR, "mandatory-rules"), "specialists init --sync-defaults");
+  const nodesOk = checkManagedMirror("nodes", CONFIG_NODES_DIR, join32(DEFAULT_SPECIALISTS_DIR, "nodes"), "specialists init --sync-defaults");
   return specialistsOk && rulesOk && nodesOk;
 }
 function checkUserOverlayDrift() {
   section3("User specialist overlays");
-  if (!existsSync30(USER_SPECIALISTS_DIR)) {
+  if (!existsSync29(USER_SPECIALISTS_DIR)) {
     ok3("no user overlays present");
     return true;
   }
@@ -39995,14 +39899,14 @@ function checkUserOverlayDrift() {
   }
   let allOk = true;
   for (const name of overlays) {
-    const userPath = join33(USER_SPECIALISTS_DIR, name);
-    const defaultPath = join33(DEFAULT_SPECIALISTS_DIR, name);
+    const userPath = join32(USER_SPECIALISTS_DIR, name);
+    const defaultPath = join32(DEFAULT_SPECIALISTS_DIR, name);
     const userSpec = loadJson2(userPath);
     if (!userSpec) {
       warn3(`${name}: failed to parse \u2014 skipping drift check`);
       continue;
     }
-    if (!existsSync30(defaultPath)) {
+    if (!existsSync29(defaultPath)) {
       ok3(`${name}: user-only overlay (no default to drift from)`);
       continue;
     }
@@ -40030,18 +39934,18 @@ function checkUserOverlayDrift() {
 }
 function checkRuntimeDirs() {
   section3(".specialists/ runtime directories");
-  const rootDir = join33(CWD, ".specialists");
-  const jobsDir = join33(rootDir, "jobs");
-  const readyDir = join33(rootDir, "ready");
+  const rootDir = join32(CWD, ".specialists");
+  const jobsDir = join32(rootDir, "jobs");
+  const readyDir = join32(rootDir, "ready");
   let allOk = true;
-  if (!existsSync30(rootDir)) {
+  if (!existsSync29(rootDir)) {
     warn3(".specialists/ not found in current project");
     fix("specialists init");
     allOk = false;
   } else {
     ok3(".specialists/ present");
     for (const [subDir, label] of [[jobsDir, "jobs"], [readyDir, "ready"]]) {
-      if (!existsSync30(subDir)) {
+      if (!existsSync29(subDir)) {
         warn3(`.specialists/${label}/ missing \u2014 auto-creating`);
         mkdirSync10(subDir, { recursive: true });
         ok3(`.specialists/${label}/ created`);
@@ -40055,8 +39959,8 @@ function checkRuntimeDirs() {
 function checkClaudeMdFragments() {
   section3("CLAUDE.md fragments");
   const projectRoot = process.cwd();
-  const claudeMd = join33(projectRoot, "CLAUDE.md");
-  if (!existsSync30(claudeMd)) {
+  const claudeMd = join32(projectRoot, "CLAUDE.md");
+  if (!existsSync29(claudeMd)) {
     warn3("No CLAUDE.md in project root \u2014 skipping fragment check");
     return true;
   }
@@ -40182,7 +40086,7 @@ function compareVersions2(left, right) {
 }
 function setStatusError(statusPath) {
   try {
-    const raw = readFileSync31(statusPath, "utf8");
+    const raw = readFileSync30(statusPath, "utf8");
     const status = JSON.parse(raw);
     status.status = "error";
     writeFileSync12(statusPath, `${JSON.stringify(status, null, 2)}
@@ -40236,11 +40140,11 @@ function cleanupProcesses(jobsDir, dryRun) {
     zombieJobIds: []
   };
   for (const jobId of entries) {
-    const statusPath = join33(jobsDir, jobId, "status.json");
-    if (!existsSync30(statusPath))
+    const statusPath = join32(jobsDir, jobId, "status.json");
+    if (!existsSync29(statusPath))
       continue;
     try {
-      const status = JSON.parse(readFileSync31(statusPath, "utf8"));
+      const status = JSON.parse(readFileSync30(statusPath, "utf8"));
       result.total += 1;
       if (status.status !== "running" && status.status !== "starting")
         continue;
@@ -40325,8 +40229,8 @@ function resolveWatchdogMode() {
 function checkZombieJobs() {
   section3("Background jobs");
   hint(`watchdog mode: ${resolveWatchdogMode()}`);
-  const jobsDir = join33(CWD, ".specialists", "jobs");
-  if (!existsSync30(jobsDir)) {
+  const jobsDir = join32(CWD, ".specialists", "jobs");
+  if (!existsSync29(jobsDir)) {
     hint("No .specialists/jobs/ \u2014 skipping");
     return true;
   }
@@ -40344,7 +40248,7 @@ function checkZombieJobs() {
   }
   return result.zombies === 0;
 }
-async function run29(argv = process.argv.slice(3)) {
+async function run28(argv = process.argv.slice(3)) {
   const subcommand = argv[0];
   if (subcommand === "orphans") {
     runDoctorOrphans();
@@ -40391,24 +40295,24 @@ var init_doctor = __esm(() => {
   init_drift_detector();
   init_version_check();
   CWD = process.cwd();
-  CLAUDE_DIR = join33(CWD, ".claude");
-  PI_DIR = join33(CWD, ".pi");
-  XTRM_SKILLS_DIR = join33(CWD, ".xtrm", "skills");
-  XTRM_DEFAULT_SKILLS_DIR = join33(XTRM_SKILLS_DIR, "default");
-  XTRM_ACTIVE_SKILLS_DIR = join33(XTRM_SKILLS_DIR, "active");
-  ACTIVE_CLAUDE_SKILLS_DIR = join33(XTRM_ACTIVE_SKILLS_DIR, "claude");
-  ACTIVE_PI_SKILLS_DIR = join33(XTRM_ACTIVE_SKILLS_DIR, "pi");
-  CONFIG_SKILLS_DIR = join33(CWD, "config", "skills");
-  CONFIG_SPECIALISTS_DIR = join33(CWD, "config", "specialists");
-  CONFIG_MANDATORY_RULES_DIR = join33(CWD, "config", "mandatory-rules");
-  CONFIG_NODES_DIR = join33(CWD, "config", "nodes");
-  SPECIALISTS_DIR = join33(CWD, ".specialists");
-  DEFAULT_SPECIALISTS_DIR = join33(SPECIALISTS_DIR, "default");
-  USER_SPECIALISTS_DIR = join33(SPECIALISTS_DIR, "user");
-  HOOKS_DIR = join33(CWD, ".xtrm", "hooks", "specialists");
-  CLAUDE_HOOKS_DIR = join33(CLAUDE_DIR, "hooks");
-  SETTINGS_FILE = join33(CLAUDE_DIR, "settings.json");
-  MCP_FILE2 = join33(CWD, ".mcp.json");
+  CLAUDE_DIR = join32(CWD, ".claude");
+  PI_DIR = join32(CWD, ".pi");
+  XTRM_SKILLS_DIR = join32(CWD, ".xtrm", "skills");
+  XTRM_DEFAULT_SKILLS_DIR = join32(XTRM_SKILLS_DIR, "default");
+  XTRM_ACTIVE_SKILLS_DIR = join32(XTRM_SKILLS_DIR, "active");
+  ACTIVE_CLAUDE_SKILLS_DIR = join32(XTRM_ACTIVE_SKILLS_DIR, "claude");
+  ACTIVE_PI_SKILLS_DIR = join32(XTRM_ACTIVE_SKILLS_DIR, "pi");
+  CONFIG_SKILLS_DIR = join32(CWD, "config", "skills");
+  CONFIG_SPECIALISTS_DIR = join32(CWD, "config", "specialists");
+  CONFIG_MANDATORY_RULES_DIR = join32(CWD, "config", "mandatory-rules");
+  CONFIG_NODES_DIR = join32(CWD, "config", "nodes");
+  SPECIALISTS_DIR = join32(CWD, ".specialists");
+  DEFAULT_SPECIALISTS_DIR = join32(SPECIALISTS_DIR, "default");
+  USER_SPECIALISTS_DIR = join32(SPECIALISTS_DIR, "user");
+  HOOKS_DIR = join32(CWD, ".xtrm", "hooks", "specialists");
+  CLAUDE_HOOKS_DIR = join32(CLAUDE_DIR, "hooks");
+  SETTINGS_FILE = join32(CLAUDE_DIR, "settings.json");
+  MCP_FILE2 = join32(CWD, ".mcp.json");
   HOOK_NAMES = [
     "specialists-complete.mjs",
     "specialists-session-start.mjs"
@@ -40418,9 +40322,9 @@ var init_doctor = __esm(() => {
 // src/cli/setup.ts
 var exports_setup = {};
 __export(exports_setup, {
-  run: () => run30
+  run: () => run29
 });
-async function run30() {
+async function run29() {
   console.log("");
   console.log(yellow13("\u26A0 DEPRECATED: `specialists setup` is deprecated"));
   console.log("");
@@ -40441,20 +40345,20 @@ async function run30() {
 var bold14 = (s) => `\x1B[1m${s}\x1B[0m`, yellow13 = (s) => `\x1B[33m${s}\x1B[0m`, dim14 = (s) => `\x1B[2m${s}\x1B[0m`;
 
 // src/cli/serve-hot-reload.ts
-import { existsSync as existsSync31, readdirSync as readdirSync15, statSync as statSync5, watch as fsWatch } from "fs";
-import { join as join34 } from "path";
+import { existsSync as existsSync30, readdirSync as readdirSync15, statSync as statSync5, watch as fsWatch } from "fs";
+import { join as join33 } from "path";
 function specialistNameFromFile(file) {
   const match = file.match(/^(.+)\.specialist\.(json|yaml)$/);
   return match ? match[1] : null;
 }
 function snapshotMtimes(dir) {
   const out = new Map;
-  if (!existsSync31(dir))
+  if (!existsSync30(dir))
     return out;
   const entries = readdirSync15(dir).filter((name) => specialistNameFromFile(name) !== null);
   for (const name of entries) {
     try {
-      out.set(name, statSync5(join34(dir, name)).mtimeMs);
+      out.set(name, statSync5(join33(dir, name)).mtimeMs);
     } catch {}
   }
   return out;
@@ -40511,7 +40415,7 @@ function createUserDirWatcher(opts) {
       for (const file of changed)
         queue(file);
     }, opts.pollMs);
-  } else if (existsSync31(opts.userDir)) {
+  } else if (existsSync30(opts.userDir)) {
     try {
       watcher = fsWatch(opts.userDir, { persistent: false }, (_eventType, filename) => {
         queue(filename ? String(filename) : null);
@@ -40543,7 +40447,7 @@ var init_serve_hot_reload = () => {};
 var exports_serve = {};
 __export(exports_serve, {
   startServe: () => startServe,
-  run: () => run31,
+  run: () => run30,
   recordAuditFailure: () => recordAuditFailure,
   evaluateReadiness: () => evaluateReadiness2,
   createReadinessState: () => createReadinessState
@@ -40551,9 +40455,9 @@ __export(exports_serve, {
 import { createServer } from "http";
 import { once } from "events";
 import { access, readdir as readdir2, readFile as readFile5, constants } from "fs/promises";
-import { existsSync as existsSync32 } from "fs";
+import { existsSync as existsSync31 } from "fs";
 import { homedir as homedir3 } from "os";
-import { join as join35 } from "path";
+import { join as join34 } from "path";
 function createReadinessState() {
   return { shuttingDown: false, auditFailures: [], dbWriteFailuresTotal: 0 };
 }
@@ -40569,7 +40473,7 @@ function pruneAuditFailures(state, now = Date.now()) {
   }
 }
 async function checkUserDirSpecs(userDir) {
-  if (!existsSync32(userDir))
+  if (!existsSync31(userDir))
     return "empty";
   const entries = await readdir2(userDir).catch(() => []);
   const specFiles = entries.filter((name) => name.endsWith(".specialist.json") || name.endsWith(".specialist.yaml"));
@@ -40578,7 +40482,7 @@ async function checkUserDirSpecs(userDir) {
   let validCount = 0;
   for (const file of specFiles) {
     try {
-      const content = await readFile5(join35(userDir, file), "utf-8");
+      const content = await readFile5(join34(userDir, file), "utf-8");
       const json = file.endsWith(".json") ? content : null;
       if (!json)
         continue;
@@ -40596,7 +40500,7 @@ async function evaluateReadiness2(opts) {
   if (opts.state.auditFailures.length > opts.auditFailureThreshold) {
     return { ready: false, reason: "degraded:audit" };
   }
-  const piConfigPath = opts.piConfigPath ?? join35(homedir3(), ".pi", "agent", "auth.json");
+  const piConfigPath = opts.piConfigPath ?? join34(homedir3(), ".pi", "agent", "auth.json");
   try {
     await access(piConfigPath, constants.R_OK);
   } catch {
@@ -40607,7 +40511,7 @@ async function evaluateReadiness2(opts) {
   } catch {
     return { ready: false, reason: "db_not_writable" };
   }
-  const userDir = join35(opts.projectDir, ".specialists", "user");
+  const userDir = join34(opts.projectDir, ".specialists", "user");
   const userDirResult = await checkUserDirSpecs(userDir);
   if (userDirResult === "empty")
     return { ready: false, reason: "empty_user_dir" };
@@ -40615,7 +40519,7 @@ async function evaluateReadiness2(opts) {
     return { ready: false, reason: "invalid_spec_in_user_dir" };
   return { ready: true };
 }
-function parseArgs13(argv) {
+function parseArgs12(argv) {
   let port = 8000;
   let concurrency = 4;
   let queueTimeoutMs = 5000;
@@ -40677,13 +40581,13 @@ async function waitForSlot(limit, timeoutMs, getActive) {
   return true;
 }
 async function startServe(argv = process.argv.slice(3)) {
-  const args = parseArgs13(argv);
+  const args = parseArgs12(argv);
   const loader = new SpecialistLoader({ projectDir: args.projectDir });
   const dbLocation = resolveObservabilityDbLocation(args.projectDir);
   ensureObservabilityDbFile(dbLocation);
   const db = createObservabilitySqliteClient(args.projectDir);
   const readinessState = createReadinessState();
-  const userDir = join35(args.projectDir, ".specialists", "user");
+  const userDir = join34(args.projectDir, ".specialists", "user");
   const hotReload = createUserDirWatcher({ loader, userDir, pollMs: args.reloadPollMs });
   let active = 0;
   const children = new Set;
@@ -40768,7 +40672,7 @@ async function startServe(argv = process.argv.slice(3)) {
   console.log(`sp serve listening on ${args.port}`);
   return { server, args, db, readinessState };
 }
-async function run31(argv = process.argv.slice(3)) {
+async function run30(argv = process.argv.slice(3)) {
   await startServe(argv);
 }
 var AUDIT_WINDOW_MS = 60000;
@@ -40785,8 +40689,8 @@ var init_serve = __esm(() => {
 var exports_script = {};
 __export(exports_script, {
   scriptCli: () => scriptCli,
-  run: () => run32,
-  parseArgs: () => parseArgs14,
+  run: () => run31,
+  parseArgs: () => parseArgs13,
   mapExitCode: () => mapExitCode
 });
 import { spawnSync as spawnSync23 } from "child_process";
@@ -40796,7 +40700,7 @@ function parseVar(entry) {
     throw new Error(`Invalid --vars entry: ${entry}`);
   return [entry.slice(0, index), entry.slice(index + 1)];
 }
-function parseArgs14(argv) {
+function parseArgs13(argv) {
   if (argv.length === 0)
     throw new Error("Missing specialist name");
   const specialist = argv[0];
@@ -40902,8 +40806,8 @@ function runUnderLock(lockPath, argv) {
     return 75;
   return flock.status ?? 1;
 }
-async function run32(argv = process.argv.slice(3)) {
-  const args = parseArgs14(argv);
+async function run31(argv = process.argv.slice(3)) {
+  const args = parseArgs13(argv);
   if (args.singleInstance && !process.env.SP_SCRIPT_NO_LOCK) {
     process.exit(runUnderLock(args.singleInstance, argv));
   }
@@ -40916,19 +40820,19 @@ var scriptCli;
 var init_script = __esm(() => {
   init_loader();
   init_script_runner();
-  scriptCli = { parseArgs: parseArgs14, mapExitCode };
+  scriptCli = { parseArgs: parseArgs13, mapExitCode };
 });
 
 // src/cli/help.ts
 var exports_help = {};
 __export(exports_help, {
-  run: () => run33
+  run: () => run32
 });
 function formatCommands(entries) {
   const width = Math.max(...entries.map(([cmd3]) => cmd3.length));
   return entries.map(([cmd3, desc]) => `  ${cmd3.padEnd(width)}   ${desc}`);
 }
-async function run33() {
+async function run32() {
   const lines = [
     "",
     "Specialists lets you run project-scoped specialist agents with a bead-first workflow.",
@@ -40964,7 +40868,7 @@ async function run33() {
     "  Async patterns",
     "    MCP:   use_specialist (foreground, returns result directly)",
     '    CLI:   specialists run <name> --prompt "..."       # job ID prints on stderr',
-    "           specialists feed|poll|result <job-id>         # observe/progress/final output",
+    "           specialists ps|feed|result <job-id>           # observe/progress/final output",
     '    Shell: specialists run <name> --prompt "..." &      # native shell backgrounding',
     "",
     "  Background workflow",
@@ -41014,7 +40918,6 @@ async function run33() {
     "  specialists view --help        View specialist configs",
     "  specialists edit --help        Edit specialist fields (dot-path, presets)",
     "  specialists run --help         Run command details and flags",
-    "  specialists poll --help        [DEPRECATED] use sp ps + sp feed",
     "  specialists steer --help       Mid-run steering details",
     "  specialists resume --help      Multi-turn keep-alive details",
     "  specialists init --help        Bootstrap behavior and workflow injection",
@@ -41042,7 +40945,6 @@ var init_help = __esm(() => {
     ["node", "Run and inspect NodeSupervisor nodes (run/status)"],
     ["epic", "Epic lifecycle management: list/status/resolve wave-bound chain groups"],
     ["feed", "Tail job events; use -f to follow all jobs"],
-    ["poll", "Machine-readable job status polling (for scripts/Claude Code)"],
     ["result", "Print final output of a completed job; --wait polls until done, --timeout <ms> sets a limit"],
     ["clean", "Purge completed job directories (TTL, --all, --keep, --dry-run)"],
     ["merge", "Publish one standalone chain (refuses unresolved epic chains)"],
@@ -44857,7 +44759,7 @@ var AssertObjectSchema = custom2((v) => v !== null && (typeof v === "object" || 
 var ProgressTokenSchema = union([string2(), number2().int()]);
 var CursorSchema = string2();
 var TaskCreationParamsSchema = looseObject({
-  ttl: union([number2(), _null3()]).optional(),
+  ttl: number2().optional(),
   pollInterval: number2().optional()
 });
 var TaskMetadataSchema = object2({
@@ -45011,7 +44913,8 @@ var ClientCapabilitiesSchema = object2({
   roots: object2({
     listChanged: boolean2().optional()
   }).optional(),
-  tasks: ClientTasksCapabilitySchema.optional()
+  tasks: ClientTasksCapabilitySchema.optional(),
+  extensions: record(string2(), AssertObjectSchema).optional()
 });
 var InitializeRequestParamsSchema = BaseRequestParamsSchema.extend({
   protocolVersion: string2(),
@@ -45036,7 +44939,8 @@ var ServerCapabilitiesSchema = object2({
   tools: object2({
     listChanged: boolean2().optional()
   }).optional(),
-  tasks: ServerTasksCapabilitySchema.optional()
+  tasks: ServerTasksCapabilitySchema.optional(),
+  extensions: record(string2(), AssertObjectSchema).optional()
 });
 var InitializeResultSchema = ResultSchema.extend({
   protocolVersion: string2(),
@@ -45151,6 +45055,7 @@ var ResourceSchema = object2({
   uri: string2(),
   description: optional(string2()),
   mimeType: optional(string2()),
+  size: optional(number2()),
   annotations: AnnotationsSchema.optional(),
   _meta: optional(looseObject({}))
 });
@@ -47146,6 +47051,10 @@ class Protocol {
     this._progressHandlers.clear();
     this._taskProgressTokens.clear();
     this._pendingDebouncedNotifications.clear();
+    for (const info of this._timeoutInfo.values()) {
+      clearTimeout(info.timeoutId);
+    }
+    this._timeoutInfo.clear();
     for (const controller of this._requestHandlerAbortControllers.values()) {
       controller.abort();
     }
@@ -47276,7 +47185,9 @@ class Protocol {
         await capturedTransport?.send(errorResponse);
       }
     }).catch((error2) => this._onerror(new Error(`Failed to send response: ${error2}`))).finally(() => {
-      this._requestHandlerAbortControllers.delete(request.id);
+      if (this._requestHandlerAbortControllers.get(request.id) === abortController) {
+        this._requestHandlerAbortControllers.delete(request.id);
+      }
     });
   }
   _onprogress(notification) {
@@ -48578,7 +48489,7 @@ var next = process.argv[3];
 function wantsHelp() {
   return next === "--help" || next === "-h";
 }
-async function run34() {
+async function run33() {
   if (sub === "install") {
     if (wantsHelp()) {
       console.log([
@@ -48963,7 +48874,7 @@ async function run34() {
         "",
         "Async execution patterns:",
         "  MCP:   use_specialist (foreground, returns result directly)",
-        "  CLI:   run prints [job started: <id>] on stderr, then use feed/poll/result",
+        "  CLI:   run prints [job started: <id>] on stderr, then use ps/feed/result",
         '  Shell: specialists run <name> --prompt "..." &',
         ""
       ].join(`
@@ -49200,53 +49111,6 @@ async function run34() {
     }
     const { run: handler } = await Promise.resolve().then(() => (init_feed(), exports_feed));
     return handler();
-  }
-  if (sub === "poll") {
-    if (wantsHelp()) {
-      console.log([
-        "",
-        "Usage: specialists poll <job-id> [--cursor N] [--json]",
-        "",
-        "[DEPRECATED] Scheduled for removal. Use:",
-        "  sp ps <id> --json   for status",
-        "  sp feed <id>        for events",
-        "",
-        "Machine-readable job status polling for scripts and Claude Code.",
-        "Currently file-based; replacements above are DB-canonical.",
-        "",
-        "Output (JSON mode):",
-        "  {",
-        '    "job_id": "abc123",',
-        '    "status": "running" | "done" | "error" | "waiting",',
-        '    "elapsed_ms": 45000,',
-        '    "cursor": 15,',
-        '    "events": [...],          // new events since cursor',
-        '    "output": "...",           // full output when done',
-        '    "model": "claude-sonnet-4-6",',
-        '    "bead_id": "unitAI-123"',
-        "  }",
-        "",
-        "Options:",
-        "  --cursor N   Event index to start from (default: 0)",
-        "  --json       Output as JSON (machine-readable)",
-        "",
-        "Examples:",
-        "  specialists poll abc123 --json",
-        "  specialists poll abc123 --cursor 5 --json",
-        "",
-        "Polling pattern in Claude Code:",
-        "  1. Start job (blocks until done):",
-        "     specialists run planner --bead xtrm-p38n.1",
-        "  2. Or use Claude Code native backgrounding",
-        "  3. Poll for incremental status:",
-        "     specialists poll <job-id> --json",
-        ""
-      ].join(`
-`));
-      return;
-    }
-    const { run: pollHandler } = await Promise.resolve().then(() => (init_poll(), exports_poll));
-    return pollHandler();
   }
   if (sub === "steer") {
     if (wantsHelp()) {
@@ -49587,7 +49451,7 @@ Run 'specialists help' to see available commands.`);
   const server = new SpecialistsServer;
   await server.start();
 }
-run34().catch((error2) => {
+run33().catch((error2) => {
   logger.error(`Fatal error: ${error2}`);
   process.exit(1);
 });

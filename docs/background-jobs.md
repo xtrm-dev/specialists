@@ -71,7 +71,6 @@ Run-time precedence:
 specialists feed 49adda --follow
 specialists feed -f
 specialists ps 49adda --json
-# `specialists poll <id>` is deprecated — use `sp ps` + `sp feed` above.
 ```
 
 ## Read final output

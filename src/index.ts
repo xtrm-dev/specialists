@@ -3,7 +3,7 @@
 /**
  * Specialists MCP Server — entry point
  * Subcommands: install, version, list, view, models, init, db, validate, edit, config, run,
- *              status, ps, result, feed, poll, clean, merge, epic, end, stop, attach, quickstart, serve, script, release, help
+ *              status, ps, result, feed, clean, merge, epic, end, stop, attach, quickstart, serve, script, release, help
  */
 
 // Suppress EBADF errors from bun's internal fd handling on named pipes.
@@ -415,7 +415,7 @@ async function run() {
         '',
         'Async execution patterns:',
         '  MCP:   use_specialist (foreground, returns result directly)',
-        '  CLI:   run prints [job started: <id>] on stderr, then use feed/poll/result',
+        '  CLI:   run prints [job started: <id>] on stderr, then use ps/feed/result',
         '  Shell: specialists run <name> --prompt "..." &',
         '',
       ].join('\n'));
@@ -653,52 +653,6 @@ async function run() {
     return handler();
   }
 
-  if (sub === 'poll') {
-    if (wantsHelp()) {
-      console.log([
-        '',
-        'Usage: specialists poll <job-id> [--cursor N] [--json]',
-        '',
-        '[DEPRECATED] Scheduled for removal. Use:',
-        '  sp ps <id> --json   for status',
-        '  sp feed <id>        for events',
-        '',
-        'Machine-readable job status polling for scripts and Claude Code.',
-        'Currently file-based; replacements above are DB-canonical.',
-        '',
-        'Output (JSON mode):',
-        '  {',
-        '    "job_id": "abc123",',
-        '    "status": "running" | "done" | "error" | "waiting",',
-        '    "elapsed_ms": 45000,',
-        '    "cursor": 15,',
-        '    "events": [...],          // new events since cursor',
-        '    "output": "...",           // full output when done',
-        '    "model": "claude-sonnet-4-6",',
-        '    "bead_id": "unitAI-123"',
-        '  }',
-        '',
-        'Options:',
-        '  --cursor N   Event index to start from (default: 0)',
-        '  --json       Output as JSON (machine-readable)',
-        '',
-        'Examples:',
-        '  specialists poll abc123 --json',
-        '  specialists poll abc123 --cursor 5 --json',
-        '',
-        'Polling pattern in Claude Code:',
-        '  1. Start job (blocks until done):',
-        '     specialists run planner --bead xtrm-p38n.1',
-        '  2. Or use Claude Code native backgrounding',
-        '  3. Poll for incremental status:',
-        '     specialists poll <job-id> --json',
-        '',
-      ].join('\n'));
-      return;
-    }
-    const { run: pollHandler } = await import('./cli/poll.js');
-    return pollHandler();
-  }
 
   if (sub === 'steer') {
     if (wantsHelp()) {

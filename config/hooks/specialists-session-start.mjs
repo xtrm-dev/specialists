@@ -124,7 +124,7 @@ lines.push('');
 lines.push('- `--bead` on edit-capable specialists auto-provisions worktree');
 lines.push('- Reviewer enters with `--job <exec-job>`; `--worktree`/`--job` exclusive');
 lines.push('- `sp epic merge <epic>` for epic chains; `sp merge <chain>` for standalone');
-lines.push('- `sp ps`/`sp feed`/`sp result` (sp poll deprecated)');
+lines.push('- `sp ps`/`sp feed`/`sp result`');
 lines.push('- `--keep-alive` required so reviewer/overthinker can be `sp resume`d');
 lines.push('- `sp merge` fails after `sp stop` cleans status.json — see unitAI-ofjvj');
 
