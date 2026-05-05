@@ -233,12 +233,53 @@ Selection rules:
 - Planner shapes epic/task graph before executor starts.
 - Overthinker defends risky design before code locks in.
 - Executor does not own full test validation; use reviewer/test-runner for that phase.
-- Code-sanity is optional and non-blocking. Use it when diff smells overcomplicated or type-risky, then resume executor with concrete findings. It is not a merge gate.
-- Security-auditor may run safe local audit commands and source research, but must not edit files, update dependencies, exfiltrate secrets, or run destructive/live-target exploit tests. Executor applies recommended fixes in separate bead.
-- Reviewer always uses its own bead plus `--job <executor-job>` and remains final merge gate.
 - Sync-docs is for audit/sync; executor is for heavy doc rewrites.
 - Researcher is for current external info, not repo archaeology.
 - Specialists-creator should precede specialist config/schema edits.
+
+## Code-sanity
+
+Use code-sanity when diff smells overcomplicated, brittle, or type-risky, but not yet broken enough for debugger. Use it before final review when you want cheap simplification check without blocking merge.
+
+Bead shape:
+
+```text
+PROBLEM: Diff has complexity, duplication, or type-safety smell that could hide bugs.
+SUCCESS: Findings isolate concrete smell or confirm clean shape.
+SCOPE: Executor diff, risky files, and any nearby helpers.
+NON_GOALS: No edits, no broad refactor, no merge gate decision.
+CONSTRAINTS: READ_ONLY, keep feedback cheap, cite exact lines or symbols.
+VALIDATION: Findings name concrete improvement or say OK.
+OUTPUT: FINDINGS with severity, or OK with caveats.
+```
+
+Use `sp resume <exec-job> "Code-sanity findings: ..."` or `sp resume <exec-job> "Code-sanity OK; continue to reviewer."` to hand findings back.
+
+OK is not reviewer PASS. It is advisory only.
+
+What differs: orchestrator uses code-sanity as cheap smell screen, not as merge gate.
+
+## Security-auditor
+
+Use security-auditor when diff touches auth, secrets, input handling, dependency logic, or agent/config surfaces. Keep it advisory and scan-only.
+
+Bead shape:
+
+```text
+PROBLEM: Diff may open auth, secrets, input, dependency, or agent-config risk.
+SUCCESS: Findings isolate real security concern or confirm no obvious issue.
+SCOPE: Executor diff, touched configs, and security-relevant paths.
+NON_GOALS: No edits, no package updates, no destructive scans, no live exploit tests.
+CONSTRAINTS: LOW permissions, scan-only, recommendations only.
+VALIDATION: Findings cite risk surface and why it matters.
+OUTPUT: Recommendations for executor to apply in a separate bead.
+```
+
+Use `sp resume <exec-job> "Security findings: ..."` or `sp resume <exec-job> "Security scan clean; continue to reviewer."`.
+
+No findings is not reviewer PASS. Executor still applies fixes if any, then reviewer decides publish.
+
+What differs: orchestrator uses security-auditor to surface risk early, not to bless merge.
 
 ## Dependency Graph Shapes
 
@@ -281,26 +322,26 @@ bd create --title "..." --type task --priority 2 --description "PROBLEM: ... SUC
 bd update <task> --claim
 
 # 2. Optional discovery when path is unknown
-bd create --title "Explore ..." --type task --priority 2 --description "PROBLEM: unknown path. SUCCESS: evidence-backed plan. SCOPE: ... OUTPUT: evidence-backed plan."
+bd create --title "Explore auth refresh path" --type task --priority 2 --description "PROBLEM: token refresh retry path is undocumented and likely drifts on failure handling. SUCCESS: evidence-backed plan names exact files, symbols, and risk. SCOPE: src/auth/refresh.ts, src/cli/login.ts, tests/unit/auth/*.test.ts. NON_GOALS: no implementation, no broad audit. CONSTRAINTS: READ_ONLY, cite files/symbols/flows, stay within live repo evidence. VALIDATION: findings cite code path and recommended sequence. OUTPUT: tracked discovery plan with stop condition."
 bd dep add <explore> <task>
 specialists run explorer --bead <explore> --context-depth 3
 specialists result <explore-job>
 
 # 3. Implementation
-bd create --title "Implement ..." --type task --priority 2 --description "PROBLEM: ... SUCCESS: ... SCOPE: ... VALIDATION: ... OUTPUT: ..."
+bd create --title "Implement token refresh retry" --type task --priority 2 --description "PROBLEM: login fails after transient token refresh error because retry path returns before backoff and clear error state. SUCCESS: retry waits once, preserves session on success, and surfaces final failure clearly. SCOPE: src/auth/refresh.ts, src/cli/login.ts, tests/unit/auth/refresh.test.ts. NON_GOALS: no auth redesign, no storage migration, no UI refresh. CONSTRAINTS: preserve existing token format, keep backward-compatible error text, avoid broad retry changes elsewhere. VALIDATION: add regression test for transient failure then success; run targeted auth tests. OUTPUT: changed files, test evidence, residual risks."
 bd dep add <impl> <explore-or-task>
 specialists run executor --bead <impl> --context-depth 3
 specialists result <exec-job>
 
 # 4. Advisory passes when diff smells risky
-bd create --title "Sanity check ..." --type task --priority 2 --description "PROBLEM: smell pass. SUCCESS: findings or clean bill. SCOPE: executor diff. NON_GOALS: no edits. CONSTRAINTS: READ_ONLY. VALIDATION: line findings. OUTPUT: recommendations."
+bd create --title "Sanity check token retry diff" --type task --priority 2 --description "PROBLEM: auth retry diff has control-flow and state-handling smell that could hide bug. SUCCESS: findings identify concrete simplification or confirm clean shape. SCOPE: executor diff in auth refresh and login flow. NON_GOALS: no edits, no merge gate decision. CONSTRAINTS: READ_ONLY, keep feedback cheap, cite exact lines or symbols. VALIDATION: findings name concrete improvement or say OK. OUTPUT: FINDINGS with severity or OK with caveats."
 specialists run code-sanity --bead <sanity-bead> --job <exec-job> --context-depth 3
 
-bd create --title "Security scan ..." --type task --priority 2 --description "PROBLEM: audit auth/secrets/input/dep/agent-config touches. SUCCESS: recommendations only. SCOPE: executor diff. NON_GOALS: no edits, no exploit tests. CONSTRAINTS: LOW permissions, scan-only. VALIDATION: findings cite risk surface. OUTPUT: recommendations."
+bd create --title "Security scan token retry diff" --type task --priority 2 --description "PROBLEM: auth refresh code touches secrets and session handling, so security regression is possible. SUCCESS: findings isolate real risk surface or confirm no obvious issue. SCOPE: executor diff in auth, token storage, and login path. NON_GOALS: no edits, no package updates, no destructive scans, no live exploit tests. CONSTRAINTS: LOW permissions, scan-only, recommendations only. VALIDATION: findings cite auth/secrets/input surface and why it matters. OUTPUT: recommendations for executor to apply in separate bead."
 specialists run security-auditor --bead <security-bead> --job <exec-job> --context-depth 3
 
 # 5. Final review
-bd create --title "Review ..." --type task --priority 2 --description "PROBLEM: verify executor output. SUCCESS: PASS/PARTIAL/FAIL. SCOPE: executor job, diff, acceptance criteria. OUTPUT: verdict with findings."
+bd create --title "Review token refresh retry" --type task --priority 2 --description "PROBLEM: verify executor output against auth retry requirements. SUCCESS: PASS only if retry behavior, error handling, and tests satisfy contract. SCOPE: executor job, diff, acceptance criteria, and target auth files. NON_GOALS: do not rewrite unless explicitly asked. CONSTRAINTS: code-review mindset; findings first; verify security and sanity findings were handled. VALIDATION: inspect targeted checks and regression coverage. OUTPUT: PASS/PARTIAL/FAIL with file/line findings."
 bd dep add <review> <impl>
 specialists run reviewer --bead <review> --job <exec-job> --context-depth 3
 specialists result <review-job>
@@ -320,16 +361,16 @@ Use epic when multiple implementation chains publish together.
 
 ```bash
 # Epic bead
-bd create --title "Epic: ..." --type epic --priority 2 --description "PROBLEM: ... SUCCESS: ... SCOPE: ... NON_GOALS: ... CONSTRAINTS: ... VALIDATION: ... OUTPUT: ..."
+bd create --title "Epic: auth refresh hardening" --type epic --priority 2 --description "PROBLEM: login and refresh flow have retry drift, weak error surfacing, and unclear follow-up ownership. SUCCESS: epic closes with stable retry behavior, tests, docs, and clean publish. SCOPE: src/auth/*, src/cli/login.ts, tests/unit/auth/*, docs/auth-refresh.md. NON_GOALS: no auth provider swap, no storage migration, no unrelated session revamp. CONSTRAINTS: preserve token format, keep login compatible, sequence risky fixes before merge, use child beads for parallelizable slices. VALIDATION: targeted tests, code-sanity or security pass if risk appears, final reviewer PASS. OUTPUT: merged chain set with notes on remaining gaps."
 
 # Planner bead
-bd create --title "Plan epic split" --type task --priority 2 --description "PROBLEM: split epic into disjoint chains. SUCCESS: child beads, dependencies, file scopes. SCOPE: epic area. OUTPUT: parallel-ready plan."
+bd create --title "Plan auth refresh split" --type task --priority 2 --description "PROBLEM: epic needs disjoint chains before executor starts. SUCCESS: child beads, dependency edges, and file ownership split are explicit. SCOPE: auth refresh epic area. NON_GOALS: no code changes. CONSTRAINTS: keep chains disjoint, identify security-sensitive slice, name review order. VALIDATION: plan names beads and edges. OUTPUT: parallel-ready plan with risk notes."
 bd dep add <plan> <epic>
 specialists run planner --bead <plan> --context-depth 3
 
 # Parallel impl beads
-bd create --parent <epic> --title "Impl A" --type task --priority 2 --description "PROBLEM: ... SUCCESS: ... SCOPE: files A. VALIDATION: ... OUTPUT: ..."
-bd create --parent <epic> --title "Impl B" --type task --priority 2 --description "PROBLEM: ... SUCCESS: ... SCOPE: files B. VALIDATION: ... OUTPUT: ..."
+bd create --parent <epic> --title "Impl auth retry" --type task --priority 2 --description "PROBLEM: transient refresh failure breaks login flow. SUCCESS: retry path succeeds after one transient failure and preserves session state. SCOPE: src/auth/refresh.ts, tests/unit/auth/refresh.test.ts. NON_GOALS: no UI changes, no storage migration, no unrelated retry framework edits. CONSTRAINTS: preserve error text, keep backoff bounded, avoid side effects outside auth flow. VALIDATION: regression test for fail-then-succeed path. OUTPUT: code diff, test proof, residual risk list."
+bd create --parent <epic> --title "Impl login handoff" --type task --priority 2 --description "PROBLEM: login CLI does not surface refresh outcome clearly enough for operators. SUCCESS: login shows clear success/failure handoff and no stale token state. SCOPE: src/cli/login.ts, tests/unit/cli/login.test.ts. NON_GOALS: no auth protocol redesign. CONSTRAINTS: preserve CLI flags and error codes, keep output terse. VALIDATION: CLI regression test. OUTPUT: login diff and test evidence."
 
 specialists run executor --bead <impl-a> --context-depth 3
 specialists run executor --bead <impl-b> --context-depth 3
