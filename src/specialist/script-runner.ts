@@ -368,7 +368,7 @@ type AttemptFailureReason = 'assistant_text_too_large' | 'stderr_too_large' | 'm
 
 function runSingleAttempt(prompt: string, model: string, thinkingLevel: string | undefined, timeoutMs: number, assistantTextLimitBytes: number, options: ScriptRunnerOptions): Promise<{ model: string; text: string; stderr: string; exitCode: number; timedOut: boolean; outputTooLarge: boolean; outputTooLargeReason?: AttemptFailureReason }> {
   return new Promise((resolve, reject) => {
-    const args = ['--mode', 'json', '--no-session', '--no-extensions', '--no-tools', '--model', model];
+    const args = ['--mode', 'json', '--no-session', '--no-extensions', '--no-tools', '--offline', '--model', model];
     if (thinkingLevel) args.push('--thinking', thinkingLevel);
     args.push(prompt);
 

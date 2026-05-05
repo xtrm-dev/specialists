@@ -1,0 +1,28 @@
+services:
+  specialists:
+    # Image publishing is deferred. Until then, build from a local checkout
+    # of the specialists repo and reference that tag below.
+    image: specialists-service:local
+    # build:
+    #   context: ../specialists           # path to specialists repo checkout
+    #   dockerfile: Dockerfile
+    # Once the image is published, replace the lines above with:
+    # image: ghcr.io/<org>/specialists-service:<tag>
+    user: "${UID:-1000}:${GID:-1000}"
+    environment:
+      HOME: /pi-home
+    volumes:
+      # On Fedora / rootless Podman, append `:z` to bind mounts for SELinux relabel
+      # and pass `--userns=keep-id` to the runtime. See specialists-service-install.md.
+      - ./.specialists:/work/.specialists
+      - ${HOME}/.pi:/pi-home/.pi
+    working_dir: /work
+    command: ["--port", "8003"]
+    network_mode: host
+    restart: unless-stopped
+
+# SQLite + bind mount rules:
+# 1. Mount .specialists/ directory, not only .db file, so SQLite can create .db-wal and .db-shm siblings.
+# 2. Keep .specialists/db/ on local disk; remote filesystems break SQLite locking.
+# 3. Match container UID/GID to host owner so trace rows can write into bind-mounted files.
+# 4. Keep .specialists/user/ inside bind mount; specs load from host state, not image state.
