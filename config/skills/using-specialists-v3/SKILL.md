@@ -495,6 +495,20 @@ Raw token totals are not context percentages.
 - `memory-processor`: deferred to memory/documenting skill; this skill stays focused on orchestration, not memory synthesis.
 - `xt-merge`: deferred to xt-merge skill; this skill names specialist flow, not merge-wrapper internals.
 
+## Adjacent xt commands
+
+Source: latest xt report + `xt --help`; keep commands here, not full CLI surface.
+- `xt report` — session report input for release synthesis; see `/session-close-report`.
+- `xt end` — close worktree session: push, PR, merge, cleanup; see `/xt-end`.
+- `xt claude` — launch Claude in sandboxed worktree; see `/using-xtrm`.
+- `xt update` — refresh xtrm-managed files in one repo or many; see `/update-xt`.
+- `xt doctor` — diagnose xtrm drift in current project; see `/update-xt`.
+- `xt init` — bootstrap xtrm in project; see xtrm-tools docs.
+- `xt release prepare/publish` — legacy release path; canonical flow is `/releasing`.
+- `bd prime` — refresh beads workflow context; see `CLAUDE.md`.
+- `memory-processor` — defer memory synthesis to documenting/memory skill.
+- `xt-merge` — defer merge-queue internals to `/xt-merge`.
+
 ## Merge And Publication
 
 Standalone chain:
