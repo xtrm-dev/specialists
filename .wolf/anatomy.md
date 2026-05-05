@@ -1230,6 +1230,7 @@
 - `SKILL.md` — Installed mirror of canonical using-specialists-v2 skill; keep synced from config/skills/using-specialists-v2/SKILL.md.
 
 - 2026-05-04: `config/skills/using-specialists-v2/SKILL.md` bumped to v1.4 and canonicalized to final-state guidance only; installed mirror copied to `.xtrm/skills/default/using-specialists-v2/SKILL.md`.
+- 2026-05-05: Latest report `.xtrm/reports/2026-05-04-2b52300a.md` includes addendum for using-specialists-v3 merge, manual expansion, activation, and remaining xtrm-tools mirror decision.
 
 - 2026-05-04: Updated config/specialists/*.specialist.json descriptions and .specialists/user overlays to improve `specialists list` routing; specialists-creator v1.2 now teaches list-friendly metadata.description authoring.
 
