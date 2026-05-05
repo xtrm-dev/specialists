@@ -492,7 +492,7 @@ Raw token totals are not context percentages.
 
 ## What Stays Out
 
-- `memory-processor`: deferred to `/documenting`; this skill stays focused on orchestration, not memory synthesis.
+- `memory-processor` — memory synthesis specialist; see `/documenting`.
 - `xt-merge`: deferred to xt-merge skill; this skill names specialist flow, not merge-wrapper internals.
 
 ## Adjacent xt commands
