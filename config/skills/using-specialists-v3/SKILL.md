@@ -506,7 +506,7 @@ Source: latest xt report + `xt --help`; keep commands here, not full CLI surface
 - `xt init` — bootstrap xtrm in project; see xtrm-tools docs.
 - `xt release prepare/publish` — legacy release path; canonical flow is `/releasing`.
 - `bd prime` — refresh beads workflow context; see `CLAUDE.md`.
-- `memory-processor` — defer memory synthesis to documenting/memory skill.
+- `memory-processor` — memory synthesis specialist; see `/documenting`.
 - `xt-merge` — defer merge-queue internals to `/xt-merge`.
 
 ## Merge And Publication
