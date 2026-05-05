@@ -29,7 +29,8 @@
     "mandatory_rules": {
       "template_sets": [
         "sync-docs-scope-discipline",
-        "serena-cheatsheet"
+        "serena-cheatsheet",
+        "per-turn-handoff-schema"
       ]
     },
     "prompt": {

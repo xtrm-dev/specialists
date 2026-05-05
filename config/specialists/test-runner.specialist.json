@@ -28,7 +28,8 @@
     "mandatory_rules": {
       "template_sets": [
         "test-runner-execution-scope",
-        "serena-cheatsheet"
+        "serena-cheatsheet",
+        "per-turn-handoff-schema"
       ]
     },
     "prompt": {

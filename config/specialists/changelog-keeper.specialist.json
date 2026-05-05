@@ -32,7 +32,8 @@
       "template_sets": [
         "changelog-keeper-scope",
         "changelog-conventions",
-        "git-workflow-safe"
+        "git-workflow-safe",
+        "per-turn-handoff-schema"
       ]
     },
     "prompt": {

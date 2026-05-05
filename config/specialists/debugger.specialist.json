@@ -36,7 +36,8 @@
       "template_sets": [
         "debugger-trace-first",
         "gitnexus-required",
-        "serena-cheatsheet"
+        "serena-cheatsheet",
+        "per-turn-handoff-schema"
       ]
     },
     "prompt": {

@@ -30,7 +30,8 @@
     "mandatory_rules": {
       "template_sets": [
         "researcher-source-discipline",
-        "serena-cheatsheet"
+        "serena-cheatsheet",
+        "per-turn-handoff-schema"
       ]
     },
     "prompt": {
