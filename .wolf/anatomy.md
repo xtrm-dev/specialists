@@ -1246,3 +1246,5 @@
 
 - 2026-05-04: Updated config/skills/using-specialists-v2/SKILL.md to route code-sanity as optional pre-review implementation smell pass and security-auditor as LOW recommendation-only security/dependency audit in implementation chains.
 
+
+- 2026-05-05: Updated `.xtrm/reports/2026-05-04-2b52300a.md` addendum with npm audit triage: @modelcontextprotocol/sdk/yaml safe bumps, audit reduction, security-auditor stall, and Vitest 4 follow-up.
