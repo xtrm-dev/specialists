@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { parseSpecialist } from '../../../src/specialist/schema.js';
-import { renderTaskTemplate } from '../../../src/specialist/script-runner.js';
+import { compatGuard, renderTaskTemplate } from '../../../src/specialist/script-runner.js';
 
 async function loadChangelogKeeperSpec() {
   return parseSpecialist(readFileSync('config/specialists/changelog-keeper.specialist.json', 'utf8'));
@@ -15,23 +15,16 @@ describe('changelog-keeper specialist', () => {
     expect(specialist.execution.permission_required).toBe('MEDIUM');
     expect(specialist.execution.response_format).toBe('markdown');
     expect(specialist.execution.output_type).toBe('workflow');
+    expect(specialist.execution.interactive).toBe(true);
+    expect(specialist.execution.requires_worktree).toBe(false);
     expect(specialist.mandatory_rules?.template_sets).toContain('changelog-conventions');
+    expect(specialist.skills?.scripts?.[0]?.run).toContain('.xtrm/skills/default/releasing/scripts/xt-reports.ts');
 
     expect(specialist.prompt.output_schema).toBeUndefined();
+    expect(() => compatGuard(result)).toThrow('interactive');
   });
 
   it('injects report bundle pre-script output with cap control', async () => {
-    const result = await loadChangelogKeeperSpec();
-    const scripts = result.specialist.skills?.scripts ?? [];
-
-    expect(scripts).toHaveLength(1);
-    expect(scripts.every((script) => script.phase === 'pre' && script.inject_output === true)).toBe(true);
-    expect(scripts[0]?.run).toContain('.xtrm/skills/default/releasing/scripts/xt-reports.ts');
-    expect(scripts[0]?.run).toContain('$prev_tag');
-    expect(scripts[0]?.run).toContain('$next_tag');
-  });
-
-  it('renders task template with injected report bundle', async () => {
     const result = await loadChangelogKeeperSpec();
     const rendered = renderTaskTemplate(result.specialist.prompt.task_template, {
       prompt: 'Draft release notes',

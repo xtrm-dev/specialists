@@ -4,6 +4,7 @@ import type { Specialist } from './schema.js';
 export type ScriptSpecialistErrorType = 'specialist_not_found' | 'specialist_load_error' | 'template_variable_missing' | 'auth' | 'quota' | 'timeout' | 'network' | 'invalid_json' | 'output_too_large' | 'internal';
 export interface ScriptGenerateRequest {
     specialist: string;
+    requested_specialist?: string;
     variables?: Record<string, string>;
     template?: string;
     model_override?: string;
@@ -17,6 +18,8 @@ export interface ScriptGenerateSuccess {
     parsed_json?: unknown;
     meta: {
         specialist: string;
+        requested_specialist?: string;
+        resolved_specialist?: string;
         model: string;
         duration_ms: number;
         trace_id: string;
@@ -28,6 +31,8 @@ export interface ScriptGenerateFailure {
     error_type: ScriptSpecialistErrorType;
     meta?: {
         specialist?: string;
+        requested_specialist?: string;
+        resolved_specialist?: string;
         model?: string;
         duration_ms?: number;
         trace_id?: string;
@@ -38,6 +43,10 @@ export interface TrustOptions {
     allowSkills?: boolean;
     allowSkillsRoots?: string[];
     allowLocalScripts?: boolean;
+}
+export declare class CompatGuardError extends Error {
+    readonly field: 'execution.interactive' | 'execution.requires_worktree' | 'execution.permission_required' | 'skills.scripts' | 'skills.paths' | 'prompt.skill_inherit';
+    constructor(field: 'execution.interactive' | 'execution.requires_worktree' | 'execution.permission_required' | 'skills.scripts' | 'skills.paths' | 'prompt.skill_inherit', message: string);
 }
 export interface SkillSource {
     path: string;

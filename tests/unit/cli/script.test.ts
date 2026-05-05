@@ -63,7 +63,7 @@ describe('script CLI', () => {
     vi.mocked(runner.runScriptSpecialist).mockResolvedValue({
       success: true,
       output: 'hello',
-      meta: { specialist: 'echo', model: 'mock/model', duration_ms: 1, trace_id: 'trace-1' },
+      meta: { specialist: 'echo', requested_specialist: 'echo', resolved_specialist: 'echo', model: 'mock/model', duration_ms: 1, trace_id: 'trace-1' },
     });
 
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
@@ -72,7 +72,7 @@ describe('script CLI', () => {
     await expect(run(['echo', '--db-path', '/tmp/db', '--no-trace'])).rejects.toThrow('exit:0');
     expect(logSpy).toHaveBeenCalledWith('hello');
     expect(vi.mocked(runner.runScriptSpecialist)).toHaveBeenCalledWith(
-      expect.objectContaining({ specialist: 'echo', trace: false }),
+      expect.objectContaining({ specialist: 'echo', requested_specialist: 'echo', trace: false }),
       expect.objectContaining({ observabilityDbPath: '/tmp/db' }),
     );
 
