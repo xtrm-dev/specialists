@@ -1,6 +1,7 @@
 // tests/unit/cli/list.test.ts
-import { describe, it, expect } from 'vitest';
-import { parseArgs, ArgParseError, computeMedianElapsedMs, getChainPositionBadge } from '../../../src/cli/list.js';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { parseArgs, ArgParseError, computeMedianElapsedMs, getChainPositionBadge, run } from '../../../src/cli/list.js';
+import { SpecialistLoader } from '../../../src/specialist/loader.js';
 
 describe('list CLI — parseArgs', () => {
   it('returns empty object for no args', () => {
@@ -115,5 +116,57 @@ describe('list CLI — helpers', () => {
     expect(computeMedianElapsedMs([300, 100, 200])).toBe(200);
     expect(computeMedianElapsedMs([100, 400, 200, 300])).toBe(250);
     expect(computeMedianElapsedMs([])).toBeNull();
+  });
+});
+
+
+const sampleSpecialist = {
+  name: 'sample',
+  description: 'desc',
+  category: 'test',
+  version: '1.0.0',
+  model: 'provider/model',
+  permission_required: 'LOW' as const,
+  interactive: false,
+  thinking_level: undefined,
+  skills: [],
+  scripts: [],
+  mandatoryRuleTemplateSets: ['sample-rules'],
+  scope: 'default' as const,
+  source: 'default-mirror' as const,
+  filePath: '/tmp/sample.specialist.json',
+  updated: undefined,
+  filestoWatch: undefined,
+  staleThresholdDays: undefined,
+  stallDetection: undefined,
+};
+
+describe('list CLI — json shape', () => {
+  const originalArgv = process.argv;
+  const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+  const listSpy = vi.spyOn(SpecialistLoader.prototype, 'list').mockResolvedValue([sampleSpecialist]);
+
+  beforeEach(() => {
+    logSpy.mockClear();
+    listSpy.mockClear();
+  });
+
+  afterEach(() => {
+    process.argv = originalArgv;
+  });
+
+  it('keeps --json shape unchanged when --full present', async () => {
+    process.argv = ['bun', 'src/index.ts', 'list', '--json'];
+    await run();
+    const withoutFull = logSpy.mock.calls.at(0)?.[0];
+
+    logSpy.mockClear();
+
+    process.argv = ['bun', 'src/index.ts', 'list', '--json', '--full'];
+    await run();
+    const withFull = logSpy.mock.calls.at(0)?.[0];
+
+    expect(withFull).toBe(withoutFull);
+    expect(JSON.parse(String(withFull))).toEqual([sampleSpecialist]);
   });
 });
