@@ -202,6 +202,25 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-05-04T22:31:10.318698+00:00"
+    },
+    {
+      "id": "bug-013",
+      "timestamp": "2026-05-05T11:54:44.653275+00:00",
+      "error_message": "sp doctor/status from published v3.12.0 crashed with Cannot find module '../../package.json' from dist/index.js and security-auditor shipped machine-local optional skill paths",
+      "file": "src/cli/version-check.ts; config/specialists/security-auditor.specialist.json",
+      "root_cause": "Bundled dist runs one directory shallower than src/cli, so ../../package.json points outside the npm package; security-auditor config used absolute dev-machine xtrm optional skill paths instead of repo-relative paths.",
+      "fix": "Version check now tries both ../package.json and ../../package.json with safe fallback; security-auditor optional skills now use .xtrm/skills/optional/... relative paths; v3.13.0 release verifies installed sp doctor no longer fatals.",
+      "tags": [
+        "bugfix",
+        "release",
+        "version-check",
+        "doctor",
+        "security-auditor",
+        "npm-package"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-05T11:54:44.653275+00:00"
     }
   ]
 }

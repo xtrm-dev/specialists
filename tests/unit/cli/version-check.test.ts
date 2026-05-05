@@ -31,6 +31,28 @@ describe('version-check CLI', () => {
     vi.resetModules();
   });
 
+
+  it('resolves package version from bundled and source layouts without throwing', async () => {
+    const { readBundledPackageVersion } = await loadModule();
+
+    const bundledRequire = vi.fn((specifier: string) => {
+      if (specifier === '../package.json') return { version: '3.13.0' };
+      throw new Error(`missing ${specifier}`);
+    });
+    expect(readBundledPackageVersion(bundledRequire)).toBe('3.13.0');
+
+    const sourceRequire = vi.fn((specifier: string) => {
+      if (specifier === '../../package.json') return { version: '3.12.0' };
+      throw new Error(`missing ${specifier}`);
+    });
+    expect(readBundledPackageVersion(sourceRequire)).toBe('3.12.0');
+
+    const missingRequire = vi.fn(() => {
+      throw new Error('missing package.json');
+    });
+    expect(readBundledPackageVersion(missingRequire)).toBe('0.0.0');
+  });
+
   it('skips when not tty', async () => {
     tempDir = mkdtempSync(join(tmpdir(), 'version-check-'));
     process.chdir(tempDir);
@@ -125,7 +147,7 @@ describe('version-check CLI', () => {
       stdout: [
         'abc\trefs/tags/v3.9.0',
         'def\trefs/tags/v3.10.1',
-        'ghi\trefs/tags/v3.11.0',
+        'ghi\trefs/tags/v3.14.0',
       ].join('\n'),
     }));
 
@@ -144,11 +166,11 @@ describe('version-check CLI', () => {
     const { formatVersionCheckNudge, getVersionCheckResult, markVersionCheckNotified } = await loadModule();
     const result = getVersionCheckResult();
 
-    expect(result?.latestTag).toBe('v3.11.0');
-    expect(formatVersionCheckNudge(result!)).toBe('specialists v3.10.0 is local; v3.11.0 published — consider /update-specialists before substantial work.');
+    expect(result?.latestTag).toBe('v3.14.0');
+    expect(formatVersionCheckNudge(result!)).toBe(`specialists v${result!.localVersion} is local; v3.14.0 published — consider /update-specialists before substantial work.`);
     expect(writes.length).toBeGreaterThan(0);
 
     markVersionCheckNotified(result!);
-    expect(writes.at(-1)?.payload).toContain('"notified_for_tag": "v3.11.0"');
+    expect(writes.at(-1)?.payload).toContain('"notified_for_tag": "v3.14.0"');
   });
 });

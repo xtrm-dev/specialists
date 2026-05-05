@@ -555,6 +555,8 @@ var require_Alias = __commonJS((exports) => {
       });
     }
     resolve(doc, ctx) {
+      if (ctx?.maxAliasCount === 0)
+        throw new ReferenceError("Alias resolution is disabled");
       let nodes;
       if (ctx?.aliasResolveCache) {
         nodes = ctx.aliasResolveCache;
@@ -1334,6 +1336,7 @@ var require_stringify = __commonJS((exports) => {
       nullStr: "null",
       simpleKeys: false,
       singleQuote: null,
+      trailingComma: false,
       trueStr: "true",
       verifyAliasOrder: true
     }, doc.schema.toStringOptions, options);
@@ -1603,18 +1606,18 @@ var require_merge = __commonJS((exports) => {
   };
   var isMergeKey = (ctx, key) => (merge.identify(key) || identity.isScalar(key) && (!key.type || key.type === Scalar.Scalar.PLAIN) && merge.identify(key.value)) && ctx?.doc.schema.tags.some((tag) => tag.tag === merge.tag && tag.default);
   function addMergeToJSMap(ctx, map, value) {
-    value = ctx && identity.isAlias(value) ? value.resolve(ctx.doc) : value;
-    if (identity.isSeq(value))
-      for (const it of value.items)
+    const source = resolveAliasValue(ctx, value);
+    if (identity.isSeq(source))
+      for (const it of source.items)
         mergeValue(ctx, map, it);
-    else if (Array.isArray(value))
-      for (const it of value)
+    else if (Array.isArray(source))
+      for (const it of source)
         mergeValue(ctx, map, it);
     else
-      mergeValue(ctx, map, value);
+      mergeValue(ctx, map, source);
   }
   function mergeValue(ctx, map, value) {
-    const source = ctx && identity.isAlias(value) ? value.resolve(ctx.doc) : value;
+    const source = resolveAliasValue(ctx, value);
     if (!identity.isMap(source))
       throw new Error("Merge sources must be maps or map aliases");
     const srcMap = source.toJSON(null, ctx, Map);
@@ -1634,6 +1637,9 @@ var require_merge = __commonJS((exports) => {
       }
     }
     return map;
+  }
+  function resolveAliasValue(ctx, value) {
+    return ctx && identity.isAlias(value) ? value.resolve(ctx.doc, ctx) : value;
   }
   exports.addMergeToJSMap = addMergeToJSMap;
   exports.isMergeKey = isMergeKey;
@@ -1842,13 +1848,20 @@ ${indent}${line}` : `
       if (comment)
         reqNewline = true;
       let str = stringify.stringify(item, itemCtx, () => comment = null);
-      if (i < items.length - 1)
+      reqNewline || (reqNewline = lines.length > linesAtValue || str.includes(`
+`));
+      if (i < items.length - 1) {
         str += ",";
+      } else if (ctx.options.trailingComma) {
+        if (ctx.options.lineWidth > 0) {
+          reqNewline || (reqNewline = lines.reduce((sum, line) => sum + line.length + 2, 2) + (str.length + 2) > ctx.options.lineWidth);
+        }
+        if (reqNewline) {
+          str += ",";
+        }
+      }
       if (comment)
         str += stringifyComment.lineComment(str, itemIndent, commentString(comment));
-      if (!reqNewline && (lines.length > linesAtValue || str.includes(`
-`)))
-        reqNewline = true;
       lines.push(str);
       linesAtValue = lines.length;
     }
@@ -2203,7 +2216,7 @@ var require_stringifyNumber = __commonJS((exports) => {
     if (!isFinite(num))
       return isNaN(num) ? ".nan" : num < 0 ? "-.inf" : ".inf";
     let n = Object.is(value, -0) ? "-0" : JSON.stringify(value);
-    if (!format && minFractionDigits && (!tag || tag === "tag:yaml.org,2002:float") && /^\d/.test(n)) {
+    if (!format && minFractionDigits && (!tag || tag === "tag:yaml.org,2002:float") && /^-?\d/.test(n) && !n.includes("e")) {
       let i = n.indexOf(".");
       if (i < 0) {
         i = n.length;
@@ -4428,7 +4441,7 @@ var require_resolve_flow_scalar = __commonJS((exports) => {
           while (next === " " || next === "\t")
             next = source[++i + 1];
         } else if (next === "x" || next === "u" || next === "U") {
-          const length = { x: 2, u: 4, U: 8 }[next];
+          const length = next === "x" ? 2 : next === "u" ? 4 : 8;
           res += parseCharCode(source, i + 1, length, onError);
           i += length;
         } else {
@@ -4497,12 +4510,13 @@ var require_resolve_flow_scalar = __commonJS((exports) => {
     const cc = source.substr(offset, length);
     const ok = cc.length === length && /^[0-9a-fA-F]+$/.test(cc);
     const code = ok ? parseInt(cc, 16) : NaN;
-    if (isNaN(code)) {
+    try {
+      return String.fromCodePoint(code);
+    } catch {
       const raw = source.substr(offset - 2, length + 2);
       onError(offset - 2, "BAD_DQ_ESCAPE", `Invalid escape sequence ${raw}`);
       return raw;
     }
-    return String.fromCodePoint(code);
   }
   exports.resolveFlowScalar = resolveFlowScalar;
 });
@@ -4643,17 +4657,22 @@ var require_compose_node = __commonJS((exports) => {
       case "block-map":
       case "block-seq":
       case "flow-collection":
-        node = composeCollection.composeCollection(CN, ctx, token, props, onError);
-        if (anchor)
-          node.anchor = anchor.source.substring(1);
+        try {
+          node = composeCollection.composeCollection(CN, ctx, token, props, onError);
+          if (anchor)
+            node.anchor = anchor.source.substring(1);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          onError(token, "RESOURCE_EXHAUSTION", message);
+        }
         break;
       default: {
         const message = token.type === "error" ? token.message : `Unsupported token (type: ${token.type})`;
         onError(token, "UNEXPECTED_TOKEN", message);
-        node = composeEmptyNode(ctx, token.offset, undefined, null, props, onError);
         isSrcToken = false;
       }
     }
+    node ?? (node = composeEmptyNode(ctx, token.offset, undefined, null, props, onError));
     if (anchor && node.anchor === "")
       onError(anchor, "BAD_ALIAS", "Anchor cannot be an empty string");
     if (atKey && ctx.options.stringKeys && (!identity.isScalar(node) || typeof node.value !== "string" || node.tag && node.tag !== "tag:yaml.org,2002:str")) {

@@ -5,25 +5,43 @@ var __getProtoOf = Object.getPrototypeOf;
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
+function __accessProp(key) {
+  return this[key];
+}
+var __toESMCache_node;
+var __toESMCache_esm;
 var __toESM = (mod, isNodeMode, target) => {
+  var canCache = mod != null && typeof mod === "object";
+  if (canCache) {
+    var cache = isNodeMode ? __toESMCache_node ??= new WeakMap : __toESMCache_esm ??= new WeakMap;
+    var cached = cache.get(mod);
+    if (cached)
+      return cached;
+  }
   target = mod != null ? __create(__getProtoOf(mod)) : {};
   const to = isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
   for (let key of __getOwnPropNames(mod))
     if (!__hasOwnProp.call(to, key))
       __defProp(to, key, {
-        get: () => mod[key],
+        get: __accessProp.bind(mod, key),
         enumerable: true
       });
+  if (canCache)
+    cache.set(mod, to);
   return to;
 };
 var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports);
+var __returnValue = (v) => v;
+function __exportSetter(name, newValue) {
+  this[name] = __returnValue.bind(null, newValue);
+}
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, {
       get: all[name],
       enumerable: true,
       configurable: true,
-      set: (newValue) => all[name] = () => newValue
+      set: __exportSetter.bind(all, name)
     });
 };
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
@@ -7790,7 +7808,7 @@ var require_core = __commonJS((exports) => {
     constructor(opts = {}) {
       this.schemas = {};
       this.refs = {};
-      this.formats = Object.create(null);
+      this.formats = {};
       this._compilations = new Set;
       this._loading = {};
       this._cache = new Map;
@@ -10248,7 +10266,7 @@ var require_formats = __commonJS((exports) => {
   }
   var TIME = /^(\d\d):(\d\d):(\d\d(?:\.\d+)?)(z|([+-])(\d\d)(?::?(\d\d))?)?$/i;
   function getTime(strictTimeZone) {
-    return function time(str) {
+    return function time3(str) {
       const matches = TIME.exec(str);
       if (!matches)
         return false;
@@ -35482,6 +35500,16 @@ import { spawnSync as spawnSync16 } from "child_process";
 import { existsSync as existsSync20, mkdirSync as mkdirSync9, readFileSync as readFileSync20, writeFileSync as writeFileSync9 } from "fs";
 import { dirname as dirname8, join as join22 } from "path";
 import { createRequire as createRequire3 } from "module";
+function readBundledPackageVersion(requireFn = require3) {
+  for (const candidate of ["../package.json", "../../package.json"]) {
+    try {
+      const pkg = requireFn(candidate);
+      if (typeof pkg.version === "string" && pkg.version.length > 0)
+        return pkg.version;
+    } catch {}
+  }
+  return "0.0.0";
+}
 function shouldRunVersionCheck() {
   if (process.env.SPECIALISTS_OFFLINE === "1")
     return false;
@@ -35589,7 +35617,7 @@ function markVersionCheckNotified(result) {
 var require3, packageVersion, localVersion, CACHE_PATH, CACHE_MAX_AGE_MS2, NETWORK_TIMEOUT_MS = 2000;
 var init_version_check = __esm(() => {
   require3 = createRequire3(import.meta.url);
-  ({ version: packageVersion } = require3("../../package.json"));
+  packageVersion = readBundledPackageVersion();
   localVersion = packageVersion;
   CACHE_PATH = join22(process.cwd(), ".specialists", "version-check.json");
   CACHE_MAX_AGE_MS2 = 6 * 60 * 60 * 1000;

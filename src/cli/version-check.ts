@@ -4,7 +4,24 @@ import { dirname, join } from 'node:path';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { version: packageVersion } = require('../../package.json') as { version: string };
+
+type PackageRequire = (specifier: string) => unknown;
+
+export function readBundledPackageVersion(requireFn: PackageRequire = require): string {
+  for (const candidate of ['../package.json', '../../package.json']) {
+    try {
+      const pkg = requireFn(candidate) as { version?: unknown };
+      if (typeof pkg.version === 'string' && pkg.version.length > 0) return pkg.version;
+    } catch {
+      // Bundled CLI runs from dist/index.js, source/tests run from src/cli/*.ts.
+      // Try both package.json depths so diagnostics never crash on install layout.
+    }
+  }
+
+  return '0.0.0';
+}
+
+const packageVersion = readBundledPackageVersion();
 
 export const localVersion = packageVersion;
 

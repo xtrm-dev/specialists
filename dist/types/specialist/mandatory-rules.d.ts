@@ -17,8 +17,13 @@ interface MandatoryRulesIndex {
     required_template_sets?: string[];
     default_template_sets?: string[];
 }
+export interface MandatoryRulesSection {
+    setId: string;
+    block: string;
+}
 export interface MandatoryRulesInjection {
     block: string;
+    sections: MandatoryRulesSection[];
     setsLoaded: string[];
     ruleCount: number;
     inlineRulesCount: number;

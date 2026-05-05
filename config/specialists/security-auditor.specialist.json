@@ -80,8 +80,8 @@
     },
     "skills": {
       "paths": [
-        "/home/dawid/projects/xtrm-tools/.xtrm/skills/optional/security-ops/security-auditor/SKILL.md",
-        "/home/dawid/projects/xtrm-tools/.xtrm/skills/optional/xt-optional/senior-security/SKILL.md",
+        ".xtrm/skills/optional/security-ops/security-auditor/SKILL.md",
+        ".xtrm/skills/optional/xt-optional/senior-security/SKILL.md",
         ".xtrm/skills/active/find-docs/SKILL.md",
         ".xtrm/skills/active/deepwiki/SKILL.md",
         ".xtrm/skills/active/github-search/SKILL.md",
