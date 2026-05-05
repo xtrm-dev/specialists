@@ -33,7 +33,8 @@
         "explorer-readonly",
         "gitnexus-required",
         "serena-cheatsheet",
-        "per-turn-handoff-schema"
+        "per-turn-handoff-schema",
+        "bead-id-verbatim"
       ]
     },
     "permissions": {

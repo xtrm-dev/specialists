@@ -32,7 +32,8 @@
       "template_sets": [
         "researcher-source-discipline",
         "serena-cheatsheet",
-        "per-turn-handoff-schema"
+        "per-turn-handoff-schema",
+        "bead-id-verbatim"
       ]
     },
     "prompt": {
