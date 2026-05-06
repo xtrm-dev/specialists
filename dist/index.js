@@ -40579,10 +40579,12 @@ __export(exports_serve, {
   run: () => run30,
   recordAuditFailure: () => recordAuditFailure,
   evaluateReadiness: () => evaluateReadiness2,
-  createReadinessState: () => createReadinessState
+  createReadinessState: () => createReadinessState,
+  checkPiHelpForFlags: () => checkPiHelpForFlags
 });
 import { createServer } from "http";
 import { once } from "events";
+import { spawnSync as spawnSync23 } from "child_process";
 import { access, readdir as readdir2, readFile as readFile5, constants } from "fs/promises";
 import { existsSync as existsSync31 } from "fs";
 import { homedir as homedir3 } from "os";
@@ -40640,13 +40642,23 @@ async function evaluateReadiness2(opts) {
   } catch {
     return { ready: false, reason: "db_not_writable" };
   }
+  let warning;
+  const canaryMode = opts.piCanaryMode ?? "off";
+  if (canaryMode !== "off" && opts.piCanaryCheck) {
+    const canaryFailure = await opts.piCanaryCheck();
+    if (canaryFailure) {
+      if (canaryMode === "require")
+        return { ready: false, reason: canaryFailure };
+      warning = canaryFailure;
+    }
+  }
   const userDir = join34(opts.projectDir, ".specialists", "user");
   const userDirResult = await checkUserDirSpecs(userDir);
   if (userDirResult === "empty")
     return { ready: false, reason: "empty_user_dir" };
   if (userDirResult === "invalid")
     return { ready: false, reason: "invalid_spec_in_user_dir" };
-  return { ready: true };
+  return warning ? { ready: true, warning } : { ready: true };
 }
 function parseArgs12(argv) {
   let port = 8000;
@@ -40660,6 +40672,10 @@ function parseArgs12(argv) {
   let allowSkills = false;
   let allowSkillsRoots = [];
   let reloadPollMs = 0;
+  let readinessCanaryMode = "off";
+  const readinessRequiredPiFlags = [];
+  let readinessCanarySpecialist;
+  let readinessCanaryTimeoutMs = 5000;
   for (let i = 0;i < argv.length; i++) {
     const token = argv[i];
     if (token === "--port" && argv[i + 1])
@@ -40686,8 +40702,27 @@ function parseArgs12(argv) {
       throw new Error("--allow-local-scripts is not supported for script-class specialists");
     else if (token === "--reload-poll-ms" && argv[i + 1])
       reloadPollMs = Number(argv[++i]);
+    else if (token === "--readiness-canary" && argv[i + 1]) {
+      const mode = argv[++i];
+      if (mode === "off" || mode === "warn" || mode === "require")
+        readinessCanaryMode = mode;
+    } else if (token === "--readiness-required-pi-flag" && argv[i + 1])
+      readinessRequiredPiFlags.push(argv[++i]);
+    else if (token === "--readiness-canary-specialist" && argv[i + 1])
+      readinessCanarySpecialist = argv[++i];
+    else if (token === "--readiness-canary-timeout-ms" && argv[i + 1])
+      readinessCanaryTimeoutMs = Number(argv[++i]);
   }
-  return { port, concurrency, queueTimeoutMs, shutdownGraceMs, projectDir, dbPath, fallbackModel, auditFailureThreshold, allowSkills, allowSkillsRoots, reloadPollMs };
+  return { port, concurrency, queueTimeoutMs, shutdownGraceMs, projectDir, dbPath, fallbackModel, auditFailureThreshold, allowSkills, allowSkillsRoots, reloadPollMs, readinessCanaryMode, readinessRequiredPiFlags, readinessCanarySpecialist, readinessCanaryTimeoutMs };
+}
+function checkPiHelpForFlags(flags = DEFAULT_REQUIRED_PI_FLAGS) {
+  const result = spawnSync23("pi", ["--help"], { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
+  if (result.error || result.status === 127)
+    return "pi_binary_missing";
+  const help = `${result.stdout ?? ""}
+${result.stderr ?? ""}`;
+  const missing = flags.find((flag2) => !help.includes(flag2));
+  return missing ? "pi_flag_missing" : undefined;
 }
 function sendJson(res, statusCode, body) {
   res.writeHead(statusCode, { "content-type": "application/json" });
@@ -40725,6 +40760,20 @@ async function startServe(argv = process.argv.slice(3)) {
   const hotReload = createUserDirWatcher({ loader, userDir, pollMs: args.reloadPollMs });
   let active = 0;
   const children = new Set;
+  const piCanaryCheck = async () => {
+    const requiredFlags = args.readinessRequiredPiFlags.length > 0 ? args.readinessRequiredPiFlags : DEFAULT_REQUIRED_PI_FLAGS;
+    const compatibilityFailure = checkPiHelpForFlags(requiredFlags);
+    if (compatibilityFailure)
+      return compatibilityFailure;
+    if (!args.readinessCanarySpecialist)
+      return;
+    const result = await runScriptSpecialist({ specialist: args.readinessCanarySpecialist, trace: false, timeout_ms: args.readinessCanaryTimeoutMs }, {
+      loader,
+      fallbackModel: args.fallbackModel,
+      observabilityDbPath: args.projectDir
+    });
+    return result.success ? undefined : "pi_smoke_failed";
+  };
   const server = createServer(async (req, res) => {
     if (req.url === "/healthz")
       return sendJson(res, 200, { ok: true });
@@ -40733,10 +40782,12 @@ async function startServe(argv = process.argv.slice(3)) {
         state: readinessState,
         projectDir: args.projectDir,
         dbPath,
-        auditFailureThreshold: args.auditFailureThreshold
+        auditFailureThreshold: args.auditFailureThreshold,
+        piCanaryMode: args.readinessCanaryMode,
+        piCanaryCheck
       });
       if (result.ready) {
-        return sendJson(res, 200, { ready: true, db_write_failures_total: readinessState.dbWriteFailuresTotal });
+        return sendJson(res, 200, { ready: true, ...result.warning ? { warning: result.warning } : {}, db_write_failures_total: readinessState.dbWriteFailuresTotal });
       }
       return sendJson(res, 503, {
         ready: false,
@@ -40809,7 +40860,7 @@ async function startServe(argv = process.argv.slice(3)) {
 async function run30(argv = process.argv.slice(3)) {
   await startServe(argv);
 }
-var AUDIT_WINDOW_MS = 60000;
+var AUDIT_WINDOW_MS = 60000, DEFAULT_REQUIRED_PI_FLAGS;
 var init_serve = __esm(() => {
   init_loader();
   init_script_runner();
@@ -40817,6 +40868,7 @@ var init_serve = __esm(() => {
   init_observability_db();
   init_schema();
   init_serve_hot_reload();
+  DEFAULT_REQUIRED_PI_FLAGS = ["--mode", "--no-session", "--no-extensions", "--no-tools", "--no-context-files", "--no-skills", "--no-prompt-templates", "--no-themes"];
 });
 
 // src/cli/script.ts
@@ -40827,7 +40879,7 @@ __export(exports_script, {
   parseArgs: () => parseArgs13,
   mapExitCode: () => mapExitCode
 });
-import { spawnSync as spawnSync23 } from "child_process";
+import { spawnSync as spawnSync24 } from "child_process";
 function parseVar(entry) {
   const index = entry.indexOf("=");
   if (index <= 0)
@@ -40930,7 +40982,7 @@ function printResult(result, json) {
   console.error(result.error);
 }
 function runUnderLock(lockPath, argv) {
-  const flock = spawnSync23("flock", ["-n", lockPath, "env", "SP_SCRIPT_NO_LOCK=1", process.execPath, process.argv[1], "script", ...argv], {
+  const flock = spawnSync24("flock", ["-n", lockPath, "env", "SP_SCRIPT_NO_LOCK=1", process.execPath, process.argv[1], "script", ...argv], {
     encoding: "utf-8",
     stdio: "inherit"
   });
@@ -41123,7 +41175,7 @@ var init_help = __esm(() => {
 });
 
 // src/index.ts
-import { spawnSync as spawnSync24 } from "child_process";
+import { spawnSync as spawnSync25 } from "child_process";
 
 // node_modules/zod/v4/core/core.js
 var NEVER2 = Object.freeze({
@@ -49533,7 +49585,7 @@ async function run33() {
     if (wantsHelp()) {
       console.log([
         "",
-        "Usage: specialists serve [--port <n>] [--concurrency <n>] [--shutdown-grace-ms <n>] [--project-dir <path>] [--db-path <observability.db>]",
+        "Usage: specialists serve [--port <n>] [--concurrency <n>] [--shutdown-grace-ms <n>] [--project-dir <path>] [--db-path <observability.db>] [--readiness-canary off|warn|require]",
         "",
         "HTTP wrapper for script-class specialists.",
         "",
@@ -49569,7 +49621,7 @@ async function run33() {
   }
   if (sub === "release") {
     console.error("Deprecated. Use `xt release prepare/publish`. This alias will be removed in v4.0.");
-    const result = spawnSync24("xt", ["release", ...process.argv.slice(3)], { stdio: "inherit" });
+    const result = spawnSync25("xt", ["release", ...process.argv.slice(3)], { stdio: "inherit" });
     if (result.error) {
       console.error(`Failed to run xt release: ${result.error.message}`);
       process.exit(1);
