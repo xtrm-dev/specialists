@@ -1260,3 +1260,9 @@
 - `docs/skills.md` — documents skill snapshots as Category B managed by `xt doctor` / `xt update`.
 - `docs/hooks.md` — documents hook snapshots as Category B and separates `specialists doctor` from `xt doctor` drift checks.
 - `docs/cli-reference.md` — updates `sp init`, `sp doctor --check-drift`, `sp prune-stale-defaults`, and xtrm-managed `xt doctor` / `xt update` references.
+## Manual session note — 2026-05-06 specialists-6vy
+
+- `src/specialist/script-runner.ts` — script-class pi invocation now includes full prompt-isolation flags after `--offline`.
+- `tests/unit/specialist/script-runner.test.ts` — regression coverage for script-runner pi isolation argv and child_process spawnSync mock support.
+- `dist/index.js` — rebuilt bundled CLI output containing the script-runner isolation flags.
+

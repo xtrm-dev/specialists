@@ -13,10 +13,14 @@ import {
   runScriptSpecialist,
 } from '../../../src/specialist/script-runner.js';
 
-const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }));
+const { spawnMock, spawnSyncMock } = vi.hoisted(() => ({
+  spawnMock: vi.fn(),
+  spawnSyncMock: vi.fn(() => ({ status: 1, stdout: '', stderr: '' })),
+}));
 
 vi.mock('node:child_process', () => ({
   spawn: spawnMock,
+  spawnSync: spawnSyncMock,
 }));
 
 const baseSpec = {
@@ -41,6 +45,7 @@ const baseSpec = {
 
 afterEach(() => {
   spawnMock.mockReset();
+  spawnSyncMock.mockClear();
   delete process.env.SPECIALISTS_SCRIPT_STDOUT_LIMIT_BYTES;
 });
 
@@ -232,6 +237,25 @@ describe('runScriptSpecialist retained-state caps', () => {
 });
 
 describe('runScriptSpecialist system prompt forwarding', () => {
+  it('isolates script-class pi calls from project context, skills, prompt templates, and themes', async () => {
+    const child = createSpawnMock();
+    const resultPromise = runScriptSpecialist(
+      { specialist: 'changelog-keeper', variables: { name: 'release notes' } },
+      { loader: makeLoader() as never, projectDir: '.' },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    child.stdout.emit('data', Buffer.from(`${JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'output' }] } })}\n`));
+    child.emit('close', 0);
+
+    await resultPromise;
+
+    const spawnArgs: string[] = spawnMock.mock.calls[0][1];
+    expect(spawnArgs).toEqual(expect.arrayContaining(['--no-context-files', '--no-skills', '--no-prompt-templates', '--no-themes']));
+    expect(spawnArgs.indexOf('--no-context-files')).toBeGreaterThan(spawnArgs.indexOf('--offline'));
+    expect(spawnArgs.indexOf('--model')).toBeGreaterThan(spawnArgs.indexOf('--no-themes'));
+  });
+
   it('passes --system-prompt to pi when spec.prompt.system is set', async () => {
     const specWithSystem = {
       ...baseSpec,

@@ -221,6 +221,24 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-05-05T11:54:44.653275+00:00"
+    },
+    {
+      "id": "bug-014",
+      "timestamp": "2026-05-06T09:48:29.854293+00:00",
+      "error_message": "script-runner pi calls leaked CLAUDE.md/AGENTS.md/skills/prompt templates/themes into script-class specialist prompts",
+      "file": "src/specialist/script-runner.ts",
+      "root_cause": "runSingleAttempt used pi isolation flags for session/tools/extensions only; pi still auto-discovered project context files, skills, prompt templates, and themes after --system-prompt.",
+      "fix": "Added --no-context-files --no-skills --no-prompt-templates --no-themes to script-runner pi argv, rebuilt dist/index.js, and added a regression test asserting the flags.",
+      "tags": [
+        "bugfix",
+        "script-runner",
+        "pi",
+        "prompt-isolation",
+        "service-migration"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-06T09:48:29.854293+00:00"
     }
   ]
 }
