@@ -52,7 +52,14 @@ afterEach(() => {
 class FakeChild extends EventEmitter {
   stdout = new EventEmitter();
   stderr = new EventEmitter();
+  stdin = new EventEmitter() as EventEmitter & { write: ReturnType<typeof vi.fn>; end: ReturnType<typeof vi.fn> };
   kill = vi.fn();
+
+  constructor() {
+    super();
+    this.stdin.write = vi.fn();
+    this.stdin.end = vi.fn();
+  }
 }
 
 function makeLoader(spec = baseSpec) {
@@ -254,6 +261,46 @@ describe('runScriptSpecialist system prompt forwarding', () => {
     expect(spawnArgs).toEqual(expect.arrayContaining(['--no-context-files', '--no-skills', '--no-prompt-templates', '--no-themes']));
     expect(spawnArgs.indexOf('--no-context-files')).toBeGreaterThan(spawnArgs.indexOf('--offline'));
     expect(spawnArgs.indexOf('--model')).toBeGreaterThan(spawnArgs.indexOf('--no-themes'));
+  });
+
+  it('passes rendered prompt through stdin instead of argv', async () => {
+    const child = createSpawnMock();
+    const renderedPrompt = 'summarize --dangerous-looking @article payload';
+    const resultPromise = runScriptSpecialist(
+      { specialist: 'changelog-keeper', template: renderedPrompt },
+      { loader: makeLoader() as never, projectDir: '.' },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    child.stdout.emit('data', Buffer.from(`${JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'output' }] } })}\n`));
+    child.emit('close', 0);
+
+    await resultPromise;
+
+    const spawnArgs: string[] = spawnMock.mock.calls[0][1];
+    const spawnOptions = spawnMock.mock.calls[0][2];
+    expect(spawnArgs).not.toContain(renderedPrompt);
+    expect(spawnArgs.at(-1)).toBe('anthropic/claude-sonnet-4-6');
+    expect(spawnOptions).toMatchObject({ stdio: ['pipe', 'pipe', 'pipe'] });
+    expect(child.stdin.write).toHaveBeenCalledWith(renderedPrompt);
+    expect(child.stdin.end).toHaveBeenCalledTimes(1);
+  });
+
+  it('swallows child stdin errors and lets close handling classify the attempt', async () => {
+    const child = createSpawnMock();
+    const resultPromise = runScriptSpecialist(
+      { specialist: 'changelog-keeper', variables: { name: 'release notes' } },
+      { loader: makeLoader() as never, projectDir: '.' },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(() => child.stdin.emit('error', new Error('EPIPE'))).not.toThrow();
+    child.stderr.emit('data', Buffer.from('broken pipe'));
+    child.emit('close', 1);
+
+    const result = await resultPromise;
+
+    expect(result).toMatchObject({ success: false, error: 'broken pipe' });
   });
 
   it('passes --system-prompt to pi when spec.prompt.system is set', async () => {

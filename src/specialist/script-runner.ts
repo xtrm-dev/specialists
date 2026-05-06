@@ -385,10 +385,15 @@ function runSingleAttempt(prompt: string, model: string, thinkingLevel: string |
     ];
     if (thinkingLevel) args.push('--thinking', thinkingLevel);
     if (systemPrompt) args.push('--system-prompt', systemPrompt);
-    args.push(prompt);
 
-    const pi = spawn('pi', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const pi = spawn('pi', args, { stdio: ['pipe', 'pipe', 'pipe'] });
     options.onChild?.(pi);
+    pi.stdin?.on('error', () => {
+      // The child close/error handlers report Pi failures. Swallow stdin EPIPE-style
+      // races so failed children do not crash the orchestrator process.
+    });
+    pi.stdin?.write(prompt);
+    pi.stdin?.end();
 
     let stderr = '';
     let timedOut = false;

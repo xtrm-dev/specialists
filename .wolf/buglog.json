@@ -239,6 +239,27 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-05-06T09:48:29.854293+00:00"
+    },
+    {
+      "id": "bug-015",
+      "timestamp": "2026-05-06T12:49:33.392314+00:00",
+      "error_message": "script-runner passed rendered task prompts as pi argv, exposing prompt text in process lists and risking CLI misparse for -- or @-prefixed content",
+      "file": "src/specialist/script-runner.ts",
+      "root_cause": "runSingleAttempt appended the rendered prompt to the pi argument array and spawned pi with stdin ignored.",
+      "fix": "Removed prompt from argv, spawned pi with stdin pipe, wrote the rendered prompt to stdin, closed stdin, swallowed stdin EPIPE/error events, rebuilt dist, and added regression tests for argv absence, stdin write/end, and stdin error handling.",
+      "tags": [
+        "bugfix",
+        "script-runner",
+        "pi",
+        "stdin",
+        "argv-leak",
+        "darth-feedor"
+      ],
+      "related_bugs": [
+        "bug-014"
+      ],
+      "occurrences": 1,
+      "last_seen": "2026-05-06T12:49:33.392314+00:00"
     }
   ]
 }
