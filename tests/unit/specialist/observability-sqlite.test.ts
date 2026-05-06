@@ -1,10 +1,11 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { Database } from 'bun:sqlite';
-import { rmSync, mkdirSync } from 'node:fs';
+import { existsSync, rmSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   createObservabilitySqliteClient,
+  createObservabilitySqliteClientAtPath,
   enforceWalMode,
   initSchema,
   parseJournalMode,
@@ -54,6 +55,19 @@ describe('observability-sqlite', () => {
     sqliteClient = client;
     return client!;
   };
+
+  it('opens and initializes an explicit observability database file path', () => {
+    const explicitPath = join(tempRoot, 'custom', 'observability.db');
+
+    const client = createObservabilitySqliteClientAtPath(explicitPath);
+    sqliteClient = client;
+
+    expect(client).not.toBeNull();
+    expect(existsSync(explicitPath)).toBe(true);
+    db = new Database(explicitPath);
+    const schemaVersion = db.query('SELECT MAX(version) AS version FROM schema_version').get() as { version?: number };
+    expect(schemaVersion.version).toBe(OBSERVABILITY_SCHEMA_VERSION);
+  });
 
   describe('enforceWalMode', () => {
     it('enables WAL mode on a fresh database', () => {

@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { SpecialistLoader } from './loader.js';
 import { renderTemplate } from './templateEngine.js';
-import { createObservabilitySqliteClient } from './observability-sqlite.js';
+import { createObservabilitySqliteClient, createObservabilitySqliteClientAtPath } from './observability-sqlite.js';
 import type { Specialist } from './schema.js';
 import type { SupervisorStatus } from './supervisor.js';
 
@@ -277,8 +277,8 @@ function resolveEnvAssistantTextLimitBytes(): number | undefined {
 }
 
 function openObservabilityClient(options: ScriptRunnerOptions): ReturnType<typeof createObservabilitySqliteClient> {
-  const dbPath = options.observabilityDbPath ?? options.projectDir;
-  return createObservabilitySqliteClient(dbPath);
+  if (options.observabilityDbPath) return createObservabilitySqliteClientAtPath(options.observabilityDbPath);
+  return createObservabilitySqliteClient(options.projectDir);
 }
 
 function resolveScriptSpecialistName(name: string): string {

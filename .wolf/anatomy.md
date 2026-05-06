@@ -1260,3 +1260,7 @@
 - `docs/skills.md` — documents skill snapshots as Category B managed by `xt doctor` / `xt update`.
 - `docs/hooks.md` — documents hook snapshots as Category B and separates `specialists doctor` from `xt doctor` drift checks.
 - `docs/cli-reference.md` — updates `sp init`, `sp doctor --check-drift`, `sp prune-stale-defaults`, and xtrm-managed `xt doctor` / `xt update` references.
+
+## Script/service observability DB path
+
+- 2026-05-06: `src/specialist/observability-sqlite.ts` exports `createObservabilitySqliteClientAtPath(dbPath)` for exact SQLite file paths. `sp script --db-path` and `sp serve --db-path` use that direct path; omit the flag to keep `<git-root>/.specialists/db/observability.db`.

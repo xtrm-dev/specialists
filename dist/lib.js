@@ -6936,7 +6936,8 @@ function renderTemplate(template, variables) {
 }
 
 // src/specialist/observability-sqlite.ts
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { dirname, join as join2 } from "node:path";
 
 // src/specialist/observability-db.ts
 import { spawnSync } from "node:child_process";
@@ -9032,22 +9033,29 @@ class SqliteClient {
     this.db.close();
   }
 }
-function createObservabilitySqliteClient(cwd = process.cwd()) {
+function openObservabilitySqliteClient(dbPath) {
   if (!loadBunDatabase())
-    return null;
-  const location = resolveObservabilityDbLocation(cwd);
-  if (!existsSync(location.dbPath))
     return null;
   try {
     const Ctor = loadBunDatabase();
-    const initDb = new Ctor(location.dbPath);
+    const initDb = new Ctor(dbPath);
     initDb.run(`PRAGMA busy_timeout=${BUSY_TIMEOUT_MS}`);
     initSchema(initDb);
     initDb.close();
-    return new SqliteClient(location.dbPath);
+    return new SqliteClient(dbPath);
   } catch {
     return null;
   }
+}
+function createObservabilitySqliteClient(cwd = process.cwd()) {
+  const location = resolveObservabilityDbLocation(cwd);
+  if (!existsSync(location.dbPath))
+    return null;
+  return openObservabilitySqliteClient(location.dbPath);
+}
+function createObservabilitySqliteClientAtPath(dbPath) {
+  mkdirSync(dirname(dbPath), { recursive: true });
+  return openObservabilitySqliteClient(dbPath);
 }
 
 // src/specialist/script-runner.ts
@@ -9210,8 +9218,9 @@ function resolveEnvAssistantTextLimitBytes() {
   return Math.floor(envLimit);
 }
 function openObservabilityClient(options) {
-  const dbPath = options.observabilityDbPath ?? options.projectDir;
-  return createObservabilitySqliteClient(dbPath);
+  if (options.observabilityDbPath)
+    return createObservabilitySqliteClientAtPath(options.observabilityDbPath);
+  return createObservabilitySqliteClient(options.projectDir);
 }
 function resolveScriptSpecialistName(name) {
   if (name === "changelog-keeper")
@@ -9247,7 +9256,8 @@ async function runScriptSpecialist(input, options) {
     const assistantTextLimitBytes = resolveAssistantTextLimitBytes(spec);
     const attempts = [];
     for (const model of modelCandidates) {
-      const attempt = await runSingleAttempt(prompt, model, input.thinking_level ?? spec.specialist.execution.thinking_level, timeoutMs, assistantTextLimitBytes, options);
+      const systemPrompt = spec.specialist.prompt.system || undefined;
+      const attempt = await runSingleAttempt(prompt, model, input.thinking_level ?? spec.specialist.execution.thinking_level, timeoutMs, assistantTextLimitBytes, options, systemPrompt);
       attempts.push(attempt);
       const parsed = classifyAttempt(attempt);
       if (parsed.retryable)
@@ -9290,11 +9300,13 @@ function collectModelCandidates(input, spec, options) {
   const candidates = [input.model_override, spec.specialist.execution.model, spec.specialist.execution.fallback_model, options.fallbackModel].filter((value) => typeof value === "string" && value.length > 0);
   return [...new Set(candidates)];
 }
-function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assistantTextLimitBytes, options) {
+function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assistantTextLimitBytes, options, systemPrompt) {
   return new Promise((resolve, reject) => {
-    const args = ["--mode", "json", "--no-session", "--no-extensions", "--no-tools", "--model", model];
+    const args = ["--mode", "json", "--no-session", "--no-extensions", "--no-tools", "--offline", "--model", model];
     if (thinkingLevel)
       args.push("--thinking", thinkingLevel);
+    if (systemPrompt)
+      args.push("--system-prompt", systemPrompt);
     args.push(prompt);
     const pi = spawn("pi", args, { stdio: ["ignore", "pipe", "pipe"] });
     options.onChild?.(pi);
@@ -9405,7 +9417,7 @@ function isRetryableModelFailure(stderr, text) {
 }
 // src/specialist/loader.ts
 import { readdir, readFile, stat } from "node:fs/promises";
-import { basename, join as join2 } from "node:path";
+import { basename, join as join3 } from "node:path";
 import { existsSync as existsSync3 } from "node:fs";
 
 // node_modules/yaml/dist/index.js
@@ -13458,15 +13470,15 @@ class SpecialistLoader {
   }
   getScanDirs() {
     const dirs = [
-      { path: join2(this.projectDir, ".specialists", "user"), scope: "user", source: "user" },
-      { path: join2(this.projectDir, ".specialists", "user", "specialists"), scope: "user", source: "legacy" },
-      { path: join2(this.projectDir, ".specialists", "default"), scope: "default", source: "default-mirror" },
-      { path: join2(this.projectDir, ".specialists", "default", "specialists"), scope: "default", source: "legacy" },
-      { path: join2(this.projectDir, "config", "specialists"), scope: "package", source: "package-fallback" },
+      { path: join3(this.projectDir, ".specialists", "user"), scope: "user", source: "user" },
+      { path: join3(this.projectDir, ".specialists", "user", "specialists"), scope: "user", source: "legacy" },
+      { path: join3(this.projectDir, ".specialists", "default"), scope: "default", source: "default-mirror" },
+      { path: join3(this.projectDir, ".specialists", "default", "specialists"), scope: "default", source: "legacy" },
+      { path: join3(this.projectDir, "config", "specialists"), scope: "package", source: "package-fallback" },
       { path: resolveCanonicalAssetDir("specialists") ?? "", scope: "package", source: "package-live" },
-      { path: join2(this.projectDir, "specialists"), scope: "default", source: "legacy" },
-      { path: join2(this.projectDir, ".claude", "specialists"), scope: "default", source: "legacy" },
-      { path: join2(this.projectDir, ".agent-forge", "specialists"), scope: "default", source: "legacy" }
+      { path: join3(this.projectDir, "specialists"), scope: "default", source: "legacy" },
+      { path: join3(this.projectDir, ".claude", "specialists"), scope: "default", source: "legacy" },
+      { path: join3(this.projectDir, ".agent-forge", "specialists"), scope: "default", source: "legacy" }
     ];
     return dirs.filter((d) => d.path && existsSync3(d.path));
   }
@@ -13476,11 +13488,11 @@ class SpecialistLoader {
     return JSON.stringify($parse(content));
   }
   resolveSpecialistPath(dirPath, specialistName) {
-    const jsonPath = join2(dirPath, `${specialistName}.specialist.json`);
+    const jsonPath = join3(dirPath, `${specialistName}.specialist.json`);
     if (existsSync3(jsonPath)) {
       return { filePath: jsonPath, deprecatedYaml: false };
     }
-    const yamlPath = join2(dirPath, `${specialistName}.specialist.yaml`);
+    const yamlPath = join3(dirPath, `${specialistName}.specialist.yaml`);
     if (existsSync3(yamlPath)) {
       return { filePath: yamlPath, deprecatedYaml: true };
     }
@@ -13558,9 +13570,9 @@ class SpecialistLoader {
         const fileDir = dir.path;
         const resolved = rawPaths.map((p) => {
           if (p.startsWith("~/"))
-            return join2(process.env.HOME || "", p.slice(2));
+            return join3(process.env.HOME || "", p.slice(2));
           if (p.startsWith("./"))
-            return join2(fileDir, p.slice(2));
+            return join3(fileDir, p.slice(2));
           return p;
         });
         spec.specialist.skills.paths = resolved;

@@ -221,6 +221,24 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-05-05T11:54:44.653275+00:00"
+    },
+    {
+      "id": "bug-014",
+      "timestamp": "2026-05-06T17:20:00+00:00",
+      "error_message": "sp script --db-path /tmp/x/observability.db was treated like a cwd/project directory and could write/read the wrong observability DB",
+      "file": "src/specialist/script-runner.ts; src/specialist/observability-sqlite.ts; src/cli/serve.ts; src/cli/script.ts",
+      "root_cause": "createObservabilitySqliteClient only accepted a cwd, but script/service options named observabilityDbPath passed that value into cwd-based DB resolution.",
+      "fix": "Added createObservabilitySqliteClientAtPath(dbPath) for direct SQLite paths; script and serve now use exact --db-path only when provided and retain project default DB behavior otherwise; added unit/integration coverage.",
+      "tags": [
+        "bugfix",
+        "script-runner",
+        "observability",
+        "db-path",
+        "service"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-06T17:20:00+00:00"
     }
   ]
 }

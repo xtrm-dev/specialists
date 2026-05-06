@@ -19156,8 +19156,8 @@ function resolveCurrentBranch(cwd = process.cwd()) {
 var init_job_root = () => {};
 
 // src/specialist/observability-sqlite.ts
-import { existsSync as existsSync5, readFileSync as readFileSync3, statSync } from "fs";
-import { join as join5 } from "path";
+import { existsSync as existsSync5, mkdirSync as mkdirSync3, readFileSync as readFileSync3, statSync } from "fs";
+import { dirname as dirname3, join as join5 } from "path";
 function loadBunDatabase() {
   if (_probed)
     return _BunDatabase;
@@ -21220,22 +21220,29 @@ function hasRunCompleteEvent(jobId, cwd = process.cwd()) {
   }
   return false;
 }
-function createObservabilitySqliteClient(cwd = process.cwd()) {
+function openObservabilitySqliteClient(dbPath) {
   if (!loadBunDatabase())
-    return null;
-  const location = resolveObservabilityDbLocation(cwd);
-  if (!existsSync5(location.dbPath))
     return null;
   try {
     const Ctor = loadBunDatabase();
-    const initDb = new Ctor(location.dbPath);
+    const initDb = new Ctor(dbPath);
     initDb.run(`PRAGMA busy_timeout=${BUSY_TIMEOUT_MS}`);
     initSchema(initDb);
     initDb.close();
-    return new SqliteClient(location.dbPath);
+    return new SqliteClient(dbPath);
   } catch {
     return null;
   }
+}
+function createObservabilitySqliteClient(cwd = process.cwd()) {
+  const location = resolveObservabilityDbLocation(cwd);
+  if (!existsSync5(location.dbPath))
+    return null;
+  return openObservabilitySqliteClient(location.dbPath);
+}
+function createObservabilitySqliteClientAtPath(dbPath) {
+  mkdirSync3(dirname3(dbPath), { recursive: true });
+  return openObservabilitySqliteClient(dbPath);
 }
 var _BunDatabase = null, _probed = false, BUSY_TIMEOUT_MS = 5000, MAX_RETRY_ATTEMPTS = 5, BASE_RETRY_DELAY_MS = 50, STALE_CLAIM_AGE_MS = 60000;
 var init_observability_sqlite = __esm(() => {
@@ -23023,7 +23030,7 @@ var init_runner = __esm(() => {
 
 // src/specialist/hooks.ts
 import { appendFile, mkdir } from "fs/promises";
-import { dirname as dirname3 } from "path";
+import { dirname as dirname4 } from "path";
 
 class HookEmitter {
   tracePath;
@@ -23031,7 +23038,7 @@ class HookEmitter {
   ready;
   constructor(options) {
     this.tracePath = options.tracePath;
-    this.ready = mkdir(dirname3(options.tracePath), { recursive: true }).then(() => {});
+    this.ready = mkdir(dirname4(options.tracePath), { recursive: true }).then(() => {});
   }
   async emit(hook, invocationId, specialistName, specialistVersion, payload) {
     await this.ready;
@@ -23085,11 +23092,11 @@ __export(exports_version, {
 });
 import { createRequire } from "module";
 import { fileURLToPath as fileURLToPath2 } from "url";
-import { dirname as dirname4, join as join7 } from "path";
+import { dirname as dirname5, join as join7 } from "path";
 import { existsSync as existsSync8 } from "fs";
 async function run2() {
   const req = createRequire(import.meta.url);
-  const here = dirname4(fileURLToPath2(import.meta.url));
+  const here = dirname5(fileURLToPath2(import.meta.url));
   const bundlePkgPath = join7(here, "..", "package.json");
   const sourcePkgPath = join7(here, "..", "..", "package.json");
   let pkg;
@@ -24219,7 +24226,7 @@ import {
   closeSync,
   existsSync as existsSync10,
   fsyncSync,
-  mkdirSync as mkdirSync3,
+  mkdirSync as mkdirSync4,
   openSync,
   readdirSync as readdirSync2,
   readFileSync as readFileSync8,
@@ -24656,7 +24663,7 @@ class Supervisor {
     return join9(this.resolvedJobsDir, "..", "ready");
   }
   writeReadyMarker(id) {
-    mkdirSync3(this.readyDir(), { recursive: true });
+    mkdirSync4(this.readyDir(), { recursive: true });
     writeFileSync3(join9(this.readyDir(), id), "", "utf-8");
   }
   withComputedLiveness(status) {
@@ -24787,7 +24794,7 @@ class Supervisor {
     if (!this.isJobFileOutputEnabled)
       return;
     const normalizedStatus = this.withStatusLineageDefaults(id, data);
-    mkdirSync3(this.jobDir(id), { recursive: true });
+    mkdirSync4(this.jobDir(id), { recursive: true });
     const path = this.statusPath(id);
     const tmp = path + ".tmp";
     writeFileSync3(tmp, JSON.stringify(normalizedStatus, null, 2), "utf-8");
@@ -24949,8 +24956,8 @@ class Supervisor {
     const id = crypto.randomUUID().slice(0, 6);
     const dir = this.jobDir(id);
     const startedAtMs = Date.now();
-    mkdirSync3(dir, { recursive: true });
-    mkdirSync3(this.readyDir(), { recursive: true });
+    mkdirSync4(dir, { recursive: true });
+    mkdirSync4(this.readyDir(), { recursive: true });
     const nodeId = runOptions.variables?.node_id ?? runOptions.variables?.SPECIALISTS_NODE_ID;
     const variablesKeys = Object.keys(runOptions.variables ?? {});
     const activatedSkills = (runOptions.variables?.activated_skills ?? runOptions.variables?.skills_activated ?? "").split(",").map((skill) => skill.trim()).filter((skill) => skill.length > 0);
@@ -25228,7 +25235,7 @@ ${appendError}
       try {
         const output = await resumeFn(task);
         latestOutput = output;
-        mkdirSync3(this.jobDir(id), { recursive: true });
+        mkdirSync4(this.jobDir(id), { recursive: true });
         writeFileSync3(this.resultPath(id), output, "utf-8");
         try {
           this.withSqliteOperation("upsertResult:resume_turn", (client) => client.upsertResult(id, output));
@@ -25636,7 +25643,7 @@ ${appendError}
       });
       latestOutput = result.output;
       if (this.isJobFileOutputEnabled) {
-        mkdirSync3(this.jobDir(id), { recursive: true });
+        mkdirSync4(this.jobDir(id), { recursive: true });
         writeFileSync3(this.resultPath(id), latestOutput, "utf-8");
       }
       const elapsed = Math.round((Date.now() - startedAtMs) / 1000);
@@ -26624,9 +26631,9 @@ var exports_init = {};
 __export(exports_init, {
   run: () => run7
 });
-import { copyFileSync, cpSync, existsSync as existsSync12, lstatSync, mkdirSync as mkdirSync4, readdirSync as readdirSync4, readFileSync as readFileSync10, readlinkSync, renameSync as renameSync2, symlinkSync, unlinkSync, writeFileSync as writeFileSync4 } from "fs";
+import { copyFileSync, cpSync, existsSync as existsSync12, lstatSync, mkdirSync as mkdirSync5, readdirSync as readdirSync4, readFileSync as readFileSync10, readlinkSync, renameSync as renameSync2, symlinkSync, unlinkSync, writeFileSync as writeFileSync4 } from "fs";
 import { spawnSync as spawnSync9 } from "child_process";
-import { basename as basename4, dirname as dirname5, join as join11, relative, resolve as resolve6 } from "path";
+import { basename as basename4, dirname as dirname6, join as join11, relative, resolve as resolve6 } from "path";
 function ok(msg) {
   console.log(`  ${green4("\u2713")} ${msg}`);
 }
@@ -26680,7 +26687,7 @@ function migrateLegacySpecialists(cwd, scope) {
     return;
   const targetDir = join11(cwd, ".specialists", scope);
   if (!existsSync12(targetDir)) {
-    mkdirSync4(targetDir, { recursive: true });
+    mkdirSync5(targetDir, { recursive: true });
   }
   const files = readdirSync4(sourceDir).filter((f) => f.endsWith(".specialist.json") || f.endsWith(".specialist.json"));
   if (files.length === 0)
@@ -26717,7 +26724,7 @@ function copyCanonicalSpecialists(cwd) {
     return;
   }
   if (!existsSync12(targetDir)) {
-    mkdirSync4(targetDir, { recursive: true });
+    mkdirSync5(targetDir, { recursive: true });
   }
   let copied = 0;
   let refreshed = 0;
@@ -26752,7 +26759,7 @@ function copyCanonicalMandatoryRules(cwd) {
     return;
   }
   if (!existsSync12(targetDir)) {
-    mkdirSync4(targetDir, { recursive: true });
+    mkdirSync5(targetDir, { recursive: true });
   }
   let copied = 0;
   let refreshed = 0;
@@ -26787,7 +26794,7 @@ function copyCanonicalNodeConfigs(cwd) {
     return;
   }
   if (!existsSync12(targetDir)) {
-    mkdirSync4(targetDir, { recursive: true });
+    mkdirSync5(targetDir, { recursive: true });
   }
   let copied = 0;
   let refreshed = 0;
@@ -26823,8 +26830,8 @@ function installProjectHooks(cwd) {
     skip("no hook files found in package");
     return;
   }
-  mkdirSync4(targetDir, { recursive: true });
-  mkdirSync4(claudeHooksDir, { recursive: true });
+  mkdirSync5(targetDir, { recursive: true });
+  mkdirSync5(claudeHooksDir, { recursive: true });
   let copied = 0;
   let skippedCopies = 0;
   let linked = 0;
@@ -26849,7 +26856,7 @@ function installProjectHooks(cwd) {
         rewiredLinks++;
         continue;
       }
-      const currentTarget = resolve6(dirname5(claudeHookPath), readlinkSync(claudeHookPath));
+      const currentTarget = resolve6(dirname6(claudeHookPath), readlinkSync(claudeHookPath));
       if (currentTarget !== xtrmDest) {
         unlinkSync(claudeHookPath);
         symlinkSync(relativeTarget, claudeHookPath);
@@ -26877,7 +26884,7 @@ function ensureProjectHookWiring(cwd) {
   const settingsPath = join11(cwd, ".claude", "settings.json");
   const settingsDir = join11(cwd, ".claude");
   if (!existsSync12(settingsDir)) {
-    mkdirSync4(settingsDir, { recursive: true });
+    mkdirSync5(settingsDir, { recursive: true });
   }
   const settings = loadJson(settingsPath, {});
   if (!settings.hooks || typeof settings.hooks !== "object") {
@@ -26913,10 +26920,10 @@ function ensureProjectHookWiring(cwd) {
 }
 function ensureRootSymlink(rootPath, expectedTargetPath) {
   if (!existsSync12(rootPath)) {
-    mkdirSync4(dirname5(rootPath), { recursive: true });
-    const relTarget = relative(dirname5(rootPath), expectedTargetPath);
+    mkdirSync5(dirname6(rootPath), { recursive: true });
+    const relTarget = relative(dirname6(rootPath), expectedTargetPath);
     symlinkSync(relTarget, rootPath);
-    ok(`created ${basename4(dirname5(rootPath))}/${basename4(rootPath)} \u2192 ${relTarget}`);
+    ok(`created ${basename4(dirname6(rootPath))}/${basename4(rootPath)} \u2192 ${relTarget}`);
     return;
   }
   const stats = lstatSync(rootPath);
@@ -26924,7 +26931,7 @@ function ensureRootSymlink(rootPath, expectedTargetPath) {
     throw new Error(`${rootPath} must be a symlink to ${expectedTargetPath}. Aborting.`);
   }
   const linkTarget = readlinkSync(rootPath);
-  const resolvedTarget = resolve6(dirname5(rootPath), linkTarget);
+  const resolvedTarget = resolve6(dirname6(rootPath), linkTarget);
   const resolvedExpected = resolve6(expectedTargetPath);
   if (resolvedTarget === resolvedExpected) {
     return;
@@ -26935,9 +26942,9 @@ function ensureRootSymlink(rootPath, expectedTargetPath) {
   ];
   if (legacyTargets.includes(resolvedTarget)) {
     unlinkSync(rootPath);
-    const relTarget = relative(dirname5(rootPath), expectedTargetPath);
+    const relTarget = relative(dirname6(rootPath), expectedTargetPath);
     symlinkSync(relTarget, rootPath);
-    ok(`rewired ${basename4(dirname5(rootPath))}/${basename4(rootPath)} \u2192 ${relTarget}`);
+    ok(`rewired ${basename4(dirname6(rootPath))}/${basename4(rootPath)} \u2192 ${relTarget}`);
     return;
   }
   throw new Error(`${rootPath} points to ${linkTarget}, expected ${expectedTargetPath}. Aborting.`);
@@ -26958,7 +26965,7 @@ function ensureActiveSkillSymlink(defaultSkillPath, activeLinkPath) {
   if (!stats.isSymbolicLink()) {
     throw new Error(`${activeLinkPath} already exists and is not a symlink.`);
   }
-  const currentTarget = resolve6(dirname5(activeLinkPath), readlinkSync(activeLinkPath));
+  const currentTarget = resolve6(dirname6(activeLinkPath), readlinkSync(activeLinkPath));
   if (currentTarget !== resolve6(defaultSkillPath)) {
     throw new Error(`${activeLinkPath} points to an unexpected target.`);
   }
@@ -26980,8 +26987,8 @@ function installProjectSkills(cwd, syncSkills) {
   }
   const defaultRoot = join11(cwd, ".xtrm", "skills", "default");
   const activeRoot = join11(cwd, ".xtrm", "skills", "active");
-  mkdirSync4(defaultRoot, { recursive: true });
-  mkdirSync4(activeRoot, { recursive: true });
+  mkdirSync5(defaultRoot, { recursive: true });
+  mkdirSync5(activeRoot, { recursive: true });
   ensureRootSymlink(join11(cwd, ".claude", "skills"), activeRoot);
   ensureRootSymlink(join11(cwd, ".pi", "skills"), activeRoot);
   let copied = 0;
@@ -27012,7 +27019,7 @@ function createSpecialistsDirs(cwd) {
   let created = 0;
   for (const dir of [defaultDir, userDir]) {
     if (!existsSync12(dir)) {
-      mkdirSync4(dir, { recursive: true });
+      mkdirSync5(dir, { recursive: true });
       created++;
     }
   }
@@ -27028,7 +27035,7 @@ function createRuntimeDirs(cwd) {
   let created = 0;
   for (const dir of runtimeDirs) {
     if (!existsSync12(dir)) {
-      mkdirSync4(dir, { recursive: true });
+      mkdirSync5(dir, { recursive: true });
       created++;
     }
   }
@@ -27161,7 +27168,7 @@ function validateInitPostconditions(cwd) {
       continue;
     }
     const expectedTarget = resolve6(xtrmHooksDir, hookFile);
-    const resolvedTarget = resolve6(dirname5(claudeHookPath), readlinkSync(claudeHookPath));
+    const resolvedTarget = resolve6(dirname6(claudeHookPath), readlinkSync(claudeHookPath));
     if (resolvedTarget !== expectedTarget) {
       warnings.push(`.claude/hooks/${hookFile} points to unexpected target`);
     }
@@ -27215,7 +27222,7 @@ function validateInitPostconditions(cwd) {
       warnings.push(`${relative(cwd, symlink.linkPath)} is not a symlink`);
       continue;
     }
-    const resolvedTarget = resolve6(dirname5(symlink.linkPath), readlinkSync(symlink.linkPath));
+    const resolvedTarget = resolve6(dirname6(symlink.linkPath), readlinkSync(symlink.linkPath));
     if (resolvedTarget !== resolve6(symlink.expectedTarget)) {
       warnings.push(`${relative(cwd, symlink.linkPath)} points to an unexpected target`);
     }
@@ -27392,8 +27399,8 @@ var exports_db = {};
 __export(exports_db, {
   run: () => run9
 });
-import { existsSync as existsSync13, mkdirSync as mkdirSync5, readdirSync as readdirSync5, readFileSync as readFileSync11, writeFileSync as writeFileSync5 } from "fs";
-import { dirname as dirname6, join as join12, resolve as resolve7 } from "path";
+import { existsSync as existsSync13, mkdirSync as mkdirSync6, readdirSync as readdirSync5, readFileSync as readFileSync11, writeFileSync as writeFileSync5 } from "fs";
+import { dirname as dirname7, join as join12, resolve as resolve7 } from "path";
 function formatBytes(bytes) {
   if (bytes < 1024)
     return `${bytes} B`;
@@ -28053,8 +28060,8 @@ function runBenchmarkExport(options) {
       });
     }
     rows.sort((a, b) => a.task_id.localeCompare(b.task_id) || a.executor_job_id.localeCompare(b.executor_job_id));
-    const outputDirectory = dirname6(options.outputPath);
-    mkdirSync5(outputDirectory, { recursive: true });
+    const outputDirectory = dirname7(options.outputPath);
+    mkdirSync6(outputDirectory, { recursive: true });
     const jsonl = rows.map((row) => JSON.stringify(row)).join(`
 `);
     writeFileSync5(options.outputPath, rows.length > 0 ? `${jsonl}
@@ -28293,8 +28300,9 @@ function resolveEnvAssistantTextLimitBytes() {
   return Math.floor(envLimit);
 }
 function openObservabilityClient(options) {
-  const dbPath = options.observabilityDbPath ?? options.projectDir;
-  return createObservabilitySqliteClient(dbPath);
+  if (options.observabilityDbPath)
+    return createObservabilitySqliteClientAtPath(options.observabilityDbPath);
+  return createObservabilitySqliteClient(options.projectDir);
 }
 function resolveScriptSpecialistName(name) {
   if (name === "changelog-keeper")
@@ -28330,7 +28338,8 @@ async function runScriptSpecialist(input2, options) {
     const assistantTextLimitBytes = resolveAssistantTextLimitBytes(spec);
     const attempts = [];
     for (const model of modelCandidates) {
-      const attempt = await runSingleAttempt(prompt, model, input2.thinking_level ?? spec.specialist.execution.thinking_level, timeoutMs, assistantTextLimitBytes, options);
+      const systemPrompt = spec.specialist.prompt.system || undefined;
+      const attempt = await runSingleAttempt(prompt, model, input2.thinking_level ?? spec.specialist.execution.thinking_level, timeoutMs, assistantTextLimitBytes, options, systemPrompt);
       attempts.push(attempt);
       const parsed = classifyAttempt(attempt);
       if (parsed.retryable)
@@ -28373,11 +28382,13 @@ function collectModelCandidates(input2, spec, options) {
   const candidates = [input2.model_override, spec.specialist.execution.model, spec.specialist.execution.fallback_model, options.fallbackModel].filter((value) => typeof value === "string" && value.length > 0);
   return [...new Set(candidates)];
 }
-function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assistantTextLimitBytes, options) {
+function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assistantTextLimitBytes, options, systemPrompt) {
   return new Promise((resolve8, reject) => {
-    const args = ["--mode", "json", "--no-session", "--no-extensions", "--no-tools", "--model", model];
+    const args = ["--mode", "json", "--no-session", "--no-extensions", "--no-tools", "--offline", "--model", model];
     if (thinkingLevel)
       args.push("--thinking", thinkingLevel);
+    if (systemPrompt)
+      args.push("--system-prompt", systemPrompt);
     args.push(prompt);
     const pi = spawn3("pi", args, { stdio: ["ignore", "pipe", "pipe"] });
     options.onChild?.(pi);
@@ -28652,7 +28663,7 @@ var exports_edit = {};
 __export(exports_edit, {
   run: () => run11
 });
-import { existsSync as existsSync15, mkdirSync as mkdirSync6, readFileSync as readFileSync13, writeFileSync as writeFileSync6 } from "fs";
+import { existsSync as existsSync15, mkdirSync as mkdirSync7, readFileSync as readFileSync13, writeFileSync as writeFileSync6 } from "fs";
 import { join as join13 } from "path";
 function loadPresets() {
   const paths = [
@@ -29090,7 +29101,7 @@ function createUserFork(source, targetName) {
   if (source.scope === "user")
     return source;
   const targetDir = join13(process.cwd(), ".specialists", "user");
-  mkdirSync6(targetDir, { recursive: true });
+  mkdirSync7(targetDir, { recursive: true });
   const targetFile = join13(targetDir, `${targetName}.specialist.json`);
   const doc2 = readJsonFile2(source.filePath);
   doc2.specialist = doc2.specialist ?? {};
@@ -29400,7 +29411,7 @@ __export(exports_config, {
 });
 import { readFileSync as readFileSync14 } from "fs";
 import { spawnSync as spawnSync10 } from "child_process";
-import { dirname as dirname7, join as join15 } from "path";
+import { dirname as dirname8, join as join15 } from "path";
 import { fileURLToPath as fileURLToPath3 } from "url";
 function usage2() {
   return [
@@ -29446,7 +29457,7 @@ function getGitTopLevel(projectDir) {
   return result.stdout.trim() || undefined;
 }
 function getRuntimePackageVersion() {
-  const runtimeDir = dirname7(fileURLToPath3(import.meta.url));
+  const runtimeDir = dirname8(fileURLToPath3(import.meta.url));
   const packageJsonPath = runtimeDir.includes("/dist/") ? join15(runtimeDir, "..", "package.json") : join15(runtimeDir, "..", "..", "package.json");
   return readPackageVersion(packageJsonPath);
 }
@@ -29585,7 +29596,7 @@ var init_config = __esm(() => {
 });
 
 // src/specialist/worktree.ts
-import { existsSync as existsSync16, symlinkSync as symlinkSync2, mkdirSync as mkdirSync7 } from "fs";
+import { existsSync as existsSync16, symlinkSync as symlinkSync2, mkdirSync as mkdirSync8 } from "fs";
 import { join as join16, resolve as resolve8 } from "path";
 import { spawnSync as spawnSync11, execFileSync as execFileSync2 } from "child_process";
 function deriveBranchName(beadId, specialistName) {
@@ -29634,7 +29645,7 @@ function symlinkPiNpmCache(commonRoot, worktreePath) {
   if (!existsSync16(source) || existsSync16(target))
     return;
   try {
-    mkdirSync7(join16(worktreePath, ".pi"), { recursive: true });
+    mkdirSync8(join16(worktreePath, ".pi"), { recursive: true });
     symlinkSync2(source, target);
   } catch {}
 }
@@ -29674,12 +29685,12 @@ var init_worktree = __esm(() => {
 });
 
 // src/specialist/epic-reconciler.ts
-import { mkdirSync as mkdirSync8, openSync as openSync2, readFileSync as readFileSync15, rmSync as rmSync2, writeFileSync as writeFileSync7 } from "fs";
+import { mkdirSync as mkdirSync9, openSync as openSync2, readFileSync as readFileSync15, rmSync as rmSync2, writeFileSync as writeFileSync7 } from "fs";
 import { join as join17 } from "path";
 function buildEpicLockPath(epicId) {
   const location = resolveObservabilityDbLocation();
   const lockDir = join17(location.dbDirectory, "locks");
-  mkdirSync8(lockDir, { recursive: true });
+  mkdirSync9(lockDir, { recursive: true });
   return join17(lockDir, `epic-${epicId}.lock`);
 }
 function withEpicAdvisoryLock(epicId, action) {
@@ -35497,8 +35508,8 @@ var init_epic = __esm(() => {
 
 // src/cli/version-check.ts
 import { spawnSync as spawnSync16 } from "child_process";
-import { existsSync as existsSync20, mkdirSync as mkdirSync9, readFileSync as readFileSync20, writeFileSync as writeFileSync9 } from "fs";
-import { dirname as dirname8, join as join22 } from "path";
+import { existsSync as existsSync20, mkdirSync as mkdirSync10, readFileSync as readFileSync20, writeFileSync as writeFileSync9 } from "fs";
+import { dirname as dirname9, join as join22 } from "path";
 import { createRequire as createRequire3 } from "module";
 function readBundledPackageVersion(requireFn = require3) {
   for (const candidate of ["../package.json", "../../package.json"]) {
@@ -35532,7 +35543,7 @@ function readCachedVersionCheck() {
   return readCache();
 }
 function writeCache(cache) {
-  mkdirSync9(dirname8(CACHE_PATH), { recursive: true });
+  mkdirSync10(dirname9(CACHE_PATH), { recursive: true });
   writeFileSync9(CACHE_PATH, `${JSON.stringify(cache, null, 2)}
 `, "utf8");
 }
@@ -39545,8 +39556,8 @@ __export(exports_doctor, {
 });
 import { createHash as createHash5 } from "crypto";
 import { spawnSync as spawnSync22 } from "child_process";
-import { existsSync as existsSync29, lstatSync as lstatSync2, mkdirSync as mkdirSync10, readdirSync as readdirSync14, readFileSync as readFileSync30, readlinkSync as readlinkSync2, writeFileSync as writeFileSync12 } from "fs";
-import { dirname as dirname9, join as join32, relative as relative3, resolve as resolve12 } from "path";
+import { existsSync as existsSync29, lstatSync as lstatSync2, mkdirSync as mkdirSync11, readdirSync as readdirSync14, readFileSync as readFileSync30, readlinkSync as readlinkSync2, writeFileSync as writeFileSync12 } from "fs";
+import { dirname as dirname10, join as join32, relative as relative3, resolve as resolve12 } from "path";
 function ok3(msg) {
   console.log(`  ${green14("\u2713")} ${msg}`);
 }
@@ -39652,7 +39663,7 @@ function checkHooks() {
     const claudeHookPath = join32(CLAUDE_HOOKS_DIR, name);
     const symlinkState = isSymlinkTo(claudeHookPath, canonicalPath);
     if (symlinkState.ok) {
-      ok3(`${relative3(CWD, claudeHookPath)} -> ${relative3(dirname9(claudeHookPath), canonicalPath)}`);
+      ok3(`${relative3(CWD, claudeHookPath)} -> ${relative3(dirname10(claudeHookPath), canonicalPath)}`);
       continue;
     }
     allPresent = false;
@@ -39759,7 +39770,7 @@ function isSymlinkTo(linkPath, expectedTargetPath) {
     return { ok: false, reason: "not-symlink" };
   try {
     const rawTarget = readlinkSync2(linkPath);
-    const resolvedTarget = resolve12(dirname9(linkPath), rawTarget);
+    const resolvedTarget = resolve12(dirname10(linkPath), rawTarget);
     const resolvedExpected = resolve12(expectedTargetPath);
     if (resolvedTarget !== resolvedExpected) {
       return { ok: false, reason: "wrong-target", target: rawTarget };
@@ -39854,7 +39865,7 @@ function checkSkillDrift() {
   for (const check2 of skillRootChecks) {
     const state = isSymlinkTo(check2.root, check2.expected);
     if (state.ok) {
-      ok3(`${relative3(CWD, check2.root)} -> ${relative3(dirname9(check2.root), check2.expected)}`);
+      ok3(`${relative3(CWD, check2.root)} -> ${relative3(dirname10(check2.root), check2.expected)}`);
       continue;
     }
     rootLinksOk = false;
@@ -39975,7 +39986,7 @@ function checkRuntimeDirs() {
     for (const [subDir, label] of [[jobsDir, "jobs"], [readyDir, "ready"]]) {
       if (!existsSync29(subDir)) {
         warn3(`.specialists/${label}/ missing \u2014 auto-creating`);
-        mkdirSync10(subDir, { recursive: true });
+        mkdirSync11(subDir, { recursive: true });
         ok3(`.specialists/${label}/ created`);
       } else {
         ok3(`.specialists/${label}/ present`);
@@ -40553,6 +40564,7 @@ function parseArgs12(argv) {
   let queueTimeoutMs = 5000;
   let shutdownGraceMs = 30000;
   let projectDir = process.cwd();
+  let dbPath;
   let fallbackModel;
   let auditFailureThreshold = 5;
   let allowSkills = false;
@@ -40571,6 +40583,8 @@ function parseArgs12(argv) {
       shutdownGraceMs = Number(argv[++i]);
     else if ((token === "--project-dir" || token === "--user-dir") && argv[i + 1])
       projectDir = argv[++i];
+    else if (token === "--db-path" && argv[i + 1])
+      dbPath = argv[++i];
     else if (token === "--fallback-model" && argv[i + 1])
       fallbackModel = argv[++i];
     else if (token === "--audit-failure-threshold" && argv[i + 1])
@@ -40584,7 +40598,7 @@ function parseArgs12(argv) {
     else if (token === "--reload-poll-ms" && argv[i + 1])
       reloadPollMs = Number(argv[++i]);
   }
-  return { port, concurrency, queueTimeoutMs, shutdownGraceMs, projectDir, fallbackModel, auditFailureThreshold, allowSkills, allowSkillsRoots, allowLocalScripts, reloadPollMs };
+  return { port, concurrency, queueTimeoutMs, shutdownGraceMs, projectDir, dbPath, fallbackModel, auditFailureThreshold, allowSkills, allowSkillsRoots, allowLocalScripts, reloadPollMs };
 }
 function sendJson(res, statusCode, body) {
   res.writeHead(statusCode, { "content-type": "application/json" });
@@ -40612,8 +40626,11 @@ async function startServe(argv = process.argv.slice(3)) {
   const args = parseArgs12(argv);
   const loader = new SpecialistLoader({ projectDir: args.projectDir });
   const dbLocation = resolveObservabilityDbLocation(args.projectDir);
-  ensureObservabilityDbFile(dbLocation);
-  const db = createObservabilitySqliteClient(args.projectDir);
+  const dbPath = args.dbPath ?? dbLocation.dbPath;
+  const db = args.dbPath ? createObservabilitySqliteClientAtPath(args.dbPath) : (() => {
+    ensureObservabilityDbFile(dbLocation);
+    return createObservabilitySqliteClient(args.projectDir);
+  })();
   const readinessState = createReadinessState();
   const userDir = join34(args.projectDir, ".specialists", "user");
   const hotReload = createUserDirWatcher({ loader, userDir, pollMs: args.reloadPollMs });
@@ -40626,7 +40643,7 @@ async function startServe(argv = process.argv.slice(3)) {
       const result = await evaluateReadiness2({
         state: readinessState,
         projectDir: args.projectDir,
-        dbPath: dbLocation.dbPath,
+        dbPath,
         auditFailureThreshold: args.auditFailureThreshold
       });
       if (result.ready) {
@@ -40660,7 +40677,7 @@ async function startServe(argv = process.argv.slice(3)) {
         const result = await runScriptSpecialist(parsed, {
           loader,
           fallbackModel: args.fallbackModel,
-          observabilityDbPath: args.projectDir,
+          ...args.dbPath ? { observabilityDbPath: args.dbPath } : {},
           onChild: (child) => {
             children.add(child);
             child.once("exit", () => children.delete(child));
@@ -40840,7 +40857,11 @@ async function run31(argv = process.argv.slice(3)) {
     process.exit(runUnderLock(args.singleInstance, argv));
   }
   const loader = new SpecialistLoader({ projectDir: args.projectDir });
-  const result = await runScriptSpecialist(buildRequest(args), { loader, projectDir: args.projectDir, observabilityDbPath: args.dbPath ?? args.projectDir });
+  const result = await runScriptSpecialist(buildRequest(args), {
+    loader,
+    projectDir: args.projectDir,
+    ...args.dbPath ? { observabilityDbPath: args.dbPath } : {}
+  });
   printResult(result, args.json);
   process.exit(mapExitCode(result));
 }
@@ -49423,7 +49444,7 @@ async function run33() {
     if (wantsHelp()) {
       console.log([
         "",
-        "Usage: specialists serve [--port <n>] [--concurrency <n>] [--shutdown-grace-ms <n>] [--project-dir <path>]",
+        "Usage: specialists serve [--port <n>] [--concurrency <n>] [--shutdown-grace-ms <n>] [--project-dir <path>] [--db-path <observability.db>]",
         "",
         "HTTP wrapper for script-class specialists.",
         "",

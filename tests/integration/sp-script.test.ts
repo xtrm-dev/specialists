@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 
 const ORIGINAL_CWD = process.cwd();
 let tempRoot = '';
@@ -52,6 +52,16 @@ beforeEach(() => {
     '#!/usr/bin/env node\nsetTimeout(() => { const event = { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: JSON.stringify({ message: "hello" }) }] } }; process.stdout.write(JSON.stringify(event) + "\\n"); }, 200);\n',
     { mode: 0o755 },
   );
+  writeFileSync(
+    join(tempRoot, 'query-db.mjs'),
+    [
+      "import { Database } from 'bun:sqlite';",
+      'const db = new Database(process.argv[2]);',
+      'const rows = db.query(\'SELECT COUNT(*) AS count FROM specialist_jobs WHERE JSON_EXTRACT(status_json, "$.surface") = ?\').all(\'script_specialist\');',
+      'console.log(JSON.stringify(rows));',
+      'db.close();',
+    ].join('\n'),
+  );
   process.chdir(tempRoot);
   process.env.PATH = `${join(tempRoot, 'bin')}:${process.env.PATH ?? ''}`;
 });
@@ -82,6 +92,26 @@ describe('sp script', () => {
     const jsonResult = await waitForExit(json);
     expect(jsonResult.code).toBe(0);
     expect(JSON.parse(jsonResult.stdout).success).toBe(true);
+  });
+
+  it('uses --db-path as the exact observability database file', async () => {
+    const baseEnv = { ...process.env, PATH: `${join(tempRoot, 'bin')}:${process.env.PATH ?? ''}` };
+    const customDbPath = join(tempRoot, 'state', 'observability.db');
+
+    const run = spawn('bun', ['src/index.ts', 'script', 'echo', '--vars', 'name=world', '--user-dir', tempRoot, '--db-path', customDbPath], {
+      cwd: ORIGINAL_CWD,
+      env: baseEnv,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const result = await waitForExit(run);
+
+    expect(result.code).toBe(0);
+    expect(existsSync(customDbPath)).toBe(true);
+    expect(existsSync(join(tempRoot, '.specialists', 'db', 'observability.db'))).toBe(false);
+    const query = spawnSync('bun', [join(tempRoot, 'query-db.mjs'), customDbPath], { encoding: 'utf-8' });
+    expect(query.status).toBe(0);
+    const rows = JSON.parse(query.stdout.trim()) as Array<{ count: number }>;
+    expect(rows[0].count).toBe(1);
   });
 
   it('returns 75 when single-instance lock busy', async () => {
