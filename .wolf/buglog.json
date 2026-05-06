@@ -221,6 +221,27 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-05-05T11:54:44.653275+00:00"
+    },
+    {
+      "id": "bug-014",
+      "timestamp": "2026-05-06T13:47:01.413282+00:00",
+      "error_message": "script-runner allowed unbounded rendered prompts to reach Pi child spawn",
+      "file": "src/specialist/script-runner.ts, src/specialist/schema.ts",
+      "root_cause": "runScriptSpecialist rendered task templates without checking byte size before spawning Pi, so malformed or oversized service payloads failed indirectly at process/model/output boundaries.",
+      "fix": "Added prompt_too_large error type, configurable prompt_limit_bytes with SPECIALISTS_SCRIPT_PROMPT_LIMIT_BYTES fallback and 4MiB default, and pre-spawn byte-size check with no-spawn regression tests.",
+      "tags": [
+        "bugfix",
+        "script-runner",
+        "prompt-limit",
+        "service",
+        "darth-feedor"
+      ],
+      "related_bugs": [
+        "bug-014",
+        "bug-015"
+      ],
+      "occurrences": 1,
+      "last_seen": "2026-05-06T13:47:01.413282+00:00"
     }
   ]
 }

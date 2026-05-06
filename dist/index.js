@@ -17561,6 +17561,7 @@ var init_schema = __esm(() => {
     max_retries: numberType().int().min(0).default(0),
     interactive: booleanType().default(false),
     stdout_limit_bytes: numberType().int().positive().optional(),
+    prompt_limit_bytes: numberType().int().positive().optional(),
     response_format: enumType(["text", "json", "markdown"]).default("text"),
     output_type: enumType(["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]).default("custom"),
     permission_required: enumType(["READ_ONLY", "LOW", "MEDIUM", "HIGH"]).default("READ_ONLY"),
@@ -28211,6 +28212,8 @@ function mapErrorType(message) {
     return "specialist_load_error";
   if (message.includes("Missing template variable"))
     return "template_variable_missing";
+  if (message.includes("prompt too large"))
+    return "prompt_too_large";
   if (message.includes("output too large"))
     return "output_too_large";
   if (message.includes("auth") || message.includes("403") || message.includes("401"))
@@ -28278,6 +28281,18 @@ function writeTraceRow(client, specialist, model, traceId, output2, durationMs, 
     onAuditFailure?.(error2);
   }
 }
+function resolvePromptLimitBytes(spec) {
+  return spec.specialist.execution.prompt_limit_bytes ?? resolveEnvPromptLimitBytes() ?? DEFAULT_PROMPT_LIMIT_BYTES;
+}
+function resolveEnvPromptLimitBytes() {
+  const raw = process.env.SPECIALISTS_SCRIPT_PROMPT_LIMIT_BYTES;
+  if (raw === undefined)
+    return;
+  const envLimit = Number(raw);
+  if (!Number.isFinite(envLimit) || envLimit <= 0)
+    return;
+  return Math.floor(envLimit);
+}
 function resolveAssistantTextLimitBytes(spec) {
   return spec.specialist.execution.stdout_limit_bytes ?? resolveEnvAssistantTextLimitBytes() ?? DEFAULT_ASSISTANT_TEXT_LIMIT_BYTES;
 }
@@ -28311,6 +28326,24 @@ async function runScriptSpecialist(input2, options) {
     const skillSources = options.trust?.allowSkills ? computeSkillSources(spec) : undefined;
     const template = input2.template ?? spec.specialist.prompt.task_template;
     const prompt = renderTaskTemplate(template, input2.variables ?? {});
+    const modelCandidates = collectModelCandidates(input2, spec, options);
+    const promptLimitBytes = resolvePromptLimitBytes(spec);
+    const promptBytes = Buffer.byteLength(prompt, "utf8");
+    if (promptBytes > promptLimitBytes) {
+      return {
+        success: false,
+        error: `prompt too large: ${promptBytes} bytes exceeds limit ${promptLimitBytes} bytes`,
+        error_type: "prompt_too_large",
+        meta: {
+          specialist: resolvedSpecialist,
+          requested_specialist: input2.requested_specialist ?? input2.specialist,
+          resolved_specialist: resolvedSpecialist,
+          model: modelCandidates[0],
+          duration_ms: Date.now() - startedAt,
+          trace_id: traceId
+        }
+      };
+    }
     if (process.env.SPECIALISTS_SCRIPT_STUB_OUTPUT) {
       return {
         success: true,
@@ -28326,11 +28359,11 @@ async function runScriptSpecialist(input2, options) {
       };
     }
     const timeoutMs = input2.timeout_ms ?? spec.specialist.execution.timeout_ms ?? 120000;
-    const modelCandidates = collectModelCandidates(input2, spec, options);
     const assistantTextLimitBytes = resolveAssistantTextLimitBytes(spec);
     const attempts = [];
     for (const model of modelCandidates) {
-      const attempt = await runSingleAttempt(prompt, model, input2.thinking_level ?? spec.specialist.execution.thinking_level, timeoutMs, assistantTextLimitBytes, options);
+      const systemPrompt = spec.specialist.prompt.system || undefined;
+      const attempt = await runSingleAttempt(prompt, model, input2.thinking_level ?? spec.specialist.execution.thinking_level, timeoutMs, assistantTextLimitBytes, options, systemPrompt);
       attempts.push(attempt);
       const parsed = classifyAttempt(attempt);
       if (parsed.retryable)
@@ -28373,11 +28406,13 @@ function collectModelCandidates(input2, spec, options) {
   const candidates = [input2.model_override, spec.specialist.execution.model, spec.specialist.execution.fallback_model, options.fallbackModel].filter((value) => typeof value === "string" && value.length > 0);
   return [...new Set(candidates)];
 }
-function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assistantTextLimitBytes, options) {
+function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assistantTextLimitBytes, options, systemPrompt) {
   return new Promise((resolve8, reject) => {
-    const args = ["--mode", "json", "--no-session", "--no-extensions", "--no-tools", "--model", model];
+    const args = ["--mode", "json", "--no-session", "--no-extensions", "--no-tools", "--offline", "--model", model];
     if (thinkingLevel)
       args.push("--thinking", thinkingLevel);
+    if (systemPrompt)
+      args.push("--system-prompt", systemPrompt);
     args.push(prompt);
     const pi = spawn3("pi", args, { stdio: ["ignore", "pipe", "pipe"] });
     options.onChild?.(pi);
@@ -28486,7 +28521,7 @@ function classifyAttempt(attempt) {
 function isRetryableModelFailure(stderr, text) {
   return stderr.includes("0 tokens") || stderr.includes("quota") || stderr.includes("rate limit") || stderr.includes("403") || stderr.includes("401") || stderr.includes("insufficient_quota") || !text && !stderr.trim();
 }
-var CompatGuardError, DEFAULT_PENDING_LINE_LIMIT_BYTES, DEFAULT_ASSISTANT_TEXT_LIMIT_BYTES, DEFAULT_STDERR_LIMIT_BYTES;
+var CompatGuardError, DEFAULT_PENDING_LINE_LIMIT_BYTES, DEFAULT_ASSISTANT_TEXT_LIMIT_BYTES, DEFAULT_STDERR_LIMIT_BYTES, DEFAULT_PROMPT_LIMIT_BYTES;
 var init_script_runner = __esm(() => {
   init_observability_sqlite();
   CompatGuardError = class CompatGuardError extends Error {
@@ -28500,6 +28535,7 @@ var init_script_runner = __esm(() => {
   DEFAULT_PENDING_LINE_LIMIT_BYTES = 16 * 1024 * 1024;
   DEFAULT_ASSISTANT_TEXT_LIMIT_BYTES = 4 * 1024 * 1024;
   DEFAULT_STDERR_LIMIT_BYTES = 1 * 1024 * 1024;
+  DEFAULT_PROMPT_LIMIT_BYTES = 4 * 1024 * 1024;
 });
 
 // src/cli/validate.ts

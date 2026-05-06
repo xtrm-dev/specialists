@@ -1,7 +1,7 @@
 import { type ChildProcess } from 'node:child_process';
 import { SpecialistLoader } from './loader.js';
 import type { Specialist } from './schema.js';
-export type ScriptSpecialistErrorType = 'specialist_not_found' | 'specialist_load_error' | 'template_variable_missing' | 'auth' | 'quota' | 'timeout' | 'network' | 'invalid_json' | 'output_too_large' | 'internal';
+export type ScriptSpecialistErrorType = 'specialist_not_found' | 'specialist_load_error' | 'template_variable_missing' | 'auth' | 'quota' | 'timeout' | 'network' | 'invalid_json' | 'prompt_too_large' | 'output_too_large' | 'internal';
 export interface ScriptGenerateRequest {
     specialist: string;
     requested_specialist?: string;
@@ -67,6 +67,8 @@ export declare function renderTaskTemplate(template: string, variables: Record<s
 export declare const DEFAULT_PENDING_LINE_LIMIT_BYTES: number;
 export declare const DEFAULT_ASSISTANT_TEXT_LIMIT_BYTES: number;
 export declare const DEFAULT_STDERR_LIMIT_BYTES: number;
+export declare const DEFAULT_PROMPT_LIMIT_BYTES: number;
+export declare function resolvePromptLimitBytes(spec: Specialist): number;
 export declare function resolveAssistantTextLimitBytes(spec: Specialist): number;
 export declare function runScriptSpecialist(input: ScriptGenerateRequest, options: ScriptRunnerOptions): Promise<ScriptGenerateResult>;
 export declare function collectModelCandidates(input: ScriptGenerateRequest, spec: Specialist, options: ScriptRunnerOptions): string[];

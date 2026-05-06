@@ -1260,3 +1260,10 @@
 - `docs/skills.md` — documents skill snapshots as Category B managed by `xt doctor` / `xt update`.
 - `docs/hooks.md` — documents hook snapshots as Category B and separates `specialists doctor` from `xt doctor` drift checks.
 - `docs/cli-reference.md` — updates `sp init`, `sp doctor --check-drift`, `sp prune-stale-defaults`, and xtrm-managed `xt doctor` / `xt update` references.
+
+## Manual session note — 2026-05-06 unitAI-z2vpq.3
+
+- `src/specialist/script-runner.ts` — added rendered prompt byte-size preflight before Pi spawn with `prompt_too_large` error and `SPECIALISTS_SCRIPT_PROMPT_LIMIT_BYTES` / spec `prompt_limit_bytes` overrides.
+- `src/specialist/schema.ts` — execution schema now accepts optional positive integer `prompt_limit_bytes`.
+- `tests/unit/specialist/script-runner.test.ts` — regression coverage for prompt limit defaults/env/spec precedence, over-limit no-spawn error, and under-limit spawn path.
+- `dist/index.js` / `dist/lib.js` / dist type outputs — rebuilt bundled/package outputs for prompt preflight.
