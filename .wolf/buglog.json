@@ -221,6 +221,27 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-05-05T11:54:44.653275+00:00"
+    },
+    {
+      "id": "bug-014",
+      "timestamp": "2026-05-06T14:34:38.387547+00:00",
+      "error_message": "allowSkillsRoots used string prefix checks so sibling paths like /opt/skills-evil could pass /opt/skills policy",
+      "file": "src/specialist/script-runner.ts",
+      "root_cause": "compatGuard used path.startsWith(root) for skills.paths and did not apply root policy to prompt.skill_inherit.",
+      "fix": "Added normalized path-relative containment check using path.resolve/relative/isAbsolute, applied it to skills.paths and prompt.skill_inherit, and added tests for sibling prefix, traversal, and multiple roots.",
+      "tags": [
+        "bugfix",
+        "security",
+        "allow-skills-roots",
+        "script-runner",
+        "path-boundary",
+        "darth-feedor"
+      ],
+      "related_bugs": [
+        "bug-014"
+      ],
+      "occurrences": 1,
+      "last_seen": "2026-05-06T14:34:38.387547+00:00"
     }
   ]
 }

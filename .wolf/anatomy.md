@@ -1260,3 +1260,9 @@
 - `docs/skills.md` — documents skill snapshots as Category B managed by `xt doctor` / `xt update`.
 - `docs/hooks.md` — documents hook snapshots as Category B and separates `specialists doctor` from `xt doctor` drift checks.
 - `docs/cli-reference.md` — updates `sp init`, `sp doctor --check-drift`, `sp prune-stale-defaults`, and xtrm-managed `xt doctor` / `xt update` references.
+
+## Manual session note — 2026-05-06 unitAI-z2vpq.6
+
+- `src/specialist/script-runner.ts` — `allowSkillsRoots` now validates normalized path containment with `path.relative` instead of string prefix matching and covers `prompt.skill_inherit`.
+- `tests/unit/specialist/script-runner-trust.test.ts` — added coverage for accepted roots, rejected sibling prefixes, relative traversal, prompt.skill_inherit, and multiple roots.
+- `dist/index.js` / `dist/lib.js` / dist type outputs — rebuilt bundled/package outputs for path-boundary validation.

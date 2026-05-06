@@ -87,6 +87,28 @@ describe('compatGuard trust options', () => {
       .not.toThrow();
   });
 
+  it('rejects sibling prefixes outside allowSkillsRoots', () => {
+    const trust: TrustOptions = { allowSkills: true, allowSkillsRoots: ['/opt/skills'] };
+    expect(() => compatGuard(makeSpec({ paths: ['/opt/skills-evil/foo.md'] }), trust))
+      .toThrow(/not under any --allow-skills-roots/);
+  });
+
+  it('rejects relative traversal outside allowSkillsRoots', () => {
+    const root = join(tmpdir(), 'skills');
+    const outsideViaTraversal = join(root, '..', 'evil.md');
+    const trust: TrustOptions = { allowSkills: true, allowSkillsRoots: [root] };
+    expect(() => compatGuard(makeSpec({ paths: [outsideViaTraversal] }), trust))
+      .toThrow(/not under any --allow-skills-roots/);
+  });
+
+  it('applies allowSkillsRoots to prompt.skill_inherit', () => {
+    const trust: TrustOptions = { allowSkills: true, allowSkillsRoots: ['/opt/skills'] };
+    expect(() => compatGuard(makeSpec({ skill_inherit: '/opt/skills/review/SKILL.md' }), trust))
+      .not.toThrow();
+    expect(() => compatGuard(makeSpec({ skill_inherit: '/opt/skills-evil/review/SKILL.md' }), trust))
+      .toThrow(/not under any --allow-skills-roots/);
+  });
+
   it('mixed allow flags: scripts blocked when only --allow-skills', () => {
     const trust: TrustOptions = { allowSkills: true };
     expect(() => compatGuard(makeSpec({ scripts: [{ name: 'pre', on: 'pre', command: 'echo' }] }), trust))
