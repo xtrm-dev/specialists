@@ -65,6 +65,7 @@ export class CompatGuardError extends Error {
 export interface SkillSource {
   path: string;
   sha256: string;
+  source: 'skills.paths' | 'prompt.skill_inherit';
 }
 
 export interface ScriptRunnerOptions {
@@ -117,16 +118,29 @@ export function compatGuard(spec: Specialist, trust?: TrustOptions): void {
   }
 }
 
+function collectSkillPathEntries(spec: Specialist): Array<{ path: string; source: SkillSource['source'] }> {
+  return [
+    ...(spec.specialist.skills?.paths ?? []).map((path) => ({ path, source: 'skills.paths' as const })),
+    ...(typeof spec.specialist.prompt.skill_inherit === 'string'
+      ? [{ path: spec.specialist.prompt.skill_inherit, source: 'prompt.skill_inherit' as const }]
+      : []),
+  ];
+}
+
+function collectSkillPaths(spec: Specialist): string[] {
+  return collectSkillPathEntries(spec).map((entry) => entry.path);
+}
+
 export function computeSkillSources(spec: Specialist): SkillSource[] {
-  const paths = spec.specialist.skills?.paths ?? [];
+  const entries = collectSkillPathEntries(spec);
   const sources: SkillSource[] = [];
-  for (const path of paths) {
+  for (const { path, source } of entries) {
     try {
       const content = readFileSync(path);
       const sha256 = createHash('sha256').update(content).digest('hex');
-      sources.push({ path, sha256 });
+      sources.push({ path, sha256, source });
     } catch {
-      sources.push({ path, sha256: 'unreadable' });
+      sources.push({ path, sha256: 'unreadable', source });
     }
   }
   return sources;
@@ -293,6 +307,7 @@ export async function runScriptSpecialist(input: ScriptGenerateRequest, options:
     const resolvedSpecialist = resolveScriptSpecialistName(input.specialist);
     const spec = await options.loader.get(resolvedSpecialist);
     compatGuard(spec, options.trust);
+    const skillPaths = options.trust?.allowSkills ? collectSkillPaths(spec) : [];
     const skillSources = options.trust?.allowSkills ? computeSkillSources(spec) : undefined;
 
     const template = input.template ?? spec.specialist.prompt.task_template;
@@ -318,7 +333,7 @@ export async function runScriptSpecialist(input: ScriptGenerateRequest, options:
 
     for (const model of modelCandidates) {
       const systemPrompt = spec.specialist.prompt.system || undefined;
-      const attempt = await runSingleAttempt(prompt, model, input.thinking_level ?? spec.specialist.execution.thinking_level, timeoutMs, assistantTextLimitBytes, options, systemPrompt);
+      const attempt = await runSingleAttempt(prompt, model, input.thinking_level ?? spec.specialist.execution.thinking_level, timeoutMs, assistantTextLimitBytes, options, systemPrompt, skillPaths);
       attempts.push(attempt);
       const parsed = classifyAttempt(attempt);
       if (parsed.retryable) continue;
@@ -367,9 +382,12 @@ export function collectModelCandidates(input: ScriptGenerateRequest, spec: Speci
 
 type AttemptFailureReason = 'assistant_text_too_large' | 'stderr_too_large' | 'malformed_line_too_large';
 
-function runSingleAttempt(prompt: string, model: string, thinkingLevel: string | undefined, timeoutMs: number, assistantTextLimitBytes: number, options: ScriptRunnerOptions, systemPrompt?: string): Promise<{ model: string; text: string; stderr: string; exitCode: number; timedOut: boolean; outputTooLarge: boolean; outputTooLargeReason?: AttemptFailureReason }> {
+function runSingleAttempt(prompt: string, model: string, thinkingLevel: string | undefined, timeoutMs: number, assistantTextLimitBytes: number, options: ScriptRunnerOptions, systemPrompt?: string, skillPaths: string[] = []): Promise<{ model: string; text: string; stderr: string; exitCode: number; timedOut: boolean; outputTooLarge: boolean; outputTooLargeReason?: AttemptFailureReason }> {
   return new Promise((resolve, reject) => {
-    const args = ['--mode', 'json', '--no-session', '--no-extensions', '--no-tools', '--offline', '--model', model];
+    const args = ['--mode', 'json', '--no-session', '--no-extensions', '--no-tools', '--offline'];
+    if (skillPaths.length === 0) args.push('--no-skills');
+    for (const skillPath of skillPaths) args.push('--skill', skillPath);
+    args.push('--model', model);
     if (thinkingLevel) args.push('--thinking', thinkingLevel);
     if (systemPrompt) args.push('--system-prompt', systemPrompt);
     args.push(prompt);

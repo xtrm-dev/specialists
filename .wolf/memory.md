@@ -123,3 +123,5 @@
 - 2026-05-05: Updated canonical-live / xtrm-managed distribution docs for unitAI-o4khi: new docs/installation.md plus docs/authoring.md, manifest.md, skills.md, hooks.md, cli-reference.md, specialists-creator skill/config, and CHANGELOG entries.
 
 - [2026-05-05T11:54:44.653275+00:00] Fixed specialists v3.12.0 packaged-runtime regression: dist version-check must resolve package.json via ../package.json first and security-auditor must avoid machine-local /home/dawid/projects/xtrm-tools skill paths.
+
+- 2026-05-06T14:46:22.053439+00:00: Fixed unitAI-z2vpq.5 trusted skills wiring: script runner now passes trusted skills.paths and prompt.skill_inherit as explicit Pi --skill args and hashes both in audit sources; default remains --no-skills.
