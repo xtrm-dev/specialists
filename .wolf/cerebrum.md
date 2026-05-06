@@ -10,6 +10,7 @@
 
 ## Key Learnings
 
+- [2026-05-06] script-class specialists must keep pi prompt context isolated: use --system-prompt plus --no-context-files --no-skills --no-prompt-templates --no-themes; package-class runner may still use project context.
 - **Project:** @jaggerxtrm/specialists
 - **Description:** OmniSpecialist — 7-tool MCP orchestration layer powered by the Specialist System. Discover and execute .specialist.yaml files across project/user/system scopes via pi.
 
