@@ -28205,6 +28205,34 @@ function renderTaskTemplate(template, variables) {
     throw new Error(`Missing template variable: ${missing}`);
   return renderTemplate(template, variables);
 }
+function truncateForPrompt(value, limitBytes) {
+  if (Buffer.byteLength(value, "utf8") <= limitBytes)
+    return value;
+  return `${value.slice(0, limitBytes)}
+... truncated ...`;
+}
+function buildJsonOutputContract(spec) {
+  if (spec.specialist.execution.response_format !== "json")
+    return;
+  const schema = spec.specialist.prompt.output_schema;
+  const required2 = Array.isArray(schema?.required) ? schema.required.filter((value) => typeof value === "string") : [];
+  const lines = [
+    "Output contract:",
+    "- Return only valid JSON. Do not include Markdown fences, prose, or commentary."
+  ];
+  if (required2.length > 0)
+    lines.push(`- Include these required top-level keys: ${required2.join(", ")}.`);
+  if (schema)
+    lines.push(`- JSON schema: ${truncateForPrompt(JSON.stringify(schema), 4096)}`);
+  return lines.join(`
+`);
+}
+function applyOutputContract(prompt, spec) {
+  const contract = buildJsonOutputContract(spec);
+  return contract ? `${prompt}
+
+${contract}` : prompt;
+}
 function mapErrorType(message) {
   if (message.includes("Specialist not found"))
     return "specialist_not_found";
@@ -28325,7 +28353,7 @@ async function runScriptSpecialist(input2, options) {
     compatGuard(spec, options.trust);
     const skillSources = options.trust?.allowSkills ? computeSkillSources(spec) : undefined;
     const template = input2.template ?? spec.specialist.prompt.task_template;
-    const prompt = renderTaskTemplate(template, input2.variables ?? {});
+    const prompt = applyOutputContract(renderTaskTemplate(template, input2.variables ?? {}), spec);
     const modelCandidates = collectModelCandidates(input2, spec, options);
     const promptLimitBytes = resolvePromptLimitBytes(spec);
     const promptBytes = Buffer.byteLength(prompt, "utf8");

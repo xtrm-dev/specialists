@@ -12,6 +12,7 @@ import {
   renderTaskTemplate,
   resolveAssistantTextLimitBytes,
   resolvePromptLimitBytes,
+  applyOutputContract,
   runScriptSpecialist,
 } from '../../../src/specialist/script-runner.js';
 
@@ -116,6 +117,71 @@ describe('template render', () => {
 
   it('still throws when template references unknown variable', () => {
     expect(() => renderTaskTemplate('hello $name and $missing', { name: 'world' })).toThrow('Missing template variable: missing');
+  });
+});
+
+describe('output contract injection', () => {
+  it('appends required JSON keys and schema only for JSON specialists', () => {
+    const jsonSpec = {
+      ...baseSpec,
+      specialist: {
+        ...baseSpec.specialist,
+        execution: { ...baseSpec.specialist.execution, response_format: 'json' },
+      },
+    };
+
+    const prompt = applyOutputContract('summarize article', jsonSpec as never);
+
+    expect(prompt).toContain('Return only valid JSON');
+    expect(prompt).toContain('unreleased_summary, sections');
+    expect(prompt).toContain('\"required\":[\"unreleased_summary\",\"sections\"]');
+    expect(applyOutputContract('summarize article', baseSpec as never)).toBe('summarize article');
+  });
+
+  it('passes the injected JSON output contract to pi', async () => {
+    const jsonSpec = {
+      ...baseSpec,
+      specialist: {
+        ...baseSpec.specialist,
+        execution: { ...baseSpec.specialist.execution, response_format: 'json' },
+      },
+    };
+    const child = createSpawnMock();
+    const resultPromise = runScriptSpecialist(
+      { specialist: 'changelog-keeper', template: 'summarize article' },
+      { loader: makeLoader(jsonSpec as never) as never, projectDir: '.' },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    child.stdout.emit('data', Buffer.from(`${JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: JSON.stringify({ unreleased_summary: 'ok', sections: [] }) }] } })}\n`));
+    child.emit('close', 0);
+
+    await resultPromise;
+
+    const spawnArgs: string[] = spawnMock.mock.calls[0][1];
+    expect(spawnArgs.at(-1)).toContain('Return only valid JSON');
+    expect(spawnArgs.at(-1)).toContain('unreleased_summary, sections');
+  });
+
+  it('keeps invalid JSON validation intact after injecting the contract', async () => {
+    const jsonSpec = {
+      ...baseSpec,
+      specialist: {
+        ...baseSpec.specialist,
+        execution: { ...baseSpec.specialist.execution, response_format: 'json' },
+      },
+    };
+    const child = createSpawnMock();
+    const resultPromise = runScriptSpecialist(
+      { specialist: 'changelog-keeper', template: 'summarize article' },
+      { loader: makeLoader(jsonSpec as never) as never, projectDir: '.' },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    child.stdout.emit('data', Buffer.from(`${JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: '{\"unreleased_summary\":\"ok\"}' }] } })}\n`));
+    child.emit('close', 0);
+
+    await expect(resultPromise).resolves.toMatchObject({ success: false, error_type: 'invalid_json' });
   });
 });
 
