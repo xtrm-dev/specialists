@@ -221,6 +221,27 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-05-05T11:54:44.653275+00:00"
+    },
+    {
+      "id": "bug-014",
+      "timestamp": "2026-05-06T13:09:01.958057+00:00",
+      "error_message": "sp serve projectDir did not propagate to script-runner Pi child cwd",
+      "file": "src/cli/serve.ts, src/specialist/script-runner.ts",
+      "root_cause": "startServe passed projectDir only to loader and observabilityDbPath, while runSingleAttempt spawned pi without cwd so child inherited orchestrator cwd.",
+      "fix": "Pass projectDir through startServe to runScriptSpecialist and spawn pi with cwd: options.projectDir ?? process.cwd(); added unit and integration coverage that Pi child cwd equals the configured projectDir.",
+      "tags": [
+        "bugfix",
+        "script-runner",
+        "sp-serve",
+        "project-dir",
+        "cwd",
+        "darth-feedor"
+      ],
+      "related_bugs": [
+        "bug-014"
+      ],
+      "occurrences": 1,
+      "last_seen": "2026-05-06T13:09:01.958057+00:00"
     }
   ]
 }

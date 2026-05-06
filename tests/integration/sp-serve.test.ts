@@ -50,7 +50,7 @@ beforeEach(() => {
   );
   writeFileSync(
     join(tempRoot, 'bin', 'pi'),
-    '#!/usr/bin/env node\nconst input = process.argv.slice(2).join(" ");\nif (input.includes("--model")) {\n  const event = { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: JSON.stringify({ message: "hello" }) }] } };\n  process.stdout.write(JSON.stringify(event) + "\\n");\n}\n',
+    '#!/usr/bin/env node\nconst input = process.argv.slice(2).join(" ");\nif (input.includes("--model")) {\n  const event = { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: JSON.stringify({ message: "hello", cwd: process.cwd() }) }] } };\n  process.stdout.write(JSON.stringify(event) + "\\n");\n}\n',
     { mode: 0o755 },
   );
   process.chdir(tempRoot);
@@ -147,11 +147,12 @@ describe('sp serve', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ specialist: 'echo', variables: { name: 'world' }, trace: true }),
     });
-    const body = await response.json() as { success: boolean; output?: string; meta?: { trace_id?: string } };
+    const body = await response.json() as { success: boolean; output?: string; parsed_json?: { cwd?: string }; meta?: { trace_id?: string } };
 
     expect(response.status).toBe(200);
     expect(body.success).toBe(true);
     expect(body.output).toContain('hello');
+    expect(body.parsed_json?.cwd).toBe(tempRoot);
     expect(body.meta?.trace_id).toBeTruthy();
 
     const traceId = body.meta?.trace_id ?? '';

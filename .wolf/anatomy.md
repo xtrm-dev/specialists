@@ -1260,3 +1260,11 @@
 - `docs/skills.md` — documents skill snapshots as Category B managed by `xt doctor` / `xt update`.
 - `docs/hooks.md` — documents hook snapshots as Category B and separates `specialists doctor` from `xt doctor` drift checks.
 - `docs/cli-reference.md` — updates `sp init`, `sp doctor --check-drift`, `sp prune-stale-defaults`, and xtrm-managed `xt doctor` / `xt update` references.
+
+## Manual session note — 2026-05-06 unitAI-z2vpq.2
+
+- `src/specialist/script-runner.ts` — Pi child spawn now sets `cwd: options.projectDir ?? process.cwd()` while leaving observability DB path handling separate.
+- `src/cli/serve.ts` — `/v1/generate` now passes `projectDir: args.projectDir` into `runScriptSpecialist()`.
+- `tests/unit/specialist/script-runner.test.ts` — regression coverage asserts child spawn cwd uses projectDir and falls back to process cwd.
+- `tests/integration/sp-serve.test.ts` — fake Pi returns `process.cwd()` and service test asserts it equals configured projectDir.
+- `dist/index.js` / `dist/lib.js` / dist type maps — rebuilt bundled/package outputs for projectDir cwd propagation.

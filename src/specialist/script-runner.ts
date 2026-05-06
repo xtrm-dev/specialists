@@ -374,7 +374,7 @@ function runSingleAttempt(prompt: string, model: string, thinkingLevel: string |
     if (systemPrompt) args.push('--system-prompt', systemPrompt);
     args.push(prompt);
 
-    const pi = spawn('pi', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const pi = spawn('pi', args, { stdio: ['ignore', 'pipe', 'pipe'], cwd: options.projectDir ?? process.cwd() });
     options.onChild?.(pi);
 
     let stderr = '';
