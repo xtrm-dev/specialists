@@ -18,7 +18,7 @@ cross_references:
 
 Install path for consumers who do **not** clone specialists source.
 
-For HTTP contract details, CLI flags (`--allow-skills`, `--allow-skills-roots`, `--allow-local-scripts`, `--reload-poll-ms`), trust gates, and hot-reload semantics, see the SSOT: **[docs/specialists-service.md](specialists-service.md)**.
+For HTTP contract details, CLI flags (`--allow-skills`, `--allow-skills-roots`, `--reload-poll-ms`), trust gates, and hot-reload semantics, see the SSOT: **[docs/specialists-service.md](specialists-service.md)**.
 
 ## Prerequisites
 
@@ -110,7 +110,7 @@ curl -sS http://localhost:8000/readyz
 
 Returns `200 {"ready":true}` when all checks pass, or `503` with a reason when degraded. Six failure reasons exist: `draining`, `degraded:audit`, `pi_config_unreadable`, `db_not_writable`, `empty_user_dir`, `invalid_spec_in_user_dir`. See [specialists-service.md](specialists-service.md#readiness) for full taxonomy.
 
-For trusted single-tenant deployments needing skill-driven specs, pass trust flags at container start: `--allow-skills`, `--allow-skills-roots=<sha256>`, `--allow-local-scripts`. Default is **deny all**. See [specialists-service.md](specialists-service.md#trust-flags).
+For trusted single-tenant deployments needing skill-driven specs, pass trust flags at container start: `--allow-skills`, `--allow-skills-roots=<path[:path]>`. `skills.scripts` remain unsupported and are always rejected. Default is **deny all**. See [specialists-service.md](specialists-service.md#trust-flags).
 
 Send one generate request:
 

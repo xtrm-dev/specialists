@@ -9,7 +9,6 @@ interface ServeArgs {
     auditFailureThreshold: number;
     allowSkills: boolean;
     allowSkillsRoots: string[];
-    allowLocalScripts: boolean;
     reloadPollMs: number;
 }
 export type ReadinessReason = 'draining' | 'degraded:audit' | 'pi_config_unreadable' | 'db_not_writable' | 'empty_user_dir' | 'invalid_spec_in_user_dir';

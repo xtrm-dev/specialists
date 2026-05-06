@@ -102,7 +102,7 @@ describe('script-runner compat guard', () => {
   });
 
   it('rejects scripted specialist', () => {
-    expect(() => compatGuard({ ...baseSpec, specialist: { ...baseSpec.specialist, skills: { scripts: [{ run: 'echo hi', phase: 'pre', inject_output: false }] } } } as never)).toThrow('scripts not allowed');
+    expect(() => compatGuard({ ...baseSpec, specialist: { ...baseSpec.specialist, skills: { scripts: [{ run: 'echo hi', phase: 'pre', inject_output: false }] } } } as never)).toThrow('local scripts are not supported');
   });
 });
 

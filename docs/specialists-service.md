@@ -108,7 +108,6 @@ sp serve \
   --audit-failure-threshold <n> \
   --allow-skills \
   --allow-skills-roots <p1>:<p2> \
-  --allow-local-scripts \
   --reload-poll-ms <n>
 ```
 
@@ -160,14 +159,13 @@ Flags:
 - `--allow-skills-roots <p1>:<p2>`
   - prefix allowlist for `skills.paths`
   - only active when `--allow-skills` on
-- `--allow-local-scripts`
-  - allows `skills.scripts`
+- `--allow-local-scripts` is not supported. `skills.scripts` are always rejected in service/script mode until a separate sandboxed script-execution design exists.
 
 Audit behavior:
 
 - when `--allow-skills` on, each resolved skill source gets `{ path, sha256 }` in status audit data
 - unreadable file records `sha256: "unreadable"`
-- compat guard still blocks interactive, worktree, and script cases outside trust rules
+- compat guard still blocks interactive, worktree, and all `skills.scripts` cases
 
 ### Hot reload
 

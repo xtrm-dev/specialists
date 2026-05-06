@@ -9077,8 +9077,8 @@ function compatGuard(spec, trust) {
   if (execution.permission_required !== "READ_ONLY")
     throw new CompatGuardError("execution.permission_required", "permission_required must be READ_ONLY");
   const hasScripts = (spec.specialist.skills?.scripts?.length ?? 0) > 0;
-  if (hasScripts && !trust?.allowLocalScripts) {
-    throw new CompatGuardError("skills.scripts", "scripts not allowed (enable with --allow-local-scripts)");
+  if (hasScripts) {
+    throw new CompatGuardError("skills.scripts", "local scripts are not supported in script-class specialists");
   }
   const hasPaths = (spec.specialist.skills?.paths?.length ?? 0) > 0;
   const hasSkillInherit = Boolean(spec.specialist.prompt.skill_inherit);

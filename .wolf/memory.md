@@ -133,3 +133,5 @@
 - 2026-05-06: During direct master merge, retained prompt-size limit cleanup with stdin/cwd script-runner state.
 
 - 2026-05-06: During direct master merge, combined JSON output contract injection with prompt-size preflight.
+
+- 2026-05-06: During direct master merge, retained fail-closed local scripts policy with existing script-runner hardening.

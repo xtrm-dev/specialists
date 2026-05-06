@@ -28164,8 +28164,8 @@ function compatGuard(spec, trust) {
   if (execution.permission_required !== "READ_ONLY")
     throw new CompatGuardError("execution.permission_required", "permission_required must be READ_ONLY");
   const hasScripts = (spec.specialist.skills?.scripts?.length ?? 0) > 0;
-  if (hasScripts && !trust?.allowLocalScripts) {
-    throw new CompatGuardError("skills.scripts", "scripts not allowed (enable with --allow-local-scripts)");
+  if (hasScripts) {
+    throw new CompatGuardError("skills.scripts", "local scripts are not supported in script-class specialists");
   }
   const hasPaths = (spec.specialist.skills?.paths?.length ?? 0) > 0;
   const hasSkillInherit = Boolean(spec.specialist.prompt.skill_inherit);
@@ -40636,7 +40636,6 @@ function parseArgs12(argv) {
   let auditFailureThreshold = 5;
   let allowSkills = false;
   let allowSkillsRoots = [];
-  let allowLocalScripts = false;
   let reloadPollMs = 0;
   for (let i = 0;i < argv.length; i++) {
     const token = argv[i];
@@ -40659,11 +40658,11 @@ function parseArgs12(argv) {
     else if (token === "--allow-skills-roots" && argv[i + 1])
       allowSkillsRoots = argv[++i].split(":").filter(Boolean);
     else if (token === "--allow-local-scripts")
-      allowLocalScripts = true;
+      throw new Error("--allow-local-scripts is not supported for script-class specialists");
     else if (token === "--reload-poll-ms" && argv[i + 1])
       reloadPollMs = Number(argv[++i]);
   }
-  return { port, concurrency, queueTimeoutMs, shutdownGraceMs, projectDir, fallbackModel, auditFailureThreshold, allowSkills, allowSkillsRoots, allowLocalScripts, reloadPollMs };
+  return { port, concurrency, queueTimeoutMs, shutdownGraceMs, projectDir, fallbackModel, auditFailureThreshold, allowSkills, allowSkillsRoots, reloadPollMs };
 }
 function sendJson(res, statusCode, body) {
   res.writeHead(statusCode, { "content-type": "application/json" });
@@ -40748,8 +40747,7 @@ async function startServe(argv = process.argv.slice(3)) {
           onAuditFailure: () => recordAuditFailure(readinessState),
           trust: {
             allowSkills: args.allowSkills,
-            allowSkillsRoots: args.allowSkillsRoots,
-            allowLocalScripts: args.allowLocalScripts
+            allowSkillsRoots: args.allowSkillsRoots
           }
         });
         return sendJson(res, 200, result);
