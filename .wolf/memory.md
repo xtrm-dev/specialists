@@ -139,3 +139,5 @@
 - 2026-05-06: During direct master merge, retained root-boundary tests/policy with local-script fail-closed behavior.
 
 - 2026-05-06: During direct master merge, combined explicit trusted --skill args with Pi isolation flags.
+
+- 2026-05-06: During direct master merge, retained exact --db-path serve semantics with fail-closed local script policy.

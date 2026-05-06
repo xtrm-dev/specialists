@@ -5,6 +5,7 @@ interface ServeArgs {
     queueTimeoutMs: number;
     shutdownGraceMs: number;
     projectDir: string;
+    dbPath?: string;
     fallbackModel?: string;
     auditFailureThreshold: number;
     allowSkills: boolean;

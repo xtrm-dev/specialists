@@ -7,7 +7,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { SpecialistLoader } from '../specialist/loader.js';
 import { runScriptSpecialist, type ScriptGenerateRequest } from '../specialist/script-runner.js';
-import { createObservabilitySqliteClient } from '../specialist/observability-sqlite.js';
+import { createObservabilitySqliteClient, createObservabilitySqliteClientAtPath } from '../specialist/observability-sqlite.js';
 import { ensureObservabilityDbFile, resolveObservabilityDbLocation } from '../specialist/observability-db.js';
 import { parseSpecialist } from '../specialist/schema.js';
 import { createUserDirWatcher } from './serve-hot-reload.js';
@@ -18,6 +18,7 @@ interface ServeArgs {
   queueTimeoutMs: number;
   shutdownGraceMs: number;
   projectDir: string;
+  dbPath?: string;
   fallbackModel?: string;
   auditFailureThreshold: number;
   allowSkills: boolean;
@@ -124,6 +125,7 @@ function parseArgs(argv: string[]): ServeArgs {
   let queueTimeoutMs = 5_000;
   let shutdownGraceMs = 30_000;
   let projectDir = process.cwd();
+  let dbPath: string | undefined;
   let fallbackModel: string | undefined;
   let auditFailureThreshold = 5;
   let allowSkills = false;
@@ -137,6 +139,7 @@ function parseArgs(argv: string[]): ServeArgs {
     else if (token === '--queue-timeout-ms' && argv[i + 1]) queueTimeoutMs = Number(argv[++i]);
     else if (token === '--shutdown-grace-ms' && argv[i + 1]) shutdownGraceMs = Number(argv[++i]);
     else if ((token === '--project-dir' || token === '--user-dir') && argv[i + 1]) projectDir = argv[++i];
+    else if (token === '--db-path' && argv[i + 1]) dbPath = argv[++i];
     else if (token === '--fallback-model' && argv[i + 1]) fallbackModel = argv[++i];
     else if (token === '--audit-failure-threshold' && argv[i + 1]) auditFailureThreshold = Number(argv[++i]);
     else if (token === '--allow-skills') allowSkills = true;
@@ -145,7 +148,7 @@ function parseArgs(argv: string[]): ServeArgs {
     else if (token === '--reload-poll-ms' && argv[i + 1]) reloadPollMs = Number(argv[++i]);
   }
 
-  return { port, concurrency, queueTimeoutMs, shutdownGraceMs, projectDir, fallbackModel, auditFailureThreshold, allowSkills, allowSkillsRoots, reloadPollMs };
+  return { port, concurrency, queueTimeoutMs, shutdownGraceMs, projectDir, dbPath, fallbackModel, auditFailureThreshold, allowSkills, allowSkillsRoots, reloadPollMs };
 }
 
 function sendJson(res: ServerResponse, statusCode: number, body: unknown): void {
@@ -176,8 +179,11 @@ export async function startServe(argv: string[] = process.argv.slice(3)) {
   const args = parseArgs(argv);
   const loader = new SpecialistLoader({ projectDir: args.projectDir });
   const dbLocation = resolveObservabilityDbLocation(args.projectDir);
-  ensureObservabilityDbFile(dbLocation);
-  const db = createObservabilitySqliteClient(args.projectDir);
+  const dbPath = args.dbPath ?? dbLocation.dbPath;
+  const db = args.dbPath ? createObservabilitySqliteClientAtPath(args.dbPath) : (() => {
+    ensureObservabilityDbFile(dbLocation);
+    return createObservabilitySqliteClient(args.projectDir);
+  })();
   const readinessState = createReadinessState();
   const userDir = join(args.projectDir, '.specialists', 'user');
   const hotReload = createUserDirWatcher({ loader, userDir, pollMs: args.reloadPollMs });
@@ -190,7 +196,7 @@ export async function startServe(argv: string[] = process.argv.slice(3)) {
       const result = await evaluateReadiness({
         state: readinessState,
         projectDir: args.projectDir,
-        dbPath: dbLocation.dbPath,
+        dbPath,
         auditFailureThreshold: args.auditFailureThreshold,
       });
       if (result.ready) {
@@ -218,7 +224,7 @@ export async function startServe(argv: string[] = process.argv.slice(3)) {
           loader,
           projectDir: args.projectDir,
           fallbackModel: args.fallbackModel,
-          observabilityDbPath: args.projectDir,
+          ...(args.dbPath ? { observabilityDbPath: args.dbPath } : {}),
           onChild: (child) => {
             children.add(child);
             child.once('exit', () => children.delete(child));

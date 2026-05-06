@@ -120,7 +120,11 @@ export async function run(argv: string[] = process.argv.slice(3)): Promise<void>
   }
 
   const loader = new SpecialistLoader({ projectDir: args.projectDir });
-  const result = await runScriptSpecialist(buildRequest(args), { loader, projectDir: args.projectDir, observabilityDbPath: args.dbPath ?? args.projectDir });
+  const result = await runScriptSpecialist(buildRequest(args), {
+    loader,
+    projectDir: args.projectDir,
+    ...(args.dbPath ? { observabilityDbPath: args.dbPath } : {}),
+  });
   printResult(result, args.json);
   process.exit(mapExitCode(result));
 }

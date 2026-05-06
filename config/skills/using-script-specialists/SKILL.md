@@ -102,6 +102,7 @@ Behaviour:
 
 - Loads the spec via `SpecialistLoader` (same loader as `sp run`).
 - Renders `prompt.task_template` (or named template) with `--vars`.
+- `--db-path /path/to/observability.db` is an exact SQLite file path; omit it to use the project default `.specialists/db/observability.db`.
 - Spawns `pi --mode json --no-session --no-extensions --no-tools` with the
   resolved model.
 - Returns the final assistant text on stdout. With `--json`, returns the full

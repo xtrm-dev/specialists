@@ -199,6 +199,7 @@ Notes:
 
 - `--project-dir` resolves specs from `<project-dir>/.specialists/user/`
 - `--user-dir` still accepted as deprecated alias
+- `--db-path` is an exact SQLite file path for script observability; default remains `<git-root>/.specialists/db/observability.db`
 - default output = assistant text on stdout
 - `--json` returns full response payload
 - `--single-instance` uses `flock`; contention exits `75`

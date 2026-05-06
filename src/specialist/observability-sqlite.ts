@@ -1,5 +1,5 @@
-import { existsSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 // bun:sqlite is Bun-only — lazy-load to avoid breaking Node/vitest imports.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -2668,22 +2668,31 @@ export function hasRunCompleteEvent(jobId: string, cwd: string = process.cwd()):
   return false;
 }
 
-export function createObservabilitySqliteClient(cwd: string = process.cwd()): ObservabilitySqliteClient | null {
+function openObservabilitySqliteClient(dbPath: string): ObservabilitySqliteClient | null {
   if (!loadBunDatabase()) return null;
-  const location = resolveObservabilityDbLocation(cwd);
-  if (!existsSync(location.dbPath)) return null;
 
   try {
     // Open DB for schema initialization (temporary connection)
     const Ctor = loadBunDatabase()!;
-    const initDb = new Ctor(location.dbPath);
+    const initDb = new Ctor(dbPath);
     initDb.run(`PRAGMA busy_timeout=${BUSY_TIMEOUT_MS}`);
     initSchema(initDb);
     initDb.close();
 
     // Create persistent client connection
-    return new SqliteClient(location.dbPath);
+    return new SqliteClient(dbPath);
   } catch {
     return null;
   }
+}
+
+export function createObservabilitySqliteClient(cwd: string = process.cwd()): ObservabilitySqliteClient | null {
+  const location = resolveObservabilityDbLocation(cwd);
+  if (!existsSync(location.dbPath)) return null;
+  return openObservabilitySqliteClient(location.dbPath);
+}
+
+export function createObservabilitySqliteClientAtPath(dbPath: string): ObservabilitySqliteClient | null {
+  mkdirSync(dirname(dbPath), { recursive: true });
+  return openObservabilitySqliteClient(dbPath);
 }

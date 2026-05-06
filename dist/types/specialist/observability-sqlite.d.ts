@@ -257,5 +257,6 @@ export interface ObservabilitySqliteClient {
 }
 export declare function hasRunCompleteEvent(jobId: string, cwd?: string): boolean;
 export declare function createObservabilitySqliteClient(cwd?: string): ObservabilitySqliteClient | null;
+export declare function createObservabilitySqliteClientAtPath(dbPath: string): ObservabilitySqliteClient | null;
 export {};
 //# sourceMappingURL=observability-sqlite.d.ts.map
