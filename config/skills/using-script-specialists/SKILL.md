@@ -54,7 +54,7 @@ A spec is rejected at request time (`specialist_load_error`) if any of:
 - `execution.interactive` is `true`
 - `execution.requires_worktree` is `true`
 - `execution.permission_required` is anything other than `READ_ONLY`
-- `skills.scripts` is non-empty
+- `skills.scripts` is non-empty (always rejected; no `--allow-local-scripts` bypass)
 - `prompt.task_template` is missing
 - a referenced `$var` in the chosen template is not supplied (`template_variable_missing`)
 

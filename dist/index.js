@@ -28163,8 +28163,8 @@ function compatGuard(spec, trust) {
   if (execution.permission_required !== "READ_ONLY")
     throw new CompatGuardError("execution.permission_required", "permission_required must be READ_ONLY");
   const hasScripts = (spec.specialist.skills?.scripts?.length ?? 0) > 0;
-  if (hasScripts && !trust?.allowLocalScripts) {
-    throw new CompatGuardError("skills.scripts", "scripts not allowed (enable with --allow-local-scripts)");
+  if (hasScripts) {
+    throw new CompatGuardError("skills.scripts", "local scripts are not supported in script-class specialists");
   }
   const hasPaths = (spec.specialist.skills?.paths?.length ?? 0) > 0;
   const hasSkillInherit = Boolean(spec.specialist.prompt.skill_inherit);
@@ -28330,7 +28330,8 @@ async function runScriptSpecialist(input2, options) {
     const assistantTextLimitBytes = resolveAssistantTextLimitBytes(spec);
     const attempts = [];
     for (const model of modelCandidates) {
-      const attempt = await runSingleAttempt(prompt, model, input2.thinking_level ?? spec.specialist.execution.thinking_level, timeoutMs, assistantTextLimitBytes, options);
+      const systemPrompt = spec.specialist.prompt.system || undefined;
+      const attempt = await runSingleAttempt(prompt, model, input2.thinking_level ?? spec.specialist.execution.thinking_level, timeoutMs, assistantTextLimitBytes, options, systemPrompt);
       attempts.push(attempt);
       const parsed = classifyAttempt(attempt);
       if (parsed.retryable)
@@ -28373,11 +28374,13 @@ function collectModelCandidates(input2, spec, options) {
   const candidates = [input2.model_override, spec.specialist.execution.model, spec.specialist.execution.fallback_model, options.fallbackModel].filter((value) => typeof value === "string" && value.length > 0);
   return [...new Set(candidates)];
 }
-function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assistantTextLimitBytes, options) {
+function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assistantTextLimitBytes, options, systemPrompt) {
   return new Promise((resolve8, reject) => {
-    const args = ["--mode", "json", "--no-session", "--no-extensions", "--no-tools", "--model", model];
+    const args = ["--mode", "json", "--no-session", "--no-extensions", "--no-tools", "--offline", "--model", model];
     if (thinkingLevel)
       args.push("--thinking", thinkingLevel);
+    if (systemPrompt)
+      args.push("--system-prompt", systemPrompt);
     args.push(prompt);
     const pi = spawn3("pi", args, { stdio: ["ignore", "pipe", "pipe"] });
     options.onChild?.(pi);
@@ -40557,7 +40560,6 @@ function parseArgs12(argv) {
   let auditFailureThreshold = 5;
   let allowSkills = false;
   let allowSkillsRoots = [];
-  let allowLocalScripts = false;
   let reloadPollMs = 0;
   for (let i = 0;i < argv.length; i++) {
     const token = argv[i];
@@ -40580,11 +40582,11 @@ function parseArgs12(argv) {
     else if (token === "--allow-skills-roots" && argv[i + 1])
       allowSkillsRoots = argv[++i].split(":").filter(Boolean);
     else if (token === "--allow-local-scripts")
-      allowLocalScripts = true;
+      throw new Error("--allow-local-scripts is not supported for script-class specialists");
     else if (token === "--reload-poll-ms" && argv[i + 1])
       reloadPollMs = Number(argv[++i]);
   }
-  return { port, concurrency, queueTimeoutMs, shutdownGraceMs, projectDir, fallbackModel, auditFailureThreshold, allowSkills, allowSkillsRoots, allowLocalScripts, reloadPollMs };
+  return { port, concurrency, queueTimeoutMs, shutdownGraceMs, projectDir, fallbackModel, auditFailureThreshold, allowSkills, allowSkillsRoots, reloadPollMs };
 }
 function sendJson(res, statusCode, body) {
   res.writeHead(statusCode, { "content-type": "application/json" });
@@ -40668,8 +40670,7 @@ async function startServe(argv = process.argv.slice(3)) {
           onAuditFailure: () => recordAuditFailure(readinessState),
           trust: {
             allowSkills: args.allowSkills,
-            allowSkillsRoots: args.allowSkillsRoots,
-            allowLocalScripts: args.allowLocalScripts
+            allowSkillsRoots: args.allowSkillsRoots
           }
         });
         return sendJson(res, 200, result);

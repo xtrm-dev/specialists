@@ -44,13 +44,13 @@ function makeSpec(overrides: {
 describe('compatGuard trust options', () => {
   it('rejects skills.scripts by default', () => {
     expect(() => compatGuard(makeSpec({ scripts: [{ name: 'pre', on: 'pre', command: 'echo' }] })))
-      .toThrow(/scripts not allowed/);
+      .toThrow(/local scripts are not supported/);
   });
 
-  it('allows skills.scripts when --allow-local-scripts', () => {
+  it('rejects skills.scripts even when allowLocalScripts is set', () => {
     const trust: TrustOptions = { allowLocalScripts: true };
     expect(() => compatGuard(makeSpec({ scripts: [{ name: 'pre', on: 'pre', command: 'echo' }] }), trust))
-      .not.toThrow();
+      .toThrow(/local scripts are not supported/);
   });
 
   it('rejects skills.paths by default', () => {
@@ -87,14 +87,14 @@ describe('compatGuard trust options', () => {
       .not.toThrow();
   });
 
-  it('mixed allow flags: scripts blocked when only --allow-skills', () => {
+  it('mixed allow flags: scripts remain blocked when skills are trusted', () => {
     const trust: TrustOptions = { allowSkills: true };
     expect(() => compatGuard(makeSpec({ scripts: [{ name: 'pre', on: 'pre', command: 'echo' }] }), trust))
-      .toThrow(/scripts not allowed/);
+      .toThrow(/local scripts are not supported/);
   });
 
   it('still enforces interactive/worktree/permission rules even with trust flags', () => {
-    const trust: TrustOptions = { allowSkills: true, allowLocalScripts: true };
+    const trust: TrustOptions = { allowSkills: true };
     expect(() => compatGuard(makeSpec({ interactive: true }), trust)).toThrow(/interactive/);
     expect(() => compatGuard(makeSpec({ requires_worktree: true }), trust)).toThrow(/worktree/);
     expect(() => compatGuard(makeSpec({ permission_required: 'LOW' }), trust)).toThrow(/READ_ONLY/);

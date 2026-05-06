@@ -603,20 +603,20 @@ By default, `compatGuard` rejects specs that would access host resources:
 |-------|---------|------------------|
 | `skills.paths` | rejected | would inject host files into prompt |
 | `prompt.skill_inherit` | rejected | same trust concern |
-| `skills.scripts` | rejected | local shell hooks unavailable in service mode |
+| `skills.scripts` | always rejected | local shell hooks unavailable in service/script mode |
 
 To permit these fields, launch `sp serve` with trust flags:
 
 ```bash
 sp serve --allow-skills --allow-skills-roots /safe/path:/another/safe/path
-sp serve --allow-local-scripts
+# Unsupported: sp serve --allow-local-scripts
 ```
 
 | Flag | Effect |
 |------|--------|
 | `--allow-skills` | Permits `skills.paths` and `prompt.skill_inherit` |
 | `--allow-skills-roots <p1>:<p2>:...` | Restricts permitted skill paths to entries under listed roots (requires `--allow-skills`) |
-| `--allow-local-scripts` | Permits `skills.scripts` |
+| `--allow-local-scripts` | Unsupported; `skills.scripts` are always rejected in service/script mode |
 
 When `--allow-skills` is active, each skill path is resolved and hashed. The `status_json.skill_sources` field in the trace row contains `{path, sha256}` entries for audit. Unreadable files produce `sha256: 'unreadable'` rather than throwing.
 

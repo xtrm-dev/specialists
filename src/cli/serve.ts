@@ -22,7 +22,6 @@ interface ServeArgs {
   auditFailureThreshold: number;
   allowSkills: boolean;
   allowSkillsRoots: string[];
-  allowLocalScripts: boolean;
   reloadPollMs: number;
 }
 
@@ -129,7 +128,6 @@ function parseArgs(argv: string[]): ServeArgs {
   let auditFailureThreshold = 5;
   let allowSkills = false;
   let allowSkillsRoots: string[] = [];
-  let allowLocalScripts = false;
   let reloadPollMs = 0;
 
   for (let i = 0; i < argv.length; i++) {
@@ -143,11 +141,11 @@ function parseArgs(argv: string[]): ServeArgs {
     else if (token === '--audit-failure-threshold' && argv[i + 1]) auditFailureThreshold = Number(argv[++i]);
     else if (token === '--allow-skills') allowSkills = true;
     else if (token === '--allow-skills-roots' && argv[i + 1]) allowSkillsRoots = argv[++i].split(':').filter(Boolean);
-    else if (token === '--allow-local-scripts') allowLocalScripts = true;
+    else if (token === '--allow-local-scripts') throw new Error('--allow-local-scripts is not supported for script-class specialists');
     else if (token === '--reload-poll-ms' && argv[i + 1]) reloadPollMs = Number(argv[++i]);
   }
 
-  return { port, concurrency, queueTimeoutMs, shutdownGraceMs, projectDir, fallbackModel, auditFailureThreshold, allowSkills, allowSkillsRoots, allowLocalScripts, reloadPollMs };
+  return { port, concurrency, queueTimeoutMs, shutdownGraceMs, projectDir, fallbackModel, auditFailureThreshold, allowSkills, allowSkillsRoots, reloadPollMs };
 }
 
 function sendJson(res: ServerResponse, statusCode: number, body: unknown): void {
@@ -228,7 +226,6 @@ export async function startServe(argv: string[] = process.argv.slice(3)) {
           trust: {
             allowSkills: args.allowSkills,
             allowSkillsRoots: args.allowSkillsRoots,
-            allowLocalScripts: args.allowLocalScripts,
           },
         });
         return sendJson(res, 200, result);

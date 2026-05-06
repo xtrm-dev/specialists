@@ -13,10 +13,14 @@ import {
   runScriptSpecialist,
 } from '../../../src/specialist/script-runner.js';
 
-const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }));
+const { spawnMock, spawnSyncMock } = vi.hoisted(() => ({
+  spawnMock: vi.fn(),
+  spawnSyncMock: vi.fn(() => ({ status: 1, stdout: '', stderr: '' })),
+}));
 
 vi.mock('node:child_process', () => ({
   spawn: spawnMock,
+  spawnSync: spawnSyncMock,
 }));
 
 const baseSpec = {
@@ -41,6 +45,7 @@ const baseSpec = {
 
 afterEach(() => {
   spawnMock.mockReset();
+  spawnSyncMock.mockClear();
   delete process.env.SPECIALISTS_SCRIPT_STDOUT_LIMIT_BYTES;
 });
 
@@ -86,7 +91,7 @@ describe('script-runner compat guard', () => {
   });
 
   it('rejects scripted specialist', () => {
-    expect(() => compatGuard({ ...baseSpec, specialist: { ...baseSpec.specialist, skills: { scripts: [{ run: 'echo hi', phase: 'pre', inject_output: false }] } } } as never)).toThrow('scripts not allowed');
+    expect(() => compatGuard({ ...baseSpec, specialist: { ...baseSpec.specialist, skills: { scripts: [{ run: 'echo hi', phase: 'pre', inject_output: false }] } } } as never)).toThrow('local scripts are not supported');
   });
 });
 

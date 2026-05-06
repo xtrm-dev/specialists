@@ -63,7 +63,7 @@ The doc lists fields by names that don't all exist. The corrected mapping:
 |---|---|---|---|
 | `tools` | not a field; real control = `execution.permission_required` + `capabilities.required_tools` | **RESHAPE** | Attack the right knob. Service surface caps `permission_required: READ_ONLY` and rejects incompatible `required_tools` values. |
 | `skills` | `specialist.skills.{paths,scripts}` (real, used in runner.ts:897-904 and via `--skill`) | **DON'T forbid** | Hard-forbidding the field breaks shared-spec reuse. Forbid the *behavior* (script execution; arbitrary skill injection) per surface policy. |
-| `scripts` | not top-level; real = `skills.scripts` | **RESHAPE** | Service surface rejects `skills.scripts` (shell exec) unless single-tenant trusted mode opts in. |
+| `scripts` | not top-level; real = `skills.scripts` | **RESHAPE** | Service surface always rejects `skills.scripts` (shell exec); no trusted-mode bypass until a separate sandboxed design exists. |
 | `keep_alive` | not a field; real = `execution.interactive` | **RESHAPE** | Service surface requires `execution.interactive: false`. Name the actual field. |
 | `worktree` | not a field; real = `execution.requires_worktree` | **RESHAPE** | Service surface requires `requires_worktree: false`. |
 | `beads_integration` | exists, used by runner.ts:1160-1167 | **DON'T forbid** | Field stays in shared schema. Service forces effective behavior to `never` at runtime. Loader doesn't reject it. |
@@ -145,7 +145,7 @@ For `class: "script"` requested by the HTTP endpoint, all CLI `sp script` invoca
 - `execution.max_retries` MUST be `0`. Retries are owned by the caller (HTTP client, cron wrapper, breaker). Internal retries amplify cost and duplicate side effects on non-idempotent downstreams. Response exposes `meta.attempts: 1` for transport parity. *(B3)*
 - **`skills.paths` MUST be empty** unless launched in trusted mode (`--allow-skills`). Reason: loader resolves these to host-FS files (`loader.ts:182-189`) and pi injects them into the prompt — a spec author can prompt-inject from any host path the service UID can read. In trusted mode, every resolved skill path is logged in the audit row (`meta.skill_sources`) with its sha256. *(B2)*
 - **`prompt.skill_inherit` MUST be absent** unless trusted mode. Same reason. *(B2)*
-- `skills.scripts` (local shell hooks) MUST be empty unless `--allow-local-scripts`. Distinct from `--allow-skills` — script execution and prompt injection are different trust decisions.
+- `skills.scripts` (local shell hooks) MUST be empty. `--allow-local-scripts` is unsupported; script execution and prompt injection remain separate trust decisions.
 - `beads_integration` is forced to `never` at runtime regardless of value.
 - `capabilities.external_commands` MUST be empty (host commands unsupported).
 - `prompt.task_template` MUST be present.
@@ -674,7 +674,7 @@ The memo references several commands and exports that **do not exist in the code
 
 | Surface | Today | Required |
 |---|---|---|
-| `sp serve` | absent (`src/index.ts:958-967`) | HTTP server entry point: `--port`, `--user-dir`, `--db-path`, `--request-concurrency`, `--queue-timeout-ms`, `--max-prompt-bytes`, `--max-output-bytes`, `--shutdown-grace-ms`, `--audit-failure-mode`, `--allow-skills`, `--allow-skills-roots`, `--allow-local-scripts`, `--reload-poll-ms`. |
+| `sp serve` | absent (`src/index.ts:958-967`) | HTTP server entry point: `--port`, `--user-dir`, `--db-path`, `--request-concurrency`, `--queue-timeout-ms`, `--max-prompt-bytes`, `--max-output-bytes`, `--shutdown-grace-ms`, `--audit-failure-mode`, `--allow-skills`, `--allow-skills-roots`, `--reload-poll-ms`. |
 | `sp script` | absent | One-shot CLI: `--vars`, `--template`, `--model`, `--thinking`, `--user-dir`, `--db-path`, `--timeout-ms`, `--json`, `--single-instance`, `--log-file`, `--no-trace`. Exit codes per §10.2. |
 | `sp validate --target script\|agent` | partial (`src/cli/validate.ts` validates schema, no `--target`) | Add `--target` flag that runs `validateForScriptService` or `validateForAgent` on top of base parse. Image-callable for CI. |
 | `sp health --exit-code` | absent | Healthcheck shim hitting `/readyz`, exit 0/1. |
