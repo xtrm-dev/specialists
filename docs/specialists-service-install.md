@@ -2,9 +2,9 @@
 title: Specialists Service Install
 scope: specialists-service-install
 category: deployment
-version: 2.0.0
-updated: 2026-04-29
-synced_at: c21f3214
+version: 2.1.0
+updated: 2026-05-06
+synced_at: a0e54d0c
 description: Install runbook for consumers who do not clone specialists source. Deployment steps, trust/readiness gates, hot-reload, common pitfalls.
 source_of_truth_for:
   - Dockerfile
@@ -44,7 +44,7 @@ Tag whatever you want (`:local`, `:v0.1`, etc.) — your compose file references
 
 The image runs as non-root, UID `10001` (label `org.specialists.uid=10001`). Override at runtime with `--user $UID:$GID` (Docker) or `--userns=keep-id --user $UID:$GID` (rootless Podman) so container writes are owned by your host user. The compose template wires this automatically.
 
-The image installs `@mariozechner/pi-coding-agent@latest` at build time. Pin to a specific version in the Dockerfile if you need reproducible rebuilds across pi releases.
+The image installs `@mariozechner/pi-coding-agent@0.64.0` at build time. Current service execution uses pi's subprocess runner; SDK-backed execution is future work if/when it lands.
 
 > **Future** — `docker pull ghcr.io/<org>/specialists-service:<tag>` once the image is published.
 

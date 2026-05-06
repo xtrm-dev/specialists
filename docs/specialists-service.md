@@ -2,9 +2,9 @@
 title: Specialists Service
 scope: specialists-service
 category: architecture
-version: 3.0.0
-updated: 2026-04-29
-synced_at: c9b37118
+version: 3.1.0
+updated: 2026-05-06
+synced_at: a0e54d0c
 description: Human SSOT for sp serve, sp script, script-class authoring, trust/readiness/hot-reload, and image release.
 source_of_truth_for:
   - src/cli/script.ts
@@ -124,7 +124,7 @@ Defaults:
 ### Runtime
 
 - One Node process, one HTTP listener, one `pi` subprocess per in-flight request.
-- `pi` gets same one-shot flags as CLI path: `--mode json --no-session --no-extensions --no-tools --model <resolved> [--thinking <level>] -- <rendered-prompt>`.
+- `pi` is spawned in `options.projectDir ?? process.cwd()` and gets current one-shot runner contract: `--mode json --no-session --no-extensions --no-tools --offline --model <resolved> [--thinking <level>] [--system-prompt <text>] [--skill <path> ... | --no-skills]`; rendered prompt is written to stdin, not argv.
 - Credentials stay inside `pi`; service never handles API keys.
 - Excess load waits behind semaphore, then returns `429`.
 
@@ -164,7 +164,7 @@ Flags:
 - `--allow-skills`
   - allows `skills.paths` and `prompt.skill_inherit`
 - `--allow-skills-roots <p1>:<p2>`
-  - prefix allowlist for `skills.paths`
+  - prefix allowlist for `skills.paths` and `prompt.skill_inherit`
   - only active when `--allow-skills` on
 - `--allow-local-scripts` is not supported. `skills.scripts` are always rejected in service/script mode until a separate sandboxed script-execution design exists.
 
@@ -204,9 +204,10 @@ sp script <name> \
 
 Notes:
 
-- `--project-dir` resolves specs from `<project-dir>/.specialists/user/`
+- `--project-dir` resolves specs from `<project-dir>/.specialists/user/` and also becomes `pi` child cwd
 - `--user-dir` still accepted as deprecated alias
 - `--db-path` is an exact SQLite file path for script observability; default remains `<git-root>/.specialists/db/observability.db`
+- rendered prompt is streamed to `pi` stdin; no positional prompt arg anymore
 - default output = assistant text on stdout
 - `--json` returns full response payload
 - `--single-instance` uses `flock`; contention exits `75`
@@ -245,6 +246,8 @@ Reference schema and examples: [`docs/authoring.md`](authoring.md)
 - same model resolution as `sp run`
 - same fallback-model behavior
 - same thinking-level forwarding
+- `prompt.system` becomes `--system-prompt` on `pi` (full override, not append)
+- trusted `skills.paths` and `prompt.skill_inherit` are forwarded as `--skill`; if none are allowed, child gets `--no-skills`
 - same output-schema validation behavior
 - stdout cap defaults to 32MB; override with `SPECIALISTS_SCRIPT_STDOUT_LIMIT_BYTES` or `execution.stdout_limit_bytes`
 - `template_variable_missing` if template references missing `$var`
@@ -317,7 +320,7 @@ docker build -t specialists-service:local .
 `pi-compat.yml` checks:
 
 - required `pi` spawn flags still exist
-- positional prompt parsing still works
+- stdin prompt handling still works
 - image boots with latest `pi`
 
 ## Merged legacy content
