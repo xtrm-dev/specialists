@@ -109,7 +109,10 @@ sp serve \
   --allow-skills \
   --allow-skills-roots <p1>:<p2> \
   --allow-local-scripts \
-  --reload-poll-ms <n>
+  --reload-poll-ms <n> \
+  --readiness-canary off|warn|require \
+  --readiness-required-pi-flag <flag> \
+  --readiness-canary-specialist <name>
 ```
 
 Defaults:
@@ -133,14 +136,15 @@ Defaults:
 
 ### `/readyz`
 
-Readiness gate with 6-reason taxonomy. Failure order:
+Readiness gate with explicit reason strings. Failure order:
 
 1. `draining`
 2. `degraded:audit`
 3. `pi_config_unreadable`
 4. `db_not_writable`
-5. `empty_user_dir`
-6. `invalid_spec_in_user_dir`
+5. optional Pi canary: `pi_binary_missing`, `pi_flag_missing`, `pi_smoke_failed`
+6. `empty_user_dir`
+7. `invalid_spec_in_user_dir`
 
 Notes:
 
@@ -148,6 +152,9 @@ Notes:
 - audit failure window is sliding 60s.
 - `SIGTERM` flips service into draining.
 - `evaluateReadiness()` is pure async and testable.
+- Pi canary defaults to `off`; use `--readiness-canary warn` in Docker/Podman rollout to surface `warning` without failing readiness, then `--readiness-canary require` when deployments should block on Pi compatibility.
+- `--readiness-required-pi-flag <flag>` may be repeated; without explicit flags the canary checks the script-runner isolation flags.
+- `--readiness-canary-specialist <name>` adds a minimal smoke generation through a script-class specialist; keep its prompt non-secret and deterministic.
 
 ### Trust flags
 

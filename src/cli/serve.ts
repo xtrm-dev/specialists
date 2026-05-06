@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { once } from 'node:events';
-import type { ChildProcess } from 'node:child_process';
+import { spawnSync, type ChildProcess } from 'node:child_process';
 import { access, readdir, readFile, constants } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -24,15 +24,23 @@ interface ServeArgs {
   allowSkillsRoots: string[];
   allowLocalScripts: boolean;
   reloadPollMs: number;
+  readinessCanaryMode: 'off' | 'warn' | 'require';
+  readinessRequiredPiFlags: string[];
+  readinessCanarySpecialist?: string;
+  readinessCanaryTimeoutMs: number;
 }
 
 const AUDIT_WINDOW_MS = 60_000;
+const DEFAULT_REQUIRED_PI_FLAGS = ['--mode', '--no-session', '--no-extensions', '--no-tools', '--no-context-files', '--no-skills', '--no-prompt-templates', '--no-themes'];
 
 export type ReadinessReason =
   | 'draining'
   | 'degraded:audit'
   | 'pi_config_unreadable'
   | 'db_not_writable'
+  | 'pi_binary_missing'
+  | 'pi_flag_missing'
+  | 'pi_smoke_failed'
   | 'empty_user_dir'
   | 'invalid_spec_in_user_dir';
 
@@ -87,9 +95,11 @@ export interface ReadinessCheckOptions {
   piConfigPath?: string;
   auditFailureThreshold: number;
   now?: number;
+  piCanaryMode?: 'off' | 'warn' | 'require';
+  piCanaryCheck?: () => Promise<ReadinessReason | undefined> | ReadinessReason | undefined;
 }
 
-export async function evaluateReadiness(opts: ReadinessCheckOptions): Promise<{ ready: true } | { ready: false; reason: ReadinessReason }> {
+export async function evaluateReadiness(opts: ReadinessCheckOptions): Promise<{ ready: true; warning?: ReadinessReason } | { ready: false; reason: ReadinessReason }> {
   const now = opts.now ?? Date.now();
   if (opts.state.shuttingDown) return { ready: false, reason: 'draining' };
 
@@ -111,12 +121,22 @@ export async function evaluateReadiness(opts: ReadinessCheckOptions): Promise<{ 
     return { ready: false, reason: 'db_not_writable' };
   }
 
+  let warning: ReadinessReason | undefined;
+  const canaryMode = opts.piCanaryMode ?? 'off';
+  if (canaryMode !== 'off' && opts.piCanaryCheck) {
+    const canaryFailure = await opts.piCanaryCheck();
+    if (canaryFailure) {
+      if (canaryMode === 'require') return { ready: false, reason: canaryFailure };
+      warning = canaryFailure;
+    }
+  }
+
   const userDir = join(opts.projectDir, '.specialists', 'user');
   const userDirResult = await checkUserDirSpecs(userDir);
   if (userDirResult === 'empty') return { ready: false, reason: 'empty_user_dir' };
   if (userDirResult === 'invalid') return { ready: false, reason: 'invalid_spec_in_user_dir' };
 
-  return { ready: true };
+  return warning ? { ready: true, warning } : { ready: true };
 }
 
 function parseArgs(argv: string[]): ServeArgs {
@@ -131,6 +151,10 @@ function parseArgs(argv: string[]): ServeArgs {
   let allowSkillsRoots: string[] = [];
   let allowLocalScripts = false;
   let reloadPollMs = 0;
+  let readinessCanaryMode: ServeArgs['readinessCanaryMode'] = 'off';
+  const readinessRequiredPiFlags: string[] = [];
+  let readinessCanarySpecialist: string | undefined;
+  let readinessCanaryTimeoutMs = 5_000;
 
   for (let i = 0; i < argv.length; i++) {
     const token = argv[i];
@@ -145,9 +169,25 @@ function parseArgs(argv: string[]): ServeArgs {
     else if (token === '--allow-skills-roots' && argv[i + 1]) allowSkillsRoots = argv[++i].split(':').filter(Boolean);
     else if (token === '--allow-local-scripts') allowLocalScripts = true;
     else if (token === '--reload-poll-ms' && argv[i + 1]) reloadPollMs = Number(argv[++i]);
+    else if (token === '--readiness-canary' && argv[i + 1]) {
+      const mode = argv[++i];
+      if (mode === 'off' || mode === 'warn' || mode === 'require') readinessCanaryMode = mode;
+    }
+    else if (token === '--readiness-required-pi-flag' && argv[i + 1]) readinessRequiredPiFlags.push(argv[++i]);
+    else if (token === '--readiness-canary-specialist' && argv[i + 1]) readinessCanarySpecialist = argv[++i];
+    else if (token === '--readiness-canary-timeout-ms' && argv[i + 1]) readinessCanaryTimeoutMs = Number(argv[++i]);
   }
 
-  return { port, concurrency, queueTimeoutMs, shutdownGraceMs, projectDir, fallbackModel, auditFailureThreshold, allowSkills, allowSkillsRoots, allowLocalScripts, reloadPollMs };
+  return { port, concurrency, queueTimeoutMs, shutdownGraceMs, projectDir, fallbackModel, auditFailureThreshold, allowSkills, allowSkillsRoots, allowLocalScripts, reloadPollMs, readinessCanaryMode, readinessRequiredPiFlags, readinessCanarySpecialist, readinessCanaryTimeoutMs };
+}
+
+
+export function checkPiHelpForFlags(flags: string[] = DEFAULT_REQUIRED_PI_FLAGS): ReadinessReason | undefined {
+  const result = spawnSync('pi', ['--help'], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
+  if (result.error || result.status === 127) return 'pi_binary_missing';
+  const help = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
+  const missing = flags.find((flag) => !help.includes(flag));
+  return missing ? 'pi_flag_missing' : undefined;
 }
 
 function sendJson(res: ServerResponse, statusCode: number, body: unknown): void {
@@ -185,6 +225,18 @@ export async function startServe(argv: string[] = process.argv.slice(3)) {
   const hotReload = createUserDirWatcher({ loader, userDir, pollMs: args.reloadPollMs });
   let active = 0;
   const children = new Set<ChildProcess>();
+  const piCanaryCheck = async (): Promise<ReadinessReason | undefined> => {
+    const requiredFlags = args.readinessRequiredPiFlags.length > 0 ? args.readinessRequiredPiFlags : DEFAULT_REQUIRED_PI_FLAGS;
+    const compatibilityFailure = checkPiHelpForFlags(requiredFlags);
+    if (compatibilityFailure) return compatibilityFailure;
+    if (!args.readinessCanarySpecialist) return undefined;
+    const result = await runScriptSpecialist({ specialist: args.readinessCanarySpecialist, trace: false, timeout_ms: args.readinessCanaryTimeoutMs }, {
+      loader,
+      fallbackModel: args.fallbackModel,
+      observabilityDbPath: args.projectDir,
+    });
+    return result.success ? undefined : 'pi_smoke_failed';
+  };
 
   const server = createServer(async (req, res) => {
     if (req.url === '/healthz') return sendJson(res, 200, { ok: true });
@@ -194,9 +246,11 @@ export async function startServe(argv: string[] = process.argv.slice(3)) {
         projectDir: args.projectDir,
         dbPath: dbLocation.dbPath,
         auditFailureThreshold: args.auditFailureThreshold,
+        piCanaryMode: args.readinessCanaryMode,
+        piCanaryCheck,
       });
       if (result.ready) {
-        return sendJson(res, 200, { ready: true, db_write_failures_total: readinessState.dbWriteFailuresTotal });
+        return sendJson(res, 200, { ready: true, ...(result.warning ? { warning: result.warning } : {}), db_write_failures_total: readinessState.dbWriteFailuresTotal });
       }
       return sendJson(res, 503, {
         ready: false,

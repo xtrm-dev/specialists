@@ -9247,7 +9247,8 @@ async function runScriptSpecialist(input, options) {
     const assistantTextLimitBytes = resolveAssistantTextLimitBytes(spec);
     const attempts = [];
     for (const model of modelCandidates) {
-      const attempt = await runSingleAttempt(prompt, model, input.thinking_level ?? spec.specialist.execution.thinking_level, timeoutMs, assistantTextLimitBytes, options);
+      const systemPrompt = spec.specialist.prompt.system || undefined;
+      const attempt = await runSingleAttempt(prompt, model, input.thinking_level ?? spec.specialist.execution.thinking_level, timeoutMs, assistantTextLimitBytes, options, systemPrompt);
       attempts.push(attempt);
       const parsed = classifyAttempt(attempt);
       if (parsed.retryable)
@@ -9290,11 +9291,13 @@ function collectModelCandidates(input, spec, options) {
   const candidates = [input.model_override, spec.specialist.execution.model, spec.specialist.execution.fallback_model, options.fallbackModel].filter((value) => typeof value === "string" && value.length > 0);
   return [...new Set(candidates)];
 }
-function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assistantTextLimitBytes, options) {
+function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assistantTextLimitBytes, options, systemPrompt) {
   return new Promise((resolve, reject) => {
-    const args = ["--mode", "json", "--no-session", "--no-extensions", "--no-tools", "--model", model];
+    const args = ["--mode", "json", "--no-session", "--no-extensions", "--no-tools", "--offline", "--model", model];
     if (thinkingLevel)
       args.push("--thinking", thinkingLevel);
+    if (systemPrompt)
+      args.push("--system-prompt", systemPrompt);
     args.push(prompt);
     const pi = spawn("pi", args, { stdio: ["ignore", "pipe", "pipe"] });
     options.onChild?.(pi);

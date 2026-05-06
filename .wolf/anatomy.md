@@ -1260,3 +1260,7 @@
 - `docs/skills.md` — documents skill snapshots as Category B managed by `xt doctor` / `xt update`.
 - `docs/hooks.md` — documents hook snapshots as Category B and separates `specialists doctor` from `xt doctor` drift checks.
 - `docs/cli-reference.md` — updates `sp init`, `sp doctor --check-drift`, `sp prune-stale-defaults`, and xtrm-managed `xt doctor` / `xt update` references.
+
+## sp serve readiness canary
+
+- 2026-05-06: `src/cli/serve.ts` supports optional `--readiness-canary off|warn|require`, repeated `--readiness-required-pi-flag`, and `--readiness-canary-specialist`. `/healthz` remains liveness-only; `/readyz` reports `pi_binary_missing`, `pi_flag_missing`, or `pi_smoke_failed` as warning or blocking reason depending on mode.
