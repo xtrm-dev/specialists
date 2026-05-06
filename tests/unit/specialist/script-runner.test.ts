@@ -158,9 +158,9 @@ describe('output contract injection', () => {
 
     await resultPromise;
 
-    const spawnArgs: string[] = spawnMock.mock.calls[0][1];
-    expect(spawnArgs.at(-1)).toContain('Return only valid JSON');
-    expect(spawnArgs.at(-1)).toContain('unreleased_summary, sections');
+    const prompt = child.stdin.write.mock.calls[0][0] as string;
+    expect(prompt).toContain('Return only valid JSON');
+    expect(prompt).toContain('unreleased_summary, sections');
   });
 
   it('keeps invalid JSON validation intact after injecting the contract', async () => {
