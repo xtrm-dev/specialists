@@ -386,7 +386,7 @@ function runSingleAttempt(prompt: string, model: string, thinkingLevel: string |
     if (thinkingLevel) args.push('--thinking', thinkingLevel);
     if (systemPrompt) args.push('--system-prompt', systemPrompt);
 
-    const pi = spawn('pi', args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    const pi = spawn('pi', args, { stdio: ['pipe', 'pipe', 'pipe'], cwd: options.projectDir ?? process.cwd() });
     options.onChild?.(pi);
     pi.stdin?.on('error', () => {
       // The child close/error handlers report Pi failures. Swallow stdin EPIPE-style

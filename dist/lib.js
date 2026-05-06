@@ -9311,7 +9311,7 @@ function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assistantText
       args.push("--thinking", thinkingLevel);
     if (systemPrompt)
       args.push("--system-prompt", systemPrompt);
-    const pi = spawn("pi", args, { stdio: ["pipe", "pipe", "pipe"] });
+    const pi = spawn("pi", args, { stdio: ["pipe", "pipe", "pipe"], cwd: options.projectDir ?? process.cwd() });
     options.onChild?.(pi);
     pi.stdin?.on("error", () => {});
     pi.stdin?.write(prompt);

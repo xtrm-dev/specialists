@@ -28394,7 +28394,7 @@ function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assistantText
       args.push("--thinking", thinkingLevel);
     if (systemPrompt)
       args.push("--system-prompt", systemPrompt);
-    const pi = spawn3("pi", args, { stdio: ["pipe", "pipe", "pipe"] });
+    const pi = spawn3("pi", args, { stdio: ["pipe", "pipe", "pipe"], cwd: options.projectDir ?? process.cwd() });
     options.onChild?.(pi);
     pi.stdin?.on("error", () => {});
     pi.stdin?.write(prompt);
@@ -40677,6 +40677,7 @@ async function startServe(argv = process.argv.slice(3)) {
           return sendJson(res, 400, { success: false, error: "malformed_request", error_type: "invalid_json" });
         const result = await runScriptSpecialist(parsed, {
           loader,
+          projectDir: args.projectDir,
           fallbackModel: args.fallbackModel,
           observabilityDbPath: args.projectDir,
           onChild: (child) => {

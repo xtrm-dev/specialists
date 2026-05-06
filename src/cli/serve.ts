@@ -218,6 +218,7 @@ export async function startServe(argv: string[] = process.argv.slice(3)) {
         if (!isValidRequest(parsed)) return sendJson(res, 400, { success: false, error: 'malformed_request', error_type: 'invalid_json' });
         const result = await runScriptSpecialist(parsed, {
           loader,
+          projectDir: args.projectDir,
           fallbackModel: args.fallbackModel,
           observabilityDbPath: args.projectDir,
           onChild: (child) => {

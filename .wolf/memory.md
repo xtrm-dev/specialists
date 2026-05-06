@@ -127,3 +127,5 @@
 - 2026-05-06T09:48:29.854293+00:00: Fixed specialists-6vy script-runner prompt isolation: pi script calls now pass --no-context-files, --no-skills, --no-prompt-templates, and --no-themes; dist rebuilt and script-runner regression test covers argv.
 
 - 2026-05-06T12:49:33.392314+00:00: Fixed unitAI-z2vpq.1 script-runner prompt transport: rendered task prompt now goes to pi stdin instead of argv; added stdin/EPIPE regression coverage and rebuilt dist.
+
+- 2026-05-06: During direct master merge, combined stdin prompt transport with projectDir cwd spawning for script-runner Pi child.
