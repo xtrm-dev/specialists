@@ -6927,6 +6927,7 @@ var require_public_api = __commonJS((exports) => {
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { readFileSync as readFileSync2 } from "node:fs";
+import { isAbsolute, relative, resolve } from "node:path";
 
 // src/specialist/templateEngine.ts
 function renderTemplate(template, variables) {
@@ -9059,6 +9060,18 @@ class CompatGuardError extends Error {
     this.name = "CompatGuardError";
   }
 }
+function isPathWithinRoot(candidatePath, rootPath) {
+  const candidate = resolve(candidatePath);
+  const root = resolve(rootPath);
+  const rel = relative(root, candidate);
+  return rel === "" || rel.length > 0 && !rel.startsWith("..") && !isAbsolute(rel);
+}
+function assertSkillPathWithinRoots(field, path, roots) {
+  const allowed = roots.some((root) => isPathWithinRoot(path, root));
+  if (!allowed) {
+    throw new CompatGuardError(field, `skill path '${path}' not under any --allow-skills-roots entry`);
+  }
+}
 function hasUnsubstitutedVariables(template, variables) {
   const matches = template.match(/\$([a-zA-Z_][a-zA-Z0-9_]*)/g) ?? [];
   for (const match of matches) {
@@ -9088,13 +9101,12 @@ function compatGuard(spec, trust) {
   if (hasSkillInherit && !trust?.allowSkills) {
     throw new CompatGuardError("prompt.skill_inherit", "skills not allowed (enable with --allow-skills)");
   }
-  if (hasPaths && trust?.allowSkills && trust.allowSkillsRoots && trust.allowSkillsRoots.length > 0) {
+  if (trust?.allowSkills && trust.allowSkillsRoots && trust.allowSkillsRoots.length > 0) {
     const paths = spec.specialist.skills?.paths ?? [];
-    for (const path of paths) {
-      const allowed = trust.allowSkillsRoots.some((root) => path.startsWith(root));
-      if (!allowed) {
-        throw new CompatGuardError("skills.paths", `skill path '${path}' not under any --allow-skills-roots entry`);
-      }
+    for (const path of paths)
+      assertSkillPathWithinRoots("skills.paths", path, trust.allowSkillsRoots);
+    if (typeof spec.specialist.prompt.skill_inherit === "string") {
+      assertSkillPathWithinRoots("prompt.skill_inherit", spec.specialist.prompt.skill_inherit, trust.allowSkillsRoots);
     }
   }
 }
@@ -9352,7 +9364,7 @@ function collectModelCandidates(input, spec, options) {
   return [...new Set(candidates)];
 }
 function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assistantTextLimitBytes, options, systemPrompt) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve2, reject) => {
     const args = [
       "--mode",
       "json",
@@ -9444,7 +9456,7 @@ function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assistantText
     pi.on("error", reject);
     pi.on("close", (code) => {
       clearTimeout(timer);
-      resolve({
+      resolve2({
         model,
         text: assistantText,
         stderr,
