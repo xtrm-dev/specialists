@@ -28204,6 +28204,34 @@ function renderTaskTemplate(template, variables) {
     throw new Error(`Missing template variable: ${missing}`);
   return renderTemplate(template, variables);
 }
+function truncateForPrompt(value, limitBytes) {
+  if (Buffer.byteLength(value, "utf8") <= limitBytes)
+    return value;
+  return `${value.slice(0, limitBytes)}
+... truncated ...`;
+}
+function buildJsonOutputContract(spec) {
+  if (spec.specialist.execution.response_format !== "json")
+    return;
+  const schema = spec.specialist.prompt.output_schema;
+  const required2 = Array.isArray(schema?.required) ? schema.required.filter((value) => typeof value === "string") : [];
+  const lines = [
+    "Output contract:",
+    "- Return only valid JSON. Do not include Markdown fences, prose, or commentary."
+  ];
+  if (required2.length > 0)
+    lines.push(`- Include these required top-level keys: ${required2.join(", ")}.`);
+  if (schema)
+    lines.push(`- JSON schema: ${truncateForPrompt(JSON.stringify(schema), 4096)}`);
+  return lines.join(`
+`);
+}
+function applyOutputContract(prompt, spec) {
+  const contract = buildJsonOutputContract(spec);
+  return contract ? `${prompt}
+
+${contract}` : prompt;
+}
 function mapErrorType(message) {
   if (message.includes("Specialist not found"))
     return "specialist_not_found";
@@ -28310,7 +28338,7 @@ async function runScriptSpecialist(input2, options) {
     compatGuard(spec, options.trust);
     const skillSources = options.trust?.allowSkills ? computeSkillSources(spec) : undefined;
     const template = input2.template ?? spec.specialist.prompt.task_template;
-    const prompt = renderTaskTemplate(template, input2.variables ?? {});
+    const prompt = applyOutputContract(renderTaskTemplate(template, input2.variables ?? {}), spec);
     if (process.env.SPECIALISTS_SCRIPT_STUB_OUTPUT) {
       return {
         success: true,
@@ -28330,7 +28358,8 @@ async function runScriptSpecialist(input2, options) {
     const assistantTextLimitBytes = resolveAssistantTextLimitBytes(spec);
     const attempts = [];
     for (const model of modelCandidates) {
-      const attempt = await runSingleAttempt(prompt, model, input2.thinking_level ?? spec.specialist.execution.thinking_level, timeoutMs, assistantTextLimitBytes, options);
+      const systemPrompt = spec.specialist.prompt.system || undefined;
+      const attempt = await runSingleAttempt(prompt, model, input2.thinking_level ?? spec.specialist.execution.thinking_level, timeoutMs, assistantTextLimitBytes, options, systemPrompt);
       attempts.push(attempt);
       const parsed = classifyAttempt(attempt);
       if (parsed.retryable)
@@ -28373,11 +28402,13 @@ function collectModelCandidates(input2, spec, options) {
   const candidates = [input2.model_override, spec.specialist.execution.model, spec.specialist.execution.fallback_model, options.fallbackModel].filter((value) => typeof value === "string" && value.length > 0);
   return [...new Set(candidates)];
 }
-function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assistantTextLimitBytes, options) {
+function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assistantTextLimitBytes, options, systemPrompt) {
   return new Promise((resolve8, reject) => {
-    const args = ["--mode", "json", "--no-session", "--no-extensions", "--no-tools", "--model", model];
+    const args = ["--mode", "json", "--no-session", "--no-extensions", "--no-tools", "--offline", "--model", model];
     if (thinkingLevel)
       args.push("--thinking", thinkingLevel);
+    if (systemPrompt)
+      args.push("--system-prompt", systemPrompt);
     args.push(prompt);
     const pi = spawn3("pi", args, { stdio: ["ignore", "pipe", "pipe"] });
     options.onChild?.(pi);

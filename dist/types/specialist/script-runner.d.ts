@@ -64,6 +64,7 @@ export interface ScriptRunnerOptions {
 export declare function compatGuard(spec: Specialist, trust?: TrustOptions): void;
 export declare function computeSkillSources(spec: Specialist): SkillSource[];
 export declare function renderTaskTemplate(template: string, variables: Record<string, string>): string;
+export declare function applyOutputContract(prompt: string, spec: Specialist): string;
 export declare const DEFAULT_PENDING_LINE_LIMIT_BYTES: number;
 export declare const DEFAULT_ASSISTANT_TEXT_LIMIT_BYTES: number;
 export declare const DEFAULT_STDERR_LIMIT_BYTES: number;

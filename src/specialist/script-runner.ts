@@ -138,6 +138,31 @@ export function renderTaskTemplate(template: string, variables: Record<string, s
   return renderTemplate(template, variables);
 }
 
+function truncateForPrompt(value: string, limitBytes: number): string {
+  if (Buffer.byteLength(value, 'utf8') <= limitBytes) return value;
+  return `${value.slice(0, limitBytes)}\n... truncated ...`;
+}
+
+function buildJsonOutputContract(spec: Specialist): string | undefined {
+  if (spec.specialist.execution.response_format !== 'json') return undefined;
+  const schema = spec.specialist.prompt.output_schema;
+  const required = Array.isArray(schema?.required)
+    ? schema.required.filter((value): value is string => typeof value === 'string')
+    : [];
+  const lines = [
+    'Output contract:',
+    '- Return only valid JSON. Do not include Markdown fences, prose, or commentary.',
+  ];
+  if (required.length > 0) lines.push(`- Include these required top-level keys: ${required.join(', ')}.`);
+  if (schema) lines.push(`- JSON schema: ${truncateForPrompt(JSON.stringify(schema), 4096)}`);
+  return lines.join('\n');
+}
+
+export function applyOutputContract(prompt: string, spec: Specialist): string {
+  const contract = buildJsonOutputContract(spec);
+  return contract ? `${prompt}\n\n${contract}` : prompt;
+}
+
 function mapErrorType(message: string): ScriptSpecialistErrorType {
   if (message.includes('Specialist not found')) return 'specialist_not_found';
   if (message.includes('interactive') || message.includes('worktree') || message.includes('permission_required') || message.includes('scripts not allowed')) return 'specialist_load_error';
@@ -296,7 +321,7 @@ export async function runScriptSpecialist(input: ScriptGenerateRequest, options:
     const skillSources = options.trust?.allowSkills ? computeSkillSources(spec) : undefined;
 
     const template = input.template ?? spec.specialist.prompt.task_template;
-    const prompt = renderTaskTemplate(template, input.variables ?? {});
+    const prompt = applyOutputContract(renderTaskTemplate(template, input.variables ?? {}), spec);
     if (process.env.SPECIALISTS_SCRIPT_STUB_OUTPUT) {
       return {
         success: true,

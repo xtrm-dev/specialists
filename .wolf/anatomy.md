@@ -1260,3 +1260,9 @@
 - `docs/skills.md` — documents skill snapshots as Category B managed by `xt doctor` / `xt update`.
 - `docs/hooks.md` — documents hook snapshots as Category B and separates `specialists doctor` from `xt doctor` drift checks.
 - `docs/cli-reference.md` — updates `sp init`, `sp doctor --check-drift`, `sp prune-stale-defaults`, and xtrm-managed `xt doctor` / `xt update` references.
+
+## Manual session note — 2026-05-06 unitAI-z2vpq.4
+
+- `src/specialist/script-runner.ts` — JSON script specialists now append an output contract requiring JSON-only responses, required top-level keys, and bounded schema text before Pi invocation.
+- `tests/unit/specialist/script-runner.test.ts` — regression coverage asserts JSON contract injection, no injection for markdown/text, prompt passed to Pi includes required keys, and invalid JSON validation still fails as expected.
+- `dist/index.js` / `dist/lib.js` / dist type outputs — rebuilt bundled/package outputs for JSON output contract injection.
