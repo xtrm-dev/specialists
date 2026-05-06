@@ -22,6 +22,7 @@ const ExecutionSchema = z.object({
   max_retries: z.number().int().min(0).default(0),
   interactive: z.boolean().default(false),
   stdout_limit_bytes: z.number().int().positive().optional(),
+  prompt_limit_bytes: z.number().int().positive().optional(),
   response_format: z.enum(['text', 'json', 'markdown']).default('text'),
   /** Semantic output archetype used for structured output contracts and schema extensions. */
   output_type: z.enum(['codegen', 'analysis', 'review', 'synthesis', 'orchestration', 'workflow', 'research', 'custom']).default('custom'),

@@ -16,6 +16,7 @@ export type ScriptSpecialistErrorType =
   | 'timeout'
   | 'network'
   | 'invalid_json'
+  | 'prompt_too_large'
   | 'output_too_large'
   | 'internal';
 
@@ -142,6 +143,7 @@ function mapErrorType(message: string): ScriptSpecialistErrorType {
   if (message.includes('Specialist not found')) return 'specialist_not_found';
   if (message.includes('interactive') || message.includes('worktree') || message.includes('permission_required') || message.includes('scripts not allowed')) return 'specialist_load_error';
   if (message.includes('Missing template variable')) return 'template_variable_missing';
+  if (message.includes('prompt too large')) return 'prompt_too_large';
   if (message.includes('output too large')) return 'output_too_large';
   if (message.includes('auth') || message.includes('403') || message.includes('401')) return 'auth';
   if (message.includes('quota') || message.includes('rate limit') || message.includes('out of extra usage') || message.includes('insufficient_quota') || message.includes('429')) return 'quota';
@@ -262,6 +264,19 @@ function writeTraceRow(client: ReturnType<typeof createObservabilitySqliteClient
 export const DEFAULT_PENDING_LINE_LIMIT_BYTES = 16 * 1024 * 1024;
 export const DEFAULT_ASSISTANT_TEXT_LIMIT_BYTES = 4 * 1024 * 1024;
 export const DEFAULT_STDERR_LIMIT_BYTES = 1 * 1024 * 1024;
+export const DEFAULT_PROMPT_LIMIT_BYTES = 4 * 1024 * 1024;
+
+export function resolvePromptLimitBytes(spec: Specialist): number {
+  return spec.specialist.execution.prompt_limit_bytes ?? resolveEnvPromptLimitBytes() ?? DEFAULT_PROMPT_LIMIT_BYTES;
+}
+
+function resolveEnvPromptLimitBytes(): number | undefined {
+  const raw = process.env.SPECIALISTS_SCRIPT_PROMPT_LIMIT_BYTES;
+  if (raw === undefined) return undefined;
+  const envLimit = Number(raw);
+  if (!Number.isFinite(envLimit) || envLimit <= 0) return undefined;
+  return Math.floor(envLimit);
+}
 
 export function resolveAssistantTextLimitBytes(spec: Specialist): number {
   return spec.specialist.execution.stdout_limit_bytes ?? resolveEnvAssistantTextLimitBytes() ?? DEFAULT_ASSISTANT_TEXT_LIMIT_BYTES;
@@ -297,6 +312,24 @@ export async function runScriptSpecialist(input: ScriptGenerateRequest, options:
 
     const template = input.template ?? spec.specialist.prompt.task_template;
     const prompt = renderTaskTemplate(template, input.variables ?? {});
+    const modelCandidates = collectModelCandidates(input, spec, options);
+    const promptLimitBytes = resolvePromptLimitBytes(spec);
+    const promptBytes = Buffer.byteLength(prompt, 'utf8');
+    if (promptBytes > promptLimitBytes) {
+      return {
+        success: false,
+        error: `prompt too large: ${promptBytes} bytes exceeds limit ${promptLimitBytes} bytes`,
+        error_type: 'prompt_too_large',
+        meta: {
+          specialist: resolvedSpecialist,
+          requested_specialist: input.requested_specialist ?? input.specialist,
+          resolved_specialist: resolvedSpecialist,
+          model: modelCandidates[0],
+          duration_ms: Date.now() - startedAt,
+          trace_id: traceId,
+        },
+      };
+    }
     if (process.env.SPECIALISTS_SCRIPT_STUB_OUTPUT) {
       return {
         success: true,
@@ -312,7 +345,6 @@ export async function runScriptSpecialist(input: ScriptGenerateRequest, options:
       };
     }
     const timeoutMs = input.timeout_ms ?? spec.specialist.execution.timeout_ms ?? 120_000;
-    const modelCandidates = collectModelCandidates(input, spec, options);
     const assistantTextLimitBytes = resolveAssistantTextLimitBytes(spec);
     const attempts: Array<{ model: string; text: string; stderr: string }> = [];
 

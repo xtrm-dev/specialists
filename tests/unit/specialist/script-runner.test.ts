@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_ASSISTANT_TEXT_LIMIT_BYTES,
   DEFAULT_PENDING_LINE_LIMIT_BYTES,
+  DEFAULT_PROMPT_LIMIT_BYTES,
   DEFAULT_STDERR_LIMIT_BYTES,
   collectModelCandidates,
   classifyAttempt,
@@ -10,6 +11,7 @@ import {
   isRetryableModelFailure,
   renderTaskTemplate,
   resolveAssistantTextLimitBytes,
+  resolvePromptLimitBytes,
   runScriptSpecialist,
 } from '../../../src/specialist/script-runner.js';
 
@@ -46,6 +48,7 @@ const baseSpec = {
 afterEach(() => {
   spawnMock.mockReset();
   spawnSyncMock.mockClear();
+  delete process.env.SPECIALISTS_SCRIPT_PROMPT_LIMIT_BYTES;
   delete process.env.SPECIALISTS_SCRIPT_STDOUT_LIMIT_BYTES;
 });
 

@@ -129,3 +129,5 @@
 - 2026-05-06T12:49:33.392314+00:00: Fixed unitAI-z2vpq.1 script-runner prompt transport: rendered task prompt now goes to pi stdin instead of argv; added stdin/EPIPE regression coverage and rebuilt dist.
 
 - 2026-05-06: During direct master merge, combined stdin prompt transport with projectDir cwd spawning for script-runner Pi child.
+
+- 2026-05-06: During direct master merge, retained prompt-size limit cleanup with stdin/cwd script-runner state.
