@@ -28394,9 +28394,11 @@ function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assistantText
       args.push("--thinking", thinkingLevel);
     if (systemPrompt)
       args.push("--system-prompt", systemPrompt);
-    args.push(prompt);
-    const pi = spawn3("pi", args, { stdio: ["ignore", "pipe", "pipe"] });
+    const pi = spawn3("pi", args, { stdio: ["pipe", "pipe", "pipe"] });
     options.onChild?.(pi);
+    pi.stdin?.on("error", () => {});
+    pi.stdin?.write(prompt);
+    pi.stdin?.end();
     let stderr = "";
     let timedOut = false;
     let outputTooLarge = false;

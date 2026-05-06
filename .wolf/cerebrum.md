@@ -8,6 +8,8 @@
 
 <!-- How the user likes things done. Code style, tools, patterns, communication. -->
 
+- [2026-05-06] For darth-feedor/service-specialist hardening, prioritize current Pi subprocess/RPC architecture redeployment fixes first; SDK migration remains a later measured phase. In full-auto mode, set wake-up timers and run paranoid validation/review passes.
+
 ## Key Learnings
 
 - [2026-05-06] script-class specialists must keep pi prompt context isolated: use --system-prompt plus --no-context-files --no-skills --no-prompt-templates --no-themes; package-class runner may still use project context.

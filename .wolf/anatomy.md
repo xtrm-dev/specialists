@@ -1266,3 +1266,9 @@
 - `tests/unit/specialist/script-runner.test.ts` — regression coverage for script-runner pi isolation argv and child_process spawnSync mock support.
 - `dist/index.js` — rebuilt bundled CLI output containing the script-runner isolation flags.
 
+
+## Manual session note — 2026-05-06 unitAI-z2vpq.1
+
+- `src/specialist/script-runner.ts` — script-class pi invocation now sends rendered task prompts over child stdin instead of appending prompt text to argv; stdin EPIPE/error events are swallowed so close/error handling owns classification.
+- `tests/unit/specialist/script-runner.test.ts` — regression coverage now asserts rendered prompt is absent from argv, written to stdin, stdin is closed, and stdin error events do not crash the caller.
+- `dist/index.js` / `dist/lib.js` / `dist/types/specialist/script-runner.d.ts.map` — rebuilt bundled/package outputs for prompt-stdin transport change.
