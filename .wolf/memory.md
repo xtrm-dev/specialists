@@ -137,3 +137,5 @@
 - 2026-05-06: During direct master merge, retained fail-closed local scripts policy with existing script-runner hardening.
 
 - 2026-05-06: During direct master merge, retained root-boundary tests/policy with local-script fail-closed behavior.
+
+- 2026-05-06: During direct master merge, combined explicit trusted --skill args with Pi isolation flags.

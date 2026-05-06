@@ -139,14 +139,27 @@ describe('computeSkillSources', () => {
     writeFileSync(path2, 'content-b');
     const sources = computeSkillSources(makeSpec({ paths: [path1, path2] }));
     expect(sources).toHaveLength(2);
-    expect(sources[0].path).toBe(path1);
+    expect(sources[0]).toMatchObject({ path: path1, source: 'skills.paths' });
     expect(sources[0].sha256).toMatch(/^[a-f0-9]{64}$/);
-    expect(sources[1].path).toBe(path2);
+    expect(sources[1]).toMatchObject({ path: path2, source: 'skills.paths' });
     expect(sources[1].sha256).not.toBe(sources[0].sha256);
+  });
+
+  it('hashes prompt.skill_inherit alongside skills.paths', () => {
+    const path1 = join(tempRoot, 'a.md');
+    const inherited = join(tempRoot, 'inherited.md');
+    writeFileSync(path1, 'content-a');
+    writeFileSync(inherited, 'content-inherited');
+    const sources = computeSkillSources(makeSpec({ paths: [path1], skill_inherit: inherited }));
+    expect(sources.map((source) => [source.path, source.source])).toEqual([
+      [path1, 'skills.paths'],
+      [inherited, 'prompt.skill_inherit'],
+    ]);
+    expect(sources.every((source) => /^[a-f0-9]{64}$/.test(source.sha256))).toBe(true);
   });
 
   it('emits unreadable for missing files', () => {
     const sources = computeSkillSources(makeSpec({ paths: ['/nonexistent/path.md'] }));
-    expect(sources).toEqual([{ path: '/nonexistent/path.md', sha256: 'unreadable' }]);
+    expect(sources).toEqual([{ path: '/nonexistent/path.md', sha256: 'unreadable', source: 'skills.paths' }]);
   });
 });

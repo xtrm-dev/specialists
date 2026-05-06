@@ -312,6 +312,60 @@ describe('runScriptSpecialist retained-state caps', () => {
   });
 });
 
+describe('runScriptSpecialist skill forwarding', () => {
+  it('disables skills by default and does not pass --skill args', async () => {
+    const child = createSpawnMock();
+    const resultPromise = runScriptSpecialist(
+      { specialist: 'changelog-keeper', variables: { name: 'release notes' } },
+      { loader: makeLoader() as never, projectDir: '.' },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    child.stdout.emit('data', Buffer.from(`${JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'output' }] } })}\n`));
+    child.emit('close', 0);
+
+    await resultPromise;
+
+    const spawnArgs: string[] = spawnMock.mock.calls[0][1];
+    expect(spawnArgs).toContain('--no-skills');
+    expect(spawnArgs).not.toContain('--skill');
+  });
+
+  it('passes trusted skills.paths and prompt.skill_inherit as explicit --skill args', async () => {
+    const specWithSkills = {
+      ...baseSpec,
+      specialist: {
+        ...baseSpec.specialist,
+        prompt: {
+          ...baseSpec.specialist.prompt,
+          skill_inherit: '/skills/inherited/SKILL.md',
+        },
+        skills: { paths: ['/skills/one/SKILL.md', '/skills/two/SKILL.md'], scripts: [] },
+      },
+    };
+    const child = createSpawnMock();
+    const resultPromise = runScriptSpecialist(
+      { specialist: 'changelog-keeper', variables: { name: 'release notes' } },
+      { loader: makeLoader(specWithSkills as never) as never, projectDir: '.', trust: { allowSkills: true } },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    child.stdout.emit('data', Buffer.from(`${JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'output' }] } })}\n`));
+    child.emit('close', 0);
+
+    await resultPromise;
+
+    const spawnArgs: string[] = spawnMock.mock.calls[0][1];
+    expect(spawnArgs).not.toContain('--no-skills');
+    expect(spawnArgs).toEqual(expect.arrayContaining([
+      '--skill', '/skills/one/SKILL.md',
+      '/skills/two/SKILL.md',
+      '/skills/inherited/SKILL.md',
+    ]));
+    expect(spawnArgs.filter((arg) => arg === '--skill')).toHaveLength(3);
+  });
+});
+
 describe('runScriptSpecialist system prompt forwarding', () => {
   it('isolates script-class pi calls from project context, skills, prompt templates, and themes', async () => {
     const child = createSpawnMock();

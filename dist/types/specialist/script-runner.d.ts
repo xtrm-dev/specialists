@@ -51,6 +51,7 @@ export declare class CompatGuardError extends Error {
 export interface SkillSource {
     path: string;
     sha256: string;
+    source: 'skills.paths' | 'prompt.skill_inherit';
 }
 export interface ScriptRunnerOptions {
     loader: SpecialistLoader;

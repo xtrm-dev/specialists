@@ -9110,16 +9110,25 @@ function compatGuard(spec, trust) {
     }
   }
 }
+function collectSkillPathEntries(spec) {
+  return [
+    ...(spec.specialist.skills?.paths ?? []).map((path) => ({ path, source: "skills.paths" })),
+    ...typeof spec.specialist.prompt.skill_inherit === "string" ? [{ path: spec.specialist.prompt.skill_inherit, source: "prompt.skill_inherit" }] : []
+  ];
+}
+function collectSkillPaths(spec) {
+  return collectSkillPathEntries(spec).map((entry) => entry.path);
+}
 function computeSkillSources(spec) {
-  const paths = spec.specialist.skills?.paths ?? [];
+  const entries = collectSkillPathEntries(spec);
   const sources = [];
-  for (const path of paths) {
+  for (const { path, source } of entries) {
     try {
       const content = readFileSync2(path);
       const sha256 = createHash("sha256").update(content).digest("hex");
-      sources.push({ path, sha256 });
+      sources.push({ path, sha256, source });
     } catch {
-      sources.push({ path, sha256: "unreadable" });
+      sources.push({ path, sha256: "unreadable", source });
     }
   }
   return sources;
@@ -9280,6 +9289,7 @@ async function runScriptSpecialist(input, options) {
     const resolvedSpecialist = resolveScriptSpecialistName(input.specialist);
     const spec = await options.loader.get(resolvedSpecialist);
     compatGuard(spec, options.trust);
+    const skillPaths = options.trust?.allowSkills ? collectSkillPaths(spec) : [];
     const skillSources = options.trust?.allowSkills ? computeSkillSources(spec) : undefined;
     const template = input.template ?? spec.specialist.prompt.task_template;
     const prompt = applyOutputContract(renderTaskTemplate(template, input.variables ?? {}), spec);
@@ -9320,7 +9330,7 @@ async function runScriptSpecialist(input, options) {
     const attempts = [];
     for (const model of modelCandidates) {
       const systemPrompt = spec.specialist.prompt.system || undefined;
-      const attempt = await runSingleAttempt(prompt, model, input.thinking_level ?? spec.specialist.execution.thinking_level, timeoutMs, assistantTextLimitBytes, options, systemPrompt);
+      const attempt = await runSingleAttempt(prompt, model, input.thinking_level ?? spec.specialist.execution.thinking_level, timeoutMs, assistantTextLimitBytes, options, systemPrompt, skillPaths);
       attempts.push(attempt);
       const parsed = classifyAttempt(attempt);
       if (parsed.retryable)
@@ -9363,22 +9373,14 @@ function collectModelCandidates(input, spec, options) {
   const candidates = [input.model_override, spec.specialist.execution.model, spec.specialist.execution.fallback_model, options.fallbackModel].filter((value) => typeof value === "string" && value.length > 0);
   return [...new Set(candidates)];
 }
-function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assistantTextLimitBytes, options, systemPrompt) {
+function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assistantTextLimitBytes, options, systemPrompt, skillPaths = []) {
   return new Promise((resolve2, reject) => {
-    const args = [
-      "--mode",
-      "json",
-      "--no-session",
-      "--no-extensions",
-      "--no-tools",
-      "--offline",
-      "--no-context-files",
-      "--no-skills",
-      "--no-prompt-templates",
-      "--no-themes",
-      "--model",
-      model
-    ];
+    const args = ["--mode", "json", "--no-session", "--no-extensions", "--no-tools", "--offline", "--no-context-files", "--no-prompt-templates", "--no-themes"];
+    if (skillPaths.length === 0)
+      args.push("--no-skills");
+    for (const skillPath of skillPaths)
+      args.push("--skill", skillPath);
+    args.push("--model", model);
     if (thinkingLevel)
       args.push("--thinking", thinkingLevel);
     if (systemPrompt)
