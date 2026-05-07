@@ -281,8 +281,31 @@ describe('ps CLI — run()', () => {
     await run();
     const clean = stripAnsi(output.join('\n'));
     expect(clean).toContain('EPIC epic-orphan');
+    expect(clean).toContain('abandoned');
     expect(clean).toContain('chain-a');
     expect(clean).toContain('chain-b');
     expect(clean).toContain('no retained jobs');
+  }, TEST_TIMEOUT_MS);
+
+  it('shows derived epic pass label instead of persisted uppercase state', async () => {
+    mockSqlite.listEpicRuns.mockReturnValue([
+      { epic_id: 'epic-pass', status: 'open', status_json: '{}', updated_at_ms: Date.now() },
+    ]);
+    mockSqlite.readEpicRun.mockReturnValue({ epic_id: 'epic-pass', status: 'open', status_json: '{}', updated_at_ms: Date.now() });
+    mockSqlite.listEpicChains.mockReturnValue([
+      { chain_id: 'chain-pass', epic_id: 'epic-pass', chain_root_bead_id: 'bead-pass', chain_root_job_id: 'job-pass', updated_at_ms: Date.now() },
+    ]);
+    createJob(tempDir, 'job-pass', { pid: process.pid, epic_id: 'epic-pass', status: 'waiting', chain_kind: 'chain', chain_id: 'chain-pass' });
+    process.argv = ['node', 'specialists', 'ps'];
+    const output: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      output.push(args.map(String).join(' '));
+    });
+    const { run } = await import('../../../src/cli/ps.js');
+    await run();
+    const clean = stripAnsi(output.join('\n'));
+    expect(clean).toContain('EPIC epic-pass');
+    expect(clean).toContain('pass');
+    expect(clean).not.toContain('OPEN');
   }, TEST_TIMEOUT_MS);
 });

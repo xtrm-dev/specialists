@@ -72,7 +72,8 @@ describe('integration: specialists resume', () => {
 
     const result = runCli(['resume', 'done1', 'continue please'], tempDir);
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('waiting');
+    expect(result.stderr).toContain('finalized');
+    expect(result.stderr).toContain('true waiting jobs');
   });
 
   it('exits 1 with clear error when waiting job has no fifo_path', async () => {

@@ -108,6 +108,22 @@ describe('stop CLI', () => {
     expect(stdoutWrites.join('')).toContain('auto-closed');
   });
 
+  it('labels already finalized job with terminal wording', async () => {
+    supervisorState.status = { status: 'done', pid: 1234, bead_id: 'bead-x', tmux_session: undefined, started_at_ms: Date.now() - 1000 };
+
+    const stderrWrites: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk: any) => {
+      stderrWrites.push(String(chunk));
+      return true;
+    });
+    vi.spyOn(process, 'kill').mockImplementation(() => true as never);
+
+    const { run } = await import('../../../src/cli/stop.js');
+    await run();
+
+    expect(stderrWrites.join('')).toContain('already finalized');
+  });
+
   it('forces bead close anyway with override', async () => {
     supervisorState.liveJobs = ['job-a', 'job-b'];
     process.argv = ['node', 'specialists', 'stop', 'job-a', '--close-bead-anyway'];

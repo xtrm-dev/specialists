@@ -91,7 +91,7 @@ export async function run(): Promise<void> {
     }
 
     if (status.status === 'done' || status.status === 'error' || status.status === 'cancelled') {
-      process.stderr.write(`${dim(`Job ${jobId} is already ${status.status}.`)}\n`);
+      process.stderr.write(`${dim(`Job ${jobId} already finalized (${status.status}).`)}\n`);
       return;
     }
 
