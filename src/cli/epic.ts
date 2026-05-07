@@ -4,8 +4,7 @@ import {
   isEpicTerminalState,
   isEpicUnresolvedState,
   transitionEpicState,
-  evaluateEpicMergeReadiness,
-  summarizeEpicTransition,
+  evaluateEpicMergeReadiness
 } from '../specialist/epic-lifecycle.js';
 import { abandonEpic, syncEpicState, withEpicAdvisoryLock } from '../specialist/epic-reconciler.js';
 import { createObservabilitySqliteClient } from '../specialist/observability-sqlite.js';
@@ -34,12 +33,6 @@ interface EpicListOptions {
 
 interface EpicStatusOptions {
   epicId: string;
-  json: boolean;
-}
-
-interface EpicResolveOptions {
-  epicId: string;
-  dryRun: boolean;
   json: boolean;
 }
 
@@ -171,28 +164,6 @@ function parseStatusOptions(argv: readonly string[]): EpicStatusOptions {
   }
 
   return { epicId, json };
-}
-
-function parseResolveOptions(argv: readonly string[]): EpicResolveOptions {
-  const epicId = parseEpicId(argv);
-  let dryRun = false;
-  let json = false;
-
-  for (const argument of argv) {
-    if (argument === '--dry-run') {
-      dryRun = true;
-      continue;
-    }
-    if (argument === '--json') {
-      json = true;
-      continue;
-    }
-    if (argument.startsWith('-') && argument !== '--dry-run' && argument !== '--json') {
-      throw new Error(`Unknown option: ${argument}`);
-    }
-  }
-
-  return { epicId, dryRun, json };
 }
 
 function parseSyncOptions(argv: readonly string[]): EpicSyncOptions {
@@ -376,13 +347,7 @@ function validateEpicMergeReadiness(context: EpicMergeContext): EpicState {
     throw new Error(`Epic ${context.epicId} is already in terminal state '${epicState}'. No further merges allowed.`);
   }
 
-  if (epicState !== 'resolving' && epicState !== 'merge_ready') {
-    throw new Error(
-      `Epic ${context.epicId} is in state '${epicState}'. Must be 'resolving' or 'merge_ready' before publication.`,
-    );
-  }
-
-  const chainStatuses = [...context.chainJobStatuses.entries()].map(([chainId, status]) => ({
+    const chainStatuses = [...context.chainJobStatuses.entries()].map(([chainId, status]) => ({
     chainId,
     hasRunningJob: status.hasRunningJob,
   }));
@@ -525,82 +490,6 @@ export async function handleEpicListCommand(argv: readonly string[]): Promise<vo
   }
 }
 
-export async function handleEpicResolveCommand(argv: readonly string[]): Promise<void> {
-  let options: EpicResolveOptions;
-  try {
-    options = parseResolveOptions(argv);
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(message);
-    console.error('Usage: specialists epic resolve <epic-id> [--dry-run] [--json]');
-    process.exit(1);
-  }
-
-  const sqlite = createObservabilitySqliteClient();
-  if (!sqlite) {
-    const message = 'Observability SQLite database not available. Run `sp db setup` first.';
-    if (options.json) {
-      console.log(JSON.stringify({ error: message }, null, 2));
-    } else {
-      console.error(message);
-    }
-    process.exit(1);
-  }
-
-  try {
-    const now = Date.now();
-    const existing = sqlite.readEpicRun(options.epicId);
-    const fromState: EpicState = existing?.status ?? 'open';
-
-    let toState: EpicState;
-    try {
-      toState = transitionEpicState(fromState, 'resolving');
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (options.json) {
-        console.log(JSON.stringify({ epic_id: options.epicId, from_state: fromState, error: message }, null, 2));
-      } else {
-        console.error(`Resolve blocked: ${message}`);
-      }
-      process.exit(1);
-      return;
-    }
-
-    if (!options.dryRun) {
-      sqlite.upsertEpicRun({
-        epic_id: options.epicId,
-        status: toState,
-        status_json: JSON.stringify({
-          epic_id: options.epicId,
-          status: toState,
-          previous_status: fromState,
-          transitioned_at_ms: now,
-        }),
-        updated_at_ms: now,
-      });
-    }
-
-    const transitionSummary = summarizeEpicTransition(options.epicId, fromState, toState);
-    if (options.json) {
-      console.log(JSON.stringify({
-        epic_id: options.epicId,
-        from_state: fromState,
-        to_state: toState,
-        dry_run: options.dryRun,
-        summary: transitionSummary,
-      }, null, 2));
-      return;
-    }
-
-    console.log(transitionSummary);
-    if (options.dryRun) {
-      console.log('(dry-run: no state persisted)');
-    }
-  } finally {
-    sqlite.close();
-  }
-}
-
 export async function handleEpicMergeCommand(argv: readonly string[]): Promise<void> {
   let options: EpicMergeCliOptions;
   try {
@@ -640,16 +529,6 @@ export async function handleEpicMergeCommand(argv: readonly string[]): Promise<v
   }
 
   const fromState = currentState;
-
-  if (currentState === 'resolving') {
-    const nextState = transitionEpicState(currentState, 'merge_ready');
-    updateEpicState(context.epicId, currentState, nextState);
-    if (!options.json) {
-      console.log(summarizeEpicTransition(context.epicId, currentState, nextState));
-    }
-    currentState = nextState;
-  }
-
   let mergedChains: MergeStepResult[] = [];
   let mergeError: string | undefined;
   let toState: EpicState = currentState;
@@ -659,9 +538,7 @@ export async function handleEpicMergeCommand(argv: readonly string[]): Promise<v
     const publicationResult = mergeEpicChains(context, options.rebuild, options.pr);
     mergedChains = publicationResult.steps;
     pullRequestUrl = publicationResult.pullRequestUrl;
-    toState = options.pr
-      ? currentState
-      : transitionEpicState(currentState, 'merged');
+    toState = options.pr ? currentState : transitionEpicState(currentState, 'merged');
     updateEpicState(context.epicId, currentState, toState);
   } catch (error: unknown) {
     mergeError = error instanceof Error ? error.message : String(error);
@@ -844,14 +721,7 @@ export async function handleEpicStatusCommand(argv: readonly string[]): Promise<
 
     console.log('');
     console.log(`Epic: ${options.epicId}`);
-
-    if (epicRecord) {
-      console.log(`State: ${epicRecord.status}`);
-      console.log(`Updated: ${new Date(epicRecord.updated_at_ms).toISOString()}`);
-    } else {
-      console.log('State: (not tracked in SQLite, defaults to open)');
-    }
-
+    console.log(`State: ${epicRecord?.status ?? '(derived)'}`);
     console.log(`Readiness: ${readiness.isReady ? 'ready' : 'blocked'}`);
     console.log(`Summary: ${readiness.summary}`);
 
@@ -884,22 +754,21 @@ export async function handleEpicCommand(argv: readonly string[]): Promise<void> 
   if (!subcommand || subcommand === '--help' || subcommand === '-h') {
     console.log([
       '',
-      'Usage: specialists epic <list|status|resolve|sync|abandon|merge> [options]',
+      'Usage: specialists epic <list|status|sync|abandon|merge> [options]',
       '',
       'Commands:',
-      '  list [--unresolved] [--json]                    List epics with lifecycle and readiness summary',
-      '  status <epic-id> [--json]                       Show epic state, chain statuses, and merge readiness',
-      '  resolve <epic-id> [--dry-run] [--json]          Transition epic from open to resolving',
-      '  sync <epic-id> [--apply] [--json]                Reconcile epic drift (dry-run by default)',
+      '  list [--unresolved] [--json]                    List epics with readiness summary',
+      '  status <epic-id> [--json]                       Show derived readiness and chain status',
+      '  sync <epic-id> [--apply] [--json]               Reconcile epic drift (dry-run by default)',
       '  abandon <epic-id> --reason <text> [--force] [--json]  Transition epic to abandoned',
       '  merge <epic-id> [--rebuild] [--pr] [--json]     Publish epic-owned chains in dependency order',
       '',
-      'Epic lifecycle states:',
-      '  open        → resolving → merge_ready → merged',
-      '  (any)       → failed / abandoned (terminal)',
+      'Epic readiness:',
+      '  status reflects derived readiness from live chain state',
+      '  persisted epic state is compatibility metadata only',
       '',
       'Merge behavior:',
-      '  - Requires epic state: resolving or merge_ready',
+      '  - Requires derived readiness: ready chains only',
       '  - All chain jobs must be terminal before publication',
       '  - Chains merged in topological dependency order',
       '  - Use --pr to publish via pull request instead of direct merge',
@@ -909,7 +778,6 @@ export async function handleEpicCommand(argv: readonly string[]): Promise<void> 
       'Examples:',
       '  specialists epic list',
       '  specialists epic list --unresolved --json',
-      '  specialists epic resolve unitAI-3f7b',
       '  specialists epic status unitAI-3f7b --json',
       '  specialists epic sync unitAI-3f7b',
       '  specialists epic sync unitAI-3f7b --apply',
@@ -923,11 +791,6 @@ export async function handleEpicCommand(argv: readonly string[]): Promise<void> 
 
   if (subcommand === 'list') {
     await handleEpicListCommand(argv.slice(1));
-    return;
-  }
-
-  if (subcommand === 'resolve') {
-    await handleEpicResolveCommand(argv.slice(1));
     return;
   }
 
@@ -952,6 +815,6 @@ export async function handleEpicCommand(argv: readonly string[]): Promise<void> 
   }
 
   console.error(`Unknown epic subcommand: ${subcommand}`);
-  console.error('Usage: specialists epic <list|status|resolve|sync|abandon|merge>');
+  console.error('Usage: specialists epic <list|status|sync|abandon|merge>');
   process.exit(1);
 }
