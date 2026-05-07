@@ -40583,6 +40583,7 @@ __export(exports_serve, {
   checkPiHelpForFlags: () => checkPiHelpForFlags
 });
 import { createServer } from "http";
+import { randomUUID as randomUUID3 } from "crypto";
 import { once } from "events";
 import { spawnSync as spawnSync23 } from "child_process";
 import { access, readdir as readdir2, readFile as readFile5, constants } from "fs/promises";
@@ -40676,6 +40677,7 @@ function parseArgs12(argv) {
   const readinessRequiredPiFlags = [];
   let readinessCanarySpecialist;
   let readinessCanaryTimeoutMs = 5000;
+  let logLevel = "info";
   for (let i = 0;i < argv.length; i++) {
     const token = argv[i];
     if (token === "--port" && argv[i + 1])
@@ -40712,8 +40714,15 @@ function parseArgs12(argv) {
       readinessCanarySpecialist = argv[++i];
     else if (token === "--readiness-canary-timeout-ms" && argv[i + 1])
       readinessCanaryTimeoutMs = Number(argv[++i]);
+    else if (token === "--log-level" && argv[i + 1]) {
+      const value = argv[++i];
+      if (value === "off" || value === "info" || value === "debug")
+        logLevel = value;
+      else
+        throw new Error("--log-level must be one of: off, info, debug");
+    }
   }
-  return { port, concurrency, queueTimeoutMs, shutdownGraceMs, projectDir, dbPath, fallbackModel, auditFailureThreshold, allowSkills, allowSkillsRoots, reloadPollMs, readinessCanaryMode, readinessRequiredPiFlags, readinessCanarySpecialist, readinessCanaryTimeoutMs };
+  return { port, concurrency, queueTimeoutMs, shutdownGraceMs, projectDir, dbPath, fallbackModel, auditFailureThreshold, allowSkills, allowSkillsRoots, reloadPollMs, readinessCanaryMode, readinessRequiredPiFlags, readinessCanarySpecialist, readinessCanaryTimeoutMs, logLevel };
 }
 function checkPiHelpForFlags(flags = DEFAULT_REQUIRED_PI_FLAGS) {
   const result = spawnSync23("pi", ["--help"], { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
@@ -40727,6 +40736,15 @@ ${result.stderr ?? ""}`;
 function sendJson(res, statusCode, body) {
   res.writeHead(statusCode, { "content-type": "application/json" });
   res.end(JSON.stringify(body));
+}
+function emitGenerateLog(logLevel, entry) {
+  if (logLevel === "off")
+    return;
+  console.log(JSON.stringify({ level: logLevel, ts: new Date().toISOString(), ...entry }));
+}
+function shortLogError(value, limit = 240) {
+  const message = value instanceof Error ? value.message : String(value);
+  return message.length <= limit ? message : `${message.slice(0, limit)}\u2026`;
 }
 async function readBody(req) {
   const chunks = [];
@@ -40797,23 +40815,60 @@ async function startServe(argv = process.argv.slice(3)) {
     }
     if (req.method !== "POST" || req.url !== "/v1/generate")
       return sendJson(res, 404, { success: false, error: "not_found", error_type: "internal" });
-    if (readinessState.shuttingDown)
+    const requestStartedAt = Date.now();
+    const method = req.method ?? "POST";
+    const path = req.url ?? "/v1/generate";
+    const requestTraceId = randomUUID3();
+    if (readinessState.shuttingDown) {
+      emitGenerateLog(args.logLevel, {
+        trace_id: requestTraceId,
+        specialist: "unknown",
+        status: "internal",
+        duration_ms: Date.now() - requestStartedAt,
+        prompt_bytes: 0,
+        method,
+        path,
+        error: "shutting_down"
+      });
       return sendJson(res, 503, { success: false, error: "shutting_down", error_type: "internal" });
+    }
     const entered = await waitForSlot(args.concurrency, args.queueTimeoutMs, () => active);
-    if (!entered)
+    if (!entered) {
+      emitGenerateLog(args.logLevel, {
+        trace_id: requestTraceId,
+        specialist: "unknown",
+        status: "quota",
+        duration_ms: Date.now() - requestStartedAt,
+        prompt_bytes: 0,
+        method,
+        path,
+        error: "too_many_requests"
+      });
       return sendJson(res, 429, { success: false, error: "too_many_requests", error_type: "quota" });
+    }
     active++;
     const work = (async () => {
+      let promptBytes = 0;
+      let requestedSpecialist = "unknown";
       try {
         const raw = await readBody(req);
+        promptBytes = Buffer.byteLength(raw, "utf8");
         let parsed;
         try {
           parsed = JSON.parse(raw);
         } catch {
+          const duration_ms2 = Date.now() - requestStartedAt;
+          const trace_id = requestTraceId;
+          emitGenerateLog(args.logLevel, { trace_id, specialist: "unknown", status: "invalid_json", duration_ms: duration_ms2, prompt_bytes: promptBytes, method, path, error: "malformed_request" });
           return sendJson(res, 400, { success: false, error: "malformed_request", error_type: "invalid_json" });
         }
-        if (!isValidRequest(parsed))
+        if (!isValidRequest(parsed)) {
+          const duration_ms2 = Date.now() - requestStartedAt;
+          const trace_id = requestTraceId;
+          emitGenerateLog(args.logLevel, { trace_id, specialist: "unknown", status: "invalid_json", duration_ms: duration_ms2, prompt_bytes: promptBytes, method, path, error: "malformed_request" });
           return sendJson(res, 400, { success: false, error: "malformed_request", error_type: "invalid_json" });
+        }
+        requestedSpecialist = parsed.specialist;
         const result = await runScriptSpecialist(parsed, {
           loader,
           projectDir: args.projectDir,
@@ -40829,7 +40884,34 @@ async function startServe(argv = process.argv.slice(3)) {
             allowSkillsRoots: args.allowSkillsRoots
           }
         });
+        const duration_ms = Date.now() - requestStartedAt;
+        const meta = result.meta ?? {};
+        emitGenerateLog(args.logLevel, {
+          trace_id: meta.trace_id ?? requestTraceId,
+          specialist: meta.specialist ?? (typeof parsed === "object" && parsed !== null ? String(parsed.specialist ?? "unknown") : "unknown"),
+          resolved_specialist: meta.resolved_specialist,
+          model: meta.model,
+          status: result.success ? "success" : result.error_type,
+          duration_ms: meta.duration_ms ?? duration_ms,
+          prompt_bytes: promptBytes,
+          method,
+          path,
+          ...result.success ? {} : { error: shortLogError(result.error) }
+        });
         return sendJson(res, 200, result);
+      } catch (error2) {
+        emitGenerateLog(args.logLevel, {
+          trace_id: requestTraceId,
+          specialist: requestedSpecialist,
+          status: "internal",
+          duration_ms: Date.now() - requestStartedAt,
+          prompt_bytes: promptBytes,
+          method,
+          path,
+          error: shortLogError(error2)
+        });
+        if (!res.headersSent)
+          return sendJson(res, 500, { success: false, error: "internal_error", error_type: "internal" });
       } finally {
         active--;
       }
@@ -49585,7 +49667,7 @@ async function run33() {
     if (wantsHelp()) {
       console.log([
         "",
-        "Usage: specialists serve [--port <n>] [--concurrency <n>] [--shutdown-grace-ms <n>] [--project-dir <path>] [--db-path <observability.db>] [--readiness-canary off|warn|require]",
+        "Usage: specialists serve [--port <n>] [--concurrency <n>] [--shutdown-grace-ms <n>] [--project-dir <path>] [--db-path <observability.db>] [--readiness-canary off|warn|require] [--log-level off|info|debug]",
         "",
         "HTTP wrapper for script-class specialists.",
         "",

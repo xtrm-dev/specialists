@@ -15,6 +15,7 @@ interface ServeArgs {
     readinessRequiredPiFlags: string[];
     readinessCanarySpecialist?: string;
     readinessCanaryTimeoutMs: number;
+    logLevel: 'off' | 'info' | 'debug';
 }
 export type ReadinessReason = 'draining' | 'degraded:audit' | 'pi_config_unreadable' | 'db_not_writable' | 'pi_binary_missing' | 'pi_flag_missing' | 'pi_smoke_failed' | 'empty_user_dir' | 'invalid_spec_in_user_dir';
 export interface ReadinessState {
