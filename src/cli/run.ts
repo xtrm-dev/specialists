@@ -587,6 +587,37 @@ export async function run(): Promise<void> {
     process.exit(1);
   }
 
+  // ── Active-job pre-flight ──────────────────────────────────────────────────
+  // Refuse fresh dispatch if a starting/running/waiting job already targets the
+  // same bead+specialist. This closes the race window where multiple `sp run`
+  // invocations against the same bead spawn duplicates before the supervisor's
+  // SQLite claim fires (unitAI-55cb3). The supervisor still acts as the
+  // transactional backstop.
+  //
+  // Skipped when:
+  //   - --job <id> is set (legitimate reuse of a waiting keep-alive job)
+  //   - the run has no bead binding (one-off prompts can't conflict)
+  if (args.beadId && !args.reuseJobId) {
+    const sqliteClient = createObservabilitySqliteClient();
+    if (sqliteClient) {
+      try {
+        const existing = sqliteClient.findActiveJob(args.beadId, args.name);
+        if (existing?.job_id) {
+          process.stderr.write(
+            `Error: existing ${existing.status ?? 'unknown'} job '${existing.job_id}' already targets bead '${args.beadId}' specialist '${args.name}'.\n` +
+            `To resume the keep-alive session: specialists run ${args.name} --job ${existing.job_id} ...\n` +
+            `To inspect: specialists ps ${existing.job_id} --json\n` +
+            `To cancel: specialists stop ${existing.job_id}\n`,
+          );
+          sqliteClient.close();
+          process.exit(1);
+        }
+      } finally {
+        sqliteClient.close();
+      }
+    }
+  }
+
   // ── Background mode: spawn detached child and exit ──────────────────────────
   if (args.background) {
     // Jobs dir may be worktree-anchored, but for the latest-poll we use the

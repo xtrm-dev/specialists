@@ -120,6 +120,37 @@ describe('claimJobStart', () => {
     }
   });
 
+  it('refuses fresh dispatch when an existing job for the same bead+specialist is in waiting (keep-alive)', () => {
+    // Regression for unitAI-55cb3: a reviewer/executor that paused at `waiting`
+    // for keep-alive resumption must still block a fresh `sp run --bead X`
+    // for the same specialist; the resume path is `--job <existing-id>`.
+    const store = createStore();
+    const now = Date.now();
+    const event = { t: now, type: 'run_start', specialist: 'reviewer', bead_id: 'bead-rv' } as never;
+
+    store._seed('bead-rv', 'reviewer', {
+      job_id: 'job-waiting',
+      status: 'waiting',
+      pid: process.pid,
+      updated_at_ms: now,
+    });
+
+    const result = claimJobStartWithStore(store, {
+      id: 'job-fresh',
+      specialist: 'reviewer',
+      status: 'starting',
+      started_at_ms: now,
+      pid: 999_999,
+      bead_id: 'bead-rv',
+    } as never, event);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.existingJobId).toBe('job-waiting');
+      expect(result.existingStatus).toBe('waiting');
+    }
+  });
+
   it('reclaims orphan starting row when prior pid is dead and row is stale', () => {
     const store = createStore();
     const now = Date.now();

@@ -7716,22 +7716,25 @@ class SqliteClient {
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `, [jobId, seq, specialist, beadId ?? null, event.t, event.type, eventJson]);
   }
+  findActiveJob(beadId, specialist) {
+    return this.db.query(`
+      SELECT
+        job_id,
+        status,
+        updated_at_ms,
+        CAST(JSON_EXTRACT(status_json, '$.pid') AS INTEGER) AS pid
+      FROM specialist_jobs
+      WHERE bead_id = ?
+        AND specialist = ?
+        AND status IN ('starting', 'running', 'waiting')
+      ORDER BY updated_at_ms DESC
+      LIMIT 1
+    `).get(beadId, specialist);
+  }
   claimJobStart(status, event) {
     return claimJobStartWithStore({
       transaction: (callback) => this.db.transaction(callback)(),
-      findActiveJob: (beadId, specialist) => this.db.query(`
-          SELECT
-            job_id,
-            status,
-            updated_at_ms,
-            CAST(JSON_EXTRACT(status_json, '$.pid') AS INTEGER) AS pid
-          FROM specialist_jobs
-          WHERE bead_id = ?
-            AND specialist = ?
-            AND status IN ('starting', 'running')
-          ORDER BY updated_at_ms DESC
-          LIMIT 1
-        `).get(beadId, specialist),
+      findActiveJob: (beadId, specialist) => this.findActiveJob(beadId, specialist),
       writeStatusRow: (nextStatus) => this.writeStatusRow(nextStatus),
       writeEventRow: (jobId, specialist, beadId, nextEvent) => this.writeEventRow(jobId, specialist, beadId, nextEvent),
       cancelStaleClaim: (jobId) => {

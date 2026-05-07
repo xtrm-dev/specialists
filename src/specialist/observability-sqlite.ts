@@ -1018,6 +1018,7 @@ export interface ObservabilitySqliteClient {
   upsertStatusWithEventAndResult(status: SupervisorStatus, event: TimelineEvent, output: string): void;
   appendEvent(jobId: string, specialist: string, beadId: string | undefined, event: TimelineEvent): void;
   claimJobStart(status: SupervisorStatus, event: TimelineEvent): { ok: true } | { ok: false; existingJobId: string; existingStatus: string };
+  findActiveJob(beadId: string | null, specialist: string): { job_id?: string; status?: string; pid?: number; updated_at_ms?: number } | undefined;
   upsertResult(jobId: string, output: string): void;
   bootstrapNode(nodeRunId: string, nodeName: string, memoryNamespace?: string): void;
   upsertNodeRun(nodeRun: NodeRunRow): void;
@@ -1174,23 +1175,27 @@ class SqliteClient implements ObservabilitySqliteClient {
     `, [jobId, seq, specialist, beadId ?? null, event.t, event.type, eventJson]);
   }
 
+  findActiveJob(beadId: string | null, specialist: string): { job_id?: string; status?: string; pid?: number; updated_at_ms?: number } | undefined {
+    return this.db.query(`
+      SELECT
+        job_id,
+        status,
+        updated_at_ms,
+        CAST(JSON_EXTRACT(status_json, '$.pid') AS INTEGER) AS pid
+      FROM specialist_jobs
+      WHERE bead_id = ?
+        AND specialist = ?
+        AND status IN ('starting', 'running', 'waiting')
+      ORDER BY updated_at_ms DESC
+      LIMIT 1
+    `).get(beadId, specialist) as { job_id?: string; status?: string; pid?: number; updated_at_ms?: number } | undefined;
+  }
+
   claimJobStart(status: SupervisorStatus, event: TimelineEvent): { ok: true } | { ok: false; existingJobId: string; existingStatus: string } {
     return claimJobStartWithStore(
       {
         transaction: <T>(callback: () => T) => this.db.transaction(callback)(),
-        findActiveJob: (beadId, specialist) => this.db.query(`
-          SELECT
-            job_id,
-            status,
-            updated_at_ms,
-            CAST(JSON_EXTRACT(status_json, '$.pid') AS INTEGER) AS pid
-          FROM specialist_jobs
-          WHERE bead_id = ?
-            AND specialist = ?
-            AND status IN ('starting', 'running')
-          ORDER BY updated_at_ms DESC
-          LIMIT 1
-        `).get(beadId, specialist) as { job_id?: string; status?: string; pid?: number; updated_at_ms?: number } | undefined,
+        findActiveJob: (beadId, specialist) => this.findActiveJob(beadId, specialist),
         writeStatusRow: (nextStatus) => this.writeStatusRow(nextStatus),
         writeEventRow: (jobId, specialist, beadId, nextEvent) => this.writeEventRow(jobId, specialist, beadId, nextEvent),
         cancelStaleClaim: (jobId) => {

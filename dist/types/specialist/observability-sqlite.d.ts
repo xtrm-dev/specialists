@@ -179,6 +179,12 @@ export interface ObservabilitySqliteClient {
         existingJobId: string;
         existingStatus: string;
     };
+    findActiveJob(beadId: string | null, specialist: string): {
+        job_id?: string;
+        status?: string;
+        pid?: number;
+        updated_at_ms?: number;
+    } | undefined;
     upsertResult(jobId: string, output: string): void;
     bootstrapNode(nodeRunId: string, nodeName: string, memoryNamespace?: string): void;
     upsertNodeRun(nodeRun: NodeRunRow): void;

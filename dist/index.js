@@ -19878,22 +19878,25 @@ class SqliteClient {
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `, [jobId, seq, specialist, beadId ?? null, event.t, event.type, eventJson]);
   }
+  findActiveJob(beadId, specialist) {
+    return this.db.query(`
+      SELECT
+        job_id,
+        status,
+        updated_at_ms,
+        CAST(JSON_EXTRACT(status_json, '$.pid') AS INTEGER) AS pid
+      FROM specialist_jobs
+      WHERE bead_id = ?
+        AND specialist = ?
+        AND status IN ('starting', 'running', 'waiting')
+      ORDER BY updated_at_ms DESC
+      LIMIT 1
+    `).get(beadId, specialist);
+  }
   claimJobStart(status, event) {
     return claimJobStartWithStore({
       transaction: (callback) => this.db.transaction(callback)(),
-      findActiveJob: (beadId, specialist) => this.db.query(`
-          SELECT
-            job_id,
-            status,
-            updated_at_ms,
-            CAST(JSON_EXTRACT(status_json, '$.pid') AS INTEGER) AS pid
-          FROM specialist_jobs
-          WHERE bead_id = ?
-            AND specialist = ?
-            AND status IN ('starting', 'running')
-          ORDER BY updated_at_ms DESC
-          LIMIT 1
-        `).get(beadId, specialist),
+      findActiveJob: (beadId, specialist) => this.findActiveJob(beadId, specialist),
       writeStatusRow: (nextStatus) => this.writeStatusRow(nextStatus),
       writeEventRow: (jobId, specialist, beadId, nextEvent) => this.writeEventRow(jobId, specialist, beadId, nextEvent),
       cancelStaleClaim: (jobId) => {
@@ -31527,6 +31530,25 @@ async function run14() {
 ` + `Provide --bead <id> for automatic worktree provisioning, or use --job <id> to reuse an existing worktree.
 `);
     process.exit(1);
+  }
+  if (args.beadId && !args.reuseJobId) {
+    const sqliteClient = createObservabilitySqliteClient();
+    if (sqliteClient) {
+      try {
+        const existing = sqliteClient.findActiveJob(args.beadId, args.name);
+        if (existing?.job_id) {
+          process.stderr.write(`Error: existing ${existing.status ?? "unknown"} job '${existing.job_id}' already targets bead '${args.beadId}' specialist '${args.name}'.
+` + `To resume the keep-alive session: specialists run ${args.name} --job ${existing.job_id} ...
+` + `To inspect: specialists ps ${existing.job_id} --json
+` + `To cancel: specialists stop ${existing.job_id}
+`);
+          sqliteClient.close();
+          process.exit(1);
+        }
+      } finally {
+        sqliteClient.close();
+      }
+    }
   }
   if (args.background) {
     const jobsDir2 = resolveJobsDir();
