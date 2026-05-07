@@ -40,8 +40,6 @@ describe('epic-lifecycle', () => {
 
       if (!terminal) continue;
       for (const next of EPIC_STATES) {
-        // failed is terminal but supports a single recovery transition to
-        // abandoned so the operator can clean up dead epics.
         if (state === 'failed' && next === 'abandoned') {
           expect(canTransitionEpicState(state, next)).toBe(true);
           continue;
@@ -66,40 +64,28 @@ describe('epic-lifecycle', () => {
     expect(resolveChainId({ id: 'job-4' })).toBeUndefined();
   });
 
-  it('requires merge_ready and all chains terminal before publication readiness', () => {
+  it('derives merge readiness from live chain terminality, not persisted state ceremony', () => {
+    const ready = evaluateEpicMergeReadiness({
+      epicId: 'unitAI-epic',
+      epicStatus: 'failed',
+      chainStatuses: [
+        { chainId: 'chain-a', hasRunningJob: false },
+        { chainId: 'chain-b', hasRunningJob: false },
+      ],
+    });
+
     const blocked = evaluateEpicMergeReadiness({
       epicId: 'unitAI-epic',
-      epicStatus: 'merge_ready',
+      epicStatus: 'open',
       chainStatuses: [
-        { chainId: 'chain-a', hasRunningJob: false },
-        { chainId: 'chain-b', hasRunningJob: true },
+        { chainId: 'chain-a', hasRunningJob: true },
       ],
     });
 
+    expect(ready.isReady).toBe(true);
+    expect(ready.summary).toContain('live-ready');
     expect(blocked.isReady).toBe(false);
-    expect(blocked.blockingChains).toEqual(['chain-b']);
+    expect(blocked.blockingChains).toEqual(['chain-a']);
     expect(blocked.summary).toContain('blocked by active chains');
-
-    const degraded = evaluateEpicMergeReadiness({
-      epicId: 'unitAI-epic',
-      epicStatus: 'resolving',
-      chainStatuses: [
-        { chainId: 'chain-a', hasRunningJob: false },
-      ],
-    });
-
-    expect(degraded.isReady).toBe(false);
-    expect(degraded.blockingChains).toEqual([]);
-    expect(degraded.summary).toContain('expected merge_ready before publication');
-
-    const standaloneReady = evaluateEpicMergeReadiness({
-      epicId: 'unitAI-standalone',
-      epicStatus: 'merge_ready',
-      chainStatuses: [],
-    });
-
-    expect(standaloneReady.isReady).toBe(true);
-    expect(standaloneReady.blockingChains).toEqual([]);
-    expect(standaloneReady.summary).toContain('merge-ready and all chains are terminal');
   });
 });

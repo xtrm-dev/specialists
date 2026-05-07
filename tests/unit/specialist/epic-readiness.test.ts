@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { evaluateEpicReadinessSummary } from '../../../src/specialist/epic-readiness.js';
 
 describe('epic-readiness', () => {
-  it('moves open epics into resolving while prep or chain jobs are active', () => {
+  it('moves open epics toward live merge readiness from active chain data', () => {
     const summary = evaluateEpicReadinessSummary({
       epicId: 'unitAI-epic',
       persistedState: 'open',
@@ -29,15 +29,15 @@ describe('epic-readiness', () => {
       ],
     });
 
-    expect(summary.readiness_state).toBe('unresolved');
+    expect(summary.readiness_state).toBe('resolving');
     expect(summary.next_state).toBe('resolving');
     expect(summary.can_transition).toBe(true);
   });
 
-  it('marks epics merge_ready only when prep is terminal and every chain has reviewer PASS', () => {
+  it('marks epics merge_ready when live chains pass even if persisted row says failed', () => {
     const summary = evaluateEpicReadinessSummary({
-      epicId: 'unitAI-epic',
-      persistedState: 'resolving',
+      epicId: 'unitAI-recover',
+      persistedState: 'failed',
       prepJobs: [
         {
           id: 'prep-1',
@@ -70,7 +70,7 @@ describe('epic-readiness', () => {
 
     expect(summary.readiness_state).toBe('merge_ready');
     expect(summary.next_state).toBe('merge_ready');
-    expect(summary.chains[0]?.reviewer_verdict).toBe('pass');
+    expect(summary.summary).toContain('stored=failed');
   });
 
   it('keeps chains blocked when fix-loop work finished but reviewer PASS is missing', () => {
@@ -100,7 +100,7 @@ describe('epic-readiness', () => {
       ],
     });
 
-    expect(summary.readiness_state).toBe('resolving');
+    expect(summary.readiness_state).toBe('blocked');
     expect(summary.chains[0]?.state).toBe('blocked');
     expect(summary.chains[0]?.blocking_reason).toContain('rerun reviewer');
   });
@@ -173,14 +173,14 @@ describe('epic-readiness', () => {
     });
 
     expect(prepOnly.readiness_state).toBe('merge_ready');
-    expect(migrationGap.readiness_state).toBe('resolving');
+    expect(migrationGap.readiness_state).toBe('blocked');
     expect(migrationGap.chains[0]?.blocking_reason).toContain('No persisted chain jobs');
   });
 
-  it('does not skip required intermediate lifecycle states', () => {
-    const openWithPassingChain = evaluateEpicReadinessSummary({
+  it('does not keep legacy failed rows terminal when live chains recover', () => {
+    const recovered = evaluateEpicReadinessSummary({
       epicId: 'unitAI-open',
-      persistedState: 'open',
+      persistedState: 'failed',
       prepJobs: [],
       chainInputs: [
         {
@@ -198,31 +198,7 @@ describe('epic-readiness', () => {
       ],
     });
 
-    expect(openWithPassingChain.readiness_state).toBe('merge_ready');
-    expect(openWithPassingChain.next_state).toBe('resolving');
-    expect(openWithPassingChain.can_transition).toBe(true);
-
-    const mergeReadyRegressesOnNewBlocker = evaluateEpicReadinessSummary({
-      epicId: 'unitAI-regress',
-      persistedState: 'merge_ready',
-      prepJobs: [],
-      chainInputs: [
-        {
-          chain_id: 'chain-a',
-          jobs: [
-            {
-              id: 'chain-a-running',
-              specialist: 'executor',
-              status: 'running',
-              started_at_ms: 2,
-            },
-          ],
-        },
-      ],
-    });
-
-    expect(mergeReadyRegressesOnNewBlocker.readiness_state).toBe('unresolved');
-    expect(mergeReadyRegressesOnNewBlocker.next_state).toBe('resolving');
-    expect(mergeReadyRegressesOnNewBlocker.blockers).toContain('chain:chain-a');
+    expect(recovered.readiness_state).toBe('merge_ready');
+    expect(recovered.next_state).toBe('merge_ready');
   });
 });
