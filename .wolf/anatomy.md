@@ -1272,3 +1272,10 @@
 - `src/specialist/script-runner.ts` — script-class pi invocation now sends rendered task prompts over child stdin instead of appending prompt text to argv; stdin EPIPE/error events are swallowed so close/error handling owns classification.
 - `tests/unit/specialist/script-runner.test.ts` — regression coverage now asserts rendered prompt is absent from argv, written to stdin, stdin is closed, and stdin error events do not crash the caller.
 - `dist/index.js` / `dist/lib.js` / `dist/types/specialist/script-runner.d.ts.map` — rebuilt bundled/package outputs for prompt-stdin transport change.
+
+
+## Manual session note — 2026-05-07 unitAI-8y70l
+
+- `src/cli/serve.ts` — `sp serve` now emits non-PII structured JSON operational logs for every `/v1/generate` request and supports `--log-level off|info|debug` (default info).
+- `tests/integration/sp-serve.test.ts` — regression coverage for success logs, malformed-request logs, and `--log-level off` suppression.
+- `src/index.ts` — serve help includes `--log-level off|info|debug`.

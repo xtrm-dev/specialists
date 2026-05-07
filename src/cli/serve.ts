@@ -183,6 +183,7 @@ function parseArgs(argv: string[]): ServeArgs {
     else if (token === '--log-level' && argv[i + 1]) {
       const value = argv[++i];
       if (value === 'off' || value === 'info' || value === 'debug') logLevel = value;
+      else throw new Error('--log-level must be one of: off, info, debug');
     }
   }
 
@@ -217,7 +218,12 @@ function emitGenerateLog(logLevel: ServeArgs['logLevel'], entry: {
   error?: string;
 }): void {
   if (logLevel === 'off') return;
-  console.log(JSON.stringify({ ...entry, level: logLevel }));
+  console.log(JSON.stringify({ level: logLevel, ts: new Date().toISOString(), ...entry }));
+}
+
+function shortLogError(value: unknown, limit = 240): string {
+  const message = value instanceof Error ? value.message : String(value);
+  return message.length <= limit ? message : `${message.slice(0, limit)}…`;
 }
 
 async function readBody(req: IncomingMessage): Promise<string> {
@@ -287,29 +293,61 @@ export async function startServe(argv: string[] = process.argv.slice(3)) {
       });
     }
     if (req.method !== 'POST' || req.url !== '/v1/generate') return sendJson(res, 404, { success: false, error: 'not_found', error_type: 'internal' });
-    if (readinessState.shuttingDown) return sendJson(res, 503, { success: false, error: 'shutting_down', error_type: 'internal' });
 
     const requestStartedAt = Date.now();
+    const method = req.method ?? 'POST';
+    const path = req.url ?? '/v1/generate';
+    const requestTraceId = randomUUID();
+
+    if (readinessState.shuttingDown) {
+      emitGenerateLog(args.logLevel, {
+        trace_id: requestTraceId,
+        specialist: 'unknown',
+        status: 'internal',
+        duration_ms: Date.now() - requestStartedAt,
+        prompt_bytes: 0,
+        method,
+        path,
+        error: 'shutting_down',
+      });
+      return sendJson(res, 503, { success: false, error: 'shutting_down', error_type: 'internal' });
+    }
+
     const entered = await waitForSlot(args.concurrency, args.queueTimeoutMs, () => active);
-    if (!entered) return sendJson(res, 429, { success: false, error: 'too_many_requests', error_type: 'quota' });
+    if (!entered) {
+      emitGenerateLog(args.logLevel, {
+        trace_id: requestTraceId,
+        specialist: 'unknown',
+        status: 'quota',
+        duration_ms: Date.now() - requestStartedAt,
+        prompt_bytes: 0,
+        method,
+        path,
+        error: 'too_many_requests',
+      });
+      return sendJson(res, 429, { success: false, error: 'too_many_requests', error_type: 'quota' });
+    }
     active++;
     const work = (async () => {
+      let promptBytes = 0;
+      let requestedSpecialist = 'unknown';
       try {
         const raw = await readBody(req);
-        const promptBytes = Buffer.byteLength(raw, 'utf8');
+        promptBytes = Buffer.byteLength(raw, 'utf8');
         let parsed: unknown;
         try { parsed = JSON.parse(raw); } catch {
           const duration_ms = Date.now() - requestStartedAt;
-          const trace_id = randomUUID();
-          emitGenerateLog(args.logLevel, { trace_id, specialist: 'unknown', status: 'invalid_json', duration_ms, prompt_bytes: promptBytes, method: req.method ?? 'POST', path: req.url ?? '/v1/generate', error: 'malformed_request' });
+          const trace_id = requestTraceId;
+          emitGenerateLog(args.logLevel, { trace_id, specialist: 'unknown', status: 'invalid_json', duration_ms, prompt_bytes: promptBytes, method, path, error: 'malformed_request' });
           return sendJson(res, 400, { success: false, error: 'malformed_request', error_type: 'invalid_json' });
         }
         if (!isValidRequest(parsed)) {
           const duration_ms = Date.now() - requestStartedAt;
-          const trace_id = randomUUID();
-          emitGenerateLog(args.logLevel, { trace_id, specialist: 'unknown', status: 'invalid_json', duration_ms, prompt_bytes: promptBytes, method: req.method ?? 'POST', path: req.url ?? '/v1/generate', error: 'malformed_request' });
+          const trace_id = requestTraceId;
+          emitGenerateLog(args.logLevel, { trace_id, specialist: 'unknown', status: 'invalid_json', duration_ms, prompt_bytes: promptBytes, method, path, error: 'malformed_request' });
           return sendJson(res, 400, { success: false, error: 'malformed_request', error_type: 'invalid_json' });
         }
+        requestedSpecialist = parsed.specialist;
         const result = await runScriptSpecialist(parsed, {
           loader,
           projectDir: args.projectDir,
@@ -328,18 +366,30 @@ export async function startServe(argv: string[] = process.argv.slice(3)) {
         const duration_ms = Date.now() - requestStartedAt;
         const meta = result.meta ?? {};
         emitGenerateLog(args.logLevel, {
-          trace_id: meta.trace_id ?? randomUUID(),
+          trace_id: meta.trace_id ?? requestTraceId,
           specialist: meta.specialist ?? (typeof parsed === 'object' && parsed !== null ? String((parsed as { specialist?: unknown }).specialist ?? 'unknown') : 'unknown'),
           resolved_specialist: meta.resolved_specialist,
           model: meta.model,
           status: result.success ? 'success' : result.error_type,
           duration_ms: meta.duration_ms ?? duration_ms,
           prompt_bytes: promptBytes,
-          method: req.method ?? 'POST',
-          path: req.url ?? '/v1/generate',
-          ...(result.success ? {} : { error: result.error }),
+          method,
+          path,
+          ...(result.success ? {} : { error: shortLogError(result.error) }),
         });
         return sendJson(res, 200, result);
+      } catch (error) {
+        emitGenerateLog(args.logLevel, {
+          trace_id: requestTraceId,
+          specialist: requestedSpecialist,
+          status: 'internal',
+          duration_ms: Date.now() - requestStartedAt,
+          prompt_bytes: promptBytes,
+          method,
+          path,
+          error: shortLogError(error),
+        });
+        if (!res.headersSent) return sendJson(res, 500, { success: false, error: 'internal_error', error_type: 'internal' });
       } finally {
         active--;
       }

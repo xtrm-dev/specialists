@@ -7,9 +7,11 @@ import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 const originalCwd = process.cwd();
 let tempRoot = '';
 let server: ChildProcess | undefined;
+let serverStdout = '';
 
 beforeEach(() => {
   tempRoot = mkdtempSync(join(tmpdir(), 'sp-serve-'));
+  serverStdout = '';
   mkdirSync(join(tempRoot, '.specialists', 'user'), { recursive: true });
   mkdirSync(join(tempRoot, 'bin'), { recursive: true });
   writeFileSync(
@@ -72,6 +74,7 @@ describe('sp serve', () => {
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('server start timeout')), 10_000);
       server?.stdout?.on('data', (chunk) => {
+        serverStdout += String(chunk);
         if (String(chunk).includes('sp serve listening on')) {
           clearTimeout(timer);
           resolve();
@@ -85,6 +88,86 @@ describe('sp serve', () => {
       }
     });
   }
+
+  async function waitForGenerateLog(): Promise<Record<string, unknown>> {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < 5_000) {
+      for (const line of serverStdout.split('\n')) {
+        if (!line.trim().startsWith('{')) continue;
+        const parsed = JSON.parse(line) as Record<string, unknown>;
+        if (parsed.path === '/v1/generate') return parsed;
+      }
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+    throw new Error(`generate log not found in stdout: ${serverStdout}`);
+  }
+
+  it('logs one structured operational line per generate request by default', async () => {
+    const port = 8128;
+    await startServer(port);
+
+    const payload = { specialist: 'echo', variables: { name: 'world' }, trace: true };
+    const response = await fetch(`http://127.0.0.1:${port}/v1/generate`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const body = await response.json() as { success: boolean; meta?: { trace_id?: string } };
+
+    expect(response.status).toBe(200);
+    expect(body.success).toBe(true);
+
+    const log = await waitForGenerateLog();
+    expect(log.level).toBe('info');
+    expect(log.trace_id).toBe(body.meta?.trace_id);
+    expect(log.specialist).toBe('echo');
+    expect(log.resolved_specialist).toBe('echo');
+    expect(log.model).toBe('mock/model');
+    expect(log.status).toBe('success');
+    expect(log.method).toBe('POST');
+    expect(log.path).toBe('/v1/generate');
+    expect(typeof log.duration_ms).toBe('number');
+    expect(log.prompt_bytes).toBe(Buffer.byteLength(JSON.stringify(payload), 'utf8'));
+  });
+
+  it('suppresses generate operational logs when --log-level off', async () => {
+    const port = 8129;
+    await startServer(port, ['--log-level', 'off']);
+
+    const response = await fetch(`http://127.0.0.1:${port}/v1/generate`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ specialist: 'echo', variables: { name: 'world' }, trace: true }),
+    });
+    const body = await response.json() as { success: boolean };
+
+    expect(response.status).toBe(200);
+    expect(body.success).toBe(true);
+    await new Promise(resolve => setTimeout(resolve, 100));
+    expect(serverStdout.split('\n').filter(line => line.trim().startsWith('{'))).toHaveLength(0);
+  });
+
+  it('logs malformed generate requests without logging request bodies', async () => {
+    const port = 8130;
+    await startServer(port);
+
+    const response = await fetch(`http://127.0.0.1:${port}/v1/generate`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{not-json',
+    });
+    const body = await response.json() as { success: boolean; error_type?: string };
+
+    expect(response.status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.error_type).toBe('invalid_json');
+
+    const log = await waitForGenerateLog();
+    expect(log.status).toBe('invalid_json');
+    expect(log.error).toBe('malformed_request');
+    expect(log.prompt_bytes).toBe(Buffer.byteLength('{not-json', 'utf8'));
+    expect(JSON.stringify(log)).not.toContain('not-json');
+  });
 
   it('healthz responds 200 regardless of readiness', async () => {
     const port = 8124;

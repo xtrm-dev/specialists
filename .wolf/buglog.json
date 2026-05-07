@@ -260,6 +260,24 @@
       ],
       "occurrences": 1,
       "last_seen": "2026-05-06T12:49:33.392314+00:00"
+    },
+    {
+      "id": "bug-016",
+      "timestamp": "2026-05-07T10:36:18Z",
+      "error_message": "sp serve emitted no per-request operational logs for POST /v1/generate",
+      "file": "src/cli/serve.ts",
+      "root_cause": "HTTP serve route only printed startup readiness text and relied on observability.db audit rows, leaving stdout/stderr empty during production traffic.",
+      "fix": "Added structured non-PII generate logging with trace_id, specialist, resolved_specialist, model, status/error_type, duration_ms, prompt_bytes, short error, and --log-level off|info|debug; added integration coverage.",
+      "tags": [
+        "sp-serve",
+        "observability",
+        "operational-logging",
+        "typescript",
+        "unitAI-8y70l"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-07T10:36:18Z"
     }
   ]
 }
