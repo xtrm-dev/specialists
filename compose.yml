@@ -1,5 +1,10 @@
 services:
   specialists:
+    # Local developer instance. The explicit container name keeps it distinct
+    # from consumer-owned deployments such as darth-feedor's `specialists-service`.
+    # Existing `specialists-specialists-1` containers are the old Compose auto-name
+    # and keep that name until recreated; do not treat them as production traffic.
+    container_name: sp-service-dev
     # Image publishing is deferred. Until then, build from a local checkout
     # of the specialists repo and reference that tag below.
     image: specialists-service:local

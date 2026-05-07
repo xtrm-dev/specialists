@@ -145,3 +145,5 @@
 - 2026-05-06: During direct master merge, combined exact --db-path serve semantics with optional readiness canary flags.
 
 - 2026-05-07T10:36:18Z: Fixed unitAI-8y70l sp serve operational logging: `/v1/generate` emits one non-PII JSON log line by default with trace_id/specialist/resolved_specialist/model/status/duration_ms/prompt_bytes, and `--log-level off` suppresses request logs.
+
+- 2026-05-07T11:53:53Z: Distinguished specialists local dev container naming: root `compose.yml` uses `sp-service-dev`; darth-feedor/consumer deployments keep `specialists-service`; existing `specialists-specialists-1` is the old Compose auto-name until recreated.

@@ -3,7 +3,7 @@ title: Specialists Service Install
 scope: specialists-service-install
 category: deployment
 version: 2.1.0
-updated: 2026-05-06
+updated: 2026-05-07
 synced_at: a0e54d0c
 description: Install runbook for consumers who do not clone specialists source. Deployment steps, trust/readiness gates, hot-reload, common pitfalls.
 source_of_truth_for:
@@ -89,6 +89,22 @@ For the full schema (every required, optional, and forbidden field with explanat
 ## Compose file walkthrough
 
 Copy `docker/compose.example.yml` and replace placeholders.
+
+### Container naming: dev vs consumer service
+
+This repository's root `compose.yml` is only a local developer convenience. It now sets `container_name: sp-service-dev` so `docker ps` is visually distinct from real consumer deployments.
+
+- `sp-service-dev` — local specialists repo dev container from `/home/dawid/dev/specialists/compose.yml`.
+- `specialists-service` — consumer-owned sidecar/service name, for example darth-feedor's `ingestion/infra/docker-compose.yml` service that other app containers call at `http://specialists-service:8000`.
+- `specialists-specialists-1` — legacy Docker Compose auto-name for the old local dev service (`project=specialists`, `service=specialists`); an already-running container keeps that name until it is recreated.
+
+Use compose labels to verify ownership before debugging traffic:
+
+```bash
+docker inspect <container> --format '{{ index .Config.Labels "com.docker.compose.project" }} {{ index .Config.Labels "com.docker.compose.service" }} {{ index .Config.Labels "com.docker.compose.project.config_files" }}'
+```
+
+No production deployment is implied by the local dev compose file.
 
 - `image`: published tag or local build tag
 - `user`: align host UID/GID with container UID label

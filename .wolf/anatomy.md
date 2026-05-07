@@ -1279,3 +1279,9 @@
 - `src/cli/serve.ts` — `sp serve` now emits non-PII structured JSON operational logs for every `/v1/generate` request and supports `--log-level off|info|debug` (default info).
 - `tests/integration/sp-serve.test.ts` — regression coverage for success logs, malformed-request logs, and `--log-level off` suppression.
 - `src/index.ts` — serve help includes `--log-level off|info|debug`.
+
+
+## Manual session note — 2026-05-07 unitAI-826pp
+
+- `compose.yml` — local specialists repo dev compose now uses explicit `container_name: sp-service-dev` to avoid confusion with consumer `specialists-service` containers.
+- `docs/specialists-service-install.md` — documents dev vs consumer container naming and how to inspect compose labels.
