@@ -43,6 +43,12 @@ const ExecutionSchema = z.object({
     serena: z.boolean().optional(),
     gitnexus: z.boolean().optional(),
   }).passthrough().optional(),
+  /** Required JSON keys the assistant output must contain. Triggers a required-keys
+   *  check independent of `response_format`. Use for specs that ship their JSON
+   *  contract inline in `task_template` and run with `response_format: text` so the
+   *  consumer parses — without this, hallucinated key sets pass through as success.
+   *  On miss the runtime returns `error_type: 'invalid_json'`. */
+  expected_output_keys: z.array(z.string()).optional(),
 }).passthrough();
 
 const PromptSchema = z.object({

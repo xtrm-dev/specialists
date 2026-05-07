@@ -358,6 +358,34 @@ const TEMPLATE_FIELD_MISUSE_MAX_LEN = 30;
 const TEMPLATE_FIELD_IDENTIFIER_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
 /**
+ * Returns the deduplicated list of required output keys for this spec.
+ * Sources, in order:
+ *   1. `execution.expected_output_keys` — author-declared, fires for any response_format.
+ *   2. `prompt.output_schema.required` — JSON Schema required array, only relevant when
+ *      `response_format === 'json'` (the runtime parses the JSON anyway in that case).
+ * Authors using `response_format: 'text'` with an inline JSON contract should declare
+ * `expected_output_keys` so saved-but-corrupt outputs are caught instead of stored.
+ */
+export function collectRequiredOutputKeys(spec: { specialist: { execution: { response_format?: string; expected_output_keys?: unknown }; prompt: { output_schema?: { required?: unknown } } } }): string[] {
+  const keys = new Set<string>();
+  const declared = spec.specialist.execution.expected_output_keys;
+  if (Array.isArray(declared)) {
+    for (const value of declared) {
+      if (typeof value === 'string' && value.length > 0) keys.add(value);
+    }
+  }
+  if (spec.specialist.execution.response_format === 'json') {
+    const required = spec.specialist.prompt.output_schema?.required;
+    if (Array.isArray(required)) {
+      for (const value of required) {
+        if (typeof value === 'string' && value.length > 0) keys.add(value);
+      }
+    }
+  }
+  return Array.from(keys);
+}
+
+/**
  * Detects when `input.template` looks like a spec field name (e.g. "task_template",
  * "normalize_template") instead of an actual template body. This catches the
  * production bug where a consumer passes the key name expecting the service to
@@ -452,13 +480,12 @@ export async function runScriptSpecialist(input: ScriptGenerateRequest, options:
 
       if (parsed.kind === 'success') {
         let parsed_json: unknown;
-        if (spec.specialist.execution.response_format === 'json') {
+        const expectedKeys = collectRequiredOutputKeys(spec);
+        const shouldParseJson = spec.specialist.execution.response_format === 'json' || expectedKeys.length > 0;
+        if (shouldParseJson) {
           try {
             parsed_json = JSON.parse(stripMarkdownFences(parsed.text));
-            const required = Array.isArray(spec.specialist.prompt.output_schema?.required)
-              ? spec.specialist.prompt.output_schema.required.filter((value): value is string => typeof value === 'string')
-              : [];
-            for (const key of required) {
+            for (const key of expectedKeys) {
               if (parsed_json === null || typeof parsed_json !== 'object' || !(key in parsed_json)) throw new Error(`Missing required output field: ${key}`);
             }
           } catch (error) {

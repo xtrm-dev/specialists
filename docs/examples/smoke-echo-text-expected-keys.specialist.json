@@ -1,0 +1,25 @@
+{
+  "specialist": {
+    "metadata": {
+      "name": "smoke-echo-text-expected-keys",
+      "version": "1.0.0",
+      "description": "Minimal script-class specialist demonstrating execution.expected_output_keys: ships a JSON contract inline in task_template, runs as response_format:text (consumer parses), and uses expected_output_keys to catch hallucinated key sets server-side.",
+      "category": "test"
+    },
+    "execution": {
+      "mode": "auto",
+      "model": "nano-gpt/moonshotai/kimi-k2.5",
+      "timeout_ms": 30000,
+      "interactive": false,
+      "response_format": "text",
+      "expected_output_keys": ["summary", "tags"],
+      "output_type": "custom",
+      "permission_required": "READ_ONLY",
+      "requires_worktree": false,
+      "max_retries": 0
+    },
+    "prompt": {
+      "task_template": "Summarize the following text and produce controlled tags.\n\nReturn ONLY a JSON object of shape:\n{\n  \"summary\": \"<one-sentence summary>\",\n  \"tags\": [\"<short-tag-1>\", \"<short-tag-2>\"]\n}\n\nNo prose, no markdown fences.\n\nText:\n$content"
+    }
+  }
+}

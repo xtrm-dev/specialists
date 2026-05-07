@@ -17571,7 +17571,8 @@ var init_schema = __esm(() => {
     extensions: objectType({
       serena: booleanType().optional(),
       gitnexus: booleanType().optional()
-    }).passthrough().optional()
+    }).passthrough().optional(),
+    expected_output_keys: arrayType(stringType()).optional()
   }).passthrough();
   PromptSchema2 = objectType({
     system: stringType().optional(),
@@ -28373,6 +28374,26 @@ function resolveScriptSpecialistName(name) {
     return "changelog-drafter";
   return name;
 }
+function collectRequiredOutputKeys(spec) {
+  const keys = new Set;
+  const declared = spec.specialist.execution.expected_output_keys;
+  if (Array.isArray(declared)) {
+    for (const value of declared) {
+      if (typeof value === "string" && value.length > 0)
+        keys.add(value);
+    }
+  }
+  if (spec.specialist.execution.response_format === "json") {
+    const required2 = spec.specialist.prompt.output_schema?.required;
+    if (Array.isArray(required2)) {
+      for (const value of required2) {
+        if (typeof value === "string" && value.length > 0)
+          keys.add(value);
+      }
+    }
+  }
+  return Array.from(keys);
+}
 function detectTemplateFieldMisuse(template, specPrompt) {
   if (!specPrompt)
     return null;
@@ -28462,11 +28483,12 @@ async function runScriptSpecialist(input2, options) {
         writeTraceRow(observability2, resolvedSpecialist, model, traceId, parsed.text, durationMs2, skillSources, options.onAuditFailure);
       if (parsed.kind === "success") {
         let parsed_json;
-        if (spec.specialist.execution.response_format === "json") {
+        const expectedKeys = collectRequiredOutputKeys(spec);
+        const shouldParseJson = spec.specialist.execution.response_format === "json" || expectedKeys.length > 0;
+        if (shouldParseJson) {
           try {
             parsed_json = JSON.parse(stripMarkdownFences(parsed.text));
-            const required2 = Array.isArray(spec.specialist.prompt.output_schema?.required) ? spec.specialist.prompt.output_schema.required.filter((value) => typeof value === "string") : [];
-            for (const key of required2) {
+            for (const key of expectedKeys) {
               if (parsed_json === null || typeof parsed_json !== "object" || !(key in parsed_json))
                 throw new Error(`Missing required output field: ${key}`);
             }

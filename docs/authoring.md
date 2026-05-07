@@ -79,6 +79,7 @@ This guide is the user-facing reference for authoring `.specialist.json` files. 
 | `interactive` | boolean | `false` | keep-alive by default for multi-turn specialists |
 | `stdout_limit_bytes` | number | `33554432` | per-run stdout cap for script-class runtime; env `SPECIALISTS_SCRIPT_STDOUT_LIMIT_BYTES` overrides default, spec value overrides env |
 | `response_format` | `"text" \| "json" \| "markdown"` | `"text"` | output contract hint |
+| `expected_output_keys` | `string[]` | unset | required JSON keys the assistant output must contain; triggers required-keys check independent of `response_format` (use for text-format specs that ship a JSON contract inline in `task_template`); on miss returns `error_type: "invalid_json"` |
 | `output_type` | enum | `"custom"` | semantic archetype: `"codegen"`, `"analysis"`, `"review"`, `"synthesis"`, `"orchestration"`, `"workflow"`, `"research"`, `"custom"` |
 | `permission_required` | `"READ_ONLY" \| "LOW" \| "MEDIUM" \| "HIGH"` | `"READ_ONLY"` | tool-access tier |
 | `thinking_level` | `"off" \| "minimal" \| "low" \| "medium" \| "high" \| "xhigh"` | unset | forwarded to thinking-capable models |
@@ -626,9 +627,38 @@ When `--allow-skills` is active, each skill path is resolved and hashed. The `st
 
 `prompt.output_schema.required` is checked against `parsed_json` when `response_format: "json"`. Missing keys produce `error_type: "invalid_json"` with a message naming the field. Nested schema is currently warn-only; tracked in `unitAI-xutg2` (passthrough) and the deferred-strict-mode discussion in `docs/design/specialists-service-evaluation.md` §29.
 
+#### `execution.expected_output_keys` — text-format with JSON contract
+
+Many specs ship their JSON contract inline in `task_template` and run with `response_format: "text"` so the consumer parses the body itself. Without an explicit required-keys check, hallucinated key sets (e.g. `{command, tables}` instead of the contracted `{summary, tags}`) pass through as `success: true` and the consumer happily saves corrupt rows.
+
+`execution.expected_output_keys: string[]` triggers a required-keys check independent of `response_format`. Set it to the keys your prompt requests:
+
+```json
+{
+  "specialist": {
+    "execution": {
+      "response_format": "text",
+      "expected_output_keys": ["summary", "tags"]
+    },
+    "prompt": {
+      "task_template": "Output JSON: {summary: string, tags: string[]}\n\nInput: $content"
+    }
+  }
+}
+```
+
+Behavior:
+
+- The runtime parses the assistant text as JSON (`stripMarkdownFences` first), then verifies every listed key is present.
+- On miss, returns `error_type: "invalid_json"` with a message naming the missing key — the same error consumers already handle for `response_format: "json"` specs.
+- If `response_format === "json"` is also set, the keys are unioned with `prompt.output_schema.required`.
+- This is intentionally **not** auto-derived from `output_schema`: the cost of mistakenly validating the wrong key set is silent corruption, so authors declare expectations explicitly.
+
 ### Reference example
 
 [`docs/examples/smoke-echo.specialist.json`](examples/smoke-echo.specialist.json) is a minimal working script-class spec. Copy it into a project's `.specialists/user/` to verify a fresh `sp serve` deployment end-to-end.
+
+[`docs/examples/smoke-echo-text-expected-keys.specialist.json`](examples/smoke-echo-text-expected-keys.specialist.json) demonstrates the text-format-with-`expected_output_keys` pattern: ships a JSON contract inline in `task_template`, runs as `response_format: "text"`, and declares `expected_output_keys: ["summary", "tags"]` so hallucinated key sets fail with `error_type: "invalid_json"` instead of being saved.
 
 ### Same loader, same edit path
 

@@ -6,6 +6,7 @@ import {
   DEFAULT_PROMPT_LIMIT_BYTES,
   DEFAULT_STDERR_LIMIT_BYTES,
   collectModelCandidates,
+  collectRequiredOutputKeys,
   classifyAttempt,
   compatGuard,
   detectTemplateFieldMisuse,
@@ -236,6 +237,126 @@ describe('runScriptSpecialist aliasing', () => {
     expect(result).toMatchObject({ success: true });
     if (result.success) {
       expect(result.meta).toMatchObject({ specialist: 'changelog-drafter', requested_specialist: 'changelog-keeper', resolved_specialist: 'changelog-drafter' });
+    }
+  });
+});
+
+describe('collectRequiredOutputKeys', () => {
+  it('returns expected_output_keys for text-format specs', () => {
+    const spec = {
+      specialist: {
+        execution: { response_format: 'text', expected_output_keys: ['summary', 'tags'] },
+        prompt: {},
+      },
+    };
+    expect(collectRequiredOutputKeys(spec)).toEqual(['summary', 'tags']);
+  });
+
+  it('returns output_schema.required for json-format specs', () => {
+    const spec = {
+      specialist: {
+        execution: { response_format: 'json' },
+        prompt: { output_schema: { required: ['a', 'b'] } },
+      },
+    };
+    expect(collectRequiredOutputKeys(spec)).toEqual(['a', 'b']);
+  });
+
+  it('unions expected_output_keys with output_schema.required for json specs', () => {
+    const spec = {
+      specialist: {
+        execution: { response_format: 'json', expected_output_keys: ['summary'] },
+        prompt: { output_schema: { required: ['summary', 'tags'] } },
+      },
+    };
+    expect(collectRequiredOutputKeys(spec).sort()).toEqual(['summary', 'tags']);
+  });
+
+  it('ignores output_schema.required for text-format specs', () => {
+    const spec = {
+      specialist: {
+        execution: { response_format: 'text' },
+        prompt: { output_schema: { required: ['ignored'] } },
+      },
+    };
+    expect(collectRequiredOutputKeys(spec)).toEqual([]);
+  });
+
+  it('drops non-string and empty entries', () => {
+    const spec = {
+      specialist: {
+        execution: { response_format: 'text', expected_output_keys: ['ok', '', 42, null, 'fine'] },
+        prompt: {},
+      },
+    };
+    expect(collectRequiredOutputKeys(spec as never)).toEqual(['ok', 'fine']);
+  });
+
+  it('returns empty array when nothing is declared', () => {
+    expect(collectRequiredOutputKeys({ specialist: { execution: {}, prompt: {} } })).toEqual([]);
+  });
+});
+
+describe('runScriptSpecialist expected_output_keys validation', () => {
+  function textSpecWithKeys(keys: string[]) {
+    return {
+      ...baseSpec,
+      specialist: {
+        ...baseSpec.specialist,
+        execution: { ...baseSpec.specialist.execution, response_format: 'text', expected_output_keys: keys },
+      },
+    };
+  }
+
+  it('returns invalid_json when text-format output is missing a required key', async () => {
+    const spec = textSpecWithKeys(['summary', 'tags']);
+    const child = createSpawnMock();
+    const resultPromise = runScriptSpecialist(
+      { specialist: 'changelog-drafter', template: 'render $name', variables: { name: 'x' } },
+      { loader: makeLoader(spec as never) as never, projectDir: '.' },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // Hallucinated output: valid JSON but missing 'tags'.
+    const text = JSON.stringify({ summary: 'ok', command: 'oops' });
+    child.stdout.emit('data', Buffer.from(`${JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text }] } })}\n`));
+    child.emit('close', 0);
+
+    const result = await resultPromise;
+    expect(result).toMatchObject({ success: false, error_type: 'invalid_json' });
+    if (!result.success) expect(result.error).toContain('tags');
+  });
+
+  it('returns invalid_json when text-format output is not parseable as JSON', async () => {
+    const spec = textSpecWithKeys(['summary']);
+    const child = createSpawnMock();
+    const resultPromise = runScriptSpecialist(
+      { specialist: 'changelog-drafter', template: 'render $name', variables: { name: 'x' } },
+      { loader: makeLoader(spec as never) as never, projectDir: '.' },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    child.stdout.emit('data', Buffer.from(`${JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'not json at all' }] } })}\n`));
+    child.emit('close', 0);
+
+    const result = await resultPromise;
+    expect(result).toMatchObject({ success: false, error_type: 'invalid_json' });
+  });
+
+  it('passes when text-format output contains every expected_output_keys entry', async () => {
+    const spec = textSpecWithKeys(['summary', 'tags']);
+    const child = createSpawnMock();
+    const resultPromise = runScriptSpecialist(
+      { specialist: 'changelog-drafter', template: 'render $name', variables: { name: 'x' } },
+      { loader: makeLoader(spec as never) as never, projectDir: '.' },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const text = JSON.stringify({ summary: 'ok', tags: ['a', 'b'], extra: 'fine' });
+    child.stdout.emit('data', Buffer.from(`${JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text }] } })}\n`));
+    child.emit('close', 0);
+
+    const result = await resultPromise;
+    expect(result).toMatchObject({ success: true });
+    if (result.success) {
+      expect(result.parsed_json).toMatchObject({ summary: 'ok', tags: ['a', 'b'] });
     }
   });
 });

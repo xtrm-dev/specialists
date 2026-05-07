@@ -73,6 +73,28 @@ export declare const DEFAULT_PROMPT_LIMIT_BYTES: number;
 export declare function resolvePromptLimitBytes(spec: Specialist): number;
 export declare function resolveAssistantTextLimitBytes(spec: Specialist): number;
 /**
+ * Returns the deduplicated list of required output keys for this spec.
+ * Sources, in order:
+ *   1. `execution.expected_output_keys` — author-declared, fires for any response_format.
+ *   2. `prompt.output_schema.required` — JSON Schema required array, only relevant when
+ *      `response_format === 'json'` (the runtime parses the JSON anyway in that case).
+ * Authors using `response_format: 'text'` with an inline JSON contract should declare
+ * `expected_output_keys` so saved-but-corrupt outputs are caught instead of stored.
+ */
+export declare function collectRequiredOutputKeys(spec: {
+    specialist: {
+        execution: {
+            response_format?: string;
+            expected_output_keys?: unknown;
+        };
+        prompt: {
+            output_schema?: {
+                required?: unknown;
+            };
+        };
+    };
+}): string[];
+/**
  * Detects when `input.template` looks like a spec field name (e.g. "task_template",
  * "normalize_template") instead of an actual template body. This catches the
  * production bug where a consumer passes the key name expecting the service to

@@ -59,6 +59,12 @@ export declare const SpecialistSchema: z.ZodObject<{
                 serena: z.ZodOptional<z.ZodBoolean>;
                 gitnexus: z.ZodOptional<z.ZodBoolean>;
             }, z.ZodTypeAny, "passthrough">>>;
+            /** Required JSON keys the assistant output must contain. Triggers a required-keys
+             *  check independent of `response_format`. Use for specs that ship their JSON
+             *  contract inline in `task_template` and run with `response_format: text` so the
+             *  consumer parses — without this, hallucinated key sets pass through as success.
+             *  On miss the runtime returns `error_type: 'invalid_json'`. */
+            expected_output_keys: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
         }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
             mode: z.ZodDefault<z.ZodEnum<["tool", "skill", "auto"]>>;
             model: z.ZodString;
@@ -95,6 +101,12 @@ export declare const SpecialistSchema: z.ZodObject<{
                 serena: z.ZodOptional<z.ZodBoolean>;
                 gitnexus: z.ZodOptional<z.ZodBoolean>;
             }, z.ZodTypeAny, "passthrough">>>;
+            /** Required JSON keys the assistant output must contain. Triggers a required-keys
+             *  check independent of `response_format`. Use for specs that ship their JSON
+             *  contract inline in `task_template` and run with `response_format: text` so the
+             *  consumer parses — without this, hallucinated key sets pass through as success.
+             *  On miss the runtime returns `error_type: 'invalid_json'`. */
+            expected_output_keys: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
         }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
             mode: z.ZodDefault<z.ZodEnum<["tool", "skill", "auto"]>>;
             model: z.ZodString;
@@ -131,6 +143,12 @@ export declare const SpecialistSchema: z.ZodObject<{
                 serena: z.ZodOptional<z.ZodBoolean>;
                 gitnexus: z.ZodOptional<z.ZodBoolean>;
             }, z.ZodTypeAny, "passthrough">>>;
+            /** Required JSON keys the assistant output must contain. Triggers a required-keys
+             *  check independent of `response_format`. Use for specs that ship their JSON
+             *  contract inline in `task_template` and run with `response_format: text` so the
+             *  consumer parses — without this, hallucinated key sets pass through as success.
+             *  On miss the runtime returns `error_type: 'invalid_json'`. */
+            expected_output_keys: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
         }, z.ZodTypeAny, "passthrough">>;
         prompt: z.ZodObject<{
             system: z.ZodOptional<z.ZodString>;
@@ -381,6 +399,12 @@ export declare const SpecialistSchema: z.ZodObject<{
                 serena: z.ZodOptional<z.ZodBoolean>;
                 gitnexus: z.ZodOptional<z.ZodBoolean>;
             }, z.ZodTypeAny, "passthrough">>>;
+            /** Required JSON keys the assistant output must contain. Triggers a required-keys
+             *  check independent of `response_format`. Use for specs that ship their JSON
+             *  contract inline in `task_template` and run with `response_format: text` so the
+             *  consumer parses — without this, hallucinated key sets pass through as success.
+             *  On miss the runtime returns `error_type: 'invalid_json'`. */
+            expected_output_keys: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
         }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
             mode: z.ZodDefault<z.ZodEnum<["tool", "skill", "auto"]>>;
             model: z.ZodString;
@@ -417,6 +441,12 @@ export declare const SpecialistSchema: z.ZodObject<{
                 serena: z.ZodOptional<z.ZodBoolean>;
                 gitnexus: z.ZodOptional<z.ZodBoolean>;
             }, z.ZodTypeAny, "passthrough">>>;
+            /** Required JSON keys the assistant output must contain. Triggers a required-keys
+             *  check independent of `response_format`. Use for specs that ship their JSON
+             *  contract inline in `task_template` and run with `response_format: text` so the
+             *  consumer parses — without this, hallucinated key sets pass through as success.
+             *  On miss the runtime returns `error_type: 'invalid_json'`. */
+            expected_output_keys: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
         }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
             mode: z.ZodDefault<z.ZodEnum<["tool", "skill", "auto"]>>;
             model: z.ZodString;
@@ -453,6 +483,12 @@ export declare const SpecialistSchema: z.ZodObject<{
                 serena: z.ZodOptional<z.ZodBoolean>;
                 gitnexus: z.ZodOptional<z.ZodBoolean>;
             }, z.ZodTypeAny, "passthrough">>>;
+            /** Required JSON keys the assistant output must contain. Triggers a required-keys
+             *  check independent of `response_format`. Use for specs that ship their JSON
+             *  contract inline in `task_template` and run with `response_format: text` so the
+             *  consumer parses — without this, hallucinated key sets pass through as success.
+             *  On miss the runtime returns `error_type: 'invalid_json'`. */
+            expected_output_keys: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
         }, z.ZodTypeAny, "passthrough">>;
         prompt: z.ZodObject<{
             system: z.ZodOptional<z.ZodString>;
@@ -703,6 +739,12 @@ export declare const SpecialistSchema: z.ZodObject<{
                 serena: z.ZodOptional<z.ZodBoolean>;
                 gitnexus: z.ZodOptional<z.ZodBoolean>;
             }, z.ZodTypeAny, "passthrough">>>;
+            /** Required JSON keys the assistant output must contain. Triggers a required-keys
+             *  check independent of `response_format`. Use for specs that ship their JSON
+             *  contract inline in `task_template` and run with `response_format: text` so the
+             *  consumer parses — without this, hallucinated key sets pass through as success.
+             *  On miss the runtime returns `error_type: 'invalid_json'`. */
+            expected_output_keys: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
         }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
             mode: z.ZodDefault<z.ZodEnum<["tool", "skill", "auto"]>>;
             model: z.ZodString;
@@ -739,6 +781,12 @@ export declare const SpecialistSchema: z.ZodObject<{
                 serena: z.ZodOptional<z.ZodBoolean>;
                 gitnexus: z.ZodOptional<z.ZodBoolean>;
             }, z.ZodTypeAny, "passthrough">>>;
+            /** Required JSON keys the assistant output must contain. Triggers a required-keys
+             *  check independent of `response_format`. Use for specs that ship their JSON
+             *  contract inline in `task_template` and run with `response_format: text` so the
+             *  consumer parses — without this, hallucinated key sets pass through as success.
+             *  On miss the runtime returns `error_type: 'invalid_json'`. */
+            expected_output_keys: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
         }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
             mode: z.ZodDefault<z.ZodEnum<["tool", "skill", "auto"]>>;
             model: z.ZodString;
@@ -775,6 +823,12 @@ export declare const SpecialistSchema: z.ZodObject<{
                 serena: z.ZodOptional<z.ZodBoolean>;
                 gitnexus: z.ZodOptional<z.ZodBoolean>;
             }, z.ZodTypeAny, "passthrough">>>;
+            /** Required JSON keys the assistant output must contain. Triggers a required-keys
+             *  check independent of `response_format`. Use for specs that ship their JSON
+             *  contract inline in `task_template` and run with `response_format: text` so the
+             *  consumer parses — without this, hallucinated key sets pass through as success.
+             *  On miss the runtime returns `error_type: 'invalid_json'`. */
+            expected_output_keys: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
         }, z.ZodTypeAny, "passthrough">>;
         prompt: z.ZodObject<{
             system: z.ZodOptional<z.ZodString>;
@@ -1027,6 +1081,12 @@ export declare const SpecialistSchema: z.ZodObject<{
                 serena: z.ZodOptional<z.ZodBoolean>;
                 gitnexus: z.ZodOptional<z.ZodBoolean>;
             }, z.ZodTypeAny, "passthrough">>>;
+            /** Required JSON keys the assistant output must contain. Triggers a required-keys
+             *  check independent of `response_format`. Use for specs that ship their JSON
+             *  contract inline in `task_template` and run with `response_format: text` so the
+             *  consumer parses — without this, hallucinated key sets pass through as success.
+             *  On miss the runtime returns `error_type: 'invalid_json'`. */
+            expected_output_keys: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
         }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
             mode: z.ZodDefault<z.ZodEnum<["tool", "skill", "auto"]>>;
             model: z.ZodString;
@@ -1063,6 +1123,12 @@ export declare const SpecialistSchema: z.ZodObject<{
                 serena: z.ZodOptional<z.ZodBoolean>;
                 gitnexus: z.ZodOptional<z.ZodBoolean>;
             }, z.ZodTypeAny, "passthrough">>>;
+            /** Required JSON keys the assistant output must contain. Triggers a required-keys
+             *  check independent of `response_format`. Use for specs that ship their JSON
+             *  contract inline in `task_template` and run with `response_format: text` so the
+             *  consumer parses — without this, hallucinated key sets pass through as success.
+             *  On miss the runtime returns `error_type: 'invalid_json'`. */
+            expected_output_keys: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
         }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
             mode: z.ZodDefault<z.ZodEnum<["tool", "skill", "auto"]>>;
             model: z.ZodString;
@@ -1099,6 +1165,12 @@ export declare const SpecialistSchema: z.ZodObject<{
                 serena: z.ZodOptional<z.ZodBoolean>;
                 gitnexus: z.ZodOptional<z.ZodBoolean>;
             }, z.ZodTypeAny, "passthrough">>>;
+            /** Required JSON keys the assistant output must contain. Triggers a required-keys
+             *  check independent of `response_format`. Use for specs that ship their JSON
+             *  contract inline in `task_template` and run with `response_format: text` so the
+             *  consumer parses — without this, hallucinated key sets pass through as success.
+             *  On miss the runtime returns `error_type: 'invalid_json'`. */
+            expected_output_keys: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
         }, z.ZodTypeAny, "passthrough">>;
         prompt: z.ZodObject<{
             system: z.ZodOptional<z.ZodString>;
@@ -1349,6 +1421,12 @@ export declare const SpecialistSchema: z.ZodObject<{
                 serena: z.ZodOptional<z.ZodBoolean>;
                 gitnexus: z.ZodOptional<z.ZodBoolean>;
             }, z.ZodTypeAny, "passthrough">>>;
+            /** Required JSON keys the assistant output must contain. Triggers a required-keys
+             *  check independent of `response_format`. Use for specs that ship their JSON
+             *  contract inline in `task_template` and run with `response_format: text` so the
+             *  consumer parses — without this, hallucinated key sets pass through as success.
+             *  On miss the runtime returns `error_type: 'invalid_json'`. */
+            expected_output_keys: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
         }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
             mode: z.ZodDefault<z.ZodEnum<["tool", "skill", "auto"]>>;
             model: z.ZodString;
@@ -1385,6 +1463,12 @@ export declare const SpecialistSchema: z.ZodObject<{
                 serena: z.ZodOptional<z.ZodBoolean>;
                 gitnexus: z.ZodOptional<z.ZodBoolean>;
             }, z.ZodTypeAny, "passthrough">>>;
+            /** Required JSON keys the assistant output must contain. Triggers a required-keys
+             *  check independent of `response_format`. Use for specs that ship their JSON
+             *  contract inline in `task_template` and run with `response_format: text` so the
+             *  consumer parses — without this, hallucinated key sets pass through as success.
+             *  On miss the runtime returns `error_type: 'invalid_json'`. */
+            expected_output_keys: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
         }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
             mode: z.ZodDefault<z.ZodEnum<["tool", "skill", "auto"]>>;
             model: z.ZodString;
@@ -1421,6 +1505,12 @@ export declare const SpecialistSchema: z.ZodObject<{
                 serena: z.ZodOptional<z.ZodBoolean>;
                 gitnexus: z.ZodOptional<z.ZodBoolean>;
             }, z.ZodTypeAny, "passthrough">>>;
+            /** Required JSON keys the assistant output must contain. Triggers a required-keys
+             *  check independent of `response_format`. Use for specs that ship their JSON
+             *  contract inline in `task_template` and run with `response_format: text` so the
+             *  consumer parses — without this, hallucinated key sets pass through as success.
+             *  On miss the runtime returns `error_type: 'invalid_json'`. */
+            expected_output_keys: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
         }, z.ZodTypeAny, "passthrough">>;
         prompt: z.ZodObject<{
             system: z.ZodOptional<z.ZodString>;
@@ -1671,6 +1761,12 @@ export declare const SpecialistSchema: z.ZodObject<{
                 serena: z.ZodOptional<z.ZodBoolean>;
                 gitnexus: z.ZodOptional<z.ZodBoolean>;
             }, z.ZodTypeAny, "passthrough">>>;
+            /** Required JSON keys the assistant output must contain. Triggers a required-keys
+             *  check independent of `response_format`. Use for specs that ship their JSON
+             *  contract inline in `task_template` and run with `response_format: text` so the
+             *  consumer parses — without this, hallucinated key sets pass through as success.
+             *  On miss the runtime returns `error_type: 'invalid_json'`. */
+            expected_output_keys: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
         }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
             mode: z.ZodDefault<z.ZodEnum<["tool", "skill", "auto"]>>;
             model: z.ZodString;
@@ -1707,6 +1803,12 @@ export declare const SpecialistSchema: z.ZodObject<{
                 serena: z.ZodOptional<z.ZodBoolean>;
                 gitnexus: z.ZodOptional<z.ZodBoolean>;
             }, z.ZodTypeAny, "passthrough">>>;
+            /** Required JSON keys the assistant output must contain. Triggers a required-keys
+             *  check independent of `response_format`. Use for specs that ship their JSON
+             *  contract inline in `task_template` and run with `response_format: text` so the
+             *  consumer parses — without this, hallucinated key sets pass through as success.
+             *  On miss the runtime returns `error_type: 'invalid_json'`. */
+            expected_output_keys: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
         }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
             mode: z.ZodDefault<z.ZodEnum<["tool", "skill", "auto"]>>;
             model: z.ZodString;
@@ -1743,6 +1845,12 @@ export declare const SpecialistSchema: z.ZodObject<{
                 serena: z.ZodOptional<z.ZodBoolean>;
                 gitnexus: z.ZodOptional<z.ZodBoolean>;
             }, z.ZodTypeAny, "passthrough">>>;
+            /** Required JSON keys the assistant output must contain. Triggers a required-keys
+             *  check independent of `response_format`. Use for specs that ship their JSON
+             *  contract inline in `task_template` and run with `response_format: text` so the
+             *  consumer parses — without this, hallucinated key sets pass through as success.
+             *  On miss the runtime returns `error_type: 'invalid_json'`. */
+            expected_output_keys: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
         }, z.ZodTypeAny, "passthrough">>;
         prompt: z.ZodObject<{
             system: z.ZodOptional<z.ZodString>;
@@ -1995,6 +2103,12 @@ export declare const SpecialistSchema: z.ZodObject<{
                 serena: z.ZodOptional<z.ZodBoolean>;
                 gitnexus: z.ZodOptional<z.ZodBoolean>;
             }, z.ZodTypeAny, "passthrough">>>;
+            /** Required JSON keys the assistant output must contain. Triggers a required-keys
+             *  check independent of `response_format`. Use for specs that ship their JSON
+             *  contract inline in `task_template` and run with `response_format: text` so the
+             *  consumer parses — without this, hallucinated key sets pass through as success.
+             *  On miss the runtime returns `error_type: 'invalid_json'`. */
+            expected_output_keys: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
         }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
             mode: z.ZodDefault<z.ZodEnum<["tool", "skill", "auto"]>>;
             model: z.ZodString;
@@ -2031,6 +2145,12 @@ export declare const SpecialistSchema: z.ZodObject<{
                 serena: z.ZodOptional<z.ZodBoolean>;
                 gitnexus: z.ZodOptional<z.ZodBoolean>;
             }, z.ZodTypeAny, "passthrough">>>;
+            /** Required JSON keys the assistant output must contain. Triggers a required-keys
+             *  check independent of `response_format`. Use for specs that ship their JSON
+             *  contract inline in `task_template` and run with `response_format: text` so the
+             *  consumer parses — without this, hallucinated key sets pass through as success.
+             *  On miss the runtime returns `error_type: 'invalid_json'`. */
+            expected_output_keys: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
         }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
             mode: z.ZodDefault<z.ZodEnum<["tool", "skill", "auto"]>>;
             model: z.ZodString;
@@ -2067,6 +2187,12 @@ export declare const SpecialistSchema: z.ZodObject<{
                 serena: z.ZodOptional<z.ZodBoolean>;
                 gitnexus: z.ZodOptional<z.ZodBoolean>;
             }, z.ZodTypeAny, "passthrough">>>;
+            /** Required JSON keys the assistant output must contain. Triggers a required-keys
+             *  check independent of `response_format`. Use for specs that ship their JSON
+             *  contract inline in `task_template` and run with `response_format: text` so the
+             *  consumer parses — without this, hallucinated key sets pass through as success.
+             *  On miss the runtime returns `error_type: 'invalid_json'`. */
+            expected_output_keys: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
         }, z.ZodTypeAny, "passthrough">>;
         prompt: z.ZodObject<{
             system: z.ZodOptional<z.ZodString>;
@@ -2317,6 +2443,12 @@ export declare const SpecialistSchema: z.ZodObject<{
                 serena: z.ZodOptional<z.ZodBoolean>;
                 gitnexus: z.ZodOptional<z.ZodBoolean>;
             }, z.ZodTypeAny, "passthrough">>>;
+            /** Required JSON keys the assistant output must contain. Triggers a required-keys
+             *  check independent of `response_format`. Use for specs that ship their JSON
+             *  contract inline in `task_template` and run with `response_format: text` so the
+             *  consumer parses — without this, hallucinated key sets pass through as success.
+             *  On miss the runtime returns `error_type: 'invalid_json'`. */
+            expected_output_keys: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
         }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
             mode: z.ZodDefault<z.ZodEnum<["tool", "skill", "auto"]>>;
             model: z.ZodString;
@@ -2353,6 +2485,12 @@ export declare const SpecialistSchema: z.ZodObject<{
                 serena: z.ZodOptional<z.ZodBoolean>;
                 gitnexus: z.ZodOptional<z.ZodBoolean>;
             }, z.ZodTypeAny, "passthrough">>>;
+            /** Required JSON keys the assistant output must contain. Triggers a required-keys
+             *  check independent of `response_format`. Use for specs that ship their JSON
+             *  contract inline in `task_template` and run with `response_format: text` so the
+             *  consumer parses — without this, hallucinated key sets pass through as success.
+             *  On miss the runtime returns `error_type: 'invalid_json'`. */
+            expected_output_keys: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
         }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
             mode: z.ZodDefault<z.ZodEnum<["tool", "skill", "auto"]>>;
             model: z.ZodString;
@@ -2389,6 +2527,12 @@ export declare const SpecialistSchema: z.ZodObject<{
                 serena: z.ZodOptional<z.ZodBoolean>;
                 gitnexus: z.ZodOptional<z.ZodBoolean>;
             }, z.ZodTypeAny, "passthrough">>>;
+            /** Required JSON keys the assistant output must contain. Triggers a required-keys
+             *  check independent of `response_format`. Use for specs that ship their JSON
+             *  contract inline in `task_template` and run with `response_format: text` so the
+             *  consumer parses — without this, hallucinated key sets pass through as success.
+             *  On miss the runtime returns `error_type: 'invalid_json'`. */
+            expected_output_keys: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
         }, z.ZodTypeAny, "passthrough">>;
         prompt: z.ZodObject<{
             system: z.ZodOptional<z.ZodString>;
@@ -2639,6 +2783,12 @@ export declare const SpecialistSchema: z.ZodObject<{
                 serena: z.ZodOptional<z.ZodBoolean>;
                 gitnexus: z.ZodOptional<z.ZodBoolean>;
             }, z.ZodTypeAny, "passthrough">>>;
+            /** Required JSON keys the assistant output must contain. Triggers a required-keys
+             *  check independent of `response_format`. Use for specs that ship their JSON
+             *  contract inline in `task_template` and run with `response_format: text` so the
+             *  consumer parses — without this, hallucinated key sets pass through as success.
+             *  On miss the runtime returns `error_type: 'invalid_json'`. */
+            expected_output_keys: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
         }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
             mode: z.ZodDefault<z.ZodEnum<["tool", "skill", "auto"]>>;
             model: z.ZodString;
@@ -2675,6 +2825,12 @@ export declare const SpecialistSchema: z.ZodObject<{
                 serena: z.ZodOptional<z.ZodBoolean>;
                 gitnexus: z.ZodOptional<z.ZodBoolean>;
             }, z.ZodTypeAny, "passthrough">>>;
+            /** Required JSON keys the assistant output must contain. Triggers a required-keys
+             *  check independent of `response_format`. Use for specs that ship their JSON
+             *  contract inline in `task_template` and run with `response_format: text` so the
+             *  consumer parses — without this, hallucinated key sets pass through as success.
+             *  On miss the runtime returns `error_type: 'invalid_json'`. */
+            expected_output_keys: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
         }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
             mode: z.ZodDefault<z.ZodEnum<["tool", "skill", "auto"]>>;
             model: z.ZodString;
@@ -2711,6 +2867,12 @@ export declare const SpecialistSchema: z.ZodObject<{
                 serena: z.ZodOptional<z.ZodBoolean>;
                 gitnexus: z.ZodOptional<z.ZodBoolean>;
             }, z.ZodTypeAny, "passthrough">>>;
+            /** Required JSON keys the assistant output must contain. Triggers a required-keys
+             *  check independent of `response_format`. Use for specs that ship their JSON
+             *  contract inline in `task_template` and run with `response_format: text` so the
+             *  consumer parses — without this, hallucinated key sets pass through as success.
+             *  On miss the runtime returns `error_type: 'invalid_json'`. */
+            expected_output_keys: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
         }, z.ZodTypeAny, "passthrough">>;
         prompt: z.ZodObject<{
             system: z.ZodOptional<z.ZodString>;
