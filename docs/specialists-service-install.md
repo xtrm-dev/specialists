@@ -90,6 +90,8 @@ For the full schema (every required, optional, and forbidden field with explanat
 
 Copy `docker/compose.example.yml` and replace placeholders.
 
+> **Adding to an existing multi-service stack?** See [`deploying-alongside.md`](deploying-alongside.md) for the production recipe with the three undocumented tweaks (`user:`, `HOME=/pi-home`, rw `.specialists/`) and a troubleshooting matrix.
+
 ### Container naming: dev vs consumer service
 
 This repository's root `compose.yml` is only a local developer convenience. It now sets `container_name: sp-service-dev` so `docker ps` is visually distinct from real consumer deployments.
