@@ -1,11 +1,11 @@
 import type { SupervisorStatus } from './supervisor.js';
 
 /**
- * Epic lifecycle is independent from node lifecycle:
- * - epic: merge-gated publication lifecycle for wave-bound chain groups
- * - chain: worktree lineage rooted at worktree_owner_job_id
- * - job: one specialist run
- * - node: coordinator/member runtime lifecycle
+ * Epic lifecycle compatibility surface.
+ *
+ * Live chain readiness now drives publication state. Persisted epic rows are
+ * treated as a view cache and legacy ceremony remains only for downstream
+ * callers still migrating.
  */
 export const EPIC_STATES = ['open', 'resolving', 'merge_ready', 'merged', 'failed', 'abandoned'] as const;
 
@@ -18,9 +18,6 @@ export const VALID_EPIC_TRANSITIONS: Record<EpicState, readonly EpicState[]> = {
   resolving: ['merge_ready', 'failed', 'abandoned'],
   merge_ready: ['merged', 'failed', 'abandoned', 'resolving'],
   merged: [],
-  // failed is recoverable to abandoned: lets operators clean up dead epics
-  // (sibling-chain conflicts, transient supervisor crashes, manual stop) that
-  // ended up in failed without an explicit publish path.
   failed: ['abandoned'],
   abandoned: [],
 };
@@ -81,23 +78,12 @@ export function resolveChainId(status: Pick<SupervisorStatus, 'id' | 'worktree_p
 }
 
 export function evaluateEpicMergeReadiness(input: EpicReadinessInput): EpicReadinessResult {
-  const isEligibleState = input.epicStatus === 'merge_ready';
   const blockingChains = input.chainStatuses
     .filter((chain) => chain.hasRunningJob)
     .map((chain) => chain.chainId);
-  const isReady = isEligibleState && blockingChains.length === 0;
+  const isReady = blockingChains.length === 0;
 
-  if (!isEligibleState) {
-    return {
-      epicId: input.epicId,
-      epicStatus: input.epicStatus,
-      isReady,
-      blockingChains,
-      summary: `Epic ${input.epicId} is ${input.epicStatus}; expected merge_ready before publication.`,
-    };
-  }
-
-  if (blockingChains.length > 0) {
+  if (!isReady) {
     return {
       epicId: input.epicId,
       epicStatus: input.epicStatus,
@@ -107,12 +93,22 @@ export function evaluateEpicMergeReadiness(input: EpicReadinessInput): EpicReadi
     };
   }
 
+  if (input.epicStatus === 'merged' || input.epicStatus === 'abandoned') {
+    return {
+      epicId: input.epicId,
+      epicStatus: input.epicStatus,
+      isReady,
+      blockingChains,
+      summary: `Epic ${input.epicId} is ${input.epicStatus}; live chains are terminal.`,
+    };
+  }
+
   return {
     epicId: input.epicId,
     epicStatus: input.epicStatus,
     isReady,
     blockingChains,
-    summary: `Epic ${input.epicId} is merge-ready and all chains are terminal.`,
+    summary: `Epic ${input.epicId} is live-ready and all chains are terminal.`,
   };
 }
 

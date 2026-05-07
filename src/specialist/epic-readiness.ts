@@ -1,5 +1,4 @@
 import type { EpicRunRecord, EpicState } from './epic-lifecycle.js';
-import { transitionEpicState } from './epic-lifecycle.js';
 import type { ObservabilitySqliteClient } from './observability-sqlite.js';
 import type { SupervisorStatus } from './supervisor.js';
 import { isProcessAlive } from './process-liveness.js';
@@ -10,7 +9,7 @@ const REVIEWER_VERDICT_REGEX = /Verdict:\s*(PASS|PARTIAL|FAIL)/i;
 
 export type ReviewerVerdict = 'pass' | 'partial' | 'fail' | 'missing';
 export type ChainReadinessState = 'pending' | 'blocked' | 'pass' | 'failed';
-export type EpicReadinessState = 'unresolved' | 'resolving' | 'merge_ready' | 'blocked' | 'failed' | 'merged' | 'abandoned';
+export type EpicReadinessState = 'unresolved' | 'resolving' | 'blocked' | 'failed' | 'merge_ready' | 'merged' | 'abandoned';
 
 interface EvaluatorJob {
   id: string;
@@ -174,74 +173,43 @@ function evaluatePrepReadiness(prepJobs: readonly SupervisorStatus[]): PrepReadi
   };
 }
 
-function toReadinessState(
-  persistedState: EpicState,
-  prep: PrepReadinessSummary,
-  chains: readonly ChainReadinessSummary[],
-): EpicReadinessState {
-  if (persistedState === 'merged') return 'merged';
-  if (persistedState === 'abandoned') return 'abandoned';
-
-  const hasBlockingPrep = prep.running > 0;
-  const hasFailedPrep = prep.failed > 0;
+function deriveEpicReadinessState(prep: PrepReadinessSummary, chains: readonly ChainReadinessSummary[]): EpicReadinessState {
+  const hasActivePrep = prep.running > 0;
   const hasPendingChain = chains.some((chain) => chain.state === 'pending');
   const hasBlockedChain = chains.some((chain) => chain.state === 'blocked');
+  const hasFailedPrep = prep.failed > 0;
   const hasFailedChain = chains.some((chain) => chain.state === 'failed');
   const allChainsPass = chains.length === 0 || chains.every((chain) => chain.state === 'pass');
 
+  if (hasActivePrep || hasPendingChain) return 'resolving';
   if (hasFailedPrep || hasFailedChain) return 'failed';
-  if (persistedState === 'failed' && allChainsPass) return 'merge_ready';
-  if (persistedState === 'failed') return 'failed';
-  if (hasBlockingPrep || hasPendingChain) return persistedState === 'resolving' ? 'resolving' : 'unresolved';
-  if (hasBlockedChain) return persistedState === 'resolving' ? 'resolving' : 'blocked';
+  if (hasBlockedChain) return 'blocked';
   if (allChainsPass) return 'merge_ready';
   return 'blocked';
 }
 
-function toNextState(persistedState: EpicState, readinessState: EpicReadinessState): EpicState {
+function deriveEpicNextState(persistedState: EpicState, readinessState: EpicReadinessState): EpicState {
   if (persistedState === 'merged' || persistedState === 'abandoned') return persistedState;
-
-  if (readinessState === 'failed') {
-    if (persistedState === 'merge_ready') {
-      return transitionEpicState('merge_ready', 'failed');
-    }
-    if (persistedState === 'resolving') {
-      return transitionEpicState('resolving', 'failed');
-    }
-    return persistedState;
-  }
-
-  if (readinessState === 'merge_ready') {
-    if (persistedState === 'failed') return 'merge_ready';
-    if (persistedState === 'open') return transitionEpicState('open', 'resolving');
-    if (persistedState === 'resolving') return transitionEpicState('resolving', 'merge_ready');
-    return persistedState;
-  }
-
-  if (persistedState === 'open' && (readinessState === 'unresolved' || readinessState === 'resolving' || readinessState === 'blocked')) {
-    return transitionEpicState('open', 'resolving');
-  }
-
-  if (persistedState === 'merge_ready' && (readinessState === 'unresolved' || readinessState === 'resolving' || readinessState === 'blocked')) {
-    return transitionEpicState('merge_ready', 'resolving');
-  }
-
-  return persistedState;
+  if (readinessState === 'merge_ready') return 'merge_ready';
+  if (readinessState === 'failed') return 'failed';
+  return 'resolving';
 }
 
-function buildSummaryLine(epicId: string, readinessState: EpicReadinessState, prep: PrepReadinessSummary, chains: readonly ChainReadinessSummary[]): string {
+function buildSummaryLine(epicId: string, persistedState: EpicState, readinessState: EpicReadinessState, prep: PrepReadinessSummary, chains: readonly ChainReadinessSummary[]): string {
   const chainPass = chains.filter((chain) => chain.state === 'pass').length;
   const chainTotal = chains.length;
-  const blockedChains = chains.filter((chain) => chain.state === 'blocked' || chain.state === 'pending').map((chain) => chain.chain_id);
+  const blockedChains = chains.filter((chain) => chain.state === 'blocked' || chain.state === 'pending' || chain.state === 'failed').map((chain) => chain.chain_id);
+  const failedChains = chains.filter((chain) => chain.state === 'failed').map((chain) => chain.chain_id);
 
   const prepSegment = `prep done=${prep.done}/${prep.total} running=${prep.running} failed=${prep.failed}`;
   const chainSegment = `chains pass=${chainPass}/${chainTotal}`;
+  const stateSegment = persistedState === readinessState ? readinessState : `${readinessState} (stored=${persistedState})`;
 
-  if (blockedChains.length > 0) {
-    return `Epic ${epicId}: ${readinessState} (${prepSegment}; ${chainSegment}; blocked=${blockedChains.join(', ')})`;
-  }
+  const segments = [prepSegment, chainSegment];
+  if (blockedChains.length > 0) segments.push(`blocked=${blockedChains.join(', ')}`);
+  if (failedChains.length > 0) segments.push(`failed=${failedChains.join(', ')}`);
 
-  return `Epic ${epicId}: ${readinessState} (${prepSegment}; ${chainSegment})`;
+  return `Epic ${epicId}: ${stateSegment} (${segments.join('; ')})`;
 }
 
 export function evaluateEpicReadinessSummary(input: {
@@ -252,12 +220,12 @@ export function evaluateEpicReadinessSummary(input: {
 }): EpicReadinessSummary {
   const prep = evaluatePrepReadiness(input.prepJobs);
   const chains = input.chainInputs.map((chain) => evaluateChainReadiness(chain.chain_id, chain.jobs, chain.chain_root_bead_id));
-  const readinessState = toReadinessState(input.persistedState, prep, chains);
-  const nextState = toNextState(input.persistedState, readinessState);
+  const readinessState = deriveEpicReadinessState(prep, chains);
+  const nextState = deriveEpicNextState(input.persistedState, readinessState);
   const blockers = [
     ...prep.blocker_job_ids.map((jobId) => `prep:${jobId}`),
     ...chains
-      .filter((chain) => chain.state === 'pending' || chain.state === 'blocked')
+      .filter((chain) => chain.state === 'pending' || chain.state === 'blocked' || chain.state === 'failed')
       .map((chain) => `chain:${chain.chain_id}`),
   ];
 
@@ -270,7 +238,7 @@ export function evaluateEpicReadinessSummary(input: {
     prep,
     chains,
     blockers,
-    summary: buildSummaryLine(input.epicId, readinessState, prep, chains),
+    summary: buildSummaryLine(input.epicId, input.persistedState, readinessState, prep, chains),
   };
 }
 
@@ -319,7 +287,7 @@ export function loadEpicReadinessSummary(sqlite: ObservabilitySqliteClient, epic
 export function syncEpicStateFromReadiness(sqlite: ObservabilitySqliteClient, summary: EpicReadinessSummary): EpicRunRecord {
   const now = Date.now();
   const existing = sqlite.readEpicRun(summary.epic_id);
-  const healedFromFailed = summary.persisted_state === 'failed' && summary.readiness_state === 'merge_ready';
+  const recoveredFromLegacyFailure = summary.persisted_state === 'failed' && summary.readiness_state === 'merge_ready';
   const nextRecord: EpicRunRecord = {
     epic_id: summary.epic_id,
     status: summary.next_state,
@@ -334,11 +302,11 @@ export function syncEpicStateFromReadiness(sqlite: ObservabilitySqliteClient, su
       chains: summary.chains,
       summary: summary.summary,
       evaluated_at_ms: now,
-      note: healedFromFailed ? 'epic reconciler: healed failed -> merge_ready after chain merge' : undefined,
+      note: recoveredFromLegacyFailure ? 'derived readiness healed legacy failed row after live chains turned pass' : undefined,
     }),
   };
 
-  if (summary.can_transition || healedFromFailed || !existing) {
+  if (summary.can_transition || recoveredFromLegacyFailure || !existing) {
     sqlite.upsertEpicRun(nextRecord);
   }
 
