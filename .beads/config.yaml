@@ -54,3 +54,5 @@
 # - github.repo
 
 dolt.auto_push: false
+
+dolt.auto-commit: "on"
