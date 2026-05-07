@@ -300,31 +300,28 @@ bd close bd-42 --reason "Completed" --json
 - `3` - Low (polish, optimization)
 - `4` - Backlog (future ideas)
 
-## Specialists
+## Specialists (`sp` / `specialists`)
 
-MCP is intentionally minimal: only `use_specialist` is exposed. Use CLI for orchestration (`run/feed/result/steer/resume/stop`).
-Legacy `start_specialist` is deprecated and should be migrated to `specialists run <name> --prompt "..." --background` ahead of next-major removal.
+**At session start, run:**
 
-**Core specialist commands (CLI-first in pi):**
-- `specialists list`
-- `specialists run <name> --bead <id>`
-- `specialists run <name> --prompt "..."`
-- `specialists feed -f` / `specialists feed <job-id>`
-- `specialists result <job-id>`
-- `specialists resume <job-id> "next task"` (for keep-alive jobs in `waiting`)
-- `specialists stop <job-id>`
+```bash
+sp help
+```
 
-**Running specialists in background (recommended): use the process extension**
-- Tool actions: `process start`, `list`, `output`, `logs`, `kill`, `clear`
-- Example: `process start "specialists run explorer --bead unitAI-123" name="sp-explorer"`
-- Useful commands: `/ps`, `/ps:pin`, `/ps:logs`, `/ps:kill`, `/ps:clear`, `/ps:dock`, `/ps:settings`
-- Benefits: unified log dock, follow mode, focus mode, file-based logs, friendly names, auto-cleanup
+`sp help` is canonical and always current. Do not rely on memorized command lists — the command surface changes between releases. `CLAUDE.md` contains project-specific specialist context but may drift; `sp help` never does.
 
-**Canonical tracked flow**
-1. Create/claim bead issue
-2. Run specialist with `--bead <id>` (for long work, launch via `process start`)
-3. Observe progress (`process output`/`process logs` or `specialists feed`)
-4. Read final output (`specialists result <job-id>`)
-5. Close/update bead with outcome
+Also explore subcommand surfaces before using them:
 
-Add custom specialists to `.specialists/user/` to extend defaults.
+```bash
+sp run --help
+sp epic --help
+sp edit --help
+sp ps --help
+```
+
+**Key facts:**
+- MCP exposes only `use_specialist` — use CLI (`sp run`, `sp feed`, `sp result`, `sp resume`, `sp stop`, `sp edit`) for all orchestration
+- Tracked work requires `--bead <id>`; `--prompt` is for untracked one-offs only
+- Specialist configs live in `config/specialists/` (shipped) and `.specialists/user/` (overrides); use `sp edit` — not direct JSON edits — to change fields
+- `sp edit --list-presets` shows available model presets for the current install
+- `sp epic abandon <id> --reason "..."` exists and closes stale epics (not listed in `sp epic --help` but works)
