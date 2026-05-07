@@ -95,10 +95,11 @@ function createStatus(options: {
   chainRootBeadId: string;
   epicId: string;
   worktreePath: string;
+  specialist?: SupervisorStatus['specialist'];
 }): SupervisorStatus {
   return {
     id: options.id,
-    specialist: 'executor',
+    specialist: options.specialist ?? 'executor',
     status: options.status,
     started_at_ms: options.startedAtMs,
     bead_id: options.beadId,
@@ -114,11 +115,14 @@ function createStatus(options: {
 describe('integration: epic and merge CLI', () => {
   let tempDir = '';
   let binDir = '';
+  let originalCwd = process.cwd();
 
   beforeEach(async () => {
+    originalCwd = process.cwd();
     tempDir = await mkdtemp(join(tmpdir(), 'sp-epic-integration-'));
     binDir = await mkdtemp(join(tmpdir(), 'sp-epic-bin-'));
     await initRepo(tempDir);
+    process.chdir(tempDir);
 
     const baseBranch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: tempDir, encoding: 'utf-8' }).trim();
     await createBranchCommit(tempDir, baseBranch, 'feature/chain-b', 'b.txt');
@@ -128,6 +132,7 @@ describe('integration: epic and merge CLI', () => {
     execSync(`git worktree add ${join(tempDir, '.worktrees', 'chain-b')} feature/chain-b`, { cwd: tempDir, stdio: 'ignore' });
 
     await mkdir(join(tempDir, '.specialists', 'jobs', 'job-chain-a'), { recursive: true });
+    await mkdir(join(tempDir, '.specialists', 'jobs', 'job-chain-a-review'), { recursive: true });
     await mkdir(join(tempDir, '.specialists', 'jobs', 'job-chain-b'), { recursive: true });
 
     await writeFile(
@@ -139,6 +144,24 @@ describe('integration: epic and merge CLI', () => {
         branch: 'feature/chain-a',
         worktree_path: join(tempDir, '.worktrees', 'chain-a'),
         started_at_ms: 2,
+      }),
+      'utf-8',
+    );
+
+    await writeFile(
+      join(tempDir, '.specialists', 'jobs', 'job-chain-a-review', 'status.json'),
+      JSON.stringify({
+        id: 'job-chain-a-review',
+        bead_id: 'unitAI-chain-a',
+        status: 'done',
+        branch: 'feature/chain-a',
+        worktree_path: join(tempDir, '.worktrees', 'chain-a'),
+        started_at_ms: 3,
+        specialist: 'reviewer',
+        chain_id: 'chain-a',
+        chain_root_job_id: 'job-chain-a',
+        chain_root_bead_id: 'unitAI-chain-a',
+        epic_id: 'unitAI-epic1',
       }),
       'utf-8',
     );
@@ -202,6 +225,21 @@ describe('integration: epic and merge CLI', () => {
     }));
 
     sqlite.upsertStatus(createStatus({
+      id: 'job-chain-a-review',
+      beadId: 'unitAI-chain-a',
+      branch: 'feature/chain-a',
+      status: 'done',
+      startedAtMs: now + 1,
+      chainId: 'chain-a',
+      chainRootJobId: 'job-chain-a',
+      chainRootBeadId: 'unitAI-chain-a',
+      epicId: 'unitAI-epic1',
+      worktreePath: join(tempDir, '.worktrees', 'chain-a'),
+      specialist: 'reviewer',
+    }));
+    sqlite.upsertResult('job-chain-a-review', '## Compliance Verdict\n- Verdict: PASS');
+
+    sqlite.upsertStatus(createStatus({
       id: 'job-chain-b',
       beadId: 'unitAI-chain-b',
       branch: 'feature/chain-b',
@@ -227,6 +265,7 @@ describe('integration: epic and merge CLI', () => {
     if (binDir) {
       await rm(binDir, { recursive: true, force: true });
     }
+    process.chdir(originalCwd);
   });
 
   it('epic list/status/resolve produce operator-readable and JSON output', () => {
@@ -262,15 +301,14 @@ describe('integration: epic and merge CLI', () => {
     expect(statusPayload.chains.map((chain) => chain.chain_id)).toEqual(expect.arrayContaining(['chain-a', 'chain-b']));
   });
 
-  it('sp merge <chain> refuses bypass when chain belongs to unresolved epic', () => {
+  it('sp merge <chain> publishes PASS chain inside active epic', () => {
     const pathPrefix = `${binDir}:${process.env.PATH ?? ''}`;
 
     const result = runCli(tempDir, ['merge', 'unitAI-chain-a'], { PATH: pathPrefix });
 
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain('unresolved epic unitAI-epic1');
-    expect(result.stderr).toContain('sp epic merge unitAI-epic1');
-    expect(result.stderr).toContain('sp epic status unitAI-epic1');
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('Publication successful.');
+    expect(result.stderr).not.toContain('unresolved epic');
   });
 
   it('sp epic merge publishes chains in dependency order and persists merged lifecycle state', async () => {

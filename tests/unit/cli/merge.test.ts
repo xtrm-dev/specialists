@@ -12,6 +12,7 @@ vi.mock('node:child_process', () => ({
 
 import { spawnSync } from 'node:child_process';
 import * as observabilitySqlite from '../../../src/specialist/observability-sqlite.js';
+import * as epicReadiness from '../../../src/specialist/epic-readiness.js';
 import { evaluateMergeWorthiness, resolveChainEpicMembership, resolveMergeTargets, topologicallySortChains, run, checkEpicUnresolvedGuard, runMergePlan } from '../../../src/cli/merge.js';
 
 function asSpawnResult(partial: Partial<SpawnSyncReturns<string>>): SpawnSyncReturns<string> {
@@ -327,7 +328,7 @@ describe('merge CLI', () => {
       expect(result.epicId).toBeUndefined();
     });
 
-    it('blocks merge for chains owned by unresolved epic (open)', () => {
+    it('allows merge for PASS chain inside unresolved epic', () => {
       const sqliteClient = {
         resolveEpicByChainRootBeadId: vi.fn().mockReturnValue({ epic_id: 'unitAI-epic-open', chain_id: 'chain-1' }),
         readEpicRun: vi.fn().mockReturnValue({
@@ -337,17 +338,26 @@ describe('merge CLI', () => {
           updated_at_ms: 1000,
         } as EpicRunRecord),
         listStatuses: vi.fn().mockReturnValue([]),
+        listEpicChains: vi.fn().mockReturnValue([{ chain_id: 'chain-1', chain_root_bead_id: 'unitAI-chain-open' }]),
         close: vi.fn(),
       };
       vi.spyOn(observabilitySqlite, 'createObservabilitySqliteClient').mockReturnValue(sqliteClient as never);
+      vi.spyOn(epicReadiness, 'loadEpicReadinessSummary').mockReturnValue({
+        epic_id: 'unitAI-epic-open',
+        persisted_state: 'open',
+        readiness_state: 'merge_ready',
+        next_state: 'merge_ready',
+        can_transition: true,
+        prep: { done: 0, running: 0, failed: 0, total: 0, blocker_job_ids: [] },
+        chains: [{ chain_id: 'chain-1', chain_root_bead_id: 'unitAI-chain-open', state: 'pass', reviewer_verdict: 'pass', has_active_jobs: false, job_ids: [] }],
+        blockers: [],
+        summary: 'Epic unitAI-epic-open: open -> merge_ready',
+      } as never);
 
       const result = checkEpicUnresolvedGuard('unitAI-chain-open');
-      expect(result.blocked).toBe(true);
+      expect(result.blocked).toBe(false);
       expect(result.epicId).toBe('unitAI-epic-open');
       expect(result.epicStatus).toBe('open');
-      expect(result.message).toContain("Chain unitAI-chain-open belongs to unresolved epic unitAI-epic-open");
-      expect(result.message).toContain('sp epic merge unitAI-epic-open');
-      expect(result.message).toContain('sp epic status unitAI-epic-open');
     });
 
     it('blocks merge for chains owned by resolving epic', () => {
@@ -360,6 +370,7 @@ describe('merge CLI', () => {
           updated_at_ms: 1000,
         } as EpicRunRecord),
         listStatuses: vi.fn().mockReturnValue([]),
+        listEpicChains: vi.fn().mockReturnValue([{ chain_id: 'chain-2', chain_root_bead_id: 'unitAI-chain-resolving' }]),
         close: vi.fn(),
       };
       vi.spyOn(observabilitySqlite, 'createObservabilitySqliteClient').mockReturnValue(sqliteClient as never);
@@ -379,6 +390,7 @@ describe('merge CLI', () => {
           updated_at_ms: 1000,
         } as EpicRunRecord),
         listStatuses: vi.fn().mockReturnValue([]),
+        listEpicChains: vi.fn().mockReturnValue([{ chain_id: 'chain-2', chain_root_bead_id: 'unitAI-chain-resolving' }]),
         close: vi.fn(),
       };
       vi.spyOn(observabilitySqlite, 'createObservabilitySqliteClient').mockReturnValue(sqliteClient as never);
@@ -398,6 +410,7 @@ describe('merge CLI', () => {
           updated_at_ms: 1000,
         } as EpicRunRecord),
         listStatuses: vi.fn().mockReturnValue([]),
+        listEpicChains: vi.fn().mockReturnValue([{ chain_id: 'chain-2', chain_root_bead_id: 'unitAI-chain-resolving' }]),
         close: vi.fn(),
       };
       vi.spyOn(observabilitySqlite, 'createObservabilitySqliteClient').mockReturnValue(sqliteClient as never);
@@ -418,6 +431,7 @@ describe('merge CLI', () => {
           updated_at_ms: 1000,
         } as EpicRunRecord),
         listStatuses: vi.fn().mockReturnValue([]),
+        listEpicChains: vi.fn().mockReturnValue([{ chain_id: 'chain-2', chain_root_bead_id: 'unitAI-chain-resolving' }]),
         close: vi.fn(),
       };
       vi.spyOn(observabilitySqlite, 'createObservabilitySqliteClient').mockReturnValue(sqliteClient as never);
@@ -458,7 +472,7 @@ describe('merge CLI', () => {
       const result = checkEpicUnresolvedGuard('unitAI-chain');
       expect(result.blocked).toBe(false);
       expect(result.epicId).toBe('unitAI-epic-migration');
-      expect(result.message).toContain('Warning: unable to verify epic unitAI-epic-migration status');
+      expect(result.message).toContain('Warning: unable to verify epic unitAI-epic-migration readiness');
     });
 
     it('allows merge with warning when epic has no run record', () => {
@@ -476,7 +490,7 @@ describe('merge CLI', () => {
     });
   });
 
-  it('throws on merge attempt for chain owned by unresolved epic', () => {
+  it('throws on merge attempt for non-PASS chain inside unresolved epic', () => {
     mkdirSync(join(testRoot, '.specialists', 'jobs', 'job-1'), { recursive: true });
     writeFileSync(
       join(testRoot, '.specialists', 'jobs', 'job-1', 'status.json'),
@@ -505,6 +519,17 @@ describe('merge CLI', () => {
       close: vi.fn(),
     };
     vi.spyOn(observabilitySqlite, 'createObservabilitySqliteClient').mockReturnValue(sqliteClient as never);
+    vi.spyOn(epicReadiness, 'loadEpicReadinessSummary').mockReturnValue({
+      epic_id: 'unitAI-epic-open',
+      persisted_state: 'open',
+      readiness_state: 'blocked',
+      next_state: 'open',
+      can_transition: false,
+      prep: { done: 0, running: 0, failed: 0, total: 0, blocker_job_ids: [] },
+      chains: [{ chain_id: 'chain-1', chain_root_bead_id: 'unitAI-chain-blocked', state: 'blocked', reviewer_verdict: 'missing', blocking_reason: 'No terminal reviewer verdict found (PASS/PARTIAL/FAIL).', has_active_jobs: false, job_ids: [] }],
+      blockers: ['chain:chain-1'],
+      summary: 'Epic unitAI-epic-open: open -> blocked',
+    } as never);
 
     (spawnSync as unknown as ReturnType<typeof vi.fn>).mockImplementation((command: string, args: string[]) => {
       if (command === 'git' && args[0] === 'rev-parse' && args.includes('--abbrev-ref')) {
@@ -520,7 +545,7 @@ describe('merge CLI', () => {
     });
 
     expect(() => resolveMergeTargets('unitAI-chain-blocked')).toThrow(
-      /Chain unitAI-chain-blocked belongs to unresolved epic unitAI-epic-open/,
+      /blocked by derived readiness: No terminal reviewer verdict found \(PASS\/PARTIAL\/FAIL\)\./,
     );
   });
 });

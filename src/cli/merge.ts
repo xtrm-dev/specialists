@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createObservabilitySqliteClient } from '../specialist/observability-sqlite.js';
+import { loadEpicReadinessSummary } from '../specialist/epic-readiness.js';
 import { syncEpicState } from '../specialist/epic-reconciler.js';
 import { isEpicUnresolvedState, type EpicState } from '../specialist/epic-lifecycle.js';
 
@@ -264,18 +265,16 @@ export function checkEpicUnresolvedGuard(chainRootBeadId: string): EpicGuardResu
 
   const sqliteClient = createObservabilitySqliteClient();
   if (!sqliteClient) {
-    // SQLite unavailable during migration/fallback: allow merge but warn
     return {
       blocked: false,
       epicId: membership.epicId,
-      message: `Warning: unable to verify epic ${membership.epicId} status (observability DB unavailable). Proceeding with chain merge.`,
+      message: `Warning: unable to verify epic ${membership.epicId} readiness (observability DB unavailable). Proceeding with chain merge.`,
     };
   }
 
   try {
     const epicRun = sqliteClient.readEpicRun(membership.epicId);
     if (!epicRun) {
-      // Epic metadata missing during migration: allow merge but warn
       return {
         blocked: false,
         epicId: membership.epicId,
@@ -285,16 +284,30 @@ export function checkEpicUnresolvedGuard(chainRootBeadId: string): EpicGuardResu
 
     const status = epicRun.status as EpicState;
     if (!isEpicUnresolvedState(status)) {
-      // Epic is terminal (merged, failed, abandoned): allow chain merge
       return { blocked: false, epicId: membership.epicId, epicStatus: status };
     }
 
-    // Epic is unresolved: block chain merge
+    const summary = loadEpicReadinessSummary(sqliteClient, membership.epicId);
+    const chain = summary.chains.find((entry) => entry.chain_root_bead_id === chainRootBeadId || entry.chain_id === chainRootBeadId);
+
+    if (!chain) {
+      return {
+        blocked: true,
+        epicId: membership.epicId,
+        epicStatus: status,
+        message: `Chain ${chainRootBeadId} belongs to epic ${membership.epicId} but has no derived readiness record. Use 'sp epic status ${membership.epicId}' to inspect migration state.`,
+      };
+    }
+
+    if (chain.state === 'pass') {
+      return { blocked: false, epicId: membership.epicId, epicStatus: status };
+    }
+
     return {
       blocked: true,
       epicId: membership.epicId,
       epicStatus: status,
-      message: `Chain ${chainRootBeadId} belongs to unresolved epic ${membership.epicId} (status: ${status}).\nUse 'sp epic merge ${membership.epicId}' to publish all chains together, or 'sp epic status ${membership.epicId}' to inspect the epic state.`,
+      message: `Chain ${chainRootBeadId} blocked by derived readiness: ${chain.blocking_reason ?? chain.state}.\nUse 'sp epic status ${membership.epicId}' to inspect epic state.`,
     };
   } finally {
     sqliteClient.close();
