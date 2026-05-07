@@ -193,6 +193,7 @@ const MODEL_CONTEXT_WINDOWS: Array<{ matcher: (model: string) => boolean; window
 ];
 
 const TERMINAL_COMPLIANCE_VERDICT_REGEX = /## Compliance Verdict[\s\S]*?- Verdict: (PASS|PARTIAL|FAIL)/i;
+const PASS_COMPLIANCE_VERDICT_REGEX = /## Compliance Verdict[\s\S]*?- Verdict: PASS/i;
 
 function getModelContextWindow(model: string | undefined): number | undefined {
   if (!model) return undefined;
@@ -686,6 +687,31 @@ export class Supervisor {
       console.warn(`[supervisor] SQLite listLiveJobsForBead failed: ${String(error)}`);
       return [];
     }
+  }
+
+  readResult(id: string): string | null {
+    const path = this.resultPath(id);
+    if (!existsSync(path)) return null;
+    try {
+      return readFileSync(path, 'utf-8');
+    } catch {
+      return null;
+    }
+  }
+
+  finalizeWaitingJob(id: string): SupervisorStatusView | null {
+    const currentStatus = this.readStatus(id);
+    if (!currentStatus) return null;
+    if (currentStatus.status !== 'waiting') return currentStatus;
+
+    if (currentStatus.fifo_path) {
+      writeFileSync(currentStatus.fifo_path, JSON.stringify({ type: 'close' }) + '\n', { flag: 'a' });
+    }
+
+    const finalized = this.updateJobStatus(id, 'done');
+    if (!finalized) return null;
+    this.aggregateJobMetricsBestEffort(id);
+    return finalized;
   }
 
   emitMetaEvent(jobId: string, model: string, backend: string): void {
@@ -1225,6 +1251,7 @@ export class Supervisor {
     const shouldAutoCloseReadOnlyKeepAlive = (output: string): boolean => (
       isReadOnlySpecialist && TERMINAL_COMPLIANCE_VERDICT_REGEX.test(output)
     );
+    const shouldAutoFinalizeKeepAlive = (output: string): boolean => PASS_COMPLIANCE_VERDICT_REGEX.test(output);
 
     const shouldWriteExternalBeadNotes = runOptions.beadsWriteNotes ?? true;
     let skipFinalKeepAliveInputBeadAppend = false;
@@ -1894,6 +1921,9 @@ export class Supervisor {
 
       if (keepAliveSession) {
         if (shouldAutoCloseReadOnlyKeepAlive(finalResult.output)) {
+          await closeKeepAliveSession();
+        } else if (shouldAutoFinalizeKeepAlive(finalResult.output)) {
+          // PASS turns waiting keep-alive chain into terminal job via same close path.
           await closeKeepAliveSession();
         } else {
           // Inline bead-notes append on the waiting checkpoint so the input

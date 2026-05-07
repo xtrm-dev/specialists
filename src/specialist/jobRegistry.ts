@@ -154,6 +154,11 @@ export class JobRegistry {
     }
   }
 
+  /** Finalize a waiting keep-alive session through same terminal path. */
+  async finalize(id: string): Promise<{ ok: boolean; error?: string }> {
+    return this.closeSession(id);
+  }
+
   /** Send a mid-run steering message to the Pi agent for this job. */
   async steer(id: string, message: string): Promise<{ ok: boolean; error?: string }> {
     const job = this.jobs.get(id);

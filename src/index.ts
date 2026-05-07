@@ -845,6 +845,25 @@ async function run() {
     return handler();
   }
 
+  if (sub === 'finalize') {
+    if (wantsHelp()) {
+      console.log([
+        '',
+        'Usage: specialists finalize <job-id>',
+        '',
+        'Finalize waiting keep-alive job after reviewer PASS.',
+        'Refuses non-waiting or non-PASS jobs.',
+        '',
+        'Examples:',
+        '  specialists finalize job_a1b2c3d4',
+        '',
+      ].join('\n'));
+      return;
+    }
+    const { run: handler } = await import('./cli/finalize.js');
+    return handler();
+  }
+
   if (sub === 'attach') {
     if (wantsHelp()) {
       process.stdout.write([
@@ -939,7 +958,7 @@ async function run() {
     if (wantsHelp()) {
       console.log([
         '',
-        'Usage: specialists serve [--port <n>] [--concurrency <n>] [--shutdown-grace-ms <n>] [--project-dir <path>] [--db-path <observability.db>] [--readiness-canary off|warn|require] [--log-level off|info|debug]',
+        'Usage: specialists serve [--port <n>] [--concurrency <n>] [--shutdown-grace-ms <n>] [--project-dir <path>]',
         '',
         'HTTP wrapper for script-class specialists.',
         '',
