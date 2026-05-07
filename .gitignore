@@ -70,3 +70,4 @@ g5np-rpc-extraction/
 
 # Beads interaction log (runtime, not source)
 .beads/interactions.jsonl
+__pycache__/

@@ -81,19 +81,26 @@ Single SSOT for `sp serve` and `sp script`. This doc covers service contract, sc
 }
 ```
 
-Failure response stays `200` with `success: false`. Error types include:
+Failure response stays `200` with `success: false`. Closed `error_type` taxonomy:
 
 - `specialist_not_found`
 - `specialist_load_error`
 - `template_variable_missing`
+- `template_field_misuse` — `input.template` was the literal name of a key on `spec.prompt` (e.g. `"task_template"`, `"normalize_template"`). Pass the template body or omit the field; do not pass a key name.
 - `auth`
 - `quota`
 - `timeout`
 - `network`
 - `invalid_json`
+- `prompt_too_large`
+- `output_too_large`
 - `internal`
 
 `400` only for malformed request JSON, missing `specialist`, or unknown template name.
+
+### Reference clients
+
+A stdlib-only Python client lives at [`clients/python/`](../clients/python/). It mirrors the closed `error_type` taxonomy 1:1 and adds a single caller-side `transport` value for HTTP/socket failures. Import as `from specialists_client import SpecialistsClient, SpecialistErrorType`.
 
 ## `sp serve`
 

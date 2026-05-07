@@ -1,13 +1,11 @@
 """Reference Python client for the specialists-service HTTP API.
 
-This is the canonical adapter referenced by docs/darth-feedor-migration.md
-Phase 1 step 1. Drop it into your project (e.g. shared/specialists_client.py)
-and tweak the imports — the public API matches the migration contract.
-
-Service contract: see docs/specialists-service.md and docs/specialists-service.md
-section "CLI peer (sp script)" for the error_type taxonomy and exit codes.
-
 Stdlib-only — no external dependencies. Tested on Python 3.10+.
+
+Service contract: see `docs/specialists-service.md` for the full request/response
+shape and the closed `error_type` taxonomy. This client mirrors that taxonomy 1:1
+plus a single caller-side `transport` error_type for HTTP/socket failures before
+the service responds.
 
 Example:
     client = SpecialistsClient(base_url="http://localhost:8000")
@@ -33,7 +31,7 @@ from typing import Any
 class SpecialistErrorType(str, Enum):
     """Mirror of the closed error_type union returned by /v1/generate.
 
-    Maps 1:1 to sp script exit codes (see docs/specialists-service.md
+    Maps 1:1 to `sp script` exit codes (see docs/specialists-service.md
     "CLI peer (sp script)" section). Use this in caller code instead of
     matching raw strings — it's a stable surface.
     """
@@ -41,11 +39,13 @@ class SpecialistErrorType(str, Enum):
     SPECIALIST_NOT_FOUND = "specialist_not_found"
     SPECIALIST_LOAD_ERROR = "specialist_load_error"
     TEMPLATE_VARIABLE_MISSING = "template_variable_missing"
+    TEMPLATE_FIELD_MISUSE = "template_field_misuse"
     AUTH = "auth"
     QUOTA = "quota"
     TIMEOUT = "timeout"
     NETWORK = "network"
     INVALID_JSON = "invalid_json"
+    PROMPT_TOO_LARGE = "prompt_too_large"
     OUTPUT_TOO_LARGE = "output_too_large"
     INTERNAL = "internal"
     # Caller-side: HTTP transport failed before the service responded.
@@ -54,11 +54,7 @@ class SpecialistErrorType(str, Enum):
 
 @dataclass
 class SpecialistResult:
-    """Service-shaped result. `meta.trace_id` propagates into service logs.
-
-    Mirrors the legacy qwen_client return shape (success/output/error/error_type/attempts)
-    plus parsed_json and meta for service-specific metadata.
-    """
+    """Service-shaped result. `meta.trace_id` propagates into service logs."""
 
     success: bool
     output: str | None = None
@@ -90,9 +86,8 @@ class SpecialistResult:
 class SpecialistsClient:
     """HTTP client for specialists-service POST /v1/generate.
 
-    Service-shaped public API — call sites change in a minimal way from
-    the legacy qwen_client / SpecialistLoader path. No retries: caller owns
-    retry policy (the service intentionally does not retry).
+    Service-shaped public API. No retries: caller owns retry policy
+    (the service intentionally does not retry).
     """
 
     def __init__(self, base_url: str = "http://localhost:8000", default_timeout_ms: int = 60_000) -> None:
@@ -111,12 +106,13 @@ class SpecialistsClient:
 
         Default behavior: the spec's `prompt.task_template` is rendered with
         `$varname` substitution from `variables`. To use a multi-stage
-        specialist (e.g. analyst initial + normalize pass), ship two specs
-        and call each by name — there is no in-spec alternate-template
-        lookup.
+        specialist, ship two specs and call each by name — there is no
+        in-spec alternate-template lookup.
 
-        `template` overrides the rendered template text directly for this
-        call only. Most callers leave it None and rely on the spec.
+        `template` overrides the rendered template body for this call only.
+        Most callers leave it None and rely on the spec. Do NOT pass a spec
+        key name (e.g. "task_template", "normalize_template") — the service
+        returns `template_field_misuse` for that pattern.
 
         `timeout_ms` overrides the service-side timeout for this call only.
         Caller-side socket timeout is set to `timeout_ms + 5_000` so the
