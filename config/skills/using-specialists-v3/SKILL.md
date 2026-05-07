@@ -72,6 +72,88 @@ sp edit --all --get specialist.execution.model
 - Bulk cross-specialist reads → `sp edit --all --get <path>`
 - Available presets → `sp edit --list-presets` (do not hardcode; varies by install)
 
+## Orchestration Discipline (Paranoid Mode)
+
+You are an orchestrator, not a hero. Move slowly enough to be correct.
+
+- Run `specialists list --full` and `sp help` again at the start of every new substantial task. Do not skip because "you remember." Roles, models, and flags drift between sessions.
+- Re-read the bead before dispatch. If you cannot defend each contract field out loud, the bead is not ready.
+- Never dispatch a chain you cannot describe end-to-end (which specialist, which bead, which workspace, which merge target).
+- Verify worktree and job state before and after each dispatch with `sp ps` and `git worktree list`. Drift is silent until merge.
+- Treat reviewer `PARTIAL` and code-sanity `FINDINGS` as mandatory fix loops, not advisory noise.
+- When unsure, prefer extra explorer/debugger passes over an over-eager executor. Wrong code merged is more expensive than slow research.
+
+## Project-Specific Specialists
+
+Users define their own specialists in `.specialists/user/*.specialist.json` to fit project shape (domain knowledge, language, framework, conventions). These override package defaults and may not match generic role descriptions.
+
+- Always run `specialists list --full` to see the resolved set, including project-specific roles, before choosing.
+- Read `sp help` and the specialist's description/tags to confirm fit. Do not assume a name maps to its package-default behavior — a `.specialists/user/` override may have a different prompt, model, or scope.
+- Pick the project-specific specialist when its role matches the task shape. Do not fall back to a generic role just because it is more familiar.
+- If the task does not match any project-specific role, use the package default and consider whether a new project-specific specialist would help (use `specialists-creator` skill).
+
+## Security-Auditor and Code-Sanity Are Part of the Chain
+
+These are not optional. For any substantive diff (auth, secrets, input handling, dependency changes, control-flow rewrites, type-risky changes, agent/config surfaces), include them between executor and reviewer.
+
+- `code-sanity` — cheap simplification and type-safety screen. Run when diff smells overcomplicated, brittle, or duplicates logic. Output is advisory; reviewer still gates merge.
+- `security-auditor` — scan-only risk surface review. Run when diff touches auth, secrets, input handling, dependency logic, or agent/config. Output is advisory; executor applies fixes if any.
+- Both run with their own bead and `--job <exec-job>` so they enter the executor workspace.
+- Order: executor → code-sanity (if smell) → security-auditor (if risk surface) → reviewer.
+- Never skip security-auditor on auth/secrets/input changes "because the diff looks small." Small diffs hide the worst regressions.
+
+## Monitoring Long-Running Jobs: Sleep Timers Are Mandatory
+
+Specialists run async. You will lose the chain if you do not actively monitor it.
+
+**Required pattern after every dispatch:**
+
+```bash
+sp run <role> --bead <id> --background ...   # dispatch
+sleep 10 && sp ps                             # confirm started
+```
+
+Then cycle sleeps based on average completion time per role, checking `sp ps` each cycle:
+
+| Role | Typical duration | Initial sleep cycle |
+|------|------------------|---------------------|
+| sync-docs, changelog-keeper | 60–180s | `sleep 60` then `sleep 60` |
+| code-sanity, security-auditor | 60–180s | `sleep 60` then `sleep 60` |
+| reviewer | 90–240s | `sleep 90` then `sleep 60` |
+| explorer, debugger, planner, overthinker | 120–300s | `sleep 120` then `sleep 90` |
+| executor | 180–600s+ | `sleep 180` then `sleep 120` |
+| test-runner | varies with suite | start at `sleep 120`, adjust |
+
+Rules:
+- After dispatch, **always** `sleep 10 && sp ps` first to confirm the job is `running`, not stuck in `queued` or already `failed`.
+- Then sleep again per the table; check `sp ps` each cycle.
+- Do not poll faster than every 30s after the initial check — it wastes context.
+- When status flips to `completed`, run `sp result <job-id>` immediately to consume output before context grows.
+- If a job exceeds 2× its typical duration without completing, inspect with `sp feed <job-id>` before assuming hang.
+
+You are not "done" until every dispatched job is `completed` or `failed` and consumed.
+
+## Worktree Cleanup After Merge
+
+`sp merge` and `sp epic merge` clean up automatically when they succeed. If you fall back to manual `git merge` (e.g., doc-only chains), you own cleanup.
+
+After every merge, verify:
+
+```bash
+git worktree list                 # any orphaned worktrees from this session?
+sp ps                             # any leftover jobs?
+git worktree prune                # drop stale worktree metadata
+```
+
+If a feature/epic worktree remains after merge, remove it explicitly:
+
+```bash
+git worktree remove <path>
+git branch -d <merged-branch>     # only after confirming merged
+```
+
+`sp ps` must be empty (or only contain jobs you intentionally kept alive) before session close. Stale worktrees and stale jobs both block future dispatches via the stale-base guard.
+
 ## When To Delegate
 
 Use specialists for substantial work: codebase exploration, debugging, implementation, review, test execution, planning, documentation sync, security/config audit, release publication, and multi-chain epics.
