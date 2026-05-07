@@ -36,7 +36,7 @@ describe('syncEpicState stale chain cleanup', () => {
 
     expect(result.drift.stale_chain_refs).toEqual(['chain-stale']);
     expect(result.repairs.stale_chain_refs_pruned).toEqual(['chain-stale']);
-    expect(result.readiness_before.readiness_state).toBe('resolving');
+    expect(result.readiness_before.readiness_state).toBe('blocked');
     expect(result.readiness_after.readiness_state).toBe('merge_ready');
     expect(epicRun.status).toBe('merge_ready');
   });
@@ -109,7 +109,7 @@ describe('abandonEpic state recovery', () => {
     expect(result.readiness_before.readiness_state).toBe('merge_ready');
     expect(result.readiness_after.persisted_state).toBe('merge_ready');
     expect(epicRun.status).toBe('merge_ready');
-    expect(epicRun.status_json).toContain('healed failed -> merge_ready');
+    expect(epicRun.status_json).toContain('derived readiness healed legacy failed row');
   });
 
   it('refuses to abandon a merged epic', () => {
