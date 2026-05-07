@@ -105,6 +105,7 @@ bv --robot-triage --format toon  # Token-optimized output for lower context usag
 | Command | Returns |
 |---------|---------|
 | `--robot-plan` | Parallel execution tracks with unblocks lists |
+| `--robot-priority` | Priority misalignment detection |
 | `--robot-insights` | PageRank, betweenness, HITS, cycles, critical path |
 | `--robot-forecast <id\|all>` | ETA predictions with dependency-aware scheduling |
 | `--robot-alerts` | Stale issues, blocking cascades, priority mismatches |

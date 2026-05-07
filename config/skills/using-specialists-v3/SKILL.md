@@ -14,6 +14,64 @@ You are the orchestrator. Turn user intent into a strong bead contract, choose r
 
 Keep skill practical. Core behavior belongs here; volatile detail stays in live commands.
 
+> **MANDATORY — Run on skill load and before every new substantial task or epic:**
+> ```bash
+> specialists list --full
+> ```
+> Do not rely on remembered roles, models, or permissions. The registry is the source of truth.
+> Run it again before dispatching any new chain or starting any epic — specialists change between sessions.
+
+## Specialist File Locations
+
+Specialists live in two layers. Know which layer you are reading or editing:
+
+| Layer | Path | Purpose |
+|-------|------|---------|
+| Package (shipped) | `config/specialists/*.specialist.json` | Canonical role definitions; versioned with the repo |
+| User override | `.specialists/user/*.specialist.json` | Per-project customizations; wins over package layer for same name |
+| Default mirror | `.specialists/default/*.specialist.json` | Repo-managed mirror of package defaults; overrides package fallback |
+
+The loader resolves in priority order: user → default-mirror → package. A same-name file in `.specialists/user/` fully replaces the package version for that specialist. When creating or editing a specialist, use `config/specialists/` for shipped roles and `.specialists/user/` for project-specific overrides. Never edit `.specialists/default/` by hand — it is managed by `update-specialists`.
+
+`specialists list --full` shows the resolved set (which layer each specialist comes from) so you always know what will actually run.
+
+### Editing Specialist Fields: `sp edit` Is Required
+
+Direct JSON editing is error-prone and bypasses schema validation. Use `sp edit` for all field changes — it validates dot-paths, handles array append/remove, and writes to the correct layer.
+
+```bash
+# Read a field
+sp edit executor --get specialist.execution.model
+
+# Set a field (schema-validated)
+sp edit executor specialist.execution.model <model-id>
+
+# Set prompt.system or task_template from a file (required for multi-line content)
+sp edit executor --set specialist.prompt.system _ --file ./my-system-prompt.txt
+
+# Append or remove tags
+sp edit executor --set specialist.metadata.tags review,security --append
+sp edit executor --set specialist.metadata.tags old-tag --remove
+
+# Apply a named preset (run sp edit --list-presets for current options)
+sp edit executor --preset power
+sp edit executor --preset cheap --dry-run   # preview first
+
+# Target a specific scope when name exists in multiple layers
+sp edit executor --scope user --set specialist.execution.model <model-id>
+
+# Bulk read across all specialists
+sp edit --all --get specialist.execution.model
+```
+
+**When `sp edit` is required vs. direct JSON edit:**
+- Model, thinking level, timeout, tags, permission, description → always `sp edit`
+- `prompt.system` or `task_template` longer than one line → `sp edit --file`
+- Structural schema fields (execution flags, output_schema) → `sp edit` with dot-path
+- Net-new specialist creation → `specialists-creator` skill, then `sp edit` for tuning
+- Bulk cross-specialist reads → `sp edit --all --get <path>`
+- Available presets → `sp edit --list-presets` (do not hardcode; varies by install)
+
 ## When To Delegate
 
 Use specialists for substantial work: codebase exploration, debugging, implementation, review, test execution, planning, documentation sync, security/config audit, release publication, and multi-chain epics.
