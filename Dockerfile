@@ -35,5 +35,12 @@ LABEL org.specialists.uid="10001"
 
 USER specialists:specialists
 WORKDIR /work
+
+# Default healthcheck targets the default --port 8000. If a deploy overrides the
+# port via CMD or compose `command:`, override this with a compose-level
+# `healthcheck:` block. node is on PATH from the bun:slim base; no curl/wget.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:8000/healthz').then(r=>r.ok?process.exit(0):process.exit(1)).catch(()=>process.exit(1))"]
+
 ENTRYPOINT ["sp", "serve"]
 CMD ["--port", "8000"]

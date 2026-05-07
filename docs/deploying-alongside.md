@@ -68,16 +68,8 @@ services:
       - ${HOME}/.pi:/pi-home/.pi:ro       # ro — pi auth + models.json
     networks:
       - merc                              # your existing network
-    healthcheck:
-      test:
-        - "CMD"
-        - "node"
-        - "-e"
-        - "fetch('http://127.0.0.1:8000/healthz').then(r=>r.ok?process.exit(0):process.exit(1)).catch(()=>process.exit(1))"
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
+    # Healthcheck is baked into the image (port 8000 default). Only declare a
+    # compose-level `healthcheck:` block when you override the listen port.
     deploy:
       resources:
         limits:
@@ -140,7 +132,7 @@ Symptom → cause → fix.
 | Sibling container can't resolve `specialists-service` hostname | Sibling is not on the same network | Both services must be on the same `networks:` entry |
 | `.specialists/db/observability.db-wal` and `-shm` files appear but the service crashes | SQLite is on a remote filesystem that breaks fcntl locking | Move `.specialists/db/` to a local-disk path |
 | Build fails with `npm` errors during `pi` install | Network restrictions during build | Use `--network=host` on the build, or pre-pull a published `pi` version via `--build-arg PI_VERSION=<tag>` |
-| Healthcheck never passes despite `serve listening` log | `node` not on PATH inside the runtime image | The supplied image has node; if you customized the base, add `apt install nodejs` |
+| Healthcheck never passes despite `serve listening` log | Compose-level `healthcheck:` block uses `wget`/`curl` (not in image) and overrides the baked-in node-fetch healthcheck | Remove the compose-level block — image bakes one in. Only override when you change the listen port. |
 
 ## Rootless Podman / Fedora / SELinux
 

@@ -18,6 +18,8 @@ services:
       - ${HOME}/.pi:/pi-home/.pi:ro
     working_dir: /work
     command: ["--port", "8000"]
+    # Healthcheck is baked into the image (port 8000). Override only when you
+    # change the listen port via `command:`.
     networks:
       - app
     restart: unless-stopped
