@@ -12,6 +12,7 @@ export type ScriptSpecialistErrorType =
   | 'specialist_not_found'
   | 'specialist_load_error'
   | 'template_variable_missing'
+  | 'template_field_misuse'
   | 'auth'
   | 'quota'
   | 'timeout'
@@ -353,6 +354,24 @@ function resolveScriptSpecialistName(name: string): string {
   return name;
 }
 
+const TEMPLATE_FIELD_MISUSE_MAX_LEN = 30;
+const TEMPLATE_FIELD_IDENTIFIER_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+
+/**
+ * Detects when `input.template` looks like a spec field name (e.g. "task_template",
+ * "normalize_template") instead of an actual template body. This catches the
+ * production bug where a consumer passes the key name expecting the service to
+ * dereference it on `spec.prompt`. Returns the offending field name when misused,
+ * or null otherwise.
+ */
+export function detectTemplateFieldMisuse(template: string, specPrompt: Record<string, unknown> | null | undefined): string | null {
+  if (!specPrompt) return null;
+  if (template.length > TEMPLATE_FIELD_MISUSE_MAX_LEN) return null;
+  if (!TEMPLATE_FIELD_IDENTIFIER_RE.test(template)) return null;
+  if (!Object.prototype.hasOwnProperty.call(specPrompt, template)) return null;
+  return template;
+}
+
 export async function runScriptSpecialist(input: ScriptGenerateRequest, options: ScriptRunnerOptions): Promise<ScriptGenerateResult> {
   const traceId = randomUUID();
   const startedAt = Date.now();
@@ -364,6 +383,25 @@ export async function runScriptSpecialist(input: ScriptGenerateRequest, options:
     const skillSources = options.trust?.allowSkills ? computeSkillSources(spec) : undefined;
 
     const template = input.template ?? spec.specialist.prompt.task_template;
+    if (input.template !== undefined) {
+      const misusedField = detectTemplateFieldMisuse(input.template, spec.specialist.prompt as Record<string, unknown>);
+      if (misusedField !== null) {
+        const modelCandidates = collectModelCandidates(input, spec, options);
+        return {
+          success: false,
+          error: `template field misuse: input.template equals spec.prompt.${misusedField} key name (${input.template.length} chars). The 'template' input field expects the literal template body, not a spec key. To use the spec's default, omit 'template'; to use a non-default template body, pass its full text inline.`,
+          error_type: 'template_field_misuse',
+          meta: {
+            specialist: resolvedSpecialist,
+            requested_specialist: input.requested_specialist ?? input.specialist,
+            resolved_specialist: resolvedSpecialist,
+            model: modelCandidates[0],
+            duration_ms: Date.now() - startedAt,
+            trace_id: traceId,
+          },
+        };
+      }
+    }
     const prompt = applyOutputContract(renderTaskTemplate(template, input.variables ?? {}), spec);
     const modelCandidates = collectModelCandidates(input, spec, options);
     const promptLimitBytes = resolvePromptLimitBytes(spec);

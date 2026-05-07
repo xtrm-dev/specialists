@@ -9291,6 +9291,19 @@ function resolveScriptSpecialistName(name) {
     return "changelog-drafter";
   return name;
 }
+var TEMPLATE_FIELD_MISUSE_MAX_LEN = 30;
+var TEMPLATE_FIELD_IDENTIFIER_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+function detectTemplateFieldMisuse(template, specPrompt) {
+  if (!specPrompt)
+    return null;
+  if (template.length > TEMPLATE_FIELD_MISUSE_MAX_LEN)
+    return null;
+  if (!TEMPLATE_FIELD_IDENTIFIER_RE.test(template))
+    return null;
+  if (!Object.prototype.hasOwnProperty.call(specPrompt, template))
+    return null;
+  return template;
+}
 async function runScriptSpecialist(input, options) {
   const traceId = randomUUID();
   const startedAt = Date.now();
@@ -9301,6 +9314,25 @@ async function runScriptSpecialist(input, options) {
     const skillPaths = options.trust?.allowSkills ? collectSkillPaths(spec) : [];
     const skillSources = options.trust?.allowSkills ? computeSkillSources(spec) : undefined;
     const template = input.template ?? spec.specialist.prompt.task_template;
+    if (input.template !== undefined) {
+      const misusedField = detectTemplateFieldMisuse(input.template, spec.specialist.prompt);
+      if (misusedField !== null) {
+        const modelCandidates2 = collectModelCandidates(input, spec, options);
+        return {
+          success: false,
+          error: `template field misuse: input.template equals spec.prompt.${misusedField} key name (${input.template.length} chars). The 'template' input field expects the literal template body, not a spec key. To use the spec's default, omit 'template'; to use a non-default template body, pass its full text inline.`,
+          error_type: "template_field_misuse",
+          meta: {
+            specialist: resolvedSpecialist,
+            requested_specialist: input.requested_specialist ?? input.specialist,
+            resolved_specialist: resolvedSpecialist,
+            model: modelCandidates2[0],
+            duration_ms: Date.now() - startedAt,
+            trace_id: traceId
+          }
+        };
+      }
+    }
     const prompt = applyOutputContract(renderTaskTemplate(template, input.variables ?? {}), spec);
     const modelCandidates = collectModelCandidates(input, spec, options);
     const promptLimitBytes = resolvePromptLimitBytes(spec);

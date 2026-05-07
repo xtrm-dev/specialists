@@ -1,7 +1,7 @@
 import { type ChildProcess } from 'node:child_process';
 import { SpecialistLoader } from './loader.js';
 import type { Specialist } from './schema.js';
-export type ScriptSpecialistErrorType = 'specialist_not_found' | 'specialist_load_error' | 'template_variable_missing' | 'auth' | 'quota' | 'timeout' | 'network' | 'invalid_json' | 'prompt_too_large' | 'output_too_large' | 'internal';
+export type ScriptSpecialistErrorType = 'specialist_not_found' | 'specialist_load_error' | 'template_variable_missing' | 'template_field_misuse' | 'auth' | 'quota' | 'timeout' | 'network' | 'invalid_json' | 'prompt_too_large' | 'output_too_large' | 'internal';
 export interface ScriptGenerateRequest {
     specialist: string;
     requested_specialist?: string;
@@ -72,6 +72,14 @@ export declare const DEFAULT_STDERR_LIMIT_BYTES: number;
 export declare const DEFAULT_PROMPT_LIMIT_BYTES: number;
 export declare function resolvePromptLimitBytes(spec: Specialist): number;
 export declare function resolveAssistantTextLimitBytes(spec: Specialist): number;
+/**
+ * Detects when `input.template` looks like a spec field name (e.g. "task_template",
+ * "normalize_template") instead of an actual template body. This catches the
+ * production bug where a consumer passes the key name expecting the service to
+ * dereference it on `spec.prompt`. Returns the offending field name when misused,
+ * or null otherwise.
+ */
+export declare function detectTemplateFieldMisuse(template: string, specPrompt: Record<string, unknown> | null | undefined): string | null;
 export declare function runScriptSpecialist(input: ScriptGenerateRequest, options: ScriptRunnerOptions): Promise<ScriptGenerateResult>;
 export declare function collectModelCandidates(input: ScriptGenerateRequest, spec: Specialist, options: ScriptRunnerOptions): string[];
 type AttemptFailureReason = 'assistant_text_too_large' | 'stderr_too_large' | 'malformed_line_too_large';

@@ -8,6 +8,7 @@ import {
   collectModelCandidates,
   classifyAttempt,
   compatGuard,
+  detectTemplateFieldMisuse,
   isRetryableModelFailure,
   renderTaskTemplate,
   resolveAssistantTextLimitBytes,
@@ -120,6 +121,36 @@ describe('template render', () => {
   });
 });
 
+describe('detectTemplateFieldMisuse', () => {
+  const promptKeys = { task_template: 'draft $name', system: 'you are an analyst', normalize_template: 'normalize $x' };
+
+  it('flags an exact spec.prompt key name passed as the template body', () => {
+    expect(detectTemplateFieldMisuse('task_template', promptKeys)).toBe('task_template');
+    expect(detectTemplateFieldMisuse('normalize_template', promptKeys)).toBe('normalize_template');
+    expect(detectTemplateFieldMisuse('system', promptKeys)).toBe('system');
+  });
+
+  it('passes through a real template body that happens to be short', () => {
+    expect(detectTemplateFieldMisuse('Hello $name', promptKeys)).toBeNull();
+    expect(detectTemplateFieldMisuse('$prompt', promptKeys)).toBeNull();
+  });
+
+  it('passes through identifier-shaped strings that are not spec keys', () => {
+    expect(detectTemplateFieldMisuse('foo_bar', promptKeys)).toBeNull();
+    expect(detectTemplateFieldMisuse('output_schema', promptKeys)).toBeNull();
+  });
+
+  it('passes through long bodies that happen to start identifier-shaped', () => {
+    expect(detectTemplateFieldMisuse('task_template_with_a_long_explanatory_suffix', promptKeys)).toBeNull();
+  });
+
+  it('returns null when prompt object is missing or empty', () => {
+    expect(detectTemplateFieldMisuse('task_template', null)).toBeNull();
+    expect(detectTemplateFieldMisuse('task_template', undefined)).toBeNull();
+    expect(detectTemplateFieldMisuse('task_template', {})).toBeNull();
+  });
+});
+
 describe('output contract injection', () => {
   it('appends required JSON keys and schema only for JSON specialists', () => {
     const jsonSpec = {
@@ -205,6 +236,25 @@ describe('runScriptSpecialist aliasing', () => {
     expect(result).toMatchObject({ success: true });
     if (result.success) {
       expect(result.meta).toMatchObject({ specialist: 'changelog-drafter', requested_specialist: 'changelog-keeper', resolved_specialist: 'changelog-drafter' });
+    }
+  });
+});
+
+describe('runScriptSpecialist template field misuse', () => {
+  it('returns template_field_misuse error when input.template names a spec.prompt key', async () => {
+    const loader = makeLoader();
+    const result = await runScriptSpecialist(
+      { specialist: 'changelog-drafter', template: 'task_template', variables: { name: 'world' } },
+      { loader: loader as never, projectDir: '.' },
+    );
+
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      success: false,
+      error_type: 'template_field_misuse',
+    });
+    if (!result.success) {
+      expect(result.error).toContain('spec.prompt.task_template');
     }
   });
 });

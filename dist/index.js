@@ -28373,6 +28373,17 @@ function resolveScriptSpecialistName(name) {
     return "changelog-drafter";
   return name;
 }
+function detectTemplateFieldMisuse(template, specPrompt) {
+  if (!specPrompt)
+    return null;
+  if (template.length > TEMPLATE_FIELD_MISUSE_MAX_LEN)
+    return null;
+  if (!TEMPLATE_FIELD_IDENTIFIER_RE.test(template))
+    return null;
+  if (!Object.prototype.hasOwnProperty.call(specPrompt, template))
+    return null;
+  return template;
+}
 async function runScriptSpecialist(input2, options) {
   const traceId = randomUUID();
   const startedAt = Date.now();
@@ -28383,6 +28394,25 @@ async function runScriptSpecialist(input2, options) {
     const skillPaths = options.trust?.allowSkills ? collectSkillPaths(spec) : [];
     const skillSources = options.trust?.allowSkills ? computeSkillSources(spec) : undefined;
     const template = input2.template ?? spec.specialist.prompt.task_template;
+    if (input2.template !== undefined) {
+      const misusedField = detectTemplateFieldMisuse(input2.template, spec.specialist.prompt);
+      if (misusedField !== null) {
+        const modelCandidates2 = collectModelCandidates(input2, spec, options);
+        return {
+          success: false,
+          error: `template field misuse: input.template equals spec.prompt.${misusedField} key name (${input2.template.length} chars). The 'template' input field expects the literal template body, not a spec key. To use the spec's default, omit 'template'; to use a non-default template body, pass its full text inline.`,
+          error_type: "template_field_misuse",
+          meta: {
+            specialist: resolvedSpecialist,
+            requested_specialist: input2.requested_specialist ?? input2.specialist,
+            resolved_specialist: resolvedSpecialist,
+            model: modelCandidates2[0],
+            duration_ms: Date.now() - startedAt,
+            trace_id: traceId
+          }
+        };
+      }
+    }
     const prompt = applyOutputContract(renderTaskTemplate(template, input2.variables ?? {}), spec);
     const modelCandidates = collectModelCandidates(input2, spec, options);
     const promptLimitBytes = resolvePromptLimitBytes(spec);
@@ -28586,7 +28616,7 @@ function classifyAttempt(attempt) {
 function isRetryableModelFailure(stderr, text) {
   return stderr.includes("0 tokens") || stderr.includes("quota") || stderr.includes("rate limit") || stderr.includes("403") || stderr.includes("401") || stderr.includes("insufficient_quota") || !text && !stderr.trim();
 }
-var CompatGuardError, DEFAULT_PENDING_LINE_LIMIT_BYTES, DEFAULT_ASSISTANT_TEXT_LIMIT_BYTES, DEFAULT_STDERR_LIMIT_BYTES, DEFAULT_PROMPT_LIMIT_BYTES;
+var CompatGuardError, DEFAULT_PENDING_LINE_LIMIT_BYTES, DEFAULT_ASSISTANT_TEXT_LIMIT_BYTES, DEFAULT_STDERR_LIMIT_BYTES, DEFAULT_PROMPT_LIMIT_BYTES, TEMPLATE_FIELD_MISUSE_MAX_LEN = 30, TEMPLATE_FIELD_IDENTIFIER_RE;
 var init_script_runner = __esm(() => {
   init_observability_sqlite();
   CompatGuardError = class CompatGuardError extends Error {
@@ -28601,6 +28631,7 @@ var init_script_runner = __esm(() => {
   DEFAULT_ASSISTANT_TEXT_LIMIT_BYTES = 4 * 1024 * 1024;
   DEFAULT_STDERR_LIMIT_BYTES = 1 * 1024 * 1024;
   DEFAULT_PROMPT_LIMIT_BYTES = 4 * 1024 * 1024;
+  TEMPLATE_FIELD_IDENTIFIER_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 });
 
 // src/cli/validate.ts
