@@ -23,7 +23,7 @@ Keep skill practical. Core behavior belongs here; volatile detail stays in live 
 
 ## Specialist File Locations
 
-Specialists live in two layers. Know which layer you are reading or editing:
+Specialists live in three layers. Know which layer you are reading or editing:
 
 | Layer | Path | Purpose |
 |-------|------|---------|

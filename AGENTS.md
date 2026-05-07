@@ -320,7 +320,7 @@ sp ps --help
 ```
 
 **Key facts:**
-- MCP exposes only `use_specialist` — use CLI (`sp run`, `sp feed`, `sp result`, `sp resume`, `sp stop`, `sp edit`) for all orchestration
+- MCP exposes only `use_specialist` — use CLI (`sp run`, `sp feed`, `sp result`, `sp resume`, `sp steer`, `sp stop`, `sp edit`) for all orchestration (`sp steer` is the live mid-run control surface)
 - Tracked work requires `--bead <id>`; `--prompt` is for untracked one-offs only
 - Specialist configs live in `config/specialists/` (shipped) and `.specialists/user/` (overrides); use `sp edit` — not direct JSON edits — to change fields
 - `sp edit --list-presets` shows available model presets for the current install
