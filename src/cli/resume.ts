@@ -9,8 +9,8 @@ const green = (s: string) => `\x1b[32m${s}\x1b[0m`;
 const red   = (s: string) => `\x1b[31m${s}\x1b[0m`;
 
 export async function run(): Promise<void> {
-  const jobId  = process.argv[3];
-  const task   = process.argv[4];
+  const jobId = process.argv[3];
+  const task = process.argv[4];
 
   if (!jobId || !task) {
     console.error('Usage: specialists|sp resume <job-id> "<task>"');
@@ -28,16 +28,16 @@ export async function run(): Promise<void> {
       process.exit(1);
     }
 
-  if (status.status !== 'waiting') {
-    process.stderr.write(`${red('Error:')} Job ${jobId} is not in waiting state (status: ${status.status}).\n`);
-    process.stderr.write('resume is only valid for keep-alive jobs in waiting state. Use steer for running jobs.\n');
-    process.exit(1);
-  }
+    if (status.status !== 'waiting') {
+      process.stderr.write(`${red('Error:')} Job ${jobId} is already finalized (${status.status}).\n`);
+      process.stderr.write('resume only works for true waiting jobs. Finalized work is terminal; use sp ps to inspect chain state.\n');
+      process.exit(1);
+    }
 
-  if (!status.fifo_path) {
-    process.stderr.write(`${red('Error:')} Job ${jobId} has no steer pipe.\n`);
-    process.exit(1);
-  }
+    if (!status.fifo_path) {
+      process.stderr.write(`${red('Error:')} Job ${jobId} has no steer pipe.\n`);
+      process.exit(1);
+    }
 
     try {
       const payload = JSON.stringify({ type: 'resume', task }) + '\n';

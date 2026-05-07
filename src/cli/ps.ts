@@ -538,13 +538,13 @@ function statusLabel(status: JobState): string {
 }
 
 function epicStateLabel(state: EpicReadinessSummary['readiness_state'] | undefined): string {
-  if (state === 'merge_ready') return green('merge_ready');
+  if (state === 'merge_ready') return green('pass');
   if (state === 'merged') return dim('merged');
   if (state === 'failed') return red('failed');
   if (state === 'blocked') return yellow('blocked');
-  if (state === 'resolving') return cyan('resolving');
+  if (state === 'resolving') return cyan('merge_ready');
   if (state === 'abandoned') return dim('abandoned');
-  return magenta('unresolved');
+  return magenta('no pass yet');
 }
 
 function withPidLiveness(statuses: SupervisorStatus[]): Array<SupervisorStatus & { is_dead: boolean }> {
@@ -763,9 +763,9 @@ function renderHuman(jobs: SupervisorStatus[], nodes: NodeTree[], trees: Worktre
       ? `chains ${readiness.chains.filter((chain) => chain.state === 'pass').length}/${readiness.chains.length} pass`
       : `chains ${chainCount}`;
 
-    const epicBanner = bold(cyan(`┏━ EPIC ${epic.epic_id} ━ ${String(readinessState).toUpperCase()} ━ ${prepSummary} ━ ${chainSummary}`));
+    const epicBanner = bold(cyan(`┏━ EPIC ${epic.epic_id} ━ ${epicStateLabel(readiness?.readiness_state)} ━ ${prepSummary} ━ ${chainSummary}`));
     console.log(epicBanner);
-    console.log(`  ${dim(`state:${persistedState}`)} · ${epicStateLabel(readiness?.readiness_state)}`);
+    console.log(`  ${dim(`derived:${readinessState}`)} · ${dim(`stored:${persistedState}`)}`);
 
     console.log(`  ${bold('Prep')}`);
     if (epic.prep_jobs.length === 0) {
