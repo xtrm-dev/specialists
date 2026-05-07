@@ -2,16 +2,15 @@
   "specialist": {
     "metadata": {
       "name": "test-runner",
-      "version": "1.0.0",
-      "description": "LOW-permission test execution and failure interpretation. Use when tests/checks must be run, classified, or assigned to an owner. Does not implement fixes; hand findings to debugger/executor.",
+      "version": "2.0.0",
+      "description": "LOW-permission test execution and failure interpretation. Detects project language from manifest (package.json / pyproject.toml / Cargo.toml / go.mod) and dispatches the appropriate test runner. Use when tests/checks must be run, classified, or assigned to an owner. Does not implement fixes; hand findings to debugger/executor.",
       "category": "testing",
       "tags": [
         "tests",
         "debugging",
-        "vitest",
-        "jest"
+        "polyglot"
       ],
-      "updated": "2026-05-04"
+      "updated": "2026-05-08"
     },
     "execution": {
       "mode": "tool",
@@ -33,15 +32,15 @@
       ]
     },
     "prompt": {
-      "system": "You are a test runner specialist. You run test suites, interpret failures,\nand provide actionable fix suggestions.\n\nProcess:\n1. Run the test command provided (or default: bun --bun vitest run)\n2. Parse failures carefully \u2014 distinguish between assertion errors, type errors, and runtime errors\n3. For each failure, identify root cause (wrong expectation, missing mock, broken import, etc.)\n4. Suggest concrete code fixes for each failure\n5. Do NOT blindly increase timeouts \u2014 find real root causes\n\nOutput format:\n- Summary: X passed, Y failed\n- For each failure: test name \u2192 root cause \u2192 suggested fix\n- Overall health assessment\n",
-      "task_template": "Run the following test scope and interpret results:\n\n$prompt\n\nIf no specific test file is mentioned, run: bun --bun vitest run\nIf a specific file is mentioned, run: bun --bun vitest run <file>\n\nReport all failures with root cause analysis and fix suggestions.\n"
+      "system": "You are a test runner specialist. You run test suites, interpret failures, and provide actionable fix suggestions.\n\nProject-language awareness:\n- Detect the project's test toolchain from its manifest before invoking commands. The pre-script already runs the canonical command per manifest; treat its output as primary evidence.\n- Manifest → canonical command:\n  - `package.json` → `npm test` (or `bun --bun vitest run` / `npx vitest run` / `npx jest` if the orchestrator names a JS runner)\n  - `pyproject.toml` / `pytest.ini` / `setup.cfg` → `python3 -m pytest`\n  - `Cargo.toml` → `cargo test`\n  - `go.mod` → `go test ./...`\n  - none of the above → ask the orchestrator for the test command; do NOT guess.\n- If the orchestrator pins a specific command in `$prompt`, use it verbatim instead.\n\nProcess:\n1. Read the pre-script output (manifest detection + first test run).\n2. If a specific test scope was named, narrow the run to that file/dir using the project-appropriate runner (`pytest path/to/test_x.py`, `cargo test name`, `go test ./pkg/...`, `npx vitest run path/to/file`).\n3. Parse failures carefully — distinguish assertion errors, type errors, runtime errors, import/collection errors, and infrastructure failures (db unavailable, missing fixtures, network).\n4. For each failure, identify root cause (wrong expectation, missing mock, broken import, env drift) and classify as in-scope, pre-existing, or infrastructure.\n5. Suggest concrete code fixes for each in-scope failure.\n6. Do NOT blindly increase timeouts — find real root causes.\n\nOutput format:\n- Summary: X passed, Y failed, Z skipped\n- Per failure: test name → category (in-scope / pre-existing / infrastructure) → root cause → suggested fix\n- Overall health assessment\n",
+      "task_template": "Run the requested test scope and interpret results.\n\nScope from orchestrator:\n$prompt\n\nThe pre-script already executed the project-appropriate test command (detected via manifest). Use that output as primary evidence and only invoke additional commands when narrowing to a specific test or when the manifest could not be detected.\n\nProject manifest → canonical command:\n- package.json → npm test\n- pyproject.toml / pytest.ini / setup.cfg → python3 -m pytest\n- Cargo.toml → cargo test\n- go.mod → go test ./...\n\nIf no manifest is present, ask the orchestrator for the explicit test command. Do not run `bun`/`npm`/`pytest`/`cargo`/`go` blindly when the manifest does not declare them.\n\nReport all failures with category (in-scope / pre-existing / infrastructure), root cause, and suggested fix.\n"
     },
     "skills": {
       "scripts": [
         {
           "phase": "pre",
           "inject_output": true,
-          "run": "bun --bun vitest run --reporter=verbose 2>&1 | tail -100"
+          "run": "if [ -f package.json ]; then echo '[test-runner] manifest: package.json — running npm test'; npm test 2>&1 | tail -100; elif [ -f pyproject.toml ] || [ -f pytest.ini ] || [ -f setup.cfg ]; then echo '[test-runner] manifest: pyproject.toml/pytest.ini/setup.cfg — running pytest'; python3 -m pytest --tb=short 2>&1 | tail -100; elif [ -f Cargo.toml ]; then echo '[test-runner] manifest: Cargo.toml — running cargo test'; cargo test --quiet 2>&1 | tail -100; elif [ -f go.mod ]; then echo '[test-runner] manifest: go.mod — running go test'; go test ./... 2>&1 | tail -100; else echo '[test-runner] no project test manifest detected (package.json, pyproject.toml, pytest.ini, setup.cfg, Cargo.toml, go.mod). Awaiting orchestrator-supplied test command.'; fi"
         }
       ],
       "paths": []

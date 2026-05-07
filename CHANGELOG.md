@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dockerfile-level `HEALTHCHECK` (node-fetch on `/healthz`, port 8000, 30s interval) — operators inheriting the image get container health reporting for free; explicit compose-level `healthcheck:` is now only needed when overriding the listen port (`unitAI-cnlea`).
 
 ### Changed
+- `test-runner` specialist v2.0.0 — now polyglot: pre-script detects manifest (`package.json` / `pyproject.toml` / `pytest.ini` / `setup.cfg` / `Cargo.toml` / `go.mod`) and dispatches the canonical test command (`npm test`, `pytest`, `cargo test`, `go test ./...`); falls back to a `[test-runner] no project test manifest detected` descriptive message with exit 0 instead of a missing-binary crash. system prompt + task_template are project-language-aware. `vitest`/`jest` removed from tags (`unitAI-0er69`).
+- `executor` and `debugger` specialist prompts soften hardcoded `tsc --noEmit` / `npm run lint` references to neutral "project-appropriate lint and typecheck" phrasing with multi-language examples (Node / Python / Rust / Go) (`unitAI-dults`).
+- `executor` post-script is manifest-aware: `package.json` → `npm run lint`, `pyproject.toml`/`setup.cfg` → `ruff` + `mypy` (when on PATH), `Cargo.toml` → `cargo clippy`/`check`, `go.mod` → `go vet`, none → descriptive no-op (`unitAI-dults`).
+
+### Changed
 - `docs/specialists-service.md` documents the full closed `error_type` taxonomy (now includes `template_field_misuse`, `prompt_too_large`, `output_too_large`) and cross-references the Python reference client (`unitAI-huwov`).
 - `docs/examples/specialists_client.py` removed; canonical reference now lives at `clients/python/specialists_client.py` (`unitAI-huwov`).
 - New `docs/deploying-alongside.md` — copyable compose recipe for adding `specialists-service` to an existing multi-service stack on a non-host network, with the three required tweaks (`user:`, `HOME=/pi-home`, rw `.specialists/`) explained and a symptom→cause→fix troubleshooting matrix (`unitAI-2fz5b`).
