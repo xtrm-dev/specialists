@@ -268,7 +268,7 @@ describe('integration: epic and merge CLI', () => {
     process.chdir(originalCwd);
   });
 
-  it('epic list/status/resolve produce operator-readable and JSON output', () => {
+  it('epic list/status/merge produce operator-readable and JSON output', () => {
     const pathPrefix = `${binDir}:${process.env.PATH ?? ''}`;
 
     const listJson = runCli(tempDir, ['epic', 'list', '--json'], { PATH: pathPrefix });
@@ -277,27 +277,20 @@ describe('integration: epic and merge CLI', () => {
     const listPayload = JSON.parse(listJson.stdout) as { epics: Array<{ epic_id: string; status: string }> };
     expect(listPayload.epics.some((row) => row.epic_id === 'unitAI-epic1')).toBe(true);
 
-    const resolveJson = runCli(tempDir, ['epic', 'resolve', 'unitAI-epic1', '--json'], { PATH: pathPrefix });
-    expect(resolveJson.status).toBe(0);
-
-    const resolvePayload = JSON.parse(resolveJson.stdout) as { epic_id: string; from_state: string; to_state: string; dry_run: boolean };
-    expect(resolvePayload.epic_id).toBe('unitAI-epic1');
-    expect(resolvePayload.from_state).toBe('open');
-    expect(resolvePayload.to_state).toBe('resolving');
-    expect(resolvePayload.dry_run).toBe(false);
-
     const statusHuman = runCli(tempDir, ['epic', 'status', 'unitAI-epic1'], { PATH: pathPrefix });
     expect(statusHuman.status).toBe(0);
     expect(statusHuman.stdout).toContain('Epic: unitAI-epic1');
-    expect(statusHuman.stdout).toContain('State: resolving');
+    expect(statusHuman.stdout).toContain('Readiness: ready');
+    expect(statusHuman.stdout).toContain('State: open');
     expect(statusHuman.stdout).toContain('chain-a');
     expect(statusHuman.stdout).toContain('chain-b');
 
     const statusJson = runCli(tempDir, ['epic', 'status', 'unitAI-epic1', '--json'], { PATH: pathPrefix });
     expect(statusJson.status).toBe(0);
-    const statusPayload = JSON.parse(statusJson.stdout) as { epic_id: string; status: string; chains: Array<{ chain_id: string }> };
+    const statusPayload = JSON.parse(statusJson.stdout) as { epic_id: string; state: string; readiness: { isReady: boolean }; chains: Array<{ chain_id: string }> };
     expect(statusPayload.epic_id).toBe('unitAI-epic1');
-    expect(statusPayload.state).toBe('resolving');
+    expect(statusPayload.state).toBe('open');
+    expect(statusPayload.readiness.isReady).toBe(true);
     expect(statusPayload.chains.map((chain) => chain.chain_id)).toEqual(expect.arrayContaining(['chain-a', 'chain-b']));
   });
 
@@ -313,9 +306,6 @@ describe('integration: epic and merge CLI', () => {
 
   it('sp epic merge publishes chains in dependency order and persists merged lifecycle state', async () => {
     const pathPrefix = `${binDir}:${process.env.PATH ?? ''}`;
-
-    const resolve = runCli(tempDir, ['epic', 'resolve', 'unitAI-epic1'], { PATH: pathPrefix });
-    expect(resolve.status).toBe(0);
 
     const merge = runCli(tempDir, ['epic', 'merge', 'unitAI-epic1'], { PATH: pathPrefix });
     expect(merge.status).toBe(0);
@@ -346,9 +336,6 @@ describe('integration: epic and merge CLI', () => {
     await writeFile(join(tempDir, '.xtrm', 'reports', 'agent.md'), 'local xtrm report\n', 'utf-8');
     await writeFile(join(tempDir, 'local-report.md'), 'untracked report\n', 'utf-8');
 
-    const resolve = runCli(tempDir, ['epic', 'resolve', 'unitAI-epic1'], { PATH: pathPrefix });
-    expect(resolve.status).toBe(0);
-
     const merge = runCli(tempDir, ['epic', 'merge', 'unitAI-epic1'], { PATH: pathPrefix });
     expect(merge.status).toBe(0);
 
@@ -361,9 +348,6 @@ describe('integration: epic and merge CLI', () => {
     const pathPrefix = `${binDir}:${process.env.PATH ?? ''}`;
 
     await writeFile(join(tempDir, 'a.txt'), 'local overlap\n', 'utf-8');
-
-    const resolve = runCli(tempDir, ['epic', 'resolve', 'unitAI-epic1'], { PATH: pathPrefix });
-    expect(resolve.status).toBe(0);
 
     const merge = runCli(tempDir, ['epic', 'merge', 'unitAI-epic1'], { PATH: pathPrefix });
     expect(merge.status).not.toBe(0);

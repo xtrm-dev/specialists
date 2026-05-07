@@ -13,12 +13,21 @@ vi.mock('../../../src/specialist/observability-sqlite.js', () => ({
   createObservabilitySqliteClient: vi.fn(() => sqliteClientMock),
 }));
 
-import { handleEpicAbandonCommand } from '../../../src/cli/epic.js';
+import { handleEpicAbandonCommand, handleEpicCommand } from '../../../src/cli/epic.js';
 
 describe('epic CLI abandon parsing', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     upsertEpicRunMock.mockReset();
+  });
+
+  it('rejects resolve subcommand as unknown', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number | string) => { throw new Error(`exit:${code}`); }) as never);
+
+    await expect(handleEpicCommand(['resolve', 'unitAI-gc2a'])).rejects.toThrow('exit:1');
+    expect(errorSpy).toHaveBeenCalledWith('Unknown epic subcommand: resolve');
+    expect(exitSpy).toHaveBeenCalledWith(1);
   });
 
   it('accepts --reason value without treating it as second epic id', async () => {
