@@ -35163,7 +35163,7 @@ function gatherEpicContext(options) {
 }
 function validateEpicMergeReadiness(context) {
   const epicState = context.epicRecord?.status ?? "open";
-  if (isEpicTerminalState(epicState)) {
+  if (epicState === "merged" || epicState === "abandoned") {
     throw new Error(`Epic ${context.epicId} is already in terminal state '${epicState}'. No further merges allowed.`);
   }
   const chainStatuses = [...context.chainJobStatuses.entries()].map(([chainId, status]) => ({

@@ -1,7 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import type { EpicState, EpicRunRecord, EpicChainRecord, EpicReadinessResult } from '../specialist/epic-lifecycle.js';
 import {
-  isEpicTerminalState,
   isEpicUnresolvedState,
   transitionEpicState,
   evaluateEpicMergeReadiness
@@ -343,7 +342,12 @@ function gatherEpicContext(options: EpicMergeCliOptions): EpicMergeContext {
 function validateEpicMergeReadiness(context: EpicMergeContext): EpicState {
   const epicState: EpicState = context.epicRecord?.status ?? 'open';
 
-  if (isEpicTerminalState(epicState)) {
+  // Per derived-readiness redesign: only 'merged' and 'abandoned' are truly
+  // terminal. A persisted 'failed' marker (from a transient merge failure
+  // such as rebase conflict) must be recoverable — readiness is recomputed
+  // live from chain state, so the next merge attempt should be allowed if
+  // the chains are still PASS.
+  if (epicState === 'merged' || epicState === 'abandoned') {
     throw new Error(`Epic ${context.epicId} is already in terminal state '${epicState}'. No further merges allowed.`);
   }
 
