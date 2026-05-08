@@ -689,6 +689,18 @@ export class Supervisor {
     }
   }
 
+  listChainJobIds(chainId: string): string[] {
+    try {
+      if (this.isDisposed) {
+        throw this.createDisposedSqliteError('listChainJobIds');
+      }
+      return this.withSqliteOperation('listChainJobIds', (client) => client.listChainJobIds(chainId)) ?? [];
+    } catch (error: unknown) {
+      console.warn(`[supervisor] SQLite listChainJobIds failed: ${String(error)}`);
+      return [];
+    }
+  }
+
   readResult(id: string): string | null {
     const path = this.resultPath(id);
     if (!existsSync(path)) return null;

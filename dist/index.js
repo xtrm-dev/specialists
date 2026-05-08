@@ -24692,6 +24692,17 @@ class Supervisor {
       return [];
     }
   }
+  listChainJobIds(chainId) {
+    try {
+      if (this.isDisposed) {
+        throw this.createDisposedSqliteError("listChainJobIds");
+      }
+      return this.withSqliteOperation("listChainJobIds", (client) => client.listChainJobIds(chainId)) ?? [];
+    } catch (error2) {
+      console.warn(`[supervisor] SQLite listChainJobIds failed: ${String(error2)}`);
+      return [];
+    }
+  }
   readResult(id) {
     const path = this.resultPath(id);
     if (!existsSync10(path))
@@ -39190,6 +39201,19 @@ function parseFinalizeArgs(argv) {
   const jobId = argv.find((token) => !token.startsWith("-"));
   return { jobId };
 }
+function findReviewerPassInChain(supervisor, chainId) {
+  const jobIds = supervisor.listChainJobIds(chainId);
+  for (const id of jobIds) {
+    const status = supervisor.readStatus(id);
+    if (!status || status.specialist !== "reviewer")
+      continue;
+    const output2 = supervisor.readResult(id) ?? "";
+    if (PASS_COMPLIANCE_VERDICT_REGEX2.test(output2)) {
+      return { reviewerJobId: id };
+    }
+  }
+  return null;
+}
 async function run25() {
   const parsed = parseFinalizeArgs(process.argv.slice(3));
   const jobId = parsed.jobId;
@@ -39205,27 +39229,55 @@ async function run25() {
       console.error(`No job found: ${jobId}`);
       process.exit(1);
     }
-    if (status.status !== "waiting") {
-      process.stderr.write(`${red7("Error:")} Job ${jobId} is not waiting (status: ${status.status}).
+    const chainId = status.chain_id ?? status.chain_root_job_id;
+    if (!chainId) {
+      process.stderr.write(`${red7("Error:")} Job ${jobId} has no chain identity (chain_id missing).
 `);
       process.exit(1);
     }
-    const output2 = supervisor.readResult(jobId) ?? "";
-    if (!PASS_COMPLIANCE_VERDICT_REGEX2.test(output2)) {
-      process.stderr.write(`${red7("Error:")} Job ${jobId} has no PASS compliance verdict.
+    const reviewerPass = findReviewerPassInChain(supervisor, chainId);
+    if (!reviewerPass) {
+      process.stderr.write(`${red7("Error:")} No reviewer with PASS compliance verdict found in chain ${chainId}.
 `);
       process.stderr.write(`${dim12("finalize only closes keep-alive chains after reviewer PASS.")}
 `);
       process.exit(1);
     }
-    const finalized = supervisor.finalizeWaitingJob(jobId);
-    if (!finalized) {
-      process.stderr.write(`${red7("Error:")} Failed to finalize job ${jobId}.
+    const chainJobIds = supervisor.listChainJobIds(chainId);
+    const finalized = [];
+    const skipped = [];
+    for (const id of chainJobIds) {
+      const memberStatus = supervisor.readStatus(id);
+      if (!memberStatus) {
+        skipped.push({ id, reason: "missing" });
+        continue;
+      }
+      if (memberStatus.status !== "waiting") {
+        skipped.push({ id, reason: memberStatus.status });
+        continue;
+      }
+      const result = supervisor.finalizeWaitingJob(id);
+      if (result) {
+        finalized.push(id);
+      } else {
+        skipped.push({ id, reason: "finalize-failed" });
+      }
+    }
+    if (finalized.length === 0) {
+      process.stderr.write(`${red7("Error:")} No waiting keep-alive jobs to finalize in chain ${chainId}.
 `);
       process.exit(1);
     }
-    process.stdout.write(`${green13("\u2713")} Finalized job ${jobId}
+    process.stdout.write(`${green13("\u2713")} Finalized chain ${chainId} (reviewer PASS: ${reviewerPass.reviewerJobId})
 `);
+    for (const id of finalized) {
+      process.stdout.write(`  ${green13("\u2713")} ${id}
+`);
+    }
+    for (const { id, reason } of skipped) {
+      process.stdout.write(`  ${dim12(`\xB7 ${id} (${reason})`)}
+`);
+    }
   } finally {
     await supervisor.dispose();
   }

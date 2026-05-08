@@ -124,6 +124,7 @@ export declare class Supervisor {
     private withComputedLiveness;
     readStatus(id: string): SupervisorStatusView | null;
     listLiveJobsForBead(beadId: string): string[];
+    listChainJobIds(chainId: string): string[];
     readResult(id: string): string | null;
     finalizeWaitingJob(id: string): SupervisorStatusView | null;
     emitMetaEvent(jobId: string, model: string, backend: string): void;
