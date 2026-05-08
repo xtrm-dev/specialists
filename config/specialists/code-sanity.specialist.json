@@ -3,7 +3,7 @@
     "metadata": {
       "name": "code-sanity",
       "version": "1.0.0",
-      "description": "READ_ONLY implementation-quality smell pass after executor/debugger and before reviewer. Checks simplicity, type safety, dead code, async/error handling, and maintainability. Not a requirements gate or merge verdict.",
+      "description": "READ_ONLY smell pass after executor and before reviewer. Checks simplicity, type safety, dead code, async/error handling, maintainability.",
       "category": "quality",
       "tags": [
         "code-quality",
