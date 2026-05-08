@@ -119,13 +119,13 @@ specialists status --job <job-id>             # single-job detail view (legacy �
 # Epic lifecycle (canonical publication path)
 specialists epic list [--unresolved]          # list epics with lifecycle state
 specialists epic status <epic-id>             # show chains, blockers, readiness
-specialists epic sync <epic-id> [--apply]     # reconcile DB vs live state (dry-run default)
-specialists epic resolve <epic-id>            # transition open -> resolving
+specialists epic sync <epic-id> [--apply]     # recompute derived readiness; repair drift
 specialists epic abandon <epic-id> --reason <text> [--force]  # terminal transition for stuck epics
-specialists epic merge <epic-id> [--pr]       # publish all epic-owned chains
+specialists epic merge <epic-id> [--pr]       # publish all epic-owned chains; auto-finalizes PASS chains
 
-# Merge (for standalone chains only)
-specialists merge <chain-root-bead> [--rebuild]  # publish ONE standalone chain
+# Merge (per-chain or standalone; PASS chains can merge inside an active epic)
+specialists merge <chain-root-bead> [--rebuild]
+specialists finalize <chain-root-bead>           # manual recovery if PASS auto-finalize did not fire
 
 # Session close (chain-aware, epic-aware)
 specialists end [--pr]                        # close session, publish via merge or PR
@@ -682,14 +682,15 @@ sp epic list --unresolved   # show non-terminal epics
 
 # Inspect one epic
 sp epic status unitAI-3f7b
-# Shows: persisted_state, readiness_state, chains[], blockers[], summary
+# Shows: derived readiness state, persisted state (audit only), chains[], blockers[], summary
 
-# Transition states (manual)
-sp epic resolve unitAI-3f7b   # open → resolving
-
-# Publish
-sp epic merge unitAI-3f7b     # merge_ready → merged
+# Publish (no manual state transition — readiness is derived live)
+sp epic merge unitAI-3f7b     # batch publish all chains; auto-finalizes PASS chains
 sp epic merge unitAI-3f7b --pr # PR mode
+
+# Or per-chain (PASS chain inside active epic is allowed)
+sp merge <chain-root-bead>
+sp finalize <chain-root-bead>  # manual recovery if PASS auto-finalize missed
 ```
 
 ### Conflict handling
@@ -1136,7 +1137,7 @@ sp stop <job-id> --force
 
 ### 5) `sp end` open-state loop fix
 
-If `sp end` detects open-state mismatch, tool now suggests `sp epic resolve <epic-id>` as next command (no redirect loop).
+If `sp end` detects open-state mismatch, tool surfaces the derived readiness summary (`sp epic status <epic-id>`) and the per-chain merge path. There is no `sp epic resolve` anymore — readiness is recomputed live from chain state.
 
 - **RPC timeout on worktree job start** (30s, `command id=1`) → pi runs `npm install` in fresh
   worktrees if `.pi/settings.json` lists local packages. Root cause: worktree gets a stale copy

@@ -633,36 +633,29 @@ Release helper contract:
 
 ## Epic Lifecycle
 
-Epics are merge-gated identities with a persisted state machine:
+Epics are merge-gated identities with a **derived** readiness model. State is computed live from chain readiness; only `merged` and `abandoned` are persisted as terminal markers.
 
-```text
-open -> resolving -> merge_ready -> merged
-                  -> failed
-                  -> abandoned
-```
+| Derived state | Meaning | Per-chain merge | Batch merge |
+| --- | --- | :---: | :---: |
+| `blocked` | Some chain pending or has no reviewer verdict. | — | No |
+| `failed` | At least one chain has a failed reviewer verdict. | per-chain on PASS chains | No |
+| `merge_ready` | All chains pass and no active jobs. | Yes | Yes via `sp epic merge` |
+| `merged` | (persisted) Publication complete. | — | — |
+| `abandoned` | (persisted) Cancelled without merge. | — | — |
 
-| State | Meaning | Chains mergeable? |
-| --- | --- | --- |
-| `open` | Epic created, chains not yet running. | No |
-| `resolving` | Chains actively running. | No |
-| `merge_ready` | All chains terminal, reviewer PASS, tsc gate passes. | Yes via `sp epic merge` |
-| `merged` | Publication complete. | — |
-| `failed` | One or more chains failed. | Resolve or abandon. |
-| `abandoned` | Cancelled without merge. | — |
-
-Operator transitions:
+Operator commands:
 
 ```bash
-sp epic resolve <epic-id>              # open -> resolving (marks epic as merge-ready target)
-sp epic merge <epic-id>                # merge_ready -> merged (canonical publication)
+sp epic merge <epic-id>                # publish all chains; auto-runs finalize preflight
 sp epic merge <epic-id> --pr           # PR mode (publish via pull request)
-sp epic sync <epic-id> --apply         # reconcile DB vs live job state when stuck
+sp epic sync <epic-id> --apply         # recompute derived readiness; repair drift
 sp epic abandon <epic-id> --reason <t> # terminal close for unrecoverable epic
 sp epic abandon <epic-id> --reason <t> --force  # force when active pointers still exist
 ```
 
-`sp merge <chain>` refuses if the chain belongs to an unresolved epic. Use
-`sp epic merge` for epic-owned chains.
+`sp merge <chain>` is allowed for any PASS chain regardless of sibling-epic state. Use `sp epic merge` only when batching all epic chains together. `sp finalize <chain>` is a manual recovery for keep-alive executors that reached PASS but did not auto-finalize.
+
+`sp epic resolve` was removed — there is no operator-driven open→resolving transition anymore; readiness is recomputed every read.
 
 ## Concurrency And Force Flags
 

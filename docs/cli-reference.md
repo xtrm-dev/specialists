@@ -532,6 +532,27 @@ specialists steer a1b2c3 "skip tests and isolate root cause"
 
 ---
 
+## `specialists finalize`
+
+Manual recovery for keep-alive executor chains that reached reviewer PASS but whose auto-finalize did not run (e.g. supervisor restart between PASS and auto-finalize).
+
+### Synopsis
+
+```bash
+specialists finalize <chain-root-bead> [--json]
+```
+
+### Behavior
+
+Refuses to finalize chains whose executor job is not in `waiting` state, or whose latest reviewer output does not contain `Verdict: PASS`. Routes through `supervisor.finalizeWaitingJob()` (the same canonical path the auto-finalize uses) so chain readiness, status persistence, and FIFO close are atomic.
+
+### Exit codes
+
+- `0`: Chain finalized.
+- `1`: Chain not eligible (executor not waiting, no PASS verdict, or chain not found).
+
+---
+
 ## `specialists stop`
 
 ### Synopsis
@@ -1223,44 +1244,48 @@ specialists memory sync --json
 ```bash
 specialists epic list [--unresolved] [--json]
 specialists epic status <epic-id> [--json]
-specialists epic resolve <epic-id> [--json]
+specialists epic sync <epic-id> [--apply] [--json]
 specialists epic merge <epic-id> [--pr] [--rebuild] [--json]
+specialists epic abandon <epic-id> --reason "<text>" [--force] [--json]
 ```
 
 ### Subcommands
 
 | Command | Purpose |
 |---------|---------|
-| `list` | Enumerate epics with lifecycle state and merge readiness |
+| `list` | Enumerate epics with derived readiness state |
 | `status` | Show epic state, chains, blockers, and readiness summary |
-| `resolve` | Transition epic from `open` to `resolving` |
-| `merge` | Publish all epic-owned chains (canonical path) |
+| `sync` | Recompute derived readiness; with `--apply`, repair drift (stale chain refs, dead jobs, redirect markers) |
+| `merge` | Publish all epic-owned chains (canonical path); auto-runs finalize preflight on PASS chains |
+| `abandon` | Mark epic as terminal-cancelled (cleanup escape hatch) |
 
 ### Flags
 
-- `--unresolved`: (list) Show only non-terminal epics (`open`, `resolving`, `merge_ready`)
+- `--unresolved`: (list) Show only non-terminal epics
+- `--apply`: (sync) Persist drift repairs; without it, sync is read-only
 - `--pr`: (merge) Create pull request instead of direct merge
 - `--rebuild`: (merge) Run `bun run build` after all merges complete
+- `--reason`: (abandon, required) Text recorded in epic transition audit
+- `--force`: (abandon) Override live-member guard
 - `--json`: Machine-readable JSON output
 
-### Epic Lifecycle
+### Epic Lifecycle (derived model)
 
-```
-open → resolving → merge_ready → merged
-                  ↘ failed → abandoned
-                  ↘ abandoned
-```
+Epic state is **derived live from chain readiness**, not a persisted state machine. Only three persisted states exist as terminal markers: `merged`, `abandoned`, and an audit-only `open` for newly-created epics. Everything else is recomputed each time it's read.
 
-| State | Meaning | Can merge? | Recovery |
-|-------|---------|:----------:|----------|
-| `open` | Epic created, chains not yet dispatched | — | — |
-| `resolving` | Chains are actively running | ✗ | `sp epic abandon` |
-| `merge_ready` | All chains terminal, reviewer PASS | ✓ | `sp epic abandon` |
-| `merged` | Publication complete | — | terminal |
-| `failed` | One or more chains failed | — | `sp epic abandon` (recovery transition to `abandoned`) |
-| `abandoned` | Cancelled without merge | — | terminal |
+| Derived state | Meaning | Per-chain merge | Batch merge |
+|-------|---------|:----------:|:----------:|
+| `blocked` | Some chain pending or has no reviewer verdict | — | ✗ |
+| `failed` | At least one chain has a failed reviewer verdict | per-chain only on PASS chains | ✗ |
+| `merge_ready` | All chains pass and no active jobs | ✓ | ✓ |
+| `merged` | (persisted) Publication complete | — | terminal |
+| `abandoned` | (persisted) Cancelled without merge | — | terminal |
 
-The `failed → abandoned` recovery path lets operators clean up dead epics (sibling-chain conflicts, transient supervisor crashes, manual stops) that would otherwise stay in `failed` indefinitely cluttering `sp ps`. Use `sp epic abandon <id> --reason "<text>"`; add `--force` only if `listLiveMemberJobIds` reports active members you accept overriding.
+**Per-chain `sp merge <chain>` is allowed for any PASS chain regardless of sibling state** — Loop A from the prior chain-lifecycle deadlock is gone. Use `sp epic merge` only when batching all chains together.
+
+**Reviewer PASS auto-finalizes the keep-alive executor** via `supervisor.finalizeWaitingJob()`. If a chain's executor is still `waiting` after PASS (e.g. supervisor restarted before the auto-finalize fired), use `sp finalize <chain-root-bead>` for manual recovery.
+
+`sp epic abandon` is the cleanup escape hatch for stuck epics. Live members require `--force`.
 
 ### `sp epic list` Output
 

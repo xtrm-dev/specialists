@@ -227,10 +227,12 @@ Run `bd memories <keyword>` or `bd recall <key>` for prior insights before subst
 
 ## Common gotchas (project-specific)
 
-- **`sp stop` cleans `status.json`; `sp merge` then can't resolve the chain.** For doc-only chains, fall back to manual `git merge --no-ff` (skips tsc + conflict gates).
+- **Reviewer PASS auto-finalizes the keep-alive executor.** If supervisor restarts mid-PASS or auto-finalize misses for any reason, run `sp finalize <chain-root-bead>` for manual recovery — do not fall back to `sp stop --force` + manual git merge.
+- **Per-chain `sp merge` is allowed for any PASS chain regardless of sibling epic state.** Loop A from the prior chain-lifecycle deadlock is gone. Use `sp epic merge` only when batching all epic chains together.
 - **`--worktree` and `--job` are mutually exclusive.** First executor: `--worktree`. Reviewer/fix: `--job <exec-job>`.
 - **Stale-base guard** blocks worktree dispatch if sibling epic chains have unmerged substantive commits. Override with `--force-stale-base` only with cause.
-- **Manual `git merge` of feature branches breaks sp's epic bookkeeping.** Use `sp merge` / `sp epic merge` when possible.
+- **Manual `git merge` of feature branches breaks sp's epic bookkeeping.** Use `sp merge` / `sp epic merge` / `sp finalize` — the redesign removed the conditions that previously forced manual fallback (sticky FAILED, inverted merge gates, no PASS finalizer).
+- **Epic readiness is derived live, not persisted.** Only `merged` and `abandoned` are terminal-persisted; everything else (`blocked`, `failed`, `merge_ready`) is recomputed each read. `sp epic resolve` was removed.
 - **GitNexus index goes stale on commit.** PostToolUse hook normally re-indexes after `git commit`/`git merge`; if not, `npx gitnexus analyze` (add `--embeddings` only if `.gitnexus/meta.json` shows `stats.embeddings > 0`).
 - **`bd close` itself does not block.** Stop hook blocks only after a successful `bd close` in same session, and only when hook can resolve issue id from `claimed:<sessionId>`, `closed-this-session:<sessionId>`, or branch name. If `bd show` fails, gate fails open. Each id in batch needs its own ack before session stop.
 - **Specialists are JSON** (`config/specialists/<name>.specialist.json`) — YAML is a deprecated legacy fallback (`loader.ts:101 deprecatedYaml`).
