@@ -24422,8 +24422,19 @@ function runAutoCommitCheckpoint(options) {
     return { status: "failed", reason: String(error2) };
   }
 }
+function gitnexusHasEmbeddings(cwd) {
+  try {
+    const metaPath = join9(cwd, ".gitnexus", "meta.json");
+    const raw = readFileSync8(metaPath, "utf-8");
+    const meta = JSON.parse(raw);
+    return typeof meta.stats?.embeddings === "number" && meta.stats.embeddings > 0;
+  } catch {
+    return false;
+  }
+}
 function startDetachedGitnexusAnalyze(cwd) {
-  const child = spawn2("npx", ["gitnexus", "analyze"], {
+  const args = gitnexusHasEmbeddings(cwd) ? ["gitnexus", "analyze", "--embeddings"] : ["gitnexus", "analyze"];
+  const child = spawn2("npx", args, {
     cwd,
     detached: true,
     stdio: "ignore"
@@ -25208,6 +25219,31 @@ class Supervisor {
     const shouldAutoFinalizeKeepAlive = (output) => PASS_COMPLIANCE_VERDICT_REGEX.test(output);
     const shouldWriteExternalBeadNotes = runOptions.beadsWriteNotes ?? true;
     let skipFinalKeepAliveInputBeadAppend = false;
+    let lastGitnexusAnalyzedSha;
+    const triggerGitnexusAnalyzeIfNeeded = (sha, source) => {
+      if (!isGitnexusAnalyzeRequired(runOptions.permissionRequired))
+        return;
+      if (sha && lastGitnexusAnalyzedSha === sha)
+        return;
+      try {
+        startDetachedGitnexusAnalyze(runOptions.workingDirectory ?? process.cwd());
+        appendTimelineEventFileOnly({
+          t: Date.now(),
+          type: TIMELINE_EVENT_TYPES.META,
+          model: "gitnexus_analyze_started",
+          backend: source
+        });
+        if (sha)
+          lastGitnexusAnalyzedSha = sha;
+      } catch (err) {
+        appendTimelineEventFileOnly({
+          t: Date.now(),
+          type: TIMELINE_EVENT_TYPES.META,
+          model: "gitnexus_analyze_start_failed",
+          backend: `${source}: ${String(err?.message ?? err)}`
+        });
+      }
+    };
     const appendResultToInputBead = (params) => {
       const inputBeadId = runOptions.inputBeadId;
       const shouldAppendResultToInputBead = Boolean(shouldWriteExternalBeadNotes && inputBeadId && this.opts.beadsClient);
@@ -25266,6 +25302,7 @@ ${appendError}
         commit_sha: autoCommitResult.sha,
         committed_files: autoCommitResult.files
       }));
+      triggerGitnexusAnalyzeIfNeeded(autoCommitResult.sha, "checkpoint");
     };
     const handleResumeTurn = async (task) => {
       if (!resumeFn)
@@ -25836,24 +25873,7 @@ ${appendError}
         throw new Error("[supervisor] SQLite upsertStatusWithEventAndResult failed: database client unavailable");
       }
       this.aggregateJobMetricsBestEffort(id);
-      if (isGitnexusAnalyzeRequired(finalResult.permissionRequired)) {
-        try {
-          startDetachedGitnexusAnalyze(runOptions.workingDirectory ?? process.cwd());
-          appendTimelineEventFileOnly({
-            t: Date.now(),
-            type: TIMELINE_EVENT_TYPES.META,
-            model: "gitnexus_analyze_started",
-            backend: "supervisor"
-          });
-        } catch (err) {
-          appendTimelineEventFileOnly({
-            t: Date.now(),
-            type: TIMELINE_EVENT_TYPES.META,
-            model: "gitnexus_analyze_start_failed",
-            backend: String(err?.message ?? err)
-          });
-        }
-      }
+      triggerGitnexusAnalyzeIfNeeded(statusSnapshot.last_auto_commit_sha, "terminal");
       this.writeReadyMarker(id);
       return id;
     } catch (err) {

@@ -377,8 +377,23 @@ function runAutoCommitCheckpoint(options: {
   }
 }
 
+/** Detects whether the GitNexus index in `cwd` has embeddings, so a re-analyze
+ *  preserves them via `--embeddings`. Reads `.gitnexus/meta.json` and inspects
+ *  `stats.embeddings`. Falls back to `false` (no `--embeddings`) on any error. */
+export function gitnexusHasEmbeddings(cwd: string): boolean {
+  try {
+    const metaPath = join(cwd, '.gitnexus', 'meta.json');
+    const raw = readFileSync(metaPath, 'utf-8');
+    const meta = JSON.parse(raw) as { stats?: { embeddings?: number } };
+    return typeof meta.stats?.embeddings === 'number' && meta.stats.embeddings > 0;
+  } catch {
+    return false;
+  }
+}
+
 function startDetachedGitnexusAnalyze(cwd: string): void {
-  const child = spawn('npx', ['gitnexus', 'analyze'], {
+  const args = gitnexusHasEmbeddings(cwd) ? ['gitnexus', 'analyze', '--embeddings'] : ['gitnexus', 'analyze'];
+  const child = spawn('npx', args, {
     cwd,
     detached: true,
     stdio: 'ignore',
@@ -1267,6 +1282,31 @@ export class Supervisor {
 
     const shouldWriteExternalBeadNotes = runOptions.beadsWriteNotes ?? true;
     let skipFinalKeepAliveInputBeadAppend = false;
+    /** SHA of the most recent commit for which gitnexus analyze was triggered.
+     *  Used to dedupe checkpoint-time vs terminal-time analyze fires when both
+     *  paths see the same final commit. */
+    let lastGitnexusAnalyzedSha: string | undefined;
+    const triggerGitnexusAnalyzeIfNeeded = (sha: string | undefined, source: 'checkpoint' | 'terminal'): void => {
+      if (!isGitnexusAnalyzeRequired(runOptions.permissionRequired)) return;
+      if (sha && lastGitnexusAnalyzedSha === sha) return;
+      try {
+        startDetachedGitnexusAnalyze(runOptions.workingDirectory ?? process.cwd());
+        appendTimelineEventFileOnly({
+          t: Date.now(),
+          type: TIMELINE_EVENT_TYPES.META,
+          model: 'gitnexus_analyze_started',
+          backend: source,
+        });
+        if (sha) lastGitnexusAnalyzedSha = sha;
+      } catch (err: any) {
+        appendTimelineEventFileOnly({
+          t: Date.now(),
+          type: TIMELINE_EVENT_TYPES.META,
+          model: 'gitnexus_analyze_start_failed',
+          backend: `${source}: ${String(err?.message ?? err)}`,
+        });
+      }
+    };
     const appendResultToInputBead = (params: {
       output: string;
       model: string;
@@ -1339,6 +1379,10 @@ export class Supervisor {
         commit_sha: autoCommitResult.sha,
         committed_files: autoCommitResult.files,
       }));
+      // Refresh GitNexus index immediately after the commit so reviewers/orchestrators
+      // inspecting the keep-alive worktree mid-session see up-to-date graph data.
+      // Dedupes against the terminal-path fire via lastGitnexusAnalyzedSha.
+      triggerGitnexusAnalyzeIfNeeded(autoCommitResult.sha, 'checkpoint');
     };
 
     const handleResumeTurn = async (task: string): Promise<void> => {
@@ -2076,24 +2120,9 @@ export class Supervisor {
 
       this.aggregateJobMetricsBestEffort(id);
 
-      if (isGitnexusAnalyzeRequired(finalResult.permissionRequired)) {
-        try {
-          startDetachedGitnexusAnalyze(runOptions.workingDirectory ?? process.cwd());
-          appendTimelineEventFileOnly({
-            t: Date.now(),
-            type: TIMELINE_EVENT_TYPES.META,
-            model: 'gitnexus_analyze_started',
-            backend: 'supervisor',
-          });
-        } catch (err: any) {
-          appendTimelineEventFileOnly({
-            t: Date.now(),
-            type: TIMELINE_EVENT_TYPES.META,
-            model: 'gitnexus_analyze_start_failed',
-            backend: String(err?.message ?? err),
-          });
-        }
-      }
+      // Terminal-path gitnexus analyze. Dedupes against checkpoint-time fires for
+      // the same commit; if a checkpoint already analyzed the final sha we skip.
+      triggerGitnexusAnalyzeIfNeeded(statusSnapshot.last_auto_commit_sha, 'terminal');
 
       // Touch ready marker so hooks can surface completion banners.
       this.writeReadyMarker(id);
