@@ -92,7 +92,7 @@
           "inject_output": true
         },
         {
-          "run": "bash -c 'if [ -f package.json ]; then npm run lint 2>&1 | tail -5 || true; elif [ -f pyproject.toml ] || [ -f setup.cfg ]; then { command -v ruff >/dev/null && ruff check . 2>&1 | tail -5; command -v mypy >/dev/null && mypy . 2>&1 | tail -5; } || true; elif [ -f Cargo.toml ]; then cargo clippy --quiet 2>&1 | tail -5 || cargo check --quiet 2>&1 | tail -5 || true; elif [ -f go.mod ]; then go vet ./... 2>&1 | tail -5 || true; else echo \"[executor] no project manifest detected for lint step\"; fi'",
+          "run": "if [ -f package.json ]; then npm run lint 2>&1 | tail -5 || true; elif [ -f pyproject.toml ] || [ -f setup.cfg ]; then { command -v ruff >/dev/null && ruff check . 2>&1 | tail -5; command -v mypy >/dev/null && mypy . 2>&1 | tail -5; } || true; elif [ -f Cargo.toml ]; then cargo clippy --quiet 2>&1 | tail -5 || cargo check --quiet 2>&1 | tail -5 || true; elif [ -f go.mod ]; then go vet ./... 2>&1 | tail -5 || true; else echo '[executor] no project manifest detected for lint step'; fi",
           "phase": "post"
         }
       ]

@@ -150,6 +150,12 @@ function commandExists(cmd: string): boolean {
   return result.status === 0;
 }
 
+const SHELL_BUILTINS = new Set<string>([
+  'if', 'then', 'else', 'elif', 'fi', 'for', 'while', 'until', 'do', 'done',
+  'case', 'esac', 'select', 'in', 'function', 'return', 'break', 'continue',
+  ':', '.', 'true', 'false', '[', '[[', '{', '(',
+]);
+
 function validateShebang(filePath: string, errors: string[]): void {
   try {
     const head = readFileSync(filePath, 'utf-8').slice(0, 120);
@@ -210,7 +216,7 @@ function validateBeforeRun(
       }
     } else {
       const binary = run.split(' ')[0];
-      if (!commandExists(binary)) {
+      if (binary && !SHELL_BUILTINS.has(binary) && !commandExists(binary)) {
         errors.push(`  ✗ skills.scripts: command not found on PATH: ${binary}`);
       }
     }
