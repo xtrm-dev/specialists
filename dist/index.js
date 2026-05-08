@@ -25227,21 +25227,11 @@ class Supervisor {
         return;
       try {
         startDetachedGitnexusAnalyze(runOptions.workingDirectory ?? process.cwd());
-        appendTimelineEventFileOnly({
-          t: Date.now(),
-          type: TIMELINE_EVENT_TYPES.META,
-          model: "gitnexus_analyze_started",
-          backend: source
-        });
+        appendTimelineEvent(createMetaEvent("gitnexus_analyze_started", source));
         if (sha)
           lastGitnexusAnalyzedSha = sha;
       } catch (err) {
-        appendTimelineEventFileOnly({
-          t: Date.now(),
-          type: TIMELINE_EVENT_TYPES.META,
-          model: "gitnexus_analyze_start_failed",
-          backend: `${source}: ${String(err?.message ?? err)}`
-        });
+        appendTimelineEvent(createMetaEvent("gitnexus_analyze_start_failed", `${source}: ${String(err?.message ?? err)}`));
       }
     };
     const appendResultToInputBead = (params) => {

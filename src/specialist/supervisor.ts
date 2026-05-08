@@ -1289,22 +1289,16 @@ export class Supervisor {
     const triggerGitnexusAnalyzeIfNeeded = (sha: string | undefined, source: 'checkpoint' | 'terminal'): void => {
       if (!isGitnexusAnalyzeRequired(runOptions.permissionRequired)) return;
       if (sha && lastGitnexusAnalyzedSha === sha) return;
+      // Use appendTimelineEvent (dual-write to file + SQLite) so the event is
+      // visible to `sp feed` / `sp result` even when SPECIALISTS_JOB_FILE_OUTPUT
+      // is off (post-ppkdg gating). Pre-ppkdg the terminal-path call used
+      // appendTimelineEventFileOnly which silently dropped events.
       try {
         startDetachedGitnexusAnalyze(runOptions.workingDirectory ?? process.cwd());
-        appendTimelineEventFileOnly({
-          t: Date.now(),
-          type: TIMELINE_EVENT_TYPES.META,
-          model: 'gitnexus_analyze_started',
-          backend: source,
-        });
+        appendTimelineEvent(createMetaEvent('gitnexus_analyze_started', source));
         if (sha) lastGitnexusAnalyzedSha = sha;
       } catch (err: any) {
-        appendTimelineEventFileOnly({
-          t: Date.now(),
-          type: TIMELINE_EVENT_TYPES.META,
-          model: 'gitnexus_analyze_start_failed',
-          backend: `${source}: ${String(err?.message ?? err)}`,
-        });
+        appendTimelineEvent(createMetaEvent('gitnexus_analyze_start_failed', `${source}: ${String(err?.message ?? err)}`));
       }
     };
     const appendResultToInputBead = (params: {

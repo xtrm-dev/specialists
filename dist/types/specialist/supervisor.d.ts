@@ -97,6 +97,10 @@ export interface SupervisorOptions {
     stallDetection?: StallDetectionConfig;
 }
 type ContextHealth = 'OK' | 'MONITOR' | 'WARN' | 'CRITICAL';
+/** Detects whether the GitNexus index in `cwd` has embeddings, so a re-analyze
+ *  preserves them via `--embeddings`. Reads `.gitnexus/meta.json` and inspects
+ *  `stats.embeddings`. Falls back to `false` (no `--embeddings`) on any error. */
+export declare function gitnexusHasEmbeddings(cwd: string): boolean;
 export declare function isPidAlive(pid: number | undefined): boolean;
 export declare function isJobDead(status: Pick<SupervisorStatus, 'status' | 'pid' | 'tmux_session'>): boolean;
 export declare class Supervisor {
