@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - `sp run --bead <id>` no longer race-spawns duplicate jobs against the same bead+specialist when a keep-alive job is already in `waiting`. The active-job check now includes `waiting` (was `starting`/`running` only), and `sp run` performs an early SQLite pre-flight before the supervisor fork — failing fast with `existing <status> job '<id>' already targets bead '<id>'` plus a hint to resume via `--job <id>` or cancel via `sp stop <id>` (`unitAI-55cb3`).
+- `supervisor.handleResumeTurn` now auto-finalizes a keep-alive session when the resume turn produces a PASS-shaped Compliance Verdict — closes the gap that made `sp finalize <id>` necessary after every resume-driven PASS. Initial-turn auto-finalize was already in place; the resume-turn path now mirrors it (`unitAI-y6crh`).
 
 ### Changed
 - `test-runner` specialist v2.0.0 — now polyglot: pre-script detects manifest (`package.json` / `pyproject.toml` / `pytest.ini` / `setup.cfg` / `Cargo.toml` / `go.mod`) and dispatches the canonical test command (`npm test`, `pytest`, `cargo test`, `go test ./...`); falls back to a `[test-runner] no project test manifest detected` descriptive message with exit 0 instead of a missing-binary crash. system prompt + task_template are project-language-aware. `vitest`/`jest` removed from tags (`unitAI-0er69`).

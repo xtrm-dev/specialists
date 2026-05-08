@@ -1366,7 +1366,9 @@ export class Supervisor {
           output,
         });
 
-        const isWaitingTurn = !shouldAutoCloseReadOnlyKeepAlive(output);
+        const passFinalize = shouldAutoFinalizeKeepAlive(output);
+        const readOnlyClose = shouldAutoCloseReadOnlyKeepAlive(output);
+        const isWaitingTurn = !readOnlyClose && !passFinalize;
         applyAutoCommitCheckpoint(isWaitingTurn ? 'waiting' : 'terminal', autoCommitPolicy);
         appendResultToInputBead({
           output,
