@@ -324,4 +324,6 @@ sp ps --help
 - Tracked work requires `--bead <id>`; `--prompt` is for untracked one-offs only
 - Specialist configs live in `config/specialists/` (shipped) and `.specialists/user/` (overrides); use `sp edit` — not direct JSON edits — to change fields
 - `sp edit --list-presets` shows available model presets for the current install
-- `sp epic abandon <id> --reason "..."` exists and closes stale epics (not listed in `sp epic --help` but works)
+- `sp epic abandon <id> --reason "..."` closes stale epics; live members require `--force`. Listed in `sp epic --help`.
+- `sp finalize <any-chain-job-id>` cascades — closes every waiting keep-alive member of a chain after reviewer PASS. Use this when auto-finalize misses (e.g. PASS delivered via `sp resume` instead of streaming output).
+- Epic state is **derived live**, not driven by operator transitions. Only `merged` / `abandoned` are persisted-terminal. Persisted soft `failed` markers are recoverable: the next `sp epic merge` retries fresh.

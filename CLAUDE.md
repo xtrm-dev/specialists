@@ -227,8 +227,9 @@ Run `bd memories <keyword>` or `bd recall <key>` for prior insights before subst
 
 ## Common gotchas (project-specific)
 
-- **Reviewer PASS auto-finalizes the keep-alive executor.** If supervisor restarts mid-PASS or auto-finalize misses for any reason, run `sp finalize <chain-root-bead>` for manual recovery — do not fall back to `sp stop --force` + manual git merge.
+- **Reviewer PASS auto-finalizes the keep-alive executor** only when the verdict appears in streaming output. PASS delivered via `sp resume` does not stream — use `sp finalize <any-chain-job-id>` (cascades; accepts executor / reviewer / debugger / any chain member) to close the whole chain. Do NOT fall back to `sp stop --force` + manual git merge.
 - **Per-chain `sp merge` is allowed for any PASS chain regardless of sibling epic state.** Loop A from the prior chain-lifecycle deadlock is gone. Use `sp epic merge` only when batching all epic chains together.
+- **Persisted `failed` epic state is recoverable.** A failed `sp epic merge` (rebase conflict etc.) writes a soft `failed` marker; the next attempt retries fresh once the operator clears the conflict. Only `merged` and `abandoned` are truly terminal.
 - **`--worktree` and `--job` are mutually exclusive.** First executor: `--worktree`. Reviewer/fix: `--job <exec-job>`.
 - **Stale-base guard** blocks worktree dispatch if sibling epic chains have unmerged substantive commits. Override with `--force-stale-base` only with cause.
 - **Manual `git merge` of feature branches breaks sp's epic bookkeeping.** Use `sp merge` / `sp epic merge` / `sp finalize` — the redesign removed the conditions that previously forced manual fallback (sticky FAILED, inverted merge gates, no PASS finalizer).

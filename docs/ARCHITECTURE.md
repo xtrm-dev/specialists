@@ -949,56 +949,49 @@ If neither key exists, the edit is blocked.
 
 ---
 
-## 10) Epic lifecycle model (`epic-lifecycle.ts`)
+## 10) Epic lifecycle model (`epic-lifecycle.ts`, `epic-readiness.ts`)
 
-Epic lifecycle is independent from node lifecycle and provides merge-gated publication for wave-bound chain groups.
+Epic lifecycle is **derived live** from chain readiness, not driven by an operator-managed state machine. Only two states are persisted as terminal markers; everything else is recomputed each read.
 
-### State machine
+### Derived state model
 
 ```
-open → resolving → merge_ready → merged
-                 ↘ failed
-                 ↘ abandoned
+                           ┌── merged (persisted, terminal)
+                           │
+chains in flight ──── derive ──── blocked / failed / merge_ready
+                           │
+                           └── abandoned (persisted, terminal)
 ```
 
-| State | Meaning | Can merge? |
-|-------|---------|:----------:|
-| `open` | Epic created, chains not yet dispatched | — |
-| `resolving` | Chains are actively running | ✗ |
-| `merge_ready` | All chains terminal, reviewer PASS | ✓ |
-| `merged` | Publication complete | — |
-| `failed` | One or more chains failed | — |
-| `abandoned` | Cancelled without merge | — |
+| State | Persisted? | Meaning | Per-chain merge | Batch merge |
+|-------|:----------:|---------|:----------:|:----------:|
+| `blocked` | No (derived) | Some chain pending or has no reviewer verdict | — | ✗ |
+| `failed` | Soft marker only | A chain reviewer returned PARTIAL/FAIL with no fix-loop, OR a previous publish attempt failed transiently | per-chain on PASS chains | ✗ until cleared |
+| `merge_ready` | No (derived) | All chains pass and no active jobs | ✓ | ✓ |
+| `merged` | Yes (terminal) | Publication complete | — | — |
+| `abandoned` | Yes (terminal) | Operator-cancelled via `sp epic abandon` | — | — |
 
-### Transition rules
+### Recovery rule
+
+`validateEpicMergeReadiness` (`src/cli/epic.ts`) refuses merge **only** for the two truly-terminal states:
 
 ```typescript
-export const VALID_EPIC_TRANSITIONS: Record<EpicState, readonly EpicState[]> = {
-  open: ['resolving', 'abandoned'],
-  resolving: ['merge_ready', 'failed', 'abandoned'],
-  merge_ready: ['merged', 'failed', 'abandoned', 'resolving'],
-  merged: [],
-  failed: [],
-  abandoned: [],
-};
+if (epicState === 'merged' || epicState === 'abandoned') throw 'No further merges allowed';
 ```
 
-Key invariants:
-- Terminal states (`merged`, `failed`, `abandoned`) have no outgoing transitions
-- `merge_ready` can revert to `resolving` if blockers reappear
-- `sp epic merge` is the ONLY legal publication path for wave-bound chains
+A persisted `failed` row from a prior transient publication failure (e.g. rebase conflict, dirty worktree) is treated as legacy/non-terminal — readiness is recomputed live, so the next `sp epic merge` retries fresh once the operator clears the conflict source.
 
 ### SQLite persistence
 
-Epic state persisted in `epic_runs` table:
+`epic_runs` table:
 - `epic_id` — bead epic ID
-- `status` — current lifecycle state
-- `status_json` — transition metadata (previous_status, transitioned_at_ms)
-- `updated_at_ms` — last state change timestamp
+- `status` — `merged` | `abandoned` for terminal records; soft `failed` markers may exist from prior transient failures and are recoverable
+- `status_json` — audit trail (transitions, reasons)
+- `updated_at_ms` — last write timestamp
 
-### Epic guard on `sp merge`
+### Per-chain merge
 
-`sp merge <chain-root>` checks `resolveChainEpicMembership()` and refuses if chain belongs to unresolved epic (`open`, `resolving`, `merge_ready`). This ensures wave-bound chains publish atomically via `sp epic merge`.
+`sp merge <chain-root>` is allowed for any PASS chain regardless of sibling-epic state. The original "refuse if epic unresolved" inverted gate was removed in the chain-lifecycle redesign — chains publish individually whenever their reviewer returns PASS and their executor is finalized. Use `sp epic merge` only when batching all epic chains together (atomic, topological order, tsc gate per merge).
 
 ## 11) Chain identity model (`chain-identity.ts`)
 

@@ -651,25 +651,32 @@ Source: latest xt report + `xt --help`; keep commands here, not full CLI surface
 
 ## Merge And Publication
 
-Standalone chain:
+Per-chain merge (works for standalone chains AND for any PASS chain inside an active epic):
 
 ```bash
 sp merge <chain-root-bead>
 ```
 
-Epic-owned chains:
+Batch publish all chains in an epic in dependency order with tsc gate between each:
 
 ```bash
 sp epic status <epic-id>
 sp epic merge <epic-id>
 ```
 
+Manual finalizer fallback when reviewer PASS arrived via resume (auto-finalize only fires on streaming output):
+
+```bash
+sp finalize <any-chain-job-id>     # cascades: closes ALL waiting keep-alive members of the chain
+```
+
 Rules:
 
 - Merge only after reviewer PASS unless operator explicitly accepts draft for follow-up work.
-- Use `sp epic merge` for unresolved epic chains; `sp merge` refuses those by design.
-- Do not manually `git merge` specialist branches.
-- If merge refuses because chain job is still `waiting`, consume result and either resume/stop/finalize that job deliberately.
+- Per-chain `sp merge` is allowed for any PASS chain regardless of sibling-epic state. Use `sp epic merge` only when batching all epic chains together (atomic publish, topological order, tsc gate per merge).
+- Do not manually `git merge` specialist branches — the redesign removed the conditions that previously forced manual fallback (sticky FAILED, inverted merge gates, missing PASS finalizer).
+- If merge refuses because a chain job is still `waiting`, run `sp finalize <any-job-in-chain>` — it cascades to close every waiting keep-alive member of that chain via `supervisor.finalizeWaitingJob()`.
+- If a previous `sp epic merge` failed (rebase conflict, dirty worktree) and persisted a soft `failed` marker, the next attempt retries fresh — only `merged` and `abandoned` are truly terminal. Just clear the conflict source.
 - If merge reports dirty worktree, inspect that worktree. Revert generated noise only when clearly unrelated; otherwise ask or re-dispatch.
 - Run or confirm required gates before closing root bead or epic.
 

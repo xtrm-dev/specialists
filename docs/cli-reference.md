@@ -534,22 +534,24 @@ specialists steer a1b2c3 "skip tests and isolate root cause"
 
 ## `specialists finalize`
 
-Manual recovery for keep-alive executor chains that reached reviewer PASS but whose auto-finalize did not run (e.g. supervisor restart between PASS and auto-finalize).
+Manual fallback for keep-alive chains that reached reviewer PASS but whose auto-finalize did not fire (auto-finalize watches the reviewer's streaming output; PASS delivered via `sp resume` does not stream and won't trigger it).
 
 ### Synopsis
 
 ```bash
-specialists finalize <chain-root-bead> [--json]
+specialists finalize <any-chain-job-id> [--json]
 ```
 
 ### Behavior
 
-Refuses to finalize chains whose executor job is not in `waiting` state, or whose latest reviewer output does not contain `Verdict: PASS`. Routes through `supervisor.finalizeWaitingJob()` (the same canonical path the auto-finalize uses) so chain readiness, status persistence, and FIFO close are atomic.
+Accepts any job id from the chain (executor, reviewer, debugger). Looks up the chain via `chain_id`, scans its members for a reviewer with `Verdict: PASS` (matches both plain and markdown-bold formats), then **cascades** — closes EVERY waiting keep-alive member of the chain via `supervisor.finalizeWaitingJob()` so chain readiness, status persistence, and FIFO close are atomic.
+
+Refuses if no reviewer in the chain has a PASS verdict, or if all chain members are already terminal.
 
 ### Exit codes
 
-- `0`: Chain finalized.
-- `1`: Chain not eligible (executor not waiting, no PASS verdict, or chain not found).
+- `0`: Chain finalized (one or more members transitioned waiting → done).
+- `1`: Chain not eligible (no reviewer with PASS verdict, no waiting members, or job not found).
 
 ---
 
@@ -1283,9 +1285,11 @@ Epic state is **derived live from chain readiness**, not a persisted state machi
 
 **Per-chain `sp merge <chain>` is allowed for any PASS chain regardless of sibling state** — Loop A from the prior chain-lifecycle deadlock is gone. Use `sp epic merge` only when batching all chains together.
 
-**Reviewer PASS auto-finalizes the keep-alive executor** via `supervisor.finalizeWaitingJob()`. If a chain's executor is still `waiting` after PASS (e.g. supervisor restarted before the auto-finalize fired), use `sp finalize <chain-root-bead>` for manual recovery.
+**Reviewer PASS auto-finalizes the keep-alive executor** via `supervisor.finalizeWaitingJob()` when the verdict appears in the reviewer's streaming output. PASS delivered via `sp resume` (not streamed) does not trigger auto-finalize — use `sp finalize <any-chain-job-id>` to cascade-close the chain in that case.
 
-`sp epic abandon` is the cleanup escape hatch for stuck epics. Live members require `--force`.
+**Persisted `failed` is recoverable.** A transient `sp epic merge` failure (rebase conflict, dirty worktree) writes a soft `failed` marker, but the next `sp epic merge` attempt retries fresh once the operator clears the conflict source. Only `merged` and `abandoned` are truly terminal. `validateEpicMergeReadiness` only blocks on those two.
+
+`sp epic abandon` is the cleanup escape hatch for genuinely-unrecoverable epics. Live members require `--force`.
 
 ### `sp epic list` Output
 

@@ -837,20 +837,16 @@ sp run validator --job d4e5f6 --bead unitAI-55d-validate
 
 ---
 
-## 18) `sp merge`: chain merge with epic guard
+## 18) `sp merge`: per-chain publication
 
-`sp merge` handles standalone chain merges. For wave-bound chains, use `sp epic merge`.
+`sp merge` publishes a single chain. The original "refuse if epic unresolved" inverted gate was removed in the chain-lifecycle redesign — per-chain merge is now allowed for any PASS chain regardless of sibling-epic state. Use `sp epic merge` only when batching all epic chains together.
 
-### Epic guard
+### When `sp merge` accepts a chain
 
-`sp merge <chain-root>` checks epic membership and refuses if chain belongs to unresolved epic (`open`, `resolving`, `merge_ready`).
-
-```
-Error: Chain unitAI-impl belongs to unresolved epic unitAI-3f7b (status: resolving).
-Use 'sp epic merge unitAI-3f7b' to publish all chains together.
-```
-
-This guard ensures wave-bound chains publish atomically via `sp epic merge`.
+- Chain has reviewer PASS verdict in its terminal state.
+- All chain jobs are terminal (executor closed via auto-finalize-on-streaming-PASS or `sp finalize <any-chain-job-id>` cascade).
+- Epic membership is allowed; the chain merges incrementally regardless of sibling state.
+- Epic has not been explicitly `merged` or `abandoned` (those two are the only blocking terminal states).
 
 ### Scope
 
@@ -858,10 +854,11 @@ This guard ensures wave-bound chains publish atomically via `sp epic merge`.
 - Merge a single chain-root branch (one bead → one branch)
 - Run TypeScript gate after merge
 - Optional rebuild (`--rebuild`) after merge
+- Optional PR mode (`--pr`)
 
 **What it does NOT include**:
-- Epic-owned chains (blocked by guard, use `sp epic merge`)
-- PR creation (use `sp merge --pr` or `sp epic merge --pr`)
+- Atomic batch publish across multiple chains (use `sp epic merge`)
+- Topological dependency ordering across chains (use `sp epic merge`)
 - Worktree cleanup after merge
 - Conflict auto-resolution
 
@@ -932,25 +929,28 @@ sp epic merge <epic-id> [--pr] [--rebuild] [--json]
 
 ### Behavior
 
-1. Reads epic state from observability SQLite
-2. Auto-transitions `resolving → merge_ready` if needed
-3. Verifies all chains are terminal
-4. Verifies latest reviewer verdict is PASS for each chain
+1. Reads epic record from observability SQLite (refuses only on `merged` / `abandoned`)
+2. Computes readiness live from chain state (no operator-driven `resolving → merge_ready` transition needed)
+3. Verifies all chains are terminal (executor finalized via auto-finalize-on-streaming-PASS or `sp finalize` cascade)
+4. Verifies latest reviewer verdict is PASS for each chain (matches plain or markdown-bold format)
 5. Topologically sorts chains by bead dependencies
 6. For each chain: `git merge <branch> --no-ff --no-edit`
 7. Runs `bunx tsc --noEmit` after each merge
 8. Creates PRs if `--pr` is set
-9. Updates epic state to `merged` on success
+9. Persists `merged` on success; on transient failure (rebase conflict, dirty worktree) writes a soft `failed` marker that the next attempt clears automatically
 
-### Epic lifecycle
+### Epic lifecycle (derived model)
 
 ```
-open → resolving → merge_ready → merged
-                 ↘ failed
-                 ↘ abandoned
+chains in flight ──── derive ──── blocked / failed / merge_ready
+                            │
+                            ├── merged (persisted, terminal)
+                            └── abandoned (persisted, terminal)
 ```
 
-See `docs/epic-readiness.md` for full readiness evaluation.
+Only `merged` and `abandoned` are persisted as terminal markers. `blocked`, `failed`, and `merge_ready` are recomputed live from chain readiness on every read. A persisted soft `failed` marker (from a transient publish failure) is recoverable — the next `sp epic merge` retries fresh.
+
+See `docs/cli-reference.md` and `docs/ARCHITECTURE.md` §10 for the full derived-readiness rules.
 
 ### Examples
 
