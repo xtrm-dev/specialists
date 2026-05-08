@@ -192,8 +192,8 @@ const MODEL_CONTEXT_WINDOWS: Array<{ matcher: (model: string) => boolean; window
   { matcher: (model) => model.includes('claude'), windowTokens: 200_000 },
 ];
 
-const TERMINAL_COMPLIANCE_VERDICT_REGEX = /## Compliance Verdict[\s\S]*?- Verdict: (PASS|PARTIAL|FAIL)/i;
-const PASS_COMPLIANCE_VERDICT_REGEX = /## Compliance Verdict[\s\S]*?- Verdict: PASS/i;
+const TERMINAL_COMPLIANCE_VERDICT_REGEX = /## Compliance Verdict[\s\S]*?- Verdict:\s*\**\s*(PASS|PARTIAL|FAIL)\s*\**/i;
+const PASS_COMPLIANCE_VERDICT_REGEX = /## Compliance Verdict[\s\S]*?- Verdict:\s*\**\s*PASS\s*\**/i;
 
 function getModelContextWindow(model: string | undefined): number | undefined {
   if (!model) return undefined;

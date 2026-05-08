@@ -124,6 +124,17 @@ describe('finalize CLI', () => {
     exitSpy.mockRestore();
   });
 
+  it('matches markdown-bold verdict (- Verdict: **PASS**)', async () => {
+    seedChain({ reviewerVerdict: 'PASS', executorWaiting: true, reviewerWaiting: true });
+    state.results.set('rev-1', '## Compliance Verdict\n- Verdict: **PASS**\n');
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    const { run } = await import('../../../src/cli/finalize.js');
+    await run();
+
+    expect(state.finalizedIds.sort()).toEqual(['exec-1', 'rev-1']);
+  });
+
   it('refuses when chain has no waiting jobs (already finalized)', async () => {
     seedChain({ reviewerVerdict: 'PASS', executorWaiting: false, reviewerWaiting: false });
     const stderrWrites: string[] = [];

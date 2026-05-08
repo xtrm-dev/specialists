@@ -5,7 +5,7 @@ import { isProcessAlive } from './process-liveness.js';
 
 const ACTIVE_JOB_STATUSES = new Set<SupervisorStatus['status']>(['starting', 'running', 'waiting']);
 const TERMINAL_JOB_STATUSES = new Set<SupervisorStatus['status']>(['done', 'error']);
-const REVIEWER_VERDICT_REGEX = /Verdict:\s*(PASS|PARTIAL|FAIL)/i;
+const REVIEWER_VERDICT_REGEX = /Verdict:\s*\**\s*(PASS|PARTIAL|FAIL)\s*\**/i;
 
 export type ReviewerVerdict = 'pass' | 'partial' | 'fail' | 'missing';
 export type ChainReadinessState = 'pending' | 'blocked' | 'pass' | 'failed';

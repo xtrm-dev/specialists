@@ -24127,7 +24127,7 @@ var init_epic_readiness = __esm(() => {
   init_process_liveness();
   ACTIVE_JOB_STATUSES = new Set(["starting", "running", "waiting"]);
   TERMINAL_JOB_STATUSES = new Set(["done", "error"]);
-  REVIEWER_VERDICT_REGEX = /Verdict:\s*(PASS|PARTIAL|FAIL)/i;
+  REVIEWER_VERDICT_REGEX = /Verdict:\s*\**\s*(PASS|PARTIAL|FAIL)\s*\**/i;
 });
 
 // src/specialist/chain-identity.ts
@@ -25950,8 +25950,8 @@ var init_supervisor = __esm(() => {
     { matcher: (model) => model.includes("qwen3.5") || model.includes("glm-5"), windowTokens: 128000 },
     { matcher: (model) => model.includes("claude"), windowTokens: 200000 }
   ];
-  TERMINAL_COMPLIANCE_VERDICT_REGEX = /## Compliance Verdict[\s\S]*?- Verdict: (PASS|PARTIAL|FAIL)/i;
-  PASS_COMPLIANCE_VERDICT_REGEX = /## Compliance Verdict[\s\S]*?- Verdict: PASS/i;
+  TERMINAL_COMPLIANCE_VERDICT_REGEX = /## Compliance Verdict[\s\S]*?- Verdict:\s*\**\s*(PASS|PARTIAL|FAIL)\s*\**/i;
+  PASS_COMPLIANCE_VERDICT_REGEX = /## Compliance Verdict[\s\S]*?- Verdict:\s*\**\s*PASS\s*\**/i;
   AUTO_COMMIT_NOISE_PREFIXES = [".xtrm/", ".wolf/", ".specialists/jobs/", ".beads/"];
 });
 
@@ -39286,7 +39286,7 @@ var green13 = (s) => `\x1B[32m${s}\x1B[0m`, red7 = (s) => `\x1B[31m${s}\x1B[0m`,
 var init_finalize = __esm(() => {
   init_supervisor();
   init_job_root();
-  PASS_COMPLIANCE_VERDICT_REGEX2 = /## Compliance Verdict[\s\S]*?- Verdict: PASS/i;
+  PASS_COMPLIANCE_VERDICT_REGEX2 = /## Compliance Verdict[\s\S]*?- Verdict:\s*\**\s*PASS\s*\**/i;
 });
 
 // src/cli/attach.ts
