@@ -192,6 +192,9 @@ sp ps --help
 sp feed --help
 sp result --help
 sp resume --help
+sp steer --help
+sp stop --help
+sp finalize --help
 sp merge --help
 sp epic --help
 ```
@@ -500,7 +503,13 @@ bd dep add <review> <impl>
 specialists run reviewer --bead <review> --job <exec-job> --context-depth 3
 specialists result <review-job>
 
-# 6. Publish after reviewer PASS
+# 6. Cascade-finalize the chain after reviewer PASS
+# (auto-finalize fires automatically when reviewer PASS appears in
+# streaming output. PASS delivered via `sp resume` does not stream —
+# run sp finalize to close any waiting keep-alive members.)
+sp finalize <review-job>     # accepts any chain member; cascades to all waiting members
+
+# 7. Publish
 sp merge <impl>
 bd close <task> --reason "Reviewer PASS; merged."
 ```
@@ -533,9 +542,14 @@ specialists run executor --bead <impl-b> --context-depth 3
 specialists run reviewer --bead <review-a> --job <exec-a-job> --context-depth 3
 specialists run reviewer --bead <review-b> --job <exec-b-job> --context-depth 3
 
+# Per-chain cascade-finalize (only needed if PASS arrived via sp resume;
+# auto-finalize handles the streaming case automatically)
+sp finalize <review-a-job>
+sp finalize <review-b-job>
+
 # Publish
-sp epic status <epic>
-sp epic merge <epic>
+sp epic status <epic>          # verify derived state shows merge_ready
+sp epic merge <epic>           # batch publish all chains in dependency order with tsc gate per merge
 ```
 
 Use `--epic <id>` when job belongs to epic but bead is not direct child. Avoid parallel executors on same file; sequence them or consolidate work.
@@ -552,8 +566,8 @@ optional code-sanity/security-auditor -> advisory findings
 reviewer -> PASS | PARTIAL | FAIL
 ```
 
-- `PASS`: verify expected commit/diff, then publish.
-- `PARTIAL`: resume same executor/debugger with exact findings, then re-review.
+- `PASS`: verify expected commit/diff. If reviewer's PASS appeared in its streaming output, auto-finalize already closed the chain — go straight to `sp merge` / `sp epic merge`. If PASS arrived via `sp resume`, run `sp finalize <any-chain-job-id>` first to cascade-close any waiting keep-alive members, then publish.
+- `PARTIAL`: resume same executor/debugger with exact findings, then re-review (`sp resume <reviewer-job>`).
 - `FAIL`: stop and decide whether to replace chain, re-scope bead, or ask operator if judgment is required.
 
 Prefer resume over new fix executor when original job is waiting and context is healthy:
@@ -698,6 +712,17 @@ Then choose one action:
 - Re-scope bead if scope was wrong.
 - Escalate if human decision is needed.
 - Replace specialist only if failure mode repeats.
+
+### Common failure patterns (and the canonical fix)
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `sp merge` refuses with "non-terminal chain jobs" after reviewer PASS | Auto-finalize did not fire (PASS arrived via `sp resume`, not streaming) | `sp finalize <any-chain-job-id>` — cascades to close every waiting keep-alive member |
+| `sp epic merge` says epic is "in terminal state 'failed'" | Prior `sp epic merge` hit a transient error (rebase conflict, dirty worktree) and persisted a soft `failed` marker | Clear the original conflict source, then re-run `sp epic merge` — it retries fresh, only `merged`/`abandoned` truly block |
+| `sp epic merge` says "rebase failed: unstaged changes" in a worktree | bd auto-export or other tooling left uncommitted changes inside the worktree | `cd .worktrees/<bead>/<bead>-executor && git stash push -u -m epic-merge-prep`, then re-run from main repo |
+| `sp ps` shows huge job/epic counts after sessions | observability sqlite retains terminal records (no built-in purge yet) | `sp clean --all` purges job dirs; sqlite truncate of `specialist_jobs` / `epic_runs` / `specialist_events` if display matters |
+| Reviewer keeps returning PARTIAL on functional contracts already met | Reviewer demanding tool-event evidence (e.g. `gitnexus_impact`) the executor never recorded | Operator override after verifying SUCCESS criteria are factually met — iteration cannot satisfy a process-evidence gate that was never going to be recorded |
+| Multiple `sp run` background launches drop silently under shell parallelism | Known launch-ceremony race | Re-check `sp ps` after each dispatch and retry the missing one; serialize when reliability matters |
 
 ## What Orchestrator Does Differently Because Of This Skill
 
