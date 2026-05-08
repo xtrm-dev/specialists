@@ -51,6 +51,11 @@ export declare class JobRegistry {
         ok: boolean;
         error?: string;
     }>;
+    /** Finalize a waiting keep-alive session through same terminal path. */
+    finalize(id: string): Promise<{
+        ok: boolean;
+        error?: string;
+    }>;
     /** Send a mid-run steering message to the Pi agent for this job. */
     steer(id: string, message: string): Promise<{
         ok: boolean;

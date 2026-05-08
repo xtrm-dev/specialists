@@ -5,43 +5,25 @@ var __getProtoOf = Object.getPrototypeOf;
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
-function __accessProp(key) {
-  return this[key];
-}
-var __toESMCache_node;
-var __toESMCache_esm;
 var __toESM = (mod, isNodeMode, target) => {
-  var canCache = mod != null && typeof mod === "object";
-  if (canCache) {
-    var cache = isNodeMode ? __toESMCache_node ??= new WeakMap : __toESMCache_esm ??= new WeakMap;
-    var cached = cache.get(mod);
-    if (cached)
-      return cached;
-  }
   target = mod != null ? __create(__getProtoOf(mod)) : {};
   const to = isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
   for (let key of __getOwnPropNames(mod))
     if (!__hasOwnProp.call(to, key))
       __defProp(to, key, {
-        get: __accessProp.bind(mod, key),
+        get: () => mod[key],
         enumerable: true
       });
-  if (canCache)
-    cache.set(mod, to);
   return to;
 };
 var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports);
-var __returnValue = (v) => v;
-function __exportSetter(name, newValue) {
-  this[name] = __returnValue.bind(null, newValue);
-}
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, {
       get: all[name],
       enumerable: true,
       configurable: true,
-      set: __exportSetter.bind(all, name)
+      set: (newValue) => all[name] = () => newValue
     });
 };
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
@@ -7808,7 +7790,7 @@ var require_core = __commonJS((exports) => {
     constructor(opts = {}) {
       this.schemas = {};
       this.refs = {};
-      this.formats = {};
+      this.formats = Object.create(null);
       this._compilations = new Set;
       this._loading = {};
       this._cache = new Map;
@@ -10266,7 +10248,7 @@ var require_formats = __commonJS((exports) => {
   }
   var TIME = /^(\d\d):(\d\d):(\d\d(?:\.\d+)?)(z|([+-])(\d\d)(?::?(\d\d))?)?$/i;
   function getTime(strictTimeZone) {
-    return function time3(str) {
+    return function time(str) {
       const matches = TIME.exec(str);
       if (!matches)
         return false;
@@ -21976,7 +21958,7 @@ function validateBeforeRun(spec, permissionLevel) {
       }
     } else {
       const binary = run.split(" ")[0];
-      if (!commandExists(binary)) {
+      if (binary && !SHELL_BUILTINS.has(binary) && !commandExists(binary)) {
         errors5.push(`  \u2717 skills.scripts: command not found on PATH: ${binary}`);
       }
     }
@@ -22852,13 +22834,41 @@ ${outputContractWarnings.map((msg) => `  \u26A0 ${msg}`).join(`
     return jobId;
   }
 }
-var PERMISSION_GATED_TOOLS, RETRY_BASE_DELAY_MS = 1000, RETRY_MAX_JITTER = 0.2, BASE_OUTPUT_SCHEMA, IMPACT_REPORT_SCHEMA, OUTPUT_TYPE_SCHEMA_EXTENSIONS, OUTPUT_TYPE_GUIDANCE;
+var SHELL_BUILTINS, PERMISSION_GATED_TOOLS, RETRY_BASE_DELAY_MS = 1000, RETRY_MAX_JITTER = 0.2, BASE_OUTPUT_SCHEMA, IMPACT_REPORT_SCHEMA, OUTPUT_TYPE_SCHEMA_EXTENSIONS, OUTPUT_TYPE_GUIDANCE;
 var init_runner = __esm(() => {
   init_session();
   init_circuitBreaker();
   init_mandatory_rules();
   init_beads();
   init_memory_retrieval();
+  SHELL_BUILTINS = new Set([
+    "if",
+    "then",
+    "else",
+    "elif",
+    "fi",
+    "for",
+    "while",
+    "until",
+    "do",
+    "done",
+    "case",
+    "esac",
+    "select",
+    "in",
+    "function",
+    "return",
+    "break",
+    "continue",
+    ":",
+    ".",
+    "true",
+    "false",
+    "[",
+    "[[",
+    "{",
+    "("
+  ]);
   PERMISSION_GATED_TOOLS = {
     bash: ["LOW", "MEDIUM", "HIGH"],
     edit: ["MEDIUM", "HIGH"],
@@ -23750,19 +23760,9 @@ function resolveChainId(status) {
   return;
 }
 function evaluateEpicMergeReadiness(input) {
-  const isEligibleState = input.epicStatus === "merge_ready";
   const blockingChains = input.chainStatuses.filter((chain) => chain.hasRunningJob).map((chain) => chain.chainId);
-  const isReady = isEligibleState && blockingChains.length === 0;
-  if (!isEligibleState) {
-    return {
-      epicId: input.epicId,
-      epicStatus: input.epicStatus,
-      isReady,
-      blockingChains,
-      summary: `Epic ${input.epicId} is ${input.epicStatus}; expected merge_ready before publication.`
-    };
-  }
-  if (blockingChains.length > 0) {
+  const isReady = blockingChains.length === 0;
+  if (!isReady) {
     return {
       epicId: input.epicId,
       epicStatus: input.epicStatus,
@@ -23771,12 +23771,21 @@ function evaluateEpicMergeReadiness(input) {
       summary: `Epic ${input.epicId} is blocked by active chains: ${blockingChains.join(", ")}.`
     };
   }
+  if (input.epicStatus === "merged" || input.epicStatus === "abandoned") {
+    return {
+      epicId: input.epicId,
+      epicStatus: input.epicStatus,
+      isReady,
+      blockingChains,
+      summary: `Epic ${input.epicId} is ${input.epicStatus}; live chains are terminal.`
+    };
+  }
   return {
     epicId: input.epicId,
     epicStatus: input.epicStatus,
     isReady,
     blockingChains,
-    summary: `Epic ${input.epicId} is merge-ready and all chains are terminal.`
+    summary: `Epic ${input.epicId} is live-ready and all chains are terminal.`
   };
 }
 function appendEpicTransitionAudit(statusJson, entry) {
@@ -23799,9 +23808,6 @@ function appendEpicTransitionAudit(statusJson, entry) {
     ...parsed,
     transitions: [...previous, entry]
   });
-}
-function summarizeEpicTransition(epicId, from, to) {
-  return `Epic ${epicId}: ${from} -> ${to}`;
 }
 var EPIC_TERMINAL_STATES, VALID_EPIC_TRANSITIONS;
 var init_epic_lifecycle = __esm(() => {
@@ -23994,79 +24000,55 @@ function evaluatePrepReadiness(prepJobs) {
     blocker_job_ids: [...running, ...failed].map((job) => job.id)
   };
 }
-function toReadinessState(persistedState, prep, chains) {
-  if (persistedState === "merged")
-    return "merged";
-  if (persistedState === "abandoned")
-    return "abandoned";
-  const hasBlockingPrep = prep.running > 0;
-  const hasFailedPrep = prep.failed > 0;
+function deriveEpicReadinessState(prep, chains) {
+  const hasActivePrep = prep.running > 0;
   const hasPendingChain = chains.some((chain) => chain.state === "pending");
   const hasBlockedChain = chains.some((chain) => chain.state === "blocked");
+  const hasFailedPrep = prep.failed > 0;
   const hasFailedChain = chains.some((chain) => chain.state === "failed");
   const allChainsPass = chains.length === 0 || chains.every((chain) => chain.state === "pass");
+  if (hasActivePrep || hasPendingChain)
+    return "resolving";
   if (hasFailedPrep || hasFailedChain)
     return "failed";
-  if (persistedState === "failed" && allChainsPass)
-    return "merge_ready";
-  if (persistedState === "failed")
-    return "failed";
-  if (hasBlockingPrep || hasPendingChain)
-    return persistedState === "resolving" ? "resolving" : "unresolved";
   if (hasBlockedChain)
-    return persistedState === "resolving" ? "resolving" : "blocked";
+    return "blocked";
   if (allChainsPass)
     return "merge_ready";
   return "blocked";
 }
-function toNextState(persistedState, readinessState) {
+function deriveEpicNextState(persistedState, readinessState) {
   if (persistedState === "merged" || persistedState === "abandoned")
     return persistedState;
-  if (readinessState === "failed") {
-    if (persistedState === "merge_ready") {
-      return transitionEpicState("merge_ready", "failed");
-    }
-    if (persistedState === "resolving") {
-      return transitionEpicState("resolving", "failed");
-    }
-    return persistedState;
-  }
-  if (readinessState === "merge_ready") {
-    if (persistedState === "failed")
-      return "merge_ready";
-    if (persistedState === "open")
-      return transitionEpicState("open", "resolving");
-    if (persistedState === "resolving")
-      return transitionEpicState("resolving", "merge_ready");
-    return persistedState;
-  }
-  if (persistedState === "open" && (readinessState === "unresolved" || readinessState === "resolving" || readinessState === "blocked")) {
-    return transitionEpicState("open", "resolving");
-  }
-  if (persistedState === "merge_ready" && (readinessState === "unresolved" || readinessState === "resolving" || readinessState === "blocked")) {
-    return transitionEpicState("merge_ready", "resolving");
-  }
-  return persistedState;
+  if (readinessState === "merge_ready")
+    return "merge_ready";
+  if (readinessState === "failed")
+    return "failed";
+  return "resolving";
 }
-function buildSummaryLine(epicId, readinessState, prep, chains) {
+function buildSummaryLine(epicId, persistedState, readinessState, prep, chains) {
   const chainPass = chains.filter((chain) => chain.state === "pass").length;
   const chainTotal = chains.length;
-  const blockedChains = chains.filter((chain) => chain.state === "blocked" || chain.state === "pending").map((chain) => chain.chain_id);
+  const blockedChains = chains.filter((chain) => chain.state === "blocked" || chain.state === "pending" || chain.state === "failed").map((chain) => chain.chain_id);
+  const failedChains = chains.filter((chain) => chain.state === "failed").map((chain) => chain.chain_id);
   const prepSegment = `prep done=${prep.done}/${prep.total} running=${prep.running} failed=${prep.failed}`;
   const chainSegment = `chains pass=${chainPass}/${chainTotal}`;
-  if (blockedChains.length > 0) {
-    return `Epic ${epicId}: ${readinessState} (${prepSegment}; ${chainSegment}; blocked=${blockedChains.join(", ")})`;
-  }
-  return `Epic ${epicId}: ${readinessState} (${prepSegment}; ${chainSegment})`;
+  const stateSegment = persistedState === readinessState ? readinessState : `${readinessState} (stored=${persistedState})`;
+  const segments = [prepSegment, chainSegment];
+  if (blockedChains.length > 0)
+    segments.push(`blocked=${blockedChains.join(", ")}`);
+  if (failedChains.length > 0)
+    segments.push(`failed=${failedChains.join(", ")}`);
+  return `Epic ${epicId}: ${stateSegment} (${segments.join("; ")})`;
 }
 function evaluateEpicReadinessSummary(input) {
   const prep = evaluatePrepReadiness(input.prepJobs);
   const chains = input.chainInputs.map((chain) => evaluateChainReadiness(chain.chain_id, chain.jobs, chain.chain_root_bead_id));
-  const readinessState = toReadinessState(input.persistedState, prep, chains);
-  const nextState = toNextState(input.persistedState, readinessState);
+  const readinessState = deriveEpicReadinessState(prep, chains);
+  const nextState = deriveEpicNextState(input.persistedState, readinessState);
   const blockers = [
     ...prep.blocker_job_ids.map((jobId) => `prep:${jobId}`),
-    ...chains.filter((chain) => chain.state === "pending" || chain.state === "blocked").map((chain) => `chain:${chain.chain_id}`)
+    ...chains.filter((chain) => chain.state === "pending" || chain.state === "blocked" || chain.state === "failed").map((chain) => `chain:${chain.chain_id}`)
   ];
   return {
     epic_id: input.epicId,
@@ -24077,7 +24059,7 @@ function evaluateEpicReadinessSummary(input) {
     prep,
     chains,
     blockers,
-    summary: buildSummaryLine(input.epicId, readinessState, prep, chains)
+    summary: buildSummaryLine(input.epicId, input.persistedState, readinessState, prep, chains)
   };
 }
 function loadEpicReadinessSummary(sqlite, epicId) {
@@ -24117,7 +24099,7 @@ function loadEpicReadinessSummary(sqlite, epicId) {
 function syncEpicStateFromReadiness(sqlite, summary) {
   const now = Date.now();
   const existing = sqlite.readEpicRun(summary.epic_id);
-  const healedFromFailed = summary.persisted_state === "failed" && summary.readiness_state === "merge_ready";
+  const recoveredFromLegacyFailure = summary.persisted_state === "failed" && summary.readiness_state === "merge_ready";
   const nextRecord = {
     epic_id: summary.epic_id,
     status: summary.next_state,
@@ -24132,17 +24114,16 @@ function syncEpicStateFromReadiness(sqlite, summary) {
       chains: summary.chains,
       summary: summary.summary,
       evaluated_at_ms: now,
-      note: healedFromFailed ? "epic reconciler: healed failed -> merge_ready after chain merge" : undefined
+      note: recoveredFromLegacyFailure ? "derived readiness healed legacy failed row after live chains turned pass" : undefined
     })
   };
-  if (summary.can_transition || healedFromFailed || !existing) {
+  if (summary.can_transition || recoveredFromLegacyFailure || !existing) {
     sqlite.upsertEpicRun(nextRecord);
   }
   return nextRecord;
 }
 var ACTIVE_JOB_STATUSES, TERMINAL_JOB_STATUSES, REVIEWER_VERDICT_REGEX;
 var init_epic_readiness = __esm(() => {
-  init_epic_lifecycle();
   init_process_liveness();
   ACTIVE_JOB_STATUSES = new Set(["starting", "running", "waiting"]);
   TERMINAL_JOB_STATUSES = new Set(["done", "error"]);
@@ -24711,6 +24692,32 @@ class Supervisor {
       return [];
     }
   }
+  readResult(id) {
+    const path = this.resultPath(id);
+    if (!existsSync10(path))
+      return null;
+    try {
+      return readFileSync8(path, "utf-8");
+    } catch {
+      return null;
+    }
+  }
+  finalizeWaitingJob(id) {
+    const currentStatus = this.readStatus(id);
+    if (!currentStatus)
+      return null;
+    if (currentStatus.status !== "waiting")
+      return currentStatus;
+    if (currentStatus.fifo_path) {
+      writeFileSync3(currentStatus.fifo_path, JSON.stringify({ type: "close" }) + `
+`, { flag: "a" });
+    }
+    const finalized = this.updateJobStatus(id, "done");
+    if (!finalized)
+      return null;
+    this.aggregateJobMetricsBestEffort(id);
+    return finalized;
+  }
   emitMetaEvent(jobId, model, backend) {
     if (this.isDisposed)
       return;
@@ -25169,6 +25176,7 @@ class Supervisor {
       }));
     };
     const shouldAutoCloseReadOnlyKeepAlive = (output) => isReadOnlySpecialist && TERMINAL_COMPLIANCE_VERDICT_REGEX.test(output);
+    const shouldAutoFinalizeKeepAlive = (output) => PASS_COMPLIANCE_VERDICT_REGEX.test(output);
     const shouldWriteExternalBeadNotes = runOptions.beadsWriteNotes ?? true;
     let skipFinalKeepAliveInputBeadAppend = false;
     const appendResultToInputBead = (params) => {
@@ -25680,6 +25688,8 @@ ${appendError}
       if (keepAliveSession) {
         if (shouldAutoCloseReadOnlyKeepAlive(finalResult.output)) {
           await closeKeepAliveSession();
+        } else if (shouldAutoFinalizeKeepAlive(finalResult.output)) {
+          await closeKeepAliveSession();
         } else {
           appendResultToInputBead({
             output: finalResult.output,
@@ -25901,7 +25911,7 @@ ${appendError}
     }
   }
 }
-var JOB_TTL_DAYS, STALL_DETECTION_DEFAULTS, GITNEXUS_RISK_ORDER, MODEL_CONTEXT_WINDOWS, TERMINAL_COMPLIANCE_VERDICT_REGEX, AUTO_COMMIT_NOISE_PREFIXES, STATUS_WATCHDOG_INTERVAL_MS = 5000, STATUS_WATCHDOG_STALE_AFTER_MS = 30000;
+var JOB_TTL_DAYS, STALL_DETECTION_DEFAULTS, GITNEXUS_RISK_ORDER, MODEL_CONTEXT_WINDOWS, TERMINAL_COMPLIANCE_VERDICT_REGEX, PASS_COMPLIANCE_VERDICT_REGEX, AUTO_COMMIT_NOISE_PREFIXES, STATUS_WATCHDOG_INTERVAL_MS = 5000, STATUS_WATCHDOG_STALE_AFTER_MS = 30000;
 var init_supervisor = __esm(() => {
   init_job_root();
   init_timeline_events();
@@ -25930,6 +25940,7 @@ var init_supervisor = __esm(() => {
     { matcher: (model) => model.includes("claude"), windowTokens: 200000 }
   ];
   TERMINAL_COMPLIANCE_VERDICT_REGEX = /## Compliance Verdict[\s\S]*?- Verdict: (PASS|PARTIAL|FAIL)/i;
+  PASS_COMPLIANCE_VERDICT_REGEX = /## Compliance Verdict[\s\S]*?- Verdict: PASS/i;
   AUTO_COMMIT_NOISE_PREFIXES = [".xtrm/", ".wolf/", ".specialists/jobs/", ".beads/"];
 });
 
@@ -30226,7 +30237,7 @@ function checkEpicUnresolvedGuard(chainRootBeadId) {
     return {
       blocked: false,
       epicId: membership.epicId,
-      message: `Warning: unable to verify epic ${membership.epicId} status (observability DB unavailable). Proceeding with chain merge.`
+      message: `Warning: unable to verify epic ${membership.epicId} readiness (observability DB unavailable). Proceeding with chain merge.`
     };
   }
   try {
@@ -30242,12 +30253,25 @@ function checkEpicUnresolvedGuard(chainRootBeadId) {
     if (!isEpicUnresolvedState(status)) {
       return { blocked: false, epicId: membership.epicId, epicStatus: status };
     }
+    const summary = loadEpicReadinessSummary(sqliteClient, membership.epicId);
+    const chain = summary.chains.find((entry) => entry.chain_root_bead_id === chainRootBeadId || entry.chain_id === chainRootBeadId);
+    if (!chain) {
+      return {
+        blocked: true,
+        epicId: membership.epicId,
+        epicStatus: status,
+        message: `Chain ${chainRootBeadId} belongs to epic ${membership.epicId} but has no derived readiness record. Use 'sp epic status ${membership.epicId}' to inspect migration state.`
+      };
+    }
+    if (chain.state === "pass") {
+      return { blocked: false, epicId: membership.epicId, epicStatus: status };
+    }
     return {
       blocked: true,
       epicId: membership.epicId,
       epicStatus: status,
-      message: `Chain ${chainRootBeadId} belongs to unresolved epic ${membership.epicId} (status: ${status}).
-Use 'sp epic merge ${membership.epicId}' to publish all chains together, or 'sp epic status ${membership.epicId}' to inspect the epic state.`
+      message: `Chain ${chainRootBeadId} blocked by derived readiness: ${chain.blocking_reason ?? chain.state}.
+Use 'sp epic status ${membership.epicId}' to inspect epic state.`
     };
   } finally {
     sqliteClient.close();
@@ -30817,6 +30841,7 @@ async function run13() {
 var TERMINAL_STATUSES, NOISE_PATH_PREFIXES, MERGE_DIRTY_IGNORE_PREFIXES;
 var init_merge = __esm(() => {
   init_observability_sqlite();
+  init_epic_readiness();
   init_epic_reconciler();
   init_epic_lifecycle();
   TERMINAL_STATUSES = new Set(["done", "error", "cancelled"]);
@@ -34899,7 +34924,6 @@ var exports_epic = {};
 __export(exports_epic, {
   handleEpicSyncCommand: () => handleEpicSyncCommand,
   handleEpicStatusCommand: () => handleEpicStatusCommand,
-  handleEpicResolveCommand: () => handleEpicResolveCommand,
   handleEpicMergeCommand: () => handleEpicMergeCommand,
   handleEpicListCommand: () => handleEpicListCommand,
   handleEpicCommand: () => handleEpicCommand,
@@ -34983,25 +35007,6 @@ function parseStatusOptions(argv) {
     }
   }
   return { epicId, json };
-}
-function parseResolveOptions(argv) {
-  const epicId = parseEpicId(argv);
-  let dryRun = false;
-  let json = false;
-  for (const argument of argv) {
-    if (argument === "--dry-run") {
-      dryRun = true;
-      continue;
-    }
-    if (argument === "--json") {
-      json = true;
-      continue;
-    }
-    if (argument.startsWith("-") && argument !== "--dry-run" && argument !== "--json") {
-      throw new Error(`Unknown option: ${argument}`);
-    }
-  }
-  return { epicId, dryRun, json };
 }
 function parseSyncOptions(argv) {
   const epicId = parseEpicId(argv);
@@ -35150,9 +35155,6 @@ function validateEpicMergeReadiness(context) {
   if (isEpicTerminalState(epicState)) {
     throw new Error(`Epic ${context.epicId} is already in terminal state '${epicState}'. No further merges allowed.`);
   }
-  if (epicState !== "resolving" && epicState !== "merge_ready") {
-    throw new Error(`Epic ${context.epicId} is in state '${epicState}'. Must be 'resolving' or 'merge_ready' before publication.`);
-  }
   const chainStatuses = [...context.chainJobStatuses.entries()].map(([chainId, status]) => ({
     chainId,
     hasRunningJob: status.hasRunningJob
@@ -35278,75 +35280,6 @@ async function handleEpicListCommand(argv) {
     sqlite.close();
   }
 }
-async function handleEpicResolveCommand(argv) {
-  let options;
-  try {
-    options = parseResolveOptions(argv);
-  } catch (error2) {
-    const message = error2 instanceof Error ? error2.message : String(error2);
-    console.error(message);
-    console.error("Usage: specialists epic resolve <epic-id> [--dry-run] [--json]");
-    process.exit(1);
-  }
-  const sqlite = createObservabilitySqliteClient();
-  if (!sqlite) {
-    const message = "Observability SQLite database not available. Run `sp db setup` first.";
-    if (options.json) {
-      console.log(JSON.stringify({ error: message }, null, 2));
-    } else {
-      console.error(message);
-    }
-    process.exit(1);
-  }
-  try {
-    const now = Date.now();
-    const existing = sqlite.readEpicRun(options.epicId);
-    const fromState = existing?.status ?? "open";
-    let toState;
-    try {
-      toState = transitionEpicState(fromState, "resolving");
-    } catch (error2) {
-      const message = error2 instanceof Error ? error2.message : String(error2);
-      if (options.json) {
-        console.log(JSON.stringify({ epic_id: options.epicId, from_state: fromState, error: message }, null, 2));
-      } else {
-        console.error(`Resolve blocked: ${message}`);
-      }
-      process.exit(1);
-      return;
-    }
-    if (!options.dryRun) {
-      sqlite.upsertEpicRun({
-        epic_id: options.epicId,
-        status: toState,
-        status_json: JSON.stringify({
-          epic_id: options.epicId,
-          status: toState,
-          previous_status: fromState,
-          transitioned_at_ms: now
-        }),
-        updated_at_ms: now
-      });
-    }
-    const transitionSummary = summarizeEpicTransition(options.epicId, fromState, toState);
-    if (options.json) {
-      console.log(JSON.stringify({
-        epic_id: options.epicId,
-        from_state: fromState,
-        to_state: toState,
-        dry_run: options.dryRun,
-        summary: transitionSummary
-      }, null, 2));
-      return;
-    }
-    console.log(transitionSummary);
-    if (options.dryRun) {
-      console.log("(dry-run: no state persisted)");
-    }
-  } finally {
-    sqlite.close();
-  }
-}
 async function handleEpicMergeCommand(argv) {
   let options;
   try {
@@ -35383,14 +35316,6 @@ async function handleEpicMergeCommand(argv) {
     process.exit(1);
   }
   const fromState = currentState;
-  if (currentState === "resolving") {
-    const nextState = transitionEpicState(currentState, "merge_ready");
-    updateEpicState(context.epicId, currentState, nextState);
-    if (!options.json) {
-      console.log(summarizeEpicTransition(context.epicId, currentState, nextState));
-    }
-    currentState = nextState;
-  }
   let mergedChains = [];
   let mergeError;
   let toState = currentState;
@@ -35563,12 +35488,7 @@ async function handleEpicStatusCommand(argv) {
     }
     console.log("");
     console.log(`Epic: ${options.epicId}`);
-    if (epicRecord) {
-      console.log(`State: ${epicRecord.status}`);
-      console.log(`Updated: ${new Date(epicRecord.updated_at_ms).toISOString()}`);
-    } else {
-      console.log("State: (not tracked in SQLite, defaults to open)");
-    }
+    console.log(`State: ${epicRecord?.status ?? "(derived)"}`);
     console.log(`Readiness: ${readiness.isReady ? "ready" : "blocked"}`);
     console.log(`Summary: ${readiness.summary}`);
     console.log("");
@@ -35597,22 +35517,21 @@ async function handleEpicCommand(argv) {
   if (!subcommand || subcommand === "--help" || subcommand === "-h") {
     console.log([
       "",
-      "Usage: specialists epic <list|status|resolve|sync|abandon|merge> [options]",
+      "Usage: specialists epic <list|status|sync|abandon|merge> [options]",
       "",
       "Commands:",
-      "  list [--unresolved] [--json]                    List epics with lifecycle and readiness summary",
-      "  status <epic-id> [--json]                       Show epic state, chain statuses, and merge readiness",
-      "  resolve <epic-id> [--dry-run] [--json]          Transition epic from open to resolving",
-      "  sync <epic-id> [--apply] [--json]                Reconcile epic drift (dry-run by default)",
+      "  list [--unresolved] [--json]                    List epics with readiness summary",
+      "  status <epic-id> [--json]                       Show derived readiness and chain status",
+      "  sync <epic-id> [--apply] [--json]               Reconcile epic drift (dry-run by default)",
       "  abandon <epic-id> --reason <text> [--force] [--json]  Transition epic to abandoned",
       "  merge <epic-id> [--rebuild] [--pr] [--json]     Publish epic-owned chains in dependency order",
       "",
-      "Epic lifecycle states:",
-      "  open        \u2192 resolving \u2192 merge_ready \u2192 merged",
-      "  (any)       \u2192 failed / abandoned (terminal)",
+      "Epic readiness:",
+      "  status reflects derived readiness from live chain state",
+      "  persisted epic state is compatibility metadata only",
       "",
       "Merge behavior:",
-      "  - Requires epic state: resolving or merge_ready",
+      "  - Requires derived readiness: ready chains only",
       "  - All chain jobs must be terminal before publication",
       "  - Chains merged in topological dependency order",
       "  - Use --pr to publish via pull request instead of direct merge",
@@ -35622,7 +35541,6 @@ async function handleEpicCommand(argv) {
       "Examples:",
       "  specialists epic list",
       "  specialists epic list --unresolved --json",
-      "  specialists epic resolve unitAI-3f7b",
       "  specialists epic status unitAI-3f7b --json",
       "  specialists epic sync unitAI-3f7b",
       "  specialists epic sync unitAI-3f7b --apply",
@@ -35636,10 +35554,6 @@ async function handleEpicCommand(argv) {
   }
   if (subcommand === "list") {
     await handleEpicListCommand(argv.slice(1));
-    return;
-  }
-  if (subcommand === "resolve") {
-    await handleEpicResolveCommand(argv.slice(1));
     return;
   }
   if (subcommand === "sync") {
@@ -35659,7 +35573,7 @@ async function handleEpicCommand(argv) {
     return;
   }
   console.error(`Unknown epic subcommand: ${subcommand}`);
-  console.error("Usage: specialists epic <list|status|resolve|sync|abandon|merge>");
+  console.error("Usage: specialists epic <list|status|sync|abandon|merge>");
   process.exit(1);
 }
 var RUNNING_STATUSES;
@@ -36611,7 +36525,7 @@ function statusLabel(status) {
 }
 function epicStateLabel(state) {
   if (state === "merge_ready")
-    return green8("merge_ready");
+    return green8("pass");
   if (state === "merged")
     return dim8("merged");
   if (state === "failed")
@@ -36619,10 +36533,10 @@ function epicStateLabel(state) {
   if (state === "blocked")
     return yellow10("blocked");
   if (state === "resolving")
-    return cyan5("resolving");
+    return cyan5("merge_ready");
   if (state === "abandoned")
     return dim8("abandoned");
-  return magenta3("unresolved");
+  return magenta3("no pass yet");
 }
 function withPidLiveness(statuses) {
   return statuses.map((job) => ({
@@ -36819,9 +36733,9 @@ function renderHuman(jobs, nodes, trees, all, includeTerminal, epicReadiness) {
     const persistedState = readiness?.persisted_state ?? "open";
     const prepSummary = readiness?.prep ? `prep ${readiness.prep.done}/${readiness.prep.total} done${readiness.prep.running > 0 ? ` ${readiness.prep.running} running` : ""}${readiness.prep.failed > 0 ? ` ${readiness.prep.failed} failed` : ""}` : `prep ${prepCount}`;
     const chainSummary = readiness?.chains ? `chains ${readiness.chains.filter((chain) => chain.state === "pass").length}/${readiness.chains.length} pass` : `chains ${chainCount}`;
-    const epicBanner = bold10(cyan5(`\u250F\u2501 EPIC ${epic.epic_id} \u2501 ${String(readinessState).toUpperCase()} \u2501 ${prepSummary} \u2501 ${chainSummary}`));
+    const epicBanner = bold10(cyan5(`\u250F\u2501 EPIC ${epic.epic_id} \u2501 ${epicStateLabel(readiness?.readiness_state)} \u2501 ${prepSummary} \u2501 ${chainSummary}`));
     console.log(epicBanner);
-    console.log(`  ${dim8(`state:${persistedState}`)} \xB7 ${epicStateLabel(readiness?.readiness_state)}`);
+    console.log(`  ${dim8(`derived:${readinessState}`)} \xB7 ${dim8(`stored:${persistedState}`)}`);
     console.log(`  ${bold10("Prep")}`);
     if (epic.prep_jobs.length === 0) {
       console.log(dim8("    (none)"));
@@ -38490,9 +38404,9 @@ async function run20() {
       process.exit(1);
     }
     if (status.status !== "waiting") {
-      process.stderr.write(`${red5("Error:")} Job ${jobId} is not in waiting state (status: ${status.status}).
+      process.stderr.write(`${red5("Error:")} Job ${jobId} is already finalized (${status.status}).
 `);
-      process.stderr.write(`resume is only valid for keep-alive jobs in waiting state. Use steer for running jobs.
+      process.stderr.write(`resume only works for true waiting jobs. Finalized work is terminal; use sp ps to inspect chain state.
 `);
       process.exit(1);
     }
@@ -39170,7 +39084,7 @@ async function run24() {
       process.exit(1);
     }
     if (status.status === "done" || status.status === "error" || status.status === "cancelled") {
-      process.stderr.write(`${dim11(`Job ${jobId} is already ${status.status}.`)}
+      process.stderr.write(`${dim11(`Job ${jobId} already finalized (${status.status}).`)}
 `);
       return;
     }
@@ -39258,10 +39172,75 @@ var init_stop = __esm(() => {
   init_tmux_utils();
 });
 
+// src/cli/finalize.ts
+var exports_finalize = {};
+__export(exports_finalize, {
+  run: () => run25
+});
+function createFinalizeSupervisor(jobsDir) {
+  const runner = {
+    run: async () => {
+      throw new Error("finalize supervisor runner is not used");
+    }
+  };
+  const runOptions = {};
+  return new Supervisor({ runner, runOptions, jobsDir });
+}
+function parseFinalizeArgs(argv) {
+  const jobId = argv.find((token) => !token.startsWith("-"));
+  return { jobId };
+}
+async function run25() {
+  const parsed = parseFinalizeArgs(process.argv.slice(3));
+  const jobId = parsed.jobId;
+  if (!jobId) {
+    console.error("Usage: specialists|sp finalize <job-id>");
+    process.exit(1);
+  }
+  const jobsDir = resolveJobsDir();
+  const supervisor = createFinalizeSupervisor(jobsDir);
+  try {
+    const status = supervisor.readStatus(jobId);
+    if (!status) {
+      console.error(`No job found: ${jobId}`);
+      process.exit(1);
+    }
+    if (status.status !== "waiting") {
+      process.stderr.write(`${red7("Error:")} Job ${jobId} is not waiting (status: ${status.status}).
+`);
+      process.exit(1);
+    }
+    const output2 = supervisor.readResult(jobId) ?? "";
+    if (!PASS_COMPLIANCE_VERDICT_REGEX2.test(output2)) {
+      process.stderr.write(`${red7("Error:")} Job ${jobId} has no PASS compliance verdict.
+`);
+      process.stderr.write(`${dim12("finalize only closes keep-alive chains after reviewer PASS.")}
+`);
+      process.exit(1);
+    }
+    const finalized = supervisor.finalizeWaitingJob(jobId);
+    if (!finalized) {
+      process.stderr.write(`${red7("Error:")} Failed to finalize job ${jobId}.
+`);
+      process.exit(1);
+    }
+    process.stdout.write(`${green13("\u2713")} Finalized job ${jobId}
+`);
+  } finally {
+    await supervisor.dispose();
+  }
+}
+var green13 = (s) => `\x1B[32m${s}\x1B[0m`, red7 = (s) => `\x1B[31m${s}\x1B[0m`, dim12 = (s) => `\x1B[2m${s}\x1B[0m`, PASS_COMPLIANCE_VERDICT_REGEX2;
+var init_finalize = __esm(() => {
+  init_supervisor();
+  init_job_root();
+  PASS_COMPLIANCE_VERDICT_REGEX2 = /## Compliance Verdict[\s\S]*?- Verdict: PASS/i;
+});
+
 // src/cli/attach.ts
 var exports_attach = {};
 __export(exports_attach, {
-  run: () => run25
+  run: () => run26
 });
 import { execFileSync as execFileSync3, spawnSync as spawnSync21 } from "child_process";
 import { readFileSync as readFileSync28 } from "fs";
@@ -39281,7 +39260,7 @@ function readStatus(statusPath, jobId) {
     exitWithError(`Failed to read status for job \`${jobId}\`: ${details}`);
   }
 }
-async function run25() {
+async function run26() {
   const [jobId] = process.argv.slice(3);
   if (!jobId) {
     exitWithError("Usage: specialists attach <job-id>  (normal runtime is DB-backed; job files are legacy/operator-only)");
@@ -39423,7 +39402,7 @@ var init_drift_detector = __esm(() => {
 // src/cli/prune-stale-defaults.ts
 var exports_prune_stale_defaults = {};
 __export(exports_prune_stale_defaults, {
-  run: () => run26
+  run: () => run27
 });
 import { resolve as resolve12 } from "path";
 function parseArgs11(argv) {
@@ -39457,7 +39436,7 @@ function printHelp() {
   console.log("  --dry-run  List stale default snapshots without pruning");
   console.log("  --root     Repo root to scan");
 }
-async function run26(argv = process.argv.slice(3)) {
+async function run27(argv = process.argv.slice(3)) {
   const { dryRun, root, help } = parseArgs11(argv);
   if (help) {
     printHelp();
@@ -39484,33 +39463,33 @@ var init_prune_stale_defaults = __esm(() => {
 // src/cli/quickstart.ts
 var exports_quickstart = {};
 __export(exports_quickstart, {
-  run: () => run27
+  run: () => run28
 });
 function section2(title) {
   const bar = "\u2500".repeat(60);
   return `
 ${bold12(cyan7(title))}
-${dim12(bar)}`;
+${dim13(bar)}`;
 }
 function cmd2(s) {
   return yellow11(s);
 }
 function flag(s) {
-  return green13(s);
+  return green14(s);
 }
-async function run27() {
+async function run28() {
   const lines = [
     "",
     bold12("specialists  \xB7  Quick Start Guide"),
-    dim12("One MCP server. Multiple AI backends. Intelligent orchestration."),
-    dim12("Tip: sp is a shorter alias \u2014 sp run, sp list, sp feed etc. work identically."),
+    dim13("One MCP server. Multiple AI backends. Intelligent orchestration."),
+    dim13("Tip: sp is a shorter alias \u2014 sp run, sp list, sp feed etc. work identically."),
     ""
   ];
   lines.push(section2("1. Installation"));
   lines.push("");
   lines.push(`  ${cmd2("npm install -g @jaggerxtrm/specialists")}    # install globally`);
   lines.push(`  ${cmd2("specialists init")}                         # project setup:`);
-  lines.push(`  ${dim12("                                            #   creates dirs, wires MCP + hooks, injects context")}`);
+  lines.push(`  ${dim13("                                            #   creates dirs, wires MCP + hooks, injects context")}`);
   lines.push("");
   lines.push(`  Verify everything is healthy:`);
   lines.push(`  ${cmd2("specialists status")}                        # shows pi, beads, MCP, active jobs`);
@@ -39521,10 +39500,10 @@ async function run27() {
   lines.push(`  ${cmd2("specialists init")}                          # creates .specialists/, wires MCP + AGENTS.md`);
   lines.push("");
   lines.push(`  What this creates:`);
-  lines.push(`  ${dim12(".specialists/default/")} \u2014 canonical specialists (from init)`);
-  lines.push(`  ${dim12(".specialists/user/")}    \u2014 custom .specialist.json files`);
-  lines.push(`  ${dim12(".specialists/jobs|ready")} \u2014 runtime data \u2014 gitignored`);
-  lines.push(`  ${dim12("AGENTS.md")}          \u2014 context block injected into Claude sessions`);
+  lines.push(`  ${dim13(".specialists/default/")} \u2014 canonical specialists (from init)`);
+  lines.push(`  ${dim13(".specialists/user/")}    \u2014 custom .specialist.json files`);
+  lines.push(`  ${dim13(".specialists/jobs|ready")} \u2014 runtime data \u2014 gitignored`);
+  lines.push(`  ${dim13("AGENTS.md")}          \u2014 context block injected into Claude sessions`);
   lines.push("");
   lines.push(section2("3. Discover Specialists"));
   lines.push("");
@@ -39541,17 +39520,17 @@ async function run27() {
   lines.push(section2("4. Running a Specialist"));
   lines.push("");
   lines.push(`  ${bold12("Foreground")} (streams output to stdout):`);
-  lines.push(`  ${cmd2("specialists run code-review")} ${flag("--prompt")} ${dim12('"Review src/api.ts for security issues"')}`);
+  lines.push(`  ${cmd2("specialists run code-review")} ${flag("--prompt")} ${dim13('"Review src/api.ts for security issues"')}`);
   lines.push("");
   lines.push(`  ${bold12("Tracked run")} (linked to a beads issue for workflow integration):`);
-  lines.push(`  ${cmd2("specialists run code-review")} ${flag("--bead")} ${dim12("unitAI-abc")}`);
-  lines.push(`  ${dim12("  # uses bead description as prompt, tracks result in issue")}`);
+  lines.push(`  ${cmd2("specialists run code-review")} ${flag("--bead")} ${dim13("unitAI-abc")}`);
+  lines.push(`  ${dim13("  # uses bead description as prompt, tracks result in issue")}`);
   lines.push("");
   lines.push(`  Override model for one run:`);
-  lines.push(`  ${cmd2("specialists run code-review")} ${flag("--model")} ${dim12("anthropic/claude-opus-4-6")} ${flag("--prompt")} ${dim12('"..."')}`);
+  lines.push(`  ${cmd2("specialists run code-review")} ${flag("--model")} ${dim13("anthropic/claude-opus-4-6")} ${flag("--prompt")} ${dim13('"..."')}`);
   lines.push("");
   lines.push(`  Run without beads issue tracking:`);
-  lines.push(`  ${cmd2("specialists run code-review")} ${flag("--no-beads")} ${flag("--prompt")} ${dim12('"..."')}`);
+  lines.push(`  ${cmd2("specialists run code-review")} ${flag("--no-beads")} ${flag("--prompt")} ${dim13('"..."')}`);
   lines.push("");
   lines.push(`  Pipe a prompt from stdin:`);
   lines.push(`  ${cmd2("cat my-brief.md | specialists run code-review")}`);
@@ -39559,7 +39538,7 @@ async function run27() {
   lines.push(section2("5. Async Job Lifecycle"));
   lines.push("");
   lines.push(`  ${bold12("MCP pattern")}: ${cmd2("use_specialist")} (foreground, returns result directly)`);
-  lines.push(`  ${bold12("CLI pattern")}: ${cmd2('specialists run <name> --prompt "..."')} prints ${dim12("[job started: <id>]")} to stderr`);
+  lines.push(`  ${bold12("CLI pattern")}: ${cmd2('specialists run <name> --prompt "..."')} prints ${dim13("[job started: <id>]")} to stderr`);
   lines.push(`  ${bold12("Shell pattern")}: ${cmd2('specialists run <name> --prompt "..." &')} for native backgrounding`);
   lines.push("");
   lines.push(`  ${bold12("Watch progress")} \u2014 stream events as they arrive:`);
@@ -39571,11 +39550,11 @@ async function run27() {
   lines.push("");
   lines.push(`  ${bold12("Steer a running job")} \u2014 redirect the agent mid-run without cancelling:`);
   lines.push(`  ${cmd2("specialists steer job_a1b2c3d4")} ${flag('"focus only on supervisor.ts"')}`);
-  lines.push(`  ${dim12("  # delivered after current tool calls finish, before the next LLM call")}`);
+  lines.push(`  ${dim13("  # delivered after current tool calls finish, before the next LLM call")}`);
   lines.push("");
   lines.push(`  ${bold12("Keep-alive multi-turn")} \u2014 start with ${flag("--keep-alive")}, then follow up:`);
   lines.push(`  ${cmd2("specialists run debugger")} ${flag("--bead unitAI-abc --keep-alive")}`);
-  lines.push(`  ${dim12("  # \u2192 status: waiting after first turn")}`);
+  lines.push(`  ${dim13("  # \u2192 status: waiting after first turn")}`);
   lines.push(`  ${cmd2("specialists result a1b2c3")}                   # read first turn`);
   lines.push(`  ${cmd2("specialists follow-up a1b2c3")} ${flag('"now write the fix"')}    # next turn, same Pi context`);
   lines.push(`  ${cmd2("specialists feed a1b2c3")} ${flag("--follow")}               # watch response`);
@@ -39583,23 +39562,23 @@ async function run27() {
   lines.push(`  ${bold12("Cancel a job")}:`);
   lines.push(`  ${cmd2("specialists stop job_a1b2c3d4")}            # sends SIGTERM to the agent process`);
   lines.push("");
-  lines.push(`  ${bold12("Job files")} in ${dim12(".specialists/jobs/<job-id>/")}:`);
-  lines.push(`  ${dim12("status.json")}   \u2014 id, specialist, status, pid, started_at, elapsed_s, current_tool`);
-  lines.push(`  ${dim12("events.jsonl")} \u2014 one JSON event per line (tool_use, text, agent_end, error \u2026)`);
-  lines.push(`  ${dim12("result.txt")}    \u2014 final output (written when status=done)`);
-  lines.push(`  ${dim12("steer.pipe")}    \u2014 named FIFO for mid-run steering (removed on job completion)`);
+  lines.push(`  ${bold12("Job files")} in ${dim13(".specialists/jobs/<job-id>/")}:`);
+  lines.push(`  ${dim13("status.json")}   \u2014 id, specialist, status, pid, started_at, elapsed_s, current_tool`);
+  lines.push(`  ${dim13("events.jsonl")} \u2014 one JSON event per line (tool_use, text, agent_end, error \u2026)`);
+  lines.push(`  ${dim13("result.txt")}    \u2014 final output (written when status=done)`);
+  lines.push(`  ${dim13("steer.pipe")}    \u2014 named FIFO for mid-run steering (removed on job completion)`);
   lines.push("");
   lines.push(section2("6. Editing Specialists"));
   lines.push("");
   lines.push(`  Change a field without opening the YAML manually:`);
-  lines.push(`  ${cmd2("specialists edit code-review")} ${flag("--model")} ${dim12("anthropic/claude-sonnet-4-6")}`);
-  lines.push(`  ${cmd2("specialists edit code-review")} ${flag("--description")} ${dim12('"Updated description"')}`);
-  lines.push(`  ${cmd2("specialists edit code-review")} ${flag("--timeout")} ${dim12("120000")}`);
-  lines.push(`  ${cmd2("specialists edit code-review")} ${flag("--permission")} ${dim12("HIGH")}`);
-  lines.push(`  ${cmd2("specialists edit code-review")} ${flag("--tags")} ${dim12("analysis,security,review")}`);
+  lines.push(`  ${cmd2("specialists edit code-review")} ${flag("--model")} ${dim13("anthropic/claude-sonnet-4-6")}`);
+  lines.push(`  ${cmd2("specialists edit code-review")} ${flag("--description")} ${dim13('"Updated description"')}`);
+  lines.push(`  ${cmd2("specialists edit code-review")} ${flag("--timeout")} ${dim13("120000")}`);
+  lines.push(`  ${cmd2("specialists edit code-review")} ${flag("--permission")} ${dim13("HIGH")}`);
+  lines.push(`  ${cmd2("specialists edit code-review")} ${flag("--tags")} ${dim13("analysis,security,review")}`);
   lines.push("");
   lines.push(`  Preview without writing:`);
-  lines.push(`  ${cmd2("specialists edit code-review")} ${flag("--model")} ${dim12("...")} ${flag("--dry-run")}`);
+  lines.push(`  ${cmd2("specialists edit code-review")} ${flag("--model")} ${dim13("...")} ${flag("--dry-run")}`);
   lines.push("");
   lines.push(section2("7. .specialist.json Schema"));
   lines.push("");
@@ -39646,12 +39625,12 @@ async function run27() {
     "    priority: 2                  # 0=critical \u2026 4=backlog"
   ];
   for (const l of schemaLines) {
-    lines.push(`  ${dim12(l)}`);
+    lines.push(`  ${dim13(l)}`);
   }
   lines.push("");
   lines.push(section2("8. Hook System"));
   lines.push("");
-  lines.push(`  Specialists emits lifecycle events to ${dim12(".specialists/trace.jsonl")}:`);
+  lines.push(`  Specialists emits lifecycle events to ${dim13(".specialists/trace.jsonl")}:`);
   lines.push("");
   lines.push(`  ${bold12("Hook point")}              ${bold12("When fired")}`);
   lines.push(`  ${yellow11("specialist:start")}       before the agent session begins`);
@@ -39660,7 +39639,7 @@ async function run27() {
   lines.push(`  ${yellow11("specialist:error")}       on failure or timeout`);
   lines.push("");
   lines.push(`  Each event line in trace.jsonl:`);
-  lines.push(`  ${dim12('{"t":"<ISO>","hook":"specialist:done","specialist":"code-review","durationMs":4120}')}`);
+  lines.push(`  ${dim13('{"t":"<ISO>","hook":"specialist:done","specialist":"code-review","durationMs":4120}')}`);
   lines.push("");
   lines.push(`  Tail the trace file to observe all activity:`);
   lines.push(`  ${cmd2("tail -f .specialists/trace.jsonl | jq .")}`);
@@ -39685,7 +39664,7 @@ async function run27() {
   lines.push("");
   lines.push(`  ${bold12("Tracked run with beads integration:")}`);
   lines.push(`  ${cmd2("specialists run deep-analysis --bead unitAI-abc")}`);
-  lines.push(`  ${dim12("  # prompt from bead, result tracked in bead")}`);
+  lines.push(`  ${dim13("  # prompt from bead, result tracked in bead")}`);
   lines.push("");
   lines.push(`  ${bold12("Steer a job mid-run:")}`);
   lines.push(`  ${cmd2('specialists steer <job-id> "focus only on the auth module"')}`);
@@ -39700,20 +39679,20 @@ async function run27() {
   lines.push(`  ${bold12("Override model for a single run:")}`);
   lines.push(`  ${cmd2('specialists run code-review --model anthropic/claude-opus-4-6 --prompt "..."')}`);
   lines.push("");
-  lines.push(dim12("\u2500".repeat(62)));
-  lines.push(`  ${dim12("specialists help")}     command list         ${dim12("specialists <cmd> --help")}   per-command flags`);
-  lines.push(`  ${dim12("specialists status")}   health check         ${dim12("specialists models")}         available models`);
+  lines.push(dim13("\u2500".repeat(62)));
+  lines.push(`  ${dim13("specialists help")}     command list         ${dim13("specialists <cmd> --help")}   per-command flags`);
+  lines.push(`  ${dim13("specialists status")}   health check         ${dim13("specialists models")}         available models`);
   lines.push("");
   console.log(lines.join(`
 `));
 }
-var bold12 = (s) => `\x1B[1m${s}\x1B[0m`, dim12 = (s) => `\x1B[2m${s}\x1B[0m`, yellow11 = (s) => `\x1B[33m${s}\x1B[0m`, cyan7 = (s) => `\x1B[36m${s}\x1B[0m`, blue4 = (s) => `\x1B[34m${s}\x1B[0m`, green13 = (s) => `\x1B[32m${s}\x1B[0m`;
+var bold12 = (s) => `\x1B[1m${s}\x1B[0m`, dim13 = (s) => `\x1B[2m${s}\x1B[0m`, yellow11 = (s) => `\x1B[33m${s}\x1B[0m`, cyan7 = (s) => `\x1B[36m${s}\x1B[0m`, blue4 = (s) => `\x1B[34m${s}\x1B[0m`, green14 = (s) => `\x1B[32m${s}\x1B[0m`;
 
 // src/cli/doctor.ts
 var exports_doctor = {};
 __export(exports_doctor, {
   setStatusError: () => setStatusError,
-  run: () => run28,
+  run: () => run29,
   renderProcessSummary: () => renderProcessSummary,
   parseVersionTuple: () => parseVersionTuple,
   compareVersions: () => compareVersions2,
@@ -39724,19 +39703,19 @@ import { spawnSync as spawnSync22 } from "child_process";
 import { existsSync as existsSync29, lstatSync as lstatSync2, mkdirSync as mkdirSync11, readdirSync as readdirSync14, readFileSync as readFileSync30, readlinkSync as readlinkSync2, writeFileSync as writeFileSync12 } from "fs";
 import { dirname as dirname10, join as join32, relative as relative4, resolve as resolve13 } from "path";
 function ok3(msg) {
-  console.log(`  ${green14("\u2713")} ${msg}`);
+  console.log(`  ${green15("\u2713")} ${msg}`);
 }
 function warn3(msg) {
   console.log(`  ${yellow12("\u25CB")} ${msg}`);
 }
 function fail4(msg) {
-  console.log(`  ${red7("\u2717")} ${msg}`);
+  console.log(`  ${red8("\u2717")} ${msg}`);
 }
 function fix(msg) {
-  console.log(`    ${dim13("\u2192 fix:")} ${yellow12(msg)}`);
+  console.log(`    ${dim14("\u2192 fix:")} ${yellow12(msg)}`);
 }
 function hint(msg) {
-  console.log(`    ${dim13(msg)}`);
+  console.log(`    ${dim14(msg)}`);
 }
 function section3(label) {
   const line = "\u2500".repeat(Math.max(0, 38 - label.length));
@@ -39776,7 +39755,7 @@ function checkPi() {
     fix("pi config   (add at least one API key)");
     return false;
   }
-  ok3(`pi ${vStr}  \u2014  ${providers.size} provider${providers.size > 1 ? "s" : ""} active  ${dim13(`(${[...providers].join(", ")})`)}`);
+  ok3(`pi ${vStr}  \u2014  ${providers.size} provider${providers.size > 1 ? "s" : ""} active  ${dim14(`(${[...providers].join(", ")})`)}`);
   return true;
 }
 function checkSpAlias() {
@@ -39796,7 +39775,7 @@ function checkBd() {
     fix("install beads (bd) first");
     return false;
   }
-  ok3(`bd installed  ${dim13(sp("bd", ["--version"]).stdout || "")}`);
+  ok3(`bd installed  ${dim14(sp("bd", ["--version"]).stdout || "")}`);
   if (existsSync29(join32(CWD, ".beads")))
     ok3(".beads/ present in project");
   else
@@ -39810,7 +39789,7 @@ function checkXt() {
     fix("install xtrm-tools first");
     return false;
   }
-  ok3(`xt installed  ${dim13(sp("xt", ["--version"]).stdout || "")}`);
+  ok3(`xt installed  ${dim14(sp("xt", ["--version"]).stdout || "")}`);
   return true;
 }
 function checkHooks() {
@@ -39819,7 +39798,7 @@ function checkHooks() {
   for (const name of HOOK_NAMES) {
     const canonicalPath = join32(HOOKS_DIR, name);
     if (!existsSync29(canonicalPath)) {
-      fail4(`${relative4(CWD, canonicalPath)}  ${red7("missing")}`);
+      fail4(`${relative4(CWD, canonicalPath)}  ${red8("missing")}`);
       fix("specialists init");
       allPresent = false;
     } else {
@@ -40444,7 +40423,7 @@ function checkZombieJobs() {
     return true;
   }
   for (const jobId of result.zombieJobIds) {
-    warn3(`${jobId}  ${yellow12("ZOMBIE")}  ${dim13("pid not found for running job")}`);
+    warn3(`${jobId}  ${yellow12("ZOMBIE")}  ${dim14("pid not found for running job")}`);
     fix(`Edit .specialists/jobs/${jobId}/status.json  \u2192  set "status": "error"`);
   }
   if (result.zombies === 0) {
@@ -40452,7 +40431,7 @@ function checkZombieJobs() {
   }
   return result.zombies === 0;
 }
-async function run28(argv = process.argv.slice(3)) {
+async function run29(argv = process.argv.slice(3)) {
   const subcommand = argv[0];
   if (subcommand === "orphans") {
     runDoctorOrphans();
@@ -40486,14 +40465,14 @@ ${bold13("specialists doctor")}
   const allOk = piOk && spOk && bdOk && xtOk && hooksOk && mcpOk && versionOk && skillDriftOk && mirrorOk && userOverlayOk && dirsOk && jobsOk && fragmentsOk;
   console.log("");
   if (allOk) {
-    console.log(`  ${green14("\u2713")} ${bold13("All checks passed")}  \u2014 specialists is healthy`);
+    console.log(`  ${green15("\u2713")} ${bold13("All checks passed")}  \u2014 specialists is healthy`);
   } else {
     console.log(`  ${yellow12("\u25CB")} ${bold13("Some checks failed")}  \u2014 follow the fix hints above`);
-    console.log(`  ${dim13("specialists init fixes hook + MCP registration; specialists init --sync-skills fixes skill drift/symlink issues; specialists init --sync-defaults fixes managed mirrors.")}`);
+    console.log(`  ${dim14("specialists init fixes hook + MCP registration; specialists init --sync-skills fixes skill drift/symlink issues; specialists init --sync-defaults fixes managed mirrors.")}`);
   }
   console.log("");
 }
-var bold13 = (s) => `\x1B[1m${s}\x1B[0m`, dim13 = (s) => `\x1B[2m${s}\x1B[0m`, green14 = (s) => `\x1B[32m${s}\x1B[0m`, yellow12 = (s) => `\x1B[33m${s}\x1B[0m`, red7 = (s) => `\x1B[31m${s}\x1B[0m`, CWD, CLAUDE_DIR, PI_DIR, XTRM_SKILLS_DIR, XTRM_DEFAULT_SKILLS_DIR, XTRM_ACTIVE_SKILLS_DIR, ACTIVE_CLAUDE_SKILLS_DIR, ACTIVE_PI_SKILLS_DIR, CONFIG_SKILLS_DIR, CONFIG_SPECIALISTS_DIR, CONFIG_MANDATORY_RULES_DIR, CONFIG_NODES_DIR, SPECIALISTS_DIR, DEFAULT_SPECIALISTS_DIR, USER_SPECIALISTS_DIR, HOOKS_DIR, CLAUDE_HOOKS_DIR, SETTINGS_FILE, MCP_FILE2, HOOK_NAMES;
+var bold13 = (s) => `\x1B[1m${s}\x1B[0m`, dim14 = (s) => `\x1B[2m${s}\x1B[0m`, green15 = (s) => `\x1B[32m${s}\x1B[0m`, yellow12 = (s) => `\x1B[33m${s}\x1B[0m`, red8 = (s) => `\x1B[31m${s}\x1B[0m`, CWD, CLAUDE_DIR, PI_DIR, XTRM_SKILLS_DIR, XTRM_DEFAULT_SKILLS_DIR, XTRM_ACTIVE_SKILLS_DIR, ACTIVE_CLAUDE_SKILLS_DIR, ACTIVE_PI_SKILLS_DIR, CONFIG_SKILLS_DIR, CONFIG_SPECIALISTS_DIR, CONFIG_MANDATORY_RULES_DIR, CONFIG_NODES_DIR, SPECIALISTS_DIR, DEFAULT_SPECIALISTS_DIR, USER_SPECIALISTS_DIR, HOOKS_DIR, CLAUDE_HOOKS_DIR, SETTINGS_FILE, MCP_FILE2, HOOK_NAMES;
 var init_doctor = __esm(() => {
   init_observability_sqlite();
   init_drift_detector();
@@ -40526,9 +40505,9 @@ var init_doctor = __esm(() => {
 // src/cli/setup.ts
 var exports_setup = {};
 __export(exports_setup, {
-  run: () => run29
+  run: () => run30
 });
-async function run29() {
+async function run30() {
   console.log("");
   console.log(yellow13("\u26A0 DEPRECATED: `specialists setup` is deprecated"));
   console.log("");
@@ -40543,10 +40522,10 @@ async function run29() {
   console.log("  Options:");
   console.log("    --force-workflow   Overwrite existing workflow blocks");
   console.log("");
-  console.log(`  ${dim14("Run: specialists init --help for full details")}`);
+  console.log(`  ${dim15("Run: specialists init --help for full details")}`);
   console.log("");
 }
-var bold14 = (s) => `\x1B[1m${s}\x1B[0m`, yellow13 = (s) => `\x1B[33m${s}\x1B[0m`, dim14 = (s) => `\x1B[2m${s}\x1B[0m`;
+var bold14 = (s) => `\x1B[1m${s}\x1B[0m`, yellow13 = (s) => `\x1B[33m${s}\x1B[0m`, dim15 = (s) => `\x1B[2m${s}\x1B[0m`;
 
 // src/cli/serve-hot-reload.ts
 import { existsSync as existsSync30, readdirSync as readdirSync15, statSync as statSync5, watch as fsWatch } from "fs";
@@ -40651,7 +40630,7 @@ var init_serve_hot_reload = () => {};
 var exports_serve = {};
 __export(exports_serve, {
   startServe: () => startServe,
-  run: () => run30,
+  run: () => run31,
   recordAuditFailure: () => recordAuditFailure,
   evaluateReadiness: () => evaluateReadiness2,
   createReadinessState: () => createReadinessState,
@@ -41014,7 +40993,7 @@ async function startServe(argv = process.argv.slice(3)) {
   console.log(`sp serve listening on ${args.port}`);
   return { server, args, db, readinessState };
 }
-async function run30(argv = process.argv.slice(3)) {
+async function run31(argv = process.argv.slice(3)) {
   await startServe(argv);
 }
 var AUDIT_WINDOW_MS = 60000, DEFAULT_REQUIRED_PI_FLAGS;
@@ -41032,7 +41011,7 @@ var init_serve = __esm(() => {
 var exports_script = {};
 __export(exports_script, {
   scriptCli: () => scriptCli,
-  run: () => run31,
+  run: () => run32,
   parseArgs: () => parseArgs13,
   mapExitCode: () => mapExitCode
 });
@@ -41149,7 +41128,7 @@ function runUnderLock(lockPath, argv) {
     return 75;
   return flock.status ?? 1;
 }
-async function run31(argv = process.argv.slice(3)) {
+async function run32(argv = process.argv.slice(3)) {
   const args = parseArgs13(argv);
   if (args.singleInstance && !process.env.SP_SCRIPT_NO_LOCK) {
     process.exit(runUnderLock(args.singleInstance, argv));
@@ -41173,13 +41152,13 @@ var init_script = __esm(() => {
 // src/cli/help.ts
 var exports_help = {};
 __export(exports_help, {
-  run: () => run32
+  run: () => run33
 });
 function formatCommands(entries) {
   const width = Math.max(...entries.map(([cmd3]) => cmd3.length));
   return entries.map(([cmd3, desc]) => `  ${cmd3.padEnd(width)}   ${desc}`);
 }
-async function run32() {
+async function run33() {
   const lines = [
     "",
     "Specialists lets you run project-scoped specialist agents with a bead-first workflow.",
@@ -41188,7 +41167,7 @@ async function run32() {
     "  specialists|sp [command]",
     "  specialists|sp [command] --help",
     "",
-    dim15("  sp is a shorter alias \u2014 sp run, sp list, sp feed etc. all work identically."),
+    dim16("  sp is a shorter alias \u2014 sp run, sp list, sp feed etc. all work identically."),
     "",
     bold15("Common flows:"),
     "",
@@ -41270,13 +41249,13 @@ async function run32() {
     "  specialists init --help        Bootstrap behavior and workflow injection",
     "  specialists feed --help        Job event streaming details",
     "",
-    dim15("Project model: specialists are project-only; user-scope discovery is deprecated."),
+    dim16("Project model: specialists are project-only; user-scope discovery is deprecated."),
     ""
   ];
   console.log(lines.join(`
 `));
 }
-var bold15 = (s) => `\x1B[1m${s}\x1B[0m`, dim15 = (s) => `\x1B[2m${s}\x1B[0m`, CORE_COMMANDS, EXTENDED_COMMANDS, WORKTREE_COMMANDS;
+var bold15 = (s) => `\x1B[1m${s}\x1B[0m`, dim16 = (s) => `\x1B[2m${s}\x1B[0m`, CORE_COMMANDS, EXTENDED_COMMANDS, WORKTREE_COMMANDS;
 var init_help = __esm(() => {
   CORE_COMMANDS = [
     ["init", "Bootstrap a project: dirs, workflow injection, project MCP registration"],
@@ -48836,7 +48815,7 @@ var next = process.argv[3];
 function wantsHelp() {
   return next === "--help" || next === "-h";
 }
-async function run33() {
+async function run34() {
   if (sub === "install") {
     if (wantsHelp()) {
       console.log([
@@ -49282,31 +49261,29 @@ async function run33() {
     if (wantsHelp()) {
       console.log([
         "",
-        "Usage: specialists epic <list|status|resolve|merge> [options]",
+        "Usage: specialists epic <list|status|sync|abandon|merge> [options]",
         "",
         "Epic lifecycle management for wave-bound chain groups.",
         "",
         "Commands:",
-        "  list [--unresolved] [--json]                Enumerate epics with lifecycle state and readiness",
-        "  status <epic-id> [--json]                   Show chains, blockers, and merge readiness",
-        "  resolve <epic-id> [--dry-run] [--json]      Transition epic from open -> resolving",
+        "  list [--unresolved] [--json]                Enumerate epics with readiness",
+        "  status <epic-id> [--json]                   Show derived readiness and chain status",
+        "  sync <epic-id> [--apply] [--json]           Reconcile epic drift (dry-run by default)",
+        "  abandon <epic-id> --reason <text> [--force] [--json]  Transition epic to abandoned",
         "  merge <epic-id> [--rebuild] [--pr] [--json] Publish epic chains (direct merge or PR mode)",
         "",
         "Options:",
-        "  --unresolved    Filter list to non-terminal (open, resolving, merge_ready) epics",
-        "  --dry-run       Preview transition without persisting",
+        "  --unresolved    Filter list to open epics only",
         "  --json          Machine-readable JSON output",
         "",
-        "Lifecycle states:",
-        "  open -> resolving -> merge_ready -> merged",
-        "  (failed, abandoned are terminal)",
+        "Readiness:",
+        "  status is derived from live chain readiness",
+        "  persisted lifecycle state is compatibility metadata only",
         "",
         "Examples:",
         "  specialists epic list",
         "  specialists epic list --unresolved",
         "  specialists epic status unitAI-epic1",
-        "  specialists epic resolve unitAI-epic1",
-        "  specialists epic resolve unitAI-epic1 --dry-run",
         "  specialists epic merge unitAI-epic1 --pr",
         ""
       ].join(`
@@ -49649,6 +49626,25 @@ async function run33() {
     const { run: handler } = await Promise.resolve().then(() => (init_stop(), exports_stop));
     return handler();
   }
+  if (sub === "finalize") {
+    if (wantsHelp()) {
+      console.log([
+        "",
+        "Usage: specialists finalize <job-id>",
+        "",
+        "Finalize waiting keep-alive job after reviewer PASS.",
+        "Refuses non-waiting or non-PASS jobs.",
+        "",
+        "Examples:",
+        "  specialists finalize job_a1b2c3d4",
+        ""
+      ].join(`
+`));
+      return;
+    }
+    const { run: handler } = await Promise.resolve().then(() => (init_finalize(), exports_finalize));
+    return handler();
+  }
   if (sub === "attach") {
     if (wantsHelp()) {
       process.stdout.write([
@@ -49742,7 +49738,7 @@ async function run33() {
     if (wantsHelp()) {
       console.log([
         "",
-        "Usage: specialists serve [--port <n>] [--concurrency <n>] [--shutdown-grace-ms <n>] [--project-dir <path>] [--db-path <observability.db>] [--readiness-canary off|warn|require] [--log-level off|info|debug]",
+        "Usage: specialists serve [--port <n>] [--concurrency <n>] [--shutdown-grace-ms <n>] [--project-dir <path>]",
         "",
         "HTTP wrapper for script-class specialists.",
         "",
@@ -49798,7 +49794,7 @@ Run 'specialists help' to see available commands.`);
   const server = new SpecialistsServer;
   await server.start();
 }
-run33().catch((error2) => {
+run34().catch((error2) => {
   logger.error(`Fatal error: ${error2}`);
   process.exit(1);
 });

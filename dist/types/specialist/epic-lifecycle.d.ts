@@ -1,10 +1,10 @@
 import type { SupervisorStatus } from './supervisor.js';
 /**
- * Epic lifecycle is independent from node lifecycle:
- * - epic: merge-gated publication lifecycle for wave-bound chain groups
- * - chain: worktree lineage rooted at worktree_owner_job_id
- * - job: one specialist run
- * - node: coordinator/member runtime lifecycle
+ * Epic lifecycle compatibility surface.
+ *
+ * Live chain readiness now drives publication state. Persisted epic rows are
+ * treated as a view cache and legacy ceremony remains only for downstream
+ * callers still migrating.
  */
 export declare const EPIC_STATES: readonly ["open", "resolving", "merge_ready", "merged", "failed", "abandoned"];
 export type EpicState = (typeof EPIC_STATES)[number];

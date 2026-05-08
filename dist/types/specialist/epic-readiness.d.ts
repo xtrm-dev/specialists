@@ -3,7 +3,7 @@ import type { ObservabilitySqliteClient } from './observability-sqlite.js';
 import type { SupervisorStatus } from './supervisor.js';
 export type ReviewerVerdict = 'pass' | 'partial' | 'fail' | 'missing';
 export type ChainReadinessState = 'pending' | 'blocked' | 'pass' | 'failed';
-export type EpicReadinessState = 'unresolved' | 'resolving' | 'merge_ready' | 'blocked' | 'failed' | 'merged' | 'abandoned';
+export type EpicReadinessState = 'unresolved' | 'resolving' | 'blocked' | 'failed' | 'merge_ready' | 'merged' | 'abandoned';
 interface EvaluatorJob {
     id: string;
     specialist: string;
