@@ -29849,6 +29849,7 @@ function provisionWorktree(options) {
   createWorktreeViaBd(worktreePath, branch, commonRoot);
   try {
     rmSync2(join16(worktreePath, ".beads"), { recursive: true, force: true });
+    symlinkSync2(join16(commonRoot, ".beads"), join16(worktreePath, ".beads"), "dir");
   } catch {}
   symlinkPiNpmCache(commonRoot, worktreePath);
   return { branch, worktreePath, reused: false };

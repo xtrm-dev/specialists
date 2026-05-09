@@ -140,23 +140,29 @@ export function provisionWorktree(options: WorktreeOptions): WorktreeInfo {
   // ── 3. Create via bd worktree create (hard — no git fallback) ──────────────
   createWorktreeViaBd(worktreePath, branch, commonRoot);
 
-  // ── 3a. Strip bd's stub .beads/ to force common-dir fallback ───────────────
-  // bd's post-checkout git hook (installed at <commonRoot>/.beads/hooks/) fires
-  // when `git worktree add` runs (which `bd worktree create` invokes), and
-  // scaffolds a stub `.beads/` directory inside the new worktree. Subsequent
-  // `bd <cmd>` invocations from the worktree (from specialists' own beads
-  // hooks: edit-gate, memory-gate, claim, close, etc.) see this local stub,
-  // read its config (which inherits `dolt.shared-server: true` from parent),
-  // and auto-spawn a *per-worktree* dolt-sql-server inside `.beads/dolt/.dolt/`
-  // — 60-200 MB RSS per active specialist worktree, plus a process-leak vector
-  // on worktree cleanup. Removing the stub forces bd's documented common-dir
-  // discovery to resolve to `<commonRoot>/.beads/` instead, sharing the parent
-  // server. See unitAI-0wz2p for the audit + symptom catalogue.
+  // ── 3a. Symlink .beads/ to parent so bd shares the parent's dolt server ───
+  // bd's post-checkout/pre-commit/post-merge git hooks (registered via the
+  // parent repo's `core.hooksPath = .beads/hooks/`) fire on any git operation
+  // inside the worktree — including supervisor's auto-commit checkpoints. Each
+  // hook invokes `bd hooks run …` from inside the worktree; if the worktree's
+  // `.beads/` is missing, bd re-scaffolds a fresh stub there and starts its
+  // own per-worktree dolt-sql-server (60–200 MB RSS each, plus a process-leak
+  // vector on cleanup). Plain `rm -rf .beads/` is therefore not sufficient —
+  // the next git commit re-creates everything.
+  //
+  // The robust fix is to replace the stub with a symlink to the parent's
+  // `.beads/`. bd inside the worktree then operates on the parent's data
+  // (shared dolt server, single source of truth, no orphan processes) while
+  // every hook call still succeeds because the path resolves correctly.
+  // Verified end-to-end: `bd kv set` from a worktree is visible from the
+  // parent and triggers no new server. See unitAI-0wz2p.
   try {
     rmSync(join(worktreePath, '.beads'), { recursive: true, force: true });
+    symlinkSync(join(commonRoot, '.beads'), join(worktreePath, '.beads'), 'dir');
   } catch {
-    // Non-fatal: worst case the per-worktree dolt server still spawns; main
-    // observability path is unaffected.
+    // Non-fatal: bd will recover by re-scaffolding a per-worktree stub on
+    // next invocation. Cost is the per-worktree dolt server we wanted to
+    // avoid; main observability path is unaffected.
   }
 
   // ── 4. Symlink .pi/npm to avoid redundant npm install on first pi start ────
