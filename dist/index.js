@@ -38613,7 +38613,7 @@ var exports_clean = {};
 __export(exports_clean, {
   run: () => run22
 });
-import { existsSync as existsSync27, readFileSync as readFileSync27, readdirSync as readdirSync12, rmSync as rmSync4, statSync as statSync4 } from "fs";
+import { existsSync as existsSync27, readFileSync as readFileSync27, readdirSync as readdirSync12, readlinkSync as readlinkSync2, rmSync as rmSync4, statSync as statSync4 } from "fs";
 import { join as join29 } from "path";
 function parseTtlDaysFromEnvironment() {
   const rawValue = process.env.SPECIALISTS_JOB_TTL_DAYS ?? process.env.JOB_TTL_DAYS;
@@ -38631,6 +38631,7 @@ function parseOptions2(argv) {
   let aggressivePrune = false;
   let staleProcessesOnly = false;
   let staleAfterHours = DEFAULT_STALE_AFTER_HOURS;
+  let reapOrphans = false;
   for (let index = 0;index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--all") {
@@ -38643,6 +38644,10 @@ function parseOptions2(argv) {
     }
     if (argument === "--processes") {
       staleProcessesOnly = true;
+      continue;
+    }
+    if (argument === "--reap-orphans") {
+      reapOrphans = true;
       continue;
     }
     if (argument === "--aggressive-prune") {
@@ -38692,7 +38697,10 @@ function parseOptions2(argv) {
   if (staleProcessesOnly && (removeAllCompleted || keepRecentCount !== null)) {
     throw new Error("--processes cannot be combined with --all or --keep");
   }
-  return { removeAllCompleted, dryRun, keepRecentCount, aggressivePrune, staleProcessesOnly, staleAfterHours };
+  if (reapOrphans && (removeAllCompleted || keepRecentCount !== null || staleProcessesOnly)) {
+    throw new Error("--reap-orphans cannot be combined with --all, --keep, or --processes");
+  }
+  return { removeAllCompleted, dryRun, keepRecentCount, aggressivePrune, staleProcessesOnly, staleAfterHours, reapOrphans };
 }
 function readDirectorySizeBytes(directoryPath) {
   let totalBytes = 0;
@@ -38860,8 +38868,113 @@ function printWorktreeGcSummary(removed, skipped) {
 }
 function printUsageAndExit2(message) {
   console.error(message);
-  console.error("Usage: specialists|sp clean [--all] [--keep <n>] [--aggressive-prune] [--processes [--stale-after <hours>]] [--dry-run]");
+  console.error("Usage: specialists|sp clean [--all] [--keep <n>] [--aggressive-prune] [--processes [--stale-after <hours>]] [--reap-orphans] [--dry-run]");
   process.exit(1);
+}
+function readProcStringOrNull(path) {
+  try {
+    return readFileSync27(path, "utf-8");
+  } catch {
+    return null;
+  }
+}
+function readProcCwdOrNull(pid) {
+  try {
+    return readlinkSync2(`/proc/${pid}/cwd`);
+  } catch {
+    return null;
+  }
+}
+function getProcPpid(pid) {
+  const stat2 = readProcStringOrNull(`/proc/${pid}/stat`);
+  if (!stat2)
+    return null;
+  const closeParen = stat2.lastIndexOf(")");
+  if (closeParen < 0)
+    return null;
+  const fields = stat2.slice(closeParen + 2).split(" ");
+  const ppid = Number(fields[1]);
+  return Number.isInteger(ppid) ? ppid : null;
+}
+function listAllPids() {
+  if (!existsSync27("/proc"))
+    return [];
+  const pids = [];
+  for (const entry of readdirSync12("/proc", { withFileTypes: true })) {
+    if (!entry.isDirectory())
+      continue;
+    const pid = Number(entry.name);
+    if (Number.isInteger(pid) && pid > 0)
+      pids.push(pid);
+  }
+  return pids;
+}
+function findOrphanProcesses() {
+  const orphans = [];
+  for (const pid of listAllPids()) {
+    const cmdlineRaw = readProcStringOrNull(`/proc/${pid}/cmdline`);
+    if (!cmdlineRaw)
+      continue;
+    const cmdline = cmdlineRaw.replace(/\0/g, " ").trim();
+    if (!cmdline)
+      continue;
+    const comm = (readProcStringOrNull(`/proc/${pid}/comm`) ?? "").trim();
+    const ppid = getProcPpid(pid) ?? -1;
+    const cwd = readProcCwdOrNull(pid);
+    if (cmdline.includes("dolt sql-server") && cwd && (cwd.includes("/.worktrees/") || cwd.includes("/.xtrm/worktrees/"))) {
+      orphans.push({ pid, ppid, comm, cmdline, cwd, reason: "dolt-worktree-local" });
+      continue;
+    }
+    if (cmdline.includes("gitnexus") && cmdline.includes("mcp") && ppid === 1) {
+      orphans.push({ pid, ppid, comm, cmdline, cwd, reason: "gitnexus-orphan" });
+      continue;
+    }
+    if ((comm === "pi" || cmdline.includes("pi-coding-agent")) && ppid === 1) {
+      orphans.push({ pid, ppid, comm, cmdline, cwd, reason: "pi-orphan" });
+      continue;
+    }
+  }
+  return orphans;
+}
+async function killOrphanProcesses(orphans, dryRun) {
+  if (dryRun)
+    return orphans.length;
+  let killed = 0;
+  for (const orphan of orphans) {
+    try {
+      process.kill(orphan.pid, "SIGTERM");
+    } catch {}
+  }
+  if (orphans.length > 0)
+    await new Promise((resolve11) => setTimeout(resolve11, 1500));
+  for (const orphan of orphans) {
+    try {
+      process.kill(orphan.pid, 0);
+      try {
+        process.kill(orphan.pid, "SIGKILL");
+      } catch {}
+    } catch {}
+    killed += 1;
+  }
+  return killed;
+}
+function printOrphanPlan(orphans) {
+  if (orphans.length === 0) {
+    console.log("No orphan processes found.");
+    return;
+  }
+  const action = "Would reap";
+  console.log(`${action} ${orphans.length} orphan process(es):`);
+  for (const orphan of orphans) {
+    const cwdSuffix = orphan.cwd ? ` cwd=${orphan.cwd}` : "";
+    console.log(`  - pid=${orphan.pid} ppid=${orphan.ppid} reason=${orphan.reason} comm=${orphan.comm}${cwdSuffix}`);
+  }
+}
+function printOrphanSummary(killedCount) {
+  if (killedCount === 0)
+    return;
+  const noun = killedCount === 1 ? "orphan" : "orphans";
+  console.log(`Reaped ${killedCount} ${noun}.`);
 }
 function deleteJobDirectories(jobs) {
   for (const job of jobs) {
@@ -38896,6 +39009,21 @@ async function run22() {
   } catch (error2) {
     const message = error2 instanceof Error ? error2.message : String(error2);
     printUsageAndExit2(message);
+  }
+  if (options.reapOrphans) {
+    const orphans = findOrphanProcesses();
+    if (options.dryRun) {
+      printOrphanPlan(orphans);
+      return;
+    }
+    if (orphans.length === 0) {
+      console.log("No orphan processes found.");
+      return;
+    }
+    printOrphanPlan(orphans);
+    const killedCount = await killOrphanProcesses(orphans, false);
+    printOrphanSummary(killedCount);
+    return;
   }
   const jobsDirectoryPath = resolveJobsDir();
   if (!existsSync27(jobsDirectoryPath)) {
@@ -39800,7 +39928,7 @@ __export(exports_doctor, {
 });
 import { createHash as createHash5 } from "crypto";
 import { spawnSync as spawnSync22 } from "child_process";
-import { existsSync as existsSync29, lstatSync as lstatSync2, mkdirSync as mkdirSync11, readdirSync as readdirSync14, readFileSync as readFileSync30, readlinkSync as readlinkSync2, writeFileSync as writeFileSync12 } from "fs";
+import { existsSync as existsSync29, lstatSync as lstatSync2, mkdirSync as mkdirSync11, readdirSync as readdirSync14, readFileSync as readFileSync30, readlinkSync as readlinkSync3, writeFileSync as writeFileSync12 } from "fs";
 import { dirname as dirname10, join as join32, relative as relative4, resolve as resolve13 } from "path";
 function ok3(msg) {
   console.log(`  ${green15("\u2713")} ${msg}`);
@@ -40013,7 +40141,7 @@ function isSymlinkTo(linkPath, expectedTargetPath) {
   if (!stats.isSymbolicLink())
     return { ok: false, reason: "not-symlink" };
   try {
-    const rawTarget = readlinkSync2(linkPath);
+    const rawTarget = readlinkSync3(linkPath);
     const resolvedTarget = resolve13(dirname10(linkPath), rawTarget);
     const resolvedExpected = resolve13(expectedTargetPath);
     if (resolvedTarget !== resolvedExpected) {
