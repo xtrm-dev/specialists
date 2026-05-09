@@ -7,7 +7,7 @@
 //   - No Pi bootstrap logic (extensions are global via ~/.pi/).
 //   - No CLI argument parsing.
 
-import { existsSync, symlinkSync, mkdirSync } from 'node:fs';
+import { existsSync, symlinkSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { spawnSync, execFileSync } from 'node:child_process';
 
@@ -139,6 +139,25 @@ export function provisionWorktree(options: WorktreeOptions): WorktreeInfo {
 
   // ── 3. Create via bd worktree create (hard — no git fallback) ──────────────
   createWorktreeViaBd(worktreePath, branch, commonRoot);
+
+  // ── 3a. Strip bd's stub .beads/ to force common-dir fallback ───────────────
+  // bd's post-checkout git hook (installed at <commonRoot>/.beads/hooks/) fires
+  // when `git worktree add` runs (which `bd worktree create` invokes), and
+  // scaffolds a stub `.beads/` directory inside the new worktree. Subsequent
+  // `bd <cmd>` invocations from the worktree (from specialists' own beads
+  // hooks: edit-gate, memory-gate, claim, close, etc.) see this local stub,
+  // read its config (which inherits `dolt.shared-server: true` from parent),
+  // and auto-spawn a *per-worktree* dolt-sql-server inside `.beads/dolt/.dolt/`
+  // — 60-200 MB RSS per active specialist worktree, plus a process-leak vector
+  // on worktree cleanup. Removing the stub forces bd's documented common-dir
+  // discovery to resolve to `<commonRoot>/.beads/` instead, sharing the parent
+  // server. See unitAI-0wz2p for the audit + symptom catalogue.
+  try {
+    rmSync(join(worktreePath, '.beads'), { recursive: true, force: true });
+  } catch {
+    // Non-fatal: worst case the per-worktree dolt server still spawns; main
+    // observability path is unaffected.
+  }
 
   // ── 4. Symlink .pi/npm to avoid redundant npm install on first pi start ────
   // Each new worktree would otherwise trigger a full npm install for project

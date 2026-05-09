@@ -18889,11 +18889,9 @@ class PiAgentSession {
     this._pendingRequests.clear();
     const proc = this.proc;
     this.proc = undefined;
-    if (proc?.pid != null) {
-      try {
-        proc.kill();
-      } catch {}
-      const pid = proc.pid;
+    proc?.kill();
+    const pid = proc?.pid;
+    if (pid != null) {
       setTimeout(() => {
         try {
           process.kill(-pid, "SIGKILL");
@@ -29809,7 +29807,7 @@ var init_config = __esm(() => {
 });
 
 // src/specialist/worktree.ts
-import { existsSync as existsSync16, symlinkSync as symlinkSync2, mkdirSync as mkdirSync8 } from "fs";
+import { existsSync as existsSync16, symlinkSync as symlinkSync2, mkdirSync as mkdirSync8, rmSync as rmSync2 } from "fs";
 import { join as join16, resolve as resolve9 } from "path";
 import { spawnSync as spawnSync11, execFileSync as execFileSync2 } from "child_process";
 function deriveBranchName(beadId, specialistName) {
@@ -29849,6 +29847,9 @@ function provisionWorktree(options) {
   const worktreeName = deriveWorktreeName(options.beadId, options.specialistName);
   const worktreePath = resolve9(join16(worktreeBase, worktreeName));
   createWorktreeViaBd(worktreePath, branch, commonRoot);
+  try {
+    rmSync2(join16(worktreePath, ".beads"), { recursive: true, force: true });
+  } catch {}
   symlinkPiNpmCache(commonRoot, worktreePath);
   return { branch, worktreePath, reused: false };
 }
@@ -29898,7 +29899,7 @@ var init_worktree = __esm(() => {
 });
 
 // src/specialist/epic-reconciler.ts
-import { mkdirSync as mkdirSync9, openSync as openSync2, readFileSync as readFileSync15, rmSync as rmSync2, writeFileSync as writeFileSync7 } from "fs";
+import { mkdirSync as mkdirSync9, openSync as openSync2, readFileSync as readFileSync15, rmSync as rmSync3, writeFileSync as writeFileSync7 } from "fs";
 import { join as join17 } from "path";
 function buildEpicLockPath(epicId) {
   const location = resolveObservabilityDbLocation();
@@ -29926,7 +29927,7 @@ function withEpicAdvisoryLock(epicId, action) {
   } finally {
     if (lockFd !== null) {
       try {
-        rmSync2(lockPath, { force: true });
+        rmSync3(lockPath, { force: true });
       } catch {}
     }
   }
@@ -38610,7 +38611,7 @@ var exports_clean = {};
 __export(exports_clean, {
   run: () => run22
 });
-import { existsSync as existsSync27, readFileSync as readFileSync27, readdirSync as readdirSync12, rmSync as rmSync3, statSync as statSync4 } from "fs";
+import { existsSync as existsSync27, readFileSync as readFileSync27, readdirSync as readdirSync12, rmSync as rmSync4, statSync as statSync4 } from "fs";
 import { join as join29 } from "path";
 function parseTtlDaysFromEnvironment() {
   const rawValue = process.env.SPECIALISTS_JOB_TTL_DAYS ?? process.env.JOB_TTL_DAYS;
@@ -38862,7 +38863,7 @@ function printUsageAndExit2(message) {
 }
 function deleteJobDirectories(jobs) {
   for (const job of jobs) {
-    rmSync3(job.directoryPath, { recursive: true, force: true });
+    rmSync4(job.directoryPath, { recursive: true, force: true });
   }
   return jobs.length;
 }
@@ -39385,7 +39386,7 @@ async function run26() {
 var init_attach = () => {};
 
 // src/specialist/drift-detector.ts
-import { existsSync as existsSync28, readFileSync as readFileSync29, readdirSync as readdirSync13, rmSync as rmSync4 } from "fs";
+import { existsSync as existsSync28, readFileSync as readFileSync29, readdirSync as readdirSync13, rmSync as rmSync5 } from "fs";
 import { join as join31, resolve as resolve11, relative as relative3 } from "path";
 function listFiles(root) {
   if (!existsSync28(root))
@@ -39481,7 +39482,7 @@ function pruneStaleDefaults(repoRoot, dryRun) {
   const targets = detectDriftForRepo(repoRoot).filter((f) => f.scope === "default" && f.bytes_equal === true).map((f) => f.path);
   if (!dryRun) {
     for (const target of targets)
-      rmSync4(target, { recursive: true, force: true });
+      rmSync5(target, { recursive: true, force: true });
   }
   return targets;
 }
