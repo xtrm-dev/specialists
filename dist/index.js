@@ -24446,7 +24446,8 @@ function gitnexusHasEmbeddings(cwd) {
   }
 }
 function startDetachedGitnexusAnalyze(cwd) {
-  const args = gitnexusHasEmbeddings(cwd) ? ["gitnexus", "analyze", "--embeddings"] : ["gitnexus", "analyze"];
+  const baseArgs = ["gitnexus", "analyze", "--skip-agents-md", "--no-stats"];
+  const args = gitnexusHasEmbeddings(cwd) ? [...baseArgs, "--embeddings"] : baseArgs;
   const child = spawn2("npx", args, {
     cwd,
     detached: true,

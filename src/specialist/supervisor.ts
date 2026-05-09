@@ -392,7 +392,12 @@ export function gitnexusHasEmbeddings(cwd: string): boolean {
 }
 
 function startDetachedGitnexusAnalyze(cwd: string): void {
-  const args = gitnexusHasEmbeddings(cwd) ? ['gitnexus', 'analyze', '--embeddings'] : ['gitnexus', 'analyze'];
+  // `--skip-agents-md --no-stats` skips the AGENTS.md / CLAUDE.md edit pass
+  // (volatile counts that would dirty the worktree branch every checkpoint)
+  // and the file/symbol-count refresh in those docs. The graph itself is
+  // still re-indexed for downstream gitnexus_impact/context queries.
+  const baseArgs = ['gitnexus', 'analyze', '--skip-agents-md', '--no-stats'];
+  const args = gitnexusHasEmbeddings(cwd) ? [...baseArgs, '--embeddings'] : baseArgs;
   const child = spawn('npx', args, {
     cwd,
     detached: true,
