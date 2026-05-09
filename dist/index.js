@@ -18430,7 +18430,8 @@ class PiAgentSession {
     this.proc = spawn("pi", args, {
       stdio: ["pipe", "pipe", "pipe"],
       cwd: sessionCwd,
-      env: worktreeBoundary ? { ...baseEnv, [WORKTREE_BOUNDARY_ENV_KEY]: worktreeBoundary } : baseEnv
+      env: worktreeBoundary ? { ...baseEnv, [WORKTREE_BOUNDARY_ENV_KEY]: worktreeBoundary } : baseEnv,
+      detached: true
     });
     const donePromise = new Promise((resolve2, reject) => {
       this._doneResolve = resolve2;
@@ -18855,14 +18856,17 @@ class PiAgentSession {
     this._clearStallTimer();
     this.proc?.stdin?.end();
     if (this.proc) {
+      const proc = this.proc;
       await new Promise((resolve2) => {
-        this.proc.on("close", () => resolve2());
+        proc.on("close", () => resolve2());
         setTimeout(() => {
-          if (this.proc && !this._killed) {
-            this.proc.kill();
+          if (proc.exitCode === null && proc.pid != null) {
+            try {
+              process.kill(-proc.pid, "SIGKILL");
+            } catch {}
           }
           resolve2();
-        }, 2000);
+        }, 8000);
       });
     }
   }
@@ -18883,8 +18887,19 @@ class PiAgentSession {
       entry.reject(killError);
     }
     this._pendingRequests.clear();
-    this.proc?.kill();
+    const proc = this.proc;
     this.proc = undefined;
+    if (proc?.pid != null) {
+      try {
+        proc.kill();
+      } catch {}
+      const pid = proc.pid;
+      setTimeout(() => {
+        try {
+          process.kill(-pid, "SIGKILL");
+        } catch {}
+      }, 8000).unref();
+    }
     this._doneReject?.(killError);
   }
   getStderr() {

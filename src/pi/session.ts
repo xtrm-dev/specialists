@@ -189,7 +189,7 @@ function resolvePermissionTools(options: {
   const specialistOverride: ManifestPolicyTier | undefined = options.specialistPermissions?.[tier];
   return resolveManifestTools({
     tier,
-    catalogs: catalogIndex.catalogs as any,
+    catalogs: catalogIndex.catalogs as unknown as Parameters<typeof resolveManifestTools>[0]['catalogs'],
     catalogDefaultOverrides: catalogIndex.default_overrides,
     specialistOverride,
     extensionState: {
@@ -650,12 +650,16 @@ export class PiAgentSession {
     const sessionCwd = resolve(this.options.cwd ?? process.cwd());
 
     const baseEnv = { ...process.env, ...(this.options.env ?? {}), CAVEMAN_LEVEL: 'full' };
+    // `detached: true` puts pi in its own process group so we can later
+    // group-SIGKILL the whole subtree (pi + gitnexus mcp + serena mcp + …)
+    // as a backstop when graceful shutdown does not reap MCP children.
     this.proc = spawn('pi', args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       cwd: sessionCwd,
       env: worktreeBoundary
         ? { ...baseEnv, [WORKTREE_BOUNDARY_ENV_KEY]: worktreeBoundary }
         : baseEnv,
+      detached: true,
     });
 
     const donePromise = new Promise<void>((resolve, reject) => {
@@ -1159,15 +1163,21 @@ export class PiAgentSession {
     this.proc?.stdin?.end();
     // Wait for the process to actually exit
     if (this.proc) {
+      const proc = this.proc;
       await new Promise<void>((resolve) => {
-        this.proc!.on('close', () => resolve());
-        // Fallback: force kill after 2s if process doesn't exit
+        proc.on('close', () => resolve());
+        // Pi's graceful shutdown can take ~4s per MCP server (transport.close()
+        // does stdin.end → SIGTERM(2s) → SIGKILL(2s)). A redundant SIGTERM here
+        // races pi's shutdown handler — pi sees `shuttingDown=true` and calls
+        // process.exit() synchronously, aborting in-flight MCP cleanup and
+        // orphaning gitnexus/serena children. Wait long enough for graceful
+        // close, then group-SIGKILL the whole subtree as a backstop.
         setTimeout(() => {
-          if (this.proc && !this._killed) {
-            this.proc.kill();
+          if (proc.exitCode === null && proc.pid != null) {
+            try { process.kill(-proc.pid, 'SIGKILL'); } catch { /* dead/missing group */ }
           }
           resolve();
-        }, 2000);
+        }, 8000);
       });
     }
   }
@@ -1190,8 +1200,18 @@ export class PiAgentSession {
       entry.reject(killError);
     }
     this._pendingRequests.clear();
-    this.proc?.kill();
+    // Send graceful SIGTERM first so pi can dispose MCP servers cleanly.
+    // Backstop: group-SIGKILL after 8s to reap any orphaned MCP children
+    // (gitnexus mcp, serena mcp) if pi hangs or aborts dispose mid-flight.
+    const proc = this.proc;
     this.proc = undefined;
+    proc?.kill();
+    const pid = proc?.pid;
+    if (pid != null) {
+      setTimeout(() => {
+        try { process.kill(-pid, 'SIGKILL'); } catch { /* already dead */ }
+      }, 8000).unref();
+    }
     // Reject so waitForDone() can distinguish cancelled vs stalled vs backend failures
     this._doneReject?.(killError);
   }
