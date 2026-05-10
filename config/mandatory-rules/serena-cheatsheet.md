@@ -5,6 +5,9 @@ rules:
   - id: prefer-serena
     level: required
     text: "Prefer Serena tools over read/grep/find/ls for source code (.ts .py .go .rs .js etc.). Native tools fine for .md .json .yaml configs."
+
+  # --- Read tier (always applicable) ---
+
   - id: get_symbols_overview
     level: required
     text: "get_symbols_overview <path> — symbol skeleton of a file or dir (~300 tokens vs reading the whole file). Use first to pick what you actually need."
@@ -23,18 +26,27 @@ rules:
   - id: read_file
     level: required
     text: "read_file <path> — full or sliced read. Use only when navigation tools are not enough; check get_symbols_overview first."
+
+  # --- Edit tier (apply only if your specialist permission_required is MEDIUM or HIGH; READ_ONLY skip) ---
+
+  - id: edit-tier-applicability
+    level: info
+    text: "The rules below are edit-only. If your specialist's permission_required is READ_ONLY, ignore them — you cannot call these tools and they do not apply to your work."
   - id: replace_symbol_body
     level: required
-    text: "replace_symbol_body <name_path> — swap a function or class body in place. Use instead of Edit string-match for symbol-scoped changes (MEDIUM+ permission)."
+    text: "replace_symbol_body <name_path> — swap a function or class body in place. Use instead of Edit string-match for symbol-scoped changes. (MEDIUM+ permission)"
   - id: insert_around_symbol
     level: required
-    text: "insert_before_symbol / insert_after_symbol <name_path> — add adjacent code such as imports or helpers (MEDIUM+ permission)."
+    text: "insert_before_symbol / insert_after_symbol <name_path> — add adjacent code such as imports or helpers. (MEDIUM+ permission)"
   - id: rename_symbol
     level: required
-    text: "rename_symbol <name_path> <new_name> — refactor-safe across all references. Use instead of find-and-replace (MEDIUM+ permission)."
+    text: "rename_symbol <name_path> <new_name> — refactor-safe across all references. Use instead of find-and-replace. (MEDIUM+ permission)"
   - id: replace_content
     level: required
-    text: "replace_content <path> <pattern> <replacement> — line-range or regex edits when no symbol target fits (MEDIUM+ permission)."
+    text: "replace_content <path> <pattern> <replacement> — line-range or regex edits when no symbol target fits. (MEDIUM+ permission)"
+
+  # --- Cost guidance ---
+
   - id: cost-rule
     level: info
     text: "Rule of thumb: read of a 500-line source file ~5000 tokens; find_symbol on one function ~200 tokens (~25x cheaper). Use get_symbols_overview before deciding."
