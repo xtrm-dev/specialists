@@ -13,7 +13,7 @@ import {
   type WorktreeOptions,
 } from '../../../src/specialist/worktree.js';
 import { spawnSync, execSync } from 'node:child_process';
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -248,5 +248,49 @@ describe('provisionWorktree', () => {
     };
 
     expect(() => provisionWorktree(options)).toThrow();
+  }, 15000);
+
+  it('suppresses .beads worktree noise: writes info/exclude entry (unitAI-u08e8)', () => {
+    // Skip if bd is not available
+    try {
+      execSync('which bd', { stdio: 'ignore' });
+    } catch {
+      console.log('[SKIP] bd not available - skipping .beads noise suppression test');
+      return;
+    }
+
+    // Initialize bd in the temp directory so .beads/ has tracked files
+    spawnSync('bd', ['init'], { cwd: tempDir, stdio: 'ignore' });
+
+    const options: WorktreeOptions = {
+      beadId: 'hgpu.2',
+      specialistName: 'explorer',
+      worktreeBase: join(tempDir, '.worktrees', 'hgpu.2'),
+      cwd: tempDir,
+    };
+
+    const result = provisionWorktree(options);
+
+    // suppressBeadsWorktreeNoise must have written '.beads' to the per-worktree
+    // info/exclude after the symlinkSync. (End-to-end git-status suppression
+    // depends on whether the tracked .beads/* files exist in the source repo
+    // and is covered upstream in xtrm-tools' tests.)
+    const gitDir = spawnSync('git', ['-C', result.worktreePath, 'rev-parse', '--absolute-git-dir'], {
+      encoding: 'utf8',
+    }).stdout.trim();
+    expect(gitDir).not.toBe('');
+
+    const excludePath = join(gitDir, 'info', 'exclude');
+    expect(existsSync(excludePath)).toBe(true);
+    const excludeContents = readFileSync(excludePath, 'utf8');
+    expect(excludeContents.split(/\r?\n/)).toContain('.beads');
+
+    // Idempotence: re-running provisionWorktree should not double-write
+    // (the reuse path also passes through the symlink block).
+    const second = provisionWorktree(options);
+    expect(second.reused).toBe(true);
+    const excludeAfter = readFileSync(excludePath, 'utf8');
+    const occurrences = excludeAfter.split('\n').filter((l) => l === '.beads').length;
+    expect(occurrences).toBe(1);
   }, 15000);
 });

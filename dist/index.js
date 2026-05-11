@@ -29808,7 +29808,7 @@ var init_config = __esm(() => {
 });
 
 // src/specialist/worktree.ts
-import { existsSync as existsSync16, symlinkSync as symlinkSync2, mkdirSync as mkdirSync8, rmSync as rmSync2 } from "fs";
+import { existsSync as existsSync16, symlinkSync as symlinkSync2, mkdirSync as mkdirSync8, rmSync as rmSync2, readFileSync as readFileSync15, writeFileSync as writeFileSync7 } from "fs";
 import { join as join16, resolve as resolve9 } from "path";
 import { spawnSync as spawnSync11, execFileSync as execFileSync2 } from "child_process";
 function deriveBranchName(beadId, specialistName) {
@@ -29851,9 +29851,50 @@ function provisionWorktree(options) {
   try {
     rmSync2(join16(worktreePath, ".beads"), { recursive: true, force: true });
     symlinkSync2(join16(commonRoot, ".beads"), join16(worktreePath, ".beads"), "dir");
+    suppressBeadsWorktreeNoise(worktreePath);
   } catch {}
   symlinkPiNpmCache(commonRoot, worktreePath);
   return { branch, worktreePath, reused: false };
+}
+function suppressBeadsWorktreeNoise(worktreePath) {
+  try {
+    const gitDirResult = spawnSync11("git", ["-C", worktreePath, "rev-parse", "--absolute-git-dir"], {
+      cwd: worktreePath,
+      stdio: "pipe",
+      encoding: "utf8"
+    });
+    if (gitDirResult.status !== 0)
+      return;
+    const gitDir = (gitDirResult.stdout ?? "").trim();
+    if (!gitDir)
+      return;
+    const excludePath = join16(gitDir, "info", "exclude");
+    mkdirSync8(join16(gitDir, "info"), { recursive: true });
+    const excludeEntry = ".beads";
+    const excludeContents = existsSync16(excludePath) ? readFileSync15(excludePath, "utf8") : "";
+    if (!excludeContents.split(/\r?\n/).includes(excludeEntry)) {
+      const prefix = excludeContents.length > 0 && !excludeContents.endsWith(`
+`) ? `
+` : "";
+      writeFileSync7(excludePath, `${excludeContents}${prefix}${excludeEntry}
+`);
+    }
+    const trackedResult = spawnSync11("git", ["-C", worktreePath, "ls-files", "--", ".beads"], {
+      cwd: worktreePath,
+      stdio: "pipe",
+      encoding: "utf8"
+    });
+    if (trackedResult.status !== 0)
+      return;
+    const trackedPaths = (trackedResult.stdout ?? "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    if (trackedPaths.length === 0)
+      return;
+    spawnSync11("git", ["-C", worktreePath, "update-index", "--skip-worktree", "--", ...trackedPaths], {
+      cwd: worktreePath,
+      stdio: "pipe",
+      encoding: "utf8"
+    });
+  } catch {}
 }
 function symlinkPiNpmCache(commonRoot, worktreePath) {
   const source = join16(commonRoot, ".pi", "npm");
@@ -29901,7 +29942,7 @@ var init_worktree = __esm(() => {
 });
 
 // src/specialist/epic-reconciler.ts
-import { mkdirSync as mkdirSync9, openSync as openSync2, readFileSync as readFileSync15, rmSync as rmSync3, writeFileSync as writeFileSync7 } from "fs";
+import { mkdirSync as mkdirSync9, openSync as openSync2, readFileSync as readFileSync16, rmSync as rmSync3, writeFileSync as writeFileSync8 } from "fs";
 import { join as join17 } from "path";
 function buildEpicLockPath(epicId) {
   const location = resolveObservabilityDbLocation();
@@ -29914,11 +29955,11 @@ function withEpicAdvisoryLock(epicId, action) {
   let lockFd = null;
   try {
     lockFd = openSync2(lockPath, "wx");
-    writeFileSync7(lockPath, JSON.stringify({ epic_id: epicId, pid: process.pid, created_at_ms: Date.now() }));
+    writeFileSync8(lockPath, JSON.stringify({ epic_id: epicId, pid: process.pid, created_at_ms: Date.now() }));
   } catch {
     let holder = "unknown";
     try {
-      holder = readFileSync15(lockPath, "utf-8");
+      holder = readFileSync16(lockPath, "utf-8");
     } catch {
       holder = "unknown";
     }
@@ -30136,7 +30177,7 @@ __export(exports_merge, {
   assertMainRepoCleanForMerge: () => assertMainRepoCleanForMerge
 });
 import { spawnSync as spawnSync12 } from "child_process";
-import { existsSync as existsSync17, readFileSync as readFileSync16, readdirSync as readdirSync6 } from "fs";
+import { existsSync as existsSync17, readFileSync as readFileSync17, readdirSync as readdirSync6 } from "fs";
 import { join as join18 } from "path";
 function parseOptions(argv) {
   let target = "";
@@ -30361,7 +30402,7 @@ function readAllJobStatuses() {
     if (!existsSync17(statusFile))
       continue;
     try {
-      const raw = JSON.parse(readFileSync16(statusFile, "utf-8"));
+      const raw = JSON.parse(readFileSync17(statusFile, "utf-8"));
       if (raw.id) {
         statuses.push(raw);
       }
@@ -31147,7 +31188,7 @@ __export(exports_run, {
   run: () => run14
 });
 import { join as join19 } from "path";
-import { readFileSync as readFileSync17 } from "fs";
+import { readFileSync as readFileSync18 } from "fs";
 import { randomBytes } from "crypto";
 import { spawn as cpSpawn, execSync as execSync4 } from "child_process";
 async function parseArgs7(argv) {
@@ -31426,7 +31467,7 @@ function startEventTailer(jobId, jobsDir, mode, specialist, beadId) {
   let activeInlinePhase = null;
   const readPayloadBreakdown = () => {
     try {
-      const statusRaw = readFileSync17(statusPath, "utf-8");
+      const statusRaw = readFileSync18(statusPath, "utf-8");
       const status = JSON.parse(statusRaw);
       return status.startup_payload_json ? JSON.parse(status.startup_payload_json) : undefined;
     } catch {
@@ -31436,7 +31477,7 @@ function startEventTailer(jobId, jobsDir, mode, specialist, beadId) {
   const drain = () => {
     let content;
     try {
-      content = readFileSync17(eventsPath, "utf-8");
+      content = readFileSync18(eventsPath, "utf-8");
     } catch {
       return;
     }
@@ -31639,7 +31680,7 @@ async function run14() {
     const latestPath = join19(jobsDir2, "latest");
     const oldLatest = (() => {
       try {
-        return readFileSync17(latestPath, "utf-8").trim();
+        return readFileSync18(latestPath, "utf-8").trim();
       } catch {
         return "";
       }
@@ -31667,7 +31708,7 @@ async function run14() {
     while (Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 100));
       try {
-        const current = readFileSync17(latestPath, "utf-8").trim();
+        const current = readFileSync18(latestPath, "utf-8").trim();
         if (current && current !== oldLatest) {
           jobId2 = current;
           break;
@@ -31928,7 +31969,7 @@ var init_node_resolve = __esm(() => {
 });
 
 // src/specialist/job-control.ts
-import { existsSync as existsSync18, readFileSync as readFileSync18, writeFileSync as writeFileSync8 } from "fs";
+import { existsSync as existsSync18, readFileSync as readFileSync19, writeFileSync as writeFileSync9 } from "fs";
 import { join as join20 } from "path";
 
 class JobControl {
@@ -32007,7 +32048,7 @@ class JobControl {
     if (!existsSync18(resultPath))
       return null;
     try {
-      return readFileSync18(resultPath, "utf-8");
+      return readFileSync19(resultPath, "utf-8");
     } catch {
       return null;
     }
@@ -32040,7 +32081,7 @@ class JobControl {
     }
     const jsonLine = `${JSON.stringify(payload)}
 `;
-    writeFileSync8(status.fifo_path, jsonLine, { flag: "a" });
+    writeFileSync9(status.fifo_path, jsonLine, { flag: "a" });
   }
   resultPath(jobId) {
     return join20(this.jobsDir, jobId, "result.txt");
@@ -34118,7 +34159,7 @@ var exports_node = {};
 __export(exports_node, {
   handleNodeCommand: () => handleNodeCommand
 });
-import { existsSync as existsSync19, readFileSync as readFileSync19, readdirSync as readdirSync7 } from "fs";
+import { existsSync as existsSync19, readFileSync as readFileSync20, readdirSync as readdirSync7 } from "fs";
 import { randomUUID as randomUUID2 } from "crypto";
 import { spawnSync as spawnSync14 } from "child_process";
 import { basename as basename5, join as join21, resolve as resolve10 } from "path";
@@ -34433,7 +34474,7 @@ async function handleNodeRun(args) {
       rawConfig = args.inlineJson;
     } else {
       const nodeConfigPath = resolveNodeConfigPath(process.cwd(), args.nodeConfigInput);
-      rawConfig = readFileSync19(nodeConfigPath.path, "utf-8");
+      rawConfig = readFileSync20(nodeConfigPath.path, "utf-8");
     }
     const config2 = parseNodeConfig(rawConfig);
     const loader = new SpecialistLoader;
@@ -35646,7 +35687,7 @@ var init_epic = __esm(() => {
 
 // src/cli/version-check.ts
 import { spawnSync as spawnSync16 } from "child_process";
-import { existsSync as existsSync20, mkdirSync as mkdirSync10, readFileSync as readFileSync20, writeFileSync as writeFileSync9 } from "fs";
+import { existsSync as existsSync20, mkdirSync as mkdirSync10, readFileSync as readFileSync21, writeFileSync as writeFileSync10 } from "fs";
 import { dirname as dirname9, join as join22 } from "path";
 import { createRequire as createRequire3 } from "module";
 function readBundledPackageVersion(requireFn = require3) {
@@ -35672,7 +35713,7 @@ function readCache() {
   if (!existsSync20(CACHE_PATH))
     return null;
   try {
-    return JSON.parse(readFileSync20(CACHE_PATH, "utf8"));
+    return JSON.parse(readFileSync21(CACHE_PATH, "utf8"));
   } catch {
     return null;
   }
@@ -35682,7 +35723,7 @@ function readCachedVersionCheck() {
 }
 function writeCache(cache) {
   mkdirSync10(dirname9(CACHE_PATH), { recursive: true });
-  writeFileSync9(CACHE_PATH, `${JSON.stringify(cache, null, 2)}
+  writeFileSync10(CACHE_PATH, `${JSON.stringify(cache, null, 2)}
 `, "utf8");
 }
 function isFresh(cache) {
@@ -35779,7 +35820,7 @@ __export(exports_status, {
   detectJobOutputMode: () => detectJobOutputMode
 });
 import { spawnSync as spawnSync17 } from "child_process";
-import { existsSync as existsSync21, readFileSync as readFileSync21 } from "fs";
+import { existsSync as existsSync21, readFileSync as readFileSync22 } from "fs";
 import { join as join23 } from "path";
 function ok2(msg) {
   console.log(`  ${green8("\u2713")} ${msg}`);
@@ -35880,7 +35921,7 @@ function countJobEvents(sqliteClient, jobsDir, jobId) {
   const eventsFile = join23(jobsDir, jobId, "events.jsonl");
   if (!existsSync21(eventsFile))
     return 0;
-  const raw = readFileSync21(eventsFile, "utf-8").trim();
+  const raw = readFileSync22(eventsFile, "utf-8").trim();
   if (!raw)
     return 0;
   return raw.split(`
@@ -35917,7 +35958,7 @@ function getLatestContextSnapshot(sqliteClient, jobsDir, jobId) {
   const eventsFile = join23(jobsDir, jobId, "events.jsonl");
   if (!existsSync21(eventsFile))
     return null;
-  const lines = readFileSync21(eventsFile, "utf-8").split(`
+  const lines = readFileSync22(eventsFile, "utf-8").split(`
 `);
   for (let index = lines.length - 1;index >= 0; index -= 1) {
     const line = lines[index].trim();
@@ -36199,7 +36240,7 @@ __export(exports_ps, {
   run: () => run16
 });
 import { spawnSync as spawnSync18 } from "child_process";
-import { existsSync as existsSync22, readdirSync as readdirSync8, readFileSync as readFileSync22 } from "fs";
+import { existsSync as existsSync22, readdirSync as readdirSync8, readFileSync as readFileSync23 } from "fs";
 import { join as join24 } from "path";
 function loadBeadIdsForCurrentUser() {
   const ids = new Set;
@@ -36283,7 +36324,7 @@ function readStatusesFromFiles(jobsDir) {
     if (!existsSync22(statusPath))
       continue;
     try {
-      statuses.push(JSON.parse(readFileSync22(statusPath, "utf-8")));
+      statuses.push(JSON.parse(readFileSync23(statusPath, "utf-8")));
     } catch {}
   }
   return statuses.sort((a, b) => b.started_at_ms - a.started_at_ms);
@@ -36293,7 +36334,7 @@ function readLastToolEventFromFile(jobsDir, jobId) {
   if (!existsSync22(eventsPath))
     return;
   try {
-    const lines = readFileSync22(eventsPath, "utf-8").split(`
+    const lines = readFileSync23(eventsPath, "utf-8").split(`
 `);
     for (let index = lines.length - 1;index >= 0; index -= 1) {
       const line = lines[index]?.trim();
@@ -37112,7 +37153,7 @@ var exports_result = {};
 __export(exports_result, {
   run: () => run17
 });
-import { existsSync as existsSync23, readFileSync as readFileSync23 } from "fs";
+import { existsSync as existsSync23, readFileSync as readFileSync24 } from "fs";
 import { join as join25 } from "path";
 function parseArgs9(argv) {
   let jobId;
@@ -37206,7 +37247,7 @@ function readTimelineEventsForResult(sqliteClient, jobsDir, jobId) {
   const eventsPath = join25(jobsDir, jobId, "events.jsonl");
   if (!existsSync23(eventsPath))
     return [];
-  return readFileSync23(eventsPath, "utf-8").split(`
+  return readFileSync24(eventsPath, "utf-8").split(`
 `).map((line) => line.trim()).filter(Boolean).map((line) => parseTimelineEvent(line)).filter((event) => event !== null);
 }
 function deriveStartupSnapshot(status, events) {
@@ -37370,7 +37411,7 @@ async function run17() {
         console.warn(`SQLite result read failed for job ${jobId}; falling back to result.txt`, error2);
       }
       if (existsSync23(resultPath)) {
-        return readFileSync23(resultPath, "utf-8");
+        return readFileSync24(resultPath, "utf-8");
       }
       try {
         const events2 = readTimelineEventsForResult(sqliteClient, jobsDir, jobId);
@@ -37555,7 +37596,7 @@ var init_result = __esm(() => {
 });
 
 // src/specialist/timeline-query.ts
-import { existsSync as existsSync24, readdirSync as readdirSync9, readFileSync as readFileSync24 } from "fs";
+import { existsSync as existsSync24, readdirSync as readdirSync9, readFileSync as readFileSync25 } from "fs";
 import { basename as basename6, join as join26 } from "path";
 function readJobEvents(jobDir) {
   const jobId = basename6(jobDir);
@@ -37571,7 +37612,7 @@ function readJobEvents(jobDir) {
   const eventsPath = join26(jobDir, "events.jsonl");
   if (!existsSync24(eventsPath))
     return [];
-  const content = readFileSync24(eventsPath, "utf-8");
+  const content = readFileSync25(eventsPath, "utf-8");
   const lines = content.split(`
 `).filter(Boolean);
   const events = [];
@@ -37622,7 +37663,7 @@ function readAllJobEvents(jobsDir) {
     let beadId;
     if (existsSync24(statusPath)) {
       try {
-        const status = JSON.parse(readFileSync24(statusPath, "utf-8"));
+        const status = JSON.parse(readFileSync25(statusPath, "utf-8"));
         specialist = status.specialist ?? "unknown";
         beadId = status.bead_id;
       } catch {}
@@ -37721,7 +37762,7 @@ import {
   closeSync as closeSync2,
   existsSync as existsSync25,
   openSync as openSync3,
-  readFileSync as readFileSync25,
+  readFileSync as readFileSync26,
   readdirSync as readdirSync10,
   statSync as statSync3
 } from "fs";
@@ -37887,7 +37928,7 @@ function readFileFresh(filePath) {
   let fd = null;
   try {
     fd = openSync3(filePath, "r");
-    return readFileSync25(fd, "utf-8");
+    return readFileSync26(fd, "utf-8");
   } catch {
     return null;
   } finally {
@@ -38392,7 +38433,7 @@ var exports_steer = {};
 __export(exports_steer, {
   run: () => run19
 });
-import { writeFileSync as writeFileSync10 } from "fs";
+import { writeFileSync as writeFileSync11 } from "fs";
 async function run19() {
   const jobId = process.argv[3];
   const message = process.argv[4];
@@ -38423,7 +38464,7 @@ async function run19() {
     try {
       const payload = JSON.stringify({ type: "steer", message }) + `
 `;
-      writeFileSync10(status.fifo_path, payload, { flag: "a" });
+      writeFileSync11(status.fifo_path, payload, { flag: "a" });
       process.stdout.write(`${green10("\u2713")} Steer message sent to job ${jobId}
 `);
     } catch (err) {
@@ -38446,7 +38487,7 @@ var exports_resume = {};
 __export(exports_resume, {
   run: () => run20
 });
-import { writeFileSync as writeFileSync11 } from "fs";
+import { writeFileSync as writeFileSync12 } from "fs";
 async function run20() {
   const jobId = process.argv[3];
   const task = process.argv[4];
@@ -38477,7 +38518,7 @@ async function run20() {
     try {
       const payload = JSON.stringify({ type: "resume", task }) + `
 `;
-      writeFileSync11(status.fifo_path, payload, { flag: "a" });
+      writeFileSync12(status.fifo_path, payload, { flag: "a" });
       process.stdout.write(`${green11("\u2713")} Resume sent to job ${jobId}
 `);
       process.stdout.write(`  Use 'specialists feed ${jobId} --follow' to watch the response.
@@ -38509,7 +38550,7 @@ async function run21() {
 }
 
 // src/specialist/worktree-gc.ts
-import { existsSync as existsSync26, readdirSync as readdirSync11, readFileSync as readFileSync26 } from "fs";
+import { existsSync as existsSync26, readdirSync as readdirSync11, readFileSync as readFileSync27 } from "fs";
 import { join as join28 } from "path";
 import { spawnSync as spawnSync19 } from "child_process";
 function readJobStatus2(jobDir) {
@@ -38517,7 +38558,7 @@ function readJobStatus2(jobDir) {
   if (!existsSync26(statusPath))
     return null;
   try {
-    return JSON.parse(readFileSync26(statusPath, "utf-8"));
+    return JSON.parse(readFileSync27(statusPath, "utf-8"));
   } catch {
     return null;
   }
@@ -38613,7 +38654,7 @@ var exports_clean = {};
 __export(exports_clean, {
   run: () => run22
 });
-import { existsSync as existsSync27, readFileSync as readFileSync27, readdirSync as readdirSync12, readlinkSync as readlinkSync2, rmSync as rmSync4, statSync as statSync4 } from "fs";
+import { existsSync as existsSync27, readFileSync as readFileSync28, readdirSync as readdirSync12, readlinkSync as readlinkSync2, rmSync as rmSync4, statSync as statSync4 } from "fs";
 import { join as join29 } from "path";
 function parseTtlDaysFromEnvironment() {
   const rawValue = process.env.SPECIALISTS_JOB_TTL_DAYS ?? process.env.JOB_TTL_DAYS;
@@ -38742,7 +38783,7 @@ function readCompletedJobDirectory(baseDirectory, entry) {
     return null;
   let statusData;
   try {
-    statusData = JSON.parse(readFileSync27(statusFilePath, "utf-8"));
+    statusData = JSON.parse(readFileSync28(statusFilePath, "utf-8"));
   } catch {
     return null;
   }
@@ -38873,7 +38914,7 @@ function printUsageAndExit2(message) {
 }
 function readProcStringOrNull(path) {
   try {
-    return readFileSync27(path, "utf-8");
+    return readFileSync28(path, "utf-8");
   } catch {
     return null;
   }
@@ -39471,7 +39512,7 @@ __export(exports_attach, {
   run: () => run26
 });
 import { execFileSync as execFileSync3, spawnSync as spawnSync21 } from "child_process";
-import { readFileSync as readFileSync28 } from "fs";
+import { readFileSync as readFileSync29 } from "fs";
 import { join as join30 } from "path";
 function exitWithError(message) {
   console.error(message);
@@ -39479,7 +39520,7 @@ function exitWithError(message) {
 }
 function readStatus(statusPath, jobId) {
   try {
-    return JSON.parse(readFileSync28(statusPath, "utf-8"));
+    return JSON.parse(readFileSync29(statusPath, "utf-8"));
   } catch (error2) {
     if (error2 && typeof error2 === "object" && "code" in error2 && error2.code === "ENOENT") {
       exitWithError(`Job \`${jobId}\` not found. Run \`specialists status\` to see active jobs in current mode.`);
@@ -39516,7 +39557,7 @@ async function run26() {
 var init_attach = () => {};
 
 // src/specialist/drift-detector.ts
-import { existsSync as existsSync28, readFileSync as readFileSync29, readdirSync as readdirSync13, rmSync as rmSync5 } from "fs";
+import { existsSync as existsSync28, readFileSync as readFileSync30, readdirSync as readdirSync13, rmSync as rmSync5 } from "fs";
 import { join as join31, resolve as resolve11, relative as relative3 } from "path";
 function listFiles(root) {
   if (!existsSync28(root))
@@ -39566,7 +39607,7 @@ function detectDriftForRepo(repoRoot) {
         const canonicalPath = join31(asset.canonicalDir, rel);
         if (!existsSync28(canonicalPath))
           continue;
-        const bytesEqual = readFileSync29(file).equals(readFileSync29(canonicalPath));
+        const bytesEqual = readFileSync30(file).equals(readFileSync30(canonicalPath));
         findings.push(makeFinding(repoRoot, asset.kind, scope, file, canonicalPath, bytesEqual));
       }
     }
@@ -39928,7 +39969,7 @@ __export(exports_doctor, {
 });
 import { createHash as createHash5 } from "crypto";
 import { spawnSync as spawnSync22 } from "child_process";
-import { existsSync as existsSync29, lstatSync as lstatSync2, mkdirSync as mkdirSync11, readdirSync as readdirSync14, readFileSync as readFileSync30, readlinkSync as readlinkSync3, writeFileSync as writeFileSync12 } from "fs";
+import { existsSync as existsSync29, lstatSync as lstatSync2, mkdirSync as mkdirSync11, readdirSync as readdirSync14, readFileSync as readFileSync31, readlinkSync as readlinkSync3, writeFileSync as writeFileSync13 } from "fs";
 import { dirname as dirname10, join as join32, relative as relative4, resolve as resolve13 } from "path";
 function ok3(msg) {
   console.log(`  ${green15("\u2713")} ${msg}`);
@@ -39961,7 +40002,7 @@ function loadJson2(path) {
   if (!existsSync29(path))
     return null;
   try {
-    return JSON.parse(readFileSync30(path, "utf8"));
+    return JSON.parse(readFileSync31(path, "utf8"));
   } catch {
     return null;
   }
@@ -40107,7 +40148,7 @@ function checkVersion() {
 }
 function hashFile(path) {
   const hash = createHash5("sha256");
-  hash.update(readFileSync30(path));
+  hash.update(readFileSync31(path));
   return hash.digest("hex");
 }
 function collectFileHashes(rootDir) {
@@ -40497,10 +40538,10 @@ function compareVersions2(left, right) {
 }
 function setStatusError(statusPath) {
   try {
-    const raw = readFileSync30(statusPath, "utf8");
+    const raw = readFileSync31(statusPath, "utf8");
     const status = JSON.parse(raw);
     status.status = "error";
-    writeFileSync12(statusPath, `${JSON.stringify(status, null, 2)}
+    writeFileSync13(statusPath, `${JSON.stringify(status, null, 2)}
 `, "utf8");
   } catch {}
 }
@@ -40555,7 +40596,7 @@ function cleanupProcesses(jobsDir, dryRun) {
     if (!existsSync29(statusPath))
       continue;
     try {
-      const status = JSON.parse(readFileSync30(statusPath, "utf8"));
+      const status = JSON.parse(readFileSync31(statusPath, "utf8"));
       result.total += 1;
       if (status.status !== "running" && status.status !== "starting")
         continue;

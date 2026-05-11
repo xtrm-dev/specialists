@@ -7,7 +7,7 @@
 //   - No Pi bootstrap logic (extensions are global via ~/.pi/).
 //   - No CLI argument parsing.
 
-import { existsSync, symlinkSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, symlinkSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { spawnSync, execFileSync } from 'node:child_process';
 
@@ -159,6 +159,7 @@ export function provisionWorktree(options: WorktreeOptions): WorktreeInfo {
   try {
     rmSync(join(worktreePath, '.beads'), { recursive: true, force: true });
     symlinkSync(join(commonRoot, '.beads'), join(worktreePath, '.beads'), 'dir');
+    suppressBeadsWorktreeNoise(worktreePath);
   } catch {
     // Non-fatal: bd will recover by re-scaffolding a per-worktree stub on
     // next invocation. Cost is the per-worktree dolt server we wanted to
@@ -176,6 +177,74 @@ export function provisionWorktree(options: WorktreeOptions): WorktreeInfo {
 
 // ── Internal ───────────────────────────────────────────────────────────────────
 
+
+/**
+ * Suppress git noise from the .beads/ directory→symlink swap done above.
+ *
+ * After the swap, git sees:
+ *   - all the parent's tracked .beads/* files as "deleted" in the worktree
+ *   - .beads (the new symlink) as untracked
+ *
+ * Without this helper, every checkpoint commit in the worktree picks up
+ * 1.7k+ lines of phantom .beads/ deletions, polluting the chain diff and
+ * causing reviewer false FAILs on out-of-scope deletions.
+ *
+ * Fix:
+ *   - append '.beads' to <gitdir>/info/exclude → .beads symlink is no longer
+ *     listed as an untracked file in `git status`
+ *   - `git update-index --skip-worktree --` on every tracked .beads/* file →
+ *     git ignores worktree differences for those files; the dir→symlink
+ *     swap stops showing as deletions
+ *
+ * Mirror of xtrm-tools commit 8697f0b (suppressBeadsWorktreeNoise). See
+ * xtrm-nsca / unitAI-u08e8.
+ *
+ * Non-fatal on failure: the worktree still works, just with the original
+ * .beads/ diff pollution.
+ */
+function suppressBeadsWorktreeNoise(worktreePath: string): void {
+  try {
+    const gitDirResult = spawnSync('git', ['-C', worktreePath, 'rev-parse', '--absolute-git-dir'], {
+      cwd: worktreePath,
+      stdio: 'pipe',
+      encoding: 'utf8',
+    });
+    if (gitDirResult.status !== 0) return;
+
+    const gitDir = (gitDirResult.stdout ?? '').trim();
+    if (!gitDir) return;
+
+    const excludePath = join(gitDir, 'info', 'exclude');
+    mkdirSync(join(gitDir, 'info'), { recursive: true });
+    const excludeEntry = '.beads';
+    const excludeContents = existsSync(excludePath) ? readFileSync(excludePath, 'utf8') : '';
+    if (!excludeContents.split(/\r?\n/).includes(excludeEntry)) {
+      const prefix = excludeContents.length > 0 && !excludeContents.endsWith('\n') ? '\n' : '';
+      writeFileSync(excludePath, `${excludeContents}${prefix}${excludeEntry}\n`);
+    }
+
+    const trackedResult = spawnSync('git', ['-C', worktreePath, 'ls-files', '--', '.beads'], {
+      cwd: worktreePath,
+      stdio: 'pipe',
+      encoding: 'utf8',
+    });
+    if (trackedResult.status !== 0) return;
+
+    const trackedPaths = (trackedResult.stdout ?? '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (trackedPaths.length === 0) return;
+
+    spawnSync('git', ['-C', worktreePath, 'update-index', '--skip-worktree', '--', ...trackedPaths], {
+      cwd: worktreePath,
+      stdio: 'pipe',
+      encoding: 'utf8',
+    });
+  } catch {
+    // non-fatal
+  }
+}
 
 /**
  * Symlink <worktreePath>/.pi/npm → <commonRoot>/.pi/npm so new worktrees
