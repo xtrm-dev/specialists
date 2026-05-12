@@ -16,6 +16,10 @@ A specialist is a reusable execution spec: model, allowed tools, skills, system 
 
 ---
 
+## Vision
+
+Specialists turns one overloaded agent chat into a coordinated agent mind: a central orchestrator keeps task identity and evidence, while fresh specialist sessions act as scoped capabilities with their own prompts, rules, memory, and contracts. See [specialists.scheme.md](specialists.scheme.md) for diagrams comparing the single-chat model with specialist pipelines, herd memory, adaptive chains, and service specialists.
+
 ## Quick start
 
 ```bash

@@ -336,3 +336,231 @@ Conscious attention does not contain every skill. It invokes specialized faculti
 ```
 For agents, `specialists` is that architecture.
 It turns one overloaded chat into a coordinated mind with bounded expert subprocesses.
+
+## 11. Herd memory system
+
+The specialist system should not remember by stuffing everything into one orchestrator context.
+It should remember through the herd.
+
+Each specialist run produces artifacts:
+
+- structured handoff
+- investigation report
+- root cause explanation
+- test evidence
+- review verdict
+- runtime observation
+- follow-up issue
+- memory note
+
+Those artifacts become shared memory for future runs.
+
+```mermaid
+flowchart TD
+  Explorer[Explorer] --> H1[Architecture map]
+  Debugger[Debugger] --> H2[Root cause report]
+  Executor[Executor] --> H3[Implementation summary]
+  TestWriter[Test-writer] --> H4[Behavior coverage]
+  TestRunner[Test-runner] --> H5[Test evidence]
+  Reviewer[Reviewer] --> H6[Verdict and gaps]
+  Service[Service specialist] --> H7[Runtime observations]
+
+  H1 --> Herd[Herd memory system]
+  H2 --> Herd
+  H3 --> Herd
+  H4 --> Herd
+  H5 --> Herd
+  H6 --> Herd
+  H7 --> Herd
+
+  Herd --> Retrieval[Task-specific retrieval]
+  Retrieval --> Orchestrator[Orchestrator]
+  Retrieval --> Future[Future specialist run]
+```
+
+The herd remembers through artifacts, not through one giant context window.
+
+This matters because memory becomes queryable, compressible, and attributable. A future debugger can retrieve the prior root-cause report without inheriting the entire emotional and tool-output history of the previous session. A future reviewer can inspect evidence without carrying the executor’s self-justification. The orchestrator can stay light while still having access to durable collective memory.
+
+## 12. Adaptive pipelines
+
+There is no single correct specialist chain.
+
+The orchestrator should choose a pipeline based on task shape, issue contract, risk, and available evidence.
+
+```mermaid
+flowchart TD
+  Task[Task / issue contract] --> Router[Pipeline router]
+
+  Router --> Bug[Unknown-cause bug]
+  Router --> Feature[Scoped feature]
+  Router --> Architecture[Risky architecture]
+  Router --> ServiceRuntime[Service/runtime issue]
+  Router --> Docs[Documentation sync]
+  Router --> Memory[Memory consolidation]
+
+  Bug --> B1[debugger]
+  B1 --> B2[test-writer]
+  B2 --> B3[test-runner]
+  B3 --> B4[reviewer]
+
+  Feature --> F1[executor]
+  F1 --> F2[test-writer]
+  F2 --> F3[test-runner]
+  F3 --> F4[code-sanity]
+  F4 --> F5[reviewer]
+
+  Architecture --> A1[explorer]
+  A1 --> A2[overthinker]
+  A2 --> A3[planner]
+  A3 --> A4[executor]
+  A4 --> A5[reviewer]
+
+  ServiceRuntime --> S1[service specialist]
+  S1 --> S2[process monitor]
+  S2 --> S3[debugger or executor if needed]
+  S3 --> S4[reviewer]
+
+  Docs --> D1[researcher]
+  D1 --> D2[sync-docs]
+  D2 --> D3[reviewer]
+
+  Memory --> M1[memory-processor]
+  M1 --> M2[herd memory update]
+```
+
+Examples:
+
+```text
+bug unknown cause:
+debugger → test-writer → test-runner → reviewer
+
+feature scoped:
+executor → test-writer → test-runner → code-sanity → reviewer
+
+risky architecture:
+explorer → overthinker → planner → executor → reviewer
+
+service/runtime issue:
+service-specialist → process monitor → debugger/executor if needed → reviewer
+
+knowledge/doc sync:
+researcher → sync-docs → reviewer
+
+memory consolidation:
+memory-processor → herd memory update
+```
+
+The pipeline is itself part of the orchestration decision. A good orchestrator does not blindly run the same chain every time. It routes cognition.
+
+## 13. Service specialists and long-running processes
+
+Some specialists are not one-shot workers.
+
+A service specialist can own a long-running process, monitor it, summarize it, and alert the orchestrator only when something meaningful changes.
+
+```mermaid
+sequenceDiagram
+  participant O as Orchestrator
+  participant S as Service specialist
+  participant P as Long-running process
+  participant M as Herd memory
+
+  O->>S: Start service contract
+  S->>P: Launch / attach / monitor
+  P-->>S: Logs, health, errors, events
+  S-->>O: Status summaries and alerts
+  S-->>M: Runtime observations
+  O->>S: Steer, resume, or stop
+```
+
+This is different from executor/debugger work.
+
+A service specialist behaves more like a daemon faculty: it maintains a relationship with a runtime surface without forcing the orchestrator to keep raw logs, health checks, stack traces, and timing observations in central context.
+
+Useful service-specialist responsibilities:
+
+- run dev servers
+- monitor test watchers
+- track logs
+- watch health endpoints
+- summarize recurring failures
+- detect readiness transitions
+- preserve runtime observations into herd memory
+- wake the orchestrator only for meaningful events
+
+This is especially important for long-running test and preflight flows. Long runs are valuable stress harnesses, but their raw output should not become orchestrator context rot.
+
+## 14. User specialists as custom faculties
+
+Package specialists are the base faculties.
+User specialists are custom faculties.
+
+The specialists in paths like:
+
+```text
+/home/dawid/second-mind/.specialists/user
+```
+
+are examples of how the mind extends itself for personal or project-specific work.
+
+```mermaid
+flowchart TD
+  O[Orchestrator] --> Package[Package specialists]
+  O --> User[User specialists]
+  O --> Project[Project specialists]
+
+  Package --> Base[Base faculties: debugger, executor, reviewer]
+  User --> Custom[Custom faculties: personal workflows, vault-aware agents, domain specialists]
+  Project --> Domain[Project faculties: service/runtime/domain-specific workers]
+
+  Base --> O
+  Custom --> O
+  Domain --> O
+```
+
+This makes the system extensible in the same way a person develops new skills.
+
+The core mind does not need to permanently contain every domain. It can install or author a new specialist, then invoke that specialist when the right contract appears.
+
+That means the specialists ecosystem is not just parallelization. It is a growing capability graph.
+
+## 15. Updated short version
+
+Single-agent chat:
+
+```text
+One mind does everything → context fills → bias/drift/rot accumulates → self-review weakens.
+```
+
+Specialist pipeline:
+
+```text
+Central orchestrator keeps identity → specialists run fresh scoped cognition → structured evidence returns → reviewer checks contract.
+```
+
+Herd memory:
+
+```text
+The system remembers through durable artifacts and retrieval, not by keeping every run in one context window.
+```
+
+Adaptive pipelines:
+
+```text
+Task shape chooses chain. Bug, feature, architecture, service runtime, docs, and memory work use different specialist paths.
+```
+
+Service specialists:
+
+```text
+Long-running processes are monitored by dedicated faculties, not by bloating orchestrator context with raw logs.
+```
+
+User specialists:
+
+```text
+Custom faculties extend the mind for personal, project, and domain-specific work.
+```
+
+For agents, `specialists` is a coordinated mind: central executive, fresh expert faculties, herd memory, and adaptable pipelines.
