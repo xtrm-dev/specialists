@@ -28,3 +28,6 @@
 ## Decision Log
 
 <!-- Significant technical decisions with rationale. Why X was chosen over Y. -->
+
+## User Corrections — 2026-05-12
+- `sp ps` default must stay compact: show aggregate System health only. Detailed per-process specialist/Dolt/Serena/orphan rows belong behind explicit `sp ps --health`.

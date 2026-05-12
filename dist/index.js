@@ -36567,6 +36567,7 @@ function parseArgs8(argv) {
     includeTerminal,
     running: argv.includes("--running"),
     mine: argv.includes("--mine"),
+    health: argv.includes("--health"),
     beadFilter,
     sinceMs,
     nodeId,
@@ -37063,7 +37064,7 @@ function formatProcessRow(process3) {
   const age = `${Math.floor(process3.ageSeconds / 60)}m`;
   return `  ${String(process3.pid).padEnd(7)} ${process3.role.padEnd(14)} ${rssMb.padEnd(8)} ${cpu.padEnd(7)} ${age.padEnd(5)} ${cwd}`;
 }
-function renderProcessHealthBlock(report) {
+function renderProcessHealthBlock(report, includeDetails) {
   const percent = report.thresholdPct.toFixed(1);
   const severity = report.status === "REFUSE" ? red2("REFUSE") : report.status === "WARN" ? yellow10("WARN") : green8("OK");
   console.log(bold10(cyan5("System health")));
@@ -37071,6 +37072,10 @@ function renderProcessHealthBlock(report) {
   console.log(`  specialists=${report.specialistCount} dolt=${report.doltCount} serena-lsp=${report.serenaLspCount} orphans=${report.orphanCount}`);
   if (report.statusReasons.length > 0)
     console.log(`  alerts=${report.statusReasons.join("; ")}`);
+  if (!includeDetails) {
+    console.log("");
+    return;
+  }
   if (report.doltProcesses.length > 0) {
     console.log(bold10("  Dolt sql-server"));
     for (const process3 of report.doltProcesses)
@@ -37122,12 +37127,12 @@ function resolveEpicReadinessMap(jobs, includeTerminal) {
     sqlite.close();
   }
 }
-function renderHuman(jobs, nodes, trees, all, includeTerminal, epicReadiness, health) {
+function renderHuman(jobs, nodes, trees, all, includeTerminal, epicReadiness, health, includeHealthDetails) {
   const beadTitles = buildBeadTitleCache(jobs);
   const renderedJobIds = new Set;
   const epicGroups = buildEpicGroups(jobs, epicReadiness);
   const renderedEpicIds = new Set(epicGroups.map((epic) => epic.epic_id));
-  renderProcessHealthBlock(health);
+  renderProcessHealthBlock(health, includeHealthDetails);
   for (const epic of epicGroups) {
     const prepCount = epic.prep_jobs.length;
     const chainCount = epic.chains.length;
@@ -37380,7 +37385,7 @@ function render(args) {
     renderJson(visibleStatuses, nodes, trees, args.all, epicReadiness, args, health);
     return;
   }
-  renderHuman(visibleStatuses, nodes, trees, args.all, args.includeTerminal, epicReadiness, health);
+  renderHuman(visibleStatuses, nodes, trees, args.all, args.includeTerminal, epicReadiness, health, args.health);
 }
 function renderBuffered(args) {
   const lines = [];
@@ -41810,7 +41815,7 @@ var init_help = __esm(() => {
     ["attach", "Attach terminal to a running background job tmux session"],
     ["report", "Generate/show/list/diff session reports in .xtrm/reports/"],
     ["status", "Show health, MCP state, and active jobs"],
-    ["ps", "Show urgency-sorted worktree view with ctx% and NEXT action; --json, --all, --follow, --running, --bead <id>, --since <dur>, --mine, --include-terminal"],
+    ["ps", "Show urgency-sorted worktree view with ctx% and NEXT action; --json, --all, --follow, --running, --health, --bead <id>, --since <dur>, --mine, --include-terminal"],
     ["doctor", "Diagnose installation/runtime problems; --check-drift reports stale .specialists/default/ snapshots"],
     ["prune-stale-defaults", "Prune redundant .specialists/default/ snapshots (byte-identical to package canonical); --dry-run, --root <path>"],
     ["quickstart", "Full getting-started guide"],
@@ -49862,6 +49867,7 @@ async function run34() {
         "  --json       Structured JSON output with trees[].children[] schema",
         "  --all        Include terminal (done/error) and dead jobs",
         "  --follow, -f Live-refresh view with spinner animation",
+        "  --health     Show detailed process health tables (default is aggregate only)",
         "",
         "Output columns:",
         "  st           Status icon: \u25C9 running, \u25D0 waiting/starting, \u25CB done/error",

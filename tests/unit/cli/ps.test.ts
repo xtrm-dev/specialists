@@ -115,7 +115,7 @@ describe('ps CLI — run()', () => {
     expect(clean).toContain('0 waiting');
   }, TEST_TIMEOUT_MS);
 
-  it('shows system health block with process counts', async () => {
+  it('shows compact system health block with process counts by default', async () => {
     createJob(tempDir, 'aaa111', { pid: process.pid });
     process.argv = ['node', 'specialists', 'ps'];
     const output: string[] = [];
@@ -129,8 +129,25 @@ describe('ps CLI — run()', () => {
     expect(clean).toContain('WARN');
     expect(clean).toContain('specialists=2 dolt=1 serena-lsp=1 orphans=1');
     expect(clean).toContain('alerts=orphan process count 1 > 0');
+    expect(clean).not.toContain('Dolt sql-server');
+    expect(clean).not.toContain('Serena LSP');
+  }, TEST_TIMEOUT_MS);
+
+  it('--health shows detailed process tables', async () => {
+    createJob(tempDir, 'aaa111', { pid: process.pid });
+    process.argv = ['node', 'specialists', 'ps', '--health'];
+    const output: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      output.push(args.map(String).join(' '));
+    });
+    const { run } = await import('../../../src/cli/ps.js');
+    await run();
+    const clean = stripAnsi(output.join('\n'));
+    expect(clean).toContain('System health');
     expect(clean).toContain('Dolt sql-server');
     expect(clean).toContain('Serena LSP');
+    expect(clean).toContain('Specialists');
+    expect(clean).toContain('Orphans');
   }, TEST_TIMEOUT_MS);
 
   it('shows running job with alive PID', async () => {

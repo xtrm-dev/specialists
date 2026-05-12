@@ -552,6 +552,7 @@ async function run() {
         '  --json       Structured JSON output with trees[].children[] schema',
         '  --all        Include terminal (done/error) and dead jobs',
         '  --follow, -f Live-refresh view with spinner animation',
+        '  --health     Show detailed process health tables (default is aggregate only)',
         '',
         'Output columns:',
         '  st           Status icon: ◉ running, ◐ waiting/starting, ○ done/error',
