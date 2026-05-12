@@ -11,6 +11,38 @@ The skill is solid for **dispatch + chain + reviewer**. The gaps surfaced by thi
 
 ## Part A — Net-new sections to add
 
+### A0. Advisory passes are part of every chain (REINFORCEMENT — 2026-05-12)
+
+The current SKILL.md has a doctrine section "Security-Auditor and Code-Sanity Are Part of the Chain" (line ~95) saying both are not optional for substantive diffs. The integration patterns introduced below (A1 cherry-pick playbook, A2 debugger-restitch, A3 E2E smoke) and the escalation matrix (A4) must explicitly route through this doctrine — otherwise an agent following the new sections will skip advisory passes by omission. Observed reality 2026-05-09 → 2026-05-11: code-sanity is under-used; reviewers absorb its responsibilities and produce noisier PARTIAL verdicts.
+
+**Add this section before "Canonical Single-Chain Flow" or fold into the existing "Security-Auditor and Code-Sanity Are Part of the Chain" section to strengthen it:**
+
+````markdown
+## Advisory Passes Are Part Of Every Chain
+
+For any substantive diff, the chain shape is:
+
+```
+executor → code-sanity (if smell) → security-auditor (if risk surface) → reviewer → merge
+```
+
+Triggers:
+
+- **code-sanity**: diff has control-flow complexity, duplication, type-risky changes, or unusual brittleness shape. Cheap. Output is advisory; executor applies findings or reviewer arbitrates.
+- **security-auditor**: diff touches auth, secrets, input handling (user/network/file), dependency lockfiles, agent/MCP/config surfaces, or token-storage paths. Output is advisory; executor applies findings.
+
+Routing patterns (cross-referenced from A1–A4, A6):
+
+- Cherry-pick integration (A1): advisory passes run on the last executor job in each chain BEFORE the squash-commit step.
+- Debugger-restitch (A2): advisory passes run on the debugger's job AFTER the restitch turn, BEFORE reviewer.
+- E2E smoke (A3): security-auditor runs on the cumulative integrated diff if any landed chain touched a sensitive surface, BEFORE smoke completes.
+- Reviewer rebuttal (A6): code-sanity / security-auditor findings count as legitimate evidence to support or rebut a reviewer verdict.
+
+Skipping an advisory pass on a substantive diff is an escalation event (A4).
+
+When the diff is purely additive (new files only, no existing-symbol modifications), advisory passes are optional — note the new-file scope explicitly in the chain's handoff. Test-only diffs that touch no production code path skip security-auditor by default but should still get code-sanity if the test logic is non-trivial.
+````
+
 ### A1. Integration phase / cherry-pick playbook
 
 The skill currently assumes `sp merge` and `sp epic merge` are the only publish path. In practice when chains forked from a non-`main` working branch (e.g. `fix/foo-baseline`), `sp merge` fails because it hardcodes `main` as the rebase target (filed as xtrm-nr05). The orchestrator falls back to manual cherry-pick + debugger restitch — a multi-step pattern that the skill should teach explicitly.
@@ -32,6 +64,7 @@ Use this when:
 3. For each non-overlapping chain (security/critical first, then test-baseline, then features):
    - `git merge --squash <chain-branch>`
    - Restore noise files (see "Chain noise filter checklist" below)
+   - **Advisory passes per A0** before commit: if the staged diff smells overcomplicated/duplicative/type-risky, dispatch `code-sanity --job <last-exec-job-of-chain>`; if it touches auth/secrets/input/agent-config, dispatch `security-auditor --job <last-exec-job-of-chain>`. Apply findings or document why skipped. Skipping on a substantive diff is an escalation event (A4).
    - `git commit -m "<type>(<scope>): <summary> (<bead-id>)"` — one squash commit per chain
 4. For each overlapping chain, switch to the **debugger-restitch** pattern (see A2).
 5. After all chains land, run E2E smoke phase (see A3) before declaring done.
@@ -85,8 +118,9 @@ When chain X conflicts with already-landed chain Y on shared files:
    git diff integration/<date>...feature/<X>-debugger -- <key-files>
    ```
    Confirm the debugger's diff is **additive** — no reverts of Y's lines.
-5. **Land via FF or cherry-pick the named commit** (NOT the checkpoint commit). Look for the commit with the proper `<type>(<scope>):` message; ignore `checkpoint(debugger):` commits above it.
-6. **Verify tests** before marking done.
+5. **Advisory passes per A0**: before landing the restitch, dispatch `code-sanity --job <debugger-job>` if the restitch added control-flow complexity, and `security-auditor --job <debugger-job>` if the restitch touched a sensitive surface. Restitched diffs are higher-risk than fresh executor diffs because the debugger had to thread around already-landed work — they should never skip advisory passes.
+6. **Land via FF or cherry-pick the named commit** (NOT the checkpoint commit). Look for the commit with the proper `<type>(<scope>):` message; ignore `checkpoint(debugger):` commits above it.
+7. **Verify tests** before marking done.
 
 ### Failure mode to watch for
 
@@ -137,6 +171,18 @@ For each smoke that fails, **decide before continuing**:
 - Missing dependency (vendor not run, etc.) → expected gate, document
 - Real regression → stop, dispatch debugger to fix, re-smoke
 
+### Cross-cutting security-auditor pass (per A0)
+
+If ANY landed chain in this integration touched auth, secrets, input handling, dependency lockfiles, or agent/MCP/config surfaces, dispatch one `security-auditor` on the cumulative integration diff BEFORE declaring smoke done:
+
+```bash
+git diff <baseline>..integration/<date>-orchestrator > /tmp/integration-diff.patch
+# file a sanity bead pointing at /tmp/integration-diff.patch + the touched-surface list
+sp run security-auditor --bead <sec-bead> --context-depth 3 --background
+```
+
+Per-chain security-auditor passes in A1/A2 catch chain-local risks; this cross-cutting pass catches interaction risks that only appear once all chains coexist (e.g. one chain weakens an input validator that another chain newly relies on). Skipping this on a sensitive-surface integration is an escalation event (A4).
+
 Record all smoke results in the session-close-report under a `## Smoke test results` table.
 ````
 
@@ -157,6 +203,8 @@ Branch delete | Never | Always
 Stash pop where conflict expected | Auto | Stash conflict that destroys session-start state
 `bd dolt fsck --revive-journal-with-data-loss` | Never | Always — has explicit data-loss warning
 `sp epic merge` | Auto if all children PASSed | Skip if any child reviewer-FAILed
+Skip `code-sanity` on a substantive diff | Auto-skip only on test-only or new-file-only diffs | Always escalate before skipping on a multi-file production diff
+Skip `security-auditor` on diff touching auth/secrets/input/agent-config | Never | Always — sensitive-surface diffs always get the pass per A0
 `sp stop <job>` | Auto when job is done/stale | Never on actively-running unless context blown
 `git push origin <branch>` | Auto for chain branches (read-only push) | Force-push or delete-remote always
 `npm publish` | Never | Always
@@ -264,7 +312,7 @@ Several specialists default to over-cautious verdicts when an evidence gate look
 
 ### General rule
 
-Resume with explicit ammunition: file/line refs, exact rerun output, link to the bead memory that documents the rebuttal pattern. Don't argue from authority; argue from new evidence. After a successful rebuttal, save the rebuttal text as a `bd remember` so the next session inherits it.
+Resume with explicit ammunition: file/line refs, exact rerun output, link to the bead memory that documents the rebuttal pattern. Don't argue from authority; argue from new evidence. **Findings from code-sanity / security-auditor are legitimate rebuttal evidence** — a clean code-sanity OK or a security-auditor "no findings" is concrete proof against a reviewer's "looks too complex" or "may have security risk" gate. Cite the advisory job id when rebutting on this axis. After a successful rebuttal, save the rebuttal text as a `bd remember` so the next session inherits it.
 
 When done, capture rebuttals in the session-close-report under the relevant specialist's "Problems" sub-table — they're durable handoff context and pattern-of-pattern fuel for future training.
 ````
