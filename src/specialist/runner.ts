@@ -14,6 +14,8 @@ import type { HookEmitter } from './hooks.js';
 import { isAuthError, isTransientError, type CircuitBreaker } from '../utils/circuitBreaker.js';
 import { stripJsonFences } from './json-output.js';
 import { buildMandatoryRulesInjection } from './mandatory-rules.js';
+import { createObservabilitySqliteClient } from './observability-sqlite.js';
+import type { TimelineEvent, TimelineEventRunComplete } from './timeline-events.js';
 
 export interface RunOptions {
   name: string;
@@ -124,6 +126,56 @@ function runScript(command: string | undefined, cwd: string): ScriptResult {
     return { name: scriptName, output, exitCode: 0 };
   } catch (e: any) {
     return { name: scriptName, output: e.stdout ?? e.message ?? '', exitCode: e.status ?? 1 };
+  }
+}
+
+/**
+ * Build a small `gitnexus_summary` block from the reviewed job's last
+ * `run_complete` event, so the reviewer task template can render it inline
+ * without having to grep `sp feed <reviewed_job_id>` itself.
+ *
+ * Returns empty string when:
+ *   - reusedFromJobId is missing (caller did not pass --job <exec-job-id>)
+ *   - observability DB unavailable on this host (rare)
+ *   - no run_complete event for that job (executor errored before terminal)
+ *   - gitnexus_summary field absent in event (executor never called gitnexus)
+ *
+ * Returning empty rather than throwing keeps the pre-inject path optional —
+ * the reviewer prompt's Step 5 falls back to running `sp feed` itself when
+ * `$gitnexus_summary` is not provided.
+ */
+function buildReviewedGitnexusSummary(opts: {
+  reusedFromJobId?: string;
+  cwd: string;
+}): string {
+  const jobId = opts.reusedFromJobId?.trim();
+  if (!jobId) return '';
+  try {
+    const client = createObservabilitySqliteClient(opts.cwd);
+    if (!client) return '';
+    const events: TimelineEvent[] = client.readEvents(jobId);
+    let runComplete: TimelineEventRunComplete | null = null;
+    for (let i = events.length - 1; i >= 0; i -= 1) {
+      const ev = events[i];
+      if (ev?.type === 'run_complete') {
+        runComplete = ev as TimelineEventRunComplete;
+        break;
+      }
+    }
+    if (!runComplete?.gitnexus_summary) return '';
+    const gs = runComplete.gitnexus_summary;
+    const files = (gs.files_touched ?? []).slice(0, 20).join(', ') || '(none)';
+    const symbols = (gs.symbols_analyzed ?? []).slice(0, 20).join(', ') || '(none)';
+    const risk = gs.highest_risk ?? 'UNKNOWN';
+    const invocations = gs.tool_invocations ?? 0;
+    return `<gitnexus_summary reviewed_job_id="${jobId}">
+  files_touched: ${files}
+  symbols_analyzed: ${symbols}
+  highest_risk: ${risk}
+  tool_invocations: ${invocations}
+</gitnexus_summary>`;
+  } catch {
+    return '';
   }
 }
 
@@ -947,6 +999,18 @@ export class SpecialistRunner {
       ...(options.reusedFromJobId ? { reused_from_job_id: options.reusedFromJobId } : {}),
       ...(options.worktreeOwnerJobId ? { worktree_owner_job_id: options.worktreeOwnerJobId } : {}),
     };
+    // Pre-inject the executor's gitnexus_summary (files_touched / symbols_analyzed /
+    // highest_risk / tool_invocations) so the reviewer task template can render it
+    // directly. Falls back to empty string when the reviewed job had no run_complete
+    // event or no gitnexus_summary — the reviewer prompt instructs to `sp feed
+    // <reviewed_job_id>` for the timeline in that case (see Phase 1 unitAI-gufaf.1).
+    const gitnexusSummary = buildReviewedGitnexusSummary({
+      reusedFromJobId: options.reusedFromJobId,
+      cwd: runCwd,
+    });
+    if (gitnexusSummary) {
+      lineageVariables.gitnexus_summary = gitnexusSummary;
+    }
     const beadTemplateVariables: Record<string, string> = {
       prompt: resolvedPrompt,
       bead_id: options.inputBeadId ?? '',
