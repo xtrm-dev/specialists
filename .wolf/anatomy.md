@@ -1286,3 +1286,10 @@
 
 - `compose.yml` — local specialists repo dev compose now uses explicit `container_name: sp-service-dev` to avoid confusion with consumer `specialists-service` containers.
 - `docs/specialists-service-install.md` — documents dev vs consumer container naming and how to inspect compose labels.
+
+## Manual session note — 2026-05-12 unitAI-uof0t
+
+- `src/specialist/process-health.ts` — new Linux `/proc` scanner for `sp ps` system health: specialist/Dolt/Serena/orphan classification, RSS/CPU/age, MemAvailable thresholds, WARN/REFUSE status reasons.
+- `src/cli/ps.ts` — renders System health block and emits `process_health` JSON with process counts, alerts, and per-process rows.
+- `src/cli/clean.ts` — reuses shared orphan-process collection from process-health.
+- `tests/unit/specialist/process-health.test.ts` / `tests/unit/cli/ps.test.ts` — fixture coverage for proc parsing, uptime-based age, status alerts, and ps rendering/JSON.
