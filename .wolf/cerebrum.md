@@ -33,3 +33,4 @@
 - `sp ps` default must stay compact: show aggregate System health only. Detailed per-process specialist/Dolt/Serena/orphan rows belong behind explicit `sp ps --health`.
 - Correction: `sp ps` default should be active-job dashboard only. Terminal historical DB rows belong behind `--include-terminal` or `--all`; otherwise cleanup appears ineffective.
 - Correction: `sp ps` should show unresolved terminal problem jobs by default until `sp clean --ps` explicitly acknowledges/hides them; default must not be active-only forever.
+- Correction: after behavioral CLI changes, update `sp help`/subcommand help and `config/skills/using-specialists-v3/SKILL.md` so orchestrators learn the current semantics.

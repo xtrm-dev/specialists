@@ -1298,3 +1298,8 @@
 
 - `src/cli/ps.ts` — default visibility now renders active jobs only; terminal historical jobs are hidden unless `--include-terminal` or `--all` is passed.
 - `tests/unit/cli/ps.test.ts` — regression coverage for hiding terminal jobs by default and showing them via `--include-terminal`.
+
+## Manual session note — 2026-05-12 unitAI-hqy43
+
+- `src/index.ts` / `src/cli/help.ts` — expanded `sp ps --help` and `sp clean --help` for actionable dashboard, `--active`, `--include-terminal`, `--include-cleaned`, `--health`, and `sp clean --ps` soft-clean semantics.
+- `config/skills/using-specialists-v3/SKILL.md` — documents final `sp ps` / `sp clean --ps` operational model for orchestration cleanup and monitoring.

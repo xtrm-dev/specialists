@@ -152,7 +152,7 @@ git worktree remove <path>
 git branch -d <merged-branch>     # only after confirming merged
 ```
 
-`sp ps` must be empty (or only contain jobs you intentionally kept alive) before session close. Stale worktrees and stale jobs both block future dispatches via the stale-base guard.
+`sp ps` must have no active jobs and no unresolved terminal problems before session close. If it only shows old terminal history that you have intentionally acknowledged, run `sp clean --ps --dry-run` and then `sp clean --ps` to soft-hide those rows from the default dashboard. This does not delete SQLite history or change job status; use `sp ps --include-cleaned` or `sp ps --all` for audit visibility. Stale worktrees and stale jobs both block future dispatches via the stale-base guard.
 
 ## When To Delegate
 
@@ -619,12 +619,17 @@ What differs: orchestrator uses specialists beyond the common trio, so planning,
 Use `sp ps` for state and `sp result` for completed turns.
 
 ```bash
-sp ps
-sp ps <job-id>
-sp ps --bead <bead-id>
+sp ps                         # active jobs + unresolved terminal problems
+sp ps --active                # active jobs only
+sp ps --health                # include detailed process tables
+sp ps --include-terminal      # include uncleaned terminal history
+sp ps --include-cleaned       # include rows hidden by sp clean --ps
+sp ps --all                   # full audit view, including cleaned/dead/history
 sp feed <job-id>
 sp result <job-id>
 ```
+
+Default `sp ps` is the actionable dashboard, not raw history. Error/cancelled terminal rows stay visible until an operator acknowledges them with `sp clean --ps`; cleaned rows remain in SQLite and are visible via `--include-cleaned`/`--all`.
 
 If job is running, use `sp feed`. If it is waiting, use `sp result` and decide whether to resume, review, merge, or stop. Avoid tight polling; sleep based on task size, then check once.
 
@@ -720,7 +725,7 @@ Then choose one action:
 | `sp merge` refuses with "non-terminal chain jobs" after reviewer PASS | Auto-finalize did not fire (PASS arrived via `sp resume`, not streaming) | `sp finalize <any-chain-job-id>` — cascades to close every waiting keep-alive member |
 | `sp epic merge` says epic is "in terminal state 'failed'" | Prior `sp epic merge` hit a transient error (rebase conflict, dirty worktree) and persisted a soft `failed` marker | Clear the original conflict source, then re-run `sp epic merge` — it retries fresh, only `merged`/`abandoned` truly block |
 | `sp epic merge` says "rebase failed: unstaged changes" in a worktree | bd auto-export or other tooling left uncommitted changes inside the worktree | `cd .worktrees/<bead>/<bead>-executor && git stash push -u -m epic-merge-prep`, then re-run from main repo |
-| `sp ps` shows huge job/epic counts after sessions | observability sqlite retains terminal records (no built-in purge yet) | `sp clean --all` purges job dirs; sqlite truncate of `specialist_jobs` / `epic_runs` / `specialist_events` if display matters |
+| `sp ps` shows old terminal jobs after a session | Default dashboard keeps unresolved terminal problems visible until acknowledged | `sp clean --ps --dry-run`, then `sp clean --ps` to soft-hide from default ps; use `sp ps --include-cleaned`/`--all` for audit history |
 | Reviewer keeps returning PARTIAL on functional contracts already met | Reviewer demanding tool-event evidence (e.g. `gitnexus_impact`) the executor never recorded | Operator override after verifying SUCCESS criteria are factually met — iteration cannot satisfy a process-evidence gate that was never going to be recorded |
 | Multiple `sp run` background launches drop silently under shell parallelism | Known launch-ceremony race | Re-check `sp ps` after each dispatch and retry the missing one; serialize when reliability matters |
 
