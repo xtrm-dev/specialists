@@ -29,7 +29,11 @@ export interface ProcessHealthWorkspaceGroup {
   processes: ProcessHealthProcess[];
 }
 
+export type ProcessHealthStatus = 'OK' | 'WARN' | 'REFUSE';
+
 export interface ProcessHealthReport {
+  status: ProcessHealthStatus;
+  statusReasons: string[];
   memAvailableBytes: number;
   totalRssBytes: number;
   totalCpuPct: number;
@@ -242,8 +246,21 @@ export function collectProcessHealth(options: { procRoot?: string; meminfoPath?:
   const refuseLimitBytes = Math.floor(memAvailableBytes * (thresholds.refusePct / 100));
   const totalRssBytes = processes.reduce((sum, process) => sum + process.rssBytes, 0);
   const totalCpuPct = processes.reduce((sum, process) => sum + process.cpuPct, 0);
+  const thresholdPct = memAvailableBytes > 0 ? (totalRssBytes / memAvailableBytes) * 100 : 0;
+  const statusReasons: string[] = [];
+
+  if (thresholdPct >= thresholds.refusePct) statusReasons.push(`rss >= refuse threshold (${thresholds.refusePct}%)`);
+  else if (thresholdPct >= thresholds.warnPct) statusReasons.push(`rss >= warn threshold (${thresholds.warnPct}%)`);
+  if (doltProcesses.length > 1) statusReasons.push(`dolt sql-server count ${doltProcesses.length} > expected 1`);
+  if (orphanProcesses.length > 0) statusReasons.push(`orphan process count ${orphanProcesses.length} > 0`);
+
+  const status: ProcessHealthStatus = thresholdPct >= thresholds.refusePct ? 'REFUSE'
+    : statusReasons.length > 0 ? 'WARN'
+    : 'OK';
 
   return {
+    status,
+    statusReasons,
     memAvailableBytes,
     totalRssBytes,
     totalCpuPct,
@@ -251,7 +268,7 @@ export function collectProcessHealth(options: { procRoot?: string; meminfoPath?:
     doltCount: doltProcesses.length,
     serenaLspCount: serenaProcesses.length,
     orphanCount: orphanProcesses.length,
-    thresholdPct: memAvailableBytes > 0 ? (totalRssBytes / memAvailableBytes) * 100 : 0,
+    thresholdPct,
     warnPct: thresholds.warnPct,
     refusePct: thresholds.refusePct,
     warnLimitBytes,

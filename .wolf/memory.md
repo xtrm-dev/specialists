@@ -149,3 +149,5 @@
 - 2026-05-07T11:53:53Z: Distinguished specialists local dev container naming: root `compose.yml` uses `sp-service-dev`; darth-feedor/consumer deployments keep `specialists-service`; existing `specialists-specialists-1` is the old Compose auto-name until recreated.
 
 - 2026-05-12T18:46:56+00:00: Cleanup pass unitAI-vtvjb reconciled dirty tree after reviewer GitNexus evidence work; unsafe generated hook downgrades were reverted, report/CHANGELOG/dist/beads metadata kept, and local .specialists/user + .tmp artifacts excluded from status.
+
+- 2026-05-12T21:45:00Z: unitAI-uof0t added `sp ps` System health backed by `src/specialist/process-health.ts`; manual validation found Dolt/orphan counts must affect headline severity, so WARN now triggers on `doltCount > 1` or `orphanCount > 0` even below RSS threshold.

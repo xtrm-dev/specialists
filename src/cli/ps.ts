@@ -725,10 +725,11 @@ function formatProcessRow(process: ProcessHealthProcess): string {
 
 function renderProcessHealthBlock(report: ProcessHealthReport): void {
   const percent = report.thresholdPct.toFixed(1);
-  const severity = report.thresholdPct >= report.refusePct ? red('REFUSE') : report.thresholdPct >= report.warnPct ? yellow('WARN') : green('OK');
+  const severity = report.status === 'REFUSE' ? red('REFUSE') : report.status === 'WARN' ? yellow('WARN') : green('OK');
   console.log(bold(cyan('System health')));
   console.log(`  ${severity} rss=${(report.totalRssBytes / (1024 * 1024)).toFixed(1)}MB avail=${(report.memAvailableBytes / (1024 * 1024)).toFixed(1)}MB used=${percent}% warn=${report.warnPct}% refuse=${report.refusePct}% cpu=${report.totalCpuPct.toFixed(1)}%`);
   console.log(`  specialists=${report.specialistCount} dolt=${report.doltCount} serena-lsp=${report.serenaLspCount} orphans=${report.orphanCount}`);
+  if (report.statusReasons.length > 0) console.log(`  alerts=${report.statusReasons.join('; ')}`);
 
   if (report.doltProcesses.length > 0) {
     console.log(bold('  Dolt sql-server'));

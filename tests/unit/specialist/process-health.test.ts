@@ -69,4 +69,26 @@ describe('process-health', () => {
     expect(report.specialistProcesses[0]?.ageSeconds).toBeCloseTo(2000, 1);
     expect(report.specialistProcesses[0]?.cpuPct).toBeGreaterThan(0);
   });
+
+  it('warns when dolt or orphan process counts exceed safe defaults', () => {
+    root = mkdtempSync(join(tmpdir(), 'process-health-'));
+    const meminfo = join(root, 'meminfo');
+    writeFileSync(meminfo, 'MemAvailable:       100000 kB\n', 'utf-8');
+    writeFileSync(join(root, 'uptime'), '2000.00 1000.00\n', 'utf-8');
+
+    for (const pid of [201, 202]) {
+      writeProcProcess(root, pid, {
+        cmdline: 'dolt sql-server\0',
+        comm: 'dolt',
+        stat: `${pid} (dolt) S 1 1 1 0 -1 4194560 100 0 0 80 20 0 0 20 0 1 0 1000 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0`,
+        status: 'VmRSS:\t1024 kB\n',
+        cwd: '/home/me/.worktrees/alpha/.beads',
+      });
+    }
+
+    const report = collectProcessHealth({ procRoot: root, meminfoPath: meminfo });
+
+    expect(report.status).toBe('WARN');
+    expect(report.statusReasons).toContain('dolt sql-server count 2 > expected 1');
+  });
 });

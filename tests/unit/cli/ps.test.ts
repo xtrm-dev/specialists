@@ -12,6 +12,8 @@ const mockSqlite = {
 };
 
 const mockProcessHealth = vi.fn(() => ({
+  status: 'WARN',
+  statusReasons: ['orphan process count 1 > 0'],
   memAvailableBytes: 1024 * 1024 * 1024,
   totalRssBytes: 256 * 1024 * 1024,
   totalCpuPct: 12.5,
@@ -124,7 +126,9 @@ describe('ps CLI — run()', () => {
     await run();
     const clean = stripAnsi(output.join('\n'));
     expect(clean).toContain('System health');
+    expect(clean).toContain('WARN');
     expect(clean).toContain('specialists=2 dolt=1 serena-lsp=1 orphans=1');
+    expect(clean).toContain('alerts=orphan process count 1 > 0');
     expect(clean).toContain('Dolt sql-server');
     expect(clean).toContain('Serena LSP');
   }, TEST_TIMEOUT_MS);
