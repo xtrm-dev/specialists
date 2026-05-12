@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { createObservabilitySqliteClient } from '../specialist/observability-sqlite.js';
+import { resolveCanonicalAssetDir } from '../specialist/canonical-asset-resolver.js';
 import { detectDriftUnderRoot } from '../specialist/drift-detector.js';
 import { formatVersionCheckNudge, getVersionCheckResult, localVersion, readCachedVersionCheck } from './version-check.js';
 
@@ -42,10 +43,6 @@ const XTRM_DEFAULT_SKILLS_DIR = join(XTRM_SKILLS_DIR, 'default');
 const XTRM_ACTIVE_SKILLS_DIR = join(XTRM_SKILLS_DIR, 'active');
 const ACTIVE_CLAUDE_SKILLS_DIR = join(XTRM_ACTIVE_SKILLS_DIR, 'claude');
 const ACTIVE_PI_SKILLS_DIR = join(XTRM_ACTIVE_SKILLS_DIR, 'pi');
-const CONFIG_SKILLS_DIR = join(CWD, 'config', 'skills');
-const CONFIG_SPECIALISTS_DIR = join(CWD, 'config', 'specialists');
-const CONFIG_MANDATORY_RULES_DIR = join(CWD, 'config', 'mandatory-rules');
-const CONFIG_NODES_DIR = join(CWD, 'config', 'nodes');
 const SPECIALISTS_DIR = join(CWD, '.specialists');
 const DEFAULT_SPECIALISTS_DIR = join(SPECIALISTS_DIR, 'default');
 const USER_SPECIALISTS_DIR = join(SPECIALISTS_DIR, 'user');
@@ -275,12 +272,17 @@ function isSymlinkTo(linkPath: string, expectedTargetPath: string): { ok: boolea
   }
 }
 
-function checkSkillDrift(): boolean {
-  section('Skill drift  (.xtrm skill sync)');
+export function resolvePackageAssetDir(relativePath: string): string | null {
+  return resolveCanonicalAssetDir(relativePath) ?? (existsSync(join(CWD, 'config', relativePath)) ? join(CWD, 'config', relativePath) : null);
+}
 
-  if (!existsSync(CONFIG_SKILLS_DIR)) {
-    fail('config/skills/ missing');
-    fix('restore config/skills/ from git');
+function checkSkillDrift(): boolean {
+  section('Category A  package-live skill sync');
+
+  const canonicalSkillsDir = resolvePackageAssetDir('skills');
+  if (!canonicalSkillsDir) {
+    fail('package canonical skills source missing');
+    fix('restore config/skills/ or install package assets');
     return false;
   }
 
@@ -290,7 +292,7 @@ function checkSkillDrift(): boolean {
     return false;
   }
 
-  const canonicalHashes = collectFileHashes(CONFIG_SKILLS_DIR);
+  const canonicalHashes = collectFileHashes(canonicalSkillsDir);
   const defaultHashes = collectFileHashes(XTRM_DEFAULT_SKILLS_DIR);
 
   const drifted: string[] = [];
@@ -311,10 +313,10 @@ function checkSkillDrift(): boolean {
   }
 
   if (drifted.length === 0 && missingInDefault.length === 0 && extraInDefault.length === 0) {
-    ok('config/skills/ and .xtrm/skills/default/ are in sync');
+    ok(`${relative(CWD, canonicalSkillsDir)} and .xtrm/skills/default/ are in sync`);
   } else {
     if (drifted.length > 0) {
-      fail(`${drifted.length} drifted file${drifted.length === 1 ? '' : 's'} between config/skills and .xtrm/skills/default`);
+      fail(`${drifted.length} drifted file${drifted.length === 1 ? '' : 's'} between ${relative(CWD, canonicalSkillsDir)} and .xtrm/skills/default`);
       hint(`example: ${drifted.slice(0, 3).join(', ')}${drifted.length > 3 ? ', ...' : ''}`);
     }
     if (missingInDefault.length > 0) {
@@ -394,9 +396,11 @@ function checkSkillDrift(): boolean {
 }
 
 
-function checkManagedMirror(label: string, sourceDir: string, mirrorDir: string, fixHint: string): boolean {
-  if (!existsSync(sourceDir)) {
-    warn(`${label} source missing: ${relative(CWD, sourceDir)}`);
+function checkManagedMirror(label: string, canonicalRelativePath: string, mirrorDir: string, fixHint: string): boolean {
+  const sourceDir = resolvePackageAssetDir(canonicalRelativePath);
+  const sourceLabel = sourceDir ? relative(CWD, sourceDir) : `package canonical ${canonicalRelativePath}`;
+  if (!sourceDir) {
+    warn(`${label} source missing: package canonical ${canonicalRelativePath}`);
     fix(fixHint);
     return false;
   }
@@ -413,7 +417,7 @@ function checkManagedMirror(label: string, sourceDir: string, mirrorDir: string,
   const extra = [...mirrorHashes.keys()].filter(relPath => !sourceHashes.has(relPath));
 
   if (drifted.length === 0 && missing.length === 0 && extra.length === 0) {
-    ok(`${label} mirror in sync`);
+    ok(`${label} mirror in sync against ${sourceLabel}`);
     return true;
   }
 
@@ -434,10 +438,10 @@ function checkManagedMirror(label: string, sourceDir: string, mirrorDir: string,
 }
 
 function checkManagedAssetMirrors(): boolean {
-  section('Managed mirrors  (specialists / mandatory-rules / nodes)');
-  const specialistsOk = checkManagedMirror('specialists', CONFIG_SPECIALISTS_DIR, DEFAULT_SPECIALISTS_DIR, 'specialists init --sync-defaults');
-  const rulesOk = checkManagedMirror('mandatory-rules', CONFIG_MANDATORY_RULES_DIR, join(DEFAULT_SPECIALISTS_DIR, 'mandatory-rules'), 'specialists init --sync-defaults');
-  const nodesOk = checkManagedMirror('nodes', CONFIG_NODES_DIR, join(DEFAULT_SPECIALISTS_DIR, 'nodes'), 'specialists init --sync-defaults');
+  section('Category B  xtrm-managed asset mirrors');
+  const specialistsOk = checkManagedMirror('specialists', 'specialists', DEFAULT_SPECIALISTS_DIR, 'specialists init --sync-defaults');
+  const rulesOk = checkManagedMirror('mandatory-rules', 'mandatory-rules', join(DEFAULT_SPECIALISTS_DIR, 'mandatory-rules'), 'specialists init --sync-defaults');
+  const nodesOk = checkManagedMirror('nodes', 'nodes', join(DEFAULT_SPECIALISTS_DIR, 'nodes'), 'specialists init --sync-defaults');
   return specialistsOk && rulesOk && nodesOk;
 }
 

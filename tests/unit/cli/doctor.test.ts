@@ -3,6 +3,31 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+describe('doctor asset source resolution', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  it('uses repo config assets in source checkout', async () => {
+    const { resolvePackageAssetDir } = await import('../../../src/cli/doctor.js');
+    const resolved = resolvePackageAssetDir('skills');
+    expect(resolved).toContain('config/skills');
+  });
+
+  it('uses package canonical assets when resolver points outside checkout', async () => {
+    const tempRoot = join(tmpdir(), `doctor-package-${crypto.randomUUID()}`);
+    mkdirSync(join(tempRoot, 'config', 'skills'), { recursive: true });
+    vi.doMock('../../../src/specialist/canonical-asset-resolver.js', () => ({
+      resolveCanonicalAssetDir: () => join(tempRoot, 'config', 'skills'),
+    }));
+    const { resolvePackageAssetDir } = await import('../../../src/cli/doctor.js');
+    expect(resolvePackageAssetDir('skills')).toBe(join(tempRoot, 'config', 'skills'));
+    rmSync(tempRoot, { recursive: true, force: true });
+  });
+});
+
+
 describe('doctor CLI — run()', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -29,8 +54,8 @@ describe('doctor CLI — run()', () => {
     expect(combined).toContain('xtrm-tools');
     expect(combined).toContain('Claude Code hooks');
     expect(combined).toContain('MCP');
-    expect(combined).toContain('Skill drift');
-    expect(combined).toContain('Managed mirrors');
+    expect(combined).toContain('Category A');
+    expect(combined).toContain('Category B');
     expect(combined).toContain('Background jobs');
   });
 
