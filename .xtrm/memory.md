@@ -1,10 +1,10 @@
 # Project Memory — specialists
-_Updated: 2026-05-08 | 502 memories in raw store | last session: 2026-05-08_
+_Updated: 2026-05-12 | 507 memories in raw store | last session: 2026-05-10_
 
 ## Do Not Repeat
 - ❌ `sp epic merge` refusing after persisted `failed` state → ✅ Only `merged`/`abandoned` block merge; persisted `failed` is soft/recoverable
 - ❌ `sp finalize` closing only named job → ✅ Cascade-closes all waiting keep-alive members via `supervisor.listChainJobIds()`
-- ❌ Reviewer PASS not triggering auto-finalize → ✅ Verdict regex now matches `**PASS**` (markdown-bold); auto-finalize fires on streaming PASS
+- ❌ Reviewer PASS not triggering auto-finalize → ✅ Verdict regex now matches `**PASS**` (markdown-bold); auto-finalize fires on streaming PASS; use `sp finalize <any-chain-job-id>` for resume-driven PASS
 - ❌ `sp run` pre-validator rejecting shell builtins like `if` → ✅ SHELL_BUILTINS allowlist before PATH check
 - ❌ `sp merge` on chains after `sp stop` cleaned status.json → ✅ Use `sp epic merge <epic>` for wave-bound chains; DB-first merge canonical
 - ❌ Specialist runtime tool starvation with `--tools` flag → ✅ Extension tools in permission-tier allowlists
@@ -21,6 +21,11 @@ _Updated: 2026-05-08 | 502 memories in raw store | last session: 2026-05-08_
 - ❌ Running vitest/bun test in executor → ✅ Executor runs lint+tsc only; test-runner in chained pipeline
 - ❌ `--job` flag without `--bead` or `--prompt` → ✅ Both required; auto-bead-resolution not implemented
 - ❌ Editing `.xtrm/skills/` directly → ✅ Edit `config/skills/<name>/SKILL.md` only; `.xtrm` paths overwritten on init/sync
+- ❌ Per-worktree dolt server leak after `bd worktree create` → ✅ `.beads` is now symlink to parent; bd hooks survive against symlink
+- ❌ GitNexus MCP child-process leak under `--keep-alive` → ✅ Detached pi spawn + 8s group-SIGKILL backstop replacing 2s redundant SIGTERM
+- ❌ GitNexus analyze events lost post-ppkdg → ✅ Use `appendTimelineEvent` (dual-write file+SQLite), not `appendTimelineEventFileOnly`
+- ❌ `bd prime` injecting ~3k tokens of all memories regardless of relevance → ✅ Use `bd memories <keyword>` for targeted recall; bulk-export for synthesis only
+- ❌ `sp run` forking supervisor before SQLite pre-flight → ✅ Early `findActiveJob` check includes `waiting` state; prevents race-spawn
 
 ## How This Project Works
 - **MCP surface**: single `use_specialist` tool; all orchestration via CLI (`sp run/feed/result/stop/finalize/merge/ps/list`)
@@ -38,15 +43,25 @@ _Updated: 2026-05-08 | 502 memories in raw store | last session: 2026-05-08_
 - **CHANGELOG flow**: `/releasing` skill v2.0.0 drives bump → build → commit → tag → push → npm publish; `changelog-keeper` v3.0.0 fills `[Unreleased]` gaps only
 - **test-runner v2.0.0**: Polyglot manifest detection (package.json/pyproject.toml/Cargo.toml/go.mod); executor/debugger prompts project-language-aware
 - **expected_output_keys**: Schema field for required-key validation independent of `response_format`; text-format specs can enforce JSON contracts
+- **GitNexus on checkpoint**: Fires at TWO points — successful auto-commit checkpoint + terminal completion; deduped via `lastGitnexusAnalyzedSha`; `--skip-agents-md --no-stats` keeps worktree clean
+- **sp clean --reap-orphans**: Walks `/proc`, kills orphaned dolt/gitnexus/pi processes (ppid=1, worktree cwd); SIGTERM + 1.5s + SIGKILL; Linux-only
+- **Models in rotation**: gpt-5.4-mini, gpt-5.3-codex, gpt-5.5 (overthinker), glm-5, qwen3.5-397b-thinking; dashscope provider deprecated
+- **bun is canonical runtime**: All tests via `bunx vitest` or `bun run`; no npx/pnpm; Dockerfile HEALTHCHECK uses `node -e fetch()` (no curl/wget in bun:slim)
+- **suppressBeadsWorktreeNoise**: `.beads` symlink to parent + `info/exclude` + `--skip-worktree` prevents phantom deletions in checkpoint commits
+- **Race-spawn dispatch fix**: `findActiveJob` includes `waiting`; early SQLite pre-flight in `src/cli/run.ts` before supervisor fork
 
 ## Active Context
-- **Chain-lifecycle + epic-simplification redesign shipped** (2026-05-08) — Epic state now derived live from chain readiness. `sp epic resolve` removed. `sp merge` works per-chain. `sp finalize` cascades chain closure. Persisted `failed` is recoverable.
 - **v3.14.0/v3.14.1 released** — sp serve operational logging, script-runner hardening, changelog-keeper v3.0.0, `/releasing` skill v2.0.0
+- **Chain-lifecycle + epic-simplification redesign shipped** (2026-05-08) — Epic state now derived live from chain readiness. `sp epic resolve` removed. `sp merge` works per-chain. `sp finalize` cascades chain closure.
 - **Race-spawn dispatch fix** (`unitAI-55cb3`) — `findActiveJob` includes `waiting`; early CLI pre-flight in `src/cli/run.ts`
+- **Worktree noise suppression** (`unitAI-u08e8`) — `.beads` symlink + `suppressBeadsWorktreeNoise()` appends to `info/exclude` + `--skip-worktree`
+- **Dashscope migration** (2026-05-12) — All `dashscope/qwen3.5-plus` refs → `nano-gpt/*` equivalents (provider unavailable)
+- **Planning skill alignment** (2026-05-12) — Phase 4 bd-create templates now use 7-section bead contract (PROBLEM/SUCCESS/SCOPE/NON_GOALS/CONSTRAINTS/VALIDATION/OUTPUT)
 - **Open P1**: `unitAI-6i986` — parallel `sp run` dispatch reliability; likely closed by `55cb3` but needs smoke test
-- **Open P2**: `unitAI-f5pxt` — `sp clean` does not purge observability sqlite; manual truncate needed this session
-- **Open P1**: `unitAI-i6khn` — defensive template-field misuse check
-- **Open P1**: `unitAI-huwov` — reference Python client for specialists-service
+- **Open P2**: `unitAI-f5pxt` — `sp clean` does not purge observability sqlite; manual truncate needed
+- **Open P2**: `unitAI-352ni` — beads-commit-gate cascades when reviewer auto-claims
+- **Open P2**: `unitAI-5i7ow` — Reviewer process-strictness: PARTIAL on functional contracts (demands gitnexus_impact evidence even when bead says don't)
 - **Open P0 cluster**: Release/distribution hardening (`unitAI-ye5s9` epic + children) — CI smokes, npm-pack validation, fresh-install paths
-- **Models in rotation**: gpt-5.4-mini, gpt-5.3-codex, gpt-5.5 (overthinker), glm-5; Anthropic deprecated for keep-alive
-- **Last commit**: `5f103032` (session report 2026-05-08, merged)
+- **Last commit**: `f435ee65` (2026-05-10 session report + rebuild/reinstall)
+- **Next priority**: Promote release-distribution cluster to epic; apply using-specialists-v3 proposal (3.2→3.3); close `unitAI-6i986` with parallel smoke test
+- **Runtime friction inventory**: Worktree/merge deadlocks resolved; specialist runtime race-spawn fixed; observability sqlite canonical; per-worktree dolt leak fixed via symlink; orphan reaper (`sp clean --reap-orphans`) ships; packaging/install gaps documented in `docs/deploying-alongside.md`
