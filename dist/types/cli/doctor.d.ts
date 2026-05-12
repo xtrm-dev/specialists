@@ -1,3 +1,4 @@
+export declare function resolvePackageAssetDir(relativePath: string): string | null;
 export declare function parseVersionTuple(value: string): [number, number, number] | null;
 export declare function compareVersions(left: string, right: string): number;
 export declare function setStatusError(statusPath: string): void;
