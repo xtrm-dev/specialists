@@ -18,6 +18,7 @@ interface CleanOptions {
   staleProcessesOnly: boolean;
   staleAfterHours: number;
   reapOrphans: boolean;
+  psDashboard: boolean;
 }
 
 interface OrphanProcess {
@@ -67,6 +68,7 @@ function parseOptions(argv: readonly string[]): CleanOptions {
   let staleProcessesOnly = false;
   let staleAfterHours = DEFAULT_STALE_AFTER_HOURS;
   let reapOrphans = false;
+  let psDashboard = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -88,6 +90,11 @@ function parseOptions(argv: readonly string[]): CleanOptions {
 
     if (argument === '--reap-orphans') {
       reapOrphans = true;
+      continue;
+    }
+
+    if (argument === '--ps') {
+      psDashboard = true;
       continue;
     }
 
@@ -138,11 +145,14 @@ function parseOptions(argv: readonly string[]): CleanOptions {
   if (staleProcessesOnly && (removeAllCompleted || keepRecentCount !== null)) {
     throw new Error('--processes cannot be combined with --all or --keep');
   }
-  if (reapOrphans && (removeAllCompleted || keepRecentCount !== null || staleProcessesOnly)) {
-    throw new Error('--reap-orphans cannot be combined with --all, --keep, or --processes');
+  if (reapOrphans && (removeAllCompleted || keepRecentCount !== null || staleProcessesOnly || psDashboard)) {
+    throw new Error('--reap-orphans cannot be combined with --all, --keep, --processes, or --ps');
+  }
+  if (psDashboard && (removeAllCompleted || keepRecentCount !== null || staleProcessesOnly || aggressivePrune)) {
+    throw new Error('--ps cannot be combined with --all, --keep, --processes, or --aggressive-prune');
   }
 
-  return { removeAllCompleted, dryRun, keepRecentCount, aggressivePrune, staleProcessesOnly, staleAfterHours, reapOrphans };
+  return { removeAllCompleted, dryRun, keepRecentCount, aggressivePrune, staleProcessesOnly, staleAfterHours, reapOrphans, psDashboard };
 }
 
 function readDirectorySizeBytes(directoryPath: string): number {
@@ -402,6 +412,44 @@ function deleteJobDirectories(jobs: readonly CompletedJobRecord[]): number {
   return jobs.length;
 }
 
+
+function isPsHidden(status: SupervisorStatus): boolean {
+  const typed = status as SupervisorStatus & { ps_hidden_at?: number; ps_hidden_from_dashboard_at?: number };
+  return Boolean(typed.ps_hidden_at ?? typed.ps_hidden_from_dashboard_at);
+}
+
+function selectPsDashboardCleanCandidates(statuses: readonly SupervisorStatus[]): SupervisorStatus[] {
+  return statuses.filter(status => COMPLETED_STATUSES.has(status.status) && !isPsHidden(status));
+}
+
+function printPsDashboardCleanPlan(statuses: readonly SupervisorStatus[]): void {
+  if (statuses.length === 0) {
+    console.log('No terminal ps rows to hide.');
+    return;
+  }
+  console.log(`Would hide ${statuses.length} terminal row(s) from default ps:`);
+  for (const status of statuses) {
+    const bead = status.bead_id ? ` bead=${status.bead_id}` : '';
+    const branch = (status as SupervisorStatus & { branch?: string }).branch ? ` branch=${(status as SupervisorStatus & { branch?: string }).branch}` : '';
+    console.log(`  - ${status.id} ${status.specialist} status=${status.status}${bead}${branch}`);
+  }
+}
+
+function hidePsDashboardRows(statuses: readonly SupervisorStatus[], dryRun: boolean): number {
+  const sqliteClient = createObservabilitySqliteClient();
+  if (!sqliteClient) return 0;
+  if (dryRun) return statuses.length;
+  const now = Date.now();
+  for (const status of statuses) {
+    sqliteClient.upsertStatus({
+      ...status,
+      ps_hidden_at: now,
+      ps_hidden_reason: 'sp clean --ps',
+    } as SupervisorStatus & { ps_hidden_at: number; ps_hidden_reason: string });
+  }
+  return statuses.length;
+}
+
 function removeStaleProcesses(statuses: readonly StaleProcessCandidate[], dryRun: boolean): number {
   const sqliteClient = createObservabilitySqliteClient();
   if (!sqliteClient) return 0;
@@ -448,13 +496,24 @@ export async function run(): Promise<void> {
   }
 
   const jobsDirectoryPath = resolveJobsDir();
+  const sqliteClient = createObservabilitySqliteClient();
+  const statuses = sqliteClient?.listStatuses() ?? [];
+
+  if (options.psDashboard) {
+    const candidates = selectPsDashboardCleanCandidates(statuses);
+    if (options.dryRun) {
+      printPsDashboardCleanPlan(candidates);
+      return;
+    }
+    const hiddenCount = hidePsDashboardRows(candidates, false);
+    console.log(`Hid ${hiddenCount} terminal row(s) from default ps.`);
+    return;
+  }
+
   if (!existsSync(jobsDirectoryPath)) {
     console.log('No jobs directory found.');
     return;
   }
-
-  const sqliteClient = createObservabilitySqliteClient();
-  const statuses = sqliteClient?.listStatuses() ?? [];
   const worktreeCandidates = collectWorktreeGcCandidates(jobsDirectoryPath);
   const protectedJobIds = options.keepRecentCount !== null && !options.aggressivePrune && sqliteClient
     ? new Set(sqliteClient.listReferencedChainRootJobIds())

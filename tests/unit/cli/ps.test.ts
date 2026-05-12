@@ -218,9 +218,10 @@ describe('ps CLI — run()', () => {
     expect(clean).toContain('err01');
   }, TEST_TIMEOUT_MS);
 
-  it('hides terminal historical jobs by default', async () => {
+  it('shows unresolved terminal problem jobs by default but hides successful done history', async () => {
     createJob(tempDir, 'done02', { status: 'done' });
     createJob(tempDir, 'err02', { status: 'error', error: 'crashed' });
+    createJob(tempDir, 'cancel02', { status: 'cancelled' });
     process.argv = ['node', 'specialists', 'ps'];
     const output: string[] = [];
     vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
@@ -230,8 +231,8 @@ describe('ps CLI — run()', () => {
     await run();
     const clean = stripAnsi(output.join('\n'));
     expect(clean).not.toContain('done02');
-    expect(clean).not.toContain('err02');
-    expect(clean).toContain('0 jobs');
+    expect(clean).toContain('err02');
+    expect(clean).toContain('cancel02');
   }, TEST_TIMEOUT_MS);
 
   it('--include-terminal includes terminal history without --all', async () => {
@@ -245,6 +246,47 @@ describe('ps CLI — run()', () => {
     await run();
     const clean = stripAnsi(output.join('\n'));
     expect(clean).toContain('done03');
+  }, TEST_TIMEOUT_MS);
+
+  it('hides ps-cleaned terminal jobs unless include-cleaned is passed', async () => {
+    createJob(tempDir, 'err-clean', { status: 'error', ps_hidden_at: Date.now(), ps_hidden_reason: 'sp clean --ps' });
+    process.argv = ['node', 'specialists', 'ps'];
+    const output: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      output.push(args.map(String).join(' '));
+    });
+    const { run } = await import('../../../src/cli/ps.js');
+    await run();
+    const clean = stripAnsi(output.join('\n'));
+    expect(clean).not.toContain('err-clean');
+    expect(clean).toContain('0 jobs');
+  }, TEST_TIMEOUT_MS);
+
+  it('--include-cleaned shows ps-cleaned terminal jobs', async () => {
+    createJob(tempDir, 'done-clean', { status: 'done', ps_hidden_at: Date.now(), ps_hidden_reason: 'sp clean --ps' });
+    process.argv = ['node', 'specialists', 'ps', '--include-cleaned'];
+    const output: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      output.push(args.map(String).join(' '));
+    });
+    const { run } = await import('../../../src/cli/ps.js');
+    await run();
+    const clean = stripAnsi(output.join('\n'));
+    expect(clean).toContain('done-clean');
+  }, TEST_TIMEOUT_MS);
+
+  it('--active hides unresolved terminal problem jobs', async () => {
+    createJob(tempDir, 'err-active', { status: 'error' });
+    process.argv = ['node', 'specialists', 'ps', '--active'];
+    const output: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      output.push(args.map(String).join(' '));
+    });
+    const { run } = await import('../../../src/cli/ps.js');
+    await run();
+    const clean = stripAnsi(output.join('\n'));
+    expect(clean).not.toContain('err-active');
+    expect(clean).toContain('0 jobs');
   }, TEST_TIMEOUT_MS);
 
   it('--json outputs valid JSON with trees array', async () => {

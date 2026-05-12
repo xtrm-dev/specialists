@@ -321,6 +321,19 @@
         "visibility",
         "terminal-history"
       ]
+    },
+    {
+      "timestamp": "2026-05-12T22:43:00Z",
+      "error_message": "Active-only sp ps default hid failed/error terminal runs and removed observability into unresolved problems",
+      "root_cause": "The previous fix over-corrected terminal-history noise by hiding all terminal jobs by default instead of introducing explicit dashboard cleanup/acknowledgement semantics.",
+      "fix": "Default ps now shows active jobs plus unresolved error/cancelled terminal rows; sp clean --ps soft-hides terminal rows with ps_hidden_at/ps_hidden_reason metadata; --include-cleaned and --all show hidden audit history.",
+      "tags": [
+        "unitAI-59nry",
+        "sp-ps",
+        "sp-clean",
+        "soft-clean",
+        "terminal-history"
+      ]
     }
   ]
 }

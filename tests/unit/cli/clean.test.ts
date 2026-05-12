@@ -239,4 +239,38 @@ describe('clean CLI — run()', () => {
     expect(mockUpsertedStatuses).toHaveLength(0);
     expect(readFileSync(join(jobsDirectory, 'stale-job', 'status.json'), 'utf-8')).toContain('running');
   });
+  it('--ps dry-run previews terminal rows without mutating status', async () => {
+    const now = Date.now();
+    mockStatuses = [
+      { id: 'err-job', specialist: 'tester', status: 'error', started_at_ms: now - 1_000 },
+      { id: 'done-job', specialist: 'tester', status: 'done', started_at_ms: now - 2_000 },
+      { id: 'run-job', specialist: 'tester', status: 'running', started_at_ms: now, pid: process.pid },
+    ];
+
+    const logs = await invokeClean(['--ps', '--dry-run']);
+
+    expect(logs.join('\n')).toContain('Would hide 2 terminal row');
+    expect(logs.join('\n')).toContain('err-job');
+    expect(logs.join('\n')).toContain('done-job');
+    expect(logs.join('\n')).not.toContain('run-job');
+    expect(mockUpsertedStatuses).toEqual([]);
+  });
+
+  it('--ps soft-hides terminal rows without changing status', async () => {
+    const now = Date.now();
+    mockStatuses = [
+      { id: 'err-job', specialist: 'tester', status: 'error', started_at_ms: now - 1_000 },
+      { id: 'hidden-job', specialist: 'tester', status: 'cancelled', started_at_ms: now - 2_000, ps_hidden_at: now - 500 },
+      { id: 'run-job', specialist: 'tester', status: 'running', started_at_ms: now, pid: process.pid },
+    ];
+
+    const logs = await invokeClean(['--ps']);
+
+    expect(logs.join('\n')).toContain('Hid 1 terminal row');
+    expect(mockUpsertedStatuses).toHaveLength(1);
+    expect(mockUpsertedStatuses[0].id).toBe('err-job');
+    expect(mockUpsertedStatuses[0].status).toBe('error');
+    expect(mockUpsertedStatuses[0].ps_hidden_reason).toBe('sp clean --ps');
+  });
+
 });

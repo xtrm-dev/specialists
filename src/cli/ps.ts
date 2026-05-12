@@ -19,6 +19,8 @@ interface PsArgs {
   all: boolean;
   follow: boolean;
   includeTerminal: boolean;
+  includeCleaned: boolean;
+  active: boolean;
   running: boolean;
   mine: boolean;
   beadFilter?: string;
@@ -171,7 +173,9 @@ function parseArgs(argv: string[]): PsArgs {
     all: argv.includes('--all'),
     follow: argv.includes('--follow') || argv.includes('-f'),
     includeTerminal,
-    running: argv.includes('--running'),
+    includeCleaned: argv.includes('--include-cleaned'),
+    active: argv.includes('--active'),
+    running: argv.includes('--running') || argv.includes('--active'),
     mine: argv.includes('--mine'),
     health: argv.includes('--health'),
     beadFilter,
@@ -179,6 +183,16 @@ function parseArgs(argv: string[]): PsArgs {
     nodeId,
     inspectId: positional[0],
   };
+}
+
+
+function isPsCleaned(job: SupervisorStatus): boolean {
+  const typed = job as SupervisorStatus & { ps_hidden_at?: number; ps_hidden_from_dashboard_at?: number };
+  return Boolean(typed.ps_hidden_at ?? typed.ps_hidden_from_dashboard_at);
+}
+
+function isDefaultActionableTerminal(job: SupervisorStatus): boolean {
+  return job.status === 'error' || job.status === 'cancelled';
 }
 
 function isVisibleStatus(status: JobState, all: boolean): boolean {
@@ -1055,17 +1069,16 @@ function render(args: PsArgs): void {
     if (args.running && !ACTIVE_STATES.includes(job.status)) return false;
     if (mineBeadIds && (!job.bead_id || !mineBeadIds.has(job.bead_id))) return false;
 
-    // Default ps is an operational dashboard: active jobs only. Terminal
-    // history stays available through --include-terminal / --all, but should
-    // not make a cleaned-up session look busy.
-    const epicTerminal = readinessState === 'merged' || readinessState === 'abandoned';
-    if (epicTerminal && !args.includeTerminal && !args.all) return false;
+    const cleaned = isPsCleaned(job);
 
     if (args.all) return true;
+    if (cleaned && !args.includeCleaned) return false;
+    if (cleaned && args.includeCleaned && TERMINAL_STATES.includes(job.status)) return true;
     if (job.is_dead) return false;
     if (ACTIVE_STATES.includes(job.status)) return true;
+    if (args.active) return false;
     if (args.includeTerminal && TERMINAL_STATES.includes(job.status)) return true;
-    return false;
+    return isDefaultActionableTerminal(job);
   });
 
   const nodes = groupByNode(visibleStatuses);

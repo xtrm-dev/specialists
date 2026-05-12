@@ -36589,7 +36589,9 @@ function parseArgs8(argv) {
     all: argv.includes("--all"),
     follow: argv.includes("--follow") || argv.includes("-f"),
     includeTerminal,
-    running: argv.includes("--running"),
+    includeCleaned: argv.includes("--include-cleaned"),
+    active: argv.includes("--active"),
+    running: argv.includes("--running") || argv.includes("--active"),
     mine: argv.includes("--mine"),
     health: argv.includes("--health"),
     beadFilter,
@@ -36597,6 +36599,13 @@ function parseArgs8(argv) {
     nodeId,
     inspectId: positional[0]
   };
+}
+function isPsCleaned(job) {
+  const typed = job;
+  return Boolean(typed.ps_hidden_at ?? typed.ps_hidden_from_dashboard_at);
+}
+function isDefaultActionableTerminal(job) {
+  return job.status === "error" || job.status === "cancelled";
 }
 function readStatusesFromFiles(jobsDir) {
   if (!existsSync23(jobsDir))
@@ -37380,18 +37389,22 @@ function render(args) {
       return false;
     if (mineBeadIds && (!job.bead_id || !mineBeadIds.has(job.bead_id)))
       return false;
-    const epicTerminal = readinessState === "merged" || readinessState === "abandoned";
-    if (epicTerminal && !args.includeTerminal && !args.all)
-      return false;
+    const cleaned = isPsCleaned(job);
     if (args.all)
+      return true;
+    if (cleaned && !args.includeCleaned)
+      return false;
+    if (cleaned && args.includeCleaned && TERMINAL_STATES.includes(job.status))
       return true;
     if (job.is_dead)
       return false;
     if (ACTIVE_STATES.includes(job.status))
       return true;
+    if (args.active)
+      return false;
     if (args.includeTerminal && TERMINAL_STATES.includes(job.status))
       return true;
-    return false;
+    return isDefaultActionableTerminal(job);
   });
   const nodes = groupByNode(visibleStatuses);
   const trees = groupByTree(visibleStatuses);
@@ -38999,6 +39012,7 @@ function parseOptions2(argv) {
   let staleProcessesOnly = false;
   let staleAfterHours = DEFAULT_STALE_AFTER_HOURS;
   let reapOrphans = false;
+  let psDashboard = false;
   for (let index = 0;index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--all") {
@@ -39015,6 +39029,10 @@ function parseOptions2(argv) {
     }
     if (argument === "--reap-orphans") {
       reapOrphans = true;
+      continue;
+    }
+    if (argument === "--ps") {
+      psDashboard = true;
       continue;
     }
     if (argument === "--aggressive-prune") {
@@ -39064,10 +39082,13 @@ function parseOptions2(argv) {
   if (staleProcessesOnly && (removeAllCompleted || keepRecentCount !== null)) {
     throw new Error("--processes cannot be combined with --all or --keep");
   }
-  if (reapOrphans && (removeAllCompleted || keepRecentCount !== null || staleProcessesOnly)) {
-    throw new Error("--reap-orphans cannot be combined with --all, --keep, or --processes");
+  if (reapOrphans && (removeAllCompleted || keepRecentCount !== null || staleProcessesOnly || psDashboard)) {
+    throw new Error("--reap-orphans cannot be combined with --all, --keep, --processes, or --ps");
   }
-  return { removeAllCompleted, dryRun, keepRecentCount, aggressivePrune, staleProcessesOnly, staleAfterHours, reapOrphans };
+  if (psDashboard && (removeAllCompleted || keepRecentCount !== null || staleProcessesOnly || aggressivePrune)) {
+    throw new Error("--ps cannot be combined with --all, --keep, --processes, or --aggressive-prune");
+  }
+  return { removeAllCompleted, dryRun, keepRecentCount, aggressivePrune, staleProcessesOnly, staleAfterHours, reapOrphans, psDashboard };
 }
 function readDirectorySizeBytes(directoryPath) {
   let totalBytes = 0;
@@ -39294,6 +39315,41 @@ function deleteJobDirectories(jobs) {
   }
   return jobs.length;
 }
+function isPsHidden(status) {
+  const typed = status;
+  return Boolean(typed.ps_hidden_at ?? typed.ps_hidden_from_dashboard_at);
+}
+function selectPsDashboardCleanCandidates(statuses) {
+  return statuses.filter((status) => COMPLETED_STATUSES.has(status.status) && !isPsHidden(status));
+}
+function printPsDashboardCleanPlan(statuses) {
+  if (statuses.length === 0) {
+    console.log("No terminal ps rows to hide.");
+    return;
+  }
+  console.log(`Would hide ${statuses.length} terminal row(s) from default ps:`);
+  for (const status of statuses) {
+    const bead = status.bead_id ? ` bead=${status.bead_id}` : "";
+    const branch = status.branch ? ` branch=${status.branch}` : "";
+    console.log(`  - ${status.id} ${status.specialist} status=${status.status}${bead}${branch}`);
+  }
+}
+function hidePsDashboardRows(statuses, dryRun) {
+  const sqliteClient = createObservabilitySqliteClient();
+  if (!sqliteClient)
+    return 0;
+  if (dryRun)
+    return statuses.length;
+  const now = Date.now();
+  for (const status of statuses) {
+    sqliteClient.upsertStatus({
+      ...status,
+      ps_hidden_at: now,
+      ps_hidden_reason: "sp clean --ps"
+    });
+  }
+  return statuses.length;
+}
 function removeStaleProcesses(statuses, dryRun) {
   const sqliteClient = createObservabilitySqliteClient();
   if (!sqliteClient)
@@ -39338,12 +39394,22 @@ async function run22() {
     return;
   }
   const jobsDirectoryPath = resolveJobsDir();
+  const sqliteClient = createObservabilitySqliteClient();
+  const statuses = sqliteClient?.listStatuses() ?? [];
+  if (options.psDashboard) {
+    const candidates = selectPsDashboardCleanCandidates(statuses);
+    if (options.dryRun) {
+      printPsDashboardCleanPlan(candidates);
+      return;
+    }
+    const hiddenCount = hidePsDashboardRows(candidates, false);
+    console.log(`Hid ${hiddenCount} terminal row(s) from default ps.`);
+    return;
+  }
   if (!existsSync28(jobsDirectoryPath)) {
     console.log("No jobs directory found.");
     return;
   }
-  const sqliteClient = createObservabilitySqliteClient();
-  const statuses = sqliteClient?.listStatuses() ?? [];
   const worktreeCandidates = collectWorktreeGcCandidates(jobsDirectoryPath);
   const protectedJobIds = options.keepRecentCount !== null && !options.aggressivePrune && sqliteClient ? new Set(sqliteClient.listReferencedChainRootJobIds()) : new Set;
   if (options.staleProcessesOnly) {
@@ -41830,7 +41896,7 @@ var init_help = __esm(() => {
     ["attach", "Attach terminal to a running background job tmux session"],
     ["report", "Generate/show/list/diff session reports in .xtrm/reports/"],
     ["status", "Show health, MCP state, and active jobs"],
-    ["ps", "Show urgency-sorted worktree view with ctx% and NEXT action; --json, --all, --follow, --running, --health, --bead <id>, --since <dur>, --mine, --include-terminal"],
+    ["ps", "Show urgency-sorted worktree view with ctx% and NEXT action; --json, --all, --follow, --running, --active, --health, --bead <id>, --since <dur>, --mine, --include-terminal, --include-cleaned"],
     ["doctor", "Diagnose installation/runtime problems; --check-drift reports stale .specialists/default/ snapshots"],
     ["prune-stale-defaults", "Prune redundant .specialists/default/ snapshots (byte-identical to package canonical); --dry-run, --root <path>"],
     ["quickstart", "Full getting-started guide"],
@@ -49880,9 +49946,12 @@ async function run34() {
         "",
         "Options:",
         "  --json       Structured JSON output with trees[].children[] schema",
-        "  --all        Include terminal (done/error) and dead jobs",
+        "  --all        Include every row, including cleaned/dead/terminal history",
         "  --follow, -f Live-refresh view with spinner animation",
         "  --health     Show detailed process health tables (default is aggregate only)",
+        "  --active     Show active jobs only",
+        "  --include-terminal Show terminal unresolved history",
+        "  --include-cleaned  Include rows hidden by sp clean --ps",
         "",
         "Output columns:",
         "  st           Status icon: \u25C9 running, \u25D0 waiting/starting, \u25CB done/error",
@@ -50075,6 +50144,7 @@ async function run34() {
         "  --all        Remove all done/error jobs regardless of age",
         "  --keep <n>   Keep only the N most recent done/error jobs",
         "  --dry-run    Show what would be removed without deleting",
+        "  --ps         Hide terminal rows from default ps without deleting DB history",
         "  --reap-orphans Reap orphan/stale leaked tool processes",
         "",
         "Examples:",
