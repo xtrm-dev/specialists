@@ -55,11 +55,11 @@ describe('integration: specialists doctor managed mirrors', () => {
     const result = runCli(tempDir, ['doctor']);
 
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain('Managed mirrors');
-    expect(result.stdout).toContain('specialists source missing: config/specialists');
-    expect(result.stdout).toContain('mandatory-rules source missing: config/mandatory-rules');
-    expect(result.stdout).toContain('nodes source missing: config/nodes');
-    expect(result.stdout).toContain('specialists init --sync-defaults');
+    expect(result.stdout).toContain('Category B');
+    expect(result.stdout).toContain('Category A');
+    expect(result.stdout).toContain('.xtrm/skills/default/ missing');
+    expect(result.stdout).toContain('Category B');
+    expect(result.stdout).toContain('specialists mirror missing: .specialists/default');
   });
 
   it('reports managed-mirror mismatch details and sync hint', async () => {
@@ -78,8 +78,9 @@ describe('integration: specialists doctor managed mirrors', () => {
     const doctorResult = runCli(tempDir, ['doctor']);
 
     expect(doctorResult.status).toBe(0);
-    expect(doctorResult.stdout).toContain('Managed mirrors');
+    expect(doctorResult.stdout).toContain('Category B');
     expect(doctorResult.stdout).toContain('specialists:');
+    expect(doctorResult.stdout).toContain('mirror in sync against');
     expect(doctorResult.stdout).toContain('extra mirror file');
     expect(doctorResult.stdout).toContain('specialists init --sync-defaults');
   });
