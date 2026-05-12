@@ -9,11 +9,10 @@ import {
   listWorktrees,
   findExistingWorktree,
   provisionWorktree,
-  type WorktreeInfo,
   type WorktreeOptions,
 } from '../../../src/specialist/worktree.js';
 import { spawnSync, execSync } from 'node:child_process';
-import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -250,12 +249,12 @@ describe('provisionWorktree', () => {
     expect(() => provisionWorktree(options)).toThrow();
   }, 15000);
 
-  it('suppresses .beads worktree noise: writes info/exclude entry (unitAI-u08e8)', () => {
+  it('removes worktree .beads/ and marks tracked .beads paths skip-worktree (unitAI-yvqmf)', () => {
     // Skip if bd is not available
     try {
       execSync('which bd', { stdio: 'ignore' });
     } catch {
-      console.log('[SKIP] bd not available - skipping .beads noise suppression test');
+      console.log('[SKIP] bd not available - skipping .beads provisioning test');
       return;
     }
 
@@ -271,26 +270,33 @@ describe('provisionWorktree', () => {
 
     const result = provisionWorktree(options);
 
-    // suppressBeadsWorktreeNoise must have written '.beads' to the per-worktree
-    // info/exclude after the symlinkSync. (End-to-end git-status suppression
-    // depends on whether the tracked .beads/* files exist in the source repo
-    // and is covered upstream in xtrm-tools' tests.)
-    const gitDir = spawnSync('git', ['-C', result.worktreePath, 'rev-parse', '--absolute-git-dir'], {
+    // The new contract: worktree-local .beads/ must be removed entirely,
+    // and `git status` inside the worktree must be clean (the tracked
+    // .beads/* paths must be masked via skip-worktree). No info/exclude
+    // write is required — that existed only for the previous symlink path.
+    expect(existsSync(join(result.worktreePath, '.beads'))).toBe(false);
+
+    const status = spawnSync('git', ['-C', result.worktreePath, 'status', '-s'], {
       encoding: 'utf8',
     }).stdout.trim();
-    expect(gitDir).not.toBe('');
+    expect(status).toBe('');
 
-    const excludePath = join(gitDir, 'info', 'exclude');
-    expect(existsSync(excludePath)).toBe(true);
-    const excludeContents = readFileSync(excludePath, 'utf8');
-    expect(excludeContents.split(/\r?\n/)).toContain('.beads');
+    // Verify the tracked .beads/* files are marked skip-worktree.
+    // `git ls-files -v` prefixes each path with a single-letter flag —
+    // 'S' indicates skip-worktree is set (vs 'H' for plain cached).
+    const lsFiles = spawnSync('git', ['-C', result.worktreePath, 'ls-files', '-v', '--', '.beads'], {
+      encoding: 'utf8',
+    }).stdout.trim();
+    if (lsFiles.length > 0) {
+      for (const line of lsFiles.split('\n')) {
+        expect(line[0]).toBe('S');
+      }
+    }
 
-    // Idempotence: re-running provisionWorktree should not double-write
-    // (the reuse path also passes through the symlink block).
+    // Idempotence: re-running provisionWorktree returns reused=true and
+    // does not re-create .beads/.
     const second = provisionWorktree(options);
     expect(second.reused).toBe(true);
-    const excludeAfter = readFileSync(excludePath, 'utf8');
-    const occurrences = excludeAfter.split('\n').filter((l) => l === '.beads').length;
-    expect(occurrences).toBe(1);
+    expect(existsSync(join(result.worktreePath, '.beads'))).toBe(false);
   }, 15000);
 });
