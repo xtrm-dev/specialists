@@ -5,7 +5,7 @@
   "models": [
     "openai-codex/gpt-5.3-codex",
     "openai-codex/gpt-5.4-mini",
-    "dashscope/qwen3.5-plus",
+    "nano-gpt/qwen/qwen3.5-397b-a17b-thinking",
     "zai/glm-5"
   ],
   "tasks": [

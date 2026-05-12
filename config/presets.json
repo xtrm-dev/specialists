@@ -2,7 +2,7 @@
   "cheap": {
     "description": "Low-cost, fast responses — best for exploration and simple tasks",
     "fields": {
-      "specialist.execution.model": "dashscope/qwen3.5-plus",
+      "specialist.execution.model": "nano-gpt/moonshotai/kimi-k2.5",
       "specialist.execution.thinking_level": "off",
       "specialist.execution.stall_timeout_ms": 60000
     }
