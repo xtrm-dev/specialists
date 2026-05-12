@@ -1,8 +1,9 @@
-import { existsSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { SupervisorStatus } from '../specialist/supervisor.js';
 import { resolveJobsDir } from '../specialist/job-root.js';
 import { createObservabilitySqliteClient } from '../specialist/observability-sqlite.js';
+import { collectOrphanProcesses } from '../specialist/process-health.js';
 import {
   collectWorktreeGcCandidates,
   pruneWorktrees,
@@ -341,66 +342,15 @@ function printUsageAndExit(message: string): never {
 // the orphan/cwd condition. Never touch the bd shared-server dolt or any
 // dolt/gitnexus process under a live supervisor.
 
-function readProcStringOrNull(path: string): string | null {
-  try { return readFileSync(path, 'utf-8'); } catch { return null; }
-}
-
-function readProcCwdOrNull(pid: number): string | null {
-  try { return readlinkSync(`/proc/${pid}/cwd`); } catch { return null; }
-}
-
-function getProcPpid(pid: number): number | null {
-  const stat = readProcStringOrNull(`/proc/${pid}/stat`);
-  if (!stat) return null;
-  // Format: "<pid> (<comm>) <state> <ppid> ...". `comm` may contain spaces or
-  // parens; locate the last ')' to anchor the rest.
-  const closeParen = stat.lastIndexOf(')');
-  if (closeParen < 0) return null;
-  const fields = stat.slice(closeParen + 2).split(' ');
-  const ppid = Number(fields[1]);
-  return Number.isInteger(ppid) ? ppid : null;
-}
-
-function listAllPids(): number[] {
-  if (!existsSync('/proc')) return [];
-  const pids: number[] = [];
-  for (const entry of readdirSync('/proc', { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    const pid = Number(entry.name);
-    if (Number.isInteger(pid) && pid > 0) pids.push(pid);
-  }
-  return pids;
-}
-
 function findOrphanProcesses(): OrphanProcess[] {
-  const orphans: OrphanProcess[] = [];
-  for (const pid of listAllPids()) {
-    const cmdlineRaw = readProcStringOrNull(`/proc/${pid}/cmdline`);
-    if (!cmdlineRaw) continue;
-    const cmdline = cmdlineRaw.replace(/\0/g, ' ').trim();
-    if (!cmdline) continue;
-
-    const comm = (readProcStringOrNull(`/proc/${pid}/comm`) ?? '').trim();
-    const ppid = getProcPpid(pid) ?? -1;
-    const cwd = readProcCwdOrNull(pid);
-
-    // (1) per-worktree dolt sql-server
-    if (cmdline.includes('dolt sql-server') && cwd && (cwd.includes('/.worktrees/') || cwd.includes('/.xtrm/worktrees/'))) {
-      orphans.push({ pid, ppid, comm, cmdline, cwd, reason: 'dolt-worktree-local' });
-      continue;
-    }
-    // (2) gitnexus mcp orphans (parent dead → reparented to PID 1)
-    if (cmdline.includes('gitnexus') && cmdline.includes('mcp') && ppid === 1) {
-      orphans.push({ pid, ppid, comm, cmdline, cwd, reason: 'gitnexus-orphan' });
-      continue;
-    }
-    // (3) pi-coding-agent orphans
-    if ((comm === 'pi' || cmdline.includes('pi-coding-agent')) && ppid === 1) {
-      orphans.push({ pid, ppid, comm, cmdline, cwd, reason: 'pi-orphan' });
-      continue;
-    }
-  }
-  return orphans;
+  return collectOrphanProcesses().map((process) => ({
+    pid: process.pid,
+    ppid: process.ppid,
+    comm: process.cmdline.split(' ')[0] ?? process.role,
+    cmdline: process.cmdline,
+    cwd: process.cwd,
+    reason: process.reason ?? 'pi-orphan',
+  }));
 }
 
 async function killOrphanProcesses(orphans: readonly OrphanProcess[], dryRun: boolean): Promise<number> {

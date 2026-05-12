@@ -11,8 +11,30 @@ const mockSqlite = {
   close: vi.fn(),
 };
 
+const mockProcessHealth = vi.fn(() => ({
+  memAvailableBytes: 1024 * 1024 * 1024,
+  totalRssBytes: 256 * 1024 * 1024,
+  totalCpuPct: 12.5,
+  specialistCount: 2,
+  doltCount: 1,
+  serenaLspCount: 1,
+  orphanCount: 1,
+  thresholdPct: 25,
+  warnPct: 70,
+  refusePct: 85,
+  warnLimitBytes: 700 * 1024 * 1024,
+  refuseLimitBytes: 850 * 1024 * 1024,
+  specialistProcesses: [{ pid: 1, ppid: 1, kind: 'specialist', role: 'specialist', cmdline: 'specialists', cwd: '/x', rssBytes: 64 * 1024 * 1024, cpuPct: 5.5, ageSeconds: 60, worktree: '/x' }],
+  doltProcesses: [{ pid: 2, ppid: 1, kind: 'dolt', role: 'dolt', cmdline: 'dolt sql-server', cwd: '/x', rssBytes: 128 * 1024 * 1024, cpuPct: 2.5, ageSeconds: 60, worktree: '/x' }],
+  serenaWorkspaces: [{ workspace: '/x', count: 1, rssBytes: 32 * 1024 * 1024, processes: [{ pid: 3, ppid: 1, kind: 'serena-lsp', role: 'serena-lsp', cmdline: 'serena language-server', cwd: '/x', rssBytes: 32 * 1024 * 1024, cpuPct: 1, ageSeconds: 60, worktree: '/x' }] }],
+  orphanProcesses: [{ pid: 4, ppid: 1, kind: 'orphan', role: 'orphan', cmdline: 'gitnexus mcp', cwd: '/x', rssBytes: 16 * 1024 * 1024, cpuPct: 0.5, ageSeconds: 60, worktree: '/x', reason: 'gitnexus-orphan' }],
+}));
+
 vi.mock('../../../src/specialist/observability-sqlite.js', () => ({
   createObservabilitySqliteClient: () => mockSqlite,
+}));
+vi.mock('../../../src/specialist/process-health.js', () => ({
+  collectProcessHealth: () => mockProcessHealth(),
 }));
 
 function stripAnsi(input: string): string {
@@ -59,6 +81,7 @@ describe('ps CLI — run()', () => {
     mockSqlite.listEpicRuns.mockReturnValue([]);
     mockSqlite.readEpicRun.mockReturnValue(null);
     mockSqlite.listEpicChains.mockReturnValue([]);
+    mockProcessHealth.mockClear();
   });
 
   afterEach(() => {
@@ -88,6 +111,22 @@ describe('ps CLI — run()', () => {
     expect(clean).toContain('0 jobs');
     expect(clean).toContain('0 running');
     expect(clean).toContain('0 waiting');
+  }, TEST_TIMEOUT_MS);
+
+  it('shows system health block with process counts', async () => {
+    createJob(tempDir, 'aaa111', { pid: process.pid });
+    process.argv = ['node', 'specialists', 'ps'];
+    const output: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      output.push(args.map(String).join(' '));
+    });
+    const { run } = await import('../../../src/cli/ps.js');
+    await run();
+    const clean = stripAnsi(output.join('\n'));
+    expect(clean).toContain('System health');
+    expect(clean).toContain('specialists=2 dolt=1 serena-lsp=1 orphans=1');
+    expect(clean).toContain('Dolt sql-server');
+    expect(clean).toContain('Serena LSP');
   }, TEST_TIMEOUT_MS);
 
   it('shows running job with alive PID', async () => {
@@ -170,6 +209,7 @@ describe('ps CLI — run()', () => {
     const raw = output.join('\n');
     const parsed = JSON.parse(raw);
     expect(parsed).toHaveProperty('trees');
+    expect(parsed).toHaveProperty('process_health');
     expect(Array.isArray(parsed.trees)).toBe(true);
   }, TEST_TIMEOUT_MS);
 

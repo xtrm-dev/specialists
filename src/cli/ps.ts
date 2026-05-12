@@ -10,6 +10,7 @@ import type { TimelineEventTool } from '../specialist/timeline-events.js';
 import { parseTimelineEvent } from '../specialist/timeline-events.js';
 import { resolveNodeRefWithClient } from '../specialist/node-resolve.js';
 import { loadEpicReadinessSummary, syncEpicStateFromReadiness, type EpicReadinessSummary } from '../specialist/epic-readiness.js';
+import { collectProcessHealth, type ProcessHealthProcess, type ProcessHealthReport } from '../specialist/process-health.js';
 
 type JobState = SupervisorStatus['status'];
 
@@ -714,6 +715,47 @@ function renderTreeNodes(
   }
 }
 
+function formatProcessRow(process: ProcessHealthProcess): string {
+  const cwd = process.cwd ?? '--';
+  const rssMb = `${(process.rssBytes / (1024 * 1024)).toFixed(1)}MB`;
+  const cpu = `${process.cpuPct.toFixed(1)}%`;
+  const age = `${Math.floor(process.ageSeconds / 60)}m`;
+  return `  ${String(process.pid).padEnd(7)} ${process.role.padEnd(14)} ${rssMb.padEnd(8)} ${cpu.padEnd(7)} ${age.padEnd(5)} ${cwd}`;
+}
+
+function renderProcessHealthBlock(report: ProcessHealthReport): void {
+  const percent = report.thresholdPct.toFixed(1);
+  const severity = report.thresholdPct >= report.refusePct ? red('REFUSE') : report.thresholdPct >= report.warnPct ? yellow('WARN') : green('OK');
+  console.log(bold(cyan('System health')));
+  console.log(`  ${severity} rss=${(report.totalRssBytes / (1024 * 1024)).toFixed(1)}MB avail=${(report.memAvailableBytes / (1024 * 1024)).toFixed(1)}MB used=${percent}% warn=${report.warnPct}% refuse=${report.refusePct}% cpu=${report.totalCpuPct.toFixed(1)}%`);
+  console.log(`  specialists=${report.specialistCount} dolt=${report.doltCount} serena-lsp=${report.serenaLspCount} orphans=${report.orphanCount}`);
+
+  if (report.doltProcesses.length > 0) {
+    console.log(bold('  Dolt sql-server'));
+    for (const process of report.doltProcesses) console.log(formatProcessRow(process));
+  }
+
+  if (report.serenaWorkspaces.length > 0) {
+    console.log(bold('  Serena LSP'));
+    for (const workspace of report.serenaWorkspaces) {
+      console.log(`  ${workspace.workspace} · ${workspace.count} procs · ${(workspace.rssBytes / (1024 * 1024)).toFixed(1)}MB`);
+      for (const process of workspace.processes) console.log(formatProcessRow(process));
+    }
+  }
+
+  if (report.specialistProcesses.length > 0) {
+    console.log(bold('  Specialists'));
+    for (const process of report.specialistProcesses) console.log(formatProcessRow(process));
+  }
+
+  if (report.orphanProcesses.length > 0) {
+    console.log(bold('  Orphans'));
+    for (const process of report.orphanProcesses) console.log(formatProcessRow(process));
+  }
+
+  console.log('');
+}
+
 function resolveEpicReadinessMap(jobs: readonly SupervisorStatus[], includeTerminal: boolean): EpicReadinessMap {
   const epicIds = new Set(jobs.map((job) => job.epic_id).filter((epicId): epicId is string => Boolean(epicId)));
   const sqlite = createObservabilitySqliteClient();
@@ -742,13 +784,13 @@ function resolveEpicReadinessMap(jobs: readonly SupervisorStatus[], includeTermi
   }
 }
 
-function renderHuman(jobs: SupervisorStatus[], nodes: NodeTree[], trees: WorktreeTree[], all: boolean, includeTerminal: boolean, epicReadiness: EpicReadinessMap): void {
+function renderHuman(jobs: SupervisorStatus[], nodes: NodeTree[], trees: WorktreeTree[], all: boolean, includeTerminal: boolean, epicReadiness: EpicReadinessMap, health: ProcessHealthReport): void {
   const beadTitles = buildBeadTitleCache(jobs);
   const renderedJobIds = new Set<string>();
   const epicGroups = buildEpicGroups(jobs, epicReadiness);
   const renderedEpicIds = new Set(epicGroups.map((epic) => epic.epic_id));
 
-  console.log('');
+  renderProcessHealthBlock(health);
 
   for (const epic of epicGroups) {
     const prepCount = epic.prep_jobs.length;
@@ -926,6 +968,7 @@ function renderJson(
   _all: boolean,
   epicReadiness: EpicReadinessMap,
   args: PsArgs,
+  health: ProcessHealthReport,
 ): void {
   console.log(JSON.stringify({
     generated_at_ms: Date.now(),
@@ -965,6 +1008,7 @@ function renderJson(
     trees,
     epics: buildEpicGroups(jobs, epicReadiness),
     epic_readiness: Object.fromEntries([...epicReadiness.entries()].map(([epicId, summary]) => [epicId, summary])),
+    process_health: health,
   }, null, 2));
 }
 
@@ -1020,13 +1064,14 @@ function render(args: PsArgs): void {
 
   const nodes = groupByNode(visibleStatuses);
   const trees = groupByTree(visibleStatuses);
+  const health = collectProcessHealth();
 
   if (args.json) {
-    renderJson(visibleStatuses, nodes, trees, args.all, epicReadiness, args);
+    renderJson(visibleStatuses, nodes, trees, args.all, epicReadiness, args, health);
     return;
   }
 
-  renderHuman(visibleStatuses, nodes, trees, args.all, args.includeTerminal, epicReadiness);
+  renderHuman(visibleStatuses, nodes, trees, args.all, args.includeTerminal, epicReadiness, health);
 }
 
 function renderBuffered(args: PsArgs): string {
