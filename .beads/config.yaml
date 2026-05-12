@@ -56,3 +56,4 @@
 dolt.auto_push: false
 
 dolt.auto-commit: "on"
+dolt.shared-server: true

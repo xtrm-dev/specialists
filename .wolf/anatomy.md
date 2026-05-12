@@ -2,6 +2,7 @@
 
 > Auto-maintained by OpenWolf. Last scanned: 2026-04-01T04:04:51.100Z
 > Files: 531 tracked | Anatomy hits: 0 | Misses: 0
+> Manual update: 2026-05-12T18:46:56+00:00 — touched AGENTS.md/CLAUDE.md GitNexus context, CHANGELOG.md, latest .xtrm report, dist bundle, .beads config/issues, .wolf memory/buglog for unitAI-vtvjb cleanup.
 
 ## ./
 

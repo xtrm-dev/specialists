@@ -21918,6 +21918,40 @@ function runScript(command, cwd) {
     return { name: scriptName, output: e.stdout ?? e.message ?? "", exitCode: e.status ?? 1 };
   }
 }
+function buildReviewedGitnexusSummary(opts) {
+  const jobId = opts.reusedFromJobId?.trim();
+  if (!jobId)
+    return "";
+  try {
+    const client = createObservabilitySqliteClient(opts.cwd);
+    if (!client)
+      return "";
+    const events = client.readEvents(jobId);
+    let runComplete = null;
+    for (let i = events.length - 1;i >= 0; i -= 1) {
+      const ev = events[i];
+      if (ev?.type === "run_complete") {
+        runComplete = ev;
+        break;
+      }
+    }
+    if (!runComplete?.gitnexus_summary)
+      return "";
+    const gs = runComplete.gitnexus_summary;
+    const files = (gs.files_touched ?? []).slice(0, 20).join(", ") || "(none)";
+    const symbols = (gs.symbols_analyzed ?? []).slice(0, 20).join(", ") || "(none)";
+    const risk = gs.highest_risk ?? "UNKNOWN";
+    const invocations = gs.tool_invocations ?? 0;
+    return `<gitnexus_summary reviewed_job_id="${jobId}">
+  files_touched: ${files}
+  symbols_analyzed: ${symbols}
+  highest_risk: ${risk}
+  tool_invocations: ${invocations}
+</gitnexus_summary>`;
+  } catch {
+    return "";
+  }
+}
 function formatScriptOutput(results) {
   const withOutput = results.filter((r) => r.output.trim());
   if (withOutput.length === 0)
@@ -22411,6 +22445,13 @@ ${buildBeadBoundaryInstruction(runCwd, options.worktreeBoundary)}`.trim() : this
       ...options.reusedFromJobId ? { reused_from_job_id: options.reusedFromJobId } : {},
       ...options.worktreeOwnerJobId ? { worktree_owner_job_id: options.worktreeOwnerJobId } : {}
     };
+    const gitnexusSummary = buildReviewedGitnexusSummary({
+      reusedFromJobId: options.reusedFromJobId,
+      cwd: runCwd
+    });
+    if (gitnexusSummary) {
+      lineageVariables.gitnexus_summary = gitnexusSummary;
+    }
     const beadTemplateVariables = {
       prompt: resolvedPrompt,
       bead_id: options.inputBeadId ?? "",
@@ -22870,6 +22911,7 @@ var init_runner = __esm(() => {
   init_session();
   init_circuitBreaker();
   init_mandatory_rules();
+  init_observability_sqlite();
   init_beads();
   init_memory_retrieval();
   SHELL_BUILTINS = new Set([

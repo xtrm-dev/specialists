@@ -278,6 +278,24 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-05-07T10:36:18Z"
+    },
+    {
+      "id": "bug-017",
+      "timestamp": "2026-05-12T18:47:28+00:00",
+      "error_message": "Uncommitted xtrm hook drift would clear memory-gate sentinel and remove DB-first specialist completion metadata lookup",
+      "file": ".xtrm/hooks/beads-memory-gate.mjs; .xtrm/hooks/specialists/specialists-complete.mjs",
+      "root_cause": "Generated/uncommitted hook refresh regressed repo-local fixes while the latest report had not captured newer reviewer evidence commits.",
+      "fix": "Backed up dirty patches, reverted unsafe hook changes to HEAD, preserved intentional dist/report/changelog/beads/GitNexus context updates, and documented cleanup in report.",
+      "tags": [
+        "bugfix",
+        "hooks",
+        "memory-gate",
+        "specialists-complete",
+        "cleanup"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-12T18:47:28+00:00"
     }
   ]
 }
