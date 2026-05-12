@@ -180,20 +180,53 @@ function getWorktreeFromCwd(cwd: string | null): string | null {
   return cwd.slice(0, index + marker.length + (slash < 0 ? tail.length : slash));
 }
 
+function basename(command: string): string {
+  return command.split('/').pop() ?? command;
+}
+
+function isShellWrapper(command: string): boolean {
+  return ['sh', 'bash', 'zsh', 'fish'].includes(basename(command));
+}
+
+function isSpecialistRunCommand(cmdline: string): boolean {
+  const tokens = cmdline.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0 || isShellWrapper(tokens[0]!)) return false;
+  const commandIndex = tokens.findIndex((token) => ['specialists', 'sp'].includes(basename(token)));
+  return commandIndex >= 0 && tokens[commandIndex + 1] === 'run';
+}
+
+function isPiAgentProcess(snapshot: ProcessSnapshot): boolean {
+  return snapshot.cmdline.includes('pi-coding-agent');
+}
+
+function isPiOrphanCandidate(snapshot: ProcessSnapshot): boolean {
+  return snapshot.comm === 'pi' || isPiAgentProcess(snapshot);
+}
+
+function isDeletedCwdToolProcess(snapshot: ProcessSnapshot): boolean {
+  if (!snapshot.cwd?.includes('(deleted)')) return false;
+  return isPiOrphanCandidate(snapshot)
+    || isSpecialistRunCommand(snapshot.cmdline)
+    || snapshot.cmdline.includes('gitnexus')
+    || snapshot.cmdline.includes('serena')
+    || snapshot.cmdline.includes('tsserver');
+}
+
 function classifyProcess(snapshot: ProcessSnapshot): ProcessHealthProcessKind | null {
-  const { cmdline, comm, cwd, ppid } = snapshot;
-  const isSpecialist = cmdline.includes('pi-coding-agent') || cmdline.includes('specialists') || cmdline.includes('gitnexus') || cmdline.includes('serena');
+  const { cmdline, ppid } = snapshot;
   if (cmdline.includes('dolt sql-server')) return 'dolt';
   if (cmdline.includes('serena') && (cmdline.includes('language-server') || cmdline.includes('lsp'))) return 'serena-lsp';
-  if ((comm === 'pi' || cmdline.includes('pi-coding-agent') || cmdline.includes('gitnexus') || cmdline.includes('serena')) && ppid === 1) return 'orphan';
-  if (isSpecialist || cwd?.includes('/.worktrees/')) return 'specialist';
+  if (isDeletedCwdToolProcess(snapshot)) return 'orphan';
+  if ((isPiOrphanCandidate(snapshot) || (cmdline.includes('gitnexus') && cmdline.includes('mcp'))) && ppid === 1) return 'orphan';
+  if (isPiAgentProcess(snapshot) || isSpecialistRunCommand(cmdline)) return 'specialist';
   return null;
 }
 
-function getOrphanReason(snapshot: ProcessSnapshot): 'dolt-worktree-local' | 'gitnexus-orphan' | 'pi-orphan' | null {
+function getOrphanReason(snapshot: ProcessSnapshot): 'dolt-worktree-local' | 'gitnexus-orphan' | 'pi-orphan' | 'deleted-worktree-process' | null {
   if (snapshot.cmdline.includes('dolt sql-server')) return 'dolt-worktree-local';
+  if (isDeletedCwdToolProcess(snapshot)) return 'deleted-worktree-process';
   if (snapshot.cmdline.includes('gitnexus') && snapshot.cmdline.includes('mcp') && snapshot.ppid === 1) return 'gitnexus-orphan';
-  if ((snapshot.comm === 'pi' || snapshot.cmdline.includes('pi-coding-agent')) && snapshot.ppid === 1) return 'pi-orphan';
+  if (isPiOrphanCandidate(snapshot) && snapshot.ppid === 1) return 'pi-orphan';
   return null;
 }
 

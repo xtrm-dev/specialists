@@ -126,4 +126,52 @@ describe('process-health', () => {
     expect(reapable[0]?.reason).toBe('dolt-worktree-local');
     expect(reapable[1]?.reason).toBe('deleted-worktree-process');
   });
+  it('does not count MCP, tsserver, or shell tooling as specialist jobs', () => {
+    root = mkdtempSync(join(tmpdir(), 'process-health-'));
+    const meminfo = join(root, 'meminfo');
+    writeFileSync(meminfo, 'MemAvailable:       100000 kB\n', 'utf-8');
+    writeFileSync(join(root, 'uptime'), '2000.00 1000.00\n', 'utf-8');
+
+    writeProcProcess(root, 401, {
+      cmdline: 'serena start-mcp-server\0',
+      comm: 'python',
+      stat: '401 (python) S 1 1 1 0 -1 4194560 100 0 0 80 20 0 0 20 0 1 0 1000 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0',
+      status: 'VmRSS:\t1024 kB\n',
+      cwd: '/repo',
+    });
+    writeProcProcess(root, 402, {
+      cmdline: 'node gitnexus mcp\0',
+      comm: 'node',
+      stat: '402 (node) S 1 1 1 0 -1 4194560 100 0 0 80 20 0 0 20 0 1 0 1000 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0',
+      status: 'VmRSS:\t1024 kB\n',
+      cwd: '/repo',
+    });
+    writeProcProcess(root, 403, {
+      cmdline: 'node node_modules/typescript/lib/tsserver.js\0',
+      comm: 'node',
+      stat: '403 (node) S 1 1 1 0 -1 4194560 100 0 0 80 20 0 0 20 0 1 0 1000 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0',
+      status: 'VmRSS:\t1024 kB\n',
+      cwd: '/repo',
+    });
+    writeProcProcess(root, 404, {
+      cmdline: 'bun /path/to/specialists run executor --bead abc\0',
+      comm: 'bun',
+      stat: '404 (bun) S 1 1 1 0 -1 4194560 100 0 0 80 20 0 0 20 0 1 0 1000 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0',
+      status: 'VmRSS:\t1024 kB\n',
+      cwd: '/repo',
+    });
+    writeProcProcess(root, 405, {
+      cmdline: '/usr/bin/zsh -c specialists run executor --bead abc\0',
+      comm: 'zsh',
+      stat: '405 (zsh) S 1 1 1 0 -1 4194560 100 0 0 80 20 0 0 20 0 1 0 1000 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0',
+      status: 'VmRSS:\t1024 kB\n',
+      cwd: '/repo',
+    });
+
+    const report = collectProcessHealth({ procRoot: root, meminfoPath: meminfo });
+
+    expect(report.specialistCount).toBe(1);
+    expect(report.specialistProcesses[0]?.pid).toBe(404);
+  });
+
 });

@@ -36384,25 +36384,52 @@ function getWorktreeFromCwd(cwd) {
   const slash = tail.indexOf("/");
   return cwd.slice(0, index + marker.length + (slash < 0 ? tail.length : slash));
 }
+function basename6(command) {
+  return command.split("/").pop() ?? command;
+}
+function isShellWrapper(command) {
+  return ["sh", "bash", "zsh", "fish"].includes(basename6(command));
+}
+function isSpecialistRunCommand(cmdline) {
+  const tokens = cmdline.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0 || isShellWrapper(tokens[0]))
+    return false;
+  const commandIndex = tokens.findIndex((token) => ["specialists", "sp"].includes(basename6(token)));
+  return commandIndex >= 0 && tokens[commandIndex + 1] === "run";
+}
+function isPiAgentProcess(snapshot) {
+  return snapshot.cmdline.includes("pi-coding-agent");
+}
+function isPiOrphanCandidate(snapshot) {
+  return snapshot.comm === "pi" || isPiAgentProcess(snapshot);
+}
+function isDeletedCwdToolProcess(snapshot) {
+  if (!snapshot.cwd?.includes("(deleted)"))
+    return false;
+  return isPiOrphanCandidate(snapshot) || isSpecialistRunCommand(snapshot.cmdline) || snapshot.cmdline.includes("gitnexus") || snapshot.cmdline.includes("serena") || snapshot.cmdline.includes("tsserver");
+}
 function classifyProcess(snapshot) {
-  const { cmdline, comm, cwd, ppid } = snapshot;
-  const isSpecialist = cmdline.includes("pi-coding-agent") || cmdline.includes("specialists") || cmdline.includes("gitnexus") || cmdline.includes("serena");
+  const { cmdline, ppid } = snapshot;
   if (cmdline.includes("dolt sql-server"))
     return "dolt";
   if (cmdline.includes("serena") && (cmdline.includes("language-server") || cmdline.includes("lsp")))
     return "serena-lsp";
-  if ((comm === "pi" || cmdline.includes("pi-coding-agent") || cmdline.includes("gitnexus") || cmdline.includes("serena")) && ppid === 1)
+  if (isDeletedCwdToolProcess(snapshot))
     return "orphan";
-  if (isSpecialist || cwd?.includes("/.worktrees/"))
+  if ((isPiOrphanCandidate(snapshot) || cmdline.includes("gitnexus") && cmdline.includes("mcp")) && ppid === 1)
+    return "orphan";
+  if (isPiAgentProcess(snapshot) || isSpecialistRunCommand(cmdline))
     return "specialist";
   return null;
 }
 function getOrphanReason(snapshot) {
   if (snapshot.cmdline.includes("dolt sql-server"))
     return "dolt-worktree-local";
+  if (isDeletedCwdToolProcess(snapshot))
+    return "deleted-worktree-process";
   if (snapshot.cmdline.includes("gitnexus") && snapshot.cmdline.includes("mcp") && snapshot.ppid === 1)
     return "gitnexus-orphan";
-  if ((snapshot.comm === "pi" || snapshot.cmdline.includes("pi-coding-agent")) && snapshot.ppid === 1)
+  if (isPiOrphanCandidate(snapshot) && snapshot.ppid === 1)
     return "pi-orphan";
   return null;
 }
@@ -36558,12 +36585,30 @@ function parseSinceArg(value) {
   return Date.now() - ms;
 }
 function parseArgs8(argv) {
+  const allowedBooleanFlags = new Set([
+    "--json",
+    "--all",
+    "--follow",
+    "-f",
+    "--include-terminal",
+    "--include-merged",
+    "--include-cleaned",
+    "--active",
+    "--running",
+    "--mine",
+    "--health"
+  ]);
+  const valueFlags = new Set(["--node", "--bead", "--since"]);
   let nodeId;
   let beadFilter;
   let sinceMs;
   const positional = [];
   for (let i = 0;i < argv.length; i += 1) {
     const token = argv[i];
+    if (token.startsWith("-") && !allowedBooleanFlags.has(token) && !valueFlags.has(token)) {
+      const hint = token === "--ps" ? " Did you mean `sp clean --ps`?" : "";
+      throw new Error(`Unknown ps option: ${token}.${hint}`);
+    }
     if (token === "--node" && argv[i + 1]) {
       nodeId = argv[i + 1];
       i += 1;
@@ -37936,9 +37981,9 @@ var init_result = __esm(() => {
 
 // src/specialist/timeline-query.ts
 import { existsSync as existsSync25, readdirSync as readdirSync10, readFileSync as readFileSync25 } from "fs";
-import { basename as basename6, join as join27 } from "path";
+import { basename as basename7, join as join27 } from "path";
 function readJobEvents(jobDir) {
-  const jobId = basename6(jobDir);
+  const jobId = basename7(jobDir);
   try {
     const sqliteEvents = createObservabilitySqliteClient()?.readEvents(jobId) ?? [];
     if (sqliteEvents.length > 0) {

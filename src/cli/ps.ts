@@ -136,6 +136,11 @@ function parseSinceArg(value: string): number | undefined {
 }
 
 function parseArgs(argv: string[]): PsArgs {
+  const allowedBooleanFlags = new Set([
+    '--json', '--all', '--follow', '-f', '--include-terminal', '--include-merged',
+    '--include-cleaned', '--active', '--running', '--mine', '--health',
+  ]);
+  const valueFlags = new Set(['--node', '--bead', '--since']);
   let nodeId: string | undefined;
   let beadFilter: string | undefined;
   let sinceMs: number | undefined;
@@ -143,6 +148,10 @@ function parseArgs(argv: string[]): PsArgs {
 
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i];
+    if (token.startsWith('-') && !allowedBooleanFlags.has(token) && !valueFlags.has(token)) {
+      const hint = token === '--ps' ? ' Did you mean `sp clean --ps`?' : '';
+      throw new Error(`Unknown ps option: ${token}.${hint}`);
+    }
     if (token === '--node' && argv[i + 1]) {
       nodeId = argv[i + 1];
       i += 1;

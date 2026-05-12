@@ -334,6 +334,19 @@
         "soft-clean",
         "terminal-history"
       ]
+    },
+    {
+      "timestamp": "2026-05-12T23:01:00Z",
+      "error_message": "sp ps health reported specialists=45+ with no active jobs because process-health counted MCP/Serena/GitNexus/tsserver/shell tooling as specialist processes",
+      "root_cause": "process-health classifyProcess used broad substring matching for specialists/serena/gitnexus and cwd under .worktrees, so developer tooling and shell wrappers were aggregated under specialistCount.",
+      "fix": "Refined classification to count only direct specialists/sp run commands and pi-coding-agent processes as specialist processes; non-deleted MCP/tsserver helpers are excluded, deleted-cwd tool leaks remain reapable; ps now rejects unknown flags such as --ps with a sp clean --ps hint.",
+      "tags": [
+        "unitAI-f2vhd",
+        "sp-ps",
+        "process-health",
+        "classification",
+        "unknown-flags"
+      ]
     }
   ]
 }

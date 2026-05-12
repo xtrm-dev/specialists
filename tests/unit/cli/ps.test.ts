@@ -94,6 +94,13 @@ describe('ps CLI — run()', () => {
     vi.restoreAllMocks();
   });
 
+
+  it('rejects unknown ps flags and points --ps to clean', async () => {
+    process.argv = ['node', 'specialists', 'ps', '--ps'];
+    const { run } = await import('../../../src/cli/ps.js');
+    await expect(run()).rejects.toThrow('Unknown ps option: --ps. Did you mean `sp clean --ps`?');
+  }, TEST_TIMEOUT_MS);
+
   it('completes without throwing when no jobs exist', async () => {
     process.argv = ['node', 'specialists', 'ps'];
     vi.spyOn(console, 'log').mockImplementation(() => {});

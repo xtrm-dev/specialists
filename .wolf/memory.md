@@ -157,3 +157,5 @@
 - 2026-05-12T22:43:00Z: Final `sp ps` design: default shows active jobs plus unresolved terminal problem jobs; `sp clean --ps` soft-hides terminal rows via status metadata without deleting DB history; `--include-cleaned`/`--all` recover audit visibility.
 
 - 2026-05-12T22:50:00Z: Documented final `sp ps`/`sp clean --ps` semantics in CLI help and `config/skills/using-specialists-v3/SKILL.md`; future CLI behavior changes should update both help and orchestration skill docs together.
+
+- 2026-05-12T23:01:00Z: `sp ps` process-health specialist count is intentionally narrow: direct `specialists/sp run` processes and pi-coding-agent only. Serena/GitNexus MCP, tsserver, shell wrappers, and other tooling must not inflate `specialists=N`; `sp ps --ps` errors and points to `sp clean --ps`.
