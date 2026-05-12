@@ -113,7 +113,7 @@ function readProcCwdOrNull(pid: number, procRoot: string): string | null {
 function parseStat(stat: string): ProcStatSnapshot | null {
   const closeParen = stat.lastIndexOf(')');
   if (closeParen < 0) return null;
-  const fields = stat.slice(closeParen + 2).split(' ');
+  const fields = stat.slice(closeParen + 2).trim().replace(/\s+/g, ' ').split(' ');
   const ppid = Number(fields[1]);
   const utimeTicks = Number(fields[11]);
   const stimeTicks = Number(fields[12]);
@@ -122,7 +122,17 @@ function parseStat(stat: string): ProcStatSnapshot | null {
   return { ppid, utimeTicks, stimeTicks, startTimeTicks };
 }
 
-function readProcessSnapshot(pid: number, procRoot: string, nowMs: number): ProcessSnapshot | null {
+function readProcUptimeSecondsOrNull(procRoot: string): number | null {
+  try {
+    const match = /^(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)$/.exec(readFileSync(join(procRoot, 'uptime'), 'utf-8').trim());
+    if (!match) return null;
+    return Number(match[1]);
+  } catch {
+    return null;
+  }
+}
+
+function readProcessSnapshot(pid: number, procRoot: string, uptimeSeconds: number): ProcessSnapshot | null {
   const basePath = join(procRoot, String(pid));
   const cmdlineRaw = readProcStringOrNull(join(basePath, 'cmdline'));
   if (!cmdlineRaw) return null;
@@ -139,7 +149,7 @@ function readProcessSnapshot(pid: number, procRoot: string, nowMs: number): Proc
   const rssBytes = rssMatch ? Number(rssMatch[1]) * 1024 : 0;
   const cwd = readProcCwdOrNull(pid, procRoot);
   const cpuSeconds = (parsedStat.utimeTicks + parsedStat.stimeTicks) / CLOCK_TICKS_PER_SECOND;
-  const ageSeconds = Math.max(0, (nowMs / 1000) - (parsedStat.startTimeTicks / CLOCK_TICKS_PER_SECOND));
+  const ageSeconds = Math.max(0, uptimeSeconds - (parsedStat.startTimeTicks / CLOCK_TICKS_PER_SECOND));
   const cpuPct = ageSeconds > 0 ? (cpuSeconds / ageSeconds) * 100 : 0;
 
   return { pid, ppid: parsedStat.ppid, cmdline, comm, cwd, rssBytes, cpuPct, ageSeconds };
@@ -201,13 +211,13 @@ function toProcessHealthProcess(snapshot: ProcessSnapshot, kind: ProcessHealthPr
 export function collectProcessHealth(options: { procRoot?: string; meminfoPath?: string; nowMs?: number } = {}): ProcessHealthReport {
   const procRoot = options.procRoot ?? '/proc';
   const meminfoPath = options.meminfoPath ?? '/proc/meminfo';
-  const nowMs = options.nowMs ?? Date.now();
+  const uptimeSeconds = readProcUptimeSecondsOrNull(procRoot) ?? ((options.nowMs ?? Date.now()) / 1000);
   const thresholds = getProcessHealthThresholds();
   const memAvailableBytes = readMemAvailableBytes(meminfoPath);
   const processes: ProcessHealthProcess[] = [];
 
   for (const pid of listPids(procRoot)) {
-    const snapshot = readProcessSnapshot(pid, procRoot, nowMs);
+    const snapshot = readProcessSnapshot(pid, procRoot, uptimeSeconds);
     if (!snapshot) continue;
     const kind = classifyProcess(snapshot);
     if (!kind) continue;
