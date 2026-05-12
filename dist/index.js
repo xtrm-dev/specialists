@@ -29848,12 +29848,32 @@ function provisionWorktree(options) {
   const worktreeName = deriveWorktreeName(options.beadId, options.specialistName);
   const worktreePath = resolve9(join16(worktreeBase, worktreeName));
   createWorktreeViaBd(worktreePath, branch, commonRoot);
+  normalizeParentHooksPath(commonRoot);
   try {
     rmSync2(join16(worktreePath, ".beads"), { recursive: true, force: true });
     markBeadsSkipWorktree(worktreePath);
   } catch {}
   symlinkPiNpmCache(commonRoot, worktreePath);
   return { branch, worktreePath, reused: false };
+}
+function normalizeParentHooksPath(mainRepoRoot) {
+  try {
+    const result = spawnSync11("git", ["-C", mainRepoRoot, "config", "--get", "core.hooksPath"], {
+      stdio: "pipe",
+      encoding: "utf8"
+    });
+    if (result.status !== 0)
+      return;
+    const current = (result.stdout ?? "").trim();
+    if (!current)
+      return;
+    if (resolve9(current) === current)
+      return;
+    if (current !== ".beads/hooks" && current !== "./.beads/hooks")
+      return;
+    const absolute = join16(mainRepoRoot, ".beads", "hooks");
+    spawnSync11("git", ["-C", mainRepoRoot, "config", "core.hooksPath", absolute], { stdio: "pipe" });
+  } catch {}
 }
 function markBeadsSkipWorktree(worktreePath) {
   try {

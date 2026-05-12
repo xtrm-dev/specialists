@@ -166,6 +166,9 @@ export function provisionWorktree(options: WorktreeOptions): WorktreeInfo {
   // are masked via skip-worktree so the index/worktree delta does not
   // surface in `git status` or checkpoint diffs.
   // See unitAI-yvqmf (this fix). Supersedes unitAI-u08e8 / xtrm-nsca.
+  // Safety net for older bd installs: normalize parent's core.hooksPath to
+  // absolute if it's still the bd relative default (see xtrm-2s44).
+  normalizeParentHooksPath(commonRoot);
   try {
     rmSync(join(worktreePath, '.beads'), { recursive: true, force: true });
     markBeadsSkipWorktree(worktreePath);
@@ -184,6 +187,38 @@ export function provisionWorktree(options: WorktreeOptions): WorktreeInfo {
 
 // ── Internal ───────────────────────────────────────────────────────────────────
 
+
+/**
+ * Normalize the parent repo's `core.hooksPath` to an absolute path if it is
+ * currently a relative `.beads/hooks` reference. Older bd installs stored a
+ * relative path which would resolve against the worktree's cwd in a worktree
+ * — i.e., against the (now-missing) worktree-local `.beads/hooks/`. The fix
+ * is idempotent: only rewrites the exact relative `.beads/hooks` form, never
+ * touches absolute paths, project-style `.githooks` chains, or unset values.
+ *
+ * No-op for the vast majority of repos surveyed 2026-05-12 — but cheap
+ * insurance so a fresh-install on an older bd binary cannot resurface the
+ * "hooks fire from missing path" failure mode after unitAI-yvqmf lands.
+ *
+ * See xtrm-2s44 (xtrm-tools side audit).
+ */
+function normalizeParentHooksPath(mainRepoRoot: string): void {
+  try {
+    const result = spawnSync('git', ['-C', mainRepoRoot, 'config', '--get', 'core.hooksPath'], {
+      stdio: 'pipe',
+      encoding: 'utf8',
+    });
+    if (result.status !== 0) return;
+    const current = (result.stdout ?? '').trim();
+    if (!current) return;
+    if (resolve(current) === current) return; // already absolute
+    if (current !== '.beads/hooks' && current !== './.beads/hooks') return;
+    const absolute = join(mainRepoRoot, '.beads', 'hooks');
+    spawnSync('git', ['-C', mainRepoRoot, 'config', 'core.hooksPath', absolute], { stdio: 'pipe' });
+  } catch {
+    // non-fatal
+  }
+}
 
 /**
  * After bd worktree create, mark the parent's tracked .beads/* paths as
