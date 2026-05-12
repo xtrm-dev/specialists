@@ -36491,8 +36491,32 @@ function collectProcessHealth(options = {}) {
     orphanProcesses
   };
 }
+function withReason(process3, reason) {
+  return { ...process3, reason };
+}
+function hasDeletedCwd(process3) {
+  return Boolean(process3.cwd?.includes("(deleted)"));
+}
 function collectOrphanProcesses(options = {}) {
-  return collectProcessHealth(options).orphanProcesses;
+  const health = collectProcessHealth(options);
+  const reaped = new Map;
+  for (const process3 of health.orphanProcesses)
+    reaped.set(process3.pid, process3);
+  for (const process3 of health.doltProcesses) {
+    if (hasDeletedCwd(process3))
+      reaped.set(process3.pid, withReason(process3, "dolt-worktree-local"));
+  }
+  for (const process3 of health.specialistProcesses) {
+    if (hasDeletedCwd(process3))
+      reaped.set(process3.pid, withReason(process3, "deleted-worktree-process"));
+  }
+  for (const workspace of health.serenaWorkspaces) {
+    for (const process3 of workspace.processes) {
+      if (hasDeletedCwd(process3))
+        reaped.set(process3.pid, withReason(process3, "deleted-worktree-process"));
+    }
+  }
+  return [...reaped.values()].sort((left, right) => left.pid - right.pid);
 }
 var DEFAULT_WARN_PCT = 70, DEFAULT_REFUSE_PCT = 85, CLOCK_TICKS_PER_SECOND = 100;
 var init_process_health = () => {};
@@ -39257,11 +39281,11 @@ async function killOrphanProcesses(orphans, dryRun) {
 }
 function printOrphanPlan(orphans) {
   if (orphans.length === 0) {
-    console.log("No orphan processes found.");
+    console.log("No orphan/stale leaked processes found.");
     return;
   }
   const action = "Would reap";
-  console.log(`${action} ${orphans.length} orphan process(es):`);
+  console.log(`${action} ${orphans.length} orphan/stale leaked process(es):`);
   for (const orphan of orphans) {
     const cwdSuffix = orphan.cwd ? ` cwd=${orphan.cwd}` : "";
     console.log(`  - pid=${orphan.pid} ppid=${orphan.ppid} reason=${orphan.reason} comm=${orphan.comm}${cwdSuffix}`);
@@ -39270,8 +39294,8 @@ function printOrphanPlan(orphans) {
 function printOrphanSummary(killedCount) {
   if (killedCount === 0)
     return;
-  const noun = killedCount === 1 ? "orphan" : "orphans";
-  console.log(`Reaped ${killedCount} ${noun}.`);
+  const noun = killedCount === 1 ? "process" : "processes";
+  console.log(`Reaped ${killedCount} orphan/stale leaked ${noun}.`);
 }
 function deleteJobDirectories(jobs) {
   for (const job of jobs) {
@@ -39314,7 +39338,7 @@ async function run22() {
       return;
     }
     if (orphans.length === 0) {
-      console.log("No orphan processes found.");
+      console.log("No orphan/stale leaked processes found.");
       return;
     }
     printOrphanPlan(orphans);
@@ -50060,6 +50084,7 @@ async function run34() {
         "  --all        Remove all done/error jobs regardless of age",
         "  --keep <n>   Keep only the N most recent done/error jobs",
         "  --dry-run    Show what would be removed without deleting",
+        "  --reap-orphans Reap orphan/stale leaked tool processes",
         "",
         "Examples:",
         "  specialists clean",

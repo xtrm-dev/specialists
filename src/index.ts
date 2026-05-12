@@ -746,6 +746,7 @@ async function run() {
         '  --all        Remove all done/error jobs regardless of age',
         '  --keep <n>   Keep only the N most recent done/error jobs',
         '  --dry-run    Show what would be removed without deleting',
+        '  --reap-orphans Reap orphan/stale leaked tool processes',
         '',
         'Examples:',
         '  specialists clean',

@@ -19,7 +19,7 @@ export interface ProcessHealthProcess {
   cpuPct: number;
   ageSeconds: number;
   worktree: string | null;
-  reason?: 'dolt-worktree-local' | 'gitnexus-orphan' | 'pi-orphan';
+  reason?: 'dolt-worktree-local' | 'gitnexus-orphan' | 'pi-orphan' | 'deleted-worktree-process';
 }
 
 export interface ProcessHealthWorkspaceGroup {
@@ -285,6 +285,30 @@ export function collectProcessHealth(options: { procRoot?: string; meminfoPath?:
   };
 }
 
+function withReason(process: ProcessHealthProcess, reason: NonNullable<ProcessHealthProcess['reason']>): ProcessHealthProcess {
+  return { ...process, reason };
+}
+
+function hasDeletedCwd(process: ProcessHealthProcess): boolean {
+  return Boolean(process.cwd?.includes('(deleted)'));
+}
+
 export function collectOrphanProcesses(options: { procRoot?: string; nowMs?: number } = {}): ProcessHealthProcess[] {
-  return collectProcessHealth(options).orphanProcesses;
+  const health = collectProcessHealth(options);
+  const reaped = new Map<number, ProcessHealthProcess>();
+
+  for (const process of health.orphanProcesses) reaped.set(process.pid, process);
+  for (const process of health.doltProcesses) {
+    if (hasDeletedCwd(process)) reaped.set(process.pid, withReason(process, 'dolt-worktree-local'));
+  }
+  for (const process of health.specialistProcesses) {
+    if (hasDeletedCwd(process)) reaped.set(process.pid, withReason(process, 'deleted-worktree-process'));
+  }
+  for (const workspace of health.serenaWorkspaces) {
+    for (const process of workspace.processes) {
+      if (hasDeletedCwd(process)) reaped.set(process.pid, withReason(process, 'deleted-worktree-process'));
+    }
+  }
+
+  return [...reaped.values()].sort((left, right) => left.pid - right.pid);
 }

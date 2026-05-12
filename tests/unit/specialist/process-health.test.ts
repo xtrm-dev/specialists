@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { collectProcessHealth } from '../../../src/specialist/process-health.js';
+import { collectOrphanProcesses, collectProcessHealth } from '../../../src/specialist/process-health.js';
 
 function writeProcProcess(root: string, pid: number, data: { cmdline: string; comm: string; stat: string; status: string; cwd?: string }): void {
   const dir = join(root, String(pid));
@@ -11,7 +11,7 @@ function writeProcProcess(root: string, pid: number, data: { cmdline: string; co
   writeFileSync(join(dir, 'comm'), data.comm, 'utf-8');
   writeFileSync(join(dir, 'stat'), data.stat, 'utf-8');
   writeFileSync(join(dir, 'status'), data.status, 'utf-8');
-  if (data.cwd) writeFileSync(join(dir, 'cwd'), data.cwd, 'utf-8');
+  if (data.cwd) symlinkSync(data.cwd, join(dir, 'cwd')); 
 }
 
 describe('process-health', () => {
@@ -90,5 +90,40 @@ describe('process-health', () => {
 
     expect(report.status).toBe('WARN');
     expect(report.statusReasons).toContain('dolt sql-server count 2 > expected 1');
+  });
+
+  it('collects deleted-cwd dolt and tool processes as reapable leaks', () => {
+    root = mkdtempSync(join(tmpdir(), 'process-health-'));
+    const meminfo = join(root, 'meminfo');
+    writeFileSync(meminfo, 'MemAvailable:       100000 kB\n', 'utf-8');
+    writeFileSync(join(root, 'uptime'), '2000.00 1000.00\n', 'utf-8');
+
+    writeProcProcess(root, 301, {
+      cmdline: 'dolt sql-server\0',
+      comm: 'dolt',
+      stat: '301 (dolt) S 1 1 1 0 -1 4194560 100 0 0 80 20 0 0 20 0 1 0 1000 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0',
+      status: 'VmRSS:\t1024 kB\n',
+      cwd: '/repo/.worktrees/a/a/.beads/dolt (deleted)',
+    });
+    writeProcProcess(root, 302, {
+      cmdline: 'serena language-server\0',
+      comm: 'serena',
+      stat: '302 (serena) S 2 1 1 0 -1 4194560 100 0 0 80 20 0 0 20 0 1 0 1000 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0',
+      status: 'VmRSS:\t1024 kB\n',
+      cwd: '/repo/.worktrees/a/a (deleted)',
+    });
+    writeProcProcess(root, 303, {
+      cmdline: 'dolt sql-server\0',
+      comm: 'dolt',
+      stat: '303 (dolt) S 1 1 1 0 -1 4194560 100 0 0 80 20 0 0 20 0 1 0 1000 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0',
+      status: 'VmRSS:\t1024 kB\n',
+      cwd: '/repo/.beads/dolt',
+    });
+
+    const reapable = collectOrphanProcesses({ procRoot: root, meminfoPath: meminfo });
+
+    expect(reapable.map(process => process.pid)).toEqual([301, 302]);
+    expect(reapable[0]?.reason).toBe('dolt-worktree-local');
+    expect(reapable[1]?.reason).toBe('deleted-worktree-process');
   });
 });

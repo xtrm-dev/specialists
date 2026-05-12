@@ -26,7 +26,7 @@ interface OrphanProcess {
   comm: string;
   cmdline: string;
   cwd: string | null;
-  reason: 'dolt-worktree-local' | 'gitnexus-orphan' | 'pi-orphan';
+  reason: 'dolt-worktree-local' | 'gitnexus-orphan' | 'pi-orphan' | 'deleted-worktree-process';
 }
 
 interface CompletedJobRecord {
@@ -378,11 +378,11 @@ async function killOrphanProcesses(orphans: readonly OrphanProcess[], dryRun: bo
 
 function printOrphanPlan(orphans: readonly OrphanProcess[]): void {
   if (orphans.length === 0) {
-    console.log('No orphan processes found.');
+    console.log('No orphan/stale leaked processes found.');
     return;
   }
   const action = 'Would reap';
-  console.log(`${action} ${orphans.length} orphan process(es):`);
+  console.log(`${action} ${orphans.length} orphan/stale leaked process(es):`);
   for (const orphan of orphans) {
     const cwdSuffix = orphan.cwd ? ` cwd=${orphan.cwd}` : '';
     console.log(`  - pid=${orphan.pid} ppid=${orphan.ppid} reason=${orphan.reason} comm=${orphan.comm}${cwdSuffix}`);
@@ -391,8 +391,8 @@ function printOrphanPlan(orphans: readonly OrphanProcess[]): void {
 
 function printOrphanSummary(killedCount: number): void {
   if (killedCount === 0) return;
-  const noun = killedCount === 1 ? 'orphan' : 'orphans';
-  console.log(`Reaped ${killedCount} ${noun}.`);
+  const noun = killedCount === 1 ? 'process' : 'processes';
+  console.log(`Reaped ${killedCount} orphan/stale leaked ${noun}.`);
 }
 
 function deleteJobDirectories(jobs: readonly CompletedJobRecord[]): number {
@@ -438,7 +438,7 @@ export async function run(): Promise<void> {
       return;
     }
     if (orphans.length === 0) {
-      console.log('No orphan processes found.');
+      console.log('No orphan/stale leaked processes found.');
       return;
     }
     printOrphanPlan(orphans);

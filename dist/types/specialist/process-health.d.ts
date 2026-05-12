@@ -14,7 +14,7 @@ export interface ProcessHealthProcess {
     cpuPct: number;
     ageSeconds: number;
     worktree: string | null;
-    reason?: 'dolt-worktree-local' | 'gitnexus-orphan' | 'pi-orphan';
+    reason?: 'dolt-worktree-local' | 'gitnexus-orphan' | 'pi-orphan' | 'deleted-worktree-process';
 }
 export interface ProcessHealthWorkspaceGroup {
     workspace: string;
