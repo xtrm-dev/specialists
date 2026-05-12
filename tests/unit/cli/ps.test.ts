@@ -218,6 +218,35 @@ describe('ps CLI — run()', () => {
     expect(clean).toContain('err01');
   }, TEST_TIMEOUT_MS);
 
+  it('hides terminal historical jobs by default', async () => {
+    createJob(tempDir, 'done02', { status: 'done' });
+    createJob(tempDir, 'err02', { status: 'error', error: 'crashed' });
+    process.argv = ['node', 'specialists', 'ps'];
+    const output: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      output.push(args.map(String).join(' '));
+    });
+    const { run } = await import('../../../src/cli/ps.js');
+    await run();
+    const clean = stripAnsi(output.join('\n'));
+    expect(clean).not.toContain('done02');
+    expect(clean).not.toContain('err02');
+    expect(clean).toContain('0 jobs');
+  }, TEST_TIMEOUT_MS);
+
+  it('--include-terminal includes terminal history without --all', async () => {
+    createJob(tempDir, 'done03', { status: 'done' });
+    process.argv = ['node', 'specialists', 'ps', '--include-terminal'];
+    const output: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      output.push(args.map(String).join(' '));
+    });
+    const { run } = await import('../../../src/cli/ps.js');
+    await run();
+    const clean = stripAnsi(output.join('\n'));
+    expect(clean).toContain('done03');
+  }, TEST_TIMEOUT_MS);
+
   it('--json outputs valid JSON with trees array', async () => {
     createJob(tempDir, 'json01', { pid: process.pid });
     process.argv = ['node', 'specialists', 'ps', '--json'];

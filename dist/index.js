@@ -36598,11 +36598,6 @@ function parseArgs8(argv) {
     inspectId: positional[0]
   };
 }
-function isVisibleStatus(status, all) {
-  if (all)
-    return true;
-  return ACTIVE_STATES.includes(status);
-}
 function readStatusesFromFiles(jobsDir) {
   if (!existsSync23(jobsDir))
     return [];
@@ -37392,15 +37387,11 @@ function render(args) {
       return true;
     if (job.is_dead)
       return false;
-    if (isVisibleStatus(job.status, false))
+    if (ACTIVE_STATES.includes(job.status))
       return true;
-    if (!job.epic_id)
-      return false;
-    if (!TERMINAL_STATES.includes(job.status))
-      return false;
-    if (epicTerminal)
-      return false;
-    return true;
+    if (args.includeTerminal && TERMINAL_STATES.includes(job.status))
+      return true;
+    return false;
   });
   const nodes = groupByNode(visibleStatuses);
   const trees = groupByTree(visibleStatuses);

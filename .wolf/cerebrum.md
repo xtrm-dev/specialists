@@ -31,3 +31,4 @@
 
 ## User Corrections — 2026-05-12
 - `sp ps` default must stay compact: show aggregate System health only. Detailed per-process specialist/Dolt/Serena/orphan rows belong behind explicit `sp ps --health`.
+- Correction: `sp ps` default should be active-job dashboard only. Terminal historical DB rows belong behind `--include-terminal` or `--all`; otherwise cleanup appears ineffective.

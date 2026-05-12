@@ -1055,19 +1055,17 @@ function render(args: PsArgs): void {
     if (args.running && !ACTIVE_STATES.includes(job.status)) return false;
     if (mineBeadIds && (!job.bead_id || !mineBeadIds.has(job.bead_id))) return false;
 
-    // Hide terminal epics (merged + abandoned) by default; --include-terminal
-    // (or legacy --include-merged) opts back in. --all also reveals them.
+    // Default ps is an operational dashboard: active jobs only. Terminal
+    // history stays available through --include-terminal / --all, but should
+    // not make a cleaned-up session look busy.
     const epicTerminal = readinessState === 'merged' || readinessState === 'abandoned';
     if (epicTerminal && !args.includeTerminal && !args.all) return false;
 
     if (args.all) return true;
     if (job.is_dead) return false;
-    if (isVisibleStatus(job.status, false)) return true;
-
-    if (!job.epic_id) return false;
-    if (!TERMINAL_STATES.includes(job.status)) return false;
-    if (epicTerminal) return false;
-    return true;
+    if (ACTIVE_STATES.includes(job.status)) return true;
+    if (args.includeTerminal && TERMINAL_STATES.includes(job.status)) return true;
+    return false;
   });
 
   const nodes = groupByNode(visibleStatuses);

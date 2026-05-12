@@ -151,3 +151,5 @@
 - 2026-05-12T18:46:56+00:00: Cleanup pass unitAI-vtvjb reconciled dirty tree after reviewer GitNexus evidence work; unsafe generated hook downgrades were reverted, report/CHANGELOG/dist/beads metadata kept, and local .specialists/user + .tmp artifacts excluded from status.
 
 - 2026-05-12T21:45:00Z: unitAI-uof0t added `sp ps` System health backed by `src/specialist/process-health.ts`; manual validation found Dolt/orphan counts must affect headline severity, so WARN now triggers on `doltCount > 1` or `orphanCount > 0` even below RSS threshold.
+
+- 2026-05-12T22:16:00Z: `sp ps` default is now an active-job dashboard only; terminal historical observability rows are available via `--include-terminal`/`--all` so `sp clean` does not appear ineffective after cleanup.

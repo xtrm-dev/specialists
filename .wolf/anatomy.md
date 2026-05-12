@@ -1293,3 +1293,8 @@
 - `src/cli/ps.ts` — renders System health block and emits `process_health` JSON with process counts, alerts, and per-process rows.
 - `src/cli/clean.ts` — reuses shared orphan-process collection from process-health.
 - `tests/unit/specialist/process-health.test.ts` / `tests/unit/cli/ps.test.ts` — fixture coverage for proc parsing, uptime-based age, status alerts, and ps rendering/JSON.
+
+## Manual session note — 2026-05-12 unitAI-tdw9o
+
+- `src/cli/ps.ts` — default visibility now renders active jobs only; terminal historical jobs are hidden unless `--include-terminal` or `--all` is passed.
+- `tests/unit/cli/ps.test.ts` — regression coverage for hiding terminal jobs by default and showing them via `--include-terminal`.

@@ -309,6 +309,18 @@
         "dolt",
         "orphan-processes"
       ]
+    },
+    {
+      "timestamp": "2026-05-12T22:16:00Z",
+      "error_message": "sp ps showed 26 terminal historical jobs after sp clean and sp clean --reap-orphans reported clean",
+      "root_cause": "Default ps visibility included terminal jobs inside non-terminal/derived epic groups, so DB history rendered even with 0 running and 0 waiting jobs.",
+      "fix": "Changed default ps filter to active states only; --include-terminal and --all retain terminal history access. Added ps tests and rebuilt dist.",
+      "tags": [
+        "unitAI-tdw9o",
+        "sp-ps",
+        "visibility",
+        "terminal-history"
+      ]
     }
   ]
 }
