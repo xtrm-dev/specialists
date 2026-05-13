@@ -691,7 +691,7 @@ Overthinker:
 Researcher:
 - Dispatch **BEFORE** answering any library/API/framework/CLI question from training data. Training is months stale; APIs change; cheap CLI lookups (`ctx7`, `deepwiki`, `ghgrep`) replace the guess.
 - Use for: API syntax checks, config options, version migrations, library-specific debugging, "how do others implement X", recent releases, public repo internals.
-- Anti-pattern to break: "I think Library X works like Y…" → instead dispatch researcher with the exact question. The cost (~30s, `anthropic/claude-sonnet-4-6` via tool mode) is far less than shipping wrong API usage.
+- Anti-pattern to break: "I think Library X works like Y…" → instead dispatch researcher with the exact question. The cost (~30s, `openai-codex/gpt-5.4-mini` via tool mode) is far less than shipping wrong API usage.
 - Bead shape: source list (which libraries/repos), question set, required citations (library ID or `npx ctx7 docs /org/project "..."` output).
 - Chain position: before executor when outside facts matter; alongside explorer when a question mixes local code with external behavior.
 - Keep-alive: ask follow-ups in the same job rather than re-dispatching — researcher stays in waiting state after each turn.
@@ -720,7 +720,7 @@ If you catch yourself making any of these claims without first dispatching resea
 
 ### Cost framing
 
-Researcher runs on `claude-sonnet-4-6` via tool mode, keep-alive. Typical turn: 20-40s wall clock, ~$0.02-0.08 per call. The cost of shipping a wrong API call (debugger turn + executor fix + reviewer re-run, or worse, production regression) is orders of magnitude higher. Default to dispatch.
+Researcher runs on `openai-codex/gpt-5.4-mini` via tool mode, keep-alive. Typical turn: 20-40s wall clock, ~$0.005-0.02 per call. The cost of shipping a wrong API call (debugger turn + executor fix + reviewer re-run, or worse, production regression) is orders of magnitude higher. Default to dispatch.
 
 ### What researcher does NOT do
 
