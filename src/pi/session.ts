@@ -43,6 +43,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { isAbsolute, resolve, sep, join, dirname } from 'node:path';
 import { mapSpecialistBackend, getProviderArgs } from './backendMap.js';
+import { resolveCanonicalAssetDir } from '../specialist/canonical-asset-resolver.js';
 import { resolveManifestTools, type ManifestPolicy, type ManifestPolicyTier } from '../specialist/manifest-resolver.js';
 import { loadToolCatalogIndex, type ToolCatalogIndex } from '../specialist/tool-catalog.js';
 
@@ -158,12 +159,20 @@ let cachedToolCatalogIndex: ToolCatalogIndex | undefined;
 function loadSharedToolCatalogIndex(): ToolCatalogIndex | undefined {
   if (cachedToolCatalogIndex) return cachedToolCatalogIndex;
 
+  const overridePath = resolve(process.cwd(), '.specialists', 'catalog', 'index.json');
   try {
-    const indexPath = resolve(process.cwd(), '.specialists', 'catalog', 'index.json');
-    cachedToolCatalogIndex = loadToolCatalogIndex(readFileSync(indexPath, 'utf8')) as ToolCatalogIndex;
+    cachedToolCatalogIndex = loadToolCatalogIndex(readFileSync(overridePath, 'utf8')) as ToolCatalogIndex;
     return cachedToolCatalogIndex;
   } catch {
-    return undefined;
+    try {
+      const canonicalDir = resolveCanonicalAssetDir('catalog');
+      if (!canonicalDir) return undefined;
+      const canonicalPath = resolve(canonicalDir, 'index.json');
+      cachedToolCatalogIndex = loadToolCatalogIndex(readFileSync(canonicalPath, 'utf8')) as ToolCatalogIndex;
+      return cachedToolCatalogIndex;
+    } catch {
+      return undefined;
+    }
   }
 }
 
