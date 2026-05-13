@@ -631,6 +631,8 @@ export async function run(): Promise<void> {
     const cmd = `${process.execPath} ${process.argv[1]} ${innerArgs.map(shellQuote).join(' ')}`;
 
     let childPid: number | undefined;
+    let childExitCode: number | undefined;
+    let childExitPromise: Promise<void> | undefined;
     if (isTmuxAvailable()) {
       const suffix = randomBytes(3).toString('hex');
       const sessionName = buildSessionName(args.name, suffix);
@@ -639,9 +641,22 @@ export async function run(): Promise<void> {
       // Re-invoke ourselves without --background, fully detached
       const child = cpSpawn(process.execPath, [process.argv[1], ...innerArgs], {
         detached: true,
-        stdio: 'ignore',
+        stdio: ['ignore', 'ignore', 'pipe'],
         cwd,
         env: process.env,
+      });
+      const childStderr = child.stderr;
+      if (childStderr) {
+        childStderr.setEncoding('utf8');
+        childStderr.on('data', (chunk: string) => {
+          process.stderr.write(chunk);
+        });
+      }
+      childExitPromise = new Promise(resolve => {
+        child.on('exit', code => {
+          childExitCode = code ?? 1;
+          resolve();
+        });
       });
       child.unref();
       childPid = child.pid;
@@ -651,11 +666,19 @@ export async function run(): Promise<void> {
     const deadline = Date.now() + 5000;
     let jobId = '';
     while (Date.now() < deadline) {
-      await new Promise(r => setTimeout(r, 100));
+      await Promise.race([
+        new Promise(r => setTimeout(r, 100)),
+        childExitPromise,
+      ]);
       try {
         const current = readFileSync(latestPath, 'utf-8').trim();
         if (current && current !== oldLatest) { jobId = current; break; }
       } catch { /* not yet */ }
+      if (childExitCode !== undefined) break;
+    }
+
+    if (!jobId && childExitCode !== undefined && childExitCode !== 0) {
+      process.exit(childExitCode);
     }
 
     if (jobId) {

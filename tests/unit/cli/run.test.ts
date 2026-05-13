@@ -2,29 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as crypto from 'node:crypto';
 import * as childProcess from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import * as tmuxUtils from '../../../src/cli/tmux-utils.js';
 import * as worktree from '../../../src/specialist/worktree.js';
 
-vi.mock('node:fs', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('node:fs')>();
-  return { ...actual };
-});
-vi.mock('node:crypto', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('node:crypto')>();
-  return { ...actual };
-});
-vi.mock('node:child_process', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('node:child_process')>();
-  return { ...actual };
-});
-vi.mock('../../../src/cli/tmux-utils.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../src/cli/tmux-utils.js')>();
-  return { ...actual };
-});
-vi.mock('../../../src/specialist/worktree.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../src/specialist/worktree.js')>();
-  return { ...actual };
-});
 import { BeadsClient } from '../../../src/specialist/beads.js';
 import { SpecialistLoader } from '../../../src/specialist/loader.js';
 import { SpecialistRunner } from '../../../src/specialist/runner.js';
@@ -421,10 +402,12 @@ describe('run CLI', () => {
     vi.spyOn(tmuxUtils, 'isTmuxAvailable').mockReturnValue(false);
     const createTmuxSessionSpy = vi.spyOn(tmuxUtils, 'createTmuxSession').mockImplementation(() => {});
     const unref = vi.fn();
-    const detachedSpawnSpy = vi.spyOn(childProcess, 'spawn').mockImplementation(() => ({
-      pid: 456,
-      unref,
-    } as any));
+    const child = new EventEmitter() as any;
+    child.pid = 456;
+    child.unref = unref;
+    child.stderr = new EventEmitter();
+    child.stderr.setEncoding = vi.fn();
+    const detachedSpawnSpy = vi.spyOn(childProcess, 'spawn').mockImplementation(() => child);
 
     let latestReads = 0;
     vi.spyOn(fs, 'readFileSync').mockImplementation((path: any) => {
@@ -454,7 +437,7 @@ describe('run CLI', () => {
       'hello',
     ]);
     expect(options.detached).toBe(true);
-    expect(options.stdio).toBe('ignore');
+    expect(options.stdio).toEqual(['ignore', 'ignore', 'pipe']);
     expect(options.cwd).toBe(process.cwd());
     expect(options.env).toBe(process.env);
     expect(unref).toHaveBeenCalled();
@@ -462,6 +445,49 @@ describe('run CLI', () => {
     expect(exit).toHaveBeenCalledWith(0);
   });
 
+
+  it('surfaces detached child stderr and exits non-zero when child fails before jobId exists', async () => {
+    process.argv = ['node', '/repo/src/index.ts', 'run', 'code-review', '--prompt', 'hello', '--background'];
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
+
+    vi.spyOn(SpecialistLoader.prototype, 'get').mockResolvedValue({
+      specialist: {
+        metadata: { name: 'code-review', version: '1.0.0' },
+        execution: { model: 'gemini', timeout_ms: 5000, mode: 'tool', permission_required: 'READ_ONLY' },
+        prompt: { task_template: 'Do $prompt' },
+      },
+    } as any);
+
+    vi.spyOn(tmuxUtils, 'isTmuxAvailable').mockReturnValue(false);
+    const child = new EventEmitter() as any;
+    child.pid = 456;
+    child.unref = vi.fn();
+    child.stderr = new EventEmitter();
+    child.stderr.setEncoding = vi.fn();
+    vi.spyOn(childProcess, 'spawn').mockImplementation(() => child);
+
+    vi.spyOn(fs, 'readFileSync').mockImplementation((path: any) => {
+      if (String(path).endsWith('/.specialists/jobs/latest')) {
+        throw new Error('no job yet');
+      }
+      throw new Error('unexpected path');
+    });
+
+    const stderrWrite = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const exit = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      throw new Error(`exit:${code}`);
+    }) as never);
+
+    setImmediate(() => {
+      child.stderr.emit('data', 'epic guard refusal\n');
+      child.emit('exit', 3);
+    });
+
+    await expect(run()).rejects.toThrow('exit:3');
+
+    expect(stderrWrite).toHaveBeenCalledWith('epic guard refusal\n');
+    expect(exit).toHaveBeenCalledWith(3);
+  });
   it('blocks MEDIUM specialists from reusing a running job worktree', async () => {
     process.argv = ['node', 'specialists', 'run', 'code-review', '--prompt', 'hello', '--job', 'job-running'];
     Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
