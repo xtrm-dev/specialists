@@ -26774,8 +26774,20 @@ function assertXtrmPrerequisites(cwd) {
   const hasXtCli = isInstalled("xt");
   if (hasXtrmDir && hasXtCli)
     return;
-  console.error("specialists requires xtrm. Run: npm install -g xtrm-tools && xt install");
-  process.exit(1);
+  if (!hasXtCli) {
+    console.error("specialists init: missing xt CLI.");
+    console.error("1. Install xtrm-tools globally: npm install -g xtrm-tools");
+    console.error("2. Run xt install");
+    console.error("3. Run xt init in this repo");
+    console.error("4. Verify xt is available: xt --version");
+    process.exit(1);
+  }
+  if (!hasXtrmDir) {
+    console.error("specialists init: missing .xtrm/ in this repo.");
+    console.error("1. Run xt init in this repo");
+    console.error("2. Verify xt is available: xt --version");
+    process.exit(1);
+  }
 }
 function warnMissingOptionalPrerequisites() {
   const optionalTools = [
@@ -40151,8 +40163,12 @@ async function run28() {
   lines.push("");
   lines.push(`  ${bold12("Prerequisite: Bun")}   ${cmd2("bun --version")}           # verify Bun >=1.0.0`);
   lines.push(`  ${cmd2("curl -fsSL https://bun.sh/install | bash")}   # install Bun if missing`);
+  lines.push(`  ${cmd2("npm install -g xtrm-tools")}                 # install runtime prerequisite`);
+  lines.push(`  ${cmd2("xt install")}                               # install xtrm-managed assets`);
+  lines.push(`  ${cmd2("xt init")}                                  # initialize .xtrm/ in this repo`);
+  lines.push(`  ${dim13("sp list, sp doctor --check-drift, sp prune-stale-defaults are Category A and do NOT require xt or .xtrm/")}`);
   lines.push(`  ${cmd2("npm install -g @jaggerxtrm/specialists")}    # install globally`);
-  lines.push(`  ${cmd2("specialists init")}                         # project setup:`);
+  lines.push(`  ${cmd2("sp init")}                                  # project setup:`);
   lines.push(`  ${dim13("                                            #   creates dirs, wires MCP + hooks, injects context")}`);
   lines.push("");
   lines.push(`  Verify everything is healthy:`);
@@ -40161,7 +40177,8 @@ async function run28() {
   lines.push(section2("2. Initialize a Project"));
   lines.push("");
   lines.push(`  Run once per project root:`);
-  lines.push(`  ${cmd2("specialists init")}                          # creates .specialists/, wires MCP + AGENTS.md`);
+  lines.push(`  ${cmd2("sp init")}                                  # creates .specialists/, wires MCP + AGENTS.md`);
+  lines.push(`  ${dim13("  # requires xt init first so .xtrm/ already exists")}`);
   lines.push("");
   lines.push(`  What this creates:`);
   lines.push(`  ${dim13(".specialists/default/")} \u2014 canonical specialists (from init)`);
