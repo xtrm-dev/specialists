@@ -54,6 +54,14 @@ Category A and bootstrap note:
 - `sp list`, `sp doctor --check-drift`, and `sp prune-stale-defaults` are Category A commands.
 - They do not require `xt` or `.xtrm/`.
 
+### Naming and prerequisite policy
+
+- Specialists ships as the scoped package `@jaggerxtrm/specialists`. Binaries: `specialists` and `sp` (alias).
+- xtrm-tools is a separate published package; the canonical name is `xtrm-tools` and its CLI is `xt`.
+- Specialists does NOT declare xtrm-tools as a normal dependency, devDependency, or peerDependency. It is recorded as a runtime prerequisite in the underscore-prefixed `_runtime_prerequisites` field in `package.json` (npm ignores underscore-prefixed top-level fields), and enforced at runtime by `sp init` via `assertXtrmPrerequisites` in `src/cli/init.ts`.
+- Rationale: a normal/peer dependency on xtrm-tools would couple specialists publishes to xtrm-tools version cuts and risk transitive-bin ambiguity. Operators install both packages globally; `xt --version` is the source of truth for xtrm CLI presence.
+- Migration: legacy installs that depended on `xtrm-tools` transitively should switch to explicit global install per the ordered flow above.
+
 GitHub CI now includes a package-payload smoke gate that packs the tarball, asserts required runtime assets are present, installs into an isolated prefix, and runs `sp --version`, `sp doctor --check-drift`, `sp prune-stale-defaults --dry-run`, `sp clean --dry-run`, and `sp list --compact` to catch payload regressions before publish.
 
 ## Category A: runtime-resolved package assets
