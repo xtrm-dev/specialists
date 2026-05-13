@@ -54,6 +54,8 @@ Category A and bootstrap note:
 - `sp list`, `sp doctor --check-drift`, and `sp prune-stale-defaults` are Category A commands.
 - They do not require `xt` or `.xtrm/`.
 
+GitHub CI now includes a package-payload smoke gate that packs the tarball, asserts required runtime assets are present, installs into an isolated prefix, and runs `sp --version`, `sp doctor --check-drift`, `sp prune-stale-defaults --dry-run`, `sp clean --dry-run`, and `sp list --compact` to catch payload regressions before publish.
+
 ## Category A: runtime-resolved package assets
 
 Category A assets are read by the `sp` runtime itself:
