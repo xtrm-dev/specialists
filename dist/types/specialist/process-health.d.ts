@@ -30,7 +30,7 @@ export interface StaleSpecialistJobCandidate {
     specialist: string;
     cwd: string | null;
     ageMs: number;
-    reason: 'dead-pid' | 'orphaned-keep-alive';
+    reason: 'dead-pid' | 'orphaned-keep-alive' | 'dead-toolchain';
 }
 export type ProcessHealthStatus = 'OK' | 'WARN' | 'REFUSE';
 export interface ProcessHealthReport {
@@ -55,6 +55,7 @@ export interface ProcessHealthReport {
 }
 interface StaleSpecialistJobSource {
     listStatuses(): SupervisorStatus[];
+    getLastActivityTimestampMs?(jobId: string): number | null;
 }
 export declare function getProcessHealthThresholds(env?: NodeJS.ProcessEnv): ProcessHealthThresholds;
 export declare function collectProcessHealth(options?: {

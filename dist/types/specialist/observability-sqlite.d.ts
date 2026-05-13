@@ -235,6 +235,7 @@ export interface ObservabilitySqliteClient {
     readEvents(jobId: string): TimelineEvent[];
     readEventsAfterSeq(jobId: string, afterSeq: number): TimelineEvent[];
     readLatestToolEvent(jobId: string): TimelineEventTool | null;
+    getLastActivityTimestampMs(jobId: string): number | null;
     aggregateJobMetrics(jobId: string): JobMetricsRecord | null;
     listJobMetrics(filters?: {
         spec?: string;

@@ -8454,6 +8454,16 @@ class SqliteClient {
       }
     }, "readLatestToolEvent");
   }
+  getLastActivityTimestampMs(jobId) {
+    return withRetry(() => {
+      const row = this.db.query(`
+        SELECT MAX(t) AS last_activity_ms
+        FROM specialist_events
+        WHERE job_id = ? AND type IN ('tool', 'think')
+      `).get(jobId);
+      return typeof row?.last_activity_ms === "number" ? row.last_activity_ms : null;
+    }, "getLastActivityTimestampMs");
+  }
   aggregateJobMetrics(jobId) {
     return withRetry(() => {
       const jobRow = this.db.query(`
