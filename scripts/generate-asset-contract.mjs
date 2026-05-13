@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
 import { readFile, readdir, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -9,21 +8,10 @@ const OUTPUT_PATH = path.join(ROOT, 'dist', 'asset-contract.json');
 const PACKAGE_PATH = path.join(ROOT, 'package.json');
 const SCHEMA_VERSION = '1.0.0';
 
-function getGeneratedAt() {
-  try {
-    return execFileSync('git', ['show', '-s', '--format=%cI', 'HEAD'], { encoding: 'utf8' }).trim();
-  } catch {
-    return new Date(0).toISOString();
-  }
-}
-
 async function main() {
   const packageJson = JSON.parse(await readFile(PACKAGE_PATH, 'utf8'));
-  const generatedAt = getGeneratedAt();
-
   const contract = {
     schema_version: SCHEMA_VERSION,
-    generated_at: generatedAt,
     package_version: packageJson.version,
     shipped_skills: await collectFiles('config/skills', 'SKILL.md', async (filePath) => ({
       path: filePath,
