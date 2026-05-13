@@ -34,6 +34,7 @@ export async function run(): Promise<void> {
   lines.push(`  ${cmd('npm install -g xtrm-tools')}                 # install runtime prerequisite`);
   lines.push(`  ${cmd('xt install')}                               # install xtrm-managed assets`);
   lines.push(`  ${cmd('xt init')}                                  # initialize .xtrm/ in this repo`);
+  lines.push(`  ${dim('sp list, sp doctor --check-drift, sp prune-stale-defaults are Category A and do NOT require xt or .xtrm/')}`);
   lines.push(`  ${cmd('npm install -g @jaggerxtrm/specialists')}    # install globally`);
   lines.push(`  ${cmd('sp init')}                                  # project setup:`);
   lines.push(`  ${dim('                                            #   creates dirs, wires MCP + hooks, injects context')}`);
