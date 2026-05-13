@@ -2,7 +2,7 @@
 session_date: 2026-05-13
 branch: master
 window: 2026-05-13 (autonomous SSOT: Tier 1 item 5 + Tier 2 + Tier 3 + reviewer prompt + user-reported GH issues + ye5s9 epic close + v3.3 doctrine merge + researcher consolidation)
-commits: 22 (12 merges + 6 dist rebuilds + 4 docs/skill)
+commits: 24 (12 merges + 6 dist rebuilds + 4 docs/skill + 2 specialist-config audits)
 issues_closed: 27 (12 parent beads + 15 chain children); +2 GH issues closed (#76, #71); +2 audits superseded (u0nbr, 6kofw); ye5s9 epic closed
 issues_filed: 0 net new (all chain beads closed within session)
 specialist_dispatches: 22 (11 executors + 11 reviewers)
@@ -191,6 +191,17 @@ Continuation from 2026-05-13b retired the remaining Tier 1 friction item (xbofm)
 - Stale `.specialists/user/researcher.specialist.json` deleted (mirrored package with minor drift; package canonical now superior).
 - v3 skill researcher section expanded with concrete dispatch triggers (see v3.3 doctrine merge above).
 
+### Anthropic/Claude removal sweep — researcher (c02f4c1a) + 9-specialist audit (d6f8d8fa)
+- Operator flagged that Anthropic Claude models don't work in their env. Researcher had been swapped TO claude-sonnet earlier in the session as part of the v1.2.0 consolidation; reverted to non-Anthropic.
+- **researcher** (c02f4c1a): primary `anthropic/claude-sonnet-4-6` → `openai-codex/gpt-5.4-mini` (matches executor; reliable for tool-heavy Bash CLI). Fallback `openai-codex/gpt-5.4-mini` → `google-gemini-cli/gemini-3.1-pro-preview` (long-context fallback for research synthesis). v3 skill cost framing updated (~$0.02-0.08 → ~$0.005-0.02 per call).
+- **Full audit (d6f8d8fa)**: found 9 other specialists with claude refs. **3 with claude as PRIMARY (fully broken — would fail on dispatch)**:
+  - `test-runner` [LOW]: `claude-haiku-4-5` → `openai-codex/gpt-5.4-mini`
+  - `specialists-creator` [HIGH]: `claude-sonnet-4-6` → `openai-codex/gpt-5.5`
+  - `xt-merge` [MEDIUM]: `claude-sonnet-4-6` → `openai-codex/gpt-5.4-mini`
+- **6 with claude as FALLBACK (silent never-fires)**: overthinker, executor, changelog-keeper, node-coordinator → `google-gemini-cli/gemini-3.1-pro-preview` (premium reasoning); explorer, changelog-drafter → `google-gemini-cli/gemini-3-flash-preview` (fast/cheap).
+- Final provider distribution: 12 specialists × openai-codex (primary), 2 × nano-gpt/glm-5, 0 × anthropic. Fallback diversity via gemini + glm + cross-provider.
+- `grep -rl "anthropic\|claude-*" config/specialists/` returns empty. All 17 specialists schema-validate clean.
+
 ## Memories Saved
 
 | Key | Content |
@@ -304,6 +315,8 @@ Operator steps remaining for the cut:
 | 2026-05-09 proposal closeout (DONE banner) | ✓ shipped |
 | Researcher specialist v1.2.0 consolidation | ✓ shipped (model swap + skill dedup + aggressive description) |
 | v3 skill researcher section expansion | ✓ shipped + mirror synced |
+| Researcher: claude → openai-codex/gpt-5.4-mini (operator env doesn't have Claude) | ✓ shipped (c02f4c1a) |
+| 9-specialist Anthropic audit + remediation (3 PRIMARY broken: test-runner, specialists-creator, xt-merge) | ✓ shipped (d6f8d8fa). 0 specialists now reference anthropic/claude-* |
 
 ## Suggested Next Priority
 
