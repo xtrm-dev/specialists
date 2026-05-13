@@ -691,10 +691,43 @@ Overthinker:
 Researcher:
 - Dispatch **BEFORE** answering any library/API/framework/CLI question from training data. Training is months stale; APIs change; cheap CLI lookups (`ctx7`, `deepwiki`, `ghgrep`) replace the guess.
 - Use for: API syntax checks, config options, version migrations, library-specific debugging, "how do others implement X", recent releases, public repo internals.
-- Anti-pattern to break: "I think Library X works like Y…" → instead dispatch researcher with the exact question. The cost (~30s, claude-sonnet-4-6 via tool mode) is far less than shipping wrong API usage.
+- Anti-pattern to break: "I think Library X works like Y…" → instead dispatch researcher with the exact question. The cost (~30s, `anthropic/claude-sonnet-4-6` via tool mode) is far less than shipping wrong API usage.
 - Bead shape: source list (which libraries/repos), question set, required citations (library ID or `npx ctx7 docs /org/project "..."` output).
 - Chain position: before executor when outside facts matter; alongside explorer when a question mixes local code with external behavior.
 - Keep-alive: ask follow-ups in the same job rather than re-dispatching — researcher stays in waiting state after each turn.
+
+Three modes — researcher picks automatically based on bead shape; you write the bead, not the mode:
+
+- **Targeted lookup** (most common): "How do I configure X in library Y v1.2?" / "What does Z.method() return now?" / "Are foo and bar still the canonical replacements for baz?" → researcher resolves library ID via `ctx7 library`, then `ctx7 docs /org/project "<intent-rich query>"`. For repo-specific internals (e.g. "How does Vite handle X internally?"), `deepwiki ask <owner/repo> "..."`.
+- **Discovery**: "How do production codebases handle X?" / "Find good examples of pattern Y" / "What does the ecosystem do for Z?" → `ghgrep "<literal pattern>" --lang <langs> --repo <maybe>`, scan results, drill into the best repos with `deepwiki toc` + `deepwiki ask`.
+- **Media / discussion-recency** (rare): YouTube transcripts, social-media trends. Triggers on URLs or "what are people saying about X right now". Researcher loads `last30days` skill on-demand for this — don't fold its setup into the bead.
+
+### Dispatch triggers — when the orchestrator should reach for researcher
+
+Concrete agent thoughts that MUST be replaced with a researcher dispatch:
+
+| Agent thought | Researcher bead |
+|---|---|
+| "I think `useEffect` cleanup works like…" | `ctx7 docs /facebook/react "useEffect cleanup with async operations"` |
+| "Next.js app router middleware should be…" | `ctx7 docs /vercel/next.js "app router middleware patterns"` |
+| "Let me check if `--target` is a valid flag for tool X" | `ctx7 docs /org/tool-x "--target flag"` or `tool-x --help` (orchestrator-side if it's installed) |
+| "Production code probably handles X by…" | `ghgrep "<X-pattern>" --lang TypeScript --limit 5` then `deepwiki ask <best-repo> "<design question>"` |
+| "Library Y added feature Z in v3 (I think)" | `ctx7 library <Y> "Z"` → `ctx7 docs /org/Y/<version> "Z"` to verify version + behavior |
+| "Repo X's authentication architecture is…" | `deepwiki ask owner/X "How does the auth middleware work? What stores tokens? What controls expiry?"` |
+| "Cross-library: do A and B compose like Z?" | `deepwiki ask repo-A repo-B "How do these interact for use-case Z?"` |
+
+If you catch yourself making any of these claims without first dispatching researcher, you are about to ship stale information. Stop and dispatch.
+
+### Cost framing
+
+Researcher runs on `claude-sonnet-4-6` via tool mode, keep-alive. Typical turn: 20-40s wall clock, ~$0.02-0.08 per call. The cost of shipping a wrong API call (debugger turn + executor fix + reviewer re-run, or worse, production regression) is orders of magnitude higher. Default to dispatch.
+
+### What researcher does NOT do
+
+- Local code mapping → use `explorer` (READ_ONLY, traces project code without external CLI cost).
+- Bug root-cause when symptoms are local → use `debugger`.
+- Reading internal docs already in this repo → use direct file read or `explorer`.
+- Security audit of third-party packages → use `security-auditor`; researcher's job is the API surface, not the threat model.
 
 Test-runner:
 - Use when commands need to run and failures need classification, not fixes.
