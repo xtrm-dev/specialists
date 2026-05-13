@@ -169,17 +169,55 @@ None new this session beyond the impl/review chain beads already closed. Existin
 - Push: 1 merge commit (82cb9949) + all session commits successfully pushed to `origin/master`.
 - CI: `.github/workflows/package-payload.yml` will fire on the next PR; ci result on master push uncertain (pi-compat workflow only runs on specific paths).
 
-## Suggested Next Priority
+## Next Release — Priority Order (post-verification 2026-05-13)
 
-Quick wins remaining in the original release-stabilization order:
-1. `unitAI-w7ksg` — likely closeable now that the CI gate (1j9om/bf7qw) exists; verify the assertion list is comprehensive enough.
-2. `unitAI-5voar` — sp init/doctor layout alignment; quick check whether current code already aligned post-this session.
-3. `unitAI-3m27y` — tighten payload allowlist + add root LICENSE; surgical package.json change.
-4. `unitAI-wq0mw` — extend 8tm35 reaper to cover alive-PID-no-events zombies.
-5. `unitAI-lqsha` — reviewer cumulative diff injection upstream fix; would eliminate the rebuttal pattern in this session.
-6. `unitAI-a6e60` — `sp merge` fork-base detection; would fix the cherry-pick fallback path documented in the proposal.
+Verified each Part C workaround against actual code state + open bd backlog. Highest-leverage items first; each removes friction the orchestrator actually hit this session.
 
-After those, the release is genuinely investor-MVP ready: every P0 gap from the prior SSOT report is closed or covered.
+### Tier 1 — code fixes that retire workarounds
+
+1. **`unitAI-lqsha`** P1 — reviewer cumulative-diff injection. Concrete fix: `src/cli/run.ts:497-516` priority order is `unstaged → staged → branch-vs-base`; noise unstaged files (`.xtrm/SKILL.md` gitnexus stat refresh) shadow real branch diff. **5-line fix**: filter each source's `files[]` against `AUTO_COMMIT_NOISE_PREFIXES` (`.xtrm/.beads/.wolf/.specialists/jobs/.pi/`) — same list already used in `supervisor.ts:290`. Eliminates the reviewer rebuttal pattern entirely (~50% of this session's friction).
+
+2. **NEW BEAD — `sp merge` auto-stash bd auto-export files** P1. No bead filed yet. Hit 8× this session. `sp merge` refuses on dirty `.beads/issues.jsonl` (bd auto-export re-dirties tree between merges). Fix: extend `merge.ts:assertCleanMainTree` (or its caller) to internally stash `.beads/*.jsonl` + `.xtrm/skills/active/**` before rebase, restore after. Same pattern already used for `shelveMainRepoDirtyState`. Removes the pre-merge ritual.
+
+3. **`unitAI-a6e60`** P1 — `sp merge` fork-base + `--target-branch` flag. Partial in code (`resolveDefaultBranchName` uses `origin/HEAD` symbolic-ref); still missing explicit override flag + merge-base inference. Closes xtrm-nr05 properly; obsoletes the A1 cherry-pick playbook in v4 skill.
+
+4. **`unitAI-wq0mw`** P1 — alive-PID-no-events zombies. Extend `collectStaleSpecialistJobs` (landed in 8tm35 this session) with a third reason `dead-toolchain`: PID alive, ppid≠1, but no tool/think events in the last N minutes AND status=waiting/running. Reuses the same 30-min threshold.
+
+5. **`unitAI-xbofm`** P2 — `sp run --background` should surface epic-guard refusal reason instead of silent drop ("Warning: job started but ID not yet available"). Hit multiple times this session.
+
+### Tier 2 — release-contract polish (mostly verification)
+
+6. **`unitAI-w7ksg`** P1 — payload contents audit. Largely satisfied by `1j9om` CI gate landed this session. Verify the asset list in `.github/workflows/package-payload.yml` matches the audit's "required runtime essentials" list, then close.
+
+7. **`unitAI-5voar`** P1 — sp init / sp doctor active-layout alignment. `usj9y` and `sgw9g` may have already aligned them; verify with a fresh `npm pack` install + `sp init` + `sp doctor --check-drift` smoke. Close if green.
+
+8. **`unitAI-3m27y`** P1 — npm payload allowlist tightening + root LICENSE. Surgical `package.json` change + add `LICENSE` file (MIT per badge). Possibly drop `.serena/`, `evals/scripts`, dev-ish files from `files:`.
+
+9. **`unitAI-rl9uh`** P1 — peer/prerequisite metadata after xtrm rename decision. `usj9y` added the `_runtime_prerequisites` field; rl9uh wants the explicit peer/optional-peer decision recorded. Likely a docs-only close.
+
+10. **`unitAI-q30r7`** P1 — naming/versioning strategy doc. Audit-style; outcome is a decision recorded, no code.
+
+### Tier 3 — CLI help drift sweep (single docs executor bead)
+
+11. **NEW BEAD — help-text refresh**. `sp init --help` missing Bun runtime + ordered xtrm install (vwrnq+usj9y drift). `sp clean --help` `--reap-orphans` description outdated post-8tm35. `sp merge --help` doesn't note `origin/HEAD` resolution. `sp finalize --help` doesn't note SQLite-first read + cascade post-amzec. `sp doctor --help` doesn't note Category-A behavior post-usj9y. Single executor turn, docs-only.
+
+### Deferred (separate epics, not v4-blocking)
+
+- `unitAI-c4g0m` / `unitAI-k5kap` — LSP pooling / shared Serena gateway (P0/P1 epic, separate workstream)
+- `unitAI-z2vpq` — script/service SDK runner (separate epic)
+- `unitAI-pnqgd` — broader board cleanup hygiene
+
+### v4 skill prep (`config/skills/using-specialists-v4/`)
+
+After Tier 1 items 1-5 land, the v4 skill can:
+- **Drop** Part C entries for `xtrm-axwq` (lqsha), `sp merge` dirty-tree, reviewer test-only-PARTIAL workaround.
+- **Drop** the entire `sp finalize` operator-override prose (amzec fixed it this session — verified in production).
+- **Promote** A1 cherry-pick playbook to "only for non-origin/HEAD forks" (a6e60 covers the common case).
+- **Keep** A2 debugger-restitch (still useful for real cross-chain conflicts).
+- **Keep** A3 E2E smoke + A4 escalation matrix + A6 rebuttal pattern (all still valuable).
+- **Add** a `using-specialists-auto` sibling skill for operator-offline runs (this session's pattern: bead contract → executor → optional sanity/sec → reviewer → merge → smoke → close, with sleep cadences and pre-merge ritual). See `config/skills/using-specialists-auto/SKILL.md`.
+
+**Estimate**: Tier 1 items (1-5) = 1 focused session, ~5 chains. Tier 2-3 = follow-up half-session.
 
 ## Release Readiness Verdict
 
