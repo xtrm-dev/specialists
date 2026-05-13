@@ -13,7 +13,7 @@ vi.mock('node:child_process', () => ({
 import { spawnSync } from 'node:child_process';
 import * as observabilitySqlite from '../../../src/specialist/observability-sqlite.js';
 import * as epicReadiness from '../../../src/specialist/epic-readiness.js';
-import { evaluateMergeWorthiness, resolveChainEpicMembership, resolveMergeTargets, topologicallySortChains, run, checkEpicUnresolvedGuard, runMergePlan, previewBranchMergeDelta, rebaseBranchOntoMaster } from '../../../src/cli/merge.js';
+import { evaluateMergeWorthiness, resolveChainEpicMembership, resolveMergeTargets, topologicallySortChains, run, checkEpicUnresolvedGuard, runMergePlan, previewBranchMergeDelta, rebaseBranchOntoMaster, runTypecheckGate } from '../../../src/cli/merge.js';
 
 function asSpawnResult(partial: Partial<SpawnSyncReturns<string>>): SpawnSyncReturns<string> {
   return {
@@ -97,6 +97,15 @@ describe('merge CLI', () => {
       ['stash', 'push', '--include-untracked', '--message', 'sp epic merge epic-test auto-shelve'],
       expect.any(Object),
     );
+  });
+
+  it('skips typecheck gate when no tsconfig exists', () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    runTypecheckGate(testRoot);
+
+    expect(spawnSync).not.toHaveBeenCalledWith('bunx', ['tsc', '--noEmit'], expect.any(Object));
+    expect(logSpy).toHaveBeenCalledWith('TypeScript gate: skipped (no tsconfig)');
   });
 
   it('sorts chains in dependency order', () => {

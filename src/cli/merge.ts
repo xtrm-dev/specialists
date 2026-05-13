@@ -866,6 +866,14 @@ export function mergeBranch(branch: string, cwd = process.cwd()): void {
 }
 
 export function runTypecheckGate(cwd = process.cwd()): void {
+  const hasTypeScriptConfig =
+    existsSync(join(cwd, 'tsconfig.json')) ||
+    readdirSync(cwd).some(entry => entry.startsWith('tsconfig') && entry.endsWith('.json'));
+  if (!hasTypeScriptConfig) {
+    console.log('TypeScript gate: skipped (no tsconfig)');
+    return;
+  }
+
   const tsc = runCommand('bunx', ['tsc', '--noEmit'], cwd);
   if (tsc.status === 0) return;
 
