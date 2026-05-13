@@ -1012,6 +1012,7 @@ export function claimJobStartWithStore(
 
 export interface ObservabilitySqliteClient {
   upsertStatus(status: SupervisorStatus): void;
+  markSpecialistJobCancelled(jobId: string, reason: string): void;
   upsertEpicRun(epic: EpicRunRecord): void;
   upsertEpicChainMembership(chain: EpicChainRecord): void;
   upsertStatusWithEvent(status: SupervisorStatus, event: TimelineEvent): void;
@@ -1412,6 +1413,22 @@ class SqliteClient implements ObservabilitySqliteClient {
     withRetry(() => {
       this.writeStatusRow(status);
     }, 'upsertStatus');
+  }
+
+  markSpecialistJobCancelled(jobId: string, reason: string): void {
+    withRetry(() => {
+      const transaction = this.db.transaction(() => {
+        const nowMs = Date.now();
+        this.db.run(`
+          UPDATE specialist_jobs
+          SET status = 'cancelled',
+              status_json = JSON_PATCH(status_json, JSON_OBJECT('status', 'cancelled', 'cancelled_reason', ?)),
+              updated_at_ms = ?
+          WHERE job_id = ?
+        `, [reason, nowMs, jobId]);
+      });
+      transaction();
+    }, 'markSpecialistJobCancelled');
   }
 
   upsertEpicRun(epic: EpicRunRecord): void {

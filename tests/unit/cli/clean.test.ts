@@ -7,7 +7,6 @@ const removedJobIds: string[] = [];
 let mockStatuses: any[] = [];
 let mockUpsertedStatuses: any[] = [];
 let mockReferencedChainRootJobIds: string[] = [];
-
 vi.mock('../../../src/specialist/observability-sqlite.js', () => ({
   createObservabilitySqliteClient: () => ({
     listStatuses: () => mockStatuses,
@@ -150,6 +149,18 @@ describe('clean CLI — run()', () => {
     expect(existsSync(join(jobsDirectory, 'chain-root'))).toBe(false);
   });
 
+
+  it('--reap-orphans dry-run includes stale specialist jobs', async () => {
+    const processHealth = await import('../../../src/specialist/process-health.js');
+    vi.spyOn(processHealth, 'collectStaleSpecialistJobs').mockReturnValue([
+      { jobId: 'dead-job', pid: 1234, beadId: 'bead-1', specialist: 'tester', cwd: null, ageMs: 90_000, reason: 'dead-pid' },
+    ] as never);
+
+    const logs = await invokeClean(['--reap-orphans', '--dry-run']);
+
+    expect(logs.join('\n')).toContain('Would reap 1 stale specialist job(s):');
+    expect(logs.join('\n')).toContain('job=dead-job pid=1234 bead=bead-1 age=2m reason=dead-pid');
+  });
   it('--dry-run prints plan and does not delete directories', async () => {
     const now = Date.now();
     createCompletedJob(jobsDirectory, 'old-job', now - 8 * 86_400_000, now - 8 * 86_400_000);

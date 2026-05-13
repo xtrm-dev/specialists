@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { SupervisorStatus } from '../specialist/supervisor.js';
 import { resolveJobsDir } from '../specialist/job-root.js';
 import { createObservabilitySqliteClient } from '../specialist/observability-sqlite.js';
-import { collectOrphanProcesses } from '../specialist/process-health.js';
+import { collectOrphanProcesses, collectStaleSpecialistJobs, type StaleSpecialistJobCandidate } from '../specialist/process-health.js';
 import {
   collectWorktreeGcCandidates,
   pruneWorktrees,
@@ -335,7 +335,7 @@ function printWorktreeGcSummary(removed: readonly WorktreeGcCandidate[], skipped
 
 function printUsageAndExit(message: string): never {
   console.error(message);
-  console.error('Usage: specialists|sp clean [--all] [--keep <n>] [--aggressive-prune] [--processes [--stale-after <hours>]] [--reap-orphans] [--dry-run]');
+  console.error('Usage: specialists|sp clean [--all] [--keep <n>] [--aggressive-prune] [--processes [--stale-after <hours>]] [--reap-orphans] [--dry-run] (stale specialist jobs)');
   process.exit(1);
 }
 
@@ -399,10 +399,52 @@ function printOrphanPlan(orphans: readonly OrphanProcess[]): void {
   }
 }
 
+function printStaleJobPlan(jobs: readonly StaleSpecialistJobCandidate[]): void {
+  if (jobs.length === 0) {
+    console.log('No stale specialist jobs found.');
+    return;
+  }
+  console.log(`Would reap ${jobs.length} stale specialist job(s):`);
+  for (const job of jobs) {
+    const ageMinutes = Math.round(job.ageMs / 60000);
+    const bead = job.beadId ? ` bead=${job.beadId}` : '';
+    const cwd = job.cwd ? ` cwd=${job.cwd}` : '';
+    console.log(`  - job=${job.jobId} pid=${job.pid}${bead} age=${ageMinutes}m reason=${job.reason}${cwd}`);
+  }
+}
+
+async function reapStaleSpecialistJobs(jobs: readonly StaleSpecialistJobCandidate[], dryRun: boolean): Promise<number> {
+  const sqliteClient = createObservabilitySqliteClient();
+  if (!sqliteClient) return 0;
+  if (dryRun) return jobs.length;
+
+  let reapedCount = 0;
+  for (const job of jobs) {
+    if (job.reason === 'orphaned-keep-alive') {
+      try {
+        process.kill(job.pid, 'SIGTERM');
+      } catch { /* already dead */ }
+      await new Promise(resolve => setTimeout(resolve, 500));
+      try {
+        process.kill(job.pid, 0);
+        try { process.kill(job.pid, 'SIGKILL'); } catch { /* race */ }
+      } catch { /* already gone */ }
+    }
+    sqliteClient.markSpecialistJobCancelled(job.jobId, `cleanup: stale-reaper:${job.reason}`);
+    reapedCount += 1;
+  }
+  return reapedCount;
+}
+
 function printOrphanSummary(killedCount: number): void {
   if (killedCount === 0) return;
   const noun = killedCount === 1 ? 'process' : 'processes';
   console.log(`Reaped ${killedCount} orphan/stale leaked ${noun}.`);
+}
+
+function printStaleJobSummary(reapedCount: number): void {
+  const noun = reapedCount === 1 ? 'job' : 'jobs';
+  console.log(`Reaped ${reapedCount} stale specialist ${noun}.`);
 }
 
 function deleteJobDirectories(jobs: readonly CompletedJobRecord[]): number {
@@ -481,17 +523,22 @@ export async function run(): Promise<void> {
 
   if (options.reapOrphans) {
     const orphans = findOrphanProcesses();
+    const staleJobs = collectStaleSpecialistJobs();
     if (options.dryRun) {
       printOrphanPlan(orphans);
+      printStaleJobPlan(staleJobs);
       return;
     }
-    if (orphans.length === 0) {
+    if (orphans.length === 0 && staleJobs.length === 0) {
       console.log('No orphan/stale leaked processes found.');
       return;
     }
     printOrphanPlan(orphans);
+    printStaleJobPlan(staleJobs);
     const killedCount = await killOrphanProcesses(orphans, false);
+    const staleCount = await reapStaleSpecialistJobs(staleJobs, false);
     printOrphanSummary(killedCount);
+    printStaleJobSummary(staleCount);
     return;
   }
 
