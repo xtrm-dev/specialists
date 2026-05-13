@@ -31068,6 +31068,8 @@ var init_merge = __esm(() => {
   NOISE_PATH_PREFIXES = [".xtrm/reports/", ".wolf/", ".specialists/jobs/"];
   MERGE_DIRTY_IGNORE_PREFIXES = [
     ...NOISE_PATH_PREFIXES,
+    ".beads/",
+    ".xtrm/skills/active/",
     "dist/"
   ];
 });
