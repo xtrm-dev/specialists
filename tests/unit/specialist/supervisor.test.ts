@@ -109,6 +109,25 @@ describe('Supervisor', () => {
     expect(aggregateSpy).toHaveBeenCalledWith(id);
   });
 
+  it('readResult prefers SQLite and falls back to file output', async () => {
+    const sup = createSupervisor({ jobsDir, runner: makeMockRunner(), runOptions: makeRunOptions() });
+    const jobId = 'job-1';
+    const jobDir = join(jobsDir, jobId);
+    mkdirSync(jobDir, { recursive: true });
+    writeFileSync(join(jobDir, 'result.txt'), 'file result');
+
+    const sqlite = createObservabilitySqliteClient(tmpDir);
+    expect(sqlite).not.toBeNull();
+    sqlite!.upsertResult(jobId, 'sqlite result');
+    (sup as any).sqliteClient = sqlite;
+
+    expect(sup.readResult(jobId)).toBe('sqlite result');
+
+    const supWithoutSqlite = createSupervisor({ jobsDir, runner: makeMockRunner(), runOptions: makeRunOptions() });
+    (supWithoutSqlite as any).sqliteClient = null;
+    expect(supWithoutSqlite.readResult(jobId)).toBe('file result');
+  });
+
   it('status.json has all expected fields after successful run', async () => {
     const sup = createSupervisor({
       jobsDir,
