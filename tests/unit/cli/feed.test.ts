@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
+import { mock } from 'bun:test';
 import { appendFileSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { resolveObservabilityDbLocation } from '../../../src/specialist/observability-db.js';
 import { join } from 'node:path';
@@ -29,8 +30,7 @@ describe('feed CLI', () => {
     process.argv = originalArgv;
     delete process.env.SPECIALISTS_JOB_FILE_OUTPUT;
     if (existsSync(tempRoot)) rmSync(tempRoot, { recursive: true, force: true });
-    vi.doUnmock('../../../src/specialist/observability-sqlite.js');
-    vi.resetModules();
+    mock.restore();
     vi.restoreAllMocks();
   });
 
@@ -806,8 +806,7 @@ invalid json line here
       { t: Date.now(), type: 'run_complete', status: 'COMPLETE', elapsed_s: 2 },
     ]);
 
-    vi.resetModules();
-    vi.doMock('../../../src/specialist/observability-sqlite.js', () => ({
+    mock.module('../../../src/specialist/observability-sqlite.js', () => ({
       createObservabilitySqliteClient: () => ({
         readEvents: () => {
           throw new Error('sqlite unavailable');
