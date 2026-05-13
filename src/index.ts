@@ -14,6 +14,15 @@ process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
   process.exit(1);
 });
 
+if (typeof globalThis.Bun === 'undefined') {
+  console.error([
+    '[specialists] [ERROR] Bun runtime required (>=1.0.0).',
+    '[specialists] Install Bun: https://bun.sh/install',
+    '[specialists] Example: curl -fsSL https://bun.sh/install | bash',
+  ].join('\n'));
+  process.exit(1);
+}
+
 import { spawnSync } from 'node:child_process';
 
 import { SpecialistsServer } from "./server.js";

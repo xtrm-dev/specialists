@@ -29,6 +29,8 @@ export async function run(): Promise<void> {
   // ── 1. Installation ────────────────────────────────────────────────────────
   lines.push(section('1. Installation'));
   lines.push('');
+  lines.push(`  ${bold('Prerequisite: Bun')}   ${cmd('bun --version')}           # verify Bun >=1.0.0`);
+  lines.push(`  ${cmd('curl -fsSL https://bun.sh/install | bash')}   # install Bun if missing`);
   lines.push(`  ${cmd('npm install -g @jaggerxtrm/specialists')}    # install globally`);
   lines.push(`  ${cmd('specialists init')}                         # project setup:`);
   lines.push(`  ${dim('                                            #   creates dirs, wires MCP + hooks, injects context')}`);

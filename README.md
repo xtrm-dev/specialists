@@ -18,6 +18,13 @@ A specialist is a reusable execution spec: model, allowed tools, skills, system 
 
 ## Quick start
 
+**Prerequisite: Bun**
+
+```bash
+bun --version
+curl -fsSL https://bun.sh/install | bash
+```
+
 ```bash
 npm install -g @jaggerxtrm/specialists
 specialists init
