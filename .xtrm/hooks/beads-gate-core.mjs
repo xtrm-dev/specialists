@@ -18,6 +18,8 @@ import {
   getTotalWork,
   getInProgress,
   isIssueInProgress,
+  isReviewerClaimExempt,
+  clearReviewerClaimOwnerIfInactive,
   resolveWorktreeRoot,
 } from './beads-gate-utils.mjs';
 
@@ -71,10 +73,12 @@ export function resolveClaimAndWorkState(ctx) {
     const claimId = getSessionClaim(ctx.sessionId, ctx.cwd);
     if (claimId === null) return null; // bd kv unavailable
     if (claimId) {
+      const claimInProgress = isIssueInProgress(claimId, ctx.cwd);
+      if (!claimInProgress) clearReviewerClaimOwnerIfInactive(claimId, ctx.cwd);
       return {
         claimed: true,
         claimId,
-        claimInProgress: isIssueInProgress(claimId, ctx.cwd),
+        claimInProgress,
         totalWork,
         inProgress,
       };
@@ -84,10 +88,12 @@ export function resolveClaimAndWorkState(ctx) {
   // No session claim — check for bead-based claim (set by specialist runner)
   const beadClaimId = getBeadClaim(ctx.cwd);
   if (beadClaimId) {
+    const claimInProgress = isIssueInProgress(beadClaimId, ctx.cwd);
+    if (!claimInProgress) clearReviewerClaimOwnerIfInactive(beadClaimId, ctx.cwd);
     return {
       claimed: true,
       claimId: beadClaimId,
-      claimInProgress: isIssueInProgress(beadClaimId, ctx.cwd),
+      claimInProgress,
       totalWork,
       inProgress,
     };
@@ -196,6 +202,11 @@ export function decideCommitGate(ctx, state) {
 
   // Claimed issue is no longer in_progress → allow (closed or transferred to another agent)
   if (!state.claimInProgress) {
+    return { allow: true };
+  }
+
+  // Reviewer-owned claim is not operator claim; allow commit while reviewer owner KV exists.
+  if (state.claimId && isReviewerClaimExempt(state.claimId, ctx.cwd)) {
     return { allow: true };
   }
 

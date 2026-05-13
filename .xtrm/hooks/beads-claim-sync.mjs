@@ -4,7 +4,7 @@
 // bd close         → set closed-this-session kv for memory gate
 
 import { spawnSync } from 'node:child_process';
-import { readFileSync, existsSync, writeFileSync, unlinkSync, mkdirSync } from 'node:fs';
+import { readFileSync, existsSync, writeFileSync, unlinkSync, mkdirSync, readdirSync } from 'node:fs';
 import { join, dirname, isAbsolute } from 'node:path';
 import { resolveSessionId } from './beads-gate-utils.mjs';
 import { logEvent } from './xtrm-logger.mjs';
@@ -82,6 +82,33 @@ function main() {
         stdio: ['pipe', 'pipe', 'pipe'],
         timeout: 5000,
       });
+      const jobsDir = join(cwd, '.specialists', 'jobs');
+      if (existsSync(jobsDir)) {
+        try {
+          const entries = readdirSync(jobsDir, { withFileTypes: true });
+          const isReviewerSessionClaim = entries.some((entry) => {
+            if (!entry.isDirectory()) return false;
+            const statusPath = join(jobsDir, entry.name, 'status.json');
+            if (!existsSync(statusPath)) return false;
+            try {
+              const status = JSON.parse(readFileSync(statusPath, 'utf-8'));
+              return status?.bead_id === issueId
+                && status?.specialist === 'reviewer'
+                && status?.session_id === sessionId
+                && (status?.status === 'running' || status?.status === 'waiting');
+            } catch {
+              return false;
+            }
+          });
+          if (isReviewerSessionClaim) {
+            spawnSync('bd', ['kv', 'set', `claim-owner:${issueId}`, `reviewer:${sessionId}`], {
+              cwd,
+              stdio: ['pipe', 'pipe', 'pipe'],
+              timeout: 5000,
+            });
+          }
+        } catch {}
+      }
 
       if (result.status !== 0) {
         const err = (result.stderr || result.stdout || '').toString().trim();
@@ -129,6 +156,20 @@ function main() {
         stdio: ['pipe', 'pipe', 'pipe'],
         timeout: 5000,
       });
+      const owner = spawnSync('bd', ['kv', 'get', `claim-owner:${closedIssueId}`], {
+        cwd,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        encoding: 'utf8',
+        timeout: 5000,
+      });
+      const ownerValue = (owner.stdout || '').toString().trim();
+      if (owner.status === 0 && ownerValue.startsWith('reviewer:')) {
+        spawnSync('bd', ['kv', 'clear', `claim-owner:${closedIssueId}`], {
+          cwd,
+          stdio: ['pipe', 'pipe', 'pipe'],
+          timeout: 5000,
+        });
+      }
 
       logEvent({
         cwd,

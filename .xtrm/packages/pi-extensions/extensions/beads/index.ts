@@ -1,6 +1,8 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { isToolCallEventType, isBashToolResult } from "@mariozechner/pi-coding-agent";
 import { SubprocessRunner, EventAdapter } from "../../src/core";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 export default function (pi: ExtensionAPI) {
 	const getCwd = (ctx: any) => ctx.cwd || process.cwd();
@@ -94,6 +96,30 @@ export default function (pi: ExtensionAPI) {
 	const closeMemoryBlockReason = (issueId: string): string =>
 		`MEMORY_GATE_BLOCK issue=${issueId} run="bd remember '<insight>' && bd kv set 'memory-acked:${issueId}' 'saved:<key>'" or="bd kv set 'memory-acked:${issueId}' 'nothing novel:<reason>'" then="bd close ${issueId} --reason='<reason>'"`;
 
+	const isReviewerSessionClaim = (cwd: string, sessionId: string, issueId: string): boolean => {
+		const jobsDir = join(cwd, ".specialists", "jobs");
+		if (!existsSync(jobsDir)) return false;
+		try {
+			for (const entry of readdirSync(jobsDir, { withFileTypes: true })) {
+				if (!entry.isDirectory()) continue;
+				const statusPath = join(jobsDir, entry.name, "status.json");
+				if (!existsSync(statusPath)) continue;
+				const status = JSON.parse(readFileSync(statusPath, "utf8"));
+				if (
+					status?.bead_id === issueId &&
+					status?.specialist === "reviewer" &&
+					status?.session_id === sessionId &&
+					(status?.status === "running" || status?.status === "waiting")
+				) {
+					return true;
+				}
+			}
+		} catch {
+			return false;
+		}
+		return false;
+	};
+
 	pi.on("session_start", async (_event, ctx) => {
 		cachedSessionId = ctx?.sessionManager?.getSessionId?.() ?? ctx?.sessionId ?? ctx?.session_id ?? cachedSessionId;
 		return undefined;
@@ -164,6 +190,9 @@ export default function (pi: ExtensionAPI) {
 			if (issueMatch) {
 				const issueId = issueMatch[1];
 				await SubprocessRunner.run("bd", ["kv", "set", `claimed:${sessionId}`, issueId], { cwd });
+				if (isReviewerSessionClaim(cwd, sessionId, issueId)) {
+					await SubprocessRunner.run("bd", ["kv", "set", `claim-owner:${issueId}`, `reviewer:${sessionId}`], { cwd });
+				}
 				memoryGateFired = false;
 				const claimNotice = `\n\n✅ **Beads**: Session \`${sessionId}\` claimed issue \`${issueId}\`. File edits are now unblocked.`;
 				return { content: [...event.content, { type: "text", text: claimNotice }] };
