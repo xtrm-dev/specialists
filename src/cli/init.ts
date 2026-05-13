@@ -721,7 +721,9 @@ function ensureAgentsMd(cwd: string): void {
 
   if (existing.includes(AGENTS_MARKER)) {
     const markerIndex = existing.indexOf(AGENTS_MARKER);
-    const next = existing.slice(0, markerIndex) + AGENTS_BLOCK + existing.slice(markerIndex + AGENTS_MARKER.length);
+    const nextH2Match = /^## /m.exec(existing.slice(markerIndex + AGENTS_MARKER.length));
+    const nextH2Index = nextH2Match ? markerIndex + AGENTS_MARKER.length + nextH2Match.index : existing.length;
+    const next = existing.slice(0, markerIndex).trimEnd() + '\n\n' + AGENTS_BLOCK + (nextH2Index < existing.length ? '\n' + existing.slice(nextH2Index) : '');
     writeFileSync(agentsPath, next, 'utf-8');
     ok('migrated Specialists section in AGENTS.md');
     return;
