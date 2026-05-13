@@ -450,6 +450,35 @@ describe('feed CLI', () => {
     expect(combined).toContain('DONE');
   });
 
+  it('exits global follow with keep-alive waiting jobs', async () => {
+    const now = Date.now();
+    createJobDir('job-keepalive', 'test', [
+      { t: now - 1000, type: 'run_start' },
+    ], {
+      status: 'waiting',
+      keep_alive: true,
+      started_at_ms: now,
+    });
+
+    process.argv = ['node', 'specialists', 'feed', '-f'];
+
+    const stderrWrites: string[] = [];
+    const logs: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk: any) => {
+      stderrWrites.push(String(chunk));
+      return true;
+    });
+    vi.spyOn(console, 'log').mockImplementation((msg: string) => {
+      logs.push(msg ?? '');
+    });
+
+    const { run } = await import('../../../src/cli/feed.js');
+    await run();
+
+    expect(stripAnsi(stderrWrites.join(''))).toContain('All jobs complete.');
+    expect(logs.join('\n')).toContain('job-keepalive');
+  });
+
   it('refreshes job metadata in follow mode when status.json is updated mid-run', async () => {
     const now = Date.now();
     createJobDir('job-meta', 'explorer', [

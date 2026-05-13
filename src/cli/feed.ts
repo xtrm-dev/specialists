@@ -314,6 +314,17 @@ function isKeepAliveJobStatus(status: Record<string, unknown> | null): boolean {
   return status?.status === 'waiting';
 }
 
+function isTerminalStatus(status: Record<string, unknown> | null): boolean {
+  return status?.status === 'done' || status?.status === 'error' || status?.status === 'cancelled';
+}
+
+function isTerminalEquivalentForFollow(
+  status: Record<string, unknown> | null | undefined,
+  isGlobalFollow: boolean
+): boolean {
+  return isTerminalStatus(status ?? null) || (isGlobalFollow && isKeepAliveJobStatus(status ?? null));
+}
+
 function isJobCompleteForFollow(
   sqliteClient: ObservabilitySqliteClient,
   jobsDir: string,
@@ -687,8 +698,12 @@ async function followMerged(
   const fileEventCache = new Map<string, JobEventsCacheEntry>();
   const initialMatchingJobIds = listMatchingJobIds(sqliteClient, jobsDir, options);
   const hasInitialMatchingJobs = initialMatchingJobIds.length > 0;
+  const isGlobalFollow = options.jobId === undefined;
   const trackedJobs = new Set<string>(
-    initialMatchingJobIds.filter((jobId) => !isTerminalJobStatus(sqliteClient, jobsDir, jobId))
+    initialMatchingJobIds.filter((jobId) => {
+      const status = readStatusJson(sqliteClient, jobsDir, jobId);
+      return !isTerminalStatus(status) && !(isGlobalFollow && isKeepAliveJobStatus(status));
+    })
   );
   const completedJobs = new Set<string>();
 
@@ -750,14 +765,11 @@ async function followMerged(
       for (const jobId of currentJobIds) {
         const status = readStatusJson(sqliteClient, jobsDir, jobId);
         statusByJobId.set(jobId, status);
-        const isTerminal = status?.status === 'done' || status?.status === 'error' || status?.status === 'cancelled';
-        if (!isKeepAliveJobStatus(status) && isTerminal) {
+        if (isTerminalEquivalentForFollow(status, isGlobalFollow)) {
           completedJobs.add(jobId);
           continue;
         }
-        if (!isTerminal) {
-          trackedJobs.add(jobId);
-        }
+        trackedJobs.add(jobId);
       }
 
       const newEvents: MergedEvent[] = [];
@@ -780,8 +792,7 @@ async function followMerged(
           if (isKeepAliveJobStatus(status ?? null)) {
             continue;
           }
-          const isTerminal = status?.status === 'done' || status?.status === 'error' || status?.status === 'cancelled';
-          if (events.some(isRunCompleteEvent) || isTerminal) {
+          if (events.some(isRunCompleteEvent) || isTerminalStatus(status ?? null) || (isGlobalFollow && isKeepAliveJobStatus(status ?? null))) {
             completedJobs.add(jobId);
           }
         }
@@ -834,7 +845,7 @@ async function followMerged(
       if (!options.forever && trackedJobs.size > 0) {
         const allTrackedTerminal = [...trackedJobs].every((jobId) => {
           const status = statusByJobId.get(jobId) ?? readStatusJson(sqliteClient, jobsDir, jobId);
-          return status?.status === 'done' || status?.status === 'error' || status?.status === 'cancelled';
+          return isTerminalEquivalentForFollow(status, isGlobalFollow);
         });
         if (completedJobs.size === trackedJobs.size || allTrackedTerminal) {
           clearInterval(interval);
