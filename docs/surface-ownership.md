@@ -45,14 +45,15 @@ Meaning:
 
 ### Mandatory rules
 
-Three-tier index resolution. Loader reads and union-merges all that exist (dedup by set id):
+Four-tier index resolution. Loader reads and union-merges all that exist (dedup by set id):
 
-1. `config/mandatory-rules/index.json` — upstream source, ships with package
-2. `.specialists/default/mandatory-rules/index.json` — managed mirror, refreshed by `sp init --sync-defaults`
-3. `.specialists/mandatory-rules/index.json` — repo overlay, wins on set-id conflict
+1. `.specialists/user/mandatory-rules/index.json` — repo-owned user overlay, highest priority
+2. `config/mandatory-rules/index.json` — upstream source, ships with package
+3. `.specialists/default/mandatory-rules/index.json` — managed mirror, refreshed by `sp init --sync-defaults`
+4. `.specialists/mandatory-rules/index.json` — repo overlay, wins on set-id conflict
 
-Set-file lookup (`<set-id>.md`) probes the same three paths in reverse precedence:
-`.specialists/mandatory-rules/` first, then `.specialists/default/mandatory-rules/`, then `config/mandatory-rules/`.
+Set-file lookup (`<set-id>.md`) probes the same four paths in reverse precedence:
+`.specialists/user/mandatory-rules/` first, then `.specialists/mandatory-rules/`, then `.specialists/default/mandatory-rules/`, then `config/mandatory-rules/`.
 
 Injection merge order (within the resolved index):
 

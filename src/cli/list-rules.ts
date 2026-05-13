@@ -3,8 +3,8 @@
 // library and which specialists pull each rule set in.
 //
 // Read-only. Walks the same tier resolution the runner uses
-// (config/ → .specialists/default/ → .specialists/) so the output
-// reflects what specialists actually receive at spawn.
+// (.specialists/user/ → .specialists/mandatory-rules/ → .specialists/default/ → config/)
+// so the output reflects what specialists actually receive at spawn.
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve, join, basename } from 'node:path';
@@ -14,7 +14,7 @@ import type { SpecialistMandatoryRulesConfig } from '../specialist/mandatory-rul
 interface RuleSetEntry {
   id: string;
   source_path: string;
-  source_tier: 'config' | 'default' | 'overlay';
+  source_tier: 'user' | 'default' | 'overlay' | 'config';
 }
 
 type RuleScope = 'required' | 'default' | 'role-specific' | 'inline';
@@ -40,6 +40,7 @@ interface ListRulesOptions {
 }
 
 const RULE_TIERS: Array<{ rel: string; tier: RuleSetEntry['source_tier'] }> = [
+  { rel: '.specialists/user/mandatory-rules', tier: 'user' },
   { rel: '.specialists/mandatory-rules', tier: 'overlay' },
   { rel: '.specialists/default/mandatory-rules', tier: 'default' },
   { rel: 'config/mandatory-rules', tier: 'config' },

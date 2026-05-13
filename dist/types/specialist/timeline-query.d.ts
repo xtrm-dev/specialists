@@ -46,7 +46,7 @@ export interface JobEventsBatch {
  * Read events from all jobs in a jobs directory.
  * Returns batches unsorted — use mergeTimelineEvents for chronological order.
  */
-export declare function readAllJobEvents(jobsDir: string): JobEventsBatch[];
+export declare function readAllJobEvents(jobsDir: string, jobId?: string): JobEventsBatch[];
 /**
  * Merge timeline events from multiple jobs into a single chronological stream.
  * Events are sorted by timestamp ascending (oldest first).

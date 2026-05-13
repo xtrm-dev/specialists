@@ -97,6 +97,7 @@ export interface SupervisorOptions {
     stallDetection?: StallDetectionConfig;
 }
 type ContextHealth = 'OK' | 'MONITOR' | 'WARN' | 'CRITICAL';
+export declare const AUTO_COMMIT_NOISE_PREFIXES: readonly [".xtrm/", ".wolf/", ".specialists/jobs/", ".beads/"];
 /** Detects whether the GitNexus index in `cwd` has embeddings, so a re-analyze
  *  preserves them via `--embeddings`. Reads `.gitnexus/meta.json` and inspects
  *  `stats.embeddings`. Falls back to `false` (no `--embeddings`) on any error. */

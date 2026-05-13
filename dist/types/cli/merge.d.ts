@@ -24,6 +24,7 @@ export interface MergeExecutionOptions {
     rebuild: boolean;
     mode?: PublicationMode;
     publicationLabel?: string;
+    targetBranch?: string;
 }
 export type PublicationMode = 'direct' | 'pr';
 export interface PublicationExecutionOptions extends MergeExecutionOptions {
@@ -67,9 +68,9 @@ interface MergeWorthinessDecision {
     reason: 'ok' | 'already-published' | 'empty-delta' | 'noise-only-delta';
 }
 export declare function assertMainRepoCleanForMerge(cwd: string): void;
-export declare function previewBranchMergeDelta(branch: string, cwd?: string): MergePreviewDelta;
-export declare function evaluateMergeWorthiness(preview: MergePreviewDelta, branch: string, cwd?: string): MergeWorthinessDecision;
-export declare function rebaseBranchOntoMaster(branch: string, worktreePath: string): void;
+export declare function previewBranchMergeDelta(branch: string, cwd?: string, targetBranch?: string): MergePreviewDelta;
+export declare function evaluateMergeWorthiness(preview: MergePreviewDelta, branch: string, cwd?: string, targetBranch?: string): MergeWorthinessDecision;
+export declare function rebaseBranchOntoMaster(branch: string, worktreePath: string, targetBranch?: string): void;
 export declare function mergeBranch(branch: string, cwd?: string): void;
 export declare function runTypecheckGate(cwd?: string): void;
 export declare function runRebuild(cwd?: string): void;
