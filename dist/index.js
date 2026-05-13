@@ -20639,6 +20639,16 @@ class SqliteClient {
       }
     }, "readLatestToolEvent");
   }
+  getLastActivityTimestampMs(jobId) {
+    return withRetry(() => {
+      const row = this.db.query(`
+        SELECT MAX(t) AS last_activity_ms
+        FROM specialist_events
+        WHERE job_id = ? AND type IN ('tool', 'think')
+      `).get(jobId);
+      return typeof row?.last_activity_ms === "number" ? row.last_activity_ms : null;
+    }, "getLastActivityTimestampMs");
+  }
   aggregateJobMetrics(jobId) {
     return withRetry(() => {
       const jobRow = this.db.query(`
@@ -36694,11 +36704,11 @@ function collectStaleSpecialistJobs(options = {}) {
     const pid = status.pid;
     if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0)
       continue;
+    const ageMs = Math.max(0, nowMs - (status.updated_at_ms ?? nowMs));
     const snapshot = readProcessSnapshot(pid, procRoot, uptimeSeconds);
     if (!snapshot) {
-      const ageMs2 = Math.max(0, nowMs - (status.updated_at_ms ?? nowMs));
-      if (readProcessLiveness(pid, procRoot) === "dead" && ageMs2 >= minKeepAliveAgeMs) {
-        candidates.push({ jobId: status.id, pid, beadId: status.bead_id ?? null, specialist: status.specialist, cwd: null, ageMs: ageMs2, reason: "dead-pid" });
+      if (readProcessLiveness(pid, procRoot) === "dead" && ageMs >= minKeepAliveAgeMs) {
+        candidates.push({ jobId: status.id, pid, beadId: status.bead_id ?? null, specialist: status.specialist, cwd: null, ageMs, reason: "dead-pid" });
         continue;
       }
       const basePath = join24(procRoot, String(pid));
@@ -36706,14 +36716,22 @@ function collectStaleSpecialistJobs(options = {}) {
       const statRaw = readProcStringOrNull(join24(basePath, "stat"));
       const parsedStat = statRaw ? parseStat(statRaw) : null;
       if (status.status === "waiting" && parsedStat?.ppid === 1 && cmdlineRaw && isSpecialistRunCommand(cmdlineRaw.replace(/\0/g, " "))) {
-        candidates.push({ jobId: status.id, pid, beadId: status.bead_id ?? null, specialist: status.specialist, cwd: readProcCwdOrNull(pid, procRoot), ageMs: ageMs2, reason: "orphaned-keep-alive" });
+        candidates.push({ jobId: status.id, pid, beadId: status.bead_id ?? null, specialist: status.specialist, cwd: readProcCwdOrNull(pid, procRoot), ageMs, reason: "orphaned-keep-alive" });
       }
       continue;
     }
-    const ageMs = Math.max(0, nowMs - (status.updated_at_ms ?? nowMs));
     if (status.status === "waiting" && snapshot.ppid === 1 && isSpecialistRunCommand(snapshot.cmdline) && ageMs >= minKeepAliveAgeMs) {
       candidates.push({ jobId: status.id, pid, beadId: status.bead_id ?? null, specialist: status.specialist, cwd: snapshot.cwd, ageMs, reason: "orphaned-keep-alive" });
+      continue;
     }
+    if (status.status !== "running" && status.status !== "waiting")
+      continue;
+    if (ageMs < minKeepAliveAgeMs)
+      continue;
+    const lastActivityMs = observabilityClient?.getLastActivityTimestampMs?.(status.id) ?? null;
+    if (lastActivityMs !== null && nowMs - lastActivityMs < minKeepAliveAgeMs)
+      continue;
+    candidates.push({ jobId: status.id, pid, beadId: status.bead_id ?? null, specialist: status.specialist, cwd: snapshot.cwd, ageMs, reason: "dead-toolchain" });
   }
   return candidates.sort((left, right) => left.pid - right.pid);
 }
