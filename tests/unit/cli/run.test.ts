@@ -29,7 +29,7 @@ import { BeadsClient } from '../../../src/specialist/beads.js';
 import { SpecialistLoader } from '../../../src/specialist/loader.js';
 import { SpecialistRunner } from '../../../src/specialist/runner.js';
 import { Supervisor } from '../../../src/specialist/supervisor.js';
-import { run } from '../../../src/cli/run.js';
+import { buildInjectedReviewerDiffVariables, run } from '../../../src/cli/run.js';
 
 describe('run CLI', () => {
   const originalArgv = process.argv;
@@ -63,6 +63,34 @@ describe('run CLI', () => {
     process.argv = originalArgv;
     Object.defineProperty(process.stdin, 'isTTY', { value: originalIsTTY, configurable: true });
     vi.restoreAllMocks();
+  });
+
+  it('falls through from noise-only unstaged files to branch-vs-base reviewer diff', () => {
+    const remoteDir = childProcess.execSync('mktemp -d', { encoding: 'utf8' }).trim();
+    const repoDir = childProcess.execSync('mktemp -d', { encoding: 'utf8' }).trim();
+    childProcess.execSync('git init --bare', { cwd: remoteDir });
+    childProcess.execSync('git init -b main', { cwd: repoDir });
+    childProcess.execSync('git config user.email test@example.com', { cwd: repoDir });
+    childProcess.execSync('git config user.name Test User', { cwd: repoDir });
+    childProcess.execSync('mkdir -p src/cli .xtrm', { cwd: repoDir, shell: '/bin/bash' as never });
+    fs.writeFileSync(`${repoDir}/src/cli/run.ts`, 'base\n');
+    childProcess.execSync('git add src/cli/run.ts && git commit -m base', { cwd: repoDir, shell: '/bin/bash' as never });
+    childProcess.execSync(`git remote add origin ${remoteDir}`, { cwd: repoDir, shell: '/bin/bash' as never });
+    childProcess.execSync('git push -u origin main', { cwd: repoDir, shell: '/bin/bash' as never });
+    childProcess.execSync('git fetch origin main', { cwd: repoDir, shell: '/bin/bash' as never });
+    childProcess.execSync('git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main', { cwd: repoDir });
+    childProcess.execSync('git checkout -b feature', { cwd: repoDir, shell: '/bin/bash' as never });
+    fs.writeFileSync(`${repoDir}/src/cli/run.ts`, 'base\nchange\n');
+    childProcess.execSync('git add src/cli/run.ts && git commit -m change', { cwd: repoDir, shell: '/bin/bash' as never });
+    fs.writeFileSync(`${repoDir}/.xtrm/SKILL.md`, 'noise\n');
+
+    const variables = buildInjectedReviewerDiffVariables(repoDir);
+
+    expect(variables).toEqual(expect.objectContaining({
+      reviewer_diff_source: expect.stringContaining('branch-vs-base diff'),
+      reviewer_diff_files: 'src/cli/run.ts',
+    }));
+    expect(variables.reviewer_diff_files).not.toContain('.xtrm/SKILL.md');
   });
 
   it('uses bead content as the prompt when --bead is provided', async () => {
