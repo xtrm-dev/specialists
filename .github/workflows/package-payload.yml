@@ -1,0 +1,88 @@
+name: package-payload
+
+on:
+  pull_request:
+    paths:
+      - package.json
+      - src/**
+      - config/**
+      - dist/**
+      - scripts/assert-package-payload.sh
+      - .github/workflows/package-payload.yml
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      package_payload: ${{ steps.filter.outputs.package_payload }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            package_payload:
+              - package.json
+              - src/**
+              - config/**
+              - dist/**
+              - scripts/assert-package-payload.sh
+              - .github/workflows/package-payload.yml
+
+  payload-contract:
+    needs: changes
+    if: needs.changes.outputs.package_payload == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Pack payload contract
+        run: |
+          npm pack --dry-run --json > /tmp/package-payload.json
+          scripts/assert-package-payload.sh /tmp/package-payload.json \
+            dist/index.js \
+            dist/lib.js \
+            dist/types/lib.d.ts \
+            bin/install.js \
+            package.json \
+            config/specialists/executor.specialist.json \
+            config/specialists/reviewer.specialist.json \
+            config/mandatory-rules/executor-delivery.md \
+            config/mandatory-rules/index.json \
+            config/skills/using-specialists-v3/SKILL.md \
+            config/catalog/index.json \
+            config/catalog/native.json \
+            config/catalog/gitnexus.json \
+            config/catalog/serena.json
+
+  packed-smoke:
+    needs: changes
+    if: needs.changes.outputs.package_payload == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Build, pack, and smoke installed tarball
+        run: |
+          set -euo pipefail
+          bun run build
+          tarball=$(npm pack --json | jq -r '.[0].filename')
+          cp "$tarball" /tmp/sp-test.tgz
+          prefix=/tmp/sp-smoke-prefix
+          workdir=$(mktemp -d)
+          npm install -g --prefix="$prefix" /tmp/sp-test.tgz
+          export PATH="$prefix/bin:$PATH"
+          cd "$workdir"
+          sp --version
+          sp doctor --check-drift
+          sp prune-stale-defaults --dry-run
+          sp clean --dry-run
+          sp list --compact
