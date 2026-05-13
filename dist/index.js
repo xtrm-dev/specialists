@@ -27237,22 +27237,51 @@ function ensureObservabilityDb(cwd) {
   }
   ensureGitignoreHasObservabilityDbEntries(location.gitRoot);
 }
+function extractSpecialistsBlockSpan(existing) {
+  const start = existing.indexOf("<!-- specialists:start -->");
+  if (start === -1)
+    return null;
+  const endMarker = "<!-- specialists:end -->";
+  const endMarkerIndex = existing.indexOf(endMarker, start);
+  if (endMarkerIndex === -1)
+    return null;
+  return { start, end: endMarkerIndex + endMarker.length };
+}
 function ensureAgentsMd(cwd) {
   const agentsPath = join11(cwd, "AGENTS.md");
-  if (existsSync12(agentsPath)) {
-    const existing = readFileSync10(agentsPath, "utf-8");
-    if (existing.includes(AGENTS_MARKER)) {
-      skip("AGENTS.md already has Specialists section");
-    } else {
-      writeFileSync4(agentsPath, existing.trimEnd() + `
-
-` + AGENTS_BLOCK, "utf-8");
-      ok("appended Specialists section to AGENTS.md");
-    }
-  } else {
+  if (!existsSync12(agentsPath)) {
     writeFileSync4(agentsPath, AGENTS_BLOCK, "utf-8");
     ok("created AGENTS.md with Specialists section");
+    return;
   }
+  const existing = readFileSync10(agentsPath, "utf-8");
+  const span = extractSpecialistsBlockSpan(existing);
+  if (span) {
+    const next = existing.slice(0, span.start) + AGENTS_BLOCK + existing.slice(span.end);
+    if (next === existing) {
+      skip("AGENTS.md already has Specialists section");
+      return;
+    }
+    writeFileSync4(agentsPath, next, "utf-8");
+    ok("updated Specialists section in AGENTS.md");
+    return;
+  }
+  if (existing.includes(AGENTS_MARKER)) {
+    const markerIndex = existing.indexOf(AGENTS_MARKER);
+    const nextH2Match = /^## /m.exec(existing.slice(markerIndex + AGENTS_MARKER.length));
+    const nextH2Index = nextH2Match ? markerIndex + AGENTS_MARKER.length + nextH2Match.index : existing.length;
+    const next = existing.slice(0, markerIndex).trimEnd() + `
+
+` + AGENTS_BLOCK + (nextH2Index < existing.length ? `
+` + existing.slice(nextH2Index) : "");
+    writeFileSync4(agentsPath, next, "utf-8");
+    ok("migrated Specialists section in AGENTS.md");
+    return;
+  }
+  writeFileSync4(agentsPath, existing.trimEnd() + `
+
+` + AGENTS_BLOCK, "utf-8");
+  ok("appended Specialists section to AGENTS.md");
 }
 function readJsonObject(path) {
   if (!existsSync12(path))
@@ -27449,6 +27478,7 @@ var init_init = __esm(() => {
   init_memory_retrieval();
   init_canonical_asset_resolver();
   AGENTS_BLOCK = `
+<!-- specialists:start -->
 ## Specialists
 
 Use CLI commands via Bash to run and monitor specialists:
@@ -27474,6 +27504,7 @@ Canonical tracked flow:
 5. Close/update bead with outcome
 
 Add custom specialists to \`.specialists/user/\` to extend defaults.
+<!-- specialists:end -->
 `.trimStart();
   GITIGNORE_ENTRIES = [
     ".specialists/jobs/",
