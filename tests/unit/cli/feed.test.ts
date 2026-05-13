@@ -107,6 +107,21 @@ describe('feed CLI', () => {
     expect(logs.join('\n')).toContain('No jobs directory');
   });
 
+  it('prints DB-backed job not found message when jobId missing from observability.db', async () => {
+    await seedSqliteJob('existing-job', [{ t: Date.now(), type: 'text' }], { specialist: 'test', status: 'done' });
+    process.argv = ['node', 'specialists', 'feed', 'missing-job'];
+
+    const logs: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((msg: string) => {
+      logs.push(msg ?? '');
+    });
+
+    const { run } = await import('../../../src/cli/feed.js');
+    await run();
+
+    expect(logs.join('\n')).toContain('job missing-job not found in .specialists/db/observability.db');
+  });
+
   it('shows appropriate message when jobs directory is empty', async () => {
     process.argv = ['node', 'specialists', 'feed'];
 

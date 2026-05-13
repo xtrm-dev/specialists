@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-let mockSqliteClient: { listStatuses: () => any[]; readEvents: (jobId: string) => any[] } | null = null;
+let mockSqliteClient: { listStatuses: () => any[]; readEvents: (jobId: string) => any[]; getStatus?: (jobId: string) => any } | null = null;
 vi.mock('../../../src/specialist/observability-sqlite.js', () => ({
   createObservabilitySqliteClient: () => mockSqliteClient,
 }));
@@ -28,7 +28,6 @@ describe('timeline-query', () => {
     if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
     mockSqliteClient = null;
     delete process.env.SPECIALISTS_JOB_FILE_OUTPUT;
-    vi.resetModules();
   });
 
   function createJobDir(jobId: string, specialist: string, events: TimelineEvent[], status?: Record<string, unknown>) {
@@ -84,6 +83,25 @@ describe('timeline-query', () => {
     const batches = readAllJobEvents(jobsDir);
     expect(batches).toHaveLength(2);
     expect(batches[0].specialist).toBe('code-review');
+  });
+
+  it('reads job-scoped DB events without list-status fanout', async () => {
+    mockSqliteClient = {
+      listStatuses: () => [{ id: 'other-job', specialist: 'noise', status: 'done' }],
+      readEvents: (jobId: string) => jobId === 'job1'
+        ? Array.from({ length: 3 }, (_, index) => ({ t: index + 1, type: 'thinking', seq: index + 1 }))
+        : [],
+      getStatus: (jobId: string) => jobId === 'job1'
+        ? { id: 'job1', specialist: 'code-review', bead_id: 'b1' }
+        : undefined,
+    };
+
+    const { queryTimeline } = await loadModule();
+    const events = queryTimeline(jobsDir, { jobId: 'job1', limit: 100 });
+
+    expect(events).toHaveLength(3);
+    expect(events.map((entry) => entry.event.seq)).toEqual([1, 2, 3]);
+    expect(events.every((entry) => entry.jobId === 'job1')).toBe(true);
   });
 
   it('merges, filters, and tool helpers still work', async () => {
