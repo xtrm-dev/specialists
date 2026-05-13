@@ -50,6 +50,10 @@ vitest.config.ts
 .prettierrc*
 .editorconfig
 
+# Dev-only config payload
+config/benchmarks/
+config/skills/**/evals/
+
 # Documentation (manteniamo solo README.md principale)
 docs/
 CLAUDE.MD

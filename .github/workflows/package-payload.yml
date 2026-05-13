@@ -57,7 +57,8 @@ jobs:
             config/catalog/index.json \
             config/catalog/native.json \
             config/catalog/gitnexus.json \
-            config/catalog/serena.json
+            config/catalog/serena.json \
+            LICENSE
 
   packed-smoke:
     needs: changes

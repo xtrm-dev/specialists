@@ -3,6 +3,7 @@
   "version": "3.14.1",
   "description": "OmniSpecialist — 7-tool MCP orchestration layer powered by the Specialist System. Discover and execute .specialist.yaml files across project/user/system scopes via pi.",
   "main": "dist/index.js",
+  "types": "dist/types/lib.d.ts",
   "type": "module",
   "exports": {
     ".": {
@@ -18,7 +19,17 @@
     "dist/lib.js",
     "dist/types/",
     "bin/install.js",
-    "config/"
+    "config/specialists/",
+    "config/mandatory-rules/",
+    "config/skills/",
+    "config/catalog/",
+    "config/nodes/",
+    "config/hooks/",
+    "config/presets.json",
+    "LICENSE",
+    "!config/benchmarks/",
+    "!config/skills/**/evals/",
+    "!config/skills/**/evals/**"
   ],
   "bin": {
     "specialists": "dist/index.js",
