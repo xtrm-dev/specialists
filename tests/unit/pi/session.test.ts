@@ -339,6 +339,33 @@ describe('PiAgentSession', () => {
     expect(spawnOptions.cwd).toBe(resolve('.'));
   });
 
+  it('starts package runner RPC sessions with Pi isolation flags', async () => {
+    const session = await PiAgentSession.create({ model: 'gemini' });
+    await session.start();
+
+    const args: string[] = mockSpawn.mock.calls[0][1];
+    expect(args).toEqual(expect.arrayContaining([
+      '--offline',
+      '--no-context-files',
+      '--no-prompt-templates',
+      '--no-themes',
+    ]));
+    expect(args.indexOf('--offline')).toBeGreaterThan(args.indexOf('--no-session'));
+    expect(args.indexOf('--no-context-files')).toBeGreaterThan(args.indexOf('--offline'));
+    expect(args.indexOf('--no-prompt-templates')).toBeGreaterThan(args.indexOf('--no-context-files'));
+    expect(args.indexOf('--no-themes')).toBeGreaterThan(args.indexOf('--no-prompt-templates'));
+  });
+
+  it('keeps package runner system prompt appended instead of replacing Pi system prompt', async () => {
+    const session = await PiAgentSession.create({ model: 'gemini', systemPrompt: 'specialist instructions' });
+    await session.start();
+
+    const args: string[] = mockSpawn.mock.calls[0][1];
+    expect(args).toContain('--append-system-prompt');
+    expect(args[args.indexOf('--append-system-prompt') + 1]).toBe('specialist instructions');
+    expect(args).not.toContain('--system-prompt');
+  });
+
   it('prompt() does NOT close stdin', async () => {
     const session = await PiAgentSession.create({ model: 'gemini' });
     await session.start();

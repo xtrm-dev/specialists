@@ -159,3 +159,5 @@
 - 2026-05-12T22:50:00Z: Documented final `sp ps`/`sp clean --ps` semantics in CLI help and `config/skills/using-specialists-v3/SKILL.md`; future CLI behavior changes should update both help and orchestration skill docs together.
 
 - 2026-05-12T23:01:00Z: `sp ps` process-health specialist count is intentionally narrow: direct `specialists/sp run` processes and pi-coding-agent only. Serena/GitNexus MCP, tsserver, shell wrappers, and other tooling must not inflate `specialists=N`; `sp ps --ps` errors and points to `sp clean --ps`.
+
+- 2026-05-13T11:30:58Z: unitAI-ldsmj aligned package-class PiAgentSession RPC launches with script-runner isolation by adding --offline, --no-context-files, --no-prompt-templates, and --no-themes while keeping --append-system-prompt semantics.

@@ -591,6 +591,10 @@ export class PiAgentSession {
       '--no-extensions',   // disable ALL auto-discovered xtrm Pi extensions (beads, session-flow, etc.)
       ...providerArgs,
       '--no-session',
+      '--offline',
+      '--no-context-files',
+      '--no-prompt-templates',
+      '--no-themes',
       ...extraArgs,
     ];
 
