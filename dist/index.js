@@ -38232,9 +38232,21 @@ function readJobEvents(jobDir) {
   events.sort(compareTimelineEvents);
   return events;
 }
-function readAllJobEvents(jobsDir) {
+function readAllJobEvents(jobsDir, jobId) {
   const sqliteClient = createObservabilitySqliteClient();
   try {
+    if (jobId !== undefined && sqliteClient) {
+      const events = sqliteClient.readEvents(jobId);
+      if (events.length === 0)
+        return [];
+      const status = typeof sqliteClient.getStatus === "function" ? sqliteClient.getStatus(jobId) : undefined;
+      return [{
+        jobId,
+        specialist: status?.specialist ?? "unknown",
+        beadId: status?.bead_id,
+        events
+      }];
+    }
     const statuses = typeof sqliteClient?.listStatuses === "function" ? sqliteClient.listStatuses() : [];
     if (statuses.length > 0 && sqliteClient) {
       return statuses.flatMap((status) => {
@@ -38265,7 +38277,7 @@ function readAllJobEvents(jobsDir) {
     } catch {
       continue;
     }
-    const jobId = entry;
+    const jobId2 = entry;
     const statusPath = join27(jobDir, "status.json");
     let specialist = "unknown";
     let beadId;
@@ -38278,7 +38290,7 @@ function readAllJobEvents(jobsDir) {
     }
     const events = readJobEvents(jobDir);
     if (events.length > 0) {
-      batches.push({ jobId, specialist, beadId, events });
+      batches.push({ jobId: jobId2, specialist, beadId, events });
     }
   }
   return batches;
@@ -38323,14 +38335,9 @@ function filterTimelineEvents(merged, filter) {
   return result;
 }
 function queryTimeline(jobsDir, filter = {}) {
-  let batches = readAllJobEvents(jobsDir);
-  if (filter.jobId !== undefined) {
-    batches = batches.filter((b) => b.jobId === filter.jobId);
-  }
-  if (filter.specialist !== undefined) {
-    batches = batches.filter((b) => b.specialist === filter.specialist);
-  }
-  const merged = mergeTimelineEvents(batches);
+  const batches = readAllJobEvents(jobsDir, filter.jobId);
+  const filteredBatches = filter.specialist !== undefined ? batches.filter((b) => b.specialist === filter.specialist) : batches;
+  const merged = mergeTimelineEvents(filteredBatches);
   return filterTimelineEvents(merged, filter);
 }
 var init_timeline_query = __esm(() => {
@@ -38677,8 +38684,13 @@ function parseArgs10(argv) {
 }
 function printSnapshot(sqliteClient, merged, options, jobsDir) {
   if (merged.length === 0) {
-    if (!options.json)
-      console.log(dim8("No events found."));
+    if (!options.json) {
+      if (options.jobId && sqliteClient) {
+        console.log(dim8(`job ${options.jobId} not found in .specialists/db/observability.db`));
+      } else {
+        console.log(dim8("No events found."));
+      }
+    }
     return;
   }
   const colorMap = new JobColorMap;
@@ -39005,7 +39017,11 @@ async function run18() {
   try {
     const jobsDir = join28(process.cwd(), ".specialists", "jobs");
     if (!existsSync26(jobsDir)) {
-      console.log(dim8("No jobs directory found."));
+      if (options.jobId && sqliteClient) {
+        console.log(dim8(`job ${options.jobId} not found in .specialists/db/observability.db`));
+      } else {
+        console.log(dim8("No jobs directory found."));
+      }
       return;
     }
     const resolvedOptions = {
