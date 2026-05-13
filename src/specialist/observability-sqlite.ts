@@ -1055,6 +1055,7 @@ export interface ObservabilitySqliteClient {
   readEvents(jobId: string): TimelineEvent[];
   readEventsAfterSeq(jobId: string, afterSeq: number): TimelineEvent[];
   readLatestToolEvent(jobId: string): TimelineEventTool | null;
+  getLastActivityTimestampMs(jobId: string): number | null;
   aggregateJobMetrics(jobId: string): JobMetricsRecord | null;
   listJobMetrics(filters?: { spec?: string; model?: string; sinceMs?: number }): JobMetricsRecord[];
   listElapsedMsBySpecialist(sinceMs: number, limitPerSpecialist?: number): Record<string, number[]>;
@@ -2007,6 +2008,17 @@ class SqliteClient implements ObservabilitySqliteClient {
         return null;
       }
     }, 'readLatestToolEvent');
+  }
+
+  getLastActivityTimestampMs(jobId: string): number | null {
+    return withRetry(() => {
+      const row = this.db.query(`
+        SELECT MAX(t) AS last_activity_ms
+        FROM specialist_events
+        WHERE job_id = ? AND type IN ('tool', 'think')
+      `).get(jobId) as { last_activity_ms?: number } | undefined;
+      return typeof row?.last_activity_ms === 'number' ? row.last_activity_ms : null;
+    }, 'getLastActivityTimestampMs');
   }
 
   aggregateJobMetrics(jobId: string): JobMetricsRecord | null {

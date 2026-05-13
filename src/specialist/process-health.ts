@@ -38,7 +38,7 @@ export interface StaleSpecialistJobCandidate {
   specialist: string;
   cwd: string | null;
   ageMs: number;
-  reason: 'dead-pid' | 'orphaned-keep-alive';
+  reason: 'dead-pid' | 'orphaned-keep-alive' | 'dead-toolchain';
 }
 
 export type ProcessHealthStatus = 'OK' | 'WARN' | 'REFUSE';
@@ -84,6 +84,7 @@ interface ProcessSnapshot {
 
 interface StaleSpecialistJobSource {
   listStatuses(): SupervisorStatus[];
+  getLastActivityTimestampMs?(jobId: string): number | null;
 }
 
 const DEFAULT_WARN_PCT = 70;
@@ -400,9 +401,9 @@ export function collectStaleSpecialistJobs(options: {
     const pid = (status as SupervisorStatus & { pid?: number }).pid;
     if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0) continue;
 
+    const ageMs = Math.max(0, nowMs - ((status as SupervisorStatus & { updated_at_ms?: number }).updated_at_ms ?? nowMs));
     const snapshot = readProcessSnapshot(pid, procRoot, uptimeSeconds);
     if (!snapshot) {
-      const ageMs = Math.max(0, nowMs - ((status as SupervisorStatus & { updated_at_ms?: number }).updated_at_ms ?? nowMs));
       if (readProcessLiveness(pid, procRoot) === 'dead' && ageMs >= minKeepAliveAgeMs) {
         candidates.push({ jobId: status.id, pid, beadId: status.bead_id ?? null, specialist: status.specialist, cwd: null, ageMs, reason: 'dead-pid' });
         continue;
@@ -418,13 +419,19 @@ export function collectStaleSpecialistJobs(options: {
       continue;
     }
 
-    const ageMs = Math.max(0, nowMs - ((status as SupervisorStatus & { updated_at_ms?: number }).updated_at_ms ?? nowMs));
     if (status.status === 'waiting'
       && snapshot.ppid === 1
       && isSpecialistRunCommand(snapshot.cmdline)
       && ageMs >= minKeepAliveAgeMs) {
       candidates.push({ jobId: status.id, pid, beadId: status.bead_id ?? null, specialist: status.specialist, cwd: snapshot.cwd, ageMs, reason: 'orphaned-keep-alive' });
+      continue;
     }
+
+    if (status.status !== 'running' && status.status !== 'waiting') continue;
+    if (ageMs < minKeepAliveAgeMs) continue;
+    const lastActivityMs = observabilityClient?.getLastActivityTimestampMs?.(status.id) ?? null;
+    if (lastActivityMs !== null && (nowMs - lastActivityMs) < minKeepAliveAgeMs) continue;
+    candidates.push({ jobId: status.id, pid, beadId: status.bead_id ?? null, specialist: status.specialist, cwd: snapshot.cwd, ageMs, reason: 'dead-toolchain' });
   }
 
   return candidates.sort((left, right) => left.pid - right.pid);
