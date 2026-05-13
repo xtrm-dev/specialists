@@ -37,6 +37,23 @@ curl -fsSL https://bun.sh/install | bash
 
 Specialists now uses a two-category distribution model. Install or upgrade the npm package to choose the canonical Specialist runtime version; do not copy default files into every repository as the normal path.
 
+## Prerequisites and install order
+
+Specialists uses xtrm-tools as a runtime prerequisite, not a normal npm dependency. Keep it installed separately so `specialists init` can verify `xt` and manage `.xtrm/`.
+
+Ordered install flow:
+
+1. Install Bun.
+2. Install xtrm-tools globally: `npm install -g xtrm-tools`
+3. Run `xt install`
+4. Run `xt init` in this repo
+5. Install Specialists: `npm install -g @jaggerxtrm/specialists`
+6. Run `sp init`
+
+Category A and bootstrap note:
+- `sp list`, `sp doctor --check-drift`, and `sp prune-stale-defaults` are Category A commands.
+- They do not require `xt` or `.xtrm/`.
+
 ## Category A: runtime-resolved package assets
 
 Category A assets are read by the `sp` runtime itself:
