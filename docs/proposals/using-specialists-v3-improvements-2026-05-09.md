@@ -1,5 +1,17 @@
 # Proposed improvements to `using-specialists-v3` skill
 
+> **Status: DONE (2026-05-13)** — merged into `using-specialists-v3` SKILL.md v3.3 + `using-specialists-auto` SKILL.md v2.0 (commits `0b4487c0` + `0b1d8220`).
+>
+> - **~80% of Part C workarounds obsoleted by code fixes** earlier in session 2026-05-13a/b/c: `unitAI-lqsha` (reviewer injected-diff noise filter), `unitAI-pqe96` (sp merge .beads/+.xtrm/skills/active/ ignore), `unitAI-a6e60` (sp merge --target-branch), `unitAI-wq0mw` (dead-toolchain reaper), `unitAI-xbofm` (background-dispatch stderr surfacing), `unitAI-6fsxp` (reviewer blast-radius gate relaxation), `unitAI-889dv` (sp feed DB-backed full event replay — the root-cause fix for the reviewer false-PARTIAL pattern).
+> - **Doctrine sections A0–A9 + Part B targeted edits merged into v3.3** with one exception (A9 session-close report — referenced via `/session-close-report` skill instead of duplicating the template, since session-close is its own skill).
+> - **Auto-mode overlay (`using-specialists-auto`) trimmed to v2.0** to delegate shared content (sleep cadence, rebuttal pattern, escalation matrix, memory-gate batch close) to v3 — auto skill is now a minimal discipline overlay (~137 lines) instead of duplicating v3 content.
+> - **Remaining residual** (filed but not yet shipped): one ~5-min `sp edit executor` patch to add a generic "don't edit generated files" CONSTRAINT to executor system prompt (proposal L588). Tracked as backlog.
+> - **Two bd/Dolt-internal workarounds (Part C #6 and #7) retained as Failure Recovery patterns in v3.3** — these are bd-side and out of specialists' scope to fix.
+>
+> Kept below for historical reference. Do not action items from this doc directly; the canonical sources are now v3 SKILL.md v3.3 and auto SKILL.md v2.0.
+
+---
+
 **Source:** lessons from the 2026-05-09 xtrm-tools full-auto orchestration session (~75 specialist dispatches, 22 chains landed, 6 friction beads filed), with a 2026-05-11 addendum from a follow-up cli-test-suite epic (11 dispatches across 5 disjoint clusters, 34→0 fails, captured in `.xtrm/reports/2026-05-11-1f573e2.md`). Addendum additions are tagged inline as **(2026-05-11)**.
 **Target:** `specialists/config/skills/using-specialists-v3/SKILL.md` (current version: 3.2).
 **Owner:** specialists repo.
