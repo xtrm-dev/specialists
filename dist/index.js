@@ -30302,9 +30302,23 @@ import { join as join18 } from "path";
 function parseOptions(argv) {
   let target = "";
   let rebuild = false;
-  for (const argument of argv) {
+  let targetBranch = "";
+  for (let index = 0;index < argv.length; index += 1) {
+    const argument = argv[index];
     if (argument === "--rebuild") {
       rebuild = true;
+      continue;
+    }
+    if (argument === "--target-branch") {
+      const branchName = argv[index + 1];
+      if (!branchName || branchName.startsWith("-")) {
+        throw new Error("Missing value for --target-branch");
+      }
+      if (targetBranch) {
+        throw new Error("Only one target branch is supported");
+      }
+      targetBranch = branchName;
+      index += 1;
       continue;
     }
     if (argument.startsWith("-")) {
@@ -30318,7 +30332,7 @@ function parseOptions(argv) {
   if (!target) {
     throw new Error("Missing merge target");
   }
-  return { target, rebuild };
+  return { target, rebuild, targetBranch: targetBranch ? validateTargetBranchRef(targetBranch) : undefined };
 }
 function runCommand(command, args, cwd = process.cwd()) {
   return spawnSync12(command, args, {
@@ -30327,7 +30341,17 @@ function runCommand(command, args, cwd = process.cwd()) {
     stdio: ["ignore", "pipe", "pipe"]
   });
 }
-function resolveDefaultBranchName(cwd = process.cwd()) {
+function validateTargetBranchRef(targetBranch, cwd = process.cwd()) {
+  const verification = runCommand("git", ["rev-parse", "--verify", `${targetBranch}^{commit}`], cwd);
+  if (verification.status !== 0) {
+    const detail = verification.stderr.trim() || verification.stdout.trim() || "unknown git ref error";
+    throw new Error(`Invalid --target-branch '${targetBranch}': ${detail}`);
+  }
+  return targetBranch;
+}
+function resolveDefaultBranchName(cwd = process.cwd(), overrideBranch) {
+  if (overrideBranch)
+    return overrideBranch;
   const symbolicRef = runCommand("git", ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"], cwd);
   if (symbolicRef.status === 0) {
     const remoteHeadRef = symbolicRef.stdout.trim();
@@ -30766,8 +30790,8 @@ function parseNameStatusLine(line) {
 function isNoisePath(path) {
   return NOISE_PATH_PREFIXES.some((prefix) => path.startsWith(prefix));
 }
-function isBranchAlreadyPublished(branch, cwd = process.cwd()) {
-  const baseBranch = resolveDefaultBranchName(cwd);
+function isBranchAlreadyPublished(branch, cwd = process.cwd(), targetBranch) {
+  const baseBranch = resolveDefaultBranchName(cwd, targetBranch);
   const ancestorCheck = runCommand("git", ["merge-base", "--is-ancestor", branch, baseBranch], cwd);
   if (ancestorCheck.status === 0) {
     return true;
@@ -30778,8 +30802,8 @@ function isBranchAlreadyPublished(branch, cwd = process.cwd()) {
   }
   return cherryPickCount.stdout.trim() === "0";
 }
-function previewBranchMergeDelta(branch, cwd = process.cwd()) {
-  const baseBranch = resolveDefaultBranchName(cwd);
+function previewBranchMergeDelta(branch, cwd = process.cwd(), targetBranch) {
+  const baseBranch = resolveDefaultBranchName(cwd, targetBranch);
   const mergeBase = runCommand("git", ["merge-base", baseBranch, branch], cwd);
   if (mergeBase.status !== 0) {
     throw new Error(`Unable to compute merge base for '${baseBranch}' and '${branch}'.`);
@@ -30803,12 +30827,12 @@ function previewBranchMergeDelta(branch, cwd = process.cwd()) {
     substantiveFiles
   };
 }
-function evaluateMergeWorthiness(preview, branch, cwd = process.cwd()) {
+function evaluateMergeWorthiness(preview, branch, cwd = process.cwd(), targetBranch) {
   if (preview.files.length === 0) {
-    return isBranchAlreadyPublished(branch, cwd) ? { shouldMerge: false, reason: "already-published" } : { shouldMerge: false, reason: "empty-delta" };
+    return isBranchAlreadyPublished(branch, cwd, targetBranch) ? { shouldMerge: false, reason: "already-published" } : { shouldMerge: false, reason: "empty-delta" };
   }
   if (preview.substantiveFiles.length === 0) {
-    return isBranchAlreadyPublished(branch, cwd) ? { shouldMerge: false, reason: "already-published" } : { shouldMerge: false, reason: "noise-only-delta" };
+    return isBranchAlreadyPublished(branch, cwd, targetBranch) ? { shouldMerge: false, reason: "already-published" } : { shouldMerge: false, reason: "noise-only-delta" };
   }
   return { shouldMerge: true, reason: "ok" };
 }
@@ -30825,9 +30849,9 @@ function throwWorthinessBlockError(target, preview, decision) {
   throw new Error(`Refusing merge for '${target.branch}': ${reason}.
 ` + `Diagnostics: ${summary}`);
 }
-function assertBranchMergeWorthiness(target, cwd = process.cwd()) {
-  const preview = previewBranchMergeDelta(target.branch, cwd);
-  const decision = evaluateMergeWorthiness(preview, target.branch, cwd);
+function assertBranchMergeWorthiness(target, cwd = process.cwd(), targetBranch) {
+  const preview = previewBranchMergeDelta(target.branch, cwd, targetBranch);
+  const decision = evaluateMergeWorthiness(preview, target.branch, cwd, targetBranch);
   if (decision.reason === "already-published" || decision.shouldMerge)
     return decision;
   throwWorthinessBlockError(target, preview, decision);
@@ -30853,8 +30877,8 @@ function getCurrentHeadBranch(cwd = process.cwd()) {
 function tryAbortRebase(cwd = process.cwd()) {
   runCommand("git", ["rebase", "--abort"], cwd);
 }
-function rebaseBranchOntoMaster(branch, worktreePath) {
-  const baseBranch = resolveDefaultBranchName(worktreePath);
+function rebaseBranchOntoMaster(branch, worktreePath, targetBranch) {
+  const baseBranch = resolveDefaultBranchName(worktreePath, targetBranch);
   const checkedOutBranch = getCurrentHeadBranch(worktreePath);
   if (checkedOutBranch !== branch) {
     throw new Error(`Expected branch '${branch}' in worktree '${worktreePath}', found '${checkedOutBranch}'.`);
@@ -30923,7 +30947,7 @@ function printSummary(steps, rebuild) {
 }
 function printUsageAndExit(message) {
   console.error(message);
-  console.error("Usage: specialists|sp merge <target-bead-id> [--rebuild]");
+  console.error("Usage: specialists|sp merge <target-bead-id> [--rebuild] [--target-branch <name>]");
   process.exit(1);
 }
 function syncEpicStateAfterMerge(target) {
@@ -30941,6 +30965,7 @@ function syncEpicStateAfterMerge(target) {
 }
 function runMergePlan(targets, options) {
   const mainRepoRoot = resolveMainWorktreeRoot();
+  const targetBranch = options.targetBranch ? validateTargetBranchRef(options.targetBranch, mainRepoRoot) : undefined;
   const shelved = options.mode === "direct" ? (() => {
     const dirtyState = classifyMainRepoDirtyState(targets.map((target) => target.branch), mainRepoRoot);
     if (dirtyState.overlappingPaths.length > 0) {
@@ -30954,7 +30979,7 @@ ${formatDirtyConflictMessage(dirtyState.overlappingPaths)}
   const mergedSteps = [];
   try {
     for (const target of targets) {
-      const worthiness = assertBranchMergeWorthiness(target, mainRepoRoot);
+      const worthiness = assertBranchMergeWorthiness(target, mainRepoRoot, targetBranch);
       if (worthiness.reason === "already-published") {
         mergedSteps.push({
           beadId: target.beadId,
@@ -30963,7 +30988,7 @@ ${formatDirtyConflictMessage(dirtyState.overlappingPaths)}
         });
         continue;
       }
-      rebaseBranchOntoMaster(target.branch, target.worktreePath);
+      rebaseBranchOntoMaster(target.branch, target.worktreePath, targetBranch);
       mergeBranch(target.branch, mainRepoRoot);
       runTypecheckGate(mainRepoRoot);
       syncEpicStateAfterMerge(target);
@@ -31055,7 +31080,7 @@ async function run13() {
     printUsageAndExit(message);
   }
   const targets = resolveMergeTargets(options.target);
-  const mergedSteps = runMergePlan(targets, { rebuild: options.rebuild });
+  const mergedSteps = runMergePlan(targets, { rebuild: options.rebuild, targetBranch: options.targetBranch });
   printSummary(mergedSteps, options.rebuild);
 }
 var TERMINAL_STATUSES, NOISE_PATH_PREFIXES, MERGE_DIRTY_IGNORE_PREFIXES;
@@ -35180,7 +35205,9 @@ function parseMergeOptions(argv) {
   let rebuild = false;
   let json = false;
   let pr = false;
-  for (const argument of argv) {
+  let targetBranch = "";
+  for (let index = 0;index < argv.length; index += 1) {
+    const argument = argv[index];
     if (argument === "--rebuild") {
       rebuild = true;
       continue;
@@ -35193,11 +35220,23 @@ function parseMergeOptions(argv) {
       pr = true;
       continue;
     }
+    if (argument === "--target-branch") {
+      const branchName = argv[index + 1];
+      if (!branchName || branchName.startsWith("-")) {
+        throw new Error("Missing value for --target-branch");
+      }
+      if (targetBranch) {
+        throw new Error("Only one target branch is supported");
+      }
+      targetBranch = branchName;
+      index += 1;
+      continue;
+    }
     if (argument.startsWith("-") && argument !== "--rebuild" && argument !== "--json" && argument !== "--pr") {
       throw new Error(`Unknown option: ${argument}`);
     }
   }
-  return { epicId, rebuild, json, pr };
+  return { epicId, rebuild, json, pr, targetBranch: targetBranch || undefined };
 }
 function parseListOptions(argv) {
   let unresolvedOnly = false;
@@ -35415,11 +35454,12 @@ function updateEpicState(epicId, fromState, toState) {
     sqlite.close();
   }
 }
-function mergeEpicChains(context, rebuild, pr) {
+function mergeEpicChains(context, rebuild, pr, targetBranch) {
   return executePublicationPlan(context.chainTargets, {
     rebuild,
     mode: pr ? "pr" : "direct",
-    publicationLabel: `epic-${context.epicId}`
+    publicationLabel: `epic-${context.epicId}`,
+    targetBranch
   });
 }
 function printEpicMergeSummary(result, rebuild, pr) {
@@ -35511,7 +35551,7 @@ async function handleEpicMergeCommand(argv) {
     const message = error2 instanceof Error ? error2.message : String(error2);
     console.error(message);
     console.error("");
-    console.error("Usage: specialists epic merge <epic-id> [--rebuild] [--pr] [--json]");
+    console.error("Usage: specialists epic merge <epic-id> [--rebuild] [--pr] [--json] [--target-branch <name>]");
     process.exit(1);
   }
   let context;
@@ -35544,7 +35584,7 @@ async function handleEpicMergeCommand(argv) {
   let toState = currentState;
   let pullRequestUrl;
   try {
-    const publicationResult = mergeEpicChains(context, options.rebuild, options.pr);
+    const publicationResult = mergeEpicChains(context, options.rebuild, options.pr, options.targetBranch);
     mergedChains = publicationResult.steps;
     pullRequestUrl = publicationResult.pullRequestUrl;
     toState = options.pr ? currentState : transitionEpicState(currentState, "merged");
@@ -35770,6 +35810,7 @@ async function handleEpicCommand(argv) {
       '  specialists epic abandon unitAI-3f7b --reason "scope changed"',
       "  specialists epic merge unitAI-3f7b --rebuild",
       "  specialists epic merge unitAI-3f7b --pr",
+      "  specialists epic merge unitAI-3f7b --target-branch feature/foo",
       ""
     ].join(`
 `));
