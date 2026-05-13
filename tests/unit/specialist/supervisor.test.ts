@@ -116,15 +116,17 @@ describe('Supervisor', () => {
     mkdirSync(jobDir, { recursive: true });
     writeFileSync(join(jobDir, 'result.txt'), 'file result');
 
-    const sqlite = createObservabilitySqliteClient(tmpDir);
-    expect(sqlite).not.toBeNull();
-    sqlite!.upsertResult(jobId, 'sqlite result');
-    (sup as any).sqliteClient = sqlite;
-
+    (sup as any).sqliteClient = {
+      readResult: vi.fn((id: string) => (id === jobId ? 'sqlite result' : null)),
+      close: vi.fn(),
+    };
     expect(sup.readResult(jobId)).toBe('sqlite result');
 
     const supWithoutSqlite = createSupervisor({ jobsDir, runner: makeMockRunner(), runOptions: makeRunOptions() });
-    (supWithoutSqlite as any).sqliteClient = null;
+    (supWithoutSqlite as any).sqliteClient = {
+      readResult: vi.fn(() => null),
+      close: vi.fn(),
+    };
     expect(supWithoutSqlite.readResult(jobId)).toBe('file result');
   });
 
