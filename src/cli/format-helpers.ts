@@ -111,6 +111,9 @@ export const EVENT_LABELS: Record<string, string> = {
   compaction: 'CMPCT',
   retry: 'RETRY',
   error: 'ERROR',
+  auto_commit_success: 'AUTO+',
+  auto_commit_skipped: 'AUTO-',
+  auto_commit_failed: 'AUTO!',
 };
 
 /**
@@ -292,14 +295,34 @@ export function formatEventLine(
   let detail = '';
 
   if (event.type === 'meta') {
-    detailParts.push(`model=${event.model}`);
-    detailParts.push(`backend=${event.backend}`);
-    if (event.source) detailParts.push(`source=${event.source}`);
+    if (event.model === 'gitnexus_analyze_started') {
+      detailParts.push('gitnexus=analyze_started');
+      detailParts.push(`source=${event.backend}`);
+    } else if (event.model === 'gitnexus_analyze_start_failed') {
+      detailParts.push('gitnexus=analyze_start_failed');
+      detailParts.push(`reason=${event.backend}`);
+    } else {
+      detailParts.push(`model=${event.model}`);
+      detailParts.push(`backend=${event.backend}`);
+      if (event.source) detailParts.push(`source=${event.source}`);
+    }
   } else if (event.type === 'tool') {
     detail = formatToolDetail(event);
   } else if (event.type === 'error') {
     detailParts.push(`source=${event.source}`);
     detailParts.push(`error=${event.error_message}`);
+  } else if (event.type === 'auto_commit_success' || event.type === 'auto_commit_skipped' || event.type === 'auto_commit_failed') {
+    const status = event.type.replace('auto_commit_', '');
+    detailParts.push(`status=${status}`);
+    if (event.commit_sha) detailParts.push(`commit=${event.commit_sha.slice(0, 12)}`);
+    if (event.committed_files) {
+      detailParts.push(`files=${event.committed_files.length}`);
+      if (event.committed_files.length > 0) {
+        const filePreview = event.committed_files.slice(0, 3).join(',');
+        detailParts.push(`paths=${filePreview}${event.committed_files.length > 3 ? ',…' : ''}`);
+      }
+    }
+    if (event.reason) detailParts.push(`reason=${event.reason}`);
   } else if (event.type === 'run_complete') {
     detailParts.push(`status=${event.status}`);
     detailParts.push(`elapsed=${formatElapsed(event.elapsed_s)}`);

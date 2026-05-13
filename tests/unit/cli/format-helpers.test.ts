@@ -83,6 +83,12 @@ describe('format-helpers', () => {
       expect(getEventLabel('run_complete')).toBe('DONE');
     });
 
+    it('returns auto-commit labels', () => {
+      expect(getEventLabel('auto_commit_success')).toBe('AUTO+');
+      expect(getEventLabel('auto_commit_skipped')).toBe('AUTO-');
+      expect(getEventLabel('auto_commit_failed')).toBe('AUTO!');
+    });
+
     it('truncates unknown types to 5 chars', () => {
       expect(getEventLabel('unknown_event')).toBe('UNKNO');
     });
@@ -218,6 +224,88 @@ describe('format-helpers', () => {
       expect(line).toContain('ERROR');
       expect(line).toContain('source=stderr');
       expect(line).toContain('error=You have hit your ChatGPT usage limit');
+    });
+
+    it('renders auto-commit success evidence with commit and file count', () => {
+      const line = formatEventLine({
+        t: Date.now(),
+        type: 'auto_commit_success',
+        commit_sha: '54e2fa6c83323b8c50cf203ce59e13af0d922e10',
+        committed_files: ['src/cli/feed.ts', 'tests/unit/cli/feed.test.ts'],
+      }, {
+        jobId: 'job1',
+        specialist: 'executor',
+        beadId: 'unitAI-1',
+        colorize: (value: string) => value,
+      });
+
+      expect(line).toContain('AUTO+');
+      expect(line).toContain('status=success');
+      expect(line).toContain('commit=54e2fa6c8332');
+      expect(line).toContain('files=2');
+      expect(line).toContain('paths=src/cli/feed.ts,tests/unit/cli/feed.test.ts');
+    });
+
+    it('renders auto-commit skipped and failed reasons', () => {
+      const skipped = formatEventLine({
+        t: Date.now(),
+        type: 'auto_commit_skipped',
+        reason: 'policy_never',
+      }, {
+        jobId: 'job1',
+        specialist: 'reviewer',
+        beadId: 'unitAI-1',
+        colorize: (value: string) => value,
+      });
+
+      const failed = formatEventLine({
+        t: Date.now(),
+        type: 'auto_commit_failed',
+        reason: 'git commit failed',
+      }, {
+        jobId: 'job1',
+        specialist: 'executor',
+        beadId: 'unitAI-1',
+        colorize: (value: string) => value,
+      });
+
+      expect(skipped).toContain('AUTO-');
+      expect(skipped).toContain('status=skipped');
+      expect(skipped).toContain('reason=policy_never');
+      expect(failed).toContain('AUTO!');
+      expect(failed).toContain('status=failed');
+      expect(failed).toContain('reason=git commit failed');
+    });
+
+    it('renders GitNexus analyze meta events as explicit evidence', () => {
+      const started = formatEventLine({
+        t: Date.now(),
+        type: 'meta',
+        model: 'gitnexus_analyze_started',
+        backend: 'checkpoint',
+      }, {
+        jobId: 'job1',
+        specialist: 'executor',
+        beadId: 'unitAI-1',
+        colorize: (value: string) => value,
+      });
+
+      const failed = formatEventLine({
+        t: Date.now(),
+        type: 'meta',
+        model: 'gitnexus_analyze_start_failed',
+        backend: 'terminal: hook missing',
+      }, {
+        jobId: 'job1',
+        specialist: 'executor',
+        beadId: 'unitAI-1',
+        colorize: (value: string) => value,
+      });
+
+      expect(started).toContain('gitnexus=analyze_started');
+      expect(started).toContain('source=checkpoint');
+      expect(failed).toContain('gitnexus=analyze_start_failed');
+      expect(failed).toContain('reason=terminal: hook missing');
     });
   });
 

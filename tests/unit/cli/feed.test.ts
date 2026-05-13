@@ -266,6 +266,38 @@ describe('feed CLI', () => {
     expect(combined).toContain('usage limit');
   });
 
+  it('surfaces auto-commit and GitNexus evidence in human feed output', async () => {
+    createJobDir('job-autocommit', 'executor', [
+      {
+        t: Date.now(),
+        type: 'auto_commit_success',
+        commit_sha: '54e2fa6c83323b8c50cf203ce59e13af0d922e10',
+        committed_files: ['src/cli/feed.ts'],
+      },
+      { t: Date.now(), type: 'meta', model: 'gitnexus_analyze_started', backend: 'checkpoint' },
+      { t: Date.now(), type: 'auto_commit_skipped', reason: 'policy_never' },
+    ], { bead_id: 'unitAI-auto' });
+
+    process.argv = ['node', 'specialists', 'feed'];
+
+    const logs: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((msg: string) => {
+      logs.push(msg ?? '');
+    });
+
+    const { run } = await import('../../../src/cli/feed.js');
+    await run();
+
+    const combined = stripAnsi(logs.join('\n'));
+    expect(combined).toContain('AUTO+');
+    expect(combined).toContain('commit=54e2fa6c8332');
+    expect(combined).toContain('files=1');
+    expect(combined).toContain('gitnexus=analyze_started');
+    expect(combined).toContain('source=checkpoint');
+    expect(combined).toContain('AUTO-');
+    expect(combined).toContain('reason=policy_never');
+  });
+
   it('outputs JSON with --json flag', async () => {
     createJobDir('job1', 'test', [
       { t: Date.now(), type: 'run_start', startup_snapshot: { job_id: 'job1' } },
@@ -289,6 +321,40 @@ describe('feed CLI', () => {
     expect(parsedLines[1]?.type).toBe('payload_breakdown');
     expect(parsedLines[1]?.payload_breakdown?.totals.bytes).toBe(2048);
     expect(parsedLines[2]?.type).toBe('run_complete');
+  });
+
+  it('outputs auto-commit and GitNexus evidence unchanged in JSON mode', async () => {
+    createJobDir('job-json-auto', 'executor', [
+      {
+        t: Date.now(),
+        type: 'auto_commit_success',
+        commit_sha: '54e2fa6c83323b8c50cf203ce59e13af0d922e10',
+        committed_files: ['src/cli/feed.ts'],
+      },
+      { t: Date.now(), type: 'meta', model: 'gitnexus_analyze_started', backend: 'checkpoint' },
+    ]);
+
+    process.argv = ['node', 'specialists', 'feed', '--json'];
+
+    const logs: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((msg: string) => {
+      logs.push(msg ?? '');
+    });
+
+    const { run } = await import('../../../src/cli/feed.js');
+    await run();
+
+    const parsedLines = logs.filter((line) => line.trim()).map((line) => JSON.parse(line) as any);
+    expect(parsedLines[0]).toMatchObject({
+      type: 'auto_commit_success',
+      commit_sha: '54e2fa6c83323b8c50cf203ce59e13af0d922e10',
+      committed_files: ['src/cli/feed.ts'],
+    });
+    expect(parsedLines[1]).toMatchObject({
+      type: 'meta',
+      model: 'gitnexus_analyze_started',
+      backend: 'checkpoint',
+    });
   });
 
   it('--json envelope includes model, backend, beadId, elapsed_ms from status.json', async () => {
