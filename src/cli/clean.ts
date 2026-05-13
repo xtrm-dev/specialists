@@ -19,6 +19,9 @@ interface CleanOptions {
   staleAfterHours: number;
   reapOrphans: boolean;
   psDashboard: boolean;
+  observability: boolean;
+  observabilityBeforeMs: number | null;
+  includeEpics: boolean;
 }
 
 interface OrphanProcess {
@@ -50,6 +53,31 @@ const COMPLETED_STATUSES = new Set<SupervisorStatus['status']>(['done', 'error',
 const STALE_PROCESS_STATUSES = new Set<SupervisorStatus['status']>(['running', 'starting', 'waiting']);
 const PROTECTED_SQLITE_SUFFIXES = ['.db', '.db-wal', '.db-shm'] as const;
 
+function parseDuration(raw: string): number | null {
+  const match = /^(\d+)(ms|s|m|h|d)$/i.exec(raw.trim());
+  if (!match) return null;
+  const amount = Number(match[1]);
+  const unit = match[2]!.toLowerCase();
+  const multipliers: Record<string, number> = {
+    ms: 1,
+    s: 1_000,
+    m: 60_000,
+    h: 3_600_000,
+    d: 86_400_000,
+  };
+  return amount * multipliers[unit]!;
+}
+
+function parseBeforeArgument(raw: string): number {
+  const durationMs = parseDuration(raw);
+  if (durationMs !== null) return Date.now() - durationMs;
+
+  const isoMs = Date.parse(raw);
+  if (Number.isFinite(isoMs)) return isoMs;
+
+  throw new Error(`Invalid --before value '${raw}'. Use ISO date or duration like 7d.`);
+}
+
 function parseTtlDaysFromEnvironment(): number {
   const rawValue = process.env.SPECIALISTS_JOB_TTL_DAYS ?? process.env.JOB_TTL_DAYS;
   if (!rawValue) return DEFAULT_TTL_DAYS;
@@ -69,6 +97,9 @@ function parseOptions(argv: readonly string[]): CleanOptions {
   let staleAfterHours = DEFAULT_STALE_AFTER_HOURS;
   let reapOrphans = false;
   let psDashboard = false;
+  let observability = false;
+  let observabilityBeforeMs: number | null = null;
+  let includeEpics = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -95,6 +126,29 @@ function parseOptions(argv: readonly string[]): CleanOptions {
 
     if (argument === '--ps') {
       psDashboard = true;
+      continue;
+    }
+
+    if (argument === '--observability') {
+      observability = true;
+      continue;
+    }
+
+    if (argument === '--include-epics') {
+      includeEpics = true;
+      continue;
+    }
+
+    if (argument === '--before') {
+      const value = argv[index + 1];
+      if (!value) throw new Error('Missing value for --before');
+      observabilityBeforeMs = parseBeforeArgument(value);
+      index += 1;
+      continue;
+    }
+
+    if (argument.startsWith('--before=')) {
+      observabilityBeforeMs = parseBeforeArgument(argument.slice('--before='.length));
       continue;
     }
 
@@ -148,11 +202,20 @@ function parseOptions(argv: readonly string[]): CleanOptions {
   if (reapOrphans && (removeAllCompleted || keepRecentCount !== null || staleProcessesOnly || psDashboard)) {
     throw new Error('--reap-orphans cannot be combined with --all, --keep, --processes, or --ps');
   }
-  if (psDashboard && (removeAllCompleted || keepRecentCount !== null || staleProcessesOnly || aggressivePrune)) {
-    throw new Error('--ps cannot be combined with --all, --keep, --processes, or --aggressive-prune');
+  if (psDashboard && (removeAllCompleted || keepRecentCount !== null || staleProcessesOnly || aggressivePrune || observability)) {
+    throw new Error('--ps cannot be combined with --all, --keep, --processes, --aggressive-prune, or --observability');
+  }
+  if (observability && (removeAllCompleted || keepRecentCount !== null || staleProcessesOnly || reapOrphans || psDashboard || aggressivePrune)) {
+    throw new Error('--observability cannot be combined with --all, --keep, --processes, --reap-orphans, --ps, or --aggressive-prune');
+  }
+  if (!observability && (observabilityBeforeMs !== null || includeEpics)) {
+    throw new Error('--before and --include-epics require --observability');
+  }
+  if (observability && observabilityBeforeMs === null) {
+    throw new Error('--observability requires --before <iso|duration>');
   }
 
-  return { removeAllCompleted, dryRun, keepRecentCount, aggressivePrune, staleProcessesOnly, staleAfterHours, reapOrphans, psDashboard };
+  return { removeAllCompleted, dryRun, keepRecentCount, aggressivePrune, staleProcessesOnly, staleAfterHours, reapOrphans, psDashboard, observability, observabilityBeforeMs, includeEpics };
 }
 
 function readDirectorySizeBytes(directoryPath: string): number {
@@ -306,6 +369,29 @@ function renderSummary(removedCount: number, freedBytes: number, dryRun: boolean
   return `${action} ${removedCount} job ${noun} (${formatBytes(freedBytes)} freed)`;
 }
 
+function printObservabilityPruneReport(report: {
+  dryRun: boolean;
+  beforeMs: number;
+  eventsCutoffMs: number;
+  includeEpics: boolean;
+  deletedEvents: number;
+  deletedResults: number;
+  deletedJobs: number;
+  deletedEpicRuns: number;
+  skippedActiveChainJobs: number;
+  extractedJobs: number;
+}): void {
+  console.log(report.dryRun ? 'Would prune observability SQLite rows:' : 'Pruned observability SQLite rows:');
+  console.log(`  before: ${new Date(report.beforeMs).toISOString()}`);
+  console.log(`  events cutoff: ${new Date(report.eventsCutoffMs).toISOString()}`);
+  console.log(`  specialist_events: ${report.deletedEvents}`);
+  console.log(`  specialist_results: ${report.deletedResults}`);
+  console.log(`  specialist_jobs: ${report.deletedJobs}`);
+  console.log(`  extracted jobs: ${report.extractedJobs}`);
+  console.log(`  epic_runs: ${report.deletedEpicRuns}${report.includeEpics ? '' : ' (skipped, use --include-epics)'}`);
+  console.log(`  skipped active-chain jobs: ${report.skippedActiveChainJobs}`);
+}
+
 function printDryRunPlan(jobs: readonly CompletedJobRecord[]): void {
   if (jobs.length === 0) return;
   console.log('Would remove:');
@@ -335,7 +421,7 @@ function printWorktreeGcSummary(removed: readonly WorktreeGcCandidate[], skipped
 
 function printUsageAndExit(message: string): never {
   console.error(message);
-  console.error('Usage: specialists|sp clean [--all] [--keep <n>] [--aggressive-prune] [--processes [--stale-after <hours>]] [--reap-orphans] [--dry-run] (stale specialist jobs)');
+  console.error('Usage: specialists|sp clean [--all] [--keep <n>] [--aggressive-prune] [--processes [--stale-after <hours>]] [--reap-orphans] [--observability --before <iso|duration> [--include-epics]] [--dry-run]');
   process.exit(1);
 }
 
@@ -545,6 +631,17 @@ export async function run(): Promise<void> {
   const jobsDirectoryPath = resolveJobsDir();
   const sqliteClient = createObservabilitySqliteClient();
   const statuses = sqliteClient?.listStatuses() ?? [];
+
+  if (options.observability) {
+    if (!sqliteClient) throw new Error('Failed to initialize observability SQLite schema. Run `specialists db setup` first.');
+    const report = sqliteClient.pruneObservabilityData({
+      beforeMs: options.observabilityBeforeMs!,
+      includeEpics: options.includeEpics,
+      apply: !options.dryRun,
+    });
+    printObservabilityPruneReport(report);
+    return;
+  }
 
   if (options.psDashboard) {
     const candidates = selectPsDashboardCleanCandidates(statuses);

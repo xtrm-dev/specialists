@@ -7,6 +7,8 @@ const removedJobIds: string[] = [];
 let mockStatuses: any[] = [];
 let mockUpsertedStatuses: any[] = [];
 let mockReferencedChainRootJobIds: string[] = [];
+let mockPruneReports: any[] = [];
+let mockPruneCalls: any[] = [];
 vi.mock('../../../src/specialist/observability-sqlite.js', () => ({
   createObservabilitySqliteClient: () => ({
     listStatuses: () => mockStatuses,
@@ -17,6 +19,21 @@ vi.mock('../../../src/specialist/observability-sqlite.js', () => ({
     },
     upsertStatus: (status: any) => {
       mockUpsertedStatuses.push(status);
+    },
+    pruneObservabilityData: (options: any) => {
+      mockPruneCalls.push(options);
+      return mockPruneReports.shift() ?? {
+        dryRun: !options.apply,
+        beforeMs: options.beforeMs,
+        eventsCutoffMs: options.beforeMs - 30 * 86_400_000,
+        includeEpics: options.includeEpics,
+        deletedEvents: 0,
+        deletedResults: 0,
+        deletedJobs: 0,
+        deletedEpicRuns: 0,
+        skippedActiveChainJobs: 0,
+        extractedJobs: 0,
+      };
     },
   }),
 }));
@@ -51,6 +68,8 @@ describe('clean CLI — run()', () => {
     mockStatuses = [];
     mockUpsertedStatuses = [];
     mockReferencedChainRootJobIds = [];
+    mockPruneReports = [];
+    mockPruneCalls = [];
     removedJobIds.length = 0;
   });
 
@@ -250,6 +269,62 @@ describe('clean CLI — run()', () => {
     expect(mockUpsertedStatuses).toHaveLength(0);
     expect(readFileSync(join(jobsDirectory, 'stale-job', 'status.json'), 'utf-8')).toContain('running');
   });
+
+
+  it('--observability dry-run delegates to SQLite prune without deleting job directories', async () => {
+    const now = Date.now();
+    createCompletedJob(jobsDirectory, 'old-job', now - 8 * 86_400_000, now - 8 * 86_400_000);
+    mockPruneReports = [{
+      dryRun: true,
+      beforeMs: now - 7 * 86_400_000,
+      eventsCutoffMs: now - 30 * 86_400_000,
+      includeEpics: false,
+      deletedEvents: 3,
+      deletedResults: 2,
+      deletedJobs: 1,
+      deletedEpicRuns: 0,
+      skippedActiveChainJobs: 4,
+      extractedJobs: 5,
+    }];
+
+    const logs = await invokeClean(['--observability', '--before', '7d', '--dry-run']);
+
+    expect(existsSync(join(jobsDirectory, 'old-job'))).toBe(true);
+    expect(mockPruneCalls).toHaveLength(1);
+    expect(mockPruneCalls[0].apply).toBe(false);
+    expect(mockPruneCalls[0].includeEpics).toBe(false);
+    expect(logs.join('\n')).toContain('Would prune observability SQLite rows:');
+    expect(logs.join('\n')).toContain('specialist_events: 3');
+    expect(logs.join('\n')).toContain('specialist_results: 2');
+    expect(logs.join('\n')).toContain('specialist_jobs: 1');
+    expect(logs.join('\n')).toContain('skipped active-chain jobs: 4');
+  });
+
+  it('--observability applies SQLite prune when explicit and includes epics on request', async () => {
+    mockPruneReports = [{
+      dryRun: false,
+      beforeMs: Date.parse('2026-01-01T00:00:00Z'),
+      eventsCutoffMs: Date.parse('2025-12-02T00:00:00Z'),
+      includeEpics: true,
+      deletedEvents: 0,
+      deletedResults: 4,
+      deletedJobs: 2,
+      deletedEpicRuns: 1,
+      skippedActiveChainJobs: 0,
+      extractedJobs: 0,
+    }];
+
+    const logs = await invokeClean(['--observability', '--before', '2026-01-01T00:00:00Z', '--include-epics']);
+
+    expect(mockPruneCalls).toHaveLength(1);
+    expect(mockPruneCalls[0].apply).toBe(true);
+    expect(mockPruneCalls[0].includeEpics).toBe(true);
+    expect(logs.join('\n')).toContain('Pruned observability SQLite rows:');
+    expect(logs.join('\n')).toContain('specialist_results: 4');
+    expect(logs.join('\n')).toContain('specialist_jobs: 2');
+    expect(logs.join('\n')).toContain('epic_runs: 1');
+  });
+
   it('--ps dry-run previews terminal rows without mutating status', async () => {
     const now = Date.now();
     mockStatuses = [
