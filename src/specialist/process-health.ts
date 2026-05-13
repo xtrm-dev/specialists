@@ -1,5 +1,7 @@
 import { existsSync, readdirSync, readFileSync, readlinkSync } from 'node:fs';
 import { join } from 'node:path';
+import type { SupervisorStatus } from './supervisor.js';
+import { createObservabilitySqliteClient } from './observability-sqlite.js';
 
 export type ProcessHealthThresholds = {
   warnPct: number;
@@ -27,6 +29,16 @@ export interface ProcessHealthWorkspaceGroup {
   count: number;
   rssBytes: number;
   processes: ProcessHealthProcess[];
+}
+
+export interface StaleSpecialistJobCandidate {
+  jobId: string;
+  pid: number;
+  beadId: string | null;
+  specialist: string;
+  cwd: string | null;
+  ageMs: number;
+  reason: 'dead-pid' | 'orphaned-keep-alive';
 }
 
 export type ProcessHealthStatus = 'OK' | 'WARN' | 'REFUSE';
@@ -68,6 +80,10 @@ interface ProcessSnapshot {
   rssBytes: number;
   cpuPct: number;
   ageSeconds: number;
+}
+
+interface StaleSpecialistJobSource {
+  listStatuses(): SupervisorStatus[];
 }
 
 const DEFAULT_WARN_PCT = 70;
@@ -136,6 +152,17 @@ function readProcUptimeSecondsOrNull(procRoot: string): number | null {
   }
 }
 
+function readProcessLiveness(pid: number, procRoot: string): 'alive' | 'dead' {
+  if (!existsSync(join(procRoot, String(pid)))) return 'dead';
+  try {
+    process.kill(pid, 0);
+    return 'alive';
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ESRCH') return 'dead';
+    return 'alive';
+  }
+}
+
 function readProcessSnapshot(pid: number, procRoot: string, uptimeSeconds: number): ProcessSnapshot | null {
   const basePath = join(procRoot, String(pid));
   const cmdlineRaw = readProcStringOrNull(join(basePath, 'cmdline'));
@@ -186,6 +213,14 @@ function basename(command: string): string {
 
 function isShellWrapper(command: string): boolean {
   return ['sh', 'bash', 'zsh', 'fish'].includes(basename(command));
+}
+
+function getSpecialistKeepAliveAgeMs(snapshot: ProcessSnapshot, nowMs: number): number {
+  return Math.max(0, nowMs - Math.round(snapshot.ageSeconds * 1000));
+}
+
+function isOrphanedKeepAlive(snapshot: ProcessSnapshot, ageMs: number, minAgeMs: number): boolean {
+  return snapshot.ppid === 1 && isSpecialistRunCommand(snapshot.cmdline) && ageMs >= minAgeMs;
 }
 
 function isSpecialistRunCommand(cmdline: string): boolean {
@@ -344,4 +379,53 @@ export function collectOrphanProcesses(options: { procRoot?: string; nowMs?: num
   }
 
   return [...reaped.values()].sort((left, right) => left.pid - right.pid);
+}
+
+export function collectStaleSpecialistJobs(options: {
+  procRoot?: string;
+  nowMs?: number;
+  minKeepAliveAgeMs?: number;
+  observabilityClient?: StaleSpecialistJobSource;
+} = {}): StaleSpecialistJobCandidate[] {
+  const procRoot = options.procRoot ?? '/proc';
+  const nowMs = options.nowMs ?? Date.now();
+  const minKeepAliveAgeMs = options.minKeepAliveAgeMs ?? 30 * 60 * 1000;
+  const observabilityClient = options.observabilityClient ?? createObservabilitySqliteClient();
+  const statuses = observabilityClient?.listStatuses() ?? [];
+  const staleStatuses = statuses.filter((status) => ['starting', 'running', 'waiting'].includes(status.status));
+  const uptimeSeconds = readProcUptimeSecondsOrNull(procRoot) ?? (nowMs / 1000);
+  const candidates: StaleSpecialistJobCandidate[] = [];
+
+  for (const status of staleStatuses) {
+    const pid = (status as SupervisorStatus & { pid?: number }).pid;
+    if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0) continue;
+
+    const snapshot = readProcessSnapshot(pid, procRoot, uptimeSeconds);
+    if (!snapshot) {
+      const ageMs = Math.max(0, nowMs - ((status as SupervisorStatus & { updated_at_ms?: number }).updated_at_ms ?? nowMs));
+      if (readProcessLiveness(pid, procRoot) === 'dead' && ageMs >= minKeepAliveAgeMs) {
+        candidates.push({ jobId: status.id, pid, beadId: status.bead_id ?? null, specialist: status.specialist, cwd: null, ageMs, reason: 'dead-pid' });
+        continue;
+      }
+
+      const basePath = join(procRoot, String(pid));
+      const cmdlineRaw = readProcStringOrNull(join(basePath, 'cmdline'));
+      const statRaw = readProcStringOrNull(join(basePath, 'stat'));
+      const parsedStat = statRaw ? parseStat(statRaw) : null;
+      if (status.status === 'waiting' && parsedStat?.ppid === 1 && cmdlineRaw && isSpecialistRunCommand(cmdlineRaw.replace(/\0/g, ' '))) {
+        candidates.push({ jobId: status.id, pid, beadId: status.bead_id ?? null, specialist: status.specialist, cwd: readProcCwdOrNull(pid, procRoot), ageMs, reason: 'orphaned-keep-alive' });
+      }
+      continue;
+    }
+
+    const ageMs = Math.max(0, nowMs - ((status as SupervisorStatus & { updated_at_ms?: number }).updated_at_ms ?? nowMs));
+    if (status.status === 'waiting'
+      && snapshot.ppid === 1
+      && isSpecialistRunCommand(snapshot.cmdline)
+      && ageMs >= minKeepAliveAgeMs) {
+      candidates.push({ jobId: status.id, pid, beadId: status.bead_id ?? null, specialist: status.specialist, cwd: snapshot.cwd, ageMs, reason: 'orphaned-keep-alive' });
+    }
+  }
+
+  return candidates.sort((left, right) => left.pid - right.pid);
 }
