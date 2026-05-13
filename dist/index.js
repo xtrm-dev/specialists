@@ -40139,6 +40139,8 @@ async function run28() {
   ];
   lines.push(section2("1. Installation"));
   lines.push("");
+  lines.push(`  ${bold12("Prerequisite: Bun")}   ${cmd2("bun --version")}           # verify Bun >=1.0.0`);
+  lines.push(`  ${cmd2("curl -fsSL https://bun.sh/install | bash")}   # install Bun if missing`);
   lines.push(`  ${cmd2("npm install -g @jaggerxtrm/specialists")}    # install globally`);
   lines.push(`  ${cmd2("specialists init")}                         # project setup:`);
   lines.push(`  ${dim13("                                            #   creates dirs, wires MCP + hooks, injects context")}`);
@@ -49466,6 +49468,15 @@ process.on("uncaughtException", (err) => {
   console.error("[specialists] [ERROR] Fatal error:", err);
   process.exit(1);
 });
+if (typeof globalThis.Bun === "undefined") {
+  console.error([
+    "[specialists] [ERROR] Bun runtime required (>=1.0.0).",
+    "[specialists] Install Bun: https://bun.sh/install",
+    "[specialists] Example: curl -fsSL https://bun.sh/install | bash"
+  ].join(`
+`));
+  process.exit(1);
+}
 var sub = process.argv[2];
 var next = process.argv[3];
 function wantsHelp() {
