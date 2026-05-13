@@ -26090,7 +26090,7 @@ var init_supervisor = __esm(() => {
   ];
   TERMINAL_COMPLIANCE_VERDICT_REGEX = /## Compliance Verdict[\s\S]*?- Verdict:\s*\**\s*(PASS|PARTIAL|FAIL)\s*\**/i;
   PASS_COMPLIANCE_VERDICT_REGEX = /## Compliance Verdict[\s\S]*?- Verdict:\s*\**\s*PASS\s*\**/i;
-  AUTO_COMMIT_NOISE_PREFIXES = [".xtrm/", ".wolf/", ".specialists/jobs/", ".beads/"];
+  AUTO_COMMIT_NOISE_PREFIXES = [".xtrm/", ".wolf/", ".specialists/jobs/", ".beads/", ".pi/"];
 });
 
 // src/cli/list.ts
@@ -29462,12 +29462,22 @@ function createUserFork(source, targetName) {
 }
 async function resolveTargets(args) {
   const loader = new SpecialistLoader;
-  const allSpecialists = (await loader.list()).filter((specialist) => specialist.scope !== "package");
+  const listedSpecialists = await loader.list();
+  const allSpecialists = listedSpecialists.filter((specialist) => specialist.scope !== "package");
   if (args.all) {
     return allSpecialists;
   }
   const match = allSpecialists.find((specialist) => specialist.name === args.name && (args.scope === undefined || specialist.scope === args.scope));
   if (!match) {
+    const packageMatch = args.scope === undefined ? listedSpecialists.find((specialist) => specialist.name === args.name && specialist.scope === "package") : undefined;
+    if (packageMatch) {
+      fail(`Error: specialist "${args.name}" lives in [package] tier and cannot be edited directly.
+` + `  Fork to user tier first:
+
+` + `    ${yellow8(`specialists edit ${args.name} --fork-from ${args.name}`)}
+
+` + `  Then re-run your edit command.`);
+    }
     const hint = args.scope ? ` (scope: ${args.scope})` : "";
     fail(`Error: specialist "${args.name}" not found${hint}
   Run ${yellow8("specialists list")} to see available specialists`);
@@ -31212,15 +31222,37 @@ function formatEventLine(event, options) {
   const detailParts = [];
   let detail = "";
   if (event.type === "meta") {
-    detailParts.push(`model=${event.model}`);
-    detailParts.push(`backend=${event.backend}`);
-    if (event.source)
-      detailParts.push(`source=${event.source}`);
+    if (event.model === "gitnexus_analyze_started") {
+      detailParts.push("gitnexus=analyze_started");
+      detailParts.push(`source=${event.backend}`);
+    } else if (event.model === "gitnexus_analyze_start_failed") {
+      detailParts.push("gitnexus=analyze_start_failed");
+      detailParts.push(`reason=${event.backend}`);
+    } else {
+      detailParts.push(`model=${event.model}`);
+      detailParts.push(`backend=${event.backend}`);
+      if (event.source)
+        detailParts.push(`source=${event.source}`);
+    }
   } else if (event.type === "tool") {
     detail = formatToolDetail(event);
   } else if (event.type === "error") {
     detailParts.push(`source=${event.source}`);
     detailParts.push(`error=${event.error_message}`);
+  } else if (event.type === "auto_commit_success" || event.type === "auto_commit_skipped" || event.type === "auto_commit_failed") {
+    const status = event.type.replace("auto_commit_", "");
+    detailParts.push(`status=${status}`);
+    if (event.commit_sha)
+      detailParts.push(`commit=${event.commit_sha.slice(0, 12)}`);
+    if (event.committed_files) {
+      detailParts.push(`files=${event.committed_files.length}`);
+      if (event.committed_files.length > 0) {
+        const filePreview = event.committed_files.slice(0, 3).join(",");
+        detailParts.push(`paths=${filePreview}${event.committed_files.length > 3 ? ",\u2026" : ""}`);
+      }
+    }
+    if (event.reason)
+      detailParts.push(`reason=${event.reason}`);
   } else if (event.type === "run_complete") {
     detailParts.push(`status=${event.status}`);
     detailParts.push(`elapsed=${formatElapsed(event.elapsed_s)}`);
@@ -31345,7 +31377,10 @@ var init_format_helpers = __esm(() => {
     turn_summary: "TURN+",
     compaction: "CMPCT",
     retry: "RETRY",
-    error: "ERROR"
+    error: "ERROR",
+    auto_commit_success: "AUTO+",
+    auto_commit_skipped: "AUTO-",
+    auto_commit_failed: "AUTO!"
   };
 });
 
@@ -39283,6 +39318,30 @@ __export(exports_clean, {
 });
 import { existsSync as existsSync28, readFileSync as readFileSync28, readdirSync as readdirSync13, rmSync as rmSync4, statSync as statSync4 } from "fs";
 import { join as join30 } from "path";
+function parseDuration2(raw) {
+  const match = /^(\d+)(ms|s|m|h|d)$/i.exec(raw.trim());
+  if (!match)
+    return null;
+  const amount = Number(match[1]);
+  const unit = match[2].toLowerCase();
+  const multipliers = {
+    ms: 1,
+    s: 1000,
+    m: 60000,
+    h: 3600000,
+    d: 86400000
+  };
+  return amount * multipliers[unit];
+}
+function parseBeforeArgument2(raw) {
+  const durationMs = parseDuration2(raw);
+  if (durationMs !== null)
+    return Date.now() - durationMs;
+  const isoMs = Date.parse(raw);
+  if (Number.isFinite(isoMs))
+    return isoMs;
+  throw new Error(`Invalid --before value '${raw}'. Use ISO date or duration like 7d.`);
+}
 function parseTtlDaysFromEnvironment() {
   const rawValue = process.env.SPECIALISTS_JOB_TTL_DAYS ?? process.env.JOB_TTL_DAYS;
   if (!rawValue)
@@ -39301,6 +39360,9 @@ function parseOptions2(argv) {
   let staleAfterHours = DEFAULT_STALE_AFTER_HOURS;
   let reapOrphans = false;
   let psDashboard = false;
+  let observability = false;
+  let observabilityBeforeMs = null;
+  let includeEpics = false;
   for (let index = 0;index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--all") {
@@ -39321,6 +39383,26 @@ function parseOptions2(argv) {
     }
     if (argument === "--ps") {
       psDashboard = true;
+      continue;
+    }
+    if (argument === "--observability") {
+      observability = true;
+      continue;
+    }
+    if (argument === "--include-epics") {
+      includeEpics = true;
+      continue;
+    }
+    if (argument === "--before") {
+      const value = argv[index + 1];
+      if (!value)
+        throw new Error("Missing value for --before");
+      observabilityBeforeMs = parseBeforeArgument2(value);
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--before=")) {
+      observabilityBeforeMs = parseBeforeArgument2(argument.slice("--before=".length));
       continue;
     }
     if (argument === "--aggressive-prune") {
@@ -39373,10 +39455,19 @@ function parseOptions2(argv) {
   if (reapOrphans && (removeAllCompleted || keepRecentCount !== null || staleProcessesOnly || psDashboard)) {
     throw new Error("--reap-orphans cannot be combined with --all, --keep, --processes, or --ps");
   }
-  if (psDashboard && (removeAllCompleted || keepRecentCount !== null || staleProcessesOnly || aggressivePrune)) {
-    throw new Error("--ps cannot be combined with --all, --keep, --processes, or --aggressive-prune");
+  if (psDashboard && (removeAllCompleted || keepRecentCount !== null || staleProcessesOnly || aggressivePrune || observability)) {
+    throw new Error("--ps cannot be combined with --all, --keep, --processes, --aggressive-prune, or --observability");
   }
-  return { removeAllCompleted, dryRun, keepRecentCount, aggressivePrune, staleProcessesOnly, staleAfterHours, reapOrphans, psDashboard };
+  if (observability && (removeAllCompleted || keepRecentCount !== null || staleProcessesOnly || reapOrphans || psDashboard || aggressivePrune)) {
+    throw new Error("--observability cannot be combined with --all, --keep, --processes, --reap-orphans, --ps, or --aggressive-prune");
+  }
+  if (!observability && (observabilityBeforeMs !== null || includeEpics)) {
+    throw new Error("--before and --include-epics require --observability");
+  }
+  if (observability && observabilityBeforeMs === null) {
+    throw new Error("--observability requires --before <iso|duration>");
+  }
+  return { removeAllCompleted, dryRun, keepRecentCount, aggressivePrune, staleProcessesOnly, staleAfterHours, reapOrphans, psDashboard, observability, observabilityBeforeMs, includeEpics };
 }
 function readDirectorySizeBytes(directoryPath) {
   let totalBytes = 0;
@@ -39513,6 +39604,17 @@ function renderSummary(removedCount, freedBytes, dryRun) {
   const noun = removedCount === 1 ? "directory" : "directories";
   return `${action} ${removedCount} job ${noun} (${formatBytes2(freedBytes)} freed)`;
 }
+function printObservabilityPruneReport(report) {
+  console.log(report.dryRun ? "Would prune observability SQLite rows:" : "Pruned observability SQLite rows:");
+  console.log(`  before: ${new Date(report.beforeMs).toISOString()}`);
+  console.log(`  events cutoff: ${new Date(report.eventsCutoffMs).toISOString()}`);
+  console.log(`  specialist_events: ${report.deletedEvents}`);
+  console.log(`  specialist_results: ${report.deletedResults}`);
+  console.log(`  specialist_jobs: ${report.deletedJobs}`);
+  console.log(`  extracted jobs: ${report.extractedJobs}`);
+  console.log(`  epic_runs: ${report.deletedEpicRuns}${report.includeEpics ? "" : " (skipped, use --include-epics)"}`);
+  console.log(`  skipped active-chain jobs: ${report.skippedActiveChainJobs}`);
+}
 function printDryRunPlan(jobs) {
   if (jobs.length === 0)
     return;
@@ -39544,7 +39646,7 @@ function printWorktreeGcSummary(removed, skipped) {
 }
 function printUsageAndExit2(message) {
   console.error(message);
-  console.error("Usage: specialists|sp clean [--all] [--keep <n>] [--aggressive-prune] [--processes [--stale-after <hours>]] [--reap-orphans] [--dry-run] (stale specialist jobs)");
+  console.error("Usage: specialists|sp clean [--all] [--keep <n>] [--aggressive-prune] [--processes [--stale-after <hours>]] [--reap-orphans] [--observability --before <iso|duration> [--include-epics]] [--dry-run]");
   process.exit(1);
 }
 function findOrphanProcesses() {
@@ -39731,6 +39833,17 @@ async function run22() {
   const jobsDirectoryPath = resolveJobsDir();
   const sqliteClient = createObservabilitySqliteClient();
   const statuses = sqliteClient?.listStatuses() ?? [];
+  if (options.observability) {
+    if (!sqliteClient)
+      throw new Error("Failed to initialize observability SQLite schema. Run `specialists db setup` first.");
+    const report = sqliteClient.pruneObservabilityData({
+      beforeMs: options.observabilityBeforeMs,
+      includeEpics: options.includeEpics,
+      apply: !options.dryRun
+    });
+    printObservabilityPruneReport(report);
+    return;
+  }
   if (options.psDashboard) {
     const candidates = selectPsDashboardCleanCandidates(statuses);
     if (options.dryRun) {
@@ -50505,6 +50618,7 @@ async function run34() {
         "Usage: specialists clean [--all] [--keep <n>] [--dry-run]",
         "       specialists clean --ps [--dry-run]",
         "       specialists clean --reap-orphans [--dry-run]",
+        "       specialists clean --observability --before <iso|duration> [--include-epics] [--dry-run]",
         "",
         "Clean specialist runtime artifacts and dashboard visibility.",
         "",
@@ -50512,17 +50626,26 @@ async function run34() {
         "  - removes done/error job directories older than SPECIALISTS_JOB_TTL_DAYS",
         "  - TTL defaults to 7 days if env is unset",
         "  - never removes SQLite artifacts (*.db, *.db-wal, *.db-shm)",
+        "  - never prunes observability.db rows unless --observability is explicit",
         "",
         "Dashboard cleanup:",
         "  - --ps soft-hides terminal rows from default sp ps",
         "  - --ps does not delete SQLite rows or change job status",
         "  - sp ps --include-cleaned / --all restore audit visibility",
         "",
+        "Observability cleanup:",
+        "  - --observability prunes terminal SQLite rows via the DB prune path",
+        "  - requires --before <iso|duration>; examples: 30d, 2026-01-01T00:00:00Z",
+        "  - preserves active/waiting/running jobs and memories_* tables",
+        "",
         "Options:",
         "  --all           Remove all done/error job directories regardless of age",
         "  --keep <n>      Keep only the N most recent done/error job directories",
         "  --dry-run       Preview filesystem, dashboard, or process cleanup",
         "  --ps            Hide terminal rows from default ps without deleting DB history",
+        "  --observability Prune terminal observability.db rows (requires --before)",
+        "  --before <value> Cutoff for --observability (ISO date or duration like 30d)",
+        "  --include-epics Also prune eligible terminal epic_runs with --observability",
         "  --reap-orphans  Reap orphan/stale leaked tool processes; detects",
         "                  dead-pid (PID gone), orphaned-keep-alive (PID alive,",
         "                  ppid=1, status=waiting), dead-toolchain (PID alive but",
@@ -50536,6 +50659,8 @@ async function run34() {
         "  specialists clean --dry-run",
         "  specialists clean --ps --dry-run",
         "  specialists clean --ps",
+        "  specialists clean --observability --before 30d --dry-run",
+        "  specialists clean --observability --before 30d",
         "  specialists clean --reap-orphans --dry-run",
         ""
       ].join(`
