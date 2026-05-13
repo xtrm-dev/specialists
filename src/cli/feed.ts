@@ -445,7 +445,13 @@ function printSnapshot(
   jobsDir?: string
 ): void {
   if (merged.length === 0) {
-    if (!options.json) console.log(dim('No events found.'));
+    if (!options.json) {
+      if (options.jobId && sqliteClient) {
+        console.log(dim(`job ${options.jobId} not found in .specialists/db/observability.db`));
+      } else {
+        console.log(dim('No events found.'));
+      }
+    }
     return;
   }
 
@@ -896,7 +902,11 @@ export async function run(): Promise<void> {
     const jobsDir = join(process.cwd(), '.specialists', 'jobs');
 
     if (!existsSync(jobsDir)) {
-      console.log(dim('No jobs directory found.'));
+      if (options.jobId && sqliteClient) {
+        console.log(dim(`job ${options.jobId} not found in .specialists/db/observability.db`));
+      } else {
+        console.log(dim('No jobs directory found.'));
+      }
       return;
     }
 

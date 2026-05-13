@@ -98,9 +98,21 @@ export interface JobEventsBatch {
  * Read events from all jobs in a jobs directory.
  * Returns batches unsorted — use mergeTimelineEvents for chronological order.
  */
-export function readAllJobEvents(jobsDir: string): JobEventsBatch[] {
+export function readAllJobEvents(jobsDir: string, jobId?: string): JobEventsBatch[] {
   const sqliteClient = createObservabilitySqliteClient();
   try {
+    if (jobId !== undefined && sqliteClient) {
+      const events = sqliteClient.readEvents(jobId);
+      if (events.length === 0) return [];
+      const status = typeof (sqliteClient as any).getStatus === 'function' ? (sqliteClient as any).getStatus(jobId) : undefined;
+      return [{
+        jobId,
+        specialist: status?.specialist ?? 'unknown',
+        beadId: status?.bead_id,
+        events,
+      }];
+    }
+
     const statuses = typeof sqliteClient?.listStatuses === 'function' ? sqliteClient.listStatuses() : [];
     if (statuses.length > 0 && sqliteClient) {
       return statuses.flatMap((status) => {
@@ -247,19 +259,13 @@ export function queryTimeline(
   jobsDir: string,
   filter: TimelineFilter = {}
 ): Array<{ jobId: string; specialist: string; beadId?: string; event: TimelineEvent }> {
-  let batches = readAllJobEvents(jobsDir);
+  const batches = readAllJobEvents(jobsDir, filter.jobId);
 
-  // Early filter by jobId if specified (avoid reading all jobs)
-  if (filter.jobId !== undefined) {
-    batches = batches.filter((b) => b.jobId === filter.jobId);
-  }
+  const filteredBatches = filter.specialist !== undefined
+    ? batches.filter((b) => b.specialist === filter.specialist)
+    : batches;
 
-  // Early filter by specialist if specified
-  if (filter.specialist !== undefined) {
-    batches = batches.filter((b) => b.specialist === filter.specialist);
-  }
-
-  const merged = mergeTimelineEvents(batches);
+  const merged = mergeTimelineEvents(filteredBatches);
   return filterTimelineEvents(merged, filter);
 }
 
