@@ -18,6 +18,23 @@ domain:
 
 # Installation and Distribution
 
+## Runtime requirement: Bun
+
+Specialists is Bun-only. Require Bun >= 1.0.0 before installing or running the package.
+
+Verify:
+
+```bash
+bun --version
+```
+
+Install Bun if missing:
+
+```bash
+curl -fsSL https://bun.sh/install | bash
+```
+
+
 Specialists now uses a two-category distribution model. Install or upgrade the npm package to choose the canonical Specialist runtime version; do not copy default files into every repository as the normal path.
 
 ## Category A: runtime-resolved package assets
