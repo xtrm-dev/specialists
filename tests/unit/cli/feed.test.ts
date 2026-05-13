@@ -119,7 +119,7 @@ describe('feed CLI', () => {
     const { run } = await import('../../../src/cli/feed.js');
     await run();
 
-    expect(logs.join('\n')).toContain('job missing-job not found in .specialists/db/observability.db');
+    expect(stripAnsi(logs.join('\n'))).toContain('job missing-job not found in .specialists/db/observability.db');
   });
 
   it('shows appropriate message when jobs directory is empty', async () => {
