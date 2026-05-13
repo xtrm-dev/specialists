@@ -13,7 +13,7 @@ vi.mock('node:child_process', () => ({
 import { spawnSync } from 'node:child_process';
 import * as observabilitySqlite from '../../../src/specialist/observability-sqlite.js';
 import * as epicReadiness from '../../../src/specialist/epic-readiness.js';
-import { evaluateMergeWorthiness, resolveChainEpicMembership, resolveMergeTargets, topologicallySortChains, run, checkEpicUnresolvedGuard, runMergePlan } from '../../../src/cli/merge.js';
+import { evaluateMergeWorthiness, resolveChainEpicMembership, resolveMergeTargets, topologicallySortChains, run, checkEpicUnresolvedGuard, runMergePlan, previewBranchMergeDelta, rebaseBranchOntoMaster } from '../../../src/cli/merge.js';
 
 function asSpawnResult(partial: Partial<SpawnSyncReturns<string>>): SpawnSyncReturns<string> {
   return {
@@ -170,6 +170,39 @@ describe('merge CLI', () => {
 
     const decision = evaluateMergeWorthiness({ branch: 'feature/already-merged', files: [], substantiveFiles: [], noiseFiles: [] }, 'feature/already-merged');
     expect(decision).toEqual({ shouldMerge: false, reason: 'already-published' });
+  });
+
+  it('honors target branch override for worthiness and rebase target', () => {
+    const commands: Array<{ command: string; args: string[] }> = [];
+    (spawnSync as unknown as ReturnType<typeof vi.fn>).mockImplementation((command: string, args: string[]) => {
+      commands.push({ command, args: [...args] });
+      if (command === 'git' && args[0] === 'rev-parse' && args.includes('--verify')) {
+        return asSpawnResult({ stdout: 'abc123\n' });
+      }
+      if (command === 'git' && args[0] === 'symbolic-ref') {
+        return asSpawnResult({ stdout: 'origin/main\n' });
+      }
+      if (command === 'git' && args[0] === 'merge-base' && args.includes('--is-ancestor')) {
+        return asSpawnResult({ status: 0 });
+      }
+      if (command === 'git' && args[0] === 'diff' && args.includes('--name-status')) {
+        return asSpawnResult({ stdout: 'M src/child.ts\n' });
+      }
+      if (command === 'git' && args[0] === 'rebase') {
+        return asSpawnResult({ status: 0 });
+      }
+      if (command === 'git' && args[0] === 'rev-parse' && args.includes('--abbrev-ref')) {
+        return asSpawnResult({ stdout: 'feature/child\n' });
+      }
+      return asSpawnResult({ stdout: '' });
+    });
+
+    const decision = evaluateMergeWorthiness({ branch: 'feature/child', files: [], substantiveFiles: [], noiseFiles: [] }, 'feature/child', '/tmp/repo', 'feature/base');
+    expect(decision).toEqual({ shouldMerge: false, reason: 'already-published' });
+
+    rebaseBranchOntoMaster('feature/child', '/tmp/wt', 'feature/base');
+
+    expect(commands.some(entry => entry.command === 'git' && entry.args[0] === 'rebase' && entry.args[1] === 'feature/base')).toBe(true);
   });
 
   it('resolves chain-root target to one branch', () => {
