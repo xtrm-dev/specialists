@@ -127,18 +127,26 @@ describe('process-health', () => {
     expect(reapable[1]?.reason).toBe('deleted-worktree-process');
   });
 
-  it('collects stale specialist jobs for dead pids and orphaned keep-alives', () => {
+  it('collects stale specialist jobs for dead pids, orphaned keep-alives, and dead toolchains', () => {
     root = mkdtempSync(join(tmpdir(), 'process-health-'));
     const meminfo = join(root, 'meminfo');
     writeFileSync(meminfo, 'MemAvailable:	100000 kB\n', 'utf-8');
     writeFileSync(join(root, 'uptime'), '4000.00 1000.00\n', 'utf-8');
 
-    const alivePid = 601;
+    const deadPid = 600;
     const keepAlivePid = 602;
+    const deadToolchainPid = 603;
     writeProcProcess(root, keepAlivePid, {
       cmdline: 'specialists run executor --bead abc\0',
       comm: 'bun',
       stat: '602 (bun) S 1 1 1 0 -1 4194560 100 0 0 80 20 0 0 20 0 1 0 0 100000',
+      status: 'VmRSS:\t1024 kB\n',
+      cwd: '/repo/.worktrees/xtrm-tools',
+    });
+    writeProcProcess(root, deadToolchainPid, {
+      cmdline: 'specialists run executor --bead stale\0',
+      comm: 'bun',
+      stat: '603 (bun) S 2 1 1 0 -1 4194560 100 0 0 80 20 0 0 20 0 1 0 0 100000',
       status: 'VmRSS:\t1024 kB\n',
       cwd: '/repo/.worktrees/xtrm-tools',
     });
@@ -149,16 +157,19 @@ describe('process-health', () => {
       minKeepAliveAgeMs: 30 * 60 * 1000,
       observabilityClient: {
         listStatuses: () => [
-          { id: 'dead-job', bead_id: 'bead-dead', specialist: 'tester', status: 'running', pid: 600, updated_at_ms: 1_000_000 },
+          { id: 'dead-job', bead_id: 'bead-dead', specialist: 'tester', status: 'running', pid: deadPid, updated_at_ms: 1_000_000 },
           { id: 'keepalive-job', bead_id: 'bead-live', specialist: 'tester', status: 'waiting', pid: keepAlivePid, updated_at_ms: 1_000_000 },
-          { id: 'too-fresh', bead_id: 'bead-fresh', specialist: 'tester', status: 'waiting', pid: alivePid, updated_at_ms: 3_900_000 },
+          { id: 'toolchain-job', bead_id: 'bead-toolchain', specialist: 'tester', status: 'running', pid: deadToolchainPid, updated_at_ms: 1_000_000 },
+          { id: 'too-fresh', bead_id: 'bead-fresh', specialist: 'tester', status: 'waiting', pid: 601, updated_at_ms: 3_900_000 },
         ],
+        getLastActivityTimestampMs: (jobId) => (jobId === 'toolchain-job' ? 2_000_000 : null),
       },
     });
 
     expect(jobs).toEqual([
-      { jobId: 'dead-job', pid: 600, beadId: 'bead-dead', specialist: 'tester', cwd: null, ageMs: 3_000_000, reason: 'dead-pid' },
+      { jobId: 'dead-job', pid: deadPid, beadId: 'bead-dead', specialist: 'tester', cwd: null, ageMs: 3_000_000, reason: 'dead-pid' },
       { jobId: 'keepalive-job', pid: keepAlivePid, beadId: 'bead-live', specialist: 'tester', cwd: '/repo/.worktrees/xtrm-tools', ageMs: 3_000_000, reason: 'orphaned-keep-alive' },
+      { jobId: 'toolchain-job', pid: deadToolchainPid, beadId: 'bead-toolchain', specialist: 'tester', cwd: '/repo/.worktrees/xtrm-tools', ageMs: 3_000_000, reason: 'dead-toolchain' },
     ]);
   });
   it('does not count MCP, tsserver, or shell tooling as specialist jobs', () => {
