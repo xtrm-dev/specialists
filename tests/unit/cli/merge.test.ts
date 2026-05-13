@@ -47,6 +47,58 @@ describe('merge CLI', () => {
     vi.restoreAllMocks();
   });
 
+  it('ignores dirty paths under managed prefixes', () => {
+    (spawnSync as unknown as ReturnType<typeof vi.fn>).mockImplementation((command: string, args: readonly string[]) => {
+      if (command === 'git' && args[0] === 'worktree') {
+        return asSpawnResult({ status: 0, stdout: `worktree ${testRoot}\n` });
+      }
+
+      if (command === 'git' && args[0] === 'status') {
+        return asSpawnResult({
+          status: 0,
+          stdout: ['?? .beads/issues.jsonl', '?? .xtrm/skills/active/foo/SKILL.md'].join('\n'),
+        });
+      }
+
+      throw new Error(`unexpected command: ${command} ${args.join(' ')}`);
+    });
+
+    expect(() => runMergePlan([], { mode: 'direct', publicationLabel: 'epic-test' })).not.toThrow();
+    expect(spawnSync).not.toHaveBeenCalledWith(
+      'git',
+      ['stash', 'push', '--include-untracked', '--message', 'sp epic merge epic-test auto-shelve'],
+      expect.any(Object),
+    );
+  });
+
+  it('keeps non-ignored dirty paths visible for merge shelving', () => {
+    (spawnSync as unknown as ReturnType<typeof vi.fn>).mockImplementation((command: string, args: readonly string[]) => {
+      if (command === 'git' && args[0] === 'worktree') {
+        return asSpawnResult({ status: 0, stdout: `worktree ${testRoot}\n` });
+      }
+
+      if (command === 'git' && args[0] === 'status') {
+        return asSpawnResult({
+          status: 0,
+          stdout: ['?? .beads/issues.jsonl', '?? .xtrm/skills/active/foo/SKILL.md', '?? src/cli/run.ts'].join('\n'),
+        });
+      }
+
+      if (command === 'git' && args[0] === 'stash') {
+        return asSpawnResult({ status: 0, stdout: 'Saved working directory and index state WIP on main: test' });
+      }
+
+      throw new Error(`unexpected command: ${command} ${args.join(' ')}`);
+    });
+
+    expect(() => runMergePlan([], { mode: 'direct', publicationLabel: 'epic-test' })).not.toThrow();
+    expect(spawnSync).toHaveBeenCalledWith(
+      'git',
+      ['stash', 'push', '--include-untracked', '--message', 'sp epic merge epic-test auto-shelve'],
+      expect.any(Object),
+    );
+  });
+
   it('sorts chains in dependency order', () => {
     const sorted = topologicallySortChains(
       [
