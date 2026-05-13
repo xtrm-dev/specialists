@@ -1,6 +1,6 @@
 // tests/unit/specialist/runner.test.ts
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execSync } from 'node:child_process';
@@ -103,6 +103,44 @@ describe('SpecialistRunner', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockSession = makeMockSession();
+  });
+
+
+  it('does not write specialist.output_file unless legacy job file output is enabled', async () => {
+    const outputPath = join(mkdtempSync(join(tmpdir(), 'runner-output-file-')), 'test-result.md');
+    const runner = new SpecialistRunner({
+      loader: makeLoader({}, 'auto', {}, { output_file: outputPath }),
+      hooks: new HookEmitter({ tracePath: '/tmp/test-hooks-trace.jsonl' }),
+      circuitBreaker: new CircuitBreaker(),
+      sessionFactory: vi.fn().mockResolvedValue(mockSession),
+    });
+
+    await runner.run({ name: 'test-spec', prompt: 'analyze this' });
+
+    expect(existsSync(outputPath)).toBe(false);
+  });
+
+  it('keeps specialist.output_file in legacy job file output mode', async () => {
+    const previousMode = process.env.SPECIALISTS_JOB_FILE_OUTPUT;
+    process.env.SPECIALISTS_JOB_FILE_OUTPUT = 'on';
+    const outputDir = mkdtempSync(join(tmpdir(), 'runner-output-file-'));
+    const outputPath = join(outputDir, 'test-result.md');
+    try {
+      const runner = new SpecialistRunner({
+        loader: makeLoader({}, 'auto', {}, { output_file: outputPath }),
+        hooks: new HookEmitter({ tracePath: '/tmp/test-hooks-trace.jsonl' }),
+        circuitBreaker: new CircuitBreaker(),
+        sessionFactory: vi.fn().mockResolvedValue(mockSession),
+      });
+
+      await runner.run({ name: 'test-spec', prompt: 'analyze this' });
+
+      expect(readFileSync(outputPath, 'utf-8')).toContain('"status":"success"');
+    } finally {
+      if (previousMode === undefined) delete process.env.SPECIALISTS_JOB_FILE_OUTPUT;
+      else process.env.SPECIALISTS_JOB_FILE_OUTPUT = previousMode;
+      rmSync(outputDir, { recursive: true, force: true });
+    }
   });
 
   it('executes specialist and returns output', async () => {

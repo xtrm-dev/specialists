@@ -1,6 +1,7 @@
 // src/specialist/runner.ts
 import { createHash } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
+import { isJobFileOutputEnabled } from './job-file-output.js';
 import { renderTemplate } from './templateEngine.js';
 import {
   PiAgentSession,
@@ -1442,7 +1443,7 @@ _This project is indexed by GitNexus. You MUST use these tools — do NOT fall b
       process.stderr.write(`[specialists] output contract warnings:\n${outputContractWarnings.map(msg => `  ⚠ ${msg}`).join('\n')}\n`);
     }
 
-    if (output_file) {
+    if (output_file && isJobFileOutputEnabled()) {
       await writeFile(output_file, output, 'utf-8').catch(() => {});
     }
 

@@ -1351,10 +1351,12 @@ export class Supervisor {
       const appendError = `[bead-append-failed] ${appendResult.error ?? 'Unknown error'}`;
       appendTimelineEvent(createMetaEvent('bead_append_failed', appendError));
       setStatus({ current_event: 'bead_append_failed', last_event_at_ms: Date.now() });
-      try {
-        appendFileSync(this.resultPath(id), `\n\n${appendError}\n`, 'utf-8');
-      } catch {
-        // ignore secondary artifact write failures
+      if (this.isJobFileOutputEnabled) {
+        try {
+          appendFileSync(this.resultPath(id), `\n\n${appendError}\n`, 'utf-8');
+        } catch {
+          // ignore secondary artifact write failures
+        }
       }
       return false;
     };
@@ -1406,8 +1408,10 @@ export class Supervisor {
       try {
         const output = await resumeFn(task);
         latestOutput = output;
-        mkdirSync(this.jobDir(id), { recursive: true });
-        writeFileSync(this.resultPath(id), output, 'utf-8');
+        if (this.isJobFileOutputEnabled) {
+          mkdirSync(this.jobDir(id), { recursive: true });
+          writeFileSync(this.resultPath(id), output, 'utf-8');
+        }
         try {
           this.withSqliteOperation('upsertResult:resume_turn', (client) => client.upsertResult(id, output));
         } catch (error: unknown) {

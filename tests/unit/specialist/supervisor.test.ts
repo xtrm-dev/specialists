@@ -21,6 +21,7 @@ import * as childProcess from 'node:child_process';
 // "Cannot replace module namespace object's binding's value".
 vi.mock('node:child_process', () => ({}));
 import { Supervisor } from '../../../src/specialist/supervisor.js';
+import { isJobFileOutputEnabled } from '../../../src/specialist/job-file-output.js';
 import type { SupervisorStatus } from '../../../src/specialist/supervisor.js';
 import { createObservabilitySqliteClient } from '../../../src/specialist/observability-sqlite.js';
 
@@ -51,6 +52,16 @@ async function waitForCondition(check: () => boolean, timeoutMs = 1500): Promise
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
 }
+
+
+describe('job file output mode', () => {
+  it('defaults off and enables only explicit legacy values', () => {
+    expect(isJobFileOutputEnabled({} as NodeJS.ProcessEnv)).toBe(false);
+    expect(isJobFileOutputEnabled({ SPECIALISTS_JOB_FILE_OUTPUT: 'off' } as NodeJS.ProcessEnv)).toBe(false);
+    expect(isJobFileOutputEnabled({ SPECIALISTS_JOB_FILE_OUTPUT: 'on' } as NodeJS.ProcessEnv)).toBe(true);
+    expect(isJobFileOutputEnabled({ SPECIALISTS_JOB_FILE_OUTPUT: '1' } as NodeJS.ProcessEnv)).toBe(true);
+  });
+});
 
 describe('Supervisor', () => {
   let tmpDir: string;
@@ -90,7 +101,19 @@ describe('Supervisor', () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('run() creates job directory with status.json, events.jsonl, result.txt', async () => {
+  it('run() does not create legacy job files by default', async () => {
+    const sup = createSupervisor({ jobsDir, runner: makeMockRunner(), runOptions: makeRunOptions() });
+    const id = await sup.run();
+
+    const jobDir = join(jobsDir, id);
+    expect(existsSync(join(jobDir, 'status.json'))).toBe(false);
+    expect(existsSync(join(jobDir, 'events.jsonl'))).toBe(false);
+    expect(existsSync(join(jobDir, 'result.txt'))).toBe(false);
+    expect(sup.readResult(id)).toBe('test output');
+  });
+
+  it('run() creates status.json, events.jsonl, and result.txt in legacy job file output mode', async () => {
+    process.env.SPECIALISTS_JOB_FILE_OUTPUT = 'on';
     const sup = createSupervisor({ jobsDir, runner: makeMockRunner(), runOptions: makeRunOptions() });
     const id = await sup.run();
 
@@ -347,7 +370,8 @@ describe('Supervisor', () => {
     expect(runComplete?.gitnexus_summary?.symbols_analyzed).toContain('run');
   });
 
-  it('result.txt contains the runner output string', async () => {
+  it('result.txt contains the runner output string in legacy job file output mode', async () => {
+    process.env.SPECIALISTS_JOB_FILE_OUTPUT = 'on';
     const sup = createSupervisor({
       jobsDir,
       runner: makeMockRunner('hello world output'),
