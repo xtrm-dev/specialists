@@ -9,7 +9,7 @@ import { SpecialistRunner } from '../specialist/runner.js';
 import { CircuitBreaker } from '../utils/circuitBreaker.js';
 import { HookEmitter } from '../specialist/hooks.js';
 import { BeadsClient, buildBeadContext } from '../specialist/beads.js';
-import { Supervisor } from '../specialist/supervisor.js';
+import { AUTO_COMMIT_NOISE_PREFIXES, Supervisor } from '../specialist/supervisor.js';
 import { resolveJobsDir } from '../specialist/job-root.js';
 import { provisionWorktree } from '../specialist/worktree.js';
 import { createObservabilitySqliteClient } from '../specialist/observability-sqlite.js';
@@ -463,7 +463,7 @@ function buildReusedWorktreeAwarenessBlock(options: {
   ].join('\n');
 }
 
-function buildInjectedReviewerDiffVariables(cwd: string, maxFiles = 20): Record<string, string> {
+export function buildInjectedReviewerDiffVariables(cwd: string, maxFiles = 20): Record<string, string> {
   const read = (command: string): string => {
     try {
       return execSync(command, {
@@ -521,7 +521,8 @@ function buildInjectedReviewerDiffVariables(cwd: string, maxFiles = 20): Record<
       .split('\n')
       .map((line) => line.trim())
       .filter(Boolean)
-      .slice(0, maxFiles);
+      .slice(0, maxFiles)
+      .filter((file) => !AUTO_COMMIT_NOISE_PREFIXES.some((prefix) => file.startsWith(prefix)));
 
     if (files.length === 0) continue;
 

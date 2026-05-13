@@ -287,7 +287,7 @@ function isGitnexusAnalyzeRequired(permissionRequired: string | undefined): bool
   return permissionRequired === 'MEDIUM' || permissionRequired === 'HIGH';
 }
 
-const AUTO_COMMIT_NOISE_PREFIXES = ['.xtrm/', '.wolf/', '.specialists/jobs/', '.beads/'] as const;
+export const AUTO_COMMIT_NOISE_PREFIXES = ['.xtrm/', '.wolf/', '.specialists/jobs/', '.beads/'] as const;
 
 function isAutoCommitNoisePath(path: string): boolean {
   return AUTO_COMMIT_NOISE_PREFIXES.some((prefix) => path.startsWith(prefix));
