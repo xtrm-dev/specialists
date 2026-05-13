@@ -417,7 +417,7 @@ Run `specialists list` if you need live registry. Choose by task, not habit.
 | Multiple review perspectives | `parallel-review` | Critical diff needs independent review passes |
 | Test execution | `test-runner` | Need suites run and failures interpreted |
 | Docs audit/sync | `sync-docs` | Docs may be stale or need targeted synchronization |
-| External/live research | `researcher` | Current non-security library/docs/media lookup is needed |
+| External/live research | `researcher` | Any library/API/framework/CLI question — dispatch BEFORE answering from training data |
 | Specialist config | `specialists-creator` | Creating or changing specialist JSON/config |
 | Release publication | `changelog-keeper` | New tag is being cut |
 
@@ -431,7 +431,7 @@ Selection rules:
 - Executor, debugger, changelog-keeper, sync-docs, and test-runner should not carry mandatory `<thinking>` blocks. That bloats output without payoff and hides the real contract.
 - Executor does not own full test validation; use reviewer/test-runner for that phase.
 - Sync-docs is for audit/sync; executor is for heavy doc rewrites.
-- Researcher is for current external info, not repo archaeology.
+- Researcher is for current external info, not repo archaeology. **Dispatch BEFORE answering any library/API/framework/CLI question from training data** — your knowledge is stale by months and APIs drift silently. The cost is one CLI call; the alternative is shipping wrong API usage.
 - Specialists-creator should precede specialist config/schema edits.
 
 ## Code-sanity
@@ -689,9 +689,12 @@ Overthinker:
 - Chain position: before planner/executor when design uncertainty is high.
 
 Researcher:
-- Use for current external docs, package behavior, or ecosystem facts that repo cannot answer.
-- Bead shape: source list, question set, required citations.
-- Chain position: before executor when outside facts matter.
+- Dispatch **BEFORE** answering any library/API/framework/CLI question from training data. Training is months stale; APIs change; cheap CLI lookups (`ctx7`, `deepwiki`, `ghgrep`) replace the guess.
+- Use for: API syntax checks, config options, version migrations, library-specific debugging, "how do others implement X", recent releases, public repo internals.
+- Anti-pattern to break: "I think Library X works like Y…" → instead dispatch researcher with the exact question. The cost (~30s, claude-sonnet-4-6 via tool mode) is far less than shipping wrong API usage.
+- Bead shape: source list (which libraries/repos), question set, required citations (library ID or `npx ctx7 docs /org/project "..."` output).
+- Chain position: before executor when outside facts matter; alongside explorer when a question mixes local code with external behavior.
+- Keep-alive: ask follow-ups in the same job rather than re-dispatching — researcher stays in waiting state after each turn.
 
 Test-runner:
 - Use when commands need to run and failures need classification, not fixes.
