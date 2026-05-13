@@ -1,0 +1,63 @@
+name: release-gate
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      cross_repo_assets: ${{ steps.filter.outputs.cross_repo_assets }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            cross_repo_assets:
+              - config/skills/**
+              - config/specialists/**
+              - config/mandatory-rules/**
+              - config/catalog/**
+              - config/hooks/**
+              - config/nodes/**
+              - package.json
+              - dist/index.js
+              - dist/asset-contract.json
+
+  asset-contract:
+    needs: changes
+    if: needs.changes.outputs.cross_repo_assets == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Verify committed asset contract is fresh
+        run: |
+          set -euo pipefail
+          tmp_contract=$(mktemp)
+          cp dist/asset-contract.json "$tmp_contract"
+          bun run generate:contract
+          cmp -s dist/asset-contract.json "$tmp_contract" || {
+            echo 'Run: bun run generate:contract && git add dist/asset-contract.json'
+            exit 1
+          }
+      # XTRM_TOOLS_DISPATCH_PAT must be configured in repo secrets for repository_dispatch.
+      - name: Dispatch xtrm-tools validation
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.XTRM_TOOLS_DISPATCH_PAT }}
+          repository: Jaggerxtrm/xtrm-tools
+          event-type: specialists-asset-validation
+          client-payload: |
+            {
+              "sha": "${{ github.sha }}",
+              "tag": "${{ github.ref_name }}"
+            }
