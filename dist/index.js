@@ -24814,6 +24814,18 @@ class Supervisor {
     }
   }
   readResult(id) {
+    try {
+      if (this.isDisposed) {
+        throw this.createDisposedSqliteError("readResult");
+      }
+      const sqliteResult = this.withSqliteOperation("readResult", (client) => client.readResult(id));
+      if (sqliteResult)
+        return sqliteResult;
+    } catch (error2) {
+      if (!(error2 instanceof Error && error2.message.includes("supervisor is disposed"))) {
+        console.warn(`[supervisor] SQLite readResult failed, falling back to file state: ${String(error2)}`);
+      }
+    }
     const path = this.resultPath(id);
     if (!existsSync10(path))
       return null;
