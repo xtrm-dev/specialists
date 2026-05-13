@@ -30926,6 +30926,11 @@ ${conflicts.map((file) => `- ${file}`).join(`
   throw new Error(`Merge conflict while merging '${branch}'.${context}`);
 }
 function runTypecheckGate(cwd = process.cwd()) {
+  const hasTypeScriptConfig = existsSync17(join18(cwd, "tsconfig.json")) || readdirSync6(cwd).some((entry) => entry.startsWith("tsconfig") && entry.endsWith(".json"));
+  if (!hasTypeScriptConfig) {
+    console.log("TypeScript gate: skipped (no tsconfig)");
+    return;
+  }
   const tsc = runCommand("bunx", ["tsc", "--noEmit"], cwd);
   if (tsc.status === 0)
     return;
