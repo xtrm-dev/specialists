@@ -79,7 +79,7 @@ specialists run codebase-explorer --prompt "Map the CLI architecture"
 - creates `specialists/`
 - creates `.specialists/` runtime dirs (`jobs/`, `ready/`)
 - adds `.specialists/` to `.gitignore`
-- injects the canonical Specialists Workflow block into `AGENTS.md` and `CLAUDE.md`
+- injects the canonical Specialists Workflow block into `AGENTS.md`
 - registers the Specialists MCP server at project scope
 
 Verify bootstrap state:
