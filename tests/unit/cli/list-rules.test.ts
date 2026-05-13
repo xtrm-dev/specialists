@@ -34,6 +34,14 @@ function setupFixture(): string {
   writeFileSync(join(root, 'config/mandatory-rules/role-rule.md'), '---\nname: role-rule\nkind: mandatory-rule\n---\nRole.\n');
   writeFileSync(join(root, 'config/mandatory-rules/orphan-rule.md'), '---\nname: orphan-rule\nkind: mandatory-rule\n---\nOrphan.\n');
 
+  // user overlay mandatory-rules/
+  mkdirSync(join(root, '.specialists/user/mandatory-rules'), { recursive: true });
+  writeFileSync(join(root, '.specialists/user/mandatory-rules/index.json'), JSON.stringify({
+    required_template_sets: ['user-rule'],
+    default_template_sets: [],
+  }));
+  writeFileSync(join(root, '.specialists/user/mandatory-rules/user-rule.md'), '---\nname: user-rule\nkind: mandatory-rule\n---\nUser.\n');
+
   // config/specialists/
   mkdirSync(join(root, 'config/specialists'), { recursive: true });
   writeFileSync(join(root, 'config/specialists/alpha.specialist.json'), JSON.stringify({
@@ -63,9 +71,10 @@ describe('sp list-rules', () => {
   it('renders rule × specialist matrix with R/D/x marks', () => {
     const { stdout, status } = runListRules(fixture);
     expect(status).toBe(0);
-    expect(stdout).toMatch(/4 sets, 2 specialists/);
+    expect(stdout).toMatch(/5 sets, 2 specialists/);
     expect(stdout).toMatch(/alpha\s+.*\s+R\s+/); // alpha gets required
     expect(stdout).toMatch(/beta\s+.*\s+R\s+/);  // beta still gets required
+    expect(stdout).toMatch(/user-rule/);
     expect(stdout).toMatch(/Orphan rules/);
     expect(stdout).toMatch(/orphan-rule/);
   });
@@ -99,8 +108,9 @@ describe('sp list-rules', () => {
     const { stdout, status } = runListRules(fixture, ['--json']);
     expect(status).toBe(0);
     const parsed = JSON.parse(stdout);
-    expect(parsed.rules).toHaveLength(4);
+    expect(parsed.rules).toHaveLength(5);
     expect(parsed.specialists).toHaveLength(2);
+    expect(parsed.rules.find((r: any) => r.id === 'user-rule').source_tier).toBe('user');
     const alpha = parsed.specialists.find((s: any) => s.name === 'alpha');
     expect(alpha.applied_rules.map((r: any) => r.id)).toContain('core-rule');
     expect(alpha.applied_rules.map((r: any) => r.id)).toContain('role-rule');

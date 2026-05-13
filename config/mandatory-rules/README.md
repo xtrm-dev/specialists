@@ -7,17 +7,18 @@ behaviors the model must follow regardless of the specific task.
 > Filter with `sp list-rules --rule <id>` or `sp list-rules --specialist <name>`,
 > machine output via `--json`.
 
-## Layout (three tiers)
+## Layout (four tiers)
 
-The loader reads and unions indexes from three paths, in this precedence:
+The loader reads and unions indexes from four paths, in this precedence:
 
 | Tier | Path | Writer | Role |
 |------|------|--------|------|
-| 1. Source | `config/mandatory-rules/` | specialists repo commits | Canonical source of truth. Ships with the tool. |
-| 2. Canonical copy | `.specialists/default/mandatory-rules/` | `sp init --sync-defaults` | Mirror of canonical, placed in every downstream project. |
-| 3. Overlay | `.specialists/mandatory-rules/` | you (per-repo) | Repo-specific additions and overrides. Wins on set-id conflict. |
+| 1. User overlay | `.specialists/user/mandatory-rules/` | you (per-repo) | Highest-priority repo-specific additions and overrides. Wins on set-id conflict. |
+| 2. Source | `config/mandatory-rules/` | specialists repo commits | Canonical source of truth. Ships with the tool. |
+| 3. Canonical copy | `.specialists/default/mandatory-rules/` | `sp init --sync-defaults` | Mirror of canonical, placed in every downstream project. |
+| 4. Overlay | `.specialists/mandatory-rules/` | you (per-repo) | Repo-specific additions and overrides. Wins on set-id conflict. |
 
-A rule set defined in tier 3 overrides a same-id rule set from tier 2 or 1,
+A rule set defined in tier 4 overrides a same-id rule set from tier 3, 2, or 1,
 letting a repo tailor or replace canonical rules without editing the source.
 
 ## What gets injected
