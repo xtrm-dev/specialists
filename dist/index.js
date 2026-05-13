@@ -31305,7 +31305,8 @@ var init_format_helpers = __esm(() => {
 // src/cli/run.ts
 var exports_run = {};
 __export(exports_run, {
-  run: () => run14
+  run: () => run14,
+  buildInjectedReviewerDiffVariables: () => buildInjectedReviewerDiffVariables
 });
 import { join as join19 } from "path";
 import { readFileSync as readFileSync17 } from "fs";
@@ -31718,7 +31719,7 @@ function buildInjectedReviewerDiffVariables(cwd, maxFiles = 20) {
   for (const src of sources) {
     const stat2 = read(src.statCmd);
     const files = read(src.namesCmd).split(`
-`).map((line) => line.trim()).filter(Boolean).slice(0, maxFiles);
+`).map((line) => line.trim()).filter(Boolean).slice(0, maxFiles).filter((file) => !AUTO_COMMIT_NOISE_PREFIXES.some((prefix) => file.startsWith(prefix)));
     if (files.length === 0)
       continue;
     let remaining = MAX_TOTAL_HUNKS_CHARS;
