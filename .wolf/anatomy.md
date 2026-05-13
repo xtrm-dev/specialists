@@ -2,7 +2,7 @@
 
 > Auto-maintained by OpenWolf. Last scanned: 2026-04-01T04:04:51.100Z
 > Files: 531 tracked | Anatomy hits: 0 | Misses: 0
-> Manual update: 2026-05-12T18:46:56+00:00 — touched AGENTS.md/CLAUDE.md GitNexus context, CHANGELOG.md, latest .xtrm report, dist bundle, .beads config/issues, .wolf memory/buglog for unitAI-vtvjb cleanup.
+> Manual update: 2026-05-13T11:30:58+00:00 — unitAI-ldsmj touched src/pi/session.ts, tests/unit/pi/session.test.ts, and dist/index.js for Pi RPC isolation flags.
 
 ## ./
 

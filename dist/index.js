@@ -18380,6 +18380,10 @@ class PiAgentSession {
       "--no-extensions",
       ...providerArgs,
       "--no-session",
+      "--offline",
+      "--no-context-files",
+      "--no-prompt-templates",
+      "--no-themes",
       ...extraArgs
     ];
     const toolsFlag = resolvePermissionTools({
