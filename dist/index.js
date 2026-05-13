@@ -18020,12 +18020,21 @@ import { isAbsolute, resolve, sep, join as join2, dirname } from "path";
 function loadSharedToolCatalogIndex() {
   if (cachedToolCatalogIndex)
     return cachedToolCatalogIndex;
+  const overridePath = resolve(process.cwd(), ".specialists", "catalog", "index.json");
   try {
-    const indexPath = resolve(process.cwd(), ".specialists", "catalog", "index.json");
-    cachedToolCatalogIndex = loadToolCatalogIndex(readFileSync(indexPath, "utf8"));
+    cachedToolCatalogIndex = loadToolCatalogIndex(readFileSync(overridePath, "utf8"));
     return cachedToolCatalogIndex;
   } catch {
-    return;
+    try {
+      const canonicalDir = resolveCanonicalAssetDir("catalog");
+      if (!canonicalDir)
+        return;
+      const canonicalPath = resolve(canonicalDir, "index.json");
+      cachedToolCatalogIndex = loadToolCatalogIndex(readFileSync(canonicalPath, "utf8"));
+      return cachedToolCatalogIndex;
+    } catch {
+      return;
+    }
   }
 }
 function probeExtensionHealth(packageName) {
@@ -18933,6 +18942,7 @@ class PiAgentSession {
 var SessionKilledError, StallTimeoutError, TEST_COMMAND_STALL_TIMEOUT_MS = 300000, GITNEXUS_IMPACT_STALL_TIMEOUT_MS = 300000, TEST_COMMAND_PATTERNS, cachedToolCatalogIndex, WRITE_BOUNDARY_TOOL_NAMES, WORKTREE_BOUNDARY_ENV_KEY = "SPECIALISTS_WORKTREE_BOUNDARY";
 var init_session = __esm(() => {
   init_backendMap();
+  init_canonical_asset_resolver();
   init_manifest_resolver();
   init_tool_catalog();
   SessionKilledError = class SessionKilledError extends Error {
