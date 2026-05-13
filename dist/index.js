@@ -40901,39 +40901,47 @@ function checkSkillDrift() {
     }
     fix("specialists init --sync-skills");
   }
+  const defaultSkills = readdirSync15(XTRM_DEFAULT_SKILLS_DIR, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
   let linksOk = true;
-  for (const scope of ["claude", "pi"]) {
-    const activeRoot = join33(XTRM_ACTIVE_SKILLS_DIR, scope);
-    if (!existsSync30(activeRoot)) {
-      fail4(`${relative4(CWD, activeRoot)}/ missing`);
-      fix("specialists init --sync-skills");
-      linksOk = false;
+  for (const skillName of defaultSkills) {
+    const activeLinkPath = join33(XTRM_ACTIVE_SKILLS_DIR, skillName);
+    const expectedTarget = join33(XTRM_DEFAULT_SKILLS_DIR, skillName);
+    const state = isSymlinkTo(activeLinkPath, expectedTarget);
+    if (state.ok)
       continue;
+    linksOk = false;
+    const relLink = relative4(CWD, activeLinkPath);
+    if (state.reason === "missing") {
+      fail4(`${relLink} missing`);
+    } else if (state.reason === "not-symlink") {
+      fail4(`${relLink} is not a symlink`);
+    } else if (state.reason === "wrong-target") {
+      fail4(`${relLink} points to ${state.target ?? "unknown target"}`);
+    } else {
+      fail4(`${relLink} is broken`);
     }
-    const defaultSkills = readdirSync15(XTRM_DEFAULT_SKILLS_DIR, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
-    for (const skillName of defaultSkills) {
-      const activeLinkPath = join33(activeRoot, skillName);
-      const expectedTarget = join33(XTRM_DEFAULT_SKILLS_DIR, skillName);
-      const state = isSymlinkTo(activeLinkPath, expectedTarget);
-      if (state.ok)
-        continue;
-      linksOk = false;
-      const relLink = relative4(CWD, activeLinkPath);
-      if (state.reason === "missing") {
-        fail4(`${relLink} missing`);
-      } else if (state.reason === "not-symlink") {
-        fail4(`${relLink} is not a symlink`);
-      } else if (state.reason === "wrong-target") {
-        fail4(`${relLink} points to ${state.target ?? "unknown target"}`);
-      } else {
-        fail4(`${relLink} is broken`);
-      }
-      fix("specialists init --sync-skills");
+    fix("specialists init --sync-skills");
+  }
+  const legacyActiveRoots = [
+    { scope: "claude", root: join33(XTRM_ACTIVE_SKILLS_DIR, "claude") },
+    { scope: "pi", root: join33(XTRM_ACTIVE_SKILLS_DIR, "pi") }
+  ];
+  for (const { root } of legacyActiveRoots) {
+    if (!existsSync30(root))
+      continue;
+    if (isSymlinkTo(root, XTRM_ACTIVE_SKILLS_DIR).ok)
+      continue;
+    const relRoot = relative4(CWD, root);
+    if (lstatSync2(root).isDirectory()) {
+      warn3(`${relRoot}/ legacy scoped layout found`);
+    } else {
+      warn3(`${relRoot} legacy scoped layout found`);
     }
+    fix("specialists init --sync-skills");
   }
   const skillRootChecks = [
-    { root: join33(CLAUDE_DIR, "skills"), expected: ACTIVE_CLAUDE_SKILLS_DIR },
-    { root: join33(PI_DIR, "skills"), expected: ACTIVE_PI_SKILLS_DIR }
+    { root: join33(CLAUDE_DIR, "skills"), expected: XTRM_ACTIVE_SKILLS_DIR },
+    { root: join33(PI_DIR, "skills"), expected: XTRM_ACTIVE_SKILLS_DIR }
   ];
   let rootLinksOk = true;
   for (const check2 of skillRootChecks) {
@@ -41404,7 +41412,7 @@ ${bold13("specialists doctor")}
   }
   console.log("");
 }
-var bold13 = (s) => `\x1B[1m${s}\x1B[0m`, dim14 = (s) => `\x1B[2m${s}\x1B[0m`, green15 = (s) => `\x1B[32m${s}\x1B[0m`, yellow12 = (s) => `\x1B[33m${s}\x1B[0m`, red8 = (s) => `\x1B[31m${s}\x1B[0m`, CWD, CLAUDE_DIR, PI_DIR, XTRM_SKILLS_DIR, XTRM_DEFAULT_SKILLS_DIR, XTRM_ACTIVE_SKILLS_DIR, ACTIVE_CLAUDE_SKILLS_DIR, ACTIVE_PI_SKILLS_DIR, SPECIALISTS_DIR, DEFAULT_SPECIALISTS_DIR, USER_SPECIALISTS_DIR, HOOKS_DIR, CLAUDE_HOOKS_DIR, SETTINGS_FILE, MCP_FILE2, HOOK_NAMES;
+var bold13 = (s) => `\x1B[1m${s}\x1B[0m`, dim14 = (s) => `\x1B[2m${s}\x1B[0m`, green15 = (s) => `\x1B[32m${s}\x1B[0m`, yellow12 = (s) => `\x1B[33m${s}\x1B[0m`, red8 = (s) => `\x1B[31m${s}\x1B[0m`, CWD, CLAUDE_DIR, PI_DIR, XTRM_SKILLS_DIR, XTRM_DEFAULT_SKILLS_DIR, XTRM_ACTIVE_SKILLS_DIR, SPECIALISTS_DIR, DEFAULT_SPECIALISTS_DIR, USER_SPECIALISTS_DIR, HOOKS_DIR, CLAUDE_HOOKS_DIR, SETTINGS_FILE, MCP_FILE2, HOOK_NAMES;
 var init_doctor = __esm(() => {
   init_observability_sqlite();
   init_canonical_asset_resolver();
@@ -41416,8 +41424,6 @@ var init_doctor = __esm(() => {
   XTRM_SKILLS_DIR = join33(CWD, ".xtrm", "skills");
   XTRM_DEFAULT_SKILLS_DIR = join33(XTRM_SKILLS_DIR, "default");
   XTRM_ACTIVE_SKILLS_DIR = join33(XTRM_SKILLS_DIR, "active");
-  ACTIVE_CLAUDE_SKILLS_DIR = join33(XTRM_ACTIVE_SKILLS_DIR, "claude");
-  ACTIVE_PI_SKILLS_DIR = join33(XTRM_ACTIVE_SKILLS_DIR, "pi");
   SPECIALISTS_DIR = join33(CWD, ".specialists");
   DEFAULT_SPECIALISTS_DIR = join33(SPECIALISTS_DIR, "default");
   USER_SPECIALISTS_DIR = join33(SPECIALISTS_DIR, "user");
