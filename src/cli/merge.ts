@@ -9,6 +9,7 @@ import { isEpicUnresolvedState, type EpicState } from '../specialist/epic-lifecy
 interface MergeCliOptions {
   target: string;
   rebuild: boolean;
+  targetBranch?: string;
 }
 
 interface BeadSummary {
@@ -47,6 +48,7 @@ export interface MergeExecutionOptions {
   rebuild: boolean;
   mode?: PublicationMode;
   publicationLabel?: string;
+  targetBranch?: string;
 }
 
 export type PublicationMode = 'direct' | 'pr';
@@ -66,10 +68,25 @@ const TERMINAL_STATUSES = new Set(['done', 'error', 'cancelled']);
 function parseOptions(argv: readonly string[]): MergeCliOptions {
   let target = '';
   let rebuild = false;
+  let targetBranch = '';
 
-  for (const argument of argv) {
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
     if (argument === '--rebuild') {
       rebuild = true;
+      continue;
+    }
+
+    if (argument === '--target-branch') {
+      const branchName = argv[index + 1];
+      if (!branchName || branchName.startsWith('-')) {
+        throw new Error('Missing value for --target-branch');
+      }
+      if (targetBranch) {
+        throw new Error('Only one target branch is supported');
+      }
+      targetBranch = branchName;
+      index += 1;
       continue;
     }
 
@@ -87,7 +104,7 @@ function parseOptions(argv: readonly string[]): MergeCliOptions {
     throw new Error('Missing merge target');
   }
 
-  return { target, rebuild };
+  return { target, rebuild, targetBranch: targetBranch ? validateTargetBranchRef(targetBranch) : undefined };
 }
 
 function runCommand(command: string, args: readonly string[], cwd = process.cwd()) {
@@ -98,7 +115,17 @@ function runCommand(command: string, args: readonly string[], cwd = process.cwd(
   });
 }
 
-function resolveDefaultBranchName(cwd = process.cwd()): string {
+function validateTargetBranchRef(targetBranch: string, cwd = process.cwd()): string {
+  const verification = runCommand('git', ['rev-parse', '--verify', `${targetBranch}^{commit}`], cwd);
+  if (verification.status !== 0) {
+    const detail = verification.stderr.trim() || verification.stdout.trim() || 'unknown git ref error';
+    throw new Error(`Invalid --target-branch '${targetBranch}': ${detail}`);
+  }
+  return targetBranch;
+}
+
+function resolveDefaultBranchName(cwd = process.cwd(), overrideBranch?: string): string {
+  if (overrideBranch) return overrideBranch;
   const symbolicRef = runCommand('git', ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], cwd);
   if (symbolicRef.status === 0) {
     const remoteHeadRef = symbolicRef.stdout.trim();
@@ -678,8 +705,8 @@ function isNoisePath(path: string): boolean {
   return NOISE_PATH_PREFIXES.some(prefix => path.startsWith(prefix));
 }
 
-function isBranchAlreadyPublished(branch: string, cwd = process.cwd()): boolean {
-  const baseBranch = resolveDefaultBranchName(cwd);
+function isBranchAlreadyPublished(branch: string, cwd = process.cwd(), targetBranch?: string): boolean {
+  const baseBranch = resolveDefaultBranchName(cwd, targetBranch);
 
   const ancestorCheck = runCommand('git', ['merge-base', '--is-ancestor', branch, baseBranch], cwd);
   if (ancestorCheck.status === 0) {
@@ -694,8 +721,8 @@ function isBranchAlreadyPublished(branch: string, cwd = process.cwd()): boolean 
   return cherryPickCount.stdout.trim() === '0';
 }
 
-export function previewBranchMergeDelta(branch: string, cwd = process.cwd()): MergePreviewDelta {
-  const baseBranch = resolveDefaultBranchName(cwd);
+export function previewBranchMergeDelta(branch: string, cwd = process.cwd(), targetBranch?: string): MergePreviewDelta {
+  const baseBranch = resolveDefaultBranchName(cwd, targetBranch);
   const mergeBase = runCommand('git', ['merge-base', baseBranch, branch], cwd);
   if (mergeBase.status !== 0) {
     throw new Error(`Unable to compute merge base for '${baseBranch}' and '${branch}'.`);
@@ -727,15 +754,15 @@ export function previewBranchMergeDelta(branch: string, cwd = process.cwd()): Me
   };
 }
 
-export function evaluateMergeWorthiness(preview: MergePreviewDelta, branch: string, cwd = process.cwd()): MergeWorthinessDecision {
+export function evaluateMergeWorthiness(preview: MergePreviewDelta, branch: string, cwd = process.cwd(), targetBranch?: string): MergeWorthinessDecision {
   if (preview.files.length === 0) {
-    return isBranchAlreadyPublished(branch, cwd)
+    return isBranchAlreadyPublished(branch, cwd, targetBranch)
       ? { shouldMerge: false, reason: 'already-published' }
       : { shouldMerge: false, reason: 'empty-delta' };
   }
 
   if (preview.substantiveFiles.length === 0) {
-    return isBranchAlreadyPublished(branch, cwd)
+    return isBranchAlreadyPublished(branch, cwd, targetBranch)
       ? { shouldMerge: false, reason: 'already-published' }
       : { shouldMerge: false, reason: 'noise-only-delta' };
   }
@@ -763,9 +790,9 @@ function throwWorthinessBlockError(target: ChainMergeTarget, preview: MergePrevi
   );
 }
 
-function assertBranchMergeWorthiness(target: ChainMergeTarget, cwd = process.cwd()): MergeWorthinessDecision {
-  const preview = previewBranchMergeDelta(target.branch, cwd);
-  const decision = evaluateMergeWorthiness(preview, target.branch, cwd);
+function assertBranchMergeWorthiness(target: ChainMergeTarget, cwd = process.cwd(), targetBranch?: string): MergeWorthinessDecision {
+  const preview = previewBranchMergeDelta(target.branch, cwd, targetBranch);
+  const decision = evaluateMergeWorthiness(preview, target.branch, cwd, targetBranch);
   if (decision.reason === 'already-published' || decision.shouldMerge) return decision;
   throwWorthinessBlockError(target, preview, decision);
 }
@@ -797,8 +824,8 @@ function tryAbortRebase(cwd = process.cwd()): void {
   runCommand('git', ['rebase', '--abort'], cwd);
 }
 
-export function rebaseBranchOntoMaster(branch: string, worktreePath: string): void {
-  const baseBranch = resolveDefaultBranchName(worktreePath);
+export function rebaseBranchOntoMaster(branch: string, worktreePath: string, targetBranch?: string): void {
+  const baseBranch = resolveDefaultBranchName(worktreePath, targetBranch);
   const checkedOutBranch = getCurrentHeadBranch(worktreePath);
   if (checkedOutBranch !== branch) {
     throw new Error(`Expected branch '${branch}' in worktree '${worktreePath}', found '${checkedOutBranch}'.`);
@@ -876,7 +903,7 @@ export function printSummary(steps: readonly MergeStepResult[], rebuild: boolean
 
 function printUsageAndExit(message: string): never {
   console.error(message);
-  console.error('Usage: specialists|sp merge <target-bead-id> [--rebuild]');
+  console.error('Usage: specialists|sp merge <target-bead-id> [--rebuild] [--target-branch <name>]');
   process.exit(1);
 }
 
@@ -899,6 +926,7 @@ export function runMergePlan(
   options: MergeExecutionOptions,
 ): MergeStepResult[] {
   const mainRepoRoot = resolveMainWorktreeRoot();
+  const targetBranch = options.targetBranch ? validateTargetBranchRef(options.targetBranch, mainRepoRoot) : undefined;
   const shelved = options.mode === 'direct'
     ? (() => {
       const dirtyState = classifyMainRepoDirtyState(targets.map((target) => target.branch), mainRepoRoot);
@@ -919,7 +947,7 @@ ${formatDirtyConflictMessage(dirtyState.overlappingPaths)}
 
   try {
     for (const target of targets) {
-      const worthiness = assertBranchMergeWorthiness(target, mainRepoRoot);
+      const worthiness = assertBranchMergeWorthiness(target, mainRepoRoot, targetBranch);
       if (worthiness.reason === 'already-published') {
         mergedSteps.push({
           beadId: target.beadId,
@@ -929,7 +957,7 @@ ${formatDirtyConflictMessage(dirtyState.overlappingPaths)}
         continue;
       }
 
-      rebaseBranchOntoMaster(target.branch, target.worktreePath);
+      rebaseBranchOntoMaster(target.branch, target.worktreePath, targetBranch);
       mergeBranch(target.branch, mainRepoRoot);
       runTypecheckGate(mainRepoRoot);
       syncEpicStateAfterMerge(target);
@@ -1043,6 +1071,6 @@ export async function run(): Promise<void> {
   }
 
   const targets = resolveMergeTargets(options.target);
-  const mergedSteps = runMergePlan(targets, { rebuild: options.rebuild });
+  const mergedSteps = runMergePlan(targets, { rebuild: options.rebuild, targetBranch: options.targetBranch });
   printSummary(mergedSteps, options.rebuild);
 }

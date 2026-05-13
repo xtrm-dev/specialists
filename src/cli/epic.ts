@@ -23,6 +23,7 @@ interface EpicMergeCliOptions {
   rebuild: boolean;
   json: boolean;
   pr: boolean;
+  targetBranch?: string;
 }
 
 interface EpicListOptions {
@@ -105,8 +106,10 @@ function parseMergeOptions(argv: readonly string[]): EpicMergeCliOptions {
   let rebuild = false;
   let json = false;
   let pr = false;
+  let targetBranch = '';
 
-  for (const argument of argv) {
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
     if (argument === '--rebuild') {
       rebuild = true;
       continue;
@@ -119,12 +122,24 @@ function parseMergeOptions(argv: readonly string[]): EpicMergeCliOptions {
       pr = true;
       continue;
     }
+    if (argument === '--target-branch') {
+      const branchName = argv[index + 1];
+      if (!branchName || branchName.startsWith('-')) {
+        throw new Error('Missing value for --target-branch');
+      }
+      if (targetBranch) {
+        throw new Error('Only one target branch is supported');
+      }
+      targetBranch = branchName;
+      index += 1;
+      continue;
+    }
     if (argument.startsWith('-') && argument !== '--rebuild' && argument !== '--json' && argument !== '--pr') {
       throw new Error(`Unknown option: ${argument}`);
     }
   }
 
-  return { epicId, rebuild, json, pr };
+  return { epicId, rebuild, json, pr, targetBranch: targetBranch || undefined };
 }
 
 function parseListOptions(argv: readonly string[]): EpicListOptions {
@@ -395,11 +410,12 @@ function updateEpicState(epicId: string, fromState: EpicState, toState: EpicStat
   }
 }
 
-function mergeEpicChains(context: EpicMergeContext, rebuild: boolean, pr: boolean): { steps: MergeStepResult[]; pullRequestUrl?: string } {
+function mergeEpicChains(context: EpicMergeContext, rebuild: boolean, pr: boolean, targetBranch?: string): { steps: MergeStepResult[]; pullRequestUrl?: string } {
   return executePublicationPlan(context.chainTargets, {
     rebuild,
     mode: pr ? 'pr' : 'direct',
     publicationLabel: `epic-${context.epicId}`,
+    targetBranch,
   });
 }
 
@@ -502,7 +518,7 @@ export async function handleEpicMergeCommand(argv: readonly string[]): Promise<v
     const message = error instanceof Error ? error.message : String(error);
     console.error(message);
     console.error('');
-    console.error('Usage: specialists epic merge <epic-id> [--rebuild] [--pr] [--json]');
+    console.error('Usage: specialists epic merge <epic-id> [--rebuild] [--pr] [--json] [--target-branch <name>]');
     process.exit(1);
   }
 
@@ -539,7 +555,7 @@ export async function handleEpicMergeCommand(argv: readonly string[]): Promise<v
   let pullRequestUrl: string | undefined;
 
   try {
-    const publicationResult = mergeEpicChains(context, options.rebuild, options.pr);
+    const publicationResult = mergeEpicChains(context, options.rebuild, options.pr, options.targetBranch);
     mergedChains = publicationResult.steps;
     pullRequestUrl = publicationResult.pullRequestUrl;
     toState = options.pr ? currentState : transitionEpicState(currentState, 'merged');
@@ -788,6 +804,7 @@ export async function handleEpicCommand(argv: readonly string[]): Promise<void> 
       '  specialists epic abandon unitAI-3f7b --reason "scope changed"',
       '  specialists epic merge unitAI-3f7b --rebuild',
       '  specialists epic merge unitAI-3f7b --pr',
+      '  specialists epic merge unitAI-3f7b --target-branch feature/foo',
       '',
     ].join('\n'));
     return;
