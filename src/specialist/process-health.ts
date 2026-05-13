@@ -418,8 +418,11 @@ export function collectStaleSpecialistJobs(options: {
       continue;
     }
 
-    const ageMs = getSpecialistKeepAliveAgeMs(snapshot, nowMs);
-    if (status.status === 'waiting' && isOrphanedKeepAlive(snapshot, ageMs, minKeepAliveAgeMs)) {
+    const ageMs = Math.max(0, nowMs - ((status as SupervisorStatus & { updated_at_ms?: number }).updated_at_ms ?? nowMs));
+    if (status.status === 'waiting'
+      && snapshot.ppid === 1
+      && isSpecialistRunCommand(snapshot.cmdline)
+      && ageMs >= minKeepAliveAgeMs) {
       candidates.push({ jobId: status.id, pid, beadId: status.bead_id ?? null, specialist: status.specialist, cwd: snapshot.cwd, ageMs, reason: 'orphaned-keep-alive' });
     }
   }
