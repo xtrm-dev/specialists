@@ -1,3 +1,4 @@
+import type { SupervisorStatus } from './supervisor.js';
 export type ProcessHealthThresholds = {
     warnPct: number;
     refusePct: number;
@@ -22,6 +23,15 @@ export interface ProcessHealthWorkspaceGroup {
     rssBytes: number;
     processes: ProcessHealthProcess[];
 }
+export interface StaleSpecialistJobCandidate {
+    jobId: string;
+    pid: number;
+    beadId: string | null;
+    specialist: string;
+    cwd: string | null;
+    ageMs: number;
+    reason: 'dead-pid' | 'orphaned-keep-alive';
+}
 export type ProcessHealthStatus = 'OK' | 'WARN' | 'REFUSE';
 export interface ProcessHealthReport {
     status: ProcessHealthStatus;
@@ -43,6 +53,9 @@ export interface ProcessHealthReport {
     serenaWorkspaces: ProcessHealthWorkspaceGroup[];
     orphanProcesses: ProcessHealthProcess[];
 }
+interface StaleSpecialistJobSource {
+    listStatuses(): SupervisorStatus[];
+}
 export declare function getProcessHealthThresholds(env?: NodeJS.ProcessEnv): ProcessHealthThresholds;
 export declare function collectProcessHealth(options?: {
     procRoot?: string;
@@ -53,4 +66,11 @@ export declare function collectOrphanProcesses(options?: {
     procRoot?: string;
     nowMs?: number;
 }): ProcessHealthProcess[];
+export declare function collectStaleSpecialistJobs(options?: {
+    procRoot?: string;
+    nowMs?: number;
+    minKeepAliveAgeMs?: number;
+    observabilityClient?: StaleSpecialistJobSource;
+}): StaleSpecialistJobCandidate[];
+export {};
 //# sourceMappingURL=process-health.d.ts.map

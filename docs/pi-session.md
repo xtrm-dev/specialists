@@ -2,10 +2,10 @@
 title: Pi Subprocess Isolation
 scope: pi-session
 category: reference
-version: 1.1.0
-updated: 2026-04-17
+version: 1.2.0
+updated: 2026-05-13
 synced_at: 50850982
-description: Why specialists spawns Pi with --no-extensions and which extensions are selectively re-enabled.
+description: Why specialists spawns Pi with isolation flags and which extensions are selectively re-enabled.
 source_of_truth_for:
   - "src/pi/session.ts"
 domain:
@@ -28,7 +28,7 @@ domain:
 
 > **Alias:** `sp` is a shorter alias for `specialists` — `sp run`, `sp list`, `sp feed` etc. work identically.
 
-Specialists spawns Pi in `--rpc` mode as a subprocess. Every specialist run starts Pi with `--no-extensions` and then selectively re-enables a small allowlist of extensions. This page explains why.
+Specialists spawns Pi in `--rpc` mode as a subprocess. Every package-class specialist run starts Pi with `--no-extensions`, `--offline`, `--no-context-files`, `--no-prompt-templates`, and `--no-themes`, then selectively re-enables a small allowlist of extensions. This page explains why.
 
 ## Why `--no-extensions`
 
@@ -36,7 +36,7 @@ Pi auto-discovers xtrm extensions on startup from `~/.pi/agent/extensions/`. In 
 
 The critical case is the **beads** extension. It blocks file edits unless a `claimed:<sessionId>` KV entry exists for the active Pi session ID. The orchestrating Claude session holds the claim; the specialist subprocess has a different, unrelated session ID. Without `--no-extensions`, every file write the specialist attempts silently fails the beads edit gate.
 
-Other extensions (`session-flow`, `xt-end` reminder, UI/UX helpers) are similarly irrelevant or harmful in a headless subprocess context.
+Other extensions (`session-flow`, `xt-end` reminder, UI/UX helpers) are similarly irrelevant or harmful in a headless subprocess context. The runner also disables Pi startup discovery surfaces with `--offline`, `--no-context-files`, `--no-prompt-templates`, and `--no-themes` so specialist subprocesses do not perform startup network checks or inherit human-session context files, prompt templates, or themes.
 
 ## Selective re-enable policy
 
@@ -98,6 +98,10 @@ const args = [
   '--no-extensions',
   ...providerArgs,
   '--no-session',
+  '--offline',
+  '--no-context-files',
+  '--no-prompt-templates',
+  '--no-themes',
 ];
 
 // Selectively re-enable extensions

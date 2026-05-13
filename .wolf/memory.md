@@ -161,3 +161,7 @@
 - 2026-05-12T23:01:00Z: `sp ps` process-health specialist count is intentionally narrow: direct `specialists/sp run` processes and pi-coding-agent only. Serena/GitNexus MCP, tsserver, shell wrappers, and other tooling must not inflate `specialists=N`; `sp ps --ps` errors and points to `sp clean --ps`.
 
 - 2026-05-13T11:30:58Z: unitAI-ldsmj aligned package-class PiAgentSession RPC launches with script-runner isolation by adding --offline, --no-context-files, --no-prompt-templates, and --no-themes while keeping --append-system-prompt semantics.
+
+- 2026-05-13T12:04:27Z: unitAI-5kuv0 rebuilt generated dist artifacts with `bun run build` after PR #77; build refreshed dist/index.js, dist/lib.js, and declaration maps/types.
+
+- 2026-05-13T12:11:27Z: unitAI-sv0v2 documented Pi RPC isolation flags in docs/pi-session.md and aligned docs/specialists-service.md one-shot runner argv with script-runner isolation.

@@ -167,6 +167,7 @@ export interface ClaimJobStartOptions {
 export declare function claimJobStartWithStore(store: ClaimJobStartStore, status: SupervisorStatus, event: TimelineEvent, options?: ClaimJobStartOptions): ClaimJobStartResult;
 export interface ObservabilitySqliteClient {
     upsertStatus(status: SupervisorStatus): void;
+    markSpecialistJobCancelled(jobId: string, reason: string): void;
     upsertEpicRun(epic: EpicRunRecord): void;
     upsertEpicChainMembership(chain: EpicChainRecord): void;
     upsertStatusWithEvent(status: SupervisorStatus, event: TimelineEvent): void;
