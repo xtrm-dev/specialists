@@ -33,8 +33,21 @@ function assertXtrmPrerequisites(cwd: string): void {
 
   if (hasXtrmDir && hasXtCli) return;
 
-  console.error('specialists requires xtrm. Run: npm install -g xtrm-tools && xt install');
-  process.exit(1);
+  if (!hasXtCli) {
+    console.error('specialists init: missing xt CLI.');
+    console.error('1. Install xtrm-tools globally: npm install -g xtrm-tools');
+    console.error('2. Run xt install');
+    console.error('3. Run xt init in this repo');
+    console.error('4. Verify xt is available: xt --version');
+    process.exit(1);
+  }
+
+  if (!hasXtrmDir) {
+    console.error('specialists init: missing .xtrm/ in this repo.');
+    console.error('1. Run xt init in this repo');
+    console.error('2. Verify xt is available: xt --version');
+    process.exit(1);
+  }
 }
 
 function warnMissingOptionalPrerequisites(): void {

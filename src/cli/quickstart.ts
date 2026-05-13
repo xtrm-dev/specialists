@@ -31,8 +31,12 @@ export async function run(): Promise<void> {
   lines.push('');
   lines.push(`  ${bold('Prerequisite: Bun')}   ${cmd('bun --version')}           # verify Bun >=1.0.0`);
   lines.push(`  ${cmd('curl -fsSL https://bun.sh/install | bash')}   # install Bun if missing`);
+  lines.push(`  ${cmd('npm install -g xtrm-tools')}                 # install runtime prerequisite`);
+  lines.push(`  ${cmd('xt install')}                               # install xtrm-managed assets`);
+  lines.push(`  ${cmd('xt init')}                                  # initialize .xtrm/ in this repo`);
+  lines.push(`  ${dim('sp list, sp doctor --check-drift, sp prune-stale-defaults are Category A and do NOT require xt or .xtrm/')}`);
   lines.push(`  ${cmd('npm install -g @jaggerxtrm/specialists')}    # install globally`);
-  lines.push(`  ${cmd('specialists init')}                         # project setup:`);
+  lines.push(`  ${cmd('sp init')}                                  # project setup:`);
   lines.push(`  ${dim('                                            #   creates dirs, wires MCP + hooks, injects context')}`);
   lines.push('');
   lines.push(`  Verify everything is healthy:`);
@@ -43,7 +47,8 @@ export async function run(): Promise<void> {
   lines.push(section('2. Initialize a Project'));
   lines.push('');
   lines.push(`  Run once per project root:`);
-  lines.push(`  ${cmd('specialists init')}                          # creates .specialists/, wires MCP + AGENTS.md`);
+  lines.push(`  ${cmd('sp init')}                                  # creates .specialists/, wires MCP + AGENTS.md`);
+  lines.push(`  ${dim('  # requires xt init first so .xtrm/ already exists')}`);
   lines.push('');
   lines.push(`  What this creates:`);
   lines.push(`  ${dim('.specialists/default/')} — canonical specialists (from init)`);

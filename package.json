@@ -52,6 +52,13 @@
   ],
   "author": "",
   "license": "MIT",
+  "_runtime_prerequisites": {
+    "xtrm-tools": {
+      "required": true,
+      "scope": "runtime",
+      "reason": "specialists init requires xt CLI and .xtrm/ managed by xtrm-tools"
+    }
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "yaml": "2.8.4",
