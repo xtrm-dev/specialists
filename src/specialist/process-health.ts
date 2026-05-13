@@ -402,8 +402,18 @@ export function collectStaleSpecialistJobs(options: {
 
     const snapshot = readProcessSnapshot(pid, procRoot, uptimeSeconds);
     if (!snapshot) {
-      if (readProcessLiveness(pid, procRoot) === 'dead') {
-        candidates.push({ jobId: status.id, pid, beadId: status.bead_id ?? null, specialist: status.specialist, cwd: null, ageMs: Math.max(0, nowMs - ((status as SupervisorStatus & { updated_at_ms?: number }).updated_at_ms ?? nowMs)), reason: 'dead-pid' });
+      const ageMs = Math.max(0, nowMs - ((status as SupervisorStatus & { updated_at_ms?: number }).updated_at_ms ?? nowMs));
+      if (readProcessLiveness(pid, procRoot) === 'dead' && ageMs >= minKeepAliveAgeMs) {
+        candidates.push({ jobId: status.id, pid, beadId: status.bead_id ?? null, specialist: status.specialist, cwd: null, ageMs, reason: 'dead-pid' });
+        continue;
+      }
+
+      const basePath = join(procRoot, String(pid));
+      const cmdlineRaw = readProcStringOrNull(join(basePath, 'cmdline'));
+      const statRaw = readProcStringOrNull(join(basePath, 'stat'));
+      const parsedStat = statRaw ? parseStat(statRaw) : null;
+      if (status.status === 'waiting' && parsedStat?.ppid === 1 && cmdlineRaw && isSpecialistRunCommand(cmdlineRaw.replace(/\0/g, ' '))) {
+        candidates.push({ jobId: status.id, pid, beadId: status.bead_id ?? null, specialist: status.specialist, cwd: readProcCwdOrNull(pid, procRoot), ageMs, reason: 'orphaned-keep-alive' });
       }
       continue;
     }

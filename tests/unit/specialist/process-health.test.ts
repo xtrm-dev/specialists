@@ -138,7 +138,7 @@ describe('process-health', () => {
     writeProcProcess(root, keepAlivePid, {
       cmdline: 'specialists run executor --bead abc\0',
       comm: 'bun',
-      stat: '602 (bun) S 1 1 1 0 -1 4194560 100 0 0 80 20 0 0 20 0 1 0 1000 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0',
+      stat: '602 (bun) S 1 1 1 0 -1 4194560 100 0 0 80 20 0 0 20 0 1 0 0 100000',
       status: 'VmRSS:\t1024 kB\n',
       cwd: '/repo/.worktrees/xtrm-tools',
     });
