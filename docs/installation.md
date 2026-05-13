@@ -43,7 +43,7 @@ Category A assets are read by the `sp` runtime itself:
 
 - specialist definitions from `config/specialists/`
 - mandatory rules from `config/mandatory-rules/`
-- tool catalog files from `.specialists/catalog/` / package catalog
+- tool catalog files from `config/catalog/` / `.specialists/catalog/` override
 - node configs
 
 The loader resolves them live from the installed package when a repo has no intentional override. Precedence is:
