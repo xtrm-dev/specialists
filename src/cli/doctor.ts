@@ -41,8 +41,6 @@ const PI_DIR = join(CWD, '.pi');
 const XTRM_SKILLS_DIR = join(CWD, '.xtrm', 'skills');
 const XTRM_DEFAULT_SKILLS_DIR = join(XTRM_SKILLS_DIR, 'default');
 const XTRM_ACTIVE_SKILLS_DIR = join(XTRM_SKILLS_DIR, 'active');
-const ACTIVE_CLAUDE_SKILLS_DIR = join(XTRM_ACTIVE_SKILLS_DIR, 'claude');
-const ACTIVE_PI_SKILLS_DIR = join(XTRM_ACTIVE_SKILLS_DIR, 'pi');
 const SPECIALISTS_DIR = join(CWD, '.specialists');
 const DEFAULT_SPECIALISTS_DIR = join(SPECIALISTS_DIR, 'default');
 const USER_SPECIALISTS_DIR = join(SPECIALISTS_DIR, 'user');
@@ -330,44 +328,52 @@ function checkSkillDrift(): boolean {
     fix('specialists init --sync-skills');
   }
 
+  const defaultSkills = readdirSync(XTRM_DEFAULT_SKILLS_DIR, { withFileTypes: true })
+    .filter(entry => entry.isDirectory())
+    .map(entry => entry.name);
+
   let linksOk = true;
-  for (const scope of ['claude', 'pi'] as const) {
-    const activeRoot = join(XTRM_ACTIVE_SKILLS_DIR, scope);
-    if (!existsSync(activeRoot)) {
-      fail(`${relative(CWD, activeRoot)}/ missing`);
-      fix('specialists init --sync-skills');
-      linksOk = false;
-      continue;
+  for (const skillName of defaultSkills) {
+    const activeLinkPath = join(XTRM_ACTIVE_SKILLS_DIR, skillName);
+    const expectedTarget = join(XTRM_DEFAULT_SKILLS_DIR, skillName);
+    const state = isSymlinkTo(activeLinkPath, expectedTarget);
+    if (state.ok) continue;
+
+    linksOk = false;
+    const relLink = relative(CWD, activeLinkPath);
+    if (state.reason === 'missing') {
+      fail(`${relLink} missing`);
+    } else if (state.reason === 'not-symlink') {
+      fail(`${relLink} is not a symlink`);
+    } else if (state.reason === 'wrong-target') {
+      fail(`${relLink} points to ${state.target ?? 'unknown target'}`);
+    } else {
+      fail(`${relLink} is broken`);
     }
+    fix('specialists init --sync-skills');
+  }
 
-    const defaultSkills = readdirSync(XTRM_DEFAULT_SKILLS_DIR, { withFileTypes: true })
-      .filter(entry => entry.isDirectory())
-      .map(entry => entry.name);
+  const legacyActiveRoots: Array<{ scope: 'claude' | 'pi'; root: string }> = [
+    { scope: 'claude', root: join(XTRM_ACTIVE_SKILLS_DIR, 'claude') },
+    { scope: 'pi', root: join(XTRM_ACTIVE_SKILLS_DIR, 'pi') },
+  ];
 
-    for (const skillName of defaultSkills) {
-      const activeLinkPath = join(activeRoot, skillName);
-      const expectedTarget = join(XTRM_DEFAULT_SKILLS_DIR, skillName);
-      const state = isSymlinkTo(activeLinkPath, expectedTarget);
-      if (state.ok) continue;
+  for (const { root } of legacyActiveRoots) {
+    if (!existsSync(root)) continue;
+    if (isSymlinkTo(root, XTRM_ACTIVE_SKILLS_DIR).ok) continue;
 
-      linksOk = false;
-      const relLink = relative(CWD, activeLinkPath);
-      if (state.reason === 'missing') {
-        fail(`${relLink} missing`);
-      } else if (state.reason === 'not-symlink') {
-        fail(`${relLink} is not a symlink`);
-      } else if (state.reason === 'wrong-target') {
-        fail(`${relLink} points to ${state.target ?? 'unknown target'}`);
-      } else {
-        fail(`${relLink} is broken`);
-      }
-      fix('specialists init --sync-skills');
+    const relRoot = relative(CWD, root);
+    if (lstatSync(root).isDirectory()) {
+      warn(`${relRoot}/ legacy scoped layout found`);
+    } else {
+      warn(`${relRoot} legacy scoped layout found`);
     }
+    fix('specialists init --sync-skills');
   }
 
   const skillRootChecks: Array<{ root: string; expected: string }> = [
-    { root: join(CLAUDE_DIR, 'skills'), expected: ACTIVE_CLAUDE_SKILLS_DIR },
-    { root: join(PI_DIR, 'skills'), expected: ACTIVE_PI_SKILLS_DIR },
+    { root: join(CLAUDE_DIR, 'skills'), expected: XTRM_ACTIVE_SKILLS_DIR },
+    { root: join(PI_DIR, 'skills'), expected: XTRM_ACTIVE_SKILLS_DIR },
   ];
 
   let rootLinksOk = true;
