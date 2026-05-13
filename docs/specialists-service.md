@@ -131,7 +131,7 @@ Defaults:
 ### Runtime
 
 - One Node process, one HTTP listener, one `pi` subprocess per in-flight request.
-- `pi` is spawned in `options.projectDir ?? process.cwd()` and gets current one-shot runner contract: `--mode json --no-session --no-extensions --no-tools --offline --model <resolved> [--thinking <level>] [--system-prompt <text>] [--skill <path> ... | --no-skills]`; rendered prompt is written to stdin, not argv.
+- `pi` is spawned in `options.projectDir ?? process.cwd()` and gets current one-shot runner contract: `--mode json --no-session --no-extensions --no-tools --offline --no-context-files --no-prompt-templates --no-themes --model <resolved> [--thinking <level>] [--system-prompt <text>] [--skill <path> ... | --no-skills]`; rendered prompt is written to stdin, not argv.
 - Credentials stay inside `pi`; service never handles API keys.
 - Excess load waits behind semaphore, then returns `429`.
 
