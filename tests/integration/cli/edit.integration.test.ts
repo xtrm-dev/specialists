@@ -84,4 +84,17 @@ describe('integration: specialists edit ownership flow', () => {
     expect(result.stderr).toContain('Run');
     expect(result.stderr).toContain('specialists list');
   });
+
+  it('suggests --fork-from when target exists only in package tier', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-edit-'));
+    await mkdir(join(tempDir, '.specialists', 'default'), { recursive: true });
+    await mkdir(join(tempDir, '.specialists', 'user'), { recursive: true });
+
+    const result = runCli(tempDir, ['edit', 'explorer', '--get', 'specialist.execution.model']);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('specialist "explorer" lives in [package] tier');
+    expect(result.stderr).toContain('cannot be edited directly');
+    expect(result.stderr).toContain('specialists edit explorer --fork-from explorer');
+  });
 });

@@ -570,7 +570,8 @@ function createUserFork(source: EditableSpecialistSummary, targetName: string): 
 
 async function resolveTargets(args: ParsedArgs): Promise<EditableSpecialistSummary[]> {
   const loader = new SpecialistLoader();
-  const allSpecialists = (await loader.list()).filter(
+  const listedSpecialists = await loader.list();
+  const allSpecialists = listedSpecialists.filter(
     (specialist): specialist is EditableSpecialistSummary => specialist.scope !== 'package',
   );
 
@@ -583,6 +584,18 @@ async function resolveTargets(args: ParsedArgs): Promise<EditableSpecialistSumma
   );
 
   if (!match) {
+    const packageMatch = args.scope === undefined
+      ? listedSpecialists.find(specialist => specialist.name === args.name && specialist.scope === 'package')
+      : undefined;
+    if (packageMatch) {
+      fail(
+        `Error: specialist "${args.name}" lives in [package] tier and cannot be edited directly.\n` +
+        `  Fork to user tier first:\n\n` +
+        `    ${yellow(`specialists edit ${args.name} --fork-from ${args.name}`)}\n\n` +
+        `  Then re-run your edit command.`,
+      );
+    }
+
     const hint = args.scope ? ` (scope: ${args.scope})` : '';
     fail(`Error: specialist "${args.name}" not found${hint}\n  Run ${yellow('specialists list')} to see available specialists`);
   }
