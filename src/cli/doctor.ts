@@ -428,7 +428,7 @@ function checkManagedMirror(label: string, canonicalRelativePath: string, mirror
   }
 
   if (drifted.length > 0) {
-    fail(`${label}: ${drifted.length} drifted file${drifted.length === 1 ? '' : 's'}`);
+    fail(`${label}: ${drifted.length} safe prune candidate${drifted.length === 1 ? '' : 's'}`);
     hint(`example: ${drifted.slice(0, 3).join(', ')}${drifted.length > 3 ? ', ...' : ''}`);
   }
   if (missing.length > 0) {

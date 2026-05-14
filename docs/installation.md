@@ -105,11 +105,22 @@ xt update --root <projects-root> --apply
 
 Omit `--apply` for a dry run. See [skills.md](skills.md), [hooks.md](hooks.md), and the `update-specialists` skill for the operator-facing flow.
 
+## Pin a specialist version
+
+If you need to keep one specialist pinned in a repo, copy it into the user layer before pruning defaults:
+
+```bash
+cp .specialists/default/<name>.specialist.json .specialists/user/
+sp prune-stale-defaults
+```
+
+User overlays stay untouched by prune.
+
 ## Migrating existing repositories
 
 1. Upgrade the `@jaggerxtrm/specialists` package version you want to run.
 2. Run `sp doctor --check-drift` to find stale Category A snapshots in `.specialists/default/`.
-3. Run `sp prune-stale-defaults --dry-run` and remove redundant snapshots only after reviewing diverged files.
+3. Run `sp prune-stale-defaults` to remove stale default mirrors. Add `--keep-diverged` if you want to preserve intentional pins.
 4. Run `xt doctor --cwd <repo> --json` for Category B drift.
 5. Run `xt update --repo <repo> --apply` or `xt update --root <projects-root> --apply` after operator confirmation.
 

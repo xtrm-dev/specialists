@@ -37,7 +37,7 @@ const CORE_COMMANDS: CommandEntry[] = [
   ['status', 'Show health, MCP state, and active jobs'],
   ['ps', 'Show actionable dashboard (active + unresolved terminal problems); --json, --all, --follow, --active, --health, --include-terminal, --include-cleaned'],
   ['doctor', 'Diagnose installation/runtime problems; --check-drift reports stale .specialists/default/ snapshots'],
-  ['prune-stale-defaults', 'Prune redundant .specialists/default/ snapshots (byte-identical to package canonical); --dry-run, --root <path>'],
+  ['prune-stale-defaults', 'Prune stale .specialists/default snapshots; default removes diverged mirrors too; --dry-run, --keep-diverged, --root <path>'],
   ['quickstart', 'Full getting-started guide'],
   ['help', 'Show this help'],
 ];

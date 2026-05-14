@@ -5,7 +5,7 @@ import { resolveCanonicalAssetDir } from './canonical-asset-resolver.js';
 export type DriftScope = 'default' | 'user';
 export type DriftStatus =
   | 'redundant-safe-to-prune'
-  | 'diverged-consider-migrating-to-user'
+  | 'diverged-safe-to-prune'
   | 'useless-override-safe-to-remove'
   | 'diverged-consider-removing-or-refactoring';
 
@@ -73,12 +73,12 @@ function makeFinding(repoRoot: string, kind: DriftAssetKind['kind'], scope: Drif
   const rel = relPath(path, repoRoot);
   if (scope === 'default') {
     return bytesEqual
-      ? { repo_root: repoRoot, kind, scope, path, canonical_path: canonicalPath, status: 'redundant-safe-to-prune', bytes_equal: true, suggested_action: `safe prune`, suggestion_command: `sp prune-stale-defaults --root ${repoRoot}` }
-      : { repo_root: repoRoot, kind, scope, path, canonical_path: canonicalPath, status: 'diverged-consider-migrating-to-user', bytes_equal: false, suggested_action: `consider migrate to .specialists/user/`, suggestion_command: `cp ${rel} .specialists/user/` };
+      ? { repo_root: repoRoot, kind, scope, path, canonical_path: canonicalPath, status: 'redundant-safe-to-prune', bytes_equal: true, suggested_action: 'safe prune', suggestion_command: `sp prune-stale-defaults --root ${repoRoot}` }
+      : { repo_root: repoRoot, kind, scope, path, canonical_path: canonicalPath, status: 'diverged-safe-to-prune', bytes_equal: false, suggested_action: 'safe prune', suggestion_command: `cp ${rel} .specialists/user/` };
   }
   return bytesEqual
-    ? { repo_root: repoRoot, kind, scope, path, canonical_path: canonicalPath, status: 'useless-override-safe-to-remove', bytes_equal: true, suggested_action: `safe remove`, suggestion_command: `rm ${rel}` }
-    : { repo_root: repoRoot, kind, scope, path, canonical_path: canonicalPath, status: 'diverged-consider-removing-or-refactoring', bytes_equal: false, suggested_action: `keep if intentional override`, suggestion_command: `rm ${rel}` };
+    ? { repo_root: repoRoot, kind, scope, path, canonical_path: canonicalPath, status: 'useless-override-safe-to-remove', bytes_equal: true, suggested_action: 'safe remove', suggestion_command: `rm ${rel}` }
+    : { repo_root: repoRoot, kind, scope, path, canonical_path: canonicalPath, status: 'diverged-consider-removing-or-refactoring', bytes_equal: false, suggested_action: 'keep if intentional override', suggestion_command: `rm ${rel}` };
 }
 
 export function resolveDriftAssets(): DriftAssetKind[] {
@@ -133,16 +133,16 @@ export function detectDriftUnderRoot(root: string): DriftReport {
       repos: repos.length,
       findings: summary.length,
       redundant_defaults: summary.filter(f => f.status === 'redundant-safe-to-prune').length,
-      diverged_defaults: summary.filter(f => f.status === 'diverged-consider-migrating-to-user').length,
+      diverged_defaults: summary.filter(f => f.status === 'diverged-safe-to-prune').length,
       useless_overrides: summary.filter(f => f.status === 'useless-override-safe-to-remove').length,
       diverged_overrides: summary.filter(f => f.status === 'diverged-consider-removing-or-refactoring').length,
     },
   };
 }
 
-export function pruneStaleDefaults(repoRoot: string, dryRun: boolean): string[] {
+export function pruneStaleDefaults(repoRoot: string, dryRun: boolean, keepDiverged = false): string[] {
   const targets = detectDriftForRepo(repoRoot)
-    .filter(f => f.scope === 'default' && f.bytes_equal === true)
+    .filter(f => f.scope === 'default' && (keepDiverged ? f.bytes_equal === true : true))
     .map(f => f.path);
   if (!dryRun) {
     for (const target of targets) rmSync(target, { recursive: true, force: true });
