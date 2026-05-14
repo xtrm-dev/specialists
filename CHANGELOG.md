@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `sp ps -f` follow mode now behaves like a terminal dashboard instead of a print loop: TTY output uses alternate-screen in-place redraw with cursor restoration and unchanged-frame dedupe, while piped output is ANSI-free append snapshots with EPIPE-safe shutdown (`unitAI-fqo38`).
+
 ## [v3.15.1] — 2026-05-14
 
 ### Changed
