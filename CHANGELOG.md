@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.15.2] — 2026-05-14
+
+### Fixed
+- `sp ps -f` follow mode now behaves like a terminal dashboard instead of a print loop: TTY output uses alternate-screen in-place redraw with cursor restoration and unchanged-frame dedupe, while piped output is ANSI-free append snapshots with EPIPE-safe shutdown (`unitAI-fqo38`).
+- `sp run --background` now works correctly again: the tmux wrapper used `/bin/bash -lc` (login shell) which rebuilt PATH from `/etc/profile` only, stripping NVM/bun from PATH and causing `pi` spawn ENOENT. Changed to `/bin/bash -c` so the wrapper inherits the parent process PATH (`unitAI-baz0t`).
+
 ## [v3.15.1] — 2026-05-14
 
 ### Changed

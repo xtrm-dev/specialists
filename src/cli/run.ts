@@ -694,7 +694,10 @@ export async function run(): Promise<void> {
     // createTmuxSession wraps cmd as `exec ${cmd}`. Use an explicit shell
     // executable for compound setup so this does not become `exec cd ...`,
     // which exits before the child can publish its background job id.
-    const tmuxCmd = `/bin/bash -lc ${shellQuote(`cd ${shellQuote(cwd)} && exec ${cmd}`)}`;
+    // Use -c (not -lc) so tmux inherits the parent's PATH — login shells
+    // rebuild PATH from /etc/profile only, stripping NVM/bun/pip entries
+    // that live in ~/.bashrc, which causes `pi` spawn ENOENT.
+    const tmuxCmd = `/bin/bash -c ${shellQuote(`cd ${shellQuote(cwd)} && exec ${cmd}`)}`;
 
     let childPid: number | undefined;
     let childExitCode: number | undefined;
