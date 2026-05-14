@@ -2,19 +2,20 @@
 // `sp list-rules` — operator-facing introspection of the mandatory-rules
 // library and which specialists pull each rule set in.
 //
-// Read-only. Walks the same tier resolution the runner uses
-// (.specialists/user/ → .specialists/mandatory-rules/ → .specialists/default/ → config/)
-// so the output reflects what specialists actually receive at spawn.
+// Read-only. Walks cwd tiers first, then package-canonical fallback
+// (.specialists/user/ → .specialists/mandatory-rules/ → .specialists/default/ → config/ → package-canonical)
+// so the output reflects what specialists can receive at spawn.
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve, join, basename } from 'node:path';
 import { loadMandatoryRulesIndex } from '../specialist/mandatory-rules.js';
+import { resolveCanonicalAssetDir } from '../specialist/canonical-asset-resolver.js';
 import type { SpecialistMandatoryRulesConfig } from '../specialist/mandatory-rules.js';
 
 interface RuleSetEntry {
   id: string;
   source_path: string;
-  source_tier: 'user' | 'default' | 'overlay' | 'config';
+  source_tier: 'user' | 'default' | 'overlay' | 'config' | 'package-canonical';
 }
 
 type RuleScope = 'required' | 'default' | 'role-specific' | 'inline';
@@ -26,7 +27,7 @@ interface AppliedRule {
 
 interface SpecialistEntry {
   name: string;
-  source_tier: 'default' | 'user' | 'config';
+  source_tier: 'default' | 'user' | 'config' | 'package-canonical';
   source_path: string;
   applied_rules: AppliedRule[];
   inline_rule_count: number;
@@ -44,19 +45,25 @@ const RULE_TIERS: Array<{ rel: string; tier: RuleSetEntry['source_tier'] }> = [
   { rel: '.specialists/mandatory-rules', tier: 'overlay' },
   { rel: '.specialists/default/mandatory-rules', tier: 'default' },
   { rel: 'config/mandatory-rules', tier: 'config' },
+  { rel: '__package__/mandatory-rules', tier: 'package-canonical' },
 ];
 
 const SPEC_TIERS: Array<{ rel: string; tier: SpecialistEntry['source_tier'] }> = [
   { rel: '.specialists/user', tier: 'user' },
   { rel: '.specialists/default', tier: 'default' },
   { rel: 'config/specialists', tier: 'config' },
+  { rel: '__package__/specialists', tier: 'package-canonical' },
 ];
+
+function resolvePackageDir(asset: 'mandatory-rules' | 'specialists'): string | null {
+  return resolveCanonicalAssetDir(asset) ?? null;
+}
 
 function discoverRuleSets(cwd: string): RuleSetEntry[] {
   const seen = new Map<string, RuleSetEntry>();
   for (const { rel, tier } of RULE_TIERS) {
-    const dir = resolve(cwd, rel);
-    if (!existsSync(dir)) continue;
+    const dir = rel === '__package__/mandatory-rules' ? resolvePackageDir('mandatory-rules') : resolve(cwd, rel);
+    if (!dir || !existsSync(dir)) continue;
     let files: string[];
     try { files = readdirSync(dir); } catch { continue; }
     for (const file of files) {
@@ -71,8 +78,8 @@ function discoverRuleSets(cwd: string): RuleSetEntry[] {
 function discoverSpecialists(cwd: string): SpecialistEntry[] {
   const seen = new Map<string, SpecialistEntry>();
   for (const { rel, tier } of SPEC_TIERS) {
-    const dir = resolve(cwd, rel);
-    if (!existsSync(dir)) continue;
+    const dir = rel === '__package__/specialists' ? resolvePackageDir('specialists') : resolve(cwd, rel);
+    if (!dir || !existsSync(dir)) continue;
     let files: string[];
     try { files = readdirSync(dir); } catch { continue; }
     for (const file of files) {
@@ -90,7 +97,7 @@ function discoverSpecialists(cwd: string): SpecialistEntry[] {
           source_tier: tier,
           source_path: path,
           applied_rules: [],
-          inline_rule_count: Array.isArray(config?.inline_rules) ? config!.inline_rules!.length : 0,
+          inline_rule_count: Array.isArray(config?.inline_rules) ? config.inline_rules.length : 0,
           globals_disabled: Boolean(config?.disable_default_globals),
         });
       } catch {
@@ -171,7 +178,8 @@ function printUsage(): void {
     'Usage: specialists list-rules [--rule <id>] [--specialist <name>] [--json]',
     '',
     'Show which mandatory rules are loaded by which specialists.',
-    'Walks tiers in runner-order: .specialists/ → .specialists/default/ → config/.',
+    'Walks cwd tiers first, then package-canonical fallback.',
+    'Priority: .specialists/ → .specialists/default/ → config/ → package-canonical.',
     '',
     'Options:',
     '  --rule <id>          Filter to one rule, list every spec that loads it',
