@@ -3,6 +3,7 @@
 > Auto-maintained by OpenWolf. Last scanned: 2026-04-01T04:04:51.100Z
 > Files: 531 tracked | Anatomy hits: 0 | Misses: 0
 > Manual update: 2026-05-13T12:11:27+00:00 — unitAI-sv0v2 updated docs/pi-session.md and docs/specialists-service.md for Pi isolation flags.
+> Manual update: 2026-05-14T01:06:48Z — updated 2026-05-13c session report with late bug-hygiene closures and cleanup state.
 
 ## ./
 
@@ -1151,6 +1152,7 @@
 ## .xtrm/reports/
 
 - `2026-03-30-orchestration-session.md` — Session Report — 2026-03-30/31 (~2858 tok)
+- `2026-05-13c-everything-pre-release.md` — Session Report — 2026-05-13c Everything-Pre-Release SSOT with late bug-hygiene addendum (~6000 tok)
 
 ## .xtrm/worktrees/specialists-xt-claude-giu4/
 

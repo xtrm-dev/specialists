@@ -2,13 +2,14 @@
 session_date: 2026-05-13
 branch: master
 window: 2026-05-13 (autonomous SSOT: Tier 1 item 5 + Tier 2 + Tier 3 + reviewer prompt + user-reported GH issues + ye5s9 epic close + v3.3 doctrine merge + researcher consolidation)
-commits: 24 (12 merges + 6 dist rebuilds + 4 docs/skill + 2 specialist-config audits)
-issues_closed: 27 (12 parent beads + 15 chain children); +2 GH issues closed (#76, #71); +2 audits superseded (u0nbr, 6kofw); ye5s9 epic closed
+commits: 31 (24 original 13c commits + 7 post-report bug-hygiene/deps/prompt commits)
+issues_closed: 37 (27 original 13c closures + 10 late bug-hygiene closures); +2 GH issues closed (#76, #71); +2 audits superseded (u0nbr, 6kofw); ye5s9 epic closed
 issues_filed: 0 net new (all chain beads closed within session)
-specialist_dispatches: 22 (11 executors + 11 reviewers)
+specialist_dispatches: 40 (22 original + 18 late bug-hygiene/debugger/reviewer/security/code-sanity jobs)
 models_used:
   - openai-codex/gpt-5.4-mini (executor)
-  - openai-codex/gpt-5.3-codex (reviewer)
+  - openai-codex/gpt-5.3-codex (reviewer/debugger)
+  - openai-codex/gpt-5.4 (security-auditor)
 ---
 
 # Session Report — 2026-05-13c Everything-Pre-Release SSOT (autonomous)
@@ -17,7 +18,11 @@ models_used:
 
 ## Summary
 
-Continuation from 2026-05-13b retired the remaining Tier 1 friction item (xbofm), swept Tier 3 help-text drift (3r268), shipped Tier 2 release-contract polish (w7ksg/5voar/3m27y/rl9uh+q30r7), and landed the reviewer blast-radius gate relaxation (6fsxp). Operator pushback flagged a deeper concern: the false-PARTIAL pattern was actually a symptom of `sp feed <job-id>` returning ~8 lines instead of full DB replay (`889dv`, P1 bug filed earlier this day). Fixed `889dv` as the structural retirement of the false-PARTIAL pattern — 6fsxp prompt relaxation now stays as a safety net but is largely obsoleted. Two user-reported GH issues surfaced and closed in-session: #76 (sp feed -f hangs forever on keep-alive waiting jobs — fixed via `032n4`), #71 (sp merge tsc gate false-positive on non-TS repos — fixed via `dpf3a`). Two release-drift audit beads (u0nbr, 6kofw) closed as covered by today's chains. Release contract epic ye5s9 closed (19/19 children: jj7hy, lqsha, pqe96, a6e60, wq0mw, xbofm, 6fsxp, 3r268, 5voar, w7ksg, 3m27y, rl9uh, q30r7, 7ezse, cww2s, dnqas, plus pre-day-of-session shipped children). New `dist/asset-contract.json` deterministic manifest + new `release-gate.yml` workflow firing `repository_dispatch` to xtrm-tools (operator wired `XTRM_TOOLS_DISPATCH_PAT` secret). Doctrine merge from `docs/proposals/using-specialists-v3-improvements-2026-05-09.md` landed as v3 SKILL.md v3.3 + auto-mode SKILL.md v2.0 minimal overlay (171→137 lines, all overlap delegated to v3). Researcher specialist consolidated to v1.2.0: model swapped from flaky qwen3.5-thinking to claude-sonnet-4-6, redundant skills dropped (folded ~3-4k tokens of duplicate content), description rewritten with aggressive triggers, v3 skill researcher section expanded with concrete dispatch-trigger table. All work pushed; operator running parallel session captured for handoff (does not affect this session's pushes).
+Continuation from 2026-05-13b retired the remaining Tier 1 friction item (xbofm), swept Tier 3 help-text drift (3r268), shipped Tier 2 release-contract polish (w7ksg/5voar/3m27y/rl9uh+q30r7), and landed the reviewer blast-radius gate relaxation (6fsxp). Operator pushback flagged a deeper concern: the false-PARTIAL pattern was actually a symptom of `sp feed <job-id>` returning ~8 lines instead of full DB replay (`889dv`, P1 bug filed earlier this day). Fixed `889dv` as the structural retirement of the false-PARTIAL pattern — 6fsxp prompt relaxation now stays as a safety net but is largely obsoleted. Two user-reported GH issues surfaced and closed in-session: #76 (sp feed -f hangs forever on keep-alive waiting jobs — fixed via `032n4`), #71 (sp merge tsc gate false-positive on non-TS repos — fixed via `dpf3a`). Two release-drift audit beads (u0nbr, 6kofw) closed as covered by today's chains. Release contract epic ye5s9 closed (19/19 children: jj7hy, lqsha, pqe96, a6e60, wq0mw, xbofm, 6fsxp, 3r268, 5voar, w7ksg, 3m27y, rl9uh, q30r7, 7ezse, cww2s, dnqas, plus pre-day-of-session shipped children). New `dist/asset-contract.json` deterministic manifest + new `release-gate.yml` workflow firing `repository_dispatch` to xtrm-tools (operator wired `XTRM_TOOLS_DISPATCH_PAT` secret). Doctrine merge from `docs/proposals/using-specialists-v3-improvements-2026-05-09.md` landed as v3 SKILL.md v3.3 + auto-mode SKILL.md v2.0 minimal overlay (171→137 lines, all overlap delegated to v3). Researcher specialist consolidated to v1.2.0: redundant skills dropped (folded ~3-4k tokens of duplicate content), description rewritten with aggressive triggers, v3 skill researcher section expanded with concrete dispatch-trigger table, then the late model audit removed every remaining anthropic/claude reference so operator environments without Anthropic access can dispatch all specialists. Original 13c work was pushed; the late report-update state is `master` ahead of origin with unrelated local `.beads`/active-symlink dirt preserved outside the report commit.
+
+## Late Bug-Hygiene Addendum (post-report parallel-orchestrator update)
+
+After the original 13c report was written, a parallel bug-hygiene wave verified and closed the remaining low/medium-risk runtime bugs without mixing branch contamination into main. The final landed fixes are intentionally curated on `master`: reviewer auto-claim commit-gate handling (`d937ac35`) and DB-first background-run integration stabilization (`fa00c5ed`). Earlier hygiene commits in the same stack closed stale/fixed bugs (`unitAI-f28ad`, `fn2wd`, `0k4mf`, `ad0ol`, `f5pxt`, `n2q4o`, `y9nah`) and the parallel orchestrator landed dependency/security/prompt cleanup (`374b6da8`, `7e98c1af`, `71b70414`, `5cee76b3`). Two bugs remain open and actionable: `unitAI-dp3lg` and `unitAI-e8eq2`. `unitAI-dq6vr` is closed as subsumed by the stronger `unitAI-sxmmy` integration fix; its partial reviewer chains were stopped rather than merged.
 
 ## Issues Closed
 
@@ -75,6 +80,22 @@ Continuation from 2026-05-13b retired the remaining Tier 1 friction item (xbofm)
 | `unitAI-cww2s` (+ `.1`, `.2`) | Machine-readable asset contract generator | executor → reviewer (PASS be76e8 after 1 determinism fix loop on generated_at timestamp) |
 | `unitAI-dnqas` (+ `.1`, `.2`) | Release gate workflow validating asset-contract + repository_dispatch | executor → reviewer (PASS acb525 after 1 YAML-validity rebuttal) |
 
+
+### Late bug-hygiene closures (parallel orchestrator)
+
+| ID | Title | Resolution | Specialist / Wave |
+|----|-------|------------|-------------------|
+| `unitAI-f28ad` | Stale explorer-tool concern | Closed stale after observability DB evidence showed later explorer jobs had Serena/GitNexus tools. | direct hygiene |
+| `unitAI-fn2wd` | `sp edit` package-tier guidance | `sp edit` now suggests `--fork-from` for package-tier targets. | direct hygiene |
+| `unitAI-0k4mf` | `.pi/` checkpoint noise | `.pi/` added to auto-commit noise prefixes. | direct hygiene |
+| `unitAI-ad0ol` | `sp feed` auto-commit evidence | `sp feed` renders auto-commit status, commit SHA/file count, and GitNexus analyze evidence. | direct hygiene |
+| `unitAI-f5pxt` | observability DB pruning | `sp clean --observability --before <iso|duration> [--include-epics] [--dry-run]` added and dist rebuilt. | direct hygiene |
+| `unitAI-n2q4o` | `.specialists/<role>-result.md` writes | Default result-file writes are gated behind `SPECIALISTS_JOB_FILE_OUTPUT=on`; DB remains canonical. | direct + tests |
+| `unitAI-y9nah` | Dolt remote PermissionDenied | Verified `bd dolt push` succeeds in this env and documented remote/auth/operator recovery workflow. | debugger→reviewer PASS |
+| `unitAI-352ni` | reviewer auto-claim blocks commit gate | Commit gate now treats reviewer-owned claims via explicit `claim-owner:<id>=reviewer:<session>` KV, adds safe cleanup/docs and xtrm hook tests. Final patch was curated to avoid contaminated specialist branch diffs. | debugger + code-sanity + security + reviewer loops |
+| `unitAI-sxmmy` | DB-first `run.integration` background tests | `sp run --background` bootstraps observability DB, hardens tmux handoff/cwd path, and integration status helper falls back to `observability.db` when `status.json` is absent. Targeted background integration passes. | debugger→reviewer PASS |
+| `unitAI-dq6vr` | 5s background job-id warning race | Closed as covered/subsumed by `unitAI-sxmmy`; partial debugger work improved poll/fallback/refusal surfacing but was not separately merged. Remaining stronger evidence is the passing `sxmmy` integration. | debugger + reviewer PARTIAL, stopped |
+
 ## Issues Filed (still open)
 
 | ID | P | Notes |
@@ -105,10 +126,21 @@ Continuation from 2026-05-13b retired the remaining Tier 1 friction item (xbofm)
 
 22 specialist dispatches (11 executors + 11 reviewers). All chains merged. 4 reviewer fix-loops + 1 rebuttal; the new 6fsxp blast-radius gate kept the rebuttal rate dramatically lower than 2026-05-13b's 3-of-4 false-PARTIAL pattern.
 
+
+### Late bug-hygiene specialist dispatches
+
+| Wave | Beads | Specialists / jobs | Outcome |
+|------|-------|--------------------|---------|
+| 1 | `unitAI-y9nah`, `unitAI-352ni` | debugger jobs `d7c186`, `696862`; reviewers `81be6c`, `e4883e`; plus `352ni` code-sanity/security loops (`5cf75d`, `a2b694`, `9bcf66`, `3b1474`) | `y9nah` PASS + closed. `352ni` needed multiple security/reviewer loops before curated main patch. |
+| 2 | `unitAI-sxmmy`, `unitAI-dq6vr` | debugger jobs `d38845`, `e2bed6`; reviewers `1f6452`, `146531`, `286286` | `sxmmy` PASS + merged manually via curated patch. `dq6vr` remained partial and was stopped/treated as subsumed. |
+| Provenance repair | `unitAI-352ni` | executor `e2b60e` + reviewer `527f97` | Exposed specialist diff-provenance mismatch; final resolution was a curated six-file patch applied directly to main with local test/lint evidence. |
+
 ## Problems Encountered
 
 | Problem | Root cause | Resolution |
 |---------|-----------|------------|
+| Specialist branch diff contamination on `unitAI-352ni` / `unitAI-sxmmy` | Worktree branches were based on stale `master` and included unrelated earlier config/report/dependency changes; reviewer injected diff sometimes saw only auto-checkpoint test files while local branch diff showed production hook files. | Avoided `sp merge`; generated curated patches for only intended files and applied them to current `master`, then re-ran targeted tests/lint locally before committing. |
+| `unitAI-sxmmy` tmux background test kept failing after handoff ID appeared | The original test assumed legacy `status.json`, but DB-first supervisor defaults no file output; the returned job id existed in observability DB, not necessarily under `.specialists/jobs/<id>/status.json`. | `readStatus()` integration helper is file-first then DB fallback via `bun:sqlite`; `src/cli/run.ts` keeps DB bootstrap + tmux handoff/cwd fixes. Targeted background integration now passes. |
 | `sp merge` refused on STAGED `.beads/issues.jsonl` each chain | `pqe96` MERGE_DIRTY_IGNORE_PREFIXES handles untracked/modified but not staged variant (`M ` not ` M`/`MM`) | Pre-merge `git restore --staged + git checkout` workaround each time. P3 polish needed. |
 | GH#76 surfaced: `sp feed -f` hangs forever | followMerged() global mode never exits while keep-alive `waiting` jobs are tracked (never reach done/error/cancelled) | Fixed via `032n4` — global mode now treats keep-alive waiting as terminal-equivalent for exit; per-job mode unchanged |
 | GH#71 surfaced: tsc gate false-positive on non-TS repos | runTypecheckGate ran unconditionally; tsc help-text exit was non-zero | Fixed via `dpf3a` — gate now checks for tsconfig.json existence first |
@@ -202,6 +234,22 @@ Continuation from 2026-05-13b retired the remaining Tier 1 friction item (xbofm)
 - Final provider distribution: 12 specialists × openai-codex (primary), 2 × nano-gpt/glm-5, 0 × anthropic. Fallback diversity via gemini + glm + cross-provider.
 - `grep -rl "anthropic\|claude-*" config/specialists/` returns empty. All 17 specialists schema-validate clean.
 
+
+### Late bug-hygiene code changes
+
+#### unitAI-352ni — reviewer-owned commit claims (`d937ac35`)
+- `.xtrm/hooks/beads-gate-utils.mjs`: `isReviewerClaimExempt()` now relies on explicit `claim-owner:<issueId>` reviewer ownership, with cleanup helper for inactive reviewer-owned claims.
+- `.xtrm/hooks/beads-gate-core.mjs` and `.xtrm/hooks/beads-claim-sync.mjs`: commit gate and bd claim/close hook paths write/clear reviewer ownership metadata safely.
+- `.xtrm/packages/pi-extensions/extensions/beads/index.ts`: Pi extension claim-sync path mirrors reviewer owner metadata behavior.
+- `.xtrm/hooks/README.md`: documents reviewer owner-KV behavior and operator recovery commands.
+- `tests/unit/xtrm/beads-commit-gate.test.ts`: adds reviewer-exempt, human-blocking, and cleanup coverage.
+- Validation: `bun --bun vitest run tests/unit/xtrm/beads-commit-gate.test.ts` (4/4), `bun run lint`.
+
+#### unitAI-sxmmy — background-run integration stabilization (`fa00c5ed`)
+- `src/cli/run.ts`: DB bootstrap/background handoff/cwd handling stabilized; tmux compound command now invokes `/bin/bash -lc` instead of becoming `exec cd ...`.
+- `tests/integration/cli/run.integration.test.ts`: `readStatus()` reads legacy `status.json` first, then falls back to `.specialists/db/observability.db` via `bun:sqlite` for DB-first supervisor runs.
+- Validation: `bunx tsc --noEmit`, `bun run lint`, `bunx vitest run tests/integration/cli/run.integration.test.ts -t background`.
+
 ## Memories Saved
 
 | Key | Content |
@@ -237,10 +285,10 @@ Continuation from 2026-05-13b retired the remaining Tier 1 friction item (xbofm)
 | `npm pack --dry-run` | LICENSE present, benchmarks/evals excluded, 256 files (down from 258), asset-contract.json present ✓ |
 | `scripts/assert-package-payload.sh` w/ LICENSE | passed ✓ |
 | `sp view reviewer --section prompt.system` | parses, shows new gate language ✓ |
-| `sp view researcher` after consolidation | model=claude-sonnet-4-6, v1.2.0, skills=[last30days only] ✓ |
+| `sp view researcher` after consolidation + late model audit | model=openai-codex/gpt-5.4-mini, v1.2.0, skills=[last30days only]; no anthropic/claude refs remain ✓ |
 | `sp validate researcher` | Schema validation passed ✓ |
 | Global `sp` symlink → `dist/index.js` shas match | YES (every rebuild auto-applies) ✓ |
-| `sp ps` final | 0 active ✓ |
+| `sp ps` final | Not session-clean globally: 2 running node/research jobs plus historical errored node groups remain from other orchestrators; no specialist worktrees from this bug-hygiene/reporting lane ✓ |
 
 ## Release-Readiness Verdict
 
@@ -260,6 +308,8 @@ Operator steps remaining for the cut:
 | ID | P | Context / Suggestions |
 |----|---|----|
 | xtrm-tools `xtrm-cvjg` + `xtrm-nogp` + `xtrm-sn9t` + `xtrm-2yn4` | mixed | Complete cross-repo handshake. Operator started a parallel auto-mode session in xtrm-tools (2 sp-executor tmux sessions visible + 3 worktrees + commit `e5da92e9` post-my-last-push). **Do not touch from specialists repo** — different bd workspace, different observability DB. |
+| `unitAI-dp3lg` | P3 | Verify whether post-`provisionWorktree` fixes still allow per-worktree Dolt sql-server spawn in xtrm-tools/specialists worktrees. Start with `git worktree list`, `sp ps --health`, and xtrm-tools' worktree lifecycle; do not infer from historical orphan counts alone. |
+| `unitAI-e8eq2` | P3 | Investigate test-issue dependency direction / inverse close gate. Reproduce with a tiny impl/test bead pair before touching hooks; likely gate logic around implementation-close vs companion-test dependency semantics. |
 | `executor.specialist.json` "don't edit generated files" CONSTRAINT (proposal L588 residual) | P3 | Not filed. ~5-min `sp edit executor` patch to system_prompt. Bake: "Never edit files inside `dist/`, `build/`, `__generated__/`, or paths with `// AUTO-GENERATED` headers. Regenerate via build script." |
 | `sp merge` STAGED `.beads/issues.jsonl` ignore | P3 | Hit 8× this session as repeated `git restore --staged + git checkout` ritual. Extend `MERGE_DIRTY_IGNORE_PREFIXES` filter to also strip staged-variant paths (`M ` not just ` M`/`MM`). |
 | Reviewer prompt minor wording polish (raw-artifact-reads vs CLIs) | P3 | Filed only as report mention. Low-leverage. |
@@ -277,15 +327,16 @@ Operator steps remaining for the cut:
 
 ## Due-Diligence Sweep
 
-- 0 active sp jobs FROM THIS SESSION. `sp ps` shows operator's parallel jobs (2 sp-executor tmux sessions + 3 worktrees: `unitAI-ad0ol-operator`, `unitAI-fn2wd-executor`, `chore/unitAI-5kuv0-dist-docs`). NOT cleaned up — would touch operator's in-flight work.
-- 0 in-progress beads from this session.
-- 0 specialist worktrees from this session. The `--keep-alive-executor` worktree visible is a pre-existing orphan that predates today's work; left untouched per "don't blindly delete what you don't understand" rule.
-- All session chain branches deleted post-merge.
-- 27 issues closed (12 parent + 15 chain children) with memory acks; +2 audits superseded (u0nbr, 6kofw); +1 reviewer-evidence bead superseded (5i7ow); +1 epic closed (ye5s9); +2 GH issues closed (#76, #71).
-- Push state at end of my work: `9c6e4161`. Operator landed `e5da92e9` after my last push — that's their concurrent work, not part of my session.
-- Skill mirrors: `config/skills/using-specialists-v3/SKILL.md` and `.xtrm/skills/default/using-specialists-v3/SKILL.md` sha256 match (`be1dbea6`). Same for `using-specialists-auto`.
-- `CHANGELOG.md`: `[Unreleased]` has the `889dv` entry from the executor's run. Other session items remain to be added by next `changelog-keeper` run during release prep — report-only entries don't belong in `[Unreleased]`.
-- Service skills / docs SSOT / CLAUDE.md / evidence artifacts / decisions / tests / skill packs / open beads: checked. No surprises. Skill mirrors hand-synced via `cp` (canonical flow is `sp init --sync-skills`). `.xtrm/skills/active/using-specialists-auto` is the operator-side leftover symlink, not part of my commits.
+- `git worktree list`: only main `/home/dawid/dev/specialists` worktree remains for this repo.
+- `sp ps`: not globally clean, but remaining active state is outside this report-update/bug-hygiene lane. Current dashboard shows 2 running node/research jobs and historical errored node groups (`unitAI-3f7b.2` family), plus system-health warnings (`specialists=1`, `dolt=2`, `serena-lsp=2`, `orphans=4`). Left intact to avoid killing another orchestrator's work.
+- `tmux ls`: only long-lived user sessions (`infra`, `market`, `quant`, `specialists`); no `sp-*` / `xt-*` tmux sessions attributable to this lane.
+- Process scan: multiple older Claude/Serena/GitNexus sessions and one xtrm-tools worktree Serena server are still alive; not killed because they predate or belong to parallel/user sessions.
+- 0 in-progress beads after late bug-hygiene reconciliation (`bd list --status=in_progress` empty).
+- 37 issues closed across the same-day report scope (27 original + 10 late bug-hygiene closures) with memory acks/notes; +2 GH issues closed (#76, #71); +2 audits superseded (u0nbr, 6kofw); +1 reviewer-evidence bead superseded (5i7ow); +1 epic closed (ye5s9).
+- Open bug sweep: only `unitAI-dp3lg` and `unitAI-e8eq2` remain open; both are P3 and listed above with handoff context.
+- Push/branch state: `master` is ahead of `origin/master` by 7 commits after the report-update commit. Local dirty state intentionally preserved/not mixed: staged `.beads/issues.jsonl` export noise and untracked `.xtrm/skills/active/using-specialists-auto`.
+- `CHANGELOG.md`: already synced for the late user-facing fixes (`unitAI-sxmmy`, `unitAI-dq6vr`, `unitAI-352ni`) plus dependency/security/prompt cleanup; no extra report-only changelog entry needed.
+- Service skills / docs SSOT / CLAUDE.md / evidence artifacts / decisions / tests / skill packs / open beads: checked. No new untracked evidence artifacts to preserve. `.xtrm/skills/active/using-specialists-auto` remains an operator-side leftover symlink, not part of this report commit.
 - npm globally-installed `sp` symlinks back to local `dist/index.js` (verified earlier this session): every `bun run build` auto-applies for local testing.
 
 ## Cumulative Pre-Release Status (sessions 2026-05-13 + 2026-05-13b + 2026-05-13c)
@@ -320,7 +371,8 @@ Operator steps remaining for the cut:
 
 ## Suggested Next Priority
 
-1. **Cut v3.15.0 release** — see Release-Readiness Verdict for the 5-step sequence. Operator-driven. Specialists-side is genuinely ready.
-2. **Wait on xtrm-tools-side parallel session to land `xtrm-cvjg`** (handler for the new `repository_dispatch`) — then the cross-repo handshake is operational end-to-end. Without it, our release-gate fires successfully but xtrm-tools does nothing with the dispatch (no regression — just incomplete loop). Operator's parallel auto-mode session in `~/dev/xtrm-tools` is already on this.
-3. **File the 2 P3 polish beads** (executor "don't edit generated files" CONSTRAINT + sp merge staged-`.beads/issues.jsonl` ignore) when bandwidth allows. Both ~5-min fixes. Total session friction they would have prevented: ~10 ritual interruptions.
-4. **Watch researcher dispatch rate post-release** — the consolidation (model swap + 4 skills → 1 + aggressive description + v3 skill expansion) should materially increase dispatch frequency. If still rarely used after a few sessions, the bottleneck is description discoverability, not capability — escalate to a stronger trigger phrase or proactive injection in orchestrator boot.
+1. **Cut v3.15.0 release** after one final clean-state check. Specialists-side release surface is ready, but current local state still has staged `.beads/issues.jsonl` export noise and untracked `.xtrm/skills/active/using-specialists-auto`; do not include either in a release commit.
+2. **Verify/finish the two remaining open bugs**: `unitAI-dp3lg` (post-fix per-worktree Dolt servers) and `unitAI-e8eq2` (test-issue dependency direction/inverse close gate).
+3. **Wait on xtrm-tools-side parallel session to land `xtrm-cvjg`** (handler for the new `repository_dispatch`) — then the cross-repo handshake is operational end-to-end. Without it, our release-gate fires successfully but xtrm-tools does nothing with the dispatch (no regression — just incomplete loop). Operator's parallel auto-mode session in `~/dev/xtrm-tools` was already working this.
+4. **File the 2 P3 polish beads** (executor "don't edit generated files" CONSTRAINT + sp merge staged-`.beads/issues.jsonl` ignore) when bandwidth allows. Both ~5-min fixes. Total session friction they would have prevented: ~10 ritual interruptions.
+5. **Watch researcher dispatch rate post-release** — the consolidation (model swap + 4 skills → 1 + aggressive description + v3 skill expansion) should materially increase dispatch frequency. If still rarely used after a few sessions, the bottleneck is description discoverability, not capability — escalate to a stronger trigger phrase or proactive injection in orchestrator boot.

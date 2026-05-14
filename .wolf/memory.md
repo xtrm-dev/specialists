@@ -165,3 +165,4 @@
 - 2026-05-13T12:04:27Z: unitAI-5kuv0 rebuilt generated dist artifacts with `bun run build` after PR #77; build refreshed dist/index.js, dist/lib.js, and declaration maps/types.
 
 - 2026-05-13T12:11:27Z: unitAI-sv0v2 documented Pi RPC isolation flags in docs/pi-session.md and aligned docs/specialists-service.md one-shot runner argv with script-runner isolation.
+- 2026-05-14T01:06:48Z: Updated `.xtrm/reports/2026-05-13c-everything-pre-release.md` as the same-day SSOT with late bug-hygiene closures (`unitAI-352ni`, `unitAI-sxmmy`, stale/fixed bug cleanup), remaining open bugs (`unitAI-dp3lg`, `unitAI-e8eq2`), and non-owned cleanup state left intact.
