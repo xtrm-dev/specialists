@@ -434,6 +434,22 @@ Selection rules:
 - Researcher is for current external info, not repo archaeology. **Dispatch BEFORE answering any library/API/framework/CLI question from training data** — your knowledge is stale by months and APIs drift silently. The cost is one CLI call; the alternative is shipping wrong API usage.
 - Specialists-creator should precede specialist config/schema edits.
 
+## Bug Diagnosis Chain
+
+For symptoms, errors, regressions, flakes, or failing tests where cause is unknown, start with diagnosis — not implementation. Do not dispatch executor while cause is unknown; executor is for clear implementation scope only.
+
+Default chain:
+
+1. **test-runner** or **debugger** establishes a fast deterministic feedback loop. If no loop can be built, debugger reports the blocker — do not patch in the dark.
+2. **debugger** reproduces the symptom, writes 3–5 falsifiable hypotheses, and tests one variable at a time. Any temporary instrumentation must be tagged `[DEBUG-<id>]` and removed before completion.
+3. **debugger** applies the minimal root-cause fix on the fault line and verifies via targeted lint/typecheck plus the focused repro.
+4. **test-runner** reruns the original repro/regression command (full-suite validation is its job, not debugger's).
+5. **code-sanity** runs if the fix smells brittle, overcomplicated, or type-risky. **security-auditor** runs if the fix touches auth/session/secrets/input handling, dependency logic, or agent/MCP/hook config.
+6. **reviewer** gates the final diff against the bead contract.
+7. If no correct regression-test seam exists, route the architecture/testability finding to **overthinker** or **planner** — do not force a brittle test just to close the loop.
+
+Explorer is useful before diagnosis only when no concrete symptom exists and architecture is unknown. For real bugs with a symptom, use debugger.
+
 ## Code-sanity
 
 Use code-sanity when diff smells overcomplicated, brittle, or type-risky, but not yet broken enough for debugger. Use it before final review when you want cheap simplification check without blocking merge.

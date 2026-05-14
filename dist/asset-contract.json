@@ -40,7 +40,7 @@
     },
     {
       "path": "config/skills/using-specialists-v3/SKILL.md",
-      "sha256": "656ef64dd16022afe63fc503e640228141f374828c7d4fdd416a3c19113b5d69"
+      "sha256": "c8aa5dccd55fe6a461e66202a6829a3f1b9f9b4dc8c54f5c4f2847eb585b30f1"
     },
     {
       "path": "config/skills/using-specialists/SKILL.md",
@@ -115,9 +115,6 @@
     },
     {
       "path": "config/mandatory-rules/core-session-boundary.md"
-    },
-    {
-      "path": "config/mandatory-rules/debugger-trace-first.md"
     },
     {
       "path": "config/mandatory-rules/diagnose-loop.md"

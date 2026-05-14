@@ -34,7 +34,6 @@
     },
     "mandatory_rules": {
       "template_sets": [
-        "debugger-trace-first",
         "diagnose-loop",
         "gitnexus-required",
         "serena-cheatsheet",
