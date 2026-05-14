@@ -32,6 +32,7 @@
       "template_sets": [
         "explorer-readonly",
         "gitnexus-required",
+        "code-quality-defaults",
         "serena-cheatsheet",
         "per-turn-handoff-schema",
         "bead-id-verbatim"
@@ -82,10 +83,7 @@
       }
     },
     "skills": {
-      "paths": [
-        ".xtrm/skills/active/clean-code/SKILL.md",
-        ".xtrm/skills/active/gitnexus-impact-analysis/SKILL.md"
-      ],
+      "paths": [],
       "scripts": []
     },
     "validation": {

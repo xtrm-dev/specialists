@@ -40,7 +40,7 @@
     },
     {
       "path": "config/skills/using-specialists-v3/SKILL.md",
-      "sha256": "be1dbea64fd7d6b5d1759a6cbfd7ad8dd41dab90ad1d029e1c57bce60b8d74b4"
+      "sha256": "656ef64dd16022afe63fc503e640228141f374828c7d4fdd416a3c19113b5d69"
     },
     {
       "path": "config/skills/using-specialists/SKILL.md",
@@ -111,10 +111,16 @@
       "path": "config/mandatory-rules/changelog-keeper-scope.md"
     },
     {
+      "path": "config/mandatory-rules/code-quality-defaults.md"
+    },
+    {
       "path": "config/mandatory-rules/core-session-boundary.md"
     },
     {
       "path": "config/mandatory-rules/debugger-trace-first.md"
+    },
+    {
+      "path": "config/mandatory-rules/diagnose-loop.md"
     },
     {
       "path": "config/mandatory-rules/executor-delivery.md"
@@ -141,10 +147,16 @@
       "path": "config/mandatory-rules/README.md"
     },
     {
+      "path": "config/mandatory-rules/research-tool-routing.md"
+    },
+    {
       "path": "config/mandatory-rules/researcher-source-discipline.md"
     },
     {
       "path": "config/mandatory-rules/reviewer-verdict-format.md"
+    },
+    {
+      "path": "config/mandatory-rules/security-review-defaults.md"
     },
     {
       "path": "config/mandatory-rules/serena-cheatsheet.md"

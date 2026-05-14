@@ -53,6 +53,12 @@
     },
     "stall_detection": {},
     "beads_integration": "auto",
-    "beads_write_notes": true
+    "beads_write_notes": true,
+    "mandatory_rules": {
+      "template_sets": [
+        "per-turn-handoff-schema",
+        "bead-id-verbatim"
+      ]
+    }
   }
 }

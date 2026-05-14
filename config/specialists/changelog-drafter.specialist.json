@@ -31,7 +31,8 @@
     "mandatory_rules": {
       "template_sets": [
         "changelog-keeper-scope",
-        "changelog-conventions"
+        "changelog-conventions",
+        "per-turn-handoff-schema"
       ]
     },
     "prompt": {

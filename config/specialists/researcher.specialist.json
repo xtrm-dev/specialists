@@ -32,7 +32,9 @@
     "mandatory_rules": {
       "template_sets": [
         "researcher-source-discipline",
-        "per-turn-handoff-schema"
+        "research-tool-routing",
+        "per-turn-handoff-schema",
+        "bead-id-verbatim"
       ]
     },
     "prompt": {
@@ -40,9 +42,7 @@
       "task_template": "Research the following and return current external evidence:\n\n$prompt\n\nPick mode by question shape:\n- Targeted (specific library/API/repo question) → ctx7 / deepwiki\n- Discovery (\"how do others do X\", real-world patterns) → ghgrep first, then deepwiki on the best hits\n- Media / discussion-recency (YouTube, social) → load .xtrm/skills/active/last30days/SKILL.md and follow its commands\n\nDo not skip the CLI step — your training data is stale by months. After delivering findings, enter keep-alive waiting state for follow-ups.\n"
     },
     "skills": {
-      "paths": [
-        ".xtrm/skills/active/last30days/SKILL.md"
-      ],
+      "paths": [],
       "scripts": []
     },
     "validation": {

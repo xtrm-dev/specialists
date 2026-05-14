@@ -29,8 +29,10 @@
     "mandatory_rules": {
       "template_sets": [
         "overthinker-4phase",
+        "research-tool-routing",
         "serena-cheatsheet",
-        "per-turn-handoff-schema"
+        "per-turn-handoff-schema",
+        "bead-id-verbatim"
       ]
     },
     "prompt": {
@@ -38,12 +40,7 @@
       "task_template": "Apply 4-phase Overthinker workflow to following problem:\n\n$prompt\n\nProduce complete multi-phase analysis. Use markdown headers for each phase.\nEnd with \"## Final Answer\" section containing distilled recommendation.\n"
     },
     "skills": {
-      "paths": [
-        ".xtrm/skills/active/deepwiki/",
-        ".xtrm/skills/active/find-docs/",
-        ".xtrm/skills/active/github-search/",
-        ".xtrm/skills/active/gitnexus-exploring/SKILL.md"
-      ],
+      "paths": [],
       "scripts": []
     },
     "validation": {

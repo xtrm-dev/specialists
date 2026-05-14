@@ -29,6 +29,7 @@
     "mandatory_rules": {
       "template_sets": [
         "reviewer-verdict-format",
+        "code-quality-defaults",
         "gitnexus-required",
         "serena-cheatsheet",
         "per-turn-handoff-schema",
@@ -40,12 +41,7 @@
       "task_template": "Audit the completed specialist run for requirement compliance.\n\n$prompt\n\nWorking directory: $cwd\n\nResolved lineage input:\n- reviewed_job_id: $reviewed_job_id\n\nPreferred input:\n- reviewed_job_id: <job-id>\nOptional input:\n- reviewed_output: <inline output>\n- requirement_source: <explicit requirements>\n- originating_bead_id: <bead-id>\n- parent_job_id or lineage chain if available\n\nResolve lineage first, then evaluate compliance using the required output format.\n\nWhen reviewing code changes, verify blast radius before edits. Acceptable evidence: `gitnexus_impact({target})`, `$gitnexus_summary`, `gitnexus_detect_changes`, or LOW `impact_report`; only flag a gap if none exist and diff is MEDIUM+ surface."
     },
     "skills": {
-      "paths": [
-        ".xtrm/skills/active/using-quality-gates/SKILL.md",
-        ".xtrm/skills/active/clean-code/SKILL.md",
-        ".xtrm/skills/active/gitnexus-refactoring/SKILL.md",
-        ".xtrm/skills/active/gitnexus-impact-analysis/SKILL.md"
-      ],
+      "paths": [],
       "scripts": []
     },
     "validation": {

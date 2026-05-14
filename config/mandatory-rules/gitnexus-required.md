@@ -8,6 +8,7 @@ Tools (prefer MCP; fall back to CLI if MCP unavailable):
 - Blast radius before edit: `gitnexus_impact({target, direction:"upstream"})` or `npx gitnexus impact <target>`. STOP and warn if HIGH/CRITICAL.
 - Symbol callers/callees: `gitnexus_context({name})` or `npx gitnexus context <name>`.
 - Concept search: `gitnexus_query({query})` or `npx gitnexus query "<text>"`.
+- Execution flow trace: `gitnexus_query({query: "<flow-keyword>"})` (process-grouped results) or read the MCP resource `gitnexus://repo/<name>/process/<flow-name>` for the step-by-step trace.
 - Pre-commit scope check: `gitnexus_detect_changes()` (MCP only — fallback: `git diff --stat`).
 
 Rules:

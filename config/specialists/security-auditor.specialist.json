@@ -31,6 +31,8 @@
     "mandatory_rules": {
       "template_sets": [
         "researcher-source-discipline",
+        "research-tool-routing",
+        "security-review-defaults",
         "serena-cheatsheet",
         "per-turn-handoff-schema",
         "bead-id-verbatim"
@@ -79,14 +81,7 @@
       }
     },
     "skills": {
-      "paths": [
-        ".xtrm/skills/optional/security-ops/security-auditor/SKILL.md",
-        ".xtrm/skills/optional/xt-optional/senior-security/SKILL.md",
-        ".xtrm/skills/active/find-docs/SKILL.md",
-        ".xtrm/skills/active/deepwiki/SKILL.md",
-        ".xtrm/skills/active/github-search/SKILL.md",
-        ".xtrm/skills/active/last30days/SKILL.md"
-      ],
+      "paths": [],
       "scripts": []
     },
     "validation": {

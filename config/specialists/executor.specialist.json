@@ -30,6 +30,7 @@
     "mandatory_rules": {
       "template_sets": [
         "executor-delivery",
+        "code-quality-defaults",
         "git-workflow-safe",
         "gitnexus-required",
         "serena-cheatsheet",
@@ -81,10 +82,7 @@
       }
     },
     "skills": {
-      "paths": [
-        ".xtrm/skills/active/gitnexus-impact-analysis",
-        ".xtrm/skills/active/clean-code"
-      ],
+      "paths": [],
       "scripts": [
         {
           "run": "git diff --stat HEAD 2>/dev/null || true",
