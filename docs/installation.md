@@ -81,7 +81,11 @@ The loader resolves them live from the installed package when a repo has no inte
 
 For new repositories this means no default snapshot is required. Pin the canonical version with `package.json` / lockfile by depending on the desired `@jaggerxtrm/specialists` version. Put custom project definitions in `.specialists/user/`; they intentionally outrank package canonical assets.
 
-`sp init --sync-defaults` is no longer the default bootstrap flow. Use it only as a human/operator compatibility action when a repo deliberately needs a local `.specialists/default/` snapshot.
+`sp init --sync-defaults` is deprecated. It still works as a compatibility alias, but it prints a loud warning because it creates drift debt.
+
+`.specialists/default/` stays empty by default. Populate it only when you intentionally pin a specialist, mandatory rule, or node config for repo-local override.
+
+Use `sp pin <id>` for intentional pins when available; otherwise copy the specific asset into `.specialists/default/` only for an operator-approved override.
 
 ## Category B: filesystem-bound xtrm-managed assets
 

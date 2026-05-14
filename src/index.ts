@@ -566,7 +566,7 @@ async function run() {
         'Options:',
         '  --json              Structured JSON output with trees[].children[] schema',
         '  --all               Include every row, including cleaned/dead/terminal history',
-        '  --follow, -f        Live-refresh view with spinner animation',
+        '  --follow, -f        Live dashboard; TTY repaints in-place, pipes append ANSI-free snapshots',
         '  --health            Show detailed process health tables (default is aggregate only)',
         '  --active            Show active jobs only; hide unresolved terminal problems',
         '  --include-terminal  Include terminal history that has not been cleaned',

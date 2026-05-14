@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- `sp init --sync-defaults` is now deprecated and prints a loud drift-debt warning; doctor remediation points to `sp prune-stale-defaults --apply`, and docs describe package-canonical-by-default defaults.
+
 ## [v3.15.0] — 2026-05-14
 
 ### Added

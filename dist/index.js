@@ -23262,11 +23262,14 @@ __export(exports_list_rules, {
 });
 import { existsSync as existsSync9, readFileSync as readFileSync6, readdirSync } from "fs";
 import { resolve as resolve5, join as join8, basename as basename3 } from "path";
+function resolvePackageDir(asset) {
+  return resolveCanonicalAssetDir(asset) ?? null;
+}
 function discoverRuleSets(cwd) {
   const seen = new Map;
   for (const { rel, tier } of RULE_TIERS) {
-    const dir = resolve5(cwd, rel);
-    if (!existsSync9(dir))
+    const dir = rel === "__package__/mandatory-rules" ? resolvePackageDir("mandatory-rules") : resolve5(cwd, rel);
+    if (!dir || !existsSync9(dir))
       continue;
     let files;
     try {
@@ -23287,8 +23290,8 @@ function discoverRuleSets(cwd) {
 function discoverSpecialists(cwd) {
   const seen = new Map;
   for (const { rel, tier } of SPEC_TIERS) {
-    const dir = resolve5(cwd, rel);
-    if (!existsSync9(dir))
+    const dir = rel === "__package__/specialists" ? resolvePackageDir("specialists") : resolve5(cwd, rel);
+    if (!dir || !existsSync9(dir))
       continue;
     let files;
     try {
@@ -23391,7 +23394,8 @@ function printUsage() {
     "Usage: specialists list-rules [--rule <id>] [--specialist <name>] [--json]",
     "",
     "Show which mandatory rules are loaded by which specialists.",
-    "Walks tiers in runner-order: .specialists/ \u2192 .specialists/default/ \u2192 config/.",
+    "Walks cwd tiers first, then package-canonical fallback.",
+    "Priority: .specialists/ \u2192 .specialists/default/ \u2192 config/ \u2192 package-canonical.",
     "",
     "Options:",
     "  --rule <id>          Filter to one rule, list every spec that loads it",
@@ -23496,16 +23500,19 @@ Orphan rules (defined but not loaded by any specialist):`);
 var RULE_TIERS, SPEC_TIERS;
 var init_list_rules = __esm(() => {
   init_mandatory_rules();
+  init_canonical_asset_resolver();
   RULE_TIERS = [
     { rel: ".specialists/user/mandatory-rules", tier: "user" },
     { rel: ".specialists/mandatory-rules", tier: "overlay" },
     { rel: ".specialists/default/mandatory-rules", tier: "default" },
-    { rel: "config/mandatory-rules", tier: "config" }
+    { rel: "config/mandatory-rules", tier: "config" },
+    { rel: "__package__/mandatory-rules", tier: "package-canonical" }
   ];
   SPEC_TIERS = [
     { rel: ".specialists/user", tier: "user" },
     { rel: ".specialists/default", tier: "default" },
-    { rel: "config/specialists", tier: "config" }
+    { rel: "config/specialists", tier: "config" },
+    { rel: "__package__/specialists", tier: "package-canonical" }
   ];
 });
 
@@ -27456,12 +27463,13 @@ ${bold5("specialists init")}
   }
   warnMissingOptionalPrerequisites();
   if (syncDefaults) {
+    warn("--sync-defaults is deprecated. This creates drift debt; use sp pin <id> for intentional pins.");
     migrateLegacySpecialists(cwd, "default");
     copyCanonicalSpecialists(cwd);
     copyCanonicalMandatoryRules(cwd);
     copyCanonicalNodeConfigs(cwd);
   } else {
-    skip(".specialists/default/ not synced (pass --sync-defaults to write canonical specialists, mandatory-rules, and nodes)");
+    skip(".specialists/default/ not synced (package canonical by default; use sp pin <id> for intentional pins)");
   }
   migrateLegacySpecialists(cwd, "user");
   createSpecialistsDirs(cwd);
@@ -27505,7 +27513,7 @@ ${bold5("Done!")}
   console.log("");
   console.log(`  ${dim5(".specialists/ structure:")}`);
   console.log(`  .specialists/`);
-  console.log(`  \u251C\u2500\u2500 default/           ${dim5("# canonical specialists (from init --sync-defaults)")}`);
+  console.log(`  \u251C\u2500\u2500 default/           ${dim5("# intentional pins only; package canonical by default")}`);
   console.log(`  \u251C\u2500\u2500 user/              ${dim5("# your custom specialists")}`);
   console.log(`  \u251C\u2500\u2500 db/                ${dim5("# observability SQLite (gitignored)")}`);
   console.log(`  \u251C\u2500\u2500 jobs/              ${dim5("# runtime (gitignored)")}`);
@@ -37811,20 +37819,65 @@ function renderBuffered(args) {
   return lines.join(`
 `);
 }
+function stripAnsiEscapeSequences(text) {
+  return text.replace(ANSI_ESCAPE_SEQUENCE_PATTERN, "");
+}
 async function follow(args) {
-  process.stdout.write("\x1B[?25l");
-  process.on("exit", () => process.stdout.write("\x1B[?25h"));
+  const isTTY = Boolean(process.stdout.isTTY);
+  let lastFrame = "";
+  let interval;
+  let cleanedUp = false;
+  const write = (text) => {
+    process.stdout.write(text);
+  };
+  const enterFollowMode = () => {
+    if (!isTTY)
+      return;
+    write(ANSI_ENTER_ALT_SCREEN);
+    write(ANSI_HIDE_CURSOR);
+  };
+  const exitFollowMode = () => {
+    if (!isTTY || cleanedUp)
+      return;
+    cleanedUp = true;
+    write(ANSI_SHOW_CURSOR);
+    write(ANSI_EXIT_ALT_SCREEN);
+  };
   const drawFrame = () => {
     const frame = renderBuffered(args);
-    process.stdout.write(`\x1B[H\x1B[J${frame}
+    if (frame === lastFrame)
+      return;
+    lastFrame = frame;
+    if (!isTTY) {
+      write(`${stripAnsiEscapeSequences(frame)}
+
+`);
+      return;
+    }
+    write(`${ANSI_CURSOR_HOME}${ANSI_ERASE_DOWN}${frame}
 `);
   };
-  process.stdout.write("\x1B[2J\x1B[H");
+  const cleanup = (exitCode) => {
+    if (interval)
+      clearInterval(interval);
+    exitFollowMode();
+    if (exitCode !== undefined)
+      process.exit(exitCode);
+  };
+  process.stdout.on("error", (error2) => {
+    if (error2.code === "EPIPE") {
+      cleanup(0);
+      return;
+    }
+    throw error2;
+  });
+  process.once("SIGINT", () => cleanup(130));
+  process.once("SIGTERM", () => cleanup(143));
+  process.once("exit", () => cleanup());
+  enterFollowMode();
   drawFrame();
   await new Promise(() => {
-    setInterval(() => {
-      drawFrame();
-    }, 1000);
+    interval = setInterval(drawFrame, 1000);
   });
 }
 async function run16() {
@@ -37848,7 +37901,7 @@ async function run16() {
     sqliteClient?.close();
   }
 }
-var ACTIVE_STATES, TERMINAL_STATES, BEAD_TITLE_CACHE, STATUS_PRIORITY;
+var ACTIVE_STATES, TERMINAL_STATES, BEAD_TITLE_CACHE, STATUS_PRIORITY, ANSI_ENTER_ALT_SCREEN = "\x1B[?1049h", ANSI_EXIT_ALT_SCREEN = "\x1B[?1049l", ANSI_HIDE_CURSOR = "\x1B[?25l", ANSI_SHOW_CURSOR = "\x1B[?25h", ANSI_CURSOR_HOME = "\x1B[H", ANSI_ERASE_DOWN = "\x1B[J", ANSI_ESCAPE_SEQUENCE_PATTERN;
 var init_ps = __esm(() => {
   init_format_helpers();
   init_supervisor();
@@ -37869,6 +37922,7 @@ var init_ps = __esm(() => {
     error: 0,
     cancelled: 0
   };
+  ANSI_ESCAPE_SEQUENCE_PATTERN = /\x1B\[[0-?]*[ -/]*[@-~]/g;
 });
 
 // src/cli/result.ts
@@ -40448,9 +40502,9 @@ function relPath(path, base) {
 function makeFinding(repoRoot, kind, scope, path, canonicalPath, bytesEqual) {
   const rel = relPath(path, repoRoot);
   if (scope === "default") {
-    return bytesEqual ? { repo_root: repoRoot, kind, scope, path, canonical_path: canonicalPath, status: "redundant-safe-to-prune", bytes_equal: true, suggested_action: `safe prune`, suggestion_command: `sp prune-stale-defaults --root ${repoRoot}` } : { repo_root: repoRoot, kind, scope, path, canonical_path: canonicalPath, status: "diverged-consider-migrating-to-user", bytes_equal: false, suggested_action: `consider migrate to .specialists/user/`, suggestion_command: `cp ${rel} .specialists/user/` };
+    return bytesEqual ? { repo_root: repoRoot, kind, scope, path, canonical_path: canonicalPath, status: "redundant-safe-to-prune", bytes_equal: true, suggested_action: "safe prune", suggestion_command: `sp prune-stale-defaults --root ${repoRoot}` } : { repo_root: repoRoot, kind, scope, path, canonical_path: canonicalPath, status: "diverged-safe-to-prune", bytes_equal: false, suggested_action: "safe prune", suggestion_command: `cp ${rel} .specialists/user/` };
   }
-  return bytesEqual ? { repo_root: repoRoot, kind, scope, path, canonical_path: canonicalPath, status: "useless-override-safe-to-remove", bytes_equal: true, suggested_action: `safe remove`, suggestion_command: `rm ${rel}` } : { repo_root: repoRoot, kind, scope, path, canonical_path: canonicalPath, status: "diverged-consider-removing-or-refactoring", bytes_equal: false, suggested_action: `keep if intentional override`, suggestion_command: `rm ${rel}` };
+  return bytesEqual ? { repo_root: repoRoot, kind, scope, path, canonical_path: canonicalPath, status: "useless-override-safe-to-remove", bytes_equal: true, suggested_action: "safe remove", suggestion_command: `rm ${rel}` } : { repo_root: repoRoot, kind, scope, path, canonical_path: canonicalPath, status: "diverged-consider-removing-or-refactoring", bytes_equal: false, suggested_action: "keep if intentional override", suggestion_command: `rm ${rel}` };
 }
 function resolveDriftAssets() {
   return ASSETS.map((asset) => ({ ...asset, canonicalDir: resolveCanonicalAssetDir(asset.kind) }));
@@ -40508,14 +40562,14 @@ function detectDriftUnderRoot(root) {
       repos: repos.length,
       findings: summary.length,
       redundant_defaults: summary.filter((f) => f.status === "redundant-safe-to-prune").length,
-      diverged_defaults: summary.filter((f) => f.status === "diverged-consider-migrating-to-user").length,
+      diverged_defaults: summary.filter((f) => f.status === "diverged-safe-to-prune").length,
       useless_overrides: summary.filter((f) => f.status === "useless-override-safe-to-remove").length,
       diverged_overrides: summary.filter((f) => f.status === "diverged-consider-removing-or-refactoring").length
     }
   };
 }
-function pruneStaleDefaults(repoRoot, dryRun) {
-  const targets = detectDriftForRepo(repoRoot).filter((f) => f.scope === "default" && f.bytes_equal === true).map((f) => f.path);
+function pruneStaleDefaults(repoRoot, dryRun, keepDiverged = false) {
+  const targets = detectDriftForRepo(repoRoot).filter((f) => f.scope === "default" && (keepDiverged ? f.bytes_equal === true : true)).map((f) => f.path);
   if (!dryRun) {
     for (const target of targets)
       rmSync5(target, { recursive: true, force: true });
@@ -40543,10 +40597,15 @@ function parseArgs11(argv) {
   let dryRun = false;
   let root = process.cwd();
   let help = false;
+  let keepDiverged = false;
   for (let i = 0;i < argv.length; i += 1) {
     const token = argv[i];
     if (token === "--dry-run") {
       dryRun = true;
+      continue;
+    }
+    if (token === "--keep-diverged") {
+      keepDiverged = true;
       continue;
     }
     if (token === "--root") {
@@ -40563,23 +40622,29 @@ function parseArgs11(argv) {
     }
     throw new Error(`Unknown argument: ${token}`);
   }
-  return { dryRun, root, help };
+  return { dryRun, root, help, keepDiverged };
 }
 function printHelp() {
-  console.log("Usage: sp prune-stale-defaults [--dry-run] [--root <path>]");
-  console.log("  --dry-run  List stale default snapshots without pruning");
-  console.log("  --root     Repo root to scan");
+  console.log("Usage: sp prune-stale-defaults [--dry-run] [--keep-diverged] [--root <path>]");
+  console.log("  --dry-run        List stale default snapshots without pruning");
+  console.log("  --keep-diverged   Preserve diverged .specialists/default entries");
+  console.log("  --root            Repo root to scan");
 }
 async function run27(argv = process.argv.slice(3)) {
-  const { dryRun, root, help } = parseArgs11(argv);
+  const { dryRun, root, help, keepDiverged } = parseArgs11(argv);
   if (help) {
     printHelp();
     return;
   }
-  const findings = detectDriftForRepo(root).filter((f) => f.scope === "default" && f.bytes_equal === true);
-  if (findings.length === 0) {
+  const allFindings = detectDriftForRepo(root).filter((f) => f.scope === "default");
+  const divergedFindings = allFindings.filter((f) => f.bytes_equal === false);
+  const findings = keepDiverged ? allFindings.filter((f) => f.bytes_equal === true) : allFindings;
+  if (allFindings.length === 0) {
     console.log("No stale default snapshots found.");
     return;
+  }
+  if (divergedFindings.length > 0 && !keepDiverged) {
+    console.log("Warning: prune-stale-defaults now removes diverged .specialists/default entries by default. Use --keep-diverged to keep old behavior.");
   }
   console.log(dryRun ? "Dry run: stale default snapshots" : "Pruning stale default snapshots");
   for (const finding of findings) {
@@ -40587,7 +40652,7 @@ async function run27(argv = process.argv.slice(3)) {
   }
   if (dryRun)
     return;
-  pruneStaleDefaults(root, false);
+  pruneStaleDefaults(root, false, keepDiverged);
   console.log(`Pruned ${findings.length} stale default snapshot${findings.length === 1 ? "" : "s"}.`);
 }
 var init_prune_stale_defaults = __esm(() => {
@@ -41204,7 +41269,7 @@ function checkManagedMirror(label, canonicalRelativePath, mirrorDir, fixHint) {
     return true;
   }
   if (drifted.length > 0) {
-    fail4(`${label}: ${drifted.length} drifted file${drifted.length === 1 ? "" : "s"}`);
+    fail4(`${label}: ${drifted.length} safe prune candidate${drifted.length === 1 ? "" : "s"}`);
     hint(`example: ${drifted.slice(0, 3).join(", ")}${drifted.length > 3 ? ", ..." : ""}`);
   }
   if (missing.length > 0) {
@@ -41220,9 +41285,9 @@ function checkManagedMirror(label, canonicalRelativePath, mirrorDir, fixHint) {
 }
 function checkManagedAssetMirrors() {
   section3("Category B  xtrm-managed asset mirrors");
-  const specialistsOk = checkManagedMirror("specialists", "specialists", DEFAULT_SPECIALISTS_DIR, "specialists init --sync-defaults");
-  const rulesOk = checkManagedMirror("mandatory-rules", "mandatory-rules", join33(DEFAULT_SPECIALISTS_DIR, "mandatory-rules"), "specialists init --sync-defaults");
-  const nodesOk = checkManagedMirror("nodes", "nodes", join33(DEFAULT_SPECIALISTS_DIR, "nodes"), "specialists init --sync-defaults");
+  const specialistsOk = checkManagedMirror("specialists", "specialists", DEFAULT_SPECIALISTS_DIR, "sp prune-stale-defaults --apply");
+  const rulesOk = checkManagedMirror("mandatory-rules", "mandatory-rules", join33(DEFAULT_SPECIALISTS_DIR, "mandatory-rules"), "sp prune-stale-defaults --apply");
+  const nodesOk = checkManagedMirror("nodes", "nodes", join33(DEFAULT_SPECIALISTS_DIR, "nodes"), "sp prune-stale-defaults --apply");
   return specialistsOk && rulesOk && nodesOk;
 }
 function checkUserOverlayDrift() {
@@ -41624,7 +41689,7 @@ ${bold13("specialists doctor")}
     console.log(`  ${green15("\u2713")} ${bold13("All checks passed")}  \u2014 specialists is healthy`);
   } else {
     console.log(`  ${yellow12("\u25CB")} ${bold13("Some checks failed")}  \u2014 follow the fix hints above`);
-    console.log(`  ${dim14("specialists init fixes hook + MCP registration; specialists init --sync-skills fixes skill drift/symlink issues; specialists init --sync-defaults fixes managed mirrors.")}`);
+    console.log(`  ${dim14("specialists init fixes hook + MCP registration; specialists init --sync-skills fixes skill drift/symlink issues; sp prune-stale-defaults --apply removes stale default mirrors; --sync-defaults is deprecated.")}`);
   }
   console.log("");
 }
@@ -42438,7 +42503,7 @@ var init_help = __esm(() => {
     ["status", "Show health, MCP state, and active jobs"],
     ["ps", "Show actionable dashboard (active + unresolved terminal problems); --json, --all, --follow, --active, --health, --include-terminal, --include-cleaned"],
     ["doctor", "Diagnose installation/runtime problems; --check-drift reports stale .specialists/default/ snapshots"],
-    ["prune-stale-defaults", "Prune redundant .specialists/default/ snapshots (byte-identical to package canonical); --dry-run, --root <path>"],
+    ["prune-stale-defaults", "Prune stale .specialists/default snapshots; default removes diverged mirrors too; --dry-run, --keep-diverged, --root <path>"],
     ["quickstart", "Full getting-started guide"],
     ["help", "Show this help"]
   ];
@@ -50502,7 +50567,7 @@ async function run34() {
         "Options:",
         "  --json              Structured JSON output with trees[].children[] schema",
         "  --all               Include every row, including cleaned/dead/terminal history",
-        "  --follow, -f        Live-refresh view with spinner animation",
+        "  --follow, -f        Live dashboard; TTY repaints in-place, pipes append ANSI-free snapshots",
         "  --health            Show detailed process health tables (default is aggregate only)",
         "  --active            Show active jobs only; hide unresolved terminal problems",
         "  --include-terminal  Include terminal history that has not been cleaned",

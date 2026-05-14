@@ -864,7 +864,7 @@ function validateInitPostconditions(cwd: string): ReadonlyArray<string> {
 }
 
 export interface InitOptions {
-  /** When true, copy canonical specialists to .specialists/default/ and migrate legacy layouts. */
+  /** Deprecated alias: keep only for intentional pin/bootstrap compatibility. */
   syncDefaults?: boolean;
   /** When true, overwrite canonical skills in .xtrm/skills/default/ and refresh active symlinks only. */
   syncSkills?: boolean;
@@ -902,12 +902,13 @@ export async function run(opts: InitOptions = {}): Promise<void> {
 
   // ── 1. Create .specialists/ structure ─────────────────────────────────────
   if (syncDefaults) {
+    warn('--sync-defaults is deprecated. This creates drift debt; use sp pin <id> for intentional pins.');
     migrateLegacySpecialists(cwd, 'default');
     copyCanonicalSpecialists(cwd);
     copyCanonicalMandatoryRules(cwd);
     copyCanonicalNodeConfigs(cwd);
   } else {
-    skip('.specialists/default/ not synced (pass --sync-defaults to write canonical specialists, mandatory-rules, and nodes)');
+    skip('.specialists/default/ not synced (package canonical by default; use sp pin <id> for intentional pins)');
   }
 
   migrateLegacySpecialists(cwd, 'user');
@@ -967,7 +968,7 @@ export async function run(opts: InitOptions = {}): Promise<void> {
   console.log('');
   console.log(`  ${dim('.specialists/ structure:')}`);
   console.log(`  .specialists/`);
-  console.log(`  ├── default/           ${dim('# canonical specialists (from init --sync-defaults)')}`)
+  console.log(`  ├── default/           ${dim('# intentional pins only; package canonical by default')}`)
   console.log(`  ├── user/              ${dim('# your custom specialists')}`);
   console.log(`  ├── db/                ${dim('# observability SQLite (gitignored)')}`);
   console.log(`  ├── jobs/              ${dim('# runtime (gitignored)')}`);

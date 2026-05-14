@@ -445,9 +445,9 @@ function checkManagedMirror(label: string, canonicalRelativePath: string, mirror
 
 function checkManagedAssetMirrors(): boolean {
   section('Category B  xtrm-managed asset mirrors');
-  const specialistsOk = checkManagedMirror('specialists', 'specialists', DEFAULT_SPECIALISTS_DIR, 'specialists init --sync-defaults');
-  const rulesOk = checkManagedMirror('mandatory-rules', 'mandatory-rules', join(DEFAULT_SPECIALISTS_DIR, 'mandatory-rules'), 'specialists init --sync-defaults');
-  const nodesOk = checkManagedMirror('nodes', 'nodes', join(DEFAULT_SPECIALISTS_DIR, 'nodes'), 'specialists init --sync-defaults');
+  const specialistsOk = checkManagedMirror('specialists', 'specialists', DEFAULT_SPECIALISTS_DIR, 'sp prune-stale-defaults --apply');
+  const rulesOk = checkManagedMirror('mandatory-rules', 'mandatory-rules', join(DEFAULT_SPECIALISTS_DIR, 'mandatory-rules'), 'sp prune-stale-defaults --apply');
+  const nodesOk = checkManagedMirror('nodes', 'nodes', join(DEFAULT_SPECIALISTS_DIR, 'nodes'), 'sp prune-stale-defaults --apply');
   return specialistsOk && rulesOk && nodesOk;
 }
 
@@ -870,7 +870,7 @@ export async function run(argv: readonly string[] = process.argv.slice(3)): Prom
     console.log(`  ${green('✓')} ${bold('All checks passed')}  — specialists is healthy`);
   } else {
     console.log(`  ${yellow('○')} ${bold('Some checks failed')}  — follow the fix hints above`);
-    console.log(`  ${dim('specialists init fixes hook + MCP registration; specialists init --sync-skills fixes skill drift/symlink issues; specialists init --sync-defaults fixes managed mirrors.')}`);
+    console.log(`  ${dim('specialists init fixes hook + MCP registration; specialists init --sync-skills fixes skill drift/symlink issues; sp prune-stale-defaults --apply removes stale default mirrors; --sync-defaults is deprecated.')}`);
   }
   console.log('');
 }
