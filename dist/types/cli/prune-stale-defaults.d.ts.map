@@ -1,1 +1,1 @@
-{"version":3,"file":"prune-stale-defaults.d.ts","sourceRoot":"","sources":["../../../src/cli/prune-stale-defaults.ts"],"names":[],"mappings":"AAmCA,wBAAsB,GAAG,CAAC,IAAI,GAAE,SAAS,MAAM,EAA0B,GAAG,OAAO,CAAC,IAAI,CAAC,CAkBxF"}
+{"version":3,"file":"prune-stale-defaults.d.ts","sourceRoot":"","sources":["../../../src/cli/prune-stale-defaults.ts"],"names":[],"mappings":"AAyCA,wBAAsB,GAAG,CAAC,IAAI,GAAE,SAAS,MAAM,EAA0B,GAAG,OAAO,CAAC,IAAI,CAAC,CA2BxF"}

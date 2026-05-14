@@ -9,8 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.15.1] — 2026-05-14
+
 ### Changed
-- `sp init --sync-defaults` is now deprecated and prints a loud drift-debt warning; doctor remediation points to `sp prune-stale-defaults --apply`, and docs describe package-canonical-by-default defaults.
+- `sp prune-stale-defaults` now removes all `.specialists/default/` entries — both byte-identical and diverged — by default, since the entire default tier is drift debt relative to the package-canonical source. Use `--keep-diverged` to retain the old conservative behavior of pruning only redundant (byte-identical) entries (`unitAI-4vuvd`).
+- `sp init --sync-defaults` is now deprecated and prints a loud drift-debt warning pointing operators to `sp pin <id>` for intentional version pins. Doctor wording updated to match new `DriftStatus` names (`unitAI-3yys6`).
+
+### Fixed
+- `sp list-rules` now includes the package-canonical mandatory-rules tier in its matrix, so a fresh npm install no longer reports 0 rules. The resolver calls `resolveCanonicalAssetDir('mandatory-rules')` as the lowest-priority fallback, matching the actual runner resolution order (`unitAI-5s8df`).
 
 ## [v3.15.0] — 2026-05-14
 

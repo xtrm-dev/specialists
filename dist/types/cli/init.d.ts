@@ -1,5 +1,5 @@
 export interface InitOptions {
-    /** When true, copy canonical specialists to .specialists/default/ and migrate legacy layouts. */
+    /** Deprecated alias: keep only for intentional pin/bootstrap compatibility. */
     syncDefaults?: boolean;
     /** When true, overwrite canonical skills in .xtrm/skills/default/ and refresh active symlinks only. */
     syncSkills?: boolean;

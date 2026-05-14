@@ -1,5 +1,5 @@
 export type DriftScope = 'default' | 'user';
-export type DriftStatus = 'redundant-safe-to-prune' | 'diverged-consider-migrating-to-user' | 'useless-override-safe-to-remove' | 'diverged-consider-removing-or-refactoring';
+export type DriftStatus = 'redundant-safe-to-prune' | 'diverged-safe-to-prune' | 'useless-override-safe-to-remove' | 'diverged-consider-removing-or-refactoring';
 export interface DriftAssetKind {
     kind: 'specialists' | 'mandatory-rules' | 'catalog' | 'nodes';
     managedDir: string;
@@ -35,5 +35,5 @@ export interface DriftReport {
 export declare function resolveDriftAssets(): DriftAssetKind[];
 export declare function detectDriftForRepo(repoRoot: string): DriftFinding[];
 export declare function detectDriftUnderRoot(root: string): DriftReport;
-export declare function pruneStaleDefaults(repoRoot: string, dryRun: boolean): string[];
+export declare function pruneStaleDefaults(repoRoot: string, dryRun: boolean, keepDiverged?: boolean): string[];
 //# sourceMappingURL=drift-detector.d.ts.map
