@@ -1115,22 +1115,76 @@ function renderBuffered(args: PsArgs): string {
   return lines.join('\n');
 }
 
+const ANSI_ENTER_ALT_SCREEN = '\x1B[?1049h';
+const ANSI_EXIT_ALT_SCREEN = '\x1B[?1049l';
+const ANSI_HIDE_CURSOR = '\x1B[?25l';
+const ANSI_SHOW_CURSOR = '\x1B[?25h';
+const ANSI_CURSOR_HOME = '\x1B[H';
+const ANSI_ERASE_DOWN = '\x1B[J';
+const ANSI_ESCAPE_SEQUENCE_PATTERN = /\x1B\[[0-?]*[ -/]*[@-~]/g;
+
+function stripAnsiEscapeSequences(text: string): string {
+  return text.replace(ANSI_ESCAPE_SEQUENCE_PATTERN, '');
+}
+
 async function follow(args: PsArgs): Promise<void> {
-  process.stdout.write('\x1B[?25l'); // hide cursor while updating
-  process.on('exit', () => process.stdout.write('\x1B[?25h')); // restore on exit
+  const isTTY = Boolean(process.stdout.isTTY);
+  let lastFrame = '';
+  let interval: ReturnType<typeof setInterval> | undefined;
+  let cleanedUp = false;
+
+  const write = (text: string): void => {
+    process.stdout.write(text);
+  };
+
+  const enterFollowMode = (): void => {
+    if (!isTTY) return;
+    write(ANSI_ENTER_ALT_SCREEN);
+    write(ANSI_HIDE_CURSOR);
+  };
+
+  const exitFollowMode = (): void => {
+    if (!isTTY || cleanedUp) return;
+    cleanedUp = true;
+    write(ANSI_SHOW_CURSOR);
+    write(ANSI_EXIT_ALT_SCREEN);
+  };
 
   const drawFrame = (): void => {
     const frame = renderBuffered(args);
-    process.stdout.write(`\x1B[H\x1B[J${frame}\n`);
+    if (frame === lastFrame) return;
+    lastFrame = frame;
+
+    if (!isTTY) {
+      write(`${stripAnsiEscapeSequences(frame)}\n\n`);
+      return;
+    }
+
+    write(`${ANSI_CURSOR_HOME}${ANSI_ERASE_DOWN}${frame}\n`);
   };
 
-  process.stdout.write('\x1B[2J\x1B[H');
+  const cleanup = (exitCode?: number): void => {
+    if (interval) clearInterval(interval);
+    exitFollowMode();
+    if (exitCode !== undefined) process.exit(exitCode);
+  };
+
+  process.stdout.on('error', (error: NodeJS.ErrnoException) => {
+    if (error.code === 'EPIPE') {
+      cleanup(0);
+      return;
+    }
+    throw error;
+  });
+  process.once('SIGINT', () => cleanup(130));
+  process.once('SIGTERM', () => cleanup(143));
+  process.once('exit', () => cleanup());
+
+  enterFollowMode();
   drawFrame();
 
   await new Promise<void>(() => {
-    setInterval(() => {
-      drawFrame();
-    }, 1000);
+    interval = setInterval(drawFrame, 1000);
   });
 }
 
