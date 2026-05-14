@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.15.0] — 2026-05-14
+
 ### Added
 - `LICENSE` file at repo root — MIT, 2026 copyright `Dawid (Jaggerxtrm)`. Now ships in the npm payload (asserted by the package-payload CI gate). README badge ↔ ship parity restored (`unitAI-3m27y`).
 - `package.json` top-level `types` field pointing at `dist/types/lib.d.ts` — TS consumers can now import `@jaggerxtrm/specialists/lib` with type resolution from the root (`unitAI-3m27y`).
