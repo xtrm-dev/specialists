@@ -31951,7 +31951,7 @@ async function run14() {
     const launchStartedAt = Date.now();
     const innerArgs = process.argv.slice(2).filter((a) => a !== "--background");
     const cmd = `${process.execPath} ${process.argv[1]} ${innerArgs.map(shellQuote2).join(" ")}`;
-    const tmuxCmd = `/bin/bash -lc ${shellQuote2(`cd ${shellQuote2(cwd)} && exec ${cmd}`)}`;
+    const tmuxCmd = `/bin/bash -c ${shellQuote2(`cd ${shellQuote2(cwd)} && exec ${cmd}`)}`;
     let childPid;
     let childExitCode;
     let childExitPromise;
