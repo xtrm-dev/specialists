@@ -1,12 +1,21 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import type { SupervisorStatus } from '../../../src/specialist/supervisor.js';
 
 const repoRoot = resolve(import.meta.dirname, '../../..');
-const hasTmux = spawnSync('which', ['tmux'], { stdio: 'ignore' }).status === 0;
+const hasTmuxBinary = spawnSync('which', ['tmux'], { stdio: 'ignore' }).status === 0;
+const hasTmux = (() => {
+  if (!hasTmuxBinary) return false;
+  const probe = `sp-int-probe-${process.pid}`;
+  const create = spawnSync('tmux', ['new-session', '-d', '-s', probe, 'sleep 1'], { stdio: 'ignore' });
+  if (create.status !== 0) return false;
+  spawnSync('tmux', ['kill-session', '-t', probe], { stdio: 'ignore' });
+  return true;
+})();
 
 function runCli(args: string[], cwd: string, env: NodeJS.ProcessEnv = process.env) {
   return spawnSync('bun', ['run', join(repoRoot, 'src/index.ts'), ...args], {
@@ -42,8 +51,25 @@ async function writeSpecialist(tempDir: string, name: string, model = 'invalid/m
 }
 
 async function readStatus(cwd: string, jobId: string): Promise<SupervisorStatus> {
-  const raw = await readFile(join(cwd, '.specialists', 'jobs', jobId, 'status.json'), 'utf-8');
-  return JSON.parse(raw) as SupervisorStatus;
+  const statusPath = join(cwd, '.specialists', 'jobs', jobId, 'status.json');
+  if (existsSync(statusPath)) {
+    const raw = await readFile(statusPath, 'utf-8');
+    return JSON.parse(raw) as SupervisorStatus;
+  }
+
+  const dbPath = join(cwd, '.specialists', 'db', 'observability.db');
+  const script = [
+    "import { Database } from 'bun:sqlite';",
+    `const db = new Database(${JSON.stringify(dbPath)});`,
+    `const row = db.query('SELECT status_json FROM specialist_jobs WHERE job_id = ?').get(${JSON.stringify(jobId)});`,
+    "if (!row?.status_json) process.exit(2);",
+    "console.log(row.status_json);",
+  ].join(' ');
+  const result = spawnSync('bun', ['-e', script], { encoding: 'utf-8' });
+  if (result.status !== 0) {
+    throw new Error(result.stderr.trim() || `status for ${jobId} not found in file or observability DB`);
+  }
+  return JSON.parse(result.stdout) as SupervisorStatus;
 }
 
 async function waitFor<T>(

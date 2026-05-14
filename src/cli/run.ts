@@ -1,7 +1,7 @@
 // src/cli/run.ts
 
 import { join } from 'node:path';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { spawn as cpSpawn, execSync } from 'node:child_process';
 import { SpecialistLoader } from '../specialist/loader.js';
@@ -12,7 +12,8 @@ import { BeadsClient, buildBeadContext } from '../specialist/beads.js';
 import { AUTO_COMMIT_NOISE_PREFIXES, Supervisor } from '../specialist/supervisor.js';
 import { resolveJobsDir } from '../specialist/job-root.js';
 import { provisionWorktree } from '../specialist/worktree.js';
-import { createObservabilitySqliteClient } from '../specialist/observability-sqlite.js';
+import { createObservabilitySqliteClient, createObservabilitySqliteClientAtPath } from '../specialist/observability-sqlite.js';
+import { resolveObservabilityDbLocation } from '../specialist/observability-db.js';
 import type { TimelineEvent } from '../specialist/timeline-events.js';
 import { evaluateMergeWorthiness, previewBranchMergeDelta } from './merge.js';
 import { formatEventInlineDebounced, type InlineIndicatorPhase } from './format-helpers.js';
@@ -31,6 +32,8 @@ const cyan  = (s: string) => `\x1b[36m${s}\x1b[0m`;
  *  - 'raw'    legacy: stream raw onProgress deltas to stdout (backward compat)
  */
 type OutputMode = 'human' | 'json' | 'raw';
+
+const JOB_ID_HANDOFF_PATH_ENV = 'SPECIALISTS_BG_JOB_ID_PATH';
 
 // ── Arg parser ─────────────────────────────────────────────────────────────────
 interface RunArgs {
@@ -208,6 +211,63 @@ function resolveEpicIdForBead(sqliteClient: NonNullable<ReturnType<typeof create
   const parent = readBeadSummary(bead.parent);
   if (parent?.issue_type !== 'epic') return undefined;
   return bead.parent;
+}
+
+function ensureObservabilityDb(cwd: string = process.cwd()): void {
+  const existing = createObservabilitySqliteClient(cwd);
+  if (existing) {
+    existing.close();
+    return;
+  }
+
+  const location = resolveObservabilityDbLocation(cwd);
+  const bootstrapped = createObservabilitySqliteClientAtPath(location.dbPath);
+  if (!bootstrapped) return;
+  bootstrapped.close();
+}
+
+function resolveNewestJobIdFromDb(cwd: string, jobsDir: string, specialist: string, previousLatest: string, minStartedAtMs: number): string {
+  const sqliteClient = createObservabilitySqliteClient(cwd);
+  if (!sqliteClient) return '';
+
+  try {
+    const newest = sqliteClient
+      .listStatuses()
+      .filter((status) => {
+        if (status.specialist !== specialist || status.id === previousLatest || status.started_at_ms < minStartedAtMs) return false;
+        return existsSync(join(jobsDir, status.id, 'status.json'));
+      })
+      .sort((left, right) => right.started_at_ms - left.started_at_ms || left.id.localeCompare(right.id))[0];
+
+    return newest?.id ?? '';
+  } catch {
+    return '';
+  } finally {
+    sqliteClient.close();
+  }
+}
+
+function resolveNewestJobIdFromJobsDir(jobsDir: string, previousLatest: string, minMtimeMs: number): string {
+  try {
+    const entries = readdirSync(jobsDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && /^[a-f0-9]{6}$/.test(entry.name) && entry.name !== previousLatest)
+      .map((entry) => {
+        const dirPath = join(jobsDir, entry.name);
+        const statusPath = join(dirPath, 'status.json');
+        const stats = statSync(dirPath);
+        const statusStats = statSync(statusPath);
+        return {
+          id: entry.name,
+          mtimeMs: Math.max(stats.mtimeMs, statusStats.mtimeMs),
+        };
+      })
+      .filter((entry) => entry.mtimeMs >= minMtimeMs)
+      .sort((left, right) => right.mtimeMs - left.mtimeMs || left.id.localeCompare(right.id));
+
+    return entries[0]?.id ?? '';
+  } catch {
+    return '';
+  }
 }
 
 function assertNoStaleBaseSiblings(beadId: string, forceStaleBase: boolean): void {
@@ -563,6 +623,7 @@ export function buildInjectedReviewerDiffVariables(cwd: string, maxFiles = 20): 
 // ── Handler ────────────────────────────────────────────────────────────────────
 export async function run(): Promise<void> {
   const args = await parseArgs(process.argv.slice(3));
+  ensureObservabilityDb(process.cwd());
   const loader = new SpecialistLoader();
   const specialist = await loader.get(args.name).catch((err: any) => {
     process.stderr.write(`Error: ${err?.message ?? err}\n`);
@@ -627,16 +688,23 @@ export async function run(): Promise<void> {
     const latestPath = join(jobsDir, 'latest');
     const oldLatest = (() => { try { return readFileSync(latestPath, 'utf-8').trim(); } catch { return ''; } })();
     const cwd = process.cwd();
+    const launchStartedAt = Date.now();
     const innerArgs = process.argv.slice(2).filter(a => a !== '--background');
     const cmd = `${process.execPath} ${process.argv[1]} ${innerArgs.map(shellQuote).join(' ')}`;
+    // createTmuxSession wraps cmd as `exec ${cmd}`. Use an explicit shell
+    // executable for compound setup so this does not become `exec cd ...`,
+    // which exits before the child can publish its background job id.
+    const tmuxCmd = `/bin/bash -lc ${shellQuote(`cd ${shellQuote(cwd)} && exec ${cmd}`)}`;
 
     let childPid: number | undefined;
     let childExitCode: number | undefined;
     let childExitPromise: Promise<void> | undefined;
+    let handoffPath: string | undefined;
     if (isTmuxAvailable()) {
       const suffix = randomBytes(3).toString('hex');
       const sessionName = buildSessionName(args.name, suffix);
-      createTmuxSession(sessionName, cwd, cmd);
+      handoffPath = join(jobsDir, `.bg-job-id-${sessionName}`);
+      createTmuxSession(sessionName, cwd, tmuxCmd, { [JOB_ID_HANDOFF_PATH_ENV]: handoffPath });
     } else {
       // Re-invoke ourselves without --background, fully detached
       const child = cpSpawn(process.execPath, [process.argv[1], ...innerArgs], {
@@ -662,8 +730,10 @@ export async function run(): Promise<void> {
       childPid = child.pid;
     }
 
-    // Wait up to 5s for the child to write a new job ID to latest
-    const deadline = Date.now() + 5000;
+    // Wait for child to write new job ID to latest.
+    // tmux startup can be slower in integration environments.
+    const pollTimeoutMs = isTmuxAvailable() ? 15000 : 5000;
+    const deadline = Date.now() + pollTimeoutMs;
     let jobId = '';
     while (Date.now() < deadline) {
       await Promise.race([
@@ -674,11 +744,25 @@ export async function run(): Promise<void> {
         const current = readFileSync(latestPath, 'utf-8').trim();
         if (current && current !== oldLatest) { jobId = current; break; }
       } catch { /* not yet */ }
+      if (!jobId && handoffPath) {
+        try {
+          const handoff = readFileSync(handoffPath, 'utf-8').trim();
+          if (/^[a-f0-9]{6}$/.test(handoff)) { jobId = handoff; break; }
+        } catch { /* not yet */ }
+      }
       if (childExitCode !== undefined) break;
     }
 
     if (!jobId && childExitCode !== undefined && childExitCode !== 0) {
       process.exit(childExitCode);
+    }
+
+    if (!jobId) {
+      jobId = resolveNewestJobIdFromDb(cwd, jobsDir, args.name, oldLatest, launchStartedAt - 1000);
+    }
+
+    if (!jobId) {
+      jobId = resolveNewestJobIdFromJobsDir(jobsDir, oldLatest, launchStartedAt - 1000);
     }
 
     if (jobId) {
@@ -832,6 +916,10 @@ export async function run(): Promise<void> {
       : undefined,
     onJobStarted: ({ id }) => {
       process.stderr.write(dim(`[job started: ${id}]\n`));
+      const handoffPath = process.env[JOB_ID_HANDOFF_PATH_ENV];
+      if (handoffPath) {
+        try { writeFileSync(handoffPath, `${id}\n`, 'utf-8'); } catch { /* best effort */ }
+      }
       if (args.outputMode !== 'raw') {
         stopTailer = startEventTailer(id, jobsDir, args.outputMode, args.name, effectiveBeadId);
       }
