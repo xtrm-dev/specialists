@@ -8,6 +8,7 @@
 > Manual update: 2026-05-15T01:03:00Z — unitAI-4r9sf pinned OSV Scanner action to v2.3.8 in live workflow and security-pipeline template.
 > Manual update: 2026-05-15T01:09:00Z — unitAI-4r9sf added package overrides and synced bun.lock to clear OSV advisories.
 > Manual update: 2026-05-15T01:12:00Z — unitAI-k9ba7 pinned safe Python dependency lower bounds in requirements.txt for OSV action parity.
+> Manual update: 2026-05-15T01:29:00Z — unitAI-agdgr fixed Docker image builds by copying config and asset-contract generator into builder context.
 
 ## ./
 

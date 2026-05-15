@@ -418,6 +418,20 @@
         "osv-scanner",
         "python"
       ]
+    },
+    {
+      "timestamp": "2026-05-15T01:29:00Z",
+      "error_message": "Dependabot Docker/GitHub Actions PR smoke jobs failed during Docker build with Module not found /app/scripts/generate-asset-contract.mjs.",
+      "file": "Dockerfile",
+      "root_cause": "The Docker builder stage copied package metadata and src but not config/ or scripts/generate-asset-contract.mjs after the build script began generating dist/asset-contract.json.",
+      "fix": "Updated Dockerfile builder context to copy config/ and scripts/generate-asset-contract.mjs before bun run build; verified docker build and container /healthz smoke locally.",
+      "tags": [
+        "unitAI-agdgr",
+        "dependabot",
+        "docker",
+        "asset-contract",
+        "ci"
+      ]
     }
   ]
 }
