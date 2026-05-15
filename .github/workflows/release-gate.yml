@@ -49,7 +49,13 @@ jobs:
             echo 'Run: bun run generate:contract && git add dist/asset-contract.json'
             exit 1
           }
+      - name: Read package version
+        id: package
+        run: |
+          version=$(node -p "require('./package.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       # XTRM_TOOLS_DISPATCH_PAT must be configured in repo secrets for repository_dispatch.
+      # Fine-grained PATs need Contents: write access on Jaggerxtrm/xtrm-tools.
       - name: Dispatch xtrm-tools validation
         uses: peter-evans/repository-dispatch@v4
         with:
@@ -58,6 +64,7 @@ jobs:
           event-type: specialists-asset-validation
           client-payload: |
             {
-              "sha": "${{ github.sha }}",
-              "tag": "${{ github.ref_name }}"
+              "specialists_sha": "${{ github.sha }}",
+              "specialists_tag": "${{ github.ref_name }}",
+              "specialists_package_version": "${{ steps.package.outputs.version }}"
             }

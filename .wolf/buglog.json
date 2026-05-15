@@ -460,6 +460,20 @@
         "typescript6",
         "ambient-types"
       ]
+    },
+    {
+      "timestamp": "2026-05-15T09:18:00Z",
+      "error_message": "specialists release-gate failed on master at repository_dispatch with 'Resource not accessible by personal access token'.",
+      "file": ".github/workflows/release-gate.yml; GitHub Actions secret XTRM_TOOLS_DISPATCH_PAT",
+      "root_cause": "The specialists repo secret held a token that could not create repository_dispatch events on Jaggerxtrm/xtrm-tools, and the sender payload used sha/tag while the xtrm-tools receiver expected specialists_sha/specialists_tag/specialists_package_version.",
+      "fix": "Refreshed XTRM_TOOLS_DISPATCH_PAT using the repo-scoped gh token, changed release-gate client-payload keys to match the xtrm-tools receiver, added package version output, and verified a repository_dispatch run in xtrm-tools completed successfully.",
+      "tags": [
+        "unitAI-3kt0b",
+        "release-gate",
+        "repository-dispatch",
+        "github-actions",
+        "xtrm-tools"
+      ]
     }
   ]
 }
