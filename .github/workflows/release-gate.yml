@@ -12,8 +12,8 @@ jobs:
     outputs:
       cross_repo_assets: ${{ steps.filter.outputs.cross_repo_assets }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v4
         id: filter
         with:
           filters: |
@@ -33,7 +33,7 @@ jobs:
     if: needs.changes.outputs.cross_repo_assets == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
@@ -51,7 +51,7 @@ jobs:
           }
       # XTRM_TOOLS_DISPATCH_PAT must be configured in repo secrets for repository_dispatch.
       - name: Dispatch xtrm-tools validation
-        uses: peter-evans/repository-dispatch@v3
+        uses: peter-evans/repository-dispatch@v4
         with:
           token: ${{ secrets.XTRM_TOOLS_DISPATCH_PAT }}
           repository: Jaggerxtrm/xtrm-tools
