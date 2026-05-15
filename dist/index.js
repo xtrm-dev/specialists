@@ -7895,7 +7895,7 @@ var require_core = __commonJS((exports) => {
     constructor(opts = {}) {
       this.schemas = {};
       this.refs = {};
-      this.formats = {};
+      this.formats = Object.create(null);
       this._compilations = new Set;
       this._loading = {};
       this._cache = new Map;

@@ -44,7 +44,7 @@ export declare function evaluateReadiness(opts: ReadinessCheckOptions): Promise<
 }>;
 export declare function checkPiHelpForFlags(flags?: string[]): ReadinessReason | undefined;
 export declare function startServe(argv?: string[]): Promise<{
-    server: import("http").Server<typeof IncomingMessage, typeof ServerResponse>;
+    server: import("node:http").Server<typeof IncomingMessage, typeof ServerResponse>;
     args: ServeArgs;
     db: import("../specialist/observability-sqlite.js").ObservabilitySqliteClient | null;
     readinessState: ReadinessState;
