@@ -432,6 +432,34 @@
         "asset-contract",
         "ci"
       ]
+    },
+    {
+      "timestamp": "2026-05-15T01:35:00Z",
+      "error_message": "Dependabot PR #86 zod ^4.4.3 fails `bun run lint` with ZodEffects and Zod issue API/type errors.",
+      "file": "src/cli/edit.ts; src/specialist/schema.ts; src/server.ts; src/tools/specialist/use_specialist.tool.ts",
+      "root_cause": "Zod 4 changed/removed APIs and typings used by the current Zod 3-oriented schema editing and error-formatting code; zod-to-json-schema integration remains typed around Zod 3.",
+      "fix": "Not fixed during Dependabot triage; PR #86 closed and migration tracked as unitAI-a5ys3.",
+      "tags": [
+        "unitAI-fxnei",
+        "unitAI-a5ys3",
+        "dependabot",
+        "zod4",
+        "typescript"
+      ]
+    },
+    {
+      "timestamp": "2026-05-15T01:35:00Z",
+      "error_message": "Dependabot PR #88 typescript ^6.0.3 fails `bun run lint` broadly with missing Node/Bun ambient types and stricter possibly-undefined checks.",
+      "file": "tsconfig.json; package.json; src/",
+      "root_cause": "TypeScript 6 changes type resolution/checking enough that the current tsconfig/types setup no longer exposes Node/Bun globals as expected and stricter diagnostics surface additional code issues.",
+      "fix": "Not fixed during Dependabot triage; PR #88 closed and migration tracked as unitAI-ib5xc.",
+      "tags": [
+        "unitAI-fxnei",
+        "unitAI-ib5xc",
+        "dependabot",
+        "typescript6",
+        "ambient-types"
+      ]
     }
   ]
 }

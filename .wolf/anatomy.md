@@ -9,6 +9,7 @@
 > Manual update: 2026-05-15T01:09:00Z — unitAI-4r9sf added package overrides and synced bun.lock to clear OSV advisories.
 > Manual update: 2026-05-15T01:12:00Z — unitAI-k9ba7 pinned safe Python dependency lower bounds in requirements.txt for OSV action parity.
 > Manual update: 2026-05-15T01:29:00Z — unitAI-agdgr fixed Docker image builds by copying config and asset-contract generator into builder context.
+> Manual update: 2026-05-15T01:35:00Z — unitAI-fxnei triaged npm Dependabot PRs and identified Zod 4 / TypeScript 6 migrations.
 
 ## ./
 

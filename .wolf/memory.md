@@ -176,3 +176,4 @@
 - 2026-05-15T01:09:00Z: unitAI-4r9sf cleared OSV by adding overrides for @hono/node-server and path-to-regexp and syncing bun.lock; full test suite now exposes Vitest 4 migration failures tracked by unitAI-rlq48.
 - 2026-05-15T01:12:00Z: OSV action v2.3.8 resolves unpinned requirements.txt to vulnerable requests/pillow/zipp; requirements.txt now pins safe lower bounds and was verified with the same action Docker image.
 - 2026-05-15T01:29:00Z: Dependabot Docker/GitHub Actions PR smoke failures exposed Dockerfile builder context drift; Docker build needs config/ plus scripts/generate-asset-contract.mjs because bun run build now generates dist/asset-contract.json.
+- 2026-05-15T01:35:00Z: npm Dependabot triage: #85 yaml/@types-bun and #87 @types-node pass after bun.lock/dist fixups; #86 Zod 4 and #88 TypeScript 6 fail lint and are migration work, not safe Dependabot merges.
