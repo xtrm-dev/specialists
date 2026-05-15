@@ -1,4 +1,5 @@
 # anatomy.md
+> Manual update: 2026-05-15T18:39:00Z — unitAI-ashu1 updated config/skills/using-specialists-v3/SKILL.md to clarify clean worktree dependency bootstrap responsibility; do not track node_modules/.venv.
 
 > Auto-maintained by OpenWolf. Last scanned: 2026-04-01T04:04:51.100Z
 > Files: 531 tracked | Anatomy hits: 0 | Misses: 0

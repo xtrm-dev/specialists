@@ -179,3 +179,4 @@
 - 2026-05-15T01:35:00Z: npm Dependabot triage: #85 yaml/@types-bun and #87 @types-node pass after bun.lock/dist fixups; #86 Zod 4 and #88 TypeScript 6 fail lint and are migration work, not safe Dependabot merges.
 
 - 2026-05-15T09:18:00Z: unitAI-3kt0b fixed specialists release-gate dispatch: XTRM_TOOLS_DISPATCH_PAT was refreshed with the broad repo-scoped gh token, payload keys now match xtrm-tools (`specialists_sha`, `specialists_tag`, `specialists_package_version`), and a direct repository_dispatch to xtrm-tools succeeded.
+- 2026-05-15T18:39:00Z: unitAI-ashu1 updated canonical using-specialists-v3 skill guidance: specialist worktrees are clean git checkouts, missing validation tools should be handled via the repo standard bootstrap, and dependency artifacts must not be tracked.

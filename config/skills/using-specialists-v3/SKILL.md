@@ -621,7 +621,7 @@ sp merge <impl>
 bd close <task> --reason "Reviewer PASS; merged."
 ```
 
-Edit-capable specialists with `--bead` auto-provision a worktree. `--worktree` is accepted for clarity but usually unnecessary. Use `--job <exec-job>` for reviewer/fix passes that must enter existing executor workspace.
+Edit-capable specialists with `--bead` auto-provision a clean git worktree. This does **not** provision ignored project dependency artifacts (`node_modules/`, `.venv/`, build caches). If validation tools are missing inside that worktree, have the specialist run the repo's standard bootstrap command (`make bootstrap`, `just setup`, `npm ci`, `uv sync`, etc.) or report that bootstrap is required; do not solve it by tracking dependency directories. `--worktree` is accepted for clarity but usually unnecessary. Use `--job <exec-job>` for reviewer/fix passes that must enter existing executor workspace.
 
 What differs: orchestrator carries full bead contract inline, so downstream specialists inherit the actual job shape, not a title.
 
@@ -1049,6 +1049,7 @@ Then choose one action:
 | `sp merge` refuses with "non-terminal chain jobs" after reviewer PASS | Auto-finalize did not fire (PASS arrived via `sp resume`, not streaming) | `sp finalize <any-chain-job-id>` — cascades to close every waiting keep-alive member |
 | `sp epic merge` says epic is "in terminal state 'failed'" | Prior `sp epic merge` hit a transient error (rebase conflict, dirty worktree) and persisted a soft `failed` marker | Clear the original conflict source, then re-run `sp epic merge` — it retries fresh, only `merged`/`abandoned` truly block |
 | `sp epic merge` says "rebase failed: unstaged changes" in a worktree | bd auto-export or other tooling left uncommitted changes inside the worktree | `cd .worktrees/<bead>/<bead>-executor && git stash push -u -m epic-merge-prep`, then re-run from main repo |
+| Validation fails with `command not found`, `vitest: not found`, missing Python tools, or `ERR_MODULE_NOT_FOUND` in a fresh worktree | Normal git worktree behavior: ignored dependency dirs (`node_modules/`, `.venv/`) are not copied into new worktrees | Run the repo's standard bootstrap inside that worktree (`make bootstrap`, `just setup`, `npm ci`, `uv sync`, etc.) or report bootstrap-required. Do not track dependency artifacts. |
 | `sp ps` shows old terminal jobs after a session | Default dashboard keeps unresolved terminal problems visible until acknowledged | `sp clean --ps --dry-run`, then `sp clean --ps` to soft-hide from default ps; use `sp ps --include-cleaned`/`--all` for audit history |
 | Reviewer keeps returning PARTIAL on functional contracts already met | Reviewer demanding tool-event evidence — typically obsoleted after the gate relaxation, but if it persists check the executor's `gitnexus_detect_changes` ran and use the rebuttal pattern (see Specialist Rebuttal As Routine) | Rebut with cited evidence; second FAIL = escalate |
 | Multiple `sp run` background launches drop silently under shell parallelism | Known launch-ceremony race | Re-check `sp ps` after each dispatch and retry the missing one; serialize when reliability matters |
