@@ -1,0 +1,39 @@
+# Gitleaks config — extends default rules with project-specific allowlists.
+# Docs: https://github.com/gitleaks/gitleaks/blob/master/README.md#configuration
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "specialists repository allowlist"
+# Keep acknowledgments narrow. Do not blanket-allowlist generated findings
+# without a bead that explains why the debt is accepted.
+stopwords = []
+regexes = [
+    '''uid:gid''',  # Docker --user placeholder in historical xtrm reports; not a credential.
+]
+paths = [
+    # Local secrets (gitignored — never committed). The --no-git scan walks
+    # the filesystem, so local-only env files need explicit exclusions.
+    '''^\.env$''',
+    '''^\.env\.local$''',
+    '''^\.env\.development\.local$''',
+    '''^\.env\.test\.local$''',
+    '''^\.env\.production\.local$''',
+    '''^\.env\.example$''',
+
+    # Beads issue tracker exports contain memory keys and Dolt hashes that can
+    # trip entropy-based rules; issue hygiene is handled by the beads workflow.
+    '''^\.beads/.*''',
+
+    # Specialist runtime state and local DB caches.
+    '''^\.specialists/db/.*''',
+    '''^\.specialists/jobs/.*''',
+    '''^\.specialists/ready/.*''',
+
+    # Dolt internal storage and xtrm local claim/cache files.
+    '''^\.dolt/.*''',
+    '''^\.xtrm/statusline-claim$''',
+    '''^\.xtrm/logs/.*''',
+    '''^\.xtrm/cache/.*''',
+]

@@ -169,3 +169,9 @@
 - 2026-05-14T18:52:00Z: Hardened `sp ps -f` rendering for unitAI-fqo38: TTY follow mode now uses alternate screen + cursor hide + unchanged-frame dedupe; non-TTY follow appends ANSI-free snapshots and handles EPIPE/SIGINT/SIGTERM cleanup. Rebuilt dist.
 
 - 2026-05-15: unitAI-xvvqb docs reconciliation cleared sync-docs drift_detector to count 0 after refreshing README and high-traffic docs for v3.14-v3.15 release drift; stale links to `docs/pi-rpc.md`/`docs/release-image.md`, `bug-hunt`, old Anthropic/Dashscope examples, and `.specialists/default` sync-defaults guidance were removed or reframed.
+
+- 2026-05-15T00:47:00Z: unitAI-i4sz0 bootstrapped the repo security pipeline: Dependabot config, OSV/Semgrep/Gitleaks workflows, local hook wrappers, allowlists, and local audit scripts; captured existing OSV and Semgrep debt as follow-up beads.
+- 2026-05-15T00:49:00Z: Enabled GitHub secret scanning, push protection, Dependabot alerts, and Dependabot security updates for Jaggerxtrm/specialists via gh api.
+- 2026-05-15T01:03:00Z: unitAI-4r9sf diagnosed PR #80 OSV failure as invalid floating action ref (`google/osv-scanner-action@v2` missing) and pinned workflow/template to `google/osv-scanner-action/osv-scanner-action@v2.3.8`.
+- 2026-05-15T01:09:00Z: unitAI-4r9sf cleared OSV by adding overrides for @hono/node-server and path-to-regexp and syncing bun.lock; full test suite now exposes Vitest 4 migration failures tracked by unitAI-rlq48.
+- 2026-05-15T01:12:00Z: OSV action v2.3.8 resolves unpinned requirements.txt to vulnerable requests/pillow/zipp; requirements.txt now pins safe lower bounds and was verified with the same action Docker image.

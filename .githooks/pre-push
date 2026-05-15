@@ -1,6 +1,22 @@
 #!/usr/bin/env bash
+# security-pipeline-managed-wrapper — installed by the security pipeline.
+# Runs the security baseline first, then any user-local pre-push hook.
+# Both receive the original push refs on stdin.
+set -uo pipefail
 
-# [jaggers] skill-staleness
-if command -v python3 &>/dev/null && [ -f "/home/dawid/dev/specialists/.claude/git-hooks/skill_staleness.py" ]; then
-    python3 "/home/dawid/dev/specialists/.claude/git-hooks/skill_staleness.py" || true
+REFS=$(cat)
+HOOKS_DIR=$(dirname "$0")
+
+if [ -x "$HOOKS_DIR/.security-pipeline-baseline" ]; then
+    echo "$REFS" | "$HOOKS_DIR/.security-pipeline-baseline" "$@"
+    rc=$?
+    [ $rc -ne 0 ] && exit $rc
 fi
+
+if [ -x "$HOOKS_DIR/pre-push.local" ]; then
+    echo "$REFS" | "$HOOKS_DIR/pre-push.local" "$@"
+    rc=$?
+    [ $rc -ne 0 ] && exit $rc
+fi
+
+exit 0

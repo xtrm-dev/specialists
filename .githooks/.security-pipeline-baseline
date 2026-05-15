@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Security pre-push baseline.
+# Install once per clone: git config core.hooksPath .githooks
+set -uo pipefail
+
+# ── Block direct push to protected branches ──────────────────────────────
+PROTECTED_BRANCHES="main master"
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+    # Block by destination ref — covers `git push origin HEAD:main` etc.
+    branch="${remote_ref#refs/heads/}"
+    for protected in $PROTECTED_BRANCHES; do
+        if [ "$branch" = "$protected" ]; then
+            echo "🚫 Direct push to '$protected' blocked." >&2
+            echo "" >&2
+            echo "Open a PR instead:" >&2
+            echo "  git checkout -b feature/<id>-<slug>" >&2
+            echo "  git push -u origin <branch>" >&2
+            echo "  gh pr create --fill" >&2
+            echo "  gh pr merge --auto --squash --delete-branch" >&2
+            echo "" >&2
+            echo "Bypass (emergency only): git push --no-verify" >&2
+            exit 1
+        fi
+    done
+done < /dev/stdin
+
+# Diff-only Semgrep blocks newly introduced SAST findings.
+if [ -x ./scripts/semgrep-diff.sh ]; then
+    ./scripts/semgrep-diff.sh || exit 1
+fi
+
+# OSV has no diff-baseline mode for lockfiles; report locally without blocking
+# pre-existing dependency debt. CI remains the authoritative full scan.
+if command -v osv-scanner >/dev/null; then
+    osv-scanner --recursive ./ || true
+else
+    echo "osv-scanner not installed locally — skipping (CI covers it)"
+fi
+
+exit 0

@@ -1,4 +1,6 @@
 pandas
 matplotlib
-requests
+requests>=2.33.0
 redis
+pillow>=12.2.0
+zipp>=3.19.1
