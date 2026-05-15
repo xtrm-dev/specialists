@@ -18,6 +18,47 @@ When a run starts from `--bead <id>`, the bead is the task prompt. Dependency co
 
 ---
 
+## Vision
+
+Specialists turns one overloaded agent chat into a coordinated agent mind: a central orchestrator keeps task identity, evidence, and publication control, while fresh specialist sessions act as scoped capabilities with their own prompts, rules, tools, memory, and output contracts.
+
+The problem it solves is not just token count. Long single-agent sessions accumulate old hypotheses, partial plans, tool residue, self-review bias, and forgotten constraints. Specialists uses **contract-bound cognition** instead: write the task contract once, dispatch the right expert role with only the relevant context, require a structured handoff, and let the orchestrator decide the next step.
+
+See [specialists.scheme.md](specialists.scheme.md) for the full diagrams and rationale. The core shape is:
+
+```mermaid
+flowchart TD
+  U[User / project need] --> O[Orchestrator]
+  O --> B[Bead issue contract]
+  B --> C{Contract ready?}
+  C -->|no| R[Repair scope, success, constraints]
+  R --> B
+  C -->|yes| D[Dispatch specialist]
+
+  D --> E[Explorer\nfresh read-only context]
+  D --> G[Debugger\nfresh root-cause context]
+  D --> X[Executor\nfresh implementation context]
+  D --> T[Test-runner\nfresh validation context]
+  D --> S[Code-sanity / Security\nadvisory context]
+  D --> V[Reviewer\ncontract compliance context]
+
+  B --> E
+  B --> G
+  B --> X
+  B --> T
+  B --> S
+  B --> V
+
+  E --> H[Structured handoff / evidence]
+  G --> H
+  X --> H
+  T --> H
+  S --> H
+  V --> H
+  H --> O
+  O --> P[Merge, resume, re-review, or close]
+```
+
 ## What you can run
 
 | Need | Specialist / surface |

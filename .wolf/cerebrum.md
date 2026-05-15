@@ -29,6 +29,9 @@
 
 <!-- Significant technical decisions with rationale. Why X was chosen over Y. -->
 
+## User Corrections — 2026-05-15
+- README should preserve the beginning Vision framing and direct `specialists.scheme.md` link; include an inline scheme/diagram so first-time readers immediately see the system shape.
+
 ## User Corrections — 2026-05-12
 - `sp ps` default must stay compact: show aggregate System health only. Detailed per-process specialist/Dolt/Serena/orphan rows belong behind explicit `sp ps --health`.
 - Correction: `sp ps` default should be active-job dashboard only. Terminal historical DB rows belong behind `--include-terminal` or `--all`; otherwise cleanup appears ineffective.
