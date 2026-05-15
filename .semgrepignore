@@ -1,0 +1,49 @@
+# Semgrep ignores — excludes generated artifacts, runtime state, and vendored
+# dependencies that are outside this repo's review/security boundary.
+
+.env
+.env.*
+node_modules/
+vendor/
+dist/
+coverage/
+**/__pycache__/
+**/test_fixtures/
+**/snapshots/
+
+# Runtime state / local databases
+.beads/
+.specialists/
+.dolt/
+.bv/
+.emdash/
+.gitnexus
+data/
+logs/
+
+# xtrm runtime + generated assets. Keep the security-pipeline skill source in
+# scope because its templates/scripts are copied into target repos.
+.xtrm/state.json
+.xtrm/statusline-claim
+.xtrm/logs/
+.xtrm/cache/
+.xtrm/config/
+.xtrm/ext-src/
+.xtrm/packages/
+.xtrm/hooks/
+.xtrm/skills/active/
+.xtrm/skills/optional/
+.xtrm/skills/user/
+.xtrm/skills/default/*
+!.xtrm/skills/default/security-pipeline/
+!.xtrm/skills/default/security-pipeline/**
+
+# Lock files
+package-lock.json
+bun.lock
+pnpm-lock.yaml
+yarn.lock
+poetry.lock
+Pipfile.lock
+go.sum
+Cargo.lock

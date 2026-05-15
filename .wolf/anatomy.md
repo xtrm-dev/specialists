@@ -4,6 +4,10 @@
 > Files: 531 tracked | Anatomy hits: 0 | Misses: 0
 > Manual update: 2026-05-13T12:11:27+00:00 — unitAI-sv0v2 updated docs/pi-session.md and docs/specialists-service.md for Pi isolation flags.
 > Manual update: 2026-05-14T01:06:48Z — updated 2026-05-13c session report with late bug-hygiene closures and cleanup state.
+> Manual update: 2026-05-15T00:47:00Z — unitAI-i4sz0 added security pipeline configs, CI workflows, local hooks, and security audit scripts.
+> Manual update: 2026-05-15T01:03:00Z — unitAI-4r9sf pinned OSV Scanner action to v2.3.8 in live workflow and security-pipeline template.
+> Manual update: 2026-05-15T01:09:00Z — unitAI-4r9sf added package overrides and synced bun.lock to clear OSV advisories.
+> Manual update: 2026-05-15T01:12:00Z — unitAI-k9ba7 pinned safe Python dependency lower bounds in requirements.txt for OSV action parity.
 
 ## ./
 
@@ -12,6 +16,9 @@
 - `.mcp copy.json` (~54 tok)
 - `.mcp.json` (~211 tok)
 - `.npmignore` — Esclude TUTTO ciò che non è necessario per il funzionamento dell'MCP server (~308 tok)
+- `.gitleaks.toml` — Gitleaks allowlist for repo-local runtime state and known non-secret placeholders.
+- `.pre-commit-config.yaml` — Local pre-commit/pre-push security and hygiene hook configuration.
+- `.semgrepignore` — Semgrep exclusions for generated/runtime artifacts with security-pipeline source re-included.
 - `.session-meta.json` (~19 tok)
 - `AGENTS.md` — XTRM Agent Workflow (~4137 tok)
 - `bunfig.toml` (~7 tok)
@@ -23,6 +30,7 @@
 - `README.md` — Project documentation (~1508 tok)
 - `requirements.txt` — Python dependencies (~8 tok)
 - `ROADMAP.md` — Specialists Roadmap (~1867 tok)
+- `SECURITY-PIPELINE.md` — Security baseline setup, local install, scan commands, and GitHub follow-up.
 - `run-dashboard-workflow.js` — Workflow Execution Script for User Activity Dashboard Feature (~1603 tok)
 - `settings.json` (~26 tok)
 - `test_registration.ts` — Declares test (~83 tok)
@@ -915,10 +923,28 @@
 - `workflow-pre-commit-validate-last-suggestion` (~3 tok)
 - `workflow-validate-last-commit-last-suggestion` (~3 tok)
 
+## .github/
+
+- `dependabot.yml` — Dependabot updates for npm, pip, Docker, and GitHub Actions.
+
+## .github/workflows/
+
+- `gitleaks.yml` — PR/default-branch/scheduled secret scanning.
+- `osv-scanner.yml` — PR/default-branch/scheduled OSV vulnerability scanning.
+- `semgrep.yml` — PR diff-aware and scheduled Semgrep SAST.
+
 ## .githooks/
 
-- `pre-commit` — [jaggers] doc-reminder (~69 tok)
-- `pre-push` — [jaggers] skill-staleness (~71 tok)
+- `.security-pipeline-baseline` — Anti-main-push guard plus diff-only Semgrep and informational OSV pre-push checks.
+- `pre-commit` — Managed wrapper preserving local doc reminder before pre-commit security checks.
+- `pre-commit.local` — Preserved doc-reminder hook.
+- `pre-push` — Managed wrapper preserving local skill-staleness hook after security baseline.
+- `pre-push.local` — Preserved skill-staleness hook.
+
+## scripts/
+
+- `security-scan.sh` — Informational local Gitleaks/Semgrep/OSV audit.
+- `semgrep-diff.sh` — Baseline-aware Semgrep scan for pre-push.
 
 ## .gitnexus/
 
@@ -1160,6 +1186,9 @@
 - `.gitignore` — Git ignore rules (~213 tok)
 - `.mcp copy.json` (~54 tok)
 - `.npmignore` — Esclude TUTTO ciò che non è necessario per il funzionamento dell'MCP server (~308 tok)
+- `.gitleaks.toml` — Gitleaks allowlist for repo-local runtime state and known non-secret placeholders.
+- `.pre-commit-config.yaml` — Local pre-commit/pre-push security and hygiene hook configuration.
+- `.semgrepignore` — Semgrep exclusions for generated/runtime artifacts with security-pipeline source re-included.
 - `.session-meta.json` (~19 tok)
 - `AGENTS.md` — XTRM Agent Workflow (~3544 tok)
 - `bunfig.toml` (~7 tok)

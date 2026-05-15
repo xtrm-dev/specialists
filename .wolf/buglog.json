@@ -376,6 +376,48 @@
         "release-drift",
         "onboarding"
       ]
+    },
+    {
+      "timestamp": "2026-05-15T01:03:00Z",
+      "error_message": "PR #80 OSV scan failed before scanning with \u201cUnable to resolve action google/osv-scanner-action@v2, unable to find version v2\u201d.",
+      "file": ".github/workflows/osv-scanner.yml; .xtrm/skills/default/security-pipeline/templates/.github/workflows/osv-scanner.yml",
+      "root_cause": "The OSV workflow used the floating tag @v2, but google/osv-scanner-action currently publishes concrete v2.x tags and no v2 alias, so GitHub Actions could not resolve the action.",
+      "fix": "Pinned the live workflow and reusable security-pipeline template to google/osv-scanner-action/osv-scanner-action@v2.3.8.",
+      "tags": [
+        "unitAI-4r9sf",
+        "security-pipeline",
+        "osv-scanner",
+        "github-actions",
+        "ci"
+      ]
+    },
+    {
+      "timestamp": "2026-05-15T01:09:00Z",
+      "error_message": "After syncing bun.lock to package.json Vitest 4.1.6 during OSV remediation, `bun run test` failed with 90 failed tests and 2 unhandled EBADF close errors.",
+      "file": "bun.lock; tests/unit/specialist/changelog-keeper.test.ts; tests/unit/specialist/supervisor-sigterm-append.test.ts",
+      "root_cause": "The committed package.json already requested Vitest 4.1.6 while the previous bun.lock still resolved Vitest 2.x; making the lockfile consistent exposes test-suite incompatibilities with Vitest 4 and existing expectation drift.",
+      "fix": "Not fixed in the security PR; created follow-up bead unitAI-rlq48. Lint, build, frozen install, and OSV scan pass for unitAI-4r9sf.",
+      "tags": [
+        "unitAI-4r9sf",
+        "unitAI-rlq48",
+        "vitest-4",
+        "tests",
+        "bun-lock"
+      ]
+    },
+    {
+      "timestamp": "2026-05-15T01:12:00Z",
+      "error_message": "PR #80 OSV scan failed after JS remediation because OSV action v2.3.8 resolved unpinned requirements.txt to vulnerable requests 2.9.2, pillow 9.5.0, and zipp 3.9.1.",
+      "file": "requirements.txt",
+      "root_cause": "requirements.txt listed Python packages without minimum safe versions, so the OSV action dependency resolver selected vulnerable historical versions/transitives even though the local older OSV CLI did not report them.",
+      "fix": "Pinned requests>=2.33.0, pillow>=12.2.0, and zipp>=3.19.1; verified with ghcr.io/google/osv-scanner-action:v2.3.8 locally.",
+      "tags": [
+        "unitAI-k9ba7",
+        "unitAI-4r9sf",
+        "security-pipeline",
+        "osv-scanner",
+        "python"
+      ]
     }
   ]
 }
