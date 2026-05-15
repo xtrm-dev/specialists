@@ -2,9 +2,9 @@
 title: MCP Tools Reference
 scope: mcp-tools
 category: reference
-version: 2.1.0
-updated: 2026-04-29
-synced_at: f52d3674
+version: 2.1.1
+updated: 2026-05-15
+synced_at: b92a11ba
 description: MCP tool contract for the Specialists server.
 source_of_truth_for:
   - "src/server.ts"
@@ -30,11 +30,11 @@ This server now exposes a single MCP tool.
 
 ```ts
 z.object({
-  name: z.string().describe('Specialist identifier (e.g. codebase-explorer)'),
+  name: z.string().describe('Specialist identifier (e.g. explorer, debugger, reviewer)'),
   prompt: z.string().optional().describe('The task or question for the specialist'),
   bead_id: z.string().optional().describe('Use an existing bead as the specialist prompt'),
   variables: z.record(z.string()).optional().describe('Additional $variable substitutions'),
-  backend_override: z.string().optional().describe('Force a specific backend (gemini, qwen, anthropic)'),
+  backend_override: z.string().optional().describe('Force a specific backend/model provider when supported by the runtime'),
   autonomy_level: z.enum(['READ_ONLY', 'LOW', 'MEDIUM', 'HIGH']).optional().describe('Override permission level for this invocation'),
   context_depth: z.number().min(0).max(10).optional().describe('Depth of blocker context injection (0 = none, 1 = immediate blockers, etc.)'),
 }).refine((input) => Boolean(input.prompt?.trim() || input.bead_id), {

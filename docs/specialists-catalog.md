@@ -2,10 +2,10 @@
 title: Specialists Catalog
 scope: specialists-catalog
 category: overview
-version: 1.6.1
-updated: 2026-04-29
-synced_at: c21f3214
-description: Current project specialists and what each one is for.
+version: 2.0.0
+updated: 2026-05-15
+synced_at: b92a11ba
+description: Current package-canonical specialists and what each one is for.
 source_of_truth_for:
   - "config/specialists/*.specialist.json"
   - ".specialists/default/*.specialist.json"
@@ -16,150 +16,72 @@ domain:
 
 # Specialists Catalog
 
-Current specialists runtime resolution:
-- `.specialists/user/` (repo custom, highest precedence)
-- `.specialists/default/` (managed mirror)
-- `config/specialists/` (package fallback)
+Runtime resolution is layered and package-canonical by default:
 
-Mirror source is `config/specialists/*.specialist.json` during `specialists init --sync-defaults`.
+1. `.specialists/user/` — repo custom specialists and overrides, highest precedence
+2. `.specialists/default/` — optional pins / compatibility snapshots
+3. package-canonical `config/specialists/` — installed package fallback
+4. legacy paths — migration compatibility only
 
-## Current specialists
+Fresh repositories normally do not need `.specialists/default/` populated. Use `sp doctor --check-drift` and `sp prune-stale-defaults` to remove stale default snapshots; use `.specialists/user/` for intentional customization.
 
-| Name | Version | Primary model | Permission | Typical use |
-|---|---|---|---|---|
-| `debugger` | v2.0 | `openai-codex/gpt-5.3-codex` | HIGH | deep bug investigation, keep-alive, 4-phase debug-fix-verify workflow |
-| `executor` | v1.0 | `openai-codex/gpt-5.4-mini` | HIGH | production-quality implementation, strict type safety |
-| `explorer` | v1.1 | `zai/glm-5` | READ_ONLY | architecture/codebase mapping |
-| `memory-processor` | v1.1 | `dashscope/qwen3.5-plus` | MEDIUM | synthesize memories + commits |
-| `node-coordinator` | v1.3 | `openai-codex/gpt-5.4` | LOW | worktree lifecycle coordination |
-| `overthinker` | v1.0 | `openai-codex/gpt-5.4` | READ_ONLY | multi-phase deep reasoning |
-| `planner` | v1.1 | `openai-codex/gpt-5.4` | HIGH | task decomposition, phased bd issue board, test-planning per layer |
-| `researcher` | v1.1 | `dashscope/qwen3.5-plus` | MEDIUM | library docs lookup + GitHub code discovery, keep-alive |
-| `reviewer` | v1.0 | `openai-codex/gpt-5.3-codex` | MEDIUM | post-run requirement compliance audit |
-| `changelog-keeper` | v1.0 | `anthropic/claude-sonnet-4-6` | READ_ONLY | draft Keep-a-Changelog section between two tags from git log + closed beads |
-| `specialists-creator` | v1.2 | `anthropic/claude-sonnet-4-6` | HIGH | create/fix specialist JSONs |
-| `sync-docs` | v2.0 | `dashscope/glm-5` | MEDIUM | documentation drift sync, 3-mode routing |
-| `test-runner` | v1.0 | `anthropic/claude-haiku-4-5` | LOW | test execution + summary |
-| `xt-merge` | v1.1 | `anthropic/claude-sonnet-4-6` | MEDIUM | merge queued xt PRs |
+## Current package specialists
 
-## Timeout baseline
+Run `sp list` for the live merged registry, including user-local specialists. The table below reflects package-canonical `config/specialists/*.specialist.json` at the current release.
 
-`stall_timeout_ms` is standardized to `120000` (120s) across canonical specialists.
+| Name | Version | Primary model | Permission | Keep-alive | Typical use |
+|---|---:|---|---|---|---|
+| `changelog-drafter` | 1.0.0 | `openai-codex/gpt-5.4-mini` | READ_ONLY | no | Read-only bundle synthesis for `xt release prepare`; no publishing or edits. |
+| `changelog-keeper` | 3.0.0 | `openai-codex/gpt-5.4-mini` | MEDIUM | yes | Fill sparse `[Unreleased]` sections from xt reports and commits; edits `CHANGELOG.md` only. |
+| `code-sanity` | 1.0.0 | `openai-codex/gpt-5.4-mini` | READ_ONLY | yes | Smell pass after executor and before reviewer. |
+| `debugger` | 2.0.0 | `openai-codex/gpt-5.3-codex` | HIGH | yes | Root-cause symptoms, regressions, flaky tests, and unknown-cause bugs before executor. |
+| `executor` | 1.0.0 | `openai-codex/gpt-5.4-mini` | HIGH | yes | Implement already-scoped code or docs changes in an isolated worktree. |
+| `explorer` | 1.1.0 | `nano-gpt/zai-org/glm-5` | READ_ONLY | yes | Map architecture, call flows, dependencies, and implementation options without edits. |
+| `memory-processor` | 1.1.0 | `openai-codex/gpt-5.3-codex` | MEDIUM | no | Curate persistent project memory into `.xtrm/memory.md`. |
+| `node-coordinator` | 1.3.0 | `openai-codex/gpt-5.4` | LOW | yes | Drive NodeSupervisor research-node runs through `sp node` commands. |
+| `overthinker` | 1.0.0 | `openai-codex/gpt-5.5` | READ_ONLY | yes | Deep reasoning, tradeoff review, premortems, architecture critique. |
+| `planner` | 1.1.0 | `openai-codex/gpt-5.4` | HIGH | yes | Turn broad initiatives into phased bead boards with dependencies and tests. |
+| `researcher` | 1.2.0 | `openai-codex/gpt-5.4-mini` | MEDIUM | yes | Current library/API docs, GitHub examples, and ecosystem evidence. |
+| `reviewer` | 1.0.0 | `openai-codex/gpt-5.3-codex` | MEDIUM | yes | Compliance review of executor/debugger output via `--job`; emits PASS/PARTIAL/FAIL. |
+| `security-auditor` | 1.0.0 | `openai-codex/gpt-5.4` | LOW | yes | Threat modeling, secure-code review, dependency advisory triage; recommendations only. |
+| `specialists-creator` | 1.3.0 | `openai-codex/gpt-5.5` | HIGH | no | Create/fix `.specialist.json` definitions and validate schema/model choices. |
+| `sync-docs` | 3.1.0 | `nano-gpt/zai-org/glm-5` | MEDIUM | yes | Sync exactly one documentation file from scoped report/commit context. |
+| `test-runner` | 2.0.0 | `openai-codex/gpt-5.4-mini` | LOW | no | Detect project language from manifests, run tests, classify failures; no fixes. |
+| `xt-merge` | 1.1.0 | `openai-codex/gpt-5.4-mini` | MEDIUM | no | Drain xt worktree PR queues with CI/rebase/conflict handling. |
 
-## Specialist skills wiring
+## Notable release highlights
 
-All specialists now have GitNexus skills wired for code intelligence:
-
-| Specialist | Skills |
-|---|---|
-| `debugger` | `xt-debugging`, `gitnexus-debugging`, `systematic-debugging` |
-| `executor` | `gitnexus-impact-analysis`, `clean-code` |
-| `explorer` | `gitnexus-exploring` |
-| `memory-processor` | `documenting`, `using-xtrm` |
-| `node-coordinator` | `using-specialists` |
-| `overthinker` | `gitnexus-exploring`, `deepwiki`, `find-docs`, `github-search` |
-| `planner` | `planning`, `test-planning`, `gitnexus-exploring` |
-| `researcher` | `find-docs`, `deepwiki`, `github-search` |
-| `reviewer` | `using-quality-gates`, `clean-code`, `gitnexus-refactoring`, `gitnexus-impact-analysis` |
-| `specialists-creator` | `specialists-creator` |
-| `sync-docs` | `sync-docs`, `gitnexus-exploring` |
-| `xt-merge` | `xt-merge` |
-| `changelog-keeper` | (none — pre-script driven) |
-
-## Version highlights
-
-### debugger v2.0
-- **Permission**: HIGH
-- **Mode**: keep-alive (long-running debug sessions)
-- **Workflow**: 4-phase debug-fix-verify cycle
-- **Skills**: `gitnexus-debugging`, `xt-debugging`, `systematic-debugging`
-
-### planner v1.1
-- **Permission**: HIGH (elevated for bd issue creation)
-- **Mode**: keep-alive (interactive)
-- **Workflow**: GitNexus codebase exploration → phased bd issue board → test-planning per layer → epic ID output
-- **Skills**: `planning`, `test-planning`, `gitnexus-exploring`
-
-### changelog-keeper v1.0
-- **Permission**: READ_ONLY
-- **Output**: `output_type=synthesis`, `response_format=markdown` plus structured JSON (`{unreleased_summary, sections:{added/changed/fixed/removed/deprecated/security}}`)
-- **Pre-scripts**: `git log --pretty=format:%H||%s||%b -- $prev_tag..$next_tag` and a bd-query for beads closed since the previous tag, both `inject_output: true`
-- **Mandatory rules**: `changelog-conventions` (Keep-a-Changelog v1.0.0 sections, conventional-commit mapping, one-line bullets, bead-id refs)
-- **Consumed by**: `sp release prepare` — see `docs/release.md`
-- **Drafts only.** The specialist never writes to `CHANGELOG.md`; the CLI is the file mutator. Operator gates the release.
-
-### specialists-creator v1.2
-- **Permission**: HIGH
-- **Config format**: JSON (`.specialist.json`) — YAML no longer supported
-- **Workflow** (create):
-  1. Model selection protocol — ping primary + fallback before writing anything
-  2. Run `scaffold-specialist.ts` first to materialise all schema fields
-  3. Mutate fields with `sp edit <name> <dot.path> <value>`
-  4. Use `sp edit <name> --preset <preset>` for common model/thinking baselines
-  5. Use `--file` only for multiline `prompt.system` and `prompt.task_template`
-  6. Run `sp view <name>` + schema validation to confirm output
-- **Workflow** (fix): identify Zod error → `sp edit` focused fix → explain why invalid
-- **Pre-scripts**: `pi --list-models` (model injection), `scaffold-specialist.ts` (field materialisation)
-- **Skills**: `specialists-creator`
-
-### executor v1.0
-- **Permission**: HIGH
-- **Mode**: `auto` (scaffold-populated field)
-- **Thinking**: low
-- **Skills**: `gitnexus-impact-analysis`, `clean-code`
-- **Post-script**: `npm run lint` (tail-5 output)
-
-### xt-merge v1.1
-- **Model**: `anthropic/claude-sonnet-4-6`
-- **Workflow**: FIFO PR drain — pre-flight, CI check, merge with rebase, cascade rebase of remaining branches, push verify
-
-### researcher v1.1
-- **Permission**: LOW
-- **Mode**: keep-alive (interactive, multi-turn research)
-- **Two modes**: targeted (ctx7/deepwiki for specific library docs) and discovery (ghgrep → deepwiki for ecosystem patterns)
-- **Tools**: `ctx7`, `deepwiki`, `ghgrep`
-- **Skills**: `find-docs`, `deepwiki`, `github-search`
-
-### reviewer v1.0
-- **Permission**: MEDIUM
-- **Purpose**: post-run compliance audit — resolves bead requirements, grades output 0-100
-- **Scoring**: coverage (0-70) + evidence quality (0-20) + traceability integrity (0-10)
-- **Skills**: `using-quality-gates`, `clean-code`, `gitnexus-refactoring`, `gitnexus-impact-analysis`
-
-### sync-docs v2.0
-- **Permission**: MEDIUM
-- **Routing**: 3-mode (targeted, area, full audit)
-- **Context**: commit-based (not PR-based)
-- **Drift detection**: automatic via `drift_detector.py`
-
-### node-coordinator v1.1
-- **Model**: `anthropic/claude-sonnet-4-6`
-- **Permission**: READ_ONLY
-- **Scope**: worktree lifecycle management
-- **Skills**: `using-specialists`
-- **Pre-script**: `sp list` for catalog discovery
+- **No package specialist uses Anthropic Claude as primary.** v3.15 moved package specialists off Anthropic-only defaults for operator environments where those models are unavailable. Fallback diversity is handled through Gemini/GLM/openai-codex models.
+- **`sync-docs` v3.1 is single-doc only.** One bead scope must name exactly one doc. It is not a broad docs-tree auditor.
+- **`test-runner` v2 is polyglot.** It detects `package.json`, Python, Rust, and Go manifests and runs the appropriate test command.
+- **`changelog-keeper` v3 is file-scoped.** It fills `CHANGELOG.md` gaps only; version bump/build/tag/publish are owned by the release skill flow.
+- **`researcher` v1.2 is for external truth.** Use it before answering library/API/framework/CLI questions from memory.
+- **`code-sanity` and `security-auditor` are advisory passes.** They provide evidence and findings before final reviewer PASS.
 
 ## Discover current runtime catalog
 
 ```bash
-specialists list
-specialists list --json
+sp list
+sp list --compact
+sp list --json
+sp list-rules
 ```
 
 ## Tool resolution
 
-The `Permission` column above is the input tier to the manifest-driven tool resolver. Each specialist's actual `--tools` set at runtime is computed from the tier plus the catalog at `.specialists/catalog/index.json` plus any per-specialist `permissions[<TIER>]` override block. Today only `explorer` declares an override (hard-deny on native `grep`/`find`/`ls`).
+The `Permission` column is the input tier to the manifest-driven tool resolver. Runtime tools are computed from the tier plus package/user catalogs and any per-specialist `permissions[<TIER>]` override.
 
-To see the resolved tool set for any specialist:
+Inspect a resolved specialist:
 
 ```bash
-specialists config show <name> --resolved
+sp config show <name> --resolved
 ```
 
-See [manifest.md](manifest.md) for the resolution semantics and how to declare an override when a specialist's policy diverges from the tier default.
+See [manifest.md](manifest.md) for resolution semantics and override policy.
 
 ## See also
 
-- [manifest.md](manifest.md) — tool catalog, resolver, `permissions[<TIER>]` override blocks
+- [manifest.md](manifest.md)
 - [authoring.md](authoring.md)
 - [workflow.md](workflow.md)
+- [skills.md](skills.md)

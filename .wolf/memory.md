@@ -166,3 +166,6 @@
 
 - 2026-05-13T12:11:27Z: unitAI-sv0v2 documented Pi RPC isolation flags in docs/pi-session.md and aligned docs/specialists-service.md one-shot runner argv with script-runner isolation.
 - 2026-05-14T01:06:48Z: Updated `.xtrm/reports/2026-05-13c-everything-pre-release.md` as the same-day SSOT with late bug-hygiene closures (`unitAI-352ni`, `unitAI-sxmmy`, stale/fixed bug cleanup), remaining open bugs (`unitAI-dp3lg`, `unitAI-e8eq2`), and non-owned cleanup state left intact.
+- 2026-05-14T18:52:00Z: Hardened `sp ps -f` rendering for unitAI-fqo38: TTY follow mode now uses alternate screen + cursor hide + unchanged-frame dedupe; non-TTY follow appends ANSI-free snapshots and handles EPIPE/SIGINT/SIGTERM cleanup. Rebuilt dist.
+
+- 2026-05-15: unitAI-xvvqb docs reconciliation cleared sync-docs drift_detector to count 0 after refreshing README and high-traffic docs for v3.14-v3.15 release drift; stale links to `docs/pi-rpc.md`/`docs/release-image.md`, `bug-hunt`, old Anthropic/Dashscope examples, and `.specialists/default` sync-defaults guidance were removed or reframed.

@@ -2,9 +2,9 @@
 title: Worktree Isolation
 scope: worktrees
 category: reference
-version: 1.4.0
-updated: 2026-04-29
-synced_at: 4395795d
+version: 1.4.1
+updated: 2026-05-15
+synced_at: b92a11ba
 description: Technical reference for worktree-per-executor isolation — CLI flags, job registry, GC, and chained bead patterns.
 source_of_truth_for:
   - "src/specialist/job-root.ts"
@@ -104,7 +104,7 @@ If a worktree for that branch already exists (e.g. from a prior interrupted run)
 
 ### `--job <id>`
 
-Reads `worktree_path` from the target job's `status.json` and uses that directory as `cwd`. The **caller's** `--bead` remains authoritative — only the workspace is borrowed.
+Resolves the target job's `worktree_path` from the DB-first runtime state, falling back to legacy `status.json` mirrors when enabled, and uses that directory as `cwd`. The **caller's** `--bead` remains authoritative — only the workspace is borrowed.
 
 ```bash
 specialists run reviewer --job 49adda --bead hgpu.3-review
@@ -151,7 +151,7 @@ Reuse detection runs first via `git worktree list --porcelain`; creation is skip
 
 ### Persisted metadata
 
-`Supervisor` writes `worktree_path` and `branch` to `status.json` immediately on job start:
+`Supervisor` persists `worktree_path` and `branch` in canonical runtime state and, when legacy file mirrors are enabled, also writes them to `status.json` immediately on job start:
 
 ```json
 {
@@ -163,7 +163,7 @@ Reuse detection runs first via `git worktree list --porcelain`; creation is skip
 }
 ```
 
-`--job` resolution reads this file directly — no git scanning required.
+`--job` resolution uses persisted job metadata — no git scanning required.
 
 ### Status / steer / resume
 
@@ -298,7 +298,7 @@ Auto-checkpoint runs silently — no user action required. The guard persists re
 | `src/specialist/worktree.ts` | `provisionWorktree()`, branch/path derivation, `listWorktrees()` |
 | `src/specialist/worktree-gc.ts` | `collectWorktreeGcCandidates()`, `pruneWorktrees()` |
 | `src/cli/run.ts` | `resolveWorkingDirectory()` — `--worktree`/`--job` dispatch |
-| `src/specialist/supervisor.ts` | Persists `worktree_path` + `branch` to `status.json` |
+| `src/specialist/supervisor.ts` | Persists `worktree_path` + `branch` to DB-first runtime state and legacy mirrors when enabled |
 
 ---
 

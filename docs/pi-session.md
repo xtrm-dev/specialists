@@ -2,9 +2,9 @@
 title: Pi Subprocess Isolation
 scope: pi-session
 category: reference
-version: 1.2.0
-updated: 2026-05-13
-synced_at: 50850982
+version: 1.2.1
+updated: 2026-05-15
+synced_at: b92a11ba
 description: Why specialists spawns Pi with isolation flags and which extensions are selectively re-enabled.
 source_of_truth_for:
   - "src/pi/session.ts"
@@ -150,5 +150,5 @@ Both live at `~/.pi/agent/extensions/`. Run `specialists status` to see which ex
 
 ## See also
 
-- [pi-rpc.md](pi-rpc.md) — RPC mode protocol and lifecycle events
+- [pi-rpc-boundary.md](pi-rpc-boundary.md) — RPC ownership boundary and lifecycle adaptation notes
 - [background-jobs.md](background-jobs.md) — Background job monitoring

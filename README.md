@@ -1,162 +1,200 @@
 # Specialists
 
-**One MCP server. Many specialists. Bead-first orchestration.**
+**One MCP server. Many specialist agents. Bead-first orchestration.**
 
 [![npm version](https://img.shields.io/npm/v/@jaggerxtrm/specialists.svg)](https://www.npmjs.com/package/@jaggerxtrm/specialists)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue.svg)](https://www.typescriptlang.org/)
 
-**Specialists is a universal framework for defining and running specialist agents.** You can invoke the same specialist from the terminal, through MCP inside coding agents, inside autonomous multi-agent runtimes, or from scripts and CI/CD pipelines. Each run can explicitly define the model, tool access, system prompt, task input, permission level, timeout, output format, tracking behavior, memory sources, and dependency context.
+Specialists is a project-scoped runtime for running focused AI agents from the CLI, MCP, scripts, CI, or HTTP sidecars. A specialist definition declares its model, tools, permission tier, prompt, skills, output contract, timeout/stall policy, worktree behavior, and tracking behavior. The orchestrator keeps task identity in a **bead**; specialists run as fresh scoped sessions that report evidence, changes, and results back to that bead.
 
-Specialists is built on top of the **[pi coding agent](https://github.com/Jaggerxtrm/pi-coding-agent)** as its base execution technology. That gives Specialists access to a broad provider surface across many OAuth and API-backed models, a richer lifecycle event stream for tracking session progress and tool execution, and a usable RPC protocol for orchestrating specialist runs as a stable subprocess boundary.
+Specialists sits in the xt/xtrm stack:
 
-Specialists is intended to run inside the **xt/xtrm architecture** provided by **[xtrm-tools](https://github.com/Jaggerxtrm/xtrm-tools)**. xtrm-tools provides the worktree isolation, execution boundaries, session model, and surrounding workflow environment that Specialists expects. Specialists handles specialist execution; xtrm-tools owns the broader operator workflow and beads enforcement hooks. For tracking and coordination Specialists uses **beads** by **Steven Yegge** as the issue, dependency, and communication layer. I built a similar issue system for Mercury AACS and Terminal back in November, but Beads is already widely used and actively maintained, so xt/Specialists is built around Beads instead of carrying a separate workflow stack. When a specialist run originates from a bead, its output is written back to that same bead, so the task spec, dependency context, coordination state, and result stay inside one tight, controlled loop.
+- **[pi coding agent](https://github.com/Jaggerxtrm/pi-coding-agent)** supplies the model/provider execution layer, JSONL/RPC subprocess boundary, tool events, and extension hooks.
+- **[xtrm-tools](https://github.com/Jaggerxtrm/xtrm-tools)** supplies the surrounding operator workflow: worktree sessions, `.xtrm/` skills/hooks, session reports, update tooling, and workflow enforcement.
+- **[beads](https://github.com/steveyegge/beads)** supplies issue IDs, dependency edges, claims, and durable task/result notes.
 
-A specialist is a reusable execution spec: model, allowed tools, skills, system prompt, task prompt, timeout, permission level, output format, and background-job behavior. It can run from a plain prompt, from a system+task prompt pair, or directly from an **issue/bead ID as the task source**. Dependency chains can be injected as context, centralized memory can be reused across runs, and jobs can execute in the foreground or as background processes with status, events, and results exposed through the CLI and MCP surfaces.
+When a run starts from `--bead <id>`, the bead is the task prompt. Dependency context and relevant memory can be injected, the specialist output is appended back to the same bead, and edit-capable specialists work in isolated branches/worktrees that can be reviewed and merged through `sp merge` or `sp epic merge`.
 
 ---
 
-## Vision
+## What you can run
 
-Specialists turns one overloaded agent chat into a coordinated agent mind: a central orchestrator keeps task identity and evidence, while fresh specialist sessions act as scoped capabilities with their own prompts, rules, memory, and contracts. See [specialists.scheme.md](specialists.scheme.md) for diagrams comparing the single-chat model with specialist pipelines, herd memory, adaptive chains, and service specialists.
+| Need | Specialist / surface |
+|---|---|
+| Map unfamiliar local code | `explorer` |
+| Diagnose a bug with unknown cause | `debugger` |
+| Implement a scoped change | `executor` |
+| Review an executor/debugger result | `reviewer --job <exec-job>` |
+| Run/classify tests | `test-runner` |
+| Current library/API/GitHub research | `researcher` |
+| Plan a multi-file feature into beads | `planner` |
+| Check code shape before review | `code-sanity` |
+| Audit security-sensitive diffs | `security-auditor` |
+| Sync exactly one doc | `sync-docs` |
+| Draft changelog gaps | `changelog-keeper` |
+| One-shot script/HTTP generation | `sp script` / `sp serve` |
 
-## Quick start
-
-1. Install Bun.
+The live registry is authoritative:
 
 ```bash
-bun --version
-curl -fsSL https://bun.sh/install | bash
+sp list
+sp list --compact
+sp list-rules
+sp help
 ```
 
-2. Install xtrm-tools.
+## Install and bootstrap
+
+Specialists is **Bun-only** and expects xtrm-tools to be installed explicitly. xtrm-tools is a runtime prerequisite, not an npm dependency of this package.
 
 ```bash
+# 1. Bun
+curl -fsSL https://bun.sh/install | bash
+bun --version
+
+# 2. xtrm-tools
 npm install -g xtrm-tools
 xt install
 xt init
-```
 
-3. Install Specialists.
-
-```bash
+# 3. Specialists
 npm install -g @jaggerxtrm/specialists
 sp init
+sp doctor
 sp list
 ```
 
-`sp` is a shorter alias for `specialists` — both commands are identical:
+`sp` is an alias for `specialists`.
 
-```bash
-sp list
-sp run bug-hunt --bead <id>
-```
+`sp init` is an interactive, human-run bootstrap. It checks for `xt` and `.xtrm/`, wires project MCP registration, hooks, skill symlinks, `.specialists/` runtime directories, and the Specialists block in `AGENTS.md`. It does **not** require copying package-owned defaults into every repo.
 
-Tracked work:
+## Update and drift repair
+
+Specialists uses two distribution tracks:
+
+| Track | Owned by | What it covers | Check / update |
+|---|---|---|---|
+| **Category A** runtime assets | `@jaggerxtrm/specialists` package | specialist JSON, mandatory rules, catalog, nodes, hooks shipped with the package | `sp doctor --check-drift`, `sp prune-stale-defaults --dry-run`, `sp prune-stale-defaults` |
+| **Category B** filesystem assets | xtrm-tools | `.xtrm/skills`, `.claude/skills`, `.pi/skills`, hook snapshots read directly from disk | `xt doctor --cwd <repo> --json`, `xt update --repo <repo> --apply` |
+
+`.specialists/user/` is your customization layer. `.specialists/default/` is now only for intentional pins or compatibility snapshots; stale default files are drift debt and `sp prune-stale-defaults` removes them by default. `sp init --sync-defaults` remains as a compatibility path, but it is deprecated because it creates repo-local snapshots that can drift from the package-canonical source.
+
+## Core tracked workflow
 
 ```bash
 bd create "Investigate auth bug" -t bug -p 1 --json
-specialists run bug-hunt --bead <id>
-specialists feed -f
-bd close <id> --reason "Done"
+bd update <id> --claim --json
+
+sp run debugger --bead <id> --context-depth 3
+sp ps
+sp feed <job-id> --follow
+sp result <job-id>
+
+# After implementation and reviewer PASS
+sp merge <chain-root-bead>          # standalone chain
+sp epic status <epic-id>            # multi-chain publication check
+sp epic merge <epic-id>             # canonical epic publication
+
+bd close <id> --reason "Done" --json
 ```
 
-Merge worktree branches:
+Ad-hoc work is still available, but tracked work should use beads:
 
 ```bash
-specialists merge <bead-id>           # single chain or epic (topological)
-specialists merge <bead-id> --rebuild # rebuild after merge
+sp run explorer --prompt "Map the CLI architecture"
 ```
 
-`specialists run` prints `[job started: <id>]` early. Normal runtime is DB-backed; `.specialists/jobs/latest` is legacy/operator-only.
+## Background jobs and monitoring
 
-Runtime state lives in `observability.db`; `.specialists/jobs/latest` is legacy convenience pointer only.
+Normal runtime is DB-first: `.specialists/db/observability.db` stores jobs, events, and results. File mirrors under `.specialists/jobs/` are legacy/operator recovery surfaces.
 
-Ad-hoc work:
+Useful commands:
 
 ```bash
-specialists run codebase-explorer --prompt "Map the CLI architecture"
+sp ps                         # actionable dashboard
+sp ps -f                      # TTY dashboard follow; pipes emit ANSI-free snapshots
+sp feed <job-id>              # full DB-backed event replay
+sp feed -f                    # follow all active jobs
+sp result <job-id> --wait
+sp steer <job-id> "focus only on X"
+sp resume <job-id> "continue with these findings"
+sp finalize <any-chain-job>   # cascade-close waiting keep-alive chain after PASS if needed
+sp clean --reap-orphans --dry-run
+sp clean --ps                 # hide terminal dashboard history without deleting DB audit rows
 ```
 
-## What `specialists init` does
+## Script and service specialists
 
-- creates `specialists/`
-- creates `.specialists/` runtime dirs (`jobs/`, `ready/`)
-- adds `.specialists/` to `.gitignore`
-- injects the canonical Specialists Workflow block into `AGENTS.md`
-- registers the Specialists MCP server at project scope
-
-Verify bootstrap state:
+Use `sp run` for interactive agent orchestration. Use the script/service surfaces when you need a synchronous, READ_ONLY, one-shot generation path:
 
 ```bash
-specialists status
-specialists doctor
+sp script <name> --vars key=value --json
+sp serve --port 8000 --readiness-canary warn
+curl -sS http://localhost:8000/v1/generate \
+  -H 'content-type: application/json' \
+  -d '{"specialist":"hello","variables":{"name":"world"}}'
 ```
+
+`sp serve` is intended as a sidecar for script-class specialists. For container deployments, mount the whole `.specialists/` directory read-write, set `HOME=/pi-home`, and align container UID/GID with the host user. See [docs/specialists-service.md](docs/specialists-service.md), [docs/specialists-service-install.md](docs/specialists-service-install.md), and [docs/deploying-alongside.md](docs/deploying-alongside.md).
 
 ## Documentation map
 
-`docs/` is the source of truth for detailed documentation. Start with the page that matches your task:
-
 | Need | Doc |
 |---|---|
-| Install and bootstrap a project | [docs/bootstrap.md](docs/bootstrap.md) |
-| Release notes and version history | [CHANGELOG.md](CHANGELOG.md) |
-| Changelog drafting specialist | [config/specialists/changelog-keeper.specialist.json](config/specialists/changelog-keeper.specialist.json) |
-| Run a script-class specialist over HTTP (`sp serve`) — overview & contract | [docs/specialists-service.md](docs/specialists-service.md) |
-| Install `sp serve` in another project (sidecar Docker / Podman) | [docs/specialists-service-install.md](docs/specialists-service-install.md) |
-| Build & publish the specialists-service image | [docs/release-image.md](docs/release-image.md) |
-| Release flow (skill + specialist) | [config/skills/releasing/SKILL.md](config/skills/releasing/SKILL.md) |
-| Bead-first workflow and semantics | [docs/workflow.md](docs/workflow.md) |
+| Install, update, and distribution model | [docs/installation.md](docs/installation.md) |
+| Project bootstrap and `sp init` | [docs/bootstrap.md](docs/bootstrap.md) |
+| Bead-first workflow | [docs/workflow.md](docs/workflow.md) |
 | CLI commands and flags | [docs/cli-reference.md](docs/cli-reference.md) |
-| Background jobs, feed, result, stop | [docs/background-jobs.md](docs/background-jobs.md) |
-| Write or edit a `.specialist.yaml` | [docs/authoring.md](docs/authoring.md) |
-| Current built-in specialists | [docs/specialists-catalog.md](docs/specialists-catalog.md) |
-| MCP registration details | [docs/mcp-servers.md](docs/mcp-servers.md) |
-| Hook behavior | [docs/hooks.md](docs/hooks.md) |
-| Skills shipped in this repo | [docs/skills.md](docs/skills.md) |
-| xtrm / worktree integration | [docs/worktree.md](docs/worktree.md) |
-| RPC mode notes | [docs/pi-rpc.md](docs/pi-rpc.md) |
-| Pi subprocess isolation and extensions | [docs/pi-session.md](docs/pi-session.md) |
-| NodeSupervisor architecture, node lifecycle, and `sp node` CLI | [docs/nodes.md](docs/nodes.md) |
-
-## Ownership model
-
-Specialists uses layered ownership with deterministic loader precedence: user layer overrides default layer, and default layer falls back to package source (`.specialists/user/*` > `.specialists/default/*` > `config/*`). Operationally: `config/*` is upstream source shipped by package, `.specialists/default/*` is managed mirror refreshed by `specialists init --sync-defaults` (scope: specialists + mandatory-rules + nodes), `.specialists/user/*` is repo customization layer, and `.specialists/{jobs,ready,db}` is runtime/generated state; `.specialists/jobs/` is legacy mirror/debug surface, not normal-runtime source of truth. Use `sp edit --fork-from <base>` to promote non-user specialist into user layer before editing.
+| Background jobs / `ps` / `feed` / `result` | [docs/background-jobs.md](docs/background-jobs.md) |
+| Specialist JSON authoring | [docs/authoring.md](docs/authoring.md) |
+| Built-in specialists | [docs/specialists-catalog.md](docs/specialists-catalog.md) |
+| Tool catalog and permission resolver | [docs/manifest.md](docs/manifest.md) |
+| MCP registration and tool surface | [docs/mcp-servers.md](docs/mcp-servers.md), [docs/mcp-tools.md](docs/mcp-tools.md) |
+| Hooks | [docs/hooks.md](docs/hooks.md) |
+| Skills | [docs/skills.md](docs/skills.md) |
+| Worktrees and session close | [docs/worktrees.md](docs/worktrees.md), [docs/worktree.md](docs/worktree.md) |
+| Runtime architecture | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| Pi subprocess isolation / RPC boundary | [docs/pi-session.md](docs/pi-session.md), [docs/pi-rpc-boundary.md](docs/pi-rpc-boundary.md) |
+| NodeSupervisor | [docs/nodes.md](docs/nodes.md) |
+| Service sidecar / HTTP contract | [docs/specialists-service.md](docs/specialists-service.md) |
+| Compose deployment recipe | [docs/deploying-alongside.md](docs/deploying-alongside.md) |
+| Release notes | [CHANGELOG.md](CHANGELOG.md) |
 
 ## Project structure
 
 ```text
 config/
-├── specialists/       canonical specialist definitions (.specialist.json)
-├── mandatory-rules/   canonical rule sets injected into specialist prompts (+ README)
-├── nodes/             canonical node configs
+├── specialists/       package-canonical specialist definitions (.specialist.json)
+├── mandatory-rules/   package-canonical rule sets injected into specialist prompts
+├── catalog/           package-canonical tool catalog
+├── nodes/             package-canonical node configs
 ├── hooks/             bundled hook scripts
-├── skills/            repo-local skills used by specialists
-└── extensions/        pi extensions (future)
+└── skills/            repo-local skills shipped by this package
+
 .specialists/
-├── default/           managed mirror of canonical (from sp init --sync-defaults)
-│   ├── specialists/
-│   ├── mandatory-rules/
-│   ├── nodes/
-│   ├── hooks/
-│   └── skills/
-├── user/              repo-owned customizations (overrides default + canonical)
-│   ├── specialists/
-│   ├── hooks/
-│   └── skills/
-├── mandatory-rules/   repo-specific rule overlay (wins on set-id conflict)
-├── jobs/              runtime — gitignored
-└── ready/             runtime — gitignored
-src/                CLI, server, loader, runner, tools
+├── user/              repo-owned specialists and overrides (highest precedence)
+├── default/           optional pins / compatibility snapshots; prune stale files
+├── mandatory-rules/   legacy/repo rule overlay compatibility
+├── db/                runtime SQLite state (gitignored)
+├── jobs/              legacy runtime mirror (gitignored)
+└── ready/             legacy ready markers (gitignored)
+
+.xtrm/
+├── skills/            xtrm-managed skill snapshots and active links
+└── hooks/             xtrm-managed hook snapshots
+
+src/                   CLI, server, loader, runner, supervisor, MCP tool
 ```
 
-## Core workflow rules
+## Core rules
 
-- **Use `--bead` for tracked work.** The bead is the prompt source.
-- **Use `--prompt` for ad-hoc work only.**
-- `--context-depth` controls how many completed blocker levels are injected.
-- `--no-beads` does **not** disable bead reading.
-- specialists are **project-only**. User-scope specialist discovery is deprecated.
+- Use `--bead` for tracked work; use `--prompt` only for quick untracked work.
+- `--context-depth` controls completed dependency context injection; default is 3 for bead runs.
+- `--no-beads` disables tracking bead creation/updates, but it does not disable reading the input bead when `--bead` is provided.
+- Edit-capable specialists run in isolated worktrees. Review/fix passes should use `--job <exec-job>` to reuse the same workspace.
+- Reviewer PASS is the publish gate. Code-sanity/security/test-runner outputs are advisory evidence, not merge approval.
+- Specialists are project-scoped. User-scope specialist discovery is deprecated.
 
 ## Deprecated commands
 
@@ -164,8 +202,9 @@ These commands are still recognized for migration guidance but are no longer onb
 
 - `specialists setup`
 - `specialists install`
+- `sp release prepare` / `sp release publish` (deprecated aliases; release flow is skill-driven)
 
-Use `specialists init` instead.
+Use `sp init`, `xt update`, and the release skill flow instead.
 
 ## Development
 
@@ -173,12 +212,10 @@ Use `specialists init` instead.
 bun run build
 bun test           # bun vitest run (default)
 bun run test:node  # node vitest run (subprocess-safe alternative)
-specialists help
-specialists quickstart
+sp help
+sp quickstart
 ```
-
-`test:node` uses plain `node vitest run` as an alternative to `bun --bun vitest`. Useful for executor/codex subprocess chains that may trigger stall detection during vitest's tinypool worker initialization silence.
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).

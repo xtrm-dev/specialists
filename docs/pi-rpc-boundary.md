@@ -2,8 +2,8 @@
 title: pi/rpc Boundary
 description: Canonical ownership boundary between pi/rpc protocol surfaces and Specialists runtime adaptation.
 synced_at: 4e7a6b4a
-version: 2
-updated: 2026-04-29
+version: 3
+updated: 2026-05-15
 ---
 
 # pi/rpc Boundary
@@ -11,7 +11,8 @@ updated: 2026-04-29
 This document defines ownership boundaries so protocol changes stay in the right layer.
 
 References:
-- `docs/pi-rpc.md`
+- `pi/rpc/` — canonical protocol implementation and types
+- `docs/pi-rpc-boundary.md` — this ownership-boundary guide
 - `pi/rpc/rpc-types.ts`
 - `pi/rpc/rpc-client.ts`
 - `pi/rpc/rpc-mode.ts`
@@ -31,7 +32,7 @@ Own this in `pi/rpc/*` and treat as canonical protocol contract:
 - JSONL framing semantics (`jsonl.ts`): LF-delimited records, strict line splitting behavior
 - Request/response correlation by `id`
 
-If a behavior is documented in `docs/pi-rpc.md` and represented in `pi/rpc/*.ts`, Specialists should adapt to it, not redefine it.
+If a behavior is represented in `pi/rpc/*.ts`, Specialists should adapt to it, not redefine it. This document records the ownership boundary; the protocol implementation remains the source of truth.
 
 ## 2) Specialists-owned boundary (adapter + orchestration)
 
@@ -114,4 +115,4 @@ The boundary path is passed to the extension via `SPECIALISTS_WORKTREE_BOUNDARY`
 - `pi/rpc/*.ts` remains the canonical protocol surface.
 - `src/pi/session.ts` remains an adapter, not a competing protocol definition.
 - Supervisor remains the durable source of run lifecycle state for Specialists.
-- Any divergence from `docs/pi-rpc.md` must be treated as a bug or an explicit upstream protocol update.
+- Any divergence from `pi/rpc/*.ts` must be treated as a bug or an explicit upstream protocol update.

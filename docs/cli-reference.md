@@ -2,9 +2,9 @@
 title: CLI Reference
 scope: cli
 category: reference
-version: 2.7.0
-updated: 2026-04-19
-synced_at: d2ab473a
+version: 2.7.1
+updated: 2026-05-15
+synced_at: b92a11ba
 description: Complete command reference for the Specialists CLI, generated from current source.
 source_of_truth_for:
   - src/index.ts
@@ -763,7 +763,7 @@ All specialist JSON fields are addressable via dot-notation:
 
 ```bash
 # Execution settings
-specialists edit executor --set specialist.execution.model anthropic/claude-sonnet-4-6
+specialists edit executor --set specialist.execution.model openai-codex/gpt-5.4-mini
 specialists edit executor --set specialist.execution.timeout_ms 180000
 specialists edit executor --set specialist.execution.permission_required HIGH
 specialists edit executor --set specialist.execution.thinking_level medium
@@ -796,9 +796,9 @@ Presets are predefined field bundles in `config/presets.json`. Built-in presets:
 
 | Preset | Description | Key fields |
 |--------|-------------|------------|
-| `cheap` | Low-cost, fast responses | `qwen3.5-plus`, `thinking_level: off`, `stall_timeout_ms: 60000` |
-| `medium` | Balanced cost/quality | `claude-sonnet-4-6`, `thinking_level: low`, `stall_timeout_ms: 120000` |
-| `power` | Maximum capability | `gpt-5.4`, `thinking_level: high`, `stall_timeout_ms: 300000` |
+| `cheap` | Low-cost, fast responses | See `sp edit --list-presets` / `config/presets.json` |
+| `medium` | Balanced cost/quality | See `sp edit --list-presets` / `config/presets.json` |
+| `power` | Maximum capability | See `sp edit --list-presets` / `config/presets.json` |
 
 ```bash
 # List available presets
@@ -819,10 +819,10 @@ specialists edit --all --preset cheap --dry-run
 specialists edit executor --get specialist.execution.model
 
 # Set single field
-specialists edit executor specialist.execution.model anthropic/claude-opus-4-6
+specialists edit executor specialist.execution.model openai-codex/gpt-5.5
 
 # Legacy alias (compat)
-specialists edit executor --model anthropic/claude-opus-4-6
+specialists edit executor --model openai-codex/gpt-5.5
 
 # Apply preset
 specialists edit reviewer --preset power
@@ -850,7 +850,7 @@ specialists edit executor --set specialist.execution.timeout_ms 300000 --dry-run
 - Specialist configs are **JSON format** (`.specialist.json`).
 - Ownership model for edits:
   - package source in `config/specialists/` is upstream fallback, not repo customization surface
-  - `.specialists/default/` is managed mirror; do not hand-edit
+  - `.specialists/default/` is optional pin / compatibility snapshot state; do not hand-edit; prune stale entries with `sp prune-stale-defaults`
   - `.specialists/user/` is repo customization/fork layer
 - `--fork-from` supports both same-name override and new-name fork into `.specialists/user/`.
 - All dot-paths must start with `specialist.` (auto-prefixed if omitted).
@@ -947,7 +947,7 @@ specialists init [--sync-defaults] [--sync-skills] [--no-xtrm-check]
 
 ```bash
 specialists init                  # full bootstrap
-specialists init --sync-defaults  # compatibility snapshot only when deliberately needed
+specialists init --sync-defaults  # deprecated compatibility snapshot only when deliberately needed
 specialists init --sync-skills    # skill-only refresh path
 ```
 
@@ -966,9 +966,11 @@ What it sets up (always):
 - `.xtrm/hooks/specialists` + `.claude/hooks` symlinks + `.claude/settings.json` hook wiring
 - `.xtrm/skills/default`, `.xtrm/skills/active`, `.claude/skills` symlink, `.pi/skills` symlink
 
-With `--sync-defaults` only:
-- refresh `.specialists/default/` managed mirror for specialists, mandatory-rules, nodes
+With `--sync-defaults` only (deprecated compatibility path):
+- populate or refresh `.specialists/default/` snapshots for specialists, mandatory-rules, nodes
 - migrate legacy nested default layout (`default/specialists/*.specialist.json` -> `default/*.specialist.json`)
+
+Prefer `sp doctor --check-drift` and `sp prune-stale-defaults` for current package-canonical installs.
 
 ---
 

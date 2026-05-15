@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Refreshed README and high-traffic docs for v3.14-v3.15 release drift: first-time install/update flow, package-canonical defaults, current specialist catalog, xtrm-tools relationship, service examples, and stale doc links (`unitAI-xvvqb`).
+
 ## [v3.15.2] — 2026-05-14
 
 ### Fixed

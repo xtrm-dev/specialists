@@ -2,8 +2,9 @@
 title: Installation and Distribution
 scope: installation
 category: guide
-version: 1.0.0
-updated: 2026-05-05
+version: 1.0.1
+updated: 2026-05-15
+synced_at: b92a11ba
 description: Canonical-from-package install model, user overlays, and managed xtrm assets.
 source_of_truth_for:
   - package.json

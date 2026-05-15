@@ -2,9 +2,9 @@
 title: Specialist Authoring
 scope: authoring
 category: guide
-version: 1.9.0
-updated: 2026-04-29
-synced_at: c21f3214
+version: 1.9.1
+updated: 2026-05-15
+synced_at: b92a11ba
 description: How to write, validate, place, and maintain specialist definition files.
 source_of_truth_for:
   - ".xtrm/skills/active/pi/specialists-creator/SKILL.md"
@@ -41,7 +41,7 @@ This guide is the user-facing reference for authoring `.specialist.json` files. 
       "category": "workflow"
     },
     "execution": {
-      "model": "anthropic/claude-sonnet-4-6",
+      "model": "openai-codex/gpt-5.4-mini",
       "permission_required": "READ_ONLY"
     },
     "prompt": {

@@ -2,9 +2,9 @@
 title: Specialists Bootstrap
 scope: bootstrap
 category: guide
-version: 1.5.0
-updated: 2026-04-29
-synced_at: 4e7a6b4a
+version: 1.6.0
+updated: 2026-05-15
+synced_at: b92a11ba
 description: Project bootstrap and installation flow for Specialists.
 source_of_truth_for:
   - "src/cli/init.ts"
@@ -70,23 +70,23 @@ What it does (always safe, idempotent):
 8. installs canonical skills into `.xtrm/skills/default/`, verifies `.xtrm/skills/active/` symlinks, and ensures `.claude/skills` + `.pi/skills` root symlinks
 9. runs full FTS memory cache sync from `bd memories` (non-fatal if unavailable)
 
-## Sync canonical specialists (human-only)
+## Package-canonical defaults and drift repair
 
-To copy the canonical specialist JSON files to `.specialists/default/`, pass `--sync-defaults`. This is a **human-only** operation — it writes files that your team manages and commits.
+Current installs resolve Category A runtime assets from the installed package by default. New repositories do **not** need a committed `.specialists/default/` mirror.
+
+Use `.specialists/default/` only for intentional pins or compatibility snapshots. `sp init --sync-defaults` still exists, but it is deprecated because it creates repo-local snapshots that drift from package-canonical assets.
+
+Preferred drift workflow:
 
 ```bash
-specialists init --sync-defaults
+sp doctor --check-drift
+sp prune-stale-defaults --dry-run
+sp prune-stale-defaults
 ```
 
-Additional steps performed:
+Use `--keep-diverged` only when you intentionally want to preserve a diverged default snapshot. Put normal customizations in `.specialists/user/` instead.
 
-- refreshes canonical mirrors into `.specialists/default/`:
-  - specialists (`*.specialist.json`)
-  - mandatory-rules (`mandatory-rules/*`)
-  - nodes (`nodes/*.node.json`)
-- migrates legacy nested specialist layouts (`default/specialists/*.specialist.json`) into flat `default/*.specialist.json`
-
-> **Do not run `--sync-defaults` from automated agents.** `specialists init` (plain or with flags) is human-only — agents must not invoke it. MCP wiring requires an interactive bootstrap performed by a human.
+> **Human-only.** `specialists init` remains an interactive bootstrap command. Agents should not invoke plain `sp init` or compatibility flags from scripts/hooks.
 
 ## Directory structure
 
@@ -119,10 +119,10 @@ Add custom specialists to `.specialists/user/`.
 
 ## Managed mirror guidance
 
-- Treat `.specialists/default/` as generated mirror state.
+- Treat `.specialists/default/` as optional pin/compatibility state, not the normal install source.
 - Do not hand-edit files under `.specialists/default/`.
 - For custom behavior use `.specialists/user/` (specialists) or `config/nodes/` (nodes).
-- Reconcile drift with `specialists init --sync-defaults`.
+- Reconcile drift with `sp doctor --check-drift` and `sp prune-stale-defaults`; use `--keep-diverged` only for intentional pins.
 
 ## Explicit non-goal
 

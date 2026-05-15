@@ -2,9 +2,9 @@
 title: Feature Guides
 scope: runtime-features
 category: guide
-version: 2.4.2
-updated: 2026-04-29
-synced_at: b1493c9a
+version: 2.4.3
+updated: 2026-05-15
+synced_at: b92a11ba
 description: Practical guides for structured output, job observation, bead-linked runs, keep-alive resume, worktree isolation, stuck detection, waiting state observability, auto gitnexus sync, specialist authoring, config presets, JSON-first configuration, context denormalization, and job lineage tracking.
 source_of_truth_for:
   - "src/cli/run.ts"
@@ -435,7 +435,7 @@ Example with structured-friendly settings and stall controls (JSON format):
     },
     "execution": {
       "model": "openai-codex/gpt-5.3-codex",
-      "fallback_model": "anthropic/claude-sonnet-4-6",
+      "fallback_model": "google-gemini-cli/gemini-3.1-pro-preview",
       "timeout_ms": 0,
       "stall_timeout_ms": 120000,
       "response_format": "text",
@@ -479,9 +479,11 @@ Presets are defined in `config/presets.json`:
 
 | Preset | Model | Thinking | Stall Timeout | Use Case |
 |--------|-------|----------|---------------|----------|
-| `cheap` | `dashscope/qwen3.5-plus` | `off` | 60s | Exploration, simple tasks, quick lookups |
-| `medium` | `anthropic/claude-sonnet-4-6` | `low` | 120s | Balanced cost/quality — default for most tasks |
-| `power` | `openai-codex/gpt-5.4` | `high` | 300s | Complex implementation, deep reasoning |
+| `cheap` | see `sp edit --list-presets` | `off` | 60s | Exploration, simple tasks, quick lookups |
+| `medium` | see `sp edit --list-presets` | `low` | 120s | Balanced cost/quality — default for most tasks |
+| `power` | see `sp edit --list-presets` | `high` | 300s | Complex implementation, deep reasoning |
+
+Preset model values are operational defaults and may change between releases; inspect the live package with `sp edit --list-presets` or `config/presets.json`.
 
 ### Usage
 
@@ -534,7 +536,7 @@ YAML configs remain functional but are deprecated. To migrate:
 
 ```bash
 # YAML (deprecated)
-config/specialists/executor.specialist.yaml
+config/specialists/executor.specialist.json
 
 # JSON (preferred)
 config/specialists/executor.specialist.json

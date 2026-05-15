@@ -2,9 +2,9 @@
 title: Specialists Service
 scope: specialists-service
 category: architecture
-version: 3.1.0
-updated: 2026-05-06
-synced_at: a0e54d0c
+version: 3.1.1
+updated: 2026-05-15
+synced_at: b92a11ba
 description: Human SSOT for sp serve, sp script, script-class authoring, trust/readiness/hot-reload, and image release.
 source_of_truth_for:
   - src/cli/script.ts
@@ -339,7 +339,7 @@ docker build -t specialists-service:local .
 - old Python/qwen implementation details dropped
 - old YAML-first wording dropped
 
-### From `docs/release-image.md`
+### From retired image-release notes
 
 - build / push intent folded into image release runbook
 - current publish state recorded as deferred

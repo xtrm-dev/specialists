@@ -2,9 +2,9 @@
 title: MCP Servers Configuration
 scope: mcp-servers
 category: reference
-version: 1.3.0
-updated: 2026-04-29
-synced_at: f52d3674
+version: 1.3.1
+updated: 2026-05-15
+synced_at: b92a11ba
 description: Project-scoped MCP registration for Specialists.
 source_of_truth_for:
   - ".mcp.json"
@@ -60,9 +60,9 @@ Typical entry:
 ## Verification
 
 ```bash
-specialists init
+# `sp init` is human-only and writes project `.mcp.json` during bootstrap.
 claude mcp get specialists
-specialists doctor
+sp doctor
 ```
 
 You should see Specialists registered at **Project config** scope.

@@ -2,11 +2,12 @@
 title: Tool Manifest and Permissions
 scope: manifest
 category: reference
-version: 1.0.0
-updated: 2026-05-03
-synced_at: 3bd799f4
+version: 1.0.1
+updated: 2026-05-15
+synced_at: b92a11ba
 description: Manifest-driven tool catalog, permission tiers, and per-specialist permissions[TIER] override blocks.
 source_of_truth_for:
+  - "config/catalog/*.json"
   - ".specialists/catalog/*.json"
   - "src/specialist/manifest-resolver.ts"
   - "src/specialist/resolution-diagnostics.ts"
@@ -29,7 +30,7 @@ When a specialist is dispatched, `PiAgentSession.start()` produces a comma-joine
 
 1. The specialist's coarse tier from `execution.permission_required` (`READ_ONLY` | `LOW` | `MEDIUM` | `HIGH`).
 2. The specialist's optional `permissions[<TIER>]` override block.
-3. The catalog index in `.specialists/catalog/index.json`, plus the live health probe of the `pi-gitnexus` and `pi-serena-tools` npm extensions.
+3. The catalog index resolved from `.specialists/catalog/index.json` when a local override exists, otherwise package-canonical `config/catalog/index.json`, plus the live health probe of the `pi-gitnexus` and `pi-serena-tools` npm extensions.
 
 The resolver is the only path. There is no env-flag fallback. There are no hardcoded tool arrays in source.
 
@@ -38,7 +39,7 @@ Catalog files are Category A assets in the distribution model: the runtime resol
 
 ## Catalog architecture
 
-`.specialists/catalog/index.json` declares the precedence order and inlines per-catalog tier policies:
+The resolved catalog `index.json` declares the precedence order and inlines per-catalog tier policies. Package installs read `config/catalog/index.json`; `.specialists/catalog/index.json` is an intentional local override when present:
 
 ```json
 {

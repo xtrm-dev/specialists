@@ -2,9 +2,9 @@
 title: Background Jobs
 scope: background-jobs
 category: guide
-version: 1.6.0
-updated: 2026-04-29
-synced_at: 4395795d
+version: 1.6.1
+updated: 2026-05-15
+synced_at: b92a11ba
 description: Supervisor-backed job model, keep-alive semantics, and monitoring commands.
 source_of_truth_for:
   - "src/cli/run.ts"
@@ -68,10 +68,15 @@ Run-time precedence:
 ## Observe progress
 
 ```bash
-specialists feed 49adda --follow
-specialists feed -f
-specialists ps 49adda --json
+sp ps                         # actionable dashboard
+sp ps -f                      # TTY in-place dashboard; pipes append ANSI-free snapshots
+sp feed 49adda --follow       # per-job follow, including future resume turns
+sp feed -f                    # global follow; keep-alive waiting jobs are terminal-equivalent unless --forever
+sp feed 49adda                # full DB-backed event replay for that job
+sp ps 49adda --json
 ```
+
+Snapshot `sp feed <job-id>` reads the full DB event history for that job. Legacy file mirrors, when enabled, are recovery surfaces rather than the normal source of truth.
 
 ## Read final output
 

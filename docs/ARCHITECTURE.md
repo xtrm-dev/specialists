@@ -2,9 +2,9 @@
 title: Specialists Runtime Architecture
 scope: architecture
 category: reference
-version: 3.4.0
-updated: 2026-04-29
-synced_at: c0624e85
+version: 3.4.1
+updated: 2026-05-15
+synced_at: b92a11ba
 description: Event pipeline, Pi RPC adapter boundaries, Supervisor lifecycle ownership, schema v1→v4 migration chain, JSON-first dual-write persistence, node runtime tables, context window tracking, job lineage fields, context denormalization, sp ps CLI surface, worktree/bead ownership semantics, and worktree write-boundary enforcement via generated Pi extensions.
 source_of_truth_for:
   - "src/specialist/job-root.ts"
@@ -1116,7 +1116,7 @@ If no `--bead` or `--epic` provided, `detectCurrentBeadIdFromWorkspace()`:
 | Component | Path | Responsibility |
 |-----------|------|----------------|
 | Protocol | `pi/rpc/` | JSONL framing, RPC types, client semantics |
-| Protocol docs | `docs/pi-rpc.md` | Human-readable protocol notes |
+| Protocol boundary docs | `docs/pi-rpc-boundary.md` | Ownership boundary between pi RPC protocol and Specialists adaptation |
 | RPC adapter | `src/pi/session.ts` | Spawns Pi, parses NDJSON, correlates requests |
 | Job registry | `src/specialist/job-root.ts` | Git-common-root-anchored jobs dir |
 | Worktree isolation | `src/specialist/worktree.ts` | Provisioning, branch naming, reuse detection |

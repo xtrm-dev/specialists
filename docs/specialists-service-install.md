@@ -2,9 +2,9 @@
 title: Specialists Service Install
 scope: specialists-service-install
 category: deployment
-version: 2.1.0
-updated: 2026-05-07
-synced_at: a0e54d0c
+version: 2.1.1
+updated: 2026-05-15
+synced_at: b92a11ba
 description: Install runbook for consumers who do not clone specialists source. Deployment steps, trust/readiness gates, hot-reload, common pitfalls.
 source_of_truth_for:
   - Dockerfile
@@ -63,7 +63,7 @@ Create one script-class specialist in `.specialists/user/hello.specialist.json`.
     },
     "execution": {
       "mode": "auto",
-      "model": "anthropic/claude-haiku-4-5",
+      "model": "openai-codex/gpt-5.4-mini",
       "timeout_ms": 30000,
       "interactive": false,
       "response_format": "json",
@@ -147,7 +147,7 @@ Expected shape:
   "parsed_json": { "greeting": "..." },
   "meta": {
     "specialist": "hello",
-    "model": "anthropic/claude-3.5-sonnet",
+    "model": "openai-codex/gpt-5.4-mini",
     "duration_ms": 1234,
     "trace_id": "..."
   }

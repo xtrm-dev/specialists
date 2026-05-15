@@ -1305,3 +1305,11 @@
 
 - `src/index.ts` / `src/cli/help.ts` — expanded `sp ps --help` and `sp clean --help` for actionable dashboard, `--active`, `--include-terminal`, `--include-cleaned`, `--health`, and `sp clean --ps` soft-clean semantics.
 - `config/skills/using-specialists-v3/SKILL.md` — documents final `sp ps` / `sp clean --ps` operational model for orchestration cleanup and monitoring.
+> Manual update: 2026-05-14T18:52:00Z — unitAI-fqo38 hardened `sp ps -f` follow rendering in `src/cli/ps.ts` and rebuilt `dist/index.js`.
+
+
+## Manual session note — 2026-05-15 unitAI-xvvqb
+
+- `README.md` — refreshed first-time user overview, install/update commands, specialist workflow, service surface, docs index, and explicit xtrm-tools relationship.
+- `docs/` — reconciled v3.14-v3.15 release drift across bootstrap, catalog, skills, CLI/features, service install, MCP, worktree, pi/RPC, manifest, workflow, and background-jobs docs.
+- `CHANGELOG.md` — added `[Unreleased]` Changed entry for the documentation refresh.

@@ -2,13 +2,13 @@
 title: Worktree Integration
 scope: worktree
 category: guide
-version: 1.2.0
-updated: 2026-04-10
-synced_at: zz22-docs
+version: 1.2.1
+updated: 2026-05-15
+synced_at: b92a11ba
 description: xtrm worktree usage alongside Specialists.
 source_of_truth_for:
   - "src/cli/help.ts"
-  - "specialists/xt-merge.specialist.yaml"
+  - "config/specialists/xt-merge.specialist.json"
 domain:
   - worktrees
   - xtrm
