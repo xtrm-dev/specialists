@@ -10,6 +10,7 @@
 > Manual update: 2026-05-15T01:12:00Z — unitAI-k9ba7 pinned safe Python dependency lower bounds in requirements.txt for OSV action parity.
 > Manual update: 2026-05-15T01:29:00Z — unitAI-agdgr fixed Docker image builds by copying config and asset-contract generator into builder context.
 > Manual update: 2026-05-15T01:35:00Z — unitAI-fxnei triaged npm Dependabot PRs and identified Zod 4 / TypeScript 6 migrations.
+> Manual update: 2026-05-15T09:18:00Z — unitAI-3kt0b fixed release-gate dispatch payload keys and refreshed XTRM_TOOLS_DISPATCH_PAT; xtrm-tools repository_dispatch validation succeeded.
 
 ## ./
 
