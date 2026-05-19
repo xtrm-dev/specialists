@@ -46,28 +46,6 @@ export function getSessionClaim(sessionId, cwd) {
 }
 
 /**
- * Check for a bead-based claim set by specialist runner.
- * Used as a fallback when session-scoped claim (claimed:<sessionId>) is not available.
- * Returns: issue ID string if claimed, '' if not set, null if bd kv unavailable.
- */
-export function getBeadClaim(cwd) {
-  try {
-    const listOutput = execSync('bd kv list', {
-      encoding: 'utf8',
-      cwd,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 5000,
-    });
-    const match = listOutput.match(/bead-claim:([A-Za-z0-9-]+)\s*=\s*(.+)/);
-    if (match) return match[1];
-    return '';
-  } catch (err) {
-    if (err.status === 1) return '';
-    return null;
-  }
-}
-
-/**
  * Parse work counts from a bd list output string.
  * Reads the "Total: N issues (X open, Y in progress)" summary line.
  * Returns { open, inProgress } or null if the line is absent.
@@ -116,47 +94,6 @@ export function isIssueInProgress(issueId, cwd) {
   } catch {
     return false;
   }
-}
-
-/**
- * Return true when bead is linked to reviewer specialist job.
- * Used by commit gate to avoid blocking operator commits on reviewer auto-claims.
- */
-function getKvValue(key, cwd) {
-  try {
-    return execSync(`bd kv get "${key}"`, {
-      encoding: 'utf8',
-      cwd,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 5000,
-    }).trim();
-  } catch (err) {
-    if (err.status === 1) return '';
-    return null;
-  }
-}
-
-export function clearReviewerClaimOwnerIfInactive(issueId, cwd) {
-  if (!issueId) return;
-  const owner = getKvValue(`claim-owner:${issueId}`, cwd);
-  if (!owner || !owner.startsWith('reviewer:')) return;
-  if (isIssueInProgress(issueId, cwd)) return;
-  try {
-    execSync(`bd kv clear "claim-owner:${issueId}"`, {
-      encoding: 'utf8',
-      cwd,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 5000,
-    });
-  } catch {
-    // non-fatal
-  }
-}
-
-export function isReviewerClaimExempt(issueId, cwd) {
-  if (!issueId) return false;
-  const explicitOwner = getKvValue(`claim-owner:${issueId}`, cwd);
-  return typeof explicitOwner === 'string' && explicitOwner.startsWith('reviewer:');
 }
 
 /**

@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 // beads-memory-gate — Claude Code Stop hook
-// At session end, checks if this session closed a bead.
+// At session end, checks if the session's claimed issue was closed.
 // If so, hard-blocks until the agent persists insights via `bd remember`.
-// Contract: Stop hook only; bd close itself never blocks.
 // Self-contained: queries claim kv + bd show directly (no PostToolUse dependency).
 // Exit 0: allow stop  |  Exit 2: block stop (stderr shown to Claude)
 //
@@ -34,10 +33,8 @@ try {
 } catch { /* key not set → not done */ }
 
 if (memoryGateDone) {
-  // Clean up session markers EXCEPT memory-gate-done (must persist as sentinel
-  // to prevent re-triggering — claimed:<sessionId> or branch inference can
-  // re-discover the issue ID after cleanup, causing an infinite loop).
-  for (const key of [`claimed:${sessionId}`, `closed-this-session:${sessionId}`]) {
+  // Clean up all session markers
+  for (const key of [`memory-gate-done:${sessionId}`, `claimed:${sessionId}`, `closed-this-session:${sessionId}`]) {
     try { execSync(`bd kv clear "${key}"`, { cwd, stdio: ['pipe', 'pipe', 'pipe'], timeout: 5000 }); } catch { /* ignore */ }
   }
   clearSessionClaim(sessionId, cwd);
@@ -101,8 +98,7 @@ try {
   const issue = Array.isArray(parsed) ? parsed[0] : parsed;
   issueStatus = issue?.status;
 } catch {
-  // Fail open when bd unavailable; avoids trapping session on tracker outage.
-  process.exit(0);
+  process.exit(0); // fail open
 }
 
 if (issueStatus !== 'closed') process.exit(0);

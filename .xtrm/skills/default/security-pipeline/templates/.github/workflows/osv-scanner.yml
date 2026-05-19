@@ -24,7 +24,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run OSV-Scanner
-        uses: google/osv-scanner-action/osv-scanner-action@v2.3.8
+        uses: google/osv-scanner-action/osv-scanner-action@v2
         with:
           # Note: --skip-git was removed in v2.3+. Recursive scan walks the
           # working tree and respects .gitignore by default.

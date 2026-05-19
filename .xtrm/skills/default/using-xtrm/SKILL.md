@@ -39,6 +39,10 @@ Use these command surfaces when the task is operational rather than code-editing
 | Close a session report | update latest same-day `.xtrm/reports/<date>-*.md` | `session-close-report` prefers one same-day SSOT handoff; do not create duplicate reports unless asked. |
 
 
+### Worktree dependency setup
+
+`xt claude` / `xt pi` sessions use clean git worktrees. Git does not copy ignored dependency artifacts such as `node_modules/`, `.venv/`, build caches, or generated outputs. If a repo's lint/tests need those files, run the repo's normal bootstrap inside the worktree (`make bootstrap`, `just setup`, `npm ci`, `uv sync`, etc.). Do not track dependency directories to make worktrees pass.
+
 ---
 
 ## Trigger Patterns

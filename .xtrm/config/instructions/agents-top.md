@@ -18,7 +18,7 @@
 - Ask for confirmation only when actions are destructive, irreversible, or high-risk (e.g. `rm`, history rewrite, mass deletes, credential rotation, prod-impacting ops).
 - Prefer concise clarifying questions only when requirements are genuinely ambiguous.
 
-## Active Gates (extensions enforce these — not optional)
+## Active Gates (hooks enforce these — not optional)
 
 | Gate | Trigger | Required action |
 |------|---------|-----------------|
@@ -144,5 +144,6 @@ bv --robot-insights | jq '.Cycles'               # Circular deps — must fix
 
 ## Worktree Sessions
 
+- `xt claude` — launch Claude Code in a sandboxed worktree
 - `xt pi` — launch Pi in a sandboxed worktree
 - `xt end` — close session: commit / push / PR / cleanup

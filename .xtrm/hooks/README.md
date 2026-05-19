@@ -26,16 +26,8 @@ The beads gate hooks integrate the `bd` (beads) issue tracker directly into Clau
 - **`beads-edit-gate.mjs`** (PreToolUse) — Blocks writes/edits without an active issue claim.
 - **`beads-commit-gate.mjs`** (PreToolUse) — Blocks commits with an unresolved session claim.
 - **`beads-stop-gate.mjs`** (Stop) — Blocks session stop while a claim remains open.
-- **`beads-memory-gate.mjs`** (Stop) — Blocks session stop after a successful `bd close` until memory handoff is acknowledged for resolved issue id.
-
-#### Reviewer owner-KV behavior
-- Reviewer auto-claim writes `claim-owner:<issueId>=reviewer:<sessionId>` only for verified live reviewer session.
-- Commit gate reviewer exemption requires exact owner KV match; `status.json` alone never bypasses gate.
-- Reviewer owner KV auto-clears when issue closes or when gate observes claim no longer `in_progress`.
-- Recovery when commit blocked:
-  - Inspect active claim: `bd kv get "claimed:<sessionId>"`
-  - If issue truly done: `bd close <issueId> --reason "..."`
-  - If stale reviewer owner KV after closure: `bd kv clear "claim-owner:<issueId>"`
+- **`beads-close-memory-gate.mjs`** (PreToolUse) — Blocks `bd close` until memory handoff is acknowledged per issue.
+- **`beads-memory-gate.mjs`** (Stop) — Fallback reminder if close-time memory acknowledgment is missing.
 
 ### Compaction & State Preservation (v2.1.18+)
 - **`beads-pre-compact.mjs`** (PreCompact) — Saves the currently `in_progress` beads state before Claude clears context.

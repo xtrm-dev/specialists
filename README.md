@@ -121,6 +121,18 @@ Specialists uses two distribution tracks:
 
 `.specialists/user/` is your customization layer. `.specialists/default/` is now only for intentional pins or compatibility snapshots; stale default files are drift debt and `sp prune-stale-defaults` removes them by default. `sp init --sync-defaults` remains as a compatibility path, but it is deprecated because it creates repo-local snapshots that can drift from the package-canonical source.
 
+For an interactive, agent-guided update flow that runs both tracks, diagnoses drift, and asks before applying destructive changes, invoke the `/update-specialists` skill in Claude Code instead of running the raw commands manually.
+
+## Operator skills
+
+These skills load into your Claude Code session on demand and guide the most common operator workflows:
+
+| Skill | Invoke | When to use |
+|---|---|---|
+| `using-specialists-v3` | `/using-specialists-v3` | **Canonical orchestration guide.** Use for any substantial delegated work: implementation, debugging, review, planning, security audit, doc sync, multi-chain epics. Covers bead contracts, role selection, chain lifecycle, merge path, and escalation. |
+| `using-specialists-auto` | `/using-specialists-auto` | **Autonomous / offline mode.** Activates when you hand over a multi-item list and step away ("auto mode", "run the list"). Layers pacing discipline and escalation triggers on top of `using-specialists-v3`. |
+| `update-specialists` | `/update-specialists` | **Guided drift repair.** Runs both Category A and Category B diagnostics, presents a combined plan, and asks before applying anything. Prefer this over running raw `sp`/`xt` commands directly. |
+
 ## Core tracked workflow
 
 ```bash
@@ -193,7 +205,10 @@ curl -sS http://localhost:8000/v1/generate \
 | Tool catalog and permission resolver | [docs/manifest.md](docs/manifest.md) |
 | MCP registration and tool surface | [docs/mcp-servers.md](docs/mcp-servers.md), [docs/mcp-tools.md](docs/mcp-tools.md) |
 | Hooks | [docs/hooks.md](docs/hooks.md) |
-| Skills | [docs/skills.md](docs/skills.md) |
+| Skills and operator skill reference | [docs/skills.md](docs/skills.md) |
+| Orchestration skill (`using-specialists-v3`) | [docs/skills.md#using-specialists-v3](docs/skills.md#using-specialists-v3) |
+| Auto mode skill (`using-specialists-auto`) | [docs/skills.md#using-specialists-auto](docs/skills.md#using-specialists-auto) |
+| Update / drift repair skill (`update-specialists`) | [docs/skills.md#update-specialists](docs/skills.md#update-specialists) |
 | Worktrees and session close | [docs/worktrees.md](docs/worktrees.md), [docs/worktree.md](docs/worktree.md) |
 | Runtime architecture | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | Pi subprocess isolation / RPC boundary | [docs/pi-session.md](docs/pi-session.md), [docs/pi-rpc-boundary.md](docs/pi-rpc-boundary.md) |
