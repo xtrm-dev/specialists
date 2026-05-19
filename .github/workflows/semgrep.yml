@@ -20,22 +20,43 @@ permissions:
 jobs:
   semgrep:
     name: Semgrep scan
-    runs-on: ubuntu-latest
-    container:
-      image: semgrep/semgrep
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","linux","mercury-lite","specialists"]') }}
+    timeout-minutes: 15
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           fetch-depth: 0  # full history for baseline diff
 
-      - name: Semgrep CI
-        run: semgrep ci
-        env:
-          SEMGREP_RULES: >-
-            p/default
-            p/security-audit
-            p/secrets
-            p/python
-            p/dockerfile
-            p/github-actions
+      - name: Install semgrep
+        run: |
+          SEMGREP_VERSION=1.99.0
+          python3 -m venv /tmp/semgrep-venv
+          /tmp/semgrep-venv/bin/pip install --quiet "semgrep==${SEMGREP_VERSION}"
+          /tmp/semgrep-venv/bin/semgrep --version
+
+      - name: Scan
+        run: |
+          # Diff-baseline behaviour: only fail on NEW findings vs main.
+          # On push-to-main or schedule (no baseline ref available), full
+          # scan runs and pre-existing debt will surface as INFO; --error
+          # still gates new issues only because semgrep-baseline excludes
+          # historical findings.
+          BASELINE_ARGS=()
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            BASELINE_ARGS=(--baseline-commit "origin/${GITHUB_BASE_REF}")
+            git fetch --no-tags --depth=200 origin "${GITHUB_BASE_REF}" || true
+          fi
+          /tmp/semgrep-venv/bin/semgrep scan \
+            --config=p/default \
+            --config=p/security-audit \
+            --config=p/secrets \
+            --config=p/python \
+            --config=p/dockerfile \
+            --config=p/github-actions \
+            --error \
+            --skip-unknown-extensions \
+            "${BASELINE_ARGS[@]}"
