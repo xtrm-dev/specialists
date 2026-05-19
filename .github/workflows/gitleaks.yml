@@ -1,14 +1,14 @@
 name: Gitleaks
 
-# Backstop scan for committed secrets (full history on push to the default
-# branch, diff on PRs). GitHub push protection is the primary gate; this
-# catches anything pre-existing or pushed from a client without push protection.
+# Backstop scan for committed secrets (full history on push to main, diff on PRs).
+# GitHub push protection is the primary gate; this catches anything pre-existing
+# or pushed from a client without push protection enabled.
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   pull_request:
-    branches: [main, master]
+    branches: [main]
   schedule:
     - cron: "0 6 * * 1"  # Monday 06:00 UTC weekly
 
@@ -19,15 +19,25 @@ permissions:
 jobs:
   gitleaks:
     name: Gitleaks scan
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","linux","mercury-lite","specialists"]') }}
+    timeout-minutes: 15
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           fetch-depth: 0  # full history for scheduled deep scans
 
-      - name: Gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # GITLEAKS_LICENSE only required for org accounts; private user repos run free.
+      - name: Install gitleaks
+        run: |
+          GITLEAKS_VERSION=v8.30.1
+          curl -sSL -o /tmp/gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION#v}_linux_x64.tar.gz"
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          sudo install /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      - name: Scan
+        run: gitleaks dir --redact --config .gitleaks.toml --no-banner --verbose .
