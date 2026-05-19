@@ -18,16 +18,23 @@ permissions:
 jobs:
   scan:
     name: OSV scan
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","linux","mercury-lite","specialists"]') }}
+    timeout-minutes: 15
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
 
-      - name: Run OSV-Scanner
-        uses: google/osv-scanner-action/osv-scanner-action@v2.3.8
-        with:
-          # Note: --skip-git was removed in v2.3+. Recursive scan walks the
-          # working tree and respects .gitignore by default.
-          scan-args: |-
-            --recursive
-            ./
+      - name: Install osv-scanner
+        run: |
+          OSV_VERSION=v2.3.8
+          curl -sSL -o /tmp/osv-scanner \
+            "https://github.com/google/osv-scanner/releases/download/${OSV_VERSION}/osv-scanner_linux_amd64"
+          chmod +x /tmp/osv-scanner
+          sudo install /tmp/osv-scanner /usr/local/bin/osv-scanner
+          osv-scanner --version
+
+      - name: Scan
+        run: osv-scanner scan source --recursive .
