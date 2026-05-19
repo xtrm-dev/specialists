@@ -180,3 +180,7 @@
 
 - 2026-05-15T09:18:00Z: unitAI-3kt0b fixed specialists release-gate dispatch: XTRM_TOOLS_DISPATCH_PAT was refreshed with the broad repo-scoped gh token, payload keys now match xtrm-tools (`specialists_sha`, `specialists_tag`, `specialists_package_version`), and a direct repository_dispatch to xtrm-tools succeeded.
 - 2026-05-15T18:39:00Z: unitAI-ashu1 updated canonical using-specialists-v3 skill guidance: specialist worktrees are clean git checkouts, missing validation tools should be handled via the repo standard bootstrap, and dependency artifacts must not be tracked.
+
+- 2026-05-18T00:00:00Z: unitAI-ylphl.8 updated canonical `using-specialists-v3` relationship guidance to use the full `bd dep --type` vocabulary, dedicated duplicate/supersede commands, and cycle checks; examples now weave `discovered-from`, `caused-by`, `validates`, `relates-to`, and `supersede` into existing single-chain, epic, conflict-cluster, test-failure-map, rebuttal, integration, and debugger-restitch flows.
+
+- 2026-05-18T00:00:00Z: unitAI-ylphl was reframed from a prose workflow catalog into an executable `sp workflows` router epic. Existing children now define registry entries; added CLI/registry implementation plus test-generation and security-audit workflow entries. Entry beads depend on relationship vocabulary unitAI-ylphl.8; CLI implementation depends on completed entries.

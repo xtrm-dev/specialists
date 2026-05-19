@@ -29,6 +29,11 @@
 
 <!-- Significant technical decisions with rationale. Why X was chosen over Y. -->
 
+- [2026-05-18] Workflow catalog epic `unitAI-ylphl` should ship as an executable `sp workflows` CLI/router backed by a data registry, with docs/skills consuming that registry instead of becoming the source of truth.
+
+## User Corrections — 2026-05-18
+- For `using-specialists-v3` relationship vocabulary updates, do not only add a standalone mapping table; read the full skill first and weave the right relationship commands into the existing worked examples and flows.
+
 ## User Corrections — 2026-05-15
 - README should preserve the beginning Vision framing and direct `specialists.scheme.md` link; include an inline scheme/diagram so first-time readers immediately see the system shape.
 

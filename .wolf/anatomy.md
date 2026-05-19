@@ -1346,3 +1346,13 @@
 - `README.md` — refreshed first-time user overview, install/update commands, specialist workflow, service surface, docs index, and explicit xtrm-tools relationship.
 - `docs/` — reconciled v3.14-v3.15 release drift across bootstrap, catalog, skills, CLI/features, service install, MCP, worktree, pi/RPC, manifest, workflow, and background-jobs docs.
 - `CHANGELOG.md` — added `[Unreleased]` Changed entry for the documentation refresh.
+
+## Manual session note — 2026-05-18 unitAI-ylphl.8
+
+- `config/skills/using-specialists-v3/SKILL.md` — relationship vocabulary expanded to v3.4 with typed bd dependency scenarios, duplicate/supersede commands, cycle checks before epic merge, and existing workflow examples updated to use `discovered-from`, `caused-by`, `validates`, `relates-to`, and `supersede` in context.
+- `.wolf/cerebrum.md` / `.wolf/memory.md` — captured operator correction and session memory for weaving relationship guidance into examples instead of only adding a standalone table.
+
+## Manual session note — 2026-05-18 unitAI-ylphl workflow-router decision
+
+- Beads `unitAI-ylphl`, `.1`-`.7`, `.9`-`.11` — epic reframed around `sp workflows` CLI/router; children define workflow registry entries and implementation work, with dependency edges from relationship vocabulary to entries and entries to CLI implementation.
+- `.wolf/cerebrum.md` / `.wolf/memory.md` — recorded the workflow-router decision for future sessions.

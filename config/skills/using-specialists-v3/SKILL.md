@@ -7,7 +7,7 @@ description: >
   security checks, multi-step chains, integration-phase reconciliation,
   debugger-restitch on conflicting chains, pre-dispatch conflict-cluster
   mapping, test-failure-map epics, and questions about specialist workflow.
-version: 3.3
+version: 3.4
 ---
 
 # Using Specialists v3
@@ -279,24 +279,75 @@ Fix three bad smells fast:
 
 What differs: orchestrator writes contract before dispatch, so specialist does less guessing and more useful work.
 
-## Dependency Linking
+## Dependency Linking And Relationship Vocabulary
 
-Link beads with correct edge shape. The edge tells orchestrator what blocks what, what is only related, and what should auto-nest.
+Link beads with correct edge shape. The edge tells orchestrator what blocks execution, what only preserves context, which bead verifies another, and which issue has been replaced. Do not overload `blocks` for follow-ups, root-cause links, verification pairs, duplicates, or restitch replacements.
 
-- `bd dep add <issue> <depends-on>`: issue depends on depends-on; depends-on blocks issue. Use this for hard sequencing. [source: bd dep --help]
-- `bd dep <blocker> --blocks <blocked>`: reverse phrasing of same edge; blocker-first reads better when thinking in blockers. [source: bd dep --help; CLAUDE.md lines 62-64]
-- `bd dep relate <a> <b>`: non-blocking `relates_to` link. Use for context, not order. [source: bd dep --help; CLAUDE.md lines 64, 200-204]
-- `bd create --parent <epic-id>`: epic-child edge; auto-names child `.1`, `.2`, … and adds parent edge. Use for chain members that must live under epic. [source: CLAUDE.md lines 49-50, 154-156; bd create --help]
-- `bd create --deps discovered-from:<id>`: follow-up work discovered from source bead. Use when one bead reveals new tracked work. [source: CLAUDE.md lines 50, 62-65; bd create --help]
+Core commands:
+
+- `bd dep add <issue> <depends-on>`: issue depends on depends-on; depends-on blocks issue. Default type is `blocks`. Use only for hard sequencing. [source: bd dep add --help]
+- `bd dep <blocker> --blocks <blocked>`: reverse phrasing of the same hard sequencing edge. [source: bd dep --help]
+- `bd dep add <issue> <other> --type <type>`: store a typed relationship. Supported types: `blocks`, `tracks`, `related`, `parent-child`, `discovered-from`, `until`, `caused-by`, `validates`, `relates-to`, `supersedes`. [source: bd dep add --help]
+- `bd dep relate <a> <b>` / `bd dep unrelate <a> <b>`: bidirectional non-blocking `relates_to` link. Use for context, not order. [source: bd dep --help]
+- `bd create --parent <epic-id>`: epic-child edge; auto-names child `.1`, `.2`, … and adds parent ownership. Use for chain members that must live under an epic. [source: bd create --help]
+- `bd create --deps discovered-from:<id>` or `bd dep add <new> <source> --type discovered-from`: follow-up work discovered from a source bead.
+- `bd duplicate <new> --of <canonical>`: close duplicate issue and point at canonical. Use when two beads describe the same required work.
+- `bd duplicates` / `bd find-duplicates --status open --method ai --json`: find exact or semantic duplicates before dispatching parallel chains.
+- `bd supersede <old> --with <new>` or `bd dep add <new> <old> --type supersedes`: mark a replacement when a better-scoped fix bead replaces an obsolete/abandoned one.
+- `bd dep cycles`, `bd dep tree <id>`, and `bd graph <id>`: sanity-check the execution graph before merge/publication.
+
+Relationship vocabulary for specialist chains:
+
+| Relationship | Reach for it when | Example command |
+| --- | --- | --- |
+| `blocks` | Hard must-happen-before sequencing: planner before executor, implementation before reviewer, restitch before publish. | `bd dep add <impl> <plan> --type blocks` |
+| `tracks` | A local bead mirrors upstream or cross-project work whose status matters but is not owned here. | `bd dep add <local> external:xtrm-tools:<capability> --type tracks` |
+| `related` | Loose topical association when no direction or scheduling effect is intended. Prefer `bd dep relate` for bidirectional relation. | `bd dep add <a> <b> --type related` |
+| `parent-child` | Epic owns child chains. Prefer `bd create --parent <epic>` so IDs and parentage stay canonical. | `bd create --parent <epic> --title "Impl auth retry" ...` |
+| `discovered-from` | Reviewer, debugger, explorer, or test-runner surfaces new follow-up work from a run. | `bd dep add <follow-up> <reviewer-bead> --type discovered-from` |
+| `until` | Time-bounded or event-bounded precondition that blocks only until a stated condition lands. | `bd dep add <chain> <precondition> --type until` |
+| `caused-by` | Failure bead points to the root-cause bead/cluster that explains it. Makes test-failure-map epics navigable. | `bd dep add <failing-test> <root-cause> --type caused-by` |
+| `validates` | Reviewer, test-runner, code-sanity, or security-auditor bead verifies an implementation/debugger bead. | `bd dep add <review> <impl> --type validates` |
+| `relates-to` | Bidirectional context edge for conflict clusters, sibling designs, or rebuttal patterns. Prefer dedicated relate command. | `bd dep relate <chain-a> <chain-b>` |
+| `supersedes` | New fix/design/restitch bead replaces an older bead that should no longer be executed or merged. Prefer `bd supersede`. | `bd supersede <old> --with <new>` |
+
+Worked high-value patterns:
+
+```bash
+# Reviewer discovers a separate follow-up during review. Do not block the impl.
+bd create --title "Follow up: tighten retry metrics" --type task --priority 3 --description "..."
+bd dep add <follow-up> <review> --type discovered-from
+
+# Test-failure-map root cause: many failures point at one underlying issue.
+bd create --title "Root cause: stale fixture factory" --type bug --priority 2 --description "..."
+bd dep add <failing-test-bead> <root-cause> --type caused-by
+
+# Verification bead validates implementation. This is not a hard prerequisite edge.
+bd dep add <test-runner-bead> <impl> --type validates
+bd dep add <reviewer-bead> <impl> --type validates
+
+# Replacement bead supersedes an abandoned or wrongly scoped implementation.
+bd create --title "Restitch auth retry onto integration state" --type task --priority 2 --description "..."
+bd supersede <old-impl> --with <restitch>
+
+# Before merging an epic or integration branch, prove the graph is sane.
+bd dep cycles
+bd graph <epic> --compact
+```
 
 Use each form for a different reason:
 
-- `add` / `--blocks` for must-happen-before dependency.
-- `relate` for soft linkage with no schedule effect.
-- `--parent` for epic ownership and child naming.
-- `discovered-from:` for spawned follow-up beads.
+- `blocks` / `--blocks` for must-happen-before dependency only.
+- `validates` for review, test, sanity, and security evidence.
+- `discovered-from` for spawned follow-up beads.
+- `caused-by` for failure-to-root-cause attribution.
+- `relates-to` / `bd dep relate` for soft linkage with no schedule effect.
+- `parent-child` / `--parent` for epic ownership and child naming.
+- `supersedes` / `bd supersede` for replacement work; `duplicate` for same-work issues.
 
-What differs: orchestrator chooses edge type deliberately, so graph stays correct for chain execution, epic publish, and follow-up traceability.
+Cross-repo consistency: keep this vocabulary aligned with the xtrm-tools triaging skill and sibling triage bead `xtrm-drkk`; both should use the same relationship names when rewiring issue graphs.
+
+What differs: orchestrator chooses edge type deliberately, so graph stays correct for chain execution, epic publish, duplicate cleanup, root-cause navigation, verification evidence, and follow-up traceability.
 
 ## Bead Contract By Bead Type
 
@@ -537,11 +588,25 @@ Before dispatching N parallel chains, build the file-overlap matrix:
 
 For each cluster of overlapping chains, choose **one** of:
 
-1. **Serial dispatch** — execute chains in dependency order, each waits for previous to land. Slowest but cleanest.
-2. **Unified bead** — collapse all chains into one bead/executor pass. Larger reviewer scope but no merge conflicts.
-3. **Parallel dispatch + debugger restitch at integration** — dispatch in parallel, plan for ~40% conflict rate (empirical), budget debugger-restitch passes during integration.
+1. **Serial dispatch** — execute chains in dependency order, each waits for previous to land. Slowest but cleanest. Encode the order with `blocks`, not notes.
+2. **Unified bead** — collapse all chains into one bead/executor pass. Larger reviewer scope but no merge conflicts. Mark obsolete split beads with `bd supersede <old> --with <unified>`.
+3. **Parallel dispatch + debugger restitch at integration** — dispatch in parallel, plan for ~40% conflict rate (empirical), budget debugger-restitch passes during integration. Link overlapping siblings with `bd dep relate <chain-a> <chain-b>` so the future restitch has visible context without creating fake blockers.
 
-Default heuristic: if 3+ chains touch the same file, **serial-dispatch them**. Conflict-resolution time at integration usually exceeds the time saved by parallel dispatch.
+Example graph rewiring:
+
+```bash
+# soft conflict-cluster context; does not change schedule
+bd dep relate <chain-a> <chain-b>
+
+# serializing because both chains edit src/cli/update.ts
+bd dep add <chain-b> <chain-a> --type blocks
+
+# replacing scattered duplicate/split beads with one unified implementation
+bd supersede <old-chain-a> --with <unified-chain>
+bd supersede <old-chain-b> --with <unified-chain>
+```
+
+Default heuristic: if 3+ chains touch the same file, **serial-dispatch them**. Conflict-resolution time at integration usually exceeds the time saved by parallel dispatch. Run `bd find-duplicates --status open --method ai --json` before launching a large wave; merge or supersede duplicate work before specialists spend tokens on it.
 
 ## Pre-Epic: Test-Failure-Map Pattern
 
@@ -560,11 +625,17 @@ Use when:
    - `CONSTRAINTS:` READ_ONLY, no source/test edits, no fix attempts.
 3. **Dispatch test-runner / explorer / debugger** for this bead READ_ONLY (or fill inline by reading the log).
 4. **Build the cluster table**: cluster name | files (counts) | representative error | root-cause hypothesis | likely-owner area | targeted validation command. Save in bead notes.
-5. **Plan fix chains** off the cluster table:
+5. **Wire root-cause relationships** so the graph is navigable:
+   ```bash
+   bd dep add <failure-cluster-bead> <root-cause-bead> --type caused-by
+   bd dep add <test-runner-bead> <fix-bead> --type validates
+   ```
+   Use `caused-by` for attribution, not `blocks`; use `validates` for the evidence-producing test bead.
+6. **Plan fix chains** off the cluster table:
    - One chain per cluster, file scopes disjoint where possible.
    - Order by leverage (largest cluster first), then by simplicity.
    - Debugger when root cause unclear; executor when bead constraint is concrete.
-6. **Save the topology insight as `bd remember`** — patterns about where a codebase's test fragility concentrates are reusable.
+7. **Save the topology insight as `bd remember`** — patterns about where a codebase's test fragility concentrates are reusable.
 
 ### Why this beats dispatch-blind
 
@@ -587,26 +658,28 @@ bd update <task> --claim
 
 # 2. Optional discovery when path is unknown
 bd create --title "Explore auth refresh path" --type task --priority 2 --description "PROBLEM: token refresh retry path is undocumented and likely drifts on failure handling. SUCCESS: evidence-backed plan names exact files, symbols, and risk. SCOPE: src/auth/refresh.ts, src/cli/login.ts, tests/unit/auth/*.test.ts. NON_GOALS: no implementation, no broad audit. CONSTRAINTS: READ_ONLY, cite files/symbols/flows, stay within live repo evidence. VALIDATION: findings cite code path and recommended sequence. OUTPUT: tracked discovery plan with stop condition."
-bd dep add <explore> <task>
+bd dep add <explore> <task> --type discovered-from
 specialists run explorer --bead <explore> --context-depth 3
 specialists result <explore-job>
 
 # 3. Implementation
 bd create --title "Implement token refresh retry" --type task --priority 2 --description "PROBLEM: login fails after transient token refresh error because retry path returns before backoff and clear error state. SUCCESS: retry waits once, preserves session on success, and surfaces final failure clearly. SCOPE: src/auth/refresh.ts, src/cli/login.ts, tests/unit/auth/refresh.test.ts. NON_GOALS: no auth redesign, no storage migration, no UI refresh. CONSTRAINTS: preserve existing token format, keep backward-compatible error text, avoid broad retry changes elsewhere. VALIDATION: add regression test for transient failure then success; run targeted auth tests. OUTPUT: changed files, test evidence, residual risks."
-bd dep add <impl> <explore-or-task>
+bd dep add <impl> <explore-or-task> --type blocks
 specialists run executor --bead <impl> --context-depth 3
 specialists result <exec-job>
 
 # 4. Advisory passes when diff smells risky
 bd create --title "Sanity check token retry diff" --type task --priority 2 --description "PROBLEM: auth retry diff has control-flow and state-handling smell that could hide bug. SUCCESS: findings identify concrete simplification or confirm clean shape. SCOPE: executor diff in auth refresh and login flow. NON_GOALS: no edits, no merge gate decision. CONSTRAINTS: READ_ONLY, keep feedback cheap, cite exact lines or symbols. VALIDATION: findings name concrete improvement or say OK. OUTPUT: FINDINGS with severity or OK with caveats."
+bd dep add <sanity-bead> <impl> --type validates
 specialists run code-sanity --bead <sanity-bead> --job <exec-job> --context-depth 3
 
 bd create --title "Security scan token retry diff" --type task --priority 2 --description "PROBLEM: auth refresh code touches secrets and session handling, so security regression is possible. SUCCESS: findings isolate real risk surface or confirm no obvious issue. SCOPE: executor diff in auth, token storage, and login path. NON_GOALS: no edits, no package updates, no destructive scans, no live exploit tests. CONSTRAINTS: LOW permissions, scan-only, recommendations only. VALIDATION: findings cite auth/secrets/input surface and why it matters. OUTPUT: recommendations for executor to apply in separate bead."
+bd dep add <security-bead> <impl> --type validates
 specialists run security-auditor --bead <security-bead> --job <exec-job> --context-depth 3
 
 # 5. Final review
 bd create --title "Review token refresh retry" --type task --priority 2 --description "PROBLEM: verify executor output against auth retry requirements. SUCCESS: PASS only if retry behavior, error handling, and tests satisfy contract. SCOPE: executor job, diff, acceptance criteria, and target auth files. NON_GOALS: do not rewrite unless explicitly asked. CONSTRAINTS: code-review mindset; findings first; verify security and sanity findings were handled. VALIDATION: inspect targeted checks and regression coverage. OUTPUT: PASS/PARTIAL/FAIL with file/line findings."
-bd dep add <review> <impl>
+bd dep add <review> <impl> --type validates
 specialists run reviewer --bead <review> --job <exec-job> --context-depth 3
 specialists result <review-job>
 
@@ -634,8 +707,7 @@ Use epic when multiple implementation chains publish together.
 bd create --title "Epic: auth refresh hardening" --type epic --priority 2 --description "PROBLEM: login and refresh flow have retry drift, weak error surfacing, and unclear follow-up ownership. SUCCESS: epic closes with stable retry behavior, tests, docs, and clean publish. SCOPE: src/auth/*, src/cli/login.ts, tests/unit/auth/*, docs/auth-refresh.md. NON_GOALS: no auth provider swap, no storage migration, no unrelated session revamp. CONSTRAINTS: preserve token format, keep login compatible, sequence risky fixes before merge, use child beads for parallelizable slices. VALIDATION: targeted tests, code-sanity or security pass if risk appears, final reviewer PASS. OUTPUT: merged chain set with notes on remaining gaps."
 
 # Planner bead
-bd create --title "Plan auth refresh split" --type task --priority 2 --description "PROBLEM: epic needs disjoint chains before executor starts. SUCCESS: child beads, dependency edges, and file ownership split are explicit. SCOPE: auth refresh epic area. NON_GOALS: no code changes. CONSTRAINTS: keep chains disjoint, identify security-sensitive slice, name review order. VALIDATION: plan names beads and edges. OUTPUT: parallel-ready plan with risk notes."
-bd dep add <plan> <epic>
+bd create --parent <epic> --title "Plan auth refresh split" --type task --priority 2 --description "PROBLEM: epic needs disjoint chains before executor starts. SUCCESS: child beads, dependency edges, and file ownership split are explicit. SCOPE: auth refresh epic area. NON_GOALS: no code changes. CONSTRAINTS: keep chains disjoint, identify security-sensitive slice, name review order. VALIDATION: plan names beads and edges. OUTPUT: parallel-ready plan with risk notes."
 specialists run planner --bead <plan> --context-depth 3
 
 # Parallel impl beads
@@ -646,6 +718,8 @@ specialists run executor --bead <impl-a> --context-depth 3
 specialists run executor --bead <impl-b> --context-depth 3
 
 # Per-chain review
+bd dep add <review-a> <impl-a> --type validates
+bd dep add <review-b> <impl-b> --type validates
 specialists run reviewer --bead <review-a> --job <exec-a-job> --context-depth 3
 specialists run reviewer --bead <review-b> --job <exec-b-job> --context-depth 3
 
@@ -655,6 +729,7 @@ sp finalize <review-a-job>
 sp finalize <review-b-job>
 
 # Publish
+bd dep cycles                 # stop if relationship rewiring introduced a cycle
 sp epic status <epic>          # verify derived state shows merge_ready
 sp epic merge <epic>           # batch publish all chains in dependency order with tsc gate per merge
 ```
@@ -675,7 +750,7 @@ reviewer -> PASS | PARTIAL | FAIL
 
 - `PASS`: verify expected commit/diff. If reviewer's PASS appeared in its streaming output, auto-finalize already closed the chain — go straight to `sp merge` / `sp epic merge`. If PASS arrived via `sp resume`, run `sp finalize <any-chain-job-id>` first to cascade-close any waiting keep-alive members, then publish.
 - `PARTIAL`: resume same executor/debugger with exact findings, then re-review (`sp resume <reviewer-job>`).
-- `FAIL`: stop and decide whether to replace chain, re-scope bead, or ask operator if judgment is required.
+- `FAIL`: stop and decide whether to replace chain, re-scope bead, or ask operator if judgment is required. If replacing a bad chain with a narrower one, use `bd supersede <failed-impl> --with <replacement>`; if reviewer discovered separate follow-up work, use `bd dep add <follow-up> <reviewer-bead> --type discovered-from`.
 
 Prefer resume over new fix executor when original job is waiting and context is healthy:
 
@@ -764,8 +839,8 @@ Several specialists default to over-cautious verdicts when an evidence gate look
 ### Overthinker
 
 - "Hold for operator decision" without specifying what decision is needed → push: "Cite file/line evidence for why this is a product decision rather than a mechanical resolution."
-- "Close as superseded by X" without verification → push: "Read the current state of `<file>` and check whether feature Y from this bead is actually present."
-- "Run separate small beads" or "run one big bead" without rationale → push: "Pick one and explain operationally — cost difference, conflict expectations, reviewer scope."
+- "Close as superseded by X" without verification → push: "Read the current state of `<file>` and check whether feature Y from this bead is actually present." If verified, record it structurally with `bd supersede <old> --with <new>` instead of burying the replacement in notes.
+- "Run separate small beads" or "run one big bead" without rationale → push: "Pick one and explain operationally — cost difference, conflict expectations, reviewer scope." If one big bead wins, mark replaced split beads with `bd supersede`; if the small beads remain parallel siblings, link overlap with `bd dep relate`, not `blocks`.
 
 ### Reviewer
 
@@ -891,6 +966,7 @@ sp merge <chain-root-bead>
 Batch publish all chains in an epic in dependency order with tsc gate between each:
 
 ```bash
+bd dep cycles
 sp epic status <epic-id>
 sp epic merge <epic-id>
 ```
@@ -922,11 +998,12 @@ Use when `sp merge` / `sp epic merge` is not the right path: chains forked from 
 3. For each non-overlapping chain (security/critical first, then test-baseline, then features):
    - `git merge --squash <chain-branch>`
    - Restore noise files (see "Chain noise filter checklist" below)
-   - **Advisory passes** before commit: if the staged diff smells overcomplicated/duplicative/type-risky, dispatch `code-sanity --job <last-exec-job-of-chain>`; if it touches auth/secrets/input/agent-config, dispatch `security-auditor --job <last-exec-job-of-chain>`. Apply findings or document why skipped.
+   - **Advisory passes** before commit: if the staged diff smells overcomplicated/duplicative/type-risky, dispatch `code-sanity --job <last-exec-job-of-chain>`; if it touches auth/secrets/input/agent-config, dispatch `security-auditor --job <last-exec-job-of-chain>`. Link those beads with `bd dep add <advisory-bead> <chain-bead> --type validates`. Apply findings or document why skipped.
    - `git commit -m "<type>(<scope>): <summary> (<bead-id>)"` — one squash commit per chain.
-4. For each overlapping chain, switch to the **debugger-restitch** pattern (next section).
-5. After all chains land, run E2E smoke phase (below) before declaring done.
-6. Operator FF-merges integration → main when satisfied.
+4. For each overlapping chain, add `bd dep relate <overlap-a> <overlap-b>` if not already linked, then switch to the **debugger-restitch** pattern (next section).
+5. Before publication, run `bd dep cycles`; fix any accidental cycle before `sp epic merge` or operator FF-merge.
+6. After all chains land, run E2E smoke phase (below) before declaring done.
+7. Operator FF-merges integration → main when satisfied.
 
 ### Chain noise filter checklist
 
@@ -950,7 +1027,7 @@ If a chain commits its own `.beads` symlink (older bd-in-worktree behavior), `rm
 
 When chain X conflicts with already-landed chain Y on shared files, raw `git cherry-pick` will revert Y's work. The debugger-restitch pattern preserves both, but only when the debugger gets an explicit "preserve already-landed work" contract.
 
-1. **Reopen X**: `bd reopen <X> --reason="integration stitch onto post-Y state"`.
+1. **Reopen X**: `bd reopen <X> --reason="integration stitch onto post-Y state"`. If the old X chain is no longer publishable, create a restitch bead and mark replacement explicitly: `bd supersede <X> --with <X-restitch>`. Link X and Y with `bd dep relate <X-restitch> <Y>` for conflict context; use `caused-by` only when a concrete failure bead is attributable to Y's already-landed change.
 2. **Strengthen the bead contract** with these fields:
    - `## CRITICAL CONSTRAINTS:` heading at the top.
    - "Fork off `integration/<date>-orchestrator`. Verify with `git log integration/...$..HEAD` empty before any commits."
@@ -969,13 +1046,13 @@ When chain X conflicts with already-landed chain Y on shared files, raw `git che
    git diff integration/<date>...feature/<X>-debugger -- <key-files>
    ```
    Confirm the debugger's diff is **additive** — no reverts of Y's lines.
-5. **Advisory passes**: before landing the restitch, dispatch `code-sanity --job <debugger-job>` if the restitch added control-flow complexity, and `security-auditor --job <debugger-job>` if it touched a sensitive surface. Restitched diffs are higher-risk than fresh executor diffs because the debugger had to thread around already-landed work.
+5. **Advisory passes**: before landing the restitch, dispatch `code-sanity --job <debugger-job>` if the restitch added control-flow complexity, and `security-auditor --job <debugger-job>` if it touched a sensitive surface. Link each advisory bead back with `bd dep add <advisory> <X-restitch-or-X> --type validates`. Restitched diffs are higher-risk than fresh executor diffs because the debugger had to thread around already-landed work.
 6. **Land via FF or cherry-pick the named commit** (NOT the checkpoint commit). Look for the commit with the proper `<type>(<scope>):` message; ignore `checkpoint(debugger):` commits above it.
 7. **Verify tests** before marking done.
 
 ### Failure mode to watch for
 
-If the debugger forks off the OLD baseline (pre-Y) instead of integration, its commit will revert Y. Symptom: `git diff integration..feature/<X>-debugger -- <Y's-file>` shows DELETIONS of Y's symbols. Fix: resume the debugger with explicit "cd to a fresh worktree forked from `integration/<date>-orchestrator`" instruction. Re-verify with `git log integration..HEAD` empty.
+If the debugger forks off the OLD baseline (pre-Y) instead of integration, its commit will revert Y. Symptom: `git diff integration..feature/<X>-debugger -- <Y's-file>` shows DELETIONS of Y's symbols. Fix: resume the debugger with explicit "cd to a fresh worktree forked from `integration/<date>-orchestrator`" instruction. Re-verify with `git log integration..HEAD` empty. If the bad restitch became a tracked bead, supersede it with the corrected restitch bead so nobody merges the obsolete chain.
 
 ## E2E Smoke Phase
 
