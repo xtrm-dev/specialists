@@ -6,9 +6,9 @@ name: Gitleaks
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   pull_request:
-    branches: [main]
+    branches: [main, master]
   schedule:
     - cron: "0 6 * * 1"  # Monday 06:00 UTC weekly
 
@@ -40,4 +40,15 @@ jobs:
           gitleaks version
 
       - name: Scan
-        run: gitleaks dir --redact --config .gitleaks.toml --no-banner --verbose .
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            gitleaks git \
+              --log-opts "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}" \
+              --redact \
+              --config .gitleaks.toml \
+              --no-banner \
+              --verbose \
+              .
+          else
+            gitleaks git --redact --config .gitleaks.toml --no-banner --verbose .
+          fi
