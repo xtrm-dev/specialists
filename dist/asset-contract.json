@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "package_version": "3.15.2",
+  "package_version": "3.15.3",
   "shipped_skills": [
     {
       "path": "config/skills/memory-audit-transaction/SKILL.md",
@@ -40,7 +40,7 @@
     },
     {
       "path": "config/skills/using-specialists-v3/SKILL.md",
-      "sha256": "c8aa5dccd55fe6a461e66202a6829a3f1b9f9b4dc8c54f5c4f2847eb585b30f1"
+      "sha256": "643264862dfa758f85cff41a150be13d6a0c2c8ed42ded6186a3b9b16a87852b"
     },
     {
       "path": "config/skills/using-specialists/SKILL.md",

@@ -9,7 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.15.3] — 2026-05-19
+
 ### Changed
+- Expanded `using-specialists-v3` guidance with the full `bd dep --type` relationship vocabulary, duplicate/supersede commands, and typed relationship examples woven through existing specialist workflow flows (`unitAI-ylphl.8`).
+- Reframed the workflow catalog epic around an executable `sp workflows` CLI/router and propagated the updated skill mirror across xtrm-managed repos (`unitAI-ylphl`).
 - Refreshed README and high-traffic docs for v3.14-v3.15 release drift: first-time install/update flow, package-canonical defaults, current specialist catalog, xtrm-tools relationship, service examples, and stale doc links (`unitAI-xvvqb`).
 
 ## [v3.15.2] — 2026-05-14
