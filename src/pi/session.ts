@@ -643,11 +643,6 @@ export class PiAgentSession {
 
       const serenaPackageName = 'pi-serena-tools';
       if (!excludedExtensions.has(serenaPackageName)) {
-        // serena-pool must load before pi-serena-tools so it sets SERENA_MCP_PORT first,
-        // causing pi-serena-tools to reuse the shared daemon instead of spawning its own.
-        const serenaPoolPath = join(npmGlobalDir, '@jaggerxtrm', 'pi-extensions', 'extensions', 'serena-pool');
-        if (existsSync(serenaPoolPath)) args.push('-e', serenaPoolPath);
-
         const serenaPath = join(npmGlobalDir, serenaPackageName);
         if (existsSync(serenaPath)) args.push('-e', serenaPath);
       }
@@ -667,7 +662,30 @@ export class PiAgentSession {
 
     const sessionCwd = resolve(this.options.cwd ?? process.cwd());
 
-    const baseEnv = { ...process.env, ...(this.options.env ?? {}), CAVEMAN_LEVEL: 'full' };
+    // serena-pool pre-spawn hook: ensure a shared Serena daemon is running for
+    // this repo root and set SERENA_MCP_PORT so pi-serena-tools (which reads
+    // the env at construction time) reuses it instead of spawning its own.
+    let serenaPoolPort: number | null = null;
+    if (npmGlobalDir && !excludedExtensions.has('pi-serena-tools')) {
+      const serenaPoolPath = join(npmGlobalDir, '@jaggerxtrm', 'pi-extensions', 'extensions', 'serena-pool', 'index.ts');
+      if (existsSync(serenaPoolPath)) {
+        try {
+          const mod = await import(serenaPoolPath);
+          if (typeof mod.ensureSerenaForRoot === 'function') {
+            serenaPoolPort = await mod.ensureSerenaForRoot(sessionCwd);
+          }
+        } catch (err) {
+          console.warn('[serena-pool] pre-spawn ensure failed:', err);
+        }
+      }
+    }
+
+    const baseEnv = {
+      ...process.env,
+      ...(this.options.env ?? {}),
+      CAVEMAN_LEVEL: 'full',
+      ...(serenaPoolPort != null ? { SERENA_MCP_PORT: String(serenaPoolPort) } : {}),
+    };
     // `detached: true` puts pi in its own process group so we can later
     // group-SIGKILL the whole subtree (pi + gitnexus mcp + serena mcp + …)
     // as a backstop when graceful shutdown does not reap MCP children.
