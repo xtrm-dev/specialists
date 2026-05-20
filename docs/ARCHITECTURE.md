@@ -94,6 +94,18 @@ const excludeExtensions = [
 
 Excluded extensions are passed to `PiAgentSession` via `excludeExtensions` option and skipped during `-e` assembly.
 
+### serena-pool pre-spawn hook
+
+Before spawning the `pi` child, `session.ts` dynamically imports `ensureSerenaForRoot` from the globally installed `@jaggerxtrm/pi-extensions/extensions/serena-pool`. The pool:
+
+1. Hashes the absolute `sessionCwd` (git root or fallback) to a deterministic port in 40000–44999.
+2. Reuses an already-listening daemon on that port, or acquires a per-port file lock, reaps orphaned LSP children left by a dead prior daemon (PGID-only, ownership-verified), spawns a fresh `uvx serena start-mcp-server --transport streamable-http --project <root>` in its own process group, and persists `{ pid, pgid, startTime, instanceId, projectRoot, port }` to `/tmp/serena-pool/pool-<port>.json`.
+3. Returns the port, which `session.ts` injects as `SERENA_MCP_PORT` in `baseEnv`.
+
+`pi-serena-tools` reads `SERENA_MCP_PORT` at extension construction time and reuses the shared daemon (its `isServerAvailable()` check sees the port live, so it does not spawn its own). The daemon survives Pi exit (`detached: true`, parent unrefs), and the next session reuses or reaps it.
+
+The hook is skipped when `pi-serena-tools` is excluded (i.e. specialists with `execution.extensions.serena=false`). Requires Bun (the `sp` shebang) for the `.ts` dynamic import.
+
 ### `memory_injection` timeline event
 
 Supervisor records token accounting for each specialist spawn:

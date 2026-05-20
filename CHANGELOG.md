@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `src/pi/session.ts` pre-spawn `serena-pool` hook: dynamically imports `ensureSerenaForRoot` from the globally installed `@jaggerxtrm/pi-extensions/extensions/serena-pool` (Bun loader) and injects `SERENA_MCP_PORT` into the pi child's `baseEnv` before spawn. `pi-serena-tools` reads the port at construction time and reuses the shared per-repo-root daemon instead of spawning its own on a random port (`unitAI-v0wpf`, `unitAI-ij37x`).
+- E2E validation under linked global `sp`: single Serena per worktree on deterministic port, distinct ports across worktrees of the same repo, Serena-disabled specialists confirmed no-op, no random-port duplicate spawns (`unitAI-3gjgh`).
+
+### Changed
+- Read-only specialists no longer load Serena: `code-sanity`, `explorer`, `overthinker`, `changelog-drafter` set `execution.extensions.serena=false` and remove the `serena-cheatsheet` template_set where present. Saves ~80–150 MB resident per invocation. Phase 1 of the LSP overhead reduction epic (`unitAI-kg4t9`, `unitAI-c4g0m`).
+- `docs/design/conversations.md` absorbs validated patterns from Statecraft / Envoy: explicit authority decision procedure (§10.1) with valid/invalid source lists, `system.epoch_bump` message kind for capability change re-read, `provenance_json` column on `conversation_messages`, read/ack separation invariant (cursor-through-N), authority-lane-per-participant invariant, `cannot_emit` spec field, structured error envelope (§10.2), and capture pattern for >8KB payloads (`unitAI-0p8w3`).
+
 ## [v3.15.3] — 2026-05-19
 
 ### Changed
