@@ -24,13 +24,15 @@
       "output_type": "synthesis",
       "permission_required": "READ_ONLY",
       "interactive": true,
-      "max_retries": 0
+      "max_retries": 0,
+      "extensions": {
+        "serena": false
+      }
     },
     "mandatory_rules": {
       "template_sets": [
         "overthinker-4phase",
         "research-tool-routing",
-        "serena-cheatsheet",
         "per-turn-handoff-schema",
         "bead-id-verbatim"
       ]

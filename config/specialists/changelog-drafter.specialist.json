@@ -26,7 +26,10 @@
       "interactive": false,
       "max_retries": 0,
       "mode": "auto",
-      "requires_worktree": false
+      "requires_worktree": false,
+      "extensions": {
+        "serena": false
+      }
     },
     "mandatory_rules": {
       "template_sets": [

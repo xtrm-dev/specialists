@@ -26,14 +26,16 @@
       "permission_required": "READ_ONLY",
       "interactive": true,
       "thinking_level": "low",
-      "max_retries": 0
+      "max_retries": 0,
+      "extensions": {
+        "serena": false
+      }
     },
     "mandatory_rules": {
       "template_sets": [
         "explorer-readonly",
         "gitnexus-required",
         "code-quality-defaults",
-        "serena-cheatsheet",
         "per-turn-handoff-schema",
         "bead-id-verbatim"
       ]

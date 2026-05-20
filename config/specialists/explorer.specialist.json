@@ -23,13 +23,15 @@
       "output_type": "analysis",
       "permission_required": "READ_ONLY",
       "max_retries": 0,
-      "interactive": true
+      "interactive": true,
+      "extensions": {
+        "serena": false
+      }
     },
     "mandatory_rules": {
       "template_sets": [
         "explorer-readonly",
         "gitnexus-required",
-        "serena-cheatsheet",
         "per-turn-handoff-schema",
         "bead-id-verbatim"
       ]

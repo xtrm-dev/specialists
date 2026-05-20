@@ -643,6 +643,11 @@ export class PiAgentSession {
 
       const serenaPackageName = 'pi-serena-tools';
       if (!excludedExtensions.has(serenaPackageName)) {
+        // serena-pool must load before pi-serena-tools so it sets SERENA_MCP_PORT first,
+        // causing pi-serena-tools to reuse the shared daemon instead of spawning its own.
+        const serenaPoolPath = join(npmGlobalDir, '@jaggerxtrm', 'pi-extensions', 'extensions', 'serena-pool');
+        if (existsSync(serenaPoolPath)) args.push('-e', serenaPoolPath);
+
         const serenaPath = join(npmGlobalDir, serenaPackageName);
         if (existsSync(serenaPath)) args.push('-e', serenaPath);
       }

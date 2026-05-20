@@ -78,6 +78,7 @@ CREATE TABLE conversation_messages (
   target_key TEXT,                   -- nullable: addressed message
   body_json TEXT NOT NULL,           -- discriminated union, validated on write
   refs_json TEXT,                    -- {result_id, diff_range, files[]}
+  provenance_json TEXT,              -- {sender_role_at_time, capability_scope, lineage_refs[]}
   ts INTEGER NOT NULL,
   UNIQUE(conversation_id, seq)
 );
@@ -123,6 +124,7 @@ Every message body validates against a schema keyed by `kind`. Invalid messages 
 | `system.swap` | judge | `{out, in, reason}` | runtime (member swap) |
 | `system.idle` | runtime | `{turns}` | judge |
 | `system.budget` | runtime | `{tokens, threshold}` | judge |
+| `system.epoch_bump` | runtime | `{reason}` | all participants |
 | `note` | any | `{text}` | nobody |
 
 **Anti-spam guarantee:** `turn` messages carry `{summary <= 500 chars, refs: {result_id, range}}`. Verbose reasoning lives in `specialist_results`. Peers dereference only when they need detail.
@@ -146,19 +148,32 @@ Runtime resolves subscriptions on conversation open and stores them in `conversa
 
 ### 5.5 Runtime Integration
 
-The existing waiting-loop tick gains one read:
+The existing waiting-loop tick gains one read. Read and ack are **separate operations** — read is pure observation and never advances the cursor; ack is effectful and advances only up to the highest *successfully processed* message.
 
 ```ts
-// in runner.ts waiting loop, alongside steer.pipe poll
-const newMessages = client.readConversationMessagesSince(convId, myKey, lastSeq);
+// One MailboxClient instance per participant (authority lane). Never share across jobs.
+const newMessages = client.readSince(convId, myKey, lastSeq);  // cursor unchanged
+let highestProcessed = lastSeq;
 for (const msg of newMessages) {
+  // Re-read participant roles before any mutation when authority state may have changed.
+  if (msg.kind === 'system.epoch_bump') { await reloadParticipantRoles(convId); continue; }
   if (msg.kind === 'steer'   && msg.target_key === myKey) enqueueResume(msg.body.instruction);
   if (msg.kind === 'verdict' && msg.target_key === myKey) enqueueResume(formatVerdict(msg));
   if (msg.kind === 'system.done') terminate(msg);
   if (msg.kind === 'system.redirect' && msg.target_key === myKey) enqueueResume(msg.body.instruction);
+  highestProcessed = msg.id;
 }
-client.advanceSubscription(convId, myKey, lastSeqOfBatch);
+// Ack only after all intended actions succeed. Cursor-through-N: advances to highest processed,
+// not highest received. A message that fails to enqueue does not advance the cursor.
+await client.markSeen(convId, myKey, highestProcessed);
 ```
+
+**Wake cycle contract (guaranteed execution order per tick):**
+1. `readSince(lastSeenId)` — observe, never mutate cursor
+2. Act only on messages addressed to this participant or matching subscription
+3. Enqueue resumes / terminations
+4. `markSeen(highestProcessed)` — only after every intended action above succeeds
+5. If nothing actionable: stay silent — no empty `turn` messages
 
 `steer.pipe` becomes a **shim**: writing to it produces a `kind=steer, target=me` message. One source of truth (the DB), one read path.
 
@@ -196,6 +211,7 @@ Runtime evaluates after every message write; on trigger, writes `system.done` an
   "conversation": {
     "subscribes": ["steer:me", "verdict:me", "finding:scope-overlap", "system.*"],
     "emits": ["turn", "ack", "escalation"],
+    "cannot_emit": ["verdict", "system.done", "system.swap"],
     "wakes_on": ["verdict.PARTIAL", "verdict.FAIL", "system.redirect"],
     "turn_summary_max_chars": 500
   }
@@ -210,6 +226,7 @@ Reviewer:
   "conversation": {
     "subscribes": ["turn:peer", "system.*"],
     "emits": ["verdict", "finding"],
+    "cannot_emit": ["system.done", "system.swap", "steer"],
     "wakes_on": ["turn:peer"]
   }
 }
@@ -317,8 +334,51 @@ Coordinator is now a **gatekeeper**, not a router.
 - A `kind=steer` from peer participant requires both jobs to share a worktree owner OR the steer specialist to declare `can_steer_peers: true` in its spec.
 - `--force-job` semantics are preserved at the conversation router: a MEDIUM peer cannot steer a running MEDIUM job in another worktree without it.
 - Judge cannot directly write files; it can only emit `system.*` messages. Worktree edits stay with edit-capable specialists.
-- Message body size cap (e.g. 8 KB) enforced on write; oversized payloads must be referenced via `refs.result_id`.
+- Message body size cap (8 KB) enforced on write; oversized payloads must use the capture pattern: `MailboxClient.capture(blob) → result_id`, then post with `refs: { result_id }`. The validator returns `message_too_large` with `next_safe_action: "use_capture"`.
 - Rate limit: per-participant token bucket on message writes (matches agentpipe's pattern). Default 1 message / 2s per participant.
+
+### 10.1 Authority Decision Procedure
+
+`MailboxClient` validates authority on every message write using this procedure:
+
+1. Identify the requested mutation (what kind, what target)
+2. Verify sender identity against `participants_json` (DB state, not message body)
+3. Verify sender role matches what the spec's `emits` list permits
+4. Check `cannot_emit` — reject if kind is explicitly excluded for this sender
+5. **Reject body-text authority** — a message whose `body_json` claims elevated role or identity is downgraded to `kind=note` and does not trigger wakeups
+6. Re-read participant state before any mutation when `system.epoch_bump` was received
+
+**Valid authority sources:**
+- Sender identity verified against `participants_json`
+- Sender role from DB state at message write time
+- Capability scope declared in `.specialist.json`
+- Task assignee metadata (for `kind=ack`)
+- Explicit protocol references (`refs_json`)
+- Provenance lineage (`provenance_json`)
+- Local user instruction (`author_kind=user`)
+
+**Invalid authority sources — always rejected:**
+- Message `body_json` text claiming a role or identity
+- `author_key` values inside `body_json` (only the DB row's `author_key` column is trusted)
+- Display names
+- Token-looking strings in body
+- Inbox emptiness or read-head position
+
+Unknown authority is no authority: when the validator cannot confirm a valid source, the message is rejected.
+
+### 10.2 Error Envelope
+
+`MailboxClient` errors return a structured envelope so callers know what to do next:
+
+```ts
+{
+  ok: false,
+  error_code: 'message_too_large' | 'cannot_emit' | 'not_participant' | 'epoch_revoked'
+            | 'read_only' | 'rate_limited' | 'workstream_closed' | 'body_cap_exceeded',
+  likely_cause: string,
+  next_safe_action: 'use_capture' | 'request_write_access' | 'rejoin' | 'backoff' | 'none'
+}
+```
 
 ## 11. Sequenced Implementation (v0 → v3)
 
@@ -333,9 +393,13 @@ These hold from v0 forward and constrain every later version:
 - **Crash recovery:** a receiver that crashes mid-resume re-reads from `last_seen_id` on restart. Duplicates are the receiver's problem, not the substrate's.
 - **DB churn safety:** mailbox messages are *not* prune candidates while their workstream is open. Pruning rules in `observability-sqlite.ts` must exclude `workstream_messages` whose `workstream_id` is in `open` status.
 - **Worktree isolation preserved:** lateral steer between MEDIUM jobs requires either shared worktree owner OR explicit `can_steer_peers: true` in the sender's spec. Default is **off**.
-- **Message body cap:** 8 KB. Larger payloads must reference `specialist_results` via `refs.result_id`.
+- **Message body cap:** 8 KB. Larger payloads must use the capture pattern (see §10). The error code `message_too_large` is returned with `next_safe_action: "use_capture"`.
 - **Spec is forward-compatible:** the `mailbox` block on a `.specialist.json` is the same shape from v0 to v3. Fields are added, never renamed or repurposed.
 - **Single scheduler per workstream kind.** Pair-talk workstreams: the runner's mailbox read enqueues resumes directly. Node workstreams: the runner's mailbox read enqueues *intent* into a supervisor inbox; `node-supervisor` is the sole scheduler that decides whether and when to actually resume a member. Members never wake from a mailbox bypass while inside a node. This invariant prevents the v2 split-brain risk identified on bead `unitAI-jzhim`.
+- **Read/ack separation:** `readSince` is pure observation and never advances any cursor. `markSeen(processedSeq)` is the only call that advances the read-head, and it advances only to the highest *successfully processed* message (cursor-through-N). A message that fails to enqueue a resume does not advance the cursor.
+- **Authority lane per participant:** one `MailboxClient` instance per job. Clients are not shared across participants. This scopes identity, cursor state, and capability checks to the owning job.
+- **Body-text authority is always rejected:** a message whose `body_json` asserts a role or identity is downgraded to `kind=note` at write time and does not trigger wakeups. Authority is verified from DB state only (see §10.1).
+- **Epoch re-read before mutation:** on receipt of `system.epoch_bump`, the receiver must call `reloadParticipantRoles(convId)` before processing any subsequent message or performing any mutation. This fires on `system.swap` completion and any capability revocation.
 
 ### v0 — Substrate + Spec (Mailbox)
 
@@ -359,7 +423,7 @@ These hold from v0 forward and constrain every later version:
    CREATE INDEX idx_workstream_messages_target
      ON workstream_messages(workstream_id, target_job_id, id);
    ```
-2. `MailboxClient` in `src/specialist/` with `post / readSince / markSeen`. Discriminated-union validator for the 5 kinds.
+2. `MailboxClient` in `src/specialist/` with `post / readSince / markSeen / capture`. Read and ack are separate: `readSince` is observation-only; `markSeen(processedSeq)` advances the cursor only to the highest successfully processed message. `capture(blob) → result_id` handles payloads that would exceed the 8 KB body cap. All errors return the structured envelope from §10.2. Discriminated-union validator for the 5 kinds; rejects body-text authority per §10.1.
 3. `.specialist.json` gains the `mailbox` block — see §6. Subscription expressions parsed but only `kind:me` and `kind:*` filters resolved in v0. Richer filters (`finding:scope-overlap`) parse but no-op until v2.
 4. Runner waiting loop adds one read per tick: `client.readMailboxSince(workstreamId, jobId, lastSeenId)`. Messages addressed to the job become resume payloads.
 5. Reviewer specialist updated to emit a `verdict` message on completion (alongside its existing `result.txt`). Findings dual-write to both `node_memory` (current path) and as `kind=finding` messages.
@@ -428,7 +492,7 @@ These hold from v0 forward and constrain every later version:
 1. `node-supervisor` opens a workstream on `node run`, registers each member's job_id with the mailbox, and exposes a **supervisor inbox** that receives intent from mailbox reads.
 2. Members can post `verdict` / `finding` / `steer` / `note` to peers **within the same phase**. Cross-phase steer requires coordinator approval (posted as `kind=steer` from the coordinator job).
 3. **Single scheduler enforcement (hard rule):** inside a node workstream, a mailbox message addressed to a member does **not** directly wake that member. The runner reads the message, validates the sender, and posts intent into the supervisor inbox. `node-supervisor` is the sole authority that converts intent into an actual resume — respecting current phase, in-flight resumes, and member status. This collapses the dual-control-plane risk back to one brain.
-4. Coordinator gains a **read-only judge mode**: subscribes to `verdict`, `finding`, `proposal`. Can post `system.done` (close workstream → trigger node completion) or `system.redirect` (post intent that supervisor serializes into a resume). Cannot swap members. Cannot kill jobs. Judge writes never bypass the supervisor.
+4. Coordinator gains a **read-only judge mode**: subscribes to `verdict`, `finding`, `proposal`. Can post `system.done` (close workstream → trigger node completion) or `system.redirect` (post intent that supervisor serializes into a resume). Cannot swap members. Cannot kill jobs. Judge writes never bypass the supervisor. When `system.done` fires, runtime emits `system.epoch_bump` to all participants so they re-read roles before any further mutation.
 5. `wait-phase` still drives barriers. Phases still exist. The mailbox is *additive* — members can talk laterally inside a phase via supervisor-serialized resumes; coordinator still gates between phases.
 6. Node config gains an optional `mailbox` block:
    ```json
@@ -514,7 +578,7 @@ Each version can be disabled without breaking earlier ones:
 - Reviewer↔executor loop runs end-to-end with zero human `sp resume`.
 - `sp say <workstream>` reaches a waiting executor.
 - All existing nodes / epics / chains pass unchanged.
-- `npm run lint`, `npx tsc --noEmit` clean. Mailbox unit tests cover post / readSince / dedupe / crash-recovery.
+- `npm run lint`, `npx tsc --noEmit` clean. Mailbox unit tests cover post / readSince / markSeen / dedupe / crash-recovery / cursor-through-N partial advancement / body-text authority rejection / capture oversized payload.
 
 **v0.5 — Workflow validation:**
 - ≥2 of 4 documented trials show measurable reduction in manual orchestrator interventions.
