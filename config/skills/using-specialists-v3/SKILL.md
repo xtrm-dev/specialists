@@ -292,7 +292,7 @@ Core commands:
 - `bd create --parent <epic-id>`: epic-child edge; auto-names child `.1`, `.2`, … and adds parent ownership. Use for chain members that must live under an epic. [source: bd create --help]
 - `bd create --deps discovered-from:<id>` or `bd dep add <new> <source> --type discovered-from`: follow-up work discovered from a source bead.
 - `bd duplicate <new> --of <canonical>`: close duplicate issue and point at canonical. Use when two beads describe the same required work.
-- `bd duplicates` / `bd find-duplicates --status open --method ai --json`: find exact or semantic duplicates before dispatching parallel chains.
+- `bd duplicates` / `bd find-duplicates --status open --method mechanical --json`: cheap duplicate prefilter before dispatching parallel chains. For semantic clustering, use the `issue-triage` skill path (mechanical prefilter + bv graph signals + explorer/GitNexus overlap + overthinker recommendations), not `bd --method ai`.
 - `bd supersede <old> --with <new>` or `bd dep add <new> <old> --type supersedes`: mark a replacement when a better-scoped fix bead replaces an obsolete/abandoned one.
 - `bd dep cycles`, `bd dep tree <id>`, and `bd graph <id>`: sanity-check the execution graph before merge/publication.
 
@@ -345,7 +345,7 @@ Use each form for a different reason:
 - `parent-child` / `--parent` for epic ownership and child naming.
 - `supersedes` / `bd supersede` for replacement work; `duplicate` for same-work issues.
 
-Cross-repo consistency: keep this vocabulary aligned with the xtrm-tools triaging skill and sibling triage bead `xtrm-drkk`; both should use the same relationship names when rewiring issue graphs.
+Cross-repo consistency: keep this vocabulary aligned with the xtrm-tools `issue-triage` and `planning` skills; all three should use the same relationship names when creating or rewiring issue graphs.
 
 What differs: orchestrator chooses edge type deliberately, so graph stays correct for chain execution, epic publish, duplicate cleanup, root-cause navigation, verification evidence, and follow-up traceability.
 
@@ -606,7 +606,7 @@ bd supersede <old-chain-a> --with <unified-chain>
 bd supersede <old-chain-b> --with <unified-chain>
 ```
 
-Default heuristic: if 3+ chains touch the same file, **serial-dispatch them**. Conflict-resolution time at integration usually exceeds the time saved by parallel dispatch. Run `bd find-duplicates --status open --method ai --json` before launching a large wave; merge or supersede duplicate work before specialists spend tokens on it.
+Default heuristic: if 3+ chains touch the same file, **serial-dispatch them**. Conflict-resolution time at integration usually exceeds the time saved by parallel dispatch. Before launching a large wave, run mechanical duplicate prefiltering and semantic clustering through `issue-triage` (or its core path: `bd find-duplicates --method mechanical` + `bv --robot-triage/alerts` + explorer/GitNexus overlap + overthinker recommendations); merge or supersede duplicate work before specialists spend tokens on it.
 
 ## Pre-Epic: Test-Failure-Map Pattern
 
