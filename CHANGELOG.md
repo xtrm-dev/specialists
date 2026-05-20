@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.15.4] — 2026-05-21
+
 ### Added
 - `src/pi/session.ts` pre-spawn `serena-pool` hook: dynamically imports `ensureSerenaForRoot` from the globally installed `@jaggerxtrm/pi-extensions/extensions/serena-pool` (Bun loader) and injects `SERENA_MCP_PORT` into the pi child's `baseEnv` before spawn. `pi-serena-tools` reads the port at construction time and reuses the shared per-repo-root daemon instead of spawning its own on a random port (`unitAI-v0wpf`, `unitAI-ij37x`).
 - E2E validation under linked global `sp`: single Serena per worktree on deterministic port, distinct ports across worktrees of the same repo, Serena-disabled specialists confirmed no-op, no random-port duplicate spawns (`unitAI-3gjgh`).

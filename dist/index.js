@@ -18562,7 +18562,26 @@ class PiAgentSession {
       }
     }
     const sessionCwd = resolve(this.options.cwd ?? process.cwd());
-    const baseEnv = { ...process.env, ...this.options.env ?? {}, CAVEMAN_LEVEL: "full" };
+    let serenaPoolPort = null;
+    if (npmGlobalDir && !excludedExtensions.has("pi-serena-tools")) {
+      const serenaPoolPath = join2(npmGlobalDir, "@jaggerxtrm", "pi-extensions", "extensions", "serena-pool", "index.ts");
+      if (existsSync3(serenaPoolPath)) {
+        try {
+          const mod = await import(serenaPoolPath);
+          if (typeof mod.ensureSerenaForRoot === "function") {
+            serenaPoolPort = await mod.ensureSerenaForRoot(sessionCwd);
+          }
+        } catch (err) {
+          console.warn("[serena-pool] pre-spawn ensure failed:", err);
+        }
+      }
+    }
+    const baseEnv = {
+      ...process.env,
+      ...this.options.env ?? {},
+      CAVEMAN_LEVEL: "full",
+      ...serenaPoolPort != null ? { SERENA_MCP_PORT: String(serenaPoolPort) } : {}
+    };
     this.proc = spawn("pi", args, {
       stdio: ["pipe", "pipe", "pipe"],
       cwd: sessionCwd,
