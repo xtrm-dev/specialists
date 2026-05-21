@@ -23,6 +23,14 @@ export interface LaunchSpecialistOptions {
     jobsDir: string;
     startEventTailer: (jobId: string, jobsDir: string) => (() => void) | undefined;
     formatFooterModel: (backend?: string, model?: string) => string;
+    onProgress?: (delta: string) => void;
+    onMeta?: (meta: {
+        backend: string;
+        model: string;
+    }) => void;
+    onJobStarted?: (job: {
+        id: string;
+    }) => void;
 }
 export declare function launchSpecialist(opts: LaunchSpecialistOptions): Promise<void>;
 //# sourceMappingURL=launch.d.ts.map

@@ -30127,12 +30127,13 @@ async function launchSpecialist(opts) {
     },
     beadsClient: opts.beadsClient,
     stallDetection: opts.specialist.specialist.stall_detection,
-    onProgress: opts.args.outputMode === "raw" ? (delta) => process.stdout.write(delta) : undefined,
-    onMeta: opts.args.outputMode !== "human" ? (meta) => process.stderr.write(dim8(`
+    onProgress: opts.onProgress ?? (opts.args.outputMode === "raw" ? (delta) => process.stdout.write(delta) : undefined),
+    onMeta: opts.onMeta ?? (opts.args.outputMode !== "human" ? (meta) => process.stderr.write(dim8(`
 [${meta.backend} / ${meta.model}]
 
-`)) : undefined,
+`)) : undefined),
     onJobStarted: ({ id }) => {
+      opts.onJobStarted?.({ id });
       process.stderr.write(dim8(`[job started: ${id}]
 `));
       const handoffPath = process.env.SPECIALISTS_BG_JOB_ID_PATH;
@@ -30182,7 +30183,7 @@ ${bold10(`Running ${cyan5(opts.args.name)}`)}
     const message = runError instanceof Error ? runError.message : String(runError);
     process.stderr.write(`Error: ${message}
 `);
-    process.exit(1);
+    throw new Error(message);
   }
   const status = supervisor.readStatus(jobId);
   const secs = ((status?.last_event_at_ms ?? Date.now()) - (status?.started_at_ms ?? Date.now())) / 1000;
@@ -30202,7 +30203,6 @@ ${green8("\u2713")} ${footer}
   process.stderr.write(dim8(`Events: specialists feed ${jobId}`) + `
 
 `);
-  process.exit(0);
 }
 var bold10 = (s) => `\x1B[1m${s}\x1B[0m`, dim8 = (s) => `\x1B[2m${s}\x1B[0m`, green8 = (s) => `\x1B[32m${s}\x1B[0m`, cyan5 = (s) => `\x1B[36m${s}\x1B[0m`;
 var init_launch = __esm(() => {
@@ -40289,8 +40289,11 @@ var exports_chat = {};
 __export(exports_chat, {
   run: () => run13
 });
+import { spawnSync as spawnSync11 } from "child_process";
 async function run13() {
   const args = parseArgs7(process.argv.slice(3));
+  const ephemeralTitle = args.beadId ? "" : buildEphemeralBeadTitle(args.prompt);
+  const beadId = args.beadId ?? createEphemeralBead(args.prompt);
   const loader = new SpecialistLoader;
   const specialist = await loader.get(args.name).catch((error2) => {
     process.stderr.write(`Error: ${error2 instanceof Error ? error2.message : String(error2)}
@@ -40298,7 +40301,7 @@ async function run13() {
     process.exit(1);
   });
   const piTui = await Promise.resolve().then(() => (init_dist2(), exports_dist));
-  const { TUI: TUI2, ProcessTerminal: ProcessTerminal2, Container: Container2, Input: Input2, Key: Key2, matchesKey: matchesKey2 } = piTui;
+  const { TUI: TUI2, ProcessTerminal: ProcessTerminal2, Container: Container2, Input: Input2 } = piTui;
   const terminal = new ProcessTerminal2;
   const tui = new TUI2(terminal);
   const feed = new ChatFeed;
@@ -40317,23 +40320,39 @@ async function run13() {
   const cleanup = createCleanup(tui, terminal, status);
   const signalCleanup = installSignalGuards(cleanup, input2);
   const onStdinData = (data) => {
-    if (!matchesKey2(data, Key2.ctrl("c")))
+    if (data.toString("utf8") !== "\x03")
       return;
-    cleanup.stopJobAndExit(args.beadId);
+    cleanup.stopJobAndExit(beadId);
   };
   process.stdin.on("data", onStdinData);
+  let shouldExit = false;
+  const removeInputListener = typeof tui.addInputListener === "function" ? tui.addInputListener(async (text) => {
+    const action = control.dispatchInput(text, { jobState: "running" });
+    if (action.kind === "quit") {
+      shouldExit = true;
+      await cleanup.stop();
+    }
+    feed.appendEvent("user", text);
+  }) : () => {
+    return;
+  };
   try {
     tui.root = root;
+    tui.setFocus(input2);
     status.start();
     feed.appendEvent("chat", `launching ${args.name}`);
     feed.appendEvent("chat", `context depth ${args.contextDepth}`);
     if (args.model)
       feed.appendEvent("chat", `model ${args.model}`);
-    await launchSpecialist({
-      args: { name: args.name, prompt: args.prompt, model: args.model, keepAlive: true, noKeepAlive: false, forceJob: false, outputMode: "human", background: false },
+    if (!args.beadId)
+      feed.appendEvent("chat", `ephemeral bead ${ephemeralTitle} (${beadId})`);
+    const launchPromise = launchSpecialist({
+      args: { name: args.name, prompt: args.prompt, model: args.model, keepAlive: true, noKeepAlive: false, forceJob: false, outputMode: "json", background: false },
       specialist,
       loader,
-      hooks: specialist.hooks ?? {},
+      hooks: specialist.hooks ?? { emit: () => {
+        return;
+      } },
       circuitBreaker: specialist.circuitBreaker ?? {
         isAvailable: () => true,
         getState: () => "CLOSED",
@@ -40351,10 +40370,20 @@ async function run13() {
       startEventTailer: () => {
         return;
       },
-      formatFooterModel: (backend, model) => formatFooterModel(backend, model)
+      formatFooterModel: (backend, model) => formatFooterModel(backend, model),
+      onProgress: (delta) => feed.appendEvent("assistant", delta),
+      onMeta: (meta) => feed.appendEvent("chat", `${meta.backend}/${meta.model}`),
+      onJobStarted: ({ id }) => feed.appendEvent("chat", `job started: ${id}`)
+    });
+    const launchDone = launchPromise.then(() => true).catch((error2) => {
+      feed.appendEvent("chat", error2 instanceof Error ? error2.message : String(error2));
+      return true;
     });
     await tui.start();
+    if (!shouldExit)
+      await launchDone;
   } finally {
+    removeInputListener?.();
     process.stdin.off("data", onStdinData);
     signalCleanup();
     await cleanup.stop();
@@ -40363,8 +40392,8 @@ async function run13() {
 function parseArgs7(argv) {
   const name = argv[0];
   if (!name)
-    throw new Error("Usage: sp chat <specialist> [prompt...] --bead <id> [--context-depth N] [--model M]");
-  let beadId = "";
+    throw new Error("Usage: sp chat <specialist> [prompt...] [--bead <id>] [--prompt <text>] [--context-depth N] [--model M]");
+  let beadId;
   let contextDepth = DEFAULT_CONTEXT_DEPTH;
   let model;
   const promptParts = [];
@@ -40372,6 +40401,8 @@ function parseArgs7(argv) {
     const token = argv[i];
     if (token === "--bead")
       beadId = argv[++i] ?? "";
+    else if (token === "--prompt")
+      promptParts.push(argv[++i] ?? "");
     else if (token === "--context-depth")
       contextDepth = Number(argv[++i] ?? DEFAULT_CONTEXT_DEPTH);
     else if (token === "--model")
@@ -40379,13 +40410,37 @@ function parseArgs7(argv) {
     else if (!token.startsWith("--"))
       promptParts.push(token);
   }
-  if (!beadId)
-    throw new Error("Usage: sp chat <specialist> [prompt...] --bead <id> [--context-depth N] [--model M]");
-  return { name, prompt: promptParts.join(" "), beadId, contextDepth, model };
+  const prompt = promptParts.join(" ").trim();
+  if (!beadId && !prompt)
+    throw new Error("Usage: sp chat <specialist> [prompt...] [--bead <id>] [--prompt <text>] [--context-depth N] [--model M]");
+  return { name, prompt, beadId, contextDepth, model };
 }
 function buildPrompt(args) {
   return [args.prompt, args.contextDepth ? `
 (context-depth: ${args.contextDepth})` : ""].join("").trim();
+}
+function createEphemeralBead(prompt) {
+  const title = buildEphemeralBeadTitle(prompt);
+  const result = spawnSync11("bd", ["create", title, "-t", "task", "-p3", "--json"], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  if (result.status !== 0) {
+    const error2 = result.stderr?.trim() || result.stdout?.trim() || `bd create failed with exit code ${result.status}`;
+    throw new Error(`Error: unable to auto-create chat bead: ${error2}`);
+  }
+  const parsed = JSON.parse(result.stdout.trim());
+  const beadId = Array.isArray(parsed) ? parsed[0]?.id : parsed.id;
+  if (!beadId)
+    throw new Error("Error: bd create returned no bead id for chat prompt");
+  return beadId;
+}
+function buildEphemeralBeadTitle(prompt) {
+  const firstLine = prompt.split(`
+`, 1)[0]?.trim() ?? "";
+  const normalized = firstLine.replace(/\s+/g, " ");
+  return (normalized || "sp chat ephemeral").slice(0, 60);
 }
 async function loadJobState(jobId) {
   const statuses = loadStatuses();
@@ -40458,7 +40513,7 @@ var init_chat = __esm(() => {
 // src/specialist/worktree.ts
 import { existsSync as existsSync17, symlinkSync as symlinkSync2, mkdirSync as mkdirSync9, rmSync as rmSync2 } from "fs";
 import { join as join20, resolve as resolve9 } from "path";
-import { spawnSync as spawnSync11, execFileSync as execFileSync2 } from "child_process";
+import { spawnSync as spawnSync12, execFileSync as execFileSync2 } from "child_process";
 function deriveBranchName(beadId, specialistName) {
   return `feature/${beadId}-${slugify(specialistName)}`;
 }
@@ -40472,7 +40527,7 @@ function resolveCommonRoot(cwd) {
   return resolveCommonGitRoot(cwd) ?? cwd;
 }
 function listWorktrees(cwd = process.cwd()) {
-  const result = spawnSync11("git", ["worktree", "list", "--porcelain"], {
+  const result = spawnSync12("git", ["worktree", "list", "--porcelain"], {
     cwd,
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "ignore"]
@@ -40506,7 +40561,7 @@ function provisionWorktree(options2) {
 }
 function normalizeParentHooksPath(mainRepoRoot) {
   try {
-    const result = spawnSync11("git", ["-C", mainRepoRoot, "config", "--get", "core.hooksPath"], {
+    const result = spawnSync12("git", ["-C", mainRepoRoot, "config", "--get", "core.hooksPath"], {
       stdio: "pipe",
       encoding: "utf8"
     });
@@ -40520,12 +40575,12 @@ function normalizeParentHooksPath(mainRepoRoot) {
     if (current !== ".beads/hooks" && current !== "./.beads/hooks")
       return;
     const absolute = join20(mainRepoRoot, ".beads", "hooks");
-    spawnSync11("git", ["-C", mainRepoRoot, "config", "core.hooksPath", absolute], { stdio: "pipe" });
+    spawnSync12("git", ["-C", mainRepoRoot, "config", "core.hooksPath", absolute], { stdio: "pipe" });
   } catch {}
 }
 function markBeadsSkipWorktree(worktreePath) {
   try {
-    const trackedResult = spawnSync11("git", ["-C", worktreePath, "ls-files", "--", ".beads"], {
+    const trackedResult = spawnSync12("git", ["-C", worktreePath, "ls-files", "--", ".beads"], {
       cwd: worktreePath,
       stdio: "pipe",
       encoding: "utf8"
@@ -40535,7 +40590,7 @@ function markBeadsSkipWorktree(worktreePath) {
     const trackedPaths = (trackedResult.stdout ?? "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
     if (trackedPaths.length === 0)
       return;
-    spawnSync11("git", ["-C", worktreePath, "update-index", "--skip-worktree", "--", ...trackedPaths], {
+    spawnSync12("git", ["-C", worktreePath, "update-index", "--skip-worktree", "--", ...trackedPaths], {
       cwd: worktreePath,
       stdio: "pipe",
       encoding: "utf8"
@@ -40822,7 +40877,7 @@ __export(exports_merge, {
   checkEpicUnresolvedGuard: () => checkEpicUnresolvedGuard,
   assertMainRepoCleanForMerge: () => assertMainRepoCleanForMerge
 });
-import { spawnSync as spawnSync12 } from "child_process";
+import { spawnSync as spawnSync13 } from "child_process";
 import { existsSync as existsSync18, readFileSync as readFileSync17, readdirSync as readdirSync8 } from "fs";
 import { join as join22 } from "path";
 function parseOptions(argv) {
@@ -40861,7 +40916,7 @@ function parseOptions(argv) {
   return { target, rebuild, targetBranch: targetBranch ? validateTargetBranchRef(targetBranch) : undefined };
 }
 function runCommand(command, args, cwd = process.cwd()) {
-  return spawnSync12(command, args, {
+  return spawnSync13(command, args, {
     cwd,
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "pipe"]
@@ -42973,7 +43028,7 @@ __export(exports_node_supervisor, {
   NodeSupervisor: () => NodeSupervisor
 });
 import { createHash as createHash4 } from "crypto";
-import { spawnSync as spawnSync13 } from "child_process";
+import { spawnSync as spawnSync14 } from "child_process";
 function hashOutput(output2, salt) {
   if (!output2)
     return null;
@@ -43018,7 +43073,7 @@ function parseCreatedBeadId(stdout) {
   return match[1];
 }
 function runCommandOrThrow(command, args, cwd = process.cwd()) {
-  const result = spawnSync13(command, args, {
+  const result = spawnSync14(command, args, {
     cwd,
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "pipe"]
@@ -44087,7 +44142,7 @@ class NodeSupervisor {
     if (!this.opts.sourceBeadId)
       return;
     const notes = this.buildCompletionSummary(options2);
-    const result = spawnSync13("bd", ["update", this.opts.sourceBeadId, "--notes", notes], {
+    const result = spawnSync14("bd", ["update", this.opts.sourceBeadId, "--notes", notes], {
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "pipe"]
     });
@@ -44100,7 +44155,7 @@ class NodeSupervisor {
     }
   }
   runCommand(command, args, cwd) {
-    const result = spawnSync13(command, args, {
+    const result = spawnSync14(command, args, {
       cwd,
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "pipe"]
@@ -44300,8 +44355,8 @@ class NodeSupervisor {
     }
   }
   runFinalQualityGates(cwd) {
-    const lintPass = spawnSync13("npm", ["run", "lint"], { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }).status === 0;
-    const tscPass = spawnSync13("npx", ["tsc", "--noEmit"], { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }).status === 0;
+    const lintPass = spawnSync14("npm", ["run", "lint"], { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }).status === 0;
+    const tscPass = spawnSync14("npx", ["tsc", "--noEmit"], { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }).status === 0;
     return {
       lint: lintPass ? "pass" : "fail",
       tsc: tscPass ? "pass" : "fail"
@@ -45757,9 +45812,9 @@ __export(exports_epic, {
   handleEpicCommand: () => handleEpicCommand,
   handleEpicAbandonCommand: () => handleEpicAbandonCommand
 });
-import { spawnSync as spawnSync14 } from "child_process";
+import { spawnSync as spawnSync15 } from "child_process";
 function runCommand2(command, args, cwd = process.cwd()) {
-  return spawnSync14(command, args, {
+  return spawnSync15(command, args, {
     cwd,
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "pipe"]
@@ -46430,7 +46485,7 @@ var init_epic = __esm(() => {
 });
 
 // src/cli/version-check.ts
-import { spawnSync as spawnSync15 } from "child_process";
+import { spawnSync as spawnSync16 } from "child_process";
 import { existsSync as existsSync22, mkdirSync as mkdirSync11, readFileSync as readFileSync21, writeFileSync as writeFileSync12 } from "fs";
 import { dirname as dirname11, join as join26 } from "path";
 import { createRequire as createRequire4 } from "module";
@@ -46498,7 +46553,7 @@ function compareVersions(left, right) {
   return 0;
 }
 function runRemoteTagLookup() {
-  const result = spawnSync15("git", ["ls-remote", "--tags", "--refs", "origin"], {
+  const result = spawnSync16("git", ["ls-remote", "--tags", "--refs", "origin"], {
     encoding: "utf8",
     stdio: "pipe",
     timeout: NETWORK_TIMEOUT_MS
@@ -46563,7 +46618,7 @@ __export(exports_status, {
   run: () => run16,
   detectJobOutputMode: () => detectJobOutputMode
 });
-import { spawnSync as spawnSync16 } from "child_process";
+import { spawnSync as spawnSync17 } from "child_process";
 import { existsSync as existsSync23, readFileSync as readFileSync22 } from "fs";
 import { join as join27 } from "path";
 function ok2(msg) {
@@ -46584,7 +46639,7 @@ function section(label) {
 ${bold11(`\u2500\u2500 ${label} ${line}`)}`);
 }
 function cmd(bin, args) {
-  const r = spawnSync16(bin, args, {
+  const r = spawnSync17(bin, args, {
     encoding: "utf8",
     stdio: "pipe",
     timeout: 5000
@@ -46592,7 +46647,7 @@ function cmd(bin, args) {
   return { ok: r.status === 0 && !r.error, stdout: (r.stdout ?? "").trim() };
 }
 function isInstalled2(bin) {
-  return spawnSync16("which", [bin], { encoding: "utf8", timeout: 2000 }).status === 0;
+  return spawnSync17("which", [bin], { encoding: "utf8", timeout: 2000 }).status === 0;
 }
 function formatElapsed2(s) {
   if (s.elapsed_s === undefined)
@@ -47315,11 +47370,11 @@ var exports_ps = {};
 __export(exports_ps, {
   run: () => run17
 });
-import { spawnSync as spawnSync17 } from "child_process";
+import { spawnSync as spawnSync18 } from "child_process";
 function loadBeadIdsForCurrentUser() {
   const ids = new Set;
   try {
-    const result = spawnSync17("bd", ["query", "assignee=me", "--json"], {
+    const result = spawnSync18("bd", ["query", "assignee=me", "--json"], {
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "pipe"],
       timeout: 5000
@@ -47686,7 +47741,7 @@ function formatPayloadStats(payloadJson) {
   }
 }
 function getBeadTitleFromBd(beadId) {
-  const result = spawnSync17("bd", ["show", beadId, "--json"], {
+  const result = spawnSync18("bd", ["show", beadId, "--json"], {
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "ignore"],
     timeout: 1500
@@ -49677,7 +49732,7 @@ async function run22() {
 // src/specialist/worktree-gc.ts
 import { existsSync as existsSync28, readdirSync as readdirSync14, readFileSync as readFileSync27 } from "fs";
 import { join as join32 } from "path";
-import { spawnSync as spawnSync18 } from "child_process";
+import { spawnSync as spawnSync19 } from "child_process";
 function readJobStatus2(jobDir) {
   const statusPath = join32(jobDir, "status.json");
   if (!existsSync28(statusPath))
@@ -49745,7 +49800,7 @@ function collectWorktreeGcCandidates(jobsDir) {
   return candidates;
 }
 function removeWorktreeDirectory(worktreePath) {
-  const result = spawnSync18("git", ["worktree", "remove", "--force", worktreePath], {
+  const result = spawnSync19("git", ["worktree", "remove", "--force", worktreePath], {
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -50372,7 +50427,7 @@ var exports_end = {};
 __export(exports_end, {
   run: () => run24
 });
-import { spawnSync as spawnSync19 } from "child_process";
+import { spawnSync as spawnSync20 } from "child_process";
 function parseOptions3(argv) {
   let beadId;
   let epicId;
@@ -50407,7 +50462,7 @@ function parseOptions3(argv) {
   return { beadId, epicId, rebuild, pr };
 }
 function runCommand3(command, args) {
-  const result = spawnSync19(command, args, { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
+  const result = spawnSync20(command, args, { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
   return {
     status: result.status,
     stdout: result.stdout ?? "",
@@ -50752,7 +50807,7 @@ var exports_attach = {};
 __export(exports_attach, {
   run: () => run27
 });
-import { execFileSync as execFileSync3, spawnSync as spawnSync20 } from "child_process";
+import { execFileSync as execFileSync3, spawnSync as spawnSync21 } from "child_process";
 import { readFileSync as readFileSync29 } from "fs";
 import { join as join34 } from "path";
 function exitWithError(message) {
@@ -50785,7 +50840,7 @@ async function run27() {
   if (!sessionName) {
     exitWithError("Job `" + jobId + "` has no tmux session. It may have been started without tmux or tmux was not installed.");
   }
-  const whichTmux = spawnSync20("which", ["tmux"], { stdio: "ignore" });
+  const whichTmux = spawnSync21("which", ["tmux"], { stdio: "ignore" });
   if (whichTmux.status !== 0) {
     exitWithError("tmux is not installed. Install tmux to use `specialists attach`.");
   }
@@ -51228,7 +51283,7 @@ __export(exports_doctor, {
   cleanupProcesses: () => cleanupProcesses
 });
 import { createHash as createHash5 } from "crypto";
-import { spawnSync as spawnSync21 } from "child_process";
+import { spawnSync as spawnSync22 } from "child_process";
 import { existsSync as existsSync31, lstatSync as lstatSync2, mkdirSync as mkdirSync12, readdirSync as readdirSync17, readFileSync as readFileSync31, readlinkSync as readlinkSync3, writeFileSync as writeFileSync15 } from "fs";
 import { dirname as dirname12, join as join36, relative as relative4, resolve as resolve13 } from "path";
 function ok3(msg) {
@@ -51252,11 +51307,11 @@ function section3(label) {
 ${bold13(`\u2500\u2500 ${label} ${line}`)}`);
 }
 function sp(bin, args) {
-  const r = spawnSync21(bin, args, { encoding: "utf8", stdio: "pipe", timeout: 5000 });
+  const r = spawnSync22(bin, args, { encoding: "utf8", stdio: "pipe", timeout: 5000 });
   return { ok: r.status === 0 && !r.error, stdout: (r.stdout ?? "").trim() };
 }
 function isInstalled3(bin) {
-  return spawnSync21("which", [bin], { encoding: "utf8", timeout: 2000 }).status === 0;
+  return spawnSync22("which", [bin], { encoding: "utf8", timeout: 2000 }).status === 0;
 }
 function loadJson2(path3) {
   if (!existsSync31(path3))
@@ -51695,7 +51750,7 @@ function checkClaudeMdFragments() {
     hint("install xtrm-tools to enable: xt claude-sync --check");
     return true;
   }
-  const result = spawnSync21("xt", ["claude-sync", "--check", "--json", "--cwd", projectRoot], {
+  const result = spawnSync22("xt", ["claude-sync", "--check", "--json", "--cwd", projectRoot], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -52177,7 +52232,7 @@ __export(exports_serve, {
 import { createServer } from "http";
 import { randomUUID as randomUUID3 } from "crypto";
 import { once } from "events";
-import { spawnSync as spawnSync22 } from "child_process";
+import { spawnSync as spawnSync23 } from "child_process";
 import { access, readdir as readdir2, readFile as readFile5, constants } from "fs/promises";
 import { existsSync as existsSync33 } from "fs";
 import { homedir as homedir5 } from "os";
@@ -52317,7 +52372,7 @@ function parseArgs13(argv) {
   return { port, concurrency, queueTimeoutMs, shutdownGraceMs, projectDir, dbPath, fallbackModel, auditFailureThreshold, allowSkills, allowSkillsRoots, reloadPollMs, readinessCanaryMode, readinessRequiredPiFlags, readinessCanarySpecialist, readinessCanaryTimeoutMs, logLevel };
 }
 function checkPiHelpForFlags(flags = DEFAULT_REQUIRED_PI_FLAGS) {
-  const result = spawnSync22("pi", ["--help"], { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
+  const result = spawnSync23("pi", ["--help"], { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
   if (result.error || result.status === 127)
     return "pi_binary_missing";
   const help = `${result.stdout ?? ""}
@@ -52553,7 +52608,7 @@ __export(exports_script, {
   parseArgs: () => parseArgs14,
   mapExitCode: () => mapExitCode
 });
-import { spawnSync as spawnSync23 } from "child_process";
+import { spawnSync as spawnSync24 } from "child_process";
 function parseVar(entry) {
   const index = entry.indexOf("=");
   if (index <= 0)
@@ -52656,7 +52711,7 @@ function printResult(result, json) {
   console.error(result.error);
 }
 function runUnderLock(lockPath, argv) {
-  const flock = spawnSync23("flock", ["-n", lockPath, "env", "SP_SCRIPT_NO_LOCK=1", process.execPath, process.argv[1], "script", ...argv], {
+  const flock = spawnSync24("flock", ["-n", lockPath, "env", "SP_SCRIPT_NO_LOCK=1", process.execPath, process.argv[1], "script", ...argv], {
     encoding: "utf-8",
     stdio: "inherit"
   });
@@ -52711,7 +52766,7 @@ async function run34() {
     "",
     "  Tracked work (primary)",
     '    bd create "Task title" -t task -p 1 --json',
-    "    specialists run <name> --bead <id> [--context-depth N]",
+    "    specialists chat <name> [prompt...] [--bead <id>] [--prompt <text>] [--context-depth N]",
     "    specialists ps <job-id> --json     # check status",
     '    bd close <id> --reason "Done"',
     "",
@@ -52721,6 +52776,7 @@ async function run34() {
     "  Rules",
     "    --bead is for tracked work",
     "    --prompt is for quick untracked work",
+    "    chat without --bead auto-creates ephemeral tracked beads",
     "    --context-depth defaults to 3 with --bead",
     "    --no-beads does not disable bead reading",
     "",
@@ -52849,7 +52905,7 @@ var init_help = __esm(() => {
 });
 
 // src/index.ts
-import { spawnSync as spawnSync24 } from "child_process";
+import { spawnSync as spawnSync25 } from "child_process";
 
 // ../../../node_modules/zod/v4/core/core.js
 var NEVER2 = Object.freeze({
@@ -60704,7 +60760,7 @@ async function run35() {
     if (wantsHelp()) {
       console.log([
         "",
-        "Usage: specialists chat <name> [prompt...] --bead <id> [--context-depth N] [--model M]",
+        "Usage: specialists chat <name> [prompt...] [--bead <id>] [--prompt <text>] [--context-depth N] [--model M]",
         "",
         "Interactive shell for a specialist run. Streams job output into a TUI.",
         ""
@@ -61391,7 +61447,7 @@ async function run35() {
   }
   if (sub === "release") {
     console.error("Deprecated. Use `xt release prepare/publish`. This alias will be removed in v4.0.");
-    const result = spawnSync24("xt", ["release", ...process.argv.slice(3)], { stdio: "inherit" });
+    const result = spawnSync25("xt", ["release", ...process.argv.slice(3)], { stdio: "inherit" });
     if (result.error) {
       console.error(`Failed to run xt release: ${result.error.message}`);
       process.exit(1);
