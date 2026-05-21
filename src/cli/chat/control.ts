@@ -7,6 +7,7 @@ export type Result =
   | { ok: false; error_code: 'not_waiting' | 'already_stopped' | 'unknown_command' | 'missing_notes'; likely_cause: string; next_safe_action: 'none' | 'rejoin' };
 
 export interface ControlOps {
+  getJobState(jobId: string): Promise<ChatState | null>;
   stopJob(jobId: string): Promise<Result>;
   finalizeJob(jobId: string): Promise<Result>;
   appendBeadNote(beadId: string, text: string): Promise<Result>;
@@ -42,7 +43,8 @@ export function createChatControl(controlOps: ControlOps): ChatControl {
       return dispatchInput(text, ctx);
     },
     async executeInput(text, ctx) {
-      const action = dispatchInput(text, { jobState: ctx.jobState });
+      const freshState = isPlainText(text) ? await controlOps.getJobState(ctx.jobId) : ctx.jobState;
+      const action = dispatchInput(text, { jobState: freshState ?? ctx.jobState });
       if (action.kind === 'info' || action.kind === 'error' || action.kind === 'reject') return action;
       if (action.kind === 'stop') return handleResult(await controlOps.stopJob(ctx.jobId), 'stop');
       if (action.kind === 'finalize') return handleResult(await controlOps.finalizeJob(ctx.jobId), 'finalize');
@@ -62,6 +64,10 @@ export function dispatchInput(text: string, ctx: DispatchInputContext): ChatActi
   if (trimmed.startsWith('/')) return parseSlashCommand(trimmed);
   if (isTerminalState(ctx.jobState)) return { kind: 'reject', message: 'freeform input rejected in terminal state' };
   return ctx.jobState === 'waiting' ? { kind: 'resume', text } : { kind: 'steer', text };
+}
+
+function isPlainText(text: string): boolean {
+  return !text.trim().startsWith('/');
 }
 
 function parseSlashCommand(text: string): ChatAction {

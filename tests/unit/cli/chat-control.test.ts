@@ -41,6 +41,7 @@ describe('dispatchInput', () => {
 describe('ControlOps contract', () => {
   it('/stop on already-stopped job is no-op info', async () => {
     const controlOps: ControlOps = {
+      getJobState: vi.fn().mockResolvedValue('running'),
       stopJob: vi.fn().mockResolvedValue(ok('already stopped')),
       finalizeJob: vi.fn().mockResolvedValue(ok()),
       appendBeadNote: vi.fn().mockResolvedValue(ok()),
@@ -53,6 +54,7 @@ describe('ControlOps contract', () => {
 
   it('/finalize on non-waiting job returns structured error envelope', async () => {
     const controlOps: ControlOps = {
+      getJobState: vi.fn().mockResolvedValue('running'),
       stopJob: vi.fn().mockResolvedValue(ok()),
       finalizeJob: vi.fn().mockResolvedValue(err('not_waiting', 'job is running', 'rejoin')),
       appendBeadNote: vi.fn().mockResolvedValue(ok()),
@@ -65,6 +67,7 @@ describe('ControlOps contract', () => {
 
   it('empty /notes returns error before ControlOps.appendBeadNote', async () => {
     const controlOps: ControlOps = {
+      getJobState: vi.fn().mockResolvedValue('running'),
       stopJob: vi.fn().mockResolvedValue(ok()),
       finalizeJob: vi.fn().mockResolvedValue(ok()),
       appendBeadNote: vi.fn().mockResolvedValue(ok()),
@@ -73,5 +76,21 @@ describe('ControlOps contract', () => {
     const chat = createChatControl(controlOps);
     expect(await chat.executeInput('/notes   ', { jobId: 'job-1', jobState: 'running', beadId: 'bd.1' })).toEqual({ kind: 'info', message: 'usage: /notes <text>' });
     expect(controlOps.appendBeadNote).not.toHaveBeenCalled();
+  });
+
+  it('re-reads live state on each plain-text submit', async () => {
+    const getJobState = vi.fn().mockResolvedValueOnce('running').mockResolvedValueOnce('done');
+    const mailboxOps = {
+      getJobState,
+      stopJob: vi.fn().mockResolvedValue(ok()),
+      finalizeJob: vi.fn().mockResolvedValue(ok()),
+      appendBeadNote: vi.fn().mockResolvedValue(ok()),
+    } satisfies ControlOps;
+
+    const chat = createChatControl(mailboxOps);
+
+    expect(await chat.executeInput('first turn', { jobId: 'job-1', jobState: 'running' })).toEqual({ kind: 'steer', text: 'first turn' });
+    expect(await chat.executeInput('second turn', { jobId: 'job-1', jobState: 'running' })).toEqual({ kind: 'reject', message: 'freeform input rejected in terminal state' });
+    expect(getJobState).toHaveBeenCalledTimes(2);
   });
 });
