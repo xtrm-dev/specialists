@@ -32,7 +32,7 @@ export async function run(): Promise<void> {
   });
 
   const piTui = (await import('@earendil-works/pi-tui')) as PiTuiModule;
-  const { TUI, ProcessTerminal, Container, Input, Key, matchesKey, addInputListener } = piTui as any;
+  const { TUI, ProcessTerminal, Container, Input } = piTui as any;
 
   const terminal = new ProcessTerminal();
   const tui = new TUI(terminal);
@@ -53,11 +53,11 @@ export async function run(): Promise<void> {
 
   const cleanup = createCleanup(tui, terminal, status);
   const signalCleanup = installSignalGuards(cleanup, input);
-  const detachInputListener = addInputListener((data: Buffer) => {
-    if (!matchesKey(data, Key.ctrl('c'))) return false;
+  const onStdinData = (data: Buffer) => {
+    if (data.toString('utf8') !== '\u0003') return;
     void cleanup.stopJobAndExit(args.beadId);
-    return true;
-  });
+  };
+  process.stdin.on('data', onStdinData);
 
   try {
     tui.root = root;
@@ -70,8 +70,13 @@ export async function run(): Promise<void> {
       args: { name: args.name, prompt: args.prompt, model: args.model, keepAlive: true, noKeepAlive: false, forceJob: false, outputMode: 'human', background: false } as any,
       specialist,
       loader,
-      hooks: (specialist as any).hooks ?? ({} as any),
-      circuitBreaker: (specialist as any).circuitBreaker ?? ({} as any),
+      hooks: (specialist as any).hooks ?? { emit: () => undefined },
+      circuitBreaker: (specialist as any).circuitBreaker ?? {
+        isAvailable: () => true,
+        getState: () => 'CLOSED',
+        recordFailure: () => undefined,
+        recordSuccess: () => undefined,
+      },
       prompt: buildPrompt(args),
       beadsWriteNotes: true,
       perm: specialist.specialist.execution.permission_required,
@@ -82,7 +87,7 @@ export async function run(): Promise<void> {
 
     await tui.start();
   } finally {
-    detachInputListener?.();
+    process.stdin.off('data', onStdinData);
     signalCleanup();
     await cleanup.stop();
   }
