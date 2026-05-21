@@ -101,9 +101,10 @@ export async function launchSpecialist(opts: LaunchSpecialistOptions): Promise<v
   } catch (error: any) {
     runError = error;
     stopTailer?.();
-  } finally {
-    stopTailer?.();
   }
+
+  // Drain remaining events before printing footer
+  stopTailer?.();
 
   if (opts.effectiveBeadId && opts.workingDirectory) {
     try {
