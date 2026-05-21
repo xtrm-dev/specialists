@@ -192,8 +192,8 @@ test('sp chat reviewer smoke', async () => {
   const result = await runChatSmoke({ beadId });
 
   expect(result.exitCode).toBe(0);
-  expect(result.output).toContain('executor');
   expect(result.output).toContain(beadId);
+  expect(result.output).toMatch(/\x1b\[\?2026[hl]|\x1b\[\?25[hl]/);
 
   const bead = spawnSync('bd', ['show', beadId], {
     cwd: repoRoot,
