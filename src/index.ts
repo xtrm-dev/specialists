@@ -381,7 +381,7 @@ async function run() {
     if (wantsHelp()) {
       console.log([
         '',
-        'Usage: specialists chat <name> [prompt...] --bead <id> [--context-depth N] [--model M]',
+        'Usage: specialists chat <name> [prompt...] [--bead <id>] [--prompt <text>] [--context-depth N] [--model M]',
         '',
         'Interactive shell for a specialist run. Streams job output into a TUI.',
         '',
