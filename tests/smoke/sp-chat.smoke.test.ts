@@ -1,10 +1,11 @@
-import { afterAll, expect, test } from 'bun:test';
+import { afterAll, expect, test } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const repoRoot = resolve(import.meta.dir, '../..');
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const transcriptDir = mkdtempSync(join(tmpdir(), 'sp-chat-smoke-'));
 const createdBeads = new Set<string>();
 const createdJobs = new Set<string>();

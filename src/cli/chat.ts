@@ -32,7 +32,7 @@ export async function run(): Promise<void> {
   });
 
   const piTui = (await import('@earendil-works/pi-tui')) as PiTuiModule;
-  const { TUI, ProcessTerminal, Container, Input, Key, matchesKey } = piTui as any;
+  const { TUI, ProcessTerminal, Container, Input } = piTui as any;
 
   const terminal = new ProcessTerminal();
   const tui = new TUI(terminal);
@@ -54,7 +54,7 @@ export async function run(): Promise<void> {
   const cleanup = createCleanup(tui, terminal, status);
   const signalCleanup = installSignalGuards(cleanup, input);
   const onStdinData = (data: Buffer) => {
-    if (!matchesKey(data, Key.ctrl('c'))) return;
+    if (data.toString('utf8') !== '\u0003') return;
     void cleanup.stopJobAndExit(args.beadId);
   };
   process.stdin.on('data', onStdinData);
@@ -70,7 +70,7 @@ export async function run(): Promise<void> {
       args: { name: args.name, prompt: args.prompt, model: args.model, keepAlive: true, noKeepAlive: false, forceJob: false, outputMode: 'human', background: false } as any,
       specialist,
       loader,
-      hooks: (specialist as any).hooks ?? ({} as any),
+      hooks: (specialist as any).hooks ?? { emit: () => undefined },
       circuitBreaker: (specialist as any).circuitBreaker ?? {
         isAvailable: () => true,
         getState: () => 'CLOSED',
