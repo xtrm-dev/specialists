@@ -35,7 +35,7 @@ export async function run(): Promise<void> {
   });
 
   const piTui = (await import('@earendil-works/pi-tui')) as PiTuiModule;
-  const { TUI, ProcessTerminal, Container, Input, addInputListener } = piTui as any;
+  const { TUI, ProcessTerminal, Container, Input } = piTui as any;
 
   const terminal = new ProcessTerminal();
   const tui = new TUI(terminal);
@@ -63,8 +63,8 @@ export async function run(): Promise<void> {
   process.stdin.on('data', onStdinData);
 
   let shouldExit = false;
-  const removeInputListener = typeof addInputListener === 'function'
-    ? addInputListener(async (text: string) => {
+  const removeInputListener = typeof tui.addInputListener === 'function'
+    ? tui.addInputListener(async (text: string) => {
       const action = control.dispatchInput(text, { jobState: 'running' as any });
       if (action.kind === 'quit') {
         shouldExit = true;
@@ -76,6 +76,7 @@ export async function run(): Promise<void> {
 
   try {
     tui.root = root;
+    tui.setFocus(input);
     status.start();
     feed.appendEvent('chat', `launching ${args.name}`);
     feed.appendEvent('chat', `context depth ${args.contextDepth}`);
