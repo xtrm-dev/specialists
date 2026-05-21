@@ -13,6 +13,7 @@ import {
   type NodeRunRow,
 } from '../specialist/observability-sqlite.js';
 import { BeadsClient, buildBeadContext } from '../specialist/beads.js';
+import { appendBeadNote } from '../specialist/bead-notes.js';
 import { Supervisor } from '../specialist/supervisor.js';
 import { resolveJobsDir } from '../specialist/job-root.js';
 import { resolveNodeRefWithClient } from '../specialist/node-resolve.js';
@@ -824,19 +825,10 @@ function buildFindingNotes(nodeId: string, findingId: string, finding: NodeMemor
   return lines.join('\n');
 }
 
-function promoteFindingToBead(beadId: string, notes: string): void {
-  const result = spawnSync('bd', ['update', beadId, '--notes', notes], {
-    encoding: 'utf-8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-
-  if (result.error) {
-    throw result.error;
-  }
-
-  if (result.status !== 0) {
-    const errorMessage = result.stderr?.trim() || result.stdout?.trim() || `bd update exited with status ${result.status}`;
-    throw new Error(errorMessage);
+async function promoteFindingToBead(beadId: string, notes: string): Promise<void> {
+  const result = await appendBeadNote(beadId, notes);
+  if (!result.ok) {
+    throw new Error(result.error || 'bd update failed');
   }
 }
 
@@ -862,7 +854,7 @@ async function handleNodePromote(args: ParsedNodeArgs): Promise<void> {
     }
 
     const notes = buildFindingNotes(nodeId, findingId, finding);
-    promoteFindingToBead(beadId, notes);
+    await promoteFindingToBead(beadId, notes);
 
     if (args.jsonMode) {
       console.log(JSON.stringify({

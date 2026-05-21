@@ -5,6 +5,7 @@
 
 import { spawnSync } from 'node:child_process';
 
+
 export interface BeadDependency {
   id: string;
   title?: string;
