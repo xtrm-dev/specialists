@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -62,8 +62,9 @@ function createBead(title: string): string {
     env: { ...process.env, NO_COLOR: '1' },
   });
   expect(result.status).toBe(0);
-  const parsed = JSON.parse(result.stdout.trim());
-  const beadId = Array.isArray(parsed) ? parsed[0].id : parsed.id;
+  const parsed = JSON.parse(result.stdout.trim()) as { id?: string } | Array<{ id?: string }>;
+  const beadId = Array.isArray(parsed) ? parsed[0]?.id : parsed.id;
+  if (!beadId) throw new Error(`bd create returned no bead id: ${result.stdout}`);
   createdBeads.add(beadId);
   return beadId;
 }
@@ -83,20 +84,25 @@ function findJobIdForBead(beadId: string): string | null {
     env: { ...process.env, NO_COLOR: '1' },
   });
   expect(result.status).toBe(0);
-  const rows = JSON.parse(result.stdout);
-  const match = Array.isArray(rows)
-    ? rows.find((row: { bead_id?: string; specialist?: string; job_id?: string }) => row.bead_id === beadId && row.specialist === 'reviewer')
-    : null;
+  const rows = JSON.parse(result.stdout) as Array<{ bead_id?: string; specialist?: string; job_id?: string }>;
+  const match = rows.find((row) => row.bead_id === beadId && row.specialist === 'reviewer');
   const jobId = match?.job_id ?? null;
   if (jobId) createdJobs.add(jobId);
   return jobId;
 }
 
-test('sp chat reviewer smoke', async () => {
-  const beadId = createBead(`unitAI-smoke-${Date.now()}`);
-  const transcriptPath = join(transcriptDir, `sp-chat-${Date.now()}.log`);
+async function runChatSmoke(options: { beadId: string; preload?: string }): Promise<{ exitCode: number; output: string; transcript: string }> {
+  const transcriptPath = join(transcriptDir, `sp-chat-${Date.now()}-${Math.random().toString(16).slice(2)}.log`);
+  const command = [
+    'bun',
+    ...(options.preload ? ['--preload', options.preload] : []),
+    join(repoRoot, 'src/index.ts'),
+    'chat',
+    'reviewer',
+    '--bead',
+    options.beadId,
+  ].join(' ');
 
-  const command = `bun run ${JSON.stringify(join(repoRoot, 'src/index.ts'))} chat reviewer --bead ${JSON.stringify(beadId)}`;
   const session = spawn('script', ['-qfec', command, transcriptPath], {
     cwd: repoRoot,
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -127,12 +133,16 @@ test('sp chat reviewer smoke', async () => {
     }),
     wait(8000).then(() => 124),
   ]);
-
   const transcript = readTranscript(transcriptPath);
-  const output = `${combined}\n${transcript}`;
+  return { exitCode, output: `${combined}\n${transcript}`, transcript };
+}
 
-  expect(exitCode).toBe(0);
-  expect(output).toMatch(new RegExp(`executor/[^/]+/${beadId} · (starting|running|waiting|done|error|cancelled) ·`));
+test('sp chat reviewer smoke', async () => {
+  const beadId = createBead(`unitAI-smoke-${Date.now()}`);
+  const result = await runChatSmoke({ beadId });
+
+  expect(result.exitCode).toBe(0);
+  expect(result.output).toMatch(new RegExp(`executor/[^/]+/${beadId} · (starting|running|waiting|done|error|cancelled) ·`));
 
   const jobId = findJobIdForBead(beadId);
   expect(jobId).toBeTruthy();
@@ -151,4 +161,39 @@ test('sp chat reviewer smoke', async () => {
   });
   expect(bead.status).toBe(0);
   expect(bead.stdout).toContain('hello');
+}, 30000);
+
+test('sp chat cleanup still fires on induced TUI crash', async () => {
+  const beadId = createBead(`unitAI-smoke-crash-${Date.now()}`);
+  const preloadPath = join(transcriptDir, 'chat-crash.preload.ts');
+  writeFileSync(preloadPath, `
+import { ChatStatus } from ${JSON.stringify(join(repoRoot, 'src/cli/chat/status.js'))};
+const original = ChatStatus.prototype.render;
+ChatStatus.prototype.render = function renderCrash(width: number): string {
+  if (width > 0) throw new Error('intentional smoke crash');
+  return original.call(this, width);
+};
+`);
+
+  const result = await runChatSmoke({ beadId, preload: preloadPath });
+  expect(result.exitCode).not.toBe(0);
+  expect(result.output).toContain('intentional smoke crash');
+
+  const jobId = findJobIdForBead(beadId);
+  expect(jobId).toBeTruthy();
+  if (!jobId) throw new Error(`No reviewer job found for crashed bead ${beadId}`);
+
+  const ps = await runCli(['ps', '--json']);
+  expect(ps.status).toBe(0);
+  const jobs = JSON.parse(ps.stdout) as Array<{ job_id?: string; status?: string }>;
+  const job = jobs.find((row) => row.job_id === jobId);
+  expect(job?.status).toBeDefined();
+  expect(['cancelled', 'error', 'done']).toContain(job?.status);
+
+  const bead = spawnSync('bd', ['show', beadId], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    env: { ...process.env, NO_COLOR: '1' },
+  });
+  expect(bead.status).toBe(0);
 }, 30000);
