@@ -122,6 +122,8 @@ export async function launchSpecialist(opts: LaunchSpecialistOptions): Promise<v
     process.exit(1);
   }
 
+  stopTailer?.();
+
   const status = supervisor.readStatus(jobId);
   const secs = ((status?.last_event_at_ms ?? Date.now()) - (status?.started_at_ms ?? Date.now())) / 1000;
   const modelLabel = opts.formatFooterModel(status?.backend, status?.model);
