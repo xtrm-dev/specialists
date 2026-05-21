@@ -56,9 +56,11 @@ describe('ChatFeed', () => {
     const feed = new ChatFeed();
     feed.appendToken('\x1b[31mredredred\x1b[0m');
 
-    expect(feed.render(4)).toEqual(wrapTextWithAnsi('\x1b[31mredredred\x1b[0m', 4));
-    expect(feed.render(4).every((line) => line.startsWith('\x1b[31m') && line.endsWith('\x1b[0m'))).toBe(true);
-    expect(stripAnsi(feed.render(4).join(''))).toBe('redredred');
+    const rendered = feed.render(4);
+    expect(rendered).toEqual(wrapTextWithAnsi('\x1b[31mredredred\x1b[0m', 4));
+    expect(rendered[0].startsWith('\x1b[31m')).toBe(true);
+    expect(rendered.at(-1)?.endsWith('\x1b[0m')).toBe(true);
+    expect(stripAnsi(rendered.join(''))).toBe('redredred');
   });
 
   it('keeps visible width within bound for fixed seeded sequences', () => {

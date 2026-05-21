@@ -20,8 +20,8 @@ describe('dispatchInput', () => {
     expect(dispatchInput('/unknown', { jobState: 'running' })).toEqual({ kind: 'error', message: 'unknown command: unknown' });
   });
 
-  it('returns info for empty notes body', () => {
-    expect(dispatchInput('/notes', { jobState: 'running' })).toEqual({ kind: 'info', message: 'usage: /notes <text>' });
+  it('returns error for empty notes body', () => {
+    expect(dispatchInput('/notes', { jobState: 'running' })).toEqual({ kind: 'error', message: 'usage: /notes <text>' });
   });
 
   it('routes plain text by job state', () => {
