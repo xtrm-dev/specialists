@@ -40330,16 +40330,48 @@ async function run13() {
     appendBeadNote: async () => ({ ok: true, message: "note appended" })
   });
   const input2 = new Input2({ placeholder: "Type message, /quit, /stop, /finalize, /show, /notes ..." });
-  const root = new Container2({
-    direction: "column",
-    children: [feed, status, input2]
+  const root = new Container2;
+  root.addChild(feed);
+  root.addChild({
+    render: (width) => [status.render(width)],
+    invalidate: () => {
+      return;
+    }
   });
+  root.addChild(input2);
   const cleanup = createCleanup(tui, terminal, status);
   const signalCleanup = installSignalGuards(cleanup, input2);
   let shouldExit = false;
+  let currentJobId = "";
+  let resolveExitRequest = null;
+  const exitRequested = new Promise((resolve9) => {
+    resolveExitRequest = () => resolve9(true);
+  });
+  const appendEvent = (type, details) => {
+    feed.appendEvent(type, details);
+    tui.requestRender();
+  };
+  const restoreStderr = redirectStderrToFeed({
+    append: (text) => appendEvent("stderr", text)
+  });
+  input2.onSubmit = (text) => {
+    input2.setValue("");
+    handleSubmittedInput({
+      text,
+      getJobId: () => currentJobId,
+      getJobState: async () => currentJobId ? await loadJobState(currentJobId) : "running",
+      control,
+      appendEvent,
+      requestRender: () => tui.requestRender(),
+      requestExit: () => {
+        shouldExit = true;
+        resolveExitRequest?.();
+      }
+    });
+  };
   const removeInputListener = typeof tui.addInputListener === "function" ? tui.addInputListener((data) => {
     if (matchesKey2 && Key2 && matchesKey2(data, Key2.ctrl("c"))) {
-      cleanup.stopJobAndExit(beadId);
+      cleanup.stopJobAndExit(currentJobId);
       return { consume: true };
     }
     return;
@@ -40377,6 +40409,7 @@ async function run13() {
         }
       },
       prompt: buildPrompt(args),
+      effectiveBeadId: beadId,
       beadsWriteNotes: true,
       perm: specialist.specialist.execution.permission_required,
       jobsDir: ".specialists/jobs",
@@ -40384,9 +40417,12 @@ async function run13() {
         return;
       },
       formatFooterModel: (backend, model) => formatFooterModel(backend, model),
-      onProgress: (delta) => feed.appendEvent("assistant", delta),
-      onMeta: (meta) => feed.appendEvent("chat", `${meta.backend}/${meta.model}`),
-      onJobStarted: ({ id }) => feed.appendEvent("chat", `job started: ${id}`)
+      onProgress: (delta) => appendEvent("assistant", delta),
+      onMeta: (meta) => appendEvent("chat", `${meta.backend}/${meta.model}`),
+      onJobStarted: ({ id }) => {
+        currentJobId = id;
+        appendEvent("chat", `job started: ${id}`);
+      }
     });
     const launchDone = launchPromise.then(() => {
       dbg("launchPromise resolved");
@@ -40471,6 +40507,45 @@ async function loadJobState(jobId) {
 }
 function formatFooterModel(backend, model) {
   return model ?? backend ?? "";
+}
+async function handleSubmittedInput(deps) {
+  deps.appendEvent("user", deps.text);
+  const jobId = deps.getJobId();
+  const jobState = await deps.getJobState() ?? "running";
+  const action = deps.control.dispatchInput(deps.text, { jobState });
+  if (action.kind === "quit") {
+    deps.appendEvent("chat", "detaching; specialist job left running");
+    deps.requestExit();
+    return;
+  }
+  if (action.kind === "steer" || action.kind === "resume") {
+    deps.appendEvent("chat", `${action.kind} queued for ${jobId || "pending job"}`);
+    return;
+  }
+  if ("message" in action)
+    deps.appendEvent("chat", action.message);
+  else
+    deps.appendEvent("chat", `${action.kind} requested for ${jobId || "pending job"}`);
+  deps.requestRender();
+}
+function redirectStderrToFeed(feed) {
+  const originalWrite = process.stderr.write.bind(process.stderr);
+  process.stderr.write = (chunk, encoding, callback) => {
+    const text = Buffer.isBuffer(chunk) ? chunk.toString(typeof encoding === "string" ? encoding : "utf8") : String(chunk);
+    for (const line of text.split(/\r?\n/)) {
+      const trimmed = line.trimEnd();
+      if (trimmed)
+        feed.append(trimmed);
+    }
+    if (typeof encoding === "function")
+      encoding(null);
+    if (typeof callback === "function")
+      callback(null);
+    return true;
+  };
+  return () => {
+    process.stderr.write = originalWrite;
+  };
 }
 function createCleanup(tui, terminal, status) {
   const state = { done: false };
