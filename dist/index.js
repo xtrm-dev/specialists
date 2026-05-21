@@ -40116,6 +40116,7 @@ class ChatStatus {
   lastSignature = null;
   timer = null;
   disposed = false;
+  targetJobId = null;
   constructor(tui, options2 = {}) {
     this.tui = tui;
     this.pollIntervalMs = Math.max(DEFAULT_POLL_INTERVAL_MS, options2.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
@@ -40134,6 +40135,10 @@ class ChatStatus {
     this.timer = null;
     this.disposed = true;
   }
+  setJobId(jobId) {
+    this.targetJobId = jobId;
+    this.poll();
+  }
   render(width) {
     if (!this.currentStatus)
       return truncateToWidth("", width);
@@ -40142,7 +40147,8 @@ class ChatStatus {
     const state = this.currentStatus.status;
     const tokenUsage = this.currentStatus.metrics?.token_usage?.total_tokens;
     const model = formatModel(this.currentStatus);
-    const line = `executor/${jobId}/${beadId} \xB7 ${state} \xB7 ${formatTokenCount(tokenUsage)} tok \xB7 ${model}`;
+    const specialist = this.currentStatus.specialist ?? "job";
+    const line = `${specialist}/${jobId}/${beadId} \xB7 ${state} \xB7 ${formatTokenCount(tokenUsage)} tok \xB7 ${model}`;
     return truncateToWidth(line, width);
   }
   async poll() {
@@ -40159,6 +40165,11 @@ class ChatStatus {
   readCurrentStatus() {
     try {
       const statuses = loadStatuses();
+      if (this.targetJobId) {
+        const target = statuses.find((status) => status.id === this.targetJobId);
+        if (target)
+          return target;
+      }
       return selectCurrentStatus(statuses);
     } catch {
       return null;
@@ -40284,13 +40295,512 @@ var init_control = __esm(() => {
   SLASH_COMMANDS = new Set(["stop", "finalize", "notes", "show", "quit"]);
 });
 
+// src/cli/format-helpers.ts
+function formatTime(t) {
+  return new Date(t).toISOString().slice(11, 19);
+}
+function formatElapsed(seconds) {
+  if (seconds < 60)
+    return `${seconds}s`;
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return s > 0 ? `${m}m ${s}s` : `${m}m`;
+}
+function formatCostUsd(costUsd) {
+  if (costUsd === undefined || !Number.isFinite(costUsd))
+    return null;
+  return `$${costUsd.toFixed(6)}`;
+}
+function formatTokenUsageSummary(tokenUsage) {
+  if (!tokenUsage)
+    return [];
+  const parts = [];
+  if (tokenUsage.total_tokens !== undefined)
+    parts.push(`tokens=${tokenUsage.total_tokens}`);
+  if (tokenUsage.input_tokens !== undefined)
+    parts.push(`in=${tokenUsage.input_tokens}`);
+  if (tokenUsage.output_tokens !== undefined)
+    parts.push(`out=${tokenUsage.output_tokens}`);
+  const cost = formatCostUsd(tokenUsage.cost_usd);
+  if (cost)
+    parts.push(`cost=${cost}`);
+  return parts;
+}
+function getEventLabel(type) {
+  return EVENT_LABELS[type] ?? type.slice(0, 5).toUpperCase();
+}
+
+class JobColorMap {
+  colors = new Map;
+  nextIdx = 0;
+  getColor(jobId) {
+    let color = this.colors.get(jobId);
+    if (!color) {
+      color = JOB_COLORS[this.nextIdx % JOB_COLORS.length];
+      this.colors.set(jobId, color);
+      this.nextIdx++;
+    }
+    return color;
+  }
+  get(jobId) {
+    return this.getColor(jobId);
+  }
+  has(jobId) {
+    return this.colors.has(jobId);
+  }
+  get size() {
+    return this.colors.size;
+  }
+}
+function formatToolArgValue(value, maxLen = 240) {
+  const raw = typeof value === "string" ? value : JSON.stringify(value);
+  const flat = raw.replace(/\s+/g, " ").trim();
+  return flat.length > maxLen ? `${flat.slice(0, maxLen - 3)}...` : flat;
+}
+function formatToolDetail(event) {
+  const toolName = cyan6(event.tool);
+  if (event.phase === "start") {
+    if (typeof event.args?.command === "string") {
+      return `${toolName}: ${yellow10(formatToolArgValue(event.args.command))}`;
+    }
+    if (event.args && Object.keys(event.args).length > 0) {
+      const argStr = Object.entries(event.args).map(([k, v]) => `${k}=${formatToolArgValue(v)}`).join(" ");
+      return `${toolName}: ${dim9(argStr)}`;
+    }
+    return `${toolName}: ${dim9("start")}`;
+  }
+  if (event.phase === "end" && event.is_error) {
+    const summary = event.result_summary?.split(`
+`)[0]?.trim().slice(0, 120);
+    return summary ? `${toolName}: ${red2(summary)}` : `${toolName}: ${red2("error")}`;
+  }
+  return `${toolName}: ${dim9(event.phase)}`;
+}
+function formatEventLine(event, options2) {
+  const ts = dim9(formatTime(event.t));
+  const job = options2.colorize(`[${options2.jobId}]`);
+  const node = options2.nodeId ? magenta3(`[\u2B22${options2.nodeId}]`) : "";
+  const bead = dim9(`[${options2.beadId ?? "-"}]`);
+  const label = options2.colorize(bold11(getEventLabel(event.type).padEnd(5)));
+  const hasContextPct = Number.isFinite(options2.contextPct);
+  const contextPct = hasContextPct ? Math.min(100, Math.max(0, Math.round(options2.contextPct))) : null;
+  const contextBadge = contextPct === null ? "" : dim9(`[${contextPct}%]`);
+  const detailParts = [];
+  let detail = "";
+  if (event.type === "meta") {
+    if (event.model === "gitnexus_analyze_started") {
+      detailParts.push("gitnexus=analyze_started");
+      detailParts.push(`source=${event.backend}`);
+    } else if (event.model === "gitnexus_analyze_start_failed") {
+      detailParts.push("gitnexus=analyze_start_failed");
+      detailParts.push(`reason=${event.backend}`);
+    } else {
+      detailParts.push(`model=${event.model}`);
+      detailParts.push(`backend=${event.backend}`);
+      if (event.source)
+        detailParts.push(`source=${event.source}`);
+    }
+  } else if (event.type === "tool") {
+    detail = formatToolDetail(event);
+  } else if (event.type === "error") {
+    detailParts.push(`source=${event.source}`);
+    detailParts.push(`error=${event.error_message}`);
+  } else if (event.type === "auto_commit_success" || event.type === "auto_commit_skipped" || event.type === "auto_commit_failed") {
+    const status = event.type.replace("auto_commit_", "");
+    detailParts.push(`status=${status}`);
+    if (event.commit_sha)
+      detailParts.push(`commit=${event.commit_sha.slice(0, 12)}`);
+    if (event.committed_files) {
+      detailParts.push(`files=${event.committed_files.length}`);
+      if (event.committed_files.length > 0) {
+        const filePreview = event.committed_files.slice(0, 3).join(",");
+        detailParts.push(`paths=${filePreview}${event.committed_files.length > 3 ? ",\u2026" : ""}`);
+      }
+    }
+    if (event.reason)
+      detailParts.push(`reason=${event.reason}`);
+  } else if (event.type === "run_complete") {
+    detailParts.push(`status=${event.status}`);
+    detailParts.push(`elapsed=${formatElapsed(event.elapsed_s)}`);
+    const finishReason = event.finish_reason ?? event.metrics?.finish_reason;
+    if (finishReason)
+      detailParts.push(`finish=${finishReason}`);
+    const exitReason = event.exit_reason ?? event.metrics?.exit_reason;
+    if (exitReason)
+      detailParts.push(`exit=${exitReason}`);
+    const tokenUsage = event.token_usage ?? event.metrics?.token_usage;
+    detailParts.push(...formatTokenUsageSummary(tokenUsage));
+    const turns = event.metrics?.turns;
+    if (turns !== undefined)
+      detailParts.push(`turns=${turns}`);
+    const toolCalls = event.tool_calls ?? event.metrics?.tool_call_names;
+    if (toolCalls && toolCalls.length > 0) {
+      detailParts.push(`tools=${toolCalls.length}`);
+    } else if (event.metrics?.tool_calls !== undefined) {
+      detailParts.push(`tools=${event.metrics.tool_calls}`);
+    }
+    if (event.error) {
+      detailParts.push(`error=${event.error}`);
+    }
+  } else if (event.type === "run_start") {
+    detailParts.push(`specialist=${event.specialist}`);
+    if (event.bead_id) {
+      detailParts.push(`bead=${event.bead_id}`);
+    }
+  } else if (event.type === "token_usage") {
+    const usage3 = event.token_usage;
+    detailParts.push(...formatTokenUsageSummary({
+      total_tokens: usage3.total_tokens,
+      input_tokens: usage3.input_tokens,
+      output_tokens: usage3.output_tokens,
+      cost_usd: usage3.cost_usd
+    }));
+  } else if (event.type === "finish_reason") {
+    detailParts.push(`reason=${event.finish_reason}`);
+    detailParts.push(`source=${event.source}`);
+  } else if (event.type === "turn_summary") {
+    detailParts.push(`turn=${event.turn_index}`);
+    if (event.finish_reason)
+      detailParts.push(`reason=${event.finish_reason}`);
+    if (event.token_usage?.total_tokens !== undefined) {
+      detailParts.push(`total=${event.token_usage.total_tokens}`);
+    }
+    if (event.context_pct !== undefined && (event.context_health === "WARN" || event.context_health === "CRITICAL")) {
+      detailParts.push(`context=${event.context_pct.toFixed(2)}%`);
+      detailParts.push(`health=${event.context_health}`);
+    }
+    if (event.text_content) {
+      const preview = event.text_content.replace(/\n/g, " ").slice(0, 80);
+      detailParts.push(`"${preview}${event.text_content.length > 80 ? "\u2026" : ""}"`);
+    }
+  } else if (event.type === "compaction" || event.type === "retry") {
+    detailParts.push(`phase=${event.phase}`);
+  } else if (event.type === "text") {
+    detailParts.push("kind=assistant");
+  } else if (event.type === "thinking") {
+    detailParts.push("kind=model");
+  } else if (event.type === "message") {
+    detailParts.push(`phase=${event.phase}`);
+    detailParts.push(`role=${event.role}`);
+  } else if (event.type === "turn") {
+    detailParts.push(`phase=${event.phase}`);
+  }
+  if (!detail && detailParts.length > 0) {
+    detail = dim9(detailParts.join(" "));
+  }
+  return `${ts} ${job} ${node ? `${node} ` : ""}${bead} ${label} ${options2.specialist}${contextBadge ? ` ${contextBadge}` : ""}${detail ? ` ${detail}` : ""}`.trimEnd();
+}
+function formatEventInline(event) {
+  switch (event.type) {
+    case "meta":
+      return dim9(`[model] ${event.backend}/${event.model}`);
+    case "thinking":
+      return dim9("[thinking...]");
+    case "text":
+      return dim9("[response]");
+    case "tool": {
+      if (event.phase !== "start")
+        return null;
+      const firstArgVal = event.args ? Object.values(event.args)[0] : undefined;
+      const argStr = firstArgVal !== undefined ? ": " + (typeof firstArgVal === "string" ? firstArgVal.split(`
+`)[0].slice(0, 80) : JSON.stringify(firstArgVal).slice(0, 80)) : "";
+      return `${dim9("[tool]")}  ${cyan6(event.tool)}${dim9(argStr)}`;
+    }
+    case "stale_warning":
+      return yellow10(`[warning] ${event.reason}: ${Math.round(event.silence_ms / 1000)}s silent`);
+    case "error":
+      return red2(`[error] ${event.source}: ${event.error_message}`);
+    default:
+      return null;
+  }
+}
+function formatEventInlineDebounced(event, activePhase) {
+  if (event.type === "thinking" || event.type === "text") {
+    if (activePhase === event.type) {
+      return { line: null, nextPhase: activePhase };
+    }
+    return { line: formatEventInline(event), nextPhase: event.type };
+  }
+  return {
+    line: formatEventInline(event),
+    nextPhase: null
+  };
+}
+var dim9 = (s) => `\x1B[2m${s}\x1B[0m`, bold11 = (s) => `\x1B[1m${s}\x1B[0m`, cyan6 = (s) => `\x1B[36m${s}\x1B[0m`, yellow10 = (s) => `\x1B[33m${s}\x1B[0m`, red2 = (s) => `\x1B[31m${s}\x1B[0m`, green9 = (s) => `\x1B[32m${s}\x1B[0m`, blue3 = (s) => `\x1B[34m${s}\x1B[0m`, magenta3 = (s) => `\x1B[35m${s}\x1B[0m`, JOB_COLORS, EVENT_LABELS;
+var init_format_helpers = __esm(() => {
+  JOB_COLORS = [cyan6, yellow10, magenta3, green9, blue3, red2];
+  EVENT_LABELS = {
+    run_start: "START",
+    meta: "META",
+    thinking: "THINK",
+    tool: "TOOL",
+    text: "TEXT",
+    message: "MSG",
+    turn: "TURN",
+    run_complete: "DONE",
+    token_usage: "TOKNS",
+    finish_reason: "FINSH",
+    turn_summary: "TURN+",
+    compaction: "CMPCT",
+    retry: "RETRY",
+    error: "ERROR",
+    auto_commit_success: "AUTO+",
+    auto_commit_skipped: "AUTO-",
+    auto_commit_failed: "AUTO!"
+  };
+});
+
+// src/specialist/model-display.ts
+function extractModelId(model) {
+  if (!model)
+    return;
+  const trimmed = model.trim();
+  if (!trimmed)
+    return;
+  return trimmed.includes("/") ? trimmed.split("/").pop() : trimmed;
+}
+function toModelAlias(model) {
+  const modelId = extractModelId(model);
+  if (!modelId)
+    return;
+  if (modelId.startsWith("claude-")) {
+    return modelId.slice("claude-".length);
+  }
+  return modelId;
+}
+function formatSpecialistModel(specialist, model) {
+  const alias = toModelAlias(model);
+  return alias ? `${specialist}/${alias}` : specialist;
+}
+
+// src/specialist/control.ts
+var exports_control = {};
+__export(exports_control, {
+  stopJob: () => stopJob,
+  finalizeJob: () => finalizeJob
+});
+function resolveTerminalStatus(jobId) {
+  return hasRunCompleteEvent(jobId) ? "done" : "cancelled";
+}
+async function waitForProcessExit(pid, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isProcessAlive(pid))
+      return true;
+    await new Promise((resolve9) => setTimeout(resolve9, 100));
+  }
+  return !isProcessAlive(pid);
+}
+function tryKillProcessGroup(pid) {
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch (err) {
+    if (err.code !== "ESRCH")
+      throw err;
+  }
+}
+function createFinalizeSupervisor(jobsDir) {
+  const runner = { run: async () => {
+    throw new Error("finalize supervisor runner is not used");
+  } };
+  const runOptions = {};
+  return new Supervisor({ runner, runOptions, jobsDir });
+}
+function findReviewerPassInChain(supervisor, chainId) {
+  for (const id of supervisor.listChainJobIds(chainId)) {
+    const status = supervisor.readStatus(id);
+    if (!status || status.specialist !== "reviewer")
+      continue;
+    if (PASS_COMPLIANCE_VERDICT_REGEX2.test(supervisor.readResult(id) ?? ""))
+      return { reviewerJobId: id };
+  }
+  return null;
+}
+async function stopJob(jobId, opts = {}) {
+  const jobsDir = opts.jobsDir ?? resolveJobsDir(process.cwd());
+  const supervisor = new Supervisor({ runner: null, runOptions: null, jobsDir });
+  try {
+    const status = supervisor.readStatus(jobId);
+    if (!status)
+      throw new Error(`No job found: ${jobId}`);
+    if (status.status === "done" || status.status === "error" || status.status === "cancelled") {
+      process.stderr.write(`${dim10(`Job ${jobId} already finalized (${status.status}).`)}
+`);
+      return;
+    }
+    if (!status.pid)
+      throw new Error(`No PID recorded for job ${jobId}.`);
+    const pid = status.pid;
+    const tmuxSession = status.tmux_session;
+    const isAlreadyDead = !isProcessAlive(pid, status.started_at_ms);
+    const force = opts.force ?? false;
+    if (force && isAlreadyDead) {
+      supervisor.updateJobStatus(jobId, "error");
+      supervisor.aggregateJobMetricsBestEffort(jobId);
+      tryKillProcessGroup(pid);
+      process.stdout.write(`${green10("\u2713")} Marked ${jobId} as error (PID ${pid} already dead)
+`);
+    } else {
+      const terminalStatus = resolveTerminalStatus(jobId);
+      supervisor.updateJobStatus(jobId, terminalStatus);
+      supervisor.aggregateJobMetricsBestEffort(jobId);
+      try {
+        process.kill(pid, "SIGTERM");
+        process.stdout.write(`${green10("\u2713")} Marked ${jobId} as ${terminalStatus} and sent SIGTERM to PID ${pid}
+`);
+        if (force) {
+          const exited = await waitForProcessExit(pid, 5000);
+          if (!exited) {
+            supervisor.updateJobStatus(jobId, "error");
+            tryKillProcessGroup(pid);
+            process.stderr.write(`${red3("Force stop:")} PID ${pid} ignored SIGTERM, marked ${jobId} as error and killed process group.
+`);
+          }
+        }
+      } catch (err) {
+        if (err.code === "ESRCH") {
+          if (force) {
+            supervisor.updateJobStatus(jobId, "error");
+            tryKillProcessGroup(pid);
+            process.stdout.write(`${green10("\u2713")} Marked ${jobId} as error (PID ${pid} already gone)
+`);
+          } else {
+            process.stderr.write(`${red3(`Process ${pid} not found.`)} Job may have already completed.
+`);
+          }
+        } else {
+          throw err;
+        }
+      }
+    }
+    if (tmuxSession) {
+      killTmuxSession(tmuxSession);
+      process.stdout.write(`${dim10(`  tmux session ${tmuxSession} killed`)}
+`);
+    }
+    if (status.bead_id) {
+      const finalStatus = supervisor.readStatus(jobId)?.status ?? "cancelled";
+      const beads = new BeadsClient;
+      const liveJobs = supervisor.listLiveJobsForBead(status.bead_id).filter((liveJobId) => liveJobId !== jobId);
+      if (opts.closeBeadAnyway || liveJobs.length === 0) {
+        if (beads.closeBeadIfInProgress(status.bead_id, `Job ${jobId} stopped (${finalStatus})`)) {
+          process.stdout.write(`${dim10(`  bead ${status.bead_id} auto-closed`)}
+`);
+        }
+      } else {
+        const message = `bead_close_skipped: sibling-jobs-active [${liveJobs.join(", ")}]`;
+        supervisor.emitMetaEvent(jobId, message, "supervisor");
+        process.stdout.write(`${dim10(`  ${message}`)}
+`);
+      }
+    }
+  } finally {
+    await supervisor.dispose();
+  }
+}
+async function finalizeJob(chainMemberId, opts = {}) {
+  const jobsDir = opts.jobsDir ?? resolveJobsDir();
+  const supervisor = createFinalizeSupervisor(jobsDir);
+  try {
+    const status = supervisor.readStatus(chainMemberId);
+    if (!status)
+      throw new Error(`No job found: ${chainMemberId}`);
+    const chainId = status.chain_id ?? status.chain_root_job_id;
+    if (!chainId)
+      throw new Error(`Job ${chainMemberId} has no chain identity (chain_id missing).`);
+    const reviewerPass = findReviewerPassInChain(supervisor, chainId);
+    if (!reviewerPass)
+      throw new Error(`No reviewer with PASS compliance verdict found in chain ${chainId}.`);
+    const finalized = [];
+    const skipped = [];
+    for (const id of supervisor.listChainJobIds(chainId)) {
+      const memberStatus = supervisor.readStatus(id);
+      if (!memberStatus) {
+        skipped.push({ id, reason: "missing" });
+        continue;
+      }
+      if (memberStatus.status !== "waiting") {
+        skipped.push({ id, reason: memberStatus.status });
+        continue;
+      }
+      const result = supervisor.finalizeWaitingJob(id);
+      if (result)
+        finalized.push(id);
+      else
+        skipped.push({ id, reason: "finalize-failed" });
+    }
+    if (finalized.length === 0)
+      throw new Error(`No waiting keep-alive jobs to finalize in chain ${chainId}.`);
+    process.stdout.write(`${green10("\u2713")} Finalized chain ${chainId} (reviewer PASS: ${reviewerPass.reviewerJobId})
+`);
+    for (const id of finalized)
+      process.stdout.write(`  ${green10("\u2713")} ${id}
+`);
+    for (const { id, reason } of skipped)
+      process.stdout.write(`  ${dim10(`\xB7 ${id} (${reason})`)}
+`);
+  } finally {
+    await supervisor.dispose();
+  }
+}
+var green10 = (s) => `\x1B[32m${s}\x1B[0m`, red3 = (s) => `\x1B[31m${s}\x1B[0m`, dim10 = (s) => `\x1B[2m${s}\x1B[0m`, PASS_COMPLIANCE_VERDICT_REGEX2;
+var init_control2 = __esm(() => {
+  init_supervisor();
+  init_observability_sqlite();
+  init_process_liveness();
+  init_beads();
+  init_tmux_utils();
+  init_job_root();
+  PASS_COMPLIANCE_VERDICT_REGEX2 = /## Compliance Verdict[\s\S]*?- Verdict:\s*\**\s*PASS\s*\**/i;
+});
+
+// src/specialist/bead-notes.ts
+var exports_bead_notes = {};
+__export(exports_bead_notes, {
+  appendBeadNote: () => appendBeadNote
+});
+import { spawn as spawn5 } from "child_process";
+async function appendBeadNote(beadId, text, opts = {}) {
+  if (!beadId || !text)
+    return { ok: false, error: "beads unavailable or empty payload" };
+  return await new Promise((resolve9) => {
+    const child = spawn5("bd", ["update", beadId, "--notes", text], {
+      stdio: ["ignore", "ignore", "pipe"]
+    });
+    const timer = opts.timeoutMs ? setTimeout(() => {
+      child.kill("SIGKILL");
+      resolve9({ ok: false, error: `bd update timed out after ${opts.timeoutMs}ms` });
+    }, opts.timeoutMs) : null;
+    let stderr = "";
+    child.stderr?.setEncoding?.("utf8");
+    child.stderr?.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", (error2) => {
+      if (timer)
+        clearTimeout(timer);
+      resolve9({ ok: false, error: error2.message });
+    });
+    child.on("close", (code, signal) => {
+      if (timer)
+        clearTimeout(timer);
+      if (signal === "SIGKILL" && opts.timeoutMs)
+        return;
+      if (code === 0)
+        return resolve9({ ok: true });
+      resolve9({ ok: false, error: stderr.trim() || `bd update failed with exit code ${code}` });
+    });
+  });
+}
+var init_bead_notes = () => {};
+
 // src/cli/chat.ts
 var exports_chat = {};
 __export(exports_chat, {
   run: () => run13
 });
 import { spawnSync as spawnSync11 } from "child_process";
-import { appendFileSync as appendFileSync4, writeFileSync as writeFileSync9 } from "fs";
+import { appendFileSync as appendFileSync4, readFileSync as readFileSync16, writeFileSync as writeFileSync9 } from "fs";
 function dbg(msg, extra) {
   if (!DEBUG_LOG_PATH)
     return;
@@ -40343,6 +40853,7 @@ async function run13() {
   const signalCleanup = installSignalGuards(cleanup, input2);
   let shouldExit = false;
   let currentJobId = "";
+  let stopChatEventTailer;
   let resolveExitRequest = null;
   const exitRequested = new Promise((resolve9) => {
     resolveExitRequest = () => resolve9(true);
@@ -40351,15 +40862,15 @@ async function run13() {
     feed.appendEvent(type, details);
     tui.requestRender();
   };
-  const restoreStderr = redirectStderrToFeed({
-    append: (text) => appendEvent("stderr", text)
-  });
+  const restoreStderr = silenceStderrDuringTui();
   input2.onSubmit = (text) => {
     input2.setValue("");
     handleSubmittedInput({
       text,
       getJobId: () => currentJobId,
       getJobState: async () => currentJobId ? await loadJobState(currentJobId) : "running",
+      getJobStatus: async () => currentJobId ? await loadJobStatus(currentJobId) : null,
+      beadId,
       control,
       appendEvent,
       requestRender: () => tui.requestRender(),
@@ -40379,17 +40890,16 @@ async function run13() {
     return;
   };
   try {
-    dbg("try block enter \u2014 setting root + focus");
-    tui.root = root;
+    dbg("try block enter \u2014 adding components + focus");
+    tui.addChild(root);
     tui.setFocus(input2);
     dbg("status.start()");
     status.start();
-    feed.appendEvent("chat", `launching ${args.name}`);
-    feed.appendEvent("chat", `context depth ${args.contextDepth}`);
-    if (args.model)
-      feed.appendEvent("chat", `model ${args.model}`);
-    if (!args.beadId)
-      feed.appendEvent("chat", `ephemeral bead ${ephemeralTitle} (${beadId})`);
+    dbg("about to tui.start()", { stdoutTTY: process.stdout.isTTY === true, stdinTTY: process.stdin.isTTY === true });
+    tui.start();
+    tui.requestRender(true);
+    await new Promise((resolve9) => setTimeout(resolve9, 0));
+    dbg("tui.start() returned");
     dbg("calling launchSpecialist (non-awaited)");
     const launchPromise = launchSpecialist({
       args: { name: args.name, prompt: args.prompt, model: args.model, keepAlive: true, noKeepAlive: false, forceJob: false, outputMode: "json", background: false },
@@ -40417,11 +40927,17 @@ async function run13() {
         return;
       },
       formatFooterModel: (backend, model) => formatFooterModel(backend, model),
-      onProgress: (delta) => appendEvent("assistant", delta),
-      onMeta: (meta) => appendEvent("chat", `${meta.backend}/${meta.model}`),
       onJobStarted: ({ id }) => {
         currentJobId = id;
-        appendEvent("chat", `job started: ${id}`);
+        status.setJobId(id);
+        stopChatEventTailer = startChatEventTailer({
+          jobId: id,
+          jobsDir: ".specialists/jobs",
+          specialist: args.name,
+          beadId,
+          feed,
+          requestRender: () => tui.requestRender()
+        });
       }
     });
     const launchDone = launchPromise.then(() => {
@@ -40429,19 +40945,18 @@ async function run13() {
       return true;
     }).catch((error2) => {
       dbg("launchPromise rejected", { error: error2 instanceof Error ? error2.message : String(error2) });
-      feed.appendEvent("chat", error2 instanceof Error ? error2.message : String(error2));
+      appendEvent("chat", error2 instanceof Error ? error2.message : String(error2));
       return true;
     });
-    dbg("about to await tui.start()");
-    await tui.start();
-    dbg("tui.start() returned");
     if (!shouldExit) {
-      dbg("awaiting launchDone");
-      await launchDone;
-      dbg("launchDone awaited");
+      dbg("awaiting launchDone or exit request");
+      await Promise.race([launchDone, exitRequested]);
+      dbg("launchDone/exit request settled");
     }
   } finally {
     dbg("finally \u2014 cleanup");
+    stopChatEventTailer?.();
+    restoreStderr();
     removeInputListener?.();
     signalCleanup();
     await cleanup.stop();
@@ -40502,11 +41017,241 @@ function buildEphemeralBeadTitle(prompt) {
   return (normalized || "sp chat ephemeral").slice(0, 60);
 }
 async function loadJobState(jobId) {
+  return (await loadJobStatus(jobId))?.status ?? null;
+}
+async function loadJobStatus(jobId) {
   const statuses = loadStatuses();
-  return statuses.find((status) => status.id === jobId)?.status ?? null;
+  return statuses.find((status) => status.id === jobId) ?? null;
 }
 function formatFooterModel(backend, model) {
   return model ?? backend ?? "";
+}
+function startChatEventTailer(options2) {
+  const eventsPath = `${options2.jobsDir}/${options2.jobId}/events.jsonl`;
+  const sqliteClient = createObservabilitySqliteClient(process.cwd());
+  const colorize = new JobColorMap().get(options2.jobId);
+  let linesRead = 0;
+  let lastSeq = 0;
+  let model;
+  let contextPct;
+  const lastPrintedEventKey = new Map;
+  const seenMetaKey = new Map;
+  const appendLine = (line) => {
+    options2.feed.appendResult(line);
+    options2.requestRender();
+  };
+  const readFileEvents = () => {
+    let content = "";
+    try {
+      content = readFileSync16(eventsPath, "utf8");
+    } catch {
+      return [];
+    }
+    if (!content)
+      return [];
+    const lastNewline = content.lastIndexOf(`
+`);
+    if (lastNewline < 0)
+      return [];
+    const lines = content.slice(0, lastNewline).split(`
+`);
+    const events = [];
+    for (let index = linesRead;index < lines.length; index += 1) {
+      linesRead += 1;
+      const raw = lines[index]?.trim();
+      if (!raw)
+        continue;
+      try {
+        events.push(JSON.parse(raw));
+      } catch {}
+    }
+    return events;
+  };
+  const readEvents = () => {
+    if (sqliteClient) {
+      const events = sqliteClient.readEventsAfterSeq(options2.jobId, lastSeq);
+      for (const event of events) {
+        if (typeof event.seq === "number")
+          lastSeq = Math.max(lastSeq, event.seq);
+      }
+      return events;
+    }
+    return readFileEvents();
+  };
+  const drain = () => {
+    const status = readChatJobStatus(options2.jobsDir, options2.jobId);
+    model = status.model ?? model;
+    contextPct = status.contextPct ?? contextPct;
+    for (const event of readEvents()) {
+      if (event.type === "turn" && event.phase === "start") {
+        lastPrintedEventKey.delete(options2.jobId);
+      }
+      if (!shouldRenderChatFeedEvent(event))
+        continue;
+      if (shouldSkipChatFeedEvent(event, options2.jobId, lastPrintedEventKey, seenMetaKey))
+        continue;
+      if (event.type === "meta")
+        model = event.model;
+      if (event.type === "run_complete")
+        model = event.model ?? model;
+      appendLine(formatEventLine(event, {
+        jobId: options2.jobId,
+        specialist: formatSpecialistModel(options2.specialist, model),
+        beadId: options2.beadId,
+        contextPct,
+        colorize
+      }));
+      const contextLine = formatChatStartupContextLine(event);
+      if (contextLine)
+        appendLine(contextLine);
+      if (event.type === "run_complete" && event.output)
+        appendLine(event.output);
+    }
+  };
+  const interval = setInterval(drain, 100);
+  return () => {
+    clearInterval(interval);
+    drain();
+    sqliteClient?.close();
+  };
+}
+function shouldRenderChatFeedEvent(event) {
+  if (event.type === "message" || event.type === "turn")
+    return false;
+  if (event.type === "tool") {
+    if (event.phase === "update")
+      return false;
+    if (event.phase === "end" && !event.is_error)
+      return false;
+  }
+  return true;
+}
+function shouldSkipChatFeedEvent(event, jobId, lastPrintedEventKey, seenMetaKey) {
+  if (event.type === "meta") {
+    const metaKey = `${event.backend}:${event.model}`;
+    if (seenMetaKey.get(jobId) === metaKey)
+      return true;
+    seenMetaKey.set(jobId, metaKey);
+  }
+  if (event.type === "tool")
+    return false;
+  const key = getChatFeedEventKey(event);
+  if (lastPrintedEventKey.get(jobId) === key)
+    return true;
+  lastPrintedEventKey.set(jobId, key);
+  return false;
+}
+function getChatFeedEventKey(event) {
+  switch (event.type) {
+    case "meta":
+      return `meta:${event.backend}:${event.model}`;
+    case "tool":
+      return `tool:${event.tool}:${event.phase}:${event.tool_call_id ?? event.t}`;
+    case "text":
+      return "text";
+    case "thinking":
+      return "thinking";
+    case "message":
+      return `message:${event.role}:${event.phase}`;
+    case "turn":
+      return `turn:${event.phase}`;
+    case "status_change":
+      return `status_change:${event.previous_status ?? ""}:${event.status}`;
+    case "run_start":
+      return `run_start:${event.specialist}:${event.bead_id ?? ""}`;
+    case "run_complete":
+      return `run_complete:${event.status}:${event.error ?? ""}`;
+    case "error":
+      return `error:${event.source}:${event.error_message}`;
+    case "token_usage":
+      return `token_usage:${event.token_usage.total_tokens ?? ""}:${event.source}`;
+    case "finish_reason":
+      return `finish_reason:${event.finish_reason}:${event.source}`;
+    case "turn_summary":
+      return `turn_summary:${event.turn_index}`;
+    case "compaction":
+    case "retry":
+      return `${event.type}:${event.phase}`;
+    default:
+      return event.type ?? "unknown";
+  }
+}
+function formatChatStartupContextLine(event) {
+  if (event.type === "run_start") {
+    const snapshot = event.startup_snapshot;
+    if (!snapshot)
+      return null;
+    const parts = [];
+    if (snapshot.job_id)
+      parts.push(`job=${snapshot.job_id}`);
+    if (snapshot.specialist_name)
+      parts.push(`specialist=${snapshot.specialist_name}`);
+    if (snapshot.bead_id)
+      parts.push(`bead=${snapshot.bead_id}`);
+    if (snapshot.reused_from_job_id)
+      parts.push(`reused=${snapshot.reused_from_job_id}`);
+    if (snapshot.worktree_owner_job_id)
+      parts.push(`owner=${snapshot.worktree_owner_job_id}`);
+    if (snapshot.chain_id)
+      parts.push(`chain=${snapshot.chain_id}`);
+    if (snapshot.chain_root_job_id)
+      parts.push(`chain_root_job=${snapshot.chain_root_job_id}`);
+    if (snapshot.chain_root_bead_id)
+      parts.push(`chain_root_bead=${snapshot.chain_root_bead_id}`);
+    if (snapshot.worktree_path)
+      parts.push(`worktree=${snapshot.worktree_path}`);
+    if (snapshot.branch)
+      parts.push(`branch=${snapshot.branch}`);
+    if (snapshot.variables_keys)
+      parts.push(`vars=[${snapshot.variables_keys.join(",")}]`);
+    if (snapshot.reviewed_job_id_present !== undefined)
+      parts.push(`reviewed_present=${snapshot.reviewed_job_id_present}`);
+    if (snapshot.reused_worktree_awareness_present !== undefined)
+      parts.push(`reuse_awareness_present=${snapshot.reused_worktree_awareness_present}`);
+    if (snapshot.bead_context_present !== undefined)
+      parts.push(`bead_context_present=${snapshot.bead_context_present}`);
+    if (snapshot.skills)
+      parts.push(`skills=${snapshot.skills.count}`);
+    return parts.length > 0 ? dim9(`  \u21B3 startup ${parts.join(" ")}`) : null;
+  }
+  if (event.type === "payload_breakdown") {
+    const payload = event.payload_breakdown;
+    const totals = payload?.totals;
+    if (!totals)
+      return null;
+    const components = (payload.components ?? []).filter((component) => Number.isFinite(component.tokens) && component.tokens > 0);
+    return dim9(`  \u21B3 payload: ${(totals.bytes / 1024).toFixed(1)}kb \xB7 ${(totals.tokens / 1000).toFixed(1)}kt across ${components.length} components`);
+  }
+  if (event.type === "meta" && event.source === "mandatory_rules_injection" && event.data) {
+    const data = event.data;
+    return dim9(`  \u21B3 mandatory_rules sets=${(data.sets_loaded ?? []).join(",") || "none"} rules=${data.rules_count ?? 0} tokens=~${data.token_estimate ?? 0}`);
+  }
+  if (event.type === "meta" && event.memory_injection) {
+    const mem = event.memory_injection;
+    return dim9(`  \u21B3 memory static=${mem.static_tokens} dynamic=${mem.memory_tokens} gitnexus=${mem.gitnexus_tokens} total=${mem.total_tokens}`);
+  }
+  return null;
+}
+function readChatJobStatus(jobsDir, jobId) {
+  try {
+    const status = JSON.parse(readFileSync16(`${jobsDir}/${jobId}/status.json`, "utf8"));
+    return { model: status.model, contextPct: status.metrics?.context_pct };
+  } catch {
+    return {};
+  }
+}
+function silenceStderrDuringTui() {
+  const originalWrite = process.stderr.write.bind(process.stderr);
+  process.stderr.write = (_chunk, encoding, callback) => {
+    if (typeof encoding === "function")
+      encoding(null);
+    if (typeof callback === "function")
+      callback(null);
+    return true;
+  };
+  return () => {
+    process.stderr.write = originalWrite;
+  };
 }
 async function handleSubmittedInput(deps) {
   deps.appendEvent("user", deps.text);
@@ -40518,8 +41263,40 @@ async function handleSubmittedInput(deps) {
     deps.requestExit();
     return;
   }
+  if (!jobId && action.kind !== "info" && action.kind !== "error") {
+    deps.appendEvent("chat", "job not ready yet; try again after job started");
+    return;
+  }
   if (action.kind === "steer" || action.kind === "resume") {
-    deps.appendEvent("chat", `${action.kind} queued for ${jobId || "pending job"}`);
+    await sendChatJobMessage(deps, action.kind, action.text);
+    return;
+  }
+  if (action.kind === "stop") {
+    await runChatControlAction(deps, async () => {
+      const { stopJob: stopJob2 } = await Promise.resolve().then(() => (init_control2(), exports_control));
+      await stopJob2(jobId, { jobsDir: ".specialists/jobs" });
+      return "stop sent";
+    });
+    return;
+  }
+  if (action.kind === "finalize") {
+    await runChatControlAction(deps, async () => {
+      const { finalizeJob: finalizeJob2 } = await Promise.resolve().then(() => (init_control2(), exports_control));
+      await finalizeJob2(jobId, { jobsDir: ".specialists/jobs" });
+      return "finalize sent";
+    });
+    return;
+  }
+  if (action.kind === "notes") {
+    await runChatControlAction(deps, async () => {
+      if (!deps.beadId)
+        throw new Error("bead id missing");
+      const { appendBeadNote: appendBeadNote2 } = await Promise.resolve().then(() => (init_bead_notes(), exports_bead_notes));
+      const result = await appendBeadNote2(deps.beadId, action.text, { timeoutMs: 5000 });
+      if (!result.ok)
+        throw new Error(result.error ?? "append note failed");
+      return "note appended";
+    });
     return;
   }
   if ("message" in action)
@@ -40528,24 +41305,25 @@ async function handleSubmittedInput(deps) {
     deps.appendEvent("chat", `${action.kind} requested for ${jobId || "pending job"}`);
   deps.requestRender();
 }
-function redirectStderrToFeed(feed) {
-  const originalWrite = process.stderr.write.bind(process.stderr);
-  process.stderr.write = (chunk, encoding, callback) => {
-    const text = Buffer.isBuffer(chunk) ? chunk.toString(typeof encoding === "string" ? encoding : "utf8") : String(chunk);
-    for (const line of text.split(/\r?\n/)) {
-      const trimmed = line.trimEnd();
-      if (trimmed)
-        feed.append(trimmed);
-    }
-    if (typeof encoding === "function")
-      encoding(null);
-    if (typeof callback === "function")
-      callback(null);
-    return true;
-  };
-  return () => {
-    process.stderr.write = originalWrite;
-  };
+async function sendChatJobMessage(deps, type, text) {
+  await runChatControlAction(deps, async () => {
+    const status = await deps.getJobStatus();
+    if (!status?.fifo_path)
+      throw new Error(`Job ${deps.getJobId()} has no steer pipe`);
+    const payload = type === "resume" ? { type: "resume", task: text } : { type: "steer", message: text };
+    writeFileSync9(status.fifo_path, `${JSON.stringify(payload)}
+`, { flag: "a" });
+    return `${type} sent to ${deps.getJobId()}`;
+  });
+}
+async function runChatControlAction(deps, action) {
+  try {
+    deps.appendEvent("chat", await action());
+  } catch (error2) {
+    deps.appendEvent("chat", `error: ${error2 instanceof Error ? error2.message : String(error2)}`);
+  } finally {
+    deps.requestRender();
+  }
 }
 function createCleanup(tui, terminal, status) {
   const state = { done: false };
@@ -40563,10 +41341,16 @@ function createCleanup(tui, terminal, status) {
       } catch {}
     },
     async stopJobAndExit(jobId) {
-      if (jobId)
+      await this.stop();
+      if (jobId) {
         process.stderr.write(`Stopping job ${jobId}
 `);
-      await this.stop();
+        const { stopJob: stopJob2 } = await Promise.resolve().then(() => (init_control2(), exports_control));
+        await stopJob2(jobId, { jobsDir: ".specialists/jobs" }).catch((error2) => {
+          process.stderr.write(`[chat] stop failed: ${error2 instanceof Error ? error2.message : String(error2)}
+`);
+        });
+      }
       process.exit(0);
     }
   };
@@ -40606,6 +41390,8 @@ var init_chat = __esm(() => {
   init_control();
   init_status_load();
   init_loader();
+  init_observability_sqlite();
+  init_format_helpers();
   DEBUG_LOG_PATH = (() => {
     const v = process.env.SP_CHAT_DEBUG;
     if (!v || v === "0" || v === "false")
@@ -40753,7 +41539,7 @@ var init_worktree = __esm(() => {
 });
 
 // src/specialist/epic-reconciler.ts
-import { mkdirSync as mkdirSync10, openSync as openSync2, readFileSync as readFileSync16, rmSync as rmSync3, writeFileSync as writeFileSync10 } from "fs";
+import { mkdirSync as mkdirSync10, openSync as openSync2, readFileSync as readFileSync17, rmSync as rmSync3, writeFileSync as writeFileSync10 } from "fs";
 import { join as join21 } from "path";
 function buildEpicLockPath(epicId) {
   const location = resolveObservabilityDbLocation();
@@ -40770,7 +41556,7 @@ function withEpicAdvisoryLock(epicId, action) {
   } catch {
     let holder = "unknown";
     try {
-      holder = readFileSync16(lockPath, "utf-8");
+      holder = readFileSync17(lockPath, "utf-8");
     } catch {
       holder = "unknown";
     }
@@ -40988,7 +41774,7 @@ __export(exports_merge, {
   assertMainRepoCleanForMerge: () => assertMainRepoCleanForMerge
 });
 import { spawnSync as spawnSync13 } from "child_process";
-import { existsSync as existsSync18, readFileSync as readFileSync17, readdirSync as readdirSync8 } from "fs";
+import { existsSync as existsSync18, readFileSync as readFileSync18, readdirSync as readdirSync8 } from "fs";
 import { join as join22 } from "path";
 function parseOptions(argv) {
   let target = "";
@@ -41237,7 +42023,7 @@ function readAllJobStatuses() {
     if (!existsSync18(statusFile))
       continue;
     try {
-      const raw = JSON.parse(readFileSync17(statusFile, "utf-8"));
+      const raw = JSON.parse(readFileSync18(statusFile, "utf-8"));
       if (raw.id) {
         statuses.push(raw);
       }
@@ -41795,261 +42581,6 @@ var init_merge = __esm(() => {
   ];
 });
 
-// src/cli/format-helpers.ts
-function formatTime(t) {
-  return new Date(t).toISOString().slice(11, 19);
-}
-function formatElapsed(seconds) {
-  if (seconds < 60)
-    return `${seconds}s`;
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return s > 0 ? `${m}m ${s}s` : `${m}m`;
-}
-function formatCostUsd(costUsd) {
-  if (costUsd === undefined || !Number.isFinite(costUsd))
-    return null;
-  return `$${costUsd.toFixed(6)}`;
-}
-function formatTokenUsageSummary(tokenUsage) {
-  if (!tokenUsage)
-    return [];
-  const parts = [];
-  if (tokenUsage.total_tokens !== undefined)
-    parts.push(`tokens=${tokenUsage.total_tokens}`);
-  if (tokenUsage.input_tokens !== undefined)
-    parts.push(`in=${tokenUsage.input_tokens}`);
-  if (tokenUsage.output_tokens !== undefined)
-    parts.push(`out=${tokenUsage.output_tokens}`);
-  const cost = formatCostUsd(tokenUsage.cost_usd);
-  if (cost)
-    parts.push(`cost=${cost}`);
-  return parts;
-}
-function getEventLabel(type) {
-  return EVENT_LABELS[type] ?? type.slice(0, 5).toUpperCase();
-}
-
-class JobColorMap {
-  colors = new Map;
-  nextIdx = 0;
-  getColor(jobId) {
-    let color = this.colors.get(jobId);
-    if (!color) {
-      color = JOB_COLORS[this.nextIdx % JOB_COLORS.length];
-      this.colors.set(jobId, color);
-      this.nextIdx++;
-    }
-    return color;
-  }
-  get(jobId) {
-    return this.getColor(jobId);
-  }
-  has(jobId) {
-    return this.colors.has(jobId);
-  }
-  get size() {
-    return this.colors.size;
-  }
-}
-function formatToolArgValue(value, maxLen = 240) {
-  const raw = typeof value === "string" ? value : JSON.stringify(value);
-  const flat = raw.replace(/\s+/g, " ").trim();
-  return flat.length > maxLen ? `${flat.slice(0, maxLen - 3)}...` : flat;
-}
-function formatToolDetail(event) {
-  const toolName = cyan6(event.tool);
-  if (event.phase === "start") {
-    if (typeof event.args?.command === "string") {
-      return `${toolName}: ${yellow10(formatToolArgValue(event.args.command))}`;
-    }
-    if (event.args && Object.keys(event.args).length > 0) {
-      const argStr = Object.entries(event.args).map(([k, v]) => `${k}=${formatToolArgValue(v)}`).join(" ");
-      return `${toolName}: ${dim9(argStr)}`;
-    }
-    return `${toolName}: ${dim9("start")}`;
-  }
-  if (event.phase === "end" && event.is_error) {
-    const summary = event.result_summary?.split(`
-`)[0]?.trim().slice(0, 120);
-    return summary ? `${toolName}: ${red2(summary)}` : `${toolName}: ${red2("error")}`;
-  }
-  return `${toolName}: ${dim9(event.phase)}`;
-}
-function formatEventLine(event, options2) {
-  const ts = dim9(formatTime(event.t));
-  const job = options2.colorize(`[${options2.jobId}]`);
-  const node = options2.nodeId ? magenta3(`[\u2B22${options2.nodeId}]`) : "";
-  const bead = dim9(`[${options2.beadId ?? "-"}]`);
-  const label = options2.colorize(bold11(getEventLabel(event.type).padEnd(5)));
-  const hasContextPct = Number.isFinite(options2.contextPct);
-  const contextPct = hasContextPct ? Math.min(100, Math.max(0, Math.round(options2.contextPct))) : null;
-  const contextBadge = contextPct === null ? "" : dim9(`[${contextPct}%]`);
-  const detailParts = [];
-  let detail = "";
-  if (event.type === "meta") {
-    if (event.model === "gitnexus_analyze_started") {
-      detailParts.push("gitnexus=analyze_started");
-      detailParts.push(`source=${event.backend}`);
-    } else if (event.model === "gitnexus_analyze_start_failed") {
-      detailParts.push("gitnexus=analyze_start_failed");
-      detailParts.push(`reason=${event.backend}`);
-    } else {
-      detailParts.push(`model=${event.model}`);
-      detailParts.push(`backend=${event.backend}`);
-      if (event.source)
-        detailParts.push(`source=${event.source}`);
-    }
-  } else if (event.type === "tool") {
-    detail = formatToolDetail(event);
-  } else if (event.type === "error") {
-    detailParts.push(`source=${event.source}`);
-    detailParts.push(`error=${event.error_message}`);
-  } else if (event.type === "auto_commit_success" || event.type === "auto_commit_skipped" || event.type === "auto_commit_failed") {
-    const status = event.type.replace("auto_commit_", "");
-    detailParts.push(`status=${status}`);
-    if (event.commit_sha)
-      detailParts.push(`commit=${event.commit_sha.slice(0, 12)}`);
-    if (event.committed_files) {
-      detailParts.push(`files=${event.committed_files.length}`);
-      if (event.committed_files.length > 0) {
-        const filePreview = event.committed_files.slice(0, 3).join(",");
-        detailParts.push(`paths=${filePreview}${event.committed_files.length > 3 ? ",\u2026" : ""}`);
-      }
-    }
-    if (event.reason)
-      detailParts.push(`reason=${event.reason}`);
-  } else if (event.type === "run_complete") {
-    detailParts.push(`status=${event.status}`);
-    detailParts.push(`elapsed=${formatElapsed(event.elapsed_s)}`);
-    const finishReason = event.finish_reason ?? event.metrics?.finish_reason;
-    if (finishReason)
-      detailParts.push(`finish=${finishReason}`);
-    const exitReason = event.exit_reason ?? event.metrics?.exit_reason;
-    if (exitReason)
-      detailParts.push(`exit=${exitReason}`);
-    const tokenUsage = event.token_usage ?? event.metrics?.token_usage;
-    detailParts.push(...formatTokenUsageSummary(tokenUsage));
-    const turns = event.metrics?.turns;
-    if (turns !== undefined)
-      detailParts.push(`turns=${turns}`);
-    const toolCalls = event.tool_calls ?? event.metrics?.tool_call_names;
-    if (toolCalls && toolCalls.length > 0) {
-      detailParts.push(`tools=${toolCalls.length}`);
-    } else if (event.metrics?.tool_calls !== undefined) {
-      detailParts.push(`tools=${event.metrics.tool_calls}`);
-    }
-    if (event.error) {
-      detailParts.push(`error=${event.error}`);
-    }
-  } else if (event.type === "run_start") {
-    detailParts.push(`specialist=${event.specialist}`);
-    if (event.bead_id) {
-      detailParts.push(`bead=${event.bead_id}`);
-    }
-  } else if (event.type === "token_usage") {
-    const usage3 = event.token_usage;
-    detailParts.push(...formatTokenUsageSummary({
-      total_tokens: usage3.total_tokens,
-      input_tokens: usage3.input_tokens,
-      output_tokens: usage3.output_tokens,
-      cost_usd: usage3.cost_usd
-    }));
-  } else if (event.type === "finish_reason") {
-    detailParts.push(`reason=${event.finish_reason}`);
-    detailParts.push(`source=${event.source}`);
-  } else if (event.type === "turn_summary") {
-    detailParts.push(`turn=${event.turn_index}`);
-    if (event.finish_reason)
-      detailParts.push(`reason=${event.finish_reason}`);
-    if (event.token_usage?.total_tokens !== undefined) {
-      detailParts.push(`total=${event.token_usage.total_tokens}`);
-    }
-    if (event.context_pct !== undefined && (event.context_health === "WARN" || event.context_health === "CRITICAL")) {
-      detailParts.push(`context=${event.context_pct.toFixed(2)}%`);
-      detailParts.push(`health=${event.context_health}`);
-    }
-    if (event.text_content) {
-      const preview = event.text_content.replace(/\n/g, " ").slice(0, 80);
-      detailParts.push(`"${preview}${event.text_content.length > 80 ? "\u2026" : ""}"`);
-    }
-  } else if (event.type === "compaction" || event.type === "retry") {
-    detailParts.push(`phase=${event.phase}`);
-  } else if (event.type === "text") {
-    detailParts.push("kind=assistant");
-  } else if (event.type === "thinking") {
-    detailParts.push("kind=model");
-  } else if (event.type === "message") {
-    detailParts.push(`phase=${event.phase}`);
-    detailParts.push(`role=${event.role}`);
-  } else if (event.type === "turn") {
-    detailParts.push(`phase=${event.phase}`);
-  }
-  if (!detail && detailParts.length > 0) {
-    detail = dim9(detailParts.join(" "));
-  }
-  return `${ts} ${job} ${node ? `${node} ` : ""}${bead} ${label} ${options2.specialist}${contextBadge ? ` ${contextBadge}` : ""}${detail ? ` ${detail}` : ""}`.trimEnd();
-}
-function formatEventInline(event) {
-  switch (event.type) {
-    case "meta":
-      return dim9(`[model] ${event.backend}/${event.model}`);
-    case "thinking":
-      return dim9("[thinking...]");
-    case "text":
-      return dim9("[response]");
-    case "tool": {
-      if (event.phase !== "start")
-        return null;
-      const firstArgVal = event.args ? Object.values(event.args)[0] : undefined;
-      const argStr = firstArgVal !== undefined ? ": " + (typeof firstArgVal === "string" ? firstArgVal.split(`
-`)[0].slice(0, 80) : JSON.stringify(firstArgVal).slice(0, 80)) : "";
-      return `${dim9("[tool]")}  ${cyan6(event.tool)}${dim9(argStr)}`;
-    }
-    case "stale_warning":
-      return yellow10(`[warning] ${event.reason}: ${Math.round(event.silence_ms / 1000)}s silent`);
-    case "error":
-      return red2(`[error] ${event.source}: ${event.error_message}`);
-    default:
-      return null;
-  }
-}
-function formatEventInlineDebounced(event, activePhase) {
-  if (event.type === "thinking" || event.type === "text") {
-    if (activePhase === event.type) {
-      return { line: null, nextPhase: activePhase };
-    }
-    return { line: formatEventInline(event), nextPhase: event.type };
-  }
-  return {
-    line: formatEventInline(event),
-    nextPhase: null
-  };
-}
-var dim9 = (s) => `\x1B[2m${s}\x1B[0m`, bold11 = (s) => `\x1B[1m${s}\x1B[0m`, cyan6 = (s) => `\x1B[36m${s}\x1B[0m`, yellow10 = (s) => `\x1B[33m${s}\x1B[0m`, red2 = (s) => `\x1B[31m${s}\x1B[0m`, green9 = (s) => `\x1B[32m${s}\x1B[0m`, blue3 = (s) => `\x1B[34m${s}\x1B[0m`, magenta3 = (s) => `\x1B[35m${s}\x1B[0m`, JOB_COLORS, EVENT_LABELS;
-var init_format_helpers = __esm(() => {
-  JOB_COLORS = [cyan6, yellow10, magenta3, green9, blue3, red2];
-  EVENT_LABELS = {
-    run_start: "START",
-    meta: "META",
-    thinking: "THINK",
-    tool: "TOOL",
-    text: "TEXT",
-    message: "MSG",
-    turn: "TURN",
-    run_complete: "DONE",
-    token_usage: "TOKNS",
-    finish_reason: "FINSH",
-    turn_summary: "TURN+",
-    compaction: "CMPCT",
-    retry: "RETRY",
-    error: "ERROR",
-    auto_commit_success: "AUTO+",
-    auto_commit_skipped: "AUTO-",
-    auto_commit_failed: "AUTO!"
-  };
-});
-
 // src/cli/run.ts
 var exports_run = {};
 __export(exports_run, {
@@ -42057,7 +42588,7 @@ __export(exports_run, {
   buildInjectedReviewerDiffVariables: () => buildInjectedReviewerDiffVariables
 });
 import { join as join23 } from "path";
-import { existsSync as existsSync19, readFileSync as readFileSync18, readdirSync as readdirSync9, statSync as statSync5 } from "fs";
+import { existsSync as existsSync19, readFileSync as readFileSync19, readdirSync as readdirSync9, statSync as statSync5 } from "fs";
 import { randomBytes } from "crypto";
 import { spawn as cpSpawn, execSync as execSync5 } from "child_process";
 async function parseArgs8(argv) {
@@ -42159,7 +42690,7 @@ async function parseArgs8(argv) {
     process.exit(1);
   }
   if (epicId && reuseJobId !== undefined) {
-    process.stderr.write(dim10(`[warning: --epic ${epicId} with --job may override target job's epic membership]
+    process.stderr.write(dim11(`[warning: --epic ${epicId} with --job may override target job's epic membership]
 `));
   }
   if (worktree && !beadId) {
@@ -42307,7 +42838,7 @@ function assertNoStaleBaseSiblings(beadId, forceStaleBase) {
     if (staleSiblings.length === 0)
       return;
     if (forceStaleBase) {
-      process.stderr.write(dim10(`[stale-base guard bypassed: ${staleSiblings.length} unmerged sibling chain(s) under epic ${epicId}]
+      process.stderr.write(dim11(`[stale-base guard bypassed: ${staleSiblings.length} unmerged sibling chain(s) under epic ${epicId}]
 `));
       return;
     }
@@ -42329,10 +42860,10 @@ function resolveWorkingDirectory(args, jobsDir, permissionRequired, readStatus) 
       specialistName: args.name
     });
     if (info.reused) {
-      process.stderr.write(dim10(`[worktree reused: ${info.worktreePath}  branch: ${info.branch}]
+      process.stderr.write(dim11(`[worktree reused: ${info.worktreePath}  branch: ${info.branch}]
 `));
     } else {
-      process.stderr.write(dim10(`[worktree created: ${info.worktreePath}  branch: ${info.branch}]
+      process.stderr.write(dim11(`[worktree created: ${info.worktreePath}  branch: ${info.branch}]
 `));
     }
     return {
@@ -42364,7 +42895,7 @@ function resolveWorkingDirectory(args, jobsDir, permissionRequired, readStatus) 
       process.exit(1);
     }
     const worktreeOwnerJobId = targetStatus.worktree_owner_job_id ?? targetStatus.id ?? args.reuseJobId;
-    process.stderr.write(dim10(`[workspace reused from job ${args.reuseJobId}: ${worktreePath}]
+    process.stderr.write(dim11(`[workspace reused from job ${args.reuseJobId}: ${worktreePath}]
 `));
     return {
       workingDirectory: worktreePath,
@@ -42382,7 +42913,7 @@ function startEventTailer(jobId, jobsDir, mode, specialist, beadId) {
   let activeInlinePhase = null;
   const readPayloadBreakdown = () => {
     try {
-      const statusRaw = readFileSync18(statusPath, "utf-8");
+      const statusRaw = readFileSync19(statusPath, "utf-8");
       const status = JSON.parse(statusRaw);
       return status.startup_payload_json ? JSON.parse(status.startup_payload_json) : undefined;
     } catch {
@@ -42392,7 +42923,7 @@ function startEventTailer(jobId, jobsDir, mode, specialist, beadId) {
   const drain = () => {
     let content;
     try {
-      content = readFileSync18(eventsPath, "utf-8");
+      content = readFileSync19(eventsPath, "utf-8");
     } catch {
       return;
     }
@@ -42596,7 +43127,7 @@ async function run15() {
     const latestPath = join23(jobsDir2, "latest");
     const oldLatest = (() => {
       try {
-        return readFileSync18(latestPath, "utf-8").trim();
+        return readFileSync19(latestPath, "utf-8").trim();
       } catch {
         return "";
       }
@@ -42647,7 +43178,7 @@ async function run15() {
         childExitPromise
       ]);
       try {
-        const current = readFileSync18(latestPath, "utf-8").trim();
+        const current = readFileSync19(latestPath, "utf-8").trim();
         if (current && current !== oldLatest) {
           jobId = current;
           break;
@@ -42655,7 +43186,7 @@ async function run15() {
       } catch {}
       if (!jobId && handoffPath) {
         try {
-          const handoff = readFileSync18(handoffPath, "utf-8").trim();
+          const handoff = readFileSync19(handoffPath, "utf-8").trim();
           if (/^[a-f0-9]{6}$/.test(handoff)) {
             jobId = handoff;
             break;
@@ -42717,7 +43248,7 @@ async function run15() {
     }
     const blockers = args.contextDepth > 0 ? beadReader.getCompletedBlockers(effectiveBeadId, args.contextDepth) : [];
     if (blockers.length > 0) {
-      process.stderr.write(dim10(`
+      process.stderr.write(dim11(`
 [context: ${blockers.length} completed dep${blockers.length > 1 ? "s" : ""} injected]
 `));
     }
@@ -42764,7 +43295,7 @@ async function run15() {
     formatFooterModel: formatFooterModel2
   });
 }
-var dim10 = (s) => `\x1B[2m${s}\x1B[0m`, JOB_ID_HANDOFF_PATH_ENV = "SPECIALISTS_BG_JOB_ID_PATH", BLOCKED_JOB_REUSE_STATUSES;
+var dim11 = (s) => `\x1B[2m${s}\x1B[0m`, JOB_ID_HANDOFF_PATH_ENV = "SPECIALISTS_BG_JOB_ID_PATH", BLOCKED_JOB_REUSE_STATUSES;
 var init_run = __esm(() => {
   init_loader();
   init_circuitBreaker();
@@ -42781,42 +43312,6 @@ var init_run = __esm(() => {
   init_launch();
   BLOCKED_JOB_REUSE_STATUSES = new Set(["starting", "running"]);
 });
-
-// src/specialist/bead-notes.ts
-import { spawn as spawn5 } from "child_process";
-async function appendBeadNote(beadId, text, opts = {}) {
-  if (!beadId || !text)
-    return { ok: false, error: "beads unavailable or empty payload" };
-  return await new Promise((resolve10) => {
-    const child = spawn5("bd", ["update", beadId, "--notes", text], {
-      stdio: ["ignore", "ignore", "pipe"]
-    });
-    const timer = opts.timeoutMs ? setTimeout(() => {
-      child.kill("SIGKILL");
-      resolve10({ ok: false, error: `bd update timed out after ${opts.timeoutMs}ms` });
-    }, opts.timeoutMs) : null;
-    let stderr = "";
-    child.stderr?.setEncoding?.("utf8");
-    child.stderr?.on("data", (chunk) => {
-      stderr += chunk;
-    });
-    child.on("error", (error2) => {
-      if (timer)
-        clearTimeout(timer);
-      resolve10({ ok: false, error: error2.message });
-    });
-    child.on("close", (code, signal) => {
-      if (timer)
-        clearTimeout(timer);
-      if (signal === "SIGKILL" && opts.timeoutMs)
-        return;
-      if (code === 0)
-        return resolve10({ ok: true });
-      resolve10({ ok: false, error: stderr.trim() || `bd update failed with exit code ${code}` });
-    });
-  });
-}
-var init_bead_notes = () => {};
 
 // src/specialist/node-resolve.ts
 function formatNodeRefMatches(matches) {
@@ -42869,7 +43364,7 @@ var init_node_resolve = __esm(() => {
 });
 
 // src/specialist/job-control.ts
-import { existsSync as existsSync20, readFileSync as readFileSync19, writeFileSync as writeFileSync12 } from "fs";
+import { existsSync as existsSync20, readFileSync as readFileSync20, writeFileSync as writeFileSync12 } from "fs";
 import { join as join24 } from "path";
 
 class JobControl {
@@ -42948,7 +43443,7 @@ class JobControl {
     if (!existsSync20(resultPath))
       return null;
     try {
-      return readFileSync19(resultPath, "utf-8");
+      return readFileSync20(resultPath, "utf-8");
     } catch {
       return null;
     }
@@ -45059,7 +45554,7 @@ var exports_node = {};
 __export(exports_node, {
   handleNodeCommand: () => handleNodeCommand
 });
-import { existsSync as existsSync21, readFileSync as readFileSync20, readdirSync as readdirSync10 } from "fs";
+import { existsSync as existsSync21, readFileSync as readFileSync21, readdirSync as readdirSync10 } from "fs";
 import { randomUUID as randomUUID2 } from "crypto";
 import { basename as basename6, join as join25, resolve as resolve10 } from "path";
 function parseNodeArgs(argv) {
@@ -45373,7 +45868,7 @@ async function handleNodeRun(args) {
       rawConfig = args.inlineJson;
     } else {
       const nodeConfigPath = resolveNodeConfigPath(process.cwd(), args.nodeConfigInput);
-      rawConfig = readFileSync20(nodeConfigPath.path, "utf-8");
+      rawConfig = readFileSync21(nodeConfigPath.path, "utf-8");
     }
     const config2 = parseNodeConfig(rawConfig);
     const loader = new SpecialistLoader;
@@ -46596,7 +47091,7 @@ var init_epic = __esm(() => {
 
 // src/cli/version-check.ts
 import { spawnSync as spawnSync16 } from "child_process";
-import { existsSync as existsSync22, mkdirSync as mkdirSync11, readFileSync as readFileSync21, writeFileSync as writeFileSync13 } from "fs";
+import { existsSync as existsSync22, mkdirSync as mkdirSync11, readFileSync as readFileSync22, writeFileSync as writeFileSync13 } from "fs";
 import { dirname as dirname11, join as join26 } from "path";
 import { createRequire as createRequire4 } from "module";
 function readBundledPackageVersion(requireFn = require3) {
@@ -46622,7 +47117,7 @@ function readCache() {
   if (!existsSync22(CACHE_PATH))
     return null;
   try {
-    return JSON.parse(readFileSync21(CACHE_PATH, "utf8"));
+    return JSON.parse(readFileSync22(CACHE_PATH, "utf8"));
   } catch {
     return null;
   }
@@ -46729,7 +47224,7 @@ __export(exports_status, {
   detectJobOutputMode: () => detectJobOutputMode
 });
 import { spawnSync as spawnSync17 } from "child_process";
-import { existsSync as existsSync23, readFileSync as readFileSync22 } from "fs";
+import { existsSync as existsSync23, readFileSync as readFileSync23 } from "fs";
 import { join as join27 } from "path";
 function ok2(msg) {
   console.log(`  ${green9("\u2713")} ${msg}`);
@@ -46830,7 +47325,7 @@ function countJobEvents(sqliteClient, jobsDir, jobId) {
   const eventsFile = join27(jobsDir, jobId, "events.jsonl");
   if (!existsSync23(eventsFile))
     return 0;
-  const raw = readFileSync22(eventsFile, "utf-8").trim();
+  const raw = readFileSync23(eventsFile, "utf-8").trim();
   if (!raw)
     return 0;
   return raw.split(`
@@ -46867,7 +47362,7 @@ function getLatestContextSnapshot(sqliteClient, jobsDir, jobId) {
   const eventsFile = join27(jobsDir, jobId, "events.jsonl");
   if (!existsSync23(eventsFile))
     return null;
-  const lines = readFileSync22(eventsFile, "utf-8").split(`
+  const lines = readFileSync23(eventsFile, "utf-8").split(`
 `);
   for (let index = lines.length - 1;index >= 0; index -= 1) {
     const line = lines[index].trim();
@@ -47144,7 +47639,7 @@ var init_status2 = __esm(() => {
 });
 
 // src/specialist/process-health.ts
-import { existsSync as existsSync24, readdirSync as readdirSync11, readFileSync as readFileSync23, readlinkSync as readlinkSync2 } from "fs";
+import { existsSync as existsSync24, readdirSync as readdirSync11, readFileSync as readFileSync24, readlinkSync as readlinkSync2 } from "fs";
 import { join as join28 } from "path";
 function parseThreshold(raw, fallback) {
   if (!raw)
@@ -47161,7 +47656,7 @@ function getProcessHealthThresholds(env = process.env) {
 }
 function readMemAvailableBytes(meminfoPath) {
   try {
-    const content = readFileSync23(meminfoPath, "utf-8");
+    const content = readFileSync24(meminfoPath, "utf-8");
     const match = /^MemAvailable:\s+(\d+)\s+kB$/m.exec(content);
     if (!match)
       return 0;
@@ -47172,7 +47667,7 @@ function readMemAvailableBytes(meminfoPath) {
 }
 function readProcStringOrNull(path3) {
   try {
-    return readFileSync23(path3, "utf-8");
+    return readFileSync24(path3, "utf-8");
   } catch {
     return null;
   }
@@ -47199,7 +47694,7 @@ function parseStat(stat2) {
 }
 function readProcUptimeSecondsOrNull(procRoot) {
   try {
-    const match = /^(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)$/.exec(readFileSync23(join28(procRoot, "uptime"), "utf-8").trim());
+    const match = /^(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)$/.exec(readFileSync24(join28(procRoot, "uptime"), "utf-8").trim());
     if (!match)
       return null;
     return Number(match[1]);
@@ -48425,7 +48920,7 @@ var exports_result = {};
 __export(exports_result, {
   run: () => run18
 });
-import { existsSync as existsSync25, readFileSync as readFileSync24 } from "fs";
+import { existsSync as existsSync25, readFileSync as readFileSync25 } from "fs";
 import { join as join29 } from "path";
 function parseArgs10(argv) {
   let jobId;
@@ -48519,7 +49014,7 @@ function readTimelineEventsForResult(sqliteClient, jobsDir, jobId) {
   const eventsPath = join29(jobsDir, jobId, "events.jsonl");
   if (!existsSync25(eventsPath))
     return [];
-  return readFileSync24(eventsPath, "utf-8").split(`
+  return readFileSync25(eventsPath, "utf-8").split(`
 `).map((line) => line.trim()).filter(Boolean).map((line) => parseTimelineEvent(line)).filter((event) => event !== null);
 }
 function deriveStartupSnapshot(status, events) {
@@ -48649,7 +49144,7 @@ async function run18() {
     const formattedCost = formatCostUsd(status.metrics?.token_usage?.cost_usd);
     if (tokenSummaryParts.length === 0 && !formattedCost) {
       if (trailingFooter)
-        process.stderr.write(dim11(trailingFooter));
+        process.stderr.write(dim12(trailingFooter));
       return;
     }
     const footerParts = [];
@@ -48657,11 +49152,11 @@ async function run18() {
       footerParts.push(tokenSummaryParts.join(" \xB7 "));
     if (formattedCost)
       footerParts.push(`cost_usd=${formattedCost}`);
-    process.stderr.write(dim11(`
+    process.stderr.write(dim12(`
 --- metrics: ${footerParts.join(" \xB7 ")} ---
 `));
     if (trailingFooter)
-      process.stderr.write(dim11(trailingFooter));
+      process.stderr.write(dim12(trailingFooter));
   };
   try {
     const jobId = (() => {
@@ -48683,7 +49178,7 @@ async function run18() {
         console.warn(`SQLite result read failed for job ${jobId}; falling back to result.txt`, error2);
       }
       if (existsSync25(resultPath)) {
-        return readFileSync24(resultPath, "utf-8");
+        return readFileSync25(resultPath, "utf-8");
       }
       try {
         const events2 = readTimelineEventsForResult(sqliteClient, jobsDir, jobId);
@@ -48718,7 +49213,7 @@ async function run18() {
             if (args.json) {
               emitJson(status2, null, message, startupContext2);
             } else {
-              process.stderr.write(`${red3(message)}
+              process.stderr.write(`${red4(message)}
 `);
             }
             process.exit(1);
@@ -48737,7 +49232,7 @@ async function run18() {
           if (args.json) {
             emitJson(status2, null, message, startupContext2);
           } else {
-            process.stderr.write(`${red3(`Job ${jobId} failed:`)} ${status2.error ?? "unknown error"}
+            process.stderr.write(`${red4(`Job ${jobId} failed:`)} ${status2.error ?? "unknown error"}
 `);
           }
           process.exit(1);
@@ -48776,7 +49271,7 @@ async function run18() {
         if (args.json) {
           emitJson(status, null, message, startupContext2);
         } else {
-          process.stderr.write(`${dim11(message)}
+          process.stderr.write(`${dim12(message)}
 `);
         }
         process.exit(1);
@@ -48784,7 +49279,7 @@ async function run18() {
       if (args.json) {
         emitJson(status, output3, null, startupContext2);
       } else {
-        process.stderr.write(`${dim11(`Job ${jobId} is currently ${status.status}. Showing last completed output while it continues.`)}
+        process.stderr.write(`${dim12(`Job ${jobId} is currently ${status.status}. Showing last completed output while it continues.`)}
 `);
         emitHumanResult(output3, status, startupContext2);
       }
@@ -48798,7 +49293,7 @@ async function run18() {
         if (args.json) {
           emitJson(status, null, message, startupContext2);
         } else {
-          process.stderr.write(`${dim11(message)}
+          process.stderr.write(`${dim12(message)}
 `);
         }
         process.exit(1);
@@ -48820,7 +49315,7 @@ async function run18() {
       if (args.json) {
         emitJson(status, null, message, startupContext2);
       } else {
-        process.stderr.write(`${red3(`Job ${jobId} failed:`)} ${status.error ?? deriveApiError(events2) ?? "unknown error"}
+        process.stderr.write(`${red4(`Job ${jobId} failed:`)} ${status.error ?? deriveApiError(events2) ?? "unknown error"}
 `);
       }
       process.exit(1);
@@ -48833,7 +49328,7 @@ async function run18() {
       if (args.json) {
         emitJson(status, null, message);
       } else {
-        process.stderr.write(`${red3(message)}
+        process.stderr.write(`${red4(message)}
 `);
       }
       process.exit(1);
@@ -48858,7 +49353,7 @@ async function run18() {
     await supervisor.dispose();
   }
 }
-var dim11 = (s) => `\x1B[2m${s}\x1B[0m`, red3 = (s) => `\x1B[31m${s}\x1B[0m`;
+var dim12 = (s) => `\x1B[2m${s}\x1B[0m`, red4 = (s) => `\x1B[31m${s}\x1B[0m`;
 var init_result = __esm(() => {
   init_supervisor();
   init_observability_sqlite();
@@ -48868,7 +49363,7 @@ var init_result = __esm(() => {
 });
 
 // src/specialist/timeline-query.ts
-import { existsSync as existsSync26, readdirSync as readdirSync12, readFileSync as readFileSync25 } from "fs";
+import { existsSync as existsSync26, readdirSync as readdirSync12, readFileSync as readFileSync26 } from "fs";
 import { basename as basename8, join as join30 } from "path";
 function readJobEvents(jobDir) {
   const jobId = basename8(jobDir);
@@ -48884,7 +49379,7 @@ function readJobEvents(jobDir) {
   const eventsPath = join30(jobDir, "events.jsonl");
   if (!existsSync26(eventsPath))
     return [];
-  const content = readFileSync25(eventsPath, "utf-8");
+  const content = readFileSync26(eventsPath, "utf-8");
   const lines = content.split(`
 `).filter(Boolean);
   const events = [];
@@ -48947,7 +49442,7 @@ function readAllJobEvents(jobsDir, jobId) {
     let beadId;
     if (existsSync26(statusPath)) {
       try {
-        const status = JSON.parse(readFileSync25(statusPath, "utf-8"));
+        const status = JSON.parse(readFileSync26(statusPath, "utf-8"));
         specialist = status.specialist ?? "unknown";
         beadId = status.bead_id;
       } catch {}
@@ -49009,29 +49504,6 @@ var init_timeline_query = __esm(() => {
   init_timeline_events();
 });
 
-// src/specialist/model-display.ts
-function extractModelId(model) {
-  if (!model)
-    return;
-  const trimmed = model.trim();
-  if (!trimmed)
-    return;
-  return trimmed.includes("/") ? trimmed.split("/").pop() : trimmed;
-}
-function toModelAlias(model) {
-  const modelId = extractModelId(model);
-  if (!modelId)
-    return;
-  if (modelId.startsWith("claude-")) {
-    return modelId.slice("claude-".length);
-  }
-  return modelId;
-}
-function formatSpecialistModel(specialist, model) {
-  const alias = toModelAlias(model);
-  return alias ? `${specialist}/${alias}` : specialist;
-}
-
 // src/cli/feed.ts
 var exports_feed = {};
 __export(exports_feed, {
@@ -49041,7 +49513,7 @@ import {
   closeSync as closeSync2,
   existsSync as existsSync27,
   openSync as openSync3,
-  readFileSync as readFileSync26,
+  readFileSync as readFileSync27,
   readdirSync as readdirSync13,
   statSync as statSync6
 } from "fs";
@@ -49207,7 +49679,7 @@ function readFileFresh(filePath) {
   let fd = null;
   try {
     fd = openSync3(filePath, "r");
-    return readFileSync26(fd, "utf-8");
+    return readFileSync27(fd, "utf-8");
   } catch {
     return null;
   } finally {
@@ -49745,7 +50217,7 @@ async function run20() {
       process.exit(1);
     }
     if (!status.fifo_path) {
-      process.stderr.write(`${red4("Error:")} Job ${jobId} has no steer pipe.
+      process.stderr.write(`${red5("Error:")} Job ${jobId} has no steer pipe.
 `);
       process.stderr.write(`FIFO support may not be available on this system (mkfifo failed at job start).
 `);
@@ -49755,10 +50227,10 @@ async function run20() {
       const payload = JSON.stringify({ type: "steer", message }) + `
 `;
       writeFileSync14(status.fifo_path, payload, { flag: "a" });
-      process.stdout.write(`${green10("\u2713")} Steer message sent to job ${jobId}
+      process.stdout.write(`${green11("\u2713")} Steer message sent to job ${jobId}
 `);
     } catch (err) {
-      process.stderr.write(`${red4("Error:")} Failed to write to steer pipe: ${err?.message}
+      process.stderr.write(`${red5("Error:")} Failed to write to steer pipe: ${err?.message}
 `);
       process.exit(1);
     }
@@ -49766,7 +50238,7 @@ async function run20() {
     await supervisor.dispose();
   }
 }
-var green10 = (s) => `\x1B[32m${s}\x1B[0m`, red4 = (s) => `\x1B[31m${s}\x1B[0m`;
+var green11 = (s) => `\x1B[32m${s}\x1B[0m`, red5 = (s) => `\x1B[31m${s}\x1B[0m`;
 var init_steer = __esm(() => {
   init_supervisor();
   init_job_root();
@@ -49794,14 +50266,14 @@ async function run21() {
       process.exit(1);
     }
     if (status.status !== "waiting") {
-      process.stderr.write(`${red5("Error:")} Job ${jobId} is already finalized (${status.status}).
+      process.stderr.write(`${red6("Error:")} Job ${jobId} is already finalized (${status.status}).
 `);
       process.stderr.write(`resume only works for true waiting jobs. Finalized work is terminal; use sp ps to inspect chain state.
 `);
       process.exit(1);
     }
     if (!status.fifo_path) {
-      process.stderr.write(`${red5("Error:")} Job ${jobId} has no steer pipe.
+      process.stderr.write(`${red6("Error:")} Job ${jobId} has no steer pipe.
 `);
       process.exit(1);
     }
@@ -49809,12 +50281,12 @@ async function run21() {
       const payload = JSON.stringify({ type: "resume", task }) + `
 `;
       writeFileSync15(status.fifo_path, payload, { flag: "a" });
-      process.stdout.write(`${green11("\u2713")} Resume sent to job ${jobId}
+      process.stdout.write(`${green12("\u2713")} Resume sent to job ${jobId}
 `);
       process.stdout.write(`  Use 'specialists feed ${jobId} --follow' to watch the response.
 `);
     } catch (err) {
-      process.stderr.write(`${red5("Error:")} Failed to write to steer pipe: ${err?.message}
+      process.stderr.write(`${red6("Error:")} Failed to write to steer pipe: ${err?.message}
 `);
       process.exit(1);
     }
@@ -49822,7 +50294,7 @@ async function run21() {
     await supervisor.dispose();
   }
 }
-var green11 = (s) => `\x1B[32m${s}\x1B[0m`, red5 = (s) => `\x1B[31m${s}\x1B[0m`;
+var green12 = (s) => `\x1B[32m${s}\x1B[0m`, red6 = (s) => `\x1B[31m${s}\x1B[0m`;
 var init_resume = __esm(() => {
   init_supervisor();
   init_job_root();
@@ -49840,7 +50312,7 @@ async function run22() {
 }
 
 // src/specialist/worktree-gc.ts
-import { existsSync as existsSync28, readdirSync as readdirSync14, readFileSync as readFileSync27 } from "fs";
+import { existsSync as existsSync28, readdirSync as readdirSync14, readFileSync as readFileSync28 } from "fs";
 import { join as join32 } from "path";
 import { spawnSync as spawnSync19 } from "child_process";
 function readJobStatus2(jobDir) {
@@ -49848,7 +50320,7 @@ function readJobStatus2(jobDir) {
   if (!existsSync28(statusPath))
     return null;
   try {
-    return JSON.parse(readFileSync27(statusPath, "utf-8"));
+    return JSON.parse(readFileSync28(statusPath, "utf-8"));
   } catch {
     return null;
   }
@@ -49944,7 +50416,7 @@ var exports_clean = {};
 __export(exports_clean, {
   run: () => run23
 });
-import { existsSync as existsSync29, readFileSync as readFileSync28, readdirSync as readdirSync15, rmSync as rmSync4, statSync as statSync7 } from "fs";
+import { existsSync as existsSync29, readFileSync as readFileSync29, readdirSync as readdirSync15, rmSync as rmSync4, statSync as statSync7 } from "fs";
 import { join as join33 } from "path";
 function parseDuration2(raw) {
   const match = /^(\d+)(ms|s|m|h|d)$/i.exec(raw.trim());
@@ -50137,7 +50609,7 @@ function readCompletedJobDirectory(baseDirectory, entry) {
     return null;
   let statusData;
   try {
-    statusData = JSON.parse(readFileSync28(statusFilePath, "utf-8"));
+    statusData = JSON.parse(readFileSync29(statusFilePath, "utf-8"));
   } catch {
     return null;
   }
@@ -50657,182 +51129,6 @@ var init_end = __esm(() => {
   init_epic();
 });
 
-// src/specialist/control.ts
-function resolveTerminalStatus(jobId) {
-  return hasRunCompleteEvent(jobId) ? "done" : "cancelled";
-}
-async function waitForProcessExit(pid, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (!isProcessAlive(pid))
-      return true;
-    await new Promise((resolve11) => setTimeout(resolve11, 100));
-  }
-  return !isProcessAlive(pid);
-}
-function tryKillProcessGroup(pid) {
-  try {
-    process.kill(-pid, "SIGKILL");
-  } catch (err) {
-    if (err.code !== "ESRCH")
-      throw err;
-  }
-}
-function createFinalizeSupervisor(jobsDir) {
-  const runner = { run: async () => {
-    throw new Error("finalize supervisor runner is not used");
-  } };
-  const runOptions = {};
-  return new Supervisor({ runner, runOptions, jobsDir });
-}
-function findReviewerPassInChain(supervisor, chainId) {
-  for (const id of supervisor.listChainJobIds(chainId)) {
-    const status = supervisor.readStatus(id);
-    if (!status || status.specialist !== "reviewer")
-      continue;
-    if (PASS_COMPLIANCE_VERDICT_REGEX2.test(supervisor.readResult(id) ?? ""))
-      return { reviewerJobId: id };
-  }
-  return null;
-}
-async function stopJob(jobId, opts = {}) {
-  const jobsDir = opts.jobsDir ?? resolveJobsDir(process.cwd());
-  const supervisor = new Supervisor({ runner: null, runOptions: null, jobsDir });
-  try {
-    const status = supervisor.readStatus(jobId);
-    if (!status)
-      throw new Error(`No job found: ${jobId}`);
-    if (status.status === "done" || status.status === "error" || status.status === "cancelled") {
-      process.stderr.write(`${dim12(`Job ${jobId} already finalized (${status.status}).`)}
-`);
-      return;
-    }
-    if (!status.pid)
-      throw new Error(`No PID recorded for job ${jobId}.`);
-    const pid = status.pid;
-    const tmuxSession = status.tmux_session;
-    const isAlreadyDead = !isProcessAlive(pid, status.started_at_ms);
-    const force = opts.force ?? false;
-    if (force && isAlreadyDead) {
-      supervisor.updateJobStatus(jobId, "error");
-      supervisor.aggregateJobMetricsBestEffort(jobId);
-      tryKillProcessGroup(pid);
-      process.stdout.write(`${green12("\u2713")} Marked ${jobId} as error (PID ${pid} already dead)
-`);
-    } else {
-      const terminalStatus = resolveTerminalStatus(jobId);
-      supervisor.updateJobStatus(jobId, terminalStatus);
-      supervisor.aggregateJobMetricsBestEffort(jobId);
-      try {
-        process.kill(pid, "SIGTERM");
-        process.stdout.write(`${green12("\u2713")} Marked ${jobId} as ${terminalStatus} and sent SIGTERM to PID ${pid}
-`);
-        if (force) {
-          const exited = await waitForProcessExit(pid, 5000);
-          if (!exited) {
-            supervisor.updateJobStatus(jobId, "error");
-            tryKillProcessGroup(pid);
-            process.stderr.write(`${red6("Force stop:")} PID ${pid} ignored SIGTERM, marked ${jobId} as error and killed process group.
-`);
-          }
-        }
-      } catch (err) {
-        if (err.code === "ESRCH") {
-          if (force) {
-            supervisor.updateJobStatus(jobId, "error");
-            tryKillProcessGroup(pid);
-            process.stdout.write(`${green12("\u2713")} Marked ${jobId} as error (PID ${pid} already gone)
-`);
-          } else {
-            process.stderr.write(`${red6(`Process ${pid} not found.`)} Job may have already completed.
-`);
-          }
-        } else {
-          throw err;
-        }
-      }
-    }
-    if (tmuxSession) {
-      killTmuxSession(tmuxSession);
-      process.stdout.write(`${dim12(`  tmux session ${tmuxSession} killed`)}
-`);
-    }
-    if (status.bead_id) {
-      const finalStatus = supervisor.readStatus(jobId)?.status ?? "cancelled";
-      const beads = new BeadsClient;
-      const liveJobs = supervisor.listLiveJobsForBead(status.bead_id).filter((liveJobId) => liveJobId !== jobId);
-      if (opts.closeBeadAnyway || liveJobs.length === 0) {
-        if (beads.closeBeadIfInProgress(status.bead_id, `Job ${jobId} stopped (${finalStatus})`)) {
-          process.stdout.write(`${dim12(`  bead ${status.bead_id} auto-closed`)}
-`);
-        }
-      } else {
-        const message = `bead_close_skipped: sibling-jobs-active [${liveJobs.join(", ")}]`;
-        supervisor.emitMetaEvent(jobId, message, "supervisor");
-        process.stdout.write(`${dim12(`  ${message}`)}
-`);
-      }
-    }
-  } finally {
-    await supervisor.dispose();
-  }
-}
-async function finalizeJob(chainMemberId, opts = {}) {
-  const jobsDir = opts.jobsDir ?? resolveJobsDir();
-  const supervisor = createFinalizeSupervisor(jobsDir);
-  try {
-    const status = supervisor.readStatus(chainMemberId);
-    if (!status)
-      throw new Error(`No job found: ${chainMemberId}`);
-    const chainId = status.chain_id ?? status.chain_root_job_id;
-    if (!chainId)
-      throw new Error(`Job ${chainMemberId} has no chain identity (chain_id missing).`);
-    const reviewerPass = findReviewerPassInChain(supervisor, chainId);
-    if (!reviewerPass)
-      throw new Error(`No reviewer with PASS compliance verdict found in chain ${chainId}.`);
-    const finalized = [];
-    const skipped = [];
-    for (const id of supervisor.listChainJobIds(chainId)) {
-      const memberStatus = supervisor.readStatus(id);
-      if (!memberStatus) {
-        skipped.push({ id, reason: "missing" });
-        continue;
-      }
-      if (memberStatus.status !== "waiting") {
-        skipped.push({ id, reason: memberStatus.status });
-        continue;
-      }
-      const result = supervisor.finalizeWaitingJob(id);
-      if (result)
-        finalized.push(id);
-      else
-        skipped.push({ id, reason: "finalize-failed" });
-    }
-    if (finalized.length === 0)
-      throw new Error(`No waiting keep-alive jobs to finalize in chain ${chainId}.`);
-    process.stdout.write(`${green12("\u2713")} Finalized chain ${chainId} (reviewer PASS: ${reviewerPass.reviewerJobId})
-`);
-    for (const id of finalized)
-      process.stdout.write(`  ${green12("\u2713")} ${id}
-`);
-    for (const { id, reason } of skipped)
-      process.stdout.write(`  ${dim12(`\xB7 ${id} (${reason})`)}
-`);
-  } finally {
-    await supervisor.dispose();
-  }
-}
-var green12 = (s) => `\x1B[32m${s}\x1B[0m`, red6 = (s) => `\x1B[31m${s}\x1B[0m`, dim12 = (s) => `\x1B[2m${s}\x1B[0m`, PASS_COMPLIANCE_VERDICT_REGEX2;
-var init_control2 = __esm(() => {
-  init_supervisor();
-  init_observability_sqlite();
-  init_process_liveness();
-  init_beads();
-  init_tmux_utils();
-  init_job_root();
-  PASS_COMPLIANCE_VERDICT_REGEX2 = /## Compliance Verdict[\s\S]*?- Verdict:\s*\**\s*PASS\s*\**/i;
-});
-
 // src/cli/stop.ts
 var exports_stop = {};
 __export(exports_stop, {
@@ -50918,7 +51214,7 @@ __export(exports_attach, {
   run: () => run27
 });
 import { execFileSync as execFileSync3, spawnSync as spawnSync21 } from "child_process";
-import { readFileSync as readFileSync29 } from "fs";
+import { readFileSync as readFileSync30 } from "fs";
 import { join as join34 } from "path";
 function exitWithError(message) {
   console.error(message);
@@ -50926,7 +51222,7 @@ function exitWithError(message) {
 }
 function readStatus(statusPath, jobId) {
   try {
-    return JSON.parse(readFileSync29(statusPath, "utf-8"));
+    return JSON.parse(readFileSync30(statusPath, "utf-8"));
   } catch (error2) {
     if (error2 && typeof error2 === "object" && "code" in error2 && error2.code === "ENOENT") {
       exitWithError(`Job \`${jobId}\` not found. Run \`specialists status\` to see active jobs in current mode.`);
@@ -50963,7 +51259,7 @@ async function run27() {
 var init_attach = () => {};
 
 // src/specialist/drift-detector.ts
-import { existsSync as existsSync30, readFileSync as readFileSync30, readdirSync as readdirSync16, rmSync as rmSync5 } from "fs";
+import { existsSync as existsSync30, readFileSync as readFileSync31, readdirSync as readdirSync16, rmSync as rmSync5 } from "fs";
 import { join as join35, resolve as resolve11, relative as relative3 } from "path";
 function listFiles(root) {
   if (!existsSync30(root))
@@ -51013,7 +51309,7 @@ function detectDriftForRepo(repoRoot) {
         const canonicalPath = join35(asset.canonicalDir, rel);
         if (!existsSync30(canonicalPath))
           continue;
-        const bytesEqual = readFileSync30(file).equals(readFileSync30(canonicalPath));
+        const bytesEqual = readFileSync31(file).equals(readFileSync31(canonicalPath));
         findings.push(makeFinding(repoRoot, asset.kind, scope, file, canonicalPath, bytesEqual));
       }
     }
@@ -51394,7 +51690,7 @@ __export(exports_doctor, {
 });
 import { createHash as createHash5 } from "crypto";
 import { spawnSync as spawnSync22 } from "child_process";
-import { existsSync as existsSync31, lstatSync as lstatSync2, mkdirSync as mkdirSync12, readdirSync as readdirSync17, readFileSync as readFileSync31, readlinkSync as readlinkSync3, writeFileSync as writeFileSync16 } from "fs";
+import { existsSync as existsSync31, lstatSync as lstatSync2, mkdirSync as mkdirSync12, readdirSync as readdirSync17, readFileSync as readFileSync32, readlinkSync as readlinkSync3, writeFileSync as writeFileSync16 } from "fs";
 import { dirname as dirname12, join as join36, relative as relative4, resolve as resolve13 } from "path";
 function ok3(msg) {
   console.log(`  ${green14("\u2713")} ${msg}`);
@@ -51427,7 +51723,7 @@ function loadJson2(path3) {
   if (!existsSync31(path3))
     return null;
   try {
-    return JSON.parse(readFileSync31(path3, "utf8"));
+    return JSON.parse(readFileSync32(path3, "utf8"));
   } catch {
     return null;
   }
@@ -51573,7 +51869,7 @@ function checkVersion() {
 }
 function hashFile(path3) {
   const hash = createHash5("sha256");
-  hash.update(readFileSync31(path3));
+  hash.update(readFileSync32(path3));
   return hash.digest("hex");
 }
 function collectFileHashes(rootDir) {
@@ -51977,7 +52273,7 @@ function compareVersions2(left, right) {
 }
 function setStatusError(statusPath) {
   try {
-    const raw = readFileSync31(statusPath, "utf8");
+    const raw = readFileSync32(statusPath, "utf8");
     const status = JSON.parse(raw);
     status.status = "error";
     writeFileSync16(statusPath, `${JSON.stringify(status, null, 2)}
@@ -52035,7 +52331,7 @@ function cleanupProcesses(jobsDir, dryRun) {
     if (!existsSync31(statusPath))
       continue;
     try {
-      const status = JSON.parse(readFileSync31(statusPath, "utf8"));
+      const status = JSON.parse(readFileSync32(statusPath, "utf8"));
       result.total += 1;
       if (status.status !== "running" && status.status !== "starting")
         continue;
