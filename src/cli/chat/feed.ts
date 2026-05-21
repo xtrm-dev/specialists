@@ -1,4 +1,4 @@
-import type { Component } from '@earendil-works/pi-tui';
+import { Container as Component, wrapTextWithAnsi } from '@earendil-works/pi-tui';
 
 export type FeedRowKind = 'token' | 'tool' | 'event' | 'result' | 'meta';
 
@@ -8,35 +8,9 @@ export interface FeedRow {
   ts: number;
 }
 
-// TODO(u4fdd.6): runtime import lands when @earendil-works/pi-tui is installed.
-const ANSI_PATTERN = /\x1b\[[0-9;]*m/g;
-const RESET = '\x1b[0m';
 const DEFAULT_LIMIT = 2000;
 
-function stripAnsi(text: string): string {
-  return text.replace(ANSI_PATTERN, '');
-}
-
-// TODO(u4fdd.6): replace with @earendil-works/pi-tui wrapTextWithAnsi
-export function wrapTextWithAnsi(text: string, width: number): string[] {
-  if (width <= 0) return [''];
-  if (text === '') return [''];
-
-  const hasAnsi = ANSI_PATTERN.test(text);
-  ANSI_PATTERN.lastIndex = 0;
-  const plain = stripAnsi(text);
-  const prefix = text.match(/^(?:\x1b\[[0-9;]*m)+/)?.[0] ?? '';
-  const lines: string[] = [];
-
-  for (let index = 0; index < plain.length; index += width) {
-    const chunk = plain.slice(index, index + width);
-    lines.push(hasAnsi ? `${prefix}${chunk}${RESET}` : chunk);
-  }
-
-  return lines.length > 0 ? lines : [''];
-}
-
-export class ChatFeed implements Component {
+export class ChatFeed extends Component {
   private readonly rows: FeedRow[] = [];
   private cachedWidth: number | null = null;
   private cachedLines: string[] = [];
@@ -62,6 +36,12 @@ export class ChatFeed implements Component {
     this.appendRow('result', text);
   }
 
+  invalidate(): void {
+    this.cachedWidth = null;
+    this.cachedLines = [];
+    this.cachedRowCount = 0;
+  }
+
   render(width: number): string[] {
     if (width <= 0) return [];
     if (this.cachedWidth !== width) {
@@ -84,7 +64,7 @@ export class ChatFeed implements Component {
   private appendRow(kind: FeedRowKind, text: string): void {
     this.rows.push({ kind, text, ts: Date.now() });
     if (this.rows.length > DEFAULT_LIMIT) this.rows.splice(0, this.rows.length - DEFAULT_LIMIT);
-    this.cachedRowCount = Math.min(this.cachedRowCount, this.rows.length);
+    this.invalidate();
   }
 
   private wrapRows(width: number): string[] {
