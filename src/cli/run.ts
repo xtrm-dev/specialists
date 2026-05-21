@@ -36,7 +36,7 @@ type OutputMode = 'human' | 'json' | 'raw';
 const JOB_ID_HANDOFF_PATH_ENV = 'SPECIALISTS_BG_JOB_ID_PATH';
 
 // ── Arg parser ─────────────────────────────────────────────────────────────────
-interface RunArgs {
+export interface RunArgs {
   name: string;
   prompt: string;
   beadId?: string;
