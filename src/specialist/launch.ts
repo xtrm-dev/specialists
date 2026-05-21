@@ -101,8 +101,9 @@ export async function launchSpecialist(opts: LaunchSpecialistOptions): Promise<v
   } catch (error: any) {
     runError = error;
     stopTailer?.();
+  } finally {
+    stopTailer?.();
   }
-
 
   if (opts.effectiveBeadId && opts.workingDirectory) {
     try {
@@ -121,8 +122,6 @@ export async function launchSpecialist(opts: LaunchSpecialistOptions): Promise<v
     process.stderr.write(`Error: ${message}\n`);
     process.exit(1);
   }
-
-  stopTailer?.();
 
   const status = supervisor.readStatus(jobId);
   const secs = ((status?.last_event_at_ms ?? Date.now()) - (status?.started_at_ms ?? Date.now())) / 1000;
