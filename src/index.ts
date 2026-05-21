@@ -3,7 +3,7 @@
 /**
  * Specialists MCP Server — entry point
  * Subcommands: install, version, list, view, models, init, db, validate, edit, config, run,
- *              status, ps, result, feed, clean, merge, epic, end, stop, attach, quickstart, serve, script, release, help
+ *              chat, status, ps, result, feed, clean, merge, epic, end, stop, attach, quickstart, serve, script, release, help
  */
 
 // Suppress EBADF errors from bun's internal fd handling on named pipes.
@@ -374,6 +374,21 @@ async function run() {
       return;
     }
     const { run: handler } = await import('./cli/config.js');
+    return handler();
+  }
+
+  if (sub === 'chat') {
+    if (wantsHelp()) {
+      console.log([
+        '',
+        'Usage: specialists chat <name> [prompt...] --bead <id> [--context-depth N] [--model M]',
+        '',
+        'Interactive shell for a specialist run. Streams job output into a TUI.',
+        '',
+      ].join('\n'));
+      return;
+    }
+    const { run: handler } = await import('./cli/chat.js');
     return handler();
   }
 
