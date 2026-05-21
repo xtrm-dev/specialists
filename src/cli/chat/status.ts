@@ -1,4 +1,6 @@
-import { createObservabilitySqliteClient, type ObservabilitySqliteClient } from '../../specialist/observability-sqlite.js';
+import { loadStatuses } from '../../specialist/status-load.js';
+// TODO(u4fdd.6): @earendil-works/pi-tui dep is installed by u4fdd.6; if tsc fails locally before install, change to 'import type' with explicit todo.
+import { truncateToWidth } from '@earendil-works/pi-tui';
 import type { SupervisorStatus } from '../../specialist/supervisor.js';
 
 const DEFAULT_POLL_INTERVAL_MS = 500;
@@ -8,7 +10,6 @@ type ChatTui = { requestRender(): void };
 
 interface ChatStatusOptions {
   pollIntervalMs?: number;
-  observabilityClient?: ObservabilitySqliteClient | null;
 }
 
 interface StatusSignature {
@@ -19,7 +20,6 @@ interface StatusSignature {
 
 export class ChatStatus {
   private readonly pollIntervalMs: number;
-  private readonly observabilityClient: ObservabilitySqliteClient | null;
   private currentStatus: SupervisorStatus | null = null;
   private lastSignature: string | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -27,7 +27,6 @@ export class ChatStatus {
 
   constructor(private readonly tui: ChatTui, options: ChatStatusOptions = {}) {
     this.pollIntervalMs = Math.max(DEFAULT_POLL_INTERVAL_MS, options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
-    this.observabilityClient = options.observabilityClient ?? createObservabilitySqliteClient();
   }
 
   start(): void {
@@ -72,7 +71,7 @@ export class ChatStatus {
 
   private readCurrentStatus(): SupervisorStatus | null {
     try {
-      const statuses = this.observabilityClient?.listStatuses() ?? [];
+      const statuses = loadStatuses();
       return selectCurrentStatus(statuses);
     } catch {
       return null;
@@ -118,9 +117,3 @@ function formatModel(status: Pick<SupervisorStatus, 'backend' | 'model'>): strin
   return '-';
 }
 
-function truncateToWidth(input: string, width: number): string {
-  if (width <= 0) return '';
-  if (input.length <= width) return input;
-  if (width <= 1) return '…'.slice(0, width);
-  return `${input.slice(0, width - 1)}…`;
-}
