@@ -349,6 +349,45 @@ Cross-repo consistency: keep this vocabulary aligned with the xtrm-tools `issue-
 
 What differs: orchestrator chooses edge type deliberately, so graph stays correct for chain execution, epic publish, duplicate cleanup, root-cause navigation, verification evidence, and follow-up traceability.
 
+## Swarm Validation For Epic Readiness
+
+Use `bd swarm` as graph-level readiness instrumentation for multi-chain epics. It does **not** replace specialists jobs, `sp epic status`, or `sp epic merge`; it validates and summarizes the bead DAG so you know whether the epic is shaped for parallel execution before spending specialist tokens.
+
+Command surface:
+
+```bash
+bd swarm validate <epic-id> [--verbose] [--json]
+bd swarm status <epic-or-swarm-id> [--json]
+bd swarm list [--json]
+bd swarm create <epic-id> [--coordinator=<addr>] [--force]
+```
+
+What each command is for:
+
+| Command | Use it when | Output / decision |
+| --- | --- | --- |
+| `bd swarm validate <epic>` | Before launching a multi-chain epic, after graph rewrites, and before `sp epic merge` | Finds dependency-direction mistakes, orphan/disconnected children, cycles, ready fronts, estimated worker sessions, and max parallelism |
+| `bd swarm status <epic-or-swarm>` | During orchestration | Shows computed completed / active / ready / blocked groups from live bead state |
+| `bd swarm list` | Operator wants all active swarm molecules | Inventory of swarm molecules with epic/progress summary |
+| `bd swarm create <epic>` | Operator explicitly wants a swarm molecule/coordinator handoff | Mutates board state; confirm first. If passed a task, bd may auto-wrap it in an epic. |
+
+Where it fits in orchestration:
+
+1. **After planning / before dispatch**: run `bd swarm validate <epic-id> --json` for epics with 3+ children or intended parallel execution. Treat warnings as graph-shaping feedback; fix relationship types or split/merge beads before launching specialists.
+2. **During execution**: use `bd swarm status <epic-id> --json` alongside `sp ps`. `sp ps` tells you job/runtime state; swarm status tells you issue-graph state (ready vs blocked fronts).
+3. **Before publication**: run `bd swarm validate <epic-id>` plus `bd dep cycles` and `sp epic status <epic-id>`. Do not `sp epic merge` if swarm validation reports cycles, disconnected graph, or suspicious dependency direction.
+4. **Optional coordinator handoff**: run `bd swarm create <epic-id> --coordinator=<addr>` only after operator confirmation. Creating a swarm molecule is a tracked mutation, not a default read-only check.
+
+Example gate before parallel dispatch:
+
+```bash
+bd dep cycles
+bd swarm validate <epic-id> --json > .triage/swarm-<epic-id>.json
+sp epic status <epic-id>
+```
+
+If validation says max parallelism is 1, do not pretend the epic is parallel; dispatch serially or fix the graph. If it reports multiple ready fronts, use that as the wave plan for specialist launches.
+
 ## Bead Contract By Bead Type
 
 Use shape that fits specialist.
