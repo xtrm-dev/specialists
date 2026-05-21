@@ -1,4 +1,5 @@
-import { Container as Component, wrapTextWithAnsi } from '@earendil-works/pi-tui';
+import type { Component } from '@earendil-works/pi-tui';
+import { wrapTextWithAnsi } from '@earendil-works/pi-tui';
 
 export type FeedRowKind = 'token' | 'tool' | 'event' | 'result' | 'meta';
 
@@ -10,7 +11,7 @@ export interface FeedRow {
 
 const DEFAULT_LIMIT = 2000;
 
-export class ChatFeed extends Component {
+export class ChatFeed implements Component {
   private readonly rows: FeedRow[] = [];
   private cachedWidth: number | null = null;
   private cachedLines: string[] = [];
