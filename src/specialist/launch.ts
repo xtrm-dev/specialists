@@ -6,7 +6,7 @@ import type { HookEmitter } from './hooks.js';
 import type { CircuitBreaker } from '../utils/circuitBreaker.js';
 import type { BeadsClient as BeadsClientType } from './beads.js';
 import type { RunArgs } from '../cli/run.js';
-import type { SpecialistRecord } from './schema.js';
+import type { Specialist } from './schema.js';
 import { SpecialistRunner } from './runner.js';
 
 const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
@@ -16,7 +16,7 @@ const cyan = (s: string) => `\x1b[36m${s}\x1b[0m`;
 
 export interface LaunchSpecialistOptions {
   args: RunArgs;
-  specialist: SpecialistRecord;
+  specialist: Specialist;
   loader: SpecialistLoader;
   hooks: HookEmitter;
   circuitBreaker: CircuitBreaker;
@@ -31,12 +31,12 @@ export interface LaunchSpecialistOptions {
   beadsWriteNotes: boolean;
   perm: 'READ_ONLY' | 'LOW' | 'MEDIUM' | 'HIGH';
   jobsDir: string;
-  stopTailer?: (() => void) | undefined;
   startEventTailer: (jobId: string, jobsDir: string) => (() => void) | undefined;
   formatFooterModel: (backend?: string, model?: string) => string;
 }
 
 export async function launchSpecialist(opts: LaunchSpecialistOptions): Promise<void> {
+  let stopTailer: (() => void) | undefined;
   const runner = new SpecialistRunner({
     loader: opts.loader,
     hooks: opts.hooks,
@@ -75,7 +75,7 @@ export async function launchSpecialist(opts: LaunchSpecialistOptions): Promise<v
         try { writeFileSync(handoffPath, `${id}\n`, 'utf-8'); } catch { /* best effort */ }
       }
       if (opts.args.outputMode !== 'raw') {
-        opts.stopTailer = opts.startEventTailer(id, opts.jobsDir);
+        stopTailer = opts.startEventTailer(id, opts.jobsDir);
       }
     },
   });
@@ -100,10 +100,9 @@ export async function launchSpecialist(opts: LaunchSpecialistOptions): Promise<v
     jobId = await supervisor.run();
   } catch (error: any) {
     runError = error;
-    opts.stopTailer?.();
+    stopTailer?.();
   }
 
-  opts.stopTailer?.();
 
   if (opts.effectiveBeadId && opts.workingDirectory) {
     try {
