@@ -1,27 +1,71 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createChatControl, dispatchInput, type ControlOps } from '../../../src/cli/chat/control.js';
+import { describe, expect, it } from 'vitest';
+import { execSync, spawnSync } from 'node:child_process';
+import { join, resolve } from 'node:path';
+import { BeadsClient } from '../../../src/specialist/beads.js';
+import { dispatchInput } from '../../../src/cli/chat/control.js';
 
-function ok(message?: string) { return { ok: true as const, message }; }
-function err(error_code: 'not_waiting' | 'already_stopped' | 'unknown_command' | 'missing_notes', likely_cause: string, next_safe_action: 'none' | 'rejoin') {
-  return { ok: false as const, error_code, likely_cause, next_safe_action };
+const repoRoot = resolve(import.meta.dirname, '../../..');
+
+function runCli(args: string[]) {
+  return spawnSync('bun', ['run', join(repoRoot, 'src/index.ts'), ...args], { cwd: repoRoot, encoding: 'utf-8', env: { ...process.env, NO_COLOR: '1' } });
+}
+
+function createBead(title: string): string {
+  const result = spawnSync('bd', ['create', title, '-t', 'task', '--json'], { cwd: repoRoot, encoding: 'utf-8' });
+  expect(result.status).toBe(0);
+  const parsed = JSON.parse(result.stdout.trim());
+  return Array.isArray(parsed) ? parsed[0].id : parsed.id;
+}
+
+function closeBead(id: string): void {
+  spawnSync('bd', ['close', id, '-r', 'test cleanup'], { cwd: repoRoot, stdio: 'ignore' });
 }
 
 describe('chat control boundary', () => {
-  afterEach(() => vi.restoreAllMocks());
-
   it('routes plain text by live state', () => {
     expect(dispatchInput('run it', { jobState: 'running' })).toEqual({ kind: 'steer', text: 'run it' });
     expect(dispatchInput('next', { jobState: 'waiting' })).toEqual({ kind: 'resume', text: 'next' });
   });
 
-  it('stop/finalize/notes helpers surface envelopes on no-op cases', async () => {
-    const stopJob = vi.fn().mockResolvedValueOnce(ok('stopped')).mockResolvedValueOnce(ok('already stopped'));
-    const finalizeJob = vi.fn().mockResolvedValue(err('not_waiting', 'job not waiting', 'rejoin'));
-    const appendBeadNote = vi.fn().mockResolvedValue(err('missing_notes', 'empty note', 'none'));
-    const chat = createChatControl({ getJobState: vi.fn().mockResolvedValue('running'), stopJob, finalizeJob, appendBeadNote } satisfies ControlOps);
-    expect(await chat.executeInput('/stop', { jobId: 'job-1', jobState: 'running' })).toEqual({ kind: 'info', message: 'stopped' });
-    expect(await chat.executeInput('/stop', { jobId: 'job-1', jobState: 'running' })).toEqual({ kind: 'info', message: 'already stopped' });
-    expect(await chat.executeInput('/finalize', { jobId: 'job-1', jobState: 'running' })).toEqual({ kind: 'error', message: JSON.stringify({ ok: false, error_code: 'not_waiting', likely_cause: 'job not waiting', next_safe_action: 'rejoin' }) });
-    expect(await chat.executeInput('/notes text', { jobId: 'job-1', jobState: 'running', beadId: 'bd-1' })).toEqual({ kind: 'error', message: JSON.stringify({ ok: false, error_code: 'missing_notes', likely_cause: 'empty note', next_safe_action: 'none' }) });
-  });
+  it('stopJob idempotent via CLI boundary', () => {
+    const beadId = createBead(`unitAI-control-stop-${Date.now()}`);
+    const launch = runCli(['run', 'reviewer', '--bead', beadId, '--background', '--no-beads', '--no-bead-notes']);
+    expect(launch.status).toBe(0);
+    const jobId = launch.stdout.trim();
+
+    const first = runCli(['stop', jobId]);
+    const second = runCli(['stop', jobId]);
+
+    expect(first.status).toBe(0);
+    expect(second.status).toBe(0);
+    expect(second.stdout + second.stderr).toContain('already finalized');
+
+    closeBead(beadId);
+  }, 30000);
+
+  it('finalizeJob on non-chain job returns structured error', () => {
+    const beadId = createBead(`unitAI-control-finalize-${Date.now()}`);
+    const launch = runCli(['run', 'reviewer', '--bead', beadId, '--background', '--no-beads', '--no-bead-notes']);
+    expect(launch.status).toBe(0);
+    const jobId = launch.stdout.trim();
+
+    const result = runCli(['finalize', jobId]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('No reviewer with PASS compliance verdict found in chain');
+
+    runCli(['stop', jobId]);
+    closeBead(beadId);
+  }, 30000);
+
+  it('appendBeadNote empty text refuses and happy path lands in bd show', () => {
+    const beadId = createBead(`unitAI-control-note-${Date.now()}`);
+    const beads = new BeadsClient();
+
+    expect(beads.updateBeadNotes(beadId, '')).toEqual({ ok: false, error: 'beads unavailable or empty payload' });
+    const note = `note-${Date.now()}`;
+    expect(beads.updateBeadNotes(beadId, note)).toEqual({ ok: true });
+    expect(execSync(`bd show ${beadId}`, { cwd: repoRoot, encoding: 'utf-8' })).toContain(note);
+
+    closeBead(beadId);
+  }, 30000);
 });
