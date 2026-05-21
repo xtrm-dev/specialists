@@ -144,6 +144,49 @@ async function runChatSmoke(options: { beadId: string; preload?: string }): Prom
   return { exitCode, output: `${combined}\n${transcript}`, transcript };
 }
 
+async function runChatSmokeWithoutBead(prompt: string): Promise<{ exitCode: number; output: string; transcript: string }> {
+  const transcriptPath = join(transcriptDir, `sp-chat-ephemeral-${Date.now()}-${Math.random().toString(16).slice(2)}.log`);
+  const command = [
+    'bun',
+    join(repoRoot, 'src/index.ts'),
+    'chat',
+    'reviewer',
+    '--prompt',
+    prompt,
+  ].join(' ');
+
+  const session = spawn('script', ['-qfec', command, transcriptPath], {
+    cwd: repoRoot,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: { ...process.env, NO_COLOR: '1', TERM: 'xterm-256color' },
+  });
+
+  let combined = '';
+  session.stdout.setEncoding('utf8');
+  session.stderr.setEncoding('utf8');
+  session.stdout.on('data', (chunk) => {
+    combined += chunk;
+  });
+  session.stderr.on('data', (chunk) => {
+    combined += chunk;
+  });
+
+  await wait(1500);
+  session.stdin.write('hello from smoke\n');
+  await wait(1000);
+  session.stdin.write('\u0003');
+  session.kill('SIGINT');
+
+  const exitCode = await Promise.race([
+    new Promise<number>((resolveExit) => {
+      session.once('close', (code) => resolveExit(code ?? 1));
+    }),
+    wait(8000).then(() => 124),
+  ]);
+  const transcript = readTranscript(transcriptPath);
+  return { exitCode, output: `${combined}\n${transcript}`, transcript };
+}
+
 test('sp chat reviewer smoke', async () => {
   const beadId = createBead(`unitAI-smoke-${Date.now()}`);
   const result = await runChatSmoke({ beadId });
@@ -152,16 +195,22 @@ test('sp chat reviewer smoke', async () => {
   expect(result.output).toContain('executor');
   expect(result.output).toContain(beadId);
 
-  // Job-state correlation via sp ps after chat exit is timing-fragile;
-  // covered by u4fdd.9 boundary tests and the broader chain lifecycle.
-  // Smoke verifies: chat started, status row appeared with bead-id, exited cleanly.
-
   const bead = spawnSync('bd', ['show', beadId], {
     cwd: repoRoot,
     encoding: 'utf8',
     env: { ...process.env, NO_COLOR: '1' },
   });
   expect(bead.status).toBe(0);
+}, 30000);
+
+test('sp chat reviewer smoke without bead', async () => {
+  const prompt = 'test prompt for ephemeral bead';
+  const expectedTitle = prompt.slice(0, 60);
+  const result = await runChatSmokeWithoutBead(prompt);
+
+  expect(result.exitCode).toBe(0);
+  expect(result.output).toContain('ephemeral bead');
+  expect(result.output).toContain(expectedTitle);
 }, 30000);
 
 test('sp chat cleanup still fires on induced TUI crash', async () => {
@@ -177,13 +226,7 @@ ChatStatus.prototype.render = function renderCrash(width: number): string {
 `);
 
   const result = await runChatSmoke({ beadId, preload: preloadPath });
-  // Graceful crash cleanup: chat catches the render error, restores terminal,
-  // exits cleanly (0) or via error path (1). Both prove the signal-guard fired.
   expect([0, 1]).toContain(result.exitCode);
-
-  // Cleanup contract verified by output presence — the crash message surfaces
-  // BEFORE the cleanup handlers run, proving the error was caught not swallowed.
-  // Job-state correlation deferred to u4fdd.9 boundary tests.
 
   const bead = spawnSync('bd', ['show', beadId], {
     cwd: repoRoot,

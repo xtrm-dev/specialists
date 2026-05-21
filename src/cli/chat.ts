@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { launchSpecialist } from '../specialist/launch.js';
 import { ChatFeed } from './chat/feed.js';
 import { ChatStatus } from './chat/status.js';
@@ -14,7 +15,7 @@ type PiTuiModule = typeof import('@earendil-works/pi-tui');
 interface ChatArgs {
   name: string;
   prompt: string;
-  beadId: string;
+  beadId?: string;
   contextDepth: number;
   model?: string;
 }
@@ -25,6 +26,8 @@ interface CleanupState {
 
 export async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(3));
+  const ephemeralTitle = args.beadId ? '' : buildEphemeralBeadTitle(args.prompt);
+  const beadId = args.beadId ?? createEphemeralBead(args.prompt);
   const loader = new SpecialistLoader();
   const specialist = await loader.get(args.name).catch((error: unknown) => {
     process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
@@ -55,7 +58,7 @@ export async function run(): Promise<void> {
   const signalCleanup = installSignalGuards(cleanup, input);
   const onStdinData = (data: Buffer) => {
     if (data.toString('utf8') !== '\u0003') return;
-    void cleanup.stopJobAndExit(args.beadId);
+    void cleanup.stopJobAndExit(beadId);
   };
   process.stdin.on('data', onStdinData);
 
@@ -65,6 +68,7 @@ export async function run(): Promise<void> {
     feed.appendEvent('chat', `launching ${args.name}`);
     feed.appendEvent('chat', `context depth ${args.contextDepth}`);
     if (args.model) feed.appendEvent('chat', `model ${args.model}`);
+    if (!args.beadId) feed.appendEvent('chat', `ephemeral bead ${ephemeralTitle} (${beadId})`);
 
     await launchSpecialist({
       args: { name: args.name, prompt: args.prompt, model: args.model, keepAlive: true, noKeepAlive: false, forceJob: false, outputMode: 'human', background: false } as any,
@@ -95,9 +99,9 @@ export async function run(): Promise<void> {
 
 function parseArgs(argv: string[]): ChatArgs {
   const name = argv[0];
-  if (!name) throw new Error('Usage: sp chat <specialist> [prompt...] --bead <id> [--context-depth N] [--model M]');
+  if (!name) throw new Error('Usage: sp chat <specialist> [prompt...] [--bead <id>] [--prompt <text>] [--context-depth N] [--model M]');
 
-  let beadId = '';
+  let beadId: string | undefined;
   let contextDepth = DEFAULT_CONTEXT_DEPTH;
   let model: string | undefined;
   const promptParts: string[] = [];
@@ -105,17 +109,42 @@ function parseArgs(argv: string[]): ChatArgs {
   for (let i = 1; i < argv.length; i++) {
     const token = argv[i];
     if (token === '--bead') beadId = argv[++i] ?? '';
+    else if (token === '--prompt') promptParts.push(argv[++i] ?? '');
     else if (token === '--context-depth') contextDepth = Number(argv[++i] ?? DEFAULT_CONTEXT_DEPTH);
     else if (token === '--model') model = argv[++i];
     else if (!token.startsWith('--')) promptParts.push(token);
   }
 
-  if (!beadId) throw new Error('Usage: sp chat <specialist> [prompt...] --bead <id> [--context-depth N] [--model M]');
-  return { name, prompt: promptParts.join(' '), beadId, contextDepth, model };
+  const prompt = promptParts.join(' ').trim();
+  if (!beadId && !prompt) throw new Error('Usage: sp chat <specialist> [prompt...] [--bead <id>] [--prompt <text>] [--context-depth N] [--model M]');
+  return { name, prompt, beadId, contextDepth, model };
 }
 
 function buildPrompt(args: ChatArgs): string {
   return [args.prompt, args.contextDepth ? `\n(context-depth: ${args.contextDepth})` : ''].join('').trim();
+}
+
+function createEphemeralBead(prompt: string): string {
+  const title = buildEphemeralBeadTitle(prompt);
+  const result = spawnSync('bd', ['create', title, '-t', 'task', '-p3', '--json'], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.status !== 0) {
+    const error = result.stderr?.trim() || result.stdout?.trim() || `bd create failed with exit code ${result.status}`;
+    throw new Error(`Error: unable to auto-create chat bead: ${error}`);
+  }
+  const parsed = JSON.parse(result.stdout.trim()) as { id?: string } | Array<{ id?: string }>;
+  const beadId = Array.isArray(parsed) ? parsed[0]?.id : parsed.id;
+  if (!beadId) throw new Error('Error: bd create returned no bead id for chat prompt');
+  return beadId;
+}
+
+function buildEphemeralBeadTitle(prompt: string): string {
+  const firstLine = prompt.split('\n', 1)[0]?.trim() ?? '';
+  const normalized = firstLine.replace(/\s+/g, ' ');
+  return (normalized || 'sp chat ephemeral').slice(0, 60);
 }
 
 async function loadJobState(jobId: string) {
