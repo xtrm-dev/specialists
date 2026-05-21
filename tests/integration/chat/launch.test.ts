@@ -47,4 +47,15 @@ describe('chat launch boundary', () => {
     expect(second.status).toBe(1);
     expect(second.stderr).toContain('existing starting job');
   }, 30000);
+
+  it('launch returns job handle shape through CLI boundary', () => {
+    const beadId = createBead(`unitAI-launch-shape-${Date.now()}`);
+    const result = runCli(['run', 'reviewer', '--bead', beadId, '--background', '--no-beads', '--no-bead-notes']);
+    expect(result.status).toBe(0);
+
+    const jobId = result.stdout.trim();
+    expect(jobId).toMatch(/^[a-f0-9]{6}$/);
+    expect(jobId).toHaveLength(6);
+    createdJobs.push(jobId);
+  }, 30000);
 });
