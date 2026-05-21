@@ -73,6 +73,7 @@
     }
   },
   "dependencies": {
+    "@earendil-works/pi-tui": "^0.75.4",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "yaml": "2.9.0",
     "zod": "^3.25.76",
