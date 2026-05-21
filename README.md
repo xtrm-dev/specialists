@@ -144,6 +144,9 @@ sp ps
 sp feed <job-id> --follow
 sp result <job-id>
 
+# Human-in-the-loop alternative: launch with a live TUI
+sp chat debugger --bead <id>          # feed-style timeline + status + final result + input
+
 # After implementation and reviewer PASS
 sp merge <chain-root-bead>          # standalone chain
 sp epic status <epic-id>            # multi-chain publication check
@@ -169,6 +172,7 @@ sp ps                         # actionable dashboard
 sp ps -f                      # TTY dashboard follow; pipes emit ANSI-free snapshots
 sp feed <job-id>              # full DB-backed event replay
 sp feed -f                    # follow all active jobs
+sp chat explorer --bead <id>    # launch interactive TUI; input auto-steers/resumes
 sp result <job-id> --wait
 sp steer <job-id> "focus only on X"
 sp resume <job-id> "continue with these findings"
@@ -176,6 +180,8 @@ sp finalize <any-chain-job>   # cascade-close waiting keep-alive chain after PAS
 sp clean --reap-orphans --dry-run
 sp clean --ps                 # hide terminal dashboard history without deleting DB audit rows
 ```
+
+`sp chat` is for launching a new interactive specialist session. It renders the same normalized feed style as `sp feed -f`, shows startup/payload context and the final result, and maps typed input to `steer` while running or `resume` while waiting. Current `sp attach <job-id>` remains the legacy tmux attach path; chat-style attach to an existing job is tracked separately.
 
 ## Script and service specialists
 
