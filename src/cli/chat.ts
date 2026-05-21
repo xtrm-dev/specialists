@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { appendFileSync, writeFileSync } from 'node:fs';
 import { launchSpecialist } from '../specialist/launch.js';
 import { ChatFeed } from './chat/feed.js';
 import { ChatStatus } from './chat/status.js';
@@ -9,6 +10,24 @@ import { createObservabilitySqliteClient } from '../specialist/observability-sql
 
 const DEFAULT_CONTEXT_DEPTH = 3;
 const DEFAULT_POLL_INTERVAL_MS = 500;
+
+// File-based debug tracing. stderr/stdout are owned by the TUI once it starts,
+// so console.log/error from within chat.ts is invisible to the operator.
+// Enable with: SP_CHAT_DEBUG=1 sp chat ...   (defaults log path to /tmp/sp-chat-debug.log)
+// Override path with: SP_CHAT_DEBUG=/path/to/file
+const DEBUG_LOG_PATH: string | null = (() => {
+  const v = process.env.SP_CHAT_DEBUG;
+  if (!v || v === '0' || v === 'false') return null;
+  return v === '1' || v === 'true' ? '/tmp/sp-chat-debug.log' : v;
+})();
+if (DEBUG_LOG_PATH) {
+  try { writeFileSync(DEBUG_LOG_PATH, `# sp chat debug log started ${new Date().toISOString()}\n`); } catch { /* ignore */ }
+}
+function dbg(msg: string, extra?: Record<string, unknown>): void {
+  if (!DEBUG_LOG_PATH) return;
+  const line = `${new Date().toISOString()} ${msg}${extra ? ' ' + JSON.stringify(extra) : ''}\n`;
+  try { appendFileSync(DEBUG_LOG_PATH, line); } catch { /* ignore */ }
+}
 
 type PiTuiModule = typeof import('@earendil-works/pi-tui');
 
@@ -25,20 +44,27 @@ interface CleanupState {
 }
 
 export async function run(): Promise<void> {
+  dbg('run() start', { argv: process.argv.slice(3), stdoutTTY: process.stdout.isTTY === true, stdinTTY: process.stdin.isTTY === true });
   const args = parseArgs(process.argv.slice(3));
+  dbg('parsed args', { name: args.name, beadId: args.beadId, hasPrompt: !!args.prompt });
   const ephemeralTitle = args.beadId ? '' : buildEphemeralBeadTitle(args.prompt);
   const beadId = args.beadId ?? createEphemeralBead(args.prompt);
+  dbg('bead resolved', { beadId, ephemeralTitle: ephemeralTitle || null });
   const loader = new SpecialistLoader();
   const specialist = await loader.get(args.name).catch((error: unknown) => {
     process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
     process.exit(1);
   });
+  dbg('specialist loaded', { name: args.name });
 
   const piTui = (await import('@earendil-works/pi-tui')) as PiTuiModule;
-  const { TUI, ProcessTerminal, Container, Input } = piTui as any;
+  dbg('pi-tui imported', { hasTUI: !!(piTui as any).TUI, hasInput: !!(piTui as any).Input, hasMatchesKey: !!(piTui as any).matchesKey });
+  const { TUI, ProcessTerminal, Container, Input, matchesKey, Key } = piTui as any;
 
   const terminal = new ProcessTerminal();
+  dbg('ProcessTerminal constructed');
   const tui = new TUI(terminal);
+  dbg('TUI constructed', { hasAddInputListener: typeof tui.addInputListener === 'function', hasSetFocus: typeof tui.setFocus === 'function' });
   const feed = new ChatFeed();
   const status = new ChatStatus(tui, { pollIntervalMs: DEFAULT_POLL_INTERVAL_MS });
   const control = createChatControl({
@@ -49,40 +75,73 @@ export async function run(): Promise<void> {
   });
 
   const input = new Input({ placeholder: 'Type message, /quit, /stop, /finalize, /show, /notes ...' });
-  const root = new Container({
-    direction: 'column',
-    children: [feed, status, input],
+  const root = new Container();
+  root.addChild(feed);
+  root.addChild({
+    render: (width: number) => [status.render(width)],
+    invalidate: () => undefined,
   });
+  root.addChild(input);
 
   const cleanup = createCleanup(tui, terminal, status);
   const signalCleanup = installSignalGuards(cleanup, input);
-  const onStdinData = (data: Buffer) => {
-    if (data.toString('utf8') !== '\u0003') return;
-    void cleanup.stopJobAndExit(beadId);
-  };
-  process.stdin.on('data', onStdinData);
 
   let shouldExit = false;
-  const removeInputListener = typeof tui.addInputListener === 'function'
-    ? tui.addInputListener(async (text: string) => {
-      const action = control.dispatchInput(text, { jobState: 'running' as any });
-      if (action.kind === 'quit') {
+  let currentJobId = '';
+  let resolveExitRequest: (() => void) | null = null;
+  const exitRequested = new Promise<true>((resolve) => {
+    resolveExitRequest = () => resolve(true);
+  });
+
+  const appendEvent = (type: string, details: string) => {
+    feed.appendEvent(type, details);
+    tui.requestRender();
+  };
+
+  const restoreStderr = redirectStderrToFeed({
+    append: (text) => appendEvent('stderr', text),
+  });
+
+  input.onSubmit = (text: string) => {
+    input.setValue('');
+    void handleSubmittedInput({
+      text,
+      getJobId: () => currentJobId,
+      getJobState: async () => currentJobId ? await loadJobState(currentJobId) : 'running',
+      control,
+      appendEvent,
+      requestRender: () => tui.requestRender(),
+      requestExit: () => {
         shouldExit = true;
-        await cleanup.stop();
+        resolveExitRequest?.();
+      },
+    });
+  };
+  // Single TUI-owned listener. Do NOT attach process.stdin.on('data') —
+  // that flips stdin into flowing mode and breaks ProcessTerminal raw-mode
+  // acquisition; the chat would render nothing and hang. pi-tui owns stdin.
+  const removeInputListener = typeof tui.addInputListener === 'function'
+    ? tui.addInputListener((data: string) => {
+      if (matchesKey && Key && matchesKey(data, Key.ctrl('c'))) {
+        void cleanup.stopJobAndExit(currentJobId);
+        return { consume: true };
       }
-      feed.appendEvent('user', text);
+      return undefined;
     })
     : () => undefined;
 
   try {
+    dbg('try block enter — setting root + focus');
     tui.root = root;
     tui.setFocus(input);
+    dbg('status.start()');
     status.start();
     feed.appendEvent('chat', `launching ${args.name}`);
     feed.appendEvent('chat', `context depth ${args.contextDepth}`);
     if (args.model) feed.appendEvent('chat', `model ${args.model}`);
     if (!args.beadId) feed.appendEvent('chat', `ephemeral bead ${ephemeralTitle} (${beadId})`);
 
+    dbg('calling launchSpecialist (non-awaited)');
     const launchPromise = launchSpecialist({
       args: { name: args.name, prompt: args.prompt, model: args.model, keepAlive: true, noKeepAlive: false, forceJob: false, outputMode: 'json', background: false } as any,
       specialist,
@@ -95,27 +154,42 @@ export async function run(): Promise<void> {
         recordSuccess: () => undefined,
       },
       prompt: buildPrompt(args),
+      effectiveBeadId: beadId,
       beadsWriteNotes: true,
       perm: specialist.specialist.execution.permission_required,
       jobsDir: '.specialists/jobs',
       startEventTailer: () => undefined,
       formatFooterModel: (backend, model) => formatFooterModel(backend, model),
-      onProgress: (delta) => feed.appendEvent('assistant', delta),
-      onMeta: (meta) => feed.appendEvent('chat', `${meta.backend}/${meta.model}`),
-      onJobStarted: ({ id }) => feed.appendEvent('chat', `job started: ${id}`),
+      onProgress: (delta) => appendEvent('assistant', delta),
+      onMeta: (meta) => appendEvent('chat', `${meta.backend}/${meta.model}`),
+      onJobStarted: ({ id }) => {
+        currentJobId = id;
+        appendEvent('chat', `job started: ${id}`);
+      },
     });
 
-    const launchDone = launchPromise.then(() => true).catch((error) => {
+    const launchDone = launchPromise.then(() => {
+      dbg('launchPromise resolved');
+      return true;
+    }).catch((error) => {
+      dbg('launchPromise rejected', { error: error instanceof Error ? error.message : String(error) });
       feed.appendEvent('chat', error instanceof Error ? error.message : String(error));
       return true;
     });
+    dbg('about to await tui.start()');
     await tui.start();
-    if (!shouldExit) await launchDone;
+    dbg('tui.start() returned');
+    if (!shouldExit) {
+      dbg('awaiting launchDone');
+      await launchDone;
+      dbg('launchDone awaited');
+    }
   } finally {
+    dbg('finally — cleanup');
     removeInputListener?.();
-    process.stdin.off('data', onStdinData);
     signalCleanup();
     await cleanup.stop();
+    dbg('cleanup done — exiting run()');
   }
 }
 
@@ -176,6 +250,57 @@ async function loadJobState(jobId: string) {
 
 function formatFooterModel(backend?: string, model?: string): string {
   return model ?? backend ?? '';
+}
+
+interface SubmittedInputDeps {
+  text: string;
+  getJobId: () => string;
+  getJobState: () => Promise<string | null>;
+  control: ReturnType<typeof createChatControl>;
+  appendEvent: (type: string, details: string) => void;
+  requestRender: () => void;
+  requestExit: () => void;
+}
+
+async function handleSubmittedInput(deps: SubmittedInputDeps): Promise<void> {
+  deps.appendEvent('user', deps.text);
+  const jobId = deps.getJobId();
+  const jobState = (await deps.getJobState()) ?? 'running';
+  const action = deps.control.dispatchInput(deps.text, { jobState: jobState as any });
+
+  if (action.kind === 'quit') {
+    deps.appendEvent('chat', 'detaching; specialist job left running');
+    deps.requestExit();
+    return;
+  }
+
+  if (action.kind === 'steer' || action.kind === 'resume') {
+    deps.appendEvent('chat', `${action.kind} queued for ${jobId || 'pending job'}`);
+    return;
+  }
+
+  if ('message' in action) deps.appendEvent('chat', action.message);
+  else deps.appendEvent('chat', `${action.kind} requested for ${jobId || 'pending job'}`);
+  deps.requestRender();
+}
+
+function redirectStderrToFeed(feed: { append(text: string): void }): () => void {
+  const originalWrite = process.stderr.write.bind(process.stderr) as any;
+  (process.stderr as any).write = (chunk: unknown, encoding?: BufferEncoding | ((error?: Error | null) => void), callback?: (error?: Error | null) => void): boolean => {
+    const text = Buffer.isBuffer(chunk)
+      ? chunk.toString(typeof encoding === 'string' ? encoding : 'utf8')
+      : String(chunk);
+    for (const line of text.split(/\r?\n/)) {
+      const trimmed = line.trimEnd();
+      if (trimmed) feed.append(trimmed);
+    }
+    if (typeof encoding === 'function') encoding(null);
+    if (typeof callback === 'function') callback(null);
+    return true;
+  };
+  return () => {
+    (process.stderr as any).write = originalWrite;
+  };
 }
 
 function createCleanup(tui: any, terminal: any, status: ChatStatus) {
