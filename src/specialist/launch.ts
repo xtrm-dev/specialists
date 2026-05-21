@@ -33,6 +33,9 @@ export interface LaunchSpecialistOptions {
   jobsDir: string;
   startEventTailer: (jobId: string, jobsDir: string) => (() => void) | undefined;
   formatFooterModel: (backend?: string, model?: string) => string;
+  onProgress?: (delta: string) => void;
+  onMeta?: (meta: { backend: string; model: string }) => void;
+  onJobStarted?: (job: { id: string }) => void;
 }
 
 export async function launchSpecialist(opts: LaunchSpecialistOptions): Promise<void> {
@@ -64,11 +67,12 @@ export async function launchSpecialist(opts: LaunchSpecialistOptions): Promise<v
     },
     beadsClient: opts.beadsClient,
     stallDetection: opts.specialist.specialist.stall_detection,
-    onProgress: opts.args.outputMode === 'raw' ? (delta) => process.stdout.write(delta) : undefined,
-    onMeta: opts.args.outputMode !== 'human'
+    onProgress: opts.onProgress ?? (opts.args.outputMode === 'raw' ? (delta) => process.stdout.write(delta) : undefined),
+    onMeta: opts.onMeta ?? (opts.args.outputMode !== 'human'
       ? (meta) => process.stderr.write(dim(`\n[${meta.backend} / ${meta.model}]\n\n`))
-      : undefined,
+      : undefined),
     onJobStarted: ({ id }) => {
+      opts.onJobStarted?.({ id });
       process.stderr.write(dim(`[job started: ${id}]\n`));
       const handoffPath = process.env.SPECIALISTS_BG_JOB_ID_PATH;
       if (handoffPath) {
@@ -121,7 +125,7 @@ export async function launchSpecialist(opts: LaunchSpecialistOptions): Promise<v
   if (runError) {
     const message = runError instanceof Error ? runError.message : String(runError);
     process.stderr.write(`Error: ${message}\n`);
-    process.exit(1);
+    throw new Error(message);
   }
 
   const status = supervisor.readStatus(jobId);
@@ -137,5 +141,4 @@ export async function launchSpecialist(opts: LaunchSpecialistOptions): Promise<v
   process.stderr.write(`\n${green('✓')} ${footer}\n\n`);
   process.stderr.write(dim(`Status: specialists ps ${jobId} --json`) + '\n');
   process.stderr.write(dim(`Events: specialists feed ${jobId}`) + '\n\n');
-  process.exit(0);
 }

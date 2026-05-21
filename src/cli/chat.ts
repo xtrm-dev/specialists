@@ -35,7 +35,7 @@ export async function run(): Promise<void> {
   });
 
   const piTui = (await import('@earendil-works/pi-tui')) as PiTuiModule;
-  const { TUI, ProcessTerminal, Container, Input } = piTui as any;
+  const { TUI, ProcessTerminal, Container, Input, addInputListener } = piTui as any;
 
   const terminal = new ProcessTerminal();
   const tui = new TUI(terminal);
@@ -62,6 +62,18 @@ export async function run(): Promise<void> {
   };
   process.stdin.on('data', onStdinData);
 
+  let shouldExit = false;
+  const removeInputListener = typeof addInputListener === 'function'
+    ? addInputListener(async (text: string) => {
+      const action = control.dispatchInput(text, { jobState: 'running' as any });
+      if (action.kind === 'quit') {
+        shouldExit = true;
+        await cleanup.stop();
+      }
+      feed.appendEvent('user', text);
+    })
+    : () => undefined;
+
   try {
     tui.root = root;
     status.start();
@@ -70,8 +82,8 @@ export async function run(): Promise<void> {
     if (args.model) feed.appendEvent('chat', `model ${args.model}`);
     if (!args.beadId) feed.appendEvent('chat', `ephemeral bead ${ephemeralTitle} (${beadId})`);
 
-    await launchSpecialist({
-      args: { name: args.name, prompt: args.prompt, model: args.model, keepAlive: true, noKeepAlive: false, forceJob: false, outputMode: 'human', background: false } as any,
+    const launchPromise = launchSpecialist({
+      args: { name: args.name, prompt: args.prompt, model: args.model, keepAlive: true, noKeepAlive: false, forceJob: false, outputMode: 'json', background: false } as any,
       specialist,
       loader,
       hooks: (specialist as any).hooks ?? { emit: () => undefined },
@@ -87,10 +99,19 @@ export async function run(): Promise<void> {
       jobsDir: '.specialists/jobs',
       startEventTailer: () => undefined,
       formatFooterModel: (backend, model) => formatFooterModel(backend, model),
+      onProgress: (delta) => feed.appendEvent('assistant', delta),
+      onMeta: (meta) => feed.appendEvent('chat', `${meta.backend}/${meta.model}`),
+      onJobStarted: ({ id }) => feed.appendEvent('chat', `job started: ${id}`),
     });
 
+    const launchDone = launchPromise.then(() => true).catch((error) => {
+      feed.appendEvent('chat', error instanceof Error ? error.message : String(error));
+      return true;
+    });
     await tui.start();
+    if (!shouldExit) await launchDone;
   } finally {
+    removeInputListener?.();
     process.stdin.off('data', onStdinData);
     signalCleanup();
     await cleanup.stop();
