@@ -22080,6 +22080,10 @@ function summarizePayloadBreakdown(components) {
 }
 
 // src/specialist/runner.ts
+var exports_runner = {};
+__export(exports_runner, {
+  SpecialistRunner: () => SpecialistRunner
+});
 import { createHash as createHash2 } from "crypto";
 import { writeFile } from "fs/promises";
 import { execSync as execSync2, spawnSync as spawnSync4 } from "child_process";
@@ -30092,9 +30096,10359 @@ var init_config = __esm(() => {
   init_resolution_diagnostics();
 });
 
+// src/specialist/launch.ts
+import { execSync as execSync4 } from "child_process";
+import { writeFileSync as writeFileSync7 } from "fs";
+async function launchSpecialist(opts) {
+  let stopTailer;
+  const runner = new SpecialistRunner({
+    loader: opts.loader,
+    hooks: opts.hooks,
+    circuitBreaker: opts.circuitBreaker,
+    beadsClient: opts.beadsClient
+  });
+  const supervisor = new Supervisor({
+    runner,
+    runOptions: {
+      name: opts.args.name,
+      prompt: opts.prompt,
+      variables: opts.variables,
+      backendOverride: opts.args.model,
+      inputBeadId: opts.effectiveBeadId,
+      epicId: opts.epicId,
+      keepAlive: opts.args.keepAlive,
+      noKeepAlive: opts.args.noKeepAlive,
+      beadsWriteNotes: opts.beadsWriteNotes,
+      forceJob: opts.args.forceJob,
+      permissionRequired: opts.perm,
+      workingDirectory: opts.workingDirectory,
+      reusedFromJobId: opts.reusedFromJobId,
+      worktreeOwnerJobId: opts.worktreeOwnerJobId
+    },
+    beadsClient: opts.beadsClient,
+    stallDetection: opts.specialist.specialist.stall_detection,
+    onProgress: opts.args.outputMode === "raw" ? (delta) => process.stdout.write(delta) : undefined,
+    onMeta: opts.args.outputMode !== "human" ? (meta) => process.stderr.write(dim8(`
+[${meta.backend} / ${meta.model}]
+
+`)) : undefined,
+    onJobStarted: ({ id }) => {
+      process.stderr.write(dim8(`[job started: ${id}]
+`));
+      const handoffPath = process.env.SPECIALISTS_BG_JOB_ID_PATH;
+      if (handoffPath) {
+        try {
+          writeFileSync7(handoffPath, `${id}
+`, "utf-8");
+        } catch {}
+      }
+      if (opts.args.outputMode !== "raw") {
+        stopTailer = opts.startEventTailer(id, opts.jobsDir);
+      }
+    }
+  });
+  if (opts.effectiveBeadId && opts.workingDirectory) {
+    try {
+      execSync4(`bd kv set "bead-claim:${opts.effectiveBeadId}" "active"`, {
+        cwd: opts.workingDirectory,
+        stdio: "pipe",
+        timeout: 5000
+      });
+    } catch {}
+  }
+  process.stderr.write(`
+${bold10(`Running ${cyan5(opts.args.name)}`)}
+
+`);
+  let jobId = "";
+  let runError;
+  try {
+    jobId = await supervisor.run();
+  } catch (error2) {
+    runError = error2;
+    stopTailer?.();
+  }
+  stopTailer?.();
+  if (opts.effectiveBeadId && opts.workingDirectory) {
+    try {
+      execSync4(`bd kv clear "bead-claim:${opts.effectiveBeadId}"`, {
+        cwd: opts.workingDirectory,
+        stdio: "pipe",
+        timeout: 5000
+      });
+    } catch {}
+  }
+  if (runError) {
+    const message = runError instanceof Error ? runError.message : String(runError);
+    process.stderr.write(`Error: ${message}
+`);
+    process.exit(1);
+  }
+  const status = supervisor.readStatus(jobId);
+  const secs = ((status?.last_event_at_ms ?? Date.now()) - (status?.started_at_ms ?? Date.now())) / 1000;
+  const modelLabel = opts.formatFooterModel(status?.backend, status?.model);
+  const footer = [
+    `job ${jobId}`,
+    status?.bead_id ? `bead ${status.bead_id}` : "",
+    `${secs.toFixed(1)}s`,
+    modelLabel ? dim8(modelLabel) : ""
+  ].filter(Boolean).join("  ");
+  process.stderr.write(`
+${green8("\u2713")} ${footer}
+
+`);
+  process.stderr.write(dim8(`Status: specialists ps ${jobId} --json`) + `
+`);
+  process.stderr.write(dim8(`Events: specialists feed ${jobId}`) + `
+
+`);
+  process.exit(0);
+}
+var bold10 = (s) => `\x1B[1m${s}\x1B[0m`, dim8 = (s) => `\x1B[2m${s}\x1B[0m`, green8 = (s) => `\x1B[32m${s}\x1B[0m`, cyan5 = (s) => `\x1B[36m${s}\x1B[0m`;
+var init_launch = __esm(() => {
+  init_supervisor();
+  init_runner();
+});
+
+// node_modules/@earendil-works/pi-tui/dist/fuzzy.js
+function fuzzyMatch(query, text) {
+  const queryLower = query.toLowerCase();
+  const textLower = text.toLowerCase();
+  const matchQuery = (normalizedQuery) => {
+    if (normalizedQuery.length === 0) {
+      return { matches: true, score: 0 };
+    }
+    if (normalizedQuery.length > textLower.length) {
+      return { matches: false, score: 0 };
+    }
+    let queryIndex = 0;
+    let score = 0;
+    let lastMatchIndex = -1;
+    let consecutiveMatches = 0;
+    for (let i = 0;i < textLower.length && queryIndex < normalizedQuery.length; i++) {
+      if (textLower[i] === normalizedQuery[queryIndex]) {
+        const isWordBoundary = i === 0 || /[\s\-_./:]/.test(textLower[i - 1]);
+        if (lastMatchIndex === i - 1) {
+          consecutiveMatches++;
+          score -= consecutiveMatches * 5;
+        } else {
+          consecutiveMatches = 0;
+          if (lastMatchIndex >= 0) {
+            score += (i - lastMatchIndex - 1) * 2;
+          }
+        }
+        if (isWordBoundary) {
+          score -= 10;
+        }
+        score += i * 0.1;
+        lastMatchIndex = i;
+        queryIndex++;
+      }
+    }
+    if (queryIndex < normalizedQuery.length) {
+      return { matches: false, score: 0 };
+    }
+    if (normalizedQuery === textLower) {
+      score -= 100;
+    }
+    return { matches: true, score };
+  };
+  const primaryMatch = matchQuery(queryLower);
+  if (primaryMatch.matches) {
+    return primaryMatch;
+  }
+  const alphaNumericMatch = queryLower.match(/^(?<letters>[a-z]+)(?<digits>[0-9]+)$/);
+  const numericAlphaMatch = queryLower.match(/^(?<digits>[0-9]+)(?<letters>[a-z]+)$/);
+  const swappedQuery = alphaNumericMatch ? `${alphaNumericMatch.groups?.digits ?? ""}${alphaNumericMatch.groups?.letters ?? ""}` : numericAlphaMatch ? `${numericAlphaMatch.groups?.letters ?? ""}${numericAlphaMatch.groups?.digits ?? ""}` : "";
+  if (!swappedQuery) {
+    return primaryMatch;
+  }
+  const swappedMatch = matchQuery(swappedQuery);
+  if (!swappedMatch.matches) {
+    return primaryMatch;
+  }
+  return { matches: true, score: swappedMatch.score + 5 };
+}
+function fuzzyFilter(items, query, getText) {
+  if (!query.trim()) {
+    return items;
+  }
+  const tokens = query.trim().split(/\s+/).filter((t) => t.length > 0);
+  if (tokens.length === 0) {
+    return items;
+  }
+  const results = [];
+  for (const item of items) {
+    const text = getText(item);
+    let totalScore = 0;
+    let allMatch = true;
+    for (const token of tokens) {
+      const match = fuzzyMatch(token, text);
+      if (match.matches) {
+        totalScore += match.score;
+      } else {
+        allMatch = false;
+        break;
+      }
+    }
+    if (allMatch) {
+      results.push({ item, totalScore });
+    }
+  }
+  results.sort((a, b) => a.totalScore - b.totalScore);
+  return results.map((r) => r.item);
+}
+
+// node_modules/@earendil-works/pi-tui/dist/autocomplete.js
+import { spawn as spawn4 } from "child_process";
+import { readdirSync as readdirSync6, statSync as statSync3 } from "fs";
+import { homedir as homedir3 } from "os";
+import { basename as basename5, dirname as dirname9, join as join16 } from "path";
+function toDisplayPath(value) {
+  return value.replace(/\\/g, "/");
+}
+function escapeRegex2(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function buildFdPathQuery(query) {
+  const normalized = toDisplayPath(query);
+  if (!normalized.includes("/")) {
+    return normalized;
+  }
+  const hasTrailingSeparator = normalized.endsWith("/");
+  const trimmed = normalized.replace(/^\/+|\/+$/g, "");
+  if (!trimmed) {
+    return normalized;
+  }
+  const separatorPattern = "[\\\\/]";
+  const segments = trimmed.split("/").filter(Boolean).map((segment) => escapeRegex2(segment));
+  if (segments.length === 0) {
+    return normalized;
+  }
+  let pattern = segments.join(separatorPattern);
+  if (hasTrailingSeparator) {
+    pattern += separatorPattern;
+  }
+  return pattern;
+}
+function findLastDelimiter(text) {
+  for (let i = text.length - 1;i >= 0; i -= 1) {
+    if (PATH_DELIMITERS.has(text[i] ?? "")) {
+      return i;
+    }
+  }
+  return -1;
+}
+function findUnclosedQuoteStart(text) {
+  let inQuotes = false;
+  let quoteStart = -1;
+  for (let i = 0;i < text.length; i += 1) {
+    if (text[i] === '"') {
+      inQuotes = !inQuotes;
+      if (inQuotes) {
+        quoteStart = i;
+      }
+    }
+  }
+  return inQuotes ? quoteStart : null;
+}
+function isTokenStart(text, index) {
+  return index === 0 || PATH_DELIMITERS.has(text[index - 1] ?? "");
+}
+function extractQuotedPrefix(text) {
+  const quoteStart = findUnclosedQuoteStart(text);
+  if (quoteStart === null) {
+    return null;
+  }
+  if (quoteStart > 0 && text[quoteStart - 1] === "@") {
+    if (!isTokenStart(text, quoteStart - 1)) {
+      return null;
+    }
+    return text.slice(quoteStart - 1);
+  }
+  if (!isTokenStart(text, quoteStart)) {
+    return null;
+  }
+  return text.slice(quoteStart);
+}
+function parsePathPrefix(prefix) {
+  if (prefix.startsWith('@"')) {
+    return { rawPrefix: prefix.slice(2), isAtPrefix: true, isQuotedPrefix: true };
+  }
+  if (prefix.startsWith('"')) {
+    return { rawPrefix: prefix.slice(1), isAtPrefix: false, isQuotedPrefix: true };
+  }
+  if (prefix.startsWith("@")) {
+    return { rawPrefix: prefix.slice(1), isAtPrefix: true, isQuotedPrefix: false };
+  }
+  return { rawPrefix: prefix, isAtPrefix: false, isQuotedPrefix: false };
+}
+function buildCompletionValue(path, options) {
+  const needsQuotes = options.isQuotedPrefix || path.includes(" ");
+  const prefix = options.isAtPrefix ? "@" : "";
+  if (!needsQuotes) {
+    return `${prefix}${path}`;
+  }
+  const openQuote = `${prefix}"`;
+  const closeQuote = '"';
+  return `${openQuote}${path}${closeQuote}`;
+}
+async function walkDirectoryWithFd(baseDir, fdPath, query, maxResults, signal) {
+  const args = [
+    "--base-directory",
+    baseDir,
+    "--max-results",
+    String(maxResults),
+    "--type",
+    "f",
+    "--type",
+    "d",
+    "--follow",
+    "--hidden",
+    "--exclude",
+    ".git",
+    "--exclude",
+    ".git/*",
+    "--exclude",
+    ".git/**"
+  ];
+  if (toDisplayPath(query).includes("/")) {
+    args.push("--full-path");
+  }
+  if (query) {
+    args.push(buildFdPathQuery(query));
+  }
+  return await new Promise((resolve9) => {
+    if (signal.aborted) {
+      resolve9([]);
+      return;
+    }
+    const child = spawn4(fdPath, args, {
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    let stdout = "";
+    let resolved = false;
+    const finish = (results) => {
+      if (resolved)
+        return;
+      resolved = true;
+      signal.removeEventListener("abort", onAbort);
+      resolve9(results);
+    };
+    const onAbort = () => {
+      if (child.exitCode === null) {
+        child.kill("SIGKILL");
+      }
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    child.stdout.setEncoding("utf-8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.on("error", () => {
+      finish([]);
+    });
+    child.on("close", (code) => {
+      if (signal.aborted || code !== 0 || !stdout) {
+        finish([]);
+        return;
+      }
+      const lines = stdout.trim().split(`
+`).filter(Boolean);
+      const results = [];
+      for (const line of lines) {
+        const displayLine = toDisplayPath(line);
+        const hasTrailingSeparator = displayLine.endsWith("/");
+        const normalizedPath = hasTrailingSeparator ? displayLine.slice(0, -1) : displayLine;
+        if (normalizedPath === ".git" || normalizedPath.startsWith(".git/") || normalizedPath.includes("/.git/")) {
+          continue;
+        }
+        results.push({
+          path: displayLine,
+          isDirectory: hasTrailingSeparator
+        });
+      }
+      finish(results);
+    });
+  });
+}
+
+class CombinedAutocompleteProvider {
+  commands;
+  basePath;
+  fdPath;
+  constructor(commands = [], basePath, fdPath = null) {
+    this.commands = commands;
+    this.basePath = basePath;
+    this.fdPath = fdPath;
+  }
+  async getSuggestions(lines, cursorLine, cursorCol, options) {
+    const currentLine = lines[cursorLine] || "";
+    const textBeforeCursor = currentLine.slice(0, cursorCol);
+    const atPrefix = this.extractAtPrefix(textBeforeCursor);
+    if (atPrefix) {
+      const { rawPrefix, isQuotedPrefix } = parsePathPrefix(atPrefix);
+      const suggestions2 = await this.getFuzzyFileSuggestions(rawPrefix, {
+        isQuotedPrefix,
+        signal: options.signal
+      });
+      if (suggestions2.length === 0)
+        return null;
+      return {
+        items: suggestions2,
+        prefix: atPrefix
+      };
+    }
+    if (!options.force && textBeforeCursor.startsWith("/")) {
+      const spaceIndex = textBeforeCursor.indexOf(" ");
+      if (spaceIndex === -1) {
+        const prefix = textBeforeCursor.slice(1);
+        const commandItems = this.commands.map((cmd) => {
+          const name = "name" in cmd ? cmd.name : cmd.value;
+          const hint = "argumentHint" in cmd && cmd.argumentHint ? cmd.argumentHint : undefined;
+          const desc = cmd.description ?? "";
+          const fullDesc = hint ? desc ? `${hint} \u2014 ${desc}` : hint : desc;
+          return {
+            name,
+            label: name,
+            description: fullDesc || undefined
+          };
+        });
+        const filtered = fuzzyFilter(commandItems, prefix, (item) => item.name).map((item) => ({
+          value: item.name,
+          label: item.label,
+          ...item.description && { description: item.description }
+        }));
+        if (filtered.length === 0)
+          return null;
+        return {
+          items: filtered,
+          prefix: textBeforeCursor
+        };
+      }
+      const commandName = textBeforeCursor.slice(1, spaceIndex);
+      const argumentText = textBeforeCursor.slice(spaceIndex + 1);
+      const command = this.commands.find((cmd) => {
+        const name = "name" in cmd ? cmd.name : cmd.value;
+        return name === commandName;
+      });
+      if (!command || !("getArgumentCompletions" in command) || !command.getArgumentCompletions) {
+        return null;
+      }
+      const argumentSuggestions = await command.getArgumentCompletions(argumentText);
+      if (!Array.isArray(argumentSuggestions) || argumentSuggestions.length === 0) {
+        return null;
+      }
+      return {
+        items: argumentSuggestions,
+        prefix: argumentText
+      };
+    }
+    const pathMatch = this.extractPathPrefix(textBeforeCursor, options.force ?? false);
+    if (pathMatch === null) {
+      return null;
+    }
+    const suggestions = this.getFileSuggestions(pathMatch);
+    if (suggestions.length === 0)
+      return null;
+    return {
+      items: suggestions,
+      prefix: pathMatch
+    };
+  }
+  applyCompletion(lines, cursorLine, cursorCol, item, prefix) {
+    const currentLine = lines[cursorLine] || "";
+    const beforePrefix = currentLine.slice(0, cursorCol - prefix.length);
+    const afterCursor = currentLine.slice(cursorCol);
+    const isQuotedPrefix = prefix.startsWith('"') || prefix.startsWith('@"');
+    const hasLeadingQuoteAfterCursor = afterCursor.startsWith('"');
+    const hasTrailingQuoteInItem = item.value.endsWith('"');
+    const adjustedAfterCursor = isQuotedPrefix && hasTrailingQuoteInItem && hasLeadingQuoteAfterCursor ? afterCursor.slice(1) : afterCursor;
+    const isSlashCommand = prefix.startsWith("/") && beforePrefix.trim() === "" && !prefix.slice(1).includes("/");
+    if (isSlashCommand) {
+      const newLine2 = `${beforePrefix}/${item.value} ${adjustedAfterCursor}`;
+      const newLines2 = [...lines];
+      newLines2[cursorLine] = newLine2;
+      return {
+        lines: newLines2,
+        cursorLine,
+        cursorCol: beforePrefix.length + item.value.length + 2
+      };
+    }
+    if (prefix.startsWith("@")) {
+      const isDirectory2 = item.label.endsWith("/");
+      const suffix = isDirectory2 ? "" : " ";
+      const newLine2 = `${beforePrefix + item.value}${suffix}${adjustedAfterCursor}`;
+      const newLines2 = [...lines];
+      newLines2[cursorLine] = newLine2;
+      const hasTrailingQuote2 = item.value.endsWith('"');
+      const cursorOffset2 = isDirectory2 && hasTrailingQuote2 ? item.value.length - 1 : item.value.length;
+      return {
+        lines: newLines2,
+        cursorLine,
+        cursorCol: beforePrefix.length + cursorOffset2 + suffix.length
+      };
+    }
+    const textBeforeCursor = currentLine.slice(0, cursorCol);
+    if (textBeforeCursor.includes("/") && textBeforeCursor.includes(" ")) {
+      const newLine2 = beforePrefix + item.value + adjustedAfterCursor;
+      const newLines2 = [...lines];
+      newLines2[cursorLine] = newLine2;
+      const isDirectory2 = item.label.endsWith("/");
+      const hasTrailingQuote2 = item.value.endsWith('"');
+      const cursorOffset2 = isDirectory2 && hasTrailingQuote2 ? item.value.length - 1 : item.value.length;
+      return {
+        lines: newLines2,
+        cursorLine,
+        cursorCol: beforePrefix.length + cursorOffset2
+      };
+    }
+    const newLine = beforePrefix + item.value + adjustedAfterCursor;
+    const newLines = [...lines];
+    newLines[cursorLine] = newLine;
+    const isDirectory = item.label.endsWith("/");
+    const hasTrailingQuote = item.value.endsWith('"');
+    const cursorOffset = isDirectory && hasTrailingQuote ? item.value.length - 1 : item.value.length;
+    return {
+      lines: newLines,
+      cursorLine,
+      cursorCol: beforePrefix.length + cursorOffset
+    };
+  }
+  extractAtPrefix(text) {
+    const quotedPrefix = extractQuotedPrefix(text);
+    if (quotedPrefix?.startsWith('@"')) {
+      return quotedPrefix;
+    }
+    const lastDelimiterIndex = findLastDelimiter(text);
+    const tokenStart = lastDelimiterIndex === -1 ? 0 : lastDelimiterIndex + 1;
+    if (text[tokenStart] === "@") {
+      return text.slice(tokenStart);
+    }
+    return null;
+  }
+  extractPathPrefix(text, forceExtract = false) {
+    const quotedPrefix = extractQuotedPrefix(text);
+    if (quotedPrefix) {
+      return quotedPrefix;
+    }
+    const lastDelimiterIndex = findLastDelimiter(text);
+    const pathPrefix = lastDelimiterIndex === -1 ? text : text.slice(lastDelimiterIndex + 1);
+    if (forceExtract) {
+      return pathPrefix;
+    }
+    if (pathPrefix.includes("/") || pathPrefix.startsWith(".") || pathPrefix.startsWith("~/")) {
+      return pathPrefix;
+    }
+    if (pathPrefix === "" && text.endsWith(" ")) {
+      return pathPrefix;
+    }
+    return null;
+  }
+  expandHomePath(path) {
+    if (path.startsWith("~/")) {
+      const expandedPath = join16(homedir3(), path.slice(2));
+      return path.endsWith("/") && !expandedPath.endsWith("/") ? `${expandedPath}/` : expandedPath;
+    } else if (path === "~") {
+      return homedir3();
+    }
+    return path;
+  }
+  resolveScopedFuzzyQuery(rawQuery) {
+    const normalizedQuery = toDisplayPath(rawQuery);
+    const slashIndex = normalizedQuery.lastIndexOf("/");
+    if (slashIndex === -1) {
+      return null;
+    }
+    const displayBase = normalizedQuery.slice(0, slashIndex + 1);
+    const query = normalizedQuery.slice(slashIndex + 1);
+    let baseDir;
+    if (displayBase.startsWith("~/")) {
+      baseDir = this.expandHomePath(displayBase);
+    } else if (displayBase.startsWith("/")) {
+      baseDir = displayBase;
+    } else {
+      baseDir = join16(this.basePath, displayBase);
+    }
+    try {
+      if (!statSync3(baseDir).isDirectory()) {
+        return null;
+      }
+    } catch {
+      return null;
+    }
+    return { baseDir, query, displayBase };
+  }
+  scopedPathForDisplay(displayBase, relativePath) {
+    const normalizedRelativePath = toDisplayPath(relativePath);
+    if (displayBase === "/") {
+      return `/${normalizedRelativePath}`;
+    }
+    return `${toDisplayPath(displayBase)}${normalizedRelativePath}`;
+  }
+  getFileSuggestions(prefix) {
+    try {
+      let searchDir;
+      let searchPrefix;
+      const { rawPrefix, isAtPrefix, isQuotedPrefix } = parsePathPrefix(prefix);
+      let expandedPrefix = rawPrefix;
+      if (expandedPrefix.startsWith("~")) {
+        expandedPrefix = this.expandHomePath(expandedPrefix);
+      }
+      const isRootPrefix = rawPrefix === "" || rawPrefix === "./" || rawPrefix === "../" || rawPrefix === "~" || rawPrefix === "~/" || rawPrefix === "/" || isAtPrefix && rawPrefix === "";
+      if (isRootPrefix) {
+        if (rawPrefix.startsWith("~") || expandedPrefix.startsWith("/")) {
+          searchDir = expandedPrefix;
+        } else {
+          searchDir = join16(this.basePath, expandedPrefix);
+        }
+        searchPrefix = "";
+      } else if (rawPrefix.endsWith("/")) {
+        if (rawPrefix.startsWith("~") || expandedPrefix.startsWith("/")) {
+          searchDir = expandedPrefix;
+        } else {
+          searchDir = join16(this.basePath, expandedPrefix);
+        }
+        searchPrefix = "";
+      } else {
+        const dir = dirname9(expandedPrefix);
+        const file = basename5(expandedPrefix);
+        if (rawPrefix.startsWith("~") || expandedPrefix.startsWith("/")) {
+          searchDir = dir;
+        } else {
+          searchDir = join16(this.basePath, dir);
+        }
+        searchPrefix = file;
+      }
+      const entries = readdirSync6(searchDir, { withFileTypes: true });
+      const suggestions = [];
+      for (const entry of entries) {
+        if (!entry.name.toLowerCase().startsWith(searchPrefix.toLowerCase())) {
+          continue;
+        }
+        let isDirectory = entry.isDirectory();
+        if (!isDirectory && entry.isSymbolicLink()) {
+          try {
+            const fullPath = join16(searchDir, entry.name);
+            isDirectory = statSync3(fullPath).isDirectory();
+          } catch {}
+        }
+        let relativePath;
+        const name = entry.name;
+        const displayPrefix = rawPrefix;
+        if (displayPrefix.endsWith("/")) {
+          relativePath = displayPrefix + name;
+        } else if (displayPrefix.includes("/") || displayPrefix.includes("\\")) {
+          if (displayPrefix.startsWith("~/")) {
+            const homeRelativeDir = displayPrefix.slice(2);
+            const dir = dirname9(homeRelativeDir);
+            relativePath = `~/${dir === "." ? name : join16(dir, name)}`;
+          } else if (displayPrefix.startsWith("/")) {
+            const dir = dirname9(displayPrefix);
+            if (dir === "/") {
+              relativePath = `/${name}`;
+            } else {
+              relativePath = `${dir}/${name}`;
+            }
+          } else {
+            relativePath = join16(dirname9(displayPrefix), name);
+            if (displayPrefix.startsWith("./") && !relativePath.startsWith("./")) {
+              relativePath = `./${relativePath}`;
+            }
+          }
+        } else {
+          if (displayPrefix.startsWith("~")) {
+            relativePath = `~/${name}`;
+          } else {
+            relativePath = name;
+          }
+        }
+        relativePath = toDisplayPath(relativePath);
+        const pathValue = isDirectory ? `${relativePath}/` : relativePath;
+        const value = buildCompletionValue(pathValue, {
+          isDirectory,
+          isAtPrefix,
+          isQuotedPrefix
+        });
+        suggestions.push({
+          value,
+          label: name + (isDirectory ? "/" : "")
+        });
+      }
+      suggestions.sort((a, b) => {
+        const aIsDir = a.value.endsWith("/");
+        const bIsDir = b.value.endsWith("/");
+        if (aIsDir && !bIsDir)
+          return -1;
+        if (!aIsDir && bIsDir)
+          return 1;
+        return a.label.localeCompare(b.label);
+      });
+      return suggestions;
+    } catch (_e) {
+      return [];
+    }
+  }
+  scoreEntry(filePath, query, isDirectory) {
+    const fileName = basename5(filePath);
+    const lowerFileName = fileName.toLowerCase();
+    const lowerQuery = query.toLowerCase();
+    let score = 0;
+    if (lowerFileName === lowerQuery)
+      score = 100;
+    else if (lowerFileName.startsWith(lowerQuery))
+      score = 80;
+    else if (lowerFileName.includes(lowerQuery))
+      score = 50;
+    else if (filePath.toLowerCase().includes(lowerQuery))
+      score = 30;
+    if (isDirectory && score > 0)
+      score += 10;
+    return score;
+  }
+  async getFuzzyFileSuggestions(query, options) {
+    if (!this.fdPath || options.signal.aborted) {
+      return [];
+    }
+    try {
+      const scopedQuery = this.resolveScopedFuzzyQuery(query);
+      const fdBaseDir = scopedQuery?.baseDir ?? this.basePath;
+      const fdQuery = scopedQuery?.query ?? query;
+      const entries = await walkDirectoryWithFd(fdBaseDir, this.fdPath, fdQuery, 100, options.signal);
+      if (options.signal.aborted) {
+        return [];
+      }
+      const scoredEntries = entries.map((entry) => ({
+        ...entry,
+        score: fdQuery ? this.scoreEntry(entry.path, fdQuery, entry.isDirectory) : 1
+      })).filter((entry) => entry.score > 0);
+      scoredEntries.sort((a, b) => b.score - a.score);
+      const topEntries = scoredEntries.slice(0, 20);
+      const suggestions = [];
+      for (const { path: entryPath, isDirectory } of topEntries) {
+        const pathWithoutSlash = isDirectory ? entryPath.slice(0, -1) : entryPath;
+        const displayPath = scopedQuery ? this.scopedPathForDisplay(scopedQuery.displayBase, pathWithoutSlash) : pathWithoutSlash;
+        const entryName = basename5(pathWithoutSlash);
+        const completionPath = isDirectory ? `${displayPath}/` : displayPath;
+        const value = buildCompletionValue(completionPath, {
+          isDirectory,
+          isAtPrefix: true,
+          isQuotedPrefix: options.isQuotedPrefix
+        });
+        suggestions.push({
+          value,
+          label: entryName + (isDirectory ? "/" : ""),
+          description: displayPath
+        });
+      }
+      return suggestions;
+    } catch {
+      return [];
+    }
+  }
+  shouldTriggerFileCompletion(lines, cursorLine, cursorCol) {
+    const currentLine = lines[cursorLine] || "";
+    const textBeforeCursor = currentLine.slice(0, cursorCol);
+    if (textBeforeCursor.trim().startsWith("/") && !textBeforeCursor.trim().includes(" ")) {
+      return false;
+    }
+    return true;
+  }
+}
+var PATH_DELIMITERS;
+var init_autocomplete = __esm(() => {
+  PATH_DELIMITERS = new Set([" ", "\t", '"', "'", "="]);
+});
+
+// node_modules/get-east-asian-width/lookup-data.js
+var ambiguousMinimalCodePoint = 161, ambiguousMaximumCodePoint = 1114109, ambiguousRanges, fullwidthMinimalCodePoint = 12288, fullwidthMaximumCodePoint = 65510, fullwidthRanges, wideMinimalCodePoint = 4352, wideMaximumCodePoint = 262141, wideRanges;
+var init_lookup_data = __esm(() => {
+  ambiguousRanges = [161, 161, 164, 164, 167, 168, 170, 170, 173, 174, 176, 180, 182, 186, 188, 191, 198, 198, 208, 208, 215, 216, 222, 225, 230, 230, 232, 234, 236, 237, 240, 240, 242, 243, 247, 250, 252, 252, 254, 254, 257, 257, 273, 273, 275, 275, 283, 283, 294, 295, 299, 299, 305, 307, 312, 312, 319, 322, 324, 324, 328, 331, 333, 333, 338, 339, 358, 359, 363, 363, 462, 462, 464, 464, 466, 466, 468, 468, 470, 470, 472, 472, 474, 474, 476, 476, 593, 593, 609, 609, 708, 708, 711, 711, 713, 715, 717, 717, 720, 720, 728, 731, 733, 733, 735, 735, 768, 879, 913, 929, 931, 937, 945, 961, 963, 969, 1025, 1025, 1040, 1103, 1105, 1105, 8208, 8208, 8211, 8214, 8216, 8217, 8220, 8221, 8224, 8226, 8228, 8231, 8240, 8240, 8242, 8243, 8245, 8245, 8251, 8251, 8254, 8254, 8308, 8308, 8319, 8319, 8321, 8324, 8364, 8364, 8451, 8451, 8453, 8453, 8457, 8457, 8467, 8467, 8470, 8470, 8481, 8482, 8486, 8486, 8491, 8491, 8531, 8532, 8539, 8542, 8544, 8555, 8560, 8569, 8585, 8585, 8592, 8601, 8632, 8633, 8658, 8658, 8660, 8660, 8679, 8679, 8704, 8704, 8706, 8707, 8711, 8712, 8715, 8715, 8719, 8719, 8721, 8721, 8725, 8725, 8730, 8730, 8733, 8736, 8739, 8739, 8741, 8741, 8743, 8748, 8750, 8750, 8756, 8759, 8764, 8765, 8776, 8776, 8780, 8780, 8786, 8786, 8800, 8801, 8804, 8807, 8810, 8811, 8814, 8815, 8834, 8835, 8838, 8839, 8853, 8853, 8857, 8857, 8869, 8869, 8895, 8895, 8978, 8978, 9312, 9449, 9451, 9547, 9552, 9587, 9600, 9615, 9618, 9621, 9632, 9633, 9635, 9641, 9650, 9651, 9654, 9655, 9660, 9661, 9664, 9665, 9670, 9672, 9675, 9675, 9678, 9681, 9698, 9701, 9711, 9711, 9733, 9734, 9737, 9737, 9742, 9743, 9756, 9756, 9758, 9758, 9792, 9792, 9794, 9794, 9824, 9825, 9827, 9829, 9831, 9834, 9836, 9837, 9839, 9839, 9886, 9887, 9919, 9919, 9926, 9933, 9935, 9939, 9941, 9953, 9955, 9955, 9960, 9961, 9963, 9969, 9972, 9972, 9974, 9977, 9979, 9980, 9982, 9983, 10045, 10045, 10102, 10111, 11094, 11097, 12872, 12879, 57344, 63743, 65024, 65039, 65533, 65533, 127232, 127242, 127248, 127277, 127280, 127337, 127344, 127373, 127375, 127376, 127387, 127404, 917760, 917999, 983040, 1048573, 1048576, 1114109];
+  fullwidthRanges = [12288, 12288, 65281, 65376, 65504, 65510];
+  wideRanges = [4352, 4447, 8986, 8987, 9001, 9002, 9193, 9196, 9200, 9200, 9203, 9203, 9725, 9726, 9748, 9749, 9776, 9783, 9800, 9811, 9855, 9855, 9866, 9871, 9875, 9875, 9889, 9889, 9898, 9899, 9917, 9918, 9924, 9925, 9934, 9934, 9940, 9940, 9962, 9962, 9970, 9971, 9973, 9973, 9978, 9978, 9981, 9981, 9989, 9989, 9994, 9995, 10024, 10024, 10060, 10060, 10062, 10062, 10067, 10069, 10071, 10071, 10133, 10135, 10160, 10160, 10175, 10175, 11035, 11036, 11088, 11088, 11093, 11093, 11904, 11929, 11931, 12019, 12032, 12245, 12272, 12287, 12289, 12350, 12353, 12438, 12441, 12543, 12549, 12591, 12593, 12686, 12688, 12773, 12783, 12830, 12832, 12871, 12880, 42124, 42128, 42182, 43360, 43388, 44032, 55203, 63744, 64255, 65040, 65049, 65072, 65106, 65108, 65126, 65128, 65131, 94176, 94180, 94192, 94198, 94208, 101589, 101631, 101662, 101760, 101874, 110576, 110579, 110581, 110587, 110589, 110590, 110592, 110882, 110898, 110898, 110928, 110930, 110933, 110933, 110948, 110951, 110960, 111355, 119552, 119638, 119648, 119670, 126980, 126980, 127183, 127183, 127374, 127374, 127377, 127386, 127488, 127490, 127504, 127547, 127552, 127560, 127568, 127569, 127584, 127589, 127744, 127776, 127789, 127797, 127799, 127868, 127870, 127891, 127904, 127946, 127951, 127955, 127968, 127984, 127988, 127988, 127992, 128062, 128064, 128064, 128066, 128252, 128255, 128317, 128331, 128334, 128336, 128359, 128378, 128378, 128405, 128406, 128420, 128420, 128507, 128591, 128640, 128709, 128716, 128716, 128720, 128722, 128725, 128728, 128732, 128735, 128747, 128748, 128756, 128764, 128992, 129003, 129008, 129008, 129292, 129338, 129340, 129349, 129351, 129535, 129648, 129660, 129664, 129674, 129678, 129734, 129736, 129736, 129741, 129756, 129759, 129770, 129775, 129784, 131072, 196605, 196608, 262141];
+});
+
+// node_modules/get-east-asian-width/utilities.js
+var isInRange = (ranges, codePoint) => {
+  let low = 0;
+  let high = Math.floor(ranges.length / 2) - 1;
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const i = mid * 2;
+    if (codePoint < ranges[i]) {
+      high = mid - 1;
+    } else if (codePoint > ranges[i + 1]) {
+      low = mid + 1;
+    } else {
+      return true;
+    }
+  }
+  return false;
+};
+
+// node_modules/get-east-asian-width/lookup.js
+function findWideFastPathRange(ranges) {
+  let fastPathStart = ranges[0];
+  let fastPathEnd = ranges[1];
+  for (let index = 0;index < ranges.length; index += 2) {
+    const start = ranges[index];
+    const end = ranges[index + 1];
+    if (commonCjkCodePoint >= start && commonCjkCodePoint <= end) {
+      return [start, end];
+    }
+    if (end - start > fastPathEnd - fastPathStart) {
+      fastPathStart = start;
+      fastPathEnd = end;
+    }
+  }
+  return [fastPathStart, fastPathEnd];
+}
+var commonCjkCodePoint = 19968, wideFastPathStart, wideFastPathEnd, isAmbiguous = (codePoint) => {
+  if (codePoint < ambiguousMinimalCodePoint || codePoint > ambiguousMaximumCodePoint) {
+    return false;
+  }
+  return isInRange(ambiguousRanges, codePoint);
+}, isFullWidth = (codePoint) => {
+  if (codePoint < fullwidthMinimalCodePoint || codePoint > fullwidthMaximumCodePoint) {
+    return false;
+  }
+  return isInRange(fullwidthRanges, codePoint);
+}, isWide = (codePoint) => {
+  if (codePoint >= wideFastPathStart && codePoint <= wideFastPathEnd) {
+    return true;
+  }
+  if (codePoint < wideMinimalCodePoint || codePoint > wideMaximumCodePoint) {
+    return false;
+  }
+  return isInRange(wideRanges, codePoint);
+};
+var init_lookup = __esm(() => {
+  init_lookup_data();
+  [wideFastPathStart, wideFastPathEnd] = /* @__PURE__ */ findWideFastPathRange(wideRanges);
+});
+
+// node_modules/get-east-asian-width/index.js
+function validate(codePoint) {
+  if (!Number.isSafeInteger(codePoint)) {
+    throw new TypeError(`Expected a code point, got \`${typeof codePoint}\`.`);
+  }
+}
+function eastAsianWidth(codePoint, { ambiguousAsWide = false } = {}) {
+  validate(codePoint);
+  if (isFullWidth(codePoint) || isWide(codePoint) || ambiguousAsWide && isAmbiguous(codePoint)) {
+    return 2;
+  }
+  return 1;
+}
+var init_get_east_asian_width = __esm(() => {
+  init_lookup();
+});
+
+// node_modules/@earendil-works/pi-tui/dist/utils.js
+function getSegmenter() {
+  return segmenter;
+}
+function couldBeEmoji(segment) {
+  const cp = segment.codePointAt(0);
+  return cp >= 126976 && cp <= 130047 || cp >= 8960 && cp <= 9215 || cp >= 9728 && cp <= 10175 || cp >= 11088 && cp <= 11093 || segment.includes("\uFE0F") || segment.length > 2;
+}
+function isPrintableAscii(str) {
+  for (let i = 0;i < str.length; i++) {
+    const code = str.charCodeAt(i);
+    if (code < 32 || code > 126) {
+      return false;
+    }
+  }
+  return true;
+}
+function truncateFragmentToWidth(text, maxWidth) {
+  if (maxWidth <= 0 || text.length === 0) {
+    return { text: "", width: 0 };
+  }
+  if (isPrintableAscii(text)) {
+    const clipped = text.slice(0, maxWidth);
+    return { text: clipped, width: clipped.length };
+  }
+  const hasAnsi = text.includes("\x1B");
+  const hasTabs = text.includes("\t");
+  if (!hasAnsi && !hasTabs) {
+    let result2 = "";
+    let width2 = 0;
+    for (const { segment } of segmenter.segment(text)) {
+      const w = graphemeWidth(segment);
+      if (width2 + w > maxWidth) {
+        break;
+      }
+      result2 += segment;
+      width2 += w;
+    }
+    return { text: result2, width: width2 };
+  }
+  let result = "";
+  let width = 0;
+  let i = 0;
+  let pendingAnsi = "";
+  while (i < text.length) {
+    const ansi = extractAnsiCode(text, i);
+    if (ansi) {
+      pendingAnsi += ansi.code;
+      i += ansi.length;
+      continue;
+    }
+    if (text[i] === "\t") {
+      if (width + 3 > maxWidth) {
+        break;
+      }
+      if (pendingAnsi) {
+        result += pendingAnsi;
+        pendingAnsi = "";
+      }
+      result += "\t";
+      width += 3;
+      i++;
+      continue;
+    }
+    let end = i;
+    while (end < text.length && text[end] !== "\t") {
+      const nextAnsi = extractAnsiCode(text, end);
+      if (nextAnsi) {
+        break;
+      }
+      end++;
+    }
+    for (const { segment } of segmenter.segment(text.slice(i, end))) {
+      const w = graphemeWidth(segment);
+      if (width + w > maxWidth) {
+        return { text: result, width };
+      }
+      if (pendingAnsi) {
+        result += pendingAnsi;
+        pendingAnsi = "";
+      }
+      result += segment;
+      width += w;
+    }
+    i = end;
+  }
+  return { text: result, width };
+}
+function finalizeTruncatedResult(prefix, prefixWidth, ellipsis, ellipsisWidth, maxWidth, pad) {
+  const reset = "\x1B[0m";
+  const visibleWidth = prefixWidth + ellipsisWidth;
+  let result;
+  if (ellipsis.length > 0) {
+    result = `${prefix}${reset}${ellipsis}${reset}`;
+  } else {
+    result = `${prefix}${reset}`;
+  }
+  return pad ? result + " ".repeat(Math.max(0, maxWidth - visibleWidth)) : result;
+}
+function graphemeWidth(segment) {
+  if (zeroWidthRegex.test(segment)) {
+    return 0;
+  }
+  if (couldBeEmoji(segment) && rgiEmojiRegex.test(segment)) {
+    return 2;
+  }
+  const base = segment.replace(leadingNonPrintingRegex, "");
+  const cp = base.codePointAt(0);
+  if (cp === undefined) {
+    return 0;
+  }
+  if (cp >= 127462 && cp <= 127487) {
+    return 2;
+  }
+  let width = eastAsianWidth(cp);
+  if (segment.length > 1) {
+    for (const char of segment.slice(1)) {
+      const c = char.codePointAt(0);
+      if (c >= 65280 && c <= 65519) {
+        width += eastAsianWidth(c);
+      } else if (c === 3635 || c === 3763) {
+        width += 1;
+      }
+    }
+  }
+  return width;
+}
+function visibleWidth(str) {
+  if (str.length === 0) {
+    return 0;
+  }
+  if (isPrintableAscii(str)) {
+    return str.length;
+  }
+  const cached2 = widthCache.get(str);
+  if (cached2 !== undefined) {
+    return cached2;
+  }
+  let clean = str;
+  if (str.includes("\t")) {
+    clean = clean.replace(/\t/g, "   ");
+  }
+  if (clean.includes("\x1B")) {
+    let stripped = "";
+    let i = 0;
+    while (i < clean.length) {
+      const ansi = extractAnsiCode(clean, i);
+      if (ansi) {
+        i += ansi.length;
+        continue;
+      }
+      stripped += clean[i];
+      i++;
+    }
+    clean = stripped;
+  }
+  let width = 0;
+  for (const { segment } of segmenter.segment(clean)) {
+    width += graphemeWidth(segment);
+  }
+  if (widthCache.size >= WIDTH_CACHE_SIZE) {
+    const firstKey = widthCache.keys().next().value;
+    if (firstKey !== undefined) {
+      widthCache.delete(firstKey);
+    }
+  }
+  widthCache.set(str, width);
+  return width;
+}
+function normalizeTerminalOutput(str) {
+  if (!THAI_LAO_AM_REGEX.test(str))
+    return str;
+  return str.replace(THAI_LAO_AM_GLOBAL_REGEX, (char) => char === "\u0E33" ? "\u0E4D\u0E32" : "\u0ECD\u0EB2");
+}
+function extractAnsiCode(str, pos) {
+  if (pos >= str.length || str[pos] !== "\x1B")
+    return null;
+  const next = str[pos + 1];
+  if (next === "[") {
+    let j = pos + 2;
+    while (j < str.length && !/[mGKHJ]/.test(str[j]))
+      j++;
+    if (j < str.length)
+      return { code: str.substring(pos, j + 1), length: j + 1 - pos };
+    return null;
+  }
+  if (next === "]") {
+    let j = pos + 2;
+    while (j < str.length) {
+      if (str[j] === "\x07")
+        return { code: str.substring(pos, j + 1), length: j + 1 - pos };
+      if (str[j] === "\x1B" && str[j + 1] === "\\")
+        return { code: str.substring(pos, j + 2), length: j + 2 - pos };
+      j++;
+    }
+    return null;
+  }
+  if (next === "_") {
+    let j = pos + 2;
+    while (j < str.length) {
+      if (str[j] === "\x07")
+        return { code: str.substring(pos, j + 1), length: j + 1 - pos };
+      if (str[j] === "\x1B" && str[j + 1] === "\\")
+        return { code: str.substring(pos, j + 2), length: j + 2 - pos };
+      j++;
+    }
+    return null;
+  }
+  return null;
+}
+function parseOsc8Hyperlink(ansiCode) {
+  if (!ansiCode.startsWith("\x1B]8;")) {
+    return;
+  }
+  const terminator = ansiCode.endsWith("\x07") ? "\x07" : "\x1B\\";
+  const body = ansiCode.slice(4, terminator === "\x07" ? -1 : -2);
+  const separatorIndex = body.indexOf(";");
+  if (separatorIndex === -1) {
+    return;
+  }
+  const params = body.slice(0, separatorIndex);
+  const url = body.slice(separatorIndex + 1);
+  if (!url) {
+    return null;
+  }
+  return { params, url, terminator };
+}
+function formatOsc8Hyperlink(hyperlink) {
+  return `\x1B]8;${hyperlink.params};${hyperlink.url}${hyperlink.terminator}`;
+}
+function formatOsc8Close(terminator) {
+  return `\x1B]8;;${terminator}`;
+}
+
+class AnsiCodeTracker {
+  bold = false;
+  dim = false;
+  italic = false;
+  underline = false;
+  blink = false;
+  inverse = false;
+  hidden = false;
+  strikethrough = false;
+  fgColor = null;
+  bgColor = null;
+  activeHyperlink = null;
+  process(ansiCode) {
+    const hyperlink = parseOsc8Hyperlink(ansiCode);
+    if (hyperlink !== undefined) {
+      this.activeHyperlink = hyperlink;
+      return;
+    }
+    if (!ansiCode.endsWith("m")) {
+      return;
+    }
+    const match = ansiCode.match(/\x1b\[([\d;]*)m/);
+    if (!match)
+      return;
+    const params = match[1];
+    if (params === "" || params === "0") {
+      this.reset();
+      return;
+    }
+    const parts = params.split(";");
+    let i = 0;
+    while (i < parts.length) {
+      const code = Number.parseInt(parts[i], 10);
+      if (code === 38 || code === 48) {
+        if (parts[i + 1] === "5" && parts[i + 2] !== undefined) {
+          const colorCode = `${parts[i]};${parts[i + 1]};${parts[i + 2]}`;
+          if (code === 38) {
+            this.fgColor = colorCode;
+          } else {
+            this.bgColor = colorCode;
+          }
+          i += 3;
+          continue;
+        } else if (parts[i + 1] === "2" && parts[i + 4] !== undefined) {
+          const colorCode = `${parts[i]};${parts[i + 1]};${parts[i + 2]};${parts[i + 3]};${parts[i + 4]}`;
+          if (code === 38) {
+            this.fgColor = colorCode;
+          } else {
+            this.bgColor = colorCode;
+          }
+          i += 5;
+          continue;
+        }
+      }
+      switch (code) {
+        case 0:
+          this.reset();
+          break;
+        case 1:
+          this.bold = true;
+          break;
+        case 2:
+          this.dim = true;
+          break;
+        case 3:
+          this.italic = true;
+          break;
+        case 4:
+          this.underline = true;
+          break;
+        case 5:
+          this.blink = true;
+          break;
+        case 7:
+          this.inverse = true;
+          break;
+        case 8:
+          this.hidden = true;
+          break;
+        case 9:
+          this.strikethrough = true;
+          break;
+        case 21:
+          this.bold = false;
+          break;
+        case 22:
+          this.bold = false;
+          this.dim = false;
+          break;
+        case 23:
+          this.italic = false;
+          break;
+        case 24:
+          this.underline = false;
+          break;
+        case 25:
+          this.blink = false;
+          break;
+        case 27:
+          this.inverse = false;
+          break;
+        case 28:
+          this.hidden = false;
+          break;
+        case 29:
+          this.strikethrough = false;
+          break;
+        case 39:
+          this.fgColor = null;
+          break;
+        case 49:
+          this.bgColor = null;
+          break;
+        default:
+          if (code >= 30 && code <= 37 || code >= 90 && code <= 97) {
+            this.fgColor = String(code);
+          } else if (code >= 40 && code <= 47 || code >= 100 && code <= 107) {
+            this.bgColor = String(code);
+          }
+          break;
+      }
+      i++;
+    }
+  }
+  reset() {
+    this.bold = false;
+    this.dim = false;
+    this.italic = false;
+    this.underline = false;
+    this.blink = false;
+    this.inverse = false;
+    this.hidden = false;
+    this.strikethrough = false;
+    this.fgColor = null;
+    this.bgColor = null;
+  }
+  clear() {
+    this.reset();
+    this.activeHyperlink = null;
+  }
+  getActiveCodes() {
+    const codes = [];
+    if (this.bold)
+      codes.push("1");
+    if (this.dim)
+      codes.push("2");
+    if (this.italic)
+      codes.push("3");
+    if (this.underline)
+      codes.push("4");
+    if (this.blink)
+      codes.push("5");
+    if (this.inverse)
+      codes.push("7");
+    if (this.hidden)
+      codes.push("8");
+    if (this.strikethrough)
+      codes.push("9");
+    if (this.fgColor)
+      codes.push(this.fgColor);
+    if (this.bgColor)
+      codes.push(this.bgColor);
+    let result = codes.length > 0 ? `\x1B[${codes.join(";")}m` : "";
+    if (this.activeHyperlink) {
+      result += formatOsc8Hyperlink(this.activeHyperlink);
+    }
+    return result;
+  }
+  hasActiveCodes() {
+    return this.bold || this.dim || this.italic || this.underline || this.blink || this.inverse || this.hidden || this.strikethrough || this.fgColor !== null || this.bgColor !== null || this.activeHyperlink !== null;
+  }
+  getLineEndReset() {
+    let result = "";
+    if (this.underline) {
+      result += "\x1B[24m";
+    }
+    if (this.activeHyperlink) {
+      result += formatOsc8Close(this.activeHyperlink.terminator);
+    }
+    return result;
+  }
+}
+function updateTrackerFromText(text, tracker) {
+  let i = 0;
+  while (i < text.length) {
+    const ansiResult = extractAnsiCode(text, i);
+    if (ansiResult) {
+      tracker.process(ansiResult.code);
+      i += ansiResult.length;
+    } else {
+      i++;
+    }
+  }
+}
+function splitIntoTokensWithAnsi(text) {
+  const tokens = [];
+  let current = "";
+  let pendingAnsi = "";
+  let inWhitespace = false;
+  let i = 0;
+  while (i < text.length) {
+    const ansiResult = extractAnsiCode(text, i);
+    if (ansiResult) {
+      pendingAnsi += ansiResult.code;
+      i += ansiResult.length;
+      continue;
+    }
+    const char = text[i];
+    const charIsSpace = char === " ";
+    if (charIsSpace !== inWhitespace && current) {
+      tokens.push(current);
+      current = "";
+    }
+    if (pendingAnsi) {
+      current += pendingAnsi;
+      pendingAnsi = "";
+    }
+    inWhitespace = charIsSpace;
+    current += char;
+    i++;
+  }
+  if (pendingAnsi) {
+    current += pendingAnsi;
+  }
+  if (current) {
+    tokens.push(current);
+  }
+  return tokens;
+}
+function wrapTextWithAnsi(text, width) {
+  if (!text) {
+    return [""];
+  }
+  const inputLines = text.split(`
+`);
+  const result = [];
+  const tracker = new AnsiCodeTracker;
+  for (const inputLine of inputLines) {
+    const prefix = result.length > 0 ? tracker.getActiveCodes() : "";
+    result.push(...wrapSingleLine(prefix + inputLine, width));
+    updateTrackerFromText(inputLine, tracker);
+  }
+  return result.length > 0 ? result : [""];
+}
+function wrapSingleLine(line, width) {
+  if (!line) {
+    return [""];
+  }
+  const visibleLength = visibleWidth(line);
+  if (visibleLength <= width) {
+    return [line];
+  }
+  const wrapped = [];
+  const tracker = new AnsiCodeTracker;
+  const tokens = splitIntoTokensWithAnsi(line);
+  let currentLine = "";
+  let currentVisibleLength = 0;
+  for (const token of tokens) {
+    const tokenVisibleLength = visibleWidth(token);
+    const isWhitespace = token.trim() === "";
+    if (tokenVisibleLength > width && !isWhitespace) {
+      if (currentLine) {
+        const lineEndReset = tracker.getLineEndReset();
+        if (lineEndReset) {
+          currentLine += lineEndReset;
+        }
+        wrapped.push(currentLine);
+        currentLine = "";
+        currentVisibleLength = 0;
+      }
+      const broken = breakLongWord(token, width, tracker);
+      wrapped.push(...broken.slice(0, -1));
+      currentLine = broken[broken.length - 1];
+      currentVisibleLength = visibleWidth(currentLine);
+      continue;
+    }
+    const totalNeeded = currentVisibleLength + tokenVisibleLength;
+    if (totalNeeded > width && currentVisibleLength > 0) {
+      let lineToWrap = currentLine.trimEnd();
+      const lineEndReset = tracker.getLineEndReset();
+      if (lineEndReset) {
+        lineToWrap += lineEndReset;
+      }
+      wrapped.push(lineToWrap);
+      if (isWhitespace) {
+        currentLine = tracker.getActiveCodes();
+        currentVisibleLength = 0;
+      } else {
+        currentLine = tracker.getActiveCodes() + token;
+        currentVisibleLength = tokenVisibleLength;
+      }
+    } else {
+      currentLine += token;
+      currentVisibleLength += tokenVisibleLength;
+    }
+    updateTrackerFromText(token, tracker);
+  }
+  if (currentLine) {
+    wrapped.push(currentLine);
+  }
+  return wrapped.length > 0 ? wrapped.map((line2) => line2.trimEnd()) : [""];
+}
+function isWhitespaceChar(char) {
+  return /\s/.test(char);
+}
+function isPunctuationChar(char) {
+  return PUNCTUATION_REGEX.test(char);
+}
+function breakLongWord(word, width, tracker) {
+  const lines = [];
+  let currentLine = tracker.getActiveCodes();
+  let currentWidth = 0;
+  let i = 0;
+  const segments = [];
+  while (i < word.length) {
+    const ansiResult = extractAnsiCode(word, i);
+    if (ansiResult) {
+      segments.push({ type: "ansi", value: ansiResult.code });
+      i += ansiResult.length;
+    } else {
+      let end = i;
+      while (end < word.length) {
+        const nextAnsi = extractAnsiCode(word, end);
+        if (nextAnsi)
+          break;
+        end++;
+      }
+      const textPortion = word.slice(i, end);
+      for (const seg of segmenter.segment(textPortion)) {
+        segments.push({ type: "grapheme", value: seg.segment });
+      }
+      i = end;
+    }
+  }
+  for (const seg of segments) {
+    if (seg.type === "ansi") {
+      currentLine += seg.value;
+      tracker.process(seg.value);
+      continue;
+    }
+    const grapheme = seg.value;
+    if (!grapheme)
+      continue;
+    const graphemeWidth2 = visibleWidth(grapheme);
+    if (currentWidth + graphemeWidth2 > width) {
+      const lineEndReset = tracker.getLineEndReset();
+      if (lineEndReset) {
+        currentLine += lineEndReset;
+      }
+      lines.push(currentLine);
+      currentLine = tracker.getActiveCodes();
+      currentWidth = 0;
+    }
+    currentLine += grapheme;
+    currentWidth += graphemeWidth2;
+  }
+  if (currentLine) {
+    lines.push(currentLine);
+  }
+  return lines.length > 0 ? lines : [""];
+}
+function applyBackgroundToLine(line, width, bgFn) {
+  const visibleLen = visibleWidth(line);
+  const paddingNeeded = Math.max(0, width - visibleLen);
+  const padding = " ".repeat(paddingNeeded);
+  const withPadding = line + padding;
+  return bgFn(withPadding);
+}
+function truncateToWidth(text, maxWidth, ellipsis = "...", pad = false) {
+  if (maxWidth <= 0) {
+    return "";
+  }
+  if (text.length === 0) {
+    return pad ? " ".repeat(maxWidth) : "";
+  }
+  const ellipsisWidth = visibleWidth(ellipsis);
+  if (ellipsisWidth >= maxWidth) {
+    const textWidth = visibleWidth(text);
+    if (textWidth <= maxWidth) {
+      return pad ? text + " ".repeat(maxWidth - textWidth) : text;
+    }
+    const clippedEllipsis = truncateFragmentToWidth(ellipsis, maxWidth);
+    if (clippedEllipsis.width === 0) {
+      return pad ? " ".repeat(maxWidth) : "";
+    }
+    return finalizeTruncatedResult("", 0, clippedEllipsis.text, clippedEllipsis.width, maxWidth, pad);
+  }
+  if (isPrintableAscii(text)) {
+    if (text.length <= maxWidth) {
+      return pad ? text + " ".repeat(maxWidth - text.length) : text;
+    }
+    const targetWidth2 = maxWidth - ellipsisWidth;
+    return finalizeTruncatedResult(text.slice(0, targetWidth2), targetWidth2, ellipsis, ellipsisWidth, maxWidth, pad);
+  }
+  const targetWidth = maxWidth - ellipsisWidth;
+  let result = "";
+  let pendingAnsi = "";
+  let visibleSoFar = 0;
+  let keptWidth = 0;
+  let keepContiguousPrefix = true;
+  let overflowed = false;
+  let exhaustedInput = false;
+  const hasAnsi = text.includes("\x1B");
+  const hasTabs = text.includes("\t");
+  if (!hasAnsi && !hasTabs) {
+    for (const { segment } of segmenter.segment(text)) {
+      const width = graphemeWidth(segment);
+      if (keepContiguousPrefix && keptWidth + width <= targetWidth) {
+        result += segment;
+        keptWidth += width;
+      } else {
+        keepContiguousPrefix = false;
+      }
+      visibleSoFar += width;
+      if (visibleSoFar > maxWidth) {
+        overflowed = true;
+        break;
+      }
+    }
+    exhaustedInput = !overflowed;
+  } else {
+    let i = 0;
+    while (i < text.length) {
+      const ansi = extractAnsiCode(text, i);
+      if (ansi) {
+        pendingAnsi += ansi.code;
+        i += ansi.length;
+        continue;
+      }
+      if (text[i] === "\t") {
+        if (keepContiguousPrefix && keptWidth + 3 <= targetWidth) {
+          if (pendingAnsi) {
+            result += pendingAnsi;
+            pendingAnsi = "";
+          }
+          result += "\t";
+          keptWidth += 3;
+        } else {
+          keepContiguousPrefix = false;
+          pendingAnsi = "";
+        }
+        visibleSoFar += 3;
+        if (visibleSoFar > maxWidth) {
+          overflowed = true;
+          break;
+        }
+        i++;
+        continue;
+      }
+      let end = i;
+      while (end < text.length && text[end] !== "\t") {
+        const nextAnsi = extractAnsiCode(text, end);
+        if (nextAnsi) {
+          break;
+        }
+        end++;
+      }
+      for (const { segment } of segmenter.segment(text.slice(i, end))) {
+        const width = graphemeWidth(segment);
+        if (keepContiguousPrefix && keptWidth + width <= targetWidth) {
+          if (pendingAnsi) {
+            result += pendingAnsi;
+            pendingAnsi = "";
+          }
+          result += segment;
+          keptWidth += width;
+        } else {
+          keepContiguousPrefix = false;
+          pendingAnsi = "";
+        }
+        visibleSoFar += width;
+        if (visibleSoFar > maxWidth) {
+          overflowed = true;
+          break;
+        }
+      }
+      if (overflowed) {
+        break;
+      }
+      i = end;
+    }
+    exhaustedInput = i >= text.length;
+  }
+  if (!overflowed && exhaustedInput) {
+    return pad ? text + " ".repeat(Math.max(0, maxWidth - visibleSoFar)) : text;
+  }
+  return finalizeTruncatedResult(result, keptWidth, ellipsis, ellipsisWidth, maxWidth, pad);
+}
+function sliceByColumn(line, startCol, length, strict = false) {
+  return sliceWithWidth(line, startCol, length, strict).text;
+}
+function sliceWithWidth(line, startCol, length, strict = false) {
+  if (length <= 0)
+    return { text: "", width: 0 };
+  const endCol = startCol + length;
+  let result = "", resultWidth = 0, currentCol = 0, i = 0, pendingAnsi = "";
+  while (i < line.length) {
+    const ansi = extractAnsiCode(line, i);
+    if (ansi) {
+      if (currentCol >= startCol && currentCol < endCol)
+        result += ansi.code;
+      else if (currentCol < startCol)
+        pendingAnsi += ansi.code;
+      i += ansi.length;
+      continue;
+    }
+    let textEnd = i;
+    while (textEnd < line.length && !extractAnsiCode(line, textEnd))
+      textEnd++;
+    for (const { segment } of segmenter.segment(line.slice(i, textEnd))) {
+      const w = graphemeWidth(segment);
+      const inRange = currentCol >= startCol && currentCol < endCol;
+      const fits = !strict || currentCol + w <= endCol;
+      if (inRange && fits) {
+        if (pendingAnsi) {
+          result += pendingAnsi;
+          pendingAnsi = "";
+        }
+        result += segment;
+        resultWidth += w;
+      }
+      currentCol += w;
+      if (currentCol >= endCol)
+        break;
+    }
+    i = textEnd;
+    if (currentCol >= endCol)
+      break;
+  }
+  return { text: result, width: resultWidth };
+}
+function extractSegments(line, beforeEnd, afterStart, afterLen, strictAfter = false) {
+  let before = "", beforeWidth = 0, after = "", afterWidth = 0;
+  let currentCol = 0, i = 0;
+  let pendingAnsiBefore = "";
+  let afterStarted = false;
+  const afterEnd = afterStart + afterLen;
+  pooledStyleTracker.clear();
+  while (i < line.length) {
+    const ansi = extractAnsiCode(line, i);
+    if (ansi) {
+      pooledStyleTracker.process(ansi.code);
+      if (currentCol < beforeEnd) {
+        pendingAnsiBefore += ansi.code;
+      } else if (currentCol >= afterStart && currentCol < afterEnd && afterStarted) {
+        after += ansi.code;
+      }
+      i += ansi.length;
+      continue;
+    }
+    let textEnd = i;
+    while (textEnd < line.length && !extractAnsiCode(line, textEnd))
+      textEnd++;
+    for (const { segment } of segmenter.segment(line.slice(i, textEnd))) {
+      const w = graphemeWidth(segment);
+      if (currentCol < beforeEnd) {
+        if (pendingAnsiBefore) {
+          before += pendingAnsiBefore;
+          pendingAnsiBefore = "";
+        }
+        before += segment;
+        beforeWidth += w;
+      } else if (currentCol >= afterStart && currentCol < afterEnd) {
+        const fits = !strictAfter || currentCol + w <= afterEnd;
+        if (fits) {
+          if (!afterStarted) {
+            after += pooledStyleTracker.getActiveCodes();
+            afterStarted = true;
+          }
+          after += segment;
+          afterWidth += w;
+        }
+      }
+      currentCol += w;
+      if (afterLen <= 0 ? currentCol >= beforeEnd : currentCol >= afterEnd)
+        break;
+    }
+    i = textEnd;
+    if (afterLen <= 0 ? currentCol >= beforeEnd : currentCol >= afterEnd)
+      break;
+  }
+  return { before, beforeWidth, after, afterWidth };
+}
+var segmenter, zeroWidthRegex, leadingNonPrintingRegex, rgiEmojiRegex, WIDTH_CACHE_SIZE = 512, widthCache, THAI_LAO_AM_REGEX, THAI_LAO_AM_GLOBAL_REGEX, PUNCTUATION_REGEX, pooledStyleTracker;
+var init_utils = __esm(() => {
+  init_get_east_asian_width();
+  segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+  zeroWidthRegex = /^(?:\p{Default_Ignorable_Code_Point}|\p{Control}|\p{Mark}|\p{Surrogate})+$/v;
+  leadingNonPrintingRegex = /^[\p{Default_Ignorable_Code_Point}\p{Control}\p{Format}\p{Mark}\p{Surrogate}]+/v;
+  rgiEmojiRegex = /^\p{RGI_Emoji}$/v;
+  widthCache = new Map;
+  THAI_LAO_AM_REGEX = /[\u0e33\u0eb3]/;
+  THAI_LAO_AM_GLOBAL_REGEX = /[\u0e33\u0eb3]/g;
+  PUNCTUATION_REGEX = /[(){}[\]<>.,;:'"!?+\-=*/\\|&%^$#@~`]/;
+  pooledStyleTracker = new AnsiCodeTracker;
+});
+
+// node_modules/@earendil-works/pi-tui/dist/components/box.js
+class Box {
+  children = [];
+  paddingX;
+  paddingY;
+  bgFn;
+  cache;
+  constructor(paddingX = 1, paddingY = 1, bgFn) {
+    this.paddingX = paddingX;
+    this.paddingY = paddingY;
+    this.bgFn = bgFn;
+  }
+  addChild(component) {
+    this.children.push(component);
+    this.invalidateCache();
+  }
+  removeChild(component) {
+    const index = this.children.indexOf(component);
+    if (index !== -1) {
+      this.children.splice(index, 1);
+      this.invalidateCache();
+    }
+  }
+  clear() {
+    this.children = [];
+    this.invalidateCache();
+  }
+  setBgFn(bgFn) {
+    this.bgFn = bgFn;
+  }
+  invalidateCache() {
+    this.cache = undefined;
+  }
+  matchCache(width, childLines, bgSample) {
+    const cache = this.cache;
+    return !!cache && cache.width === width && cache.bgSample === bgSample && cache.childLines.length === childLines.length && cache.childLines.every((line, i) => line === childLines[i]);
+  }
+  invalidate() {
+    this.invalidateCache();
+    for (const child of this.children) {
+      child.invalidate?.();
+    }
+  }
+  render(width) {
+    if (this.children.length === 0) {
+      return [];
+    }
+    const contentWidth = Math.max(1, width - this.paddingX * 2);
+    const leftPad = " ".repeat(this.paddingX);
+    const childLines = [];
+    for (const child of this.children) {
+      const lines = child.render(contentWidth);
+      for (const line of lines) {
+        childLines.push(leftPad + line);
+      }
+    }
+    if (childLines.length === 0) {
+      return [];
+    }
+    const bgSample = this.bgFn ? this.bgFn("test") : undefined;
+    if (this.matchCache(width, childLines, bgSample)) {
+      return this.cache.lines;
+    }
+    const result = [];
+    for (let i = 0;i < this.paddingY; i++) {
+      result.push(this.applyBg("", width));
+    }
+    for (const line of childLines) {
+      result.push(this.applyBg(line, width));
+    }
+    for (let i = 0;i < this.paddingY; i++) {
+      result.push(this.applyBg("", width));
+    }
+    this.cache = { childLines, width, bgSample, lines: result };
+    return result;
+  }
+  applyBg(line, width) {
+    const visLen = visibleWidth(line);
+    const padNeeded = Math.max(0, width - visLen);
+    const padded = line + " ".repeat(padNeeded);
+    if (this.bgFn) {
+      return applyBackgroundToLine(padded, width, this.bgFn);
+    }
+    return padded;
+  }
+}
+var init_box = __esm(() => {
+  init_utils();
+});
+
+// node_modules/@earendil-works/pi-tui/dist/keys.js
+function setKittyProtocolActive(active) {
+  _kittyProtocolActive = active;
+}
+function isKittyProtocolActive() {
+  return _kittyProtocolActive;
+}
+function normalizeKittyFunctionalCodepoint(codepoint) {
+  return KITTY_FUNCTIONAL_KEY_EQUIVALENTS.get(codepoint) ?? codepoint;
+}
+function normalizeShiftedLetterIdentityCodepoint(codepoint, modifier) {
+  const effectiveModifier = modifier & ~LOCK_MASK;
+  if ((effectiveModifier & MODIFIERS.shift) !== 0 && codepoint >= 65 && codepoint <= 90) {
+    return codepoint + 32;
+  }
+  return codepoint;
+}
+function isKeyRelease(data) {
+  if (data.includes("\x1B[200~")) {
+    return false;
+  }
+  if (data.includes(":3u") || data.includes(":3~") || data.includes(":3A") || data.includes(":3B") || data.includes(":3C") || data.includes(":3D") || data.includes(":3H") || data.includes(":3F")) {
+    return true;
+  }
+  return false;
+}
+function isKeyRepeat(data) {
+  if (data.includes("\x1B[200~")) {
+    return false;
+  }
+  if (data.includes(":2u") || data.includes(":2~") || data.includes(":2A") || data.includes(":2B") || data.includes(":2C") || data.includes(":2D") || data.includes(":2H") || data.includes(":2F")) {
+    return true;
+  }
+  return false;
+}
+function parseEventType(eventTypeStr) {
+  if (!eventTypeStr)
+    return "press";
+  const eventType = parseInt(eventTypeStr, 10);
+  if (eventType === 2)
+    return "repeat";
+  if (eventType === 3)
+    return "release";
+  return "press";
+}
+function parseKittySequence(data) {
+  const csiUMatch = data.match(/^\x1b\[(\d+)(?::(\d*))?(?::(\d+))?(?:;(\d+))?(?::(\d+))?u$/);
+  if (csiUMatch) {
+    const codepoint = parseInt(csiUMatch[1], 10);
+    const shiftedKey = csiUMatch[2] && csiUMatch[2].length > 0 ? parseInt(csiUMatch[2], 10) : undefined;
+    const baseLayoutKey = csiUMatch[3] ? parseInt(csiUMatch[3], 10) : undefined;
+    const modValue = csiUMatch[4] ? parseInt(csiUMatch[4], 10) : 1;
+    const eventType = parseEventType(csiUMatch[5]);
+    _lastEventType = eventType;
+    return { codepoint, shiftedKey, baseLayoutKey, modifier: modValue - 1, eventType };
+  }
+  const arrowMatch = data.match(/^\x1b\[1;(\d+)(?::(\d+))?([ABCD])$/);
+  if (arrowMatch) {
+    const modValue = parseInt(arrowMatch[1], 10);
+    const eventType = parseEventType(arrowMatch[2]);
+    const arrowCodes = { A: -1, B: -2, C: -3, D: -4 };
+    _lastEventType = eventType;
+    return { codepoint: arrowCodes[arrowMatch[3]], modifier: modValue - 1, eventType };
+  }
+  const funcMatch = data.match(/^\x1b\[(\d+)(?:;(\d+))?(?::(\d+))?~$/);
+  if (funcMatch) {
+    const keyNum = parseInt(funcMatch[1], 10);
+    const modValue = funcMatch[2] ? parseInt(funcMatch[2], 10) : 1;
+    const eventType = parseEventType(funcMatch[3]);
+    const funcCodes = {
+      2: FUNCTIONAL_CODEPOINTS.insert,
+      3: FUNCTIONAL_CODEPOINTS.delete,
+      5: FUNCTIONAL_CODEPOINTS.pageUp,
+      6: FUNCTIONAL_CODEPOINTS.pageDown,
+      7: FUNCTIONAL_CODEPOINTS.home,
+      8: FUNCTIONAL_CODEPOINTS.end
+    };
+    const codepoint = funcCodes[keyNum];
+    if (codepoint !== undefined) {
+      _lastEventType = eventType;
+      return { codepoint, modifier: modValue - 1, eventType };
+    }
+  }
+  const homeEndMatch = data.match(/^\x1b\[1;(\d+)(?::(\d+))?([HF])$/);
+  if (homeEndMatch) {
+    const modValue = parseInt(homeEndMatch[1], 10);
+    const eventType = parseEventType(homeEndMatch[2]);
+    const codepoint = homeEndMatch[3] === "H" ? FUNCTIONAL_CODEPOINTS.home : FUNCTIONAL_CODEPOINTS.end;
+    _lastEventType = eventType;
+    return { codepoint, modifier: modValue - 1, eventType };
+  }
+  return null;
+}
+function matchesKittySequence(data, expectedCodepoint, expectedModifier) {
+  const parsed = parseKittySequence(data);
+  if (!parsed)
+    return false;
+  const actualMod = parsed.modifier & ~LOCK_MASK;
+  const expectedMod = expectedModifier & ~LOCK_MASK;
+  if (actualMod !== expectedMod)
+    return false;
+  const normalizedCodepoint = normalizeShiftedLetterIdentityCodepoint(normalizeKittyFunctionalCodepoint(parsed.codepoint), parsed.modifier);
+  const normalizedExpectedCodepoint = normalizeShiftedLetterIdentityCodepoint(normalizeKittyFunctionalCodepoint(expectedCodepoint), expectedModifier);
+  if (normalizedCodepoint === normalizedExpectedCodepoint)
+    return true;
+  if (parsed.baseLayoutKey !== undefined && parsed.baseLayoutKey === expectedCodepoint) {
+    const cp = normalizedCodepoint;
+    const isLatinLetter = cp >= 97 && cp <= 122;
+    const isKnownSymbol = SYMBOL_KEYS.has(String.fromCharCode(cp));
+    if (!isLatinLetter && !isKnownSymbol)
+      return true;
+  }
+  return false;
+}
+function parseModifyOtherKeysSequence(data) {
+  const match = data.match(/^\x1b\[27;(\d+);(\d+)~$/);
+  if (!match)
+    return null;
+  const modValue = parseInt(match[1], 10);
+  const codepoint = parseInt(match[2], 10);
+  return { codepoint, modifier: modValue - 1 };
+}
+function matchesModifyOtherKeys(data, expectedKeycode, expectedModifier) {
+  const parsed = parseModifyOtherKeysSequence(data);
+  if (!parsed)
+    return false;
+  return parsed.codepoint === expectedKeycode && parsed.modifier === expectedModifier;
+}
+function isWindowsTerminalSession() {
+  return Boolean(process.env.WT_SESSION) && !process.env.SSH_CONNECTION && !process.env.SSH_CLIENT && !process.env.SSH_TTY;
+}
+function matchesRawBackspace(data, expectedModifier) {
+  if (data === "\x7F")
+    return expectedModifier === 0;
+  if (data !== "\b")
+    return false;
+  return isWindowsTerminalSession() ? expectedModifier === MODIFIERS.ctrl : expectedModifier === 0;
+}
+function rawCtrlChar(key) {
+  const char = key.toLowerCase();
+  const code = char.charCodeAt(0);
+  if (code >= 97 && code <= 122 || char === "[" || char === "\\" || char === "]" || char === "_") {
+    return String.fromCharCode(code & 31);
+  }
+  if (char === "-") {
+    return String.fromCharCode(31);
+  }
+  return null;
+}
+function isDigitKey(key) {
+  return key >= "0" && key <= "9";
+}
+function matchesPrintableModifyOtherKeys(data, expectedKeycode, expectedModifier) {
+  if (expectedModifier === 0)
+    return false;
+  const parsed = parseModifyOtherKeysSequence(data);
+  if (!parsed || parsed.modifier !== expectedModifier)
+    return false;
+  return normalizeShiftedLetterIdentityCodepoint(parsed.codepoint, parsed.modifier) === normalizeShiftedLetterIdentityCodepoint(expectedKeycode, expectedModifier);
+}
+function formatKeyNameWithModifiers(keyName, modifier) {
+  const mods = [];
+  const effectiveMod = modifier & ~LOCK_MASK;
+  const supportedModifierMask = MODIFIERS.shift | MODIFIERS.ctrl | MODIFIERS.alt | MODIFIERS.super;
+  if ((effectiveMod & ~supportedModifierMask) !== 0)
+    return;
+  if (effectiveMod & MODIFIERS.shift)
+    mods.push("shift");
+  if (effectiveMod & MODIFIERS.ctrl)
+    mods.push("ctrl");
+  if (effectiveMod & MODIFIERS.alt)
+    mods.push("alt");
+  if (effectiveMod & MODIFIERS.super)
+    mods.push("super");
+  return mods.length > 0 ? `${mods.join("+")}+${keyName}` : keyName;
+}
+function parseKeyId(keyId) {
+  const parts = keyId.toLowerCase().split("+");
+  const key = parts[parts.length - 1];
+  if (!key)
+    return null;
+  return {
+    key,
+    ctrl: parts.includes("ctrl"),
+    shift: parts.includes("shift"),
+    alt: parts.includes("alt"),
+    super: parts.includes("super")
+  };
+}
+function matchesKey(data, keyId) {
+  const parsed = parseKeyId(keyId);
+  if (!parsed)
+    return false;
+  const { key, ctrl, shift, alt, super: superModifier } = parsed;
+  let modifier = 0;
+  if (shift)
+    modifier |= MODIFIERS.shift;
+  if (alt)
+    modifier |= MODIFIERS.alt;
+  if (ctrl)
+    modifier |= MODIFIERS.ctrl;
+  if (superModifier)
+    modifier |= MODIFIERS.super;
+  switch (key) {
+    case "escape":
+    case "esc":
+      if (modifier !== 0)
+        return false;
+      return data === "\x1B" || matchesKittySequence(data, CODEPOINTS.escape, 0) || matchesModifyOtherKeys(data, CODEPOINTS.escape, 0);
+    case "space":
+      if (!_kittyProtocolActive) {
+        if (modifier === MODIFIERS.ctrl && data === "\x00") {
+          return true;
+        }
+        if (modifier === MODIFIERS.alt && data === "\x1B ") {
+          return true;
+        }
+      }
+      if (modifier === 0) {
+        return data === " " || matchesKittySequence(data, CODEPOINTS.space, 0) || matchesModifyOtherKeys(data, CODEPOINTS.space, 0);
+      }
+      return matchesKittySequence(data, CODEPOINTS.space, modifier) || matchesModifyOtherKeys(data, CODEPOINTS.space, modifier);
+    case "tab":
+      if (modifier === MODIFIERS.shift) {
+        return data === "\x1B[Z" || matchesKittySequence(data, CODEPOINTS.tab, MODIFIERS.shift) || matchesModifyOtherKeys(data, CODEPOINTS.tab, MODIFIERS.shift);
+      }
+      if (modifier === 0) {
+        return data === "\t" || matchesKittySequence(data, CODEPOINTS.tab, 0);
+      }
+      return matchesKittySequence(data, CODEPOINTS.tab, modifier) || matchesModifyOtherKeys(data, CODEPOINTS.tab, modifier);
+    case "enter":
+    case "return":
+      if (modifier === MODIFIERS.shift) {
+        if (matchesKittySequence(data, CODEPOINTS.enter, MODIFIERS.shift) || matchesKittySequence(data, CODEPOINTS.kpEnter, MODIFIERS.shift)) {
+          return true;
+        }
+        if (matchesModifyOtherKeys(data, CODEPOINTS.enter, MODIFIERS.shift)) {
+          return true;
+        }
+        if (_kittyProtocolActive) {
+          return data === "\x1B\r" || data === `
+`;
+        }
+        return false;
+      }
+      if (modifier === MODIFIERS.alt) {
+        if (matchesKittySequence(data, CODEPOINTS.enter, MODIFIERS.alt) || matchesKittySequence(data, CODEPOINTS.kpEnter, MODIFIERS.alt)) {
+          return true;
+        }
+        if (matchesModifyOtherKeys(data, CODEPOINTS.enter, MODIFIERS.alt)) {
+          return true;
+        }
+        if (!_kittyProtocolActive) {
+          return data === "\x1B\r";
+        }
+        return false;
+      }
+      if (modifier === 0) {
+        return data === "\r" || !_kittyProtocolActive && data === `
+` || data === "\x1BOM" || matchesKittySequence(data, CODEPOINTS.enter, 0) || matchesKittySequence(data, CODEPOINTS.kpEnter, 0);
+      }
+      return matchesKittySequence(data, CODEPOINTS.enter, modifier) || matchesKittySequence(data, CODEPOINTS.kpEnter, modifier) || matchesModifyOtherKeys(data, CODEPOINTS.enter, modifier);
+    case "backspace":
+      if (modifier === MODIFIERS.alt) {
+        if (data === "\x1B\x7F" || data === "\x1B\b") {
+          return true;
+        }
+        return matchesKittySequence(data, CODEPOINTS.backspace, MODIFIERS.alt) || matchesModifyOtherKeys(data, CODEPOINTS.backspace, MODIFIERS.alt);
+      }
+      if (modifier === MODIFIERS.ctrl) {
+        if (matchesRawBackspace(data, MODIFIERS.ctrl))
+          return true;
+        return matchesKittySequence(data, CODEPOINTS.backspace, MODIFIERS.ctrl) || matchesModifyOtherKeys(data, CODEPOINTS.backspace, MODIFIERS.ctrl);
+      }
+      if (modifier === 0) {
+        return matchesRawBackspace(data, 0) || matchesKittySequence(data, CODEPOINTS.backspace, 0) || matchesModifyOtherKeys(data, CODEPOINTS.backspace, 0);
+      }
+      return matchesKittySequence(data, CODEPOINTS.backspace, modifier) || matchesModifyOtherKeys(data, CODEPOINTS.backspace, modifier);
+    case "insert":
+      if (modifier === 0) {
+        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.insert) || matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.insert, 0);
+      }
+      if (matchesLegacyModifierSequence(data, "insert", modifier)) {
+        return true;
+      }
+      return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.insert, modifier);
+    case "delete":
+      if (modifier === 0) {
+        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.delete) || matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.delete, 0);
+      }
+      if (matchesLegacyModifierSequence(data, "delete", modifier)) {
+        return true;
+      }
+      return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.delete, modifier);
+    case "clear":
+      if (modifier === 0) {
+        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.clear);
+      }
+      return matchesLegacyModifierSequence(data, "clear", modifier);
+    case "home":
+      if (modifier === 0) {
+        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.home) || matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.home, 0);
+      }
+      if (matchesLegacyModifierSequence(data, "home", modifier)) {
+        return true;
+      }
+      return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.home, modifier);
+    case "end":
+      if (modifier === 0) {
+        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.end) || matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.end, 0);
+      }
+      if (matchesLegacyModifierSequence(data, "end", modifier)) {
+        return true;
+      }
+      return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.end, modifier);
+    case "pageup":
+      if (modifier === 0) {
+        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.pageUp) || matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.pageUp, 0);
+      }
+      if (matchesLegacyModifierSequence(data, "pageUp", modifier)) {
+        return true;
+      }
+      return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.pageUp, modifier);
+    case "pagedown":
+      if (modifier === 0) {
+        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.pageDown) || matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.pageDown, 0);
+      }
+      if (matchesLegacyModifierSequence(data, "pageDown", modifier)) {
+        return true;
+      }
+      return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.pageDown, modifier);
+    case "up":
+      if (modifier === MODIFIERS.alt) {
+        return data === "\x1Bp" || matchesKittySequence(data, ARROW_CODEPOINTS.up, MODIFIERS.alt);
+      }
+      if (modifier === 0) {
+        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.up) || matchesKittySequence(data, ARROW_CODEPOINTS.up, 0);
+      }
+      if (matchesLegacyModifierSequence(data, "up", modifier)) {
+        return true;
+      }
+      return matchesKittySequence(data, ARROW_CODEPOINTS.up, modifier);
+    case "down":
+      if (modifier === MODIFIERS.alt) {
+        return data === "\x1Bn" || matchesKittySequence(data, ARROW_CODEPOINTS.down, MODIFIERS.alt);
+      }
+      if (modifier === 0) {
+        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.down) || matchesKittySequence(data, ARROW_CODEPOINTS.down, 0);
+      }
+      if (matchesLegacyModifierSequence(data, "down", modifier)) {
+        return true;
+      }
+      return matchesKittySequence(data, ARROW_CODEPOINTS.down, modifier);
+    case "left":
+      if (modifier === MODIFIERS.alt) {
+        return data === "\x1B[1;3D" || !_kittyProtocolActive && data === "\x1BB" || data === "\x1Bb" || matchesKittySequence(data, ARROW_CODEPOINTS.left, MODIFIERS.alt);
+      }
+      if (modifier === MODIFIERS.ctrl) {
+        return data === "\x1B[1;5D" || matchesLegacyModifierSequence(data, "left", MODIFIERS.ctrl) || matchesKittySequence(data, ARROW_CODEPOINTS.left, MODIFIERS.ctrl);
+      }
+      if (modifier === 0) {
+        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.left) || matchesKittySequence(data, ARROW_CODEPOINTS.left, 0);
+      }
+      if (matchesLegacyModifierSequence(data, "left", modifier)) {
+        return true;
+      }
+      return matchesKittySequence(data, ARROW_CODEPOINTS.left, modifier);
+    case "right":
+      if (modifier === MODIFIERS.alt) {
+        return data === "\x1B[1;3C" || !_kittyProtocolActive && data === "\x1BF" || data === "\x1Bf" || matchesKittySequence(data, ARROW_CODEPOINTS.right, MODIFIERS.alt);
+      }
+      if (modifier === MODIFIERS.ctrl) {
+        return data === "\x1B[1;5C" || matchesLegacyModifierSequence(data, "right", MODIFIERS.ctrl) || matchesKittySequence(data, ARROW_CODEPOINTS.right, MODIFIERS.ctrl);
+      }
+      if (modifier === 0) {
+        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.right) || matchesKittySequence(data, ARROW_CODEPOINTS.right, 0);
+      }
+      if (matchesLegacyModifierSequence(data, "right", modifier)) {
+        return true;
+      }
+      return matchesKittySequence(data, ARROW_CODEPOINTS.right, modifier);
+    case "f1":
+    case "f2":
+    case "f3":
+    case "f4":
+    case "f5":
+    case "f6":
+    case "f7":
+    case "f8":
+    case "f9":
+    case "f10":
+    case "f11":
+    case "f12": {
+      if (modifier !== 0) {
+        return false;
+      }
+      const functionKey = key;
+      return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES[functionKey]);
+    }
+  }
+  if (key.length === 1 && (key >= "a" && key <= "z" || isDigitKey(key) || SYMBOL_KEYS.has(key))) {
+    const codepoint = key.charCodeAt(0);
+    const rawCtrl = rawCtrlChar(key);
+    const isLetter = key >= "a" && key <= "z";
+    const isDigit = isDigitKey(key);
+    if (modifier === MODIFIERS.ctrl + MODIFIERS.alt && !_kittyProtocolActive && rawCtrl) {
+      if (data === `\x1B${rawCtrl}`)
+        return true;
+    }
+    if (modifier === MODIFIERS.alt && !_kittyProtocolActive && (isLetter || isDigit)) {
+      if (data === `\x1B${key}`)
+        return true;
+    }
+    if (modifier === MODIFIERS.ctrl) {
+      if (rawCtrl && data === rawCtrl)
+        return true;
+      return matchesKittySequence(data, codepoint, MODIFIERS.ctrl) || matchesPrintableModifyOtherKeys(data, codepoint, MODIFIERS.ctrl);
+    }
+    if (modifier === MODIFIERS.shift + MODIFIERS.ctrl) {
+      return matchesKittySequence(data, codepoint, MODIFIERS.shift + MODIFIERS.ctrl) || matchesPrintableModifyOtherKeys(data, codepoint, MODIFIERS.shift + MODIFIERS.ctrl);
+    }
+    if (modifier === MODIFIERS.shift) {
+      if (isLetter && data === key.toUpperCase())
+        return true;
+      return matchesKittySequence(data, codepoint, MODIFIERS.shift) || matchesPrintableModifyOtherKeys(data, codepoint, MODIFIERS.shift);
+    }
+    if (modifier !== 0) {
+      return matchesKittySequence(data, codepoint, modifier) || matchesPrintableModifyOtherKeys(data, codepoint, modifier);
+    }
+    return data === key || matchesKittySequence(data, codepoint, 0);
+  }
+  return false;
+}
+function formatParsedKey(codepoint, modifier, baseLayoutKey) {
+  const normalizedCodepoint = normalizeKittyFunctionalCodepoint(codepoint);
+  const identityCodepoint = normalizeShiftedLetterIdentityCodepoint(normalizedCodepoint, modifier);
+  const isLatinLetter = identityCodepoint >= 97 && identityCodepoint <= 122;
+  const isDigit = identityCodepoint >= 48 && identityCodepoint <= 57;
+  const isKnownSymbol = SYMBOL_KEYS.has(String.fromCharCode(identityCodepoint));
+  const effectiveCodepoint = isLatinLetter || isDigit || isKnownSymbol ? identityCodepoint : baseLayoutKey ?? identityCodepoint;
+  let keyName;
+  if (effectiveCodepoint === CODEPOINTS.escape)
+    keyName = "escape";
+  else if (effectiveCodepoint === CODEPOINTS.tab)
+    keyName = "tab";
+  else if (effectiveCodepoint === CODEPOINTS.enter || effectiveCodepoint === CODEPOINTS.kpEnter)
+    keyName = "enter";
+  else if (effectiveCodepoint === CODEPOINTS.space)
+    keyName = "space";
+  else if (effectiveCodepoint === CODEPOINTS.backspace)
+    keyName = "backspace";
+  else if (effectiveCodepoint === FUNCTIONAL_CODEPOINTS.delete)
+    keyName = "delete";
+  else if (effectiveCodepoint === FUNCTIONAL_CODEPOINTS.insert)
+    keyName = "insert";
+  else if (effectiveCodepoint === FUNCTIONAL_CODEPOINTS.home)
+    keyName = "home";
+  else if (effectiveCodepoint === FUNCTIONAL_CODEPOINTS.end)
+    keyName = "end";
+  else if (effectiveCodepoint === FUNCTIONAL_CODEPOINTS.pageUp)
+    keyName = "pageUp";
+  else if (effectiveCodepoint === FUNCTIONAL_CODEPOINTS.pageDown)
+    keyName = "pageDown";
+  else if (effectiveCodepoint === ARROW_CODEPOINTS.up)
+    keyName = "up";
+  else if (effectiveCodepoint === ARROW_CODEPOINTS.down)
+    keyName = "down";
+  else if (effectiveCodepoint === ARROW_CODEPOINTS.left)
+    keyName = "left";
+  else if (effectiveCodepoint === ARROW_CODEPOINTS.right)
+    keyName = "right";
+  else if (effectiveCodepoint >= 48 && effectiveCodepoint <= 57)
+    keyName = String.fromCharCode(effectiveCodepoint);
+  else if (effectiveCodepoint >= 97 && effectiveCodepoint <= 122)
+    keyName = String.fromCharCode(effectiveCodepoint);
+  else if (SYMBOL_KEYS.has(String.fromCharCode(effectiveCodepoint)))
+    keyName = String.fromCharCode(effectiveCodepoint);
+  if (!keyName)
+    return;
+  return formatKeyNameWithModifiers(keyName, modifier);
+}
+function parseKey(data) {
+  const kitty = parseKittySequence(data);
+  if (kitty) {
+    return formatParsedKey(kitty.codepoint, kitty.modifier, kitty.baseLayoutKey);
+  }
+  const modifyOtherKeys = parseModifyOtherKeysSequence(data);
+  if (modifyOtherKeys) {
+    return formatParsedKey(modifyOtherKeys.codepoint, modifyOtherKeys.modifier);
+  }
+  if (_kittyProtocolActive) {
+    if (data === "\x1B\r" || data === `
+`)
+      return "shift+enter";
+  }
+  const legacySequenceKeyId = LEGACY_SEQUENCE_KEY_IDS[data];
+  if (legacySequenceKeyId)
+    return legacySequenceKeyId;
+  if (data === "\x1B")
+    return "escape";
+  if (data === "\x1C")
+    return "ctrl+\\";
+  if (data === "\x1D")
+    return "ctrl+]";
+  if (data === "\x1F")
+    return "ctrl+-";
+  if (data === "\x1B\x1B")
+    return "ctrl+alt+[";
+  if (data === "\x1B\x1C")
+    return "ctrl+alt+\\";
+  if (data === "\x1B\x1D")
+    return "ctrl+alt+]";
+  if (data === "\x1B\x1F")
+    return "ctrl+alt+-";
+  if (data === "\t")
+    return "tab";
+  if (data === "\r" || !_kittyProtocolActive && data === `
+` || data === "\x1BOM")
+    return "enter";
+  if (data === "\x00")
+    return "ctrl+space";
+  if (data === " ")
+    return "space";
+  if (data === "\x7F")
+    return "backspace";
+  if (data === "\b")
+    return isWindowsTerminalSession() ? "ctrl+backspace" : "backspace";
+  if (data === "\x1B[Z")
+    return "shift+tab";
+  if (!_kittyProtocolActive && data === "\x1B\r")
+    return "alt+enter";
+  if (!_kittyProtocolActive && data === "\x1B ")
+    return "alt+space";
+  if (data === "\x1B\x7F" || data === "\x1B\b")
+    return "alt+backspace";
+  if (!_kittyProtocolActive && data === "\x1BB")
+    return "alt+left";
+  if (!_kittyProtocolActive && data === "\x1BF")
+    return "alt+right";
+  if (!_kittyProtocolActive && data.length === 2 && data[0] === "\x1B") {
+    const code = data.charCodeAt(1);
+    if (code >= 1 && code <= 26) {
+      return `ctrl+alt+${String.fromCharCode(code + 96)}`;
+    }
+    if (code >= 97 && code <= 122 || code >= 48 && code <= 57) {
+      return `alt+${String.fromCharCode(code)}`;
+    }
+  }
+  if (data === "\x1B[A")
+    return "up";
+  if (data === "\x1B[B")
+    return "down";
+  if (data === "\x1B[C")
+    return "right";
+  if (data === "\x1B[D")
+    return "left";
+  if (data === "\x1B[H" || data === "\x1BOH")
+    return "home";
+  if (data === "\x1B[F" || data === "\x1BOF")
+    return "end";
+  if (data === "\x1B[3~")
+    return "delete";
+  if (data === "\x1B[5~")
+    return "pageUp";
+  if (data === "\x1B[6~")
+    return "pageDown";
+  if (data.length === 1) {
+    const code = data.charCodeAt(0);
+    if (code >= 1 && code <= 26) {
+      return `ctrl+${String.fromCharCode(code + 96)}`;
+    }
+    if (code >= 32 && code <= 126) {
+      return data;
+    }
+  }
+  return;
+}
+function decodeKittyPrintable(data) {
+  const match = data.match(KITTY_CSI_U_REGEX);
+  if (!match)
+    return;
+  const codepoint = Number.parseInt(match[1] ?? "", 10);
+  if (!Number.isFinite(codepoint))
+    return;
+  const shiftedKey = match[2] && match[2].length > 0 ? Number.parseInt(match[2], 10) : undefined;
+  const modValue = match[4] ? Number.parseInt(match[4], 10) : 1;
+  const modifier = Number.isFinite(modValue) ? modValue - 1 : 0;
+  if ((modifier & ~KITTY_PRINTABLE_ALLOWED_MODIFIERS) !== 0)
+    return;
+  if (modifier & (MODIFIERS.alt | MODIFIERS.ctrl))
+    return;
+  let effectiveCodepoint = codepoint;
+  if (modifier & MODIFIERS.shift && typeof shiftedKey === "number") {
+    effectiveCodepoint = shiftedKey;
+  }
+  effectiveCodepoint = normalizeKittyFunctionalCodepoint(effectiveCodepoint);
+  if (!Number.isFinite(effectiveCodepoint) || effectiveCodepoint < 32)
+    return;
+  try {
+    return String.fromCodePoint(effectiveCodepoint);
+  } catch {
+    return;
+  }
+}
+function decodeModifyOtherKeysPrintable(data) {
+  const parsed = parseModifyOtherKeysSequence(data);
+  if (!parsed)
+    return;
+  const modifier = parsed.modifier & ~LOCK_MASK;
+  if ((modifier & ~MODIFIERS.shift) !== 0)
+    return;
+  if (!Number.isFinite(parsed.codepoint) || parsed.codepoint < 32)
+    return;
+  try {
+    return String.fromCodePoint(parsed.codepoint);
+  } catch {
+    return;
+  }
+}
+function decodePrintableKey(data) {
+  return decodeKittyPrintable(data) ?? decodeModifyOtherKeysPrintable(data);
+}
+var _kittyProtocolActive = false, Key, SYMBOL_KEYS, MODIFIERS, LOCK_MASK, CODEPOINTS, ARROW_CODEPOINTS, FUNCTIONAL_CODEPOINTS, KITTY_FUNCTIONAL_KEY_EQUIVALENTS, LEGACY_KEY_SEQUENCES, LEGACY_SHIFT_SEQUENCES, LEGACY_CTRL_SEQUENCES, LEGACY_SEQUENCE_KEY_IDS, matchesLegacySequence = (data, sequences) => sequences.includes(data), matchesLegacyModifierSequence = (data, key, modifier) => {
+  if (modifier === MODIFIERS.shift) {
+    return matchesLegacySequence(data, LEGACY_SHIFT_SEQUENCES[key]);
+  }
+  if (modifier === MODIFIERS.ctrl) {
+    return matchesLegacySequence(data, LEGACY_CTRL_SEQUENCES[key]);
+  }
+  return false;
+}, _lastEventType = "press", KITTY_CSI_U_REGEX, KITTY_PRINTABLE_ALLOWED_MODIFIERS;
+var init_keys = __esm(() => {
+  Key = {
+    escape: "escape",
+    esc: "esc",
+    enter: "enter",
+    return: "return",
+    tab: "tab",
+    space: "space",
+    backspace: "backspace",
+    delete: "delete",
+    insert: "insert",
+    clear: "clear",
+    home: "home",
+    end: "end",
+    pageUp: "pageUp",
+    pageDown: "pageDown",
+    up: "up",
+    down: "down",
+    left: "left",
+    right: "right",
+    f1: "f1",
+    f2: "f2",
+    f3: "f3",
+    f4: "f4",
+    f5: "f5",
+    f6: "f6",
+    f7: "f7",
+    f8: "f8",
+    f9: "f9",
+    f10: "f10",
+    f11: "f11",
+    f12: "f12",
+    backtick: "`",
+    hyphen: "-",
+    equals: "=",
+    leftbracket: "[",
+    rightbracket: "]",
+    backslash: "\\",
+    semicolon: ";",
+    quote: "'",
+    comma: ",",
+    period: ".",
+    slash: "/",
+    exclamation: "!",
+    at: "@",
+    hash: "#",
+    dollar: "$",
+    percent: "%",
+    caret: "^",
+    ampersand: "&",
+    asterisk: "*",
+    leftparen: "(",
+    rightparen: ")",
+    underscore: "_",
+    plus: "+",
+    pipe: "|",
+    tilde: "~",
+    leftbrace: "{",
+    rightbrace: "}",
+    colon: ":",
+    lessthan: "<",
+    greaterthan: ">",
+    question: "?",
+    ctrl: (key) => `ctrl+${key}`,
+    shift: (key) => `shift+${key}`,
+    alt: (key) => `alt+${key}`,
+    super: (key) => `super+${key}`,
+    ctrlShift: (key) => `ctrl+shift+${key}`,
+    shiftCtrl: (key) => `shift+ctrl+${key}`,
+    ctrlAlt: (key) => `ctrl+alt+${key}`,
+    altCtrl: (key) => `alt+ctrl+${key}`,
+    shiftAlt: (key) => `shift+alt+${key}`,
+    altShift: (key) => `alt+shift+${key}`,
+    ctrlSuper: (key) => `ctrl+super+${key}`,
+    superCtrl: (key) => `super+ctrl+${key}`,
+    shiftSuper: (key) => `shift+super+${key}`,
+    superShift: (key) => `super+shift+${key}`,
+    altSuper: (key) => `alt+super+${key}`,
+    superAlt: (key) => `super+alt+${key}`,
+    ctrlShiftAlt: (key) => `ctrl+shift+alt+${key}`,
+    ctrlShiftSuper: (key) => `ctrl+shift+super+${key}`
+  };
+  SYMBOL_KEYS = new Set([
+    "`",
+    "-",
+    "=",
+    "[",
+    "]",
+    "\\",
+    ";",
+    "'",
+    ",",
+    ".",
+    "/",
+    "!",
+    "@",
+    "#",
+    "$",
+    "%",
+    "^",
+    "&",
+    "*",
+    "(",
+    ")",
+    "_",
+    "+",
+    "|",
+    "~",
+    "{",
+    "}",
+    ":",
+    "<",
+    ">",
+    "?"
+  ]);
+  MODIFIERS = {
+    shift: 1,
+    alt: 2,
+    ctrl: 4,
+    super: 8
+  };
+  LOCK_MASK = 64 + 128;
+  CODEPOINTS = {
+    escape: 27,
+    tab: 9,
+    enter: 13,
+    space: 32,
+    backspace: 127,
+    kpEnter: 57414
+  };
+  ARROW_CODEPOINTS = {
+    up: -1,
+    down: -2,
+    right: -3,
+    left: -4
+  };
+  FUNCTIONAL_CODEPOINTS = {
+    delete: -10,
+    insert: -11,
+    pageUp: -12,
+    pageDown: -13,
+    home: -14,
+    end: -15
+  };
+  KITTY_FUNCTIONAL_KEY_EQUIVALENTS = new Map([
+    [57399, 48],
+    [57400, 49],
+    [57401, 50],
+    [57402, 51],
+    [57403, 52],
+    [57404, 53],
+    [57405, 54],
+    [57406, 55],
+    [57407, 56],
+    [57408, 57],
+    [57409, 46],
+    [57410, 47],
+    [57411, 42],
+    [57412, 45],
+    [57413, 43],
+    [57415, 61],
+    [57416, 44],
+    [57417, ARROW_CODEPOINTS.left],
+    [57418, ARROW_CODEPOINTS.right],
+    [57419, ARROW_CODEPOINTS.up],
+    [57420, ARROW_CODEPOINTS.down],
+    [57421, FUNCTIONAL_CODEPOINTS.pageUp],
+    [57422, FUNCTIONAL_CODEPOINTS.pageDown],
+    [57423, FUNCTIONAL_CODEPOINTS.home],
+    [57424, FUNCTIONAL_CODEPOINTS.end],
+    [57425, FUNCTIONAL_CODEPOINTS.insert],
+    [57426, FUNCTIONAL_CODEPOINTS.delete]
+  ]);
+  LEGACY_KEY_SEQUENCES = {
+    up: ["\x1B[A", "\x1BOA"],
+    down: ["\x1B[B", "\x1BOB"],
+    right: ["\x1B[C", "\x1BOC"],
+    left: ["\x1B[D", "\x1BOD"],
+    home: ["\x1B[H", "\x1BOH", "\x1B[1~", "\x1B[7~"],
+    end: ["\x1B[F", "\x1BOF", "\x1B[4~", "\x1B[8~"],
+    insert: ["\x1B[2~"],
+    delete: ["\x1B[3~"],
+    pageUp: ["\x1B[5~", "\x1B[[5~"],
+    pageDown: ["\x1B[6~", "\x1B[[6~"],
+    clear: ["\x1B[E", "\x1BOE"],
+    f1: ["\x1BOP", "\x1B[11~", "\x1B[[A"],
+    f2: ["\x1BOQ", "\x1B[12~", "\x1B[[B"],
+    f3: ["\x1BOR", "\x1B[13~", "\x1B[[C"],
+    f4: ["\x1BOS", "\x1B[14~", "\x1B[[D"],
+    f5: ["\x1B[15~", "\x1B[[E"],
+    f6: ["\x1B[17~"],
+    f7: ["\x1B[18~"],
+    f8: ["\x1B[19~"],
+    f9: ["\x1B[20~"],
+    f10: ["\x1B[21~"],
+    f11: ["\x1B[23~"],
+    f12: ["\x1B[24~"]
+  };
+  LEGACY_SHIFT_SEQUENCES = {
+    up: ["\x1B[a"],
+    down: ["\x1B[b"],
+    right: ["\x1B[c"],
+    left: ["\x1B[d"],
+    clear: ["\x1B[e"],
+    insert: ["\x1B[2$"],
+    delete: ["\x1B[3$"],
+    pageUp: ["\x1B[5$"],
+    pageDown: ["\x1B[6$"],
+    home: ["\x1B[7$"],
+    end: ["\x1B[8$"]
+  };
+  LEGACY_CTRL_SEQUENCES = {
+    up: ["\x1BOa"],
+    down: ["\x1BOb"],
+    right: ["\x1BOc"],
+    left: ["\x1BOd"],
+    clear: ["\x1BOe"],
+    insert: ["\x1B[2^"],
+    delete: ["\x1B[3^"],
+    pageUp: ["\x1B[5^"],
+    pageDown: ["\x1B[6^"],
+    home: ["\x1B[7^"],
+    end: ["\x1B[8^"]
+  };
+  LEGACY_SEQUENCE_KEY_IDS = {
+    "\x1BOA": "up",
+    "\x1BOB": "down",
+    "\x1BOC": "right",
+    "\x1BOD": "left",
+    "\x1BOH": "home",
+    "\x1BOF": "end",
+    "\x1B[E": "clear",
+    "\x1BOE": "clear",
+    "\x1BOe": "ctrl+clear",
+    "\x1B[e": "shift+clear",
+    "\x1B[2~": "insert",
+    "\x1B[2$": "shift+insert",
+    "\x1B[2^": "ctrl+insert",
+    "\x1B[3$": "shift+delete",
+    "\x1B[3^": "ctrl+delete",
+    "\x1B[[5~": "pageUp",
+    "\x1B[[6~": "pageDown",
+    "\x1B[a": "shift+up",
+    "\x1B[b": "shift+down",
+    "\x1B[c": "shift+right",
+    "\x1B[d": "shift+left",
+    "\x1BOa": "ctrl+up",
+    "\x1BOb": "ctrl+down",
+    "\x1BOc": "ctrl+right",
+    "\x1BOd": "ctrl+left",
+    "\x1B[5$": "shift+pageUp",
+    "\x1B[6$": "shift+pageDown",
+    "\x1B[7$": "shift+home",
+    "\x1B[8$": "shift+end",
+    "\x1B[5^": "ctrl+pageUp",
+    "\x1B[6^": "ctrl+pageDown",
+    "\x1B[7^": "ctrl+home",
+    "\x1B[8^": "ctrl+end",
+    "\x1BOP": "f1",
+    "\x1BOQ": "f2",
+    "\x1BOR": "f3",
+    "\x1BOS": "f4",
+    "\x1B[11~": "f1",
+    "\x1B[12~": "f2",
+    "\x1B[13~": "f3",
+    "\x1B[14~": "f4",
+    "\x1B[[A": "f1",
+    "\x1B[[B": "f2",
+    "\x1B[[C": "f3",
+    "\x1B[[D": "f4",
+    "\x1B[[E": "f5",
+    "\x1B[15~": "f5",
+    "\x1B[17~": "f6",
+    "\x1B[18~": "f7",
+    "\x1B[19~": "f8",
+    "\x1B[20~": "f9",
+    "\x1B[21~": "f10",
+    "\x1B[23~": "f11",
+    "\x1B[24~": "f12",
+    "\x1Bb": "alt+left",
+    "\x1Bf": "alt+right",
+    "\x1Bp": "alt+up",
+    "\x1Bn": "alt+down"
+  };
+  KITTY_CSI_U_REGEX = /^\x1b\[(\d+)(?::(\d*))?(?::(\d+))?(?:;(\d+))?(?::(\d+))?u$/;
+  KITTY_PRINTABLE_ALLOWED_MODIFIERS = MODIFIERS.shift | LOCK_MASK;
+});
+
+// node_modules/@earendil-works/pi-tui/dist/keybindings.js
+function normalizeKeys(keys) {
+  if (keys === undefined)
+    return [];
+  const keyList = Array.isArray(keys) ? keys : [keys];
+  const seen = new Set;
+  const result = [];
+  for (const key of keyList) {
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push(key);
+    }
+  }
+  return result;
+}
+
+class KeybindingsManager {
+  definitions;
+  userBindings;
+  keysById = new Map;
+  conflicts = [];
+  constructor(definitions, userBindings = {}) {
+    this.definitions = definitions;
+    this.userBindings = userBindings;
+    this.rebuild();
+  }
+  rebuild() {
+    this.keysById.clear();
+    this.conflicts = [];
+    const userClaims = new Map;
+    for (const [keybinding, keys] of Object.entries(this.userBindings)) {
+      if (!(keybinding in this.definitions))
+        continue;
+      for (const key of normalizeKeys(keys)) {
+        const claimants = userClaims.get(key) ?? new Set;
+        claimants.add(keybinding);
+        userClaims.set(key, claimants);
+      }
+    }
+    for (const [key, keybindings] of userClaims) {
+      if (keybindings.size > 1) {
+        this.conflicts.push({ key, keybindings: [...keybindings] });
+      }
+    }
+    for (const [id, definition] of Object.entries(this.definitions)) {
+      const userKeys = this.userBindings[id];
+      const keys = userKeys === undefined ? normalizeKeys(definition.defaultKeys) : normalizeKeys(userKeys);
+      this.keysById.set(id, keys);
+    }
+  }
+  matches(data, keybinding) {
+    const keys = this.keysById.get(keybinding) ?? [];
+    for (const key of keys) {
+      if (matchesKey(data, key))
+        return true;
+    }
+    return false;
+  }
+  getKeys(keybinding) {
+    return [...this.keysById.get(keybinding) ?? []];
+  }
+  getDefinition(keybinding) {
+    return this.definitions[keybinding];
+  }
+  getConflicts() {
+    return this.conflicts.map((conflict) => ({ ...conflict, keybindings: [...conflict.keybindings] }));
+  }
+  setUserBindings(userBindings) {
+    this.userBindings = userBindings;
+    this.rebuild();
+  }
+  getUserBindings() {
+    return { ...this.userBindings };
+  }
+  getResolvedBindings() {
+    const resolved = {};
+    for (const id of Object.keys(this.definitions)) {
+      const keys = this.keysById.get(id) ?? [];
+      resolved[id] = keys.length === 1 ? keys[0] : [...keys];
+    }
+    return resolved;
+  }
+}
+function setKeybindings(keybindings) {
+  globalKeybindings = keybindings;
+}
+function getKeybindings() {
+  if (!globalKeybindings) {
+    globalKeybindings = new KeybindingsManager(TUI_KEYBINDINGS);
+  }
+  return globalKeybindings;
+}
+var TUI_KEYBINDINGS, globalKeybindings = null;
+var init_keybindings = __esm(() => {
+  init_keys();
+  TUI_KEYBINDINGS = {
+    "tui.editor.cursorUp": { defaultKeys: "up", description: "Move cursor up" },
+    "tui.editor.cursorDown": { defaultKeys: "down", description: "Move cursor down" },
+    "tui.editor.cursorLeft": {
+      defaultKeys: ["left", "ctrl+b"],
+      description: "Move cursor left"
+    },
+    "tui.editor.cursorRight": {
+      defaultKeys: ["right", "ctrl+f"],
+      description: "Move cursor right"
+    },
+    "tui.editor.cursorWordLeft": {
+      defaultKeys: ["alt+left", "ctrl+left", "alt+b"],
+      description: "Move cursor word left"
+    },
+    "tui.editor.cursorWordRight": {
+      defaultKeys: ["alt+right", "ctrl+right", "alt+f"],
+      description: "Move cursor word right"
+    },
+    "tui.editor.cursorLineStart": {
+      defaultKeys: ["home", "ctrl+a"],
+      description: "Move to line start"
+    },
+    "tui.editor.cursorLineEnd": {
+      defaultKeys: ["end", "ctrl+e"],
+      description: "Move to line end"
+    },
+    "tui.editor.jumpForward": {
+      defaultKeys: "ctrl+]",
+      description: "Jump forward to character"
+    },
+    "tui.editor.jumpBackward": {
+      defaultKeys: "ctrl+alt+]",
+      description: "Jump backward to character"
+    },
+    "tui.editor.pageUp": { defaultKeys: "pageUp", description: "Page up" },
+    "tui.editor.pageDown": { defaultKeys: "pageDown", description: "Page down" },
+    "tui.editor.deleteCharBackward": {
+      defaultKeys: "backspace",
+      description: "Delete character backward"
+    },
+    "tui.editor.deleteCharForward": {
+      defaultKeys: ["delete", "ctrl+d"],
+      description: "Delete character forward"
+    },
+    "tui.editor.deleteWordBackward": {
+      defaultKeys: ["ctrl+w", "alt+backspace"],
+      description: "Delete word backward"
+    },
+    "tui.editor.deleteWordForward": {
+      defaultKeys: ["alt+d", "alt+delete"],
+      description: "Delete word forward"
+    },
+    "tui.editor.deleteToLineStart": {
+      defaultKeys: "ctrl+u",
+      description: "Delete to line start"
+    },
+    "tui.editor.deleteToLineEnd": {
+      defaultKeys: "ctrl+k",
+      description: "Delete to line end"
+    },
+    "tui.editor.yank": { defaultKeys: "ctrl+y", description: "Yank" },
+    "tui.editor.yankPop": { defaultKeys: "alt+y", description: "Yank pop" },
+    "tui.editor.undo": { defaultKeys: "ctrl+-", description: "Undo" },
+    "tui.input.newLine": { defaultKeys: "shift+enter", description: "Insert newline" },
+    "tui.input.submit": { defaultKeys: "enter", description: "Submit input" },
+    "tui.input.tab": { defaultKeys: "tab", description: "Tab / autocomplete" },
+    "tui.input.copy": { defaultKeys: "ctrl+c", description: "Copy selection" },
+    "tui.select.up": { defaultKeys: "up", description: "Move selection up" },
+    "tui.select.down": { defaultKeys: "down", description: "Move selection down" },
+    "tui.select.pageUp": { defaultKeys: "pageUp", description: "Selection page up" },
+    "tui.select.pageDown": {
+      defaultKeys: "pageDown",
+      description: "Selection page down"
+    },
+    "tui.select.confirm": { defaultKeys: "enter", description: "Confirm selection" },
+    "tui.select.cancel": {
+      defaultKeys: ["escape", "ctrl+c"],
+      description: "Cancel selection"
+    }
+  };
+});
+
+// node_modules/@earendil-works/pi-tui/dist/components/text.js
+class Text {
+  text;
+  paddingX;
+  paddingY;
+  customBgFn;
+  cachedText;
+  cachedWidth;
+  cachedLines;
+  constructor(text = "", paddingX = 1, paddingY = 1, customBgFn) {
+    this.text = text;
+    this.paddingX = paddingX;
+    this.paddingY = paddingY;
+    this.customBgFn = customBgFn;
+  }
+  setText(text) {
+    this.text = text;
+    this.cachedText = undefined;
+    this.cachedWidth = undefined;
+    this.cachedLines = undefined;
+  }
+  setCustomBgFn(customBgFn) {
+    this.customBgFn = customBgFn;
+    this.cachedText = undefined;
+    this.cachedWidth = undefined;
+    this.cachedLines = undefined;
+  }
+  invalidate() {
+    this.cachedText = undefined;
+    this.cachedWidth = undefined;
+    this.cachedLines = undefined;
+  }
+  render(width) {
+    if (this.cachedLines && this.cachedText === this.text && this.cachedWidth === width) {
+      return this.cachedLines;
+    }
+    if (!this.text || this.text.trim() === "") {
+      const result2 = [];
+      this.cachedText = this.text;
+      this.cachedWidth = width;
+      this.cachedLines = result2;
+      return result2;
+    }
+    const normalizedText = this.text.replace(/\t/g, "   ");
+    const contentWidth = Math.max(1, width - this.paddingX * 2);
+    const wrappedLines = wrapTextWithAnsi(normalizedText, contentWidth);
+    const leftMargin = " ".repeat(this.paddingX);
+    const rightMargin = " ".repeat(this.paddingX);
+    const contentLines = [];
+    for (const line of wrappedLines) {
+      const lineWithMargins = leftMargin + line + rightMargin;
+      if (this.customBgFn) {
+        contentLines.push(applyBackgroundToLine(lineWithMargins, width, this.customBgFn));
+      } else {
+        const visibleLen = visibleWidth(lineWithMargins);
+        const paddingNeeded = Math.max(0, width - visibleLen);
+        contentLines.push(lineWithMargins + " ".repeat(paddingNeeded));
+      }
+    }
+    const emptyLine = " ".repeat(width);
+    const emptyLines = [];
+    for (let i = 0;i < this.paddingY; i++) {
+      const line = this.customBgFn ? applyBackgroundToLine(emptyLine, width, this.customBgFn) : emptyLine;
+      emptyLines.push(line);
+    }
+    const result = [...emptyLines, ...contentLines, ...emptyLines];
+    this.cachedText = this.text;
+    this.cachedWidth = width;
+    this.cachedLines = result;
+    return result.length > 0 ? result : [""];
+  }
+}
+var init_text = __esm(() => {
+  init_utils();
+});
+
+// node_modules/@earendil-works/pi-tui/dist/components/loader.js
+var DEFAULT_FRAMES, DEFAULT_INTERVAL_MS = 80, Loader;
+var init_loader2 = __esm(() => {
+  init_text();
+  DEFAULT_FRAMES = ["\u280B", "\u2819", "\u2839", "\u2838", "\u283C", "\u2834", "\u2826", "\u2827", "\u2807", "\u280F"];
+  Loader = class Loader extends Text {
+    frames = [...DEFAULT_FRAMES];
+    intervalMs = DEFAULT_INTERVAL_MS;
+    currentFrame = 0;
+    intervalId = null;
+    ui = null;
+    renderIndicatorVerbatim = false;
+    spinnerColorFn;
+    messageColorFn;
+    message = "Loading...";
+    constructor(ui, spinnerColorFn, messageColorFn, message = "Loading...", indicator) {
+      super("", 1, 0);
+      this.ui = ui;
+      this.spinnerColorFn = spinnerColorFn;
+      this.messageColorFn = messageColorFn;
+      this.message = message;
+      this.setIndicator(indicator);
+    }
+    render(width) {
+      return ["", ...super.render(width)];
+    }
+    start() {
+      this.updateDisplay();
+      this.restartAnimation();
+    }
+    stop() {
+      if (this.intervalId) {
+        clearInterval(this.intervalId);
+        this.intervalId = null;
+      }
+    }
+    setMessage(message) {
+      this.message = message;
+      this.updateDisplay();
+    }
+    setIndicator(indicator) {
+      this.renderIndicatorVerbatim = indicator !== undefined;
+      this.frames = indicator?.frames !== undefined ? [...indicator.frames] : [...DEFAULT_FRAMES];
+      this.intervalMs = indicator?.intervalMs && indicator.intervalMs > 0 ? indicator.intervalMs : DEFAULT_INTERVAL_MS;
+      this.currentFrame = 0;
+      this.start();
+    }
+    restartAnimation() {
+      this.stop();
+      if (this.frames.length <= 1) {
+        return;
+      }
+      this.intervalId = setInterval(() => {
+        this.currentFrame = (this.currentFrame + 1) % this.frames.length;
+        this.updateDisplay();
+      }, this.intervalMs);
+    }
+    updateDisplay() {
+      const frame = this.frames[this.currentFrame] ?? "";
+      const renderedFrame = this.renderIndicatorVerbatim ? frame : this.spinnerColorFn(frame);
+      const indicator = frame.length > 0 ? `${renderedFrame} ` : "";
+      this.setText(`${indicator}${this.messageColorFn(this.message)}`);
+      if (this.ui) {
+        this.ui.requestRender();
+      }
+    }
+  };
+});
+
+// node_modules/@earendil-works/pi-tui/dist/components/cancellable-loader.js
+var CancellableLoader;
+var init_cancellable_loader = __esm(() => {
+  init_keybindings();
+  init_loader2();
+  CancellableLoader = class CancellableLoader extends Loader {
+    abortController = new AbortController;
+    onAbort;
+    get signal() {
+      return this.abortController.signal;
+    }
+    get aborted() {
+      return this.abortController.signal.aborted;
+    }
+    handleInput(data) {
+      const kb = getKeybindings();
+      if (kb.matches(data, "tui.select.cancel")) {
+        this.abortController.abort();
+        this.onAbort?.();
+      }
+    }
+    dispose() {
+      this.stop();
+    }
+  };
+});
+
+// node_modules/@earendil-works/pi-tui/dist/kill-ring.js
+class KillRing {
+  ring = [];
+  push(text, opts) {
+    if (!text)
+      return;
+    if (opts.accumulate && this.ring.length > 0) {
+      const last = this.ring.pop();
+      this.ring.push(opts.prepend ? text + last : last + text);
+    } else {
+      this.ring.push(text);
+    }
+  }
+  peek() {
+    return this.ring.length > 0 ? this.ring[this.ring.length - 1] : undefined;
+  }
+  rotate() {
+    if (this.ring.length > 1) {
+      const last = this.ring.pop();
+      this.ring.unshift(last);
+    }
+  }
+  get length() {
+    return this.ring.length;
+  }
+}
+
+// node_modules/@earendil-works/pi-tui/dist/terminal-image.js
+function getCellDimensions() {
+  return cellDimensions;
+}
+function setCellDimensions(dims) {
+  cellDimensions = dims;
+}
+function detectCapabilities() {
+  const termProgram = process.env.TERM_PROGRAM?.toLowerCase() || "";
+  const term = process.env.TERM?.toLowerCase() || "";
+  const colorTerm = process.env.COLORTERM?.toLowerCase() || "";
+  const hasTrueColorHint = colorTerm === "truecolor" || colorTerm === "24bit";
+  const inTmuxOrScreen = !!process.env.TMUX || term.startsWith("tmux") || term.startsWith("screen");
+  if (inTmuxOrScreen) {
+    return { images: null, trueColor: hasTrueColorHint, hyperlinks: false };
+  }
+  if (process.env.KITTY_WINDOW_ID || termProgram === "kitty") {
+    return { images: "kitty", trueColor: true, hyperlinks: true };
+  }
+  if (termProgram === "ghostty" || term.includes("ghostty") || process.env.GHOSTTY_RESOURCES_DIR) {
+    return { images: "kitty", trueColor: true, hyperlinks: true };
+  }
+  if (process.env.WEZTERM_PANE || termProgram === "wezterm") {
+    return { images: "kitty", trueColor: true, hyperlinks: true };
+  }
+  if (process.env.ITERM_SESSION_ID || termProgram === "iterm.app") {
+    return { images: "iterm2", trueColor: true, hyperlinks: true };
+  }
+  if (termProgram === "vscode") {
+    return { images: null, trueColor: true, hyperlinks: true };
+  }
+  if (termProgram === "alacritty") {
+    return { images: null, trueColor: true, hyperlinks: true };
+  }
+  return { images: null, trueColor: hasTrueColorHint || !!process.env.WT_SESSION, hyperlinks: false };
+}
+function getCapabilities() {
+  if (!cachedCapabilities) {
+    cachedCapabilities = detectCapabilities();
+  }
+  return cachedCapabilities;
+}
+function resetCapabilitiesCache() {
+  cachedCapabilities = null;
+}
+function setCapabilities(caps) {
+  cachedCapabilities = caps;
+}
+function isImageLine(line) {
+  if (line.startsWith(KITTY_PREFIX) || line.startsWith(ITERM2_PREFIX)) {
+    return true;
+  }
+  return line.includes(KITTY_PREFIX) || line.includes(ITERM2_PREFIX);
+}
+function allocateImageId() {
+  return Math.floor(Math.random() * 4294967294) + 1;
+}
+function encodeKitty(base64Data, options = {}) {
+  const CHUNK_SIZE = 4096;
+  const params = ["a=T", "f=100", "q=2"];
+  if (options.moveCursor === false)
+    params.push("C=1");
+  if (options.columns)
+    params.push(`c=${options.columns}`);
+  if (options.rows)
+    params.push(`r=${options.rows}`);
+  if (options.imageId)
+    params.push(`i=${options.imageId}`);
+  if (base64Data.length <= CHUNK_SIZE) {
+    return `\x1B_G${params.join(",")};${base64Data}\x1B\\`;
+  }
+  const chunks = [];
+  let offset = 0;
+  let isFirst = true;
+  while (offset < base64Data.length) {
+    const chunk = base64Data.slice(offset, offset + CHUNK_SIZE);
+    const isLast = offset + CHUNK_SIZE >= base64Data.length;
+    if (isFirst) {
+      chunks.push(`\x1B_G${params.join(",")},m=1;${chunk}\x1B\\`);
+      isFirst = false;
+    } else if (isLast) {
+      chunks.push(`\x1B_Gm=0;${chunk}\x1B\\`);
+    } else {
+      chunks.push(`\x1B_Gm=1;${chunk}\x1B\\`);
+    }
+    offset += CHUNK_SIZE;
+  }
+  return chunks.join("");
+}
+function deleteKittyImage(imageId) {
+  return `\x1B_Ga=d,d=I,i=${imageId},q=2\x1B\\`;
+}
+function deleteAllKittyImages() {
+  return "\x1B_Ga=d,d=A,q=2\x1B\\";
+}
+function encodeITerm2(base64Data, options = {}) {
+  const params = [`inline=${options.inline !== false ? 1 : 0}`];
+  if (options.width !== undefined)
+    params.push(`width=${options.width}`);
+  if (options.height !== undefined)
+    params.push(`height=${options.height}`);
+  if (options.name) {
+    const nameBase64 = Buffer.from(options.name).toString("base64");
+    params.push(`name=${nameBase64}`);
+  }
+  if (options.preserveAspectRatio === false) {
+    params.push("preserveAspectRatio=0");
+  }
+  return `\x1B]1337;File=${params.join(";")}:${base64Data}\x07`;
+}
+function calculateImageCellSize(imageDimensions, maxWidthCells, maxHeightCells, cellDimensions2 = { widthPx: 9, heightPx: 18 }) {
+  const maxWidth = Math.max(1, Math.floor(maxWidthCells));
+  const maxHeight = maxHeightCells === undefined ? undefined : Math.max(1, Math.floor(maxHeightCells));
+  const imageWidth = Math.max(1, imageDimensions.widthPx);
+  const imageHeight = Math.max(1, imageDimensions.heightPx);
+  const widthScale = maxWidth * cellDimensions2.widthPx / imageWidth;
+  const heightScale = maxHeight === undefined ? widthScale : maxHeight * cellDimensions2.heightPx / imageHeight;
+  const scale = Math.min(widthScale, heightScale);
+  const scaledWidthPx = imageWidth * scale;
+  const scaledHeightPx = imageHeight * scale;
+  const columns = Math.ceil(scaledWidthPx / cellDimensions2.widthPx);
+  const rows = Math.ceil(scaledHeightPx / cellDimensions2.heightPx);
+  return {
+    columns: Math.max(1, Math.min(maxWidth, columns)),
+    rows: Math.max(1, maxHeight === undefined ? rows : Math.min(maxHeight, rows))
+  };
+}
+function calculateImageRows(imageDimensions, targetWidthCells, cellDimensions2 = { widthPx: 9, heightPx: 18 }) {
+  return calculateImageCellSize(imageDimensions, targetWidthCells, undefined, cellDimensions2).rows;
+}
+function getPngDimensions(base64Data) {
+  try {
+    const buffer = Buffer.from(base64Data, "base64");
+    if (buffer.length < 24) {
+      return null;
+    }
+    if (buffer[0] !== 137 || buffer[1] !== 80 || buffer[2] !== 78 || buffer[3] !== 71) {
+      return null;
+    }
+    const width = buffer.readUInt32BE(16);
+    const height = buffer.readUInt32BE(20);
+    return { widthPx: width, heightPx: height };
+  } catch {
+    return null;
+  }
+}
+function getJpegDimensions(base64Data) {
+  try {
+    const buffer = Buffer.from(base64Data, "base64");
+    if (buffer.length < 2) {
+      return null;
+    }
+    if (buffer[0] !== 255 || buffer[1] !== 216) {
+      return null;
+    }
+    let offset = 2;
+    while (offset < buffer.length - 9) {
+      if (buffer[offset] !== 255) {
+        offset++;
+        continue;
+      }
+      const marker = buffer[offset + 1];
+      if (marker >= 192 && marker <= 194) {
+        const height = buffer.readUInt16BE(offset + 5);
+        const width = buffer.readUInt16BE(offset + 7);
+        return { widthPx: width, heightPx: height };
+      }
+      if (offset + 3 >= buffer.length) {
+        return null;
+      }
+      const length = buffer.readUInt16BE(offset + 2);
+      if (length < 2) {
+        return null;
+      }
+      offset += 2 + length;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+function getGifDimensions(base64Data) {
+  try {
+    const buffer = Buffer.from(base64Data, "base64");
+    if (buffer.length < 10) {
+      return null;
+    }
+    const sig = buffer.slice(0, 6).toString("ascii");
+    if (sig !== "GIF87a" && sig !== "GIF89a") {
+      return null;
+    }
+    const width = buffer.readUInt16LE(6);
+    const height = buffer.readUInt16LE(8);
+    return { widthPx: width, heightPx: height };
+  } catch {
+    return null;
+  }
+}
+function getWebpDimensions(base64Data) {
+  try {
+    const buffer = Buffer.from(base64Data, "base64");
+    if (buffer.length < 30) {
+      return null;
+    }
+    const riff = buffer.slice(0, 4).toString("ascii");
+    const webp = buffer.slice(8, 12).toString("ascii");
+    if (riff !== "RIFF" || webp !== "WEBP") {
+      return null;
+    }
+    const chunk = buffer.slice(12, 16).toString("ascii");
+    if (chunk === "VP8 ") {
+      if (buffer.length < 30)
+        return null;
+      const width = buffer.readUInt16LE(26) & 16383;
+      const height = buffer.readUInt16LE(28) & 16383;
+      return { widthPx: width, heightPx: height };
+    } else if (chunk === "VP8L") {
+      if (buffer.length < 25)
+        return null;
+      const bits = buffer.readUInt32LE(21);
+      const width = (bits & 16383) + 1;
+      const height = (bits >> 14 & 16383) + 1;
+      return { widthPx: width, heightPx: height };
+    } else if (chunk === "VP8X") {
+      if (buffer.length < 30)
+        return null;
+      const width = (buffer[24] | buffer[25] << 8 | buffer[26] << 16) + 1;
+      const height = (buffer[27] | buffer[28] << 8 | buffer[29] << 16) + 1;
+      return { widthPx: width, heightPx: height };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+function getImageDimensions(base64Data, mimeType) {
+  if (mimeType === "image/png") {
+    return getPngDimensions(base64Data);
+  }
+  if (mimeType === "image/jpeg") {
+    return getJpegDimensions(base64Data);
+  }
+  if (mimeType === "image/gif") {
+    return getGifDimensions(base64Data);
+  }
+  if (mimeType === "image/webp") {
+    return getWebpDimensions(base64Data);
+  }
+  return null;
+}
+function renderImage(base64Data, imageDimensions, options = {}) {
+  const caps = getCapabilities();
+  if (!caps.images) {
+    return null;
+  }
+  const maxWidth = options.maxWidthCells ?? 80;
+  const size = calculateImageCellSize(imageDimensions, maxWidth, options.maxHeightCells, getCellDimensions());
+  if (caps.images === "kitty") {
+    const sequence = encodeKitty(base64Data, {
+      columns: size.columns,
+      rows: size.rows,
+      imageId: options.imageId,
+      moveCursor: options.moveCursor
+    });
+    return { sequence, rows: size.rows, imageId: options.imageId };
+  }
+  if (caps.images === "iterm2") {
+    const sequence = encodeITerm2(base64Data, {
+      width: size.columns,
+      height: "auto",
+      preserveAspectRatio: options.preserveAspectRatio ?? true
+    });
+    return { sequence, rows: size.rows };
+  }
+  return null;
+}
+function hyperlink(text, url) {
+  return `\x1B]8;;${url}\x1B\\${text}\x1B]8;;\x1B\\`;
+}
+function imageFallback(mimeType, dimensions, filename) {
+  const parts = [];
+  if (filename)
+    parts.push(filename);
+  parts.push(`[${mimeType}]`);
+  if (dimensions)
+    parts.push(`${dimensions.widthPx}x${dimensions.heightPx}`);
+  return `[Image: ${parts.join(" ")}]`;
+}
+var cachedCapabilities = null, cellDimensions, KITTY_PREFIX = "\x1B_G", ITERM2_PREFIX = "\x1B]1337;File=";
+var init_terminal_image = __esm(() => {
+  cellDimensions = { widthPx: 9, heightPx: 18 };
+});
+
+// node_modules/@earendil-works/pi-tui/dist/tui.js
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import { performance } from "perf_hooks";
+function extractKittyImageIds(line) {
+  const sequenceStart = line.indexOf(KITTY_SEQUENCE_PREFIX);
+  if (sequenceStart === -1)
+    return [];
+  const paramsStart = sequenceStart + KITTY_SEQUENCE_PREFIX.length;
+  const paramsEnd = line.indexOf(";", paramsStart);
+  if (paramsEnd === -1)
+    return [];
+  const params = line.slice(paramsStart, paramsEnd);
+  for (const param of params.split(",")) {
+    const [key, value] = param.split("=", 2);
+    if (key !== "i" || value === undefined)
+      continue;
+    const id = Number(value);
+    if (Number.isInteger(id) && id > 0 && id <= 4294967295) {
+      return [id];
+    }
+  }
+  return [];
+}
+function isFocusable(component) {
+  return component !== null && "focused" in component;
+}
+function parseSizeValue(value, referenceSize) {
+  if (value === undefined)
+    return;
+  if (typeof value === "number")
+    return value;
+  const match = value.match(/^(\d+(?:\.\d+)?)%$/);
+  if (match) {
+    return Math.floor(referenceSize * parseFloat(match[1]) / 100);
+  }
+  return;
+}
+function isTermuxSession() {
+  return Boolean(process.env.TERMUX_VERSION);
+}
+
+class Container {
+  children = [];
+  addChild(component) {
+    this.children.push(component);
+  }
+  removeChild(component) {
+    const index = this.children.indexOf(component);
+    if (index !== -1) {
+      this.children.splice(index, 1);
+    }
+  }
+  clear() {
+    this.children = [];
+  }
+  invalidate() {
+    for (const child of this.children) {
+      child.invalidate?.();
+    }
+  }
+  render(width) {
+    const lines = [];
+    for (const child of this.children) {
+      const childLines = child.render(width);
+      for (const line of childLines) {
+        lines.push(line);
+      }
+    }
+    return lines;
+  }
+}
+var KITTY_SEQUENCE_PREFIX = "\x1B_G", CURSOR_MARKER = "\x1B_pi:c\x07", TUI;
+var init_tui = __esm(() => {
+  init_keys();
+  init_terminal_image();
+  init_utils();
+  TUI = class TUI extends Container {
+    terminal;
+    previousLines = [];
+    previousKittyImageIds = new Set;
+    previousWidth = 0;
+    previousHeight = 0;
+    focusedComponent = null;
+    inputListeners = new Set;
+    onDebug;
+    renderRequested = false;
+    renderTimer;
+    lastRenderAt = 0;
+    static MIN_RENDER_INTERVAL_MS = 16;
+    cursorRow = 0;
+    hardwareCursorRow = 0;
+    showHardwareCursor = process.env.PI_HARDWARE_CURSOR === "1";
+    clearOnShrink = process.env.PI_CLEAR_ON_SHRINK === "1";
+    maxLinesRendered = 0;
+    previousViewportTop = 0;
+    fullRedrawCount = 0;
+    stopped = false;
+    focusOrderCounter = 0;
+    overlayStack = [];
+    constructor(terminal, showHardwareCursor) {
+      super();
+      this.terminal = terminal;
+      if (showHardwareCursor !== undefined) {
+        this.showHardwareCursor = showHardwareCursor;
+      }
+    }
+    get fullRedraws() {
+      return this.fullRedrawCount;
+    }
+    getShowHardwareCursor() {
+      return this.showHardwareCursor;
+    }
+    setShowHardwareCursor(enabled) {
+      if (this.showHardwareCursor === enabled)
+        return;
+      this.showHardwareCursor = enabled;
+      if (!enabled) {
+        this.terminal.hideCursor();
+      }
+      this.requestRender();
+    }
+    getClearOnShrink() {
+      return this.clearOnShrink;
+    }
+    setClearOnShrink(enabled) {
+      this.clearOnShrink = enabled;
+    }
+    setFocus(component) {
+      if (isFocusable(this.focusedComponent)) {
+        this.focusedComponent.focused = false;
+      }
+      this.focusedComponent = component;
+      if (isFocusable(component)) {
+        component.focused = true;
+      }
+    }
+    showOverlay(component, options) {
+      const entry = {
+        component,
+        options,
+        preFocus: this.focusedComponent,
+        hidden: false,
+        focusOrder: ++this.focusOrderCounter
+      };
+      this.overlayStack.push(entry);
+      if (!options?.nonCapturing && this.isOverlayVisible(entry)) {
+        this.setFocus(component);
+      }
+      this.terminal.hideCursor();
+      this.requestRender();
+      return {
+        hide: () => {
+          const index = this.overlayStack.indexOf(entry);
+          if (index !== -1) {
+            this.overlayStack.splice(index, 1);
+            if (this.focusedComponent === component) {
+              const topVisible = this.getTopmostVisibleOverlay();
+              this.setFocus(topVisible?.component ?? entry.preFocus);
+            }
+            if (this.overlayStack.length === 0)
+              this.terminal.hideCursor();
+            this.requestRender();
+          }
+        },
+        setHidden: (hidden) => {
+          if (entry.hidden === hidden)
+            return;
+          entry.hidden = hidden;
+          if (hidden) {
+            if (this.focusedComponent === component) {
+              const topVisible = this.getTopmostVisibleOverlay();
+              this.setFocus(topVisible?.component ?? entry.preFocus);
+            }
+          } else {
+            if (!options?.nonCapturing && this.isOverlayVisible(entry)) {
+              entry.focusOrder = ++this.focusOrderCounter;
+              this.setFocus(component);
+            }
+          }
+          this.requestRender();
+        },
+        isHidden: () => entry.hidden,
+        focus: () => {
+          if (!this.overlayStack.includes(entry) || !this.isOverlayVisible(entry))
+            return;
+          if (this.focusedComponent !== component) {
+            this.setFocus(component);
+          }
+          entry.focusOrder = ++this.focusOrderCounter;
+          this.requestRender();
+        },
+        unfocus: () => {
+          if (this.focusedComponent !== component)
+            return;
+          const topVisible = this.getTopmostVisibleOverlay();
+          this.setFocus(topVisible && topVisible !== entry ? topVisible.component : entry.preFocus);
+          this.requestRender();
+        },
+        isFocused: () => this.focusedComponent === component
+      };
+    }
+    hideOverlay() {
+      const overlay = this.overlayStack.pop();
+      if (!overlay)
+        return;
+      if (this.focusedComponent === overlay.component) {
+        const topVisible = this.getTopmostVisibleOverlay();
+        this.setFocus(topVisible?.component ?? overlay.preFocus);
+      }
+      if (this.overlayStack.length === 0)
+        this.terminal.hideCursor();
+      this.requestRender();
+    }
+    hasOverlay() {
+      return this.overlayStack.some((o) => this.isOverlayVisible(o));
+    }
+    isOverlayVisible(entry) {
+      if (entry.hidden)
+        return false;
+      if (entry.options?.visible) {
+        return entry.options.visible(this.terminal.columns, this.terminal.rows);
+      }
+      return true;
+    }
+    getTopmostVisibleOverlay() {
+      for (let i = this.overlayStack.length - 1;i >= 0; i--) {
+        if (this.overlayStack[i].options?.nonCapturing)
+          continue;
+        if (this.isOverlayVisible(this.overlayStack[i])) {
+          return this.overlayStack[i];
+        }
+      }
+      return;
+    }
+    invalidate() {
+      super.invalidate();
+      for (const overlay of this.overlayStack)
+        overlay.component.invalidate?.();
+    }
+    start() {
+      this.stopped = false;
+      this.terminal.start((data) => this.handleInput(data), () => this.requestRender());
+      this.terminal.hideCursor();
+      this.queryCellSize();
+      this.requestRender();
+    }
+    addInputListener(listener) {
+      this.inputListeners.add(listener);
+      return () => {
+        this.inputListeners.delete(listener);
+      };
+    }
+    removeInputListener(listener) {
+      this.inputListeners.delete(listener);
+    }
+    queryCellSize() {
+      if (!getCapabilities().images) {
+        return;
+      }
+      this.terminal.write("\x1B[16t");
+    }
+    stop() {
+      this.stopped = true;
+      if (this.renderTimer) {
+        clearTimeout(this.renderTimer);
+        this.renderTimer = undefined;
+      }
+      if (this.previousLines.length > 0) {
+        const targetRow = this.previousLines.length;
+        const lineDiff = targetRow - this.hardwareCursorRow;
+        if (lineDiff > 0) {
+          this.terminal.write(`\x1B[${lineDiff}B`);
+        } else if (lineDiff < 0) {
+          this.terminal.write(`\x1B[${-lineDiff}A`);
+        }
+        this.terminal.write(`\r
+`);
+      }
+      this.terminal.showCursor();
+      this.terminal.stop();
+    }
+    requestRender(force = false) {
+      if (force) {
+        this.previousLines = [];
+        this.previousWidth = -1;
+        this.previousHeight = -1;
+        this.cursorRow = 0;
+        this.hardwareCursorRow = 0;
+        this.maxLinesRendered = 0;
+        this.previousViewportTop = 0;
+        if (this.renderTimer) {
+          clearTimeout(this.renderTimer);
+          this.renderTimer = undefined;
+        }
+        this.renderRequested = true;
+        process.nextTick(() => {
+          if (this.stopped || !this.renderRequested) {
+            return;
+          }
+          this.renderRequested = false;
+          this.lastRenderAt = performance.now();
+          this.doRender();
+        });
+        return;
+      }
+      if (this.renderRequested)
+        return;
+      this.renderRequested = true;
+      process.nextTick(() => this.scheduleRender());
+    }
+    scheduleRender() {
+      if (this.stopped || this.renderTimer || !this.renderRequested) {
+        return;
+      }
+      const elapsed = performance.now() - this.lastRenderAt;
+      const delay = Math.max(0, TUI.MIN_RENDER_INTERVAL_MS - elapsed);
+      this.renderTimer = setTimeout(() => {
+        this.renderTimer = undefined;
+        if (this.stopped || !this.renderRequested) {
+          return;
+        }
+        this.renderRequested = false;
+        this.lastRenderAt = performance.now();
+        this.doRender();
+        if (this.renderRequested) {
+          this.scheduleRender();
+        }
+      }, delay);
+    }
+    handleInput(data) {
+      if (this.inputListeners.size > 0) {
+        let current = data;
+        for (const listener of this.inputListeners) {
+          const result = listener(current);
+          if (result?.consume) {
+            return;
+          }
+          if (result?.data !== undefined) {
+            current = result.data;
+          }
+        }
+        if (current.length === 0) {
+          return;
+        }
+        data = current;
+      }
+      if (this.consumeCellSizeResponse(data)) {
+        return;
+      }
+      if (matchesKey(data, "shift+ctrl+d") && this.onDebug) {
+        this.onDebug();
+        return;
+      }
+      const focusedOverlay = this.overlayStack.find((o) => o.component === this.focusedComponent);
+      if (focusedOverlay && !this.isOverlayVisible(focusedOverlay)) {
+        const topVisible = this.getTopmostVisibleOverlay();
+        if (topVisible) {
+          this.setFocus(topVisible.component);
+        } else {
+          this.setFocus(focusedOverlay.preFocus);
+        }
+      }
+      if (this.focusedComponent?.handleInput) {
+        if (isKeyRelease(data) && !this.focusedComponent.wantsKeyRelease) {
+          return;
+        }
+        this.focusedComponent.handleInput(data);
+        this.requestRender();
+      }
+    }
+    consumeCellSizeResponse(data) {
+      const match = data.match(/^\x1b\[6;(\d+);(\d+)t$/);
+      if (!match) {
+        return false;
+      }
+      const heightPx = parseInt(match[1], 10);
+      const widthPx = parseInt(match[2], 10);
+      if (heightPx <= 0 || widthPx <= 0) {
+        return true;
+      }
+      setCellDimensions({ widthPx, heightPx });
+      this.invalidate();
+      this.requestRender();
+      return true;
+    }
+    resolveOverlayLayout(options, overlayHeight, termWidth, termHeight) {
+      const opt = options ?? {};
+      const margin = typeof opt.margin === "number" ? { top: opt.margin, right: opt.margin, bottom: opt.margin, left: opt.margin } : opt.margin ?? {};
+      const marginTop = Math.max(0, margin.top ?? 0);
+      const marginRight = Math.max(0, margin.right ?? 0);
+      const marginBottom = Math.max(0, margin.bottom ?? 0);
+      const marginLeft = Math.max(0, margin.left ?? 0);
+      const availWidth = Math.max(1, termWidth - marginLeft - marginRight);
+      const availHeight = Math.max(1, termHeight - marginTop - marginBottom);
+      let width = parseSizeValue(opt.width, termWidth) ?? Math.min(80, availWidth);
+      if (opt.minWidth !== undefined) {
+        width = Math.max(width, opt.minWidth);
+      }
+      width = Math.max(1, Math.min(width, availWidth));
+      let maxHeight = parseSizeValue(opt.maxHeight, termHeight);
+      if (maxHeight !== undefined) {
+        maxHeight = Math.max(1, Math.min(maxHeight, availHeight));
+      }
+      const effectiveHeight = maxHeight !== undefined ? Math.min(overlayHeight, maxHeight) : overlayHeight;
+      let row;
+      let col;
+      if (opt.row !== undefined) {
+        if (typeof opt.row === "string") {
+          const match = opt.row.match(/^(\d+(?:\.\d+)?)%$/);
+          if (match) {
+            const maxRow = Math.max(0, availHeight - effectiveHeight);
+            const percent = parseFloat(match[1]) / 100;
+            row = marginTop + Math.floor(maxRow * percent);
+          } else {
+            row = this.resolveAnchorRow("center", effectiveHeight, availHeight, marginTop);
+          }
+        } else {
+          row = opt.row;
+        }
+      } else {
+        const anchor = opt.anchor ?? "center";
+        row = this.resolveAnchorRow(anchor, effectiveHeight, availHeight, marginTop);
+      }
+      if (opt.col !== undefined) {
+        if (typeof opt.col === "string") {
+          const match = opt.col.match(/^(\d+(?:\.\d+)?)%$/);
+          if (match) {
+            const maxCol = Math.max(0, availWidth - width);
+            const percent = parseFloat(match[1]) / 100;
+            col = marginLeft + Math.floor(maxCol * percent);
+          } else {
+            col = this.resolveAnchorCol("center", width, availWidth, marginLeft);
+          }
+        } else {
+          col = opt.col;
+        }
+      } else {
+        const anchor = opt.anchor ?? "center";
+        col = this.resolveAnchorCol(anchor, width, availWidth, marginLeft);
+      }
+      if (opt.offsetY !== undefined)
+        row += opt.offsetY;
+      if (opt.offsetX !== undefined)
+        col += opt.offsetX;
+      row = Math.max(marginTop, Math.min(row, termHeight - marginBottom - effectiveHeight));
+      col = Math.max(marginLeft, Math.min(col, termWidth - marginRight - width));
+      return { width, row, col, maxHeight };
+    }
+    resolveAnchorRow(anchor, height, availHeight, marginTop) {
+      switch (anchor) {
+        case "top-left":
+        case "top-center":
+        case "top-right":
+          return marginTop;
+        case "bottom-left":
+        case "bottom-center":
+        case "bottom-right":
+          return marginTop + availHeight - height;
+        case "left-center":
+        case "center":
+        case "right-center":
+          return marginTop + Math.floor((availHeight - height) / 2);
+      }
+    }
+    resolveAnchorCol(anchor, width, availWidth, marginLeft) {
+      switch (anchor) {
+        case "top-left":
+        case "left-center":
+        case "bottom-left":
+          return marginLeft;
+        case "top-right":
+        case "right-center":
+        case "bottom-right":
+          return marginLeft + availWidth - width;
+        case "top-center":
+        case "center":
+        case "bottom-center":
+          return marginLeft + Math.floor((availWidth - width) / 2);
+      }
+    }
+    compositeOverlays(lines, termWidth, termHeight) {
+      if (this.overlayStack.length === 0)
+        return lines;
+      const result = [...lines];
+      const rendered = [];
+      let minLinesNeeded = result.length;
+      const visibleEntries = this.overlayStack.filter((e) => this.isOverlayVisible(e));
+      visibleEntries.sort((a, b) => a.focusOrder - b.focusOrder);
+      for (const entry of visibleEntries) {
+        const { component, options } = entry;
+        const { width, maxHeight } = this.resolveOverlayLayout(options, 0, termWidth, termHeight);
+        let overlayLines = component.render(width);
+        if (maxHeight !== undefined && overlayLines.length > maxHeight) {
+          overlayLines = overlayLines.slice(0, maxHeight);
+        }
+        const { row, col } = this.resolveOverlayLayout(options, overlayLines.length, termWidth, termHeight);
+        rendered.push({ overlayLines, row, col, w: width });
+        minLinesNeeded = Math.max(minLinesNeeded, row + overlayLines.length);
+      }
+      const workingHeight = Math.max(result.length, termHeight, minLinesNeeded);
+      while (result.length < workingHeight) {
+        result.push("");
+      }
+      const viewportStart = Math.max(0, workingHeight - termHeight);
+      for (const { overlayLines, row, col, w } of rendered) {
+        for (let i = 0;i < overlayLines.length; i++) {
+          const idx = viewportStart + row + i;
+          if (idx >= 0 && idx < result.length) {
+            const truncatedOverlayLine = visibleWidth(overlayLines[i]) > w ? sliceByColumn(overlayLines[i], 0, w, true) : overlayLines[i];
+            result[idx] = this.compositeLineAt(result[idx], truncatedOverlayLine, col, w, termWidth);
+          }
+        }
+      }
+      return result;
+    }
+    static SEGMENT_RESET = "\x1B[0m\x1B]8;;\x07";
+    applyLineResets(lines) {
+      const reset = TUI.SEGMENT_RESET;
+      for (let i = 0;i < lines.length; i++) {
+        const line = lines[i];
+        if (!isImageLine(line)) {
+          lines[i] = normalizeTerminalOutput(line) + reset;
+        }
+      }
+      return lines;
+    }
+    collectKittyImageIds(lines) {
+      const ids = new Set;
+      for (const line of lines) {
+        for (const id of extractKittyImageIds(line)) {
+          ids.add(id);
+        }
+      }
+      return ids;
+    }
+    deleteKittyImages(ids) {
+      let buffer = "";
+      for (const id of ids) {
+        buffer += deleteKittyImage(id);
+      }
+      return buffer;
+    }
+    expandLastChangedForKittyImages(firstChanged, lastChanged) {
+      let expandedLastChanged = lastChanged;
+      for (let i = firstChanged;i < this.previousLines.length; i++) {
+        if (extractKittyImageIds(this.previousLines[i]).length > 0) {
+          expandedLastChanged = Math.max(expandedLastChanged, i);
+        }
+      }
+      return expandedLastChanged;
+    }
+    deleteChangedKittyImages(firstChanged, lastChanged) {
+      if (firstChanged < 0 || lastChanged < firstChanged)
+        return "";
+      const ids = new Set;
+      const maxLine = Math.min(lastChanged, this.previousLines.length - 1);
+      for (let i = firstChanged;i <= maxLine; i++) {
+        for (const id of extractKittyImageIds(this.previousLines[i] ?? "")) {
+          ids.add(id);
+        }
+      }
+      return this.deleteKittyImages(ids);
+    }
+    compositeLineAt(baseLine, overlayLine, startCol, overlayWidth, totalWidth) {
+      if (isImageLine(baseLine))
+        return baseLine;
+      const afterStart = startCol + overlayWidth;
+      const base = extractSegments(baseLine, startCol, afterStart, totalWidth - afterStart, true);
+      const overlay = sliceWithWidth(overlayLine, 0, overlayWidth, true);
+      const beforePad = Math.max(0, startCol - base.beforeWidth);
+      const overlayPad = Math.max(0, overlayWidth - overlay.width);
+      const actualBeforeWidth = Math.max(startCol, base.beforeWidth);
+      const actualOverlayWidth = Math.max(overlayWidth, overlay.width);
+      const afterTarget = Math.max(0, totalWidth - actualBeforeWidth - actualOverlayWidth);
+      const afterPad = Math.max(0, afterTarget - base.afterWidth);
+      const r = TUI.SEGMENT_RESET;
+      const result = base.before + " ".repeat(beforePad) + r + overlay.text + " ".repeat(overlayPad) + r + base.after + " ".repeat(afterPad);
+      const resultWidth = visibleWidth(result);
+      if (resultWidth <= totalWidth) {
+        return result;
+      }
+      return sliceByColumn(result, 0, totalWidth, true);
+    }
+    extractCursorPosition(lines, height) {
+      const viewportTop = Math.max(0, lines.length - height);
+      for (let row = lines.length - 1;row >= viewportTop; row--) {
+        const line = lines[row];
+        const markerIndex = line.indexOf(CURSOR_MARKER);
+        if (markerIndex !== -1) {
+          const beforeMarker = line.slice(0, markerIndex);
+          const col = visibleWidth(beforeMarker);
+          lines[row] = line.slice(0, markerIndex) + line.slice(markerIndex + CURSOR_MARKER.length);
+          return { row, col };
+        }
+      }
+      return null;
+    }
+    doRender() {
+      if (this.stopped)
+        return;
+      const width = this.terminal.columns;
+      const height = this.terminal.rows;
+      const widthChanged = this.previousWidth !== 0 && this.previousWidth !== width;
+      const heightChanged = this.previousHeight !== 0 && this.previousHeight !== height;
+      const previousBufferLength = this.previousHeight > 0 ? this.previousViewportTop + this.previousHeight : height;
+      let prevViewportTop = heightChanged ? Math.max(0, previousBufferLength - height) : this.previousViewportTop;
+      let viewportTop = prevViewportTop;
+      let hardwareCursorRow = this.hardwareCursorRow;
+      const computeLineDiff = (targetRow) => {
+        const currentScreenRow = hardwareCursorRow - prevViewportTop;
+        const targetScreenRow = targetRow - viewportTop;
+        return targetScreenRow - currentScreenRow;
+      };
+      let newLines = this.render(width);
+      if (this.overlayStack.length > 0) {
+        newLines = this.compositeOverlays(newLines, width, height);
+      }
+      const cursorPos = this.extractCursorPosition(newLines, height);
+      newLines = this.applyLineResets(newLines);
+      const fullRender = (clear) => {
+        this.fullRedrawCount += 1;
+        let buffer2 = "\x1B[?2026h";
+        if (clear) {
+          buffer2 += this.deleteKittyImages(this.previousKittyImageIds);
+          buffer2 += "\x1B[2J\x1B[H\x1B[3J";
+        }
+        for (let i = 0;i < newLines.length; i++) {
+          if (i > 0)
+            buffer2 += `\r
+`;
+          buffer2 += newLines[i];
+        }
+        buffer2 += "\x1B[?2026l";
+        this.terminal.write(buffer2);
+        this.cursorRow = Math.max(0, newLines.length - 1);
+        this.hardwareCursorRow = this.cursorRow;
+        if (clear) {
+          this.maxLinesRendered = newLines.length;
+        } else {
+          this.maxLinesRendered = Math.max(this.maxLinesRendered, newLines.length);
+        }
+        const bufferLength = Math.max(height, newLines.length);
+        this.previousViewportTop = Math.max(0, bufferLength - height);
+        this.positionHardwareCursor(cursorPos, newLines.length);
+        this.previousLines = newLines;
+        this.previousKittyImageIds = this.collectKittyImageIds(newLines);
+        this.previousWidth = width;
+        this.previousHeight = height;
+      };
+      const debugRedraw = process.env.PI_DEBUG_REDRAW === "1";
+      const logRedraw = (reason) => {
+        if (!debugRedraw)
+          return;
+        const logPath = path.join(os.homedir(), ".pi", "agent", "pi-debug.log");
+        const msg = `[${new Date().toISOString()}] fullRender: ${reason} (prev=${this.previousLines.length}, new=${newLines.length}, height=${height})
+`;
+        fs.appendFileSync(logPath, msg);
+      };
+      if (this.previousLines.length === 0 && !widthChanged && !heightChanged) {
+        logRedraw("first render");
+        fullRender(false);
+        return;
+      }
+      if (widthChanged) {
+        logRedraw(`terminal width changed (${this.previousWidth} -> ${width})`);
+        fullRender(true);
+        return;
+      }
+      if (heightChanged && !isTermuxSession()) {
+        logRedraw(`terminal height changed (${this.previousHeight} -> ${height})`);
+        fullRender(true);
+        return;
+      }
+      if (this.clearOnShrink && newLines.length < this.maxLinesRendered && this.overlayStack.length === 0) {
+        logRedraw(`clearOnShrink (maxLinesRendered=${this.maxLinesRendered})`);
+        fullRender(true);
+        return;
+      }
+      let firstChanged = -1;
+      let lastChanged = -1;
+      const maxLines = Math.max(newLines.length, this.previousLines.length);
+      for (let i = 0;i < maxLines; i++) {
+        const oldLine = i < this.previousLines.length ? this.previousLines[i] : "";
+        const newLine = i < newLines.length ? newLines[i] : "";
+        if (oldLine !== newLine) {
+          if (firstChanged === -1) {
+            firstChanged = i;
+          }
+          lastChanged = i;
+        }
+      }
+      const appendedLines = newLines.length > this.previousLines.length;
+      if (appendedLines) {
+        if (firstChanged === -1) {
+          firstChanged = this.previousLines.length;
+        }
+        lastChanged = newLines.length - 1;
+      }
+      if (firstChanged !== -1) {
+        lastChanged = this.expandLastChangedForKittyImages(firstChanged, lastChanged);
+      }
+      const appendStart = appendedLines && firstChanged === this.previousLines.length && firstChanged > 0;
+      if (firstChanged === -1) {
+        this.positionHardwareCursor(cursorPos, newLines.length);
+        this.previousViewportTop = prevViewportTop;
+        this.previousHeight = height;
+        return;
+      }
+      if (firstChanged >= newLines.length) {
+        if (this.previousLines.length > newLines.length) {
+          let buffer2 = "\x1B[?2026h";
+          buffer2 += this.deleteChangedKittyImages(firstChanged, lastChanged);
+          const targetRow = Math.max(0, newLines.length - 1);
+          if (targetRow < prevViewportTop) {
+            logRedraw(`deleted lines moved viewport up (${targetRow} < ${prevViewportTop})`);
+            fullRender(true);
+            return;
+          }
+          const lineDiff2 = computeLineDiff(targetRow);
+          if (lineDiff2 > 0)
+            buffer2 += `\x1B[${lineDiff2}B`;
+          else if (lineDiff2 < 0)
+            buffer2 += `\x1B[${-lineDiff2}A`;
+          buffer2 += "\r";
+          const extraLines = this.previousLines.length - newLines.length;
+          if (extraLines > height) {
+            logRedraw(`extraLines > height (${extraLines} > ${height})`);
+            fullRender(true);
+            return;
+          }
+          if (extraLines > 0) {
+            buffer2 += "\x1B[1B";
+          }
+          for (let i = 0;i < extraLines; i++) {
+            buffer2 += "\r\x1B[2K";
+            if (i < extraLines - 1)
+              buffer2 += "\x1B[1B";
+          }
+          if (extraLines > 0) {
+            buffer2 += `\x1B[${extraLines}A`;
+          }
+          buffer2 += "\x1B[?2026l";
+          this.terminal.write(buffer2);
+          this.cursorRow = targetRow;
+          this.hardwareCursorRow = targetRow;
+        }
+        this.positionHardwareCursor(cursorPos, newLines.length);
+        this.previousLines = newLines;
+        this.previousKittyImageIds = this.collectKittyImageIds(newLines);
+        this.previousWidth = width;
+        this.previousHeight = height;
+        this.previousViewportTop = prevViewportTop;
+        return;
+      }
+      if (firstChanged < prevViewportTop) {
+        logRedraw(`firstChanged < viewportTop (${firstChanged} < ${prevViewportTop})`);
+        fullRender(true);
+        return;
+      }
+      let buffer = "\x1B[?2026h";
+      buffer += this.deleteChangedKittyImages(firstChanged, lastChanged);
+      const prevViewportBottom = prevViewportTop + height - 1;
+      const moveTargetRow = appendStart ? firstChanged - 1 : firstChanged;
+      if (moveTargetRow > prevViewportBottom) {
+        const currentScreenRow = Math.max(0, Math.min(height - 1, hardwareCursorRow - prevViewportTop));
+        const moveToBottom = height - 1 - currentScreenRow;
+        if (moveToBottom > 0) {
+          buffer += `\x1B[${moveToBottom}B`;
+        }
+        const scroll = moveTargetRow - prevViewportBottom;
+        buffer += `\r
+`.repeat(scroll);
+        prevViewportTop += scroll;
+        viewportTop += scroll;
+        hardwareCursorRow = moveTargetRow;
+      }
+      const lineDiff = computeLineDiff(moveTargetRow);
+      if (lineDiff > 0) {
+        buffer += `\x1B[${lineDiff}B`;
+      } else if (lineDiff < 0) {
+        buffer += `\x1B[${-lineDiff}A`;
+      }
+      buffer += appendStart ? `\r
+` : "\r";
+      const renderEnd = Math.min(lastChanged, newLines.length - 1);
+      for (let i = firstChanged;i <= renderEnd; i++) {
+        if (i > firstChanged)
+          buffer += `\r
+`;
+        buffer += "\x1B[2K";
+        const line = newLines[i];
+        const isImage = isImageLine(line);
+        if (!isImage && visibleWidth(line) > width) {
+          const crashLogPath = path.join(os.homedir(), ".pi", "agent", "pi-crash.log");
+          const crashData = [
+            `Crash at ${new Date().toISOString()}`,
+            `Terminal width: ${width}`,
+            `Line ${i} visible width: ${visibleWidth(line)}`,
+            "",
+            "=== All rendered lines ===",
+            ...newLines.map((l, idx) => `[${idx}] (w=${visibleWidth(l)}) ${l}`),
+            ""
+          ].join(`
+`);
+          fs.mkdirSync(path.dirname(crashLogPath), { recursive: true });
+          fs.writeFileSync(crashLogPath, crashData);
+          this.stop();
+          const errorMsg = [
+            `Rendered line ${i} exceeds terminal width (${visibleWidth(line)} > ${width}).`,
+            "",
+            "This is likely caused by a custom TUI component not truncating its output.",
+            "Use visibleWidth() to measure and truncateToWidth() to truncate lines.",
+            "",
+            `Debug log written to: ${crashLogPath}`
+          ].join(`
+`);
+          throw new Error(errorMsg);
+        }
+        buffer += line;
+      }
+      let finalCursorRow = renderEnd;
+      if (this.previousLines.length > newLines.length) {
+        if (renderEnd < newLines.length - 1) {
+          const moveDown = newLines.length - 1 - renderEnd;
+          buffer += `\x1B[${moveDown}B`;
+          finalCursorRow = newLines.length - 1;
+        }
+        const extraLines = this.previousLines.length - newLines.length;
+        for (let i = newLines.length;i < this.previousLines.length; i++) {
+          buffer += `\r
+\x1B[2K`;
+        }
+        buffer += `\x1B[${extraLines}A`;
+      }
+      buffer += "\x1B[?2026l";
+      if (process.env.PI_TUI_DEBUG === "1") {
+        const debugDir = "/tmp/tui";
+        fs.mkdirSync(debugDir, { recursive: true });
+        const debugPath = path.join(debugDir, `render-${Date.now()}-${Math.random().toString(36).slice(2)}.log`);
+        const debugData = [
+          `firstChanged: ${firstChanged}`,
+          `viewportTop: ${viewportTop}`,
+          `cursorRow: ${this.cursorRow}`,
+          `height: ${height}`,
+          `lineDiff: ${lineDiff}`,
+          `hardwareCursorRow: ${hardwareCursorRow}`,
+          `renderEnd: ${renderEnd}`,
+          `finalCursorRow: ${finalCursorRow}`,
+          `cursorPos: ${JSON.stringify(cursorPos)}`,
+          `newLines.length: ${newLines.length}`,
+          `previousLines.length: ${this.previousLines.length}`,
+          "",
+          "=== newLines ===",
+          JSON.stringify(newLines, null, 2),
+          "",
+          "=== previousLines ===",
+          JSON.stringify(this.previousLines, null, 2),
+          "",
+          "=== buffer ===",
+          JSON.stringify(buffer)
+        ].join(`
+`);
+        fs.writeFileSync(debugPath, debugData);
+      }
+      this.terminal.write(buffer);
+      this.cursorRow = Math.max(0, newLines.length - 1);
+      this.hardwareCursorRow = finalCursorRow;
+      this.maxLinesRendered = Math.max(this.maxLinesRendered, newLines.length);
+      this.previousViewportTop = Math.max(prevViewportTop, finalCursorRow - height + 1);
+      this.positionHardwareCursor(cursorPos, newLines.length);
+      this.previousLines = newLines;
+      this.previousKittyImageIds = this.collectKittyImageIds(newLines);
+      this.previousWidth = width;
+      this.previousHeight = height;
+    }
+    positionHardwareCursor(cursorPos, totalLines) {
+      if (!cursorPos || totalLines <= 0) {
+        this.terminal.hideCursor();
+        return;
+      }
+      const targetRow = Math.max(0, Math.min(cursorPos.row, totalLines - 1));
+      const targetCol = Math.max(0, cursorPos.col);
+      const rowDelta = targetRow - this.hardwareCursorRow;
+      let buffer = "";
+      if (rowDelta > 0) {
+        buffer += `\x1B[${rowDelta}B`;
+      } else if (rowDelta < 0) {
+        buffer += `\x1B[${-rowDelta}A`;
+      }
+      buffer += `\x1B[${targetCol + 1}G`;
+      if (buffer) {
+        this.terminal.write(buffer);
+      }
+      this.hardwareCursorRow = targetRow;
+      if (this.showHardwareCursor) {
+        this.terminal.showCursor();
+      } else {
+        this.terminal.hideCursor();
+      }
+    }
+  };
+});
+
+// node_modules/@earendil-works/pi-tui/dist/undo-stack.js
+class UndoStack {
+  stack = [];
+  push(state) {
+    this.stack.push(structuredClone(state));
+  }
+  pop() {
+    return this.stack.pop();
+  }
+  clear() {
+    this.stack.length = 0;
+  }
+  get length() {
+    return this.stack.length;
+  }
+}
+
+// node_modules/@earendil-works/pi-tui/dist/components/select-list.js
+class SelectList {
+  items = [];
+  filteredItems = [];
+  selectedIndex = 0;
+  maxVisible = 5;
+  theme;
+  layout;
+  onSelect;
+  onCancel;
+  onSelectionChange;
+  constructor(items, maxVisible, theme, layout = {}) {
+    this.items = items;
+    this.filteredItems = items;
+    this.maxVisible = maxVisible;
+    this.theme = theme;
+    this.layout = layout;
+  }
+  setFilter(filter) {
+    this.filteredItems = this.items.filter((item) => item.value.toLowerCase().startsWith(filter.toLowerCase()));
+    this.selectedIndex = 0;
+  }
+  setSelectedIndex(index) {
+    this.selectedIndex = Math.max(0, Math.min(index, this.filteredItems.length - 1));
+  }
+  invalidate() {}
+  render(width) {
+    const lines = [];
+    if (this.filteredItems.length === 0) {
+      lines.push(this.theme.noMatch("  No matching commands"));
+      return lines;
+    }
+    const primaryColumnWidth = this.getPrimaryColumnWidth();
+    const startIndex = Math.max(0, Math.min(this.selectedIndex - Math.floor(this.maxVisible / 2), this.filteredItems.length - this.maxVisible));
+    const endIndex = Math.min(startIndex + this.maxVisible, this.filteredItems.length);
+    for (let i = startIndex;i < endIndex; i++) {
+      const item = this.filteredItems[i];
+      if (!item)
+        continue;
+      const isSelected = i === this.selectedIndex;
+      const descriptionSingleLine = item.description ? normalizeToSingleLine(item.description) : undefined;
+      lines.push(this.renderItem(item, isSelected, width, descriptionSingleLine, primaryColumnWidth));
+    }
+    if (startIndex > 0 || endIndex < this.filteredItems.length) {
+      const scrollText = `  (${this.selectedIndex + 1}/${this.filteredItems.length})`;
+      lines.push(this.theme.scrollInfo(truncateToWidth(scrollText, width - 2, "")));
+    }
+    return lines;
+  }
+  handleInput(keyData) {
+    const kb = getKeybindings();
+    if (kb.matches(keyData, "tui.select.up")) {
+      this.selectedIndex = this.selectedIndex === 0 ? this.filteredItems.length - 1 : this.selectedIndex - 1;
+      this.notifySelectionChange();
+    } else if (kb.matches(keyData, "tui.select.down")) {
+      this.selectedIndex = this.selectedIndex === this.filteredItems.length - 1 ? 0 : this.selectedIndex + 1;
+      this.notifySelectionChange();
+    } else if (kb.matches(keyData, "tui.select.confirm")) {
+      const selectedItem = this.filteredItems[this.selectedIndex];
+      if (selectedItem && this.onSelect) {
+        this.onSelect(selectedItem);
+      }
+    } else if (kb.matches(keyData, "tui.select.cancel")) {
+      if (this.onCancel) {
+        this.onCancel();
+      }
+    }
+  }
+  renderItem(item, isSelected, width, descriptionSingleLine, primaryColumnWidth) {
+    const prefix = isSelected ? "\u2192 " : "  ";
+    const prefixWidth = visibleWidth(prefix);
+    if (descriptionSingleLine && width > 40) {
+      const effectivePrimaryColumnWidth = Math.max(1, Math.min(primaryColumnWidth, width - prefixWidth - 4));
+      const maxPrimaryWidth = Math.max(1, effectivePrimaryColumnWidth - PRIMARY_COLUMN_GAP);
+      const truncatedValue2 = this.truncatePrimary(item, isSelected, maxPrimaryWidth, effectivePrimaryColumnWidth);
+      const truncatedValueWidth = visibleWidth(truncatedValue2);
+      const spacing = " ".repeat(Math.max(1, effectivePrimaryColumnWidth - truncatedValueWidth));
+      const descriptionStart = prefixWidth + truncatedValueWidth + spacing.length;
+      const remainingWidth = width - descriptionStart - 2;
+      if (remainingWidth > MIN_DESCRIPTION_WIDTH) {
+        const truncatedDesc = truncateToWidth(descriptionSingleLine, remainingWidth, "");
+        if (isSelected) {
+          return this.theme.selectedText(`${prefix}${truncatedValue2}${spacing}${truncatedDesc}`);
+        }
+        const descText = this.theme.description(spacing + truncatedDesc);
+        return prefix + truncatedValue2 + descText;
+      }
+    }
+    const maxWidth = width - prefixWidth - 2;
+    const truncatedValue = this.truncatePrimary(item, isSelected, maxWidth, maxWidth);
+    if (isSelected) {
+      return this.theme.selectedText(`${prefix}${truncatedValue}`);
+    }
+    return prefix + truncatedValue;
+  }
+  getPrimaryColumnWidth() {
+    const { min, max } = this.getPrimaryColumnBounds();
+    const widestPrimary = this.filteredItems.reduce((widest, item) => {
+      return Math.max(widest, visibleWidth(this.getDisplayValue(item)) + PRIMARY_COLUMN_GAP);
+    }, 0);
+    return clamp(widestPrimary, min, max);
+  }
+  getPrimaryColumnBounds() {
+    const rawMin = this.layout.minPrimaryColumnWidth ?? this.layout.maxPrimaryColumnWidth ?? DEFAULT_PRIMARY_COLUMN_WIDTH;
+    const rawMax = this.layout.maxPrimaryColumnWidth ?? this.layout.minPrimaryColumnWidth ?? DEFAULT_PRIMARY_COLUMN_WIDTH;
+    return {
+      min: Math.max(1, Math.min(rawMin, rawMax)),
+      max: Math.max(1, Math.max(rawMin, rawMax))
+    };
+  }
+  truncatePrimary(item, isSelected, maxWidth, columnWidth) {
+    const displayValue = this.getDisplayValue(item);
+    const truncatedValue = this.layout.truncatePrimary ? this.layout.truncatePrimary({
+      text: displayValue,
+      maxWidth,
+      columnWidth,
+      item,
+      isSelected
+    }) : truncateToWidth(displayValue, maxWidth, "");
+    return truncateToWidth(truncatedValue, maxWidth, "");
+  }
+  getDisplayValue(item) {
+    return item.label || item.value;
+  }
+  notifySelectionChange() {
+    const selectedItem = this.filteredItems[this.selectedIndex];
+    if (selectedItem && this.onSelectionChange) {
+      this.onSelectionChange(selectedItem);
+    }
+  }
+  getSelectedItem() {
+    const item = this.filteredItems[this.selectedIndex];
+    return item || null;
+  }
+}
+var DEFAULT_PRIMARY_COLUMN_WIDTH = 32, PRIMARY_COLUMN_GAP = 2, MIN_DESCRIPTION_WIDTH = 10, normalizeToSingleLine = (text) => text.replace(/[\r\n]+/g, " ").trim(), clamp = (value, min, max) => Math.max(min, Math.min(value, max));
+var init_select_list = __esm(() => {
+  init_keybindings();
+  init_utils();
+});
+
+// node_modules/@earendil-works/pi-tui/dist/components/editor.js
+function isPasteMarker(segment) {
+  return segment.length >= 10 && PASTE_MARKER_SINGLE.test(segment);
+}
+function segmentWithMarkers(text, validIds) {
+  if (validIds.size === 0 || !text.includes("[paste #")) {
+    return baseSegmenter.segment(text);
+  }
+  const markers = [];
+  for (const m of text.matchAll(PASTE_MARKER_REGEX)) {
+    const id = Number.parseInt(m[1], 10);
+    if (!validIds.has(id))
+      continue;
+    markers.push({ start: m.index, end: m.index + m[0].length });
+  }
+  if (markers.length === 0) {
+    return baseSegmenter.segment(text);
+  }
+  const baseSegments = baseSegmenter.segment(text);
+  const result = [];
+  let markerIdx = 0;
+  for (const seg of baseSegments) {
+    while (markerIdx < markers.length && markers[markerIdx].end <= seg.index) {
+      markerIdx++;
+    }
+    const marker = markerIdx < markers.length ? markers[markerIdx] : null;
+    if (marker && seg.index >= marker.start && seg.index < marker.end) {
+      if (seg.index === marker.start) {
+        const markerText = text.slice(marker.start, marker.end);
+        result.push({
+          segment: markerText,
+          index: marker.start,
+          input: text
+        });
+      }
+    } else {
+      result.push(seg);
+    }
+  }
+  return result;
+}
+function wordWrapLine(line, maxWidth, preSegmented) {
+  if (!line || maxWidth <= 0) {
+    return [{ text: "", startIndex: 0, endIndex: 0 }];
+  }
+  const lineWidth = visibleWidth(line);
+  if (lineWidth <= maxWidth) {
+    return [{ text: line, startIndex: 0, endIndex: line.length }];
+  }
+  const chunks = [];
+  const segments = preSegmented ?? [...baseSegmenter.segment(line)];
+  let currentWidth = 0;
+  let chunkStart = 0;
+  let wrapOppIndex = -1;
+  let wrapOppWidth = 0;
+  for (let i = 0;i < segments.length; i++) {
+    const seg = segments[i];
+    const grapheme = seg.segment;
+    const gWidth = visibleWidth(grapheme);
+    const charIndex = seg.index;
+    const isWs = !isPasteMarker(grapheme) && isWhitespaceChar(grapheme);
+    if (currentWidth + gWidth > maxWidth) {
+      if (wrapOppIndex >= 0 && currentWidth - wrapOppWidth + gWidth <= maxWidth) {
+        chunks.push({ text: line.slice(chunkStart, wrapOppIndex), startIndex: chunkStart, endIndex: wrapOppIndex });
+        chunkStart = wrapOppIndex;
+        currentWidth -= wrapOppWidth;
+      } else if (chunkStart < charIndex) {
+        chunks.push({ text: line.slice(chunkStart, charIndex), startIndex: chunkStart, endIndex: charIndex });
+        chunkStart = charIndex;
+        currentWidth = 0;
+      }
+      wrapOppIndex = -1;
+    }
+    if (gWidth > maxWidth) {
+      const subChunks = wordWrapLine(grapheme, maxWidth);
+      for (let j = 0;j < subChunks.length - 1; j++) {
+        const sc = subChunks[j];
+        chunks.push({ text: sc.text, startIndex: charIndex + sc.startIndex, endIndex: charIndex + sc.endIndex });
+      }
+      const last = subChunks[subChunks.length - 1];
+      chunkStart = charIndex + last.startIndex;
+      currentWidth = visibleWidth(last.text);
+      wrapOppIndex = -1;
+      continue;
+    }
+    currentWidth += gWidth;
+    const next = segments[i + 1];
+    if (isWs && next && (isPasteMarker(next.segment) || !isWhitespaceChar(next.segment))) {
+      wrapOppIndex = next.index;
+      wrapOppWidth = currentWidth;
+    }
+  }
+  chunks.push({ text: line.slice(chunkStart), startIndex: chunkStart, endIndex: line.length });
+  return chunks;
+}
+
+class Editor {
+  state = {
+    lines: [""],
+    cursorLine: 0,
+    cursorCol: 0
+  };
+  focused = false;
+  tui;
+  theme;
+  paddingX = 0;
+  lastWidth = 80;
+  scrollOffset = 0;
+  borderColor;
+  autocompleteProvider;
+  autocompleteList;
+  autocompleteState = null;
+  autocompletePrefix = "";
+  autocompleteMaxVisible = 5;
+  autocompleteAbort;
+  autocompleteDebounceTimer;
+  autocompleteRequestTask = Promise.resolve();
+  autocompleteStartToken = 0;
+  autocompleteRequestId = 0;
+  pastes = new Map;
+  pasteCounter = 0;
+  pasteBuffer = "";
+  isInPaste = false;
+  history = [];
+  historyIndex = -1;
+  killRing = new KillRing;
+  lastAction = null;
+  jumpMode = null;
+  preferredVisualCol = null;
+  snappedFromCursorCol = null;
+  undoStack = new UndoStack;
+  onSubmit;
+  onChange;
+  disableSubmit = false;
+  constructor(tui, theme, options = {}) {
+    this.tui = tui;
+    this.theme = theme;
+    this.borderColor = theme.borderColor;
+    const paddingX = options.paddingX ?? 0;
+    this.paddingX = Number.isFinite(paddingX) ? Math.max(0, Math.floor(paddingX)) : 0;
+    const maxVisible = options.autocompleteMaxVisible ?? 5;
+    this.autocompleteMaxVisible = Number.isFinite(maxVisible) ? Math.max(3, Math.min(20, Math.floor(maxVisible))) : 5;
+  }
+  validPasteIds() {
+    return new Set(this.pastes.keys());
+  }
+  segment(text) {
+    return segmentWithMarkers(text, this.validPasteIds());
+  }
+  getPaddingX() {
+    return this.paddingX;
+  }
+  setPaddingX(padding) {
+    const newPadding = Number.isFinite(padding) ? Math.max(0, Math.floor(padding)) : 0;
+    if (this.paddingX !== newPadding) {
+      this.paddingX = newPadding;
+      this.tui.requestRender();
+    }
+  }
+  getAutocompleteMaxVisible() {
+    return this.autocompleteMaxVisible;
+  }
+  setAutocompleteMaxVisible(maxVisible) {
+    const newMaxVisible = Number.isFinite(maxVisible) ? Math.max(3, Math.min(20, Math.floor(maxVisible))) : 5;
+    if (this.autocompleteMaxVisible !== newMaxVisible) {
+      this.autocompleteMaxVisible = newMaxVisible;
+      this.tui.requestRender();
+    }
+  }
+  setAutocompleteProvider(provider) {
+    this.cancelAutocomplete();
+    this.autocompleteProvider = provider;
+  }
+  addToHistory(text) {
+    const trimmed = text.trim();
+    if (!trimmed)
+      return;
+    if (this.history.length > 0 && this.history[0] === trimmed)
+      return;
+    this.history.unshift(trimmed);
+    if (this.history.length > 100) {
+      this.history.pop();
+    }
+  }
+  isEditorEmpty() {
+    return this.state.lines.length === 1 && this.state.lines[0] === "";
+  }
+  isOnFirstVisualLine() {
+    const visualLines = this.buildVisualLineMap(this.lastWidth);
+    const currentVisualLine = this.findCurrentVisualLine(visualLines);
+    return currentVisualLine === 0;
+  }
+  isOnLastVisualLine() {
+    const visualLines = this.buildVisualLineMap(this.lastWidth);
+    const currentVisualLine = this.findCurrentVisualLine(visualLines);
+    return currentVisualLine === visualLines.length - 1;
+  }
+  navigateHistory(direction) {
+    this.lastAction = null;
+    if (this.history.length === 0)
+      return;
+    const newIndex = this.historyIndex - direction;
+    if (newIndex < -1 || newIndex >= this.history.length)
+      return;
+    if (this.historyIndex === -1 && newIndex >= 0) {
+      this.pushUndoSnapshot();
+    }
+    this.historyIndex = newIndex;
+    if (this.historyIndex === -1) {
+      this.setTextInternal("");
+    } else {
+      this.setTextInternal(this.history[this.historyIndex] || "");
+    }
+  }
+  setTextInternal(text) {
+    const lines = text.split(`
+`);
+    this.state.lines = lines.length === 0 ? [""] : lines;
+    this.state.cursorLine = this.state.lines.length - 1;
+    this.setCursorCol(this.state.lines[this.state.cursorLine]?.length || 0);
+    this.scrollOffset = 0;
+    if (this.onChange) {
+      this.onChange(this.getText());
+    }
+  }
+  invalidate() {}
+  render(width) {
+    const maxPadding = Math.max(0, Math.floor((width - 1) / 2));
+    const paddingX = Math.min(this.paddingX, maxPadding);
+    const contentWidth = Math.max(1, width - paddingX * 2);
+    const layoutWidth = Math.max(1, contentWidth - (paddingX ? 0 : 1));
+    this.lastWidth = layoutWidth;
+    const horizontal = this.borderColor("\u2500");
+    const layoutLines = this.layoutText(layoutWidth);
+    const terminalRows = this.tui.terminal.rows;
+    const maxVisibleLines = Math.max(5, Math.floor(terminalRows * 0.3));
+    let cursorLineIndex = layoutLines.findIndex((line) => line.hasCursor);
+    if (cursorLineIndex === -1)
+      cursorLineIndex = 0;
+    if (cursorLineIndex < this.scrollOffset) {
+      this.scrollOffset = cursorLineIndex;
+    } else if (cursorLineIndex >= this.scrollOffset + maxVisibleLines) {
+      this.scrollOffset = cursorLineIndex - maxVisibleLines + 1;
+    }
+    const maxScrollOffset = Math.max(0, layoutLines.length - maxVisibleLines);
+    this.scrollOffset = Math.max(0, Math.min(this.scrollOffset, maxScrollOffset));
+    const visibleLines = layoutLines.slice(this.scrollOffset, this.scrollOffset + maxVisibleLines);
+    const result = [];
+    const leftPadding = " ".repeat(paddingX);
+    const rightPadding = leftPadding;
+    if (this.scrollOffset > 0) {
+      const indicator = `\u2500\u2500\u2500 \u2191 ${this.scrollOffset} more `;
+      const remaining = width - visibleWidth(indicator);
+      if (remaining >= 0) {
+        result.push(this.borderColor(indicator + "\u2500".repeat(remaining)));
+      } else {
+        result.push(this.borderColor(truncateToWidth(indicator, width)));
+      }
+    } else {
+      result.push(horizontal.repeat(width));
+    }
+    const emitCursorMarker = this.focused && !this.autocompleteState;
+    for (const layoutLine of visibleLines) {
+      let displayText = layoutLine.text;
+      let lineVisibleWidth = visibleWidth(layoutLine.text);
+      let cursorInPadding = false;
+      if (layoutLine.hasCursor && layoutLine.cursorPos !== undefined) {
+        const before = displayText.slice(0, layoutLine.cursorPos);
+        const after = displayText.slice(layoutLine.cursorPos);
+        const marker = emitCursorMarker ? CURSOR_MARKER : "";
+        if (after.length > 0) {
+          const afterGraphemes = [...this.segment(after)];
+          const firstGrapheme = afterGraphemes[0]?.segment || "";
+          const restAfter = after.slice(firstGrapheme.length);
+          const cursor = `\x1B[7m${firstGrapheme}\x1B[0m`;
+          displayText = before + marker + cursor + restAfter;
+        } else {
+          const cursor = "\x1B[7m \x1B[0m";
+          displayText = before + marker + cursor;
+          lineVisibleWidth = lineVisibleWidth + 1;
+          if (lineVisibleWidth > contentWidth && paddingX > 0) {
+            cursorInPadding = true;
+          }
+        }
+      }
+      const padding = " ".repeat(Math.max(0, contentWidth - lineVisibleWidth));
+      const lineRightPadding = cursorInPadding ? rightPadding.slice(1) : rightPadding;
+      result.push(`${leftPadding}${displayText}${padding}${lineRightPadding}`);
+    }
+    const linesBelow = layoutLines.length - (this.scrollOffset + visibleLines.length);
+    if (linesBelow > 0) {
+      const indicator = `\u2500\u2500\u2500 \u2193 ${linesBelow} more `;
+      const remaining = width - visibleWidth(indicator);
+      result.push(this.borderColor(indicator + "\u2500".repeat(Math.max(0, remaining))));
+    } else {
+      result.push(horizontal.repeat(width));
+    }
+    if (this.autocompleteState && this.autocompleteList) {
+      const autocompleteResult = this.autocompleteList.render(contentWidth);
+      for (const line of autocompleteResult) {
+        const lineWidth = visibleWidth(line);
+        const linePadding = " ".repeat(Math.max(0, contentWidth - lineWidth));
+        result.push(`${leftPadding}${line}${linePadding}${rightPadding}`);
+      }
+    }
+    return result;
+  }
+  handleInput(data) {
+    const kb = getKeybindings();
+    if (this.jumpMode !== null) {
+      if (kb.matches(data, "tui.editor.jumpForward") || kb.matches(data, "tui.editor.jumpBackward")) {
+        this.jumpMode = null;
+        return;
+      }
+      const printable2 = decodePrintableKey(data) ?? (data.charCodeAt(0) >= 32 ? data : undefined);
+      if (printable2 !== undefined) {
+        const direction = this.jumpMode;
+        this.jumpMode = null;
+        this.jumpToChar(printable2, direction);
+        return;
+      }
+      this.jumpMode = null;
+    }
+    if (data.includes("\x1B[200~")) {
+      this.isInPaste = true;
+      this.pasteBuffer = "";
+      data = data.replace("\x1B[200~", "");
+    }
+    if (this.isInPaste) {
+      this.pasteBuffer += data;
+      const endIndex = this.pasteBuffer.indexOf("\x1B[201~");
+      if (endIndex !== -1) {
+        const pasteContent = this.pasteBuffer.substring(0, endIndex);
+        if (pasteContent.length > 0) {
+          this.handlePaste(pasteContent);
+        }
+        this.isInPaste = false;
+        const remaining = this.pasteBuffer.substring(endIndex + 6);
+        this.pasteBuffer = "";
+        if (remaining.length > 0) {
+          this.handleInput(remaining);
+        }
+        return;
+      }
+      return;
+    }
+    if (kb.matches(data, "tui.input.copy")) {
+      return;
+    }
+    if (kb.matches(data, "tui.editor.undo")) {
+      this.undo();
+      return;
+    }
+    if (this.autocompleteState && this.autocompleteList) {
+      if (kb.matches(data, "tui.select.cancel")) {
+        this.cancelAutocomplete();
+        return;
+      }
+      if (kb.matches(data, "tui.select.up") || kb.matches(data, "tui.select.down")) {
+        this.autocompleteList.handleInput(data);
+        return;
+      }
+      if (kb.matches(data, "tui.input.tab")) {
+        const selected = this.autocompleteList.getSelectedItem();
+        if (selected && this.autocompleteProvider) {
+          this.pushUndoSnapshot();
+          this.lastAction = null;
+          const result = this.autocompleteProvider.applyCompletion(this.state.lines, this.state.cursorLine, this.state.cursorCol, selected, this.autocompletePrefix);
+          this.state.lines = result.lines;
+          this.state.cursorLine = result.cursorLine;
+          this.setCursorCol(result.cursorCol);
+          this.cancelAutocomplete();
+          if (this.onChange)
+            this.onChange(this.getText());
+        }
+        return;
+      }
+      if (kb.matches(data, "tui.select.confirm")) {
+        const selected = this.autocompleteList.getSelectedItem();
+        if (selected && this.autocompleteProvider) {
+          this.pushUndoSnapshot();
+          this.lastAction = null;
+          const result = this.autocompleteProvider.applyCompletion(this.state.lines, this.state.cursorLine, this.state.cursorCol, selected, this.autocompletePrefix);
+          this.state.lines = result.lines;
+          this.state.cursorLine = result.cursorLine;
+          this.setCursorCol(result.cursorCol);
+          if (this.autocompletePrefix.startsWith("/")) {
+            this.cancelAutocomplete();
+          } else {
+            this.cancelAutocomplete();
+            if (this.onChange)
+              this.onChange(this.getText());
+            return;
+          }
+        }
+      }
+    }
+    if (kb.matches(data, "tui.input.tab") && !this.autocompleteState) {
+      this.handleTabCompletion();
+      return;
+    }
+    if (kb.matches(data, "tui.editor.deleteToLineEnd")) {
+      this.deleteToEndOfLine();
+      return;
+    }
+    if (kb.matches(data, "tui.editor.deleteToLineStart")) {
+      this.deleteToStartOfLine();
+      return;
+    }
+    if (kb.matches(data, "tui.editor.deleteWordBackward")) {
+      this.deleteWordBackwards();
+      return;
+    }
+    if (kb.matches(data, "tui.editor.deleteWordForward")) {
+      this.deleteWordForward();
+      return;
+    }
+    if (kb.matches(data, "tui.editor.deleteCharBackward") || matchesKey(data, "shift+backspace")) {
+      this.handleBackspace();
+      return;
+    }
+    if (kb.matches(data, "tui.editor.deleteCharForward") || matchesKey(data, "shift+delete")) {
+      this.handleForwardDelete();
+      return;
+    }
+    if (kb.matches(data, "tui.editor.yank")) {
+      this.yank();
+      return;
+    }
+    if (kb.matches(data, "tui.editor.yankPop")) {
+      this.yankPop();
+      return;
+    }
+    if (kb.matches(data, "tui.editor.cursorLineStart")) {
+      this.moveToLineStart();
+      return;
+    }
+    if (kb.matches(data, "tui.editor.cursorLineEnd")) {
+      this.moveToLineEnd();
+      return;
+    }
+    if (kb.matches(data, "tui.editor.cursorWordLeft")) {
+      this.moveWordBackwards();
+      return;
+    }
+    if (kb.matches(data, "tui.editor.cursorWordRight")) {
+      this.moveWordForwards();
+      return;
+    }
+    if (kb.matches(data, "tui.input.newLine") || data.charCodeAt(0) === 10 && data.length > 1 || data === "\x1B\r" || data === "\x1B[13;2~" || data.length > 1 && data.includes("\x1B") && data.includes("\r") || data === `
+` && data.length === 1) {
+      if (this.shouldSubmitOnBackslashEnter(data, kb)) {
+        this.handleBackspace();
+        this.submitValue();
+        return;
+      }
+      this.addNewLine();
+      return;
+    }
+    if (kb.matches(data, "tui.input.submit")) {
+      if (this.disableSubmit)
+        return;
+      const currentLine = this.state.lines[this.state.cursorLine] || "";
+      if (this.state.cursorCol > 0 && currentLine[this.state.cursorCol - 1] === "\\") {
+        this.handleBackspace();
+        this.addNewLine();
+        return;
+      }
+      this.submitValue();
+      return;
+    }
+    if (kb.matches(data, "tui.editor.cursorUp")) {
+      if (this.isEditorEmpty()) {
+        this.navigateHistory(-1);
+      } else if (this.historyIndex > -1 && this.isOnFirstVisualLine()) {
+        this.navigateHistory(-1);
+      } else if (this.isOnFirstVisualLine()) {
+        this.moveToLineStart();
+      } else {
+        this.moveCursor(-1, 0);
+      }
+      return;
+    }
+    if (kb.matches(data, "tui.editor.cursorDown")) {
+      if (this.historyIndex > -1 && this.isOnLastVisualLine()) {
+        this.navigateHistory(1);
+      } else if (this.isOnLastVisualLine()) {
+        this.moveToLineEnd();
+      } else {
+        this.moveCursor(1, 0);
+      }
+      return;
+    }
+    if (kb.matches(data, "tui.editor.cursorRight")) {
+      this.moveCursor(0, 1);
+      return;
+    }
+    if (kb.matches(data, "tui.editor.cursorLeft")) {
+      this.moveCursor(0, -1);
+      return;
+    }
+    if (kb.matches(data, "tui.editor.pageUp")) {
+      this.pageScroll(-1);
+      return;
+    }
+    if (kb.matches(data, "tui.editor.pageDown")) {
+      this.pageScroll(1);
+      return;
+    }
+    if (kb.matches(data, "tui.editor.jumpForward")) {
+      this.jumpMode = "forward";
+      return;
+    }
+    if (kb.matches(data, "tui.editor.jumpBackward")) {
+      this.jumpMode = "backward";
+      return;
+    }
+    if (matchesKey(data, "shift+space")) {
+      this.insertCharacter(" ");
+      return;
+    }
+    const printable = decodePrintableKey(data);
+    if (printable !== undefined) {
+      this.insertCharacter(printable);
+      return;
+    }
+    if (data.charCodeAt(0) >= 32) {
+      this.insertCharacter(data);
+    }
+  }
+  layoutText(contentWidth) {
+    const layoutLines = [];
+    if (this.state.lines.length === 0 || this.state.lines.length === 1 && this.state.lines[0] === "") {
+      layoutLines.push({
+        text: "",
+        hasCursor: true,
+        cursorPos: 0
+      });
+      return layoutLines;
+    }
+    for (let i = 0;i < this.state.lines.length; i++) {
+      const line = this.state.lines[i] || "";
+      const isCurrentLine = i === this.state.cursorLine;
+      const lineVisibleWidth = visibleWidth(line);
+      if (lineVisibleWidth <= contentWidth) {
+        if (isCurrentLine) {
+          layoutLines.push({
+            text: line,
+            hasCursor: true,
+            cursorPos: this.state.cursorCol
+          });
+        } else {
+          layoutLines.push({
+            text: line,
+            hasCursor: false
+          });
+        }
+      } else {
+        const chunks = wordWrapLine(line, contentWidth, [...this.segment(line)]);
+        for (let chunkIndex = 0;chunkIndex < chunks.length; chunkIndex++) {
+          const chunk = chunks[chunkIndex];
+          if (!chunk)
+            continue;
+          const cursorPos = this.state.cursorCol;
+          const isLastChunk = chunkIndex === chunks.length - 1;
+          let hasCursorInChunk = false;
+          let adjustedCursorPos = 0;
+          if (isCurrentLine) {
+            if (isLastChunk) {
+              hasCursorInChunk = cursorPos >= chunk.startIndex;
+              adjustedCursorPos = cursorPos - chunk.startIndex;
+            } else {
+              hasCursorInChunk = cursorPos >= chunk.startIndex && cursorPos < chunk.endIndex;
+              if (hasCursorInChunk) {
+                adjustedCursorPos = cursorPos - chunk.startIndex;
+                if (adjustedCursorPos > chunk.text.length) {
+                  adjustedCursorPos = chunk.text.length;
+                }
+              }
+            }
+          }
+          if (hasCursorInChunk) {
+            layoutLines.push({
+              text: chunk.text,
+              hasCursor: true,
+              cursorPos: adjustedCursorPos
+            });
+          } else {
+            layoutLines.push({
+              text: chunk.text,
+              hasCursor: false
+            });
+          }
+        }
+      }
+    }
+    return layoutLines;
+  }
+  getText() {
+    return this.state.lines.join(`
+`);
+  }
+  expandPasteMarkers(text) {
+    let result = text;
+    for (const [pasteId, pasteContent] of this.pastes) {
+      const markerRegex = new RegExp(`\\[paste #${pasteId}( (\\+\\d+ lines|\\d+ chars))?\\]`, "g");
+      result = result.replace(markerRegex, () => pasteContent);
+    }
+    return result;
+  }
+  getExpandedText() {
+    return this.expandPasteMarkers(this.state.lines.join(`
+`));
+  }
+  getLines() {
+    return [...this.state.lines];
+  }
+  getCursor() {
+    return { line: this.state.cursorLine, col: this.state.cursorCol };
+  }
+  setText(text) {
+    this.cancelAutocomplete();
+    this.lastAction = null;
+    this.historyIndex = -1;
+    const normalized = this.normalizeText(text);
+    if (this.getText() !== normalized) {
+      this.pushUndoSnapshot();
+    }
+    this.setTextInternal(normalized);
+  }
+  insertTextAtCursor(text) {
+    if (!text)
+      return;
+    this.cancelAutocomplete();
+    this.pushUndoSnapshot();
+    this.lastAction = null;
+    this.historyIndex = -1;
+    this.insertTextAtCursorInternal(text);
+  }
+  normalizeText(text) {
+    return text.replace(/\r\n/g, `
+`).replace(/\r/g, `
+`).replace(/\t/g, "    ");
+  }
+  insertTextAtCursorInternal(text) {
+    if (!text)
+      return;
+    const normalized = this.normalizeText(text);
+    const insertedLines = normalized.split(`
+`);
+    const currentLine = this.state.lines[this.state.cursorLine] || "";
+    const beforeCursor = currentLine.slice(0, this.state.cursorCol);
+    const afterCursor = currentLine.slice(this.state.cursorCol);
+    if (insertedLines.length === 1) {
+      this.state.lines[this.state.cursorLine] = beforeCursor + normalized + afterCursor;
+      this.setCursorCol(this.state.cursorCol + normalized.length);
+    } else {
+      this.state.lines = [
+        ...this.state.lines.slice(0, this.state.cursorLine),
+        beforeCursor + insertedLines[0],
+        ...insertedLines.slice(1, -1),
+        insertedLines[insertedLines.length - 1] + afterCursor,
+        ...this.state.lines.slice(this.state.cursorLine + 1)
+      ];
+      this.state.cursorLine += insertedLines.length - 1;
+      this.setCursorCol((insertedLines[insertedLines.length - 1] || "").length);
+    }
+    if (this.onChange) {
+      this.onChange(this.getText());
+    }
+  }
+  insertCharacter(char, skipUndoCoalescing) {
+    this.historyIndex = -1;
+    if (!skipUndoCoalescing) {
+      if (isWhitespaceChar(char) || this.lastAction !== "type-word") {
+        this.pushUndoSnapshot();
+      }
+      this.lastAction = "type-word";
+    }
+    const line = this.state.lines[this.state.cursorLine] || "";
+    const before = line.slice(0, this.state.cursorCol);
+    const after = line.slice(this.state.cursorCol);
+    this.state.lines[this.state.cursorLine] = before + char + after;
+    this.setCursorCol(this.state.cursorCol + char.length);
+    if (this.onChange) {
+      this.onChange(this.getText());
+    }
+    if (!this.autocompleteState) {
+      if (char === "/" && this.isAtStartOfMessage()) {
+        this.tryTriggerAutocomplete();
+      } else if (char === "@" || char === "#") {
+        const currentLine = this.state.lines[this.state.cursorLine] || "";
+        const textBeforeCursor = currentLine.slice(0, this.state.cursorCol);
+        const charBeforeSymbol = textBeforeCursor[textBeforeCursor.length - 2];
+        if (textBeforeCursor.length === 1 || charBeforeSymbol === " " || charBeforeSymbol === "\t") {
+          this.tryTriggerAutocomplete();
+        }
+      } else if (/[a-zA-Z0-9.\-_]/.test(char)) {
+        const currentLine = this.state.lines[this.state.cursorLine] || "";
+        const textBeforeCursor = currentLine.slice(0, this.state.cursorCol);
+        if (this.isInSlashCommandContext(textBeforeCursor)) {
+          this.tryTriggerAutocomplete();
+        } else if (textBeforeCursor.match(/(?:^|[\s])[@#][^\s]*$/)) {
+          this.tryTriggerAutocomplete();
+        }
+      }
+    } else {
+      this.updateAutocomplete();
+    }
+  }
+  handlePaste(pastedText) {
+    this.cancelAutocomplete();
+    this.historyIndex = -1;
+    this.lastAction = null;
+    this.pushUndoSnapshot();
+    const decodedText = pastedText.replace(/\x1b\[(\d+);5u/g, (match, code) => {
+      const cp = Number(code);
+      if (cp >= 97 && cp <= 122)
+        return String.fromCharCode(cp - 96);
+      if (cp >= 65 && cp <= 90)
+        return String.fromCharCode(cp - 64);
+      return match;
+    });
+    const cleanText = this.normalizeText(decodedText);
+    let filteredText = cleanText.split("").filter((char) => char === `
+` || char.charCodeAt(0) >= 32).join("");
+    if (/^[/~.]/.test(filteredText)) {
+      const currentLine = this.state.lines[this.state.cursorLine] || "";
+      const charBeforeCursor = this.state.cursorCol > 0 ? currentLine[this.state.cursorCol - 1] : "";
+      if (charBeforeCursor && /\w/.test(charBeforeCursor)) {
+        filteredText = ` ${filteredText}`;
+      }
+    }
+    const pastedLines = filteredText.split(`
+`);
+    const totalChars = filteredText.length;
+    if (pastedLines.length > 10 || totalChars > 1000) {
+      this.pasteCounter++;
+      const pasteId = this.pasteCounter;
+      this.pastes.set(pasteId, filteredText);
+      const marker = pastedLines.length > 10 ? `[paste #${pasteId} +${pastedLines.length} lines]` : `[paste #${pasteId} ${totalChars} chars]`;
+      this.insertTextAtCursorInternal(marker);
+      return;
+    }
+    if (pastedLines.length === 1) {
+      this.insertTextAtCursorInternal(filteredText);
+      return;
+    }
+    this.insertTextAtCursorInternal(filteredText);
+  }
+  addNewLine() {
+    this.cancelAutocomplete();
+    this.historyIndex = -1;
+    this.lastAction = null;
+    this.pushUndoSnapshot();
+    const currentLine = this.state.lines[this.state.cursorLine] || "";
+    const before = currentLine.slice(0, this.state.cursorCol);
+    const after = currentLine.slice(this.state.cursorCol);
+    this.state.lines[this.state.cursorLine] = before;
+    this.state.lines.splice(this.state.cursorLine + 1, 0, after);
+    this.state.cursorLine++;
+    this.setCursorCol(0);
+    if (this.onChange) {
+      this.onChange(this.getText());
+    }
+  }
+  shouldSubmitOnBackslashEnter(data, kb) {
+    if (this.disableSubmit)
+      return false;
+    if (!matchesKey(data, "enter"))
+      return false;
+    const submitKeys = kb.getKeys("tui.input.submit");
+    const hasShiftEnter = submitKeys.includes("shift+enter") || submitKeys.includes("shift+return");
+    if (!hasShiftEnter)
+      return false;
+    const currentLine = this.state.lines[this.state.cursorLine] || "";
+    return this.state.cursorCol > 0 && currentLine[this.state.cursorCol - 1] === "\\";
+  }
+  submitValue() {
+    this.cancelAutocomplete();
+    const result = this.expandPasteMarkers(this.state.lines.join(`
+`)).trim();
+    this.state = { lines: [""], cursorLine: 0, cursorCol: 0 };
+    this.pastes.clear();
+    this.pasteCounter = 0;
+    this.historyIndex = -1;
+    this.scrollOffset = 0;
+    this.undoStack.clear();
+    this.lastAction = null;
+    if (this.onChange)
+      this.onChange("");
+    if (this.onSubmit)
+      this.onSubmit(result);
+  }
+  handleBackspace() {
+    this.historyIndex = -1;
+    this.lastAction = null;
+    if (this.state.cursorCol > 0) {
+      this.pushUndoSnapshot();
+      const line = this.state.lines[this.state.cursorLine] || "";
+      const beforeCursor = line.slice(0, this.state.cursorCol);
+      const graphemes = [...this.segment(beforeCursor)];
+      const lastGrapheme = graphemes[graphemes.length - 1];
+      const graphemeLength = lastGrapheme ? lastGrapheme.segment.length : 1;
+      const before = line.slice(0, this.state.cursorCol - graphemeLength);
+      const after = line.slice(this.state.cursorCol);
+      this.state.lines[this.state.cursorLine] = before + after;
+      this.setCursorCol(this.state.cursorCol - graphemeLength);
+    } else if (this.state.cursorLine > 0) {
+      this.pushUndoSnapshot();
+      const currentLine = this.state.lines[this.state.cursorLine] || "";
+      const previousLine = this.state.lines[this.state.cursorLine - 1] || "";
+      this.state.lines[this.state.cursorLine - 1] = previousLine + currentLine;
+      this.state.lines.splice(this.state.cursorLine, 1);
+      this.state.cursorLine--;
+      this.setCursorCol(previousLine.length);
+    }
+    if (this.onChange) {
+      this.onChange(this.getText());
+    }
+    if (this.autocompleteState) {
+      this.updateAutocomplete();
+    } else {
+      const currentLine = this.state.lines[this.state.cursorLine] || "";
+      const textBeforeCursor = currentLine.slice(0, this.state.cursorCol);
+      if (this.isInSlashCommandContext(textBeforeCursor)) {
+        this.tryTriggerAutocomplete();
+      } else if (textBeforeCursor.match(/(?:^|[\s])[@#][^\s]*$/)) {
+        this.tryTriggerAutocomplete();
+      }
+    }
+  }
+  setCursorCol(col) {
+    this.state.cursorCol = col;
+    this.preferredVisualCol = null;
+    this.snappedFromCursorCol = null;
+  }
+  moveToVisualLine(visualLines, currentVisualLine, targetVisualLine) {
+    const currentVL = visualLines[currentVisualLine];
+    const targetVL = visualLines[targetVisualLine];
+    if (!(currentVL && targetVL))
+      return;
+    let currentVisualCol;
+    if (this.snappedFromCursorCol !== null) {
+      const vlIndex = this.findVisualLineAt(visualLines, currentVL.logicalLine, this.snappedFromCursorCol);
+      currentVisualCol = this.snappedFromCursorCol - visualLines[vlIndex].startCol;
+    } else {
+      currentVisualCol = this.state.cursorCol - currentVL.startCol;
+    }
+    const isLastSourceSegment = currentVisualLine === visualLines.length - 1 || visualLines[currentVisualLine + 1]?.logicalLine !== currentVL.logicalLine;
+    const sourceMaxVisualCol = isLastSourceSegment ? currentVL.length : Math.max(0, currentVL.length - 1);
+    const isLastTargetSegment = targetVisualLine === visualLines.length - 1 || visualLines[targetVisualLine + 1]?.logicalLine !== targetVL.logicalLine;
+    const targetMaxVisualCol = isLastTargetSegment ? targetVL.length : Math.max(0, targetVL.length - 1);
+    const moveToVisualCol = this.computeVerticalMoveColumn(currentVisualCol, sourceMaxVisualCol, targetMaxVisualCol);
+    this.state.cursorLine = targetVL.logicalLine;
+    const targetCol = targetVL.startCol + moveToVisualCol;
+    const logicalLine = this.state.lines[targetVL.logicalLine] || "";
+    this.state.cursorCol = Math.min(targetCol, logicalLine.length);
+    const segments = [...this.segment(logicalLine)];
+    for (const seg of segments) {
+      if (seg.index > this.state.cursorCol)
+        break;
+      if (seg.segment.length <= 1)
+        continue;
+      if (this.state.cursorCol < seg.index + seg.segment.length) {
+        const isContinuation = seg.index < targetVL.startCol;
+        const isMovingDown = targetVisualLine > currentVisualLine;
+        if (isContinuation && isMovingDown) {
+          const segEnd = seg.index + seg.segment.length;
+          let next = targetVisualLine + 1;
+          while (next < visualLines.length && visualLines[next].logicalLine === targetVL.logicalLine && visualLines[next].startCol < segEnd) {
+            next++;
+          }
+          if (next < visualLines.length) {
+            this.moveToVisualLine(visualLines, currentVisualLine, next);
+            return;
+          }
+        }
+        this.snappedFromCursorCol = this.state.cursorCol;
+        this.state.cursorCol = seg.index;
+        return;
+      }
+    }
+    this.snappedFromCursorCol = null;
+  }
+  computeVerticalMoveColumn(currentVisualCol, sourceMaxVisualCol, targetMaxVisualCol) {
+    const hasPreferred = this.preferredVisualCol !== null;
+    const cursorInMiddle = currentVisualCol < sourceMaxVisualCol;
+    const targetTooShort = targetMaxVisualCol < currentVisualCol;
+    if (!hasPreferred || cursorInMiddle) {
+      if (targetTooShort) {
+        this.preferredVisualCol = currentVisualCol;
+        return targetMaxVisualCol;
+      }
+      this.preferredVisualCol = null;
+      return currentVisualCol;
+    }
+    const targetCantFitPreferred = targetMaxVisualCol < this.preferredVisualCol;
+    if (targetTooShort || targetCantFitPreferred) {
+      return targetMaxVisualCol;
+    }
+    const result = this.preferredVisualCol;
+    this.preferredVisualCol = null;
+    return result;
+  }
+  moveToLineStart() {
+    this.lastAction = null;
+    this.setCursorCol(0);
+  }
+  moveToLineEnd() {
+    this.lastAction = null;
+    const currentLine = this.state.lines[this.state.cursorLine] || "";
+    this.setCursorCol(currentLine.length);
+  }
+  deleteToStartOfLine() {
+    this.historyIndex = -1;
+    const currentLine = this.state.lines[this.state.cursorLine] || "";
+    if (this.state.cursorCol > 0) {
+      this.pushUndoSnapshot();
+      const deletedText = currentLine.slice(0, this.state.cursorCol);
+      this.killRing.push(deletedText, { prepend: true, accumulate: this.lastAction === "kill" });
+      this.lastAction = "kill";
+      this.state.lines[this.state.cursorLine] = currentLine.slice(this.state.cursorCol);
+      this.setCursorCol(0);
+    } else if (this.state.cursorLine > 0) {
+      this.pushUndoSnapshot();
+      this.killRing.push(`
+`, { prepend: true, accumulate: this.lastAction === "kill" });
+      this.lastAction = "kill";
+      const previousLine = this.state.lines[this.state.cursorLine - 1] || "";
+      this.state.lines[this.state.cursorLine - 1] = previousLine + currentLine;
+      this.state.lines.splice(this.state.cursorLine, 1);
+      this.state.cursorLine--;
+      this.setCursorCol(previousLine.length);
+    }
+    if (this.onChange) {
+      this.onChange(this.getText());
+    }
+  }
+  deleteToEndOfLine() {
+    this.historyIndex = -1;
+    const currentLine = this.state.lines[this.state.cursorLine] || "";
+    if (this.state.cursorCol < currentLine.length) {
+      this.pushUndoSnapshot();
+      const deletedText = currentLine.slice(this.state.cursorCol);
+      this.killRing.push(deletedText, { prepend: false, accumulate: this.lastAction === "kill" });
+      this.lastAction = "kill";
+      this.state.lines[this.state.cursorLine] = currentLine.slice(0, this.state.cursorCol);
+    } else if (this.state.cursorLine < this.state.lines.length - 1) {
+      this.pushUndoSnapshot();
+      this.killRing.push(`
+`, { prepend: false, accumulate: this.lastAction === "kill" });
+      this.lastAction = "kill";
+      const nextLine = this.state.lines[this.state.cursorLine + 1] || "";
+      this.state.lines[this.state.cursorLine] = currentLine + nextLine;
+      this.state.lines.splice(this.state.cursorLine + 1, 1);
+    }
+    if (this.onChange) {
+      this.onChange(this.getText());
+    }
+  }
+  deleteWordBackwards() {
+    this.historyIndex = -1;
+    const currentLine = this.state.lines[this.state.cursorLine] || "";
+    if (this.state.cursorCol === 0) {
+      if (this.state.cursorLine > 0) {
+        this.pushUndoSnapshot();
+        this.killRing.push(`
+`, { prepend: true, accumulate: this.lastAction === "kill" });
+        this.lastAction = "kill";
+        const previousLine = this.state.lines[this.state.cursorLine - 1] || "";
+        this.state.lines[this.state.cursorLine - 1] = previousLine + currentLine;
+        this.state.lines.splice(this.state.cursorLine, 1);
+        this.state.cursorLine--;
+        this.setCursorCol(previousLine.length);
+      }
+    } else {
+      this.pushUndoSnapshot();
+      const wasKill = this.lastAction === "kill";
+      const oldCursorCol = this.state.cursorCol;
+      this.moveWordBackwards();
+      const deleteFrom = this.state.cursorCol;
+      this.setCursorCol(oldCursorCol);
+      const deletedText = currentLine.slice(deleteFrom, this.state.cursorCol);
+      this.killRing.push(deletedText, { prepend: true, accumulate: wasKill });
+      this.lastAction = "kill";
+      this.state.lines[this.state.cursorLine] = currentLine.slice(0, deleteFrom) + currentLine.slice(this.state.cursorCol);
+      this.setCursorCol(deleteFrom);
+    }
+    if (this.onChange) {
+      this.onChange(this.getText());
+    }
+  }
+  deleteWordForward() {
+    this.historyIndex = -1;
+    const currentLine = this.state.lines[this.state.cursorLine] || "";
+    if (this.state.cursorCol >= currentLine.length) {
+      if (this.state.cursorLine < this.state.lines.length - 1) {
+        this.pushUndoSnapshot();
+        this.killRing.push(`
+`, { prepend: false, accumulate: this.lastAction === "kill" });
+        this.lastAction = "kill";
+        const nextLine = this.state.lines[this.state.cursorLine + 1] || "";
+        this.state.lines[this.state.cursorLine] = currentLine + nextLine;
+        this.state.lines.splice(this.state.cursorLine + 1, 1);
+      }
+    } else {
+      this.pushUndoSnapshot();
+      const wasKill = this.lastAction === "kill";
+      const oldCursorCol = this.state.cursorCol;
+      this.moveWordForwards();
+      const deleteTo = this.state.cursorCol;
+      this.setCursorCol(oldCursorCol);
+      const deletedText = currentLine.slice(this.state.cursorCol, deleteTo);
+      this.killRing.push(deletedText, { prepend: false, accumulate: wasKill });
+      this.lastAction = "kill";
+      this.state.lines[this.state.cursorLine] = currentLine.slice(0, this.state.cursorCol) + currentLine.slice(deleteTo);
+    }
+    if (this.onChange) {
+      this.onChange(this.getText());
+    }
+  }
+  handleForwardDelete() {
+    this.historyIndex = -1;
+    this.lastAction = null;
+    const currentLine = this.state.lines[this.state.cursorLine] || "";
+    if (this.state.cursorCol < currentLine.length) {
+      this.pushUndoSnapshot();
+      const afterCursor = currentLine.slice(this.state.cursorCol);
+      const graphemes = [...this.segment(afterCursor)];
+      const firstGrapheme = graphemes[0];
+      const graphemeLength = firstGrapheme ? firstGrapheme.segment.length : 1;
+      const before = currentLine.slice(0, this.state.cursorCol);
+      const after = currentLine.slice(this.state.cursorCol + graphemeLength);
+      this.state.lines[this.state.cursorLine] = before + after;
+    } else if (this.state.cursorLine < this.state.lines.length - 1) {
+      this.pushUndoSnapshot();
+      const nextLine = this.state.lines[this.state.cursorLine + 1] || "";
+      this.state.lines[this.state.cursorLine] = currentLine + nextLine;
+      this.state.lines.splice(this.state.cursorLine + 1, 1);
+    }
+    if (this.onChange) {
+      this.onChange(this.getText());
+    }
+    if (this.autocompleteState) {
+      this.updateAutocomplete();
+    } else {
+      const currentLine2 = this.state.lines[this.state.cursorLine] || "";
+      const textBeforeCursor = currentLine2.slice(0, this.state.cursorCol);
+      if (this.isInSlashCommandContext(textBeforeCursor)) {
+        this.tryTriggerAutocomplete();
+      } else if (textBeforeCursor.match(/(?:^|[\s])[@#][^\s]*$/)) {
+        this.tryTriggerAutocomplete();
+      }
+    }
+  }
+  buildVisualLineMap(width) {
+    const visualLines = [];
+    for (let i = 0;i < this.state.lines.length; i++) {
+      const line = this.state.lines[i] || "";
+      const lineVisWidth = visibleWidth(line);
+      if (line.length === 0) {
+        visualLines.push({ logicalLine: i, startCol: 0, length: 0 });
+      } else if (lineVisWidth <= width) {
+        visualLines.push({ logicalLine: i, startCol: 0, length: line.length });
+      } else {
+        const chunks = wordWrapLine(line, width, [...this.segment(line)]);
+        for (const chunk of chunks) {
+          visualLines.push({
+            logicalLine: i,
+            startCol: chunk.startIndex,
+            length: chunk.endIndex - chunk.startIndex
+          });
+        }
+      }
+    }
+    return visualLines;
+  }
+  findVisualLineAt(visualLines, line, col) {
+    for (let i = 0;i < visualLines.length; i++) {
+      const vl = visualLines[i];
+      if (!vl || vl.logicalLine !== line)
+        continue;
+      const offset = col - vl.startCol;
+      const isLastSegmentOfLine = i === visualLines.length - 1 || visualLines[i + 1]?.logicalLine !== vl.logicalLine;
+      if (offset >= 0 && (offset < vl.length || isLastSegmentOfLine && offset === vl.length)) {
+        return i;
+      }
+    }
+    return visualLines.length - 1;
+  }
+  findCurrentVisualLine(visualLines) {
+    return this.findVisualLineAt(visualLines, this.state.cursorLine, this.state.cursorCol);
+  }
+  moveCursor(deltaLine, deltaCol) {
+    this.lastAction = null;
+    const visualLines = this.buildVisualLineMap(this.lastWidth);
+    const currentVisualLine = this.findCurrentVisualLine(visualLines);
+    if (deltaLine !== 0) {
+      const targetVisualLine = currentVisualLine + deltaLine;
+      if (targetVisualLine >= 0 && targetVisualLine < visualLines.length) {
+        this.moveToVisualLine(visualLines, currentVisualLine, targetVisualLine);
+      }
+    }
+    if (deltaCol !== 0) {
+      const currentLine = this.state.lines[this.state.cursorLine] || "";
+      if (deltaCol > 0) {
+        if (this.state.cursorCol < currentLine.length) {
+          const afterCursor = currentLine.slice(this.state.cursorCol);
+          const graphemes = [...this.segment(afterCursor)];
+          const firstGrapheme = graphemes[0];
+          this.setCursorCol(this.state.cursorCol + (firstGrapheme ? firstGrapheme.segment.length : 1));
+        } else if (this.state.cursorLine < this.state.lines.length - 1) {
+          this.state.cursorLine++;
+          this.setCursorCol(0);
+        } else {
+          const currentVL = visualLines[currentVisualLine];
+          if (currentVL) {
+            this.preferredVisualCol = this.state.cursorCol - currentVL.startCol;
+          }
+        }
+      } else {
+        if (this.state.cursorCol > 0) {
+          const beforeCursor = currentLine.slice(0, this.state.cursorCol);
+          const graphemes = [...this.segment(beforeCursor)];
+          const lastGrapheme = graphemes[graphemes.length - 1];
+          this.setCursorCol(this.state.cursorCol - (lastGrapheme ? lastGrapheme.segment.length : 1));
+        } else if (this.state.cursorLine > 0) {
+          this.state.cursorLine--;
+          const prevLine = this.state.lines[this.state.cursorLine] || "";
+          this.setCursorCol(prevLine.length);
+        }
+      }
+    }
+  }
+  pageScroll(direction) {
+    this.lastAction = null;
+    const terminalRows = this.tui.terminal.rows;
+    const pageSize = Math.max(5, Math.floor(terminalRows * 0.3));
+    const visualLines = this.buildVisualLineMap(this.lastWidth);
+    const currentVisualLine = this.findCurrentVisualLine(visualLines);
+    const targetVisualLine = Math.max(0, Math.min(visualLines.length - 1, currentVisualLine + direction * pageSize));
+    this.moveToVisualLine(visualLines, currentVisualLine, targetVisualLine);
+  }
+  moveWordBackwards() {
+    this.lastAction = null;
+    const currentLine = this.state.lines[this.state.cursorLine] || "";
+    if (this.state.cursorCol === 0) {
+      if (this.state.cursorLine > 0) {
+        this.state.cursorLine--;
+        const prevLine = this.state.lines[this.state.cursorLine] || "";
+        this.setCursorCol(prevLine.length);
+      }
+      return;
+    }
+    const textBeforeCursor = currentLine.slice(0, this.state.cursorCol);
+    const graphemes = [...this.segment(textBeforeCursor)];
+    let newCol = this.state.cursorCol;
+    while (graphemes.length > 0 && !isPasteMarker(graphemes[graphemes.length - 1]?.segment || "") && isWhitespaceChar(graphemes[graphemes.length - 1]?.segment || "")) {
+      newCol -= graphemes.pop()?.segment.length || 0;
+    }
+    if (graphemes.length > 0) {
+      const lastGrapheme = graphemes[graphemes.length - 1]?.segment || "";
+      if (isPasteMarker(lastGrapheme)) {
+        newCol -= graphemes.pop()?.segment.length || 0;
+      } else if (isPunctuationChar(lastGrapheme)) {
+        while (graphemes.length > 0 && isPunctuationChar(graphemes[graphemes.length - 1]?.segment || "") && !isPasteMarker(graphemes[graphemes.length - 1]?.segment || "")) {
+          newCol -= graphemes.pop()?.segment.length || 0;
+        }
+      } else {
+        while (graphemes.length > 0 && !isWhitespaceChar(graphemes[graphemes.length - 1]?.segment || "") && !isPunctuationChar(graphemes[graphemes.length - 1]?.segment || "") && !isPasteMarker(graphemes[graphemes.length - 1]?.segment || "")) {
+          newCol -= graphemes.pop()?.segment.length || 0;
+        }
+      }
+    }
+    this.setCursorCol(newCol);
+  }
+  yank() {
+    if (this.killRing.length === 0)
+      return;
+    this.pushUndoSnapshot();
+    const text = this.killRing.peek();
+    this.insertYankedText(text);
+    this.lastAction = "yank";
+  }
+  yankPop() {
+    if (this.lastAction !== "yank" || this.killRing.length <= 1)
+      return;
+    this.pushUndoSnapshot();
+    this.deleteYankedText();
+    this.killRing.rotate();
+    const text = this.killRing.peek();
+    this.insertYankedText(text);
+    this.lastAction = "yank";
+  }
+  insertYankedText(text) {
+    this.historyIndex = -1;
+    const lines = text.split(`
+`);
+    if (lines.length === 1) {
+      const currentLine = this.state.lines[this.state.cursorLine] || "";
+      const before = currentLine.slice(0, this.state.cursorCol);
+      const after = currentLine.slice(this.state.cursorCol);
+      this.state.lines[this.state.cursorLine] = before + text + after;
+      this.setCursorCol(this.state.cursorCol + text.length);
+    } else {
+      const currentLine = this.state.lines[this.state.cursorLine] || "";
+      const before = currentLine.slice(0, this.state.cursorCol);
+      const after = currentLine.slice(this.state.cursorCol);
+      this.state.lines[this.state.cursorLine] = before + (lines[0] || "");
+      for (let i = 1;i < lines.length - 1; i++) {
+        this.state.lines.splice(this.state.cursorLine + i, 0, lines[i] || "");
+      }
+      const lastLineIndex = this.state.cursorLine + lines.length - 1;
+      this.state.lines.splice(lastLineIndex, 0, (lines[lines.length - 1] || "") + after);
+      this.state.cursorLine = lastLineIndex;
+      this.setCursorCol((lines[lines.length - 1] || "").length);
+    }
+    if (this.onChange) {
+      this.onChange(this.getText());
+    }
+  }
+  deleteYankedText() {
+    const yankedText = this.killRing.peek();
+    if (!yankedText)
+      return;
+    const yankLines = yankedText.split(`
+`);
+    if (yankLines.length === 1) {
+      const currentLine = this.state.lines[this.state.cursorLine] || "";
+      const deleteLen = yankedText.length;
+      const before = currentLine.slice(0, this.state.cursorCol - deleteLen);
+      const after = currentLine.slice(this.state.cursorCol);
+      this.state.lines[this.state.cursorLine] = before + after;
+      this.setCursorCol(this.state.cursorCol - deleteLen);
+    } else {
+      const startLine = this.state.cursorLine - (yankLines.length - 1);
+      const startCol = (this.state.lines[startLine] || "").length - (yankLines[0] || "").length;
+      const afterCursor = (this.state.lines[this.state.cursorLine] || "").slice(this.state.cursorCol);
+      const beforeYank = (this.state.lines[startLine] || "").slice(0, startCol);
+      this.state.lines.splice(startLine, yankLines.length, beforeYank + afterCursor);
+      this.state.cursorLine = startLine;
+      this.setCursorCol(startCol);
+    }
+    if (this.onChange) {
+      this.onChange(this.getText());
+    }
+  }
+  pushUndoSnapshot() {
+    this.undoStack.push(this.state);
+  }
+  undo() {
+    this.historyIndex = -1;
+    const snapshot = this.undoStack.pop();
+    if (!snapshot)
+      return;
+    Object.assign(this.state, snapshot);
+    this.lastAction = null;
+    this.preferredVisualCol = null;
+    if (this.onChange) {
+      this.onChange(this.getText());
+    }
+  }
+  jumpToChar(char, direction) {
+    this.lastAction = null;
+    const isForward = direction === "forward";
+    const lines = this.state.lines;
+    const end = isForward ? lines.length : -1;
+    const step = isForward ? 1 : -1;
+    for (let lineIdx = this.state.cursorLine;lineIdx !== end; lineIdx += step) {
+      const line = lines[lineIdx] || "";
+      const isCurrentLine = lineIdx === this.state.cursorLine;
+      const searchFrom = isCurrentLine ? isForward ? this.state.cursorCol + 1 : this.state.cursorCol - 1 : undefined;
+      const idx = isForward ? line.indexOf(char, searchFrom) : line.lastIndexOf(char, searchFrom);
+      if (idx !== -1) {
+        this.state.cursorLine = lineIdx;
+        this.setCursorCol(idx);
+        return;
+      }
+    }
+  }
+  moveWordForwards() {
+    this.lastAction = null;
+    const currentLine = this.state.lines[this.state.cursorLine] || "";
+    if (this.state.cursorCol >= currentLine.length) {
+      if (this.state.cursorLine < this.state.lines.length - 1) {
+        this.state.cursorLine++;
+        this.setCursorCol(0);
+      }
+      return;
+    }
+    const textAfterCursor = currentLine.slice(this.state.cursorCol);
+    const segments = this.segment(textAfterCursor);
+    const iterator = segments[Symbol.iterator]();
+    let next = iterator.next();
+    let newCol = this.state.cursorCol;
+    while (!next.done && !isPasteMarker(next.value.segment) && isWhitespaceChar(next.value.segment)) {
+      newCol += next.value.segment.length;
+      next = iterator.next();
+    }
+    if (!next.done) {
+      const firstGrapheme = next.value.segment;
+      if (isPasteMarker(firstGrapheme)) {
+        newCol += firstGrapheme.length;
+      } else if (isPunctuationChar(firstGrapheme)) {
+        while (!next.done && isPunctuationChar(next.value.segment) && !isPasteMarker(next.value.segment)) {
+          newCol += next.value.segment.length;
+          next = iterator.next();
+        }
+      } else {
+        while (!next.done && !isWhitespaceChar(next.value.segment) && !isPunctuationChar(next.value.segment) && !isPasteMarker(next.value.segment)) {
+          newCol += next.value.segment.length;
+          next = iterator.next();
+        }
+      }
+    }
+    this.setCursorCol(newCol);
+  }
+  isSlashMenuAllowed() {
+    return this.state.cursorLine === 0;
+  }
+  isAtStartOfMessage() {
+    if (!this.isSlashMenuAllowed())
+      return false;
+    const currentLine = this.state.lines[this.state.cursorLine] || "";
+    const beforeCursor = currentLine.slice(0, this.state.cursorCol);
+    return beforeCursor.trim() === "" || beforeCursor.trim() === "/";
+  }
+  isInSlashCommandContext(textBeforeCursor) {
+    return this.isSlashMenuAllowed() && textBeforeCursor.trimStart().startsWith("/");
+  }
+  getBestAutocompleteMatchIndex(items, prefix) {
+    if (!prefix)
+      return -1;
+    let firstPrefixIndex = -1;
+    for (let i = 0;i < items.length; i++) {
+      const value = items[i].value;
+      if (value === prefix) {
+        return i;
+      }
+      if (firstPrefixIndex === -1 && value.startsWith(prefix)) {
+        firstPrefixIndex = i;
+      }
+    }
+    return firstPrefixIndex;
+  }
+  createAutocompleteList(prefix, items) {
+    const layout = prefix.startsWith("/") ? SLASH_COMMAND_SELECT_LIST_LAYOUT : undefined;
+    return new SelectList(items, this.autocompleteMaxVisible, this.theme.selectList, layout);
+  }
+  tryTriggerAutocomplete(explicitTab = false) {
+    this.requestAutocomplete({ force: false, explicitTab });
+  }
+  handleTabCompletion() {
+    if (!this.autocompleteProvider)
+      return;
+    const currentLine = this.state.lines[this.state.cursorLine] || "";
+    const beforeCursor = currentLine.slice(0, this.state.cursorCol);
+    if (this.isInSlashCommandContext(beforeCursor) && !beforeCursor.trimStart().includes(" ")) {
+      this.handleSlashCommandCompletion();
+    } else {
+      this.forceFileAutocomplete(true);
+    }
+  }
+  handleSlashCommandCompletion() {
+    this.requestAutocomplete({ force: false, explicitTab: true });
+  }
+  forceFileAutocomplete(explicitTab = false) {
+    this.requestAutocomplete({ force: true, explicitTab });
+  }
+  requestAutocomplete(options) {
+    if (!this.autocompleteProvider)
+      return;
+    if (options.force) {
+      const shouldTrigger = !this.autocompleteProvider.shouldTriggerFileCompletion || this.autocompleteProvider.shouldTriggerFileCompletion(this.state.lines, this.state.cursorLine, this.state.cursorCol);
+      if (!shouldTrigger) {
+        return;
+      }
+    }
+    this.cancelAutocompleteRequest();
+    const startToken = ++this.autocompleteStartToken;
+    const debounceMs = this.getAutocompleteDebounceMs(options);
+    if (debounceMs > 0) {
+      this.autocompleteDebounceTimer = setTimeout(() => {
+        this.autocompleteDebounceTimer = undefined;
+        this.startAutocompleteRequest(startToken, options);
+      }, debounceMs);
+      return;
+    }
+    this.startAutocompleteRequest(startToken, options);
+  }
+  async startAutocompleteRequest(startToken, options) {
+    const previousTask = this.autocompleteRequestTask;
+    this.autocompleteRequestTask = (async () => {
+      await previousTask;
+      if (startToken !== this.autocompleteStartToken || !this.autocompleteProvider) {
+        return;
+      }
+      const controller = new AbortController;
+      this.autocompleteAbort = controller;
+      const requestId = ++this.autocompleteRequestId;
+      const snapshotText = this.getText();
+      const snapshotLine = this.state.cursorLine;
+      const snapshotCol = this.state.cursorCol;
+      await this.runAutocompleteRequest(requestId, controller, snapshotText, snapshotLine, snapshotCol, options);
+    })();
+    await this.autocompleteRequestTask;
+  }
+  getAutocompleteDebounceMs(options) {
+    if (options.explicitTab || options.force) {
+      return 0;
+    }
+    const currentLine = this.state.lines[this.state.cursorLine] || "";
+    const textBeforeCursor = currentLine.slice(0, this.state.cursorCol);
+    const isSymbolAutocompleteContext = /(?:^|[ \t])(?:@(?:"[^"]*|[^\s]*)|#[^\s]*)$/.test(textBeforeCursor);
+    return isSymbolAutocompleteContext ? ATTACHMENT_AUTOCOMPLETE_DEBOUNCE_MS : 0;
+  }
+  async runAutocompleteRequest(requestId, controller, snapshotText, snapshotLine, snapshotCol, options) {
+    if (!this.autocompleteProvider)
+      return;
+    const suggestions = await this.autocompleteProvider.getSuggestions(this.state.lines, this.state.cursorLine, this.state.cursorCol, { signal: controller.signal, force: options.force });
+    if (!this.isAutocompleteRequestCurrent(requestId, controller, snapshotText, snapshotLine, snapshotCol)) {
+      return;
+    }
+    this.autocompleteAbort = undefined;
+    if (!suggestions || !Array.isArray(suggestions.items) || suggestions.items.length === 0) {
+      this.cancelAutocomplete();
+      this.tui.requestRender();
+      return;
+    }
+    if (options.force && options.explicitTab && suggestions.items.length === 1) {
+      const item = suggestions.items[0];
+      this.pushUndoSnapshot();
+      this.lastAction = null;
+      const result = this.autocompleteProvider.applyCompletion(this.state.lines, this.state.cursorLine, this.state.cursorCol, item, suggestions.prefix);
+      this.state.lines = result.lines;
+      this.state.cursorLine = result.cursorLine;
+      this.setCursorCol(result.cursorCol);
+      if (this.onChange)
+        this.onChange(this.getText());
+      this.tui.requestRender();
+      return;
+    }
+    this.applyAutocompleteSuggestions(suggestions, options.force ? "force" : "regular");
+    this.tui.requestRender();
+  }
+  isAutocompleteRequestCurrent(requestId, controller, snapshotText, snapshotLine, snapshotCol) {
+    return !controller.signal.aborted && requestId === this.autocompleteRequestId && this.getText() === snapshotText && this.state.cursorLine === snapshotLine && this.state.cursorCol === snapshotCol;
+  }
+  applyAutocompleteSuggestions(suggestions, state) {
+    this.autocompletePrefix = suggestions.prefix;
+    this.autocompleteList = this.createAutocompleteList(suggestions.prefix, suggestions.items);
+    const bestMatchIndex = this.getBestAutocompleteMatchIndex(suggestions.items, suggestions.prefix);
+    if (bestMatchIndex >= 0) {
+      this.autocompleteList.setSelectedIndex(bestMatchIndex);
+    }
+    this.autocompleteState = state;
+  }
+  cancelAutocompleteRequest() {
+    this.autocompleteStartToken += 1;
+    if (this.autocompleteDebounceTimer) {
+      clearTimeout(this.autocompleteDebounceTimer);
+      this.autocompleteDebounceTimer = undefined;
+    }
+    this.autocompleteAbort?.abort();
+    this.autocompleteAbort = undefined;
+  }
+  clearAutocompleteUi() {
+    this.autocompleteState = null;
+    this.autocompleteList = undefined;
+    this.autocompletePrefix = "";
+  }
+  cancelAutocomplete() {
+    this.cancelAutocompleteRequest();
+    this.clearAutocompleteUi();
+  }
+  isShowingAutocomplete() {
+    return this.autocompleteState !== null;
+  }
+  updateAutocomplete() {
+    if (!this.autocompleteState || !this.autocompleteProvider)
+      return;
+    this.requestAutocomplete({ force: this.autocompleteState === "force", explicitTab: false });
+  }
+}
+var baseSegmenter, PASTE_MARKER_REGEX, PASTE_MARKER_SINGLE, SLASH_COMMAND_SELECT_LIST_LAYOUT, ATTACHMENT_AUTOCOMPLETE_DEBOUNCE_MS = 20;
+var init_editor = __esm(() => {
+  init_keybindings();
+  init_keys();
+  init_tui();
+  init_utils();
+  init_select_list();
+  baseSegmenter = getSegmenter();
+  PASTE_MARKER_REGEX = /\[paste #(\d+)( (\+\d+ lines|\d+ chars))?\]/g;
+  PASTE_MARKER_SINGLE = /^\[paste #(\d+)( (\+\d+ lines|\d+ chars))?\]$/;
+  SLASH_COMMAND_SELECT_LIST_LAYOUT = {
+    minPrimaryColumnWidth: 12,
+    maxPrimaryColumnWidth: 32
+  };
+});
+
+// node_modules/@earendil-works/pi-tui/dist/components/image.js
+class Image {
+  base64Data;
+  mimeType;
+  dimensions;
+  theme;
+  options;
+  imageId;
+  cachedLines;
+  cachedWidth;
+  constructor(base64Data, mimeType, theme, options = {}, dimensions) {
+    this.base64Data = base64Data;
+    this.mimeType = mimeType;
+    this.theme = theme;
+    this.options = options;
+    this.dimensions = dimensions || getImageDimensions(base64Data, mimeType) || { widthPx: 800, heightPx: 600 };
+    this.imageId = options.imageId;
+  }
+  getImageId() {
+    return this.imageId;
+  }
+  invalidate() {
+    this.cachedLines = undefined;
+    this.cachedWidth = undefined;
+  }
+  render(width) {
+    if (this.cachedLines && this.cachedWidth === width) {
+      return this.cachedLines;
+    }
+    const maxWidth = Math.max(1, Math.min(width - 2, this.options.maxWidthCells ?? 60));
+    const cellDimensions2 = getCellDimensions();
+    const defaultMaxHeight = Math.max(1, Math.ceil(maxWidth * cellDimensions2.widthPx / cellDimensions2.heightPx));
+    const maxHeight = this.options.maxHeightCells ?? defaultMaxHeight;
+    const caps = getCapabilities();
+    let lines;
+    if (caps.images) {
+      if (caps.images === "kitty" && this.imageId === undefined) {
+        this.imageId = allocateImageId();
+      }
+      const result = renderImage(this.base64Data, this.dimensions, {
+        maxWidthCells: maxWidth,
+        maxHeightCells: maxHeight,
+        imageId: this.imageId,
+        moveCursor: false
+      });
+      if (result) {
+        if (result.imageId) {
+          this.imageId = result.imageId;
+        }
+        if (caps.images === "kitty") {
+          lines = [result.sequence];
+          for (let i = 0;i < result.rows - 1; i++) {
+            lines.push("");
+          }
+        } else {
+          lines = [];
+          for (let i = 0;i < result.rows - 1; i++) {
+            lines.push("");
+          }
+          const rowOffset = result.rows - 1;
+          const moveUp = rowOffset > 0 ? `\x1B[${rowOffset}A` : "";
+          lines.push(moveUp + result.sequence);
+        }
+      } else {
+        const fallback = imageFallback(this.mimeType, this.dimensions, this.options.filename);
+        lines = [this.theme.fallbackColor(fallback)];
+      }
+    } else {
+      const fallback = imageFallback(this.mimeType, this.dimensions, this.options.filename);
+      lines = [this.theme.fallbackColor(fallback)];
+    }
+    this.cachedLines = lines;
+    this.cachedWidth = width;
+    return lines;
+  }
+}
+var init_image = __esm(() => {
+  init_terminal_image();
+});
+
+// node_modules/@earendil-works/pi-tui/dist/components/input.js
+class Input {
+  value = "";
+  cursor = 0;
+  onSubmit;
+  onEscape;
+  focused = false;
+  pasteBuffer = "";
+  isInPaste = false;
+  killRing = new KillRing;
+  lastAction = null;
+  undoStack = new UndoStack;
+  getValue() {
+    return this.value;
+  }
+  setValue(value) {
+    this.value = value;
+    this.cursor = Math.min(this.cursor, value.length);
+  }
+  handleInput(data) {
+    if (data.includes("\x1B[200~")) {
+      this.isInPaste = true;
+      this.pasteBuffer = "";
+      data = data.replace("\x1B[200~", "");
+    }
+    if (this.isInPaste) {
+      this.pasteBuffer += data;
+      const endIndex = this.pasteBuffer.indexOf("\x1B[201~");
+      if (endIndex !== -1) {
+        const pasteContent = this.pasteBuffer.substring(0, endIndex);
+        this.handlePaste(pasteContent);
+        this.isInPaste = false;
+        const remaining = this.pasteBuffer.substring(endIndex + 6);
+        this.pasteBuffer = "";
+        if (remaining) {
+          this.handleInput(remaining);
+        }
+      }
+      return;
+    }
+    const kb = getKeybindings();
+    if (kb.matches(data, "tui.select.cancel")) {
+      if (this.onEscape)
+        this.onEscape();
+      return;
+    }
+    if (kb.matches(data, "tui.editor.undo")) {
+      this.undo();
+      return;
+    }
+    if (kb.matches(data, "tui.input.submit") || data === `
+`) {
+      if (this.onSubmit)
+        this.onSubmit(this.value);
+      return;
+    }
+    if (kb.matches(data, "tui.editor.deleteCharBackward")) {
+      this.handleBackspace();
+      return;
+    }
+    if (kb.matches(data, "tui.editor.deleteCharForward")) {
+      this.handleForwardDelete();
+      return;
+    }
+    if (kb.matches(data, "tui.editor.deleteWordBackward")) {
+      this.deleteWordBackwards();
+      return;
+    }
+    if (kb.matches(data, "tui.editor.deleteWordForward")) {
+      this.deleteWordForward();
+      return;
+    }
+    if (kb.matches(data, "tui.editor.deleteToLineStart")) {
+      this.deleteToLineStart();
+      return;
+    }
+    if (kb.matches(data, "tui.editor.deleteToLineEnd")) {
+      this.deleteToLineEnd();
+      return;
+    }
+    if (kb.matches(data, "tui.editor.yank")) {
+      this.yank();
+      return;
+    }
+    if (kb.matches(data, "tui.editor.yankPop")) {
+      this.yankPop();
+      return;
+    }
+    if (kb.matches(data, "tui.editor.cursorLeft")) {
+      this.lastAction = null;
+      if (this.cursor > 0) {
+        const beforeCursor = this.value.slice(0, this.cursor);
+        const graphemes = [...segmenter2.segment(beforeCursor)];
+        const lastGrapheme = graphemes[graphemes.length - 1];
+        this.cursor -= lastGrapheme ? lastGrapheme.segment.length : 1;
+      }
+      return;
+    }
+    if (kb.matches(data, "tui.editor.cursorRight")) {
+      this.lastAction = null;
+      if (this.cursor < this.value.length) {
+        const afterCursor = this.value.slice(this.cursor);
+        const graphemes = [...segmenter2.segment(afterCursor)];
+        const firstGrapheme = graphemes[0];
+        this.cursor += firstGrapheme ? firstGrapheme.segment.length : 1;
+      }
+      return;
+    }
+    if (kb.matches(data, "tui.editor.cursorLineStart")) {
+      this.lastAction = null;
+      this.cursor = 0;
+      return;
+    }
+    if (kb.matches(data, "tui.editor.cursorLineEnd")) {
+      this.lastAction = null;
+      this.cursor = this.value.length;
+      return;
+    }
+    if (kb.matches(data, "tui.editor.cursorWordLeft")) {
+      this.moveWordBackwards();
+      return;
+    }
+    if (kb.matches(data, "tui.editor.cursorWordRight")) {
+      this.moveWordForwards();
+      return;
+    }
+    const kittyPrintable = decodeKittyPrintable(data);
+    if (kittyPrintable !== undefined) {
+      this.insertCharacter(kittyPrintable);
+      return;
+    }
+    const hasControlChars = [...data].some((ch) => {
+      const code = ch.charCodeAt(0);
+      return code < 32 || code === 127 || code >= 128 && code <= 159;
+    });
+    if (!hasControlChars) {
+      this.insertCharacter(data);
+    }
+  }
+  insertCharacter(char) {
+    if (isWhitespaceChar(char) || this.lastAction !== "type-word") {
+      this.pushUndo();
+    }
+    this.lastAction = "type-word";
+    this.value = this.value.slice(0, this.cursor) + char + this.value.slice(this.cursor);
+    this.cursor += char.length;
+  }
+  handleBackspace() {
+    this.lastAction = null;
+    if (this.cursor > 0) {
+      this.pushUndo();
+      const beforeCursor = this.value.slice(0, this.cursor);
+      const graphemes = [...segmenter2.segment(beforeCursor)];
+      const lastGrapheme = graphemes[graphemes.length - 1];
+      const graphemeLength = lastGrapheme ? lastGrapheme.segment.length : 1;
+      this.value = this.value.slice(0, this.cursor - graphemeLength) + this.value.slice(this.cursor);
+      this.cursor -= graphemeLength;
+    }
+  }
+  handleForwardDelete() {
+    this.lastAction = null;
+    if (this.cursor < this.value.length) {
+      this.pushUndo();
+      const afterCursor = this.value.slice(this.cursor);
+      const graphemes = [...segmenter2.segment(afterCursor)];
+      const firstGrapheme = graphemes[0];
+      const graphemeLength = firstGrapheme ? firstGrapheme.segment.length : 1;
+      this.value = this.value.slice(0, this.cursor) + this.value.slice(this.cursor + graphemeLength);
+    }
+  }
+  deleteToLineStart() {
+    if (this.cursor === 0)
+      return;
+    this.pushUndo();
+    const deletedText = this.value.slice(0, this.cursor);
+    this.killRing.push(deletedText, { prepend: true, accumulate: this.lastAction === "kill" });
+    this.lastAction = "kill";
+    this.value = this.value.slice(this.cursor);
+    this.cursor = 0;
+  }
+  deleteToLineEnd() {
+    if (this.cursor >= this.value.length)
+      return;
+    this.pushUndo();
+    const deletedText = this.value.slice(this.cursor);
+    this.killRing.push(deletedText, { prepend: false, accumulate: this.lastAction === "kill" });
+    this.lastAction = "kill";
+    this.value = this.value.slice(0, this.cursor);
+  }
+  deleteWordBackwards() {
+    if (this.cursor === 0)
+      return;
+    const wasKill = this.lastAction === "kill";
+    this.pushUndo();
+    const oldCursor = this.cursor;
+    this.moveWordBackwards();
+    const deleteFrom = this.cursor;
+    this.cursor = oldCursor;
+    const deletedText = this.value.slice(deleteFrom, this.cursor);
+    this.killRing.push(deletedText, { prepend: true, accumulate: wasKill });
+    this.lastAction = "kill";
+    this.value = this.value.slice(0, deleteFrom) + this.value.slice(this.cursor);
+    this.cursor = deleteFrom;
+  }
+  deleteWordForward() {
+    if (this.cursor >= this.value.length)
+      return;
+    const wasKill = this.lastAction === "kill";
+    this.pushUndo();
+    const oldCursor = this.cursor;
+    this.moveWordForwards();
+    const deleteTo = this.cursor;
+    this.cursor = oldCursor;
+    const deletedText = this.value.slice(this.cursor, deleteTo);
+    this.killRing.push(deletedText, { prepend: false, accumulate: wasKill });
+    this.lastAction = "kill";
+    this.value = this.value.slice(0, this.cursor) + this.value.slice(deleteTo);
+  }
+  yank() {
+    const text = this.killRing.peek();
+    if (!text)
+      return;
+    this.pushUndo();
+    this.value = this.value.slice(0, this.cursor) + text + this.value.slice(this.cursor);
+    this.cursor += text.length;
+    this.lastAction = "yank";
+  }
+  yankPop() {
+    if (this.lastAction !== "yank" || this.killRing.length <= 1)
+      return;
+    this.pushUndo();
+    const prevText = this.killRing.peek() || "";
+    this.value = this.value.slice(0, this.cursor - prevText.length) + this.value.slice(this.cursor);
+    this.cursor -= prevText.length;
+    this.killRing.rotate();
+    const text = this.killRing.peek() || "";
+    this.value = this.value.slice(0, this.cursor) + text + this.value.slice(this.cursor);
+    this.cursor += text.length;
+    this.lastAction = "yank";
+  }
+  pushUndo() {
+    this.undoStack.push({ value: this.value, cursor: this.cursor });
+  }
+  undo() {
+    const snapshot = this.undoStack.pop();
+    if (!snapshot)
+      return;
+    this.value = snapshot.value;
+    this.cursor = snapshot.cursor;
+    this.lastAction = null;
+  }
+  moveWordBackwards() {
+    if (this.cursor === 0) {
+      return;
+    }
+    this.lastAction = null;
+    const textBeforeCursor = this.value.slice(0, this.cursor);
+    const graphemes = [...segmenter2.segment(textBeforeCursor)];
+    while (graphemes.length > 0 && isWhitespaceChar(graphemes[graphemes.length - 1]?.segment || "")) {
+      this.cursor -= graphemes.pop()?.segment.length || 0;
+    }
+    if (graphemes.length > 0) {
+      const lastGrapheme = graphemes[graphemes.length - 1]?.segment || "";
+      if (isPunctuationChar(lastGrapheme)) {
+        while (graphemes.length > 0 && isPunctuationChar(graphemes[graphemes.length - 1]?.segment || "")) {
+          this.cursor -= graphemes.pop()?.segment.length || 0;
+        }
+      } else {
+        while (graphemes.length > 0 && !isWhitespaceChar(graphemes[graphemes.length - 1]?.segment || "") && !isPunctuationChar(graphemes[graphemes.length - 1]?.segment || "")) {
+          this.cursor -= graphemes.pop()?.segment.length || 0;
+        }
+      }
+    }
+  }
+  moveWordForwards() {
+    if (this.cursor >= this.value.length) {
+      return;
+    }
+    this.lastAction = null;
+    const textAfterCursor = this.value.slice(this.cursor);
+    const segments = segmenter2.segment(textAfterCursor);
+    const iterator = segments[Symbol.iterator]();
+    let next = iterator.next();
+    while (!next.done && isWhitespaceChar(next.value.segment)) {
+      this.cursor += next.value.segment.length;
+      next = iterator.next();
+    }
+    if (!next.done) {
+      const firstGrapheme = next.value.segment;
+      if (isPunctuationChar(firstGrapheme)) {
+        while (!next.done && isPunctuationChar(next.value.segment)) {
+          this.cursor += next.value.segment.length;
+          next = iterator.next();
+        }
+      } else {
+        while (!next.done && !isWhitespaceChar(next.value.segment) && !isPunctuationChar(next.value.segment)) {
+          this.cursor += next.value.segment.length;
+          next = iterator.next();
+        }
+      }
+    }
+  }
+  handlePaste(pastedText) {
+    this.lastAction = null;
+    this.pushUndo();
+    const cleanText = pastedText.replace(/\r\n/g, "").replace(/\r/g, "").replace(/\n/g, "").replace(/\t/g, "    ");
+    this.value = this.value.slice(0, this.cursor) + cleanText + this.value.slice(this.cursor);
+    this.cursor += cleanText.length;
+  }
+  invalidate() {}
+  render(width) {
+    const prompt = "> ";
+    const availableWidth = width - prompt.length;
+    if (availableWidth <= 0) {
+      return [prompt];
+    }
+    let visibleText = "";
+    let cursorDisplay = this.cursor;
+    const totalWidth = visibleWidth(this.value);
+    if (totalWidth < availableWidth) {
+      visibleText = this.value;
+    } else {
+      const scrollWidth = this.cursor === this.value.length ? availableWidth - 1 : availableWidth;
+      const cursorCol = visibleWidth(this.value.slice(0, this.cursor));
+      if (scrollWidth > 0) {
+        const halfWidth = Math.floor(scrollWidth / 2);
+        let startCol = 0;
+        if (cursorCol < halfWidth) {
+          startCol = 0;
+        } else if (cursorCol > totalWidth - halfWidth) {
+          startCol = Math.max(0, totalWidth - scrollWidth);
+        } else {
+          startCol = Math.max(0, cursorCol - halfWidth);
+        }
+        visibleText = sliceByColumn(this.value, startCol, scrollWidth, true);
+        const beforeCursor2 = sliceByColumn(this.value, startCol, Math.max(0, cursorCol - startCol), true);
+        cursorDisplay = beforeCursor2.length;
+      } else {
+        visibleText = "";
+        cursorDisplay = 0;
+      }
+    }
+    const graphemes = [...segmenter2.segment(visibleText.slice(cursorDisplay))];
+    const cursorGrapheme = graphemes[0];
+    const beforeCursor = visibleText.slice(0, cursorDisplay);
+    const atCursor = cursorGrapheme?.segment ?? " ";
+    const afterCursor = visibleText.slice(cursorDisplay + atCursor.length);
+    const marker = this.focused ? CURSOR_MARKER : "";
+    const cursorChar = `\x1B[7m${atCursor}\x1B[27m`;
+    const textWithCursor = beforeCursor + marker + cursorChar + afterCursor;
+    const visualLength = visibleWidth(textWithCursor);
+    const padding = " ".repeat(Math.max(0, availableWidth - visualLength));
+    const line = prompt + textWithCursor + padding;
+    return [line];
+  }
+}
+var segmenter2;
+var init_input = __esm(() => {
+  init_keybindings();
+  init_keys();
+  init_tui();
+  init_utils();
+  segmenter2 = getSegmenter();
+});
+
+// node_modules/marked/lib/marked.esm.js
+function _getDefaults() {
+  return {
+    async: false,
+    breaks: false,
+    extensions: null,
+    gfm: true,
+    hooks: null,
+    pedantic: false,
+    renderer: null,
+    silent: false,
+    tokenizer: null,
+    walkTokens: null
+  };
+}
+function changeDefaults(newDefaults) {
+  _defaults = newDefaults;
+}
+function edit(regex, opt = "") {
+  let source = typeof regex === "string" ? regex : regex.source;
+  const obj = {
+    replace: (name, val) => {
+      let valSource = typeof val === "string" ? val : val.source;
+      valSource = valSource.replace(other.caret, "$1");
+      source = source.replace(name, valSource);
+      return obj;
+    },
+    getRegex: () => {
+      return new RegExp(source, opt);
+    }
+  };
+  return obj;
+}
+function escape22(html2, encode) {
+  if (encode) {
+    if (other.escapeTest.test(html2)) {
+      return html2.replace(other.escapeReplace, getEscapeReplacement);
+    }
+  } else {
+    if (other.escapeTestNoEncode.test(html2)) {
+      return html2.replace(other.escapeReplaceNoEncode, getEscapeReplacement);
+    }
+  }
+  return html2;
+}
+function cleanUrl(href) {
+  try {
+    href = encodeURI(href).replace(other.percentDecode, "%");
+  } catch {
+    return null;
+  }
+  return href;
+}
+function splitCells(tableRow, count) {
+  const row = tableRow.replace(other.findPipe, (match, offset, str) => {
+    let escaped = false;
+    let curr = offset;
+    while (--curr >= 0 && str[curr] === "\\")
+      escaped = !escaped;
+    if (escaped) {
+      return "|";
+    } else {
+      return " |";
+    }
+  }), cells = row.split(other.splitPipe);
+  let i = 0;
+  if (!cells[0].trim()) {
+    cells.shift();
+  }
+  if (cells.length > 0 && !cells.at(-1)?.trim()) {
+    cells.pop();
+  }
+  if (count) {
+    if (cells.length > count) {
+      cells.splice(count);
+    } else {
+      while (cells.length < count)
+        cells.push("");
+    }
+  }
+  for (;i < cells.length; i++) {
+    cells[i] = cells[i].trim().replace(other.slashPipe, "|");
+  }
+  return cells;
+}
+function rtrim(str, c, invert) {
+  const l = str.length;
+  if (l === 0) {
+    return "";
+  }
+  let suffLen = 0;
+  while (suffLen < l) {
+    const currChar = str.charAt(l - suffLen - 1);
+    if (currChar === c && !invert) {
+      suffLen++;
+    } else if (currChar !== c && invert) {
+      suffLen++;
+    } else {
+      break;
+    }
+  }
+  return str.slice(0, l - suffLen);
+}
+function findClosingBracket(str, b) {
+  if (str.indexOf(b[1]) === -1) {
+    return -1;
+  }
+  let level = 0;
+  for (let i = 0;i < str.length; i++) {
+    if (str[i] === "\\") {
+      i++;
+    } else if (str[i] === b[0]) {
+      level++;
+    } else if (str[i] === b[1]) {
+      level--;
+      if (level < 0) {
+        return i;
+      }
+    }
+  }
+  if (level > 0) {
+    return -2;
+  }
+  return -1;
+}
+function outputLink(cap, link2, raw, lexer2, rules) {
+  const href = link2.href;
+  const title = link2.title || null;
+  const text = cap[1].replace(rules.other.outputLinkReplace, "$1");
+  lexer2.state.inLink = true;
+  const token = {
+    type: cap[0].charAt(0) === "!" ? "image" : "link",
+    raw,
+    href,
+    title,
+    text,
+    tokens: lexer2.inlineTokens(text)
+  };
+  lexer2.state.inLink = false;
+  return token;
+}
+function indentCodeCompensation(raw, text, rules) {
+  const matchIndentToCode = raw.match(rules.other.indentCodeCompensation);
+  if (matchIndentToCode === null) {
+    return text;
+  }
+  const indentToCode = matchIndentToCode[1];
+  return text.split(`
+`).map((node) => {
+    const matchIndentInNode = node.match(rules.other.beginningSpace);
+    if (matchIndentInNode === null) {
+      return node;
+    }
+    const [indentInNode] = matchIndentInNode;
+    if (indentInNode.length >= indentToCode.length) {
+      return node.slice(indentToCode.length);
+    }
+    return node;
+  }).join(`
+`);
+}
+function marked(src, opt) {
+  return markedInstance.parse(src, opt);
+}
+var _defaults, noopTest, other, newline, blockCode, fences, hr, heading, bullet, lheadingCore, lheading, lheadingGfm, _paragraph, blockText, _blockLabel, def, list, _tag = "address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|meta|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul", _comment, html, paragraph, blockquote, blockNormal, gfmTable, blockGfm, blockPedantic, escape2, inlineCode, br, inlineText, _punctuation, _punctuationOrSpace, _notPunctuationOrSpace, punctuation, _punctuationGfmStrongEm, _punctuationOrSpaceGfmStrongEm, _notPunctuationOrSpaceGfmStrongEm, blockSkip, emStrongLDelimCore, emStrongLDelim, emStrongLDelimGfm, emStrongRDelimAstCore = "^[^_*]*?__[^_*]*?\\*[^_*]*?(?=__)|[^*]+(?=[^*])|(?!\\*)punct(\\*+)(?=[\\s]|$)|notPunctSpace(\\*+)(?!\\*)(?=punctSpace|$)|(?!\\*)punctSpace(\\*+)(?=notPunctSpace)|[\\s](\\*+)(?!\\*)(?=punct)|(?!\\*)punct(\\*+)(?!\\*)(?=punct)|notPunctSpace(\\*+)(?=notPunctSpace)", emStrongRDelimAst, emStrongRDelimAstGfm, emStrongRDelimUnd, anyPunctuation, autolink, _inlineComment, tag, _inlineLabel, link, reflink, nolink, reflinkSearch, inlineNormal, inlinePedantic, inlineGfm, inlineBreaks, block, inline, escapeReplacements, getEscapeReplacement = (ch) => escapeReplacements[ch], _Tokenizer = class {
+  options;
+  rules;
+  lexer;
+  constructor(options2) {
+    this.options = options2 || _defaults;
+  }
+  space(src) {
+    const cap = this.rules.block.newline.exec(src);
+    if (cap && cap[0].length > 0) {
+      return {
+        type: "space",
+        raw: cap[0]
+      };
+    }
+  }
+  code(src) {
+    const cap = this.rules.block.code.exec(src);
+    if (cap) {
+      const text = cap[0].replace(this.rules.other.codeRemoveIndent, "");
+      return {
+        type: "code",
+        raw: cap[0],
+        codeBlockStyle: "indented",
+        text: !this.options.pedantic ? rtrim(text, `
+`) : text
+      };
+    }
+  }
+  fences(src) {
+    const cap = this.rules.block.fences.exec(src);
+    if (cap) {
+      const raw = cap[0];
+      const text = indentCodeCompensation(raw, cap[3] || "", this.rules);
+      return {
+        type: "code",
+        raw,
+        lang: cap[2] ? cap[2].trim().replace(this.rules.inline.anyPunctuation, "$1") : cap[2],
+        text
+      };
+    }
+  }
+  heading(src) {
+    const cap = this.rules.block.heading.exec(src);
+    if (cap) {
+      let text = cap[2].trim();
+      if (this.rules.other.endingHash.test(text)) {
+        const trimmed = rtrim(text, "#");
+        if (this.options.pedantic) {
+          text = trimmed.trim();
+        } else if (!trimmed || this.rules.other.endingSpaceChar.test(trimmed)) {
+          text = trimmed.trim();
+        }
+      }
+      return {
+        type: "heading",
+        raw: cap[0],
+        depth: cap[1].length,
+        text,
+        tokens: this.lexer.inline(text)
+      };
+    }
+  }
+  hr(src) {
+    const cap = this.rules.block.hr.exec(src);
+    if (cap) {
+      return {
+        type: "hr",
+        raw: rtrim(cap[0], `
+`)
+      };
+    }
+  }
+  blockquote(src) {
+    const cap = this.rules.block.blockquote.exec(src);
+    if (cap) {
+      let lines = rtrim(cap[0], `
+`).split(`
+`);
+      let raw = "";
+      let text = "";
+      const tokens = [];
+      while (lines.length > 0) {
+        let inBlockquote = false;
+        const currentLines = [];
+        let i;
+        for (i = 0;i < lines.length; i++) {
+          if (this.rules.other.blockquoteStart.test(lines[i])) {
+            currentLines.push(lines[i]);
+            inBlockquote = true;
+          } else if (!inBlockquote) {
+            currentLines.push(lines[i]);
+          } else {
+            break;
+          }
+        }
+        lines = lines.slice(i);
+        const currentRaw = currentLines.join(`
+`);
+        const currentText = currentRaw.replace(this.rules.other.blockquoteSetextReplace, `
+    $1`).replace(this.rules.other.blockquoteSetextReplace2, "");
+        raw = raw ? `${raw}
+${currentRaw}` : currentRaw;
+        text = text ? `${text}
+${currentText}` : currentText;
+        const top = this.lexer.state.top;
+        this.lexer.state.top = true;
+        this.lexer.blockTokens(currentText, tokens, true);
+        this.lexer.state.top = top;
+        if (lines.length === 0) {
+          break;
+        }
+        const lastToken = tokens.at(-1);
+        if (lastToken?.type === "code") {
+          break;
+        } else if (lastToken?.type === "blockquote") {
+          const oldToken = lastToken;
+          const newText = oldToken.raw + `
+` + lines.join(`
+`);
+          const newToken = this.blockquote(newText);
+          tokens[tokens.length - 1] = newToken;
+          raw = raw.substring(0, raw.length - oldToken.raw.length) + newToken.raw;
+          text = text.substring(0, text.length - oldToken.text.length) + newToken.text;
+          break;
+        } else if (lastToken?.type === "list") {
+          const oldToken = lastToken;
+          const newText = oldToken.raw + `
+` + lines.join(`
+`);
+          const newToken = this.list(newText);
+          tokens[tokens.length - 1] = newToken;
+          raw = raw.substring(0, raw.length - lastToken.raw.length) + newToken.raw;
+          text = text.substring(0, text.length - oldToken.raw.length) + newToken.raw;
+          lines = newText.substring(tokens.at(-1).raw.length).split(`
+`);
+          continue;
+        }
+      }
+      return {
+        type: "blockquote",
+        raw,
+        tokens,
+        text
+      };
+    }
+  }
+  list(src) {
+    let cap = this.rules.block.list.exec(src);
+    if (cap) {
+      let bull = cap[1].trim();
+      const isordered = bull.length > 1;
+      const list2 = {
+        type: "list",
+        raw: "",
+        ordered: isordered,
+        start: isordered ? +bull.slice(0, -1) : "",
+        loose: false,
+        items: []
+      };
+      bull = isordered ? `\\d{1,9}\\${bull.slice(-1)}` : `\\${bull}`;
+      if (this.options.pedantic) {
+        bull = isordered ? bull : "[*+-]";
+      }
+      const itemRegex = this.rules.other.listItemRegex(bull);
+      let endsWithBlankLine = false;
+      while (src) {
+        let endEarly = false;
+        let raw = "";
+        let itemContents = "";
+        if (!(cap = itemRegex.exec(src))) {
+          break;
+        }
+        if (this.rules.block.hr.test(src)) {
+          break;
+        }
+        raw = cap[0];
+        src = src.substring(raw.length);
+        let line = cap[2].split(`
+`, 1)[0].replace(this.rules.other.listReplaceTabs, (t) => " ".repeat(3 * t.length));
+        let nextLine = src.split(`
+`, 1)[0];
+        let blankLine = !line.trim();
+        let indent = 0;
+        if (this.options.pedantic) {
+          indent = 2;
+          itemContents = line.trimStart();
+        } else if (blankLine) {
+          indent = cap[1].length + 1;
+        } else {
+          indent = cap[2].search(this.rules.other.nonSpaceChar);
+          indent = indent > 4 ? 1 : indent;
+          itemContents = line.slice(indent);
+          indent += cap[1].length;
+        }
+        if (blankLine && this.rules.other.blankLine.test(nextLine)) {
+          raw += nextLine + `
+`;
+          src = src.substring(nextLine.length + 1);
+          endEarly = true;
+        }
+        if (!endEarly) {
+          const nextBulletRegex = this.rules.other.nextBulletRegex(indent);
+          const hrRegex = this.rules.other.hrRegex(indent);
+          const fencesBeginRegex = this.rules.other.fencesBeginRegex(indent);
+          const headingBeginRegex = this.rules.other.headingBeginRegex(indent);
+          const htmlBeginRegex = this.rules.other.htmlBeginRegex(indent);
+          while (src) {
+            const rawLine = src.split(`
+`, 1)[0];
+            let nextLineWithoutTabs;
+            nextLine = rawLine;
+            if (this.options.pedantic) {
+              nextLine = nextLine.replace(this.rules.other.listReplaceNesting, "  ");
+              nextLineWithoutTabs = nextLine;
+            } else {
+              nextLineWithoutTabs = nextLine.replace(this.rules.other.tabCharGlobal, "    ");
+            }
+            if (fencesBeginRegex.test(nextLine)) {
+              break;
+            }
+            if (headingBeginRegex.test(nextLine)) {
+              break;
+            }
+            if (htmlBeginRegex.test(nextLine)) {
+              break;
+            }
+            if (nextBulletRegex.test(nextLine)) {
+              break;
+            }
+            if (hrRegex.test(nextLine)) {
+              break;
+            }
+            if (nextLineWithoutTabs.search(this.rules.other.nonSpaceChar) >= indent || !nextLine.trim()) {
+              itemContents += `
+` + nextLineWithoutTabs.slice(indent);
+            } else {
+              if (blankLine) {
+                break;
+              }
+              if (line.replace(this.rules.other.tabCharGlobal, "    ").search(this.rules.other.nonSpaceChar) >= 4) {
+                break;
+              }
+              if (fencesBeginRegex.test(line)) {
+                break;
+              }
+              if (headingBeginRegex.test(line)) {
+                break;
+              }
+              if (hrRegex.test(line)) {
+                break;
+              }
+              itemContents += `
+` + nextLine;
+            }
+            if (!blankLine && !nextLine.trim()) {
+              blankLine = true;
+            }
+            raw += rawLine + `
+`;
+            src = src.substring(rawLine.length + 1);
+            line = nextLineWithoutTabs.slice(indent);
+          }
+        }
+        if (!list2.loose) {
+          if (endsWithBlankLine) {
+            list2.loose = true;
+          } else if (this.rules.other.doubleBlankLine.test(raw)) {
+            endsWithBlankLine = true;
+          }
+        }
+        let istask = null;
+        let ischecked;
+        if (this.options.gfm) {
+          istask = this.rules.other.listIsTask.exec(itemContents);
+          if (istask) {
+            ischecked = istask[0] !== "[ ] ";
+            itemContents = itemContents.replace(this.rules.other.listReplaceTask, "");
+          }
+        }
+        list2.items.push({
+          type: "list_item",
+          raw,
+          task: !!istask,
+          checked: ischecked,
+          loose: false,
+          text: itemContents,
+          tokens: []
+        });
+        list2.raw += raw;
+      }
+      const lastItem = list2.items.at(-1);
+      if (lastItem) {
+        lastItem.raw = lastItem.raw.trimEnd();
+        lastItem.text = lastItem.text.trimEnd();
+      } else {
+        return;
+      }
+      list2.raw = list2.raw.trimEnd();
+      for (let i = 0;i < list2.items.length; i++) {
+        this.lexer.state.top = false;
+        list2.items[i].tokens = this.lexer.blockTokens(list2.items[i].text, []);
+        if (!list2.loose) {
+          const spacers = list2.items[i].tokens.filter((t) => t.type === "space");
+          const hasMultipleLineBreaks = spacers.length > 0 && spacers.some((t) => this.rules.other.anyLine.test(t.raw));
+          list2.loose = hasMultipleLineBreaks;
+        }
+      }
+      if (list2.loose) {
+        for (let i = 0;i < list2.items.length; i++) {
+          list2.items[i].loose = true;
+        }
+      }
+      return list2;
+    }
+  }
+  html(src) {
+    const cap = this.rules.block.html.exec(src);
+    if (cap) {
+      const token = {
+        type: "html",
+        block: true,
+        raw: cap[0],
+        pre: cap[1] === "pre" || cap[1] === "script" || cap[1] === "style",
+        text: cap[0]
+      };
+      return token;
+    }
+  }
+  def(src) {
+    const cap = this.rules.block.def.exec(src);
+    if (cap) {
+      const tag2 = cap[1].toLowerCase().replace(this.rules.other.multipleSpaceGlobal, " ");
+      const href = cap[2] ? cap[2].replace(this.rules.other.hrefBrackets, "$1").replace(this.rules.inline.anyPunctuation, "$1") : "";
+      const title = cap[3] ? cap[3].substring(1, cap[3].length - 1).replace(this.rules.inline.anyPunctuation, "$1") : cap[3];
+      return {
+        type: "def",
+        tag: tag2,
+        raw: cap[0],
+        href,
+        title
+      };
+    }
+  }
+  table(src) {
+    const cap = this.rules.block.table.exec(src);
+    if (!cap) {
+      return;
+    }
+    if (!this.rules.other.tableDelimiter.test(cap[2])) {
+      return;
+    }
+    const headers = splitCells(cap[1]);
+    const aligns = cap[2].replace(this.rules.other.tableAlignChars, "").split("|");
+    const rows = cap[3]?.trim() ? cap[3].replace(this.rules.other.tableRowBlankLine, "").split(`
+`) : [];
+    const item = {
+      type: "table",
+      raw: cap[0],
+      header: [],
+      align: [],
+      rows: []
+    };
+    if (headers.length !== aligns.length) {
+      return;
+    }
+    for (const align of aligns) {
+      if (this.rules.other.tableAlignRight.test(align)) {
+        item.align.push("right");
+      } else if (this.rules.other.tableAlignCenter.test(align)) {
+        item.align.push("center");
+      } else if (this.rules.other.tableAlignLeft.test(align)) {
+        item.align.push("left");
+      } else {
+        item.align.push(null);
+      }
+    }
+    for (let i = 0;i < headers.length; i++) {
+      item.header.push({
+        text: headers[i],
+        tokens: this.lexer.inline(headers[i]),
+        header: true,
+        align: item.align[i]
+      });
+    }
+    for (const row of rows) {
+      item.rows.push(splitCells(row, item.header.length).map((cell, i) => {
+        return {
+          text: cell,
+          tokens: this.lexer.inline(cell),
+          header: false,
+          align: item.align[i]
+        };
+      }));
+    }
+    return item;
+  }
+  lheading(src) {
+    const cap = this.rules.block.lheading.exec(src);
+    if (cap) {
+      return {
+        type: "heading",
+        raw: cap[0],
+        depth: cap[2].charAt(0) === "=" ? 1 : 2,
+        text: cap[1],
+        tokens: this.lexer.inline(cap[1])
+      };
+    }
+  }
+  paragraph(src) {
+    const cap = this.rules.block.paragraph.exec(src);
+    if (cap) {
+      const text = cap[1].charAt(cap[1].length - 1) === `
+` ? cap[1].slice(0, -1) : cap[1];
+      return {
+        type: "paragraph",
+        raw: cap[0],
+        text,
+        tokens: this.lexer.inline(text)
+      };
+    }
+  }
+  text(src) {
+    const cap = this.rules.block.text.exec(src);
+    if (cap) {
+      return {
+        type: "text",
+        raw: cap[0],
+        text: cap[0],
+        tokens: this.lexer.inline(cap[0])
+      };
+    }
+  }
+  escape(src) {
+    const cap = this.rules.inline.escape.exec(src);
+    if (cap) {
+      return {
+        type: "escape",
+        raw: cap[0],
+        text: cap[1]
+      };
+    }
+  }
+  tag(src) {
+    const cap = this.rules.inline.tag.exec(src);
+    if (cap) {
+      if (!this.lexer.state.inLink && this.rules.other.startATag.test(cap[0])) {
+        this.lexer.state.inLink = true;
+      } else if (this.lexer.state.inLink && this.rules.other.endATag.test(cap[0])) {
+        this.lexer.state.inLink = false;
+      }
+      if (!this.lexer.state.inRawBlock && this.rules.other.startPreScriptTag.test(cap[0])) {
+        this.lexer.state.inRawBlock = true;
+      } else if (this.lexer.state.inRawBlock && this.rules.other.endPreScriptTag.test(cap[0])) {
+        this.lexer.state.inRawBlock = false;
+      }
+      return {
+        type: "html",
+        raw: cap[0],
+        inLink: this.lexer.state.inLink,
+        inRawBlock: this.lexer.state.inRawBlock,
+        block: false,
+        text: cap[0]
+      };
+    }
+  }
+  link(src) {
+    const cap = this.rules.inline.link.exec(src);
+    if (cap) {
+      const trimmedUrl = cap[2].trim();
+      if (!this.options.pedantic && this.rules.other.startAngleBracket.test(trimmedUrl)) {
+        if (!this.rules.other.endAngleBracket.test(trimmedUrl)) {
+          return;
+        }
+        const rtrimSlash = rtrim(trimmedUrl.slice(0, -1), "\\");
+        if ((trimmedUrl.length - rtrimSlash.length) % 2 === 0) {
+          return;
+        }
+      } else {
+        const lastParenIndex = findClosingBracket(cap[2], "()");
+        if (lastParenIndex === -2) {
+          return;
+        }
+        if (lastParenIndex > -1) {
+          const start = cap[0].indexOf("!") === 0 ? 5 : 4;
+          const linkLen = start + cap[1].length + lastParenIndex;
+          cap[2] = cap[2].substring(0, lastParenIndex);
+          cap[0] = cap[0].substring(0, linkLen).trim();
+          cap[3] = "";
+        }
+      }
+      let href = cap[2];
+      let title = "";
+      if (this.options.pedantic) {
+        const link2 = this.rules.other.pedanticHrefTitle.exec(href);
+        if (link2) {
+          href = link2[1];
+          title = link2[3];
+        }
+      } else {
+        title = cap[3] ? cap[3].slice(1, -1) : "";
+      }
+      href = href.trim();
+      if (this.rules.other.startAngleBracket.test(href)) {
+        if (this.options.pedantic && !this.rules.other.endAngleBracket.test(trimmedUrl)) {
+          href = href.slice(1);
+        } else {
+          href = href.slice(1, -1);
+        }
+      }
+      return outputLink(cap, {
+        href: href ? href.replace(this.rules.inline.anyPunctuation, "$1") : href,
+        title: title ? title.replace(this.rules.inline.anyPunctuation, "$1") : title
+      }, cap[0], this.lexer, this.rules);
+    }
+  }
+  reflink(src, links) {
+    let cap;
+    if ((cap = this.rules.inline.reflink.exec(src)) || (cap = this.rules.inline.nolink.exec(src))) {
+      const linkString = (cap[2] || cap[1]).replace(this.rules.other.multipleSpaceGlobal, " ");
+      const link2 = links[linkString.toLowerCase()];
+      if (!link2) {
+        const text = cap[0].charAt(0);
+        return {
+          type: "text",
+          raw: text,
+          text
+        };
+      }
+      return outputLink(cap, link2, cap[0], this.lexer, this.rules);
+    }
+  }
+  emStrong(src, maskedSrc, prevChar = "") {
+    let match = this.rules.inline.emStrongLDelim.exec(src);
+    if (!match)
+      return;
+    if (match[3] && prevChar.match(this.rules.other.unicodeAlphaNumeric))
+      return;
+    const nextChar = match[1] || match[2] || "";
+    if (!nextChar || !prevChar || this.rules.inline.punctuation.exec(prevChar)) {
+      const lLength = [...match[0]].length - 1;
+      let rDelim, rLength, delimTotal = lLength, midDelimTotal = 0;
+      const endReg = match[0][0] === "*" ? this.rules.inline.emStrongRDelimAst : this.rules.inline.emStrongRDelimUnd;
+      endReg.lastIndex = 0;
+      maskedSrc = maskedSrc.slice(-1 * src.length + lLength);
+      while ((match = endReg.exec(maskedSrc)) != null) {
+        rDelim = match[1] || match[2] || match[3] || match[4] || match[5] || match[6];
+        if (!rDelim)
+          continue;
+        rLength = [...rDelim].length;
+        if (match[3] || match[4]) {
+          delimTotal += rLength;
+          continue;
+        } else if (match[5] || match[6]) {
+          if (lLength % 3 && !((lLength + rLength) % 3)) {
+            midDelimTotal += rLength;
+            continue;
+          }
+        }
+        delimTotal -= rLength;
+        if (delimTotal > 0)
+          continue;
+        rLength = Math.min(rLength, rLength + delimTotal + midDelimTotal);
+        const lastCharLength = [...match[0]][0].length;
+        const raw = src.slice(0, lLength + match.index + lastCharLength + rLength);
+        if (Math.min(lLength, rLength) % 2) {
+          const text2 = raw.slice(1, -1);
+          return {
+            type: "em",
+            raw,
+            text: text2,
+            tokens: this.lexer.inlineTokens(text2)
+          };
+        }
+        const text = raw.slice(2, -2);
+        return {
+          type: "strong",
+          raw,
+          text,
+          tokens: this.lexer.inlineTokens(text)
+        };
+      }
+    }
+  }
+  codespan(src) {
+    const cap = this.rules.inline.code.exec(src);
+    if (cap) {
+      let text = cap[2].replace(this.rules.other.newLineCharGlobal, " ");
+      const hasNonSpaceChars = this.rules.other.nonSpaceChar.test(text);
+      const hasSpaceCharsOnBothEnds = this.rules.other.startingSpaceChar.test(text) && this.rules.other.endingSpaceChar.test(text);
+      if (hasNonSpaceChars && hasSpaceCharsOnBothEnds) {
+        text = text.substring(1, text.length - 1);
+      }
+      return {
+        type: "codespan",
+        raw: cap[0],
+        text
+      };
+    }
+  }
+  br(src) {
+    const cap = this.rules.inline.br.exec(src);
+    if (cap) {
+      return {
+        type: "br",
+        raw: cap[0]
+      };
+    }
+  }
+  del(src) {
+    const cap = this.rules.inline.del.exec(src);
+    if (cap) {
+      return {
+        type: "del",
+        raw: cap[0],
+        text: cap[2],
+        tokens: this.lexer.inlineTokens(cap[2])
+      };
+    }
+  }
+  autolink(src) {
+    const cap = this.rules.inline.autolink.exec(src);
+    if (cap) {
+      let text, href;
+      if (cap[2] === "@") {
+        text = cap[1];
+        href = "mailto:" + text;
+      } else {
+        text = cap[1];
+        href = text;
+      }
+      return {
+        type: "link",
+        raw: cap[0],
+        text,
+        href,
+        tokens: [
+          {
+            type: "text",
+            raw: text,
+            text
+          }
+        ]
+      };
+    }
+  }
+  url(src) {
+    let cap;
+    if (cap = this.rules.inline.url.exec(src)) {
+      let text, href;
+      if (cap[2] === "@") {
+        text = cap[0];
+        href = "mailto:" + text;
+      } else {
+        let prevCapZero;
+        do {
+          prevCapZero = cap[0];
+          cap[0] = this.rules.inline._backpedal.exec(cap[0])?.[0] ?? "";
+        } while (prevCapZero !== cap[0]);
+        text = cap[0];
+        if (cap[1] === "www.") {
+          href = "http://" + cap[0];
+        } else {
+          href = cap[0];
+        }
+      }
+      return {
+        type: "link",
+        raw: cap[0],
+        text,
+        href,
+        tokens: [
+          {
+            type: "text",
+            raw: text,
+            text
+          }
+        ]
+      };
+    }
+  }
+  inlineText(src) {
+    const cap = this.rules.inline.text.exec(src);
+    if (cap) {
+      const escaped = this.lexer.state.inRawBlock;
+      return {
+        type: "text",
+        raw: cap[0],
+        text: cap[0],
+        escaped
+      };
+    }
+  }
+}, _Lexer = class __Lexer {
+  tokens;
+  options;
+  state;
+  tokenizer;
+  inlineQueue;
+  constructor(options2) {
+    this.tokens = [];
+    this.tokens.links = /* @__PURE__ */ Object.create(null);
+    this.options = options2 || _defaults;
+    this.options.tokenizer = this.options.tokenizer || new _Tokenizer;
+    this.tokenizer = this.options.tokenizer;
+    this.tokenizer.options = this.options;
+    this.tokenizer.lexer = this;
+    this.inlineQueue = [];
+    this.state = {
+      inLink: false,
+      inRawBlock: false,
+      top: true
+    };
+    const rules = {
+      other,
+      block: block.normal,
+      inline: inline.normal
+    };
+    if (this.options.pedantic) {
+      rules.block = block.pedantic;
+      rules.inline = inline.pedantic;
+    } else if (this.options.gfm) {
+      rules.block = block.gfm;
+      if (this.options.breaks) {
+        rules.inline = inline.breaks;
+      } else {
+        rules.inline = inline.gfm;
+      }
+    }
+    this.tokenizer.rules = rules;
+  }
+  static get rules() {
+    return {
+      block,
+      inline
+    };
+  }
+  static lex(src, options2) {
+    const lexer2 = new __Lexer(options2);
+    return lexer2.lex(src);
+  }
+  static lexInline(src, options2) {
+    const lexer2 = new __Lexer(options2);
+    return lexer2.inlineTokens(src);
+  }
+  lex(src) {
+    src = src.replace(other.carriageReturn, `
+`);
+    this.blockTokens(src, this.tokens);
+    for (let i = 0;i < this.inlineQueue.length; i++) {
+      const next = this.inlineQueue[i];
+      this.inlineTokens(next.src, next.tokens);
+    }
+    this.inlineQueue = [];
+    return this.tokens;
+  }
+  blockTokens(src, tokens = [], lastParagraphClipped = false) {
+    if (this.options.pedantic) {
+      src = src.replace(other.tabCharGlobal, "    ").replace(other.spaceLine, "");
+    }
+    while (src) {
+      let token;
+      if (this.options.extensions?.block?.some((extTokenizer) => {
+        if (token = extTokenizer.call({ lexer: this }, src, tokens)) {
+          src = src.substring(token.raw.length);
+          tokens.push(token);
+          return true;
+        }
+        return false;
+      })) {
+        continue;
+      }
+      if (token = this.tokenizer.space(src)) {
+        src = src.substring(token.raw.length);
+        const lastToken = tokens.at(-1);
+        if (token.raw.length === 1 && lastToken !== undefined) {
+          lastToken.raw += `
+`;
+        } else {
+          tokens.push(token);
+        }
+        continue;
+      }
+      if (token = this.tokenizer.code(src)) {
+        src = src.substring(token.raw.length);
+        const lastToken = tokens.at(-1);
+        if (lastToken?.type === "paragraph" || lastToken?.type === "text") {
+          lastToken.raw += `
+` + token.raw;
+          lastToken.text += `
+` + token.text;
+          this.inlineQueue.at(-1).src = lastToken.text;
+        } else {
+          tokens.push(token);
+        }
+        continue;
+      }
+      if (token = this.tokenizer.fences(src)) {
+        src = src.substring(token.raw.length);
+        tokens.push(token);
+        continue;
+      }
+      if (token = this.tokenizer.heading(src)) {
+        src = src.substring(token.raw.length);
+        tokens.push(token);
+        continue;
+      }
+      if (token = this.tokenizer.hr(src)) {
+        src = src.substring(token.raw.length);
+        tokens.push(token);
+        continue;
+      }
+      if (token = this.tokenizer.blockquote(src)) {
+        src = src.substring(token.raw.length);
+        tokens.push(token);
+        continue;
+      }
+      if (token = this.tokenizer.list(src)) {
+        src = src.substring(token.raw.length);
+        tokens.push(token);
+        continue;
+      }
+      if (token = this.tokenizer.html(src)) {
+        src = src.substring(token.raw.length);
+        tokens.push(token);
+        continue;
+      }
+      if (token = this.tokenizer.def(src)) {
+        src = src.substring(token.raw.length);
+        const lastToken = tokens.at(-1);
+        if (lastToken?.type === "paragraph" || lastToken?.type === "text") {
+          lastToken.raw += `
+` + token.raw;
+          lastToken.text += `
+` + token.raw;
+          this.inlineQueue.at(-1).src = lastToken.text;
+        } else if (!this.tokens.links[token.tag]) {
+          this.tokens.links[token.tag] = {
+            href: token.href,
+            title: token.title
+          };
+        }
+        continue;
+      }
+      if (token = this.tokenizer.table(src)) {
+        src = src.substring(token.raw.length);
+        tokens.push(token);
+        continue;
+      }
+      if (token = this.tokenizer.lheading(src)) {
+        src = src.substring(token.raw.length);
+        tokens.push(token);
+        continue;
+      }
+      let cutSrc = src;
+      if (this.options.extensions?.startBlock) {
+        let startIndex = Infinity;
+        const tempSrc = src.slice(1);
+        let tempStart;
+        this.options.extensions.startBlock.forEach((getStartIndex) => {
+          tempStart = getStartIndex.call({ lexer: this }, tempSrc);
+          if (typeof tempStart === "number" && tempStart >= 0) {
+            startIndex = Math.min(startIndex, tempStart);
+          }
+        });
+        if (startIndex < Infinity && startIndex >= 0) {
+          cutSrc = src.substring(0, startIndex + 1);
+        }
+      }
+      if (this.state.top && (token = this.tokenizer.paragraph(cutSrc))) {
+        const lastToken = tokens.at(-1);
+        if (lastParagraphClipped && lastToken?.type === "paragraph") {
+          lastToken.raw += `
+` + token.raw;
+          lastToken.text += `
+` + token.text;
+          this.inlineQueue.pop();
+          this.inlineQueue.at(-1).src = lastToken.text;
+        } else {
+          tokens.push(token);
+        }
+        lastParagraphClipped = cutSrc.length !== src.length;
+        src = src.substring(token.raw.length);
+        continue;
+      }
+      if (token = this.tokenizer.text(src)) {
+        src = src.substring(token.raw.length);
+        const lastToken = tokens.at(-1);
+        if (lastToken?.type === "text") {
+          lastToken.raw += `
+` + token.raw;
+          lastToken.text += `
+` + token.text;
+          this.inlineQueue.pop();
+          this.inlineQueue.at(-1).src = lastToken.text;
+        } else {
+          tokens.push(token);
+        }
+        continue;
+      }
+      if (src) {
+        const errMsg = "Infinite loop on byte: " + src.charCodeAt(0);
+        if (this.options.silent) {
+          console.error(errMsg);
+          break;
+        } else {
+          throw new Error(errMsg);
+        }
+      }
+    }
+    this.state.top = true;
+    return tokens;
+  }
+  inline(src, tokens = []) {
+    this.inlineQueue.push({ src, tokens });
+    return tokens;
+  }
+  inlineTokens(src, tokens = []) {
+    let maskedSrc = src;
+    let match = null;
+    if (this.tokens.links) {
+      const links = Object.keys(this.tokens.links);
+      if (links.length > 0) {
+        while ((match = this.tokenizer.rules.inline.reflinkSearch.exec(maskedSrc)) != null) {
+          if (links.includes(match[0].slice(match[0].lastIndexOf("[") + 1, -1))) {
+            maskedSrc = maskedSrc.slice(0, match.index) + "[" + "a".repeat(match[0].length - 2) + "]" + maskedSrc.slice(this.tokenizer.rules.inline.reflinkSearch.lastIndex);
+          }
+        }
+      }
+    }
+    while ((match = this.tokenizer.rules.inline.anyPunctuation.exec(maskedSrc)) != null) {
+      maskedSrc = maskedSrc.slice(0, match.index) + "++" + maskedSrc.slice(this.tokenizer.rules.inline.anyPunctuation.lastIndex);
+    }
+    while ((match = this.tokenizer.rules.inline.blockSkip.exec(maskedSrc)) != null) {
+      maskedSrc = maskedSrc.slice(0, match.index) + "[" + "a".repeat(match[0].length - 2) + "]" + maskedSrc.slice(this.tokenizer.rules.inline.blockSkip.lastIndex);
+    }
+    let keepPrevChar = false;
+    let prevChar = "";
+    while (src) {
+      if (!keepPrevChar) {
+        prevChar = "";
+      }
+      keepPrevChar = false;
+      let token;
+      if (this.options.extensions?.inline?.some((extTokenizer) => {
+        if (token = extTokenizer.call({ lexer: this }, src, tokens)) {
+          src = src.substring(token.raw.length);
+          tokens.push(token);
+          return true;
+        }
+        return false;
+      })) {
+        continue;
+      }
+      if (token = this.tokenizer.escape(src)) {
+        src = src.substring(token.raw.length);
+        tokens.push(token);
+        continue;
+      }
+      if (token = this.tokenizer.tag(src)) {
+        src = src.substring(token.raw.length);
+        tokens.push(token);
+        continue;
+      }
+      if (token = this.tokenizer.link(src)) {
+        src = src.substring(token.raw.length);
+        tokens.push(token);
+        continue;
+      }
+      if (token = this.tokenizer.reflink(src, this.tokens.links)) {
+        src = src.substring(token.raw.length);
+        const lastToken = tokens.at(-1);
+        if (token.type === "text" && lastToken?.type === "text") {
+          lastToken.raw += token.raw;
+          lastToken.text += token.text;
+        } else {
+          tokens.push(token);
+        }
+        continue;
+      }
+      if (token = this.tokenizer.emStrong(src, maskedSrc, prevChar)) {
+        src = src.substring(token.raw.length);
+        tokens.push(token);
+        continue;
+      }
+      if (token = this.tokenizer.codespan(src)) {
+        src = src.substring(token.raw.length);
+        tokens.push(token);
+        continue;
+      }
+      if (token = this.tokenizer.br(src)) {
+        src = src.substring(token.raw.length);
+        tokens.push(token);
+        continue;
+      }
+      if (token = this.tokenizer.del(src)) {
+        src = src.substring(token.raw.length);
+        tokens.push(token);
+        continue;
+      }
+      if (token = this.tokenizer.autolink(src)) {
+        src = src.substring(token.raw.length);
+        tokens.push(token);
+        continue;
+      }
+      if (!this.state.inLink && (token = this.tokenizer.url(src))) {
+        src = src.substring(token.raw.length);
+        tokens.push(token);
+        continue;
+      }
+      let cutSrc = src;
+      if (this.options.extensions?.startInline) {
+        let startIndex = Infinity;
+        const tempSrc = src.slice(1);
+        let tempStart;
+        this.options.extensions.startInline.forEach((getStartIndex) => {
+          tempStart = getStartIndex.call({ lexer: this }, tempSrc);
+          if (typeof tempStart === "number" && tempStart >= 0) {
+            startIndex = Math.min(startIndex, tempStart);
+          }
+        });
+        if (startIndex < Infinity && startIndex >= 0) {
+          cutSrc = src.substring(0, startIndex + 1);
+        }
+      }
+      if (token = this.tokenizer.inlineText(cutSrc)) {
+        src = src.substring(token.raw.length);
+        if (token.raw.slice(-1) !== "_") {
+          prevChar = token.raw.slice(-1);
+        }
+        keepPrevChar = true;
+        const lastToken = tokens.at(-1);
+        if (lastToken?.type === "text") {
+          lastToken.raw += token.raw;
+          lastToken.text += token.text;
+        } else {
+          tokens.push(token);
+        }
+        continue;
+      }
+      if (src) {
+        const errMsg = "Infinite loop on byte: " + src.charCodeAt(0);
+        if (this.options.silent) {
+          console.error(errMsg);
+          break;
+        } else {
+          throw new Error(errMsg);
+        }
+      }
+    }
+    return tokens;
+  }
+}, _Renderer = class {
+  options;
+  parser;
+  constructor(options2) {
+    this.options = options2 || _defaults;
+  }
+  space(token) {
+    return "";
+  }
+  code({ text, lang, escaped }) {
+    const langString = (lang || "").match(other.notSpaceStart)?.[0];
+    const code = text.replace(other.endingNewline, "") + `
+`;
+    if (!langString) {
+      return "<pre><code>" + (escaped ? code : escape22(code, true)) + `</code></pre>
+`;
+    }
+    return '<pre><code class="language-' + escape22(langString) + '">' + (escaped ? code : escape22(code, true)) + `</code></pre>
+`;
+  }
+  blockquote({ tokens }) {
+    const body = this.parser.parse(tokens);
+    return `<blockquote>
+${body}</blockquote>
+`;
+  }
+  html({ text }) {
+    return text;
+  }
+  heading({ tokens, depth }) {
+    return `<h${depth}>${this.parser.parseInline(tokens)}</h${depth}>
+`;
+  }
+  hr(token) {
+    return `<hr>
+`;
+  }
+  list(token) {
+    const ordered = token.ordered;
+    const start = token.start;
+    let body = "";
+    for (let j = 0;j < token.items.length; j++) {
+      const item = token.items[j];
+      body += this.listitem(item);
+    }
+    const type = ordered ? "ol" : "ul";
+    const startAttr = ordered && start !== 1 ? ' start="' + start + '"' : "";
+    return "<" + type + startAttr + `>
+` + body + "</" + type + `>
+`;
+  }
+  listitem(item) {
+    let itemBody = "";
+    if (item.task) {
+      const checkbox = this.checkbox({ checked: !!item.checked });
+      if (item.loose) {
+        if (item.tokens[0]?.type === "paragraph") {
+          item.tokens[0].text = checkbox + " " + item.tokens[0].text;
+          if (item.tokens[0].tokens && item.tokens[0].tokens.length > 0 && item.tokens[0].tokens[0].type === "text") {
+            item.tokens[0].tokens[0].text = checkbox + " " + escape22(item.tokens[0].tokens[0].text);
+            item.tokens[0].tokens[0].escaped = true;
+          }
+        } else {
+          item.tokens.unshift({
+            type: "text",
+            raw: checkbox + " ",
+            text: checkbox + " ",
+            escaped: true
+          });
+        }
+      } else {
+        itemBody += checkbox + " ";
+      }
+    }
+    itemBody += this.parser.parse(item.tokens, !!item.loose);
+    return `<li>${itemBody}</li>
+`;
+  }
+  checkbox({ checked }) {
+    return "<input " + (checked ? 'checked="" ' : "") + 'disabled="" type="checkbox">';
+  }
+  paragraph({ tokens }) {
+    return `<p>${this.parser.parseInline(tokens)}</p>
+`;
+  }
+  table(token) {
+    let header = "";
+    let cell = "";
+    for (let j = 0;j < token.header.length; j++) {
+      cell += this.tablecell(token.header[j]);
+    }
+    header += this.tablerow({ text: cell });
+    let body = "";
+    for (let j = 0;j < token.rows.length; j++) {
+      const row = token.rows[j];
+      cell = "";
+      for (let k = 0;k < row.length; k++) {
+        cell += this.tablecell(row[k]);
+      }
+      body += this.tablerow({ text: cell });
+    }
+    if (body)
+      body = `<tbody>${body}</tbody>`;
+    return `<table>
+<thead>
+` + header + `</thead>
+` + body + `</table>
+`;
+  }
+  tablerow({ text }) {
+    return `<tr>
+${text}</tr>
+`;
+  }
+  tablecell(token) {
+    const content = this.parser.parseInline(token.tokens);
+    const type = token.header ? "th" : "td";
+    const tag2 = token.align ? `<${type} align="${token.align}">` : `<${type}>`;
+    return tag2 + content + `</${type}>
+`;
+  }
+  strong({ tokens }) {
+    return `<strong>${this.parser.parseInline(tokens)}</strong>`;
+  }
+  em({ tokens }) {
+    return `<em>${this.parser.parseInline(tokens)}</em>`;
+  }
+  codespan({ text }) {
+    return `<code>${escape22(text, true)}</code>`;
+  }
+  br(token) {
+    return "<br>";
+  }
+  del({ tokens }) {
+    return `<del>${this.parser.parseInline(tokens)}</del>`;
+  }
+  link({ href, title, tokens }) {
+    const text = this.parser.parseInline(tokens);
+    const cleanHref = cleanUrl(href);
+    if (cleanHref === null) {
+      return text;
+    }
+    href = cleanHref;
+    let out = '<a href="' + href + '"';
+    if (title) {
+      out += ' title="' + escape22(title) + '"';
+    }
+    out += ">" + text + "</a>";
+    return out;
+  }
+  image({ href, title, text, tokens }) {
+    if (tokens) {
+      text = this.parser.parseInline(tokens, this.parser.textRenderer);
+    }
+    const cleanHref = cleanUrl(href);
+    if (cleanHref === null) {
+      return escape22(text);
+    }
+    href = cleanHref;
+    let out = `<img src="${href}" alt="${text}"`;
+    if (title) {
+      out += ` title="${escape22(title)}"`;
+    }
+    out += ">";
+    return out;
+  }
+  text(token) {
+    return "tokens" in token && token.tokens ? this.parser.parseInline(token.tokens) : ("escaped" in token) && token.escaped ? token.text : escape22(token.text);
+  }
+}, _TextRenderer = class {
+  strong({ text }) {
+    return text;
+  }
+  em({ text }) {
+    return text;
+  }
+  codespan({ text }) {
+    return text;
+  }
+  del({ text }) {
+    return text;
+  }
+  html({ text }) {
+    return text;
+  }
+  text({ text }) {
+    return text;
+  }
+  link({ text }) {
+    return "" + text;
+  }
+  image({ text }) {
+    return "" + text;
+  }
+  br() {
+    return "";
+  }
+}, _Parser = class __Parser {
+  options;
+  renderer;
+  textRenderer;
+  constructor(options2) {
+    this.options = options2 || _defaults;
+    this.options.renderer = this.options.renderer || new _Renderer;
+    this.renderer = this.options.renderer;
+    this.renderer.options = this.options;
+    this.renderer.parser = this;
+    this.textRenderer = new _TextRenderer;
+  }
+  static parse(tokens, options2) {
+    const parser2 = new __Parser(options2);
+    return parser2.parse(tokens);
+  }
+  static parseInline(tokens, options2) {
+    const parser2 = new __Parser(options2);
+    return parser2.parseInline(tokens);
+  }
+  parse(tokens, top = true) {
+    let out = "";
+    for (let i = 0;i < tokens.length; i++) {
+      const anyToken = tokens[i];
+      if (this.options.extensions?.renderers?.[anyToken.type]) {
+        const genericToken = anyToken;
+        const ret = this.options.extensions.renderers[genericToken.type].call({ parser: this }, genericToken);
+        if (ret !== false || !["space", "hr", "heading", "code", "table", "blockquote", "list", "html", "paragraph", "text"].includes(genericToken.type)) {
+          out += ret || "";
+          continue;
+        }
+      }
+      const token = anyToken;
+      switch (token.type) {
+        case "space": {
+          out += this.renderer.space(token);
+          continue;
+        }
+        case "hr": {
+          out += this.renderer.hr(token);
+          continue;
+        }
+        case "heading": {
+          out += this.renderer.heading(token);
+          continue;
+        }
+        case "code": {
+          out += this.renderer.code(token);
+          continue;
+        }
+        case "table": {
+          out += this.renderer.table(token);
+          continue;
+        }
+        case "blockquote": {
+          out += this.renderer.blockquote(token);
+          continue;
+        }
+        case "list": {
+          out += this.renderer.list(token);
+          continue;
+        }
+        case "html": {
+          out += this.renderer.html(token);
+          continue;
+        }
+        case "paragraph": {
+          out += this.renderer.paragraph(token);
+          continue;
+        }
+        case "text": {
+          let textToken = token;
+          let body = this.renderer.text(textToken);
+          while (i + 1 < tokens.length && tokens[i + 1].type === "text") {
+            textToken = tokens[++i];
+            body += `
+` + this.renderer.text(textToken);
+          }
+          if (top) {
+            out += this.renderer.paragraph({
+              type: "paragraph",
+              raw: body,
+              text: body,
+              tokens: [{ type: "text", raw: body, text: body, escaped: true }]
+            });
+          } else {
+            out += body;
+          }
+          continue;
+        }
+        default: {
+          const errMsg = 'Token with "' + token.type + '" type was not found.';
+          if (this.options.silent) {
+            console.error(errMsg);
+            return "";
+          } else {
+            throw new Error(errMsg);
+          }
+        }
+      }
+    }
+    return out;
+  }
+  parseInline(tokens, renderer = this.renderer) {
+    let out = "";
+    for (let i = 0;i < tokens.length; i++) {
+      const anyToken = tokens[i];
+      if (this.options.extensions?.renderers?.[anyToken.type]) {
+        const ret = this.options.extensions.renderers[anyToken.type].call({ parser: this }, anyToken);
+        if (ret !== false || !["escape", "html", "link", "image", "strong", "em", "codespan", "br", "del", "text"].includes(anyToken.type)) {
+          out += ret || "";
+          continue;
+        }
+      }
+      const token = anyToken;
+      switch (token.type) {
+        case "escape": {
+          out += renderer.text(token);
+          break;
+        }
+        case "html": {
+          out += renderer.html(token);
+          break;
+        }
+        case "link": {
+          out += renderer.link(token);
+          break;
+        }
+        case "image": {
+          out += renderer.image(token);
+          break;
+        }
+        case "strong": {
+          out += renderer.strong(token);
+          break;
+        }
+        case "em": {
+          out += renderer.em(token);
+          break;
+        }
+        case "codespan": {
+          out += renderer.codespan(token);
+          break;
+        }
+        case "br": {
+          out += renderer.br(token);
+          break;
+        }
+        case "del": {
+          out += renderer.del(token);
+          break;
+        }
+        case "text": {
+          out += renderer.text(token);
+          break;
+        }
+        default: {
+          const errMsg = 'Token with "' + token.type + '" type was not found.';
+          if (this.options.silent) {
+            console.error(errMsg);
+            return "";
+          } else {
+            throw new Error(errMsg);
+          }
+        }
+      }
+    }
+    return out;
+  }
+}, _Hooks, Marked = class {
+  defaults = _getDefaults();
+  options = this.setOptions;
+  parse = this.parseMarkdown(true);
+  parseInline = this.parseMarkdown(false);
+  Parser = _Parser;
+  Renderer = _Renderer;
+  TextRenderer = _TextRenderer;
+  Lexer = _Lexer;
+  Tokenizer = _Tokenizer;
+  Hooks = _Hooks;
+  constructor(...args) {
+    this.use(...args);
+  }
+  walkTokens(tokens, callback) {
+    let values = [];
+    for (const token of tokens) {
+      values = values.concat(callback.call(this, token));
+      switch (token.type) {
+        case "table": {
+          const tableToken = token;
+          for (const cell of tableToken.header) {
+            values = values.concat(this.walkTokens(cell.tokens, callback));
+          }
+          for (const row of tableToken.rows) {
+            for (const cell of row) {
+              values = values.concat(this.walkTokens(cell.tokens, callback));
+            }
+          }
+          break;
+        }
+        case "list": {
+          const listToken = token;
+          values = values.concat(this.walkTokens(listToken.items, callback));
+          break;
+        }
+        default: {
+          const genericToken = token;
+          if (this.defaults.extensions?.childTokens?.[genericToken.type]) {
+            this.defaults.extensions.childTokens[genericToken.type].forEach((childTokens) => {
+              const tokens2 = genericToken[childTokens].flat(Infinity);
+              values = values.concat(this.walkTokens(tokens2, callback));
+            });
+          } else if (genericToken.tokens) {
+            values = values.concat(this.walkTokens(genericToken.tokens, callback));
+          }
+        }
+      }
+    }
+    return values;
+  }
+  use(...args) {
+    const extensions = this.defaults.extensions || { renderers: {}, childTokens: {} };
+    args.forEach((pack) => {
+      const opts = { ...pack };
+      opts.async = this.defaults.async || opts.async || false;
+      if (pack.extensions) {
+        pack.extensions.forEach((ext) => {
+          if (!ext.name) {
+            throw new Error("extension name required");
+          }
+          if ("renderer" in ext) {
+            const prevRenderer = extensions.renderers[ext.name];
+            if (prevRenderer) {
+              extensions.renderers[ext.name] = function(...args2) {
+                let ret = ext.renderer.apply(this, args2);
+                if (ret === false) {
+                  ret = prevRenderer.apply(this, args2);
+                }
+                return ret;
+              };
+            } else {
+              extensions.renderers[ext.name] = ext.renderer;
+            }
+          }
+          if ("tokenizer" in ext) {
+            if (!ext.level || ext.level !== "block" && ext.level !== "inline") {
+              throw new Error("extension level must be 'block' or 'inline'");
+            }
+            const extLevel = extensions[ext.level];
+            if (extLevel) {
+              extLevel.unshift(ext.tokenizer);
+            } else {
+              extensions[ext.level] = [ext.tokenizer];
+            }
+            if (ext.start) {
+              if (ext.level === "block") {
+                if (extensions.startBlock) {
+                  extensions.startBlock.push(ext.start);
+                } else {
+                  extensions.startBlock = [ext.start];
+                }
+              } else if (ext.level === "inline") {
+                if (extensions.startInline) {
+                  extensions.startInline.push(ext.start);
+                } else {
+                  extensions.startInline = [ext.start];
+                }
+              }
+            }
+          }
+          if ("childTokens" in ext && ext.childTokens) {
+            extensions.childTokens[ext.name] = ext.childTokens;
+          }
+        });
+        opts.extensions = extensions;
+      }
+      if (pack.renderer) {
+        const renderer = this.defaults.renderer || new _Renderer(this.defaults);
+        for (const prop in pack.renderer) {
+          if (!(prop in renderer)) {
+            throw new Error(`renderer '${prop}' does not exist`);
+          }
+          if (["options", "parser"].includes(prop)) {
+            continue;
+          }
+          const rendererProp = prop;
+          const rendererFunc = pack.renderer[rendererProp];
+          const prevRenderer = renderer[rendererProp];
+          renderer[rendererProp] = (...args2) => {
+            let ret = rendererFunc.apply(renderer, args2);
+            if (ret === false) {
+              ret = prevRenderer.apply(renderer, args2);
+            }
+            return ret || "";
+          };
+        }
+        opts.renderer = renderer;
+      }
+      if (pack.tokenizer) {
+        const tokenizer = this.defaults.tokenizer || new _Tokenizer(this.defaults);
+        for (const prop in pack.tokenizer) {
+          if (!(prop in tokenizer)) {
+            throw new Error(`tokenizer '${prop}' does not exist`);
+          }
+          if (["options", "rules", "lexer"].includes(prop)) {
+            continue;
+          }
+          const tokenizerProp = prop;
+          const tokenizerFunc = pack.tokenizer[tokenizerProp];
+          const prevTokenizer = tokenizer[tokenizerProp];
+          tokenizer[tokenizerProp] = (...args2) => {
+            let ret = tokenizerFunc.apply(tokenizer, args2);
+            if (ret === false) {
+              ret = prevTokenizer.apply(tokenizer, args2);
+            }
+            return ret;
+          };
+        }
+        opts.tokenizer = tokenizer;
+      }
+      if (pack.hooks) {
+        const hooks = this.defaults.hooks || new _Hooks;
+        for (const prop in pack.hooks) {
+          if (!(prop in hooks)) {
+            throw new Error(`hook '${prop}' does not exist`);
+          }
+          if (["options", "block"].includes(prop)) {
+            continue;
+          }
+          const hooksProp = prop;
+          const hooksFunc = pack.hooks[hooksProp];
+          const prevHook = hooks[hooksProp];
+          if (_Hooks.passThroughHooks.has(prop)) {
+            hooks[hooksProp] = (arg) => {
+              if (this.defaults.async) {
+                return Promise.resolve(hooksFunc.call(hooks, arg)).then((ret2) => {
+                  return prevHook.call(hooks, ret2);
+                });
+              }
+              const ret = hooksFunc.call(hooks, arg);
+              return prevHook.call(hooks, ret);
+            };
+          } else {
+            hooks[hooksProp] = (...args2) => {
+              let ret = hooksFunc.apply(hooks, args2);
+              if (ret === false) {
+                ret = prevHook.apply(hooks, args2);
+              }
+              return ret;
+            };
+          }
+        }
+        opts.hooks = hooks;
+      }
+      if (pack.walkTokens) {
+        const walkTokens2 = this.defaults.walkTokens;
+        const packWalktokens = pack.walkTokens;
+        opts.walkTokens = function(token) {
+          let values = [];
+          values.push(packWalktokens.call(this, token));
+          if (walkTokens2) {
+            values = values.concat(walkTokens2.call(this, token));
+          }
+          return values;
+        };
+      }
+      this.defaults = { ...this.defaults, ...opts };
+    });
+    return this;
+  }
+  setOptions(opt) {
+    this.defaults = { ...this.defaults, ...opt };
+    return this;
+  }
+  lexer(src, options2) {
+    return _Lexer.lex(src, options2 ?? this.defaults);
+  }
+  parser(tokens, options2) {
+    return _Parser.parse(tokens, options2 ?? this.defaults);
+  }
+  parseMarkdown(blockType) {
+    const parse22 = (src, options2) => {
+      const origOpt = { ...options2 };
+      const opt = { ...this.defaults, ...origOpt };
+      const throwError = this.onError(!!opt.silent, !!opt.async);
+      if (this.defaults.async === true && origOpt.async === false) {
+        return throwError(new Error("marked(): The async option was set to true by an extension. Remove async: false from the parse options object to return a Promise."));
+      }
+      if (typeof src === "undefined" || src === null) {
+        return throwError(new Error("marked(): input parameter is undefined or null"));
+      }
+      if (typeof src !== "string") {
+        return throwError(new Error("marked(): input parameter is of type " + Object.prototype.toString.call(src) + ", string expected"));
+      }
+      if (opt.hooks) {
+        opt.hooks.options = opt;
+        opt.hooks.block = blockType;
+      }
+      const lexer2 = opt.hooks ? opt.hooks.provideLexer() : blockType ? _Lexer.lex : _Lexer.lexInline;
+      const parser2 = opt.hooks ? opt.hooks.provideParser() : blockType ? _Parser.parse : _Parser.parseInline;
+      if (opt.async) {
+        return Promise.resolve(opt.hooks ? opt.hooks.preprocess(src) : src).then((src2) => lexer2(src2, opt)).then((tokens) => opt.hooks ? opt.hooks.processAllTokens(tokens) : tokens).then((tokens) => opt.walkTokens ? Promise.all(this.walkTokens(tokens, opt.walkTokens)).then(() => tokens) : tokens).then((tokens) => parser2(tokens, opt)).then((html2) => opt.hooks ? opt.hooks.postprocess(html2) : html2).catch(throwError);
+      }
+      try {
+        if (opt.hooks) {
+          src = opt.hooks.preprocess(src);
+        }
+        let tokens = lexer2(src, opt);
+        if (opt.hooks) {
+          tokens = opt.hooks.processAllTokens(tokens);
+        }
+        if (opt.walkTokens) {
+          this.walkTokens(tokens, opt.walkTokens);
+        }
+        let html2 = parser2(tokens, opt);
+        if (opt.hooks) {
+          html2 = opt.hooks.postprocess(html2);
+        }
+        return html2;
+      } catch (e) {
+        return throwError(e);
+      }
+    };
+    return parse22;
+  }
+  onError(silent, async) {
+    return (e) => {
+      e.message += `
+Please report this to https://github.com/markedjs/marked.`;
+      if (silent) {
+        const msg = "<p>An error occurred:</p><pre>" + escape22(e.message + "", true) + "</pre>";
+        if (async) {
+          return Promise.resolve(msg);
+        }
+        return msg;
+      }
+      if (async) {
+        return Promise.reject(e);
+      }
+      throw e;
+    };
+  }
+}, markedInstance, options, setOptions, use, walkTokens, parseInline, parser2, lexer2;
+var init_marked_esm = __esm(() => {
+  _defaults = _getDefaults();
+  noopTest = { exec: () => null };
+  other = {
+    codeRemoveIndent: /^(?: {1,4}| {0,3}\t)/gm,
+    outputLinkReplace: /\\([\[\]])/g,
+    indentCodeCompensation: /^(\s+)(?:```)/,
+    beginningSpace: /^\s+/,
+    endingHash: /#$/,
+    startingSpaceChar: /^ /,
+    endingSpaceChar: / $/,
+    nonSpaceChar: /[^ ]/,
+    newLineCharGlobal: /\n/g,
+    tabCharGlobal: /\t/g,
+    multipleSpaceGlobal: /\s+/g,
+    blankLine: /^[ \t]*$/,
+    doubleBlankLine: /\n[ \t]*\n[ \t]*$/,
+    blockquoteStart: /^ {0,3}>/,
+    blockquoteSetextReplace: /\n {0,3}((?:=+|-+) *)(?=\n|$)/g,
+    blockquoteSetextReplace2: /^ {0,3}>[ \t]?/gm,
+    listReplaceTabs: /^\t+/,
+    listReplaceNesting: /^ {1,4}(?=( {4})*[^ ])/g,
+    listIsTask: /^\[[ xX]\] /,
+    listReplaceTask: /^\[[ xX]\] +/,
+    anyLine: /\n.*\n/,
+    hrefBrackets: /^<(.*)>$/,
+    tableDelimiter: /[:|]/,
+    tableAlignChars: /^\||\| *$/g,
+    tableRowBlankLine: /\n[ \t]*$/,
+    tableAlignRight: /^ *-+: *$/,
+    tableAlignCenter: /^ *:-+: *$/,
+    tableAlignLeft: /^ *:-+ *$/,
+    startATag: /^<a /i,
+    endATag: /^<\/a>/i,
+    startPreScriptTag: /^<(pre|code|kbd|script)(\s|>)/i,
+    endPreScriptTag: /^<\/(pre|code|kbd|script)(\s|>)/i,
+    startAngleBracket: /^</,
+    endAngleBracket: />$/,
+    pedanticHrefTitle: /^([^'"]*[^\s])\s+(['"])(.*)\2/,
+    unicodeAlphaNumeric: /[\p{L}\p{N}]/u,
+    escapeTest: /[&<>"']/,
+    escapeReplace: /[&<>"']/g,
+    escapeTestNoEncode: /[<>"']|&(?!(#\d{1,7}|#[Xx][a-fA-F0-9]{1,6}|\w+);)/,
+    escapeReplaceNoEncode: /[<>"']|&(?!(#\d{1,7}|#[Xx][a-fA-F0-9]{1,6}|\w+);)/g,
+    unescapeTest: /&(#(?:\d+)|(?:#x[0-9A-Fa-f]+)|(?:\w+));?/ig,
+    caret: /(^|[^\[])\^/g,
+    percentDecode: /%25/g,
+    findPipe: /\|/g,
+    splitPipe: / \|/,
+    slashPipe: /\\\|/g,
+    carriageReturn: /\r\n|\r/g,
+    spaceLine: /^ +$/gm,
+    notSpaceStart: /^\S*/,
+    endingNewline: /\n$/,
+    listItemRegex: (bull) => new RegExp(`^( {0,3}${bull})((?:[	 ][^\\n]*)?(?:\\n|$))`),
+    nextBulletRegex: (indent) => new RegExp(`^ {0,${Math.min(3, indent - 1)}}(?:[*+-]|\\d{1,9}[.)])((?:[ 	][^\\n]*)?(?:\\n|$))`),
+    hrRegex: (indent) => new RegExp(`^ {0,${Math.min(3, indent - 1)}}((?:- *){3,}|(?:_ *){3,}|(?:\\* *){3,})(?:\\n+|$)`),
+    fencesBeginRegex: (indent) => new RegExp(`^ {0,${Math.min(3, indent - 1)}}(?:\`\`\`|~~~)`),
+    headingBeginRegex: (indent) => new RegExp(`^ {0,${Math.min(3, indent - 1)}}#`),
+    htmlBeginRegex: (indent) => new RegExp(`^ {0,${Math.min(3, indent - 1)}}<(?:[a-z].*>|!--)`, "i")
+  };
+  newline = /^(?:[ \t]*(?:\n|$))+/;
+  blockCode = /^((?: {4}| {0,3}\t)[^\n]+(?:\n(?:[ \t]*(?:\n|$))*)?)+/;
+  fences = /^ {0,3}(`{3,}(?=[^`\n]*(?:\n|$))|~{3,})([^\n]*)(?:\n|$)(?:|([\s\S]*?)(?:\n|$))(?: {0,3}\1[~`]* *(?=\n|$)|$)/;
+  hr = /^ {0,3}((?:-[\t ]*){3,}|(?:_[ \t]*){3,}|(?:\*[ \t]*){3,})(?:\n+|$)/;
+  heading = /^ {0,3}(#{1,6})(?=\s|$)(.*)(?:\n+|$)/;
+  bullet = /(?:[*+-]|\d{1,9}[.)])/;
+  lheadingCore = /^(?!bull |blockCode|fences|blockquote|heading|html|table)((?:.|\n(?!\s*?\n|bull |blockCode|fences|blockquote|heading|html|table))+?)\n {0,3}(=+|-+) *(?:\n+|$)/;
+  lheading = edit(lheadingCore).replace(/bull/g, bullet).replace(/blockCode/g, /(?: {4}| {0,3}\t)/).replace(/fences/g, / {0,3}(?:`{3,}|~{3,})/).replace(/blockquote/g, / {0,3}>/).replace(/heading/g, / {0,3}#{1,6}/).replace(/html/g, / {0,3}<[^\n>]+>\n/).replace(/\|table/g, "").getRegex();
+  lheadingGfm = edit(lheadingCore).replace(/bull/g, bullet).replace(/blockCode/g, /(?: {4}| {0,3}\t)/).replace(/fences/g, / {0,3}(?:`{3,}|~{3,})/).replace(/blockquote/g, / {0,3}>/).replace(/heading/g, / {0,3}#{1,6}/).replace(/html/g, / {0,3}<[^\n>]+>\n/).replace(/table/g, / {0,3}\|?(?:[:\- ]*\|)+[\:\- ]*\n/).getRegex();
+  _paragraph = /^([^\n]+(?:\n(?!hr|heading|lheading|blockquote|fences|list|html|table| +\n)[^\n]+)*)/;
+  blockText = /^[^\n]+/;
+  _blockLabel = /(?!\s*\])(?:\\.|[^\[\]\\])+/;
+  def = edit(/^ {0,3}\[(label)\]: *(?:\n[ \t]*)?([^<\s][^\s]*|<.*?>)(?:(?: +(?:\n[ \t]*)?| *\n[ \t]*)(title))? *(?:\n+|$)/).replace("label", _blockLabel).replace("title", /(?:"(?:\\"?|[^"\\])*"|'[^'\n]*(?:\n[^'\n]+)*\n?'|\([^()]*\))/).getRegex();
+  list = edit(/^( {0,3}bull)([ \t][^\n]+?)?(?:\n|$)/).replace(/bull/g, bullet).getRegex();
+  _comment = /<!--(?:-?>|[\s\S]*?(?:-->|$))/;
+  html = edit("^ {0,3}(?:<(script|pre|style|textarea)[\\s>][\\s\\S]*?(?:</\\1>[^\\n]*\\n+|$)|comment[^\\n]*(\\n+|$)|<\\?[\\s\\S]*?(?:\\?>\\n*|$)|<![A-Z][\\s\\S]*?(?:>\\n*|$)|<!\\[CDATA\\[[\\s\\S]*?(?:\\]\\]>\\n*|$)|</?(tag)(?: +|\\n|/?>)[\\s\\S]*?(?:(?:\\n[ \t]*)+\\n|$)|<(?!script|pre|style|textarea)([a-z][\\w-]*)(?:attribute)*? */?>(?=[ \\t]*(?:\\n|$))[\\s\\S]*?(?:(?:\\n[ \t]*)+\\n|$)|</(?!script|pre|style|textarea)[a-z][\\w-]*\\s*>(?=[ \\t]*(?:\\n|$))[\\s\\S]*?(?:(?:\\n[ \t]*)+\\n|$))", "i").replace("comment", _comment).replace("tag", _tag).replace("attribute", / +[a-zA-Z:_][\w.:-]*(?: *= *"[^"\n]*"| *= *'[^'\n]*'| *= *[^\s"'=<>`]+)?/).getRegex();
+  paragraph = edit(_paragraph).replace("hr", hr).replace("heading", " {0,3}#{1,6}(?:\\s|$)").replace("|lheading", "").replace("|table", "").replace("blockquote", " {0,3}>").replace("fences", " {0,3}(?:`{3,}(?=[^`\\n]*\\n)|~{3,})[^\\n]*\\n").replace("list", " {0,3}(?:[*+-]|1[.)]) ").replace("html", "</?(?:tag)(?: +|\\n|/?>)|<(?:script|pre|style|textarea|!--)").replace("tag", _tag).getRegex();
+  blockquote = edit(/^( {0,3}> ?(paragraph|[^\n]*)(?:\n|$))+/).replace("paragraph", paragraph).getRegex();
+  blockNormal = {
+    blockquote,
+    code: blockCode,
+    def,
+    fences,
+    heading,
+    hr,
+    html,
+    lheading,
+    list,
+    newline,
+    paragraph,
+    table: noopTest,
+    text: blockText
+  };
+  gfmTable = edit("^ *([^\\n ].*)\\n {0,3}((?:\\| *)?:?-+:? *(?:\\| *:?-+:? *)*(?:\\| *)?)(?:\\n((?:(?! *\\n|hr|heading|blockquote|code|fences|list|html).*(?:\\n|$))*)\\n*|$)").replace("hr", hr).replace("heading", " {0,3}#{1,6}(?:\\s|$)").replace("blockquote", " {0,3}>").replace("code", "(?: {4}| {0,3}\t)[^\\n]").replace("fences", " {0,3}(?:`{3,}(?=[^`\\n]*\\n)|~{3,})[^\\n]*\\n").replace("list", " {0,3}(?:[*+-]|1[.)]) ").replace("html", "</?(?:tag)(?: +|\\n|/?>)|<(?:script|pre|style|textarea|!--)").replace("tag", _tag).getRegex();
+  blockGfm = {
+    ...blockNormal,
+    lheading: lheadingGfm,
+    table: gfmTable,
+    paragraph: edit(_paragraph).replace("hr", hr).replace("heading", " {0,3}#{1,6}(?:\\s|$)").replace("|lheading", "").replace("table", gfmTable).replace("blockquote", " {0,3}>").replace("fences", " {0,3}(?:`{3,}(?=[^`\\n]*\\n)|~{3,})[^\\n]*\\n").replace("list", " {0,3}(?:[*+-]|1[.)]) ").replace("html", "</?(?:tag)(?: +|\\n|/?>)|<(?:script|pre|style|textarea|!--)").replace("tag", _tag).getRegex()
+  };
+  blockPedantic = {
+    ...blockNormal,
+    html: edit(`^ *(?:comment *(?:\\n|\\s*$)|<(tag)[\\s\\S]+?</\\1> *(?:\\n{2,}|\\s*$)|<tag(?:"[^"]*"|'[^']*'|\\s[^'"/>\\s]*)*?/?> *(?:\\n{2,}|\\s*$))`).replace("comment", _comment).replace(/tag/g, "(?!(?:a|em|strong|small|s|cite|q|dfn|abbr|data|time|code|var|samp|kbd|sub|sup|i|b|u|mark|ruby|rt|rp|bdi|bdo|span|br|wbr|ins|del|img)\\b)\\w+(?!:|[^\\w\\s@]*@)\\b").getRegex(),
+    def: /^ *\[([^\]]+)\]: *<?([^\s>]+)>?(?: +(["(][^\n]+[")]))? *(?:\n+|$)/,
+    heading: /^(#{1,6})(.*)(?:\n+|$)/,
+    fences: noopTest,
+    lheading: /^(.+?)\n {0,3}(=+|-+) *(?:\n+|$)/,
+    paragraph: edit(_paragraph).replace("hr", hr).replace("heading", ` *#{1,6} *[^
+]`).replace("lheading", lheading).replace("|table", "").replace("blockquote", " {0,3}>").replace("|fences", "").replace("|list", "").replace("|html", "").replace("|tag", "").getRegex()
+  };
+  escape2 = /^\\([!"#$%&'()*+,\-./:;<=>?@\[\]\\^_`{|}~])/;
+  inlineCode = /^(`+)([^`]|[^`][\s\S]*?[^`])\1(?!`)/;
+  br = /^( {2,}|\\)\n(?!\s*$)/;
+  inlineText = /^(`+|[^`])(?:(?= {2,}\n)|[\s\S]*?(?:(?=[\\<!\[`*_]|\b_|$)|[^ ](?= {2,}\n)))/;
+  _punctuation = /[\p{P}\p{S}]/u;
+  _punctuationOrSpace = /[\s\p{P}\p{S}]/u;
+  _notPunctuationOrSpace = /[^\s\p{P}\p{S}]/u;
+  punctuation = edit(/^((?![*_])punctSpace)/, "u").replace(/punctSpace/g, _punctuationOrSpace).getRegex();
+  _punctuationGfmStrongEm = /(?!~)[\p{P}\p{S}]/u;
+  _punctuationOrSpaceGfmStrongEm = /(?!~)[\s\p{P}\p{S}]/u;
+  _notPunctuationOrSpaceGfmStrongEm = /(?:[^\s\p{P}\p{S}]|~)/u;
+  blockSkip = /\[[^[\]]*?\]\((?:\\.|[^\\\(\)]|\((?:\\.|[^\\\(\)])*\))*\)|`[^`]*?`|<[^<>]*?>/g;
+  emStrongLDelimCore = /^(?:\*+(?:((?!\*)punct)|[^\s*]))|^_+(?:((?!_)punct)|([^\s_]))/;
+  emStrongLDelim = edit(emStrongLDelimCore, "u").replace(/punct/g, _punctuation).getRegex();
+  emStrongLDelimGfm = edit(emStrongLDelimCore, "u").replace(/punct/g, _punctuationGfmStrongEm).getRegex();
+  emStrongRDelimAst = edit(emStrongRDelimAstCore, "gu").replace(/notPunctSpace/g, _notPunctuationOrSpace).replace(/punctSpace/g, _punctuationOrSpace).replace(/punct/g, _punctuation).getRegex();
+  emStrongRDelimAstGfm = edit(emStrongRDelimAstCore, "gu").replace(/notPunctSpace/g, _notPunctuationOrSpaceGfmStrongEm).replace(/punctSpace/g, _punctuationOrSpaceGfmStrongEm).replace(/punct/g, _punctuationGfmStrongEm).getRegex();
+  emStrongRDelimUnd = edit("^[^_*]*?\\*\\*[^_*]*?_[^_*]*?(?=\\*\\*)|[^_]+(?=[^_])|(?!_)punct(_+)(?=[\\s]|$)|notPunctSpace(_+)(?!_)(?=punctSpace|$)|(?!_)punctSpace(_+)(?=notPunctSpace)|[\\s](_+)(?!_)(?=punct)|(?!_)punct(_+)(?!_)(?=punct)", "gu").replace(/notPunctSpace/g, _notPunctuationOrSpace).replace(/punctSpace/g, _punctuationOrSpace).replace(/punct/g, _punctuation).getRegex();
+  anyPunctuation = edit(/\\(punct)/, "gu").replace(/punct/g, _punctuation).getRegex();
+  autolink = edit(/^<(scheme:[^\s\x00-\x1f<>]*|email)>/).replace("scheme", /[a-zA-Z][a-zA-Z0-9+.-]{1,31}/).replace("email", /[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+(@)[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+(?![-_])/).getRegex();
+  _inlineComment = edit(_comment).replace("(?:-->|$)", "-->").getRegex();
+  tag = edit("^comment|^</[a-zA-Z][\\w:-]*\\s*>|^<[a-zA-Z][\\w-]*(?:attribute)*?\\s*/?>|^<\\?[\\s\\S]*?\\?>|^<![a-zA-Z]+\\s[\\s\\S]*?>|^<!\\[CDATA\\[[\\s\\S]*?\\]\\]>").replace("comment", _inlineComment).replace("attribute", /\s+[a-zA-Z:_][\w.:-]*(?:\s*=\s*"[^"]*"|\s*=\s*'[^']*'|\s*=\s*[^\s"'=<>`]+)?/).getRegex();
+  _inlineLabel = /(?:\[(?:\\.|[^\[\]\\])*\]|\\.|`[^`]*`|[^\[\]\\`])*?/;
+  link = edit(/^!?\[(label)\]\(\s*(href)(?:(?:[ \t]*(?:\n[ \t]*)?)(title))?\s*\)/).replace("label", _inlineLabel).replace("href", /<(?:\\.|[^\n<>\\])+>|[^ \t\n\x00-\x1f]*/).replace("title", /"(?:\\"?|[^"\\])*"|'(?:\\'?|[^'\\])*'|\((?:\\\)?|[^)\\])*\)/).getRegex();
+  reflink = edit(/^!?\[(label)\]\[(ref)\]/).replace("label", _inlineLabel).replace("ref", _blockLabel).getRegex();
+  nolink = edit(/^!?\[(ref)\](?:\[\])?/).replace("ref", _blockLabel).getRegex();
+  reflinkSearch = edit("reflink|nolink(?!\\()", "g").replace("reflink", reflink).replace("nolink", nolink).getRegex();
+  inlineNormal = {
+    _backpedal: noopTest,
+    anyPunctuation,
+    autolink,
+    blockSkip,
+    br,
+    code: inlineCode,
+    del: noopTest,
+    emStrongLDelim,
+    emStrongRDelimAst,
+    emStrongRDelimUnd,
+    escape: escape2,
+    link,
+    nolink,
+    punctuation,
+    reflink,
+    reflinkSearch,
+    tag,
+    text: inlineText,
+    url: noopTest
+  };
+  inlinePedantic = {
+    ...inlineNormal,
+    link: edit(/^!?\[(label)\]\((.*?)\)/).replace("label", _inlineLabel).getRegex(),
+    reflink: edit(/^!?\[(label)\]\s*\[([^\]]*)\]/).replace("label", _inlineLabel).getRegex()
+  };
+  inlineGfm = {
+    ...inlineNormal,
+    emStrongRDelimAst: emStrongRDelimAstGfm,
+    emStrongLDelim: emStrongLDelimGfm,
+    url: edit(/^((?:ftp|https?):\/\/|www\.)(?:[a-zA-Z0-9\-]+\.?)+[^\s<]*|^email/, "i").replace("email", /[A-Za-z0-9._+-]+(@)[a-zA-Z0-9-_]+(?:\.[a-zA-Z0-9-_]*[a-zA-Z0-9])+(?![-_])/).getRegex(),
+    _backpedal: /(?:[^?!.,:;*_'"~()&]+|\([^)]*\)|&(?![a-zA-Z0-9]+;$)|[?!.,:;*_'"~)]+(?!$))+/,
+    del: /^(~~?)(?=[^\s~])((?:\\.|[^\\])*?(?:\\.|[^\s~\\]))\1(?=[^~]|$)/,
+    text: /^([`~]+|[^`~])(?:(?= {2,}\n)|(?=[a-zA-Z0-9.!#$%&'*+\/=?_`{\|}~-]+@)|[\s\S]*?(?:(?=[\\<!\[`*~_]|\b_|https?:\/\/|ftp:\/\/|www\.|$)|[^ ](?= {2,}\n)|[^a-zA-Z0-9.!#$%&'*+\/=?_`{\|}~-](?=[a-zA-Z0-9.!#$%&'*+\/=?_`{\|}~-]+@)))/
+  };
+  inlineBreaks = {
+    ...inlineGfm,
+    br: edit(br).replace("{2,}", "*").getRegex(),
+    text: edit(inlineGfm.text).replace("\\b_", "\\b_| {2,}\\n").replace(/\{2,\}/g, "*").getRegex()
+  };
+  block = {
+    normal: blockNormal,
+    gfm: blockGfm,
+    pedantic: blockPedantic
+  };
+  inline = {
+    normal: inlineNormal,
+    gfm: inlineGfm,
+    breaks: inlineBreaks,
+    pedantic: inlinePedantic
+  };
+  escapeReplacements = {
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  };
+  _Hooks = class {
+    options;
+    block;
+    constructor(options2) {
+      this.options = options2 || _defaults;
+    }
+    static passThroughHooks = /* @__PURE__ */ new Set([
+      "preprocess",
+      "postprocess",
+      "processAllTokens"
+    ]);
+    preprocess(markdown) {
+      return markdown;
+    }
+    postprocess(html2) {
+      return html2;
+    }
+    processAllTokens(tokens) {
+      return tokens;
+    }
+    provideLexer() {
+      return this.block ? _Lexer.lex : _Lexer.lexInline;
+    }
+    provideParser() {
+      return this.block ? _Parser.parse : _Parser.parseInline;
+    }
+  };
+  markedInstance = new Marked;
+  marked.options = marked.setOptions = function(options2) {
+    markedInstance.setOptions(options2);
+    marked.defaults = markedInstance.defaults;
+    changeDefaults(marked.defaults);
+    return marked;
+  };
+  marked.getDefaults = _getDefaults;
+  marked.defaults = _defaults;
+  marked.use = function(...args) {
+    markedInstance.use(...args);
+    marked.defaults = markedInstance.defaults;
+    changeDefaults(marked.defaults);
+    return marked;
+  };
+  marked.walkTokens = function(tokens, callback) {
+    return markedInstance.walkTokens(tokens, callback);
+  };
+  marked.parseInline = markedInstance.parseInline;
+  marked.Parser = _Parser;
+  marked.parser = _Parser.parse;
+  marked.Renderer = _Renderer;
+  marked.TextRenderer = _TextRenderer;
+  marked.Lexer = _Lexer;
+  marked.lexer = _Lexer.lex;
+  marked.Tokenizer = _Tokenizer;
+  marked.Hooks = _Hooks;
+  marked.parse = marked;
+  options = marked.options;
+  setOptions = marked.setOptions;
+  use = marked.use;
+  walkTokens = marked.walkTokens;
+  parseInline = marked.parseInline;
+  parser2 = _Parser.parse;
+  lexer2 = _Lexer.lex;
+});
+
+// node_modules/@earendil-works/pi-tui/dist/components/markdown.js
+class Markdown {
+  text;
+  paddingX;
+  paddingY;
+  defaultTextStyle;
+  theme;
+  defaultStylePrefix;
+  cachedText;
+  cachedWidth;
+  cachedLines;
+  constructor(text, paddingX, paddingY, theme, defaultTextStyle) {
+    this.text = text;
+    this.paddingX = paddingX;
+    this.paddingY = paddingY;
+    this.theme = theme;
+    this.defaultTextStyle = defaultTextStyle;
+  }
+  setText(text) {
+    this.text = text;
+    this.invalidate();
+  }
+  invalidate() {
+    this.cachedText = undefined;
+    this.cachedWidth = undefined;
+    this.cachedLines = undefined;
+  }
+  render(width) {
+    if (this.cachedLines && this.cachedText === this.text && this.cachedWidth === width) {
+      return this.cachedLines;
+    }
+    const contentWidth = Math.max(1, width - this.paddingX * 2);
+    if (!this.text || this.text.trim() === "") {
+      const result2 = [];
+      this.cachedText = this.text;
+      this.cachedWidth = width;
+      this.cachedLines = result2;
+      return result2;
+    }
+    const normalizedText = this.text.replace(/\t/g, "   ");
+    const tokens = markdownParser.lexer(normalizedText);
+    const renderedLines = [];
+    for (let i = 0;i < tokens.length; i++) {
+      const token = tokens[i];
+      const nextToken = tokens[i + 1];
+      const tokenLines = this.renderToken(token, contentWidth, nextToken?.type);
+      for (const tokenLine of tokenLines) {
+        renderedLines.push(tokenLine);
+      }
+    }
+    const wrappedLines = [];
+    for (const line of renderedLines) {
+      if (isImageLine(line)) {
+        wrappedLines.push(line);
+      } else {
+        for (const wrappedLine of wrapTextWithAnsi(line, contentWidth)) {
+          wrappedLines.push(wrappedLine);
+        }
+      }
+    }
+    const leftMargin = " ".repeat(this.paddingX);
+    const rightMargin = " ".repeat(this.paddingX);
+    const bgFn = this.defaultTextStyle?.bgColor;
+    const contentLines = [];
+    for (const line of wrappedLines) {
+      if (isImageLine(line)) {
+        contentLines.push(line);
+        continue;
+      }
+      const lineWithMargins = leftMargin + line + rightMargin;
+      if (bgFn) {
+        contentLines.push(applyBackgroundToLine(lineWithMargins, width, bgFn));
+      } else {
+        const visibleLen = visibleWidth(lineWithMargins);
+        const paddingNeeded = Math.max(0, width - visibleLen);
+        contentLines.push(lineWithMargins + " ".repeat(paddingNeeded));
+      }
+    }
+    const emptyLine = " ".repeat(width);
+    const emptyLines = [];
+    for (let i = 0;i < this.paddingY; i++) {
+      const line = bgFn ? applyBackgroundToLine(emptyLine, width, bgFn) : emptyLine;
+      emptyLines.push(line);
+    }
+    const result = emptyLines.concat(contentLines, emptyLines);
+    this.cachedText = this.text;
+    this.cachedWidth = width;
+    this.cachedLines = result;
+    return result.length > 0 ? result : [""];
+  }
+  applyDefaultStyle(text) {
+    if (!this.defaultTextStyle) {
+      return text;
+    }
+    let styled = text;
+    if (this.defaultTextStyle.color) {
+      styled = this.defaultTextStyle.color(styled);
+    }
+    if (this.defaultTextStyle.bold) {
+      styled = this.theme.bold(styled);
+    }
+    if (this.defaultTextStyle.italic) {
+      styled = this.theme.italic(styled);
+    }
+    if (this.defaultTextStyle.strikethrough) {
+      styled = this.theme.strikethrough(styled);
+    }
+    if (this.defaultTextStyle.underline) {
+      styled = this.theme.underline(styled);
+    }
+    return styled;
+  }
+  getDefaultStylePrefix() {
+    if (!this.defaultTextStyle) {
+      return "";
+    }
+    if (this.defaultStylePrefix !== undefined) {
+      return this.defaultStylePrefix;
+    }
+    const sentinel = "\x00";
+    let styled = sentinel;
+    if (this.defaultTextStyle.color) {
+      styled = this.defaultTextStyle.color(styled);
+    }
+    if (this.defaultTextStyle.bold) {
+      styled = this.theme.bold(styled);
+    }
+    if (this.defaultTextStyle.italic) {
+      styled = this.theme.italic(styled);
+    }
+    if (this.defaultTextStyle.strikethrough) {
+      styled = this.theme.strikethrough(styled);
+    }
+    if (this.defaultTextStyle.underline) {
+      styled = this.theme.underline(styled);
+    }
+    const sentinelIndex = styled.indexOf(sentinel);
+    this.defaultStylePrefix = sentinelIndex >= 0 ? styled.slice(0, sentinelIndex) : "";
+    return this.defaultStylePrefix;
+  }
+  getStylePrefix(styleFn) {
+    const sentinel = "\x00";
+    const styled = styleFn(sentinel);
+    const sentinelIndex = styled.indexOf(sentinel);
+    return sentinelIndex >= 0 ? styled.slice(0, sentinelIndex) : "";
+  }
+  getDefaultInlineStyleContext() {
+    return {
+      applyText: (text) => this.applyDefaultStyle(text),
+      stylePrefix: this.getDefaultStylePrefix()
+    };
+  }
+  renderToken(token, width, nextTokenType, styleContext) {
+    const lines = [];
+    switch (token.type) {
+      case "heading": {
+        const headingLevel = token.depth;
+        const headingPrefix = `${"#".repeat(headingLevel)} `;
+        let headingStyleFn;
+        if (headingLevel === 1) {
+          headingStyleFn = (text) => this.theme.heading(this.theme.bold(this.theme.underline(text)));
+        } else {
+          headingStyleFn = (text) => this.theme.heading(this.theme.bold(text));
+        }
+        const headingStyleContext = {
+          applyText: headingStyleFn,
+          stylePrefix: this.getStylePrefix(headingStyleFn)
+        };
+        const headingText = this.renderInlineTokens(token.tokens || [], headingStyleContext);
+        const styledHeading = headingLevel >= 3 ? headingStyleFn(headingPrefix) + headingText : headingText;
+        lines.push(styledHeading);
+        if (nextTokenType && nextTokenType !== "space") {
+          lines.push("");
+        }
+        break;
+      }
+      case "paragraph": {
+        const paragraphText = this.renderInlineTokens(token.tokens || [], styleContext);
+        lines.push(paragraphText);
+        if (nextTokenType && nextTokenType !== "list" && nextTokenType !== "space") {
+          lines.push("");
+        }
+        break;
+      }
+      case "text":
+        lines.push(this.renderInlineTokens([token], styleContext));
+        break;
+      case "code": {
+        const indent = this.theme.codeBlockIndent ?? "  ";
+        lines.push(this.theme.codeBlockBorder(`\`\`\`${token.lang || ""}`));
+        if (this.theme.highlightCode) {
+          const highlightedLines = this.theme.highlightCode(token.text, token.lang);
+          for (const hlLine of highlightedLines) {
+            lines.push(`${indent}${hlLine}`);
+          }
+        } else {
+          const codeLines = token.text.split(`
+`);
+          for (const codeLine of codeLines) {
+            lines.push(`${indent}${this.theme.codeBlock(codeLine)}`);
+          }
+        }
+        lines.push(this.theme.codeBlockBorder("```"));
+        if (nextTokenType && nextTokenType !== "space") {
+          lines.push("");
+        }
+        break;
+      }
+      case "list": {
+        const listLines = this.renderList(token, 0, width, styleContext);
+        lines.push(...listLines);
+        break;
+      }
+      case "table": {
+        const tableLines = this.renderTable(token, width, nextTokenType, styleContext);
+        lines.push(...tableLines);
+        break;
+      }
+      case "blockquote": {
+        const quoteStyle = (text) => this.theme.quote(this.theme.italic(text));
+        const quoteStylePrefix = this.getStylePrefix(quoteStyle);
+        const applyQuoteStyle = (line) => {
+          if (!quoteStylePrefix) {
+            return quoteStyle(line);
+          }
+          const lineWithReappliedStyle = line.replace(/\x1b\[0m/g, `\x1B[0m${quoteStylePrefix}`);
+          return quoteStyle(lineWithReappliedStyle);
+        };
+        const quoteContentWidth = Math.max(1, width - 2);
+        const quoteInlineStyleContext = {
+          applyText: (text) => text,
+          stylePrefix: quoteStylePrefix
+        };
+        const quoteTokens = token.tokens || [];
+        const renderedQuoteLines = [];
+        for (let i = 0;i < quoteTokens.length; i++) {
+          const quoteToken = quoteTokens[i];
+          const nextQuoteToken = quoteTokens[i + 1];
+          renderedQuoteLines.push(...this.renderToken(quoteToken, quoteContentWidth, nextQuoteToken?.type, quoteInlineStyleContext));
+        }
+        while (renderedQuoteLines.length > 0 && renderedQuoteLines[renderedQuoteLines.length - 1] === "") {
+          renderedQuoteLines.pop();
+        }
+        for (const quoteLine of renderedQuoteLines) {
+          const styledLine = applyQuoteStyle(quoteLine);
+          const wrappedLines = wrapTextWithAnsi(styledLine, quoteContentWidth);
+          for (const wrappedLine of wrappedLines) {
+            lines.push(this.theme.quoteBorder("\u2502 ") + wrappedLine);
+          }
+        }
+        if (nextTokenType && nextTokenType !== "space") {
+          lines.push("");
+        }
+        break;
+      }
+      case "hr":
+        lines.push(this.theme.hr("\u2500".repeat(Math.min(width, 80))));
+        if (nextTokenType && nextTokenType !== "space") {
+          lines.push("");
+        }
+        break;
+      case "html":
+        if ("raw" in token && typeof token.raw === "string") {
+          lines.push(this.applyDefaultStyle(token.raw.trim()));
+        }
+        break;
+      case "space":
+        lines.push("");
+        break;
+      default:
+        if ("text" in token && typeof token.text === "string") {
+          lines.push(token.text);
+        }
+    }
+    return lines;
+  }
+  renderInlineTokens(tokens, styleContext) {
+    let result = "";
+    const resolvedStyleContext = styleContext ?? this.getDefaultInlineStyleContext();
+    const { applyText, stylePrefix } = resolvedStyleContext;
+    const applyTextWithNewlines = (text) => {
+      const segments = text.split(`
+`);
+      return segments.map((segment) => applyText(segment)).join(`
+`);
+    };
+    for (const token of tokens) {
+      switch (token.type) {
+        case "text":
+          if (token.tokens && token.tokens.length > 0) {
+            result += this.renderInlineTokens(token.tokens, resolvedStyleContext);
+          } else {
+            result += applyTextWithNewlines(token.text);
+          }
+          break;
+        case "paragraph":
+          result += this.renderInlineTokens(token.tokens || [], resolvedStyleContext);
+          break;
+        case "strong": {
+          const boldContent = this.renderInlineTokens(token.tokens || [], resolvedStyleContext);
+          result += this.theme.bold(boldContent) + stylePrefix;
+          break;
+        }
+        case "em": {
+          const italicContent = this.renderInlineTokens(token.tokens || [], resolvedStyleContext);
+          result += this.theme.italic(italicContent) + stylePrefix;
+          break;
+        }
+        case "codespan":
+          result += this.theme.code(token.text) + stylePrefix;
+          break;
+        case "link": {
+          const linkText = this.renderInlineTokens(token.tokens || [], resolvedStyleContext);
+          const styledLink = this.theme.link(this.theme.underline(linkText));
+          if (getCapabilities().hyperlinks) {
+            result += hyperlink(styledLink, token.href) + stylePrefix;
+          } else {
+            const hrefForComparison = token.href.startsWith("mailto:") ? token.href.slice(7) : token.href;
+            if (token.text === token.href || token.text === hrefForComparison) {
+              result += styledLink + stylePrefix;
+            } else {
+              result += styledLink + this.theme.linkUrl(` (${token.href})`) + stylePrefix;
+            }
+          }
+          break;
+        }
+        case "br":
+          result += `
+`;
+          break;
+        case "del": {
+          const delContent = this.renderInlineTokens(token.tokens || [], resolvedStyleContext);
+          result += this.theme.strikethrough(delContent) + stylePrefix;
+          break;
+        }
+        case "html":
+          if ("raw" in token && typeof token.raw === "string") {
+            result += applyTextWithNewlines(token.raw);
+          }
+          break;
+        default:
+          if ("text" in token && typeof token.text === "string") {
+            result += applyTextWithNewlines(token.text);
+          }
+      }
+    }
+    while (stylePrefix && result.endsWith(stylePrefix)) {
+      result = result.slice(0, -stylePrefix.length);
+    }
+    return result;
+  }
+  renderList(token, depth, width, styleContext) {
+    const lines = [];
+    const indent = "    ".repeat(depth);
+    const startNumber = typeof token.start === "number" ? token.start : 1;
+    for (let i = 0;i < token.items.length; i++) {
+      const item = token.items[i];
+      const bullet2 = token.ordered ? `${startNumber + i}. ` : "- ";
+      const taskMarker = item.task ? `[${item.checked ? "x" : " "}] ` : "";
+      const marker = bullet2 + taskMarker;
+      const firstPrefix = indent + this.theme.listBullet(marker);
+      const continuationPrefix = indent + " ".repeat(visibleWidth(marker));
+      const itemWidth = Math.max(1, width - visibleWidth(firstPrefix));
+      let renderedAnyLine = false;
+      for (const itemToken of item.tokens) {
+        if (itemToken.type === "list") {
+          lines.push(...this.renderList(itemToken, depth + 1, width, styleContext));
+          renderedAnyLine = true;
+          continue;
+        }
+        const itemLines = this.renderToken(itemToken, itemWidth, undefined, styleContext);
+        for (const line of itemLines) {
+          for (const wrappedLine of wrapTextWithAnsi(line, itemWidth)) {
+            const linePrefix = renderedAnyLine ? continuationPrefix : firstPrefix;
+            lines.push(linePrefix + wrappedLine);
+            renderedAnyLine = true;
+          }
+        }
+      }
+      if (!renderedAnyLine) {
+        lines.push(firstPrefix);
+      }
+    }
+    return lines;
+  }
+  getLongestWordWidth(text, maxWidth) {
+    const words = text.split(/\s+/).filter((word) => word.length > 0);
+    let longest = 0;
+    for (const word of words) {
+      longest = Math.max(longest, visibleWidth(word));
+    }
+    if (maxWidth === undefined) {
+      return longest;
+    }
+    return Math.min(longest, maxWidth);
+  }
+  wrapCellText(text, maxWidth) {
+    return wrapTextWithAnsi(text, Math.max(1, maxWidth));
+  }
+  renderTable(token, availableWidth, nextTokenType, styleContext) {
+    const lines = [];
+    const numCols = token.header.length;
+    if (numCols === 0) {
+      return lines;
+    }
+    const borderOverhead = 3 * numCols + 1;
+    const availableForCells = availableWidth - borderOverhead;
+    if (availableForCells < numCols) {
+      const fallbackLines = token.raw ? wrapTextWithAnsi(token.raw, availableWidth) : [];
+      if (nextTokenType && nextTokenType !== "space") {
+        fallbackLines.push("");
+      }
+      return fallbackLines;
+    }
+    const maxUnbrokenWordWidth = 30;
+    const naturalWidths = [];
+    const minWordWidths = [];
+    for (let i = 0;i < numCols; i++) {
+      const headerText = this.renderInlineTokens(token.header[i].tokens || [], styleContext);
+      naturalWidths[i] = visibleWidth(headerText);
+      minWordWidths[i] = Math.max(1, this.getLongestWordWidth(headerText, maxUnbrokenWordWidth));
+    }
+    for (const row of token.rows) {
+      for (let i = 0;i < row.length; i++) {
+        const cellText = this.renderInlineTokens(row[i].tokens || [], styleContext);
+        naturalWidths[i] = Math.max(naturalWidths[i] || 0, visibleWidth(cellText));
+        minWordWidths[i] = Math.max(minWordWidths[i] || 1, this.getLongestWordWidth(cellText, maxUnbrokenWordWidth));
+      }
+    }
+    let minColumnWidths = minWordWidths;
+    let minCellsWidth = minColumnWidths.reduce((a, b) => a + b, 0);
+    if (minCellsWidth > availableForCells) {
+      minColumnWidths = new Array(numCols).fill(1);
+      const remaining = availableForCells - numCols;
+      if (remaining > 0) {
+        const totalWeight = minWordWidths.reduce((total, width) => total + Math.max(0, width - 1), 0);
+        const growth = minWordWidths.map((width) => {
+          const weight = Math.max(0, width - 1);
+          return totalWeight > 0 ? Math.floor(weight / totalWeight * remaining) : 0;
+        });
+        for (let i = 0;i < numCols; i++) {
+          minColumnWidths[i] += growth[i] ?? 0;
+        }
+        const allocated = growth.reduce((total, width) => total + width, 0);
+        let leftover = remaining - allocated;
+        for (let i = 0;leftover > 0 && i < numCols; i++) {
+          minColumnWidths[i]++;
+          leftover--;
+        }
+      }
+      minCellsWidth = minColumnWidths.reduce((a, b) => a + b, 0);
+    }
+    const totalNaturalWidth = naturalWidths.reduce((a, b) => a + b, 0) + borderOverhead;
+    let columnWidths;
+    if (totalNaturalWidth <= availableWidth) {
+      columnWidths = naturalWidths.map((width, index) => Math.max(width, minColumnWidths[index]));
+    } else {
+      const totalGrowPotential = naturalWidths.reduce((total, width, index) => {
+        return total + Math.max(0, width - minColumnWidths[index]);
+      }, 0);
+      const extraWidth = Math.max(0, availableForCells - minCellsWidth);
+      columnWidths = minColumnWidths.map((minWidth, index) => {
+        const naturalWidth = naturalWidths[index];
+        const minWidthDelta = Math.max(0, naturalWidth - minWidth);
+        let grow = 0;
+        if (totalGrowPotential > 0) {
+          grow = Math.floor(minWidthDelta / totalGrowPotential * extraWidth);
+        }
+        return minWidth + grow;
+      });
+      const allocated = columnWidths.reduce((a, b) => a + b, 0);
+      let remaining = availableForCells - allocated;
+      while (remaining > 0) {
+        let grew = false;
+        for (let i = 0;i < numCols && remaining > 0; i++) {
+          if (columnWidths[i] < naturalWidths[i]) {
+            columnWidths[i]++;
+            remaining--;
+            grew = true;
+          }
+        }
+        if (!grew) {
+          break;
+        }
+      }
+    }
+    const topBorderCells = columnWidths.map((w) => "\u2500".repeat(w));
+    lines.push(`\u250C\u2500${topBorderCells.join("\u2500\u252C\u2500")}\u2500\u2510`);
+    const headerCellLines = token.header.map((cell, i) => {
+      const text = this.renderInlineTokens(cell.tokens || [], styleContext);
+      return this.wrapCellText(text, columnWidths[i]);
+    });
+    const headerLineCount = Math.max(...headerCellLines.map((c) => c.length));
+    for (let lineIdx = 0;lineIdx < headerLineCount; lineIdx++) {
+      const rowParts = headerCellLines.map((cellLines, colIdx) => {
+        const text = cellLines[lineIdx] || "";
+        const padded = text + " ".repeat(Math.max(0, columnWidths[colIdx] - visibleWidth(text)));
+        return this.theme.bold(padded);
+      });
+      lines.push(`\u2502 ${rowParts.join(" \u2502 ")} \u2502`);
+    }
+    const separatorCells = columnWidths.map((w) => "\u2500".repeat(w));
+    const separatorLine = `\u251C\u2500${separatorCells.join("\u2500\u253C\u2500")}\u2500\u2524`;
+    lines.push(separatorLine);
+    for (let rowIndex = 0;rowIndex < token.rows.length; rowIndex++) {
+      const row = token.rows[rowIndex];
+      const rowCellLines = row.map((cell, i) => {
+        const text = this.renderInlineTokens(cell.tokens || [], styleContext);
+        return this.wrapCellText(text, columnWidths[i]);
+      });
+      const rowLineCount = Math.max(...rowCellLines.map((c) => c.length));
+      for (let lineIdx = 0;lineIdx < rowLineCount; lineIdx++) {
+        const rowParts = rowCellLines.map((cellLines, colIdx) => {
+          const text = cellLines[lineIdx] || "";
+          return text + " ".repeat(Math.max(0, columnWidths[colIdx] - visibleWidth(text)));
+        });
+        lines.push(`\u2502 ${rowParts.join(" \u2502 ")} \u2502`);
+      }
+      if (rowIndex < token.rows.length - 1) {
+        lines.push(separatorLine);
+      }
+    }
+    const bottomBorderCells = columnWidths.map((w) => "\u2500".repeat(w));
+    lines.push(`\u2514\u2500${bottomBorderCells.join("\u2500\u2534\u2500")}\u2500\u2518`);
+    if (nextTokenType && nextTokenType !== "space") {
+      lines.push("");
+    }
+    return lines;
+  }
+}
+var STRICT_STRIKETHROUGH_REGEX, StrictStrikethroughTokenizer, markdownParser;
+var init_markdown = __esm(() => {
+  init_marked_esm();
+  init_terminal_image();
+  init_utils();
+  STRICT_STRIKETHROUGH_REGEX = /^(~~)(?=[^\s~])((?:\\.|[^\\])*?(?:\\.|[^\s~\\]))\1(?=[^~]|$)/;
+  StrictStrikethroughTokenizer = class StrictStrikethroughTokenizer extends _Tokenizer {
+    del(src) {
+      const match = STRICT_STRIKETHROUGH_REGEX.exec(src);
+      if (!match) {
+        return;
+      }
+      const text = match[2];
+      return {
+        type: "del",
+        raw: match[0],
+        text,
+        tokens: this.lexer.inlineTokens(text)
+      };
+    }
+  };
+  markdownParser = new Marked;
+  markdownParser.setOptions({
+    tokenizer: new StrictStrikethroughTokenizer
+  });
+});
+
+// node_modules/@earendil-works/pi-tui/dist/components/settings-list.js
+class SettingsList {
+  items;
+  filteredItems;
+  theme;
+  selectedIndex = 0;
+  maxVisible;
+  onChange;
+  onCancel;
+  searchInput;
+  searchEnabled;
+  submenuComponent = null;
+  submenuItemIndex = null;
+  constructor(items, maxVisible, theme, onChange, onCancel, options2 = {}) {
+    this.items = items;
+    this.filteredItems = items;
+    this.maxVisible = maxVisible;
+    this.theme = theme;
+    this.onChange = onChange;
+    this.onCancel = onCancel;
+    this.searchEnabled = options2.enableSearch ?? false;
+    if (this.searchEnabled) {
+      this.searchInput = new Input;
+    }
+  }
+  updateValue(id, newValue) {
+    const item = this.items.find((i) => i.id === id);
+    if (item) {
+      item.currentValue = newValue;
+    }
+  }
+  invalidate() {
+    this.submenuComponent?.invalidate?.();
+  }
+  render(width) {
+    if (this.submenuComponent) {
+      return this.submenuComponent.render(width);
+    }
+    return this.renderMainList(width);
+  }
+  renderMainList(width) {
+    const lines = [];
+    if (this.searchEnabled && this.searchInput) {
+      lines.push(...this.searchInput.render(width));
+      lines.push("");
+    }
+    if (this.items.length === 0) {
+      lines.push(this.theme.hint("  No settings available"));
+      if (this.searchEnabled) {
+        this.addHintLine(lines, width);
+      }
+      return lines;
+    }
+    const displayItems = this.searchEnabled ? this.filteredItems : this.items;
+    if (displayItems.length === 0) {
+      lines.push(truncateToWidth(this.theme.hint("  No matching settings"), width));
+      this.addHintLine(lines, width);
+      return lines;
+    }
+    const startIndex = Math.max(0, Math.min(this.selectedIndex - Math.floor(this.maxVisible / 2), displayItems.length - this.maxVisible));
+    const endIndex = Math.min(startIndex + this.maxVisible, displayItems.length);
+    const maxLabelWidth = Math.min(30, Math.max(...this.items.map((item) => visibleWidth(item.label))));
+    for (let i = startIndex;i < endIndex; i++) {
+      const item = displayItems[i];
+      if (!item)
+        continue;
+      const isSelected = i === this.selectedIndex;
+      const prefix = isSelected ? this.theme.cursor : "  ";
+      const prefixWidth = visibleWidth(prefix);
+      const labelPadded = item.label + " ".repeat(Math.max(0, maxLabelWidth - visibleWidth(item.label)));
+      const labelText = this.theme.label(labelPadded, isSelected);
+      const separator = "  ";
+      const usedWidth = prefixWidth + maxLabelWidth + visibleWidth(separator);
+      const valueMaxWidth = width - usedWidth - 2;
+      const valueText = this.theme.value(truncateToWidth(item.currentValue, valueMaxWidth, ""), isSelected);
+      lines.push(truncateToWidth(prefix + labelText + separator + valueText, width));
+    }
+    if (startIndex > 0 || endIndex < displayItems.length) {
+      const scrollText = `  (${this.selectedIndex + 1}/${displayItems.length})`;
+      lines.push(this.theme.hint(truncateToWidth(scrollText, width - 2, "")));
+    }
+    const selectedItem = displayItems[this.selectedIndex];
+    if (selectedItem?.description) {
+      lines.push("");
+      const wrappedDesc = wrapTextWithAnsi(selectedItem.description, width - 4);
+      for (const line of wrappedDesc) {
+        lines.push(this.theme.description(`  ${line}`));
+      }
+    }
+    this.addHintLine(lines, width);
+    return lines;
+  }
+  handleInput(data) {
+    if (this.submenuComponent) {
+      this.submenuComponent.handleInput?.(data);
+      return;
+    }
+    const kb = getKeybindings();
+    const displayItems = this.searchEnabled ? this.filteredItems : this.items;
+    if (kb.matches(data, "tui.select.up")) {
+      if (displayItems.length === 0)
+        return;
+      this.selectedIndex = this.selectedIndex === 0 ? displayItems.length - 1 : this.selectedIndex - 1;
+    } else if (kb.matches(data, "tui.select.down")) {
+      if (displayItems.length === 0)
+        return;
+      this.selectedIndex = this.selectedIndex === displayItems.length - 1 ? 0 : this.selectedIndex + 1;
+    } else if (kb.matches(data, "tui.select.confirm") || data === " ") {
+      this.activateItem();
+    } else if (kb.matches(data, "tui.select.cancel")) {
+      this.onCancel();
+    } else if (this.searchEnabled && this.searchInput) {
+      const sanitized = data.replace(/ /g, "");
+      if (!sanitized) {
+        return;
+      }
+      this.searchInput.handleInput(sanitized);
+      this.applyFilter(this.searchInput.getValue());
+    }
+  }
+  activateItem() {
+    const item = this.searchEnabled ? this.filteredItems[this.selectedIndex] : this.items[this.selectedIndex];
+    if (!item)
+      return;
+    if (item.submenu) {
+      this.submenuItemIndex = this.selectedIndex;
+      this.submenuComponent = item.submenu(item.currentValue, (selectedValue) => {
+        if (selectedValue !== undefined) {
+          item.currentValue = selectedValue;
+          this.onChange(item.id, selectedValue);
+        }
+        this.closeSubmenu();
+      });
+    } else if (item.values && item.values.length > 0) {
+      const currentIndex = item.values.indexOf(item.currentValue);
+      const nextIndex = (currentIndex + 1) % item.values.length;
+      const newValue = item.values[nextIndex];
+      item.currentValue = newValue;
+      this.onChange(item.id, newValue);
+    }
+  }
+  closeSubmenu() {
+    this.submenuComponent = null;
+    if (this.submenuItemIndex !== null) {
+      this.selectedIndex = this.submenuItemIndex;
+      this.submenuItemIndex = null;
+    }
+  }
+  applyFilter(query) {
+    this.filteredItems = fuzzyFilter(this.items, query, (item) => item.label);
+    this.selectedIndex = 0;
+  }
+  addHintLine(lines, width) {
+    lines.push("");
+    lines.push(truncateToWidth(this.theme.hint(this.searchEnabled ? "  Type to search \xB7 Enter/Space to change \xB7 Esc to cancel" : "  Enter/Space to change \xB7 Esc to cancel"), width));
+  }
+}
+var init_settings_list = __esm(() => {
+  init_keybindings();
+  init_utils();
+  init_input();
+});
+
+// node_modules/@earendil-works/pi-tui/dist/components/spacer.js
+class Spacer {
+  lines;
+  constructor(lines = 1) {
+    this.lines = lines;
+  }
+  setLines(lines) {
+    this.lines = lines;
+  }
+  invalidate() {}
+  render(_width) {
+    const result = [];
+    for (let i = 0;i < this.lines; i++) {
+      result.push("");
+    }
+    return result;
+  }
+}
+
+// node_modules/@earendil-works/pi-tui/dist/components/truncated-text.js
+class TruncatedText {
+  text;
+  paddingX;
+  paddingY;
+  constructor(text, paddingX = 0, paddingY = 0) {
+    this.text = text;
+    this.paddingX = paddingX;
+    this.paddingY = paddingY;
+  }
+  invalidate() {}
+  render(width) {
+    const result = [];
+    const emptyLine = " ".repeat(width);
+    for (let i = 0;i < this.paddingY; i++) {
+      result.push(emptyLine);
+    }
+    const availableWidth = Math.max(1, width - this.paddingX * 2);
+    let singleLineText = this.text;
+    const newlineIndex = this.text.indexOf(`
+`);
+    if (newlineIndex !== -1) {
+      singleLineText = this.text.substring(0, newlineIndex);
+    }
+    const displayText = truncateToWidth(singleLineText, availableWidth);
+    const leftPadding = " ".repeat(this.paddingX);
+    const rightPadding = " ".repeat(this.paddingX);
+    const lineWithPadding = leftPadding + displayText + rightPadding;
+    const lineVisibleWidth = visibleWidth(lineWithPadding);
+    const paddingNeeded = Math.max(0, width - lineVisibleWidth);
+    const finalLine = lineWithPadding + " ".repeat(paddingNeeded);
+    result.push(finalLine);
+    for (let i = 0;i < this.paddingY; i++) {
+      result.push(emptyLine);
+    }
+    return result;
+  }
+}
+var init_truncated_text = __esm(() => {
+  init_utils();
+});
+
+// node_modules/@earendil-works/pi-tui/dist/stdin-buffer.js
+import { EventEmitter } from "events";
+function isCompleteSequence(data) {
+  if (!data.startsWith(ESC)) {
+    return "not-escape";
+  }
+  if (data.length === 1) {
+    return "incomplete";
+  }
+  const afterEsc = data.slice(1);
+  if (afterEsc.startsWith("[")) {
+    if (afterEsc.startsWith("[M")) {
+      return data.length >= 6 ? "complete" : "incomplete";
+    }
+    return isCompleteCsiSequence(data);
+  }
+  if (afterEsc.startsWith("]")) {
+    return isCompleteOscSequence(data);
+  }
+  if (afterEsc.startsWith("P")) {
+    return isCompleteDcsSequence(data);
+  }
+  if (afterEsc.startsWith("_")) {
+    return isCompleteApcSequence(data);
+  }
+  if (afterEsc.startsWith("O")) {
+    return afterEsc.length >= 2 ? "complete" : "incomplete";
+  }
+  if (afterEsc.length === 1) {
+    return "complete";
+  }
+  return "complete";
+}
+function isCompleteCsiSequence(data) {
+  if (!data.startsWith(`${ESC}[`)) {
+    return "complete";
+  }
+  if (data.length < 3) {
+    return "incomplete";
+  }
+  const payload = data.slice(2);
+  const lastChar = payload[payload.length - 1];
+  const lastCharCode = lastChar.charCodeAt(0);
+  if (lastCharCode >= 64 && lastCharCode <= 126) {
+    if (payload.startsWith("<")) {
+      const mouseMatch = /^<\d+;\d+;\d+[Mm]$/.test(payload);
+      if (mouseMatch) {
+        return "complete";
+      }
+      if (lastChar === "M" || lastChar === "m") {
+        const parts = payload.slice(1, -1).split(";");
+        if (parts.length === 3 && parts.every((p) => /^\d+$/.test(p))) {
+          return "complete";
+        }
+      }
+      return "incomplete";
+    }
+    return "complete";
+  }
+  return "incomplete";
+}
+function isCompleteOscSequence(data) {
+  if (!data.startsWith(`${ESC}]`)) {
+    return "complete";
+  }
+  if (data.endsWith(`${ESC}\\`) || data.endsWith("\x07")) {
+    return "complete";
+  }
+  return "incomplete";
+}
+function isCompleteDcsSequence(data) {
+  if (!data.startsWith(`${ESC}P`)) {
+    return "complete";
+  }
+  if (data.endsWith(`${ESC}\\`)) {
+    return "complete";
+  }
+  return "incomplete";
+}
+function isCompleteApcSequence(data) {
+  if (!data.startsWith(`${ESC}_`)) {
+    return "complete";
+  }
+  if (data.endsWith(`${ESC}\\`)) {
+    return "complete";
+  }
+  return "incomplete";
+}
+function parseUnmodifiedKittyPrintableCodepoint(sequence) {
+  const match = sequence.match(/^\x1b\[(\d+)(?::\d*)?(?::\d+)?u$/);
+  if (!match)
+    return;
+  const codepoint = parseInt(match[1], 10);
+  return codepoint >= 32 ? codepoint : undefined;
+}
+function extractCompleteSequences(buffer) {
+  const sequences = [];
+  let pos = 0;
+  while (pos < buffer.length) {
+    const remaining = buffer.slice(pos);
+    if (remaining.startsWith(ESC)) {
+      let seqEnd = 1;
+      while (seqEnd <= remaining.length) {
+        const candidate = remaining.slice(0, seqEnd);
+        const status = isCompleteSequence(candidate);
+        if (status === "complete") {
+          if (candidate === "\x1B\x1B") {
+            const nextChar = remaining[seqEnd];
+            if (nextChar === "[" || nextChar === "]" || nextChar === "O" || nextChar === "P" || nextChar === "_") {
+              sequences.push(ESC);
+              pos += 1;
+              break;
+            }
+          }
+          sequences.push(candidate);
+          pos += seqEnd;
+          break;
+        } else if (status === "incomplete") {
+          seqEnd++;
+        } else {
+          sequences.push(candidate);
+          pos += seqEnd;
+          break;
+        }
+      }
+      if (seqEnd > remaining.length) {
+        return { sequences, remainder: remaining };
+      }
+    } else {
+      sequences.push(remaining[0]);
+      pos++;
+    }
+  }
+  return { sequences, remainder: "" };
+}
+var ESC = "\x1B", BRACKETED_PASTE_START = "\x1B[200~", BRACKETED_PASTE_END = "\x1B[201~", StdinBuffer;
+var init_stdin_buffer = __esm(() => {
+  StdinBuffer = class StdinBuffer extends EventEmitter {
+    buffer = "";
+    timeout = null;
+    timeoutMs;
+    pasteMode = false;
+    pasteBuffer = "";
+    pendingKittyPrintableCodepoint;
+    constructor(options2 = {}) {
+      super();
+      this.timeoutMs = options2.timeout ?? 10;
+    }
+    process(data) {
+      if (this.timeout) {
+        clearTimeout(this.timeout);
+        this.timeout = null;
+      }
+      let str;
+      if (Buffer.isBuffer(data)) {
+        if (data.length === 1 && data[0] > 127) {
+          const byte = data[0] - 128;
+          str = `\x1B${String.fromCharCode(byte)}`;
+        } else {
+          str = data.toString();
+        }
+      } else {
+        str = data;
+      }
+      if (str.length === 0 && this.buffer.length === 0) {
+        this.emitDataSequence("");
+        return;
+      }
+      this.buffer += str;
+      if (this.pasteMode) {
+        this.pasteBuffer += this.buffer;
+        this.buffer = "";
+        const endIndex = this.pasteBuffer.indexOf(BRACKETED_PASTE_END);
+        if (endIndex !== -1) {
+          const pastedContent = this.pasteBuffer.slice(0, endIndex);
+          const remaining = this.pasteBuffer.slice(endIndex + BRACKETED_PASTE_END.length);
+          this.pasteMode = false;
+          this.pasteBuffer = "";
+          this.pendingKittyPrintableCodepoint = undefined;
+          this.emit("paste", pastedContent);
+          if (remaining.length > 0) {
+            this.process(remaining);
+          }
+        }
+        return;
+      }
+      const startIndex = this.buffer.indexOf(BRACKETED_PASTE_START);
+      if (startIndex !== -1) {
+        if (startIndex > 0) {
+          const beforePaste = this.buffer.slice(0, startIndex);
+          const result2 = extractCompleteSequences(beforePaste);
+          for (const sequence of result2.sequences) {
+            this.emitDataSequence(sequence);
+          }
+        }
+        this.pendingKittyPrintableCodepoint = undefined;
+        this.buffer = this.buffer.slice(startIndex + BRACKETED_PASTE_START.length);
+        this.pasteMode = true;
+        this.pasteBuffer = this.buffer;
+        this.buffer = "";
+        const endIndex = this.pasteBuffer.indexOf(BRACKETED_PASTE_END);
+        if (endIndex !== -1) {
+          const pastedContent = this.pasteBuffer.slice(0, endIndex);
+          const remaining = this.pasteBuffer.slice(endIndex + BRACKETED_PASTE_END.length);
+          this.pasteMode = false;
+          this.pasteBuffer = "";
+          this.pendingKittyPrintableCodepoint = undefined;
+          this.emit("paste", pastedContent);
+          if (remaining.length > 0) {
+            this.process(remaining);
+          }
+        }
+        return;
+      }
+      const result = extractCompleteSequences(this.buffer);
+      this.buffer = result.remainder;
+      for (const sequence of result.sequences) {
+        this.emitDataSequence(sequence);
+      }
+      if (this.buffer.length > 0) {
+        this.timeout = setTimeout(() => {
+          const flushed = this.flush();
+          for (const sequence of flushed) {
+            this.emitDataSequence(sequence);
+          }
+        }, this.timeoutMs);
+      }
+    }
+    emitDataSequence(sequence) {
+      const rawCodepoint = sequence.length === 1 ? sequence.codePointAt(0) : undefined;
+      if (rawCodepoint !== undefined && rawCodepoint === this.pendingKittyPrintableCodepoint) {
+        this.pendingKittyPrintableCodepoint = undefined;
+        return;
+      }
+      this.pendingKittyPrintableCodepoint = parseUnmodifiedKittyPrintableCodepoint(sequence);
+      this.emit("data", sequence);
+    }
+    flush() {
+      if (this.timeout) {
+        clearTimeout(this.timeout);
+        this.timeout = null;
+      }
+      if (this.buffer.length === 0) {
+        return [];
+      }
+      const sequences = [this.buffer];
+      this.buffer = "";
+      this.pendingKittyPrintableCodepoint = undefined;
+      return sequences;
+    }
+    clear() {
+      if (this.timeout) {
+        clearTimeout(this.timeout);
+        this.timeout = null;
+      }
+      this.buffer = "";
+      this.pasteMode = false;
+      this.pasteBuffer = "";
+      this.pendingKittyPrintableCodepoint = undefined;
+    }
+    getBuffer() {
+      return this.buffer;
+    }
+    destroy() {
+      this.clear();
+    }
+  };
+});
+
+// node_modules/@earendil-works/pi-tui/dist/terminal.js
+import * as fs2 from "fs";
+import { createRequire as createRequire3 } from "module";
+import * as path2 from "path";
+
+class ProcessTerminal {
+  wasRaw = false;
+  inputHandler;
+  resizeHandler;
+  _kittyProtocolActive = false;
+  _modifyOtherKeysActive = false;
+  stdinBuffer;
+  stdinDataHandler;
+  progressInterval;
+  writeLogPath = (() => {
+    const env = process.env.PI_TUI_WRITE_LOG || "";
+    if (!env)
+      return "";
+    try {
+      if (fs2.statSync(env).isDirectory()) {
+        const now = new Date;
+        const ts = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}_${String(now.getHours()).padStart(2, "0")}-${String(now.getMinutes()).padStart(2, "0")}-${String(now.getSeconds()).padStart(2, "0")}`;
+        return path2.join(env, `tui-${ts}-${process.pid}.log`);
+      }
+    } catch {}
+    return env;
+  })();
+  get kittyProtocolActive() {
+    return this._kittyProtocolActive;
+  }
+  start(onInput, onResize) {
+    this.inputHandler = onInput;
+    this.resizeHandler = onResize;
+    this.wasRaw = process.stdin.isRaw || false;
+    if (process.stdin.setRawMode) {
+      process.stdin.setRawMode(true);
+    }
+    process.stdin.setEncoding("utf8");
+    process.stdin.resume();
+    process.stdout.write("\x1B[?2004h");
+    process.stdout.on("resize", this.resizeHandler);
+    if (process.platform !== "win32") {
+      process.kill(process.pid, "SIGWINCH");
+    }
+    this.enableWindowsVTInput();
+    this.queryAndEnableKittyProtocol();
+  }
+  setupStdinBuffer() {
+    this.stdinBuffer = new StdinBuffer({ timeout: 10 });
+    const kittyResponsePattern = /^\x1b\[\?(\d+)u$/;
+    this.stdinBuffer.on("data", (sequence) => {
+      if (!this._kittyProtocolActive) {
+        const match = sequence.match(kittyResponsePattern);
+        if (match) {
+          this._kittyProtocolActive = true;
+          setKittyProtocolActive(true);
+          process.stdout.write("\x1B[>7u");
+          return;
+        }
+      }
+      if (this.inputHandler) {
+        this.inputHandler(sequence);
+      }
+    });
+    this.stdinBuffer.on("paste", (content) => {
+      if (this.inputHandler) {
+        this.inputHandler(`\x1B[200~${content}\x1B[201~`);
+      }
+    });
+    this.stdinDataHandler = (data) => {
+      this.stdinBuffer.process(data);
+    };
+  }
+  queryAndEnableKittyProtocol() {
+    this.setupStdinBuffer();
+    process.stdin.on("data", this.stdinDataHandler);
+    process.stdout.write("\x1B[?u");
+    setTimeout(() => {
+      if (!this._kittyProtocolActive && !this._modifyOtherKeysActive) {
+        process.stdout.write("\x1B[>4;2m");
+        this._modifyOtherKeysActive = true;
+      }
+    }, 150);
+  }
+  enableWindowsVTInput() {
+    if (process.platform !== "win32")
+      return;
+    try {
+      const koffi = cjsRequire("koffi");
+      const k32 = koffi.load("kernel32.dll");
+      const GetStdHandle = k32.func("void* __stdcall GetStdHandle(int)");
+      const GetConsoleMode = k32.func("bool __stdcall GetConsoleMode(void*, _Out_ uint32_t*)");
+      const SetConsoleMode = k32.func("bool __stdcall SetConsoleMode(void*, uint32_t)");
+      const STD_INPUT_HANDLE = -10;
+      const ENABLE_VIRTUAL_TERMINAL_INPUT = 512;
+      const handle = GetStdHandle(STD_INPUT_HANDLE);
+      const mode = new Uint32Array(1);
+      GetConsoleMode(handle, mode);
+      SetConsoleMode(handle, mode[0] | ENABLE_VIRTUAL_TERMINAL_INPUT);
+    } catch {}
+  }
+  async drainInput(maxMs = 1000, idleMs = 50) {
+    if (this._kittyProtocolActive) {
+      process.stdout.write("\x1B[<u");
+      this._kittyProtocolActive = false;
+      setKittyProtocolActive(false);
+    }
+    if (this._modifyOtherKeysActive) {
+      process.stdout.write("\x1B[>4;0m");
+      this._modifyOtherKeysActive = false;
+    }
+    const previousHandler = this.inputHandler;
+    this.inputHandler = undefined;
+    let lastDataTime = Date.now();
+    const onData = () => {
+      lastDataTime = Date.now();
+    };
+    process.stdin.on("data", onData);
+    const endTime = Date.now() + maxMs;
+    try {
+      while (true) {
+        const now = Date.now();
+        const timeLeft = endTime - now;
+        if (timeLeft <= 0)
+          break;
+        if (now - lastDataTime >= idleMs)
+          break;
+        await new Promise((resolve9) => setTimeout(resolve9, Math.min(idleMs, timeLeft)));
+      }
+    } finally {
+      process.stdin.removeListener("data", onData);
+      this.inputHandler = previousHandler;
+    }
+  }
+  stop() {
+    if (this.clearProgressInterval()) {
+      process.stdout.write(TERMINAL_PROGRESS_CLEAR_SEQUENCE);
+    }
+    process.stdout.write("\x1B[?2004l");
+    if (this._kittyProtocolActive) {
+      process.stdout.write("\x1B[<u");
+      this._kittyProtocolActive = false;
+      setKittyProtocolActive(false);
+    }
+    if (this._modifyOtherKeysActive) {
+      process.stdout.write("\x1B[>4;0m");
+      this._modifyOtherKeysActive = false;
+    }
+    if (this.stdinBuffer) {
+      this.stdinBuffer.destroy();
+      this.stdinBuffer = undefined;
+    }
+    if (this.stdinDataHandler) {
+      process.stdin.removeListener("data", this.stdinDataHandler);
+      this.stdinDataHandler = undefined;
+    }
+    this.inputHandler = undefined;
+    if (this.resizeHandler) {
+      process.stdout.removeListener("resize", this.resizeHandler);
+      this.resizeHandler = undefined;
+    }
+    process.stdin.pause();
+    if (process.stdin.setRawMode) {
+      process.stdin.setRawMode(this.wasRaw);
+    }
+  }
+  write(data) {
+    process.stdout.write(data);
+    if (this.writeLogPath) {
+      try {
+        fs2.appendFileSync(this.writeLogPath, data, { encoding: "utf8" });
+      } catch {}
+    }
+  }
+  get columns() {
+    return process.stdout.columns || Number(process.env.COLUMNS) || 80;
+  }
+  get rows() {
+    return process.stdout.rows || Number(process.env.LINES) || 24;
+  }
+  moveBy(lines) {
+    if (lines > 0) {
+      process.stdout.write(`\x1B[${lines}B`);
+    } else if (lines < 0) {
+      process.stdout.write(`\x1B[${-lines}A`);
+    }
+  }
+  hideCursor() {
+    process.stdout.write("\x1B[?25l");
+  }
+  showCursor() {
+    process.stdout.write("\x1B[?25h");
+  }
+  clearLine() {
+    process.stdout.write("\x1B[K");
+  }
+  clearFromCursor() {
+    process.stdout.write("\x1B[J");
+  }
+  clearScreen() {
+    process.stdout.write("\x1B[2J\x1B[H");
+  }
+  setTitle(title) {
+    process.stdout.write(`\x1B]0;${title}\x07`);
+  }
+  setProgress(active) {
+    if (active) {
+      process.stdout.write(TERMINAL_PROGRESS_ACTIVE_SEQUENCE);
+      if (!this.progressInterval) {
+        this.progressInterval = setInterval(() => {
+          process.stdout.write(TERMINAL_PROGRESS_ACTIVE_SEQUENCE);
+        }, TERMINAL_PROGRESS_KEEPALIVE_MS);
+      }
+    } else {
+      this.clearProgressInterval();
+      process.stdout.write(TERMINAL_PROGRESS_CLEAR_SEQUENCE);
+    }
+  }
+  clearProgressInterval() {
+    if (!this.progressInterval)
+      return false;
+    clearInterval(this.progressInterval);
+    this.progressInterval = undefined;
+    return true;
+  }
+}
+var cjsRequire, TERMINAL_PROGRESS_KEEPALIVE_MS = 1000, TERMINAL_PROGRESS_ACTIVE_SEQUENCE = "\x1B]9;4;3\x07", TERMINAL_PROGRESS_CLEAR_SEQUENCE = "\x1B]9;4;0;\x07";
+var init_terminal = __esm(() => {
+  init_keys();
+  init_stdin_buffer();
+  cjsRequire = createRequire3(import.meta.url);
+});
+
+// node_modules/@earendil-works/pi-tui/dist/index.js
+var exports_dist = {};
+__export(exports_dist, {
+  wrapTextWithAnsi: () => wrapTextWithAnsi,
+  visibleWidth: () => visibleWidth,
+  truncateToWidth: () => truncateToWidth,
+  setKittyProtocolActive: () => setKittyProtocolActive,
+  setKeybindings: () => setKeybindings,
+  setCellDimensions: () => setCellDimensions,
+  setCapabilities: () => setCapabilities,
+  resetCapabilitiesCache: () => resetCapabilitiesCache,
+  renderImage: () => renderImage,
+  parseKey: () => parseKey,
+  matchesKey: () => matchesKey,
+  isKittyProtocolActive: () => isKittyProtocolActive,
+  isKeyRepeat: () => isKeyRepeat,
+  isKeyRelease: () => isKeyRelease,
+  isFocusable: () => isFocusable,
+  imageFallback: () => imageFallback,
+  hyperlink: () => hyperlink,
+  getWebpDimensions: () => getWebpDimensions,
+  getPngDimensions: () => getPngDimensions,
+  getKeybindings: () => getKeybindings,
+  getJpegDimensions: () => getJpegDimensions,
+  getImageDimensions: () => getImageDimensions,
+  getGifDimensions: () => getGifDimensions,
+  getCellDimensions: () => getCellDimensions,
+  getCapabilities: () => getCapabilities,
+  fuzzyMatch: () => fuzzyMatch,
+  fuzzyFilter: () => fuzzyFilter,
+  encodeKitty: () => encodeKitty,
+  encodeITerm2: () => encodeITerm2,
+  detectCapabilities: () => detectCapabilities,
+  deleteKittyImage: () => deleteKittyImage,
+  deleteAllKittyImages: () => deleteAllKittyImages,
+  decodeKittyPrintable: () => decodeKittyPrintable,
+  calculateImageRows: () => calculateImageRows,
+  allocateImageId: () => allocateImageId,
+  TruncatedText: () => TruncatedText,
+  Text: () => Text,
+  TUI_KEYBINDINGS: () => TUI_KEYBINDINGS,
+  TUI: () => TUI,
+  StdinBuffer: () => StdinBuffer,
+  Spacer: () => Spacer,
+  SettingsList: () => SettingsList,
+  SelectList: () => SelectList,
+  ProcessTerminal: () => ProcessTerminal,
+  Markdown: () => Markdown,
+  Loader: () => Loader,
+  KeybindingsManager: () => KeybindingsManager,
+  Key: () => Key,
+  Input: () => Input,
+  Image: () => Image,
+  Editor: () => Editor,
+  Container: () => Container,
+  CombinedAutocompleteProvider: () => CombinedAutocompleteProvider,
+  CancellableLoader: () => CancellableLoader,
+  CURSOR_MARKER: () => CURSOR_MARKER,
+  Box: () => Box
+});
+var init_dist2 = __esm(() => {
+  init_autocomplete();
+  init_box();
+  init_cancellable_loader();
+  init_editor();
+  init_image();
+  init_input();
+  init_loader2();
+  init_markdown();
+  init_select_list();
+  init_settings_list();
+  init_text();
+  init_truncated_text();
+  init_keybindings();
+  init_keys();
+  init_stdin_buffer();
+  init_terminal();
+  init_terminal_image();
+  init_tui();
+  init_utils();
+});
+
+// src/cli/chat/feed.ts
+class ChatFeed {
+  rows = [];
+  cachedWidth = null;
+  cachedLines = [];
+  cachedRowCount = 0;
+  appendToken(text) {
+    this.appendRow("token", text);
+  }
+  appendToolStart(name, args) {
+    this.appendRow("tool", this.formatToolLine(name, args, "start"));
+  }
+  appendToolEnd(name, result) {
+    this.appendRow("tool", this.formatToolLine(name, result, "end"));
+  }
+  appendEvent(type, details) {
+    this.appendRow("event", `${type}: ${details}`);
+  }
+  appendResult(text) {
+    this.appendRow("result", text);
+  }
+  invalidate() {
+    this.cachedWidth = null;
+    this.cachedLines = [];
+    this.cachedRowCount = 0;
+  }
+  render(width) {
+    if (width <= 0)
+      return [];
+    if (this.cachedWidth !== width) {
+      this.cachedWidth = width;
+      this.cachedLines = this.wrapRows(width);
+      this.cachedRowCount = this.rows.length;
+      return this.cachedLines;
+    }
+    if (this.cachedRowCount !== this.rows.length) {
+      for (const row of this.rows.slice(this.cachedRowCount)) {
+        this.cachedLines.push(...wrapTextWithAnsi(row.text, width));
+      }
+      this.cachedRowCount = this.rows.length;
+    }
+    return this.cachedLines;
+  }
+  appendRow(kind, text) {
+    this.rows.push({ kind, text, ts: Date.now() });
+    if (this.rows.length > DEFAULT_LIMIT)
+      this.rows.splice(0, this.rows.length - DEFAULT_LIMIT);
+    this.invalidate();
+  }
+  wrapRows(width) {
+    const lines = [];
+    for (const row of this.rows)
+      lines.push(...wrapTextWithAnsi(row.text, width));
+    return lines;
+  }
+  formatToolLine(name, details, phase) {
+    const status = phase === "start" ? "\u25B6" : "\u2713";
+    const summary = this.summarizeDetails(details);
+    return `${status} ${name}${summary ? ` ${summary}` : ""}`;
+  }
+  summarizeDetails(details) {
+    const trimmed = details.trim();
+    if (!trimmed)
+      return "";
+    const pathMatch = trimmed.match(/(?:['"`])?([^'"`\s]+\/(?:[^'"`\s]+))(?:['"`])?/);
+    return pathMatch ? pathMatch[1] : trimmed;
+  }
+}
+var DEFAULT_LIMIT = 2000;
+var init_feed = __esm(() => {
+  init_dist2();
+});
+
+// src/specialist/status-load.ts
+import { existsSync as existsSync16, readdirSync as readdirSync7, readFileSync as readFileSync15 } from "fs";
+import { join as join19 } from "path";
+function readStatusesFromFiles(jobsDir) {
+  if (!existsSync16(jobsDir))
+    return [];
+  const statuses = [];
+  for (const entry of readdirSync7(jobsDir)) {
+    const statusPath = join19(jobsDir, entry, "status.json");
+    if (!existsSync16(statusPath))
+      continue;
+    try {
+      statuses.push(JSON.parse(readFileSync15(statusPath, "utf-8")));
+    } catch {}
+  }
+  return statuses.sort((a, b) => b.started_at_ms - a.started_at_ms);
+}
+function readLastToolEventFromFile(jobsDir, jobId) {
+  const eventsPath = join19(jobsDir, jobId, "events.jsonl");
+  if (!existsSync16(eventsPath))
+    return;
+  try {
+    const lines = readFileSync15(eventsPath, "utf-8").split(`
+`);
+    for (let index = lines.length - 1;index >= 0; index -= 1) {
+      const line = lines[index]?.trim();
+      if (!line)
+        continue;
+      const parsed = parseTimelineEvent(line);
+      if (!parsed || parsed.type !== "tool")
+        continue;
+      return parsed;
+    }
+  } catch {
+    return;
+  }
+  return;
+}
+function resolveDerivedCurrentTool(status, jobsDir, sqliteClient) {
+  let lastToolEvent;
+  try {
+    lastToolEvent = sqliteClient?.readLatestToolEvent(status.id) ?? undefined;
+  } catch {
+    lastToolEvent = undefined;
+  }
+  if (!lastToolEvent) {
+    lastToolEvent = readLastToolEventFromFile(jobsDir, status.id);
+  }
+  if (!lastToolEvent)
+    return status.current_tool;
+  if (lastToolEvent.phase === "start")
+    return lastToolEvent.tool;
+  return;
+}
+function enrichStatusesWithDerivedCurrentTool(statuses, jobsDir, sqliteClient) {
+  return statuses.map((status) => ({
+    ...status,
+    current_tool: resolveDerivedCurrentTool(status, jobsDir, sqliteClient)
+  }));
+}
+function loadStatuses() {
+  const sqliteClient = createObservabilitySqliteClient();
+  const jobsDir = resolveJobsDir();
+  const fileStatuses = readStatusesFromFiles(jobsDir);
+  try {
+    const sqliteStatuses = sqliteClient?.listStatuses() ?? [];
+    if (sqliteStatuses.length === 0) {
+      return enrichStatusesWithDerivedCurrentTool(fileStatuses, jobsDir, sqliteClient).sort((a, b) => b.started_at_ms - a.started_at_ms);
+    }
+    const merged = new Map;
+    for (const status of fileStatuses)
+      merged.set(status.id, status);
+    for (const status of sqliteStatuses) {
+      const current = merged.get(status.id);
+      if (!current || status.started_at_ms >= current.started_at_ms) {
+        merged.set(status.id, status);
+      }
+    }
+    return enrichStatusesWithDerivedCurrentTool([...merged.values()], jobsDir, sqliteClient).sort((a, b) => b.started_at_ms - a.started_at_ms);
+  } catch {
+    return enrichStatusesWithDerivedCurrentTool(fileStatuses, jobsDir, sqliteClient).sort((a, b) => b.started_at_ms - a.started_at_ms);
+  } finally {
+    sqliteClient?.close();
+  }
+}
+var init_status_load = __esm(() => {
+  init_observability_sqlite();
+  init_job_root();
+  init_timeline_events();
+});
+
+// src/cli/chat/status.ts
+class ChatStatus {
+  tui;
+  pollIntervalMs;
+  currentStatus = null;
+  lastSignature = null;
+  timer = null;
+  disposed = false;
+  constructor(tui, options2 = {}) {
+    this.tui = tui;
+    this.pollIntervalMs = Math.max(DEFAULT_POLL_INTERVAL_MS, options2.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
+  }
+  start() {
+    if (this.disposed || this.timer)
+      return;
+    this.poll();
+    this.timer = setInterval(() => {
+      this.poll();
+    }, this.pollIntervalMs);
+  }
+  stop() {
+    if (this.timer)
+      clearInterval(this.timer);
+    this.timer = null;
+    this.disposed = true;
+  }
+  render(width) {
+    if (!this.currentStatus)
+      return truncateToWidth("", width);
+    const jobId = this.currentStatus.id;
+    const beadId = this.currentStatus.bead_id ?? "-";
+    const state = this.currentStatus.status;
+    const tokenUsage = this.currentStatus.metrics?.token_usage?.total_tokens;
+    const model = formatModel(this.currentStatus);
+    const line = `executor/${jobId}/${beadId} \xB7 ${state} \xB7 ${formatTokenCount(tokenUsage)} tok \xB7 ${model}`;
+    return truncateToWidth(line, width);
+  }
+  async poll() {
+    if (this.disposed)
+      return;
+    const status = this.readCurrentStatus();
+    const nextSignature = status ? signatureOf(status) : null;
+    if (nextSignature === this.lastSignature)
+      return;
+    this.currentStatus = status;
+    this.lastSignature = nextSignature;
+    this.tui.requestRender();
+  }
+  readCurrentStatus() {
+    try {
+      const statuses = loadStatuses();
+      return selectCurrentStatus(statuses);
+    } catch {
+      return null;
+    }
+  }
+}
+function selectCurrentStatus(statuses) {
+  if (statuses.length === 0)
+    return null;
+  for (const desiredState of STATUS_ORDER) {
+    const match = statuses.find((status) => status.status === desiredState);
+    if (match)
+      return match;
+  }
+  return statuses[0] ?? null;
+}
+function signatureOf(status) {
+  const signature = {
+    status: status.status,
+    totalTokens: status.metrics?.token_usage?.total_tokens ?? null,
+    model: formatModel(status)
+  };
+  return JSON.stringify(signature);
+}
+function formatTokenCount(totalTokens) {
+  if (totalTokens === undefined || !Number.isFinite(totalTokens))
+    return "--";
+  if (totalTokens < 1000)
+    return String(totalTokens);
+  const value = totalTokens / 1000;
+  return `${value.toFixed(1).replace(/\.0$/, "")}k`;
+}
+function formatModel(status) {
+  if (status.model) {
+    const parts = status.model.split("/");
+    return parts[parts.length - 1] ?? status.model;
+  }
+  if (status.backend)
+    return status.backend;
+  return "-";
+}
+var DEFAULT_POLL_INTERVAL_MS = 500, STATUS_ORDER;
+var init_status = __esm(() => {
+  init_status_load();
+  init_dist2();
+  STATUS_ORDER = ["running", "waiting", "starting", "done", "error", "cancelled"];
+});
+
+// src/cli/chat/control.ts
+function createChatControl(controlOps) {
+  return {
+    dispatchInput(text, ctx) {
+      return dispatchInput(text, ctx);
+    },
+    async executeInput(text, ctx) {
+      const liveState = isPlainText(text) ? await controlOps.getJobState(ctx.jobId) : ctx.jobState;
+      const action = dispatchInput(text, { jobState: liveState ?? ctx.jobState });
+      if (action.kind === "info" || action.kind === "error" || action.kind === "reject")
+        return action;
+      if (isPlainText(text)) {
+        const currentState = await controlOps.getJobState(ctx.jobId);
+        if (currentState && isTerminalState(currentState)) {
+          return { kind: "reject", message: "freeform input rejected in terminal state" };
+        }
+      }
+      if (action.kind === "stop")
+        return handleResult2(await controlOps.stopJob(ctx.jobId), "stop");
+      if (action.kind === "finalize")
+        return handleResult2(await controlOps.finalizeJob(ctx.jobId), "finalize");
+      if (action.kind === "notes") {
+        if (!action.text.trim())
+          return errorEnvelope("missing_notes", "notes body missing", "none");
+        if (!ctx.beadId)
+          return errorEnvelope("missing_notes", "bead id missing", "none");
+        return handleResult2(await controlOps.appendBeadNote(ctx.beadId, action.text), "notes");
+      }
+      return action;
+    }
+  };
+}
+function dispatchInput(text, ctx) {
+  const trimmed = text.trim();
+  if (!trimmed)
+    return { kind: "info", message: "empty input" };
+  if (trimmed.startsWith("/"))
+    return parseSlashCommand(trimmed);
+  if (isTerminalState(ctx.jobState))
+    return { kind: "reject", message: "freeform input rejected in terminal state" };
+  return ctx.jobState === "waiting" ? { kind: "resume", text } : { kind: "steer", text };
+}
+function isPlainText(text) {
+  return !text.trim().startsWith("/");
+}
+function parseSlashCommand(text) {
+  const [command, ...rest] = text.slice(1).split(/\s+/);
+  if (!command || !SLASH_COMMANDS.has(command))
+    return { kind: "error", message: `unknown command: ${command ?? ""}`.trim() };
+  if (command === "notes") {
+    const note = rest.join(" ").trim();
+    return note ? { kind: "notes", text: note } : { kind: "error", message: "usage: /notes <text>" };
+  }
+  if (command === "stop")
+    return { kind: "stop" };
+  if (command === "finalize")
+    return { kind: "finalize" };
+  if (command === "show")
+    return { kind: "show" };
+  return { kind: "quit" };
+}
+function isTerminalState(state) {
+  return state === "done" || state === "error" || state === "cancelled";
+}
+function handleResult2(result, successKind) {
+  if (result.ok)
+    return { kind: "info", message: result.message ?? `${successKind} ok` };
+  return errorEnvelope(result.error_code, result.likely_cause, result.next_safe_action);
+}
+function errorEnvelope(error_code, likely_cause, next_safe_action) {
+  return { kind: "error", message: JSON.stringify({ ok: false, error_code, likely_cause, next_safe_action }) };
+}
+var SLASH_COMMANDS;
+var init_control = __esm(() => {
+  SLASH_COMMANDS = new Set(["stop", "finalize", "notes", "show", "quit"]);
+});
+
+// src/cli/chat.ts
+var exports_chat = {};
+__export(exports_chat, {
+  run: () => run13
+});
+async function run13() {
+  const args = parseArgs7(process.argv.slice(3));
+  const loader = new SpecialistLoader;
+  const specialist = await loader.get(args.name).catch((error2) => {
+    process.stderr.write(`Error: ${error2 instanceof Error ? error2.message : String(error2)}
+`);
+    process.exit(1);
+  });
+  const piTui = await Promise.resolve().then(() => (init_dist2(), exports_dist));
+  const { TUI: TUI2, ProcessTerminal: ProcessTerminal2, Container: Container2, Input: Input2, Key: Key2, matchesKey: matchesKey2, addInputListener } = piTui;
+  const terminal = new ProcessTerminal2;
+  const tui = new TUI2(terminal);
+  const feed = new ChatFeed;
+  const status = new ChatStatus(tui, { pollIntervalMs: DEFAULT_POLL_INTERVAL_MS2 });
+  const control = createChatControl({
+    getJobState: async (jobId) => loadJobState(jobId),
+    stopJob: async () => ({ ok: true, message: "stop requested" }),
+    finalizeJob: async () => ({ ok: true, message: "finalize requested" }),
+    appendBeadNote: async () => ({ ok: true, message: "note appended" })
+  });
+  const input2 = new Input2({ placeholder: "Type message, /quit, /stop, /finalize, /show, /notes ..." });
+  const root = new Container2({
+    direction: "column",
+    children: [feed, status, input2]
+  });
+  const cleanup = createCleanup(tui, terminal, status);
+  const signalCleanup = installSignalGuards(cleanup, input2);
+  const detachInputListener = addInputListener((data) => {
+    if (!matchesKey2(data, Key2.ctrl("c")))
+      return false;
+    cleanup.stopJobAndExit(args.beadId);
+    return true;
+  });
+  try {
+    tui.root = root;
+    status.start();
+    feed.appendEvent("chat", `launching ${args.name}`);
+    feed.appendEvent("chat", `context depth ${args.contextDepth}`);
+    if (args.model)
+      feed.appendEvent("chat", `model ${args.model}`);
+    await launchSpecialist({
+      args: { name: args.name, prompt: args.prompt, model: args.model, keepAlive: true, noKeepAlive: false, forceJob: false, outputMode: "human", background: false },
+      specialist,
+      loader,
+      hooks: specialist.hooks ?? {},
+      circuitBreaker: specialist.circuitBreaker ?? {},
+      prompt: buildPrompt(args),
+      beadsWriteNotes: true,
+      perm: specialist.specialist.execution.permission_required,
+      jobsDir: ".specialists/jobs",
+      startEventTailer: () => {
+        return;
+      },
+      formatFooterModel: (backend, model) => formatFooterModel(backend, model)
+    });
+    await tui.start();
+  } finally {
+    detachInputListener?.();
+    signalCleanup();
+    await cleanup.stop();
+  }
+}
+function parseArgs7(argv) {
+  const name = argv[0];
+  if (!name)
+    throw new Error("Usage: sp chat <specialist> [prompt...] --bead <id> [--context-depth N] [--model M]");
+  let beadId = "";
+  let contextDepth = DEFAULT_CONTEXT_DEPTH;
+  let model;
+  const promptParts = [];
+  for (let i = 1;i < argv.length; i++) {
+    const token = argv[i];
+    if (token === "--bead")
+      beadId = argv[++i] ?? "";
+    else if (token === "--context-depth")
+      contextDepth = Number(argv[++i] ?? DEFAULT_CONTEXT_DEPTH);
+    else if (token === "--model")
+      model = argv[++i];
+    else if (!token.startsWith("--"))
+      promptParts.push(token);
+  }
+  if (!beadId)
+    throw new Error("Usage: sp chat <specialist> [prompt...] --bead <id> [--context-depth N] [--model M]");
+  return { name, prompt: promptParts.join(" "), beadId, contextDepth, model };
+}
+function buildPrompt(args) {
+  return [args.prompt, args.contextDepth ? `
+(context-depth: ${args.contextDepth})` : ""].join("").trim();
+}
+async function loadJobState(jobId) {
+  const statuses = loadStatuses();
+  return statuses.find((status) => status.id === jobId)?.status ?? null;
+}
+function formatFooterModel(backend, model) {
+  return model ?? backend ?? "";
+}
+function createCleanup(tui, terminal, status) {
+  const state = { done: false };
+  return {
+    async stop() {
+      if (state.done)
+        return;
+      state.done = true;
+      status.stop();
+      try {
+        tui.stop();
+      } catch {}
+      try {
+        terminal.stop();
+      } catch {}
+    },
+    async stopJobAndExit(jobId) {
+      if (jobId)
+        process.stderr.write(`Stopping job ${jobId}
+`);
+      await this.stop();
+      process.exit(0);
+    }
+  };
+}
+function installSignalGuards(cleanup, input2) {
+  const handle = async (reason, error2) => {
+    try {
+      input2?.drainInput?.();
+    } catch {}
+    try {
+      await cleanup.stop();
+    } catch {}
+    if (error2)
+      process.stderr.write(`[chat] ${reason}: ${error2 instanceof Error ? error2.message : String(error2)}
+`);
+  };
+  const onSigterm = () => void handle("SIGTERM").finally(() => process.exit(0));
+  const onSighup = () => void handle("SIGHUP").finally(() => process.exit(0));
+  const onUnhandled = (error2) => void handle("unhandledRejection", error2).finally(() => process.exit(1));
+  const onUncaught = (error2) => void handle("uncaughtException", error2).finally(() => process.exit(1));
+  process.once("SIGTERM", onSigterm);
+  process.once("SIGHUP", onSighup);
+  process.once("unhandledRejection", onUnhandled);
+  process.once("uncaughtException", onUncaught);
+  return () => {
+    process.off("SIGTERM", onSigterm);
+    process.off("SIGHUP", onSighup);
+    process.off("unhandledRejection", onUnhandled);
+    process.off("uncaughtException", onUncaught);
+  };
+}
+var DEFAULT_CONTEXT_DEPTH = 3, DEFAULT_POLL_INTERVAL_MS2 = 500;
+var init_chat = __esm(() => {
+  init_launch();
+  init_feed();
+  init_status();
+  init_control();
+  init_status_load();
+  init_loader();
+});
+
 // src/specialist/worktree.ts
-import { existsSync as existsSync16, symlinkSync as symlinkSync2, mkdirSync as mkdirSync8, rmSync as rmSync2 } from "fs";
-import { join as join16, resolve as resolve9 } from "path";
+import { existsSync as existsSync17, symlinkSync as symlinkSync2, mkdirSync as mkdirSync9, rmSync as rmSync2 } from "fs";
+import { join as join20, resolve as resolve9 } from "path";
 import { spawnSync as spawnSync11, execFileSync as execFileSync2 } from "child_process";
 function deriveBranchName(beadId, specialistName) {
   return `feature/${beadId}-${slugify(specialistName)}`;
@@ -30121,21 +40475,21 @@ function listWorktrees(cwd = process.cwd()) {
 function findExistingWorktree(branch, cwd = process.cwd()) {
   return listWorktrees(cwd).get(branch);
 }
-function provisionWorktree(options) {
-  const cwd = options.cwd ?? process.cwd();
+function provisionWorktree(options2) {
+  const cwd = options2.cwd ?? process.cwd();
   const commonRoot = resolveCommonRoot(cwd);
-  const branch = deriveBranchName(options.beadId, options.specialistName);
+  const branch = deriveBranchName(options2.beadId, options2.specialistName);
   const existingPath = findExistingWorktree(branch, cwd);
   if (existingPath) {
     return { branch, worktreePath: resolve9(existingPath), reused: true };
   }
-  const worktreeBase = options.worktreeBase ?? join16(commonRoot, ".worktrees", options.beadId);
-  const worktreeName = deriveWorktreeName(options.beadId, options.specialistName);
-  const worktreePath = resolve9(join16(worktreeBase, worktreeName));
+  const worktreeBase = options2.worktreeBase ?? join20(commonRoot, ".worktrees", options2.beadId);
+  const worktreeName = deriveWorktreeName(options2.beadId, options2.specialistName);
+  const worktreePath = resolve9(join20(worktreeBase, worktreeName));
   createWorktreeViaBd(worktreePath, branch, commonRoot);
   normalizeParentHooksPath(commonRoot);
   try {
-    rmSync2(join16(worktreePath, ".beads"), { recursive: true, force: true });
+    rmSync2(join20(worktreePath, ".beads"), { recursive: true, force: true });
     markBeadsSkipWorktree(worktreePath);
   } catch {}
   symlinkPiNpmCache(commonRoot, worktreePath);
@@ -30156,7 +40510,7 @@ function normalizeParentHooksPath(mainRepoRoot) {
       return;
     if (current !== ".beads/hooks" && current !== "./.beads/hooks")
       return;
-    const absolute = join16(mainRepoRoot, ".beads", "hooks");
+    const absolute = join20(mainRepoRoot, ".beads", "hooks");
     spawnSync11("git", ["-C", mainRepoRoot, "config", "core.hooksPath", absolute], { stdio: "pipe" });
   } catch {}
 }
@@ -30180,12 +40534,12 @@ function markBeadsSkipWorktree(worktreePath) {
   } catch {}
 }
 function symlinkPiNpmCache(commonRoot, worktreePath) {
-  const source = join16(commonRoot, ".pi", "npm");
-  const target = join16(worktreePath, ".pi", "npm");
-  if (!existsSync16(source) || existsSync16(target))
+  const source = join20(commonRoot, ".pi", "npm");
+  const target = join20(worktreePath, ".pi", "npm");
+  if (!existsSync17(source) || existsSync17(target))
     return;
   try {
-    mkdirSync8(join16(worktreePath, ".pi"), { recursive: true });
+    mkdirSync9(join20(worktreePath, ".pi"), { recursive: true });
     symlinkSync2(source, target);
   } catch {}
 }
@@ -30225,24 +40579,24 @@ var init_worktree = __esm(() => {
 });
 
 // src/specialist/epic-reconciler.ts
-import { mkdirSync as mkdirSync9, openSync as openSync2, readFileSync as readFileSync15, rmSync as rmSync3, writeFileSync as writeFileSync7 } from "fs";
-import { join as join17 } from "path";
+import { mkdirSync as mkdirSync10, openSync as openSync2, readFileSync as readFileSync16, rmSync as rmSync3, writeFileSync as writeFileSync9 } from "fs";
+import { join as join21 } from "path";
 function buildEpicLockPath(epicId) {
   const location = resolveObservabilityDbLocation();
-  const lockDir = join17(location.dbDirectory, "locks");
-  mkdirSync9(lockDir, { recursive: true });
-  return join17(lockDir, `epic-${epicId}.lock`);
+  const lockDir = join21(location.dbDirectory, "locks");
+  mkdirSync10(lockDir, { recursive: true });
+  return join21(lockDir, `epic-${epicId}.lock`);
 }
 function withEpicAdvisoryLock(epicId, action) {
   const lockPath = buildEpicLockPath(epicId);
   let lockFd = null;
   try {
     lockFd = openSync2(lockPath, "wx");
-    writeFileSync7(lockPath, JSON.stringify({ epic_id: epicId, pid: process.pid, created_at_ms: Date.now() }));
+    writeFileSync9(lockPath, JSON.stringify({ epic_id: epicId, pid: process.pid, created_at_ms: Date.now() }));
   } catch {
     let holder = "unknown";
     try {
-      holder = readFileSync15(lockPath, "utf-8");
+      holder = readFileSync16(lockPath, "utf-8");
     } catch {
       holder = "unknown";
     }
@@ -30443,7 +40797,7 @@ __export(exports_merge, {
   runTypecheckGate: () => runTypecheckGate,
   runRebuild: () => runRebuild,
   runMergePlan: () => runMergePlan,
-  run: () => run13,
+  run: () => run14,
   resolveMergeTargetsForBeadIds: () => resolveMergeTargetsForBeadIds,
   resolveMergeTargets: () => resolveMergeTargets,
   resolveChainEpicMembership: () => resolveChainEpicMembership,
@@ -30460,8 +40814,8 @@ __export(exports_merge, {
   assertMainRepoCleanForMerge: () => assertMainRepoCleanForMerge
 });
 import { spawnSync as spawnSync12 } from "child_process";
-import { existsSync as existsSync17, readFileSync as readFileSync16, readdirSync as readdirSync6 } from "fs";
-import { join as join18 } from "path";
+import { existsSync as existsSync18, readFileSync as readFileSync17, readdirSync as readdirSync8 } from "fs";
+import { join as join22 } from "path";
 function parseOptions(argv) {
   let target = "";
   let rebuild = false;
@@ -30700,16 +41054,16 @@ function readAllJobStatuses() {
       sqliteClient.close();
     }
   }
-  const jobsDir = join18(process.cwd(), ".specialists", "jobs");
-  if (!existsSync17(jobsDir))
+  const jobsDir = join22(process.cwd(), ".specialists", "jobs");
+  if (!existsSync18(jobsDir))
     return [];
   const statuses = [];
-  for (const jobId of readdirSync6(jobsDir)) {
-    const statusFile = join18(jobsDir, jobId, "status.json");
-    if (!existsSync17(statusFile))
+  for (const jobId of readdirSync8(jobsDir)) {
+    const statusFile = join22(jobsDir, jobId, "status.json");
+    if (!existsSync18(statusFile))
       continue;
     try {
-      const raw = JSON.parse(readFileSync16(statusFile, "utf-8"));
+      const raw = JSON.parse(readFileSync17(statusFile, "utf-8"));
       if (raw.id) {
         statuses.push(raw);
       }
@@ -30840,8 +41194,8 @@ function readChangedFilesForLastMerge(cwd = process.cwd()) {
   return diff.stdout.split(`
 `).map((line) => line.trim()).filter(Boolean);
 }
-function isMergeDirtyIgnored(path) {
-  return MERGE_DIRTY_IGNORE_PREFIXES.some((prefix) => path.startsWith(prefix));
+function isMergeDirtyIgnored(path3) {
+  return MERGE_DIRTY_IGNORE_PREFIXES.some((prefix) => path3.startsWith(prefix));
 }
 function parseGitStatusPaths(stdout) {
   const tracked = [];
@@ -30852,15 +41206,15 @@ function parseGitStatusPaths(stdout) {
     if (!line)
       continue;
     if (line.startsWith("?? ")) {
-      const path2 = line.slice(3).trim();
-      if (path2 && !isMergeDirtyIgnored(path2))
-        untracked.push(path2);
+      const path4 = line.slice(3).trim();
+      if (path4 && !isMergeDirtyIgnored(path4))
+        untracked.push(path4);
       continue;
     }
     const match = /^..\s(.+?)(?:\s->\s(.+))?$/.exec(line);
-    const path = match ? match[2] ?? match[1] ?? "" : line.slice(3).trim();
-    if (path && !isMergeDirtyIgnored(path))
-      tracked.push(path.trim());
+    const path3 = match ? match[2] ?? match[1] ?? "" : line.slice(3).trim();
+    if (path3 && !isMergeDirtyIgnored(path3))
+      tracked.push(path3.trim());
   }
   return { tracked, untracked };
 }
@@ -30883,13 +41237,13 @@ function getIncomingMergePaths(branches, cwd) {
   return incoming;
 }
 function formatDirtyConflictMessage(paths) {
-  return paths.map((path) => `- ${path}`).join(`
+  return paths.map((path3) => `- ${path3}`).join(`
 `);
 }
 function classifyMainRepoDirtyState(branches, cwd) {
   const dirty = getMainRepoDirtyPaths(cwd);
   const incoming = getIncomingMergePaths(branches, cwd);
-  const overlap = [...dirty.tracked, ...dirty.untracked].filter((path) => incoming.has(path));
+  const overlap = [...dirty.tracked, ...dirty.untracked].filter((path3) => incoming.has(path3));
   return { dirty, overlappingPaths: overlap };
 }
 function shelveMainRepoDirtyState(cwd, dirty, publicationLabel) {
@@ -30928,11 +41282,11 @@ function assertMainRepoCleanForMerge(cwd) {
   const allDirty = [...dirty.tracked, ...dirty.untracked];
   if (allDirty.length === 0)
     return;
-  const list = allDirty.map((path) => `- ${path}`).join(`
+  const list2 = allDirty.map((path3) => `- ${path3}`).join(`
 `);
   throw new Error(`Refusing merge: main repo '${cwd}' has uncommitted changes that could cause spurious conflicts.
 ` + `Dirty files (tracked + untracked, non-dist/wolf/xtrm):
-${list}
+${list2}
 ` + `Resolve by committing, stashing, or reverting these changes, then retry merge.`);
 }
 function parseNameStatusLine(line) {
@@ -30945,13 +41299,13 @@ function parseNameStatusLine(line) {
   const status = parts[0] ?? "";
   if (!status)
     return null;
-  const path = parts.length >= 3 ? parts[parts.length - 1] ?? "" : parts[1] ?? "";
-  if (!path)
+  const path3 = parts.length >= 3 ? parts[parts.length - 1] ?? "" : parts[1] ?? "";
+  if (!path3)
     return null;
-  return { status, path };
+  return { status, path: path3 };
 }
-function isNoisePath(path) {
-  return NOISE_PATH_PREFIXES.some((prefix) => path.startsWith(prefix));
+function isNoisePath(path3) {
+  return NOISE_PATH_PREFIXES.some((prefix) => path3.startsWith(prefix));
 }
 function isBranchAlreadyPublished(branch, cwd = process.cwd(), targetBranch) {
   const baseBranch = resolveDefaultBranchName(cwd, targetBranch);
@@ -31075,7 +41429,7 @@ ${conflicts.map((file) => `- ${file}`).join(`
   throw new Error(`Merge conflict while merging '${branch}'.${context}`);
 }
 function runTypecheckGate(cwd = process.cwd()) {
-  const hasTypeScriptConfig = existsSync17(join18(cwd, "tsconfig.json")) || readdirSync6(cwd).some((entry) => entry.startsWith("tsconfig") && entry.endsWith(".json"));
+  const hasTypeScriptConfig = existsSync18(join22(cwd, "tsconfig.json")) || readdirSync8(cwd).some((entry) => entry.startsWith("tsconfig") && entry.endsWith(".json"));
   if (!hasTypeScriptConfig) {
     console.log("TypeScript gate: skipped (no tsconfig)");
     return;
@@ -31131,10 +41485,10 @@ function syncEpicStateAfterMerge(target) {
     sqliteClient.close();
   }
 }
-function runMergePlan(targets, options) {
+function runMergePlan(targets, options2) {
   const mainRepoRoot = resolveMainWorktreeRoot();
-  const targetBranch = options.targetBranch ? validateTargetBranchRef(options.targetBranch, mainRepoRoot) : undefined;
-  const shelved = options.mode === "direct" ? (() => {
+  const targetBranch = options2.targetBranch ? validateTargetBranchRef(options2.targetBranch, mainRepoRoot) : undefined;
+  const shelved = options2.mode === "direct" ? (() => {
     const dirtyState = classifyMainRepoDirtyState(targets.map((target) => target.branch), mainRepoRoot);
     if (dirtyState.overlappingPaths.length > 0) {
       throw new Error(`Refusing merge: main repo '${mainRepoRoot}' has dirty files overlapping incoming epic changes.
@@ -31142,7 +41496,7 @@ function runMergePlan(targets, options) {
 ${formatDirtyConflictMessage(dirtyState.overlappingPaths)}
 ` + `Resolve or move these changes, then retry merge.`);
     }
-    return shelveMainRepoDirtyState(mainRepoRoot, dirtyState.dirty, options.publicationLabel ?? `epic-${targets[0]?.beadId ?? "publication"}`);
+    return shelveMainRepoDirtyState(mainRepoRoot, dirtyState.dirty, options2.publicationLabel ?? `epic-${targets[0]?.beadId ?? "publication"}`);
   })() : null;
   const mergedSteps = [];
   try {
@@ -31166,7 +41520,7 @@ ${formatDirtyConflictMessage(dirtyState.overlappingPaths)}
         changedFiles: readChangedFilesForLastMerge(mainRepoRoot)
       });
     }
-    if (options.rebuild) {
+    if (options2.rebuild) {
       runRebuild(mainRepoRoot);
     }
     return mergedSteps;
@@ -31218,18 +41572,18 @@ function createPullRequest(baseBranch, publishBranch, publicationLabel) {
   }
   return pullRequestUrl;
 }
-function executePublicationPlan(targets, options) {
-  if (options.mode === "direct") {
+function executePublicationPlan(targets, options2) {
+  if (options2.mode === "direct") {
     return {
-      steps: runMergePlan(targets, options)
+      steps: runMergePlan(targets, options2)
     };
   }
   const baseBranch = getCurrentBranchName();
-  const publishBranch = `sp/publish-${options.publicationLabel.replace(/[^a-zA-Z0-9._-]+/g, "-")}-${Date.now()}`;
+  const publishBranch = `sp/publish-${options2.publicationLabel.replace(/[^a-zA-Z0-9._-]+/g, "-")}-${Date.now()}`;
   checkoutNewBranch(publishBranch);
   try {
-    const steps = runMergePlan(targets, options);
-    const pullRequestUrl = createPullRequest(baseBranch, publishBranch, options.publicationLabel);
+    const steps = runMergePlan(targets, options2);
+    const pullRequestUrl = createPullRequest(baseBranch, publishBranch, options2.publicationLabel);
     checkoutBranch(baseBranch);
     return { steps, pullRequestUrl };
   } catch (error2) {
@@ -31239,17 +41593,17 @@ function executePublicationPlan(targets, options) {
     throw error2;
   }
 }
-async function run13() {
-  let options;
+async function run14() {
+  let options2;
   try {
-    options = parseOptions(process.argv.slice(3));
+    options2 = parseOptions(process.argv.slice(3));
   } catch (error2) {
     const message = error2 instanceof Error ? error2.message : String(error2);
     printUsageAndExit(message);
   }
-  const targets = resolveMergeTargets(options.target);
-  const mergedSteps = runMergePlan(targets, { rebuild: options.rebuild, targetBranch: options.targetBranch });
-  printSummary(mergedSteps, options.rebuild);
+  const targets = resolveMergeTargets(options2.target);
+  const mergedSteps = runMergePlan(targets, { rebuild: options2.rebuild, targetBranch: options2.targetBranch });
+  printSummary(mergedSteps, options2.rebuild);
 }
 var TERMINAL_STATUSES, NOISE_PATH_PREFIXES, MERGE_DIRTY_IGNORE_PREFIXES;
 var init_merge = __esm(() => {
@@ -31330,33 +41684,33 @@ function formatToolArgValue(value, maxLen = 240) {
   return flat.length > maxLen ? `${flat.slice(0, maxLen - 3)}...` : flat;
 }
 function formatToolDetail(event) {
-  const toolName = cyan5(event.tool);
+  const toolName = cyan6(event.tool);
   if (event.phase === "start") {
     if (typeof event.args?.command === "string") {
       return `${toolName}: ${yellow10(formatToolArgValue(event.args.command))}`;
     }
     if (event.args && Object.keys(event.args).length > 0) {
       const argStr = Object.entries(event.args).map(([k, v]) => `${k}=${formatToolArgValue(v)}`).join(" ");
-      return `${toolName}: ${dim8(argStr)}`;
+      return `${toolName}: ${dim9(argStr)}`;
     }
-    return `${toolName}: ${dim8("start")}`;
+    return `${toolName}: ${dim9("start")}`;
   }
   if (event.phase === "end" && event.is_error) {
     const summary = event.result_summary?.split(`
 `)[0]?.trim().slice(0, 120);
     return summary ? `${toolName}: ${red2(summary)}` : `${toolName}: ${red2("error")}`;
   }
-  return `${toolName}: ${dim8(event.phase)}`;
+  return `${toolName}: ${dim9(event.phase)}`;
 }
-function formatEventLine(event, options) {
-  const ts = dim8(formatTime(event.t));
-  const job = options.colorize(`[${options.jobId}]`);
-  const node = options.nodeId ? magenta3(`[\u2B22${options.nodeId}]`) : "";
-  const bead = dim8(`[${options.beadId ?? "-"}]`);
-  const label = options.colorize(bold10(getEventLabel(event.type).padEnd(5)));
-  const hasContextPct = Number.isFinite(options.contextPct);
-  const contextPct = hasContextPct ? Math.min(100, Math.max(0, Math.round(options.contextPct))) : null;
-  const contextBadge = contextPct === null ? "" : dim8(`[${contextPct}%]`);
+function formatEventLine(event, options2) {
+  const ts = dim9(formatTime(event.t));
+  const job = options2.colorize(`[${options2.jobId}]`);
+  const node = options2.nodeId ? magenta3(`[\u2B22${options2.nodeId}]`) : "";
+  const bead = dim9(`[${options2.beadId ?? "-"}]`);
+  const label = options2.colorize(bold11(getEventLabel(event.type).padEnd(5)));
+  const hasContextPct = Number.isFinite(options2.contextPct);
+  const contextPct = hasContextPct ? Math.min(100, Math.max(0, Math.round(options2.contextPct))) : null;
+  const contextBadge = contextPct === null ? "" : dim9(`[${contextPct}%]`);
   const detailParts = [];
   let detail = "";
   if (event.type === "meta") {
@@ -31458,25 +41812,25 @@ function formatEventLine(event, options) {
     detailParts.push(`phase=${event.phase}`);
   }
   if (!detail && detailParts.length > 0) {
-    detail = dim8(detailParts.join(" "));
+    detail = dim9(detailParts.join(" "));
   }
-  return `${ts} ${job} ${node ? `${node} ` : ""}${bead} ${label} ${options.specialist}${contextBadge ? ` ${contextBadge}` : ""}${detail ? ` ${detail}` : ""}`.trimEnd();
+  return `${ts} ${job} ${node ? `${node} ` : ""}${bead} ${label} ${options2.specialist}${contextBadge ? ` ${contextBadge}` : ""}${detail ? ` ${detail}` : ""}`.trimEnd();
 }
 function formatEventInline(event) {
   switch (event.type) {
     case "meta":
-      return dim8(`[model] ${event.backend}/${event.model}`);
+      return dim9(`[model] ${event.backend}/${event.model}`);
     case "thinking":
-      return dim8("[thinking...]");
+      return dim9("[thinking...]");
     case "text":
-      return dim8("[response]");
+      return dim9("[response]");
     case "tool": {
       if (event.phase !== "start")
         return null;
       const firstArgVal = event.args ? Object.values(event.args)[0] : undefined;
       const argStr = firstArgVal !== undefined ? ": " + (typeof firstArgVal === "string" ? firstArgVal.split(`
 `)[0].slice(0, 80) : JSON.stringify(firstArgVal).slice(0, 80)) : "";
-      return `${dim8("[tool]")}  ${cyan5(event.tool)}${dim8(argStr)}`;
+      return `${dim9("[tool]")}  ${cyan6(event.tool)}${dim9(argStr)}`;
     }
     case "stale_warning":
       return yellow10(`[warning] ${event.reason}: ${Math.round(event.silence_ms / 1000)}s silent`);
@@ -31498,9 +41852,9 @@ function formatEventInlineDebounced(event, activePhase) {
     nextPhase: null
   };
 }
-var dim8 = (s) => `\x1B[2m${s}\x1B[0m`, bold10 = (s) => `\x1B[1m${s}\x1B[0m`, cyan5 = (s) => `\x1B[36m${s}\x1B[0m`, yellow10 = (s) => `\x1B[33m${s}\x1B[0m`, red2 = (s) => `\x1B[31m${s}\x1B[0m`, green8 = (s) => `\x1B[32m${s}\x1B[0m`, blue3 = (s) => `\x1B[34m${s}\x1B[0m`, magenta3 = (s) => `\x1B[35m${s}\x1B[0m`, JOB_COLORS, EVENT_LABELS;
+var dim9 = (s) => `\x1B[2m${s}\x1B[0m`, bold11 = (s) => `\x1B[1m${s}\x1B[0m`, cyan6 = (s) => `\x1B[36m${s}\x1B[0m`, yellow10 = (s) => `\x1B[33m${s}\x1B[0m`, red2 = (s) => `\x1B[31m${s}\x1B[0m`, green9 = (s) => `\x1B[32m${s}\x1B[0m`, blue3 = (s) => `\x1B[34m${s}\x1B[0m`, magenta3 = (s) => `\x1B[35m${s}\x1B[0m`, JOB_COLORS, EVENT_LABELS;
 var init_format_helpers = __esm(() => {
-  JOB_COLORS = [cyan5, yellow10, magenta3, green8, blue3, red2];
+  JOB_COLORS = [cyan6, yellow10, magenta3, green9, blue3, red2];
   EVENT_LABELS = {
     run_start: "START",
     meta: "META",
@@ -31525,14 +41879,14 @@ var init_format_helpers = __esm(() => {
 // src/cli/run.ts
 var exports_run = {};
 __export(exports_run, {
-  run: () => run14,
+  run: () => run15,
   buildInjectedReviewerDiffVariables: () => buildInjectedReviewerDiffVariables
 });
-import { join as join19 } from "path";
-import { existsSync as existsSync18, readFileSync as readFileSync17, readdirSync as readdirSync7, statSync as statSync3, writeFileSync as writeFileSync8 } from "fs";
+import { join as join23 } from "path";
+import { existsSync as existsSync19, readFileSync as readFileSync18, readdirSync as readdirSync9, statSync as statSync5 } from "fs";
 import { randomBytes } from "crypto";
-import { spawn as cpSpawn, execSync as execSync4 } from "child_process";
-async function parseArgs7(argv) {
+import { spawn as cpSpawn, execSync as execSync5 } from "child_process";
+async function parseArgs8(argv) {
   const name = argv[0];
   if (!name || name.startsWith("--")) {
     console.error('Usage: specialists|sp run <name> [--prompt "..."] [--bead <id>] ' + "[--worktree] [--job <id>] [--force-job] [--epic <id>] [--force-stale-base] [--context-depth <n>] [--model <model>] " + "[--no-beads] [--no-bead-notes] [--keep-alive|--no-keep-alive] [--json|--raw]");
@@ -31631,7 +41985,7 @@ async function parseArgs7(argv) {
     process.exit(1);
   }
   if (epicId && reuseJobId !== undefined) {
-    process.stderr.write(dim9(`[warning: --epic ${epicId} with --job may override target job's epic membership]
+    process.stderr.write(dim10(`[warning: --epic ${epicId} with --job may override target job's epic membership]
 `));
   }
   if (worktree && !beadId) {
@@ -31678,7 +42032,7 @@ async function parseArgs7(argv) {
 }
 function readBeadSummary(beadId) {
   try {
-    const raw = execSync4(`bd show ${beadId} --json`, {
+    const raw = execSync5(`bd show ${beadId} --json`, {
       stdio: "pipe",
       encoding: "utf-8",
       timeout: 5000
@@ -31724,7 +42078,7 @@ function resolveNewestJobIdFromDb(cwd, jobsDir, specialist, previousLatest, minS
     const newest = sqliteClient.listStatuses().filter((status) => {
       if (status.specialist !== specialist || status.id === previousLatest || status.started_at_ms < minStartedAtMs)
         return false;
-      return existsSync18(join19(jobsDir, status.id, "status.json"));
+      return existsSync19(join23(jobsDir, status.id, "status.json"));
     }).sort((left, right) => right.started_at_ms - left.started_at_ms || left.id.localeCompare(right.id))[0];
     return newest?.id ?? "";
   } catch {
@@ -31735,11 +42089,11 @@ function resolveNewestJobIdFromDb(cwd, jobsDir, specialist, previousLatest, minS
 }
 function resolveNewestJobIdFromJobsDir(jobsDir, previousLatest, minMtimeMs) {
   try {
-    const entries = readdirSync7(jobsDir, { withFileTypes: true }).filter((entry) => entry.isDirectory() && /^[a-f0-9]{6}$/.test(entry.name) && entry.name !== previousLatest).map((entry) => {
-      const dirPath = join19(jobsDir, entry.name);
-      const statusPath = join19(dirPath, "status.json");
-      const stats = statSync3(dirPath);
-      const statusStats = statSync3(statusPath);
+    const entries = readdirSync9(jobsDir, { withFileTypes: true }).filter((entry) => entry.isDirectory() && /^[a-f0-9]{6}$/.test(entry.name) && entry.name !== previousLatest).map((entry) => {
+      const dirPath = join23(jobsDir, entry.name);
+      const statusPath = join23(dirPath, "status.json");
+      const stats = statSync5(dirPath);
+      const statusStats = statSync5(statusPath);
       return {
         id: entry.name,
         mtimeMs: Math.max(stats.mtimeMs, statusStats.mtimeMs)
@@ -31779,7 +42133,7 @@ function assertNoStaleBaseSiblings(beadId, forceStaleBase) {
     if (staleSiblings.length === 0)
       return;
     if (forceStaleBase) {
-      process.stderr.write(dim9(`[stale-base guard bypassed: ${staleSiblings.length} unmerged sibling chain(s) under epic ${epicId}]
+      process.stderr.write(dim10(`[stale-base guard bypassed: ${staleSiblings.length} unmerged sibling chain(s) under epic ${epicId}]
 `));
       return;
     }
@@ -31801,10 +42155,10 @@ function resolveWorkingDirectory(args, jobsDir, permissionRequired, readStatus) 
       specialistName: args.name
     });
     if (info.reused) {
-      process.stderr.write(dim9(`[worktree reused: ${info.worktreePath}  branch: ${info.branch}]
+      process.stderr.write(dim10(`[worktree reused: ${info.worktreePath}  branch: ${info.branch}]
 `));
     } else {
-      process.stderr.write(dim9(`[worktree created: ${info.worktreePath}  branch: ${info.branch}]
+      process.stderr.write(dim10(`[worktree created: ${info.worktreePath}  branch: ${info.branch}]
 `));
     }
     return {
@@ -31836,7 +42190,7 @@ function resolveWorkingDirectory(args, jobsDir, permissionRequired, readStatus) 
       process.exit(1);
     }
     const worktreeOwnerJobId = targetStatus.worktree_owner_job_id ?? targetStatus.id ?? args.reuseJobId;
-    process.stderr.write(dim9(`[workspace reused from job ${args.reuseJobId}: ${worktreePath}]
+    process.stderr.write(dim10(`[workspace reused from job ${args.reuseJobId}: ${worktreePath}]
 `));
     return {
       workingDirectory: worktreePath,
@@ -31848,13 +42202,13 @@ function resolveWorkingDirectory(args, jobsDir, permissionRequired, readStatus) 
   return {};
 }
 function startEventTailer(jobId, jobsDir, mode, specialist, beadId) {
-  const eventsPath = join19(jobsDir, jobId, "events.jsonl");
-  const statusPath = join19(jobsDir, jobId, "status.json");
+  const eventsPath = join23(jobsDir, jobId, "events.jsonl");
+  const statusPath = join23(jobsDir, jobId, "status.json");
   let linesRead = 0;
   let activeInlinePhase = null;
   const readPayloadBreakdown = () => {
     try {
-      const statusRaw = readFileSync17(statusPath, "utf-8");
+      const statusRaw = readFileSync18(statusPath, "utf-8");
       const status = JSON.parse(statusRaw);
       return status.startup_payload_json ? JSON.parse(status.startup_payload_json) : undefined;
     } catch {
@@ -31864,7 +42218,7 @@ function startEventTailer(jobId, jobsDir, mode, specialist, beadId) {
   const drain = () => {
     let content;
     try {
-      content = readFileSync17(eventsPath, "utf-8");
+      content = readFileSync18(eventsPath, "utf-8");
     } catch {
       return;
     }
@@ -31914,7 +42268,7 @@ function startEventTailer(jobId, jobsDir, mode, specialist, beadId) {
     drain();
   };
 }
-function formatFooterModel(backend, model) {
+function formatFooterModel2(backend, model) {
   if (!model)
     return "";
   if (!backend)
@@ -31929,11 +42283,11 @@ function extractReviewedJobIdOverride(prompt) {
   const candidate = match?.[1]?.trim();
   return candidate ? candidate : undefined;
 }
-function buildReusedWorktreeAwarenessBlock(options) {
-  const owner = options.worktreeOwnerJobId ?? options.reusedFromJobId;
+function buildReusedWorktreeAwarenessBlock(options2) {
+  const owner = options2.worktreeOwnerJobId ?? options2.reusedFromJobId;
   return [
     "## Reused workspace awareness (from --job)",
-    `You are entering an existing worktree reused from job: ${options.reusedFromJobId}.`,
+    `You are entering an existing worktree reused from job: ${options2.reusedFromJobId}.`,
     `Worktree chain owner job: ${owner}.`,
     "Workspace may contain uncommitted edits, staged changes, generated files, or partial fixes from prior handoff steps.",
     "Before edits, run and inspect: git status --short --branch, git diff --stat, git diff --cached --stat.",
@@ -31944,7 +42298,7 @@ function buildReusedWorktreeAwarenessBlock(options) {
 function buildInjectedReviewerDiffVariables(cwd, maxFiles = 20) {
   const read = (command) => {
     try {
-      return execSync4(command, {
+      return execSync5(command, {
         cwd,
         stdio: "pipe",
         encoding: "utf-8",
@@ -32023,8 +42377,8 @@ ${truncated}` : `### ${file}
   }
   return {};
 }
-async function run14() {
-  const args = await parseArgs7(process.argv.slice(3));
+async function run15() {
+  const args = await parseArgs8(process.argv.slice(3));
   ensureObservabilityDb2(process.cwd());
   const loader = new SpecialistLoader;
   const specialist = await loader.get(args.name).catch((err) => {
@@ -32065,10 +42419,10 @@ async function run14() {
   }
   if (args.background) {
     const jobsDir2 = resolveJobsDir();
-    const latestPath = join19(jobsDir2, "latest");
+    const latestPath = join23(jobsDir2, "latest");
     const oldLatest = (() => {
       try {
-        return readFileSync17(latestPath, "utf-8").trim();
+        return readFileSync18(latestPath, "utf-8").trim();
       } catch {
         return "";
       }
@@ -32085,7 +42439,7 @@ async function run14() {
     if (isTmuxAvailable()) {
       const suffix = randomBytes(3).toString("hex");
       const sessionName = buildSessionName(args.name, suffix);
-      handoffPath = join19(jobsDir2, `.bg-job-id-${sessionName}`);
+      handoffPath = join23(jobsDir2, `.bg-job-id-${sessionName}`);
       createTmuxSession(sessionName, cwd, tmuxCmd, { [JOB_ID_HANDOFF_PATH_ENV]: handoffPath });
     } else {
       const child = cpSpawn(process.execPath, [process.argv[1], ...innerArgs], {
@@ -32112,24 +42466,24 @@ async function run14() {
     }
     const pollTimeoutMs = isTmuxAvailable() ? 15000 : 5000;
     const deadline = Date.now() + pollTimeoutMs;
-    let jobId2 = "";
+    let jobId = "";
     while (Date.now() < deadline) {
       await Promise.race([
         new Promise((r) => setTimeout(r, 100)),
         childExitPromise
       ]);
       try {
-        const current = readFileSync17(latestPath, "utf-8").trim();
+        const current = readFileSync18(latestPath, "utf-8").trim();
         if (current && current !== oldLatest) {
-          jobId2 = current;
+          jobId = current;
           break;
         }
       } catch {}
-      if (!jobId2 && handoffPath) {
+      if (!jobId && handoffPath) {
         try {
-          const handoff = readFileSync17(handoffPath, "utf-8").trim();
+          const handoff = readFileSync18(handoffPath, "utf-8").trim();
           if (/^[a-f0-9]{6}$/.test(handoff)) {
-            jobId2 = handoff;
+            jobId = handoff;
             break;
           }
         } catch {}
@@ -32137,17 +42491,17 @@ async function run14() {
       if (childExitCode !== undefined)
         break;
     }
-    if (!jobId2 && childExitCode !== undefined && childExitCode !== 0) {
+    if (!jobId && childExitCode !== undefined && childExitCode !== 0) {
       process.exit(childExitCode);
     }
-    if (!jobId2) {
-      jobId2 = resolveNewestJobIdFromDb(cwd, jobsDir2, args.name, oldLatest, launchStartedAt - 1000);
+    if (!jobId) {
+      jobId = resolveNewestJobIdFromDb(cwd, jobsDir2, args.name, oldLatest, launchStartedAt - 1000);
     }
-    if (!jobId2) {
-      jobId2 = resolveNewestJobIdFromJobsDir(jobsDir2, oldLatest, launchStartedAt - 1000);
+    if (!jobId) {
+      jobId = resolveNewestJobIdFromJobsDir(jobsDir2, oldLatest, launchStartedAt - 1000);
     }
-    if (jobId2) {
-      process.stdout.write(`${jobId2}
+    if (jobId) {
+      process.stdout.write(`${jobId}
 `);
     } else {
       process.stderr.write(`Warning: job started but ID not yet available. Check specialists status.
@@ -32158,38 +42512,21 @@ async function run14() {
     process.exit(0);
   }
   const circuitBreaker = new CircuitBreaker;
-  const hooks = new HookEmitter({ tracePath: join19(process.cwd(), ".specialists", "trace.jsonl") });
+  const hooks = new HookEmitter({ tracePath: join23(process.cwd(), ".specialists", "trace.jsonl") });
   const beadsClient = args.noBeads ? undefined : new BeadsClient;
   const beadReader = beadsClient ?? new BeadsClient;
   let prompt = args.prompt;
   let variables;
   let epicId;
   let effectiveBeadId = args.beadId;
-  const runner = new SpecialistRunner({
-    loader,
-    hooks,
-    circuitBreaker,
-    beadsClient
-  });
   const beadsWriteNotes = args.noBeadNotes ? false : specialist.specialist.beads_write_notes ?? true;
   const jobsDir = resolveJobsDir();
   const statusReader = new Supervisor({
-    runner,
-    runOptions: {
-      name: args.name,
-      prompt
-    },
+    runner: new (await Promise.resolve().then(() => (init_runner(), exports_runner))).SpecialistRunner({ loader, hooks, circuitBreaker, beadsClient }),
+    runOptions: { name: args.name, prompt },
     jobsDir
   });
-  const {
-    workingDirectory,
-    reusedFromJobId,
-    worktreeOwnerJobId,
-    inferredBeadId
-  } = resolveWorkingDirectory({
-    ...args,
-    worktree: useWorktree
-  }, jobsDir, perm, (jobId2) => statusReader.readStatus(jobId2));
+  const { workingDirectory, reusedFromJobId, worktreeOwnerJobId, inferredBeadId } = resolveWorkingDirectory({ ...args, worktree: useWorktree }, jobsDir, perm, (jobId) => statusReader.readStatus(jobId));
   await statusReader.dispose();
   if (!effectiveBeadId && inferredBeadId) {
     effectiveBeadId = inferredBeadId;
@@ -32206,35 +42543,25 @@ async function run14() {
     }
     const blockers = args.contextDepth > 0 ? beadReader.getCompletedBlockers(effectiveBeadId, args.contextDepth) : [];
     if (blockers.length > 0) {
-      process.stderr.write(dim9(`
+      process.stderr.write(dim10(`
 [context: ${blockers.length} completed dep${blockers.length > 1 ? "s" : ""} injected]
 `));
     }
     const beadContext = buildBeadContext(bead, blockers);
     prompt = beadContext;
     epicId = args.epicId ?? bead.parent;
-    variables = {
-      ...variables ?? {},
-      bead_context: beadContext,
-      bead_id: effectiveBeadId
-    };
+    variables = { ...variables ?? {}, bead_context: beadContext, bead_id: effectiveBeadId };
   } else if (args.epicId) {
     epicId = args.epicId;
   }
-  variables = {
-    ...variables ?? {},
-    reused_worktree_awareness: ""
-  };
+  variables = { ...variables ?? {}, reused_worktree_awareness: "" };
   if (args.reuseJobId) {
     const reviewedJobId = extractReviewedJobIdOverride(prompt) ?? args.reuseJobId;
     const injectedReviewerDiffVariables = workingDirectory && args.name === "reviewer" ? buildInjectedReviewerDiffVariables(workingDirectory) : {};
     variables = {
       ...variables ?? {},
       reviewed_job_id: reviewedJobId,
-      reused_worktree_awareness: buildReusedWorktreeAwarenessBlock({
-        reusedFromJobId: args.reuseJobId,
-        worktreeOwnerJobId
-      }),
+      reused_worktree_awareness: buildReusedWorktreeAwarenessBlock({ reusedFromJobId: args.reuseJobId, worktreeOwnerJobId }),
       ...injectedReviewerDiffVariables
     };
   }
@@ -32242,107 +42569,30 @@ async function run14() {
     console.error("Error: provide --prompt, pipe stdin, use --bead <id>, or provide --job <id> for bead inference.");
     process.exit(1);
   }
-  let stopTailer;
-  const supervisor = new Supervisor({
-    runner,
-    runOptions: {
-      name: args.name,
-      prompt,
-      variables,
-      backendOverride: args.model,
-      inputBeadId: effectiveBeadId,
-      epicId,
-      keepAlive: args.keepAlive,
-      noKeepAlive: args.noKeepAlive,
-      beadsWriteNotes,
-      forceJob: args.forceJob,
-      permissionRequired: perm,
-      workingDirectory,
-      reusedFromJobId,
-      worktreeOwnerJobId
-    },
+  await launchSpecialist({
+    args,
+    specialist,
+    loader,
+    hooks,
+    circuitBreaker,
     beadsClient,
-    stallDetection: specialist.specialist.stall_detection,
-    onProgress: args.outputMode === "raw" ? (delta) => process.stdout.write(delta) : undefined,
-    onMeta: args.outputMode !== "human" ? (meta) => process.stderr.write(dim9(`
-[${meta.backend} / ${meta.model}]
-
-`)) : undefined,
-    onJobStarted: ({ id }) => {
-      process.stderr.write(dim9(`[job started: ${id}]
-`));
-      const handoffPath = process.env[JOB_ID_HANDOFF_PATH_ENV];
-      if (handoffPath) {
-        try {
-          writeFileSync8(handoffPath, `${id}
-`, "utf-8");
-        } catch {}
-      }
-      if (args.outputMode !== "raw") {
-        stopTailer = startEventTailer(id, jobsDir, args.outputMode, args.name, effectiveBeadId);
-      }
-    }
+    workingDirectory,
+    reusedFromJobId,
+    worktreeOwnerJobId,
+    effectiveBeadId,
+    prompt,
+    variables,
+    epicId,
+    beadsWriteNotes,
+    perm,
+    jobsDir,
+    startEventTailer: (jobId, jobsDirArg) => startEventTailer(jobId, jobsDirArg, args.outputMode === "raw" ? "human" : args.outputMode, args.name, effectiveBeadId),
+    formatFooterModel: formatFooterModel2
   });
-  if (effectiveBeadId && workingDirectory) {
-    try {
-      execSync4(`bd kv set "bead-claim:${effectiveBeadId}" "active"`, {
-        cwd: workingDirectory,
-        stdio: "pipe",
-        timeout: 5000
-      });
-    } catch {}
-  }
-  process.stderr.write(`
-${bold11(`Running ${cyan6(args.name)}`)}
-
-`);
-  let jobId = "";
-  let runError;
-  try {
-    jobId = await supervisor.run();
-  } catch (err) {
-    runError = err;
-    stopTailer?.();
-  }
-  stopTailer?.();
-  if (effectiveBeadId && workingDirectory) {
-    try {
-      execSync4(`bd kv clear "bead-claim:${effectiveBeadId}"`, {
-        cwd: workingDirectory,
-        stdio: "pipe",
-        timeout: 5000
-      });
-    } catch {}
-  }
-  if (runError) {
-    process.stderr.write(`Error: ${runError?.message ?? runError}
-`);
-    process.exit(1);
-  }
-  const status = supervisor.readStatus(jobId);
-  const secs = ((status?.last_event_at_ms ?? Date.now()) - (status?.started_at_ms ?? Date.now())) / 1000;
-  const modelLabel = formatFooterModel(status?.backend, status?.model);
-  const footer = [
-    `job ${jobId}`,
-    status?.bead_id ? `bead ${status.bead_id}` : "",
-    `${secs.toFixed(1)}s`,
-    modelLabel ? dim9(modelLabel) : ""
-  ].filter(Boolean).join("  ");
-  process.stderr.write(`
-${green9("\u2713")} ${footer}
-
-`);
-  process.stderr.write(dim9(`Status: specialists ps ${jobId} --json
-`));
-  process.stderr.write(dim9(`Events: specialists feed ${jobId}
-
-`));
-  process.exit(0);
 }
-var bold11 = (s) => `\x1B[1m${s}\x1B[0m`, dim9 = (s) => `\x1B[2m${s}\x1B[0m`, green9 = (s) => `\x1B[32m${s}\x1B[0m`, cyan6 = (s) => `\x1B[36m${s}\x1B[0m`, JOB_ID_HANDOFF_PATH_ENV = "SPECIALISTS_BG_JOB_ID_PATH", BLOCKED_JOB_REUSE_STATUSES;
+var dim10 = (s) => `\x1B[2m${s}\x1B[0m`, JOB_ID_HANDOFF_PATH_ENV = "SPECIALISTS_BG_JOB_ID_PATH", BLOCKED_JOB_REUSE_STATUSES;
 var init_run = __esm(() => {
   init_loader();
-  init_runner();
   init_circuitBreaker();
   init_hooks();
   init_beads();
@@ -32354,8 +42604,45 @@ var init_run = __esm(() => {
   init_merge();
   init_format_helpers();
   init_tmux_utils();
+  init_launch();
   BLOCKED_JOB_REUSE_STATUSES = new Set(["starting", "running"]);
 });
+
+// src/specialist/bead-notes.ts
+import { spawn as spawn5 } from "child_process";
+async function appendBeadNote(beadId, text, opts = {}) {
+  if (!beadId || !text)
+    return { ok: false, error: "beads unavailable or empty payload" };
+  return await new Promise((resolve10) => {
+    const child = spawn5("bd", ["update", beadId, "--notes", text], {
+      stdio: ["ignore", "ignore", "pipe"]
+    });
+    const timer = opts.timeoutMs ? setTimeout(() => {
+      child.kill("SIGKILL");
+      resolve10({ ok: false, error: `bd update timed out after ${opts.timeoutMs}ms` });
+    }, opts.timeoutMs) : null;
+    let stderr = "";
+    child.stderr?.setEncoding?.("utf8");
+    child.stderr?.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", (error2) => {
+      if (timer)
+        clearTimeout(timer);
+      resolve10({ ok: false, error: error2.message });
+    });
+    child.on("close", (code, signal) => {
+      if (timer)
+        clearTimeout(timer);
+      if (signal === "SIGKILL" && opts.timeoutMs)
+        return;
+      if (code === 0)
+        return resolve10({ ok: true });
+      resolve10({ ok: false, error: stderr.trim() || `bd update failed with exit code ${code}` });
+    });
+  });
+}
+var init_bead_notes = () => {};
 
 // src/specialist/node-resolve.ts
 function formatNodeRefMatches(matches) {
@@ -32408,8 +42695,8 @@ var init_node_resolve = __esm(() => {
 });
 
 // src/specialist/job-control.ts
-import { existsSync as existsSync19, readFileSync as readFileSync18, writeFileSync as writeFileSync9 } from "fs";
-import { join as join20 } from "path";
+import { existsSync as existsSync20, readFileSync as readFileSync19, writeFileSync as writeFileSync11 } from "fs";
+import { join as join24 } from "path";
 
 class JobControl {
   supervisor;
@@ -32484,10 +42771,10 @@ class JobControl {
         return sqliteResult;
     } catch {}
     const resultPath = this.resultPath(jobId);
-    if (!existsSync19(resultPath))
+    if (!existsSync20(resultPath))
       return null;
     try {
-      return readFileSync18(resultPath, "utf-8");
+      return readFileSync19(resultPath, "utf-8");
     } catch {
       return null;
     }
@@ -32520,10 +42807,10 @@ class JobControl {
     }
     const jsonLine = `${JSON.stringify(payload)}
 `;
-    writeFileSync9(status.fifo_path, jsonLine, { flag: "a" });
+    writeFileSync11(status.fifo_path, jsonLine, { flag: "a" });
   }
   resultPath(jobId) {
-    return join20(this.jobsDir, jobId, "result.txt");
+    return join24(this.jobsDir, jobId, "result.txt");
   }
 }
 var TERMINAL_STATUSES2, INITIAL_BACKOFF_MS = 100, MAX_BACKOFF_MS = 2000;
@@ -33754,7 +44041,7 @@ class NodeSupervisor {
     const contextPct = this.opts.sqliteClient.queryMemberContextHealth(member.jobId);
     return toContextHealth(contextPct) !== "CRITICAL";
   }
-  buildCompletionSummary(options) {
+  buildCompletionSummary(options2) {
     const coordinatorOutput = this.coordinatorJobId ? this.coordinatorController?.readResult(this.coordinatorJobId) ?? "" : "";
     const memberSummary = this.getMembers().map((member) => `- ${member.memberId}: ${member.status} (generation=${member.generation}, phase=${member.phaseId ?? "-"})`).join(`
 `);
@@ -33766,7 +44053,7 @@ class NodeSupervisor {
       `node_name: ${this.opts.nodeName}`,
       `status: ${this.status}`,
       this.coordinatorJobId ? `coordinator_job_id: ${this.coordinatorJobId}` : "coordinator_job_id: -",
-      options?.reportPayloadRef ? `report_payload_ref: ${options.reportPayloadRef}` : "report_payload_ref: -",
+      options2?.reportPayloadRef ? `report_payload_ref: ${options2.reportPayloadRef}` : "report_payload_ref: -",
       "",
       "Member lineage:",
       memberSummary || "- none",
@@ -33775,11 +44062,11 @@ class NodeSupervisor {
       actionLedgerSummary || "- none",
       "",
       "Reviewer verdicts:",
-      options?.reviewerVerdicts?.length ? options.reviewerVerdicts.map((verdict) => `- ${verdict}`).join(`
+      options2?.reviewerVerdicts?.length ? options2.reviewerVerdicts.map((verdict) => `- ${verdict}`).join(`
 `) : "- none",
       "",
       "Gate results:",
-      options?.gateResults ? Object.entries(options.gateResults).map(([gate, result]) => `- ${gate}: ${result}`).join(`
+      options2?.gateResults ? Object.entries(options2.gateResults).map(([gate, result]) => `- ${gate}: ${result}`).join(`
 `) : "- none",
       "",
       "Final coordinator summary:",
@@ -33787,10 +44074,10 @@ class NodeSupervisor {
     ].join(`
 `);
   }
-  appendCompletionSummaryToBead(options) {
+  appendCompletionSummaryToBead(options2) {
     if (!this.opts.sourceBeadId)
       return;
-    const notes = this.buildCompletionSummary(options);
+    const notes = this.buildCompletionSummary(options2);
     const result = spawnSync13("bd", ["update", this.opts.sourceBeadId, "--notes", notes], {
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "pipe"]
@@ -34598,10 +44885,9 @@ var exports_node = {};
 __export(exports_node, {
   handleNodeCommand: () => handleNodeCommand
 });
-import { existsSync as existsSync20, readFileSync as readFileSync19, readdirSync as readdirSync8 } from "fs";
+import { existsSync as existsSync21, readFileSync as readFileSync20, readdirSync as readdirSync10 } from "fs";
 import { randomUUID as randomUUID2 } from "crypto";
-import { spawnSync as spawnSync14 } from "child_process";
-import { basename as basename5, join as join21, resolve as resolve10 } from "path";
+import { basename as basename6, join as join25, resolve as resolve10 } from "path";
 function parseNodeArgs(argv) {
   const command = argv[0];
   const supportedCommands = new Set(["run", "list", "promote", "members", "memory", "stop", "spawn-member", "create-bead", "complete", "wait-phase"]);
@@ -34784,22 +45070,22 @@ function parseNodeArgs(argv) {
   };
 }
 function toNodeName(filePath) {
-  const fileName = basename5(filePath);
+  const fileName = basename6(filePath);
   return fileName.endsWith(NODE_CONFIG_SUFFIX) ? fileName.slice(0, -NODE_CONFIG_SUFFIX.length) : fileName;
 }
 function discoverNodeConfigs(cwd) {
   const discoveredByName = new Map;
   for (const directory of NODE_DISCOVERY_DIRS) {
     const absoluteDir = resolve10(cwd, directory.path);
-    if (!existsSync20(absoluteDir))
+    if (!existsSync21(absoluteDir))
       continue;
-    const files = readdirSync8(absoluteDir).filter((fileName) => fileName.endsWith(NODE_CONFIG_SUFFIX));
+    const files = readdirSync10(absoluteDir).filter((fileName) => fileName.endsWith(NODE_CONFIG_SUFFIX));
     for (const fileName of files) {
-      const path = join21(absoluteDir, fileName);
+      const path3 = join25(absoluteDir, fileName);
       const name = toNodeName(fileName);
       if (discoveredByName.has(name))
         continue;
-      discoveredByName.set(name, { name, path, source: directory.source });
+      discoveredByName.set(name, { name, path: path3, source: directory.source });
     }
   }
   return [...discoveredByName.values()].sort((left, right) => left.name.localeCompare(right.name));
@@ -34813,7 +45099,7 @@ function getNodeDiscoverySummary() {
 }
 function resolveNodeConfigPath(cwd, input2) {
   const explicitPath = resolve10(cwd, input2);
-  if (existsSync20(explicitPath)) {
+  if (existsSync21(explicitPath)) {
     return { name: toNodeName(explicitPath), path: explicitPath, source: "repo" };
   }
   const normalizedName = input2.endsWith(NODE_CONFIG_SUFFIX) ? input2.slice(0, -NODE_CONFIG_SUFFIX.length) : input2;
@@ -34913,13 +45199,13 @@ async function handleNodeRun(args) {
       rawConfig = args.inlineJson;
     } else {
       const nodeConfigPath = resolveNodeConfigPath(process.cwd(), args.nodeConfigInput);
-      rawConfig = readFileSync19(nodeConfigPath.path, "utf-8");
+      rawConfig = readFileSync20(nodeConfigPath.path, "utf-8");
     }
     const config2 = parseNodeConfig(rawConfig);
     const loader = new SpecialistLoader;
     const runner = new SpecialistRunner({
       loader,
-      hooks: new HookEmitter({ tracePath: join21(process.cwd(), ".specialists", "trace.jsonl") }),
+      hooks: new HookEmitter({ tracePath: join25(process.cwd(), ".specialists", "trace.jsonl") }),
       circuitBreaker: new CircuitBreaker
     });
     const nodeId = `${config2.name}-${randomUUID2().slice(0, 8)}`;
@@ -35217,17 +45503,10 @@ function buildFindingNotes(nodeId, findingId, finding) {
   return lines.join(`
 `);
 }
-function promoteFindingToBead(beadId, notes) {
-  const result = spawnSync14("bd", ["update", beadId, "--notes", notes], {
-    encoding: "utf-8",
-    stdio: ["ignore", "pipe", "pipe"]
-  });
-  if (result.error) {
-    throw result.error;
-  }
-  if (result.status !== 0) {
-    const errorMessage = result.stderr?.trim() || result.stdout?.trim() || `bd update exited with status ${result.status}`;
-    throw new Error(errorMessage);
+async function promoteFindingToBead(beadId, notes) {
+  const result = await appendBeadNote(beadId, notes);
+  if (!result.ok) {
+    throw new Error(result.error || "bd update failed");
   }
 }
 async function handleNodePromote(args) {
@@ -35248,7 +45527,7 @@ async function handleNodePromote(args) {
       throw new Error(`Finding ${findingId} has no summary to promote`);
     }
     const notes = buildFindingNotes(nodeId, findingId, finding);
-    promoteFindingToBead(beadId, notes);
+    await promoteFindingToBead(beadId, notes);
     if (args.jsonMode) {
       console.log(JSON.stringify({
         type: "node_promote",
@@ -35287,7 +45566,7 @@ async function createNodeActionRunnerDependencies() {
   const loader = new SpecialistLoader;
   const runner = new SpecialistRunner({
     loader,
-    hooks: new HookEmitter({ tracePath: join21(process.cwd(), ".specialists", "trace.jsonl") }),
+    hooks: new HookEmitter({ tracePath: join25(process.cwd(), ".specialists", "trace.jsonl") }),
     circuitBreaker: new CircuitBreaker
   });
   return { loader, runner };
@@ -35441,6 +45720,7 @@ var init_node = __esm(() => {
   init_hooks();
   init_observability_sqlite();
   init_beads();
+  init_bead_notes();
   init_supervisor();
   init_job_root();
   init_node_resolve();
@@ -35468,9 +45748,9 @@ __export(exports_epic, {
   handleEpicCommand: () => handleEpicCommand,
   handleEpicAbandonCommand: () => handleEpicAbandonCommand
 });
-import { spawnSync as spawnSync15 } from "child_process";
+import { spawnSync as spawnSync14 } from "child_process";
 function runCommand2(command, args, cwd = process.cwd()) {
-  return spawnSync15(command, args, {
+  return spawnSync14(command, args, {
     cwd,
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "pipe"]
@@ -35660,40 +45940,40 @@ function evaluateReadiness(epicId, state, chainRecords, sqlite) {
 }
 function gatherEpicList(sqlite, unresolvedOnly) {
   const epicRuns = sqlite.listEpicRuns();
-  return epicRuns.filter((run15) => !unresolvedOnly || isEpicUnresolvedState(run15.status)).map((run15) => {
-    const chainRecords = sqlite.listEpicChains(run15.epic_id);
-    const readiness = evaluateReadiness(run15.epic_id, run15.status, chainRecords, sqlite);
+  return epicRuns.filter((run16) => !unresolvedOnly || isEpicUnresolvedState(run16.status)).map((run16) => {
+    const chainRecords = sqlite.listEpicChains(run16.epic_id);
+    const readiness = evaluateReadiness(run16.epic_id, run16.status, chainRecords, sqlite);
     return {
-      epic_id: run15.epic_id,
-      state: run15.status,
+      epic_id: run16.epic_id,
+      state: run16.status,
       chain_count: chainRecords.length,
       readiness,
-      updated_at_ms: run15.updated_at_ms
+      updated_at_ms: run16.updated_at_ms
     };
   });
 }
-function gatherEpicContext(options) {
+function gatherEpicContext(options2) {
   const sqlite = createObservabilitySqliteClient();
   if (!sqlite) {
     throw new Error("Observability SQLite database not available. Run `sp db setup` first.");
   }
   try {
-    const epicRecord = sqlite.readEpicRun(options.epicId);
-    const chainRecords = sqlite.listEpicChains(options.epicId);
-    const childBeadIds = chainRecords.length > 0 ? chainRecords.map((chain) => chain.chain_root_bead_id).filter((id) => Boolean(id)) : readEpicChildrenFromBeads(options.epicId);
+    const epicRecord = sqlite.readEpicRun(options2.epicId);
+    const chainRecords = sqlite.listEpicChains(options2.epicId);
+    const childBeadIds = chainRecords.length > 0 ? chainRecords.map((chain) => chain.chain_root_bead_id).filter((id) => Boolean(id)) : readEpicChildrenFromBeads(options2.epicId);
     if (childBeadIds.length === 0) {
-      throw new Error(`No chain-root bead IDs found for epic '${options.epicId}'`);
+      throw new Error(`No chain-root bead IDs found for epic '${options2.epicId}'`);
     }
     const chainTargets = resolveMergeTargetsForBeadIds(childBeadIds);
     const chainRecordsForStatus = chainRecords.length > 0 ? chainRecords : chainTargets.map((chainTarget) => ({
       chain_id: chainTarget.jobId,
-      epic_id: options.epicId,
+      epic_id: options2.epicId,
       chain_root_bead_id: chainTarget.beadId,
       chain_root_job_id: chainTarget.jobId,
       updated_at_ms: chainTarget.startedAtMs
     }));
     return {
-      epicId: options.epicId,
+      epicId: options2.epicId,
       epicRecord,
       chainRecords,
       chainTargets,
@@ -35792,9 +46072,9 @@ function printEpicMergeSummary(result, rebuild, pr) {
   console.log("");
 }
 async function handleEpicListCommand(argv) {
-  let options;
+  let options2;
   try {
-    options = parseListOptions(argv);
+    options2 = parseListOptions(argv);
   } catch (error2) {
     const message = error2 instanceof Error ? error2.message : String(error2);
     console.error(message);
@@ -35804,7 +46084,7 @@ async function handleEpicListCommand(argv) {
   const sqlite = createObservabilitySqliteClient();
   if (!sqlite) {
     const message = "Observability SQLite database not available. Run `sp db setup` first.";
-    if (options.json) {
+    if (options2.json) {
       console.log(JSON.stringify({ error: message }, null, 2));
     } else {
       console.error(message);
@@ -35812,8 +46092,8 @@ async function handleEpicListCommand(argv) {
     process.exit(1);
   }
   try {
-    const entries = gatherEpicList(sqlite, options.unresolvedOnly);
-    if (options.json) {
+    const entries = gatherEpicList(sqlite, options2.unresolvedOnly);
+    if (options2.json) {
       console.log(JSON.stringify({ epics: entries }, null, 2));
       return;
     }
@@ -35835,9 +46115,9 @@ async function handleEpicListCommand(argv) {
   }
 }
 async function handleEpicMergeCommand(argv) {
-  let options;
+  let options2;
   try {
-    options = parseMergeOptions(argv);
+    options2 = parseMergeOptions(argv);
   } catch (error2) {
     const message = error2 instanceof Error ? error2.message : String(error2);
     console.error(message);
@@ -35847,11 +46127,11 @@ async function handleEpicMergeCommand(argv) {
   }
   let context;
   try {
-    context = gatherEpicContext(options);
+    context = gatherEpicContext(options2);
   } catch (error2) {
     const message = error2 instanceof Error ? error2.message : String(error2);
-    if (options.json) {
-      console.log(JSON.stringify({ epic_id: options.epicId, error: `Failed to gather epic context: ${message}` }, null, 2));
+    if (options2.json) {
+      console.log(JSON.stringify({ epic_id: options2.epicId, error: `Failed to gather epic context: ${message}` }, null, 2));
     } else {
       console.error(`Failed to gather epic context: ${message}`);
     }
@@ -35862,8 +46142,8 @@ async function handleEpicMergeCommand(argv) {
     currentState = validateEpicMergeReadiness(context);
   } catch (error2) {
     const message = error2 instanceof Error ? error2.message : String(error2);
-    if (options.json) {
-      console.log(JSON.stringify({ epic_id: options.epicId, error: `Merge blocked: ${message}` }, null, 2));
+    if (options2.json) {
+      console.log(JSON.stringify({ epic_id: options2.epicId, error: `Merge blocked: ${message}` }, null, 2));
     } else {
       console.error(`Merge blocked: ${message}`);
     }
@@ -35875,10 +46155,10 @@ async function handleEpicMergeCommand(argv) {
   let toState = currentState;
   let pullRequestUrl;
   try {
-    const publicationResult = mergeEpicChains(context, options.rebuild, options.pr, options.targetBranch);
+    const publicationResult = mergeEpicChains(context, options2.rebuild, options2.pr, options2.targetBranch);
     mergedChains = publicationResult.steps;
     pullRequestUrl = publicationResult.pullRequestUrl;
-    toState = options.pr ? currentState : transitionEpicState(currentState, "merged");
+    toState = options2.pr ? currentState : transitionEpicState(currentState, "merged");
     updateEpicState(context.epicId, currentState, toState);
   } catch (error2) {
     mergeError = error2 instanceof Error ? error2.message : String(error2);
@@ -35895,19 +46175,19 @@ async function handleEpicMergeCommand(argv) {
     error: mergeError,
     pullRequestUrl
   };
-  if (options.json) {
+  if (options2.json) {
     console.log(JSON.stringify(result, null, 2));
   } else {
-    printEpicMergeSummary(result, options.rebuild, options.pr);
+    printEpicMergeSummary(result, options2.rebuild, options2.pr);
   }
   if (!result.success) {
     process.exit(1);
   }
 }
 async function handleEpicSyncCommand(argv) {
-  let options;
+  let options2;
   try {
-    options = parseSyncOptions(argv);
+    options2 = parseSyncOptions(argv);
   } catch (error2) {
     const message = error2 instanceof Error ? error2.message : String(error2);
     console.error(message);
@@ -35917,7 +46197,7 @@ async function handleEpicSyncCommand(argv) {
   const sqlite = createObservabilitySqliteClient();
   if (!sqlite) {
     const message = "Observability SQLite database not available. Run `sp db setup` first.";
-    if (options.json) {
+    if (options2.json) {
       console.log(JSON.stringify({ error: message }, null, 2));
     } else {
       console.error(message);
@@ -35925,8 +46205,8 @@ async function handleEpicSyncCommand(argv) {
     process.exit(1);
   }
   try {
-    const result = withEpicAdvisoryLock(options.epicId, () => syncEpicState(sqlite, options.epicId, options.apply));
-    if (options.json) {
+    const result = withEpicAdvisoryLock(options2.epicId, () => syncEpicState(sqlite, options2.epicId, options2.apply));
+    if (options2.json) {
       console.log(JSON.stringify(result, null, 2));
       return;
     }
@@ -35950,9 +46230,9 @@ async function handleEpicSyncCommand(argv) {
   }
 }
 async function handleEpicAbandonCommand(argv) {
-  let options;
+  let options2;
   try {
-    options = parseAbandonOptions(argv);
+    options2 = parseAbandonOptions(argv);
   } catch (error2) {
     const message = error2 instanceof Error ? error2.message : String(error2);
     console.error(message);
@@ -35962,7 +46242,7 @@ async function handleEpicAbandonCommand(argv) {
   const sqlite = createObservabilitySqliteClient();
   if (!sqlite) {
     const message = "Observability SQLite database not available. Run `sp db setup` first.";
-    if (options.json) {
+    if (options2.json) {
       console.log(JSON.stringify({ error: message }, null, 2));
     } else {
       console.error(message);
@@ -35970,8 +46250,8 @@ async function handleEpicAbandonCommand(argv) {
     process.exit(1);
   }
   try {
-    const result = withEpicAdvisoryLock(options.epicId, () => abandonEpic(sqlite, options.epicId, options.reason, options.force));
-    if (options.json) {
+    const result = withEpicAdvisoryLock(options2.epicId, () => abandonEpic(sqlite, options2.epicId, options2.reason, options2.force));
+    if (options2.json) {
       console.log(JSON.stringify(result, null, 2));
       return;
     }
@@ -35982,8 +46262,8 @@ async function handleEpicAbandonCommand(argv) {
     }
   } catch (error2) {
     const message = error2 instanceof Error ? error2.message : String(error2);
-    if (options.json) {
-      console.log(JSON.stringify({ epic_id: options.epicId, error: message }, null, 2));
+    if (options2.json) {
+      console.log(JSON.stringify({ epic_id: options2.epicId, error: message }, null, 2));
     } else {
       console.error(message);
     }
@@ -35993,9 +46273,9 @@ async function handleEpicAbandonCommand(argv) {
   }
 }
 async function handleEpicStatusCommand(argv) {
-  let options;
+  let options2;
   try {
-    options = parseStatusOptions(argv);
+    options2 = parseStatusOptions(argv);
   } catch (error2) {
     const message = error2 instanceof Error ? error2.message : String(error2);
     console.error(message);
@@ -36005,7 +46285,7 @@ async function handleEpicStatusCommand(argv) {
   const sqlite = createObservabilitySqliteClient();
   if (!sqlite) {
     const message = "Observability SQLite database not available. Run `sp db setup` first.";
-    if (options.json) {
+    if (options2.json) {
       console.log(JSON.stringify({ error: message }, null, 2));
     } else {
       console.error(message);
@@ -36013,10 +46293,10 @@ async function handleEpicStatusCommand(argv) {
     process.exit(1);
   }
   try {
-    const epicRecord = sqlite.readEpicRun(options.epicId);
-    const chainRecords = sqlite.listEpicChains(options.epicId);
+    const epicRecord = sqlite.readEpicRun(options2.epicId);
+    const chainRecords = sqlite.listEpicChains(options2.epicId);
     const state = epicRecord?.status ?? "open";
-    const readiness = evaluateReadiness(options.epicId, state, chainRecords, sqlite);
+    const readiness = evaluateReadiness(options2.epicId, state, chainRecords, sqlite);
     const chainDetails = chainRecords.map((chain) => {
       const jobIds = sqlite.listChainJobIds(chain.chain_id);
       const runningJobs = jobIds.filter((jobId) => {
@@ -36030,9 +46310,9 @@ async function handleEpicStatusCommand(argv) {
         terminal: runningJobs.length === 0
       };
     });
-    if (options.json) {
+    if (options2.json) {
       console.log(JSON.stringify({
-        epic_id: options.epicId,
+        epic_id: options2.epicId,
         state,
         updated_at_ms: epicRecord?.updated_at_ms ?? null,
         readiness,
@@ -36041,7 +46321,7 @@ async function handleEpicStatusCommand(argv) {
       return;
     }
     console.log("");
-    console.log(`Epic: ${options.epicId}`);
+    console.log(`Epic: ${options2.epicId}`);
     console.log(`State: ${epicRecord?.status ?? "(derived)"}`);
     console.log(`Readiness: ${readiness.isReady ? "ready" : "blocked"}`);
     console.log(`Summary: ${readiness.summary}`);
@@ -36141,10 +46421,10 @@ var init_epic = __esm(() => {
 });
 
 // src/cli/version-check.ts
-import { spawnSync as spawnSync16 } from "child_process";
-import { existsSync as existsSync21, mkdirSync as mkdirSync10, readFileSync as readFileSync20, writeFileSync as writeFileSync10 } from "fs";
-import { dirname as dirname9, join as join22 } from "path";
-import { createRequire as createRequire3 } from "module";
+import { spawnSync as spawnSync15 } from "child_process";
+import { existsSync as existsSync22, mkdirSync as mkdirSync11, readFileSync as readFileSync21, writeFileSync as writeFileSync12 } from "fs";
+import { dirname as dirname11, join as join26 } from "path";
+import { createRequire as createRequire4 } from "module";
 function readBundledPackageVersion(requireFn = require3) {
   for (const candidate of ["../package.json", "../../package.json"]) {
     try {
@@ -36165,10 +46445,10 @@ function shouldRunVersionCheck() {
   return true;
 }
 function readCache() {
-  if (!existsSync21(CACHE_PATH))
+  if (!existsSync22(CACHE_PATH))
     return null;
   try {
-    return JSON.parse(readFileSync20(CACHE_PATH, "utf8"));
+    return JSON.parse(readFileSync21(CACHE_PATH, "utf8"));
   } catch {
     return null;
   }
@@ -36177,8 +46457,8 @@ function readCachedVersionCheck() {
   return readCache();
 }
 function writeCache(cache) {
-  mkdirSync10(dirname9(CACHE_PATH), { recursive: true });
-  writeFileSync10(CACHE_PATH, `${JSON.stringify(cache, null, 2)}
+  mkdirSync11(dirname11(CACHE_PATH), { recursive: true });
+  writeFileSync12(CACHE_PATH, `${JSON.stringify(cache, null, 2)}
 `, "utf8");
 }
 function isFresh(cache) {
@@ -36209,7 +46489,7 @@ function compareVersions(left, right) {
   return 0;
 }
 function runRemoteTagLookup() {
-  const result = spawnSync16("git", ["ls-remote", "--tags", "--refs", "origin"], {
+  const result = spawnSync15("git", ["ls-remote", "--tags", "--refs", "origin"], {
     encoding: "utf8",
     stdio: "pipe",
     timeout: NETWORK_TIMEOUT_MS
@@ -36261,24 +46541,24 @@ function markVersionCheckNotified(result) {
 }
 var require3, packageVersion, localVersion, CACHE_PATH, CACHE_MAX_AGE_MS2, NETWORK_TIMEOUT_MS = 2000;
 var init_version_check = __esm(() => {
-  require3 = createRequire3(import.meta.url);
+  require3 = createRequire4(import.meta.url);
   packageVersion = readBundledPackageVersion();
   localVersion = packageVersion;
-  CACHE_PATH = join22(process.cwd(), ".specialists", "version-check.json");
+  CACHE_PATH = join26(process.cwd(), ".specialists", "version-check.json");
   CACHE_MAX_AGE_MS2 = 6 * 60 * 60 * 1000;
 });
 
 // src/cli/status.ts
 var exports_status = {};
 __export(exports_status, {
-  run: () => run15,
+  run: () => run16,
   detectJobOutputMode: () => detectJobOutputMode
 });
-import { spawnSync as spawnSync17 } from "child_process";
-import { existsSync as existsSync22, readFileSync as readFileSync21 } from "fs";
-import { join as join23 } from "path";
+import { spawnSync as spawnSync16 } from "child_process";
+import { existsSync as existsSync23, readFileSync as readFileSync22 } from "fs";
+import { join as join27 } from "path";
 function ok2(msg) {
-  console.log(`  ${green8("\u2713")} ${msg}`);
+  console.log(`  ${green9("\u2713")} ${msg}`);
 }
 function warn2(msg) {
   console.log(`  ${yellow10("\u25CB")} ${msg}`);
@@ -36287,15 +46567,15 @@ function fail3(msg) {
   console.log(`  ${red2("\u2717")} ${msg}`);
 }
 function info(msg) {
-  console.log(`  ${dim8(msg)}`);
+  console.log(`  ${dim9(msg)}`);
 }
 function section(label) {
   const line = "\u2500".repeat(Math.max(0, 38 - label.length));
   console.log(`
-${bold10(`\u2500\u2500 ${label} ${line}`)}`);
+${bold11(`\u2500\u2500 ${label} ${line}`)}`);
 }
 function cmd(bin, args) {
-  const r = spawnSync17(bin, args, {
+  const r = spawnSync16(bin, args, {
     encoding: "utf8",
     stdio: "pipe",
     timeout: 5000
@@ -36303,7 +46583,7 @@ function cmd(bin, args) {
   return { ok: r.status === 0 && !r.error, stdout: (r.stdout ?? "").trim() };
 }
 function isInstalled2(bin) {
-  return spawnSync17("which", [bin], { encoding: "utf8", timeout: 2000 }).status === 0;
+  return spawnSync16("which", [bin], { encoding: "utf8", timeout: 2000 }).status === 0;
 }
 function formatElapsed2(s) {
   if (s.elapsed_s === undefined)
@@ -36317,9 +46597,9 @@ function statusColor(job) {
     return red2("dead \u2620");
   switch (job.status) {
     case "running":
-      return cyan5(job.status);
+      return cyan6(job.status);
     case "done":
-      return green8(job.status);
+      return green9(job.status);
     case "error":
       return red2(job.status);
     case "starting":
@@ -36373,10 +46653,10 @@ function countJobEvents(sqliteClient, jobsDir, jobId) {
   if (detectJobOutputMode() !== "on") {
     return 0;
   }
-  const eventsFile = join23(jobsDir, jobId, "events.jsonl");
-  if (!existsSync22(eventsFile))
+  const eventsFile = join27(jobsDir, jobId, "events.jsonl");
+  if (!existsSync23(eventsFile))
     return 0;
-  const raw = readFileSync21(eventsFile, "utf-8").trim();
+  const raw = readFileSync22(eventsFile, "utf-8").trim();
   if (!raw)
     return 0;
   return raw.split(`
@@ -36410,10 +46690,10 @@ function getLatestContextSnapshot(sqliteClient, jobsDir, jobId) {
   if (detectJobOutputMode() !== "on") {
     return null;
   }
-  const eventsFile = join23(jobsDir, jobId, "events.jsonl");
-  if (!existsSync22(eventsFile))
+  const eventsFile = join27(jobsDir, jobId, "events.jsonl");
+  if (!existsSync23(eventsFile))
     return null;
-  const lines = readFileSync21(eventsFile, "utf-8").split(`
+  const lines = readFileSync22(eventsFile, "utf-8").split(`
 `);
   for (let index = lines.length - 1;index >= 0; index -= 1) {
     const line = lines[index].trim();
@@ -36453,7 +46733,7 @@ function formatMetricsInline(metrics) {
 }
 function renderJobDetail(job, eventCount, contextSnapshot) {
   console.log(`
-${bold10("specialists status")}
+${bold11("specialists status")}
 `);
   section(`Job ${job.id}`);
   console.log(`  specialist   ${job.specialist}`);
@@ -36496,7 +46776,7 @@ ${bold10("specialists status")}
     console.log(`  error        ${red2(job.error)}`);
   console.log();
 }
-async function run15() {
+async function run16() {
   const argv = process.argv.slice(3);
   let parsedArgs;
   try {
@@ -36518,12 +46798,12 @@ async function run15() {
 `).slice(1).map((line) => line.split(/\s+/)[0]).filter(Boolean)) : new Set;
     const bdInstalled = isInstalled2("bd");
     const bdVersion = bdInstalled ? cmd("bd", ["--version"]) : null;
-    const beadsPresent = existsSync22(join23(process.cwd(), ".beads"));
+    const beadsPresent = existsSync23(join27(process.cwd(), ".beads"));
     const specialistsBin = cmd("which", ["specialists"]);
     const jobsDir = resolveJobsDir();
     const jobFileOutputMode = detectJobFileOutputMode();
     let jobs = [];
-    if (existsSync22(jobsDir)) {
+    if (existsSync23(jobsDir)) {
       supervisor = new Supervisor({
         runner: null,
         runOptions: null,
@@ -36607,7 +46887,7 @@ async function run15() {
       return;
     }
     console.log(`
-${bold10("specialists status")}
+${bold11("specialists status")}
 `);
     section("Specialists");
     if (allSpecialists.length === 0) {
@@ -36618,13 +46898,13 @@ ${bold10("specialists status")}
         return acc;
       }, {});
       const scopeSummary = Object.entries(byScope).map(([scope, n]) => `${n} ${scope}`).join(", ");
-      ok2(`${allSpecialists.length} found  ${dim8(`(${scopeSummary})`)}`);
+      ok2(`${allSpecialists.length} found  ${dim9(`(${scopeSummary})`)}`);
       for (const s of allSpecialists) {
         const staleness = stalenessMap[s.name];
         if (staleness === "AGED") {
-          warn2(`${s.name}  ${red2("AGED")}  ${dim8(s.scope)}`);
+          warn2(`${s.name}  ${red2("AGED")}  ${dim9(s.scope)}`);
         } else if (staleness === "STALE") {
-          warn2(`${s.name}  ${yellow10("STALE")}  ${dim8(s.scope)}`);
+          warn2(`${s.name}  ${yellow10("STALE")}  ${dim9(s.scope)}`);
         }
       }
     }
@@ -36633,14 +46913,14 @@ ${bold10("specialists status")}
       fail3(`pi not installed \u2014 install ${yellow10("pi")} first`);
     } else {
       const vStr = piVersion?.ok ? `v${piVersion.stdout}` : "unknown version";
-      const pStr = piProviders.size > 0 ? `${piProviders.size} provider${piProviders.size > 1 ? "s" : ""} active  ${dim8(`(${[...piProviders].join(", ")})`)} ` : yellow10("no providers configured \u2014 run pi config");
+      const pStr = piProviders.size > 0 ? `${piProviders.size} provider${piProviders.size > 1 ? "s" : ""} active  ${dim9(`(${[...piProviders].join(", ")})`)} ` : yellow10("no providers configured \u2014 run pi config");
       ok2(`${vStr}  \u2014  ${pStr}`);
     }
     section("beads  (issue tracker)");
     if (!bdInstalled) {
       fail3(`bd not installed \u2014 install ${yellow10("bd")} first`);
     } else {
-      ok2(`bd installed${bdVersion?.ok ? `  ${dim8(bdVersion.stdout)}` : ""}`);
+      ok2(`bd installed${bdVersion?.ok ? `  ${dim9(bdVersion.stdout)}` : ""}`);
       if (beadsPresent) {
         ok2(".beads/ present in project");
       } else {
@@ -36651,7 +46931,7 @@ ${bold10("specialists status")}
     if (!specialistsBin.ok) {
       fail3(`specialists not installed globally \u2014 run ${yellow10("npm install -g @jaggerxtrm/specialists")}`);
     } else {
-      ok2(`specialists binary installed  ${dim8(specialistsBin.stdout)}`);
+      ok2(`specialists binary installed  ${dim9(specialistsBin.stdout)}`);
       info(`verify registration: claude mcp get specialists`);
       info(`re-register:         specialists install`);
     }
@@ -36662,8 +46942,8 @@ ${bold10("specialists status")}
       for (const job of jobs) {
         const elapsed = formatElapsed2(job);
         const metricsInline = formatMetricsInline(job.metrics);
-        const detail = job.is_dead ? red2("[dead]") : job.status === "error" ? red2(job.error?.slice(0, 40) ?? "error") : job.status === "waiting" ? magenta3(`resume: specialists resume ${job.id} "..."`) : job.current_tool ? dim8(`tool: ${job.current_tool}`) : metricsInline ? dim8(metricsInline) : dim8(job.current_event ?? "");
-        console.log(`  ${dim8(job.id)}  ${job.specialist.padEnd(20)}  ${statusColor(job).padEnd(7)}  ${elapsed.padStart(6)}  ${detail}`);
+        const detail = job.is_dead ? red2("[dead]") : job.status === "error" ? red2(job.error?.slice(0, 40) ?? "error") : job.status === "waiting" ? magenta3(`resume: specialists resume ${job.id} "..."`) : job.current_tool ? dim9(`tool: ${job.current_tool}`) : metricsInline ? dim9(metricsInline) : dim9(job.current_event ?? "");
+        console.log(`  ${dim9(job.id)}  ${job.specialist.padEnd(20)}  ${statusColor(job).padEnd(7)}  ${elapsed.padStart(6)}  ${detail}`);
       }
     }
     const versionCheck = getVersionCheckResult();
@@ -36680,7 +46960,7 @@ ${bold10("specialists status")}
     await supervisor?.dispose();
   }
 }
-var init_status = __esm(() => {
+var init_status2 = __esm(() => {
   init_loader();
   init_supervisor();
   init_job_root();
@@ -36690,8 +46970,8 @@ var init_status = __esm(() => {
 });
 
 // src/specialist/process-health.ts
-import { existsSync as existsSync23, readdirSync as readdirSync9, readFileSync as readFileSync22, readlinkSync as readlinkSync2 } from "fs";
-import { join as join24 } from "path";
+import { existsSync as existsSync24, readdirSync as readdirSync11, readFileSync as readFileSync23, readlinkSync as readlinkSync2 } from "fs";
+import { join as join28 } from "path";
 function parseThreshold(raw, fallback) {
   if (!raw)
     return fallback;
@@ -36707,7 +46987,7 @@ function getProcessHealthThresholds(env = process.env) {
 }
 function readMemAvailableBytes(meminfoPath) {
   try {
-    const content = readFileSync22(meminfoPath, "utf-8");
+    const content = readFileSync23(meminfoPath, "utf-8");
     const match = /^MemAvailable:\s+(\d+)\s+kB$/m.exec(content);
     if (!match)
       return 0;
@@ -36716,16 +46996,16 @@ function readMemAvailableBytes(meminfoPath) {
     return 0;
   }
 }
-function readProcStringOrNull(path) {
+function readProcStringOrNull(path3) {
   try {
-    return readFileSync22(path, "utf-8");
+    return readFileSync23(path3, "utf-8");
   } catch {
     return null;
   }
 }
 function readProcCwdOrNull(pid, procRoot) {
   try {
-    return readlinkSync2(join24(procRoot, String(pid), "cwd"));
+    return readlinkSync2(join28(procRoot, String(pid), "cwd"));
   } catch {
     return null;
   }
@@ -36745,7 +47025,7 @@ function parseStat(stat2) {
 }
 function readProcUptimeSecondsOrNull(procRoot) {
   try {
-    const match = /^(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)$/.exec(readFileSync22(join24(procRoot, "uptime"), "utf-8").trim());
+    const match = /^(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)$/.exec(readFileSync23(join28(procRoot, "uptime"), "utf-8").trim());
     if (!match)
       return null;
     return Number(match[1]);
@@ -36754,7 +47034,7 @@ function readProcUptimeSecondsOrNull(procRoot) {
   }
 }
 function readProcessLiveness(pid, procRoot) {
-  if (!existsSync23(join24(procRoot, String(pid))))
+  if (!existsSync24(join28(procRoot, String(pid))))
     return "dead";
   try {
     process.kill(pid, 0);
@@ -36766,19 +47046,19 @@ function readProcessLiveness(pid, procRoot) {
   }
 }
 function readProcessSnapshot(pid, procRoot, uptimeSeconds) {
-  const basePath = join24(procRoot, String(pid));
-  const cmdlineRaw = readProcStringOrNull(join24(basePath, "cmdline"));
+  const basePath = join28(procRoot, String(pid));
+  const cmdlineRaw = readProcStringOrNull(join28(basePath, "cmdline"));
   if (!cmdlineRaw)
     return null;
   const cmdline = cmdlineRaw.replace(/\0/g, " ").trim();
   if (!cmdline)
     return null;
-  const comm = (readProcStringOrNull(join24(basePath, "comm")) ?? "").trim();
-  const stat2 = readProcStringOrNull(join24(basePath, "stat"));
+  const comm = (readProcStringOrNull(join28(basePath, "comm")) ?? "").trim();
+  const stat2 = readProcStringOrNull(join28(basePath, "stat"));
   const parsedStat = stat2 ? parseStat(stat2) : null;
   if (!parsedStat)
     return null;
-  const status = readProcStringOrNull(join24(basePath, "status")) ?? "";
+  const status = readProcStringOrNull(join28(basePath, "status")) ?? "";
   const rssMatch = /VmRSS:\s+(\d+)\s+kB/m.exec(status);
   const rssBytes = rssMatch ? Number(rssMatch[1]) * 1024 : 0;
   const cwd = readProcCwdOrNull(pid, procRoot);
@@ -36788,10 +47068,10 @@ function readProcessSnapshot(pid, procRoot, uptimeSeconds) {
   return { pid, ppid: parsedStat.ppid, cmdline, comm, cwd, rssBytes, cpuPct, ageSeconds };
 }
 function listPids(procRoot) {
-  if (!existsSync23(procRoot))
+  if (!existsSync24(procRoot))
     return [];
   const pids = [];
-  for (const entry of readdirSync9(procRoot, { withFileTypes: true })) {
+  for (const entry of readdirSync11(procRoot, { withFileTypes: true })) {
     if (!entry.isDirectory())
       continue;
     const pid = Number(entry.name);
@@ -36811,17 +47091,17 @@ function getWorktreeFromCwd(cwd) {
   const slash = tail.indexOf("/");
   return cwd.slice(0, index + marker.length + (slash < 0 ? tail.length : slash));
 }
-function basename6(command) {
+function basename7(command) {
   return command.split("/").pop() ?? command;
 }
 function isShellWrapper(command) {
-  return ["sh", "bash", "zsh", "fish"].includes(basename6(command));
+  return ["sh", "bash", "zsh", "fish"].includes(basename7(command));
 }
 function isSpecialistRunCommand(cmdline) {
   const tokens = cmdline.split(/\s+/).filter(Boolean);
   if (tokens.length === 0 || isShellWrapper(tokens[0]))
     return false;
-  const commandIndex = tokens.findIndex((token) => ["specialists", "sp"].includes(basename6(token)));
+  const commandIndex = tokens.findIndex((token) => ["specialists", "sp"].includes(basename7(token)));
   return commandIndex >= 0 && tokens[commandIndex + 1] === "run";
 }
 function isPiAgentProcess(snapshot) {
@@ -36874,10 +47154,10 @@ function toProcessHealthProcess(snapshot, kind) {
     worktree: getWorktreeFromCwd(snapshot.cwd)
   };
 }
-function collectProcessHealth(options = {}) {
-  const procRoot = options.procRoot ?? "/proc";
-  const meminfoPath = options.meminfoPath ?? "/proc/meminfo";
-  const uptimeSeconds = readProcUptimeSecondsOrNull(procRoot) ?? (options.nowMs ?? Date.now()) / 1000;
+function collectProcessHealth(options2 = {}) {
+  const procRoot = options2.procRoot ?? "/proc";
+  const meminfoPath = options2.meminfoPath ?? "/proc/meminfo";
+  const uptimeSeconds = readProcUptimeSecondsOrNull(procRoot) ?? (options2.nowMs ?? Date.now()) / 1000;
   const thresholds = getProcessHealthThresholds();
   const memAvailableBytes = readMemAvailableBytes(meminfoPath);
   const processes = [];
@@ -36951,8 +47231,8 @@ function withReason(process3, reason) {
 function hasDeletedCwd(process3) {
   return Boolean(process3.cwd?.includes("(deleted)"));
 }
-function collectOrphanProcesses(options = {}) {
-  const health = collectProcessHealth(options);
+function collectOrphanProcesses(options2 = {}) {
+  const health = collectProcessHealth(options2);
   const reaped = new Map;
   for (const process3 of health.orphanProcesses)
     reaped.set(process3.pid, process3);
@@ -36972,11 +47252,11 @@ function collectOrphanProcesses(options = {}) {
   }
   return [...reaped.values()].sort((left, right) => left.pid - right.pid);
 }
-function collectStaleSpecialistJobs(options = {}) {
-  const procRoot = options.procRoot ?? "/proc";
-  const nowMs = options.nowMs ?? Date.now();
-  const minKeepAliveAgeMs = options.minKeepAliveAgeMs ?? 30 * 60 * 1000;
-  const observabilityClient = options.observabilityClient ?? createObservabilitySqliteClient();
+function collectStaleSpecialistJobs(options2 = {}) {
+  const procRoot = options2.procRoot ?? "/proc";
+  const nowMs = options2.nowMs ?? Date.now();
+  const minKeepAliveAgeMs = options2.minKeepAliveAgeMs ?? 30 * 60 * 1000;
+  const observabilityClient = options2.observabilityClient ?? createObservabilitySqliteClient();
   const statuses = observabilityClient?.listStatuses() ?? [];
   const staleStatuses = statuses.filter((status) => ["starting", "running", "waiting"].includes(status.status));
   const uptimeSeconds = readProcUptimeSecondsOrNull(procRoot) ?? nowMs / 1000;
@@ -36992,9 +47272,9 @@ function collectStaleSpecialistJobs(options = {}) {
         candidates.push({ jobId: status.id, pid, beadId: status.bead_id ?? null, specialist: status.specialist, cwd: null, ageMs, reason: "dead-pid" });
         continue;
       }
-      const basePath = join24(procRoot, String(pid));
-      const cmdlineRaw = readProcStringOrNull(join24(basePath, "cmdline"));
-      const statRaw = readProcStringOrNull(join24(basePath, "stat"));
+      const basePath = join28(procRoot, String(pid));
+      const cmdlineRaw = readProcStringOrNull(join28(basePath, "cmdline"));
+      const statRaw = readProcStringOrNull(join28(basePath, "stat"));
       const parsedStat = statRaw ? parseStat(statRaw) : null;
       if (status.status === "waiting" && parsedStat?.ppid === 1 && cmdlineRaw && isSpecialistRunCommand(cmdlineRaw.replace(/\0/g, " "))) {
         candidates.push({ jobId: status.id, pid, beadId: status.bead_id ?? null, specialist: status.specialist, cwd: readProcCwdOrNull(pid, procRoot), ageMs, reason: "orphaned-keep-alive" });
@@ -37024,15 +47304,13 @@ var init_process_health = __esm(() => {
 // src/cli/ps.ts
 var exports_ps = {};
 __export(exports_ps, {
-  run: () => run16
+  run: () => run17
 });
-import { spawnSync as spawnSync18 } from "child_process";
-import { existsSync as existsSync24, readdirSync as readdirSync10, readFileSync as readFileSync23 } from "fs";
-import { join as join25 } from "path";
+import { spawnSync as spawnSync17 } from "child_process";
 function loadBeadIdsForCurrentUser() {
   const ids = new Set;
   try {
-    const result = spawnSync18("bd", ["query", "assignee=me", "--json"], {
+    const result = spawnSync17("bd", ["query", "assignee=me", "--json"], {
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "pipe"],
       timeout: 5000
@@ -37057,7 +47335,7 @@ function parseSinceArg(value) {
   const ms = unit === "s" ? n * 1000 : unit === "m" ? n * 60000 : unit === "h" ? n * 3600000 : n * 86400000;
   return Date.now() - ms;
 }
-function parseArgs8(argv) {
+function parseArgs9(argv) {
   const allowedBooleanFlags = new Set([
     "--json",
     "--all",
@@ -37124,88 +47402,6 @@ function isPsCleaned(job) {
 }
 function isDefaultActionableTerminal(job) {
   return job.status === "error" || job.status === "cancelled";
-}
-function readStatusesFromFiles(jobsDir) {
-  if (!existsSync24(jobsDir))
-    return [];
-  const statuses = [];
-  for (const entry of readdirSync10(jobsDir)) {
-    const statusPath = join25(jobsDir, entry, "status.json");
-    if (!existsSync24(statusPath))
-      continue;
-    try {
-      statuses.push(JSON.parse(readFileSync23(statusPath, "utf-8")));
-    } catch {}
-  }
-  return statuses.sort((a, b) => b.started_at_ms - a.started_at_ms);
-}
-function readLastToolEventFromFile(jobsDir, jobId) {
-  const eventsPath = join25(jobsDir, jobId, "events.jsonl");
-  if (!existsSync24(eventsPath))
-    return;
-  try {
-    const lines = readFileSync23(eventsPath, "utf-8").split(`
-`);
-    for (let index = lines.length - 1;index >= 0; index -= 1) {
-      const line = lines[index]?.trim();
-      if (!line)
-        continue;
-      const parsed = parseTimelineEvent(line);
-      if (!parsed || parsed.type !== "tool")
-        continue;
-      return parsed;
-    }
-  } catch {
-    return;
-  }
-  return;
-}
-function resolveDerivedCurrentTool(status, jobsDir, sqliteClient) {
-  let lastToolEvent;
-  try {
-    lastToolEvent = sqliteClient?.readLatestToolEvent(status.id) ?? undefined;
-  } catch {
-    lastToolEvent = undefined;
-  }
-  if (!lastToolEvent) {
-    lastToolEvent = readLastToolEventFromFile(jobsDir, status.id);
-  }
-  if (!lastToolEvent)
-    return status.current_tool;
-  if (lastToolEvent.phase === "start")
-    return lastToolEvent.tool;
-  return;
-}
-function enrichStatusesWithDerivedCurrentTool(statuses, jobsDir, sqliteClient) {
-  return statuses.map((status) => ({
-    ...status,
-    current_tool: resolveDerivedCurrentTool(status, jobsDir, sqliteClient)
-  }));
-}
-function loadStatuses() {
-  const sqliteClient = createObservabilitySqliteClient();
-  const jobsDir = resolveJobsDir();
-  const fileStatuses = readStatusesFromFiles(jobsDir);
-  try {
-    const sqliteStatuses = sqliteClient?.listStatuses() ?? [];
-    if (sqliteStatuses.length === 0) {
-      return enrichStatusesWithDerivedCurrentTool(fileStatuses, jobsDir, sqliteClient).sort((a, b) => b.started_at_ms - a.started_at_ms);
-    }
-    const merged = new Map;
-    for (const status of fileStatuses)
-      merged.set(status.id, status);
-    for (const status of sqliteStatuses) {
-      const current = merged.get(status.id);
-      if (!current || status.started_at_ms >= current.started_at_ms) {
-        merged.set(status.id, status);
-      }
-    }
-    return enrichStatusesWithDerivedCurrentTool([...merged.values()], jobsDir, sqliteClient).sort((a, b) => b.started_at_ms - a.started_at_ms);
-  } catch {
-    return enrichStatusesWithDerivedCurrentTool(fileStatuses, jobsDir, sqliteClient).sort((a, b) => b.started_at_ms - a.started_at_ms);
-  } finally {
-    sqliteClient?.close();
-  }
 }
 function toJobNode(job) {
   const beadAwareStatus = job;
@@ -37422,30 +47618,30 @@ function groupByNode(jobs) {
 }
 function statusLabel(status) {
   if (status === "running")
-    return bold10(green8(status));
+    return bold11(green9(status));
   if (status === "waiting")
-    return bold10(magenta3(status));
+    return bold11(magenta3(status));
   if (status === "done")
-    return dim8(status);
+    return dim9(status);
   if (status === "error")
-    return bold10(red2(status));
+    return bold11(red2(status));
   if (status === "cancelled")
-    return dim8(status);
-  return bold10(yellow10(status));
+    return dim9(status);
+  return bold11(yellow10(status));
 }
 function epicStateLabel(state) {
   if (state === "merge_ready")
-    return green8("pass");
+    return green9("pass");
   if (state === "merged")
-    return dim8("merged");
+    return dim9("merged");
   if (state === "failed")
     return red2("failed");
   if (state === "blocked")
     return yellow10("blocked");
   if (state === "resolving")
-    return cyan5("merge_ready");
+    return cyan6("merge_ready");
   if (state === "abandoned")
-    return dim8("abandoned");
+    return dim9("abandoned");
   return magenta3("no pass yet");
 }
 function withPidLiveness(statuses) {
@@ -37481,7 +47677,7 @@ function formatPayloadStats(payloadJson) {
   }
 }
 function getBeadTitleFromBd(beadId) {
-  const result = spawnSync18("bd", ["show", beadId, "--json"], {
+  const result = spawnSync17("bd", ["show", beadId, "--json"], {
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "ignore"],
     timeout: 1500
@@ -37531,16 +47727,16 @@ function getStatusIcon(job) {
   if (job.is_dead)
     return red2("\u25C9");
   if (job.status === "running")
-    return cyan5("\u25C9");
+    return cyan6("\u25C9");
   if (job.status === "waiting")
     return magenta3("\u25D0");
   if (job.status === "starting")
     return yellow10("\u25D0");
   if (job.status === "done")
-    return green8("\u25CB");
+    return green9("\u25CB");
   if (job.status === "error")
     return red2("\u25CB");
-  return dim8("\u25CB");
+  return dim9("\u25CB");
 }
 function getNextAction(job) {
   if (job.is_dead)
@@ -37567,7 +47763,7 @@ function renderJobLine(job, beadTitles, prefix, connector) {
   const id = job.id.padEnd(8);
   const spec = job.specialist.slice(0, 13).padEnd(13);
   const status = statusLabel(job.status).padEnd(18);
-  const ctx = dim8(formatCtxWithIndicator(job.context_pct, job.context_health));
+  const ctx = dim9(formatCtxWithIndicator(job.context_pct, job.context_health));
   const elapsedBase = formatElapsed3(job.elapsed_s);
   const metricParts = [];
   if (job.metrics?.turns)
@@ -37578,14 +47774,14 @@ function renderJobLine(job, beadTitles, prefix, connector) {
   if (totalTokens)
     metricParts.push(`${totalTokens}tok`);
   const payloadStats = formatPayloadStats(job.startup_payload_json);
-  const elapsed = metricParts.length > 0 ? dim8(`${elapsedBase} ${metricParts.join("\xB7")}`) : dim8(elapsedBase);
+  const elapsed = metricParts.length > 0 ? dim9(`${elapsedBase} ${metricParts.join("\xB7")}`) : dim9(elapsedBase);
   const beadTitle = job.bead_id ? beadTitles.get(job.bead_id) : undefined;
-  const payloadKbCol = dim8(payloadStats.payload_kb.padEnd(8));
-  const payloadTokensCol = dim8(payloadStats.payload_tokens.padEnd(8));
-  const beadCol = dim8((job.bead_id ? job.bead_id : "").padEnd(14));
+  const payloadKbCol = dim9(payloadStats.payload_kb.padEnd(8));
+  const payloadTokensCol = dim9(payloadStats.payload_tokens.padEnd(8));
+  const beadCol = dim9((job.bead_id ? job.bead_id : "").padEnd(14));
   const action = getNextAction(job);
-  const actionCol = job.is_dead ? red2(action) : dim8(action);
-  const titleSuffix = beadTitle ? dim8(` ${beadTitle.slice(0, 40)}`) : "";
+  const actionCol = job.is_dead ? red2(action) : dim9(action);
+  const titleSuffix = beadTitle ? dim9(` ${beadTitle.slice(0, 40)}`) : "";
   return `${prefix}${connector}${icon} ${id} ${spec} ${status} ${ctx} ${elapsed} ${payloadKbCol} ${payloadTokensCol} ${beadCol} ${actionCol}${titleSuffix}`;
 }
 function renderTreeNodes(nodes, beadTitles, prefix, renderedJobIds) {
@@ -37612,8 +47808,8 @@ function formatProcessRow(process3) {
 }
 function renderProcessHealthBlock(report, includeDetails) {
   const percent = report.thresholdPct.toFixed(1);
-  const severity = report.status === "REFUSE" ? red2("REFUSE") : report.status === "WARN" ? yellow10("WARN") : green8("OK");
-  console.log(bold10(cyan5("System health")));
+  const severity = report.status === "REFUSE" ? red2("REFUSE") : report.status === "WARN" ? yellow10("WARN") : green9("OK");
+  console.log(bold11(cyan6("System health")));
   console.log(`  ${severity} rss=${(report.totalRssBytes / (1024 * 1024)).toFixed(1)}MB avail=${(report.memAvailableBytes / (1024 * 1024)).toFixed(1)}MB used=${percent}% warn=${report.warnPct}% refuse=${report.refusePct}% cpu=${report.totalCpuPct.toFixed(1)}%`);
   console.log(`  specialists=${report.specialistCount} dolt=${report.doltCount} serena-lsp=${report.serenaLspCount} orphans=${report.orphanCount}`);
   if (report.statusReasons.length > 0)
@@ -37623,12 +47819,12 @@ function renderProcessHealthBlock(report, includeDetails) {
     return;
   }
   if (report.doltProcesses.length > 0) {
-    console.log(bold10("  Dolt sql-server"));
+    console.log(bold11("  Dolt sql-server"));
     for (const process3 of report.doltProcesses)
       console.log(formatProcessRow(process3));
   }
   if (report.serenaWorkspaces.length > 0) {
-    console.log(bold10("  Serena LSP"));
+    console.log(bold11("  Serena LSP"));
     for (const workspace of report.serenaWorkspaces) {
       console.log(`  ${workspace.workspace} \xB7 ${workspace.count} procs \xB7 ${(workspace.rssBytes / (1024 * 1024)).toFixed(1)}MB`);
       for (const process3 of workspace.processes)
@@ -37636,12 +47832,12 @@ function renderProcessHealthBlock(report, includeDetails) {
     }
   }
   if (report.specialistProcesses.length > 0) {
-    console.log(bold10("  Specialists"));
+    console.log(bold11("  Specialists"));
     for (const process3 of report.specialistProcesses)
       console.log(formatProcessRow(process3));
   }
   if (report.orphanProcesses.length > 0) {
-    console.log(bold10("  Orphans"));
+    console.log(bold11("  Orphans"));
     for (const process3 of report.orphanProcesses)
       console.log(formatProcessRow(process3));
   }
@@ -37687,12 +47883,12 @@ function renderHuman(jobs, nodes, trees, all, includeTerminal, epicReadiness, he
     const persistedState = readiness?.persisted_state ?? "open";
     const prepSummary = readiness?.prep ? `prep ${readiness.prep.done}/${readiness.prep.total} done${readiness.prep.running > 0 ? ` ${readiness.prep.running} running` : ""}${readiness.prep.failed > 0 ? ` ${readiness.prep.failed} failed` : ""}` : `prep ${prepCount}`;
     const chainSummary = readiness?.chains ? `chains ${readiness.chains.filter((chain) => chain.state === "pass").length}/${readiness.chains.length} pass` : `chains ${chainCount}`;
-    const epicBanner = bold10(cyan5(`\u250F\u2501 EPIC ${epic.epic_id} \u2501 ${epicStateLabel(readiness?.readiness_state)} \u2501 ${prepSummary} \u2501 ${chainSummary}`));
+    const epicBanner = bold11(cyan6(`\u250F\u2501 EPIC ${epic.epic_id} \u2501 ${epicStateLabel(readiness?.readiness_state)} \u2501 ${prepSummary} \u2501 ${chainSummary}`));
     console.log(epicBanner);
-    console.log(`  ${dim8(`derived:${readinessState}`)} \xB7 ${dim8(`stored:${persistedState}`)}`);
-    console.log(`  ${bold10("Prep")}`);
+    console.log(`  ${dim9(`derived:${readinessState}`)} \xB7 ${dim9(`stored:${persistedState}`)}`);
+    console.log(`  ${bold11("Prep")}`);
     if (epic.prep_jobs.length === 0) {
-      console.log(dim8("    (none)"));
+      console.log(dim9("    (none)"));
     } else {
       for (const prepJob of epic.prep_jobs) {
         if (!renderedJobIds.has(prepJob.id)) {
@@ -37701,18 +47897,18 @@ function renderHuman(jobs, nodes, trees, all, includeTerminal, epicReadiness, he
         }
       }
     }
-    console.log(`  ${bold10("Chains")}`);
+    console.log(`  ${bold11("Chains")}`);
     if (epic.chains.length === 0) {
-      console.log(dim8("    (none)"));
+      console.log(dim9("    (none)"));
     } else {
       for (const chain of epic.chains) {
         const chainReadiness = readiness?.chains.find((entry) => entry.chain_id === chain.chain_id);
         const readinessLabel = chainReadiness ? ` \xB7 ${chainReadiness.state}` : "";
         const rootBeadSuffix = chain.chain_root_bead_id ? ` \xB7 root:${chain.chain_root_bead_id}` : "";
-        console.log(`    ${bold10(chain.chain_id)}${dim8(rootBeadSuffix)}${dim8(readinessLabel)}`);
+        console.log(`    ${bold11(chain.chain_id)}${dim9(rootBeadSuffix)}${dim9(readinessLabel)}`);
         for (const tree of chain.trees) {
           const branch = tree.branch ?? "master";
-          console.log(`      ${dim8(branch)}`);
+          console.log(`      ${dim9(branch)}`);
           renderTreeNodes(tree.children, beadTitles, "      ", renderedJobIds);
         }
       }
@@ -37724,18 +47920,18 @@ function renderHuman(jobs, nodes, trees, all, includeTerminal, epicReadiness, he
       if (renderedEpicIds.has(epicId))
         continue;
       const chainCount = readiness.chains.length;
-      const epicBanner = bold10(cyan5(`\u250F\u2501 EPIC ${epicId} \u2501 ${String(readiness.readiness_state).toUpperCase()} \u2501 prep 0 \u2501 chains ${chainCount}`));
+      const epicBanner = bold11(cyan6(`\u250F\u2501 EPIC ${epicId} \u2501 ${String(readiness.readiness_state).toUpperCase()} \u2501 prep 0 \u2501 chains ${chainCount}`));
       console.log(epicBanner);
-      console.log(`  ${dim8(`state:${readiness.persisted_state}`)} \xB7 ${epicStateLabel(readiness.readiness_state)}`);
-      console.log(`  ${bold10("Prep")}`);
-      console.log(dim8("    (none retained)"));
-      console.log(`  ${bold10("Chains")}`);
+      console.log(`  ${dim9(`state:${readiness.persisted_state}`)} \xB7 ${epicStateLabel(readiness.readiness_state)}`);
+      console.log(`  ${bold11("Prep")}`);
+      console.log(dim9("    (none retained)"));
+      console.log(`  ${bold11("Chains")}`);
       if (readiness.chains.length === 0) {
-        console.log(dim8("    (none)"));
+        console.log(dim9("    (none)"));
       } else {
         for (const chain of readiness.chains) {
           const rootBeadSuffix = chain.chain_root_bead_id ? ` \xB7 root:${chain.chain_root_bead_id}` : "";
-          console.log(`    ${bold10(chain.chain_id)}${dim8(rootBeadSuffix)}${dim8(" \xB7 no retained jobs")}`);
+          console.log(`    ${bold11(chain.chain_id)}${dim9(rootBeadSuffix)}${dim9(" \xB7 no retained jobs")}`);
         }
       }
       console.log("");
@@ -37744,7 +47940,7 @@ function renderHuman(jobs, nodes, trees, all, includeTerminal, epicReadiness, he
   const legacyNodes = nodes.filter((node) => !node.members.some((member) => member.epic_id));
   const legacyTrees = trees.filter((tree) => !tree.children.some((child) => child.epic_id));
   for (const node of legacyNodes) {
-    console.log(`${cyan5("\u2B22")} ${node.node_id} \xB7 ${node.node_name} \xB7 ${statusLabel(node.status)} \xB7 ${node.member_count} members`);
+    console.log(`${cyan6("\u2B22")} ${node.node_id} \xB7 ${node.node_name} \xB7 ${statusLabel(node.status)} \xB7 ${node.member_count} members`);
     for (const member of node.members) {
       if (!renderedJobIds.has(member.id)) {
         renderedJobIds.add(member.id);
@@ -37757,18 +47953,18 @@ function renderHuman(jobs, nodes, trees, all, includeTerminal, epicReadiness, he
     const branch = tree.branch ?? "master";
     const beadId = tree.children[0]?.bead_id;
     const beadSuffix = beadId ? ` \xB7 ${beadId}` : "";
-    console.log(`${dim8(branch)}${dim8(beadSuffix)}`);
+    console.log(`${dim9(branch)}${dim9(beadSuffix)}`);
     renderTreeNodes(tree.children, beadTitles, "", renderedJobIds);
     console.log("");
   }
   if (epicGroups.length === 0 && legacyNodes.length === 0 && legacyTrees.length === 0) {
-    console.log(dim8("  no active jobs"));
+    console.log(dim9("  no active jobs"));
     console.log("");
   }
   const renderedJobs = jobs.filter((job) => renderedJobIds.has(job.id));
   const runningCount = renderedJobs.filter((job) => job.status === "running").length;
   const waitingCount = renderedJobs.filter((job) => job.status === "waiting").length;
-  console.log(dim8(`${renderedJobIds.size} jobs \xB7 ${epicGroups.length} epics \xB7 ${legacyNodes.length} nodes \xB7 ${legacyTrees.length} worktrees \xB7 ${runningCount} running \xB7 ${waitingCount} waiting${all ? " \xB7 include terminal" : ""}`));
+  console.log(dim9(`${renderedJobIds.size} jobs \xB7 ${epicGroups.length} epics \xB7 ${legacyNodes.length} nodes \xB7 ${legacyTrees.length} worktrees \xB7 ${runningCount} running \xB7 ${waitingCount} waiting${all ? " \xB7 include terminal" : ""}`));
 }
 function renderInspect(jobId) {
   const statuses = withPidLiveness(loadStatuses());
@@ -37784,7 +47980,7 @@ function renderInspect(jobId) {
   const ctx = job.context_pct !== undefined ? `${Math.round(job.context_pct)}% ${job.context_health ?? ""}` : "--";
   const deadLabel = job.is_dead ? ` ${red2("dead")}` : "";
   const chainJobs = job.worktree_owner_job_id ? statuses.filter((s) => s.worktree_owner_job_id === job.worktree_owner_job_id).sort((a, b) => a.started_at_ms - b.started_at_ms) : [job];
-  const chainStr = chainJobs.map((j) => j.id === job.id ? bold10(j.id) : dim8(j.id)).join(" \u2192 ");
+  const chainStr = chainJobs.map((j) => j.id === job.id ? bold11(j.id) : dim9(j.id)).join(" \u2192 ");
   console.log(`
 ${job.id}  ${job.specialist}  ${getStatusIcon(toJobNode(job))} ${statusLabel(job.status)}  ${ctx}${deadLabel}`);
   if (job.epic_id) {
@@ -37796,7 +47992,7 @@ ${job.id}  ${job.specialist}  ${getStatusIcon(toJobNode(job))} ${statusLabel(job
   if (job.bead_id)
     console.log(`  bead      ${job.bead_id}${beadTitle ? ` \u2014 ${beadTitle}` : ""}`);
   if (job.worktree_path || job.branch) {
-    const wt = job.worktree_path ? dim8(` ${job.worktree_path}`) : "";
+    const wt = job.worktree_path ? dim9(` ${job.worktree_path}`) : "";
     console.log(`  worktree  ${job.branch ?? "master"}${wt}`);
   }
   const chainRole = job.chain_kind === "chain" ? "chain" : "prep";
@@ -37832,7 +48028,7 @@ ${job.id}  ${job.specialist}  ${getStatusIcon(toJobNode(job))} ${statusLabel(job
   if (job.is_dead)
     inspectActions.push("clean --zombies");
   console.log(`
-  ${dim8(inspectActions.join(" | "))}`);
+  ${dim9(inspectActions.join(" | "))}`);
 }
 function renderJson(jobs, nodes, trees, _all, epicReadiness, args, health) {
   console.log(JSON.stringify({
@@ -38006,8 +48202,8 @@ async function follow(args) {
     interval = setInterval(drawFrame, 1000);
   });
 }
-async function run16() {
-  const args = parseArgs8(process.argv.slice(3));
+async function run17() {
+  const args = parseArgs9(process.argv.slice(3));
   const sqliteClient = createObservabilitySqliteClient();
   try {
     const resolvedArgs = {
@@ -38031,9 +48227,8 @@ var ACTIVE_STATES, TERMINAL_STATES, BEAD_TITLE_CACHE, STATUS_PRIORITY, ANSI_ENTE
 var init_ps = __esm(() => {
   init_format_helpers();
   init_supervisor();
-  init_job_root();
+  init_status_load();
   init_observability_sqlite();
-  init_timeline_events();
   init_node_resolve();
   init_epic_readiness();
   init_process_health();
@@ -38054,11 +48249,11 @@ var init_ps = __esm(() => {
 // src/cli/result.ts
 var exports_result = {};
 __export(exports_result, {
-  run: () => run17
+  run: () => run18
 });
 import { existsSync as existsSync25, readFileSync as readFileSync24 } from "fs";
-import { join as join26 } from "path";
-function parseArgs9(argv) {
+import { join as join29 } from "path";
+function parseArgs10(argv) {
   let jobId;
   let nodeId;
   let memberKey;
@@ -38147,7 +48342,7 @@ function readTimelineEventsForResult(sqliteClient, jobsDir, jobId) {
       return sqliteClient.readEvents(jobId);
     } catch {}
   }
-  const eventsPath = join26(jobsDir, jobId, "events.jsonl");
+  const eventsPath = join29(jobsDir, jobId, "events.jsonl");
   if (!existsSync25(eventsPath))
     return [];
   return readFileSync24(eventsPath, "utf-8").split(`
@@ -38249,8 +48444,8 @@ function formatStartupSnapshot(snapshot) {
 `)}
 `;
 }
-async function run17() {
-  const args = parseArgs9(process.argv.slice(3));
+async function run18() {
+  const args = parseArgs10(process.argv.slice(3));
   const emitJson = (status, output2, error2, startupContext = null) => {
     console.log(JSON.stringify({
       job: status ? {
@@ -38269,7 +48464,7 @@ async function run17() {
       error: error2
     }, null, 2));
   };
-  const jobsDir = join26(process.cwd(), ".specialists", "jobs");
+  const jobsDir = join29(process.cwd(), ".specialists", "jobs");
   const supervisor = new Supervisor({ runner: null, runOptions: null, jobsDir });
   const sqliteClient = createObservabilitySqliteClient();
   const emitHumanResult = (output2, status, startupContext, trailingFooter) => {
@@ -38280,7 +48475,7 @@ async function run17() {
     const formattedCost = formatCostUsd(status.metrics?.token_usage?.cost_usd);
     if (tokenSummaryParts.length === 0 && !formattedCost) {
       if (trailingFooter)
-        process.stderr.write(dim10(trailingFooter));
+        process.stderr.write(dim11(trailingFooter));
       return;
     }
     const footerParts = [];
@@ -38288,11 +48483,11 @@ async function run17() {
       footerParts.push(tokenSummaryParts.join(" \xB7 "));
     if (formattedCost)
       footerParts.push(`cost_usd=${formattedCost}`);
-    process.stderr.write(dim10(`
+    process.stderr.write(dim11(`
 --- metrics: ${footerParts.join(" \xB7 ")} ---
 `));
     if (trailingFooter)
-      process.stderr.write(dim10(trailingFooter));
+      process.stderr.write(dim11(trailingFooter));
   };
   try {
     const jobId = (() => {
@@ -38304,7 +48499,7 @@ async function run17() {
       const resolvedNodeId = args.nodeId ? resolveNodeRefWithClient(args.nodeId, sqliteClient) : resolveSingleActiveNodeRef(sqliteClient);
       return resolveJobIdFromNodeMember(sqliteClient, resolvedNodeId, args.memberKey);
     })();
-    const resultPath = join26(jobsDir, jobId, "result.txt");
+    const resultPath = join29(jobsDir, jobId, "result.txt");
     const readResultOutput = () => {
       try {
         const sqliteResult = sqliteClient?.readResult(jobId) ?? null;
@@ -38407,7 +48602,7 @@ async function run17() {
         if (args.json) {
           emitJson(status, null, message, startupContext2);
         } else {
-          process.stderr.write(`${dim10(message)}
+          process.stderr.write(`${dim11(message)}
 `);
         }
         process.exit(1);
@@ -38415,7 +48610,7 @@ async function run17() {
       if (args.json) {
         emitJson(status, output3, null, startupContext2);
       } else {
-        process.stderr.write(`${dim10(`Job ${jobId} is currently ${status.status}. Showing last completed output while it continues.`)}
+        process.stderr.write(`${dim11(`Job ${jobId} is currently ${status.status}. Showing last completed output while it continues.`)}
 `);
         emitHumanResult(output3, status, startupContext2);
       }
@@ -38429,7 +48624,7 @@ async function run17() {
         if (args.json) {
           emitJson(status, null, message, startupContext2);
         } else {
-          process.stderr.write(`${dim10(message)}
+          process.stderr.write(`${dim11(message)}
 `);
         }
         process.exit(1);
@@ -38489,7 +48684,7 @@ async function run17() {
     await supervisor.dispose();
   }
 }
-var dim10 = (s) => `\x1B[2m${s}\x1B[0m`, red3 = (s) => `\x1B[31m${s}\x1B[0m`;
+var dim11 = (s) => `\x1B[2m${s}\x1B[0m`, red3 = (s) => `\x1B[31m${s}\x1B[0m`;
 var init_result = __esm(() => {
   init_supervisor();
   init_observability_sqlite();
@@ -38499,10 +48694,10 @@ var init_result = __esm(() => {
 });
 
 // src/specialist/timeline-query.ts
-import { existsSync as existsSync26, readdirSync as readdirSync11, readFileSync as readFileSync25 } from "fs";
-import { basename as basename7, join as join27 } from "path";
+import { existsSync as existsSync26, readdirSync as readdirSync12, readFileSync as readFileSync25 } from "fs";
+import { basename as basename8, join as join30 } from "path";
 function readJobEvents(jobDir) {
-  const jobId = basename7(jobDir);
+  const jobId = basename8(jobDir);
   try {
     const sqliteEvents = createObservabilitySqliteClient()?.readEvents(jobId) ?? [];
     if (sqliteEvents.length > 0) {
@@ -38512,7 +48707,7 @@ function readJobEvents(jobDir) {
   } catch {}
   if (process.env.SPECIALISTS_JOB_FILE_OUTPUT !== "on")
     return [];
-  const eventsPath = join27(jobDir, "events.jsonl");
+  const eventsPath = join30(jobDir, "events.jsonl");
   if (!existsSync26(eventsPath))
     return [];
   const content = readFileSync25(eventsPath, "utf-8");
@@ -38562,9 +48757,9 @@ function readAllJobEvents(jobsDir, jobId) {
   if (!existsSync26(jobsDir))
     return [];
   const batches = [];
-  const entries = readdirSync11(jobsDir);
+  const entries = readdirSync12(jobsDir);
   for (const entry of entries) {
-    const jobDir = join27(jobsDir, entry);
+    const jobDir = join30(jobsDir, entry);
     try {
       const stat2 = __require("fs").statSync(jobDir);
       if (!stat2.isDirectory())
@@ -38573,7 +48768,7 @@ function readAllJobEvents(jobsDir, jobId) {
       continue;
     }
     const jobId2 = entry;
-    const statusPath = join27(jobDir, "status.json");
+    const statusPath = join30(jobDir, "status.json");
     let specialist = "unknown";
     let beadId;
     if (existsSync26(statusPath)) {
@@ -38666,17 +48861,17 @@ function formatSpecialistModel(specialist, model) {
 // src/cli/feed.ts
 var exports_feed = {};
 __export(exports_feed, {
-  run: () => run18
+  run: () => run19
 });
 import {
   closeSync as closeSync2,
   existsSync as existsSync27,
   openSync as openSync3,
   readFileSync as readFileSync26,
-  readdirSync as readdirSync12,
-  statSync as statSync4
+  readdirSync as readdirSync13,
+  statSync as statSync6
 } from "fs";
-import { join as join28 } from "path";
+import { join as join31 } from "path";
 function getHumanEventKey(event) {
   switch (event.type) {
     case "meta":
@@ -38743,7 +48938,7 @@ function isWaitingStatusChangeEvent(event) {
   return event.type === "status_change" && event.status === "waiting";
 }
 function formatWaitingBanner(jobId, specialist) {
-  const prefix = magenta3(bold10("WAIT"));
+  const prefix = magenta3(bold11("WAIT"));
   return `${prefix} ${specialist} (${jobId}) is waiting for input. Use: specialists resume ${jobId} "..."`;
 }
 function formatPayloadBreakdownSummary(payloadBreakdown) {
@@ -38793,21 +48988,21 @@ function formatStartupContextLine(event) {
       parts.push(`bead_context_present=${snapshot.bead_context_present}`);
     if (snapshot.skills)
       parts.push(`skills=${snapshot.skills.count}`);
-    return parts.length > 0 ? dim8(`  \u21B3 startup ${parts.join(" ")}`) : null;
+    return parts.length > 0 ? dim9(`  \u21B3 startup ${parts.join(" ")}`) : null;
   }
   if (event.type === "payload_breakdown") {
     const summary = formatPayloadBreakdownSummary(event.payload_breakdown);
     if (!summary)
       return null;
-    return dim8(`  \u21B3 ${summary}`);
+    return dim9(`  \u21B3 ${summary}`);
   }
   if (event.type === "meta" && event.source === "mandatory_rules_injection" && event.data) {
     const data = event.data;
-    return dim8(`  \u21B3 mandatory_rules sets=${(data.sets_loaded ?? []).join(",") || "none"} rules=${data.rules_count ?? 0} tokens=~${data.token_estimate ?? 0}`);
+    return dim9(`  \u21B3 mandatory_rules sets=${(data.sets_loaded ?? []).join(",") || "none"} rules=${data.rules_count ?? 0} tokens=~${data.token_estimate ?? 0}`);
   }
   if (event.type === "meta" && event.memory_injection) {
     const mem = event.memory_injection;
-    return dim8(`  \u21B3 memory static=${mem.static_tokens} dynamic=${mem.memory_tokens} gitnexus=${mem.gitnexus_tokens} total=${mem.total_tokens}`);
+    return dim9(`  \u21B3 memory static=${mem.static_tokens} dynamic=${mem.memory_tokens} gitnexus=${mem.gitnexus_tokens} total=${mem.total_tokens}`);
   }
   return null;
 }
@@ -38855,7 +49050,7 @@ function readStatusJson(sqliteClient, jobsDir, jobId) {
   } catch (error2) {
     console.warn(`SQLite status read failed for job ${jobId}; falling back to status.json`, error2);
   }
-  const statusPath = join28(jobsDir, jobId, "status.json");
+  const statusPath = join31(jobsDir, jobId, "status.json");
   const raw = readFileFresh(statusPath);
   if (!raw)
     return null;
@@ -38900,8 +49095,8 @@ function readJobMeta(sqliteClient, jobsDir, jobId) {
     startedAtMs: typeof status.started_at_ms === "number" ? status.started_at_ms : Date.now()
   };
 }
-function makeJobMetaReader(sqliteClient, jobsDir, options = {}) {
-  const useCache = options.useCache ?? true;
+function makeJobMetaReader(sqliteClient, jobsDir, options2 = {}) {
+  const useCache = options2.useCache ?? true;
   if (!useCache) {
     return (jobId) => readJobMeta(sqliteClient, jobsDir, jobId);
   }
@@ -38915,7 +49110,7 @@ function makeJobMetaReader(sqliteClient, jobsDir, options = {}) {
     return meta;
   };
 }
-function parseArgs10(argv) {
+function parseArgs11(argv) {
   let jobId;
   let specialist;
   let nodeId;
@@ -38977,19 +49172,19 @@ function parseArgs10(argv) {
     json
   };
 }
-function printSnapshot(sqliteClient, merged, options, jobsDir) {
+function printSnapshot(sqliteClient, merged, options2, jobsDir) {
   if (merged.length === 0) {
-    if (!options.json) {
-      if (options.jobId && sqliteClient) {
-        console.log(dim8(`job ${options.jobId} not found in .specialists/db/observability.db`));
+    if (!options2.json) {
+      if (options2.jobId && sqliteClient) {
+        console.log(dim9(`job ${options2.jobId} not found in .specialists/db/observability.db`));
       } else {
-        console.log(dim8("No events found."));
+        console.log(dim9("No events found."));
       }
     }
     return;
   }
   const colorMap = new JobColorMap;
-  if (options.json) {
+  if (options2.json) {
     const getJobMeta2 = jobsDir ? makeJobMetaReader(sqliteClient, jobsDir) : () => ({ startedAtMs: Date.now() });
     for (const { jobId, specialist, beadId, event } of merged) {
       const meta = getJobMeta2(jobId);
@@ -39070,29 +49265,29 @@ function filterMergedEventsByNode(sqliteClient, jobsDir, merged, nodeId) {
     return typeof status?.node_id === "string" && status.node_id === nodeId;
   });
 }
-function listMatchingJobIds(sqliteClient, jobsDir, options) {
+function listMatchingJobIds(sqliteClient, jobsDir, options2) {
   if (!existsSync27(jobsDir))
     return [];
   const jobIds = [];
-  for (const entry of readdirSync12(jobsDir)) {
-    const jobDir = join28(jobsDir, entry);
+  for (const entry of readdirSync13(jobsDir)) {
+    const jobDir = join31(jobsDir, entry);
     try {
-      if (!statSync4(jobDir).isDirectory())
+      if (!statSync6(jobDir).isDirectory())
         continue;
     } catch {
       continue;
     }
-    if (options.jobId && entry !== options.jobId)
+    if (options2.jobId && entry !== options2.jobId)
       continue;
     const status = readStatusJson(sqliteClient, jobsDir, entry);
-    if (options.nodeId) {
+    if (options2.nodeId) {
       const currentNodeId = typeof status?.node_id === "string" ? status.node_id : "";
-      if (currentNodeId !== options.nodeId)
+      if (currentNodeId !== options2.nodeId)
         continue;
     }
-    if (options.specialist) {
+    if (options2.specialist) {
       const specialist = typeof status?.specialist === "string" ? status.specialist : undefined;
-      if (specialist !== options.specialist)
+      if (specialist !== options2.specialist)
         continue;
     }
     jobIds.push(entry);
@@ -39112,7 +49307,7 @@ function readJobEventsFresh(sqliteClient, jobsDir, jobId) {
   } catch (error2) {
     console.warn(`SQLite events read failed for job ${jobId}; falling back to events.jsonl`, error2);
   }
-  const eventsPath = join28(jobsDir, jobId, "events.jsonl");
+  const eventsPath = join31(jobsDir, jobId, "events.jsonl");
   const content = readFileFresh(eventsPath);
   if (!content)
     return [];
@@ -39136,10 +49331,10 @@ function readJobEventsIncremental(sqliteClient, jobsDir, jobId, afterSeq, fileCa
   } catch (error2) {
     console.warn(`SQLite incremental events read failed for job ${jobId}; falling back to events.jsonl`, error2);
   }
-  const eventsPath = join28(jobsDir, jobId, "events.jsonl");
+  const eventsPath = join31(jobsDir, jobId, "events.jsonl");
   let stats;
   try {
-    stats = statSync4(eventsPath);
+    stats = statSync6(eventsPath);
   } catch {
     return [];
   }
@@ -39153,9 +49348,9 @@ function readJobEventsIncremental(sqliteClient, jobsDir, jobId, afterSeq, fileCa
     return events;
   return events.filter((event) => typeof event.seq === "number" && event.seq > afterSeq);
 }
-function readFilteredBatchesFresh(sqliteClient, jobsDir, options) {
+function readFilteredBatchesFresh(sqliteClient, jobsDir, options2) {
   const batches = [];
-  for (const jobId of listMatchingJobIds(sqliteClient, jobsDir, options)) {
+  for (const jobId of listMatchingJobIds(sqliteClient, jobsDir, options2)) {
     const status = readStatusJson(sqliteClient, jobsDir, jobId);
     const specialist = typeof status?.specialist === "string" ? status.specialist : "unknown";
     const beadId = typeof status?.bead_id === "string" ? status.bead_id : undefined;
@@ -39166,27 +49361,27 @@ function readFilteredBatchesFresh(sqliteClient, jobsDir, options) {
   }
   return batches;
 }
-async function followMerged(sqliteClient, jobsDir, options) {
+async function followMerged(sqliteClient, jobsDir, options2) {
   const colorMap = new JobColorMap;
   const getJobMeta = makeJobMetaReader(sqliteClient, jobsDir, { useCache: false });
   const lastSeenSeq = new Map;
   const fileEventCache = new Map;
-  const initialMatchingJobIds = listMatchingJobIds(sqliteClient, jobsDir, options);
+  const initialMatchingJobIds = listMatchingJobIds(sqliteClient, jobsDir, options2);
   const hasInitialMatchingJobs = initialMatchingJobIds.length > 0;
-  const isGlobalFollow = options.jobId === undefined;
+  const isGlobalFollow = options2.jobId === undefined;
   const trackedJobs = new Set(initialMatchingJobIds.filter((jobId) => {
     const status = readStatusJson(sqliteClient, jobsDir, jobId);
     return !isTerminalStatus(status) && !(isGlobalFollow && isKeepAliveJobStatus(status));
   }));
   const completedJobs = new Set;
-  const filteredBatches = () => readFilteredBatchesFresh(sqliteClient, jobsDir, options);
+  const filteredBatches = () => readFilteredBatchesFresh(sqliteClient, jobsDir, options2);
   const initial = filterMergedEventsByCursor(filterMergedEventsByNode(sqliteClient, jobsDir, queryTimeline(jobsDir, {
-    jobId: options.jobId,
-    specialist: options.specialist,
-    since: options.since,
-    limit: options.limit
-  }), options.nodeId), options.from);
-  printSnapshot(sqliteClient, initial, { ...options, json: options.json }, jobsDir);
+    jobId: options2.jobId,
+    specialist: options2.specialist,
+    since: options2.since,
+    limit: options2.limit
+  }), options2.nodeId), options2.from);
+  printSnapshot(sqliteClient, initial, { ...options2, json: options2.json }, jobsDir);
   for (const batch of filteredBatches()) {
     const maxSeq = batch.events.reduce((max, event) => Math.max(max, event.seq ?? 0), 0);
     lastSeenSeq.set(batch.jobId, maxSeq);
@@ -39194,31 +49389,31 @@ async function followMerged(sqliteClient, jobsDir, options) {
       completedJobs.add(batch.jobId);
     }
   }
-  if (!options.forever && trackedJobs.size === 0) {
-    if (!options.json) {
+  if (!options2.forever && trackedJobs.size === 0) {
+    if (!options2.json) {
       const message = hasInitialMatchingJobs ? `All jobs complete.
 ` : `No jobs found.
 `;
-      process.stderr.write(dim8(message));
+      process.stderr.write(dim9(message));
     }
     return;
   }
-  if (!options.forever && hasInitialMatchingJobs && trackedJobs.size > 0 && completedJobs.size === trackedJobs.size) {
-    if (!options.json) {
+  if (!options2.forever && hasInitialMatchingJobs && trackedJobs.size > 0 && completedJobs.size === trackedJobs.size) {
+    if (!options2.json) {
       process.stderr.write(`All jobs complete.
 `);
     }
     return;
   }
-  if (!options.json) {
-    process.stderr.write(dim8(`Following... (Ctrl+C to stop)
+  if (!options2.json) {
+    process.stderr.write(dim9(`Following... (Ctrl+C to stop)
 `));
   }
   const lastPrintedEventKey = new Map;
   const seenMetaKey = new Map;
   await new Promise((resolve11) => {
     const interval = setInterval(() => {
-      const currentJobIds = listMatchingJobIds(sqliteClient, jobsDir, options);
+      const currentJobIds = listMatchingJobIds(sqliteClient, jobsDir, options2);
       const statusByJobId = new Map;
       for (const jobId of currentJobIds) {
         const status = readStatusJson(sqliteClient, jobsDir, jobId);
@@ -39239,7 +49434,7 @@ async function followMerged(sqliteClient, jobsDir, options) {
         const maxSeq = events.reduce((max, event) => Math.max(max, event.seq ?? 0), previousSeq);
         lastSeenSeq.set(jobId, maxSeq);
         for (const event of events) {
-          if (isEventAtOrAfterCursor(jobId, event, options.from)) {
+          if (isEventAtOrAfterCursor(jobId, event, options2.from)) {
             newEvents.push({ jobId, specialist, beadId, event });
           }
         }
@@ -39257,7 +49452,7 @@ async function followMerged(sqliteClient, jobsDir, options) {
         const meta = getJobMeta(jobId);
         const model = meta.model ?? (event.type === "meta" ? event.model : undefined);
         const backend = meta.backend ?? (event.type === "meta" ? event.backend : undefined);
-        if (options.json) {
+        if (options2.json) {
           console.log(JSON.stringify({
             jobId,
             specialist,
@@ -39293,7 +49488,7 @@ async function followMerged(sqliteClient, jobsDir, options) {
             console.log(startupContextLine);
         }
       }
-      if (!options.forever && trackedJobs.size > 0) {
+      if (!options2.forever && trackedJobs.size > 0) {
         const allTrackedTerminal = [...trackedJobs].every((jobId) => {
           const status = statusByJobId.get(jobId) ?? readStatusJson(sqliteClient, jobsDir, jobId);
           return isTerminalEquivalentForFollow(status, isGlobalFollow);
@@ -39306,25 +49501,25 @@ async function followMerged(sqliteClient, jobsDir, options) {
     }, 750);
   });
 }
-async function run18() {
-  const options = parseArgs10(process.argv.slice(3));
+async function run19() {
+  const options2 = parseArgs11(process.argv.slice(3));
   const sqliteClient = createObservabilitySqliteClient();
   try {
-    const jobsDir = join28(process.cwd(), ".specialists", "jobs");
+    const jobsDir = join31(process.cwd(), ".specialists", "jobs");
     if (!existsSync27(jobsDir)) {
-      if (options.jobId && sqliteClient) {
-        console.log(dim8(`job ${options.jobId} not found in .specialists/db/observability.db`));
+      if (options2.jobId && sqliteClient) {
+        console.log(dim9(`job ${options2.jobId} not found in .specialists/db/observability.db`));
       } else {
-        console.log(dim8("No jobs directory found."));
+        console.log(dim9("No jobs directory found."));
       }
       return;
     }
     const resolvedOptions = {
-      ...options,
-      nodeId: options.nodeId && sqliteClient ? resolveNodeRefWithClient(options.nodeId, sqliteClient) : options.nodeId
+      ...options2,
+      nodeId: options2.nodeId && sqliteClient ? resolveNodeRefWithClient(options2.nodeId, sqliteClient) : options2.nodeId
     };
     if (resolvedOptions.from && !resolvedOptions.json) {
-      console.log(dim8(`Showing events from cursor ${resolvedOptions.from.jobId}:${resolvedOptions.from.seq}`));
+      console.log(dim9(`Showing events from cursor ${resolvedOptions.from.jobId}:${resolvedOptions.from.seq}`));
     }
     if (resolvedOptions.follow) {
       await followMerged(sqliteClient, jobsDir, resolvedOptions);
@@ -39341,7 +49536,7 @@ async function run18() {
     sqliteClient?.close();
   }
 }
-var init_feed = __esm(() => {
+var init_feed2 = __esm(() => {
   init_timeline_events();
   init_observability_sqlite();
   init_node_resolve();
@@ -39352,10 +49547,10 @@ var init_feed = __esm(() => {
 // src/cli/steer.ts
 var exports_steer = {};
 __export(exports_steer, {
-  run: () => run19
+  run: () => run20
 });
-import { writeFileSync as writeFileSync11 } from "fs";
-async function run19() {
+import { writeFileSync as writeFileSync13 } from "fs";
+async function run20() {
   const jobId = process.argv[3];
   const message = process.argv[4];
   if (!jobId || !message) {
@@ -39385,7 +49580,7 @@ async function run19() {
     try {
       const payload = JSON.stringify({ type: "steer", message }) + `
 `;
-      writeFileSync11(status.fifo_path, payload, { flag: "a" });
+      writeFileSync13(status.fifo_path, payload, { flag: "a" });
       process.stdout.write(`${green10("\u2713")} Steer message sent to job ${jobId}
 `);
     } catch (err) {
@@ -39406,10 +49601,10 @@ var init_steer = __esm(() => {
 // src/cli/resume.ts
 var exports_resume = {};
 __export(exports_resume, {
-  run: () => run20
+  run: () => run21
 });
-import { writeFileSync as writeFileSync12 } from "fs";
-async function run20() {
+import { writeFileSync as writeFileSync14 } from "fs";
+async function run21() {
   const jobId = process.argv[3];
   const task = process.argv[4];
   if (!jobId || !task) {
@@ -39439,7 +49634,7 @@ async function run20() {
     try {
       const payload = JSON.stringify({ type: "resume", task }) + `
 `;
-      writeFileSync12(status.fifo_path, payload, { flag: "a" });
+      writeFileSync14(status.fifo_path, payload, { flag: "a" });
       process.stdout.write(`${green11("\u2713")} Resume sent to job ${jobId}
 `);
       process.stdout.write(`  Use 'specialists feed ${jobId} --follow' to watch the response.
@@ -39462,20 +49657,20 @@ var init_resume = __esm(() => {
 // src/cli/follow-up.ts
 var exports_follow_up = {};
 __export(exports_follow_up, {
-  run: () => run21
+  run: () => run22
 });
-async function run21() {
+async function run22() {
   process.stderr.write("\x1B[33m\u26A0 DEPRECATED:\x1B[0m `specialists follow-up` is deprecated. Use `specialists resume` instead.\n\n");
   const { run: resumeRun } = await Promise.resolve().then(() => (init_resume(), exports_resume));
   return resumeRun();
 }
 
 // src/specialist/worktree-gc.ts
-import { existsSync as existsSync28, readdirSync as readdirSync13, readFileSync as readFileSync27 } from "fs";
-import { join as join29 } from "path";
-import { spawnSync as spawnSync19 } from "child_process";
+import { existsSync as existsSync28, readdirSync as readdirSync14, readFileSync as readFileSync27 } from "fs";
+import { join as join32 } from "path";
+import { spawnSync as spawnSync18 } from "child_process";
 function readJobStatus2(jobDir) {
-  const statusPath = join29(jobDir, "status.json");
+  const statusPath = join32(jobDir, "status.json");
   if (!existsSync28(statusPath))
     return null;
   try {
@@ -39516,10 +49711,10 @@ function collectWorktreeGcCandidates(jobsDir) {
   if (!existsSync28(jobsDir))
     return [];
   const candidates = [];
-  for (const entry of readdirSync13(jobsDir, { withFileTypes: true })) {
+  for (const entry of readdirSync14(jobsDir, { withFileTypes: true })) {
     if (!entry.isDirectory())
       continue;
-    const status = readJobStatus2(join29(jobsDir, entry.name));
+    const status = readJobStatus2(join32(jobsDir, entry.name));
     if (!status)
       continue;
     if (isActive(status.status))
@@ -39541,7 +49736,7 @@ function collectWorktreeGcCandidates(jobsDir) {
   return candidates;
 }
 function removeWorktreeDirectory(worktreePath) {
-  const result = spawnSync19("git", ["worktree", "remove", "--force", worktreePath], {
+  const result = spawnSync18("git", ["worktree", "remove", "--force", worktreePath], {
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -39573,10 +49768,10 @@ var init_worktree_gc = __esm(() => {
 // src/cli/clean.ts
 var exports_clean = {};
 __export(exports_clean, {
-  run: () => run22
+  run: () => run23
 });
-import { existsSync as existsSync29, readFileSync as readFileSync28, readdirSync as readdirSync14, rmSync as rmSync4, statSync as statSync5 } from "fs";
-import { join as join30 } from "path";
+import { existsSync as existsSync29, readFileSync as readFileSync28, readdirSync as readdirSync15, rmSync as rmSync4, statSync as statSync7 } from "fs";
+import { join as join33 } from "path";
 function parseDuration2(raw) {
   const match = /^(\d+)(ms|s|m|h|d)$/i.exec(raw.trim());
   if (!match)
@@ -39730,16 +49925,16 @@ function parseOptions2(argv) {
 }
 function readDirectorySizeBytes(directoryPath) {
   let totalBytes = 0;
-  for (const entry of readdirSync14(directoryPath, { withFileTypes: true })) {
-    const entryPath = join30(directoryPath, entry.name);
-    const stats = statSync5(entryPath);
+  for (const entry of readdirSync15(directoryPath, { withFileTypes: true })) {
+    const entryPath = join33(directoryPath, entry.name);
+    const stats = statSync7(entryPath);
     totalBytes += stats.isDirectory() ? readDirectorySizeBytes(entryPath) : stats.size;
   }
   return totalBytes;
 }
 function containsProtectedSqliteArtifact(directoryPath) {
-  for (const entry of readdirSync14(directoryPath, { withFileTypes: true })) {
-    const entryPath = join30(directoryPath, entry.name);
+  for (const entry of readdirSync15(directoryPath, { withFileTypes: true })) {
+    const entryPath = join33(directoryPath, entry.name);
     if (entry.isDirectory()) {
       if (containsProtectedSqliteArtifact(entryPath))
         return true;
@@ -39760,10 +49955,10 @@ function getJobTimestamps(status) {
 function readCompletedJobDirectory(baseDirectory, entry) {
   if (!entry.isDirectory())
     return null;
-  const directoryPath = join30(baseDirectory, entry.name);
+  const directoryPath = join33(baseDirectory, entry.name);
   if (containsProtectedSqliteArtifact(directoryPath))
     return null;
-  const statusFilePath = join30(directoryPath, "status.json");
+  const statusFilePath = join33(directoryPath, "status.json");
   if (!existsSync29(statusFilePath))
     return null;
   let statusData;
@@ -39782,7 +49977,7 @@ function collectCompletedJobs(jobsDirectoryPath) {
   const statuses = sqliteClient?.listStatuses() ?? [];
   if (statuses.length > 0) {
     return statuses.filter((status) => COMPLETED_STATUSES.has(status.status)).map((status) => {
-      const directoryPath = join30(jobsDirectoryPath, status.id);
+      const directoryPath = join33(jobsDirectoryPath, status.id);
       if (!existsSync29(directoryPath) || containsProtectedSqliteArtifact(directoryPath))
         return null;
       const { createdAtMs, completedAtMs } = getJobTimestamps(status);
@@ -39791,21 +49986,21 @@ function collectCompletedJobs(jobsDirectoryPath) {
   }
   if (process.env.SPECIALISTS_JOB_FILE_OUTPUT !== "on")
     return [];
-  return readdirSync14(jobsDirectoryPath, { withFileTypes: true }).map((entry) => readCompletedJobDirectory(jobsDirectoryPath, entry)).filter((job) => job !== null);
+  return readdirSync15(jobsDirectoryPath, { withFileTypes: true }).map((entry) => readCompletedJobDirectory(jobsDirectoryPath, entry)).filter((job) => job !== null);
 }
-function selectJobsToRemove(completedJobs, options, protectedJobIds) {
+function selectJobsToRemove(completedJobs, options2, protectedJobIds) {
   const jobsByNewest = [...completedJobs].sort((left, right) => {
     if (right.createdAtMs !== left.createdAtMs)
       return right.createdAtMs - left.createdAtMs;
     return right.completedAtMs - left.completedAtMs;
   });
-  if (options.keepRecentCount !== null) {
-    const removable = jobsByNewest.slice(options.keepRecentCount);
-    if (options.aggressivePrune)
+  if (options2.keepRecentCount !== null) {
+    const removable = jobsByNewest.slice(options2.keepRecentCount);
+    if (options2.aggressivePrune)
       return removable;
     return removable.filter((job) => !protectedJobIds.has(job.id));
   }
-  if (options.removeAllCompleted)
+  if (options2.removeAllCompleted)
     return jobsByNewest;
   const cutoffMs = Date.now() - parseTtlDaysFromEnvironment() * MS_PER_DAY;
   return jobsByNewest.filter((job) => job.completedAtMs < cutoffMs);
@@ -40061,18 +50256,18 @@ function removeStaleProcesses(statuses, dryRun) {
   }
   return updatedCount;
 }
-async function run22() {
-  let options;
+async function run23() {
+  let options2;
   try {
-    options = parseOptions2(process.argv.slice(3));
+    options2 = parseOptions2(process.argv.slice(3));
   } catch (error2) {
     const message = error2 instanceof Error ? error2.message : String(error2);
     printUsageAndExit2(message);
   }
-  if (options.reapOrphans) {
+  if (options2.reapOrphans) {
     const orphans = findOrphanProcesses();
     const staleJobs = collectStaleSpecialistJobs();
-    if (options.dryRun) {
+    if (options2.dryRun) {
       printOrphanPlan(orphans);
       printStaleJobPlan(staleJobs);
       return;
@@ -40092,20 +50287,20 @@ async function run22() {
   const jobsDirectoryPath = resolveJobsDir();
   const sqliteClient = createObservabilitySqliteClient();
   const statuses = sqliteClient?.listStatuses() ?? [];
-  if (options.observability) {
+  if (options2.observability) {
     if (!sqliteClient)
       throw new Error("Failed to initialize observability SQLite schema. Run `specialists db setup` first.");
     const report = sqliteClient.pruneObservabilityData({
-      beforeMs: options.observabilityBeforeMs,
-      includeEpics: options.includeEpics,
-      apply: !options.dryRun
+      beforeMs: options2.observabilityBeforeMs,
+      includeEpics: options2.includeEpics,
+      apply: !options2.dryRun
     });
     printObservabilityPruneReport(report);
     return;
   }
-  if (options.psDashboard) {
+  if (options2.psDashboard) {
     const candidates = selectPsDashboardCleanCandidates(statuses);
-    if (options.dryRun) {
+    if (options2.dryRun) {
       printPsDashboardCleanPlan(candidates);
       return;
     }
@@ -40118,10 +50313,10 @@ async function run22() {
     return;
   }
   const worktreeCandidates = collectWorktreeGcCandidates(jobsDirectoryPath);
-  const protectedJobIds = options.keepRecentCount !== null && !options.aggressivePrune && sqliteClient ? new Set(sqliteClient.listReferencedChainRootJobIds()) : new Set;
-  if (options.staleProcessesOnly) {
-    const staleJobs = selectStaleProcesses(statuses, options.staleAfterHours);
-    if (options.dryRun) {
+  const protectedJobIds = options2.keepRecentCount !== null && !options2.aggressivePrune && sqliteClient ? new Set(sqliteClient.listReferencedChainRootJobIds()) : new Set;
+  if (options2.staleProcessesOnly) {
+    const staleJobs = selectStaleProcesses(statuses, options2.staleAfterHours);
+    if (options2.dryRun) {
       printProcessPlan(staleJobs);
       console.log(renderSummary(staleJobs.length, 0, true));
       printWorktreeDryRunPlan(worktreeCandidates);
@@ -40136,9 +50331,9 @@ async function run22() {
     return;
   }
   const completedJobs = collectCompletedJobs(jobsDirectoryPath);
-  const jobsToRemove = selectJobsToRemove(completedJobs, options, protectedJobIds);
+  const jobsToRemove = selectJobsToRemove(completedJobs, options2, protectedJobIds);
   const freedBytes = jobsToRemove.reduce((total, job) => total + job.sizeBytes, 0);
-  if (options.dryRun) {
+  if (options2.dryRun) {
     printDryRunPlan(jobsToRemove);
     console.log(renderSummary(jobsToRemove.length, freedBytes, true));
     printWorktreeDryRunPlan(worktreeCandidates);
@@ -40166,9 +50361,9 @@ var init_clean = __esm(() => {
 // src/cli/end.ts
 var exports_end = {};
 __export(exports_end, {
-  run: () => run23
+  run: () => run24
 });
-import { spawnSync as spawnSync20 } from "child_process";
+import { spawnSync as spawnSync19 } from "child_process";
 function parseOptions3(argv) {
   let beadId;
   let epicId;
@@ -40203,7 +50398,7 @@ function parseOptions3(argv) {
   return { beadId, epicId, rebuild, pr };
 }
 function runCommand3(command, args) {
-  const result = spawnSync20(command, args, { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
+  const result = spawnSync19(command, args, { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
   return {
     status: result.status,
     stdout: result.stdout ?? "",
@@ -40236,34 +50431,34 @@ function printUsageAndExit3(message) {
   console.error("Usage: specialists|sp end [--bead <id>|--epic <id>] [--pr] [--rebuild]");
   process.exit(1);
 }
-async function publishChain(beadId, options) {
+async function publishChain(beadId, options2) {
   const targets = resolveMergeTargets(beadId);
   const publication = executePublicationPlan(targets, {
-    rebuild: options.rebuild,
-    mode: options.pr ? "pr" : "direct",
+    rebuild: options2.rebuild,
+    mode: options2.pr ? "pr" : "direct",
     publicationLabel: `chain-${beadId}`
   });
-  printSummary(publication.steps, options.rebuild);
-  if (options.pr) {
+  printSummary(publication.steps, options2.rebuild);
+  if (options2.pr) {
     console.log(`Publication mode: PR${publication.pullRequestUrl ? ` (${publication.pullRequestUrl})` : ""}`);
   } else {
     console.log("Publication mode: direct merge");
   }
 }
-async function run23() {
-  let options;
+async function run24() {
+  let options2;
   try {
-    options = parseOptions3(process.argv.slice(3));
+    options2 = parseOptions3(process.argv.slice(3));
   } catch (error2) {
     const message = error2 instanceof Error ? error2.message : String(error2);
     printUsageAndExit3(message);
   }
-  if (options.epicId) {
-    const args = ["merge", options.epicId, ...options.rebuild ? ["--rebuild"] : [], ...options.pr ? ["--pr"] : []];
+  if (options2.epicId) {
+    const args = ["merge", options2.epicId, ...options2.rebuild ? ["--rebuild"] : [], ...options2.pr ? ["--pr"] : []];
     await handleEpicMergeCommand(args);
     return;
   }
-  const beadId = options.beadId ?? detectCurrentBeadIdFromWorkspace();
+  const beadId = options2.beadId ?? detectCurrentBeadIdFromWorkspace();
   if (!beadId) {
     printUsageAndExit3("Unable to infer current chain bead from workspace. Pass --bead <id> or --epic <id>.");
   }
@@ -40274,12 +50469,12 @@ async function run23() {
       console.log(`Epic ${guard.epicId} still open. Run: sp epic resolve ${guard.epicId}`);
       process.exit(1);
     }
-    console.log(`Redirecting session close publication to epic merge (${options.pr ? "PR mode" : "direct mode"}).`);
-    const args = ["merge", guard.epicId, ...options.rebuild ? ["--rebuild"] : [], ...options.pr ? ["--pr"] : []];
+    console.log(`Redirecting session close publication to epic merge (${options2.pr ? "PR mode" : "direct mode"}).`);
+    const args = ["merge", guard.epicId, ...options2.rebuild ? ["--rebuild"] : [], ...options2.pr ? ["--pr"] : []];
     await handleEpicMergeCommand(args);
     return;
   }
-  await publishChain(beadId, options);
+  await publishChain(beadId, options2);
 }
 var init_end = __esm(() => {
   init_observability_sqlite();
@@ -40288,34 +50483,9 @@ var init_end = __esm(() => {
   init_epic();
 });
 
-// src/cli/stop.ts
-var exports_stop = {};
-__export(exports_stop, {
-  run: () => run24
-});
+// src/specialist/control.ts
 function resolveTerminalStatus(jobId) {
   return hasRunCompleteEvent(jobId) ? "done" : "cancelled";
-}
-function parseStopArgs(argv) {
-  let jobId;
-  let force = false;
-  let closeBeadAnyway = false;
-  for (const token of argv) {
-    if (token === "--force") {
-      force = true;
-      continue;
-    }
-    if (token === "--close-bead-anyway") {
-      closeBeadAnyway = true;
-      continue;
-    }
-    if (!token.startsWith("-") && !jobId) {
-      jobId = token;
-      continue;
-    }
-    throw new Error(`Unknown option: ${token}`);
-  }
-  return { jobId, force, closeBeadAnyway };
 }
 async function waitForProcessExit(pid, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
@@ -40334,41 +50504,41 @@ function tryKillProcessGroup(pid) {
       throw err;
   }
 }
-async function run24() {
-  let parsed;
-  try {
-    parsed = parseStopArgs(process.argv.slice(3));
-  } catch (err) {
-    console.error(err.message);
-    console.error("Usage: specialists|sp stop <job-id> [--force]");
-    process.exit(1);
+function createFinalizeSupervisor(jobsDir) {
+  const runner = { run: async () => {
+    throw new Error("finalize supervisor runner is not used");
+  } };
+  const runOptions = {};
+  return new Supervisor({ runner, runOptions, jobsDir });
+}
+function findReviewerPassInChain(supervisor, chainId) {
+  for (const id of supervisor.listChainJobIds(chainId)) {
+    const status = supervisor.readStatus(id);
+    if (!status || status.specialist !== "reviewer")
+      continue;
+    if (PASS_COMPLIANCE_VERDICT_REGEX2.test(supervisor.readResult(id) ?? ""))
+      return { reviewerJobId: id };
   }
-  const { jobId, force, closeBeadAnyway } = parsed;
-  if (!jobId) {
-    console.error("Usage: specialists|sp stop <job-id> [--force]");
-    process.exit(1);
-  }
-  const jobsDir = resolveJobsDir(process.cwd());
+  return null;
+}
+async function stopJob(jobId, opts = {}) {
+  const jobsDir = opts.jobsDir ?? resolveJobsDir(process.cwd());
   const supervisor = new Supervisor({ runner: null, runOptions: null, jobsDir });
   try {
     const status = supervisor.readStatus(jobId);
-    if (!status) {
-      console.error(`No job found: ${jobId}`);
-      process.exit(1);
-    }
+    if (!status)
+      throw new Error(`No job found: ${jobId}`);
     if (status.status === "done" || status.status === "error" || status.status === "cancelled") {
-      process.stderr.write(`${dim11(`Job ${jobId} already finalized (${status.status}).`)}
+      process.stderr.write(`${dim12(`Job ${jobId} already finalized (${status.status}).`)}
 `);
       return;
     }
-    if (!status.pid) {
-      process.stderr.write(`${red6(`No PID recorded for job ${jobId}.`)}
-`);
-      process.exit(1);
-    }
+    if (!status.pid)
+      throw new Error(`No PID recorded for job ${jobId}.`);
     const pid = status.pid;
     const tmuxSession = status.tmux_session;
     const isAlreadyDead = !isProcessAlive(pid, status.started_at_ms);
+    const force = opts.force ?? false;
     if (force && isAlreadyDead) {
       supervisor.updateJobStatus(jobId, "error");
       supervisor.aggregateJobMetricsBestEffort(jobId);
@@ -40404,30 +50574,28 @@ async function run24() {
 `);
           }
         } else {
-          process.stderr.write(`${red6("Error:")} ${err.message}
-`);
-          process.exit(1);
+          throw err;
         }
       }
     }
     if (tmuxSession) {
       killTmuxSession(tmuxSession);
-      process.stdout.write(`${dim11(`  tmux session ${tmuxSession} killed`)}
+      process.stdout.write(`${dim12(`  tmux session ${tmuxSession} killed`)}
 `);
     }
     if (status.bead_id) {
       const finalStatus = supervisor.readStatus(jobId)?.status ?? "cancelled";
       const beads = new BeadsClient;
       const liveJobs = supervisor.listLiveJobsForBead(status.bead_id).filter((liveJobId) => liveJobId !== jobId);
-      if (closeBeadAnyway || liveJobs.length === 0) {
+      if (opts.closeBeadAnyway || liveJobs.length === 0) {
         if (beads.closeBeadIfInProgress(status.bead_id, `Job ${jobId} stopped (${finalStatus})`)) {
-          process.stdout.write(`${dim11(`  bead ${status.bead_id} auto-closed`)}
+          process.stdout.write(`${dim12(`  bead ${status.bead_id} auto-closed`)}
 `);
         }
       } else {
         const message = `bead_close_skipped: sibling-jobs-active [${liveJobs.join(", ")}]`;
         supervisor.emitMetaEvent(jobId, message, "supervisor");
-        process.stdout.write(`${dim11(`  ${message}`)}
+        process.stdout.write(`${dim12(`  ${message}`)}
 `);
       }
     }
@@ -40435,80 +50603,22 @@ async function run24() {
     await supervisor.dispose();
   }
 }
-var green12 = (s) => `\x1B[32m${s}\x1B[0m`, red6 = (s) => `\x1B[31m${s}\x1B[0m`, dim11 = (s) => `\x1B[2m${s}\x1B[0m`;
-var init_stop = __esm(() => {
-  init_supervisor();
-  init_job_root();
-  init_observability_sqlite();
-  init_process_liveness();
-  init_beads();
-  init_tmux_utils();
-});
-
-// src/cli/finalize.ts
-var exports_finalize = {};
-__export(exports_finalize, {
-  run: () => run25
-});
-function createFinalizeSupervisor(jobsDir) {
-  const runner = {
-    run: async () => {
-      throw new Error("finalize supervisor runner is not used");
-    }
-  };
-  const runOptions = {};
-  return new Supervisor({ runner, runOptions, jobsDir });
-}
-function parseFinalizeArgs(argv) {
-  const jobId = argv.find((token) => !token.startsWith("-"));
-  return { jobId };
-}
-function findReviewerPassInChain(supervisor, chainId) {
-  const jobIds = supervisor.listChainJobIds(chainId);
-  for (const id of jobIds) {
-    const status = supervisor.readStatus(id);
-    if (!status || status.specialist !== "reviewer")
-      continue;
-    const output2 = supervisor.readResult(id) ?? "";
-    if (PASS_COMPLIANCE_VERDICT_REGEX2.test(output2)) {
-      return { reviewerJobId: id };
-    }
-  }
-  return null;
-}
-async function run25() {
-  const parsed = parseFinalizeArgs(process.argv.slice(3));
-  const jobId = parsed.jobId;
-  if (!jobId) {
-    console.error("Usage: specialists|sp finalize <job-id>");
-    process.exit(1);
-  }
-  const jobsDir = resolveJobsDir();
+async function finalizeJob(chainMemberId, opts = {}) {
+  const jobsDir = opts.jobsDir ?? resolveJobsDir();
   const supervisor = createFinalizeSupervisor(jobsDir);
   try {
-    const status = supervisor.readStatus(jobId);
-    if (!status) {
-      console.error(`No job found: ${jobId}`);
-      process.exit(1);
-    }
+    const status = supervisor.readStatus(chainMemberId);
+    if (!status)
+      throw new Error(`No job found: ${chainMemberId}`);
     const chainId = status.chain_id ?? status.chain_root_job_id;
-    if (!chainId) {
-      process.stderr.write(`${red7("Error:")} Job ${jobId} has no chain identity (chain_id missing).
-`);
-      process.exit(1);
-    }
+    if (!chainId)
+      throw new Error(`Job ${chainMemberId} has no chain identity (chain_id missing).`);
     const reviewerPass = findReviewerPassInChain(supervisor, chainId);
-    if (!reviewerPass) {
-      process.stderr.write(`${red7("Error:")} No reviewer with PASS compliance verdict found in chain ${chainId}.
-`);
-      process.stderr.write(`${dim12("finalize only closes keep-alive chains after reviewer PASS.")}
-`);
-      process.exit(1);
-    }
-    const chainJobIds = supervisor.listChainJobIds(chainId);
+    if (!reviewerPass)
+      throw new Error(`No reviewer with PASS compliance verdict found in chain ${chainId}.`);
     const finalized = [];
     const skipped = [];
-    for (const id of chainJobIds) {
+    for (const id of supervisor.listChainJobIds(chainId)) {
       const memberStatus = supervisor.readStatus(id);
       if (!memberStatus) {
         skipped.push({ id, reason: "missing" });
@@ -40519,46 +50629,123 @@ async function run25() {
         continue;
       }
       const result = supervisor.finalizeWaitingJob(id);
-      if (result) {
+      if (result)
         finalized.push(id);
-      } else {
+      else
         skipped.push({ id, reason: "finalize-failed" });
-      }
     }
-    if (finalized.length === 0) {
-      process.stderr.write(`${red7("Error:")} No waiting keep-alive jobs to finalize in chain ${chainId}.
+    if (finalized.length === 0)
+      throw new Error(`No waiting keep-alive jobs to finalize in chain ${chainId}.`);
+    process.stdout.write(`${green12("\u2713")} Finalized chain ${chainId} (reviewer PASS: ${reviewerPass.reviewerJobId})
 `);
-      process.exit(1);
-    }
-    process.stdout.write(`${green13("\u2713")} Finalized chain ${chainId} (reviewer PASS: ${reviewerPass.reviewerJobId})
+    for (const id of finalized)
+      process.stdout.write(`  ${green12("\u2713")} ${id}
 `);
-    for (const id of finalized) {
-      process.stdout.write(`  ${green13("\u2713")} ${id}
-`);
-    }
-    for (const { id, reason } of skipped) {
+    for (const { id, reason } of skipped)
       process.stdout.write(`  ${dim12(`\xB7 ${id} (${reason})`)}
 `);
-    }
   } finally {
     await supervisor.dispose();
   }
 }
-var green13 = (s) => `\x1B[32m${s}\x1B[0m`, red7 = (s) => `\x1B[31m${s}\x1B[0m`, dim12 = (s) => `\x1B[2m${s}\x1B[0m`, PASS_COMPLIANCE_VERDICT_REGEX2;
-var init_finalize = __esm(() => {
+var green12 = (s) => `\x1B[32m${s}\x1B[0m`, red6 = (s) => `\x1B[31m${s}\x1B[0m`, dim12 = (s) => `\x1B[2m${s}\x1B[0m`, PASS_COMPLIANCE_VERDICT_REGEX2;
+var init_control2 = __esm(() => {
   init_supervisor();
+  init_observability_sqlite();
+  init_process_liveness();
+  init_beads();
+  init_tmux_utils();
   init_job_root();
   PASS_COMPLIANCE_VERDICT_REGEX2 = /## Compliance Verdict[\s\S]*?- Verdict:\s*\**\s*PASS\s*\**/i;
+});
+
+// src/cli/stop.ts
+var exports_stop = {};
+__export(exports_stop, {
+  run: () => run25
+});
+function parseStopArgs(argv) {
+  let jobId;
+  let force = false;
+  let closeBeadAnyway = false;
+  for (const token of argv) {
+    if (token === "--force") {
+      force = true;
+      continue;
+    }
+    if (token === "--close-bead-anyway") {
+      closeBeadAnyway = true;
+      continue;
+    }
+    if (!token.startsWith("-") && !jobId) {
+      jobId = token;
+      continue;
+    }
+    throw new Error(`Unknown option: ${token}`);
+  }
+  return { jobId, force, closeBeadAnyway };
+}
+async function run25() {
+  let parsed;
+  try {
+    parsed = parseStopArgs(process.argv.slice(3));
+  } catch (err) {
+    console.error(err.message);
+    console.error("Usage: specialists|sp stop <job-id> [--force]");
+    process.exit(1);
+  }
+  const { jobId, force, closeBeadAnyway } = parsed;
+  if (!jobId) {
+    console.error("Usage: specialists|sp stop <job-id> [--force]");
+    process.exit(1);
+  }
+  try {
+    await stopJob(jobId, { force, closeBeadAnyway });
+  } catch (err) {
+    console.error(err.message);
+    process.exit(1);
+  }
+}
+var init_stop = __esm(() => {
+  init_control2();
+});
+
+// src/cli/finalize.ts
+var exports_finalize = {};
+__export(exports_finalize, {
+  run: () => run26
+});
+function parseFinalizeArgs(argv) {
+  const jobId = argv.find((token) => !token.startsWith("-"));
+  return { jobId };
+}
+async function run26() {
+  const parsed = parseFinalizeArgs(process.argv.slice(3));
+  const jobId = parsed.jobId;
+  if (!jobId) {
+    console.error("Usage: specialists|sp finalize <job-id>");
+    process.exit(1);
+  }
+  try {
+    await finalizeJob(jobId);
+  } catch (err) {
+    process.stderr.write(`Error: ${err.message}
+`);
+    process.exit(1);
+  }
+}
+var init_finalize = __esm(() => {
+  init_control2();
 });
 
 // src/cli/attach.ts
 var exports_attach = {};
 __export(exports_attach, {
-  run: () => run26
+  run: () => run27
 });
-import { execFileSync as execFileSync3, spawnSync as spawnSync21 } from "child_process";
+import { execFileSync as execFileSync3, spawnSync as spawnSync20 } from "child_process";
 import { readFileSync as readFileSync29 } from "fs";
-import { join as join31 } from "path";
+import { join as join34 } from "path";
 function exitWithError(message) {
   console.error(message);
   process.exit(1);
@@ -40574,13 +50761,13 @@ function readStatus(statusPath, jobId) {
     exitWithError(`Failed to read status for job \`${jobId}\`: ${details}`);
   }
 }
-async function run26() {
+async function run27() {
   const [jobId] = process.argv.slice(3);
   if (!jobId) {
     exitWithError("Usage: specialists attach <job-id>  (normal runtime is DB-backed; job files are legacy/operator-only)");
   }
-  const jobsDir = join31(process.cwd(), ".specialists", "jobs");
-  const statusPath = join31(jobsDir, jobId, "status.json");
+  const jobsDir = join34(process.cwd(), ".specialists", "jobs");
+  const statusPath = join34(jobsDir, jobId, "status.json");
   const status = readStatus(statusPath, jobId);
   if (status.status === "done" || status.status === "error") {
     exitWithError(`Job \`${jobId}\` has already completed (status: ${status.status}). Use \`specialists result ${jobId}\` to read output.`);
@@ -40589,7 +50776,7 @@ async function run26() {
   if (!sessionName) {
     exitWithError("Job `" + jobId + "` has no tmux session. It may have been started without tmux or tmux was not installed.");
   }
-  const whichTmux = spawnSync21("which", ["tmux"], { stdio: "ignore" });
+  const whichTmux = spawnSync20("which", ["tmux"], { stdio: "ignore" });
   if (whichTmux.status !== 0) {
     exitWithError("tmux is not installed. Install tmux to use `specialists attach`.");
   }
@@ -40602,15 +50789,15 @@ async function run26() {
 var init_attach = () => {};
 
 // src/specialist/drift-detector.ts
-import { existsSync as existsSync30, readFileSync as readFileSync30, readdirSync as readdirSync15, rmSync as rmSync5 } from "fs";
-import { join as join32, resolve as resolve11, relative as relative3 } from "path";
+import { existsSync as existsSync30, readFileSync as readFileSync30, readdirSync as readdirSync16, rmSync as rmSync5 } from "fs";
+import { join as join35, resolve as resolve11, relative as relative3 } from "path";
 function listFiles(root) {
   if (!existsSync30(root))
     return [];
   const out = [];
   const visit2 = (dir) => {
-    for (const entry of readdirSync15(dir, { withFileTypes: true })) {
-      const full = join32(dir, entry.name);
+    for (const entry of readdirSync16(dir, { withFileTypes: true })) {
+      const full = join35(dir, entry.name);
       if (entry.isDirectory()) {
         visit2(full);
         continue;
@@ -40622,15 +50809,15 @@ function listFiles(root) {
   visit2(root);
   return out;
 }
-function relPath(path, base) {
-  return relative3(base, path) || ".";
+function relPath(path3, base) {
+  return relative3(base, path3) || ".";
 }
-function makeFinding(repoRoot, kind, scope, path, canonicalPath, bytesEqual) {
-  const rel = relPath(path, repoRoot);
+function makeFinding(repoRoot, kind, scope, path3, canonicalPath, bytesEqual) {
+  const rel = relPath(path3, repoRoot);
   if (scope === "default") {
-    return bytesEqual ? { repo_root: repoRoot, kind, scope, path, canonical_path: canonicalPath, status: "redundant-safe-to-prune", bytes_equal: true, suggested_action: "safe prune", suggestion_command: `sp prune-stale-defaults --root ${repoRoot}` } : { repo_root: repoRoot, kind, scope, path, canonical_path: canonicalPath, status: "diverged-safe-to-prune", bytes_equal: false, suggested_action: "safe prune", suggestion_command: `cp ${rel} .specialists/user/` };
+    return bytesEqual ? { repo_root: repoRoot, kind, scope, path: path3, canonical_path: canonicalPath, status: "redundant-safe-to-prune", bytes_equal: true, suggested_action: "safe prune", suggestion_command: `sp prune-stale-defaults --root ${repoRoot}` } : { repo_root: repoRoot, kind, scope, path: path3, canonical_path: canonicalPath, status: "diverged-safe-to-prune", bytes_equal: false, suggested_action: "safe prune", suggestion_command: `cp ${rel} .specialists/user/` };
   }
-  return bytesEqual ? { repo_root: repoRoot, kind, scope, path, canonical_path: canonicalPath, status: "useless-override-safe-to-remove", bytes_equal: true, suggested_action: "safe remove", suggestion_command: `rm ${rel}` } : { repo_root: repoRoot, kind, scope, path, canonical_path: canonicalPath, status: "diverged-consider-removing-or-refactoring", bytes_equal: false, suggested_action: "keep if intentional override", suggestion_command: `rm ${rel}` };
+  return bytesEqual ? { repo_root: repoRoot, kind, scope, path: path3, canonical_path: canonicalPath, status: "useless-override-safe-to-remove", bytes_equal: true, suggested_action: "safe remove", suggestion_command: `rm ${rel}` } : { repo_root: repoRoot, kind, scope, path: path3, canonical_path: canonicalPath, status: "diverged-consider-removing-or-refactoring", bytes_equal: false, suggested_action: "keep if intentional override", suggestion_command: `rm ${rel}` };
 }
 function resolveDriftAssets() {
   return ASSETS.map((asset) => ({ ...asset, canonicalDir: resolveCanonicalAssetDir(asset.kind) }));
@@ -40649,7 +50836,7 @@ function detectDriftForRepo(repoRoot) {
         continue;
       for (const file of listFiles(dir)) {
         const rel = relPath(file, dir);
-        const canonicalPath = join32(asset.canonicalDir, rel);
+        const canonicalPath = join35(asset.canonicalDir, rel);
         if (!existsSync30(canonicalPath))
           continue;
         const bytesEqual = readFileSync30(file).equals(readFileSync30(canonicalPath));
@@ -40671,12 +50858,12 @@ function detectDriftUnderRoot(root) {
       repos.push({ root: dir, findings });
       return;
     }
-    for (const entry of readdirSync15(dir, { withFileTypes: true })) {
+    for (const entry of readdirSync16(dir, { withFileTypes: true })) {
       if (!entry.isDirectory())
         continue;
       if (entry.name === "node_modules" || entry.name === ".git")
         continue;
-      visit2(join32(dir, entry.name));
+      visit2(join35(dir, entry.name));
     }
   };
   visit2(resolve11(root));
@@ -40716,10 +50903,10 @@ var init_drift_detector = __esm(() => {
 // src/cli/prune-stale-defaults.ts
 var exports_prune_stale_defaults = {};
 __export(exports_prune_stale_defaults, {
-  run: () => run27
+  run: () => run28
 });
 import { resolve as resolve12 } from "path";
-function parseArgs11(argv) {
+function parseArgs12(argv) {
   let dryRun = false;
   let root = process.cwd();
   let help = false;
@@ -40756,8 +50943,8 @@ function printHelp() {
   console.log("  --keep-diverged   Preserve diverged .specialists/default entries");
   console.log("  --root            Repo root to scan");
 }
-async function run27(argv = process.argv.slice(3)) {
-  const { dryRun, root, help, keepDiverged } = parseArgs11(argv);
+async function run28(argv = process.argv.slice(3)) {
+  const { dryRun, root, help, keepDiverged } = parseArgs12(argv);
   if (help) {
     printHelp();
     return;
@@ -40788,7 +50975,7 @@ var init_prune_stale_defaults = __esm(() => {
 // src/cli/quickstart.ts
 var exports_quickstart = {};
 __export(exports_quickstart, {
-  run: () => run28
+  run: () => run29
 });
 function section2(title) {
   const bar = "\u2500".repeat(60);
@@ -40800,9 +50987,9 @@ function cmd2(s) {
   return yellow11(s);
 }
 function flag(s) {
-  return green14(s);
+  return green13(s);
 }
-async function run28() {
+async function run29() {
   const lines = [
     "",
     bold12("specialists  \xB7  Quick Start Guide"),
@@ -41018,13 +51205,13 @@ async function run28() {
   console.log(lines.join(`
 `));
 }
-var bold12 = (s) => `\x1B[1m${s}\x1B[0m`, dim13 = (s) => `\x1B[2m${s}\x1B[0m`, yellow11 = (s) => `\x1B[33m${s}\x1B[0m`, cyan7 = (s) => `\x1B[36m${s}\x1B[0m`, blue4 = (s) => `\x1B[34m${s}\x1B[0m`, green14 = (s) => `\x1B[32m${s}\x1B[0m`;
+var bold12 = (s) => `\x1B[1m${s}\x1B[0m`, dim13 = (s) => `\x1B[2m${s}\x1B[0m`, yellow11 = (s) => `\x1B[33m${s}\x1B[0m`, cyan7 = (s) => `\x1B[36m${s}\x1B[0m`, blue4 = (s) => `\x1B[34m${s}\x1B[0m`, green13 = (s) => `\x1B[32m${s}\x1B[0m`;
 
 // src/cli/doctor.ts
 var exports_doctor = {};
 __export(exports_doctor, {
   setStatusError: () => setStatusError,
-  run: () => run29,
+  run: () => run30,
   resolvePackageAssetDir: () => resolvePackageAssetDir,
   renderProcessSummary: () => renderProcessSummary,
   parseVersionTuple: () => parseVersionTuple,
@@ -41032,17 +51219,17 @@ __export(exports_doctor, {
   cleanupProcesses: () => cleanupProcesses
 });
 import { createHash as createHash5 } from "crypto";
-import { spawnSync as spawnSync22 } from "child_process";
-import { existsSync as existsSync31, lstatSync as lstatSync2, mkdirSync as mkdirSync11, readdirSync as readdirSync16, readFileSync as readFileSync31, readlinkSync as readlinkSync3, writeFileSync as writeFileSync13 } from "fs";
-import { dirname as dirname10, join as join33, relative as relative4, resolve as resolve13 } from "path";
+import { spawnSync as spawnSync21 } from "child_process";
+import { existsSync as existsSync31, lstatSync as lstatSync2, mkdirSync as mkdirSync12, readdirSync as readdirSync17, readFileSync as readFileSync31, readlinkSync as readlinkSync3, writeFileSync as writeFileSync15 } from "fs";
+import { dirname as dirname12, join as join36, relative as relative4, resolve as resolve13 } from "path";
 function ok3(msg) {
-  console.log(`  ${green15("\u2713")} ${msg}`);
+  console.log(`  ${green14("\u2713")} ${msg}`);
 }
 function warn3(msg) {
   console.log(`  ${yellow12("\u25CB")} ${msg}`);
 }
 function fail4(msg) {
-  console.log(`  ${red8("\u2717")} ${msg}`);
+  console.log(`  ${red7("\u2717")} ${msg}`);
 }
 function fix(msg) {
   console.log(`    ${dim14("\u2192 fix:")} ${yellow12(msg)}`);
@@ -41056,17 +51243,17 @@ function section3(label) {
 ${bold13(`\u2500\u2500 ${label} ${line}`)}`);
 }
 function sp(bin, args) {
-  const r = spawnSync22(bin, args, { encoding: "utf8", stdio: "pipe", timeout: 5000 });
+  const r = spawnSync21(bin, args, { encoding: "utf8", stdio: "pipe", timeout: 5000 });
   return { ok: r.status === 0 && !r.error, stdout: (r.stdout ?? "").trim() };
 }
 function isInstalled3(bin) {
-  return spawnSync22("which", [bin], { encoding: "utf8", timeout: 2000 }).status === 0;
+  return spawnSync21("which", [bin], { encoding: "utf8", timeout: 2000 }).status === 0;
 }
-function loadJson2(path) {
-  if (!existsSync31(path))
+function loadJson2(path3) {
+  if (!existsSync31(path3))
     return null;
   try {
-    return JSON.parse(readFileSync31(path, "utf8"));
+    return JSON.parse(readFileSync31(path3, "utf8"));
   } catch {
     return null;
   }
@@ -41109,7 +51296,7 @@ function checkBd() {
     return false;
   }
   ok3(`bd installed  ${dim14(sp("bd", ["--version"]).stdout || "")}`);
-  if (existsSync31(join33(CWD, ".beads")))
+  if (existsSync31(join36(CWD, ".beads")))
     ok3(".beads/ present in project");
   else
     warn3(".beads/ not found in project");
@@ -41129,18 +51316,18 @@ function checkHooks() {
   section3("Claude Code hooks  (2 expected)");
   let allPresent = true;
   for (const name of HOOK_NAMES) {
-    const canonicalPath = join33(HOOKS_DIR, name);
+    const canonicalPath = join36(HOOKS_DIR, name);
     if (!existsSync31(canonicalPath)) {
-      fail4(`${relative4(CWD, canonicalPath)}  ${red8("missing")}`);
+      fail4(`${relative4(CWD, canonicalPath)}  ${red7("missing")}`);
       fix("specialists init");
       allPresent = false;
     } else {
       ok3(relative4(CWD, canonicalPath));
     }
-    const claudeHookPath = join33(CLAUDE_HOOKS_DIR, name);
+    const claudeHookPath = join36(CLAUDE_HOOKS_DIR, name);
     const symlinkState = isSymlinkTo(claudeHookPath, canonicalPath);
     if (symlinkState.ok) {
-      ok3(`${relative4(CWD, claudeHookPath)} -> ${relative4(dirname10(claudeHookPath), canonicalPath)}`);
+      ok3(`${relative4(CWD, claudeHookPath)} -> ${relative4(dirname12(claudeHookPath), canonicalPath)}`);
       continue;
     }
     allPresent = false;
@@ -41210,16 +51397,16 @@ function checkVersion() {
   ok3(`specialists v${localVersion} is local; ${cached2.latest_tag} cached on ${new Date(cached2.checked_at_ms).toISOString()}`);
   return true;
 }
-function hashFile(path) {
+function hashFile(path3) {
   const hash = createHash5("sha256");
-  hash.update(readFileSync31(path));
+  hash.update(readFileSync31(path3));
   return hash.digest("hex");
 }
 function collectFileHashes(rootDir) {
   const hashes = new Map;
   const visit2 = (dir) => {
-    for (const entry of readdirSync16(dir, { withFileTypes: true })) {
-      const fullPath = join33(dir, entry.name);
+    for (const entry of readdirSync17(dir, { withFileTypes: true })) {
+      const fullPath = join36(dir, entry.name);
       if (entry.isDirectory()) {
         visit2(fullPath);
         continue;
@@ -41247,7 +51434,7 @@ function isSymlinkTo(linkPath, expectedTargetPath) {
     return { ok: false, reason: "not-symlink" };
   try {
     const rawTarget = readlinkSync3(linkPath);
-    const resolvedTarget = resolve13(dirname10(linkPath), rawTarget);
+    const resolvedTarget = resolve13(dirname12(linkPath), rawTarget);
     const resolvedExpected = resolve13(expectedTargetPath);
     if (resolvedTarget !== resolvedExpected) {
       return { ok: false, reason: "wrong-target", target: rawTarget };
@@ -41258,7 +51445,7 @@ function isSymlinkTo(linkPath, expectedTargetPath) {
   }
 }
 function resolvePackageAssetDir(relativePath) {
-  return resolveCanonicalAssetDir(relativePath) ?? (existsSync31(join33(CWD, "config", relativePath)) ? join33(CWD, "config", relativePath) : null);
+  return resolveCanonicalAssetDir(relativePath) ?? (existsSync31(join36(CWD, "config", relativePath)) ? join36(CWD, "config", relativePath) : null);
 }
 function checkSkillDrift() {
   section3("Category A  package-live skill sync");
@@ -41308,11 +51495,11 @@ function checkSkillDrift() {
     }
     fix("specialists init --sync-skills");
   }
-  const defaultSkills = readdirSync16(XTRM_DEFAULT_SKILLS_DIR, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+  const defaultSkills = readdirSync17(XTRM_DEFAULT_SKILLS_DIR, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
   let linksOk = true;
   for (const skillName of defaultSkills) {
-    const activeLinkPath = join33(XTRM_ACTIVE_SKILLS_DIR, skillName);
-    const expectedTarget = join33(XTRM_DEFAULT_SKILLS_DIR, skillName);
+    const activeLinkPath = join36(XTRM_ACTIVE_SKILLS_DIR, skillName);
+    const expectedTarget = join36(XTRM_DEFAULT_SKILLS_DIR, skillName);
     const state = isSymlinkTo(activeLinkPath, expectedTarget);
     if (state.ok)
       continue;
@@ -41330,8 +51517,8 @@ function checkSkillDrift() {
     fix("specialists init --sync-skills");
   }
   const legacyActiveRoots = [
-    { scope: "claude", root: join33(XTRM_ACTIVE_SKILLS_DIR, "claude") },
-    { scope: "pi", root: join33(XTRM_ACTIVE_SKILLS_DIR, "pi") }
+    { scope: "claude", root: join36(XTRM_ACTIVE_SKILLS_DIR, "claude") },
+    { scope: "pi", root: join36(XTRM_ACTIVE_SKILLS_DIR, "pi") }
   ];
   for (const { root } of legacyActiveRoots) {
     if (!existsSync31(root))
@@ -41347,14 +51534,14 @@ function checkSkillDrift() {
     fix("specialists init --sync-skills");
   }
   const skillRootChecks = [
-    { root: join33(CLAUDE_DIR, "skills"), expected: XTRM_ACTIVE_SKILLS_DIR },
-    { root: join33(PI_DIR, "skills"), expected: XTRM_ACTIVE_SKILLS_DIR }
+    { root: join36(CLAUDE_DIR, "skills"), expected: XTRM_ACTIVE_SKILLS_DIR },
+    { root: join36(PI_DIR, "skills"), expected: XTRM_ACTIVE_SKILLS_DIR }
   ];
   let rootLinksOk = true;
   for (const check2 of skillRootChecks) {
     const state = isSymlinkTo(check2.root, check2.expected);
     if (state.ok) {
-      ok3(`${relative4(CWD, check2.root)} -> ${relative4(dirname10(check2.root), check2.expected)}`);
+      ok3(`${relative4(CWD, check2.root)} -> ${relative4(dirname12(check2.root), check2.expected)}`);
       continue;
     }
     rootLinksOk = false;
@@ -41412,8 +51599,8 @@ function checkManagedMirror(label, canonicalRelativePath, mirrorDir, fixHint) {
 function checkManagedAssetMirrors() {
   section3("Category B  xtrm-managed asset mirrors");
   const specialistsOk = checkManagedMirror("specialists", "specialists", DEFAULT_SPECIALISTS_DIR, "sp prune-stale-defaults --apply");
-  const rulesOk = checkManagedMirror("mandatory-rules", "mandatory-rules", join33(DEFAULT_SPECIALISTS_DIR, "mandatory-rules"), "sp prune-stale-defaults --apply");
-  const nodesOk = checkManagedMirror("nodes", "nodes", join33(DEFAULT_SPECIALISTS_DIR, "nodes"), "sp prune-stale-defaults --apply");
+  const rulesOk = checkManagedMirror("mandatory-rules", "mandatory-rules", join36(DEFAULT_SPECIALISTS_DIR, "mandatory-rules"), "sp prune-stale-defaults --apply");
+  const nodesOk = checkManagedMirror("nodes", "nodes", join36(DEFAULT_SPECIALISTS_DIR, "nodes"), "sp prune-stale-defaults --apply");
   return specialistsOk && rulesOk && nodesOk;
 }
 function checkUserOverlayDrift() {
@@ -41422,15 +51609,15 @@ function checkUserOverlayDrift() {
     ok3("no user overlays present");
     return true;
   }
-  const overlays = readdirSync16(USER_SPECIALISTS_DIR).filter((name) => name.endsWith(".specialist.json"));
+  const overlays = readdirSync17(USER_SPECIALISTS_DIR).filter((name) => name.endsWith(".specialist.json"));
   if (overlays.length === 0) {
     ok3("no user overlays present");
     return true;
   }
   let allOk = true;
   for (const name of overlays) {
-    const userPath = join33(USER_SPECIALISTS_DIR, name);
-    const defaultPath = join33(DEFAULT_SPECIALISTS_DIR, name);
+    const userPath = join36(USER_SPECIALISTS_DIR, name);
+    const defaultPath = join36(DEFAULT_SPECIALISTS_DIR, name);
     const userSpec = loadJson2(userPath);
     if (!userSpec) {
       warn3(`${name}: failed to parse \u2014 skipping drift check`);
@@ -41464,9 +51651,9 @@ function checkUserOverlayDrift() {
 }
 function checkRuntimeDirs() {
   section3(".specialists/ runtime directories");
-  const rootDir = join33(CWD, ".specialists");
-  const jobsDir = join33(rootDir, "jobs");
-  const readyDir = join33(rootDir, "ready");
+  const rootDir = join36(CWD, ".specialists");
+  const jobsDir = join36(rootDir, "jobs");
+  const readyDir = join36(rootDir, "ready");
   let allOk = true;
   if (!existsSync31(rootDir)) {
     warn3(".specialists/ not found in current project");
@@ -41477,7 +51664,7 @@ function checkRuntimeDirs() {
     for (const [subDir, label] of [[jobsDir, "jobs"], [readyDir, "ready"]]) {
       if (!existsSync31(subDir)) {
         warn3(`.specialists/${label}/ missing \u2014 auto-creating`);
-        mkdirSync11(subDir, { recursive: true });
+        mkdirSync12(subDir, { recursive: true });
         ok3(`.specialists/${label}/ created`);
       } else {
         ok3(`.specialists/${label}/ present`);
@@ -41489,7 +51676,7 @@ function checkRuntimeDirs() {
 function checkClaudeMdFragments() {
   section3("CLAUDE.md fragments");
   const projectRoot = process.cwd();
-  const claudeMd = join33(projectRoot, "CLAUDE.md");
+  const claudeMd = join36(projectRoot, "CLAUDE.md");
   if (!existsSync31(claudeMd)) {
     warn3("No CLAUDE.md in project root \u2014 skipping fragment check");
     return true;
@@ -41499,7 +51686,7 @@ function checkClaudeMdFragments() {
     hint("install xtrm-tools to enable: xt claude-sync --check");
     return true;
   }
-  const result = spawnSync22("xt", ["claude-sync", "--check", "--json", "--cwd", projectRoot], {
+  const result = spawnSync21("xt", ["claude-sync", "--check", "--json", "--cwd", projectRoot], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -41619,7 +51806,7 @@ function setStatusError(statusPath) {
     const raw = readFileSync31(statusPath, "utf8");
     const status = JSON.parse(raw);
     status.status = "error";
-    writeFileSync13(statusPath, `${JSON.stringify(status, null, 2)}
+    writeFileSync15(statusPath, `${JSON.stringify(status, null, 2)}
 `, "utf8");
   } catch {}
 }
@@ -41658,7 +51845,7 @@ function cleanupProcesses(jobsDir, dryRun) {
   }
   let entries;
   try {
-    entries = readdirSync16(jobsDir);
+    entries = readdirSync17(jobsDir);
   } catch {
     entries = [];
   }
@@ -41670,7 +51857,7 @@ function cleanupProcesses(jobsDir, dryRun) {
     zombieJobIds: []
   };
   for (const jobId of entries) {
-    const statusPath = join33(jobsDir, jobId, "status.json");
+    const statusPath = join36(jobsDir, jobId, "status.json");
     if (!existsSync31(statusPath))
       continue;
     try {
@@ -41759,7 +51946,7 @@ function resolveWatchdogMode() {
 function checkZombieJobs() {
   section3("Background jobs");
   hint(`watchdog mode: ${resolveWatchdogMode()}`);
-  const jobsDir = join33(CWD, ".specialists", "jobs");
+  const jobsDir = join36(CWD, ".specialists", "jobs");
   if (!existsSync31(jobsDir)) {
     hint("No .specialists/jobs/ \u2014 skipping");
     return true;
@@ -41778,7 +51965,7 @@ function checkZombieJobs() {
   }
   return result.zombies === 0;
 }
-async function run29(argv = process.argv.slice(3)) {
+async function run30(argv = process.argv.slice(3)) {
   const subcommand = argv[0];
   if (subcommand === "orphans") {
     runDoctorOrphans();
@@ -41812,32 +51999,32 @@ ${bold13("specialists doctor")}
   const allOk = piOk && spOk && bdOk && xtOk && hooksOk && mcpOk && versionOk && skillDriftOk && mirrorOk && userOverlayOk && dirsOk && jobsOk && fragmentsOk;
   console.log("");
   if (allOk) {
-    console.log(`  ${green15("\u2713")} ${bold13("All checks passed")}  \u2014 specialists is healthy`);
+    console.log(`  ${green14("\u2713")} ${bold13("All checks passed")}  \u2014 specialists is healthy`);
   } else {
     console.log(`  ${yellow12("\u25CB")} ${bold13("Some checks failed")}  \u2014 follow the fix hints above`);
     console.log(`  ${dim14("specialists init fixes hook + MCP registration; specialists init --sync-skills fixes skill drift/symlink issues; sp prune-stale-defaults --apply removes stale default mirrors; --sync-defaults is deprecated.")}`);
   }
   console.log("");
 }
-var bold13 = (s) => `\x1B[1m${s}\x1B[0m`, dim14 = (s) => `\x1B[2m${s}\x1B[0m`, green15 = (s) => `\x1B[32m${s}\x1B[0m`, yellow12 = (s) => `\x1B[33m${s}\x1B[0m`, red8 = (s) => `\x1B[31m${s}\x1B[0m`, CWD, CLAUDE_DIR, PI_DIR, XTRM_SKILLS_DIR, XTRM_DEFAULT_SKILLS_DIR, XTRM_ACTIVE_SKILLS_DIR, SPECIALISTS_DIR, DEFAULT_SPECIALISTS_DIR, USER_SPECIALISTS_DIR, HOOKS_DIR, CLAUDE_HOOKS_DIR, SETTINGS_FILE, MCP_FILE2, HOOK_NAMES;
+var bold13 = (s) => `\x1B[1m${s}\x1B[0m`, dim14 = (s) => `\x1B[2m${s}\x1B[0m`, green14 = (s) => `\x1B[32m${s}\x1B[0m`, yellow12 = (s) => `\x1B[33m${s}\x1B[0m`, red7 = (s) => `\x1B[31m${s}\x1B[0m`, CWD, CLAUDE_DIR, PI_DIR, XTRM_SKILLS_DIR, XTRM_DEFAULT_SKILLS_DIR, XTRM_ACTIVE_SKILLS_DIR, SPECIALISTS_DIR, DEFAULT_SPECIALISTS_DIR, USER_SPECIALISTS_DIR, HOOKS_DIR, CLAUDE_HOOKS_DIR, SETTINGS_FILE, MCP_FILE2, HOOK_NAMES;
 var init_doctor = __esm(() => {
   init_observability_sqlite();
   init_canonical_asset_resolver();
   init_drift_detector();
   init_version_check();
   CWD = process.cwd();
-  CLAUDE_DIR = join33(CWD, ".claude");
-  PI_DIR = join33(CWD, ".pi");
-  XTRM_SKILLS_DIR = join33(CWD, ".xtrm", "skills");
-  XTRM_DEFAULT_SKILLS_DIR = join33(XTRM_SKILLS_DIR, "default");
-  XTRM_ACTIVE_SKILLS_DIR = join33(XTRM_SKILLS_DIR, "active");
-  SPECIALISTS_DIR = join33(CWD, ".specialists");
-  DEFAULT_SPECIALISTS_DIR = join33(SPECIALISTS_DIR, "default");
-  USER_SPECIALISTS_DIR = join33(SPECIALISTS_DIR, "user");
-  HOOKS_DIR = join33(CWD, ".xtrm", "hooks", "specialists");
-  CLAUDE_HOOKS_DIR = join33(CLAUDE_DIR, "hooks");
-  SETTINGS_FILE = join33(CLAUDE_DIR, "settings.json");
-  MCP_FILE2 = join33(CWD, ".mcp.json");
+  CLAUDE_DIR = join36(CWD, ".claude");
+  PI_DIR = join36(CWD, ".pi");
+  XTRM_SKILLS_DIR = join36(CWD, ".xtrm", "skills");
+  XTRM_DEFAULT_SKILLS_DIR = join36(XTRM_SKILLS_DIR, "default");
+  XTRM_ACTIVE_SKILLS_DIR = join36(XTRM_SKILLS_DIR, "active");
+  SPECIALISTS_DIR = join36(CWD, ".specialists");
+  DEFAULT_SPECIALISTS_DIR = join36(SPECIALISTS_DIR, "default");
+  USER_SPECIALISTS_DIR = join36(SPECIALISTS_DIR, "user");
+  HOOKS_DIR = join36(CWD, ".xtrm", "hooks", "specialists");
+  CLAUDE_HOOKS_DIR = join36(CLAUDE_DIR, "hooks");
+  SETTINGS_FILE = join36(CLAUDE_DIR, "settings.json");
+  MCP_FILE2 = join36(CWD, ".mcp.json");
   HOOK_NAMES = [
     "specialists-complete.mjs",
     "specialists-session-start.mjs"
@@ -41847,9 +52034,9 @@ var init_doctor = __esm(() => {
 // src/cli/setup.ts
 var exports_setup = {};
 __export(exports_setup, {
-  run: () => run30
+  run: () => run31
 });
-async function run30() {
+async function run31() {
   console.log("");
   console.log(yellow13("\u26A0 DEPRECATED: `specialists setup` is deprecated"));
   console.log("");
@@ -41870,8 +52057,8 @@ async function run30() {
 var bold14 = (s) => `\x1B[1m${s}\x1B[0m`, yellow13 = (s) => `\x1B[33m${s}\x1B[0m`, dim15 = (s) => `\x1B[2m${s}\x1B[0m`;
 
 // src/cli/serve-hot-reload.ts
-import { existsSync as existsSync32, readdirSync as readdirSync17, statSync as statSync6, watch as fsWatch } from "fs";
-import { join as join34 } from "path";
+import { existsSync as existsSync32, readdirSync as readdirSync18, statSync as statSync8, watch as fsWatch } from "fs";
+import { join as join37 } from "path";
 function specialistNameFromFile(file) {
   const match = file.match(/^(.+)\.specialist\.(json|yaml)$/);
   return match ? match[1] : null;
@@ -41880,10 +52067,10 @@ function snapshotMtimes(dir) {
   const out = new Map;
   if (!existsSync32(dir))
     return out;
-  const entries = readdirSync17(dir).filter((name) => specialistNameFromFile(name) !== null);
+  const entries = readdirSync18(dir).filter((name) => specialistNameFromFile(name) !== null);
   for (const name of entries) {
     try {
-      out.set(name, statSync6(join34(dir, name)).mtimeMs);
+      out.set(name, statSync8(join37(dir, name)).mtimeMs);
     } catch {}
   }
   return out;
@@ -41972,7 +52159,7 @@ var init_serve_hot_reload = () => {};
 var exports_serve = {};
 __export(exports_serve, {
   startServe: () => startServe,
-  run: () => run31,
+  run: () => run32,
   recordAuditFailure: () => recordAuditFailure,
   evaluateReadiness: () => evaluateReadiness2,
   createReadinessState: () => createReadinessState,
@@ -41981,11 +52168,11 @@ __export(exports_serve, {
 import { createServer } from "http";
 import { randomUUID as randomUUID3 } from "crypto";
 import { once } from "events";
-import { spawnSync as spawnSync23 } from "child_process";
+import { spawnSync as spawnSync22 } from "child_process";
 import { access, readdir as readdir2, readFile as readFile5, constants } from "fs/promises";
 import { existsSync as existsSync33 } from "fs";
-import { homedir as homedir3 } from "os";
-import { join as join35 } from "path";
+import { homedir as homedir5 } from "os";
+import { join as join38 } from "path";
 function createReadinessState() {
   return { shuttingDown: false, auditFailures: [], dbWriteFailuresTotal: 0 };
 }
@@ -42010,7 +52197,7 @@ async function checkUserDirSpecs(userDir) {
   let validCount = 0;
   for (const file of specFiles) {
     try {
-      const content = await readFile5(join35(userDir, file), "utf-8");
+      const content = await readFile5(join38(userDir, file), "utf-8");
       const json = file.endsWith(".json") ? content : null;
       if (!json)
         continue;
@@ -42028,7 +52215,7 @@ async function evaluateReadiness2(opts) {
   if (opts.state.auditFailures.length > opts.auditFailureThreshold) {
     return { ready: false, reason: "degraded:audit" };
   }
-  const piConfigPath = opts.piConfigPath ?? join35(homedir3(), ".pi", "agent", "auth.json");
+  const piConfigPath = opts.piConfigPath ?? join38(homedir5(), ".pi", "agent", "auth.json");
   try {
     await access(piConfigPath, constants.R_OK);
   } catch {
@@ -42049,7 +52236,7 @@ async function evaluateReadiness2(opts) {
       warning = canaryFailure;
     }
   }
-  const userDir = join35(opts.projectDir, ".specialists", "user");
+  const userDir = join38(opts.projectDir, ".specialists", "user");
   const userDirResult = await checkUserDirSpecs(userDir);
   if (userDirResult === "empty")
     return { ready: false, reason: "empty_user_dir" };
@@ -42057,7 +52244,7 @@ async function evaluateReadiness2(opts) {
     return { ready: false, reason: "invalid_spec_in_user_dir" };
   return warning ? { ready: true, warning } : { ready: true };
 }
-function parseArgs12(argv) {
+function parseArgs13(argv) {
   let port = 8000;
   let concurrency = 4;
   let queueTimeoutMs = 5000;
@@ -42121,7 +52308,7 @@ function parseArgs12(argv) {
   return { port, concurrency, queueTimeoutMs, shutdownGraceMs, projectDir, dbPath, fallbackModel, auditFailureThreshold, allowSkills, allowSkillsRoots, reloadPollMs, readinessCanaryMode, readinessRequiredPiFlags, readinessCanarySpecialist, readinessCanaryTimeoutMs, logLevel };
 }
 function checkPiHelpForFlags(flags = DEFAULT_REQUIRED_PI_FLAGS) {
-  const result = spawnSync23("pi", ["--help"], { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
+  const result = spawnSync22("pi", ["--help"], { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
   if (result.error || result.status === 127)
     return "pi_binary_missing";
   const help = `${result.stdout ?? ""}
@@ -42161,7 +52348,7 @@ async function waitForSlot(limit, timeoutMs, getActive) {
   return true;
 }
 async function startServe(argv = process.argv.slice(3)) {
-  const args = parseArgs12(argv);
+  const args = parseArgs13(argv);
   const loader = new SpecialistLoader({ projectDir: args.projectDir });
   const dbLocation = resolveObservabilityDbLocation(args.projectDir);
   const dbPath = args.dbPath ?? dbLocation.dbPath;
@@ -42170,7 +52357,7 @@ async function startServe(argv = process.argv.slice(3)) {
     return createObservabilitySqliteClient(args.projectDir);
   })();
   const readinessState = createReadinessState();
-  const userDir = join35(args.projectDir, ".specialists", "user");
+  const userDir = join38(args.projectDir, ".specialists", "user");
   const hotReload = createUserDirWatcher({ loader, userDir, pollMs: args.reloadPollMs });
   let active = 0;
   const children = new Set;
@@ -42213,7 +52400,7 @@ async function startServe(argv = process.argv.slice(3)) {
       return sendJson(res, 404, { success: false, error: "not_found", error_type: "internal" });
     const requestStartedAt = Date.now();
     const method = req.method ?? "POST";
-    const path = req.url ?? "/v1/generate";
+    const path3 = req.url ?? "/v1/generate";
     const requestTraceId = randomUUID3();
     if (readinessState.shuttingDown) {
       emitGenerateLog(args.logLevel, {
@@ -42223,7 +52410,7 @@ async function startServe(argv = process.argv.slice(3)) {
         duration_ms: Date.now() - requestStartedAt,
         prompt_bytes: 0,
         method,
-        path,
+        path: path3,
         error: "shutting_down"
       });
       return sendJson(res, 503, { success: false, error: "shutting_down", error_type: "internal" });
@@ -42237,7 +52424,7 @@ async function startServe(argv = process.argv.slice(3)) {
         duration_ms: Date.now() - requestStartedAt,
         prompt_bytes: 0,
         method,
-        path,
+        path: path3,
         error: "too_many_requests"
       });
       return sendJson(res, 429, { success: false, error: "too_many_requests", error_type: "quota" });
@@ -42255,13 +52442,13 @@ async function startServe(argv = process.argv.slice(3)) {
         } catch {
           const duration_ms2 = Date.now() - requestStartedAt;
           const trace_id = requestTraceId;
-          emitGenerateLog(args.logLevel, { trace_id, specialist: "unknown", status: "invalid_json", duration_ms: duration_ms2, prompt_bytes: promptBytes, method, path, error: "malformed_request" });
+          emitGenerateLog(args.logLevel, { trace_id, specialist: "unknown", status: "invalid_json", duration_ms: duration_ms2, prompt_bytes: promptBytes, method, path: path3, error: "malformed_request" });
           return sendJson(res, 400, { success: false, error: "malformed_request", error_type: "invalid_json" });
         }
         if (!isValidRequest(parsed)) {
           const duration_ms2 = Date.now() - requestStartedAt;
           const trace_id = requestTraceId;
-          emitGenerateLog(args.logLevel, { trace_id, specialist: "unknown", status: "invalid_json", duration_ms: duration_ms2, prompt_bytes: promptBytes, method, path, error: "malformed_request" });
+          emitGenerateLog(args.logLevel, { trace_id, specialist: "unknown", status: "invalid_json", duration_ms: duration_ms2, prompt_bytes: promptBytes, method, path: path3, error: "malformed_request" });
           return sendJson(res, 400, { success: false, error: "malformed_request", error_type: "invalid_json" });
         }
         requestedSpecialist = parsed.specialist;
@@ -42291,7 +52478,7 @@ async function startServe(argv = process.argv.slice(3)) {
           duration_ms: meta.duration_ms ?? duration_ms,
           prompt_bytes: promptBytes,
           method,
-          path,
+          path: path3,
           ...result.success ? {} : { error: shortLogError(result.error) }
         });
         return sendJson(res, 200, result);
@@ -42303,7 +52490,7 @@ async function startServe(argv = process.argv.slice(3)) {
           duration_ms: Date.now() - requestStartedAt,
           prompt_bytes: promptBytes,
           method,
-          path,
+          path: path3,
           error: shortLogError(error2)
         });
         if (!res.headersSent)
@@ -42335,7 +52522,7 @@ async function startServe(argv = process.argv.slice(3)) {
   console.log(`sp serve listening on ${args.port}`);
   return { server, args, db, readinessState };
 }
-async function run31(argv = process.argv.slice(3)) {
+async function run32(argv = process.argv.slice(3)) {
   await startServe(argv);
 }
 var AUDIT_WINDOW_MS = 60000, DEFAULT_REQUIRED_PI_FLAGS;
@@ -42353,18 +52540,18 @@ var init_serve = __esm(() => {
 var exports_script = {};
 __export(exports_script, {
   scriptCli: () => scriptCli,
-  run: () => run32,
-  parseArgs: () => parseArgs13,
+  run: () => run33,
+  parseArgs: () => parseArgs14,
   mapExitCode: () => mapExitCode
 });
-import { spawnSync as spawnSync24 } from "child_process";
+import { spawnSync as spawnSync23 } from "child_process";
 function parseVar(entry) {
   const index = entry.indexOf("=");
   if (index <= 0)
     throw new Error(`Invalid --vars entry: ${entry}`);
   return [entry.slice(0, index), entry.slice(index + 1)];
 }
-function parseArgs13(argv) {
+function parseArgs14(argv) {
   if (argv.length === 0)
     throw new Error("Missing specialist name");
   const specialist = argv[0];
@@ -42460,7 +52647,7 @@ function printResult(result, json) {
   console.error(result.error);
 }
 function runUnderLock(lockPath, argv) {
-  const flock = spawnSync24("flock", ["-n", lockPath, "env", "SP_SCRIPT_NO_LOCK=1", process.execPath, process.argv[1], "script", ...argv], {
+  const flock = spawnSync23("flock", ["-n", lockPath, "env", "SP_SCRIPT_NO_LOCK=1", process.execPath, process.argv[1], "script", ...argv], {
     encoding: "utf-8",
     stdio: "inherit"
   });
@@ -42470,8 +52657,8 @@ function runUnderLock(lockPath, argv) {
     return 75;
   return flock.status ?? 1;
 }
-async function run32(argv = process.argv.slice(3)) {
-  const args = parseArgs13(argv);
+async function run33(argv = process.argv.slice(3)) {
+  const args = parseArgs14(argv);
   if (args.singleInstance && !process.env.SP_SCRIPT_NO_LOCK) {
     process.exit(runUnderLock(args.singleInstance, argv));
   }
@@ -42488,19 +52675,19 @@ var scriptCli;
 var init_script = __esm(() => {
   init_loader();
   init_script_runner();
-  scriptCli = { parseArgs: parseArgs13, mapExitCode };
+  scriptCli = { parseArgs: parseArgs14, mapExitCode };
 });
 
 // src/cli/help.ts
 var exports_help = {};
 __export(exports_help, {
-  run: () => run33
+  run: () => run34
 });
 function formatCommands(entries) {
   const width = Math.max(...entries.map(([cmd3]) => cmd3.length));
   return entries.map(([cmd3, desc]) => `  ${cmd3.padEnd(width)}   ${desc}`);
 }
-async function run33() {
+async function run34() {
   const lines = [
     "",
     "Specialists lets you run project-scoped specialist agents with a bead-first workflow.",
@@ -42653,7 +52840,7 @@ var init_help = __esm(() => {
 });
 
 // src/index.ts
-import { spawnSync as spawnSync25 } from "child_process";
+import { spawnSync as spawnSync24 } from "child_process";
 
 // node_modules/zod/v4/core/core.js
 var NEVER2 = Object.freeze({
@@ -50166,7 +60353,7 @@ var next = process.argv[3];
 function wantsHelp() {
   return next === "--help" || next === "-h";
 }
-async function run34() {
+async function run35() {
   if (sub === "install") {
     if (wantsHelp()) {
       console.log([
@@ -50504,6 +60691,21 @@ async function run34() {
     const { run: handler } = await Promise.resolve().then(() => (init_config(), exports_config));
     return handler();
   }
+  if (sub === "chat") {
+    if (wantsHelp()) {
+      console.log([
+        "",
+        "Usage: specialists chat <name> [prompt...] --bead <id> [--context-depth N] [--model M]",
+        "",
+        "Interactive shell for a specialist run. Streams job output into a TUI.",
+        ""
+      ].join(`
+`));
+      return;
+    }
+    const { run: handler } = await Promise.resolve().then(() => (init_chat(), exports_chat));
+    return handler();
+  }
   if (sub === "run") {
     if (wantsHelp()) {
       console.log([
@@ -50677,7 +60879,7 @@ async function run34() {
 `));
       return;
     }
-    const { run: handler } = await Promise.resolve().then(() => (init_status(), exports_status));
+    const { run: handler } = await Promise.resolve().then(() => (init_status2(), exports_status));
     return handler();
   }
   if (sub === "ps") {
@@ -50802,7 +61004,7 @@ async function run34() {
 `));
       return;
     }
-    const { run: handler } = await Promise.resolve().then(() => (init_feed(), exports_feed));
+    const { run: handler } = await Promise.resolve().then(() => (init_feed2(), exports_feed));
     return handler();
   }
   if (sub === "steer") {
@@ -51180,7 +61382,7 @@ async function run34() {
   }
   if (sub === "release") {
     console.error("Deprecated. Use `xt release prepare/publish`. This alias will be removed in v4.0.");
-    const result = spawnSync25("xt", ["release", ...process.argv.slice(3)], { stdio: "inherit" });
+    const result = spawnSync24("xt", ["release", ...process.argv.slice(3)], { stdio: "inherit" });
     if (result.error) {
       console.error(`Failed to run xt release: ${result.error.message}`);
       process.exit(1);
@@ -51200,7 +61402,7 @@ Run 'specialists help' to see available commands.`);
   const server = new SpecialistsServer;
   await server.start();
 }
-run34().catch((error2) => {
+run35().catch((error2) => {
   logger.error(`Fatal error: ${error2}`);
   process.exit(1);
 });
