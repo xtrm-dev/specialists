@@ -1,3 +1,5 @@
+import type { Component } from '@earendil-works/pi-tui';
+
 export type FeedRowKind = 'token' | 'tool' | 'event' | 'result' | 'meta';
 
 export interface FeedRow {
@@ -6,10 +8,7 @@ export interface FeedRow {
   ts: number;
 }
 
-export interface ComponentBase {
-  render(width: number): string[];
-}
-
+// TODO(u4fdd.6): runtime import lands when @earendil-works/pi-tui is installed.
 const ANSI_PATTERN = /\x1b\[[0-9;]*m/g;
 const RESET = '\x1b[0m';
 const DEFAULT_LIMIT = 2000;
@@ -18,6 +17,7 @@ function stripAnsi(text: string): string {
   return text.replace(ANSI_PATTERN, '');
 }
 
+// TODO(u4fdd.6): replace with @earendil-works/pi-tui wrapTextWithAnsi
 export function wrapTextWithAnsi(text: string, width: number): string[] {
   if (width <= 0) return [''];
   if (text === '') return [''];
@@ -36,7 +36,7 @@ export function wrapTextWithAnsi(text: string, width: number): string[] {
   return lines.length > 0 ? lines : [''];
 }
 
-export class ChatFeed implements ComponentBase {
+export class ChatFeed implements Component {
   private readonly rows: FeedRow[] = [];
   private cachedWidth: number | null = null;
   private cachedLines: string[] = [];

@@ -29,4 +29,6 @@ describe('ChatFeed', () => {
     expect(wrapped[1]).toContain('\x1b[31m');
     expect(wrapped[1]).toContain('\x1b[0m');
   });
+
+  it.todo('uses pi-tui wrapTextWithAnsi after dep install');
 });
