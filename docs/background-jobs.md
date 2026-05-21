@@ -2,13 +2,17 @@
 title: Background Jobs
 scope: background-jobs
 category: guide
-version: 1.6.1
-updated: 2026-05-15
+version: 1.7.0
+updated: 2026-05-21
 synced_at: b92a11ba
 description: Supervisor-backed job model, keep-alive semantics, and monitoring commands.
 source_of_truth_for:
   - "src/cli/run.ts"
   - "src/cli/feed.ts"
+  - "src/cli/chat.ts"
+  - "src/cli/chat/control.ts"
+  - "src/cli/chat/feed.ts"
+  - "src/cli/chat/status.ts"
   - "src/cli/steer.ts"
   - "src/cli/resume.ts"
   - "src/specialist/supervisor.ts"
@@ -33,8 +37,10 @@ specialists run sync-docs --bead unitAI-26s
 
 When `tmux` is installed:
 - a named tmux session is created as `sp-<specialist>-<id>`
-- use `specialists attach <job-id>` to attach directly to that session
+- use `specialists attach <job-id>` to attach directly to that legacy tmux session
 - use `specialists list --live` for an interactive tmux session picker
+
+For a first-class interactive TUI while launching a new specialist, use `sp chat <specialist> ...`. Chat is separate from legacy tmux attach: it owns the terminal, renders the normalized feed, shows status, and sends steer/resume messages from one prompt.
 
 When `tmux` is not installed, the CLI falls back to detached process mode (stdio ignored, spawned with `detached: true`) and still keeps DB state canonical; file mirrors are legacy/operator-only.
 
@@ -77,6 +83,34 @@ sp ps 49adda --json
 ```
 
 Snapshot `sp feed <job-id>` reads the full DB event history for that job. Legacy file mirrors, when enabled, are recovery surfaces rather than the normal source of truth.
+
+## Interactive chat TUI
+
+Use `sp chat` when you want to launch a specialist and keep a live, interactive control surface open:
+
+```bash
+sp chat explorer "map this failure"
+sp chat reviewer --bead unitAI-929wj
+```
+
+The chat feed intentionally matches `sp feed -f` formatting. It reads timeline events from SQLite first and falls back to `events.jsonl` only for recovery. It suppresses raw launch preamble/stderr noise, shows startup/payload context side-lines, dedupes repeated streaming `THINK`/`TEXT` events once per turn, and appends the final `run_complete.output` so the result is visible in the same screen.
+
+Typed chat input uses the same FIFO as the explicit commands:
+
+| Current status | Chat input becomes | CLI equivalent |
+|---|---|---|
+| `running` / `starting` | `{"type":"steer","message":"..."}` | `sp steer <job-id> "..."` |
+| `waiting` | `{"type":"resume","task":"..."}` | `sp resume <job-id> "..."` |
+
+Slash commands in chat:
+
+- `/quit` detaches without killing the job.
+- `/stop` stops the job through the normal control path.
+- `/finalize` finalizes a waiting chain/job.
+- `/notes <text>` appends to the current bead.
+- `/show` prints current context.
+
+`sp attach <job-id>` is still the legacy tmux attach path. TUI attach to an already-existing job is planned separately in bead `unitAI-hx4ln`; until then, use `sp feed` + `sp steer`/`sp resume` for existing jobs that were not started by `sp chat`.
 
 ## Read final output
 

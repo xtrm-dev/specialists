@@ -2,8 +2,8 @@
 title: CLI Reference
 scope: cli
 category: reference
-version: 2.7.1
-updated: 2026-05-15
+version: 2.8.0
+updated: 2026-05-21
 synced_at: b92a11ba
 description: Complete command reference for the Specialists CLI, generated from current source.
 source_of_truth_for:
@@ -13,6 +13,10 @@ source_of_truth_for:
   - src/cli/feed.ts
   - src/cli/result.ts
   - src/cli/status.ts
+  - src/cli/chat.ts
+  - src/cli/chat/control.ts
+  - src/cli/chat/feed.ts
+  - src/cli/chat/status.ts
   - src/cli/attach.ts
   - src/cli/resume.ts
   - src/cli/steer.ts
@@ -39,7 +43,8 @@ source_of_truth_for:
 | [`specialists feed`](#specialists-feed) | `--job <id>`: Filter by job ID |
 | [`specialists result`](#specialists-result) | `--wait`: Poll until terminal state |
 | [`specialists status`](#specialists-status) | `--json`: Machine-readable status |
-| [`specialists attach`](#specialists-attach) | No flags |
+| [`specialists chat`](#specialists-chat) | Interactive TUI launch/control surface |
+| [`specialists attach`](#specialists-attach) | Legacy tmux attach for jobs with `tmux_session` |
 | [`specialists resume`](#specialists-resume) | No flags |
 | [`specialists steer`](#specialists-steer) | No flags |
 | [`specialists stop`](#specialists-stop) | No flags |
@@ -447,6 +452,70 @@ specialists clean --dry-run
 
 ---
 
+## `specialists chat`
+
+### Synopsis
+
+```bash
+specialists chat <specialist> [prompt...] [--bead <id>] [--prompt <text>] [--context-depth <n>] [--model <provider/model>]
+```
+
+`sp chat` launches a specialist and opens an interactive TUI around that job. It is the single-screen equivalent of starting a run, following `sp feed -f`, checking status, and sending `sp steer` / `sp resume` messages.
+
+### What the TUI shows
+
+- **Feed area**: normalized timeline lines rendered with the same formatter as `sp feed -f`; startup preamble and raw `stderr:` rows are suppressed while the TUI owns the terminal.
+- **Deduped turn stream**: repeated streaming `THINK` / `TEXT` updates render once per turn phase instead of continuously repainting the same state. The dedupe resets on each new turn.
+- **Startup context**: run-start, payload, mandatory-rules, and memory/context side-lines are shown when timeline metadata is present.
+- **Final result**: `run_complete.output` is appended to the feed so the last assistant result is visible without leaving chat for `sp result`.
+- **Status row**: pinned to the chat job id and displays the actual specialist name, job id, bead id, state, token count, and model.
+- **Input prompt**: accepts freeform follow-up text and slash commands.
+
+### Input behavior
+
+Freeform input is state-aware:
+
+| Job state | Input action | FIFO payload | Equivalent CLI |
+|---|---|---|---|
+| `running` / `starting` | steer current turn | `{"type":"steer","message":"..."}` | `sp steer <job-id> "..."` |
+| `waiting` | resume next keep-alive turn | `{"type":"resume","task":"..."}` | `sp resume <job-id> "..."` |
+| terminal (`done`, `error`, `cancelled`) | rejected | none | inspect with `sp result` |
+
+Slash commands:
+
+| Command | Behavior |
+|---|---|
+| `/quit` | Detach from the TUI and leave the specialist job running/waiting. |
+| `/stop` | Send the normal stop control action for the current job. |
+| `/finalize` | Finalize the current waiting chain/job using the normal finalize path. |
+| `/notes <text>` | Append a note to the current bead. |
+| `/show` | Print current job/bead context in the feed. |
+
+### Examples
+
+```bash
+sp chat explorer "map the release workflow"
+sp chat reviewer --bead unitAI-929wj
+sp chat debugger --prompt "why is sp chat not rendering?" --context-depth 2
+```
+
+### Relationship to `feed`, `result`, `steer`, and `resume`
+
+`sp chat` does not replace the batch/headless commands. Use it when a human wants to stay in a live interactive loop. Use the individual commands for scripts, CI, specialist orchestration, or non-TTY sessions:
+
+- `sp feed -f` — global multi-job observability.
+- `sp feed <job-id> --follow` — per-job feed without an input prompt.
+- `sp result <job-id>` — terminal or latest keep-alive output.
+- `sp steer <job-id> "..."` — explicit mid-turn steering.
+- `sp resume <job-id> "..."` — explicit next-turn prompt for a waiting keep-alive job.
+
+### Exit codes
+
+- `0`: TUI exited cleanly.
+- `1`: Invalid args, specialist/job startup failure, or terminal setup failure.
+
+---
+
 ## `specialists attach`
 
 ### Synopsis
@@ -471,8 +540,9 @@ specialists attach a1b2c3
 - `1`: Missing args, job missing, terminal job state, missing tmux session, or tmux unavailable.
 
 Notes:
-- `attach` requires tmux and a live `tmux_session` recorded in the job `status.json`.
-- For multi-job interactive selection, use `specialists list --live`.
+- `attach` is the legacy tmux attachment path. It requires tmux and a live `tmux_session` recorded in the job `status.json`.
+- It does **not** provide the new chat TUI/feed/input surface. Use `sp chat <specialist> ...` when launching a new interactive TUI session. TUI attach to an existing job is planned separately in bead `unitAI-hx4ln`.
+- For multi-job interactive tmux selection, use `specialists list --live`.
 
 ---
 

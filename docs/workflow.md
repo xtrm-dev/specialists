@@ -2,12 +2,13 @@
 title: Bead-First Workflow
 scope: workflow
 category: guide
-version: 1.3.1
-updated: 2026-05-15
+version: 1.4.0
+updated: 2026-05-21
 synced_at: b92a11ba
 description: Canonical tracked and ad-hoc workflow for Specialists.
 source_of_truth_for:
   - "src/cli/run.ts"
+  - "src/cli/chat.ts"
   - "src/specialist/runner.ts"
   - "src/specialist/supervisor.ts"
   - "src/cli/resume.ts"
@@ -49,10 +50,26 @@ Use this for quick untracked tasks.
 
 ## Async observation model
 
-`--background` spawns a detached process via tmux. Use `sp attach <job>` to reconnect.
+For headless or multi-job work, run specialists normally and inspect them with `feed`, `ps`, and `result`:
+
+```bash
+specialists run explorer --bead unitAI-abc
+sp feed -f
+sp result <job-id>
+```
+
+For a human-in-the-loop launch, use `sp chat`:
+
+```bash
+sp chat explorer --bead unitAI-abc
+```
+
+`sp chat` opens a TUI that combines a `sp feed -f`-style feed, pinned status row, final result display, and input prompt. Freeform input maps to `steer` while the job is running and `resume` while it is waiting. `/quit` detaches without killing the job.
+
+`--background` may also create a legacy tmux session when tmux is available. `sp attach <job>` reconnects to that tmux session only; it is not yet the chat TUI attach flow. Existing-job TUI attach is tracked separately in bead `unitAI-hx4ln`.
 
 Use:
-- CLI: run, then inspect with `feed`, `ps`, `result`
+- CLI: run/chat, then inspect with `feed`, `ps`, `result`
 - MCP: `use_specialist` (only exposed tool)
 - Shell backgrounding (`&`) when needed
 
@@ -78,6 +95,8 @@ Important:
 
 - `steer`: for jobs currently `running` (mid-turn redirection)
 - `resume`: for keep-alive jobs in `waiting` (next turn)
+
+Inside `sp chat`, freeform input chooses between those two actions automatically based on the current status. Use explicit `sp steer` / `sp resume` commands when operating outside the chat TUI or from scripts.
 
 Keep-alive may be enabled explicitly (`--keep-alive`) or by specialist YAML (`execution.interactive: true`).
 Use `--no-keep-alive` when you want one-shot behavior for an otherwise interactive specialist.
