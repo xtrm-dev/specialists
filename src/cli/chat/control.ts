@@ -75,7 +75,7 @@ function parseSlashCommand(text: string): ChatAction {
   if (!command || !SLASH_COMMANDS.has(command)) return { kind: 'error', message: `unknown command: ${command ?? ''}`.trim() };
   if (command === 'notes') {
     const note = rest.join(' ').trim();
-    return note ? { kind: 'notes', text: note } : { kind: 'info', message: 'usage: /notes <text>' };
+    return note ? { kind: 'notes', text: note } : { kind: 'error', message: 'usage: /notes <text>' };
   }
   if (command === 'stop') return { kind: 'stop' };
   if (command === 'finalize') return { kind: 'finalize' };
