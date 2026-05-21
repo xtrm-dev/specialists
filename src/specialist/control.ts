@@ -1,5 +1,3 @@
-import { spawnSync } from 'node:child_process';
-
 import { Supervisor } from './supervisor.js';
 import { hasRunCompleteEvent } from './observability-sqlite.js';
 import { isProcessAlive } from './process-liveness.js';
@@ -23,10 +21,6 @@ export interface StopJobOptions {
 
 export interface FinalizeJobOptions {
   jobsDir?: string;
-}
-
-export interface AppendBeadNoteOptions {
-  timeoutMs?: number;
 }
 
 function resolveTerminalStatus(jobId: string): 'done' | 'cancelled' {
@@ -174,14 +168,3 @@ export async function finalizeJob(chainMemberId: string, opts: FinalizeJobOption
   }
 }
 
-export function appendBeadNote(beadId: string, text: string, opts: AppendBeadNoteOptions = {}): { ok: boolean; error?: string } {
-  if (!beadId || !text) return { ok: false, error: 'beads unavailable or empty payload' };
-  const result = spawnSync('bd', ['update', beadId, '--append-notes', text], {
-    encoding: 'utf-8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-    timeout: opts.timeoutMs,
-  });
-  if (result.error) return { ok: false, error: result.error.message };
-  if (result.status !== 0) return { ok: false, error: result.stderr?.trim() || `bd update failed with exit code ${result.status}` };
-  return { ok: true };
-}

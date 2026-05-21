@@ -22,7 +22,7 @@ export async function run(): Promise<void> {
   try {
     await finalizeJob(jobId);
   } catch (err: any) {
-    console.error(`Error: ${err.message}`);
+    process.stderr.write(`Error: ${err.message}\n`);
     process.exit(1);
   }
 }

@@ -825,8 +825,8 @@ function buildFindingNotes(nodeId: string, findingId: string, finding: NodeMemor
   return lines.join('\n');
 }
 
-function promoteFindingToBead(beadId: string, notes: string): void {
-  const result = appendBeadNote(beadId, notes);
+async function promoteFindingToBead(beadId: string, notes: string): Promise<void> {
+  const result = await appendBeadNote(beadId, notes);
   if (!result.ok) {
     throw new Error(result.error || 'bd update failed');
   }
@@ -854,7 +854,7 @@ async function handleNodePromote(args: ParsedNodeArgs): Promise<void> {
     }
 
     const notes = buildFindingNotes(nodeId, findingId, finding);
-    promoteFindingToBead(beadId, notes);
+    await promoteFindingToBead(beadId, notes);
 
     if (args.jsonMode) {
       console.log(JSON.stringify({
