@@ -5,7 +5,6 @@ import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from '
 import { randomBytes } from 'node:crypto';
 import { spawn as cpSpawn, execSync } from 'node:child_process';
 import { SpecialistLoader } from '../specialist/loader.js';
-import { SpecialistRunner } from '../specialist/runner.js';
 import { CircuitBreaker } from '../utils/circuitBreaker.js';
 import { HookEmitter } from '../specialist/hooks.js';
 import { BeadsClient, buildBeadContext } from '../specialist/beads.js';
@@ -18,6 +17,7 @@ import type { TimelineEvent } from '../specialist/timeline-events.js';
 import { evaluateMergeWorthiness, previewBranchMergeDelta } from './merge.js';
 import { formatEventInlineDebounced, type InlineIndicatorPhase } from './format-helpers.js';
 import { isTmuxAvailable, buildSessionName, createTmuxSession } from './tmux-utils.js';
+import { launchSpecialist } from '../specialist/launch.js';
 
 // ── ANSI helpers ───────────────────────────────────────────────────────────────
 const bold  = (s: string) => `\x1b[1m${s}\x1b[0m`;
@@ -36,7 +36,7 @@ type OutputMode = 'human' | 'json' | 'raw';
 const JOB_ID_HANDOFF_PATH_ENV = 'SPECIALISTS_BG_JOB_ID_PATH';
 
 // ── Arg parser ─────────────────────────────────────────────────────────────────
-interface RunArgs {
+export interface RunArgs {
   name: string;
   prompt: string;
   beadId?: string;
@@ -778,9 +778,8 @@ export async function run(): Promise<void> {
   }
 
   const circuitBreaker = new CircuitBreaker();
-  const hooks          = new HookEmitter({ tracePath: join(process.cwd(), '.specialists', 'trace.jsonl') });
+  const hooks = new HookEmitter({ tracePath: join(process.cwd(), '.specialists', 'trace.jsonl') });
   const beadsClient = args.noBeads ? undefined : new BeadsClient();
-  // Always create a reader for bead content — --no-beads only suppresses tracking
   const beadReader = beadsClient ?? new BeadsClient();
 
   let prompt = args.prompt;
@@ -788,38 +787,19 @@ export async function run(): Promise<void> {
   let epicId: string | undefined;
   let effectiveBeadId = args.beadId;
 
-  const runner = new SpecialistRunner({
-    loader,
-    hooks,
-    circuitBreaker,
-    beadsClient,
-  });
   const beadsWriteNotes = args.noBeadNotes
     ? false
     : (specialist.specialist.beads_write_notes ?? true);
 
-  // ── Resolve jobs dir and optional working directory ─────────────────────────
-  // Supervisor resolves this internally too, but we need it here for the tailer.
   const jobsDir = resolveJobsDir();
   const statusReader = new Supervisor({
-    runner,
-    runOptions: {
-      name: args.name,
-      prompt,
-    },
+    runner: new (await import('../specialist/runner.js')).SpecialistRunner({ loader, hooks, circuitBreaker, beadsClient }),
+    runOptions: { name: args.name, prompt },
     jobsDir,
   });
 
-  const {
-    workingDirectory,
-    reusedFromJobId,
-    worktreeOwnerJobId,
-    inferredBeadId,
-  } = resolveWorkingDirectory(
-    {
-      ...args,
-      worktree: useWorktree,
-    },
+  const { workingDirectory, reusedFromJobId, worktreeOwnerJobId, inferredBeadId } = resolveWorkingDirectory(
+    { ...args, worktree: useWorktree },
     jobsDir,
     perm,
     (jobId) => statusReader.readStatus(jobId),
@@ -841,10 +821,7 @@ export async function run(): Promise<void> {
       throw new Error(`Unable to read bead '${effectiveBeadId}' via bd show --json`);
     }
 
-    const blockers = (args.contextDepth > 0)
-      ? beadReader.getCompletedBlockers(effectiveBeadId, args.contextDepth)
-      : [];
-
+    const blockers = args.contextDepth > 0 ? beadReader.getCompletedBlockers(effectiveBeadId, args.contextDepth) : [];
     if (blockers.length > 0) {
       process.stderr.write(dim(`\n[context: ${blockers.length} completed dep${blockers.length > 1 ? 's' : ''} injected]\n`));
     }
@@ -852,32 +829,20 @@ export async function run(): Promise<void> {
     const beadContext = buildBeadContext(bead, blockers);
     prompt = beadContext;
     epicId = args.epicId ?? bead.parent;
-    variables = {
-      ...(variables ?? {}),
-      bead_context: beadContext,
-      bead_id: effectiveBeadId,
-    };
+    variables = { ...(variables ?? {}), bead_context: beadContext, bead_id: effectiveBeadId };
   } else if (args.epicId) {
     epicId = args.epicId;
   }
 
-  variables = {
-    ...(variables ?? {}),
-    reused_worktree_awareness: '',
-  };
+  variables = { ...(variables ?? {}), reused_worktree_awareness: '' };
 
   if (args.reuseJobId) {
     const reviewedJobId = extractReviewedJobIdOverride(prompt) ?? args.reuseJobId;
-    const injectedReviewerDiffVariables = workingDirectory && args.name === 'reviewer'
-      ? buildInjectedReviewerDiffVariables(workingDirectory)
-      : {};
+    const injectedReviewerDiffVariables = workingDirectory && args.name === 'reviewer' ? buildInjectedReviewerDiffVariables(workingDirectory) : {};
     variables = {
       ...(variables ?? {}),
       reviewed_job_id: reviewedJobId,
-      reused_worktree_awareness: buildReusedWorktreeAwarenessBlock({
-        reusedFromJobId: args.reuseJobId,
-        worktreeOwnerJobId,
-      }),
+      reused_worktree_awareness: buildReusedWorktreeAwarenessBlock({ reusedFromJobId: args.reuseJobId, worktreeOwnerJobId }),
       ...injectedReviewerDiffVariables,
     };
   }
@@ -887,112 +852,24 @@ export async function run(): Promise<void> {
     process.exit(1);
   }
 
-  let stopTailer: (() => void) | undefined;
-
-  const supervisor = new Supervisor({
-    runner,
-    runOptions: {
-      name: args.name,
-      prompt,
-      variables,
-      backendOverride: args.model,
-      inputBeadId: effectiveBeadId,
-      epicId,
-      keepAlive: args.keepAlive,
-      noKeepAlive: args.noKeepAlive,
-      beadsWriteNotes,
-      forceJob: args.forceJob,
-      permissionRequired: perm,
-      workingDirectory,
-      reusedFromJobId,
-      worktreeOwnerJobId,
-    },
-    // jobsDir intentionally omitted — Supervisor derives it from workingDirectory
-    // via resolveJobsDir() so all worktree sessions share the same state root.
+  await launchSpecialist({
+    args,
+    specialist,
+    loader,
+    hooks,
+    circuitBreaker,
     beadsClient,
-    stallDetection: specialist.specialist.stall_detection,
-    // raw: stream onProgress deltas (legacy behaviour); others: suppress raw text
-    onProgress: args.outputMode === 'raw' ? (delta) => process.stdout.write(delta) : undefined,
-    // raw/json: show backend/model on stderr; human: tailer prints it to stdout
-    onMeta: args.outputMode !== 'human'
-      ? (meta) => process.stderr.write(dim(`\n[${meta.backend} / ${meta.model}]\n\n`))
-      : undefined,
-    onJobStarted: ({ id }) => {
-      process.stderr.write(dim(`[job started: ${id}]\n`));
-      const handoffPath = process.env[JOB_ID_HANDOFF_PATH_ENV];
-      if (handoffPath) {
-        try { writeFileSync(handoffPath, `${id}\n`, 'utf-8'); } catch { /* best effort */ }
-      }
-      if (args.outputMode !== 'raw') {
-        stopTailer = startEventTailer(id, jobsDir, args.outputMode, args.name, effectiveBeadId);
-      }
-    },
+    workingDirectory,
+    reusedFromJobId,
+    worktreeOwnerJobId,
+    effectiveBeadId,
+    prompt,
+    variables,
+    epicId,
+    beadsWriteNotes,
+    perm,
+    jobsDir,
+    startEventTailer: (jobId, jobsDirArg) => startEventTailer(jobId, jobsDirArg, args.outputMode === 'raw' ? 'human' : args.outputMode, args.name, effectiveBeadId),
+    formatFooterModel,
   });
-
-  // Set bead-based claim for edit gate — allows specialists to edit without session-scoped claim.
-  // This is checked by beads-edit-gate as a fallback when claimed:<sessionId> is not set.
-  if (effectiveBeadId && workingDirectory) {
-    try {
-      execSync(`bd kv set "bead-claim:${effectiveBeadId}" "active"`, {
-        cwd: workingDirectory,
-        stdio: 'pipe',
-        timeout: 5000,
-      });
-    } catch {
-      // Non-fatal — edit gate will fall back to in_progress check
-    }
-  }
-
-  process.stderr.write(`\n${bold(`Running ${cyan(args.name)}`)}\n\n`);
-
-  let jobId = '';
-  let runError: any;
-  try {
-    jobId = await supervisor.run();
-  } catch (err: any) {
-    runError = err;
-    stopTailer?.();
-  }
-
-  // Drain remaining events before printing footer
-  stopTailer?.();
-
-  // Clean up bead-claim AFTER run completes (success or error) — ensures no stale claims
-  if (effectiveBeadId && workingDirectory) {
-    try {
-      execSync(`bd kv clear "bead-claim:${effectiveBeadId}"`, {
-        cwd: workingDirectory,
-        stdio: 'pipe',
-        timeout: 5000,
-      });
-    } catch {
-      // Non-fatal — stale claim will be overwritten on next run
-    }
-  }
-
-  // If run failed, report error and exit
-  if (runError) {
-    process.stderr.write(`Error: ${runError?.message ?? runError}\n`);
-    process.exit(1);
-  }
-
-  // Read the result from the job file
-  const status = supervisor.readStatus(jobId);
-
-  // Footer
-  const secs = ((status?.last_event_at_ms ?? Date.now()) - (status?.started_at_ms ?? Date.now())) / 1000;
-  const modelLabel = formatFooterModel(status?.backend, status?.model);
-  const footer = [
-    `job ${jobId}`,
-    status?.bead_id ? `bead ${status.bead_id}` : '',
-    `${secs.toFixed(1)}s`,
-    modelLabel ? dim(modelLabel) : '',
-  ].filter(Boolean).join('  ');
-
-  process.stderr.write(`\n${green('✓')} ${footer}\n\n`);
-  process.stderr.write(dim(`Status: specialists ps ${jobId} --json\n`));
-  process.stderr.write(dim(`Events: specialists feed ${jobId}\n\n`));
-
-  // Exit immediately - all work is done
-  process.exit(0);
 }
