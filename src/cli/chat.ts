@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { launchSpecialist } from '../specialist/launch.js';
 import { ChatFeed } from './chat/feed.js';
 import { ChatStatus } from './chat/status.js';
@@ -7,6 +7,9 @@ import { createChatControl } from './chat/control.js';
 import { loadStatuses } from '../specialist/status-load.js';
 import { SpecialistLoader } from '../specialist/loader.js';
 import { createObservabilitySqliteClient } from '../specialist/observability-sqlite.js';
+import type { TimelineEvent } from '../specialist/timeline-events.js';
+import { JobColorMap, dim, formatEventLine } from './format-helpers.js';
+import { formatSpecialistModel } from '../specialist/model-display.js';
 
 const DEFAULT_CONTEXT_DEPTH = 3;
 const DEFAULT_POLL_INTERVAL_MS = 500;
@@ -88,6 +91,7 @@ export async function run(): Promise<void> {
 
   let shouldExit = false;
   let currentJobId = '';
+  let stopChatEventTailer: (() => void) | undefined;
   let resolveExitRequest: (() => void) | null = null;
   const exitRequested = new Promise<true>((resolve) => {
     resolveExitRequest = () => resolve(true);
@@ -98,9 +102,7 @@ export async function run(): Promise<void> {
     tui.requestRender();
   };
 
-  const restoreStderr = redirectStderrToFeed({
-    append: (text) => appendEvent('stderr', text),
-  });
+  const restoreStderr = silenceStderrDuringTui();
 
   input.onSubmit = (text: string) => {
     input.setValue('');
@@ -108,6 +110,8 @@ export async function run(): Promise<void> {
       text,
       getJobId: () => currentJobId,
       getJobState: async () => currentJobId ? await loadJobState(currentJobId) : 'running',
+      getJobStatus: async () => currentJobId ? await loadJobStatus(currentJobId) : null,
+      beadId,
       control,
       appendEvent,
       requestRender: () => tui.requestRender(),
@@ -131,15 +135,16 @@ export async function run(): Promise<void> {
     : () => undefined;
 
   try {
-    dbg('try block enter — setting root + focus');
-    tui.root = root;
+    dbg('try block enter — adding components + focus');
+    tui.addChild(root);
     tui.setFocus(input);
     dbg('status.start()');
     status.start();
-    feed.appendEvent('chat', `launching ${args.name}`);
-    feed.appendEvent('chat', `context depth ${args.contextDepth}`);
-    if (args.model) feed.appendEvent('chat', `model ${args.model}`);
-    if (!args.beadId) feed.appendEvent('chat', `ephemeral bead ${ephemeralTitle} (${beadId})`);
+    dbg('about to tui.start()', { stdoutTTY: process.stdout.isTTY === true, stdinTTY: process.stdin.isTTY === true });
+    tui.start();
+    tui.requestRender(true);
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    dbg('tui.start() returned');
 
     dbg('calling launchSpecialist (non-awaited)');
     const launchPromise = launchSpecialist({
@@ -160,11 +165,17 @@ export async function run(): Promise<void> {
       jobsDir: '.specialists/jobs',
       startEventTailer: () => undefined,
       formatFooterModel: (backend, model) => formatFooterModel(backend, model),
-      onProgress: (delta) => appendEvent('assistant', delta),
-      onMeta: (meta) => appendEvent('chat', `${meta.backend}/${meta.model}`),
       onJobStarted: ({ id }) => {
         currentJobId = id;
-        appendEvent('chat', `job started: ${id}`);
+        status.setJobId(id);
+        stopChatEventTailer = startChatEventTailer({
+          jobId: id,
+          jobsDir: '.specialists/jobs',
+          specialist: args.name,
+          beadId,
+          feed,
+          requestRender: () => tui.requestRender(),
+        });
       },
     });
 
@@ -173,19 +184,18 @@ export async function run(): Promise<void> {
       return true;
     }).catch((error) => {
       dbg('launchPromise rejected', { error: error instanceof Error ? error.message : String(error) });
-      feed.appendEvent('chat', error instanceof Error ? error.message : String(error));
+      appendEvent('chat', error instanceof Error ? error.message : String(error));
       return true;
     });
-    dbg('about to await tui.start()');
-    await tui.start();
-    dbg('tui.start() returned');
     if (!shouldExit) {
-      dbg('awaiting launchDone');
-      await launchDone;
-      dbg('launchDone awaited');
+      dbg('awaiting launchDone or exit request');
+      await Promise.race([launchDone, exitRequested]);
+      dbg('launchDone/exit request settled');
     }
   } finally {
     dbg('finally — cleanup');
+    stopChatEventTailer?.();
+    restoreStderr();
     removeInputListener?.();
     signalCleanup();
     await cleanup.stop();
@@ -244,18 +254,247 @@ function buildEphemeralBeadTitle(prompt: string): string {
 }
 
 async function loadJobState(jobId: string) {
+  return (await loadJobStatus(jobId))?.status ?? null;
+}
+
+async function loadJobStatus(jobId: string) {
   const statuses = loadStatuses();
-  return statuses.find((status) => status.id === jobId)?.status ?? null;
+  return statuses.find((status) => status.id === jobId) ?? null;
 }
 
 function formatFooterModel(backend?: string, model?: string): string {
   return model ?? backend ?? '';
 }
 
+interface ChatEventTailerOptions {
+  jobId: string;
+  jobsDir: string;
+  specialist: string;
+  beadId?: string;
+  feed: ChatFeed;
+  requestRender: () => void;
+}
+
+function startChatEventTailer(options: ChatEventTailerOptions): () => void {
+  const eventsPath = `${options.jobsDir}/${options.jobId}/events.jsonl`;
+  const sqliteClient = createObservabilitySqliteClient(process.cwd());
+  const colorize = new JobColorMap().get(options.jobId);
+  let linesRead = 0;
+  let lastSeq = 0;
+  let model: string | undefined;
+  let contextPct: number | undefined;
+  const lastPrintedEventKey = new Map<string, string>();
+  const seenMetaKey = new Map<string, string>();
+
+  const appendLine = (line: string) => {
+    options.feed.appendResult(line);
+    options.requestRender();
+  };
+
+  const readFileEvents = (): TimelineEvent[] => {
+    let content = '';
+    try { content = readFileSync(eventsPath, 'utf8'); } catch { return []; }
+    if (!content) return [];
+    const lastNewline = content.lastIndexOf('\n');
+    if (lastNewline < 0) return [];
+    const lines = content.slice(0, lastNewline).split('\n');
+    const events: TimelineEvent[] = [];
+    for (let index = linesRead; index < lines.length; index += 1) {
+      linesRead += 1;
+      const raw = lines[index]?.trim();
+      if (!raw) continue;
+      try { events.push(JSON.parse(raw) as TimelineEvent); } catch { /* ignore malformed */ }
+    }
+    return events;
+  };
+
+  const readEvents = (): TimelineEvent[] => {
+    if (sqliteClient) {
+      const events = sqliteClient.readEventsAfterSeq(options.jobId, lastSeq);
+      for (const event of events) {
+        if (typeof event.seq === 'number') lastSeq = Math.max(lastSeq, event.seq);
+      }
+      return events;
+    }
+    return readFileEvents();
+  };
+
+  const drain = () => {
+    const status = readChatJobStatus(options.jobsDir, options.jobId);
+    model = status.model ?? model;
+    contextPct = status.contextPct ?? contextPct;
+
+    for (const event of readEvents()) {
+      if (event.type === 'turn' && event.phase === 'start') {
+        lastPrintedEventKey.delete(options.jobId);
+      }
+      if (!shouldRenderChatFeedEvent(event)) continue;
+      if (shouldSkipChatFeedEvent(event, options.jobId, lastPrintedEventKey, seenMetaKey)) continue;
+      if (event.type === 'meta') model = event.model;
+      if (event.type === 'run_complete') model = event.model ?? model;
+
+      appendLine(formatEventLine(event, {
+        jobId: options.jobId,
+        specialist: formatSpecialistModel(options.specialist, model),
+        beadId: options.beadId,
+        contextPct,
+        colorize,
+      }));
+
+      const contextLine = formatChatStartupContextLine(event);
+      if (contextLine) appendLine(contextLine);
+      if (event.type === 'run_complete' && event.output) appendLine(event.output);
+    }
+  };
+
+  const interval = setInterval(drain, 100);
+  return () => {
+    clearInterval(interval);
+    drain();
+    sqliteClient?.close();
+  };
+}
+
+function shouldRenderChatFeedEvent(event: TimelineEvent): boolean {
+  if (event.type === 'message' || event.type === 'turn') return false;
+  if (event.type === 'tool') {
+    if (event.phase === 'update') return false;
+    if (event.phase === 'end' && !event.is_error) return false;
+  }
+  return true;
+}
+
+
+function shouldSkipChatFeedEvent(
+  event: TimelineEvent,
+  jobId: string,
+  lastPrintedEventKey: Map<string, string>,
+  seenMetaKey: Map<string, string>,
+): boolean {
+  if (event.type === 'meta') {
+    const metaKey = `${event.backend}:${event.model}`;
+    if (seenMetaKey.get(jobId) === metaKey) return true;
+    seenMetaKey.set(jobId, metaKey);
+  }
+
+  if (event.type === 'tool') return false;
+
+  const key = getChatFeedEventKey(event);
+  if (lastPrintedEventKey.get(jobId) === key) return true;
+  lastPrintedEventKey.set(jobId, key);
+  return false;
+}
+
+function getChatFeedEventKey(event: TimelineEvent): string {
+  switch (event.type) {
+    case 'meta':
+      return `meta:${event.backend}:${event.model}`;
+    case 'tool':
+      return `tool:${event.tool}:${event.phase}:${event.tool_call_id ?? event.t}`;
+    case 'text':
+      return 'text';
+    case 'thinking':
+      return 'thinking';
+    case 'message':
+      return `message:${event.role}:${event.phase}`;
+    case 'turn':
+      return `turn:${event.phase}`;
+    case 'status_change':
+      return `status_change:${event.previous_status ?? ''}:${event.status}`;
+    case 'run_start':
+      return `run_start:${event.specialist}:${event.bead_id ?? ''}`;
+    case 'run_complete':
+      return `run_complete:${event.status}:${event.error ?? ''}`;
+    case 'error':
+      return `error:${event.source}:${event.error_message}`;
+    case 'token_usage':
+      return `token_usage:${event.token_usage.total_tokens ?? ''}:${event.source}`;
+    case 'finish_reason':
+      return `finish_reason:${event.finish_reason}:${event.source}`;
+    case 'turn_summary':
+      return `turn_summary:${event.turn_index}`;
+    case 'compaction':
+    case 'retry':
+      return `${event.type}:${event.phase}`;
+    default:
+      return (event as { type?: string }).type ?? 'unknown';
+  }
+}
+
+function formatChatStartupContextLine(event: TimelineEvent): string | null {
+  if (event.type === 'run_start') {
+    const snapshot = event.startup_snapshot;
+    if (!snapshot) return null;
+    const parts: string[] = [];
+    if (snapshot.job_id) parts.push(`job=${snapshot.job_id}`);
+    if (snapshot.specialist_name) parts.push(`specialist=${snapshot.specialist_name}`);
+    if (snapshot.bead_id) parts.push(`bead=${snapshot.bead_id}`);
+    if (snapshot.reused_from_job_id) parts.push(`reused=${snapshot.reused_from_job_id}`);
+    if (snapshot.worktree_owner_job_id) parts.push(`owner=${snapshot.worktree_owner_job_id}`);
+    if (snapshot.chain_id) parts.push(`chain=${snapshot.chain_id}`);
+    if (snapshot.chain_root_job_id) parts.push(`chain_root_job=${snapshot.chain_root_job_id}`);
+    if (snapshot.chain_root_bead_id) parts.push(`chain_root_bead=${snapshot.chain_root_bead_id}`);
+    if (snapshot.worktree_path) parts.push(`worktree=${snapshot.worktree_path}`);
+    if (snapshot.branch) parts.push(`branch=${snapshot.branch}`);
+    if (snapshot.variables_keys) parts.push(`vars=[${snapshot.variables_keys.join(',')}]`);
+    if (snapshot.reviewed_job_id_present !== undefined) parts.push(`reviewed_present=${snapshot.reviewed_job_id_present}`);
+    if (snapshot.reused_worktree_awareness_present !== undefined) parts.push(`reuse_awareness_present=${snapshot.reused_worktree_awareness_present}`);
+    if (snapshot.bead_context_present !== undefined) parts.push(`bead_context_present=${snapshot.bead_context_present}`);
+    if (snapshot.skills) parts.push(`skills=${snapshot.skills.count}`);
+    return parts.length > 0 ? dim(`  ↳ startup ${parts.join(' ')}`) : null;
+  }
+
+  if (event.type === 'payload_breakdown') {
+    const payload = event.payload_breakdown;
+    const totals = payload?.totals;
+    if (!totals) return null;
+    const components = (payload.components ?? []).filter((component) => Number.isFinite(component.tokens) && component.tokens > 0);
+    return dim(`  ↳ payload: ${(totals.bytes / 1024).toFixed(1)}kb · ${(totals.tokens / 1000).toFixed(1)}kt across ${components.length} components`);
+  }
+
+  if (event.type === 'meta' && event.source === 'mandatory_rules_injection' && event.data) {
+    const data = event.data as { sets_loaded?: string[]; rules_count?: number; token_estimate?: number };
+    return dim(`  ↳ mandatory_rules sets=${(data.sets_loaded ?? []).join(',') || 'none'} rules=${data.rules_count ?? 0} tokens=~${data.token_estimate ?? 0}`);
+  }
+
+  if (event.type === 'meta' && event.memory_injection) {
+    const mem = event.memory_injection;
+    return dim(`  ↳ memory static=${mem.static_tokens} dynamic=${mem.memory_tokens} gitnexus=${mem.gitnexus_tokens} total=${mem.total_tokens}`);
+  }
+
+  return null;
+}
+
+function readChatJobStatus(jobsDir: string, jobId: string): { model?: string; contextPct?: number } {
+  try {
+    const status = JSON.parse(readFileSync(`${jobsDir}/${jobId}/status.json`, 'utf8')) as {
+      model?: string;
+      metrics?: { context_pct?: number };
+    };
+    return { model: status.model, contextPct: status.metrics?.context_pct };
+  } catch {
+    return {};
+  }
+}
+
+function silenceStderrDuringTui(): () => void {
+  const originalWrite = process.stderr.write.bind(process.stderr) as any;
+  (process.stderr as any).write = (_chunk: unknown, encoding?: BufferEncoding | ((error?: Error | null) => void), callback?: (error?: Error | null) => void): boolean => {
+    if (typeof encoding === 'function') encoding(null);
+    if (typeof callback === 'function') callback(null);
+    return true;
+  };
+  return () => {
+    (process.stderr as any).write = originalWrite;
+  };
+}
+
 interface SubmittedInputDeps {
   text: string;
   getJobId: () => string;
   getJobState: () => Promise<string | null>;
+  getJobStatus: () => Promise<{ fifo_path?: string; status?: string } | null>;
+  beadId?: string;
   control: ReturnType<typeof createChatControl>;
   appendEvent: (type: string, details: string) => void;
   requestRender: () => void;
@@ -274,8 +513,42 @@ async function handleSubmittedInput(deps: SubmittedInputDeps): Promise<void> {
     return;
   }
 
+  if (!jobId && action.kind !== 'info' && action.kind !== 'error') {
+    deps.appendEvent('chat', 'job not ready yet; try again after job started');
+    return;
+  }
+
   if (action.kind === 'steer' || action.kind === 'resume') {
-    deps.appendEvent('chat', `${action.kind} queued for ${jobId || 'pending job'}`);
+    await sendChatJobMessage(deps, action.kind, action.text);
+    return;
+  }
+
+  if (action.kind === 'stop') {
+    await runChatControlAction(deps, async () => {
+      const { stopJob } = await import('../specialist/control.js');
+      await stopJob(jobId, { jobsDir: '.specialists/jobs' });
+      return 'stop sent';
+    });
+    return;
+  }
+
+  if (action.kind === 'finalize') {
+    await runChatControlAction(deps, async () => {
+      const { finalizeJob } = await import('../specialist/control.js');
+      await finalizeJob(jobId, { jobsDir: '.specialists/jobs' });
+      return 'finalize sent';
+    });
+    return;
+  }
+
+  if (action.kind === 'notes') {
+    await runChatControlAction(deps, async () => {
+      if (!deps.beadId) throw new Error('bead id missing');
+      const { appendBeadNote } = await import('../specialist/bead-notes.js');
+      const result = await appendBeadNote(deps.beadId, action.text, { timeoutMs: 5000 });
+      if (!result.ok) throw new Error(result.error ?? 'append note failed');
+      return 'note appended';
+    });
     return;
   }
 
@@ -284,23 +557,26 @@ async function handleSubmittedInput(deps: SubmittedInputDeps): Promise<void> {
   deps.requestRender();
 }
 
-function redirectStderrToFeed(feed: { append(text: string): void }): () => void {
-  const originalWrite = process.stderr.write.bind(process.stderr) as any;
-  (process.stderr as any).write = (chunk: unknown, encoding?: BufferEncoding | ((error?: Error | null) => void), callback?: (error?: Error | null) => void): boolean => {
-    const text = Buffer.isBuffer(chunk)
-      ? chunk.toString(typeof encoding === 'string' ? encoding : 'utf8')
-      : String(chunk);
-    for (const line of text.split(/\r?\n/)) {
-      const trimmed = line.trimEnd();
-      if (trimmed) feed.append(trimmed);
-    }
-    if (typeof encoding === 'function') encoding(null);
-    if (typeof callback === 'function') callback(null);
-    return true;
-  };
-  return () => {
-    (process.stderr as any).write = originalWrite;
-  };
+async function sendChatJobMessage(deps: SubmittedInputDeps, type: 'steer' | 'resume', text: string): Promise<void> {
+  await runChatControlAction(deps, async () => {
+    const status = await deps.getJobStatus();
+    if (!status?.fifo_path) throw new Error(`Job ${deps.getJobId()} has no steer pipe`);
+    const payload = type === 'resume'
+      ? { type: 'resume', task: text }
+      : { type: 'steer', message: text };
+    writeFileSync(status.fifo_path, `${JSON.stringify(payload)}\n`, { flag: 'a' });
+    return `${type} sent to ${deps.getJobId()}`;
+  });
+}
+
+async function runChatControlAction(deps: SubmittedInputDeps, action: () => Promise<string>): Promise<void> {
+  try {
+    deps.appendEvent('chat', await action());
+  } catch (error) {
+    deps.appendEvent('chat', `error: ${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    deps.requestRender();
+  }
 }
 
 function createCleanup(tui: any, terminal: any, status: ChatStatus) {
@@ -314,8 +590,14 @@ function createCleanup(tui: any, terminal: any, status: ChatStatus) {
       try { terminal.stop(); } catch {}
     },
     async stopJobAndExit(jobId: string): Promise<void> {
-      if (jobId) process.stderr.write(`Stopping job ${jobId}\n`);
       await this.stop();
+      if (jobId) {
+        process.stderr.write(`Stopping job ${jobId}\n`);
+        const { stopJob } = await import('../specialist/control.js');
+        await stopJob(jobId, { jobsDir: '.specialists/jobs' }).catch((error: unknown) => {
+          process.stderr.write(`[chat] stop failed: ${error instanceof Error ? error.message : String(error)}\n`);
+        });
+      }
       process.exit(0);
     },
   };

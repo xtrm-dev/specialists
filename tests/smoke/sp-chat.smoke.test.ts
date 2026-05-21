@@ -22,6 +22,11 @@ afterAll(() => {
   }
   for (const beadId of createdBeads) {
     try {
+      spawnSync('bd', ['kv', 'set', `memory-acked:${beadId}`, 'nothing novel:smoke test cleanup'], {
+        cwd: repoRoot,
+        stdio: 'ignore',
+        env: { ...process.env, NO_COLOR: '1' },
+      });
       spawnSync('bd', ['close', beadId, '-r', 'smoke cleanup'], {
         cwd: repoRoot,
         stdio: 'ignore',
@@ -32,7 +37,7 @@ afterAll(() => {
   try {
     rmSync(transcriptDir, { recursive: true, force: true });
   } catch {}
-});
+}, 30000);
 
 function runCli(args: string[]): Promise<{ status: number; stdout: string; stderr: string }> {
   return new Promise((resolveRun, rejectRun) => {
@@ -98,6 +103,19 @@ function findJobIdForBead(beadId: string): string | null {
   return jobId;
 }
 
+function rememberOpenBeadsByTitle(title: string): void {
+  const result = spawnSync('bd', ['list', '--status=open', '--json', '--limit', '0'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    env: { ...process.env, NO_COLOR: '1' },
+  });
+  if (result.status !== 0) return;
+  const rows = JSON.parse(result.stdout || '[]') as Array<{ id?: string; title?: string }>;
+  for (const row of rows) {
+    if (row.id && row.title === title) createdBeads.add(row.id);
+  }
+}
+
 async function runChatSmoke(options: { beadId: string; preload?: string }): Promise<{ exitCode: number; output: string; transcript: string }> {
   const transcriptPath = join(transcriptDir, `sp-chat-${Date.now()}-${Math.random().toString(16).slice(2)}.log`);
   const command = [
@@ -125,6 +143,9 @@ async function runChatSmoke(options: { beadId: string; preload?: string }): Prom
   session.stderr.on('data', (chunk) => {
     combined += chunk;
   });
+  const closed = new Promise<number>((resolveExit) => {
+    session.once('close', (code) => resolveExit(code ?? 1));
+  });
 
   await wait(1500);
   session.stdin.write('hello from smoke\n');
@@ -135,9 +156,7 @@ async function runChatSmoke(options: { beadId: string; preload?: string }): Prom
   session.kill('SIGINT');
 
   const exitCode = await Promise.race([
-    new Promise<number>((resolveExit) => {
-      session.once('close', (code) => resolveExit(code ?? 1));
-    }),
+    closed,
     wait(8000).then(() => 124),
   ]);
   const transcript = readTranscript(transcriptPath);
@@ -170,6 +189,9 @@ async function runChatSmokeWithoutBead(prompt: string): Promise<{ exitCode: numb
   session.stderr.on('data', (chunk) => {
     combined += chunk;
   });
+  const closed = new Promise<number>((resolveExit) => {
+    session.once('close', (code) => resolveExit(code ?? 1));
+  });
 
   await wait(1500);
   session.stdin.write('hello from smoke\n');
@@ -178,13 +200,15 @@ async function runChatSmokeWithoutBead(prompt: string): Promise<{ exitCode: numb
   session.kill('SIGINT');
 
   const exitCode = await Promise.race([
-    new Promise<number>((resolveExit) => {
-      session.once('close', (code) => resolveExit(code ?? 1));
-    }),
+    closed,
     wait(8000).then(() => 124),
   ]);
   const transcript = readTranscript(transcriptPath);
-  return { exitCode, output: `${combined}\n${transcript}`, transcript };
+  const output = `${combined}\n${transcript}`;
+  const ephemeralMatch = output.match(/ephemeral bead .*?\((unitAI-[^)]+)\)/);
+  if (ephemeralMatch?.[1]) createdBeads.add(ephemeralMatch[1]);
+  rememberOpenBeadsByTitle(prompt.slice(0, 60));
+  return { exitCode, output, transcript };
 }
 
 test('sp chat reviewer smoke', async () => {
@@ -193,6 +217,12 @@ test('sp chat reviewer smoke', async () => {
 
   expect(result.exitCode).toBe(0);
   expect(result.output).toContain(beadId);
+  expect(result.output).not.toContain('chat: launching reviewer');
+  expect(result.output).not.toContain('stderr:');
+  expect(result.output).not.toContain('assistant:');
+  expect(result.output).not.toContain('Running reviewer');
+  expect(result.output).not.toContain('[job started:');
+  expect(result.output).toMatch(/> (?:\x1b_pi:c\x07)?\x1b\[7m/);
   expect(result.output).toMatch(/\x1b\[\?2026[hl]|\x1b\[\?25[hl]/);
 
   const bead = spawnSync('bd', ['show', beadId], {
@@ -209,8 +239,8 @@ test('sp chat reviewer smoke without bead', async () => {
   const result = await runChatSmokeWithoutBead(prompt);
 
   expect(result.exitCode).toBe(0);
-  expect(result.output).toContain('ephemeral bead');
   expect(result.output).toContain(expectedTitle);
+  expect(result.output).not.toContain('chat: ephemeral bead');
 }, 30000);
 
 test('sp chat cleanup still fires on induced TUI crash', async () => {

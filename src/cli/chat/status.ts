@@ -24,6 +24,7 @@ export class ChatStatus {
   private lastSignature: string | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private disposed = false;
+  private targetJobId: string | null = null;
 
   constructor(private readonly tui: ChatTui, options: ChatStatusOptions = {}) {
     this.pollIntervalMs = Math.max(DEFAULT_POLL_INTERVAL_MS, options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
@@ -43,6 +44,11 @@ export class ChatStatus {
     this.disposed = true;
   }
 
+  setJobId(jobId: string): void {
+    this.targetJobId = jobId;
+    void this.poll();
+  }
+
   render(width: number): string {
     if (!this.currentStatus) return truncateToWidth('', width);
 
@@ -51,8 +57,9 @@ export class ChatStatus {
     const state = this.currentStatus.status;
     const tokenUsage = this.currentStatus.metrics?.token_usage?.total_tokens;
     const model = formatModel(this.currentStatus);
+    const specialist = this.currentStatus.specialist ?? 'job';
 
-    const line = `executor/${jobId}/${beadId} · ${state} · ${formatTokenCount(tokenUsage)} tok · ${model}`;
+    const line = `${specialist}/${jobId}/${beadId} · ${state} · ${formatTokenCount(tokenUsage)} tok · ${model}`;
     return truncateToWidth(line, width);
   }
 
@@ -72,6 +79,10 @@ export class ChatStatus {
   private readCurrentStatus(): SupervisorStatus | null {
     try {
       const statuses = loadStatuses();
+      if (this.targetJobId) {
+        const target = statuses.find((status) => status.id === this.targetJobId);
+        if (target) return target;
+      }
       return selectCurrentStatus(statuses);
     } catch {
       return null;
