@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { dispatchInput, executeInput } from '../../../src/cli/chat/control.js';
+import { createChatControl, dispatchInput, type ControlOps, type Result } from '../../../src/cli/chat/control.js';
 
-function status(status: 'running' | 'waiting' | 'done' | 'error' | 'cancelled' = 'running', bead_id = 'bd.1') {
-  return { status, bead_id, fifo_path: '/tmp/fifo' } as const;
+function ok(message?: string): Result { return { ok: true, message }; }
+function err(error_code: 'not_waiting' | 'already_stopped' | 'unknown_command' | 'missing_notes', likely_cause: string, next_safe_action: 'none' | 'rejoin'): Result {
+  return { ok: false, error_code, likely_cause, next_safe_action };
 }
 
 describe('dispatchInput', () => {
@@ -13,68 +14,64 @@ describe('dispatchInput', () => {
     ['/show', 'running', { kind: 'show' }],
     ['/quit', 'running', { kind: 'quit' }],
   ])('parses %s', (input, jobState, expected) => {
-    expect(dispatchInput(input as string, { jobState: jobState as any }).action).toEqual(expected);
+    expect(dispatchInput(input as string, { jobState: jobState as any })).toEqual(expected);
   });
 
   it('returns error action for unknown slash', () => {
-    expect(dispatchInput('/bogus', { jobState: 'running' }).action).toEqual({ kind: 'error', message: 'unknown command: bogus' });
+    expect(dispatchInput('/bogus', { jobState: 'running' })).toEqual({ kind: 'error', message: 'unknown command: bogus' });
   });
 
   it('routes plain text to steer when running', () => {
-    expect(dispatchInput('focus on supervisor', { jobState: 'running' }).action).toEqual({ kind: 'steer', text: 'focus on supervisor' });
+    expect(dispatchInput('focus on supervisor', { jobState: 'running' })).toEqual({ kind: 'steer', text: 'focus on supervisor' });
   });
 
   it('routes plain text to resume when waiting', () => {
-    expect(dispatchInput('next task', { jobState: 'waiting' }).action).toEqual({ kind: 'resume', text: 'next task' });
+    expect(dispatchInput('next task', { jobState: 'waiting' })).toEqual({ kind: 'resume', text: 'next task' });
   });
 
   it('rejects freeform input in terminal state', () => {
-    expect(dispatchInput('next task', { jobState: 'done' }).action).toEqual({ kind: 'reject', message: 'freeform input rejected in terminal state' });
+    expect(dispatchInput('next task', { jobState: 'done' })).toEqual({ kind: 'reject', message: 'freeform input rejected in terminal state' });
   });
 
   it('requires notes body', () => {
-    expect(dispatchInput('/notes   ', { jobState: 'running' }).action).toEqual({ kind: 'info', message: 'usage: /notes <text>' });
+    expect(dispatchInput('/notes   ', { jobState: 'running' })).toEqual({ kind: 'info', message: 'usage: /notes <text>' });
   });
 });
 
-describe('executeInput', () => {
-  it('posts plain text as steer when job is running', async () => {
-    const mailboxPost = vi.fn();
-    const action = await executeInput('keep going', {
-      jobId: 'job-1',
-      readStatus: () => status('running'),
-      mailboxPost,
-    });
+describe('ControlOps contract', () => {
+  it('/stop on already-stopped job is no-op info', async () => {
+    const controlOps: ControlOps = {
+      stopJob: vi.fn().mockResolvedValue(ok('already stopped')),
+      finalizeJob: vi.fn().mockResolvedValue(ok()),
+      appendBeadNote: vi.fn().mockResolvedValue(ok()),
+    };
 
-    expect(action).toEqual({ kind: 'steer', text: 'keep going' });
-    expect(mailboxPost).toHaveBeenCalledWith({ jobId: 'job-1', kind: 'steer', text: 'keep going' });
+    const chat = createChatControl(controlOps);
+    expect(await chat.executeInput('/stop', { jobId: 'job-1', jobState: 'running' })).toEqual({ kind: 'info', message: 'already stopped' });
+    expect(controlOps.stopJob).toHaveBeenCalledWith('job-1');
   });
 
-  it('does not call appendBeadNote for empty /notes', async () => {
-    const appendBeadNote = vi.fn();
-    const action = await executeInput('/notes', {
-      jobId: 'job-1',
-      readStatus: () => status('running'),
-      appendBeadNote,
-      writeHint: vi.fn(),
-    });
+  it('/finalize on non-waiting job returns structured error envelope', async () => {
+    const controlOps: ControlOps = {
+      stopJob: vi.fn().mockResolvedValue(ok()),
+      finalizeJob: vi.fn().mockResolvedValue(err('not_waiting', 'job is running', 'rejoin')),
+      appendBeadNote: vi.fn().mockResolvedValue(ok()),
+    };
 
-    expect(action).toEqual({ kind: 'info', message: 'usage: /notes <text>' });
-    expect(appendBeadNote).not.toHaveBeenCalled();
+    const chat = createChatControl(controlOps);
+    const action = await chat.executeInput('/finalize', { jobId: 'job-1', jobState: 'running' });
+    expect(action).toEqual({ kind: 'error', message: JSON.stringify({ ok: false, error_code: 'not_waiting', likely_cause: 'job is running', next_safe_action: 'rejoin' }) });
   });
 
-  it('matches integration snapshot for running state plain text submit', async () => {
-    const action = await executeInput('resume this', {
-      jobId: 'job-7',
-      readStatus: () => status('running'),
-      mailboxPost: vi.fn(),
-    });
+  it('empty /notes returns error before ControlOps.appendBeadNote', async () => {
+    const controlOps: ControlOps = {
+      stopJob: vi.fn().mockResolvedValue(ok()),
+      finalizeJob: vi.fn().mockResolvedValue(ok()),
+      appendBeadNote: vi.fn().mockResolvedValue(ok()),
+    };
 
-    expect(action).toMatchInlineSnapshot(`
-      {
-        "kind": "steer",
-        "text": "resume this",
-      }
-    `);
+    const chat = createChatControl(controlOps);
+    expect(await chat.executeInput('/notes   ', { jobId: 'job-1', jobState: 'running', beadId: 'bd.1' })).toEqual({ kind: 'info', message: 'usage: /notes <text>' });
+    expect(controlOps.appendBeadNote).not.toHaveBeenCalled();
   });
 });
