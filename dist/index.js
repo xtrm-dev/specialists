@@ -51367,7 +51367,7 @@ function exitWithError(message) {
   process.exit(1);
 }
 function isTerminalStatus2(status) {
-  return status === "done" || status === "error" || status === "cancelled";
+  return status === "done" || status === "error" || status === "cancelled" || status === "stopped";
 }
 function toTarget(status) {
   return {

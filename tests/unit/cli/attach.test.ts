@@ -66,19 +66,23 @@ describe('attach CLI', () => {
     });
   });
 
-  it('attaches terminal job in read-only mode through injected TUI runner', async () => {
-    statuses = [{ id: 'job-done', status: 'done', specialist: 'reviewer' }];
-    process.argv = ['node', 'specialists', 'attach', 'job-done'];
+  it.each([
+    ['job-done', 'done'],
+    ['job-stopped', 'stopped'],
+  ])('attaches terminal job %s in read-only mode through injected TUI runner', async (jobId, status) => {
+    statuses = [{ id: jobId, status, specialist: 'reviewer' }];
+    process.argv = ['node', 'specialists', 'attach', jobId];
     const runTui = vi.fn().mockResolvedValue(undefined);
 
     const { run } = await import('../../../src/cli/attach.js');
     await run({ runTui });
 
     expect(runTui).toHaveBeenCalledWith({
-      id: 'job-done',
-      status: 'done',
+      id: jobId,
+      status,
       specialist: 'reviewer',
       beadId: undefined,
+      fifoPath: undefined,
       terminal: true,
     });
   });
