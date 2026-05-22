@@ -51313,7 +51313,10 @@ async function run27(target, deps = {}) {
     return;
   }) : undefined;
   let lastSubmitted = null;
+  let submitInFlight = false;
   input2.onSubmit = (text) => {
+    if (submitInFlight)
+      return;
     const now = Date.now();
     if (lastSubmitted && lastSubmitted.text === text && now - lastSubmitted.atMs < 250)
       return;
@@ -51323,6 +51326,7 @@ async function run27(target, deps = {}) {
       tui.requestRender();
       return;
     }
+    submitInFlight = true;
     handleSubmittedInput({
       text,
       getJobId: () => target.id,
@@ -51345,6 +51349,8 @@ async function run27(target, deps = {}) {
       },
       requestRender: () => tui.requestRender(),
       requestExit: requestDetach
+    }).finally(() => {
+      submitInFlight = false;
     });
   };
   try {
