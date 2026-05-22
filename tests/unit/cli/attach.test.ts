@@ -66,16 +66,21 @@ describe('attach CLI', () => {
     });
   });
 
-  it('rejects terminal job attach explicitly', async () => {
-    statuses = [{ id: 'job-done', status: 'done', specialist: 'reviewer' }];
-    process.argv = ['node', 'specialists', 'attach', 'job-done'];
+  it.each([
+    ['job-done', 'done'],
+    ['job-error', 'error'],
+    ['job-cancelled', 'cancelled'],
+    ['job-stopped', 'stopped'],
+  ])('rejects terminal job attach explicitly for %s', async (jobId, status) => {
+    statuses = [{ id: jobId, status, specialist: 'reviewer' }];
+    process.argv = ['node', 'specialists', 'attach', jobId];
 
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(process, 'exit').mockImplementation(((code?: number) => { throw new Error(`exit:${code}`); }) as never);
 
     const { run } = await import('../../../src/cli/attach.js');
     await expect(run()).rejects.toThrow('exit:1');
-    expect(errorSpy).toHaveBeenCalledWith('Job `job-done` is terminal. Attach only supports running, waiting, starting jobs.');
+    expect(errorSpy).toHaveBeenCalledWith(`Job \`${jobId}\` is terminal. Attach only supports running, waiting, starting jobs.`);
   });
 
   it('picker only shows active jobs', async () => {
