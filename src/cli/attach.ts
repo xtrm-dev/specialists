@@ -28,7 +28,7 @@ function exitWithError(message: string): never {
 }
 
 function isTerminalStatus(status?: string): boolean {
-  return status === 'done' || status === 'error' || status === 'cancelled';
+  return status === 'done' || status === 'error' || status === 'cancelled' || status === 'stopped';
 }
 
 function toTarget(status: { id: string; status: ChatState; specialist?: string; bead_id?: string; fifo_path?: string }): AttachTarget {
