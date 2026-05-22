@@ -51260,7 +51260,7 @@ var exports_attach_tui = {};
 __export(exports_attach_tui, {
   run: () => run27
 });
-async function run27(target) {
+async function run27(target, deps = {}) {
   const piTui = await Promise.resolve().then(() => (init_dist2(), exports_dist));
   const { TUI: TUI2, ProcessTerminal: ProcessTerminal2, Container: Container2, Input: Input2, matchesKey: matchesKey2, Key: Key2 } = piTui;
   const terminal = new ProcessTerminal2;
@@ -51269,12 +51269,12 @@ async function run27(target) {
   const statusBar = new ChatStatus(tui, { pollIntervalMs: 500 });
   statusBar.setJobId(target.id);
   const control = createChatControl({
-    getJobState: async () => target.status,
+    getJobState: async () => target.status ?? "running",
     stopJob: async () => ({ ok: true, message: "stop requested" }),
     finalizeJob: async () => ({ ok: true, message: "finalize requested" }),
     appendBeadNote: async () => ({ ok: false, error_code: "missing_notes", likely_cause: "notes unavailable", next_safe_action: "none" })
   });
-  const input2 = new Input2({ placeholder: target.terminal ? "Read-only attach; input unavailable for terminal job" : "Type message, /quit, /stop, /finalize, /show" });
+  const input2 = new Input2;
   const root = new Container2;
   root.addChild(feed);
   root.addChild({ render: (width) => [statusBar.render(width)], invalidate: () => {
@@ -51284,27 +51284,45 @@ async function run27(target) {
     root.addChild(input2);
   const cleanup = createCleanup(tui, terminal, statusBar);
   const restoreStderr = silenceStderrDuringTui();
+  const stopTailer = startChatEventTailer({
+    jobId: target.id,
+    jobsDir: ".specialists/jobs",
+    specialist: target.specialist,
+    beadId: target.beadId,
+    feed,
+    requestRender: () => tui.requestRender()
+  });
+  let detached = false;
+  let resolveDetach = null;
+  const detachedPromise = new Promise((resolve11) => {
+    resolveDetach = resolve11;
+  });
+  const requestDetach = () => {
+    if (detached)
+      return;
+    detached = true;
+    feed.appendEvent("chat", "detaching; specialist job left running");
+    tui.requestRender();
+    resolveDetach?.();
+  };
   const removeInputListener = typeof tui.addInputListener === "function" ? tui.addInputListener((data) => {
     if (matchesKey2 && Key2 && matchesKey2(data, Key2.ctrl("c"))) {
-      feed.appendEvent("chat", "detaching; specialist job left running");
-      tui.requestRender();
+      requestDetach();
       return { consume: true };
     }
     return;
-  }) : () => {
-    return;
-  };
+  }) : undefined;
   input2.onSubmit = (text) => {
     if (target.terminal && !text.trim().startsWith("/")) {
-      feed.appendEvent("chat", "input unavailable in terminal job; /show or /quit only");
+      feed.appendEvent("chat", ALWAYS_READ_ONLY_MESSAGE);
       tui.requestRender();
       return;
     }
     handleSubmittedInput({
       text,
       getJobId: () => target.id,
-      getJobState: async () => target.status,
-      getJobStatus: async () => ({ status: target.status }),
+      getJobState: async () => target.status ?? "running",
+      getJobStatus: async () => ({ status: target.status, fifo_path: target.fifoPath }),
       beadId: target.beadId,
       control,
       appendEvent: (type, details) => {
@@ -51312,20 +51330,17 @@ async function run27(target) {
         tui.requestRender();
       },
       requestRender: () => tui.requestRender(),
-      requestExit: () => process.exit(0)
+      requestExit: requestDetach
     });
   };
-  const stopTailer = startChatEventTailer({ jobId: target.id, jobsDir: ".specialists/jobs", specialist: target.specialist, beadId: target.beadId, feed, requestRender: () => tui.requestRender() });
   try {
     tui.addChild(root);
     tui.setFocus(input2);
     statusBar.start();
     tui.start();
-    feed.appendEvent("chat", formatChatShow(target.id, target.beadId, { status: target.status }));
+    feed.appendEvent("chat", formatChatShow(target.id, target.beadId, { status: target.status, fifo_path: target.fifoPath }));
     tui.requestRender(true);
-    await new Promise(() => {
-      return;
-    });
+    await detachedPromise;
   } finally {
     stopTailer();
     restoreStderr();
@@ -51333,6 +51348,7 @@ async function run27(target) {
     await cleanup.stop();
   }
 }
+var ALWAYS_READ_ONLY_MESSAGE = "input unavailable in terminal job; /show or /quit only";
 var init_attach_tui = __esm(() => {
   init_feed();
   init_status();
@@ -51359,6 +51375,7 @@ function toTarget(status) {
     status: status.status,
     specialist: status.specialist ?? "job",
     beadId: status.bead_id,
+    fifoPath: status.fifo_path,
     terminal: isTerminalStatus2(status.status)
   };
 }
@@ -51400,7 +51417,7 @@ function pickTarget(targets) {
 async function run28(deps = {}) {
   const [jobId] = process.argv.slice(3);
   if (!jobId) {
-    if (!process.stdout.isTTY)
+    if (!process.stdout.isTTY || !process.stdin.isTTY)
       exitWithError("Usage: specialists attach <job-id>");
     const targets = loadTargets();
     if (targets.length === 0)
@@ -51412,9 +51429,9 @@ async function run28(deps = {}) {
   return attachTarget(loadTarget(jobId), deps);
 }
 async function attachTarget(target, deps) {
-  const runTui = deps.runTui ?? (async () => {
+  const runTui = deps.runTui ?? (async (resolvedTarget) => {
     const { run: run29 } = await Promise.resolve().then(() => (init_attach_tui(), exports_attach_tui));
-    return run29(target);
+    return run29(resolvedTarget, deps);
   });
   return runTui(target);
 }
