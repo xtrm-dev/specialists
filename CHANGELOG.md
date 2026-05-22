@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `sp attach` now opens a chat-style TUI for active specialist jobs, including bare-picker launch and explicit `sp attach <job-id>` attach flows.
+
+### Fixed
+- Bare `sp attach` now has a real keyboard picker: Up/Down moves the highlighted active job and Enter attaches it.
+- Attach targets are limited to active jobs (`running`, `waiting`, `starting`); terminal jobs are hidden from the picker and rejected when requested explicitly.
+- Waiting-job attach input now uses live status/fifo data and sends resume/follow-up instead of stale `steer`; duplicate submit guards prevent double-resume busy errors.
+
 ## [v3.15.4] — 2026-05-21
 
 ### Added
