@@ -1,22 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { execFileSync, spawnSync } from 'node:child_process';
 
-vi.mock('node:child_process', () => ({
-  execFileSync: vi.fn(),
-  spawnSync: vi.fn(),
+let statuses: Array<Record<string, unknown>> = [];
+
+vi.mock('../../../src/specialist/status-load.js', () => ({
+  loadStatuses: vi.fn(() => statuses),
 }));
 
-let tempRoot: string;
-let specialistsDir: string;
-let jobsDir: string;
+vi.mock('node:fs', async () => {
+  const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+  return { ...actual, readFileSync: vi.fn(() => '1') };
+});
 
-function writeStatus(jobId: string, status: Record<string, unknown>): void {
-  const jobDir = join(jobsDir, jobId);
-  mkdirSync(jobDir, { recursive: true });
-  writeFileSync(join(jobDir, 'status.json'), JSON.stringify(status), 'utf-8');
+let tempRoot: string;
+
+function setTty(stdout: boolean, stdin: boolean): void {
+  Object.defineProperty(process.stdout, 'isTTY', { configurable: true, value: stdout });
+  Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: stdin });
 }
 
 describe('attach CLI', () => {
@@ -24,117 +26,98 @@ describe('attach CLI', () => {
 
   beforeEach(() => {
     tempRoot = mkdtempSync(join(tmpdir(), 'sp-attach-test-'));
-    specialistsDir = join(tempRoot, '.specialists');
-    jobsDir = join(specialistsDir, 'jobs');
-    mkdirSync(jobsDir, { recursive: true });
     vi.spyOn(process, 'cwd').mockReturnValue(tempRoot);
-    process.env.SPECIALISTS_JOB_FILE_OUTPUT = 'on';
-    (spawnSync as unknown as { mockReset: () => void }).mockReset();
-    (execFileSync as unknown as { mockReset: () => void }).mockReset();
+    setTty(true, true);
+    statuses = [];
   });
 
   afterEach(() => {
     process.argv = originalArgv;
     if (existsSync(tempRoot)) rmSync(tempRoot, { recursive: true, force: true });
     vi.restoreAllMocks();
-    delete process.env.SPECIALISTS_JOB_FILE_OUTPUT;
   });
 
-  it('exits with usage when job-id is missing', async () => {
+  it('exits with usage when job-id is missing and tty absent', async () => {
+    setTty(false, false);
     process.argv = ['node', 'specialists', 'attach'];
 
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
-      throw new Error(`exit:${code}`);
-    }) as never);
+    vi.spyOn(process, 'exit').mockImplementation(((code?: number) => { throw new Error(`exit:${code}`); }) as never);
 
     const { run } = await import('../../../src/cli/attach.js');
     await expect(run()).rejects.toThrow('exit:1');
     expect(errorSpy).toHaveBeenCalledWith('Usage: specialists attach <job-id>');
   });
 
-  it('exits when the job is not found', async () => {
-    process.argv = ['node', 'specialists', 'attach', 'job-missing'];
-
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
-      throw new Error(`exit:${code}`);
-    }) as never);
+  it('attaches to running job through injected TUI runner', async () => {
+    statuses = [{ id: 'job-running', status: 'running', specialist: 'reviewer', bead_id: 'bd.1' }];
+    process.argv = ['node', 'specialists', 'attach', 'job-running'];
+    const runTui = vi.fn().mockResolvedValue(undefined);
 
     const { run } = await import('../../../src/cli/attach.js');
-    await expect(run()).rejects.toThrow('exit:1');
-    expect(errorSpy).toHaveBeenCalledWith('Job `job-missing` not found.');
-  });
+    await run({ runTui });
 
-  it('exits when the job is already completed', async () => {
-    writeStatus('job-done', {
-      id: 'job-done',
-      status: 'done',
-      tmux_session: 'sess-1',
-    });
-    process.argv = ['node', 'specialists', 'attach', 'job-done'];
-
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
-      throw new Error(`exit:${code}`);
-    }) as never);
-
-    const { run } = await import('../../../src/cli/attach.js');
-    await expect(run()).rejects.toThrow('exit:1');
-    expect(errorSpy).toHaveBeenCalledWith('Job `job-done` has already completed (status: done). Use `specialists result job-done` to read output.');
-  });
-
-  it('exits when tmux session is missing', async () => {
-    writeStatus('job-no-session', {
-      id: 'job-no-session',
-      status: 'running',
-    });
-    process.argv = ['node', 'specialists', 'attach', 'job-no-session'];
-
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
-      throw new Error(`exit:${code}`);
-    }) as never);
-
-    const { run } = await import('../../../src/cli/attach.js');
-    await expect(run()).rejects.toThrow('exit:1');
-    expect(errorSpy).toHaveBeenCalledWith('Job `job-no-session` has no tmux session. It may have been started without tmux or tmux was not installed.');
-  });
-
-  it('exits when tmux is not installed', async () => {
-    writeStatus('job-no-tmux', {
-      id: 'job-no-tmux',
-      status: 'running',
-      tmux_session: 'sess-2',
-    });
-    process.argv = ['node', 'specialists', 'attach', 'job-no-tmux'];
-
-    (spawnSync as unknown as { mockReturnValue: (value: unknown) => void }).mockReturnValue({ status: 1 } as never);
-
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
-      throw new Error(`exit:${code}`);
-    }) as never);
-
-    const { run } = await import('../../../src/cli/attach.js');
-    await expect(run()).rejects.toThrow('exit:1');
-    expect(errorSpy).toHaveBeenCalledWith('tmux is not installed. Install tmux to use `specialists attach`.');
-  });
-
-  it('attaches to tmux for a running job', async () => {
-    writeStatus('job-running', {
+    expect(runTui).toHaveBeenCalledWith({
       id: 'job-running',
       status: 'running',
-      tmux_session: 'sess-live',
+      specialist: 'reviewer',
+      beadId: 'bd.1',
+      terminal: false,
     });
-    process.argv = ['node', 'specialists', 'attach', 'job-running'];
+  });
 
-    (spawnSync as unknown as { mockReturnValue: (value: unknown) => void }).mockReturnValue({ status: 0 } as never);
+  it.each([
+    ['job-done', 'done'],
+    ['job-stopped', 'stopped'],
+  ])('attaches terminal job %s in read-only mode through injected TUI runner', async (jobId, status) => {
+    statuses = [{ id: jobId, status, specialist: 'reviewer' }];
+    process.argv = ['node', 'specialists', 'attach', jobId];
+    const runTui = vi.fn().mockResolvedValue(undefined);
 
     const { run } = await import('../../../src/cli/attach.js');
-    await run();
+    await run({ runTui });
 
-    expect(spawnSync).toHaveBeenCalledWith('which', ['tmux'], { stdio: 'ignore' });
-    expect(execFileSync).toHaveBeenCalledWith('tmux', ['attach-session', '-t', 'sess-live'], { stdio: 'inherit' });
+    expect(runTui).toHaveBeenCalledWith({
+      id: jobId,
+      status,
+      specialist: 'reviewer',
+      beadId: undefined,
+      fifoPath: undefined,
+      terminal: true,
+    });
+  });
+
+  it('picker selects highest-priority job in tty mode', async () => {
+    statuses = [
+      { id: 'job-done', status: 'done', specialist: 'reviewer' },
+      { id: 'job-running', status: 'running', specialist: 'executor' },
+      { id: 'job-waiting', status: 'waiting', specialist: 'planner' },
+    ];
+    process.argv = ['node', 'specialists', 'attach'];
+    const runTui = vi.fn().mockResolvedValue(undefined);
+
+    const { run } = await import('../../../src/cli/attach.js');
+    await run({ runTui });
+
+    expect(runTui).toHaveBeenCalledWith({
+      id: 'job-running',
+      status: 'running',
+      specialist: 'executor',
+      beadId: undefined,
+      terminal: false,
+    });
+  });
+
+  it('exits with usage when no tty is available for explicit job id', async () => {
+    setTty(false, false);
+    statuses = [{ id: 'job-running', status: 'running' }];
+    process.argv = ['node', 'specialists', 'attach', 'job-running'];
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(process, 'exit').mockImplementation(((code?: number) => { throw new Error(`exit:${code}`); }) as never);
+
+    const { run } = await import('../../../src/cli/attach.js');
+    await expect(run()).rejects.toThrow('exit:1');
+    expect(errorSpy).toHaveBeenCalledWith('Usage: specialists attach <job-id>');
   });
 });

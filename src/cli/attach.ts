@@ -1,10 +1,25 @@
-import { execFileSync, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { loadStatuses } from '../specialist/status-load.js';
+import type { ChatState } from './chat/control.js';
 
 interface JobStatus {
-  status?: string;
-  tmux_session?: string;
+  status?: ChatState;
+  bead_id?: string;
+  specialist?: string;
+  fifo_path?: string;
+}
+
+interface AttachTarget {
+  id: string;
+  status: JobStatus['status'];
+  specialist: string;
+  beadId?: string;
+  fifoPath?: string;
+  terminal: boolean;
+}
+
+export interface AttachRuntimeDeps {
+  runTui?: (target: AttachTarget) => Promise<void>;
 }
 
 function exitWithError(message: string): never {
@@ -12,47 +27,71 @@ function exitWithError(message: string): never {
   process.exit(1);
 }
 
-function readStatus(statusPath: string, jobId: string): JobStatus {
-  try {
-    return JSON.parse(readFileSync(statusPath, 'utf-8')) as JobStatus;
-  } catch (error: unknown) {
-    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
-      exitWithError(`Job \`${jobId}\` not found. Run \`specialists status\` to see active jobs in current mode.`);
-    }
-
-    const details = error instanceof Error ? error.message : String(error);
-    exitWithError(`Failed to read status for job \`${jobId}\`: ${details}`);
-  }
+function isTerminalStatus(status?: string): boolean {
+  return status === 'done' || status === 'error' || status === 'cancelled' || status === 'stopped';
 }
 
-export async function run(): Promise<void> {
+function toTarget(status: { id: string; status: ChatState; specialist?: string; bead_id?: string; fifo_path?: string }): AttachTarget {
+  return {
+    id: status.id,
+    status: status.status,
+    specialist: status.specialist ?? 'job',
+    beadId: status.bead_id,
+    fifoPath: status.fifo_path,
+    terminal: isTerminalStatus(status.status),
+  };
+}
+
+function loadTarget(jobId: string): AttachTarget {
+  const status = loadStatuses().find((item) => item.id === jobId);
+  if (!status) exitWithError(`Job \`${jobId}\` not found. Run \`specialists status\` to see active jobs in current mode.`);
+  return toTarget(status);
+}
+
+function loadTargets(): AttachTarget[] {
+  return loadStatuses()
+    .map(toTarget)
+    .sort((left, right) => priorityOf(left.status) - priorityOf(right.status) || left.id.localeCompare(right.id));
+}
+
+function priorityOf(status?: string): number {
+  if (status === 'running') return 0;
+  if (status === 'waiting') return 1;
+  if (status === 'starting') return 2;
+  if (status === 'done') return 3;
+  if (status === 'error') return 4;
+  if (status === 'cancelled') return 5;
+  return 6;
+}
+
+function pickTarget(targets: AttachTarget[]): AttachTarget {
+  console.log('Attach job:');
+  for (const [index, target] of targets.entries()) {
+    console.log(`  ${index + 1}. ${target.id}  ${target.specialist}  ${target.status}`);
+  }
+  const input = readFileSync(0, 'utf8').trim();
+  const choice = Number(input);
+  if (!Number.isInteger(choice) || choice < 1 || choice > targets.length) exitWithError('Invalid selection.');
+  return targets[choice - 1]!;
+}
+
+export async function run(deps: AttachRuntimeDeps = {}): Promise<void> {
   const [jobId] = process.argv.slice(3);
-
   if (!jobId) {
-    exitWithError('Usage: specialists attach <job-id>  (normal runtime is DB-backed; job files are legacy/operator-only)');
+    if (!process.stdout.isTTY || !process.stdin.isTTY) exitWithError('Usage: specialists attach <job-id>');
+    const targets = loadTargets();
+    if (targets.length === 0) exitWithError('No jobs found. Run `specialists status` to see active jobs in current mode.');
+    return attachTarget(pickTarget(targets), deps);
   }
 
-  const jobsDir = join(process.cwd(), '.specialists', 'jobs');
-  const statusPath = join(jobsDir, jobId, 'status.json');
-  const status = readStatus(statusPath, jobId);
+  if (!process.stdout.isTTY || !process.stdin.isTTY) exitWithError('Usage: specialists attach <job-id>');
+  return attachTarget(loadTarget(jobId), deps);
+}
 
-  if (status.status === 'done' || status.status === 'error') {
-    exitWithError(`Job \`${jobId}\` has already completed (status: ${status.status}). Use \`specialists result ${jobId}\` to read output.`);
-  }
-
-  const sessionName = status.tmux_session?.trim();
-  if (!sessionName) {
-    exitWithError('Job `' + jobId + '` has no tmux session. It may have been started without tmux or tmux was not installed.');
-  }
-
-  const whichTmux = spawnSync('which', ['tmux'], { stdio: 'ignore' });
-  if (whichTmux.status !== 0) {
-    exitWithError('tmux is not installed. Install tmux to use `specialists attach`.');
-  }
-
-  try {
-    execFileSync('tmux', ['attach-session', '-t', sessionName], { stdio: 'inherit' });
-  } catch {
-    process.exit(1);
-  }
+async function attachTarget(target: AttachTarget, deps: AttachRuntimeDeps): Promise<void> {
+  const runTui = deps.runTui ?? (async (resolvedTarget: AttachTarget) => {
+    const { run } = await import('./attach-tui.js');
+    return run(resolvedTarget, deps);
+  });
+  return runTui(target);
 }
