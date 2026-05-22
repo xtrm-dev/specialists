@@ -91,7 +91,11 @@ export async function run(target: AttachTarget, deps: AttachRuntimeDeps = {}): P
     })
     : undefined;
 
+  let lastSubmitted: { text: string; atMs: number } | null = null;
   input.onSubmit = (text: string) => {
+    const now = Date.now();
+    if (lastSubmitted && lastSubmitted.text === text && now - lastSubmitted.atMs < 250) return;
+    lastSubmitted = { text, atMs: now };
     if (target.terminal && !text.trim().startsWith('/')) {
       feed.appendEvent('chat', ALWAYS_READ_ONLY_MESSAGE);
       tui.requestRender();
