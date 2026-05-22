@@ -2,8 +2,8 @@
 title: CLI Reference
 scope: cli
 category: reference
-version: 2.8.0
-updated: 2026-05-21
+version: 2.8.1
+updated: 2026-05-22
 synced_at: b92a11ba
 description: Complete command reference for the Specialists CLI, generated from current source.
 source_of_truth_for:
@@ -486,6 +486,7 @@ Slash commands:
 | Command | Behavior |
 |---|---|
 | `/quit` | Detach from the TUI and leave the specialist job running/waiting. |
+| `Ctrl+C` | Same as `/quit`: restore the terminal and detach without stopping the job. |
 | `/stop` | Send the normal stop control action for the current job. |
 | `/finalize` | Finalize the current waiting chain/job using the normal finalize path. |
 | `/notes <text>` | Append a note to the current bead. |

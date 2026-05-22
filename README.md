@@ -181,7 +181,7 @@ sp clean --reap-orphans --dry-run
 sp clean --ps                 # hide terminal dashboard history without deleting DB audit rows
 ```
 
-`sp chat` is for launching a new interactive specialist session. It renders the same normalized feed style as `sp feed -f`, shows startup/payload context and the final result, and maps typed input to `steer` while running or `resume` while waiting. Current `sp attach <job-id>` remains the legacy tmux attach path; chat-style attach to an existing job is tracked separately.
+`sp chat` is for launching a new interactive specialist session. It renders the same normalized feed style as `sp feed -f`, shows startup/payload context and the final result, and maps typed input to `steer` while running or `resume` while waiting. `/quit` and Ctrl+C detach the TUI without stopping the job; use `/stop` when you intend to stop it. Current `sp attach <job-id>` remains the legacy tmux attach path; chat-style attach to an existing job is tracked separately.
 
 ## Script and service specialists
 

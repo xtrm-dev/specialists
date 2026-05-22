@@ -2,8 +2,8 @@
 title: Bead-First Workflow
 scope: workflow
 category: guide
-version: 1.4.0
-updated: 2026-05-21
+version: 1.4.1
+updated: 2026-05-22
 synced_at: b92a11ba
 description: Canonical tracked and ad-hoc workflow for Specialists.
 source_of_truth_for:
@@ -64,7 +64,7 @@ For a human-in-the-loop launch, use `sp chat`:
 sp chat explorer --bead unitAI-abc
 ```
 
-`sp chat` opens a TUI that combines a `sp feed -f`-style feed, pinned status row, final result display, and input prompt. Freeform input maps to `steer` while the job is running and `resume` while it is waiting. `/quit` detaches without killing the job.
+`sp chat` opens a TUI that combines a `sp feed -f`-style feed, pinned status row, final result display, and input prompt. Freeform input maps to `steer` while the job is running and `resume` while it is waiting. `/quit` and `Ctrl+C` detach without killing the job; use `/stop` when you intend to stop it.
 
 `--background` may also create a legacy tmux session when tmux is available. `sp attach <job>` reconnects to that tmux session only; it is not yet the chat TUI attach flow. Existing-job TUI attach is tracked separately in bead `unitAI-hx4ln`.
 

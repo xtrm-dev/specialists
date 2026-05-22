@@ -34,7 +34,7 @@ describe('dispatchInput', () => {
   });
 
   it('requires notes body', () => {
-    expect(dispatchInput('/notes   ', { jobState: 'running' })).toEqual({ kind: 'info', message: 'usage: /notes <text>' });
+    expect(dispatchInput('/notes   ', { jobState: 'running' })).toEqual({ kind: 'error', message: 'usage: /notes <text>' });
   });
 });
 
@@ -74,7 +74,7 @@ describe('ControlOps contract', () => {
     };
 
     const chat = createChatControl(controlOps);
-    expect(await chat.executeInput('/notes   ', { jobId: 'job-1', jobState: 'running', beadId: 'bd.1' })).toEqual({ kind: 'info', message: 'usage: /notes <text>' });
+    expect(await chat.executeInput('/notes   ', { jobId: 'job-1', jobState: 'running', beadId: 'bd.1' })).toEqual({ kind: 'error', message: 'usage: /notes <text>' });
     expect(controlOps.appendBeadNote).not.toHaveBeenCalled();
   });
 
