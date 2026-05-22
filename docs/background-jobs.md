@@ -2,8 +2,8 @@
 title: Background Jobs
 scope: background-jobs
 category: guide
-version: 1.7.0
-updated: 2026-05-21
+version: 1.7.1
+updated: 2026-05-22
 synced_at: b92a11ba
 description: Supervisor-backed job model, keep-alive semantics, and monitoring commands.
 source_of_truth_for:
@@ -105,6 +105,7 @@ Typed chat input uses the same FIFO as the explicit commands:
 Slash commands in chat:
 
 - `/quit` detaches without killing the job.
+- `Ctrl+C` behaves like `/quit`: it restores the terminal and detaches, but does not stop the job.
 - `/stop` stops the job through the normal control path.
 - `/finalize` finalizes a waiting chain/job.
 - `/notes <text>` appends to the current bead.
