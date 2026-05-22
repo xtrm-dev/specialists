@@ -125,4 +125,24 @@ describe('attach-tui runtime', () => {
     listener?.('ctrl-c');
     await expect(runPromise).resolves.toBeUndefined();
   });
+
+  it('suppresses duplicate rapid submits of same line', async () => {
+    const { loadStatuses } = await import('../../../src/specialist/status-load.js');
+    vi.mocked(loadStatuses).mockReturnValue([{ id: 'job-1', status: 'waiting', fifo_path: '/tmp/live-fifo' } as any]);
+    const { handleSubmittedInput } = await import('../../../src/cli/chat.js');
+    const { run } = await import('../../../src/cli/attach-tui.js');
+
+    const baseline = vi.mocked(handleSubmittedInput).mock.calls.length;
+    const runPromise = run({ id: 'job-1', status: 'waiting', specialist: 'reviewer', fifoPath: '/tmp/old-fifo', terminal: false });
+    await Promise.resolve();
+    lastInput?.onSubmit?.('where is runner.ts');
+    lastInput?.onSubmit?.('where is runner.ts');
+    await Promise.resolve();
+
+    const delta = vi.mocked(handleSubmittedInput).mock.calls.length - baseline;
+    expect(delta).toBe(1);
+
+    listener?.('ctrl-c');
+    await expect(runPromise).resolves.toBeUndefined();
+  });
 });

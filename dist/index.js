@@ -51312,7 +51312,12 @@ async function run27(target, deps = {}) {
     }
     return;
   }) : undefined;
+  let lastSubmitted = null;
   input2.onSubmit = (text) => {
+    const now = Date.now();
+    if (lastSubmitted && lastSubmitted.text === text && now - lastSubmitted.atMs < 250)
+      return;
+    lastSubmitted = { text, atMs: now };
     if (target.terminal && !text.trim().startsWith("/")) {
       feed.appendEvent("chat", ALWAYS_READ_ONLY_MESSAGE);
       tui.requestRender();
