@@ -285,7 +285,7 @@ interface ChatEventTailerOptions {
   requestRender: () => void;
 }
 
-function startChatEventTailer(options: ChatEventTailerOptions): () => void {
+export function startChatEventTailer(options: ChatEventTailerOptions): () => void {
   const eventsPath = `${options.jobsDir}/${options.jobId}/events.jsonl`;
   const sqliteClient = createObservabilitySqliteClient(process.cwd());
   const colorize = new JobColorMap().get(options.jobId);
@@ -487,7 +487,7 @@ function readChatJobStatus(jobsDir: string, jobId: string): { model?: string; co
   }
 }
 
-function silenceStderrDuringTui(): () => void {
+export function silenceStderrDuringTui(): () => void {
   const originalWrite = process.stderr.write.bind(process.stderr) as any;
   (process.stderr as any).write = (_chunk: unknown, encoding?: BufferEncoding | ((error?: Error | null) => void), callback?: (error?: Error | null) => void): boolean => {
     if (typeof encoding === 'function') encoding(null);
@@ -617,7 +617,7 @@ export async function handleSubmittedInput(deps: SubmittedInputDeps): Promise<vo
   deps.requestRender();
 }
 
-function formatChatShow(jobId: string, beadId: string | undefined, status: { fifo_path?: string; status?: string } | null): string {
+export function formatChatShow(jobId: string, beadId: string | undefined, status: { fifo_path?: string; status?: string } | null): string {
   const parts = [
     `job=${jobId}`,
     beadId ? `bead=${beadId}` : '',
@@ -649,7 +649,7 @@ async function runChatControlAction(deps: SubmittedInputDeps, action: () => Prom
   }
 }
 
-function createCleanup(tui: any, terminal: any, status: ChatStatus) {
+export function createCleanup(tui: any, terminal: any, status: ChatStatus) {
   const state: CleanupState = { done: false };
   return {
     async stop(): Promise<void> {
