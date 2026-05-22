@@ -2,6 +2,7 @@ import { ChatFeed } from './chat/feed.js';
 import { ChatStatus } from './chat/status.js';
 import { createChatControl, type ChatState } from './chat/control.js';
 import { createCleanup, formatChatShow, handleSubmittedInput, silenceStderrDuringTui, startChatEventTailer } from './chat.js';
+import { loadStatuses } from '../specialist/status-load.js';
 import type { AttachRuntimeDeps } from './attach.js';
 
 type PiTuiModule = typeof import('@earendil-works/pi-tui');
@@ -99,8 +100,17 @@ export async function run(target: AttachTarget, deps: AttachRuntimeDeps = {}): P
     void handleSubmittedInput({
       text,
       getJobId: () => target.id,
-      getJobState: async () => target.status ?? 'running',
-      getJobStatus: async (): Promise<JobStatusView> => ({ status: target.status, fifo_path: target.fifoPath }),
+      getJobState: async () => {
+        const live = loadStatuses().find((status) => status.id === target.id);
+        return live?.status ?? target.status ?? 'running';
+      },
+      getJobStatus: async (): Promise<JobStatusView> => {
+        const live = loadStatuses().find((status) => status.id === target.id);
+        return {
+          status: live?.status ?? target.status,
+          fifo_path: live?.fifo_path ?? target.fifoPath,
+        };
+      },
       beadId: target.beadId,
       control,
       appendEvent: (type, details) => {
