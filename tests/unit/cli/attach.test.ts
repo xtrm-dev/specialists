@@ -68,44 +68,43 @@ describe('attach CLI', () => {
 
   it.each([
     ['job-done', 'done'],
+    ['job-error', 'error'],
+    ['job-cancelled', 'cancelled'],
     ['job-stopped', 'stopped'],
-  ])('attaches terminal job %s in read-only mode through injected TUI runner', async (jobId, status) => {
+  ])('rejects terminal job attach explicitly for %s', async (jobId, status) => {
     statuses = [{ id: jobId, status, specialist: 'reviewer' }];
     process.argv = ['node', 'specialists', 'attach', jobId];
-    const runTui = vi.fn().mockResolvedValue(undefined);
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(process, 'exit').mockImplementation(((code?: number) => { throw new Error(`exit:${code}`); }) as never);
 
     const { run } = await import('../../../src/cli/attach.js');
-    await run({ runTui });
-
-    expect(runTui).toHaveBeenCalledWith({
-      id: jobId,
-      status,
-      specialist: 'reviewer',
-      beadId: undefined,
-      fifoPath: undefined,
-      terminal: true,
-    });
+    await expect(run()).rejects.toThrow('exit:1');
+    expect(errorSpy).toHaveBeenCalledWith(`Job \`${jobId}\` is terminal. Attach only supports running, waiting, starting jobs.`);
   });
 
-  it('picker selects highest-priority job in tty mode', async () => {
+  it('picker only shows active jobs', async () => {
     statuses = [
       { id: 'job-done', status: 'done', specialist: 'reviewer' },
       { id: 'job-running', status: 'running', specialist: 'executor' },
       { id: 'job-waiting', status: 'waiting', specialist: 'planner' },
+      { id: 'job-starting', status: 'starting', specialist: 'ops' },
+      { id: 'job-error', status: 'error', specialist: 'reviewer' },
+      { id: 'job-cancelled', status: 'cancelled', specialist: 'reviewer' },
+      { id: 'job-stopped', status: 'stopped', specialist: 'reviewer' },
     ];
     process.argv = ['node', 'specialists', 'attach'];
     const runTui = vi.fn().mockResolvedValue(undefined);
 
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const { run } = await import('../../../src/cli/attach.js');
     await run({ runTui });
 
-    expect(runTui).toHaveBeenCalledWith({
-      id: 'job-running',
-      status: 'running',
-      specialist: 'executor',
-      beadId: undefined,
-      terminal: false,
-    });
+    expect(logSpy).toHaveBeenCalledWith('Attach job:');
+    expect(logSpy).toHaveBeenCalledWith('  1. job-running  executor  running');
+    expect(logSpy).toHaveBeenCalledWith('  2. job-waiting  planner  waiting');
+    expect(logSpy).toHaveBeenCalledWith('  3. job-starting  ops  starting');
+    expect(runTui).toHaveBeenCalledWith(expect.objectContaining({ id: 'job-running', terminal: false }));
   });
 
   it('exits with usage when no tty is available for explicit job id', async () => {

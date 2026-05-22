@@ -45,12 +45,14 @@ function toTarget(status: { id: string; status: ChatState; specialist?: string; 
 function loadTarget(jobId: string): AttachTarget {
   const status = loadStatuses().find((item) => item.id === jobId);
   if (!status) exitWithError(`Job \`${jobId}\` not found. Run \`specialists status\` to see active jobs in current mode.`);
+  if (isTerminalStatus(status.status)) exitWithError(`Job \`${jobId}\` is terminal. Attach only supports running, waiting, starting jobs.`);
   return toTarget(status);
 }
 
 function loadTargets(): AttachTarget[] {
   return loadStatuses()
     .map(toTarget)
+    .filter((target) => !target.terminal)
     .sort((left, right) => priorityOf(left.status) - priorityOf(right.status) || left.id.localeCompare(right.id));
 }
 
@@ -58,10 +60,7 @@ function priorityOf(status?: string): number {
   if (status === 'running') return 0;
   if (status === 'waiting') return 1;
   if (status === 'starting') return 2;
-  if (status === 'done') return 3;
-  if (status === 'error') return 4;
-  if (status === 'cancelled') return 5;
-  return 6;
+  return 3;
 }
 
 function pickTarget(targets: AttachTarget[]): AttachTarget {
