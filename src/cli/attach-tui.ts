@@ -1,4 +1,3 @@
-import type { Component } from '@earendil-works/pi-tui';
 import { ChatFeed } from './chat/feed.js';
 import { ChatStatus } from './chat/status.js';
 import { createChatControl, type ChatState } from './chat/control.js';
@@ -8,7 +7,7 @@ import type { AttachRuntimeDeps } from './attach.js';
 type PiTuiModule = typeof import('@earendil-works/pi-tui');
 
 type TuiInstance = {
-  addChild(child: Component | { render(width: number): string[]; invalidate(): void }): void;
+  addChild(child: unknown): void;
   setFocus(component: unknown): void;
   start(): void;
   stop(): void;
@@ -52,11 +51,11 @@ export async function run(target: AttachTarget, deps: AttachRuntimeDeps = {}): P
     appendBeadNote: async () => ({ ok: false, error_code: 'missing_notes', likely_cause: 'notes unavailable', next_safe_action: 'none' }),
   });
 
-  const input = new Input() as InputInstance;
-  const root = new Container();
+  const input: InputInstance = new Input();
+  const root = new Container() as { addChild(child: unknown): void };
   root.addChild(feed);
   root.addChild({ render: (width: number) => [statusBar.render(width)], invalidate: () => undefined });
-  if (!target.terminal) root.addChild(input as unknown as Component);
+  if (!target.terminal) root.addChild(input);
   const cleanup = createCleanup(tui, terminal, statusBar);
   const restoreStderr = silenceStderrDuringTui();
   const stopTailer = startChatEventTailer({
@@ -115,7 +114,7 @@ export async function run(target: AttachTarget, deps: AttachRuntimeDeps = {}): P
 
   try {
     tui.addChild(root);
-    tui.setFocus(input as unknown as InputInstance);
+    tui.setFocus(input);
     statusBar.start();
     tui.start();
     feed.appendEvent('chat', formatChatShow(target.id, target.beadId, { status: target.status, fifo_path: target.fifoPath }));
