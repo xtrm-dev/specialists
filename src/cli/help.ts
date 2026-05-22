@@ -89,7 +89,7 @@ export async function run(): Promise<void> {
     '  Interactive TUI',
     '    specialists chat <name> --bead <id>       # launches job + feed/status/result/input TUI',
     '    # freeform input steers running jobs or resumes waiting jobs automatically',
-    '    # /quit detaches; /stop, /finalize, /notes, /show use normal control paths',
+    '    # /quit or Ctrl+C detach; /stop intentionally stops; /finalize, /notes, /show use control paths',
     '',
     '  Ad-hoc work',
     '    specialists run <name> --prompt "..."',

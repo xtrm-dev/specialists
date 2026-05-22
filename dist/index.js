@@ -40229,11 +40229,8 @@ function createChatControl(controlOps) {
       const action = dispatchInput(text, { jobState: liveState ?? ctx.jobState });
       if (action.kind === "info" || action.kind === "error" || action.kind === "reject")
         return action;
-      if (isPlainText(text)) {
-        const currentState = await controlOps.getJobState(ctx.jobId);
-        if (currentState && isTerminalState(currentState)) {
-          return { kind: "reject", message: "freeform input rejected in terminal state" };
-        }
+      if (isPlainText(text) && liveState && isTerminalState(liveState)) {
+        return { kind: "reject", message: "freeform input rejected in terminal state" };
       }
       if (action.kind === "stop")
         return handleResult2(await controlOps.stopJob(ctx.jobId), "stop");
@@ -40797,7 +40794,8 @@ var init_bead_notes = () => {};
 // src/cli/chat.ts
 var exports_chat = {};
 __export(exports_chat, {
-  run: () => run13
+  run: () => run13,
+  handleSubmittedInput: () => handleSubmittedInput
 });
 import { spawnSync as spawnSync11 } from "child_process";
 import { appendFileSync as appendFileSync4, readFileSync as readFileSync16, writeFileSync as writeFileSync9 } from "fs";
@@ -40852,18 +40850,24 @@ async function run13() {
   const cleanup = createCleanup(tui, terminal, status);
   const signalCleanup = installSignalGuards(cleanup, input2);
   let shouldExit = false;
+  let exitAfterCleanup = false;
   let currentJobId = "";
   let stopChatEventTailer;
   let resolveExitRequest = null;
   const exitRequested = new Promise((resolve9) => {
     resolveExitRequest = () => resolve9(true);
   });
+  const requestDetach = () => {
+    shouldExit = true;
+    exitAfterCleanup = true;
+    resolveExitRequest?.();
+  };
   const appendEvent = (type, details) => {
     feed.appendEvent(type, details);
     tui.requestRender();
   };
   const restoreStderr = silenceStderrDuringTui();
-  input2.onSubmit = (text) => {
+  const submitChatInput = (text) => {
     input2.setValue("");
     handleSubmittedInput({
       text,
@@ -40874,15 +40878,15 @@ async function run13() {
       control,
       appendEvent,
       requestRender: () => tui.requestRender(),
-      requestExit: () => {
-        shouldExit = true;
-        resolveExitRequest?.();
-      }
+      requestExit: requestDetach
     });
   };
+  input2.onSubmit = submitChatInput;
+  let removeStdinFallback;
   const removeInputListener = typeof tui.addInputListener === "function" ? tui.addInputListener((data) => {
     if (matchesKey2 && Key2 && matchesKey2(data, Key2.ctrl("c"))) {
-      cleanup.stopJobAndExit(currentJobId);
+      appendEvent("chat", "detaching; specialist job left running");
+      requestDetach();
       return { consume: true };
     }
     return;
@@ -40897,6 +40901,7 @@ async function run13() {
     status.start();
     dbg("about to tui.start()", { stdoutTTY: process.stdout.isTTY === true, stdinTTY: process.stdin.isTTY === true });
     tui.start();
+    removeStdinFallback = installStdinCommandFallback({ submitChatInput, requestDetach, appendEvent });
     tui.requestRender(true);
     await new Promise((resolve9) => setTimeout(resolve9, 0));
     dbg("tui.start() returned");
@@ -40957,10 +40962,13 @@ async function run13() {
     dbg("finally \u2014 cleanup");
     stopChatEventTailer?.();
     restoreStderr();
+    removeStdinFallback?.();
     removeInputListener?.();
     signalCleanup();
     await cleanup.stop();
     dbg("cleanup done \u2014 exiting run()");
+    if (exitAfterCleanup)
+      process.exit(0);
   }
 }
 function parseArgs7(argv) {
@@ -41253,6 +41261,42 @@ function silenceStderrDuringTui() {
     process.stderr.write = originalWrite;
   };
 }
+function installStdinCommandFallback(options2) {
+  let currentLine = "";
+  const onData = (chunk) => {
+    const data = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : chunk;
+    if (data.includes("\x03")) {
+      options2.appendEvent("chat", "detaching; specialist job left running");
+      options2.requestDetach();
+      return;
+    }
+    const result = updateRawSlashCommandBuffer(data, currentLine);
+    currentLine = result.nextLine;
+    if (result.command)
+      options2.submitChatInput(result.command);
+  };
+  process.stdin.on("data", onData);
+  return () => process.stdin.off("data", onData);
+}
+function updateRawSlashCommandBuffer(data, currentLine) {
+  let line = currentLine;
+  for (const char of data) {
+    if (char === "\r" || char === `
+`) {
+      const submitted = line.trim();
+      return { nextLine: "", command: submitted.startsWith("/") ? submitted : undefined };
+    }
+    if (char === "\x03")
+      return { nextLine: line };
+    if (char === "\b" || char === "\x7F") {
+      line = line.slice(0, -1);
+      continue;
+    }
+    if (char >= " " && char !== "\x7F")
+      line += char;
+  }
+  return { nextLine: line };
+}
 async function handleSubmittedInput(deps) {
   deps.appendEvent("user", deps.text);
   const jobId = deps.getJobId();
@@ -41265,6 +41309,11 @@ async function handleSubmittedInput(deps) {
   }
   if (!jobId && action.kind !== "info" && action.kind !== "error") {
     deps.appendEvent("chat", "job not ready yet; try again after job started");
+    return;
+  }
+  if (action.kind === "show") {
+    deps.appendEvent("chat", formatChatShow(jobId, deps.beadId, await deps.getJobStatus()));
+    deps.requestRender();
     return;
   }
   if (action.kind === "steer" || action.kind === "resume") {
@@ -41301,9 +41350,16 @@ async function handleSubmittedInput(deps) {
   }
   if ("message" in action)
     deps.appendEvent("chat", action.message);
-  else
-    deps.appendEvent("chat", `${action.kind} requested for ${jobId || "pending job"}`);
   deps.requestRender();
+}
+function formatChatShow(jobId, beadId, status) {
+  const parts = [
+    `job=${jobId}`,
+    beadId ? `bead=${beadId}` : "",
+    status?.status ? `state=${status.status}` : "",
+    status?.fifo_path ? "fifo=ready" : "fifo=missing"
+  ].filter(Boolean);
+  return parts.join(" ");
 }
 async function sendChatJobMessage(deps, type, text) {
   await runChatControlAction(deps, async () => {
@@ -41339,19 +41395,6 @@ function createCleanup(tui, terminal, status) {
       try {
         terminal.stop();
       } catch {}
-    },
-    async stopJobAndExit(jobId) {
-      await this.stop();
-      if (jobId) {
-        process.stderr.write(`Stopping job ${jobId}
-`);
-        const { stopJob: stopJob2 } = await Promise.resolve().then(() => (init_control2(), exports_control));
-        await stopJob2(jobId, { jobsDir: ".specialists/jobs" }).catch((error2) => {
-          process.stderr.write(`[chat] stop failed: ${error2 instanceof Error ? error2.message : String(error2)}
-`);
-        });
-      }
-      process.exit(0);
     }
   };
 }
@@ -53179,7 +53222,7 @@ async function run34() {
     "  Interactive TUI",
     "    specialists chat <name> --bead <id>       # launches job + feed/status/result/input TUI",
     "    # freeform input steers running jobs or resumes waiting jobs automatically",
-    "    # /quit detaches; /stop, /finalize, /notes, /show use normal control paths",
+    "    # /quit or Ctrl+C detach; /stop intentionally stops; /finalize, /notes, /show use control paths",
     "",
     "  Ad-hoc work",
     '    specialists run <name> --prompt "..."',

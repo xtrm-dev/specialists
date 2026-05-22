@@ -46,11 +46,8 @@ export function createChatControl(controlOps: ControlOps): ChatControl {
       const liveState = isPlainText(text) ? await controlOps.getJobState(ctx.jobId) : ctx.jobState;
       const action = dispatchInput(text, { jobState: liveState ?? ctx.jobState });
       if (action.kind === 'info' || action.kind === 'error' || action.kind === 'reject') return action;
-      if (isPlainText(text)) {
-        const currentState = await controlOps.getJobState(ctx.jobId);
-        if (currentState && isTerminalState(currentState)) {
-          return { kind: 'reject', message: 'freeform input rejected in terminal state' };
-        }
+      if (isPlainText(text) && liveState && isTerminalState(liveState)) {
+        return { kind: 'reject', message: 'freeform input rejected in terminal state' };
       }
       if (action.kind === 'stop') return handleResult(await controlOps.stopJob(ctx.jobId), 'stop');
       if (action.kind === 'finalize') return handleResult(await controlOps.finalizeJob(ctx.jobId), 'finalize');
