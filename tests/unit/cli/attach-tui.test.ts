@@ -82,6 +82,45 @@ describe('attach-tui runtime', () => {
     const call = vi.mocked(handleSubmittedInput).mock.calls.at(-1)?.[0] as any;
     expect(await call.getJobState()).toBe('waiting');
     expect(await call.getJobStatus()).toEqual({ status: 'waiting', fifo_path: '/tmp/live-fifo' });
+    expect((await call.getJobState()) === 'waiting' ? 'resume' : 'steer').toBe('resume');
+
+    listener?.('ctrl-c');
+    await expect(runPromise).resolves.toBeUndefined();
+  });
+
+  it('uses live running status for submitted plain text and keeps steer route', async () => {
+    const { loadStatuses } = await import('../../../src/specialist/status-load.js');
+    vi.mocked(loadStatuses).mockReturnValue([{ id: 'job-1', status: 'running', fifo_path: '/tmp/live-fifo' } as any]);
+    const { handleSubmittedInput } = await import('../../../src/cli/chat.js');
+    const { run } = await import('../../../src/cli/attach-tui.js');
+
+    const runPromise = run({ id: 'job-1', status: 'waiting', specialist: 'reviewer', fifoPath: '/tmp/old-fifo', terminal: false });
+    await Promise.resolve();
+    lastInput?.onSubmit?.('where is runner.ts');
+    await Promise.resolve();
+
+    const call = vi.mocked(handleSubmittedInput).mock.calls.at(-1)?.[0] as any;
+    expect(await call.getJobState()).toBe('running');
+    expect((await call.getJobState()) === 'waiting' ? 'resume' : 'steer').toBe('steer');
+
+    listener?.('ctrl-c');
+    await expect(runPromise).resolves.toBeUndefined();
+  });
+
+  it('uses live starting status for submitted plain text and keeps steer route', async () => {
+    const { loadStatuses } = await import('../../../src/specialist/status-load.js');
+    vi.mocked(loadStatuses).mockReturnValue([{ id: 'job-1', status: 'starting', fifo_path: '/tmp/live-fifo' } as any]);
+    const { handleSubmittedInput } = await import('../../../src/cli/chat.js');
+    const { run } = await import('../../../src/cli/attach-tui.js');
+
+    const runPromise = run({ id: 'job-1', status: 'waiting', specialist: 'reviewer', fifoPath: '/tmp/old-fifo', terminal: false });
+    await Promise.resolve();
+    lastInput?.onSubmit?.('where is runner.ts');
+    await Promise.resolve();
+
+    const call = vi.mocked(handleSubmittedInput).mock.calls.at(-1)?.[0] as any;
+    expect(await call.getJobState()).toBe('starting');
+    expect((await call.getJobState()) === 'waiting' ? 'resume' : 'steer').toBe('steer');
 
     listener?.('ctrl-c');
     await expect(runPromise).resolves.toBeUndefined();
