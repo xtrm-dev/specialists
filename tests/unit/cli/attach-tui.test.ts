@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 const requestRender = vi.fn();
 const stop = vi.fn();
 let listener: ((data: string) => { consume: boolean } | undefined) | undefined;
+let lastInput: { onSubmit?: (text: string) => void } | undefined;
 
 vi.mock('@earendil-works/pi-tui', () => {
   class FakeTerminal { stop() {} }
@@ -20,6 +21,7 @@ vi.mock('@earendil-works/pi-tui', () => {
   class FakeContainer { addChild() {} }
   class FakeInput {
     onSubmit?: (text: string) => void;
+    constructor() { lastInput = this; }
     setValue() {}
   }
   return {
@@ -39,7 +41,9 @@ const startChatEventTailer = vi.fn(() => vi.fn());
 vi.mock('../../../src/cli/chat.js', () => ({
   createCleanup,
   formatChatShow,
-  handleSubmittedInput: vi.fn().mockResolvedValue(undefined),
+  handleSubmittedInput: vi.fn().mockImplementation(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }),
   silenceStderrDuringTui: vi.fn(() => vi.fn()),
   startChatEventTailer,
 }));
@@ -47,6 +51,7 @@ vi.mock('../../../src/cli/chat.js', () => ({
 vi.mock('../../../src/cli/chat/feed.js', () => ({ ChatFeed: class { appendEvent() {} } }));
 vi.mock('../../../src/cli/chat/status.js', () => ({ ChatStatus: class { setJobId() {} start() {} render() { return ''; } } }));
 vi.mock('../../../src/cli/chat/control.js', () => ({ createChatControl: vi.fn(() => ({})) }));
+vi.mock('../../../src/specialist/status-load.js', () => ({ loadStatuses: vi.fn(() => []) }));
 
 describe('attach-tui runtime', () => {
   it('detaches on Ctrl+C and passes fifo_path to chat state', async () => {
@@ -63,5 +68,103 @@ describe('attach-tui runtime', () => {
       beadId: undefined,
     }));
     expect(createCleanup).toHaveBeenCalled();
+  });
+
+  it('uses live waiting status for submitted plain text', async () => {
+    const { loadStatuses } = await import('../../../src/specialist/status-load.js');
+    vi.mocked(loadStatuses).mockReturnValue([{ id: 'job-1', status: 'waiting', fifo_path: '/tmp/live-fifo' } as any]);
+    const { handleSubmittedInput } = await import('../../../src/cli/chat.js');
+    const { run } = await import('../../../src/cli/attach-tui.js');
+
+    const runPromise = run({ id: 'job-1', status: 'running', specialist: 'reviewer', fifoPath: '/tmp/old-fifo', terminal: false });
+    await Promise.resolve();
+    lastInput?.onSubmit?.('where is runner.ts');
+    await Promise.resolve();
+
+    const call = vi.mocked(handleSubmittedInput).mock.calls.at(-1)?.[0] as any;
+    expect(await call.getJobState()).toBe('waiting');
+    expect(await call.getJobStatus()).toEqual({ status: 'waiting', fifo_path: '/tmp/live-fifo' });
+    expect((await call.getJobState()) === 'waiting' ? 'resume' : 'steer').toBe('resume');
+
+    listener?.('ctrl-c');
+    await expect(runPromise).resolves.toBeUndefined();
+  });
+
+  it('uses live running status for submitted plain text and keeps steer route', async () => {
+    const { loadStatuses } = await import('../../../src/specialist/status-load.js');
+    vi.mocked(loadStatuses).mockReturnValue([{ id: 'job-1', status: 'running', fifo_path: '/tmp/live-fifo' } as any]);
+    const { handleSubmittedInput } = await import('../../../src/cli/chat.js');
+    const { run } = await import('../../../src/cli/attach-tui.js');
+
+    const runPromise = run({ id: 'job-1', status: 'waiting', specialist: 'reviewer', fifoPath: '/tmp/old-fifo', terminal: false });
+    await Promise.resolve();
+    lastInput?.onSubmit?.('where is runner.ts');
+    await Promise.resolve();
+
+    const call = vi.mocked(handleSubmittedInput).mock.calls.at(-1)?.[0] as any;
+    expect(await call.getJobState()).toBe('running');
+    expect((await call.getJobState()) === 'waiting' ? 'resume' : 'steer').toBe('steer');
+
+    listener?.('ctrl-c');
+    await expect(runPromise).resolves.toBeUndefined();
+  });
+
+  it('uses live starting status for submitted plain text and keeps steer route', async () => {
+    const { loadStatuses } = await import('../../../src/specialist/status-load.js');
+    vi.mocked(loadStatuses).mockReturnValue([{ id: 'job-1', status: 'starting', fifo_path: '/tmp/live-fifo' } as any]);
+    const { handleSubmittedInput } = await import('../../../src/cli/chat.js');
+    const { run } = await import('../../../src/cli/attach-tui.js');
+
+    const runPromise = run({ id: 'job-1', status: 'waiting', specialist: 'reviewer', fifoPath: '/tmp/old-fifo', terminal: false });
+    await Promise.resolve();
+    lastInput?.onSubmit?.('where is runner.ts');
+    await Promise.resolve();
+
+    const call = vi.mocked(handleSubmittedInput).mock.calls.at(-1)?.[0] as any;
+    expect(await call.getJobState()).toBe('starting');
+    expect((await call.getJobState()) === 'waiting' ? 'resume' : 'steer').toBe('steer');
+
+    listener?.('ctrl-c');
+    await expect(runPromise).resolves.toBeUndefined();
+  });
+
+  it('suppresses duplicate rapid submits of same line', async () => {
+    const { loadStatuses } = await import('../../../src/specialist/status-load.js');
+    vi.mocked(loadStatuses).mockReturnValue([{ id: 'job-1', status: 'waiting', fifo_path: '/tmp/live-fifo' } as any]);
+    const { handleSubmittedInput } = await import('../../../src/cli/chat.js');
+    const { run } = await import('../../../src/cli/attach-tui.js');
+
+    const baseline = vi.mocked(handleSubmittedInput).mock.calls.length;
+    const runPromise = run({ id: 'job-1', status: 'waiting', specialist: 'reviewer', fifoPath: '/tmp/old-fifo', terminal: false });
+    await Promise.resolve();
+    lastInput?.onSubmit?.('where is runner.ts');
+    lastInput?.onSubmit?.('where is runner.ts');
+    await Promise.resolve();
+
+    const delta = vi.mocked(handleSubmittedInput).mock.calls.length - baseline;
+    expect(delta).toBe(1);
+
+    listener?.('ctrl-c');
+    await expect(runPromise).resolves.toBeUndefined();
+  });
+
+  it('suppresses second submit while first submit in flight', async () => {
+    const { loadStatuses } = await import('../../../src/specialist/status-load.js');
+    vi.mocked(loadStatuses).mockReturnValue([{ id: 'job-1', status: 'waiting', fifo_path: '/tmp/live-fifo' } as any]);
+    const { handleSubmittedInput } = await import('../../../src/cli/chat.js');
+    const { run } = await import('../../../src/cli/attach-tui.js');
+
+    const baseline = vi.mocked(handleSubmittedInput).mock.calls.length;
+    const runPromise = run({ id: 'job-1', status: 'waiting', specialist: 'reviewer', fifoPath: '/tmp/old-fifo', terminal: false });
+    await Promise.resolve();
+    lastInput?.onSubmit?.('where is runner.ts');
+    lastInput?.onSubmit?.('where is runner.ts /quit');
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    const delta = vi.mocked(handleSubmittedInput).mock.calls.length - baseline;
+    expect(delta).toBe(1);
+
+    listener?.('ctrl-c');
+    await expect(runPromise).resolves.toBeUndefined();
   });
 });
