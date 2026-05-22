@@ -51321,8 +51321,17 @@ async function run27(target, deps = {}) {
     handleSubmittedInput({
       text,
       getJobId: () => target.id,
-      getJobState: async () => target.status ?? "running",
-      getJobStatus: async () => ({ status: target.status, fifo_path: target.fifoPath }),
+      getJobState: async () => {
+        const live = loadStatuses().find((status) => status.id === target.id);
+        return live?.status ?? target.status ?? "running";
+      },
+      getJobStatus: async () => {
+        const live = loadStatuses().find((status) => status.id === target.id);
+        return {
+          status: live?.status ?? target.status,
+          fifo_path: live?.fifo_path ?? target.fifoPath
+        };
+      },
       beadId: target.beadId,
       control,
       appendEvent: (type, details) => {
@@ -51354,6 +51363,7 @@ var init_attach_tui = __esm(() => {
   init_status();
   init_control();
   init_chat();
+  init_status_load();
 });
 
 // src/cli/attach.ts
