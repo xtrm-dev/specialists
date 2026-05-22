@@ -92,7 +92,9 @@ export async function run(target: AttachTarget, deps: AttachRuntimeDeps = {}): P
     : undefined;
 
   let lastSubmitted: { text: string; atMs: number } | null = null;
+  let submitInFlight = false;
   input.onSubmit = (text: string) => {
+    if (submitInFlight) return;
     const now = Date.now();
     if (lastSubmitted && lastSubmitted.text === text && now - lastSubmitted.atMs < 250) return;
     lastSubmitted = { text, atMs: now };
@@ -101,6 +103,7 @@ export async function run(target: AttachTarget, deps: AttachRuntimeDeps = {}): P
       tui.requestRender();
       return;
     }
+    submitInFlight = true;
     void handleSubmittedInput({
       text,
       getJobId: () => target.id,
@@ -123,6 +126,8 @@ export async function run(target: AttachTarget, deps: AttachRuntimeDeps = {}): P
       },
       requestRender: () => tui.requestRender(),
       requestExit: requestDetach,
+    }).finally(() => {
+      submitInFlight = false;
     });
   };
 

@@ -41,7 +41,9 @@ const startChatEventTailer = vi.fn(() => vi.fn());
 vi.mock('../../../src/cli/chat.js', () => ({
   createCleanup,
   formatChatShow,
-  handleSubmittedInput: vi.fn().mockResolvedValue(undefined),
+  handleSubmittedInput: vi.fn().mockImplementation(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }),
   silenceStderrDuringTui: vi.fn(() => vi.fn()),
   startChatEventTailer,
 }));
@@ -138,6 +140,26 @@ describe('attach-tui runtime', () => {
     lastInput?.onSubmit?.('where is runner.ts');
     lastInput?.onSubmit?.('where is runner.ts');
     await Promise.resolve();
+
+    const delta = vi.mocked(handleSubmittedInput).mock.calls.length - baseline;
+    expect(delta).toBe(1);
+
+    listener?.('ctrl-c');
+    await expect(runPromise).resolves.toBeUndefined();
+  });
+
+  it('suppresses second submit while first submit in flight', async () => {
+    const { loadStatuses } = await import('../../../src/specialist/status-load.js');
+    vi.mocked(loadStatuses).mockReturnValue([{ id: 'job-1', status: 'waiting', fifo_path: '/tmp/live-fifo' } as any]);
+    const { handleSubmittedInput } = await import('../../../src/cli/chat.js');
+    const { run } = await import('../../../src/cli/attach-tui.js');
+
+    const baseline = vi.mocked(handleSubmittedInput).mock.calls.length;
+    const runPromise = run({ id: 'job-1', status: 'waiting', specialist: 'reviewer', fifoPath: '/tmp/old-fifo', terminal: false });
+    await Promise.resolve();
+    lastInput?.onSubmit?.('where is runner.ts');
+    lastInput?.onSubmit?.('where is runner.ts /quit');
+    await new Promise((resolve) => setTimeout(resolve, 5));
 
     const delta = vi.mocked(handleSubmittedInput).mock.calls.length - baseline;
     expect(delta).toBe(1);
