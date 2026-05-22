@@ -474,6 +474,120 @@
         "github-actions",
         "xtrm-tools"
       ]
+    },
+    {
+      "id": "bug-031",
+      "timestamp": "2026-05-21T17:10:10+00:00",
+      "error_message": "sp chat TUI emitted terminal mode escapes but rendered no visible feed/status/input in real terminals.",
+      "file": "src/cli/chat.ts; tests/smoke/sp-chat.smoke.test.ts",
+      "root_cause": "chat.ts assigned a non-API tui.root property instead of adding the component tree with tui.addChild(root), started launchSpecialist before the first TUI render could flush, and the smoke harness only asserted generic ANSI takeover markers.",
+      "fix": "Mount the root component via tui.addChild(root), force/yield one render before launching the specialist, route feed updates through requestRender, strengthen smoke assertions for visible feed and input cursor, and make smoke cleanup memory-gate aware.",
+      "tags": [
+        "unitAI-929wj",
+        "bugfix",
+        "sp-chat",
+        "pi-tui",
+        "rendering",
+        "smoke-test"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-21T17:10:10+00:00"
+    },
+    {
+      "id": "bug-032",
+      "timestamp": "2026-05-21T17:51:53+00:00",
+      "error_message": "sp chat rendered specialist activity as noisy assistant:-prefixed raw deltas instead of matching sp run/sp feed.",
+      "file": "src/cli/chat.ts; tests/smoke/sp-chat.smoke.test.ts",
+      "root_cause": "ChatFeed subscribed directly to launchSpecialist onProgress, which streams raw token/thinking/tool deltas, then wrapped each chunk with appendEvent(\"assistant\", ...).",
+      "fix": "Chat now tails the job events.jsonl and formats events with formatEventInlineDebounced, matching sp run human-mode presentation and suppressing assistant: prefixes; smoke asserts the prefix is absent.",
+      "tags": [
+        "unitAI-929wj",
+        "bugfix",
+        "sp-chat",
+        "feed",
+        "formatting"
+      ],
+      "related_bugs": [
+        "bug-031"
+      ],
+      "occurrences": 1,
+      "last_seen": "2026-05-21T17:51:53+00:00"
+    },
+    {
+      "id": "bug-033",
+      "timestamp": "2026-05-21T18:20:57+00:00",
+      "error_message": "sp chat feed printed repeated THINK/TEXT event lines continuously and did not surface startup context or final run output like sp feed/sp result.",
+      "file": "src/cli/chat.ts",
+      "root_cause": "The chat timeline tailer reused formatEventLine but did not copy sp feed event-key dedupe/context-side-line behavior, and it rendered run_complete only as an event summary without output.",
+      "fix": "Added sp feed-style event-key dedupe, startup context side-lines for run_start/payload/mandatory rules/memory events, and run_complete.output rendering so chat behaves as a feed/result hybrid.",
+      "tags": [
+        "unitAI-929wj",
+        "bugfix",
+        "sp-chat",
+        "sp-feed-parity",
+        "dedupe"
+      ],
+      "related_bugs": [
+        "bug-032"
+      ],
+      "occurrences": 1,
+      "last_seen": "2026-05-21T18:20:57+00:00"
+    },
+    {
+      "id": "bug-034",
+      "timestamp": "2026-05-21T21:47:23+00:00",
+      "error_message": "bd create description was corrupted because markdown backticks in a double-quoted shell argument triggered command substitution (sp help, sp attach, build output executed/inlined).",
+      "file": "shell command / bead unitAI-vj8cl",
+      "root_cause": "Used inline double-quoted bash text for markdown containing backticks instead of passing arguments safely.",
+      "fix": "Rewrote the bead description via Python subprocess argument passing; added Do-Not-Repeat guidance to use subprocess args or body files for markdown/code snippets.",
+      "tags": [
+        "beads",
+        "shell-quoting",
+        "docs"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-21T21:47:23+00:00"
+    },
+    {
+      "id": "bug-035",
+      "timestamp": "2026-05-22T08:11:20+00:00",
+      "error_message": "sp chat Ctrl+C stopped the job and /quit did not reliably exit the shell/TUI; /show parsed but had no useful implementation.",
+      "file": "src/cli/chat.ts",
+      "root_cause": "Ctrl+C was wired to stopJobAndExit, coupling detach with job cancellation. /quit only resolved the local race and could leave foreground runner handles alive. /show fell through to a generic requested message.",
+      "fix": "Route Ctrl+C and /quit through a detach path that restores TUI and exits without stopJob, add stdin fallback for slash commands after raw-mode acquisition, implement /show status output, and keep /stop as the explicit stop path.",
+      "tags": [
+        "sp-chat",
+        "ctrl-c",
+        "slash-commands",
+        "attach-prereq",
+        "unitAI-17kx3"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-22T08:11:20+00:00"
+    },
+    {
+      "id": "bug-036",
+      "timestamp": "2026-05-22T13:43:53Z",
+      "error_message": "Bare sp attach list could not be navigated/selected with arrow keys.",
+      "file": "src/cli/attach.ts; tests/unit/cli/attach.test.ts",
+      "root_cause": "The bare attach picker printed a numeric list and blocked on readFileSync(0), so it had no raw-mode keypress handling for Up/Down/Enter despite being presented as an interactive list.",
+      "fix": "Replaced numeric stdin reader with readline keypress picker supporting Up/Down cycling, Enter selection, Ctrl+C cancel, numeric shortcuts, and added regression coverage plus PTY smoke.",
+      "tags": [
+        "unitAI-76yuy",
+        "bugfix",
+        "sp-attach",
+        "picker",
+        "tui",
+        "keyboard"
+      ],
+      "related_bugs": [
+        "bug-035"
+      ],
+      "occurrences": 1,
+      "last_seen": "2026-05-22T13:43:53Z"
     }
   ]
 }

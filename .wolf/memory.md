@@ -184,3 +184,19 @@
 - 2026-05-18T00:00:00Z: unitAI-ylphl.8 updated canonical `using-specialists-v3` relationship guidance to use the full `bd dep --type` vocabulary, dedicated duplicate/supersede commands, and cycle checks; examples now weave `discovered-from`, `caused-by`, `validates`, `relates-to`, and `supersede` into existing single-chain, epic, conflict-cluster, test-failure-map, rebuttal, integration, and debugger-restitch flows.
 
 - 2026-05-18T00:00:00Z: unitAI-ylphl was reframed from a prose workflow catalog into an executable `sp workflows` router epic. Existing children now define registry entries; added CLI/registry implementation plus test-generation and security-audit workflow entries. Entry beads depend on relationship vocabulary unitAI-ylphl.8; CLI implementation depends on completed entries.
+
+- 2026-05-21T17:10:10+00:00: Fixed unitAI-929wj sp chat rendering: pi-tui does not use `tui.root` or Container constructor children; mount with `tui.addChild(root)` and let the initial render flush before launching specialist work. Smoke now asserts visible feed text plus Input cursor, not only terminal mode escapes.
+
+- 2026-05-21T17:51:53+00:00: Follow-up unitAI-929wj feed fix: sp chat should tail events.jsonl and use formatEventInlineDebounced like sp run, not render raw onProgress deltas as assistant-prefixed rows.
+
+- 2026-05-21T18:20:57+00:00: Final unitAI-929wj feed parity fix: sp chat tailer must copy sp feed event-key dedupe for THINK/TEXT, include startup/payload side-lines, and append run_complete.output for a sp feed + sp result hybrid.
+
+- 2026-05-21T21:03:34+00:00: PR 93 concrete append includes turn-boundary reset in chat feed dedupe: reset per job on `turn:start` so THINK/TEXT render once per turn rather than once per job.
+
+- 2026-05-21T21:08:27+00:00: unitAI-cxa50 docs pass: docs/cli-reference.md, docs/background-jobs.md, and docs/workflow.md now define sp chat launch TUI semantics and explicitly keep sp attach documented as legacy tmux-only until unitAI-hx4ln.
+
+- 2026-05-21T21:47:23+00:00: unitAI-vj8cl added sp chat guidance to top-level sp help and README; use safe subprocess/body-file for markdown text containing backticks.
+
+- 2026-05-22T08:11:20+00:00: unitAI-17kx3 changed sp chat detach semantics: /quit and Ctrl+C now restore/exit the TUI without calling stopJob; /stop is the explicit kill path; /show now prints job/bead/state/fifo.
+
+- 2026-05-22T13:43:53Z: unitAI-76yuy fixed bare `sp attach` picker navigation: use raw-mode readline keypresses for Up/Down/Enter instead of `readFileSync(0)` numeric input; regression test emits keypress events and PTY smoke verifies marker movement into attach TUI.

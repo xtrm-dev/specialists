@@ -9,10 +9,6 @@ vi.mock('../../../src/specialist/status-load.js', () => ({
   loadStatuses: vi.fn(() => statuses),
 }));
 
-vi.mock('node:fs', async () => {
-  const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
-  return { ...actual, readFileSync: vi.fn(() => '1') };
-});
 
 let tempRoot: string;
 
@@ -95,16 +91,40 @@ describe('attach CLI', () => {
     ];
     process.argv = ['node', 'specialists', 'attach'];
     const runTui = vi.fn().mockResolvedValue(undefined);
+    const writeSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
 
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const { run } = await import('../../../src/cli/attach.js');
-    await run({ runTui });
+    const runPromise = run({ runTui });
+    process.stdin.emit('keypress', '', { name: 'return' });
+    await runPromise;
 
-    expect(logSpy).toHaveBeenCalledWith('Attach job:');
-    expect(logSpy).toHaveBeenCalledWith('  1. job-running  executor  running');
-    expect(logSpy).toHaveBeenCalledWith('  2. job-waiting  planner  waiting');
-    expect(logSpy).toHaveBeenCalledWith('  3. job-starting  ops  starting');
+    const output = writeSpy.mock.calls.map(([chunk]) => String(chunk)).join('');
+    expect(output).toContain('Attach job (↑/↓, Enter to select, Ctrl+C to cancel)');
+    expect(output).toContain('job-running  executor  running');
+    expect(output).toContain('job-waiting  planner  waiting');
+    expect(output).toContain('job-starting  ops  starting');
+    expect(output).not.toContain('job-done');
+    expect(output).not.toContain('job-error');
     expect(runTui).toHaveBeenCalledWith(expect.objectContaining({ id: 'job-running', terminal: false }));
+  });
+
+  it('picker moves selection with arrow keys before attaching', async () => {
+    statuses = [
+      { id: 'job-running', status: 'running', specialist: 'executor' },
+      { id: 'job-waiting', status: 'waiting', specialist: 'planner' },
+      { id: 'job-starting', status: 'starting', specialist: 'ops' },
+    ];
+    process.argv = ['node', 'specialists', 'attach'];
+    const runTui = vi.fn().mockResolvedValue(undefined);
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    const { run } = await import('../../../src/cli/attach.js');
+    const runPromise = run({ runTui });
+    process.stdin.emit('keypress', '', { name: 'down' });
+    process.stdin.emit('keypress', '', { name: 'return' });
+    await runPromise;
+
+    expect(runTui).toHaveBeenCalledWith(expect.objectContaining({ id: 'job-waiting', terminal: false }));
   });
 
   it('exits with usage when no tty is available for explicit job id', async () => {

@@ -1356,3 +1356,19 @@
 
 - Beads `unitAI-ylphl`, `.1`-`.7`, `.9`-`.11` — epic reframed around `sp workflows` CLI/router; children define workflow registry entries and implementation work, with dependency edges from relationship vocabulary to entries and entries to CLI implementation.
 - `.wolf/cerebrum.md` / `.wolf/memory.md` — recorded the workflow-router decision for future sessions.
+
+> Manual update: 2026-05-21T17:10:10+00:00 — unitAI-929wj fixed sp chat TUI mounting/render timing in src/cli/chat.ts; strengthened tests/smoke/sp-chat.smoke.test.ts and rebuilt dist/index.js.
+
+> Manual update: 2026-05-21T17:51:53+00:00 — unitAI-929wj aligned sp chat feed rendering with sp run/feed by tailing events.jsonl and using formatEventInlineDebounced.
+
+> Manual update: 2026-05-21T18:20:57+00:00 — unitAI-929wj added sp feed dedupe/startup context and sp result output surfacing to src/cli/chat.ts.
+
+> Manual update: 2026-05-21T21:03:34+00:00 — refined `src/cli/chat.ts` dedupe to reset on turn start before appending fixes to PR 93.
+
+> Manual update: 2026-05-21T21:08:27+00:00 — unitAI-cxa50 documented sp chat TUI/feed parity and current attach boundary in docs/cli-reference.md, docs/background-jobs.md, and docs/workflow.md.
+
+> Manual update: 2026-05-21T21:47:23+00:00 — unitAI-vj8cl updated src/cli/help.ts and README.md with sp chat guidance; rebuilt dist/index.js.
+
+> Manual update: 2026-05-22T08:11:20+00:00 — unitAI-17kx3 updated src/cli/chat.ts, src/cli/chat/control.ts, chat tests, docs/help/readme for attach-safe detach semantics.
+
+> Manual update: 2026-05-22T13:43:53Z — unitAI-76yuy updated `src/cli/attach.ts` bare attach picker to support arrow-key selection; `tests/unit/cli/attach.test.ts` covers active-only picker and arrow navigation.

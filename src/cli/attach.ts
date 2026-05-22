@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import readline from 'node:readline';
 import { loadStatuses } from '../specialist/status-load.js';
 import type { ChatState } from './chat/control.js';
 
@@ -63,15 +63,92 @@ function priorityOf(status?: string): number {
   return 3;
 }
 
-function pickTarget(targets: AttachTarget[]): AttachTarget {
-  console.log('Attach job:');
-  for (const [index, target] of targets.entries()) {
-    console.log(`  ${index + 1}. ${target.id}  ${target.specialist}  ${target.status}`);
-  }
-  const input = readFileSync(0, 'utf8').trim();
-  const choice = Number(input);
-  if (!Number.isInteger(choice) || choice < 1 || choice > targets.length) exitWithError('Invalid selection.');
-  return targets[choice - 1]!;
+function formatChoice(target: AttachTarget): string {
+  return `${target.id}  ${target.specialist}  ${target.status}`;
+}
+
+function renderPicker(targets: readonly AttachTarget[], selectedIndex: number): string[] {
+  return [
+    '',
+    'Attach job (↑/↓, Enter to select, Ctrl+C to cancel)',
+    '',
+    ...targets.map((target, index) => `${index === selectedIndex ? '❯' : ' '} ${formatChoice(target)}`),
+    '',
+  ];
+}
+
+function pickTarget(targets: readonly AttachTarget[]): Promise<AttachTarget> {
+  return new Promise((resolve) => {
+    const input = process.stdin;
+    const output = process.stdout;
+    const wasRawMode = input.isTTY ? Boolean(input.isRaw) : false;
+    let selectedIndex = 0;
+    let renderedLineCount = 0;
+
+    const render = (): void => {
+      if (renderedLineCount > 0) {
+        readline.moveCursor(output, 0, -renderedLineCount);
+        readline.clearScreenDown(output);
+      }
+      const lines = renderPicker(targets, selectedIndex);
+      output.write(lines.join('\n'));
+      renderedLineCount = lines.length;
+    };
+
+    const cleanup = (): void => {
+      input.off('keypress', onKeypress);
+      if (input.isTTY && !wasRawMode && typeof input.setRawMode === 'function') {
+        input.setRawMode(false);
+      }
+      output.write('\x1B[?25h');
+      if (renderedLineCount > 0) {
+        readline.moveCursor(output, 0, -renderedLineCount);
+        readline.clearScreenDown(output);
+      }
+    };
+
+    const choose = (index: number): void => {
+      cleanup();
+      resolve(targets[index]!);
+    };
+
+    const onKeypress = (value: string, key: readline.Key): void => {
+      if (key.ctrl && key.name === 'c') {
+        cleanup();
+        process.exit(130);
+      }
+
+      if (key.name === 'up') {
+        selectedIndex = (selectedIndex - 1 + targets.length) % targets.length;
+        render();
+        return;
+      }
+
+      if (key.name === 'down') {
+        selectedIndex = (selectedIndex + 1) % targets.length;
+        render();
+        return;
+      }
+
+      if (key.name === 'return') {
+        choose(selectedIndex);
+        return;
+      }
+
+      const choice = Number(value);
+      if (Number.isInteger(choice) && choice >= 1 && choice <= targets.length) {
+        choose(choice - 1);
+      }
+    };
+
+    readline.emitKeypressEvents(input);
+    if (input.isTTY && !wasRawMode && typeof input.setRawMode === 'function') {
+      input.setRawMode(true);
+    }
+    output.write('\x1B[?25l');
+    input.on('keypress', onKeypress);
+    render();
+  });
 }
 
 export async function run(deps: AttachRuntimeDeps = {}): Promise<void> {
@@ -80,7 +157,7 @@ export async function run(deps: AttachRuntimeDeps = {}): Promise<void> {
     if (!process.stdout.isTTY || !process.stdin.isTTY) exitWithError('Usage: specialists attach <job-id>');
     const targets = loadTargets();
     if (targets.length === 0) exitWithError('No jobs found. Run `specialists status` to see active jobs in current mode.');
-    return attachTarget(pickTarget(targets), deps);
+    return attachTarget(await pickTarget(targets), deps);
   }
 
   if (!process.stdout.isTTY || !process.stdin.isTTY) exitWithError('Usage: specialists attach <job-id>');
