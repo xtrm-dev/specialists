@@ -1,10 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { loadStatuses } from '../specialist/status-load.js';
+import type { ChatState } from './chat/control.js';
 
 interface JobStatus {
-  status?: string;
+  status?: ChatState;
   bead_id?: string;
   specialist?: string;
+  fifo_path?: string;
 }
 
 interface AttachTarget {
@@ -12,6 +14,7 @@ interface AttachTarget {
   status: JobStatus['status'];
   specialist: string;
   beadId?: string;
+  fifoPath?: string;
   terminal: boolean;
 }
 
@@ -28,12 +31,13 @@ function isTerminalStatus(status?: string): boolean {
   return status === 'done' || status === 'error' || status === 'cancelled';
 }
 
-function toTarget(status: { id: string; status: string; specialist?: string; bead_id?: string }): AttachTarget {
+function toTarget(status: { id: string; status: ChatState; specialist?: string; bead_id?: string; fifo_path?: string }): AttachTarget {
   return {
     id: status.id,
     status: status.status,
     specialist: status.specialist ?? 'job',
     beadId: status.bead_id,
+    fifoPath: status.fifo_path,
     terminal: isTerminalStatus(status.status),
   };
 }
@@ -74,7 +78,7 @@ function pickTarget(targets: AttachTarget[]): AttachTarget {
 export async function run(deps: AttachRuntimeDeps = {}): Promise<void> {
   const [jobId] = process.argv.slice(3);
   if (!jobId) {
-    if (!process.stdout.isTTY) exitWithError('Usage: specialists attach <job-id>');
+    if (!process.stdout.isTTY || !process.stdin.isTTY) exitWithError('Usage: specialists attach <job-id>');
     const targets = loadTargets();
     if (targets.length === 0) exitWithError('No jobs found. Run `specialists status` to see active jobs in current mode.');
     return attachTarget(pickTarget(targets), deps);
@@ -85,9 +89,9 @@ export async function run(deps: AttachRuntimeDeps = {}): Promise<void> {
 }
 
 async function attachTarget(target: AttachTarget, deps: AttachRuntimeDeps): Promise<void> {
-  const runTui = deps.runTui ?? (async () => {
+  const runTui = deps.runTui ?? (async (resolvedTarget: AttachTarget) => {
     const { run } = await import('./attach-tui.js');
-    return run(target);
+    return run(resolvedTarget, deps);
   });
   return runTui(target);
 }
