@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- All 17 package-shipped specialists in `config/specialists/` now declare the v3.16.0 schema additions explicitly: `execution.bare: false` and `prompt.system_prompt_mode: "append"`. Values match the previous absent-field defaults — pure-mechanical, zero behavior change — but every shipped spec is now self-documenting at the schema level instead of relying on per-runner legacy fallbacks. `bare.specialist.json` retains its explicit `bare: true` + `replace` (`unitAI-51r2w`).
+
 ### Fixed
 - Supervisor status reads now reconcile dead `starting`/`running` specialist jobs to terminal `error` with a `run_complete(ERROR)` event, so reviewer crashes during heavy bash validation no longer leave `sp ps`/`sp result` stuck on stale `running` rows (`unitAI-6x6p6`, `unitAI-uzyut`).
 
