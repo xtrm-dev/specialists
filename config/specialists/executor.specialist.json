@@ -25,7 +25,8 @@
       "auto_commit": "checkpoint_on_waiting",
       "interactive": true,
       "max_retries": 0,
-      "mode": "auto"
+      "mode": "auto",
+      "bare": false
     },
     "mandatory_rules": {
       "template_sets": [
@@ -79,7 +80,8 @@
             }
           }
         }
-      }
+      },
+      "system_prompt_mode": "append"
     },
     "skills": {
       "paths": [],

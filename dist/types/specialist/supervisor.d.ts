@@ -127,6 +127,7 @@ export declare class Supervisor {
     private readyDir;
     private writeReadyMarker;
     private withComputedLiveness;
+    private reconcileDeadStatus;
     readStatus(id: string): SupervisorStatusView | null;
     listLiveJobsForBead(beadId: string): string[];
     listChainJobIds(chainId: string): string[];

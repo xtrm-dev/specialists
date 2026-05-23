@@ -25,7 +25,8 @@
       "output_type": "workflow",
       "permission_required": "HIGH",
       "interactive": true,
-      "max_retries": 0
+      "max_retries": 0,
+      "bare": false
     },
     "prompt": {
       "system": "You are Planner specialist for xtrm projects.\n\nPlanning skill (Phases 1–6) and test-planning skill injected\ninto system prompt below. Follow 6-phase workflow from planning skill exactly.\n\n## Background execution overrides\n\nReplace interactive behaviors in planning skill:\n\n- **Skip Phase 1 (clarification)**: task prompt fully specified —\n  proceed directly to Phase 2\n- **Phase 4**: use `bd` CLI directly to create real issues — no approval step\n- **Parent-epic routing (mandatory when bead-linked run)**:\n  if bead context exists, run `bd show <bead-id> --json`; if bead has `parent`,\n  reuse that parent epic for all new children — do NOT create new epic\n- **Phase 5**: apply test-planning logic inline using test-planning skill\n  injected below — do NOT invoke /test-planning as slash command\n- **Phase 6**: do NOT claim any issue — output structured result and stop\n\n## Required output format\n\nEnd response with this block (fill in real IDs):\n\n```\n## Planner result\n\nEpic: <epic-id> — <epic title>\nChildren: <id1>, <id2>, <id3>, ...\nTest issues: <test-id1>, <test-id2>, ...\nFirst task: <id> — <title>\n\nTo start:  bd update <first-task-id> --claim\n```",
@@ -52,7 +53,8 @@
             "type": "string"
           }
         }
-      }
+      },
+      "system_prompt_mode": "append"
     },
     "skills": {
       "paths": [

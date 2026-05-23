@@ -26,7 +26,8 @@
       "interactive": true,
       "extensions": {
         "serena": false
-      }
+      },
+      "bare": false
     },
     "mandatory_rules": {
       "template_sets": [
@@ -71,7 +72,8 @@
             }
           }
         }
-      }
+      },
+      "system_prompt_mode": "append"
     },
     "skills": {
       "paths": [],

@@ -24932,6 +24932,45 @@ class Supervisor {
       is_dead: isJobDead(status)
     };
   }
+  reconcileDeadStatus(id, status) {
+    if (!isJobDead(status) || status.status !== "running" && status.status !== "starting") {
+      return this.withComputedLiveness(status);
+    }
+    if (!Number.isFinite(status.started_at_ms)) {
+      return this.withComputedLiveness(status);
+    }
+    const now = Date.now();
+    const recoveredStatus = {
+      ...status,
+      status: "error",
+      current_event: undefined,
+      error: "Process crashed or was killed",
+      last_event_at_ms: now
+    };
+    const elapsed = Math.max(0, Math.round((now - status.started_at_ms) / 1000));
+    const runCompleteEvent = createRunCompleteEvent("ERROR", elapsed, {
+      error: recoveredStatus.error,
+      exit_reason: "crashed"
+    });
+    if (this.sqliteClient) {
+      const persisted = this.withSqliteOperation("upsertStatusWithEvent:readStatus", (client) => {
+        client.upsertStatusWithEvent(recoveredStatus, runCompleteEvent);
+        return true;
+      });
+      if (persisted === undefined) {
+        throw new Error("[supervisor] SQLite upsertStatusWithEvent failed during readStatus recovery: database client unavailable");
+      }
+    } else {
+      this.writeStatusFileOnly(id, recoveredStatus);
+      if (this.isJobFileOutputEnabled) {
+        const eventsPath = this.eventsPath(id);
+        mkdirSync4(this.jobDir(id), { recursive: true });
+        appendFileSync(eventsPath, JSON.stringify(runCompleteEvent) + `
+`, "utf-8");
+      }
+    }
+    return this.withComputedLiveness(recoveredStatus);
+  }
   readStatus(id) {
     try {
       if (this.isDisposed) {
@@ -24939,7 +24978,7 @@ class Supervisor {
       }
       const sqliteStatus = this.withSqliteOperation("readStatus", (client) => client.readStatus(id));
       if (sqliteStatus)
-        return this.withComputedLiveness(sqliteStatus);
+        return this.reconcileDeadStatus(id, sqliteStatus);
     } catch (error2) {
       if (!(error2 instanceof Error && error2.message.includes("supervisor is disposed"))) {
         console.warn(`[supervisor] SQLite readStatus failed, falling back to file state: ${String(error2)}`);
@@ -24950,7 +24989,7 @@ class Supervisor {
       return null;
     try {
       const status = JSON.parse(readFileSync8(path, "utf-8"));
-      return this.withComputedLiveness(status);
+      return this.reconcileDeadStatus(id, status);
     } catch {
       return null;
     }

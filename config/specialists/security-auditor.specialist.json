@@ -26,7 +26,8 @@
       "permission_required": "LOW",
       "interactive": true,
       "thinking_level": "low",
-      "max_retries": 0
+      "max_retries": 0,
+      "bare": false
     },
     "mandatory_rules": {
       "template_sets": [
@@ -78,7 +79,8 @@
             }
           }
         }
-      }
+      },
+      "system_prompt_mode": "append"
     },
     "skills": {
       "paths": [],
