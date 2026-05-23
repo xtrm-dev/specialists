@@ -464,6 +464,7 @@ Authoring notes:
 - `stall_detection` handles Supervisor state/timeline warnings and error promotion
 - `permission_required` controls post-job GitNexus reindex (see below)
 - For bead-driven specialists, rely on `$bead_context` / `$bead_id` in templates
+- Bare specialists: see [bare-specialists.md](bare-specialists.md)
 - Additional fields: `author`, `tags`, `created`, `output_type`, `max_retries`, `beads_write_notes`, `communication`
 
 
