@@ -1129,6 +1129,7 @@ _This project is indexed by GitNexus. You MUST use these tools — do NOT fall b
       } catch {
       // Non-fatal — GitNexus not indexed, skip injection
     }
+    }
 
     // 2. .xtrm/memory.md is injected by xtrm-loader Pi extension (before_agent_start).
     // Do NOT duplicate here — saves ~800 tokens per specialist spawn.
@@ -1205,7 +1206,6 @@ _This project is indexed by GitNexus. You MUST use these tools — do NOT fall b
         }
       }
     }
-  }
 
     const totalMemoryInjectionTokens = staticTokens + memoryTokens + gitnexusTokens;
     onEvent?.('memory_injection', {
