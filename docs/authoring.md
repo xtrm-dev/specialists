@@ -134,6 +134,8 @@ The example above is explorer's actual block: when `pi-serena-tools` and `pi-git
 
 See [manifest.md](manifest.md) for full semantics, the canonical example, and when to *not* add an override.
 
+For bare-mode authoring and npm-package starter flow, see [bare-specialists.md](bare-specialists.md).
+
 
 ### Referencing canonical assets
 
