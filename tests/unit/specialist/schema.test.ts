@@ -63,6 +63,7 @@ describe('parseSpecialist', () => {
     expect(result.specialist.execution.max_retries).toBe(0);
     expect(result.specialist.execution.interactive).toBe(false);
     expect(result.specialist.execution.output_type).toBe('custom');
+    expect(result.specialist.execution.bare).toBe(false);
   });
 
   it('accepts execution.interactive', async () => {

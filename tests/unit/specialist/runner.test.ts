@@ -455,6 +455,95 @@ describe('SpecialistRunner', () => {
     expect(sessionOptions.systemPrompt).not.toContain('## Output Contract');
   });
 
+  it('toggles runtime injections off when execution.bare=true', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'runner-bare-mode-'));
+    try {
+      mkdirSync(join(cwd, '.gitnexus'), { recursive: true });
+      writeFileSync(join(cwd, '.gitnexus', 'meta.json'), JSON.stringify({ indexed: true }));
+
+      const sessionFactory = vi.fn().mockResolvedValue(mockSession);
+      const runner = new SpecialistRunner({
+        loader: makeLoader(
+          { response_format: 'markdown', output_type: 'codegen', bare: true },
+          'auto',
+          { system: 'Base system prompt.', task_template: 'Do $prompt' },
+          {
+            mandatory_rules: {
+              template_sets: ['serena-cheatsheet'],
+              inline_rules: [{ id: 'bare-inline', level: 'error', text: 'Bare rule' }],
+            },
+          },
+        ),
+        hooks: new HookEmitter({ tracePath: '/tmp/test-hooks-trace.jsonl' }),
+        circuitBreaker: new CircuitBreaker(),
+        sessionFactory,
+      });
+
+      await runner.run({
+        name: 'reviewer',
+        prompt: 'do thing',
+        reusedFromJobId: 'job-reviewed',
+        workingDirectory: cwd,
+        variables: {
+          reviewed_job_id: 'job-reviewed',
+        },
+      });
+
+      const sessionOptions = sessionFactory.mock.calls[0][0];
+      const renderedTask = mockSession.prompt.mock.calls.at(-1)?.[0] as string;
+      expect(sessionOptions.systemPrompt).toContain('Base system prompt.');
+      expect(sessionOptions.systemPrompt).not.toContain('Specialist Run Context');
+      expect(sessionOptions.systemPrompt).not.toContain('Output Style (mandatory)');
+      expect(sessionOptions.systemPrompt).not.toContain('MANDATORY: GitNexus Code Intelligence');
+      expect(sessionOptions.systemPrompt).not.toContain('Beads Workflow Quick Rules');
+      expect(sessionOptions.systemPrompt).not.toContain('Reviewer patch retrieval');
+      expect(sessionOptions.systemPrompt).not.toContain('Output Contract');
+      expect(renderedTask).not.toContain('## MANDATORY_RULES');
+      expect(renderedTask).not.toContain('Bare rule');
+
+      const defaultSession = makeMockSession();
+      const defaultSessionFactory = vi.fn().mockResolvedValue(defaultSession);
+      const defaultRunner = new SpecialistRunner({
+        loader: makeLoader(
+          { response_format: 'markdown', output_type: 'codegen' },
+          'auto',
+          { system: 'Base system prompt.', task_template: 'Do $prompt' },
+          {
+            mandatory_rules: {
+              template_sets: ['serena-cheatsheet'],
+              inline_rules: [{ id: 'bare-inline', level: 'error', text: 'Bare rule' }],
+            },
+          },
+        ),
+        hooks: new HookEmitter({ tracePath: '/tmp/test-hooks-trace.jsonl' }),
+        circuitBreaker: new CircuitBreaker(),
+        sessionFactory: defaultSessionFactory,
+      });
+
+      await defaultRunner.run({
+        name: 'reviewer',
+        prompt: 'do thing',
+        reusedFromJobId: 'job-reviewed',
+        workingDirectory: cwd,
+        variables: {
+          reviewed_job_id: 'job-reviewed',
+        },
+      });
+
+      const defaultSessionOptions = defaultSessionFactory.mock.calls[0][0];
+      const defaultRenderedTask = defaultSession.prompt.mock.calls.at(-1)?.[0] as string;
+      expect(defaultSessionOptions.systemPrompt).toContain('Specialist Run Context');
+      expect(defaultSessionOptions.systemPrompt).toContain('Output Style (mandatory)');
+      expect(defaultSessionOptions.systemPrompt).toContain('MANDATORY: GitNexus Code Intelligence');
+      expect(defaultSessionOptions.systemPrompt).toContain('Beads Workflow Quick Rules');
+      expect(defaultSessionOptions.systemPrompt).toContain('Output Contract');
+      expect(defaultRenderedTask).toContain('## MANDATORY_RULES');
+      expect(defaultRenderedTask).toContain('Bare rule');
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
   it('warns when response_format=json output is not parseable JSON', async () => {
     mockSession.getLastOutput.mockResolvedValueOnce('not-json');
     const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);

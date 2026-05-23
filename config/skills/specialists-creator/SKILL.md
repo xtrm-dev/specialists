@@ -358,6 +358,22 @@ Typical use cases:
 - `gitnexus: false` for specialists that should not receive GitNexus graph tooling
 - set both `false` for constrained runs that need clean extension surface
 
+### Bare specialists
+
+Use `execution.bare: true` for non-coding LLM transforms that need a fresh canvas: research synthesis, document analysis, summarization, extraction, translation, or other tasks where specialist runtime framing adds noise instead of help.
+
+Bare mode disables all package-runner prompt injection beyond rendered `prompt.system` and `prompt.task_template`: Specialist Run Context, Output Style, GitNexus mandate, `STATIC_WORKFLOW_RULES_BLOCK`, memory injection, GitNexus pre-query snapshot, reviewer patch retrieval, output contract, and task-side mandatory rules / reviewer diff context.
+
+`execution.bare` is orthogonal to `prompt.system_prompt_mode`. Set `bare: true` without `system_prompt_mode: "replace"` when you want to keep pi's coding-agent base prompt but skip specialist runtime injections.
+
+Copy bare template from installed npm package, not repo clone:
+
+```bash
+cp "$(node -p \"require.resolve('@jaggerxtrm/specialists/package.json').replace(/package\\.json$/, '')\")config/specialists/bare.specialist.json" ".specialists/user/<your-name>.specialist.json"
+```
+
+Warning: bare mode bypasses `mandatory_rules` completely — template sets, inline rules, and global disables all skip runtime injection in bare runs.
+
 ### `specialist.prompt` (required)
 
 | Field | Type | Required | Notes |
