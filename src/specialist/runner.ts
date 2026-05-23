@@ -1037,7 +1037,7 @@ export class SpecialistRunner {
     try {
       mandatoryRulesInjection = buildMandatoryRulesInjection({ cwd: runCwd, specialist: spec.specialist });
       mandatoryRulesBlock = mandatoryRulesInjection.block;
-      if (mandatoryRulesBlock.trim()) {
+      if (!execution.bare && mandatoryRulesBlock.trim()) {
         const rulesTokens = Math.ceil(mandatoryRulesBlock.length / 4);
         if (rulesTokens <= 2000) {
           renderedTask = `${renderedTask}
@@ -1051,7 +1051,7 @@ ${mandatoryRulesBlock}`;
       console.warn(`[specialist runner] Skipping MANDATORY_RULES injection: ${String(error)}`);
     }
 
-    if (metadata.name === 'reviewer') {
+    if (!execution.bare && metadata.name === 'reviewer') {
       try {
         const diffContext = buildReviewerDiffContext(runCwd, variables);
         renderedTask = `${renderedTask}${buildReviewerDiffInstruction(diffContext)}`;
@@ -1077,7 +1077,11 @@ ${mandatoryRulesBlock}`;
     // instructions that are meant for human developers, not specialist agents. Key overrides:
     // - CLAUDE.md often says "run specialists init" — specialists must NEVER do this
     // - CLAUDE.md edit-gate rules say "bd create before editing" — not applicable inside a specialist
-    {
+    let staticTokens = 0;
+    let memoryTokens = 0;
+    let gitnexusTokens = 0;
+
+    if (!execution.bare) {
       const sanitizedBeadId = options.inputBeadId
         ? sanitizeBeadIdForPrompt(options.inputBeadId)
         : '';
@@ -1089,7 +1093,8 @@ ${mandatoryRulesBlock}`;
 
     // 0. Inject caveman-micro output directive — all specialist output is agent-to-agent,
     // terse output improves accuracy (+26pp per study) and cuts tokens ~65%.
-    agentsMd += `\n\n---\n## Output Style (mandatory)
+    if (!execution.bare) {
+      agentsMd += `\n\n---\n## Output Style (mandatory)
 Respond like smart caveman. Cut all filler, keep technical substance.
 - Drop articles (a, an, the), filler (just, really, basically, actually).
 - Drop pleasantries (sure, certainly, happy to).
@@ -1097,12 +1102,14 @@ Respond like smart caveman. Cut all filler, keep technical substance.
 - Technical terms stay exact. Code blocks unchanged.
 - Pattern: [thing] [action] [reason]. [next step].
 ---\n`;
+    }
 
     // 1. Inject GitNexus workflow mandate — high-priority, must not be buried (~200 tokens)
-    try {
-      const gitnexusMetaPath = resolve(runCwd, '.gitnexus/meta.json');
-      if (existsSync(gitnexusMetaPath)) {
-        agentsMd += `\n\n---\n## MANDATORY: GitNexus Code Intelligence
+    if (!execution.bare) {
+      try {
+        const gitnexusMetaPath = resolve(runCwd, '.gitnexus/meta.json');
+        if (existsSync(gitnexusMetaPath)) {
+          agentsMd += `\n\n---\n## MANDATORY: GitNexus Code Intelligence
 _This project is indexed by GitNexus. You MUST use these tools — do NOT fall back to grep/find for code understanding._
 
 ### Before reading or editing ANY code:
@@ -1118,8 +1125,8 @@ _This project is indexed by GitNexus. You MUST use these tools — do NOT fall b
 
 **These are not optional.** Use GitNexus as your PRIMARY code navigation tool. Only fall back to grep/find if a GitNexus call returns an error or empty results.
 ---\n`;
-      }
-    } catch {
+        }
+      } catch {
       // Non-fatal — GitNexus not indexed, skip injection
     }
 
@@ -1127,13 +1134,11 @@ _This project is indexed by GitNexus. You MUST use these tools — do NOT fall b
     // Do NOT duplicate here — saves ~800 tokens per specialist spawn.
 
     // 3. Inject compact beads rules + keyword-filtered memories (replaces full bd prime dump)
-    let staticTokens = 0;
-    let memoryTokens = 0;
-    let gitnexusTokens = 0;
-
     const staticRulesBlock = `\n\n---\n${STATIC_WORKFLOW_RULES_BLOCK}\n---\n`;
-    agentsMd += staticRulesBlock;
-    staticTokens = estimateInjectedTokens(staticRulesBlock);
+    if (!execution.bare) {
+      agentsMd += staticRulesBlock;
+      staticTokens = estimateInjectedTokens(staticRulesBlock);
+    }
 
     if (options.inputBeadId) {
       const beadForMemory = (beadsClient ?? new BeadsClient()).readBead(options.inputBeadId);
@@ -1144,7 +1149,7 @@ _This project is indexed by GitNexus. You MUST use these tools — do NOT fall b
           beadDescription: beadForMemory.description,
         });
 
-        if (memoryInjection.block) {
+        if (!execution.bare && memoryInjection.block) {
           const memoryBlock = `\n\n---\n${memoryInjection.block}\n---\n`;
           agentsMd += memoryBlock;
           memoryTokens = memoryInjection.estimatedTokens;
@@ -1189,7 +1194,7 @@ _This project is indexed by GitNexus. You MUST use these tools — do NOT fall b
               }
             }
 
-            if (summaries.length > 0) {
+            if (!execution.bare && summaries.length > 0) {
               const gitnexusBlock = `\n\n---\n## GitNexus Pre-query Snapshot\n${summaries.join('\n')}\n---\n`;
               agentsMd += gitnexusBlock;
               gitnexusTokens = estimateInjectedTokens(gitnexusBlock);
@@ -1200,6 +1205,7 @@ _This project is indexed by GitNexus. You MUST use these tools — do NOT fall b
         }
       }
     }
+  }
 
     const totalMemoryInjectionTokens = staticTokens + memoryTokens + gitnexusTokens;
     onEvent?.('memory_injection', {
@@ -1236,7 +1242,7 @@ _This project is indexed by GitNexus. You MUST use these tools — do NOT fall b
       });
     }
 
-    if (metadata.name === 'reviewer' && options.reusedFromJobId) {
+    if (!execution.bare && metadata.name === 'reviewer' && options.reusedFromJobId) {
       agentsMd += '\n\nReviewer patch retrieval: run `git diff master..HEAD -- ":!dist/" ":!*.map"` inside reused worktree. Find worktree path via `sp ps ${reviewed_job_id}` first.\n';
     }
 
@@ -1244,7 +1250,9 @@ _This project is indexed by GitNexus. You MUST use these tools — do NOT fall b
     const outputType = (execution.output_type ?? 'custom') as OutputType;
     const specialistOutputSchema = prompt.output_schema as JsonSchema | undefined;
     const outputContractSchema = resolveOutputContractSchema(responseFormat, outputType, specialistOutputSchema);
-    agentsMd += buildOutputContractInstruction(responseFormat, outputType, outputContractSchema);
+    if (!execution.bare) {
+      agentsMd += buildOutputContractInstruction(responseFormat, outputType, outputContractSchema);
+    }
 
     const skillPaths: string[] = [];
     if (prompt.skill_inherit) skillPaths.push(prompt.skill_inherit);
