@@ -9,13 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v3.16.0] — 2026-05-23
+
 ### Added
 - `sp attach` now opens a chat-style TUI for active specialist jobs, including bare-picker launch and explicit `sp attach <job-id>` attach flows.
+- `sp chat` V1 ships as an interactive TUI for active jobs with `@earendil-works/pi-tui`, full keyboard input, and feed parity (`unitAI-u4fdd`).
+- `execution.bare` adds zero-runtime-injection package-class specialists plus `bare.specialist.json` template support (`unitAI-rz0cp`).
+- `docs/bare-specialists.md` documents bare specialists and package-class runtime behavior (`unitAI-w8t6y`).
+
+### Changed
+- `prompt.system_prompt_mode` now supports `append` and `replace` across both runner paths (`unitAI-qngis`).
+- `specialists-creator` v1.4.0 adds a Bare specialists section, mandatory_rules layering, and script-class vs package-class runtime split guidance (`unitAI-dp0rw`, `unitAI-w8t6y`).
 
 ### Fixed
 - Bare `sp attach` now has a real keyboard picker: Up/Down moves the highlighted active job and Enter attaches it.
 - Attach targets are limited to active jobs (`running`, `waiting`, `starting`); terminal jobs are hidden from the picker and rejected when requested explicitly.
 - Waiting-job attach input now uses live status/fifo data and sends resume/follow-up instead of stale `steer`; duplicate submit guards prevent double-resume busy errors.
+
+### Security
+- Pin `idna` above OSV advisory (`f7599a22`).
 
 ## [v3.15.4] — 2026-05-21
 

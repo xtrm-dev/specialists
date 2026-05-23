@@ -9439,7 +9439,8 @@ async function runScriptSpecialist(input, options) {
     const attempts = [];
     for (const model of modelCandidates) {
       const systemPrompt = spec.specialist.prompt.system || undefined;
-      const attempt = await runSingleAttempt(prompt, model, input.thinking_level ?? spec.specialist.execution.thinking_level, timeoutMs, assistantTextLimitBytes, options, systemPrompt, skillPaths);
+      const systemPromptMode = spec.specialist.prompt.system_prompt_mode;
+      const attempt = await runSingleAttempt(prompt, model, input.thinking_level ?? spec.specialist.execution.thinking_level, timeoutMs, assistantTextLimitBytes, options, systemPrompt, systemPromptMode, skillPaths);
       attempts.push(attempt);
       const parsed = classifyAttempt(attempt);
       if (parsed.retryable)
@@ -9483,7 +9484,7 @@ function collectModelCandidates(input, spec, options) {
   const candidates = [input.model_override, spec.specialist.execution.model, spec.specialist.execution.fallback_model, options.fallbackModel].filter((value) => typeof value === "string" && value.length > 0);
   return [...new Set(candidates)];
 }
-function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assistantTextLimitBytes, options, systemPrompt, skillPaths = []) {
+function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assistantTextLimitBytes, options, systemPrompt, systemPromptMode, skillPaths = []) {
   return new Promise((resolve2, reject) => {
     const args = ["--mode", "json", "--no-session", "--no-extensions", "--no-tools", "--offline", "--no-context-files", "--no-prompt-templates", "--no-themes"];
     if (skillPaths.length === 0)
@@ -9494,7 +9495,7 @@ function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assistantText
     if (thinkingLevel)
       args.push("--thinking", thinkingLevel);
     if (systemPrompt)
-      args.push("--system-prompt", systemPrompt);
+      args.push(systemPromptMode === "append" ? "--append-system-prompt" : "--system-prompt", systemPrompt);
     const pi = spawn("pi", args, { stdio: ["pipe", "pipe", "pipe"], cwd: options.projectDir ?? process.cwd() });
     options.onChild?.(pi);
     pi.stdin?.on("error", () => {});
@@ -13492,6 +13493,7 @@ var ExecutionSchema = objectType({
   output_type: enumType(["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]).default("custom"),
   permission_required: enumType(["READ_ONLY", "LOW", "MEDIUM", "HIGH"]).default("READ_ONLY"),
   requires_worktree: booleanType().default(true),
+  bare: booleanType().default(false),
   thinking_level: enumType(["off", "minimal", "low", "medium", "high", "xhigh"]).optional(),
   auto_commit: enumType(["never", "checkpoint_on_waiting", "checkpoint_on_terminal"]).default("never"),
   extensions: objectType({
@@ -13502,6 +13504,7 @@ var ExecutionSchema = objectType({
 }).passthrough();
 var PromptSchema = objectType({
   system: stringType().optional(),
+  system_prompt_mode: enumType(["append", "replace"]).optional(),
   task_template: stringType(),
   output_schema: recordType(unknownType()).optional(),
   skill_inherit: stringType().optional()

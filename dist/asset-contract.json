@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "package_version": "3.15.4",
+  "package_version": "3.16.0",
   "shipped_skills": [
     {
       "path": "config/skills/memory-audit-transaction/SKILL.md",
@@ -12,7 +12,7 @@
     },
     {
       "path": "config/skills/specialists-creator/SKILL.md",
-      "sha256": "250cd9376b818142d1ccca71b48198086723ab2453ebac1eb69c3ba6293e9721"
+      "sha256": "f8951e41b20d03a1a5cb71cd79fc7a17f525aba7005cce893d2a4524fc5a169e"
     },
     {
       "path": "config/skills/update-specialists/SKILL.md",
@@ -48,6 +48,9 @@
     }
   ],
   "shipped_specialists": [
+    {
+      "path": "config/specialists/bare.specialist.json"
+    },
     {
       "path": "config/specialists/changelog-drafter.specialist.json"
     },

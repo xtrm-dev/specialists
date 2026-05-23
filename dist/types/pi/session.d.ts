@@ -73,6 +73,7 @@ export type SessionMetricEvent = {
 export interface PiSessionOptions {
     model: string;
     systemPrompt?: string;
+    systemPromptMode?: 'append' | 'replace';
     /** Absolute path boundary for write-side tools; undefined disables enforcement */
     worktreeBoundary?: string;
     /** Permission level from specialist YAML — controls which pi tools are enabled */

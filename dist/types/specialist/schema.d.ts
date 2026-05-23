@@ -45,6 +45,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
             auto_commit: z.ZodDefault<z.ZodEnum<["never", "checkpoint_on_waiting", "checkpoint_on_terminal"]>>;
@@ -87,6 +88,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
             auto_commit: z.ZodDefault<z.ZodEnum<["never", "checkpoint_on_waiting", "checkpoint_on_terminal"]>>;
@@ -129,6 +131,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
             auto_commit: z.ZodDefault<z.ZodEnum<["never", "checkpoint_on_waiting", "checkpoint_on_terminal"]>>;
@@ -152,16 +155,19 @@ export declare const SpecialistSchema: z.ZodObject<{
         }, z.ZodTypeAny, "passthrough">>;
         prompt: z.ZodObject<{
             system: z.ZodOptional<z.ZodString>;
+            system_prompt_mode: z.ZodOptional<z.ZodEnum<["append", "replace"]>>;
             task_template: z.ZodString;
             output_schema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
             skill_inherit: z.ZodOptional<z.ZodString>;
         }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
             system: z.ZodOptional<z.ZodString>;
+            system_prompt_mode: z.ZodOptional<z.ZodEnum<["append", "replace"]>>;
             task_template: z.ZodString;
             output_schema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
             skill_inherit: z.ZodOptional<z.ZodString>;
         }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
             system: z.ZodOptional<z.ZodString>;
+            system_prompt_mode: z.ZodOptional<z.ZodEnum<["append", "replace"]>>;
             task_template: z.ZodString;
             output_schema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
             skill_inherit: z.ZodOptional<z.ZodString>;
@@ -385,6 +391,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
             auto_commit: z.ZodDefault<z.ZodEnum<["never", "checkpoint_on_waiting", "checkpoint_on_terminal"]>>;
@@ -427,6 +434,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
             auto_commit: z.ZodDefault<z.ZodEnum<["never", "checkpoint_on_waiting", "checkpoint_on_terminal"]>>;
@@ -469,6 +477,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
             auto_commit: z.ZodDefault<z.ZodEnum<["never", "checkpoint_on_waiting", "checkpoint_on_terminal"]>>;
@@ -492,16 +501,19 @@ export declare const SpecialistSchema: z.ZodObject<{
         }, z.ZodTypeAny, "passthrough">>;
         prompt: z.ZodObject<{
             system: z.ZodOptional<z.ZodString>;
+            system_prompt_mode: z.ZodOptional<z.ZodEnum<["append", "replace"]>>;
             task_template: z.ZodString;
             output_schema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
             skill_inherit: z.ZodOptional<z.ZodString>;
         }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
             system: z.ZodOptional<z.ZodString>;
+            system_prompt_mode: z.ZodOptional<z.ZodEnum<["append", "replace"]>>;
             task_template: z.ZodString;
             output_schema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
             skill_inherit: z.ZodOptional<z.ZodString>;
         }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
             system: z.ZodOptional<z.ZodString>;
+            system_prompt_mode: z.ZodOptional<z.ZodEnum<["append", "replace"]>>;
             task_template: z.ZodString;
             output_schema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
             skill_inherit: z.ZodOptional<z.ZodString>;
@@ -725,6 +737,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
             auto_commit: z.ZodDefault<z.ZodEnum<["never", "checkpoint_on_waiting", "checkpoint_on_terminal"]>>;
@@ -767,6 +780,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
             auto_commit: z.ZodDefault<z.ZodEnum<["never", "checkpoint_on_waiting", "checkpoint_on_terminal"]>>;
@@ -809,6 +823,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
             auto_commit: z.ZodDefault<z.ZodEnum<["never", "checkpoint_on_waiting", "checkpoint_on_terminal"]>>;
@@ -832,16 +847,19 @@ export declare const SpecialistSchema: z.ZodObject<{
         }, z.ZodTypeAny, "passthrough">>;
         prompt: z.ZodObject<{
             system: z.ZodOptional<z.ZodString>;
+            system_prompt_mode: z.ZodOptional<z.ZodEnum<["append", "replace"]>>;
             task_template: z.ZodString;
             output_schema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
             skill_inherit: z.ZodOptional<z.ZodString>;
         }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
             system: z.ZodOptional<z.ZodString>;
+            system_prompt_mode: z.ZodOptional<z.ZodEnum<["append", "replace"]>>;
             task_template: z.ZodString;
             output_schema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
             skill_inherit: z.ZodOptional<z.ZodString>;
         }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
             system: z.ZodOptional<z.ZodString>;
+            system_prompt_mode: z.ZodOptional<z.ZodEnum<["append", "replace"]>>;
             task_template: z.ZodString;
             output_schema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
             skill_inherit: z.ZodOptional<z.ZodString>;
@@ -1067,6 +1085,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
             auto_commit: z.ZodDefault<z.ZodEnum<["never", "checkpoint_on_waiting", "checkpoint_on_terminal"]>>;
@@ -1109,6 +1128,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
             auto_commit: z.ZodDefault<z.ZodEnum<["never", "checkpoint_on_waiting", "checkpoint_on_terminal"]>>;
@@ -1151,6 +1171,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
             auto_commit: z.ZodDefault<z.ZodEnum<["never", "checkpoint_on_waiting", "checkpoint_on_terminal"]>>;
@@ -1174,16 +1195,19 @@ export declare const SpecialistSchema: z.ZodObject<{
         }, z.ZodTypeAny, "passthrough">>;
         prompt: z.ZodObject<{
             system: z.ZodOptional<z.ZodString>;
+            system_prompt_mode: z.ZodOptional<z.ZodEnum<["append", "replace"]>>;
             task_template: z.ZodString;
             output_schema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
             skill_inherit: z.ZodOptional<z.ZodString>;
         }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
             system: z.ZodOptional<z.ZodString>;
+            system_prompt_mode: z.ZodOptional<z.ZodEnum<["append", "replace"]>>;
             task_template: z.ZodString;
             output_schema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
             skill_inherit: z.ZodOptional<z.ZodString>;
         }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
             system: z.ZodOptional<z.ZodString>;
+            system_prompt_mode: z.ZodOptional<z.ZodEnum<["append", "replace"]>>;
             task_template: z.ZodString;
             output_schema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
             skill_inherit: z.ZodOptional<z.ZodString>;
@@ -1407,6 +1431,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
             auto_commit: z.ZodDefault<z.ZodEnum<["never", "checkpoint_on_waiting", "checkpoint_on_terminal"]>>;
@@ -1449,6 +1474,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
             auto_commit: z.ZodDefault<z.ZodEnum<["never", "checkpoint_on_waiting", "checkpoint_on_terminal"]>>;
@@ -1491,6 +1517,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
             auto_commit: z.ZodDefault<z.ZodEnum<["never", "checkpoint_on_waiting", "checkpoint_on_terminal"]>>;
@@ -1514,16 +1541,19 @@ export declare const SpecialistSchema: z.ZodObject<{
         }, z.ZodTypeAny, "passthrough">>;
         prompt: z.ZodObject<{
             system: z.ZodOptional<z.ZodString>;
+            system_prompt_mode: z.ZodOptional<z.ZodEnum<["append", "replace"]>>;
             task_template: z.ZodString;
             output_schema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
             skill_inherit: z.ZodOptional<z.ZodString>;
         }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
             system: z.ZodOptional<z.ZodString>;
+            system_prompt_mode: z.ZodOptional<z.ZodEnum<["append", "replace"]>>;
             task_template: z.ZodString;
             output_schema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
             skill_inherit: z.ZodOptional<z.ZodString>;
         }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
             system: z.ZodOptional<z.ZodString>;
+            system_prompt_mode: z.ZodOptional<z.ZodEnum<["append", "replace"]>>;
             task_template: z.ZodString;
             output_schema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
             skill_inherit: z.ZodOptional<z.ZodString>;
@@ -1747,6 +1777,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
             auto_commit: z.ZodDefault<z.ZodEnum<["never", "checkpoint_on_waiting", "checkpoint_on_terminal"]>>;
@@ -1789,6 +1820,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
             auto_commit: z.ZodDefault<z.ZodEnum<["never", "checkpoint_on_waiting", "checkpoint_on_terminal"]>>;
@@ -1831,6 +1863,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
             auto_commit: z.ZodDefault<z.ZodEnum<["never", "checkpoint_on_waiting", "checkpoint_on_terminal"]>>;
@@ -1854,16 +1887,19 @@ export declare const SpecialistSchema: z.ZodObject<{
         }, z.ZodTypeAny, "passthrough">>;
         prompt: z.ZodObject<{
             system: z.ZodOptional<z.ZodString>;
+            system_prompt_mode: z.ZodOptional<z.ZodEnum<["append", "replace"]>>;
             task_template: z.ZodString;
             output_schema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
             skill_inherit: z.ZodOptional<z.ZodString>;
         }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
             system: z.ZodOptional<z.ZodString>;
+            system_prompt_mode: z.ZodOptional<z.ZodEnum<["append", "replace"]>>;
             task_template: z.ZodString;
             output_schema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
             skill_inherit: z.ZodOptional<z.ZodString>;
         }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
             system: z.ZodOptional<z.ZodString>;
+            system_prompt_mode: z.ZodOptional<z.ZodEnum<["append", "replace"]>>;
             task_template: z.ZodString;
             output_schema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
             skill_inherit: z.ZodOptional<z.ZodString>;
@@ -2089,6 +2125,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
             auto_commit: z.ZodDefault<z.ZodEnum<["never", "checkpoint_on_waiting", "checkpoint_on_terminal"]>>;
@@ -2131,6 +2168,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
             auto_commit: z.ZodDefault<z.ZodEnum<["never", "checkpoint_on_waiting", "checkpoint_on_terminal"]>>;
@@ -2173,6 +2211,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
             auto_commit: z.ZodDefault<z.ZodEnum<["never", "checkpoint_on_waiting", "checkpoint_on_terminal"]>>;
@@ -2196,16 +2235,19 @@ export declare const SpecialistSchema: z.ZodObject<{
         }, z.ZodTypeAny, "passthrough">>;
         prompt: z.ZodObject<{
             system: z.ZodOptional<z.ZodString>;
+            system_prompt_mode: z.ZodOptional<z.ZodEnum<["append", "replace"]>>;
             task_template: z.ZodString;
             output_schema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
             skill_inherit: z.ZodOptional<z.ZodString>;
         }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
             system: z.ZodOptional<z.ZodString>;
+            system_prompt_mode: z.ZodOptional<z.ZodEnum<["append", "replace"]>>;
             task_template: z.ZodString;
             output_schema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
             skill_inherit: z.ZodOptional<z.ZodString>;
         }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
             system: z.ZodOptional<z.ZodString>;
+            system_prompt_mode: z.ZodOptional<z.ZodEnum<["append", "replace"]>>;
             task_template: z.ZodString;
             output_schema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
             skill_inherit: z.ZodOptional<z.ZodString>;
@@ -2429,6 +2471,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
             auto_commit: z.ZodDefault<z.ZodEnum<["never", "checkpoint_on_waiting", "checkpoint_on_terminal"]>>;
@@ -2471,6 +2514,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
             auto_commit: z.ZodDefault<z.ZodEnum<["never", "checkpoint_on_waiting", "checkpoint_on_terminal"]>>;
@@ -2513,6 +2557,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
             auto_commit: z.ZodDefault<z.ZodEnum<["never", "checkpoint_on_waiting", "checkpoint_on_terminal"]>>;
@@ -2536,16 +2581,19 @@ export declare const SpecialistSchema: z.ZodObject<{
         }, z.ZodTypeAny, "passthrough">>;
         prompt: z.ZodObject<{
             system: z.ZodOptional<z.ZodString>;
+            system_prompt_mode: z.ZodOptional<z.ZodEnum<["append", "replace"]>>;
             task_template: z.ZodString;
             output_schema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
             skill_inherit: z.ZodOptional<z.ZodString>;
         }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
             system: z.ZodOptional<z.ZodString>;
+            system_prompt_mode: z.ZodOptional<z.ZodEnum<["append", "replace"]>>;
             task_template: z.ZodString;
             output_schema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
             skill_inherit: z.ZodOptional<z.ZodString>;
         }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
             system: z.ZodOptional<z.ZodString>;
+            system_prompt_mode: z.ZodOptional<z.ZodEnum<["append", "replace"]>>;
             task_template: z.ZodString;
             output_schema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
             skill_inherit: z.ZodOptional<z.ZodString>;
@@ -2769,6 +2817,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
             auto_commit: z.ZodDefault<z.ZodEnum<["never", "checkpoint_on_waiting", "checkpoint_on_terminal"]>>;
@@ -2811,6 +2860,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
             auto_commit: z.ZodDefault<z.ZodEnum<["never", "checkpoint_on_waiting", "checkpoint_on_terminal"]>>;
@@ -2853,6 +2903,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
             auto_commit: z.ZodDefault<z.ZodEnum<["never", "checkpoint_on_waiting", "checkpoint_on_terminal"]>>;
@@ -2876,16 +2927,19 @@ export declare const SpecialistSchema: z.ZodObject<{
         }, z.ZodTypeAny, "passthrough">>;
         prompt: z.ZodObject<{
             system: z.ZodOptional<z.ZodString>;
+            system_prompt_mode: z.ZodOptional<z.ZodEnum<["append", "replace"]>>;
             task_template: z.ZodString;
             output_schema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
             skill_inherit: z.ZodOptional<z.ZodString>;
         }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
             system: z.ZodOptional<z.ZodString>;
+            system_prompt_mode: z.ZodOptional<z.ZodEnum<["append", "replace"]>>;
             task_template: z.ZodString;
             output_schema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
             skill_inherit: z.ZodOptional<z.ZodString>;
         }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
             system: z.ZodOptional<z.ZodString>;
+            system_prompt_mode: z.ZodOptional<z.ZodEnum<["append", "replace"]>>;
             task_template: z.ZodString;
             output_schema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
             skill_inherit: z.ZodOptional<z.ZodString>;

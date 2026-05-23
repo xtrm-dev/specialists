@@ -17673,6 +17673,7 @@ var init_schema = __esm(() => {
     output_type: enumType(["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]).default("custom"),
     permission_required: enumType(["READ_ONLY", "LOW", "MEDIUM", "HIGH"]).default("READ_ONLY"),
     requires_worktree: booleanType().default(true),
+    bare: booleanType().default(false),
     thinking_level: enumType(["off", "minimal", "low", "medium", "high", "xhigh"]).optional(),
     auto_commit: enumType(["never", "checkpoint_on_waiting", "checkpoint_on_terminal"]).default("never"),
     extensions: objectType({
@@ -17683,6 +17684,7 @@ var init_schema = __esm(() => {
   }).passthrough();
   PromptSchema2 = objectType({
     system: stringType().optional(),
+    system_prompt_mode: enumType(["append", "replace"]).optional(),
     task_template: stringType(),
     output_schema: recordType(unknownType()).optional(),
     skill_inherit: stringType().optional()
@@ -18552,7 +18554,8 @@ class PiAgentSession {
       }
     }
     if (this.options.systemPrompt) {
-      args.push("--append-system-prompt", this.options.systemPrompt);
+      const systemPromptFlag = this.options.systemPromptMode === "replace" ? "--system-prompt" : "--append-system-prompt";
+      args.push(systemPromptFlag, this.options.systemPrompt);
     }
     const worktreeBoundary = this.options.worktreeBoundary ? resolve(this.options.worktreeBoundary) : undefined;
     if (worktreeBoundary) {
@@ -22659,7 +22662,7 @@ ${buildBeadBoundaryInstruction(runCwd, options.worktreeBoundary)}`.trim() : this
     try {
       mandatoryRulesInjection = buildMandatoryRulesInjection({ cwd: runCwd, specialist: spec.specialist });
       mandatoryRulesBlock = mandatoryRulesInjection.block;
-      if (mandatoryRulesBlock.trim()) {
+      if (!execution.bare && mandatoryRulesBlock.trim()) {
         const rulesTokens = Math.ceil(mandatoryRulesBlock.length / 4);
         if (rulesTokens <= 2000) {
           renderedTask = `${renderedTask}
@@ -22672,7 +22675,7 @@ ${mandatoryRulesBlock}`;
     } catch (error2) {
       console.warn(`[specialist runner] Skipping MANDATORY_RULES injection: ${String(error2)}`);
     }
-    if (metadata.name === "reviewer") {
+    if (!execution.bare && metadata.name === "reviewer") {
       try {
         const diffContext = buildReviewerDiffContext(runCwd, variables);
         renderedTask = `${renderedTask}${buildReviewerDiffInstruction(diffContext)}`;
@@ -22688,7 +22691,10 @@ ${mandatoryRulesBlock}`;
       system_prompt_present: !!prompt.system
     });
     let agentsMd = renderTemplate(prompt.system ?? "", beadTemplateVariables);
-    {
+    let staticTokens = 0;
+    let memoryTokens = 0;
+    let gitnexusTokens = 0;
+    if (!execution.bare) {
       const sanitizedBeadId = options.inputBeadId ? sanitizeBeadIdForPrompt(options.inputBeadId) : "";
       const beadInstructions = sanitizedBeadId ? `
 - Your task bead is: ${sanitizedBeadId}
@@ -22707,7 +22713,8 @@ ${beadInstructions}
 ---
 `;
     }
-    agentsMd += `
+    if (!execution.bare) {
+      agentsMd += `
 
 ---
 ## Output Style (mandatory)
@@ -22719,10 +22726,12 @@ Respond like smart caveman. Cut all filler, keep technical substance.
 - Pattern: [thing] [action] [reason]. [next step].
 ---
 `;
-    try {
-      const gitnexusMetaPath = resolve4(runCwd, ".gitnexus/meta.json");
-      if (existsSync7(gitnexusMetaPath)) {
-        agentsMd += `
+    }
+    if (!execution.bare) {
+      try {
+        const gitnexusMetaPath = resolve4(runCwd, ".gitnexus/meta.json");
+        if (existsSync7(gitnexusMetaPath)) {
+          agentsMd += `
 
 ---
 ## MANDATORY: GitNexus Code Intelligence
@@ -22742,19 +22751,19 @@ _This project is indexed by GitNexus. You MUST use these tools \u2014 do NOT fal
 **These are not optional.** Use GitNexus as your PRIMARY code navigation tool. Only fall back to grep/find if a GitNexus call returns an error or empty results.
 ---
 `;
-      }
-    } catch {}
-    let staticTokens = 0;
-    let memoryTokens = 0;
-    let gitnexusTokens = 0;
+        }
+      } catch {}
+    }
     const staticRulesBlock = `
 
 ---
 ${STATIC_WORKFLOW_RULES_BLOCK}
 ---
 `;
-    agentsMd += staticRulesBlock;
-    staticTokens = estimateInjectedTokens(staticRulesBlock);
+    if (!execution.bare) {
+      agentsMd += staticRulesBlock;
+      staticTokens = estimateInjectedTokens(staticRulesBlock);
+    }
     if (options.inputBeadId) {
       const beadForMemory = (beadsClient ?? new BeadsClient).readBead(options.inputBeadId);
       if (beadForMemory?.title) {
@@ -22763,7 +22772,7 @@ ${STATIC_WORKFLOW_RULES_BLOCK}
           beadTitle: beadForMemory.title,
           beadDescription: beadForMemory.description
         });
-        if (memoryInjection.block) {
+        if (!execution.bare && memoryInjection.block) {
           const memoryBlock = `
 
 ---
@@ -22798,7 +22807,7 @@ ${memoryInjection.block}
 ` + `  processes: ${processes.length > 0 ? processes.join(", ") : "none"}`);
               } catch {}
             }
-            if (summaries.length > 0) {
+            if (!execution.bare && summaries.length > 0) {
               const gitnexusBlock = `
 
 ---
@@ -22844,14 +22853,16 @@ ${summaries.join(`
         })
       });
     }
-    if (metadata.name === "reviewer" && options.reusedFromJobId) {
+    if (!execution.bare && metadata.name === "reviewer" && options.reusedFromJobId) {
       agentsMd += '\n\nReviewer patch retrieval: run `git diff master..HEAD -- ":!dist/" ":!*.map"` inside reused worktree. Find worktree path via `sp ps ${reviewed_job_id}` first.\n';
     }
     const responseFormat = execution.response_format ?? "text";
     const outputType = execution.output_type ?? "custom";
     const specialistOutputSchema = prompt.output_schema;
     const outputContractSchema = resolveOutputContractSchema(responseFormat, outputType, specialistOutputSchema);
-    agentsMd += buildOutputContractInstruction(responseFormat, outputType, outputContractSchema);
+    if (!execution.bare) {
+      agentsMd += buildOutputContractInstruction(responseFormat, outputType, outputContractSchema);
+    }
     const skillPaths = [];
     if (prompt.skill_inherit)
       skillPaths.push(prompt.skill_inherit);
@@ -22942,6 +22953,7 @@ ${preScripts.map((s) => `    \u2022 ${s.run ?? s.path ?? "<missing>"}${s.inject_
       session = await this.sessionFactory({
         model,
         systemPrompt: agentsMd || undefined,
+        systemPromptMode: prompt.system_prompt_mode,
         skillPaths: skillPaths.length > 0 ? skillPaths : undefined,
         thinkingLevel: execution.thinking_level,
         permissionLevel,
@@ -28820,7 +28832,8 @@ async function runScriptSpecialist(input2, options) {
     const attempts = [];
     for (const model of modelCandidates) {
       const systemPrompt = spec.specialist.prompt.system || undefined;
-      const attempt = await runSingleAttempt(prompt, model, input2.thinking_level ?? spec.specialist.execution.thinking_level, timeoutMs, assistantTextLimitBytes, options, systemPrompt, skillPaths);
+      const systemPromptMode = spec.specialist.prompt.system_prompt_mode;
+      const attempt = await runSingleAttempt(prompt, model, input2.thinking_level ?? spec.specialist.execution.thinking_level, timeoutMs, assistantTextLimitBytes, options, systemPrompt, systemPromptMode, skillPaths);
       attempts.push(attempt);
       const parsed = classifyAttempt(attempt);
       if (parsed.retryable)
@@ -28864,7 +28877,7 @@ function collectModelCandidates(input2, spec, options) {
   const candidates = [input2.model_override, spec.specialist.execution.model, spec.specialist.execution.fallback_model, options.fallbackModel].filter((value) => typeof value === "string" && value.length > 0);
   return [...new Set(candidates)];
 }
-function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assistantTextLimitBytes, options, systemPrompt, skillPaths = []) {
+function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assistantTextLimitBytes, options, systemPrompt, systemPromptMode, skillPaths = []) {
   return new Promise((resolve9, reject) => {
     const args = ["--mode", "json", "--no-session", "--no-extensions", "--no-tools", "--offline", "--no-context-files", "--no-prompt-templates", "--no-themes"];
     if (skillPaths.length === 0)
@@ -28875,7 +28888,7 @@ function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assistantText
     if (thinkingLevel)
       args.push("--thinking", thinkingLevel);
     if (systemPrompt)
-      args.push("--system-prompt", systemPrompt);
+      args.push(systemPromptMode === "append" ? "--append-system-prompt" : "--system-prompt", systemPrompt);
     const pi = spawn3("pi", args, { stdio: ["pipe", "pipe", "pipe"], cwd: options.projectDir ?? process.cwd() });
     options.onChild?.(pi);
     pi.stdin?.on("error", () => {});
