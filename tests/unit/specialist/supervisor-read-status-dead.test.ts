@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -100,5 +100,48 @@ describe('Supervisor dead-status recovery', () => {
     expect(sqliteClient.readStatus('dead01')?.status).toBe('error');
     expect(event.type).toBe('run_complete');
     expect(event.status).toBe('ERROR');
+  });
+
+  it('does not append file event when file output is off', () => {
+    const sup = createSupervisor({ jobsDir, runner: { run: vi.fn() } as any, runOptions: { name: 'test-specialist', prompt: 'do something' } });
+    (sup as any).sqliteClient = null;
+
+    const jobId = 'dead02';
+    mkdirSync(join(jobsDir, jobId), { recursive: true });
+    writeFileSync(join(jobsDir, jobId, 'status.json'), JSON.stringify({
+      id: jobId,
+      specialist: 'test-specialist',
+      status: 'running',
+      started_at_ms: Date.now() - 10_000,
+      last_event_at_ms: Date.now() - 10_000,
+      pid: 999_999_998,
+    }), 'utf-8');
+
+    const status = sup.readStatus(jobId);
+
+    expect(status?.status).toBe('error');
+    expect(existsSync(join(jobsDir, jobId, 'events.jsonl'))).toBe(false);
+  });
+
+  it('skips dead recovery when started_at_ms is invalid', () => {
+    const sup = createSupervisor({ jobsDir, runner: { run: vi.fn() } as any, runOptions: { name: 'test-specialist', prompt: 'do something' } });
+    (sup as any).sqliteClient = null;
+
+    const jobId = 'dead03';
+    mkdirSync(join(jobsDir, jobId), { recursive: true });
+    writeFileSync(join(jobsDir, jobId, 'status.json'), JSON.stringify({
+      id: jobId,
+      specialist: 'test-specialist',
+      status: 'running',
+      started_at_ms: null,
+      last_event_at_ms: Date.now() - 10_000,
+      pid: 999_999_997,
+    }), 'utf-8');
+
+    const status = sup.readStatus(jobId);
+
+    expect(status?.status).toBe('running');
+    expect(status?.is_dead).toBe(true);
+    expect(existsSync(join(jobsDir, jobId, 'events.jsonl'))).toBe(false);
   });
 });

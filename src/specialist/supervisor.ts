@@ -679,6 +679,10 @@ export class Supervisor {
       return this.withComputedLiveness(status);
     }
 
+    if (!Number.isFinite(status.started_at_ms)) {
+      return this.withComputedLiveness(status);
+    }
+
     const now = Date.now();
     const recoveredStatus: SupervisorStatus = {
       ...status,
@@ -687,7 +691,7 @@ export class Supervisor {
       error: 'Process crashed or was killed',
       last_event_at_ms: now,
     };
-    const elapsed = Math.max(0, Math.round((now - recoveredStatus.started_at_ms) / 1000));
+    const elapsed = Math.max(0, Math.round((now - status.started_at_ms) / 1000));
     const runCompleteEvent = createRunCompleteEvent('ERROR', elapsed, {
       error: recoveredStatus.error,
       exit_reason: 'crashed',
@@ -703,9 +707,11 @@ export class Supervisor {
       }
     } else {
       this.writeStatusFileOnly(id, recoveredStatus);
-      const eventsPath = this.eventsPath(id);
-      mkdirSync(this.jobDir(id), { recursive: true });
-      appendFileSync(eventsPath, JSON.stringify(runCompleteEvent) + '\n', 'utf-8');
+      if (this.isJobFileOutputEnabled) {
+        const eventsPath = this.eventsPath(id);
+        mkdirSync(this.jobDir(id), { recursive: true });
+        appendFileSync(eventsPath, JSON.stringify(runCompleteEvent) + '\n', 'utf-8');
+      }
     }
 
     return this.withComputedLiveness(recoveredStatus);
