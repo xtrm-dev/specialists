@@ -99,6 +99,7 @@ export type SessionMetricEvent =
 export interface PiSessionOptions {
   model: string;
   systemPrompt?: string;
+  systemPromptMode?: 'append' | 'replace';
   /** Absolute path boundary for write-side tools; undefined disables enforcement */
   worktreeBoundary?: string;
   /** Permission level from specialist YAML — controls which pi tools are enabled */
@@ -649,7 +650,8 @@ export class PiAgentSession {
     }
 
     if (this.options.systemPrompt) {
-      args.push('--append-system-prompt', this.options.systemPrompt);
+      const systemPromptFlag = this.options.systemPromptMode === 'replace' ? '--system-prompt' : '--append-system-prompt';
+      args.push(systemPromptFlag, this.options.systemPrompt);
     }
 
     const worktreeBoundary = this.options.worktreeBoundary ? resolve(this.options.worktreeBoundary) : undefined;

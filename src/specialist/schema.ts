@@ -53,6 +53,7 @@ const ExecutionSchema = z.object({
 
 const PromptSchema = z.object({
   system: z.string().optional(),
+  system_prompt_mode: z.enum(['append', 'replace']).optional(),
   task_template: z.string(),
   output_schema: z.record(z.unknown()).optional(),
   skill_inherit: z.string().optional(),         // injected via pi --skill

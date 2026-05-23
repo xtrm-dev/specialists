@@ -1326,6 +1326,7 @@ _This project is indexed by GitNexus. You MUST use these tools — do NOT fall b
       session = await this.sessionFactory({
         model,
         systemPrompt: agentsMd || undefined,
+        systemPromptMode: prompt.system_prompt_mode,
         skillPaths: skillPaths.length > 0 ? skillPaths : undefined,
         thinkingLevel: execution.thinking_level,
         permissionLevel,
