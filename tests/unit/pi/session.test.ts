@@ -360,10 +360,26 @@ describe('PiAgentSession', () => {
     const session = await PiAgentSession.create({ model: 'gemini', systemPrompt: 'specialist instructions' });
     await session.start();
 
-    const args: string[] = mockSpawn.mock.calls[0][1];
+    const args: string[] = mockSpawn.mock.calls.find(([, callArgs]) => (callArgs as string[]).includes('--append-system-prompt'))?.[1] as string[];
+    expect(args).toBeDefined();
     expect(args).toContain('--append-system-prompt');
     expect(args[args.indexOf('--append-system-prompt') + 1]).toBe('specialist instructions');
     expect(args).not.toContain('--system-prompt');
+  });
+
+  it('uses --system-prompt when package runner systemPromptMode is replace', async () => {
+    const session = await PiAgentSession.create({
+      model: 'gemini',
+      systemPrompt: 'specialist instructions',
+      systemPromptMode: 'replace',
+    });
+    await session.start();
+
+    const args: string[] = mockSpawn.mock.calls.find(([, callArgs]) => (callArgs as string[]).includes('--system-prompt'))?.[1] as string[];
+    expect(args).toBeDefined();
+    expect(args).toContain('--system-prompt');
+    expect(args[args.indexOf('--system-prompt') + 1]).toBe('specialist instructions');
+    expect(args).not.toContain('--append-system-prompt');
   });
 
   it('prompt() does NOT close stdin', async () => {

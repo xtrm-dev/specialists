@@ -469,7 +469,8 @@ export async function runScriptSpecialist(input: ScriptGenerateRequest, options:
 
     for (const model of modelCandidates) {
       const systemPrompt = spec.specialist.prompt.system || undefined;
-      const attempt = await runSingleAttempt(prompt, model, input.thinking_level ?? spec.specialist.execution.thinking_level, timeoutMs, assistantTextLimitBytes, options, systemPrompt, skillPaths);
+      const systemPromptMode = spec.specialist.prompt.system_prompt_mode;
+      const attempt = await runSingleAttempt(prompt, model, input.thinking_level ?? spec.specialist.execution.thinking_level, timeoutMs, assistantTextLimitBytes, options, systemPrompt, systemPromptMode, skillPaths);
       attempts.push(attempt);
       const parsed = classifyAttempt(attempt);
       if (parsed.retryable) continue;
@@ -517,14 +518,14 @@ export function collectModelCandidates(input: ScriptGenerateRequest, spec: Speci
 
 type AttemptFailureReason = 'assistant_text_too_large' | 'stderr_too_large' | 'malformed_line_too_large';
 
-function runSingleAttempt(prompt: string, model: string, thinkingLevel: string | undefined, timeoutMs: number, assistantTextLimitBytes: number, options: ScriptRunnerOptions, systemPrompt?: string, skillPaths: string[] = []): Promise<{ model: string; text: string; stderr: string; exitCode: number; timedOut: boolean; outputTooLarge: boolean; outputTooLargeReason?: AttemptFailureReason }> {
+function runSingleAttempt(prompt: string, model: string, thinkingLevel: string | undefined, timeoutMs: number, assistantTextLimitBytes: number, options: ScriptRunnerOptions, systemPrompt?: string, systemPromptMode?: 'append' | 'replace', skillPaths: string[] = []): Promise<{ model: string; text: string; stderr: string; exitCode: number; timedOut: boolean; outputTooLarge: boolean; outputTooLargeReason?: AttemptFailureReason }> {
   return new Promise((resolve, reject) => {
     const args = ['--mode', 'json', '--no-session', '--no-extensions', '--no-tools', '--offline', '--no-context-files', '--no-prompt-templates', '--no-themes'];
     if (skillPaths.length === 0) args.push('--no-skills');
     for (const skillPath of skillPaths) args.push('--skill', skillPath);
     args.push('--model', model);
     if (thinkingLevel) args.push('--thinking', thinkingLevel);
-    if (systemPrompt) args.push('--system-prompt', systemPrompt);
+    if (systemPrompt) args.push(systemPromptMode === 'append' ? '--append-system-prompt' : '--system-prompt', systemPrompt);
 
     const pi = spawn('pi', args, { stdio: ['pipe', 'pipe', 'pipe'], cwd: options.projectDir ?? process.cwd() });
     options.onChild?.(pi);

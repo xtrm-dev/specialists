@@ -626,6 +626,37 @@ describe('runScriptSpecialist system prompt forwarding', () => {
     expect(spawnArgs[idx + 1]).toBe('You are a financial data extractor. Return only JSON.');
   });
 
+  it('uses --append-system-prompt when spec.prompt.system_prompt_mode is append', async () => {
+    const specWithAppend = {
+      ...baseSpec,
+      specialist: {
+        ...baseSpec.specialist,
+        prompt: {
+          ...baseSpec.specialist.prompt,
+          system: 'You are a financial data extractor. Return only JSON.',
+          system_prompt_mode: 'append',
+        },
+      },
+    };
+    const child = createSpawnMock();
+    const resultPromise = runScriptSpecialist(
+      { specialist: 'changelog-keeper', variables: { name: 'release notes' } },
+      { loader: makeLoader(specWithAppend as never) as never, projectDir: '.' },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    child.stdout.emit('data', Buffer.from(`${JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'output' }] } })}\n`));
+    child.emit('close', 0);
+
+    await resultPromise;
+
+    const spawnArgs: string[] = spawnMock.mock.calls[0][1];
+    const idx = spawnArgs.indexOf('--append-system-prompt');
+    expect(idx).toBeGreaterThan(-1);
+    expect(spawnArgs[idx + 1]).toBe('You are a financial data extractor. Return only JSON.');
+    expect(spawnArgs).not.toContain('--system-prompt');
+  });
+
   it('omits --system-prompt when spec.prompt.system is absent', async () => {
     const child = createSpawnMock();
     const resultPromise = runScriptSpecialist(
