@@ -200,3 +200,8 @@
 - 2026-05-22T08:11:20+00:00: unitAI-17kx3 changed sp chat detach semantics: /quit and Ctrl+C now restore/exit the TUI without calling stopJob; /stop is the explicit kill path; /show now prints job/bead/state/fifo.
 
 - 2026-05-22T13:43:53Z: unitAI-76yuy fixed bare `sp attach` picker navigation: use raw-mode readline keypresses for Up/Down/Enter instead of `readFileSync(0)` numeric input; regression test emits keypress events and PTY smoke verifies marker movement into attach TUI.
+
+## 2026-05-23 — unitAI-6x6p6 reviewer crash fix
+- Reproduced reviewer heavy-bash crash (`cada28`) and confirmed cache_read_tokens was not causal.
+- Merged supervisor read-time dead-PID reconciliation (`4f8410eb`) so dead `starting|running` jobs terminalize to `error` with `run_complete(ERROR)` instead of hanging as stale `running`.
+- Updated CHANGELOG `[Unreleased]` and session report `.xtrm/reports/2026-05-23-4f8410eb.md`.
