@@ -222,20 +222,20 @@ Run `bd memories <keyword>` or `bd recall <key>` for prior insights before subst
 
 ## Specialist orchestration in one paragraph
 
-`--bead` is the prompt — don't run a specialist until the bead is a usable task contract (PROBLEM / SUCCESS / SCOPE / NON_GOALS / CONSTRAINTS / VALIDATION / OUTPUT). Edit-capable specialists auto-provision a worktree from `--bead`. Reviewer reuses the executor workspace via `--job <exec-job>` — `--worktree` and `--job` are mutually exclusive. Keep executor/debugger jobs alive with `--keep-alive` so they're resumable. Default `--context-depth` is 3. Merge via `sp merge <chain-root>` or `sp epic merge <epic>` — never manual `git merge` for specialist branches. Per-turn output auto-appends to bead notes; `bd show <id>` is the canonical way to read a handoff. Full reference: `/using-specialists-v2`.
+`--bead` is the prompt — don't run a specialist until the bead is a usable task contract (PROBLEM / SUCCESS / SCRUTINY / SCOPE / NON_GOALS / CONSTRAINTS / VALIDATION / OUTPUT). Edit-capable specialists auto-provision a worktree from `--bead`. Reviewer reuses the executor workspace via `--job <exec-job>` — `--worktree` and `--job` are mutually exclusive. Keep executor/debugger jobs alive with `--keep-alive` so they're resumable. Default `--context-depth` is 3. **Merge via manual git workflow (Cherry-Pick Playbook or `git merge --no-ff`)** — `sp merge` and `sp epic merge` are prohibited (known broken, awaiting separate rework epic). Per-turn output auto-appends to bead notes; `bd show <id>` is the canonical way to read a handoff. Full reference: `/using-specialists-v3`.
 
 ## Common gotchas (project-specific)
 
-- **Reviewer PASS auto-finalizes the keep-alive executor** only when the verdict appears in streaming output. PASS delivered via `sp resume` does not stream — use `sp finalize <any-chain-job-id>` (cascades; accepts executor / reviewer / debugger / any chain member) to close the whole chain. Do NOT fall back to `sp stop --force` + manual git merge.
-- **Per-chain `sp merge` is allowed for any PASS chain regardless of sibling epic state.** Loop A from the prior chain-lifecycle deadlock is gone. Use `sp epic merge` only when batching all epic chains together.
-- **Persisted `failed` epic state is recoverable.** A failed `sp epic merge` (rebase conflict etc.) writes a soft `failed` marker; the next attempt retries fresh once the operator clears the conflict. Only `merged` and `abandoned` are truly terminal.
+- **Merge is manual.** `sp merge` and `sp epic merge` are prohibited (rule #9 in `/using-specialists-v3`). Use `git merge --no-ff feature/<bead>` for per-chain merges, or `git update-ref` for FF-equivalent when checkout is blocked by transient `.beads/issues.jsonl` churn. Cherry-Pick Playbook is the canonical multi-chain path.
+- **Closing keep-alive specialists.** No `sp finalize` cascade — close each waiting job explicitly with `sp stop <job-id>` after reviewer PASS. Verify with `sp ps` first.
 - **`--worktree` and `--job` are mutually exclusive.** First executor: `--worktree`. Reviewer/fix: `--job <exec-job>`.
-- **Stale-base guard** blocks worktree dispatch if sibling epic chains have unmerged substantive commits. Override with `--force-stale-base` only with cause.
-- **Manual `git merge` of feature branches breaks sp's epic bookkeeping.** Use `sp merge` / `sp epic merge` / `sp finalize` — the redesign removed the conditions that previously forced manual fallback (sticky FAILED, inverted merge gates, no PASS finalizer).
-- **Epic readiness is derived live, not persisted.** Only `merged` and `abandoned` are terminal-persisted; everything else (`blocked`, `failed`, `merge_ready`) is recomputed each read. `sp epic resolve` was removed.
+- **Iron-style gates are now mandatory.** code-sanity (seconder) and obligations-scanner (new specialist, scans TODO/FIXME/HACK/etc) run on every production diff. Skip only allowed for test-only or new-file-only diffs. Reviewer auto-escalates SCRUTINY on sensitive surfaces (auth, config/specialists, lockfiles, migrations, permissions/hooks).
+- **Git State Precondition before any dependent chain dispatch.** `git status` clean + HEAD contains prior chain commits + no orphaned worktrees. Stale-base dispatch → guaranteed debugger-restitch loop.
 - **GitNexus index goes stale on commit.** PostToolUse hook normally re-indexes after `git commit`/`git merge`; if not, `npx gitnexus analyze` (add `--embeddings` only if `.gitnexus/meta.json` shows `stats.embeddings > 0`).
 - **`bd close` itself does not block.** Stop hook blocks only after a successful `bd close` in same session, and only when hook can resolve issue id from `claimed:<sessionId>`, `closed-this-session:<sessionId>`, or branch name. If `bd show` fails, gate fails open. Each id in batch needs its own ack before session stop.
+- **bd auto-export keeps re-staging `.beads/issues.jsonl`** after every bd op. `.git/info/exclude` blocks `git add` but the already-tracked staged change can still be committed. Stale `.git/index.lock` from bd hooks is safe to `rm -f` when no real git process is running.
 - **Specialists are JSON** (`config/specialists/<name>.specialist.json`) — YAML is a deprecated legacy fallback (`loader.ts:101 deprecatedYaml`).
+- **Package-tier specialists need direct JSON edit** (not `sp edit` — that's user-tier only). Use `jq -e` to validate after edit. `specialists list --full` to confirm registry sees the change.
 
 ## Project-specific
 
