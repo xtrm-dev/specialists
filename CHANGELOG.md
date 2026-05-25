@@ -9,7 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`obligations-scanner` specialist** (NEW) — READ_ONLY, cheap (`openai-codex/gpt-5.4-mini`, `bare: true`, ~30s target) pre-review marker scan. Scans executor/debugger diffs for newly-introduced `TODO`/`FIXME`/`HACK`/`XXX`/`TEMP`/`WIP`/`NOTE(release)` markers in production code. Distinguishes production vs test/fixture surfaces. Recognizes structured `// TODO(<bead-id>): reason` format and treats it as TRACKED when the linked bead is open. Verdict: `CLEAN | OBLIGATIONS_FOUND | BLOCKED` with a JSON `output_schema` the reviewer consumes directly. Iron-style obligations tracking (`unitAI-kglvm.3`).
+- **`docs/design/iron-review-hardening.html`** — design doc visualizing the new pipeline (SCRUTINY taxonomy, old-vs-new chain flow, per-specialist changes, git-state precondition, manual execution plan). Mirrored to `~/second-mind/1-projects/Mercury/` for sync (`unitAI-fpwbr`, `unitAI-1n56e`, `unitAI-ejdi1`).
+
 ### Changed
+- **`reviewer` specialist — Iron-inspired prompt overhaul.** Five new system-prompt sections, additions only (existing source-of-truth priority and AUTHORITATIVE REVIEW CONTEXT preserved verbatim) (`unitAI-kglvm.1`):
+  - **SCRUTINY tier behavior** (`low | medium | high | critical`) — reads field from bead contract; defaults to `medium`; tiers reviewer depth from seconder-only spot-check (low) through file-by-file sign-off with mandatory `gitnexus_impact` (high) to required second-opinion (critical).
+  - **Scrutiny auto-escalation** — surface-pattern floor table raises level regardless of bead's stated SCRUTINY when diff touches `auth/*`, `**/credentials*`, `**/token*` (→ high), `config/specialists/*.json` (→ high), `src/specialist/{runner,schema}.ts` (→ high), `**/*.lock` (→ medium + security-auditor required), `migrations/**` (→ high), `src/permissions/*` / `hooks/**` (→ critical). Author's level is a floor, not a ceiling.
+  - **Re-review after PARTIAL (Ddiff mode)** — when re-reviewing a fixed PARTIAL, scope to delta since prior verdict, carry forward prior approvals, audit only newly-touched files/symbols.
+  - **Obligations scan** — consumes `obligations-scanner` JSON output if present, else scans diff inline; production markers → PARTIAL unless accepted via bead `NON_GOALS` or structured `// TODO(<bead-id>):` reference; test/fixture markers noted but not blocking.
+  - **Release Checklist** (REQUIRED) — machine-readable block appended to every verdict for future `sp merge` enforcement.
+- **`code-sanity` specialist — promoted to mandatory seconder gate.** Description and prompt reframe the role: reviewer treats `OK` verdict as a pre-condition for `PASS` on production diffs. Skip permitted only for test-only or new-file-only diffs. Output schema unchanged (`OK | FINDINGS | BLOCKED`). Tag `seconder` added (`unitAI-kglvm.2`).
+- **`executor` and `debugger` specialists — Obligations discipline.** New system-prompt section instructs both codegen specialists to avoid introducing in-code obligation markers in production paths by default; if work is genuinely deferred, file a follow-up bead via `bd create --deps discovered-from:<current>`; if a marker is truly needed at a code site, use structured form `// TODO(<follow-up-bead-id>): <reason>` where the linked bead is open and listed in current bead's `NON_GOALS`. Prevents PARTIAL fix-loops from the new obligations-scanner gate. Test/fixture paths exempt (`unitAI-kglvm.4`).
+- **`using-specialists-v3` skill: v3.4 → v3.5 (Iron-style orchestration).** Substantial restructure aligned with the above specialist changes (`unitAI-kglvm.5`):
+  - "Advisory Passes" section reframed as three mandatory gates: **Seconder Gate** (`code-sanity`), **Security Gate** (`security-auditor` on sensitive surfaces), **Obligations Gate** (`obligations-scanner`). Skip rules tightened.
+  - NEW **SCRUTINY taxonomy** section: tier behavior + auto-escalation surface table. SCRUTINY field added to task/epic, executor, reviewer bead contract templates.
+  - NEW **Git State Precondition** section: four-check pre-flight (working tree clean, HEAD contains prior chain commits, no orphaned worktrees, in-sync integration branch) required before dispatching any chain that depends on prior chain output. Strictness-by-scenario table.
+  - **Rule #9 INVERTED**: manual git workflow is now canonical; `sp merge` and `sp epic merge` are PROHIBITED (known broken, awaiting separate rework epic). Cherry-Pick Playbook promoted to canonical multi-chain merge path. `sp finalize` removed from documented orchestrator workflow.
+  - **Rule #13 exception clause** added for epics that restructure the specialists themselves (operator-authorized manual-orchestrator-direct work).
+  - **Rule #14 NEW**: Git State Precondition reference.
+  - `obligations-scanner` row added to Choosing The Specialist table. `parallel-review` marked deprecated.
+  - Escalation Matrix and Failure Recovery tables rewritten: sp-merge rows replaced with git-workflow recovery patterns (stale `.git/index.lock`, `info/exclude` vs tracked beads file, FF-via-`git update-ref` when checkout blocked).
+- **CLAUDE.md "Common gotchas" section rewritten** to match the new canonical: manual merge, explicit `sp stop` for keep-alive cleanup, Iron-style gates mandatory, Git State Precondition, bd auto-export churn handling, package-tier specialist edits via direct JSON.
+- **`bd` auto-export pain fix.** `bd config set export.git-add false` disables per-write auto-staging of `.beads/issues.jsonl` (silent mid-work; no checkout aborts; no `.git/index.lock` races). Paired with a custom block added to `.git/hooks/pre-commit` AFTER bd's managed markers — runs `git add -f .beads/issues.jsonl` so commits naturally include the fresh JSONL snapshot via the existing pre-commit hook chain. Eliminates the runaway `chore(beads): export state` commits that plagued every multi-bd-op session. Verified end-to-end in this repo (commits `63ac83f6`, `4c1f19a5`, `1e014f33`) (`unitAI-mg18o`).
+
+### Removed
+- `sp merge` / `sp epic merge` / `sp finalize` removed from documented orchestrator workflow in `using-specialists-v3`. Commands still exist in the `sp` binary (no source-code removal) but the skill explicitly prohibits their use pending a separate rework epic. Operators reaching for them should use the documented manual git workflow instead.
+
+### Changed (prior)
 - All 17 package-shipped specialists in `config/specialists/` now declare the v3.16.0 schema additions explicitly: `execution.bare: false` and `prompt.system_prompt_mode: "append"`. Values match the previous absent-field defaults — pure-mechanical, zero behavior change — but every shipped spec is now self-documenting at the schema level instead of relying on per-runner legacy fallbacks. `bare.specialist.json` retains its explicit `bare: true` + `replace` (`unitAI-51r2w`).
 
 ### Fixed
