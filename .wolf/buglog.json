@@ -631,6 +631,22 @@
         "mercury",
         "unitAI-f5k0p"
       ]
+    },
+    {
+      "timestamp": "2026-05-26T23:12:00+00:00",
+      "error_message": "PR #99 OSV scan failed on vulnerable qs@6.15.1 from bun.lock, and Codex flagged telemetry write failures aborting stop/resume control actions",
+      "file": "package.json; bun.lock; src/specialist/supervisor.ts; src/cli/resume.ts",
+      "root_cause": "Bun lockfile retained transitive qs@6.15.1 entries despite adding a top-level qs dependency, and supervisor control/status telemetry writes threw when SQLite was unavailable, coupling observability failures to operator control-plane actions.",
+      "fix": "Added a qs 6.15.2 override and regenerated bun.lock so no qs@6.15.1 entries remain; made control/meta/status telemetry persistence best-effort for updateJobStatus/emitControlEvent and split resume FIFO writes from telemetry recording.",
+      "tags": [
+        "unitAI-dkhi3",
+        "osv",
+        "qs",
+        "codex-review",
+        "telemetry",
+        "stop",
+        "resume"
+      ]
     }
   ]
 }

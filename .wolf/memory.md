@@ -225,3 +225,11 @@
 ## 2026-05-26 — sp log duplicate display rows
 - Real `~/projects/mercury` logs showed adjacent duplicate `RETRY` rows with different seq/timestamps but identical display payload. `sp log` now collapses near-identical human display rows within 2s while preserving full event fidelity in `--json`.
 - `status=<state>` is color-coded again, but only the status segment uses semantic colors to avoid rainbow output.
+
+## 2026-05-27 — Substrate review notes
+
+Created `docs/design/substrate-review.md` to capture current substrate design review decisions: Pi turn vs job turn vs container transition, workflow advancement as persisted step contracts, root/step issue classes, edge-driven blocking semantics, concrete nesting examples, dispatch commands, mid-flight pulse insertion, and channels/issues/evidence coexistence.
+## 2026-05-26 — PR #99 OSV/Codex follow-up
+
+PR #99 failed GitHub OSV on `qs@6.15.1` in `bun.lock` (`GHSA-q8mj-m7cp-5q26`). Fix uses a `qs: 6.15.2` package override and regenerated lockfile. Codex also flagged stop/resume telemetry coupling; supervisor control/status telemetry is now best-effort and resume reports success once FIFO delivery succeeds even if telemetry recording fails.
+

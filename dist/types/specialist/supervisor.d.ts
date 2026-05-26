@@ -134,6 +134,7 @@ export declare class Supervisor {
     listChainJobIds(chainId: string): string[];
     readResult(id: string): string | null;
     finalizeWaitingJob(id: string): SupervisorStatusView | null;
+    private appendEventBestEffort;
     emitMetaEvent(jobId: string, model: string, backend: string): void;
     emitControlEvent(jobId: string, action: string, options: Omit<TimelineEventControlSignal, 't' | 'type' | 'action'>): void;
     updateJobStatus(id: string, status: Extract<SupervisorJobStatus, 'done' | 'cancelled' | 'error' | 'waiting' | 'running' | 'starting'>, error?: string): SupervisorStatusView | null;
