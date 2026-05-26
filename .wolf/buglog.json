@@ -617,6 +617,20 @@
         "do-not-repeat",
         "unitAI-v5xfu"
       ]
+    },
+    {
+      "timestamp": "2026-05-26T16:46:23+00:00",
+      "error_message": "sp log human output showed duplicate RETRY rows in real mercury logs",
+      "file": "src/cli/log.ts",
+      "root_cause": "Some runtime events are persisted more than once with adjacent seq numbers and millisecond-apart timestamps (observed auto_retry start/end in mercury). sp log rendered every durable event verbatim in human mode, making duplicate display rows look like repeated work.",
+      "fix": "Added human-mode display duplicate collapse keyed by job id and normalized event payload within a 2s window. JSON mode remains full-fidelity and preserves every stored event. Also restored color-coded status=<state> using the restrained palette.",
+      "tags": [
+        "sp-log",
+        "dedupe",
+        "observability",
+        "mercury",
+        "unitAI-f5k0p"
+      ]
     }
   ]
 }

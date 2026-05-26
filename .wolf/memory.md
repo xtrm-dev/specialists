@@ -220,3 +220,8 @@
 
 ## 2026-05-26 — sp log restrained colors
 - `sp log` human output intentionally uses a restrained palette: metadata dim, identifiers mostly plain/bold, green only for success, yellow for warnings/cancel/control, red for failures. Avoid rainbow job/status colors in this command.
+
+
+## 2026-05-26 — sp log duplicate display rows
+- Real `~/projects/mercury` logs showed adjacent duplicate `RETRY` rows with different seq/timestamps but identical display payload. `sp log` now collapses near-identical human display rows within 2s while preserving full event fidelity in `--json`.
+- `status=<state>` is color-coded again, but only the status segment uses semantic colors to avoid rainbow output.
