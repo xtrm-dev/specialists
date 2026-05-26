@@ -310,10 +310,11 @@ specialists log -f [--specialist <name>] [--bead <id>]
 - `--limit <n>`: Max rows in each snapshot (default `200`).
 - `-f`, `--follow`: Poll continuously for new rows.
 - `--json`: NDJSON rows with the full event payload.
+- `--all-events`, `--verbose`: Include agent-internal feed events (`tool`, `turn`, `message`, `text`, `thinking`, token rows).
 
 ### Output
 
-`log` is the full runtime/debug stream. Every human row includes timestamp, job, specialist, bead, repo, path, branch, status, pid, model, chain, seq, event type, and event detail when available. It does not suppress lifecycle/control rows, so it is the first command to use for reviewer/code-sanity crashes, dispatch failures, `resume`, `steer`, `stop`, SIGTERM/SIGKILL escalation, and terminal error provenance.
+`log` is the specialist-runtime/debug stream, not a duplicate of `sp feed`. By default it hides agent-internal turn/tool/text/thinking/token rows and shows only runtime-owned rows such as `run_start`, `run_complete`, `status_change`, `control_signal`, stale warnings, retries, compactions, extension/API errors, and auto-commit events. Human rows are colorized and compact: timestamp, event label, job, specialist, bead, one collapsed `worktree=<root>@<branch>` field, status, pid, and event detail. Use `--all-events` when you explicitly need the raw feed-like internals.
 
 Examples:
 
@@ -322,6 +323,7 @@ specialists log a1b2c3
 specialists log --bead unitAI-123 --limit 500
 specialists log --specialist reviewer -f
 specialists log -f --json
+specialists log a1b2c3 --all-events
 ```
 
 ### Exit codes

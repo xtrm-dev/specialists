@@ -7,7 +7,20 @@ import { execFileSync } from 'node:child_process';
 import { createObservabilitySqliteClient } from '../specialist/observability-sqlite.js';
 import type { SupervisorStatus } from '../specialist/supervisor.js';
 import type { TimelineEvent } from '../specialist/timeline-events.js';
-import { formatDateTime, formatElapsed, formatTokenUsageSummary } from './format-helpers.js';
+import {
+  bold,
+  blue,
+  cyan,
+  dim,
+  formatDateTime,
+  formatElapsed,
+  formatTokenUsageSummary,
+  green,
+  magenta,
+  red,
+  yellow,
+  type Colorizer,
+} from './format-helpers.js';
 
 interface LogOptions {
   jobId?: string;
@@ -18,7 +31,25 @@ interface LogOptions {
   limit: number;
   follow: boolean;
   json: boolean;
+  allEvents: boolean;
 }
+
+const RUNTIME_EVENT_TYPES = new Set<string>([
+  'run_start',
+  'run_complete',
+  'status_change',
+  'control_signal',
+  'stale_warning',
+  'error',
+  'extension_error',
+  'model_change',
+  'retry',
+  'compaction',
+  'auto_commit_success',
+  'auto_commit_skipped',
+  'auto_commit_failed',
+  'status_snapshot',
+]);
 
 interface LogRow {
   jobId: string;
@@ -57,6 +88,7 @@ function parseArgs(argv: readonly string[]): LogOptions {
   let limit = 200;
   let follow = false;
   let json = false;
+  let allEvents = false;
 
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i];
@@ -68,11 +100,12 @@ function parseArgs(argv: readonly string[]): LogOptions {
     if (token === '--limit' && argv[i + 1]) { limit = Math.max(1, Number(argv[++i]) || limit); continue; }
     if (token === '--follow' || token === '-f') { follow = true; continue; }
     if (token === '--json') { json = true; continue; }
+    if (token === '--all-events' || token === '--verbose') { allEvents = true; continue; }
     if (!token.startsWith('-') && !jobId) { jobId = token; continue; }
     throw new Error(`Unknown option: ${token}`);
   }
 
-  return { jobId, specialist, beadId, nodeId, since, limit, follow, json };
+  return { jobId, specialist, beadId, nodeId, since, limit, follow, json, allEvents };
 }
 
 const repoCache = new Map<string, { repo?: string; path?: string }>();
@@ -102,12 +135,28 @@ function matches(status: SupervisorStatus, options: LogOptions): boolean {
   return true;
 }
 
+function isRuntimeEvent(event: TimelineEvent): boolean {
+  if (RUNTIME_EVENT_TYPES.has(event.type)) return true;
+  if (event.type === 'meta') {
+    return Boolean(
+      event.model.startsWith('gitnexus_')
+      || event.model.startsWith('bead_')
+      || event.backend === 'supervisor',
+    );
+  }
+  return false;
+}
+
 function toRows(statuses: SupervisorStatus[], options: LogOptions, readEvents: (jobId: string) => TimelineEvent[]): LogRow[] {
   const rows: LogRow[] = [];
   for (const status of statuses) {
     if (!matches(status, options)) continue;
     const repo = resolveRepo(status.worktree_path);
-    const events = readEvents(status.id).filter((event) => options.since === undefined || event.t >= options.since);
+    const events = readEvents(status.id).filter((event) => {
+      if (options.since !== undefined && event.t < options.since) return false;
+      if (options.allEvents) return true;
+      return isRuntimeEvent(event);
+    });
     for (const event of events) {
       rows.push({
         jobId: status.id,
@@ -160,9 +209,7 @@ function compact(value: unknown, max = 240): string {
 }
 
 function eventDetail(event: TimelineEvent): string {
-  if (event.type === 'run_start') {
-    return `specialist=${event.specialist}${event.bead_id ? ` bead=${event.bead_id}` : ''}`;
-  }
+  if (event.type === 'run_start') return 'started';
   if (event.type === 'control_signal') {
     return [
       `action=${event.action}`,
@@ -209,6 +256,55 @@ function eventDetail(event: TimelineEvent): string {
   return compact(event, 500);
 }
 
+function eventColor(event: TimelineEvent): Colorizer {
+  switch (event.type) {
+    case 'run_start': return cyan;
+    case 'run_complete':
+      return event.status === 'ERROR' ? red : event.status === 'CANCELLED' ? yellow : green;
+    case 'status_change': return blue;
+    case 'control_signal': return magenta;
+    case 'stale_warning': return yellow;
+    case 'error':
+    case 'extension_error': return red;
+    case 'auto_commit_success': return green;
+    case 'auto_commit_failed': return red;
+    case 'auto_commit_skipped': return yellow;
+    default: return dim;
+  }
+}
+
+function eventLabel(event: TimelineEvent): string {
+  const rawType = (event as { type: string }).type;
+  if (rawType === 'status_snapshot') return 'SNAP';
+  switch (event.type) {
+    case 'run_start': return 'START';
+    case 'run_complete': return event.status;
+    case 'status_change': return 'STATUS';
+    case 'control_signal': return 'CTRL';
+    case 'stale_warning': return 'WARN';
+    case 'auto_commit_success': return 'AUTO+';
+    case 'auto_commit_skipped': return 'AUTO-';
+    case 'auto_commit_failed': return 'AUTO!';
+    default: return rawType.toUpperCase().slice(0, 6);
+  }
+}
+
+function formatWorktree(row: LogRow): string {
+  return row.path ? basename(row.path) : row.repo ?? '-';
+}
+
+function statusColor(status: string | undefined): Colorizer {
+  switch (status) {
+    case 'done': return green;
+    case 'error': return red;
+    case 'cancelled': return yellow;
+    case 'running': return cyan;
+    case 'waiting': return magenta;
+    case 'starting': return blue;
+    default: return dim;
+  }
+}
+
 function printRow(row: LogRow, json: boolean): void {
   if (json) {
     console.log(JSON.stringify({
@@ -220,6 +316,7 @@ function printRow(row: LogRow, json: boolean): void {
       repo: row.repo ?? null,
       path: row.path ?? null,
       branch: row.branch ?? null,
+      worktree: formatWorktree(row),
       status: row.status ?? null,
       pid: row.pid ?? null,
       model: row.model ?? null,
@@ -232,23 +329,22 @@ function printRow(row: LogRow, json: boolean): void {
     return;
   }
 
-  const prefix = [
-    formatDateTime(row.event.t),
-    `job=${row.jobId}`,
-    `specialist=${row.specialist}`,
-    `bead=${row.beadId ?? '-'}`,
-    row.nodeId ? `node=${row.nodeId}` : null,
-    `repo=${row.repo ?? '-'}`,
-    `path=${row.path ?? '-'}`,
-    row.branch ? `branch=${row.branch}` : null,
-    `status=${row.status ?? '-'}`,
-    row.pid !== undefined ? `pid=${row.pid}` : null,
-    row.model ? `model=${row.backend ? `${row.backend}/` : ''}${row.model}` : null,
-    row.chainId ? `chain=${row.chainId}` : null,
-    `seq=${row.event.seq ?? '-'}`,
-    `event=${row.event.type}`,
+  const color = eventColor(row.event);
+  const label = color(bold(eventLabel(row.event).padEnd(6)));
+  const status = statusColor(row.status)(row.status ?? '-');
+  const head = [
+    dim(formatDateTime(row.event.t)),
+    label,
+    cyan(row.jobId),
+    bold(row.specialist),
+    dim(`bead=${row.beadId ?? '-'}`),
+    row.nodeId ? magenta(`node=${row.nodeId}`) : null,
+    blue(`worktree=${formatWorktree(row)}`),
+    `status=${status}`,
+    row.pid !== undefined ? dim(`pid=${row.pid}`) : null,
   ].filter(Boolean).join(' ');
-  console.log(`${prefix} ${eventDetail(row.event)}`.trim());
+
+  console.log(`${head} ${eventDetail(row.event)}`.trim());
 }
 
 export async function run(argv: readonly string[] = process.argv.slice(3)): Promise<void> {
@@ -257,7 +353,7 @@ export async function run(argv: readonly string[] = process.argv.slice(3)): Prom
     options = parseArgs(argv);
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
-    console.error('Usage: specialists|sp log [job-id] [--specialist <name>] [--bead <id>] [--node <id>] [--since <5m|iso>] [--limit <n>] [-f|--follow] [--json]');
+    console.error('Usage: specialists|sp log [job-id] [--specialist <name>] [--bead <id>] [--node <id>] [--since <5m|iso>] [--limit <n>] [-f|--follow] [--json] [--all-events]');
     process.exit(1);
   }
 

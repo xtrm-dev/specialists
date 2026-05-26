@@ -50481,6 +50481,7 @@ function parseArgs12(argv) {
   let limit = 200;
   let follow2 = false;
   let json = false;
+  let allEvents = false;
   for (let i = 0;i < argv.length; i += 1) {
     const token = argv[i];
     if ((token === "--job" || token === "--job-id") && argv[i + 1]) {
@@ -50515,13 +50516,17 @@ function parseArgs12(argv) {
       json = true;
       continue;
     }
+    if (token === "--all-events" || token === "--verbose") {
+      allEvents = true;
+      continue;
+    }
     if (!token.startsWith("-") && !jobId) {
       jobId = token;
       continue;
     }
     throw new Error(`Unknown option: ${token}`);
   }
-  return { jobId, specialist, beadId, nodeId, since, limit, follow: follow2, json };
+  return { jobId, specialist, beadId, nodeId, since, limit, follow: follow2, json, allEvents };
 }
 function resolveRepo(path3) {
   if (!path3)
@@ -50551,13 +50556,27 @@ function matches(status, options2) {
     return false;
   return true;
 }
+function isRuntimeEvent(event) {
+  if (RUNTIME_EVENT_TYPES.has(event.type))
+    return true;
+  if (event.type === "meta") {
+    return Boolean(event.model.startsWith("gitnexus_") || event.model.startsWith("bead_") || event.backend === "supervisor");
+  }
+  return false;
+}
 function toRows(statuses, options2, readEvents) {
   const rows = [];
   for (const status of statuses) {
     if (!matches(status, options2))
       continue;
     const repo = resolveRepo(status.worktree_path);
-    const events = readEvents(status.id).filter((event) => options2.since === undefined || event.t >= options2.since);
+    const events = readEvents(status.id).filter((event) => {
+      if (options2.since !== undefined && event.t < options2.since)
+        return false;
+      if (options2.allEvents)
+        return true;
+      return isRuntimeEvent(event);
+    });
     for (const event of events) {
       rows.push({
         jobId: status.id,
@@ -50606,9 +50625,8 @@ function compact(value, max = 240) {
   return flat.length > max ? `${flat.slice(0, max - 1)}\u2026` : flat;
 }
 function eventDetail(event) {
-  if (event.type === "run_start") {
-    return `specialist=${event.specialist}${event.bead_id ? ` bead=${event.bead_id}` : ""}`;
-  }
+  if (event.type === "run_start")
+    return "started";
   if (event.type === "control_signal") {
     return [
       `action=${event.action}`,
@@ -50664,6 +50682,77 @@ function eventDetail(event) {
     return `phase=${event.phase}`;
   return compact(event, 500);
 }
+function eventColor(event) {
+  switch (event.type) {
+    case "run_start":
+      return cyan6;
+    case "run_complete":
+      return event.status === "ERROR" ? red2 : event.status === "CANCELLED" ? yellow10 : green9;
+    case "status_change":
+      return blue3;
+    case "control_signal":
+      return magenta3;
+    case "stale_warning":
+      return yellow10;
+    case "error":
+    case "extension_error":
+      return red2;
+    case "auto_commit_success":
+      return green9;
+    case "auto_commit_failed":
+      return red2;
+    case "auto_commit_skipped":
+      return yellow10;
+    default:
+      return dim9;
+  }
+}
+function eventLabel(event) {
+  const rawType = event.type;
+  if (rawType === "status_snapshot")
+    return "SNAP";
+  switch (event.type) {
+    case "run_start":
+      return "START";
+    case "run_complete":
+      return event.status;
+    case "status_change":
+      return "STATUS";
+    case "control_signal":
+      return "CTRL";
+    case "stale_warning":
+      return "WARN";
+    case "auto_commit_success":
+      return "AUTO+";
+    case "auto_commit_skipped":
+      return "AUTO-";
+    case "auto_commit_failed":
+      return "AUTO!";
+    default:
+      return rawType.toUpperCase().slice(0, 6);
+  }
+}
+function formatWorktree(row) {
+  return row.path ? basename9(row.path) : row.repo ?? "-";
+}
+function statusColor2(status) {
+  switch (status) {
+    case "done":
+      return green9;
+    case "error":
+      return red2;
+    case "cancelled":
+      return yellow10;
+    case "running":
+      return cyan6;
+    case "waiting":
+      return magenta3;
+    case "starting":
+      return blue3;
+    default:
+      return dim9;
+  }
+}
 function printRow(row, json) {
   if (json) {
     console.log(JSON.stringify({
@@ -50675,6 +50764,7 @@ function printRow(row, json) {
       repo: row.repo ?? null,
       path: row.path ?? null,
       branch: row.branch ?? null,
+      worktree: formatWorktree(row),
       status: row.status ?? null,
       pid: row.pid ?? null,
       model: row.model ?? null,
@@ -50686,23 +50776,21 @@ function printRow(row, json) {
     }));
     return;
   }
-  const prefix = [
-    formatDateTime(row.event.t),
-    `job=${row.jobId}`,
-    `specialist=${row.specialist}`,
-    `bead=${row.beadId ?? "-"}`,
-    row.nodeId ? `node=${row.nodeId}` : null,
-    `repo=${row.repo ?? "-"}`,
-    `path=${row.path ?? "-"}`,
-    row.branch ? `branch=${row.branch}` : null,
-    `status=${row.status ?? "-"}`,
-    row.pid !== undefined ? `pid=${row.pid}` : null,
-    row.model ? `model=${row.backend ? `${row.backend}/` : ""}${row.model}` : null,
-    row.chainId ? `chain=${row.chainId}` : null,
-    `seq=${row.event.seq ?? "-"}`,
-    `event=${row.event.type}`
+  const color = eventColor(row.event);
+  const label = color(bold11(eventLabel(row.event).padEnd(6)));
+  const status = statusColor2(row.status)(row.status ?? "-");
+  const head = [
+    dim9(formatDateTime(row.event.t)),
+    label,
+    cyan6(row.jobId),
+    bold11(row.specialist),
+    dim9(`bead=${row.beadId ?? "-"}`),
+    row.nodeId ? magenta3(`node=${row.nodeId}`) : null,
+    blue3(`worktree=${formatWorktree(row)}`),
+    `status=${status}`,
+    row.pid !== undefined ? dim9(`pid=${row.pid}`) : null
   ].filter(Boolean).join(" ");
-  console.log(`${prefix} ${eventDetail(row.event)}`.trim());
+  console.log(`${head} ${eventDetail(row.event)}`.trim());
 }
 async function run20(argv = process.argv.slice(3)) {
   let options2;
@@ -50710,7 +50798,7 @@ async function run20(argv = process.argv.slice(3)) {
     options2 = parseArgs12(argv);
   } catch (error2) {
     console.error(error2 instanceof Error ? error2.message : String(error2));
-    console.error("Usage: specialists|sp log [job-id] [--specialist <name>] [--bead <id>] [--node <id>] [--since <5m|iso>] [--limit <n>] [-f|--follow] [--json]");
+    console.error("Usage: specialists|sp log [job-id] [--specialist <name>] [--bead <id>] [--node <id>] [--since <5m|iso>] [--limit <n>] [-f|--follow] [--json] [--all-events]");
     process.exit(1);
   }
   const sqlite = createObservabilitySqliteClient();
@@ -50751,10 +50839,26 @@ async function run20(argv = process.argv.slice(3)) {
     sqlite.close();
   }
 }
-var repoCache;
+var RUNTIME_EVENT_TYPES, repoCache;
 var init_log = __esm(() => {
   init_observability_sqlite();
   init_format_helpers();
+  RUNTIME_EVENT_TYPES = new Set([
+    "run_start",
+    "run_complete",
+    "status_change",
+    "control_signal",
+    "stale_warning",
+    "error",
+    "extension_error",
+    "model_change",
+    "retry",
+    "compaction",
+    "auto_commit_success",
+    "auto_commit_skipped",
+    "auto_commit_failed",
+    "status_snapshot"
+  ]);
   repoCache = new Map;
 });
 
@@ -62297,7 +62401,7 @@ async function run37() {
         "",
         "Runtime-oriented specialist log stream. Unlike feed, it does not suppress",
         "control/lifecycle rows and every row includes timestamp, job, specialist,",
-        "bead, repo, path, branch, status, pid, seq, and event detail when known.",
+        "bead, compact worktree, status, pid, and runtime event detail.",
         "",
         "Options:",
         "  --job <id>          Filter to one job id",
@@ -62308,6 +62412,7 @@ async function run37() {
         "  --limit <n>         Max rows per snapshot (default 200)",
         "  -f, --follow        Continue polling for new rows",
         "  --json              Emit NDJSON rows with full event payloads",
+        "  --all-events        Include agent-internal feed events (tool/turn/text/etc.)",
         "",
         "Examples:",
         "  specialists log 49adda",
@@ -62315,6 +62420,7 @@ async function run37() {
         "  specialists log --specialist reviewer -f",
         "  specialists log -f --json",
         "",
+        "Default output is runtime-only; use --all-events for raw agent internals.",
         "Use feed for compact human progress; use log for debugging crashes,",
         "dispatch/resume/steer/stop signals, and terminal error provenance.",
         ""

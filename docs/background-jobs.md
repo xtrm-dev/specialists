@@ -79,12 +79,12 @@ sp ps -f                      # TTY in-place dashboard; pipes append ANSI-free s
 sp feed 49adda --follow       # per-job follow, including future resume turns
 sp feed -f                    # global follow; keep-alive waiting jobs are terminal-equivalent unless --forever
 sp feed 49adda                # compact DB-backed event replay for that job
-sp log 49adda                 # full runtime/control/error log with bead/repo/path metadata
+sp log 49adda                 # lean runtime/control/error log with compact worktree metadata
 sp log --specialist reviewer -f  # follow reviewer runtime logs
 sp ps 49adda --json
 ```
 
-Snapshot `sp feed <job-id>` reads compact DB event history for that job. Use `sp log <job-id>` for the complete runtime/debug stream: dispatch, control signals, resume/steer consumption, stop/SIGTERM/SIGKILL, crashes, status transitions, and terminal error provenance. Legacy file mirrors, when enabled, are recovery surfaces rather than the normal source of truth.
+Snapshot `sp feed <job-id>` reads compact DB event history for that job. Use `sp log <job-id>` for the lean runtime/debug stream: dispatch, control signals, resume/steer consumption, stop/SIGTERM/SIGKILL, crashes, status transitions, and terminal error provenance. It intentionally excludes feed-owned agent internals by default; add `--all-events` when you need them. Legacy file mirrors, when enabled, are recovery surfaces rather than the normal source of truth.
 
 ## Interactive chat TUI
 

@@ -37,8 +37,9 @@ function seedJob(jobId: string): void {
   sqliteState.statuses = [status];
   sqliteState.events.set(jobId, [
     { t: 1000, seq: 1, type: 'run_start', specialist: 'reviewer', bead_id: 'unitAI-log' },
-    { t: 2000, seq: 2, type: 'control_signal', action: 'stop_requested', source: 'cli', pid: 123, previous_status: 'running', next_status: 'cancelled', reason: 'operator_stop' },
-    { t: 3000, seq: 3, type: 'status_change', previous_status: 'running', status: 'cancelled' },
+    { t: 1500, seq: 2, type: 'tool', tool: 'bash', phase: 'start', args: { command: 'echo noisy' } },
+    { t: 2000, seq: 3, type: 'control_signal', action: 'stop_requested', source: 'cli', pid: 123, previous_status: 'running', next_status: 'cancelled', reason: 'operator_stop' },
+    { t: 3000, seq: 4, type: 'status_change', previous_status: 'running', status: 'cancelled' },
   ] as TimelineEvent[]);
 }
 
@@ -59,7 +60,7 @@ describe('log CLI', () => {
     vi.resetModules();
   });
 
-  it('prints runtime rows with bead repo path and control signal detail', async () => {
+  it('prints lean colorized runtime rows with compact worktree and control signal detail', async () => {
     seedJob('joblog');
     process.argv = ['node', 'specialists', 'log', 'joblog'];
 
@@ -70,14 +71,30 @@ describe('log CLI', () => {
     await run();
 
     const output = logs.join('\n');
-    expect(output).toContain('job=joblog');
-    expect(output).toContain('specialist=reviewer');
+    expect(output).toContain('joblog');
+    expect(output).toContain('reviewer');
     expect(output).toContain('bead=unitAI-log');
-    expect(output).toContain('repo=');
-    expect(output).toContain(`path=${tempRoot}`);
-    expect(output).toContain('event=control_signal');
+    expect(output).toContain(`worktree=${tempRoot.split('/').pop()}`);
+    expect(output).toContain('CTRL');
+    expect(output).not.toContain('tool=bash');
+    expect(output).not.toContain(`path=${tempRoot}`);
     expect(output).toContain('action=stop_requested');
     expect(output).toContain('status=running->cancelled');
+  });
+
+
+
+  it('can include agent-internal events when --all-events is set', async () => {
+    seedJob('jobverbose');
+    process.argv = ['node', 'specialists', 'log', 'jobverbose', '--all-events'];
+
+    const logs: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((msg?: unknown) => logs.push(String(msg ?? '')));
+
+    const { run } = await import('../../../src/cli/log.js');
+    await run();
+
+    expect(logs.join('\n')).toContain('tool=bash');
   });
 
   it('emits JSON rows with full event payload', async () => {
