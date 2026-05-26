@@ -7895,7 +7895,7 @@ var require_core = __commonJS((exports) => {
     constructor(opts = {}) {
       this.schemas = {};
       this.refs = {};
-      this.formats = {};
+      this.formats = Object.create(null);
       this._compilations = new Set;
       this._loading = {};
       this._cache = new Map;
@@ -25063,31 +25063,29 @@ class Supervisor {
     this.aggregateJobMetricsBestEffort(id);
     return finalized;
   }
+  appendEventBestEffort(jobId, operation, event) {
+    try {
+      const status = this.readStatus(jobId);
+      const persisted = this.withSqliteOperation(operation, (client) => {
+        client.appendEvent(jobId, status?.specialist ?? "unknown", status?.bead_id, event);
+        return true;
+      });
+      if (persisted === undefined) {
+        console.warn(`[supervisor] SQLite ${operation} skipped: database client unavailable`);
+      }
+    } catch (error2) {
+      console.warn(`[supervisor] SQLite ${operation} failed: ${String(error2)}`);
+    }
+  }
   emitMetaEvent(jobId, model, backend) {
     if (this.isDisposed)
       return;
-    const event = createMetaEvent(model, backend);
-    const persisted = this.withSqliteOperation("appendEvent", (client) => {
-      const status = this.readStatus(jobId);
-      client.appendEvent(jobId, status?.specialist ?? "unknown", status?.bead_id, event);
-      return true;
-    });
-    if (persisted === undefined) {
-      throw new Error("[supervisor] SQLite appendEvent failed: database client unavailable");
-    }
+    this.appendEventBestEffort(jobId, "appendEvent", createMetaEvent(model, backend));
   }
   emitControlEvent(jobId, action, options) {
     if (this.isDisposed)
       return;
-    const event = createControlSignalEvent(action, options);
-    const persisted = this.withSqliteOperation("appendEvent", (client) => {
-      const status = this.readStatus(jobId);
-      client.appendEvent(jobId, status?.specialist ?? "unknown", status?.bead_id, event);
-      return true;
-    });
-    if (persisted === undefined) {
-      throw new Error("[supervisor] SQLite appendEvent failed: database client unavailable");
-    }
+    this.appendEventBestEffort(jobId, "appendEvent", createControlSignalEvent(action, options));
   }
   updateJobStatus(id, status, error2) {
     const currentStatus = this.readStatus(id);
@@ -25101,16 +25099,9 @@ class Supervisor {
       error: error2,
       last_event_at_ms: Date.now()
     };
-    this.writeStatusFile(id, updatedStatus);
+    this.writeStatusFile(id, updatedStatus, { sqliteFailureMode: "warn" });
     if (previousStatus !== status) {
-      const event = createStatusChangeEvent(status, previousStatus);
-      const persisted = this.withSqliteOperation("appendEvent:status_change", (client) => {
-        client.appendEvent(id, updatedStatus.specialist, updatedStatus.bead_id, event);
-        return true;
-      });
-      if (persisted === undefined) {
-        throw new Error("[supervisor] SQLite appendEvent failed during status update: database client unavailable");
-      }
+      this.appendEventBestEffort(id, "appendEvent:status_change", createStatusChangeEvent(status, previousStatus));
     }
     return this.withComputedLiveness(updatedStatus);
   }
@@ -25181,41 +25172,49 @@ class Supervisor {
     writeFileSync3(tmp, JSON.stringify(normalizedStatus, null, 2), "utf-8");
     renameSync(tmp, path);
   }
-  writeStatusFile(id, data) {
+  writeStatusFile(id, data, options = {}) {
     const normalizedStatus = this.withStatusLineageDefaults(id, data);
     this.writeStatusFileOnly(id, normalizedStatus);
-    const persisted = this.withSqliteOperation("upsertStatus", (client) => {
-      client.upsertStatus(normalizedStatus);
-      const chainId = resolveChainId(normalizedStatus);
-      if (!normalizedStatus.epic_id || !chainId) {
-        return true;
-      }
-      client.upsertEpicRun({
-        epic_id: normalizedStatus.epic_id,
-        status: "open",
-        updated_at_ms: Date.now(),
-        status_json: JSON.stringify({
+    try {
+      const persisted = this.withSqliteOperation("upsertStatus", (client) => {
+        client.upsertStatus(normalizedStatus);
+        const chainId = resolveChainId(normalizedStatus);
+        if (!normalizedStatus.epic_id || !chainId) {
+          return true;
+        }
+        client.upsertEpicRun({
           epic_id: normalizedStatus.epic_id,
           status: "open",
-          source: "supervisor",
+          updated_at_ms: Date.now(),
+          status_json: JSON.stringify({
+            epic_id: normalizedStatus.epic_id,
+            status: "open",
+            source: "supervisor",
+            chain_id: chainId,
+            chain_root_bead_id: normalizedStatus.chain_root_bead_id ?? null,
+            chain_root_job_id: normalizedStatus.chain_root_job_id ?? normalizedStatus.id
+          })
+        });
+        client.upsertEpicChainMembership({
           chain_id: chainId,
-          chain_root_bead_id: normalizedStatus.chain_root_bead_id ?? null,
-          chain_root_job_id: normalizedStatus.chain_root_job_id ?? normalizedStatus.id
-        })
+          epic_id: normalizedStatus.epic_id,
+          chain_root_bead_id: normalizedStatus.chain_root_bead_id,
+          chain_root_job_id: normalizedStatus.chain_root_job_id ?? normalizedStatus.id,
+          updated_at_ms: Date.now()
+        });
+        const readiness = loadEpicReadinessSummary(client, normalizedStatus.epic_id);
+        syncEpicStateFromReadiness(client, readiness);
+        return true;
       });
-      client.upsertEpicChainMembership({
-        chain_id: chainId,
-        epic_id: normalizedStatus.epic_id,
-        chain_root_bead_id: normalizedStatus.chain_root_bead_id,
-        chain_root_job_id: normalizedStatus.chain_root_job_id ?? normalizedStatus.id,
-        updated_at_ms: Date.now()
-      });
-      const readiness = loadEpicReadinessSummary(client, normalizedStatus.epic_id);
-      syncEpicStateFromReadiness(client, readiness);
-      return true;
-    });
-    if (persisted === undefined) {
-      throw new Error("[supervisor] SQLite upsertStatus failed: database client unavailable");
+      if (persisted === undefined) {
+        throw new Error("[supervisor] SQLite upsertStatus failed: database client unavailable");
+      }
+    } catch (error2) {
+      if (options.sqliteFailureMode === "warn") {
+        console.warn(`[supervisor] SQLite upsertStatus failed: ${String(error2)}`);
+        return;
+      }
+      throw error2;
     }
   }
   gc() {
@@ -39745,6 +39744,7 @@ var init_stdin_buffer = __esm(() => {
 import * as fs2 from "fs";
 import { createRequire as createRequire3 } from "module";
 import * as path2 from "path";
+import { fileURLToPath as fileURLToPath4 } from "url";
 
 class ProcessTerminal {
   wasRaw = false;
@@ -39829,17 +39829,23 @@ class ProcessTerminal {
     if (process.platform !== "win32")
       return;
     try {
-      const koffi = cjsRequire("koffi");
-      const k32 = koffi.load("kernel32.dll");
-      const GetStdHandle = k32.func("void* __stdcall GetStdHandle(int)");
-      const GetConsoleMode = k32.func("bool __stdcall GetConsoleMode(void*, _Out_ uint32_t*)");
-      const SetConsoleMode = k32.func("bool __stdcall SetConsoleMode(void*, uint32_t)");
-      const STD_INPUT_HANDLE = -10;
-      const ENABLE_VIRTUAL_TERMINAL_INPUT = 512;
-      const handle = GetStdHandle(STD_INPUT_HANDLE);
-      const mode = new Uint32Array(1);
-      GetConsoleMode(handle, mode);
-      SetConsoleMode(handle, mode[0] | ENABLE_VIRTUAL_TERMINAL_INPUT);
+      const arch = process.arch;
+      if (arch !== "x64" && arch !== "arm64")
+        return;
+      const moduleDir = path2.dirname(fileURLToPath4(import.meta.url));
+      const nativePath = path2.join("native", "win32", "prebuilds", `win32-${arch}`, "win32-console-mode.node");
+      const candidates = [
+        path2.join(moduleDir, "..", nativePath),
+        path2.join(moduleDir, nativePath),
+        path2.join(path2.dirname(process.execPath), nativePath)
+      ];
+      for (const modulePath of candidates) {
+        try {
+          const helper = cjsRequire(modulePath);
+          helper.enableVirtualTerminalInput?.();
+          return;
+        } catch {}
+      }
     } catch {}
   }
   async drainInput(maxMs = 1000, idleMs = 50) {
@@ -47299,7 +47305,7 @@ var init_epic = __esm(() => {
 // src/cli/version-check.ts
 import { spawnSync as spawnSync16 } from "child_process";
 import { existsSync as existsSync22, mkdirSync as mkdirSync11, readFileSync as readFileSync22, writeFileSync as writeFileSync13 } from "fs";
-import { dirname as dirname11, join as join26 } from "path";
+import { dirname as dirname12, join as join26 } from "path";
 import { createRequire as createRequire4 } from "module";
 function readBundledPackageVersion(requireFn = require3) {
   for (const candidate of ["../package.json", "../../package.json"]) {
@@ -47333,7 +47339,7 @@ function readCachedVersionCheck() {
   return readCache();
 }
 function writeCache(cache) {
-  mkdirSync11(dirname11(CACHE_PATH), { recursive: true });
+  mkdirSync11(dirname12(CACHE_PATH), { recursive: true });
   writeFileSync13(CACHE_PATH, `${JSON.stringify(cache, null, 2)}
 `, "utf8");
 }
@@ -51016,10 +51022,16 @@ async function run22() {
 `);
       process.exit(1);
     }
-    try {
-      const payload = JSON.stringify({ type: "resume", task }) + `
+    const payload = JSON.stringify({ type: "resume", task }) + `
 `;
+    try {
       writeFileSync15(status.fifo_path, payload, { flag: "a" });
+    } catch (err) {
+      process.stderr.write(`${red6("Error:")} Failed to write to steer pipe: ${err?.message}
+`);
+      process.exit(1);
+    }
+    try {
       supervisor.emitControlEvent(jobId, "resume_sent", {
         source: "cli",
         previous_status: status.status,
@@ -51027,15 +51039,14 @@ async function run22() {
         fifo_path: status.fifo_path,
         task_preview: task.replace(/\s+/g, " ").slice(0, 240)
       });
-      process.stdout.write(`${green12("\u2713")} Resume sent to job ${jobId}
-`);
-      process.stdout.write(`  Use 'specialists feed ${jobId} --follow' to watch the response.
-`);
     } catch (err) {
-      process.stderr.write(`${red6("Error:")} Failed to write to steer pipe: ${err?.message}
+      process.stderr.write(`Warning: resume delivered, but telemetry could not be recorded: ${err?.message ?? String(err)}
 `);
-      process.exit(1);
     }
+    process.stdout.write(`${green12("\u2713")} Resume sent to job ${jobId}
+`);
+    process.stdout.write(`  Use 'specialists feed ${jobId} --follow' to watch the response.
+`);
   } finally {
     await supervisor.dispose();
   }
@@ -52654,7 +52665,7 @@ __export(exports_doctor, {
 import { createHash as createHash5 } from "crypto";
 import { spawnSync as spawnSync21 } from "child_process";
 import { existsSync as existsSync32, lstatSync as lstatSync2, mkdirSync as mkdirSync12, readdirSync as readdirSync18, readFileSync as readFileSync31, readlinkSync as readlinkSync3, writeFileSync as writeFileSync16 } from "fs";
-import { dirname as dirname12, join as join36, relative as relative4, resolve as resolve13 } from "path";
+import { dirname as dirname13, join as join36, relative as relative4, resolve as resolve13 } from "path";
 function ok3(msg) {
   console.log(`  ${green14("\u2713")} ${msg}`);
 }
@@ -52760,7 +52771,7 @@ function checkHooks() {
     const claudeHookPath = join36(CLAUDE_HOOKS_DIR, name);
     const symlinkState = isSymlinkTo(claudeHookPath, canonicalPath);
     if (symlinkState.ok) {
-      ok3(`${relative4(CWD, claudeHookPath)} -> ${relative4(dirname12(claudeHookPath), canonicalPath)}`);
+      ok3(`${relative4(CWD, claudeHookPath)} -> ${relative4(dirname13(claudeHookPath), canonicalPath)}`);
       continue;
     }
     allPresent = false;
@@ -52867,7 +52878,7 @@ function isSymlinkTo(linkPath, expectedTargetPath) {
     return { ok: false, reason: "not-symlink" };
   try {
     const rawTarget = readlinkSync3(linkPath);
-    const resolvedTarget = resolve13(dirname12(linkPath), rawTarget);
+    const resolvedTarget = resolve13(dirname13(linkPath), rawTarget);
     const resolvedExpected = resolve13(expectedTargetPath);
     if (resolvedTarget !== resolvedExpected) {
       return { ok: false, reason: "wrong-target", target: rawTarget };
@@ -52974,7 +52985,7 @@ function checkSkillDrift() {
   for (const check2 of skillRootChecks) {
     const state = isSymlinkTo(check2.root, check2.expected);
     if (state.ok) {
-      ok3(`${relative4(CWD, check2.root)} -> ${relative4(dirname12(check2.root), check2.expected)}`);
+      ok3(`${relative4(CWD, check2.root)} -> ${relative4(dirname13(check2.root), check2.expected)}`);
       continue;
     }
     rootLinksOk = false;

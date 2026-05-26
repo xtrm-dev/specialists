@@ -1,4 +1,6 @@
 # anatomy.md
+> Manual update: 2026-05-26T23:12:00Z — unitAI-dkhi3 fixed PR #99 follow-up: package overrides now force qs 6.15.2 in bun.lock, and supervisor stop/resume telemetry is best-effort so SQLite failures do not block control actions.
+> Manual update: 2026-05-27T00:00:00Z — unitAI-q5slu added docs/design/substrate-review.md with substrate review decisions covering turn/tick hierarchy, issue-backed workflow steps, channels, pulses, and dispatch examples.
 > Manual update: 2026-05-23T13:30:00Z — unitAI-6x6p6 merged supervisor read-time dead-job reconciliation, added regression test, updated CHANGELOG and 2026-05-23 session report.
 > Manual update: 2026-05-15T18:39:00Z — unitAI-ashu1 updated config/skills/using-specialists-v3/SKILL.md to clarify clean worktree dependency bootstrap responsibility; do not track node_modules/.venv.
 

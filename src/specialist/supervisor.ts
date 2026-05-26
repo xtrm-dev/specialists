@@ -803,17 +803,24 @@ export class Supervisor {
     return finalized;
   }
 
+  private appendEventBestEffort(jobId: string, operation: string, event: TimelineEvent): void {
+    try {
+      const status = this.readStatus(jobId);
+      const persisted = this.withSqliteOperation(operation, (client) => {
+        client.appendEvent(jobId, status?.specialist ?? 'unknown', status?.bead_id, event);
+        return true;
+      });
+      if (persisted === undefined) {
+        console.warn(`[supervisor] SQLite ${operation} skipped: database client unavailable`);
+      }
+    } catch (error: unknown) {
+      console.warn(`[supervisor] SQLite ${operation} failed: ${String(error)}`);
+    }
+  }
+
   emitMetaEvent(jobId: string, model: string, backend: string): void {
     if (this.isDisposed) return;
-    const event = createMetaEvent(model, backend);
-    const persisted = this.withSqliteOperation('appendEvent', (client) => {
-      const status = this.readStatus(jobId);
-      client.appendEvent(jobId, status?.specialist ?? 'unknown', status?.bead_id, event);
-      return true;
-    });
-    if (persisted === undefined) {
-      throw new Error('[supervisor] SQLite appendEvent failed: database client unavailable');
-    }
+    this.appendEventBestEffort(jobId, 'appendEvent', createMetaEvent(model, backend));
   }
 
   emitControlEvent(
@@ -822,15 +829,7 @@ export class Supervisor {
     options: Omit<TimelineEventControlSignal, 't' | 'type' | 'action'>,
   ): void {
     if (this.isDisposed) return;
-    const event = createControlSignalEvent(action, options);
-    const persisted = this.withSqliteOperation('appendEvent', (client) => {
-      const status = this.readStatus(jobId);
-      client.appendEvent(jobId, status?.specialist ?? 'unknown', status?.bead_id, event);
-      return true;
-    });
-    if (persisted === undefined) {
-      throw new Error('[supervisor] SQLite appendEvent failed: database client unavailable');
-    }
+    this.appendEventBestEffort(jobId, 'appendEvent', createControlSignalEvent(action, options));
   }
 
   updateJobStatus(id: string, status: Extract<SupervisorJobStatus, 'done' | 'cancelled' | 'error' | 'waiting' | 'running' | 'starting'>, error?: string): SupervisorStatusView | null {
@@ -846,17 +845,10 @@ export class Supervisor {
       last_event_at_ms: Date.now(),
     };
 
-    this.writeStatusFile(id, updatedStatus);
+    this.writeStatusFile(id, updatedStatus, { sqliteFailureMode: 'warn' });
 
     if (previousStatus !== status) {
-      const event = createStatusChangeEvent(status, previousStatus);
-      const persisted = this.withSqliteOperation('appendEvent:status_change', (client) => {
-        client.appendEvent(id, updatedStatus.specialist, updatedStatus.bead_id, event);
-        return true;
-      });
-      if (persisted === undefined) {
-        throw new Error('[supervisor] SQLite appendEvent failed during status update: database client unavailable');
-      }
+      this.appendEventBestEffort(id, 'appendEvent:status_change', createStatusChangeEvent(status, previousStatus));
     }
 
     return this.withComputedLiveness(updatedStatus);
@@ -939,46 +931,59 @@ export class Supervisor {
     renameSync(tmp, path);
   }
 
-  private writeStatusFile(id: string, data: SupervisorStatus): void {
+  private writeStatusFile(
+    id: string,
+    data: SupervisorStatus,
+    options: { sqliteFailureMode?: 'throw' | 'warn' } = {},
+  ): void {
     const normalizedStatus = this.withStatusLineageDefaults(id, data);
     this.writeStatusFileOnly(id, normalizedStatus);
-    const persisted = this.withSqliteOperation('upsertStatus', (client) => {
-      client.upsertStatus(normalizedStatus);
 
-      const chainId = resolveChainId(normalizedStatus);
-      if (!normalizedStatus.epic_id || !chainId) {
-        return true;
-      }
+    try {
+      const persisted = this.withSqliteOperation('upsertStatus', (client) => {
+        client.upsertStatus(normalizedStatus);
 
-      client.upsertEpicRun({
-        epic_id: normalizedStatus.epic_id,
-        status: 'open',
-        updated_at_ms: Date.now(),
-        status_json: JSON.stringify({
+        const chainId = resolveChainId(normalizedStatus);
+        if (!normalizedStatus.epic_id || !chainId) {
+          return true;
+        }
+
+        client.upsertEpicRun({
           epic_id: normalizedStatus.epic_id,
           status: 'open',
-          source: 'supervisor',
+          updated_at_ms: Date.now(),
+          status_json: JSON.stringify({
+            epic_id: normalizedStatus.epic_id,
+            status: 'open',
+            source: 'supervisor',
+            chain_id: chainId,
+            chain_root_bead_id: normalizedStatus.chain_root_bead_id ?? null,
+            chain_root_job_id: normalizedStatus.chain_root_job_id ?? normalizedStatus.id,
+          }),
+        });
+
+        client.upsertEpicChainMembership({
           chain_id: chainId,
-          chain_root_bead_id: normalizedStatus.chain_root_bead_id ?? null,
+          epic_id: normalizedStatus.epic_id,
+          chain_root_bead_id: normalizedStatus.chain_root_bead_id,
           chain_root_job_id: normalizedStatus.chain_root_job_id ?? normalizedStatus.id,
-        }),
+          updated_at_ms: Date.now(),
+        });
+
+        const readiness = loadEpicReadinessSummary(client, normalizedStatus.epic_id);
+        syncEpicStateFromReadiness(client, readiness);
+        return true;
       });
 
-      client.upsertEpicChainMembership({
-        chain_id: chainId,
-        epic_id: normalizedStatus.epic_id,
-        chain_root_bead_id: normalizedStatus.chain_root_bead_id,
-        chain_root_job_id: normalizedStatus.chain_root_job_id ?? normalizedStatus.id,
-        updated_at_ms: Date.now(),
-      });
-
-      const readiness = loadEpicReadinessSummary(client, normalizedStatus.epic_id);
-      syncEpicStateFromReadiness(client, readiness);
-      return true;
-    });
-
-    if (persisted === undefined) {
-      throw new Error('[supervisor] SQLite upsertStatus failed: database client unavailable');
+      if (persisted === undefined) {
+        throw new Error('[supervisor] SQLite upsertStatus failed: database client unavailable');
+      }
+    } catch (error: unknown) {
+      if (options.sqliteFailureMode === 'warn') {
+        console.warn(`[supervisor] SQLite upsertStatus failed: ${String(error)}`);
+        return;
+      }
+      throw error;
     }
   }
 

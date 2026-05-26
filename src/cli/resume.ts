@@ -39,9 +39,15 @@ export async function run(): Promise<void> {
       process.exit(1);
     }
 
+    const payload = JSON.stringify({ type: 'resume', task }) + '\n';
     try {
-      const payload = JSON.stringify({ type: 'resume', task }) + '\n';
       writeFileSync(status.fifo_path, payload, { flag: 'a' });
+    } catch (err: any) {
+      process.stderr.write(`${red('Error:')} Failed to write to steer pipe: ${err?.message}\n`);
+      process.exit(1);
+    }
+
+    try {
       supervisor.emitControlEvent(jobId, 'resume_sent', {
         source: 'cli',
         previous_status: status.status,
@@ -49,12 +55,12 @@ export async function run(): Promise<void> {
         fifo_path: status.fifo_path,
         task_preview: task.replace(/\s+/g, ' ').slice(0, 240),
       });
-      process.stdout.write(`${green('✓')} Resume sent to job ${jobId}\n`);
-      process.stdout.write(`  Use 'specialists feed ${jobId} --follow' to watch the response.\n`);
     } catch (err: any) {
-      process.stderr.write(`${red('Error:')} Failed to write to steer pipe: ${err?.message}\n`);
-      process.exit(1);
+      process.stderr.write(`Warning: resume delivered, but telemetry could not be recorded: ${err?.message ?? String(err)}\n`);
     }
+
+    process.stdout.write(`${green('✓')} Resume sent to job ${jobId}\n`);
+    process.stdout.write(`  Use 'specialists feed ${jobId} --follow' to watch the response.\n`);
   } finally {
     await supervisor.dispose();
   }

@@ -44,6 +44,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - All 17 package-shipped specialists in `config/specialists/` now declare the v3.16.0 schema additions explicitly: `execution.bare: false` and `prompt.system_prompt_mode: "append"`. Values match the previous absent-field defaults — pure-mechanical, zero behavior change — but every shipped spec is now self-documenting at the schema level instead of relying on per-runner legacy fallbacks. `bare.specialist.json` retains its explicit `bare: true` + `replace` (`unitAI-51r2w`).
 
 ### Fixed
+- `sp stop` / `sp resume` control-plane actions now treat observability writes as best-effort: status/control telemetry failures no longer prevent SIGTERM delivery or falsely report a delivered resume as a steer-pipe write failure (`unitAI-dkhi3`).
+- OSV scan now resolves `GHSA-q8mj-m7cp-5q26` by overriding all `qs` lockfile entries to `6.15.2`; `bun.lock` no longer contains vulnerable `qs@6.15.1` entries (`unitAI-dkhi3`).
 - Supervisor status reads now reconcile dead `starting`/`running` specialist jobs to terminal `error` with a `run_complete(ERROR)` event, so reviewer crashes during heavy bash validation no longer leave `sp ps`/`sp result` stuck on stale `running` rows (`unitAI-6x6p6`, `unitAI-uzyut`).
 
 ## [v3.16.0] — 2026-05-23
