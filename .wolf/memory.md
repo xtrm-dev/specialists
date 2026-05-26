@@ -216,3 +216,7 @@
 ## 2026-05-26 — unitAI-v5xfu global sp log
 - `sp log` now supports parent-directory/global mode: if cwd lacks `.specialists/db/observability.db`, it scans immediate child repos with that DB, aggregates logs, and supports `--repo <name>` filtering.
 - Avoid shell-quoted markdown/backticks in `bd create/update`; use subprocess argv/body files.
+
+
+## 2026-05-26 — sp log restrained colors
+- `sp log` human output intentionally uses a restrained palette: metadata dim, identifiers mostly plain/bold, green only for success, yellow for warnings/cancel/control, red for failures. Avoid rainbow job/status colors in this command.

@@ -1380,3 +1380,7 @@
 - `src/cli/log.ts` now resolves log DB targets with repo-root-first behavior and parent-directory discovery: when cwd lacks `.specialists/db/observability.db`, it scans immediate child directories for that DB and aggregates rows across repos.
 - `sp log --repo <name>` filters parent/global output to one discovered child repo.
 - Human output identifies rows as `worktree=<repo>/<worktree>` for cross-repo disambiguation; JSON includes `db_path`.
+
+## 2026-05-26 — `sp log` restrained color palette
+- `src/cli/log.ts` human rendering keeps a calm palette: timestamps/metadata dim, job ids plain, specialist bold, success green, warnings/control/cancel yellow, failures red.
+- `sp log` intentionally does not use per-job rainbow colors; `sp feed` remains the richer live progress view.

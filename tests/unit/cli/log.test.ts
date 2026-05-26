@@ -62,7 +62,7 @@ describe('log CLI', () => {
     vi.resetModules();
   });
 
-  it('prints lean colorized runtime rows with compact worktree and control signal detail', async () => {
+  it('prints lean runtime rows with compact worktree and control signal detail', async () => {
     seedJob('joblog');
     process.argv = ['node', 'specialists', 'log', 'joblog'];
 
