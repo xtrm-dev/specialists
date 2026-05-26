@@ -11,14 +11,11 @@ import type { SupervisorStatus } from '../specialist/supervisor.js';
 import type { TimelineEvent } from '../specialist/timeline-events.js';
 import {
   bold,
-  blue,
-  cyan,
   dim,
   formatDateTime,
   formatElapsed,
   formatTokenUsageSummary,
   green,
-  magenta,
   red,
   yellow,
   type Colorizer,
@@ -289,18 +286,20 @@ function eventDetail(event: TimelineEvent): string {
 
 function eventColor(event: TimelineEvent): Colorizer {
   switch (event.type) {
-    case 'run_start': return cyan;
     case 'run_complete':
       return event.status === 'ERROR' ? red : event.status === 'CANCELLED' ? yellow : green;
-    case 'status_change': return blue;
-    case 'control_signal': return magenta;
-    case 'stale_warning': return yellow;
+    case 'stale_warning':
+    case 'control_signal':
+    case 'auto_commit_skipped':
+      return yellow;
     case 'error':
-    case 'extension_error': return red;
-    case 'auto_commit_success': return green;
-    case 'auto_commit_failed': return red;
-    case 'auto_commit_skipped': return yellow;
-    default: return dim;
+    case 'extension_error':
+    case 'auto_commit_failed':
+      return red;
+    case 'auto_commit_success':
+      return green;
+    default:
+      return dim;
   }
 }
 
@@ -328,12 +327,8 @@ function formatWorktree(row: LogRow): string {
 
 function statusColor(status: string | undefined): Colorizer {
   switch (status) {
-    case 'done': return green;
     case 'error': return red;
     case 'cancelled': return yellow;
-    case 'running': return cyan;
-    case 'waiting': return magenta;
-    case 'starting': return blue;
     default: return dim;
   }
 }
@@ -369,11 +364,11 @@ function printRow(row: LogRow, json: boolean): void {
   const head = [
     dim(formatDateTime(row.event.t)),
     label,
-    cyan(row.jobId),
+    row.jobId,
     bold(row.specialist),
     dim(`bead=${row.beadId ?? '-'}`),
-    row.nodeId ? magenta(`node=${row.nodeId}`) : null,
-    blue(`worktree=${formatWorktree(row)}`),
+    row.nodeId ? dim(`node=${row.nodeId}`) : null,
+    dim(`worktree=${formatWorktree(row)}`),
     `status=${status}`,
     row.pid !== undefined ? dim(`pid=${row.pid}`) : null,
   ].filter(Boolean).join(' ');
