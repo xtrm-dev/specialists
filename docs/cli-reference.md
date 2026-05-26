@@ -41,6 +41,7 @@ source_of_truth_for:
 | [`specialists node`](#specialists-node) | NodeSupervisor control surface: run/list/promote/members/memory/stop |
 | [`specialists epic`](#specialists-epic) | Epic lifecycle: list/status/resolve/merge (canonical publication path) |
 | [`specialists feed`](#specialists-feed) | `--job <id>`: Filter by job ID |
+| [`specialists log`](#specialists-log) | `-f`: Follow full runtime/control/error logs |
 | [`specialists result`](#specialists-result) | `--wait`: Poll until terminal state |
 | [`specialists status`](#specialists-status) | `--json`: Machine-readable status |
 | [`specialists chat`](#specialists-chat) | Interactive TUI launch/control surface |
@@ -281,12 +282,52 @@ On `meta` events with `memory_injection`, feed emits a memory token accounting l
   ↳ memory static=1200 dynamic=3400 gitnexus=500 total=5100
 ```
 
-`feed` reads from SQLite first and falls back to runtime files when SQLite data is unavailable.
+`feed` reads from SQLite first and falls back to runtime files when SQLite data is unavailable. It is intentionally compact: use `sp log` when debugging stop/crash/resume/steer provenance.
 
 ### Exit codes
 
 - `0`: Success (including no events found).
 - `1`: Unhandled runtime error.
+
+---
+
+## `specialists log`
+
+### Synopsis
+
+```bash
+specialists log [job-id] [options]
+specialists log -f [--specialist <name>] [--bead <id>]
+```
+
+### Flags
+
+- `--job <id>`: Filter to one job id.
+- `--specialist <name>`: Filter by specialist role.
+- `--bead <id>`: Filter by bead id.
+- `--node <id>`: Filter by node id.
+- `--since <iso|relative>`: Start time filter (`5m`, `1h`, ISO timestamp).
+- `--limit <n>`: Max rows in each snapshot (default `200`).
+- `-f`, `--follow`: Poll continuously for new rows.
+- `--json`: NDJSON rows with the full event payload.
+
+### Output
+
+`log` is the full runtime/debug stream. Every human row includes timestamp, job, specialist, bead, repo, path, branch, status, pid, model, chain, seq, event type, and event detail when available. It does not suppress lifecycle/control rows, so it is the first command to use for reviewer/code-sanity crashes, dispatch failures, `resume`, `steer`, `stop`, SIGTERM/SIGKILL escalation, and terminal error provenance.
+
+Examples:
+
+```bash
+specialists log a1b2c3
+specialists log --bead unitAI-123 --limit 500
+specialists log --specialist reviewer -f
+specialists log -f --json
+```
+
+### Exit codes
+
+- `0`: Success.
+- `1`: Invalid args or missing observability DB.
 
 ---
 
@@ -357,7 +398,7 @@ In `--json` mode, `startup_context` appears both at top-level and inside `job`:
 - `0`: Result printed.
 - `1`: Job missing, still running with no result file, failed job, timeout, or invalid args.
 
-`result` reads from SQLite first and falls back to runtime files when SQLite data is unavailable.
+`result` reads from SQLite first and falls back to runtime files when SQLite data is unavailable. Failed or cancelled jobs include a `sp log <job-id>` hint so the operator can inspect the full runtime/control trail.
 
 ---
 
@@ -645,7 +686,7 @@ Before sending SIGTERM, `sp stop` resolves the terminal status:
 - If the job has a `run_complete` event in `events.jsonl` → status becomes `done`
 - Otherwise → status becomes `cancelled`
 
-This prevents zombie "waiting" jobs after external kills. Status is written to `status.json` **before** SIGTERM, ensuring the record reflects the actual outcome.
+This prevents zombie "waiting" jobs after external kills. Status is written to `status.json` and `observability.db` **before** SIGTERM, ensuring the record reflects the actual outcome. `sp stop` also appends `control_signal` timeline events for stop request, signal delivery, tmux kill, and force-escalation paths.
 
 ### Examples
 

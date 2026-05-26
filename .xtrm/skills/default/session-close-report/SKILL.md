@@ -318,9 +318,62 @@ If you updated an existing same-day report after an earlier report commit, commi
 that update with the same message style or fold it into the current final commit
 before push.
 
-### 8. Final cleanup verification (MANDATORY)
+### 8. File a handoff bead (MANDATORY)
 
-After committing, re-run the Step 0 checks one more time:
+The report is a static artifact — the next agent will not find it unless something
+in the live board points to it. Create a single handoff bead that anchors the
+SSOT report and links to the suggested next work.
+
+```bash
+REPORT_PATH=".xtrm/reports/<date>-<hash>.md"   # the path you just committed
+bd create \
+  --title="Session handoff <date>: pick up next priorities" \
+  --description="$(cat <<EOF
+Handoff for session ending <date>.
+
+**SSOT report:** \`$REPORT_PATH\`
+
+Read the report first — it has the full summary, problems, open issues with
+context, and the ordered next-priority list. This bead is the live pointer
+into the board.
+
+**Suggested next priorities (from report §Suggested Next Priority):**
+1. <bead-id-1> — <one-line rationale>
+2. <bead-id-2> — <one-line rationale>
+3. <bead-id-3> — <one-line rationale>
+EOF
+)" \
+  --type=task --priority=1
+```
+
+Then link the handoff bead to each suggested next bead with a non-blocking
+relation so the graph shows the recommended pickup order:
+
+```bash
+bd dep relate <handoff-id> <next-bead-1>
+bd dep relate <handoff-id> <next-bead-2>
+bd dep relate <handoff-id> <next-bead-3>
+```
+
+Rules:
+- Use `bd dep relate` (non-blocking), **not** `bd dep add` — the handoff bead
+  is advisory; it must not artificially block work.
+- Priority P1 so the handoff surfaces near the top of `bd ready` / `bv --robot-next`
+  for the next session.
+- One handoff bead per session, even when updating a same-day SSOT report — if
+  an earlier handoff bead exists for today, update its description and relations
+  instead of creating a duplicate.
+- If §Suggested Next Priority lists fewer than 3 beads, link only what exists.
+  If it lists none (truly nothing actionable left), still file the handoff bead
+  so the report is discoverable, and note "no follow-up beads — see report for
+  context" in the description.
+
+Record the handoff bead ID in the report's frontmatter (`handoff_bead: <id>`)
+so the link is bidirectional.
+
+### 9. Final cleanup verification (MANDATORY)
+
+After committing and filing the handoff bead, re-run the Step 0 checks one more time:
 
 ```bash
 git worktree list
@@ -338,9 +391,10 @@ clean.
 The reference is `~/projects/specialists/.xtrm/reports/2026-03-30-orchestration-session.md`.
 Every report must match that level of detail. Specifically:
 
-- Step 0 cleanup performed before report generation; Step 8 verification clean.
+- Step 0 cleanup performed before report generation; Step 9 verification clean.
 - Step 5 due-diligence sweep performed; service skills, docs, memories, CLAUDE.md, evidence, decisions, tests, and skill mirrors checked (or skipped with reason).
 - Step 6 CHANGELOG sync performed when user-facing changes shipped (or skip noted).
+- Step 8 handoff bead filed (P1, `bd dep relate` to each suggested next bead, `handoff_bead` recorded in report frontmatter).
 - No empty `<!-- FILL -->` markers left in the final output
 - No duplicate same-day reports unless explicitly requested by the operator
 - Every closed issue has context, not just an ID

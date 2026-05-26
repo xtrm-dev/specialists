@@ -114,6 +114,7 @@ export const EVENT_LABELS: Record<string, string> = {
   auto_commit_success: 'AUTO+',
   auto_commit_skipped: 'AUTO-',
   auto_commit_failed: 'AUTO!',
+  control_signal: 'CTRL',
 };
 
 /**
@@ -311,6 +312,19 @@ export function formatEventLine(
   } else if (event.type === 'error') {
     detailParts.push(`source=${event.source}`);
     detailParts.push(`error=${event.error_message}`);
+  } else if (event.type === 'control_signal') {
+    detailParts.push(`action=${event.action}`);
+    detailParts.push(`source=${event.source}`);
+    if (event.previous_status || event.next_status) {
+      detailParts.push(`status=${event.previous_status ?? '?'}->${event.next_status ?? '?'}`);
+    }
+    if (event.pid !== undefined) detailParts.push(`pid=${event.pid}`);
+    if (event.signal) detailParts.push(`signal=${event.signal}`);
+    if (event.force !== undefined) detailParts.push(`force=${event.force}`);
+    if (event.reason) detailParts.push(`reason=${event.reason}`);
+    if (event.message_preview) detailParts.push(`message="${event.message_preview}"`);
+    if (event.task_preview) detailParts.push(`task="${event.task_preview}"`);
+    if (event.error_message) detailParts.push(`error=${event.error_message}`);
   } else if (event.type === 'auto_commit_success' || event.type === 'auto_commit_skipped' || event.type === 'auto_commit_failed') {
     const status = event.type.replace('auto_commit_', '');
     detailParts.push(`status=${status}`);
@@ -424,6 +438,8 @@ export function formatEventInline(event: TimelineEvent): string | null {
     }
     case 'stale_warning':
       return yellow(`[warning] ${event.reason}: ${Math.round(event.silence_ms / 1000)}s silent`);
+    case 'control_signal':
+      return dim(`[control] ${event.action}`);
     case 'error':
       return red(`[error] ${event.source}: ${event.error_message}`);
     default:

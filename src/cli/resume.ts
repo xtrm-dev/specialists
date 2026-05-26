@@ -42,6 +42,13 @@ export async function run(): Promise<void> {
     try {
       const payload = JSON.stringify({ type: 'resume', task }) + '\n';
       writeFileSync(status.fifo_path, payload, { flag: 'a' });
+      supervisor.emitControlEvent(jobId, 'resume_sent', {
+        source: 'cli',
+        previous_status: status.status,
+        next_status: 'running',
+        fifo_path: status.fifo_path,
+        task_preview: task.replace(/\s+/g, ' ').slice(0, 240),
+      });
       process.stdout.write(`${green('✓')} Resume sent to job ${jobId}\n`);
       process.stdout.write(`  Use 'specialists feed ${jobId} --follow' to watch the response.\n`);
     } catch (err: any) {

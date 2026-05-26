@@ -77,22 +77,36 @@ export async function stopJob(jobId: string, opts: StopJobOptions = {}): Promise
     const isAlreadyDead = !isProcessAlive(pid, status.started_at_ms);
     const force = opts.force ?? false;
 
+    supervisor.emitControlEvent(jobId, 'stop_requested', {
+      source: 'cli',
+      pid,
+      previous_status: status.status,
+      force,
+      reason: isAlreadyDead ? 'pid_already_dead' : 'operator_stop',
+      signal: force ? 'SIGTERM/SIGKILL' : 'SIGTERM',
+      tmux_session: tmuxSession,
+    });
+
     if (force && isAlreadyDead) {
-      supervisor.updateJobStatus(jobId, 'error');
+      supervisor.updateJobStatus(jobId, 'error', `Force stop requested; PID ${pid} already dead`);
+      supervisor.emitControlEvent(jobId, 'stop_marked_error', { source: 'cli', pid, previous_status: status.status, next_status: 'error', force, reason: 'pid_already_dead' });
       supervisor.aggregateJobMetricsBestEffort(jobId);
       tryKillProcessGroup(pid);
       process.stdout.write(`${green('✓')} Marked ${jobId} as error (PID ${pid} already dead)\n`);
     } else {
       const terminalStatus = resolveTerminalStatus(jobId);
       supervisor.updateJobStatus(jobId, terminalStatus);
+      supervisor.emitControlEvent(jobId, 'status_marked_before_signal', { source: 'cli', pid, previous_status: status.status, next_status: terminalStatus, force });
       supervisor.aggregateJobMetricsBestEffort(jobId);
       try {
         process.kill(pid, 'SIGTERM');
+        supervisor.emitControlEvent(jobId, 'signal_sent', { source: 'cli', pid, signal: 'SIGTERM', force, next_status: terminalStatus });
         process.stdout.write(`${green('✓')} Marked ${jobId} as ${terminalStatus} and sent SIGTERM to PID ${pid}\n`);
         if (force) {
           const exited = await waitForProcessExit(pid, 5_000);
           if (!exited) {
-            supervisor.updateJobStatus(jobId, 'error');
+            supervisor.updateJobStatus(jobId, 'error', `Force stop escalated; PID ${pid} ignored SIGTERM`);
+            supervisor.emitControlEvent(jobId, 'force_stop_escalated', { source: 'cli', pid, signal: 'SIGKILL', previous_status: terminalStatus, next_status: 'error', force: true, reason: 'sigterm_timeout' });
             tryKillProcessGroup(pid);
             process.stderr.write(`${red('Force stop:')} PID ${pid} ignored SIGTERM, marked ${jobId} as error and killed process group.\n`);
           }
@@ -100,7 +114,8 @@ export async function stopJob(jobId: string, opts: StopJobOptions = {}): Promise
       } catch (err: any) {
         if (err.code === 'ESRCH') {
           if (force) {
-            supervisor.updateJobStatus(jobId, 'error');
+            supervisor.updateJobStatus(jobId, 'error', `Force stop escalated; PID ${pid} ignored SIGTERM`);
+            supervisor.emitControlEvent(jobId, 'force_stop_escalated', { source: 'cli', pid, signal: 'SIGKILL', previous_status: terminalStatus, next_status: 'error', force: true, reason: 'sigterm_timeout' });
             tryKillProcessGroup(pid);
             process.stdout.write(`${green('✓')} Marked ${jobId} as error (PID ${pid} already gone)\n`);
           } else {
@@ -113,6 +128,7 @@ export async function stopJob(jobId: string, opts: StopJobOptions = {}): Promise
     }
 
     if (tmuxSession) {
+      supervisor.emitControlEvent(jobId, 'tmux_kill_requested', { source: 'cli', pid, tmux_session: tmuxSession });
       killTmuxSession(tmuxSession);
       process.stdout.write(`${dim(`  tmux session ${tmuxSession} killed`)}\n`);
     }

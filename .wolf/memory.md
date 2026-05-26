@@ -205,3 +205,9 @@
 - Reproduced reviewer heavy-bash crash (`cada28`) and confirmed cache_read_tokens was not causal.
 - Merged supervisor read-time dead-PID reconciliation (`4f8410eb`) so dead `starting|running` jobs terminalize to `error` with `run_complete(ERROR)` instead of hanging as stale `running`.
 - Updated CHANGELOG `[Unreleased]` and session report `.xtrm/reports/2026-05-23-4f8410eb.md`.
+
+
+## 2026-05-26 — unitAI-gqpvw specialist runtime logs
+- Added `sp log` as the full runtime/control/error stream: rows include timestamp, job, specialist, bead, repo/path, branch, status, pid, model, chain, seq, event, and full JSON mode.
+- Runtime now emits `control_signal` events for stop/steer/resume paths and status changes on `updateJobStatus`, so cancelled specialists can be traced beyond compact `sp feed`.
+- `sp result` now points failed/cancelled jobs to `sp log <job-id> --limit 200`.

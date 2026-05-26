@@ -26,6 +26,7 @@ import { isJobFileOutputEnabled } from './job-file-output.js';
 import type { BeadsClient } from './beads.js';
 import {
   type TimelineEvent,
+  type TimelineEventControlSignal,
   TIMELINE_EVENT_TYPES,
   createRunStartEvent,
   createMetaEvent,
@@ -38,6 +39,7 @@ import {
   createCompactionEvent,
   createRetryEvent,
   createAutoCommitEvent,
+  createControlSignalEvent,
   mapCallbackEventToTimelineEvent,
 } from './timeline-events.js';
 import type { SessionMetricEvent, SessionRunMetrics } from '../pi/session.js';
@@ -814,10 +816,28 @@ export class Supervisor {
     }
   }
 
+  emitControlEvent(
+    jobId: string,
+    action: string,
+    options: Omit<TimelineEventControlSignal, 't' | 'type' | 'action'>,
+  ): void {
+    if (this.isDisposed) return;
+    const event = createControlSignalEvent(action, options);
+    const persisted = this.withSqliteOperation('appendEvent', (client) => {
+      const status = this.readStatus(jobId);
+      client.appendEvent(jobId, status?.specialist ?? 'unknown', status?.bead_id, event);
+      return true;
+    });
+    if (persisted === undefined) {
+      throw new Error('[supervisor] SQLite appendEvent failed: database client unavailable');
+    }
+  }
+
   updateJobStatus(id: string, status: Extract<SupervisorJobStatus, 'done' | 'cancelled' | 'error' | 'waiting' | 'running' | 'starting'>, error?: string): SupervisorStatusView | null {
     const currentStatus = this.readStatus(id);
     if (!currentStatus) return null;
 
+    const previousStatus = currentStatus.status;
     const updatedStatus: SupervisorStatus = {
       ...currentStatus,
       status,
@@ -827,6 +847,18 @@ export class Supervisor {
     };
 
     this.writeStatusFile(id, updatedStatus);
+
+    if (previousStatus !== status) {
+      const event = createStatusChangeEvent(status, previousStatus);
+      const persisted = this.withSqliteOperation('appendEvent:status_change', (client) => {
+        client.appendEvent(id, updatedStatus.specialist, updatedStatus.bead_id, event);
+        return true;
+      });
+      if (persisted === undefined) {
+        throw new Error('[supervisor] SQLite appendEvent failed during status update: database client unavailable');
+      }
+    }
+
     return this.withComputedLiveness(updatedStatus);
   }
 
@@ -1445,7 +1477,17 @@ export class Supervisor {
       if (!resumeFn) return;
       const now = Date.now();
       lastActivityMs = now;
+      const previousStatus = statusSnapshot.status;
       setStatus({ status: 'running', current_event: 'starting', last_event_at_ms: now });
+      if (previousStatus !== 'running') {
+        appendTimelineEvent(createStatusChangeEvent('running', previousStatus));
+      }
+      appendTimelineEvent(createControlSignalEvent('resume_consumed', {
+        source: 'runtime',
+        previous_status: previousStatus,
+        next_status: 'running',
+        task_preview: task.replace(/\s+/g, ' ').slice(0, 240),
+      }));
       silenceWarnEmitted = false;
 
       try {
@@ -1886,8 +1928,19 @@ export class Supervisor {
               try {
                 const parsed = JSON.parse(line);
                 if (parsed?.type === 'steer' && typeof parsed.message === 'string') {
+                  appendTimelineEvent(createControlSignalEvent('steer_consumed', {
+                    source: 'runtime',
+                    previous_status: statusSnapshot.status,
+                    message_preview: parsed.message.replace(/\s+/g, ' ').slice(0, 240),
+                  }));
                   // steer is only valid while the session is running
-                  steerFn?.(parsed.message).catch(() => {});
+                  steerFn?.(parsed.message).catch((error) => {
+                    appendTimelineEvent(createControlSignalEvent('steer_failed', {
+                      source: 'runtime',
+                      previous_status: statusSnapshot.status,
+                      error_message: error instanceof Error ? error.message : String(error),
+                    }));
+                  });
                 } else if (parsed?.type === 'resume' && typeof parsed.task === 'string') {
                   // resume: send next-turn prompt to a waiting keep-alive session
                   // waiting state: retained, non-streaming pi session awaiting explicit next-turn
@@ -1898,9 +1951,15 @@ export class Supervisor {
                   console.error('[specialists] DEPRECATED: FIFO message {type:"prompt"} is deprecated. Use {type:"resume", task:"..."} instead.');
                   void handleResumeTurn(parsed.message);
                 } else if (parsed?.type === 'close') {
+                  appendTimelineEvent(createControlSignalEvent('close_consumed', { source: 'runtime', previous_status: statusSnapshot.status }));
                   void closeKeepAliveSession();
                 }
-              } catch { /* ignore malformed lines */ }
+              } catch (error) {
+                appendTimelineEvent(createControlSignalEvent('fifo_parse_error', {
+                  source: 'runtime',
+                  error_message: error instanceof Error ? error.message : String(error),
+                }));
+              }
             });
           fifoReadline.on('error', (error) => {
             console.error(`[supervisor] FIFO read error: ${String(error)}`);

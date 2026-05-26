@@ -371,6 +371,24 @@ export interface TimelineEventAutoCommit extends TimelineEventBase {
   committed_files?: string[];
 }
 
+export interface TimelineEventControlSignal extends TimelineEventBase {
+  type: 'control_signal';
+  action: string;
+  source: 'cli' | 'supervisor' | 'watchdog' | 'runtime';
+  message_preview?: string;
+  task_preview?: string;
+  reason?: string;
+  signal?: string;
+  pid?: number;
+  previous_status?: string;
+  next_status?: string;
+  force?: boolean;
+  fifo_path?: string;
+  tmux_session?: string;
+  error_message?: string;
+  metadata?: Record<string, unknown>;
+}
+
 /**
  * Legacy completion events that still exist in older jobs.
  * These are accepted for backward compatibility while feed v2 migrates history.
@@ -405,6 +423,7 @@ export type TimelineEvent =
   | TimelineEventExtensionError
   | TimelineEventApiError
   | TimelineEventAutoCommit
+  | TimelineEventControlSignal
   | TimelineEventLegacyComplete;
 
 // ============================================================================
@@ -434,6 +453,7 @@ export const TIMELINE_EVENT_TYPES = {
   AUTO_COMMIT_SUCCESS: 'auto_commit_success',
   AUTO_COMMIT_SKIPPED: 'auto_commit_skipped',
   AUTO_COMMIT_FAILED: 'auto_commit_failed',
+  CONTROL_SIGNAL: 'control_signal',
   DONE: 'done',
   AGENT_END: 'agent_end',
 } as const;
@@ -872,6 +892,18 @@ export function createRunCompleteEvent(
     type: TIMELINE_EVENT_TYPES.RUN_COMPLETE,
     status,
     elapsed_s,
+    ...options,
+  };
+}
+
+export function createControlSignalEvent(
+  action: string,
+  options: Omit<TimelineEventControlSignal, 't' | 'type' | 'action'>,
+): TimelineEventControlSignal {
+  return {
+    t: Date.now(),
+    type: TIMELINE_EVENT_TYPES.CONTROL_SIGNAL,
+    action,
     ...options,
   };
 }

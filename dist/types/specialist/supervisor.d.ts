@@ -1,5 +1,6 @@
 import type { SpecialistRunner, RunOptions } from './runner.js';
 import type { BeadsClient } from './beads.js';
+import { type TimelineEventControlSignal } from './timeline-events.js';
 import type { SessionRunMetrics } from '../pi/session.js';
 import type { StallDetectionConfig } from './loader.js';
 export declare const STALL_DETECTION_DEFAULTS: Required<StallDetectionConfig>;
@@ -134,6 +135,7 @@ export declare class Supervisor {
     readResult(id: string): string | null;
     finalizeWaitingJob(id: string): SupervisorStatusView | null;
     emitMetaEvent(jobId: string, model: string, backend: string): void;
+    emitControlEvent(jobId: string, action: string, options: Omit<TimelineEventControlSignal, 't' | 'type' | 'action'>): void;
     updateJobStatus(id: string, status: Extract<SupervisorJobStatus, 'done' | 'cancelled' | 'error' | 'waiting' | 'running' | 'starting'>, error?: string): SupervisorStatusView | null;
     aggregateJobMetricsBestEffort(jobId: string): void;
     /** List all jobs sorted newest-first. */

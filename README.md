@@ -170,8 +170,10 @@ Useful commands:
 ```bash
 sp ps                         # actionable dashboard
 sp ps -f                      # TTY dashboard follow; pipes emit ANSI-free snapshots
-sp feed <job-id>              # full DB-backed event replay
+sp feed <job-id>              # compact DB-backed event replay
 sp feed -f                    # follow all active jobs
+sp log <job-id>               # full runtime/control/error log with bead/repo/path metadata
+sp log --specialist reviewer -f
 sp chat explorer --bead <id>    # launch interactive TUI; input auto-steers/resumes
 sp result <job-id> --wait
 sp steer <job-id> "focus only on X"

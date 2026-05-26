@@ -350,6 +350,23 @@ export interface TimelineEventAutoCommit extends TimelineEventBase {
     commit_sha?: string;
     committed_files?: string[];
 }
+export interface TimelineEventControlSignal extends TimelineEventBase {
+    type: 'control_signal';
+    action: string;
+    source: 'cli' | 'supervisor' | 'watchdog' | 'runtime';
+    message_preview?: string;
+    task_preview?: string;
+    reason?: string;
+    signal?: string;
+    pid?: number;
+    previous_status?: string;
+    next_status?: string;
+    force?: boolean;
+    fifo_path?: string;
+    tmux_session?: string;
+    error_message?: string;
+    metadata?: Record<string, unknown>;
+}
 /**
  * Legacy completion events that still exist in older jobs.
  * These are accepted for backward compatibility while feed v2 migrates history.
@@ -362,7 +379,7 @@ export interface TimelineEventLegacyComplete extends TimelineEventBase {
  * Union of all timeline event types.
  * This is the canonical type for events.jsonl records.
  */
-export type TimelineEvent = TimelineEventRunStart | TimelineEventPayloadBreakdown | TimelineEventMeta | TimelineEventThinking | TimelineEventTool | TimelineEventText | TimelineEventMessage | TimelineEventTurn | TimelineEventStatusChange | TimelineEventRunComplete | TimelineEventStaleWarning | TimelineEventTokenUsage | TimelineEventFinishReason | TimelineEventTurnSummary | TimelineEventCompaction | TimelineEventRetry | TimelineEventModelChange | TimelineEventExtensionError | TimelineEventApiError | TimelineEventAutoCommit | TimelineEventLegacyComplete;
+export type TimelineEvent = TimelineEventRunStart | TimelineEventPayloadBreakdown | TimelineEventMeta | TimelineEventThinking | TimelineEventTool | TimelineEventText | TimelineEventMessage | TimelineEventTurn | TimelineEventStatusChange | TimelineEventRunComplete | TimelineEventStaleWarning | TimelineEventTokenUsage | TimelineEventFinishReason | TimelineEventTurnSummary | TimelineEventCompaction | TimelineEventRetry | TimelineEventModelChange | TimelineEventExtensionError | TimelineEventApiError | TimelineEventAutoCommit | TimelineEventControlSignal | TimelineEventLegacyComplete;
 export declare const TIMELINE_EVENT_TYPES: {
     readonly RUN_START: "run_start";
     readonly META: "meta";
@@ -386,6 +403,7 @@ export declare const TIMELINE_EVENT_TYPES: {
     readonly AUTO_COMMIT_SUCCESS: "auto_commit_success";
     readonly AUTO_COMMIT_SKIPPED: "auto_commit_skipped";
     readonly AUTO_COMMIT_FAILED: "auto_commit_failed";
+    readonly CONTROL_SIGNAL: "control_signal";
     readonly DONE: "done";
     readonly AGENT_END: "agent_end";
 };
@@ -500,6 +518,7 @@ export declare function createRunCompleteEvent(status: 'COMPLETE' | 'ERROR' | 'C
         tool_invocations: number;
     };
 }): TimelineEventRunComplete;
+export declare function createControlSignalEvent(action: string, options: Omit<TimelineEventControlSignal, 't' | 'type' | 'action'>): TimelineEventControlSignal;
 export declare function createAutoCommitEvent(status: 'success' | 'skipped' | 'failed', options?: {
     reason?: string;
     commit_sha?: string;
