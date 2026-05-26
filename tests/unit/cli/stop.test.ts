@@ -4,6 +4,7 @@ const supervisorState = {
   liveJobs: [] as string[],
   status: { status: 'running', pid: 1234, bead_id: 'bead-x', tmux_session: undefined, started_at_ms: Date.now() - 1000 },
   metaEvents: [] as Array<{ jobId: string; model: string; backend: string }>,
+  controlEvents: [] as Array<{ jobId: string; action: string; options: Record<string, unknown> }>,
 };
 
 const beadsState = {
@@ -29,6 +30,9 @@ vi.mock('../../../src/specialist/supervisor.js', () => ({
     emitMetaEvent(jobId: string, model: string, backend: string) {
       supervisorState.metaEvents.push({ jobId, model, backend });
     }
+    emitControlEvent(jobId: string, action: string, options: Record<string, unknown>) {
+      supervisorState.controlEvents.push({ jobId, action, options });
+    }
     async dispose() {}
   },
 }));
@@ -52,6 +56,7 @@ describe('stop CLI', () => {
     process.argv = ['node', 'specialists', 'stop', 'job-a'];
     supervisorState.liveJobs = [];
     supervisorState.metaEvents = [];
+    supervisorState.controlEvents = [];
     supervisorState.status = { status: 'running', pid: 1234, bead_id: 'bead-x', tmux_session: undefined, started_at_ms: Date.now() - 1000 };
     beadsState.closeCalls = [];
     beadsState.closeBeadIfInProgress.mockClear();

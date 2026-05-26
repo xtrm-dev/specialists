@@ -1373,3 +1373,5 @@
 > Manual update: 2026-05-22T08:11:20+00:00 — unitAI-17kx3 updated src/cli/chat.ts, src/cli/chat/control.ts, chat tests, docs/help/readme for attach-safe detach semantics.
 
 > Manual update: 2026-05-22T13:43:53Z — unitAI-76yuy updated `src/cli/attach.ts` bare attach picker to support arrow-key selection; `tests/unit/cli/attach.test.ts` covers active-only picker and arrow navigation.
+
+> Manual update: 2026-05-26T15:44:47+00:00 — unitAI-gqpvw added `src/cli/log.ts`, runtime `control_signal` timeline events, result/log help/docs, tests, and rebuilt dist for specialist error tracing.

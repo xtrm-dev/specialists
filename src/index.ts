@@ -3,7 +3,7 @@
 /**
  * Specialists MCP Server — entry point
  * Subcommands: install, version, list, view, models, init, db, validate, edit, config, run,
- *              chat, status, ps, result, feed, clean, merge, epic, end, stop, attach, quickstart, serve, script, release, help
+ *              chat, status, ps, result, feed, log, clean, merge, epic, end, stop, attach, quickstart, serve, script, release, help
  */
 
 // Suppress EBADF errors from bun's internal fd handling on named pipes.
@@ -690,6 +690,44 @@ async function run() {
       return;
     }
     const { run: handler } = await import('./cli/feed.js');
+    return handler();
+  }
+
+
+  if (sub === 'log') {
+    if (wantsHelp()) {
+      console.log([
+        '',
+        'Usage: specialists log [job-id] [options]',
+        '       specialists log -f [--specialist <name>] [--bead <id>]',
+        '',
+        'Runtime-oriented specialist log stream. Unlike feed, it does not suppress',
+        'control/lifecycle rows and every row includes timestamp, job, specialist,',
+        'bead, repo, path, branch, status, pid, seq, and event detail when known.',
+        '',
+        'Options:',
+        '  --job <id>          Filter to one job id',
+        '  --specialist <name> Filter by specialist role',
+        '  --bead <id>         Filter by bead id',
+        '  --node <id>         Filter by node id',
+        '  --since <5m|iso>    Show rows after a relative/ISO timestamp',
+        '  --limit <n>         Max rows per snapshot (default 200)',
+        '  -f, --follow        Continue polling for new rows',
+        '  --json              Emit NDJSON rows with full event payloads',
+        '',
+        'Examples:',
+        '  specialists log 49adda',
+        '  specialists log --bead unitAI-123 --limit 500',
+        '  specialists log --specialist reviewer -f',
+        '  specialists log -f --json',
+        '',
+        'Use feed for compact human progress; use log for debugging crashes,',
+        'dispatch/resume/steer/stop signals, and terminal error provenance.',
+        '',
+      ].join('\n'));
+      return;
+    }
+    const { run: handler } = await import('./cli/log.js');
     return handler();
   }
 

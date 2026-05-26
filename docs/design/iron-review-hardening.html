@@ -687,6 +687,228 @@ git log integration/&lt;date&gt;..HEAD    <span class="diff-ctx"># MUST be empty
 </svg>
 </div>
 
+<h2>Channels in an Iron review workflow</h2>
+<p>
+  The channel substrate changes how specialists coordinate during a review chain.
+  Instead of the orchestrator passing outputs between jobs, each specialist
+  subscribes to the shared channel and wakes on the messages it cares about.
+  Prior verdicts from code-sanity and obligations-scanner stay in the channel
+  history — the reviewer reads them directly, no orchestrator forwarding.
+  On a <code>PARTIAL</code> verdict the executor wakes from the reviewer's
+  <code>verdict:PARTIAL</code> message, fixes only the flagged delta, and posts a
+  new <code>turn</code>; on re-review the reviewer reads the channel history to
+  identify prior approvals and audits the delta only. Ddiff mode emerges from
+  the channel naturally, not from orchestrator state.
+</p>
+
+<h3>Medium scrutiny — channel walkthrough</h3>
+
+<div class="pipeline">
+<svg viewBox="0 0 1060 310" width="100%" style="max-width:1060px">
+  <defs>
+    <marker id="arrowM"  viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#58a6ff"/></marker>
+    <marker id="arrowMg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#3fb950"/></marker>
+    <marker id="arrowMp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#f0883e"/></marker>
+    <marker id="arrowMv" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#bc8cff"/></marker>
+  </defs>
+
+  <text x="20" y="18" font-family="JetBrains Mono, monospace" font-size="11" fill="#58a6ff" font-weight="700">sp ch open executor code-sanity obligations-scanner reviewer --bead &lt;id&gt; --stop-on pass</text>
+
+  <g font-family="Inter, sans-serif" font-size="13" font-weight="600" fill="#e6edf3">
+    <rect x="20"  y="30" width="115" height="50" rx="8" fill="#1c232e" stroke="#58a6ff"/>
+    <text x="77"  y="52" text-anchor="middle">executor</text>
+    <text x="77"  y="68" text-anchor="middle" font-size="9" font-family="JetBrains Mono, monospace" fill="#9da7b1">posts: turn</text>
+
+    <rect x="165" y="30" width="145" height="50" rx="8" fill="#1c232e" stroke="#bc8cff"/>
+    <text x="237" y="52" text-anchor="middle">code-sanity</text>
+    <text x="237" y="68" text-anchor="middle" font-size="9" font-family="JetBrains Mono, monospace" fill="#bc8cff">posts: verdict·OK</text>
+
+    <rect x="340" y="30" width="190" height="50" rx="8" fill="#1c232e" stroke="#bc8cff"/>
+    <text x="435" y="52" text-anchor="middle">obligations-scanner</text>
+    <text x="435" y="68" text-anchor="middle" font-size="9" font-family="JetBrains Mono, monospace" fill="#bc8cff">posts: verdict·CLEAN</text>
+
+    <rect x="560" y="30" width="145" height="50" rx="8" fill="#1c232e" stroke="#58a6ff"/>
+    <text x="632" y="52" text-anchor="middle">reviewer</text>
+    <text x="632" y="68" text-anchor="middle" font-size="9" font-family="JetBrains Mono, monospace" fill="#58a6ff">posts: verdict·PASS</text>
+
+    <rect x="735" y="30" width="110" height="50" rx="8" fill="#1c232e" stroke="#3fb950"/>
+    <text x="790" y="52" text-anchor="middle">sp merge</text>
+    <text x="790" y="68" text-anchor="middle" font-size="9" font-family="JetBrains Mono, monospace" fill="#3fb950">on stop-on:pass</text>
+  </g>
+
+  <line x1="705" y1="55" x2="735" y2="55" stroke="#3fb950" stroke-width="1.5" marker-end="url(#arrowMg)"/>
+
+  <rect x="20" y="108" width="940" height="46" rx="8" fill="#060f1a" stroke="#58a6ff" stroke-width="2"/>
+  <text x="36" y="124" font-family="JetBrains Mono, monospace" font-size="10" fill="#58a6ff" font-weight="700">CHANNEL  chain:&lt;bead-id&gt;</text>
+
+  <rect x="48"  y="128" width="58" height="18" rx="9" fill="rgba(88,166,255,0.18)"  stroke="#58a6ff"  stroke-width="1"/>
+  <text x="77"  y="141" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#58a6ff">turn</text>
+  <rect x="194" y="128" width="86" height="18" rx="9" fill="rgba(188,140,255,0.18)" stroke="#bc8cff" stroke-width="1"/>
+  <text x="237" y="141" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#bc8cff">verdict·OK</text>
+  <rect x="387" y="128" width="96" height="18" rx="9" fill="rgba(188,140,255,0.18)" stroke="#bc8cff" stroke-width="1"/>
+  <text x="435" y="141" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#bc8cff">verdict·CLEAN</text>
+  <rect x="589" y="128" width="88" height="18" rx="9" fill="rgba(63,185,80,0.18)"   stroke="#3fb950" stroke-width="1"/>
+  <text x="633" y="141" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#3fb950">verdict·PASS</text>
+
+  <line x1="77"  y1="80" x2="77"  y2="108" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrowM)"/>
+  <line x1="237" y1="80" x2="237" y2="108" stroke="#bc8cff" stroke-width="1.5" marker-end="url(#arrowMv)"/>
+  <line x1="435" y1="80" x2="435" y2="108" stroke="#bc8cff" stroke-width="1.5" marker-end="url(#arrowMv)"/>
+  <line x1="632" y1="80" x2="632" y2="108" stroke="#3fb950" stroke-width="1.5" marker-end="url(#arrowMg)"/>
+
+  <line x1="230" y1="108" x2="230" y2="80" stroke="#58a6ff"  stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arrowM)"/>
+  <line x1="443" y1="108" x2="443" y2="80" stroke="#58a6ff"  stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arrowM)"/>
+  <line x1="624" y1="108" x2="624" y2="80" stroke="#bc8cff"  stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arrowMv)"/>
+  <line x1="68"  y1="108" x2="68"  y2="80" stroke="#f0883e"  stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arrowMp)"/>
+
+  <g font-family="JetBrains Mono, monospace" font-size="9" fill="#6e7681" text-anchor="middle">
+    <text x="77"  y="170">wakes: verdict:me</text>
+    <text x="237" y="170">wakes: turn:peer</text>
+    <text x="435" y="170">wakes: turn:peer</text>
+    <text x="632" y="170">wakes: turn:peer + verdict:me×2</text>
+  </g>
+
+  <line x1="230" y1="178" x2="443" y2="178" stroke="#9da7b1" stroke-width="1"/>
+  <line x1="230" y1="174" x2="230" y2="182" stroke="#9da7b1" stroke-width="1"/>
+  <line x1="443" y1="174" x2="443" y2="182" stroke="#9da7b1" stroke-width="1"/>
+  <text x="336" y="191" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#9da7b1">wake in parallel from the same turn message</text>
+
+  <path d="M 632 154 Q 632 258 77 258 Q 77 210 77 154" stroke="#f0883e" stroke-width="1.5" fill="none" stroke-dasharray="4,3" marker-end="url(#arrowMp)"/>
+  <text x="354" y="252" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#f0883e">PARTIAL → executor wakes on verdict:me · fixes delta only · posts new turn</text>
+  <text x="354" y="266" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#6e7681">reviewer re-reads channel history → ddiff mode (prior-approved sections carry · no full re-audit)</text>
+</svg>
+</div>
+
+<ol>
+  <li><strong>Open.</strong> <code>sp ch open executor code-sanity obligations-scanner reviewer --bead &lt;id&gt; --stop-on pass</code>. Channel <code>chain:&lt;bead-id&gt;</code> opens; subscriptions registered: executor (<code>verdict:me</code>), code-sanity and obligations-scanner (<code>turn:peer</code>), reviewer (<code>turn:peer + verdict:me×2</code>).</li>
+  <li><strong>executor</strong> writes diff, posts <code>kind=turn, summary="…", refs={result_id}</code> to channel.</li>
+  <li><strong>code-sanity</strong> and <strong>obligations-scanner</strong> wake in parallel from the same <code>turn:peer</code> event — no orchestrator coordination. Each runs independently and posts its <code>kind=verdict</code> targeted at reviewer.</li>
+  <li><strong>reviewer</strong> wakes once both targeted verdicts have arrived. Reads full channel history (turn + both verdicts). Applies medium depth. Posts <code>kind=verdict, verdict=PASS</code> with Release Checklist.</li>
+  <li>Stop condition <code>stop-on:pass</code> fires → channel closes → <code>sp merge</code>.</li>
+</ol>
+
+<div class="callout">
+  <strong>On PARTIAL (step 4):</strong> reviewer posts <code>verdict:PARTIAL, target=executor, findings=[…]</code>.
+  Executor wakes (<code>verdict:me</code>), reads <em>only its delta findings</em> from the channel message.
+  Fixes, posts a new <code>turn</code>. Reviewer wakes again; reads the channel history to identify what it
+  already approved in its prior verdict; audits only the new diff range. Ddiff is the reviewer
+  reading its own prior message — no orchestrator state needed.
+</div>
+
+<h3>High scrutiny — channel walkthrough with ddiff loop</h3>
+
+<div class="pipeline">
+<svg viewBox="0 0 1080 355" width="100%" style="max-width:1080px">
+  <defs>
+    <marker id="arrowH"  viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#58a6ff"/></marker>
+    <marker id="arrowHg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#3fb950"/></marker>
+    <marker id="arrowHp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#f0883e"/></marker>
+    <marker id="arrowHv" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#bc8cff"/></marker>
+    <marker id="arrowHr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#f85149"/></marker>
+  </defs>
+
+  <text x="20" y="16" font-family="JetBrains Mono, monospace" font-size="11" fill="#f0883e" font-weight="700">Bead: "Add token rotation" · SCRUTINY: high · diff touches src/auth/* + migrations/</text>
+  <text x="20" y="30" font-family="JetBrains Mono, monospace" font-size="10" fill="#6e7681">Auto-escalation: auth/* → floor=high confirmed · lockfile touched → security-auditor mandatory</text>
+
+  <g font-family="Inter, sans-serif" font-size="12" font-weight="600" fill="#e6edf3">
+    <rect x="20"  y="44" width="108" height="52" rx="8" fill="#1c232e" stroke="#58a6ff"/>
+    <text x="74"  y="66" text-anchor="middle">executor</text>
+    <text x="74"  y="82" text-anchor="middle" font-size="9" font-family="JetBrains Mono, monospace" fill="#9da7b1">posts: turn</text>
+
+    <rect x="154" y="44" width="128" height="52" rx="8" fill="#1c232e" stroke="#bc8cff"/>
+    <text x="218" y="66" text-anchor="middle">code-sanity</text>
+    <text x="218" y="82" text-anchor="middle" font-size="9" font-family="JetBrains Mono, monospace" fill="#bc8cff">seconder gate</text>
+
+    <rect x="308" y="44" width="148" height="52" rx="8" fill="#1c232e" stroke="#f0883e"/>
+    <text x="382" y="66" text-anchor="middle">security-auditor</text>
+    <text x="382" y="82" text-anchor="middle" font-size="9" font-family="JetBrains Mono, monospace" fill="#f0883e">auto: auth/* + .lock</text>
+
+    <rect x="482" y="44" width="170" height="52" rx="8" fill="#1c232e" stroke="#bc8cff"/>
+    <text x="567" y="66" text-anchor="middle">obligations-scanner</text>
+    <text x="567" y="82" text-anchor="middle" font-size="9" font-family="JetBrains Mono, monospace" fill="#bc8cff">verdict·CLEAN</text>
+
+    <rect x="680" y="44" width="160" height="52" rx="8" fill="#1c232e" stroke="#58a6ff"/>
+    <text x="760" y="62" text-anchor="middle">reviewer (high)</text>
+    <text x="760" y="76" text-anchor="middle" font-size="9" font-family="JetBrains Mono, monospace" fill="#58a6ff">file-by-file sign-off</text>
+    <text x="760" y="89" text-anchor="middle" font-size="9" font-family="JetBrains Mono, monospace" fill="#58a6ff">gitnexus_impact req.</text>
+
+    <rect x="868" y="44" width="108" height="52" rx="8" fill="#1c232e" stroke="#3fb950"/>
+    <text x="922" y="66" text-anchor="middle">sp merge</text>
+    <text x="922" y="82" text-anchor="middle" font-size="9" font-family="JetBrains Mono, monospace" fill="#3fb950">checklist enforced</text>
+  </g>
+
+  <line x1="840" y1="70" x2="868" y2="70" stroke="#3fb950" stroke-width="1.5" marker-end="url(#arrowHg)"/>
+
+  <rect x="20" y="124" width="1042" height="46" rx="8" fill="#060f1a" stroke="#58a6ff" stroke-width="2"/>
+  <text x="36" y="140" font-family="JetBrains Mono, monospace" font-size="10" fill="#58a6ff" font-weight="700">CHANNEL  chain:&lt;bead-id&gt;</text>
+
+  <rect x="44"  y="142" width="58" height="18" rx="9" fill="rgba(88,166,255,0.18)"  stroke="#58a6ff"  stroke-width="1"/>
+  <text x="73"  y="155" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#58a6ff">turn</text>
+  <rect x="172" y="142" width="86" height="18" rx="9" fill="rgba(188,140,255,0.18)" stroke="#bc8cff" stroke-width="1"/>
+  <text x="215" y="155" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#bc8cff">verdict·OK</text>
+  <rect x="332" y="142" width="96" height="18" rx="9" fill="rgba(240,136,62,0.18)"  stroke="#f0883e" stroke-width="1"/>
+  <text x="380" y="155" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#f0883e">verdict·sec</text>
+  <rect x="516" y="142" width="96" height="18" rx="9" fill="rgba(188,140,255,0.18)" stroke="#bc8cff" stroke-width="1"/>
+  <text x="564" y="155" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#bc8cff">verdict·CLEAN</text>
+  <rect x="706" y="142" width="108" height="18" rx="9" fill="rgba(248,81,73,0.18)"  stroke="#f85149" stroke-width="1"/>
+  <text x="760" y="155" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#f85149">verdict·PARTIAL</text>
+  <rect x="44"  y="166" width="76" height="16" rx="8" fill="rgba(88,166,255,0.10)"  stroke="#58a6ff"  stroke-width="1" stroke-dasharray="3,2"/>
+  <text x="82"  y="178" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#58a6ff">turn (Δ fix)</text>
+  <rect x="824" y="142" width="88" height="18" rx="9" fill="rgba(63,185,80,0.18)"   stroke="#3fb950" stroke-width="1"/>
+  <text x="868" y="155" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#3fb950">verdict·PASS</text>
+
+  <line x1="74"  y1="96" x2="74"  y2="124" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrowH)"/>
+  <line x1="218" y1="96" x2="218" y2="124" stroke="#bc8cff" stroke-width="1.5" marker-end="url(#arrowHv)"/>
+  <line x1="382" y1="96" x2="382" y2="124" stroke="#f0883e" stroke-width="1.5" marker-end="url(#arrowHp)"/>
+  <line x1="567" y1="96" x2="567" y2="124" stroke="#bc8cff" stroke-width="1.5" marker-end="url(#arrowHv)"/>
+  <line x1="760" y1="96" x2="760" y2="124" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrowH)"/>
+
+  <line x1="208" y1="124" x2="208" y2="96" stroke="#58a6ff"  stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arrowH)"/>
+  <line x1="372" y1="124" x2="372" y2="96" stroke="#58a6ff"  stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arrowH)"/>
+  <line x1="557" y1="124" x2="557" y2="96" stroke="#58a6ff"  stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arrowH)"/>
+  <line x1="751" y1="124" x2="751" y2="96" stroke="#bc8cff"  stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arrowHv)"/>
+  <line x1="63"  y1="124" x2="63"  y2="96" stroke="#f85149"  stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arrowHr)"/>
+
+  <g font-family="JetBrains Mono, monospace" font-size="9" fill="#6e7681" text-anchor="middle">
+    <text x="74"  y="200">wakes: verdict:me</text>
+    <text x="218" y="200">wakes: turn:peer</text>
+    <text x="382" y="200">wakes: turn:peer</text>
+    <text x="567" y="200">wakes: turn:peer</text>
+    <text x="760" y="200">wakes: turn:peer + verdict:me×3</text>
+  </g>
+
+  <line x1="208" y1="208" x2="577" y2="208" stroke="#9da7b1" stroke-width="1"/>
+  <line x1="208" y1="204" x2="208" y2="212" stroke="#9da7b1" stroke-width="1"/>
+  <line x1="577" y1="204" x2="577" y2="212" stroke="#9da7b1" stroke-width="1"/>
+  <text x="392" y="221" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#9da7b1">all three wake in parallel from the same turn message — no orchestrator coordination</text>
+
+  <path d="M 760 170 Q 760 298 74 298 Q 74 248 74 170" stroke="#f85149" stroke-width="1.5" fill="none" stroke-dasharray="4,3" marker-end="url(#arrowHr)"/>
+  <text x="416" y="290" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#f85149">PARTIAL → executor wakes · reads only flagged files from verdict message · fixes delta · posts turn(Δ)</text>
+  <text x="416" y="305" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#3fb950">reviewer wakes in DDIFF mode → reads prior verdict from channel history → audits new diff range only</text>
+  <text x="416" y="319" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#6e7681">prior-approved files carry forward · no full re-audit · PASS + Release Checklist → channel closes</text>
+</svg>
+</div>
+
+<ol>
+  <li><strong>Open.</strong> <code>sp ch open executor code-sanity security-auditor obligations-scanner reviewer --bead &lt;id&gt; --scrutiny high --stop-on pass</code>. Reviewer's spec applies auto-escalation: <code>src/auth/*</code> → floor=high confirmed; lockfile change → security-auditor mandatory.</li>
+  <li><strong>executor</strong> writes diff (auth + migration), posts <code>kind=turn</code> with <code>refs={diff_range}</code> to channel.</li>
+  <li><strong>code-sanity</strong>, <strong>security-auditor</strong>, and <strong>obligations-scanner</strong> all wake in parallel from the same <code>turn:peer</code> subscription. No orchestrator coordination — the channel delivers the event to all three simultaneously.</li>
+  <li>Each posts its <code>kind=verdict</code> targeted at reviewer: <code>verdict:OK</code>, <code>verdict:sec={findings}</code>, <code>verdict:CLEAN</code>.</li>
+  <li><strong>reviewer</strong> wakes once all three targeted verdicts have arrived. Applies <strong>high</strong> mode: file-by-file sign-off, <code>gitnexus_impact</code> mandatory. Posts <code>verdict:PARTIAL, target=executor</code> with per-file findings. The partial verdict body records which files are already approved — this becomes the ddiff baseline.</li>
+  <li><strong>executor</strong> wakes (<code>verdict:me</code>), reads the partial findings from the channel message — sees exactly which files need work. Fixes those files only. Posts <code>kind=turn</code> with <code>refs={new_diff_range}</code> pointing at the fix commits.</li>
+  <li><strong>reviewer</strong> wakes in <strong>ddiff mode</strong>: reads the channel history to find its own prior <code>verdict:PARTIAL</code>, reconstructs the approved-file list, then audits only the new diff range from step 6. Prior-approved files carry forward.</li>
+  <li>Posts <code>verdict:PASS</code> + full Release Checklist → stop condition fires → channel closes → <code>sp merge</code>.</li>
+</ol>
+
+<div class="callout callout-good">
+  <strong>What the channel buys at high scrutiny:</strong>
+  the reviewer's step-5 partial verdict is a first-class message in the channel.
+  When it wakes in step 7, it reads its own prior message to reconstruct "what I already approved"
+  — no orchestrator state, no external memory, no re-audit of unchanged code.
+  The three parallel seconders also coordinate without the orchestrator: they all wake from
+  the same <code>turn</code> event and each posts independently to the channel.
+  The reviewer wakes only once all three have posted their targeted verdicts.
+</div>
+
 <h2>What's intentionally NOT in this epic</h2>
 
 <div class="grid grid-2">

@@ -588,6 +588,21 @@
       ],
       "occurrences": 1,
       "last_seen": "2026-05-22T13:43:53Z"
+    },
+    {
+      "timestamp": "2026-05-26T15:44:47+00:00",
+      "error_message": "Specialist reviewer/code-sanity/cancelled/error jobs lacked a complete operator-visible runtime log for crash/stop/resume/steer provenance",
+      "file": "src/cli/log.ts; src/specialist/supervisor.ts; src/specialist/control.ts; src/cli/result.ts",
+      "root_cause": "Compact feed suppressed many lifecycle details and stop/resume/steer paths updated status/FIFO without durable control-signal timeline events; cancelled jobs had no result output and no log hint.",
+      "fix": "Added control_signal timeline events, status_change persistence for updateJobStatus, sp log snapshot/follow command with bead/repo/path metadata, result cancelled/error log hints, docs/help/tests, and rebuilt dist.",
+      "tags": [
+        "unitAI-gqpvw",
+        "specialists",
+        "observability",
+        "sp-log",
+        "runtime-logging",
+        "debugging"
+      ]
     }
   ]
 }

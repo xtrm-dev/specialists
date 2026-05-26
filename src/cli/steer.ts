@@ -42,6 +42,12 @@ export async function run(): Promise<void> {
     try {
       const payload = JSON.stringify({ type: 'steer', message }) + '\n';
       writeFileSync(status.fifo_path, payload, { flag: 'a' });
+      supervisor.emitControlEvent(jobId, 'steer_sent', {
+        source: 'cli',
+        previous_status: status.status,
+        fifo_path: status.fifo_path,
+        message_preview: message.replace(/\s+/g, ' ').slice(0, 240),
+      });
       process.stdout.write(`${green('✓')} Steer message sent to job ${jobId}\n`);
     } catch (err: any) {
       process.stderr.write(`${red('Error:')} Failed to write to steer pipe: ${err?.message}\n`);

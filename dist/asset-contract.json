@@ -76,6 +76,9 @@
       "path": "config/specialists/node-coordinator.specialist.json"
     },
     {
+      "path": "config/specialists/obligations-scanner.specialist.json"
+    },
+    {
       "path": "config/specialists/overthinker.specialist.json"
     },
     {

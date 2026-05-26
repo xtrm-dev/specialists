@@ -191,8 +191,31 @@ function deriveStartupSnapshot(
 }
 
 function deriveApiError(events: TimelineEvent[]): string | null {
-  const errorEvent = [...events].reverse().find((event): event is Extract<TimelineEvent, { type: 'error' }> => event.type === 'error');
-  return errorEvent?.error_message ?? null;
+  for (const event of [...events].reverse()) {
+    if (event.type === 'error') return event.error_message;
+    if (event.type === 'run_complete' && event.error) return event.error;
+    if (event.type === 'control_signal' && event.error_message) return event.error_message;
+  }
+  return null;
+}
+
+function deriveTerminalReason(events: TimelineEvent[]): string | null {
+  for (const event of [...events].reverse()) {
+    if (event.type === 'run_complete') {
+      return event.error ?? event.exit_reason ?? event.status;
+    }
+    if (event.type === 'control_signal') {
+      return event.error_message ?? event.reason ?? event.action;
+    }
+    if (event.type === 'status_change') {
+      return `status ${event.previous_status ?? '?'} -> ${event.status}`;
+    }
+  }
+  return null;
+}
+
+function logHint(jobId: string): string {
+  return ` Inspect with: specialists log ${jobId} --limit 200`;
 }
 
 function formatPayloadPreamble(payloadJson: string | null | undefined): string | null {
@@ -387,8 +410,8 @@ export async function run(): Promise<void> {
         const output = readResultOutput();
         if (!output) {
           const message = apiError
-            ? `Job ${jobId} failed: ${apiError}`
-            : `Result not found for job ${jobId}`;
+            ? `Job ${jobId} failed: ${apiError}.${logHint(jobId)}`
+            : `Result not found for job ${jobId}.${logHint(jobId)}`;
           if (args.json) {
             emitJson(status, null, message, startupContext);
           } else {
@@ -409,11 +432,26 @@ export async function run(): Promise<void> {
 
       if (status.status === 'error') {
         const startupContext = deriveStartupSnapshot(status, readTimelineEventsForResult(sqliteClient, jobsDir, jobId));
-        const message = `Job ${jobId} failed: ${status.error ?? 'unknown error'}`;
+        const events = readTimelineEventsForResult(sqliteClient, jobsDir, jobId);
+        const reason = status.error ?? deriveApiError(events) ?? deriveTerminalReason(events) ?? 'unknown error';
+        const message = `Job ${jobId} failed: ${reason}.${logHint(jobId)}`;
         if (args.json) {
           emitJson(status, null, message, startupContext);
         } else {
-          process.stderr.write(`${red(`Job ${jobId} failed:`)} ${status.error ?? 'unknown error'}\n`);
+          process.stderr.write(`${red(`Job ${jobId} failed:`)} ${reason}\n${dim(logHint(jobId).trim())}\n`);
+        }
+        process.exit(1);
+      }
+
+      if (status.status === 'cancelled') {
+        const events = readTimelineEventsForResult(sqliteClient, jobsDir, jobId);
+        const startupContext = deriveStartupSnapshot(status, events);
+        const reason = status.error ?? deriveTerminalReason(events) ?? 'cancelled';
+        const message = `Job ${jobId} cancelled: ${reason}.${logHint(jobId)}`;
+        if (args.json) {
+          emitJson(status, null, message, startupContext);
+        } else {
+          process.stderr.write(`${red(`Job ${jobId} cancelled:`)} ${reason}\n${dim(logHint(jobId).trim())}\n`);
         }
         process.exit(1);
       }
@@ -495,14 +533,30 @@ export async function run(): Promise<void> {
     return;
   }
 
-  if (status.status === 'error') {
+  if (status.status === 'cancelled') {
     const events = readTimelineEventsForResult(sqliteClient, jobsDir, jobId);
     const startupContext = deriveStartupSnapshot(status, events);
-    const message = `Job ${jobId} failed: ${status.error ?? deriveApiError(events) ?? 'unknown error'}`;
+    const reason = status.error ?? deriveTerminalReason(events) ?? 'cancelled';
+    const message = `Job ${jobId} cancelled: ${reason}.${logHint(jobId)}`;
     if (args.json) {
       emitJson(status, null, message, startupContext);
     } else {
-      process.stderr.write(`${red(`Job ${jobId} failed:`)} ${status.error ?? deriveApiError(events) ?? 'unknown error'}\n`);
+      process.stderr.write(`${red(`Job ${jobId} cancelled:`)} ${reason}
+${dim(logHint(jobId).trim())}
+`);
+    }
+    process.exit(1);
+  }
+
+  if (status.status === 'error') {
+    const events = readTimelineEventsForResult(sqliteClient, jobsDir, jobId);
+    const startupContext = deriveStartupSnapshot(status, events);
+    const reason = status.error ?? deriveApiError(events) ?? deriveTerminalReason(events) ?? 'unknown error';
+    const message = `Job ${jobId} failed: ${reason}.${logHint(jobId)}`;
+    if (args.json) {
+      emitJson(status, null, message, startupContext);
+    } else {
+      process.stderr.write(`${red(`Job ${jobId} failed:`)} ${reason}\n${dim(logHint(jobId).trim())}\n`);
     }
     process.exit(1);
   }
@@ -510,7 +564,7 @@ export async function run(): Promise<void> {
   const apiError = status.error ?? deriveApiError(events);
   const output = readResultOutput();
   if (!output) {
-    const message = apiError ? `Job ${jobId} failed: ${apiError}` : `Result not found for job ${jobId}`;
+    const message = apiError ? `Job ${jobId} failed: ${apiError}.${logHint(jobId)}` : `Result not found for job ${jobId}.${logHint(jobId)}`;
     if (args.json) {
       emitJson(status, null, message);
     } else {
