@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { SupervisorStatus } from '../../../src/specialist/supervisor.js';
@@ -13,14 +13,14 @@ const sqliteState = {
 };
 
 vi.mock('../../../src/specialist/observability-sqlite.js', () => ({
-  createObservabilitySqliteClient: () => ({
+  createObservabilitySqliteClientAtPath: () => ({
     listStatuses: () => sqliteState.statuses,
     readEvents: (jobId: string) => sqliteState.events.get(jobId) ?? [],
     close: vi.fn(),
   }),
 }));
 
-function seedJob(jobId: string): void {
+function seedJob(jobId: string, worktreePath: string = tempRoot): void {
   const status: SupervisorStatus = {
     id: jobId,
     specialist: 'reviewer',
@@ -30,7 +30,7 @@ function seedJob(jobId: string): void {
     pid: 123,
     bead_id: 'unitAI-log',
     branch: 'feature/log',
-    worktree_path: tempRoot,
+    worktree_path: worktreePath,
     model: 'gpt-5.3-codex',
     backend: 'openai-codex',
   };
@@ -50,6 +50,8 @@ describe('log CLI', () => {
     tempRoot = mkdtempSync(join(tmpdir(), 'sp-log-test-'));
     sqliteState.statuses = [];
     sqliteState.events.clear();
+    mkdirSync(join(tempRoot, '.specialists', 'db'), { recursive: true });
+    writeFileSync(join(tempRoot, '.specialists', 'db', 'observability.db'), '');
     vi.spyOn(process, 'cwd').mockReturnValue(tempRoot);
   });
 
@@ -83,6 +85,26 @@ describe('log CLI', () => {
   });
 
 
+
+
+
+  it('discovers a single child repo when run from its parent directory', async () => {
+    rmSync(join(tempRoot, '.specialists'), { recursive: true, force: true });
+    const repoRoot = join(tempRoot, 'onlyrepo');
+    mkdirSync(join(repoRoot, '.specialists', 'db'), { recursive: true });
+    writeFileSync(join(repoRoot, '.specialists', 'db', 'observability.db'), '');
+    seedJob('parentjob', repoRoot);
+    process.argv = ['node', 'specialists', 'log', 'parentjob'];
+
+    const logs: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((msg?: unknown) => logs.push(String(msg ?? '')));
+
+    const { run } = await import('../../../src/cli/log.js');
+    await run();
+
+    expect(logs.join('\n')).toContain('worktree=onlyrepo');
+    expect(logs.join('\n')).toContain('parentjob');
+  });
 
   it('can include agent-internal events when --all-events is set', async () => {
     seedJob('jobverbose');

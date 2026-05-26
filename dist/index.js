@@ -50459,8 +50459,8 @@ var exports_log = {};
 __export(exports_log, {
   run: () => run20
 });
-import { basename as basename9 } from "path";
-import { execFileSync as execFileSync3 } from "child_process";
+import { existsSync as existsSync28, readdirSync as readdirSync14, statSync as statSync7 } from "fs";
+import { basename as basename9, join as join32 } from "path";
 function parseSince2(value) {
   if (value.includes("T") || value.includes("-"))
     return new Date(value).getTime();
@@ -50477,6 +50477,7 @@ function parseArgs12(argv) {
   let specialist;
   let beadId;
   let nodeId;
+  let repo;
   let since;
   let limit = 200;
   let follow2 = false;
@@ -50498,6 +50499,10 @@ function parseArgs12(argv) {
     }
     if (token === "--node" && argv[i + 1]) {
       nodeId = argv[++i];
+      continue;
+    }
+    if (token === "--repo" && argv[i + 1]) {
+      repo = argv[++i];
       continue;
     }
     if (token === "--since" && argv[i + 1]) {
@@ -50526,24 +50531,40 @@ function parseArgs12(argv) {
     }
     throw new Error(`Unknown option: ${token}`);
   }
-  return { jobId, specialist, beadId, nodeId, since, limit, follow: follow2, json, allEvents };
+  return { jobId, specialist, beadId, nodeId, repo, since, limit, follow: follow2, json, allEvents };
 }
-function resolveRepo(path3) {
-  if (!path3)
-    return { path: process.cwd(), repo: basename9(process.cwd()) };
-  const cached2 = repoCache.get(path3);
-  if (cached2)
-    return cached2;
-  try {
-    const root = execFileSync3("git", ["-C", path3, "rev-parse", "--show-toplevel"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-    const result = { repo: basename9(root), path: root || path3 };
-    repoCache.set(path3, result);
-    return result;
-  } catch {
-    const result = { repo: basename9(path3), path: path3 };
-    repoCache.set(path3, result);
-    return result;
+function discoverDbTargets(cwd, repoFilter) {
+  const cwdLocation = resolveObservabilityDbLocation(cwd);
+  if (existsSync28(cwdLocation.dbPath)) {
+    const repo = basename9(cwdLocation.gitRoot);
+    if (!repoFilter || repo === repoFilter) {
+      return [{ repo, root: cwdLocation.gitRoot, dbPath: cwdLocation.dbPath, source: "cwd" }];
+    }
+    return [];
   }
+  const targets = [];
+  let entries = [];
+  try {
+    entries = readdirSync14(cwd);
+  } catch {
+    return [];
+  }
+  for (const entry of entries) {
+    const root = join32(cwd, entry);
+    try {
+      if (!statSync7(root).isDirectory())
+        continue;
+    } catch {
+      continue;
+    }
+    const dbPath = join32(root, ".specialists", "db", "observability.db");
+    if (!existsSync28(dbPath))
+      continue;
+    if (repoFilter && entry !== repoFilter)
+      continue;
+    targets.push({ repo: entry, root, dbPath, source: "child" });
+  }
+  return targets.sort((a, b) => a.repo.localeCompare(b.repo));
 }
 function matches(status, options2) {
   if (options2.jobId && status.id !== options2.jobId)
@@ -50564,12 +50585,12 @@ function isRuntimeEvent(event) {
   }
   return false;
 }
-function toRows(statuses, options2, readEvents) {
+function toRows(target, statuses, options2, readEvents) {
   const rows = [];
   for (const status of statuses) {
     if (!matches(status, options2))
       continue;
-    const repo = resolveRepo(status.worktree_path);
+    const rowPath = status.worktree_path ?? target.root;
     const events = readEvents(status.id).filter((event) => {
       if (options2.since !== undefined && event.t < options2.since)
         return false;
@@ -50583,8 +50604,9 @@ function toRows(statuses, options2, readEvents) {
         specialist: status.specialist,
         beadId: status.bead_id,
         nodeId: status.node_id,
-        repo: repo.repo,
-        path: repo.path,
+        repo: target.repo,
+        path: rowPath,
+        dbPath: target.dbPath,
         branch: status.branch,
         status: status.status,
         pid: status.pid,
@@ -50602,8 +50624,9 @@ function toRows(statuses, options2, readEvents) {
         specialist: status.specialist,
         beadId: status.bead_id,
         nodeId: status.node_id,
-        repo: repo.repo,
-        path: repo.path,
+        repo: target.repo,
+        path: rowPath,
+        dbPath: target.dbPath,
         branch: status.branch,
         status: status.status,
         pid: status.pid,
@@ -50733,7 +50756,10 @@ function eventLabel(event) {
   }
 }
 function formatWorktree(row) {
-  return row.path ? basename9(row.path) : row.repo ?? "-";
+  const base = row.path ? basename9(row.path) : row.repo ?? "-";
+  if (!row.repo || base === row.repo)
+    return base;
+  return `${row.repo}/${base}`;
 }
 function statusColor2(status) {
   switch (status) {
@@ -50763,6 +50789,7 @@ function printRow(row, json) {
       node_id: row.nodeId ?? null,
       repo: row.repo ?? null,
       path: row.path ?? null,
+      db_path: row.dbPath ?? null,
       branch: row.branch ?? null,
       worktree: formatWorktree(row),
       status: row.status ?? null,
@@ -50801,23 +50828,34 @@ async function run20(argv = process.argv.slice(3)) {
     console.error("Usage: specialists|sp log [job-id] [--specialist <name>] [--bead <id>] [--node <id>] [--since <5m|iso>] [--limit <n>] [-f|--follow] [--json] [--all-events]");
     process.exit(1);
   }
-  const sqlite = createObservabilitySqliteClient();
-  if (!sqlite) {
+  const targets = discoverDbTargets(process.cwd(), options2.repo);
+  if (targets.length === 0) {
+    const suffix = options2.repo ? ` for repo '${options2.repo}'` : "";
+    console.error(`No specialists observability DB found${suffix}. Run from a repo root or a parent containing repos with .specialists/db/observability.db.`);
+    process.exit(1);
+  }
+  const clients = targets.map((target) => ({ target, client: createObservabilitySqliteClientAtPath(target.dbPath) }));
+  if (clients.every((entry) => !entry.client)) {
     console.error("Observability SQLite DB is unavailable. Run: specialists db setup");
     process.exit(1);
   }
   const printed = new Set;
   const printSnapshot2 = () => {
-    const statuses = sqlite.listStatuses();
-    const rows = toRows(statuses, options2, (jobId) => sqlite.readEvents(jobId));
-    for (const row of rows) {
-      const key = `${row.jobId}:${row.event.seq ?? row.event.t}:${row.event.type}`;
+    const rows = clients.flatMap(({ target, client }) => {
+      if (!client)
+        return [];
+      return toRows(target, client.listStatuses(), options2, (jobId) => client.readEvents(jobId));
+    });
+    rows.sort((a, b) => a.event.t - b.event.t || (a.repo ?? "").localeCompare(b.repo ?? "") || a.jobId.localeCompare(b.jobId) || (a.event.seq ?? 0) - (b.event.seq ?? 0));
+    const limitedRows = rows.slice(Math.max(0, rows.length - options2.limit));
+    for (const row of limitedRows) {
+      const key = `${row.repo ?? ""}:${row.jobId}:${row.event.seq ?? row.event.t}:${row.event.type}`;
       if (printed.has(key))
         continue;
       printed.add(key);
       printRow(row, options2.json);
     }
-    if (rows.length === 0 && !options2.json && printed.size === 0)
+    if (limitedRows.length === 0 && !options2.json && printed.size === 0)
       console.error("No matching specialist log rows.");
   };
   try {
@@ -50825,7 +50863,7 @@ async function run20(argv = process.argv.slice(3)) {
     if (!options2.follow)
       return;
     if (!options2.json)
-      console.error("Following specialist runtime logs... (Ctrl+C to stop)");
+      console.error(`Following specialist runtime logs across ${targets.length} repo${targets.length === 1 ? "" : "s"}... (Ctrl+C to stop)`);
     await new Promise((resolve11) => {
       const interval = setInterval(printSnapshot2, 750);
       const stop = () => {
@@ -50836,12 +50874,14 @@ async function run20(argv = process.argv.slice(3)) {
       process.once("SIGTERM", stop);
     });
   } finally {
-    sqlite.close();
+    for (const { client } of clients)
+      client?.close();
   }
 }
-var RUNTIME_EVENT_TYPES, repoCache;
+var RUNTIME_EVENT_TYPES;
 var init_log = __esm(() => {
   init_observability_sqlite();
+  init_observability_db();
   init_format_helpers();
   RUNTIME_EVENT_TYPES = new Set([
     "run_start",
@@ -50859,7 +50899,6 @@ var init_log = __esm(() => {
     "auto_commit_failed",
     "status_snapshot"
   ]);
-  repoCache = new Map;
 });
 
 // src/cli/steer.ts
@@ -50997,12 +51036,12 @@ async function run23() {
 }
 
 // src/specialist/worktree-gc.ts
-import { existsSync as existsSync28, readdirSync as readdirSync14, readFileSync as readFileSync28 } from "fs";
-import { join as join32 } from "path";
+import { existsSync as existsSync29, readdirSync as readdirSync15, readFileSync as readFileSync28 } from "fs";
+import { join as join33 } from "path";
 import { spawnSync as spawnSync19 } from "child_process";
 function readJobStatus2(jobDir) {
-  const statusPath = join32(jobDir, "status.json");
-  if (!existsSync28(statusPath))
+  const statusPath = join33(jobDir, "status.json");
+  if (!existsSync29(statusPath))
     return null;
   try {
     return JSON.parse(readFileSync28(statusPath, "utf-8"));
@@ -51027,7 +51066,7 @@ function collectWorktreeGcCandidates(jobsDir) {
       const worktreePath = status.worktree_path;
       if (!worktreePath)
         return null;
-      if (!existsSync28(worktreePath))
+      if (!existsSync29(worktreePath))
         return null;
       return {
         jobId: status.id,
@@ -51039,13 +51078,13 @@ function collectWorktreeGcCandidates(jobsDir) {
   }
   if (!getFileFallbackEnabled())
     return [];
-  if (!existsSync28(jobsDir))
+  if (!existsSync29(jobsDir))
     return [];
   const candidates = [];
-  for (const entry of readdirSync14(jobsDir, { withFileTypes: true })) {
+  for (const entry of readdirSync15(jobsDir, { withFileTypes: true })) {
     if (!entry.isDirectory())
       continue;
-    const status = readJobStatus2(join32(jobsDir, entry.name));
+    const status = readJobStatus2(join33(jobsDir, entry.name));
     if (!status)
       continue;
     if (isActive(status.status))
@@ -51055,7 +51094,7 @@ function collectWorktreeGcCandidates(jobsDir) {
     const { worktree_path: worktreePath, branch } = status;
     if (!worktreePath)
       continue;
-    if (!existsSync28(worktreePath))
+    if (!existsSync29(worktreePath))
       continue;
     candidates.push({
       jobId: status.id,
@@ -51101,8 +51140,8 @@ var exports_clean = {};
 __export(exports_clean, {
   run: () => run24
 });
-import { existsSync as existsSync29, readFileSync as readFileSync29, readdirSync as readdirSync15, rmSync as rmSync4, statSync as statSync7 } from "fs";
-import { join as join33 } from "path";
+import { existsSync as existsSync30, readFileSync as readFileSync29, readdirSync as readdirSync16, rmSync as rmSync4, statSync as statSync8 } from "fs";
+import { join as join34 } from "path";
 function parseDuration2(raw) {
   const match = /^(\d+)(ms|s|m|h|d)$/i.exec(raw.trim());
   if (!match)
@@ -51256,16 +51295,16 @@ function parseOptions2(argv) {
 }
 function readDirectorySizeBytes(directoryPath) {
   let totalBytes = 0;
-  for (const entry of readdirSync15(directoryPath, { withFileTypes: true })) {
-    const entryPath = join33(directoryPath, entry.name);
-    const stats = statSync7(entryPath);
+  for (const entry of readdirSync16(directoryPath, { withFileTypes: true })) {
+    const entryPath = join34(directoryPath, entry.name);
+    const stats = statSync8(entryPath);
     totalBytes += stats.isDirectory() ? readDirectorySizeBytes(entryPath) : stats.size;
   }
   return totalBytes;
 }
 function containsProtectedSqliteArtifact(directoryPath) {
-  for (const entry of readdirSync15(directoryPath, { withFileTypes: true })) {
-    const entryPath = join33(directoryPath, entry.name);
+  for (const entry of readdirSync16(directoryPath, { withFileTypes: true })) {
+    const entryPath = join34(directoryPath, entry.name);
     if (entry.isDirectory()) {
       if (containsProtectedSqliteArtifact(entryPath))
         return true;
@@ -51286,11 +51325,11 @@ function getJobTimestamps(status) {
 function readCompletedJobDirectory(baseDirectory, entry) {
   if (!entry.isDirectory())
     return null;
-  const directoryPath = join33(baseDirectory, entry.name);
+  const directoryPath = join34(baseDirectory, entry.name);
   if (containsProtectedSqliteArtifact(directoryPath))
     return null;
-  const statusFilePath = join33(directoryPath, "status.json");
-  if (!existsSync29(statusFilePath))
+  const statusFilePath = join34(directoryPath, "status.json");
+  if (!existsSync30(statusFilePath))
     return null;
   let statusData;
   try {
@@ -51308,8 +51347,8 @@ function collectCompletedJobs(jobsDirectoryPath) {
   const statuses = sqliteClient?.listStatuses() ?? [];
   if (statuses.length > 0) {
     return statuses.filter((status) => COMPLETED_STATUSES.has(status.status)).map((status) => {
-      const directoryPath = join33(jobsDirectoryPath, status.id);
-      if (!existsSync29(directoryPath) || containsProtectedSqliteArtifact(directoryPath))
+      const directoryPath = join34(jobsDirectoryPath, status.id);
+      if (!existsSync30(directoryPath) || containsProtectedSqliteArtifact(directoryPath))
         return null;
       const { createdAtMs, completedAtMs } = getJobTimestamps(status);
       return { id: status.id, directoryPath, completedAtMs, createdAtMs, sizeBytes: readDirectorySizeBytes(directoryPath) };
@@ -51317,7 +51356,7 @@ function collectCompletedJobs(jobsDirectoryPath) {
   }
   if (process.env.SPECIALISTS_JOB_FILE_OUTPUT !== "on")
     return [];
-  return readdirSync15(jobsDirectoryPath, { withFileTypes: true }).map((entry) => readCompletedJobDirectory(jobsDirectoryPath, entry)).filter((job) => job !== null);
+  return readdirSync16(jobsDirectoryPath, { withFileTypes: true }).map((entry) => readCompletedJobDirectory(jobsDirectoryPath, entry)).filter((job) => job !== null);
 }
 function selectJobsToRemove(completedJobs, options2, protectedJobIds) {
   const jobsByNewest = [...completedJobs].sort((left, right) => {
@@ -51639,7 +51678,7 @@ async function run24() {
     console.log(`Hid ${hiddenCount} terminal row(s) from default ps.`);
     return;
   }
-  if (!existsSync29(jobsDirectoryPath)) {
+  if (!existsSync30(jobsDirectoryPath)) {
     console.log("No jobs directory found.");
     return;
   }
@@ -52161,15 +52200,15 @@ var init_attach = __esm(() => {
 });
 
 // src/specialist/drift-detector.ts
-import { existsSync as existsSync30, readFileSync as readFileSync30, readdirSync as readdirSync16, rmSync as rmSync5 } from "fs";
-import { join as join34, resolve as resolve11, relative as relative3 } from "path";
+import { existsSync as existsSync31, readFileSync as readFileSync30, readdirSync as readdirSync17, rmSync as rmSync5 } from "fs";
+import { join as join35, resolve as resolve11, relative as relative3 } from "path";
 function listFiles(root) {
-  if (!existsSync30(root))
+  if (!existsSync31(root))
     return [];
   const out = [];
   const visit2 = (dir) => {
-    for (const entry of readdirSync16(dir, { withFileTypes: true })) {
-      const full = join34(dir, entry.name);
+    for (const entry of readdirSync17(dir, { withFileTypes: true })) {
+      const full = join35(dir, entry.name);
       if (entry.isDirectory()) {
         visit2(full);
         continue;
@@ -52204,12 +52243,12 @@ function detectDriftForRepo(repoRoot) {
       { scope: "user", dir: resolve11(repoRoot, ".specialists/user") }
     ];
     for (const { scope, dir } of scopes) {
-      if (!existsSync30(dir))
+      if (!existsSync31(dir))
         continue;
       for (const file of listFiles(dir)) {
         const rel = relPath(file, dir);
-        const canonicalPath = join34(asset.canonicalDir, rel);
-        if (!existsSync30(canonicalPath))
+        const canonicalPath = join35(asset.canonicalDir, rel);
+        if (!existsSync31(canonicalPath))
           continue;
         const bytesEqual = readFileSync30(file).equals(readFileSync30(canonicalPath));
         findings.push(makeFinding(repoRoot, asset.kind, scope, file, canonicalPath, bytesEqual));
@@ -52230,12 +52269,12 @@ function detectDriftUnderRoot(root) {
       repos.push({ root: dir, findings });
       return;
     }
-    for (const entry of readdirSync16(dir, { withFileTypes: true })) {
+    for (const entry of readdirSync17(dir, { withFileTypes: true })) {
       if (!entry.isDirectory())
         continue;
       if (entry.name === "node_modules" || entry.name === ".git")
         continue;
-      visit2(join34(dir, entry.name));
+      visit2(join35(dir, entry.name));
     }
   };
   visit2(resolve11(root));
@@ -52592,8 +52631,8 @@ __export(exports_doctor, {
 });
 import { createHash as createHash5 } from "crypto";
 import { spawnSync as spawnSync21 } from "child_process";
-import { existsSync as existsSync31, lstatSync as lstatSync2, mkdirSync as mkdirSync12, readdirSync as readdirSync17, readFileSync as readFileSync31, readlinkSync as readlinkSync3, writeFileSync as writeFileSync16 } from "fs";
-import { dirname as dirname12, join as join35, relative as relative4, resolve as resolve13 } from "path";
+import { existsSync as existsSync32, lstatSync as lstatSync2, mkdirSync as mkdirSync12, readdirSync as readdirSync18, readFileSync as readFileSync31, readlinkSync as readlinkSync3, writeFileSync as writeFileSync16 } from "fs";
+import { dirname as dirname12, join as join36, relative as relative4, resolve as resolve13 } from "path";
 function ok3(msg) {
   console.log(`  ${green14("\u2713")} ${msg}`);
 }
@@ -52622,7 +52661,7 @@ function isInstalled3(bin) {
   return spawnSync21("which", [bin], { encoding: "utf8", timeout: 2000 }).status === 0;
 }
 function loadJson2(path3) {
-  if (!existsSync31(path3))
+  if (!existsSync32(path3))
     return null;
   try {
     return JSON.parse(readFileSync31(path3, "utf8"));
@@ -52668,7 +52707,7 @@ function checkBd() {
     return false;
   }
   ok3(`bd installed  ${dim14(sp("bd", ["--version"]).stdout || "")}`);
-  if (existsSync31(join35(CWD, ".beads")))
+  if (existsSync32(join36(CWD, ".beads")))
     ok3(".beads/ present in project");
   else
     warn3(".beads/ not found in project");
@@ -52688,15 +52727,15 @@ function checkHooks() {
   section3("Claude Code hooks  (2 expected)");
   let allPresent = true;
   for (const name of HOOK_NAMES) {
-    const canonicalPath = join35(HOOKS_DIR, name);
-    if (!existsSync31(canonicalPath)) {
+    const canonicalPath = join36(HOOKS_DIR, name);
+    if (!existsSync32(canonicalPath)) {
       fail4(`${relative4(CWD, canonicalPath)}  ${red7("missing")}`);
       fix("specialists init");
       allPresent = false;
     } else {
       ok3(relative4(CWD, canonicalPath));
     }
-    const claudeHookPath = join35(CLAUDE_HOOKS_DIR, name);
+    const claudeHookPath = join36(CLAUDE_HOOKS_DIR, name);
     const symlinkState = isSymlinkTo(claudeHookPath, canonicalPath);
     if (symlinkState.ok) {
       ok3(`${relative4(CWD, claudeHookPath)} -> ${relative4(dirname12(claudeHookPath), canonicalPath)}`);
@@ -52777,8 +52816,8 @@ function hashFile(path3) {
 function collectFileHashes(rootDir) {
   const hashes = new Map;
   const visit2 = (dir) => {
-    for (const entry of readdirSync17(dir, { withFileTypes: true })) {
-      const fullPath = join35(dir, entry.name);
+    for (const entry of readdirSync18(dir, { withFileTypes: true })) {
+      const fullPath = join36(dir, entry.name);
       if (entry.isDirectory()) {
         visit2(fullPath);
         continue;
@@ -52789,12 +52828,12 @@ function collectFileHashes(rootDir) {
       hashes.set(relPath2, hashFile(fullPath));
     }
   };
-  if (existsSync31(rootDir))
+  if (existsSync32(rootDir))
     visit2(rootDir);
   return hashes;
 }
 function isSymlinkTo(linkPath, expectedTargetPath) {
-  if (!existsSync31(linkPath))
+  if (!existsSync32(linkPath))
     return { ok: false, reason: "missing" };
   let stats;
   try {
@@ -52817,7 +52856,7 @@ function isSymlinkTo(linkPath, expectedTargetPath) {
   }
 }
 function resolvePackageAssetDir(relativePath) {
-  return resolveCanonicalAssetDir(relativePath) ?? (existsSync31(join35(CWD, "config", relativePath)) ? join35(CWD, "config", relativePath) : null);
+  return resolveCanonicalAssetDir(relativePath) ?? (existsSync32(join36(CWD, "config", relativePath)) ? join36(CWD, "config", relativePath) : null);
 }
 function checkSkillDrift() {
   section3("Category A  package-live skill sync");
@@ -52827,7 +52866,7 @@ function checkSkillDrift() {
     fix("restore config/skills/ or install package assets");
     return false;
   }
-  if (!existsSync31(XTRM_DEFAULT_SKILLS_DIR)) {
+  if (!existsSync32(XTRM_DEFAULT_SKILLS_DIR)) {
     fail4(".xtrm/skills/default/ missing");
     fix("specialists init --sync-skills");
     return false;
@@ -52867,11 +52906,11 @@ function checkSkillDrift() {
     }
     fix("specialists init --sync-skills");
   }
-  const defaultSkills = readdirSync17(XTRM_DEFAULT_SKILLS_DIR, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+  const defaultSkills = readdirSync18(XTRM_DEFAULT_SKILLS_DIR, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
   let linksOk = true;
   for (const skillName of defaultSkills) {
-    const activeLinkPath = join35(XTRM_ACTIVE_SKILLS_DIR, skillName);
-    const expectedTarget = join35(XTRM_DEFAULT_SKILLS_DIR, skillName);
+    const activeLinkPath = join36(XTRM_ACTIVE_SKILLS_DIR, skillName);
+    const expectedTarget = join36(XTRM_DEFAULT_SKILLS_DIR, skillName);
     const state = isSymlinkTo(activeLinkPath, expectedTarget);
     if (state.ok)
       continue;
@@ -52889,11 +52928,11 @@ function checkSkillDrift() {
     fix("specialists init --sync-skills");
   }
   const legacyActiveRoots = [
-    { scope: "claude", root: join35(XTRM_ACTIVE_SKILLS_DIR, "claude") },
-    { scope: "pi", root: join35(XTRM_ACTIVE_SKILLS_DIR, "pi") }
+    { scope: "claude", root: join36(XTRM_ACTIVE_SKILLS_DIR, "claude") },
+    { scope: "pi", root: join36(XTRM_ACTIVE_SKILLS_DIR, "pi") }
   ];
   for (const { root } of legacyActiveRoots) {
-    if (!existsSync31(root))
+    if (!existsSync32(root))
       continue;
     if (isSymlinkTo(root, XTRM_ACTIVE_SKILLS_DIR).ok)
       continue;
@@ -52906,8 +52945,8 @@ function checkSkillDrift() {
     fix("specialists init --sync-skills");
   }
   const skillRootChecks = [
-    { root: join35(CLAUDE_DIR, "skills"), expected: XTRM_ACTIVE_SKILLS_DIR },
-    { root: join35(PI_DIR, "skills"), expected: XTRM_ACTIVE_SKILLS_DIR }
+    { root: join36(CLAUDE_DIR, "skills"), expected: XTRM_ACTIVE_SKILLS_DIR },
+    { root: join36(PI_DIR, "skills"), expected: XTRM_ACTIVE_SKILLS_DIR }
   ];
   let rootLinksOk = true;
   for (const check2 of skillRootChecks) {
@@ -52939,7 +52978,7 @@ function checkManagedMirror(label, canonicalRelativePath, mirrorDir, fixHint) {
     fix(fixHint);
     return false;
   }
-  if (!existsSync31(mirrorDir)) {
+  if (!existsSync32(mirrorDir)) {
     fail4(`${label} mirror missing: ${relative4(CWD, mirrorDir)}`);
     fix(fixHint);
     return false;
@@ -52971,31 +53010,31 @@ function checkManagedMirror(label, canonicalRelativePath, mirrorDir, fixHint) {
 function checkManagedAssetMirrors() {
   section3("Category B  xtrm-managed asset mirrors");
   const specialistsOk = checkManagedMirror("specialists", "specialists", DEFAULT_SPECIALISTS_DIR, "sp prune-stale-defaults --apply");
-  const rulesOk = checkManagedMirror("mandatory-rules", "mandatory-rules", join35(DEFAULT_SPECIALISTS_DIR, "mandatory-rules"), "sp prune-stale-defaults --apply");
-  const nodesOk = checkManagedMirror("nodes", "nodes", join35(DEFAULT_SPECIALISTS_DIR, "nodes"), "sp prune-stale-defaults --apply");
+  const rulesOk = checkManagedMirror("mandatory-rules", "mandatory-rules", join36(DEFAULT_SPECIALISTS_DIR, "mandatory-rules"), "sp prune-stale-defaults --apply");
+  const nodesOk = checkManagedMirror("nodes", "nodes", join36(DEFAULT_SPECIALISTS_DIR, "nodes"), "sp prune-stale-defaults --apply");
   return specialistsOk && rulesOk && nodesOk;
 }
 function checkUserOverlayDrift() {
   section3("User specialist overlays");
-  if (!existsSync31(USER_SPECIALISTS_DIR)) {
+  if (!existsSync32(USER_SPECIALISTS_DIR)) {
     ok3("no user overlays present");
     return true;
   }
-  const overlays = readdirSync17(USER_SPECIALISTS_DIR).filter((name) => name.endsWith(".specialist.json"));
+  const overlays = readdirSync18(USER_SPECIALISTS_DIR).filter((name) => name.endsWith(".specialist.json"));
   if (overlays.length === 0) {
     ok3("no user overlays present");
     return true;
   }
   let allOk = true;
   for (const name of overlays) {
-    const userPath = join35(USER_SPECIALISTS_DIR, name);
-    const defaultPath = join35(DEFAULT_SPECIALISTS_DIR, name);
+    const userPath = join36(USER_SPECIALISTS_DIR, name);
+    const defaultPath = join36(DEFAULT_SPECIALISTS_DIR, name);
     const userSpec = loadJson2(userPath);
     if (!userSpec) {
       warn3(`${name}: failed to parse \u2014 skipping drift check`);
       continue;
     }
-    if (!existsSync31(defaultPath)) {
+    if (!existsSync32(defaultPath)) {
       ok3(`${name}: user-only overlay (no default to drift from)`);
       continue;
     }
@@ -53023,18 +53062,18 @@ function checkUserOverlayDrift() {
 }
 function checkRuntimeDirs() {
   section3(".specialists/ runtime directories");
-  const rootDir = join35(CWD, ".specialists");
-  const jobsDir = join35(rootDir, "jobs");
-  const readyDir = join35(rootDir, "ready");
+  const rootDir = join36(CWD, ".specialists");
+  const jobsDir = join36(rootDir, "jobs");
+  const readyDir = join36(rootDir, "ready");
   let allOk = true;
-  if (!existsSync31(rootDir)) {
+  if (!existsSync32(rootDir)) {
     warn3(".specialists/ not found in current project");
     fix("specialists init");
     allOk = false;
   } else {
     ok3(".specialists/ present");
     for (const [subDir, label] of [[jobsDir, "jobs"], [readyDir, "ready"]]) {
-      if (!existsSync31(subDir)) {
+      if (!existsSync32(subDir)) {
         warn3(`.specialists/${label}/ missing \u2014 auto-creating`);
         mkdirSync12(subDir, { recursive: true });
         ok3(`.specialists/${label}/ created`);
@@ -53048,8 +53087,8 @@ function checkRuntimeDirs() {
 function checkClaudeMdFragments() {
   section3("CLAUDE.md fragments");
   const projectRoot = process.cwd();
-  const claudeMd = join35(projectRoot, "CLAUDE.md");
-  if (!existsSync31(claudeMd)) {
+  const claudeMd = join36(projectRoot, "CLAUDE.md");
+  if (!existsSync32(claudeMd)) {
     warn3("No CLAUDE.md in project root \u2014 skipping fragment check");
     return true;
   }
@@ -53217,7 +53256,7 @@ function cleanupProcesses(jobsDir, dryRun) {
   }
   let entries;
   try {
-    entries = readdirSync17(jobsDir);
+    entries = readdirSync18(jobsDir);
   } catch {
     entries = [];
   }
@@ -53229,8 +53268,8 @@ function cleanupProcesses(jobsDir, dryRun) {
     zombieJobIds: []
   };
   for (const jobId of entries) {
-    const statusPath = join35(jobsDir, jobId, "status.json");
-    if (!existsSync31(statusPath))
+    const statusPath = join36(jobsDir, jobId, "status.json");
+    if (!existsSync32(statusPath))
       continue;
     try {
       const status = JSON.parse(readFileSync31(statusPath, "utf8"));
@@ -53318,8 +53357,8 @@ function resolveWatchdogMode() {
 function checkZombieJobs() {
   section3("Background jobs");
   hint(`watchdog mode: ${resolveWatchdogMode()}`);
-  const jobsDir = join35(CWD, ".specialists", "jobs");
-  if (!existsSync31(jobsDir)) {
+  const jobsDir = join36(CWD, ".specialists", "jobs");
+  if (!existsSync32(jobsDir)) {
     hint("No .specialists/jobs/ \u2014 skipping");
     return true;
   }
@@ -53385,18 +53424,18 @@ var init_doctor = __esm(() => {
   init_drift_detector();
   init_version_check();
   CWD = process.cwd();
-  CLAUDE_DIR = join35(CWD, ".claude");
-  PI_DIR = join35(CWD, ".pi");
-  XTRM_SKILLS_DIR = join35(CWD, ".xtrm", "skills");
-  XTRM_DEFAULT_SKILLS_DIR = join35(XTRM_SKILLS_DIR, "default");
-  XTRM_ACTIVE_SKILLS_DIR = join35(XTRM_SKILLS_DIR, "active");
-  SPECIALISTS_DIR = join35(CWD, ".specialists");
-  DEFAULT_SPECIALISTS_DIR = join35(SPECIALISTS_DIR, "default");
-  USER_SPECIALISTS_DIR = join35(SPECIALISTS_DIR, "user");
-  HOOKS_DIR = join35(CWD, ".xtrm", "hooks", "specialists");
-  CLAUDE_HOOKS_DIR = join35(CLAUDE_DIR, "hooks");
-  SETTINGS_FILE = join35(CLAUDE_DIR, "settings.json");
-  MCP_FILE2 = join35(CWD, ".mcp.json");
+  CLAUDE_DIR = join36(CWD, ".claude");
+  PI_DIR = join36(CWD, ".pi");
+  XTRM_SKILLS_DIR = join36(CWD, ".xtrm", "skills");
+  XTRM_DEFAULT_SKILLS_DIR = join36(XTRM_SKILLS_DIR, "default");
+  XTRM_ACTIVE_SKILLS_DIR = join36(XTRM_SKILLS_DIR, "active");
+  SPECIALISTS_DIR = join36(CWD, ".specialists");
+  DEFAULT_SPECIALISTS_DIR = join36(SPECIALISTS_DIR, "default");
+  USER_SPECIALISTS_DIR = join36(SPECIALISTS_DIR, "user");
+  HOOKS_DIR = join36(CWD, ".xtrm", "hooks", "specialists");
+  CLAUDE_HOOKS_DIR = join36(CLAUDE_DIR, "hooks");
+  SETTINGS_FILE = join36(CLAUDE_DIR, "settings.json");
+  MCP_FILE2 = join36(CWD, ".mcp.json");
   HOOK_NAMES = [
     "specialists-complete.mjs",
     "specialists-session-start.mjs"
@@ -53429,20 +53468,20 @@ async function run33() {
 var bold14 = (s) => `\x1B[1m${s}\x1B[0m`, yellow13 = (s) => `\x1B[33m${s}\x1B[0m`, dim15 = (s) => `\x1B[2m${s}\x1B[0m`;
 
 // src/cli/serve-hot-reload.ts
-import { existsSync as existsSync32, readdirSync as readdirSync18, statSync as statSync8, watch as fsWatch } from "fs";
-import { join as join36 } from "path";
+import { existsSync as existsSync33, readdirSync as readdirSync19, statSync as statSync9, watch as fsWatch } from "fs";
+import { join as join37 } from "path";
 function specialistNameFromFile(file) {
   const match = file.match(/^(.+)\.specialist\.(json|yaml)$/);
   return match ? match[1] : null;
 }
 function snapshotMtimes(dir) {
   const out = new Map;
-  if (!existsSync32(dir))
+  if (!existsSync33(dir))
     return out;
-  const entries = readdirSync18(dir).filter((name) => specialistNameFromFile(name) !== null);
+  const entries = readdirSync19(dir).filter((name) => specialistNameFromFile(name) !== null);
   for (const name of entries) {
     try {
-      out.set(name, statSync8(join36(dir, name)).mtimeMs);
+      out.set(name, statSync9(join37(dir, name)).mtimeMs);
     } catch {}
   }
   return out;
@@ -53499,7 +53538,7 @@ function createUserDirWatcher(opts) {
       for (const file of changed)
         queue(file);
     }, opts.pollMs);
-  } else if (existsSync32(opts.userDir)) {
+  } else if (existsSync33(opts.userDir)) {
     try {
       watcher = fsWatch(opts.userDir, { persistent: false }, (_eventType, filename) => {
         queue(filename ? String(filename) : null);
@@ -53542,9 +53581,9 @@ import { randomUUID as randomUUID3 } from "crypto";
 import { once } from "events";
 import { spawnSync as spawnSync22 } from "child_process";
 import { access, readdir as readdir2, readFile as readFile5, constants } from "fs/promises";
-import { existsSync as existsSync33 } from "fs";
+import { existsSync as existsSync34 } from "fs";
 import { homedir as homedir5 } from "os";
-import { join as join37 } from "path";
+import { join as join38 } from "path";
 function createReadinessState() {
   return { shuttingDown: false, auditFailures: [], dbWriteFailuresTotal: 0 };
 }
@@ -53560,7 +53599,7 @@ function pruneAuditFailures(state, now = Date.now()) {
   }
 }
 async function checkUserDirSpecs(userDir) {
-  if (!existsSync33(userDir))
+  if (!existsSync34(userDir))
     return "empty";
   const entries = await readdir2(userDir).catch(() => []);
   const specFiles = entries.filter((name) => name.endsWith(".specialist.json") || name.endsWith(".specialist.yaml"));
@@ -53569,7 +53608,7 @@ async function checkUserDirSpecs(userDir) {
   let validCount = 0;
   for (const file of specFiles) {
     try {
-      const content = await readFile5(join37(userDir, file), "utf-8");
+      const content = await readFile5(join38(userDir, file), "utf-8");
       const json = file.endsWith(".json") ? content : null;
       if (!json)
         continue;
@@ -53587,7 +53626,7 @@ async function evaluateReadiness2(opts) {
   if (opts.state.auditFailures.length > opts.auditFailureThreshold) {
     return { ready: false, reason: "degraded:audit" };
   }
-  const piConfigPath = opts.piConfigPath ?? join37(homedir5(), ".pi", "agent", "auth.json");
+  const piConfigPath = opts.piConfigPath ?? join38(homedir5(), ".pi", "agent", "auth.json");
   try {
     await access(piConfigPath, constants.R_OK);
   } catch {
@@ -53608,7 +53647,7 @@ async function evaluateReadiness2(opts) {
       warning = canaryFailure;
     }
   }
-  const userDir = join37(opts.projectDir, ".specialists", "user");
+  const userDir = join38(opts.projectDir, ".specialists", "user");
   const userDirResult = await checkUserDirSpecs(userDir);
   if (userDirResult === "empty")
     return { ready: false, reason: "empty_user_dir" };
@@ -53729,7 +53768,7 @@ async function startServe(argv = process.argv.slice(3)) {
     return createObservabilitySqliteClient(args.projectDir);
   })();
   const readinessState = createReadinessState();
-  const userDir = join37(args.projectDir, ".specialists", "user");
+  const userDir = join38(args.projectDir, ".specialists", "user");
   const hotReload = createUserDirWatcher({ loader, userDir, pollMs: args.reloadPollMs });
   let active = 0;
   const children = new Set;
@@ -62399,7 +62438,9 @@ async function run37() {
         "Usage: specialists log [job-id] [options]",
         "       specialists log -f [--specialist <name>] [--bead <id>]",
         "",
-        "Runtime-oriented specialist log stream. Unlike feed, it does not suppress",
+        "Runtime-oriented specialist log stream. From a repo root it reads that repo;",
+        "from a parent directory it aggregates child repos with observability DBs.",
+        "Unlike feed, it does not suppress",
         "control/lifecycle rows and every row includes timestamp, job, specialist,",
         "bead, compact worktree, status, pid, and runtime event detail.",
         "",
@@ -62408,6 +62449,7 @@ async function run37() {
         "  --specialist <name> Filter by specialist role",
         "  --bead <id>         Filter by bead id",
         "  --node <id>         Filter by node id",
+        "  --repo <name>       In parent/global mode, filter to one child repo",
         "  --since <5m|iso>    Show rows after a relative/ISO timestamp",
         "  --limit <n>         Max rows per snapshot (default 200)",
         "  -f, --follow        Continue polling for new rows",

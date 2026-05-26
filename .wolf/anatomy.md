@@ -1375,3 +1375,8 @@
 > Manual update: 2026-05-22T13:43:53Z — unitAI-76yuy updated `src/cli/attach.ts` bare attach picker to support arrow-key selection; `tests/unit/cli/attach.test.ts` covers active-only picker and arrow navigation.
 
 > Manual update: 2026-05-26T15:44:47+00:00 — unitAI-gqpvw added `src/cli/log.ts`, runtime `control_signal` timeline events, result/log help/docs, tests, and rebuilt dist for specialist error tracing.
+
+## 2026-05-26 — `sp log` global mode
+- `src/cli/log.ts` now resolves log DB targets with repo-root-first behavior and parent-directory discovery: when cwd lacks `.specialists/db/observability.db`, it scans immediate child directories for that DB and aggregates rows across repos.
+- `sp log --repo <name>` filters parent/global output to one discovered child repo.
+- Human output identifies rows as `worktree=<repo>/<worktree>` for cross-repo disambiguation; JSON includes `db_path`.

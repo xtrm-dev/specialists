@@ -306,6 +306,7 @@ specialists log -f [--specialist <name>] [--bead <id>]
 - `--specialist <name>`: Filter by specialist role.
 - `--bead <id>`: Filter by bead id.
 - `--node <id>`: Filter by node id.
+- `--repo <name>`: In parent/global mode, restrict output to one child repo.
 - `--since <iso|relative>`: Start time filter (`5m`, `1h`, ISO timestamp).
 - `--limit <n>`: Max rows in each snapshot (default `200`).
 - `-f`, `--follow`: Poll continuously for new rows.
@@ -314,7 +315,7 @@ specialists log -f [--specialist <name>] [--bead <id>]
 
 ### Output
 
-`log` is the specialist-runtime/debug stream, not a duplicate of `sp feed`. By default it hides agent-internal turn/tool/text/thinking/token rows and shows only runtime-owned rows such as `run_start`, `run_complete`, `status_change`, `control_signal`, stale warnings, retries, compactions, extension/API errors, and auto-commit events. Human rows are colorized and compact: timestamp, event label, job, specialist, bead, one collapsed `worktree=<root>@<branch>` field, status, pid, and event detail. Use `--all-events` when you explicitly need the raw feed-like internals.
+`log` is the specialist-runtime/debug stream, not a duplicate of `sp feed`. From a repo root it reads that repo's `.specialists/db/observability.db`; from a parent directory with no local DB it discovers immediate child repos that have `.specialists/db/observability.db` and aggregates them as a global log. Use `--repo <name>` to narrow parent/global output. If exactly one child repo is found, it is used transparently.  By default it hides agent-internal turn/tool/text/thinking/token rows and shows only runtime-owned rows such as `run_start`, `run_complete`, `status_change`, `control_signal`, stale warnings, retries, compactions, extension/API errors, and auto-commit events. Human rows are colorized and compact: timestamp, event label, job, specialist, bead, one collapsed `worktree=<root>@<branch>` field, status, pid, and event detail. Use `--all-events` when you explicitly need the raw feed-like internals.
 
 Examples:
 

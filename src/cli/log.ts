@@ -2,9 +2,11 @@
 // Runtime-oriented specialist log stream. Unlike feed, this does not suppress
 // lifecycle/control rows and always prefixes rows with job/bead/repo/path data.
 
-import { basename } from 'node:path';
+import { existsSync, readdirSync, statSync } from 'node:fs';
+import { basename, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { createObservabilitySqliteClient } from '../specialist/observability-sqlite.js';
+import { createObservabilitySqliteClientAtPath } from '../specialist/observability-sqlite.js';
+import { resolveObservabilityDbLocation } from '../specialist/observability-db.js';
 import type { SupervisorStatus } from '../specialist/supervisor.js';
 import type { TimelineEvent } from '../specialist/timeline-events.js';
 import {
@@ -27,6 +29,7 @@ interface LogOptions {
   specialist?: string;
   beadId?: string;
   nodeId?: string;
+  repo?: string;
   since?: number;
   limit: number;
   follow: boolean;
@@ -58,6 +61,7 @@ interface LogRow {
   nodeId?: string;
   repo?: string;
   path?: string;
+  dbPath?: string;
   branch?: string;
   status?: string;
   pid?: number;
@@ -84,6 +88,7 @@ function parseArgs(argv: readonly string[]): LogOptions {
   let specialist: string | undefined;
   let beadId: string | undefined;
   let nodeId: string | undefined;
+  let repo: string | undefined;
   let since: number | undefined;
   let limit = 200;
   let follow = false;
@@ -96,6 +101,7 @@ function parseArgs(argv: readonly string[]): LogOptions {
     if (token === '--specialist' && argv[i + 1]) { specialist = argv[++i]; continue; }
     if ((token === '--bead' || token === '--bead-id') && argv[i + 1]) { beadId = argv[++i]; continue; }
     if (token === '--node' && argv[i + 1]) { nodeId = argv[++i]; continue; }
+    if (token === '--repo' && argv[i + 1]) { repo = argv[++i]; continue; }
     if (token === '--since' && argv[i + 1]) { since = parseSince(argv[++i]); continue; }
     if (token === '--limit' && argv[i + 1]) { limit = Math.max(1, Number(argv[++i]) || limit); continue; }
     if (token === '--follow' || token === '-f') { follow = true; continue; }
@@ -105,26 +111,49 @@ function parseArgs(argv: readonly string[]): LogOptions {
     throw new Error(`Unknown option: ${token}`);
   }
 
-  return { jobId, specialist, beadId, nodeId, since, limit, follow, json, allEvents };
+  return { jobId, specialist, beadId, nodeId, repo, since, limit, follow, json, allEvents };
 }
 
-const repoCache = new Map<string, { repo?: string; path?: string }>();
+interface DbTarget {
+  repo: string;
+  root: string;
+  dbPath: string;
+  source: 'cwd' | 'child';
+}
 
-function resolveRepo(path: string | undefined): { repo?: string; path?: string } {
-  if (!path) return { path: process.cwd(), repo: basename(process.cwd()) };
-  const cached = repoCache.get(path);
-  if (cached) return cached;
-
-  try {
-    const root = execFileSync('git', ['-C', path, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    const result = { repo: basename(root), path: root || path };
-    repoCache.set(path, result);
-    return result;
-  } catch {
-    const result = { repo: basename(path), path };
-    repoCache.set(path, result);
-    return result;
+function discoverDbTargets(cwd: string, repoFilter?: string): DbTarget[] {
+  const cwdLocation = resolveObservabilityDbLocation(cwd);
+  if (existsSync(cwdLocation.dbPath)) {
+    const repo = basename(cwdLocation.gitRoot);
+    if (!repoFilter || repo === repoFilter) {
+      return [{ repo, root: cwdLocation.gitRoot, dbPath: cwdLocation.dbPath, source: 'cwd' }];
+    }
+    return [];
   }
+
+  const targets: DbTarget[] = [];
+  let entries: string[] = [];
+  try {
+    entries = readdirSync(cwd);
+  } catch {
+    return [];
+  }
+
+  for (const entry of entries) {
+    const root = join(cwd, entry);
+    try {
+      if (!statSync(root).isDirectory()) continue;
+    } catch {
+      continue;
+    }
+
+    const dbPath = join(root, '.specialists', 'db', 'observability.db');
+    if (!existsSync(dbPath)) continue;
+    if (repoFilter && entry !== repoFilter) continue;
+    targets.push({ repo: entry, root, dbPath, source: 'child' });
+  }
+
+  return targets.sort((a, b) => a.repo.localeCompare(b.repo));
 }
 
 function matches(status: SupervisorStatus, options: LogOptions): boolean {
@@ -147,11 +176,11 @@ function isRuntimeEvent(event: TimelineEvent): boolean {
   return false;
 }
 
-function toRows(statuses: SupervisorStatus[], options: LogOptions, readEvents: (jobId: string) => TimelineEvent[]): LogRow[] {
+function toRows(target: DbTarget, statuses: SupervisorStatus[], options: LogOptions, readEvents: (jobId: string) => TimelineEvent[]): LogRow[] {
   const rows: LogRow[] = [];
   for (const status of statuses) {
     if (!matches(status, options)) continue;
-    const repo = resolveRepo(status.worktree_path);
+    const rowPath = status.worktree_path ?? target.root;
     const events = readEvents(status.id).filter((event) => {
       if (options.since !== undefined && event.t < options.since) return false;
       if (options.allEvents) return true;
@@ -163,8 +192,9 @@ function toRows(statuses: SupervisorStatus[], options: LogOptions, readEvents: (
         specialist: status.specialist,
         beadId: status.bead_id,
         nodeId: status.node_id,
-        repo: repo.repo,
-        path: repo.path,
+        repo: target.repo,
+        path: rowPath,
+        dbPath: target.dbPath,
         branch: status.branch,
         status: status.status,
         pid: status.pid,
@@ -183,8 +213,9 @@ function toRows(statuses: SupervisorStatus[], options: LogOptions, readEvents: (
         specialist: status.specialist,
         beadId: status.bead_id,
         nodeId: status.node_id,
-        repo: repo.repo,
-        path: repo.path,
+        repo: target.repo,
+        path: rowPath,
+        dbPath: target.dbPath,
         branch: status.branch,
         status: status.status,
         pid: status.pid,
@@ -290,7 +321,9 @@ function eventLabel(event: TimelineEvent): string {
 }
 
 function formatWorktree(row: LogRow): string {
-  return row.path ? basename(row.path) : row.repo ?? '-';
+  const base = row.path ? basename(row.path) : row.repo ?? '-';
+  if (!row.repo || base === row.repo) return base;
+  return `${row.repo}/${base}`;
 }
 
 function statusColor(status: string | undefined): Colorizer {
@@ -315,6 +348,7 @@ function printRow(row: LogRow, json: boolean): void {
       node_id: row.nodeId ?? null,
       repo: row.repo ?? null,
       path: row.path ?? null,
+      db_path: row.dbPath ?? null,
       branch: row.branch ?? null,
       worktree: formatWorktree(row),
       status: row.status ?? null,
@@ -357,30 +391,41 @@ export async function run(argv: readonly string[] = process.argv.slice(3)): Prom
     process.exit(1);
   }
 
-  const sqlite = createObservabilitySqliteClient();
-  if (!sqlite) {
+  const targets = discoverDbTargets(process.cwd(), options.repo);
+  if (targets.length === 0) {
+    const suffix = options.repo ? ` for repo '${options.repo}'` : '';
+    console.error(`No specialists observability DB found${suffix}. Run from a repo root or a parent containing repos with .specialists/db/observability.db.`);
+    process.exit(1);
+  }
+
+  const clients = targets.map((target) => ({ target, client: createObservabilitySqliteClientAtPath(target.dbPath) }));
+  if (clients.every((entry) => !entry.client)) {
     console.error('Observability SQLite DB is unavailable. Run: specialists db setup');
     process.exit(1);
   }
 
   const printed = new Set<string>();
   const printSnapshot = (): void => {
-    const statuses = sqlite.listStatuses();
-    const rows = toRows(statuses, options, (jobId) => sqlite.readEvents(jobId));
-    for (const row of rows) {
-      const key = `${row.jobId}:${row.event.seq ?? row.event.t}:${row.event.type}`;
+    const rows = clients.flatMap(({ target, client }) => {
+      if (!client) return [];
+      return toRows(target, client.listStatuses(), options, (jobId) => client.readEvents(jobId));
+    });
+    rows.sort((a, b) => a.event.t - b.event.t || (a.repo ?? '').localeCompare(b.repo ?? '') || a.jobId.localeCompare(b.jobId) || ((a.event.seq ?? 0) - (b.event.seq ?? 0)));
+    const limitedRows = rows.slice(Math.max(0, rows.length - options.limit));
+    for (const row of limitedRows) {
+      const key = `${row.repo ?? ''}:${row.jobId}:${row.event.seq ?? row.event.t}:${row.event.type}`;
       if (printed.has(key)) continue;
       printed.add(key);
       printRow(row, options.json);
     }
-    if (rows.length === 0 && !options.json && printed.size === 0) console.error('No matching specialist log rows.');
+    if (limitedRows.length === 0 && !options.json && printed.size === 0) console.error('No matching specialist log rows.');
   };
 
   try {
     printSnapshot();
     if (!options.follow) return;
 
-    if (!options.json) console.error('Following specialist runtime logs... (Ctrl+C to stop)');
+    if (!options.json) console.error(`Following specialist runtime logs across ${targets.length} repo${targets.length === 1 ? '' : 's'}... (Ctrl+C to stop)`);
     await new Promise<void>((resolve) => {
       const interval = setInterval(printSnapshot, 750);
       const stop = () => { clearInterval(interval); resolve(); };
@@ -388,6 +433,6 @@ export async function run(argv: readonly string[] = process.argv.slice(3)): Prom
       process.once('SIGTERM', stop);
     });
   } finally {
-    sqlite.close();
+    for (const { client } of clients) client?.close();
   }
 }

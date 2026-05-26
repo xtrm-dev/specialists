@@ -79,7 +79,7 @@ sp ps -f                      # TTY in-place dashboard; pipes append ANSI-free s
 sp feed 49adda --follow       # per-job follow, including future resume turns
 sp feed -f                    # global follow; keep-alive waiting jobs are terminal-equivalent unless --forever
 sp feed 49adda                # compact DB-backed event replay for that job
-sp log 49adda                 # lean runtime/control/error log with compact worktree metadata
+sp log 49adda                 # lean runtime/control/error log; parent dirs aggregate child repo DBs
 sp log --specialist reviewer -f  # follow reviewer runtime logs
 sp ps 49adda --json
 ```
