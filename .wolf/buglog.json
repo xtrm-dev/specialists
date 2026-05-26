@@ -603,6 +603,20 @@
         "runtime-logging",
         "debugging"
       ]
+    },
+    {
+      "timestamp": "2026-05-26T16:12:21+00:00",
+      "error_message": "bd create description accidentally embedded sp log output while creating unitAI-v5xfu",
+      "file": "operator workflow / bd create shell invocation",
+      "root_cause": "Issue description was passed through a double-quoted shell string containing backticked `.specialists/db/observability.db`, triggering command substitution and executing sp log-like content before bd create.",
+      "fix": "Use Python subprocess argument arrays or body files for markdown/backtick-heavy bd create/update text; never inline markdown with backticks in shell strings.",
+      "tags": [
+        "workflow",
+        "bd",
+        "shell-quoting",
+        "do-not-repeat",
+        "unitAI-v5xfu"
+      ]
     }
   ]
 }

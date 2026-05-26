@@ -211,3 +211,8 @@
 - Added `sp log` as the full runtime/control/error stream: rows include timestamp, job, specialist, bead, repo/path, branch, status, pid, model, chain, seq, event, and full JSON mode.
 - Runtime now emits `control_signal` events for stop/steer/resume paths and status changes on `updateJobStatus`, so cancelled specialists can be traced beyond compact `sp feed`.
 - `sp result` now points failed/cancelled jobs to `sp log <job-id> --limit 200`.
+
+
+## 2026-05-26 — unitAI-v5xfu global sp log
+- `sp log` now supports parent-directory/global mode: if cwd lacks `.specialists/db/observability.db`, it scans immediate child repos with that DB, aggregates logs, and supports `--repo <name>` filtering.
+- Avoid shell-quoted markdown/backticks in `bd create/update`; use subprocess argv/body files.
