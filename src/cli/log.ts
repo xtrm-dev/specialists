@@ -11,6 +11,7 @@ import type { SupervisorStatus } from '../specialist/supervisor.js';
 import type { TimelineEvent } from '../specialist/timeline-events.js';
 import {
   bold,
+  cyan,
   dim,
   formatDateTime,
   formatElapsed,
@@ -33,6 +34,8 @@ interface LogOptions {
   json: boolean;
   allEvents: boolean;
 }
+
+const DISPLAY_DUPLICATE_WINDOW_MS = 2000;
 
 const RUNTIME_EVENT_TYPES = new Set<string>([
   'run_start',
@@ -227,7 +230,38 @@ function toRows(target: DbTarget, statuses: SupervisorStatus[], options: LogOpti
   }
 
   rows.sort((a, b) => a.event.t - b.event.t || a.jobId.localeCompare(b.jobId) || ((a.event.seq ?? 0) - (b.event.seq ?? 0)));
-  return rows.slice(Math.max(0, rows.length - options.limit));
+  const displayRows = options.json ? rows : collapseDisplayDuplicates(rows);
+  return displayRows.slice(Math.max(0, displayRows.length - options.limit));
+}
+
+function normalizedEventForDisplay(event: TimelineEvent): Record<string, unknown> {
+  const normalized = { ...(event as unknown as Record<string, unknown>) };
+  delete normalized.t;
+  delete normalized.seq;
+  if (event.type === 'run_complete') delete normalized.elapsed_s;
+  return normalized;
+}
+
+function displayDuplicateKey(row: LogRow): string {
+  return JSON.stringify({
+    jobId: row.jobId,
+    event: normalizedEventForDisplay(row.event),
+  });
+}
+
+function collapseDisplayDuplicates(rows: LogRow[]): LogRow[] {
+  const collapsed: LogRow[] = [];
+  const lastByKey = new Map<string, LogRow>();
+
+  for (const row of rows) {
+    const key = displayDuplicateKey(row);
+    const previous = lastByKey.get(key);
+    if (previous && row.event.t - previous.event.t <= DISPLAY_DUPLICATE_WINDOW_MS) continue;
+    collapsed.push(row);
+    lastByKey.set(key, row);
+  }
+
+  return collapsed;
 }
 
 function compact(value: unknown, max = 240): string {
@@ -327,8 +361,12 @@ function formatWorktree(row: LogRow): string {
 
 function statusColor(status: string | undefined): Colorizer {
   switch (status) {
+    case 'done': return green;
     case 'error': return red;
     case 'cancelled': return yellow;
+    case 'running': return cyan;
+    case 'waiting': return yellow;
+    case 'starting': return yellow;
     default: return dim;
   }
 }
@@ -360,7 +398,8 @@ function printRow(row: LogRow, json: boolean): void {
 
   const color = eventColor(row.event);
   const label = color(bold(eventLabel(row.event).padEnd(6)));
-  const status = statusColor(row.status)(row.status ?? '-');
+  const status = row.status ?? '-';
+  const statusSegment = statusColor(row.status)(`status=${status}`);
   const head = [
     dim(formatDateTime(row.event.t)),
     label,
@@ -369,7 +408,7 @@ function printRow(row: LogRow, json: boolean): void {
     dim(`bead=${row.beadId ?? '-'}`),
     row.nodeId ? dim(`node=${row.nodeId}`) : null,
     dim(`worktree=${formatWorktree(row)}`),
-    `status=${status}`,
+    statusSegment,
     row.pid !== undefined ? dim(`pid=${row.pid}`) : null,
   ].filter(Boolean).join(' ');
 

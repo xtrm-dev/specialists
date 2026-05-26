@@ -1384,3 +1384,7 @@
 ## 2026-05-26 — `sp log` restrained color palette
 - `src/cli/log.ts` human rendering keeps a calm palette: timestamps/metadata dim, job ids plain, specialist bold, success green, warnings/control/cancel yellow, failures red.
 - `sp log` intentionally does not use per-job rainbow colors; `sp feed` remains the richer live progress view.
+
+## 2026-05-26 — `sp log` status colors + human dedupe
+- `src/cli/log.ts` collapses near-identical human display rows within a 2s window using a normalized event payload key; JSON mode remains full-fidelity.
+- `status=<state>` is color-coded as a whole segment with the restrained palette: done green, error red, cancelled/starting/waiting yellow, running cyan.

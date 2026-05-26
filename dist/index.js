@@ -50640,7 +50640,35 @@ function toRows(target, statuses, options2, readEvents) {
     }
   }
   rows.sort((a, b) => a.event.t - b.event.t || a.jobId.localeCompare(b.jobId) || (a.event.seq ?? 0) - (b.event.seq ?? 0));
-  return rows.slice(Math.max(0, rows.length - options2.limit));
+  const displayRows = options2.json ? rows : collapseDisplayDuplicates(rows);
+  return displayRows.slice(Math.max(0, displayRows.length - options2.limit));
+}
+function normalizedEventForDisplay(event) {
+  const normalized = { ...event };
+  delete normalized.t;
+  delete normalized.seq;
+  if (event.type === "run_complete")
+    delete normalized.elapsed_s;
+  return normalized;
+}
+function displayDuplicateKey(row) {
+  return JSON.stringify({
+    jobId: row.jobId,
+    event: normalizedEventForDisplay(row.event)
+  });
+}
+function collapseDisplayDuplicates(rows) {
+  const collapsed = [];
+  const lastByKey = new Map;
+  for (const row of rows) {
+    const key = displayDuplicateKey(row);
+    const previous = lastByKey.get(key);
+    if (previous && row.event.t - previous.event.t <= DISPLAY_DUPLICATE_WINDOW_MS)
+      continue;
+    collapsed.push(row);
+    lastByKey.set(key, row);
+  }
+  return collapsed;
 }
 function compact(value, max = 240) {
   const raw = typeof value === "string" ? value : JSON.stringify(value);
@@ -50756,9 +50784,17 @@ function formatWorktree(row) {
 }
 function statusColor2(status) {
   switch (status) {
+    case "done":
+      return green9;
     case "error":
       return red2;
     case "cancelled":
+      return yellow10;
+    case "running":
+      return cyan6;
+    case "waiting":
+      return yellow10;
+    case "starting":
       return yellow10;
     default:
       return dim9;
@@ -50790,7 +50826,8 @@ function printRow(row, json) {
   }
   const color = eventColor(row.event);
   const label = color(bold11(eventLabel(row.event).padEnd(6)));
-  const status = statusColor2(row.status)(row.status ?? "-");
+  const status = row.status ?? "-";
+  const statusSegment = statusColor2(row.status)(`status=${status}`);
   const head = [
     dim9(formatDateTime(row.event.t)),
     label,
@@ -50799,7 +50836,7 @@ function printRow(row, json) {
     dim9(`bead=${row.beadId ?? "-"}`),
     row.nodeId ? dim9(`node=${row.nodeId}`) : null,
     dim9(`worktree=${formatWorktree(row)}`),
-    `status=${status}`,
+    statusSegment,
     row.pid !== undefined ? dim9(`pid=${row.pid}`) : null
   ].filter(Boolean).join(" ");
   console.log(`${head} ${eventDetail(row.event)}`.trim());
@@ -50863,7 +50900,7 @@ async function run20(argv = process.argv.slice(3)) {
       client?.close();
   }
 }
-var RUNTIME_EVENT_TYPES;
+var DISPLAY_DUPLICATE_WINDOW_MS = 2000, RUNTIME_EVENT_TYPES;
 var init_log = __esm(() => {
   init_observability_sqlite();
   init_observability_db();

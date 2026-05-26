@@ -38,8 +38,10 @@ function seedJob(jobId: string, worktreePath: string = tempRoot): void {
   sqliteState.events.set(jobId, [
     { t: 1000, seq: 1, type: 'run_start', specialist: 'reviewer', bead_id: 'unitAI-log' },
     { t: 1500, seq: 2, type: 'tool', tool: 'bash', phase: 'start', args: { command: 'echo noisy' } },
-    { t: 2000, seq: 3, type: 'control_signal', action: 'stop_requested', source: 'cli', pid: 123, previous_status: 'running', next_status: 'cancelled', reason: 'operator_stop' },
-    { t: 3000, seq: 4, type: 'status_change', previous_status: 'running', status: 'cancelled' },
+    { t: 1700, seq: 3, type: 'retry', phase: 'start' },
+    { t: 1705, seq: 4, type: 'retry', phase: 'start' },
+    { t: 2000, seq: 5, type: 'control_signal', action: 'stop_requested', source: 'cli', pid: 123, previous_status: 'running', next_status: 'cancelled', reason: 'operator_stop' },
+    { t: 3000, seq: 6, type: 'status_change', previous_status: 'running', status: 'cancelled' },
   ] as TimelineEvent[]);
 }
 
@@ -78,6 +80,7 @@ describe('log CLI', () => {
     expect(output).toContain('bead=unitAI-log');
     expect(output).toContain(`worktree=${tempRoot.split('/').pop()}`);
     expect(output).toContain('CTRL');
+    expect(output.match(/phase=start/g)).toHaveLength(1);
     expect(output).not.toContain('tool=bash');
     expect(output).not.toContain(`path=${tempRoot}`);
     expect(output).toContain('action=stop_requested');
