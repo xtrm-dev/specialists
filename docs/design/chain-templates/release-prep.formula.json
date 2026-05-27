@@ -1,0 +1,36 @@
+{
+  "formula": "release-prep",
+  "type": "workflow",
+  "version": 1,
+  "description": "Release preparation. Reconciles [Unreleased] CHANGELOG.md from xt reports + commit subjects in a tag range. changelog-drafter (READ_ONLY) produces bundle synthesis first; changelog-keeper edits CHANGELOG.md. Does NOT bump version, build, commit, tag, push, or publish — operator handles those via /releasing skill.",
+  "vars": {
+    "root_title": { "default": "Release prep", "required": false },
+    "prev_tag": { "default": "HEAD~50", "required": false },
+    "next_tag": { "default": "HEAD", "required": false }
+  },
+  "steps": [
+    {
+      "id": "root",
+      "title": "{{root_title}}",
+      "type": "chore",
+      "description": "PROBLEM: prepare release by reconciling [Unreleased] CHANGELOG.md from {{prev_tag}}..{{next_tag}}.\nSCOPE: CHANGELOG.md only.\nNON_GOALS: no version bump; no build; no commit/tag/push/publish; no code edits.\nVALIDATION: CHANGELOG.md [Unreleased] section populated with Added/Changed/Fixed/Removed entries reflecting commits + xt reports in range.\nACCEPTANCE: operator runs /releasing and sees populated [Unreleased] ready for version bump.\n\nRelease prep chain: drafter synthesizes, keeper writes.",
+      "labels": ["chain-root", "kind:root", "type:chore", "release"]
+    },
+    {
+      "id": "changelog-drafter",
+      "title": "changelog-drafter:{{root_title}}",
+      "type": "task",
+      "needs": ["root"],
+      "description": "MANDATE: READ_ONLY bundle synthesis from {{prev_tag}}..{{next_tag}}. Group commits and xt reports by category (Added/Changed/Fixed/Removed).\nINPUTS: git log {{prev_tag}}..{{next_tag}}; .xtrm/reports/*.md in range.\nOUTPUTS: structured draft markdown — categorized bullet list with PR/commit refs. No file edits.\nSCOPE: read-only synthesis.\nNON_GOALS: no edits; no publishing; no tagging.",
+      "labels": ["chain-step", "kind:step", "role:changelog-drafter", "edge:informs->root", "advisor:pre-impl"]
+    },
+    {
+      "id": "changelog-keeper",
+      "title": "changelog-keeper:{{root_title}}",
+      "type": "task",
+      "needs": ["changelog-drafter"],
+      "description": "MANDATE: edit CHANGELOG.md [Unreleased] section using drafter's structured draft.\nINPUTS: changelog-drafter's draft; current CHANGELOG.md.\nOUTPUTS: edited CHANGELOG.md with [Unreleased] populated. Preserves existing entries below [Unreleased]. Single-file diff.\nSCOPE: CHANGELOG.md only.\nNON_GOALS: no version bump; no build; no commit/tag/push/publish; no other files touched.",
+      "labels": ["chain-step", "kind:step", "role:changelog-keeper", "edge:implements->root"]
+    }
+  ]
+}

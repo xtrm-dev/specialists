@@ -1,0 +1,27 @@
+{
+  "formula": "planning",
+  "type": "workflow",
+  "version": 1,
+  "description": "Turn vague feature/initiative into a phased bd issue board with dependencies and test planning. Single specialist (planner, HIGH-authority). Output is an executable bd issue graph the operator dispatches subsequent chains against.",
+  "vars": {
+    "root_title": { "default": "Untitled initiative", "required": false },
+    "scope": { "default": "src/**", "required": false }
+  },
+  "steps": [
+    {
+      "id": "root",
+      "title": "{{root_title}}",
+      "type": "task",
+      "description": "PROBLEM: (the broad initiative — what we want to deliver and why)\nSCOPE: {{scope}} (initial; planner may propose expansion)\nNON_GOALS: NO implementation in this chain — planning only; no architecture decisions beyond what's needed for phasing.\nVALIDATION: planner produces a phased bd issue board with dependencies; each phase has acceptance criteria; test planning included.\nACCEPTANCE: operator can dispatch sub-chains against the planned board.\n\nPlanning chain — turn vague into structured work graph.",
+      "labels": ["chain-root", "kind:root", "type:task", "planning"]
+    },
+    {
+      "id": "planner",
+      "title": "planner:{{root_title}}",
+      "type": "task",
+      "needs": ["root"],
+      "description": "MANDATE: turn root's initiative into a phased bd issue board with dependencies, test planning, and acceptance criteria per phase. HIGH planning authority.\nINPUTS: root's PROBLEM + SCOPE; current codebase shape (read via grep/find/explorer-equivalent capability).\nOUTPUTS: bd issues created via bd create with proper --parent/--deps; each issue has change-contract sections; phases identified; companion test issues filed. Final summary memo lists the bead-ids + phase order.\nSCOPE: bd graph + design proposals; no code edits.\nNON_GOALS: no implementation; no architecture lock-in beyond what's needed to phase; no test execution.",
+      "labels": ["chain-step", "kind:step", "role:planner", "edge:implements->root"]
+    }
+  ]
+}
