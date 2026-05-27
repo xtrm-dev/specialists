@@ -638,6 +638,26 @@ CREATE INDEX channel_messages_channel_seq ON channel_messages(channel_id, seq);
 <p>Runtime resolves subscriptions on channel open and stores them in <code>channel_subscriptions</code>. Cursor advances only on messages matching the filter.</p>
 
 <figure class="visual">
+<div class="figmeta"><span class="num">Fig. 05G</span><span>subscription resolution · one message, different wake decisions</span></div>
+<div class="dash">
+  <div class="dash-bar">
+    <div class="left"><span class="chip live">message</span><span><code>finding</code> · refs.files=["src/auth/token.ts"] · target=null</span></div>
+    <div class="right">resolved at channel open from participant spec + issue scope</div>
+  </div>
+  <table style="font-size:10.5px;margin:0">
+    <thead><tr><th>participant</th><th>subscription</th><th>scope / target</th><th>decision</th><th>why</th></tr></thead>
+    <tbody>
+      <tr><td>executor</td><td><code>verdict:me</code></td><td><code>exec_7f3a</code></td><td><span class="chip partial">ignore</span></td><td>wrong kind</td></tr>
+      <tr><td>security-auditor</td><td><code>finding:scope-overlap</code></td><td><code>src/auth/**</code></td><td><span class="chip ready">wake</span></td><td>file intersects scope</td></tr>
+      <tr><td>reviewer</td><td><code>turn:peer</code></td><td>peer turns only</td><td><span class="chip partial">ignore</span></td><td>finding is not a turn</td></tr>
+      <tr><td>judge</td><td><code>finding</code>, <code>proposal</code></td><td>all findings</td><td><span class="chip ready">wake</span></td><td>terminal-candidate evidence</td></tr>
+    </tbody>
+  </table>
+</div>
+<figcaption>The subscription language is not a notification preference; it is runtime routing logic. Filters resolve against DB-backed participant state, not message prose.</figcaption>
+</figure>
+
+<figure class="visual">
 <div class="figmeta"><span class="num">Fig. 05E</span><span>cursor-through-N</span></div>
 <svg class="diagram" viewBox="0 0 900 250" xmlns="http://www.w3.org/2000/svg">
   <line x1="80" y1="112" x2="820" y2="112" stroke="#15130E" stroke-width="1.2"/>
@@ -798,6 +818,18 @@ await client.markSeen(convId, myKey, highestProcessed);
 </tbody></table>
 
 <p>Runtime evaluates after every message write; on trigger, writes <code>system.done</code> and marks channel <code>closed</code>.</p>
+
+<figure class="visual">
+<div class="figmeta"><span class="num">Fig. 05H</span><span>stop evaluator · judge timeout backstop</span></div>
+<div class="timeline">
+  <div class="rail"><span class="label">msg</span><p>A participant posts an actionable <code>proposal</code> or <code>verdict</code>. Stop evaluator runs immediately after the write.</p></div>
+  <div class="rail"><span class="label">judge</span><p>Judge subscription matches; runtime wakes judge and starts <code>judge_timeout:N</code> counter.</p></div>
+  <div class="rail"><span class="label">silent</span><p>If the judge posts <code>system.done</code>, channel closes. If it posts <code>system.continue</code>, members continue. If it says nothing for N ticks, runtime emits <code>system.continue</code>.</p></div>
+  <div class="rail"><span class="label">safe</span><p>The judge can improve quality but cannot become a permanent before-hook. Silence degrades to continue, not deadlock.</p></div>
+</div>
+<div class="callout flat"><strong>First trigger wins:</strong> budget, consensus, idle, manual close, and judge decision all race through one evaluator after each append.</div>
+<figcaption><code>judge_timeout</code> is the design's quiet safety valve: a judge is eventually-consistent coordination, not a blocking dependency.</figcaption>
+</figure>
 
 
 </section>
@@ -1083,6 +1115,30 @@ sp ch show &lt;channel-id&gt;
 <figcaption>Authority is never inferred from prose. The rejection itself is a channel event, so replay shows exactly why a wakeup did not fire.</figcaption>
 </figure>
 
+<figure class="visual">
+<div class="figmeta"><span class="num">Fig. 10B</span><span>epoch bump · role changes are not trusted from stale cursors</span></div>
+<div class="flow">
+  <div class="step"><strong>system.swap</strong><span>Judge requests member replacement or capability revocation.</span></div>
+  <div class="arrow">→</div>
+  <div class="step"><strong>runtime applies</strong><span>Participant DB state changes; old capability is no longer valid.</span></div>
+  <div class="arrow">→</div>
+  <div class="step"><strong>epoch_bump</strong><span><code>system.epoch_bump</code> is appended for all participants.</span></div>
+  <div class="arrow">→</div>
+  <div class="step"><strong>reload roles</strong><span>Every client must re-read participant state before any mutation.</span></div>
+</div>
+<div class="dash">
+  <div class="dash-bar">
+    <div class="left"><span class="chip invalid">stale</span><span>old client wants to emit <code>verdict</code></span></div>
+    <div class="right">after epoch bump, cached authority is invalid</div>
+  </div>
+  <div class="dash-cell" style="border-right:none">
+    <div class="dash-evt ctrc"><span>#221</span><span>system</span><span class="tag ctrc">EPOCH</span><span>reason=swap_complete · all participants must reload roles</span></div>
+    <div class="dash-evt mail"><span>#222</span><span>old_rev</span><span class="tag mail">NOTE</span><span>attempted verdict after unsubscribe · downgraded, no wakeup</span></div>
+  </div>
+</div>
+<figcaption>Epoch bump is the guard against stale authority. A participant that was allowed to act before the swap must prove it is still allowed after the swap.</figcaption>
+</figure>
+
 
 <h3 id="error-envelope">10.2 Error Envelope</h3>
 <p><code>ChannelClient</code> errors return a structured envelope so callers know what to do next:</p>
@@ -1135,6 +1191,21 @@ sp ch show &lt;channel-id&gt;
 <li><strong>Body-text authority is always rejected:</strong> a message whose <code>body_json</code> asserts a role or identity is downgraded to <code>kind=note</code> at write time and does not trigger wakeups. Authority is verified from DB state only (see §10.1).</li>
 <li><strong>Epoch re-read before mutation:</strong> on receipt of <code>system.epoch_bump</code>, the receiver must call <code>reloadParticipantRoles(channelId)</code> before processing any subsequent message or performing any mutation. This fires on <code>system.swap</code> completion and any capability revocation.</li>
 </ul>
+
+<figure class="visual">
+<div class="figmeta"><span class="num">Fig. 11B</span><span>rollout gates · expansion only after measured value</span></div>
+<table style="font-family:var(--mono);font-size:10.5px;margin:0">
+<thead><tr><th>version</th><th>new authority introduced</th><th>must prove before next</th><th>rollback handle</th></tr></thead>
+<tbody>
+<tr><td><span class="chip ready">v0</span></td><td>addressed message wakeups</td><td>reviewer→executor loop works without manual resume</td><td>remove runner read + table</td></tr>
+<tr><td><span class="chip ready">v0.5</span></td><td>none, trial only</td><td>2+ workflows show fewer interventions</td><td>stop here with no code rollback</td></tr>
+<tr><td><span class="chip partial">v1</span></td><td>ad-hoc pair channels</td><td><code>sp ch open</code> converges without node config</td><td>fall back to direct steer/resume</td></tr>
+<tr><td><span class="chip partial">v2</span></td><td>node lateral intent + read-only judge</td><td>no split-brain; supervisor line stays bounded</td><td><code>channel.enabled=false</code></td></tr>
+<tr><td><span class="chip invalid">v3</span></td><td>freeform + active judge + swap</td><td>2 weeks, 3 workflows, no new race class</td><td>stop writes; preserve previous versions</td></tr>
+</tbody>
+</table>
+<figcaption>The version ladder is deliberately conservative: each step introduces one new kind of runtime authority and one explicit way to retreat.</figcaption>
+</figure>
 
 
 <h3 id="v0-substrate-spec"><span class="version-label">v0</span>— Substrate + Spec</h3>
@@ -1331,6 +1402,16 @@ CREATE INDEX idx_channel_messages_target
 <li>v3: stop writing to <code>channels</code> table; revert <code>node_memory</code> to direct writes (backfill is one-way, plan migration carefully).</li>
 </ul>
 
+<figure class="visual">
+<div class="figmeta"><span class="num">Fig. 11C</span><span>reversal surfaces by blast radius</span></div>
+<div class="axis-map">
+  <div class="axis"><b>safe disable</b><ul><li><code>channel.enabled=false</code></li><li>stop lateral wakeups</li><li>keep job execution unchanged</li></ul></div>
+  <div class="axis"><b>compatibility</b><ul><li><code>sp steer</code> and <code>sp resume</code> keep old behavior</li><li>channel writes are additive until v3</li></ul></div>
+  <div class="axis"><b>migration caution</b><ul><li>derived <code>node_memory</code> is one-way</li><li><code>system.swap</code> waits for v3 proof</li></ul></div>
+</div>
+<figcaption>Reversibility is not a vibe in this plan; it is a surface in the config and command path for each rollout phase.</figcaption>
+</figure>
+
 
 <h3 id="out-of-scope-across-all-versions">Out of scope across all versions</h3>
 <ul>
@@ -1388,6 +1469,19 @@ CREATE INDEX idx_channel_messages_target
 <td>Wake-on filters narrow; lightweight decision call; quorum gating reduces wake frequency. Hard backstop: <code>judge_timeout:N</code> stop condition auto-emits <code>system.continue</code> if judge is silent for N ticks, making the judge eventually-consistent rather than a blocking gate (see §5.7).</td>
 </tr>
 </tbody></table>
+
+<figure class="visual">
+<div class="figmeta"><span class="num">Fig. 13A</span><span>risk controls mapped to runtime guardrails</span></div>
+<div class="map-grid">
+  <div class="mini-card"><b>loop control</b><p>turn caps, idle ladder, budget stop, and <code>judge_timeout</code> keep freeform from becoming unbounded.</p></div>
+  <div class="mini-card"><b>authority control</b><p>DB participant state, <code>cannot_emit</code>, body-text rejection, and epoch reload block stale or forged control.</p></div>
+  <div class="mini-card"><b>scheduler control</b><p>Node channels enqueue intent; supervisor remains the only scheduler, preserving phase rules.</p></div>
+  <div class="mini-card"><b>payload control</b><p>8 KB body cap plus <code>capture(blob)</code> keeps message rows pointer-sized.</p></div>
+  <div class="mini-card"><b>rollout control</b><p>v0→v3 gates require measured wins before adding judge/swap/freeform authority.</p></div>
+  <div class="mini-card"><b>replay control</b><p>read/ack separation and reducer purity make crash recovery deterministic.</p></div>
+</div>
+<figcaption>The mitigation table becomes easier to audit when each risk maps to an explicit runtime guardrail rather than a promise to be careful.</figcaption>
+</figure>
 
 </section>
 <section id="success-criteria">
