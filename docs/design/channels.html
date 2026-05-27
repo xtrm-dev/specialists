@@ -1,0 +1,1101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Channels · A Reusable Inter-Specialist Communication Layer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#15130E;
+  --paper:#F5F2E9;
+  --paper-shade:#EBE7DB;
+  --rule:#15130E;
+  --muted:#6B675C;
+  --faint:#A8A395;
+  --accent:#7A1F1B;
+  --serif:'Newsreader','Iowan Old Style','Charter','Georgia',serif;
+  --mono:'JetBrains Mono','SF Mono','Consolas',monospace;
+  --c-life:#6B675C;
+  --c-mail:#3F2F86;
+  --c-teth:#9A6A12;
+  --c-coll:#8A2949;
+  --c-ctrc:#1A4D85;
+  --c-plan:#2C5F1F;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--paper);color:var(--ink);font-family:var(--serif);font-size:17px;line-height:1.55}
+body{background-image:radial-gradient(circle at 0 0, rgba(21,19,14,0.025) 1px, transparent 1px);background-size:32px 32px}
+.page{max-width:1080px;margin:0 auto;padding:80px 56px 120px}
+.code, code, kbd, .mono{font-family:var(--mono);font-size:0.88em}
+code{background:var(--paper-shade);padding:1px 5px;border-radius:2px}
+pre{background:#1A1813;color:#E8E3D2;padding:18px 22px;overflow-x:auto;border-radius:0;border-left:3px solid var(--accent);font-family:var(--mono);font-size:13px;line-height:1.55}
+pre code{background:transparent;padding:0;color:inherit}
+a{color:var(--accent);text-decoration:none;border-bottom:1px solid var(--accent)}
+a:hover{background:var(--accent);color:var(--paper)}
+table{width:100%;border-collapse:collapse;margin:18px 0;font-size:14px}
+th,td{border-bottom:1px solid var(--paper-shade);padding:8px 10px;text-align:left;vertical-align:top}
+th{font-family:var(--mono);text-transform:uppercase;letter-spacing:0.1em;font-size:10px;color:var(--muted);border-bottom:1.5px solid var(--rule);font-weight:500}
+tbody tr:hover{background:var(--paper-shade)}
+td code{font-size:12px}
+.masthead{border-bottom:2px solid var(--rule);padding-bottom:36px;margin-bottom:48px;position:relative}
+.kicker{font-family:var(--mono);font-size:11px;letter-spacing:0.22em;text-transform:uppercase;color:var(--muted);margin-bottom:14px}
+h1.title{font-family:var(--serif);font-weight:500;font-size:64px;line-height:1.02;letter-spacing:-0.025em;margin:0 0 18px;font-style:italic}
+h1.title span{font-style:normal;font-weight:400}
+.subtitle{font-family:var(--serif);font-size:21px;font-style:italic;color:var(--ink);font-weight:400;max-width:740px;line-height:1.4}
+.meta{margin-top:32px;display:grid;grid-template-columns:repeat(4,1fr);gap:24px;font-family:var(--mono);font-size:11px;letter-spacing:0.05em}
+.meta dt{color:var(--muted);text-transform:uppercase;letter-spacing:0.15em;font-size:10px;margin-bottom:4px}
+.meta dd{margin:0;color:var(--ink)}
+.dingbat{position:absolute;top:-8px;right:0;font-family:var(--serif);font-style:italic;font-size:18px;color:var(--accent);transform:rotate(2deg)}
+section{margin:64px 0;scroll-margin-top:24px}
+section > h2{font-family:var(--serif);font-style:italic;font-weight:500;font-size:32px;letter-spacing:-0.01em;margin:0 0 24px;padding-bottom:8px;border-bottom:1px solid var(--rule);display:flex;align-items:baseline;gap:14px}
+section > h2 .num{font-family:var(--mono);font-style:normal;font-size:13px;color:var(--accent);letter-spacing:0.1em;flex-shrink:0;width:38px}
+h3{font-family:var(--serif);font-weight:500;font-size:22px;margin:36px 0 12px;letter-spacing:-0.005em}
+h4{font-family:var(--mono);text-transform:uppercase;letter-spacing:0.15em;font-size:11px;color:var(--accent);margin:24px 0 10px;font-weight:600}
+p{margin:0 0 16px;max-width:68ch}
+ul,ol{padding-left:22px}
+li{margin-bottom:6px;max-width:65ch}
+strong{font-weight:600}
+em{font-style:italic}
+section.lead p:first-of-type::first-letter{font-family:var(--serif);float:left;font-size:64px;line-height:0.85;padding:8px 10px 0 0;font-weight:500;color:var(--accent);font-style:italic}
+blockquote{border-left:3px solid var(--accent);padding:14px 22px;background:var(--paper-shade);margin:24px 0;font-style:italic;max-width:72ch}
+blockquote p{max-width:none}
+hr{border:0;border-top:1px solid var(--paper-shade);margin:40px 0}
+.toc{background:transparent;border:1px solid var(--paper-shade);padding:24px 28px;margin:32px 0;column-count:2;column-gap:32px}
+.toc h4{margin-top:0;column-span:all}
+.toc ol{padding-left:18px;margin:0;column-span:all}
+.toc li{font-family:var(--serif);font-size:14px;margin-bottom:4px;break-inside:avoid}
+.toc a{color:var(--ink);border:none}
+.toc a:hover{color:var(--accent);background:transparent}
+.toc .num{font-family:var(--mono);font-size:10px;color:var(--accent);margin-right:8px;letter-spacing:0.1em}
+.version-label{display:inline-block;font-family:var(--mono);font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--accent);border:1px solid var(--accent);padding:1px 7px;margin-right:8px;vertical-align:middle}
+footer{margin-top:96px;padding-top:32px;border-top:2px solid var(--rule);font-family:var(--mono);font-size:11px;letter-spacing:0.05em;color:var(--muted);display:flex;justify-content:space-between;gap:16px}
+footer .accent{color:var(--accent)}
+@media (max-width:780px){.page{padding:48px 24px 80px}h1.title{font-size:44px}.meta{grid-template-columns:repeat(2,1fr)}.toc{column-count:1}table{display:block;overflow-x:auto;white-space:normal}}
+@media print{body{background:white}pre{break-inside:avoid;font-size:10px}section{break-before:auto;break-after:auto}section > h2{break-after:avoid}table{break-inside:avoid}}
+
+</style>
+</head>
+<body>
+<div class="page">
+<header class="masthead">
+  <div class="dingbat">¶</div>
+  <div class="kicker">Design memo · v0 → v3 · 2026</div>
+  <h1 class="title"><span>Channels:</span> A Reusable Inter-Specialist Communication Layer</h1>
+  <div class="subtitle">An append-only, subscribable, multi-party message stream per container. Rev-9 aligned with substrate; sequenced v0 → v3.</div>
+  <dl class="meta">
+    <div><dt>Status</dt><dd>Design draft, rev-9 aligned</dd></div>
+    <div><dt>Scope</dt><dd>Inter-specialist comms</dd></div>
+    <div><dt>Relationship</dt><dd>Subordinate to substrate</dd></div>
+    <div><dt>Source</dt><dd>channels.md</dd></div>
+  </dl>
+</header>
+<nav class="toc">
+<h4>Contents</h4>
+<ol>
+  <li><span class="num">01</span><a href="#problem">Problem</a></li>
+  <li><span class="num">02</span><a href="#goals">Goals</a></li>
+  <li><span class="num">03</span><a href="#non-goals">Non-Goals</a></li>
+  <li><span class="num">04</span><a href="#concepts">Concepts</a></li>
+  <li><span class="num">05</span><a href="#architecture">Architecture</a></li>
+  <li><span class="num">06</span><a href="#spec-schema">Spec Schema (<code>.specialist.json</code> addition)</a></li>
+  <li><span class="num">07</span><a href="#node-config">Node Config Schema (additions)</a></li>
+  <li><span class="num">08</span><a href="#cli">CLI Surface</a></li>
+  <li><span class="num">09</span><a href="#self-managed-node-flow">Self-Managed Node Flow</a></li>
+  <li><span class="num">10</span><a href="#permission-safety">Permission &amp; Safety</a></li>
+  <li><span class="num">11</span><a href="#sequenced-implementation">Sequenced Implementation (v0 → v3)</a></li>
+  <li><span class="num">12</span><a href="#open-questions">Open Questions</a></li>
+  <li><span class="num">13</span><a href="#risks-mitigations">Risks &amp; Mitigations</a></li>
+  <li><span class="num">14</span><a href="#success-criteria">Success Criteria (per version)</a></li>
+</ol>
+</nav>
+
+<section id="problem" class="lead">
+<h2><span class="num">01</span>Problem</h2>
+<p>Today&#39;s specialist runtime is point-to-point and orchestrator-mediated:</p>
+
+
+<ul>
+<li>Reviewer reads executor <code>result.txt</code>; executor cannot see reviewer findings until the orchestrator manually <code>sp resume</code>s it.</li>
+<li>Node coordinator is a <em>router</em> (drives <code>spawn-member</code> / <code>wait-phase</code>) not a <em>judge</em>. Members never talk laterally.</li>
+<li>Human participation is per-job (<code>sp steer &lt;job&gt;</code>), not per-channel.</li>
+<li><code>node_memory</code> captures curated findings but has no notion of message ordering, addressing, or subscription.</li>
+<li>No reusable &quot;two specialists talk until done&quot; primitive — every chain reimplements the loop in the orchestrator&#39;s head.</li>
+</ul>
+
+
+<p>This makes multi-agent collaboration ceremonial and brittle.</p>
+
+
+</section>
+<section id="goals">
+<h2><span class="num">02</span>Goals</h2>
+<ol>
+<li>One primitive — <strong>channel</strong> — that powers: pair-talk, self-managed nodes, reviewer loops, parallel-review consensus, and human chat.</li>
+<li>Lateral peer wakeups (reviewer → executor) without orchestrator round-trips.</li>
+<li>Spec-declared participation: a specialist&#39;s <code>.json</code> says what it subscribes to and emits.</li>
+<li>Machine-readable messages with a discriminated-union schema, so judges and routers can act deterministically.</li>
+<li>Anti-spam by construction: messages are pointers + summaries, not raw turn output.</li>
+<li>CLI ergonomics: ad-hoc channels from the command line (<code>sp ch open</code>), no node config required.</li>
+<li><code>sp steer</code> and <code>sp resume</code> are implemented on top of channels; their CLI surface is unchanged.</li>
+</ol>
+
+
+</section>
+<section id="non-goals">
+<h2><span class="num">03</span>Non-Goals</h2>
+<ul>
+<li>New IPC layer. Channels live in <code>observability.db</code>, polled by the existing waiting-loop tick.</li>
+<li>New transport for raw turn output. <code>specialist_results</code> remains canonical for verbose content.</li>
+<li>Replacing <code>node_events</code>. Events stay for lifecycle (job starting/done); messages carry content.</li>
+<li>Free-form prose protocols. Every actionable message kind has a typed shape.</li>
+</ul>
+
+
+</section>
+<section id="concepts">
+<h2><span class="num">04</span>Concepts</h2>
+<table>
+<thead>
+<tr>
+<th>Concept</th>
+<th>Definition</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Channel</td>
+<td>Ordered, append-only stream of messages. Any number of participants can subscribe; bilateral pair-talk is just the degenerate N=2 case. Mental model: a Slack channel — persistent, subscribable, multi-party, joinable after open. Has participants, topology, stop conditions.</td>
+</tr>
+<tr>
+<td>Participant</td>
+<td>A specialist job, the coordinator/judge, the human user, or <code>system</code>. Each has a key, role, and subscription filter.</td>
+</tr>
+<tr>
+<td>Message</td>
+<td>Typed, structured payload. Carries pointers (<code>result_id</code>, <code>diff_range</code>) rather than raw blobs.</td>
+</tr>
+<tr>
+<td>Subscription</td>
+<td>Per-participant cursor over the message stream, filtered by <code>kind:target</code>.</td>
+</tr>
+<tr>
+<td>Topology</td>
+<td>How turns are taken: <code>turns</code> (round-robin), <code>reactive</code> (peer-driven), <code>freeform</code> (self-electing).</td>
+</tr>
+<tr>
+<td>Judge</td>
+<td>Optional coordinator that subscribes to terminal-candidate messages and decides done/continue. Non-blocking: if the judge does not respond within <code>judge_timeout_ticks</code>, the runtime auto-emits <code>system.continue</code> so members are never stalled.</td>
+</tr>
+<tr>
+<td>Stop condition</td>
+<td>Declarative termination: <code>judge.done</code>, <code>consensus</code>, <code>budget</code>, <code>idle:K</code>, <code>judge_timeout</code>, <code>manual</code>.</td>
+</tr>
+</tbody></table>
+
+</section>
+<section id="architecture">
+<h2><span class="num">05</span>Architecture</h2>
+<h3 id="storage-observability-db">5.1 Storage (<code>observability.db</code>)</h3>
+<pre><code class="language-sql">CREATE TABLE channels (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,                -- &#39;pair&#39; | &#39;node&#39; | &#39;epic&#39;
+  topology TEXT NOT NULL,            -- &#39;turns&#39; | &#39;reactive&#39; | &#39;freeform&#39;
+  bead_id TEXT,
+  node_run_id TEXT,                  -- nullable: pair channels have no node
+  judge_key TEXT,                    -- nullable: pair channels have no judge
+  participants_json TEXT NOT NULL,   -- [{key, specialist, job_id, role, subscribe, emits}]
+  stop_on_json TEXT NOT NULL,        -- [&quot;judge.done&quot;,&quot;budget&quot;,&quot;idle:8&quot;]
+  max_turns_per_member INTEGER,
+  status TEXT NOT NULL,              -- &#39;open&#39; | &#39;closed&#39; | &#39;aborted&#39;
+  created_at_ms INTEGER NOT NULL,
+  closed_at_ms INTEGER,
+  close_reason TEXT
+);
+
+CREATE TABLE channel_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  channel_id TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  author_kind TEXT NOT NULL,         -- &#39;specialist&#39; | &#39;user&#39; | &#39;system&#39; | &#39;gate&#39; | &#39;judge&#39;
+  author_key TEXT NOT NULL,
+  author_job_id TEXT,
+  kind TEXT NOT NULL,                -- see §5.3
+  target_key TEXT,                   -- nullable: addressed message
+  body_json TEXT NOT NULL,           -- discriminated union, validated on write
+  refs_json TEXT,                    -- {result_id, diff_range, files[]}
+  provenance_json TEXT,              -- {sender_role_at_time, capability_scope, lineage_refs[]}
+  ts INTEGER NOT NULL,
+  UNIQUE(channel_id, seq)
+);
+
+CREATE TABLE channel_subscriptions (
+  channel_id TEXT NOT NULL,
+  participant_key TEXT NOT NULL,
+  last_seq_seen INTEGER NOT NULL DEFAULT 0,
+  paused INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (channel_id, participant_key)
+);
+
+CREATE INDEX channel_messages_channel_seq ON channel_messages(channel_id, seq);
+</code></pre>
+
+
+<h4 id="workstream-id-naming-convention">Workstream ID naming convention</h4>
+<table>
+<thead>
+<tr>
+<th>Prefix</th>
+<th>Example</th>
+<th>When used</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>chain:&lt;id&gt;</code></td>
+<td><code>chain:abc123</code></td>
+<td>Single executor→reviewer chain</td>
+</tr>
+<tr>
+<td><code>node:&lt;id&gt;</code></td>
+<td><code>node:node-run-xyz</code></td>
+<td>Node run (all members share one channel)</td>
+</tr>
+<tr>
+<td><code>pair:&lt;uuid&gt;</code></td>
+<td><code>pair:d4e5f6</code></td>
+<td>Ad-hoc pair-talk, no node config</td>
+</tr>
+<tr>
+<td><code>node:&lt;id&gt;/sub:&lt;uuid&gt;</code></td>
+<td><code>node:n1/sub:ab12</code></td>
+<td>Lateral sub-channel within a node phase</td>
+</tr>
+</tbody></table>
+
+<p>Hierarchical IDs (<code>/</code>) make <code>sp ch list --node &lt;id&gt;</code> queries trivially implementable and map cleanly to the stream-path model: child channels live under their parent&#39;s namespace.</p>
+
+
+<p>Existing tables unchanged. <code>node_memory</code> becomes a <strong>derived view</strong> seeded by <code>kind=finding</code> messages with <code>confidence &gt;= threshold</code>.</p>
+
+
+<h3 id="lifecycle">5.2 Lifecycle</h3>
+<pre><code>created -&gt; open -&gt; closed
+              -&gt; aborted
+</code></pre>
+
+
+<p>A channel is <code>open</code> while at least one participant has unread messages or is <code>running</code>. The judge (or stop condition evaluator) closes it by writing a terminal <code>system.done</code> message.</p>
+
+
+<h3 id="message-kinds-discriminated-union">5.3 Message Kinds (discriminated union)</h3>
+<p>Every message body validates against a schema keyed by <code>kind</code>. Invalid messages are downgraded to <code>kind=note</code> and do <strong>not</strong> trigger wakeups.</p>
+
+
+<table>
+<thead>
+<tr>
+<th>Kind</th>
+<th>Author</th>
+<th>Body shape</th>
+<th>Wakes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>turn</code></td>
+<td>specialist</td>
+<td><code>{summary, refs}</code></td>
+<td>nobody by default</td>
+</tr>
+<tr>
+<td><code>finding</code></td>
+<td>specialist, judge</td>
+<td><code>{severity, file?, line?, rule?, summary, refs}</code></td>
+<td>subscribers with matching <code>wakes_on</code></td>
+</tr>
+<tr>
+<td><code>verdict</code></td>
+<td>reviewer, judge</td>
+<td><code>{verdict: PASS|PARTIAL|FAIL, target_key, summary, findings[]}</code></td>
+<td><code>target_key</code> participant if subscribed</td>
+</tr>
+<tr>
+<td><code>proposal</code></td>
+<td>specialist</td>
+<td><code>{kind: terminate|swap|redirect, summary}</code></td>
+<td>judge</td>
+</tr>
+<tr>
+<td><code>steer</code></td>
+<td>user, judge, peer</td>
+<td><code>{target_key, instruction}</code></td>
+<td><code>target_key</code> participant</td>
+</tr>
+<tr>
+<td><code>ack</code></td>
+<td>specialist</td>
+<td><code>{refs: [seq...], decision}</code></td>
+<td>proposal author (for quorum)</td>
+</tr>
+<tr>
+<td><code>escalation</code></td>
+<td>any</td>
+<td><code>{reason, refs}</code></td>
+<td>judge</td>
+</tr>
+<tr>
+<td><code>system.continue</code></td>
+<td>judge</td>
+<td><code>{reason}</code></td>
+<td>all open participants</td>
+</tr>
+<tr>
+<td><code>system.done</code></td>
+<td>judge</td>
+<td><code>{reason, outcome}</code></td>
+<td>all (terminal)</td>
+</tr>
+<tr>
+<td><code>system.redirect</code></td>
+<td>judge</td>
+<td><code>{target_key, instruction}</code></td>
+<td><code>target_key</code></td>
+</tr>
+<tr>
+<td><code>system.swap</code></td>
+<td>judge</td>
+<td><code>{out, in, reason}</code></td>
+<td>runtime (member swap)</td>
+</tr>
+<tr>
+<td><code>system.idle</code></td>
+<td>runtime</td>
+<td><code>{turns}</code></td>
+<td>judge</td>
+</tr>
+<tr>
+<td><code>system.budget</code></td>
+<td>runtime</td>
+<td><code>{tokens, threshold}</code></td>
+<td>judge</td>
+</tr>
+<tr>
+<td><code>system.epoch_bump</code></td>
+<td>runtime</td>
+<td><code>{reason}</code></td>
+<td>all participants</td>
+</tr>
+<tr>
+<td><code>note</code></td>
+<td>any</td>
+<td><code>{text}</code></td>
+<td>nobody</td>
+</tr>
+<tr>
+<td><code>error</code></td>
+<td>system (ChannelClient)</td>
+<td><code>{error_code, likely_cause, rejected_body_hash}</code></td>
+<td>nobody</td>
+</tr>
+</tbody></table>
+
+<p><code>error</code> messages are written to the stream (not just returned as API envelopes) so the channel log is self-contained for post-mortem: a replay of the stream reveals exactly where and why messages were rejected, without needing external logs.</p>
+
+
+<p><strong>Anti-spam guarantee:</strong> <code>turn</code> messages carry <code>{summary &lt;= 500 chars, refs: {result_id, range}}</code>. Verbose reasoning lives in <code>specialist_results</code>. Peers dereference only when they need detail.</p>
+
+
+<h3 id="subscription-model">5.4 Subscription Model</h3>
+<p>Each participant declares a subscription expression. Defaults are conservative (addressed messages + verdicts + system).</p>
+
+
+<p>Format: <code>kind[:target_filter]</code></p>
+
+
+<table>
+<thead>
+<tr>
+<th>Pattern</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>steer:me</code></td>
+<td>steers addressed to my participant key</td>
+</tr>
+<tr>
+<td><code>verdict:me</code></td>
+<td>verdicts targeting me</td>
+</tr>
+<tr>
+<td><code>finding:scope-overlap</code></td>
+<td>findings whose <code>refs.files</code> intersect my scope</td>
+</tr>
+<tr>
+<td><code>turn:peer</code></td>
+<td>reviewer-style: every other participant&#39;s turns</td>
+</tr>
+<tr>
+<td><code>system.*</code></td>
+<td>all system messages (on by default)</td>
+</tr>
+<tr>
+<td><code>proposal</code></td>
+<td>unaddressed proposals (judge default)</td>
+</tr>
+</tbody></table>
+
+<p>Runtime resolves subscriptions on channel open and stores them in <code>channel_subscriptions</code>. Cursor advances only on messages matching the filter.</p>
+
+
+<h3 id="runtime-integration">5.5 Runtime Integration</h3>
+<p>The existing waiting-loop tick gains one read. Read and ack are <strong>separate operations</strong> — read is pure observation and never advances the cursor; ack is effectful and advances only up to the highest <em>successfully processed</em> message.</p>
+
+
+<p><strong>Reducer / after-hook split (mandatory).</strong> Each tick performs two strictly separated passes:</p>
+
+
+<ol>
+<li><strong>Reducer</strong> (pure, synchronous, no I/O): derive channel state from new messages — current turn, stop-condition check, participant roles, subscription resolution. Must be idempotent over replay: if the job crashes and restarts it re-reads from <code>lastSeenId</code> and rebuilds state without re-triggering anything external.</li>
+<li><strong>After-hook</strong> (effectful, deduped by <code>(channel_id, msg_id)</code>): enqueue resumes, post <code>system.*</code> messages, trigger wakeups. Side effects gate on whether the action was already enqueued (idempotency key check before every external call).</li>
+</ol>
+
+
+<p>Never mix state derivation and side effects in the same pass. Violating this means a crash between &quot;enqueue resume&quot; and <code>markSeen</code> re-triggers the LLM call on replay.</p>
+
+
+<pre><code class="language-ts">// One ChannelClient instance per participant (authority lane). Never share across jobs.
+const newMessages = client.readSince(convId, myKey, lastSeq);  // cursor unchanged
+let highestProcessed = lastSeq;
+for (const msg of newMessages) {
+  // Re-read participant roles before any mutation when authority state may have changed.
+  if (msg.kind === &#39;system.epoch_bump&#39;) { await reloadParticipantRoles(convId); continue; }
+  if (msg.kind === &#39;steer&#39;   &amp;&amp; msg.target_key === myKey) enqueueResume(msg.body.instruction);
+  if (msg.kind === &#39;verdict&#39; &amp;&amp; msg.target_key === myKey) enqueueResume(formatVerdict(msg));
+  if (msg.kind === &#39;system.done&#39;) terminate(msg);
+  if (msg.kind === &#39;system.redirect&#39; &amp;&amp; msg.target_key === myKey) enqueueResume(msg.body.instruction);
+  highestProcessed = msg.id;
+}
+// Ack only after all intended actions succeed. Cursor-through-N: advances to highest processed,
+// not highest received. A message that fails to enqueue does not advance the cursor.
+await client.markSeen(convId, myKey, highestProcessed);
+</code></pre>
+
+
+<p><strong>Wake cycle contract (guaranteed execution order per tick):</strong></p>
+
+<ol>
+<li><code>readSince(lastSeenId)</code> — observe, never mutate cursor</li>
+<li>Act only on messages addressed to this participant or matching subscription</li>
+<li>Enqueue resumes / terminations</li>
+<li><code>markSeen(highestProcessed)</code> — only after every intended action above succeeds</li>
+<li>If nothing actionable: stay silent — no empty <code>turn</code> messages</li>
+</ol>
+
+
+<h3 id="topologies">5.6 Topologies</h3>
+<table>
+<thead>
+<tr>
+<th>Topology</th>
+<th>Turn selection</th>
+<th>Use case</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>turns</code></td>
+<td>Coordinator/runtime picks next in declared order</td>
+<td>Phased nodes, reviewer-after-executor</td>
+</tr>
+<tr>
+<td><code>reactive</code></td>
+<td>Last poster&#39;s <code>target_key</code> wakes; otherwise judge picks</td>
+<td>Pair channels, debugger↔test-runner</td>
+</tr>
+<tr>
+<td><code>freeform</code></td>
+<td>Every member evaluates <code>should_i_respond?</code> cheaply each tick</td>
+<td>Self-managed nodes, brainstorming</td>
+</tr>
+</tbody></table>
+
+<p><code>freeform</code> requires per-author cooldown (no N turns in a row) and per-member turn cap to prevent runaway loops.</p>
+
+
+<h3 id="stop-conditions">5.7 Stop Conditions</h3>
+<p>Declared as a list; first to fire wins.</p>
+
+
+<table>
+<thead>
+<tr>
+<th>Condition</th>
+<th>Trigger</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>judge.done</code></td>
+<td>Judge posts <code>system.done</code></td>
+</tr>
+<tr>
+<td><code>consensus:N</code></td>
+<td>N matching <code>verdict=PASS</code> from distinct authors</td>
+</tr>
+<tr>
+<td><code>budget:tokens=T</code></td>
+<td>Aggregate token usage across participants exceeds T</td>
+</tr>
+<tr>
+<td><code>budget:turns=N</code></td>
+<td>Total turn count reaches N</td>
+</tr>
+<tr>
+<td><code>idle:K</code></td>
+<td>K consecutive ticks without a <code>turn</code>/<code>finding</code>/<code>verdict</code></td>
+</tr>
+<tr>
+<td><code>judge_timeout:N</code></td>
+<td>Judge has not posted within N ticks since last actionable message; runtime auto-emits <code>system.continue</code> and resets the counter. Prevents the judge from becoming a blocking before-hook.</td>
+</tr>
+<tr>
+<td><code>manual</code></td>
+<td>User runs <code>sp conv close &lt;id&gt;</code></td>
+</tr>
+</tbody></table>
+
+<p>Runtime evaluates after every message write; on trigger, writes <code>system.done</code> and marks channel <code>closed</code>.</p>
+
+
+</section>
+<section id="spec-schema">
+<h2><span class="num">06</span>Spec Schema (<code>.specialist.json</code> addition)</h2>
+<pre><code class="language-json">{
+  &quot;name&quot;: &quot;executor&quot;,
+  &quot;permission&quot;: &quot;MEDIUM&quot;,
+  &quot;channel&quot;: {
+    &quot;subscribes&quot;: [&quot;steer:me&quot;, &quot;verdict:me&quot;, &quot;finding:scope-overlap&quot;, &quot;system.*&quot;],
+    &quot;emits&quot;: [&quot;turn&quot;, &quot;ack&quot;, &quot;escalation&quot;],
+    &quot;cannot_emit&quot;: [&quot;verdict&quot;, &quot;system.done&quot;, &quot;system.swap&quot;],
+    &quot;wakes_on&quot;: [&quot;verdict.PARTIAL&quot;, &quot;verdict.FAIL&quot;, &quot;system.redirect&quot;],
+    &quot;turn_summary_max_chars&quot;: 500
+  }
+}
+</code></pre>
+
+
+<p>Reviewer:</p>
+
+
+<pre><code class="language-json">{
+  &quot;name&quot;: &quot;reviewer&quot;,
+  &quot;channel&quot;: {
+    &quot;subscribes&quot;: [&quot;turn:peer&quot;, &quot;system.*&quot;],
+    &quot;emits&quot;: [&quot;verdict&quot;, &quot;finding&quot;],
+    &quot;cannot_emit&quot;: [&quot;system.done&quot;, &quot;system.swap&quot;, &quot;steer&quot;],
+    &quot;wakes_on&quot;: [&quot;turn:peer&quot;]
+  }
+}
+</code></pre>
+
+
+<p>Judge (node coordinator):</p>
+
+
+<pre><code class="language-json">{
+  &quot;name&quot;: &quot;node-coordinator&quot;,
+  &quot;channel&quot;: {
+    &quot;role&quot;: &quot;judge&quot;,
+    &quot;subscribes&quot;: [&quot;verdict&quot;, &quot;finding&quot;, &quot;proposal&quot;, &quot;system.idle&quot;, &quot;system.budget&quot;, &quot;escalation&quot;],
+    &quot;emits&quot;: [&quot;system.continue&quot;, &quot;system.done&quot;, &quot;system.redirect&quot;, &quot;system.swap&quot;],
+    &quot;decision_schema&quot;: &quot;judge.decision.v1&quot;
+  }
+}
+</code></pre>
+
+
+<p><code>decision_schema</code> enforces structured output:</p>
+
+
+<pre><code class="language-json">{
+  &quot;decision&quot;: &quot;done | continue | redirect | swap | escalate&quot;,
+  &quot;reason&quot;: &quot;string&quot;,
+  &quot;redirect&quot;: { &quot;target_key&quot;: &quot;string&quot;, &quot;instruction&quot;: &quot;string&quot; } | null,
+  &quot;swap&quot;:     { &quot;out&quot;: &quot;string&quot;, &quot;in&quot;: &quot;string&quot; } | null
+}
+</code></pre>
+
+
+<p>Judge prose lives in its <code>specialist_results</code>. Only the structured decision becomes a <code>system.*</code> message.</p>
+
+
+</section>
+<section id="node-config">
+<h2><span class="num">07</span>Node Config Schema (additions)</h2>
+<pre><code class="language-json">{
+  &quot;name&quot;: &quot;self-managed-design-review&quot;,
+  &quot;channel&quot;: {
+    &quot;topology&quot;: &quot;freeform&quot;,
+    &quot;members&quot;: [&quot;explorer&quot;, &quot;debugger&quot;, &quot;executor&quot;],
+    &quot;judge&quot;: &quot;node-coordinator&quot;,
+    &quot;stop_on&quot;: [&quot;judge.done&quot;, &quot;budget:turns=40&quot;, &quot;idle:8&quot;],
+    &quot;max_turns_per_member&quot;: 12
+  },
+  &quot;completion_strategy&quot;: &quot;manual&quot;
+}
+</code></pre>
+
+
+<p>Phased nodes (existing behavior) become a thin wrapper: <code>topology: turns</code> + per-phase member subsets. <code>wait-phase</code> and <code>spawn-member</code> remain as escape hatches but are no longer the primary mechanism.</p>
+
+
+</section>
+<section id="cli">
+<h2><span class="num">08</span>CLI Surface</h2>
+<h3 id="new-commands">8.1 New commands</h3>
+<pre><code class="language-bash"># Open a channel
+sp ch open executor reviewer --bead &lt;id&gt; [--turns 6] [--stop-on pass]
+sp ch open debugger test-runner --bead &lt;id&gt; --topology reactive
+sp ch open a b c --judge node-coordinator --stop-on judge.done --topology freeform
+
+# Post a message (human → channel)
+sp msg &lt;channel-id&gt; &quot;focus only on retry path&quot;
+
+# Inspect
+sp tail &lt;channel-id&gt; [-f] [--kind verdict,finding] [--jq &#39;.body.severity&#39;]
+sp ch inject &lt;channel-id&gt; --as system --kind finding ...
+sp ch pause  &lt;channel-id&gt; &lt;participant&gt;
+sp ch resume &lt;channel-id&gt; &lt;participant&gt;
+sp ch close  &lt;channel-id&gt; --reason &quot;...&quot;
+
+# List / inspect
+sp ch list [--node &lt;id&gt;] [--bead &lt;id&gt;] [--status open]
+sp ch show &lt;channel-id&gt;
+</code></pre>
+
+
+<p><code>sp steer &lt;job&gt; &quot;...&quot;</code> and <code>sp resume &lt;job&gt; &quot;...&quot;</code> are implemented as <code>kind=steer</code> messages posted to the job&#39;s channel. Their CLI surface is unchanged.</p>
+
+
+</section>
+<section id="self-managed-node-flow">
+<h2><span class="num">09</span>Self-Managed Node Flow</h2>
+<pre><code>1. sp node run self-managed-design-review --bead &lt;id&gt;
+2. Runtime opens channel C, spawns members + judge.
+3. Members run in `freeform` topology. Each subscribes per spec.
+4. Member emits `turn` → peers with matching subscription wake.
+5. Reviewer-style member emits `verdict=PARTIAL target=executor`.
+6. Executor (waiting + keep-alive) wakes from C, applies fixes, posts new `turn`.
+7. Eventually a member emits `proposal=terminate`. Quorum requires M acks.
+8. On quorum, judge wakes, evaluates, posts:
+     {decision: done, reason: &quot;...&quot;}  → system.done → channel closed
+   or
+     {decision: redirect, redirect: {target: executor, instruction: &quot;...&quot;}}
+9. On idle:8, judge wakes for nudge / swap / done ladder.
+10. Channel closed → node merges per completion_strategy.
+</code></pre>
+
+
+<p>Coordinator is now a <strong>gatekeeper</strong>, not a router.</p>
+
+
+</section>
+<section id="permission-safety">
+<h2><span class="num">10</span>Permission &amp; Safety</h2>
+<ul>
+<li>A <code>kind=steer</code> from peer participant requires both jobs to share a worktree owner OR the steer specialist to declare <code>can_steer_peers: true</code> in its spec.</li>
+<li><code>--force-job</code> semantics are preserved at the channel router: a MEDIUM peer cannot steer a running MEDIUM job in another worktree without it.</li>
+<li>Judge cannot directly write files; it can only emit <code>system.*</code> messages. Worktree edits stay with edit-capable specialists.</li>
+<li>Message body size cap (8 KB) enforced on write; oversized payloads must use the capture pattern: <code>ChannelClient.capture(blob) → result_id</code>, then post with <code>refs: { result_id }</code>. The validator returns <code>message_too_large</code> with <code>next_safe_action: &quot;use_capture&quot;</code>.</li>
+<li>Rate limit: per-participant token bucket on message writes (matches agentpipe&#39;s pattern). Default 1 message / 2s per participant.</li>
+</ul>
+
+
+<h3 id="authority-decision-procedure">10.1 Authority Decision Procedure</h3>
+<p><code>ChannelClient</code> validates authority on every message write using this procedure:</p>
+
+
+<ol>
+<li>Identify the requested mutation (what kind, what target)</li>
+<li>Verify sender identity against <code>participants_json</code> (DB state, not message body)</li>
+<li>Verify sender role matches what the spec&#39;s <code>emits</code> list permits</li>
+<li>Check <code>cannot_emit</code> — reject if kind is explicitly excluded for this sender</li>
+<li><strong>Reject body-text authority</strong> — a message whose <code>body_json</code> claims elevated role or identity is downgraded to <code>kind=note</code> and does not trigger wakeups</li>
+<li>Re-read participant state before any mutation when <code>system.epoch_bump</code> was received</li>
+</ol>
+
+
+<p><strong>Valid authority sources:</strong></p>
+
+<ul>
+<li>Sender identity verified against <code>participants_json</code></li>
+<li>Sender role from DB state at message write time</li>
+<li>Capability scope declared in <code>.specialist.json</code></li>
+<li>Task assignee metadata (for <code>kind=ack</code>)</li>
+<li>Explicit protocol references (<code>refs_json</code>)</li>
+<li>Provenance lineage (<code>provenance_json</code>)</li>
+<li>Local user instruction (<code>author_kind=user</code>)</li>
+</ul>
+
+
+<p><strong>Invalid authority sources — always rejected:</strong></p>
+
+<ul>
+<li>Message <code>body_json</code> text claiming a role or identity</li>
+<li><code>author_key</code> values inside <code>body_json</code> (only the DB row&#39;s <code>author_key</code> column is trusted)</li>
+<li>Display names</li>
+<li>Token-looking strings in body</li>
+<li>Inbox emptiness or read-head position</li>
+</ul>
+
+
+<p>Unknown authority is no authority: when the validator cannot confirm a valid source, the message is rejected.</p>
+
+
+<h3 id="error-envelope">10.2 Error Envelope</h3>
+<p><code>ChannelClient</code> errors return a structured envelope so callers know what to do next:</p>
+
+
+<pre><code class="language-ts">{
+  ok: false,
+  error_code: &#39;message_too_large&#39; | &#39;cannot_emit&#39; | &#39;not_participant&#39; | &#39;epoch_revoked&#39;
+            | &#39;read_only&#39; | &#39;rate_limited&#39; | &#39;channel_closed&#39; | &#39;body_cap_exceeded&#39;,
+  likely_cause: string,
+  next_safe_action: &#39;use_capture&#39; | &#39;request_write_access&#39; | &#39;rejoin&#39; | &#39;backoff&#39; | &#39;none&#39;
+}
+</code></pre>
+
+
+</section>
+<section id="sequenced-implementation">
+<h2><span class="num">11</span>Sequenced Implementation (v0 → v3)</h2>
+<p>Each version is independently shippable, reversible, and pays its own way. <strong>Do not move to vN+1 until vN has shipped and proven value on real workflows.</strong> Earlier versions never block on later ones.</p>
+
+
+<h3 id="design-invariants-across-all-versions">Design invariants across all versions</h3>
+<p>These hold from v0 forward and constrain every later version:</p>
+
+
+<ul>
+<li><strong>Storage model:</strong> <code>id INTEGER PRIMARY KEY AUTOINCREMENT</code> is the cursor. No <code>MAX(seq)+1</code> allocation; no multi-writer race. SQLite gives us monotonic ids for free.</li>
+<li><strong>Delivery semantics:</strong> at-least-once. Cursor advances <em>after</em> the resume payload is enqueued on the receiver. Receivers dedupe by <code>(channel_id, msg_id)</code> in their job-local state.</li>
+<li><strong>Crash recovery:</strong> a receiver that crashes mid-resume re-reads from <code>last_seen_id</code> on restart. Duplicates are the receiver&#39;s problem, not the substrate&#39;s.</li>
+<li><strong>DB churn safety:</strong> channel messages are <em>not</em> prune candidates while their channel is open. Pruning rules in <code>observability-sqlite.ts</code> must exclude <code>channel_messages</code> whose <code>channel_id</code> is in <code>open</code> status.</li>
+<li><strong>Worktree isolation preserved:</strong> lateral steer between MEDIUM jobs requires either shared worktree owner OR explicit <code>can_steer_peers: true</code> in the sender&#39;s spec. Default is <strong>off</strong>.</li>
+<li><strong>Message body cap:</strong> 8 KB. Larger payloads must use the capture pattern (see §10). The error code <code>message_too_large</code> is returned with <code>next_safe_action: &quot;use_capture&quot;</code>.</li>
+<li><strong>Spec is forward-compatible:</strong> the <code>channel</code> block on a <code>.specialist.json</code> is the same shape from v0 to v3. Fields are added, never renamed or repurposed.</li>
+<li><strong>Single scheduler per channel kind.</strong> Pair-talk channels: the runner&#39;s channel read enqueues resumes directly. Node channels: the runner&#39;s channel read enqueues <em>intent</em> into a supervisor inbox; <code>node-supervisor</code> is the sole scheduler that decides whether and when to actually resume a member. Members never wake from a channel bypass while inside a node. This invariant prevents the v2 split-brain risk identified on bead <code>unitAI-jzhim</code>.</li>
+<li><strong>Read/ack separation:</strong> <code>readSince</code> is pure observation and never advances any cursor. <code>markSeen(processedSeq)</code> is the only call that advances the read-head, and it advances only to the highest <em>successfully processed</em> message (cursor-through-N). A message that fails to enqueue a resume does not advance the cursor.</li>
+<li><strong>Authority lane per participant:</strong> one <code>ChannelClient</code> instance per job. Clients are not shared across participants. This scopes identity, cursor state, and capability checks to the owning job.</li>
+<li><strong>Reducer purity:</strong> Channel state (turn order, stop-condition evaluation, participant role lookup) is derived by a pure reducer over the message log. Side effects (resume enqueue, <code>system.*</code> writes) live in the after-hook and gate on idempotency keys. Replay of the reducer must never trigger external calls or LLM requests. This is the event-sourcing crash-recovery guarantee: a job that restarts mid-resume re-reads from <code>last_seen_id</code>, rebuilds state, and re-enqueues only actions that were not yet committed.</li>
+<li><strong>Body-text authority is always rejected:</strong> a message whose <code>body_json</code> asserts a role or identity is downgraded to <code>kind=note</code> at write time and does not trigger wakeups. Authority is verified from DB state only (see §10.1).</li>
+<li><strong>Epoch re-read before mutation:</strong> on receipt of <code>system.epoch_bump</code>, the receiver must call <code>reloadParticipantRoles(channelId)</code> before processing any subsequent message or performing any mutation. This fires on <code>system.swap</code> completion and any capability revocation.</li>
+</ul>
+
+
+<h3 id="v0-substrate-spec"><span class="version-label">v0</span>— Substrate + Spec</h3>
+<p><strong>Goal:</strong> Reviewer can autonomously wake an executor. Human can steer a channel without knowing the job id. No orchestrator round-trip.</p>
+
+
+<p><strong>What ships:</strong></p>
+
+
+<ol>
+<li>One new table: <code>channel_messages</code> (see §5.1, but only this table — not <code>channels</code> or <code>channel_subscriptions</code> yet).<pre><code class="language-sql">CREATE TABLE channel_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  channel_id TEXT NOT NULL,
+  target_job_id TEXT,                -- null = broadcast
+  author_kind TEXT NOT NULL,         -- &#39;specialist&#39; | &#39;user&#39; | &#39;system&#39;
+  author_job_id TEXT,
+  kind TEXT NOT NULL,                -- &#39;verdict&#39; | &#39;finding&#39; | &#39;steer&#39; | &#39;done&#39; | &#39;note&#39;
+  body_json TEXT NOT NULL,
+  refs_json TEXT,
+  ts INTEGER NOT NULL
+);
+CREATE INDEX idx_channel_messages_target
+  ON channel_messages(channel_id, target_job_id, id);
+</code></pre>
+</li>
+<li><code>ChannelClient</code> in <code>src/specialist/</code> with <code>post / readSince / markSeen / capture</code>. Read and ack are separate: <code>readSince</code> is observation-only; <code>markSeen(processedSeq)</code> advances the cursor only to the highest successfully processed message. <code>capture(blob) → result_id</code> handles payloads that would exceed the 8 KB body cap. All errors return the structured envelope from §10.2. Discriminated-union validator for the 5 kinds; rejects body-text authority per §10.1.</li>
+<li><code>.specialist.json</code> gains the <code>channel</code> block — see §6. Subscription expressions parsed but only <code>kind:me</code> and <code>kind:*</code> filters resolved in v0. Richer filters (<code>finding:scope-overlap</code>) parse but no-op until v2.</li>
+<li>Runner waiting loop adds one read per tick: <code>client.readSince(channelId, jobId, lastSeenId)</code>. Messages addressed to the job become resume payloads.</li>
+<li>Reviewer specialist updated to emit a <code>verdict</code> message on completion (alongside its existing <code>result.txt</code>). Findings dual-write to both <code>node_memory</code> (current path) and as <code>kind=finding</code> messages.</li>
+<li>CLI: <code>sp msg &lt;channel-id&gt; &quot;...&quot;</code>, <code>sp tail &lt;channel-id&gt; [-f]</code>, <code>sp ch post --channel &lt;id&gt; --target &lt;job&gt; --kind &lt;k&gt; --body &lt;json&gt;</code>.</li>
+</ol>
+
+
+<p><strong>What does NOT ship in v0:</strong></p>
+
+
+<ul>
+<li>No <code>channels</code> table. Channel id is just a string (chain id, node id, or a fresh <code>pair-&lt;uuid&gt;</code>).</li>
+<li>No subscriptions table. Receivers query by <code>target_job_id</code> directly.</li>
+<li>No topology, no judge, no freeform.</li>
+<li>No <code>node_memory</code> derivation.</li>
+<li>No node-supervisor changes.</li>
+</ul>
+
+
+<p><strong>Acceptance:</strong></p>
+
+
+<ul>
+<li>Reviewer↔executor loop runs end-to-end with no human <code>sp resume</code>.</li>
+<li><code>sp msg &lt;channel-id&gt;</code> reaches a waiting executor and resumes it.</li>
+<li>Existing nodes, epics, chains, <code>sp steer</code>, <code>sp resume</code> continue to work unchanged.</li>
+<li><code>npm run lint</code>, <code>npx tsc --noEmit</code>, channel unit tests pass.</li>
+</ul>
+
+
+<h3 id="v0-5-workflow-validation-no-code-changes-to-substrate"><span class="version-label">v0.5</span>— Workflow Validation (no code changes to substrate)</h3>
+<p><strong>Goal:</strong> Prove channels are useful across more than one workflow before adding any complexity.</p>
+
+
+<p><strong>What ships:</strong></p>
+
+
+<ul>
+<li>3–4 real workflow trials documented in <code>docs/design/channels-v0-trials.md</code>:<ol>
+<li>Reviewer↔executor (the canonical case).</li>
+<li>Debugger↔test-runner — debugger posts <code>finding</code>, test-runner posts <code>verdict</code>.</li>
+<li>Human-steered explorer — <code>sp msg</code> redirects an exploring specialist mid-flight.</li>
+<li>Parallel-review consensus — two reviewers post verdicts; a synthesizer reads both via <code>sp tail --kind verdict</code>.</li>
+</ol>
+</li>
+<li>Each trial captures: did the loop converge, how many manual interventions were avoided, what spec/CLI rough edges showed up.</li>
+</ul>
+
+
+<p><strong>Decision gate:</strong> if 2+ trials show clear win, proceed to v1. Otherwise revise v0 or stop.</p>
+
+
+<h3 id="v1-pair-talk-cli"><span class="version-label">v1</span>— Pair-Talk CLI</h3>
+<p><strong>Goal:</strong> Make ad-hoc multi-specialist channels a first-class CLI primitive. Unify the steer paths.</p>
+
+
+<p><strong>What ships:</strong></p>
+
+
+<ol>
+<li><code>sp ch open &lt;specialist-a&gt; &lt;specialist-b&gt; --bead &lt;id&gt; [--turns N] [--stop-on pass]</code> — opens a fresh channel, spawns both jobs into it, wires their subscriptions per their spec, streams.</li>
+<li><code>sp ch open a b c [...]</code> — N-way, no judge yet. Turn order is <code>reactive</code>: last poster&#39;s <code>target_key</code> wakes; if no target, runtime falls back to round-robin.</li>
+<li><code>sp steer</code> and <code>sp resume</code> implemented on top of <code>ChannelClient.post()</code>.</li>
+<li>Channel subscription resolver gains real filters: <code>finding:scope-overlap</code> resolves against the job&#39;s declared scope.</li>
+</ol>
+
+
+<p><strong>What does NOT ship in v1:</strong></p>
+
+
+<ul>
+<li>Still no judge, no freeform, no node-supervisor changes.</li>
+<li><code>node_memory</code> still primary; findings still dual-write.</li>
+</ul>
+
+
+<p><strong>Acceptance:</strong></p>
+
+
+<ul>
+<li><code>sp ch open executor reviewer --bead X --stop-on pass</code> produces a complete back-and-forth.</li>
+<li><code>sp steer</code> and <code>sp resume</code> behave identically to v0 from the user&#39;s perspective; under the hood they post to the channel.</li>
+<li><code>sp ch open a b --bead X --stop-on pass</code> produces a complete back-and-forth.</li>
+</ul>
+
+
+<h3 id="v2-node-lateral-wakeups-read-only-judge"><span class="version-label">v2</span>— Node Lateral Wakeups + Read-Only Judge</h3>
+<p><strong>Goal:</strong> Bring lateral messaging <em>into</em> nodes without dismantling node-supervisor&#39;s phase machinery.</p>
+
+
+<p><strong>What ships:</strong></p>
+
+
+<ol>
+<li><code>node-supervisor</code> opens a channel on <code>node run</code>, registers each member&#39;s job_id, and exposes a <strong>supervisor inbox</strong> that receives intent from channel reads.</li>
+<li>Members can post <code>verdict</code> / <code>finding</code> / <code>steer</code> / <code>note</code> to peers <strong>within the same phase</strong>. Cross-phase steer requires coordinator approval (posted as <code>kind=steer</code> from the coordinator job).</li>
+<li><strong>Single scheduler enforcement (hard rule):</strong> inside a node channel, a message addressed to a member does <strong>not</strong> directly wake that member. The runner reads the message, validates the sender, and posts intent into the supervisor inbox. <code>node-supervisor</code> is the sole authority that converts intent into an actual resume — respecting current phase, in-flight resumes, and member status. This collapses the dual-control-plane risk back to one brain.</li>
+<li>Coordinator gains a <strong>read-only judge mode</strong>: subscribes to <code>verdict</code>, <code>finding</code>, <code>proposal</code>. Can post <code>system.done</code> (close channel → trigger node completion) or <code>system.redirect</code> (post intent that supervisor serializes into a resume). Cannot swap members. Cannot kill jobs. Judge writes never bypass the supervisor. When <code>system.done</code> fires, runtime emits <code>system.epoch_bump</code> to all participants so they re-read roles before any further mutation.</li>
+<li><code>wait-phase</code> still drives barriers. Phases still exist. The channel is <em>additive</em> — members can talk laterally inside a phase via supervisor-serialized resumes; coordinator still gates between phases.</li>
+<li>Node config gains an optional <code>channel</code> block:<pre><code class="language-json">&quot;channel&quot;: {
+  &quot;enabled&quot;: true,
+  &quot;judge_mode&quot;: &quot;readonly&quot;,
+  &quot;stop_on&quot;: [&quot;judge.done&quot;, &quot;phase.complete&quot;, &quot;budget:turns=40&quot;]
+}
+</code></pre>
+</li>
+<li>New canonical node configs: <code>pair-review.node.json</code>, <code>lateral-debug.node.json</code>.</li>
+</ol>
+
+
+<p><strong>What does NOT ship in v2:</strong></p>
+
+
+<ul>
+<li>No freeform topology. Phase-driven turns remain default.</li>
+<li>No <code>system.swap</code>. Coordinator can&#39;t replace members.</li>
+<li>No derived <code>node_memory</code>. Findings still dual-write.</li>
+</ul>
+
+
+<p><strong>Acceptance:</strong></p>
+
+
+<ul>
+<li>A node with two reviewers in the same phase can converge on a verdict via channel without coordinator intervention.</li>
+<li>A coordinator running in judge mode can terminate a node early via <code>system.done</code>.</li>
+<li><code>node-supervisor</code> line count does not grow significantly (additive, not rewrite).</li>
+<li>Existing nodes work unchanged when <code>channel.enabled</code> is omitted.</li>
+</ul>
+
+
+<h3 id="v3-full-channel-engine-only-if-v2-proves-out"><span class="version-label">v3</span>— Full Channel Engine (only if v2 proves out)</h3>
+<p><strong>Goal:</strong> Reach the original design&#39;s vision — self-managed nodes, freeform topology, derived memory.</p>
+
+
+<p><strong>What ships (only if measurements from v2 justify it):</strong></p>
+
+
+<ol>
+<li>Promote <code>channel_messages</code> schema toward the full §5.1 design: add <code>channels</code> and <code>channel_subscriptions</code> tables for richer lifecycle and replay.</li>
+<li><code>freeform</code> topology: members self-elect each tick via cheap &quot;should I respond?&quot; probe.</li>
+<li>Active judge mode: coordinator can post <code>system.swap</code> (replace a member), with explicit safety gates from §10.</li>
+<li><code>node_memory</code> becomes a derived view over <code>kind=finding</code> messages, with a backfill migration.</li>
+<li>New stop conditions: <code>consensus:N</code>, <code>idle:K</code>, <code>budget:tokens=T</code>.</li>
+<li>Per-participant token-bucket rate limits on message writes.</li>
+<li><code>using-specialists-v2</code> skill rewritten to teach channel-first patterns; orchestrator-mediated review marked legacy.</li>
+</ol>
+
+
+<p><strong>Pre-conditions for starting v3:</strong></p>
+
+
+<ul>
+<li>v2 has been in use for ≥2 weeks across ≥3 distinct workflows.</li>
+<li>Measured outcome: (a) human <code>sp resume</code> count per chain dropped substantially, (b) no new class of race or oscillation bug attributable to channels, (c) <code>node-supervisor</code> either shrunk or held steady.</li>
+<li>If any pre-condition fails, v3 is shelved indefinitely. v2 is a stable equilibrium.</li>
+</ul>
+
+
+<h3 id="reversal-plan">Reversal plan</h3>
+<p>Each version can be disabled without breaking earlier ones:</p>
+
+
+<ul>
+<li>v0: drop the table, remove the spec block, remove the runner read. No data loss elsewhere.</li>
+<li>v1: revert <code>sp ch open</code>; <code>sp steer</code> / <code>sp resume</code> fall back to direct runner injection.</li>
+<li>v2: set <code>channel.enabled: false</code> per node; lateral messaging is silently no-op.</li>
+<li>v3: stop writing to <code>channels</code> table; revert <code>node_memory</code> to direct writes (backfill is one-way, plan migration carefully).</li>
+</ul>
+
+
+<h3 id="out-of-scope-across-all-versions">Out of scope across all versions</h3>
+<ul>
+<li>Cross-channel messaging (epic-level coordinator watching N chain channels). Deferred indefinitely.</li>
+<li>Multi-user identity in messages. Single <code>user</code> author key.</li>
+<li>Bidirectional integration with external systems (Slack, GitHub comments). Channels are internal.</li>
+</ul>
+
+
+</section>
+<section id="open-questions">
+<h2><span class="num">12</span>Open Questions</h2>
+<ol>
+<li><strong>Channel per node, or channel per chain inside an epic?</strong> Leaning per-node for self-managed; per-chain for traditional executor→reviewer. Allow both via <code>kind</code> field.</li>
+<li><strong>Verdict targeting when reviewer reviews multiple executors?</strong> Either multi-target (<code>target_keys: []</code>) or one verdict message per target. Prefer the latter for replay clarity.</li>
+<li><strong>Should <code>system.swap</code> actually kill the outgoing job, or just unsubscribe it?</strong> Default: unsubscribe + mark waiting; let user <code>sp stop</code> if needed. Less destructive.</li>
+<li><strong>Cross-channel references</strong> (epic-level coordinator watching multiple chain channels)? Possible via <code>epic</code> kind, deferred to v2.</li>
+<li><strong>User identity in messages</strong> — single <code>user</code> key, or per-CLI-invocation? Single for now; revisit if multi-user becomes real.</li>
+<li><strong>Judge model selection</strong> — does the judge run a full specialist turn for every wake, or a lightweight classifier? Lightweight first (cheap call returning the decision schema); full turn behind a flag.</li>
+</ol>
+
+
+</section>
+<section id="risks-mitigations">
+<h2><span class="num">13</span>Risks &amp; Mitigations</h2>
+<table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Runaway freeform loops</td>
+<td>Per-member turn cap, idle escalation ladder, total budget stop</td>
+</tr>
+<tr>
+<td>DB write contention</td>
+<td>Pointer-only messages, batched writes per turn, per-participant rate limit</td>
+</tr>
+<tr>
+<td>Context bloat from over-broad subscriptions</td>
+<td>Conservative default subscription, schema-validated <code>subscribes</code> field, lint warning on <code>*</code></td>
+</tr>
+<tr>
+<td>Lateral steer abuse between MEDIUM jobs</td>
+<td>Permission gate at router, <code>--force-job</code> reuse, per-spec <code>can_steer_peers</code> opt-in</td>
+</tr>
+<tr>
+<td>Rollout breakage of nodes/epics</td>
+<td>Phased rollout per §11; each version independently reversible; node channel opt-in via <code>channel.enabled</code></td>
+</tr>
+<tr>
+<td>Judge becoming a bottleneck</td>
+<td>Wake-on filters narrow; lightweight decision call; quorum gating reduces wake frequency. Hard backstop: <code>judge_timeout:N</code> stop condition auto-emits <code>system.continue</code> if judge is silent for N ticks, making the judge eventually-consistent rather than a blocking gate (see §5.7).</td>
+</tr>
+</tbody></table>
+
+</section>
+<section id="success-criteria">
+<h2><span class="num">14</span>Success Criteria (per version)</h2>
+<p><strong>v0 — Substrate:</strong></p>
+
+<ul>
+<li>Reviewer↔executor loop runs end-to-end with zero human <code>sp resume</code>.</li>
+<li><code>sp msg &lt;channel-id&gt;</code> reaches a waiting executor.</li>
+<li>All existing nodes / epics / chains pass unchanged.</li>
+<li><code>npm run lint</code>, <code>npx tsc --noEmit</code> clean. Channel unit tests cover post / readSince / markSeen / dedupe / crash-recovery / cursor-through-N partial advancement / body-text authority rejection / capture oversized payload.</li>
+</ul>
+
+
+<p><strong>v0.5 — Workflow validation:</strong></p>
+
+<ul>
+<li>≥2 of 4 documented trials show measurable reduction in manual orchestrator interventions.</li>
+<li>No new class of bug attributable to channels after the trial period.</li>
+</ul>
+
+
+<p><strong>v1 — Pair-talk CLI:</strong></p>
+
+<ul>
+<li><code>sp ch open a b --bead X --stop-on pass</code> works for any two compatible specialists with no node config.</li>
+<li><code>sp steer</code> / <code>sp resume</code> user-visible behavior unchanged.</li>
+<li>Subscription filters (<code>finding:scope-overlap</code>) resolve correctly.</li>
+</ul>
+
+
+<p><strong>v2 — Node lateral wakeups + read-only judge:</strong></p>
+
+<ul>
+<li>A node with two reviewers in the same phase converges via channel without coordinator manual intervention.</li>
+<li>Coordinator in <code>judge_mode: readonly</code> can terminate a node early via <code>system.done</code>.</li>
+<li><strong>Single-scheduler invariant verified by test:</strong> no resume of a node member ever bypasses <code>node-supervisor</code>. A direct channel→runner wake inside a node channel is a test failure.</li>
+<li><code>node-supervisor</code> source line count holds steady or drops; phase machinery untouched.</li>
+<li>Nodes with <code>channel.enabled</code> omitted behave identically to today.</li>
+</ul>
+
+
+<p><strong>v3 — Full engine (gated on v2 outcomes):</strong></p>
+
+<ul>
+<li>Self-managed node terminates correctly on <code>judge.done</code>, <code>idle:K</code>, and <code>budget</code> in tests.</li>
+<li><code>node_memory</code> derivation passes a one-week shadow-write comparison before cutover.</li>
+<li>No oscillation observed in freeform topology with 3+ members under standard cooldowns.</li>
+<li><code>sp tail &lt;channel-id&gt; --jq &#39;.body.severity&#39;</code> lets a human grep across a channel.</li>
+</ul>
+
+</section>
+<footer><span>channels.md</span><span class="accent">Generated from canonical markdown</span></footer>
+</div>
+</body>
+</html>
