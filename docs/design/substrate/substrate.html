@@ -507,6 +507,37 @@ footer .accent{color:var(--accent)}
 
 <p>Emitters and participants are orthogonal but often coincide: a <code>script</code> participant that reacts <em>and</em> emits is both; an <code>external</code> webhook adapter emits without being a member of any container; a <code>system</code> participant may react without emitting. An emitter&#39;s capability — <code>can_emit: { pulse_kinds, budget, escalate_when }</code> — is <strong>the same mechanism</strong> as a node&#39;s autonomy policy and a container&#39;s <code>can_open_containers</code> capability. One capability model, not three.</p>
 
+<figure class="visual">
+<div class="figmeta"><span class="num">Fig. 02B</span><span>pulse idempotency and cross-container wake</span></div>
+<div class="split-visual">
+  <div>
+    <h4>Duplicate external event</h4>
+    <div class="flow tight">
+      <div class="step"><strong>webhook #1</strong><span><code>github:pr-50:opened</code></span></div>
+      <div class="arrow">→</div>
+      <div class="step"><strong>dedup map</strong><span>key absent → create <code>seed:pr50</code></span></div>
+    </div>
+    <div class="flow tight" style="margin-top:10px">
+      <div class="step"><strong>webhook #2</strong><span>same idempotency key</span></div>
+      <div class="arrow">→</div>
+      <div class="step"><strong>no-op</strong><span>returns existing container; no second seed opens</span></div>
+    </div>
+  </div>
+  <div>
+    <h4>Cross-container pulse</h4>
+    <div class="flow tight">
+      <div class="step"><strong>chain coord A</strong><span>emits <code>collision.alert</code></span></div>
+      <div class="arrow">→</div>
+      <div class="step"><strong>pulse queue</strong><span>mechanical delivery, not channel watching</span></div>
+      <div class="arrow">→</div>
+      <div class="step"><strong>node B</strong><span>wakes if trigger policy matches</span></div>
+    </div>
+  </div>
+</div>
+<div class="callout flat"><strong>Boundary:</strong> channels stay container-scoped. Cross-container coordination is pulse-based, deduped, and governed by emitter capability.</div>
+<figcaption>The idempotency key is what makes external events and autonomous nodes safe: repeated input returns the same work object instead of multiplying containers.</figcaption>
+</figure>
+
 
 <h3 id="the-sdk-surface">2.4 The SDK surface</h3>
 <p>These primitives are a reusable SDK, not specialist-specific machinery. Building a new actor means filling a schema for a new participant/emitter kind — not writing new runtime:</p>
@@ -1127,6 +1158,50 @@ footer .accent{color:var(--accent)}
 
 <p><strong>Pulse as a general primitive — including specialist lifecycle.</strong> The daemon is itself an emitter that observes specialist runtime and emits lifecycle pulses: <code>specialist.spawned</code>, <code>specialist.compacted</code> (with a count), <code>specialist.stopped</code>, <code>specialist.context-threshold</code>. Any participant can subscribe. This means mechanisms like the coordinator respawn (§5.9) are not special-cased code — they are <em>handlers of a pulse</em>. One primitive, N uses: a webhook, a script, a coordinator decision, and a specialist compaction all flow through the same emit→react surface.</p>
 
+<figure class="visual">
+<div class="figmeta"><span class="num">Fig. 05B</span><span>node scheduling split · mechanical daemon, semantic coordinator</span></div>
+<div class="flow">
+  <div class="step"><strong>emitters</strong><span>schedule, watch, webhook, lifecycle, peer pulse</span></div>
+  <div class="arrow">→</div>
+  <div class="step"><strong>daemon</strong><span>dedup, rate-limit, coalesce, FIFO enqueue</span></div>
+  <div class="arrow">→</div>
+  <div class="step"><strong>node queue</strong><span>bounded pulse stream per standing container</span></div>
+  <div class="arrow">→</div>
+  <div class="step"><strong>coordinator</strong><span>semantic choice: ignore, defer, serialize, parallelize, seed</span></div>
+  <div class="arrow">→</div>
+  <div class="step"><strong>child work</strong><span>opens seed / chain / epic / wave within autonomy policy</span></div>
+</div>
+<div class="dash">
+  <div class="dash-bar">
+    <div class="left"><span class="chip ready">mechanical</span><span>daemon responsibilities</span></div>
+    <div class="right">protects the machine, not the product vision</div>
+  </div>
+  <div class="dash-grid">
+    <div class="dash-cell">
+      <div class="dash-h">daemon may decide</div>
+      <table style="font-size:10.5px;margin:0">
+        <tbody>
+          <tr><td>duplicate key</td><td><span class="chip ready">no-op</span></td></tr>
+          <tr><td>10 identical pulses</td><td>coalesce into one wake</td></tr>
+          <tr><td>rate exceeded</td><td>delay or drop by policy</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="dash-cell">
+      <div class="dash-h">coordinator must decide</div>
+      <table style="font-size:10.5px;margin:0">
+        <tbody>
+          <tr><td>open work?</td><td>semantic judgment</td></tr>
+          <tr><td>parallel or serial?</td><td>depends on live scope</td></tr>
+          <tr><td>beyond policy?</td><td>escalate ownership</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+<figcaption>The split is the architectural point: the daemon prevents hot loops and duplicate work; the coordinator decides what the work means.</figcaption>
+</figure>
+
 
 <h3 id="coordinator-context-window-kill-and-respawn">5.9 Coordinator context window — kill and respawn</h3>
 <p>A coordinator cannot live for weeks compacting its context indefinitely; compaction degrades until the model loses the thread. <strong>Rule of thumb: at most two compactions, then kill and respawn a fresh coordinator.</strong> The daemon watches the <code>specialist.compacted</code> pulse; on the second, it triggers the respawn cycle — the coordinator writes its final node-state, is terminated, and a fresh coordinator is spawned.</p>
@@ -1152,6 +1227,19 @@ footer .accent{color:var(--accent)}
 
 
 <p>The <strong>journal is distinct from memory</strong> (§10): the journal is <em>operational state of this node</em> (what&#39;s in flight now) and dies with the node; memory is <em>durable cross-task knowledge</em> and outlives the task. The respawn reads both, from different places.</p>
+
+<figure class="visual">
+<div class="figmeta"><span class="num">Fig. 05C</span><span>coordinator respawn with journal gap detection</span></div>
+<div class="timeline">
+  <div class="rail"><span class="label">t0</span><p><strong>Coordinator A</strong> handles pulse <code>github:pr-50:opened</code>, opens <code>seed:pr50</code>, checkpoints journal with <code>channel_head=msg#140</code> and open children.</p></div>
+  <div class="rail"><span class="label">t1</span><p>A compacts twice. Daemon emits <code>specialist.compacted</code> pulse and triggers planned respawn.</p></div>
+  <div class="rail"><span class="label">t2</span><p>A dies after one more event but before a clean handoff. The container state and channel continue to exist.</p></div>
+  <div class="rail"><span class="label">t3</span><p><strong>Coordinator B</strong> reads origin seed, recent channel tail, and <code>coordinator_journal_json</code>.</p></div>
+  <div class="rail"><span class="label">t4</span><p>B compares journal snapshot to live state: <code>journal head msg#140</code> vs <code>live head msg#145</code>. Diff = gap; B re-reads more cautiously before acting.</p></div>
+</div>
+<div class="callout flat"><strong>Safety property:</strong> the journal is useful but never blindly authoritative. Live substrate state wins, and journal/live mismatch becomes explicit recovery work.</div>
+<figcaption>Respawn is safe because the coordinator is replaceable. Its context can die; the node state cannot.</figcaption>
+</figure>
 
 
 <h3 id="failure-recovery">5.10 Failure recovery</h3>
@@ -1901,6 +1989,27 @@ sb chain approve &lt;chain-id&gt;     # &quot;shape is correct&quot; → open tr
 
 <p>This formalizes &quot;one active writer at a time&quot;: at most one non-null <code>held_by</code>. A second writer is the normal case, not an edge — the <strong>debugger-restitch</strong>: the executor produces a diff and goes quiescent (releasing the lease), a gate finds a regression, the debugger acquires the now-free lease and produces a patch. More writers <em>over time</em> on one chain, one writer <em>at a time</em>. The discriminant from §6.9.5 becomes concrete: <em>simultaneous</em> writers → separate chains on separate worktrees (a wave/epic, collision-watched); <em>sequential</em> writers → one worktree, the lease handed off. &quot;Writer-step vs read-only-step&quot; is now a defined property: does it acquire the lease.</p>
 
+<figure class="visual">
+<div class="figmeta"><span class="num">Fig. 06E</span><span>worktree lease handoff · executor to debugger</span></div>
+<div class="dash">
+  <div class="dash-bar">
+    <div class="left"><span class="chip live">lease</span><span>chain:7f3a · one active writer</span></div>
+    <div class="right">read-only gates inspect without acquiring</div>
+  </div>
+  <table style="font-size:10.5px;margin:0">
+    <thead><tr><th>time</th><th>executor</th><th>daemon / lease</th><th>gate</th><th>debugger</th></tr></thead>
+    <tbody>
+      <tr><td>t0</td><td><span class="chip ready">acquires</span> writes diff</td><td><code>held_by=step:exec</code></td><td class="matrix-cell empty">·</td><td class="matrix-cell empty">·</td></tr>
+      <tr><td>t1</td><td>agent_end → waiting</td><td><span class="chip ready">release</span> <code>held_by=null</code></td><td class="matrix-cell empty">·</td><td class="matrix-cell empty">·</td></tr>
+      <tr><td>t2</td><td class="matrix-cell empty">·</td><td><code>state=free</code></td><td>READ_ONLY scan finds regression</td><td class="matrix-cell empty">·</td></tr>
+      <tr><td>t3</td><td class="matrix-cell empty">·</td><td><span class="chip partial">grant</span> queued writer</td><td>posts evidence</td><td><span class="chip ready">acquires</span> restitch patch</td></tr>
+      <tr><td>t4</td><td class="matrix-cell empty">·</td><td><span class="chip ready">release</span></td><td>re-runs gate</td><td>agent_end → waiting</td></tr>
+    </tbody>
+  </table>
+</div>
+<figcaption>The restitch loop is sequential writing on one worktree, not parallel ownership. This is why debugger belongs in the same chain rather than a sibling worktree.</figcaption>
+</figure>
+
 
 <h4 id="the-git-model-two-axes-container-kind-and-chain-shape">6.9.7 The git model — two axes: container kind and chain shape</h4>
 <p>Two things were being conflated and must be kept as separate axes, because confusing them loses work:</p>
@@ -1927,6 +2036,43 @@ wave:               (no shared base required)
 
 
 <p>The essential distinction between epic and wave is right here at the git layer: an <strong>epic has a shared integration base</strong> (<code>epic/&lt;id&gt;</code>, forked from main) and its child chains fork from <em>that branch</em>, so dependent roots <strong>see each other&#39;s merged work</strong> as they progress; the epic merges to main as a unit when all children are integrated. A <strong>wave has no shared base</strong> — its child chains fork independently from main, run in parallel, and the collision matrix (§9) watches that their worktrees don&#39;t clash. Epic = progressive shared base (children see each other); wave = independent bases (children don&#39;t, parallel).</p>
+
+<figure class="visual">
+<div class="figmeta"><span class="num">Fig. 06F</span><span>git two-axis · epic shared base vs wave independent bases</span></div>
+<div class="split-visual">
+  <div>
+    <h4>Epic: dependent roots share integration base</h4>
+    <svg class="diagram" viewBox="0 0 420 250" xmlns="http://www.w3.org/2000/svg">
+      <line x1="40" y1="40" x2="360" y2="40" stroke="#15130E"/>
+      <circle cx="60" cy="40" r="6" fill="#15130E"/><text x="60" y="24" text-anchor="middle">main</text>
+      <line x1="120" y1="40" x2="120" y2="105" stroke="#7A1F1B"/>
+      <circle cx="120" cy="105" r="6" fill="#7A1F1B"/><text x="120" y="128" text-anchor="middle">epic/tx92</text>
+      <line x1="120" y1="105" x2="230" y2="80" stroke="#1A4D85"/>
+      <line x1="170" y1="105" x2="280" y2="130" stroke="#1A4D85"/>
+      <line x1="220" y1="105" x2="330" y2="180" stroke="#1A4D85"/>
+      <circle cx="230" cy="80" r="5" fill="#1A4D85"/><text x="230" y="64" text-anchor="middle">chain 1</text>
+      <circle cx="280" cy="130" r="5" fill="#1A4D85"/><text x="280" y="116" text-anchor="middle">chain 2</text>
+      <circle cx="330" cy="180" r="5" fill="#1A4D85"/><text x="330" y="166" text-anchor="middle">chain 3</text>
+      <text x="210" y="225" text-anchor="middle" class="muted">children fork from epic branch and see integrated siblings</text>
+    </svg>
+  </div>
+  <div>
+    <h4>Wave: independent roots from main</h4>
+    <svg class="diagram" viewBox="0 0 420 250" xmlns="http://www.w3.org/2000/svg">
+      <line x1="40" y1="40" x2="360" y2="40" stroke="#15130E"/>
+      <circle cx="60" cy="40" r="6" fill="#15130E"/><text x="60" y="24" text-anchor="middle">main</text>
+      <line x1="120" y1="40" x2="230" y2="80" stroke="#8A2949"/>
+      <line x1="180" y1="40" x2="280" y2="130" stroke="#8A2949"/>
+      <line x1="240" y1="40" x2="330" y2="180" stroke="#8A2949"/>
+      <circle cx="230" cy="80" r="5" fill="#8A2949"/><text x="230" y="64" text-anchor="middle">chain A</text>
+      <circle cx="280" cy="130" r="5" fill="#8A2949"/><text x="280" y="116" text-anchor="middle">chain B</text>
+      <circle cx="330" cy="180" r="5" fill="#8A2949"/><text x="330" y="166" text-anchor="middle">chain C</text>
+      <text x="210" y="225" text-anchor="middle" class="muted">children fork from main independently; collision matrix watches overlap</text>
+    </svg>
+  </div>
+</div>
+<figcaption>Container kind determines how roots relate in git; chain shape determines the steps inside one root. They are independent axes.</figcaption>
+</figure>
 
 
 <p><strong>Worktree names inherit the higher level</strong>, so you can tell where you are and where you came from: <code>wt/epic-tx92/chain-tx92.2</code>, branch <code>epic/tx92/chain-tx92.2</code>. The name is derived <em>from</em> the container&#39;s membership (it mirrors <code>parent_id</code>), not parsed <em>to</em> deduce structure — same discipline as §7 (the name is not the semantics). This makes the layout legible to both a human (<code>git worktree list</code>) and the daemon (which polls worktrees for the collision matrix, §9.1, and can now group by epic/wave).</p>
@@ -2237,6 +2383,23 @@ git -C &lt;worktree&gt; diff                         # uncommitted on top
 
 
 <p>Concatenate. Parse <code>+++</code> headers for files, <code>@@</code> headers for hunk ranges, count added/removed lines per hunk.</p>
+
+<figure class="visual">
+<div class="figmeta"><span class="num">Fig. 09B</span><span>collision detection pipeline</span></div>
+<div class="flow">
+  <div class="step"><strong>poll</strong><span>Every 8–15s per active worktree: committed and uncommitted diffs.</span></div>
+  <div class="arrow">→</div>
+  <div class="step"><strong>parse</strong><span><code>+++</code> file headers and <code>@@</code> hunk ranges.</span></div>
+  <div class="arrow">→</div>
+  <div class="step"><strong>cross-ref</strong><span>Group by file, then overlap hunk ranges across active containers.</span></div>
+  <div class="arrow">→</div>
+  <div class="step"><strong>classify</strong><span><span class="chip partial">file</span> <span class="chip invalid">range</span> <span class="chip invalid">semantic</span></span></div>
+  <div class="arrow">→</div>
+  <div class="step"><strong>surface</strong><span>Write <code>collision_events</code>, tether hint, dashboard row, optional pulse.</span></div>
+</div>
+<div class="callout flat"><strong>Semantic collision is explicitly caveated:</strong> git may merge cleanly while behavior breaks, so symbol-impact evidence is advisory unless a gate elevates it.</div>
+<figcaption>Fig. 09A shows the rendered matrix; this figure shows the data path that makes the matrix a runtime fact rather than a UI guess.</figcaption>
+</figure>
 
 
 <h3 id="cross-reference">9.2 Cross-reference</h3>
