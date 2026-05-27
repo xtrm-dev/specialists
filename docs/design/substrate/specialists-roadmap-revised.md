@@ -57,9 +57,11 @@ The prior revision left nine open questions (old §11). They are now resolved. T
 - **D23 — `recommended_template` on the planner (§D of the reconciliation).** Pass-2 of the planner annotates each child root bead with `recommended_template: <one of the 13 formula names | on-the-run>`. Validated against live `bd formula list`. Proposal, not materialization — resolved at `sp chain review` / `bd mol pour`, not at planning time. **Prereq (D26)**: edit `config/specialists/planner.specialist.json` output_schema + update `config/skills/planning/SKILL.md` to teach Pass-2 — both required before D23 ships.
 - **D24 — `sp chain <bead>` v0 shape.** Read-once, human-viewable + `--json` flag. `-f` follow mode deferred to a dedicated small-CLI/TUI design pass (naive repaint has the same flicker pattern as `sp ps -f`). **New chain-lifecycle events from Phases 1–3 surface in `sp log`** — every new event kind ships with its `sp log` formatter in the same PR; no event ships dark.
 - **D25 — `xtrm-h9hqg` status.** **CLOSED 2026-05-27** (verified in xtrm-tools: bd auto-stage patch in `xt init`/`xt update`, dependency-maintenance checks, `--all-repos` sweep mode, tests, dist smoke). B-A1/A2/A3 done; B-A4/A5/A6 remain friction-audit-side (Phase 4 row 14).
-- **D26 — Planner-spec + planning-skill prereq for D23.** Adding `recommended_template` requires: (a) `config/specialists/planner.specialist.json` — extend `output_schema` with `recommended_template: enum(<13 formula names> | 'on-the-run')` (validated against `bd formula list` at runtime); (b) `config/skills/planning/SKILL.md` — teach Pass-2 (annotate each child root bead with `recommended_template`; do **not** materialize step beads at planning time — that's `sp chain review`'s job). Single PR; both files are package-tier, so direct JSON / Markdown edits per the CLAUDE.md gotcha. **[updated 2026-05-27]** Moved from Phase 3 row 11b to **Phase 0 (bootstrap)** rows 0.b/0.c — Phase 2 Pass-2 planning cannot run without D26 shipped, and Phase 0 makes that precondition honest instead of circular. `config/skills/planning/SKILL.md` does not exist today as canonical (only `.xtrm/skills/default/planning/SKILL.md` deployed mirror); Phase 0 creates the canonical file then teaches Pass-2 in it.
-- **D28 — Skills revamp: `using-specialists-v4` as new canonical (Phase 6).** After Phases 1–5 ship, the discipline has fundamentally changed (`--chain` replaces `--worktree`/`--job`; `sp chain review/approve` is composition gate; `kind:step` is label-as-truth; R-checks fire at dispatch; pull-not-push memory replaces auto-injection; sp epic is decoration-only). v3 was structured around the pre-roadmap mental model — patching it in place produces contradictory text. **v4 is created from scratch as the new canonical**, frontmatter `status: canonical (post-roadmap)`. v3 is **frozen** with banner `status: legacy — superseded by v4`, preserved for cold-start sessions. Auto-mode mirrors v4. **v4 is NOT gated on channels v0 or substrate landing** (those are months out, outside this roadmap); channels/substrate-aware surfaces live as a clearly-marked "Future surfaces" section inside v4 — coming, not active. Future `using-specialists-v5` is the receiver when channels v0 ships, but it does not block v4.
-- **D27 — Memory injection: push → pull (Opportunity 11).** Eliminate the runner-time auto-injection of `bd prime` + `.xtrm/memory.md` (~3.8k token irrelevant for most tasks per memory `bd-prime-context-overhead`). Replace with mandatory rule `config/mandatory-rules/memory-recall.md` that teaches specialists to query `bd memories <keyword>` / `bd recall <key>` scoped to their bead at startup and before key decisions. Reads forward to **substrate §10.2 memory-as-capability** (memory-curator role eliminated; every participant carries the memory-query extension; chain coordinator distills new memory at close — Opportunity 11 brings the pull-not-push half into the runtime today). Rule joins the default `template_sets` for all package-tier specialists; opt-out allowed for tiny pre-scripted specialists if measurements show no benefit. Sequenced Phase 1 — independent, reversible, immediate token-budget win.
+- **D26 — Planner-spec + planning-skill prereq for D23.** Adding `recommended_template` requires: (a) `config/specialists/planner.specialist.json` — extend `output_schema` with `recommended_template: enum(<13 formula names> | 'on-the-run')` (validated against `bd formula list` at runtime); (b) `config/skills/planning/SKILL.md` — teach Pass-1 (epic + root beads) + Pass-2 (annotate each child root bead with `recommended_template`; do **not** materialize step beads at planning time — that's `sp chain review`'s job). **[absorbed D29]** `planning/SKILL.md` includes a "How to write a change-contract" section with 2 worked + 1 anti-example, CoT prefill template, and critique-before-commit pattern (premortem-style). Single PR; both files are package-tier, so direct JSON / Markdown edits per the CLAUDE.md gotcha. **[updated 2026-05-27]** Moved from Phase 3 row 11b to **Phase 0 (bootstrap)** rows 0.b/0.c — Phase 2 Pass-2 planning cannot run without D26 shipped. `config/skills/planning/SKILL.md` does not exist today as canonical (only `.xtrm/skills/default/planning/SKILL.md` deployed mirror); Phase 0 creates the canonical file.
+- **D28 — Skills revamp: `using-specialists-v4` as new canonical (Phase 6).** After Phases 1–5 ship, the discipline has fundamentally changed (`--chain` replaces `--worktree`/`--job`; `sp chain review/approve` is composition gate; `kind:step` is label-as-truth; R-checks fire at dispatch; pull-not-push memory replaces auto-injection; sp epic is decoration-only). v3 was structured around the pre-roadmap mental model — patching it in place produces contradictory text. **v4 is created from scratch as the new canonical**, frontmatter `status: canonical (post-roadmap)`, **written in XML semantic structure** per Anthropic prompt-improving research (action-decision sections as `<workflow>` / `<prohibitions>` / `<smoke-checkpoints>` etc.). v3 is **frozen** with banner `status: legacy — superseded by v4`, preserved for cold-start sessions. Auto-mode mirrors v4. **[absorbed D29]** v4 includes an "Orchestration Discipline" section teaching contract-creation: CoT prefill + 2 worked + 1 anti-example for both root and step contracts; critique-before-commit pattern; explicit reference to the `contract-discipline.md` mandatory rule for the same content from the specialist-emitting side. **v4 is NOT gated on channels v0 or substrate landing** (those are months out, outside this roadmap); channels/substrate-aware surfaces live as a clearly-marked "Future surfaces" section inside v4. Future `using-specialists-v5` is the receiver when channels v0 ships, but it does not block v4.
+- **D29 — Contract-creation discipline (CoT + multishot + critique-before-commit, XML structure).** All contract creators (planner Pass-1, orchestrator-as-specialist spawning follow-ups, executor spawning `discovered-from` beads, overthinker opening cleanup beads, Claude Code hook on `bd create`) must follow a uniform discipline when authoring change-contracts (root) or step-contracts (step beads). Rationale: contract quality is the highest-leverage point in the system — substrate §6.4 dispatcher refuses under-specified contracts; better contracts upfront = fewer refusal round-trips = faster chains end-to-end. The discipline has three components: **(a) chain-of-thought prefill** — draft contract inside `<thinking>` tags before commit, focusing on negative-space (NON_GOALS), falsifiable VALIDATION, glob-vs-file-list SCOPE; **(b) multishot in the meta-prompt** — 2 worked examples + 1 anti-example of common failure modes (e.g., "SCOPE glob too wide → matched 10 chains in dispatcher", "VALIDATION 'looks good' → unverifiable"); **(c) critique-before-commit** (premortem-style, Anthropic published pattern) — ask "what's WRONG with this draft" before committing, not "is this draft good". The discipline is **absorbed into existing items**, no new opportunity required: D26 planning skill (Phase 0), §4 Claude hook output (Phase 1), new mandatory rule `config/mandatory-rules/contract-discipline.md` (Phase 1, ~50 lines, wired into `template_sets` of the ~5 contract-creating specialists), D28 v4 SKILL Orchestration Discipline section (Phase 6). Substrate-aligned measurement: `dispatcher_refusal_rate` + `contract_revision_count` + `executor_clarification_request_count` are all queryable from existing observability tables; A/B compare pre/post Phase 1 ship to validate the discipline pays off.
+- **D30 — XML-structured contracts (Opportunity 12).** Root and step bead contracts move from markdown-with-headers (today: `PROBLEM:` / `SCOPE:` / etc.) to **XML semantic tags inside the bd description text** (`<change-contract>` for root, `<step-contract>` for step). Three rationales: (1) substrate §6.4 Stage-1 validator (when it lands) parses XML deterministically — markdown-header-parsing is fragile (header level confusion, typos, ordering); (2) dispatcher `<scope>` lookup deterministic for matcher rules and scope-collision detection; (3) compliance research (Anthropic) shows LLM consumers (specialists reading the contract as task context) parse XML more reliably than markdown headers. **Final outputs of specialists remain JSON** (reviewer verdict, code-sanity, etc.) — consumed by orchestrator code via existing schema validators. **Channel messages (channels.md) remain JSON** — `body_json` discriminated-union per spec. **XML applies only to bd contract descriptions and to specialist task_template scaffolding (system_prompt stays free-form).** New beads (post-§4-hook ship) are XML; existing beads stay markdown (no retrofit). The 13 chain template `.formula.json` step.description fields are retrofitted once (~14 file edit). Sequenced Phase 3 as **Opportunity 12** (parallelizable, ~2 E-D-E / ~few hours wall-clock auto-mode). Substrate migration: `<change-contract>` ↔ substrate's contract row with same tag names — rename pass, no semantic transform.
+- **D27 — Memory injection: push → pull (Opportunity 11).** Eliminate the runner-time auto-injection of `bd prime` + `.xtrm/memory.md` (~3.8k token irrelevant for most tasks per memory `bd-prime-context-overhead`). Replace with mandatory rule `config/mandatory-rules/memory-recall.md` that teaches specialists to query `bd memories <keyword>` / `bd recall <key>` scoped to their bead at startup and before key decisions. **[absorbed D28-XML]** The mandatory rule is written in XML semantic tags (`<at-startup>`, `<before-decisions>`, `<keyword-derivation>`, `<bd-prime-prohibition>`) for compliance per Anthropic prompt-improving research. Reads forward to **substrate §10.2 memory-as-capability** (memory-curator role eliminated; every participant carries the memory-query extension; chain coordinator distills new memory at close — Opportunity 11 brings the pull-not-push half into the runtime today). Rule joins the default `template_sets` for all package-tier specialists; opt-out allowed for tiny pre-scripted specialists if measurements show no benefit. Sequenced Phase 1 — independent, reversible, immediate token-budget win.
 
 **[absorbed] Chain ≡ bd `molecule` mental model.** Where this audit speaks of "chain identity," the concrete bd realization is a **molecule**: `bd mol pour <formula>` creates an `issue_type=molecule` parent with one child bead per formula step (`parent-child` edges; `blocks` edges between siblings per `needs`). An **epic** is the *organizational parent above chains* — `--type=epic` + `--parent` holding multiple chain-molecules for one PRD/initiative. Nesting: top epic (organizational) → chain-molecule (per root issue) → step beads. Quick-chain variant: bare molecule with no organizational epic. Ultra-quick single-shot: a lone task bead (READ_ONLY only). Substrate migration mapping: organizational epic → container `kind: epic`; chain-molecule → container `kind: chain`; molecule's root child → substrate root issue; step beads → step issues (`parent-child`/`validates` edges pre-populate the step relationship). The bridge value: data is already substrate-shaped; migration is a rename pass. See §13 for the 13 evidence-backed formula files.
 
@@ -160,7 +162,7 @@ A1/A2/A3 are addressed by `xtrm-h9hqg` (§0 #6). A4/A5/A6 remain friction-audit-
 
 ---
 
-## 3. Substrate-aligned patch roadmap (the eleven opportunities)
+## 3. Substrate-aligned patch roadmap (the twelve opportunities)
 
 Each opportunity (a) is implementable without the substrate daemon or `containers` table, (b) survives into rev-9 without rework, (c) closes a friction (§2) and/or removes an asymmetry (§1.2). The orthogonal layers (§4/§5/§6) sit at different layers and are described separately.
 
@@ -179,8 +181,9 @@ Each opportunity (a) is implementable without the substrate daemon or `container
 | 9 | Composition-nudge YAML — **[adjusted: external selection-config, not formula sections]** `applies_when` is not a `bd formula` field (silently dropped by the bd binary); the nudge matcher lives in a separate selection-config file consumed by §4 hook + `sp chain review`. One matcher language across the system, applied at the selection layer (substrate §6.9.5 L1 nudges are a lookup table at the composition gate, not part of any template). | B2 | — | §6.9.5 L1 nudges (selection layer) | 1 day |
 | **10 [absorbed]** | **`--chain <molecule-id>` redesign: deprecate `--worktree` and `--job`; chain-identity-driven dispatch with implicit worktree provisioning for write-capable specialists + cwd dispatch for READ_ONLY single-shot; write-capable WITHOUT `--chain` is REFUSED (closes existing safety hole where default cwd dispatch could write to master).** Verbs use the molecule id as the chain handle. | A4, C1, prevents R1/R2 entirely | **1 + 2 + 6** | **§6.9.5 + §11.1 dispatch surface (1:1 with `sb dispatch --container <id>`); workspace-identity-internal commitment (§0 D21 / handoff)** | **2 days** |
 | **11 [absorbed]** | **Pull-not-push memory recall: eliminate runner-time auto-injection of `bd prime` + `.xtrm/memory.md` (~3.8k token); replace with mandatory rule `memory-recall.md` teaching specialists to query `bd memories <keyword>` / `bd recall <key>` scoped to their bead.** Wins ~3.8k/spawn × 8–15 dispatches/session = 30–60k token budget freed per session. | new D7 (memory-injection waste; memories `bd-prime-context-overhead`, `specialist-runner-injects-xtrm-memory-md-bd-prime`) | — (philosophical alignment) | **substrate §10.2 memory-as-capability (memory-curator role eliminated; participants carry memory-query extension; chain coordinator distills at close)** | **1 day** |
+| **12 [absorbed]** | **XML-structured contracts everywhere it pays off**: root beads use `<change-contract>` XML in `bd` description (created by §4 hook + planner); step beads use `<step-contract>` XML (created by §4 hook + chain-template pour + `sp chain insert`); 13 chain-template `.formula.json` step.description retrofit (one-time edit); package-tier specialist `task_template` scaffolding XML (system_prompt stays free-form). **Final outputs stay JSON; channel messages stay JSON** — XML applies only to contracts + task scaffolding. | new D8 (markdown-header-parsing fragility); enables D29 discipline measurement | — (alignment) | **substrate §6.4 Stage-1 validator parses XML natively; `<change-contract>` ↔ substrate contract row is rename pass** | **2 days** |
 
-**Total ~13 days for Opportunities 1–11.** Sequencing in §10.
+**Total ~15 days for Opportunities 1–12.** Sequencing in §10.
 
 ### 3.2 Per-opportunity detail
 
@@ -303,6 +306,64 @@ Closes Asymmetries **1 + 2 + 6** by inversion (any specialist can dispatch first
 
 **Sequenced Phase 1.** Independent, reversible (re-add the injection), measurable A/B in 2–3 sessions.
 
+**Opportunity 12 [absorbed] — XML-structured contracts (Phase 3).**
+
+**Problem today.** Root and step bead contracts are markdown-with-headers (`PROBLEM:` / `SCOPE:` / etc.). Two costs: (1) the §6.4 Stage-1 validator (when substrate lands) has to parse this fragile shape — header-level confusion, typos, ordering — to confirm required fields are present and SCOPE matches dispatcher rules; (2) LLM consumers (specialists reading the contract as task context) parse XML semantic tags more reliably than markdown headers per Anthropic prompt-improving research (memory `prompt-improving-skill`).
+
+**Patch.** Move contracts to XML semantic tags inside the bd description text. Three rules of scope:
+
+- **What goes XML:** bd contract descriptions (`<change-contract>` for root, `<step-contract>` for step), specialist `task_template` scaffolding (the per-call task block, not the system_prompt which stays free-form for model flexibility).
+- **What stays JSON:** final outputs of specialists (reviewer verdict, code-sanity verdict, planner Pass-2 `recommended_template`, etc.) — consumed by orchestrator code via existing schema validators; channel messages (`body_json` discriminated-union per channels.md §5.1).
+- **What stays markdown:** SKILL.md files (human-readable; though XML scaffold inside specific action-sections is allowed per D28 v4), system_prompt fields, free-form notes.
+
+**Concrete contract shape:**
+
+```xml
+<change-contract issue-id="forge-eorh.74" type="bug" scrutiny="high">
+  <problem>Auth retry leaks credentials in logs at line src/auth/retry.ts:84</problem>
+  <scope>
+    <path>src/auth/retry.ts</path>
+    <path>src/auth/__tests__/retry.test.ts</path>
+  </scope>
+  <non-goals>
+    <item>Refactor auth subsystem more broadly</item>
+    <item>Change retry semantics (backoff/limits)</item>
+  </non-goals>
+  <validation>
+    <criterion>tests/auth/retry.test.ts passes new test case "credential not in error message"</criterion>
+    <criterion>grep -r "console.log.*token" src/auth/ returns zero matches</criterion>
+  </validation>
+  <acceptance>
+    <criterion>reviewer PASS verdict on the chain</criterion>
+    <criterion>code-sanity OK verdict</criterion>
+  </acceptance>
+</change-contract>
+```
+
+Step contract analogous shape: `<step-contract>` with `<mandate>` / `<inputs>` / `<outputs>` / `<scope>` / `<non-goals>` children.
+
+**Scope of edits.**
+- §4 Claude hook (`bd-create-hint.sh`) emits XML contract scaffold at `bd create` time (new beads only).
+- Opp 5 step-bead conventions: the `kind:step` template is `<step-contract>` XML.
+- 13 chain template `.formula.json` step.description fields retrofitted to XML (one-time, ~13 file edit).
+- ~14 package-tier specialist `task_template` fields wrapped in XML scaffold (`<task>` with `<inputs>` / `<process>` / `<output-contract>`).
+- Existing beads stay markdown — no retrofit. Migration is forward-only.
+
+**Why.** (1) Substrate-aligned: §6.4 Stage-1 validator parses XML deterministically — no regex-on-markdown fragility. (2) Substrate migration: `<change-contract>` ↔ substrate's contract row with the same tag names is a rename pass, not a content transform. (3) LLM compliance: specialists reading a contract as task context produce higher-quality work per the Anthropic research.
+
+**Why NOT extend to channels / final outputs.** Channels are schema-validated machine messages; JSON discriminated-union (channels.md §5) gives strict shape without parsing fragility — XML would add complexity without benefit. Final outputs of specialists are consumed by orchestrator code via existing extractors (`extractReleaseDraft`, `finalize.ts` verdict regex); switching to XML breaks them. Hybrid is right: XML for human-and-LLM-read text (contracts, prompts), JSON for machine-to-machine schemas.
+
+**Measurement.** Substrate-aligned A/B via observability tables:
+- `dispatcher_refusal_rate` (when §6.4 Stage-1 validator lands)
+- `contract_revision_count` (how many edits between bd create and first successful dispatch)
+- `executor_clarification_request_count` (specialists stopping to ask "what does SCOPE mean here?")
+
+Pre-Phase-3 vs post-Phase-3 ship.
+
+**Cost: ~2 E-D-E (~few hours wall-clock auto-mode, parallelizable with other Phase 3 items).** Hook output extension, 13 chain template edits, ~14 specialist task_template wraps. All file-disjoint.
+
+**Reads forward.** Substrate §6.4 Stage-1 validator parses XML natively; §6.9.2 contract row uses the same tag schema. When substrate lands, the migration is `bd description XML` → `substrate contract row XML` — same content, attached to a container row instead of a bd issue.
+
 ---
 
 ## 4. Orthogonal layer A — Claude Code hook on `bd create`
@@ -351,6 +412,35 @@ Recommended dispatch:
   sp chain review forge-eorh.74      # composition gate (Opp 4)
   sp run debugger --bead forge-eorh.74 --keep-alive --background
 Registry version: registry@2026-05-26 (12m ago; `specialists list --full` to refresh)
+
+Contract scaffold (XML per Opp 12 / D30; CoT prefill per D29):
+  <change-contract issue-id="forge-eorh.74" type="bug" scrutiny="high">
+    <!-- CoT: before filling these, ask: what's WRONG with my first draft?
+         (premortem-style critique-before-commit per D29) -->
+    <problem>...</problem>
+    <scope>
+      <!-- prefer file-list over glob — dispatcher matcher is deterministic -->
+      <path>...</path>
+    </scope>
+    <non-goals>
+      <!-- explicit negative-space; substrate §6.4 scope-collision uses this -->
+      <item>...</item>
+    </non-goals>
+    <validation>
+      <!-- FALSIFIABLE — "tests X pass" not "looks good" -->
+      <criterion>...</criterion>
+    </validation>
+    <acceptance>
+      <criterion>reviewer PASS verdict</criterion>
+      <criterion>code-sanity OK</criterion>
+    </acceptance>
+  </change-contract>
+
+Example of well-written change-contract (multishot, 1 of 2):
+  see ~/.config/specialists/contract-examples/change-contract-bugfix.xml
+
+Anti-example (what NOT to do):
+  see ~/.config/specialists/contract-examples/change-contract-anti-vague.xml
 ```
 
 ### 4.5 What this closes
@@ -594,7 +684,7 @@ After Phase 0: the operator has the chain templates installed, the planner knows
 | 8 | sp-runtime hint blocks (§5.1/5.2/5.3) | §5 | 1d | Opp 8 |
 | 9 | **Opp 10 — `--chain <molecule-id>` redesign** (deprecate `--worktree`/`--job` with 1-release grace) | §3.2 | 2d | Opp 1+2 (lease) + Opp 3 (mol) + Opp 6 (naming) |
 
-### Phase 3 — Naming, conventions, environment (~3 days)
+### Phase 3 — Naming, conventions, environment + XML contracts + contract discipline (~5.5 days)
 
 | # | Item | Source | Cost |
 |---|---|---|---|
@@ -603,6 +693,8 @@ After Phase 0: the operator has the chain templates installed, the planner knows
 | 12 | Opp 7 — `--accept-stale-base --reason` (+ grace period) | §3.2 | 0.5d |
 | 13 | Opp 9 — composition-nudge external selection-config | §3.2 | 1d |
 | 14 | Reviewer checks R3/R6/R7 (build full; survive Opp 10), R1/R2/R4 (warn; retire with `--job`) | §7 / §F | 1d |
+| 15 | **Opp 12 — XML-structured contracts** (§4 hook XML scaffold + 13 chain-template `.formula.json` retrofit + ~14 specialist `task_template` XML wrap; Opp 5 `kind:step` template = `<step-contract>` XML) | §3.2 Opp 12 / D30 | 2d |
+| 15b | **New mandatory rule `config/mandatory-rules/contract-discipline.md`** (~50 lines, XML structure): CoT prefill + 2 worked + 1 anti-example for change-contract and step-contract authoring + critique-before-commit (premortem). Wire into `template_sets` of: planner, executor (for `discovered-from` follow-ups), overthinker (for cleanup beads), debugger (for diagnostic beads), code-sanity (for blockers spawning new work). | §0 D29 | 0.5d |
 
 ### Phase 4 — `sp epic` decoration rewrite (~2 days, see §12)
 
@@ -645,16 +737,16 @@ E-D-E = engineer-day-equivalent (budget reasoning). Wall-clock in specialists-au
 
 | Phase | E-D-E | Cumul. E-D-E | Auto-mode wall-clock | Key unlock |
 |---|---|---|---|---|
-| 0 | 1 | 1 | ~1–2h | Bootstrap: chain templates installed; planner spec + planning skill teach `recommended_template`; manual-chain-discipline verified current |
-| 1 | 4 | 5 | ~half overnight (4 parallel) | Pre-dispatch hints; READ_ONLY decoupled from keep-alive; specialists pull scoped memory instead of paying full dump |
+| 0 | 1 | 1 | ~1–2h | Bootstrap: chain templates installed; planner spec + planning skill teach `recommended_template` + contract-creation discipline (D29); manual-chain-discipline verified current |
+| 1 | 4 | 5 | ~half overnight (4 parallel) | Pre-dispatch hints; READ_ONLY decoupled from keep-alive; specialists pull scoped memory instead of paying full dump; new mandatory rules in XML |
 | 2 | 5 | 10 | ~one overnight (sequential dep chain) | Composition gate explicit; chain state queryable; `--chain` is the single chain-identity verb; `--worktree`/`--job` deprecated |
-| 3 | 3 | 13 | ~half overnight (5 parallel) | Naming aligned; conventions teach the right shape; reviewer mistakes caught |
-| 4 | 2 | 15 | ~few hours | `sp epic` blocker friction eliminated; ~500 LOC removed |
-| 5 | 1 | 16 | ~few hours (parallel) | h9hqg already done; B-A4/A5/A6 + sp merge diagnostic + `xt init` auto-run |
-| 6 | 2 | 18 | ~half day (sequential coherence) | Skills revamp: v4 is the new canonical (post-roadmap discipline), auto-mode mirrors v4 with smoke-checkpoint cadence, v3 frozen as legacy reference |
-| 7 | 3 | 21 | ~few hours (3 parallel) | Other gate roles get pre-dispatch checks |
+| 3 | 5.5 | 15.5 | ~one overnight (5 parallel + 2 absorbed) | Naming aligned; conventions teach the right shape; reviewer mistakes caught; XML contracts + contract-discipline mandatory rule live (Opp 12 / D29) |
+| 4 | 2 | 17.5 | ~few hours | `sp epic` blocker friction eliminated; ~500 LOC removed |
+| 5 | 1 | 18.5 | ~few hours (parallel) | h9hqg already done; B-A4/A5/A6 + sp merge diagnostic + `xt init` auto-run |
+| 6 | 2 | 20.5 | ~half day (sequential coherence) | Skills revamp: v4 is the new canonical (XML semantic + CoT+multishot for contracts absorbed), auto-mode mirrors v4, v3 frozen as legacy |
+| 7 | 3 | 23.5 | ~few hours (3 parallel) | Other gate roles get pre-dispatch checks |
 
-**Budget reasoning:** ~16 E-D-E for Phases 0–5 (bootstrap + core runtime + sp epic decoration + per-repo bootstrap), Phase 6 finalizes the operator-facing documentation, Phase 7 as polish. **Wall-clock reality in auto-mode: ~3–4 days end-to-end** (or one long overnight + a day of supervised checkpoints), driven by parallelizable phases (1, 3, 5, 7) running concurrently in disjoint worktrees and sequential phases (0, 2, 4, 6) chaining quickly because each opportunity is hours-of-LLM, not days-of-human.
+**Budget reasoning:** ~18.5 E-D-E for Phases 0–5 (bootstrap + core runtime + XML contracts + sp epic decoration + per-repo bootstrap), Phase 6 finalizes the operator-facing documentation, Phase 7 as polish. **Wall-clock reality in auto-mode: ~3–4 days end-to-end** (or one long overnight + a day of supervised checkpoints), driven by parallelizable phases (1, 3, 5, 7) running concurrently in disjoint worktrees and sequential phases (0, 2, 4, 6) chaining quickly because each opportunity is hours-of-LLM, not days-of-human.
 
 ### 10.7 What this rollout does NOT do (honest scope)
 
@@ -681,6 +773,8 @@ A1 → §6/h9hqg + §5.5 diag. A2/A3 → h9hqg (hooksPath cases). A4 → §6 B-A
 Every friction is addressed by ≥1 patch; every asymmetry removed by ≥1 opportunity. If a planning iteration drops a patch, this matrix shows what becomes uncovered.
 
 **[absorbed] New friction row D7 — memory injection waste.** Spawn auto-injects `bd prime` + `.xtrm/memory.md` dump (~3.8k token) regardless of task scope; small specialists (code-sanity, obligations-scanner) pay disproportionate context tax. Memories: `bd-prime-context-overhead`, `specialist-runner-injects-xtrm-memory-md-bd-prime`. Closed by Opp 11 (pull-not-push memory recall via mandatory rule).
+
+**[absorbed] New friction row D8 — markdown-header contract fragility.** Today's contracts use markdown headers (`PROBLEM:`/`SCOPE:`/...) — fragile to header-level confusion, typos, ordering. Substrate §6.4 Stage-1 validator needs deterministic shape; LLM consumers parse XML semantic tags more reliably (Anthropic prompt-improving research). Closed by Opp 12 (XML-structured contracts via §4 hook + chain templates + step-bead conventions + specialist task_template scaffolding). Final outputs + channel messages stay JSON per channels.md design — XML applies only where humans-and-LLMs both read the content.
 
 ---
 
