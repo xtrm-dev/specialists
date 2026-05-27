@@ -175,6 +175,7 @@ L'orchestratore non può essere meno pigro se il sistema non gli dice cosa è ap
 | **D4** | Il messaggio di successo di `sp run` è minimale — l'operatore non vede modello usato, scrutiny risolto, durata attesa, o "prossimo step raccomandato" | Inferito dall'assenza nei report di pattern "dopo che `sp run` ha mostrato ..." | Un messaggio strutturato di hint post-dispatch |
 | **D5** | Dopo `sp result <id>` l'operatore non riceve un "suggerimento prossimo step" basato sul contenuto del risultato (PASS → prossimo gate; PARTIAL → resume executor; FAIL → escalate) | Stesso | Formattatore di risultati consapevole del workflow |
 | **D6** | Nessuna superficie che mostri "stato corrente della chain + prossimo dispatch atteso" — l'operatore porta lo stato in testa | SKILL.md cerca di insegnare questo; la realtà è che l'operatore dimentica tra un sonno e l'altro | Un comando `sp chain <bead>` o vista timeline equivalente |
+| **D7** | Lo spawn dello specialista auto-inietta `bd prime` + dump di `.xtrm/memory.md` (~3.8k token) indipendentemente dallo scope del task; la maggior parte delle memorie è irrilevante al bead corrente; gli specialisti piccoli (code-sanity, obligations-scanner) pagano una tassa di context sproporzionata | Memorie `bd-prime-context-overhead`, `specialist-runner-injects-xtrm-memory-md-bd-prime` | Pull-not-push: l'agente interroga `bd memories <keyword>` scoped al proprio bead. Si chiude allo stesso modo in cui lo fa il principio knowledge-scope del substrato — le query ricostruiscono la slice. **Opportunità 11 / D27.** |
 
 ---
 
@@ -203,7 +204,7 @@ Quattro primitive bd che ho sottovalutato nel primo passaggio di review supporta
 
 Queste sono verificate con `bd <cmd> --help` rispetto alla versione corrente di bd. Le opportunità qui sotto le riutilizzano esplicitamente.
 
-### 3.1 Le dieci opportunità — tabella riassuntiva
+### 3.1 Le undici opportunità — tabella riassuntiva
 
 | # | Patch | primitiva bd riutilizzata | Attrito chiuso | Asimmetria rimossa | Si proietta nel substrato | Costo |
 |---|---|---|---|---|---|---|
@@ -216,8 +217,9 @@ Queste sono verificate con `bd <cmd> --help` rispetto alla versione corrente di 
 | 8 | Evento `step_completed` con payload `next_step_recommendation` (letto dai metadata mol dell'Opportunità #3) | `bd mol` (per lookup prossimo-step) | D4, D5 | ponte verso "il daemon avanza" | §3 daemon-advances-on-agent_end (stesso payload) | 1 giorno |
 | 9 | Regole di composition-nudge espresse nella sintassi `bd formula` (estende il linguaggio esistente; stesso matcher tra `bd formula applies_when` e ogni nuova regola nudge) | `bd formula` | B2 | — | §6.9.5 L1 nudges (un matcher in tutto il sistema) | 1 giorno |
 | **10 (NUOVO)** | **Riprogettazione `--chain <molecule-id>`: deprecare `--worktree` e `--job`; dispatch basato su identità della chain con provisioning implicito del worktree per specialisti write-capable + dispatch cwd per single-shot READ_ONLY; write-capable SENZA `--chain` viene RIFIUTATO (chiude l'attuale buco di sicurezza dove il dispatch predefinito su cwd poteva scrivere su master)** | `bd merge-slot` (via #1+#2), `bd --parent` (creazione chain-molecule) | A4, C1, previene R1/R2 interamente | **1 + 2 + 6** | **§6.9.5 + §11.1 superficie di dispatch (1:1 con `sb dispatch`)** | **2 giorni** |
+| **11 (NUOVO)** | **Pull-not-push memory recall: eliminare l'iniezione automatica di `bd prime` + `.xtrm/memory.md` allo spawn (~3.8k token irrilevanti per la maggior parte dei task); sostituire con una mandatory rule che insegna allo specialista a interrogare `bd memories <keyword>` / `bd recall <key>` in base al proprio scope** | `bd memories`, `bd recall` (già esistenti) | nuovo: spreco di context (D27 nel ledger; memoria `bd-prime-context-overhead`) | — (allineamento filosofico con substrate) | **substrate knowledge-scope principle ("facts with metadata; queries reconstruct the slice") — il curator al seed start interroga in base allo scope, non pre-carica tutto** | **1 giorno** |
 
-**Totale: ~12 giorni di lavoro concentrato**, ma il riutilizzo delle primitive bd significa che molte opportunità sono thin glue di integrazione (un giorno ciascuna) piuttosto che nuova infrastruttura. Sequenziamento in §10.
+**Totale: ~13 giorni di lavoro concentrato**, ma il riutilizzo delle primitive bd significa che molte opportunità sono thin glue di integrazione (un giorno ciascuna) piuttosto che nuova infrastruttura. Sequenziamento in §10.
 
 ### 3.2 Dettaglio per opportunità
 
@@ -483,6 +485,34 @@ sp run executor --bead X                   # no flag, write-capable
 Taglio netto dopo il periodo di grazia: `--worktree`, `--job`, `--force-job` rimossi dal codice.
 
 **Costo di implementazione: ~2 giorni.** Include la nuova gestione dei flag, gli avvisi di deprecazione, il flusso di auto-creazione integrato con Opportunity 1+2 (merge-slot) + Opportunity 3 (mol pour) + Opportunity 6 (chain-derived worktree naming).
+
+#### Opportunità 11 (NUOVA) — Pull-not-push memory recall via mandatory rule
+
+**Problema oggi.** `runner.ts` inietta `.xtrm/memory.md` + l'output di `bd prime` al spawn di OGNI specialista — ~3.8k token (memorie `specialist-runner-injects-xtrm-memory-md-bd-prime`, `bd-prime-context-overhead`). La maggior parte delle memorie iniettate è irrilevante allo scope del task corrente; lo specialista paga il context cost senza beneficio, e i task piccoli (code-sanity, obligations-scanner, doc-sync) sono particolarmente penalizzati perché la percentuale di memorie irrilevanti è altissima rispetto al loro budget naturale.
+
+**Ora (cambio runtime).**
+
+1. **Rimuovere** dal prompt-builder di `runner.ts` l'iniezione automatica di `bd prime` + dump completo di `.xtrm/memory.md`.
+2. **Aggiungere** una nuova mandatory rule `config/mandatory-rules/memory-recall.md` (~30 righe) che insegna allo specialista:
+   - **All'avvio**, identifica 2–4 keyword dal proprio bead (PROBLEM/SCOPE/keywords del titolo) e esegui `bd memories <keyword>` per ciascuna. Le keyword tipiche includono il nome del sottosistema toccato, il tipo di operazione (merge/migration/auth/...), eventuali nomi di file critici.
+   - **Prima di decisioni rilevanti** (scelta di approccio, refactor che cambia API, esecuzione di operazione non banale), esegui un secondo round mirato sulla decisione in arrivo.
+   - **`bd recall <key>`** per recuperare il payload completo di una memoria specifica vista in un risultato `bd memories`.
+   - **Non** scorrere l'intero output di `bd memories` se >10 risultati — affina la keyword.
+   - **Non** invocare `bd prime` (è un comando session-bootstrap, non per specialist runtime).
+3. **Wiring**: la rule entra nel `template_sets` di default per tutti gli specialisti package-tier (in `config/specialists/*.specialist.json` mandatory_rules). Specialisti molto piccoli e pre-scriptati (`obligations-scanner`, `changelog-drafter`) possono opt-out esplicito se misurazioni mostrano che non beneficiano.
+
+**Perché.** Allineamento filosofico con substrate's knowledge-scope principle (memoria `substrate-knowledge-scope-principle`): *"facts with metadata; queries reconstruct the slice."* substrate non pre-carica memorie — il curator al seed start le interroga *in base allo scope*. Opportunità 11 porta la stessa disciplina nel runtime oggi: la conoscenza è già queryable (bd memories indicizza per fulltext), basta smettere di fare il push indiscriminato e insegnare il pull mirato.
+
+**Risparmio atteso.** ~3.8k token × ogni spawn specialista. Su una sessione tipica con 8–15 dispatch, si liberano 30–60k token di budget context che possono essere spesi su evidence reale (codice, diff, risultati di tool). Per specialisti haiku/mini il vantaggio relativo è massimo (3.8k su una window da 200k = 1.9%, ma su un task naturalmente piccolo da 20k è il 19%).
+
+**Rischio mitigato.** "Lo specialista potrebbe non chiamare `bd memories` e ricadere in bug noti" — la mandatory rule è strutturata come *obbligo all'avvio* (non opzionale), con esempi concreti. Le rule mandatory entrano nel system prompt in coda, dove la compliance è alta. Misurabile via `bd memories <keyword>` tool-call rate negli specialist_events di observability.db dopo il rollout — gate review se rate <80% sui task non-trivial.
+
+**Legge in avanti.** substrate §10 query layer + knowledge-scope principle. Quando substrate arriva, il dispatcher (§6.4) può precomputare un `memory_pack` mirato per ogni step-issue (come Graphify/TaskPrep faceva — memoria `graphify-taskprep-design-session`); l'evoluzione naturale è dispatcher-injected scoped pack invece di agent-queried pull. Ma il pull-not-push di oggi è il bridge corretto e già allineato — il dispatcher futuro non re-introduce il push indiscriminato.
+
+**Costo: ~1 giorno.** Rimozione iniezione runtime (~30 LOC), nuova mandatory-rule file (~30 righe), aggiunta a template_sets dei ~14 specialisti package-tier (edit JSON diretto, package-tier non passa per sp edit per il gotcha CLAUDE.md). Niente nuove API, niente nuova infrastruttura — solo politica espressa come rule + rimozione di codice runtime.
+
+**Sequenziamento.** Fase 1 (§10.1): è un win immediato di token-budget che non dipende da nessun'altra opportunità ed è completamente reversibile (rimuovi la rule, riaggiungi l'iniezione). Misurabile con A/B in 2–3 sessioni.
+
 ---
 
 ## 4. Strato ortogonale A — Hook Claude Code su `bd create`
@@ -901,8 +931,9 @@ Lista ordinata singola che combina le opportunità di allineamento (§3) con i l
 | 2 | **Opportunità 1+2 (fuse) — bd merge-slot lease + binding percorso READ_ONLY** | §3.2 | 2 giorni | Rimuove le asimmetrie 2+4+6 in un'unica integrazione usando primitive bd esistenti; chiude il coupling più costoso |
 | 3 | Opportunità 8 — evento `step_completed` con raccomandazione prossimo passo | §3.2 | 1 giorno | Sblocca le superfici di suggerimento §5.1/§5.2; fondazionale per la Fase 2 |
 | 4 | Hook di igiene sp ps §5.6 (nudge Stop hook + PreToolUse su bd close + banner periodico) | §5.6 | 1 giorno | Rende autogestita la disciplina di keep-alive dell'operatore; preserva il valore del keep-alive |
+| 5 | **Opportunità 11 — Pull-not-push memory recall** (rimozione iniezione bd prime/.xtrm/memory.md al spawn + nuova mandatory rule `memory-recall.md` + wiring template_sets) | §3.2 / D27 | 1 giorno | Win immediato di token-budget (~3.8k token recuperati per spawn × 8–15 dispatch/sessione = 30–60k token liberati); reversibile; indipendente da altre opportunità; misurabile via tool-call rate di `bd memories` post-rollout |
 
-Dopo la Fase 1: l'orchestrator riceve suggerimenti contestuali al momento giusto; reviewer/code-sanity smettono di tenere in ostaggio le sessioni pi dell'esecutore; le raccomandazioni del prossimo passo fluiscono attraverso lo stream di eventi; i nudge di igiene prevengono leak silenziosi di risorse.
+Dopo la Fase 1: l'orchestrator riceve suggerimenti contestuali al momento giusto; reviewer/code-sanity smettono di tenere in ostaggio le sessioni pi dell'esecutore; le raccomandazioni del prossimo passo fluiscono attraverso lo stream di eventi; i nudge di igiene prevengono leak silenziosi di risorse; gli specialisti tirano (pull) le memorie pertinenti invece di pagare il costo di context per il dump completo.
 
 ### 10.2 Fase 2 — Riprogettazione chain (il cambiamento strutturale sostanziale, ~5 giorni)
 
@@ -956,14 +987,14 @@ R1–R8 era specifico del revisore. Dopo il rilascio e la validazione, generaliz
 
 | Fase | Giorni | Cumulativo | Sblocco chiave |
 |---|---|---|---|
-| 1 — Visibilità, disaccoppiamento, igiene | 4 | 4 | L'orchestrator ottiene hint pre-dispatch; READ_ONLY disaccoppia; disciplina keep-alive auto-applicata |
-| 2 — Ridisegno catena | 5 | 9 | --chain è il singolo verbo; stato catena interrogabile; --worktree/--job deprecati |
-| 3 — Convenzioni ed ergonomia | 3 | 12 | Step bead strutturalmente puliti; errori revisore prevenuti; i nudges sollevano questioni di composizione |
-| 4 — Decorazione sp epic | 2 | 14 | Attrito bloccante sp epic eliminato; ~500 righe rimosse |
-| 5 — Bootstrap repo | — | — | Tracciato separatamente (`xtrm-h9hqg`); in parallelo; non bloccante |
-| 6 — Generalizzazione pre-dispatch | 3 | 17 | Altri ruoli gate ottengono controlli pre-dispatch |
+| 1 — Visibilità, disaccoppiamento, igiene, memory pull | 5 | 5 | L'orchestrator ottiene hint pre-dispatch; READ_ONLY disaccoppia; disciplina keep-alive auto-applicata; specialisti tirano memorie scoped invece di pagare dump completo |
+| 2 — Ridisegno catena | 5 | 10 | --chain è il singolo verbo; stato catena interrogabile; --worktree/--job deprecati |
+| 3 — Convenzioni ed ergonomia | 3,5 | 13,5 | Step bead strutturalmente puliti; errori revisore prevenuti; i nudges sollevano questioni di composizione; planner spec + planning skill insegnano `recommended_template` |
+| 4 — Decorazione sp epic | 2 | 15,5 | Attrito bloccante sp epic eliminato; ~500 righe rimosse |
+| 5 — Bootstrap repo | 1 | 16,5 | h9hqg già chiuso (B-A1/A2/A3); B-A4/A5/A6 + diagnostica sp merge + auto-run su xt init |
+| 6 — Generalizzazione pre-dispatch | 3 | 19,5 | Altri ruoli gate ottengono controlli pre-dispatch |
 
-**~14 giorni per le Fasi 1–4** (lavoro core sul runtime specialist), più Fase 5 in parallelo sotto xtrm-tools, più Fase 6 dopo come rifinitura.
+**~15,5 giorni per le Fasi 1–4** (lavoro core sul runtime specialist), più Fase 5 in parte già fatta sotto xtrm-tools + ~1 giorno friction-audit-side, più Fase 6 dopo come rifinitura.
 
 ### 10.8 Cosa questo rollout NON fa (scope onesto)
 
@@ -1012,6 +1043,7 @@ Tutte le domande precedentemente aperte tra le iterazioni di design sono ora ris
 | D24 | Shape v0 di `sp chain <id>` | **read-once, human-viewable + `--json`.** `-f` follow mode deferito al proprio pass di design (repaint naive → flicker, stesso pattern di `sp ps -f` — richiede un piccolo TUI dedicato). Nuovi eventi chain-lifecycle dalle Fasi 1–3 emergono in `sp log` (ogni nuovo event kind ships con il suo `sp log` formatter nello stesso PR — nessun evento ships dark) |
 | D25 | Stato `xtrm-h9hqg` | **CHIUSO** (verificato 2026-05-27 in xtrm-tools: implementato bd auto-stage patch in xt init/update, dependency maintenance checks, modalità sweep `--all-repos`, test, dist smoke). B-A1/A2/A3 fatti; B-A4/A5/A6 rimangono lato friction-audit (Fase 5 riga 17b) |
 | D26 | Prereq planner-spec + planning-skill per D23 | Aggiungere `recommended_template` richiede di toccare: (a) `config/specialists/planner.specialist.json` — estendere output_schema con `recommended_template: enum(<13 nomi formula> \| 'on-the-run')` (validato contro `bd formula list` a runtime); (b) `config/skills/planning/SKILL.md` — insegnare il Pass-2 (annotare ogni bead root figlio con `recommended_template`; NON materializzare step beads al momento del planning — quello è il lavoro di `sp chain review`). Land come singolo PR; entrambi i file sono package-tier, quindi edit JSON / Markdown diretti per il gotcha nel CLAUDE.md. Sequenziato in Fase 3 (§10.3) prima del wiring nudge dell'Opportunità 9 |
+| D27 | Memory injection: push → pull (Opportunità 11) | **ELIMINARE** l'iniezione automatica di `bd prime` + `.xtrm/memory.md` al spawn (~3.8k token irrilevanti). **SOSTITUIRE** con mandatory rule `config/mandatory-rules/memory-recall.md` che insegna allo specialista a interrogare `bd memories <keyword>` / `bd recall <key>` in base al proprio scope all'avvio e prima di decisioni rilevanti. Allineato a substrate knowledge-scope principle ("facts with metadata; queries reconstruct the slice"). Rule entra nel template_sets di default di tutti gli specialisti package-tier; opt-out esplicito ammesso per specialisti pre-scriptati molto piccoli. Sequenziato Fase 1 (§10.1) — win immediato di token-budget, reversibile, indipendente |
 
 ### 11.1 Decisioni operative prima dell'implementazione
 
@@ -1084,6 +1116,7 @@ Per la sessione di pianificazione: mappare ogni tag di attrito alle patch che lo
 | D4 (sp run mute success) | §5.1 post-dispatch hint |
 | D5 (no result next-step suggestion) | §5.2 result-aware hint + Opportunity 8 |
 | D6 (no chain timeline view) | Opportunity 4 (`sp chain` command) + Opportunity 3 (chain shape data) |
+| D7 (memory injection wastes ~3.8k token/spawn — memorie `bd-prime-context-overhead`, `specialist-runner-injects-xtrm-memory-md-bd-prime`) | **Opportunity 11** (pull-not-push memory recall via mandatory rule) |
 
 ### Asimmetria → patch
 
