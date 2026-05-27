@@ -57,7 +57,8 @@ The prior revision left nine open questions (old §11). They are now resolved. T
 - **D23 — `recommended_template` on the planner (§D of the reconciliation).** Pass-2 of the planner annotates each child root bead with `recommended_template: <one of the 13 formula names | on-the-run>`. Validated against live `bd formula list`. Proposal, not materialization — resolved at `sp chain review` / `bd mol pour`, not at planning time. **Prereq (D26)**: edit `config/specialists/planner.specialist.json` output_schema + update `config/skills/planning/SKILL.md` to teach Pass-2 — both required before D23 ships.
 - **D24 — `sp chain <bead>` v0 shape.** Read-once, human-viewable + `--json` flag. `-f` follow mode deferred to a dedicated small-CLI/TUI design pass (naive repaint has the same flicker pattern as `sp ps -f`). **New chain-lifecycle events from Phases 1–3 surface in `sp log`** — every new event kind ships with its `sp log` formatter in the same PR; no event ships dark.
 - **D25 — `xtrm-h9hqg` status.** **CLOSED 2026-05-27** (verified in xtrm-tools: bd auto-stage patch in `xt init`/`xt update`, dependency-maintenance checks, `--all-repos` sweep mode, tests, dist smoke). B-A1/A2/A3 done; B-A4/A5/A6 remain friction-audit-side (Phase 4 row 14).
-- **D26 — Planner-spec + planning-skill prereq for D23.** Adding `recommended_template` requires: (a) `config/specialists/planner.specialist.json` — extend `output_schema` with `recommended_template: enum(<13 formula names> | 'on-the-run')` (validated against `bd formula list` at runtime); (b) `config/skills/planning/SKILL.md` — teach Pass-2 (annotate each child root bead with `recommended_template`; do **not** materialize step beads at planning time — that's `sp chain review`'s job). Single PR; both files are package-tier, so direct JSON / Markdown edits per the CLAUDE.md gotcha. Sequenced in Phase 3 ahead of Opportunity 9 nudge wiring.
+- **D26 — Planner-spec + planning-skill prereq for D23.** Adding `recommended_template` requires: (a) `config/specialists/planner.specialist.json` — extend `output_schema` with `recommended_template: enum(<13 formula names> | 'on-the-run')` (validated against `bd formula list` at runtime); (b) `config/skills/planning/SKILL.md` — teach Pass-2 (annotate each child root bead with `recommended_template`; do **not** materialize step beads at planning time — that's `sp chain review`'s job). Single PR; both files are package-tier, so direct JSON / Markdown edits per the CLAUDE.md gotcha. **[updated 2026-05-27]** Moved from Phase 3 row 11b to **Phase 0 (bootstrap)** rows 0.b/0.c — Phase 2 Pass-2 planning cannot run without D26 shipped, and Phase 0 makes that precondition honest instead of circular. `config/skills/planning/SKILL.md` does not exist today as canonical (only `.xtrm/skills/default/planning/SKILL.md` deployed mirror); Phase 0 creates the canonical file then teaches Pass-2 in it.
+- **D28 — Skills canonical refresh + v4 forward-looking draft (Phase 6).** After all opportunities ship, the operator-facing skills (`using-specialists-v3`, `using-specialists-auto`) drift from reality — they teach the pre-roadmap `--bead`+`--worktree`+`--job` model while the runtime has moved to `--chain <molecule-id>` + `sp chain review/approve/insert` + new mandatory rule for memory + atomic step-bead conventions + R-check survival/dissolution. Phase 6 is a single-PR canonicalization: refresh v3 to reflect what shipped, mirror in auto, and draft `using-specialists-v4` as forward-looking only (channels v0 `verdict`/`finding` pattern + substrate-aware terms). v4 is `status: draft — gated on channels v0 ship + substrate landing`; v3 stays canonical until channels v0 proves out. Skills are the operator's first read; stale skills outweigh stale code in confusion cost.
 - **D27 — Memory injection: push → pull (Opportunity 11).** Eliminate the runner-time auto-injection of `bd prime` + `.xtrm/memory.md` (~3.8k token irrelevant for most tasks per memory `bd-prime-context-overhead`). Replace with mandatory rule `config/mandatory-rules/memory-recall.md` that teaches specialists to query `bd memories <keyword>` / `bd recall <key>` scoped to their bead at startup and before key decisions. Reads forward to **substrate §10.2 memory-as-capability** (memory-curator role eliminated; every participant carries the memory-query extension; chain coordinator distills new memory at close — Opportunity 11 brings the pull-not-push half into the runtime today). Rule joins the default `template_sets` for all package-tier specialists; opt-out allowed for tiny pre-scripted specialists if measurements show no benefit. Sequenced Phase 1 — independent, reversible, immediate token-budget win.
 
 **[absorbed] Chain ≡ bd `molecule` mental model.** Where this audit speaks of "chain identity," the concrete bd realization is a **molecule**: `bd mol pour <formula>` creates an `issue_type=molecule` parent with one child bead per formula step (`parent-child` edges; `blocks` edges between siblings per `needs`). An **epic** is the *organizational parent above chains* — `--type=epic` + `--parent` holding multiple chain-molecules for one PRD/initiative. Nesting: top epic (organizational) → chain-molecule (per root issue) → step beads. Quick-chain variant: bare molecule with no organizational epic. Ultra-quick single-shot: a lone task bead (READ_ONLY only). Substrate migration mapping: organizational epic → container `kind: epic`; chain-molecule → container `kind: chain`; molecule's root child → substrate root issue; step beads → step issues (`parent-child`/`validates` edges pre-populate the step relationship). The bridge value: data is already substrate-shaped; migration is a rename pass. See §13 for the 13 evidence-backed formula files.
@@ -541,6 +542,22 @@ Both are workarounds for absent model: `sp finalize` exists because there's no r
 
 Sequenced by leverage-per-day. **[recalibrated]** The runway (month+, ~10 repos) raises the value of every friction-removing day, so the ordering optimizes for earliest daily-pain relief.
 
+### Phase 0 — Bootstrap (~1 day, operator + 1 small executor chain)
+
+Everything below this phase assumes Phase 0 has shipped. Without it, Phase 2 Pass-2 planning (the `recommended_template` annotation) cannot run, and Phase 1+ executors cannot benefit from the 13 chain-template formulas because `bd formula list` doesn't see them yet. This phase is the honest precondition the plan was missing — moved here from where D26 used to live as Phase 3 row 11b.
+
+| # | Item | Cost | Verify |
+|---|---|---|---|
+| 0.a | Copy `docs/design/chain-templates/*.formula.json` → `~/.beads/formulas/` (eventually shipped via `xt init` per D19; manual for first install) | 0.1d | `bd formula list` shows all 13 |
+| 0.b | Edit `config/specialists/planner.specialist.json` — extend `output_schema` with `recommended_template: enum(<13 formula names> \| 'on-the-run')`; validated at runtime against `bd formula list` (D26 a) | 0.3d | `jq` shows new enum; `sp validate planner` passes |
+| 0.c | Create canonical `config/skills/planning/SKILL.md` (today only `.xtrm/skills/default/planning/SKILL.md` deployed mirror exists); teach Pass-1 (epic + root beads) + Pass-2 (`recommended_template` annotation) (D26 b) | 0.3d | File present; planner specialist runtime reads it via `skills.paths` |
+| 0.d | Verify `/using-specialists-v3` still teaches the manual-chain-discipline + Iron pipeline + manual git per CLAUDE.md rule #9 that holds Phase 1 execution until Opp 4+10 land | 0.1d | Skim §"Orchestration Discipline" + §"Chain Management" sections |
+| 0.e | Smoke: dispatch planner on a vacuum bead (just a title) → confirm `recommended_template` field appears in output_schema-validated output | 0.2d | `sp run planner --bead <test> --json` shows the field |
+
+**Why Phase 0 is bootstrap, not Phase 3:** D26 was originally Phase 3 row 11b because the operator could in principle hand-edit it any time. But Phase 2 Pass-2 (planner annotation of `recommended_template`) **cannot run without D26 shipped**. Putting D26 inside Phase 3 created a circular dependency: planning Phase 2 produces the bd board that includes Phase 3 work that planning Phase 2 needs. The fix is sequencing, not redesign.
+
+After Phase 0: the operator has the chain templates installed, the planner knows how to recommend them, the planning skill teaches the two passes, and the execution discipline that bridges to Phase 1+ is verified current.
+
 ### Phase 1 — Visibility & decoupling + memory pull (~4 days)
 
 | # | Item | Source | Cost | Why first |
@@ -560,13 +577,12 @@ Sequenced by leverage-per-day. **[recalibrated]** The runway (month+, ~10 repos)
 | 8 | sp-runtime hint blocks (§5.1/5.2/5.3) | §5 | 1d | Opp 8 |
 | 9 | **Opp 10 — `--chain <molecule-id>` redesign** (deprecate `--worktree`/`--job` with 1-release grace) | §3.2 | 2d | Opp 1+2 (lease) + Opp 3 (mol) + Opp 6 (naming) |
 
-### Phase 3 — Naming, conventions, environment (~3.5 days)
+### Phase 3 — Naming, conventions, environment (~3 days)
 
 | # | Item | Source | Cost |
 |---|---|---|---|
 | 10 | Opp 5 — step-bead conventions (`kind:step` tag; label is truth, title is hint) | §3.2 | 1d |
 | 11 | Opp 6 — chain-derived naming | §3.2 | 0.5d |
-| 11b | **D26 prereq for D23**: edit `config/specialists/planner.specialist.json` output_schema + `config/skills/planning/SKILL.md` Pass-2 teaching | §0 D26 | 0.5d |
 | 12 | Opp 7 — `--accept-stale-base --reason` (+ grace period) | §3.2 | 0.5d |
 | 13 | Opp 9 — composition-nudge external selection-config | §3.2 | 1d |
 | 14 | Reviewer checks R3/R6/R7 (build full; survive Opp 10), R1/R2/R4 (warn; retire with `--job`) | §7 / §F | 1d |
@@ -586,7 +602,21 @@ Sequenced by leverage-per-day. **[recalibrated]** The runway (month+, ~10 repos)
 | 18 | `sp merge` dirty-index diagnostic | §5.5 | **Land** per D18 (runway recalibration); 0.5d |
 | 19 | `xt init` auto-runs the bootstrap skill on new repos (per D19) | §6 | xtrm-tools (~0.5d) |
 
-### Phase 6 — Generalize gate pre-dispatch checks (~3 days)
+### Phase 6 — Skills canonical refresh + v4 forward-looking draft (~1.5 days)
+
+The operator-facing skills (`using-specialists-v3`, `using-specialists-auto`) currently teach the pre-roadmap discipline: `--bead` + `--worktree` / `--job` dispatch, manual chain stitching, Iron pipeline as convention, manual git per rule #9. After Phases 1–5 ship, the discipline has changed — `--chain <molecule-id>` is the single dispatch verb, `sp chain review/approve` is the composition gate, step-bead conventions are atomic, R-checks fire at dispatch, the new mandatory rule replaces auto-injection. Skills must reflect what shipped — operators (human and orchestrator) reach for skills first when learning the system; stale skills outweigh stale code in confusion cost. **This phase is single-PR canonicalization.**
+
+| # | Item | Source | Cost |
+|---|---|---|---|
+| 18 | Refresh `config/skills/using-specialists-v3/SKILL.md`: rewrite §"Orchestration Discipline" to teach `sp chain review/approve/insert` (Opp 4); rewrite §"Chain Management" around `--chain <molecule-id>` (Opp 10); update §"Pre-Dispatch Checks" to reflect R-check survival/dissolution (R3/R6/R7 build, R1/R2/R5 retire); add §"Memory Recall" pointing at the new mandatory rule (Opp 11/D27); update §"Step-Bead Conventions" around `kind:step` label-as-truth (Opp 5/D20); update §"sp epic" around the decorated reader-only surface (§12); remove sp merge / sp epic merge prohibitions wording where now stale (manual git stays canonical per rule #9 — keep the rule, drop the obsolete error-recovery notes that referenced the dropped commands) | §11.1 D28 (new) | 0.5d |
+| 19 | Refresh `config/skills/using-specialists-auto/SKILL.md` to mirror v3 changes in the auto-orchestration mode; explicitly call out the new smoke-checkpoint cadence (each phase's checkpoint set is the new auto-mode validation gate) | §11.1 D28 | 0.5d |
+| 20 | Draft `config/skills/using-specialists-v4/SKILL.md` as **forward-looking only** (do NOT replace v3 yet) — teaches the channels v0 `verdict`/`finding` message pattern (channels.md §11 v0) as the chain-internal communication layer, and the substrate-aware terms (container/lease/chain-coordinator §4.3) that will become live when substrate lands. v4 is the receiver of the operator's mental migration: when channels v0 ships and the operator wants the lateral-wakeup pattern, they switch to `/using-specialists-v4` per-session. v3 remains canonical for chain-template + Iron-pipeline work until channels v0 proves out. Mark v4 with frontmatter `status: draft — gated on channels v0 ship + substrate landing` | §11.1 D28 | 0.5d |
+
+**Why Phase 6, not throughout Phases 1–5:** drip-feeding skill updates per-phase produces partial skills that contradict the next phase's still-WIP state. Single canonicalization pass at the end, after all surfaces have shipped and the smoke checkpoints have stabilized them, gives one coherent v3 + one coherent auto + one honest v4 draft. The skills become **what shipped, not what was planned** — which is the only honest source.
+
+**Why v4 is a draft, not a release:** v4's payload (channels lateral-wakeup, container/lease, chain-coordinator) depends on channels v0 shipping and substrate landing — both outside this roadmap's scope (§10.7). Drafting v4 now captures the design alignment work already done; releasing v4 waits on real shipping of its substrate.
+
+### Phase 7 — Generalize gate pre-dispatch checks (~3 days)
 
 After the reviewer set proves out, generalize R-checks to code-sanity / obligations-scanner / security-auditor (~1d each). Not blocking.
 
@@ -594,14 +624,16 @@ After the reviewer set proves out, generalize R-checks to code-sanity / obligati
 
 | Phase | Days | Cumulative | Key unlock |
 |---|---|---|---|
-| 1 | 4 | 4 | Pre-dispatch hints; READ_ONLY decoupled from keep-alive; specialists pull scoped memory instead of paying full dump |
-| 2 | 5 | 9 | Composition gate explicit; chain state queryable; `--chain` is the single chain-identity verb; `--worktree`/`--job` deprecated |
-| 3 | 3.5 | 12.5 | Naming aligned; conventions teach the right shape; reviewer mistakes caught; planner spec + planning skill teach `recommended_template` |
-| 4 | 2 | 14.5 | `sp epic` blocker friction eliminated; ~500 LOC removed |
-| 5 | 1 | 15.5 | h9hqg already done; B-A4/A5/A6 + sp merge diagnostic + `xt init` auto-run |
-| 6 | 3 | 18.5 | Other gate roles get checks |
+| 0 | 1 | 1 | Bootstrap: chain templates installed; planner spec + planning skill teach `recommended_template`; manual-chain-discipline verified current |
+| 1 | 4 | 5 | Pre-dispatch hints; READ_ONLY decoupled from keep-alive; specialists pull scoped memory instead of paying full dump |
+| 2 | 5 | 10 | Composition gate explicit; chain state queryable; `--chain` is the single chain-identity verb; `--worktree`/`--job` deprecated |
+| 3 | 3 | 13 | Naming aligned; conventions teach the right shape; reviewer mistakes caught |
+| 4 | 2 | 15 | `sp epic` blocker friction eliminated; ~500 LOC removed |
+| 5 | 1 | 16 | h9hqg already done; B-A4/A5/A6 + sp merge diagnostic + `xt init` auto-run |
+| 6 | 1.5 | 17.5 | Skills canonicalized: v3 refreshed for shipped state, auto-mode mirrors v3 + smoke-checkpoint cadence, v4 drafted as forward-looking (channels v0 + substrate-aware) |
+| 7 | 3 | 20.5 | Other gate roles get pre-dispatch checks |
 
-**~14.5 days for Phases 1–5** (core runtime + bootstrap + sp epic decoration), Phase 6 as polish.
+**~16 days for Phases 0–5** (bootstrap + core runtime + sp epic decoration + per-repo bootstrap), Phase 6 finalizes the operator-facing documentation, Phase 7 as polish.
 
 ### 10.7 What this rollout does NOT do (honest scope)
 
