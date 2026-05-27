@@ -1,0 +1,767 @@
+# Specialists Runtime — Architectural Critique, Friction Audit, and Substrate-Aligned Patch Roadmap
+
+> **Document role.** Canonical, consolidated source-of-truth for the specialists-runtime cleanup and substrate-alignment effort. Absorbs and supersedes the previously-separate `specialists-runtime-critique.md` and `specialists-substrate-alignment.md`.
+>
+> **Revision note (this version).** Reviewed against `substrate.md` revision 10 *after* the step-1/2/3/4/6 integration and the rev10 additions (chain-coordinator §4.3, memory-as-capability §10.2, chain-template-declares-coordinator §6.9.10). Open questions (§11) resolved; the four content adjustments and the runway recalibration applied; every reads-forward retargeted to the sections that now actually exist in the canonical design. **Absorbed (2026-05-27 consolidation):** the prior parallel `specialists-friction-audit.md` (now archived) — its additions are now Opportunities 10 (`--chain` redesign) and 11 (pull-not-push memory recall), §12 (`sp epic` decoration strategy), §13 (chain templates concretized in `docs/design/chain-templates/`), and D24–D27 in this §0. Changes are marked inline with **[rev-9/10 author]** where they reflect a decision by the substrate-design author, **[recalibrated]** where the runway changed a prior conclusion, and **[absorbed]** where they came from the friction-audit consolidation.
+>
+> **Intended consumers.** Operator (decisions now closed — see §0), planning session (produce a phased work plan from this doc), implementer (after plan approved).
+>
+> **Method.** Direct reading of `.xtrm/reports/2026-05-25..26` across mercury market-data, gitboard, and specialists repos; direct reading of `src/specialist/{chain-identity,supervisor,runner,worktree,control}.ts` + `src/cli/{run,finalize}.ts`; cross-reference against `substrate-design.md` revision 9 and `channels.md`.
+>
+> **Scope discipline.** This document is *action plan for the existing specialists runtime*, not design. Every patch must (a) reduce concrete friction now, (b) survive substrate's arrival without rework, or (c) be an honest throwaway bridge whose cost is justified by friction-removed-now.
+
+## §0. Decisions closed in this review pass
+
+The prior revision left nine open questions (old §11). They are now resolved. This section is the decision record; the body has been updated to match.
+
+**Runway recalibration (frames everything below).** Substrate may be a month or more away, during which the operator works ~10 repos in parallel. This flips the leverage-per-day math: friction-removed-per-day × days-until-substrate × repos-affected is large, so even an honest throwaway bridge repays its cost many times over before it retires. Crucially, **the bd-layer patches are keepers — they retire only at the substrate §13.7 bd→substrate migration, which is *later* than substrate landing**, not at landing. Two prior conclusions change as a result: the `sp merge` dirty-index diagnostic moves from "skip" to **land**; the reviewer R1–R7 checks move from "build only 2–3" to **build more, but dedupe R5 and first verify which are made redundant by Opportunities 1/2/3**.
+
+**Operator decisions (old §11.1):**
+
+1. **Verb naming — align to substrate, don't invent.** The composition-gate command is **`sp chain review / approve / insert`** (not `plan / dispatch`), matching substrate §6.9.5 `sb chain review/approve/insert` 1:1 so migration is only `sp`→`sb`, no command remapping. `sp chain <bead>` accepts **root beads only**, refusing step-beads with a hint to the root (preempting Asymmetry 5).
+2. **Pre-dispatch warning severity — warn-only except data-loss.** Default is **warn-only** (matches substrate's "refuse with reason, allow override" pattern). The **data-loss class is hard-refuse-with-explicit-override**: C1 (cwd-mismatch wipe), R5 (reviewer cwd-mismatch), and stale-base. The discriminant is severity-of-harm, not category — a warning on a small diff is a healthy nudge; "you are about to wipe the executor branch" must stop you.
+3. **`--accept-stale-base` rollout — grace period.** Accept the old `--force-stale-base` with a deprecation warning for a release or two, not a hard cut. Rationale is the runway: a hard cut mid-campaign across 10 repos breaks muscle-memory at the worst moment; the grace period costs almost nothing.
+4. **Bootstrap skill location — both.** A discoverable `xtrm-tools/skills/repo-bootstrap` skill **and** automatic application on `xt init`. With 10 repos the automatic-on-init path saves repeated manual setup; the standalone skill serves already-existing repos that don't pass through a fresh init.
+5. **`sp chain <bead>` — read-once for v0.** Follow mode (`-f`) deferred to v0.5. Don't block the value on the streaming code.
+6. **Phase 4 splits (per `xtrm-h9hqg`).** The P0 ticket `xtrm-h9hqg` (IN_PROGRESS) covers **B-A1/A2/A3** — bd auto-stage config flip + pre-commit shim, *and* explicitly the three hooksPath/third-party-hook cases the audit catalogued as A2/A3 (core.hooksPath honored; hooksPath misconfigured at `.beads/hooks`; non-bd pre-commit at target) — *plus* extra scope the audit hadn't listed (bd/gitnexus version + migration verification). It does **not** cover **B-A4** (orphan worktree cleanup), **B-A5** (test-runner `.worktrees/` excludes), **B-A6** (osv-scanner wrapper). Those remain friction-audit-side work: file separately or extend `xtrm-h9hqg`'s scope. (The `xtrm-h9hqg` sweep findings — 12/23 repos patched, 4 stuck on hooksPath misconfig, 7 on third-party hooks, named repos under `~/dev` and `~/projects` — are authoritative operator-environment data.)
+
+**Answers to the prior "questions for the rev-9 author" (old §11.2 / §11.3) — now decided:**
+
+- **[rev-9 author] Workspace identity is internal to substrate, not exposed in the API.** Operations are container-scoped; there is no first-class `workspace_id`. A participant never names a workspace — it is spawned into a container (substrate §7.1), the container holds the worktree and the lease (§6.9.6), substrate resolves the rest. This is the second of the two options the audit posed, and it validates making `--job` a workspace-*pointer* for read-only roles (Opportunity 2) as the step toward removing it. The current half-and-half state (`--job` as both workspace handle and liveness handle) is exactly what produced the six asymmetries; substrate commits to the clean side.
+- **[rev-9 author] The containers-table migration shape aligns**, with one correction: the audit's suggested `opened_by: <first-job-id>` for legacy chains conflicts with substrate's model, where `opened_by` is *provenance* — immutable, normally a seed/node/operator (§2.6). For legacy chains with no seed it is acceptable as an approximation **only if marked "synthetic pre-substrate provenance"**, not conflated with the real provenance a seed will later write. Otherwise the mechanical migration (synthetic `kind: chain` container per chain-identity row, members re-linked via `container_id`) is correct, and the bridge's value holds: the alignment work makes the data already substrate-shaped, so migration is a rename pass, not a shim.
+
+**Canonical reads-forward (retargeted to sections that now exist):**
+
+| Bridge | Reads forward to (canonical, rev-9) |
+|---|---|
+| Opp 1 worktree lease | §6.9.6 worktree lease |
+| Opp 2 READ_ONLY path-binding | §6.9.6 read-only steps don't acquire the lease |
+| Opp 3 persisted chain shape | §6.9.2 resolved shape persisted; container row §13.3 (`resolved_chain_json`) |
+| Opp 4 `sp chain review/approve/insert` | §6.9.5 composition gate + §11.1 `sb chain review/approve/insert` |
+| Opp 5 step-bead conventions | §6.9.2 dual contract (change vs step) + §6.2.1 class |
+| Opp 6 chain-derived naming | §6.9.7 names from membership |
+| Opp 7 `--accept-stale-base --reason` | §6.4 precondition gate + channels.md §10.2 envelope |
+| Opp 8 `step_completed` event | §3.1 daemon advances on `agent_end` (same payload) |
+| Opp 9 composition-nudge YAML | §6.9.5 L1 nudges (same matcher) |
+| `sp finalize` removal + `sp merge` diagnostic | §6.10 close-as-derivation |
+| Hook hard-codes "the six workflows" | §6.9.10 the six shipped default templates |
+
+**Four content adjustments applied to the body:**
+- **R5 deduplicated** — the cwd-mismatch check appeared in both §5.3 and §7 (as R5); it is now one check, referenced from both.
+- **[discipline] Opportunity 5 step-detection** — the `kind:step` **tag is the truth**; the `<role>:<root-id>` title pattern is only a *hint* for the hook proposing a template, never the source of the step-vs-root decision (substrate §6.9.7: the name is not the semantics).
+- **D2 elevated to principle** — moving `tests_pass` off the executor onto an independent gate is not a small adjacent fix; it is the runtime application of "verification authority belongs to an independent gate, not the verified actor" (substrate §3.1 advance-on-persisted-evidence + §6.9.2 a gate is `done` only when *satisfied*).
+- **Opportunity 3 JSON shape aligned** to `resolved_chain_json` (§6.9.2: Layer-1 steps + Layer-2 gates, reached/pending per step) so the migration is a true rename, not a content transform.
+
+**[absorbed] Decisions D23–D27 (from the consolidated friction-audit work):**
+
+- **D23 — `recommended_template` on the planner (§D of the reconciliation).** Pass-2 of the planner annotates each child root bead with `recommended_template: <one of the 13 formula names | on-the-run>`. Validated against live `bd formula list`. Proposal, not materialization — resolved at `sp chain review` / `bd mol pour`, not at planning time. **Prereq (D26)**: edit `config/specialists/planner.specialist.json` output_schema + update `config/skills/planning/SKILL.md` to teach Pass-2 — both required before D23 ships.
+- **D24 — `sp chain <bead>` v0 shape.** Read-once, human-viewable + `--json` flag. `-f` follow mode deferred to a dedicated small-CLI/TUI design pass (naive repaint has the same flicker pattern as `sp ps -f`). **New chain-lifecycle events from Phases 1–3 surface in `sp log`** — every new event kind ships with its `sp log` formatter in the same PR; no event ships dark.
+- **D25 — `xtrm-h9hqg` status.** **CLOSED 2026-05-27** (verified in xtrm-tools: bd auto-stage patch in `xt init`/`xt update`, dependency-maintenance checks, `--all-repos` sweep mode, tests, dist smoke). B-A1/A2/A3 done; B-A4/A5/A6 remain friction-audit-side (Phase 4 row 14).
+- **D26 — Planner-spec + planning-skill prereq for D23.** Adding `recommended_template` requires: (a) `config/specialists/planner.specialist.json` — extend `output_schema` with `recommended_template: enum(<13 formula names> | 'on-the-run')` (validated against `bd formula list` at runtime); (b) `config/skills/planning/SKILL.md` — teach Pass-2 (annotate each child root bead with `recommended_template`; do **not** materialize step beads at planning time — that's `sp chain review`'s job). Single PR; both files are package-tier, so direct JSON / Markdown edits per the CLAUDE.md gotcha. Sequenced in Phase 3 ahead of Opportunity 9 nudge wiring.
+- **D27 — Memory injection: push → pull (Opportunity 11).** Eliminate the runner-time auto-injection of `bd prime` + `.xtrm/memory.md` (~3.8k token irrelevant for most tasks per memory `bd-prime-context-overhead`). Replace with mandatory rule `config/mandatory-rules/memory-recall.md` that teaches specialists to query `bd memories <keyword>` / `bd recall <key>` scoped to their bead at startup and before key decisions. Reads forward to **substrate §10.2 memory-as-capability** (memory-curator role eliminated; every participant carries the memory-query extension; chain coordinator distills new memory at close — Opportunity 11 brings the pull-not-push half into the runtime today). Rule joins the default `template_sets` for all package-tier specialists; opt-out allowed for tiny pre-scripted specialists if measurements show no benefit. Sequenced Phase 1 — independent, reversible, immediate token-budget win.
+
+**[absorbed] Chain ≡ bd `molecule` mental model.** Where this audit speaks of "chain identity," the concrete bd realization is a **molecule**: `bd mol pour <formula>` creates an `issue_type=molecule` parent with one child bead per formula step (`parent-child` edges; `blocks` edges between siblings per `needs`). An **epic** is the *organizational parent above chains* — `--type=epic` + `--parent` holding multiple chain-molecules for one PRD/initiative. Nesting: top epic (organizational) → chain-molecule (per root issue) → step beads. Quick-chain variant: bare molecule with no organizational epic. Ultra-quick single-shot: a lone task bead (READ_ONLY only). Substrate migration mapping: organizational epic → container `kind: epic`; chain-molecule → container `kind: chain`; molecule's root child → substrate root issue; step beads → step issues (`parent-child`/`validates` edges pre-populate the step relationship). The bridge value: data is already substrate-shaped; migration is a rename pass. See §13 for the 13 evidence-backed formula files.
+
+**[absorbed] Channels v0 subsumes Opportunity 8.** Per the handoff: **channels v0** (`docs/design/channels.md` §11) adopts a richer `kind=verdict` discriminated-union message that subsumes the event-only `step_completed` payload Opp 8 proposes. Opp 8 in this roadmap is therefore a **bridge until channels v0 ships**, not a permanent surface. When channels v0 lands, the `step_completed` event retires in favor of `verdict` + `finding` messages on the chain's channel (the reviewer-↔-executor loop runs end-to-end with no `sp resume` per channels.md §14 v0 acceptance). Until then, Opp 8 supplies the next-step recommendation that `sp result` / `sp chain <bead>` render — same data, simpler shape.
+
+**[absorbed] Rev10 forward-references** (above what rev-9 supplied):
+- **Chain coordinator (substrate §4.3)** is a transient standing brain of a chain — fresh-context participant spawned at composition completion (after `sb chain approve`, before the daemon dispatches step-1). Four roles: entry gate, borderline judge, hygiene coordinator (cross-chain via pulse), close-time judge. **Reads forward correction for Opp 4:** the substrate flow is `sb chain approve` → chain-coordinator `verdict: ready` (with policy-scoped step inserts permitted) → step-1 dispatch. Opp 4's `sp chain approve` is the bridge today; when chain-coordinator lands, the verdict step becomes mandatory between approve and step-1.
+- **Memory-as-capability (substrate §10.2)** eliminates the memory-curator role entirely — every participant carries the memory-query extension; the chain coordinator distills new memory at close (failure / best-practice memories). Opp 11 D27 is the runtime application of the pull half of this principle today.
+- **Chain-template declares its coordinator model (substrate §6.9.10)** — the 13 formulas in `docs/design/chain-templates/` will eventually carry a `chain_coordinator` field naming the coordinator spec; for now they don't (the runtime is still single-orchestrator, no chain coordinator yet).
+
+---
+
+## 1. Architectural framing — six asymmetries and how rev-9 resolves them
+
+### 1.1 The shape error in one sentence
+
+The current specialists runtime treats *jobs* as first-class entities and *chains* as a derived projection over the job graph. Substrate's container model inverts this: containers are first-class, jobs (participants) are tenants of containers. Six concrete asymmetries fall out of the inversion, each grounded in code today and each resolved by a specific section of substrate revision 9.
+
+### 1.2 The six asymmetries (code-verified)
+
+**Asymmetry 1 — Executor is the privileged chain bootstrapper.** `chain-identity.ts:38–39`: the chain id defaults to the worktree-owner job id, which defaults to the job's own id. No `chains` table; the chain is computed by walking back to the worktree-owning job — in practice the first specialist dispatched with `--worktree` (by convention the executor). The CLAUDE.md gotcha *"--worktree and --job are mutually exclusive"* is the operator-facing surface of this. Killing the executor implicitly destroys the chain; a non-executor role wanting to *open* a fresh worktree must take the bootstrapper role.
+
+**Asymmetry 2 — Worktree is owned by a job, not by the chain.** The worktree is created during first `sp run --worktree`; the owning job id is stamped via `worktree_owner_job_id`. When the job ends the worktree is not destroyed but is no longer owned by any live entity. Future specialists join via `--job <owner>`, even after the owner's pi session has gone to `waiting` — that's why keep-alive must hold the owner alive. Observed consequence: orphan worktrees trip the stale-base guard (mercury 2026-05-25).
+
+**Asymmetry 3 — Chain has no first-class entity row.** No `chains` table; `chain_id`/`chain_root_job_id`/`chain_root_bead_id` are columns on jobs. The chain is reconstructed by aggregating jobs sharing `chain_id`. There is no place to attach chain-level state — resolved shape, scrutiny, collision matrix, budget, evidence index.
+
+**Asymmetry 4 — Keep-alive paradox: pi session held alive because the workspace has no other persistence handle.** `--keep-alive` keeps the first specialist's pi session in `waiting` after `agent_end` so later specialists can `--job <owner>` in. The keep-alive pays for **workspace handle**, not LLM-state reuse. A reviewer chain that doesn't need executor resumability still holds executor's pi session in memory until `sp finalize` (operator-forgets-finalize = resource leak).
+
+**Asymmetry 5 — `--bead` conflates work-contract with chain-key.** `sp run <role> --bead <id>` passes the bead as both **contract** (what to do) and **identity key** (`chain_root_bead_id`). SKILL Rule 7 then forces a *second* bead for reviewer/code-sanity, so the chain carries two beads: target + tracking. Structural conflation; produces the R4 friction.
+
+**Asymmetry 6 — Reviewer-as-parasite: cannot exist without executor.** Reviewer must be dispatched with `--job <exec-job>` to enter the executor's workspace; without it, it runs in a clean checkout and sees no diff (R1). The runtime structurally encodes "reviewer is a follower of executor." A security-audit-only use case (review pre-existing code, a manually-applied patch, an external PR) has no place. Code-sanity, security-auditor, obligations-scanner share this parasite shape.
+
+### 1.3 How substrate revision 9 resolves each
+
+| Asymmetry | Rev-9 answer (canonical section) |
+|---|---|
+| 1 — Executor as bootstrapper | §6.9.5 chain composition is an explicit gate (`sb chain review`/`approve`); first dispatch is daemon-driven from the resolved shape. Executor is one step among others. |
+| 2 — Worktree owned by job | §6.9.6 worktree **lease** — owned by container, acquired by writer-steps, released on quiescence. |
+| 3 — Chain has no entity row | §6.9.2 resolved shape persisted as container state (`resolved_chain_json`, §13.3). |
+| 4 — Keep-alive paradox | §6.9.6 lease releases on `agent_end` (§3.1 pi quiescence) — pi keep-alive decouples from workspace persistence. |
+| 5 — `--bead` conflation | §6.9.2 dual contract: root carries the change-contract (5 sections), step carries the step-contract (mandate/inputs/outputs/scope/non_goals). |
+| 6 — Reviewer-as-parasite | §6.9.6 read-only steps **do not acquire** the lease; they coexist with a writer or run alone. |
+
+These resolutions are the target. §3 brings sp incrementally toward this shape without waiting for substrate.
+
+---
+
+## 2. Friction catalog with evidence
+
+Four categories, ordered by observed cost (frequency × time-to-recover). **[recalibrated]** With a month-plus runway across ~10 repos, the recurring categories (A and B especially) accumulate cost daily — this is why the bridges that remove them repay well before substrate lands.
+
+### 2.A Repo bootstrap / dirty-state breakage
+
+| Tag | Friction | Evidence | Recovery cost |
+|---|---|---|---|
+| **A1** | `bd` per-write auto-export keeps `.beads/issues.jsonl` staged; `git checkout/reset/merge` aborts mid-orchestration; `sp merge` reports phantom conflicts | specialists 2026-05-26; gitboard 2026-05-26 (recurred 5×) | Multi-minute manual recovery + risk of `git reset --hard` wiping work |
+| **A2** | `bd hooks install` silently no-ops when `core.hooksPath` set OR a non-bd pre-commit already at target | specialists 2026-05-26 Problems #4–5 | A1 recurs invisibly |
+| **A3** | 8 repos with broken bd-dolt state where `bd config`/`bd doctor` refuse | specialists 2026-05-26 | Per-repo manual YAML edit |
+| **A4** | Orphan worktrees from prior sessions trip the stale-base guard; forced `--force-stale-base` even when work IS on master | mercury 2026-05-25 (6 orphans; flag used for ALL dispatches) | Hours of noise; risk of bypassing real staleness |
+| **A5** | `vitest`/`pytest` pick up duplicate test files from `.worktrees/` during repo-root runs | gitboard 2026-05-26 (`vitest.config.ts` exclude patch) | Mysterious failures that don't reproduce clean |
+| **A6** | Third-party pre-push hooks (`osv-scanner`) crash inside worktrees; `git push --delete` blocked by export-state fixer | mercury 2026-05-25 | Memorized `SKIP=osv-scanner`/`gh api -X DELETE` per-repo |
+
+A1/A2/A3 are addressed by `xtrm-h9hqg` (§0 #6). A4/A5/A6 remain friction-audit-side (§6).
+
+### 2.B Orchestrator laziness
+
+| Tag | Friction | Evidence | What SKILL.md says |
+|---|---|---|---|
+| **B1** | Reviewer skipped on "small" diff | gitboard 2026-05-26 (".66 one-char fix, reviewer skipped intentionally") | "small diffs hide the worst regressions... always escalate before skipping" |
+| **B2** | Explorer/methodologist skipped on HIGH-blast "cause known" | mercury 2026-05-25 wave 4 (`lb9s`) | "When unsure, prefer extra explorer/debugger passes" |
+| **B3** | No `specialists list --full` at substantial-task start | Inferred — no explicit invocations in dispatch sections | "MANDATORY on skill load and before every new substantial task" |
+| **B4** | Invents flags that don't exist | gitboard 2026-05-26 (`sp finalize ... --skip-review`, no such flag) | "Do not rely on stale remembered flags" |
+| **B5** | `--force-stale-base` as default escape valve | mercury 2026-05-25 (same flag for all dispatches) | precondition memory: verify clean status FIRST |
+| **B6** | Hand-edits files marked "managed by tooling" | specialists 2026-05-26 (`.specialists/default/` edits in 15 repos) | "Never edit `.specialists/default/` by hand" |
+| **B7** | Executor `--no-verify` + pulls unrelated files into commit | mercury 2026-05-25 (`7egg`) | Implicit |
+
+### 2.C Wrong-diff / wrong-cwd dispatches
+
+| Tag | Friction | Evidence | Severity |
+|---|---|---|---|
+| **C1** | cwd persistence across Bash calls — `cd <worktree>` leaves later commands inside it; `git reset --hard origin/main` wipes the executor branch ref | gitboard 2026-05-26 ("wiped the executor's commits") | **CRITICAL** — reflog-only recovery |
+| **C2** | Chain dispatched on stale base when a prior sibling chain is unmerged → debugger-restitch loop | precondition memory; CLAUDE.md | HIGH |
+| **C3** | Reviewer without `--job <exec-job>` → wrong diff | SKILL Rule 7 | HIGH — silent wrong verdict |
+| **C4** | Bead `VALIDATION` narrower than pre-commit's test scope → surprise failures | mercury 2026-05-25 (`7egg`, 5 baseline regressions) | MEDIUM |
+
+### 2.D Visibility gaps
+
+| Tag | Friction | Evidence | What's missing |
+|---|---|---|---|
+| **D1** | Silent swallow / uncaught JSON.parse mask root causes | gitboard 2026-05-26 (forge-eorh.62) | Error events on the wire |
+| **D2** | Executor self-reports `tests_pass: false` when tests pass | mercury 2026-05-25 | **Independent verification by a gate, not the verified actor** (see §3.2 / principle below) |
+| **D3** | `sp merge` "Merge conflict" with no actionable info | gitboard 2026-05-26 | Diagnostic in the error message |
+| **D4** | `sp run` success message minimal | Inferred | Structured post-dispatch hint |
+| **D5** | No result-aware next-step suggestion | Inferred | Workflow-aware result formatter |
+| **D6** | No "current chain state + next dispatch" surface | SKILL.md tries to teach it | `sp chain <bead>` timeline view |
+
+**[discipline] D2 is a principle, not an adjacent fix.** "Executor reports its own test result" is the verified actor judging its own verification. Substrate §3.1 advances only on *persisted evidence*, and §6.9.2 makes a gate `done` only when *satisfied* — verification authority belongs to an independent gate (code-sanity / local-validation), never the executor. Moving `tests_pass` off the executor onto a gate's evidence is the runtime application of that principle, and it reads forward to substrate cleanly.
+
+---
+
+## 3. Substrate-aligned patch roadmap (the eleven opportunities)
+
+Each opportunity (a) is implementable without the substrate daemon or `containers` table, (b) survives into rev-9 without rework, (c) closes a friction (§2) and/or removes an asymmetry (§1.2). The orthogonal layers (§4/§5/§6) sit at different layers and are described separately.
+
+### 3.1 Summary table
+
+| # | Patch | Friction | Asymmetry | Reads-forward (canonical rev-9) | Cost |
+|---|---|---|---|---|---|
+| 1 | Worktree lease shimmed onto chain-identity | C2 (partial), feeds A4 | 2 | §6.9.6 lease (move column job→container) | 1 day |
+| **2** | **READ_ONLY specialists bind by path, decoupled from owner keep-alive** | **D6 (partial), B1+B2 indirect** | **4+6** | **§6.9.6 read-only steps don't acquire lease** | **1 day** |
+| 3 | Persist resolved chain shape as data | D6 | 3 | §6.9.2 resolved shape; `resolved_chain_json` §13.3 | 2 days |
+| 4 | `sp chain review/approve/insert` — composition gate | D4, D6, B1 | 1 | §6.9.5 + §11.1 (1:1 verb match) | 2 days |
+| 5 | Step-bead conventions (`kind:step` tag) | R4 | 5 | §6.9.2 step-contract; §6.2.1 class | 1 day |
+| 6 | Branch/worktree names derive from chain | naming part of (3) | 3 (partial) | §6.9.7 names from membership | 0.5 day |
+| 7 | `--accept-stale-base --reason` + structured refusal | B5 | — | §6.4 precondition gate + channels.md §10.2 | 0.5 day |
+| 8 | `step_completed` event + next-step recommendation | D4, D5 | bridge | §3.1 daemon-advances-on-agent_end | 1 day |
+| 9 | Composition-nudge YAML — **[adjusted: external selection-config, not formula sections]** `applies_when` is not a `bd formula` field (silently dropped by the bd binary); the nudge matcher lives in a separate selection-config file consumed by §4 hook + `sp chain review`. One matcher language across the system, applied at the selection layer (substrate §6.9.5 L1 nudges are a lookup table at the composition gate, not part of any template). | B2 | — | §6.9.5 L1 nudges (selection layer) | 1 day |
+| **10 [absorbed]** | **`--chain <molecule-id>` redesign: deprecate `--worktree` and `--job`; chain-identity-driven dispatch with implicit worktree provisioning for write-capable specialists + cwd dispatch for READ_ONLY single-shot; write-capable WITHOUT `--chain` is REFUSED (closes existing safety hole where default cwd dispatch could write to master).** Verbs use the molecule id as the chain handle. | A4, C1, prevents R1/R2 entirely | **1 + 2 + 6** | **§6.9.5 + §11.1 dispatch surface (1:1 with `sb dispatch --container <id>`); workspace-identity-internal commitment (§0 D21 / handoff)** | **2 days** |
+| **11 [absorbed]** | **Pull-not-push memory recall: eliminate runner-time auto-injection of `bd prime` + `.xtrm/memory.md` (~3.8k token); replace with mandatory rule `memory-recall.md` teaching specialists to query `bd memories <keyword>` / `bd recall <key>` scoped to their bead.** Wins ~3.8k/spawn × 8–15 dispatches/session = 30–60k token budget freed per session. | new D7 (memory-injection waste; memories `bd-prime-context-overhead`, `specialist-runner-injects-xtrm-memory-md-bd-prime`) | — (philosophical alignment) | **substrate §10.2 memory-as-capability (memory-curator role eliminated; participants carry memory-query extension; chain coordinator distills at close)** | **1 day** |
+
+**Total ~13 days for Opportunities 1–11.** Sequencing in §10.
+
+### 3.2 Per-opportunity detail
+
+**Opportunity 1 — Worktree lease shimmed onto chain-identity.** Add `worktree_lease_held_by` + `worktree_lease_state` to the chain-identity/status row (today jobs; later containers). Writer-step (executor, debugger) + lease `free` → acquire on dispatch, release on `agent_end` (supervisor.ts:1658). Writer-step + lease `held` → queue (`WAIT: lease held by <job>`). Read-only step → do not touch the lease; bind to the path (Opp 2). Closes Asymmetry 2 + much of 4/6; `--worktree`/`--job` mutual-exclusion becomes derivable from lease state. **Reads forward:** §6.9.6 *is* this column moved job→container; migration is rename + ownership transfer.
+
+**Opportunity 2 — READ_ONLY specialists bind by path, decoupled from owner keep-alive.** Today reviewer/code-sanity via `--job <owner>` requires the owner alive (waiting) — for the *workspace handle*, not LLM-state. Patch: when the dispatched specialist is `permission: READ_ONLY`, runner binds to the worktree **path** stored on `--job <owner>` (read once, cached) instead of requiring the owner live. Owner can be `done`/`closed`/killed; the read-only reviewer enters on its own pi session, reads the diff against the lease base, produces evidence. `--job` becomes a **workspace pointer**, not a **liveness pointer**, for read-only roles. Closes Asymmetry 6 + reduces the forgotten-`sp finalize` leak. **Reads forward:** §6.9.6 read-only steps don't acquire the lease and don't require a writer live — identical semantics; when containers land the lookup target moves job→container, surface identical. **This is the highest-leverage runtime patch. Land first.**
+
+**Opportunity 3 — Persist resolved chain shape as data.** Add a thin `chain_shapes` table (or `~/.specialists/chains/<chain-id>.json`). **[adjusted] The shape matches `resolved_chain_json` (§6.9.2): Layer-1 domain steps + Layer-2 overlaid gates, reached/pending per step** — so migration is a true rename, not a content transform:
+
+```jsonc
+{
+  "chain_id": "feature/forge-eorh.48",
+  "template_name": "code-standard",          // one of the six §6.9.10 defaults
+  "resolved_steps": [                          // Layer-1 + Layer-2, in resolved order
+    { "role": "executor",            "class": "step",  "status": "completed", "job_id": "cc5fcc" },
+    { "role": "code-sanity",         "class": "gate",  "status": "completed", "job_id": "d6eacc", "mandatory": true },
+    { "role": "obligations-scanner", "class": "gate",  "status": "completed", "job_id": "...",    "mandatory": true },
+    { "role": "reviewer",            "class": "gate",  "status": "running",   "job_id": "7b3775" }
+  ],
+  "composed_at_ms": 0,
+  "composed_by": "orchestrator:auto"           // or "operator:explicit"
+}
+```
+
+Written when the first step dispatches (or via `sp chain review`, Opp 4); updated as steps run. Closes Asymmetry 3; unlocks `sp chain <bead>` as a primary-key lookup; lets the daemon-advances promise (§3.1) work at small scale today. **Reads forward:** §6.9.2 resolved shape on the container — rename column, attach to container row. The `class`/`mandatory` fields are already substrate-shaped (§6.2.1 / §6.9.3).
+
+**Opportunity 4 — `sp chain review/approve/insert` as the composition gate.** **[adjusted: verbs match substrate]** Resolves the chain shape before any `sp run`:
+
+```
+$ sp chain review forge-eorh.48
+Resolved template: code-standard (matched type=task, scrutiny=medium, scope=production)
+  1. executor              (~3-6m)
+  2. code-sanity           (~1-3m)   [mandatory gate, READ_ONLY]
+  3. obligations-scanner   (~30s)    [mandatory gate, READ_ONLY]
+  4. reviewer              (~2-4m)   [scrutiny may auto-escalate]
+Run `sp chain approve forge-eorh.48` to execute.
+Run `sp chain insert forge-eorh.48 --role <r> --before <step>` to modify.
+```
+
+The shape is persisted (Opp 3) on approve; dispatch follows it. Closes Asymmetry 1 — composition is an explicit action *before* any role is dispatched; the executor is no longer special, just the first step the resolved template happens to start with. **Reads forward:** §6.9.5 / §11.1 `sb chain review/approve/insert` are this command shape 1:1; migration is `sp`→`sb` only. **`sp chain <bead>` accepts root beads only** (per §0 #1), refusing step-beads with a hint to the root — this preempts Asymmetry 5 at the CLI surface.
+
+**Opportunity 5 — Split step contracts from root contracts in bd.** Convention + tooling, not schema change. A **root bead** uses the change-contract sections (`PROBLEM/SCOPE/NON_GOALS/VALIDATION/ACCEPTANCE`). A **step bead** uses `MANDATE/INPUTS/OUTPUTS/SCOPE/NON_GOALS`. **[discipline] The `kind:step` tag is the authoritative discriminator** — the truth lives in the tag, never in string-parsing. The title pattern `<role>:<root-id>` is only a *hint* the Claude Code hook (§4) uses to *propose* the step-contract template; it is never the source of the step-vs-root decision (substrate §6.9.7: the name is not the semantics, membership/metadata is). SKILL.md teaches the distinction; existing reviewer/code-sanity tracking-beads migrate lazily as touched. Closes Asymmetry 5. **Reads forward:** §6.9.2 dual-contract is this split as schema; each step bead becomes a `class: step` issue (§6.2.1) with its step-contract populated.
+
+**Opportunity 6 — Branch/worktree names derive from chain identity.** Switch the writer-branch to `chain/<bead-id>` (no role suffix); worktree `.worktrees/chain-<bead-id>`. If a debugger takes over post-executor (Opp 1 handoff), the branch name doesn't change — the current-writer role moves through the same branch. Closes part of Asymmetry 3. **Reads forward:** §6.9.7 names are `wt/epic-<id>/chain-<id>` — extends `chain-<id>` cleanly when epics land.
+
+**Opportunity 7 — `--accept-stale-base --reason` + structured refusal envelope.** Rename `--force-stale-base` → `--accept-stale-base --reason "<text>"` (required, logged). **[per §0 #3: grace period — old flag accepted with deprecation warning for a release or two.]** Refusal envelope gains structured fields matching channels.md §10.2:
+
+```jsonc
+{ "ok": false, "error_code": "stale_base",
+  "blocked_by": ["sibling chain feature/forge-eorh.40 unmerged"],
+  "next_safe_action": "diagnose | accept | abandon-chain",
+  "diagnose_command": "git log --oneline <sibling-branches> ^master" }
+```
+
+`--force-` taught "this is normal, override"; `--accept- --reason` makes it deliberate and audit-traceable. Closes B5. **Reads forward:** §6.4 precondition gate (precondition violation, not §5.10 recovery); the envelope matches channels.md §10.2; `--accept --reason` survives into `sb dispatch --allow-unready --reason`. **Stretch (non-blocking):** patch-id equivalence detection in `evaluateMergeWorthiness` — if the sibling's commits are patch-id-equal to commits already on master under a different SHA, the guard does not fire (addresses the over-fire root cause, §9.2).
+
+**Opportunity 8 — `step_completed` event with next-step recommendation.** On pi `agent_end`, extend the status row: look up Opp 3's resolved-shape row, find the just-completed step, compute the next from the template, emit `runner_event` kind `step_completed` with `{ completed, next, next_dispatch_command }`. `sp result` (§5.2) and `sp chain` (Opp 4) read it. **[recalibrated/principle]** This is also where **D2** lands: the `step_completed` for an executor carries the executor's *claimed* result, but the chain does not advance on it — it advances when the **independent gate** (code-sanity/local-validation) persists its verdict (§3.1). The executor's self-report is informational; the gate's evidence is authoritative. **[absorbed — bridge until channels v0]** Per `channels.md` §11, the channels-v0 `kind=verdict` discriminated-union message subsumes this event; when channels v0 ships, `step_completed` retires and the reviewer-↔-executor loop runs end-to-end via `verdict` + `finding` channel messages with no `sp resume`. Opp 8 supplies the same next-step recommendation in event form until then. **Reads forward:** §3.1 daemon advances on member `agent_end` from persisted evidence — and ultimately channels v0 `verdict` message.
+
+**Opportunity 9 — Composition-nudge selection-config.** **[adjusted]** A separate selection-config file (e.g. `~/.config/specialists/composition-nudges.yaml`) with `applies_when` matchers (reusing the matcher substrate uses everywhere, §5.2/§6.9.3) producing "consider X because Y" hints. **Not** a `bd formula` section — `applies_when` is silently dropped by the bd binary (verified). Consumed by `sp chain review` (Opp 4) and the Claude hook (§4). Informational, not refusal — raises the question, preserves orchestrator judgment. Closes B2. **Reads forward:** §6.9.5 L1 nudges are the same table evaluated by the composition gate at the selection layer; today's selection-config is the schema substrate adopts as-is.
+
+**Opportunity 10 [absorbed] — `--chain <molecule-id>` redesign; deprecate `--worktree` and `--job`.** A single chain-identity verb replaces the `--worktree`/`--job` flag pair; flag semantics derive worktree behavior from chain state. **This is the runtime adopting substrate's identity model early** (§0 D21): substrate makes operations container-scoped — workspace identity is internal, never a first-class API handle. `--chain` IS the container handle in the bridge; `--job`-as-workspace-handle dissolves.
+
+Surface: `sp run <role> --chain <molecule-id> --bead <bead-id>`. Decision tree:
+
+```
+chain (molecule) exists in bd?
+├── NO
+│   └── specialist permission?
+│       ├── READ_ONLY: refuse → "chain <id> doesn't exist; create it via `bd mol pour` or `sp chain review`"
+│       └── MEDIUM/HIGH: auto-create
+│           ├── `bd mol pour <inferred-formula>` (auto-resolve via Opp 9 nudges; default code-standard)
+│           ├── `sp chain wire-edges <molecule-id>` post-pour helper applies semantic edges (validates/informs/...)
+│           ├── provision worktree .worktrees/chain-<molecule-id>
+│           ├── `bd merge-slot create` + acquire for the molecule (Opp 1)
+│           └── dispatch
+│
+└── YES (molecule + merge-slot exist; metadata has worktree_path)
+    └── specialist permission?
+        ├── READ_ONLY: bind by path (no merge-slot acquire — Opp 2), dispatch
+        └── MEDIUM/HIGH:
+            ├── merge-slot free → acquire, dispatch
+            └── merge-slot held → queue (refuse "WAIT: lease held by <job>; will dispatch on release")
+
+sp run <role> --bead <bead-id>          # no --chain
+└── permission?
+    ├── READ_ONLY: dispatch in cwd (single-shot ephemeral investigation; current behavior preserved)
+    └── MEDIUM/HIGH: REFUSE → "write-capable specialists require --chain <id> for safety. Use --chain X to bind to existing or auto-create."
+```
+
+Closes Asymmetries **1 + 2 + 6** by inversion (any specialist can dispatch first into a `--chain` that auto-creates; worktree path lives on the merge-slot, not on the bootstrapping job; reviewer + `--chain X` enters the worktree without needing executor live). Also closes **A4** (orphan worktrees: bound to molecule, reaped on chain close) and **C1** (no more `--job` cwd-mismatch path since `--job` is gone). Closes the **existing safety hole** where dispatch without `--worktree` or `--job` ran in `process.cwd` — for write-capable specialists this could write to master directly; the "MEDIUM/HIGH refuses without --chain" rule closes the gap explicitly.
+
+**Grace period (1 release per D14):** `--worktree` and `--job` accepted with stderr deprecation warning, auto-resolving to `--chain <id>`. Hard-cut afterward. **Reads forward:** §6.9.5 + §11.1 `sb dispatch --container <id>` — verb shape identical, `--chain` (bd-molecule today) → `--container` (substrate-container tomorrow). Mechanical rename.
+
+**Cost: ~2 days.** Includes flag handling, deprecation warnings, integration with Opportunity 1+2 (merge-slot lease) + Opp 3 (mol pour) + Opp 6 (chain-derived worktree naming).
+
+**Opportunity 11 [absorbed] — Pull-not-push memory recall via mandatory rule.**
+
+**Problem today.** `runner.ts` injects `.xtrm/memory.md` + `bd prime` output at the spawn of **every** specialist — ~3.8k tokens (memories `specialist-runner-injects-xtrm-memory-md-bd-prime`, `bd-prime-context-overhead`). Most injected memories are irrelevant to the current task scope; small specialists (code-sanity, obligations-scanner, doc-sync) are penalized disproportionately because the irrelevant-memory percentage is enormous against their natural budget.
+
+**Patch.**
+
+1. **Remove** from `runner.ts`'s prompt-builder the auto-injection of `bd prime` + the full dump of `.xtrm/memory.md`.
+2. **Add** a new mandatory rule `config/mandatory-rules/memory-recall.md` (~30 lines) teaching the specialist:
+   - **At startup**, identify 2–4 keywords from the bead (PROBLEM/SCOPE/title keywords) and run `bd memories <keyword>` for each. Typical keywords: subsystem name, operation type (merge/migration/auth/...), critical file names.
+   - **Before relevant decisions** (approach choice, refactor that changes API, non-trivial operation), run a second targeted round on the upcoming decision.
+   - **`bd recall <key>`** to fetch the full payload of a specific memory seen in a `bd memories` result.
+   - **Do not** scroll the full `bd memories` output if >10 results — refine the keyword.
+   - **Do not** invoke `bd prime` (session-bootstrap command, not for specialist runtime).
+3. **Wire**: the rule joins the default `template_sets` for all package-tier specialists (`config/specialists/*.specialist.json`). Tiny pre-scripted specialists (`obligations-scanner`, `changelog-drafter`) may opt out explicitly if measurement shows no benefit.
+
+**Why.** Philosophical alignment with substrate's **memory-as-capability (§10.2)**: the memory-curator role is eliminated; the **chain coordinator distills new memory at close** (failure / best-practice). Opportunity 11 brings the *pull half* into today's runtime: knowledge is already queryable (`bd memories` is fulltext-indexed), just stop pushing it indiscriminately and teach targeted pull.
+
+**Expected savings.** ~3.8k tokens × every spawn. On a typical session of 8–15 dispatches, 30–60k tokens of budget freed for evidence (code, diff, tool results). For haiku/mini specialists the relative gain is highest (3.8k on 200k window = 1.9%, but on a naturally-small 20k task = 19%).
+
+**Risk mitigated.** "Specialist may not call `bd memories` and fall into known bugs" — the mandatory rule is structured as *obligation at startup* (not optional), with concrete examples. Mandatory rules land in the system-prompt tail where compliance is high. Measurable via `bd memories <keyword>` tool-call rate in `specialist_events` post-rollout — gate the review if rate <80% on non-trivial tasks.
+
+**Reads forward.** substrate §10.2 memory-as-capability + chain-coordinator distillation. The substrate dispatcher (§6.4) can precompute a scoped `memory_pack` per step-issue (the Graphify/TaskPrep evolution); the natural next step is dispatcher-injected scoped pack instead of agent-queried pull. Today's pull-not-push is the correct bridge — the dispatcher of tomorrow does not re-introduce the indiscriminate push.
+
+**Cost: ~1 day.** Runtime-injection removal (~30 LOC), new mandatory-rule file (~30 lines), add to `template_sets` of ~14 package-tier specialists (direct JSON edits per CLAUDE.md gotcha). No new APIs, no new infrastructure — just policy expressed as a rule + runtime-code removal.
+
+**Sequenced Phase 1.** Independent, reversible (re-add the injection), measurable A/B in 2–3 sessions.
+
+---
+
+## 4. Orthogonal layer A — Claude Code hook on `bd create`
+
+The single highest-ROI patch and orthogonal to substrate (one layer above the runtime; survives rev-9 unchanged). Catches type-shape mismatches BEFORE any specialist is dispatched. **[recalibrated]** With the runway, this is also a keeper: it operates above the runtime and survives any future, bd-layer or substrate-layer.
+
+### 4.1 Why this beats sp-runtime hints
+
+- **Fires at the right moment** — when the bead is fresh, before the specialist is picked (sp-run hints arrive after the dispatch decision).
+- **Catches type-shape mismatches before they cost a dispatch.**
+- **Uses the existing Claude Code hook mechanism** — no new sp infrastructure.
+- **Cross-references the live registry** — proposes a chain whose specialist names are guaranteed to exist (closes B3+B4).
+- **Works offline of sp** — fires even if sp is broken or the daemon is down.
+
+### 4.2 Hook wiring
+
+`PostToolUse` matcher on Bash matching `^bd create\b` (PostToolUse so the bead id is assigned and visible):
+
+```jsonc
+{ "hooks": { "PostToolUse": [ {
+  "matcher": "Bash",
+  "command_pattern": "^bd create\\b",
+  "hook": "~/.claude/hooks/bd-create-hint.sh" } ] } }
+```
+
+### 4.3 Hook computation
+
+Given `bd create --title --type --priority --description`:
+
+1. **Scrutiny inference** — keyword scan against the SCRUTINY surface table (auth/secret/token/migration/lockfile/.github/workflow → critical; database/cache/perf/race → high; else default).
+2. **Type-shape mismatch** — `type=task` but description leads "fix/regression/broken" → suggest `type=bug + debug`; `type=bug` but "implement/add/create" → suggest `type=task + code-standard`; single-line change → suggest `type=chore`.
+3. **Template proposal** — using the **six §6.9.10 default templates** (hard-coded in the hook as a bridge; the canonical source is substrate §6.9.10): `bug`→`debug`; `task`+medium→`code-standard`; `task`+high/critical→`code-with-advisors`; scope `analytics/**` or tags=quant→`quant-validation`; scope `auth|secrets|crypto|migrations|hooks`→`security-deep`; trivial→`code-quick`.
+4. **Specialist resolution** — per step, resolve via `specialists list --full --json` (cached, refreshed every 10 min or on stale). Print model + est duration.
+5. **Compatibility cross-check** — verify proposed specialists exist (closes B4 at hint-time).
+6. **Step-bead detection** — **[discipline]** if the bead carries the `kind:step` tag, propose the step-contract template; the `<role>:<root-id>` title pattern is only a secondary hint, never the decision (Opp 5).
+
+### 4.4 Hint output
+
+```
+[bd-create-hint] bead created: forge-eorh.74 (type=bug, priority=1)
+Severity inferred: scrutiny=high  (matched "auth retry" against surface table)
+Type-shape check:  OK
+Suggested chain shape:  debug
+  debugger → code-sanity → obligations-scanner → reviewer
+Recommended dispatch:
+  sp chain review forge-eorh.74      # composition gate (Opp 4)
+  sp run debugger --bead forge-eorh.74 --keep-alive --background
+Registry version: registry@2026-05-26 (12m ago; `specialists list --full` to refresh)
+```
+
+### 4.5 What this closes
+
+B1 (lists every required step — skipping becomes explicit against printed text), B2 (proposes `code-with-advisors` for high), B3 (auto-refresh + version print), B4 (live registry cross-check), D4 (bridge until §5.1), R4 (step-bead template via Opp 5).
+
+### 4.6 Cost
+
+~1 day. Standalone — no daemon, no sp patch.
+
+---
+
+## 5. Orthogonal layer B — sp-runtime hints + `sp chain` command
+
+Layer A (§4) fires at bead-creation; this fires at and after `sp run`. Complementary, both needed.
+
+### 5.1 Post-dispatch hint on `sp run`
+
+```
+$ sp run executor --bead forge-eorh.48 --background
+✓ Dispatched executor cc5fcc (model: ..., scrutiny: medium)
+  workspace: .worktrees/chain-forge-eorh.48 (new)
+  expected: ~3-6 min
+  next: on completion → code-sanity (mandatory per §6.9.3 mandatory layer)
+  flag check: --background OK. Did not see --keep-alive (recommended for resumable runs)
+```
+
+Closes B1+B2+D4+D5. `src/cli/run.ts` has the data; it just doesn't print it.
+
+### 5.2 Result-aware next-step hint on `sp result`
+
+PASS → `next: sp merge forge-eorh.48 — chain ready`. PARTIAL → `next: sp resume <exec-job> "address findings: <bullets>"`. FAIL → `next: escalate — reviewer FAIL is operator-decision (do NOT auto-retry)`. After Opp 8, read from the `step_completed` payload. Reflects substrate §6.10: PASS→close_ready→merge; FAIL is not a routine close (an unsatisfied gate blocks, §6.9.2).
+
+### 5.3 Pre-dispatch warning hooks (auto, <2s)
+
+**[per §0 #2: warn-only except the data-loss class, which hard-refuses.]**
+
+| Check | Behavior | Text |
+|---|---|---|
+| Bead missing PROBLEM/SCOPE/VALIDATION/ACCEPTANCE | warn | `BEAD INCOMPLETE: <fields>; specialist quality bounded by bead quality.` |
+| reviewer/code-sanity without `--job <exec-job>` | warn | `MISSING --job: runs from clean checkout, diff context lost.` |
+| debugger dispatched but issue.type=`task` | warn | `TYPE MISMATCH: debugger is for bugs; type=task. Did you mean executor?` |
+| skip code-sanity on production diff | warn | `SKIP NOT PERMITTED on production diff — only test-only/new-file-only may skip.` |
+| `--force-stale-base` without `--reason` | warn (grace) | `STALE BASE: pass --reason "<why>" (Opp 7); old flag deprecated.` |
+| **cwd inside a worktree dispatching for a different bead (C1)** | **HARD-REFUSE** | `CWD MISMATCH: you're in <wt-path> for <bead-X>, dispatching for <bead-Y>. Refusing (data-loss risk, C1). cd out or pass explicit path.` |
+
+**[adjusted: R5 dedup]** The last check IS the reviewer-specific R5 — it lives here, once. §7's R5 references this row rather than restating it. This is the data-loss class, hence hard-refuse not warn.
+
+### 5.4 `sp chain <bead>` CLI dashboard view
+
+Unifies Opp 3 + Opp 8 data into one display (root beads only, §0 #1):
+
+```
+$ sp chain forge-eorh.48
+chain: forge-eorh.48 — "<title>"   template: code-standard   scrutiny: medium
+  ✓ executor          cc5fcc  PASS   3m12s
+  ✓ code-sanity       d6eacc  OK     1m45s   findings: 0
+  → reviewer          7b3775  RUNNING 1m20s
+  ○ merge             pending
+next (when reviewer PASS): sp merge forge-eorh.48
+git state: clean; ahead of main by 3 commits
+```
+
+Read-once (v0, per §0 #5); `-f` follow later.
+
+### 5.5 `sp merge` dirty-index diagnostic
+
+**[recalibrated: LAND, not skip.]** When `sp merge` sees a `git status --porcelain` containing only `.beads/issues.jsonl`, report the cause not "Merge conflict":
+
+```
+sp merge refused: dirty index from bd-auto-export race
+  fix: git restore --staged .beads/issues.jsonl
+  then: retry sp merge
+```
+
+Closes D3. Cost half a day. It is a throwaway bridge — substrate §6.10's transactional `sb container merge` removes the cause — **but A1 recurred 5× in one session and the runway is a month over 10 repos, so the recurrence cost justifies landing it.** (If `xtrm-h9hqg` lands the bd auto-stage fix first and A1 stops recurring, this can be skipped — they address the same root cause from two angles.)
+
+---
+
+## 6. Orthogonal layer C — per-repo bootstrap
+
+**[per §0 #6: split between `xtrm-h9hqg` and friction-audit-side work.]**
+
+**Covered by `xtrm-h9hqg` (P0, IN_PROGRESS) — do NOT duplicate:**
+- **B-A1** bd auto-stage recipe (`export.git-add false` + pre-commit shim after bd markers).
+- **B-A2/A3** the three hooksPath/third-party cases: `core.hooksPath` honored; hooksPath misconfigured at `.beads/hooks` (mercury/{market-data, market-data-uuj, platform, terminalbeta}); non-bd pre-commit at target (precommit.com framework → plugin integration; security-pipeline wrapper → safe append; custom fast-unit-tests runner → manual decision). Idempotent sweep across `~/dev` + `~/projects`, dry-run default + `--apply`.
+- *Plus extra scope the audit hadn't listed:* bd/gitnexus version detection + upgrade (operator-confirm major bumps), pending bd migrations, gitnexus reindex on schema drift, single summary report.
+
+**NOT covered by `xtrm-h9hqg` — friction-audit-side (file separately or extend its scope):**
+- **B-A4** orphan worktree sweep: `git worktree list | grep -v master`, classify live / merged-already / abandoned, auto-remove the latter two, flag live for review.
+- **B-A5** test-runner `.worktrees/` excludes (per-language: vitest/pytest/jest).
+- **B-A6** osv-scanner wrapper as a per-repo `xt-push` shell function.
+
+**Substrate-future:** §13.2 lazy-launch daemon + a clean store removes much of the bd-hook fragility — but the bd-layer fixes are keepers until the §13.7 migration (later than substrate landing), and B-A4/A5/A6 (worktree-level) survive substrate regardless.
+
+---
+
+## 7. Reviewer-specific error modes (R1–R7)
+
+`Non-Negotiable Rule 7` hides seven distinct failure modes. Each gets a pre-dispatch check in `run.ts` when `specialistName === 'reviewer'`, reading `observability.db` + bead store (<200ms).
+
+**[recalibrated] Build more of these than a short runway would justify — they recur across 10 repos over a month — but first dedupe and check redundancy against the structural patches.** Two guards before writing code: (a) **R5 is already implemented in §5.3** (the cwd-mismatch hard-refuse); §7 does not restate it, it references it. (b) **Once Opp 2 (read-only path-binding) and Opp 1 (lease) land, several R-modes lose the surface they fire on** — R1 (no `--job`) and R2 (stale `--job` HEAD) partly dissolve when read-only binds by path against the lease base rather than the owner's live session. So: implement the checks whose friction survives Opp 1/2, skip the ones Opp 1/2 already prevent.
+
+| Tag | Error mode | Check | Status after Opp 1/2 |
+|---|---|---|---|
+| **R1** | reviewer without `--job` → clean checkout, no diff | if no `--job` AND target has a `validates` edge to a bead with an open executor job, refuse with the right command | Partly dissolved — read-only binds by path; keep as a *hint* not a hard refuse |
+| **R2** | `--job` points at a stale/completed executor whose HEAD moved | compare `<exec-job>` last SHA vs worktree HEAD; warn if different | Partly dissolved — lease tracks current HEAD; keep as warn |
+| **R3** | reviewer before mandatory `code-sanity` ran | check for a `code-sanity` PASS on the same `--job`; warn | Survives — build (it's the §6.9.2 completeness contract, pre-substrate) |
+| **R4** | tracking-bead vs target confusion | parse for `reviewer:`/`code-sanity:` prefix; warn with the root | Dissolved by Opp 5 long-term; build the warn as bridge |
+| **R5** | operator cwd in a different worktree | **see §5.3 — implemented there as hard-refuse (data-loss class)** | — (deduped) |
+| **R6** | `scrutiny=critical` but no `security-auditor` in chain history | on reviewer with scrutiny≥high + sensitive surface, check for prior security-auditor; refuse if missing | Survives — build (it's the §6.9.3 mandatory layer, pre-substrate) |
+| **R7** | reviewer dispatched twice for same target | check for an existing PASS on the same `--job`; warn | Survives — build (cheap) |
+
+**Build order, post-recalibration:** R3, R6, R7 first (survive Opp 1/2, real friction). R1, R2, R4 as warns/hints (partly dissolved but cheap and useful during the runway). R5 already done in §5.3. Generalize to code-sanity/obligations-scanner/security-auditor after the reviewer set proves out (§10.5).
+
+**Reads forward.** §6.9.6 + §6.9.2 + §6.10 absorb all seven: R1/R5 impossible (any participant reads the container's worktree), R2 impossible (lease tracks HEAD), R3 → §6.9.2 completeness contract, R4 → §6.9.2 dual-contract, R6 → §6.9.3 mandatory layer, R7 → §6.10 close-ready prevents duplicate dispatch. The checks are bridges to substrate's structural prevention; they retire on substrate, kept now because they close real friction across the runway.
+
+---
+
+## 8. Reuse audit + substrate-future bridge map
+
+### 8.1 Reuse audit
+
+Per substrate's §18 discipline: every patch maps to an existing primitive or is a temporary bridge. No proposal introduces a new daemon, IPC, or entity — every one is text-emission improvement, a thin CLI wrapper over existing data, or shimmed columns.
+
+| Patch | Reuses | New surface |
+|---|---|---|
+| Opp 1 lease columns | jobs/status table; `agent_end` | 2 columns |
+| Opp 2 READ_ONLY path binding | `permission: READ_ONLY` tag; worktree path on `--job` | runner branch |
+| Opp 3 chain shape | jobs/status table | 1 table or JSON-per-chain |
+| Opp 4 `sp chain review/approve/insert` | Opp 3 data; the six §6.9.10 templates | 3 CLI verbs |
+| Opp 5 step-bead conventions | bd `kind:step` tag; Claude hook | convention only |
+| Opp 6 branch naming | worktree.ts template | 1 template change |
+| Opp 7 `--accept-stale-base --reason` | existing flag renamed + arg | flag rename + envelope |
+| Opp 8 `step_completed` | `runner_event` + observability.db | one event kind |
+| Opp 9 nudges | matcher syntax | one selection-config file (not formula sections — see Opp 9 detail) |
+| **Opp 10 `--chain` redesign** | merge-slot (Opp 1), molecule (Opp 3); existing flag-parse code | flag deprecation + auto-create flow |
+| **Opp 11 pull-not-push memory** | `bd memories` / `bd recall` (already exist); mandatory-rule infra (`config/mandatory-rules/`); `template_sets` field on specs | one new rule file + runner-injection removal |
+| Claude hook (§4) | `specialists list --full --json`; PostToolUse | one shell script |
+| sp hints (§5.1–5.3) | data `sp run`/`sp result` already have | stderr blocks + checks |
+| `sp chain` (§5.4) | Opp 3 + Opp 8 | one command |
+| `sp merge` diag (§5.5) | `git status` + merge wrapper | error text |
+| Bootstrap (§6) | `xt init` + `bd config` + `git worktree` | per §0 #6 split |
+
+### 8.2 Substrate-future bridge map
+
+| Patch | Replacement | Survives? |
+|---|---|---|
+| Opp 1 lease | §6.9.6 lease on container | **Yes** — storage moves |
+| Opp 2 READ_ONLY binding | §6.9.6 read-only no lease | **Yes** — identical |
+| Opp 3 chain shape | §6.9.2 resolved shape | **Yes** — rename/re-attach |
+| Opp 4 `sp chain ...` | §6.9.5 + §11.1 | **Yes** — `sp`→`sb` |
+| Opp 5 step-bead | §6.9.2 dual-contract | **Yes** — convention→schema |
+| Opp 6 naming | §6.9.7 | **Yes** — extends as containers nest |
+| Opp 7 stale-base | §6.4 precondition + channels.md §10.2 | **Yes** — keeper |
+| Opp 8 `step_completed` | §3.1 daemon-advances | **Yes** — same payload |
+| Opp 9 nudges | §6.9.5 L1 (selection layer) | **Yes** — same selection-config |
+| **Opp 10 `--chain` redesign** | §6.9.5 + §11.1 `sb dispatch --container <id>` | **Yes** — mechanical rename; runtime adopts substrate identity model early |
+| **Opp 11 pull-not-push memory** | §10.2 memory-as-capability (eventually + dispatcher-precomputed `memory_pack`) | **Yes** — same pull principle; dispatcher-scoped pack is evolution, not reversal |
+| Opp 8 `step_completed` | channels v0 `verdict` message (§11 of channels.md) | **Bridge** — retires when channels v0 ships; same data, simpler shape |
+| Claude hook (§4) | independent of runtime | **Yes** — above runtime |
+| sp hints (§5) | §12 dashboard + §17.1 feed | **Yes** — help offline operators |
+| `sp chain` (§5.4) | `sb container ps <id>` | Mostly — CLI rename |
+| `sp merge` diag (§5.5) | §6.10 transactional close removes cause | **No** — throwaway, but **land** per recalibration (A1 recurrence) |
+| Bootstrap bd pieces (§6) | §13.2 lazy daemon + clean store | Partially — **bd pieces keep value until §13.7 migration, later than landing**; worktree pieces (A4/A5/A6) survive |
+| Reviewer R-checks (§7) | §6.9.6 + §6.9.2 + §6.10 | **No** — friction-justified across the runway; retire on substrate |
+
+**[recalibrated] "Bridges to skip" is now empty.** The prior revision flagged `sp merge` diag as the one skip candidate; the runway flips it to land. Every bridge either survives substrate or repays its cost before retiring.
+
+---
+
+## 9. Mechanism reference — `sp finalize` and `--force-stale-base`
+
+### 9.1 `sp finalize <job-id>` — keep-alive chain-close trigger
+
+`finalize.ts` → `control.ts:155 finalizeJob`. Executor with `--keep-alive` flips to `waiting` after first `agent_end` instead of closing; reviewer enters via `--job` into the same workspace; on reviewer PASS, `sp finalize` reads the verdict from `observability.db.specialist_results` and closes all waiting keep-alive members. Exists because without keep-alive the executor's pi session closes and the reviewer can't `--job` in. **Failure mode:** forgotten `sp finalize` = jobs in `waiting` forever (resource leak). **Opp 2 mitigates** — when READ_ONLY no longer needs owner-keep-alive, the executor releases earlier, dropping the urgency even before substrate removes it. **Substrate replacement (§6.10):** disappears, not migrated — reviewer PASS evidence → reducer derives `close_ready` → `sb container merge` closes all members transactionally. Close is derived from evidence, not commanded.
+
+### 9.2 `--force-stale-base` — stale-base guard bypass
+
+`run.ts:273 assertNoStaleBaseSiblings`. Before dispatch: resolve the bead's epic, list sibling chains, for each with a branch call `previewBranchMergeDelta` + `evaluateMergeWorthiness`; if any sibling has commits worth merging → refuse. **Over-fires** because the equivalent work may already be on master under a different SHA (PR-merged outside `sp epic merge`, branch never deleted, cherry-pick with rewritten SHA) — `evaluateMergeWorthiness` is a structural delta check, not patch-id equivalence. **Patch (Opp 7):** rename + structured envelope + optional patch-id detection. **Substrate replacement (§6.4):** dispatch-time precondition gate (precondition violation, not §5.10 recovery); envelope matches channels.md §10.2.
+
+### 9.3 Common pattern — compensation for missing model
+
+Both are workarounds for absent model: `sp finalize` exists because there's no rule "a chain is closed when its reviewer evidence is PASS and all members are waiting"; `--force-stale-base` because there's no model "sibling work is equivalent if its patch-id matches master." Substrate's contribution is **making the model explicit** so the procedural compensation disappears — the same move as substrate §6.10 (the three bd shims deleted, not migrated). This audit catalogs every place we pay for absent-model with operator procedure; §3–§6 reduce the tax now, substrate eliminates it. **[recalibrated]** Over a month across 10 repos, that tax is paid daily — which is the whole case for building the bridges rather than waiting.
+
+---
+
+## 10. Master sequenced rollout
+
+Sequenced by leverage-per-day. **[recalibrated]** The runway (month+, ~10 repos) raises the value of every friction-removing day, so the ordering optimizes for earliest daily-pain relief.
+
+### Phase 1 — Visibility & decoupling + memory pull (~4 days)
+
+| # | Item | Source | Cost | Why first |
+|---|---|---|---|---|
+| 1 | Claude Code hook on `bd create` | §4 | 1d | Highest leverage — fires before any dispatch; closes B1/B2/B3/B4/D4/R4 |
+| 2 | Opp 2 — READ_ONLY binds by path | §3.2 | 1d | Removes the costliest coupling (4+6); cuts the forgotten-finalize leak |
+| 3 | Opp 8 — `step_completed` + next-step (bridge until channels v0) | §3.2 | 1d | Unlocks §5.1/§5.2; carries the D2 verification-authority principle |
+| 4 | **Opp 11 — pull-not-push memory recall** (remove runner injection + new mandatory rule + wire `template_sets`) | §3.2 / D27 | 1d | Immediate token-budget win (~3.8k/spawn × 8–15 dispatches/session = 30–60k freed); reversible; independent; substrate §10.2 aligned |
+
+### Phase 2 — Composition gate & chain visibility (~5 days)
+
+| # | Item | Source | Cost | Deps |
+|---|---|---|---|---|
+| 5 | Opp 1 — lease columns | §3.2 | 1d | Opp 2 first (defines READ_ONLY) |
+| 6 | Opp 3 — persist chain shape | §3.2 | 2d | — |
+| 7 | Opp 4 — `sp chain review/approve/insert` | §3.2 | 2d | Opp 3 |
+| 8 | sp-runtime hint blocks (§5.1/5.2/5.3) | §5 | 1d | Opp 8 |
+| 9 | **Opp 10 — `--chain <molecule-id>` redesign** (deprecate `--worktree`/`--job` with 1-release grace) | §3.2 | 2d | Opp 1+2 (lease) + Opp 3 (mol) + Opp 6 (naming) |
+
+### Phase 3 — Naming, conventions, environment (~3.5 days)
+
+| # | Item | Source | Cost |
+|---|---|---|---|
+| 10 | Opp 5 — step-bead conventions (`kind:step` tag; label is truth, title is hint) | §3.2 | 1d |
+| 11 | Opp 6 — chain-derived naming | §3.2 | 0.5d |
+| 11b | **D26 prereq for D23**: edit `config/specialists/planner.specialist.json` output_schema + `config/skills/planning/SKILL.md` Pass-2 teaching | §0 D26 | 0.5d |
+| 12 | Opp 7 — `--accept-stale-base --reason` (+ grace period) | §3.2 | 0.5d |
+| 13 | Opp 9 — composition-nudge external selection-config | §3.2 | 1d |
+| 14 | Reviewer checks R3/R6/R7 (build full; survive Opp 10), R1/R2/R4 (warn; retire with `--job`) | §7 / §F | 1d |
+
+### Phase 4 — `sp epic` decoration rewrite (~2 days, see §12)
+
+| # | Item | Source | Cost |
+|---|---|---|---|
+| 15 | Drop `sp epic merge`/`abandon`/`sync` + `epic_runs` + state machine + readiness + reconciler (~500 LOC removed); keep `list`/`status` as thin readers + `--epic` flag + `specialist_jobs.epic_id` | §12 | 2d |
+
+### Phase 5 — Per-repo bootstrap (split)
+
+| # | Item | Source | Owner |
+|---|---|---|---|
+| 16 | bd auto-stage + hooksPath cases + dep/migration verify | §6 / §0 #6 | **`xtrm-h9hqg`** ✓ done (CLOSED 2026-05-27 per D25) |
+| 17 | Orphan worktree cleanup (B-A4), test excludes (B-A5), osv wrapper (B-A6) | §6 | friction-audit-side (~1d) |
+| 18 | `sp merge` dirty-index diagnostic | §5.5 | **Land** per D18 (runway recalibration); 0.5d |
+| 19 | `xt init` auto-runs the bootstrap skill on new repos (per D19) | §6 | xtrm-tools (~0.5d) |
+
+### Phase 6 — Generalize gate pre-dispatch checks (~3 days)
+
+After the reviewer set proves out, generalize R-checks to code-sanity / obligations-scanner / security-auditor (~1d each). Not blocking.
+
+### 10.6 Phase summary
+
+| Phase | Days | Cumulative | Key unlock |
+|---|---|---|---|
+| 1 | 4 | 4 | Pre-dispatch hints; READ_ONLY decoupled from keep-alive; specialists pull scoped memory instead of paying full dump |
+| 2 | 5 | 9 | Composition gate explicit; chain state queryable; `--chain` is the single chain-identity verb; `--worktree`/`--job` deprecated |
+| 3 | 3.5 | 12.5 | Naming aligned; conventions teach the right shape; reviewer mistakes caught; planner spec + planning skill teach `recommended_template` |
+| 4 | 2 | 14.5 | `sp epic` blocker friction eliminated; ~500 LOC removed |
+| 5 | 1 | 15.5 | h9hqg already done; B-A4/A5/A6 + sp merge diagnostic + `xt init` auto-run |
+| 6 | 3 | 18.5 | Other gate roles get checks |
+
+**~14.5 days for Phases 1–5** (core runtime + bootstrap + sp epic decoration), Phase 6 as polish.
+
+### 10.7 What this rollout does NOT do (honest scope)
+
+Does not implement the seed/planning container (substrate §5), the chain coordinator (substrate §4.3), the full channel primitive beyond v0 (channels.md v1–v3), or a `containers` table (substrate §15 Stage 4). Does not remove `sp finalize` (Opp 2 reduces its urgency; substrate §6.10 removes it). Does not retire `bd` (the hook §4 and step-bead conventions Opp 5 make `bd create` smarter; bd is replaced only at substrate §13.7 migration). Does not modify keep-alive semantics (Opp 1+2 decouples cross-job liveness; intra-job keep-alive for resume is preserved per D3). Does not introduce epic-level worktrees (substrate §6.9.7 `wt/epic-<id>/chain-<id>` is future work when substrate lands). These survive substrate intact — bridging them now would be double-work.
+
+---
+
+## 11. Migration shape (confirmed with rev-9 author)
+
+When the `containers` table lands (substrate §15 Stage 4): ship it empty; migrate each `chain-identity` row to a synthetic `kind: chain` container with members re-linked via `container_id`; mark its provenance **`opened_by: synthetic-pre-substrate:<first-job-id>`** (not conflated with real seed/node provenance, §2.6). The §3 patches (Opp 1, 3, 5, 6, 8) already produce container-shaped data, so the migration is a rename pass, not a shim — **that is the value of the bridge: no double-write, just a rename when substrate is ready.** The workspace-identity decision (§0: container-scoped, no first-class `workspace_id`) is what lets `--job`-as-workspace-handle dissolve cleanly into container scoping.
+
+---
+
+## Appendix — Cross-reference matrix
+
+### Friction → patches
+
+A1 → §6/h9hqg + §5.5 diag. A2/A3 → h9hqg (hooksPath cases). A4 → §6 B-A4. A5 → §6 B-A5. A6 → §6 B-A6. B1 → §4 + §5.1 + Opp 4. B2 → §4 + Opp 9. B3 → §4. B4 → §4. B5 → Opp 7. B6 → SKILL + bootstrap detection. B7 → §5.3 + substrate §6.10. C1 → §5.3 cwd hard-refuse (= R5). C2 → Opp 7 + Opp 1. C3 → R1. C4 → §4 bead guidance. D1 → §10.5 polish. D2 → Opp 8 (verification-authority principle). D3 → §5.5. D4 → §5.1. D5 → §5.2 + Opp 8. D6 → Opp 4 + Opp 3.
+
+### Asymmetry → patches
+
+1 → Opp 4 + Opp 10. 2 → Opp 1 + Opp 10. 3 → Opp 3 + Opp 6. 4 → Opp 2 + Opp 1. 5 → Opp 5 + §4. 6 → Opp 2 + Opp 10.
+
+Every friction is addressed by ≥1 patch; every asymmetry removed by ≥1 opportunity. If a planning iteration drops a patch, this matrix shows what becomes uncovered.
+
+**[absorbed] New friction row D7 — memory injection waste.** Spawn auto-injects `bd prime` + `.xtrm/memory.md` dump (~3.8k token) regardless of task scope; small specialists (code-sanity, obligations-scanner) pay disproportionate context tax. Memories: `bd-prime-context-overhead`, `specialist-runner-injects-xtrm-memory-md-bd-prime`. Closed by Opp 11 (pull-not-push memory recall via mandatory rule).
+
+---
+
+## 12. `sp epic` decoration strategy [absorbed]
+
+Captured from explorer-mapped findings (job 2b6a44 against `unitAI-ueron`) and the reconciliation discussion. **The principle:** sp keeps `--epic` flag + `specialist_jobs.epic_id` column (load-bearing for cross-cutting queries) but **drops all epic orchestration logic**. Manual git workflow (Cherry-Pick Playbook) is canonical until substrate `sb container merge` lands.
+
+### 12.1 What `sp epic` does TODAY (explorer-mapped)
+
+| Surface | File | Behavior |
+|---|---|---|
+| `sp epic list [--unresolved] [--json]` | `epic.ts:285-318` | enumerate `epic_runs` + per-epic readiness eval |
+| `sp epic status <id> [--json]` | `epic.ts:478-511` | persisted state + per-chain job status |
+| `sp epic sync <id> [--apply] [--json]` | `epic.ts:573-635` | drift detection (dead jobs, stale chain refs, integrity flags) + optional repair |
+| `sp epic abandon <id> --reason <text> [--force] [--json]` | `epic.ts:657-680` | terminal-state bookkeeping with audit trail |
+| `sp epic merge <id> [--rebuild] [--pr] [--target-branch <name>]` | `epic.ts:344-437` | topological multi-chain merge + tsc gate + dirty-tree auto-shelve |
+| `sp epic resolve` | — | **ALREADY REMOVED** in `unitAI-aurbi.10` (2026-05-08) — derived readiness replaced explicit transition |
+
+### 12.2 Friction patterns (confirming user's "blocker system" concern)
+
+- `sp epic merge` blocked on dirty `.beads/issues.jsonl`; the `MERGE_DIRTY_IGNORE_PREFIXES` patch helped but doesn't address the structural issue
+- `epic_runs` table + state machine duplicate the chain-identity projection — readiness is *already* derivable from job statuses, the persisted state drifts and needs `sp epic sync`
+- Operator workflow has migrated to manual `git merge --no-ff` per chain + Cherry-Pick Playbook (CLAUDE.md rule #9, current); `sp epic merge` is prohibited
+
+### 12.3 What to DROP (Phase 4, ~500 LOC removed)
+
+- `sp epic merge <id>` — the broken multi-chain merger; manual git canonical
+- `sp epic abandon <id>` — terminal-state bookkeeping; bd close handles audit
+- `sp epic sync [--apply]` — drift repair; without persisted `epic_runs` there's no drift to repair
+- `epic_runs` table itself
+- `epic-lifecycle.ts` state machine (open → resolving → merge_ready → merged/failed/abandoned)
+- `epic-readiness.ts` + `epic-reconciler.ts` modules
+- `checkEpicUnresolvedGuard` (only exists to force the dropped merge)
+
+### 12.4 What to KEEP (thin readers)
+
+- `sp epic list` — `bd children <epic> --type chain | --json` + observability join (job status, latest activity per chain)
+- `sp epic status <id>` — same as list, scoped to one epic, with `bd dep tree` rendering
+- `--epic <id>` flag on `sp run` — sets `specialist_jobs.epic_id` for cross-cutting queries
+- `specialist_jobs.epic_id` column — load-bearing for queries like "all jobs under this epic across chains"
+
+### 12.5 Decoration architecture (target state)
+
+```
+sp epic list         → bd children + observability join (read-only)
+sp epic status <id>  → bd dep tree + per-chain job rollup (read-only)
+sp run --epic <id>   → sets specialist_jobs.epic_id
+sp epic merge        → REMOVED; manual git workflow per CLAUDE.md rule #9
+sp epic abandon      → REMOVED; bd close <epic>
+sp epic sync         → REMOVED; nothing to sync (no persisted state)
+```
+
+**Reads forward.** Substrate §6.10 `sb container merge` is the real future for multi-chain merge — close-as-derivation, transactional. Until then, manual git + Cherry-Pick Playbook. The `--epic` flag + `epic_id` column survive: in substrate they become `container_id` pointing at the epic-kind container.
+
+---
+
+## 13. Chain templates concretized — `docs/design/chain-templates/` [absorbed]
+
+The 13 evidence-backed chain templates have been concretized as `bd formula` files in `docs/design/chain-templates/`. Schema verified against current `bd formula` / `bd cook` / `bd mol pour` engine (all parsing + cooking correctly).
+
+### 13.1 Catalog (all 13)
+
+Catalog vs substrate §6.9.10: substrate names **six archetypes** as a floor; the runtime ships the larger evidence-backed catalog below. **A** = one of the six substrate archetypes; **D** = deliberative/maintenance chain (realizes substrate §6.9.8 deliberative issue types, closes with `decided` / artifact outcome rather than a code diff). The §6.9.4 promotion cycle relates the two: deliberative chains that recur become archetypes.
+
+| File | Class | Steps | Roles | Use case |
+|---|---|---|---|---|
+| `code-quick.formula.json` | A | 2 | reviewer | LOW-blast trivial change |
+| `code-standard.formula.json` | A | 5 | executor, code-sanity, obligations-scanner, reviewer | Production-diff default (Iron pipeline) |
+| `code-with-advisors.formula.json` | A | 8 | + parallel explorer/researcher/overthinker before executor | HIGH/CRITICAL blast, unknown approach |
+| `debug.formula.json` | A | 5 | debugger (non-skippable), code-sanity, obligations-scanner, reviewer | Bug fix |
+| `security-deep.formula.json` | A | 7 | security-auditor (×2: advisor + gate), executor, code-sanity, obligations-scanner, reviewer | Sensitive surface — independently validates substrate §6.9.10's "same role at two classes" |
+| `restitch.formula.json` | A | 4 | debugger, code-sanity, reviewer | Conflict recovery (sixth archetype) |
+| `release-prep.formula.json` | D | 3 | changelog-drafter, changelog-keeper | Release [Unreleased] reconcile |
+| `triage.formula.json` | D | 3 | explorer, overthinker | Board health |
+| `research-only.formula.json` | D | 2 | `{{specialist}}` (default explorer; override researcher) | Pure investigation |
+| `planning.formula.json` | D | 2 | planner | Vague initiative → phased board |
+| `premortem.formula.json` | D | 2 | overthinker | Devil's advocate before risky design |
+| `doc-sync.formula.json` | D | 2 | sync-docs | Single-doc drift update |
+| `memory-hygiene.formula.json` | D | 2 | memory-processor | Stale memory consolidation |
+
+### 13.2 Critical schema findings (verified against bd binary)
+
+- **File format:** `.formula.json` (TOML also supported). YAML deprecated (changelog: "Formula format YAML→JSON").
+- **Top-level field is `formula` (not `name`).** Validation error says "name is required" but the JSON key is `formula`.
+- **`version` is INT, `extends` is array** (single string fails parse).
+- **`vars` is a map**, not array: `{ "var": { "default": "...", "required": false } }`.
+- **Per-step:** `id` (required), `title` (required, supports `{{var}}`), `type` (bd issue type), `needs` (deps → becomes `blocks` edge), `description` (multi-line, supports `{{var}}`), `labels` (array).
+- **`applies_when` matcher NOT supported as formula field** — silently dropped. Selection logic lives in Claude hook §4 + `sp chain review` dispatcher externally. **One matcher language across the system** still holds, applied at selection layer (Opp 9).
+
+### 13.3 Chain ≡ bd `molecule` (refinement of §0 absorbed model)
+
+`bd mol pour <formula>` creates an `issue_type=molecule` parent (NOT epic) with steps as children via `parent-child` edges + `blocks` edges between siblings per `needs`. The molecule IS the chain identity. To nest a chain inside an organizational epic: `bd dep add <molecule-id> <organizational-epic-id> --type parent-child` after pour.
+
+### 13.4 Post-pour edge-wiring helper (Option B confirmed)
+
+`needs` produces `blocks-on` edges only. Semantic edges from Opp 5 (`validates`, `informs`, `discovered-from`) are encoded in step `labels` as `edge:<type>-><target>`. Helper script `sp chain wire-edges <molecule-id>` reads labels post-pour and applies the right `bd dep add <step> <target> --type <type>`. Pseudocode + spec in `docs/design/chain-templates/README.md`. Implementation: ~50 LOC, idempotent. Land in Phase 2.
+
+### 13.5 Per-repo extension pattern
+
+`bd formula extends: ["parent-formula"]` (array, not string) appends parent steps + child steps. Example from market-data:
+
+```jsonc
+// ~/projects/mercury/market-data/.beads/formulas/quant-validation.formula.json
+{
+  "formula": "quant-validation",
+  "extends": ["code-with-advisors"],
+  "steps": [
+    { "id": "quant-methodologist", "title": "quant-methodologist:{{root_title}}", "needs": ["root"], ... }
+  ]
+}
+```
+
+**Caveat:** `extends` APPENDS — child steps come AFTER parent steps. To put a custom advisor BEFORE executor, either duplicate the full chain or accept that the parent's executor still has its original `needs`. We chose duplication for the default catalog (no extends) for predictability.
+
+### 13.6 What still needs implementation
+
+- **`sp chain wire-edges <molecule-id>`** helper (~50 LOC). Phase 2.
+- **Claude hook on `bd create` template proposal** (§4) needs the template catalog paths to suggest. Phase 1.
+- **`sp chain review <bead>`** (Opp 4) dispatches `bd cook` + `bd mol pour` + `sp chain wire-edges` as one composed operation. Phase 2.
+- **Shipping mechanism:** copy `docs/design/chain-templates/*.formula.json` to `~/.beads/formulas/` via `xt init` / `xt update`, or to per-repo `<repo>/.beads/formulas/` behind a flag.
+
+### 13.7 New friction patterns closed by templates
+
+| Friction (pre-template) | Closed by template |
+|---|---|
+| Reviewer skipped on trivial diff | `code-quick` (reviewer non-skippable structurally) |
+| Explorer forgotten on HIGH blast | `code-with-advisors` (3 advisors parallel before executor) |
+| Debugger forgotten on bug | `debug` (debugger non-skippable opener) |
+| Overthinker never dispatched | `triage` + `premortem` + `code-with-advisors` |
+| Researcher never dispatched | `code-with-advisors` + `research-only` |
+| Changelog manual fill | `release-prep` (drafter → keeper automated) |
+| Investigation accidentally writes code | `research-only` (scope-empty:code label + NON_GOALS) |
+| Manual git fallback after sp merge fail | `restitch` (clean recovery flow) |
+| Planning intent dropped on the floor | `planning` (planner alone, output is bd issue board) |
+| Risky design committed without devil's-advocate | `premortem` (overthinker alone, type=decision) |
+| Doc drift accumulates | `doc-sync` (single-doc drift update) |
+| Stale memory pollutes future sessions | `memory-hygiene` (memory-processor consolidation) |
