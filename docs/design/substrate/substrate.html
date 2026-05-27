@@ -94,6 +94,49 @@ hr{border:0;border-top:1px solid var(--paper-shade);margin:40px 0}
 .timeline p{margin:0;font-size:14px;max-width:none}
 .badge-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
 .badge{font-family:var(--mono);font-size:10px;letter-spacing:0.08em;text-transform:uppercase;border:1px solid var(--accent);color:var(--accent);padding:2px 7px;background:var(--paper)}
+.callout{border-left:3px solid var(--accent);padding:14px 22px;background:var(--paper-shade);margin:24px 0;font-style:italic;max-width:76ch}
+.callout.flat{border-left-color:var(--ink);font-style:normal}
+.sidenote{font-size:13px;color:var(--muted);font-style:italic;border-top:1px solid var(--paper-shade);border-bottom:1px solid var(--paper-shade);padding:8px 0;margin:16px 0;font-family:var(--serif);max-width:76ch}
+.chip{display:inline-flex;align-items:center;gap:4px;padding:1px 8px;border-radius:0;font-family:var(--mono);font-size:10px;letter-spacing:0.05em;border:1px solid;text-transform:uppercase;white-space:nowrap}
+.chip.ready{color:#2C5F1F;border-color:#2C5F1F}
+.chip.partial{color:#9A6A12;border-color:#9A6A12}
+.chip.invalid{color:#8A2949;border-color:#8A2949}
+.chip.live{color:var(--accent);border-color:var(--accent)}
+.dash{background:var(--paper);border:1.5px solid var(--rule);padding:0;margin:24px 0;font-family:var(--mono);font-size:11.5px;color:var(--ink)}
+.dash-bar{padding:10px 14px;border-bottom:1.5px solid var(--rule);display:flex;justify-content:space-between;gap:12px;align-items:center;background:var(--paper-shade)}
+.dash-bar .left{display:flex;align-items:center;gap:10px;font-weight:500;flex-wrap:wrap}
+.dash-bar .right{font-size:10px;color:var(--muted);letter-spacing:0.05em;text-align:right}
+.dash-grid{display:grid;grid-template-columns:1.25fr 1fr;border-bottom:1px solid var(--paper-shade)}
+.dash-cell{padding:12px 14px;border-right:1px solid var(--paper-shade)}
+.dash-cell:last-child{border-right:none}
+.dash-h{font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:7px}
+.dash-evt{display:grid;grid-template-columns:58px 48px 112px 1fr;gap:8px;padding:6px 14px;border-bottom:1px dashed var(--paper-shade);align-items:baseline;font-size:11px}
+.dash-evt:last-child{border-bottom:none}
+.tag{display:inline-block;padding:0 5px;font-size:9px;font-weight:600;letter-spacing:0.05em;text-align:center;width:38px;color:var(--paper)}
+.tag.life{background:var(--c-life)}
+.tag.mail{background:var(--c-mail)}
+.tag.teth{background:var(--c-teth)}
+.tag.coll{background:var(--c-coll)}
+.tag.ctrc{background:var(--c-ctrc)}
+.tag.plan{background:var(--c-plan)}
+.dash-evt.mail{background:rgba(63,47,134,0.04)}
+.dash-evt.teth{background:rgba(154,106,18,0.05)}
+.dash-evt.coll{background:rgba(138,41,73,0.05)}
+.dash-evt.ctrc{background:rgba(26,77,133,0.04)}
+.dash-evt.plan{background:rgba(44,95,31,0.04)}
+.matrix-cell{padding:6px;text-align:center;border:1px solid var(--paper-shade);font-size:10px;font-family:var(--mono)}
+.matrix-cell.edit{background:rgba(26,77,133,0.12);color:#1A4D85;font-weight:600}
+.matrix-cell.collide{background:rgba(138,41,73,0.18);color:#8A2949;font-weight:600}
+.matrix-cell.empty{color:var(--faint)}
+.ledger{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:16px 0}
+.ledger .entry{border:1px solid var(--paper-shade);background:rgba(245,242,233,0.75);padding:12px}
+.ledger .entry b{display:block;font-family:var(--mono);font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:var(--accent);margin-bottom:6px}
+.ledger .entry span{display:block;font-size:14px;line-height:1.35}
+.axis-map{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.axis{border:1px solid var(--rule);background:var(--paper);padding:12px}
+.axis b{font-family:var(--mono);font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--accent)}
+.axis ul{margin:8px 0 0;padding-left:16px}
+.axis li{font-size:13px;margin-bottom:3px}
 svg.diagram{display:block;width:100%;height:auto}
 svg.diagram text{font-family:var(--mono);font-size:11px;fill:var(--ink)}
 svg.diagram .serif{font-family:var(--serif);font-style:italic;font-size:15px}
@@ -104,7 +147,7 @@ svg.diagram .soft{fill:var(--paper-shade);stroke:var(--paper-shade)}
 svg.diagram .line{stroke:var(--accent);stroke-width:1.4;fill:none}
 footer{margin-top:96px;padding-top:32px;border-top:2px solid var(--rule);font-family:var(--mono);font-size:11px;letter-spacing:0.05em;color:var(--muted);display:flex;justify-content:space-between;gap:16px}
 footer .accent{color:var(--accent)}
-@media (max-width:780px){.page{padding:48px 24px 80px}h1.title{font-size:44px}.meta{grid-template-columns:repeat(2,1fr)}.toc{column-count:1}table{display:block;overflow-x:auto;white-space:normal}.split-visual,.map-grid,.map-grid.five{grid-template-columns:1fr}.arrow{display:none}.flow{display:grid;grid-template-columns:1fr}}
+@media (max-width:780px){.page{padding:48px 24px 80px}h1.title{font-size:44px}.meta{grid-template-columns:repeat(2,1fr)}.toc{column-count:1}table{display:block;overflow-x:auto;white-space:normal}.split-visual,.map-grid,.map-grid.five,.dash-grid,.ledger,.axis-map{grid-template-columns:1fr}.dash-bar{align-items:flex-start}.dash-bar .right{text-align:left}.dash-evt{grid-template-columns:54px 44px 1fr}.dash-evt span:nth-child(3){display:none}.arrow{display:none}.flow{display:grid;grid-template-columns:1fr}}
 @media print{body{background:white}pre{break-inside:avoid;font-size:10px}section{break-before:auto;break-after:auto}section > h2{break-after:avoid}table{break-inside:avoid}}
 
 </style>
@@ -198,6 +241,45 @@ footer .accent{color:var(--accent)}
 
 <p>The CLI never surfaces the package name (<code>xt skills update</code>, not <code>xt core skills update</code>).</p>
 
+<figure class="visual">
+<div class="figmeta"><span class="num">Fig. 00A</span><span>monorepo, one runtime store, code-owned domains</span></div>
+<svg class="diagram" viewBox="0 0 900 360" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="layoutArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7A1F1B"/>
+    </marker>
+  </defs>
+  <rect x="24" y="28" width="852" height="292" fill="none" stroke="#15130E" stroke-width="1.2" stroke-dasharray="6 4"/>
+  <text x="450" y="54" text-anchor="middle" class="serif">xtrm monorepo</text>
+  <rect x="60" y="86" width="132" height="70" class="box"/>
+  <text x="126" y="112" text-anchor="middle">core</text>
+  <text x="126" y="132" text-anchor="middle" class="muted">xt · bootstrap</text>
+  <rect x="214" y="86" width="132" height="70" class="box"/>
+  <text x="280" y="112" text-anchor="middle">substrate</text>
+  <text x="280" y="132" text-anchor="middle" class="muted">sb · work truth</text>
+  <rect x="368" y="86" width="132" height="70" class="box"/>
+  <text x="434" y="112" text-anchor="middle">channels</text>
+  <text x="434" y="132" text-anchor="middle" class="muted">lib/ch · messages</text>
+  <rect x="522" y="86" width="132" height="70" class="box"/>
+  <text x="588" y="112" text-anchor="middle">specialists</text>
+  <text x="588" y="132" text-anchor="middle" class="muted">sp · jobs</text>
+  <rect x="676" y="86" width="132" height="70" class="box"/>
+  <text x="742" y="112" text-anchor="middle">console</text>
+  <text x="742" y="132" text-anchor="middle" class="muted">web · renderer</text>
+
+  <rect x="220" y="218" width="460" height="74" fill="#EBE7DB" stroke="#15130E" stroke-width="1.4"/>
+  <text x="450" y="246" text-anchor="middle">~/.xtrm/state.db · one daemon · one socket</text>
+  <text x="450" y="268" text-anchor="middle" class="muted">tables namespaced by domain · no cross-domain foreign keys</text>
+
+  <line x1="280" y1="156" x2="360" y2="218" stroke="#7A1F1B" stroke-width="1.2" marker-end="url(#layoutArrow)"/>
+  <line x1="434" y1="156" x2="430" y2="218" stroke="#7A1F1B" stroke-width="1.2" marker-end="url(#layoutArrow)"/>
+  <line x1="588" y1="156" x2="540" y2="218" stroke="#7A1F1B" stroke-width="1.2" marker-end="url(#layoutArrow)"/>
+  <line x1="742" y1="156" x2="620" y2="218" stroke="#7A1F1B" stroke-width="1.2" marker-end="url(#layoutArrow)"/>
+  <text x="450" y="330" text-anchor="middle" class="muted">separation lives in package APIs and table ownership; operationally the user sees one local runtime</text>
+</svg>
+<figcaption>The rev10 simplification is visual as well as architectural: one process and one store at runtime, but each package owns its own domain tables and API surface.</figcaption>
+</figure>
+
 
 <hr>
 
@@ -221,6 +303,31 @@ footer .accent{color:var(--accent)}
 
 
 <p>The fix is not a better dashboard. The fix is making the missing entities <strong>real in the runtime</strong>, with stable IDs, lifecycles, and CLI surfaces. The dashboard then becomes a thin renderer over runtime state.</p>
+
+<figure class="visual">
+<div class="figmeta"><span class="num">Fig. 01A</span><span>from tribal state to named runtime state</span></div>
+<div class="split-visual">
+  <div>
+    <h4>Today: held by discipline</h4>
+    <div class="timeline">
+      <div class="rail"><span class="label">implicit</span><p>Chains exist only because the orchestrator remembers which jobs belong together.</p></div>
+      <div class="rail"><span class="label">late</span><p>Collisions are discovered when branches are merged, not when the conflict becomes inevitable.</p></div>
+      <div class="rail"><span class="label">prose</span><p>Issues are free-text requests whose quality depends on how tired the operator was.</p></div>
+      <div class="rail"><span class="label">manual</span><p>Reviewer, debugger, memory, and gate steps are optional unless someone remembers them.</p></div>
+    </div>
+  </div>
+  <div>
+    <h4>Substrate: named entities</h4>
+    <div class="timeline">
+      <div class="rail"><span class="label">container</span><p><code>chain:</code>, <code>epic:</code>, <code>wave:</code>, <code>seed:</code>, <code>node:</code> are queryable objects with lifecycle.</p></div>
+      <div class="rail"><span class="label">channel</span><p>Every container has an append-only stream whose participants and cursors are runtime state.</p></div>
+      <div class="rail"><span class="label">contract</span><p>Issues carry class/type/role, validation, evidence, and close eligibility.</p></div>
+      <div class="rail"><span class="label">gate</span><p>Verification authority is persisted outside the actor that did the work.</p></div>
+    </div>
+  </div>
+</div>
+<figcaption>The design moves the fragile parts from memory and ritual into durable objects: container, issue, channel, pulse, evidence, gate.</figcaption>
+</figure>
 
 
 <hr>
@@ -294,6 +401,62 @@ footer .accent{color:var(--accent)}
 </tbody></table>
 
 <p>IDs use a <strong>colon separator</strong> (<code>chain:7f3a</code>, <code>node:research</code>) because a container&#39;s ID <em>is</em> its channel&#39;s workstream ID (§7), so they must be the same token. Hierarchical sub-streams nest with <code>/</code> (<code>node:n1/sub:ab12</code>).</p>
+
+<figure class="visual">
+<div class="figmeta"><span class="num">Fig. 02A</span><span>entity map · what owns what</span></div>
+<svg class="diagram" viewBox="0 0 900 520" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="entityArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#15130E"/>
+    </marker>
+    <marker id="entityAccent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7A1F1B"/>
+    </marker>
+  </defs>
+  <rect x="40" y="50" width="820" height="420" fill="rgba(235,231,219,0.45)" stroke="#15130E" stroke-width="1.2"/>
+  <text x="450" y="80" text-anchor="middle" class="serif">container scope</text>
+  <rect x="80" y="118" width="160" height="76" class="box"/>
+  <text x="160" y="145" text-anchor="middle">container</text>
+  <text x="160" y="164" text-anchor="middle" class="muted">chain:7f3a</text>
+  <text x="160" y="181" text-anchor="middle" class="muted">lifecycle + budget</text>
+  <rect x="368" y="118" width="164" height="76" fill="#F5F2E9" stroke="#7A1F1B" stroke-width="1.4"/>
+  <text x="450" y="145" text-anchor="middle">channel</text>
+  <text x="450" y="164" text-anchor="middle" class="muted">same ID: chain:7f3a</text>
+  <text x="450" y="181" text-anchor="middle" class="muted">append-only stream</text>
+  <rect x="660" y="118" width="150" height="76" class="box"/>
+  <text x="735" y="145" text-anchor="middle">pulse</text>
+  <text x="735" y="164" text-anchor="middle" class="muted">trigger/job/message</text>
+  <text x="735" y="181" text-anchor="middle" class="muted">idempotent</text>
+
+  <rect x="86" y="270" width="126" height="64" class="box"/>
+  <text x="149" y="296" text-anchor="middle">issue</text>
+  <text x="149" y="314" text-anchor="middle" class="muted">contract</text>
+  <rect x="244" y="270" width="126" height="64" class="box"/>
+  <text x="307" y="296" text-anchor="middle">participant</text>
+  <text x="307" y="314" text-anchor="middle" class="muted">specialist/script</text>
+  <rect x="402" y="270" width="126" height="64" class="box"/>
+  <text x="465" y="296" text-anchor="middle">evidence</text>
+  <text x="465" y="314" text-anchor="middle" class="muted">diff/verdict/test</text>
+  <rect x="560" y="270" width="126" height="64" class="box"/>
+  <text x="623" y="296" text-anchor="middle">memory</text>
+  <text x="623" y="314" text-anchor="middle" class="muted">capability</text>
+  <rect x="718" y="270" width="92" height="64" class="box"/>
+  <text x="764" y="296" text-anchor="middle">tether</text>
+  <text x="764" y="314" text-anchor="middle" class="muted">sidecar</text>
+
+  <line x1="240" y1="156" x2="366" y2="156" stroke="#7A1F1B" stroke-width="1.4" marker-end="url(#entityAccent)"/>
+  <text x="303" y="145" text-anchor="middle" class="muted">opens</text>
+  <line x1="532" y1="156" x2="658" y2="156" stroke="#15130E" stroke-width="1.2" marker-end="url(#entityArrow)"/>
+  <text x="595" y="145" text-anchor="middle" class="muted">emits / reacts</text>
+  <line x1="160" y1="194" x2="149" y2="268" stroke="#15130E" stroke-width="1.2" marker-end="url(#entityArrow)"/>
+  <line x1="220" y1="194" x2="307" y2="268" stroke="#15130E" stroke-width="1.2" marker-end="url(#entityArrow)"/>
+  <line x1="450" y1="194" x2="465" y2="268" stroke="#15130E" stroke-width="1.2" marker-end="url(#entityArrow)"/>
+  <line x1="506" y1="194" x2="623" y2="268" stroke="#15130E" stroke-width="1.2" marker-end="url(#entityArrow)"/>
+  <line x1="735" y1="194" x2="764" y2="268" stroke="#15130E" stroke-width="1.2" marker-end="url(#entityArrow)"/>
+  <text x="450" y="398" text-anchor="middle" class="muted">cross-container coordination never watches another channel directly; it crosses by pulse</text>
+</svg>
+<figcaption>Container and channel share an ID, but not responsibility: substrate owns work state, channels owns message ordering, specialists owns job execution, and pulse is the boundary between containers.</figcaption>
+</figure>
 
 
 <h3 id="participants-a-specialist-is-one-kind-not-the-only-kind">2.2 Participants — a specialist is one kind, not the only kind</h3>
@@ -664,6 +827,19 @@ footer .accent{color:var(--accent)}
 <li><strong>Hygiene coordinator (cross-chain, via pulse).</strong> Coordinators on parallel chains pulse each other (§2.3) for <strong>mechanical hygiene</strong> — collision alerts (&quot;I&#39;m touching file X&quot;), gate-state advertisements (&quot;code-sanity passed, evidence Y available&quot;), wait-for-me requests. The line that must hold: <strong>pulses are for mechanics, never for vision.</strong> &quot;Deciding which approach to take&quot; or &quot;should we abort?&quot; stay with the orchestrator. The coordinator&#39;s pulse vocabulary is documented hygiene events, not open negotiation.</li>
 <li><strong>Close-time judge (pre-merge).</strong> When the reducer says <code>close_ready</code>, the coordinator does the closing pass: confirms or pushes back on the derivation; verifies <strong>git is clean <em>for real</em></strong> (not just <code>git status --porcelain</code> clean — every intended change committed, branch in the declared state, no stray artifacts); <strong>distills memory</strong> from the chain&#39;s outcome — <code>type:failure</code> for semantic failures (§5.10), <code>type:best_practice</code> for clean successes — replacing the role previously held by a dedicated curator (§10.2); <strong>proposes <code>class: followup</code> issues</strong> for findings that surfaced during the chain but fell outside its scope (<code>sb issue create --rel discovered-from:&lt;root&gt;</code>, §6.7) — these followups are ordinary root issues, free to scale into chains of their own later if the operator/orchestrator promotes them. Only after these passes does the coordinator release the chain to <code>sb container merge</code>. This is where the coordinator most clearly adds value the reducer cannot: judgment about what was learned, what&#39;s still owed, what&#39;s worth remembering.</li>
 </ol>
+
+<figure class="visual">
+<div class="figmeta"><span class="num">Fig. 04B</span><span>chain coordinator · four judgment roles</span></div>
+<div class="map-grid">
+  <div class="mini-card"><b>entry gate</b><p>Fresh-context check after <code>sb chain approve</code>; may insert steps within autonomy before step-1 dispatches.</p></div>
+  <div class="mini-card"><b>borderline judge</b><p>Interprets ambiguous evidence and minor gate findings that the reducer cannot classify mechanically.</p></div>
+  <div class="mini-card"><b>hygiene pulse</b><p>Coordinates collision alerts, gate-state advertisements, and wait requests across chains by pulse.</p></div>
+  <div class="mini-card"><b>close judge</b><p>Confirms <code>close_ready</code>, checks git for real, distills memory, and proposes followups.</p></div>
+  <div class="mini-card"><b>boundary</b><p>Mechanics belong here; vision remains with the orchestrator. Beyond policy, it escalates.</p></div>
+  <div class="mini-card"><b>lifetime</b><p>Spawned for this chain only. No standing journal; dies with the transient container.</p></div>
+</div>
+<figcaption>The coordinator is the rev10 addition that turns a chain from “steps plus gates” into a transient container with its own bounded judgment surface.</figcaption>
+</figure>
 
 
 <p><strong>Same access as any participant — no privileged read path.</strong> The coordinator reads the chain&#39;s channel (live stream, §6.8) and queries <code>issue.evidence_json</code> (the durable persisted side of the dual-write, §6.8) — both views are available to every participant; the coordinator uses the channel for live coordination during execution and the persisted evidence for structured queries at close-time. This keeps the replay log canonical and gives the coordinator no special channel into substrate.</p>
@@ -1441,6 +1617,17 @@ ISSUE_LOCAL_RULES     (from this issue&#39;s `issue_local_rules`)
 
 <p>The behavioral contract is explicit: <strong>only <code>blocks</code>, <code>parent-child</code>, and <code>until</code> gate dispatch.</strong> Everything else is read for context or recorded for tracing, never blocks dispatch. This is the thing bd left implicit and substrate makes a property of the relationship <code>kind</code> itself.</p>
 
+<figure class="visual">
+<div class="figmeta"><span class="num">Fig. 06D</span><span>relationship semantics by runtime effect</span></div>
+<div class="axis-map">
+  <div class="axis"><b>gate</b><ul><li><code>blocks</code></li><li><code>parent-child</code></li><li><code>until</code></li></ul></div>
+  <div class="axis"><b>context</b><ul><li><code>discovered-from</code></li><li><code>validates</code></li><li><code>caused-by</code></li><li><code>relates</code></li><li><code>tracks</code></li></ul></div>
+  <div class="axis"><b>lifecycle</b><ul><li><code>supersedes</code></li><li>closes old issue</li><li>redirects references</li></ul></div>
+</div>
+<div class="callout flat"><strong>Dispatch rule:</strong> gate edges change what can start; context edges change what gets read; lifecycle edges change which issue remains canonical. Those effects are not interchangeable.</div>
+<figcaption>This is the part bd could store but not interpret. Substrate makes the relationship kind executable runtime knowledge.</figcaption>
+</figure>
+
 
 <p><strong>Two future edges, deliberately not added yet.</strong> A review pass proposed <code>informs</code> (output enters a target&#39;s context pack) and <code>spawned_by</code> (runtime provenance from a pulse / template event). Both are <em>subsumed today</em> — <code>informs</code> by <code>relates</code>, <code>spawned_by</code> by <code>discovered_from</code> — so per the discipline of not creating variants until a use distinguishes them, they stay folded in. The split paths are recorded for the next agent: promote <code>informs</code> out of <code>relates</code> when context-pack rules need to distinguish pack-feeding context from soft context; split <code>spawned_by</code> from <code>discovered_from</code> when replay/audit needs to distinguish human creation from runtime materialization. Until then, nine relationships, not eleven.</p>
 
@@ -1968,6 +2155,46 @@ failed-transient · failed-semantic · failed-with-container · abandoned · aba
 
 <p>So the specialist never &quot;joins a channel.&quot; It is spawned into a container; the container has a channel; the spawn does the wiring by resolving the spec template. Static template (config) → automatic resolution (spawn-time) → live state (in the container). The orchestrator touches none of the three — the topology of who-talks-to-whom is now an emergent property of &quot;who is inside which container, with which templates,&quot; not orchestrator-held state.</p>
 
+<figure class="visual">
+<div class="figmeta"><span class="num">Fig. 07A</span><span>spawn-time channel wiring</span></div>
+<div class="flow">
+  <div class="step"><strong>container</strong><span><code>chain:7f3a</code> opens; its channel already exists because the ID is shared.</span></div>
+  <div class="arrow">→</div>
+  <div class="step"><strong>spec template</strong><span><code>.specialist.json</code> declares <code>subscribes</code>, <code>emits</code>, <code>wakes_on</code>.</span></div>
+  <div class="arrow">→</div>
+  <div class="step"><strong>resolve</strong><span>Spawn reads issue scope and participant key; relational filters become concrete predicates.</span></div>
+  <div class="arrow">→</div>
+  <div class="step"><strong>active row</strong><span><code>channel_subscriptions</code> gets a cursor for this job in this channel.</span></div>
+</div>
+<div class="dash">
+  <div class="dash-bar">
+    <div class="left"><span class="chip live">spawn</span><span>chain:7f3a · subscription resolution</span></div>
+    <div class="right">orchestrator writes no channel topology</div>
+  </div>
+  <div class="dash-grid">
+    <div class="dash-cell">
+      <div class="dash-h">static template</div>
+      <pre style="margin:0;font-size:11px"><code>"channel": {
+  "subscribes": ["steer:me", "verdict:me", "finding:scope-overlap"],
+  "emits": ["turn", "finding", "proposal"]
+}</code></pre>
+    </div>
+    <div class="dash-cell">
+      <div class="dash-h">runtime subscription row</div>
+      <table style="font-size:10px;margin:0">
+        <tbody>
+          <tr><td>channel_id</td><td><code>chain:7f3a</code></td></tr>
+          <tr><td>participant_key</td><td><code>exec_7f3a</code></td></tr>
+          <tr><td>scope_filter</td><td><code>src/runtime/**</code></td></tr>
+          <tr><td>last_seq_seen</td><td><code>0</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+<figcaption>The channel topology is no longer an orchestrator-held convention. Spawning into a container resolves a static participant template into an active subscription with a cursor.</figcaption>
+</figure>
+
 
 <p><strong>Resolving relational filters needs a cross-store read.</strong> Self-addressed filters (<code>steer:me</code>, <code>verdict:me</code>) resolve trivially against the job&#39;s <code>participant_key</code>. But relational filters — <code>finding:scope-overlap</code> (&quot;wake me on findings whose files intersect <em>my</em> scope&quot;), <code>turn:peer</code> — need the job&#39;s scope, which comes from the issue contract (<code>contract.scope</code>) of the issue this job is executing. So spawn-time resolution does one cross-store read: specialists asks substrate &quot;what is the scope of this container&#39;s issue?&quot; to resolve the filter. This is the §13.1 opaque-ID join-in-the-reader pattern, where the &quot;reader&quot; is the spawn-time runtime.</p>
 
@@ -2021,6 +2248,65 @@ git -C &lt;worktree&gt; diff                         # uncommitted on top
 <li><strong>Range-level collision</strong> (red): same file, overlapping line ranges. Will conflict at merge.</li>
 <li><strong>Semantic collision</strong> (red, with caveat): non-overlapping ranges, but one chain edits a symbol the other chain calls (resolved via cached <code>gitnexus_impact</code>). Git would merge cleanly; behavior may break.</li>
 </ol>
+
+<figure class="visual">
+<div class="figmeta"><span class="num">Fig. 09A</span><span>live file-touch matrix</span></div>
+<table style="margin:0;font-family:var(--mono);font-size:11px">
+<thead>
+<tr>
+<th style="text-align:left">file</th>
+<th style="text-align:center;width:92px">chain:42in</th>
+<th style="text-align:center;width:92px">chain:19e5</th>
+<th style="text-align:center;width:92px">chain:9xg2</th>
+<th style="text-align:center;width:92px">chain:xxf4</th>
+<th style="text-align:center;width:92px">chain:f8z7</th>
+</tr>
+</thead>
+<tbody>
+<tr style="background:rgba(138,41,73,0.05)">
+<td style="font-weight:600;color:#8A2949">packages/substrate/src/container.ts</td>
+<td class="matrix-cell collide">L142+24 ⊕</td>
+<td class="matrix-cell empty">·</td>
+<td class="matrix-cell collide">L151-176</td>
+<td class="matrix-cell empty">·</td>
+<td class="matrix-cell empty">·</td>
+</tr>
+<tr style="background:rgba(138,41,73,0.05)">
+<td style="font-weight:600;color:#8A2949">packages/channels/src/reducer.ts</td>
+<td class="matrix-cell empty">·</td>
+<td class="matrix-cell collide">L34+19</td>
+<td class="matrix-cell collide">L48-63 ⊕</td>
+<td class="matrix-cell empty">·</td>
+<td class="matrix-cell empty">·</td>
+</tr>
+<tr>
+<td>packages/specialists/src/runner.ts</td>
+<td class="matrix-cell empty">·</td>
+<td class="matrix-cell edit">+5</td>
+<td class="matrix-cell edit">+9 ⊕</td>
+<td class="matrix-cell empty">·</td>
+<td class="matrix-cell empty">·</td>
+</tr>
+<tr>
+<td>config/substrate/templates.yaml</td>
+<td class="matrix-cell edit">NEW</td>
+<td class="matrix-cell empty">·</td>
+<td class="matrix-cell empty">·</td>
+<td class="matrix-cell edit">+34</td>
+<td class="matrix-cell empty">·</td>
+</tr>
+<tr>
+<td>docs/design/substrate/substrate.md</td>
+<td class="matrix-cell empty">·</td>
+<td class="matrix-cell empty">·</td>
+<td class="matrix-cell empty">·</td>
+<td class="matrix-cell empty">·</td>
+<td class="matrix-cell edit">+15</td>
+</tr>
+</tbody>
+</table>
+<figcaption>⊕ marks a currently active turn. Pink cells are range-level conflicts; blue cells are independent edits. This is the table version of <code>sb collisions list</code>, not a dashboard-only reconstruction.</figcaption>
+</figure>
 
 
 <h3 id="surfacing">9.3 Surfacing</h3>
@@ -2365,6 +2651,62 @@ draft plan: 3 issues · est $0.85 · est 35min wall · 1 cluster (serial)
 <h3 id="reader-orchestrator-parity">12.4 Reader/orchestrator parity</h3>
 <p>The dashboard reads the merged <code>sp feed -f</code> + <code>sb feed -f</code> streams. The orchestrator reads the same two streams. Differences are pure rendering (color, grouping, sparklines vs. text). Anything the dashboard can show, the orchestrator can query.</p>
 
+<figure class="visual">
+<div class="figmeta"><span class="num">Fig. 12A</span><span>integrated console mockup</span></div>
+<div class="dash">
+  <div class="dash-bar">
+    <div class="left"><span class="chip live">live</span><span>xtrm console</span></div>
+    <div class="right">5 containers · 3 worktrees · 2 collisions · 1 contract block · 20:24:09Z</div>
+  </div>
+  <div class="dash-grid">
+    <div class="dash-cell">
+      <div class="dash-h">active containers · lifecycle</div>
+      <table style="font-size:11px;margin:0">
+        <tbody>
+          <tr><td><code>seed:7f3a</code></td><td>runtime split</td><td><span class="chip partial">planning</span></td><td>operator-gate</td></tr>
+          <tr><td><code>chain:42in</code></td><td>container reducer</td><td><span class="chip ready">working</span></td><td>executor lease</td></tr>
+          <tr><td><code>chain:19e5</code></td><td>channels cursor</td><td><span class="chip ready">reviewing</span></td><td>gate pending</td></tr>
+          <tr style="background:rgba(138,41,73,0.07)"><td><code>iss-2yn4</code></td><td>release gates</td><td><span class="chip invalid">invalid</span></td><td>dispatch refused</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="dash-cell">
+      <div class="dash-h">focused chain · resolved shape</div>
+      <table style="font-size:10.5px;margin:0">
+        <tbody>
+          <tr><td>✓ explorer</td><td>advisor</td><td>evidence: msg#88</td></tr>
+          <tr><td>▶ executor</td><td>step</td><td>holds worktree lease</td></tr>
+          <tr><td>○ code-sanity</td><td>gate</td><td>mandatory layer 2</td></tr>
+          <tr><td>○ reviewer</td><td>gate</td><td>independent authority</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="dash-cell" style="border-right:none;border-bottom:1px solid var(--paper-shade)">
+    <div class="dash-h">unified event stream</div>
+    <div class="dash-evt ctrc"><span>20:24:09</span><span class="tag ctrc">CTRC</span><span>validator</span><span><code>iss-2yn4</code> invalid · acceptance not observable · validation missing</span></div>
+    <div class="dash-evt coll"><span>20:24:04</span><span class="tag coll">COLL</span><span>range</span><span><code>container.ts</code> overlap: chain:42in L142-166 ∩ chain:9xg2 L151-176</span></div>
+    <div class="dash-evt mail"><span>20:24:01</span><span class="tag mail">CHAN</span><span>rev → exec</span><span>verdict PARTIAL · msg#142 · missing regression test</span></div>
+    <div class="dash-evt teth"><span>20:23:58</span><span class="tag teth">TETH</span><span>exec_42in</span><span><span class="chip invalid">blocker</span> edit outside declared scope</span></div>
+    <div class="dash-evt"><span>20:23:54</span><span class="tag life">LIFE</span><span>runner</span><span>turn_end · read=3 write=1 · awaiting channel reducer</span></div>
+    <div class="dash-evt plan"><span>20:23:18</span><span class="tag plan">PLAN</span><span>seed</span><span>plan artifact drafted · topology=epic · ordering=serial · approval=operator-gate</span></div>
+  </div>
+  <div class="dash-cell" style="border-right:none">
+    <div class="dash-h">channel chain:42in · 4 participants · reactive · 12 messages</div>
+    <table style="font-size:10.5px;margin:0">
+      <thead><tr><th>seq</th><th>from → to</th><th>kind</th><th>refs</th><th>summary</th></tr></thead>
+      <tbody>
+        <tr><td>#142</td><td>reviewer → executor</td><td>verdict</td><td>result#88</td><td>PARTIAL · missing regression test</td></tr>
+        <tr><td>#141</td><td>user → executor</td><td>steer</td><td>—</td><td>stay inside packages/substrate</td></tr>
+        <tr><td>#140</td><td>tether → executor</td><td>hint</td><td>scope#3</td><td>BLOCKER scope drift</td></tr>
+        <tr><td>#139</td><td>executor → all</td><td>turn</td><td>result#87</td><td>updating reducer tests</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+<figcaption>This is the density target: the dashboard is not a hero illustration, it is a live operational surface. Every colored row corresponds to a feed event or queryable table row.</figcaption>
+</figure>
+
 
 <hr>
 
@@ -2411,6 +2753,18 @@ draft plan: 3 issues · est $0.85 · est 35min wall · 1 cluster (serial)
 
 
 <p>This keeps specialists <strong>project-agnostic</strong>: the <code>project_id</code> concept lives entirely in substrate&#39;s domain.</p>
+
+<figure class="visual">
+<div class="figmeta"><span class="num">Fig. 13A</span><span>single store, domain tables, opaque joins</span></div>
+<div class="ledger">
+  <div class="entry"><b>substrate</b><span><code>projects</code>, <code>containers</code>, <code>issues</code>, <code>plans</code>, <code>collision_events</code>, <code>memories</code></span></div>
+  <div class="entry"><b>channels</b><span><code>channel_messages</code>, <code>channel_subscriptions</code>; ordered by channel-local <code>seq</code>.</span></div>
+  <div class="entry"><b>specialists</b><span><code>jobs</code>, <code>runner_events</code>, <code>tether_hints</code>, <code>telemetry_samples</code>.</span></div>
+  <div class="entry"><b>core</b><span><code>.xt/</code> markers remain file-backed: worktree registry, hooks, bootstrap state.</span></div>
+</div>
+<div class="callout flat"><strong>Opaque join rule.</strong> A reader may stitch <code>containers.id = jobs.workstream_id = channel_messages.channel_id</code>, but the schema does not enforce that relationship across domains. The boundary remains movable.</div>
+<figcaption>The database is operationally single, but the design still behaves like separate stores joined by correlation IDs. That is what preserves a future split without making v0 miserable.</figcaption>
+</figure>
 
 
 <h3 id="the-store-shared-by-default">13.2 The store: shared by default</h3>
@@ -2840,6 +3194,18 @@ CREATE INDEX idx_memories_type ON memories(type, project_id);
 </tbody></table>
 
 <p>Each stage is independently shippable and reversible per the channels.md/tether.md philosophy. Stage 0 (the daemon + store) now leads because every substrate entity needs somewhere to live; it inherits bd&#39;s hard-won failure-mode lessons (§13.2) rather than rediscovering them.</p>
+
+<figure class="visual">
+<div class="figmeta"><span class="num">Fig. 15A</span><span>implementation runway · reversible stages</span></div>
+<div class="timeline">
+  <div class="rail"><span class="label">0-2</span><p><strong>Foundation:</strong> store/daemon, issue schema, channels v0. Durable state and message ordering come before clever orchestration.</p></div>
+  <div class="rail"><span class="label">3-6</span><p><strong>First useful substrate:</strong> tether v0, chain container, seed channel, plan artifact. A single issue can now travel the real lifecycle.</p></div>
+  <div class="rail"><span class="label">7-9</span><p><strong>Scale of work:</strong> collision matrix, epic/wave kinds, advisor invite rules. Parallel work becomes schedulable instead of hand-held.</p></div>
+  <div class="rail"><span class="label">10-11</span><p><strong>Recovery intelligence:</strong> tether layer 2, memory mid-run, reconciler specialist. Failures become routable events instead of session folklore.</p></div>
+  <div class="rail"><span class="label">12-13</span><p><strong>Operator surface and cutover:</strong> console renders merged feeds; bd imports once and then gets out of the way.</p></div>
+</div>
+<figcaption>The sequence is front-loaded around primitives. Rich automation arrives only after lifecycle, channel ordering, and evidence can survive replay.</figcaption>
+</figure>
 
 
 <hr>

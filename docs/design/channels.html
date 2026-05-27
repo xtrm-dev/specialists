@@ -94,6 +94,49 @@ hr{border:0;border-top:1px solid var(--paper-shade);margin:40px 0}
 .timeline p{margin:0;font-size:14px;max-width:none}
 .badge-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
 .badge{font-family:var(--mono);font-size:10px;letter-spacing:0.08em;text-transform:uppercase;border:1px solid var(--accent);color:var(--accent);padding:2px 7px;background:var(--paper)}
+.callout{border-left:3px solid var(--accent);padding:14px 22px;background:var(--paper-shade);margin:24px 0;font-style:italic;max-width:76ch}
+.callout.flat{border-left-color:var(--ink);font-style:normal}
+.sidenote{font-size:13px;color:var(--muted);font-style:italic;border-top:1px solid var(--paper-shade);border-bottom:1px solid var(--paper-shade);padding:8px 0;margin:16px 0;font-family:var(--serif);max-width:76ch}
+.chip{display:inline-flex;align-items:center;gap:4px;padding:1px 8px;border-radius:0;font-family:var(--mono);font-size:10px;letter-spacing:0.05em;border:1px solid;text-transform:uppercase;white-space:nowrap}
+.chip.ready{color:#2C5F1F;border-color:#2C5F1F}
+.chip.partial{color:#9A6A12;border-color:#9A6A12}
+.chip.invalid{color:#8A2949;border-color:#8A2949}
+.chip.live{color:var(--accent);border-color:var(--accent)}
+.dash{background:var(--paper);border:1.5px solid var(--rule);padding:0;margin:24px 0;font-family:var(--mono);font-size:11.5px;color:var(--ink)}
+.dash-bar{padding:10px 14px;border-bottom:1.5px solid var(--rule);display:flex;justify-content:space-between;gap:12px;align-items:center;background:var(--paper-shade)}
+.dash-bar .left{display:flex;align-items:center;gap:10px;font-weight:500;flex-wrap:wrap}
+.dash-bar .right{font-size:10px;color:var(--muted);letter-spacing:0.05em;text-align:right}
+.dash-grid{display:grid;grid-template-columns:1.18fr 1fr;border-bottom:1px solid var(--paper-shade)}
+.dash-cell{padding:12px 14px;border-right:1px solid var(--paper-shade)}
+.dash-cell:last-child{border-right:none}
+.dash-h{font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:7px}
+.dash-evt{display:grid;grid-template-columns:48px 92px 68px 1fr;gap:8px;padding:6px 14px;border-bottom:1px dashed var(--paper-shade);align-items:baseline;font-size:11px}
+.dash-evt:last-child{border-bottom:none}
+.tag{display:inline-block;padding:0 5px;font-size:9px;font-weight:600;letter-spacing:0.05em;text-align:center;width:40px;color:var(--paper)}
+.tag.life{background:var(--c-life)}
+.tag.mail{background:var(--c-mail)}
+.tag.teth{background:var(--c-teth)}
+.tag.coll{background:var(--c-coll)}
+.tag.ctrc{background:var(--c-ctrc)}
+.tag.plan{background:var(--c-plan)}
+.dash-evt.mail{background:rgba(63,47,134,0.04)}
+.dash-evt.teth{background:rgba(154,106,18,0.05)}
+.dash-evt.coll{background:rgba(138,41,73,0.05)}
+.dash-evt.ctrc{background:rgba(26,77,133,0.04)}
+.dash-evt.plan{background:rgba(44,95,31,0.04)}
+.matrix-cell{padding:6px;text-align:center;border:1px solid var(--paper-shade);font-size:10px;font-family:var(--mono)}
+.matrix-cell.edit{background:rgba(26,77,133,0.12);color:#1A4D85;font-weight:600}
+.matrix-cell.collide{background:rgba(138,41,73,0.18);color:#8A2949;font-weight:600}
+.matrix-cell.empty{color:var(--faint)}
+.ledger{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:16px 0}
+.ledger .entry{border:1px solid var(--paper-shade);background:rgba(245,242,233,0.75);padding:12px}
+.ledger .entry b{display:block;font-family:var(--mono);font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:var(--accent);margin-bottom:6px}
+.ledger .entry span{display:block;font-size:14px;line-height:1.35}
+.axis-map{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.axis{border:1px solid var(--rule);background:var(--paper);padding:12px}
+.axis b{font-family:var(--mono);font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--accent)}
+.axis ul{margin:8px 0 0;padding-left:16px}
+.axis li{font-size:13px;margin-bottom:3px}
 svg.diagram{display:block;width:100%;height:auto}
 svg.diagram text{font-family:var(--mono);font-size:11px;fill:var(--ink)}
 svg.diagram .serif{font-family:var(--serif);font-style:italic;font-size:15px}
@@ -104,7 +147,7 @@ svg.diagram .soft{fill:var(--paper-shade);stroke:var(--paper-shade)}
 svg.diagram .line{stroke:var(--accent);stroke-width:1.4;fill:none}
 footer{margin-top:96px;padding-top:32px;border-top:2px solid var(--rule);font-family:var(--mono);font-size:11px;letter-spacing:0.05em;color:var(--muted);display:flex;justify-content:space-between;gap:16px}
 footer .accent{color:var(--accent)}
-@media (max-width:780px){.page{padding:48px 24px 80px}h1.title{font-size:44px}.meta{grid-template-columns:repeat(2,1fr)}.toc{column-count:1}table{display:block;overflow-x:auto;white-space:normal}.split-visual,.map-grid,.map-grid.five{grid-template-columns:1fr}.arrow{display:none}.flow{display:grid;grid-template-columns:1fr}}
+@media (max-width:780px){.page{padding:48px 24px 80px}h1.title{font-size:44px}.meta{grid-template-columns:repeat(2,1fr)}.toc{column-count:1}table{display:block;overflow-x:auto;white-space:normal}.split-visual,.map-grid,.map-grid.five,.dash-grid,.ledger,.axis-map{grid-template-columns:1fr}.dash-bar{align-items:flex-start}.dash-bar .right{text-align:left}.dash-evt{grid-template-columns:48px 72px 1fr}.dash-evt span:nth-child(3){display:none}.arrow{display:none}.flow{display:grid;grid-template-columns:1fr}}
 @media print{body{background:white}pre{break-inside:avoid;font-size:10px}section{break-before:auto;break-after:auto}section > h2{break-after:avoid}table{break-inside:avoid}}
 
 </style>
@@ -158,6 +201,29 @@ footer .accent{color:var(--accent)}
 
 
 <p>This makes multi-agent collaboration ceremonial and brittle.</p>
+
+<figure class="visual">
+<div class="figmeta"><span class="num">Fig. 01A</span><span>before channels · orchestrator as switchboard</span></div>
+<div class="split-visual">
+  <div>
+    <h4>point-to-point today</h4>
+    <div class="timeline">
+      <div class="rail"><span class="label">result</span><p>Reviewer reads a file after executor finishes; executor is blind to the review until manually resumed.</p></div>
+      <div class="rail"><span class="label">steer</span><p>Human messages target one job, not the workstream that the job belongs to.</p></div>
+      <div class="rail"><span class="label">router</span><p>The node coordinator drives phases, but lateral specialist talk is still an orchestration trick.</p></div>
+    </div>
+  </div>
+  <div>
+    <h4>channel primitive</h4>
+    <div class="timeline">
+      <div class="rail"><span class="label">stream</span><p>Every participant writes typed messages into one ordered append-only channel.</p></div>
+      <div class="rail"><span class="label">cursor</span><p>Each participant has its own <code>last_seq_seen</code> and can replay after crashes.</p></div>
+      <div class="rail"><span class="label">wake</span><p>Subscriptions determine which message kinds become resume intent.</p></div>
+    </div>
+  </div>
+</div>
+<figcaption>Channels remove the human/orchestrator as the only switchboard. The runtime can route typed peer messages while preserving replay and authority checks.</figcaption>
+</figure>
 
 
 </section>
@@ -224,6 +290,18 @@ footer .accent{color:var(--accent)}
 <td>Declarative termination: <code>judge.done</code>, <code>consensus</code>, <code>budget</code>, <code>idle:K</code>, <code>judge_timeout</code>, <code>manual</code>.</td>
 </tr>
 </tbody></table>
+
+<figure class="visual">
+<div class="figmeta"><span class="num">Fig. 04A</span><span>primitive anatomy</span></div>
+<div class="ledger">
+  <div class="entry"><b>channel</b><span>Durable workstream ID, topology, stop conditions, participants, status.</span></div>
+  <div class="entry"><b>message</b><span>Typed body, author identity, target, refs, provenance, channel-local sequence.</span></div>
+  <div class="entry"><b>subscription</b><span>Participant cursor plus filters; read/ack are deliberately separate.</span></div>
+  <div class="entry"><b>judge</b><span>Optional participant that converts terminal candidates into <code>system.done</code> or redirect.</span></div>
+</div>
+<div class="callout flat"><strong>One primitive, many shapes.</strong> Pair-talk, reviewer loop, self-managed node, human chat, and seed preflight differ by topology and subscriptions, not by new transport.</div>
+<figcaption>The depth of the design is in the constraints around one primitive: ordering, filtering, authority, cursor discipline, and deterministic side effects.</figcaption>
+</figure>
 
 </section>
 <section id="architecture">
@@ -303,6 +381,43 @@ CREATE TABLE channel_subscriptions (
 
 CREATE INDEX channel_messages_channel_seq ON channel_messages(channel_id, seq);
 </code></pre>
+
+<figure class="visual">
+<div class="figmeta"><span class="num">Fig. 05D</span><span>storage and cursor surfaces</span></div>
+<div class="dash">
+  <div class="dash-bar">
+    <div class="left"><span class="chip live">open</span><span>channel chain:7f3a</span></div>
+    <div class="right">seq=148 · topology=reactive · stop_on=[verdict.PASS]</div>
+  </div>
+  <div class="dash-grid">
+    <div class="dash-cell">
+      <div class="dash-h">channel_messages</div>
+      <table style="font-size:10.5px;margin:0">
+        <thead><tr><th>seq</th><th>author</th><th>kind</th><th>target</th><th>refs</th></tr></thead>
+        <tbody>
+          <tr><td>145</td><td>exec</td><td>turn</td><td>all</td><td>result#31</td></tr>
+          <tr><td>146</td><td>reviewer</td><td>finding</td><td>exec</td><td>diff:L42</td></tr>
+          <tr><td>147</td><td>reviewer</td><td>verdict</td><td>exec</td><td>result#32</td></tr>
+          <tr><td>148</td><td>system</td><td>continue</td><td>all</td><td>judge_timeout</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="dash-cell">
+      <div class="dash-h">channel_subscriptions</div>
+      <table style="font-size:10.5px;margin:0">
+        <thead><tr><th>participant</th><th>filter</th><th>seen</th><th>status</th></tr></thead>
+        <tbody>
+          <tr><td>exec</td><td>verdict:me</td><td>147</td><td><span class="chip ready">caught up</span></td></tr>
+          <tr><td>reviewer</td><td>turn:peer</td><td>145</td><td><span class="chip partial">pending</span></td></tr>
+          <tr><td>judge</td><td>proposal|idle</td><td>148</td><td><span class="chip ready">caught up</span></td></tr>
+          <tr><td>user</td><td>*</td><td>142</td><td><span class="chip partial">tailing</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+<figcaption>The table schema is not abstract bookkeeping: it is exactly what <code>sp tail</code>, wake routing, crash recovery, and replay read from.</figcaption>
+</figure>
 
 
 <h4 id="workstream-id-naming-convention">Workstream ID naming convention</h4>
@@ -522,6 +637,26 @@ CREATE INDEX channel_messages_channel_seq ON channel_messages(channel_id, seq);
 
 <p>Runtime resolves subscriptions on channel open and stores them in <code>channel_subscriptions</code>. Cursor advances only on messages matching the filter.</p>
 
+<figure class="visual">
+<div class="figmeta"><span class="num">Fig. 05E</span><span>cursor-through-N</span></div>
+<svg class="diagram" viewBox="0 0 900 250" xmlns="http://www.w3.org/2000/svg">
+  <line x1="80" y1="112" x2="820" y2="112" stroke="#15130E" stroke-width="1.2"/>
+  <g>
+    <rect x="90" y="82" width="72" height="60" class="box"/><text x="126" y="108" text-anchor="middle">#145</text><text x="126" y="126" text-anchor="middle" class="muted">turn</text>
+    <rect x="190" y="82" width="72" height="60" class="box"/><text x="226" y="108" text-anchor="middle">#146</text><text x="226" y="126" text-anchor="middle" class="muted">finding</text>
+    <rect x="290" y="82" width="72" height="60" fill="rgba(138,41,73,0.1)" stroke="#8A2949"/><text x="326" y="108" text-anchor="middle">#147</text><text x="326" y="126" text-anchor="middle" class="muted">verdict</text>
+    <rect x="390" y="82" width="72" height="60" class="box"/><text x="426" y="108" text-anchor="middle">#148</text><text x="426" y="126" text-anchor="middle" class="muted">system</text>
+    <rect x="490" y="82" width="72" height="60" class="box"/><text x="526" y="108" text-anchor="middle">#149</text><text x="526" y="126" text-anchor="middle" class="muted">turn</text>
+  </g>
+  <path d="M326 150 L326 190 L226 190 L226 150" fill="none" stroke="#8A2949" stroke-width="1.3" stroke-dasharray="4 3"/>
+  <text x="276" y="211" text-anchor="middle" class="muted">#147 fails to enqueue resume</text>
+  <text x="126" y="58" text-anchor="middle" class="muted">last_seq_seen</text>
+  <text x="526" y="58" text-anchor="middle" class="muted">received but not acked</text>
+  <text x="450" y="232" text-anchor="middle" class="serif">markSeen advances only to the highest successfully processed message, not the highest read</text>
+</svg>
+<figcaption>Read is observation; ack is commitment. If an actionable message fails mid-processing, the cursor stays behind it so replay can finish safely.</figcaption>
+</figure>
+
 
 <h3 id="runtime-integration">5.5 Runtime Integration</h3>
 <p>The existing waiting-loop tick gains one read. Read and ack are <strong>separate operations</strong> — read is pure observation and never advances the cursor; ack is effectful and advances only up to the highest <em>successfully processed</em> message.</p>
@@ -566,6 +701,21 @@ await client.markSeen(convId, myKey, highestProcessed);
 <li><code>markSeen(highestProcessed)</code> — only after every intended action above succeeds</li>
 <li>If nothing actionable: stay silent — no empty <code>turn</code> messages</li>
 </ol>
+
+<figure class="visual">
+<div class="figmeta"><span class="num">Fig. 05F</span><span>pure reducer, deduped after-hook</span></div>
+<div class="flow">
+  <div class="step"><strong>readSince</strong><span>Fetch messages after cursor. No mutation, no wakeup, no external effect.</span></div>
+  <div class="arrow">→</div>
+  <div class="step"><strong>reducer</strong><span>Derive state: stop conditions, targets, roles, current turn, terminal candidates.</span></div>
+  <div class="arrow">→</div>
+  <div class="step"><strong>after-hook</strong><span>Enqueue resumes and write <code>system.*</code>, deduped by <code>(channel_id,msg_id)</code>.</span></div>
+  <div class="arrow">→</div>
+  <div class="step"><strong>markSeen</strong><span>Advance only after every intended side effect is committed.</span></div>
+</div>
+<div class="callout flat"><strong>Crash invariant:</strong> a restart can replay the reducer any number of times without triggering a second LLM call. Only the after-hook performs effects, and every effect has an idempotency key.</div>
+<figcaption>This is the architecture that makes lateral wakeups safe enough to be runtime behavior rather than an orchestrator ritual.</figcaption>
+</figure>
 
 
 <h3 id="topologies">5.6 Topologies</h3>
@@ -711,6 +861,20 @@ await client.markSeen(convId, myKey, highestProcessed);
 
 <p>Judge prose lives in its <code>specialist_results</code>. Only the structured decision becomes a <code>system.*</code> message.</p>
 
+<figure class="visual">
+<div class="figmeta"><span class="num">Fig. 06A</span><span>static spec to live participant</span></div>
+<div class="flow">
+  <div class="step"><strong>spec</strong><span><code>.specialist.json</code> says what the role may read, emit, and wake on.</span></div>
+  <div class="arrow">→</div>
+  <div class="step"><strong>spawn</strong><span>The runtime assigns a participant key and binds the job to one channel.</span></div>
+  <div class="arrow">→</div>
+  <div class="step"><strong>subscription</strong><span>Filters become DB rows with cursors. State is per job, not per role.</span></div>
+  <div class="arrow">→</div>
+  <div class="step"><strong>authority</strong><span><code>emits</code> and <code>cannot_emit</code> are checked on every write.</span></div>
+</div>
+<figcaption>The spec is a template. The active subscription is runtime state, and authority is rechecked at write time from DB state.</figcaption>
+</figure>
+
 
 </section>
 <section id="node-config">
@@ -759,6 +923,31 @@ sp ch show &lt;channel-id&gt;
 
 <p><code>sp steer &lt;job&gt; &quot;...&quot;</code> and <code>sp resume &lt;job&gt; &quot;...&quot;</code> are implemented as <code>kind=steer</code> messages posted to the job&#39;s channel. Their CLI surface is unchanged.</p>
 
+<figure class="visual">
+<div class="figmeta"><span class="num">Fig. 08A</span><span>CLI surfaces over the same stream</span></div>
+<div class="dash">
+  <div class="dash-bar">
+    <div class="left"><span class="chip live">tail</span><span>sp ch show chain:7f3a</span></div>
+    <div class="right">human, orchestrator, and participants share one channel log</div>
+  </div>
+  <div class="dash-cell" style="border-right:none">
+    <div class="dash-h">recent messages</div>
+    <div class="dash-evt mail"><span>#145</span><span>exec</span><span class="tag mail">TURN</span><span>updated reducer and tests · refs=result#31</span></div>
+    <div class="dash-evt teth"><span>#146</span><span>tether</span><span class="tag teth">HINT</span><span>scope blocker · edited outside declared contract</span></div>
+    <div class="dash-evt mail"><span>#147</span><span>reviewer</span><span class="tag mail">VERD</span><span>PARTIAL target=exec · missing cursor-through-N test</span></div>
+    <div class="dash-evt ctrc"><span>#148</span><span>system</span><span class="tag ctrc">ERR</span><span>rejected system.done from non-judge author</span></div>
+  </div>
+</div>
+<div class="badge-row">
+  <span class="badge">sp msg</span>
+  <span class="badge">sp tail</span>
+  <span class="badge">sp ch show</span>
+  <span class="badge">sp steer</span>
+  <span class="badge">sp resume</span>
+</div>
+<figcaption>The old commands survive as ergonomic aliases, but their implementation becomes message writes and cursor reads over the channel primitive.</figcaption>
+</figure>
+
 
 </section>
 <section id="self-managed-node-flow">
@@ -780,6 +969,29 @@ sp ch show &lt;channel-id&gt;
 
 
 <p>Coordinator is now a <strong>gatekeeper</strong>, not a router.</p>
+
+<figure class="visual">
+<div class="figmeta"><span class="num">Fig. 09A</span><span>node channel · single scheduler invariant</span></div>
+<svg class="diagram" viewBox="0 0 900 330" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="nodeArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7A1F1B"/>
+    </marker>
+  </defs>
+  <rect x="40" y="46" width="206" height="58" class="box"/><text x="143" y="80" text-anchor="middle">reviewer posts verdict</text>
+  <rect x="338" y="46" width="224" height="58" fill="#EBE7DB" stroke="#15130E"/><text x="450" y="80" text-anchor="middle">channel log</text>
+  <rect x="650" y="46" width="206" height="58" class="box"/><text x="753" y="80" text-anchor="middle">executor subscription</text>
+  <rect x="338" y="154" width="224" height="58" fill="rgba(122,31,27,0.08)" stroke="#7A1F1B"/><text x="450" y="188" text-anchor="middle">supervisor inbox</text>
+  <rect x="338" y="250" width="224" height="58" class="box"/><text x="450" y="284" text-anchor="middle">node supervisor resumes</text>
+  <line x1="246" y1="75" x2="336" y2="75" stroke="#7A1F1B" stroke-width="1.4" marker-end="url(#nodeArrow)"/>
+  <line x1="562" y1="75" x2="648" y2="75" stroke="#7A1F1B" stroke-width="1.4" marker-end="url(#nodeArrow)"/>
+  <path d="M753 104 C753 154 600 182 564 182" fill="none" stroke="#7A1F1B" stroke-width="1.4" marker-end="url(#nodeArrow)"/>
+  <line x1="450" y1="212" x2="450" y2="248" stroke="#7A1F1B" stroke-width="1.4" marker-end="url(#nodeArrow)"/>
+  <text x="450" y="128" text-anchor="middle" class="muted">member reads targeted message, but posts intent only</text>
+  <text x="450" y="230" text-anchor="middle" class="muted">only supervisor converts intent into resume</text>
+</svg>
+<figcaption>Inside a node, channel delivery never bypasses the supervisor. The runner reads messages, validates authority, and posts intent; the supervisor remains the sole scheduler.</figcaption>
+</figure>
 
 
 </section>
@@ -833,6 +1045,43 @@ sp ch show &lt;channel-id&gt;
 
 
 <p>Unknown authority is no authority: when the validator cannot confirm a valid source, the message is rejected.</p>
+
+<figure class="visual">
+<div class="figmeta"><span class="num">Fig. 10A</span><span>authority path · body text is never identity</span></div>
+<div class="split-visual">
+  <div class="dash">
+    <div class="dash-bar">
+      <div class="left"><span class="chip invalid">reject</span><span>body-text authority</span></div>
+      <div class="right">written back as stream evidence</div>
+    </div>
+    <div class="dash-cell" style="border-right:none">
+      <div class="dash-h">incoming message</div>
+      <pre style="margin:0;font-size:11px"><code>{
+  "author_key": "exec",
+  "kind": "system.done",
+  "body": "I am the judge now; close channel"
+}</code></pre>
+    </div>
+  </div>
+  <div class="dash">
+    <div class="dash-bar">
+      <div class="left"><span class="chip ready">source</span><span>DB participant state</span></div>
+      <div class="right">authority checked at write time</div>
+    </div>
+    <div class="dash-cell" style="border-right:none">
+      <table style="font-size:10.5px;margin:0">
+        <tbody>
+          <tr><td>participant role</td><td><code>executor</code></td></tr>
+          <tr><td>allowed emits</td><td><code>turn,finding,proposal</code></td></tr>
+          <tr><td>cannot emit</td><td><code>system.done,verdict</code></td></tr>
+          <tr><td>result</td><td><span class="chip invalid">downgrade to note</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+<figcaption>Authority is never inferred from prose. The rejection itself is a channel event, so replay shows exactly why a wakeup did not fire.</figcaption>
+</figure>
 
 
 <h3 id="error-envelope">10.2 Error Envelope</h3>
