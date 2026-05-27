@@ -71,9 +71,40 @@ hr{border:0;border-top:1px solid var(--paper-shade);margin:40px 0}
 .toc a:hover{color:var(--accent);background:transparent}
 .toc .num{font-family:var(--mono);font-size:10px;color:var(--accent);margin-right:8px;letter-spacing:0.1em}
 .version-label{display:inline-block;font-family:var(--mono);font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--accent);border:1px solid var(--accent);padding:1px 7px;margin-right:8px;vertical-align:middle}
+.visual{margin:30px 0 34px;border:1px solid var(--paper-shade);background:rgba(235,231,219,0.42);padding:22px 24px}
+.visual .figmeta{display:flex;justify-content:space-between;gap:16px;border-bottom:1px solid var(--paper-shade);padding-bottom:9px;margin-bottom:18px;font-family:var(--mono);font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:var(--muted)}
+.visual .figmeta .num{color:var(--accent)}
+.visual figcaption{font-style:italic;color:var(--muted);font-size:14px;max-width:72ch;margin-top:16px}
+.flow{display:flex;align-items:stretch;gap:10px;flex-wrap:wrap}
+.flow.tight{gap:6px}
+.flow .step,.nodebox{border:1px solid var(--rule);background:var(--paper);padding:12px 14px;min-width:122px;flex:1}
+.flow .step strong,.nodebox strong{display:block;font-family:var(--mono);font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--accent);margin-bottom:5px}
+.flow .step span,.nodebox span{display:block;font-size:14px;line-height:1.35;color:var(--ink)}
+.arrow{align-self:center;font-family:var(--mono);color:var(--accent);font-size:18px;line-height:1}
+.split-visual{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.map-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.map-grid.five{grid-template-columns:repeat(5,1fr)}
+.mini-card{border-top:2px solid var(--rule);padding:12px 10px;background:rgba(245,242,233,0.72)}
+.mini-card b{display:block;font-family:var(--mono);font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--accent);margin-bottom:6px}
+.mini-card p{font-size:14px;line-height:1.38;margin:0;max-width:none}
+.timeline{display:grid;gap:10px;counter-reset:item}
+.timeline .rail{display:grid;grid-template-columns:74px 1fr;gap:14px;align-items:start;border-top:1px solid var(--paper-shade);padding-top:10px}
+.timeline .rail:first-child{border-top:0;padding-top:0}
+.timeline .label{font-family:var(--mono);font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--accent)}
+.timeline p{margin:0;font-size:14px;max-width:none}
+.badge-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.badge{font-family:var(--mono);font-size:10px;letter-spacing:0.08em;text-transform:uppercase;border:1px solid var(--accent);color:var(--accent);padding:2px 7px;background:var(--paper)}
+svg.diagram{display:block;width:100%;height:auto}
+svg.diagram text{font-family:var(--mono);font-size:11px;fill:var(--ink)}
+svg.diagram .serif{font-family:var(--serif);font-style:italic;font-size:15px}
+svg.diagram .muted{fill:var(--muted)}
+svg.diagram .accent{fill:var(--accent)}
+svg.diagram .box{fill:var(--paper);stroke:var(--rule);stroke-width:1.25}
+svg.diagram .soft{fill:var(--paper-shade);stroke:var(--paper-shade)}
+svg.diagram .line{stroke:var(--accent);stroke-width:1.4;fill:none}
 footer{margin-top:96px;padding-top:32px;border-top:2px solid var(--rule);font-family:var(--mono);font-size:11px;letter-spacing:0.05em;color:var(--muted);display:flex;justify-content:space-between;gap:16px}
 footer .accent{color:var(--accent)}
-@media (max-width:780px){.page{padding:48px 24px 80px}h1.title{font-size:44px}.meta{grid-template-columns:repeat(2,1fr)}.toc{column-count:1}table{display:block;overflow-x:auto;white-space:normal}}
+@media (max-width:780px){.page{padding:48px 24px 80px}h1.title{font-size:44px}.meta{grid-template-columns:repeat(2,1fr)}.toc{column-count:1}table{display:block;overflow-x:auto;white-space:normal}.split-visual,.map-grid,.map-grid.five{grid-template-columns:1fr}.arrow{display:none}.flow{display:grid;grid-template-columns:1fr}}
 @media print{body{background:white}pre{break-inside:avoid;font-size:10px}section{break-before:auto;break-after:auto}section > h2{break-after:avoid}table{break-inside:avoid}}
 
 </style>
@@ -355,6 +386,42 @@ footer .accent{color:var(--accent)}
 <h2><span class="num">03</span>The container lifecycle</h2>
 <p>Every container — a one-issue chain, a long-running node, a planning seed — runs the <strong>same abstract lifecycle</strong>. This abstraction is deliberate: it is what makes the system adaptable to non-coding workflows and to kinds we haven&#39;t invented yet. The dashboard, CLI, and observability surfaces see one shape; the <em>kind</em> decides what each abstract state concretely means.</p>
 
+<figure class="visual">
+  <div class="figmeta"><span class="num">Fig. 03A</span><span>abstract lifecycle</span></div>
+  <svg class="diagram" viewBox="0 0 920 230" role="img" aria-label="Container lifecycle diagram">
+    <defs>
+      <marker id="arrow-substrate" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#7A1F1B"/></marker>
+    </defs>
+    <rect class="box" x="28" y="52" width="130" height="58"/>
+    <text x="93" y="77" text-anchor="middle">open</text>
+    <text class="muted" x="93" y="96" text-anchor="middle">wiring</text>
+    <path class="line" marker-end="url(#arrow-substrate)" d="M158 81 H215"/>
+    <rect class="box" x="216" y="52" width="130" height="58"/>
+    <text x="281" y="77" text-anchor="middle">working</text>
+    <text class="muted" x="281" y="96" text-anchor="middle">members active</text>
+    <path class="line" marker-end="url(#arrow-substrate)" d="M346 81 H403"/>
+    <rect class="box" x="404" y="52" width="146" height="58"/>
+    <text x="477" y="77" text-anchor="middle">converging</text>
+    <text class="muted" x="477" y="96" text-anchor="middle">judge / gate</text>
+    <path class="line" marker-end="url(#arrow-substrate)" d="M550 81 H607"/>
+    <rect class="box" x="608" y="52" width="130" height="58"/>
+    <text x="673" y="77" text-anchor="middle">ready</text>
+    <text class="muted" x="673" y="96" text-anchor="middle">deliverable</text>
+    <path class="line" marker-end="url(#arrow-substrate)" d="M738 81 H795"/>
+    <rect class="box" x="796" y="52" width="96" height="58"/>
+    <text x="844" y="77" text-anchor="middle">closed</text>
+    <text class="muted" x="844" y="96" text-anchor="middle">terminal</text>
+    <path class="line" marker-end="url(#arrow-substrate)" d="M477 110 V154"/>
+    <rect class="soft" x="390" y="154" width="174" height="48"/>
+    <text x="477" y="176" text-anchor="middle">escalated</text>
+    <text class="muted" x="477" y="194" text-anchor="middle">operator / owner decision</text>
+    <path class="line" marker-end="url(#arrow-substrate)" d="M390 178 C268 178 246 132 266 110"/>
+    <path class="line" marker-end="url(#arrow-substrate)" d="M564 178 C688 178 706 132 686 110"/>
+    <text class="serif accent" x="28" y="28">one lifecycle, five concrete meanings</text>
+  </svg>
+  <figcaption>The same reducer shape drives seeds, chains, epics, waves, and nodes. The kind supplies meaning; evidence and pulses supply motion.</figcaption>
+</figure>
+
 
 <pre><code>open ──► working ──► converging ──► ready ──► closed
                           │                       
@@ -497,6 +564,19 @@ footer .accent{color:var(--accent)}
 <h2><span class="num">04</span>Container kinds</h2>
 <p>Five kinds, in two families. Transient kinds finish; the standing kind persists.</p>
 
+<figure class="visual">
+  <div class="figmeta"><span class="num">Fig. 04A</span><span>container taxonomy</span></div>
+  <div class="map-grid five">
+    <div class="mini-card"><b>seed</b><p>Planning container. Advisors converse, judge emits <code>plan.v1</code>, then it transforms into the final container.</p></div>
+    <div class="mini-card"><b>chain</b><p>Smallest execution unit. A resolved <code>chain_template</code> drives steps, gates, reviewer, and merge readiness.</p></div>
+    <div class="mini-card"><b>epic</b><p>Dependent roots under one integration base. Child chains merge in dependency-aware order.</p></div>
+    <div class="mini-card"><b>wave</b><p>Independent roots optimized for parallelism. Collision-watched, but not dependency-bound.</p></div>
+    <div class="mini-card"><b>node</b><p>Standing container. Sleeps between pulses, wakes, opens transient children under policy.</p></div>
+  </div>
+  <div class="badge-row"><span class="badge">transient: seed · chain · epic · wave</span><span class="badge">standing: node</span><span class="badge">every container owns a channel</span></div>
+  <figcaption>The taxonomy is intentionally small: everything else is either a member, signal, artifact, or contract inside these five shapes.</figcaption>
+</figure>
+
 
 <table>
 <thead>
@@ -612,6 +692,22 @@ footer .accent{color:var(--accent)}
 <section id="seed">
 <h2><span class="num">05</span>Seed: planning in depth</h2>
 <p>A <code>seed</code> is the planning container — formerly called &quot;preflight.&quot; It is <strong>a channel among advisors</strong>, scoped to the container, that produces a <code>plan.v1</code> artifact and then transforms into the container it planned. Because a seed is a normal container, everything here reuses the standard runtime (lifecycle §3, channel §7, budget, escalation, participants §2.2); only its members (advisors) and its outcome (a plan, then a transform) are seed-specific.</p>
+
+<figure class="visual">
+  <div class="figmeta"><span class="num">Fig. 05A</span><span>seed-to-container transform</span></div>
+  <div class="flow">
+    <div class="step"><strong>intent</strong><span>User, node, or existing issue asks for shape.</span></div>
+    <div class="arrow">→</div>
+    <div class="step"><strong>seed channel</strong><span>Planner, validator, advisors, and judge deliberate in one scoped stream.</span></div>
+    <div class="arrow">→</div>
+    <div class="step"><strong>plan.v1</strong><span>Issues, dependencies, topology, memory packs, local rules.</span></div>
+    <div class="arrow">→</div>
+    <div class="step"><strong>approval</strong><span>Auto, operator-gate, or re-seed.</span></div>
+    <div class="arrow">→</div>
+    <div class="step"><strong>final container</strong><span><code>chain</code>, <code>epic</code>, <code>wave</code>, or node mandate with provenance.</span></div>
+  </div>
+  <figcaption>The seed is not a prelude outside the runtime. It is a normal container whose deliverable is another container.</figcaption>
+</figure>
 
 
 <h3 id="entry">5.1 Entry</h3>
@@ -962,6 +1058,33 @@ footer .accent{color:var(--accent)}
 <section id="issues">
 <h2><span class="num">06</span>The new issue system</h2>
 <p>The new issue is a structured contract, not prose. Replaces bd&#39;s free-text description with named fields and machine-validated state.</p>
+
+<figure class="visual">
+  <div class="figmeta"><span class="num">Fig. 06A</span><span>contract to execution</span></div>
+  <div class="split-visual">
+    <div>
+      <h4>Issue classifiers</h4>
+      <div class="map-grid">
+        <div class="mini-card"><b>class</b><p>Structural function: <code>root</code>, <code>step</code>, <code>gate</code>, <code>advisor</code>, <code>followup</code>.</p></div>
+        <div class="mini-card"><b>type</b><p>Root work genre: <code>task</code>, <code>bug</code>, <code>design</code>, <code>research</code>.</p></div>
+        <div class="mini-card"><b>role</b><p>Executor identity: <code>reviewer</code>, <code>code-sanity</code>, custom specialist.</p></div>
+      </div>
+    </div>
+    <div>
+      <h4>Dispatch gate</h4>
+      <div class="flow tight">
+        <div class="step"><strong>root</strong><span>change contract</span></div>
+        <div class="arrow">→</div>
+        <div class="step"><strong>stage 1</strong><span>programmatic readiness</span></div>
+        <div class="arrow">→</div>
+        <div class="step"><strong>compose</strong><span>materialize step-issues</span></div>
+        <div class="arrow">→</div>
+        <div class="step"><strong>approve</strong><span>chain enters working</span></div>
+      </div>
+    </div>
+  </div>
+  <figcaption>The important split: the root says what should change; step-issues say what each participant must do to prove it.</figcaption>
+</figure>
 
 
 <h3 id="schema">6.1 Schema</h3>
@@ -1363,6 +1486,23 @@ sb issue rel ls  &lt;issue&gt;                      # all edges, grouped by clas
 <h3 id="chain-templates-and-composition-the-shape-a-chain-runs">6.9 Chain templates and composition — the shape a chain runs</h3>
 <p>A chain is the minimal unit of specialist work — even a single-member chain is a chain. Its <em>shape</em> (which steps, in what order, with which gates) is defined by a <strong>chain_template</strong>: a named, reusable definition from which a concrete chain is instantiated. This section settles, once and for all, how a chain advances, how its steps come to exist as durable contracts, who composes its shape, and how its worktree is shared — the questions everything downstream depends on.</p>
 
+<figure class="visual">
+  <div class="figmeta"><span class="num">Fig. 06B</span><span>template-driven chain</span></div>
+  <div class="flow">
+    <div class="step"><strong>root issue</strong><span>Change contract and desired outcome.</span></div>
+    <div class="arrow">→</div>
+    <div class="step"><strong>template</strong><span>Layer 1 steps plus Layer 2 mandatory gates.</span></div>
+    <div class="arrow">→</div>
+    <div class="step"><strong>step issues</strong><span>Every dispatch gets a durable mandate and outputs.</span></div>
+    <div class="arrow">→</div>
+    <div class="step"><strong>coordinator</strong><span>Fresh-context entry gate emits <code>verdict: ready</code>.</span></div>
+    <div class="arrow">→</div>
+    <div class="step"><strong>working chain</strong><span>Substrate advances steps from persisted evidence.</span></div>
+  </div>
+  <div class="badge-row"><span class="badge">pre-built</span><span class="badge">type-resolved</span><span class="badge">on-the-run</span><span class="badge">mid-run insertions</span></div>
+  <figcaption>Routine step dispatch leaves the orchestrator’s head and becomes a resolved forward plan in substrate.</figcaption>
+</figure>
+
 
 <p>A note on naming: earlier drafts called this a &quot;workflow.&quot; That word is generic (it evokes BPM/n8n pipelines) and doesn&#39;t say what the thing <em>is</em> in this system. The unit here is the <strong>chain</strong>; a <code>chain_template</code> is its reusable form. &quot;Workflow&quot; does not appear in this design.</p>
 
@@ -1696,6 +1836,22 @@ wave:               (no shared base required)
 <h3 id="closing-an-issue-close-is-a-derivation-not-an-imperative">6.10 Closing an issue — close is a derivation, not an imperative</h3>
 <p>bd treats close as an <em>action</em> on an issue. Its three procedural shims — a memory-ack hook, a commit-gate hook, a Stop hook — exist because bd has no model of <em>what makes a close valid</em>; they enforce discipline from the outside. Substrate has the model, so the shims are not ported, they are <strong>deleted</strong> — the same move as the eliminated watchdog (§5.10) and the same pattern the specialists-runtime audit names &quot;compensation for missing model.&quot; An issue closes when three conditions hold: its <strong>evidence satisfies</strong> its acceptance (a root&#39;s change-contract) or its step-contract (a step/gate/advisor); its <strong>container state</strong> permits terminating that issue&#39;s role; and a <strong>close_reason</strong> from a closed enum is recorded.</p>
 
+<figure class="visual">
+  <div class="figmeta"><span class="num">Fig. 06C</span><span>close derivation</span></div>
+  <div class="flow">
+    <div class="step"><strong>evidence</strong><span>Diffs, verdicts, tests, checklist refs.</span></div>
+    <div class="arrow">→</div>
+    <div class="step"><strong>close_ready</strong><span>Per-issue predicates satisfied.</span></div>
+    <div class="arrow">→</div>
+    <div class="step"><strong>container ready</strong><span>All required members and gates cleared.</span></div>
+    <div class="arrow">→</div>
+    <div class="step"><strong>coordinator pass</strong><span>Git-clean, memory distillation, followup proposals.</span></div>
+    <div class="arrow">→</div>
+    <div class="step"><strong>merge</strong><span>Transactional close of root and member steps.</span></div>
+  </div>
+  <figcaption>The old bd shims disappear because substrate can derive readiness from evidence and container state.</figcaption>
+</figure>
+
 
 <h4 id="the-close-hierarchy-closeready-ready-merge">6.10.1 The close hierarchy — <code>close_ready</code> → <code>ready</code> → merge</h4>
 <p>There is a clean nesting between issue state and container state:</p>
@@ -1898,6 +2054,23 @@ sb reconcile &lt;chain:a&gt; &lt;chain:b&gt;
 <section id="memory">
 <h2><span class="num">10</span>Memory</h2>
 <p>Memory is <strong>durable, cross-task knowledge</strong> — distinct from the coordinator journal (operational state of one node, §5.9) and from channel messages (ephemeral live traffic, §7). Today this is bd memories + FTS5: flat, anyone writes, everything lands in one generic project pool, retention is &quot;whenever you run the memory-processor.&quot; Substrate keeps the generic write-and-FTS5 idea but adds <strong>metadata</strong>, and from that metadata three levels of memory emerge — <em>as queries, not as a field</em>.</p>
+
+<figure class="visual">
+  <div class="figmeta"><span class="num">Fig. 10A</span><span>memory as capability</span></div>
+  <div class="split-visual">
+    <div class="map-grid">
+      <div class="mini-card"><b>herd</b><p>Project-wide facts and anti-patterns.</p></div>
+      <div class="mini-card"><b>workgroup</b><p>Container-local lessons and node strategy.</p></div>
+      <div class="mini-card"><b>identity</b><p>Role-specific experience: what an executor or reviewer should remember.</p></div>
+    </div>
+    <div class="timeline">
+      <div class="rail"><span class="label">seed</span><p>Planner queries memory directly and stamps each issue’s <code>memory_pack</code>.</p></div>
+      <div class="rail"><span class="label">run</span><p>Participants carry the memory-query extension; no dedicated curator sits in between.</p></div>
+      <div class="rail"><span class="label">close</span><p>Chain or node coordinator distills <code>failure</code> and <code>best_practice</code> memories.</p></div>
+    </div>
+  </div>
+  <figcaption>Memory access moves from a role to a capability. Distillation moves to the closing judge with the freshest complete context.</figcaption>
+</figure>
 
 
 <h3 id="a-memory-is-facts-metadata-levels-are-queries">10.1 A memory is facts + metadata; levels are queries</h3>
@@ -2693,6 +2866,25 @@ CREATE INDEX idx_memories_type ON memories(type, project_id);
 
 
 <p>substrate is a <strong>local long-running daemon</strong>, one per machine, sole owner and sole writer of <code>state.db</code> (§13.2). It is authoritative and read-write for its domain (issues, containers, plans, collisions, validator). This is what distinguishes it from a <em>projection</em>: a projection is a rebuildable read-only copy; the engine <em>owns the truth</em>. Authoring is native to substrate, not write-through to some other store. Its three clients read the same surface: the <code>sb</code> CLI, the xtrm console, and the orchestrator. One source of truth, three readers.</p>
+
+<figure class="visual">
+  <div class="figmeta"><span class="num">Fig. 17A</span><span>one source, three faces</span></div>
+  <div class="split-visual">
+    <div class="flow tight">
+      <div class="step"><strong>sb CLI</strong><span>Human and orchestrator command surface.</span></div>
+      <div class="arrow">→</div>
+      <div class="step"><strong>daemon</strong><span>Owns <code>state.db</code>, emits feed, applies commands.</span></div>
+      <div class="arrow">→</div>
+      <div class="step"><strong>console</strong><span>Read-live dashboard over the same state.</span></div>
+    </div>
+    <div class="map-grid">
+      <div class="mini-card"><b>query</b><p>Snapshot and filtered reads for cold-start and inspection.</p></div>
+      <div class="mini-card"><b>changes</b><p>Native monotonic cursor plus stream for live readers.</p></div>
+      <div class="mini-card"><b>command</b><p>Issue, seed, container, validator mutations through one authority.</p></div>
+    </div>
+  </div>
+  <figcaption>Substrate is not a projection of old stores. It is the authoring engine; readers stitch opaque IDs across domains.</figcaption>
+</figure>
 
 
 <h3 id="three-faces">17.1 Three faces</h3>

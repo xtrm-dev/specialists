@@ -71,9 +71,40 @@ hr{border:0;border-top:1px solid var(--paper-shade);margin:40px 0}
 .toc a:hover{color:var(--accent);background:transparent}
 .toc .num{font-family:var(--mono);font-size:10px;color:var(--accent);margin-right:8px;letter-spacing:0.1em}
 .version-label{display:inline-block;font-family:var(--mono);font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--accent);border:1px solid var(--accent);padding:1px 7px;margin-right:8px;vertical-align:middle}
+.visual{margin:30px 0 34px;border:1px solid var(--paper-shade);background:rgba(235,231,219,0.42);padding:22px 24px}
+.visual .figmeta{display:flex;justify-content:space-between;gap:16px;border-bottom:1px solid var(--paper-shade);padding-bottom:9px;margin-bottom:18px;font-family:var(--mono);font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:var(--muted)}
+.visual .figmeta .num{color:var(--accent)}
+.visual figcaption{font-style:italic;color:var(--muted);font-size:14px;max-width:72ch;margin-top:16px}
+.flow{display:flex;align-items:stretch;gap:10px;flex-wrap:wrap}
+.flow.tight{gap:6px}
+.flow .step,.nodebox{border:1px solid var(--rule);background:var(--paper);padding:12px 14px;min-width:122px;flex:1}
+.flow .step strong,.nodebox strong{display:block;font-family:var(--mono);font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--accent);margin-bottom:5px}
+.flow .step span,.nodebox span{display:block;font-size:14px;line-height:1.35;color:var(--ink)}
+.arrow{align-self:center;font-family:var(--mono);color:var(--accent);font-size:18px;line-height:1}
+.split-visual{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.map-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.map-grid.five{grid-template-columns:repeat(5,1fr)}
+.mini-card{border-top:2px solid var(--rule);padding:12px 10px;background:rgba(245,242,233,0.72)}
+.mini-card b{display:block;font-family:var(--mono);font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--accent);margin-bottom:6px}
+.mini-card p{font-size:14px;line-height:1.38;margin:0;max-width:none}
+.timeline{display:grid;gap:10px}
+.timeline .rail{display:grid;grid-template-columns:74px 1fr;gap:14px;align-items:start;border-top:1px solid var(--paper-shade);padding-top:10px}
+.timeline .rail:first-child{border-top:0;padding-top:0}
+.timeline .label{font-family:var(--mono);font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--accent)}
+.timeline p{margin:0;font-size:14px;max-width:none}
+.badge-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.badge{font-family:var(--mono);font-size:10px;letter-spacing:0.08em;text-transform:uppercase;border:1px solid var(--accent);color:var(--accent);padding:2px 7px;background:var(--paper)}
+svg.diagram{display:block;width:100%;height:auto}
+svg.diagram text{font-family:var(--mono);font-size:11px;fill:var(--ink)}
+svg.diagram .serif{font-family:var(--serif);font-style:italic;font-size:15px}
+svg.diagram .muted{fill:var(--muted)}
+svg.diagram .accent{fill:var(--accent)}
+svg.diagram .box{fill:var(--paper);stroke:var(--rule);stroke-width:1.25}
+svg.diagram .soft{fill:var(--paper-shade);stroke:var(--paper-shade)}
+svg.diagram .line{stroke:var(--accent);stroke-width:1.4;fill:none}
 footer{margin-top:96px;padding-top:32px;border-top:2px solid var(--rule);font-family:var(--mono);font-size:11px;letter-spacing:0.05em;color:var(--muted);display:flex;justify-content:space-between;gap:16px}
 footer .accent{color:var(--accent)}
-@media (max-width:780px){.page{padding:48px 24px 80px}h1.title{font-size:44px}.meta{grid-template-columns:repeat(2,1fr)}.toc{column-count:1}table{display:block;overflow-x:auto;white-space:normal}}
+@media (max-width:780px){.page{padding:48px 24px 80px}h1.title{font-size:44px}.meta{grid-template-columns:repeat(2,1fr)}.toc{column-count:1}table{display:block;overflow-x:auto;white-space:normal}.split-visual,.map-grid,.map-grid.five{grid-template-columns:1fr}.arrow{display:none}.flow{display:grid;grid-template-columns:1fr}}
 @media print{body{background:white}pre{break-inside:avoid;font-size:10px}section{break-before:auto;break-after:auto}section > h2{break-after:avoid}table{break-inside:avoid}}
 
 </style>
@@ -197,6 +228,38 @@ footer .accent{color:var(--accent)}
 </section>
 <section id="architecture">
 <h2><span class="num">05</span>Architecture</h2>
+<figure class="visual">
+  <div class="figmeta"><span class="num">Fig. 05A</span><span>channel primitive</span></div>
+  <svg class="diagram" viewBox="0 0 920 320" role="img" aria-label="Channel architecture diagram">
+    <defs>
+      <marker id="arrow-channel" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#7A1F1B"/></marker>
+    </defs>
+    <rect class="soft" x="330" y="36" width="260" height="218"/>
+    <text class="serif accent" x="460" y="64" text-anchor="middle">channel</text>
+    <rect class="box" x="364" y="92" width="192" height="48"/>
+    <text x="460" y="118" text-anchor="middle">channel_messages</text>
+    <rect class="box" x="364" y="158" width="192" height="48"/>
+    <text x="460" y="184" text-anchor="middle">subscriptions / cursors</text>
+    <rect class="box" x="54" y="54" width="170" height="64"/>
+    <text x="139" y="82" text-anchor="middle">executor</text>
+    <text class="muted" x="139" y="101" text-anchor="middle">turn · finding</text>
+    <rect class="box" x="54" y="176" width="170" height="64"/>
+    <text x="139" y="204" text-anchor="middle">reviewer</text>
+    <text class="muted" x="139" y="223" text-anchor="middle">verdict · steer</text>
+    <rect class="box" x="696" y="54" width="170" height="64"/>
+    <text x="781" y="82" text-anchor="middle">human</text>
+    <text class="muted" x="781" y="101" text-anchor="middle">steer · note</text>
+    <rect class="box" x="696" y="176" width="170" height="64"/>
+    <text x="781" y="204" text-anchor="middle">judge</text>
+    <text class="muted" x="781" y="223" text-anchor="middle">done · continue</text>
+    <path class="line" marker-end="url(#arrow-channel)" d="M224 86 C270 86 300 104 360 112"/>
+    <path class="line" marker-end="url(#arrow-channel)" d="M224 208 C270 208 300 190 360 182"/>
+    <path class="line" marker-end="url(#arrow-channel)" d="M696 86 C642 86 618 104 560 112"/>
+    <path class="line" marker-end="url(#arrow-channel)" d="M696 208 C642 208 618 190 560 182"/>
+    <text class="muted" x="460" y="286" text-anchor="middle">append-only messages · per-participant cursors · typed wakeups</text>
+  </svg>
+  <figcaption>Pair-talk, human steer, lateral wakeups, and judge decisions all reduce to one append-only stream with filtered cursors.</figcaption>
+</figure>
 <h3 id="storage-observability-db">5.1 Storage (<code>observability.db</code>)</h3>
 <pre><code class="language-sql">CREATE TABLE channels (
   id TEXT PRIMARY KEY,
@@ -290,6 +353,18 @@ CREATE INDEX channel_messages_channel_seq ON channel_messages(channel_id, seq);
 
 <h3 id="message-kinds-discriminated-union">5.3 Message Kinds (discriminated union)</h3>
 <p>Every message body validates against a schema keyed by <code>kind</code>. Invalid messages are downgraded to <code>kind=note</code> and do <strong>not</strong> trigger wakeups.</p>
+
+<figure class="visual">
+  <div class="figmeta"><span class="num">Fig. 05B</span><span>message taxonomy</span></div>
+  <div class="map-grid five">
+    <div class="mini-card"><b>content</b><p><code>turn</code>, <code>finding</code>, <code>note</code>: knowledge enters the stream.</p></div>
+    <div class="mini-card"><b>judgment</b><p><code>verdict</code>, <code>ack</code>: another participant can act on a decision.</p></div>
+    <div class="mini-card"><b>control</b><p><code>steer</code>, <code>proposal</code>, <code>escalation</code>: direction changes without orchestration ceremony.</p></div>
+    <div class="mini-card"><b>system</b><p><code>continue</code>, <code>done</code>, <code>idle</code>, <code>budget</code>: lifecycle control stays typed.</p></div>
+    <div class="mini-card"><b>safety</b><p><code>error</code> downgrades invalid bodies and prevents accidental wakeups.</p></div>
+  </div>
+  <figcaption>The table below is dense by design; the visual taxonomy shows why the discriminated union is one protocol, not a pile of chat messages.</figcaption>
+</figure>
 
 
 <table>
@@ -494,6 +569,15 @@ await client.markSeen(convId, myKey, highestProcessed);
 
 
 <h3 id="topologies">5.6 Topologies</h3>
+<figure class="visual">
+  <div class="figmeta"><span class="num">Fig. 05C</span><span>turn-taking shapes</span></div>
+  <div class="map-grid">
+    <div class="mini-card"><b>turns</b><p>Round-robin or declared order. Useful when phases matter and the runtime chooses the next speaker.</p></div>
+    <div class="mini-card"><b>reactive</b><p>Messages wake subscribers. Reviewer findings can wake executor without human resume.</p></div>
+    <div class="mini-card"><b>freeform</b><p>Participants self-elect. A judge closes on consensus, budget, idle, or manual stop.</p></div>
+  </div>
+  <figcaption>Topology decides who gets the next chance to speak; message kind decides who wakes.</figcaption>
+</figure>
 <table>
 <thead>
 <tr>
@@ -769,6 +853,18 @@ sp ch show &lt;channel-id&gt;
 <section id="sequenced-implementation">
 <h2><span class="num">11</span>Sequenced Implementation (v0 → v3)</h2>
 <p>Each version is independently shippable, reversible, and pays its own way. <strong>Do not move to vN+1 until vN has shipped and proven value on real workflows.</strong> Earlier versions never block on later ones.</p>
+
+<figure class="visual">
+  <div class="figmeta"><span class="num">Fig. 11A</span><span>reversible rollout</span></div>
+  <div class="timeline">
+    <div class="rail"><span class="label">v0</span><p>Substrate table and spec block. Runner reads once; channels are real but modest.</p></div>
+    <div class="rail"><span class="label">v0.5</span><p>Workflow trials. Prove the primitive reduces manual orchestrator intervention before expanding it.</p></div>
+    <div class="rail"><span class="label">v1</span><p>Pair-talk CLI. Two participants can coordinate without node configuration.</p></div>
+    <div class="rail"><span class="label">v2</span><p>Node lateral wakeups and read-only judge. Single-scheduler invariant remains protected.</p></div>
+    <div class="rail"><span class="label">v3</span><p>Full channel engine only if v2 measurements justify it.</p></div>
+  </div>
+  <figcaption>The design is intentionally staged: each version is shippable, measurable, and reversible.</figcaption>
+</figure>
 
 
 <h3 id="design-invariants-across-all-versions">Design invariants across all versions</h3>
@@ -1047,6 +1143,15 @@ CREATE INDEX idx_channel_messages_target
 </section>
 <section id="success-criteria">
 <h2><span class="num">14</span>Success Criteria (per version)</h2>
+<figure class="visual">
+  <div class="figmeta"><span class="num">Fig. 14A</span><span>what success proves</span></div>
+  <div class="map-grid">
+    <div class="mini-card"><b>less ceremony</b><p>Reviewer↔executor loops converge without manual <code>sp resume</code>.</p></div>
+    <div class="mini-card"><b>same surface</b><p><code>sp steer</code> and <code>sp resume</code> keep user-visible behavior while moving onto channels.</p></div>
+    <div class="mini-card"><b>no split brain</b><p>Node members never bypass <code>node-supervisor</code>; the channel emits intent, not rogue scheduling.</p></div>
+  </div>
+  <figcaption>The success bar is behavioral: fewer operator interventions, no regression in existing nodes, and deterministic scheduler authority.</figcaption>
+</figure>
 <p><strong>v0 — Substrate:</strong></p>
 
 <ul>
