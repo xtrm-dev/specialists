@@ -542,6 +542,23 @@ Both are workarounds for absent model: `sp finalize` exists because there's no r
 
 Sequenced by leverage-per-day. **[recalibrated]** The runway (month+, ~10 repos) raises the value of every friction-removing day, so the ordering optimizes for earliest daily-pain relief.
 
+**Day estimates are engineer-day-equivalent (E-D-E), not wall-clock.** Each item's cost is the budget of focused engineering effort needed if a human did it sequentially. In **specialists-auto execution mode** the wall-clock is much shorter because (a) specialist runs are LLM-fast (executor chain ≈ 10–30 min where a human takes a day), (b) independent items in a phase run as **parallel chains** in disjoint worktrees, (c) overnight cycles chew through multiple phases sequentially. Realistic wall-clock for the full roadmap in auto-mode: **~3–4 days end-to-end** (or one long overnight + a day of supervised checkpoints), not 20+ calendar days.
+
+**Parallelization map (within-phase concurrency in auto-mode):**
+
+| Phase | E-D-E | Parallel chains | Why sequential within | Auto-mode wall-clock estimate |
+|---|---|---|---|---|
+| 0 | 1 | mostly sequential | bootstrap items chain (install templates → edit planner → create planning skill → verify → smoke) | ~1–2h |
+| 1 | 4 | up to 4 parallel (Claude hook, Opp 2 path-binding, Opp 8 event, Opp 11 memory) | all touch different files / different surfaces | ~half overnight |
+| 2 | 5 | mostly sequential (Opp 1 → Opp 3 → Opp 4 → Opp 10 dep chain) | each opportunity depends on prior data shapes / flags | ~one overnight |
+| 3 | 3 | up to 5 parallel (Opp 5, 6, 7, 9, R-checks all independent) | independent file scopes | ~half overnight |
+| 4 | 2 | sequential single workstream | one removal pass across `epic.ts` + state machine + reconciler | ~few hours |
+| 5 | 1 | parallel (B-A4 sweep, B-A5 excludes, B-A6 wrapper, sp merge diag) | independent file scopes | ~few hours |
+| 6 | 2 | sequential (v4 create → auto mirror → v3 freeze) | the order matters for coherence | ~half day |
+| 7 | 3 | parallel (one per role: code-sanity, obligations-scanner, security-auditor) | independent role checks | ~few hours |
+
+**Operator role in auto-mode:** drive the smoke checkpoints between phases (the cheap rebuild + CLI smoke per the handoff bead), validate at each phase boundary, only intervene on failure. The E-D-E columns below remain useful for reasoning about budget consumed per item; they should not be read as wall-clock.
+
 ### Phase 0 — Bootstrap (~1 day, operator + 1 small executor chain)
 
 Everything below this phase assumes Phase 0 has shipped. Without it, Phase 2 Pass-2 planning (the `recommended_template` annotation) cannot run, and Phase 1+ executors cannot benefit from the 13 chain-template formulas because `bd formula list` doesn't see them yet. This phase is the honest precondition the plan was missing — moved here from where D26 used to live as Phase 3 row 11b.
@@ -624,18 +641,20 @@ After the reviewer set proves out, generalize R-checks to code-sanity / obligati
 
 ### 10.6 Phase summary
 
-| Phase | Days | Cumulative | Key unlock |
-|---|---|---|---|
-| 0 | 1 | 1 | Bootstrap: chain templates installed; planner spec + planning skill teach `recommended_template`; manual-chain-discipline verified current |
-| 1 | 4 | 5 | Pre-dispatch hints; READ_ONLY decoupled from keep-alive; specialists pull scoped memory instead of paying full dump |
-| 2 | 5 | 10 | Composition gate explicit; chain state queryable; `--chain` is the single chain-identity verb; `--worktree`/`--job` deprecated |
-| 3 | 3 | 13 | Naming aligned; conventions teach the right shape; reviewer mistakes caught |
-| 4 | 2 | 15 | `sp epic` blocker friction eliminated; ~500 LOC removed |
-| 5 | 1 | 16 | h9hqg already done; B-A4/A5/A6 + sp merge diagnostic + `xt init` auto-run |
-| 6 | 2 | 18 | Skills revamp: v4 is the new canonical (post-roadmap discipline), auto-mode mirrors v4 with smoke-checkpoint cadence, v3 frozen as legacy reference |
-| 7 | 3 | 21 | Other gate roles get pre-dispatch checks |
+E-D-E = engineer-day-equivalent (budget reasoning). Wall-clock in specialists-auto mode is much shorter; see the parallelization map above.
 
-**~16 days for Phases 0–5** (bootstrap + core runtime + sp epic decoration + per-repo bootstrap), Phase 6 finalizes the operator-facing documentation, Phase 7 as polish.
+| Phase | E-D-E | Cumul. E-D-E | Auto-mode wall-clock | Key unlock |
+|---|---|---|---|---|
+| 0 | 1 | 1 | ~1–2h | Bootstrap: chain templates installed; planner spec + planning skill teach `recommended_template`; manual-chain-discipline verified current |
+| 1 | 4 | 5 | ~half overnight (4 parallel) | Pre-dispatch hints; READ_ONLY decoupled from keep-alive; specialists pull scoped memory instead of paying full dump |
+| 2 | 5 | 10 | ~one overnight (sequential dep chain) | Composition gate explicit; chain state queryable; `--chain` is the single chain-identity verb; `--worktree`/`--job` deprecated |
+| 3 | 3 | 13 | ~half overnight (5 parallel) | Naming aligned; conventions teach the right shape; reviewer mistakes caught |
+| 4 | 2 | 15 | ~few hours | `sp epic` blocker friction eliminated; ~500 LOC removed |
+| 5 | 1 | 16 | ~few hours (parallel) | h9hqg already done; B-A4/A5/A6 + sp merge diagnostic + `xt init` auto-run |
+| 6 | 2 | 18 | ~half day (sequential coherence) | Skills revamp: v4 is the new canonical (post-roadmap discipline), auto-mode mirrors v4 with smoke-checkpoint cadence, v3 frozen as legacy reference |
+| 7 | 3 | 21 | ~few hours (3 parallel) | Other gate roles get pre-dispatch checks |
+
+**Budget reasoning:** ~16 E-D-E for Phases 0–5 (bootstrap + core runtime + sp epic decoration + per-repo bootstrap), Phase 6 finalizes the operator-facing documentation, Phase 7 as polish. **Wall-clock reality in auto-mode: ~3–4 days end-to-end** (or one long overnight + a day of supervised checkpoints), driven by parallelizable phases (1, 3, 5, 7) running concurrently in disjoint worktrees and sequential phases (0, 2, 4, 6) chaining quickly because each opportunity is hours-of-LLM, not days-of-human.
 
 ### 10.7 What this rollout does NOT do (honest scope)
 
