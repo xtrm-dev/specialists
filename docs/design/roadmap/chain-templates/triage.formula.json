@@ -1,0 +1,35 @@
+{
+  "formula": "triage",
+  "type": "workflow",
+  "version": 1,
+  "description": "Board health work. explorer (semantic clustering + duplicate detection) → overthinker (rewire recommendations, priority re-balancing, decompose-or-merge proposals). READ_ONLY chain — no code edits. Output is advisory; operator applies recommendations via bd dep / bd duplicate / bd supersede / bd close.",
+  "vars": {
+    "root_title": { "default": "Board triage pass", "required": false },
+    "filter": { "default": "status=open", "required": false }
+  },
+  "steps": [
+    {
+      "id": "root",
+      "title": "{{root_title}}",
+      "type": "chore",
+      "description": "PROBLEM: board accumulates open issues, duplicates, stale advisors, orphan tracking-beads, mis-prioritized work. Periodic triage keeps the graph navigable.\nSCOPE: bd issues matching filter `{{filter}}`.\nNON_GOALS: no bd edits during this chain — operator applies recommendations after; no specialist edits.\nVALIDATION: explorer produces clustering+dup table; overthinker produces ranked recommendation list.\nACCEPTANCE: operator has actionable list of bd dep / bd duplicate / bd supersede / bd close commands.\n\nBoard triage: explorer maps, overthinker recommends.",
+      "labels": ["chain-root", "kind:root", "type:chore", "triage", "board-health"]
+    },
+    {
+      "id": "explorer",
+      "title": "explorer:{{root_title}}",
+      "type": "task",
+      "needs": ["root"],
+      "description": "MANDATE: READ_ONLY board mapper. For filter `{{filter}}`: cluster semantically related issues, identify duplicates (mechanical + semantic), flag stale advisors (no recent activity), flag orphan tracking-beads (step-beads missing validates edge to root), surface priority-vs-blast-radius mismatches.\nINPUTS: bd list --status=open --json + filter.\nOUTPUTS: structured table — clusters, candidate dups, stale advisors, orphans, mismatches. Cite bead-ids.\nSCOPE: bd graph queries only.\nNON_GOALS: no bd edits; no specialist edits; no recommendations (that's overthinker's job).",
+      "labels": ["chain-step", "kind:step", "role:explorer", "edge:informs->root", "advisor:pre-impl"]
+    },
+    {
+      "id": "overthinker",
+      "title": "overthinker:{{root_title}}",
+      "type": "task",
+      "needs": ["explorer"],
+      "description": "MANDATE: devil's-advocate review of explorer's board map. 4-phase synthesis: initial analysis → critique (what would actually break if we merge cluster X? are these REALLY duplicates? is this stale advisor still relevant?) → synthesis → distilled recommendations.\nINPUTS: explorer's structured table.\nOUTPUTS: ranked recommendations — for each cluster/dup/orphan/mismatch, propose action (merge / supersede / close / re-prioritize / leave) with reasoning. Generate ready-to-run bd commands.\nSCOPE: explorer's findings only.\nNON_GOALS: no bd edits; no expansion of scope beyond explorer's findings.",
+      "labels": ["chain-step", "kind:step", "role:overthinker", "edge:informs->root", "advisor:pre-impl"]
+    }
+  ]
+}

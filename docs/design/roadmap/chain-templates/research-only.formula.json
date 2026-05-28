@@ -1,0 +1,28 @@
+{
+  "formula": "research-only",
+  "type": "workflow",
+  "version": 1,
+  "description": "Investigation that deliberately does NOT produce code. Single specialist (default: explorer for local codebase; operator overrides to researcher for external sources). Output is a findings memo — saved to bd notes + optionally to a design doc. Use for: pre-feature research, post-mortem investigation, exploratory mapping.",
+  "vars": {
+    "root_title": { "default": "Untitled investigation", "required": false },
+    "scope": { "default": "src/**", "required": false },
+    "specialist": { "default": "explorer", "required": false }
+  },
+  "steps": [
+    {
+      "id": "root",
+      "title": "{{root_title}}",
+      "type": "task",
+      "description": "PROBLEM: (the question being investigated)\nSCOPE: {{scope}} (or external research target)\nNON_GOALS: NO CODE CHANGES (this is research-only); no implementation; no design decisions (those go through separate planning chain).\nVALIDATION: findings memo produced; cites concrete evidence (file:line for code; URL+date for external).\nACCEPTANCE: operator has structured evidence to inform a follow-up decision.\n\nResearch-only chain. Single specialist ({{specialist}}). If external sources needed, override to researcher; if internal codebase, keep default explorer.",
+      "labels": ["chain-root", "kind:root", "type:task", "research", "scope-empty:code"]
+    },
+    {
+      "id": "investigation",
+      "title": "{{specialist}}:{{root_title}}",
+      "type": "task",
+      "needs": ["root"],
+      "description": "MANDATE: READ_ONLY investigation. Produce structured findings memo answering root's PROBLEM.\nINPUTS: root contract; relevant code in {{scope}} (for explorer) OR external sources (for researcher).\nOUTPUTS: structured findings — for explorer: call flows, dependencies, file:line evidence; for researcher: ecosystem evidence with URL+date citations. Markdown format.\nSCOPE: research-only.\nNON_GOALS: NO CODE EDITS; no implementation recommendations beyond what root asked.",
+      "labels": ["chain-step", "kind:step", "role:{{specialist}}", "edge:informs->root", "advisor:standalone"]
+    }
+  ]
+}
