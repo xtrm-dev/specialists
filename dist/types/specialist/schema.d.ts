@@ -342,8 +342,9 @@ export declare const SpecialistSchema: z.ZodObject<{
                 when: z.ZodOptional<z.ZodString>;
             }, z.ZodTypeAny, "passthrough">>, "many">>;
         }, z.ZodTypeAny, "passthrough">>>;
-        /** Write the final output to this file path after the session completes */
+        /** Write handoff output to this file path via unified job-file writer */
         output_file: z.ZodOptional<z.ZodString>;
+        notes_mode: z.ZodDefault<z.ZodEnum<["full-trail", "final-only"]>>;
         beads_integration: z.ZodDefault<z.ZodEnum<["auto", "always", "never"]>>;
         beads_write_notes: z.ZodDefault<z.ZodBoolean>;
     }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
@@ -688,8 +689,9 @@ export declare const SpecialistSchema: z.ZodObject<{
                 when: z.ZodOptional<z.ZodString>;
             }, z.ZodTypeAny, "passthrough">>, "many">>;
         }, z.ZodTypeAny, "passthrough">>>;
-        /** Write the final output to this file path after the session completes */
+        /** Write handoff output to this file path via unified job-file writer */
         output_file: z.ZodOptional<z.ZodString>;
+        notes_mode: z.ZodDefault<z.ZodEnum<["full-trail", "final-only"]>>;
         beads_integration: z.ZodDefault<z.ZodEnum<["auto", "always", "never"]>>;
         beads_write_notes: z.ZodDefault<z.ZodBoolean>;
     }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
@@ -1034,8 +1036,9 @@ export declare const SpecialistSchema: z.ZodObject<{
                 when: z.ZodOptional<z.ZodString>;
             }, z.ZodTypeAny, "passthrough">>, "many">>;
         }, z.ZodTypeAny, "passthrough">>>;
-        /** Write the final output to this file path after the session completes */
+        /** Write handoff output to this file path via unified job-file writer */
         output_file: z.ZodOptional<z.ZodString>;
+        notes_mode: z.ZodDefault<z.ZodEnum<["full-trail", "final-only"]>>;
         beads_integration: z.ZodDefault<z.ZodEnum<["auto", "always", "never"]>>;
         beads_write_notes: z.ZodDefault<z.ZodBoolean>;
     }, z.ZodTypeAny, "passthrough">>;
@@ -1382,8 +1385,9 @@ export declare const SpecialistSchema: z.ZodObject<{
                 when: z.ZodOptional<z.ZodString>;
             }, z.ZodTypeAny, "passthrough">>, "many">>;
         }, z.ZodTypeAny, "passthrough">>>;
-        /** Write the final output to this file path after the session completes */
+        /** Write handoff output to this file path via unified job-file writer */
         output_file: z.ZodOptional<z.ZodString>;
+        notes_mode: z.ZodDefault<z.ZodEnum<["full-trail", "final-only"]>>;
         beads_integration: z.ZodDefault<z.ZodEnum<["auto", "always", "never"]>>;
         beads_write_notes: z.ZodDefault<z.ZodBoolean>;
     }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
@@ -1728,8 +1732,9 @@ export declare const SpecialistSchema: z.ZodObject<{
                 when: z.ZodOptional<z.ZodString>;
             }, z.ZodTypeAny, "passthrough">>, "many">>;
         }, z.ZodTypeAny, "passthrough">>>;
-        /** Write the final output to this file path after the session completes */
+        /** Write handoff output to this file path via unified job-file writer */
         output_file: z.ZodOptional<z.ZodString>;
+        notes_mode: z.ZodDefault<z.ZodEnum<["full-trail", "final-only"]>>;
         beads_integration: z.ZodDefault<z.ZodEnum<["auto", "always", "never"]>>;
         beads_write_notes: z.ZodDefault<z.ZodBoolean>;
     }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
@@ -2074,8 +2079,9 @@ export declare const SpecialistSchema: z.ZodObject<{
                 when: z.ZodOptional<z.ZodString>;
             }, z.ZodTypeAny, "passthrough">>, "many">>;
         }, z.ZodTypeAny, "passthrough">>>;
-        /** Write the final output to this file path after the session completes */
+        /** Write handoff output to this file path via unified job-file writer */
         output_file: z.ZodOptional<z.ZodString>;
+        notes_mode: z.ZodDefault<z.ZodEnum<["full-trail", "final-only"]>>;
         beads_integration: z.ZodDefault<z.ZodEnum<["auto", "always", "never"]>>;
         beads_write_notes: z.ZodDefault<z.ZodBoolean>;
     }, z.ZodTypeAny, "passthrough">>;
@@ -2422,8 +2428,9 @@ export declare const SpecialistSchema: z.ZodObject<{
                 when: z.ZodOptional<z.ZodString>;
             }, z.ZodTypeAny, "passthrough">>, "many">>;
         }, z.ZodTypeAny, "passthrough">>>;
-        /** Write the final output to this file path after the session completes */
+        /** Write handoff output to this file path via unified job-file writer */
         output_file: z.ZodOptional<z.ZodString>;
+        notes_mode: z.ZodDefault<z.ZodEnum<["full-trail", "final-only"]>>;
         beads_integration: z.ZodDefault<z.ZodEnum<["auto", "always", "never"]>>;
         beads_write_notes: z.ZodDefault<z.ZodBoolean>;
     }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
@@ -2768,8 +2775,9 @@ export declare const SpecialistSchema: z.ZodObject<{
                 when: z.ZodOptional<z.ZodString>;
             }, z.ZodTypeAny, "passthrough">>, "many">>;
         }, z.ZodTypeAny, "passthrough">>>;
-        /** Write the final output to this file path after the session completes */
+        /** Write handoff output to this file path via unified job-file writer */
         output_file: z.ZodOptional<z.ZodString>;
+        notes_mode: z.ZodDefault<z.ZodEnum<["full-trail", "final-only"]>>;
         beads_integration: z.ZodDefault<z.ZodEnum<["auto", "always", "never"]>>;
         beads_write_notes: z.ZodDefault<z.ZodBoolean>;
     }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
@@ -3114,8 +3122,9 @@ export declare const SpecialistSchema: z.ZodObject<{
                 when: z.ZodOptional<z.ZodString>;
             }, z.ZodTypeAny, "passthrough">>, "many">>;
         }, z.ZodTypeAny, "passthrough">>>;
-        /** Write the final output to this file path after the session completes */
+        /** Write handoff output to this file path via unified job-file writer */
         output_file: z.ZodOptional<z.ZodString>;
+        notes_mode: z.ZodDefault<z.ZodEnum<["full-trail", "final-only"]>>;
         beads_integration: z.ZodDefault<z.ZodEnum<["auto", "always", "never"]>>;
         beads_write_notes: z.ZodDefault<z.ZodBoolean>;
     }, z.ZodTypeAny, "passthrough">>;

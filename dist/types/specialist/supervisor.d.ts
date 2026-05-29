@@ -97,7 +97,7 @@ export interface SupervisorOptions {
     /** Stall detection thresholds — merged with STALL_DETECTION_DEFAULTS */
     stallDetection?: StallDetectionConfig;
 }
-export declare function formatBeadNotes(result: {
+export declare function formatHandoffBlock(result: {
     output: string;
     promptHash?: string;
     durationMs?: number;
@@ -108,7 +108,15 @@ export declare function formatBeadNotes(result: {
     status: SupervisorJobStatus;
     timestamp: string;
     tokenUsage?: SessionTokenUsage;
+    turnIndex?: number;
+}, options: {
+    final: boolean;
 }): string;
+export declare function shouldPersistHandoffBlock(params: {
+    output: string;
+    notesMode: 'full-trail' | 'final-only';
+    final: boolean;
+}): boolean;
 type ContextHealth = 'OK' | 'MONITOR' | 'WARN' | 'CRITICAL';
 export declare const AUTO_COMMIT_NOISE_PREFIXES: readonly [".xtrm/", ".wolf/", ".specialists/jobs/", ".beads/", ".pi/"];
 /** Detects whether the GitNexus index in `cwd` has embeddings, so a re-analyze

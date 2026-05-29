@@ -1,7 +1,6 @@
 // src/specialist/runner.ts
 import { createHash } from 'node:crypto';
-import { writeFile } from 'node:fs/promises';
-import { isJobFileOutputEnabled } from './job-file-output.js';
+import { isJobFileOutputEnabled, writeJobFileOutput } from './job-file-output.js';
 import { renderTemplate } from './templateEngine.js';
 import {
   PiAgentSession,
@@ -32,6 +31,9 @@ export interface RunOptions {
   worktreeBoundary?: string;
   /** Existing bead whose content should be used as the task prompt. */
   inputBeadId?: string;
+  output_file?: string;
+  suppressRunnerFileOutput?: boolean;
+  notesMode?: 'full-trail' | 'final-only';
   /** Owning epic id for wave-bound chains, when bead belongs to an epic. */
   epicId?: string;
   /** Lineage: set when --job <id> is used to reuse another job's worktree. */
@@ -1452,8 +1454,8 @@ _This project is indexed by GitNexus. You MUST use these tools — do NOT fall b
       process.stderr.write(`[specialists] output contract warnings:\n${outputContractWarnings.map(msg => `  ⚠ ${msg}`).join('\n')}\n`);
     }
 
-    if (output_file && isJobFileOutputEnabled()) {
-      await writeFile(output_file, output, 'utf-8').catch(() => {});
+    if (output_file && isJobFileOutputEnabled() && !options.suppressRunnerFileOutput) {
+      await writeJobFileOutput(output_file, output, 'overwrite').catch(() => {});
     }
 
     await hooks.emit('post_execute', invocationId, metadata.name, metadata.version, {

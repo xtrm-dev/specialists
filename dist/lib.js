@@ -13554,6 +13554,7 @@ var SpecialistSchema = objectType({
     stall_detection: StallDetectionSchema,
     mandatory_rules: MandatoryRulesSchema,
     output_file: stringType().optional(),
+    notes_mode: enumType(["full-trail", "final-only"]).default("full-trail"),
     beads_integration: enumType(["auto", "always", "never"]).default("auto"),
     beads_write_notes: booleanType().default(true)
   }).passthrough()

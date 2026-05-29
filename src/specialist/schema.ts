@@ -124,8 +124,9 @@ export const SpecialistSchema = z.object({
     validation: ValidationSchema,
     stall_detection: StallDetectionSchema,
     mandatory_rules: MandatoryRulesSchema,
-    /** Write the final output to this file path after the session completes */
+    /** Write handoff output to this file path via unified job-file writer */
     output_file: z.string().optional(),
+    notes_mode: z.enum(['full-trail', 'final-only']).default('full-trail'),
     beads_integration: z.enum(['auto', 'always', 'never']).default('auto'),
     beads_write_notes: z.boolean().default(true),
   }).passthrough(),

@@ -1,4 +1,5 @@
 export type JobFileOutputMode = 'on' | 'off';
+export type JobFileWriteMode = 'append' | 'overwrite';
 
 function normalizeMode(value: string | undefined): string {
   return (value ?? '').trim().toLowerCase();
@@ -13,4 +14,18 @@ export function detectJobFileOutputMode(env: NodeJS.ProcessEnv = process.env): J
 
 export function isJobFileOutputEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return detectJobFileOutputMode(env) === 'on';
+}
+
+export async function writeJobFileOutput(
+  path: string,
+  content: string,
+  mode: JobFileWriteMode,
+): Promise<void> {
+  if (!isJobFileOutputEnabled()) return;
+  const { appendFile, writeFile } = await import('node:fs/promises');
+  if (mode === 'append') {
+    await appendFile(path, content, 'utf-8');
+    return;
+  }
+  await writeFile(path, content, 'utf-8');
 }

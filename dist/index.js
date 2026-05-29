@@ -17734,6 +17734,7 @@ var init_schema = __esm(() => {
       stall_detection: StallDetectionSchema,
       mandatory_rules: MandatoryRulesSchema,
       output_file: stringType().optional(),
+      notes_mode: enumType(["full-trail", "final-only"]).default("full-trail"),
       beads_integration: enumType(["auto", "always", "never"]).default("auto"),
       beads_write_notes: booleanType().default(true)
     }).passthrough()
@@ -17925,6 +17926,16 @@ function detectJobFileOutputMode(env = process.env) {
 }
 function isJobFileOutputEnabled(env = process.env) {
   return detectJobFileOutputMode(env) === "on";
+}
+async function writeJobFileOutput(path, content, mode) {
+  if (!isJobFileOutputEnabled())
+    return;
+  const { appendFile, writeFile } = await import("fs/promises");
+  if (mode === "append") {
+    await appendFile(path, content, "utf-8");
+    return;
+  }
+  await writeFile(path, content, "utf-8");
 }
 
 // src/specialist/templateEngine.ts
@@ -22088,7 +22099,6 @@ __export(exports_runner, {
   SpecialistRunner: () => SpecialistRunner
 });
 import { createHash as createHash2 } from "crypto";
-import { writeFile } from "fs/promises";
 import { execSync as execSync2, spawnSync as spawnSync4 } from "child_process";
 import { existsSync as existsSync7, readFileSync as readFileSync5 } from "fs";
 import { basename as basename2, resolve as resolve4 } from "path";
@@ -23061,8 +23071,8 @@ ${outputContractWarnings.map((msg) => `  \u26A0 ${msg}`).join(`
 `)}
 `);
     }
-    if (output_file && isJobFileOutputEnabled()) {
-      await writeFile(output_file, output, "utf-8").catch(() => {});
+    if (output_file && isJobFileOutputEnabled() && !options.suppressRunnerFileOutput) {
+      await writeJobFileOutput(output_file, output, "overwrite").catch(() => {});
     }
     await hooks.emit("post_execute", invocationId, metadata.name, metadata.version, {
       status: "COMPLETE",
@@ -24507,13 +24517,16 @@ function getCurrentGitSha() {
   const sha = result.stdout?.trim();
   return sha || undefined;
 }
-function formatBeadNotes(result) {
-  const statusLabel = result.status === "waiting" ? "WAITING \u2014 more output may follow" : result.status.toUpperCase();
+function formatHandoffBlock(result, options) {
+  const statusToken = options.final ? `FINAL \xB7 ${result.status === "cancelled" ? "CANCELLED" : result.status === "error" ? "ERROR" : "DONE"}` : result.status === "waiting" ? "WAITING" : "WORKING";
+  const rule = options.final ? "\u2550".repeat(70) : "_".repeat(70);
+  const header = options.final ? `### \u2705 ${result.specialist} \xB7 ${result.model} \xB7 [${statusToken}]` : `### \uD83D\uDD2C ${result.specialist} \xB7 ${result.model} \xB7 [turn ${result.turnIndex ?? "unknown"} \xB7 ${statusToken}]`;
   const metadata = [
     `timestamp=${result.timestamp}`,
     `status=${result.status}`,
     `specialist=${result.specialist}`,
     `job_id=${result.jobId}`,
+    `turn_index=${result.turnIndex ?? "unknown"}`,
     `prompt_hash=${result.promptHash ?? "unknown"}`,
     `git_sha=${getCurrentGitSha() ?? "unknown"}`,
     `elapsed_ms=${result.durationMs !== undefined ? Math.round(result.durationMs) : "unknown"}`,
@@ -24529,14 +24542,21 @@ function formatBeadNotes(result) {
 `);
   return `
 
-______________________________________________________________________
+${rule}
 
-### \uD83D\uDD2C ${result.specialist} \xB7 ${result.model} \xB7 [${statusLabel}]
+${header}
 
 ${result.output}
 
 ---
 ${metadata}`;
+}
+function shouldPersistHandoffBlock(params) {
+  if (!params.output.trim())
+    return false;
+  if (params.notesMode === "final-only" && !params.final)
+    return false;
+  return true;
 }
 function getModelContextWindow(model) {
   if (!model)
@@ -25558,6 +25578,10 @@ class Supervisor {
     const shouldAutoCloseReadOnlyKeepAlive = (output) => isReadOnlySpecialist && TERMINAL_COMPLIANCE_VERDICT_REGEX.test(output);
     const shouldAutoFinalizeKeepAlive = (output) => PASS_COMPLIANCE_VERDICT_REGEX.test(output);
     const shouldWriteExternalBeadNotes = runOptions.beadsWriteNotes ?? true;
+    const notesMode = runOptions.notesMode ?? "full-trail";
+    const outputFile = runOptions.output_file;
+    let lastTurnSummaryTextContent = "";
+    let lastTurnSummaryIndex = 0;
     let skipFinalKeepAliveInputBeadAppend = false;
     let lastGitnexusAnalyzedSha;
     const triggerGitnexusAnalyzeIfNeeded = (sha, source) => {
@@ -25574,12 +25598,10 @@ class Supervisor {
         appendTimelineEvent(createMetaEvent("gitnexus_analyze_start_failed", `${source}: ${String(err?.message ?? err)}`));
       }
     };
-    const appendResultToInputBead = (params) => {
-      const inputBeadId = runOptions.inputBeadId;
-      const shouldAppendResultToInputBead = Boolean(shouldWriteExternalBeadNotes && inputBeadId && this.opts.beadsClient);
-      if (!shouldAppendResultToInputBead || !inputBeadId || !this.opts.beadsClient)
+    const writeUnifiedHandoff = (params) => {
+      if (!shouldPersistHandoffBlock({ output: params.output, notesMode, final: params.final }))
         return false;
-      const notes = formatBeadNotes({
+      const rendered = formatHandoffBlock({
         output: params.output,
         promptHash: params.promptHash,
         durationMs: params.durationMs,
@@ -25589,24 +25611,41 @@ class Supervisor {
         jobId: id,
         status: params.status,
         timestamp: new Date().toISOString(),
-        tokenUsage: params.tokenUsage
-      });
-      const appendResult = this.opts.beadsClient.updateBeadNotes(inputBeadId, notes);
-      if (appendResult.ok)
-        return true;
-      const appendError = `[bead-append-failed] ${appendResult.error ?? "Unknown error"}`;
-      appendTimelineEvent(createMetaEvent("bead_append_failed", appendError));
-      setStatus({ current_event: "bead_append_failed", last_event_at_ms: Date.now() });
-      if (this.isJobFileOutputEnabled) {
-        try {
-          appendFileSync(this.resultPath(id), `
+        tokenUsage: params.tokenUsage,
+        turnIndex: params.turnIndex
+      }, { final: params.final });
+      const inputBeadId = runOptions.inputBeadId;
+      if (shouldWriteExternalBeadNotes && inputBeadId && this.opts.beadsClient) {
+        const noteText = notesMode === "final-only" && !params.final ? "" : rendered;
+        if (noteText) {
+          const appendResult = this.opts.beadsClient.updateBeadNotes(inputBeadId, noteText);
+          if (!appendResult.ok) {
+            const appendError = `[bead-append-failed] ${appendResult.error ?? "Unknown error"}`;
+            appendTimelineEvent(createMetaEvent("bead_append_failed", appendError));
+            setStatus({ current_event: "bead_append_failed", last_event_at_ms: Date.now() });
+            if (this.isJobFileOutputEnabled) {
+              try {
+                appendFileSync(this.resultPath(id), `
 
 ${appendError}
 `, "utf-8");
+              } catch {}
+            }
+          }
+        }
+      }
+      if (outputFile && this.isJobFileOutputEnabled) {
+        try {
+          if (notesMode === "final-only") {
+            writeFileSync3(outputFile, rendered, "utf-8");
+          } else {
+            appendFileSync(outputFile, rendered, "utf-8");
+          }
         } catch {}
       }
-      return false;
+      return true;
     };
+    const appendResultToInputBead = (params) => writeUnifiedHandoff(params);
     const applyAutoCommitCheckpoint = (target, autoCommitPolicy2) => {
       const autoCommitResult = runAutoCommitCheckpoint({
         autoCommitPolicy: autoCommitPolicy2,
@@ -25659,7 +25698,7 @@ ${appendError}
         latestOutput = output;
         if (this.isJobFileOutputEnabled) {
           mkdirSync4(this.jobDir(id), { recursive: true });
-          writeFileSync3(this.resultPath(id), output, "utf-8");
+          writeFileSync3(this.resultPath(id), lastTurnSummaryTextContent || output, "utf-8");
         }
         try {
           this.withSqliteOperation("upsertResult:resume_turn", (client) => client.upsertResult(id, output));
@@ -25676,11 +25715,13 @@ ${appendError}
         const readOnlyClose = shouldAutoCloseReadOnlyKeepAlive(output);
         const isWaitingTurn = !readOnlyClose && !passFinalize;
         applyAutoCommitCheckpoint(isWaitingTurn ? "waiting" : "terminal", autoCommitPolicy);
-        appendResultToInputBead({
+        writeUnifiedHandoff({
           output,
           model: statusSnapshot.model ?? "unknown",
           backend: statusSnapshot.backend ?? "unknown",
           status: isWaitingTurn ? "waiting" : "done",
+          final: false,
+          turnIndex: runMetrics.turns,
           tokenUsage: runMetrics.token_usage
         });
         if (!isWaitingTurn) {
@@ -25758,11 +25799,13 @@ ${appendError}
       if (keepAliveSession) {
         const hasPendingKeepAliveOutput = Boolean(latestOutput && statusSnapshot.status === "waiting" && !shouldAutoCloseReadOnlyKeepAlive(latestOutput));
         if (hasPendingKeepAliveOutput) {
-          const appendSucceeded = appendResultToInputBead({
+          const appendSucceeded = writeUnifiedHandoff({
             output: latestOutput,
             model: statusSnapshot.model ?? "unknown",
             backend: statusSnapshot.backend ?? "unknown",
             status: "cancelled",
+            final: false,
+            turnIndex: runMetrics.turns,
             tokenUsage: runMetrics.token_usage
           });
           if (appendSucceeded) {
@@ -25775,7 +25818,7 @@ ${appendError}
       killFn?.();
     };
     process.once("SIGTERM", sigtermHandler);
-    const runOptionsWithBoundary = runOptions.workingDirectory ? { ...runOptions, worktreeBoundary: runOptions.workingDirectory } : runOptions;
+    const runOptionsWithBoundary = runOptions.workingDirectory ? { ...runOptions, worktreeBoundary: runOptions.workingDirectory, suppressRunnerFileOutput: true } : { ...runOptions, suppressRunnerFileOutput: true };
     try {
       const result = await runner.run(runOptionsWithBoundary, (delta) => {
         const toolMatch = delta.match(/\u2699 (.+?)\u2026/);
@@ -25943,7 +25986,18 @@ ${appendError}
             context_pct: contextUtilization?.context_pct,
             context_health: contextUtilization?.context_health
           });
+          lastTurnSummaryIndex = metricEvent.turn_index;
+          lastTurnSummaryTextContent = turnTextAccumulator;
           appendTimelineEvent(createTurnSummaryEvent(metricEvent.turn_index, metricEvent.token_usage, metricEvent.finish_reason, turnTextAccumulator || undefined, contextUtilization?.context_pct, contextUtilization?.context_health));
+          writeUnifiedHandoff({
+            output: turnTextAccumulator,
+            model: statusSnapshot.model ?? "unknown",
+            backend: statusSnapshot.backend ?? "unknown",
+            status: "done",
+            final: false,
+            turnIndex: metricEvent.turn_index,
+            tokenUsage: metricEvent.token_usage ?? runMetrics.token_usage
+          });
           turnTextAccumulator = "";
           return;
         }
@@ -26089,7 +26143,7 @@ ${appendError}
       latestOutput = result.output;
       if (this.isJobFileOutputEnabled) {
         mkdirSync4(this.jobDir(id), { recursive: true });
-        writeFileSync3(this.resultPath(id), latestOutput, "utf-8");
+        writeFileSync3(this.resultPath(id), lastTurnSummaryTextContent || latestOutput, "utf-8");
       }
       const elapsed = Math.round((Date.now() - startedAtMs) / 1000);
       const finalResult = {
@@ -26123,11 +26177,13 @@ ${appendError}
         } else if (shouldAutoFinalizeKeepAlive(finalResult.output)) {
           await closeKeepAliveSession();
         } else {
-          appendResultToInputBead({
+          writeUnifiedHandoff({
             output: finalResult.output,
             model: finalResult.model,
             backend: finalResult.backend,
             status: "waiting",
+            final: false,
+            turnIndex: runMetrics.turns,
             promptHash: finalResult.promptHash,
             durationMs: finalResult.durationMs,
             tokenUsage: finalResult.metrics?.token_usage
@@ -26149,19 +26205,21 @@ ${appendError}
       const appendedStatus = keepAliveSession && !shouldAutoCloseReadOnlyKeepAlive(finalResult.output) ? "waiting" : "done";
       const shouldSkipFinalInputBeadAppend = keepAliveSession && skipFinalKeepAliveInputBeadAppend;
       if (!shouldSkipFinalInputBeadAppend) {
-        appendResultToInputBead({
-          output: finalResult.output,
+        writeUnifiedHandoff({
+          output: lastTurnSummaryTextContent || finalResult.output,
           model: finalResult.model,
           backend: finalResult.backend,
           status: appendedStatus,
+          final: true,
+          turnIndex: lastTurnSummaryIndex || runMetrics.turns,
           promptHash: finalResult.promptHash,
           durationMs: finalResult.durationMs,
           tokenUsage: finalResult.metrics?.token_usage
         });
       }
       if (ownsBead && finalResult.beadId) {
-        this.opts.beadsClient?.updateBeadNotes(finalResult.beadId, formatBeadNotes({
-          output: finalResult.output,
+        this.opts.beadsClient?.updateBeadNotes(finalResult.beadId, formatHandoffBlock({
+          output: lastTurnSummaryTextContent || finalResult.output,
           promptHash: finalResult.promptHash,
           durationMs: finalResult.durationMs,
           model: finalResult.model,
@@ -26170,11 +26228,12 @@ ${appendError}
           jobId: id,
           status: "done",
           timestamp: new Date().toISOString(),
-          tokenUsage: finalResult.metrics?.token_usage
-        }));
+          tokenUsage: finalResult.metrics?.token_usage,
+          turnIndex: lastTurnSummaryIndex || runMetrics.turns
+        }, { final: true }));
       } else if (shouldWriteExternalBeadNotes && !inputBeadId && finalResult.beadId) {
-        this.opts.beadsClient?.updateBeadNotes(finalResult.beadId, formatBeadNotes({
-          output: finalResult.output,
+        this.opts.beadsClient?.updateBeadNotes(finalResult.beadId, formatHandoffBlock({
+          output: lastTurnSummaryTextContent || finalResult.output,
           promptHash: finalResult.promptHash,
           durationMs: finalResult.durationMs,
           model: finalResult.model,
@@ -26183,8 +26242,9 @@ ${appendError}
           jobId: id,
           status: "done",
           timestamp: new Date().toISOString(),
-          tokenUsage: finalResult.metrics?.token_usage
-        }));
+          tokenUsage: finalResult.metrics?.token_usage,
+          turnIndex: lastTurnSummaryIndex || runMetrics.turns
+        }, { final: true }));
       }
       if (finalResult.beadId) {
         const liveJobs = this.listLiveJobsForBead(finalResult.beadId).filter((liveJobId) => liveJobId !== id);
@@ -26289,6 +26349,8 @@ ${appendError}
         model: statusSnapshot.model ?? "unknown",
         backend: statusSnapshot.backend ?? "unknown",
         status: "error",
+        final: false,
+        turnIndex: runMetrics.turns,
         tokenUsage: runMetrics.token_usage
       });
       this.writeReadyMarker(id);
@@ -30250,11 +30312,13 @@ async function launchSpecialist(opts) {
       keepAlive: opts.args.keepAlive,
       noKeepAlive: opts.args.noKeepAlive,
       beadsWriteNotes: opts.beadsWriteNotes,
+      notesMode: opts.specialist.specialist.notes_mode,
       forceJob: opts.args.forceJob,
       permissionRequired: opts.perm,
       workingDirectory: opts.workingDirectory,
       reusedFromJobId: opts.reusedFromJobId,
-      worktreeOwnerJobId: opts.worktreeOwnerJobId
+      worktreeOwnerJobId: opts.worktreeOwnerJobId,
+      output_file: opts.specialist.specialist.output_file
     },
     beadsClient: opts.beadsClient,
     stallDetection: opts.specialist.specialist.stall_detection,

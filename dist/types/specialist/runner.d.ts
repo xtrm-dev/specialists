@@ -16,6 +16,9 @@ export interface RunOptions {
     worktreeBoundary?: string;
     /** Existing bead whose content should be used as the task prompt. */
     inputBeadId?: string;
+    output_file?: string;
+    suppressRunnerFileOutput?: boolean;
+    notesMode?: 'full-trail' | 'final-only';
     /** Owning epic id for wave-bound chains, when bead belongs to an epic. */
     epicId?: string;
     /** Lineage: set when --job <id> is used to reuse another job's worktree. */
