@@ -155,6 +155,7 @@ Two things fall out cleanly. A **seed**'s `closed` reason is `transformed` — i
 Specialists run on the pi-coding-agent runtime, which already has the structure substrate's lifecycle assumed. Verified against the runtime (`runner.ts` / `supervisor.ts` / `pi-rpc.md`), substrate aligns to pi's existing beats rather than inventing a parallel clock. Four facts settle how a container actually advances:
 
 - **No separate "tick" clock — advancement is event-driven.** A container's reducer fires on three triggers only: a member's `turn_end` / `agent_end` (live activity inside the container), a pulse arrival (external trigger), or an explicit `sb` command (operator action). Substrate advances containers and chains **from persisted evidence or equivalent pulses — never from a wall-clock tick and never from text seen in a live stream.** A PASS emitted in an initial run, a resume turn, or a channel verdict all become the same durable `verdict` evidence before anything advances. (This is what makes the completeness contract of §6.9.2 sound: a gate is `done` only when its evidence is persisted and satisfies, not when its process happened to print "OK".) **One refinement for chains:** the dispatch of the first step waits not only for `sb chain approve` but also for the chain coordinator's `verdict: ready` (§4.3) — the coordinator is a fresh-context entry gate that can insert steps within policy before the chain runs. Subsequent steps advance on `agent_end` of the previous step as before.
+  > */warning: round-3 — three mechanisms now gate a chain's first step: human `sb chain approve` (§6.9.5), node coordinator auto-approve under autonomy policy (§5.8), chain coordinator `verdict: ready` (§4.3). Specify how they compose when a node opens a chain: does the node's auto-approve double as `sb chain approve` AND substitute for `verdict: ready` (one approval, no chain coordinator)? Or does the chain coordinator spawn anyway and emit `verdict: ready` autonomously (two layers of judgment, both within autonomy policies)? Today the design suggests the latter (uniformity claim in §4.3 "always spawned") but never says so explicitly.*
 
 - **`waiting` = pi keep-alive after `agent_end`.** Pi's `agent_end` is the job-level quiescence barrier; in keep-alive mode the session stays resumable. Substrate's `waiting` work-state maps 1:1 onto this — no new state is invented. A step's writer releasing the worktree lease (§6.9.6) on `done`/`waiting` *is* this barrier. Resume injection (a mid-flight steer/redirect) uses pi's existing `steer` command, which delivers after the current turn's tool calls and before the next model call — the idempotent injection point a channel after-hook (§7) needs.
 
@@ -204,18 +205,24 @@ A chain has a coordinator, parallel in shape to a node's (§4.2) but scoped to o
 
 **Four roles.**
 
-1. **Entry gate (pre-execution).** With fresh context, the coordinator validates the chain shape from the inside. Does anything need to be inserted before step-1 runs — an explorer the planner missed, a methodologist for an unexpectedly insidious scope? **Within autonomy policy** it calls `sb chain insert` directly (§6.9.5); beyond, it escalates. When satisfied it emits a **`verdict: ready`** message on the chain's channel, and only then does the daemon dispatch step-1. This is the small refinement to §3.1: a chain's first step does not advance from `sb chain approve` alone — it advances from `sb chain approve` *plus* the coordinator's `verdict: ready`.
+1. **Entry gate (pre-execution).** With fresh context, the coordinator validates the chain shape from the inside. Does anything need to be inserted before step-1 runs — an explorer the planner missed, a methodologist for an unexpectedly insidious scope? **Within autonomy policy** it includes one or more `<insert-step role='...' before|after='<step-id>' because='...'/>` elements in its `verdict: ready` message; the dispatcher applies them as the final composition step before step-1 dispatches. Beyond policy, it escalates a `proposal`/`escalation` channel message instead. When satisfied (with or without inserts) it emits the **`verdict: ready`** message, and only then does the daemon dispatch step-1. This is the small refinement to §3.1: a chain's first step does not advance from `sb chain approve` alone — it advances from `sb chain approve` *plus* the coordinator's `verdict: ready`. Three insert paths coexist, each at its own moment: `sb chain insert` CLI (pre-approve human/operator composition, §6.9.5); coordinator `<insert-step>` XML in `verdict: ready` (post-approve, pre-step-1, autonomous within policy); mid-run insertion (§6.9.9) during execution.
 2. **Borderline judge (during execution).** The reducer of §6.10 does the mechanical close-readiness check (boolean predicates on persisted evidence). The coordinator interprets the cases the reducer cannot decide alone — "this gate returned FINDINGS but they're minor and within `non_goals`," "this evidence reference is ambiguous." Within policy it decides; beyond, it escalates as a `proposal`/`escalation` channel message that the orchestrator picks up. It does not duplicate the reducer; it fills the judgment space the reducer leaves.
 3. **Hygiene coordinator (cross-chain, via pulse).** Coordinators on parallel chains pulse each other (§2.3) for **mechanical hygiene** — collision alerts ("I'm touching file X"), gate-state advertisements ("code-sanity passed, evidence Y available"), wait-for-me requests. The line that must hold: **pulses are for mechanics, never for vision.** "Deciding which approach to take" or "should we abort?" stay with the orchestrator. The coordinator's pulse vocabulary is documented hygiene events, not open negotiation.
+   > */warning: round-3 — the chain coordinator emits cross-container pulses (§2.3 capability model), but its emit-capability is not declared anywhere. `autonomy_json` carries `max_inserts` / `allowed_insertion_roles` / `max_followup_proposals` / `escalate_when` — nothing about `can_emit`. Either grant pulse-emit implicitly to all coordinators (and document it as a base capability) or extend `autonomy_json` with `can_emit: { pulse_kinds, budget }` per §2.3.*
 4. **Close-time judge (pre-merge).** When the reducer says `close_ready`, the coordinator does the closing pass: confirms or pushes back on the derivation; verifies **git is clean *for real*** (not just `git status --porcelain` clean — every intended change committed, branch in the declared state, no stray artifacts); **distills memory** from the chain's outcome — `type:failure` for semantic failures (§5.10), `type:best_practice` for clean successes — replacing the role previously held by a dedicated curator (§10.2); **proposes `class: followup` issues** for findings that surfaced during the chain but fell outside its scope (`sb issue create --rel discovered-from:<root>`, §6.7) — these followups are ordinary root issues, free to scale into chains of their own later if the operator/orchestrator promotes them. Only after these passes does the coordinator release the chain to `sb container merge`. This is where the coordinator most clearly adds value the reducer cannot: judgment about what was learned, what's still owed, what's worth remembering.
+   > */warning: round-3 — atomicity of distillation vs. container-close not specified. The coordinator dies when the chain reaches `closed`; the close pass runs distillation + followup creation + git verification + release-to-merge. The reducer (§3.1) advances state on persisted evidence — what guarantees the coordinator finishes writing memory BEFORE the state transitions to `closed` and kills it? Either declare "merge waits on the coordinator's explicit release signal" (already implied by "releases the chain to `sb container merge`") and specify what that signal is in §13.3 schema, or document the fallback if the coordinator dies mid-distillation.*
 
 **Same access as any participant — no privileged read path.** The coordinator reads the chain's channel (live stream, §6.8) and queries `issue.evidence_json` (the durable persisted side of the dual-write, §6.8) — both views are available to every participant; the coordinator uses the channel for live coordination during execution and the persisted evidence for structured queries at close-time. This keeps the replay log canonical and gives the coordinator no special channel into substrate.
 
+**Contracts the coordinator reads are XML** (§6.9.2 canonical serialization), parsed deterministically by the same XML reader that backs the Stage-1 validator. The coordinator's **structured outputs are XML too**: the entry-gate `verdict: ready` message can carry one or more `<insert-step>` elements proposing additions ("`<insert-step role='explorer' before='executor' because='...'/>"`); the dispatcher applies them as part of finalizing the chain's resolved shape, before step-1 dispatches. The proposal-mining at close-time (`class: followup` issues) similarly emits `<change-contract>` XML the dispatcher persists. Free-form prose stays in `<rationale>` child tags inside these elements; structure lives in the tags themselves.
+
 **Model selection — per chain_template.** The coordinator is **always spawned** for a chain (uniformity with the node coordinator, no special-case logic), but the model is **declared on the chain_template** (§6.9.10). Sensible defaults: `code-quick` → small free-tier (or `null` to skip the coordinator entirely on trivial work); `code-standard` → mid-tier; `code-with-advisors` / `security-deep` / `quantitative-validation` → top-tier. The operator can override per-chain. This calibrates cost to value — premium judgment where it counts, lighter touch where the work is structurally bounded — without making the *presence* of a coordinator a per-chain configuration decision.
+> */warning: round-3 — "always spawned" + "`null` to skip the coordinator entirely" is a direct contradiction in the same sentence. Resolve in one direction: either (a) the coordinator is always spawned and `null` model means "spawn with no LLM, only the reducer + the cheap mechanical checks fire" (then nothing is skipped, just the model call); or (b) `null` skips the coordinator entirely and "always spawned" is overstated. Pick the side and rewrite. (a) is cleaner — it preserves the uniformity claim — but commits to a coordinator entity that has no model.*
 
 **Autonomy and escalation.** The chain container carries an `autonomy_json` policy alongside its `resolved_chain_json` (§13.3), with fields parallel to a node's (§5.8): `max_inserts`, `allowed_insertion_roles`, `max_followup_proposals`, `escalate_when`. The coordinator's actions inside policy are autonomous; beyond, it escalates to the orchestrator the same way `escalated` works for any container (§3). One escalation pattern across all coordinators — node and chain.
 
 **Lifecycle alignment.** The coordinator's life is the chain's life. It spawns at composition completion, dies when the chain reaches `closed` (the `sb container merge` it released, or `closed:failed` / `abandoned` on a failure path — in which case the failure-distillation memory it would have written becomes the work of §5.10's existing mechanism). It does not journal across sessions (chains are transient — no long-lived state to hand off, unlike a node's `coordinator_journal_json` in §5.9). Fresh context, scoped lifetime.
+> */warning: round-3 — context-window exhaustion on a long chain (many PARTIAL cycles, a debugger-restitch, many findings) is not addressed. Node coordinator has explicit kill+respawn via journal (§5.9); chain coordinator has "no journal across sessions" — implying it cannot respawn. What happens if a chain accumulates more context than one window can hold? Options: (a) declare an explicit "chain too long for one coordinator context" failure that escalates; (b) add a minimal in-chain journal (snapshot of decisions, role-3 pulse history) and allow respawn; (c) rely on close-time distillation being self-contained reading evidence_json (the coordinator's runtime context can be lossy at close because the evidence is authoritative). Pick one.*
 
 ### 4.4 Merge is substrate's, and it works
 
@@ -306,7 +313,8 @@ Seed expected cost: **under $0.05** on free-tier or small models. Tether-Layer-2
 {
   "schema": "seed.plan.v1",
   "id": "plan-7f3a",
-  "container_id": "chain:7f3a",      // assigned at seed open; kind decided on approval
+  "container_id": "chain:7f3a",      // shown resolved; kind prefix tracks the draft's `topology.kind`
+                                     // (filled when topology crystallizes), committed at approval (§5.7)
   "origin": {
     "trigger_issue_id": "iss-2yn4",
     "requester": "user|orchestrator|node-coordinator",
@@ -427,6 +435,8 @@ Within the policy the coordinator acts alone. Beyond it, instead of acting it **
 
 **Composing the chains it opens.** When a coordinator opens a chain (directly or via a seed), that chain is composed like any other (§6.9.5): a chain_template resolves, step-issues materialize, the composition gate sits at `open → working`. The coordinator **auto-approves the composition within its autonomy policy** — this is exactly "acts alone within policy" applied to chain shape. It does not stop for human `sb chain approve`; its policy *is* the approval authority for the chains it opens, the same way `auto` plan approval (§5.6) lets a seed's first wave dispatch itself. If composition surfaces something beyond policy (an L1 nudge for a class the policy doesn't permit, a scrutiny level above its budget), it escalates rather than auto-approving — the same graded boundary as everything else a node does. So a node's chains are fully template-driven and gated (mandatory gates still overlay, §6.9.3), but their composition gate is crossed by the coordinator's policy, not by a human, in the autonomous case.
 
+> */warning: round-3 — `dispatch_mode: direct` (this paragraph) skips the seed. But §6.9.5 composition requires step-issues materialized (the planner's role inside a seed). In `direct` mode, who produces the chain's step-issues? Three plausible answers: (a) the node coordinator acts as inline planner within its own context (taking on a planner role transiently); (b) the chain_template alone provides the full shape with no per-chain refinement (lowest fidelity but simplest); (c) a degenerate single-issue seed runs invisibly. Specify the answer — without it, the L1 nudge / memory_pack / scrutiny-escalation paths in §6.9.5 have no executor in direct mode.*
+
 **Triggers and pulses.** A node sleeps between events and wakes on a **pulse** (§2.3) — a `trigger` from a schedule, a watch, or an external source. Substrate owns the wake: a `triggers` table (cron-like schedules, or watches on a predicate) and a per-node **FIFO pulse queue**. The daemon does **mechanical** scheduling only — rate-limit (no more than N wakes/period) and coalescing (10 identical events in a window are not 10 wakes). It then delivers the queue to the coordinator. The **coordinator does semantic scheduling**: it reads its queue and decides order, whether to run children parallel or serial, whether a new pulse waits for the current chain to finish. The daemon protects against hot loops; the coordinator makes the work decisions. No overlap.
 
 **Idempotency.** Every pulse carries an idempotency key (`github:pr-50:opened`); substrate keeps a `pulse_dedup` map (`key → container_id`). A pulse whose key is already seen *and* mapped is a **no-op** — it returns the existing container, never opens a second. A key seen but not yet mapped (pulse in flight) coalesces rather than racing. A pulse with no key is treated as unique (the emitter owns the duplicate risk); external-event emitters (webhooks) *must* declare a key. This is what makes node autonomy safe instead of a self-duplicating machine.
@@ -468,6 +478,10 @@ The classification stays **binary**. A third situation that looks adjacent — a
 
 - **`semantic_after` (consecutive, resets on progress).** N consecutive non-progressing cycles at any gate → escalate. Clearing *any* gate is real progress and resets the counter to zero, so a genuinely hard chain that advances gate-by-gate (2 FAILs at the reviewer, then PASS, then 1 FAIL at obligations, then PASS) is working, not stuck. This is the primary detector: it catches *the wall* — repeatedly hitting the same gate without advancing.
 - **`hard_cap` (total, generous, never resets).** N total review iterations over the chain's life, regardless of progress → escalate anyway. This is the backstop: it catches *attrition* — a chain that advances-and-regresses forever, resetting the consecutive counter each time but never closing. Without it, a chain could oscillate indefinitely (pass a gate, fail another, regress, re-pass) burning budget without tripping the consecutive threshold. Generous, so it fires only on the real pathology, not on legitimately laborious work.
+
+> */warning: round-3 — "iteration" unit not defined. A debugger-restitch cycle runs code-sanity + obligations + reviewer FAIL → debugger → code-sanity + obligations + reviewer = 6 gate-runs or 1 logical review cycle? Per-gate-run vs per-reviewer-cycle changes the threshold 5-6x. Specify which the counter increments on.*
+
+> */warning: round-3 — interaction with §7's `judge_timeout` backstop not specified. If a judge stays silent for N ticks the runtime auto-emits `system.continue`. Does that count as "progress" (reset `semantic_after`) or not? Reset → silent-judge masks non-progress indefinitely; no-reset → slow-but-working judge falsely trips the counter. Pick one.*
 
 **Graded escalation (semantic).** A semantic failure does not go straight to the human. It climbs:
 
@@ -622,10 +636,10 @@ Default visibility follows `class`: `sb issue ls` shows `root`/`followup` (the w
 
 Running a model on *every* issue create/update would be overkill: it costs money and adds latency to a hot path. So validation is two stages, and only the first is universal.
 
-**Stage 1 — programmatic (always, instant, free).** A schema validator runs on every create/update. It is pure code, no model. It does two things:
+**Stage 1 — programmatic (always, instant, free).** A schema validator runs on every create/update. It is pure code, no model. The contract is XML (§6.9.2 canonical serialization); Stage-1 parses XML deterministically — well-formedness + required tags present + attributes matching the role — never regex-on-markdown. It does two things:
 
-- **Hard-rejects structurally incomplete issues** — required fields missing (`problem`, `scope`, `validation`, `acceptance`), malformed types, contradictory states. This is a non-negotiable gate; an issue that fails it is `contract_state.status = invalid` and cannot dispatch.
-- **Soft-flags thin issues** — for present fields, it measures content against configurable minimums (e.g. per-field character floors) and emits a hint, not a block: `thin: 'acceptance' may need more detail`. This is advisory; it does not stop dispatch.
+- **Hard-rejects structurally incomplete issues** — required tags missing (`<problem>`, `<scope>`, `<validation>`, `<acceptance>` for `<change-contract>`; `<mandate>`, `<inputs>`, `<outputs>` for `<step-contract>`), malformed XML, contradictory states. This is a non-negotiable gate; an issue that fails it is `contract_state.status = invalid` and cannot dispatch.
+- **Soft-flags thin issues** — for present tags, it measures content against configurable minimums (e.g. per-tag character floors) and emits a hint, not a block: `thin: 'acceptance' may need more detail`. This is advisory; it does not stop dispatch.
 
 So `sb issue create` returns an immediate readiness verdict — `ready` / `incomplete: missing X` / `thin: field Y may need more detail` — with zero model cost. This is the default gate on every issue and on `sb dispatch`.
 
@@ -820,6 +834,39 @@ Two kinds of issue, two kinds of contract — not one mould forced onto both:
 - A **step-issue** carries a **step contract** — a different shape, fit to what a step does (which is produce a *judgment* or an *artifact*, not describe a change): `mandate` (what this participant must do), `inputs` (evidence it reads — the executor's diff, a prior finding), `outputs` (what it produces — a verdict, findings citing file:line), `scope` (what it operates on, inheritable from the root), `non_goals`. Forcing the five change-contract sections onto a gate produces empty or tautological fields ("the problem is to do your review"); the step contract is honest about a step being a task-over-inputs-toward-outputs.
 
 Both are durable and inspectable (the bd property); they differ in structure because they describe different things. `sb issue show` on a root renders the change contract; on a step, the step contract.
+
+**Canonical serialization — XML semantic tags.** Contracts are stored as **XML inside the issue's `contract` field** (§13.3 schema: `contract_xml`), not as markdown-with-headers and not as JSON. Two consumers depend on this: (a) the Stage-1 validator (§6.3) parses XML deterministically — well-formed structure, required tags present, attributes matching the role — with no regex-on-markdown fragility (header-level confusion, typo-renamed sections, ordering); (b) every specialist that reads the contract as task context parses XML more reliably than markdown headers (Anthropic prompt-improving research). Tag shapes are fixed and small:
+
+```xml
+<change-contract issue-id="iss-7f3a-001" type="bug" scrutiny="high">
+  <problem>...</problem>
+  <scope>
+    <path>...</path>
+  </scope>
+  <non-goals>
+    <item>...</item>
+  </non-goals>
+  <validation>
+    <criterion>...</criterion>
+  </validation>
+  <acceptance>
+    <criterion>...</criterion>
+  </acceptance>
+</change-contract>
+
+<step-contract role="reviewer" root="iss-7f3a-001">
+  <mandate>...</mandate>
+  <inputs>...</inputs>
+  <outputs>...</outputs>
+  <scope>...</scope>
+  <non-goals>...</non-goals>
+</step-contract>
+```
+
+The §6.1 issue schema shows the *parsed* / in-memory / API shape (an object with named fields); XML is the *on-disk* serialization the field stores. The split keeps the storage parse-deterministic for the validator and human-and-LLM-legible for everyone reading the contract, while the API surface stays object-shaped for code.
+
+**Serialization choices across the system — XML for human-and-LLM-read structured text, JSON for machine-to-machine schemas.** Contracts (read by specialists as task context, by humans inspecting work) are XML. Final outputs of specialists (verdicts, findings, planner Pass-2 output — consumed by orchestrator code via existing schema validators), channel messages (`body_json` discriminated-union, §7), and `evidence_json` (per-type schemas) stay **JSON**. `system_prompt` of a specialist stays **free-form** for model-flexibility — though this carries weaker rationale than the rest (see warning below). One serialization rule per consumer kind: a code-only consumer gets JSON; a text-context consumer gets XML; a prompt-tuning surface stays free-form.
+> */warning: round-3 — "system_prompt stays free-form for model flexibility" (per roadmap D30) is the thinnest justification in the serialization split. The XML-improves-LLM-compliance argument applies to any text the model reads; the system_prompt is read deepest. D28 applies XML to SKILL.md content for exactly this reason. Plausible unstated reasons: (a) refactoring cost across all package-tier specialists outweighs the marginal compliance gain on a once-per-session read; (b) system_prompt is *content* (the role identity), not *scaffolding* (a wrapper) — XML is for the wrapper; (c) compatibility with non-Claude models that handle heavy XML system prompts worse. None of these is stated. Either tighten the rationale, narrow the exemption (e.g. action-sections inside system_prompt can be XML per D28's SKILL.md treatment), or measure with/without before treating it as settled.*
 
 **Prompt composition is explicit and layered — a participant receives its role, never infers it.** A step-issue's specialist is not handed an undifferentiated blob to puzzle out. It receives labelled layers (extending §6.5):
 
@@ -1029,6 +1076,8 @@ So `close_ready` is the per-issue analog of the container's `ready`, and per-mem
 
 **Members close transactionally at merge, not the moment they're individually satisfied.** A chain's steps reach `close_ready` mid-run but their terminal `closed`+close_reason happens *all together* at merge. This keeps a chain's close as *one* event and means a chain that fails later never leaves orphaned `closed:gate-passed` steps behind. The sole exception is `followup` (non-blocking, not part of the completeness contract) — it closes independently, any time.
 
+> */warning: round-3 — chain coordinator (§4.3 role 4) creates `class: followup` issues AT close-time, before `sb container merge`. A newly-created followup is `work_state=draft` with no evidence yet. Specify: do draft followups block the merge (chain stalls until each followup is at least dispatched or explicitly accepted), or does the close pass merge regardless of their state (followups are pure annotations, no gating)? Today the "non-blocking, not part of the completeness contract" line suggests the latter — make it explicit.*
+
 **Where the chain coordinator fits in the close.** The reducer's `close_ready` derivation is mechanical (boolean predicates on persisted evidence). Between the container reaching `ready` and `sb container merge` actually running, the chain coordinator (§4.3, role 4) does its close-time pass: confirms or pushes back on the derivation (interpreting borderline cases the reducer cannot decide, §4.3 role 2 carried to close); verifies git is clean *for real* beyond porcelain; distills `type:failure` / `type:best_practice` memory from the chain's outcome (§5.10, §10.2); and proposes `class: followup` issues for findings outside scope via `sb issue create --rel discovered-from:<root>` (§6.7) — **these followups are ordinary root issues**, available to scale to future chains of their own by the normal promotion path (§5: a followup can later seed its own chain if its scope warrants one). Only after this pass does the coordinator release the chain to `sb container merge`. On a chain that fails-then-cascades (§6.10.3), the coordinator's would-be distillation is taken over by the existing §5.10 mechanism (closing judge, generic); the followup proposals are skipped (failure cascade preserves evidence; followup mining is for clean closes).
 
 #### 6.10.2 Two paths, kept distinct
@@ -1048,6 +1097,8 @@ Eligibility, in brief: a `root` closes `merged` (single chain) or `merged-as-par
 #### 6.10.3 Container-failed cascade
 
 When a container reaches `closed:failed`/`abandoned` before all members are `done`: non-done members auto-close with `failed-with-container`/`abandoned-with-container`, their **evidence preserved** (§5.10 — never destroy work on failure), and a re-seeded container can create issues that `supersedes` the old ones (the existing edge, §6.7). The cascade **is itself a pulse handler** (§5.8, the universal mechanism), not new code: container terminal pulse → cascade handler → batched member close.
+
+> */warning: round-3 — `owned_by` on cascade-closed members not specified. §2.6 transfers ownership to the orchestrator on node death; a failed-cascade is structurally similar (container alive but failed, children auto-close). Specify whether cascade-closed children keep their previous `owned_by` (stable provenance for inspection) or transfer to the orchestrator (consistent with §2.6 default). The chosen behavior matters for who reads the preserved evidence later.*
 
 #### 6.10.4 The three shims, deleted by reuse
 
@@ -1134,7 +1185,10 @@ Cross-cutting facility attached to containers, populated by polling each active 
 Per worktree, every 8–15 seconds:
 
 ```bash
-git -C <worktree> diff main...HEAD           # committed since branch
+git -C <worktree> diff <fork_base>...HEAD    # committed since branch; <fork_base> from the container
+                                             # (§6.9.7 / §13.3: `main` for standalone/wave-children,
+                                             # `epic/<id>` for epic-children). Using `main` uniformly
+                                             # produces false positives on epic-base commits no child touched.
 git -C <worktree> diff                         # uncommitted on top
 ```
 
@@ -1532,8 +1586,10 @@ CREATE TABLE issues (
   type                   TEXT,              -- only on class=root: task|bug|chore|spike|design|research
   role                   TEXT,              -- only on non-root: executor|reviewer|<custom> (was specialist_hint)
   priority               INTEGER NOT NULL,
-  contract_json          TEXT NOT NULL,     -- change contract (5 sections) if class=root, else step contract
-                                            -- (mandate/inputs/outputs/scope/non_goals) — keyed by class (§6.2.1)
+  contract_xml           TEXT NOT NULL,     -- canonical serialization is XML (§6.9.2): <change-contract> if
+                                            -- class=root (problem/scope/non-goals/validation/acceptance child tags);
+                                            -- <step-contract> if class=step|gate|advisor|followup
+                                            -- (mandate/inputs/outputs/scope/non-goals child tags) — keyed by class (§6.2.1)
   contract_state_json    TEXT NOT NULL,
   work_state             TEXT NOT NULL,
   review_state           TEXT NOT NULL,
@@ -1578,7 +1634,7 @@ CREATE TABLE validator_runs (
   issue_id       TEXT NOT NULL,
   ran_at_ms      INTEGER NOT NULL,
   contract_state TEXT NOT NULL,             -- invalid | partial | ready | waived
-  body_json      TEXT NOT NULL              -- gaps, suggested_rewrite, recommended_chain
+  body_json      TEXT NOT NULL              -- gaps, suggested_rewrite, recommended_template + display steps (§6.3)
 );
 
 -- pulse / trigger / node-scheduling (§5.8)
@@ -1713,7 +1769,6 @@ This design was developed at the architecture level, deliberately *without* read
 - **The "turn" concept.** *(Resolved in §3.1.)* Pi's turn is the runtime's heartbeat; substrate aligns to it rather than inventing a separate tick. A container's reducer is event-driven on member `turn_end`/`agent_end`, pulse arrival, or `sb` command — never a wall-clock tick. `waiting` = pi keep-alive after `agent_end`. (Was verified against `runner.ts`/`supervisor.ts`/`pi-rpc.md` by the specialists-runtime review.)
 - **The daemon-observes model.** *(Resolved in §3.1.)* Yes — the daemon is a second reader of the observability stream the supervisor already writes (the rows `sp log` reads); lifecycle pulses are emitted as a side effect of those rows, no new instrumentation.
 - **Cross-container pulse conventions (open-Q #8).** Peer node coordinators collaborate via cross-container pulses (§2.3, §4.2), not channel-watching — channels stay container-scoped. The key conventions and cross-container pulse authority are the remaining detail; resolve against the pulse/trigger implementation and channels.md.
-- **Cross-container pulse conventions (open-Q #8).** Peer node coordinators collaborate via cross-container pulses (§2.3, §4.2), not channel-watching — channels stay container-scoped. The key conventions and cross-container pulse authority are the remaining detail; resolve against the pulse/trigger implementation and channels.md.
 
 **Requires reading past run transcripts (what emerged naturally over time):**
 
@@ -1743,12 +1798,12 @@ Not a migration plan; just dependency order for design completeness.
 | 2 | Channels v0 (channel_messages table, `sp tail`/`sp msg`) | — |
 | 3 | Tether v0 (Layer 1 matchers, forced injection) | — |
 | 4 | Container entity (chain only) + lifecycle states | 0, 1, 2 |
-| 5 | Seed channel (memory-curator + validator advisors only) | 1, 2, 4 |
+| 5 | Seed channel (planner with memory-query capability §10.2 + validator advisor) | 1, 2, 4 |
 | 6 | Plan artifact + approval modes | 4, 5 |
 | 7 | Collision matrix (file-level) + tether collision-overlap matcher | 3, 4 |
 | 8 | Epic / wave container kinds | 4, 7 |
 | 9 | Advisor invite rules + full advisor set | 5 |
-| 10 | Tether Layer 2 + memory curator mid-run | 3, 9 |
+| 10 | Tether Layer 2 (small-model relevance check on quiet jobs, §8) | 3, 9 |
 | 11 | Reconciler specialist | 7, 8 |
 | 12 | Console renders against merged `sp feed -f` + `sb feed -f` | 1–7 (minimum) |
 | 13 | bd → substrate data migration (§13.7, not a shim) | 1, 4 |
