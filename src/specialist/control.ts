@@ -47,7 +47,7 @@ function tryKillProcessGroup(pid: number): void {
 function createFinalizeSupervisor(jobsDir: string): Supervisor {
   const runner = { run: async () => { throw new Error('finalize supervisor runner is not used'); } } as unknown as SpecialistRunner;
   const runOptions = {} as unknown as RunOptions;
-  return new Supervisor({ runner, runOptions, jobsDir });
+  return new Supervisor({ runner, runOptions, jobsDir, beadsClient: new BeadsClient() });
 }
 
 function findReviewerPassInChain(supervisor: Supervisor, chainId: string): { reviewerJobId: string } | null {
@@ -61,13 +61,28 @@ function findReviewerPassInChain(supervisor: Supervisor, chainId: string): { rev
 
 export async function stopJob(jobId: string, opts: StopJobOptions = {}): Promise<void> {
   const jobsDir = opts.jobsDir ?? resolveJobsDir(process.cwd());
-  const supervisor = new Supervisor({ runner: null as any, runOptions: null as any, jobsDir });
+  const supervisor = new Supervisor({ runner: null as any, runOptions: null as any, jobsDir, beadsClient: new BeadsClient() });
 
   try {
     const status = supervisor.readStatus(jobId);
     if (!status) throw new Error(`No job found: ${jobId}`);
     if (status.status === 'done' || status.status === 'error' || status.status === 'cancelled') {
       process.stderr.write(`${dim(`Job ${jobId} already finalized (${status.status}).`)}\n`);
+      return;
+    }
+
+    let statusForBeadClose = status;
+    let finalizedFromWaiting = false;
+    if (status.status === 'waiting' && status.bead_id) {
+      const finalized = supervisor.finalizeWaitingJob(jobId);
+      if (finalized) {
+        statusForBeadClose = finalized;
+        finalizedFromWaiting = true;
+      }
+    }
+
+    if (!finalizedFromWaiting && (statusForBeadClose.status === 'done' || statusForBeadClose.status === 'error' || statusForBeadClose.status === 'cancelled')) {
+      process.stderr.write(`${dim(`Job ${jobId} already finalized (${statusForBeadClose.status}).`)}\n`);
       return;
     }
     if (!status.pid) throw new Error(`No PID recorded for job ${jobId}.`);
@@ -134,7 +149,7 @@ export async function stopJob(jobId: string, opts: StopJobOptions = {}): Promise
     }
 
     if (status.bead_id) {
-      const finalStatus = supervisor.readStatus(jobId)?.status ?? 'cancelled';
+      const finalStatus = supervisor.readStatus(jobId)?.status ?? statusForBeadClose.status ?? 'cancelled';
       const beads = new BeadsClient();
       const liveJobs = supervisor.listLiveJobsForBead(status.bead_id).filter((liveJobId) => liveJobId !== jobId);
       if (opts.closeBeadAnyway || liveJobs.length === 0) {

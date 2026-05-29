@@ -25059,7 +25059,7 @@ class Supervisor {
         throw this.createDisposedSqliteError("readResult");
       }
       const sqliteResult = this.withSqliteOperation("readResult", (client) => client.readResult(id));
-      if (sqliteResult)
+      if (typeof sqliteResult === "string" && sqliteResult.trim().length > 0)
         return sqliteResult;
     } catch (error2) {
       if (!(error2 instanceof Error && error2.message.includes("supervisor is disposed"))) {
@@ -25089,6 +25089,21 @@ class Supervisor {
     if (!finalized)
       return null;
     this.aggregateJobMetricsBestEffort(id);
+    if (finalized.bead_id && this.opts.beadsClient) {
+      const outputPath = this.resultPath(id);
+      const output = existsSync10(outputPath) ? readFileSync8(outputPath, "utf-8") || this.readResult(id) || "" : this.readResult(id) || "";
+      if (output.trim()) {
+        this.opts.beadsClient.updateBeadNotes(finalized.bead_id, formatHandoffBlock({
+          output,
+          model: finalized.model ?? "unknown",
+          backend: finalized.backend ?? "unknown",
+          specialist: finalized.specialist,
+          jobId: id,
+          status: "done",
+          timestamp: new Date().toISOString()
+        }, { final: true }));
+      }
+    }
     return finalized;
   }
   appendEventBestEffort(jobId, operation, event) {
@@ -25985,15 +26000,17 @@ ${appendError}
           lastTurnSummaryIndex = metricEvent.turn_index;
           lastTurnSummaryTextContent = turnTextAccumulator;
           appendTimelineEvent(createTurnSummaryEvent(metricEvent.turn_index, metricEvent.token_usage, metricEvent.finish_reason, turnTextAccumulator || undefined, contextUtilization?.context_pct, contextUtilization?.context_health));
-          writeUnifiedHandoff({
-            output: turnTextAccumulator,
-            model: statusSnapshot.model ?? "unknown",
-            backend: statusSnapshot.backend ?? "unknown",
-            status: "done",
-            final: false,
-            turnIndex: metricEvent.turn_index,
-            tokenUsage: metricEvent.token_usage ?? runMetrics.token_usage
-          });
+          if (!keepAliveSession && !runOptions.keepAlive) {
+            writeUnifiedHandoff({
+              output: turnTextAccumulator,
+              model: statusSnapshot.model ?? "unknown",
+              backend: statusSnapshot.backend ?? "unknown",
+              status: "done",
+              final: false,
+              turnIndex: metricEvent.turn_index,
+              tokenUsage: metricEvent.token_usage ?? runMetrics.token_usage
+            });
+          }
           turnTextAccumulator = "";
           return;
         }
@@ -40832,7 +40849,7 @@ function createFinalizeSupervisor(jobsDir) {
     throw new Error("finalize supervisor runner is not used");
   } };
   const runOptions = {};
-  return new Supervisor({ runner, runOptions, jobsDir });
+  return new Supervisor({ runner, runOptions, jobsDir, beadsClient: new BeadsClient });
 }
 function findReviewerPassInChain(supervisor, chainId) {
   for (const id of supervisor.listChainJobIds(chainId)) {
@@ -40846,13 +40863,27 @@ function findReviewerPassInChain(supervisor, chainId) {
 }
 async function stopJob(jobId, opts = {}) {
   const jobsDir = opts.jobsDir ?? resolveJobsDir(process.cwd());
-  const supervisor = new Supervisor({ runner: null, runOptions: null, jobsDir });
+  const supervisor = new Supervisor({ runner: null, runOptions: null, jobsDir, beadsClient: new BeadsClient });
   try {
     const status = supervisor.readStatus(jobId);
     if (!status)
       throw new Error(`No job found: ${jobId}`);
     if (status.status === "done" || status.status === "error" || status.status === "cancelled") {
       process.stderr.write(`${dim10(`Job ${jobId} already finalized (${status.status}).`)}
+`);
+      return;
+    }
+    let statusForBeadClose = status;
+    let finalizedFromWaiting = false;
+    if (status.status === "waiting" && status.bead_id) {
+      const finalized = supervisor.finalizeWaitingJob(jobId);
+      if (finalized) {
+        statusForBeadClose = finalized;
+        finalizedFromWaiting = true;
+      }
+    }
+    if (!finalizedFromWaiting && (statusForBeadClose.status === "done" || statusForBeadClose.status === "error" || statusForBeadClose.status === "cancelled")) {
+      process.stderr.write(`${dim10(`Job ${jobId} already finalized (${statusForBeadClose.status}).`)}
 `);
       return;
     }
@@ -40922,7 +40953,7 @@ async function stopJob(jobId, opts = {}) {
 `);
     }
     if (status.bead_id) {
-      const finalStatus = supervisor.readStatus(jobId)?.status ?? "cancelled";
+      const finalStatus = supervisor.readStatus(jobId)?.status ?? statusForBeadClose.status ?? "cancelled";
       const beads = new BeadsClient;
       const liveJobs = supervisor.listLiveJobsForBead(status.bead_id).filter((liveJobId) => liveJobId !== jobId);
       if (opts.closeBeadAnyway || liveJobs.length === 0) {

@@ -8,6 +8,7 @@ vi.mock('../../../src/specialist/observability-sqlite.js', () => ({
     close: vi.fn(),
     readStatus: () => null,
     listStatuses: () => [],
+    readResult: () => '',
     upsertStatus: vi.fn(),
     upsertEpicRun: vi.fn(),
     upsertEpicChainMembership: vi.fn(),
@@ -31,9 +32,10 @@ describe('Supervisor finalizeWaitingJob', () => {
     vi.restoreAllMocks();
   });
 
-  it('marks waiting job done through canonical status writer', async () => {
+  it('marks waiting job done through canonical status writer and falls back to result file when sqlite result empty', async () => {
     const { Supervisor } = await import('../../../src/specialist/supervisor.js');
-    const supervisor = new Supervisor({ runner: null as any, runOptions: null as any, jobsDir });
+    const updateBeadNotes = vi.fn(() => ({ ok: true }));
+    const supervisor = new Supervisor({ runner: null as any, runOptions: null as any, jobsDir, beadsClient: { updateBeadNotes } as any });
 
     const id = 'job-a';
     mkdirSync(join(jobsDir, id), { recursive: true });
@@ -41,13 +43,20 @@ describe('Supervisor finalizeWaitingJob', () => {
       id,
       specialist: 'executor',
       status: 'waiting',
+      bead_id: 'bead-1',
+      model: 'anthropic/claude-3-5-haiku',
+      backend: 'anthropic',
       started_at_ms: Date.now() - 1000,
     }), 'utf-8');
+    writeFileSync(join(jobsDir, id, 'result.txt'), 'keep-alive output', 'utf-8');
 
     const finalized = supervisor.finalizeWaitingJob(id);
 
     expect(finalized?.status).toBe('done');
     expect(JSON.parse(readFileSync(join(jobsDir, id, 'status.json'), 'utf-8')).status).toBe('done');
+    expect(updateBeadNotes).toHaveBeenCalledTimes(1);
+    expect(updateBeadNotes.mock.calls[0][0]).toBe('bead-1');
+    expect(updateBeadNotes.mock.calls[0][1]).toContain('[FINAL · DONE]');
     await supervisor.dispose();
   });
 

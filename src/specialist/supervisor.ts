@@ -791,7 +791,7 @@ export class Supervisor {
         throw this.createDisposedSqliteError('readResult');
       }
       const sqliteResult = this.withSqliteOperation('readResult', (client) => client.readResult(id));
-      if (sqliteResult) return sqliteResult;
+      if (typeof sqliteResult === 'string' && sqliteResult.trim().length > 0) return sqliteResult;
     } catch (error: unknown) {
       if (!(error instanceof Error && error.message.includes('supervisor is disposed'))) {
         console.warn(`[supervisor] SQLite readResult failed, falling back to file state: ${String(error)}`);
@@ -819,6 +819,25 @@ export class Supervisor {
     const finalized = this.updateJobStatus(id, 'done');
     if (!finalized) return null;
     this.aggregateJobMetricsBestEffort(id);
+
+    if (finalized.bead_id && this.opts.beadsClient) {
+      const outputPath = this.resultPath(id);
+      const output = existsSync(outputPath)
+        ? (readFileSync(outputPath, 'utf-8') || this.readResult(id) || '')
+        : (this.readResult(id) || '');
+      if (output.trim()) {
+        this.opts.beadsClient.updateBeadNotes(finalized.bead_id, formatHandoffBlock({
+          output,
+          model: finalized.model ?? 'unknown',
+          backend: finalized.backend ?? 'unknown',
+          specialist: finalized.specialist,
+          jobId: id,
+          status: 'done',
+          timestamp: new Date().toISOString(),
+        }, { final: true }));
+      }
+    }
+
     return finalized;
   }
 
@@ -1932,15 +1951,17 @@ export class Supervisor {
               contextUtilization?.context_pct,
               contextUtilization?.context_health,
             ));
-            writeUnifiedHandoff({
-              output: turnTextAccumulator,
-              model: statusSnapshot.model ?? 'unknown',
-              backend: statusSnapshot.backend ?? 'unknown',
-              status: 'done',
-              final: false,
-              turnIndex: metricEvent.turn_index,
-              tokenUsage: metricEvent.token_usage ?? runMetrics.token_usage,
-            });
+            if (!keepAliveSession && !runOptions.keepAlive) {
+              writeUnifiedHandoff({
+                output: turnTextAccumulator,
+                model: statusSnapshot.model ?? 'unknown',
+                backend: statusSnapshot.backend ?? 'unknown',
+                status: 'done',
+                final: false,
+                turnIndex: metricEvent.turn_index,
+                tokenUsage: metricEvent.token_usage ?? runMetrics.token_usage,
+              });
+            }
             turnTextAccumulator = '';
             return;
           }
