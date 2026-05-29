@@ -24512,14 +24512,26 @@ function formatBeadNotes(result) {
   const metadata = [
     `timestamp=${result.timestamp}`,
     `status=${result.status}`,
+    `specialist=${result.specialist}`,
+    `job_id=${result.jobId}`,
     `prompt_hash=${result.promptHash ?? "unknown"}`,
     `git_sha=${getCurrentGitSha() ?? "unknown"}`,
     `elapsed_ms=${result.durationMs !== undefined ? Math.round(result.durationMs) : "unknown"}`,
     `model=${result.model}`,
-    `backend=${result.backend}`
+    `backend=${result.backend}`,
+    ...result.tokenUsage ? [
+      `input_tokens=${result.tokenUsage.input_tokens}`,
+      `output_tokens=${result.tokenUsage.output_tokens}`,
+      `cache_creation_tokens=${result.tokenUsage.cache_creation_tokens ?? 0}`,
+      `cache_read_tokens=${result.tokenUsage.cache_read_tokens ?? 0}`
+    ] : []
   ].join(`
 `);
-  return `### Specialist Output \u2014 ${result.specialist} (job ${result.jobId}) [${statusLabel}]
+  return `
+
+______________________________________________________________________
+
+### \uD83D\uDD2C ${result.specialist} \xB7 ${result.model} \xB7 [${statusLabel}]
 
 ${result.output}
 
@@ -25576,7 +25588,8 @@ class Supervisor {
         specialist: runOptions.name,
         jobId: id,
         status: params.status,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        tokenUsage: params.tokenUsage
       });
       const appendResult = this.opts.beadsClient.updateBeadNotes(inputBeadId, notes);
       if (appendResult.ok)
@@ -25667,7 +25680,8 @@ ${appendError}
           output,
           model: statusSnapshot.model ?? "unknown",
           backend: statusSnapshot.backend ?? "unknown",
-          status: isWaitingTurn ? "waiting" : "done"
+          status: isWaitingTurn ? "waiting" : "done",
+          tokenUsage: runMetrics.token_usage
         });
         if (!isWaitingTurn) {
           closeKeepAliveSession();
@@ -25748,7 +25762,8 @@ ${appendError}
             output: latestOutput,
             model: statusSnapshot.model ?? "unknown",
             backend: statusSnapshot.backend ?? "unknown",
-            status: "cancelled"
+            status: "cancelled",
+            tokenUsage: runMetrics.token_usage
           });
           if (appendSucceeded) {
             skipFinalKeepAliveInputBeadAppend = true;
@@ -26114,7 +26129,8 @@ ${appendError}
             backend: finalResult.backend,
             status: "waiting",
             promptHash: finalResult.promptHash,
-            durationMs: finalResult.durationMs
+            durationMs: finalResult.durationMs,
+            tokenUsage: finalResult.metrics?.token_usage
           });
           skipFinalKeepAliveInputBeadAppend = true;
           setWaitingStatus({
@@ -26139,7 +26155,8 @@ ${appendError}
           backend: finalResult.backend,
           status: appendedStatus,
           promptHash: finalResult.promptHash,
-          durationMs: finalResult.durationMs
+          durationMs: finalResult.durationMs,
+          tokenUsage: finalResult.metrics?.token_usage
         });
       }
       if (ownsBead && finalResult.beadId) {
@@ -26152,7 +26169,8 @@ ${appendError}
           specialist: runOptions.name,
           jobId: id,
           status: "done",
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
+          tokenUsage: finalResult.metrics?.token_usage
         }));
       } else if (shouldWriteExternalBeadNotes && !inputBeadId && finalResult.beadId) {
         this.opts.beadsClient?.updateBeadNotes(finalResult.beadId, formatBeadNotes({
@@ -26164,7 +26182,8 @@ ${appendError}
           specialist: runOptions.name,
           jobId: id,
           status: "done",
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
+          tokenUsage: finalResult.metrics?.token_usage
         }));
       }
       if (finalResult.beadId) {
@@ -26269,7 +26288,8 @@ ${appendError}
         output: latestOutput || errorMsg,
         model: statusSnapshot.model ?? "unknown",
         backend: statusSnapshot.backend ?? "unknown",
-        status: "error"
+        status: "error",
+        tokenUsage: runMetrics.token_usage
       });
       this.writeReadyMarker(id);
       throw err;
@@ -40927,7 +40947,7 @@ async function appendBeadNote(beadId, text, opts = {}) {
   if (!beadId || !text)
     return { ok: false, error: "beads unavailable or empty payload" };
   return await new Promise((resolve9) => {
-    const child = spawn5("bd", ["update", beadId, "--notes", text], {
+    const child = spawn5("bd", ["update", beadId, "--append-notes", text], {
       stdio: ["ignore", "ignore", "pipe"]
     });
     const timer = opts.timeoutMs ? setTimeout(() => {

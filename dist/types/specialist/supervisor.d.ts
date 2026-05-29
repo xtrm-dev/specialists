@@ -1,7 +1,7 @@
 import type { SpecialistRunner, RunOptions } from './runner.js';
 import type { BeadsClient } from './beads.js';
 import { type TimelineEventControlSignal } from './timeline-events.js';
-import type { SessionRunMetrics } from '../pi/session.js';
+import type { SessionRunMetrics, SessionTokenUsage } from '../pi/session.js';
 import type { StallDetectionConfig } from './loader.js';
 export declare const STALL_DETECTION_DEFAULTS: Required<StallDetectionConfig>;
 export type SupervisorJobStatus = 'starting' | 'running' | 'waiting' | 'done' | 'error' | 'cancelled';
@@ -97,6 +97,18 @@ export interface SupervisorOptions {
     /** Stall detection thresholds — merged with STALL_DETECTION_DEFAULTS */
     stallDetection?: StallDetectionConfig;
 }
+export declare function formatBeadNotes(result: {
+    output: string;
+    promptHash?: string;
+    durationMs?: number;
+    model: string;
+    backend: string;
+    specialist: string;
+    jobId: string;
+    status: SupervisorJobStatus;
+    timestamp: string;
+    tokenUsage?: SessionTokenUsage;
+}): string;
 type ContextHealth = 'OK' | 'MONITOR' | 'WARN' | 'CRITICAL';
 export declare const AUTO_COMMIT_NOISE_PREFIXES: readonly [".xtrm/", ".wolf/", ".specialists/jobs/", ".beads/", ".pi/"];
 /** Detects whether the GitNexus index in `cwd` has embeddings, so a re-analyze
