@@ -42,7 +42,7 @@ import {
   createControlSignalEvent,
   mapCallbackEventToTimelineEvent,
 } from './timeline-events.js';
-import type { SessionMetricEvent, SessionRunMetrics } from '../pi/session.js';
+import type { SessionMetricEvent, SessionRunMetrics, SessionTokenUsage } from '../pi/session.js';
 import type { StallDetectionConfig } from './loader.js';
 import { createObservabilitySqliteClient, type ObservabilitySqliteClient } from './observability-sqlite.js';
 import { resolveObservabilityDbLocation } from './observability-db.js';
@@ -163,20 +163,30 @@ function getCurrentGitSha(): string | undefined {
   return sha || undefined;
 }
 
-function formatBeadNotes(result: { output: string; promptHash?: string; durationMs?: number; model: string; backend: string; specialist: string; jobId: string; status: SupervisorJobStatus; timestamp: string }): string {
+export function formatBeadNotes(result: { output: string; promptHash?: string; durationMs?: number; model: string; backend: string; specialist: string; jobId: string; status: SupervisorJobStatus; timestamp: string; tokenUsage?: SessionTokenUsage }): string {
   const statusLabel = result.status === 'waiting'
     ? 'WAITING — more output may follow'
     : result.status.toUpperCase();
   const metadata = [
     `timestamp=${result.timestamp}`,
     `status=${result.status}`,
+    `specialist=${result.specialist}`,
+    `job_id=${result.jobId}`,
     `prompt_hash=${result.promptHash ?? 'unknown'}`,
     `git_sha=${getCurrentGitSha() ?? 'unknown'}`,
     `elapsed_ms=${result.durationMs !== undefined ? Math.round(result.durationMs) : 'unknown'}`,
     `model=${result.model}`,
     `backend=${result.backend}`,
+    ...(result.tokenUsage
+      ? [
+          `input_tokens=${result.tokenUsage.input_tokens}`,
+          `output_tokens=${result.tokenUsage.output_tokens}`,
+          `cache_creation_tokens=${result.tokenUsage.cache_creation_tokens ?? 0}`,
+          `cache_read_tokens=${result.tokenUsage.cache_read_tokens ?? 0}`,
+        ]
+      : []),
   ].join('\n');
-  return `### Specialist Output — ${result.specialist} (job ${result.jobId}) [${statusLabel}]\n\n${result.output}\n\n---\n${metadata}`;
+  return `\n\n______________________________________________________________________\n\n### 🔬 ${result.specialist} · ${result.model} · [${statusLabel}]\n\n${result.output}\n\n---\n${metadata}`;
 }
 
 const GITNEXUS_RISK_ORDER: Record<'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL', number> = {
@@ -1405,6 +1415,7 @@ export class Supervisor {
       status: SupervisorJobStatus;
       promptHash?: string;
       durationMs?: number;
+      tokenUsage?: SessionTokenUsage;
     }): boolean => {
       const inputBeadId = runOptions.inputBeadId;
       const shouldAppendResultToInputBead = Boolean(
@@ -1424,6 +1435,7 @@ export class Supervisor {
         jobId: id,
         status: params.status,
         timestamp: new Date().toISOString(),
+        tokenUsage: params.tokenUsage,
       });
       const appendResult = this.opts.beadsClient.updateBeadNotes(inputBeadId, notes);
       if (appendResult.ok) return true;
@@ -1524,6 +1536,7 @@ export class Supervisor {
           model: statusSnapshot.model ?? 'unknown',
           backend: statusSnapshot.backend ?? 'unknown',
           status: isWaitingTurn ? 'waiting' : 'done',
+          tokenUsage: runMetrics.token_usage,
         });
 
         if (!isWaitingTurn) {
@@ -1616,6 +1629,7 @@ export class Supervisor {
             model: statusSnapshot.model ?? 'unknown',
             backend: statusSnapshot.backend ?? 'unknown',
             status: 'cancelled',
+            tokenUsage: runMetrics.token_usage,
           });
           if (appendSucceeded) {
             skipFinalKeepAliveInputBeadAppend = true;
@@ -2115,6 +2129,7 @@ export class Supervisor {
             status: 'waiting',
             promptHash: finalResult.promptHash,
             durationMs: finalResult.durationMs,
+            tokenUsage: finalResult.metrics?.token_usage,
           });
           skipFinalKeepAliveInputBeadAppend = true;
           setWaitingStatus({
@@ -2145,6 +2160,7 @@ export class Supervisor {
           status: appendedStatus,
           promptHash: finalResult.promptHash,
           durationMs: finalResult.durationMs,
+          tokenUsage: finalResult.metrics?.token_usage,
         });
       }
 
@@ -2159,6 +2175,7 @@ export class Supervisor {
           jobId: id,
           status: 'done',
           timestamp: new Date().toISOString(),
+          tokenUsage: finalResult.metrics?.token_usage,
         }));
       } else if (shouldWriteExternalBeadNotes && !inputBeadId && finalResult.beadId) {
         this.opts.beadsClient?.updateBeadNotes(finalResult.beadId, formatBeadNotes({
@@ -2171,6 +2188,7 @@ export class Supervisor {
           jobId: id,
           status: 'done',
           timestamp: new Date().toISOString(),
+          tokenUsage: finalResult.metrics?.token_usage,
         }));
       }
 
@@ -2303,6 +2321,7 @@ export class Supervisor {
         model: statusSnapshot.model ?? 'unknown',
         backend: statusSnapshot.backend ?? 'unknown',
         status: 'error',
+        tokenUsage: runMetrics.token_usage,
       });
 
       // Touch ready marker so hooks can surface failure banners.

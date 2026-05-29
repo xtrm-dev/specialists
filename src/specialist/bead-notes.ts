@@ -8,7 +8,7 @@ export async function appendBeadNote(beadId: string, text: string, opts: AppendB
   if (!beadId || !text) return { ok: false, error: 'beads unavailable or empty payload' };
 
   return await new Promise((resolve) => {
-    const child = spawn('bd', ['update', beadId, '--notes', text], {
+    const child = spawn('bd', ['update', beadId, '--append-notes', text], {
       stdio: ['ignore', 'ignore', 'pipe'],
     });
     const timer = opts.timeoutMs
