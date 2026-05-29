@@ -24520,7 +24520,7 @@ function getCurrentGitSha() {
 function formatHandoffBlock(result, options) {
   const statusToken = options.final ? `FINAL \xB7 ${result.status === "cancelled" ? "CANCELLED" : result.status === "error" ? "ERROR" : "DONE"}` : result.status === "waiting" ? "WAITING" : "WORKING";
   const rule = options.final ? "\u2550".repeat(70) : "_".repeat(70);
-  const header = options.final ? `### \u2705 ${result.specialist} \xB7 ${result.model} \xB7 [${statusToken}]` : `### \uD83D\uDD2C ${result.specialist} \xB7 ${result.model} \xB7 [turn ${result.turnIndex ?? "unknown"} \xB7 ${statusToken}]`;
+  const header = options.final ? `### ${result.specialist} \xB7 ${result.model} \xB7 [${statusToken}]` : `### ${result.specialist} \xB7 ${result.model} \xB7 [turn ${result.turnIndex ?? "unknown"} \xB7 ${statusToken}]`;
   const metadata = [
     `timestamp=${result.timestamp}`,
     `status=${result.status}`,
@@ -24952,10 +24952,6 @@ class Supervisor {
   }
   observabilityDbPath() {
     return resolveObservabilityDbLocation(this.opts.runOptions?.workingDirectory ?? process.cwd()).dbPath;
-  }
-  shouldWriteJobFiles() {
-    const mode = String(process.env.SPECIALISTS_JOB_FILE_OUTPUT ?? "").trim().toLowerCase();
-    return mode === "" || mode === "on" || mode === "true" || mode === "1";
   }
   eventsPath(id) {
     return join9(this.jobDir(id), "events.jsonl");

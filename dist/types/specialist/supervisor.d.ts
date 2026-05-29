@@ -143,7 +143,6 @@ export declare class Supervisor {
     private statusPath;
     private resultPath;
     private observabilityDbPath;
-    private shouldWriteJobFiles;
     private eventsPath;
     private readyDir;
     private writeReadyMarker;

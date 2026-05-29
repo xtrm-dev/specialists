@@ -18,13 +18,13 @@ describe('formatHandoffBlock', () => {
   it('renders waiting handoff block', () => {
     const note = formatHandoffBlock(base, { final: false });
     expect(note).toContain('______________________________________________________________________');
-    expect(note).toContain('### 🔬 researcher · claude-haiku · [turn 7 · WAITING]');
+    expect(note).toContain('### researcher · claude-haiku · [turn 7 · WAITING]');
   });
 
   it('renders final done block', () => {
     const note = formatHandoffBlock({ ...base, status: 'done' }, { final: true });
     expect(note).toContain('══════════════════════════════════════════════════════════════════════');
-    expect(note).toContain('### ✅ researcher · claude-haiku · [FINAL · DONE]');
+    expect(note).toContain('### researcher · claude-haiku · [FINAL · DONE]');
   });
 
   it('renders token usage lines when provided', () => {

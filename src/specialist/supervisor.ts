@@ -171,8 +171,8 @@ export function formatHandoffBlock(result: { output: string; promptHash?: string
       : 'WORKING';
   const rule = options.final ? '═'.repeat(70) : '_'.repeat(70);
   const header = options.final
-    ? `### ✅ ${result.specialist} · ${result.model} · [${statusToken}]`
-    : `### 🔬 ${result.specialist} · ${result.model} · [turn ${result.turnIndex ?? 'unknown'} · ${statusToken}]`;
+    ? `### ${result.specialist} · ${result.model} · [${statusToken}]`
+    : `### ${result.specialist} · ${result.model} · [turn ${result.turnIndex ?? 'unknown'} · ${statusToken}]`;
   const metadata = [
     `timestamp=${result.timestamp}`,
     `status=${result.status}`,
@@ -674,10 +674,6 @@ export class Supervisor {
     return resolveObservabilityDbLocation(this.opts.runOptions?.workingDirectory ?? process.cwd()).dbPath;
   }
 
-  private shouldWriteJobFiles(): boolean {
-    const mode = String(process.env.SPECIALISTS_JOB_FILE_OUTPUT ?? '').trim().toLowerCase();
-    return mode === '' || mode === 'on' || mode === 'true' || mode === '1';
-  }
 
   private eventsPath(id: string): string {
     return join(this.jobDir(id), 'events.jsonl');
