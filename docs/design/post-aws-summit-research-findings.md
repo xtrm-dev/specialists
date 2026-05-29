@@ -39,7 +39,7 @@ The epic could not start until the `researcher` specialist could reach the open 
 
 **Recommendation — ADAPT (opt-in).** Keep policy-driven insert as default; add a `research/dynamic` chain class as an **opt-in catalog entry** for open-ended research only.
 
-**Proposed path → bead:** design bead for an opt-in dynamic/self-organizing chain class (substrate), deferred-friendly.
+**Filed bead:** [`unitAI-wxl85`](https://github.com/Jaggerxtrm/specialists) (P3, open → deferred 2026-05-29 per operator decision) — design: opt-in research/dynamic (self-organizing) chain class.
 
 ---
 
@@ -55,7 +55,7 @@ The epic could not start until the `researcher` specialist could reach the open 
 
 **Recommendation — ADOPTED (done).** Only justify a separate web-scraper specialist for long-running crawl / heavy extraction / strict per-target isolation.
 
-**Proposed path → bead:** `unitAI-of6dw` (already filed) — safe-default flags + eval-deny on untrusted domains + HAR redaction.
+**Filed bead:** `unitAI-of6dw` (P3, open → deferred 2026-05-29 per operator decision) — harden researcher agent-browser usage with safe-default flags (`--content-boundaries`, `--max-output`, `--allowed-domains`, `--action-policy`) + eval-deny on untrusted domains + HAR redaction. Independent tactical hardening; not roadmap-blocking.
 
 ---
 
@@ -71,7 +71,7 @@ The epic could not start until the `researcher` specialist could reach the open 
 
 **Recommendation — ADAPT (defer to post-v4).** Do **not** make this live self-editing now. Pilot **after v4 freeze** (roadmap §714-728 wants a clean post-ship revamp, not drip patches): 1 skill first, held-out task set + frozen registry snapshot; accept only if the primary metric improves with no key regressions. Quarterly cadence, not per-PR.
 
-**Proposed path → bead:** deferred/backlog bead — post-v4 SkillOpt-style skill-optimization pilot.
+**Filed bead:** `unitAI-my1li` (P4, open → deferred 2026-05-29 per operator decision) — design (deferred): post-v4 SkillOpt-style skill-optimization pilot. Explicit defer until v4 freeze.
 
 ---
 
@@ -88,7 +88,7 @@ The epic could not start until the `researcher` specialist could reach the open 
 
 **Recommendation — ADAPT, and consider a NEW `security-tester` specialist.** The scan-only `security-auditor` (LOW, recommendations-only) is the wrong home for active/offensive tooling. **Proposed:** a distinct **`security-tester`** specialist for *active/authorized* testing (recon + local analysis baseline; offensive tools opt-in only), default-OFF, capability-tiered, per-repo opt-in + per-run audit log, gated on authorized scope + SCRUTINY=critical surfaces. `security-auditor` stays scan-only; `security-pipeline` stays semgrep+osv+gitleaks+dependabot baseline.
 
-**Proposed path → bead:** deferred bead to evaluate/spec a `security-tester` specialist (active testing) leveraging a HexStrike adapter, with a capability matrix and authorization model — explicitly NOT auto-enabled.
+**Filed bead:** `unitAI-dhhm6` (P3, open → deferred 2026-05-29 per operator decision) — design: evaluate/spec a `security-tester` specialist (active testing) leveraging a HexStrike adapter, with a capability matrix and authorization model — explicitly NOT auto-enabled.
 
 ---
 
@@ -108,7 +108,9 @@ Plus **DevOps Agent learned-skills**: SKILL.md + refs/assets, auto-load by descr
 
 **Recommendation — ADAPT (extract pattern, no AWS dependency).**
 
-**Proposed path → bead:** design bead — absorb the evaluator-vs-diagnostic split into roadmap **Phase 7 R-checks** (`score-check` / `diagnose-check`).
+**Filed bead:** `unitAI-cg4y6` (P2, open → deferred 2026-05-29 per operator decision) — design: absorb AgentCore evaluator-vs-diagnostic split into roadmap Phase 7 R-checks.
+
+**⚠ OPERATOR NOTE 2026-05-29:** the AgentCore research scope was misunderstood by the researcher, and the derived recommendation here is **not valid as-is**. The "score-check vs diagnose-check" framing should NOT be absorbed into the roadmap. If the AgentCore direction is pursued later, the bead must be re-scoped and re-researched first. Left open + deferred for that future re-evaluation; not closed because the topic itself may still warrant fresh investigation under correct scope.
 
 ---
 
@@ -121,7 +123,7 @@ Plus **DevOps Agent learned-skills**: SKILL.md + refs/assets, auto-load by descr
 
 **Recommendation — ADOPT (Grafana first).** Keep raw in `observability.db`, export a curated view; add Grafana for dashboards + alerting (SQLite→Grafana adapter); add a new **`monitor`** specialist for the anomaly-detection gap (no native engine today); traces later only; Snowflake cold-warehouse only; Datadog reference-only.
 
-**Proposed path → bead(s):** SQLite→Grafana adapter + dashboards/alerting; a `monitor` specialist for anomaly detection.
+**Filed bead:** `unitAI-itn9h` (P2, open → deferred 2026-05-29 per operator decision) — design: agentic observability — Grafana adapter + `monitor` specialist for anomaly gap.
 
 ---
 
@@ -137,14 +139,37 @@ Plus **DevOps Agent learned-skills**: SKILL.md + refs/assets, auto-load by descr
 
 ## Decision summary
 
-| # | Topic | Decision | Becomes |
-|---|---|---|---|
-| .5 | AgentCore eval pattern | Adapt | Design bead → Phase 7 R-checks (score/diagnose split) |
-| .6 | Observability | Adopt | Grafana adapter + `monitor` specialist bead(s) |
-| .1 | Dynamic workflows | Adapt (opt-in) | Design bead → opt-in `research/dynamic` chain class |
-| .4 | HexStrike | Adapt | Deferred bead → evaluate **`security-tester`** specialist (active testing) |
-| .3 | SkillOpt | Adapt (later) | Deferred bead → post-v4 skill-optimization pilot |
-| .2 | agent-browser | Adopted | Done (`of6dw` hardening follow-up open) |
-| .7 | CCH Tagetik | Defer/skip | None (reopen only if enterprise-finance pursued) |
+| # | Topic | Researcher recommendation | Filed bead | Operator decision 2026-05-29 |
+|---|---|---|---|---|
+| .5 | AgentCore eval pattern | Adapt → Phase 7 R-checks (score/diagnose split) | `unitAI-cg4y6` (P2) | **Deferred** — research scope misunderstood; recommendation invalid as-is; re-scope before any future absorbance |
+| .6 | Observability | Adopt → Grafana adapter + `monitor` specialist | `unitAI-itn9h` (P2) | **Deferred** — net-new capability, out of current roadmap scope; promote when observability becomes priority |
+| .1 | Dynamic workflows | Adapt (opt-in) → research/dynamic chain class | `unitAI-wxl85` (P3) | **Deferred** — substrate-level chain_template extension; future substrate-design iteration |
+| .4 | HexStrike | Adapt → `security-tester` specialist | `unitAI-dhhm6` (P3) | **Deferred** — new specialist creation outside roadmap scope; revisit when security-active-testing becomes priority |
+| .3 | SkillOpt | Adapt (later) → post-v4 pilot | `unitAI-my1li` (P4) | **Deferred** — explicit by design (post-v4) |
+| .2 | agent-browser | Adopted | `unitAI-of6dw` (P3) | **Deferred** — adoption already done (researcher v1.3.0); hardening bead waits independent shipping window |
+| .7 | CCH Tagetik | Defer/skip | (none filed) | **Skip** — only relevant if enterprise-finance direction pursued |
 
 Cross-references: .5 (learned-skills) ↔ .3 (SkillOpt) both inform skill self-improvement; .1 ↔ substrate §4.3 chain coordinator; .6 ↔ `observability.db` / `sp log`.
+
+---
+
+## Operator decision 2026-05-29 — no roadmap integration
+
+After review, the operator decided that **none of the 6 filed beads above gets integrated into the canonical roadmap** (`docs/design/roadmap/specialists-roadmap.md`). Reasons captured here for the next session:
+
+1. **The roadmap is execution-ready** at 12 opportunities / 8 phases / D1–D30 / ~3–4 days wall-clock auto-mode. Mid-flight absorbance risks scope creep against a fixed shipping budget.
+2. **`cg4y6` (AgentCore split) is invalid as-derived** — research scope misframed; the score-check/diagnose-check distinction proposed is not what AgentCore actually means in context. Re-scoping required before any future absorbance attempt.
+3. **`itn9h` and `dhhm6` introduce net-new capabilities** (monitor specialist, security-tester specialist) outside the runtime-cleanup scope this roadmap addresses.
+4. **`wxl85` is substrate-level** (chain_template class extension, §6.9.10 catalog) — belongs to substrate-design iterations, not the runtime roadmap.
+5. **`my1li` is already explicitly deferred by design** (post-v4 freeze).
+6. **`of6dw` is tactical hardening** of a just-shipped tool — ships independently when convenient, not roadmap-blocking.
+
+All 6 beads are therefore **`bd defer`**'d (status: deferred). They remain in `bd list` (visible) but do not show in `bd ready` (not actionable). The bd `defer` semantics fit exactly here: not blocked, not closed — set aside for later consideration, revisited when operator promotes individually.
+
+**Storage of research info — not lost by deferring:**
+- This synthesis doc (`docs/design/post-aws-summit-research-findings.md`) is the canonical record of what was researched and what was recommended
+- Per-stream researcher memos live on each `unitAI-544sf.{1-7}` bead's notes (auto-appended via `per-turn-handoff-schema`)
+- Durable insights saved via `bd remember` (queryable later by future specialists via `bd memories <keyword>` per Opp 11 pull-not-push)
+- Follow-up beads `cg4y6 / itn9h / wxl85 / dhhm6 / my1li / of6dw` themselves carry full scope + rationale on description
+
+The research did the right job: mapped the territory, produced actionable recommendations, surfaced where the operator's strategic call is needed. Deferring is the strategic call.
