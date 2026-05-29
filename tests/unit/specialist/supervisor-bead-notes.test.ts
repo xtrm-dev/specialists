@@ -13,36 +13,57 @@ describe('formatHandoffBlock', () => {
     status: 'waiting' as const,
     timestamp: '2026-05-29T15:00:00.000Z',
     turnIndex: 7,
+    tokenUsage: {
+      input_tokens: 111,
+      output_tokens: 222,
+      cache_creation_tokens: 0,
+      cache_read_tokens: 0,
+    },
   };
 
   it('renders waiting handoff block', () => {
     const note = formatHandoffBlock(base, { final: false });
-    expect(note).toContain('______________________________________________________________________');
     expect(note).toContain('### researcher · claude-haiku · [turn 7 · WAITING]');
+    expect(note).not.toContain('______________________________________________________________________');
+    expect(note).not.toContain('══════════════════════════════════════════════════════════════════════');
+    expect(note).not.toContain('\n---\n');
+    expect(note).toContain('_turn 7 · 321 ms · 111 to 222 tok · 2026-05-29 15:00 · git ');
   });
 
   it('renders final done block', () => {
     const note = formatHandoffBlock({ ...base, status: 'done' }, { final: true });
-    expect(note).toContain('══════════════════════════════════════════════════════════════════════');
-    expect(note).toContain('### researcher · claude-haiku · [FINAL · DONE]');
+    expect(note).toContain('## researcher · claude-haiku · [FINAL · DONE]');
+    expect(note).not.toContain('### researcher · claude-haiku · [FINAL · DONE]');
+    expect(note).not.toContain('______________________________________________________________________');
+    expect(note).not.toContain('══════════════════════════════════════════════════════════════════════');
+    expect(note).toContain('_final · 321 ms · 111 to 222 tok · 2026-05-29 15:00 · git ');
   });
 
-  it('renders token usage lines when provided', () => {
+  it('normalizes provider-qualified model strings', () => {
+    const note = formatHandoffBlock({ ...base, model: 'anthropic/claude-haiku' }, { final: false });
+    expect(note).toContain('### researcher · claude-haiku · [turn 7 · WAITING]');
+    expect(note).not.toContain('anthropic/claude-haiku');
+  });
+
+  it('omits empty metadata fields from footer', () => {
     const note = formatHandoffBlock({
       ...base,
-      status: 'done',
+      durationMs: undefined,
+      promptHash: undefined,
       tokenUsage: {
-        input_tokens: 111,
-        output_tokens: 222,
-        cache_creation_tokens: 3,
-        cache_read_tokens: 4,
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_creation_tokens: 0,
+        cache_read_tokens: 0,
       },
     }, { final: true });
 
-    expect(note).toContain('input_tokens=111');
-    expect(note).toContain('output_tokens=222');
-    expect(note).toContain('cache_creation_tokens=3');
-    expect(note).toContain('cache_read_tokens=4');
+    expect(note).toContain('_final · 2026-05-29 15:00 · git ');
+    expect(note).not.toContain('prompt_hash=');
+    expect(note).not.toContain('input_tokens=');
+    expect(note).not.toContain('output_tokens=');
+    expect(note).not.toContain('cache_creation_tokens=');
+    expect(note).not.toContain('cache_read_tokens=');
   });
 });
 

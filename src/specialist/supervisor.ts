@@ -163,37 +163,37 @@ function getCurrentGitSha(): string | undefined {
   return sha || undefined;
 }
 
+function normalizeHandoffModel(model: string): string {
+  return model.split('/').at(-1) ?? model;
+}
+
 export function formatHandoffBlock(result: { output: string; promptHash?: string; durationMs?: number; model: string; backend: string; specialist: string; jobId: string; status: SupervisorJobStatus; timestamp: string; tokenUsage?: SessionTokenUsage; turnIndex?: number }, options: { final: boolean }): string {
   const statusToken = options.final
     ? `FINAL · ${result.status === 'cancelled' ? 'CANCELLED' : result.status === 'error' ? 'ERROR' : 'DONE'}`
     : result.status === 'waiting'
       ? 'WAITING'
       : 'WORKING';
-  const rule = options.final ? '═'.repeat(70) : '_'.repeat(70);
+  const model = normalizeHandoffModel(result.model);
   const header = options.final
-    ? `### ${result.specialist} · ${result.model} · [${statusToken}]`
-    : `### ${result.specialist} · ${result.model} · [turn ${result.turnIndex ?? 'unknown'} · ${statusToken}]`;
-  const metadata = [
-    `timestamp=${result.timestamp}`,
-    `status=${result.status}`,
-    `specialist=${result.specialist}`,
-    `job_id=${result.jobId}`,
-    `turn_index=${result.turnIndex ?? 'unknown'}`,
-    `prompt_hash=${result.promptHash ?? 'unknown'}`,
-    `git_sha=${getCurrentGitSha() ?? 'unknown'}`,
-    `elapsed_ms=${result.durationMs !== undefined ? Math.round(result.durationMs) : 'unknown'}`,
-    `model=${result.model}`,
-    `backend=${result.backend}`,
-    ...(result.tokenUsage
-      ? [
-          `input_tokens=${result.tokenUsage.input_tokens}`,
-          `output_tokens=${result.tokenUsage.output_tokens}`,
-          `cache_creation_tokens=${result.tokenUsage.cache_creation_tokens ?? 0}`,
-          `cache_read_tokens=${result.tokenUsage.cache_read_tokens ?? 0}`,
-        ]
-      : []),
-  ].join('\n');
-  return `\n\n${rule}\n\n${header}\n\n${result.output}\n\n---\n${metadata}`;
+    ? `## ${result.specialist} · ${model} · [${statusToken}]`
+    : `### ${result.specialist} · ${model} · [turn ${result.turnIndex ?? 'unknown'} · ${statusToken}]`;
+  const tokenUsage = result.tokenUsage;
+  const gitSha = getCurrentGitSha();
+  const footerParts = [
+    options.final ? 'final' : `turn ${result.turnIndex ?? 'unknown'}`,
+    result.durationMs !== undefined ? `${Math.round(result.durationMs)} ms` : undefined,
+    tokenUsage?.input_tokens && tokenUsage?.output_tokens
+      ? `${tokenUsage.input_tokens} to ${tokenUsage.output_tokens} tok`
+      : tokenUsage?.input_tokens
+        ? `${tokenUsage.input_tokens} tok in`
+        : tokenUsage?.output_tokens
+          ? `${tokenUsage.output_tokens} tok out`
+          : undefined,
+    result.timestamp ? new Date(result.timestamp).toISOString().slice(0, 16).replace('T', ' ') : undefined,
+    gitSha ? `git ${gitSha.slice(0, 8)}` : undefined,
+  ].filter((part): part is string => Boolean(part));
+  const footer = footerParts.length > 0 ? `_${footerParts.join(' · ')}_` : '';
+  return `\n\n${header}\n\n${result.output}${footer ? `\n\n${footer}` : ''}`;
 }
 
 export function shouldPersistHandoffBlock(params: { output: string; notesMode: 'full-trail' | 'final-only'; final: boolean }): boolean {
