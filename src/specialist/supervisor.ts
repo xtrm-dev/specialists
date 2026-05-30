@@ -1484,7 +1484,7 @@ export class Supervisor {
           }
         }
       }
-      if (outputFile && this.isJobFileOutputEnabled) {
+      if (outputFile) {
         try {
           if (notesMode === 'final-only') {
             writeFileSync(outputFile, rendered, 'utf-8');

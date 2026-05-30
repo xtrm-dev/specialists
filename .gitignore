@@ -65,6 +65,7 @@ g5np-rpc-extraction/
 
 # Specialists runtime artifacts
 .specialists/executor-result.md
+.specialists/*-result.md
 .specialists/trace.jsonl
 .specialists/sync-docs-report.md
 

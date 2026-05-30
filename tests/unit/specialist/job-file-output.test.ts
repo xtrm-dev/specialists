@@ -41,14 +41,15 @@ describe('job-file-output', () => {
     process.env.SPECIALISTS_JOB_FILE_OUTPUT = original;
   });
 
-  it('does nothing when gate disabled', async () => {
+  it('writes output even when legacy gate is off', async () => {
+    fsMocks.appendFile.mockResolvedValue(undefined);
     const original = process.env.SPECIALISTS_JOB_FILE_OUTPUT;
     process.env.SPECIALISTS_JOB_FILE_OUTPUT = 'off';
 
     const { writeJobFileOutput } = await import('../../../src/specialist/job-file-output.js');
     await writeJobFileOutput('/tmp/handoff.md', 'block', 'append');
 
-    expect(fsMocks.appendFile).not.toHaveBeenCalled();
+    expect(fsMocks.appendFile).toHaveBeenCalledWith('/tmp/handoff.md', 'block', 'utf-8');
     expect(fsMocks.writeFile).not.toHaveBeenCalled();
 
     process.env.SPECIALISTS_JOB_FILE_OUTPUT = original;
