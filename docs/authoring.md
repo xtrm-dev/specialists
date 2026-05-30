@@ -344,9 +344,32 @@ If any `external_commands` binary is missing, startup hard-fails and the session
 }
 ```
 
-Writes final specialist output to the file after completion. Relative paths are resolved from the working directory.
+When set, the specialist writes its **handoff block** to this file on every substantive turn — foreground and `--background`. The content is identical to what is appended to the input bead notes and shown by `sp result`: a markdown heading, the verbatim specialist output, and an italic metadata footer.
+
+- **No env flag required.** `output_file` is honored whenever it is set (since unitAI-f58ma). It does NOT require `SPECIALISTS_JOB_FILE_OUTPUT` — that flag now only gates the debug file-mirrors (events.jsonl / status.json / result.txt).
+- **Single writer.** In a supervised run (`sp run`) the supervisor owns the file and the runner's own write is suppressed, so the file is never double-written. (In script/serve runs there is no supervisor; the runner writes the raw output instead of the enveloped block.)
+- **Format is the rendered handoff block, not bare output.** A downstream specialist that consumes this file as input will see the header/footer envelope around the body.
+- **Append vs overwrite is controlled by `notes_mode`** (see below): `full-trail` appends each turn; `final-only` overwrites with just the final `[FINAL · DONE]` block.
+- **Gitignore the path** if you don't want it committed — specs with `output_file` always write, so add the path (e.g. `.specialists/*-result.md`) to `.gitignore`.
+
+Relative paths resolve from the working directory.
 
 ---
+
+## `specialist.notes_mode`
+
+Controls how per-turn handoff output is persisted to BOTH the input bead notes and `output_file`.
+
+| Value | Behavior |
+|---|---|
+| `"full-trail"` (default) | Append every substantive turn. Bead notes / `output_file` accumulate `### … [turn N · WAITING]` blocks, ending with a final `## … [FINAL · DONE]` block. Best for keep-alive specialists where the operator wants the full trail. |
+| `"final-only"` | Persist only the single canonical `## … [FINAL · DONE]` block; intermediate turns are skipped and `output_file` is OVERWRITTEN (not appended). Best for non-coding / chained pipelines where the next specialist reads the previous specialist's bead note or `output_file` as its input and only wants the final result. |
+
+Empty turns are never persisted. The handoff block is markdown-native (heading + verbatim body + one italic metadata footer); the model string is normalized (provider prefix stripped, e.g. `nano-gpt/moonshotai/kimi-k2.5` renders as `kimi-k2.5`).
+
+```json
+{ "notes_mode": "final-only" }
+```
 
 ## `specialist.validation` (optional)
 
@@ -419,7 +442,7 @@ Controls stall detection warnings during specialist execution.
 | `"always"` | Always create a tracking bead |
 | `"never"` | Never create a tracking bead |
 
-`beads_write_notes` (boolean, default `true`) — when `true`, the specialist appends run notes to the associated bead on completion.
+`beads_write_notes` (boolean, default `true`) — when `true`, the specialist appends its handoff block to the associated bead's notes on every substantive turn. The appended block is the rendered handoff format described under `notes_mode`: a markdown heading (`### <specialist> · <model> · [turn N · WAITING]` for trail turns, `## … [FINAL · DONE]` for the final turn), the verbatim specialist output, and an italic footer with timing / token / git metadata. Set to `false` to suppress bead-note writes entirely. The same content also feeds `output_file` and `sp result` (one shared content source).
 
 ---
 
