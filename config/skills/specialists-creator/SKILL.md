@@ -596,8 +596,9 @@ Controls how per-turn handoff output is persisted to BOTH the input bead notes a
 
 Empty turns are never persisted. The handoff block is markdown-native (heading + verbatim body + one italic metadata footer); the model string is normalized (provider prefix stripped, e.g. `nano-gpt/moonshotai/kimi-k2.5` renders as `kimi-k2.5`).
 
-Example JSON:
+```json
 { "notes_mode": "final-only" }
+```
 
 ### Handoff / pipeline output recipe
 
