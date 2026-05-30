@@ -2,10 +2,10 @@
   "specialist": {
     "metadata": {
       "name": "specialists-creator",
-      "version": "1.4.0",
+      "version": "1.4.1",
       "description": "Specialist-definition author. Use for creating or fixing .specialist.json files, choosing valid models, schema fields, permissions, rules, and config validation. HIGH; not for ordinary app code.",
       "category": "authoring",
-      "updated": "2026-05-23",
+      "updated": "2026-05-30",
       "tags": [
         "authoring",
         "json",
