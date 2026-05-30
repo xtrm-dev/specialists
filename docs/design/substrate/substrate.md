@@ -766,16 +766,17 @@ This means the same `executor` specialist behaves differently across issues — 
 
 These four concepts come from Jane Street's Iron review model. They are folded in **generically** — substrate stays domain-neutral, because a user's specialists might do legal review, trading research, or prose editing, not just code. The mechanisms live in substrate; the *code-specific* policy (which file paths escalate scrutiny) lives in shipped config, never in substrate core. This section defines the *concepts* (what scrutiny/obligations/ddiff mean); §6.9's mandatory-gate layer is *where they are enforced as non-skippable chain steps* (code-sanity, obligations-scanner, security-auditor) on production diffs and sensitive surfaces.
 
-**Scrutiny — a generic review-depth dial.** `contract.scrutiny: low|medium|high|critical` replaces the old `risk` field (one axis, one name; two would drift). It says how hard review should work here, in domain-neutral terms:
+**Scrutiny — a generic chain-structure dial, not a per-specialist quality dial.** `contract.scrutiny: none|low|medium|high|critical` is a **required field on every root contract** (the old `risk` field is replaced — one axis, one name, two would drift). It says how much *structural defense* the chain has around this work, in domain-neutral terms. **Crucially, scrutiny does NOT mean "lower tier = lower-quality work."** Every participant always does the highest-quality work possible. What scrutiny modulates is **chain structure**: how many independent advisors fire pre-impl, which conditional gates activate, whether a second-opinion turn runs, how strictly the final reviewer enforces the Release Checklist. The work itself is always max-quality; the amount of structure around the work is what changes.
 
-| Level | Meaning (generic) |
+| Level | Meaning (generic) — what changes structurally |
 |---|---|
-| `low` | Seconder-only. Spot-check; no blast-radius analysis. |
-| `medium` | Default. Standard review depth. |
-| `high` | Item-by-item sign-off; impact evidence required. |
-| `critical` | High + independent second opinion (or premortem). |
+| `none` | Design / read-only chains only (planning, premortem, research, doc-sync, memory-hygiene, triage). No code diff produced; no mandatory layer applies. |
+| `low` | Floor for any chain that produces a diff. Cheap pre-QA gates skippable with reason; seconder advisory not blocking; final review minimal Release Checklist pass. |
+| `medium` | Default. Full mandatory layer applies (cheap pre-QA gate as PASS-pre-condition; seconder gate; behavioral-validation gate; obligations gate; reviewer with Release Checklist). |
+| `high` | + Item-by-item sign-off in Release Checklist; impact evidence required at reviewer; pre-QA UNCLEAR verdicts escalate to chain coordinator (§4.3 role 2 borderline judge) BEFORE expensive QA fires. |
+| `critical` | + Independent second opinion (or premortem); conditional gates (e.g., domain-specific auditors) run twice — advisor pre-impl and gate post-impl. |
 
-The reviewer reads `scrutiny` and tiers its behavior. Absent field defaults to `medium` (backward compatible).
+The chain (its participants and its mandatory layer) **all read `scrutiny` and tier the chain's structure accordingly** — it is not a private input to the reviewer alone. Step issues inherit `scrutiny` from their root container; they do not redeclare it (single source of truth). Absent field defaults to `medium` only as backward-compat fallback for pre-existing data; new contracts hard-fail validation if scrutiny is missing (seed-phase validator, §5; also §6.4 dispatch gate). `none` is hard-denied when the seed produces a `class:root` contract whose scope contains code-touching paths.
 
 **Auto-escalation is shipped config, not substrate.** A reviewer may raise the scrutiny floor based on what the diff touches — but the surface→floor table (`auth/*` → high, `migrations/**` → high, `src/permissions/*` → critical, …) is **code-oriented policy** that ships with a code specialist set, in `config/scrutiny/surfaces.yaml`. This parallels how seed advisor-invite rules live in config (§5.2). A legal-review specialist set ships its own surface table (`**/contracts/*` → high) or none. Substrate only knows the generic dial; it never hardcodes a path pattern. The author's stated level is a floor, not a ceiling; config can raise it.
 
@@ -950,10 +951,12 @@ reviewer             → auto-escalates scrutiny by diff content (§6.6 surfaces
 The chain shape for a substantive production diff is therefore the template's domain steps *with the mandatory layer overlaid*:
 
 ```
-executor → code-sanity → security-auditor (if surface) → obligations-scanner → reviewer → merge
+executor → contract-coverage → code-sanity → test-engineer → test-runner → security-auditor (if surface) → obligations-scanner → reviewer → merge
 ```
 
-- `code-sanity` (seconder gate) and `obligations-scanner` are **mandatory on production diffs**. Reviewer treats their `OK` as a precondition for PASS and returns PARTIAL if missing.
+- `contract-coverage` is a **cheap, hard-scoped scope/compliance gate** that runs immediately post-executor. It answers one question — *did the writer's diff satisfy the bead's contract enough to justify expensive QA?* — with PASS / FAIL / UNCLEAR + a scope-coverage map. Hard token budget (5–20k). Extracted in the foreground runtime (chain-templates.md §2.3, roadmap Opp 15) from the reviewer's pre-existing two-phase audit, separating phase-1 compliance-check (now `contract-coverage`) from phase-2 adversarial deep audit (now reviewer alone). This is not a fourth composition moment (§6.9.5) — it is an evidence gate using the §6.10 close-as-derivation pattern applied at intermediate-step granularity. Reads forward to `class:gate, role:contract-coverage` with evidence in `issue.evidence_json` per §6.8. Mandatory at medium+ scrutiny; skippable with reason at low; not applicable at none.
+- `code-sanity` (Iron seconder gate) and `obligations-scanner` are **mandatory on production diffs**. Reviewer treats their `OK` as a precondition for PASS and returns PARTIAL if missing.
+- `test-engineer` + `test-runner` form the behavioral-validation gate at medium+ scrutiny (the QA portion of the mandatory layer). Cross-reference: chain-templates.md §2.5 (behavioral-validation contract) and roadmap Opp 14 (`unitAI-sfwe1`).
 - **Skip permitted only** for codified exceptions: test-only diffs (entirely under `test/`, `__tests__/`, `*.spec.*`, `*.test.*`, `*.fixture.*`) or new-file-only diffs (no modification to existing symbols). **Any other skip is an escalation event** — small diffs hide the worst regressions.
 - Gates run READ_ONLY on the executor's job (they do not acquire the worktree lease, §6.9.6), in order; on a debugger-restitch they re-run after the restitch turn, before the reviewer; their JSON output is consumed by the reviewer directly via the job feed and is citable evidence in reviewer rebuttals.
 

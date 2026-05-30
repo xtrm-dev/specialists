@@ -50,41 +50,59 @@ This document concerns itself with **what the canonical pipeline is** and **what
 
 Every chain that produces a production diff runs the same canonical pipeline. The pipeline is **canonical**, not optional, not pluggable, not "overlaid." Severity modulates depth (which steps fire); it does not modulate whether the pipeline exists.
 
-> **Already in production.** The pipeline below is taught and enforced by `config/skills/using-specialists-v3/SKILL.md` (canonical operator skill). `test-engineer` + the upgraded `test-runner` ship via `unitAI-sfwe1` (in-flight). The only step still under design is **§4 DevOps gates**; everything else is current canonical behavior.
+> **Status of canonical steps as of 2026-05-31.** The Iron portion (writer → code-sanity → security-auditor? → obligations-scanner → reviewer) is **in production** via `config/skills/using-specialists-v3/SKILL.md`. The QA portion (`test-engineer` + upgraded `test-runner`) is **imminent-canonical** via epic `unitAI-sfwe1`. The **`contract-coverage` gate** between writer and code-sanity is **design-canonical** as of this revision (extracted from the reviewer's existing compliance phase — see §2.3 and §2.9); implementation epic to be filed as Opp 15 of the roadmap. The **§4 DevOps gates** remain under design.
 
 ### 2.1 The shape
 
 ```mermaid
 flowchart LR
   planner[planner + test-planning<br><i>pre-impl, optional</i>] --> writer[executor or debugger]
-  writer --> test-engineer
+  writer --> contract-coverage
+  contract-coverage --> ccv{verdict}
+  ccv -- UNCLEAR / FAIL --> writer
+  ccv -- PASS --> code-sanity
+  code-sanity --> test-engineer
   test-engineer --> test-runner
-  test-runner --> verdict{verdict}
-  verdict -- test wrong --> test-engineer
-  verdict -- source wrong --> writer
-  verdict -- clean --> code-sanity
-  code-sanity --> security[security-auditor<br><i>if sensitive surface</i>]
+  test-runner --> tv{verdict}
+  tv -- test wrong --> test-engineer
+  tv -- source wrong --> writer
+  tv -- clean --> security[security-auditor<br><i>if sensitive surface</i>]
   security --> obligations
   obligations --> reviewer
   reviewer --> release[Release Checklist]
 ```
 
-The pipeline has six roles past the writer (test-engineer, test-runner, code-sanity, security-auditor, obligations-scanner, reviewer) plus the writer itself (executor or debugger). The writer's choice is template-determined (`debug` uses `debugger`, others use `executor`); the rest is the same across every production-diff template.
+The pipeline has seven roles past the writer (contract-coverage, code-sanity, test-engineer, test-runner, security-auditor, obligations-scanner, reviewer) plus the writer itself (executor or debugger). The writer's choice is template-determined (`debug` uses `debugger`, others use `executor`); the rest is the same across every production-diff template.
 
-### 2.2 Severity modulates depth
+**Why this order — the two early gates protect downstream effort.** `contract-coverage` is a cheap, hard-scoped scope/compliance check that asks one question — *did the writer's diff satisfy the bead's contract enough to justify expensive QA?* It catches wrong-task work before `test-engineer` invests effort writing tests/fixtures/smoke/telemetry on an implementation the reviewer will eventually reject as off-scope. `code-sanity` is the Iron seconder — cheap code-quality screen — that catches source-quality issues before `test-engineer` writes tests on bad code. The combined effect: a wrong-task or low-quality writer attempt fails fast (cheap gates) instead of paying the million-token cost of full QA followed by reviewer FAIL. (Design rationale: bead `unitAI-wf834` overthinker analysis, 2026-05-31; pattern is the empirical validation of `code-with-advisors` §6.9.10 substrate template at the chain-coordinator level.)
 
-`SCRUTINY: low|medium|high|critical` is a **required field** on every bead's change-contract. It governs which canonical steps fire and how strict the gates are.
+### 2.2 SCRUTINY is a chain property — it modulates structure, not quality
 
-| Tier | Cost-of-being-wrong | What runs |
+`SCRUTINY: none|low|medium|high|critical` is a **required field on every root bead's change-contract**. Step beads inherit from root and do not redeclare (single source of truth).
+
+**Key principle — quality is invariant, chain structure is the variable.** SCRUTINY does NOT mean "low scrutiny → executor can write lower-quality code." Every specialist always does the highest-quality work possible regardless of tier. What SCRUTINY modulates is **which structural pieces of the chain fire**: how many independent advisors run pre-impl, which conditional gates activate (security-auditor presence, behavioral-evidence mandate), whether a second-opinion turn runs at critical, how strictly the reviewer enforces the Release Checklist, whether UNCLEAR verdicts auto-escalate to the chain-coordinator (substrate §4.3) instead of single-PARTIAL-loop. The work itself is always at maximum quality; the *amount of structural defense around the work* is what changes.
+
+**Tier semantics:**
+
+| Tier | When | Chain-structure modulation |
 |---|---|---|
-| `low` | Trivial — single-file, easily-reverted | writer → obligations-scanner → reviewer (code-sanity advisory; test-engineer skippable with reason; security N/A) |
-| `medium` | Normal — production code | writer → test-engineer → test-runner → code-sanity (gate) → obligations → reviewer |
-| `high` | Significant — cross-cutting, library boundary, public API, persistence | + security-auditor on sensitive surfaces; Release Checklist enforced |
-| `critical` | Severe — auth, money, data integrity, irreversible state, security | + security-auditor runs **twice** (advisor pre-impl + gate post-impl); behavioral QA evidence required in Release Checklist |
+| `none` | Design / read-only chains only — `planning`, `premortem`, `research-only`, `triage`, `doc-sync`, `memory-hygiene`. Never valid when chain produces a code diff. | No Iron + QA pipeline (these chains don't produce production diffs). |
+| `low` | Trivial code-touching work — single-file fix, typo, log-message tweak, isolated config. Floor for any chain that touches code. | `contract-coverage` skippable with explicit reason; `code-sanity` advisory not gate; `test-engineer` skippable with reason; `security-auditor` N/A; reviewer minimal Release Checklist pass. |
+| `medium` (default) | Most production diffs. | Full canonical pipeline mandatory. `contract-coverage`, `code-sanity`, `test-engineer`, `test-runner`, `obligations-scanner`, `reviewer` all required. `security-auditor` if surface matches. |
+| `high` | Cross-cutting refactor, library boundary, public API, persistence, agent-orchestration code. | + `contract-coverage` UNCLEAR escalates to chain-coordinator (substrate §4.3, post-substrate) or operator (pre-substrate) BEFORE QA starts (don't let test-engineer waste effort on borderline scope). + `gitnexus_impact` evidence required at reviewer phase. + Release Checklist file-by-file sign-off. |
+| `critical` | Auth, money, data integrity, irreversible state, security-sensitive surfaces. | + `security-auditor` runs **twice** (advisor pre-impl + gate post-impl). + behavioral QA evidence required in Release Checklist. + independent second-opinion turn (overthinker premortem OR independent reviewer pass) on UNCLEAR / FAIL-prone surfaces. |
 
-**The operator never lowers a tier the reviewer raises.** Auto-escalation can promote `medium` to `critical` when scope hits a sensitive surface (see §2.4); declared scrutiny is the *floor*, the reviewer may raise it, never lower it.
+**Tier `none` rules.**
+- Only valid when the chain produces no code diff. Hard-deny at bead creation if the bead's scope detects source-file paths (pre-substrate: `bd create` hint enforces; substrate: seed-phase validator hard-denies per §6.4).
+- Reviewer / contract-coverage / code-sanity / test-engineer / obligations / security-auditor: none of these run on `none` chains. The chain runs its specialist (planner / overthinker / explorer / sync-docs / memory-processor / etc.) and closes.
 
-**The operator can declare any bead `critical`.** Cost-of-being-wrong is operator judgment — a small bead in a sensitive area is `critical` if the operator says so, regardless of file count.
+**Floor + ceiling rules.**
+- Declared SCRUTINY is the **floor**. Auto-escalation (§2.4) can raise the effective floor when scope hits a sensitive surface; the reviewer / dispatcher never lowers it.
+- The operator can always declare a bead `critical` regardless of apparent size. Cost-of-being-wrong is operator judgment; a small bead in a sensitive area is `critical` if the operator says so.
+
+**Creation enforcement.**
+- Pre-substrate (today): the `bd create` hook (roadmap §4 / Layer A) proposes SCRUTINY at bead creation time and rejects missing field on new beads (default `medium` applies only to pre-existing beads as backward-compat fallback). Hard-deny `none` if scope-detection finds source files in the bead's declared scope.
+- Substrate (future): seed-phase (§5) validator hard-denies container open without SCRUTINY on the root contract. Chain coordinator (§4.3 entry-gate, §6.3.1 third validation moment) verifies tier-vs-scope appropriateness as part of `verdict: ready`.
 
 ### 2.3 Roles in the canonical pipeline
 
@@ -93,12 +111,15 @@ The pipeline has six roles past the writer (test-engineer, test-runner, code-san
 | `planner` + xtrm `test-planning` | LOW | pre-impl | Phase-level decomposition; logging/telemetry + smoke/E2E contracts; initial test strategy | Write final tests from an unknown future diff |
 | `executor` | HIGH | impl | Production implementation from clear bead contract; static lint/typecheck | Own full behavioral validation or broad test writing |
 | `debugger` | HIGH | impl (bug chain) | Root-cause fixes for symptoms/failing tests; targeted repro verification | Run broad suites or redesign unrelated tests |
-| `test-engineer` | MEDIUM | post-impl | Reads actual diff; writes/updates tests + fixtures + smoke scripts + telemetry assertions; emits exact `test-runner` commands | Patch production source by default; decide release readiness |
+| **`contract-coverage`** | **LOW (READ_ONLY hard)** | **post-writer / pre-QA** | **Cheap, hard-scoped scope/compliance check: did the writer's diff satisfy the bead's contract sections (PROBLEM / SUCCESS / SCOPE / NON_GOALS / VALIDATION) enough to justify expensive QA? Token budget forced (5–20k). Output: `PASS` / `FAIL` / `UNCLEAR` + scope-coverage map (per contract section: covered / partial / missing).** | **Do style review; do release blessing; do broad audit (that's `reviewer`'s job)** |
+| `code-sanity` | LOW | post-contract-coverage | Cheap implementation quality / simplicity / type-safety pass (Iron seconder; mandatory gate on production diffs at medium+) | Validate product behavior; validate scope compliance (that's `contract-coverage`'s job) |
+| `test-engineer` | MEDIUM | post-sanity | Reads actual diff; writes/updates tests + fixtures + smoke scripts + telemetry assertions; emits exact `test-runner` commands | Patch production source by default; decide release readiness |
 | `test-runner` | LOW | post-test-write | Executes exact commands; captures log/telemetry artifacts; classifies failures by owner | Write tests; fix source; silently expand scope |
-| `code-sanity` | LOW | post-QA | Cheap implementation quality / simplicity / type-safety pass (mandatory seconder on production diffs) | Validate product behavior or test coverage |
 | `security-auditor` | LOW | conditional (sensitive surface) | Threat-model the diff (advisor pre-impl) + verify diff matches model (gate post-impl) | Bless release; write fixes |
 | `obligations-scanner` | LOW | pre-reviewer | Scans diff for newly-introduced `TODO/FIXME/HACK/XXX/TEMP/WIP/NOTE(release)`; distinguishes production vs test; recognizes structured `TODO(<bead-id>)` format | Act as test gate |
-| `reviewer` | LOW | final gate | PASS/PARTIAL/FAIL verdict; mandatory Release Checklist; ddiff re-review on PARTIAL | Write missing tests itself |
+| `reviewer` | LOW | final gate | **Phase-2 only** (post-extraction of phase-1 into `contract-coverage`): adversarial deep code-quality audit on every changed file + mandatory Release Checklist + ddiff re-review on PARTIAL. PASS / PARTIAL / FAIL verdict. | Write missing tests itself; redo scope/compliance check (that's `contract-coverage`'s job and is already an established PASS gate by the time reviewer runs) |
+
+**On the `contract-coverage` / `reviewer` split.** Pre-2026-05-31, `reviewer.specialist.json` declared a two-phase audit: (1) compliance check against bead requirements, (2) adversarial code-quality review of every changed file. These two phases were always conceptually distinct concerns collapsed into one specialist. Per the overthinker analysis on `unitAI-wf834`, **phase-1 is extracted as a separate `contract-coverage` specialist** that runs immediately post-writer (cheap, READ_ONLY, hard token budget) and the existing `reviewer` keeps only phase-2 (the deep adversarial audit + Release Checklist, run last on the assembled chain). This is not a new specialist concept — it's a refactor of an already-collapsed pair into the architecturally-clean separation. Implementation tracked as roadmap Opp 15.
 
 ### 2.4 Auto-escalation on sensitive surfaces
 
@@ -160,6 +181,7 @@ Every reviewer verdict produces a Release Checklist. Lines are mandatory; values
 
 ```text
 - [ ] SCRUTINY tier confirmed (auto-escalation triggered: yes|no, reason)
+- [ ] contract-coverage verdict: PASS|FAIL|UNCLEAR|skipped (reason) — scope-coverage map cited
 - [ ] code-sanity verdict: OK|FINDINGS|BLOCKED|skipped (reason)
 - [ ] obligations-scanner verdict: CLEAN|OBLIGATIONS_FOUND|BLOCKED
 - [ ] security-auditor (if applicable): PASS|FINDINGS|BLOCKED|N/A
@@ -173,7 +195,7 @@ Every reviewer verdict produces a Release Checklist. Lines are mandatory; values
 - [ ] ddiff applied (on PARTIAL re-review): yes|no|N/A
 ```
 
-At `SCRUTINY: high|critical`, missing behavioral QA evidence is a **PARTIAL verdict** unless the bead is explicitly docs-only or static-analysis-only.
+At `SCRUTINY: high|critical`, missing behavioral QA evidence is a **PARTIAL verdict** unless the bead is explicitly docs-only or static-analysis-only. A missing or FAIL `contract-coverage` at medium+ is a hard precondition failure — reviewer cannot PASS without an established PASS from contract-coverage (chain should have re-routed back to writer at the contract-coverage gate, not advanced to reviewer; if it did, that is a chain-coordinator escalation event).
 
 ### 2.7 The ddiff loop
 
@@ -187,11 +209,12 @@ Per CLAUDE.md rule #9 (current): `sp merge` and `sp epic merge` are **prohibited
 
 The canonical pipeline in this section maps directly to substrate primitives when substrate lands:
 
-- Each step in §2.1 becomes a `class:step` issue (substrate §6.2.1) with its `step-contract` populated (substrate §6.9.2).
-- The severity-tiered depth rules in §2.2 become the chain template's `mandatory_layer` declarations (substrate §6.9.3).
+- Each step in §2.1 becomes a `class:step` issue (substrate §6.2.1) with its `step-contract` populated (substrate §6.9.2). `contract-coverage` becomes `class:gate, role:contract-coverage` — same shape as the other Iron gates; persisted evidence (the scope-coverage map + PASS/FAIL/UNCLEAR verdict) lives in `issue.evidence_json` per substrate §6.8.
+- The severity-tiered chain-structure rules in §2.2 become the chain template's `mandatory_layer` declarations (substrate §6.9.3). The `none` tier maps to "no mandatory_layer applies" (the chain runs only its Layer-1 specialist).
 - The auto-escalation rules in §2.4 become dispatcher policy on `recommended_template` selection (substrate §6.4).
 - The Release Checklist in §2.6 is rendered by the reviewer-as-step from `issue.evidence_json` (substrate §6.8).
 - The ddiff loop in §2.7 is the reducer's blocking-not-routine behavior (substrate §6.9.2 completeness contract).
+- The `contract-coverage` gate is **not a fourth composition moment** (substrate §6.9.5 documents seed-time / dispatch-time / mid-run composition — three moments). It is a post-writer **evidence gate** using the existing §6.10 close-as-derivation pattern applied at intermediate-step granularity: writer's diff persists as evidence, the gate's predicate derives PASS / FAIL / UNCLEAR, the chain advances or blocks per §3.1 reducer semantics. This is a clean instance of already-documented substrate patterns, not an architectural extension. The chain coordinator's borderline-judge role (§4.3 role 2) is where UNCLEAR verdicts at `high`+ scrutiny route for human-or-coordinator-grade judgment.
 
 Migration is naming + ownership-transfer; the canonical shape survives unchanged.
 
@@ -225,10 +248,11 @@ flowchart LR
 ```mermaid
 flowchart LR
   root[root: change-contract] --> executor
-  executor --> test-engineer
+  executor --> contract-coverage
+  contract-coverage --> code-sanity
+  code-sanity --> test-engineer
   test-engineer --> test-runner
-  test-runner --> code-sanity
-  code-sanity --> obligations
+  test-runner --> obligations
   obligations --> reviewer
 ```
 
@@ -247,10 +271,11 @@ flowchart LR
   explorer --> executor
   researcher --> executor
   overthinker --> executor
-  executor --> test-engineer
+  executor --> contract-coverage
+  contract-coverage --> code-sanity
+  code-sanity --> test-engineer
   test-engineer --> test-runner
-  test-runner --> code-sanity
-  code-sanity --> security[security-auditor<br><i>if sensitive</i>]
+  test-runner --> security[security-auditor<br><i>if sensitive</i>]
   security --> obligations
   obligations --> reviewer
 ```
@@ -265,10 +290,11 @@ flowchart LR
 ```mermaid
 flowchart LR
   root[root: change-contract + repro] --> debugger
-  debugger --> test-engineer
+  debugger --> contract-coverage
+  contract-coverage --> code-sanity
+  code-sanity --> test-engineer
   test-engineer --> test-runner
-  test-runner --> code-sanity
-  code-sanity --> obligations
+  test-runner --> obligations
   obligations --> reviewer
 ```
 
@@ -284,10 +310,11 @@ flowchart LR
 flowchart LR
   root[root: change-contract] --> security-advisor[security-auditor: advisor]
   security-advisor --> executor
-  executor --> test-engineer
+  executor --> contract-coverage
+  contract-coverage --> code-sanity
+  code-sanity --> test-engineer
   test-engineer --> test-runner
-  test-runner --> code-sanity
-  code-sanity --> security-gate[security-auditor: gate]
+  test-runner --> security-gate[security-auditor: gate]
   security-gate --> obligations
   obligations --> reviewer
 ```
@@ -340,7 +367,8 @@ flowchart LR
 ```mermaid
 flowchart LR
   root[root: conflict context] --> debugger
-  debugger --> code-sanity
+  debugger --> contract-coverage
+  contract-coverage --> code-sanity
   code-sanity --> reviewer
 ```
 
@@ -504,3 +532,4 @@ This document's revision header lists the date of each substantive fold so the l
 
 - **2026-05-30 (initial).** Promoted from `iron-review-hardening.html` + `iron-review-hardening-qa-chain-substrate.md` absorption. Initial framing used "overlay" vocabulary (Iron / QA / DevOps as composable add-ons).
 - **2026-05-30 (restructure same-day).** Dropped "overlay" framing. Iron is canonical via `using-specialists-v3` (in production); QA is imminent-canonical via `unitAI-sfwe1`; neither is opt-in or modular. Restructured: §2 is now "The canonical pipeline" describing what every production-diff chain runs (severity-modulated). §3 catalog entries describe each template's resolved canonical chain inline. §4 is the only genuine pending gap (DevOps gates — design fill follows in continuation of this session). §5 is engineering composition reference. Companion HTML retained as snapshot, not maintained going forward.
+- **2026-05-31 (contract-coverage gate insertion).** Overthinker analysis on `unitAI-wf834` (Candidate F) accepted by operator: extracted reviewer's existing phase-1 (compliance check) as standalone `contract-coverage` gate between writer and code-sanity. Reviewer keeps only phase-2 (adversarial deep audit + Release Checklist). Rationale: the late-binding scope/compliance check at chain end meant a single reviewer FAIL on scope grounds invalidated the entire million-token chain (test-engineer's E2E + smoke + telemetry effort wasted). Cheap early gate (5–20k token budget) prevents wrong-task waste; code-sanity (Iron seconder) protects against bad-code waste. Order updated in §2.1 + all production-diff template diagrams in §3. SCRUTINY framing in §2.2 corrected: quality is invariant across tiers; SCRUTINY modulates chain structure (which advisors / gates / second-opinions fire), NOT specialist behavior. Added `none` tier for read-only / design chains. SCRUTINY required-at-creation rule documented (pre-substrate via `bd create` hint; substrate via seed-phase validator). §2.9 substrate alignment extended: contract-coverage is not a fourth composition moment (§6.9.5) but an instance of §6.10 close-as-derivation applied at intermediate-step granularity. Implementation tracked as roadmap Opp 15.
