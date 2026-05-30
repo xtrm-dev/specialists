@@ -1,11 +1,11 @@
 ---
 name: test-planning
-description: "Plans and creates test issues alongside implementation work using bd issue tracker. Activates at two points: (1) when creating an issue board from a spec/plan — classifies each issue by code layer and attaches the right testing strategy as a companion issue or AC gate, and (2) when closing an implementation issue — checks whether adequate test coverage was planned, improves existing test issues if needed. Use this skill PROACTIVELY whenever you see implementation issues being created without test coverage, when an epic is being broken into tasks, when closing/reviewing implementation work, or when the user asks about testing strategy for a set of issues. Also activate when you see bd create, bd children, bd close in a planning context."
+description: "Plans and creates test, smoke/E2E, and telemetry-validation issues alongside implementation work using bd issue tracker. Activates at three points: (1) issue-board creation from a spec/plan, (2) specialist-chain test authoring after executor/debugger work clarifies what changed, and (3) implementation closure to close coverage gaps. Use proactively whenever implementation issues lack tests, logs/telemetry assertions, smoke/E2E validation, or concrete test-runner command contracts."
 ---
 
 # Test Planning
 
-This skill ensures every implementation issue has appropriate test coverage planned — not as an afterthought, but wired into the issue board from the start. It does NOT write test code; it classifies what needs testing, picks the right strategy, and creates bd issues that another agent (or human) will implement.
+This skill ensures every implementation issue has appropriate test coverage planned — not as an afterthought, but wired into the issue board from the start. It is not unit-test-only: it plans unit, contract, integration, smoke, E2E, live checks, and log/telemetry assertions needed for autonomous debugging. In orchestrator mode it does not directly edit code; it classifies what needs testing, picks the right strategy, and creates or updates bd issues that another specialist or human will implement. Inside a specialist chain, it may be used after implementation to understand what actually changed and produce a concrete test-writing/test-runner contract.
 
 ## When This Fires
 
@@ -13,7 +13,16 @@ This skill ensures every implementation issue has appropriate test coverage plan
 
 When breaking a spec or plan into bd issues — typically during epic decomposition or `bd create --parent` sequences — scan each implementation issue and create companion test issues.
 
-### Trigger 2: Closure gate (implementation complete)
+### Trigger 2: Specialist-chain test authoring (after implementation/debugging)
+
+When an executor or debugger has produced a diff and tests were not already written, run test-planning inside the chain before final review. The test-planning pass must:
+- Read the implementation bead, actual changed files, and verification already performed.
+- Identify the critical paths introduced or modified by the diff.
+- Specify which tests should be written now versus deferred, with explicit follow-up beads for deferred P2+ risk.
+- Include log/telemetry assertions when logs are the only way an automated run can debug itself.
+- Hand a concrete contract to the test-writing executor and a separate command contract to `test-runner`.
+
+### Trigger 3: Closure gate (implementation complete)
 
 When an implementation issue is being closed (`bd close`), check whether:
 - A test issue already exists for it (created in Trigger 1)
@@ -55,6 +64,15 @@ Code that glues core + boundary together into user-facing features. Examples:
 
 **Signals**: "command", "CLI", "subcommand", "mercury <verb>", user-facing behavior described, combines multiple components.
 
+### Operational / agentic layer — deploy, hooks, observability, autonomous workflows
+Code or configuration that makes agents, hooks, CI/CD, deploy, monitoring, or runtime operations work. Examples:
+- Specialist chains, test-runner/reviewer gates, orchestration policies
+- Hooks, MCP servers, background jobs, worktree/session runners
+- Deploy scripts, health checks, runbooks, telemetry emitters
+- Prometheus/Grafana/OpenTelemetry integrations, logs/traces/metrics
+
+**Signals**: "agent", "specialist", "hook", "MCP", "deploy", "devops", "health check", "log", "metric", "trace", "smoke", "E2E", "runbook", "observability".
+
 ## Testing Strategy Selection
 
 ### By layer
@@ -63,7 +81,8 @@ Code that glues core + boundary together into user-facing features. Examples:
 |---|---|---|---|
 | Core | Unit + property tests | Input/output correctness, edge cases, invariants | No mocking needed — pure functions |
 | Boundary | Contract tests (live preferred) | Response schemas, field presence/types, status codes, param behavior | Live > contract > mock (see preference order below) |
-| Shell | Integration tests | Exit codes, output format validity, end-to-end wiring, error messages | Test the real thing via subprocess or function call |
+| Shell | Integration + smoke tests | Exit codes, output format validity, end-to-end wiring, error messages | Test the real thing via subprocess or function call |
+| Operational / agentic | Smoke + E2E + telemetry assertions | Health-check result, deploy/rollback envelope, hook/agent chain behavior, logs/metrics emitted | Prefer real command/workflow in an isolated temp env; mock only dangerous external side effects |
 
 ### By situation (override layer default when applicable)
 
@@ -73,6 +92,8 @@ Code that glues core + boundary together into user-facing features. Examples:
 | Contract known up front | Spec-first | API routes documented, response shapes defined — write schema assertions |
 | Parsers/transforms/invariants | Property-based | The function should hold for any valid input, not just examples |
 | Service/API boundaries | Contract testing | Testing the seam between systems — assert schemas, not implementations |
+| Agent/workflow/deploy changes | Smoke + E2E | Verify the chain actually runs: command → side effect/artifact → log/metric → cleanup |
+| Logging/observability changes | Telemetry assertions | Verify event names, fields, redaction, correlation IDs, and query/grep path |
 | Legacy code being wrapped | Characterization tests | Capture current behavior before changing it |
 | Simple CRUD paths | Example-based | Straightforward input→output, a few examples suffice |
 
@@ -85,6 +106,28 @@ When services are accessible, prefer this order:
 3. **Mocked tests** — last resort, only when no service access exists or for pure unit logic that has no I/O.
 
 The rationale: mocks encode your assumptions about the system. If your assumptions were correct, you wouldn't need tests. Live tests validate reality.
+
+### Smoke and E2E are mandatory for integrated behavior
+
+For shell, boundary, operational, agent, hook, deploy, MCP, and devops work, do not stop at lint/typecheck/unit tests. Plan at least one smoke check, and plan E2E/live-contract coverage for any P0/P1 or user-facing critical path.
+
+A good smoke/E2E plan names:
+- Exact command(s) `test-runner` should execute.
+- Required setup/bootstrap and safe cleanup.
+- Expected observable result: exit code, stdout/stderr, generated file, API response, job state, metric/log line, or health-check result.
+- What failure class means: product regression vs pre-existing failure vs infrastructure.
+- How logs/telemetry prove the path was exercised.
+
+Static gates like `pyright`, `tsc`, `ruff`, ESLint, or schema validation are valuable, but they are not substitutes for smoke/E2E evidence. Treat them as build/static checks that feed reviewer evidence; the test gate must still exercise behavior.
+
+### Logging and telemetry assertions
+
+If a future agent would need logs to debug or self-check the feature, the test plan must require log/telemetry evidence. Specify:
+- Emission points: start/end, decisions, retries, external calls, failures, fallbacks, cleanup.
+- Format: repo-standard structured logs first; otherwise require fields such as `timestamp`, `level`, `component`, `event`, `bead/job/session/request id`, `action`, `outcome`, `duration_ms`, and redacted `error`.
+- Location/query: log file, stdout/stderr, trace JSONL, metrics endpoint, Prometheus/Grafana label, specialist feed, CI artifact, or grep command.
+- Redaction: no secrets/tokens/credentials/raw PII/full unredacted payloads.
+- Assertion: the test or smoke script must fail if the required event/field is missing or malformed.
 
 ## Creating Test Issues
 
@@ -121,7 +164,9 @@ The description should contain:
 3. **Strategy chosen** — which testing approach and why
 4. **Test file structure** — where tests go in the project
 5. **What to assert** — specific assertions, not vague "test that it works"
-6. **AC** — when is this test issue done
+6. **Smoke/E2E commands** — exact commands and safe setup/cleanup when applicable
+7. **Log/telemetry assertions** — required events, fields, locations, redaction, and query/grep evidence
+8. **AC** — when is this test issue done
 
 ### Batching
 
@@ -144,6 +189,13 @@ Test issues should gate the next phase of work. Use bd dependencies or document 
 This issue gates: .17 (analyze runner), .18 (spread), .19 (charts)
 Do not start Phase 3 until these tests pass.
 ```
+
+For specialist chains, make the gate explicit:
+- `test-runner` receives the exact command list and classification rules.
+- Reviewer receives test-runner output plus log/telemetry artifact evidence.
+- `code-sanity` remains the Iron seconder for implementation quality; it is not the test gate.
+- `obligations-scanner` remains the Iron obligations gate; it is not the test gate.
+- Typecheck-only evidence is insufficient for shell/boundary/operational changes unless the bead is explicitly static-analysis-only.
 
 ## Closure Gate Behavior
 
@@ -300,7 +352,7 @@ Fallback documented in issue if live is not accessible.
 
 ```
 Layer: shell
-Strategy: integration (subprocess or function-level wiring test)
+Strategy: integration + smoke (subprocess or function-level wiring test)
 Covers: <impl issue IDs>
 
 Assertions required:
@@ -308,16 +360,36 @@ Assertions required:
 - [ ] Failure-mode UX: <error messages, non-zero exit codes, stderr vs stdout>
 - [ ] Cross-component wiring: <core + boundary are called and integrated correctly>
 - [ ] At least one real-data scenario (not mocked) if service is accessible
+- [ ] Smoke command named for test-runner: <exact command + expected output/artifact>
 
-Done when: integration tests run against real components (not mocked internals) and cover
+Done when: integration/smoke tests run against real components (not mocked internals) and cover
 both success and at least one failure path.
+```
+
+### Operational / agentic layer DoD
+
+```
+Layer: operational/agentic
+Strategy: smoke + E2E + telemetry assertions
+Covers: <impl issue IDs>
+
+Assertions required:
+- [ ] Workflow smoke: <command/chain/hook/deploy path actually runs>
+- [ ] E2E critical path: <trigger → action → observable result → cleanup>
+- [ ] Failure-mode path: <bad config, missing service, non-zero exit, rollback, or blocked permission>
+- [ ] Logs/telemetry: <required events + fields + redaction + where to query>
+- [ ] Health/runbook evidence: <health-check command, dashboard/query, or artifact path>
+- [ ] Test-runner command contract: <exact command(s), setup, cleanup, failure taxonomy>
+
+Done when: test-runner or equivalent smoke harness produces pass/fail evidence, logs/telemetry
+prove the path was exercised, and failures are classified as in-scope/pre-existing/infrastructure.
 ```
 
 ## Critical-Path Coverage
 
 Do not frame test issues around coverage percentages. Frame them around critical paths and risk rationale.
 
-Every test issue description must include a **critical path map**:
+Every test issue description must include a **critical path map** and a **debuggability map**:
 
 ```
 Critical paths covered:
@@ -326,6 +398,9 @@ Critical paths covered:
 
 Known deferred paths (with follow-up refs):
 - <path not covered yet> → follow-up: <bd issue ID or "to be created">
+
+Debuggability evidence required:
+- <log/metric/trace/event and how the test proves it exists>
 ```
 
 **Why**: a 90% line-coverage number says nothing about whether the one path that processes payments is tested. A critical path map forces explicit reasoning about what matters and what was skipped.
@@ -346,13 +421,15 @@ This skill is advisory. It recommends test strategy, creates test issues, and fl
 
 | Concern | Who owns it | How enforced |
 |---|---|---|
-| Test strategy selection (TDD vs contract vs unit) | This skill | Recommendation only |
+| Test strategy selection (TDD vs contract vs unit vs smoke/E2E) | This skill | Recommendation + bd issue contract |
+| Log/telemetry assertions | This skill | Required in planned test issue when needed for debugging/self-checking |
 | Anti-pattern detection in test issues | This skill | Checklist in issue description |
 | Priority assignment | This skill | Heuristics table above |
 | DoD template in issue description | This skill | Template pasted into bd issue |
-| CI test pass/fail | quality-gates hook | PostToolUse hook blocks on test failures |
-| Test file lint/type correctness | quality-gates hook | ESLint + mypy on every edit |
-| Branch not mergeable without tests | Not enforced | Human review — no automated gate today |
+| CI test pass/fail | quality-gates hook / CI | PostToolUse or CI blocks on configured failures |
+| Test command execution + failure classification | test-runner specialist | Runs requested commands and classifies failures; requires explicit smoke/E2E command contract |
+| Static type/lint checks | quality gates / executor | Evidence only; not enough for behavioral smoke/E2E gate |
+| Reviewer release decision | reviewer + Iron gates | Consumes test-runner, code-sanity, obligations, security, and telemetry evidence |
 | Claiming work without test issue existing | Not enforced | Human judgment — skill creates test issue at closure if missing |
 
 **Example — advisory boundary in practice**:
