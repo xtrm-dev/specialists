@@ -21,7 +21,6 @@ export async function writeJobFileOutput(
   content: string,
   mode: JobFileWriteMode,
 ): Promise<void> {
-  if (!isJobFileOutputEnabled()) return;
   const { appendFile, writeFile } = await import('node:fs/promises');
   if (mode === 'append') {
     await appendFile(path, content, 'utf-8');
