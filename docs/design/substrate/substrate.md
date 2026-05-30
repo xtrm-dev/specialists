@@ -1,4 +1,6 @@
 # Substrate: Containers, Issues, and the Seed Lifecycle
+> *operators_notes:
+> - in fase di seed delle chain step/o durante gate coordinator (step 0) a chain running, determina set di skills da integrare (da una lista complete) negli specialist di vari step. le skill non sonon più generiche, ma ad esempio una skill "React" - o che fa da sublayer al service skills. Oppure nel caso del devops agent, per non crearne troppe varianti, se c'è da ottimizzare i containers docker, ad esempio, viene caricata la skill docker. Se si lavora con database a uno specialist viene iniettata la skill database, forniamo un template generico, ma poi viene adattata per-repo or per-stack (come nel caso di mercury con multiple repos)
 
 > **Status:** Draft (revision 10). Consolidates rev9 plus: chain-coordinator as standing judge of a transient container (§4.3); memory access as participant capability + chain-coordinator distillation at close (§10.2, memory-curator role eliminated); chain-template declares its coordinator model (§6.9.10). Earlier consolidation (rev9): container model (abstract lifecycle, five kinds incl. seed + node), preflight-as-seed-container, new issue system (three creation paths, two-stage validator, step-issue contracts), issue-relationship system, chain templates + composition (worktree lease, two-axis git model), channels (formerly conversations, v0–v3), participant abstraction + SDK surface, emitter/pulse, failure recovery, tether (formerly shepherd), contract validator, three-axis memory, collision matrix, scrutiny/obligations/ddiff (Iron-inspired), container-channel coexistence, context-depth, provenance/ownership, single-store data model, dashboard, API surface.
 >
@@ -60,8 +62,9 @@ The system is built from a small set of primitives. Containers and the things in
 | **Emitter** | A registered actor that emits pulses, under a declared capability (§2.3). | (registered key) |
 | **Plan artifact** | Structured output of a seed container; the contract between planning and execution. | `plan-` |
 | **Tether** | Always-on sidecar that injects scoped hints into a job's next prompt turn. | (per-job) |
-| **Validator** | Two-stage gate on issue contract readiness: programmatic always, agentic on demand (§6.3). | (per-issue) |
+| **Validator** | Gate on issue contract readiness: two stages plus a third moment at container start (§6.3, §4.3). | (per-issue) |
 | **Memory** | A durable, cross-task fact with metadata; queried at three levels (§10). | `mem-` |
+| **Node cluster** | An emergent pattern, not a new entity: ≥2 nodes collaborating via cross-container pulses (§4.5). | (graph, no own id) |
 
 IDs use a **colon separator** (`chain:7f3a`, `node:research`) because a container's ID *is* its channel's workstream ID (§7), so they must be the same token. Hierarchical sub-streams nest with `/` (`node:n1/sub:ab12`).
 
@@ -229,6 +232,20 @@ A chain has a coordinator, parallel in shape to a node's (§4.2) but scoped to o
 `sb container merge` is the single canonical publish path for every transient kind. It works — where the old `sp merge` / `sp epic merge` did not — *because substrate owns the container lifecycle and the worktree fork-base*. The recurring `sp merge` failure (merging to the wrong base, friction bead `xtrm-nr05`) was a symptom of merge logic living in the specialist runtime with no authority over where chains forked from. Substrate has that authority by construction: it opened the container, knows each chain's base, gates `ready`. The interim "manual cherry-pick is canonical, sp merge prohibited" workaround (Iron epic) was a response to the *broken old path*; under substrate it is unneeded. `sp merge` / `sp epic merge` are removed, not routed around. (A node has no final merge — it *opens* mergeable transient containers as part of its work.)
 
 **Containers can nest.** `sb container ps --tree` shows the tree. Membership (`parent_id`) is distinct from provenance (`opened_by`) and ownership (`owned_by`) — §2.6.
+
+### 4.5 Node clusters — the pulse mesh as a named pattern
+
+When ≥2 nodes collaborate via the cross-container pulse mechanism (§2.3, §4.2 line on peer coordinators), the resulting graph of pulse-bound peers is a **node cluster**. This is not a new container kind, not a new entity, not a new schema — it is a *name for an emergent pattern* in the pulse mesh. A cluster has no `cluster_id`, no lifecycle of its own, no membership row: it is whatever subset of nodes are currently exchanging pulses on related keys, observable as a graph at query time.
+
+**Why name it.** The pulse mechanism alone says "node A can pulse node B"; the cluster framing says "and when ≥2 nodes do that on a documented topic, they form a workgroup." This is the substrate-level analogue of a node's internal workgroup of participants, lifted one layer: workgroups inside a node, clusters between nodes. Naming it makes three things easier:
+
+- **Observability.** `sb container ps --graph` (or the dashboard's container view, §12) can render pulse-bound peer sets as cluster overlays without inventing new state. Operators and orchestrators see "research-cluster: 3 nodes pulsing on `research:source-update`" without anyone declaring it.
+- **Capability declaration.** A node's `autonomy_json` (§5.8) can carry `pulse_topics: [...]` as its public emit/listen surface — the topics it participates on. Two nodes sharing a topic are by definition in a cluster on that topic; no separate registration step.
+- **Future SDK / connector vision** (§14.1, the n8n-style pipeline north star noted at §18). Connectors (Discord, Gmail, an external API) are emitters under the pulse capability model (§2.3). A connector emitting on a topic and a node listening on the same topic is the simplest cluster — node + external participant. The same primitive scales from "two nodes coordinate" to "node + connector pipeline" without new mechanics. This is what makes the SDK enough to write a connector against: pulse topics are the interop surface, clusters are how those connections become workgroups.
+
+**What it does not introduce.** No cluster lifecycle, no cluster CLI verbs, no cluster-as-container, no cross-channel reading (channels stay container-scoped per channels.md). A cluster is *queryable, not constructable.* If a future need emerges for explicit cluster membership (e.g., billing topics or rate-limiting per cluster), that is a separate decision; today the emergent-pattern framing is enough.
+
+> */open: cluster topology — is it a strict graph (edges are "shared topic") or a multigraph (multiple topics between the same node pair counted separately)? Defer until the first observability query needs to commit to one shape; both are renderable.*
 
 ---
 
@@ -632,9 +649,9 @@ An issue carries three classifiers that answer different questions and do not ov
 
 Default visibility follows `class`: `sb issue ls` shows `root`/`followup` (the work the operator thinks about); `step`/`gate`/`advisor` are chain internals, hidden by default and shown in container views (`sb container ps <id> --tree`).
 
-### 6.3 Validator — two stages
+### 6.3 Validator — two stages, plus a third moment at container start
 
-Running a model on *every* issue create/update would be overkill: it costs money and adds latency to a hot path. So validation is two stages, and only the first is universal.
+Running a model on *every* issue create/update would be overkill: it costs money and adds latency to a hot path. So validation is two stages, and only the first is universal. A **third validation moment** then runs at container start when a chain coordinator is spawned (§4.3) — not a third *stage* (it reuses Stage-1's XML parser and Stage-2's agentic judgment where applicable), but a third *moment* in the lifecycle: contract was validated at create/update time, the chain was composed and approved, and now a fresh participant re-reads the same contract from inside the container before step-1 dispatches. See §6.3.1 below for that moment's specifics.
 
 **Stage 1 — programmatic (always, instant, free).** A schema validator runs on every create/update. It is pure code, no model. The contract is XML (§6.9.2 canonical serialization); Stage-1 parses XML deterministically — well-formedness + required tags present + attributes matching the role — never regex-on-markdown. It does two things:
 
@@ -667,7 +684,18 @@ So `sb issue create` returns an immediate readiness verdict — `ready` / `incom
 
 Both stages write the same `contract_state` shape, so consumers don't care which produced it. The split keeps the common path instant and free while reserving model judgment for when it earns its cost. Stage 1 is the structural floor everything passes through; Stage 2 is the depth check you reach for.
 
-### 6.4 Where issues come from, and the dispatch gate
+#### 6.3.1 The third moment — chain coordinator entry-gate at container start
+
+Stage-1 runs at `sb issue create/update` (hot path). Stage-2 runs on demand (`sb validate --explain`) or inside a seed (where deliberation is already the point). Between approval and step-1 dispatch, however, a **third validation moment** runs as part of the chain coordinator's lifecycle (§4.3 role 1, *entry gate*): the freshly-spawned coordinator re-reads the chain's contracts (root `<change-contract>` + each step's `<step-contract>`) from inside the container, with fresh context, and emits its `verdict: ready` message before the daemon dispatches step-1.
+
+This moment is **not** a third stage — it does not introduce new validator code. It is a third *moment* in the validation lifecycle, at which the existing validators may be re-applied with fuller context:
+
+- **What it adds.** The contract was structurally valid at create-time (Stage-1) and may have been depth-checked once (Stage-2). The third moment asks a different question: *given the resolved chain shape (§6.9.2) and the fresh in-container perspective, does this contract still make sense for the chain about to run?* The coordinator can: (a) confirm readiness as-is and emit `verdict: ready`; (b) propose `<insert-step>` additions within `autonomy_json` policy (§4.3 line on three insert paths); (c) escalate as `proposal`/`escalation` if the contract still looks inadequate from inside, returning the chain to operator/orchestrator judgment.
+- **Why it cannot collapse into Stage-1 or Stage-2.** Stage-1 has no knowledge of the resolved chain shape (the chain is composed *after* the contract is approved). Stage-2 runs against the contract in isolation. The third moment is the only point where the contract, the resolved chain shape, and a fresh-context judge all coexist — and the coordinator's `<insert-step>` outputs require exactly that conjunction.
+- **What it shares.** The coordinator reads contracts via the **same XML reader** that backs Stage-1 (§6.9.2 canonical serialization). When the coordinator escalates a contract-quality concern, the orchestrator can route that to a Stage-2 agentic re-validation if useful — same surface, same `contract_state` shape, no parallel path.
+- **Lifecycle position.** `sb chain approve` no longer suffices alone to advance the chain's first step; advancement requires `sb chain approve` **plus** the coordinator's `verdict: ready` (§4.3 role 1 makes this explicit; the reducer in §3.1 reads both signals before dispatching step-1).
+
+> */open: when chain_template declares `coordinator: null` (§4.3 model-selection clause that needs the contradiction resolved per its round-3 warning), what fills the third validation moment? Two paths: (a) skip it (small/trivial templates accept the validity already established at Stage-1/2); (b) run a minimal mechanical check (porcelain-equivalent of Stage-1, no LLM) as the coordinator's stand-in. Defer until that contradiction is resolved.*
 
 An issue can be born **three ways**, all first-class. bd had effectively one (create a bead, `bd dep add` to link it, `sp run --bead X` — three manual acts the orchestrator wired by hand). Substrate names three distinct birth paths and none is privileged over the others:
 
@@ -1059,6 +1087,8 @@ Two things these make concrete:
 `debug`'s `non_skippable: true` on the `debugger` step is what structurally closes the "orchestrator forgets the debugger on an obvious bug chain" laziness (§6.9.1) — the step cannot be quietly dropped, only skipped via a logged escalation. `quantitative-validation`'s non-skippable `quant-methodologist` does the same for "methodology must precede the executor on quant work."
 
 These six are a starting floor, not a closed set — they are the conceptual archetypes that illustrate the mechanism. The runtime ships a larger, evidence-backed catalog (currently thirteen) as `bd formula` files — the six archetypes plus deliberative and maintenance chains (planning, premortem, research-only, triage, doc-sync, memory-hygiene, release-prep, restitch) extracted from a wider transcript corpus; the deliberative ones realize the §6.9.8 deliberative-type path, and the catalog's `security-deep` realizes the same-role-two-classes point above. New templates arrive by the promotion cycle (§6.9.4): an on-the-run shape that recurs is formalized into `config/chains/` (today, a `bd formula`). The next agent, mining more run transcripts, is expected to find others worth shipping (§14.1).
+
+**Canonical roster + overlays — see `docs/design/chain-templates.md`.** The full catalog (thirteen templates), the per-template overlay matrix, the severity-tiered depth rules, and the overlay specs (Iron, QA, DevOps) live in the cross-cutting design canon `docs/design/chain-templates.md` (and its editorial mirror `chain-templates.html`). That document is the *philosophy* substrate and the pre-substrate runtime share; substrate's §6.9.10 (this section) describes the *primitive shape* substrate executes; the chain-templates canon describes *what the catalog means*. When this section and the canon disagree, the canon wins for catalog roster and overlay semantics; this section wins for substrate primitive mechanics. Notably, **`test-engineer` (QA overlay)** — a post-implementation role that writes tests/fixtures/smoke scripts/telemetry assertions from the actual diff and emits exact `test-runner` commands, MEDIUM permission — is established in the canon as §3.2 (sibling to the Iron overlay §3.1). Substrate models it as another step-issue (`class:step`, `role:test-engineer`) within the mandatory layer (§6.9.3) when the chain_template's overlay obligations declare QA active. Two new channel message kinds (`qa_plan_and_tests`, `test_verdict`) join the chain channel when channels v0 ships; the channel-flow shape and the failure-routing matrix are in the canon §3.2. Implementation lives in the foreground runtime (epic `unitAI-sfwe1`) — substrate inherits the resolved-shape semantics when it lands.
 
 ### 6.10 Closing an issue — close is a derivation, not an imperative
 

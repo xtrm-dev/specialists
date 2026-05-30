@@ -1,30 +1,38 @@
-# Chain Templates — Default Catalog
+# Chain Templates — Default Catalog (operator quick-start)
 
-> **Status:** design deliverables, evidence-backed from 96+ session reports across 9 repos (explorer pass 2026-05-27).
+> **Status:** operator quick-start to the executable `.formula.json` files in this directory.
 >
-> **Schema:** verified `bd formula` schema. Pour mechanism creates a `molecule` parent issue (the chain identity) + one bd issue per formula step as children with `parent-child` edge. `needs` produces `blocks` edges between siblings. Per-step `labels` carry role identity for the post-pour edge-wiring helper (Opportunity 5).
+> **Canonical design canon** for chain templates lives in [`docs/design/chain-templates.md`](../../chain-templates.md) (referential source-of-truth) and [`docs/design/chain-templates.html`](../../chain-templates.html) (editorial mirror). That is where the catalog philosophy, per-template overlay matrix, severity-tiered depth rules, Iron + QA + DevOps overlay specs, composition rules, and evolution protocol live. **Consult the canon first for design questions.** This README covers the operator quick-start: schema notes, pour mechanism, search-path resolution, post-pour edge helper, per-repo extension example.
 >
-> **Reference:** `docs/design/roadmap/specialists-roadmap.md` §3 (10 alignment opportunities), §3.1.10 (--chain redesign), §12 (sp epic decoration).
+> **Schema:** verified `bd formula` schema. Pour mechanism creates a `molecule` parent issue (the chain identity) + one bd issue per formula step as children with `parent-child` edge. `needs` produces `blocks` edges between siblings. Per-step `labels` carry role identity for the post-pour edge-wiring helper (roadmap Opportunity 5).
+>
+> **Reference:** `docs/design/roadmap/specialists-roadmap.md` §3 (twelve alignment opportunities), Opp 4 (`sp chain review/approve/insert`), Opp 10 (`--chain` redesign), Opp 14 (QA chain integration via `test-engineer` + `test-runner` upgrade), §12 (sp epic decoration). For substrate alignment: `docs/design/substrate/substrate.md` §6.9.10.
 
 ## What's in this directory
 
-13 default chain template files, named `<template>.formula.json`. Each uses only `[package]` tier specialists from `config/specialists/` — these are the cross-repo defaults. Per-repo overrides via `extends` can add custom specialists (see market-data example pattern in roadmap §3 Opportunity 4).
+13 default chain template files, named `<template>.formula.json`. Each uses only `[package]` tier specialists from `config/specialists/` — these are the cross-repo defaults. Per-repo overrides via `extends` can add custom specialists (see market-data example pattern below).
 
-| File | Roles in chain | Use case |
+Catalog table (for full per-template detail, mermaid step diagrams, overlay obligations, anti-patterns, and severity defaults, see [`chain-templates.md` §2](../../chain-templates.md#2-catalog)):
+
+| File | Layer-1 roles (overlays compose on top) | Use case |
 |---|---|---|
 | `code-quick.formula.json` | root → reviewer | LOW-blast trivial change (one-line fix, typo) |
-| `code-standard.formula.json` | root → executor → code-sanity → obligations-scanner → reviewer | Production diff default (Iron pipeline) |
-| `code-with-advisors.formula.json` | root → [explorer + researcher + overthinker] → executor → code-sanity → obligations-scanner → reviewer | HIGH/CRITICAL blast, cross-cutting refactor, external-library work |
-| `debug.formula.json` | root → debugger (non-skippable) → code-sanity → obligations-scanner → reviewer | Bug fix (root cause + targeted fix + regression test) |
-| `security-deep.formula.json` | root → security-auditor (advisor) → executor → code-sanity → security-auditor (gate) → obligations-scanner → reviewer | Sensitive surface (auth/secrets/crypto/migrations/agent-config); scrutiny=critical default |
-| `release-prep.formula.json` | root → changelog-drafter → changelog-keeper | Release prep — reconcile [Unreleased] CHANGELOG.md |
-| `triage.formula.json` | root → explorer → overthinker | Board health: clustering + dup detection + rewire recommendations |
-| `research-only.formula.json` | root → {explorer or researcher via `{{specialist}}` var} | Investigation that deliberately produces no code |
-| `restitch.formula.json` | root → debugger → code-sanity → reviewer | Conflict recovery after failed merge |
-| `planning.formula.json` | root → planner | Vague initiative → phased bd issue board |
-| `premortem.formula.json` | root → overthinker | Devil's-advocate before risky design commits |
-| `doc-sync.formula.json` | root → sync-docs | Single-document drift-aware update |
-| `memory-hygiene.formula.json` | root → memory-processor | Stale memory consolidation (post-epic-close) |
+| `code-standard.formula.json` | root → executor → code-sanity → obligations-scanner → reviewer | Production diff default (Iron + QA overlay on top) |
+| `code-with-advisors.formula.json` | root → [explorer + researcher + overthinker] → executor → code-sanity → obligations-scanner → reviewer | HIGH/CRITICAL blast, cross-cutting refactor (Iron + QA overlay) |
+| `debug.formula.json` | root → debugger (non-skippable) → code-sanity → obligations-scanner → reviewer | Bug fix (Iron + QA overlay; regression test mandatory) |
+| `security-deep.formula.json` | root → security-auditor (advisor) → executor → code-sanity → security-auditor (gate) → obligations-scanner → reviewer | Sensitive surface; SCRUTINY: critical default (Iron + QA + security twice) |
+| `release-prep.formula.json` | root → changelog-drafter → changelog-keeper | Release prep — reconcile [Unreleased] CHANGELOG.md (no overlays) |
+| `triage.formula.json` | root → explorer → overthinker | Board health (READ_ONLY, no overlays) |
+| `research-only.formula.json` | root → {explorer or researcher via `{{specialist}}` var} | Investigation (READ_ONLY, no overlays) |
+| `restitch.formula.json` | root → debugger → code-sanity → reviewer | Conflict recovery (inherits original chain's overlays) |
+| `planning.formula.json` | root → planner | Vague initiative → phased bd issue board (no overlays) |
+| `premortem.formula.json` | root → overthinker | Devil's-advocate before risky decisions (no overlays) |
+| `doc-sync.formula.json` | root → sync-docs | Single-document drift-aware update (no overlays) |
+| `memory-hygiene.formula.json` | root → memory-processor | Stale memory consolidation (no overlays) |
+
+**Overlays.** The Layer-1 shapes above are the formula declarations. **Overlay obligations compose on top**: Iron (code-sanity gate / obligations / reviewer Release Checklist / security-auditor on sensitive surfaces — see [canon §3.1](../../chain-templates.md#31-iron-overlay--code-review-hardening)), QA (test-engineer + test-runner upgrade between writer-role and code-sanity — see [canon §3.2](../../chain-templates.md#32-qa-overlay--test-engineer--test-runner-upgrade)), DevOps (placeholder, design pending — see [canon §3.3](../../chain-templates.md#33-devops-overlay--placeholder)). The per-template overlay matrix in [canon §5](../../chain-templates.md#5-per-template-overlay-matrix) declares which overlays apply to which template at which severity floor.
+
+**QA overlay integration status.** The QA overlay (`test-engineer` step) is **not yet wired** into the formula files — that's tracked under epic `unitAI-sfwe1` (test-engineer specialist + test-runner upgrade) + task `unitAI-f9kku` (formula integration, blocked on sfwe1.1/.2). Roadmap §3 Opp 14 describes the full integration; canon §3.2 describes the resulting chain shape.
 
 ## Shipping path
 
@@ -123,12 +131,14 @@ The child template's steps APPEND to parent's. Behavior: bd cook resolves parent
 
 ## Cross-reference
 
-- **Friction audit** `docs/design/roadmap/specialists-roadmap.md`:
-  - §3 alignment opportunities (especially #3 mol pour, #4 sp chain plan, #5 step bead conventions)
-  - §12 sp epic decoration (chain ≡ bd molecule replaces the old chain ≡ bd epic mental model where molecule auto-creates)
-- **Substrate design** `docs/design/substrate.md`:
-  - §6.9.2 step-issues (the substrate analog of step beads)
-  - §6.9.3 mandatory layer (Iron pipeline gates overlay)
+- **Design canon (philosophy + overlays)** [`docs/design/chain-templates.md`](../../chain-templates.md) — the source-of-truth for catalog, severity-tiered depth, overlay specs, per-template matrix, composition rules, evolution protocol. Editorial mirror: [`chain-templates.html`](../../chain-templates.html).
+- **Roadmap** `docs/design/roadmap/specialists-roadmap.md`:
+  - §3 twelve alignment opportunities (Opp 4 `sp chain review/approve/insert`, Opp 5 step-bead conventions, Opp 10 `--chain` redesign, Opp 13 `sp stop --all` + `sp chain stop`, Opp 14 QA chain integration)
+  - §12 `sp epic` decoration (chain ≡ bd molecule replaces the old chain ≡ bd epic mental model where molecule auto-creates)
+  - Phase 6 `using-specialists-v4` SKILL (operator-facing how-to derived from the canon)
+- **Substrate (background canonical future)** `docs/design/substrate/substrate.md`:
+  - §6.9.2 step-issues (substrate analog of step beads)
+  - §6.9.3 mandatory layer (the overlay system in substrate primitives)
   - §6.9.5 composition in three moments
-- **Substrate review** `docs/design/substrate-review.md`:
-  - §25 workflow definition language (initial 6-template draft, now superseded by these 13 evidence-backed templates)
+  - §6.9.10 substrate-side catalog reference (points back at canon for full roster)
+  - §4.3 chain coordinator (entry-gate at container start)

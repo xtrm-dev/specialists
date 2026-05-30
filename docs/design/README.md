@@ -1,6 +1,15 @@
 # Design — navigation index
 
-Two design tracks in this directory, deliberately separated:
+Three layers in this directory:
+
+## 📐 Cross-cutting design canon (TOP-LEVEL)
+
+Documents that span both the pre-substrate roadmap and the substrate-canonical future. These are the *shared philosophy* both sides agree on.
+
+- **[`chain-templates.md`](chain-templates.md)** — CANONICAL chain-template catalog + overlay system (Iron, QA, DevOps). Source-of-truth for chain shapes, severity-tiered depth, per-template overlay matrix, composition rules, evolution protocol. Living document — updated as new templates / overlays / per-template lessons emerge.
+- **[`chain-templates.html`](chain-templates.html)** — editorial mirror of the same canon (substrate.html visual identity).
+
+Both the roadmap (`roadmap/chain-templates/README.md`, `roadmap/specialists-roadmap.md` Opp 14) and substrate (`substrate/substrate.md` §6.9.10) reference these as the authoritative catalog + overlay declarations.
 
 ## 🛠 `roadmap/` — workaround/adaptation to ship now (FOREGROUND)
 
@@ -26,8 +35,12 @@ The substrate design (revision 10). **This is what the system migrates TO** when
 
 ## 📦 `../archive/` — superseded artifacts
 
-Earlier design iterations that have been absorbed into the canonical roadmap. Redirect headers in each file point at the canonical source. Do NOT cite as authoritative.
+Earlier design iterations that have been absorbed into canonical sources. Redirect headers in each file point at the canonical source. Do NOT cite as authoritative.
+
+Notable recent absorptions (2026-05-30):
+- `iron-review-hardening.html` → absorbed into `chain-templates.md` §3.1 (Iron overlay)
+- `iron-review-hardening-qa-chain-substrate.md` → absorbed into `chain-templates.md` §3.2 (QA overlay)
 
 ## Other design docs (unrelated to specialists/substrate work)
 
-Top-level files in this directory not in `roadmap/` or `substrate/` are unrelated design notes (darth-feedor migration, gzrx tool catalog, iron-review hardening, issuetracking, shepherd, specialists-service evaluation, test-writer specialist).
+Top-level files in this directory not listed above are unrelated design notes (darth-feedor migration, gzrx tool catalog, issuetracking, shepherd, specialists-service evaluation, test-writer specialist).

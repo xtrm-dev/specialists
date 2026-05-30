@@ -366,6 +366,69 @@ Pre-Phase-3 vs post-Phase-3 ship.
 
 ---
 
+**Opportunity 13 [absorbed] — Chain-scoped job termination: `sp stop --all` + `sp chain stop <chain-id>`.** *(Bead: `unitAI-heukb`.)*
+
+**Problem today.** At chain completion the operator has N waiting/done specialist jobs (keep-alive executors, reviewers, advisors) that must be torn down one-by-one via `sp stop <job-id>` after looking each one up in `sp ps`. When two or more chains run concurrently in the same repo, no command targets jobs of a specific chain — operator manually filters `sp ps` output, copies job ids, runs `sp stop` per job. This is the operator-procedural compensation for the absent chain-as-entity model (Asymmetry 3); same shape as `sp finalize` (§9).
+
+**Patch.** Two thin CLI additions, both reusing the existing `stopJob()` path (terminal-status-before-SIGTERM, flush handoff, persist) so semantics match per-job `sp stop`.
+
+**`sp chain stop <chain-id> [--dry-run]`** — terminate every job (running, waiting, starting) whose `chain_id` matches. Resolved via existing chain-identity walk (`chain-identity.ts`); after Opp 10 lands this reads the chain row directly. Cross-chain-safe by construction (filter is the chain id), so it is the **default** verb whenever any concurrent work exists in the repo.
+
+**`sp stop --all [--dry-run] [--yes]`** — the "blast radius" verb, with hard guardrails:
+
+- **Scope of kill:** terminates `waiting` and `starting` jobs in the local observability DB. `done`/`error`/`cancelled` are already terminal (no-op, surfaced as "skipped N terminal"). **`running` is never touched by `--all`** — running jobs mean other work is in flight, and `--all` must refuse rather than interrupt them.
+- **Refusal rule (sole-orchestrator gate):** if any job in the current repo is `running` OR belongs to a `chain_id` other than the orchestrator's current chain context, the command **refuses** with a structured envelope:
+  ```
+  refused: sp stop --all requires sole-orchestrator state.
+  found 2 running job(s) and 4 waiting job(s) across 2 chain(s):
+    chain forge-eorh.74 — 1 running, 2 waiting
+    chain forge-eorh.81 — 1 running, 2 waiting
+  use: sp chain stop <chain-id> for chain-scoped termination
+  ```
+- **`--yes`** skips the loud-preview confirmation prompt; it does NOT bypass the refusal rule.
+- **`--dry-run`** prints the would-stop set without acting.
+
+Both verbs surface counts (`stopped 7 waiting, skipped 3 terminal, refused 1 running in other chain`) and respect the keep-alive flush path so bead notes get the final handoff block before terminal transition.
+
+**Why this asymmetry between the two verbs.** `sp chain stop` is *targeted* and *cooperative* — it cannot affect work outside its filter, so it has no guardrails beyond the chain id. `sp stop --all` is *unscoped* and operates on the global repo DB, so it must (a) refuse to kill running work (the operator wasn't asked) and (b) refuse when not sole orchestrator (another chain's lifecycle isn't this orchestrator's to end). The refusal-envelope teaches the operator the right verb (`sp chain stop <chain-id>`) at refusal time, so the wrong choice never silently destroys work — it educates instead.
+
+**Companion enforcement layer.**
+
+- **`using-specialists-v4` SKILL.md** (Phase 6) gets a dedicated **"Chain teardown discipline"** section: `sp chain stop <chain-id>` is the default at chain-end; `sp stop --all` is reserved for end-of-session repo wipes when nothing else is running. Example refusal envelope and "what to do instead" inline.
+- **Claude Code PreToolUse hook on `sp stop --all`** (extends §4 hook layer): before the command runs, the hook queries `sp ps --json`, computes the same sole-orchestrator predicate, and if violated emits a blocking hint with the suggested `sp chain stop` command — same shape as the bd-create hint (§4). Cheap, fires at the right moment, prevents the misuse before the CLI itself refuses (defense-in-depth: hook educates, CLI enforces).
+
+**Cost: ~1 E-D-E (hours wall-clock auto-mode).** Two CLI surfaces + shared filter/predicate helper + tests (`--all` refusal cases, `--chain` filter, `--dry-run`, cross-chain isolation, `--yes` does-not-bypass-refusal) + v4 SKILL section + Claude hook. Sequenced **Phase 7 (polish)** — independent, no blocking deps.
+
+**Reads forward.** Substrate §6.10: chain-as-container makes `sb container close <id>` the native equivalent of `sp chain stop` — one-for-one migration when containers land. `sp stop --all` survives as the local-DB blast-radius verb regardless of substrate's container model; its sole-orchestrator predicate continues to read from the same observability table.
+
+---
+
+**Opportunity 14 [absorbed] — QA overlay integration: `test-engineer` step + `test-runner` upgrade + chain_template wiring.** *(Beads: epic `unitAI-sfwe1`, design canon `docs/design/chain-templates.md` §3.2, formula integration `unitAI-f9kku`.)*
+
+**Problem today.** The Iron pipeline (`code-sanity` + `obligations-scanner` + `reviewer`) hardens review but leaves a precise gap: nobody turns a production diff into the right behavioral tests, smoke/E2E checks, and telemetry assertions before the reviewer sees it. The executor is busy implementing; `test-runner` only executes. As a result, autonomous chains repeatedly ship code whose test/log/telemetry contract was never validated against the actual diff — the reviewer either gives a false PASS (no evidence to gate on) or a noisy PARTIAL (asking the operator to fill the gap manually).
+
+**Patch.** Two specialist additions/upgrades plus a chain_template formula pass:
+
+- **NEW `test-engineer` specialist** (MEDIUM permission, post-impl phase). Reads the actual diff and the planning-time logging/telemetry + smoke/E2E contracts; writes/updates tests, fixtures, smoke scripts, telemetry assertions; emits exact `test-runner` commands. Required structured-JSON output (`status`, `files_changed`, `coverage_map`, `smoke_e2e_commands`, `telemetry_assertions`, `test_runner_commands`, `known_deferred_paths`, `source_bug_suspicions`). Does NOT patch production source by default — if untestable without a source fix, returns `source_bug_suspected` + discovered-from followup. *(Bead: `unitAI-sfwe1.1`.)*
+- **UPGRADED `test-runner` specialist** (stays LOW permission, no file writes). Prefers exact commands supplied by `test-engineer`; runs smoke/E2E/live-contract checks when requested; captures requested log/telemetry artifacts; **classifies failures by owner** (`test_engineer` | `debugger_or_executor` | `infrastructure` | `pre_existing`). Never silently expands a pinned test scope. *(Bead: `unitAI-sfwe1.2`.)*
+- **Chain_template formula integration.** Every applicable formula (`code-standard`, `code-with-advisors`, `debug`, `security-deep`, `restitch`) gets `test-engineer` wired between writer-role (executor/debugger) and code-sanity, with the correct severity-tiered obligation per the canonical doc's per-template overlay matrix. Templates that are READ_ONLY (`planning`, `premortem`, `research-only`, `doc-sync`, `memory-hygiene`, `triage`) are NOT modified. `code-quick` keeps `test-engineer` optional/skippable per low-scrutiny rule. *(Bead: `unitAI-f9kku`, blocked on sfwe1.1/.2.)*
+
+**Why.** Closes the executor-to-code-sanity gap that produces false-PASS reviews on autonomous chains. Aligns specialists with the xtrm planning/test-planning skills (which already require logging/telemetry + smoke/E2E contracts in every implementation bead). Severity-tiered: low scrutiny stays light; medium recommends; high mandates; critical mandates + adds behavioral evidence to the Release Checklist. This is the QA overlay that the canonical chain-templates design canon (§3.2) formalizes — Opp 14 is its runtime realization.
+
+**Companion enforcement layer.**
+
+- **Reviewer prompt** (extends current Iron Release Checklist): adds QA evidence lines — `test-engineer required`, `test-engineer completed`, `test-runner commands executed`, `smoke/E2E evidence present`, `telemetry/log assertions present`, `failures classified and routed`. PARTIAL when high/critical scrutiny + behavioral QA evidence missing. *(Folded into `unitAI-sfwe1.3` — using-specialists-v4 chain docs / reviewer prompt update.)*
+- **`using-specialists-v4` SKILL** (Phase 6): teaches the QA overlay as the default for production-diff templates; documents the failure-routing matrix; cross-references the canonical chain-templates design canon §3.2 as the authoritative source.
+- **Smoke/eval** (`unitAI-sfwe1.5`): proves the routing — test-engineer writes tests → test-runner fails due to test-side issue → routes back to test-engineer; source-side failure routes to debugger/executor.
+
+**Cost: ~5 E-D-E (~1 day wall-clock auto-mode), parallelizable.** sfwe1.1 (test-engineer spec) + sfwe1.2 (test-runner upgrade) can run in parallel (disjoint specialist files); sfwe1.3 (doc/skill update) gates on both; f9kku (formula integration) gates on sfwe1.1/.2; sfwe1.5 (smoke/eval) gates on f9kku. Wall-clock with auto-mode parallelism: ~1 day end-to-end.
+
+**Sequencing.** Phase 5 (immediately after Phase 4 chain-template + sp epic decoration work lands), before Phase 6 v4 SKILL drafting — so the SKILL can teach the QA overlay as a shipped capability rather than a future commitment.
+
+**Reads forward.** Substrate §6.9.10 (updated to reference `chain-templates.md` §3.2 as the canonical QA overlay declaration) — when substrate lands, `test-engineer` is a `class:step`, `role:test-engineer` participant within the chain_template's mandatory layer; the two channel-message kinds (`qa_plan_and_tests`, `test_verdict`) join the chain channel when channels v0 ships. The runtime → substrate migration is naming + ownership-transfer; the role and the contract survive unchanged.
+
+---
+
 ## 4. Orthogonal layer A — Claude Code hook on `bd create`
 
 The single highest-ROI patch and orthogonal to substrate (one layer above the runtime; survives rev-9 unchanged). Catches type-shape mismatches BEFORE any specialist is dispatched. **[recalibrated]** With the runway, this is also a keeper: it operates above the runtime and survives any future, bd-layer or substrate-layer.
