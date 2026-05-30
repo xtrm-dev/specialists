@@ -6,10 +6,10 @@ Three layers in this directory:
 
 Documents that span both the pre-substrate roadmap and the substrate-canonical future. These are the *shared philosophy* both sides agree on.
 
-- **[`chain-templates.md`](chain-templates.md)** — CANONICAL chain-template catalog + overlay system (Iron, QA, DevOps). Source-of-truth for chain shapes, severity-tiered depth, per-template overlay matrix, composition rules, evolution protocol. Living document — updated as new templates / overlays / per-template lessons emerge.
-- **[`chain-templates.html`](chain-templates.html)** — editorial mirror of the same canon (substrate.html visual identity).
+- **[`chain-templates.md`](chain-templates.md)** — CANONICAL chain-template catalog + the canonical pipeline (severity-modulated). Source-of-truth for the pipeline every production-diff chain runs (§2), the 13 templates' resolved chains (§3), the DevOps-gates design gap (§4 — the only currently-pending piece), composition mechanism (§5), evolution protocol (§6). Living document.
+- **[`chain-templates.html`](chain-templates.html)** — editorial snapshot in substrate.html visual style; preserved for external reading, **not maintained going forward** (the MD is the only living source).
 
-Both the roadmap (`roadmap/chain-templates/README.md`, `roadmap/specialists-roadmap.md` Opp 14) and substrate (`substrate/substrate.md` §6.9.10) reference these as the authoritative catalog + overlay declarations.
+Both the roadmap (`roadmap/chain-templates/README.md`, `roadmap/specialists-roadmap.md` Opp 14) and substrate (`substrate/substrate.md` §6.9.10) reference the MD as the authoritative pipeline + catalog declaration.
 
 ## 🛠 `roadmap/` — workaround/adaptation to ship now (FOREGROUND)
 
@@ -38,8 +38,8 @@ The substrate design (revision 10). **This is what the system migrates TO** when
 Earlier design iterations that have been absorbed into canonical sources. Redirect headers in each file point at the canonical source. Do NOT cite as authoritative.
 
 Notable recent absorptions (2026-05-30):
-- `iron-review-hardening.html` → absorbed into `chain-templates.md` §3.1 (Iron overlay)
-- `iron-review-hardening-qa-chain-substrate.md` → absorbed into `chain-templates.md` §3.2 (QA overlay)
+- `iron-review-hardening.html` → absorbed into `chain-templates.md` §2 (canonical pipeline: Iron portion already in production)
+- `iron-review-hardening-qa-chain-substrate.md` → absorbed into `chain-templates.md` §2 (canonical pipeline: QA portion imminent-canonical via sfwe1)
 
 ## Other design docs (unrelated to specialists/substrate work)
 
