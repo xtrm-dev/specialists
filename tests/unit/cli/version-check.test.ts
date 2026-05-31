@@ -135,6 +135,28 @@ describe('version-check CLI', () => {
     expect(getVersionCheckResult()).toBeNull();
   });
 
+  it('formats list alert only for newer release', async () => {
+    const { formatListVersionAlert } = await loadModule();
+
+    expect(formatListVersionAlert({
+      latestTag: 'v3.14.0',
+      localVersion: '3.13.0',
+      cache: { checked_at_ms: 0, latest_tag: 'v3.14.0', notified_for_tag: '' },
+    })).toBe('new version 3.14.0 available, run npm i -g @jaggerxtrm/specialists@3.14.0');
+
+    expect(formatListVersionAlert({
+      latestTag: 'v3.13.0',
+      localVersion: '3.13.0',
+      cache: { checked_at_ms: 0, latest_tag: 'v3.13.0', notified_for_tag: '' },
+    })).toBeNull();
+
+    expect(formatListVersionAlert({
+      latestTag: 'v3.12.9',
+      localVersion: '3.13.0',
+      cache: { checked_at_ms: 0, latest_tag: 'v3.12.9', notified_for_tag: '' },
+    })).toBeNull();
+  });
+
   it('parses remote tags, caches result, and nudges on newer release', async () => {
     tempDir = mkdtempSync(join(tmpdir(), 'version-check-'));
     process.chdir(tempDir);
@@ -163,11 +185,12 @@ describe('version-check CLI', () => {
       };
     });
 
-    const { formatVersionCheckNudge, getVersionCheckResult, markVersionCheckNotified } = await loadModule();
+    const { formatListVersionAlert, formatVersionCheckNudge, getVersionCheckResult, markVersionCheckNotified } = await loadModule();
     const result = getVersionCheckResult();
 
     expect(result?.latestTag).toBe('v3.14.0');
     expect(formatVersionCheckNudge(result!)).toBe(`specialists v${result!.localVersion} is local; v3.14.0 published — consider /update-specialists before substantial work.`);
+    expect(formatListVersionAlert(result!)).toBe('new version 3.14.0 available, run npm i -g @jaggerxtrm/specialists@3.14.0');
     expect(writes.length).toBeGreaterThan(0);
 
     markVersionCheckNotified(result!);
