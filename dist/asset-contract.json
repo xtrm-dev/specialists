@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "package_version": "3.16.0",
+  "package_version": "3.17.0",
   "shipped_skills": [
     {
       "path": "config/skills/memory-audit-transaction/SKILL.md",
@@ -12,7 +12,7 @@
     },
     {
       "path": "config/skills/specialists-creator/SKILL.md",
-      "sha256": "f8951e41b20d03a1a5cb71cd79fc7a17f525aba7005cce893d2a4524fc5a169e"
+      "sha256": "f84c22e11e08f83ab73c7f3d52df3b071037600740352713d1494f57799b679e"
     },
     {
       "path": "config/skills/update-specialists/SKILL.md",
@@ -32,15 +32,15 @@
     },
     {
       "path": "config/skills/using-specialists-auto/SKILL.md",
-      "sha256": "7e5ced0726dcb1e5a7c08c8102d40f722943e5d826b9edea0e6b4c76dadb0986"
+      "sha256": "4cf6adb2bf50a0896e9d424025d05cbf6ba9d16f9830c56949b524f97ed998f6"
     },
     {
       "path": "config/skills/using-specialists-v2/SKILL.md",
-      "sha256": "45fd944558a8008046f6a3624b97f26b48b0ea72095bf722024490f7b069bc59"
+      "sha256": "0a8613391c8bc627f6ce065c3eb8909da893735c3542a636b7fe441af2d599e0"
     },
     {
       "path": "config/skills/using-specialists-v3/SKILL.md",
-      "sha256": "e98b5fb499f06d5a00e161ba97d87c506d7fe41e0bc28c556cfd69ef23725ea9"
+      "sha256": "4f1aa674c35ec136e787559a76c2a9f585b5e31b1bf9ba6eccc896894a10660f"
     },
     {
       "path": "config/skills/using-specialists/SKILL.md",
@@ -56,9 +56,6 @@
     },
     {
       "path": "config/specialists/changelog-keeper.specialist.json"
-    },
-    {
-      "path": "config/specialists/code-sanity.specialist.json"
     },
     {
       "path": "config/specialists/debugger.specialist.json"
@@ -91,7 +88,13 @@
       "path": "config/specialists/reviewer.specialist.json"
     },
     {
+      "path": "config/specialists/seconder.specialist.json"
+    },
+    {
       "path": "config/specialists/security-auditor.specialist.json"
+    },
+    {
+      "path": "config/specialists/service-skills-sync.specialist.json"
     },
     {
       "path": "config/specialists/specialists-creator.specialist.json"
@@ -100,7 +103,13 @@
       "path": "config/specialists/sync-docs.specialist.json"
     },
     {
+      "path": "config/specialists/test-engineer.specialist.json"
+    },
+    {
       "path": "config/specialists/test-runner.specialist.json"
+    },
+    {
+      "path": "config/specialists/transcriber.specialist.json"
     },
     {
       "path": "config/specialists/xt-merge.specialist.json"
