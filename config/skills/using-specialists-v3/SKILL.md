@@ -108,7 +108,7 @@ Reviewer consumes final QA evidence together with Iron gates: test-engineer outp
 
 ### Seconder Gate — `seconder`
 
-Mandatory READ_ONLY scope/compliance + smell/type-safety/simplicity dual verdict. This is the fused gate from canon §2.3, replacing the old split between `contract-coverage` and `code-sanity`. Every change gets one cheap second pair of eyes before QA and reviewer. If `overall_verdict` is FAIL or UNCLEAR where not allowed, route back to writer.
+Mandatory READ_ONLY scope/compliance + smell/type-safety/simplicity dual-verdict gate (canon §2.3). Every change gets one cheap second pair of eyes before QA and reviewer. If `overall_verdict` is FAIL or UNCLEAR where not allowed, route back to writer.
 
 - Skip permitted ONLY for: test-only diffs (entirely under `test/`, `tests/`, `__tests__/`, `*.spec.*`, `*.test.*`, `*.fixture.*`) or new-file-only diffs (no modifications to existing symbols).
 - Any other skip = escalation event. Small diffs hide the worst regressions.
@@ -581,25 +581,25 @@ Default chain:
 
 Explorer is useful before diagnosis only when no concrete symptom exists and architecture is unknown. For real bugs with a symptom, use debugger.
 
-## Code-sanity
+## Seconder
 
-Use seconder when diff smells overcomplicated, brittle, or type-risky, but not yet broken enough for debugger. Use it before final review when you want cheap simplification check without blocking merge.
+The mandatory post-writer gate (canon §2.3): one READ_ONLY dual-verdict pass over the writer's diff that checks **scope/compliance** (does the diff satisfy the bead contract sections?) and **implementation quality** (complexity, duplication, type safety, brittle async/error handling) together, before test-engineer and reviewer.
 
 Bead shape:
 
 ```text
-PROBLEM: Diff has complexity, duplication, or type-safety smell that could hide bugs.
-SUCCESS: Findings isolate concrete smell or confirm clean shape.
-SCOPE: Executor diff, risky files, and any nearby helpers.
-NON_GOALS: No edits, no broad refactor, no merge gate decision.
-CONSTRAINTS: READ_ONLY, keep feedback cheap, cite exact lines or symbols.
-VALIDATION: Findings name concrete improvement or say OK.
-OUTPUT: FINDINGS with severity, or OK with caveats.
+PROBLEM: Verify the writer diff satisfies the bead contract and is implementation-sound before expensive QA.
+SUCCESS: Dual-verdict isolates any scope or quality issue, or confirms the diff is clean.
+SCOPE: Writer diff, risky files, and any nearby helpers.
+NON_GOALS: No edits, no broad refactor, no release blessing, no security audit, no broad reviewer phase-2.
+CONSTRAINTS: READ_ONLY, keep feedback cheap, cite exact sections/lines/symbols.
+VALIDATION: scope_verdict + quality_verdict + overall_verdict with concrete findings.
+OUTPUT: JSON dual-verdict (scope_verdict / scope_findings / quality_verdict / quality_findings / overall_verdict).
 ```
 
-Use `sp resume <exec-job> "Code-sanity findings: ..."` or `sp resume <exec-job> "Code-sanity OK; continue to reviewer."` to hand findings back.
+The chain reducer reads `overall_verdict`: PASS advances to test-engineer; FAIL routes back to the writer. Hand findings back with `sp resume <exec-job> "Seconder overall_verdict=FAIL — scope: ...; quality: ..."`.
 
-OK is not reviewer PASS. It is advisory only.
+A seconder PASS is the upstream scope gate for the reviewer; it is not itself a reviewer PASS.
 
 What differs: orchestrator uses seconder as cheap smell screen, not as merge gate.
 
