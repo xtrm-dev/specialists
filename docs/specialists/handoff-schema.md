@@ -17,7 +17,7 @@ Role-specific fields:
 - `explorer`: `findings[]`, `recommended_next`
 - `code-sanity`: `outcome`, `findings[]`
 - `security-auditor`: `outcome`, `findings[]`
-- `test-runner`: `pass_count`, `fail_count`, `classification[]`
+- `test-runner`: `pass_count`, `fail_count`, `skip_count`, `commands_executed[]`, `artifact_evidence[]`, `classification[]`
 
 Notes:
 - Keep `reviewer` verdict shape aligned with `reviewer-verdict-format`; do not duplicate its prose rules.
@@ -148,8 +148,11 @@ Notes:
   "verification": ["bunx vitest run src/a.test.ts"],
   "pass_count": 4,
   "fail_count": 0,
+  "skip_count": 0,
+  "commands_executed": ["bunx vitest run src/a.test.ts"],
+  "artifact_evidence": ["logs/test-runner/latest.log", "artifacts/smoke.json"],
   "classification": [
-    {"test": "src/a.test.ts", "classification": "in_scope"}
+    {"test": "src/a.test.ts", "classification": "in_scope", "owner": "test_engineer", "evidence": "assertion mismatch"}
   ]
 }
 ```
