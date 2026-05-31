@@ -50,7 +50,7 @@ This document concerns itself with **what the canonical pipeline is** and **what
 
 Every chain that produces a production diff runs the same canonical pipeline. The pipeline is **canonical**, not optional, not pluggable, not "overlaid." Severity modulates depth (which steps fire); it does not modulate whether the pipeline exists.
 
-> **Status of canonical steps as of 2026-05-31.** The Iron portion (writer → code-sanity → security-auditor? → obligations-scanner → reviewer) is **in production** via `config/skills/using-specialists-v3/SKILL.md`. The QA portion (`test-engineer` + upgraded `test-runner`) is **imminent-canonical** via epic `unitAI-sfwe1`. The **`seconder` step** between writer and the rest of the pipeline is **design-canonical** as of this revision — it fuses the prior `code-sanity` cheap-quality pass with the reviewer's pre-existing phase-1 compliance check into a single READ_ONLY dual-verdict step (see §2.3 + revision history note on the fusion); the reviewer keeps only its phase-2 (adversarial deep audit + Release Checklist). Implementation epic Opp 15. The **§4 DevOps gates** remain under design.
+> **Status.** Canonical pipeline: writer → seconder → test-engineer → test-runner → security-auditor? → obligations-scanner → reviewer. Revision history (§7) records the 2026-05-30/31 migration from `code-sanity` + `contract-coverage` into `seconder`; this section states current canon only. Implementation epic Opp 15. The **§4 DevOps gates** remain under design.
 
 ### 2.1 The shape
 
@@ -73,7 +73,7 @@ flowchart LR
 
 The pipeline has six roles past the writer (seconder, test-engineer, test-runner, security-auditor, obligations-scanner, reviewer) plus the writer itself (executor or debugger). The writer's choice is template-determined (`debug` uses `debugger`, others use `executor`); the rest is the same across every production-diff template.
 
-**Why the seconder fuses scope and quality checks.** The earlier draft of this canonical (2026-05-30) had two separate gates between writer and test-engineer: `contract-coverage` (scope/compliance, extracted from the reviewer's pre-existing phase-1) and `code-sanity` (Iron quality seconder). The 2026-05-31 designer + operator review collapsed both into a single **`seconder`** step with a structured dual-verdict output. Three empirical reasons drove the fusion: (1) real bead contracts are long and writer diffs often touch 3+ files of 500+ lines — a "cheap dispatch" model for scope-only checks produces poor verdicts that force escalation to a capable model anyway; (2) operator's nano-gpt subscription (asian providers — deepseek/qwen) makes "cheap dispatch saves tokens" optimism rather than real savings; (3) **scope-FAIL and quality-FAIL correlate empirically** — when an executor errs, it usually errs on both dimensions together, so the theoretical short-circuit (scope-FAIL blocks before quality check) doesn't pay on this workflow. One dispatch, one capable model, two verdicts in one output: cheaper, simpler, more accurate. The reviewer's phase-1 still exists conceptually — it now lives inside the seconder's `scope_verdict`. The reviewer keeps only phase-2 (adversarial deep audit + Release Checklist + ddiff re-review). See §2.3 for the seconder's output schema and the reviewer's phase-2-only mandate. Design rationale: designer handoff 2026-05-31 (reversal of `contract-coverage` extraction proposed in the same-day overthinker analysis `unitAI-wf834` — the overthinker's break-even calculation was from-the-table, not grounded in operator workflow data).
+**Why seconder exists.** See revision history (§7) for migration from `code-sanity` + `contract-coverage` into one READ_ONLY dual-verdict gate. Current canon: one dispatch, one capable model, two verdicts in one output; reviewer keeps only phase-2 (adversarial deep audit + Release Checklist + ddiff re-review). See §2.3 for output schema.
 
 ### 2.2 SCRUTINY is a chain property — it modulates structure, not quality
 
@@ -85,15 +85,15 @@ The pipeline has six roles past the writer (seconder, test-engineer, test-runner
 
 | Tier | When | Chain-structure modulation |
 |---|---|---|
-| `none` | Design / read-only chains only — `planning`, `premortem`, `research-only`, `triage`, `doc-sync`, `memory-hygiene`. Never valid when chain produces a code diff. | No Iron + QA pipeline (these chains don't produce production diffs). |
-| `low` | Trivial code-touching work — single-file fix, typo, log-message tweak, isolated config. Floor for any chain that touches code. | `contract-coverage` skippable with explicit reason; `code-sanity` advisory not gate; `test-engineer` skippable with reason; `security-auditor` N/A; reviewer minimal Release Checklist pass. |
-| `medium` (default) | Most production diffs. | Full canonical pipeline mandatory. `contract-coverage`, `code-sanity`, `test-engineer`, `test-runner`, `obligations-scanner`, `reviewer` all required. `security-auditor` if surface matches. |
-| `high` | Cross-cutting refactor, library boundary, public API, persistence, agent-orchestration code. | + `contract-coverage` UNCLEAR escalates to chain-coordinator (substrate §4.3, post-substrate) or operator (pre-substrate) BEFORE QA starts (don't let test-engineer waste effort on borderline scope). + `gitnexus_impact` evidence required at reviewer phase. + Release Checklist file-by-file sign-off. |
+| `none` | Design / read-only chains only — `planning`, `premortem`, `research-only`, `triage`, `doc-sync`, `memory-hygiene`. Never valid when chain produces a code diff. | No production-diff pipeline. |
+| `low` | Trivial code-touching work — single-file fix, typo, log-message tweak, isolated config. Floor for any chain that touches code. | `seconder` skippable with explicit reason; `test-engineer` skippable with reason; `security-auditor` N/A; reviewer minimal Release Checklist pass. |
+| `medium` (default) | Most production diffs. | Full canonical pipeline mandatory. `seconder`, `test-engineer`, `test-runner`, `obligations-scanner`, `reviewer` all required. `security-auditor` if surface matches. |
+| `high` | Cross-cutting refactor, library boundary, public API, persistence, agent-orchestration code. | + `seconder` UNCLEAR escalates to chain-coordinator (substrate §4.3, post-substrate) or operator (pre-substrate) BEFORE QA starts (don't let test-engineer waste effort on borderline scope). + `gitnexus_impact` evidence required at reviewer phase. + Release Checklist file-by-file sign-off. |
 | `critical` | Auth, money, data integrity, irreversible state, security-sensitive surfaces. | + `security-auditor` runs **twice** (advisor pre-impl + gate post-impl). + behavioral QA evidence required in Release Checklist. + independent second-opinion turn (overthinker premortem OR independent reviewer pass) on UNCLEAR / FAIL-prone surfaces. |
 
 **Tier `none` rules.**
 - Only valid when the chain produces no code diff. Hard-deny at bead creation if the bead's scope detects source-file paths (pre-substrate: `bd create` hint enforces; substrate: seed-phase validator hard-denies per §6.4).
-- Reviewer / contract-coverage / code-sanity / test-engineer / obligations / security-auditor: none of these run on `none` chains. The chain runs its specialist (planner / overthinker / explorer / sync-docs / memory-processor / etc.) and closes.
+- Reviewer / seconder / test-engineer / obligations / security-auditor: none of these run on `none` chains. The chain runs its specialist (planner / overthinker / explorer / sync-docs / memory-processor / etc.) and closes.
 
 **Floor + ceiling rules.**
 - Declared SCRUTINY is the **floor**. Auto-escalation (§2.4) can raise the effective floor when scope hits a sensitive surface; the reviewer / dispatcher never lowers it.
@@ -110,7 +110,7 @@ The pipeline has six roles past the writer (seconder, test-engineer, test-runner
 | `planner` + xtrm `test-planning` | LOW | pre-impl | Phase-level decomposition; logging/telemetry + smoke/E2E contracts; initial test strategy | Write final tests from an unknown future diff |
 | `executor` | HIGH | impl | Production implementation from clear bead contract; static lint/typecheck | Own full behavioral validation or broad test writing |
 | `debugger` | HIGH | impl (bug chain) | Root-cause fixes for symptoms/failing tests; targeted repro verification | Run broad suites or redesign unrelated tests |
-| **`seconder`** | **LOW (READ_ONLY hard)** | **post-writer / pre-QA** | **Compound gate: scope/compliance check (was reviewer phase-1) + code-quality smell pass (was code-sanity). One dispatch, capable model (inherits `code-sanity`'s `openai-codex/gpt-5.4-mini` + fallback `zai/glm-5-turbo`). Structured dual-verdict output: `scope_verdict` + `quality_verdict` + `overall_verdict`. Findings tagged by dimension. UNCLEAR at high+ scrutiny escalates to chain-coordinator borderline-judge (substrate §4.3 role 2).** | **Do style review for taste; do release blessing; do broad audit (that's `reviewer`'s job)** |
+| **`seconder`** | **LOW (READ_ONLY hard)** | **post-writer / pre-QA** | **Compound gate: scope/compliance check + code-quality smell pass. One dispatch, capable model (inherits `openai-codex/gpt-5.4-mini` + fallback `zai/glm-5-turbo`). Structured dual-verdict output: `scope_verdict` + `quality_verdict` + `overall_verdict`. Findings tagged by dimension. UNCLEAR at high+ scrutiny escalates to chain-coordinator borderline-judge (substrate §4.3 role 2).** | **Do style review for taste; do release blessing; do broad audit (that's `reviewer`'s job)** |
 | `test-engineer` | HIGH | post-seconder | Reads actual diff; writes/updates tests + fixtures + smoke scripts + telemetry assertions; emits exact `test-runner` commands. Ambidextrous role — primary writer in `test-only` template, secondary writer in `code-with-tests` template (see §3 + the "On ambidextrous roles" subsection). HIGH because authoring NEW test/fixture files requires the `write` tool (runtime: `write`→HIGH, `edit`→MEDIUM — a MEDIUM specialist can only edit existing files, not create them); the source-edit prohibition is enforced by prompt + inline rules, not by the permission tier. | Patch production source by default (unless step contract explicitly designates primary-writer mode); decide release readiness |
 | `test-runner` | LOW | post-test-write | Executes exact commands; captures log/telemetry artifacts; classifies failures by owner | Write tests; fix source; silently expand scope |
 | `security-auditor` | LOW | conditional (sensitive surface) | Threat-model the diff (advisor pre-impl) + verify diff matches model (gate post-impl) | Bless release; write fixes |
@@ -133,7 +133,7 @@ The pipeline has six roles past the writer (seconder, test-engineer, test-runner
 - The reviewer reads the **tagged findings** (`scope_findings` + `quality_findings`) in its final phase-2 audit; the dimension tagging is what the ddiff re-review loop uses to decide which part of the writer's work needs revisiting (usually both together — the dimensions correlate empirically — but the distinction stays available for the clean cases).
 - `UNCLEAR` on either dimension at `high|critical` scrutiny escalates to the chain-coordinator borderline-judge (substrate §4.3 role 2) rather than blocking; it does not auto-route back to the writer without judgment.
 
-**On the seconder / reviewer split.** Pre-2026-05-31, `reviewer.specialist.json` declared a two-phase audit: (1) compliance check against bead requirements, (2) adversarial code-quality review. The 2026-05-30 first-pass canonical extracted phase-1 as a separate `contract-coverage` specialist sitting alongside `code-sanity`. The 2026-05-31 designer + operator review reverted that into the seconder fusion described above — empirical data (long contracts, nano-gpt subscription = cheap dispatch is fiction, scope/quality failure correlation) made the separation more expensive and less accurate than the fusion. The phase-2 deep adversarial audit + Release Checklist + ddiff re-review remain the reviewer's mandate, unchanged in substance.
+**On seconder / reviewer split.** Revision history (§7) records the old two-step layout. Current canon: seconder owns scope/compliance + code-quality pass; reviewer owns phase-2 deep audit + Release Checklist + ddiff re-review.
 
 ### 2.4 Auto-escalation on sensitive surfaces
 
@@ -148,7 +148,7 @@ The reviewer raises the SCRUTINY floor when scope hits a sensitive surface. The 
 | `.claude/**`, `.xtrm/hooks/**`, `permissions/**` | `high` |
 | Default | bead-declared `SCRUTINY` |
 
-When the floor is raised to `critical`, the `security-deep` template's twice-running `security-auditor` shape applies regardless of which template was originally selected — the gate composes onto the chain at the post-`code-sanity` position, and additionally a pre-implementation `security-auditor` advisor is inserted before the writer.
+When the floor is raised to `critical`, the `security-deep` template's twice-running `security-auditor` shape applies regardless of which template was originally selected — the gate composes onto the chain at the post-`seconder` position, and additionally a pre-implementation `security-auditor` advisor is inserted before the writer.
 
 ### 2.5 The behavioral-validation contract
 
@@ -256,7 +256,7 @@ flowchart LR
 **Use.** LOW-blast trivial change — one-line fix, typo, comment correction, log-message tweak.
 **Variables.** `root_title`, `scope`.
 **Severity floor.** `low`.
-**Differences from §2 canonical:** at `low` scrutiny, `code-sanity` is advisory (not a gate), `test-engineer` is skippable with reason, `security-auditor` is N/A. Reviewer Release Checklist still required (minimal pass).
+**Differences from §2 canonical:** at `low` scrutiny, `seconder` is advisory (not a gate), `test-engineer` is skippable with reason, `security-auditor` is N/A. Reviewer Release Checklist still required (minimal pass).
 **Anti-pattern.** Using `code-quick` for anything that touches more than one file or any sensitive surface. Auto-escalation (§2.4) promotes to `code-standard` when the bead's scope hits an escalation trigger.
 
 ### 3.2 `code-standard`
@@ -383,7 +383,7 @@ flowchart LR
   seconder --> reviewer
 ```
 
-**Use.** Conflict recovery after a failed merge — `debugger` restitches the worktree against the new base, `code-sanity` verifies, reviewer confirms equivalence.
+**Use.** Conflict recovery after a failed merge — `debugger` restitches the worktree against the new base, `seconder` verifies, reviewer confirms equivalence.
 **Variables.** `original_chain_root`, `conflict_summary`.
 **Severity floor.** Inherits original chain's SCRUTINY.
 **Differences from §2 canonical:** this IS the recovery from a §2 pipeline that broke. Test-engineer / test-runner re-execution depends on whether the original chain's QA evidence is invalidated by the restitch (ddiff carry-forward applies).
@@ -501,7 +501,7 @@ The canonical pipeline (§2) handles this gap partially: `test-engineer`'s `smok
 **What's missing.** This section will be filled in the continuation of session 2026-05-30 (DevOps gates design segment). The fill will define:
 
 - **The role(s).** Likely candidates: `ops-validator` (writes operational smoke harnesses against actual integrated boundaries — temp repo, container, hook context, fake-chain), `telemetry-validator` (verifies log/metric/event emissions at the integrated layer rather than at the unit-test layer), `deploy-rehearser` (dry-runs the deploy envelope + asserts pre/post state). Whether these are one specialist with broad scope or multiple narrow specialists is a design decision.
-- **Where they fire in the canonical pipeline (§2.1).** Most likely between `test-runner` and `code-sanity` — after behavioral tests pass at the unit/integration layer, before code-quality gates fire. Alternative placement: between `code-sanity` and `obligations-scanner`, treating operational validation as a post-quality gate.
+- **Where they fire in the canonical pipeline (§2.1).** Most likely between `test-runner` and `seconder` — after behavioral tests pass at the unit/integration layer, before code-quality gates fire. Alternative placement: between `seconder` and `obligations-scanner`, treating operational validation as a post-quality gate.
 - **Severity sensitivity.** When are DevOps gates mandatory vs optional? Anticipated: mandatory when scope matches an ops-surface trigger (Dockerfile, compose, CI workflow, hook script, deploy script, MCP server, agent-orchestration code); optional otherwise. The trigger list will likely extend §2.4's auto-escalation table.
 - **The contracts.** What does an `ops-validator` produce that `test-engineer`'s schema (§2.5) doesn't already cover? Likely: integrated-boundary smoke results + telemetry-from-real-emission (not from test stubs) + rollback/cleanup evidence + health-check transition traces.
 - **Per-template applicability.** Which templates in §3 acquire DevOps gates? Anticipated: `code-standard`, `code-with-advisors`, `debug`, `security-deep` when scope is operational; opt-out otherwise. `release-prep` may acquire a DevOps preflight (verify deploy readiness before tag push).
@@ -520,7 +520,7 @@ The dispatcher resolves a chain shape deterministically — same inputs always p
 
 1. **Selected template's Layer-1 shape** from the `.formula.json` (the catalog declares this).
 2. **Canonical pipeline application.** The dispatcher inserts the §2.1 canonical steps in their canonical positions for production-diff templates. (Read-only / decision / maintenance templates — §3.7–3.13 — don't trigger this; their chains are their full canonical shape.)
-3. **Severity-tiered modulation.** §2.2 tier semantics decide which canonical steps fire. At `low`, code-sanity is advisory and test-engineer skippable; at `critical`, security-auditor runs twice and behavioral QA evidence is mandatory.
+3. **Severity-tiered modulation.** §2.2 tier semantics decide which canonical steps fire. At `low`, seconder is advisory and test-engineer skippable; at `critical`, security-auditor runs twice and behavioral QA evidence is mandatory.
 4. **Auto-escalation pass.** The reviewer's auto-escalation table (§2.4) runs against the bead's scope and raises the effective SCRUTINY floor when sensitive surfaces are touched. Floor changes promote conditional steps to mandatory.
 5. **Operator inserts.** `sp chain insert <chain-id> <role> --before|--after <step>` (roadmap Opp 4) applies operator-requested additions. Operator inserts cannot remove canonical steps.
 6. **Coordinator entry-gate** (post-substrate-landing only). The chain coordinator (substrate §4.3 role 1, §6.3.1) re-validates the composed chain from inside the container with fresh context; may propose additional `<insert-step>` elements within `autonomy_json` policy. Pre-substrate: this step does not exist.
@@ -548,11 +548,11 @@ This document, the canonical pipeline, and the template catalog are **living art
 
 The new template is added by: (a) drafting a `.formula.json` in `chain-templates/`; (b) adding a §3.N entry to this document with mermaid + use + variables + severity floor + differences from §2 canonical; (c) updating `chain-templates/README.md`; (d) cross-referencing in `using-specialists-v4` SKILL; (e) noting in substrate.md §6.9.10 catalog.
 
-**When to add a new canonical-pipeline step.** A new step is added to §2 only when a gate or set of gates applies **broadly to all production-diff chains** (not template-specific) and represents a **distinct concern** orthogonal to existing canonical steps. Iron's `code-sanity` + `obligations-scanner` + `reviewer` were the original canonical gates; `test-engineer` + upgraded `test-runner` (QA) are the imminent-canonical additions; DevOps gates (§4) are the next anticipated addition. Each was/is a distinct concern (code-quality, behavioral validation, operational validation) applicable across every production-diff template.
+**When to add a new canonical-pipeline step.** A new step is added to §2 only when a gate or set of gates applies **broadly to all production-diff chains** (not template-specific) and represents a **distinct concern** orthogonal to existing canonical steps. `seconder`, `obligations-scanner`, and `reviewer` are current canonical gates; `test-engineer` + upgraded `test-runner` (QA) are the imminent-canonical additions; DevOps gates (§4) are the next anticipated addition. Each was/is a distinct concern (code-quality/scope, behavioral validation, operational validation) applicable across every production-diff template.
 
 A new canonical step lands in: (a) §2.1 shape diagram; (b) §2.3 roles table; (c) §2.6 Release Checklist; (d) the reviewer prompt; (e) the relevant per-template §3 entries; (f) substrate.md §6.9.10 catalog and §6.9.3 mandatory-layer declaration.
 
-**When to update a per-template canonical chain.** When a template's resolved chain changes (e.g., `code-quick` raises `code-sanity` from advisory to gate because we observed too many post-merge regressions on trivial-looking changes), the change lands in:
+**When to update a per-template canonical chain.** When a template's resolved chain changes (e.g., `code-quick` raises `seconder` from advisory to gate because we observed too many post-merge regressions on trivial-looking changes), the change lands in:
 
 1. This document §3 entry (the canonical declaration of the template's resolved chain).
 2. The §2.2 severity-tier semantics if the change reflects a tier-rule shift.
