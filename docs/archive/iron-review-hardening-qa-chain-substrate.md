@@ -1,10 +1,18 @@
 # Iron Review Hardening — DevOps QA Chain Extension
 
-> **⚠ ARCHIVED — superseded 2026-05-30.** This document is preserved for historical reference. Its content has been absorbed into the canonical chain-templates design as **§3.2 QA overlay**. For current QA overlay framing (`test-engineer` role, upgraded `test-runner` contract, failure-routing matrix, channel-message kinds, severity-tiered obligations), consult:
-> - [`docs/design/chain-templates.md`](../design/chain-templates.md) §3.2 — referential canon (source of truth)
-> - [`docs/design/chain-templates.html`](../design/chain-templates.html) §3.2 — editorial mirror
+> **⚠ ARCHIVED — superseded 2026-05-30 / further evolved 2026-05-31.** This document is preserved for historical / archeological reference only. Its content was first absorbed into the canonical chain-templates design (2026-05-30) as a "QA overlay" §3.2, then **restructured the same day to drop the overlay framing** (Iron + QA are canonical pipeline, not opt-in overlays — neither lives at §3.2 anymore), then **further revised 2026-05-31** with the seconder fusion (code-sanity + reviewer phase-1 → single dual-verdict step) which changes the chain position of `test-engineer`. The `test-engineer` role and behavioral-validation contract are preserved unchanged; only the chain position around them moved.
 >
-> Implementation tracking remains: epic `unitAI-sfwe1` (test-engineer + test-runner upgrade), task `unitAI-f9kku` (chain_template formula integration).
+> For current canonical guidance, consult:
+> - [`docs/design/chain-templates.md`](../design/chain-templates.md) **§2** — the canonical pipeline (writer → seconder → test-engineer → test-runner → security-auditor? → obligations-scanner → reviewer)
+> - [`docs/design/chain-templates.md`](../design/chain-templates.md) **§2.3** — roles table (test-engineer + test-runner + seconder definitions, ambidextrous test-engineer note)
+> - [`docs/design/chain-templates.md`](../design/chain-templates.md) **§2.5** — behavioral-validation contract (test-engineer JSON output schema, test-runner failure-routing matrix)
+> - [`docs/design/chain-templates.md`](../design/chain-templates.md) **§3.14** `code-with-tests` and **§3.15** `test-only` — the two templates that consume `test-engineer` in different positions
+> - [`docs/design/chain-templates.md`](../design/chain-templates.md) **§3.16** — ambidextrous-roles pattern (test-engineer × 2 positions; mode-agnostic system_prompt + position-injection mechanism for pre-substrate vs substrate)
+> - [`docs/design/roadmap/specialists-roadmap.md`](../design/roadmap/specialists-roadmap.md) **Opp 14** — implementation track for `test-engineer` + `test-runner` upgrade (this archived doc's downstream implementation)
+>
+> Companion `chain-templates.html` exists as an editorial snapshot in `substrate.html` style but is **not maintained going forward** — the MD is the only living source.
+>
+> Implementation tracking remains: epic `unitAI-sfwe1` (test-engineer + test-runner upgrade), task `unitAI-f9kku` (chain_template formula integration), related epic `unitAI-4e194` (seconder fusion + reviewer phase-2-only refactor — sibling work that changes the gate immediately before test-engineer).
 >
 > ---
 >
