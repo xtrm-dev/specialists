@@ -3,7 +3,7 @@ title: Specialists Catalog
 scope: specialists-catalog
 category: overview
 version: 2.0.0
-updated: 2026-05-15
+updated: 2026-05-31
 synced_at: b92a11ba
 description: Current package-canonical specialists and what each one is for.
 source_of_truth_for:
@@ -46,6 +46,7 @@ Run `sp list` for the live merged registry, including user-local specialists. Th
 | `security-auditor` | 1.0.0 | `openai-codex/gpt-5.4` | LOW | yes | Threat modeling, secure-code review, dependency advisory triage; recommendations only. |
 | `specialists-creator` | 1.3.0 | `openai-codex/gpt-5.5` | HIGH | no | Create/fix `.specialist.json` definitions and validate schema/model choices. |
 | `sync-docs` | 3.1.0 | `nano-gpt/zai-org/glm-5` | MEDIUM | yes | Sync exactly one documentation file from scoped report/commit context. |
+| `test-engineer` | 1.0.0 | `openai-codex/gpt-5.5` | HIGH | no | Write/update tests, fixtures, smoke/E2E harnesses, and telemetry assertions from actual implementation diff; no production fixes. |
 | `test-runner` | 2.0.1 | `openai-codex/gpt-5.4-mini` | LOW | no | Execute exact requested test commands first, fall back to manifest-detected suites only when needed, capture evidence, classify failures by owner; no fixes. |
 | `xt-merge` | 1.1.0 | `openai-codex/gpt-5.4-mini` | MEDIUM | no | Drain xt worktree PR queues with CI/rebase/conflict handling. |
 
@@ -53,7 +54,9 @@ Run `sp list` for the live merged registry, including user-local specialists. Th
 
 - **No package specialist uses Anthropic Claude as primary.** v3.15 moved package specialists off Anthropic-only defaults for operator environments where those models are unavailable. Fallback diversity is handled through Gemini/GLM/openai-codex models.
 - **`sync-docs` v3.1 is single-doc only.** One bead scope must name exactly one doc. It is not a broad docs-tree auditor.
+- **`test-engineer` v1 writes tests from actual diff evidence.** It is ambidextrous for `test-only` and `code-with-tests` chains, creates/updates test assets only, emits exact `test-runner` commands, and routes source bugs back to debugger/executor.
 - **`test-runner` v2.0.1 is exact-command first.** It prefers orchestrator/test-engineer command lists, falls back to manifest-detected suites only when no exact command is provided, and reports owner-routed failures with evidence.
+- **`test-runner` v2 is polyglot.** It detects `package.json`, Python, Rust, and Go manifests and runs the appropriate test command.
 - **`changelog-keeper` v3 is file-scoped.** It fills `CHANGELOG.md` gaps only; version bump/build/tag/publish are owned by the release skill flow.
 - **`researcher` v1.2 is for external truth.** Use it before answering library/API/framework/CLI questions from memory.
 - **`code-sanity` and `security-auditor` are advisory passes.** They provide evidence and findings before final reviewer PASS.
