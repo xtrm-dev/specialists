@@ -96,17 +96,17 @@ Users define their own specialists in `.specialists/user/*.specialist.json` to f
 
 ## Mandatory Gates: Seconder, Obligations, Security (Iron-style)
 
-For any substantive production diff, the chain shape is:
+For any substantive production diff, the chain shape is the canonical pipeline from [`docs/design/chain-templates.md` §2](../../../docs/design/chain-templates.md#2-the-canonical-pipeline):
 
 ```
-executor → code-sanity → security-auditor (if surface) → obligations-scanner → reviewer → merge
+writer (executor/debugger) → seconder → test-engineer → test-runner → security-auditor (if surface) → obligations-scanner → reviewer → Release Checklist
 ```
 
-`code-sanity` and `obligations-scanner` are MANDATORY on production diffs. `security-auditor` is mandatory when the diff touches a sensitive surface. Reviewer auto-escalates SCRUTINY based on diff content (see SCRUTINY taxonomy below).
+`seconder`, `obligations-scanner`, and `reviewer` are mandatory on production diffs. `test-engineer` + `test-runner` are mandatory once shipped from Opp 14 / `unitAI-sfwe1`; until then they remain the canonical future step pair documented in canon §2. `security-auditor` is mandatory when the diff touches a sensitive surface. Reviewer follows canon §2.2 SCRUTINY as a chain-property, not reviewer input.
 
-### Seconder Gate — `code-sanity`
+### Seconder Gate — `seconder`
 
-Mandatory READ_ONLY smell + type-safety + simplicity screen. Iron's seconder role: every change gets one cheap second pair of eyes before the deep reviewer pass. Reviewer treats `OK` as a pre-condition for PASS on production diffs and will return PARTIAL if missing.
+Mandatory READ_ONLY scope/compliance + smell/type-safety/simplicity dual verdict. This is the fused gate from canon §2.3, replacing the old split between `contract-coverage` and `code-sanity`. Every change gets one cheap second pair of eyes before QA and reviewer. If `overall_verdict` is FAIL or UNCLEAR where not allowed, route back to writer.
 
 - Skip permitted ONLY for: test-only diffs (entirely under `test/`, `tests/`, `__tests__/`, `*.spec.*`, `*.test.*`, `*.fixture.*`) or new-file-only diffs (no modifications to existing symbols).
 - Any other skip = escalation event. Small diffs hide the worst regressions.
@@ -134,7 +134,7 @@ All run with their own bead and `--job <exec-job>` so they enter the executor wo
 
 Routing across chain phases:
 
-- **Per-chain dispatch**: gates run on the executor's job, in order: code-sanity → security-auditor (if surface) → obligations-scanner → reviewer.
+- **Per-chain dispatch**: gates run on the chain's job in canon order: seconder → test-engineer → test-runner → security-auditor (if surface) → obligations-scanner → reviewer. Seconder FAIL/UNCLEAR routes back to writer; test-runner misclassifications route to test-engineer or writer per canon §2.5.
 - **Debugger-restitch**: same gate order on the debugger's job AFTER the restitch turn, BEFORE reviewer.
 - **E2E smoke phase**: cross-cutting security-auditor on cumulative integrated diff if any landed chain touched a sensitive surface.
 - **Reviewer rebuttal**: code-sanity OK and security-auditor "no findings" are legitimate evidence in reviewer rebuttals (cite the advisory job id).
@@ -300,31 +300,23 @@ What differs: orchestrator writes contract before dispatch, so specialist does l
 
 ## SCRUTINY taxonomy (Iron-style)
 
-Every substantive bead should carry a `SCRUTINY` field. Reviewer reads it and tiers behavior. Beads without it default to `medium` (backwards-compatible). The author's stated SCRUTINY is a floor — reviewer can auto-escalate based on diff surface but never lower it.
+`SCRUTINY` is a chain-property from canon §2.2, not reviewer input and not a quality tier. Every substantive bead must declare it at creation. It modulates chain structure only; quality stays invariant. New beads without it are invalid unless read-only / none-chain work.
 
 ```
-SCRUTINY: low | medium | high | critical
+SCRUTINY: none | low | medium | high | critical
 ```
 
-| Level | Reviewer behavior | When to use |
+| Level | Chain-structure modulation | When to use |
 |---|---|---|
-| `low` | Seconder-only. code-sanity OK is sufficient evidence; reviewer checks contract compliance + spot-checks 2-3 changed files. No blast-radius requirement. | Test-only diffs, docs-only diffs, isolated config tweaks. |
-| `medium` (default) | Current reviewer behavior. code-sanity OK required. security-auditor required if sensitive surface. | Most production diffs. |
-| `high` | File-by-file sign-off in Requirement Coverage Matrix. Mandatory `gitnexus_impact` evidence. code-sanity + security-auditor both required. Ddiff re-review enforced on PARTIAL. | Auth, payments, schema, migrations, agent/orchestrator core. |
-| `critical` | High + mandatory obligations-scanner CLEAN + at least one independent second opinion (overthinker premortem or independent reviewer turn). | Credential storage, model routing, specialist permission boundaries. |
+| `none` | Read-only / design chains only. No production-diff pipeline. | planning, premortem, research-only, triage, doc-sync, memory-hygiene |
+| `low` | Minimal production diff. Keep pipeline light. | tiny isolated fixes |
+| `medium` | Default production-diff chain. | most implementation beads |
+| `high` | Heavier review / evidence floor. | cross-cutting, boundary, public API, persistence, orchestration |
+| `critical` | Max structural gating. | auth, money, irreversible state, security-sensitive work |
 
-### Auto-escalation surfaces (reviewer raises floor regardless of bead's stated level)
+Floor rule: author sets the minimum; dispatcher/reviewer can raise it on sensitive surfaces per canon §2.4, never lower it.
 
-| Surface pattern | Floor | Additional gates |
-|---|---|---|
-| `auth/*`, `**/credentials*`, `**/token*` | high | security-auditor required |
-| `config/specialists/*.json`, `.specialists/user/*` | high | schema validation evidence |
-| `src/specialist/runner.ts`, `src/specialist/schema.ts` | high | gitnexus_impact required |
-| `**/*.lock`, `package-lock.json`, `yarn.lock`, `Cargo.lock` | medium | security-auditor required |
-| `migrations/**`, `**/schema.sql`, `**/schema.prisma` | high | backwards-compat note |
-| `src/permissions/*`, `hooks/**` | critical | full critical pipeline |
-
-The reviewer's verdict includes a Release Checklist block with the applied tier and any escalation reason. Reviewers must log escalations explicitly.
+Cross-ref: [`docs/design/chain-templates.md` §2.2](../../../docs/design/chain-templates.md#22-scrutiny-is-a-chain-property--it-modulates-structure-not-quality), [`§2.3`](../../../docs/design/chain-templates.md#23-roles-in-the-canonical-pipeline), [`§2.5`](../../../docs/design/chain-templates.md#25-the-behavioral-validation-contract), [`§2.6`](../../../docs/design/chain-templates.md#26-the-release-checklist), roadmap Opp 15.
 
 ## Git State Precondition (before any chain dispatch)
 
@@ -433,14 +425,14 @@ What differs: orchestrator chooses edge type deliberately, so graph stays correc
 
 Use shape that fits specialist.
 
-> **SCRUTINY field is universal.** Every substantive bead should carry `SCRUTINY: low|medium|high|critical` (default `medium` if absent). It controls reviewer depth and gate strictness (see SCRUTINY taxonomy section). Reviewer may auto-escalate but never lower it.
+> **SCRUTINY field is universal.** Every substantive bead should carry `SCRUTINY: none|low|medium|high|critical` at creation. It is a chain-property, not reviewer behavior; it controls chain structure and gate strictness per the SCRUTINY taxonomy section and canon §2.2. Reviewer may auto-escalate but never lower it. Canon refs: §2.2, §2.3, §2.5, §2.6.
 
 Task/epic bead:
 
 ```text
 PROBLEM: User-facing or project-facing objective.
 SUCCESS: End-state across all child beads.
-SCRUTINY: low|medium|high|critical    # default medium; reviewer may auto-escalate
+SCRUTINY: none|low|medium|high|critical    # required at creation; chain-property, not reviewer input
 SCOPE: Area of project affected.
 REFERENCES: Optional files, skills, or docs specialist reads only if work needs them.
 NON_GOALS: Boundaries for entire effort.
@@ -487,7 +479,7 @@ Executor bead:
 ```text
 PROBLEM: Exact behavior or artifact to change.
 SUCCESS: Observable acceptance criteria.
-SCRUTINY: low|medium|high|critical    # informs downstream reviewer depth
+SCRUTINY: none|low|medium|high|critical    # required at creation; chain-property, not reviewer input
 SCOPE: Target files/symbols; include do-not-touch boundaries.
 NON_GOALS: Related improvements explicitly excluded. (Include any accepted in-code obligation markers tracked in follow-up beads.)
 CONSTRAINTS: API compatibility, style, migrations, safety.
@@ -500,7 +492,7 @@ Reviewer bead:
 ```text
 PROBLEM: Verify executor output against requirements.
 SUCCESS: PASS only if requirements + validation + Release Checklist satisfied.
-SCRUTINY: low|medium|high|critical    # reviewer applies tier; may auto-escalate
+SCRUTINY: none|low|medium|high|critical    # required at creation; chain-property, not reviewer input
 SCOPE: Executor job, diff, task bead, acceptance criteria.
 NON_GOALS: Do not rewrite unless explicitly asked.
 CONSTRAINTS: Code-review mindset; findings first; emit Release Checklist.
@@ -548,7 +540,7 @@ Run `specialists list` if you need live registry. Choose by task, not habit.
 | Design/tradeoffs | `overthinker` | Approach is risky, ambiguous, or needs critique |
 | Implementation | `executor` | Contract is clear enough to write code or docs |
 | Compliance/code review | `reviewer` | Executor/debugger produced changes that need final PASS/PARTIAL/FAIL |
-| Seconder gate (mandatory) | `code-sanity` | Production diff — Iron-style seconder; reviewer pre-condition |
+| Seconder gate (mandatory) | `seconder` | Production diff — fused scope/compliance + quality gate; reviewer pre-condition |
 | Obligations gate (mandatory) | `obligations-scanner` | Production diff — scans for unstructured TODO/FIXME/HACK/XXX/TEMP/WIP/NOTE(release) markers |
 | Security/dependency audit | `security-auditor` | Diff touches auth/secrets/input/lockfiles/migrations/agent-config |
 | Test execution | `test-runner` | Need suites run and failures interpreted |
