@@ -27,10 +27,17 @@ function readJson<T>(path: string): T {
 describe('using-specialists-v3 qa-routing evals', () => {
   const evals = readJson<EvalsFile>(evalsPath);
 
-  it('defines qa-routing evals for test-engineer, test-runner, and reviewer evidence', () => {
+  it('keeps 8 evals with restored originals first and qa-routing appended', () => {
     expect(evals.skill_name).toBe('using-specialists-v3');
-    expect(evals.evals).toHaveLength(4);
-    expect(evals.evals.map((entry) => entry.eval_name)).toEqual([
+    expect(evals.evals).toHaveLength(8);
+    expect(evals.evals.map((entry) => entry.id)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(evals.evals.slice(0, 4).map((entry) => entry.eval_name)).toEqual([
+      'role-selection-implementation',
+      'role-selection-debugging',
+      'role-selection-review',
+      'merge-publication-flow',
+    ]);
+    expect(evals.evals.slice(4).map((entry) => entry.eval_name)).toEqual([
       'qa-routing-test-engineer-primary-writer',
       'qa-routing-test-engineer-secondary-writer',
       'qa-routing-test-runner-owner-routing',
@@ -39,8 +46,8 @@ describe('using-specialists-v3 qa-routing evals', () => {
   });
 
   it('keeps test-engineer mandate mode-agnostic and output-contract complete', () => {
-    const primary = evals.evals[0];
-    const secondary = evals.evals[1];
+    const primary = evals.evals[4];
+    const secondary = evals.evals[5];
 
     expect(primary.prompt).toContain('PRIMARY writer');
     expect(secondary.prompt).toContain('SECONDARY writer');
@@ -52,8 +59,8 @@ describe('using-specialists-v3 qa-routing evals', () => {
   });
 
   it('covers exact command handoff, owner routing, and reviewer evidence', () => {
-    const runner = evals.evals[2];
-    const reviewer = evals.evals[3];
+    const runner = evals.evals[6];
+    const reviewer = evals.evals[7];
 
     expect(runner.prompt).toContain('bad assertion/harness failure');
     expect(runner.prompt).toContain('source-behavior regression');
