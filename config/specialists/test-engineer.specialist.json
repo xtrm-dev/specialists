@@ -3,7 +3,7 @@
     "metadata": {
       "name": "test-engineer",
       "version": "1.0.0",
-      "description": "Post-implementation test authoring from actual diff. Use for adding/updating tests, fixtures, smoke/E2E harnesses, and telemetry assertions before test-runner. Not for production fixes, broad test execution, generic QA review, or release blessing. MEDIUM (canon chain-templates.md §2.3) with requires_worktree=true via --job because new test/fixture files may need creation; prompt forbids production source edits unless bead explicitly authorizes test-helper/export changes.",
+      "description": "Post-implementation test authoring from actual diff. Use for adding/updating tests, fixtures, smoke/E2E harnesses, and telemetry assertions before test-runner. Not for production fixes, broad test execution, generic QA review, or release blessing. HIGH worktree via --job because authoring NEW test/fixture files needs the `write` tool (runtime: write→HIGH, edit→MEDIUM; MEDIUM cannot create files); prompt forbids production source edits unless bead explicitly authorizes test-helper/export changes.",
       "category": "testing",
       "tags": [
         "tests",
@@ -23,7 +23,7 @@
       "stall_timeout_ms": 120000,
       "response_format": "markdown",
       "output_type": "codegen",
-      "permission_required": "MEDIUM",
+      "permission_required": "HIGH",
       "thinking_level": "low",
       "max_retries": 0,
       "interactive": false,
