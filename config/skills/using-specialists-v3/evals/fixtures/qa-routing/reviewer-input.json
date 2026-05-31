@@ -1,0 +1,47 @@
+{
+  "seconder": {
+    "scope_verdict": "PASS",
+    "quality_verdict": "PASS",
+    "overall_verdict": "PASS"
+  },
+  "test_engineer": {
+    "status": "tests_written",
+    "files_changed": ["tests/unit/qa-routing-demo.test.ts"],
+    "coverage_map": [
+      {
+        "impl_path": "src/qa-routing-demo.ts",
+        "test_path": "tests/unit/qa-routing-demo.test.ts",
+        "critical_path": "retry behavior and telemetry redaction"
+      }
+    ],
+    "smoke_e2e_commands": ["bunx vitest run tests/unit/qa-routing-demo.test.ts"],
+    "telemetry_assertions": [
+      {
+        "event": "job_finished",
+        "fields": ["component", "redacted"],
+        "query_or_grep": "grep -n 'event=job_finished' logs/qa-routing/test-runner.log",
+        "redaction": "required"
+      }
+    ],
+    "test_runner_commands": ["bunx vitest run tests/unit/qa-routing-demo.test.ts"],
+    "known_deferred_paths": [],
+    "source_bug_suspicions": []
+  },
+  "test_runner": {
+    "commands_executed": ["bunx vitest run tests/unit/qa-routing-demo.test.ts"],
+    "classification": ["test_engineer", "debugger_or_executor"],
+    "artifact_evidence": ["logs/qa-routing/test-runner.log", "logs/qa-routing/source-regression.log"],
+    "pass_count": 1,
+    "fail_count": 1,
+    "skip_count": 0
+  },
+  "reviewer": {
+    "release_checklist_inputs": [
+      "test_engineer completed",
+      "test_runner commands executed",
+      "smoke/E2E evidence present",
+      "telemetry/log assertions present",
+      "failures classified and routed"
+    ]
+  }
+}

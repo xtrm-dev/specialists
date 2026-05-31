@@ -1,0 +1,79 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
+
+const repoRoot = process.cwd();
+const evalsPath = join(repoRoot, 'config/skills/using-specialists-v3/evals/evals.json');
+const fixtureDir = join(repoRoot, 'config/skills/using-specialists-v3/evals/fixtures/qa-routing');
+
+type EvalSpec = {
+  id: number;
+  eval_name: string;
+  prompt: string;
+  expected_output: string;
+  assertions: Array<{ name: string; description: string }>;
+  files: string[];
+};
+
+type EvalsFile = {
+  skill_name: string;
+  evals: EvalSpec[];
+};
+
+function readJson<T>(path: string): T {
+  return JSON.parse(readFileSync(path, 'utf8')) as T;
+}
+
+describe('using-specialists-v3 qa-routing evals', () => {
+  const evals = readJson<EvalsFile>(evalsPath);
+
+  it('defines qa-routing evals for test-engineer, test-runner, and reviewer evidence', () => {
+    expect(evals.skill_name).toBe('using-specialists-v3');
+    expect(evals.evals).toHaveLength(4);
+    expect(evals.evals.map((entry) => entry.eval_name)).toEqual([
+      'qa-routing-test-engineer-primary-writer',
+      'qa-routing-test-engineer-secondary-writer',
+      'qa-routing-test-runner-owner-routing',
+      'qa-routing-reviewer-consumes-evidence',
+    ]);
+  });
+
+  it('keeps test-engineer mandate mode-agnostic and output-contract complete', () => {
+    const primary = evals.evals[0];
+    const secondary = evals.evals[1];
+
+    expect(primary.prompt).toContain('PRIMARY writer');
+    expect(secondary.prompt).toContain('SECONDARY writer');
+    expect(primary.expected_output).toContain('test-engineer');
+    expect(primary.expected_output).toContain('test_runner_commands');
+    expect(primary.expected_output).toContain('source_bug_suspicions');
+    expect(secondary.expected_output).toContain('actual changed files/diff');
+    expect(secondary.expected_output).toContain('prior test-runner failures');
+  });
+
+  it('covers exact command handoff, owner routing, and reviewer evidence', () => {
+    const runner = evals.evals[2];
+    const reviewer = evals.evals[3];
+
+    expect(runner.prompt).toContain('bad assertion/harness failure');
+    expect(runner.prompt).toContain('source-behavior regression');
+    expect(runner.expected_output).toContain('test_engineer');
+    expect(runner.expected_output).toContain('debugger_or_executor');
+    expect(reviewer.expected_output).toContain('smoke/E2E commands');
+    expect(reviewer.expected_output).toContain('telemetry/log assertions');
+    expect(reviewer.expected_output).toContain('Iron gates');
+  });
+
+  it('ships deterministic qa-routing fixtures', () => {
+    const expectedFiles = [
+      'source-regression.diff',
+      'bad-test-result.json',
+      'source-regression-result.json',
+      'reviewer-input.json',
+    ];
+
+    for (const fileName of expectedFiles) {
+      expect(readFileSync(join(fixtureDir, fileName), 'utf8')).toBeTruthy();
+    }
+  });
+});

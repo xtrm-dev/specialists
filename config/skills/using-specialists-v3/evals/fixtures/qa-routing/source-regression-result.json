@@ -1,0 +1,7 @@
+{
+  "command": "bunx vitest run tests/unit/qa-routing-demo.test.ts",
+  "status": "failed",
+  "failure": "Smoke passed but source state remained stale after retry",
+  "owner": "debugger_or_executor",
+  "artifact_evidence": ["src/qa-routing-demo.ts", "logs/qa-routing/source-regression.log"]
+}

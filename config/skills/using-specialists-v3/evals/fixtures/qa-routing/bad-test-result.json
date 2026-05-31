@@ -1,0 +1,7 @@
+{
+  "command": "bunx vitest run tests/unit/qa-routing-demo.test.ts",
+  "status": "failed",
+  "failure": "Expected event=job_finished but got event=job_done",
+  "owner": "test_engineer",
+  "artifact_evidence": ["tests/unit/qa-routing-demo.test.ts", "logs/qa-routing/test-runner.log"]
+}
