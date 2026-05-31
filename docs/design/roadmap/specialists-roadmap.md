@@ -431,41 +431,73 @@ Both verbs surface counts (`stopped 7 waiting, skipped 3 terminal, refused 1 run
 
 ---
 
-**Opportunity 15 [absorbed] — `contract-coverage` gate: extract reviewer phase-1 as standalone scope/compliance gate between writer and code-sanity.** *(Beads: design canon `docs/design/chain-templates.md` §2.3, overthinker rationale `unitAI-wf834` closed, implementation epic to be filed.)*
+**Opportunity 15 [absorbed] — `seconder` fusion: collapse `code-sanity` and the reviewer's phase-1 compliance check into one dual-verdict step.** *(Beads: design canon `docs/design/chain-templates.md` §2.3, designer handoff 2026-05-31, implementation epic `unitAI-4e194`.)*
 
-**Problem today.** The current canonical pipeline (Opp 14 completes the QA portion) runs `executor → code-sanity → test-engineer → test-runner → ... → reviewer`. The reviewer's job is two-phase: (1) compliance check against bead requirements, (2) adversarial deep code-quality review. Phase-1 only runs at chain end. Consequence: a single reviewer FAIL on scope/compliance grounds invalidates the entire chain's downstream work — and at high/critical scrutiny, `test-engineer` writing E2E + smoke + telemetry assertions can cost 80–300k tokens. Average chain: a wrong-task reviewer-FAIL can waste 500k–1M+ tokens of work (writer + sanity + test-engineer + test-runner + security + obligations + reviewer itself), plus the operator-attention cost of triaging the failure and re-dispatching. The `code-sanity` reorder (already in canonical §2) protects against bad-code waste but **not against wrong-task waste** — code-sanity validates code quality, not whether the diff matches the bead's contract.
+**Problem today.** The current canonical pipeline (Opp 14 completes the QA portion) runs `executor → code-sanity → test-engineer → test-runner → ... → reviewer`. The reviewer's job is two-phase: (1) compliance check against bead requirements, (2) adversarial deep code-quality review. Phase-1 only runs at chain end. Consequence: a single reviewer FAIL on scope/compliance grounds invalidates the entire chain's downstream work — and at high/critical scrutiny, `test-engineer` writing E2E + smoke + telemetry assertions can cost 80–300k tokens. A wrong-task reviewer-FAIL can waste 500k–1M+ tokens (writer + sanity + test-engineer + test-runner + security + obligations + reviewer itself), plus operator-attention cost. The `code-sanity` reorder alone protects against bad-code waste but **not against wrong-task waste** — code-sanity validates code quality, not whether the diff matches the bead's contract.
 
-**Patch.** Extract the reviewer's phase-1 compliance check as a standalone `contract-coverage` specialist that runs immediately post-writer, before any expensive QA fires:
+**Patch — seconder fusion** (revision of the earlier `contract-coverage` extraction proposal in the same-day overthinker analysis on `unitAI-wf834`). The earlier proposal extracted reviewer phase-1 as a separate `contract-coverage` specialist sitting alongside `code-sanity`. Designer + operator review 2026-05-31 revised that approach based on empirical workflow data and adopted the **seconder fusion**:
 
-- **NEW `contract-coverage` specialist** (LOW permission, READ_ONLY hard, post-writer phase). Cheap model (cost-optimized; not gpt-5.5 / claude-sonnet-4-6). Hard token budget (5–20k forced via `prompt_limit_bytes` + system-prompt enforcement). Hard-scoped task: read the writer's diff + the bead's change-contract (PROBLEM / SUCCESS / SCOPE / NON_GOALS / VALIDATION), produce PASS / FAIL / UNCLEAR + a scope-coverage map (per contract section: `covered` / `partial` / `missing` + evidence excerpt). Does NOT do style review, does NOT do release blessing, does NOT do broad audit — those remain reviewer's job.
-- **REFACTOR `reviewer.specialist.json`** — remove phase-1 compliance text from system_prompt; keep only phase-2 (adversarial deep code-quality audit + Release Checklist enforcement). Reviewer's input set expands to include `contract-coverage`'s verdict as evidence (parallel to how it already consumes `code-sanity` + `obligations-scanner` verdicts as preconditions).
-- **Chain_template formula integration.** Every applicable formula (`code-standard`, `code-with-advisors`, `debug`, `security-deep`, `restitch`) gets `contract-coverage` wired between writer and `code-sanity`. `unitAI-f9kku` scope extends to cover both Opp 14 (test-engineer wiring) AND Opp 15 (contract-coverage wiring) — formula edits done in one pass.
+- **NEW `seconder` specialist**, inheriting from `code-sanity` (model `openai-codex/gpt-5.4-mini` + fallback `zai/glm-5-turbo`, LOW permission, READ_ONLY hard) and **extending the mandate** to include reviewer phase-1 (scope/compliance check against the bead's change-contract sections). Single dispatch, capable model — not a separate "cheap" experiment. Structured dual-verdict output: `{ scope_verdict, scope_findings, quality_verdict, quality_findings, overall_verdict }` per chain-templates.md §2.3. The reducer reads `overall_verdict`; the reviewer reads the tagged findings in its phase-2 adversarial audit; ddiff loop uses the dimension tags (`scope` vs `quality`) to route fix-loop work.
+- **REFACTOR `reviewer.specialist.json`** — remove phase-1 compliance text from system_prompt; keep only phase-2 (adversarial deep code-quality audit + Release Checklist enforcement + ddiff re-review). Reviewer consumes the seconder's verdict + tagged findings (parallel to how it already consumes `obligations-scanner` verdict).
+- **Chain_template formula integration.** Every applicable formula (`code-standard`, `code-with-advisors`, `debug`, `security-deep`, `restitch`) swaps `code-sanity` for `seconder` in the same position; the QA section (test-engineer + test-runner) lands after seconder PASS per Opp 14. `unitAI-f9kku` scope covers both Opp 14 (test-engineer wiring) AND Opp 15 (code-sanity → seconder swap) in one pass.
+- **Optional mandatory rule** `seconder-dual-verdict-output.md` — enforce dual-verdict JSON output schema if the prompt-only enforcement turns out insufficient in practice.
 
-**Why.** The cost-benefit is dominated by the wasted-QA tail at higher scrutiny. Overthinker's break-even calculation (`unitAI-wf834` analysis): a 10k-token early gate saving 400k downstream waste breaks even if the late-scope FAIL rate is just 2.5%. At `high|critical`, one prevented late-FAIL per month pays for many early gates. At `medium`, the gate cost (5–20k) is small relative to even a single saved QA invocation (80k+). At `low`, the gate is skippable with reason (most low chains don't carry scope-FAIL risk worth the gate). The extraction is **architecturally clean**, not a new mini-reviewer: reviewer.specialist.json already declared phase-1 + phase-2 separately; this surfaces the separation as two specialists.
+**Why fusion instead of extraction.** Three empirical reasons the same-day designer/operator review brought against the overthinker's break-even calculation:
+
+1. **Real workload doesn't fit "cheap dispatch" assumption.** Bead contracts are long (multi-paragraph + multi-section); executors regularly modify 3+ files of 500+ lines. A cheap model dispatched against `contract + diff` of that size produces low-quality verdicts that force escalation to a capable model anyway. One capable-model dispatch is cheaper than two-tier dispatch where the cheap tier doesn't pay.
+2. **Subscription economics.** Operator's nano-gpt subscription (asian providers — deepseek/qwen) makes the "cheap model saves tokens" framing optimism, not real saving. Provider pricing is flat-ish under subscription; the saving is in *number of dispatches*, not *per-dispatch tier*.
+3. **Scope-FAIL and quality-FAIL correlate empirically.** When an executor errs, it usually errs on both dimensions together. The theoretical short-circuit motivating contract-coverage's separation (scope-FAIL blocks before quality check) doesn't pay on this workflow — both checks fire together anyway.
+
+The fusion is architecturally clean: `reviewer.specialist.json` already declared phase-1 + phase-2 separately as conceptual phases of one audit; collapsing phase-1 with `code-sanity` into `seconder` (rather than extracting it as a third specialist) is the move that respects the empirical correlation while still surfacing the dimension-tagging in structured output.
 
 **Severity sensitivity.**
 
-| SCRUTINY | contract-coverage obligation |
+| SCRUTINY | seconder obligation |
 |---|---|
 | `none` | N/A (read-only / design chains; no diff produced) |
-| `low` | Skippable with explicit reason (small / trivial diffs rarely have scope-FAIL risk) |
-| `medium` | Mandatory; FAIL routes to writer; UNCLEAR routes to writer with reason |
-| `high` | Mandatory; UNCLEAR escalates to chain coordinator (substrate §4.3 role 2) or operator (pre-substrate) BEFORE QA starts |
-| `critical` | Mandatory + independent second-opinion on UNCLEAR / FAIL-prone surfaces |
+| `low` | Skippable with explicit reason (small / trivial diffs rarely have scope-FAIL or quality-FAIL risk worth the gate) |
+| `medium` | Mandatory; `overall_verdict: FAIL` routes back to writer; `UNCLEAR` on either dimension routes to writer with reason |
+| `high` | Mandatory; `UNCLEAR` on either dimension escalates to chain coordinator (substrate §4.3 role 2) or operator (pre-substrate) BEFORE QA starts |
+| `critical` | Mandatory + independent second-opinion seconder turn on `UNCLEAR` / FAIL-prone surfaces |
 
 **Companion enforcement.**
 
-- **Reviewer Release Checklist** (canon §2.6 already updated): new `contract-coverage verdict: PASS|FAIL|UNCLEAR|skipped` line + scope-coverage map citation. Reviewer cannot PASS without an established `contract-coverage` PASS at medium+.
-- **`using-specialists-v3` + `v4` SKILL docs**: teach the canonical pipeline including `contract-coverage` step; document failure-routing back to writer; cross-reference canon §2.3.
-- **Smoke/eval** (new bead under implementation epic): empirically prove that a wrong-scope writer dispatch is blocked at `contract-coverage` BEFORE `test-engineer` starts. The eval is the only way to validate that the gate is actually catching wrong-task work (vs being a ritual cost).
+- **Reviewer Release Checklist** (canon §2.6 already updated): three seconder lines (`scope_verdict`, `quality_verdict`, `overall_verdict`). Reviewer cannot PASS without an established `seconder.overall_verdict: PASS` at medium+.
+- **`using-specialists-v3` + `v4` SKILL docs**: teach the canonical pipeline including `seconder` step; document dual-verdict semantics + failure routing per dimension; cross-reference canon §2.3.
+- **Smoke/eval** (`unitAI-o7j1a` adapted): empirically prove that an off-scope writer dispatch produces `seconder.scope_verdict: FAIL` and blocks `test-engineer` from firing.
 
-**Cost: ~3 E-D-E (~half-day wall-clock auto-mode), parallelizable.** contract-coverage spec authoring (1 E-D-E) + reviewer prompt refactor (0.5 E-D-E) + formula integration (folds into f9kku, +0.5 E-D-E) + skill doc update (0.5 E-D-E) + eval (0.5 E-D-E). Parallel-able with Opp 14 work (sfwe1) since formula files are touched once by f9kku for both Opps.
+**Cost: ~3 E-D-E (~half-day wall-clock auto-mode), parallelizable.** seconder spec authoring (inherit + extend code-sanity, 1 E-D-E) + reviewer prompt refactor (0.5 E-D-E) + formula integration (folds into f9kku, ~0 marginal since code-sanity → seconder is a string swap) + skill doc update (0.5 E-D-E) + eval (0.5 E-D-E) + optional mandatory rule (0.5 E-D-E).
 
-**Sequencing.** Phase 5 (immediately after Opp 14 ships). Folds into the same v4 SKILL drafting window (Phase 6) — v4 teaches the complete canonical pipeline including `contract-coverage`.
+**Sequencing.** Phase 5 (immediately after Opp 14 ships). Folds into v4 SKILL drafting (Phase 6).
 
-**Reads forward.** Substrate §6.9.3 mandatory-layer (updated to include `contract-coverage` in the gate set); §6.9.10 catalog (references chain-templates.md §2 as canonical pipeline); §6.6 SCRUTINY framing (corrected to chain-property-not-reviewer-input); §4.3 chain coordinator role 2 (borderline judge for `contract-coverage` UNCLEAR at high+); §6.10 close-as-derivation (the evidence-gate pattern `contract-coverage` instances at intermediate-step granularity, not a fourth composition moment per §6.9.5). Substrate migration: `contract-coverage` becomes `class:gate, role:contract-coverage` with verdict + scope-coverage map persisted in `issue.evidence_json` per §6.8 — one-for-one with the foreground runtime.
+**Reads forward.** Substrate §6.9.3 mandatory-layer (gate set includes `seconder` as a single fused gate, not two separate ones); §6.9.10 catalog (references chain-templates.md §2 as canonical); §6.6 SCRUTINY framing (chain-property — corrected and kept); §4.3 chain coordinator role 2 (borderline judge for seconder UNCLEAR at high+); §6.10 close-as-derivation (the evidence-gate pattern seconder instances at intermediate-step granularity). Substrate migration: `seconder` becomes `class:gate, role:seconder` with the dual-verdict block persisted in `issue.evidence_json` per §6.8 — one-for-one with the foreground runtime.
 
-**Design rationale (full).** Overthinker bead `unitAI-wf834` (closed 2026-05-31) — Candidate F selected after premortem of 6 candidate directions. Bias audit captured: orchestrator confirmation-bias on initial `code-sanity` reorder + missed macro late-FAIL; operator's "million-token waste" framing may overstate average case (ddiff can salvage some) but understates auto-mode parallel-chain multiplication. Deliberation pattern (operator-pushes → orchestrator-confirms-too-fast → overthinker-restructures) saved as `bd memories deliberation-pattern-overthinker-validates-design`.
+**Design rationale (full).** Two-step deliberation history: same-day overthinker `unitAI-wf834` proposed `contract-coverage` extraction (Candidate F of 6 premortemed candidates); designer + operator review later same day brought empirical workflow data against the overthinker's from-the-table break-even and revised to the seconder fusion. Both deliberation steps preserved as memory `deliberation-pattern-overthinker-validates-design` (the broader meta-pattern that overthinker validation is necessary AND that overthinker outputs require operator empirical-data check before commit).
+
+---
+
+**Opportunity 16 [absorbed] — SCRUTINY enforcement infrastructure (chain-property required-at-creation; runner pre-script injection; scrutiny-aware composition mandatory rule).** *(Beads: design canon `docs/design/chain-templates.md` §2.2 + substrate.md §6.6 already updated; implementation epic to be filed.)*
+
+**Problem today.** Canon (chain-templates.md §2.2, substrate.md §6.6) declares SCRUTINY a required-field chain-property with the tier set `none|low|medium|high|critical`, with chain-structure modulation rules and required-at-creation enforcement. But the IMPLEMENTATION of those rules is incomplete:
+
+- `bd create` does not validate SCRUTINY at bead-create time — operator can file a bead without it (default `medium` applies silently).
+- `bd create` does not hard-deny `none` when scope detection finds source files (the canon rule).
+- Specialist runner pre-script does not inject SCRUTINY into the context of every specialist — only the reviewer reads it (legacy behavior). Per canon §2.2 every chain participant should read SCRUTINY for awareness of where they are; the composer of the chain (planner / orchestrator / chain-coordinator entry-gate) uses it to decide chain structure.
+- No mandatory rule documenting the rule "compose chain structure according to SCRUTINY" exists; it lives only in canonical design docs.
+
+**Patch.** Three infrastructure additions:
+
+1. **`bd create` hook validation extension** (roadmap §4 Layer A — Claude Code hook on `bd create`): hook gains SCRUTINY validation. New beads without SCRUTINY get rejected with proposal hint ("set SCRUTINY: low|medium|high|critical|none"). Beads declaring `none` when scope-detection finds source files get rejected with hint ("scope touches code paths; SCRUTINY: none is invalid — declare low at minimum").
+2. **Runner pre-script SCRUTINY injection** (src/specialist/runner.ts): pre-script reads the bead's change-contract SCRUTINY field and injects it as `$scrutiny` into every specialist's template context (parallel to how `$bead_id`, `$cwd` are injected today). Specialists' system prompts can reference it for awareness.
+3. **NEW mandatory rule `config/mandatory-rules/scrutiny-aware-composition.md`** — addresses the *composer* (planner, orchestrator, chain-coordinator). Documents: "When composing a chain, read the root bead's SCRUTINY field; insert advisor steps, second-opinion turns, and conditional gates per the canon §2.2 table." Joins the default `template_sets` for `planner` and (post-substrate) `chain-coordinator`. NOT injected into worker specialists — they don't compose chains; they only read SCRUTINY for awareness via the pre-script injection.
+
+**Why standalone Opp.** Enforcement infrastructure is orthogonal to pipeline shape (Opp 15) and to QA pipeline completion (Opp 14). All three can ship independently and combine cleanly. Filing Opp 16 standalone avoids overloading either of the other epics with implementation-layer work that has its own complete deliverable shape.
+
+**Cost: ~2 E-D-E (~half-day wall-clock).** bd create hook extension (1 E-D-E) + runner pre-script injection (0.5 E-D-E) + mandatory rule authoring (0.5 E-D-E) + SKILL doc updates (folds into 096re).
+
+**Sequencing.** Can ship in parallel with Opp 15 (no shared files). Phase 5 alongside Opp 14 + Opp 15.
+
+**Reads forward.** Substrate §6.6 (SCRUTINY chain-property + required-at-creation rule); substrate §5 (seed-phase validator hard-denies missing SCRUTINY at container open — this is the substrate-side enforcement that supersedes Opp 16's bd-side enforcement when substrate lands); substrate §4.3 role 1 (chain coordinator entry-gate verifies tier-vs-scope appropriateness as part of `verdict: ready`). Migration is naming + ownership-transfer; the rule survives unchanged.
 
 ---
 
