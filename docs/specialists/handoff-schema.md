@@ -17,6 +17,7 @@ Role-specific fields:
 - `explorer`: `findings[]`, `recommended_next`
 - `code-sanity`: `outcome`, `findings[]`
 - `security-auditor`: `outcome`, `findings[]`
+- `test-engineer`: machine-readable block uses behavioral `status` (`tests_written | blocked | source_bug_suspected`), plus `coverage_map[]`, `smoke_e2e_commands[]`, `telemetry_assertions[]`, `test_runner_commands[]`, `known_deferred_paths[]`, `source_bug_suspicions[]`
 - `test-runner`: `pass_count`, `fail_count`, `classification[]`
 
 Notes:
@@ -134,6 +135,28 @@ Notes:
   "findings": [
     {"severity": "medium", "file": "src/a.ts", "concern": "Unsanitized input", "source": "diff"}
   ]
+}
+```
+
+### test-engineer
+```json
+{
+  "status": "tests_written",
+  "summary": "Added regression coverage and smoke command contract for changed behavior.",
+  "files_changed": ["tests/a.test.ts", "tests/smoke/a-smoke.sh"],
+  "follow_ups": [],
+  "risks": [],
+  "verification": ["bunx vitest run tests/a.test.ts"],
+  "coverage_map": [
+    {"impl_path": "src/a.ts", "test_path": "tests/a.test.ts", "critical_path": "retry fallback emits terminal event"}
+  ],
+  "smoke_e2e_commands": ["bash tests/smoke/a-smoke.sh"],
+  "telemetry_assertions": [
+    {"event": "job_finished", "fields": ["component", "event", "outcome"], "query_or_grep": "grep 'event=job_finished' .xtrm/logs/jobs.log", "redaction": "no secrets or raw payloads"}
+  ],
+  "test_runner_commands": ["bunx vitest run tests/a.test.ts", "bash tests/smoke/a-smoke.sh"],
+  "known_deferred_paths": [],
+  "source_bug_suspicions": []
 }
 ```
 
