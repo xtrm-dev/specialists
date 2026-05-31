@@ -13,6 +13,76 @@
 
 ---
 
+## 0. Cross-repo ownership and source map
+
+This document owns the **specialists/substrate/devops** side of the design: agent
+roles, learned operating loops, job/runtime semantics, specialist observability,
+and how a devops specialist acts on infrastructure telemetry. It deliberately
+does not own the platform stack or the console UI.
+
+Repo boundaries:
+
+- `~/projects/mercury/infra` owns Prometheus, Grafana, Loki, Alertmanager, exporters, Traefik, platform Docker networks/volumes, Terraform/IaC, and the concrete Mercury monitoring stack. See `MONITORING.md` and `docs/AGENT_MONITORING.md`.
+- `~/dev/specialists` owns specialist runtime telemetry and devops/platform-agent semantics. See also `docs/observability-metrics.md` and `docs/specialists-service.md`.
+- `~/dev/gitboard` owns the xtrm operational console/product surface. See `docs/xtrm-observability-prd.md` and `docs/xtrm-console-visual-contract.md`.
+
+Research inputs from `/home/dawid/second-mind/1-projects/xtrm/research/` (absolute paths are intentional; future agents should read these exact notes):
+
+- `devops-specialists.md` — source/index note for the AWS DevOps Agent video/research thread.
+- `devops-specialists-research.md` — AWS DevOps Agent reference architecture and xtrm/Mercury role split.
+- `sre-telemetry-patterns-for-mercury.md` — what a production SRE telemetry contract needs beyond container status.
+- `agentops-telemetry-for-specialists.md` — token/tool/model/job metrics emitted by the specialists runtime.
+- `devops-query-surfaces-mcp-architecture.md` — Grafana MCP, Prometheus MCP, and custom query facade options.
+- `terraform-first-steps.md` — Terraform boundaries; specialists may propose/validate plans, but human-approved infra owns apply authority.
+- `aws-devops-agent-official-docs.md` — official AWS DevOps Agent evidence: Agent Spaces, Agent Instructions, Skills/Learned Skills, journals, recommendations, EventBridge/API/MCP/ACP/webhook surfaces.
+- `aws-agentcore-observability-official-docs.md` — official AgentCore observability evidence: CloudWatch + OTEL/ADOT, runtime/gateway/identity/policy/eval telemetry, trace/span/session propagation.
+
+Design rule: the devops specialist should **consume and compose** infra telemetry;
+it should not fork a parallel monitoring definition. When it needs a missing
+signal, it proposes the metric in the owning repo and then teaches gitboard how
+to display or act on it. The proposal must preserve provenance back to the
+second-mind research note that motivated it.
+
+### 0.1 Integration point with `substrate.md`
+
+This PRD is not a parallel workflow system. It is a domain-specific interpretation
+of the substrate model in `docs/design/substrate/substrate.md`. Any designer
+picking this up should read, at minimum, substrate §6.2.1 (`class | type | role`),
+§6.4 (issue birth paths), §6.7 (relationship runtime effects), §6.8
+(channels vs persisted evidence), §6.9.2 (step-issues), §6.10 (close/followup),
+and §10.2 (memory access/distillation).
+
+The key design hint is that a DevOps agent should not behave like today's
+orchestrator manually creating flat beads whenever it notices something. In
+substrate terms, it should emit **`proposal`** or **`escalation`** messages into
+the container channel, backed by evidence. Substrate/orchestrator then
+materializes the right issue shape:
+
+- **Non-blocking operational recommendation** → `class: followup`, related by
+  `discovered-from` to the root. It preserves the finding without blocking the
+  current chain.
+- **Current-chain safety blocker** → unsatisfied `class: gate` evidence or an
+  escalation that inserts a required step. This blocks because the runtime effect
+  is genuinely gate-like.
+- **Accepted standalone work** → promoted to `class: root`, with `type` chosen by
+  content: `bug` for incidents/broken behavior, `task` for instrumentation or
+  runbooks, `chore` for maintenance, `research`/`spike` for uncertainty, and
+  `design` for unresolved architecture.
+- **Pre-work operational advice** → `class: advisor`; **post-work operational
+  validation** → `class: gate`. The same `role: devops-*` can occupy both
+  classes, just as substrate allows the same role to appear as advisor and gate
+  in different positions.
+
+AWS DevOps Agent's journal/recommendation model maps well onto substrate's
+channel + evidence split: live investigation notes belong in the channel, while
+recommendations, mitigation plans, trace links, evaluation results, and close-time
+lessons must be persisted as structured evidence or followup/root issues. The
+further design work should therefore specify not only a specialist persona, but
+also the evidence schemas and issue-class materialization rules that let gitboard
+render DevOps journals/recommendations without inventing a second work graph.
+
+---
+
 ## 1. Problem & motivation
 
 The specialists roster has **no devops/platform agent**. Operating the Mercury

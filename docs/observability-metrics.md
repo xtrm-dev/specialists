@@ -12,6 +12,24 @@ summary: "Defines additive metrics from Pi RPC surfaced via specialists status/f
 
 # RPC Observability Metrics Contract
 
+## Cross-repo telemetry contract
+
+This file is the specialists-owned metrics contract. It defines what the runtime
+emits for jobs, turns, token usage, tool calls, retries, compactions, model
+changes, extension errors, and related agent lifecycle events.
+
+The platform path is deliberately split:
+
+- `~/projects/mercury/infra/MONITORING.md` and `docs/AGENT_MONITORING.md` own scraping, storage, alerting, dashboard infrastructure, and future Terraform/IaC wiring.
+- `~/dev/gitboard/docs/xtrm-observability-prd.md` owns how these metrics become operator-console panels, links, and agent-authored dashboards.
+- `~/second-mind/1-projects/xtrm/research/agentops-telemetry-for-specialists.md` is the current research note for expanding this contract into AgentOps metrics.
+
+Do not rely on host/container metrics alone for specialist health. Required
+specialist-level signals include queue age, job state, tool-call error rate, MCP
+latency/error rate, model-change history, token/cost totals, retry/compaction
+frequency, worktree cleanup state, and durable result availability.
+
+
 This document defines additive, backward-compatible metrics captured from Pi RPC and surfaced through specialists status/feed/timeline. For KPI analysis recipes, see `.xtrm/skills/default/using-kpi/SKILL.md`.
 
 ## Metric Source Map
