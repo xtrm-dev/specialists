@@ -215,7 +215,7 @@ Run `specialists list` if you need the live registry. Choose by task, not by hab
 | Design/tradeoffs | `overthinker` | The approach is risky, ambiguous, or needs critique. |
 | Implementation | `executor` | The contract is clear enough to write code or docs. |
 | Compliance/code review | `reviewer` | An executor/debugger produced changes that need the final PASS/PARTIAL/FAIL verdict. |
-| Implementation sanity | `code-sanity` | You want a cheap READ_ONLY smell pass for simplicity, type safety, dead code, brittle async/error handling, or maintainability before reviewer. |
+| Implementation sanity | `seconder` | You want a cheap READ_ONLY smell pass for simplicity, type safety, dead code, brittle async/error handling, or maintainability before reviewer. |
 | Security/dependency audit | `security-auditor` | You need threat modeling, secure-code review, package advisory triage, or agent/config security scanning. LOW: scan/read/recommend only. |
 | Multiple review perspectives | `parallel-review` | A critical diff needs independent review passes. |
 | Test execution | `test-runner` | You need suites run and failures interpreted. |
@@ -247,7 +247,7 @@ specialists doctor --check-drift                 # inspect stale .specialists/de
 sp prune-stale-defaults --dry-run                # preview redundant default snapshots
 specialists run <name> --bead <id> --background
 specialists run executor --bead <impl-bead> --background       # worktree auto-provisioned
-specialists run code-sanity --bead <sanity-bead> --job <exec-job> --keep-alive --background
+specialists run seconder --bead <sanity-bead> --job <exec-job> --keep-alive --background
 specialists run security-auditor --bead <security-bead> --job <exec-job> --keep-alive --background
 specialists run reviewer --bead <review-bead> --job <exec-job> --keep-alive --background
 specialists ps
@@ -343,7 +343,7 @@ specialists run executor --worktree --bead <impl> --context-depth 3 --background
 specialists result <exec-job>
 ```
 
-Optional code-sanity pass for implementation smell checks (use when the diff is non-trivial or likely to accumulate agent-code complexity):
+Optional seconder pass for implementation smell checks (use when the diff is non-trivial or likely to accumulate agent-code complexity):
 
 ```bash
 bd create --title "Code sanity check token refresh retry" --type task --priority 3 \
@@ -355,11 +355,11 @@ CONSTRAINTS: At most 5 concrete findings; cite files/symbols/lines where possibl
 VALIDATION: Findings are suitable to paste into specialists resume <exec-job>.
 OUTPUT: OK/FINDINGS/BLOCKED with handoff."
 bd dep add <sanity> <impl>
-specialists run code-sanity --bead <sanity> --job <exec-job> --context-depth 3 --keep-alive --background
+specialists run seconder --bead <sanity> --job <exec-job> --context-depth 3 --keep-alive --background
 specialists result <sanity-job>
 ```
 
-If code-sanity returns `FINDINGS`, resume executor with those concrete instructions, then rerun code-sanity only if the fixes were substantive. Do not treat code-sanity `OK` as reviewer PASS.
+If seconder returns `FINDINGS`, resume executor with those concrete instructions, then rerun seconder only if the fixes were substantive. Do not treat seconder `OK` as reviewer PASS.
 
 Optional security pass when the task touches auth, secrets, input handling, dependency updates, package advisories, agent config, hooks, or exposed endpoints:
 
@@ -492,7 +492,7 @@ Standard loop:
 ```text
 executor --worktree --bead impl
   -> waiting after turn
-optional code-sanity --bead sanity --job exec-job
+optional seconder --bead sanity --job exec-job
   -> OK: continue
   -> FINDINGS: resume executor with exact sanity findings
 optional security-auditor --bead security --job exec-job
@@ -506,7 +506,7 @@ reviewer --bead review --job exec-job
 
 Prefer `sp resume <exec-job>` over a new fix executor when the original job is waiting and context is healthy. Use a new fix bead with `--job <exec-job>` only when the original executor is dead, context exhausted, or a separate audit trail is required.
 
-Code-sanity and security-auditor outputs are advisory inputs to the chain; reviewer output must still be consumed before publishing. Do not treat job completion, code-sanity OK, or security no-findings as equivalent to reviewer acceptance.
+Seconder and security-auditor outputs are advisory inputs to the chain; reviewer output must still be consumed before publishing. Do not treat job completion, seconder OK, or security no-findings as equivalent to reviewer acceptance.
 
 ## Dependency Mapping
 

@@ -39,7 +39,7 @@ read bead → write 7-section contract (child impl bead) → bd dep add parent�
   → sleep 10 && sp ps                              # confirm started, not stuck queued
   → sleep <role-typical from v3> & sp ps          # check (see v3 Monitoring section)
   → sp result <exec-job>                           # consume immediately on transition to waiting
-  → optional advisory passes per v3 (code-sanity if smelly, security-auditor if risk surface)
+  → optional advisory passes per v3 (seconder if smelly, security-auditor if risk surface)
   → write reviewer bead contract → sp run reviewer --bead <review> --job <exec-job> --background
   → sleep 90 & sp ps
   → sp result <reviewer-job>
