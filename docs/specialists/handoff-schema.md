@@ -18,7 +18,7 @@ Role-specific fields:
 - `code-sanity`: `outcome`, `findings[]`
 - `security-auditor`: `outcome`, `findings[]`
 - `test-engineer`: machine-readable block uses behavioral `status` (`tests_written | blocked | source_bug_suspected`), plus `coverage_map[]`, `smoke_e2e_commands[]`, `telemetry_assertions[]`, `test_runner_commands[]`, `known_deferred_paths[]`, `source_bug_suspicions[]`
-- `test-runner`: `pass_count`, `fail_count`, `classification[]`
+- `test-runner`: `pass_count`, `fail_count`, `skip_count`, `commands_executed[]`, `artifact_evidence[]`, `classification[]`
 
 Notes:
 - Keep `reviewer` verdict shape aligned with `reviewer-verdict-format`; do not duplicate its prose rules.
@@ -171,8 +171,11 @@ Notes:
   "verification": ["bunx vitest run src/a.test.ts"],
   "pass_count": 4,
   "fail_count": 0,
+  "skip_count": 0,
+  "commands_executed": ["bunx vitest run src/a.test.ts"],
+  "artifact_evidence": ["logs/test-runner/latest.log", "artifacts/smoke.json"],
   "classification": [
-    {"test": "src/a.test.ts", "classification": "in_scope"}
+    {"test": "src/a.test.ts", "classification": "in_scope", "owner": "test_engineer", "evidence": "assertion mismatch"}
   ]
 }
 ```
