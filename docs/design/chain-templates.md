@@ -16,7 +16,7 @@
 
 1. **Concept** — what a chain template is, and why templates instead of ad-hoc dispatch
 2. **The canonical pipeline** — what every production-diff chain runs, severity-modulated
-3. **The template catalog** — the 13 templates with their canonical resolved chains
+3. **The template catalog** — 15 templates documented (13 `.formula.json` files on disk + 2 designed pending wiring)
 4. **DevOps gates — design pending** — the only genuine gap left to fill
 5. **Composition mechanism** — how the dispatcher resolves a chain shape
 6. **Evolution protocol** — how new templates and lessons are absorbed
@@ -238,7 +238,7 @@ Migration is naming + ownership-transfer; the canonical shape survives unchanged
 
 ## 3. The template catalog
 
-13 default templates ship in `docs/design/roadmap/chain-templates/`. Each is a `.formula.json` file using only `[package]`-tier specialists (cross-repo defaults). Per-repo extension is supported via `extends` (see `chain-templates/README.md` for the market-data `quant-validation` example).
+**15 templates documented in this catalog**: 13 `.formula.json` files currently ship in `docs/design/roadmap/chain-templates/` (§3.1–§3.13 below) + 2 additional templates designed in this canon (`code-with-tests` §3.14 and `test-only` §3.15) that are **pending formula-file authoring** via `unitAI-f9kku` (blocked on `unitAI-sfwe1` shipping test-engineer + test-runner). Each `.formula.json` uses only `[package]`-tier specialists (cross-repo defaults). Per-repo extension is supported via `extends` (see `chain-templates/README.md` for the market-data `quant-validation` example). Until f9kku ships, the §3.14/§3.15 entries are *canon-documented but not yet pourable*; the dispatcher cannot pour them via `bd mol pour` until the formula files exist.
 
 The catalog is **evidence-backed** — every template name maps to a recurring chain shape observed in real session reports. New templates are added through the evolution protocol (§6), not on speculation.
 
@@ -537,7 +537,7 @@ The dispatcher resolves a chain shape deterministically — same inputs always p
 
 This document, the canonical pipeline, and the template catalog are **living artifacts** — they evolve as we learn.
 
-**When to add a new template.** Three or more distinct chains across two or more repositories exhibiting the same Layer-1 shape that none of the existing 13 templates covers cleanly. The pattern must be repeated (not a one-off), stable (not in flux), and distinct (not a degraded form of an existing template). Evidence comes from `.xtrm/reports/*.md` across repos.
+**When to add a new template.** Three or more distinct chains across two or more repositories exhibiting the same Layer-1 shape that none of the existing 15 documented templates covers cleanly. The pattern must be repeated (not a one-off), stable (not in flux), and distinct (not a degraded form of an existing template). Evidence comes from `.xtrm/reports/*.md` across repos.
 
 The new template is added by: (a) drafting a `.formula.json` in `chain-templates/`; (b) adding a §3.N entry to this document with mermaid + use + variables + severity floor + differences from §2 canonical; (c) updating `chain-templates/README.md`; (d) cross-referencing in `using-specialists-v4` SKILL; (e) noting in substrate.md §6.9.10 catalog.
 

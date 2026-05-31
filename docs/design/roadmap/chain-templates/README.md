@@ -10,7 +10,9 @@
 
 ## What's in this directory
 
-13 default chain template files, named `<template>.formula.json`. Each uses only `[package]` tier specialists from `config/specialists/` — these are the cross-repo defaults. Per-repo overrides via `extends` can add custom specialists (see market-data example pattern below).
+**13 chain template `.formula.json` files** currently in this directory (named `<template>.formula.json`). Each uses only `[package]` tier specialists from `config/specialists/` — these are the cross-repo defaults. Per-repo overrides via `extends` can add custom specialists (see market-data example pattern below).
+
+**2 additional templates are designed in the canon but not yet authored as formula files**: `code-with-tests` (dual-writer for production+tests at high+ scrutiny) and `test-only` (single-writer test-engineer chain). Authoring is tracked under `unitAI-f9kku` (blocked on `unitAI-sfwe1` shipping the test-engineer + test-runner specialists). See `docs/design/chain-templates.md` §3.14 + §3.15 for their design.
 
 Catalog table (for full per-template detail with mermaid step diagrams, severity floors, and the canonical pipeline that wraps production-diff chains, see [`chain-templates.md` §3](../../chain-templates.md#3-the-template-catalog)):
 

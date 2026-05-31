@@ -476,7 +476,7 @@ The fusion is architecturally clean: `reviewer.specialist.json` already declared
 
 ---
 
-**Opportunity 16 [absorbed] — SCRUTINY enforcement infrastructure (chain-property required-at-creation; runner pre-script injection; scrutiny-aware composition mandatory rule).** *(Beads: design canon `docs/design/chain-templates.md` §2.2 + substrate.md §6.6 already updated; implementation epic to be filed.)*
+**Opportunity 16 [absorbed] — SCRUTINY enforcement infrastructure (chain-property required-at-creation; runner pre-script injection; scrutiny-aware composition mandatory rule).** *(Beads: design canon `docs/design/chain-templates.md` §2.2 + substrate.md §6.6 already updated; implementation epic `unitAI-rkwpp` filed.)*
 
 **Problem today.** Canon (chain-templates.md §2.2, substrate.md §6.6) declares SCRUTINY a required-field chain-property with the tier set `none|low|medium|high|critical`, with chain-structure modulation rules and required-at-creation enforcement. But the IMPLEMENTATION of those rules is incomplete:
 
