@@ -185,6 +185,8 @@ Each opportunity (a) is implementable without the substrate daemon or `container
 
 **Total ~15 days for Opportunities 1–12.** Sequencing in §10.
 
+> **Post-table additions (2026-05-31).** Opportunities 13, 14, 15, 16 were added after this summary table and are described in §3.2 below — Opp 13 (sp stop --all / sp chain stop, `unitAI-1p0s5`), Opp 14 (canonical-pipeline completion, **[shipped]** via `unitAI-sfwe1`), Opp 15 (seconder fusion, **[shipped]** via `unitAI-4e194`), Opp 16 (SCRUTINY enforcement, in-flight via `unitAI-3l0ac`). A 17th initiative — sp merge / sp epic merge / sp finalize rework — is filed as `unitAI-lyh1b` (kj651 child); described in §10.5 Phase 5 row 19 + replaces the prior dirty-index-diagnostic scope. All five are kj651 parent-child children.
+
 ### 3.2 Per-opportunity detail
 
 **Opportunity 1 — Worktree lease shimmed onto chain-identity.** Add `worktree_lease_held_by` + `worktree_lease_state` to the chain-identity/status row (today jobs; later containers). Writer-step (executor, debugger) + lease `free` → acquire on dispatch, release on `agent_end` (supervisor.ts:1658). Writer-step + lease `held` → queue (`WAIT: lease held by <job>`). Read-only step → do not touch the lease; bind to the path (Opp 2). Closes Asymmetry 2 + much of 4/6; `--worktree`/`--job` mutual-exclusion becomes derivable from lease state. **Reads forward:** §6.9.6 *is* this column moved job→container; migration is rename + ownership transfer.
@@ -843,7 +845,7 @@ After Phase 0: the operator has the chain templates installed, the planner knows
 |---|---|---|---|
 | 17 | bd auto-stage + hooksPath cases + dep/migration verify | §6 / §0 #6 | **`xtrm-h9hqg`** ✓ done (CLOSED 2026-05-27 per D25) |
 | 18 | Orphan worktree cleanup (B-A4), test excludes (B-A5), osv wrapper (B-A6) | §6 | friction-audit-side (~1d) |
-| 19 | `sp merge` dirty-index diagnostic | §5.5 | **Land** per D18 (runway recalibration); 0.5d |
+| 19 | `sp merge` / `sp epic merge` / `sp finalize` rework | §5.5 | **NEW epic `unitAI-lyh1b` filed 2026-05-31 as kj651 child** — supersedes the original "dirty-index diagnostic" scope (D18 runway recalibration) with a fuller rework: structured failure envelopes, conflict-recovery paths, auto-rebase suggestion, soak across 3 repos to remove the `using-specialists-v3` rule #9 prohibition. Decomposition into child beads by planner Pass-1. |
 | 20 | `xt init` auto-runs the bootstrap skill on new repos (per D19) | §6 | xtrm-tools (~0.5d) |
 
 ### Phase 6 — Skills revamp: `using-specialists-v4` as new canonical (~2 days)
@@ -968,20 +970,24 @@ sp epic sync         → REMOVED; nothing to sync (no persisted state)
 
 ## 13. Chain templates concretized — `docs/design/roadmap/chain-templates/` [absorbed]
 
-The 13 evidence-backed chain templates have been concretized as `bd formula` files in `docs/design/roadmap/chain-templates/`. Schema verified against current `bd formula` / `bd cook` / `bd mol pour` engine (all parsing + cooking correctly).
+> **Canonical design source (post-2026-05-31):** [`docs/design/chain-templates.md`](../chain-templates.md) is the **authoritative canonical doc** for the canonical pipeline (§2), template catalog (§3.1–§3.15), DevOps gates design gap (§4), composition mechanism (§5), evolution protocol (§6), and ambidextrous-roles pattern (§3.16). This §13 of the roadmap retains the bd-formula schema findings + the per-repo extension mechanics; semantic / pipeline questions read the canonical doc. The canon was promoted in commits `183f375e` (initial absorb) + `8f06357f` (overlay→canonical restructure) + `e99d7b9c` (D1/D2/Opp 16) + `7848a091` (rev11 multi-writer) and references the now-archived `docs/archive/iron-review-hardening*.{html,md}` lineage.
 
-### 13.1 Catalog (all 13)
+The 15 evidence-backed chain templates (13 originally + 2 added 2026-05-31 by `unitAI-f9kku`) have been concretized as `bd formula` files in `docs/design/roadmap/chain-templates/`. Schema verified against current `bd formula` / `bd cook` / `bd mol pour` engine (all parsing + cooking correctly).
+
+### 13.1 Catalog (all 15)
 
 Catalog vs substrate §6.9.10: substrate names **six archetypes** as a floor; the runtime ships the larger evidence-backed catalog below. **A** = one of the six substrate archetypes; **D** = deliberative/maintenance chain (realizes substrate §6.9.8 deliberative issue types, closes with `decided` / artifact outcome rather than a code diff). The §6.9.4 promotion cycle relates the two: deliberative chains that recur become archetypes.
 
 | File | Class | Steps | Roles | Use case |
 |---|---|---|---|---|
 | `code-quick.formula.json` | A | 2 | reviewer | LOW-blast trivial change |
-| `code-standard.formula.json` | A | 5 | executor, code-sanity, obligations-scanner, reviewer | Production-diff default (Iron pipeline) |
-| `code-with-advisors.formula.json` | A | 8 | + parallel explorer/researcher/overthinker before executor | HIGH/CRITICAL blast, unknown approach |
-| `debug.formula.json` | A | 5 | debugger (non-skippable), code-sanity, obligations-scanner, reviewer | Bug fix |
-| `security-deep.formula.json` | A | 7 | security-auditor (×2: advisor + gate), executor, code-sanity, obligations-scanner, reviewer | Sensitive surface — independently validates substrate §6.9.10's "same role at two classes" |
-| `restitch.formula.json` | A | 4 | debugger, code-sanity, reviewer | Conflict recovery (sixth archetype) |
+| `code-standard.formula.json` | A | 7 | executor, seconder, test-engineer, test-runner, obligations-scanner, reviewer | Production-diff default (canonical QA pipeline) |
+| `code-with-advisors.formula.json` | A | 10 | + parallel explorer/researcher/overthinker before executor, then canonical QA chain | HIGH/CRITICAL blast, unknown approach |
+| `code-with-tests.formula.json` | A | 8 | executor (primary writer) + test-engineer (secondary writer, ambidextrous §3.16) + canonical QA chain + security-auditor (if surface) | Dual-writer chain at high|critical scrutiny (new 2026-05-31, `unitAI-f9kku`) |
+| `test-only.formula.json` | A | 5 | test-engineer (primary writer, ambidextrous §3.16) + seconder + test-runner + reviewer | Pure test-authoring chain, no production diff (new 2026-05-31, `unitAI-f9kku`) |
+| `debug.formula.json` | A | 7 | debugger (non-skippable), seconder, test-engineer, test-runner, obligations-scanner, reviewer | Bug fix |
+| `security-deep.formula.json` | A | 9 | security-auditor (×2: advisor + gate), executor, seconder, test-engineer, test-runner, obligations-scanner, reviewer | Sensitive surface — independently validates substrate §6.9.10's "same role at two classes" |
+| `restitch.formula.json` | A | 6 | debugger, seconder, test-engineer, test-runner, obligations-scanner, reviewer | Conflict recovery (sixth archetype) |
 | `release-prep.formula.json` | D | 3 | changelog-drafter, changelog-keeper | Release [Unreleased] reconcile |
 | `triage.formula.json` | D | 3 | explorer, overthinker | Board health |
 | `research-only.formula.json` | D | 2 | `{{specialist}}` (default explorer; override researcher) | Pure investigation |
