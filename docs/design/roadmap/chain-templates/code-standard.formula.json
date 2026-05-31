@@ -22,7 +22,7 @@
       "id": "root",
       "title": "{{root_title}}",
       "type": "task",
-      "description": "PROBLEM: (fill in: what needs implementing and why)\nSCOPE: {{scope}}\nNON_GOALS: (fill in)\nVALIDATION: (fill in: tests/commands that prove correctness)\nACCEPTANCE: (fill in: externally observable outcome)\n\nProduction-diff scrutiny: {{scrutiny}}. Iron pipeline applies (code-sanity + obligations-scanner mandatory; reviewer may auto-escalate scrutiny on surface match).",
+      "description": "PROBLEM: (fill in: what needs implementing and why)\nSCOPE: {{scope}}\nNON_GOALS: (fill in)\nVALIDATION: (fill in: tests/commands that prove correctness)\nACCEPTANCE: (fill in: externally observable outcome)\n\nProduction-diff scrutiny: {{scrutiny}}. Iron pipeline applies (seconder + obligations-scanner mandatory; reviewer may auto-escalate scrutiny on surface match).",
       "labels": [
         "chain-root",
         "kind:root",

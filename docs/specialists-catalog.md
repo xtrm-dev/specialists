@@ -33,7 +33,7 @@ Run `sp list` for the live merged registry, including user-local specialists. Th
 |---|---:|---|---|---|---|
 | `changelog-drafter` | 1.0.0 | `openai-codex/gpt-5.4-mini` | READ_ONLY | no | Read-only bundle synthesis for `xt release prepare`; no publishing or edits. |
 | `changelog-keeper` | 3.0.0 | `openai-codex/gpt-5.4-mini` | MEDIUM | yes | Fill sparse `[Unreleased]` sections from xt reports and commits; edits `CHANGELOG.md` only. |
-| `code-sanity` | 1.0.0 | `openai-codex/gpt-5.4-mini` | READ_ONLY | yes | Smell pass after executor and before reviewer. |
+| `seconder` | 1.0.0 | `openai-codex/gpt-5.4-mini` | READ_ONLY | yes | Smell pass after executor and before reviewer. |
 | `debugger` | 2.0.0 | `openai-codex/gpt-5.3-codex` | HIGH | yes | Root-cause symptoms, regressions, flaky tests, and unknown-cause bugs before executor. |
 | `executor` | 1.0.0 | `openai-codex/gpt-5.4-mini` | HIGH | yes | Implement already-scoped code or docs changes in an isolated worktree. |
 | `explorer` | 1.1.0 | `nano-gpt/zai-org/glm-5` | READ_ONLY | yes | Map architecture, call flows, dependencies, and implementation options without edits. |
@@ -59,7 +59,7 @@ Run `sp list` for the live merged registry, including user-local specialists. Th
 - **`test-runner` v2 is polyglot.** It detects `package.json`, Python, Rust, and Go manifests and runs the appropriate test command.
 - **`changelog-keeper` v3 is file-scoped.** It fills `CHANGELOG.md` gaps only; version bump/build/tag/publish are owned by the release skill flow.
 - **`researcher` v1.2 is for external truth.** Use it before answering library/API/framework/CLI questions from memory.
-- **`code-sanity` and `security-auditor` are advisory passes.** They provide evidence and findings before final reviewer PASS.
+- **`seconder` and `security-auditor` are advisory passes.** They provide evidence and findings before final reviewer PASS.
 
 ## Discover current runtime catalog
 

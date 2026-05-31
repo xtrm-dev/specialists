@@ -82,7 +82,7 @@ You are an orchestrator, not a hero. Move slowly enough to be correct.
 - Re-read the bead before dispatch. If you cannot defend each contract field out loud, the bead is not ready.
 - Never dispatch a chain you cannot describe end-to-end (which specialist, which bead, which workspace, which merge target).
 - Verify worktree and job state before and after each dispatch with `sp ps` and `git worktree list`. Drift is silent until merge.
-- Treat reviewer `PARTIAL` and code-sanity `FINDINGS` as mandatory fix loops, not advisory noise.
+- Treat reviewer `PARTIAL` and seconder `FINDINGS` as mandatory fix loops, not advisory noise.
 - When unsure, prefer extra explorer/debugger passes over an over-eager executor. Wrong code merged is more expensive than slow research.
 
 ## Project-Specific Specialists
@@ -139,7 +139,7 @@ Routing across chain phases:
 - **Per-chain dispatch**: gates run on the chain's job in canon order: seconder → test-engineer → test-runner → security-auditor (if surface) → obligations-scanner → reviewer. Seconder FAIL/UNCLEAR routes back to writer; test-runner misclassifications route to test-engineer or writer per canon §2.5.
 - **Debugger-restitch**: same gate order on the debugger's job AFTER the restitch turn, BEFORE reviewer.
 - **E2E smoke phase**: cross-cutting security-auditor on cumulative integrated diff if any landed chain touched a sensitive surface.
-- **Reviewer rebuttal**: code-sanity OK and security-auditor "no findings" are legitimate evidence in reviewer rebuttals (cite the advisory job id).
+- **Reviewer rebuttal**: seconder OK and security-auditor "no findings" are legitimate evidence in reviewer rebuttals (cite the advisory job id).
 
 ## Monitoring Long-Running Jobs: Sleep Timers Are Mandatory
 
@@ -157,7 +157,7 @@ Then cycle sleeps based on average completion time per role, checking `sp ps` ea
 | Role | Typical duration | Initial sleep cycle |
 |------|------------------|---------------------|
 | sync-docs, changelog-keeper | 60–180s | `sleep 60` then `sleep 60` |
-| code-sanity, security-auditor | 60–180s | `sleep 60` then `sleep 60` |
+| seconder, security-auditor | 60–180s | `sleep 60` then `sleep 60` |
 | reviewer | 90–240s | `sleep 90` then `sleep 60` |
 | explorer, debugger, planner, overthinker | 120–300s | `sleep 120` then `sleep 90` |
 | executor | 180–600s+ | `sleep 180` then `sleep 120` |
@@ -228,7 +228,7 @@ Do small deterministic edits directly when scope is already obvious and delegati
 | Stash pop where conflict expected | Auto | Stash conflict that destroys session-start state |
 | `bd dolt fsck --revive-journal-with-data-loss` | Never | Always — explicit data-loss warning |
 | `sp merge` / `sp epic merge` | Never (prohibited per rule #9; both known broken) | Always — if you reach for these, stop and use manual git workflow |
-| Skip `code-sanity` (mandatory seconder) on production diff | Auto-skip only on test-only or new-file-only diffs | Always escalate on any other skip — seconder OK is reviewer pre-condition |
+| Skip `seconder` (mandatory seconder) on production diff | Auto-skip only on test-only or new-file-only diffs | Always escalate on any other skip — seconder OK is reviewer pre-condition |
 | Skip `obligations-scanner` on production diff | Auto-skip only on test-only or new-file-only diffs | Always escalate on any other skip |
 | Skip `security-auditor` on diff touching auth/secrets/input/agent-config/lockfiles/migrations | Never | Always — sensitive-surface diffs always get the pass |
 | Manual merge with conflicts | Never auto-resolve | Always escalate to operator (rule #13) |
@@ -381,7 +381,7 @@ Relationship vocabulary for specialist chains:
 | `discovered-from` | Reviewer, debugger, explorer, or test-runner surfaces new follow-up work from a run. | `bd dep add <follow-up> <reviewer-bead> --type discovered-from` |
 | `until` | Time-bounded or event-bounded precondition that blocks only until a stated condition lands. | `bd dep add <chain> <precondition> --type until` |
 | `caused-by` | Failure bead points to the root-cause bead/cluster that explains it. Makes test-failure-map epics navigable. | `bd dep add <failing-test> <root-cause> --type caused-by` |
-| `validates` | Reviewer, test-runner, code-sanity, or security-auditor bead verifies an implementation/debugger bead. | `bd dep add <review> <impl> --type validates` |
+| `validates` | Reviewer, test-runner, seconder, or security-auditor bead verifies an implementation/debugger bead. | `bd dep add <review> <impl> --type validates` |
 | `relates-to` | Bidirectional context edge for conflict clusters, sibling designs, or rebuttal patterns. Prefer dedicated relate command. | `bd dep relate <chain-a> <chain-b>` |
 | `supersedes` | New fix/design/restitch bead replaces an older bead that should no longer be executed or merged. Prefer `bd supersede`. | `bd supersede <old> --with <new>` |
 
@@ -575,7 +575,7 @@ Default chain:
 2. **debugger** reproduces the symptom, writes 3–5 falsifiable hypotheses, and tests one variable at a time. Any temporary instrumentation must be tagged `[DEBUG-<id>]` and removed before completion.
 3. **debugger** applies the minimal root-cause fix on the fault line and verifies via targeted lint/typecheck plus the focused repro.
 4. **test-runner** reruns the original repro/regression command (full-suite validation is its job, not debugger's).
-5. **code-sanity** runs if the fix smells brittle, overcomplicated, or type-risky. **security-auditor** runs if the fix touches auth/session/secrets/input handling, dependency logic, or agent/MCP/hook config.
+5. **seconder** runs if the fix smells brittle, overcomplicated, or type-risky. **security-auditor** runs if the fix touches auth/session/secrets/input handling, dependency logic, or agent/MCP/hook config.
 6. **reviewer** gates the final diff against the bead contract.
 7. If no correct regression-test seam exists, route the architecture/testability finding to **overthinker** or **planner** — do not force a brittle test just to close the loop.
 
@@ -583,7 +583,7 @@ Explorer is useful before diagnosis only when no concrete symptom exists and arc
 
 ## Code-sanity
 
-Use code-sanity when diff smells overcomplicated, brittle, or type-risky, but not yet broken enough for debugger. Use it before final review when you want cheap simplification check without blocking merge.
+Use seconder when diff smells overcomplicated, brittle, or type-risky, but not yet broken enough for debugger. Use it before final review when you want cheap simplification check without blocking merge.
 
 Bead shape:
 
@@ -601,7 +601,7 @@ Use `sp resume <exec-job> "Code-sanity findings: ..."` or `sp resume <exec-job> 
 
 OK is not reviewer PASS. It is advisory only.
 
-What differs: orchestrator uses code-sanity as cheap smell screen, not as merge gate.
+What differs: orchestrator uses seconder as cheap smell screen, not as merge gate.
 
 ## Security-auditor
 
@@ -638,7 +638,7 @@ task -> explore -> impl -> review
 Fix loop:
 
 ```text
-debug -> exec -> code-sanity? -> security-auditor? -> reviewer
+debug -> exec -> seconder? -> security-auditor? -> reviewer
                 ^                                     |
                 |------ resume PARTIAL --------------|
 ```
@@ -751,7 +751,7 @@ specialists result <exec-job>
 # 4. Advisory passes when diff smells risky
 bd create --title "Sanity check token retry diff" --type task --priority 2 --description "PROBLEM: auth retry diff has control-flow and state-handling smell that could hide bug. SUCCESS: findings identify concrete simplification or confirm clean shape. SCOPE: executor diff in auth refresh and login flow. NON_GOALS: no edits, no merge gate decision. CONSTRAINTS: READ_ONLY, keep feedback cheap, cite exact lines or symbols. VALIDATION: findings name concrete improvement or say OK. OUTPUT: FINDINGS with severity or OK with caveats."
 bd dep add <sanity-bead> <impl> --type validates
-specialists run code-sanity --bead <sanity-bead> --job <exec-job> --context-depth 3
+specialists run seconder --bead <sanity-bead> --job <exec-job> --context-depth 3
 
 bd create --title "Security scan token retry diff" --type task --priority 2 --description "PROBLEM: auth refresh code touches secrets and session handling, so security regression is possible. SUCCESS: findings isolate real risk surface or confirm no obvious issue. SCOPE: executor diff in auth, token storage, and login path. NON_GOALS: no edits, no package updates, no destructive scans, no live exploit tests. CONSTRAINTS: LOW permissions, scan-only, recommendations only. VALIDATION: findings cite auth/secrets/input surface and why it matters. OUTPUT: recommendations for executor to apply in separate bead."
 bd dep add <security-bead> <impl> --type validates
@@ -787,7 +787,7 @@ Use epic when multiple implementation chains publish together.
 
 ```bash
 # Epic bead
-bd create --title "Epic: auth refresh hardening" --type epic --priority 2 --description "PROBLEM: login and refresh flow have retry drift, weak error surfacing, and unclear follow-up ownership. SUCCESS: epic closes with stable retry behavior, tests, docs, and clean publish. SCOPE: src/auth/*, src/cli/login.ts, tests/unit/auth/*, docs/auth-refresh.md. NON_GOALS: no auth provider swap, no storage migration, no unrelated session revamp. CONSTRAINTS: preserve token format, keep login compatible, sequence risky fixes before merge, use child beads for parallelizable slices. VALIDATION: targeted tests, code-sanity or security pass if risk appears, final reviewer PASS. OUTPUT: merged chain set with notes on remaining gaps."
+bd create --title "Epic: auth refresh hardening" --type epic --priority 2 --description "PROBLEM: login and refresh flow have retry drift, weak error surfacing, and unclear follow-up ownership. SUCCESS: epic closes with stable retry behavior, tests, docs, and clean publish. SCOPE: src/auth/*, src/cli/login.ts, tests/unit/auth/*, docs/auth-refresh.md. NON_GOALS: no auth provider swap, no storage migration, no unrelated session revamp. CONSTRAINTS: preserve token format, keep login compatible, sequence risky fixes before merge, use child beads for parallelizable slices. VALIDATION: targeted tests, seconder or security pass if risk appears, final reviewer PASS. OUTPUT: merged chain set with notes on remaining gaps."
 
 # Planner bead
 bd create --parent <epic> --title "Plan auth refresh split" --type task --priority 2 --description "PROBLEM: epic needs disjoint chains before executor starts. SUCCESS: child beads, dependency edges, and file ownership split are explicit. SCOPE: auth refresh epic area. NON_GOALS: no code changes. CONSTRAINTS: keep chains disjoint, identify security-sensitive slice, name review order. VALIDATION: plan names beads and edges. OUTPUT: parallel-ready plan with risk notes."
@@ -830,7 +830,7 @@ A chain stays alive until merged or abandoned.
 
 ```text
 executor/debugger -> waiting
-optional code-sanity/security-auditor -> advisory findings
+optional seconder/security-auditor -> advisory findings
 reviewer -> PASS | PARTIAL | FAIL
 ```
 
@@ -844,7 +844,7 @@ Prefer resume over new fix executor when original job is waiting and context is 
 sp resume <exec-job> "Reviewer PARTIAL. Fix only these findings: ..."
 ```
 
-Do not treat job completion, code-sanity OK, security no-findings, or test-runner pass as equivalent to reviewer PASS.
+Do not treat job completion, seconder OK, security no-findings, or test-runner pass as equivalent to reviewer PASS.
 
 What differs: orchestrator uses PASS/PARTIAL/FAIL as real control flow, not just status labels.
 
@@ -936,7 +936,7 @@ Several specialists default to over-cautious verdicts when an evidence gate look
 
 ### General rule
 
-Resume with explicit ammunition: file/line refs, exact rerun output, link to the bead memory documenting the rebuttal pattern. Don't argue from authority; argue from new evidence. **Findings from code-sanity / security-auditor are legitimate rebuttal evidence** — a clean code-sanity OK or a security-auditor "no findings" is concrete proof against a reviewer's "looks too complex" or "may have security risk" gate. Cite the advisory job id when rebutting on this axis.
+Resume with explicit ammunition: file/line refs, exact rerun output, link to the bead memory documenting the rebuttal pattern. Don't argue from authority; argue from new evidence. **Findings from seconder / security-auditor are legitimate rebuttal evidence** — a clean seconder OK or a security-auditor "no findings" is concrete proof against a reviewer's "looks too complex" or "may have security risk" gate. Cite the advisory job id when rebutting on this axis.
 
 **One rebuttal per reviewer is the limit.** Second FAIL after rebuttal means stop and report. After a successful rebuttal, save the rebuttal text to `bd remember "<key>"` so the next session inherits it.
 
@@ -1054,7 +1054,7 @@ After reviewer PASS on a chain whose work lives in `feature/<bead-id>-<slug>` wo
 bd show <bead-id>   # check notes for the verdict
 
 # 2. Verify the chain's gates passed:
-#    code-sanity OK | obligations-scanner CLEAN | security-auditor clean (if surface)
+#    seconder OK | obligations-scanner CLEAN | security-auditor clean (if surface)
 #    Reviewer's Release Checklist block enumerates these.
 
 # 3. Switch to target branch (master or integration/<date>) and FF or merge
@@ -1110,7 +1110,7 @@ The canonical path for landing multiple specialist chains. Operator gets visibil
 3. For each non-overlapping chain (security/critical first, then test-baseline, then features):
    - `git merge --squash <chain-branch>`
    - Restore noise files (see "Chain noise filter checklist" below)
-   - **Advisory passes** before commit: if the staged diff smells overcomplicated/duplicative/type-risky, dispatch `code-sanity --job <last-exec-job-of-chain>`; if it touches auth/secrets/input/agent-config, dispatch `security-auditor --job <last-exec-job-of-chain>`. Link those beads with `bd dep add <advisory-bead> <chain-bead> --type validates`. Apply findings or document why skipped.
+   - **Advisory passes** before commit: if the staged diff smells overcomplicated/duplicative/type-risky, dispatch `seconder --job <last-exec-job-of-chain>`; if it touches auth/secrets/input/agent-config, dispatch `security-auditor --job <last-exec-job-of-chain>`. Link those beads with `bd dep add <advisory-bead> <chain-bead> --type validates`. Apply findings or document why skipped.
    - `git commit -m "<type>(<scope>): <summary> (<bead-id>)"` — one squash commit per chain.
 4. For each overlapping chain, add `bd dep relate <overlap-a> <overlap-b>` if not already linked, then switch to the **debugger-restitch** pattern (next section).
 5. Before publication, run `bd dep cycles`; fix any accidental cycle before operator FF-merges integration → main.
@@ -1158,7 +1158,7 @@ When chain X conflicts with already-landed chain Y on shared files, raw `git che
    git diff integration/<date>...feature/<X>-debugger -- <key-files>
    ```
    Confirm the debugger's diff is **additive** — no reverts of Y's lines.
-5. **Advisory passes**: before landing the restitch, dispatch `code-sanity --job <debugger-job>` if the restitch added control-flow complexity, and `security-auditor --job <debugger-job>` if it touched a sensitive surface. Link each advisory bead back with `bd dep add <advisory> <X-restitch-or-X> --type validates`. Restitched diffs are higher-risk than fresh executor diffs because the debugger had to thread around already-landed work.
+5. **Advisory passes**: before landing the restitch, dispatch `seconder --job <debugger-job>` if the restitch added control-flow complexity, and `security-auditor --job <debugger-job>` if it touched a sensitive surface. Link each advisory bead back with `bd dep add <advisory> <X-restitch-or-X> --type validates`. Restitched diffs are higher-risk than fresh executor diffs because the debugger had to thread around already-landed work.
 6. **Land via FF or cherry-pick the named commit** (NOT the checkpoint commit). Look for the commit with the proper `<type>(<scope>):` message; ignore `checkpoint(debugger):` commits above it.
 7. **Verify tests** before marking done.
 
