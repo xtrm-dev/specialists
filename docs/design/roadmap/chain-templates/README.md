@@ -10,31 +10,31 @@
 
 ## What's in this directory
 
-**13 chain template `.formula.json` files** currently in this directory (named `<template>.formula.json`). Each uses only `[package]` tier specialists from `config/specialists/` — these are the cross-repo defaults. Per-repo overrides via `extends` can add custom specialists (see market-data example pattern below).
+**15 chain template `.formula.json` files** currently in this directory (named `<template>.formula.json`). Each uses only `[package]` tier specialists from `config/specialists/` — these are the cross-repo defaults. Per-repo overrides via `extends` can add custom specialists (see market-data example pattern below).
 
-**2 additional templates are designed in the canon but not yet authored as formula files**: `code-with-tests` (dual-writer for production+tests at high+ scrutiny) and `test-only` (single-writer test-engineer chain). Authoring is tracked under `unitAI-f9kku` (blocked on `unitAI-sfwe1` shipping the test-engineer + test-runner specialists). See `docs/design/chain-templates.md` §3.14 + §3.15 for their design.
+**2 templates are authored in the canon and now shipped as formula files**: `code-with-tests` (dual-writer for production+tests at high+ scrutiny) and `test-only` (single-writer test-engineer chain). Both are wired for the same `test-engineer` specialist via position-specific mandate text in the formula step description.
 
 Catalog table (for full per-template detail with mermaid step diagrams, severity floors, and the canonical pipeline that wraps production-diff chains, see [`chain-templates.md` §3](../../chain-templates.md#3-the-template-catalog)):
 
 | File | Layer-1 roles (canonical pipeline §2 wraps production-diff chains) | Use case |
 |---|---|---|
-| `code-quick.formula.json` | root → reviewer | LOW-blast trivial change (one-line fix, typo) |
-| `code-standard.formula.json` | root → executor → code-sanity → obligations-scanner → reviewer | Production diff default — canonical pipeline applies |
-| `code-with-advisors.formula.json` | root → [explorer + researcher + overthinker] → executor → code-sanity → obligations-scanner → reviewer | HIGH/CRITICAL blast — canonical pipeline applies |
-| `debug.formula.json` | root → debugger (non-skippable) → code-sanity → obligations-scanner → reviewer | Bug fix — canonical pipeline applies; regression test mandatory |
-| `security-deep.formula.json` | root → security-auditor (advisor) → executor → code-sanity → security-auditor (gate) → obligations-scanner → reviewer | Sensitive surface; SCRUTINY: critical default; security-auditor runs twice |
+| `code-quick.formula.json` | root → reviewer *(test-engineer optional/skippable at low scrutiny)* | LOW-blast trivial change (one-line fix, typo) |
+| `code-standard.formula.json` | root → executor → seconder → test-engineer → test-runner → obligations-scanner → reviewer | Production diff default — canonical pipeline applies |
+| `code-with-advisors.formula.json` | root → [explorer + researcher + overthinker] → executor → seconder → test-engineer → test-runner → obligations-scanner → reviewer | HIGH/CRITICAL blast — canonical pipeline applies |
+| `debug.formula.json` | root → debugger (non-skippable) → seconder → test-engineer → test-runner → obligations-scanner → reviewer | Bug fix — canonical pipeline applies; regression test mandatory |
+| `security-deep.formula.json` | root → security-auditor (advisor) → executor → seconder → test-engineer → test-runner → security-auditor (gate) → obligations-scanner → reviewer | Sensitive surface; SCRUTINY: critical default; security-auditor runs twice |
 | `release-prep.formula.json` | root → changelog-drafter → changelog-keeper | Release prep — reconcile [Unreleased] CHANGELOG.md (meta chain, pipeline N/A) |
 | `triage.formula.json` | root → explorer → overthinker | Board health (READ_ONLY, pipeline N/A) |
 | `research-only.formula.json` | root → {explorer or researcher via `{{specialist}}` var} | Investigation (READ_ONLY, pipeline N/A) |
-| `restitch.formula.json` | root → debugger → code-sanity → reviewer | Conflict recovery (inherits original chain's pipeline state) |
+| `restitch.formula.json` | root → debugger → seconder → test-engineer → test-runner → obligations-scanner → reviewer | Conflict recovery (inherits original chain's pipeline state) |
 | `planning.formula.json` | root → planner | Vague initiative → phased bd issue board (pipeline N/A) |
 | `premortem.formula.json` | root → overthinker | Devil's-advocate before risky decisions (pipeline N/A) |
 | `doc-sync.formula.json` | root → sync-docs | Single-document drift-aware update (pipeline N/A) |
 | `memory-hygiene.formula.json` | root → memory-processor | Stale memory consolidation (pipeline N/A) |
 
-**Canonical pipeline.** The Layer-1 shapes above are what the formula files declare. On top of Layer-1, every production-diff chain runs the **canonical pipeline** described in [canon §2](../../chain-templates.md#2-the-canonical-pipeline) — `test-engineer → test-runner → code-sanity → security-auditor (if sensitive) → obligations-scanner → reviewer` with Release Checklist. The canonical pipeline is not opt-in; severity (`SCRUTINY: low|medium|high|critical`) modulates which steps fire. Each template's resolved canonical chain is in [canon §3](../../chain-templates.md#3-the-template-catalog).
+**Canonical pipeline.** The Layer-1 shapes above are what the formula files declare. On top of Layer-1, every production-diff chain runs the **canonical pipeline** described in [canon §2](../../chain-templates.md#2-the-canonical-pipeline) — `seconder → test-engineer → test-runner → security-auditor (if sensitive) → obligations-scanner → reviewer` with Release Checklist. The canonical pipeline is not opt-in; severity (`SCRUTINY: low|medium|high|critical`) modulates which steps fire. Each template's resolved canonical chain is in [canon §3](../../chain-templates.md#3-the-template-catalog).
 
-**Status today.** The Iron portion of the canonical pipeline (code-sanity gate + obligations-scanner + reviewer + auto-escalation) is **in production** via `config/skills/using-specialists-v3/SKILL.md`. The QA portion (`test-engineer` + upgraded `test-runner`) is **imminent-canonical** via epic `unitAI-sfwe1` + formula integration `unitAI-f9kku` (blocked on sfwe1.1/.2). Once shipped, both are canonical pipeline behavior — not "overlays." The one currently-pending piece is **DevOps gates** for operational validation ([canon §4](../../chain-templates.md#4-devops-gates--design-pending)); design fill follows in a separate session segment.
+**Status today.** The Iron portion of the canonical pipeline (seconder gate + obligations-scanner + reviewer + auto-escalation) is **in production** via `config/skills/using-specialists-v3/SKILL.md`. The QA portion (`test-engineer` + upgraded `test-runner`) is now **wired in formula files** via epic `unitAI-f9kku` (blocked on sfwe1.1/.2 at specialist layer). Once shipped, both are canonical pipeline behavior — not "overlays." The one currently-pending piece is **DevOps gates** for operational validation ([canon §4](../../chain-templates.md#4-devops-gates--design-pending)); design fill follows in a separate session segment.
 
 ## Shipping path
 

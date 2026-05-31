@@ -2,11 +2,20 @@
   "formula": "code-standard",
   "type": "workflow",
   "version": 1,
-  "description": "Production-diff default chain (Iron pipeline). root → executor → code-sanity → obligations-scanner → reviewer. For type=task/bug with scrutiny>=medium. security-auditor is dispatched separately if scope hits sensitive surface (auth/secrets/migrations/etc.) — see security-deep template for embedded variant.",
+  "description": "Production-diff default chain (Iron pipeline + QA). root → executor → seconder → test-engineer → test-runner → obligations-scanner → reviewer. For type=task/bug with scrutiny>=medium. security-auditor is dispatched separately if scope hits sensitive surface (auth/secrets/migrations/etc.) — see security-deep template for embedded variant.",
   "vars": {
-    "root_title": { "default": "Untitled work", "required": false },
-    "scope": { "default": "src/**", "required": false },
-    "scrutiny": { "default": "medium", "required": false }
+    "root_title": {
+      "default": "Untitled work",
+      "required": false
+    },
+    "scope": {
+      "default": "src/**",
+      "required": false
+    },
+    "scrutiny": {
+      "default": "medium",
+      "required": false
+    }
   },
   "steps": [
     {
@@ -14,39 +23,104 @@
       "title": "{{root_title}}",
       "type": "task",
       "description": "PROBLEM: (fill in: what needs implementing and why)\nSCOPE: {{scope}}\nNON_GOALS: (fill in)\nVALIDATION: (fill in: tests/commands that prove correctness)\nACCEPTANCE: (fill in: externally observable outcome)\n\nProduction-diff scrutiny: {{scrutiny}}. Iron pipeline applies (code-sanity + obligations-scanner mandatory; reviewer may auto-escalate scrutiny on surface match).",
-      "labels": ["chain-root", "kind:root", "scrutiny:{{scrutiny}}"]
+      "labels": [
+        "chain-root",
+        "kind:root",
+        "scrutiny:{{scrutiny}}"
+      ]
     },
     {
       "id": "executor",
       "title": "executor:{{root_title}}",
       "type": "task",
-      "needs": ["root"],
+      "needs": [
+        "root"
+      ],
       "description": "MANDATE: implement root's deliverable per its contract.\nINPUTS: root's PROBLEM/SCOPE/ACCEPTANCE/VALIDATION; existing code in {{scope}}.\nOUTPUTS: diff on chain branch satisfying ACCEPTANCE; tests passing per VALIDATION; obligations discipline (no unstructured TODO/FIXME in production; structured `// TODO(<bead-id>):` only when bead-tracked in NON_GOALS).\nSCOPE: same as root ({{scope}}).\nNON_GOALS: no `--no-verify`; no edits outside SCOPE; no merge.",
-      "labels": ["chain-step", "kind:step", "role:executor", "edge:implements->root"]
+      "labels": [
+        "chain-step",
+        "kind:step",
+        "role:executor",
+        "edge:implements->root"
+      ]
     },
     {
-      "id": "code-sanity",
-      "title": "code-sanity:{{root_title}}",
+      "id": "seconder",
+      "title": "seconder:{{root_title}}",
       "type": "task",
-      "needs": ["executor"],
-      "description": "MANDATE: Iron-style mandatory seconder gate (READ_ONLY) on executor's diff.\nINPUTS: executor's diff; root contract.\nOUTPUTS: verdict OK or FINDINGS (with file:line + severity). Reviewer treats OK as pre-condition for PASS.\nSCOPE: same as root.\nNON_GOALS: no edits; no broad architecture review; skip allowed only for test-only or new-file-only diffs.",
-      "labels": ["chain-step", "kind:step", "role:code-sanity", "edge:validates->executor", "gate:mandatory"]
+      "needs": [
+        "executor"
+      ],
+      "description": "MANDATE: fused scope/compliance + quality gate on executor's diff.\nINPUTS: executor's diff; root contract.\nOUTPUTS: verdict JSON with scope_verdict, scope_findings, quality_verdict, quality_findings, overall_verdict.\nSCOPE: same as root.\nNON_GOALS: no edits.",
+      "labels": [
+        "chain-step",
+        "kind:step",
+        "role:seconder",
+        "edge:validates->executor",
+        "gate:mandatory"
+      ]
+    },
+    {
+      "id": "test-engineer",
+      "title": "test-engineer:{{root_title}}",
+      "type": "task",
+      "needs": [
+        "seconder"
+      ],
+      "description": "MANDATE: write tests against the actual diff.\nINPUTS: executor's diff; seconder verdict; root contract.\nOUTPUTS: tests, fixtures, smoke scripts, telemetry assertions, exact test-runner commands.\nSCOPE: test paths plus diff-adjacent harness code.\nNON_GOALS: no production source edits unless root explicitly authorizes helper/export change.",
+      "labels": [
+        "chain-step",
+        "kind:step",
+        "role:test-engineer",
+        "edge:validates->executor"
+      ]
+    },
+    {
+      "id": "test-runner",
+      "title": "test-runner:{{root_title}}",
+      "type": "task",
+      "needs": [
+        "test-engineer"
+      ],
+      "description": "MANDATE: execute exact commands supplied by test-engineer and classify failures by owner.\nINPUTS: exact commands; tests; telemetry assertions.\nOUTPUTS: pass/fail counts, artifact evidence, owner routing, rerun guidance.\nSCOPE: requested commands only; fallback must be labeled.\nNON_GOALS: no edits; no scope expansion.",
+      "labels": [
+        "chain-step",
+        "kind:step",
+        "role:test-runner",
+        "gate:mandatory"
+      ]
     },
     {
       "id": "obligations-scanner",
       "title": "obligations-scanner:{{root_title}}",
       "type": "task",
-      "needs": ["executor"],
+      "needs": [
+        "test-runner"
+      ],
       "description": "MANDATE: scan executor's diff for unstructured TODO/FIXME/HACK/XXX/TEMP/WIP/NOTE(release) markers in production code.\nINPUTS: executor's diff.\nOUTPUTS: structured JSON: CLEAN | OBLIGATIONS_FOUND | BLOCKED. Distinguish production vs test/fixture surface; distinguish TRACKED `// TODO(<bead-id>):` vs UNTRACKED.\nSCOPE: same as root.\nNON_GOALS: no edits; reviewer enforces, scanner only reports.",
-      "labels": ["chain-step", "kind:step", "role:obligations-scanner", "edge:validates->executor", "gate:mandatory"]
+      "labels": [
+        "chain-step",
+        "kind:step",
+        "role:obligations-scanner",
+        "edge:validates->executor",
+        "gate:mandatory"
+      ]
     },
     {
       "id": "reviewer",
       "title": "reviewer:{{root_title}}",
       "type": "task",
-      "needs": ["code-sanity", "obligations-scanner"],
-      "description": "MANDATE: compliance reviewer + adversarial code-quality auditor. Iron-aware: SCRUTINY={{scrutiny}}, may auto-escalate on sensitive-surface match.\nINPUTS: executor diff + code-sanity verdict + obligations-scanner output + root contract.\nOUTPUTS: verdict PASS|PARTIAL|FAIL + machine-readable Release Checklist. PARTIAL triggers ddiff re-review after fix.\nSCOPE: same as root.\nNON_GOALS: no edits; do not waive mandatory gates.",
-      "labels": ["chain-step", "kind:step", "role:reviewer", "edge:validates->root", "gate:final"]
+      "needs": [
+        "obligations-scanner"
+      ],
+      "description": "MANDATE: compliance reviewer + adversarial code-quality auditor. Iron-aware: SCRUTINY={{scrutiny}}, may auto-escalate on sensitive-surface match.\nINPUTS: executor diff + seconder verdict + test evidence + obligations-scanner output + root contract.\nOUTPUTS: verdict PASS|PARTIAL|FAIL + machine-readable Release Checklist. PARTIAL triggers ddiff re-review after fix.\nSCOPE: same as root.\nNON_GOALS: no edits; do not waive mandatory gates.",
+      "labels": [
+        "chain-step",
+        "kind:step",
+        "role:reviewer",
+        "edge:validates->root",
+        "gate:final"
+      ]
     }
   ]
 }

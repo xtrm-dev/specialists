@@ -2,11 +2,20 @@
   "formula": "code-with-advisors",
   "type": "workflow",
   "version": 1,
-  "description": "HIGH/CRITICAL blast or unknown approach. Adds explorer + researcher + overthinker as parallel advisors BEFORE executor. Use for scrutiny>=high, cross-cutting refactors, or when external library/API knowledge is needed. Includes full Iron pipeline gates after executor.",
+  "description": "HIGH/CRITICAL blast or unknown approach. Adds explorer + researcher + overthinker as parallel advisors BEFORE executor. Includes seconder + QA pipeline after executor.",
   "vars": {
-    "root_title": { "default": "Untitled work", "required": false },
-    "scope": { "default": "src/**", "required": false },
-    "scrutiny": { "default": "high", "required": false }
+    "root_title": {
+      "default": "Untitled work",
+      "required": false
+    },
+    "scope": {
+      "default": "src/**",
+      "required": false
+    },
+    "scrutiny": {
+      "default": "high",
+      "required": false
+    }
   },
   "steps": [
     {
@@ -14,63 +23,106 @@
       "title": "{{root_title}}",
       "type": "task",
       "description": "PROBLEM: (fill in: what needs implementing and why)\nSCOPE: {{scope}}\nNON_GOALS: (fill in)\nVALIDATION: (fill in)\nACCEPTANCE: (fill in: externally observable outcome)\n\nHIGH/CRITICAL blast. Three parallel advisors (explorer + researcher + overthinker) prep before executor implements. Full Iron pipeline gates apply.",
-      "labels": ["chain-root", "kind:root", "scrutiny:{{scrutiny}}"]
-    },
-    {
-      "id": "explorer",
-      "title": "explorer:{{root_title}}",
-      "type": "task",
-      "needs": ["root"],
-      "description": "MANDATE: READ_ONLY codebase mapper — produce evidence for executor.\nINPUTS: root contract.\nOUTPUTS: structured findings — call flows, dependencies, implementation options, files-to-touch list with file:line. No code edits.\nSCOPE: {{scope}} and adjacent symbols/processes.\nNON_GOALS: no edits; no symptoms-debugging (use debugger for that).",
-      "labels": ["chain-step", "kind:step", "role:explorer", "edge:informs->root", "advisor:pre-impl"]
-    },
-    {
-      "id": "researcher",
-      "title": "researcher:{{root_title}}",
-      "type": "task",
-      "needs": ["root"],
-      "description": "MANDATE: external-source researcher (READ_ONLY). Dispatch when root mentions external libraries / APIs / frameworks where current knowledge matters more than internal code.\nINPUTS: root contract (especially any library/API references).\nOUTPUTS: structured ecosystem evidence — current API syntax, recent migrations, repo internals, recommended patterns. Cite sources.\nSCOPE: external research only; no local code reading.\nNON_GOALS: no edits; no local code mapping (use explorer for that).",
-      "labels": ["chain-step", "kind:step", "role:researcher", "edge:informs->root", "advisor:pre-impl", "optional:true"]
-    },
-    {
-      "id": "overthinker",
-      "title": "overthinker:{{root_title}}",
-      "type": "task",
-      "needs": ["root"],
-      "description": "MANDATE: devil's-advocate review (READ_ONLY). 4-phase chain-of-thought: initial analysis → critique → synthesis → distilled recommendation.\nINPUTS: root contract; explorer findings (if available); researcher evidence (if available).\nOUTPUTS: structured 4-phase analysis. Phase 4 = clear, actionable conclusion with concrete recommendations. Surface uncertainty explicitly.\nSCOPE: design + tradeoff space implied by root.\nNON_GOALS: no edits; no symptom-debugging.",
-      "labels": ["chain-step", "kind:step", "role:overthinker", "edge:informs->root", "advisor:pre-impl"]
+      "labels": [
+        "chain-root",
+        "kind:root",
+        "scrutiny:{{scrutiny}}"
+      ]
     },
     {
       "id": "executor",
       "title": "executor:{{root_title}}",
       "type": "task",
-      "needs": ["explorer", "researcher", "overthinker"],
+      "needs": [
+        "explorer",
+        "researcher",
+        "overthinker"
+      ],
       "description": "MANDATE: implement root's deliverable per its contract, informed by advisor evidence.\nINPUTS: root contract + explorer findings + researcher evidence (if dispatched) + overthinker recommendations.\nOUTPUTS: diff on chain branch satisfying ACCEPTANCE; tests per VALIDATION; obligations discipline.\nSCOPE: same as root.\nNON_GOALS: no `--no-verify`; no scope creep; no merge.",
-      "labels": ["chain-step", "kind:step", "role:executor", "edge:implements->root"]
+      "labels": [
+        "chain-step",
+        "kind:step",
+        "role:executor",
+        "edge:implements->root"
+      ]
     },
     {
-      "id": "code-sanity",
-      "title": "code-sanity:{{root_title}}",
+      "id": "seconder",
+      "title": "seconder:{{root_title}}",
       "type": "task",
-      "needs": ["executor"],
-      "description": "MANDATE: Iron-style mandatory seconder gate (READ_ONLY) on executor's diff.\nINPUTS: executor's diff; root contract.\nOUTPUTS: verdict OK or FINDINGS (with file:line + severity).\nSCOPE: same as root.\nNON_GOALS: no edits; skip allowed only for test-only / new-file-only diffs.",
-      "labels": ["chain-step", "kind:step", "role:code-sanity", "edge:validates->executor", "gate:mandatory"]
+      "needs": [
+        "executor"
+      ],
+      "description": "MANDATE: fused scope/compliance + quality gate on executor's diff.\nINPUTS: executor's diff; root contract.\nOUTPUTS: verdict JSON with scope_verdict, scope_findings, quality_verdict, quality_findings, overall_verdict.\nSCOPE: same as root.\nNON_GOALS: no edits.",
+      "labels": [
+        "chain-step",
+        "kind:step",
+        "role:seconder",
+        "edge:validates->executor",
+        "gate:mandatory"
+      ]
+    },
+    {
+      "id": "test-engineer",
+      "title": "test-engineer:{{root_title}}",
+      "type": "task",
+      "needs": [
+        "seconder"
+      ],
+      "description": "MANDATE: write tests against the actual diff.\nINPUTS: executor's diff; seconder verdict; root contract.\nOUTPUTS: tests, fixtures, smoke scripts, telemetry assertions, exact test-runner commands.\nSCOPE: test paths plus diff-adjacent harness code.\nNON_GOALS: no production source edits unless root explicitly authorizes helper/export change.",
+      "labels": [
+        "chain-step",
+        "kind:step",
+        "role:test-engineer",
+        "edge:validates->executor"
+      ]
+    },
+    {
+      "id": "test-runner",
+      "title": "test-runner:{{root_title}}",
+      "type": "task",
+      "needs": [
+        "test-engineer"
+      ],
+      "description": "MANDATE: execute exact commands supplied by test-engineer and classify failures by owner.\nINPUTS: exact commands; tests; telemetry assertions.\nOUTPUTS: pass/fail counts, artifact evidence, owner routing, rerun guidance.\nSCOPE: requested commands only; fallback must be labeled.\nNON_GOALS: no edits; no scope expansion.",
+      "labels": [
+        "chain-step",
+        "kind:step",
+        "role:test-runner",
+        "gate:mandatory"
+      ]
     },
     {
       "id": "obligations-scanner",
       "title": "obligations-scanner:{{root_title}}",
       "type": "task",
-      "needs": ["executor"],
-      "description": "MANDATE: scan executor's diff for unstructured markers in production code.\nINPUTS: executor's diff.\nOUTPUTS: CLEAN | OBLIGATIONS_FOUND | BLOCKED. Distinguish production vs test; tracked vs untracked markers.\nSCOPE: same as root.\nNON_GOALS: no edits.",
-      "labels": ["chain-step", "kind:step", "role:obligations-scanner", "edge:validates->executor", "gate:mandatory"]
+      "needs": [
+        "test-runner"
+      ],
+      "description": "MANDATE: scan executor's diff for unstructured markers in production code.\nINPUTS: executor's diff.\nOUTPUTS: CLEAN | OBLIGATIONS_FOUND | BLOCKED.\nSCOPE: same as root.\nNON_GOALS: no edits.",
+      "labels": [
+        "chain-step",
+        "kind:step",
+        "role:obligations-scanner",
+        "edge:validates->executor",
+        "gate:mandatory"
+      ]
     },
     {
       "id": "reviewer",
       "title": "reviewer:{{root_title}}",
       "type": "task",
-      "needs": ["code-sanity", "obligations-scanner"],
-      "description": "MANDATE: compliance reviewer + adversarial code-quality auditor at SCRUTINY={{scrutiny}}.\nINPUTS: executor diff + code-sanity verdict + obligations-scanner output + advisor findings + root contract.\nOUTPUTS: verdict PASS|PARTIAL|FAIL + Release Checklist. PARTIAL triggers ddiff re-review.\nSCOPE: same as root.\nNON_GOALS: no edits; do not waive mandatory gates.",
-      "labels": ["chain-step", "kind:step", "role:reviewer", "edge:validates->root", "gate:final"]
+      "needs": [
+        "obligations-scanner"
+      ],
+      "description": "MANDATE: compliance reviewer + adversarial code-quality auditor at SCRUTINY={{scrutiny}}.\nINPUTS: executor diff + seconder verdict + test evidence + obligations-scanner output + advisor findings + root contract.\nOUTPUTS: verdict PASS|PARTIAL|FAIL + Release Checklist. PARTIAL triggers ddiff re-review.\nSCOPE: same as root.\nNON_GOALS: no edits; do not waive mandatory gates.",
+      "labels": [
+        "chain-step",
+        "kind:step",
+        "role:reviewer",
+        "edge:validates->root",
+        "gate:final"
+      ]
     }
   ]
 }
