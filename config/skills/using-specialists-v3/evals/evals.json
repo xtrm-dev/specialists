@@ -84,6 +84,99 @@
         }
       ],
       "files": []
+    },
+    {
+      "id": 5,
+      "eval_name": "qa-routing-test-engineer-primary-writer",
+      "prompt": "Need add a regression test for a failing source change in src/foo.ts. The exact diff is available, the actual implementation is already in another job, and I need post-implementation tests plus exact test-runner commands. The dispatch text says: you are the PRIMARY writer and this is a test-only position. What specialist should handle it, what must it output, and what command list should be handed to test-runner?",
+      "expected_output": "Agent chooses test-engineer, reads actual diff rather than the planning-time test idea only, writes or updates tests/fixtures/smoke harnesses, emits exact copy-pasteable test-runner commands, includes files_changed, coverage_map, smoke_e2e_commands, telemetry_assertions, test_runner_commands, known_deferred_paths, and source_bug_suspicions, and does not patch source.",
+      "assertions": [
+        {
+          "name": "selects_test_engineer",
+          "description": "Agent routes post-implementation test writing to test-engineer"
+        },
+        {
+          "name": "emits_exact_runner_commands",
+          "description": "Agent provides exact copy-pasteable test-runner commands rather than vague suite advice"
+        },
+        {
+          "name": "keeps_source_boundary",
+          "description": "Agent does not edit production source when asked to write tests"
+        }
+      ],
+      "files": [
+        "fixtures/qa-routing/source-regression.diff"
+      ]
+    },
+    {
+      "id": 6,
+      "eval_name": "qa-routing-test-engineer-secondary-writer",
+      "prompt": "Same implementation diff as before. Dispatch text says: you are the SECONDARY writer after the executor and this is a code-with-tests position. What should the same test-engineer do now, and what evidence should it consume from the earlier implementation job?",
+      "expected_output": "Agent still uses test-engineer, but now as secondary writer after the executor; it consumes actual changed files/diff, existing test style, and prior test-runner failures, then updates tests and emits exact test-runner commands without writing source fixes.",
+      "assertions": [
+        {
+          "name": "same_role_different_mandate",
+          "description": "Same specialist behaves differently based on dispatch mandate, not a hardcoded position"
+        },
+        {
+          "name": "consumes_impl_evidence",
+          "description": "Agent references actual diff, test style, and prior test-runner output"
+        },
+        {
+          "name": "does_not_patch_source",
+          "description": "Agent keeps source bug handling routed away from test-engineer"
+        }
+      ],
+      "files": [
+        "fixtures/qa-routing/source-regression.diff"
+      ]
+    },
+    {
+      "id": 7,
+      "eval_name": "qa-routing-test-runner-owner-routing",
+      "prompt": "The test-engineer handed off exact commands and a failure happened. One run is a bad assertion/harness failure; the other is a source-behavior regression. What should test-runner do for each, and what owner category should each failure get?",
+      "expected_output": "Agent says test-runner executes only the exact commands, captures evidence, and classifies the bad assertion/harness case as test_engineer while classifying the source-behavior regression as debugger_or_executor.",
+      "assertions": [
+        {
+          "name": "classifies_test_engineer_owner",
+          "description": "Test or harness failure routes to test_engineer"
+        },
+        {
+          "name": "classifies_source_owner",
+          "description": "Source regression routes to debugger_or_executor"
+        },
+        {
+          "name": "does_not_write_fixes",
+          "description": "Test-runner remains execution/classification only"
+        }
+      ],
+      "files": [
+        "fixtures/qa-routing/bad-test-result.json",
+        "fixtures/qa-routing/source-regression-result.json"
+      ]
+    },
+    {
+      "id": 8,
+      "eval_name": "qa-routing-reviewer-consumes-evidence",
+      "prompt": "Reviewer receives the chain output. What QA evidence must it consume alongside Iron gates before issuing PASS, and what happens if smoke/E2E or telemetry assertions are missing for a devops-style change?",
+      "expected_output": "Agent says reviewer must consume test-engineer output, test-runner classification, smoke/E2E commands or evidence, telemetry/log assertions, obligations-scanner, and security-auditor when applicable, together with Iron gates, and that missing behavioral QA evidence on a devops-style diff should prevent PASS.",
+      "assertions": [
+        {
+          "name": "mentions_qa_evidence_fields",
+          "description": "Agent names the QA evidence fields reviewer must read"
+        },
+        {
+          "name": "treats_missing_behavioral_evidence_as_blocking",
+          "description": "Agent treats absent smoke/E2E or telemetry evidence as a gate failure for devops-style work"
+        },
+        {
+          "name": "ties_into_iron_gates",
+          "description": "Agent explicitly consumes QA evidence together with Iron gates"
+        }
+      ],
+      "files": [
+        "fixtures/qa-routing/reviewer-input.json"
+      ]
     }
   ]
 }

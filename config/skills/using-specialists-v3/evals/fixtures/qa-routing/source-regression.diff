@@ -1,0 +1,18 @@
+diff --git a/src/qa-routing-demo.ts b/src/qa-routing-demo.ts
+index 1111111..2222222 100644
+--- a/src/qa-routing-demo.ts
++++ b/src/qa-routing-demo.ts
+@@ -1,6 +1,10 @@
+ export function shouldRetry(status: number): boolean {
+-  return status >= 500;
++  return status >= 500 || status === 429;
+ }
+ 
+ export function formatTelemetry(event: string): string {
+-  return `event=${event}`;
++  return `event=${event} component=qa-routing-demo redacted=true`;
+ }
++
++export function renderBadge(): string {
++  return 'badge';
++}
