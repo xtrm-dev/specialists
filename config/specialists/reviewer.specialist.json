@@ -2,17 +2,17 @@
   "specialist": {
     "metadata": {
       "name": "reviewer",
-      "version": "1.0.0",
-      "description": "Compliance reviewer + adversarial code-quality auditor. Iron-inspired: SCRUTINY-aware (low|medium|high|critical), auto-escalates on sensitive surfaces, ddiff re-review after PARTIAL, obligations scan, machine-readable Release Checklist. Use after executor/debugger. MEDIUM; verdict is PASS/PARTIAL/FAIL.",
+      "version": "2.0.0",
+      "description": "Adversarial code-quality auditor + Release Checklist enforcer (post-seconder phase-2). Iron-inspired: SCRUTINY-aware (low|medium|high|critical), auto-escalates on sensitive surfaces, ddiff re-review after PARTIAL, obligations scan, machine-readable Release Checklist. Consumes seconder's scope/compliance verdict as upstream pre-condition; runs after executor/debugger + seconder + QA chain. MEDIUM; verdict is PASS/PARTIAL/FAIL.",
       "category": "quality",
       "tags": [
         "audit",
-        "compliance",
-        "requirements",
+        "code-quality",
+        "release-checklist",
         "bead",
         "post-run"
       ],
-      "updated": "2026-05-25"
+      "updated": "2026-05-31"
     },
     "execution": {
       "mode": "tool",

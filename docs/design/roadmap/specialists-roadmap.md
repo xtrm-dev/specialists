@@ -403,7 +403,7 @@ Both verbs surface counts (`stopped 7 waiting, skipped 3 terminal, refused 1 run
 
 ---
 
-**Opportunity 14 [partially shipped] — Canonical-pipeline completion: `test-engineer` step + `test-runner` upgrade + chain_template wiring.** *(Beads: epic `unitAI-sfwe1`, design canon `docs/design/chain-templates.md` §2, formula integration `unitAI-f9kku`.)*
+**Opportunity 14 [shipped 2026-05-31] — Canonical-pipeline completion: `test-engineer` step + `test-runner` upgrade + chain_template wiring.** *(Beads: epic `unitAI-sfwe1`, design canon `docs/design/chain-templates.md` §2, formula integration `unitAI-f9kku`.)*
 
 **Problem today.** The current canonical pipeline (already in production via `using-specialists-v3`) runs `executor → code-sanity → obligations-scanner → reviewer` for production diffs. But there is a precise gap between the writer and `code-sanity`: nobody turns a production diff into the right behavioral tests, smoke/E2E checks, and telemetry assertions before the reviewer sees it. The executor is busy implementing; `test-runner` only executes. As a result, autonomous chains repeatedly ship code whose test/log/telemetry contract was never validated against the actual diff — the reviewer either gives a false PASS (no evidence to gate on) or a noisy PARTIAL (asking the operator to fill the gap manually).
 
@@ -427,11 +427,11 @@ Both verbs surface counts (`stopped 7 waiting, skipped 3 terminal, refused 1 run
 
 **Reads forward.** Substrate §6.9.10 (updated to reference `chain-templates.md` §2 as the canonical pipeline declaration) — when substrate lands, `test-engineer` is a `class:step`, `role:test-engineer` participant within the chain_template's mandatory layer; the two channel-message kinds (`qa_plan_and_tests`, `test_verdict`) join the chain channel when channels v0 ships. The runtime → substrate migration is naming + ownership-transfer; the role and the contract survive unchanged.
 
-**Not in scope of Opp 14.** Two pieces of the canonical pipeline are still pending after Opp 14 ships: (a) **`contract-coverage` gate** between writer and code-sanity (the cheap pre-QA scope/compliance check that protects test-engineer's expensive QA effort from wrong-task waste) — see **Opp 15** below; (b) **DevOps gates** (operational validation for ops-shaped diffs — Dockerfile, compose, hooks, deploy, agent-orchestration) — see canon §4; design fill in a separate session segment + future opportunity.
+**Not in scope of Opp 14.** Two pieces of the canonical pipeline are still pending after Opp 14 ships: (a) the **wrong-task-waste protection** between writer and test-engineer — solved by Opp 15's `seconder` fusion (the seconder's `scope_verdict` is the cheap pre-QA compliance check that gates expensive QA work; the original draft proposed a separate `contract-coverage` extraction step, but the designer handoff 2026-05-31 reversed this to a single fused `seconder` based on empirical workload data); (b) **DevOps gates** (operational validation for ops-shaped diffs — Dockerfile, compose, hooks, deploy, agent-orchestration) — see canon §4; design fill in a separate session segment + future opportunity.
 
 ---
 
-**Opportunity 15 [partially shipped] — `seconder` fusion: collapse `code-sanity` and the reviewer's phase-1 compliance check into one dual-verdict step.** *(Beads: design canon `docs/design/chain-templates.md` §2.3, designer handoff 2026-05-31, implementation epic `unitAI-4e194`.)*
+**Opportunity 15 [shipped 2026-05-31] — `seconder` fusion: collapse `code-sanity` and the reviewer's phase-1 compliance check into one dual-verdict step.** *(Beads: design canon `docs/design/chain-templates.md` §2.3, designer handoff 2026-05-31, implementation epic `unitAI-4e194`.)*
 
 **Problem today.** The current canonical pipeline (Opp 14 completes the QA portion) runs `executor → code-sanity → test-engineer → test-runner → ... → reviewer`. The reviewer's job is two-phase: (1) compliance check against bead requirements, (2) adversarial deep code-quality review. Phase-1 only runs at chain end. Consequence: a single reviewer FAIL on scope/compliance grounds invalidates the entire chain's downstream work — and at high/critical scrutiny, `test-engineer` writing E2E + smoke + telemetry assertions can cost 80–300k tokens. A wrong-task reviewer-FAIL can waste 500k–1M+ tokens (writer + sanity + test-engineer + test-runner + security + obligations + reviewer itself), plus operator-attention cost. The `code-sanity` reorder alone protects against bad-code waste but **not against wrong-task waste** — code-sanity validates code quality, not whether the diff matches the bead's contract.
 
@@ -476,7 +476,7 @@ The fusion is architecturally clean: `reviewer.specialist.json` already declared
 
 ---
 
-**Opportunity 16 [absorbed] — SCRUTINY enforcement infrastructure (chain-property required-at-creation; runner pre-script injection; scrutiny-aware composition mandatory rule).** *(Beads: design canon `docs/design/chain-templates.md` §2.2 + substrate.md §6.6 already updated; implementation epic `unitAI-rkwpp` filed.)*
+**Opportunity 16 [design absorbed; impl pending] — SCRUTINY enforcement infrastructure (chain-property required-at-creation; runner pre-script injection; scrutiny-aware composition mandatory rule).** *(Beads: design canon `docs/design/chain-templates.md` §2.2 + substrate.md §6.6 already updated; implementation epic `unitAI-rkwpp` filed — children .1-.4 OPEN as of 2026-05-31.)*
 
 **Problem today.** Canon (chain-templates.md §2.2, substrate.md §6.6) declares SCRUTINY a required-field chain-property with the tier set `none|low|medium|high|critical`, with chain-structure modulation rules and required-at-creation enforcement. But the IMPLEMENTATION of those rules is incomplete:
 

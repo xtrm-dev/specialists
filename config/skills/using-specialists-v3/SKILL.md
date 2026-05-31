@@ -104,7 +104,7 @@ writer (executor/debugger) → seconder → test-engineer → test-runner → se
 
 Reviewer consumes final QA evidence together with Iron gates: test-engineer output, test-runner classification, smoke/E2E proof, telemetry/log assertions, obligations-scanner, and security-auditor when applicable.
 
-`seconder`, `obligations-scanner`, and `reviewer` are mandatory on production diffs. `test-engineer` + `test-runner` are mandatory once shipped from Opp 14 / `unitAI-sfwe1`; until then they remain the canonical future step pair documented in canon §2. `security-auditor` is mandatory when the diff touches a sensitive surface. Reviewer follows canon §2.2 SCRUTINY as a chain-property, not reviewer input.
+`seconder`, `test-engineer`, `test-runner`, `obligations-scanner`, and `reviewer` are mandatory on production diffs (shipped via Opp 14 / `unitAI-sfwe1` + Opp 15 / `unitAI-4e194`). `security-auditor` is mandatory when the diff touches a sensitive surface. Reviewer follows canon §2.2 SCRUTINY as a chain-property, not reviewer input.
 
 ### Seconder Gate — `seconder`
 

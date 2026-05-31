@@ -60,7 +60,7 @@
       "id": "obligations-scanner",
       "title": "obligations-scanner:{{root_title}}",
       "type": "task",
-      "needs": ["test-runner"],
+      "needs": ["security-auditor"],
       "description": "MANDATE: scan executor's diff for unstructured markers in production code.\nINPUTS: executor's diff.\nOUTPUTS: CLEAN | OBLIGATIONS_FOUND | BLOCKED.\nSCOPE: same as root.\nNON_GOALS: no edits; reviewer enforces, scanner only reports.",
       "labels": ["chain-step", "kind:step", "role:obligations-scanner", "edge:validates->executor", "gate:mandatory"]
     },
