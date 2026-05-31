@@ -1,0 +1,76 @@
+{
+  "formula": "code-with-tests",
+  "type": "workflow",
+  "version": 1,
+  "description": "Dual-writer chain for production-touching diffs at high+ scrutiny. Executor writes production diff, test-engineer writes tests against the actual diff, seconder validates scope+quality, then test-runner executes. Planned secondary-writer mode for test-engineer.",
+  "vars": {
+    "root_title": { "default": "Untitled work", "required": false },
+    "scope": { "default": "src/**", "required": false },
+    "scrutiny": { "default": "high", "required": false }
+  },
+  "steps": [
+    {
+      "id": "root",
+      "title": "{{root_title}}",
+      "type": "task",
+      "description": "PROBLEM: (fill in: what needs implementing and why)\nSCOPE: {{scope}}\nNON_GOALS: (fill in)\nVALIDATION: (fill in)\nACCEPTANCE: (fill in: externally observable outcome)\n\nHigh-blast production diff. Executor writes production changes first; test-engineer follows as secondary writer with tests that validate the diff.",
+      "labels": ["chain-root", "kind:root", "scrutiny:{{scrutiny}}"]
+    },
+    {
+      "id": "executor",
+      "title": "executor:{{root_title}}",
+      "type": "task",
+      "needs": ["root"],
+      "description": "MANDATE: implement root's deliverable per its contract.\nINPUTS: root's PROBLEM/SCOPE/ACCEPTANCE/VALIDATION; existing code in {{scope}}.\nOUTPUTS: diff on chain branch satisfying ACCEPTANCE; obligations discipline.\nSCOPE: same as root ({{scope}}).\nNON_GOALS: no `--no-verify`; no edits outside SCOPE; no merge.",
+      "labels": ["chain-step", "kind:step", "role:executor", "edge:implements->root"]
+    },
+    {
+      "id": "seconder",
+      "title": "seconder:{{root_title}}",
+      "type": "task",
+      "needs": ["executor"],
+      "description": "MANDATE: fused scope/compliance + quality gate on executor's diff.\nINPUTS: executor's diff; root contract.\nOUTPUTS: verdict JSON with scope_verdict, scope_findings, quality_verdict, quality_findings, overall_verdict.\nSCOPE: same as root.\nNON_GOALS: no edits.",
+      "labels": ["chain-step", "kind:step", "role:seconder", "edge:validates->executor", "gate:mandatory"]
+    },
+    {
+      "id": "test-engineer",
+      "title": "test-engineer:{{root_title}}",
+      "type": "task",
+      "needs": ["seconder"],
+      "description": "MANDATE: you are the secondary writer after the executor; write tests that validate their production diff.\nINPUTS: executor's diff; seconder verdict; root contract.\nOUTPUTS: tests, fixtures, smoke scripts, telemetry assertions, exact test-runner commands.\nSCOPE: test paths plus diff-adjacent harness code.\nNON_GOALS: no production source edits unless root explicitly authorizes helper/export change.",
+      "labels": ["chain-step", "kind:step", "role:test-engineer", "edge:validates->executor", "position:secondary-writer"]
+    },
+    {
+      "id": "test-runner",
+      "title": "test-runner:{{root_title}}",
+      "type": "task",
+      "needs": ["test-engineer"],
+      "description": "MANDATE: execute exact commands supplied by test-engineer and classify failures by owner.\nINPUTS: exact commands; tests; telemetry assertions.\nOUTPUTS: pass/fail counts, artifact evidence, owner routing, rerun guidance.\nSCOPE: requested commands only; fallback must be labeled.\nNON_GOALS: no edits; no scope expansion.",
+      "labels": ["chain-step", "kind:step", "role:test-runner", "gate:mandatory"]
+    },
+    {
+      "id": "security-auditor",
+      "title": "security-auditor:{{root_title}}",
+      "type": "task",
+      "needs": ["test-runner"],
+      "description": "MANDATE: LOW-permission validation pass after test-runner for sensitive surfaces.\nINPUTS: executor diff; test evidence; root contract.\nOUTPUTS: verdict OK or FINDINGS.\nSCOPE: same as root.\nNON_GOALS: no edits; no exploits.",
+      "labels": ["chain-step", "kind:step", "role:security-auditor", "edge:validates->executor", "gate:mandatory", "optional:sensitive"]
+    },
+    {
+      "id": "obligations-scanner",
+      "title": "obligations-scanner:{{root_title}}",
+      "type": "task",
+      "needs": ["test-runner"],
+      "description": "MANDATE: scan executor's diff for unstructured markers in production code.\nINPUTS: executor's diff.\nOUTPUTS: CLEAN | OBLIGATIONS_FOUND | BLOCKED.\nSCOPE: same as root.\nNON_GOALS: no edits; reviewer enforces, scanner only reports.",
+      "labels": ["chain-step", "kind:step", "role:obligations-scanner", "edge:validates->executor", "gate:mandatory"]
+    },
+    {
+      "id": "reviewer",
+      "title": "reviewer:{{root_title}}",
+      "type": "task",
+      "needs": ["obligations-scanner"],
+      "description": "MANDATE: compliance reviewer + adversarial code-quality auditor at SCRUTINY={{scrutiny}}; findings_per_writer attribution required.\nINPUTS: executor diff + seconder verdict + test evidence + obligations-scanner output + root contract.\nOUTPUTS: verdict PASS|PARTIAL|FAIL + Release Checklist.\nSCOPE: same as root.\nNON_GOALS: no edits; do not waive mandatory gates.",
+      "labels": ["chain-step", "kind:step", "role:reviewer", "edge:validates->root", "gate:final"]
+    }
+  ]
+}

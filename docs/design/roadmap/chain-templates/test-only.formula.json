@@ -1,0 +1,52 @@
+{
+  "formula": "test-only",
+  "type": "workflow",
+  "version": 1,
+  "description": "Single-writer test chain. test-engineer is primary writer, seconder validates scope+quality, test-runner executes exact commands, reviewer closes. No production diff by default.",
+  "vars": {
+    "root_title": { "default": "Untitled tests", "required": false },
+    "scope": { "default": "tests/**", "required": false },
+    "scrutiny": { "default": "medium", "required": false }
+  },
+  "steps": [
+    {
+      "id": "root",
+      "title": "{{root_title}}",
+      "type": "task",
+      "description": "PROBLEM: (fill in: what tests need adding/updating and why)\nSCOPE: {{scope}}\nNON_GOALS: (fill in)\nVALIDATION: (fill in)\nACCEPTANCE: (fill in: externally observable outcome)\n\nTest-only chain. test-engineer is the primary writer; write tests that satisfy the bead contract.",
+      "labels": ["chain-root", "kind:root", "scrutiny:{{scrutiny}}"]
+    },
+    {
+      "id": "test-engineer",
+      "title": "test-engineer:{{root_title}}",
+      "type": "task",
+      "needs": ["root"],
+      "description": "MANDATE: you are the primary writer; write tests that satisfy the bead contract.\nINPUTS: root contract; existing test style; current implementation diff.\nOUTPUTS: tests, fixtures, smoke scripts, telemetry assertions, exact test-runner commands.\nSCOPE: test paths plus harness/fixture updates.\nNON_GOALS: no production source edits unless root explicitly authorizes helper/export change.",
+      "labels": ["chain-step", "kind:step", "role:test-engineer", "edge:validates->root", "position:primary-writer"]
+    },
+    {
+      "id": "seconder",
+      "title": "seconder:{{root_title}}",
+      "type": "task",
+      "needs": ["test-engineer"],
+      "description": "MANDATE: fused scope/compliance + quality gate on the test diff.\nINPUTS: test-engineer diff; root contract.\nOUTPUTS: verdict JSON with scope_verdict, scope_findings, quality_verdict, quality_findings, overall_verdict.\nSCOPE: same as root.\nNON_GOALS: no edits.",
+      "labels": ["chain-step", "kind:step", "role:seconder", "edge:validates->root", "gate:mandatory"]
+    },
+    {
+      "id": "test-runner",
+      "title": "test-runner:{{root_title}}",
+      "type": "task",
+      "needs": ["seconder"],
+      "description": "MANDATE: execute exact commands supplied by test-engineer and classify failures by owner.\nINPUTS: exact commands; tests; telemetry assertions.\nOUTPUTS: pass/fail counts, artifact evidence, owner routing, rerun guidance.\nSCOPE: requested commands only; fallback must be labeled.\nNON_GOALS: no edits; no scope expansion.",
+      "labels": ["chain-step", "kind:step", "role:test-runner", "gate:mandatory"]
+    },
+    {
+      "id": "reviewer",
+      "title": "reviewer:{{root_title}}",
+      "type": "task",
+      "needs": ["test-runner"],
+      "description": "MANDATE: compliance reviewer for test quality and coverage adequacy at SCRUTINY={{scrutiny}}.\nINPUTS: test diff + seconder verdict + test-runner evidence + root contract.\nOUTPUTS: verdict PASS|PARTIAL|FAIL + Release Checklist.\nSCOPE: same as root.\nNON_GOALS: no edits; do not waive mandatory gates.",
+      "labels": ["chain-step", "kind:step", "role:reviewer", "edge:validates->root", "gate:final"]
+    }
+  ]
+}

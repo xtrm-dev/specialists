@@ -2,11 +2,20 @@
   "formula": "debug",
   "type": "workflow",
   "version": 1,
-  "description": "Bug-fix chain. Replaces executor with debugger (non-skippable opener — fixes the 'orchestrator forgets debugger on a bug' laziness pattern). Iron pipeline gates apply after debugger's fix lands.",
+  "description": "Bug-fix chain. Debugger is non-skippable opener; Iron pipeline gates + QA apply after debugger's fix lands.",
   "vars": {
-    "root_title": { "default": "Untitled bug", "required": false },
-    "scope": { "default": "src/**", "required": false },
-    "scrutiny": { "default": "medium", "required": false }
+    "root_title": {
+      "default": "Untitled bug",
+      "required": false
+    },
+    "scope": {
+      "default": "src/**",
+      "required": false
+    },
+    "scrutiny": {
+      "default": "medium",
+      "required": false
+    }
   },
   "steps": [
     {
@@ -14,39 +23,106 @@
       "title": "{{root_title}}",
       "type": "bug",
       "description": "PROBLEM: (symptom; failing test; regression; error message)\nSCOPE: {{scope}}\nNON_GOALS: (fill in)\nVALIDATION: (failing test that should pass after fix)\nACCEPTANCE: (symptom no longer reproduces; regression test stays green)\n\nBug fix. Debugger is non-skippable opener; do NOT dispatch executor here — executor is for adding features, debugger is for symptom investigation + targeted fix + verification.",
-      "labels": ["chain-root", "kind:root", "type:bug", "scrutiny:{{scrutiny}}"]
+      "labels": [
+        "chain-root",
+        "kind:root",
+        "type:bug",
+        "scrutiny:{{scrutiny}}"
+      ]
     },
     {
       "id": "debugger",
       "title": "debugger:{{root_title}}",
       "type": "task",
-      "needs": ["root"],
+      "needs": [
+        "root"
+      ],
       "description": "MANDATE: root-cause specialist. Diagnose symptom, trace, fix targeted code, verify regression test passes.\nINPUTS: root's PROBLEM + failing test + repro steps.\nOUTPUTS: root-cause analysis + minimal-diff fix + passing regression test on chain branch.\nSCOPE: same as root ({{scope}}); broaden only when root cause requires.\nNON_GOALS: no scope creep; no refactoring beyond fix; no `--no-verify`.",
-      "labels": ["chain-step", "kind:step", "role:debugger", "edge:fixes->root", "non-skippable:true"]
+      "labels": [
+        "chain-step",
+        "kind:step",
+        "role:debugger",
+        "edge:implements->root",
+        "non-skippable:true"
+      ]
     },
     {
-      "id": "code-sanity",
-      "title": "code-sanity:{{root_title}}",
+      "id": "seconder",
+      "title": "seconder:{{root_title}}",
       "type": "task",
-      "needs": ["debugger"],
-      "description": "MANDATE: Iron-style mandatory seconder gate (READ_ONLY) on debugger's fix.\nINPUTS: debugger's diff; root's PROBLEM/ACCEPTANCE.\nOUTPUTS: verdict OK or FINDINGS (with file:line + severity).\nSCOPE: same as root.\nNON_GOALS: no edits; skip allowed only for test-only / new-file-only diffs.",
-      "labels": ["chain-step", "kind:step", "role:code-sanity", "edge:validates->debugger", "gate:mandatory"]
+      "needs": [
+        "debugger"
+      ],
+      "description": "MANDATE: fused scope/compliance + quality gate on debugger's diff.\nINPUTS: debugger's diff; root contract.\nOUTPUTS: verdict JSON with scope_verdict, scope_findings, quality_verdict, quality_findings, overall_verdict.\nSCOPE: same as root.\nNON_GOALS: no edits.",
+      "labels": [
+        "chain-step",
+        "kind:step",
+        "role:seconder",
+        "edge:validates->debugger",
+        "gate:mandatory"
+      ]
+    },
+    {
+      "id": "test-engineer",
+      "title": "test-engineer:{{root_title}}",
+      "type": "task",
+      "needs": [
+        "seconder"
+      ],
+      "description": "MANDATE: write tests against the actual diff.\nINPUTS: debugger's diff; seconder verdict; root contract.\nOUTPUTS: tests, fixtures, smoke scripts, telemetry assertions, exact test-runner commands.\nSCOPE: test paths plus diff-adjacent harness code.\nNON_GOALS: no production source edits unless root explicitly authorizes helper/export change.",
+      "labels": [
+        "chain-step",
+        "kind:step",
+        "role:test-engineer",
+        "edge:validates->debugger"
+      ]
+    },
+    {
+      "id": "test-runner",
+      "title": "test-runner:{{root_title}}",
+      "type": "task",
+      "needs": [
+        "test-engineer"
+      ],
+      "description": "MANDATE: execute exact commands supplied by test-engineer and classify failures by owner.\nINPUTS: exact commands; tests; telemetry assertions.\nOUTPUTS: pass/fail counts, artifact evidence, owner routing, rerun guidance.\nSCOPE: requested commands only; fallback must be labeled.\nNON_GOALS: no edits; no scope expansion.",
+      "labels": [
+        "chain-step",
+        "kind:step",
+        "role:test-runner",
+        "gate:mandatory"
+      ]
     },
     {
       "id": "obligations-scanner",
       "title": "obligations-scanner:{{root_title}}",
       "type": "task",
-      "needs": ["debugger"],
+      "needs": [
+        "test-runner"
+      ],
       "description": "MANDATE: scan debugger's diff for unstructured markers in production code.\nINPUTS: debugger's diff.\nOUTPUTS: CLEAN | OBLIGATIONS_FOUND | BLOCKED.\nSCOPE: same as root.\nNON_GOALS: no edits.",
-      "labels": ["chain-step", "kind:step", "role:obligations-scanner", "edge:validates->debugger", "gate:mandatory"]
+      "labels": [
+        "chain-step",
+        "kind:step",
+        "role:obligations-scanner",
+        "edge:validates->debugger",
+        "gate:mandatory"
+      ]
     },
     {
       "id": "reviewer",
       "title": "reviewer:{{root_title}}",
       "type": "task",
-      "needs": ["code-sanity", "obligations-scanner"],
-      "description": "MANDATE: compliance reviewer at SCRUTINY={{scrutiny}}; debugger-restitch ddiff mode on PARTIAL.\nINPUTS: debugger diff + code-sanity verdict + obligations-scanner output + root contract.\nOUTPUTS: verdict PASS|PARTIAL|FAIL + Release Checklist.\nSCOPE: same as root.\nNON_GOALS: no edits.",
-      "labels": ["chain-step", "kind:step", "role:reviewer", "edge:validates->root", "gate:final"]
+      "needs": [
+        "obligations-scanner"
+      ],
+      "description": "MANDATE: compliance reviewer at SCRUTINY={{scrutiny}}; debugger-restitch ddiff mode on PARTIAL.\nINPUTS: debugger diff + seconder verdict + obligations-scanner output + root contract.\nOUTPUTS: verdict PASS|PARTIAL|FAIL + Release Checklist.\nSCOPE: same as root.\nNON_GOALS: no edits.",
+      "labels": [
+        "chain-step",
+        "kind:step",
+        "role:reviewer",
+        "edge:validates->root",
+        "gate:final"
+      ]
     }
   ]
 }
