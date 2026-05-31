@@ -1,0 +1,13 @@
+{
+  "scope_verdict": "PASS",
+  "scope_findings": [],
+  "quality_verdict": "FAIL",
+  "quality_findings": [
+    {
+      "file": "src/foo.ts",
+      "category": "type-safety",
+      "issue": "Returns null through an unsafe cast from a number function, violating type safety."
+    }
+  ],
+  "overall_verdict": "FAIL"
+}
