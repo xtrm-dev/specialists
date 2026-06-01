@@ -186,6 +186,8 @@ Each opportunity (a) is implementable without the substrate daemon or `container
 **Total ~15 days for Opportunities 1–12.** Sequencing in §10.
 
 > **Post-table additions (2026-05-31).** Opportunities 13, 14, 15, 16 were added after this summary table and are described in §3.2 below — Opp 13 (sp stop --all / sp chain stop, `unitAI-1p0s5`), Opp 14 (canonical-pipeline completion, **[shipped]** via `unitAI-sfwe1`), Opp 15 (seconder fusion, **[shipped]** via `unitAI-4e194`), Opp 16 (SCRUTINY enforcement, in-flight via `unitAI-3l0ac`). A 17th initiative — sp merge / sp epic merge / sp finalize rework — is filed as `unitAI-lyh1b` (kj651 child); described in §10.5 Phase 5 row 19 + replaces the prior dirty-index-diagnostic scope. All five are kj651 parent-child children.
+>
+> **Post-table addition (2026-06-02).** Opportunity 18 — adopt the **5-layer identity model** (`participant_kind` / `participant_role` / `participant_id` / `job_id` / `turn_id`+`tool_call_id`+`event_id`) in observability + envelope, replacing the current conflation of `specialist_id` (a bounded role name) with run identity. Substrate is under-specified on per-activation identity (no Run/Activation entity in §2.1); this opp pins the canonical schema bridge-side. Cost ~1.5 E-D-E, Phase 1 parallel slot. Tracking bead: `unitAI-n2px1`. Co-supersedes the (wrong) Opp 18 framing previously on the feature branch (`specialist_id → participant_id` rename), which conflated role with instance.
 
 ### 3.2 Per-opportunity detail
 
@@ -510,6 +512,54 @@ The fusion is architecturally clean: `reviewer.specialist.json` already declared
 **Sequencing.** Can ship in parallel with Opp 15 (no shared files). Phase 5 alongside Opp 14 + Opp 15.
 
 **Reads forward.** Substrate §6.6 (SCRUTINY chain-property + required-at-creation rule); substrate §5 (seed-phase validator hard-denies missing SCRUTINY at container open — this is the substrate-side enforcement that supersedes Opp 16's bd-side enforcement when substrate lands); substrate §4.3 role 1 (chain coordinator entry-gate verifies tier-vs-scope appropriateness as part of `verdict: ready`). Migration is naming + ownership-transfer; the rule survives unchanged.
+
+**Opportunity 18 — Adopt the 5-layer identity model in observability + envelope.** *(Tracking bead: `unitAI-n2px1`. Co-supersedes the prior, incorrect Opp 18 framing on the feature branch.)*
+
+**Why.** The current `specialist_jobs.specialist_id` column conflates two layers: the bounded role name ("executor") and run identity. Substrate §2.1 lists `Participant` as an entity but does **not** declare a separate Run/Activation entity, leaving the per-execution identity under-specified. The user's invariant (two runs of the same role MUST have different run ids) and the runtime reality (a participant lives across multiple activations — restitch, debugger handoff) require a clean separation. We pin the schema bridge-side so the implementation has an unambiguous target, then propose the same model upstream to substrate (see `unitAI-n2px1`'s sibling substrate-author flag bead).
+
+**The 5 layers (canonical).**
+
+| Layer | Field | Type | Cardinality | Label-safe | Lifetime |
+|---|---|---|---|---|---|
+| 1 | `participant_kind` | bounded enum | low | ✅ yes | constant |
+| 2 | `participant_role` | bounded enum | low | ✅ yes | constant |
+| 3 | `participant_id` | opaque, stable for `(scope, role)` | high | ❌ no | member's membership |
+| 4 | `job_id` (= activation) | opaque, **new each run** | high | ❌ no | one pi-session / one execution |
+| 5 | `turn_id` / `tool_call_id` / `event_id` | opaque, per-fact | very high | ❌ no | one event |
+
+**Per participant kind (cascade).**
+
+| `participant_kind` (L1) | `participant_role` (L2) examples | `participant_id` (L3) derivation | `job_id` (L4) | L3 scope |
+|---|---|---|---|---|
+| `specialist` | `executor`, `reviewer`, `obligations-scanner`, ... | `${chain_id}::${role}` | UUID per `sp run` | chain |
+| `orchestrator` | `claude-code-session`, `auto-mode-harness` | `orch::${session_uuid}` | UUID per session run | session |
+| `pulse_emitter` (in container) | `chain-coordinator-hygiene`, ... | `${container_id}::emitter::${role}` | UUID per emission | container |
+| `pulse_emitter` (extern) | `github-webhook`, `cron-trigger`, ... | opaque UUID registered at setup | UUID per emission | global |
+| `adapter` | `mcp-grafana`, `mcp-gitnexus`, `service-skills-sync`, ... | opaque UUID per registered adapter | UUID per invocation | global |
+| `node_member` | `coordinator`, `<member-role>` | `node::${node_id}::${role}::${member_index}` | UUID per run | node |
+
+**Invariants.**
+
+1. Two activations of the **same role** in the **same scope** ⇒ identical `participant_id`, distinct `job_id`.
+2. Two activations of the **same role** in **different scopes** (e.g. executor of chain A vs chain B) ⇒ distinct `participant_id`.
+3. `participant_kind × participant_role` is **not** sufficient to identify a participant — Layer 3+4 required.
+4. Layer 1+2 are the **only** identity fields eligible as Prometheus/Loki labels. Layer 3+4+5 live in correlation/body, never labels.
+5. **Tool vs participant.** A *tool* is invoked synchronously and has no own lifecycle (e.g. MCP grafana query). A *participant* has its own lifecycle/runs/state (e.g. `service-skills` drift detector). Adapters that are pure tools are NOT participants.
+
+**Scope.**
+
+- `observability.db` schema migration: rename `specialist_jobs.specialist_id` → `participant_role`; add columns `participant_kind` (default `'specialist'`), `participant_id` (derived at write time per L3 derivation table above). `job_id` **unchanged** (it IS the activation, name preserved).
+- `SupervisorStatus` field rename `specialist_id` → `participant_role`; add `participant_kind`, `participant_id`. New fields populated by the supervisor at write time.
+- CLI display surfaces (`sp ps`, `sp log`, `sp feed`, `sp result`): show new fields; accept old `--specialist` filter as alias for `--participant-role` for ~1 release with deprecation warning.
+- Forensic envelope alignment: `participant_kind` + `participant_role` go in §4 resource attributes; `participant_id` joins §5 correlation as available-bridge-era (no longer "reserved for substrate"). See cross-edit to `docs/telemetry/forensic-event-contract.md` in `unitAI-n2px1`.
+- Documentation: `docs/observability-metrics.md`, `docs/cli-reference.md`, `docs/design/substrate/devops-platform-engineering-prd.md` updated to new field names.
+- Tests: schema migration test + alias-filter back-compat smoke + CLI snapshot updates + L3 derivation unit tests (specialist scope-chain, orchestrator scope-session, edge cases).
+
+**Cost: ~1.5 E-D-E.** No hard dep on Opp 1/3/4/10 (different surface). Sequence Phase 1 parallel with Opp 2 / Opp 8 / Opp 11.
+
+**Reads forward.** Substrate §2.2 makes the participant abstract first-class; this opp pre-bridges the per-activation identity that substrate's entity table does not currently declare (under-specification flagged in `unitAI-n2px1`'s sibling bead requesting substrate-author add an Identity Model section to `substrate.md`). Channels v0 (`channels.md` §11) verdict messages already carry `participant_id` natively in the v0 schema; the bridge populates the same field name from Phase 1. State.db rewrite is identity for this surface (no rename, just re-home).
+
+**Closes / unblocks.** Pre-bridges the orchestrator-observability P4 (`unitAI-tpsgv`): the writer appends rows with `participant_kind = 'orchestrator'`, `participant_role = 'claude-code-session'`, `participant_id = orch::${session_uuid}`, `job_id = ${session_run_uuid}` — no schema fork, no additional migration. Cross-link to `unitAI-60w93.1` §3 correlation model: `participant_id` joins the envelope's correlation-field list at the bridge layer.
 
 ---
 

@@ -137,11 +137,29 @@ Specialists-specific resource attributes:
 
 | Field | Example | Notes |
 |---|---|---|
-| `specialist` | `executor` | Bounded by specialist catalog; safe label. |
+| `participant_kind` | `specialist` | **5-layer L1** (canonical). Bounded enum: `specialist`, `orchestrator`, `pulse_emitter`, `adapter`, `node_member`, future. Per kj651 Opp 18. |
+| `participant_role` | `executor` | **5-layer L2** (canonical). Bounded by participant catalog (specialist names, orchestrator role labels, etc.). Per kj651 Opp 18. |
+| `specialist` | `executor` | **DEPRECATED ALIAS** for `participant_role` when `participant_kind=specialist`. Accepted on read for ~1 release with deprecation warning; not emitted on new events post-Opp-18. |
 | `model_provider` | `anthropic` | Bounded provider slug. |
 | `model` | `claude-sonnet-4-6` | Usually bounded enough for logs; metric labels need explicit allowlist. |
 | `worktree_mode` | `isolated` | `none`, `isolated`, `reused`, `unknown`. |
 | `chain_kind` | `chain` | `prep`, `chain`, `node`, or future substrate kind. |
+
+### Identity layers (canonical — pinned by kj651 Opp 18)
+
+The envelope adopts a **5-layer identity model** because substrate §2.1 does not declare a separate Run/Activation entity, leaving per-execution identity under-specified. The bridge pins it:
+
+| Layer | Field(s) | Type | Label-safe | Lifetime |
+|---|---|---|---|---|
+| 1 | `participant_kind` (resource) | bounded enum | ✅ yes | constant |
+| 2 | `participant_role` (resource) | bounded enum | ✅ yes | constant |
+| 3 | `participant_id` (correlation) | opaque, stable for `(scope, role)` | ❌ no | member's membership |
+| 4 | `job_id` (correlation, = activation) | opaque, **new each run** | ❌ no | one pi-session / execution |
+| 5 | `turn_id`, `tool_call_id`, `event_id` (correlation) | opaque, per-fact | ❌ no | one event |
+
+**Invariant.** Two activations of the same `participant_role` in the same scope ⇒ identical `participant_id`, distinct `job_id`. `participant_kind × participant_role` alone is NOT a participant identifier — Layer 3+4 required.
+
+**Tool vs participant.** A *tool* (e.g. MCP grafana query) is invoked synchronously and has no lifecycle of its own — events live inside the calling participant's `job_id` with a `tool_call_id`. A *participant* (e.g. `service-skills` drift detector, an external webhook adapter) has its own runs/state and is identified by its own Layer 3+4 pair.
 
 OpenTelemetry alignment:
 
@@ -171,6 +189,7 @@ Correlation fields are for joining logs/traces/results. They are intentionally h
 | `reused_from_job_id` | startup snapshot | Opaque parent/reuse link. |
 | `worktree_owner_job_id` | startup snapshot | Opaque worktree owner link. |
 | `commit_sha` | git/autocommit events | Full SHA in body/correlation, never metric label. |
+| `participant_id` | derived bridge-side per Opp 18 L3 rule | **5-layer L3** (canonical). Stable across multiple activations of the same `participant_role` in the same scope. Derivation: `${chain_id}::${participant_role}` for specialists; `orch::${session_uuid}` for orchestrator; `${container_id}::emitter::${role}` for in-container pulse emitters; opaque UUID for external pulse emitters / adapters; `node::${node_id}::${role}::${member_index}` for node members. |
 
 ### Reserved for substrate / full tracing
 
@@ -181,7 +200,6 @@ Correlation fields are for joining logs/traces/results. They are intentionally h
 | `span_id` | OTEL/substrate span context | Opaque span id. |
 | `parent_span_id` | OTEL/substrate span context | Opaque causal parent. |
 | `pulse_id` | substrate pulse emitter | Opaque pulse/event-bus id. |
-| `participant_id` | substrate participant | Opaque participant instance id. |
 
 ### Chain identity discipline
 
