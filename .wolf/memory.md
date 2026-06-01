@@ -233,3 +233,7 @@ Created `docs/design/substrate-review.md` to capture current substrate design re
 
 PR #99 failed GitHub OSV on `qs@6.15.1` in `bun.lock` (`GHSA-q8mj-m7cp-5q26`). Fix uses a `qs: 6.15.2` package override and regenerated lockfile. Codex also flagged stop/resume telemetry coupling; supervisor control/status telemetry is now best-effort and resume reports success once FIFO delivery succeeds even if telemetry recording fails.
 
+
+## 2026-06-01 — unitAI-60w93.1 forensic telemetry contract
+- Added docs/telemetry/forensic-event-contract.md defining the ecosystem-wide xtrm.forensic.v1 envelope, Loki/Prometheus boundary, opaque correlation IDs, service_skills/pulse reserved families, canonical JSON examples, and validation checklist.
+- Created follow-up beads unitAI-60w93.2 through unitAI-60w93.5 for shared emitter, schema/cardinality/redaction tests, log/feed normalization, and Prometheus projection design.
