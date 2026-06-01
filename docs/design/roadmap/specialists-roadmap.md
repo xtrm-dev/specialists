@@ -197,7 +197,7 @@ Each opportunity (a) is implementable without the substrate daemon or `container
 
 ```jsonc
 {
-  "chain_id": "feature/forge-eorh.48",
+  "chain_id": "unitAI-abc12",                  // bd molecule id per §0 absorbed model + Opp 10 — NOT a branch name
   "template_name": "code-standard",          // one of the six §6.9.10 defaults
   "resolved_steps": [                          // Layer-1 + Layer-2, in resolved order
     { "role": "executor",            "class": "step",  "status": "completed", "job_id": "cc5fcc" },
@@ -227,6 +227,10 @@ Run `sp chain insert forge-eorh.48 --role <r> --before <step>` to modify.
 
 The shape is persisted (Opp 3) on approve; dispatch follows it. Closes Asymmetry 1 — composition is an explicit action *before* any role is dispatched; the executor is no longer special, just the first step the resolved template happens to start with. **Reads forward:** §6.9.5 / §11.1 `sb chain review/approve/insert` are this command shape 1:1; migration is `sp`→`sb` only. **`sp chain <bead>` accepts root beads only** (per §0 #1), refusing step-beads with a hint to the root — this preempts Asymmetry 5 at the CLI surface.
 
+**[discipline] Shape persistence timing (resolves a minor Opp 3 / Opp 4 inconsistency).** Three write moments on the resolved-shape row, none overlap: (a) `sp chain review` writes the *draft* shape with `composed_at_ms: 0` + `composed_by: null` — mutations via `sp chain insert` are permitted while draft; (b) `sp chain approve` *finalizes* the row by stamping `composed_at_ms` + `composed_by` and freezing the step list (further mutation requires a new review); (c) per-step runs *update* the `status`/`job_id` columns on existing rows but never the list shape. This makes draft-vs-approved distinguishable in the persisted state, matching substrate §6.9.2 / §6.9.5's two-stage gate.
+
+**[discipline] INVARIANT — bd `kind:step` tag ↔ resolved-shape `class` field must agree.** The bd-side label (`kind:step` tag on a step bead per Opp 5) and the sp-side shape entry's `class` field (`"step"` / `"gate"` / future kinds per substrate §6.2.1) are two representations of the same fact. **`sp chain insert` is the sole atomic writer** for the bridge — it pours the step bead with the `kind:step` tag AND appends the shape entry with the corresponding `class` in one transaction. Manual `bd update --tags kind:step` outside `sp chain insert` is **unsupported in the bridge** (would leave the shape stale; no reconciler). The auto-create path (Opp 10) MUST go through `sp chain insert` or its programmatic equivalent. Post-substrate this invariant is trivially preserved because there is one entity (the issue row carries `class` directly per §6.2.1); the bridge maintains it manually.
+
 **Opportunity 5 — Split step contracts from root contracts in bd.** Convention + tooling, not schema change. A **root bead** uses the change-contract sections (`PROBLEM/SCOPE/NON_GOALS/VALIDATION/ACCEPTANCE`). A **step bead** uses `MANDATE/INPUTS/OUTPUTS/SCOPE/NON_GOALS`. **[discipline] The `kind:step` tag is the authoritative discriminator** — the truth lives in the tag, never in string-parsing. The title pattern `<role>:<root-id>` is only a *hint* the Claude Code hook (§4) uses to *propose* the step-contract template; it is never the source of the step-vs-root decision (substrate §6.9.7: the name is not the semantics, membership/metadata is). SKILL.md teaches the distinction; existing reviewer/code-sanity tracking-beads migrate lazily as touched. Closes Asymmetry 5. **Reads forward:** §6.9.2 dual-contract is this split as schema; each step bead becomes a `class: step` issue (§6.2.1) with its step-contract populated.
 
 **Opportunity 6 — Branch/worktree names derive from chain identity.** Switch the writer-branch to `chain/<bead-id>` (no role suffix); worktree `.worktrees/chain-<bead-id>`. If a debugger takes over post-executor (Opp 1 handoff), the branch name doesn't change — the current-writer role moves through the same branch. Closes part of Asymmetry 3. **Reads forward:** §6.9.7 names are `wt/epic-<id>/chain-<id>` — extends `chain-<id>` cleanly when epics land.
@@ -242,7 +246,11 @@ The shape is persisted (Opp 3) on approve; dispatch follows it. Closes Asymmetry
 
 `--force-` taught "this is normal, override"; `--accept- --reason` makes it deliberate and audit-traceable. Closes B5. **Reads forward:** §6.4 precondition gate (precondition violation, not §5.10 recovery); the envelope matches channels.md §10.2; `--accept --reason` survives into `sb dispatch --allow-unready --reason`. **Stretch (non-blocking):** patch-id equivalence detection in `evaluateMergeWorthiness` — if the sibling's commits are patch-id-equal to commits already on master under a different SHA, the guard does not fire (addresses the over-fire root cause, §9.2).
 
-**Opportunity 8 — `step_completed` event with next-step recommendation.** On pi `agent_end`, extend the status row: look up Opp 3's resolved-shape row, find the just-completed step, compute the next from the template, emit `runner_event` kind `step_completed` with `{ completed, next, next_dispatch_command }`. `sp result` (§5.2) and `sp chain` (Opp 4) read it. **[recalibrated/principle]** This is also where **D2** lands: the `step_completed` for an executor carries the executor's *claimed* result, but the chain does not advance on it — it advances when the **independent gate** (code-sanity/local-validation) persists its verdict (§3.1). The executor's self-report is informational; the gate's evidence is authoritative. **[absorbed — bridge until channels v0]** Per `channels.md` §11, the channels-v0 `kind=verdict` discriminated-union message subsumes this event; when channels v0 ships, `step_completed` retires and the reviewer-↔-executor loop runs end-to-end via `verdict` + `finding` channel messages with no `sp resume`. Opp 8 supplies the same next-step recommendation in event form until then. **Reads forward:** §3.1 daemon advances on member `agent_end` from persisted evidence — and ultimately channels v0 `verdict` message.
+**Opportunity 8 — `step_completed` event with next-step recommendation.** On pi `agent_end`, extend the status row: look up Opp 3's resolved-shape row, find the just-completed step, compute the next from the template, emit `runner_event` kind `step_completed` with `{ completed, next, next_dispatch_command }`. `sp result` (§5.2) and `sp chain` (Opp 4) read it. **[recalibrated/principle]** This is also where **D2** lands: the `step_completed` for an executor carries the executor's *claimed* result, but the chain does not advance on it — it advances when the **independent gate** (code-sanity/local-validation) persists its verdict (§3.1). The executor's self-report is informational; the gate's evidence is authoritative. **[absorbed — bridge until channels v0]** Per `channels.md` §11, the channels-v0 `kind=verdict` discriminated-union message subsumes this event; when channels v0 ships, `step_completed` retires and the reviewer-↔-executor loop runs end-to-end via `verdict` + `finding` channel messages with no `sp resume`. Opp 8 supplies the same next-step recommendation in event form until then.
+
+**[discipline] Bridge-era restitch is manual-orchestrator-driven.** Substrate §3.1 has a daemon that auto-advances on member `agent_end` from persisted evidence — that's the target state. The bridge has **no daemon**. So when a gate produces a regression-finding verdict and the resolved-shape (Opp 3) says the next step is `debugger`, the `step_completed.next_dispatch_command` is a **recommendation**, not a trigger — the orchestrator (Claude/human/auto-mode harness) reads it via `sp chain <bead>` or the event stream and **executes the `sp run` manually**. Lease handoff is automatic (executor agent_end → lease free → debugger acquires per Opp 1), but the *invocation* is orchestrator-side until substrate's daemon takes over. This keeps the restitch loop honest in the bridge and avoids inventing a half-daemon that would later need to be unwound.
+
+**Reads forward:** §3.1 daemon advances on member `agent_end` from persisted evidence — and ultimately channels v0 `verdict` message. The orchestrator-side dispatch step disappears when the daemon lands; the recommendation field becomes the input to the daemon's compute-next-step routine.
 
 **Opportunity 9 — Composition-nudge selection-config.** **[adjusted]** A separate selection-config file (e.g. `~/.config/specialists/composition-nudges.yaml`) with `applies_when` matchers (reusing the matcher substrate uses everywhere, §5.2/§6.9.3) producing "consider X because Y" hints. **Not** a `bd formula` section — `applies_when` is silently dropped by the bd binary (verified). Consumed by `sp chain review` (Opp 4) and the Claude hook (§4). Informational, not refusal — raises the question, preserves orchestrator judgment. Closes B2. **Reads forward:** §6.9.5 L1 nudges are the same table evaluated by the composition gate at the selection layer; today's selection-config is the schema substrate adopts as-is.
 
@@ -257,17 +265,17 @@ chain (molecule) exists in bd?
 │       ├── READ_ONLY: refuse → "chain <id> doesn't exist; create it via `bd mol pour` or `sp chain review`"
 │       └── MEDIUM/HIGH: auto-create
 │           ├── `bd mol pour <inferred-formula>` (auto-resolve via Opp 9 nudges; default code-standard)
-│           ├── `sp chain wire-edges <molecule-id>` post-pour helper applies semantic edges (validates/informs/...)
+│           ├── `sp chain wire-edges <molecule-id>` post-pour helper applies semantic edges (validates/informs/...) — **[throwaway shim — see note below]**
 │           ├── provision worktree .worktrees/chain-<molecule-id>
-│           ├── `bd merge-slot create` + acquire for the molecule (Opp 1)
+│           ├── acquire worktree lease (Opp 1) on the chain-identity row via supervisor — **[bridge wording]**
 │           └── dispatch
 │
-└── YES (molecule + merge-slot exist; metadata has worktree_path)
+└── YES (molecule exists; chain-identity row has worktree_path + lease state)
     └── specialist permission?
-        ├── READ_ONLY: bind by path (no merge-slot acquire — Opp 2), dispatch
+        ├── READ_ONLY: bind by path (does NOT acquire lease — Opp 2), dispatch
         └── MEDIUM/HIGH:
-            ├── merge-slot free → acquire, dispatch
-            └── merge-slot held → queue (refuse "WAIT: lease held by <job>; will dispatch on release")
+            ├── lease `free` → acquire, dispatch
+            └── lease `held` → queue (refuse "WAIT: worktree lease held by <job>; will dispatch on release")
 
 sp run <role> --bead <bead-id>          # no --chain
 └── permission?
@@ -275,11 +283,13 @@ sp run <role> --bead <bead-id>          # no --chain
     └── MEDIUM/HIGH: REFUSE → "write-capable specialists require --chain <id> for safety. Use --chain X to bind to existing or auto-create."
 ```
 
-Closes Asymmetries **1 + 2 + 6** by inversion (any specialist can dispatch first into a `--chain` that auto-creates; worktree path lives on the merge-slot, not on the bootstrapping job; reviewer + `--chain X` enters the worktree without needing executor live). Also closes **A4** (orphan worktrees: bound to molecule, reaped on chain close) and **C1** (no more `--job` cwd-mismatch path since `--job` is gone). Closes the **existing safety hole** where dispatch without `--worktree` or `--job` ran in `process.cwd` — for write-capable specialists this could write to master directly; the "MEDIUM/HIGH refuses without --chain" rule closes the gap explicitly.
+Closes Asymmetries **1 + 2 + 6** by inversion (any specialist can dispatch first into a `--chain` that auto-creates; worktree path lives on the chain-identity row, not on the bootstrapping job; reviewer + `--chain X` enters the worktree without needing executor live). Also closes **A4** (orphan worktrees: bound to molecule, reaped on chain close) and **C1** (no more `--job` cwd-mismatch path since `--job` is gone). Closes the **existing safety hole** where dispatch without `--worktree` or `--job` ran in `process.cwd` — for write-capable specialists this could write to master directly; the "MEDIUM/HIGH refuses without --chain" rule closes the gap explicitly.
+
+**[discipline] `sp chain wire-edges` is a throwaway shim, not a rename target.** Unlike every other bridge surface that migrates `sp` → `sb` as a rename pass, `sp chain wire-edges` has no substrate equivalent — substrate creates relationship rows natively at composition time (§6.7 9-edge relationship vocabulary; `sb chain approve` + the chain coordinator §4.3 wire edges as part of the lifecycle). The bridge shim exists *only* because `bd mol pour` produces the parent-child skeleton but not the richer `validates`/`informs`/`discovered-from` edges the canonical pipeline relies on. When substrate lands, `sp chain wire-edges` is **deleted**, not renamed. Implementers: keep the helper minimal — pure mechanical edge-application from a static mapping (formula step `class` → fixed edge kind), no inference logic that would need to be replicated server-side later.
 
 **Grace period (1 release per D14):** `--worktree` and `--job` accepted with stderr deprecation warning, auto-resolving to `--chain <id>`. Hard-cut afterward. **Reads forward:** §6.9.5 + §11.1 `sb dispatch --container <id>` — verb shape identical, `--chain` (bd-molecule today) → `--container` (substrate-container tomorrow). Mechanical rename.
 
-**Cost: ~2 days.** Includes flag handling, deprecation warnings, integration with Opportunity 1+2 (merge-slot lease) + Opp 3 (mol pour) + Opp 6 (chain-derived worktree naming).
+**Cost: ~2 days.** Includes flag handling, deprecation warnings, integration with Opportunity 1+2 (worktree lease) + Opp 3 (mol pour) + Opp 6 (chain-derived worktree naming).
 
 **Opportunity 11 [absorbed] — Pull-not-push memory recall via mandatory rule.**
 
