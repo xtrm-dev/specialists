@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`sp list` / `specialists list` — per-specialist version badge, package-version header, and new-release alert.** Each row now renders the spec's own `metadata.version` as a `[vX.Y.Z]` badge after the name (e.g. `seconder [v1.0.0]`); the header line shows the running package version (`Specialists (N)  specialists v<pkg>`); and when the existing version-check finds a newer published tag, `sp list` prints `new version <v> available, run npm i -g @jaggerxtrm/specialists@<v>`. Rows are sorted alphabetically by name (human output and `--json`, ordering-only — `--json` stays a top-level array, backward-compatible). Reuses `getVersionCheckResult()` (TTY-gated, 6h cache, 2s timeout, silent on failure) via a new `formatListVersionAlert()` — no new network/cache path (`unitAI-k5vx7`).
+
+### Changed
+- **`test-runner` specialist — `task_template` aligns with exact-command-wins scope semantics.** Pinned exact commands from the orchestrator/test-engineer now explicitly win over manifest-detected fallback (fallback is clearly labelled as evidence, never a scope override) (`v2.0.0 → v2.0.1`, PR #102).
+
 ## [v3.17.0] — 2026-05-31
 
 ### Added
