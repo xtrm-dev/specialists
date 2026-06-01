@@ -1,6 +1,7 @@
 // tests/unit/cli/list.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { parseArgs, ArgParseError, computeMedianElapsedMs, getChainPositionBadge, run } from '../../../src/cli/list.js';
+import * as versionCheck from '../../../src/cli/version-check.js';
 import { SpecialistLoader } from '../../../src/specialist/loader.js';
 
 describe('list CLI — parseArgs', () => {
@@ -144,11 +145,14 @@ const sampleSpecialist = {
 describe('list CLI — json shape', () => {
   const originalArgv = process.argv;
   const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-  const listSpy = vi.spyOn(SpecialistLoader.prototype, 'list').mockResolvedValue([sampleSpecialist]);
+  const listSpy = vi.spyOn(SpecialistLoader.prototype, 'list');
+  const versionSpy = vi.spyOn(versionCheck, 'getVersionCheckResult').mockReturnValue(null);
 
   beforeEach(() => {
     logSpy.mockClear();
+    listSpy.mockResolvedValue([sampleSpecialist]);
     listSpy.mockClear();
+    versionSpy.mockClear();
   });
 
   afterEach(() => {
@@ -168,5 +172,55 @@ describe('list CLI — json shape', () => {
 
     expect(withFull).toBe(withoutFull);
     expect(JSON.parse(String(withFull))).toEqual([sampleSpecialist]);
+  });
+});
+
+describe('list CLI — human output', () => {
+  const originalArgv = process.argv;
+  const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+  const versionSpy = vi.spyOn(versionCheck, 'getVersionCheckResult');
+  const alertSpy = vi.spyOn(versionCheck, 'formatListVersionAlert');
+  const notifySpy = vi.spyOn(versionCheck, 'markVersionCheckNotified').mockImplementation(() => {});
+  const listSpy = vi.spyOn(SpecialistLoader.prototype, 'list');
+
+  beforeEach(() => {
+    logSpy.mockClear();
+    versionSpy.mockReset();
+    alertSpy.mockReset();
+    notifySpy.mockClear();
+    listSpy.mockResolvedValue([
+      { ...sampleSpecialist, name: 'zeta', version: '2.0.0' },
+      { ...sampleSpecialist, name: 'alpha', version: '1.2.3' },
+    ]);
+    listSpy.mockClear();
+  });
+
+  afterEach(() => {
+    process.argv = originalArgv;
+  });
+
+  it('sorts by name, shows spec and package versions, and alerts on new release', async () => {
+    const result = {
+      latestTag: 'v9.9.9',
+      localVersion: '3.17.0',
+      cache: { checked_at_ms: Date.now(), latest_tag: 'v9.9.9', notified_for_tag: '' },
+    } satisfies versionCheck.VersionCheckResult;
+
+    versionSpy.mockReturnValue(result);
+    alertSpy.mockReturnValue('new version 9.9.9 available, run npm i -g @jaggerxtrm/specialists@9.9.9');
+
+    process.argv = ['bun', 'src/index.ts', 'list'];
+    await run();
+
+    expect(logSpy.mock.calls[0]?.[0]).toContain('new version 9.9.9 available, run npm i -g @jaggerxtrm/specialists@9.9.9');
+    expect(logSpy.mock.calls.some((call) => String(call[0]).includes('specialists v3.17.0'))).toBe(true);
+    expect(logSpy.mock.calls.some((call) => String(call[0]).includes('alpha') && String(call[0]).includes('[v1.2.3]'))).toBe(true);
+    expect(logSpy.mock.calls.some((call) => String(call[0]).includes('zeta') && String(call[0]).includes('[v2.0.0]'))).toBe(true);
+    const alphaIdx = logSpy.mock.calls.findIndex((call) => String(call[0]).includes('alpha'));
+    const zetaIdx = logSpy.mock.calls.findIndex((call) => String(call[0]).includes('zeta'));
+    expect(alphaIdx).toBeGreaterThanOrEqual(0);
+    expect(zetaIdx).toBeGreaterThanOrEqual(0);
+    expect(alphaIdx).toBeLessThan(zetaIdx);
+    expect(notifySpy).toHaveBeenCalledWith(result);
   });
 });

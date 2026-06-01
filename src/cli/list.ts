@@ -8,6 +8,7 @@ import { SpecialistLoader } from '../specialist/loader.js';
 import { createObservabilitySqliteClient } from '../specialist/observability-sqlite.js';
 import { isJobDead } from '../specialist/supervisor.js';
 import type { SupervisorStatus } from '../specialist/supervisor.js';
+import { formatListVersionAlert, getVersionCheckResult, localVersion, markVersionCheckNotified } from './version-check.js';
 
 // ── ANSI helpers ───────────────────────────────────────────────────────────────
 const dim    = (s: string) => `\x1b[2m${s}\x1b[0m`;
@@ -380,9 +381,18 @@ export async function run(): Promise<void> {
     specialists = specialists.filter(s => s.scope === args.scope);
   }
 
+  specialists = [...specialists].sort((left, right) => left.name.localeCompare(right.name));
+
   if (args.json) {
     console.log(JSON.stringify(specialists, null, 2));
     return;
+  }
+
+  const versionCheckResult = getVersionCheckResult();
+  const versionAlert = versionCheckResult ? formatListVersionAlert(versionCheckResult) : null;
+  if (versionCheckResult && versionAlert) {
+    console.log(versionAlert);
+    markVersionCheckNotified(versionCheckResult);
   }
 
   if (specialists.length === 0) {
@@ -390,7 +400,7 @@ export async function run(): Promise<void> {
     return;
   }
 
-  console.log(`\n${bold(`Specialists (${specialists.length})`)}\n`);
+  console.log(`\n${bold(`Specialists (${specialists.length})`)}  ${dim(`specialists v${localVersion}`)}\n`);
   for (const s of specialists) {
     const scopeTag = s.scope === 'default' ? green('[default]') : s.scope === 'package' ? blue('[package]') : yellow('[user]');
     const permission = permissionBadge(s.permission_required);
@@ -403,7 +413,7 @@ export async function run(): Promise<void> {
     const worktreeTag = args.full ? (s.permission_required === 'MEDIUM' || s.permission_required === 'HIGH' ? '[worktree:auto]' : '[worktree:none]') : '';
     const runtimeStats = args.full ? formatRuntimeStats(runtimeStatsBySpecialist[s.name] ?? {}) : null;
 
-    console.log(`  ${cyan(s.name)}  ${scopeTag}  ${permission}${keepAliveTag}${thinkingTag}  ${model}${worktreeTag ? `  ${worktreeTag}` : ''}${chainPosition ? `  ${chainPosition}` : ''}${runtimeStats ? `  ${runtimeStats}` : ''}`);
+    console.log(`  ${cyan(s.name)} ${dim(`[v${s.version}]`)}  ${scopeTag}  ${permission}${keepAliveTag}${thinkingTag}  ${model}${worktreeTag ? `  ${worktreeTag}` : ''}${chainPosition ? `  ${chainPosition}` : ''}${runtimeStats ? `  ${runtimeStats}` : ''}`);
     console.log(`  ${dim(desc)}`);
 
     if (s.skills.length > 0) {

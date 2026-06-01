@@ -144,6 +144,11 @@ export function formatVersionCheckNudge(result: VersionCheckResult): string | nu
   return `specialists v${result.localVersion} is local; ${result.latestTag} published — consider /update-specialists before substantial work.`;
 }
 
+export function formatListVersionAlert(result: VersionCheckResult): string | null {
+  if (compareVersions(result.latestTag, `v${result.localVersion}`) <= 0) return null;
+  return `new version ${result.latestTag.slice(1)} available, run npm i -g @jaggerxtrm/specialists@${result.latestTag.slice(1)}`;
+}
+
 export function markVersionCheckNotified(result: VersionCheckResult): void {
   if (result.cache.notified_for_tag === result.latestTag) return;
   writeCache({
