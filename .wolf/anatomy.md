@@ -5,6 +5,7 @@
 > Manual update: 2026-05-15T18:39:00Z — unitAI-ashu1 updated config/skills/using-specialists-v3/SKILL.md to clarify clean worktree dependency bootstrap responsibility; do not track node_modules/.venv.
 
 > Manual update: 2026-06-01T18:09:38Z — unitAI-60w93.1 added docs/telemetry/forensic-event-contract.md as xtrm.forensic.v1 shared telemetry envelope SSOT; created follow-ups 60w93.2-.5.
+> Manual update: 2026-06-02T11:24:41Z — unitAI-5537g aligned substrate/vault design with xtrm.forensic.v1: added Activation/Run identity, telemetry fabric §2.8, channel participant_id mapping, and participant_role contract examples.
 > Auto-maintained by OpenWolf. Last scanned: 2026-04-01T04:04:51.100Z
 > Files: 531 tracked | Anatomy hits: 0 | Misses: 0
 > Manual update: 2026-05-13T12:11:27+00:00 — unitAI-sv0v2 updated docs/pi-session.md and docs/specialists-service.md for Pi isolation flags.

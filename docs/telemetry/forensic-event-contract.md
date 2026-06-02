@@ -3,7 +3,7 @@ title: Forensic Telemetry Event Contract
 scope: telemetry-forensics
 category: reference
 version: 1.0.0
-updated: 2026-06-01
+updated: 2026-06-02
 source_of_truth_for:
   - "xtrm forensic telemetry envelope"
   - "specialists runtime JSON events"
@@ -259,7 +259,9 @@ These labels are safe by default if present:
 - `service_component`
 - `deployment_environment`
 - `repo`
-- `specialist`
+- `participant_kind`
+- `participant_role`
+- `specialist` (deprecated read-only alias during bridge period)
 - `event_family`
 - `severity`
 - `status`
@@ -274,6 +276,7 @@ Use `model` as a Loki label only if the deployment has a bounded allowlist and c
 Never use these as Loki labels or Prometheus labels:
 
 - `job_id`
+- `participant_id`
 - `bead_id`
 - `chain_id`
 - `chain_root_job_id`
@@ -301,8 +304,8 @@ Put high-cardinality forensic fields in `correlation` or `body`, not labels. Exa
 {
   "event_family": "tool",
   "event_name": "tool.call.failed",
-  "resource": { "service_name": "specialists", "specialist": "executor" },
-  "correlation": { "job_id": "8f2a1c", "tool_call_id": "toolu_01", "bead_id": "unitAI-abc12" },
+  "resource": { "service_name": "specialists", "participant_kind": "specialist", "participant_role": "executor" },
+  "correlation": { "participant_id": "chain:7f3a::executor", "job_id": "8f2a1c", "tool_call_id": "toolu_01", "bead_id": "unitAI-abc12" },
   "body": { "tool": "bash", "duration_ms": 2401, "exit_code": 2, "result_summary": "tsc failed with 3 diagnostics" }
 }
 ```
@@ -316,7 +319,7 @@ Use narrow selectors first, then JSON parsing/body filters.
 ```
 
 ```logql
-{service_name="specialists", specialist="executor", event_family="tool"} | json | body_tool="bash" | body_is_error=true
+{service_name="specialists", participant_role="executor", event_family="tool"} | json | body_tool="bash" | body_is_error=true
 ```
 
 ```logql
@@ -332,7 +335,7 @@ Use narrow selectors first, then JSON parsing/body filters.
 ```
 
 ```logql
-sum by (specialist) (rate({service_name="specialists", event_family="tool", severity="error"} | json [5m]))
+sum by (participant_role) (rate({service_name="specialists", event_family="tool", severity="error"} | json [5m]))
 ```
 
 ## 8. Prometheus boundary
@@ -343,15 +346,15 @@ Prometheus metrics are projections, not a copy of the forensic body.
 
 | Metric | Type | Labels | Source events/state |
 |---|---|---|---|
-| `xtrm_specialist_jobs_total` | counter | `repo`, `specialist`, `status`, `result` | `job.completed`, `job.failed`, `job.cancelled` |
-| `xtrm_specialist_job_duration_seconds` | histogram | `repo`, `specialist`, `result` | job lifecycle elapsed time |
-| `xtrm_specialist_job_wait_seconds` | histogram | `repo`, `specialist` | queued/waiting state durations |
-| `xtrm_specialist_job_state` | gauge | `repo`, `specialist`, `state` | current `specialist_jobs.status` snapshot |
-| `xtrm_specialist_tool_calls_total` | counter | `repo`, `specialist`, `tool`, `result` | `tool.call.completed/failed` |
-| `xtrm_specialist_tool_duration_seconds` | histogram | `repo`, `specialist`, `tool`, `result` | tool call duration |
-| `xtrm_specialist_mcp_operations_total` | counter | `repo`, `specialist`, `method`, `result` | `mcp.*` events |
-| `xtrm_specialist_mcp_operation_duration_seconds` | histogram | `repo`, `specialist`, `method`, `result` | MCP events/spans |
-| `xtrm_specialist_tokens_total` | counter | `repo`, `specialist`, `model_provider`, `model`, `direction` | `model.token_usage` with model allowlist |
+| `xtrm_specialist_jobs_total` | counter | `repo`, `participant_kind`, `participant_role`, `status`, `result` | `job.completed`, `job.failed`, `job.cancelled` |
+| `xtrm_specialist_job_duration_seconds` | histogram | `repo`, `participant_kind`, `participant_role`, `result` | job lifecycle elapsed time |
+| `xtrm_specialist_job_wait_seconds` | histogram | `repo`, `participant_kind`, `participant_role` | queued/waiting state durations |
+| `xtrm_specialist_job_state` | gauge | `repo`, `participant_kind`, `participant_role`, `state` | current `specialist_jobs.status` snapshot |
+| `xtrm_specialist_tool_calls_total` | counter | `repo`, `participant_kind`, `participant_role`, `tool`, `result` | `tool.call.completed/failed` |
+| `xtrm_specialist_tool_duration_seconds` | histogram | `repo`, `participant_kind`, `participant_role`, `tool`, `result` | tool call duration |
+| `xtrm_specialist_mcp_operations_total` | counter | `repo`, `participant_kind`, `participant_role`, `method`, `result` | `mcp.*` events |
+| `xtrm_specialist_mcp_operation_duration_seconds` | histogram | `repo`, `participant_kind`, `participant_role`, `method`, `result` | MCP events/spans |
+| `xtrm_specialist_tokens_total` | counter | `repo`, `participant_kind`, `participant_role`, `model_provider`, `model`, `direction` | `model.token_usage` with model allowlist |
 | `xtrm_service_skills_drift_total` | counter | `repo`, `service_name`, `drift_tier`, `result` | `service_skills.*` events |
 | `xtrm_pulses_total` | counter | `repo`, `service_name`, `event_family`, `result` | `pulse.*` events |
 
@@ -476,10 +479,12 @@ Migration rule:
     "service_version": "3.14.1",
     "deployment_environment": "local",
     "repo": "specialists",
-    "specialist": "executor",
+    "participant_kind": "specialist",
+    "participant_role": "executor",
     "chain_kind": "chain"
   },
   "correlation": {
+    "participant_id": "chain:7f3a::executor",
     "job_id": "8f2a1c",
     "bead_id": "unitAI-60w93.1",
     "chain_id": "unitAI-molecule1",
@@ -515,11 +520,12 @@ Migration rule:
     "service_component": "pi-session",
     "deployment_environment": "local",
     "repo": "specialists",
-    "specialist": "executor",
+    "participant_kind": "specialist",
+    "participant_role": "executor",
     "model_provider": "anthropic",
     "model": "claude-sonnet-4-6"
   },
-  "correlation": { "job_id": "8f2a1c", "bead_id": "unitAI-60w93.1", "turn_id": "turn-1" },
+  "correlation": { "participant_id": "chain:7f3a::executor", "job_id": "8f2a1c", "bead_id": "unitAI-60w93.1", "turn_id": "turn-1" },
   "body": {
     "turn_index": 1,
     "finish_reason": "tool_use",
@@ -549,9 +555,10 @@ Migration rule:
     "service_component": "pi-tool-runner",
     "deployment_environment": "local",
     "repo": "specialists",
-    "specialist": "executor"
+    "participant_kind": "specialist",
+    "participant_role": "executor"
   },
-  "correlation": { "job_id": "8f2a1c", "bead_id": "unitAI-60w93.1", "tool_call_id": "toolu_01" },
+  "correlation": { "participant_id": "chain:7f3a::executor", "job_id": "8f2a1c", "bead_id": "unitAI-60w93.1", "tool_call_id": "toolu_01" },
   "body": {
     "tool": "bash",
     "duration_ms": 2401,
@@ -581,9 +588,11 @@ Migration rule:
     "service_component": "mcp-client",
     "deployment_environment": "local",
     "repo": "specialists",
-    "specialist": "researcher"
+    "participant_kind": "specialist",
+    "participant_role": "researcher"
   },
   "correlation": {
+    "participant_id": "chain:7f3a::researcher",
     "job_id": "f13d9b",
     "tool_call_id": "mcp-call-17",
     "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
@@ -626,11 +635,12 @@ Migration rule:
     "service_component": "pi-session",
     "deployment_environment": "local",
     "repo": "specialists",
-    "specialist": "executor",
+    "participant_kind": "specialist",
+    "participant_role": "executor",
     "model_provider": "anthropic",
     "model": "claude-sonnet-4-6"
   },
-  "correlation": { "job_id": "8f2a1c", "bead_id": "unitAI-60w93.1", "turn_id": "turn-1" },
+  "correlation": { "participant_id": "chain:7f3a::executor", "job_id": "8f2a1c", "bead_id": "unitAI-60w93.1", "turn_id": "turn-1" },
   "body": {
     "source": "turn_end",
     "input_tokens": 25000,
@@ -662,9 +672,10 @@ Migration rule:
     "service_component": "cli",
     "deployment_environment": "local",
     "repo": "specialists",
-    "specialist": "executor"
+    "participant_kind": "specialist",
+    "participant_role": "executor"
   },
-  "correlation": { "job_id": "8f2a1c", "bead_id": "unitAI-60w93.1" },
+  "correlation": { "participant_id": "chain:7f3a::executor", "job_id": "8f2a1c", "bead_id": "unitAI-60w93.1" },
   "body": {
     "action": "stop",
     "source": "cli",
@@ -696,9 +707,11 @@ Migration rule:
     "service_component": "supervisor",
     "deployment_environment": "local",
     "repo": "specialists",
-    "specialist": "executor"
+    "participant_kind": "specialist",
+    "participant_role": "executor"
   },
   "correlation": {
+    "participant_id": "chain:7f3a::executor",
     "job_id": "8f2a1c",
     "bead_id": "unitAI-60w93.1",
     "commit_sha": "abc123def456"
@@ -730,9 +743,10 @@ Migration rule:
     "service_component": "supervisor",
     "deployment_environment": "local",
     "repo": "specialists",
-    "specialist": "reviewer"
+    "participant_kind": "specialist",
+    "participant_role": "reviewer"
   },
-  "correlation": { "job_id": "9c77aa", "bead_id": "unitAI-review1", "chain_id": "unitAI-molecule1" },
+  "correlation": { "participant_id": "chain:7f3a::reviewer", "job_id": "9c77aa", "bead_id": "unitAI-review1", "chain_id": "unitAI-molecule1" },
   "body": {
     "target": "sqlite",
     "output_bytes": 18400,
@@ -759,9 +773,11 @@ Migration rule:
     "service_name": "service-skills",
     "service_component": "drift_detector",
     "deployment_environment": "local",
-    "repo": "specialists"
+    "repo": "specialists",
+    "participant_kind": "adapter",
+    "participant_role": "service-skills-sync"
   },
-  "correlation": { "bead_id": "unitAI-service1" },
+  "correlation": { "bead_id": "unitAI-service1", "participant_id": "adapter:service-skills-sync" },
   "body": {
     "service": "specialists-runtime",
     "drift_tier": "high",
@@ -789,7 +805,9 @@ Migration rule:
     "service_name": "substrate",
     "service_component": "participant-runtime",
     "deployment_environment": "local",
-    "repo": "specialists"
+    "repo": "specialists",
+    "participant_kind": "pulse_emitter",
+    "participant_role": "devops-advisor"
   },
   "correlation": {
     "container_id": "chain:7f3a",
@@ -821,7 +839,7 @@ Implementation beads that emit, normalize, export, or project these events must 
 
 - Assert forbidden labels from §7 never appear in Loki label config or Prometheus label sets.
 - Assert metric labels are drawn from allowlisted bounded fields.
-- Include regression tests for `job_id`, `bead_id`, `chain_id`, `trace_id`, `span_id`, and `tool_call_id` not becoming labels.
+- Include regression tests for `job_id`, `participant_id`, `bead_id`, `chain_id`, `trace_id`, `span_id`, and `tool_call_id` not becoming labels.
 
 ### Redaction tests
 
@@ -854,7 +872,7 @@ Implementation beads that emit, normalize, export, or project these events must 
 VALIDATION — forensic telemetry contract
 - [ ] New events are emitted through the shared envelope writer, not hand-built JSON.
 - [ ] Every event has schema_version, timestamp, t_unix_ms, severity, event_family, event_name, event_version, resource, correlation, body, redaction.
-- [ ] job_id/bead_id/chain_id/trace_id/span_id/tool_call_id are body/correlation fields only, never labels.
+- [ ] job_id/participant_id/bead_id/chain_id/trace_id/span_id/tool_call_id are body/correlation fields only, never labels.
 - [ ] Resource labels are bounded and match docs/telemetry/forensic-event-contract.md §4/§7.
 - [ ] Redaction tests cover secrets in tool args, command previews, env-like payloads, and error text.
 - [ ] Legacy TimelineEvent records still parse and display.
