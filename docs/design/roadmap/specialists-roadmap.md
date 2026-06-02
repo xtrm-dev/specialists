@@ -72,6 +72,28 @@ The prior revision left nine open questions (old §11). They are now resolved. T
 - **Memory-as-capability (substrate §10.2)** eliminates the memory-curator role entirely — every participant carries the memory-query extension; the chain coordinator distills new memory at close (failure / best-practice memories). Opp 11 D27 is the runtime application of the pull half of this principle today.
 - **Chain-template declares its coordinator model (substrate §6.9.10)** — the 13 formulas in `docs/design/roadmap/chain-templates/` will eventually carry a `chain_coordinator` field naming the coordinator spec; for now they don't (the runtime is still single-orchestrator, no chain coordinator yet).
 
+### Existing bd surface inventory (2026-06-02)
+
+Discovered late via `bd help`: bd already implements primitives that several Opportunities propose to build ex novo. **Discipline going forward: every new sp-side primitive in this roadmap must justify why the existing bd primitive is insufficient.** When the bd primitive fits, the Opportunity reduces to a thin sp wrapper + auto-create wiring, not a new column/table on observability.db.
+
+| bd primitive | What it does | Roadmap opp(s) that should use it | Notes |
+|---|---|---|---|
+| `bd merge-slot` (create / acquire / release / check) | Exclusive-access primitive with `metadata.holder` + priority-queued `metadata.waiters`. One slot per rig (`<prefix>-merge-slot`, labeled `gt:slot`). | **Opp 1** (worktree lease), **Opp 10** (chain auto-create) | Existing intentional reference in Opp 10 — the prior drill fix `unitAI-oa9aa` mistakenly rewrote it as "worktree lease via supervisor"; reverted in `unitAI-i2hot`. Opp 1's `worktree_lease_*` columns are likely **redundant** with bd merge-slot metadata. |
+| `bd gate` (create / check / resolve / list / add-waiter) | Async wait conditions with typed gates: `human` (manual close), `timer` (timeout), `gh:run` (GitHub workflow), `gh:pr` (PR merge), `bead` (cross-rig). Phase rollout 1-4. | **Opp 4** (composition gate), **Opp 8** (step_completed → gate satisfaction), `bd gate add-waiter` covers reviewer-↔-executor loop substrate-style. | `bd gate check` is already the "advance on satisfied" mechanism Opp 8 proposes for the bridge. |
+| `bd swarm` (create / list / status / validate) | "Structured body of work defined by epic + children with DAG"; epic-→-children with dependency graph. | **Opp 4** (chain composition), the molecule mental model in §0 | `bd swarm validate` checks DAG well-formedness — the composition pre-check Opp 4's `sp chain review` proposes. |
+| `bd create --skills <list>` (field) | Required skills declared on issue. | **substrate §10.4** skills-as-capability bridge | No roadmap Opp uses it; D26/D29 talk about skill discipline but never reach for this field. |
+| `bd state` / `bd set-state` | Multi-dimensional state (NOT just status open/closed); creates event + updates label. | **Opp 16** SCRUTINY, future state-dim work | SCRUTINY can be a state dimension instead of a contract field if substrate §6.6 chain-property model lands that way. |
+| `bd wisp-type` (heartbeat/ping/patrol/gc_report/recovery/error/escalation) | TTL ephemeral patterns for short-lived issues subject to GC. | — | New paradigm; not yet referenced in roadmap. May be relevant for orchestrator-observability events. |
+| `bd create` fields not yet leveraged: `acceptance`, `design`, `context`, `due`, `estimate`, `metadata` (custom JSON), `spec-id`, `waits-for` + `waits-for-gate` (fanout) | First-class fields separate from description/notes | **Opp 12** XML contracts proposes embedding much of this in description XML; `waits-for`/`waits-for-gate` may be a cleaner bd-native alternative to Opp 8's event-based hand-off. | The XML-in-description approach (Opp 12) may be reinventing native bd fields. Worth re-evaluating. |
+| `bd federation` | Peer-to-peer federation between workspaces | — | Future cross-repo coordination (`unitAI-eoqxp.5`-shaped) may use this natively. |
+
+**Direct consequence — three Opportunities pending re-evaluation:**
+- **Opp 1** (worktree lease columns on chain-identity row) → almost certainly **subsumed by `bd merge-slot`** with sp adding only the molecule-id↔slot binding at auto-create time. The proposed observability.db columns are unnecessary if `bd merge-slot metadata.holder` and `metadata.waiters` are queried directly.
+- **Opp 4** (`sp chain review/approve/insert` as composition gate) → can be reframed as **thin wrapper over `bd swarm validate` + `bd swarm create` + per-step `bd gate create`**. The CLI verbs stay sp-side for operator UX (`sp chain review` reads better than `bd swarm validate`), but the substance is bd-native.
+- **Opp 8** (`step_completed` event) → can be reframed as **`bd gate add-waiter` + `bd gate check` polling**. Eliminates the need for a new `runner_event` kind on the sp side; bd is already the "gate satisfied → unblock" loop.
+
+A flag bead (`unitAI-i2hot`'s sibling) tracks the per-opp re-evaluation. Implementation effort drops substantially if the re-evaluations land — Opp 1 from ~1 day to ~few hours; Opp 4 from 2 days to ~1 day; Opp 8 from ~1 day to ~few hours. Net runway gain ~2-3 E-D-E.
+
 ---
 
 ## 1. Architectural framing — six asymmetries and how rev-9 resolves them
@@ -269,15 +291,15 @@ chain (molecule) exists in bd?
 │           ├── `bd mol pour <inferred-formula>` (auto-resolve via Opp 9 nudges; default code-standard)
 │           ├── `sp chain wire-edges <molecule-id>` post-pour helper applies semantic edges (validates/informs/...) — **[throwaway shim — see note below]**
 │           ├── provision worktree .worktrees/chain-<molecule-id>
-│           ├── acquire worktree lease (Opp 1) on the chain-identity row via supervisor — **[bridge wording]**
+│           ├── `bd merge-slot create` + `bd merge-slot acquire` for the molecule (Opp 1) — bd's existing exclusive-access primitive; sp does NOT invent a parallel lock
 │           └── dispatch
 │
-└── YES (molecule exists; chain-identity row has worktree_path + lease state)
+└── YES (molecule + merge-slot exist; merge-slot metadata has worktree_path)
     └── specialist permission?
-        ├── READ_ONLY: bind by path (does NOT acquire lease — Opp 2), dispatch
+        ├── READ_ONLY: bind by path (no merge-slot acquire — Opp 2), dispatch
         └── MEDIUM/HIGH:
-            ├── lease `free` → acquire, dispatch
-            └── lease `held` → queue (refuse "WAIT: worktree lease held by <job>; will dispatch on release")
+            ├── merge-slot free → `bd merge-slot acquire`, dispatch
+            └── merge-slot held → queue (refuse "WAIT: merge-slot held by <holder>; will dispatch on release")
 
 sp run <role> --bead <bead-id>          # no --chain
 └── permission?
@@ -291,7 +313,7 @@ Closes Asymmetries **1 + 2 + 6** by inversion (any specialist can dispatch first
 
 **Grace period (1 release per D14):** `--worktree` and `--job` accepted with stderr deprecation warning, auto-resolving to `--chain <id>`. Hard-cut afterward. **Reads forward:** §6.9.5 + §11.1 `sb dispatch --container <id>` — verb shape identical, `--chain` (bd-molecule today) → `--container` (substrate-container tomorrow). Mechanical rename.
 
-**Cost: ~2 days.** Includes flag handling, deprecation warnings, integration with Opportunity 1+2 (worktree lease) + Opp 3 (mol pour) + Opp 6 (chain-derived worktree naming).
+**Cost: ~2 days.** Includes flag handling, deprecation warnings, integration with Opportunity 1+2 (`bd merge-slot` wiring) + Opp 3 (mol pour) + Opp 6 (chain-derived worktree naming).
 
 **Opportunity 11 [absorbed] — Pull-not-push memory recall via mandatory rule.**
 
