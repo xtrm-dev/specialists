@@ -12,6 +12,8 @@ summary: "Defines additive metrics from Pi RPC surfaced via specialists status/f
 
 # RPC Observability Metrics Contract
 
+> **Bridge-era note (2026-06-02):** this file documents the current RPC/timeline metrics emitted by specialists. New Prometheus-facing metric design lives in `docs/telemetry/prometheus-projection-contract.md`, and forensic event shape lives in `docs/telemetry/forensic-event-contract.md`. Keep this file for source mapping/backward compatibility until the projection exporter lands.
+
 ## Cross-repo telemetry contract
 
 This file is the specialists-owned metrics contract. It defines what the runtime

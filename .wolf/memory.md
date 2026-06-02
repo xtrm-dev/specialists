@@ -241,3 +241,7 @@ PR #99 failed GitHub OSV on `qs@6.15.1` in `bun.lock` (`GHSA-q8mj-m7cp-5q26`). F
 ## 2026-06-02 — unitAI-5537g substrate telemetry consistency pass
 - Formalized substrate vault design around xtrm.forensic.v1: substrate_design_it.md now declares Activation/Run, §2.8 telemetry/traceability fabric, pulse forensic events, and session-close reports as evidence refs.
 - channels.md now maps participant_key/author_key/target_key to participant_id (L3) and job_id to activation (L4). forensic-event-contract examples/labels now prefer participant_kind/participant_role over deprecated specialist.
+
+## 2026-06-02 — unitAI-60w93.5 Prometheus projection contract
+- Added docs/telemetry/prometheus-projection-contract.md defining low-cardinality xtrm Prometheus metrics, allowlisted labels, forbidden correlation labels, buckets, exporter architecture, SLO candidates, and ownership split.
+- Linked forensic-event-contract.md and observability-metrics.md to the projection contract; created follow-ups unitAI-60w93.6 exporter prototype and unitAI-60w93.7 infra/console handoff.

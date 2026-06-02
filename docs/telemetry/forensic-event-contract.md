@@ -340,7 +340,8 @@ sum by (participant_role) (rate({service_name="specialists", event_family="tool"
 
 ## 8. Prometheus boundary
 
-Prometheus metrics are projections, not a copy of the forensic body.
+Prometheus metrics are projections, not a copy of the forensic body. The detailed projection/exporter contract is `docs/telemetry/prometheus-projection-contract.md`; this section keeps only the boundary rules and seed examples.
+
 
 ### Good projections
 
