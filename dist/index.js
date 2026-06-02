@@ -19338,6 +19338,349 @@ function resolveCurrentBranch(cwd = process.cwd()) {
 }
 var init_job_root = () => {};
 
+// src/specialist/forensic-events.ts
+function redactForensicValue(value, path = "body") {
+  const fields = new Set;
+  const rules = new Set;
+  function visit2(input, currentPath) {
+    if (Array.isArray(input))
+      return input.map((item, index) => visit2(item, `${currentPath}[${index}]`));
+    if (input && typeof input === "object") {
+      const output = {};
+      for (const [key, nested] of Object.entries(input)) {
+        const nextPath = `${currentPath}.${key}`;
+        if (isSensitiveField(key)) {
+          output[key] = REDACTED;
+          fields.add(nextPath);
+          rules.add(REDACTION_RULES.sensitiveField);
+          continue;
+        }
+        output[key] = visit2(nested, nextPath);
+      }
+      return output;
+    }
+    if (typeof input === "string" && SECRET_VALUE_RE.test(input)) {
+      fields.add(currentPath);
+      rules.add(REDACTION_RULES.secretPattern);
+      return input.replace(SECRET_VALUE_RE, REDACTED);
+    }
+    return input;
+  }
+  return {
+    value: visit2(value, path),
+    fields: Array.from(fields).sort(),
+    rules: Array.from(rules).sort()
+  };
+}
+function isSensitiveField(key) {
+  if (key === "input_tokens" || key === "output_tokens" || key === "cache_read_tokens" || key === "cache_creation_tokens")
+    return false;
+  return SENSITIVE_FIELD_RE.test(key);
+}
+function mergeRedaction(explicit, result) {
+  const fields = [...new Set([...explicit?.fields ?? [], ...result.fields])].sort();
+  const rules = [...new Set([...explicit?.rules ?? [], ...result.rules])].sort();
+  const status = explicit?.status === "unknown" ? "unknown" : explicit?.status === "redacted" || fields.length > 0 ? "redacted" : "clean";
+  return {
+    status,
+    ...fields.length > 0 ? { fields } : {},
+    ...rules.length > 0 ? { rules } : {}
+  };
+}
+function createForensicEvent(options) {
+  const tUnixMs = options.t_unix_ms ?? Date.now();
+  const redactionResult = redactForensicValue(options.body ?? {}, "body");
+  const explicitRedaction = options.redaction;
+  const event = {
+    schema_version: FORENSIC_SCHEMA_VERSION,
+    timestamp: options.timestamp ?? new Date(tUnixMs).toISOString(),
+    t_unix_ms: tUnixMs,
+    severity: options.severity ?? "info",
+    event_family: options.event_family,
+    event_name: options.event_name,
+    event_version: options.event_version ?? 1,
+    resource: normalizeResource(options.resource),
+    correlation: options.correlation ?? {},
+    body: redactionResult.value,
+    redaction: mergeRedaction(explicitRedaction, redactionResult)
+  };
+  if (options.seq !== undefined)
+    event.seq = options.seq;
+  if (options.trace)
+    event.trace = options.trace;
+  if (options.otel)
+    event.otel = options.otel;
+  if (options.links)
+    event.links = options.links;
+  if (options.diagnostics)
+    event.diagnostics = options.diagnostics;
+  assertKnownTopLevelFields(event);
+  return event;
+}
+function normalizeResource(resource) {
+  const normalized = { ...resource };
+  const legacySpecialist = normalized.specialist;
+  if (!normalized.participant_kind && typeof legacySpecialist === "string") {
+    normalized.participant_kind = "specialist";
+  }
+  if (!normalized.participant_role && typeof legacySpecialist === "string") {
+    normalized.participant_role = legacySpecialist;
+  }
+  delete normalized.specialist;
+  return normalized;
+}
+function deriveParticipantId(input) {
+  const kind = input.participant_kind ?? "specialist";
+  if (kind === "specialist" && input.chain_id)
+    return `${input.chain_id}::${input.participant_role}`;
+  if (kind === "orchestrator" && input.session_uuid)
+    return `orch::${input.session_uuid}`;
+  if (kind === "pulse_emitter" && input.container_id)
+    return `${input.container_id}::emitter::${input.participant_role}`;
+  if (kind === "node_member" && input.node_id)
+    return `node::${input.node_id}::${input.participant_role}::${input.member_index ?? 0}`;
+  if (kind === "adapter" && input.adapter_id)
+    return input.adapter_id;
+  return;
+}
+function assertKnownTopLevelFields(event) {
+  for (const key of Object.keys(event)) {
+    if (!ALLOWED_TOP_LEVEL_FIELDS.has(key)) {
+      throw new Error(`Unknown forensic event top-level field: ${key}`);
+    }
+  }
+}
+function assertNoForbiddenLabels(labels) {
+  const forbidden = Object.keys(labels).filter((key) => FORBIDDEN_PROMETHEUS_LABELS.has(key));
+  if (forbidden.length > 0) {
+    throw new Error(`Forbidden telemetry label(s): ${forbidden.join(", ")}`);
+  }
+}
+function pickAllowedLabels(source, allowlist = DEFAULT_LABEL_ALLOWLIST) {
+  const labels = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (!allowlist.has(key) || value === undefined || value === null)
+      continue;
+    labels[key] = String(value);
+  }
+  assertNoForbiddenLabels(labels);
+  return labels;
+}
+function forensicEventFromTimelineEvent(event, context) {
+  const participantRole = context.specialist;
+  const participantKind = context.nodeId ? "node_member" : "specialist";
+  const participantId = deriveParticipantId({
+    participant_kind: participantKind,
+    participant_role: participantRole,
+    chain_id: context.chainId,
+    node_id: context.nodeId
+  });
+  return createForensicEvent({
+    event_family: familyForTimelineType(event.type),
+    event_name: eventNameForTimelineEvent(event),
+    severity: severityForTimelineEvent(event),
+    resource: {
+      service_namespace: "xtrm",
+      service_name: "specialists",
+      service_component: context.serviceComponent ?? "runtime",
+      deployment_environment: "local",
+      repo: context.repo ?? "unknown",
+      participant_kind: participantKind,
+      participant_role: participantRole,
+      model_provider: context.backend,
+      model: context.model,
+      chain_kind: context.chainKind
+    },
+    correlation: {
+      participant_id: participantId,
+      job_id: context.jobId,
+      bead_id: context.beadId,
+      node_id: context.nodeId,
+      chain_id: context.chainId,
+      chain_root_job_id: context.chainRootJobId,
+      chain_root_bead_id: context.chainRootBeadId,
+      epic_id: context.epicId,
+      tool_call_id: typeof event.tool_call_id === "string" ? event.tool_call_id : undefined
+    },
+    body: { legacy_timeline_event: event },
+    redaction: { status: redactionStatusForTimelineEvent(event) },
+    t_unix_ms: event.t,
+    seq: event.seq
+  });
+}
+function familyForTimelineType(type) {
+  if (type === "run_start" || type === "run_complete" || type === "status_change" || type === "payload_breakdown")
+    return "job";
+  if (type === "tool")
+    return "tool";
+  if (type === "turn" || type === "turn_summary" || type === "message" || type === "text" || type === "thinking")
+    return "turn";
+  if (type === "token_usage" || type === "finish_reason" || type === "model_change" || type === "meta")
+    return "model";
+  if (type === "control_signal")
+    return "control";
+  if (type === "retry")
+    return "retry";
+  if (type === "compaction")
+    return "compaction";
+  if (type === "error" || type === "extension_error")
+    return "error";
+  if (type === "auto_commit_success" || type === "auto_commit_skipped" || type === "auto_commit_failed")
+    return "git";
+  if (type === "stale_warning")
+    return "process_health";
+  return "job";
+}
+function eventNameForTimelineEvent(event) {
+  if (event.type === "run_start")
+    return "job.started";
+  if (event.type === "run_complete") {
+    if (event.status === "ERROR")
+      return "job.failed";
+    if (event.status === "CANCELLED")
+      return "job.cancelled";
+    return "job.completed";
+  }
+  if (event.type === "status_change")
+    return "job.status_changed";
+  if (event.type === "tool") {
+    if (event.phase === "start")
+      return "tool.call.started";
+    if (event.is_error)
+      return "tool.call.failed";
+    return "tool.call.completed";
+  }
+  if (event.type === "turn_summary")
+    return "turn.summarized";
+  if (event.type === "token_usage")
+    return "model.token_usage.recorded";
+  if (event.type === "finish_reason")
+    return "model.finish_reason.recorded";
+  if (event.type === "model_change")
+    return "model.changed";
+  if (event.type === "control_signal")
+    return `control.${String(event.action ?? "signal")}.recorded`;
+  if (event.type === "retry")
+    return `retry.${String(event.phase ?? "recorded")}`;
+  if (event.type === "compaction")
+    return `compaction.${String(event.phase ?? "recorded")}`;
+  if (event.type === "extension_error")
+    return "error.extension";
+  if (event.type === "error")
+    return "error.rpc";
+  if (event.type === "auto_commit_success")
+    return "git.auto_commit.succeeded";
+  if (event.type === "auto_commit_skipped")
+    return "git.auto_commit.skipped";
+  if (event.type === "auto_commit_failed")
+    return "git.auto_commit.failed";
+  if (event.type === "stale_warning")
+    return "process_health.stale_detected";
+  return `${familyForTimelineType(event.type)}.${event.type}`;
+}
+function severityForTimelineEvent(event) {
+  if (event.type === "error" || event.type === "extension_error" || event.type === "auto_commit_failed")
+    return "error";
+  if (event.type === "stale_warning" || event.type === "control_signal")
+    return "warn";
+  if (event.type === "run_complete" && event.status === "ERROR")
+    return "error";
+  if (event.type === "tool" && event.is_error)
+    return "error";
+  return "info";
+}
+function redactionStatusForTimelineEvent(event) {
+  if (event.type === "tool" || event.type === "turn_summary" || event.type === "run_complete")
+    return "redacted";
+  return "clean";
+}
+var FORENSIC_SCHEMA_VERSION = "xtrm.forensic.v1", FORBIDDEN_PROMETHEUS_LABELS, DEFAULT_LABEL_ALLOWLIST, ALLOWED_TOP_LEVEL_FIELDS, REDACTED = "[REDACTED]", REDACTION_RULES, SENSITIVE_FIELD_RE, SECRET_VALUE_RE;
+var init_forensic_events = __esm(() => {
+  FORBIDDEN_PROMETHEUS_LABELS = new Set([
+    "participant_id",
+    "job_id",
+    "bead_id",
+    "issue_id",
+    "container_id",
+    "chain_id",
+    "chain_root_job_id",
+    "chain_root_bead_id",
+    "epic_id",
+    "node_id",
+    "pulse_id",
+    "turn_id",
+    "tool_call_id",
+    "trace_id",
+    "span_id",
+    "parent_span_id",
+    "commit_sha",
+    "jsonrpc_request_id",
+    "mcp_session_id",
+    "raw_path",
+    "raw_command",
+    "raw_error",
+    "raw_url",
+    "prompt",
+    "model_output",
+    "user_id",
+    "email",
+    "token",
+    "credential"
+  ]);
+  DEFAULT_LABEL_ALLOWLIST = new Set([
+    "service_namespace",
+    "service_name",
+    "service_component",
+    "deployment_environment",
+    "repo",
+    "participant_kind",
+    "participant_role",
+    "event_family",
+    "severity",
+    "state",
+    "status",
+    "result",
+    "model_provider",
+    "model",
+    "tool_name",
+    "mcp_server",
+    "mcp_method",
+    "error_type",
+    "drift_tier",
+    "pulse_kind",
+    "direction",
+    "reason",
+    "process_kind",
+    "evidence_kind",
+    "target",
+    "highest_risk"
+  ]);
+  ALLOWED_TOP_LEVEL_FIELDS = new Set([
+    "schema_version",
+    "timestamp",
+    "t_unix_ms",
+    "seq",
+    "severity",
+    "event_family",
+    "event_name",
+    "event_version",
+    "resource",
+    "correlation",
+    "body",
+    "redaction",
+    "trace",
+    "otel",
+    "links",
+    "diagnostics"
+  ]);
+  REDACTION_RULES = {
+    sensitiveField: "sensitive-field-name",
+    secretPattern: "secret-pattern"
+  };
+  SENSITIVE_FIELD_RE = /(^|_)(password|secret|credential|api_?key|access_?token|refresh_?token|auth_?token|bearer|email|prompt|model_?output|raw_?command|raw_?url|raw_?error|stderr|stdout|args|arguments|input|output|content)$/i;
+  SECRET_VALUE_RE = /(sk-[a-z0-9_-]{12,}|ghp_[a-z0-9_]{12,}|xox[baprs]-[a-z0-9-]{12,}|bearer\s+[a-z0-9._-]{12,})/i;
+});
+
 // src/specialist/observability-sqlite.ts
 import { existsSync as existsSync5, mkdirSync as mkdirSync3, readFileSync as readFileSync3, statSync } from "fs";
 import { dirname as dirname3, join as join5 } from "path";
@@ -19521,6 +19864,45 @@ function migrateToV11(db) {
     INSERT OR IGNORE INTO schema_version (version, applied_at_ms)
       VALUES (11, strftime('%s', 'now') * 1000);
   `);
+}
+function migrateToV12(db) {
+  const hasV12 = db.query("SELECT 1 FROM schema_version WHERE version = 12 LIMIT 1").get();
+  db.run(`
+    CREATE TABLE IF NOT EXISTS specialist_forensic_events (
+      id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+      job_id             TEXT NOT NULL,
+      seq                INTEGER NOT NULL,
+      t                  INTEGER NOT NULL,
+      schema_version     TEXT NOT NULL,
+      event_family       TEXT NOT NULL,
+      event_name         TEXT NOT NULL,
+      participant_kind   TEXT,
+      participant_role   TEXT,
+      participant_id     TEXT,
+      redaction_status   TEXT NOT NULL,
+      event_json         TEXT NOT NULL
+    );
+  `);
+  db.run("CREATE UNIQUE INDEX IF NOT EXISTS idx_forensic_events_job_seq ON specialist_forensic_events(job_id, seq)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_forensic_events_job_t ON specialist_forensic_events(job_id, t, seq, id)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_forensic_events_family ON specialist_forensic_events(event_family, event_name, t)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_forensic_events_participant ON specialist_forensic_events(participant_kind, participant_role, t)");
+  if (hasV12)
+    return;
+  db.run(`
+    INSERT OR IGNORE INTO schema_version (version, applied_at_ms)
+      VALUES (12, strftime('%s', 'now') * 1000);
+  `);
+}
+function parseJsonRecord(input) {
+  if (!input)
+    return {};
+  try {
+    const parsed = JSON.parse(input);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
 }
 function stringifyJson(value) {
   return JSON.stringify(value);
@@ -19733,6 +20115,7 @@ function initSchema(db) {
   migrateToV9(db);
   migrateToV10(db);
   migrateToV11(db);
+  migrateToV12(db);
   verifyWalMode(db);
 }
 function migrateToV5(db) {
@@ -20053,11 +20436,73 @@ class SqliteClient {
   }
   writeEventRow(jobId, specialist, beadId, event) {
     const seq = typeof event.seq === "number" && event.seq > 0 ? event.seq : this.getNextSpecialistEventSeq(jobId);
-    const eventJson = JSON.stringify({ ...event, seq });
+    const sequencedEvent = { ...event, seq };
+    const eventJson = JSON.stringify(sequencedEvent);
     this.db.run(`
       INSERT INTO specialist_events (job_id, seq, specialist, bead_id, t, type, event_json)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `, [jobId, seq, specialist, beadId ?? null, event.t, event.type, eventJson]);
+    this.writeForensicEventRow(jobId, specialist, beadId, sequencedEvent);
+  }
+  writeForensicEventRow(jobId, specialist, beadId, event) {
+    const context = this.readForensicContext(jobId);
+    const forensicEvent = forensicEventFromTimelineEvent(event, {
+      jobId,
+      specialist,
+      beadId: context.beadId ?? beadId,
+      nodeId: context.nodeId,
+      repo: context.repo,
+      serviceComponent: "runtime",
+      model: context.model,
+      backend: context.backend,
+      chainKind: context.chainKind,
+      chainId: context.chainId,
+      chainRootJobId: context.chainRootJobId,
+      chainRootBeadId: context.chainRootBeadId,
+      epicId: context.epicId
+    });
+    this.insertForensicEventRow(jobId, event.seq, forensicEvent);
+  }
+  readForensicContext(jobId) {
+    const row = this.db.query(`
+      SELECT bead_id, node_id, chain_kind, chain_id, chain_root_job_id, chain_root_bead_id, epic_id, status_json
+      FROM specialist_jobs
+      WHERE job_id = ?
+      LIMIT 1
+    `).get(jobId);
+    const statusJson = parseJsonRecord(typeof row?.status_json === "string" ? row.status_json : undefined);
+    return {
+      beadId: typeof row?.bead_id === "string" ? row.bead_id : undefined,
+      nodeId: typeof row?.node_id === "string" ? row.node_id : undefined,
+      repo: typeof statusJson.repo === "string" ? statusJson.repo : undefined,
+      model: typeof statusJson.model === "string" ? statusJson.model : undefined,
+      backend: typeof statusJson.backend === "string" ? statusJson.backend : undefined,
+      chainKind: typeof row?.chain_kind === "string" ? row.chain_kind : undefined,
+      chainId: typeof row?.chain_id === "string" ? row.chain_id : undefined,
+      chainRootJobId: typeof row?.chain_root_job_id === "string" ? row.chain_root_job_id : undefined,
+      chainRootBeadId: typeof row?.chain_root_bead_id === "string" ? row.chain_root_bead_id : undefined,
+      epicId: typeof row?.epic_id === "string" ? row.epic_id : undefined
+    };
+  }
+  insertForensicEventRow(jobId, seq, forensicEvent) {
+    this.db.run(`
+      INSERT OR REPLACE INTO specialist_forensic_events (
+        job_id, seq, t, schema_version, event_family, event_name,
+        participant_kind, participant_role, participant_id, redaction_status, event_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      jobId,
+      seq,
+      forensicEvent.t_unix_ms,
+      forensicEvent.schema_version,
+      forensicEvent.event_family,
+      forensicEvent.event_name,
+      forensicEvent.resource.participant_kind ?? null,
+      forensicEvent.resource.participant_role ?? null,
+      typeof forensicEvent.correlation.participant_id === "string" ? forensicEvent.correlation.participant_id : null,
+      forensicEvent.redaction.status,
+      JSON.stringify(forensicEvent)
+    ]);
   }
   findActiveJob(beadId, specialist) {
     return this.db.query(`
@@ -20777,6 +21222,38 @@ class SqliteClient {
       return events;
     }, "readEventsAfterSeq");
   }
+  readForensicEvents(filters = {}) {
+    return withRetry(() => {
+      const clauses = [];
+      const params = [];
+      if (filters.jobId) {
+        clauses.push("job_id = ?");
+        params.push(filters.jobId);
+      }
+      if (filters.sinceMs !== undefined) {
+        clauses.push("t >= ?");
+        params.push(filters.sinceMs);
+      }
+      if (filters.eventFamily) {
+        clauses.push("event_family = ?");
+        params.push(filters.eventFamily);
+      }
+      if (filters.eventName) {
+        clauses.push("event_name = ?");
+        params.push(filters.eventName);
+      }
+      const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+      const limit = Math.max(1, Math.min(filters.limit ?? 1000, 1e4));
+      return this.db.query(`
+        SELECT id, job_id, seq, t, schema_version, event_family, event_name,
+               participant_kind, participant_role, participant_id, redaction_status, event_json
+        FROM specialist_forensic_events
+        ${where}
+        ORDER BY t ASC, seq ASC, id ASC
+        LIMIT ?
+      `).all(...params, limit);
+    }, "readForensicEvents");
+  }
   readLatestToolEvent(jobId) {
     return withRetry(() => {
       const row = this.db.query(`
@@ -21459,6 +21936,7 @@ var _BunDatabase = null, _probed = false, BUSY_TIMEOUT_MS = 5000, MAX_RETRY_ATTE
 var init_observability_sqlite = __esm(() => {
   init_observability_db();
   init_job_root();
+  init_forensic_events();
 });
 
 // src/specialist/memory-retrieval.ts
@@ -49745,287 +50223,6 @@ var init_result = __esm(() => {
   init_format_helpers();
 });
 
-// src/specialist/forensic-events.ts
-function createForensicEvent(options2) {
-  const tUnixMs = options2.t_unix_ms ?? Date.now();
-  const event = {
-    schema_version: FORENSIC_SCHEMA_VERSION,
-    timestamp: options2.timestamp ?? new Date(tUnixMs).toISOString(),
-    t_unix_ms: tUnixMs,
-    severity: options2.severity ?? "info",
-    event_family: options2.event_family,
-    event_name: options2.event_name,
-    event_version: options2.event_version ?? 1,
-    resource: normalizeResource(options2.resource),
-    correlation: options2.correlation ?? {},
-    body: options2.body ?? {},
-    redaction: options2.redaction ?? { status: "clean" }
-  };
-  if (options2.seq !== undefined)
-    event.seq = options2.seq;
-  if (options2.trace)
-    event.trace = options2.trace;
-  if (options2.otel)
-    event.otel = options2.otel;
-  if (options2.links)
-    event.links = options2.links;
-  if (options2.diagnostics)
-    event.diagnostics = options2.diagnostics;
-  assertKnownTopLevelFields(event);
-  return event;
-}
-function normalizeResource(resource) {
-  const normalized = { ...resource };
-  const legacySpecialist = normalized.specialist;
-  if (!normalized.participant_kind && typeof legacySpecialist === "string") {
-    normalized.participant_kind = "specialist";
-  }
-  if (!normalized.participant_role && typeof legacySpecialist === "string") {
-    normalized.participant_role = legacySpecialist;
-  }
-  delete normalized.specialist;
-  return normalized;
-}
-function deriveParticipantId(input2) {
-  const kind = input2.participant_kind ?? "specialist";
-  if (kind === "specialist" && input2.chain_id)
-    return `${input2.chain_id}::${input2.participant_role}`;
-  if (kind === "orchestrator" && input2.session_uuid)
-    return `orch::${input2.session_uuid}`;
-  if (kind === "pulse_emitter" && input2.container_id)
-    return `${input2.container_id}::emitter::${input2.participant_role}`;
-  if (kind === "node_member" && input2.node_id)
-    return `node::${input2.node_id}::${input2.participant_role}::${input2.member_index ?? 0}`;
-  if (kind === "adapter" && input2.adapter_id)
-    return input2.adapter_id;
-  return;
-}
-function assertKnownTopLevelFields(event) {
-  for (const key of Object.keys(event)) {
-    if (!ALLOWED_TOP_LEVEL_FIELDS.has(key)) {
-      throw new Error(`Unknown forensic event top-level field: ${key}`);
-    }
-  }
-}
-function assertNoForbiddenLabels(labels) {
-  const forbidden = Object.keys(labels).filter((key) => FORBIDDEN_PROMETHEUS_LABELS.has(key));
-  if (forbidden.length > 0) {
-    throw new Error(`Forbidden telemetry label(s): ${forbidden.join(", ")}`);
-  }
-}
-function pickAllowedLabels(source, allowlist = DEFAULT_LABEL_ALLOWLIST) {
-  const labels = {};
-  for (const [key, value] of Object.entries(source)) {
-    if (!allowlist.has(key) || value === undefined || value === null)
-      continue;
-    labels[key] = String(value);
-  }
-  assertNoForbiddenLabels(labels);
-  return labels;
-}
-function forensicEventFromTimelineEvent(event, context) {
-  const participantRole = context.specialist;
-  const participantKind = context.nodeId ? "node_member" : "specialist";
-  const participantId = deriveParticipantId({
-    participant_kind: participantKind,
-    participant_role: participantRole,
-    chain_id: context.chainId,
-    node_id: context.nodeId
-  });
-  return createForensicEvent({
-    event_family: familyForTimelineType(event.type),
-    event_name: eventNameForTimelineEvent(event),
-    severity: severityForTimelineEvent(event),
-    resource: {
-      service_namespace: "xtrm",
-      service_name: "specialists",
-      service_component: context.serviceComponent ?? "runtime",
-      deployment_environment: "local",
-      repo: context.repo ?? "unknown",
-      participant_kind: participantKind,
-      participant_role: participantRole,
-      model_provider: context.backend,
-      model: context.model,
-      chain_kind: context.chainKind
-    },
-    correlation: {
-      participant_id: participantId,
-      job_id: context.jobId,
-      bead_id: context.beadId,
-      node_id: context.nodeId,
-      chain_id: context.chainId,
-      chain_root_job_id: context.chainRootJobId,
-      chain_root_bead_id: context.chainRootBeadId,
-      epic_id: context.epicId,
-      tool_call_id: typeof event.tool_call_id === "string" ? event.tool_call_id : undefined
-    },
-    body: { legacy_timeline_event: event },
-    redaction: { status: redactionStatusForTimelineEvent(event) },
-    t_unix_ms: event.t,
-    seq: event.seq
-  });
-}
-function familyForTimelineType(type) {
-  if (type === "run_start" || type === "run_complete" || type === "status_change" || type === "payload_breakdown")
-    return "job";
-  if (type === "tool")
-    return "tool";
-  if (type === "turn" || type === "turn_summary" || type === "message" || type === "text" || type === "thinking")
-    return "turn";
-  if (type === "token_usage" || type === "finish_reason" || type === "model_change" || type === "meta")
-    return "model";
-  if (type === "control_signal")
-    return "control";
-  if (type === "retry")
-    return "retry";
-  if (type === "compaction")
-    return "compaction";
-  if (type === "error" || type === "extension_error")
-    return "error";
-  if (type === "auto_commit_success" || type === "auto_commit_skipped" || type === "auto_commit_failed")
-    return "git";
-  if (type === "stale_warning")
-    return "process_health";
-  return "job";
-}
-function eventNameForTimelineEvent(event) {
-  if (event.type === "run_start")
-    return "job.started";
-  if (event.type === "run_complete") {
-    if (event.status === "ERROR")
-      return "job.failed";
-    if (event.status === "CANCELLED")
-      return "job.cancelled";
-    return "job.completed";
-  }
-  if (event.type === "status_change")
-    return "job.status_changed";
-  if (event.type === "tool") {
-    if (event.phase === "start")
-      return "tool.call.started";
-    if (event.is_error)
-      return "tool.call.failed";
-    return "tool.call.completed";
-  }
-  if (event.type === "turn_summary")
-    return "turn.summarized";
-  if (event.type === "token_usage")
-    return "model.token_usage.recorded";
-  if (event.type === "finish_reason")
-    return "model.finish_reason.recorded";
-  if (event.type === "model_change")
-    return "model.changed";
-  if (event.type === "control_signal")
-    return `control.${String(event.action ?? "signal")}.recorded`;
-  if (event.type === "retry")
-    return `retry.${String(event.phase ?? "recorded")}`;
-  if (event.type === "compaction")
-    return `compaction.${String(event.phase ?? "recorded")}`;
-  if (event.type === "extension_error")
-    return "error.extension";
-  if (event.type === "error")
-    return "error.rpc";
-  if (event.type === "auto_commit_success")
-    return "git.auto_commit.succeeded";
-  if (event.type === "auto_commit_skipped")
-    return "git.auto_commit.skipped";
-  if (event.type === "auto_commit_failed")
-    return "git.auto_commit.failed";
-  if (event.type === "stale_warning")
-    return "process_health.stale_detected";
-  return `${familyForTimelineType(event.type)}.${event.type}`;
-}
-function severityForTimelineEvent(event) {
-  if (event.type === "error" || event.type === "extension_error" || event.type === "auto_commit_failed")
-    return "error";
-  if (event.type === "stale_warning" || event.type === "control_signal")
-    return "warn";
-  if (event.type === "run_complete" && event.status === "ERROR")
-    return "error";
-  if (event.type === "tool" && event.is_error)
-    return "error";
-  return "info";
-}
-function redactionStatusForTimelineEvent(event) {
-  if (event.type === "tool" || event.type === "turn_summary" || event.type === "run_complete")
-    return "redacted";
-  return "clean";
-}
-var FORENSIC_SCHEMA_VERSION = "xtrm.forensic.v1", FORBIDDEN_PROMETHEUS_LABELS, DEFAULT_LABEL_ALLOWLIST, ALLOWED_TOP_LEVEL_FIELDS;
-var init_forensic_events = __esm(() => {
-  FORBIDDEN_PROMETHEUS_LABELS = new Set([
-    "participant_id",
-    "job_id",
-    "bead_id",
-    "issue_id",
-    "container_id",
-    "chain_id",
-    "chain_root_job_id",
-    "chain_root_bead_id",
-    "epic_id",
-    "node_id",
-    "pulse_id",
-    "turn_id",
-    "tool_call_id",
-    "trace_id",
-    "span_id",
-    "parent_span_id",
-    "commit_sha",
-    "jsonrpc_request_id",
-    "mcp_session_id",
-    "raw_path",
-    "raw_command",
-    "raw_error",
-    "raw_url",
-    "prompt",
-    "model_output",
-    "user_id",
-    "email",
-    "token",
-    "credential"
-  ]);
-  DEFAULT_LABEL_ALLOWLIST = new Set([
-    "service_namespace",
-    "service_name",
-    "service_component",
-    "deployment_environment",
-    "repo",
-    "participant_kind",
-    "participant_role",
-    "event_family",
-    "severity",
-    "state",
-    "status",
-    "result",
-    "model_provider",
-    "model",
-    "tool_name",
-    "mcp_server",
-    "mcp_method",
-    "error_type",
-    "drift_tier",
-    "pulse_kind"
-  ]);
-  ALLOWED_TOP_LEVEL_FIELDS = new Set([
-    "schema_version",
-    "timestamp",
-    "t_unix_ms",
-    "seq",
-    "severity",
-    "event_family",
-    "event_name",
-    "event_version",
-    "resource",
-    "correlation",
-    "body",
-    "redaction",
-    "trace",
-    "otel",
-    "links",
-    "diagnostics"
-  ]);
-});
-
 // src/specialist/timeline-query.ts
 import { existsSync as existsSync26, readdirSync as readdirSync12, readFileSync as readFileSync26 } from "fs";
 import { basename as basename8, join as join30 } from "path";
@@ -50864,6 +51061,95 @@ var init_feed2 = __esm(() => {
   init_format_helpers();
 });
 
+// src/cli/forensic.ts
+var exports_forensic = {};
+__export(exports_forensic, {
+  run: () => run20
+});
+function parseArgs12(argv) {
+  const options2 = { json: true, limit: 1000 };
+  for (let i = 0;i < argv.length; i += 1) {
+    const token = argv[i];
+    if (token === "--json") {
+      options2.json = true;
+      continue;
+    }
+    if (token === "--family") {
+      const value = argv[i + 1];
+      if (!value)
+        throw new Error("--family requires a value");
+      options2.eventFamily = value;
+      i += 1;
+      continue;
+    }
+    if (token === "--event-name") {
+      const value = argv[i + 1];
+      if (!value)
+        throw new Error("--event-name requires a value");
+      options2.eventName = value;
+      i += 1;
+      continue;
+    }
+    if (token === "--since") {
+      const value = argv[i + 1];
+      if (!value)
+        throw new Error("--since requires a value");
+      options2.sinceMs = parseSince2(value);
+      if (options2.sinceMs === undefined)
+        throw new Error(`Invalid --since value: ${value}`);
+      i += 1;
+      continue;
+    }
+    if (token === "--limit") {
+      const value = argv[i + 1];
+      if (!value)
+        throw new Error("--limit requires a value");
+      const parsed = Number(value);
+      if (!Number.isInteger(parsed) || parsed <= 0)
+        throw new Error(`Invalid --limit value: ${value}`);
+      options2.limit = parsed;
+      i += 1;
+      continue;
+    }
+    if (!options2.jobId && !token.startsWith("-")) {
+      options2.jobId = token;
+      continue;
+    }
+    throw new Error(`Unknown forensic option: ${token}`);
+  }
+  return options2;
+}
+function parseSince2(value) {
+  if (value.includes("T") || value.includes("-")) {
+    const parsed = new Date(value).getTime();
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  const match = value.match(/^(\d+)([smhd])$/);
+  if (!match)
+    return;
+  const n = Number(match[1]);
+  const unit = match[2];
+  const ms = { s: 1000, m: 60000, h: 3600000, d: 86400000 };
+  return Date.now() - n * ms[unit];
+}
+async function run20() {
+  const options2 = parseArgs12(process.argv.slice(3));
+  const client = createObservabilitySqliteClient();
+  if (!client)
+    throw new Error("Observability SQLite is unavailable; run under Bun with an initialized specialists database.");
+  const rows = client.readForensicEvents(options2);
+  for (const row of rows) {
+    if (options2.json) {
+      console.log(row.event_json);
+      continue;
+    }
+    console.log(`${new Date(row.t).toISOString()} ${row.event_family}/${row.event_name} ${row.participant_role ?? "unknown"} job=${row.job_id} seq=${row.seq}`);
+  }
+}
+var init_forensic = __esm(() => {
+  init_observability_sqlite();
+});
+
 // src/specialist/prometheus-projection.ts
 function collectPrometheusProjection(options2 = {}) {
   const client = createObservabilitySqliteClient();
@@ -50895,6 +51181,33 @@ function renderPrometheusProjection(input2) {
       value: count
     });
   }
+  for (const [key, count] of countBy(input2.statuses.filter(isQueuedStatus), (status) => labelsKey(jobQueueLabels(status, input2.repo)))) {
+    samples.push({
+      name: "xtrm_job_queue_depth",
+      help: "Current queued or waiting-to-start specialist jobs.",
+      type: "gauge",
+      labels: parseLabelsKey(key),
+      value: count
+    });
+  }
+  for (const [key, count] of countBy(input2.statuses, (status) => labelsKey(processLabels(status, input2.repo)))) {
+    samples.push({
+      name: "xtrm_processes",
+      help: "Current specialist process rows by bounded process state.",
+      type: "gauge",
+      labels: parseLabelsKey(key),
+      value: count
+    });
+  }
+  for (const [key, count] of countBy(input2.statuses.filter(hasWorktree), (status) => labelsKey(worktreeLabels(status, input2.repo)))) {
+    samples.push({
+      name: "xtrm_worktrees",
+      help: "Current specialist worktrees by bounded state.",
+      type: "gauge",
+      labels: parseLabelsKey(key),
+      value: count
+    });
+  }
   const terminalMetrics = input2.jobMetrics.filter((record3) => isTerminalStatus2(record3.status));
   for (const [key, records] of groupBy(terminalMetrics, (record3) => labelsKey(jobResultLabels(record3, input2.repo)))) {
     samples.push({
@@ -50912,6 +51225,16 @@ function renderPrometheusProjection(input2) {
         labels: parseLabelsKey(key),
         buckets: JOB_DURATION_BUCKETS,
         values: durations
+      });
+    }
+    const activeDurations = records.map((record3) => msToSeconds(record3.active_runtime_ms)).filter(isNumber);
+    if (activeDurations.length > 0) {
+      histograms.push({
+        name: "xtrm_job_active_runtime_seconds",
+        help: "Specialist job active runtime excluding waiting time where measurable.",
+        labels: parseLabelsKey(key),
+        buckets: JOB_DURATION_BUCKETS,
+        values: activeDurations
       });
     }
   }
@@ -50967,6 +51290,31 @@ function jobStateLabels(status, repo) {
     repo,
     participant_role: String(rawStatus.specialist ?? "unknown"),
     state: normalizeState(String(rawStatus.status ?? "unknown"))
+  });
+}
+function jobQueueLabels(status, repo) {
+  const rawStatus = status;
+  return safeLabels({
+    ...DEFAULT_SERVICE_LABELS,
+    repo,
+    participant_role: String(rawStatus.specialist ?? "unknown")
+  });
+}
+function processLabels(status, repo) {
+  const rawStatus = status;
+  return safeLabels({
+    service_name: "specialists",
+    repo,
+    process_kind: "specialist",
+    state: normalizeState(String(rawStatus.status ?? "unknown"))
+  });
+}
+function worktreeLabels(status, repo) {
+  const rawStatus = status;
+  return safeLabels({
+    service_name: "specialists",
+    repo,
+    state: isTerminalStatus2(String(rawStatus.status ?? "unknown")) ? "preserved_terminal" : "active"
   });
 }
 function jobParticipantLabels(record3, repo) {
@@ -51142,6 +51490,15 @@ function increment(map2, labels, value) {
   }
   map2.set(key, { labels, value });
 }
+function isQueuedStatus(status) {
+  const rawStatus = status;
+  const state = String(rawStatus.status ?? "unknown").toLowerCase();
+  return state === "starting" || state === "waiting" || state === "queued";
+}
+function hasWorktree(status) {
+  const rawStatus = status;
+  return typeof rawStatus.worktree_path === "string" && rawStatus.worktree_path.length > 0;
+}
 function isTerminalStatus2(status) {
   return ["done", "completed", "complete", "error", "cancelled", "failed"].includes(status.toLowerCase());
 }
@@ -51224,9 +51581,9 @@ var init_prometheus_projection = __esm(() => {
 // src/cli/metrics.ts
 var exports_metrics = {};
 __export(exports_metrics, {
-  run: () => run20
+  run: () => run21
 });
-function parseArgs12(argv) {
+function parseArgs13(argv) {
   let format = "prometheus";
   let sinceMs;
   for (let i = 0;i < argv.length; i += 1) {
@@ -51239,7 +51596,7 @@ function parseArgs12(argv) {
       const value = argv[i + 1];
       if (!value)
         throw new Error("--since requires a value");
-      sinceMs = parseSince2(value);
+      sinceMs = parseSince3(value);
       if (sinceMs === undefined)
         throw new Error(`Invalid --since value: ${value}`);
       i += 1;
@@ -51249,7 +51606,7 @@ function parseArgs12(argv) {
   }
   return { format, sinceMs };
 }
-function parseSince2(value) {
+function parseSince3(value) {
   if (value.includes("T") || value.includes("-")) {
     const parsed = new Date(value).getTime();
     return Number.isFinite(parsed) ? parsed : undefined;
@@ -51262,8 +51619,8 @@ function parseSince2(value) {
   const ms = { s: 1000, m: 60000, h: 3600000, d: 86400000 };
   return Date.now() - n * ms[unit];
 }
-async function run20() {
-  const options2 = parseArgs12(process.argv.slice(3));
+async function run21() {
+  const options2 = parseArgs13(process.argv.slice(3));
   if (options2.format !== "prometheus")
     throw new Error(`Unsupported metrics format: ${options2.format}`);
   process.stdout.write(collectPrometheusProjection({ sinceMs: options2.sinceMs }));
@@ -51275,11 +51632,11 @@ var init_metrics = __esm(() => {
 // src/cli/log.ts
 var exports_log = {};
 __export(exports_log, {
-  run: () => run21
+  run: () => run22
 });
 import { existsSync as existsSync28, readdirSync as readdirSync14, statSync as statSync7 } from "fs";
 import { basename as basename10, join as join32 } from "path";
-function parseSince3(value) {
+function parseSince4(value) {
   if (value.includes("T") || value.includes("-"))
     return new Date(value).getTime();
   const match = value.match(/^(\d+)([smhd])$/);
@@ -51290,7 +51647,7 @@ function parseSince3(value) {
   const ms = { s: 1000, m: 60000, h: 3600000, d: 86400000 };
   return Date.now() - n * ms[unit];
 }
-function parseArgs13(argv) {
+function parseArgs14(argv) {
   let jobId;
   let specialist;
   let beadId;
@@ -51324,7 +51681,7 @@ function parseArgs13(argv) {
       continue;
     }
     if (token === "--since" && argv[i + 1]) {
-      since = parseSince3(argv[++i]);
+      since = parseSince4(argv[++i]);
       continue;
     }
     if (token === "--limit" && argv[i + 1]) {
@@ -51672,10 +52029,10 @@ function printRow(row, json) {
   ].filter(Boolean).join(" ");
   console.log(`${head} ${eventDetail(row.event)}`.trim());
 }
-async function run21(argv = process.argv.slice(3)) {
+async function run22(argv = process.argv.slice(3)) {
   let options2;
   try {
-    options2 = parseArgs13(argv);
+    options2 = parseArgs14(argv);
   } catch (error2) {
     console.error(error2 instanceof Error ? error2.message : String(error2));
     console.error("Usage: specialists|sp log [job-id] [--specialist <name>] [--bead <id>] [--node <id>] [--since <5m|iso>] [--limit <n>] [-f|--follow] [--json] [--all-events]");
@@ -51758,10 +52115,10 @@ var init_log = __esm(() => {
 // src/cli/steer.ts
 var exports_steer = {};
 __export(exports_steer, {
-  run: () => run22
+  run: () => run23
 });
 import { writeFileSync as writeFileSync14 } from "fs";
-async function run22() {
+async function run23() {
   const jobId = process.argv[3];
   const message = process.argv[4];
   if (!jobId || !message) {
@@ -51818,10 +52175,10 @@ var init_steer = __esm(() => {
 // src/cli/resume.ts
 var exports_resume = {};
 __export(exports_resume, {
-  run: () => run23
+  run: () => run24
 });
 import { writeFileSync as writeFileSync15 } from "fs";
-async function run23() {
+async function run24() {
   const jobId = process.argv[3];
   const task = process.argv[4];
   if (!jobId || !task) {
@@ -51886,9 +52243,9 @@ var init_resume = __esm(() => {
 // src/cli/follow-up.ts
 var exports_follow_up = {};
 __export(exports_follow_up, {
-  run: () => run24
+  run: () => run25
 });
-async function run24() {
+async function run25() {
   process.stderr.write("\x1B[33m\u26A0 DEPRECATED:\x1B[0m `specialists follow-up` is deprecated. Use `specialists resume` instead.\n\n");
   const { run: resumeRun } = await Promise.resolve().then(() => (init_resume(), exports_resume));
   return resumeRun();
@@ -51997,7 +52354,7 @@ var init_worktree_gc = __esm(() => {
 // src/cli/clean.ts
 var exports_clean = {};
 __export(exports_clean, {
-  run: () => run25
+  run: () => run26
 });
 import { existsSync as existsSync30, readFileSync as readFileSync29, readdirSync as readdirSync16, rmSync as rmSync4, statSync as statSync8 } from "fs";
 import { join as join34 } from "path";
@@ -52485,7 +52842,7 @@ function removeStaleProcesses(statuses, dryRun) {
   }
   return updatedCount;
 }
-async function run25() {
+async function run26() {
   let options2;
   try {
     options2 = parseOptions2(process.argv.slice(3));
@@ -52590,7 +52947,7 @@ var init_clean = __esm(() => {
 // src/cli/end.ts
 var exports_end = {};
 __export(exports_end, {
-  run: () => run26
+  run: () => run27
 });
 import { spawnSync as spawnSync20 } from "child_process";
 function parseOptions3(argv) {
@@ -52674,7 +53031,7 @@ async function publishChain(beadId, options2) {
     console.log("Publication mode: direct merge");
   }
 }
-async function run26() {
+async function run27() {
   let options2;
   try {
     options2 = parseOptions3(process.argv.slice(3));
@@ -52715,7 +53072,7 @@ var init_end = __esm(() => {
 // src/cli/stop.ts
 var exports_stop = {};
 __export(exports_stop, {
-  run: () => run27
+  run: () => run28
 });
 function parseStopArgs(argv) {
   let jobId;
@@ -52738,7 +53095,7 @@ function parseStopArgs(argv) {
   }
   return { jobId, force, closeBeadAnyway };
 }
-async function run27() {
+async function run28() {
   let parsed;
   try {
     parsed = parseStopArgs(process.argv.slice(3));
@@ -52766,13 +53123,13 @@ var init_stop = __esm(() => {
 // src/cli/finalize.ts
 var exports_finalize = {};
 __export(exports_finalize, {
-  run: () => run28
+  run: () => run29
 });
 function parseFinalizeArgs(argv) {
   const jobId = argv.find((token) => !token.startsWith("-"));
   return { jobId };
 }
-async function run28() {
+async function run29() {
   const parsed = parseFinalizeArgs(process.argv.slice(3));
   const jobId = parsed.jobId;
   if (!jobId) {
@@ -52794,9 +53151,9 @@ var init_finalize = __esm(() => {
 // src/cli/attach-tui.ts
 var exports_attach_tui = {};
 __export(exports_attach_tui, {
-  run: () => run29
+  run: () => run30
 });
-async function run29(target, deps = {}) {
+async function run30(target, deps = {}) {
   const piTui = await Promise.resolve().then(() => (init_dist2(), exports_dist));
   const { TUI: TUI2, ProcessTerminal: ProcessTerminal2, Container: Container2, Input: Input2, matchesKey: matchesKey2, Key: Key2 } = piTui;
   const terminal = new ProcessTerminal2;
@@ -52916,7 +53273,7 @@ var init_attach_tui = __esm(() => {
 // src/cli/attach.ts
 var exports_attach = {};
 __export(exports_attach, {
-  run: () => run30
+  run: () => run31
 });
 import readline3 from "readline";
 function exitWithError(message) {
@@ -53033,7 +53390,7 @@ function pickTarget(targets) {
     render2();
   });
 }
-async function run30(deps = {}) {
+async function run31(deps = {}) {
   const [jobId] = process.argv.slice(3);
   if (!jobId) {
     if (!process.stdout.isTTY || !process.stdin.isTTY)
@@ -53049,8 +53406,8 @@ async function run30(deps = {}) {
 }
 async function attachTarget(target, deps) {
   const runTui = deps.runTui ?? (async (resolvedTarget) => {
-    const { run: run31 } = await Promise.resolve().then(() => (init_attach_tui(), exports_attach_tui));
-    return run31(resolvedTarget, deps);
+    const { run: run32 } = await Promise.resolve().then(() => (init_attach_tui(), exports_attach_tui));
+    return run32(resolvedTarget, deps);
   });
   return runTui(target);
 }
@@ -53173,10 +53530,10 @@ var init_drift_detector = __esm(() => {
 // src/cli/prune-stale-defaults.ts
 var exports_prune_stale_defaults = {};
 __export(exports_prune_stale_defaults, {
-  run: () => run31
+  run: () => run32
 });
 import { resolve as resolve12 } from "path";
-function parseArgs14(argv) {
+function parseArgs15(argv) {
   let dryRun = false;
   let root = process.cwd();
   let help = false;
@@ -53213,8 +53570,8 @@ function printHelp() {
   console.log("  --keep-diverged   Preserve diverged .specialists/default entries");
   console.log("  --root            Repo root to scan");
 }
-async function run31(argv = process.argv.slice(3)) {
-  const { dryRun, root, help, keepDiverged } = parseArgs14(argv);
+async function run32(argv = process.argv.slice(3)) {
+  const { dryRun, root, help, keepDiverged } = parseArgs15(argv);
   if (help) {
     printHelp();
     return;
@@ -53245,7 +53602,7 @@ var init_prune_stale_defaults = __esm(() => {
 // src/cli/quickstart.ts
 var exports_quickstart = {};
 __export(exports_quickstart, {
-  run: () => run32
+  run: () => run33
 });
 function section2(title) {
   const bar = "\u2500".repeat(60);
@@ -53259,7 +53616,7 @@ function cmd2(s) {
 function flag(s) {
   return green13(s);
 }
-async function run32() {
+async function run33() {
   const lines = [
     "",
     bold12("specialists  \xB7  Quick Start Guide"),
@@ -53481,7 +53838,7 @@ var bold12 = (s) => `\x1B[1m${s}\x1B[0m`, dim13 = (s) => `\x1B[2m${s}\x1B[0m`, y
 var exports_doctor = {};
 __export(exports_doctor, {
   setStatusError: () => setStatusError,
-  run: () => run33,
+  run: () => run34,
   resolvePackageAssetDir: () => resolvePackageAssetDir,
   renderProcessSummary: () => renderProcessSummary,
   parseVersionTuple: () => parseVersionTuple,
@@ -54235,7 +54592,7 @@ function checkZombieJobs() {
   }
   return result.zombies === 0;
 }
-async function run33(argv = process.argv.slice(3)) {
+async function run34(argv = process.argv.slice(3)) {
   const subcommand = argv[0];
   if (subcommand === "orphans") {
     runDoctorOrphans();
@@ -54304,9 +54661,9 @@ var init_doctor = __esm(() => {
 // src/cli/setup.ts
 var exports_setup = {};
 __export(exports_setup, {
-  run: () => run34
+  run: () => run35
 });
-async function run34() {
+async function run35() {
   console.log("");
   console.log(yellow13("\u26A0 DEPRECATED: `specialists setup` is deprecated"));
   console.log("");
@@ -54429,7 +54786,7 @@ var init_serve_hot_reload = () => {};
 var exports_serve = {};
 __export(exports_serve, {
   startServe: () => startServe,
-  run: () => run35,
+  run: () => run36,
   recordAuditFailure: () => recordAuditFailure,
   evaluateReadiness: () => evaluateReadiness2,
   createReadinessState: () => createReadinessState,
@@ -54514,7 +54871,7 @@ async function evaluateReadiness2(opts) {
     return { ready: false, reason: "invalid_spec_in_user_dir" };
   return warning ? { ready: true, warning } : { ready: true };
 }
-function parseArgs15(argv) {
+function parseArgs16(argv) {
   let port = 8000;
   let concurrency = 4;
   let queueTimeoutMs = 5000;
@@ -54618,7 +54975,7 @@ async function waitForSlot(limit, timeoutMs, getActive) {
   return true;
 }
 async function startServe(argv = process.argv.slice(3)) {
-  const args = parseArgs15(argv);
+  const args = parseArgs16(argv);
   const loader = new SpecialistLoader({ projectDir: args.projectDir });
   const dbLocation = resolveObservabilityDbLocation(args.projectDir);
   const dbPath = args.dbPath ?? dbLocation.dbPath;
@@ -54648,6 +55005,14 @@ async function startServe(argv = process.argv.slice(3)) {
   const server = createServer(async (req, res) => {
     if (req.url === "/healthz")
       return sendJson(res, 200, { ok: true });
+    if (req.method === "GET" && req.url === "/metrics") {
+      if (!db)
+        return sendJson(res, 503, { success: false, error: "observability_unavailable", error_type: "internal" });
+      const text = collectPrometheusProjectionFromClient(db, { repo: dbLocation.gitRoot.split(/[\\/]/).filter(Boolean).at(-1) ?? "specialists" });
+      res.writeHead(200, { "content-type": "text/plain; version=0.0.4; charset=utf-8" });
+      res.end(text);
+      return;
+    }
     if (req.url === "/readyz") {
       const result = await evaluateReadiness2({
         state: readinessState,
@@ -54792,7 +55157,7 @@ async function startServe(argv = process.argv.slice(3)) {
   console.log(`sp serve listening on ${args.port}`);
   return { server, args, db, readinessState };
 }
-async function run35(argv = process.argv.slice(3)) {
+async function run36(argv = process.argv.slice(3)) {
   await startServe(argv);
 }
 var AUDIT_WINDOW_MS = 60000, DEFAULT_REQUIRED_PI_FLAGS;
@@ -54800,6 +55165,7 @@ var init_serve = __esm(() => {
   init_loader();
   init_script_runner();
   init_observability_sqlite();
+  init_prometheus_projection();
   init_observability_db();
   init_schema();
   init_serve_hot_reload();
@@ -54810,8 +55176,8 @@ var init_serve = __esm(() => {
 var exports_script = {};
 __export(exports_script, {
   scriptCli: () => scriptCli,
-  run: () => run36,
-  parseArgs: () => parseArgs16,
+  run: () => run37,
+  parseArgs: () => parseArgs17,
   mapExitCode: () => mapExitCode
 });
 import { spawnSync as spawnSync23 } from "child_process";
@@ -54821,7 +55187,7 @@ function parseVar(entry) {
     throw new Error(`Invalid --vars entry: ${entry}`);
   return [entry.slice(0, index), entry.slice(index + 1)];
 }
-function parseArgs16(argv) {
+function parseArgs17(argv) {
   if (argv.length === 0)
     throw new Error("Missing specialist name");
   const specialist = argv[0];
@@ -54927,8 +55293,8 @@ function runUnderLock(lockPath, argv) {
     return 75;
   return flock.status ?? 1;
 }
-async function run36(argv = process.argv.slice(3)) {
-  const args = parseArgs16(argv);
+async function run37(argv = process.argv.slice(3)) {
+  const args = parseArgs17(argv);
   if (args.singleInstance && !process.env.SP_SCRIPT_NO_LOCK) {
     process.exit(runUnderLock(args.singleInstance, argv));
   }
@@ -54945,19 +55311,19 @@ var scriptCli;
 var init_script = __esm(() => {
   init_loader();
   init_script_runner();
-  scriptCli = { parseArgs: parseArgs16, mapExitCode };
+  scriptCli = { parseArgs: parseArgs17, mapExitCode };
 });
 
 // src/cli/help.ts
 var exports_help = {};
 __export(exports_help, {
-  run: () => run37
+  run: () => run38
 });
 function formatCommands(entries) {
   const width = Math.max(...entries.map(([cmd3]) => cmd3.length));
   return entries.map(([cmd3, desc]) => `  ${cmd3.padEnd(width)}   ${desc}`);
 }
-async function run37() {
+async function run38() {
   const lines = [
     "",
     "Specialists lets you run project-scoped specialist agents with a bead-first workflow.",
@@ -55057,6 +55423,7 @@ async function run37() {
     "  specialists init --help        Bootstrap behavior and workflow injection",
     "  specialists feed --help        Compact job event streaming details",
     "  specialists log --help         Full runtime/control/error log details",
+    "  specialists forensic --help    Persisted forensic event query details",
     "  specialists metrics --help     Prometheus projection/exporter prototype",
     "  specialists chat <name> ...     Interactive TUI launch/control surface",
     "",
@@ -55083,6 +55450,7 @@ var init_help = __esm(() => {
     ["epic", "Epic lifecycle management: list/status/resolve wave-bound chain groups"],
     ["feed", "Tail compact job events; use -f to follow all jobs"],
     ["log", "Full runtime logs with job/bead/repo/path metadata; -f follows control/error events"],
+    ["forensic", "Query persisted xtrm.forensic.v1 runtime events; --json emits NDJSON"],
     ["metrics", "Export low-cardinality xtrm AgentOps metrics in Prometheus text format"],
     ["chat", "Launch an interactive TUI: feed-style timeline, status row, result, and steer/resume input"],
     ["result", "Print final output of a completed job; --wait polls until done, --timeout <ms> sets a limit"],
@@ -62638,7 +63006,7 @@ var next = process.argv[3];
 function wantsHelp() {
   return next === "--help" || next === "-h";
 }
-async function run38() {
+async function run39() {
   if (sub === "install") {
     if (wantsHelp()) {
       console.log([
@@ -63292,6 +63660,32 @@ async function run38() {
     const { run: handler } = await Promise.resolve().then(() => (init_feed2(), exports_feed));
     return handler();
   }
+  if (sub === "forensic") {
+    if (wantsHelp()) {
+      console.log([
+        "",
+        "Usage: specialists forensic [job-id] [--family <name>] [--event-name <name>] [--since <5m|iso>] [--limit <n>] [--json]",
+        "",
+        "Query canonical persisted xtrm.forensic.v1 events from observability SQLite.",
+        "",
+        "Options:",
+        "  --family <name>      Filter by event_family, e.g. job/tool/model/error",
+        "  --event-name <name>  Filter by event_name, e.g. tool.call.completed",
+        "  --since <5m|iso>     Filter by event timestamp",
+        "  --limit <n>          Maximum rows (default 1000, max 10000)",
+        "  --json               Emit forensic event JSON as NDJSON (default)",
+        "",
+        "Examples:",
+        "  specialists forensic 49adda --json",
+        "  specialists forensic --family error --since 24h",
+        ""
+      ].join(`
+`));
+      return;
+    }
+    const { run: handler } = await Promise.resolve().then(() => (init_forensic(), exports_forensic));
+    return handler();
+  }
   if (sub === "metrics") {
     if (wantsHelp()) {
       console.log([
@@ -63760,7 +64154,7 @@ Run 'specialists help' to see available commands.`);
   const server = new SpecialistsServer;
   await server.start();
 }
-run38().catch((error2) => {
+run39().catch((error2) => {
   logger.error(`Fatal error: ${error2}`);
   process.exit(1);
 });

@@ -169,6 +169,17 @@ describe('sp serve', () => {
     expect(JSON.stringify(log)).not.toContain('not-json');
   });
 
+  it('metrics responds with Prometheus text regardless of readiness', async () => {
+    const port = 8131;
+    await startServer(port);
+    const response = await fetch(`http://127.0.0.1:${port}/metrics`);
+    const text = await response.text();
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('text/plain');
+    expect(text).toContain('# TYPE xtrm_prometheus_projection_timestamp_seconds gauge');
+    expect(text).not.toMatch(/job_id=|bead_id=|chain_id=|participant_id=|trace_id=/);
+  });
+
   it('healthz responds 200 regardless of readiness', async () => {
     const port = 8124;
     await startServer(port);

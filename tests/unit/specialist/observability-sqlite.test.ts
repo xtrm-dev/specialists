@@ -791,6 +791,52 @@ describe('observability-sqlite', () => {
     });
   });
 
+  describe('forensic event persistence', () => {
+    it('dual-writes canonical forensic events with redaction and query filters', () => {
+      const client = createClient();
+      const now = Date.now();
+
+      client.upsertStatus({
+        id: 'job-forensic',
+        specialist: 'executor',
+        status: 'running',
+        bead_id: 'unitAI-forensic',
+        chain_kind: 'chain',
+        chain_id: 'chain-forensic',
+        chain_root_job_id: 'job-forensic',
+        chain_root_bead_id: 'unitAI-forensic',
+        started_at_ms: now - 1_000,
+        updated_at_ms: now,
+        model: 'openai/gpt-5.4-mini',
+        backend: 'openai',
+      } as any);
+
+      client.appendEvent('job-forensic', 'executor', 'unitAI-forensic', {
+        t: now,
+        type: 'tool',
+        tool: 'bash',
+        phase: 'end',
+        args: { raw_command: 'cat ~/.ssh/id_rsa', input_tokens: 42 },
+        tool_call_id: 'tool-call-1',
+      } as any);
+
+      const forensicRows = client.readForensicEvents({ jobId: 'job-forensic', eventFamily: 'tool' });
+      expect(forensicRows).toHaveLength(1);
+      expect(forensicRows[0]?.schema_version).toBe('xtrm.forensic.v1');
+      expect(forensicRows[0]?.event_name).toBe('tool.call.completed');
+      expect(forensicRows[0]?.participant_kind).toBe('specialist');
+      expect(forensicRows[0]?.participant_role).toBe('executor');
+      expect(forensicRows[0]?.participant_id).toBe('chain-forensic::executor');
+      expect(forensicRows[0]?.redaction_status).toBe('redacted');
+
+      const event = JSON.parse(forensicRows[0]!.event_json) as any;
+      expect(event.correlation.job_id).toBe('job-forensic');
+      expect(event.correlation.chain_id).toBe('chain-forensic');
+      expect(event.body.legacy_timeline_event.args).toBe('[REDACTED]');
+      expect(event.redaction.fields).toContain('body.legacy_timeline_event.args');
+    });
+  });
+
   describe('parseJournalMode', () => {
     it('normalizes journal mode to lowercase', () => {
       expect(parseJournalMode('WAL')).toBe('wal');

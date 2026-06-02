@@ -4,11 +4,11 @@ export declare const resumeSpecialistSchema: z.ZodObject<{
     job_id: z.ZodString;
     task: z.ZodString;
 }, "strip", z.ZodTypeAny, {
-    task: string;
     job_id: string;
+    task: string;
 }, {
-    task: string;
     job_id: string;
+    task: string;
 }>;
 export declare function createResumeSpecialistTool(registry: JobRegistry): {
     name: "resume_specialist";
@@ -17,11 +17,11 @@ export declare function createResumeSpecialistTool(registry: JobRegistry): {
         job_id: z.ZodString;
         task: z.ZodString;
     }, "strip", z.ZodTypeAny, {
-        task: string;
         job_id: string;
+        task: string;
     }, {
-        task: string;
         job_id: string;
+        task: string;
     }>;
     execute(input: z.infer<typeof resumeSpecialistSchema>): Promise<{
         status: string;

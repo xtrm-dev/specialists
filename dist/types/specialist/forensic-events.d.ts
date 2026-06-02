@@ -79,6 +79,12 @@ export interface CreateForensicEventOptions<TBody extends Record<string, unknown
 }
 export declare const FORBIDDEN_PROMETHEUS_LABELS: Set<string>;
 export declare const DEFAULT_LABEL_ALLOWLIST: Set<string>;
+interface RedactionResult<T = unknown> {
+    value: T;
+    fields: string[];
+    rules: string[];
+}
+export declare function redactForensicValue<T>(value: T, path?: string): RedactionResult<T>;
 export declare function createForensicEvent<TBody extends Record<string, unknown> = Record<string, unknown>>(options: CreateForensicEventOptions<TBody>): ForensicEvent<TBody>;
 export declare function normalizeResource(resource: ForensicResource): ForensicResource;
 export interface ParticipantIdentityInput {
@@ -116,4 +122,5 @@ export declare function forensicEventFromTimelineEvent(event: {
     type: string;
     [key: string]: unknown;
 }, context: TimelineForensicContext): ForensicEvent;
+export {};
 //# sourceMappingURL=forensic-events.d.ts.map

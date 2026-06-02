@@ -3,7 +3,7 @@
 /**
  * Specialists MCP Server — entry point
  * Subcommands: install, version, list, view, models, init, db, validate, edit, config, run,
- *              chat, status, ps, result, feed, log, metrics, clean, merge, epic, end, stop, attach, quickstart, serve, script, release, help
+ *              chat, status, ps, result, feed, log, forensic, metrics, clean, merge, epic, end, stop, attach, quickstart, serve, script, release, help
  */
 
 // Suppress EBADF errors from bun's internal fd handling on named pipes.
@@ -693,6 +693,32 @@ async function run() {
     return handler();
   }
 
+
+  if (sub === 'forensic') {
+    if (wantsHelp()) {
+      console.log([
+        '',
+        'Usage: specialists forensic [job-id] [--family <name>] [--event-name <name>] [--since <5m|iso>] [--limit <n>] [--json]',
+        '',
+        'Query canonical persisted xtrm.forensic.v1 events from observability SQLite.',
+        '',
+        'Options:',
+        '  --family <name>      Filter by event_family, e.g. job/tool/model/error',
+        '  --event-name <name>  Filter by event_name, e.g. tool.call.completed',
+        '  --since <5m|iso>     Filter by event timestamp',
+        '  --limit <n>          Maximum rows (default 1000, max 10000)',
+        '  --json               Emit forensic event JSON as NDJSON (default)',
+        '',
+        'Examples:',
+        '  specialists forensic 49adda --json',
+        '  specialists forensic --family error --since 24h',
+        '',
+      ].join('\n'));
+      return;
+    }
+    const { run: handler } = await import('./cli/forensic.js');
+    return handler();
+  }
 
   if (sub === 'metrics') {
     if (wantsHelp()) {

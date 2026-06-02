@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { SpecialistLoader } from '../specialist/loader.js';
 import { runScriptSpecialist, type ScriptGenerateRequest, type ScriptSpecialistErrorType } from '../specialist/script-runner.js';
 import { createObservabilitySqliteClient, createObservabilitySqliteClientAtPath } from '../specialist/observability-sqlite.js';
+import { collectPrometheusProjectionFromClient } from '../specialist/prometheus-projection.js';
 import { ensureObservabilityDbFile, resolveObservabilityDbLocation } from '../specialist/observability-db.js';
 import { parseSpecialist } from '../specialist/schema.js';
 import { createUserDirWatcher } from './serve-hot-reload.js';
@@ -274,6 +275,13 @@ export async function startServe(argv: string[] = process.argv.slice(3)) {
 
   const server = createServer(async (req, res) => {
     if (req.url === '/healthz') return sendJson(res, 200, { ok: true });
+    if (req.method === 'GET' && req.url === '/metrics') {
+      if (!db) return sendJson(res, 503, { success: false, error: 'observability_unavailable', error_type: 'internal' });
+      const text = collectPrometheusProjectionFromClient(db, { repo: dbLocation.gitRoot.split(/[\\/]/).filter(Boolean).at(-1) ?? 'specialists' });
+      res.writeHead(200, { 'content-type': 'text/plain; version=0.0.4; charset=utf-8' });
+      res.end(text);
+      return;
+    }
     if (req.url === '/readyz') {
       const result = await evaluateReadiness({
         state: readinessState,

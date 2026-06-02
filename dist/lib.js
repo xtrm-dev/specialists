@@ -7011,6 +7011,332 @@ function resolveObservabilityDbLocation(cwd = process.cwd()) {
   };
 }
 
+// src/specialist/forensic-events.ts
+var FORENSIC_SCHEMA_VERSION = "xtrm.forensic.v1";
+var FORBIDDEN_PROMETHEUS_LABELS = new Set([
+  "participant_id",
+  "job_id",
+  "bead_id",
+  "issue_id",
+  "container_id",
+  "chain_id",
+  "chain_root_job_id",
+  "chain_root_bead_id",
+  "epic_id",
+  "node_id",
+  "pulse_id",
+  "turn_id",
+  "tool_call_id",
+  "trace_id",
+  "span_id",
+  "parent_span_id",
+  "commit_sha",
+  "jsonrpc_request_id",
+  "mcp_session_id",
+  "raw_path",
+  "raw_command",
+  "raw_error",
+  "raw_url",
+  "prompt",
+  "model_output",
+  "user_id",
+  "email",
+  "token",
+  "credential"
+]);
+var DEFAULT_LABEL_ALLOWLIST = new Set([
+  "service_namespace",
+  "service_name",
+  "service_component",
+  "deployment_environment",
+  "repo",
+  "participant_kind",
+  "participant_role",
+  "event_family",
+  "severity",
+  "state",
+  "status",
+  "result",
+  "model_provider",
+  "model",
+  "tool_name",
+  "mcp_server",
+  "mcp_method",
+  "error_type",
+  "drift_tier",
+  "pulse_kind",
+  "direction",
+  "reason",
+  "process_kind",
+  "evidence_kind",
+  "target",
+  "highest_risk"
+]);
+var ALLOWED_TOP_LEVEL_FIELDS = new Set([
+  "schema_version",
+  "timestamp",
+  "t_unix_ms",
+  "seq",
+  "severity",
+  "event_family",
+  "event_name",
+  "event_version",
+  "resource",
+  "correlation",
+  "body",
+  "redaction",
+  "trace",
+  "otel",
+  "links",
+  "diagnostics"
+]);
+var REDACTED = "[REDACTED]";
+var REDACTION_RULES = {
+  sensitiveField: "sensitive-field-name",
+  secretPattern: "secret-pattern"
+};
+var SENSITIVE_FIELD_RE = /(^|_)(password|secret|credential|api_?key|access_?token|refresh_?token|auth_?token|bearer|email|prompt|model_?output|raw_?command|raw_?url|raw_?error|stderr|stdout|args|arguments|input|output|content)$/i;
+var SECRET_VALUE_RE = /(sk-[a-z0-9_-]{12,}|ghp_[a-z0-9_]{12,}|xox[baprs]-[a-z0-9-]{12,}|bearer\s+[a-z0-9._-]{12,})/i;
+function redactForensicValue(value, path = "body") {
+  const fields = new Set;
+  const rules = new Set;
+  function visit(input, currentPath) {
+    if (Array.isArray(input))
+      return input.map((item, index) => visit(item, `${currentPath}[${index}]`));
+    if (input && typeof input === "object") {
+      const output = {};
+      for (const [key, nested] of Object.entries(input)) {
+        const nextPath = `${currentPath}.${key}`;
+        if (isSensitiveField(key)) {
+          output[key] = REDACTED;
+          fields.add(nextPath);
+          rules.add(REDACTION_RULES.sensitiveField);
+          continue;
+        }
+        output[key] = visit(nested, nextPath);
+      }
+      return output;
+    }
+    if (typeof input === "string" && SECRET_VALUE_RE.test(input)) {
+      fields.add(currentPath);
+      rules.add(REDACTION_RULES.secretPattern);
+      return input.replace(SECRET_VALUE_RE, REDACTED);
+    }
+    return input;
+  }
+  return {
+    value: visit(value, path),
+    fields: Array.from(fields).sort(),
+    rules: Array.from(rules).sort()
+  };
+}
+function isSensitiveField(key) {
+  if (key === "input_tokens" || key === "output_tokens" || key === "cache_read_tokens" || key === "cache_creation_tokens")
+    return false;
+  return SENSITIVE_FIELD_RE.test(key);
+}
+function mergeRedaction(explicit, result) {
+  const fields = [...new Set([...explicit?.fields ?? [], ...result.fields])].sort();
+  const rules = [...new Set([...explicit?.rules ?? [], ...result.rules])].sort();
+  const status = explicit?.status === "unknown" ? "unknown" : explicit?.status === "redacted" || fields.length > 0 ? "redacted" : "clean";
+  return {
+    status,
+    ...fields.length > 0 ? { fields } : {},
+    ...rules.length > 0 ? { rules } : {}
+  };
+}
+function createForensicEvent(options) {
+  const tUnixMs = options.t_unix_ms ?? Date.now();
+  const redactionResult = redactForensicValue(options.body ?? {}, "body");
+  const explicitRedaction = options.redaction;
+  const event = {
+    schema_version: FORENSIC_SCHEMA_VERSION,
+    timestamp: options.timestamp ?? new Date(tUnixMs).toISOString(),
+    t_unix_ms: tUnixMs,
+    severity: options.severity ?? "info",
+    event_family: options.event_family,
+    event_name: options.event_name,
+    event_version: options.event_version ?? 1,
+    resource: normalizeResource(options.resource),
+    correlation: options.correlation ?? {},
+    body: redactionResult.value,
+    redaction: mergeRedaction(explicitRedaction, redactionResult)
+  };
+  if (options.seq !== undefined)
+    event.seq = options.seq;
+  if (options.trace)
+    event.trace = options.trace;
+  if (options.otel)
+    event.otel = options.otel;
+  if (options.links)
+    event.links = options.links;
+  if (options.diagnostics)
+    event.diagnostics = options.diagnostics;
+  assertKnownTopLevelFields(event);
+  return event;
+}
+function normalizeResource(resource) {
+  const normalized = { ...resource };
+  const legacySpecialist = normalized.specialist;
+  if (!normalized.participant_kind && typeof legacySpecialist === "string") {
+    normalized.participant_kind = "specialist";
+  }
+  if (!normalized.participant_role && typeof legacySpecialist === "string") {
+    normalized.participant_role = legacySpecialist;
+  }
+  delete normalized.specialist;
+  return normalized;
+}
+function deriveParticipantId(input) {
+  const kind = input.participant_kind ?? "specialist";
+  if (kind === "specialist" && input.chain_id)
+    return `${input.chain_id}::${input.participant_role}`;
+  if (kind === "orchestrator" && input.session_uuid)
+    return `orch::${input.session_uuid}`;
+  if (kind === "pulse_emitter" && input.container_id)
+    return `${input.container_id}::emitter::${input.participant_role}`;
+  if (kind === "node_member" && input.node_id)
+    return `node::${input.node_id}::${input.participant_role}::${input.member_index ?? 0}`;
+  if (kind === "adapter" && input.adapter_id)
+    return input.adapter_id;
+  return;
+}
+function assertKnownTopLevelFields(event) {
+  for (const key of Object.keys(event)) {
+    if (!ALLOWED_TOP_LEVEL_FIELDS.has(key)) {
+      throw new Error(`Unknown forensic event top-level field: ${key}`);
+    }
+  }
+}
+function forensicEventFromTimelineEvent(event, context) {
+  const participantRole = context.specialist;
+  const participantKind = context.nodeId ? "node_member" : "specialist";
+  const participantId = deriveParticipantId({
+    participant_kind: participantKind,
+    participant_role: participantRole,
+    chain_id: context.chainId,
+    node_id: context.nodeId
+  });
+  return createForensicEvent({
+    event_family: familyForTimelineType(event.type),
+    event_name: eventNameForTimelineEvent(event),
+    severity: severityForTimelineEvent(event),
+    resource: {
+      service_namespace: "xtrm",
+      service_name: "specialists",
+      service_component: context.serviceComponent ?? "runtime",
+      deployment_environment: "local",
+      repo: context.repo ?? "unknown",
+      participant_kind: participantKind,
+      participant_role: participantRole,
+      model_provider: context.backend,
+      model: context.model,
+      chain_kind: context.chainKind
+    },
+    correlation: {
+      participant_id: participantId,
+      job_id: context.jobId,
+      bead_id: context.beadId,
+      node_id: context.nodeId,
+      chain_id: context.chainId,
+      chain_root_job_id: context.chainRootJobId,
+      chain_root_bead_id: context.chainRootBeadId,
+      epic_id: context.epicId,
+      tool_call_id: typeof event.tool_call_id === "string" ? event.tool_call_id : undefined
+    },
+    body: { legacy_timeline_event: event },
+    redaction: { status: redactionStatusForTimelineEvent(event) },
+    t_unix_ms: event.t,
+    seq: event.seq
+  });
+}
+function familyForTimelineType(type) {
+  if (type === "run_start" || type === "run_complete" || type === "status_change" || type === "payload_breakdown")
+    return "job";
+  if (type === "tool")
+    return "tool";
+  if (type === "turn" || type === "turn_summary" || type === "message" || type === "text" || type === "thinking")
+    return "turn";
+  if (type === "token_usage" || type === "finish_reason" || type === "model_change" || type === "meta")
+    return "model";
+  if (type === "control_signal")
+    return "control";
+  if (type === "retry")
+    return "retry";
+  if (type === "compaction")
+    return "compaction";
+  if (type === "error" || type === "extension_error")
+    return "error";
+  if (type === "auto_commit_success" || type === "auto_commit_skipped" || type === "auto_commit_failed")
+    return "git";
+  if (type === "stale_warning")
+    return "process_health";
+  return "job";
+}
+function eventNameForTimelineEvent(event) {
+  if (event.type === "run_start")
+    return "job.started";
+  if (event.type === "run_complete") {
+    if (event.status === "ERROR")
+      return "job.failed";
+    if (event.status === "CANCELLED")
+      return "job.cancelled";
+    return "job.completed";
+  }
+  if (event.type === "status_change")
+    return "job.status_changed";
+  if (event.type === "tool") {
+    if (event.phase === "start")
+      return "tool.call.started";
+    if (event.is_error)
+      return "tool.call.failed";
+    return "tool.call.completed";
+  }
+  if (event.type === "turn_summary")
+    return "turn.summarized";
+  if (event.type === "token_usage")
+    return "model.token_usage.recorded";
+  if (event.type === "finish_reason")
+    return "model.finish_reason.recorded";
+  if (event.type === "model_change")
+    return "model.changed";
+  if (event.type === "control_signal")
+    return `control.${String(event.action ?? "signal")}.recorded`;
+  if (event.type === "retry")
+    return `retry.${String(event.phase ?? "recorded")}`;
+  if (event.type === "compaction")
+    return `compaction.${String(event.phase ?? "recorded")}`;
+  if (event.type === "extension_error")
+    return "error.extension";
+  if (event.type === "error")
+    return "error.rpc";
+  if (event.type === "auto_commit_success")
+    return "git.auto_commit.succeeded";
+  if (event.type === "auto_commit_skipped")
+    return "git.auto_commit.skipped";
+  if (event.type === "auto_commit_failed")
+    return "git.auto_commit.failed";
+  if (event.type === "stale_warning")
+    return "process_health.stale_detected";
+  return `${familyForTimelineType(event.type)}.${event.type}`;
+}
+function severityForTimelineEvent(event) {
+  if (event.type === "error" || event.type === "extension_error" || event.type === "auto_commit_failed")
+    return "error";
+  if (event.type === "stale_warning" || event.type === "control_signal")
+    return "warn";
+  if (event.type === "run_complete" && event.status === "ERROR")
+    return "error";
+  if (event.type === "tool" && event.is_error)
+    return "error";
+  return "info";
+}
+function redactionStatusForTimelineEvent(event) {
+  if (event.type === "tool" || event.type === "turn_summary" || event.type === "run_complete")
+    return "redacted";
+  return "clean";
+}
+
 // src/specialist/observability-sqlite.ts
 var _BunDatabase = null;
 var _probed = false;
@@ -7197,6 +7523,45 @@ function migrateToV11(db) {
     INSERT OR IGNORE INTO schema_version (version, applied_at_ms)
       VALUES (11, strftime('%s', 'now') * 1000);
   `);
+}
+function migrateToV12(db) {
+  const hasV12 = db.query("SELECT 1 FROM schema_version WHERE version = 12 LIMIT 1").get();
+  db.run(`
+    CREATE TABLE IF NOT EXISTS specialist_forensic_events (
+      id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+      job_id             TEXT NOT NULL,
+      seq                INTEGER NOT NULL,
+      t                  INTEGER NOT NULL,
+      schema_version     TEXT NOT NULL,
+      event_family       TEXT NOT NULL,
+      event_name         TEXT NOT NULL,
+      participant_kind   TEXT,
+      participant_role   TEXT,
+      participant_id     TEXT,
+      redaction_status   TEXT NOT NULL,
+      event_json         TEXT NOT NULL
+    );
+  `);
+  db.run("CREATE UNIQUE INDEX IF NOT EXISTS idx_forensic_events_job_seq ON specialist_forensic_events(job_id, seq)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_forensic_events_job_t ON specialist_forensic_events(job_id, t, seq, id)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_forensic_events_family ON specialist_forensic_events(event_family, event_name, t)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_forensic_events_participant ON specialist_forensic_events(participant_kind, participant_role, t)");
+  if (hasV12)
+    return;
+  db.run(`
+    INSERT OR IGNORE INTO schema_version (version, applied_at_ms)
+      VALUES (12, strftime('%s', 'now') * 1000);
+  `);
+}
+function parseJsonRecord(input) {
+  if (!input)
+    return {};
+  try {
+    const parsed = JSON.parse(input);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
 }
 function stringifyJson(value) {
   return JSON.stringify(value);
@@ -7409,6 +7774,7 @@ function initSchema(db) {
   migrateToV9(db);
   migrateToV10(db);
   migrateToV11(db);
+  migrateToV12(db);
   verifyWalMode(db);
 }
 function migrateToV5(db) {
@@ -7730,11 +8096,73 @@ class SqliteClient {
   }
   writeEventRow(jobId, specialist, beadId, event) {
     const seq = typeof event.seq === "number" && event.seq > 0 ? event.seq : this.getNextSpecialistEventSeq(jobId);
-    const eventJson = JSON.stringify({ ...event, seq });
+    const sequencedEvent = { ...event, seq };
+    const eventJson = JSON.stringify(sequencedEvent);
     this.db.run(`
       INSERT INTO specialist_events (job_id, seq, specialist, bead_id, t, type, event_json)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `, [jobId, seq, specialist, beadId ?? null, event.t, event.type, eventJson]);
+    this.writeForensicEventRow(jobId, specialist, beadId, sequencedEvent);
+  }
+  writeForensicEventRow(jobId, specialist, beadId, event) {
+    const context = this.readForensicContext(jobId);
+    const forensicEvent = forensicEventFromTimelineEvent(event, {
+      jobId,
+      specialist,
+      beadId: context.beadId ?? beadId,
+      nodeId: context.nodeId,
+      repo: context.repo,
+      serviceComponent: "runtime",
+      model: context.model,
+      backend: context.backend,
+      chainKind: context.chainKind,
+      chainId: context.chainId,
+      chainRootJobId: context.chainRootJobId,
+      chainRootBeadId: context.chainRootBeadId,
+      epicId: context.epicId
+    });
+    this.insertForensicEventRow(jobId, event.seq, forensicEvent);
+  }
+  readForensicContext(jobId) {
+    const row = this.db.query(`
+      SELECT bead_id, node_id, chain_kind, chain_id, chain_root_job_id, chain_root_bead_id, epic_id, status_json
+      FROM specialist_jobs
+      WHERE job_id = ?
+      LIMIT 1
+    `).get(jobId);
+    const statusJson = parseJsonRecord(typeof row?.status_json === "string" ? row.status_json : undefined);
+    return {
+      beadId: typeof row?.bead_id === "string" ? row.bead_id : undefined,
+      nodeId: typeof row?.node_id === "string" ? row.node_id : undefined,
+      repo: typeof statusJson.repo === "string" ? statusJson.repo : undefined,
+      model: typeof statusJson.model === "string" ? statusJson.model : undefined,
+      backend: typeof statusJson.backend === "string" ? statusJson.backend : undefined,
+      chainKind: typeof row?.chain_kind === "string" ? row.chain_kind : undefined,
+      chainId: typeof row?.chain_id === "string" ? row.chain_id : undefined,
+      chainRootJobId: typeof row?.chain_root_job_id === "string" ? row.chain_root_job_id : undefined,
+      chainRootBeadId: typeof row?.chain_root_bead_id === "string" ? row.chain_root_bead_id : undefined,
+      epicId: typeof row?.epic_id === "string" ? row.epic_id : undefined
+    };
+  }
+  insertForensicEventRow(jobId, seq, forensicEvent) {
+    this.db.run(`
+      INSERT OR REPLACE INTO specialist_forensic_events (
+        job_id, seq, t, schema_version, event_family, event_name,
+        participant_kind, participant_role, participant_id, redaction_status, event_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      jobId,
+      seq,
+      forensicEvent.t_unix_ms,
+      forensicEvent.schema_version,
+      forensicEvent.event_family,
+      forensicEvent.event_name,
+      forensicEvent.resource.participant_kind ?? null,
+      forensicEvent.resource.participant_role ?? null,
+      typeof forensicEvent.correlation.participant_id === "string" ? forensicEvent.correlation.participant_id : null,
+      forensicEvent.redaction.status,
+      JSON.stringify(forensicEvent)
+    ]);
   }
   findActiveJob(beadId, specialist) {
     return this.db.query(`
@@ -8453,6 +8881,38 @@ class SqliteClient {
       }
       return events;
     }, "readEventsAfterSeq");
+  }
+  readForensicEvents(filters = {}) {
+    return withRetry(() => {
+      const clauses = [];
+      const params = [];
+      if (filters.jobId) {
+        clauses.push("job_id = ?");
+        params.push(filters.jobId);
+      }
+      if (filters.sinceMs !== undefined) {
+        clauses.push("t >= ?");
+        params.push(filters.sinceMs);
+      }
+      if (filters.eventFamily) {
+        clauses.push("event_family = ?");
+        params.push(filters.eventFamily);
+      }
+      if (filters.eventName) {
+        clauses.push("event_name = ?");
+        params.push(filters.eventName);
+      }
+      const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+      const limit = Math.max(1, Math.min(filters.limit ?? 1000, 1e4));
+      return this.db.query(`
+        SELECT id, job_id, seq, t, schema_version, event_family, event_name,
+               participant_kind, participant_role, participant_id, redaction_status, event_json
+        FROM specialist_forensic_events
+        ${where}
+        ORDER BY t ASC, seq ASC, id ASC
+        LIMIT ?
+      `).all(...params, limit);
+    }, "readForensicEvents");
   }
   readLatestToolEvent(jobId) {
     return withRetry(() => {

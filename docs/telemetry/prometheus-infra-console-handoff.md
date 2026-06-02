@@ -42,7 +42,7 @@ Initial local validation uses the CLI exporter:
 sp metrics --prometheus --since 24h
 ```
 
-Infra can wrap this as a textfile collector or sidecar until an HTTP `/metrics` endpoint lands. The wrapper must not add labels from opaque IDs.
+Infra can use the CLI as a textfile collector or scrape the read-only `GET /metrics` endpoint exposed by `sp serve`. Wrappers and scrape configs must not add labels from opaque IDs.
 
 Recommended scrape metadata:
 

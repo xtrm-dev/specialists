@@ -1,0 +1,43 @@
+name: telemetry-contract
+
+on:
+  pull_request:
+    paths:
+      - 'src/specialist/forensic-events.ts'
+      - 'src/specialist/prometheus-projection.ts'
+      - 'src/specialist/observability-sqlite.ts'
+      - 'src/cli/metrics.ts'
+      - 'tests/unit/specialist/forensic-events.test.ts'
+      - 'tests/unit/specialist/prometheus-projection.test.ts'
+      - 'tests/unit/specialist/observability-sqlite.test.ts'
+      - '.github/workflows/telemetry-contract.yml'
+  push:
+    branches:
+      - master
+    paths:
+      - 'src/specialist/forensic-events.ts'
+      - 'src/specialist/prometheus-projection.ts'
+      - 'src/specialist/observability-sqlite.ts'
+      - 'src/cli/metrics.ts'
+      - 'tests/unit/specialist/forensic-events.test.ts'
+      - 'tests/unit/specialist/prometheus-projection.test.ts'
+      - 'tests/unit/specialist/observability-sqlite.test.ts'
+      - '.github/workflows/telemetry-contract.yml'
+  workflow_dispatch:
+
+jobs:
+  telemetry-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Validate telemetry contracts and Prometheus exposition parser
+        run: |
+          bun --bun vitest run \
+            tests/unit/specialist/forensic-events.test.ts \
+            tests/unit/specialist/prometheus-projection.test.ts \
+            tests/unit/specialist/observability-sqlite.test.ts
