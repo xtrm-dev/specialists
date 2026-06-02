@@ -36,6 +36,13 @@ describe('command-specific --help', () => {
     expect(out).toContain('--forever');
   });
 
+  it('metrics --help documents Prometheus projection label discipline', () => {
+    const out = captureIndexHelp(['metrics', '--help']);
+    expect(out).toContain('Prometheus text format');
+    expect(out).toContain('--since <5m|iso>');
+    expect(out).toContain('Opaque ids');
+  });
+
   it('status --help describes sections it reports', () => {
     const out = captureIndexHelp(['status', '--help']);
     expect(out).toContain('Sections include:');
@@ -44,7 +51,7 @@ describe('command-specific --help', () => {
 
   it('clean --help describes TTL and cleanup modes', () => {
     const out = captureIndexHelp(['clean', '--help']);
-    expect(out).toContain('Purge completed job directories');
+    expect(out).toContain('Clean specialist runtime artifacts');
     expect(out).toContain('SPECIALISTS_JOB_TTL_DAYS');
     expect(out).toContain('never removes SQLite artifacts');
     expect(out).toContain('--all');

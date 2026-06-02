@@ -3,7 +3,7 @@
 /**
  * Specialists MCP Server — entry point
  * Subcommands: install, version, list, view, models, init, db, validate, edit, config, run,
- *              chat, status, ps, result, feed, log, clean, merge, epic, end, stop, attach, quickstart, serve, script, release, help
+ *              chat, status, ps, result, feed, log, metrics, clean, merge, epic, end, stop, attach, quickstart, serve, script, release, help
  */
 
 // Suppress EBADF errors from bun's internal fd handling on named pipes.
@@ -693,6 +693,37 @@ async function run() {
     return handler();
   }
 
+
+  if (sub === 'metrics') {
+    if (wantsHelp()) {
+      console.log([
+        '',
+        'Usage: specialists metrics [--prometheus] [--since <5m|iso>]',
+        '',
+        'Project low-cardinality xtrm AgentOps telemetry into Prometheus text format.',
+        '',
+        'Source of truth:',
+        '  - observability SQLite runtime state and job metrics',
+        '  - forensic-event semantics from xtrm.forensic.v1',
+        '',
+        'Options:',
+        '  --prometheus       Emit Prometheus exposition text (default)',
+        '  --since <5m|iso>   Restrict job-metric backfill rows by updated_at_ms',
+        '',
+        'Examples:',
+        '  specialists metrics',
+        '  specialists metrics --prometheus --since 24h',
+        '',
+        'Label discipline:',
+        '  Outputs only low-cardinality labels such as participant_kind/participant_role.',
+        '  Opaque ids (job_id, chain_id, participant_id, trace_id) are never labels.',
+        '',
+      ].join('\n'));
+      return;
+    }
+    const { run: handler } = await import('./cli/metrics.js');
+    return handler();
+  }
 
   if (sub === 'log') {
     if (wantsHelp()) {

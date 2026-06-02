@@ -34,6 +34,8 @@ The split is mandatory:
 
 This contract is intentionally projection-first. It does not require an implementation to ship all metrics at once, but any exported metric must follow these names, types, labels, and cardinality rules.
 
+For scrape, alert, and dashboard ownership boundaries, see `docs/telemetry/prometheus-infra-console-handoff.md`.
+
 ## 2. Inputs and source of truth
 
 Prometheus is not the source of truth. The source of truth remains runtime state and forensic events.

@@ -15,6 +15,7 @@ export declare function shouldRunVersionCheck(): boolean;
 export declare function readCachedVersionCheck(): VersionCheckCache | null;
 export declare function getVersionCheckResult(): VersionCheckResult | null;
 export declare function formatVersionCheckNudge(result: VersionCheckResult): string | null;
+export declare function formatListVersionAlert(result: VersionCheckResult): string | null;
 export declare function markVersionCheckNotified(result: VersionCheckResult): void;
 export {};
 //# sourceMappingURL=version-check.d.ts.map
