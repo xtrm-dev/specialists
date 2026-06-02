@@ -387,6 +387,9 @@ describe('feed CLI', () => {
     expect(parsed.backend).toBe('anthropic');
     expect(parsed.beadId).toBe('unitAI-abc');
     expect(parsed.elapsed_ms).toBeGreaterThanOrEqual(0);
+    expect(parsed.forensic_event.schema_version).toBe('xtrm.forensic.v1');
+    expect(parsed.forensic_event.resource.participant_role).toBe('my-spec');
+    expect(parsed.forensic_event.correlation.job_id).toBe('job1');
     // Event fields still present
     expect(parsed.type).toBe('run_complete');
   });

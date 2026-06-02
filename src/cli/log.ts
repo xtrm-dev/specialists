@@ -9,6 +9,7 @@ import { createObservabilitySqliteClientAtPath } from '../specialist/observabili
 import { resolveObservabilityDbLocation } from '../specialist/observability-db.js';
 import type { SupervisorStatus } from '../specialist/supervisor.js';
 import type { TimelineEvent } from '../specialist/timeline-events.js';
+import { forensicEventFromTimelineEvent } from '../specialist/forensic-events.js';
 import {
   bold,
   cyan,
@@ -392,6 +393,19 @@ function printRow(row: LogRow, json: boolean): void {
       chain_root_job_id: row.chainRootJobId ?? null,
       chain_root_bead_id: row.chainRootBeadId ?? null,
       event: row.event,
+      forensic_event: forensicEventFromTimelineEvent(row.event as unknown as { t: number; seq?: number; type: string; [key: string]: unknown }, {
+        jobId: row.jobId,
+        specialist: row.specialist,
+        beadId: row.beadId,
+        nodeId: row.nodeId,
+        repo: row.repo,
+        serviceComponent: 'cli.log',
+        model: row.model,
+        backend: row.backend,
+        chainId: row.chainId,
+        chainRootJobId: row.chainRootJobId,
+        chainRootBeadId: row.chainRootBeadId,
+      }),
     }));
     return;
   }

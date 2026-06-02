@@ -132,9 +132,12 @@ describe('log CLI', () => {
     const { run } = await import('../../../src/cli/log.js');
     await run();
 
-    const row = JSON.parse(logs[0]) as { job_id: string; bead_id: string; event: { type: string } };
+    const row = JSON.parse(logs[0]) as { job_id: string; bead_id: string; event: { type: string }; forensic_event: any };
     expect(row.job_id).toBe('jobjson');
     expect(row.bead_id).toBe('unitAI-log');
     expect(row.event.type).toBe('status_change');
+    expect(row.forensic_event.schema_version).toBe('xtrm.forensic.v1');
+    expect(row.forensic_event.resource.participant_role).toBe('reviewer');
+    expect(row.forensic_event.correlation.job_id).toBe('jobjson');
   });
 });

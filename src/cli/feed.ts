@@ -31,6 +31,7 @@ import {
   isRunCompleteEvent,
   parseTimelineEvent,
 } from '../specialist/timeline-events.js';
+import { forensicEventFromTimelineEvent } from '../specialist/forensic-events.js';
 import { createObservabilitySqliteClient } from '../specialist/observability-sqlite.js';
 import { resolveNodeRefWithClient } from '../specialist/node-resolve.js';
 import { queryTimeline } from '../specialist/timeline-query.js';
@@ -475,6 +476,15 @@ function printSnapshot(
         beadId: meta.beadId ?? beadId,
         metrics: meta.metrics,
         elapsed_ms: Date.now() - meta.startedAtMs,
+        forensic_event: forensicEventFromTimelineEvent(event as unknown as { t: number; seq?: number; type: string; [key: string]: unknown }, {
+          jobId,
+          specialist,
+          beadId: meta.beadId ?? beadId,
+          nodeId: meta.nodeId,
+          serviceComponent: 'cli.feed',
+          model,
+          backend,
+        }),
         ...event,
       }));
     }
