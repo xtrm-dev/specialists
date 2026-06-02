@@ -36,6 +36,13 @@ describe('command-specific --help', () => {
     expect(out).toContain('--forever');
   });
 
+  it('forensic --help documents persisted forensic event queries', () => {
+    const out = captureIndexHelp(['forensic', '--help']);
+    expect(out).toContain('xtrm.forensic.v1');
+    expect(out).toContain('--family <name>');
+    expect(out).toContain('--event-name <name>');
+  });
+
   it('metrics --help documents Prometheus projection label discipline', () => {
     const out = captureIndexHelp(['metrics', '--help']);
     expect(out).toContain('Prometheus text format');

@@ -104,6 +104,26 @@ describe('forensic-events', () => {
     });
   });
 
+  it('redacts sensitive forensic body fields before output or persistence', () => {
+    const event = createForensicEvent({
+      event_family: 'tool',
+      event_name: 'tool.call.completed',
+      resource,
+      body: {
+        raw_command: 'cat ~/.ssh/id_rsa',
+        nested: { api_key: 'sk-test-secret-value-1234567890', input_tokens: 42 },
+      },
+    });
+
+    expect(event.body).toEqual({
+      raw_command: '[REDACTED]',
+      nested: { api_key: '[REDACTED]', input_tokens: 42 },
+    });
+    expect(event.redaction.status).toBe('redacted');
+    expect(event.redaction.fields).toContain('body.raw_command');
+    expect(event.redaction.fields).toContain('body.nested.api_key');
+  });
+
   it('normalizes timeline events to forensic events for JSON surfaces', async () => {
     const { forensicEventFromTimelineEvent } = await import('../../../src/specialist/forensic-events.js');
     const event = forensicEventFromTimelineEvent(

@@ -895,12 +895,20 @@ The contract is only effective if all writers use one helper. The implementation
 
 No caller should assemble final forensic JSON directly with ad-hoc object literals once the shared writer exists.
 
-## 16. Implementation follow-up candidates
+## 16. Implementation status and follow-up candidates
 
-The documentation contract intentionally stops before code changes. Likely follow-up beads:
+Specialists now ships the pre-substrate forensic bridge:
 
-1. Implement `xtrm.forensic.v1` shared envelope writer for specialists.
-2. Normalize `sp log --json` and `sp feed --json` output to the envelope while preserving legacy compatibility.
-3. Add schema/cardinality/redaction fixtures and tests.
-4. Add metrics projection/exporter using only allowlisted labels.
-5. Add service-skills and pulse family emitters when those runtimes need telemetry.
+1. `src/specialist/forensic-events.ts` implements the shared `xtrm.forensic.v1` envelope writer, participant identity derivation, forbidden-label guards, and deterministic redaction.
+2. Timeline persistence dual-writes canonical rows into `specialist_forensic_events` in observability SQLite.
+3. `sp forensic [job-id] --json` queries persisted forensic envelopes as NDJSON.
+4. `sp log --json` and `sp feed --json` include additive `forensic_event` payloads while preserving legacy fields.
+5. `sp metrics --prometheus` projects low-cardinality metrics from runtime state and job metrics.
+6. Unit and CI checks cover schema/cardinality/redaction and Prometheus exposition syntax.
+
+Remaining follow-up candidates:
+
+1. Expand native source emission beyond the current persistence-time dual-write bridge where doing so simplifies event-family-specific bodies.
+2. Add service-skills, MCP, process-health, worktree-health, and pulse family emitters when those runtimes need telemetry.
+3. Add an HTTP `/metrics` scrape surface if the CLI/textfile bridge is insufficient for infra.
+4. Migrate gitboard from text `sp feed` consumption to structured `sp feed --json` / `sp forensic` consumption.

@@ -79,6 +79,36 @@ export function renderPrometheusProjection(input: PrometheusProjectionInput): st
     });
   }
 
+  for (const [key, count] of countBy(input.statuses.filter(isQueuedStatus), (status) => labelsKey(jobQueueLabels(status, input.repo)))) {
+    samples.push({
+      name: 'xtrm_job_queue_depth',
+      help: 'Current queued or waiting-to-start specialist jobs.',
+      type: 'gauge',
+      labels: parseLabelsKey(key),
+      value: count,
+    });
+  }
+
+  for (const [key, count] of countBy(input.statuses, (status) => labelsKey(processLabels(status, input.repo)))) {
+    samples.push({
+      name: 'xtrm_processes',
+      help: 'Current specialist process rows by bounded process state.',
+      type: 'gauge',
+      labels: parseLabelsKey(key),
+      value: count,
+    });
+  }
+
+  for (const [key, count] of countBy(input.statuses.filter(hasWorktree), (status) => labelsKey(worktreeLabels(status, input.repo)))) {
+    samples.push({
+      name: 'xtrm_worktrees',
+      help: 'Current specialist worktrees by bounded state.',
+      type: 'gauge',
+      labels: parseLabelsKey(key),
+      value: count,
+    });
+  }
+
   const terminalMetrics = input.jobMetrics.filter((record) => isTerminalStatus(record.status));
   for (const [key, records] of groupBy(terminalMetrics, (record) => labelsKey(jobResultLabels(record, input.repo)))) {
     samples.push({
@@ -97,6 +127,17 @@ export function renderPrometheusProjection(input: PrometheusProjectionInput): st
         labels: parseLabelsKey(key),
         buckets: JOB_DURATION_BUCKETS,
         values: durations,
+      });
+    }
+
+    const activeDurations = records.map((record) => msToSeconds(record.active_runtime_ms)).filter(isNumber);
+    if (activeDurations.length > 0) {
+      histograms.push({
+        name: 'xtrm_job_active_runtime_seconds',
+        help: 'Specialist job active runtime excluding waiting time where measurable.',
+        labels: parseLabelsKey(key),
+        buckets: JOB_DURATION_BUCKETS,
+        values: activeDurations,
       });
     }
   }
@@ -150,6 +191,32 @@ export function renderPrometheusProjection(input: PrometheusProjectionInput): st
   return renderMetrics(samples, histograms);
 }
 
+export function validatePrometheusProjectionText(text: string): { ok: true } | { ok: false; errors: string[] } {
+  const errors: string[] = [];
+  const metricLineRe = /^[a-zA-Z_:][a-zA-Z0-9_:]*(\{[^}]*\})? [-+]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?$/;
+  for (const [index, line] of text.split(/\r?\n/).entries()) {
+    if (line.trim().length === 0 || line.startsWith('# HELP ') || line.startsWith('# TYPE ')) continue;
+    if (!metricLineRe.test(line)) errors.push(`line ${index + 1}: invalid Prometheus sample syntax`);
+    const labelsMatch = line.match(/\{([^}]*)\}/);
+    if (!labelsMatch) continue;
+    const labels = Object.fromEntries(
+      labelsMatch[1]
+        .split(',')
+        .filter(Boolean)
+        .map((pair) => {
+          const [key, rawValue = ''] = pair.split('=');
+          return [key, rawValue.replace(/^"|"$/g, '')];
+        }),
+    );
+    try {
+      assertNoForbiddenLabels(labels);
+    } catch (error) {
+      errors.push(`line ${index + 1}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  return errors.length === 0 ? { ok: true } : { ok: false, errors };
+}
+
 function jobStateLabels(status: SupervisorStatus, repo: string): Labels {
   const rawStatus = status as unknown as Record<string, unknown>;
   return safeLabels({
@@ -157,6 +224,34 @@ function jobStateLabels(status: SupervisorStatus, repo: string): Labels {
     repo,
     participant_role: String(rawStatus.specialist ?? 'unknown'),
     state: normalizeState(String(rawStatus.status ?? 'unknown')),
+  });
+}
+
+function jobQueueLabels(status: SupervisorStatus, repo: string): Labels {
+  const rawStatus = status as unknown as Record<string, unknown>;
+  return safeLabels({
+    ...DEFAULT_SERVICE_LABELS,
+    repo,
+    participant_role: String(rawStatus.specialist ?? 'unknown'),
+  });
+}
+
+function processLabels(status: SupervisorStatus, repo: string): Labels {
+  const rawStatus = status as unknown as Record<string, unknown>;
+  return safeLabels({
+    service_name: 'specialists',
+    repo,
+    process_kind: 'specialist',
+    state: normalizeState(String(rawStatus.status ?? 'unknown')),
+  });
+}
+
+function worktreeLabels(status: SupervisorStatus, repo: string): Labels {
+  const rawStatus = status as unknown as Record<string, unknown>;
+  return safeLabels({
+    service_name: 'specialists',
+    repo,
+    state: isTerminalStatus(String(rawStatus.status ?? 'unknown')) ? 'preserved_terminal' : 'active',
   });
 }
 
@@ -342,6 +437,17 @@ function increment(map: Map<string, { labels: Labels; value: number }>, labels: 
     return;
   }
   map.set(key, { labels, value });
+}
+
+function isQueuedStatus(status: SupervisorStatus): boolean {
+  const rawStatus = status as unknown as Record<string, unknown>;
+  const state = String(rawStatus.status ?? 'unknown').toLowerCase();
+  return state === 'starting' || state === 'waiting' || state === 'queued';
+}
+
+function hasWorktree(status: SupervisorStatus): boolean {
+  const rawStatus = status as unknown as Record<string, unknown>;
+  return typeof rawStatus.worktree_path === 'string' && rawStatus.worktree_path.length > 0;
 }
 
 function isTerminalStatus(status: string): boolean {

@@ -21,6 +21,7 @@ function loadBunDatabase(): (new (path: string) => BunDb) | null {
 import { resolveObservabilityDbLocation } from './observability-db.js';
 import { resolveJobsDir } from './job-root.js';
 import type { TimelineEvent, TimelineEventTool } from './timeline-events.js';
+import { forensicEventFromTimelineEvent, type ForensicEvent } from './forensic-events.js';
 import type { SupervisorStatus } from './supervisor.js';
 import type { EpicChainRecord, EpicRunRecord } from './epic-lifecycle.js';
 import type { PersistedChainIdentity } from './chain-identity.js';
@@ -236,6 +237,38 @@ function migrateToV11(db: BunDb): void {
     CREATE INDEX IF NOT EXISTS idx_job_metrics_updated ON specialist_job_metrics(updated_at_ms DESC);
     INSERT OR IGNORE INTO schema_version (version, applied_at_ms)
       VALUES (11, strftime('%s', 'now') * 1000);
+  `);
+}
+
+function migrateToV12(db: BunDb): void {
+  const hasV12 = db.query('SELECT 1 FROM schema_version WHERE version = 12 LIMIT 1').get() as { 1?: number } | undefined;
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS specialist_forensic_events (
+      id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+      job_id             TEXT NOT NULL,
+      seq                INTEGER NOT NULL,
+      t                  INTEGER NOT NULL,
+      schema_version     TEXT NOT NULL,
+      event_family       TEXT NOT NULL,
+      event_name         TEXT NOT NULL,
+      participant_kind   TEXT,
+      participant_role   TEXT,
+      participant_id     TEXT,
+      redaction_status   TEXT NOT NULL,
+      event_json         TEXT NOT NULL
+    );
+  `);
+  db.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_forensic_events_job_seq ON specialist_forensic_events(job_id, seq)');
+  db.run('CREATE INDEX IF NOT EXISTS idx_forensic_events_job_t ON specialist_forensic_events(job_id, t, seq, id)');
+  db.run('CREATE INDEX IF NOT EXISTS idx_forensic_events_family ON specialist_forensic_events(event_family, event_name, t)');
+  db.run('CREATE INDEX IF NOT EXISTS idx_forensic_events_participant ON specialist_forensic_events(participant_kind, participant_role, t)');
+
+  if (hasV12) return;
+
+  db.run(`
+    INSERT OR IGNORE INTO schema_version (version, applied_at_ms)
+      VALUES (12, strftime('%s', 'now') * 1000);
   `);
 }
 
@@ -485,6 +518,7 @@ export function initSchema(db: BunDb): void {
   migrateToV9(db);
   migrateToV10(db);
   migrateToV11(db);
+  migrateToV12(db);
   verifyWalMode(db);
 }
 
@@ -897,6 +931,29 @@ export interface PruneObservabilityOptions {
   skipExtract?: boolean;
 }
 
+export interface ForensicEventRecord {
+  id: number;
+  job_id: string;
+  seq: number;
+  t: number;
+  schema_version: string;
+  event_family: string;
+  event_name: string;
+  participant_kind: string | null;
+  participant_role: string | null;
+  participant_id: string | null;
+  redaction_status: string;
+  event_json: string;
+}
+
+export interface ListForensicEventsFilters {
+  jobId?: string;
+  sinceMs?: number;
+  eventFamily?: string;
+  eventName?: string;
+  limit?: number;
+}
+
 export interface JobMetricsRecord {
   job_id: string;
   specialist: string;
@@ -1054,6 +1111,7 @@ export interface ObservabilitySqliteClient {
   resolveChainEpicLinkByJobId(jobId: string): ChainEpicLinkRecord | null;
   readEvents(jobId: string): TimelineEvent[];
   readEventsAfterSeq(jobId: string, afterSeq: number): TimelineEvent[];
+  readForensicEvents(filters?: ListForensicEventsFilters): ForensicEventRecord[];
   readLatestToolEvent(jobId: string): TimelineEventTool | null;
   getLastActivityTimestampMs(jobId: string): number | null;
   aggregateJobMetrics(jobId: string): JobMetricsRecord | null;
@@ -1170,11 +1228,90 @@ class SqliteClient implements ObservabilitySqliteClient {
 
   private writeEventRow(jobId: string, specialist: string, beadId: string | undefined, event: TimelineEvent): void {
     const seq = typeof event.seq === 'number' && event.seq > 0 ? event.seq : this.getNextSpecialistEventSeq(jobId);
-    const eventJson = JSON.stringify({ ...event, seq });
+    const sequencedEvent = { ...event, seq };
+    const eventJson = JSON.stringify(sequencedEvent);
     this.db.run(`
       INSERT INTO specialist_events (job_id, seq, specialist, bead_id, t, type, event_json)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `, [jobId, seq, specialist, beadId ?? null, event.t, event.type, eventJson]);
+    this.writeForensicEventRow(jobId, specialist, beadId, sequencedEvent);
+  }
+
+  private writeForensicEventRow(jobId: string, specialist: string, beadId: string | undefined, event: TimelineEvent & { seq: number }): void {
+    const context = this.readForensicContext(jobId);
+    const forensicEvent = forensicEventFromTimelineEvent(
+      event as unknown as { t: number; seq?: number; type: string; [key: string]: unknown },
+      {
+        jobId,
+        specialist,
+        beadId: context.beadId ?? beadId,
+        nodeId: context.nodeId,
+        repo: context.repo,
+        serviceComponent: 'runtime',
+        model: context.model,
+        backend: context.backend,
+        chainKind: context.chainKind,
+        chainId: context.chainId,
+        chainRootJobId: context.chainRootJobId,
+        chainRootBeadId: context.chainRootBeadId,
+        epicId: context.epicId,
+      },
+    );
+    this.insertForensicEventRow(jobId, event.seq, forensicEvent);
+  }
+
+  private readForensicContext(jobId: string): {
+    beadId?: string;
+    nodeId?: string;
+    repo?: string;
+    model?: string;
+    backend?: string;
+    chainKind?: string;
+    chainId?: string;
+    chainRootJobId?: string;
+    chainRootBeadId?: string;
+    epicId?: string;
+  } {
+    const row = this.db.query(`
+      SELECT bead_id, node_id, chain_kind, chain_id, chain_root_job_id, chain_root_bead_id, epic_id, status_json
+      FROM specialist_jobs
+      WHERE job_id = ?
+      LIMIT 1
+    `).get(jobId) as Record<string, unknown> | undefined;
+    const statusJson = parseJsonRecord(typeof row?.status_json === 'string' ? row.status_json : undefined);
+    return {
+      beadId: typeof row?.bead_id === 'string' ? row.bead_id : undefined,
+      nodeId: typeof row?.node_id === 'string' ? row.node_id : undefined,
+      repo: typeof statusJson.repo === 'string' ? statusJson.repo : undefined,
+      model: typeof statusJson.model === 'string' ? statusJson.model : undefined,
+      backend: typeof statusJson.backend === 'string' ? statusJson.backend : undefined,
+      chainKind: typeof row?.chain_kind === 'string' ? row.chain_kind : undefined,
+      chainId: typeof row?.chain_id === 'string' ? row.chain_id : undefined,
+      chainRootJobId: typeof row?.chain_root_job_id === 'string' ? row.chain_root_job_id : undefined,
+      chainRootBeadId: typeof row?.chain_root_bead_id === 'string' ? row.chain_root_bead_id : undefined,
+      epicId: typeof row?.epic_id === 'string' ? row.epic_id : undefined,
+    };
+  }
+
+  private insertForensicEventRow(jobId: string, seq: number, forensicEvent: ForensicEvent): void {
+    this.db.run(`
+      INSERT OR REPLACE INTO specialist_forensic_events (
+        job_id, seq, t, schema_version, event_family, event_name,
+        participant_kind, participant_role, participant_id, redaction_status, event_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      jobId,
+      seq,
+      forensicEvent.t_unix_ms,
+      forensicEvent.schema_version,
+      forensicEvent.event_family,
+      forensicEvent.event_name,
+      forensicEvent.resource.participant_kind ?? null,
+      forensicEvent.resource.participant_role ?? null,
+      typeof forensicEvent.correlation.participant_id === 'string' ? forensicEvent.correlation.participant_id : null,
+      forensicEvent.redaction.status,
+      JSON.stringify(forensicEvent),
+    ]);
   }
 
   findActiveJob(beadId: string | null, specialist: string): { job_id?: string; status?: string; pid?: number; updated_at_ms?: number } | undefined {
@@ -1987,6 +2124,27 @@ class SqliteClient implements ObservabilitySqliteClient {
       }
       return events;
     }, 'readEventsAfterSeq');
+  }
+
+  readForensicEvents(filters: ListForensicEventsFilters = {}): ForensicEventRecord[] {
+    return withRetry(() => {
+      const clauses: string[] = [];
+      const params: Array<string | number> = [];
+      if (filters.jobId) { clauses.push('job_id = ?'); params.push(filters.jobId); }
+      if (filters.sinceMs !== undefined) { clauses.push('t >= ?'); params.push(filters.sinceMs); }
+      if (filters.eventFamily) { clauses.push('event_family = ?'); params.push(filters.eventFamily); }
+      if (filters.eventName) { clauses.push('event_name = ?'); params.push(filters.eventName); }
+      const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+      const limit = Math.max(1, Math.min(filters.limit ?? 1000, 10_000));
+      return this.db.query(`
+        SELECT id, job_id, seq, t, schema_version, event_family, event_name,
+               participant_kind, participant_role, participant_id, redaction_status, event_json
+        FROM specialist_forensic_events
+        ${where}
+        ORDER BY t ASC, seq ASC, id ASC
+        LIMIT ?
+      `).all(...params, limit) as ForensicEventRecord[];
+    }, 'readForensicEvents');
   }
 
   readLatestToolEvent(jobId: string): TimelineEventTool | null {

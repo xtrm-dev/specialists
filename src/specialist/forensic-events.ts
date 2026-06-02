@@ -137,6 +137,12 @@ export const DEFAULT_LABEL_ALLOWLIST = new Set([
   'error_type',
   'drift_tier',
   'pulse_kind',
+  'direction',
+  'reason',
+  'process_kind',
+  'evidence_kind',
+  'target',
+  'highest_risk',
 ]);
 
 const ALLOWED_TOP_LEVEL_FIELDS = new Set([
@@ -158,10 +164,82 @@ const ALLOWED_TOP_LEVEL_FIELDS = new Set([
   'diagnostics',
 ]);
 
+const REDACTED = '[REDACTED]';
+const REDACTION_RULES = {
+  sensitiveField: 'sensitive-field-name',
+  secretPattern: 'secret-pattern',
+} as const;
+
+const SENSITIVE_FIELD_RE = /(^|_)(password|secret|credential|api_?key|access_?token|refresh_?token|auth_?token|bearer|email|prompt|model_?output|raw_?command|raw_?url|raw_?error|stderr|stdout|args|arguments|input|output|content)$/i;
+const SECRET_VALUE_RE = /(sk-[a-z0-9_-]{12,}|ghp_[a-z0-9_]{12,}|xox[baprs]-[a-z0-9-]{12,}|bearer\s+[a-z0-9._-]{12,})/i;
+
+interface RedactionResult<T = unknown> {
+  value: T;
+  fields: string[];
+  rules: string[];
+}
+
+export function redactForensicValue<T>(value: T, path = 'body'): RedactionResult<T> {
+  const fields = new Set<string>();
+  const rules = new Set<string>();
+
+  function visit(input: unknown, currentPath: string): unknown {
+    if (Array.isArray(input)) return input.map((item, index) => visit(item, `${currentPath}[${index}]`));
+    if (input && typeof input === 'object') {
+      const output: Record<string, unknown> = {};
+      for (const [key, nested] of Object.entries(input)) {
+        const nextPath = `${currentPath}.${key}`;
+        if (isSensitiveField(key)) {
+          output[key] = REDACTED;
+          fields.add(nextPath);
+          rules.add(REDACTION_RULES.sensitiveField);
+          continue;
+        }
+        output[key] = visit(nested, nextPath);
+      }
+      return output;
+    }
+    if (typeof input === 'string' && SECRET_VALUE_RE.test(input)) {
+      fields.add(currentPath);
+      rules.add(REDACTION_RULES.secretPattern);
+      return input.replace(SECRET_VALUE_RE, REDACTED);
+    }
+    return input;
+  }
+
+  return {
+    value: visit(value, path) as T,
+    fields: Array.from(fields).sort(),
+    rules: Array.from(rules).sort(),
+  };
+}
+
+function isSensitiveField(key: string): boolean {
+  if (key === 'input_tokens' || key === 'output_tokens' || key === 'cache_read_tokens' || key === 'cache_creation_tokens') return false;
+  return SENSITIVE_FIELD_RE.test(key);
+}
+
+function mergeRedaction(explicit: ForensicRedaction | undefined, result: RedactionResult): ForensicRedaction {
+  const fields = [...new Set([...(explicit?.fields ?? []), ...result.fields])].sort();
+  const rules = [...new Set([...(explicit?.rules ?? []), ...result.rules])].sort();
+  const status: RedactionStatus = explicit?.status === 'unknown'
+    ? 'unknown'
+    : explicit?.status === 'redacted' || fields.length > 0
+      ? 'redacted'
+      : 'clean';
+  return {
+    status,
+    ...(fields.length > 0 ? { fields } : {}),
+    ...(rules.length > 0 ? { rules } : {}),
+  };
+}
+
 export function createForensicEvent<TBody extends Record<string, unknown> = Record<string, unknown>>(
   options: CreateForensicEventOptions<TBody>,
 ): ForensicEvent<TBody> {
   const tUnixMs = options.t_unix_ms ?? Date.now();
+  const redactionResult = redactForensicValue(options.body ?? {}, 'body');
+  const explicitRedaction = options.redaction;
   const event: ForensicEvent<TBody> = {
     schema_version: FORENSIC_SCHEMA_VERSION,
     timestamp: options.timestamp ?? new Date(tUnixMs).toISOString(),
@@ -172,8 +250,8 @@ export function createForensicEvent<TBody extends Record<string, unknown> = Reco
     event_version: options.event_version ?? 1,
     resource: normalizeResource(options.resource),
     correlation: options.correlation ?? {},
-    body: options.body ?? ({} as TBody),
-    redaction: options.redaction ?? { status: 'clean' },
+    body: redactionResult.value as TBody,
+    redaction: mergeRedaction(explicitRedaction, redactionResult),
   };
 
   if (options.seq !== undefined) event.seq = options.seq;

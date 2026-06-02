@@ -14,4 +14,10 @@ export interface PrometheusProjectionInput {
 export declare function collectPrometheusProjection(options?: PrometheusProjectionOptions): string;
 export declare function collectPrometheusProjectionFromClient(client: Pick<ObservabilitySqliteClient, 'listStatuses' | 'listJobMetrics'>, options?: PrometheusProjectionOptions): string;
 export declare function renderPrometheusProjection(input: PrometheusProjectionInput): string;
+export declare function validatePrometheusProjectionText(text: string): {
+    ok: true;
+} | {
+    ok: false;
+    errors: string[];
+};
 //# sourceMappingURL=prometheus-projection.d.ts.map

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { renderPrometheusProjection } from '../../../src/specialist/prometheus-projection.js';
+import { renderPrometheusProjection, validatePrometheusProjectionText } from '../../../src/specialist/prometheus-projection.js';
 import type { JobMetricsRecord } from '../../../src/specialist/observability-sqlite.js';
 import type { SupervisorStatus } from '../../../src/specialist/supervisor.js';
 
@@ -38,7 +38,7 @@ describe('prometheus-projection', () => {
       repo: 'specialists',
       nowMs: 1_780_000_000_000,
       statuses: [
-        { id: 'job-1', specialist: 'executor', status: 'running' } as unknown as SupervisorStatus,
+        { id: 'job-1', specialist: 'executor', status: 'running', worktree_path: '/tmp/wt' } as unknown as SupervisorStatus,
         { id: 'job-2', specialist: 'reviewer', status: 'waiting' } as unknown as SupervisorStatus,
       ],
       jobMetrics: [metric()],
@@ -47,7 +47,11 @@ describe('prometheus-projection', () => {
     expect(output).toContain('# TYPE xtrm_job_state gauge');
     expect(output).toContain('xtrm_jobs_total');
     expect(output).toContain('xtrm_job_duration_seconds_bucket');
+    expect(output).toContain('xtrm_job_active_runtime_seconds_bucket');
     expect(output).toContain('xtrm_job_wait_seconds_bucket');
+    expect(output).toContain('xtrm_job_queue_depth');
+    expect(output).toContain('xtrm_processes');
+    expect(output).toContain('xtrm_worktrees');
     expect(output).toContain('xtrm_turns_total');
     expect(output).toContain('xtrm_context_usage_ratio');
     expect(output).toContain('xtrm_tool_calls_total');
@@ -55,7 +59,20 @@ describe('prometheus-projection', () => {
     expect(output).toContain('participant_kind="specialist"');
     expect(output).toContain('participant_role="executor"');
     expect(output).toContain('tool_name="bash"');
+    expect(output).toContain('direction="input"');
+    expect(validatePrometheusProjectionText(output)).toEqual({ ok: true });
     expect(output).not.toMatch(/job_id=|bead_id=|chain_id=|participant_id=|trace_id=/);
+  });
+
+  it('is replay-safe for table-derived counters across repeated renders', () => {
+    const input = {
+      repo: 'specialists',
+      statuses: [] as SupervisorStatus[],
+      jobMetrics: [metric(), metric({ job_id: 'job-2', elapsed_ms: 7_000 })],
+      nowMs: 1_780_000_000_000,
+    };
+
+    expect(renderPrometheusProjection(input)).toBe(renderPrometheusProjection(input));
   });
 
   it('normalizes terminal results without exposing raw ids as labels', () => {

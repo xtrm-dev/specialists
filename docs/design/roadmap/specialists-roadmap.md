@@ -209,7 +209,7 @@ Each opportunity (a) is implementable without the substrate daemon or `container
 
 > **Post-table additions (2026-05-31).** Opportunities 13, 14, 15, 16 were added after this summary table and are described in §3.2 below — Opp 13 (sp stop --all / sp chain stop, `unitAI-1p0s5`), Opp 14 (canonical-pipeline completion, **[shipped]** via `unitAI-sfwe1`), Opp 15 (seconder fusion, **[shipped]** via `unitAI-4e194`), Opp 16 (SCRUTINY enforcement, in-flight via `unitAI-3l0ac`). A 17th initiative — sp merge / sp epic merge / sp finalize rework — is filed as `unitAI-lyh1b` (kj651 child); described in §10.5 Phase 5 row 19 + replaces the prior dirty-index-diagnostic scope. All five are kj651 parent-child children.
 >
-> **Post-table addition (2026-06-02).** Opportunity 18 — adopt the **5-layer identity model** (`participant_kind` / `participant_role` / `participant_id` / `job_id` / `turn_id`+`tool_call_id`+`event_id`) in observability + envelope, replacing the current conflation of `specialist_id` (a bounded role name) with run identity. Substrate is under-specified on per-activation identity (no Run/Activation entity in §2.1); this opp pins the canonical schema bridge-side. Cost ~1.5 E-D-E, Phase 1 parallel slot. Tracking bead: `unitAI-n2px1`. Co-supersedes the (wrong) Opp 18 framing previously on the feature branch (`specialist_id → participant_id` rename), which conflated role with instance.
+> **Post-table addition (2026-06-02; stable bridge shipped 2026-06-02).** Opportunity 18 — adopt the **5-layer identity model** (`participant_kind` / `participant_role` / `participant_id` / `job_id` / `turn_id`+`tool_call_id`+`event_id`) in observability + envelope, replacing the current conflation of `specialist_id` (a bounded role name) with run identity. Substrate is under-specified on per-activation identity (no Run/Activation entity in §2.1); this opp pins the canonical schema bridge-side. **Pre-substrate bridge status:** shipped for `xtrm.forensic.v1` envelopes, persisted `specialist_forensic_events`, `sp forensic`, `sp feed/log --json` additive `forensic_event`, and `sp metrics --prometheus` low-cardinality projection. Remaining substrate-era work is broader source-family coverage and eventual re-home into substrate state/events. Tracking beads: `unitAI-60w93.8`–`.15` (bridge stabilization) plus `unitAI-n2px1` (identity alignment). Co-supersedes the (wrong) Opp 18 framing previously on the feature branch (`specialist_id → participant_id` rename), which conflated role with instance.
 
 ### 3.2 Per-opportunity detail
 
@@ -568,16 +568,23 @@ The fusion is architecturally clean: `reviewer.specialist.json` already declared
 4. Layer 1+2 are the **only** identity fields eligible as Prometheus/Loki labels. Layer 3+4+5 live in correlation/body, never labels.
 5. **Tool vs participant.** A *tool* is invoked synchronously and has no own lifecycle (e.g. MCP grafana query). A *participant* has its own lifecycle/runs/state (e.g. `service-skills` drift detector). Adapters that are pure tools are NOT participants.
 
-**Scope.**
+**Bridge status (shipped).**
 
-- `observability.db` schema migration: rename `specialist_jobs.specialist_id` → `participant_role`; add columns `participant_kind` (default `'specialist'`), `participant_id` (derived at write time per L3 derivation table above). `job_id` **unchanged** (it IS the activation, name preserved).
-- `SupervisorStatus` field rename `specialist_id` → `participant_role`; add `participant_kind`, `participant_id`. New fields populated by the supervisor at write time.
-- CLI display surfaces (`sp ps`, `sp log`, `sp feed`, `sp result`): show new fields; accept old `--specialist` filter as alias for `--participant-role` for ~1 release with deprecation warning.
-- Forensic envelope alignment: `participant_kind` + `participant_role` go in §4 resource attributes; `participant_id` joins §5 correlation as available-bridge-era (no longer "reserved for substrate"). See cross-edit to `docs/telemetry/forensic-event-contract.md` in `unitAI-n2px1`.
-- Documentation: `docs/observability-metrics.md`, `docs/cli-reference.md`, `docs/design/substrate/devops-platform-engineering-prd.md` updated to new field names.
-- Tests: schema migration test + alias-filter back-compat smoke + CLI snapshot updates + L3 derivation unit tests (specialist scope-chain, orchestrator scope-session, edge cases).
+- `src/specialist/forensic-events.ts` implements L1/L2/L3 derivation and enforces L1+L2-only metric label discipline.
+- `specialist_forensic_events` now persists canonical `xtrm.forensic.v1` envelopes alongside legacy `specialist_events` rows.
+- `sp forensic` queries persisted envelopes; `sp feed --json` and `sp log --json` expose additive `forensic_event` payloads for compatibility.
+- `sp metrics --prometheus` uses only low-cardinality identity labels and validates Prometheus text syntax in CI.
+- Tests cover L3 derivation, redaction, forbidden-label rejection, persistence, and replay-safe table-derived counters.
 
-**Cost: ~1.5 E-D-E.** No hard dep on Opp 1/3/4/10 (different surface). Sequence Phase 1 parallel with Opp 2 / Opp 8 / Opp 11.
+**Remaining scope.**
+
+- Broaden source-specific native event bodies where persistence-time dual-write is too generic.
+- Decide whether to rename legacy `specialist` DB/status fields to `participant_role`, or keep them as storage-era aliases while substrate/state.db owns canonical identity names.
+- Extend CLI filters only if operators need `--participant-role`; current `--specialist` remains the bridge alias.
+- Add service-skills/MCP/process/worktree/pulse metric families when those source states emit sufficient forensic facts.
+- Migrate gitboard consumer paths from text feed to `sp feed --json` / `sp forensic`.
+
+**Cost/status:** initial bridge shipped under `unitAI-60w93.2`–`.14`; remaining work is incremental family coverage and consumer migration, not a blocker for pre-substrate telemetry stability.
 
 **Reads forward.** Substrate §2.2 makes the participant abstract first-class; this opp pre-bridges the per-activation identity that substrate's entity table does not currently declare (under-specification flagged in `unitAI-n2px1`'s sibling bead requesting substrate-author add an Identity Model section to `substrate.md`). Channels v0 (`channels.md` §11) verdict messages already carry `participant_id` natively in the v0 schema; the bridge populates the same field name from Phase 1. State.db rewrite is identity for this surface (no rename, just re-home).
 

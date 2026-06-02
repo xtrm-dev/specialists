@@ -93,6 +93,27 @@ export interface PruneObservabilityOptions {
     eventsRetentionMs?: number;
     skipExtract?: boolean;
 }
+export interface ForensicEventRecord {
+    id: number;
+    job_id: string;
+    seq: number;
+    t: number;
+    schema_version: string;
+    event_family: string;
+    event_name: string;
+    participant_kind: string | null;
+    participant_role: string | null;
+    participant_id: string | null;
+    redaction_status: string;
+    event_json: string;
+}
+export interface ListForensicEventsFilters {
+    jobId?: string;
+    sinceMs?: number;
+    eventFamily?: string;
+    eventName?: string;
+    limit?: number;
+}
 export interface JobMetricsRecord {
     job_id: string;
     specialist: string;
@@ -234,6 +255,7 @@ export interface ObservabilitySqliteClient {
     resolveChainEpicLinkByJobId(jobId: string): ChainEpicLinkRecord | null;
     readEvents(jobId: string): TimelineEvent[];
     readEventsAfterSeq(jobId: string, afterSeq: number): TimelineEvent[];
+    readForensicEvents(filters?: ListForensicEventsFilters): ForensicEventRecord[];
     readLatestToolEvent(jobId: string): TimelineEventTool | null;
     getLastActivityTimestampMs(jobId: string): number | null;
     aggregateJobMetrics(jobId: string): JobMetricsRecord | null;

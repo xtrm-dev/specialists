@@ -244,8 +244,8 @@ Recommended shape:
 2. Maintain a durable projection cursor/watermark.
 3. Increment counters/histograms exactly once per source event.
 4. Compute gauges from current state tables at scrape time or on a short polling interval.
-5. Expose `/metrics` in Prometheus text/OpenMetrics format.
-6. Optionally expose `sp metrics export` for local debugging and CI snapshots.
+5. Expose Prometheus text/OpenMetrics format. The pre-substrate bridge ships both `sp metrics --prometheus` and read-only HTTP `GET /metrics` on `sp serve`.
+6. Validate exposition syntax in CI with the telemetry-contract test path.
 
 ### 6.2 Durable counters
 
@@ -256,6 +256,8 @@ Counters must survive exporter restarts. Options:
 - or run exporter as part of the daemon with process-lifetime counters and accept reset semantics only if Prometheus handles restart resets.
 
 Preferred for xtrm: **persistent cursor + replayable event history**. This keeps local CLI/debug use deterministic and avoids silent undercounting after exporter restarts.
+
+Current pre-substrate bridge status: `sp metrics --prometheus` uses table-derived counters from durable `specialist_job_metrics` / current-state snapshots rather than incrementing a process-local event stream. Repeated renders over the same table state are deterministic; event-cursor projection remains the target for a long-running HTTP exporter.
 
 ### 6.3 Gauges
 
@@ -328,10 +330,10 @@ VALIDATION — Prometheus projection
 - [ ] participant_kind + participant_role are used; specialist is not a primary label.
 - [ ] participant_id/job_id/bead_id/container_id/chain_id/trace_id/span_id/tool_call_id are not labels.
 - [ ] Histograms use seconds and documented buckets.
-- [ ] Counters are replay-safe or backed by a durable projection cursor.
+- [x] CLI counters are replay-safe table-derived projections; long-running event-stream exporters still need a durable projection cursor.
 - [ ] Gauges are current-state snapshots.
 - [ ] Exemplars use trace_id only when available; otherwise dashboards link to logs by bounded labels + time range.
-- [ ] /metrics includes HELP/TYPE and passes a Prometheus/OpenMetrics parser.
+- [x] `sp metrics --prometheus` and `sp serve` `GET /metrics` include HELP/TYPE; CLI output passes the repository Prometheus text parser validation.
 ```
 
 ## 10. Implementation sequence
