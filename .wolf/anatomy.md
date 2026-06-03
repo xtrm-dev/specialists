@@ -1393,3 +1393,10 @@
 ## 2026-05-26 — `sp log` status colors + human dedupe
 - `src/cli/log.ts` collapses near-identical human display rows within a 2s window using a normalized event payload key; JSON mode remains full-fidelity.
 - `status=<state>` is color-coded as a whole segment with the restrained palette: done green, error red, cancelled/starting/waiting yellow, running cyan.
+> Manual update: 2026-06-03 — `.wolf/cerebrum.md` and `.wolf/memory.md` recorded the substrate-vs-devops design SSOT distinction clarified during unitAI-69s6t planning.
+> Manual update: 2026-06-03 — unitAI-69s6t updated `/home/dawid/second-mind/1-projects/xtrm/substrate/substrate_design_it.md` (§2.8, §11.3, §12.5) for telemetry projection links, shipped forensic/metrics surfaces, and console lineage/evidence drawer semantics.
+> Manual update: 2026-06-03 — unitAI-0gdjp added `docs/telemetry/agentops-event-catalog.md` and linked it from `docs/telemetry/forensic-event-contract.md`.
+> Manual update: 2026-06-03 — unitAI-eoqxp.1 research refresh closed; evidence pack and scope refinements appended to beads `unitAI-eoqxp`, `unitAI-eoqxp.1`, and children `.1`-`.4`.
+> Manual update: 2026-06-03 — DevOps PRD vault note `/home/dawid/second-mind/1-projects/xtrm/devops/devops-system.md` gained §7.2 parking `unitAI-eoqxp.1` research findings behind telemetry/roadmap/substrate/channels sequencing.
+> Manual update: 2026-06-03 — unitAI-eoqxp.3 extended `docs/telemetry/forensic-event-contract.md`, `docs/telemetry/agentops-event-catalog.md`, and `docs/telemetry/prometheus-projection-contract.md`; created implementation children `unitAI-eoqxp.3.1`-.`3.5`.
+> Manual update: 2026-06-03 — telemetry pricing correction: docs now treat token usage as current reliable signal and defer USD cost metrics until direct API billing/pricing provenance exists.

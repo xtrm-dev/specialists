@@ -49,3 +49,8 @@
 
 ## Learned — 2026-05-22T13:43:53Z
 - Bare `sp attach` picker must use raw-mode `readline.emitKeypressEvents` with Up/Down/Enter handling; a blocking `readFileSync(0)` numeric reader makes the list non-interactive and breaks arrow selection UX.
+## User Corrections — 2026-06-03
+- Substrate design (`substrate_design_it.md`) is the broad xtrm product/runtime/collante: future system spanning core/substrate/channels/specialists/console. `devops-system.md` is specialists-owned vertical design that covers substrate touchpoints, future DevOps, AgentOps telemetry, MCP, IaC, and console; do not treat it as the substrate SSOT or let it override substrate boundaries.
+## Decision Log — 2026-06-03
+- DevOps module design is parked behind foundational work: first close specialists telemetry bridge/event-catalog follow-through, specialists roadmap/runtime cleanup, then substrate/channels; only then return to `unitAI-eoqxp.2`–`.6`. `devops-system.md` should retain evidence links so future work does not redo research.
+- 2026-06-03 correction: For xtrm/specialists telemetry, do not treat USD/API cost as reliable today. The project uses subscription plans rather than direct provider API billing. Track token usage first (input/output/cache/reasoning/tool/total where available); keep USD cost metrics future-only until explicit API billing/pricing provenance exists.

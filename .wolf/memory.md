@@ -245,3 +245,25 @@ PR #99 failed GitHub OSV on `qs@6.15.1` in `bun.lock` (`GHSA-q8mj-m7cp-5q26`). F
 ## 2026-06-02 — unitAI-60w93.5 Prometheus projection contract
 - Added docs/telemetry/prometheus-projection-contract.md defining low-cardinality xtrm Prometheus metrics, allowlisted labels, forbidden correlation labels, buckets, exporter architecture, SLO candidates, and ownership split.
 - Linked forensic-event-contract.md and observability-metrics.md to the projection contract; created follow-ups unitAI-60w93.6 exporter prototype and unitAI-60w93.7 infra/console handoff.
+## 2026-06-03 — substrate/devops SSOT distinction
+- User clarified that `substrate_design_it.md` is the broad xtrm substrate/product/collante design across core/substrate/channels/specialists/console.
+- `devops-system.md` is specialists-owned vertical design spanning substrate touchpoints, DevOps, AgentOps telemetry, MCP, IaC, and console; use it as DevOps SSOT, not as a replacement for substrate SSOT.
+## 2026-06-03 — unitAI-69s6t substrate telemetry design pass
+- Updated `second-mind/1-projects/xtrm/substrate/substrate_design_it.md` with explicit Prometheus projection contract link, shipped `sp forensic` / `sp metrics --prometheus` observability surfaces, and a new §12.5 lineage/evidence drawer model for console drill-down.
+- The pass treats substrate as xtrm-wide SSOT and `docs/telemetry/*` as shipped specialists-side implementation contracts, not as the whole substrate design.
+## 2026-06-03 — unitAI-0gdjp AgentOps event catalog
+- Added `docs/telemetry/agentops-event-catalog.md` as the implementation-ready catalog for xtrm AgentOps event names, body fields, evidence semantics, and Prometheus projection eligibility.
+- Linked the catalog from `docs/telemetry/forensic-event-contract.md` design context and §6 event-family taxonomy.
+## 2026-06-03 — unitAI-eoqxp.1 research refresh
+- Completed four researcher passes for AgentOps telemetry gaps, DevOps operating loop, MCP query surfaces, and Terraform/IaC guardrails.
+- Synthesis appended to `unitAI-eoqxp` and `unitAI-eoqxp.1`: telemetry gaps are narrow; DevOps specialist is recommendation-first; query path is Grafana MCP first; Terraform path is fmt/validate/plan/show-json/policy/human approval with no default apply/destroy.
+## 2026-06-03 — DevOps module parked behind foundations
+- Updated `/home/dawid/second-mind/1-projects/xtrm/devops/devops-system.md` §7.2 with `unitAI-eoqxp.1` research findings linked to child beads `.1`-`.4`, plus `69s6t` and `0gdjp`.
+- Decision: keep DevOps findings as parked evidence; focus first on specialists telemetry bridge/event-catalog follow-through, specialists roadmap/runtime cleanup, then substrate/channels before implementing `eoqxp.2`-`.6`.
+## 2026-06-03 — unitAI-eoqxp.3 forensic telemetry increment
+- Extended telemetry contracts for runtime AgentOps gaps: session/conversation/trace correlation discipline, MCP semconv fields, identity/policy/eval event families, cost provenance, and identity/policy metric projections.
+- Created child beads `unitAI-eoqxp.3.1`-.`3.5` for implementation/test follow-through.
+## 2026-06-03 — token telemetry pricing correction
+- User corrected telemetry contract: xtrm/specialists uses subscription plans, not direct API billing; USD cost metrics are misleading today.
+- Updated docs to track token usage first via split directions (`input`, `output`, `cache_read`, `cache_creation`, `reasoning`, `tool`) and derive totals; `direction=total` is fallback-only for unsplit sources.
+- `xtrm_llm_cost_usd_total` is deferred/future-only until explicit API billing/pricing provenance exists.
