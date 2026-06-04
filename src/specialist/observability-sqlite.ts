@@ -1075,6 +1075,7 @@ export interface ObservabilitySqliteClient {
   upsertStatusWithEvent(status: SupervisorStatus, event: TimelineEvent): void;
   upsertStatusWithEventAndResult(status: SupervisorStatus, event: TimelineEvent, output: string): void;
   appendEvent(jobId: string, specialist: string, beadId: string | undefined, event: TimelineEvent): void;
+  appendForensicEvent(jobId: string, specialist: string, beadId: string | undefined, forensicEvent: ForensicEvent): void;
   claimJobStart(status: SupervisorStatus, event: TimelineEvent): { ok: true } | { ok: false; existingJobId: string; existingStatus: string };
   findActiveJob(beadId: string | null, specialist: string): { job_id?: string; status?: string; pid?: number; updated_at_ms?: number } | undefined;
   upsertResult(jobId: string, output: string): void;
@@ -1621,6 +1622,13 @@ class SqliteClient implements ObservabilitySqliteClient {
     withRetry(() => {
       this.writeEventRow(jobId, specialist, beadId, event);
     }, 'appendEvent');
+  }
+
+  appendForensicEvent(jobId: string, specialist: string, beadId: string | undefined, forensicEvent: ForensicEvent): void {
+    withRetry(() => {
+      const seq = typeof forensicEvent.seq === 'number' && forensicEvent.seq > 0 ? forensicEvent.seq : this.getNextSpecialistEventSeq(jobId);
+      this.insertForensicEventRow(jobId, seq, forensicEvent);
+    }, 'appendForensicEvent');
   }
 
   upsertResult(jobId: string, output: string): void {
