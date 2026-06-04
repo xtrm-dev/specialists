@@ -204,6 +204,31 @@ function sendJson(res: ServerResponse, statusCode: number, body: unknown): void 
   res.end(JSON.stringify(body));
 }
 
+function parseFeedEventsRequest(url: string | undefined): { jobId: string; eventFamily?: string; eventName?: string; sinceMs?: number; limit?: number } | null {
+  if (!url) return null;
+  const parsed = new URL(url, 'http://localhost');
+  const match = parsed.pathname.match(/^\/(?:api\/specialists\/)?jobs\/([^/]+)\/feed-events$/);
+  if (!match) return null;
+  const since = parsed.searchParams.get('since');
+  const limit = parsed.searchParams.get('limit');
+  return {
+    jobId: decodeURIComponent(match[1]),
+    eventFamily: parsed.searchParams.get('family') ?? undefined,
+    eventName: parsed.searchParams.get('event_name') ?? undefined,
+    sinceMs: since ? Number(since) : undefined,
+    limit: limit ? Number(limit) : undefined,
+  };
+}
+
+function feedEventsResponse(rows: ReturnType<NonNullable<ReturnType<typeof createObservabilitySqliteClient>>['readForensicEvents']>): { events: unknown[]; next_cursor: { t: number; seq: number } | null } {
+  const events = rows.map((row) => JSON.parse(row.event_json) as unknown);
+  const last = rows.at(-1);
+  return {
+    events,
+    next_cursor: last ? { t: last.t, seq: last.seq } : null,
+  };
+}
+
 type GenerateLogStatus = 'success' | ScriptSpecialistErrorType;
 
 function emitGenerateLog(logLevel: ServeArgs['logLevel'], entry: {
@@ -275,6 +300,15 @@ export async function startServe(argv: string[] = process.argv.slice(3)) {
 
   const server = createServer(async (req, res) => {
     if (req.url === '/healthz') return sendJson(res, 200, { ok: true });
+    if (req.method === 'GET') {
+      const feedRequest = parseFeedEventsRequest(req.url);
+      if (feedRequest) {
+        if (!db) return sendJson(res, 503, { success: false, error: 'observability_unavailable', error_type: 'internal' });
+        const { jobId, ...filters } = feedRequest;
+        const rows = db.readForensicEvents({ jobId, ...filters });
+        return sendJson(res, 200, { job_id: jobId, ...feedEventsResponse(rows) });
+      }
+    }
     if (req.method === 'GET' && req.url === '/metrics') {
       if (!db) return sendJson(res, 503, { success: false, error: 'observability_unavailable', error_type: 'internal' });
       const text = collectPrometheusProjectionFromClient(db, { repo: dbLocation.gitRoot.split(/[\\/]/).filter(Boolean).at(-1) ?? 'specialists' });

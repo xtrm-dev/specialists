@@ -110,7 +110,7 @@ orchestration state, not individual model turns.
 | `chain.member.started` | A step/advisor/gate member begins. | `member_role`, `member_class`, `step_issue_id`, `position` | Shows resolved chain shape progress. | yes (`xtrm_jobs_total` via job events; optional chain counter) |
 | `chain.member.completed` | A member produces terminal evidence. | `member_role`, `verdict`, `evidence_ref` | Step-level completion and evidence link. | optional / gate metrics if verdicted |
 | `chain.ready_for_review` | Writer work is done and review gates can run. | `ready_reason`, `changed_paths_count`, `lease_state` | Boundary from execution to verification. | optional |
-| `chain.finalized` | Chain is closed/finalized after PASS or terminal decision. | `finalize_reason`, `terminal_state`, `evidence_refs` | Close-time lineage and memory distillation trigger. | yes/state |
+| `chain.finalized` | Chain is closed/finalized after PASS or terminal decision. | `chain_template`, `finalize_reason`, `terminal_state`, `evidence_refs` | Close-time lineage and memory distillation trigger. | yes (`xtrm_chains_total`, `xtrm_chain_duration_seconds`) |
 | `epic.merge_attempted` | Multi-chain/epic merge begins. | `child_count`, `merge_strategy`, `base_ref` | Explains merge operation inputs. | yes |
 | `epic.merged` | Epic merge succeeds. | `child_count`, `commit_sha`, `pr_id` | Publication evidence. | yes (`result=success`) |
 | `epic.merge_failed` | Epic merge fails/conflicts. | `error_type`, `conflict_paths_count`, `retryable` | Preserves conflict evidence; may spawn follow-up. | yes (`result=error`) |
@@ -123,9 +123,9 @@ metrics project through `xtrm_gate_verdicts_total`.
 | Event | Emit when | Body fields | Evidence / lineage | Prometheus |
 |---|---|---|---|---|
 | `review.started` | Reviewer/gate begins evaluating evidence. | `review_kind`, `scope`, `ddiff_base` | Review boundary; links to issue/chain. | optional |
-| `review.verdict.pass` | Reviewer emits PASS. | `confidence`, `tested_commands`, `evidence_refs` | Satisfies gate/close readiness. | yes (`verdict=PASS`) |
-| `review.verdict.partial` | Reviewer emits PARTIAL/FINDINGS. | `findings_count`, `blocking_count`, `evidence_refs` | Drives ddiff loop; not terminal success. | yes (`verdict=PARTIAL`) |
-| `review.verdict.fail` | Reviewer emits FAIL. | `failure_class`, `findings_count`, `evidence_refs` | Can trigger semantic recovery/escalation. | yes (`verdict=FAIL`) |
+| `review.verdict.pass` | Reviewer emits PASS. | `gate_kind`, `verdict`, `confidence`, `tested_commands`, `evidence_refs` | Satisfies gate/close readiness. | yes (`gate_kind`, `verdict=PASS`) |
+| `review.verdict.partial` | Reviewer emits PARTIAL/FINDINGS. | `gate_kind`, `verdict`, `findings_count`, `blocking_count`, `evidence_refs` | Drives ddiff loop; not terminal success. | yes (`gate_kind`, `verdict=PARTIAL`) |
+| `review.verdict.fail` | Reviewer emits FAIL. | `gate_kind`, `verdict`, `failure_class`, `findings_count`, `evidence_refs` | Can trigger semantic recovery/escalation. | yes (`gate_kind`, `verdict=FAIL`) |
 | `review.rebuttal_requested` | Executor/operator asks for reviewer reconsideration. | `reason`, `target_finding_ids` | Explains review loop mutation. | optional |
 | `review.recheck_started` | Reviewer starts a ddiff-scoped recheck. | `ddiff_base`, `changed_paths_count` | Separates recheck from first review. | optional |
 
@@ -318,7 +318,7 @@ Allowed `evidence_kind` values for `xtrm_evidence_refs_total`:
 |---|---|
 | `verdict` | reviewer PASS/PARTIAL/FAIL, chain coordinator decision |
 | `test` | unit/integration/smoke command result |
-| `diff` | changed file summary, ddiff base |
+| `diff` | changed file summary, per-file +/- counts, ddiff base, linked hunks/artifact |
 | `commit` | commit SHA, auto-commit result |
 | `pr` | PR id/url/status |
 | `report` | session-close report, handoff report |
@@ -327,7 +327,7 @@ Allowed `evidence_kind` values for `xtrm_evidence_refs_total`:
 | `deployment` | deploy event, rollback event, health after deploy |
 | `memory` | distilled memory/best-practice/failure record |
 
-Evidence refs may contain high-cardinality IDs in `correlation`, `body`, or
+Evidence refs may contain high-cardinality IDs, file paths, and diff hunks in `correlation`, `body`, `links`, or
 `links`. They are never Prometheus labels.
 
 ## 13. New-event procedure

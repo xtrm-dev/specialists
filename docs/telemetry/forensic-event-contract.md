@@ -38,7 +38,8 @@ The specialists runtime now ships the **pre-substrate forensic bridge**:
 - persisted `specialist_forensic_events` rows in observability SQLite;
 - additive forensic payloads in `sp feed --json` and `sp log --json`;
 - `sp forensic <job-id> --json` for persisted forensic event reads;
-- `sp metrics --prometheus` / `sp serve` `GET /metrics` projection over current runtime tables and selected forensic fixtures;
+- `sp serve` read-only `GET /jobs/:job_id/feed-events` / `GET /api/specialists/jobs/:job_id/feed-events` for ordered normalized per-job event streams;
+- `sp metrics --prometheus` / `sp serve` `GET /metrics` projection over current runtime tables and selected forensic fixtures, including bounded chain/gate/evidence counters;
 - full forbidden-label guard tests for every opaque correlation id in this contract;
 - Pi-generated `session_id` propagation into specialist status and forensic correlation;
 - optional pass-through for `conversation_id`, `trace_id`, `span_id`, and `parent_span_id` when a timeline event or caller supplies them;
@@ -85,6 +86,7 @@ Specialists currently emits or exposes telemetry through these surfaces:
 | `src/specialist/timeline-events.ts` | Current TypeScript event union for specialists timeline events. | Current event names map to event families in §12. |
 | `sp log --json` | Normalized runtime log rows with job/worktree/chain metadata and event body. | Should converge on this envelope for machine consumers. |
 | `sp feed --json` | NDJSON chronological feed. Adds job metadata and metrics to timeline events. | Good operator stream; future fields must remain backward-compatible. |
+| `sp serve` `GET /jobs/:job_id/feed-events` | JSON response containing ordered normalized forensic envelopes for one job plus `(t, seq)` cursor. | Console activity-card/detail stream surface; high-cardinality IDs remain in event correlation/body, not metric labels. |
 | `sp ps --json` | Snapshot of job state and metrics. | Snapshot surface, not an event stream. |
 | `sp result --json` | Durable result output and metrics footer/source. | Result persistence events should link to this surface. |
 | `docs/observability-metrics.md` | Existing metrics contract. | Remains the metrics-side sibling of this forensic contract. |
@@ -452,7 +454,7 @@ per provider API call. Therefore **token usage is the reliable runtime signal**;
 USD spend is not a trustworthy operational metric today.
 
 Every `model.token_usage.recorded` event should report the best available token
-breakdown in `body.token_usage`:
+breakdown in the event `body`:
 
 | Field | Meaning |
 |---|---|
@@ -1017,9 +1019,11 @@ Specialists now ships the pre-substrate forensic bridge:
 4. `sp log --json` and `sp feed --json` include additive `forensic_event` payloads while preserving legacy fields.
 5. `sp metrics --prometheus` projects low-cardinality metrics from runtime state, job metrics, and selected forensic event families.
 6. `sp serve` exposes read-only `GET /metrics` for the same Prometheus projection.
-7. Unit checks cover schema/cardinality/redaction, full forbidden-label enforcement, AgentOps catalog fixtures, and Prometheus exposition syntax.
-8. `PiAgentSession.meta.sessionId` is persisted as `status.session_id` and forwarded to forensic correlation; conversation/trace/span ids are optional pass-through fields.
-9. MCP normalization/projection is pre-wired for future emitters: `type:"mcp"` timeline events map to canonical `mcp.*` events, support `_meta` trace/MCP/JSON-RPC correlation, and include semconv-style `otel` hints.
+7. `sp serve` exposes read-only per-job `GET /jobs/:job_id/feed-events` and `/api/specialists/jobs/:job_id/feed-events` for console activity-card streams.
+8. Projection now includes bounded `xtrm_chains_total`, `xtrm_chain_duration_seconds`, `xtrm_gate_verdicts_total`, and `xtrm_evidence_refs_total`; chain/job/file/diff drill-down stays in forensic events/evidence.
+9. Unit checks cover schema/cardinality/redaction, full forbidden-label enforcement, AgentOps catalog fixtures, and Prometheus exposition syntax.
+10. `PiAgentSession.meta.sessionId` is persisted as `status.session_id` and forwarded to forensic correlation; conversation/trace/span ids are optional pass-through fields.
+11. MCP normalization/projection is pre-wired for future emitters: `type:"mcp"` timeline events map to canonical `mcp.*` events, support `_meta` trace/MCP/JSON-RPC correlation, and include semconv-style `otel` hints.
 
 Remaining follow-up candidates:
 

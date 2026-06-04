@@ -109,6 +109,8 @@ Allowed by default when present:
 | `action_kind` | Normalized action category; bounded. |
 | `credential_kind` | Normalized credential/token kind; bounded. |
 | `eval_kind` | Normalized eval category; bounded. |
+| `chain_template` | Normalized chain/workflow template such as `executor-review`; bounded and never a chain id. |
+| `gate_kind` | Normalized gate category such as `reviewer`, `code_sanity`, `security`, `obligations`; bounded. |
 
 ### 3.2 Forbidden labels
 
@@ -143,6 +145,7 @@ Never export these as labels:
 - raw command
 - raw URL
 - raw error text
+- raw diff text
 - prompt/model/tool payloads
 - user id, email, credential, token, or secret material
 
@@ -174,12 +177,15 @@ Never export these as labels:
 | `xtrm_job_state` | gauge | `service_name`, `repo`, `participant_kind`, `participant_role`, `state` | current jobs table | Current count by state. |
 | `xtrm_job_queue_depth` | gauge | `service_name`, `repo`, `participant_kind`, `participant_role` | jobs/pulse queue | Current queued or waiting-to-start jobs. |
 | `xtrm_job_stale_total` | counter | `service_name`, `repo`, `participant_kind`, `participant_role`, `reason` | `process_health.stale_detected` | `reason` must be bounded. |
+| `xtrm_chains_total` | counter | `service_name`, `repo`, `chain_template`, `result` | terminal chain state / `chain.finalized` | One increment per terminal chain instance; no `chain_id` label. |
+| `xtrm_chain_duration_seconds` | histogram | `service_name`, `repo`, `chain_template`, `result` | terminal chain state / job metric rollup | End-to-end chain duration using bounded template/result labels only. |
 
 Recommended buckets:
 
 ```text
 xtrm_job_duration_seconds: 1, 5, 10, 30, 60, 120, 300, 600, 1800, 3600, 7200, 14400, +Inf
 xtrm_job_wait_seconds:     1, 5, 30, 60, 300, 900, 1800, 3600, 7200, 21600, +Inf
+xtrm_chain_duration_seconds: 1, 5, 10, 30, 60, 120, 300, 600, 1800, 3600, 7200, 14400, +Inf
 ```
 
 ### 5.2 Turn, context, and model usage
@@ -314,7 +320,7 @@ Counters must survive exporter restarts. Options:
 
 Preferred for xtrm: **persistent cursor + replayable event history**. This keeps local CLI/debug use deterministic and avoids silent undercounting after exporter restarts.
 
-Current pre-substrate bridge status: `sp metrics --prometheus` uses table-derived counters from durable `specialist_job_metrics` / current-state snapshots rather than incrementing a process-local event stream. Repeated renders over the same table state are deterministic; event-cursor projection remains the target for a long-running HTTP exporter.
+Current pre-substrate bridge status: `sp metrics --prometheus` uses table-derived counters from durable `specialist_job_metrics` / current-state snapshots rather than incrementing a process-local event stream. Chain metrics are derived by grouping terminal chain jobs internally by opaque chain id, but only export bounded `chain_template` and `result` labels. Repeated renders over the same table state are deterministic; event-cursor projection remains the target for a long-running HTTP exporter.
 
 ### 6.3 Gauges
 
@@ -393,6 +399,7 @@ VALIDATION — Prometheus projection
 - [x] Current shipped gauges are current-state snapshots.
 - [ ] Exemplars use trace_id only when available; otherwise dashboards link to logs by bounded labels + time range.
 - [x] `sp metrics --prometheus` and `sp serve` `GET /metrics` include HELP/TYPE; CLI output passes the repository Prometheus text parser validation.
+- [x] `xtrm_chains_total`, `xtrm_chain_duration_seconds`, `xtrm_gate_verdicts_total`, and `xtrm_evidence_refs_total` are covered by projection tests without forbidden labels.
 - [x] MCP operation counter projection uses only bounded `mcp_server`, `mcp_method`, and `result` labels when MCP forensic events are supplied.
 ```
 

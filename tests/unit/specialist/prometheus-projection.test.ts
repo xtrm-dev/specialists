@@ -107,6 +107,42 @@ describe('prometheus-projection', () => {
     expect(output).not.toContain('cost_usd');
   });
 
+  it('projects bounded chain metrics without chain identifiers', () => {
+    const output = renderPrometheusProjection({
+      repo: 'specialists',
+      statuses: [],
+      jobMetrics: [
+        metric({
+          job_id: 'chain-job-1',
+          chain_kind: 'chain',
+          chain_id: 'opaque-chain-id',
+          started_at_ms: 1_000,
+          completed_at_ms: 5_000,
+          elapsed_ms: 4_000,
+          startup_payload_json: JSON.stringify({ chain_template: 'executor-review' }),
+        }),
+        metric({
+          job_id: 'chain-job-2',
+          specialist: 'reviewer',
+          chain_kind: 'chain',
+          chain_id: 'opaque-chain-id',
+          started_at_ms: 6_000,
+          completed_at_ms: 11_000,
+          elapsed_ms: 5_000,
+          startup_payload_json: JSON.stringify({ chain_template: 'executor-review' }),
+        }),
+      ],
+      nowMs: 1_780_000_000_000,
+    });
+
+    expect(output).toContain('xtrm_chains_total');
+    expect(output).toContain('xtrm_chain_duration_seconds_bucket');
+    expect(output).toContain('chain_template="executor-review"');
+    expect(output).toContain('result="success"');
+    expect(validatePrometheusProjectionText(output)).toEqual({ ok: true });
+    expect(output).not.toMatch(/chain_id=|opaque-chain-id|job_id=/);
+  });
+
   it('is replay-safe for table-derived counters across repeated renders', () => {
     const input = {
       repo: 'specialists',
@@ -241,6 +277,48 @@ describe('prometheus-projection', () => {
     expect(output).toContain('eval_kind="policy_compliance"');
     expect(validatePrometheusProjectionText(output)).toEqual({ ok: true });
     expect(output).not.toMatch(/identity_request_id=|policy_decision_id=|eval_id=/);
+  });
+
+  it('projects gate verdict and evidence forensic events with bounded labels', () => {
+    const resource = {
+      service_namespace: 'xtrm',
+      service_name: 'specialists',
+      service_component: 'test',
+      deployment_environment: 'local',
+      repo: 'specialists',
+      participant_kind: 'specialist',
+      participant_role: 'reviewer',
+    };
+    const output = renderPrometheusProjection({
+      repo: 'specialists',
+      statuses: [],
+      jobMetrics: [],
+      forensicEvents: [
+        createForensicEvent({
+          event_family: 'review',
+          event_name: 'review.verdict.pass',
+          resource,
+          correlation: { job_id: 'job-review', chain_id: 'chain-review', trace_id: 'trace-review' },
+          body: { gate_kind: 'reviewer', verdict: 'PASS' },
+        }),
+        createForensicEvent({
+          event_family: 'evidence',
+          event_name: 'evidence.diff.recorded',
+          resource,
+          correlation: { job_id: 'job-review', chain_id: 'chain-review' },
+          body: { evidence_kind: 'diff', result: 'success', changed_paths_count: 2 },
+        }),
+      ],
+      nowMs: 1_780_000_000_000,
+    });
+
+    expect(output).toContain('xtrm_gate_verdicts_total');
+    expect(output).toContain('gate_kind="reviewer"');
+    expect(output).toContain('verdict="PASS"');
+    expect(output).toContain('xtrm_evidence_refs_total');
+    expect(output).toContain('evidence_kind="diff"');
+    expect(validatePrometheusProjectionText(output)).toEqual({ ok: true });
+    expect(output).not.toMatch(/job-review|chain-review|trace-review|job_id=|chain_id=|trace_id=/);
   });
 
   it('normalizes terminal results without exposing raw ids as labels', () => {

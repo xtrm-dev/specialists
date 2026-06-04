@@ -19513,7 +19513,8 @@ function forensicEventFromTimelineEvent(event, context) {
       parent_span_id: context.parentSpanId ?? stringField(event, "parent_span_id") ?? metaStringField(event, "parent_span_id"),
       mcp_session_id: stringField(event, "mcp_session_id") ?? metaStringField(event, "mcp_session_id") ?? metaStringField(event, "mcp.session.id"),
       jsonrpc_request_id: stringField(event, "jsonrpc_request_id") ?? metaStringField(event, "jsonrpc_request_id") ?? metaStringField(event, "jsonrpc.request.id"),
-      tool_call_id: typeof event.tool_call_id === "string" ? event.tool_call_id : undefined
+      tool_call_id: typeof event.tool_call_id === "string" ? event.tool_call_id : undefined,
+      commit_sha: typeof event.commit_sha === "string" ? event.commit_sha : undefined
     },
     body: bodyForTimelineEvent(event),
     otel: otelForTimelineEvent(event),
@@ -19541,20 +19542,46 @@ function booleanField(source, key) {
   return typeof value === "boolean" ? value : undefined;
 }
 function bodyForTimelineEvent(event) {
-  if (event.type !== "mcp")
-    return { legacy_timeline_event: event };
-  return {
-    legacy_timeline_event: event,
-    mcp_server: stringField(event, "mcp_server") ?? stringField(event, "server") ?? "unknown",
-    mcp_method: stringField(event, "mcp_method") ?? stringField(event, "method") ?? "tools/call",
-    tool_name: stringField(event, "tool_name") ?? stringField(event, "tool"),
-    network_transport: stringField(event, "network_transport") ?? stringField(event, "transport"),
-    duration_ms: numberField(event, "duration_ms"),
-    error_type: stringField(event, "error_type"),
-    status_code: stringField(event, "status_code"),
-    duplicate_span_suppressed: booleanField(event, "duplicate_span_suppressed"),
-    trace_carrier: metaStringField(event, "trace_carrier") ?? (event._meta && typeof event._meta === "object" ? "_meta" : undefined)
-  };
+  if (event.type === "mcp") {
+    return {
+      legacy_timeline_event: event,
+      mcp_server: stringField(event, "mcp_server") ?? stringField(event, "server") ?? "unknown",
+      mcp_method: stringField(event, "mcp_method") ?? stringField(event, "method") ?? "tools/call",
+      tool_name: stringField(event, "tool_name") ?? stringField(event, "tool"),
+      network_transport: stringField(event, "network_transport") ?? stringField(event, "transport"),
+      duration_ms: numberField(event, "duration_ms"),
+      error_type: stringField(event, "error_type"),
+      status_code: stringField(event, "status_code"),
+      duplicate_span_suppressed: booleanField(event, "duplicate_span_suppressed"),
+      trace_carrier: metaStringField(event, "trace_carrier") ?? (event._meta && typeof event._meta === "object" ? "_meta" : undefined)
+    };
+  }
+  if (event.type === "token_usage") {
+    return {
+      legacy_timeline_event: event,
+      input_tokens: numberField(event, "input_tokens") ?? numberField(event, "input"),
+      output_tokens: numberField(event, "output_tokens") ?? numberField(event, "output"),
+      cache_read_tokens: numberField(event, "cache_read_tokens") ?? numberField(event, "cache_read"),
+      cache_creation_tokens: numberField(event, "cache_creation_tokens") ?? numberField(event, "cache_creation"),
+      reasoning_tokens: numberField(event, "reasoning_tokens") ?? numberField(event, "reasoning") ?? numberField(event, "thinking_tokens"),
+      tool_tokens: numberField(event, "tool_tokens") ?? numberField(event, "tool") ?? numberField(event, "tool_use_tokens"),
+      total_tokens: numberField(event, "total_tokens") ?? numberField(event, "total"),
+      usage_source: stringField(event, "usage_source") ?? stringField(event, "source") ?? "runtime_event"
+    };
+  }
+  if (event.type === "auto_commit_success" || event.type === "auto_commit_skipped" || event.type === "auto_commit_failed") {
+    const committedFiles = Array.isArray(event.committed_files) ? event.committed_files.filter((file) => typeof file === "string") : [];
+    return {
+      legacy_timeline_event: event,
+      evidence_kind: event.type === "auto_commit_success" ? "commit" : "report",
+      result: event.type === "auto_commit_success" ? "success" : event.type === "auto_commit_failed" ? "error" : "skipped",
+      commit_sha: stringField(event, "commit_sha"),
+      changed_paths_count: committedFiles.length,
+      changed_paths: committedFiles,
+      reason: stringField(event, "reason")
+    };
+  }
+  return { legacy_timeline_event: event };
 }
 function otelForTimelineEvent(event) {
   if (event.type !== "mcp")
@@ -19714,6 +19741,7 @@ var init_forensic_events = __esm(() => {
     "raw_path",
     "raw_command",
     "raw_error",
+    "raw_diff",
     "raw_url",
     "prompt",
     "model_output",
@@ -19748,6 +19776,7 @@ var init_forensic_events = __esm(() => {
     "resource_kind",
     "credential_kind",
     "eval_kind",
+    "chain_template",
     "gate_kind",
     "verdict",
     "severity_level",
@@ -51472,6 +51501,27 @@ function renderPrometheusProjection(input2) {
       });
     }
   }
+  const chainSummaries = summarizeChains(terminalMetrics, input2.repo);
+  for (const [key, chains] of groupBy(chainSummaries, (chain) => labelsKey(chain.labels))) {
+    const labels = parseLabelsKey(key);
+    samples.push({
+      name: "xtrm_chains_total",
+      help: "Terminal specialist chains by bounded template and result.",
+      type: "counter",
+      labels,
+      value: chains.length
+    });
+    const durations = chains.map((chain) => chain.durationSeconds).filter(isNumber);
+    if (durations.length > 0) {
+      histograms.push({
+        name: "xtrm_chain_duration_seconds",
+        help: "End-to-end specialist chain duration by bounded template and result.",
+        labels,
+        buckets: CHAIN_DURATION_BUCKETS,
+        values: durations
+      });
+    }
+  }
   for (const [key, records] of groupBy(input2.jobMetrics, (record3) => labelsKey(jobParticipantLabels(record3, input2.repo)))) {
     const waits = records.map((record3) => msToSeconds(record3.waiting_ms)).filter(isNumber);
     if (waits.length > 0) {
@@ -51518,6 +51568,55 @@ function renderPrometheusProjection(input2) {
     value: nowMs / 1000
   });
   return renderMetrics(samples, histograms);
+}
+function summarizeChains(records, repo) {
+  const chainRecords = records.filter((record3) => record3.chain_kind === "chain" || Boolean(record3.chain_id));
+  const summaries = [];
+  for (const recordsForChain of groupBy(chainRecords, (record3) => record3.chain_id ?? record3.job_id).values()) {
+    const labels = safeLabels({
+      service_name: "specialists",
+      repo,
+      chain_template: chainTemplateFor(recordsForChain),
+      result: resultForChain(recordsForChain)
+    });
+    summaries.push({ labels, durationSeconds: chainDurationSeconds(recordsForChain) });
+  }
+  return summaries;
+}
+function chainTemplateFor(records) {
+  for (const record3 of records) {
+    const startupPayload = parseJson(record3.startup_payload_json, {});
+    const raw = startupPayload.chain_template ?? startupPayload.chainTemplate ?? startupPayload.workflow_template ?? startupPayload.workflow ?? startupPayload.chain_kind ?? record3.chain_kind;
+    if (typeof raw === "string" && raw.trim().length > 0)
+      return normalizeChainTemplate(raw);
+  }
+  return "chain";
+}
+function normalizeChainTemplate(value) {
+  const normalized = value.toLowerCase().replace(/[^a-z0-9_.:-]+/g, "_");
+  if (!normalized || normalized.length > 80)
+    return "unknown";
+  return normalized;
+}
+function resultForChain(records) {
+  const results = records.map((record3) => resultForStatus(record3.status));
+  if (results.includes("error"))
+    return "error";
+  if (results.includes("cancelled"))
+    return "cancelled";
+  if (results.every((result) => result === "success"))
+    return "success";
+  return "unknown";
+}
+function chainDurationSeconds(records) {
+  const starts = records.map((record3) => record3.started_at_ms).filter(isNumber);
+  const completions = records.map((record3) => record3.completed_at_ms).filter(isNumber);
+  if (starts.length > 0 && completions.length > 0) {
+    const durationMs = Math.max(...completions) - Math.min(...starts);
+    return durationMs >= 0 ? durationMs / 1000 : null;
+  }
+  const elapsedSum = records.map((record3) => record3.elapsed_ms).filter(isNumber).reduce((sum, elapsedMs) => sum + elapsedMs, 0);
+  return elapsedSum > 0 ? elapsedSum / 1000 : null;
 }
 function jobStateLabels(status, repo) {
   const rawStatus = status;
@@ -51638,58 +51737,22 @@ function forensicEventSamples(events, repo) {
   const byKey = new Map;
   for (const event of events) {
     for (const sample of samplesForForensicEvent(event, repo)) {
-      if (sample.metricName === "xtrm_eval_score") {
-        byKey.set(`${sample.metricName}:${labelsKey(sample.labels)}`, { labels: sample.labels, value: sample.value });
+      const key = `${sample.metricName}:${labelsKey(sample.labels)}`;
+      const existing = byKey.get(key);
+      if (existing && sample.metricName !== "xtrm_eval_score") {
+        existing.value += sample.value;
       } else {
-        increment(byKey, sample.labels, sample.value);
+        byKey.set(key, { metricName: sample.metricName, labels: sample.labels, value: sample.value });
       }
     }
   }
-  return Array.from(byKey.values()).map(({ labels, value }) => {
-    if ("mcp_server" in labels) {
-      return {
-        name: "xtrm_mcp_operations_total",
-        help: "MCP operations by bounded server, method, and result.",
-        type: "counter",
-        labels,
-        value
-      };
-    }
-    if ("eval_kind" in labels && !("policy_kind" in labels) && !("credential_kind" in labels)) {
-      return {
-        name: labels.result === "score" ? "xtrm_eval_score" : "xtrm_eval_runs_total",
-        help: labels.result === "score" ? "Latest eval score by bounded eval kind." : "Evaluation runs by bounded eval kind and result.",
-        type: labels.result === "score" ? "gauge" : "counter",
-        labels: labels.result === "score" ? withoutLabel(labels, "result") : labels,
-        value
-      };
-    }
-    if ("policy_kind" in labels && "severity" in labels && labels.result === "mismatch") {
-      return {
-        name: "xtrm_policy_mismatches_total",
-        help: "Policy mismatches by bounded policy kind and severity.",
-        type: "counter",
-        labels: withoutLabel(labels, "result"),
-        value
-      };
-    }
-    if ("policy_kind" in labels) {
-      return {
-        name: "xtrm_policy_decisions_total",
-        help: "Policy decisions by bounded policy/action kind and result.",
-        type: "counter",
-        labels,
-        value
-      };
-    }
-    return {
-      name: "xtrm_identity_operations_total",
-      help: "Identity credential operations by bounded credential kind and result.",
-      type: "counter",
-      labels,
-      value
-    };
-  });
+  return Array.from(byKey.values()).map(({ metricName, labels, value }) => ({
+    name: metricName,
+    help: helpForForensicMetric(metricName),
+    type: metricName === "xtrm_eval_score" ? "gauge" : "counter",
+    labels: metricName === "xtrm_eval_score" ? withoutLabel(labels, "result") : labels,
+    value
+  }));
 }
 function samplesForForensicEvent(event, repo) {
   if (event.event_family === "mcp") {
@@ -51697,6 +51760,7 @@ function samplesForForensicEvent(event, repo) {
     if (!result)
       return [];
     return [{
+      metricName: "xtrm_mcp_operations_total",
       labels: safeLabels({
         ...eventBaseLabels(event, repo),
         mcp_server: normalizeKind(bodyString(event, "mcp_server") ?? "unknown"),
@@ -51706,11 +51770,38 @@ function samplesForForensicEvent(event, repo) {
       value: 1
     }];
   }
+  if (event.event_family === "review" || event.event_name.startsWith("review.verdict.")) {
+    const verdict = verdictForReviewEvent(event);
+    if (!verdict)
+      return [];
+    return [{
+      metricName: "xtrm_gate_verdicts_total",
+      labels: safeLabels({
+        ...eventBaseLabels(event, repo),
+        participant_role: event.resource.participant_role ?? "unknown",
+        gate_kind: normalizeKind(bodyString(event, "gate_kind") ?? bodyString(event, "gate") ?? event.resource.participant_role ?? "review"),
+        verdict
+      }),
+      value: 1
+    }];
+  }
+  if (event.event_family === "evidence" || event.event_name.startsWith("evidence.") || bodyString(event, "evidence_kind")) {
+    return [{
+      metricName: "xtrm_evidence_refs_total",
+      labels: safeLabels({
+        ...eventBaseLabels(event, repo),
+        evidence_kind: normalizeKind(bodyString(event, "evidence_kind") ?? evidenceKindForEventName(event.event_name)),
+        result: normalizeKind(bodyString(event, "result") ?? resultForEvidenceEvent(event.event_name))
+      }),
+      value: 1
+    }];
+  }
   if (event.event_family === "identity") {
     const result = resultForIdentityEvent(event.event_name);
     if (!result)
       return [];
     return [{
+      metricName: "xtrm_identity_operations_total",
       labels: safeLabels({
         ...eventBaseLabels(event, repo),
         credential_kind: normalizeKind(bodyString(event, "credential_kind") ?? "unknown"),
@@ -51729,14 +51820,14 @@ function samplesForForensicEvent(event, repo) {
       action_kind: normalizeKind(bodyString(event, "action_kind") ?? "unknown"),
       result
     });
-    const samples = [{ labels, value: 1 }];
+    const samples = [{ metricName: "xtrm_policy_decisions_total", labels, value: 1 }];
     if (event.event_name === "policy.mismatch.detected") {
       samples.push({
+        metricName: "xtrm_policy_mismatches_total",
         labels: safeLabels({
           ...eventBaseLabels(event, repo),
           policy_kind: normalizeKind(bodyString(event, "policy_kind") ?? "unknown"),
-          severity: normalizeKind(bodyString(event, "severity") ?? "unknown"),
-          result: "mismatch"
+          severity: normalizeKind(bodyString(event, "severity") ?? "unknown")
         }),
         value: 1
       });
@@ -51749,19 +51840,20 @@ function samplesForForensicEvent(event, repo) {
       if (score === null)
         return [];
       return [{
+        metricName: "xtrm_eval_score",
         labels: safeLabels({
           ...eventBaseLabels(event, repo),
           eval_kind: normalizeKind(bodyString(event, "eval_kind") ?? "unknown"),
           result: "score"
         }),
-        value: score,
-        metricName: "xtrm_eval_score"
+        value: score
       }];
     }
     const result = resultForEvalEvent(event);
     if (!result)
       return [];
     return [{
+      metricName: "xtrm_eval_runs_total",
       labels: safeLabels({
         ...eventBaseLabels(event, repo),
         eval_kind: normalizeKind(bodyString(event, "eval_kind") ?? "unknown"),
@@ -51772,11 +51864,58 @@ function samplesForForensicEvent(event, repo) {
   }
   return [];
 }
+function helpForForensicMetric(metricName) {
+  switch (metricName) {
+    case "xtrm_mcp_operations_total":
+      return "MCP operations by bounded server, method, and result.";
+    case "xtrm_gate_verdicts_total":
+      return "Gate verdicts by bounded gate kind, participant role, and verdict.";
+    case "xtrm_evidence_refs_total":
+      return "Evidence references by bounded evidence kind and result.";
+    case "xtrm_identity_operations_total":
+      return "Identity credential operations by bounded credential kind and result.";
+    case "xtrm_policy_decisions_total":
+      return "Policy decisions by bounded policy/action kind and result.";
+    case "xtrm_policy_mismatches_total":
+      return "Policy mismatches by bounded policy kind and severity.";
+    case "xtrm_eval_score":
+      return "Latest eval score by bounded eval kind.";
+    case "xtrm_eval_runs_total":
+      return "Evaluation runs by bounded eval kind and result.";
+    default:
+      return "Forensic event projection.";
+  }
+}
 function eventBaseLabels(event, repo) {
   return {
     service_name: event.resource.service_name ?? "specialists",
     repo: event.resource.repo ?? repo
   };
+}
+function verdictForReviewEvent(event) {
+  const explicit = bodyString(event, "verdict");
+  if (explicit)
+    return normalizeVerdict(explicit);
+  const suffix = event.event_name.split(".").at(-1);
+  return suffix ? normalizeVerdict(suffix) : null;
+}
+function normalizeVerdict(value) {
+  const normalized = value.toUpperCase().replace(/[^A-Z_:-]+/g, "_");
+  if (normalized === "PASS" || normalized === "PARTIAL" || normalized === "FAIL" || normalized === "WAIVED")
+    return normalized;
+  return null;
+}
+function evidenceKindForEventName(eventName) {
+  const parts = eventName.split(".");
+  const candidate = parts.length > 1 ? parts[1] : undefined;
+  return candidate && candidate.length > 0 ? candidate : "report";
+}
+function resultForEvidenceEvent(eventName) {
+  if (eventName.endsWith(".failed"))
+    return "error";
+  if (eventName.endsWith(".skipped"))
+    return "skipped";
+  return "success";
 }
 function resultForMcpEvent(eventName) {
   if (eventName === "mcp.connected" || eventName === "mcp.disconnected" || eventName === "mcp.call.completed" || eventName === "mcp.latency.observed")
@@ -52005,13 +52144,14 @@ function escapeLabel(value) {
 function basename9(path3) {
   return path3.split(/[\\/]/).filter(Boolean).at(-1) ?? path3;
 }
-var JOB_DURATION_BUCKETS, JOB_WAIT_BUCKETS, DEFAULT_SERVICE_LABELS;
+var JOB_DURATION_BUCKETS, JOB_WAIT_BUCKETS, CHAIN_DURATION_BUCKETS, DEFAULT_SERVICE_LABELS;
 var init_prometheus_projection = __esm(() => {
   init_observability_db();
   init_observability_sqlite();
   init_forensic_events();
   JOB_DURATION_BUCKETS = [1, 5, 10, 30, 60, 120, 300, 600, 1800, 3600, 7200, 14400];
   JOB_WAIT_BUCKETS = [1, 5, 30, 60, 300, 900, 1800, 3600, 7200, 21600];
+  CHAIN_DURATION_BUCKETS = [1, 5, 10, 30, 60, 120, 300, 600, 1800, 3600, 7200, 14400];
   DEFAULT_SERVICE_LABELS = {
     service_name: "specialists",
     participant_kind: "specialist"
@@ -55402,6 +55542,31 @@ function sendJson(res, statusCode, body) {
   res.writeHead(statusCode, { "content-type": "application/json" });
   res.end(JSON.stringify(body));
 }
+function parseFeedEventsRequest(url) {
+  if (!url)
+    return null;
+  const parsed = new URL(url, "http://localhost");
+  const match = parsed.pathname.match(/^\/(?:api\/specialists\/)?jobs\/([^/]+)\/feed-events$/);
+  if (!match)
+    return null;
+  const since = parsed.searchParams.get("since");
+  const limit = parsed.searchParams.get("limit");
+  return {
+    jobId: decodeURIComponent(match[1]),
+    eventFamily: parsed.searchParams.get("family") ?? undefined,
+    eventName: parsed.searchParams.get("event_name") ?? undefined,
+    sinceMs: since ? Number(since) : undefined,
+    limit: limit ? Number(limit) : undefined
+  };
+}
+function feedEventsResponse(rows) {
+  const events = rows.map((row) => JSON.parse(row.event_json));
+  const last = rows.at(-1);
+  return {
+    events,
+    next_cursor: last ? { t: last.t, seq: last.seq } : null
+  };
+}
 function emitGenerateLog(logLevel, entry) {
   if (logLevel === "off")
     return;
@@ -55460,6 +55625,16 @@ async function startServe(argv = process.argv.slice(3)) {
   const server = createServer(async (req, res) => {
     if (req.url === "/healthz")
       return sendJson(res, 200, { ok: true });
+    if (req.method === "GET") {
+      const feedRequest = parseFeedEventsRequest(req.url);
+      if (feedRequest) {
+        if (!db)
+          return sendJson(res, 503, { success: false, error: "observability_unavailable", error_type: "internal" });
+        const { jobId, ...filters } = feedRequest;
+        const rows = db.readForensicEvents({ jobId, ...filters });
+        return sendJson(res, 200, { job_id: jobId, ...feedEventsResponse(rows) });
+      }
+    }
     if (req.method === "GET" && req.url === "/metrics") {
       if (!db)
         return sendJson(res, 503, { success: false, error: "observability_unavailable", error_type: "internal" });
@@ -64560,6 +64735,8 @@ async function run39() {
         "Routes:",
         "  POST /v1/generate",
         "  GET  /healthz",
+        "  GET  /metrics",
+        "  GET  /jobs/:job_id/feed-events",
         ""
       ].join(`
 `));
@@ -64610,7 +64787,7 @@ Run 'specialists help' to see available commands.`);
   await server.start();
 }
 run39().then(() => {
-  if (sub)
+  if (sub && sub !== "serve")
     process.exit(process.exitCode ?? 0);
 }).catch((error2) => {
   logger.error(`Fatal error: ${error2}`);

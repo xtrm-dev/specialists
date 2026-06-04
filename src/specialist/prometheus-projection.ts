@@ -6,6 +6,7 @@ import type { SupervisorStatus } from './supervisor.js';
 
 const JOB_DURATION_BUCKETS = [1, 5, 10, 30, 60, 120, 300, 600, 1800, 3600, 7200, 14400];
 const JOB_WAIT_BUCKETS = [1, 5, 30, 60, 300, 900, 1800, 3600, 7200, 21600];
+const CHAIN_DURATION_BUCKETS = [1, 5, 10, 30, 60, 120, 300, 600, 1800, 3600, 7200, 14400];
 const DEFAULT_SERVICE_LABELS = {
   service_name: 'specialists',
   participant_kind: 'specialist',
@@ -41,6 +42,17 @@ interface HistogramSample {
   labels: Labels;
   buckets: readonly number[];
   values: number[];
+}
+
+interface ChainSummary {
+  labels: Labels;
+  durationSeconds: number | null;
+}
+
+interface ForensicMetricSample {
+  metricName: string;
+  labels: Labels;
+  value: number;
 }
 
 export function collectPrometheusProjection(options: PrometheusProjectionOptions = {}): string {
@@ -144,6 +156,28 @@ export function renderPrometheusProjection(input: PrometheusProjectionInput): st
     }
   }
 
+  const chainSummaries = summarizeChains(terminalMetrics, input.repo);
+  for (const [key, chains] of groupBy(chainSummaries, (chain) => labelsKey(chain.labels))) {
+    const labels = parseLabelsKey(key);
+    samples.push({
+      name: 'xtrm_chains_total',
+      help: 'Terminal specialist chains by bounded template and result.',
+      type: 'counter',
+      labels,
+      value: chains.length,
+    });
+    const durations = chains.map((chain) => chain.durationSeconds).filter(isNumber);
+    if (durations.length > 0) {
+      histograms.push({
+        name: 'xtrm_chain_duration_seconds',
+        help: 'End-to-end specialist chain duration by bounded template and result.',
+        labels,
+        buckets: CHAIN_DURATION_BUCKETS,
+        values: durations,
+      });
+    }
+  }
+
   for (const [key, records] of groupBy(input.jobMetrics, (record) => labelsKey(jobParticipantLabels(record, input.repo)))) {
     const waits = records.map((record) => msToSeconds(record.waiting_ms)).filter(isNumber);
     if (waits.length > 0) {
@@ -218,6 +252,63 @@ export function validatePrometheusProjectionText(text: string): { ok: true } | {
     }
   }
   return errors.length === 0 ? { ok: true } : { ok: false, errors };
+}
+
+function summarizeChains(records: JobMetricsRecord[], repo: string): ChainSummary[] {
+  const chainRecords = records.filter((record) => record.chain_kind === 'chain' || Boolean(record.chain_id));
+  const summaries: ChainSummary[] = [];
+  for (const recordsForChain of groupBy(chainRecords, (record) => record.chain_id ?? record.job_id).values()) {
+    const labels = safeLabels({
+      service_name: 'specialists',
+      repo,
+      chain_template: chainTemplateFor(recordsForChain),
+      result: resultForChain(recordsForChain),
+    });
+    summaries.push({ labels, durationSeconds: chainDurationSeconds(recordsForChain) });
+  }
+  return summaries;
+}
+
+function chainTemplateFor(records: JobMetricsRecord[]): string {
+  for (const record of records) {
+    const startupPayload = parseJson<Record<string, unknown>>(record.startup_payload_json, {});
+    const raw = startupPayload.chain_template
+      ?? startupPayload.chainTemplate
+      ?? startupPayload.workflow_template
+      ?? startupPayload.workflow
+      ?? startupPayload.chain_kind
+      ?? record.chain_kind;
+    if (typeof raw === 'string' && raw.trim().length > 0) return normalizeChainTemplate(raw);
+  }
+  return 'chain';
+}
+
+function normalizeChainTemplate(value: string): string {
+  const normalized = value.toLowerCase().replace(/[^a-z0-9_.:-]+/g, '_');
+  if (!normalized || normalized.length > 80) return 'unknown';
+  return normalized;
+}
+
+function resultForChain(records: JobMetricsRecord[]): string {
+  const results = records.map((record) => resultForStatus(record.status));
+  if (results.includes('error')) return 'error';
+  if (results.includes('cancelled')) return 'cancelled';
+  if (results.every((result) => result === 'success')) return 'success';
+  return 'unknown';
+}
+
+function chainDurationSeconds(records: JobMetricsRecord[]): number | null {
+  const starts = records.map((record) => record.started_at_ms).filter(isNumber);
+  const completions = records.map((record) => record.completed_at_ms).filter(isNumber);
+  if (starts.length > 0 && completions.length > 0) {
+    const durationMs = Math.max(...completions) - Math.min(...starts);
+    return durationMs >= 0 ? durationMs / 1000 : null;
+  }
+  const elapsedSum = records
+    .map((record) => record.elapsed_ms)
+    .filter(isNumber)
+    .reduce((sum, elapsedMs) => sum + elapsedMs, 0);
+  return elapsedSum > 0 ? elapsedSum / 1000 : null;
 }
 
 function jobStateLabels(status: SupervisorStatus, repo: string): Labels {
@@ -346,69 +437,34 @@ function latestTokenTrajectory(record: JobMetricsRecord): Record<string, number>
 
 
 function forensicEventSamples(events: ForensicEvent[], repo: string): NumericSample[] {
-  const byKey = new Map<string, { labels: Labels; value: number }>();
+  const byKey = new Map<string, { metricName: string; labels: Labels; value: number }>();
   for (const event of events) {
     for (const sample of samplesForForensicEvent(event, repo)) {
-      if (sample.metricName === 'xtrm_eval_score') {
-        byKey.set(`${sample.metricName}:${labelsKey(sample.labels)}`, { labels: sample.labels, value: sample.value });
+      const key = `${sample.metricName}:${labelsKey(sample.labels)}`;
+      const existing = byKey.get(key);
+      if (existing && sample.metricName !== 'xtrm_eval_score') {
+        existing.value += sample.value;
       } else {
-        increment(byKey, sample.labels, sample.value);
+        byKey.set(key, { metricName: sample.metricName, labels: sample.labels, value: sample.value });
       }
     }
   }
 
-  return Array.from(byKey.values()).map(({ labels, value }) => {
-    if ('mcp_server' in labels) {
-      return {
-        name: 'xtrm_mcp_operations_total',
-        help: 'MCP operations by bounded server, method, and result.',
-        type: 'counter' as const,
-        labels,
-        value,
-      };
-    }
-    if ('eval_kind' in labels && !('policy_kind' in labels) && !('credential_kind' in labels)) {
-      return {
-        name: labels.result === 'score' ? 'xtrm_eval_score' : 'xtrm_eval_runs_total',
-        help: labels.result === 'score' ? 'Latest eval score by bounded eval kind.' : 'Evaluation runs by bounded eval kind and result.',
-        type: labels.result === 'score' ? 'gauge' as const : 'counter' as const,
-        labels: labels.result === 'score' ? withoutLabel(labels, 'result') : labels,
-        value,
-      };
-    }
-    if ('policy_kind' in labels && 'severity' in labels && labels.result === 'mismatch') {
-      return {
-        name: 'xtrm_policy_mismatches_total',
-        help: 'Policy mismatches by bounded policy kind and severity.',
-        type: 'counter' as const,
-        labels: withoutLabel(labels, 'result'),
-        value,
-      };
-    }
-    if ('policy_kind' in labels) {
-      return {
-        name: 'xtrm_policy_decisions_total',
-        help: 'Policy decisions by bounded policy/action kind and result.',
-        type: 'counter' as const,
-        labels,
-        value,
-      };
-    }
-    return {
-      name: 'xtrm_identity_operations_total',
-      help: 'Identity credential operations by bounded credential kind and result.',
-      type: 'counter' as const,
-      labels,
-      value,
-    };
-  });
+  return Array.from(byKey.values()).map(({ metricName, labels, value }) => ({
+    name: metricName,
+    help: helpForForensicMetric(metricName),
+    type: metricName === 'xtrm_eval_score' ? 'gauge' as const : 'counter' as const,
+    labels: metricName === 'xtrm_eval_score' ? withoutLabel(labels, 'result') : labels,
+    value,
+  }));
 }
 
-function samplesForForensicEvent(event: ForensicEvent, repo: string): Array<{ labels: Labels; value: number; metricName?: string }> {
+function samplesForForensicEvent(event: ForensicEvent, repo: string): ForensicMetricSample[] {
   if (event.event_family === 'mcp') {
     const result = resultForMcpEvent(event.event_name);
     if (!result) return [];
     return [{
+      metricName: 'xtrm_mcp_operations_total',
       labels: safeLabels({
         ...eventBaseLabels(event, repo),
         mcp_server: normalizeKind(bodyString(event, 'mcp_server') ?? 'unknown'),
@@ -419,10 +475,38 @@ function samplesForForensicEvent(event: ForensicEvent, repo: string): Array<{ la
     }];
   }
 
+  if (event.event_family === 'review' || event.event_name.startsWith('review.verdict.')) {
+    const verdict = verdictForReviewEvent(event);
+    if (!verdict) return [];
+    return [{
+      metricName: 'xtrm_gate_verdicts_total',
+      labels: safeLabels({
+        ...eventBaseLabels(event, repo),
+        participant_role: event.resource.participant_role ?? 'unknown',
+        gate_kind: normalizeKind(bodyString(event, 'gate_kind') ?? bodyString(event, 'gate') ?? event.resource.participant_role ?? 'review'),
+        verdict,
+      }),
+      value: 1,
+    }];
+  }
+
+  if (event.event_family === 'evidence' || event.event_name.startsWith('evidence.') || bodyString(event, 'evidence_kind')) {
+    return [{
+      metricName: 'xtrm_evidence_refs_total',
+      labels: safeLabels({
+        ...eventBaseLabels(event, repo),
+        evidence_kind: normalizeKind(bodyString(event, 'evidence_kind') ?? evidenceKindForEventName(event.event_name)),
+        result: normalizeKind(bodyString(event, 'result') ?? resultForEvidenceEvent(event.event_name)),
+      }),
+      value: 1,
+    }];
+  }
+
   if (event.event_family === 'identity') {
     const result = resultForIdentityEvent(event.event_name);
     if (!result) return [];
     return [{
+      metricName: 'xtrm_identity_operations_total',
       labels: safeLabels({
         ...eventBaseLabels(event, repo),
         credential_kind: normalizeKind(bodyString(event, 'credential_kind') ?? 'unknown'),
@@ -441,14 +525,14 @@ function samplesForForensicEvent(event: ForensicEvent, repo: string): Array<{ la
       action_kind: normalizeKind(bodyString(event, 'action_kind') ?? 'unknown'),
       result,
     });
-    const samples = [{ labels, value: 1 }];
+    const samples: ForensicMetricSample[] = [{ metricName: 'xtrm_policy_decisions_total', labels, value: 1 }];
     if (event.event_name === 'policy.mismatch.detected') {
       samples.push({
+        metricName: 'xtrm_policy_mismatches_total',
         labels: safeLabels({
           ...eventBaseLabels(event, repo),
           policy_kind: normalizeKind(bodyString(event, 'policy_kind') ?? 'unknown'),
           severity: normalizeKind(bodyString(event, 'severity') ?? 'unknown'),
-          result: 'mismatch',
         }),
         value: 1,
       });
@@ -461,18 +545,19 @@ function samplesForForensicEvent(event: ForensicEvent, repo: string): Array<{ la
       const score = bodyNumber(event, 'score');
       if (score === null) return [];
       return [{
+        metricName: 'xtrm_eval_score',
         labels: safeLabels({
           ...eventBaseLabels(event, repo),
           eval_kind: normalizeKind(bodyString(event, 'eval_kind') ?? 'unknown'),
           result: 'score',
         }),
         value: score,
-        metricName: 'xtrm_eval_score',
       }];
     }
     const result = resultForEvalEvent(event);
     if (!result) return [];
     return [{
+      metricName: 'xtrm_eval_runs_total',
       labels: safeLabels({
         ...eventBaseLabels(event, repo),
         eval_kind: normalizeKind(bodyString(event, 'eval_kind') ?? 'unknown'),
@@ -485,11 +570,50 @@ function samplesForForensicEvent(event: ForensicEvent, repo: string): Array<{ la
   return [];
 }
 
+function helpForForensicMetric(metricName: string): string {
+  switch (metricName) {
+    case 'xtrm_mcp_operations_total': return 'MCP operations by bounded server, method, and result.';
+    case 'xtrm_gate_verdicts_total': return 'Gate verdicts by bounded gate kind, participant role, and verdict.';
+    case 'xtrm_evidence_refs_total': return 'Evidence references by bounded evidence kind and result.';
+    case 'xtrm_identity_operations_total': return 'Identity credential operations by bounded credential kind and result.';
+    case 'xtrm_policy_decisions_total': return 'Policy decisions by bounded policy/action kind and result.';
+    case 'xtrm_policy_mismatches_total': return 'Policy mismatches by bounded policy kind and severity.';
+    case 'xtrm_eval_score': return 'Latest eval score by bounded eval kind.';
+    case 'xtrm_eval_runs_total': return 'Evaluation runs by bounded eval kind and result.';
+    default: return 'Forensic event projection.';
+  }
+}
+
 function eventBaseLabels(event: ForensicEvent, repo: string): Record<string, unknown> {
   return {
     service_name: event.resource.service_name ?? 'specialists',
     repo: event.resource.repo ?? repo,
   };
+}
+
+function verdictForReviewEvent(event: ForensicEvent): string | null {
+  const explicit = bodyString(event, 'verdict');
+  if (explicit) return normalizeVerdict(explicit);
+  const suffix = event.event_name.split('.').at(-1);
+  return suffix ? normalizeVerdict(suffix) : null;
+}
+
+function normalizeVerdict(value: string): string | null {
+  const normalized = value.toUpperCase().replace(/[^A-Z_:-]+/g, '_');
+  if (normalized === 'PASS' || normalized === 'PARTIAL' || normalized === 'FAIL' || normalized === 'WAIVED') return normalized;
+  return null;
+}
+
+function evidenceKindForEventName(eventName: string): string {
+  const parts = eventName.split('.');
+  const candidate = parts.length > 1 ? parts[1] : undefined;
+  return candidate && candidate.length > 0 ? candidate : 'report';
+}
+
+function resultForEvidenceEvent(eventName: string): string {
+  if (eventName.endsWith('.failed')) return 'error';
+  if (eventName.endsWith('.skipped')) return 'skipped';
+  return 'success';
 }
 
 function resultForMcpEvent(eventName: string): string | null {

@@ -718,6 +718,26 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-06-04T01:36:22.606651Z"
+    },
+    {
+      "id": "bug-045",
+      "timestamp": "2026-06-04T06:41:07.715202Z",
+      "error_message": "sp serve integration tests failed with ECONNREFUSED because the server process exited immediately after printing the listening banner.",
+      "file": "src/index.ts; src/cli/serve.ts; tests/integration/sp-serve.test.ts",
+      "root_cause": "The foreground-run fix explicitly exited after every successful subcommand. `serve` is a long-running subcommand, so returning from startServe after the listen event triggered process.exit and shut the HTTP server down.",
+      "fix": "Exempted `serve` from successful-subcommand auto-exit, documented feed-events in serve help, and added an integration regression for per-job feed-events.",
+      "tags": [
+        "cli",
+        "serve",
+        "telemetry",
+        "forensic",
+        "unitAI-5ljfu"
+      ],
+      "related_bugs": [
+        "bug-044"
+      ],
+      "occurrences": 1,
+      "last_seen": "2026-06-04T06:41:07.715202Z"
     }
   ]
 }

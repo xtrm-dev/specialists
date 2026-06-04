@@ -1410,3 +1410,9 @@
 > Manual update: 2026-06-04 — unitAI-v1fzu updated docs/telemetry shipped-status sections for forensic bridge, session correlation, MCP pre-wiring boundary, and Prometheus projection scope.
 > Manual update: 2026-06-04 — unitAI-7v93b synced eoqxp open children, repo DevOps PRD, and vault devops-system.md to current shipped telemetry bridge / MCP pre-wiring status.
 > Manual update: 2026-06-04 — unitAI-4j22u copied docs/telemetry/*.md into vault folder `/home/dawid/second-mind/1-projects/xtrm/telemetry/` with matching checksums.
+
+## Manual update — 2026-06-04 unitAI-5ljfu
+- `src/specialist/prometheus-projection.ts` — adds bounded chain metrics and forensic gate/evidence projections.
+- `src/specialist/forensic-events.ts` — token split body normalization, git commit evidence body/correlation, `chain_template` allowlist, `raw_diff` forbidden label.
+- `src/cli/serve.ts` / `src/index.ts` — adds per-job feed-events route and keeps `sp serve` long-running after listen.
+- `docs/telemetry/*.md` — console-safe forensic/Prometheus handoff updates.

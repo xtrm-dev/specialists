@@ -171,6 +171,7 @@ describe('forensic-events', () => {
   });
 
   it('rejects the full forbidden high-cardinality label set', () => {
+    expect(FORBIDDEN_PROMETHEUS_LABELS).toContain('raw_diff');
     for (const label of FORBIDDEN_PROMETHEUS_LABELS) {
       expect(() => assertNoForbiddenLabels({ [label]: `${label}-value` })).toThrow(label);
     }
@@ -414,6 +415,63 @@ describe('forensic-events', () => {
 
     expect(event.event_name).toBe(eventName);
     expect(event.severity).toBe(severity);
+  });
+
+  it('normalizes token usage timeline events with explicit split and usage source', async () => {
+    const { forensicEventFromTimelineEvent } = await import('../../../src/specialist/forensic-events.js');
+    const event = forensicEventFromTimelineEvent(
+      {
+        t: 1_780_000_000_004,
+        type: 'token_usage',
+        input_tokens: 100,
+        output_tokens: 50,
+        cache_read_tokens: 25,
+        cache_creation_tokens: 10,
+        reasoning_tokens: 7,
+        tool_tokens: 3,
+        total_tokens: 195,
+        usage_source: 'provider_usage',
+      },
+      { jobId: 'job-token', specialist: 'executor', repo: 'specialists' },
+    );
+
+    expect(event.event_name).toBe('model.token_usage.recorded');
+    expect(event.body).toMatchObject({
+      input_tokens: 100,
+      output_tokens: 50,
+      cache_read_tokens: 25,
+      cache_creation_tokens: 10,
+      reasoning_tokens: 7,
+      tool_tokens: 3,
+      total_tokens: 195,
+      usage_source: 'provider_usage',
+    });
+    expect(event.body).not.toHaveProperty('cost_usd');
+    expect(event.redaction.status).toBe('clean');
+  });
+
+  it('keeps git commit evidence and changed paths in forensic body, not labels', async () => {
+    const { forensicEventFromTimelineEvent } = await import('../../../src/specialist/forensic-events.js');
+    const event = forensicEventFromTimelineEvent(
+      {
+        t: 1_780_000_000_005,
+        type: 'auto_commit_success',
+        commit_sha: 'abc123def456',
+        committed_files: ['src/a.ts', 'docs/telemetry/prometheus-projection-contract.md'],
+      },
+      { jobId: 'job-git', specialist: 'executor', repo: 'specialists', chainId: 'chain-git' },
+    );
+
+    expect(event.event_family).toBe('git');
+    expect(event.event_name).toBe('git.auto_commit.succeeded');
+    expect(event.correlation.commit_sha).toBe('abc123def456');
+    expect(event.body).toMatchObject({
+      evidence_kind: 'commit',
+      result: 'success',
+      changed_paths_count: 2,
+      changed_paths: ['src/a.ts', 'docs/telemetry/prometheus-projection-contract.md'],
+    });
+    expect(() => assertNoForbiddenLabels(pickAllowedLabels({ ...event.resource, ...event.correlation, ...event.body }))).not.toThrow();
   });
 
   it('falls back to timeline correlation fields when context fields are absent', async () => {

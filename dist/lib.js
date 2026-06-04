@@ -7041,6 +7041,7 @@ var FORBIDDEN_PROMETHEUS_LABELS = new Set([
   "raw_path",
   "raw_command",
   "raw_error",
+  "raw_diff",
   "raw_url",
   "prompt",
   "model_output",
@@ -7075,6 +7076,7 @@ var DEFAULT_LABEL_ALLOWLIST = new Set([
   "resource_kind",
   "credential_kind",
   "eval_kind",
+  "chain_template",
   "gate_kind",
   "verdict",
   "severity_level",
@@ -7289,7 +7291,8 @@ function forensicEventFromTimelineEvent(event, context) {
       parent_span_id: context.parentSpanId ?? stringField(event, "parent_span_id") ?? metaStringField(event, "parent_span_id"),
       mcp_session_id: stringField(event, "mcp_session_id") ?? metaStringField(event, "mcp_session_id") ?? metaStringField(event, "mcp.session.id"),
       jsonrpc_request_id: stringField(event, "jsonrpc_request_id") ?? metaStringField(event, "jsonrpc_request_id") ?? metaStringField(event, "jsonrpc.request.id"),
-      tool_call_id: typeof event.tool_call_id === "string" ? event.tool_call_id : undefined
+      tool_call_id: typeof event.tool_call_id === "string" ? event.tool_call_id : undefined,
+      commit_sha: typeof event.commit_sha === "string" ? event.commit_sha : undefined
     },
     body: bodyForTimelineEvent(event),
     otel: otelForTimelineEvent(event),
@@ -7317,20 +7320,46 @@ function booleanField(source, key) {
   return typeof value === "boolean" ? value : undefined;
 }
 function bodyForTimelineEvent(event) {
-  if (event.type !== "mcp")
-    return { legacy_timeline_event: event };
-  return {
-    legacy_timeline_event: event,
-    mcp_server: stringField(event, "mcp_server") ?? stringField(event, "server") ?? "unknown",
-    mcp_method: stringField(event, "mcp_method") ?? stringField(event, "method") ?? "tools/call",
-    tool_name: stringField(event, "tool_name") ?? stringField(event, "tool"),
-    network_transport: stringField(event, "network_transport") ?? stringField(event, "transport"),
-    duration_ms: numberField(event, "duration_ms"),
-    error_type: stringField(event, "error_type"),
-    status_code: stringField(event, "status_code"),
-    duplicate_span_suppressed: booleanField(event, "duplicate_span_suppressed"),
-    trace_carrier: metaStringField(event, "trace_carrier") ?? (event._meta && typeof event._meta === "object" ? "_meta" : undefined)
-  };
+  if (event.type === "mcp") {
+    return {
+      legacy_timeline_event: event,
+      mcp_server: stringField(event, "mcp_server") ?? stringField(event, "server") ?? "unknown",
+      mcp_method: stringField(event, "mcp_method") ?? stringField(event, "method") ?? "tools/call",
+      tool_name: stringField(event, "tool_name") ?? stringField(event, "tool"),
+      network_transport: stringField(event, "network_transport") ?? stringField(event, "transport"),
+      duration_ms: numberField(event, "duration_ms"),
+      error_type: stringField(event, "error_type"),
+      status_code: stringField(event, "status_code"),
+      duplicate_span_suppressed: booleanField(event, "duplicate_span_suppressed"),
+      trace_carrier: metaStringField(event, "trace_carrier") ?? (event._meta && typeof event._meta === "object" ? "_meta" : undefined)
+    };
+  }
+  if (event.type === "token_usage") {
+    return {
+      legacy_timeline_event: event,
+      input_tokens: numberField(event, "input_tokens") ?? numberField(event, "input"),
+      output_tokens: numberField(event, "output_tokens") ?? numberField(event, "output"),
+      cache_read_tokens: numberField(event, "cache_read_tokens") ?? numberField(event, "cache_read"),
+      cache_creation_tokens: numberField(event, "cache_creation_tokens") ?? numberField(event, "cache_creation"),
+      reasoning_tokens: numberField(event, "reasoning_tokens") ?? numberField(event, "reasoning") ?? numberField(event, "thinking_tokens"),
+      tool_tokens: numberField(event, "tool_tokens") ?? numberField(event, "tool") ?? numberField(event, "tool_use_tokens"),
+      total_tokens: numberField(event, "total_tokens") ?? numberField(event, "total"),
+      usage_source: stringField(event, "usage_source") ?? stringField(event, "source") ?? "runtime_event"
+    };
+  }
+  if (event.type === "auto_commit_success" || event.type === "auto_commit_skipped" || event.type === "auto_commit_failed") {
+    const committedFiles = Array.isArray(event.committed_files) ? event.committed_files.filter((file) => typeof file === "string") : [];
+    return {
+      legacy_timeline_event: event,
+      evidence_kind: event.type === "auto_commit_success" ? "commit" : "report",
+      result: event.type === "auto_commit_success" ? "success" : event.type === "auto_commit_failed" ? "error" : "skipped",
+      commit_sha: stringField(event, "commit_sha"),
+      changed_paths_count: committedFiles.length,
+      changed_paths: committedFiles,
+      reason: stringField(event, "reason")
+    };
+  }
+  return { legacy_timeline_event: event };
 }
 function otelForTimelineEvent(event) {
   if (event.type !== "mcp")

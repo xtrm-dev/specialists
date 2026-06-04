@@ -298,3 +298,9 @@ PR #99 failed GitHub OSV on `qs@6.15.1` in `bun.lock` (`GHSA-q8mj-m7cp-5q26`). F
 ## 2026-06-04 — telemetry docs copied to second-mind vault
 - Copied all repo telemetry docs (`agentops-event-catalog.md`, `forensic-event-contract.md`, `prometheus-infra-console-handoff.md`, `prometheus-projection-contract.md`) to `/home/dawid/second-mind/1-projects/xtrm/telemetry/`.
 - SHA1 checksums match repo sources. `vaultctl note index`/search did not return useful indexed search results during the copy session, but direct files are present and readable on disk.
+
+## 2026-06-04 — unitAI-5ljfu console-safe telemetry handoff
+- Added `sp serve` per-job forensic feed endpoint (`/jobs/:job_id/feed-events` and `/api/specialists/jobs/:job_id/feed-events`) returning normalized `xtrm.forensic.v1` events with `(t, seq)` cursor for console activity cards.
+- Prometheus projection now emits bounded chain aggregate metrics (`xtrm_chains_total`, `xtrm_chain_duration_seconds`) and projects review gate verdict/evidence-ref forensic counters without job/chain/trace/file/diff labels.
+- Token usage timeline events now normalize explicit split fields plus `usage_source`; git auto-commit events carry commit/changed-path evidence in forensic body/correlation only.
+- Regression caught: `sp serve` exited immediately after listening because top-level subcommand auto-exit did not exempt long-running serve mode; entrypoint now excludes `serve` from successful-subcommand `process.exit`.
