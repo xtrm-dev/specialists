@@ -6,6 +6,7 @@ import {
   evaluateEpicMergeReadiness
 } from '../specialist/epic-lifecycle.js';
 import { abandonEpic, syncEpicState, withEpicAdvisoryLock } from '../specialist/epic-reconciler.js';
+import { createForensicEvent } from '../specialist/forensic-events.js';
 import { createObservabilitySqliteClient } from '../specialist/observability-sqlite.js';
 import type { ObservabilitySqliteClient } from '../specialist/observability-sqlite.js';
 import {
@@ -419,6 +420,35 @@ function mergeEpicChains(context: EpicMergeContext, rebuild: boolean, pr: boolea
   });
 }
 
+
+function emitEpicForensicEvent(epicId: string, eventFamily: 'chain' | 'worktree', eventName: string, body: Record<string, unknown>, correlation: Record<string, unknown>): void {
+  const sqlite = createObservabilitySqliteClient();
+  if (!sqlite) return;
+
+  try {
+    const now = Date.now();
+    sqlite.appendForensicEvent(epicId, 'specialist', undefined, createForensicEvent({
+      event_family: eventFamily,
+      event_name: eventName,
+      resource: {
+        service_namespace: 'xtrm',
+        service_name: 'specialists',
+        service_component: 'epic',
+        deployment_environment: process.env.NODE_ENV ?? 'local',
+        repo: 'specialists',
+        participant_kind: 'specialist',
+        participant_role: 'epic',
+      },
+      correlation: { epic_id: epicId, ...correlation },
+      body,
+      t_unix_ms: now,
+      seq: now,
+    }));
+  } finally {
+    sqlite.close();
+  }
+}
+
 function printEpicMergeSummary(result: EpicMergeResult, rebuild: boolean, pr: boolean): void {
   console.log('');
   console.log(`Epic ${result.epicId}: ${result.fromState} → ${result.toState}`);
@@ -538,6 +568,17 @@ export async function handleEpicMergeCommand(argv: readonly string[]): Promise<v
   let currentState: EpicState;
   try {
     currentState = validateEpicMergeReadiness(context);
+    for (const chain of context.chainTargets) {
+      emitEpicForensicEvent(context.epicId, 'chain', 'chain.ready_for_review', {
+        chain_template: `epic-${context.epicId}`,
+        terminal_state: 'merge_ready',
+        result: 'pass',
+      }, {
+        job_id: chain.jobId,
+        bead_id: chain.beadId,
+        chain_root_job_id: chain.jobId,
+      });
+    }
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     if (options.json) {
@@ -560,6 +601,18 @@ export async function handleEpicMergeCommand(argv: readonly string[]): Promise<v
     pullRequestUrl = publicationResult.pullRequestUrl;
     toState = options.pr ? currentState : transitionEpicState(currentState, 'merged');
     updateEpicState(context.epicId, currentState, toState);
+    for (const chain of mergedChains) {
+      emitEpicForensicEvent(context.epicId, 'worktree', 'worktree.merged', {
+        changed_paths_count: chain.changedFiles.length,
+        merge_ref: chain.branch,
+        source_ref: chain.branch,
+        target_ref: options.targetBranch ?? 'main',
+        result: 'success',
+      }, {
+        job_id: chain.beadId,
+        bead_id: chain.beadId,
+      });
+    }
   } catch (error: unknown) {
     mergeError = error instanceof Error ? error.message : String(error);
     toState = transitionEpicState(currentState, 'failed');

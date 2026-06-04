@@ -128,6 +128,26 @@ describe('forensic-events', () => {
         body: { verdict: 'pass', chain_template: 'chain', terminal_state: 'merge_ready', result: 'pass' },
       }),
     },
+    {
+      name: 'chain.ready_for_review',
+      event: createForensicEvent({
+        event_family: 'chain',
+        event_name: 'chain.ready_for_review',
+        resource,
+        correlation: { participant_id: 'chain:1::executor', job_id: 'job-6', chain_id: 'chain:1' },
+        body: { chain_template: 'chain', changed_paths_count: 3, terminal_state: 'merge_ready', result: 'pass' },
+      }),
+    },
+    {
+      name: 'worktree.merged',
+      event: createForensicEvent({
+        event_family: 'worktree',
+        event_name: 'worktree.merged',
+        resource,
+        correlation: { participant_id: 'chain:1::executor', job_id: 'job-7', bead_id: 'unitAI-eoqxp.3.5' },
+        body: { changed_paths_count: 4, merge_ref: 'refs/heads/sp/publish-chain', source_ref: 'refs/heads/feature', target_ref: 'refs/heads/main', result: 'success' },
+      }),
+    },
   ];
 
   it('stamps the xtrm forensic envelope', () => {
@@ -209,6 +229,8 @@ describe('forensic-events', () => {
       'model.token_usage.recorded',
       'command.completed',
       'review.verdict.pass',
+      'chain.ready_for_review',
+      'worktree.merged',
     ]);
 
     for (const { event } of catalogFixtures) {
