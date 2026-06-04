@@ -40,6 +40,7 @@ import {
   createRetryEvent,
   createAutoCommitEvent,
   createControlSignalEvent,
+  createCommandEvent,
   mapCallbackEventToTimelineEvent,
 } from './timeline-events.js';
 import type { SessionMetricEvent, SessionRunMetrics, SessionTokenUsage } from '../pi/session.js';
@@ -349,11 +350,12 @@ function runAutoCommitCheckpoint(options: {
   specialist: string;
   beadId: string | undefined;
   turnNumber: number;
+  emitCommandEvent?: (status: 'completed' | 'failed', options: { command_kind: string; duration_ms?: number; command?: string; args?: string[]; exit_code?: number; stderr?: string; redacted?: boolean }) => void;
 }):
   | { status: 'skipped'; reason: string }
   | { status: 'success'; sha: string; files: string[]; committedAtMs: number }
   | { status: 'failed'; reason: string } {
-  const { autoCommitPolicy, target, worktreePath, specialist, beadId, turnNumber } = options;
+  const { autoCommitPolicy, target, worktreePath, specialist, beadId, turnNumber, emitCommandEvent } = options;
   if (!worktreePath) return { status: 'skipped', reason: 'no_worktree' };
   if (!autoCommitPolicy || autoCommitPolicy === 'never') return { status: 'skipped', reason: 'policy_never' };
   if (autoCommitPolicy === 'checkpoint_on_waiting' && target !== 'waiting') {
@@ -369,32 +371,45 @@ function runAutoCommitCheckpoint(options: {
       return { status: 'skipped', reason: 'no_substantive_changes' };
     }
 
+    const addStart = Date.now();
     const addResult = spawnSync('git', ['add', '--', ...substantiveFiles], {
       cwd: worktreePath,
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    const addDuration = Date.now() - addStart;
     if (addResult.status !== 0) {
+      emitCommandEvent?.('failed', { command_kind: 'git', duration_ms: addDuration, command: 'git', args: ['add', '--', ...substantiveFiles], exit_code: typeof addResult.status === 'number' ? addResult.status : undefined, stderr: (addResult.stderr ?? addResult.stdout ?? 'git add failed').trim(), redacted: true });
       return { status: 'failed', reason: (addResult.stderr ?? addResult.stdout ?? 'git add failed').trim() };
     }
+    emitCommandEvent?.('completed', { command_kind: 'git', duration_ms: addDuration, command: 'git', args: ['add', '--', ...substantiveFiles], exit_code: 0, redacted: true });
 
-    const commitResult = spawnSync('git', ['commit', '-m', buildAutoCommitMessage(specialist, beadId, turnNumber)], {
+    const commitMessage = buildAutoCommitMessage(specialist, beadId, turnNumber);
+    const commitStart = Date.now();
+    const commitResult = spawnSync('git', ['commit', '-m', commitMessage], {
       cwd: worktreePath,
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    const commitDuration = Date.now() - commitStart;
     if (commitResult.status !== 0) {
+      emitCommandEvent?.('failed', { command_kind: 'git', duration_ms: commitDuration, command: 'git', args: ['commit', '-m', commitMessage], exit_code: typeof commitResult.status === 'number' ? commitResult.status : undefined, stderr: (commitResult.stderr ?? commitResult.stdout ?? 'git commit failed').trim(), redacted: true });
       return { status: 'failed', reason: (commitResult.stderr ?? commitResult.stdout ?? 'git commit failed').trim() };
     }
+    emitCommandEvent?.('completed', { command_kind: 'git', duration_ms: commitDuration, command: 'git', args: ['commit', '-m', commitMessage], exit_code: 0, redacted: true });
 
+    const shaStart = Date.now();
     const shaResult = spawnSync('git', ['rev-parse', 'HEAD'], {
       cwd: worktreePath,
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    const shaDuration = Date.now() - shaStart;
     if (shaResult.status !== 0) {
+      emitCommandEvent?.('failed', { command_kind: 'git', duration_ms: shaDuration, command: 'git', args: ['rev-parse', 'HEAD'], exit_code: typeof shaResult.status === 'number' ? shaResult.status : undefined, stderr: (shaResult.stderr ?? shaResult.stdout ?? 'git rev-parse failed').trim(), redacted: true });
       return { status: 'failed', reason: (shaResult.stderr ?? shaResult.stdout ?? 'git rev-parse failed').trim() };
     }
+    emitCommandEvent?.('completed', { command_kind: 'git', duration_ms: shaDuration, command: 'git', args: ['rev-parse', 'HEAD'], exit_code: 0, redacted: true });
 
     return {
       status: 'success',
@@ -403,6 +418,7 @@ function runAutoCommitCheckpoint(options: {
       committedAtMs: Date.now(),
     };
   } catch (error: unknown) {
+    emitCommandEvent?.('failed', { command_kind: 'git', command: 'git', args: ['status', '--porcelain'], redacted: true, stderr: String(error) });
     return { status: 'failed', reason: String(error) };
   }
 }
@@ -873,6 +889,11 @@ export class Supervisor {
   ): void {
     if (this.isDisposed) return;
     this.appendEventBestEffort(jobId, 'appendEvent', createControlSignalEvent(action, options));
+  }
+
+  emitTimelineEvent(jobId: string, event: TimelineEvent): void {
+    if (this.isDisposed) return;
+    this.appendEventBestEffort(jobId, 'appendEvent', event);
   }
 
   updateJobStatus(id: string, status: Extract<SupervisorJobStatus, 'done' | 'cancelled' | 'error' | 'waiting' | 'running' | 'starting'>, error?: string): SupervisorStatusView | null {
@@ -1523,6 +1544,9 @@ export class Supervisor {
         specialist: runOptions.name,
         beadId: statusSnapshot.bead_id,
         turnNumber: Math.max(1, runMetrics.turns ?? 1),
+        emitCommandEvent: (status, commandEvent) => {
+          appendTimelineEvent(createCommandEvent(status, commandEvent) as unknown as TimelineEvent);
+        },
       });
 
       if (autoCommitResult.status === 'skipped') {

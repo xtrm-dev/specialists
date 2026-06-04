@@ -1,4 +1,5 @@
 import { Supervisor } from './supervisor.js';
+import { createReviewVerdictEvent, createChainEvent } from './timeline-events.js';
 import { hasRunCompleteEvent } from './observability-sqlite.js';
 import { isProcessAlive } from './process-liveness.js';
 import { BeadsClient } from './beads.js';
@@ -180,6 +181,13 @@ export async function finalizeJob(chainMemberId: string, opts: FinalizeJobOption
     const reviewerPass = findReviewerPassInChain(supervisor, chainId);
     if (!reviewerPass) throw new Error(`No reviewer with PASS compliance verdict found in chain ${chainId}.`);
 
+    supervisor.emitTimelineEvent(chainMemberId, createReviewVerdictEvent('pass', {
+      chain_id: chainId,
+      reviewer_job_id: reviewerPass.reviewerJobId,
+      terminal_state: 'merge_ready',
+      result: 'pass',
+    }) as any);
+
     const finalized: string[] = [];
     const skipped: Array<{ id: string; reason: string }> = [];
     for (const id of supervisor.listChainJobIds(chainId)) {
@@ -190,6 +198,13 @@ export async function finalizeJob(chainMemberId: string, opts: FinalizeJobOption
       if (result) finalized.push(id); else skipped.push({ id, reason: 'finalize-failed' });
     }
     if (finalized.length === 0) throw new Error(`No waiting keep-alive jobs to finalize in chain ${chainId}.`);
+
+    supervisor.emitTimelineEvent(chainMemberId, createChainEvent('chain_finalized', {
+      chain_id: chainId,
+      chain_template: 'unknown',
+      terminal_state: 'merged',
+      result: 'success',
+    }) as any);
 
     process.stdout.write(`${green('✓')} Finalized chain ${chainId} (reviewer PASS: ${reviewerPass.reviewerJobId})\n`);
     for (const id of finalized) process.stdout.write(`  ${green('✓')} ${id}\n`);

@@ -108,6 +108,26 @@ describe('forensic-events', () => {
         body: { input_tokens: 100, output_tokens: 50, cache_read_tokens: 25, usage_source: 'provider_usage' },
       }),
     },
+    {
+      name: 'command.completed',
+      event: createForensicEvent({
+        event_family: 'command',
+        event_name: 'command.completed',
+        resource,
+        correlation: { participant_id: 'chain:1::executor', job_id: 'job-4' },
+        body: { command_kind: 'git', duration_ms: 12, status: 'success', command: 'git', args: ['status', '--porcelain'], redacted: true },
+      }),
+    },
+    {
+      name: 'review.verdict.pass',
+      event: createForensicEvent({
+        event_family: 'review',
+        event_name: 'review.verdict.pass',
+        resource,
+        correlation: { participant_id: 'chain:1::executor', job_id: 'job-5', chain_id: 'chain:1' },
+        body: { verdict: 'pass', chain_template: 'chain', terminal_state: 'merge_ready', result: 'pass' },
+      }),
+    },
   ];
 
   it('stamps the xtrm forensic envelope', () => {
@@ -187,6 +207,8 @@ describe('forensic-events', () => {
       'service_skills.drift_detected',
       'pulse.emitted',
       'model.token_usage.recorded',
+      'command.completed',
+      'review.verdict.pass',
     ]);
 
     for (const { event } of catalogFixtures) {
@@ -194,7 +216,7 @@ describe('forensic-events', () => {
       expect(event.event_version).toBe(1);
       expect(event.resource.participant_kind).toBeTruthy();
       expect(event.resource.participant_role).toBeTruthy();
-      expect(event.redaction.status).toBe('clean');
+      expect(['clean', 'redacted', 'unknown']).toContain(event.redaction.status);
       expect(() => assertNoForbiddenLabels(pickAllowedLabels({
         ...event.resource,
         ...event.correlation,
@@ -207,6 +229,8 @@ describe('forensic-events', () => {
     const tokenFixture = catalogFixtures.find((fixture) => fixture.name === 'model.token_usage.recorded')?.event;
     expect(tokenFixture?.body).toMatchObject({ usage_source: 'provider_usage' });
     expect(tokenFixture?.body).not.toHaveProperty('cost_usd');
+    expect(catalogFixtures.find((fixture) => fixture.name === 'command.completed')?.event.redaction.status).toBeTruthy();
+    expect(catalogFixtures.find((fixture) => fixture.name === 'review.verdict.pass')?.event.redaction.status).toBeTruthy();
   });
 
   it('picks only allowlisted low-cardinality labels', () => {

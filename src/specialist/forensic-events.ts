@@ -516,6 +516,52 @@ function bodyForTimelineEvent(event: { type: string; [key: string]: unknown }): 
     };
   }
 
+  if (event.type === 'command_completed' || event.type === 'command_failed') {
+    return {
+      legacy_timeline_event: event,
+      command_kind: stringField(event, 'command_kind') ?? 'unknown',
+      duration_ms: numberField(event, 'duration_ms'),
+      status: event.type === 'command_completed' ? 'success' : 'error',
+      command: stringField(event, 'command'),
+      args: Array.isArray(event.args) ? event.args.filter((arg): arg is string => typeof arg === 'string') : undefined,
+      exit_code: numberField(event, 'exit_code'),
+      stderr: stringField(event, 'stderr'),
+      redacted: booleanField(event, 'redacted'),
+    };
+  }
+
+  if (event.type === 'review_verdict_pass' || event.type === 'review_verdict_partial' || event.type === 'review_verdict_fail' || event.type === 'review_verdict_waived') {
+    return {
+      legacy_timeline_event: event,
+      verdict: event.type.replace('review_verdict_', ''),
+      chain_template: stringField(event, 'chain_template'),
+      changed_paths_count: numberField(event, 'changed_paths_count'),
+      terminal_state: stringField(event, 'terminal_state'),
+      result: stringField(event, 'result'),
+    };
+  }
+
+  if (event.type === 'chain_ready_for_review' || event.type === 'chain_finalized') {
+    return {
+      legacy_timeline_event: event,
+      chain_template: stringField(event, 'chain_template'),
+      changed_paths_count: numberField(event, 'changed_paths_count'),
+      terminal_state: stringField(event, 'terminal_state'),
+      result: stringField(event, 'result'),
+    };
+  }
+
+  if (event.type === 'worktree_merged') {
+    return {
+      legacy_timeline_event: event,
+      changed_paths_count: numberField(event, 'changed_paths_count'),
+      merge_ref: stringField(event, 'merge_ref'),
+      source_ref: stringField(event, 'source_ref'),
+      target_ref: stringField(event, 'target_ref'),
+      result: stringField(event, 'result'),
+    };
+  }
+
   return { legacy_timeline_event: event };
 }
 
@@ -543,6 +589,10 @@ function familyForTimelineType(type: string): string {
   if (type === 'compaction') return 'compaction';
   if (type === 'error' || type === 'extension_error') return 'error';
   if (type === 'auto_commit_success' || type === 'auto_commit_skipped' || type === 'auto_commit_failed') return 'git';
+  if (type === 'command_completed' || type === 'command_failed') return 'command';
+  if (type === 'review_verdict_pass' || type === 'review_verdict_partial' || type === 'review_verdict_fail' || type === 'review_verdict_waived') return 'review';
+  if (type === 'chain_ready_for_review' || type === 'chain_finalized') return 'chain';
+  if (type === 'worktree_merged') return 'worktree';
   if (type === 'stale_warning') return 'process_health';
   return 'job';
 }
@@ -573,6 +623,15 @@ function eventNameForTimelineEvent(event: { type: string; [key: string]: unknown
   if (event.type === 'auto_commit_success') return 'git.auto_commit.succeeded';
   if (event.type === 'auto_commit_skipped') return 'git.auto_commit.skipped';
   if (event.type === 'auto_commit_failed') return 'git.auto_commit.failed';
+  if (event.type === 'command_completed') return 'command.completed';
+  if (event.type === 'command_failed') return 'command.failed';
+  if (event.type === 'review_verdict_pass') return 'review.verdict.pass';
+  if (event.type === 'review_verdict_partial') return 'review.verdict.partial';
+  if (event.type === 'review_verdict_fail') return 'review.verdict.fail';
+  if (event.type === 'review_verdict_waived') return 'review.verdict.waived';
+  if (event.type === 'chain_ready_for_review') return 'chain.ready_for_review';
+  if (event.type === 'chain_finalized') return 'chain.finalized';
+  if (event.type === 'worktree_merged') return 'worktree.merged';
   if (event.type === 'stale_warning') return 'process_health.stale_detected';
   return `${familyForTimelineType(event.type)}.${event.type}`;
 }
@@ -593,7 +652,7 @@ function mcpEventNameForTimelineEvent(event: { [key: string]: unknown }): string
 }
 
 function severityForTimelineEvent(event: { type: string; [key: string]: unknown }): ForensicSeverity {
-  if (event.type === 'error' || event.type === 'extension_error' || event.type === 'auto_commit_failed') return 'error';
+  if (event.type === 'error' || event.type === 'extension_error' || event.type === 'auto_commit_failed' || event.type === 'command_failed') return 'error';
   if (event.type === 'mcp' && (event.is_error || mcpEventNameForTimelineEvent(event).endsWith('.failed') || mcpEventNameForTimelineEvent(event) === 'mcp.auth.failed')) return 'error';
   if (event.type === 'mcp' && mcpEventNameForTimelineEvent(event) === 'mcp.rate_limited') return 'warn';
   if (event.type === 'stale_warning' || event.type === 'control_signal') return 'warn';
@@ -603,6 +662,6 @@ function severityForTimelineEvent(event: { type: string; [key: string]: unknown 
 }
 
 function redactionStatusForTimelineEvent(event: { type: string; [key: string]: unknown }): RedactionStatus {
-  if (event.type === 'tool' || event.type === 'turn_summary' || event.type === 'run_complete') return 'redacted';
+  if (event.type === 'tool' || event.type === 'turn_summary' || event.type === 'run_complete' || event.type === 'command_completed' || event.type === 'command_failed' || event.type === 'review_verdict_pass' || event.type === 'review_verdict_partial' || event.type === 'review_verdict_fail' || event.type === 'review_verdict_waived' || event.type === 'chain_ready_for_review' || event.type === 'chain_finalized' || event.type === 'worktree_merged') return 'redacted';
   return 'clean';
 }
