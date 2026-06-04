@@ -1,4 +1,5 @@
 import { type JobMetricsRecord, type ObservabilitySqliteClient } from './observability-sqlite.js';
+import type { ForensicEvent } from './forensic-events.js';
 import type { SupervisorStatus } from './supervisor.js';
 export interface PrometheusProjectionOptions {
     repo?: string;
@@ -10,6 +11,7 @@ export interface PrometheusProjectionInput {
     jobMetrics: JobMetricsRecord[];
     repo: string;
     nowMs?: number;
+    forensicEvents?: ForensicEvent[];
 }
 export declare function collectPrometheusProjection(options?: PrometheusProjectionOptions): string;
 export declare function collectPrometheusProjectionFromClient(client: Pick<ObservabilitySqliteClient, 'listStatuses' | 'listJobMetrics'>, options?: PrometheusProjectionOptions): string;

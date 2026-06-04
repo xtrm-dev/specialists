@@ -78,6 +78,11 @@ export interface SupervisorStatus {
   last_event_at_ms?: number;
   bead_id?: string;
   node_id?: string;
+  session_id?: string;
+  conversation_id?: string;
+  trace_id?: string;
+  span_id?: string;
+  parent_span_id?: string;
   session_file?: string;
   fifo_path?: string;
   tmux_session?: string;
@@ -144,7 +149,7 @@ export interface SupervisorOptions {
   /** Optional callback to stream progress deltas to stdout/elsewhere */
   onProgress?: (delta: string) => void;
   /** Optional callback for meta events (backend/model) */
-  onMeta?: (meta: { backend: string; model: string }) => void;
+  onMeta?: (meta: { backend: string; model: string; sessionId?: string }) => void;
   /** Optional callback fired as soon as a job id is allocated and persisted */
   onJobStarted?: (job: { id: string }) => void;
   /** Stall detection thresholds — merged with STALL_DETECTION_DEFAULTS */
@@ -1992,7 +1997,7 @@ export class Supervisor {
         },
         // onMeta — model/backend metadata
         (meta) => {
-          setStatus({ model: meta.model, backend: meta.backend });
+          setStatus({ model: meta.model, backend: meta.backend, ...(meta.sessionId ? { session_id: meta.sessionId } : {}) });
           appendTimelineEvent(createMetaEvent(meta.model, meta.backend));
           // Stream to caller if callback provided
           this.opts.onMeta?.(meta);
@@ -2415,12 +2420,18 @@ export class Supervisor {
       if (statusWatchdogPid !== undefined) {
         try { process.kill(statusWatchdogPid, 'SIGTERM'); } catch { /* ignore */ }
       }
-      // Close the FIFO: readline → fd → stream. Closing the fd synchronously before
-      // destroying the stream prevents the event loop hang that blocks batch test suites.
-      // autoClose is false so stream.destroy() won't attempt a second close on the fd.
+      // Close the FIFO idempotently. Bun can emit EBADF if a stream observes an fd
+      // after we have already closed it, so destroy the stream with a local EBADF
+      // guard before the single explicit closeSync(). autoClose is false, but the
+      // guard keeps cleanup safe across runtime edge cases and tests.
+      const swallowBenignFifoError = (error: NodeJS.ErrnoException): void => {
+        if (error.code === 'EBADF' && error.syscall === 'close') return;
+        throw error;
+      };
       try { fifoReadline?.close(); } catch { /* ignore */ }
-      if (fifoFd !== undefined) { try { closeSync(fifoFd); } catch { /* ignore */ } fifoFd = undefined; }
+      try { fifoReadStream?.once('error', swallowBenignFifoError); } catch { /* ignore */ }
       try { fifoReadStream?.destroy(); } catch { /* ignore */ }
+      if (fifoFd !== undefined) { try { closeSync(fifoFd); } catch { /* ignore */ } fifoFd = undefined; }
       // Ensure events are flushed to disk before closing
       if (eventsFd !== undefined) {
         try { fsyncSync(eventsFd); } catch { /* ignore */ }

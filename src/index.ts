@@ -1196,7 +1196,11 @@ async function run() {
   await server.start();
 }
 
-run().catch((error) => {
-  logger.error(`Fatal error: ${error}`);
-  process.exit(1);
-});
+run()
+  .then(() => {
+    if (sub) process.exit(process.exitCode ?? 0);
+  })
+  .catch((error) => {
+    logger.error(`Fatal error: ${error}`);
+    process.exit(1);
+  });

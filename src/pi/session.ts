@@ -70,8 +70,10 @@ export interface SessionTokenUsage {
   output_tokens?: number;
   cache_creation_tokens?: number;
   cache_read_tokens?: number;
+  reasoning_tokens?: number;
+  tool_tokens?: number;
   total_tokens?: number;
-  cost_usd?: number;
+  usage_source?: 'provider_usage' | 'runtime_estimate' | 'local_estimate' | 'unknown';
 }
 
 export interface SessionRunMetrics {
@@ -148,7 +150,7 @@ export interface PiSessionOptions {
   /** Called with additive observability metrics derived from RPC events */
   onMetric?: (event: SessionMetricEvent) => void;
   /** Called once with actual backend/model from the first assistant message_start */
-  onMeta?: (meta: { backend: string; model: string }) => void;
+  onMeta?: (meta: { backend: string; model: string; sessionId?: string }) => void;
   /** Kill and fail if no streaming/protocol activity occurs within this window */
   stallTimeoutMs?: number;
   /** Extended stall timeout used while known test commands run via bash tool */
@@ -230,6 +232,11 @@ function asNumber(value: unknown): number | undefined {
   return undefined;
 }
 
+function normalizeUsageSource(value: string): SessionTokenUsage['usage_source'] {
+  if (value === 'provider_usage' || value === 'runtime_estimate' || value === 'local_estimate' || value === 'unknown') return value;
+  return 'unknown';
+}
+
 function pickFirstNumber(record: Record<string, unknown>, keys: readonly string[]): number | undefined {
   for (const key of keys) {
     const value = asNumber(record[key]);
@@ -241,18 +248,17 @@ function pickFirstNumber(record: Record<string, unknown>, keys: readonly string[
 function normalizeTokenUsage(candidate: unknown): SessionTokenUsage | undefined {
   if (!candidate || typeof candidate !== 'object') return undefined;
   const usage = candidate as Record<string, unknown>;
-  const cost = usage.cost;
-
   const normalized: SessionTokenUsage = {
     input_tokens: pickFirstNumber(usage, ['input_tokens', 'inputTokens', 'prompt_tokens', 'promptTokens', 'input']),
     output_tokens: pickFirstNumber(usage, ['output_tokens', 'outputTokens', 'completion_tokens', 'completionTokens', 'output']),
     cache_creation_tokens: pickFirstNumber(usage, ['cache_creation_tokens', 'cacheCreationTokens', 'cache_write_tokens', 'cacheWrite']),
     cache_read_tokens: pickFirstNumber(usage, ['cache_read_tokens', 'cacheReadTokens', 'cache_hit_tokens', 'cacheRead']),
+    reasoning_tokens: pickFirstNumber(usage, ['reasoning_tokens', 'reasoningTokens', 'thinking_tokens', 'thinkingTokens']),
+    tool_tokens: pickFirstNumber(usage, ['tool_tokens', 'toolTokens', 'tool_use_tokens', 'toolUseTokens']),
     total_tokens: pickFirstNumber(usage, ['total_tokens', 'totalTokens']),
-    cost_usd: pickFirstNumber(usage, ['cost_usd', 'costUsd', 'usd_cost', 'cost'])
-      ?? (typeof cost === 'object' && cost !== null
-        ? pickFirstNumber(cost as Record<string, unknown>, ['total', 'usd', 'cost_usd'])
-        : undefined),
+    usage_source: typeof usage.usage_source === 'string'
+      ? normalizeUsageSource(usage.usage_source)
+      : 'provider_usage',
   };
 
   const hasAny = Object.values(normalized).some(value => value !== undefined);
@@ -871,7 +877,7 @@ export class PiAgentSession {
         this.options.onEvent?.('message_start_assistant');
         const { provider, model } = event.message ?? {};
         if (provider || model) {
-          this.options.onMeta?.({ backend: provider ?? '', model: model ?? '' });
+          this.options.onMeta?.({ backend: provider ?? '', model: model ?? '', sessionId: this.meta.sessionId });
         }
       } else if (role === 'toolResult') {
         this.options.onEvent?.('message_start_tool_result');

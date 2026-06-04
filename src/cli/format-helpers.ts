@@ -68,24 +68,24 @@ export function formatElapsed(seconds: number): string {
   return s > 0 ? `${m}m ${s}s` : `${m}m`;
 }
 
-export function formatCostUsd(costUsd: number | undefined): string | null {
-  if (costUsd === undefined || !Number.isFinite(costUsd)) return null;
-  return `$${costUsd.toFixed(6)}`;
-}
-
 export function formatTokenUsageSummary(tokenUsage: {
   total_tokens?: number;
   input_tokens?: number;
   output_tokens?: number;
-  cost_usd?: number;
+  cache_read_tokens?: number;
+  cache_creation_tokens?: number;
+  reasoning_tokens?: number;
+  tool_tokens?: number;
 } | undefined): string[] {
   if (!tokenUsage) return [];
   const parts: string[] = [];
   if (tokenUsage.total_tokens !== undefined) parts.push(`tokens=${tokenUsage.total_tokens}`);
   if (tokenUsage.input_tokens !== undefined) parts.push(`in=${tokenUsage.input_tokens}`);
   if (tokenUsage.output_tokens !== undefined) parts.push(`out=${tokenUsage.output_tokens}`);
-  const cost = formatCostUsd(tokenUsage.cost_usd);
-  if (cost) parts.push(`cost=${cost}`);
+  if (tokenUsage.cache_read_tokens !== undefined) parts.push(`cache_read=${tokenUsage.cache_read_tokens}`);
+  if (tokenUsage.cache_creation_tokens !== undefined) parts.push(`cache_create=${tokenUsage.cache_creation_tokens}`);
+  if (tokenUsage.reasoning_tokens !== undefined) parts.push(`reasoning=${tokenUsage.reasoning_tokens}`);
+  if (tokenUsage.tool_tokens !== undefined) parts.push(`tool=${tokenUsage.tool_tokens}`);
   return parts;
 }
 
@@ -372,7 +372,10 @@ export function formatEventLine(
       total_tokens: usage.total_tokens,
       input_tokens: usage.input_tokens,
       output_tokens: usage.output_tokens,
-      cost_usd: usage.cost_usd,
+      cache_read_tokens: usage.cache_read_tokens,
+      cache_creation_tokens: usage.cache_creation_tokens,
+      reasoning_tokens: usage.reasoning_tokens,
+      tool_tokens: usage.tool_tokens,
     }));
   } else if (event.type === 'finish_reason') {
     detailParts.push(`reason=${event.finish_reason}`);

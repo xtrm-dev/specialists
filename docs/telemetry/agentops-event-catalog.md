@@ -3,7 +3,7 @@ title: AgentOps Event Catalog
 scope: telemetry-agentops-event-catalog
 category: reference
 version: 1.0.0
-updated: 2026-06-03
+updated: 2026-06-04
 source_of_truth_for:
   - "xtrm AgentOps event names"
   - "forensic event family catalog"
@@ -182,6 +182,15 @@ observability. Both use the same event naming and label discipline.
 | `mcp.latency.observed` | Passive latency sample/health check records latency. | `mcp_server`, `mcp_method`, `duration_ms` | Health evidence. | yes |
 
 Never label by MCP session id, JSON-RPC id, raw args, result text, URL, or token.
+
+Shipped bridge status (2026-06-04): specialists has no live MCP emitter yet, but
+`src/specialist/forensic-events.ts` already normalizes future timeline events with
+`type: "mcp"` into this catalog. It extracts `mcp_session_id` and
+`jsonrpc_request_id` from direct fields or `_meta`, keeps them in correlation,
+and adds semconv-style `otel` attributes (`mcp.method.name`, `mcp.session.id`,
+`jsonrpc.request.id`, `network.transport`, and GenAI tool hints). Prometheus
+projection currently supports `xtrm_mcp_operations_total`; duration/session
+metrics require real MCP lifecycle emitters.
 
 ## 8. Service skills
 

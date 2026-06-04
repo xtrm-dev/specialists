@@ -34,6 +34,13 @@ export interface ForensicCorrelation {
     trace_id?: string;
     span_id?: string;
     parent_span_id?: string;
+    session_id?: string;
+    conversation_id?: string;
+    mcp_session_id?: string;
+    jsonrpc_request_id?: string;
+    eval_id?: string;
+    policy_decision_id?: string;
+    identity_request_id?: string;
     commit_sha?: string;
     [key: string]: unknown;
 }
@@ -115,6 +122,11 @@ export interface TimelineForensicContext {
     chainRootJobId?: string;
     chainRootBeadId?: string;
     epicId?: string;
+    sessionId?: string;
+    conversationId?: string;
+    traceId?: string;
+    spanId?: string;
+    parentSpanId?: string;
 }
 export declare function forensicEventFromTimelineEvent(event: {
     t: number;

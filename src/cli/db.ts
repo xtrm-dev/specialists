@@ -632,7 +632,6 @@ interface BenchmarkRow {
   reviewer_verdict: ReviewerVerdict;
   reviewer_score_if_present: number | null;
   total_tokens: number | null;
-  cost_usd: number | null;
   elapsed_ms: number | null;
   failure_notes: string[];
   source_of_truth: {
@@ -645,7 +644,6 @@ interface BenchmarkRow {
     reviewer_verdict: string;
     reviewer_score_if_present: string;
     total_tokens: string;
-    cost_usd: string;
     elapsed_ms: string;
     failure_notes: string;
   };
@@ -791,10 +789,6 @@ function runBenchmarkExport(options: BenchmarkExportOptions): void {
           ?? runComplete?.metrics?.token_usage?.total_tokens
           ?? executorStatus.metrics?.token_usage?.total_tokens
           ?? null;
-        const costUsd = runComplete?.token_usage?.cost_usd
-          ?? runComplete?.metrics?.token_usage?.cost_usd
-          ?? executorStatus.metrics?.token_usage?.cost_usd
-          ?? null;
         const elapsedMs = runComplete
           ? Math.round(runComplete.elapsed_s * 1000)
           : (typeof executorStatus.elapsed_s === 'number' ? Math.round(executorStatus.elapsed_s * 1000) : null);
@@ -817,7 +811,6 @@ function runBenchmarkExport(options: BenchmarkExportOptions): void {
           reviewer_verdict: reviewerVerdict,
           reviewer_score_if_present: parseReviewerScore(reviewerOutput),
           total_tokens: totalTokens,
-          cost_usd: costUsd,
           elapsed_ms: elapsedMs,
           failure_notes: failureNotes,
           source_of_truth: {
@@ -830,7 +823,6 @@ function runBenchmarkExport(options: BenchmarkExportOptions): void {
             reviewer_verdict: 'reviewer specialist_results.output Verdict: PASS|PARTIAL|FAIL',
             reviewer_score_if_present: 'reviewer specialist_results.output score regex; null when absent',
             total_tokens: runComplete ? 'specialist_events.type=run_complete.token_usage.total_tokens' : 'status_json.metrics.token_usage.total_tokens fallback',
-            cost_usd: runComplete ? 'specialist_events.type=run_complete.token_usage.cost_usd' : 'status_json.metrics.token_usage.cost_usd fallback',
             elapsed_ms: runComplete ? 'specialist_events.type=run_complete.elapsed_s * 1000' : 'status_json.elapsed_s * 1000 fallback',
             failure_notes: 'run_complete.error/status + status_json.error + chain sequencing heuristics',
           },

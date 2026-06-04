@@ -237,8 +237,10 @@ export interface TimelineTokenUsage {
   output_tokens?: number;
   cache_creation_tokens?: number;
   cache_read_tokens?: number;
+  reasoning_tokens?: number;
+  tool_tokens?: number;
   total_tokens?: number;
-  cost_usd?: number;
+  usage_source?: 'provider_usage' | 'runtime_estimate' | 'local_estimate' | 'unknown';
 }
 
 export interface TimelineRunMetrics {

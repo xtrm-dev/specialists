@@ -3,7 +3,7 @@ title: Forensic Telemetry Event Contract
 scope: telemetry-forensics
 category: reference
 version: 1.0.0
-updated: 2026-06-02
+updated: 2026-06-04
 source_of_truth_for:
   - "xtrm forensic telemetry envelope"
   - "specialists runtime JSON events"
@@ -29,6 +29,26 @@ correlation, redaction, and future journal/recommendation drill-down. Do not use
 this document as the whole DevOps PRD; it is the implemented telemetry substrate
 that the broader design consumes. For the implementation-ready list of event
 names, see `docs/telemetry/agentops-event-catalog.md`.
+
+### Shipped bridge status — 2026-06-04
+
+The specialists runtime now ships the **pre-substrate forensic bridge**:
+
+- canonical `xtrm.forensic.v1` envelope creation and timeline-event normalization;
+- persisted `specialist_forensic_events` rows in observability SQLite;
+- additive forensic payloads in `sp feed --json` and `sp log --json`;
+- `sp forensic <job-id> --json` for persisted forensic event reads;
+- `sp metrics --prometheus` / `sp serve` `GET /metrics` projection over current runtime tables and selected forensic fixtures;
+- full forbidden-label guard tests for every opaque correlation id in this contract;
+- Pi-generated `session_id` propagation into specialist status and forensic correlation;
+- optional pass-through for `conversation_id`, `trace_id`, `span_id`, and `parent_span_id` when a timeline event or caller supplies them;
+- MCP event normalization/projection **pre-wiring** for future MCP emitters.
+
+Important boundary: **there is not yet a live MCP emitter or cross-process MCP
+`_meta` trace propagation in this repo.** What shipped for MCP is the normalization
+and projection layer: if a future timeline event uses `type: "mcp"`, it is mapped
+to the canonical `mcp.*` names, extracts trace/MCP/JSON-RPC ids from direct fields
+or `_meta`, and keeps those ids in correlation only.
 
 ## 1. Purpose and non-goals
 
@@ -196,8 +216,8 @@ Correlation fields are for joining logs/traces/results. They are intentionally h
 | `chain_root_bead_id` | specialists status | Opaque root bead id today. |
 | `epic_id` | specialists status / epic membership | Opaque bd/sp epic id. |
 | `node_id` | node supervisor | Opaque node run/member id when present. |
-| `session_id` | runtime/session layer | Opaque stable session id for a keep-alive conversation or orchestrator session. Distinct from `job_id`; not all jobs have one yet. |
-| `conversation_id` | GenAI / substrate channel | Opaque conversation/channel/thread id when available. Maps to OTel `gen_ai.conversation.id` where appropriate. |
+| `session_id` | runtime/session layer | Opaque stable session id for a Pi/specialist session. Specialists now persist the Pi-generated session id when available. Distinct from `job_id`. |
+| `conversation_id` | GenAI / substrate channel | Opaque conversation/channel/thread id when available. Currently optional pass-through from timeline/caller context; maps to OTel `gen_ai.conversation.id` where appropriate. |
 | `reused_from_job_id` | startup snapshot | Opaque parent/reuse link. |
 | `worktree_owner_job_id` | startup snapshot | Opaque worktree owner link. |
 | `commit_sha` | git/autocommit events | Full SHA in body/correlation, never metric label. |
@@ -294,6 +314,15 @@ Where spans are available, model agent/tool activity as nested operations:
 - MCP span: `tools/call` with `mcp.method.name`, `mcp.session.id`, `jsonrpc.request.id`, and transport attributes
 
 The forensic event body may include an `otel` sub-object with prepared attributes, but implementation may remain log-first until OTEL export exists.
+
+Current shipped bridge behavior: timeline events with `type: "mcp"` are normalized
+to `event_family="mcp"` and canonical `mcp.*` event names. The normalizer reads
+`trace_id`, `span_id`, `parent_span_id`, `mcp_session_id`, and
+`jsonrpc_request_id` from either top-level event fields or `_meta`, and emits an
+`otel` object with `mcp.method.name`, `mcp.session.id`, `jsonrpc.request.id`,
+`network.transport`, `gen_ai.operation.name="execute_tool"`, and
+`gen_ai.tool.name` when available. This is pre-wiring only; no real MCP emitter
+exists yet.
 
 ## 7. Loki-friendly logging guidance
 
@@ -986,12 +1015,16 @@ Specialists now ships the pre-substrate forensic bridge:
 2. Timeline persistence dual-writes canonical rows into `specialist_forensic_events` in observability SQLite.
 3. `sp forensic [job-id] --json` queries persisted forensic envelopes as NDJSON.
 4. `sp log --json` and `sp feed --json` include additive `forensic_event` payloads while preserving legacy fields.
-5. `sp metrics --prometheus` projects low-cardinality metrics from runtime state and job metrics.
-6. Unit and CI checks cover schema/cardinality/redaction and Prometheus exposition syntax.
+5. `sp metrics --prometheus` projects low-cardinality metrics from runtime state, job metrics, and selected forensic event families.
+6. `sp serve` exposes read-only `GET /metrics` for the same Prometheus projection.
+7. Unit checks cover schema/cardinality/redaction, full forbidden-label enforcement, AgentOps catalog fixtures, and Prometheus exposition syntax.
+8. `PiAgentSession.meta.sessionId` is persisted as `status.session_id` and forwarded to forensic correlation; conversation/trace/span ids are optional pass-through fields.
+9. MCP normalization/projection is pre-wired for future emitters: `type:"mcp"` timeline events map to canonical `mcp.*` events, support `_meta` trace/MCP/JSON-RPC correlation, and include semconv-style `otel` hints.
 
 Remaining follow-up candidates:
 
 1. Expand native source emission beyond the current persistence-time dual-write bridge where doing so simplifies event-family-specific bodies.
-2. Add service-skills, MCP, process-health, worktree-health, and pulse family emitters when those runtimes need telemetry.
-3. Add an HTTP `/metrics` scrape surface if the CLI/textfile bridge is insufficient for infra.
+2. Add actual live MCP emitters and cross-process MCP `_meta` trace propagation; the current bridge only normalizes future `type:"mcp"` events.
+3. Add service-skills, process-health, worktree-health, and pulse family emitters when those runtimes need telemetry.
 4. Migrate gitboard from text `sp feed` consumption to structured `sp feed --json` / `sp forensic` consumption.
+5. Add a durable event-cursor projection path for long-running exporters if table-derived replay-safe counters become insufficient.

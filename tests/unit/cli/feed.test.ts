@@ -211,7 +211,7 @@ describe('feed CLI', () => {
         elapsed_s: 5,
         finish_reason: 'stop',
         exit_reason: 'agent_end',
-        token_usage: { total_tokens: 321, cost_usd: 0.000654 },
+        token_usage: { total_tokens: 321, input_tokens: 200, output_tokens: 100, reasoning_tokens: 21 },
         metrics: { turns: 2 },
         tool_calls: ['bash'],
       },
@@ -238,7 +238,10 @@ describe('feed CLI', () => {
     expect(combined).toContain('status=COMPLETE');
     expect(combined).toContain('elapsed=5s');
     expect(combined).toContain('tokens=321');
-    expect(combined).toContain('cost=$0.000654');
+    expect(combined).toContain('in=200');
+    expect(combined).toContain('out=100');
+    expect(combined).toContain('reasoning=21');
+    expect(combined).not.toContain('cost=');
     expect(combined).toContain('turns=2');
     expect(combined).toContain('tools=1');
     expect(combined).toContain('finish=stop');

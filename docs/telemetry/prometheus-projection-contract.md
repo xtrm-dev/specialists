@@ -3,12 +3,12 @@ title: Prometheus Projection Contract
 scope: telemetry-prometheus-projection
 category: reference
 version: 1.0.0
-updated: 2026-06-02
+updated: 2026-06-04
 source_of_truth_for:
   - "xtrm Prometheus metric projection"
   - "specialists AgentOps metrics"
   - "forensic-to-metrics boundary"
-  - "future /metrics exporter implementation"
+  - "sp serve /metrics exporter implementation"
 domain:
   - telemetry
   - observability
@@ -27,6 +27,25 @@ design in `/home/dawid/second-mind/1-projects/xtrm/devops/devops-system.md`. It
 turns AgentOps forensic/runtime state into low-cardinality Prometheus metrics for
 infra dashboards and alerts. For exact event evidence and journal/recommendation
 drill-down, link back to `docs/telemetry/forensic-event-contract.md`.
+
+### Shipped bridge status — 2026-06-04
+
+Specialists currently ships `sp metrics --prometheus` and `sp serve` `GET
+/metrics`. The projection is table-derived and replay-safe for the current local
+runtime: it reads `specialist_jobs`, `specialist_job_metrics`, and selected
+forensic event families rather than maintaining a long-running event cursor.
+
+Currently shipped projections include:
+
+- job state, queue depth, process/worktree gauges;
+- terminal job counters and job duration/wait/active-runtime histograms;
+- turn/context/tool/token metrics, including split token directions and fallback-only `direction="total"`;
+- identity, policy, eval, and MCP operation counters from supplied forensic events;
+- parser/cardinality tests that reject forbidden labels such as `job_id`, `trace_id`, `mcp_session_id`, `jsonrpc_request_id`, `eval_id`, `policy_decision_id`, and `identity_request_id`.
+
+Boundary: MCP metrics are projection-ready but not live from a real MCP runtime
+until an MCP emitter is added. The current implementation can project
+`mcp.*` forensic events when they are supplied.
 
 ## 1. Purpose
 
@@ -200,12 +219,12 @@ xtrm_tool_call_duration_seconds: 0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 300, +Inf
 
 | Metric | Type | Labels | Source | Notes |
 |---|---|---|---|---|
-| `xtrm_mcp_operations_total` | counter | `service_name`, `repo`, `participant_kind`, `participant_role`, `mcp_server`, `mcp_method`, `result` | `mcp.operation.completed/failed` | Aligns with MCP semconv. |
-| `xtrm_mcp_operation_duration_seconds` | histogram | `service_name`, `repo`, `participant_kind`, `participant_role`, `mcp_server`, `mcp_method`, `result` | MCP events/spans | Client-side duration. |
-| `xtrm_mcp_sessions` | gauge | `service_name`, `repo`, `mcp_server`, `state` | MCP session lifecycle | Current sessions by state. |
-| `xtrm_mcp_session_duration_seconds` | histogram | `service_name`, `repo`, `mcp_server`, `result` | session end event | Optional when session lifecycle is tracked. |
+| `xtrm_mcp_operations_total` | counter | `service_name`, `repo`, `mcp_server`, `mcp_method`, `result` | `mcp.connected/disconnected/call.completed/call.failed/auth.failed/rate_limited/latency.observed` forensic events | **Shipped for supplied forensic events.** Current code normalizes future `type:"mcp"` timeline events and projects this counter. |
+| `xtrm_mcp_operation_duration_seconds` | histogram | `service_name`, `repo`, `participant_kind`, `participant_role`, `mcp_server`, `mcp_method`, `result` | MCP events/spans | Future: requires real MCP lifecycle durations. |
+| `xtrm_mcp_sessions` | gauge | `service_name`, `repo`, `mcp_server`, `state` | MCP session lifecycle | Future: requires real MCP session emitter. |
+| `xtrm_mcp_session_duration_seconds` | histogram | `service_name`, `repo`, `mcp_server`, `result` | session end event | Future: requires real MCP session emitter. |
 
-Forbidden labels include `mcp.session.id`, `jsonrpc.request.id`, `tool_call_id`, and raw tool args/result.
+Forbidden labels include `mcp.session.id`, `jsonrpc.request.id`, `mcp_session_id`, `jsonrpc_request_id`, `trace_id`, `tool_call_id`, and raw tool args/result.
 
 Recommended buckets:
 
@@ -368,12 +387,13 @@ VALIDATION — Prometheus projection
 - [ ] Metric names use xtrm_ prefix and base-unit suffixes.
 - [ ] Labels are only from the allowlist in docs/telemetry/prometheus-projection-contract.md §3.
 - [ ] participant_kind + participant_role are used; specialist is not a primary label.
-- [ ] participant_id/job_id/bead_id/container_id/chain_id/session_id/conversation_id/trace_id/span_id/tool_call_id/mcp_session_id/eval_id/policy_decision_id are not labels.
+- [x] participant_id/job_id/bead_id/container_id/chain_id/session_id/conversation_id/trace_id/span_id/tool_call_id/mcp_session_id/jsonrpc_request_id/eval_id/policy_decision_id/identity_request_id are not labels in current projection tests.
 - [ ] Histograms use seconds and documented buckets.
 - [x] CLI counters are replay-safe table-derived projections; long-running event-stream exporters still need a durable projection cursor.
-- [ ] Gauges are current-state snapshots.
+- [x] Current shipped gauges are current-state snapshots.
 - [ ] Exemplars use trace_id only when available; otherwise dashboards link to logs by bounded labels + time range.
 - [x] `sp metrics --prometheus` and `sp serve` `GET /metrics` include HELP/TYPE; CLI output passes the repository Prometheus text parser validation.
+- [x] MCP operation counter projection uses only bounded `mcp_server`, `mcp_method`, and `result` labels when MCP forensic events are supplied.
 ```
 
 ## 10. Implementation sequence

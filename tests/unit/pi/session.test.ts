@@ -797,7 +797,8 @@ describe('sendCommand — concurrent dispatch', () => {
           output: 13,
           cacheRead: 5,
           cacheWrite: 2,
-          cost: { total: 0.1234 },
+          reasoning_tokens: 7,
+          tool_tokens: 3,
         },
       },
     });
@@ -813,7 +814,9 @@ describe('sendCommand — concurrent dispatch', () => {
     expect(metrics.token_usage?.cache_read_tokens).toBe(5);
     expect(metrics.token_usage?.cache_creation_tokens).toBe(2);
     expect(metrics.token_usage?.total_tokens).toBe(50);
-    expect(metrics.token_usage?.cost_usd).toBe(0.1234);
+    expect(metrics.token_usage?.reasoning_tokens).toBe(7);
+    expect(metrics.token_usage?.tool_tokens).toBe(3);
+    expect(metrics.token_usage?.usage_source).toBe('provider_usage');
   });
 
   it('auto_compaction_start and auto_compaction_end both fire onEvent("auto_compaction")', async () => {

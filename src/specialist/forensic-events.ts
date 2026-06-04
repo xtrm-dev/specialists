@@ -37,6 +37,13 @@ export interface ForensicCorrelation {
   trace_id?: string;
   span_id?: string;
   parent_span_id?: string;
+  session_id?: string;
+  conversation_id?: string;
+  mcp_session_id?: string;
+  jsonrpc_request_id?: string;
+  eval_id?: string;
+  policy_decision_id?: string;
+  identity_request_id?: string;
   commit_sha?: string;
   [key: string]: unknown;
 }
@@ -101,9 +108,14 @@ export const FORBIDDEN_PROMETHEUS_LABELS = new Set([
   'trace_id',
   'span_id',
   'parent_span_id',
-  'commit_sha',
-  'jsonrpc_request_id',
+  'session_id',
+  'conversation_id',
   'mcp_session_id',
+  'jsonrpc_request_id',
+  'eval_id',
+  'policy_decision_id',
+  'identity_request_id',
+  'commit_sha',
   'raw_path',
   'raw_command',
   'raw_error',
@@ -137,6 +149,14 @@ export const DEFAULT_LABEL_ALLOWLIST = new Set([
   'error_type',
   'drift_tier',
   'pulse_kind',
+  'policy_kind',
+  'action_kind',
+  'resource_kind',
+  'credential_kind',
+  'eval_kind',
+  'gate_kind',
+  'verdict',
+  'severity_level',
   'direction',
   'reason',
   'process_kind',
@@ -214,8 +234,36 @@ export function redactForensicValue<T>(value: T, path = 'body'): RedactionResult
   };
 }
 
+const NON_SENSITIVE_TELEMETRY_BODY_FIELDS = new Set([
+  'input_tokens',
+  'output_tokens',
+  'cache_read_tokens',
+  'cache_creation_tokens',
+  'reasoning_tokens',
+  'tool_tokens',
+  'total_tokens',
+  'usage_source',
+  'credential_kind',
+  'policy_kind',
+  'action_kind',
+  'resource_kind',
+  'eval_kind',
+  'target_kind',
+  'scope_kind',
+  'provider',
+  'ttl_seconds',
+  'retryable',
+  'result',
+  'score',
+  'threshold',
+  'scale',
+  'severity',
+  'reason_code',
+  'mismatch_kind',
+]);
+
 function isSensitiveField(key: string): boolean {
-  if (key === 'input_tokens' || key === 'output_tokens' || key === 'cache_read_tokens' || key === 'cache_creation_tokens') return false;
+  if (NON_SENSITIVE_TELEMETRY_BODY_FIELDS.has(key)) return false;
   return SENSITIVE_FIELD_RE.test(key);
 }
 
@@ -337,6 +385,11 @@ export interface TimelineForensicContext {
   chainRootJobId?: string;
   chainRootBeadId?: string;
   epicId?: string;
+  sessionId?: string;
+  conversationId?: string;
+  traceId?: string;
+  spanId?: string;
+  parentSpanId?: string;
 }
 
 export function forensicEventFromTimelineEvent(
@@ -377,17 +430,77 @@ export function forensicEventFromTimelineEvent(
       chain_root_job_id: context.chainRootJobId,
       chain_root_bead_id: context.chainRootBeadId,
       epic_id: context.epicId,
+      session_id: context.sessionId ?? stringField(event, 'session_id'),
+      conversation_id: context.conversationId ?? stringField(event, 'conversation_id'),
+      trace_id: context.traceId ?? stringField(event, 'trace_id') ?? metaStringField(event, 'trace_id'),
+      span_id: context.spanId ?? stringField(event, 'span_id') ?? metaStringField(event, 'span_id'),
+      parent_span_id: context.parentSpanId ?? stringField(event, 'parent_span_id') ?? metaStringField(event, 'parent_span_id'),
+      mcp_session_id: stringField(event, 'mcp_session_id') ?? metaStringField(event, 'mcp_session_id') ?? metaStringField(event, 'mcp.session.id'),
+      jsonrpc_request_id: stringField(event, 'jsonrpc_request_id') ?? metaStringField(event, 'jsonrpc_request_id') ?? metaStringField(event, 'jsonrpc.request.id'),
       tool_call_id: typeof event.tool_call_id === 'string' ? event.tool_call_id : undefined,
     },
-    body: { legacy_timeline_event: event },
+    body: bodyForTimelineEvent(event),
+    otel: otelForTimelineEvent(event),
     redaction: { status: redactionStatusForTimelineEvent(event) },
     t_unix_ms: event.t,
     seq: event.seq,
   });
 }
 
+function stringField(source: Record<string, unknown>, key: string): string | undefined {
+  const value = source[key];
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function metaStringField(source: Record<string, unknown>, key: string): string | undefined {
+  const meta = source._meta;
+  if (!meta || typeof meta !== 'object') return undefined;
+  return stringField(meta as Record<string, unknown>, key);
+}
+
+function numberField(source: Record<string, unknown>, key: string): number | undefined {
+  const value = Number(source[key]);
+  return Number.isFinite(value) ? value : undefined;
+}
+
+function booleanField(source: Record<string, unknown>, key: string): boolean | undefined {
+  const value = source[key];
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+function bodyForTimelineEvent(event: { type: string; [key: string]: unknown }): Record<string, unknown> {
+  if (event.type !== 'mcp') return { legacy_timeline_event: event };
+
+  return {
+    legacy_timeline_event: event,
+    mcp_server: stringField(event, 'mcp_server') ?? stringField(event, 'server') ?? 'unknown',
+    mcp_method: stringField(event, 'mcp_method') ?? stringField(event, 'method') ?? 'tools/call',
+    tool_name: stringField(event, 'tool_name') ?? stringField(event, 'tool'),
+    network_transport: stringField(event, 'network_transport') ?? stringField(event, 'transport'),
+    duration_ms: numberField(event, 'duration_ms'),
+    error_type: stringField(event, 'error_type'),
+    status_code: stringField(event, 'status_code'),
+    duplicate_span_suppressed: booleanField(event, 'duplicate_span_suppressed'),
+    trace_carrier: metaStringField(event, 'trace_carrier') ?? (event._meta && typeof event._meta === 'object' ? '_meta' : undefined),
+  };
+}
+
+function otelForTimelineEvent(event: { type: string; [key: string]: unknown }): Record<string, unknown> | undefined {
+  if (event.type !== 'mcp') return undefined;
+  const method = stringField(event, 'mcp_method') ?? stringField(event, 'method') ?? 'tools/call';
+  return {
+    'mcp.method.name': method,
+    'mcp.session.id': stringField(event, 'mcp_session_id') ?? metaStringField(event, 'mcp_session_id') ?? metaStringField(event, 'mcp.session.id'),
+    'jsonrpc.request.id': stringField(event, 'jsonrpc_request_id') ?? metaStringField(event, 'jsonrpc_request_id') ?? metaStringField(event, 'jsonrpc.request.id'),
+    'network.transport': stringField(event, 'network_transport') ?? stringField(event, 'transport'),
+    'gen_ai.operation.name': 'execute_tool',
+    'gen_ai.tool.name': stringField(event, 'tool_name') ?? stringField(event, 'tool'),
+  };
+}
+
 function familyForTimelineType(type: string): string {
   if (type === 'run_start' || type === 'run_complete' || type === 'status_change' || type === 'payload_breakdown') return 'job';
+  if (type === 'mcp') return 'mcp';
   if (type === 'tool') return 'tool';
   if (type === 'turn' || type === 'turn_summary' || type === 'message' || type === 'text' || type === 'thinking') return 'turn';
   if (type === 'token_usage' || type === 'finish_reason' || type === 'model_change' || type === 'meta') return 'model';
@@ -408,6 +521,7 @@ function eventNameForTimelineEvent(event: { type: string; [key: string]: unknown
     return 'job.completed';
   }
   if (event.type === 'status_change') return 'job.status_changed';
+  if (event.type === 'mcp') return mcpEventNameForTimelineEvent(event);
   if (event.type === 'tool') {
     if (event.phase === 'start') return 'tool.call.started';
     if (event.is_error) return 'tool.call.failed';
@@ -429,8 +543,25 @@ function eventNameForTimelineEvent(event: { type: string; [key: string]: unknown
   return `${familyForTimelineType(event.type)}.${event.type}`;
 }
 
+function mcpEventNameForTimelineEvent(event: { [key: string]: unknown }): string {
+  const explicit = stringField(event, 'event_name');
+  if (explicit?.startsWith('mcp.')) return explicit;
+
+  const action = stringField(event, 'action') ?? stringField(event, 'phase') ?? stringField(event, 'status');
+  if (action === 'connected') return 'mcp.connected';
+  if (action === 'disconnected') return 'mcp.disconnected';
+  if (action === 'auth_failed') return 'mcp.auth.failed';
+  if (action === 'rate_limited') return 'mcp.rate_limited';
+  if (action === 'latency_observed') return 'mcp.latency.observed';
+  if (action === 'start' || action === 'started') return 'mcp.call.started';
+  if (event.is_error || action === 'failed' || action === 'error') return 'mcp.call.failed';
+  return 'mcp.call.completed';
+}
+
 function severityForTimelineEvent(event: { type: string; [key: string]: unknown }): ForensicSeverity {
   if (event.type === 'error' || event.type === 'extension_error' || event.type === 'auto_commit_failed') return 'error';
+  if (event.type === 'mcp' && (event.is_error || mcpEventNameForTimelineEvent(event).endsWith('.failed') || mcpEventNameForTimelineEvent(event) === 'mcp.auth.failed')) return 'error';
+  if (event.type === 'mcp' && mcpEventNameForTimelineEvent(event) === 'mcp.rate_limited') return 'warn';
   if (event.type === 'stale_warning' || event.type === 'control_signal') return 'warn';
   if (event.type === 'run_complete' && event.status === 'ERROR') return 'error';
   if (event.type === 'tool' && event.is_error) return 'error';

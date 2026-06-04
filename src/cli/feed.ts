@@ -256,6 +256,11 @@ interface JobMeta {
   backend?: string;
   beadId?: string;
   nodeId?: string;
+  sessionId?: string;
+  conversationId?: string;
+  traceId?: string;
+  spanId?: string;
+  parentSpanId?: string;
   metrics?: Record<string, unknown>;
   contextPct?: number;
   startedAtMs: number;
@@ -366,6 +371,11 @@ function readJobMeta(
     backend: typeof status.backend === 'string' ? status.backend : undefined,
     beadId: typeof status.bead_id === 'string' ? status.bead_id : undefined,
     nodeId: typeof status.node_id === 'string' && status.node_id.trim() !== '' ? status.node_id : undefined,
+    sessionId: typeof status.session_id === 'string' ? status.session_id : undefined,
+    conversationId: typeof status.conversation_id === 'string' ? status.conversation_id : undefined,
+    traceId: typeof status.trace_id === 'string' ? status.trace_id : undefined,
+    spanId: typeof status.span_id === 'string' ? status.span_id : undefined,
+    parentSpanId: typeof status.parent_span_id === 'string' ? status.parent_span_id : undefined,
     metrics: typeof status.metrics === 'object' && status.metrics !== null
       ? status.metrics as Record<string, unknown>
       : undefined,
@@ -484,6 +494,11 @@ function printSnapshot(
           serviceComponent: 'cli.feed',
           model,
           backend,
+          sessionId: meta.sessionId,
+          conversationId: meta.conversationId,
+          traceId: meta.traceId,
+          spanId: meta.spanId,
+          parentSpanId: meta.parentSpanId,
         }),
         ...event,
       }));

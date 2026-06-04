@@ -447,4 +447,63 @@ describe('ps CLI — run()', () => {
     expect(clean).toContain('pass');
     expect(clean).not.toContain('OPEN');
   }, TEST_TIMEOUT_MS);
+  it('falls back to persisted events for inspect JSON when status row is absent', async () => {
+    const now = Date.now();
+    const readEvents = vi.fn(() => [
+      {
+        t: now,
+        type: 'run_start',
+        specialist: 'smoke-echo',
+        startup_snapshot: { job_id: 'job-events-only', specialist_name: 'smoke-echo' },
+      },
+      {
+        t: now + 10,
+        type: 'token_usage',
+        token_usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15, usage_source: 'provider_usage' },
+        source: 'agent_end',
+      },
+      {
+        t: now + 20,
+        type: 'run_complete',
+        status: 'COMPLETE',
+        elapsed_s: 1,
+        model: 'nano-gpt/test-model',
+        backend: 'nano-gpt',
+        token_usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15, usage_source: 'provider_usage' },
+      },
+    ]);
+    mockSqlite.readEvents = readEvents;
+
+    process.argv = ['node', 'specialists', 'ps', 'job-events-only', '--json'];
+    const output: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      output.push(args.map(String).join(' '));
+    });
+
+    const { run } = await import('../../../src/cli/ps.js');
+    await run();
+
+    const payload = JSON.parse(output.join('\n')) as {
+      job: {
+        id: string;
+        status: string;
+        specialist: string;
+        model: string;
+        backend: string;
+        recovered_from_events: boolean;
+        metrics: { token_usage?: { total_tokens?: number; usage_source?: string } };
+      };
+    };
+
+    expect(payload.job.id).toBe('job-events-only');
+    expect(payload.job.status).toBe('done');
+    expect(payload.job.specialist).toBe('smoke-echo');
+    expect(payload.job.model).toBe('nano-gpt/test-model');
+    expect(payload.job.backend).toBe('nano-gpt');
+    expect(payload.job.recovered_from_events).toBe(true);
+    expect(payload.job.metrics.token_usage?.total_tokens).toBe(15);
+    expect(payload.job.metrics.token_usage?.usage_source).toBe('provider_usage');
+    expect(readEvents).toHaveBeenCalledWith('job-events-only');
+  }, TEST_TIMEOUT_MS);
+
 });

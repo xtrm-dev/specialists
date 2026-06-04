@@ -18216,6 +18216,11 @@ function asNumber(value) {
   }
   return;
 }
+function normalizeUsageSource(value) {
+  if (value === "provider_usage" || value === "runtime_estimate" || value === "local_estimate" || value === "unknown")
+    return value;
+  return "unknown";
+}
 function pickFirstNumber(record3, keys) {
   for (const key of keys) {
     const value = asNumber(record3[key]);
@@ -18228,14 +18233,15 @@ function normalizeTokenUsage(candidate) {
   if (!candidate || typeof candidate !== "object")
     return;
   const usage = candidate;
-  const cost = usage.cost;
   const normalized = {
     input_tokens: pickFirstNumber(usage, ["input_tokens", "inputTokens", "prompt_tokens", "promptTokens", "input"]),
     output_tokens: pickFirstNumber(usage, ["output_tokens", "outputTokens", "completion_tokens", "completionTokens", "output"]),
     cache_creation_tokens: pickFirstNumber(usage, ["cache_creation_tokens", "cacheCreationTokens", "cache_write_tokens", "cacheWrite"]),
     cache_read_tokens: pickFirstNumber(usage, ["cache_read_tokens", "cacheReadTokens", "cache_hit_tokens", "cacheRead"]),
+    reasoning_tokens: pickFirstNumber(usage, ["reasoning_tokens", "reasoningTokens", "thinking_tokens", "thinkingTokens"]),
+    tool_tokens: pickFirstNumber(usage, ["tool_tokens", "toolTokens", "tool_use_tokens", "toolUseTokens"]),
     total_tokens: pickFirstNumber(usage, ["total_tokens", "totalTokens"]),
-    cost_usd: pickFirstNumber(usage, ["cost_usd", "costUsd", "usd_cost", "cost"]) ?? (typeof cost === "object" && cost !== null ? pickFirstNumber(cost, ["total", "usd", "cost_usd"]) : undefined)
+    usage_source: typeof usage.usage_source === "string" ? normalizeUsageSource(usage.usage_source) : "provider_usage"
   };
   const hasAny = Object.values(normalized).some((value) => value !== undefined);
   if (!hasAny)
@@ -18751,7 +18757,7 @@ class PiAgentSession {
         this.options.onEvent?.("message_start_assistant");
         const { provider, model } = event.message ?? {};
         if (provider || model) {
-          this.options.onMeta?.({ backend: provider ?? "", model: model ?? "" });
+          this.options.onMeta?.({ backend: provider ?? "", model: model ?? "", sessionId: this.meta.sessionId });
         }
       } else if (role === "toolResult") {
         this.options.onEvent?.("message_start_tool_result");
@@ -19373,7 +19379,7 @@ function redactForensicValue(value, path = "body") {
   };
 }
 function isSensitiveField(key) {
-  if (key === "input_tokens" || key === "output_tokens" || key === "cache_read_tokens" || key === "cache_creation_tokens")
+  if (NON_SENSITIVE_TELEMETRY_BODY_FIELDS.has(key))
     return false;
   return SENSITIVE_FIELD_RE.test(key);
 }
@@ -19500,17 +19506,74 @@ function forensicEventFromTimelineEvent(event, context) {
       chain_root_job_id: context.chainRootJobId,
       chain_root_bead_id: context.chainRootBeadId,
       epic_id: context.epicId,
+      session_id: context.sessionId ?? stringField(event, "session_id"),
+      conversation_id: context.conversationId ?? stringField(event, "conversation_id"),
+      trace_id: context.traceId ?? stringField(event, "trace_id") ?? metaStringField(event, "trace_id"),
+      span_id: context.spanId ?? stringField(event, "span_id") ?? metaStringField(event, "span_id"),
+      parent_span_id: context.parentSpanId ?? stringField(event, "parent_span_id") ?? metaStringField(event, "parent_span_id"),
+      mcp_session_id: stringField(event, "mcp_session_id") ?? metaStringField(event, "mcp_session_id") ?? metaStringField(event, "mcp.session.id"),
+      jsonrpc_request_id: stringField(event, "jsonrpc_request_id") ?? metaStringField(event, "jsonrpc_request_id") ?? metaStringField(event, "jsonrpc.request.id"),
       tool_call_id: typeof event.tool_call_id === "string" ? event.tool_call_id : undefined
     },
-    body: { legacy_timeline_event: event },
+    body: bodyForTimelineEvent(event),
+    otel: otelForTimelineEvent(event),
     redaction: { status: redactionStatusForTimelineEvent(event) },
     t_unix_ms: event.t,
     seq: event.seq
   });
 }
+function stringField(source, key) {
+  const value = source[key];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+function metaStringField(source, key) {
+  const meta = source._meta;
+  if (!meta || typeof meta !== "object")
+    return;
+  return stringField(meta, key);
+}
+function numberField(source, key) {
+  const value = Number(source[key]);
+  return Number.isFinite(value) ? value : undefined;
+}
+function booleanField(source, key) {
+  const value = source[key];
+  return typeof value === "boolean" ? value : undefined;
+}
+function bodyForTimelineEvent(event) {
+  if (event.type !== "mcp")
+    return { legacy_timeline_event: event };
+  return {
+    legacy_timeline_event: event,
+    mcp_server: stringField(event, "mcp_server") ?? stringField(event, "server") ?? "unknown",
+    mcp_method: stringField(event, "mcp_method") ?? stringField(event, "method") ?? "tools/call",
+    tool_name: stringField(event, "tool_name") ?? stringField(event, "tool"),
+    network_transport: stringField(event, "network_transport") ?? stringField(event, "transport"),
+    duration_ms: numberField(event, "duration_ms"),
+    error_type: stringField(event, "error_type"),
+    status_code: stringField(event, "status_code"),
+    duplicate_span_suppressed: booleanField(event, "duplicate_span_suppressed"),
+    trace_carrier: metaStringField(event, "trace_carrier") ?? (event._meta && typeof event._meta === "object" ? "_meta" : undefined)
+  };
+}
+function otelForTimelineEvent(event) {
+  if (event.type !== "mcp")
+    return;
+  const method = stringField(event, "mcp_method") ?? stringField(event, "method") ?? "tools/call";
+  return {
+    "mcp.method.name": method,
+    "mcp.session.id": stringField(event, "mcp_session_id") ?? metaStringField(event, "mcp_session_id") ?? metaStringField(event, "mcp.session.id"),
+    "jsonrpc.request.id": stringField(event, "jsonrpc_request_id") ?? metaStringField(event, "jsonrpc_request_id") ?? metaStringField(event, "jsonrpc.request.id"),
+    "network.transport": stringField(event, "network_transport") ?? stringField(event, "transport"),
+    "gen_ai.operation.name": "execute_tool",
+    "gen_ai.tool.name": stringField(event, "tool_name") ?? stringField(event, "tool")
+  };
+}
 function familyForTimelineType(type) {
   if (type === "run_start" || type === "run_complete" || type === "status_change" || type === "payload_breakdown")
     return "job";
+  if (type === "mcp")
+    return "mcp";
   if (type === "tool")
     return "tool";
   if (type === "turn" || type === "turn_summary" || type === "message" || type === "text" || type === "thinking")
@@ -19543,6 +19606,8 @@ function eventNameForTimelineEvent(event) {
   }
   if (event.type === "status_change")
     return "job.status_changed";
+  if (event.type === "mcp")
+    return mcpEventNameForTimelineEvent(event);
   if (event.type === "tool") {
     if (event.phase === "start")
       return "tool.call.started";
@@ -19578,9 +19643,34 @@ function eventNameForTimelineEvent(event) {
     return "process_health.stale_detected";
   return `${familyForTimelineType(event.type)}.${event.type}`;
 }
+function mcpEventNameForTimelineEvent(event) {
+  const explicit = stringField(event, "event_name");
+  if (explicit?.startsWith("mcp."))
+    return explicit;
+  const action = stringField(event, "action") ?? stringField(event, "phase") ?? stringField(event, "status");
+  if (action === "connected")
+    return "mcp.connected";
+  if (action === "disconnected")
+    return "mcp.disconnected";
+  if (action === "auth_failed")
+    return "mcp.auth.failed";
+  if (action === "rate_limited")
+    return "mcp.rate_limited";
+  if (action === "latency_observed")
+    return "mcp.latency.observed";
+  if (action === "start" || action === "started")
+    return "mcp.call.started";
+  if (event.is_error || action === "failed" || action === "error")
+    return "mcp.call.failed";
+  return "mcp.call.completed";
+}
 function severityForTimelineEvent(event) {
   if (event.type === "error" || event.type === "extension_error" || event.type === "auto_commit_failed")
     return "error";
+  if (event.type === "mcp" && (event.is_error || mcpEventNameForTimelineEvent(event).endsWith(".failed") || mcpEventNameForTimelineEvent(event) === "mcp.auth.failed"))
+    return "error";
+  if (event.type === "mcp" && mcpEventNameForTimelineEvent(event) === "mcp.rate_limited")
+    return "warn";
   if (event.type === "stale_warning" || event.type === "control_signal")
     return "warn";
   if (event.type === "run_complete" && event.status === "ERROR")
@@ -19594,7 +19684,7 @@ function redactionStatusForTimelineEvent(event) {
     return "redacted";
   return "clean";
 }
-var FORENSIC_SCHEMA_VERSION = "xtrm.forensic.v1", FORBIDDEN_PROMETHEUS_LABELS, DEFAULT_LABEL_ALLOWLIST, ALLOWED_TOP_LEVEL_FIELDS, REDACTED = "[REDACTED]", REDACTION_RULES, SENSITIVE_FIELD_RE, SECRET_VALUE_RE;
+var FORENSIC_SCHEMA_VERSION = "xtrm.forensic.v1", FORBIDDEN_PROMETHEUS_LABELS, DEFAULT_LABEL_ALLOWLIST, ALLOWED_TOP_LEVEL_FIELDS, REDACTED = "[REDACTED]", REDACTION_RULES, SENSITIVE_FIELD_RE, SECRET_VALUE_RE, NON_SENSITIVE_TELEMETRY_BODY_FIELDS;
 var init_forensic_events = __esm(() => {
   FORBIDDEN_PROMETHEUS_LABELS = new Set([
     "participant_id",
@@ -19613,9 +19703,14 @@ var init_forensic_events = __esm(() => {
     "trace_id",
     "span_id",
     "parent_span_id",
-    "commit_sha",
-    "jsonrpc_request_id",
+    "session_id",
+    "conversation_id",
     "mcp_session_id",
+    "jsonrpc_request_id",
+    "eval_id",
+    "policy_decision_id",
+    "identity_request_id",
+    "commit_sha",
     "raw_path",
     "raw_command",
     "raw_error",
@@ -19648,6 +19743,14 @@ var init_forensic_events = __esm(() => {
     "error_type",
     "drift_tier",
     "pulse_kind",
+    "policy_kind",
+    "action_kind",
+    "resource_kind",
+    "credential_kind",
+    "eval_kind",
+    "gate_kind",
+    "verdict",
+    "severity_level",
     "direction",
     "reason",
     "process_kind",
@@ -19679,6 +19782,33 @@ var init_forensic_events = __esm(() => {
   };
   SENSITIVE_FIELD_RE = /(^|_)(password|secret|credential|api_?key|access_?token|refresh_?token|auth_?token|bearer|email|prompt|model_?output|raw_?command|raw_?url|raw_?error|stderr|stdout|args|arguments|input|output|content)$/i;
   SECRET_VALUE_RE = /(sk-[a-z0-9_-]{12,}|ghp_[a-z0-9_]{12,}|xox[baprs]-[a-z0-9-]{12,}|bearer\s+[a-z0-9._-]{12,})/i;
+  NON_SENSITIVE_TELEMETRY_BODY_FIELDS = new Set([
+    "input_tokens",
+    "output_tokens",
+    "cache_read_tokens",
+    "cache_creation_tokens",
+    "reasoning_tokens",
+    "tool_tokens",
+    "total_tokens",
+    "usage_source",
+    "credential_kind",
+    "policy_kind",
+    "action_kind",
+    "resource_kind",
+    "eval_kind",
+    "target_kind",
+    "scope_kind",
+    "provider",
+    "ttl_seconds",
+    "retryable",
+    "result",
+    "score",
+    "threshold",
+    "scale",
+    "severity",
+    "reason_code",
+    "mismatch_kind"
+  ]);
 });
 
 // src/specialist/observability-sqlite.ts
@@ -20459,7 +20589,12 @@ class SqliteClient {
       chainId: context.chainId,
       chainRootJobId: context.chainRootJobId,
       chainRootBeadId: context.chainRootBeadId,
-      epicId: context.epicId
+      epicId: context.epicId,
+      sessionId: context.sessionId,
+      conversationId: context.conversationId,
+      traceId: context.traceId,
+      spanId: context.spanId,
+      parentSpanId: context.parentSpanId
     });
     this.insertForensicEventRow(jobId, event.seq, forensicEvent);
   }
@@ -20481,7 +20616,12 @@ class SqliteClient {
       chainId: typeof row?.chain_id === "string" ? row.chain_id : undefined,
       chainRootJobId: typeof row?.chain_root_job_id === "string" ? row.chain_root_job_id : undefined,
       chainRootBeadId: typeof row?.chain_root_bead_id === "string" ? row.chain_root_bead_id : undefined,
-      epicId: typeof row?.epic_id === "string" ? row.epic_id : undefined
+      epicId: typeof row?.epic_id === "string" ? row.epic_id : undefined,
+      sessionId: typeof statusJson.session_id === "string" ? statusJson.session_id : undefined,
+      conversationId: typeof statusJson.conversation_id === "string" ? statusJson.conversation_id : undefined,
+      traceId: typeof statusJson.trace_id === "string" ? statusJson.trace_id : undefined,
+      spanId: typeof statusJson.span_id === "string" ? statusJson.span_id : undefined,
+      parentSpanId: typeof statusJson.parent_span_id === "string" ? statusJson.parent_span_id : undefined
     };
   }
   insertForensicEventRow(jobId, seq, forensicEvent) {
@@ -26503,7 +26643,7 @@ ${appendError}
           return;
         }
       }, (meta) => {
-        setStatus({ model: meta.model, backend: meta.backend });
+        setStatus({ model: meta.model, backend: meta.backend, ...meta.sessionId ? { session_id: meta.sessionId } : {} });
         appendTimelineEvent(createMetaEvent(meta.model, meta.backend));
         this.opts.onMeta?.(meta);
       }, (fn) => {
@@ -26844,8 +26984,19 @@ ${appendError}
           process.kill(statusWatchdogPid, "SIGTERM");
         } catch {}
       }
+      const swallowBenignFifoError = (error2) => {
+        if (error2.code === "EBADF" && error2.syscall === "close")
+          return;
+        throw error2;
+      };
       try {
         fifoReadline?.close();
+      } catch {}
+      try {
+        fifoReadStream?.once("error", swallowBenignFifoError);
+      } catch {}
+      try {
+        fifoReadStream?.destroy();
       } catch {}
       if (fifoFd !== undefined) {
         try {
@@ -26853,9 +27004,6 @@ ${appendError}
         } catch {}
         fifoFd = undefined;
       }
-      try {
-        fifoReadStream?.destroy();
-      } catch {}
       if (eventsFd !== undefined) {
         try {
           fsyncSync(eventsFd);
@@ -29183,7 +29331,6 @@ function runBenchmarkExport(options) {
         const reviewerOutput = reviewer ? sqliteClient.readResult(reviewer.id) : null;
         const reviewerVerdict = parseReviewerVerdict2(reviewerOutput);
         const totalTokens = runComplete?.token_usage?.total_tokens ?? runComplete?.metrics?.token_usage?.total_tokens ?? executorStatus.metrics?.token_usage?.total_tokens ?? null;
-        const costUsd = runComplete?.token_usage?.cost_usd ?? runComplete?.metrics?.token_usage?.cost_usd ?? executorStatus.metrics?.token_usage?.cost_usd ?? null;
         const elapsedMs = runComplete ? Math.round(runComplete.elapsed_s * 1000) : typeof executorStatus.elapsed_s === "number" ? Math.round(executorStatus.elapsed_s * 1000) : null;
         const hasLaterExecutorInChain = Boolean(nextExecutor);
         const failureNotes = inferFailureNotes({
@@ -29202,7 +29349,6 @@ function runBenchmarkExport(options) {
           reviewer_verdict: reviewerVerdict,
           reviewer_score_if_present: parseReviewerScore(reviewerOutput),
           total_tokens: totalTokens,
-          cost_usd: costUsd,
           elapsed_ms: elapsedMs,
           failure_notes: failureNotes,
           source_of_truth: {
@@ -29215,7 +29361,6 @@ function runBenchmarkExport(options) {
             reviewer_verdict: "reviewer specialist_results.output Verdict: PASS|PARTIAL|FAIL",
             reviewer_score_if_present: "reviewer specialist_results.output score regex; null when absent",
             total_tokens: runComplete ? "specialist_events.type=run_complete.token_usage.total_tokens" : "status_json.metrics.token_usage.total_tokens fallback",
-            cost_usd: runComplete ? "specialist_events.type=run_complete.token_usage.cost_usd" : "status_json.metrics.token_usage.cost_usd fallback",
             elapsed_ms: runComplete ? "specialist_events.type=run_complete.elapsed_s * 1000" : "status_json.elapsed_s * 1000 fallback",
             failure_notes: "run_complete.error/status + status_json.error + chain sequencing heuristics"
           }
@@ -41136,11 +41281,6 @@ function formatElapsed(seconds) {
   const s = seconds % 60;
   return s > 0 ? `${m}m ${s}s` : `${m}m`;
 }
-function formatCostUsd(costUsd) {
-  if (costUsd === undefined || !Number.isFinite(costUsd))
-    return null;
-  return `$${costUsd.toFixed(6)}`;
-}
 function formatTokenUsageSummary(tokenUsage) {
   if (!tokenUsage)
     return [];
@@ -41151,9 +41291,14 @@ function formatTokenUsageSummary(tokenUsage) {
     parts.push(`in=${tokenUsage.input_tokens}`);
   if (tokenUsage.output_tokens !== undefined)
     parts.push(`out=${tokenUsage.output_tokens}`);
-  const cost = formatCostUsd(tokenUsage.cost_usd);
-  if (cost)
-    parts.push(`cost=${cost}`);
+  if (tokenUsage.cache_read_tokens !== undefined)
+    parts.push(`cache_read=${tokenUsage.cache_read_tokens}`);
+  if (tokenUsage.cache_creation_tokens !== undefined)
+    parts.push(`cache_create=${tokenUsage.cache_creation_tokens}`);
+  if (tokenUsage.reasoning_tokens !== undefined)
+    parts.push(`reasoning=${tokenUsage.reasoning_tokens}`);
+  if (tokenUsage.tool_tokens !== undefined)
+    parts.push(`tool=${tokenUsage.tool_tokens}`);
   return parts;
 }
 function getEventLabel(type) {
@@ -41303,7 +41448,10 @@ function formatEventLine(event, options2) {
       total_tokens: usage3.total_tokens,
       input_tokens: usage3.input_tokens,
       output_tokens: usage3.output_tokens,
-      cost_usd: usage3.cost_usd
+      cache_read_tokens: usage3.cache_read_tokens,
+      cache_creation_tokens: usage3.cache_creation_tokens,
+      reasoning_tokens: usage3.reasoning_tokens,
+      tool_tokens: usage3.tool_tokens
     }));
   } else if (event.type === "finish_reason") {
     detailParts.push(`reason=${event.finish_reason}`);
@@ -48195,9 +48343,6 @@ function formatMetricsInline(metrics) {
   if (metrics.token_usage?.total_tokens !== undefined) {
     parts.push(`tokens=${metrics.token_usage.total_tokens}`);
   }
-  const cost = formatCostUsd(metrics.token_usage?.cost_usd);
-  if (cost)
-    parts.push(`cost=${cost}`);
   if (metrics.finish_reason)
     parts.push(`finish=${metrics.finish_reason}`);
   if (metrics.exit_reason)
@@ -48232,10 +48377,6 @@ ${bold11("specialists status")}
     console.log(`  tool_calls   ${toolCount}`);
   if (job.metrics?.token_usage?.total_tokens !== undefined) {
     console.log(`  tokens       ${job.metrics.token_usage.total_tokens}`);
-  }
-  if (job.metrics?.token_usage?.cost_usd !== undefined) {
-    const cost = formatCostUsd(job.metrics.token_usage.cost_usd);
-    console.log(`  cost_usd     ${cost ?? job.metrics.token_usage.cost_usd}`);
   }
   if (contextSnapshot) {
     console.log(`  context_pct  ${contextSnapshot.context_pct.toFixed(2)}%`);
@@ -49439,13 +49580,103 @@ function renderHuman(jobs, nodes, trees, all, includeTerminal, epicReadiness, he
   const waitingCount = renderedJobs.filter((job) => job.status === "waiting").length;
   console.log(dim9(`${renderedJobIds.size} jobs \xB7 ${epicGroups.length} epics \xB7 ${legacyNodes.length} nodes \xB7 ${legacyTrees.length} worktrees \xB7 ${runningCount} running \xB7 ${waitingCount} waiting${all ? " \xB7 include terminal" : ""}`));
 }
-function renderInspect(jobId) {
+function statusFromRunComplete(status) {
+  if (status === "COMPLETE")
+    return "done";
+  if (status === "CANCELLED")
+    return "cancelled";
+  if (status === "ERROR")
+    return "error";
+  return "running";
+}
+function latestTokenUsage(events, complete) {
+  if (complete?.token_usage)
+    return complete.token_usage;
+  if (complete?.metrics?.token_usage)
+    return complete.metrics.token_usage;
+  for (let index = events.length - 1;index >= 0; index -= 1) {
+    const event = events[index];
+    if (event.token_usage)
+      return event.token_usage;
+  }
+  return;
+}
+function synthesizeStatusFromEvents(jobId) {
+  const sqliteClient = createObservabilitySqliteClient();
+  try {
+    const events = sqliteClient?.readEvents(jobId) ?? [];
+    if (events.length === 0)
+      return null;
+    const first = events[0];
+    const runStart = events.find((event) => event.type === "run_start");
+    const runComplete = [...events].reverse().find((event) => event.type === "run_complete");
+    const latestMeta = [...events].reverse().find((event) => event.type === "meta");
+    const last = events[events.length - 1];
+    const startup = runStart?.startup_snapshot;
+    const specialist = runStart?.specialist ?? (typeof startup?.specialist_name === "string" ? startup.specialist_name : undefined) ?? "unknown";
+    return {
+      id: jobId,
+      specialist,
+      status: statusFromRunComplete(runComplete?.status),
+      started_at_ms: first.t,
+      elapsed_s: runComplete?.elapsed_s ?? Math.max(0, Math.round((last.t - first.t) / 1000)),
+      last_event_at_ms: last.t,
+      bead_id: runStart?.bead_id ?? (typeof startup?.bead_id === "string" ? startup.bead_id : undefined),
+      model: runComplete?.model ?? latestMeta?.model,
+      backend: runComplete?.backend ?? latestMeta?.backend,
+      output_type: runComplete?.metrics?.output_type,
+      chain_kind: typeof startup?.chain_id === "string" ? "chain" : "prep",
+      chain_id: typeof startup?.chain_id === "string" ? startup.chain_id : undefined,
+      chain_root_job_id: typeof startup?.chain_root_job_id === "string" ? startup.chain_root_job_id : undefined,
+      chain_root_bead_id: typeof startup?.chain_root_bead_id === "string" ? startup.chain_root_bead_id : undefined,
+      worktree_path: typeof startup?.worktree_path === "string" ? startup.worktree_path : undefined,
+      branch: typeof startup?.branch === "string" ? startup.branch : undefined,
+      reused_from_job_id: typeof startup?.reused_from_job_id === "string" ? startup.reused_from_job_id : undefined,
+      worktree_owner_job_id: typeof startup?.worktree_owner_job_id === "string" ? startup.worktree_owner_job_id : undefined,
+      metrics: {
+        ...runComplete?.metrics,
+        ...latestTokenUsage(events, runComplete) ? { token_usage: latestTokenUsage(events, runComplete) } : {}
+      }
+    };
+  } finally {
+    sqliteClient?.close();
+  }
+}
+function renderInspectJson(job) {
+  console.log(JSON.stringify({
+    job: {
+      id: job.id,
+      specialist: job.specialist,
+      status: job.status,
+      model: job.model ?? null,
+      backend: job.backend ?? null,
+      bead_id: job.bead_id ?? null,
+      chain_kind: job.chain_kind ?? null,
+      chain_id: job.chain_id ?? null,
+      started_at_ms: job.started_at_ms,
+      elapsed_s: job.elapsed_s ?? null,
+      metrics: job.metrics ?? null,
+      recovered_from_events: Boolean(job.recovered_from_events)
+    }
+  }, null, 2));
+}
+function renderInspect(jobId, args) {
   const statuses = withPidLiveness(loadStatuses());
   const epicReadiness = resolveEpicReadinessMap(statuses, false);
-  const job = statuses.find((s) => s.id.startsWith(jobId));
+  const statusJob = statuses.find((s) => s.id.startsWith(jobId));
+  const fallbackJob = statusJob ? null : synthesizeStatusFromEvents(jobId);
+  const job = statusJob ?? (fallbackJob ? { ...fallbackJob, is_dead: false, recovered_from_events: true } : null);
   if (!job) {
-    console.error(`Job not found: ${jobId}`);
+    if (args.json) {
+      console.log(JSON.stringify({ error: `Job not found: ${jobId}` }, null, 2));
+    } else {
+      console.error(`Job not found: ${jobId}`);
+    }
     process.exitCode = 1;
+    return;
+  }
+  if (args.json) {
+    renderInspectJson(job);
     return;
   }
   const beadTitles = buildBeadTitleCache([job]);
@@ -49476,13 +49707,9 @@ ${job.id}  ${job.specialist}  ${getStatusIcon(toJobNode(job))} ${statusLabel(job
     console.log(`  chain     ${chainStr}`);
   console.log(`  elapsed   ${formatElapsed3(job.elapsed_s)}${job.metrics ? ` \xB7 ${job.metrics.turns ?? 0} turns \xB7 ${job.metrics.tool_calls ?? 0} tools` : ""}`);
   const tokenUsage = job.metrics?.token_usage;
-  const tokenSummaryParts = formatTokenUsageSummary(tokenUsage).filter((part) => !part.startsWith("cost="));
+  const tokenSummaryParts = formatTokenUsageSummary(tokenUsage);
   if (tokenSummaryParts.length > 0) {
     console.log(`  tokens    ${tokenSummaryParts.join(" \xB7 ")}`);
-  }
-  const formattedCost = formatCostUsd(tokenUsage?.cost_usd);
-  if (formattedCost) {
-    console.log(`  cost_usd  ${formattedCost}`);
   }
   console.log(`  context   ${ctx}`);
   if (job.current_tool)
@@ -49684,7 +49911,7 @@ async function run17() {
       nodeId: args.nodeId && sqliteClient ? resolveNodeRefWithClient(args.nodeId, sqliteClient) : args.nodeId
     };
     if (resolvedArgs.inspectId) {
-      renderInspect(resolvedArgs.inspectId);
+      renderInspect(resolvedArgs.inspectId, resolvedArgs);
       return;
     }
     if (resolvedArgs.follow) {
@@ -49968,9 +50195,8 @@ async function run18() {
     const startupBlock = formatStartupSnapshot(startupContext);
     const payloadBlock = formatPayloadPreamble(status.startup_payload_json);
     process.stdout.write(`${startupBlock ?? ""}${payloadBlock ?? ""}${output2}`);
-    const tokenSummaryParts = formatTokenUsageSummary(status.metrics?.token_usage).filter((part) => !part.startsWith("cost="));
-    const formattedCost = formatCostUsd(status.metrics?.token_usage?.cost_usd);
-    if (tokenSummaryParts.length === 0 && !formattedCost) {
+    const tokenSummaryParts = formatTokenUsageSummary(status.metrics?.token_usage);
+    if (tokenSummaryParts.length === 0) {
       if (trailingFooter)
         process.stderr.write(dim12(trailingFooter));
       return;
@@ -49978,8 +50204,6 @@ async function run18() {
     const footerParts = [];
     if (tokenSummaryParts.length > 0)
       footerParts.push(tokenSummaryParts.join(" \xB7 "));
-    if (formattedCost)
-      footerParts.push(`cost_usd=${formattedCost}`);
     process.stderr.write(dim12(`
 --- metrics: ${footerParts.join(" \xB7 ")} ---
 `));
@@ -50597,6 +50821,11 @@ function readJobMeta(sqliteClient, jobsDir, jobId) {
     backend: typeof status.backend === "string" ? status.backend : undefined,
     beadId: typeof status.bead_id === "string" ? status.bead_id : undefined,
     nodeId: typeof status.node_id === "string" && status.node_id.trim() !== "" ? status.node_id : undefined,
+    sessionId: typeof status.session_id === "string" ? status.session_id : undefined,
+    conversationId: typeof status.conversation_id === "string" ? status.conversation_id : undefined,
+    traceId: typeof status.trace_id === "string" ? status.trace_id : undefined,
+    spanId: typeof status.span_id === "string" ? status.span_id : undefined,
+    parentSpanId: typeof status.parent_span_id === "string" ? status.parent_span_id : undefined,
     metrics: typeof status.metrics === "object" && status.metrics !== null ? status.metrics : undefined,
     contextPct: Number.isFinite(contextPct) ? contextPct : undefined,
     startedAtMs: typeof status.started_at_ms === "number" ? status.started_at_ms : Date.now()
@@ -50713,7 +50942,12 @@ function printSnapshot(sqliteClient, merged, options2, jobsDir) {
           nodeId: meta.nodeId,
           serviceComponent: "cli.feed",
           model,
-          backend
+          backend,
+          sessionId: meta.sessionId,
+          conversationId: meta.conversationId,
+          traceId: meta.traceId,
+          spanId: meta.spanId,
+          parentSpanId: meta.parentSpanId
         }),
         ...event
       }));
@@ -51274,6 +51508,8 @@ function renderPrometheusProjection(input2) {
     samples.push(sample);
   for (const sample of tokenSamples(input2.jobMetrics, input2.repo))
     samples.push(sample);
+  for (const sample of forensicEventSamples(input2.forensicEvents ?? [], input2.repo))
+    samples.push(sample);
   samples.push({
     name: "xtrm_prometheus_projection_timestamp_seconds",
     help: "Unix timestamp when the xtrm Prometheus projection was rendered.",
@@ -51384,12 +51620,216 @@ function latestTokenTrajectory(record3) {
   const latest = trajectory.at(-1);
   if (!latest)
     return null;
-  return {
+  const split = {
     input: Number(latest.input_tokens ?? latest.input ?? 0),
     output: Number(latest.output_tokens ?? latest.output ?? 0),
     cache_read: Number(latest.cache_read_tokens ?? latest.cache_read ?? 0),
-    cache_creation: Number(latest.cache_creation_tokens ?? latest.cache_creation ?? 0)
+    cache_creation: Number(latest.cache_creation_tokens ?? latest.cache_creation ?? 0),
+    reasoning: Number(latest.reasoning_tokens ?? latest.reasoning ?? latest.thinking_tokens ?? 0),
+    tool: Number(latest.tool_tokens ?? latest.tool ?? latest.tool_use_tokens ?? 0)
   };
+  const hasSplit = Object.values(split).some((value) => value > 0);
+  if (hasSplit)
+    return split;
+  const total = Number(latest.total_tokens ?? latest.total ?? 0);
+  return total > 0 ? { total } : null;
+}
+function forensicEventSamples(events, repo) {
+  const byKey = new Map;
+  for (const event of events) {
+    for (const sample of samplesForForensicEvent(event, repo)) {
+      if (sample.metricName === "xtrm_eval_score") {
+        byKey.set(`${sample.metricName}:${labelsKey(sample.labels)}`, { labels: sample.labels, value: sample.value });
+      } else {
+        increment(byKey, sample.labels, sample.value);
+      }
+    }
+  }
+  return Array.from(byKey.values()).map(({ labels, value }) => {
+    if ("mcp_server" in labels) {
+      return {
+        name: "xtrm_mcp_operations_total",
+        help: "MCP operations by bounded server, method, and result.",
+        type: "counter",
+        labels,
+        value
+      };
+    }
+    if ("eval_kind" in labels && !("policy_kind" in labels) && !("credential_kind" in labels)) {
+      return {
+        name: labels.result === "score" ? "xtrm_eval_score" : "xtrm_eval_runs_total",
+        help: labels.result === "score" ? "Latest eval score by bounded eval kind." : "Evaluation runs by bounded eval kind and result.",
+        type: labels.result === "score" ? "gauge" : "counter",
+        labels: labels.result === "score" ? withoutLabel(labels, "result") : labels,
+        value
+      };
+    }
+    if ("policy_kind" in labels && "severity" in labels && labels.result === "mismatch") {
+      return {
+        name: "xtrm_policy_mismatches_total",
+        help: "Policy mismatches by bounded policy kind and severity.",
+        type: "counter",
+        labels: withoutLabel(labels, "result"),
+        value
+      };
+    }
+    if ("policy_kind" in labels) {
+      return {
+        name: "xtrm_policy_decisions_total",
+        help: "Policy decisions by bounded policy/action kind and result.",
+        type: "counter",
+        labels,
+        value
+      };
+    }
+    return {
+      name: "xtrm_identity_operations_total",
+      help: "Identity credential operations by bounded credential kind and result.",
+      type: "counter",
+      labels,
+      value
+    };
+  });
+}
+function samplesForForensicEvent(event, repo) {
+  if (event.event_family === "mcp") {
+    const result = resultForMcpEvent(event.event_name);
+    if (!result)
+      return [];
+    return [{
+      labels: safeLabels({
+        ...eventBaseLabels(event, repo),
+        mcp_server: normalizeKind(bodyString(event, "mcp_server") ?? "unknown"),
+        mcp_method: normalizeKind(bodyString(event, "mcp_method") ?? bodyString(event, "mcp_method_name") ?? "unknown"),
+        result
+      }),
+      value: 1
+    }];
+  }
+  if (event.event_family === "identity") {
+    const result = resultForIdentityEvent(event.event_name);
+    if (!result)
+      return [];
+    return [{
+      labels: safeLabels({
+        ...eventBaseLabels(event, repo),
+        credential_kind: normalizeKind(bodyString(event, "credential_kind") ?? "unknown"),
+        result
+      }),
+      value: 1
+    }];
+  }
+  if (event.event_family === "policy") {
+    const result = resultForPolicyEvent(event.event_name);
+    if (!result)
+      return [];
+    const labels = safeLabels({
+      ...eventBaseLabels(event, repo),
+      policy_kind: normalizeKind(bodyString(event, "policy_kind") ?? "unknown"),
+      action_kind: normalizeKind(bodyString(event, "action_kind") ?? "unknown"),
+      result
+    });
+    const samples = [{ labels, value: 1 }];
+    if (event.event_name === "policy.mismatch.detected") {
+      samples.push({
+        labels: safeLabels({
+          ...eventBaseLabels(event, repo),
+          policy_kind: normalizeKind(bodyString(event, "policy_kind") ?? "unknown"),
+          severity: normalizeKind(bodyString(event, "severity") ?? "unknown"),
+          result: "mismatch"
+        }),
+        value: 1
+      });
+    }
+    return samples;
+  }
+  if (event.event_family === "eval") {
+    if (event.event_name === "eval.score.recorded") {
+      const score = bodyNumber(event, "score");
+      if (score === null)
+        return [];
+      return [{
+        labels: safeLabels({
+          ...eventBaseLabels(event, repo),
+          eval_kind: normalizeKind(bodyString(event, "eval_kind") ?? "unknown"),
+          result: "score"
+        }),
+        value: score,
+        metricName: "xtrm_eval_score"
+      }];
+    }
+    const result = resultForEvalEvent(event);
+    if (!result)
+      return [];
+    return [{
+      labels: safeLabels({
+        ...eventBaseLabels(event, repo),
+        eval_kind: normalizeKind(bodyString(event, "eval_kind") ?? "unknown"),
+        result
+      }),
+      value: 1
+    }];
+  }
+  return [];
+}
+function eventBaseLabels(event, repo) {
+  return {
+    service_name: event.resource.service_name ?? "specialists",
+    repo: event.resource.repo ?? repo
+  };
+}
+function resultForMcpEvent(eventName) {
+  if (eventName === "mcp.connected" || eventName === "mcp.disconnected" || eventName === "mcp.call.completed" || eventName === "mcp.latency.observed")
+    return "success";
+  if (eventName === "mcp.call.failed" || eventName === "mcp.auth.failed")
+    return "error";
+  if (eventName === "mcp.rate_limited")
+    return "rate_limited";
+  return null;
+}
+function resultForIdentityEvent(eventName) {
+  if (eventName === "identity.credential.issued")
+    return "success";
+  if (eventName === "identity.credential.failed")
+    return "error";
+  if (eventName === "identity.throttled")
+    return "throttled";
+  return null;
+}
+function resultForPolicyEvent(eventName) {
+  if (eventName === "policy.decision.allowed")
+    return "allowed";
+  if (eventName === "policy.decision.denied")
+    return "denied";
+  if (eventName === "policy.mismatch.detected")
+    return "mismatch";
+  return null;
+}
+function resultForEvalEvent(event) {
+  if (event.event_name === "eval.completed")
+    return normalizeKind(bodyString(event, "result") ?? "success");
+  if (event.event_name === "eval.failed")
+    return "error";
+  return null;
+}
+function bodyString(event, key) {
+  const value = event.body[key];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+function bodyNumber(event, key) {
+  const value = Number(event.body[key]);
+  return Number.isFinite(value) ? value : null;
+}
+function normalizeKind(value) {
+  const normalized = value.toLowerCase().replace(/[^a-z0-9_.:-]+/g, "_");
+  if (!normalized || normalized.length > 80)
+    return "unknown";
+  return normalized;
+}
+function withoutLabel(labels, key) {
+  const copy = { ...labels };
+  delete copy[key];
+  return copy;
 }
 function latestContextRatio(records) {
   const sorted = [...records].sort((a, b) => b.updated_at_ms - a.updated_at_ms);
@@ -51790,6 +52230,11 @@ function toRows(target, statuses, options2, readEvents) {
         chainId: status.chain_id,
         chainRootJobId: status.chain_root_job_id,
         chainRootBeadId: status.chain_root_bead_id,
+        sessionId: status.session_id,
+        conversationId: status.conversation_id,
+        traceId: status.trace_id,
+        spanId: status.span_id,
+        parentSpanId: status.parent_span_id,
         event
       });
     }
@@ -51810,6 +52255,11 @@ function toRows(target, statuses, options2, readEvents) {
         chainId: status.chain_id,
         chainRootJobId: status.chain_root_job_id,
         chainRootBeadId: status.chain_root_bead_id,
+        sessionId: status.session_id,
+        conversationId: status.conversation_id,
+        traceId: status.trace_id,
+        spanId: status.span_id,
+        parentSpanId: status.parent_span_id,
         event: { t: status.last_event_at_ms ?? status.started_at_ms, type: "status_snapshot" }
       });
     }
@@ -52007,7 +52457,12 @@ function printRow(row, json) {
         backend: row.backend,
         chainId: row.chainId,
         chainRootJobId: row.chainRootJobId,
-        chainRootBeadId: row.chainRootBeadId
+        chainRootBeadId: row.chainRootBeadId,
+        sessionId: row.sessionId,
+        conversationId: row.conversationId,
+        traceId: row.traceId,
+        spanId: row.spanId,
+        parentSpanId: row.parentSpanId
       })
     }));
     return;
@@ -64154,7 +64609,10 @@ Run 'specialists help' to see available commands.`);
   const server = new SpecialistsServer;
   await server.start();
 }
-run39().catch((error2) => {
+run39().then(() => {
+  if (sub)
+    process.exit(process.exitCode ?? 0);
+}).catch((error2) => {
   logger.error(`Fatal error: ${error2}`);
   process.exit(1);
 });

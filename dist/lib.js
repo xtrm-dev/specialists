@@ -7030,9 +7030,14 @@ var FORBIDDEN_PROMETHEUS_LABELS = new Set([
   "trace_id",
   "span_id",
   "parent_span_id",
-  "commit_sha",
-  "jsonrpc_request_id",
+  "session_id",
+  "conversation_id",
   "mcp_session_id",
+  "jsonrpc_request_id",
+  "eval_id",
+  "policy_decision_id",
+  "identity_request_id",
+  "commit_sha",
   "raw_path",
   "raw_command",
   "raw_error",
@@ -7065,6 +7070,14 @@ var DEFAULT_LABEL_ALLOWLIST = new Set([
   "error_type",
   "drift_tier",
   "pulse_kind",
+  "policy_kind",
+  "action_kind",
+  "resource_kind",
+  "credential_kind",
+  "eval_kind",
+  "gate_kind",
+  "verdict",
+  "severity_level",
   "direction",
   "reason",
   "process_kind",
@@ -7130,8 +7143,35 @@ function redactForensicValue(value, path = "body") {
     rules: Array.from(rules).sort()
   };
 }
+var NON_SENSITIVE_TELEMETRY_BODY_FIELDS = new Set([
+  "input_tokens",
+  "output_tokens",
+  "cache_read_tokens",
+  "cache_creation_tokens",
+  "reasoning_tokens",
+  "tool_tokens",
+  "total_tokens",
+  "usage_source",
+  "credential_kind",
+  "policy_kind",
+  "action_kind",
+  "resource_kind",
+  "eval_kind",
+  "target_kind",
+  "scope_kind",
+  "provider",
+  "ttl_seconds",
+  "retryable",
+  "result",
+  "score",
+  "threshold",
+  "scale",
+  "severity",
+  "reason_code",
+  "mismatch_kind"
+]);
 function isSensitiveField(key) {
-  if (key === "input_tokens" || key === "output_tokens" || key === "cache_read_tokens" || key === "cache_creation_tokens")
+  if (NON_SENSITIVE_TELEMETRY_BODY_FIELDS.has(key))
     return false;
   return SENSITIVE_FIELD_RE.test(key);
 }
@@ -7242,17 +7282,74 @@ function forensicEventFromTimelineEvent(event, context) {
       chain_root_job_id: context.chainRootJobId,
       chain_root_bead_id: context.chainRootBeadId,
       epic_id: context.epicId,
+      session_id: context.sessionId ?? stringField(event, "session_id"),
+      conversation_id: context.conversationId ?? stringField(event, "conversation_id"),
+      trace_id: context.traceId ?? stringField(event, "trace_id") ?? metaStringField(event, "trace_id"),
+      span_id: context.spanId ?? stringField(event, "span_id") ?? metaStringField(event, "span_id"),
+      parent_span_id: context.parentSpanId ?? stringField(event, "parent_span_id") ?? metaStringField(event, "parent_span_id"),
+      mcp_session_id: stringField(event, "mcp_session_id") ?? metaStringField(event, "mcp_session_id") ?? metaStringField(event, "mcp.session.id"),
+      jsonrpc_request_id: stringField(event, "jsonrpc_request_id") ?? metaStringField(event, "jsonrpc_request_id") ?? metaStringField(event, "jsonrpc.request.id"),
       tool_call_id: typeof event.tool_call_id === "string" ? event.tool_call_id : undefined
     },
-    body: { legacy_timeline_event: event },
+    body: bodyForTimelineEvent(event),
+    otel: otelForTimelineEvent(event),
     redaction: { status: redactionStatusForTimelineEvent(event) },
     t_unix_ms: event.t,
     seq: event.seq
   });
 }
+function stringField(source, key) {
+  const value = source[key];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+function metaStringField(source, key) {
+  const meta = source._meta;
+  if (!meta || typeof meta !== "object")
+    return;
+  return stringField(meta, key);
+}
+function numberField(source, key) {
+  const value = Number(source[key]);
+  return Number.isFinite(value) ? value : undefined;
+}
+function booleanField(source, key) {
+  const value = source[key];
+  return typeof value === "boolean" ? value : undefined;
+}
+function bodyForTimelineEvent(event) {
+  if (event.type !== "mcp")
+    return { legacy_timeline_event: event };
+  return {
+    legacy_timeline_event: event,
+    mcp_server: stringField(event, "mcp_server") ?? stringField(event, "server") ?? "unknown",
+    mcp_method: stringField(event, "mcp_method") ?? stringField(event, "method") ?? "tools/call",
+    tool_name: stringField(event, "tool_name") ?? stringField(event, "tool"),
+    network_transport: stringField(event, "network_transport") ?? stringField(event, "transport"),
+    duration_ms: numberField(event, "duration_ms"),
+    error_type: stringField(event, "error_type"),
+    status_code: stringField(event, "status_code"),
+    duplicate_span_suppressed: booleanField(event, "duplicate_span_suppressed"),
+    trace_carrier: metaStringField(event, "trace_carrier") ?? (event._meta && typeof event._meta === "object" ? "_meta" : undefined)
+  };
+}
+function otelForTimelineEvent(event) {
+  if (event.type !== "mcp")
+    return;
+  const method = stringField(event, "mcp_method") ?? stringField(event, "method") ?? "tools/call";
+  return {
+    "mcp.method.name": method,
+    "mcp.session.id": stringField(event, "mcp_session_id") ?? metaStringField(event, "mcp_session_id") ?? metaStringField(event, "mcp.session.id"),
+    "jsonrpc.request.id": stringField(event, "jsonrpc_request_id") ?? metaStringField(event, "jsonrpc_request_id") ?? metaStringField(event, "jsonrpc.request.id"),
+    "network.transport": stringField(event, "network_transport") ?? stringField(event, "transport"),
+    "gen_ai.operation.name": "execute_tool",
+    "gen_ai.tool.name": stringField(event, "tool_name") ?? stringField(event, "tool")
+  };
+}
 function familyForTimelineType(type) {
   if (type === "run_start" || type === "run_complete" || type === "status_change" || type === "payload_breakdown")
     return "job";
+  if (type === "mcp")
+    return "mcp";
   if (type === "tool")
     return "tool";
   if (type === "turn" || type === "turn_summary" || type === "message" || type === "text" || type === "thinking")
@@ -7285,6 +7382,8 @@ function eventNameForTimelineEvent(event) {
   }
   if (event.type === "status_change")
     return "job.status_changed";
+  if (event.type === "mcp")
+    return mcpEventNameForTimelineEvent(event);
   if (event.type === "tool") {
     if (event.phase === "start")
       return "tool.call.started";
@@ -7320,9 +7419,34 @@ function eventNameForTimelineEvent(event) {
     return "process_health.stale_detected";
   return `${familyForTimelineType(event.type)}.${event.type}`;
 }
+function mcpEventNameForTimelineEvent(event) {
+  const explicit = stringField(event, "event_name");
+  if (explicit?.startsWith("mcp."))
+    return explicit;
+  const action = stringField(event, "action") ?? stringField(event, "phase") ?? stringField(event, "status");
+  if (action === "connected")
+    return "mcp.connected";
+  if (action === "disconnected")
+    return "mcp.disconnected";
+  if (action === "auth_failed")
+    return "mcp.auth.failed";
+  if (action === "rate_limited")
+    return "mcp.rate_limited";
+  if (action === "latency_observed")
+    return "mcp.latency.observed";
+  if (action === "start" || action === "started")
+    return "mcp.call.started";
+  if (event.is_error || action === "failed" || action === "error")
+    return "mcp.call.failed";
+  return "mcp.call.completed";
+}
 function severityForTimelineEvent(event) {
   if (event.type === "error" || event.type === "extension_error" || event.type === "auto_commit_failed")
     return "error";
+  if (event.type === "mcp" && (event.is_error || mcpEventNameForTimelineEvent(event).endsWith(".failed") || mcpEventNameForTimelineEvent(event) === "mcp.auth.failed"))
+    return "error";
+  if (event.type === "mcp" && mcpEventNameForTimelineEvent(event) === "mcp.rate_limited")
+    return "warn";
   if (event.type === "stale_warning" || event.type === "control_signal")
     return "warn";
   if (event.type === "run_complete" && event.status === "ERROR")
@@ -8119,7 +8243,12 @@ class SqliteClient {
       chainId: context.chainId,
       chainRootJobId: context.chainRootJobId,
       chainRootBeadId: context.chainRootBeadId,
-      epicId: context.epicId
+      epicId: context.epicId,
+      sessionId: context.sessionId,
+      conversationId: context.conversationId,
+      traceId: context.traceId,
+      spanId: context.spanId,
+      parentSpanId: context.parentSpanId
     });
     this.insertForensicEventRow(jobId, event.seq, forensicEvent);
   }
@@ -8141,7 +8270,12 @@ class SqliteClient {
       chainId: typeof row?.chain_id === "string" ? row.chain_id : undefined,
       chainRootJobId: typeof row?.chain_root_job_id === "string" ? row.chain_root_job_id : undefined,
       chainRootBeadId: typeof row?.chain_root_bead_id === "string" ? row.chain_root_bead_id : undefined,
-      epicId: typeof row?.epic_id === "string" ? row.epic_id : undefined
+      epicId: typeof row?.epic_id === "string" ? row.epic_id : undefined,
+      sessionId: typeof statusJson.session_id === "string" ? statusJson.session_id : undefined,
+      conversationId: typeof statusJson.conversation_id === "string" ? statusJson.conversation_id : undefined,
+      traceId: typeof statusJson.trace_id === "string" ? statusJson.trace_id : undefined,
+      spanId: typeof statusJson.span_id === "string" ? statusJson.span_id : undefined,
+      parentSpanId: typeof statusJson.parent_span_id === "string" ? statusJson.parent_span_id : undefined
     };
   }
   insertForensicEventRow(jobId, seq, forensicEvent) {

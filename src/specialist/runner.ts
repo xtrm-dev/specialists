@@ -923,7 +923,7 @@ export class SpecialistRunner {
       },
     ) => void,
     onMetric?: (event: SessionMetricEvent) => void,
-    onMeta?: (meta: { backend: string; model: string }) => void,
+    onMeta?: (meta: { backend: string; model: string; sessionId?: string }) => void,
     onKillRegistered?: (killFn: () => void) => void,
     onBeadCreated?: (beadId: string) => void,
     onSteerRegistered?: (steerFn: (msg: string) => Promise<void>) => void,
