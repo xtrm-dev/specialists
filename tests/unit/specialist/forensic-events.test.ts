@@ -253,6 +253,7 @@ describe('forensic-events', () => {
     expect(tokenFixture?.body).not.toHaveProperty('cost_usd');
     expect(catalogFixtures.find((fixture) => fixture.name === 'command.completed')?.event.redaction.status).toBeTruthy();
     expect(catalogFixtures.find((fixture) => fixture.name === 'review.verdict.pass')?.event.redaction.status).toBeTruthy();
+    expect(catalogFixtures.find((fixture) => fixture.name === 'worktree.merged')?.event.correlation.job_id).toBe('job-7');
   });
 
   it('picks only allowlisted low-cardinality labels', () => {

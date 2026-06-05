@@ -11,6 +11,7 @@ import {
   parseJournalMode,
   verifyWalMode,
 } from '../../../src/specialist/observability-sqlite.js';
+import { createForensicEvent } from '../../../src/specialist/forensic-events.js';
 import { loadEpicReadinessSummary } from '../../../src/specialist/epic-readiness.js';
 import {
   OBSERVABILITY_SCHEMA_VERSION,
@@ -279,6 +280,41 @@ describe('observability-sqlite', () => {
       expect(customSeqValues).toHaveLength(3);
       expect(customSeqValues.every((seq) => typeof seq === 'number')).toBe(true);
       expect(customSeqValues).toEqual([...customSeqValues].sort((a, b) => (a ?? 0) - (b ?? 0)));
+    });
+  });
+
+  describe('appendForensicEvent', () => {
+    it('allocates unique seq values when caller omits seq', () => {
+      const client = createClient();
+      const event = createForensicEvent({
+        event_family: 'chain',
+        event_name: 'chain.ready_for_review',
+        resource: {
+          service_namespace: 'xtrm',
+          service_name: 'specialists',
+          service_component: 'epic',
+          deployment_environment: 'local',
+          repo: 'specialists',
+          participant_kind: 'specialist',
+          participant_role: 'epic',
+        },
+        correlation: { job_id: 'epic-1', participant_id: 'epic::1' },
+        body: { chain_template: 'epic-1', changed_paths_count: 2, terminal_state: 'merge_ready', result: 'pass' },
+      });
+
+      client.appendForensicEvent('epic-1', 'specialist', undefined, event);
+      client.appendForensicEvent('epic-1', 'specialist', undefined, createForensicEvent({
+        event_family: 'chain',
+        event_name: 'chain.ready_for_review',
+        resource: event.resource,
+        correlation: event.correlation,
+        body: event.body,
+      }));
+
+      const rows = db!.query('SELECT seq, event_json FROM specialist_forensic_events WHERE job_id = ? ORDER BY seq').all('epic-1') as Array<{ seq: number; event_json: string }>;
+      expect(rows).toHaveLength(2);
+      expect(rows[0].seq).toBeLessThan(rows[1].seq);
+      expect(rows.map((row) => JSON.parse(row.event_json) as { correlation?: { job_id?: string } }).every((payload) => payload.correlation?.job_id === 'epic-1')).toBe(true);
     });
   });
 

@@ -426,7 +426,6 @@ function emitEpicForensicEvent(epicId: string, eventFamily: 'chain' | 'worktree'
   if (!sqlite) return;
 
   try {
-    const now = Date.now();
     sqlite.appendForensicEvent(epicId, 'specialist', undefined, createForensicEvent({
       event_family: eventFamily,
       event_name: eventName,
@@ -441,8 +440,6 @@ function emitEpicForensicEvent(epicId: string, eventFamily: 'chain' | 'worktree'
       },
       correlation: { epic_id: epicId, ...correlation },
       body,
-      t_unix_ms: now,
-      seq: now,
     }));
   } finally {
     sqlite.close();
@@ -601,7 +598,8 @@ export async function handleEpicMergeCommand(argv: readonly string[]): Promise<v
     pullRequestUrl = publicationResult.pullRequestUrl;
     toState = options.pr ? currentState : transitionEpicState(currentState, 'merged');
     updateEpicState(context.epicId, currentState, toState);
-    for (const chain of mergedChains) {
+    for (const [index, chain] of mergedChains.entries()) {
+      const chainTarget = context.chainTargets[index];
       emitEpicForensicEvent(context.epicId, 'worktree', 'worktree.merged', {
         changed_paths_count: chain.changedFiles.length,
         merge_ref: chain.branch,
@@ -609,7 +607,7 @@ export async function handleEpicMergeCommand(argv: readonly string[]): Promise<v
         target_ref: options.targetBranch ?? 'main',
         result: 'success',
       }, {
-        job_id: chain.beadId,
+        job_id: chainTarget?.jobId ?? context.epicId,
         bead_id: chain.beadId,
       });
     }
