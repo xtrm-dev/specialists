@@ -596,6 +596,42 @@ describe('forensic-events', () => {
     expect(() => assertNoForbiddenLabels(pickAllowedLabels({ ...event.resource, ...event.correlation, ...event.body }))).not.toThrow();
   });
 
+  it('keeps git pr evidence in forensic body, not labels', async () => {
+    const { forensicEventFromTimelineEvent } = await import('../../../src/specialist/forensic-events.js');
+    const event = forensicEventFromTimelineEvent(
+      {
+        t: 1_780_000_000_006,
+        type: 'run_complete',
+        status: 'COMPLETE',
+        evidence: [
+          {
+            evidence_kind: 'pr',
+            evidence_ref: 'pr:42',
+            evidence_url: 'https://github.com/org/repo/pull/42',
+            evidence_state: 'open',
+            pr_id: 42,
+            pr_url: 'https://github.com/org/repo/pull/42',
+            pr_state: 'open',
+          },
+        ],
+      },
+      { jobId: 'job-git', specialist: 'executor', repo: 'specialists', chainId: 'chain-git' },
+    );
+
+    expect(event.body).toMatchObject({
+      evidence_refs: [
+        expect.objectContaining({
+          evidence_kind: 'pr',
+          evidence_ref: 'pr:42',
+          pr_id: 42,
+          pr_url: 'https://github.com/org/repo/pull/42',
+          pr_state: 'open',
+        }),
+      ],
+    });
+    expect(() => assertNoForbiddenLabels(pickAllowedLabels({ ...event.resource, ...event.correlation, ...event.body }))).not.toThrow();
+  });
+
   it('keeps git commit evidence and changed paths in forensic body, not labels', async () => {
     const { forensicEventFromTimelineEvent } = await import('../../../src/specialist/forensic-events.js');
     const event = forensicEventFromTimelineEvent(

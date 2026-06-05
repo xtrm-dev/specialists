@@ -45,7 +45,7 @@ import {
   createChainEvent,
   mapCallbackEventToTimelineEvent,
 } from './timeline-events.js';
-import { buildGitDiffEvidence } from './git-diff-evidence.js';
+import { buildGitDiffEvidence, writeGitDiffHunksArtifact } from './git-diff-evidence.js';
 import type { SessionMetricEvent, SessionRunMetrics, SessionTokenUsage } from '../pi/session.js';
 import type { StallDetectionConfig } from './loader.js';
 import { createObservabilitySqliteClient, type ObservabilitySqliteClient } from './observability-sqlite.js';
@@ -1481,6 +1481,17 @@ export class Supervisor {
     let lastTurnSummaryIndex = 0;
     let skipFinalKeepAliveInputBeadAppend = false;
     let latestEvidenceRefs: Array<{ evidence_kind: 'diff' | 'commit' | 'pr'; evidence_ref?: string; evidence_url?: string; evidence_state?: string; base_ref?: string; base_sha?: string; head_sha?: string; pr_id?: string | number; pr_url?: string; pr_state?: string; diff?: { changed_files: Array<{ path: string; added_lines: number; removed_lines: number }>; hunks?: string; hunks_artifact_ref?: string; hunks_inline?: boolean; hunks_truncated?: boolean; } }> | undefined;
+    const getObservedPrEvidenceRef = (worktreePath: string): { pr_id?: number; pr_url?: string; pr_state?: string } | undefined => {
+      const result = spawnSync('gh', ['pr', 'view', '--json', 'number,url,state'], { cwd: worktreePath, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
+      if (result.status !== 0) return undefined;
+      try {
+        const parsed = JSON.parse((result.stdout ?? '').trim()) as { number?: number; url?: string; state?: string };
+        if (!parsed?.url) return undefined;
+        return { pr_id: parsed.number, pr_url: parsed.url, pr_state: parsed.state };
+      } catch {
+        return undefined;
+      }
+    };
     /** SHA of the most recent commit for which gitnexus analyze was triggered.
      *  Used to dedupe checkpoint-time vs terminal-time analyze fires when both
      *  paths see the same final commit. */
@@ -1570,25 +1581,39 @@ export class Supervisor {
       tokenUsage?: SessionTokenUsage;
     }): boolean => writeUnifiedHandoff(params);
 
-    const buildAutoCommitEvidenceRefs = (worktreePath: string, commitSha: string): NonNullable<typeof latestEvidenceRefs> => {
+    const buildAutoCommitEvidenceRefs = (jobId: string, worktreePath: string, commitSha: string): NonNullable<typeof latestEvidenceRefs> => {
       const baseShaResult = spawnSync('git', ['rev-parse', commitSha + '^'], { cwd: worktreePath, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
       const baseSha = baseShaResult.status === 0 ? (baseShaResult.stdout ?? '').trim() : undefined;
       const baseRef = baseSha ? commitSha + '^' : undefined;
       const range = baseSha ? baseSha + '..' + commitSha : commitSha + '^..' + commitSha;
       const numstatResult = spawnSync('git', ['diff', '--numstat', '--no-renames', range], { cwd: worktreePath, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
       const hunksResult = spawnSync('git', ['diff', '--unified=0', '--no-ext-diff', '--no-renames', range], { cwd: worktreePath, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
+      const hunksOutput = (hunksResult.stdout ?? '').trim();
       const diff = buildGitDiffEvidence({
         base_ref: baseRef,
         base_sha: baseSha,
         head_sha: commitSha,
         numstat_output: (numstatResult.stdout ?? '').trim(),
-        hunks_output: (hunksResult.stdout ?? '').trim(),
-        artifact_ref: 'artifact://git-diff/' + commitSha.slice(0, 12),
+        hunks_output: hunksOutput,
+        artifact_ref: writeGitDiffHunksArtifact(this.jobDir(jobId), 'git-diff-' + commitSha.slice(0, 12) + '.patch', hunksOutput),
       });
-      return [
-        { evidence_kind: 'diff', evidence_ref: 'git:' + commitSha.slice(0, 12), evidence_state: diff.hunks_inline ? 'inline' : 'artifact', base_ref: diff.base_ref, base_sha: diff.base_sha, head_sha: diff.head_sha, diff },
+      const evidenceRefs: NonNullable<typeof latestEvidenceRefs> = [
+        {
+          evidence_kind: 'diff',
+          evidence_ref: 'git:' + commitSha.slice(0, 12),
+          evidence_state: diff.hunks_inline ? 'inline' : 'artifact',
+          base_ref: diff.base_ref,
+          base_sha: diff.base_sha,
+          head_sha: diff.head_sha,
+          diff,
+        },
         { evidence_kind: 'commit', evidence_ref: commitSha, evidence_state: 'complete' },
       ];
+      const prEvidence = getObservedPrEvidenceRef(worktreePath);
+      if (prEvidence) {
+        evidenceRefs.push({ evidence_kind: 'pr', evidence_ref: prEvidence.pr_id ? 'pr:' + prEvidence.pr_id : prEvidence.pr_url, evidence_url: prEvidence.pr_url, evidence_state: prEvidence.pr_state, pr_id: prEvidence.pr_id, pr_url: prEvidence.pr_url, pr_state: prEvidence.pr_state });
+      }
+      return evidenceRefs;
     };
 
     const applyAutoCommitCheckpoint = (target: 'waiting' | 'terminal', autoCommitPolicy: 'never' | 'checkpoint_on_waiting' | 'checkpoint_on_terminal' | undefined): void => {
@@ -1621,7 +1646,7 @@ export class Supervisor {
         last_auto_commit_sha: autoCommitResult.sha,
         last_auto_commit_at_ms: autoCommitResult.committedAtMs,
       });
-      latestEvidenceRefs = buildAutoCommitEvidenceRefs(statusSnapshot.worktree_path ?? process.cwd(), autoCommitResult.sha);
+      latestEvidenceRefs = buildAutoCommitEvidenceRefs(id, statusSnapshot.worktree_path ?? process.cwd(), autoCommitResult.sha);
       appendTimelineEvent(createAutoCommitEvent('success', {
         commit_sha: autoCommitResult.sha,
         committed_files: autoCommitResult.files,

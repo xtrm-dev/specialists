@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { buildGitDiffEvidence, parseGitNumstat } from '../../../src/specialist/git-diff-evidence.js';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { buildGitDiffEvidence, parseGitNumstat, writeGitDiffHunksArtifact } from '../../../src/specialist/git-diff-evidence.js';
 
 describe('git-diff-evidence', () => {
   it('parses per-file +/- counts from git numstat output', () => {
@@ -10,6 +13,29 @@ describe('git-diff-evidence', () => {
     ]);
   });
 
+
+  it('redacts hunks before inline or artifact persistence', () => {
+    const inline = buildGitDiffEvidence({
+      numstat_output: '1	1	src/a.ts\n',
+      hunks_output: 'diff --git a/src/a.ts b/src/a.ts\n-old secret sk-123456789012\n+new alice@example.com\n',
+    });
+
+    expect(inline.hunks).toContain('[REDACTED]');
+    expect(inline.hunks).not.toContain('sk-123456789012');
+    expect(inline.hunks).not.toContain('alice@example.com');
+
+    const jobDir = mkdtempSync(join(tmpdir(), 'git-diff-artifact-'));
+    try {
+      const ref = writeGitDiffHunksArtifact(jobDir, 'hunks.patch', 'diff --git a/src/a.ts b/src/a.ts\n-old sk-123456789012\n+new alice@example.com\n');
+      expect(ref).toContain('artifact://');
+      const stored = readFileSync(join(jobDir, 'artifacts', 'hunks.patch'), 'utf8');
+      expect(stored).toContain('[REDACTED]');
+      expect(stored).not.toContain('sk-123456789012');
+      expect(stored).not.toContain('alice@example.com');
+    } finally {
+      rmSync(jobDir, { recursive: true, force: true });
+    }
+  });
   it('keeps small hunks inline and large hunks redacted as artifact ref', () => {
     const inline = buildGitDiffEvidence({
       base_ref: 'HEAD^',
