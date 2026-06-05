@@ -1,0 +1,132 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 770" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#444"/>
+    </marker>
+    <marker id="arrG" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#0f9d58"/>
+    </marker>
+    <marker id="arrR" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#ea4b71"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1040" height="770" fill="#ffffff"/>
+  <text x="40" y="34" font-size="22" font-weight="700" fill="#202124">Architettura xtrm — due livelli: runtime locale  →  tier condiviso / web</text>
+
+  <!-- USERS -->
+  <g>
+    <rect x="70" y="52" width="115" height="36" rx="8" fill="#fff" stroke="#5f6368"/>
+    <text x="127" y="75" font-size="14" fill="#202124" text-anchor="middle">👤 Solo</text>
+    <rect x="197" y="52" width="115" height="36" rx="8" fill="#fff" stroke="#5f6368"/>
+    <text x="254" y="75" font-size="14" fill="#202124" text-anchor="middle">👥 Team</text>
+    <rect x="324" y="52" width="115" height="36" rx="8" fill="#fff" stroke="#5f6368"/>
+    <text x="381" y="75" font-size="14" fill="#202124" text-anchor="middle">🏢 Azienda</text>
+    <path d="M127,88 L210,158" stroke="#444" fill="none" marker-end="url(#arr)"/>
+    <path d="M254,88 L252,158" stroke="#444" fill="none" marker-end="url(#arr)"/>
+    <path d="M381,88 L300,158" stroke="#444" fill="none" marker-end="url(#arr)"/>
+  </g>
+
+  <!-- SHARED / WEB TIER -->
+  <rect x="40" y="112" width="795" height="232" rx="14" fill="#e8f0fe" stroke="#4285f4" stroke-width="1.5"/>
+  <text x="56" y="134" font-size="15" font-weight="700" fill="#1a56c4">LIVELLO CONDIVISO / WEB — team · azienda  (proiezione, non la sorgente di verità)</text>
+
+  <!-- Console -->
+  <rect x="70" y="158" width="360" height="158" rx="10" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="86" y="182" font-size="16" font-weight="700" fill="#5b21b6">Console Web</text>
+  <text x="86" y="208" font-size="13.5" fill="#3c1d8f">• Visualizzazione del lavoro</text>
+  <text x="86" y="230" font-size="13.5" fill="#3c1d8f">• DevOps</text>
+  <text x="86" y="252" font-size="13.5" fill="#3c1d8f">• AgentOps — suite di ottimizzazione</text>
+  <text x="86" y="274" font-size="13.5" fill="#3c1d8f">• Maturità specialist · coda proposte</text>
+  <text x="86" y="296" font-size="12" fill="#6b21a8" font-style="italic">stesso console per ogni livello</text>
+
+  <!-- Supabase -->
+  <rect x="460" y="158" width="375" height="158" rx="10" fill="#d1fae5" stroke="#10b981" stroke-width="1.5"/>
+  <text x="476" y="182" font-size="16" font-weight="700" fill="#047857">Supabase  (Postgres)</text>
+  <text x="476" y="208" font-size="13.5" fill="#065f46">• Auth — chi vede cosa</text>
+  <text x="476" y="230" font-size="13.5" fill="#065f46">• Realtime → aggiorna il browser</text>
+  <text x="476" y="252" font-size="13.5" fill="#065f46">• API automatica (REST/GraphQL)</text>
+  <text x="476" y="274" font-size="13.5" fill="#065f46">• Storage</text>
+  <text x="476" y="296" font-size="12" fill="#059669" font-style="italic">serve solo da team in su</text>
+
+  <!-- realtime arrow Supabase -> Console -->
+  <path d="M460,224 L433,224" stroke="#0f9d58" stroke-width="1.6" fill="none" marker-end="url(#arrG)"/>
+  <text x="446" y="216" font-size="11.5" fill="#0f9d58" text-anchor="middle">dati + realtime</text>
+
+  <!-- n8n -->
+  <rect x="868" y="158" width="150" height="120" rx="10" fill="#fde2e7" stroke="#ea4b71" stroke-width="1.5"/>
+  <text x="884" y="182" font-size="15" font-weight="700" fill="#b3294e">n8n</text>
+  <text x="884" y="204" font-size="12.5" fill="#9d1f42">automazioni</text>
+  <text x="884" y="224" font-size="12" fill="#9d1f42" font-style="italic">glue, non</text>
+  <text x="884" y="240" font-size="12" fill="#9d1f42" font-style="italic">uno store</text>
+  <!-- n8n -> Supabase -->
+  <path d="M868,214 L838,214" stroke="#ea4b71" stroke-width="1.5" fill="none" marker-end="url(#arrR)"/>
+  <text x="852" y="206" font-size="10.5" fill="#ea4b71" text-anchor="middle">scrive</text>
+
+  <!-- SYNC SEAM -->
+  <line x1="40" y1="362" x2="835" y2="362" stroke="#9aa0a6" stroke-width="1.5" stroke-dasharray="7 5"/>
+  <text x="437" y="356" font-size="12.5" fill="#5f6368" text-anchor="middle" font-style="italic">proiezione / sync ↑  —  ID opachi, niente FK cross-dominio  ·  il runtime resta autoritativo in basso</text>
+
+  <!-- LOCAL RUNTIME TIER -->
+  <rect x="40" y="376" width="795" height="236" rx="14" fill="#f1f3f4" stroke="#5f6368" stroke-width="1.5"/>
+  <text x="56" y="398" font-size="15" font-weight="700" fill="#3c4043">LIVELLO RUNTIME LOCALE — sempre presente · autoritativo (la verità del lifecycle)</text>
+
+  <!-- machine template -->
+  <g>
+    <!-- Dev A -->
+    <rect x="62" y="412" width="235" height="180" rx="10" fill="#ffffff" stroke="#5f6368"/>
+    <text x="78" y="436" font-size="14.5" font-weight="700" fill="#202124">💻 Dev A (laptop)</text>
+    <rect x="78" y="448" width="203" height="30" rx="6" fill="#e8eaed" stroke="#9aa0a6"/>
+    <text x="180" y="468" font-size="12.5" fill="#202124" text-anchor="middle">daemon: sp · sb · channels</text>
+    <rect x="78" y="486" width="203" height="34" rx="6" fill="#fff7ed" stroke="#f59e0b"/>
+    <text x="180" y="507" font-size="12.5" font-weight="700" fill="#b45309" text-anchor="middle">state.db (SQLite WAL)</text>
+    <text x="180" y="540" font-size="12" fill="#5f6368" text-anchor="middle">worktrees · 1 socket</text>
+    <text x="180" y="562" font-size="11.5" fill="#80868b" text-anchor="middle" font-style="italic">routing per project_id</text>
+
+    <!-- Dev B -->
+    <rect x="310" y="412" width="235" height="180" rx="10" fill="#ffffff" stroke="#5f6368"/>
+    <text x="326" y="436" font-size="14.5" font-weight="700" fill="#202124">💻 Dev B</text>
+    <rect x="326" y="448" width="203" height="30" rx="6" fill="#e8eaed" stroke="#9aa0a6"/>
+    <text x="428" y="468" font-size="12.5" fill="#202124" text-anchor="middle">daemon: sp · sb · channels</text>
+    <rect x="326" y="486" width="203" height="34" rx="6" fill="#fff7ed" stroke="#f59e0b"/>
+    <text x="428" y="507" font-size="12.5" font-weight="700" fill="#b45309" text-anchor="middle">state.db (SQLite WAL)</text>
+    <text x="428" y="540" font-size="12" fill="#5f6368" text-anchor="middle">cattura locale →</text>
+    <text x="428" y="560" font-size="11.5" fill="#80868b" text-anchor="middle" font-style="italic">sp-improve beads + telemetria</text>
+
+    <!-- CI / Server -->
+    <rect x="558" y="412" width="235" height="180" rx="10" fill="#ffffff" stroke="#5f6368"/>
+    <text x="574" y="436" font-size="14.5" font-weight="700" fill="#202124">🖥 CI / Server</text>
+    <rect x="574" y="448" width="203" height="30" rx="6" fill="#e8eaed" stroke="#9aa0a6"/>
+    <text x="676" y="468" font-size="12.5" fill="#202124" text-anchor="middle">daemon + state.db</text>
+    <rect x="574" y="486" width="203" height="34" rx="6" fill="#e0f2fe" stroke="#0284c7"/>
+    <text x="676" y="507" font-size="12" font-weight="700" fill="#075985" text-anchor="middle">sp serve  POST /v1/generate</text>
+    <text x="676" y="540" font-size="11.5" fill="#5f6368" text-anchor="middle">script specialists (READ_ONLY)</text>
+    <text x="676" y="560" font-size="11.5" fill="#80868b" text-anchor="middle" font-style="italic">il punto d'aggancio per n8n</text>
+  </g>
+
+  <!-- sync arrows machines -> Supabase -->
+  <path d="M180,412 L560,318" stroke="#0f9d58" stroke-width="1.4" fill="none" marker-end="url(#arrG)" opacity="0.85"/>
+  <path d="M428,412 L625,318" stroke="#0f9d58" stroke-width="1.4" fill="none" marker-end="url(#arrG)" opacity="0.85"/>
+  <path d="M676,412 L700,318" stroke="#0f9d58" stroke-width="1.4" fill="none" marker-end="url(#arrG)" opacity="0.85"/>
+
+  <!-- n8n -> sp serve -->
+  <path d="M944,278 L770,486" stroke="#ea4b71" stroke-width="1.4" fill="none" stroke-dasharray="6 4" marker-end="url(#arrR)"/>
+  <text x="892" y="392" font-size="11" fill="#ea4b71" text-anchor="middle" transform="rotate(-2 892 392)">chiama gli</text>
+  <text x="900" y="406" font-size="11" fill="#ea4b71" text-anchor="middle">script specialists</text>
+
+  <!-- LEGEND -->
+  <rect x="40" y="632" width="978" height="118" rx="12" fill="#fafafa" stroke="#dadce0"/>
+  <text x="58" y="656" font-size="14.5" font-weight="700" fill="#202124">Scelta dello store per livello</text>
+
+  <rect x="58" y="668" width="16" height="16" rx="3" fill="#fff7ed" stroke="#f59e0b"/>
+  <text x="82" y="681" font-size="13" fill="#202124"><tspan font-weight="700">SQLite + daemon</tspan>  →  Solo, una macchina  (è il design di substrate · zero-ops)</text>
+
+  <rect x="58" y="692" width="16" height="16" rx="3" fill="#e0f2fe" stroke="#0284c7"/>
+  <text x="82" y="705" font-size="13" fill="#202124"><tspan font-weight="700">libSQL / Turso</tspan>  →  Solo, più macchine  (SQLite condiviso/leggero · quasi drop-in · niente auth/web)</text>
+
+  <rect x="58" y="716" width="16" height="16" rx="3" fill="#d1fae5" stroke="#10b981"/>
+  <text x="82" y="729" font-size="13" fill="#202124"><tspan font-weight="700">Supabase (Postgres)</tspan>  →  Team · Azienda  (auth + realtime + API per la console web)</text>
+
+  <rect x="560" y="716" width="16" height="16" rx="3" fill="#f3e8ff" stroke="#9333ea"/>
+  <text x="584" y="729" font-size="13" fill="#202124"><tspan font-weight="700">Dolt</tspan>  →  solo se vuoi versioning dei dati (branch/merge) — non ora</text>
+</svg>
