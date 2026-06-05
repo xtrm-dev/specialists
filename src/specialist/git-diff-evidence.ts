@@ -19,18 +19,37 @@ export interface GitDiffEvidence {
 }
 
 const INLINE_HUNKS_LIMIT = 4_000;
-const SECRET_VALUE_RE = /(sk-[a-z0-9_-]{12,}|ghp_[a-z0-9_]{12,}|xox[baprs]-[a-z0-9-]{12,}|bearer\s+[a-z0-9._-]{12,}|[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/ig;
+
+// Known-secret token patterns (prefix-anchored, high-confidence)
+const TOKEN_RE = /\b(sk-[a-z0-9_-]{12,}|ghp_[a-z0-9_]{12,}|ghs_[a-z0-9_]{12,}|xox[baprs]-[a-z0-9-]{12,}|AIza[0-9A-Za-z_-]{35,}|ya29\.[0-9A-Za-z_-]{40,})/ig;
+// env/config assignments whose RHS is a secret — key name may carry prefixes like DB_, APP_
+const ENV_SECRET_RE = /[a-z0-9_]*(?:password|passwd|secret|api_?key|auth_?token|access_?token|refresh_?token|private_?key|credential|client_?secret|db_?pass|database_?pass)[a-z0-9_]*\s*[=:]\s*\S+/ig;
+// PEM blocks
+const PEM_BLOCK_RE = /-----BEGIN [A-Z ]*(?:PRIVATE KEY|CERTIFICATE|PUBLIC KEY|ENCRYPTED)[A-Z ]*-----[\s\S]*?-----END [A-Z ]*(?:PRIVATE KEY|CERTIFICATE|PUBLIC KEY|ENCRYPTED)[A-Z ]*-----/ig;
+// Authorization / Cookie headers — capture to end of line so multi-word values (Bearer <token>) are fully redacted
+const AUTH_HEADER_RE = /\b(authorization|cookie)\s*:[^\n]+/ig;
+// URLs with embedded credentials (https://user:pass@host)
+const URL_CREDS_RE = /https?:\/\/[^/:@\s]+:[^/@\s]+@/ig;
+// JWT-like tokens (three base64url segments)
+const JWT_RE = /\bey[a-z0-9_-]{10,}\.ey[a-z0-9_-]{10,}\.[a-z0-9_-]{10,}\b/ig;
 
 export function redactGitDiffHunks(hunks: string): string {
-  return hunks.replace(SECRET_VALUE_RE, '[REDACTED]');
+  return hunks
+    .replace(PEM_BLOCK_RE, '[REDACTED-PEM]')
+    .replace(JWT_RE, '[REDACTED-JWT]')
+    .replace(URL_CREDS_RE, '[REDACTED-URL-CREDS]://')
+    .replace(ENV_SECRET_RE, '[REDACTED]')
+    .replace(AUTH_HEADER_RE, '[REDACTED]')
+    .replace(TOKEN_RE, '[REDACTED-TOKEN]');
 }
 
+// Returns an opaque resolver ref; filesystem path stays internal.
 export function writeGitDiffHunksArtifact(jobDir: string, artifactName: string, hunks: string): string {
   const artifactPath = join(jobDir, 'artifacts');
   mkdirSync(artifactPath, { recursive: true });
   const filePath = join(artifactPath, artifactName);
   writeFileSync(filePath, redactGitDiffHunks(hunks), 'utf-8');
-  return 'artifact://' + join(artifactPath, artifactName);
+  return `artifact://git-diff/${artifactName}`;
 }
 
 export function parseGitNumstat(output: string): GitChangedFileEvidence[] {

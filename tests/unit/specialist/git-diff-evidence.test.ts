@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildGitDiffEvidence, parseGitNumstat, writeGitDiffHunksArtifact } from '../../../src/specialist/git-diff-evidence.js';
+import {
+  buildGitDiffEvidence,
+  parseGitNumstat,
+  redactGitDiffHunks,
+  writeGitDiffHunksArtifact,
+} from '../../../src/specialist/git-diff-evidence.js';
 
 describe('git-diff-evidence', () => {
   it('parses per-file +/- counts from git numstat output', () => {
@@ -13,30 +18,79 @@ describe('git-diff-evidence', () => {
     ]);
   });
 
+  it('redacts known-prefix API tokens', () => {
+    const out = redactGitDiffHunks('token: sk-123456789012\nghp_abcdefghijklmnop\nxoxb-abc-def-ghi-jkl');
+    expect(out).not.toContain('sk-123456789012');
+    expect(out).not.toContain('ghp_abcdefghijklmnop');
+    expect(out).not.toContain('xoxb-abc-def-ghi-jkl');
+    expect(out).toContain('[REDACTED-TOKEN]');
+  });
+
+  it('redacts env/config password and secret assignments', () => {
+    const out = redactGitDiffHunks(
+      '+DB_PASSWORD=supersecret123\n+API_KEY=sk-my-real-key\n+client_secret: abc123xyz',
+    );
+    expect(out).not.toContain('supersecret123');
+    expect(out).not.toContain('sk-my-real-key');
+    expect(out).not.toContain('abc123xyz');
+    expect(out).toContain('[REDACTED]');
+  });
+
+  it('redacts PEM private key blocks', () => {
+    const pem =
+      '-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7\n-----END PRIVATE KEY-----';
+    const out = redactGitDiffHunks(`+${pem}`);
+    expect(out).not.toContain('MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7');
+    expect(out).toContain('[REDACTED-PEM]');
+  });
+
+  it('redacts Authorization and Cookie headers', () => {
+    const out = redactGitDiffHunks(
+      '+Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.payload.sig\n+Cookie: session=abc123secret',
+    );
+    expect(out).not.toContain('eyJhbGciOiJIUzI1NiJ9');
+    expect(out).not.toContain('abc123secret');
+    expect(out).toContain('[REDACTED]');
+  });
+
+  it('redacts URLs with embedded credentials', () => {
+    const out = redactGitDiffHunks('+const url = "https://admin:p@ssw0rd@db.example.com/db"');
+    expect(out).not.toContain('p@ssw0rd');
+    expect(out).toContain('[REDACTED-URL-CREDS]://');
+  });
 
   it('redacts hunks before inline or artifact persistence', () => {
     const inline = buildGitDiffEvidence({
-      numstat_output: '1	1	src/a.ts\n',
-      hunks_output: 'diff --git a/src/a.ts b/src/a.ts\n-old secret sk-123456789012\n+new alice@example.com\n',
+      numstat_output: '1\t1\tsrc/a.ts\n',
+      hunks_output: 'diff --git a/src/a.ts b/src/a.ts\n-old secret sk-123456789012\n+DB_PASSWORD=realpassword\n',
     });
 
-    expect(inline.hunks).toContain('[REDACTED]');
+    expect(inline.hunks).toContain('[REDACTED');
     expect(inline.hunks).not.toContain('sk-123456789012');
-    expect(inline.hunks).not.toContain('alice@example.com');
+    expect(inline.hunks).not.toContain('realpassword');
 
     const jobDir = mkdtempSync(join(tmpdir(), 'git-diff-artifact-'));
     try {
-      const ref = writeGitDiffHunksArtifact(jobDir, 'hunks.patch', 'diff --git a/src/a.ts b/src/a.ts\n-old sk-123456789012\n+new alice@example.com\n');
-      expect(ref).toContain('artifact://');
+      const ref = writeGitDiffHunksArtifact(
+        jobDir,
+        'hunks.patch',
+        'diff --git a/src/a.ts b/src/a.ts\n-old sk-123456789012\n+DB_PASSWORD=supersecret\n',
+      );
+      // ref must be opaque — no absolute paths, tmp dirs, home dirs, or usernames
+      expect(ref).toMatch(/^artifact:\/\/git-diff\//);
+      expect(ref).not.toContain('/tmp');
+      expect(ref).not.toContain('/home');
+      expect(ref).not.toContain(tmpdir());
+      expect(ref).not.toContain(jobDir);
       const stored = readFileSync(join(jobDir, 'artifacts', 'hunks.patch'), 'utf8');
-      expect(stored).toContain('[REDACTED]');
       expect(stored).not.toContain('sk-123456789012');
-      expect(stored).not.toContain('alice@example.com');
+      expect(stored).not.toContain('supersecret');
     } finally {
       rmSync(jobDir, { recursive: true, force: true });
     }
   });
-  it('keeps small hunks inline and large hunks redacted as artifact ref', () => {
+
+  it('keeps small hunks inline and large hunks as artifact ref', () => {
     const inline = buildGitDiffEvidence({
       base_ref: 'HEAD^',
       base_sha: 'base-sha',
