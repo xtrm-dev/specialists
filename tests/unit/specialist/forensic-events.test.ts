@@ -552,6 +552,50 @@ describe('forensic-events', () => {
     expect(event.redaction.status).toBe('clean');
   });
 
+  it('keeps git diff evidence in forensic body, not labels', async () => {
+    const { forensicEventFromTimelineEvent } = await import('../../../src/specialist/forensic-events.js');
+    const event = forensicEventFromTimelineEvent(
+      {
+        t: 1_780_000_000_005,
+        type: 'run_complete',
+        status: 'COMPLETE',
+        evidence: [
+          {
+            evidence_kind: 'diff',
+            evidence_ref: 'git:abc123def456',
+            evidence_state: 'inline',
+            base_ref: 'HEAD^',
+            base_sha: 'base-sha',
+            head_sha: 'head-sha',
+            diff: {
+              changed_files: [
+                { path: 'src/a.ts', added_lines: 12, removed_lines: 3 },
+                { path: 'docs/b.md', added_lines: 0, removed_lines: 7 },
+              ],
+              hunks: 'diff --git a/src/a.ts b/src/a.ts',
+              hunks_inline: true,
+            },
+          },
+        ],
+      },
+      { jobId: 'job-git', specialist: 'executor', repo: 'specialists', chainId: 'chain-git' },
+    );
+
+    expect(event.event_family).toBe('job');
+    expect(event.body).toMatchObject({
+      status: 'COMPLETE',
+      evidence_refs: [
+        expect.objectContaining({
+          evidence_kind: 'diff',
+          evidence_ref: 'git:abc123def456',
+          base_sha: 'base-sha',
+          head_sha: 'head-sha',
+        }),
+      ],
+    });
+    expect(() => assertNoForbiddenLabels(pickAllowedLabels({ ...event.resource, ...event.correlation, ...event.body }))).not.toThrow();
+  });
+
   it('keeps git commit evidence and changed paths in forensic body, not labels', async () => {
     const { forensicEventFromTimelineEvent } = await import('../../../src/specialist/forensic-events.js');
     const event = forensicEventFromTimelineEvent(

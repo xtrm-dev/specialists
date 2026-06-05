@@ -366,11 +366,32 @@ export interface TimelineEventApiError extends TimelineEventBase {
   error_message: string;
 }
 
+export interface TimelineEventEvidenceRef {
+  evidence_kind: 'diff' | 'commit' | 'pr';
+  evidence_ref?: string;
+  evidence_url?: string;
+  evidence_state?: string;
+  base_ref?: string;
+  base_sha?: string;
+  head_sha?: string;
+  pr_id?: string | number;
+  pr_url?: string;
+  pr_state?: string;
+  diff?: {
+    changed_files: Array<{ path: string; added_lines: number; removed_lines: number }>;
+    hunks?: string;
+    hunks_artifact_ref?: string;
+    hunks_inline?: boolean;
+    hunks_truncated?: boolean;
+  };
+}
+
 export interface TimelineEventAutoCommit extends TimelineEventBase {
   type: 'auto_commit_success' | 'auto_commit_skipped' | 'auto_commit_failed';
   reason?: string;
   commit_sha?: string;
   committed_files?: string[];
+  evidence?: TimelineEventEvidenceRef[];
 }
 
 export interface TimelineEventControlSignal extends TimelineEventBase {
@@ -890,6 +911,7 @@ export function createRunCompleteEvent(
     tool_calls?: string[];
     exit_reason?: string;
     metrics?: TimelineRunMetrics;
+    evidence?: TimelineEventEvidenceRef[];
     gitnexus_summary?: {
       files_touched: string[];
       symbols_analyzed: string[];
@@ -921,7 +943,7 @@ export function createControlSignalEvent(
 
 export function createAutoCommitEvent(
   status: 'success' | 'skipped' | 'failed',
-  options?: { reason?: string; commit_sha?: string; committed_files?: string[] },
+  options?: { reason?: string; commit_sha?: string; committed_files?: string[]; evidence?: TimelineEventEvidenceRef[] },
 ): TimelineEventAutoCommit {
   const type = status === 'success'
     ? TIMELINE_EVENT_TYPES.AUTO_COMMIT_SUCCESS
@@ -935,6 +957,7 @@ export function createAutoCommitEvent(
     ...(options?.reason ? { reason: options.reason } : {}),
     ...(options?.commit_sha ? { commit_sha: options.commit_sha } : {}),
     ...(options?.committed_files ? { committed_files: options.committed_files } : {}),
+    ...(options?.evidence ? { evidence: options.evidence } : {}),
   };
 }
 
