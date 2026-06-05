@@ -181,6 +181,13 @@ export async function finalizeJob(chainMemberId: string, opts: FinalizeJobOption
     const reviewerPass = findReviewerPassInChain(supervisor, chainId);
     if (!reviewerPass) throw new Error(`No reviewer with PASS compliance verdict found in chain ${chainId}.`);
 
+    supervisor.emitTimelineEvent(chainMemberId, createChainEvent('chain_ready_for_review', {
+      chain_id: chainId,
+      chain_template: status.branch ?? status.startup_context?.branch ?? 'unknown',
+      reviewer_job_id: reviewerPass.reviewerJobId,
+      terminal_state: 'merge_ready',
+      result: 'pass',
+    }) as any);
     supervisor.emitTimelineEvent(chainMemberId, createReviewVerdictEvent('pass', {
       chain_id: chainId,
       chain_template: status.branch ?? status.startup_context?.branch ?? 'unknown',

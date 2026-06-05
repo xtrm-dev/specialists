@@ -42,6 +42,7 @@ import {
   createControlSignalEvent,
   createCommandEvent,
   createReviewVerdictEvent,
+  createChainEvent,
   mapCallbackEventToTimelineEvent,
 } from './timeline-events.js';
 import type { SessionMetricEvent, SessionRunMetrics, SessionTokenUsage } from '../pi/session.js';
@@ -1449,6 +1450,15 @@ export class Supervisor {
       const verdict = parseReviewVerdict(output);
       if (!verdict) return;
       const terminalState = verdict === 'pass' ? 'merge_ready' : 'reviewed';
+      if (verdict === 'pass' && context.chainId) {
+        appendTimelineEvent(createChainEvent('chain_ready_for_review', {
+          chain_id: context.chainId,
+          chain_template: context.chainTemplate,
+          changed_paths_count: context.changedPathsCount,
+          terminal_state: terminalState,
+          result: verdict,
+        }) as unknown as TimelineEvent);
+      }
       appendTimelineEvent(createReviewVerdictEvent(verdict, {
         chain_id: context.chainId,
         chain_template: context.chainTemplate,

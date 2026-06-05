@@ -576,6 +576,43 @@ describe('forensic-events', () => {
     expect(() => assertNoForbiddenLabels(pickAllowedLabels({ ...event.resource, ...event.correlation, ...event.body }))).not.toThrow();
   });
 
+  it('normalizes live lifecycle families to canonical forensic rows', async () => {
+    const { forensicEventFromTimelineEvent } = await import('../../../src/specialist/forensic-events.js');
+    const resourceContext = { jobId: 'job-live', specialist: 'executor', repo: 'specialists', chainId: 'chain-live', beadId: 'unitAI-live' };
+
+    const commandEvent = forensicEventFromTimelineEvent(
+      { t: 1_780_000_000_006, type: 'command_completed', command_kind: 'git', duration_ms: 12, command: 'git', args: ['status', '--short'], redacted: true },
+      resourceContext,
+    );
+    const reviewEvent = forensicEventFromTimelineEvent(
+      { t: 1_780_000_000_007, type: 'review_verdict_pass', chain_template: 'chain', changed_paths_count: 3, terminal_state: 'merge_ready', result: 'pass' },
+      resourceContext,
+    );
+    const chainEvent = forensicEventFromTimelineEvent(
+      { t: 1_780_000_000_008, type: 'chain_ready_for_review', chain_template: 'chain', changed_paths_count: 3, terminal_state: 'merge_ready', result: 'pass' },
+      resourceContext,
+    );
+    const finalizedEvent = forensicEventFromTimelineEvent(
+      { t: 1_780_000_000_009, type: 'chain_finalized', chain_template: 'chain', changed_paths_count: 3, terminal_state: 'merged', result: 'success' },
+      resourceContext,
+    );
+    const worktreeEvent = forensicEventFromTimelineEvent(
+      { t: 1_780_000_000_010, type: 'worktree_merged', changed_paths_count: 3, merge_ref: 'refs/heads/sp/publish-chain', source_ref: 'refs/heads/feature', target_ref: 'refs/heads/main', result: 'success' },
+      resourceContext,
+    );
+
+    expect(commandEvent).toMatchObject({ event_family: 'command', event_name: 'command.completed', body: { command_kind: 'git', duration_ms: 12, status: 'success', redacted: true } });
+    expect(reviewEvent).toMatchObject({ event_family: 'review', event_name: 'review.verdict.pass', body: { verdict: 'pass', chain_template: 'chain', changed_paths_count: 3, terminal_state: 'merge_ready', result: 'pass' }, redaction: { status: 'redacted' } });
+    expect(chainEvent).toMatchObject({ event_family: 'chain', event_name: 'chain.ready_for_review', body: { chain_template: 'chain', changed_paths_count: 3, terminal_state: 'merge_ready', result: 'pass' }, redaction: { status: 'redacted' } });
+    expect(finalizedEvent).toMatchObject({ event_family: 'chain', event_name: 'chain.finalized', body: { chain_template: 'chain', changed_paths_count: 3, terminal_state: 'merged', result: 'success' } });
+    expect(worktreeEvent).toMatchObject({ event_family: 'worktree', event_name: 'worktree.merged', body: { changed_paths_count: 3, merge_ref: 'refs/heads/sp/publish-chain', source_ref: 'refs/heads/feature', target_ref: 'refs/heads/main', result: 'success' } });
+
+    for (const event of [commandEvent, reviewEvent, chainEvent, finalizedEvent, worktreeEvent]) {
+      expect(['clean', 'redacted', 'unknown']).toContain(event.redaction.status);
+      expect(() => assertNoForbiddenLabels(pickAllowedLabels({ ...event.resource, ...event.correlation, ...event.body, event_family: event.event_family, severity: event.severity }))).not.toThrow();
+    }
+  });
+
   it('falls back to timeline correlation fields when context fields are absent', async () => {
     const { forensicEventFromTimelineEvent } = await import('../../../src/specialist/forensic-events.js');
     const event = forensicEventFromTimelineEvent(
