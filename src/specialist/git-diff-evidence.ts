@@ -32,6 +32,8 @@ const AUTH_HEADER_RE = /\b(authorization|cookie)\s*:[^\n]+/ig;
 const URL_CREDS_RE = /https?:\/\/[^/:@\s]+:[^/@\s]+@/ig;
 // JWT-like tokens (three base64url segments)
 const JWT_RE = /\bey[a-z0-9_-]{10,}\.ey[a-z0-9_-]{10,}\.[a-z0-9_-]{10,}\b/ig;
+// Email addresses (PII)
+const EMAIL_RE = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/ig;
 
 export function redactGitDiffHunks(hunks: string): string {
   return hunks
@@ -40,7 +42,8 @@ export function redactGitDiffHunks(hunks: string): string {
     .replace(URL_CREDS_RE, '[REDACTED-URL-CREDS]://')
     .replace(ENV_SECRET_RE, '[REDACTED]')
     .replace(AUTH_HEADER_RE, '[REDACTED]')
-    .replace(TOKEN_RE, '[REDACTED-TOKEN]');
+    .replace(TOKEN_RE, '[REDACTED-TOKEN]')
+    .replace(EMAIL_RE, '[REDACTED-EMAIL]');
 }
 
 // Returns an opaque resolver ref; filesystem path stays internal.

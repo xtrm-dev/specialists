@@ -53,6 +53,13 @@ describe('git-diff-evidence', () => {
     expect(out).toContain('[REDACTED]');
   });
 
+  it('redacts email addresses (PII)', () => {
+    const out = redactGitDiffHunks('+author = alice@example.com\n+contact: bob@corp.io');
+    expect(out).not.toContain('alice@example.com');
+    expect(out).not.toContain('bob@corp.io');
+    expect(out).toContain('[REDACTED-EMAIL]');
+  });
+
   it('redacts URLs with embedded credentials', () => {
     const out = redactGitDiffHunks('+const url = "https://admin:p@ssw0rd@db.example.com/db"');
     expect(out).not.toContain('p@ssw0rd');
