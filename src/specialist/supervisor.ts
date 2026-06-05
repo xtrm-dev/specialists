@@ -41,6 +41,7 @@ import {
   createAutoCommitEvent,
   createControlSignalEvent,
   createCommandEvent,
+  createReviewVerdictEvent,
   mapCallbackEventToTimelineEvent,
 } from './timeline-events.js';
 import type { SessionMetricEvent, SessionRunMetrics, SessionTokenUsage } from '../pi/session.js';
@@ -223,8 +224,9 @@ const MODEL_CONTEXT_WINDOWS: Array<{ matcher: (model: string) => boolean; window
   { matcher: (model) => model.includes('claude'), windowTokens: 200_000 },
 ];
 
-const TERMINAL_COMPLIANCE_VERDICT_REGEX = /## Compliance Verdict[\s\S]*?- Verdict:\s*\**\s*(PASS|PARTIAL|FAIL)\s*\**/i;
+const TERMINAL_COMPLIANCE_VERDICT_REGEX = /## Compliance Verdict[\s\S]*?- Verdict:\s*\**\s*(PASS|PARTIAL|FAIL|WAIVED)\s*\**/i;
 const PASS_COMPLIANCE_VERDICT_REGEX = /## Compliance Verdict[\s\S]*?- Verdict:\s*\**\s*PASS\s*\**/i;
+const REVIEW_VERDICT_REGEX = /## Compliance Verdict[\s\S]*?- Verdict:\s*\**\s*(PASS|PARTIAL|FAIL|WAIVED)\s*\**/i;
 
 function getModelContextWindow(model: string | undefined): number | undefined {
   if (!model) return undefined;
@@ -237,6 +239,13 @@ function getContextHealth(contextPct: number): ContextHealth {
   if (contextPct <= 65) return 'MONITOR';
   if (contextPct <= 80) return 'WARN';
   return 'CRITICAL';
+}
+
+function parseReviewVerdict(output: string): 'pass' | 'partial' | 'fail' | 'waived' | undefined {
+  const match = output.match(REVIEW_VERDICT_REGEX);
+  if (!match?.[1]) return undefined;
+  const verdict = match[1].toLowerCase();
+  return verdict === 'pass' || verdict === 'partial' || verdict === 'fail' || verdict === 'waived' ? verdict : undefined;
 }
 
 function calculateContextUtilization(
@@ -1436,6 +1445,18 @@ export class Supervisor {
       }));
     };
 
+    const emitReviewVerdictTimelineEvent = (output: string, context: { chainId?: string; chainTemplate?: string; changedPathsCount?: number }): void => {
+      const verdict = parseReviewVerdict(output);
+      if (!verdict) return;
+      const terminalState = verdict === 'pass' ? 'merge_ready' : 'reviewed';
+      appendTimelineEvent(createReviewVerdictEvent(verdict, {
+        chain_id: context.chainId,
+        chain_template: context.chainTemplate,
+        changed_paths_count: context.changedPathsCount,
+        terminal_state: terminalState,
+        result: verdict,
+      }) as unknown as TimelineEvent);
+    };
     const shouldAutoCloseReadOnlyKeepAlive = (output: string): boolean => (
       isReadOnlySpecialist && TERMINAL_COMPLIANCE_VERDICT_REGEX.test(output)
     );
@@ -1615,6 +1636,12 @@ export class Supervisor {
 
         const passFinalize = shouldAutoFinalizeKeepAlive(output);
         const readOnlyClose = shouldAutoCloseReadOnlyKeepAlive(output);
+        if (passFinalize || readOnlyClose || parseReviewVerdict(output)) {
+          emitReviewVerdictTimelineEvent(output, {
+            chainId: statusSnapshot.chain_id,
+            chainTemplate: statusSnapshot.startup_context?.branch,
+          });
+        }
         const isWaitingTurn = !readOnlyClose && !passFinalize;
         applyAutoCommitCheckpoint(isWaitingTurn ? 'waiting' : 'terminal', autoCommitPolicy);
         writeUnifiedHandoff({
@@ -2217,6 +2244,12 @@ export class Supervisor {
       applyAutoCommitCheckpoint(runCompletesAsWaiting ? 'waiting' : 'terminal', autoCommitPolicy);
 
       if (keepAliveSession) {
+        if (parseReviewVerdict(finalResult.output)) {
+          emitReviewVerdictTimelineEvent(finalResult.output, {
+            chainId: statusSnapshot.chain_id,
+            chainTemplate: statusSnapshot.startup_context?.branch,
+          });
+        }
         if (shouldAutoCloseReadOnlyKeepAlive(finalResult.output)) {
           await closeKeepAliveSession();
         } else if (shouldAutoFinalizeKeepAlive(finalResult.output)) {

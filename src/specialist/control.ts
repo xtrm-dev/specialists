@@ -183,6 +183,7 @@ export async function finalizeJob(chainMemberId: string, opts: FinalizeJobOption
 
     supervisor.emitTimelineEvent(chainMemberId, createReviewVerdictEvent('pass', {
       chain_id: chainId,
+      chain_template: status.branch ?? status.startup_context?.branch ?? 'unknown',
       reviewer_job_id: reviewerPass.reviewerJobId,
       terminal_state: 'merge_ready',
       result: 'pass',
@@ -201,7 +202,7 @@ export async function finalizeJob(chainMemberId: string, opts: FinalizeJobOption
 
     supervisor.emitTimelineEvent(chainMemberId, createChainEvent('chain_finalized', {
       chain_id: chainId,
-      chain_template: 'unknown',
+      chain_template: status.branch ?? status.startup_context?.branch ?? 'unknown',
       terminal_state: 'merged',
       result: 'success',
     }) as any);

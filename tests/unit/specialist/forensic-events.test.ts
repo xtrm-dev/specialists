@@ -119,6 +119,46 @@ describe('forensic-events', () => {
       }),
     },
     {
+      name: 'command.failed',
+      event: createForensicEvent({
+        event_family: 'command',
+        event_name: 'command.failed',
+        resource,
+        correlation: { participant_id: 'chain:1::executor', job_id: 'job-4b' },
+        body: { command_kind: 'git', duration_ms: 13, status: 'error', command: 'git', args: ['commit', '-m', '[REDACTED]'], stderr: '[REDACTED]', redacted: true },
+      }),
+    },
+    {
+      name: 'review.verdict.partial',
+      event: createForensicEvent({
+        event_family: 'review',
+        event_name: 'review.verdict.partial',
+        resource,
+        correlation: { participant_id: 'chain:1::executor', job_id: 'job-5b', chain_id: 'chain:1' },
+        body: { verdict: 'partial', chain_template: 'chain', terminal_state: 'reviewed', result: 'partial' },
+      }),
+    },
+    {
+      name: 'review.verdict.fail',
+      event: createForensicEvent({
+        event_family: 'review',
+        event_name: 'review.verdict.fail',
+        resource,
+        correlation: { participant_id: 'chain:1::executor', job_id: 'job-5c', chain_id: 'chain:1' },
+        body: { verdict: 'fail', chain_template: 'chain', terminal_state: 'reviewed', result: 'fail' },
+      }),
+    },
+    {
+      name: 'review.verdict.waived',
+      event: createForensicEvent({
+        event_family: 'review',
+        event_name: 'review.verdict.waived',
+        resource,
+        correlation: { participant_id: 'chain:1::executor', job_id: 'job-5d', chain_id: 'chain:1' },
+        body: { verdict: 'waived', chain_template: 'chain', terminal_state: 'reviewed', result: 'waived' },
+      }),
+    },
+    {
       name: 'review.verdict.pass',
       event: createForensicEvent({
         event_family: 'review',
@@ -136,6 +176,16 @@ describe('forensic-events', () => {
         resource,
         correlation: { participant_id: 'chain:1::executor', job_id: 'job-6', chain_id: 'chain:1' },
         body: { chain_template: 'chain', changed_paths_count: 3, terminal_state: 'merge_ready', result: 'pass' },
+      }),
+    },
+    {
+      name: 'chain.finalized',
+      event: createForensicEvent({
+        event_family: 'chain',
+        event_name: 'chain.finalized',
+        resource,
+        correlation: { participant_id: 'chain:1::executor', job_id: 'job-6b', chain_id: 'chain:1' },
+        body: { chain_template: 'epic-1', changed_paths_count: 4, terminal_state: 'merged', result: 'success' },
       }),
     },
     {
