@@ -278,8 +278,13 @@ describe('forensic-events', () => {
       'pulse.emitted',
       'model.token_usage.recorded',
       'command.completed',
+      'command.failed',
+      'review.verdict.partial',
+      'review.verdict.fail',
+      'review.verdict.waived',
       'review.verdict.pass',
       'chain.ready_for_review',
+      'chain.finalized',
       'worktree.merged',
     ]);
 
