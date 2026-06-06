@@ -1,7 +1,8 @@
 import { spawnSync } from 'node:child_process';
-import { bold, cyan, dim, formatCostUsd, formatTokenUsageSummary, green, magenta, red, yellow } from './format-helpers.js';
+import { bold, cyan, dim, formatTokenUsageSummary, green, magenta, red, yellow } from './format-helpers.js';
 import { isJobDead } from '../specialist/supervisor.js';
 import type { SupervisorStatus } from '../specialist/supervisor.js';
+import type { TimelineEvent, TimelineEventRunComplete, TimelineTokenUsage } from '../specialist/timeline-events.js';
 // TODO(u4fdd.6): shared status loading now lives in src/specialist/status-load.ts for ChatStatus reuse.
 import { loadStatuses } from '../specialist/status-load.js';
 import { createObservabilitySqliteClient } from '../specialist/observability-sqlite.js';
@@ -828,13 +829,105 @@ function renderHuman(jobs: SupervisorStatus[], nodes: NodeTree[], trees: Worktre
   console.log(dim(`${renderedJobIds.size} jobs · ${epicGroups.length} epics · ${legacyNodes.length} nodes · ${legacyTrees.length} worktrees · ${runningCount} running · ${waitingCount} waiting${all ? ' · include terminal' : ''}`));
 }
 
-function renderInspect(jobId: string): void {
+function statusFromRunComplete(status: TimelineEventRunComplete['status'] | undefined): JobState {
+  if (status === 'COMPLETE') return 'done';
+  if (status === 'CANCELLED') return 'cancelled';
+  if (status === 'ERROR') return 'error';
+  return 'running';
+}
+
+function latestTokenUsage(events: readonly TimelineEvent[], complete?: TimelineEventRunComplete): TimelineTokenUsage | undefined {
+  if (complete?.token_usage) return complete.token_usage;
+  if (complete?.metrics?.token_usage) return complete.metrics.token_usage;
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index] as TimelineEvent & { token_usage?: TimelineTokenUsage };
+    if (event.token_usage) return event.token_usage;
+  }
+  return undefined;
+}
+
+function synthesizeStatusFromEvents(jobId: string): SupervisorStatus | null {
+  const sqliteClient = createObservabilitySqliteClient();
+  try {
+    const events = sqliteClient?.readEvents(jobId) ?? [];
+    if (events.length === 0) return null;
+
+    const first = events[0]!;
+    const runStart = events.find((event) => event.type === 'run_start') as (TimelineEvent & { specialist?: string; bead_id?: string; startup_snapshot?: Record<string, unknown> }) | undefined;
+    const runComplete = [...events].reverse().find((event) => event.type === 'run_complete') as TimelineEventRunComplete | undefined;
+    const latestMeta = [...events].reverse().find((event) => event.type === 'meta') as (TimelineEvent & { model?: string; backend?: string }) | undefined;
+    const last = events[events.length - 1]!;
+    const startup = runStart?.startup_snapshot;
+    const specialist = runStart?.specialist
+      ?? (typeof startup?.specialist_name === 'string' ? startup.specialist_name : undefined)
+      ?? 'unknown';
+
+    return {
+      id: jobId,
+      specialist,
+      status: statusFromRunComplete(runComplete?.status),
+      started_at_ms: first.t,
+      elapsed_s: runComplete?.elapsed_s ?? Math.max(0, Math.round((last.t - first.t) / 1000)),
+      last_event_at_ms: last.t,
+      bead_id: runStart?.bead_id ?? (typeof startup?.bead_id === 'string' ? startup.bead_id : undefined),
+      model: runComplete?.model ?? latestMeta?.model,
+      backend: runComplete?.backend ?? latestMeta?.backend,
+      output_type: runComplete?.metrics?.output_type,
+      chain_kind: typeof startup?.chain_id === 'string' ? 'chain' : 'prep',
+      chain_id: typeof startup?.chain_id === 'string' ? startup.chain_id : undefined,
+      chain_root_job_id: typeof startup?.chain_root_job_id === 'string' ? startup.chain_root_job_id : undefined,
+      chain_root_bead_id: typeof startup?.chain_root_bead_id === 'string' ? startup.chain_root_bead_id : undefined,
+      worktree_path: typeof startup?.worktree_path === 'string' ? startup.worktree_path : undefined,
+      branch: typeof startup?.branch === 'string' ? startup.branch : undefined,
+      reused_from_job_id: typeof startup?.reused_from_job_id === 'string' ? startup.reused_from_job_id : undefined,
+      worktree_owner_job_id: typeof startup?.worktree_owner_job_id === 'string' ? startup.worktree_owner_job_id : undefined,
+      metrics: {
+        ...runComplete?.metrics,
+        ...(latestTokenUsage(events, runComplete) ? { token_usage: latestTokenUsage(events, runComplete) } : {}),
+      },
+    };
+  } finally {
+    sqliteClient?.close();
+  }
+}
+
+function renderInspectJson(job: SupervisorStatus & { is_dead: boolean; recovered_from_events?: boolean }): void {
+  console.log(JSON.stringify({
+    job: {
+      id: job.id,
+      specialist: job.specialist,
+      status: job.status,
+      model: job.model ?? null,
+      backend: job.backend ?? null,
+      bead_id: job.bead_id ?? null,
+      chain_kind: job.chain_kind ?? null,
+      chain_id: job.chain_id ?? null,
+      started_at_ms: job.started_at_ms,
+      elapsed_s: job.elapsed_s ?? null,
+      metrics: job.metrics ?? null,
+      recovered_from_events: Boolean(job.recovered_from_events),
+    },
+  }, null, 2));
+}
+
+function renderInspect(jobId: string, args: PsArgs): void {
   const statuses = withPidLiveness(loadStatuses());
   const epicReadiness = resolveEpicReadinessMap(statuses, false);
-  const job = statuses.find((s) => s.id.startsWith(jobId));
+  const statusJob = statuses.find((s) => s.id.startsWith(jobId));
+  const fallbackJob = statusJob ? null : synthesizeStatusFromEvents(jobId);
+  const job = statusJob ?? (fallbackJob ? { ...fallbackJob, is_dead: false, recovered_from_events: true } : null);
   if (!job) {
-    console.error(`Job not found: ${jobId}`);
+    if (args.json) {
+      console.log(JSON.stringify({ error: `Job not found: ${jobId}` }, null, 2));
+    } else {
+      console.error(`Job not found: ${jobId}`);
+    }
     process.exitCode = 1;
+    return;
+  }
+
+  if (args.json) {
+    renderInspectJson(job);
     return;
   }
 
@@ -868,13 +961,9 @@ function renderInspect(jobId: string): void {
   if (chainJobs.length > 1) console.log(`  chain     ${chainStr}`);
   console.log(`  elapsed   ${formatElapsed(job.elapsed_s)}${job.metrics ? ` · ${job.metrics.turns ?? 0} turns · ${job.metrics.tool_calls ?? 0} tools` : ''}`);
   const tokenUsage = job.metrics?.token_usage;
-  const tokenSummaryParts = formatTokenUsageSummary(tokenUsage).filter((part) => !part.startsWith('cost='));
+  const tokenSummaryParts = formatTokenUsageSummary(tokenUsage);
   if (tokenSummaryParts.length > 0) {
     console.log(`  tokens    ${tokenSummaryParts.join(' · ')}`);
-  }
-  const formattedCost = formatCostUsd(tokenUsage?.cost_usd);
-  if (formattedCost) {
-    console.log(`  cost_usd  ${formattedCost}`);
   }
   console.log(`  context   ${ctx}`);
   if (job.current_tool) console.log(`  current   ${job.current_tool}`);
@@ -1094,7 +1183,7 @@ export async function run(): Promise<void> {
     };
 
     if (resolvedArgs.inspectId) {
-      renderInspect(resolvedArgs.inspectId);
+      renderInspect(resolvedArgs.inspectId, resolvedArgs);
       return;
     }
     if (resolvedArgs.follow) {

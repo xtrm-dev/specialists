@@ -40,8 +40,12 @@ import {
   createRetryEvent,
   createAutoCommitEvent,
   createControlSignalEvent,
+  createCommandEvent,
+  createReviewVerdictEvent,
+  createChainEvent,
   mapCallbackEventToTimelineEvent,
 } from './timeline-events.js';
+import { buildGitDiffEvidence, willHunksBeInline, writeGitDiffHunksArtifact } from './git-diff-evidence.js';
 import type { SessionMetricEvent, SessionRunMetrics, SessionTokenUsage } from '../pi/session.js';
 import type { StallDetectionConfig } from './loader.js';
 import { createObservabilitySqliteClient, type ObservabilitySqliteClient } from './observability-sqlite.js';
@@ -78,6 +82,11 @@ export interface SupervisorStatus {
   last_event_at_ms?: number;
   bead_id?: string;
   node_id?: string;
+  session_id?: string;
+  conversation_id?: string;
+  trace_id?: string;
+  span_id?: string;
+  parent_span_id?: string;
   session_file?: string;
   fifo_path?: string;
   tmux_session?: string;
@@ -144,7 +153,7 @@ export interface SupervisorOptions {
   /** Optional callback to stream progress deltas to stdout/elsewhere */
   onProgress?: (delta: string) => void;
   /** Optional callback for meta events (backend/model) */
-  onMeta?: (meta: { backend: string; model: string }) => void;
+  onMeta?: (meta: { backend: string; model: string; sessionId?: string }) => void;
   /** Optional callback fired as soon as a job id is allocated and persisted */
   onJobStarted?: (job: { id: string }) => void;
   /** Stall detection thresholds — merged with STALL_DETECTION_DEFAULTS */
@@ -217,8 +226,9 @@ const MODEL_CONTEXT_WINDOWS: Array<{ matcher: (model: string) => boolean; window
   { matcher: (model) => model.includes('claude'), windowTokens: 200_000 },
 ];
 
-const TERMINAL_COMPLIANCE_VERDICT_REGEX = /## Compliance Verdict[\s\S]*?- Verdict:\s*\**\s*(PASS|PARTIAL|FAIL)\s*\**/i;
+const TERMINAL_COMPLIANCE_VERDICT_REGEX = /## Compliance Verdict[\s\S]*?- Verdict:\s*\**\s*(PASS|PARTIAL|FAIL|WAIVED)\s*\**/i;
 const PASS_COMPLIANCE_VERDICT_REGEX = /## Compliance Verdict[\s\S]*?- Verdict:\s*\**\s*PASS\s*\**/i;
+const REVIEW_VERDICT_REGEX = /## Compliance Verdict[\s\S]*?- Verdict:\s*\**\s*(PASS|PARTIAL|FAIL|WAIVED)\s*\**/i;
 
 function getModelContextWindow(model: string | undefined): number | undefined {
   if (!model) return undefined;
@@ -231,6 +241,13 @@ function getContextHealth(contextPct: number): ContextHealth {
   if (contextPct <= 65) return 'MONITOR';
   if (contextPct <= 80) return 'WARN';
   return 'CRITICAL';
+}
+
+function parseReviewVerdict(output: string): 'pass' | 'partial' | 'fail' | 'waived' | undefined {
+  const match = output.match(REVIEW_VERDICT_REGEX);
+  if (!match?.[1]) return undefined;
+  const verdict = match[1].toLowerCase();
+  return verdict === 'pass' || verdict === 'partial' || verdict === 'fail' || verdict === 'waived' ? verdict : undefined;
 }
 
 function calculateContextUtilization(
@@ -344,11 +361,12 @@ function runAutoCommitCheckpoint(options: {
   specialist: string;
   beadId: string | undefined;
   turnNumber: number;
+  emitCommandEvent?: (status: 'completed' | 'failed', options: { command_kind: string; duration_ms?: number; command?: string; args?: string[]; exit_code?: number; stderr?: string; redacted?: boolean }) => void;
 }):
   | { status: 'skipped'; reason: string }
   | { status: 'success'; sha: string; files: string[]; committedAtMs: number }
   | { status: 'failed'; reason: string } {
-  const { autoCommitPolicy, target, worktreePath, specialist, beadId, turnNumber } = options;
+  const { autoCommitPolicy, target, worktreePath, specialist, beadId, turnNumber, emitCommandEvent } = options;
   if (!worktreePath) return { status: 'skipped', reason: 'no_worktree' };
   if (!autoCommitPolicy || autoCommitPolicy === 'never') return { status: 'skipped', reason: 'policy_never' };
   if (autoCommitPolicy === 'checkpoint_on_waiting' && target !== 'waiting') {
@@ -364,32 +382,45 @@ function runAutoCommitCheckpoint(options: {
       return { status: 'skipped', reason: 'no_substantive_changes' };
     }
 
+    const addStart = Date.now();
     const addResult = spawnSync('git', ['add', '--', ...substantiveFiles], {
       cwd: worktreePath,
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    const addDuration = Date.now() - addStart;
     if (addResult.status !== 0) {
+      emitCommandEvent?.('failed', { command_kind: 'git', duration_ms: addDuration, command: 'git', args: ['add', '--', ...substantiveFiles], exit_code: typeof addResult.status === 'number' ? addResult.status : undefined, stderr: (addResult.stderr ?? addResult.stdout ?? 'git add failed').trim(), redacted: true });
       return { status: 'failed', reason: (addResult.stderr ?? addResult.stdout ?? 'git add failed').trim() };
     }
+    emitCommandEvent?.('completed', { command_kind: 'git', duration_ms: addDuration, command: 'git', args: ['add', '--', ...substantiveFiles], exit_code: 0, redacted: true });
 
-    const commitResult = spawnSync('git', ['commit', '-m', buildAutoCommitMessage(specialist, beadId, turnNumber)], {
+    const commitMessage = buildAutoCommitMessage(specialist, beadId, turnNumber);
+    const commitStart = Date.now();
+    const commitResult = spawnSync('git', ['commit', '-m', commitMessage], {
       cwd: worktreePath,
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    const commitDuration = Date.now() - commitStart;
     if (commitResult.status !== 0) {
+      emitCommandEvent?.('failed', { command_kind: 'git', duration_ms: commitDuration, command: 'git', args: ['commit', '-m', commitMessage], exit_code: typeof commitResult.status === 'number' ? commitResult.status : undefined, stderr: (commitResult.stderr ?? commitResult.stdout ?? 'git commit failed').trim(), redacted: true });
       return { status: 'failed', reason: (commitResult.stderr ?? commitResult.stdout ?? 'git commit failed').trim() };
     }
+    emitCommandEvent?.('completed', { command_kind: 'git', duration_ms: commitDuration, command: 'git', args: ['commit', '-m', commitMessage], exit_code: 0, redacted: true });
 
+    const shaStart = Date.now();
     const shaResult = spawnSync('git', ['rev-parse', 'HEAD'], {
       cwd: worktreePath,
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    const shaDuration = Date.now() - shaStart;
     if (shaResult.status !== 0) {
+      emitCommandEvent?.('failed', { command_kind: 'git', duration_ms: shaDuration, command: 'git', args: ['rev-parse', 'HEAD'], exit_code: typeof shaResult.status === 'number' ? shaResult.status : undefined, stderr: (shaResult.stderr ?? shaResult.stdout ?? 'git rev-parse failed').trim(), redacted: true });
       return { status: 'failed', reason: (shaResult.stderr ?? shaResult.stdout ?? 'git rev-parse failed').trim() };
     }
+    emitCommandEvent?.('completed', { command_kind: 'git', duration_ms: shaDuration, command: 'git', args: ['rev-parse', 'HEAD'], exit_code: 0, redacted: true });
 
     return {
       status: 'success',
@@ -398,6 +429,7 @@ function runAutoCommitCheckpoint(options: {
       committedAtMs: Date.now(),
     };
   } catch (error: unknown) {
+    emitCommandEvent?.('failed', { command_kind: 'git', command: 'git', args: ['status', '--porcelain'], redacted: true, stderr: String(error) });
     return { status: 'failed', reason: String(error) };
   }
 }
@@ -868,6 +900,11 @@ export class Supervisor {
   ): void {
     if (this.isDisposed) return;
     this.appendEventBestEffort(jobId, 'appendEvent', createControlSignalEvent(action, options));
+  }
+
+  emitTimelineEvent(jobId: string, event: TimelineEvent): void {
+    if (this.isDisposed) return;
+    this.appendEventBestEffort(jobId, 'appendEvent', event);
   }
 
   updateJobStatus(id: string, status: Extract<SupervisorJobStatus, 'done' | 'cancelled' | 'error' | 'waiting' | 'running' | 'starting'>, error?: string): SupervisorStatusView | null {
@@ -1406,10 +1443,32 @@ export class Supervisor {
         tool_calls: [...toolCallNames],
         exit_reason: runMetrics.exit_reason,
         metrics: runMetrics,
+        evidence: latestEvidenceRefs,
         ...(gitnexusSummary ? { gitnexus_summary: gitnexusSummary } : {}),
       }));
     };
 
+    const emitReviewVerdictTimelineEvent = (output: string, context: { chainId?: string; chainTemplate?: string; changedPathsCount?: number }): void => {
+      const verdict = parseReviewVerdict(output);
+      if (!verdict) return;
+      const terminalState = verdict === 'pass' ? 'merge_ready' : 'reviewed';
+      if (verdict === 'pass' && context.chainId) {
+        appendTimelineEvent(createChainEvent('chain_ready_for_review', {
+          chain_id: context.chainId,
+          chain_template: context.chainTemplate,
+          changed_paths_count: context.changedPathsCount,
+          terminal_state: terminalState,
+          result: verdict,
+        }) as unknown as TimelineEvent);
+      }
+      appendTimelineEvent(createReviewVerdictEvent(verdict, {
+        chain_id: context.chainId,
+        chain_template: context.chainTemplate,
+        changed_paths_count: context.changedPathsCount,
+        terminal_state: terminalState,
+        result: verdict,
+      }) as unknown as TimelineEvent);
+    };
     const shouldAutoCloseReadOnlyKeepAlive = (output: string): boolean => (
       isReadOnlySpecialist && TERMINAL_COMPLIANCE_VERDICT_REGEX.test(output)
     );
@@ -1421,6 +1480,18 @@ export class Supervisor {
     let lastTurnSummaryTextContent = '';
     let lastTurnSummaryIndex = 0;
     let skipFinalKeepAliveInputBeadAppend = false;
+    let latestEvidenceRefs: Array<{ evidence_kind: 'diff' | 'commit' | 'pr'; evidence_ref?: string; evidence_url?: string; evidence_state?: string; base_ref?: string; base_sha?: string; head_sha?: string; pr_id?: string | number; pr_url?: string; pr_state?: string; diff?: { changed_files: Array<{ path: string; added_lines: number; removed_lines: number }>; hunks?: string; hunks_artifact_ref?: string; hunks_inline?: boolean; hunks_truncated?: boolean; } }> | undefined;
+    const getObservedPrEvidenceRef = (worktreePath: string): { pr_id?: number; pr_url?: string; pr_state?: string } | undefined => {
+      const result = spawnSync('gh', ['pr', 'view', '--json', 'number,url,state'], { cwd: worktreePath, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
+      if (result.status !== 0) return undefined;
+      try {
+        const parsed = JSON.parse((result.stdout ?? '').trim()) as { number?: number; url?: string; state?: string };
+        if (!parsed?.url) return undefined;
+        return { pr_id: parsed.number, pr_url: parsed.url, pr_state: parsed.state };
+      } catch {
+        return undefined;
+      }
+    };
     /** SHA of the most recent commit for which gitnexus analyze was triggered.
      *  Used to dedupe checkpoint-time vs terminal-time analyze fires when both
      *  paths see the same final commit. */
@@ -1510,6 +1581,44 @@ export class Supervisor {
       tokenUsage?: SessionTokenUsage;
     }): boolean => writeUnifiedHandoff(params);
 
+    const buildAutoCommitEvidenceRefs = (jobId: string, worktreePath: string, commitSha: string): NonNullable<typeof latestEvidenceRefs> => {
+      const baseShaResult = spawnSync('git', ['rev-parse', commitSha + '^'], { cwd: worktreePath, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
+      const baseSha = baseShaResult.status === 0 ? (baseShaResult.stdout ?? '').trim() : undefined;
+      const baseRef = baseSha ? commitSha + '^' : undefined;
+      const range = baseSha ? baseSha + '..' + commitSha : commitSha + '^..' + commitSha;
+      const numstatResult = spawnSync('git', ['diff', '--numstat', '--no-renames', range], { cwd: worktreePath, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
+      const hunksResult = spawnSync('git', ['diff', '--unified=0', '--no-ext-diff', '--no-renames', range], { cwd: worktreePath, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
+      const hunksOutput = (hunksResult.stdout ?? '').trim();
+      const artifactRef = hunksOutput && !willHunksBeInline(hunksOutput)
+        ? writeGitDiffHunksArtifact(this.jobDir(jobId), 'git-diff-' + commitSha.slice(0, 12) + '.patch', hunksOutput)
+        : undefined;
+      const diff = buildGitDiffEvidence({
+        base_ref: baseRef,
+        base_sha: baseSha,
+        head_sha: commitSha,
+        numstat_output: (numstatResult.stdout ?? '').trim(),
+        hunks_output: hunksOutput,
+        artifact_ref: artifactRef,
+      });
+      const evidenceRefs: NonNullable<typeof latestEvidenceRefs> = [
+        {
+          evidence_kind: 'diff',
+          evidence_ref: 'git:' + commitSha.slice(0, 12),
+          evidence_state: diff.hunks_inline ? 'inline' : 'artifact',
+          base_ref: diff.base_ref,
+          base_sha: diff.base_sha,
+          head_sha: diff.head_sha,
+          diff,
+        },
+        { evidence_kind: 'commit', evidence_ref: commitSha, evidence_state: 'complete' },
+      ];
+      const prEvidence = getObservedPrEvidenceRef(worktreePath);
+      if (prEvidence) {
+        evidenceRefs.push({ evidence_kind: 'pr', evidence_ref: prEvidence.pr_id ? 'pr:' + prEvidence.pr_id : prEvidence.pr_url, evidence_url: prEvidence.pr_url, evidence_state: prEvidence.pr_state, pr_id: prEvidence.pr_id, pr_url: prEvidence.pr_url, pr_state: prEvidence.pr_state });
+      }
+      return evidenceRefs;
+    };
+
     const applyAutoCommitCheckpoint = (target: 'waiting' | 'terminal', autoCommitPolicy: 'never' | 'checkpoint_on_waiting' | 'checkpoint_on_terminal' | undefined): void => {
       const autoCommitResult = runAutoCommitCheckpoint({
         autoCommitPolicy,
@@ -1518,6 +1627,9 @@ export class Supervisor {
         specialist: runOptions.name,
         beadId: statusSnapshot.bead_id,
         turnNumber: Math.max(1, runMetrics.turns ?? 1),
+        emitCommandEvent: (status, commandEvent) => {
+          appendTimelineEvent(createCommandEvent(status, commandEvent) as unknown as TimelineEvent);
+        },
       });
 
       if (autoCommitResult.status === 'skipped') {
@@ -1537,9 +1649,11 @@ export class Supervisor {
         last_auto_commit_sha: autoCommitResult.sha,
         last_auto_commit_at_ms: autoCommitResult.committedAtMs,
       });
+      latestEvidenceRefs = buildAutoCommitEvidenceRefs(id, statusSnapshot.worktree_path ?? process.cwd(), autoCommitResult.sha);
       appendTimelineEvent(createAutoCommitEvent('success', {
         commit_sha: autoCommitResult.sha,
         committed_files: autoCommitResult.files,
+        evidence: latestEvidenceRefs,
       }));
       // Refresh GitNexus index immediately after the commit so reviewers/orchestrators
       // inspecting the keep-alive worktree mid-session see up-to-date graph data.
@@ -1586,6 +1700,12 @@ export class Supervisor {
 
         const passFinalize = shouldAutoFinalizeKeepAlive(output);
         const readOnlyClose = shouldAutoCloseReadOnlyKeepAlive(output);
+        if (passFinalize || readOnlyClose || parseReviewVerdict(output)) {
+          emitReviewVerdictTimelineEvent(output, {
+            chainId: statusSnapshot.chain_id,
+            chainTemplate: statusSnapshot.startup_context?.branch,
+          });
+        }
         const isWaitingTurn = !readOnlyClose && !passFinalize;
         applyAutoCommitCheckpoint(isWaitingTurn ? 'waiting' : 'terminal', autoCommitPolicy);
         writeUnifiedHandoff({
@@ -1992,7 +2112,7 @@ export class Supervisor {
         },
         // onMeta — model/backend metadata
         (meta) => {
-          setStatus({ model: meta.model, backend: meta.backend });
+          setStatus({ model: meta.model, backend: meta.backend, ...(meta.sessionId ? { session_id: meta.sessionId } : {}) });
           appendTimelineEvent(createMetaEvent(meta.model, meta.backend));
           // Stream to caller if callback provided
           this.opts.onMeta?.(meta);
@@ -2188,6 +2308,12 @@ export class Supervisor {
       applyAutoCommitCheckpoint(runCompletesAsWaiting ? 'waiting' : 'terminal', autoCommitPolicy);
 
       if (keepAliveSession) {
+        if (parseReviewVerdict(finalResult.output)) {
+          emitReviewVerdictTimelineEvent(finalResult.output, {
+            chainId: statusSnapshot.chain_id,
+            chainTemplate: statusSnapshot.startup_context?.branch,
+          });
+        }
         if (shouldAutoCloseReadOnlyKeepAlive(finalResult.output)) {
           await closeKeepAliveSession();
         } else if (shouldAutoFinalizeKeepAlive(finalResult.output)) {
@@ -2415,12 +2541,18 @@ export class Supervisor {
       if (statusWatchdogPid !== undefined) {
         try { process.kill(statusWatchdogPid, 'SIGTERM'); } catch { /* ignore */ }
       }
-      // Close the FIFO: readline → fd → stream. Closing the fd synchronously before
-      // destroying the stream prevents the event loop hang that blocks batch test suites.
-      // autoClose is false so stream.destroy() won't attempt a second close on the fd.
+      // Close the FIFO idempotently. Bun can emit EBADF if a stream observes an fd
+      // after we have already closed it, so destroy the stream with a local EBADF
+      // guard before the single explicit closeSync(). autoClose is false, but the
+      // guard keeps cleanup safe across runtime edge cases and tests.
+      const swallowBenignFifoError = (error: NodeJS.ErrnoException): void => {
+        if (error.code === 'EBADF' && error.syscall === 'close') return;
+        throw error;
+      };
       try { fifoReadline?.close(); } catch { /* ignore */ }
-      if (fifoFd !== undefined) { try { closeSync(fifoFd); } catch { /* ignore */ } fifoFd = undefined; }
+      try { fifoReadStream?.once('error', swallowBenignFifoError); } catch { /* ignore */ }
       try { fifoReadStream?.destroy(); } catch { /* ignore */ }
+      if (fifoFd !== undefined) { try { closeSync(fifoFd); } catch { /* ignore */ } fifoFd = undefined; }
       // Ensure events are flushed to disk before closing
       if (eventsFd !== undefined) {
         try { fsyncSync(eventsFd); } catch { /* ignore */ }

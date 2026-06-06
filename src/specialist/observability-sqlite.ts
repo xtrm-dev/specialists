@@ -1075,6 +1075,7 @@ export interface ObservabilitySqliteClient {
   upsertStatusWithEvent(status: SupervisorStatus, event: TimelineEvent): void;
   upsertStatusWithEventAndResult(status: SupervisorStatus, event: TimelineEvent, output: string): void;
   appendEvent(jobId: string, specialist: string, beadId: string | undefined, event: TimelineEvent): void;
+  appendForensicEvent(jobId: string, specialist: string, beadId: string | undefined, forensicEvent: ForensicEvent): void;
   claimJobStart(status: SupervisorStatus, event: TimelineEvent): { ok: true } | { ok: false; existingJobId: string; existingStatus: string };
   findActiveJob(beadId: string | null, specialist: string): { job_id?: string; status?: string; pid?: number; updated_at_ms?: number } | undefined;
   upsertResult(jobId: string, output: string): void;
@@ -1255,6 +1256,11 @@ class SqliteClient implements ObservabilitySqliteClient {
         chainRootJobId: context.chainRootJobId,
         chainRootBeadId: context.chainRootBeadId,
         epicId: context.epicId,
+        sessionId: context.sessionId,
+        conversationId: context.conversationId,
+        traceId: context.traceId,
+        spanId: context.spanId,
+        parentSpanId: context.parentSpanId,
       },
     );
     this.insertForensicEventRow(jobId, event.seq, forensicEvent);
@@ -1271,6 +1277,11 @@ class SqliteClient implements ObservabilitySqliteClient {
     chainRootJobId?: string;
     chainRootBeadId?: string;
     epicId?: string;
+    sessionId?: string;
+    conversationId?: string;
+    traceId?: string;
+    spanId?: string;
+    parentSpanId?: string;
   } {
     const row = this.db.query(`
       SELECT bead_id, node_id, chain_kind, chain_id, chain_root_job_id, chain_root_bead_id, epic_id, status_json
@@ -1290,6 +1301,11 @@ class SqliteClient implements ObservabilitySqliteClient {
       chainRootJobId: typeof row?.chain_root_job_id === 'string' ? row.chain_root_job_id : undefined,
       chainRootBeadId: typeof row?.chain_root_bead_id === 'string' ? row.chain_root_bead_id : undefined,
       epicId: typeof row?.epic_id === 'string' ? row.epic_id : undefined,
+      sessionId: typeof statusJson.session_id === 'string' ? statusJson.session_id : undefined,
+      conversationId: typeof statusJson.conversation_id === 'string' ? statusJson.conversation_id : undefined,
+      traceId: typeof statusJson.trace_id === 'string' ? statusJson.trace_id : undefined,
+      spanId: typeof statusJson.span_id === 'string' ? statusJson.span_id : undefined,
+      parentSpanId: typeof statusJson.parent_span_id === 'string' ? statusJson.parent_span_id : undefined,
     };
   }
 
@@ -1606,6 +1622,13 @@ class SqliteClient implements ObservabilitySqliteClient {
     withRetry(() => {
       this.writeEventRow(jobId, specialist, beadId, event);
     }, 'appendEvent');
+  }
+
+  appendForensicEvent(jobId: string, specialist: string, beadId: string | undefined, forensicEvent: ForensicEvent): void {
+    withRetry(() => {
+      const seq = typeof forensicEvent.seq === 'number' && forensicEvent.seq > 0 ? forensicEvent.seq : this.getNextSpecialistEventSeq(jobId);
+      this.insertForensicEventRow(jobId, seq, forensicEvent);
+    }, 'appendForensicEvent');
   }
 
   upsertResult(jobId: string, output: string): void {

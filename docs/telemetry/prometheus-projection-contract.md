@@ -3,12 +3,12 @@ title: Prometheus Projection Contract
 scope: telemetry-prometheus-projection
 category: reference
 version: 1.0.0
-updated: 2026-06-02
+updated: 2026-06-04
 source_of_truth_for:
   - "xtrm Prometheus metric projection"
   - "specialists AgentOps metrics"
   - "forensic-to-metrics boundary"
-  - "future /metrics exporter implementation"
+  - "sp serve /metrics exporter implementation"
 domain:
   - telemetry
   - observability
@@ -19,6 +19,33 @@ summary: "Defines low-cardinality Prometheus projections from xtrm.forensic.v1 e
 ---
 
 # Prometheus Projection Contract
+
+## Design context
+
+This is the shipped specialists-side metrics projection for the canonical DevOps
+design in `/home/dawid/second-mind/1-projects/xtrm/devops/devops-system.md`. It
+turns AgentOps forensic/runtime state into low-cardinality Prometheus metrics for
+infra dashboards and alerts. For exact event evidence and journal/recommendation
+drill-down, link back to `docs/telemetry/forensic-event-contract.md`.
+
+### Shipped bridge status — 2026-06-04
+
+Specialists currently ships `sp metrics --prometheus` and `sp serve` `GET
+/metrics`. The projection is table-derived and replay-safe for the current local
+runtime: it reads `specialist_jobs`, `specialist_job_metrics`, and selected
+forensic event families rather than maintaining a long-running event cursor.
+
+Currently shipped projections include:
+
+- job state, queue depth, process/worktree gauges;
+- terminal job counters and job duration/wait/active-runtime histograms;
+- turn/context/tool/token metrics, including split token directions and fallback-only `direction="total"`;
+- identity, policy, eval, and MCP operation counters from supplied forensic events;
+- parser/cardinality tests that reject forbidden labels such as `job_id`, `trace_id`, `mcp_session_id`, `jsonrpc_request_id`, `eval_id`, `policy_decision_id`, and `identity_request_id`.
+
+Boundary: MCP metrics are projection-ready but not live from a real MCP runtime
+until an MCP emitter is added. The current implementation can project
+`mcp.*` forensic events when they are supplied.
 
 ## 1. Purpose
 
@@ -77,6 +104,13 @@ Allowed by default when present:
 | `error_type` | Normalized enum/category, not raw message text. |
 | `drift_tier` | `none`, `low`, `medium`, `high`, `critical`; bounded. |
 | `pulse_kind` | `trigger`, `job`, `message`; bounded. |
+| `direction` | Token direction: `input`, `output`, `cache_read`, `cache_creation`, `reasoning`, `tool`, or fallback `total`; bounded. |
+| `policy_kind` | Normalized policy/check category; bounded. |
+| `action_kind` | Normalized action category; bounded. |
+| `credential_kind` | Normalized credential/token kind; bounded. |
+| `eval_kind` | Normalized eval category; bounded. |
+| `chain_template` | Normalized chain/workflow template such as `executor-review`; bounded and never a chain id. |
+| `gate_kind` | Normalized gate category such as `reviewer`, `code_sanity`, `security`, `obligations`; bounded. |
 
 ### 3.2 Forbidden labels
 
@@ -97,6 +131,13 @@ Never export these as labels:
 - `tool_call_id`
 - `trace_id`
 - `span_id`
+- `session_id`
+- `conversation_id`
+- `mcp_session_id`
+- `jsonrpc_request_id`
+- `eval_id`
+- `policy_decision_id`
+- `identity_request_id`
 - `parent_span_id`
 - `commit_sha`
 - PR number / ticket id / external object id
@@ -104,6 +145,7 @@ Never export these as labels:
 - raw command
 - raw URL
 - raw error text
+- raw diff text
 - prompt/model/tool payloads
 - user id, email, credential, token, or secret material
 
@@ -114,7 +156,7 @@ Never export these as labels:
 ## 4. Metric naming rules
 
 - Prefix all xtrm-owned metrics with `xtrm_`.
-- Use Prometheus base units and suffixes: `_seconds`, `_bytes`, `_total`, `_ratio`, `_usd_total`.
+- Use Prometheus base units and suffixes: `_seconds`, `_bytes`, `_total`, `_ratio`. Reserve `_usd_total` for future direct API billing/pricing provenance only.
 - Use counters for monotonically increasing counts.
 - Use gauges for current state, freshness, queue depth, and budget remaining.
 - Use histograms for durations and sizes where percentiles are needed.
@@ -135,12 +177,15 @@ Never export these as labels:
 | `xtrm_job_state` | gauge | `service_name`, `repo`, `participant_kind`, `participant_role`, `state` | current jobs table | Current count by state. |
 | `xtrm_job_queue_depth` | gauge | `service_name`, `repo`, `participant_kind`, `participant_role` | jobs/pulse queue | Current queued or waiting-to-start jobs. |
 | `xtrm_job_stale_total` | counter | `service_name`, `repo`, `participant_kind`, `participant_role`, `reason` | `process_health.stale_detected` | `reason` must be bounded. |
+| `xtrm_chains_total` | counter | `service_name`, `repo`, `chain_template`, `result` | terminal chain state / `chain.finalized` | One increment per terminal chain instance; no `chain_id` label. |
+| `xtrm_chain_duration_seconds` | histogram | `service_name`, `repo`, `chain_template`, `result` | terminal chain state / job metric rollup | End-to-end chain duration using bounded template/result labels only. |
 
 Recommended buckets:
 
 ```text
 xtrm_job_duration_seconds: 1, 5, 10, 30, 60, 120, 300, 600, 1800, 3600, 7200, 14400, +Inf
 xtrm_job_wait_seconds:     1, 5, 30, 60, 300, 900, 1800, 3600, 7200, 21600, +Inf
+xtrm_chain_duration_seconds: 1, 5, 10, 30, 60, 120, 300, 600, 1800, 3600, 7200, 14400, +Inf
 ```
 
 ### 5.2 Turn, context, and model usage
@@ -151,10 +196,16 @@ xtrm_job_wait_seconds:     1, 5, 30, 60, 300, 900, 1800, 3600, 7200, 21600, +Inf
 | `xtrm_context_usage_ratio` | gauge | `service_name`, `repo`, `participant_kind`, `participant_role` | latest `turn.summarized` | Current/latest context percentage as ratio 0..1. |
 | `xtrm_context_compactions_total` | counter | `service_name`, `repo`, `participant_kind`, `participant_role`, `result` | `compaction.completed` | Result bounded. |
 | `xtrm_retries_total` | counter | `service_name`, `repo`, `participant_kind`, `participant_role`, `result` | `retry.completed` / `retry.exhausted` | Retry attempts. |
-| `xtrm_llm_tokens_total` | counter | `service_name`, `repo`, `participant_kind`, `participant_role`, `model_provider`, `model`, `direction` | `model.token_usage.recorded` | `direction=input|output|cache_read|cache_creation`; model allowlisted. |
-| `xtrm_llm_cost_usd_total` | counter | `service_name`, `repo`, `participant_kind`, `participant_role`, `model_provider`, `model` | token usage + pricing table | Use only if pricing table is explicit/versioned. |
+| `xtrm_llm_tokens_total` | counter | `service_name`, `repo`, `participant_kind`, `participant_role`, `model_provider`, `model`, `direction` | `model.token_usage.recorded` | `direction=input|output|cache_read|cache_creation|reasoning|tool`; use fallback `direction=total` only when no split exists; model allowlisted. |
 
 Do not label token metrics by `job_id`, `bead_id`, or `participant_id`. Drill down via exemplars/log links.
+
+Total-token mapping:
+
+- Preferred total: `sum without(direction)(xtrm_llm_tokens_total{direction!="total"})` over split directions.
+- Fallback total: `xtrm_llm_tokens_total{direction="total"}` only when the source exposes no split.
+- Never add split directions and `direction="total"` together in the same panel/alert.
+- USD cost metrics are deferred until direct API billing or another explicit, versioned pricing source exists. Subscription-plan usage should be represented with token counts and plan-level notes, not authoritative `*_usd_total` counters.
 
 ### 5.3 Tool calls
 
@@ -174,12 +225,12 @@ xtrm_tool_call_duration_seconds: 0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 300, +Inf
 
 | Metric | Type | Labels | Source | Notes |
 |---|---|---|---|---|
-| `xtrm_mcp_operations_total` | counter | `service_name`, `repo`, `participant_kind`, `participant_role`, `mcp_server`, `mcp_method`, `result` | `mcp.operation.completed/failed` | Aligns with MCP semconv. |
-| `xtrm_mcp_operation_duration_seconds` | histogram | `service_name`, `repo`, `participant_kind`, `participant_role`, `mcp_server`, `mcp_method`, `result` | MCP events/spans | Client-side duration. |
-| `xtrm_mcp_sessions` | gauge | `service_name`, `repo`, `mcp_server`, `state` | MCP session lifecycle | Current sessions by state. |
-| `xtrm_mcp_session_duration_seconds` | histogram | `service_name`, `repo`, `mcp_server`, `result` | session end event | Optional when session lifecycle is tracked. |
+| `xtrm_mcp_operations_total` | counter | `service_name`, `repo`, `mcp_server`, `mcp_method`, `result` | `mcp.connected/disconnected/call.completed/call.failed/auth.failed/rate_limited/latency.observed` forensic events | **Shipped for supplied forensic events.** Current code normalizes future `type:"mcp"` timeline events and projects this counter. |
+| `xtrm_mcp_operation_duration_seconds` | histogram | `service_name`, `repo`, `participant_kind`, `participant_role`, `mcp_server`, `mcp_method`, `result` | MCP events/spans | Future: requires real MCP lifecycle durations. |
+| `xtrm_mcp_sessions` | gauge | `service_name`, `repo`, `mcp_server`, `state` | MCP session lifecycle | Future: requires real MCP session emitter. |
+| `xtrm_mcp_session_duration_seconds` | histogram | `service_name`, `repo`, `mcp_server`, `result` | session end event | Future: requires real MCP session emitter. |
 
-Forbidden labels include `mcp.session.id`, `jsonrpc.request.id`, `tool_call_id`, and raw tool args/result.
+Forbidden labels include `mcp.session.id`, `jsonrpc.request.id`, `mcp_session_id`, `jsonrpc_request_id`, `trace_id`, `tool_call_id`, and raw tool args/result.
 
 Recommended buckets:
 
@@ -232,6 +283,18 @@ xtrm_mcp_operation_duration_seconds: 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, +I
 | `xtrm_eval_runs_total` | counter | `service_name`, `repo`, `eval_kind`, `result` | future eval events | Keeps AgentCore evaluator/diagnostic split visible. |
 | `xtrm_eval_score` | gauge | `service_name`, `repo`, `eval_kind` | eval result | Latest score where meaningful. |
 
+### 5.10 Identity, policy, and approval outcomes
+
+| Metric | Type | Labels | Source | Notes |
+|---|---|---|---|---|
+| `xtrm_identity_operations_total` | counter | `service_name`, `repo`, `credential_kind`, `result` | `identity.credential.issued/failed/throttled` | Secret values never exported. |
+| `xtrm_policy_decisions_total` | counter | `service_name`, `repo`, `policy_kind`, `action_kind`, `result` | `policy.decision.allowed/denied`, `policy.mismatch.detected` | `result=allowed|denied|mismatch|error`. |
+| `xtrm_policy_mismatches_total` | counter | `service_name`, `repo`, `policy_kind`, `severity` | `policy.mismatch.detected` | Severity bounded. |
+
+Identity/policy metrics are audit signals, not an authorization source of truth.
+Drill down through forensic events for decision ids, approver refs, and redacted
+provider errors.
+
 ## 6. Exporter architecture
 
 ### 6.1 Projection engine
@@ -257,7 +320,7 @@ Counters must survive exporter restarts. Options:
 
 Preferred for xtrm: **persistent cursor + replayable event history**. This keeps local CLI/debug use deterministic and avoids silent undercounting after exporter restarts.
 
-Current pre-substrate bridge status: `sp metrics --prometheus` uses table-derived counters from durable `specialist_job_metrics` / current-state snapshots rather than incrementing a process-local event stream. Repeated renders over the same table state are deterministic; event-cursor projection remains the target for a long-running HTTP exporter.
+Current pre-substrate bridge status: `sp metrics --prometheus` uses table-derived counters from durable `specialist_job_metrics` / current-state snapshots rather than incrementing a process-local event stream. Chain metrics are derived by grouping terminal chain jobs internally by opaque chain id, but only export bounded `chain_template` and `result` labels. Repeated renders over the same table state are deterministic; event-cursor projection remains the target for a long-running HTTP exporter.
 
 ### 6.3 Gauges
 
@@ -288,7 +351,7 @@ Initial alerting should page on symptoms, not root causes.
 | No worker heartbeat | `xtrm_job_state{state="running"}` unexpectedly zero while queue depth > 0 | critical |
 | Orphan process growth | orphan detection/reap failures increase | warn |
 | Dirty/stale worktrees | stale dirty worktrees > threshold | warn |
-| Token/cost budget burn | cost/token rate above policy | warn |
+| Token budget burn | token rate above policy or subscription-plan quota proxy | warn |
 | Pulse backlog | pulse queue depth or delivery latency exceeds threshold | warn |
 | Gate failure pattern | gate verdict FAIL/PARTIAL spike | info/warn |
 
@@ -319,6 +382,8 @@ Future implementation beads must validate:
 - gauges reflect current state, not stale event-derived counts;
 - legacy events normalize before projection;
 - `/metrics` output includes `HELP` and `TYPE` lines;
+- token totals are derived from split directions, with `direction="total"` used only for unsplit upstream totals;
+- no USD cost metric is exported until direct API billing/pricing provenance exists;
 - redaction is applied before any label/value leaves the process.
 
 ### Pasteable validation checklist
@@ -328,12 +393,14 @@ VALIDATION — Prometheus projection
 - [ ] Metric names use xtrm_ prefix and base-unit suffixes.
 - [ ] Labels are only from the allowlist in docs/telemetry/prometheus-projection-contract.md §3.
 - [ ] participant_kind + participant_role are used; specialist is not a primary label.
-- [ ] participant_id/job_id/bead_id/container_id/chain_id/trace_id/span_id/tool_call_id are not labels.
+- [x] participant_id/job_id/bead_id/container_id/chain_id/session_id/conversation_id/trace_id/span_id/tool_call_id/mcp_session_id/jsonrpc_request_id/eval_id/policy_decision_id/identity_request_id are not labels in current projection tests.
 - [ ] Histograms use seconds and documented buckets.
 - [x] CLI counters are replay-safe table-derived projections; long-running event-stream exporters still need a durable projection cursor.
-- [ ] Gauges are current-state snapshots.
+- [x] Current shipped gauges are current-state snapshots.
 - [ ] Exemplars use trace_id only when available; otherwise dashboards link to logs by bounded labels + time range.
 - [x] `sp metrics --prometheus` and `sp serve` `GET /metrics` include HELP/TYPE; CLI output passes the repository Prometheus text parser validation.
+- [x] `xtrm_chains_total`, `xtrm_chain_duration_seconds`, `xtrm_gate_verdicts_total`, and `xtrm_evidence_refs_total` are covered by projection tests without forbidden labels.
+- [x] MCP operation counter projection uses only bounded `mcp_server`, `mcp_method`, and `result` labels when MCP forensic events are supplied.
 ```
 
 ## 10. Implementation sequence

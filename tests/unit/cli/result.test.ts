@@ -25,7 +25,8 @@ function createJob(jobId: string, status: 'starting' | 'running' | 'waiting' | '
         exit_reason: status === 'done' ? 'agent_end' : undefined,
         token_usage: {
           total_tokens: 99,
-          cost_usd: 0.00123,
+          input_tokens: 60,
+          output_tokens: 39,
         },
       },
     }),

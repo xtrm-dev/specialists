@@ -7,7 +7,7 @@ import { Supervisor } from '../specialist/supervisor.js';
 import { createObservabilitySqliteClient } from '../specialist/observability-sqlite.js';
 import { parseTimelineEvent, type TimelineEvent } from '../specialist/timeline-events.js';
 import { resolveNodeRefWithClient, resolveSingleActiveNodeRef } from '../specialist/node-resolve.js';
-import { formatCostUsd, formatTokenUsageSummary } from './format-helpers.js';
+import { formatTokenUsageSummary } from './format-helpers.js';
 
 const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
 const red = (s: string) => `\x1b[31m${s}\x1b[0m`;
@@ -325,16 +325,14 @@ export async function run(): Promise<void> {
     const payloadBlock = formatPayloadPreamble(status.startup_payload_json);
     process.stdout.write(`${startupBlock ?? ''}${payloadBlock ?? ''}${output}`);
 
-    const tokenSummaryParts = formatTokenUsageSummary(status.metrics?.token_usage).filter((part) => !part.startsWith('cost='));
-    const formattedCost = formatCostUsd(status.metrics?.token_usage?.cost_usd);
-    if (tokenSummaryParts.length === 0 && !formattedCost) {
+    const tokenSummaryParts = formatTokenUsageSummary(status.metrics?.token_usage);
+    if (tokenSummaryParts.length === 0) {
       if (trailingFooter) process.stderr.write(dim(trailingFooter));
       return;
     }
 
     const footerParts: string[] = [];
     if (tokenSummaryParts.length > 0) footerParts.push(tokenSummaryParts.join(' · '));
-    if (formattedCost) footerParts.push(`cost_usd=${formattedCost}`);
 
     process.stderr.write(dim(`\n--- metrics: ${footerParts.join(' · ')} ---\n`));
     if (trailingFooter) process.stderr.write(dim(trailingFooter));

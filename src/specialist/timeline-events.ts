@@ -237,8 +237,10 @@ export interface TimelineTokenUsage {
   output_tokens?: number;
   cache_creation_tokens?: number;
   cache_read_tokens?: number;
+  reasoning_tokens?: number;
+  tool_tokens?: number;
   total_tokens?: number;
-  cost_usd?: number;
+  usage_source?: 'provider_usage' | 'runtime_estimate' | 'local_estimate' | 'unknown';
 }
 
 export interface TimelineRunMetrics {
@@ -364,11 +366,32 @@ export interface TimelineEventApiError extends TimelineEventBase {
   error_message: string;
 }
 
+export interface TimelineEventEvidenceRef {
+  evidence_kind: 'diff' | 'commit' | 'pr';
+  evidence_ref?: string;
+  evidence_url?: string;
+  evidence_state?: string;
+  base_ref?: string;
+  base_sha?: string;
+  head_sha?: string;
+  pr_id?: string | number;
+  pr_url?: string;
+  pr_state?: string;
+  diff?: {
+    changed_files: Array<{ path: string; added_lines: number; removed_lines: number }>;
+    hunks?: string;
+    hunks_artifact_ref?: string;
+    hunks_inline?: boolean;
+    hunks_truncated?: boolean;
+  };
+}
+
 export interface TimelineEventAutoCommit extends TimelineEventBase {
   type: 'auto_commit_success' | 'auto_commit_skipped' | 'auto_commit_failed';
   reason?: string;
   commit_sha?: string;
   committed_files?: string[];
+  evidence?: TimelineEventEvidenceRef[];
 }
 
 export interface TimelineEventControlSignal extends TimelineEventBase {
@@ -453,6 +476,15 @@ export const TIMELINE_EVENT_TYPES = {
   AUTO_COMMIT_SUCCESS: 'auto_commit_success',
   AUTO_COMMIT_SKIPPED: 'auto_commit_skipped',
   AUTO_COMMIT_FAILED: 'auto_commit_failed',
+  COMMAND_COMPLETED: 'command_completed',
+  COMMAND_FAILED: 'command_failed',
+  REVIEW_VERDICT_PASS: 'review_verdict_pass',
+  REVIEW_VERDICT_PARTIAL: 'review_verdict_partial',
+  REVIEW_VERDICT_FAIL: 'review_verdict_fail',
+  REVIEW_VERDICT_WAIVED: 'review_verdict_waived',
+  CHAIN_READY_FOR_REVIEW: 'chain_ready_for_review',
+  CHAIN_FINALIZED: 'chain_finalized',
+  WORKTREE_MERGED: 'worktree_merged',
   CONTROL_SIGNAL: 'control_signal',
   DONE: 'done',
   AGENT_END: 'agent_end',
@@ -879,6 +911,7 @@ export function createRunCompleteEvent(
     tool_calls?: string[];
     exit_reason?: string;
     metrics?: TimelineRunMetrics;
+    evidence?: TimelineEventEvidenceRef[];
     gitnexus_summary?: {
       files_touched: string[];
       symbols_analyzed: string[];
@@ -910,7 +943,7 @@ export function createControlSignalEvent(
 
 export function createAutoCommitEvent(
   status: 'success' | 'skipped' | 'failed',
-  options?: { reason?: string; commit_sha?: string; committed_files?: string[] },
+  options?: { reason?: string; commit_sha?: string; committed_files?: string[]; evidence?: TimelineEventEvidenceRef[] },
 ): TimelineEventAutoCommit {
   const type = status === 'success'
     ? TIMELINE_EVENT_TYPES.AUTO_COMMIT_SUCCESS
@@ -924,7 +957,24 @@ export function createAutoCommitEvent(
     ...(options?.reason ? { reason: options.reason } : {}),
     ...(options?.commit_sha ? { commit_sha: options.commit_sha } : {}),
     ...(options?.committed_files ? { committed_files: options.committed_files } : {}),
+    ...(options?.evidence ? { evidence: options.evidence } : {}),
   };
+}
+
+export function createCommandEvent(status: 'completed' | 'failed', options: { command_kind: string; duration_ms?: number; command?: string; args?: string[]; exit_code?: number; stderr?: string; redacted?: boolean }): TimelineEventBase & { type: 'command_completed' | 'command_failed'; command_kind: string; duration_ms?: number; command?: string; args?: string[]; exit_code?: number; stderr?: string; redacted?: boolean } {
+  return { t: Date.now(), type: status === 'completed' ? TIMELINE_EVENT_TYPES.COMMAND_COMPLETED : TIMELINE_EVENT_TYPES.COMMAND_FAILED, ...options };
+}
+
+export function createReviewVerdictEvent(verdict: 'pass' | 'partial' | 'fail' | 'waived', body: Record<string, unknown> = {}): TimelineEventBase & { type: string } {
+  return { t: Date.now(), type: 'review_verdict_' + verdict, ...body };
+}
+
+export function createChainEvent(type: 'chain_ready_for_review' | 'chain_finalized', body: Record<string, unknown> = {}): TimelineEventBase & { type: string } {
+  return { t: Date.now(), type, ...body };
+}
+
+export function createWorktreeMergedEvent(body: Record<string, unknown> = {}): TimelineEventBase & { type: 'worktree_merged' } {
+  return { t: Date.now(), type: TIMELINE_EVENT_TYPES.WORKTREE_MERGED, ...body };
 }
 
 // ============================================================================

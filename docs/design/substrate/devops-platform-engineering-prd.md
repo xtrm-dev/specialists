@@ -23,7 +23,7 @@ does not own the platform stack or the console UI.
 Repo boundaries:
 
 - `~/projects/mercury/infra` owns Prometheus, Grafana, Loki, Alertmanager, exporters, Traefik, platform Docker networks/volumes, Terraform/IaC, and the concrete Mercury monitoring stack. See `MONITORING.md` and `docs/AGENT_MONITORING.md`.
-- `~/dev/specialists` owns specialist runtime telemetry and devops/platform-agent semantics. See also `docs/observability-metrics.md` and `docs/specialists-service.md`.
+- `~/dev/specialists` owns specialist runtime telemetry and devops/platform-agent semantics. Current telemetry implementation contracts live in `docs/telemetry/{forensic-event-contract,agentops-event-catalog,prometheus-projection-contract}.md`; `docs/observability-metrics.md` is historical/supporting context. See also `docs/specialists-service.md`.
 - `~/dev/gitboard` owns the xtrm operational console/product surface. See `docs/xtrm-observability-prd.md` and `docs/xtrm-console-visual-contract.md`.
 
 Research inputs from `/home/dawid/second-mind/1-projects/xtrm/research/` (absolute paths are intentional; future agents should read these exact notes):
@@ -80,6 +80,32 @@ lessons must be persisted as structured evidence or followup/root issues. The
 further design work should therefore specify not only a specialist persona, but
 also the evidence schemas and issue-class materialization rules that let gitboard
 render DevOps journals/recommendations without inventing a second work graph.
+
+### 0.2 Current telemetry bridge status (2026-06-04)
+
+The specialists-side AgentOps telemetry bridge is now concrete enough for DevOps
+planning to consume instead of re-inventing telemetry semantics:
+
+- `docs/telemetry/forensic-event-contract.md` defines the shipped `xtrm.forensic.v1`
+  envelope, 5-layer participant identity, redaction, forbidden-label discipline,
+  session/trace/conversation correlation, and implementation status.
+- `docs/telemetry/agentops-event-catalog.md` is the implementation-ready event-name
+  catalog for job/turn/model/tool/MCP/service-skills/pulse/identity/policy/eval
+  and evidence events.
+- `docs/telemetry/prometheus-projection-contract.md` defines the shipped low-cardinality
+  projection: `sp metrics --prometheus` and `sp serve` `GET /metrics`.
+
+Shipped surfaces in `~/dev/specialists` now include SQLite forensic rows
+(`specialist_forensic_events`), `sp forensic <job-id> --json`, additive
+`forensic_event` payloads in `sp feed --json` / `sp log --json`, a token-first
+Prometheus projection, full forbidden-label tests, and Pi `session_id` propagation
+into forensic correlation.
+
+Boundary: MCP is **not live yet**. MCP telemetry currently has normalization and
+metric-projection pre-wiring only: future `type:"mcp"` timeline events will map to
+canonical `mcp.*` events and keep `mcp_session_id` / `jsonrpc_request_id` /
+trace/span ids in correlation, but there is no real MCP emitter or cross-process
+`_meta` propagation yet. That follow-up is tracked as `unitAI-dl02w`.
 
 ---
 
@@ -264,6 +290,11 @@ This must be accounted for in the **substrate API design from the start**, inclu
   telemetry-standardization pass adds metrics/log streams, the infra MCP exposes them —
   so the devops agent's query surface expands in lockstep with coverage. (Operator point,
   2026-05-30.) Mirrors AWS's AgentCore MCP Gateway pattern (§6.1) but home-rooted in infra.
+- **Current shipped query substrate:** specialists already exposes AgentOps evidence through
+  `sp forensic`, `sp feed/log --json`, and Prometheus metrics. DevOps query-answer work should
+  first consume those surfaces, then explicitly mark missing signals as follow-up requests in
+  the owning repo. Do not assume live MCP query telemetry until `unitAI-dl02w` and infra-side
+  MCP work land.
 
 ### 7.1 Per-service knowledge substrate — service skills (gitnexus-enhanced)
 
@@ -297,11 +328,13 @@ per-service topology context** (§6.1).
 
 ## 8. Foundations / prerequisites (must precede a useful agent)
 
-1. **Telemetry standardization pass** — a first exploration pass over **all Mercury repos**
-   (start: `~/projects/mercury/infra`) to inventory current metrics and define a **standard
-   emission contract**. The process must be standardized, not per-repo ad hoc.
-   → **Filed: `infra-bnh`** (mercury/infra project) — also covers the devops query-MCP (grows
-   with telemetry), the OpenTelemetry eval, and the Terraform/IaC eval. Infra agents implement.
+1. **Telemetry standardization pass** — specialists-side AgentOps telemetry now has a concrete
+   forensic/Prometheus bridge (`docs/telemetry/*`), but Mercury infra still needs a first
+   exploration pass over **all Mercury repos** (start: `~/projects/mercury/infra`) to inventory
+   service metrics/logs and define a **standard emission contract**. The process must be
+   standardized, not per-repo ad hoc. → **Filed: `infra-bnh`** (mercury/infra project) — also
+   covers the devops query-MCP (grows with telemetry), the OpenTelemetry eval, and the
+   Terraform/IaC eval. Infra agents implement.
 2. **Pulse-emitter primitive** — wake on **events** + **scheduled intervals**. Prototype this
    *now*, ahead of substrate-as-long-running-node landing in the xtrm project group. (When
    substrate lands, this expands into a long-running node.)
@@ -391,8 +424,11 @@ failure isolation, backups, recovery & DR — no single-component failure cascad
 peak memory; bottleneck services; marginal cost of workload; throughput limits.
 
 **Cost management.** Track token consumption, model usage, compute, storage growth, network,
-per-service cost. Determine: most expensive agents/workflows, cost per job/user/workflow-category.
-Operational visibility includes **financial** visibility.
+and per-service cost. For specialists/xtrm LLM usage, the reliable current signal is token
+usage by direction/category; per-run USD is deferred until direct API billing or versioned
+pricing provenance exists. Determine: most expensive agents/workflows, cost proxies per
+job/user/workflow-category, and where real infra billing data is available. Operational
+visibility includes **financial** visibility without inventing misleading cost attribution.
 
 **Developer experience (DX).** Reduce friction; devs shouldn't need deep ops knowledge.
 Expose simple workflows: `mercury new-specialist`, `mercury test`, `mercury deploy`,

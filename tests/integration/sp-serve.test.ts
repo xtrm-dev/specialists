@@ -51,6 +51,16 @@ beforeEach(() => {
     ].join('\n'),
   );
   writeFileSync(
+    join(tempRoot, 'insert-forensic-event.mjs'),
+    [
+      "import { Database } from 'bun:sqlite';",
+      'const db = new Database(process.argv[2]);',
+      'const event = JSON.parse(process.argv[3]);',
+      "db.run(`INSERT INTO specialist_forensic_events (job_id, seq, t, schema_version, event_family, event_name, participant_kind, participant_role, participant_id, redaction_status, event_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [event.correlation.job_id, event.seq, event.t_unix_ms, event.schema_version, event.event_family, event.event_name, event.resource.participant_kind, event.resource.participant_role, `${event.correlation.chain_id}::${event.resource.participant_role}`, event.redaction.status, JSON.stringify(event)]);",
+      'db.close();',
+    ].join('\n'),
+  );
+  writeFileSync(
     join(tempRoot, 'bin', 'pi'),
     '#!/usr/bin/env node\nconst input = process.argv.slice(2).join(" ");\nif (input.includes("--model")) {\n  const event = { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: JSON.stringify({ message: "hello", cwd: process.cwd() }) }] } };\n  process.stdout.write(JSON.stringify(event) + "\\n");\n}\n',
     { mode: 0o755 },
@@ -167,6 +177,50 @@ describe('sp serve', () => {
     expect(log.error).toBe('malformed_request');
     expect(log.prompt_bytes).toBe(Buffer.byteLength('{not-json', 'utf8'));
     expect(JSON.stringify(log)).not.toContain('not-json');
+  });
+
+  it('serves per-job normalized forensic feed events', async () => {
+    const port = 8132;
+    await startServer(port);
+
+    const dbPath = join(tempRoot, '.specialists', 'db', 'observability.db');
+    const event = {
+      schema_version: 'xtrm.forensic.v1',
+      timestamp: '2026-06-04T00:00:00.000Z',
+      t_unix_ms: 1_780_000_000_000,
+      seq: 1,
+      severity: 'info',
+      event_family: 'tool',
+      event_name: 'tool.call.completed',
+      event_version: 1,
+      resource: {
+        service_namespace: 'xtrm',
+        service_name: 'specialists',
+        service_component: 'test',
+        deployment_environment: 'local',
+        repo: 'specialists',
+        participant_kind: 'specialist',
+        participant_role: 'executor',
+      },
+      correlation: { job_id: 'job-feed', chain_id: 'chain-feed', trace_id: 'trace-feed' },
+      body: { tool_name: 'bash' },
+      redaction: { status: 'clean' },
+    };
+    const insert = spawnSync('bun', [join(tempRoot, 'insert-forensic-event.mjs'), dbPath, JSON.stringify(event)], { encoding: 'utf-8' });
+    expect(insert.status).toBe(0);
+
+    // nosemgrep: typescript.react.security.react-insecure-request.react-insecure-request
+    const response = await fetch(`http://127.0.0.1:${port}/jobs/job-feed/feed-events?family=tool`);
+    const body = await response.json() as { job_id: string; events: any[]; next_cursor: { t: number; seq: number } | null };
+
+    expect(response.status).toBe(200);
+    expect(body.job_id).toBe('job-feed');
+    expect(body.events).toHaveLength(1);
+    expect(body.events[0].schema_version).toBe('xtrm.forensic.v1');
+    expect(body.events[0].event_name).toBe('tool.call.completed');
+    expect(body.events[0].body).toEqual({ tool_name: 'bash' });
+    expect(body.events[0].redaction).toEqual({ status: 'clean' });
+    expect(body.next_cursor).toEqual({ t: 1_780_000_000_000, seq: 1 });
   });
 
   it('metrics responds with Prometheus text regardless of readiness', async () => {

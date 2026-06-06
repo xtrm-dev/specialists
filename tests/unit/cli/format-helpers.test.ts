@@ -181,13 +181,13 @@ describe('format-helpers', () => {
   });
 
   describe('formatEventLine', () => {
-    it('renders run_complete metrics summary including cost/turns/tools/exit', () => {
+    it('renders run_complete token split metrics summary including turns/tools/exit', () => {
       const line = formatEventLine({
         t: Date.now(),
         type: 'run_complete',
         status: 'COMPLETE',
         elapsed_s: 5,
-        token_usage: { total_tokens: 111, input_tokens: 70, output_tokens: 41, cost_usd: 0.012345 },
+        token_usage: { total_tokens: 111, input_tokens: 70, output_tokens: 41, cache_read_tokens: 9, reasoning_tokens: 5, tool_tokens: 2 },
         finish_reason: 'stop',
         exit_reason: 'agent_end',
         tool_calls: ['read', 'bash'],
@@ -201,7 +201,10 @@ describe('format-helpers', () => {
 
       expect(line).toContain('status=COMPLETE');
       expect(line).toContain('tokens=111');
-      expect(line).toContain('cost=$0.012345');
+      expect(line).toContain('cache_read=9');
+      expect(line).toContain('reasoning=5');
+      expect(line).toContain('tool=2');
+      expect(line).not.toContain('cost=');
       expect(line).toContain('turns=3');
       expect(line).toContain('tools=2');
       expect(line).toContain('finish=stop');

@@ -1773,9 +1773,11 @@ export class NodeSupervisor {
 
         this.persistNodeEvent('executeCompleteNodeAction.pr_created', 'pr_created', {
           node_id: this.opts.nodeId,
+          pr_id: prMetadata.pr_number ?? null,
           pr_number: prMetadata.pr_number ?? null,
           pr_url: prMetadata.pr_url ?? null,
           pr_head_sha: prMetadata.pr_head_sha ?? null,
+          pr_state: hasFailingGate && action.force_draft_pr ? 'draft' : 'open',
           base_branch: this.opts.baseBranch ?? NODE_BASE_BRANCH_DEFAULT,
           head_branch: currentBranch,
           draft: Boolean(hasFailingGate && action.force_draft_pr),
@@ -1809,7 +1811,7 @@ export class NodeSupervisor {
     this.persistNodeEvent('executeCompleteNodeAction.node_completed', 'node_completed', {
       node_id: this.opts.nodeId,
       final_state: this.status,
-      pr_metadata: prMetadata,
+      pr_metadata: { ...prMetadata, pr_state: hasFailingGate && action.force_draft_pr ? 'draft' : 'open' },
       gate_results: gateResults,
       summary_bead_id: this.opts.sourceBeadId ?? null,
     });

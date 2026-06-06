@@ -16,8 +16,10 @@ export interface SessionTokenUsage {
     output_tokens?: number;
     cache_creation_tokens?: number;
     cache_read_tokens?: number;
+    reasoning_tokens?: number;
+    tool_tokens?: number;
     total_tokens?: number;
-    cost_usd?: number;
+    usage_source?: 'provider_usage' | 'runtime_estimate' | 'local_estimate' | 'unknown';
 }
 export interface SessionRunMetrics {
     token_usage?: SessionTokenUsage;
@@ -122,6 +124,7 @@ export interface PiSessionOptions {
     onMeta?: (meta: {
         backend: string;
         model: string;
+        sessionId?: string;
     }) => void;
     /** Kill and fail if no streaming/protocol activity occurs within this window */
     stallTimeoutMs?: number;

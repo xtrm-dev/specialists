@@ -34,7 +34,7 @@ export interface LaunchSpecialistOptions {
   startEventTailer: (jobId: string, jobsDir: string) => (() => void) | undefined;
   formatFooterModel: (backend?: string, model?: string) => string;
   onProgress?: (delta: string) => void;
-  onMeta?: (meta: { backend: string; model: string }) => void;
+  onMeta?: (meta: { backend: string; model: string; sessionId?: string }) => void;
   onJobStarted?: (job: { id: string }) => void;
 }
 

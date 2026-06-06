@@ -98,6 +98,7 @@ export declare class SpecialistRunner {
     }) => void, onMetric?: (event: SessionMetricEvent) => void, onMeta?: (meta: {
         backend: string;
         model: string;
+        sessionId?: string;
     }) => void, onKillRegistered?: (killFn: () => void) => void, onBeadCreated?: (beadId: string) => void, onSteerRegistered?: (steerFn: (msg: string) => Promise<void>) => void, onResumeReady?: (resumeFn: (msg: string) => Promise<string>, closeFn: () => Promise<void>) => void, onToolStartCallback?: (tool: string, args?: Record<string, unknown>, toolCallId?: string) => void, onToolEndCallback?: (tool: string, isError: boolean, toolCallId?: string, resultContent?: string, resultRaw?: Record<string, unknown>) => void): Promise<RunResult>;
     /**
      * @deprecated Legacy in-memory async path.

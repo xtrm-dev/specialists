@@ -17,7 +17,6 @@ import {
   red,
   cyan,
   magenta,
-  formatCostUsd,
 } from './format-helpers.js';
 import { formatVersionCheckNudge, getVersionCheckResult, markVersionCheckNotified } from './version-check.js';
 
@@ -203,8 +202,6 @@ function formatMetricsInline(metrics: SupervisorStatus['metrics']): string {
     parts.push(`tokens=${metrics.token_usage.total_tokens}`);
   }
 
-  const cost = formatCostUsd(metrics.token_usage?.cost_usd);
-  if (cost) parts.push(`cost=${cost}`);
 
   if (metrics.finish_reason) parts.push(`finish=${metrics.finish_reason}`);
   if (metrics.exit_reason) parts.push(`exit=${metrics.exit_reason}`);
@@ -238,10 +235,6 @@ function renderJobDetail(
   if (toolCount !== undefined) console.log(`  tool_calls   ${toolCount}`);
   if (job.metrics?.token_usage?.total_tokens !== undefined) {
     console.log(`  tokens       ${job.metrics.token_usage.total_tokens}`);
-  }
-  if (job.metrics?.token_usage?.cost_usd !== undefined) {
-    const cost = formatCostUsd(job.metrics.token_usage.cost_usd);
-    console.log(`  cost_usd     ${cost ?? job.metrics.token_usage.cost_usd}`);
   }
   if (contextSnapshot) {
     console.log(`  context_pct  ${contextSnapshot.context_pct.toFixed(2)}%`);

@@ -1142,6 +1142,8 @@ async function run() {
         'Routes:',
         '  POST /v1/generate',
         '  GET  /healthz',
+        '  GET  /metrics',
+        '  GET  /jobs/:job_id/feed-events',
         '',
       ].join('\n'));
       return;
@@ -1196,7 +1198,11 @@ async function run() {
   await server.start();
 }
 
-run().catch((error) => {
-  logger.error(`Fatal error: ${error}`);
-  process.exit(1);
-});
+run()
+  .then(() => {
+    if (sub && sub !== 'serve') process.exit(process.exitCode ?? 0);
+  })
+  .catch((error) => {
+    logger.error(`Fatal error: ${error}`);
+    process.exit(1);
+  });

@@ -20,7 +20,7 @@
     },
     "execution": {
       "mode": "tool",
-      "model": "openai-codex/gpt-5.3-codex",
+      "model": "openai-codex/gpt-5.5",
       "fallback_model": "openai-codex/gpt-5.4",
       "timeout_ms": 0,
       "stall_timeout_ms": 120000,

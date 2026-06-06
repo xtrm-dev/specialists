@@ -30,7 +30,8 @@ function createJob(rootDir: string, jobId: string, eventCount = 0): void {
         exit_reason: 'agent_end',
         token_usage: {
           total_tokens: 1234,
-          cost_usd: 0.042,
+          input_tokens: 900,
+          output_tokens: 334,
         },
       },
     }),
@@ -175,7 +176,7 @@ describe('status CLI — run()', () => {
     expect(clean).toContain('finish       stop');
     expect(clean).toContain('exit_reason  agent_end');
     expect(clean).toContain('tokens       1234');
-    expect(clean).toContain('cost_usd     $0.042000');
+    expect(clean).not.toContain('cost_usd');
     expect(clean).not.toContain('Active Jobs');
   }, TEST_TIMEOUT_MS);
 

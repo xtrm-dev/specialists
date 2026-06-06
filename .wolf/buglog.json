@@ -647,6 +647,97 @@
         "stop",
         "resume"
       ]
+    },
+    {
+      "id": "bug-041",
+      "timestamp": "2026-06-03T23:48:48.705572Z",
+      "error_message": "Telemetry contract/runtime treated USD cost as a current metric despite subscription-plan usage.",
+      "file": "docs/telemetry/prometheus-projection-contract.md; src/pi/session.ts; src/cli/format-helpers.ts",
+      "root_cause": "Assumed direct provider API billing/pricing provenance existed; project currently uses subscription plans, so per-run USD attribution is misleading.",
+      "fix": "Changed docs and runtime to token-first telemetry: split input/output/cache/reasoning/tool token counters, fallback direction=total only for unsplit sources, removed cost_usd parsing/display/export, and deferred USD metrics until explicit API billing/pricing provenance exists.",
+      "tags": [
+        "telemetry",
+        "tokens",
+        "pricing",
+        "user-correction",
+        "unitAI-eoqxp.3.3"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-06-03T23:48:48.705627Z"
+    },
+    {
+      "id": "bug-042",
+      "timestamp": "2026-06-04T00:34:33.306960Z",
+      "error_message": "sp ps <job> returned Job not found for jobs visible via feed/forensic.",
+      "file": "src/cli/ps.ts",
+      "root_cause": "ps inspect only searched status rows/files via loadStatuses, while feed/forensic can read jobs that only have persisted timeline/forensic events.",
+      "fix": "Added event-backed inspect fallback that synthesizes SupervisorStatus from run_start/run_complete/token_usage events and supports JSON/human output.",
+      "tags": [
+        "cli",
+        "ps",
+        "forensic",
+        "telemetry",
+        "unitAI-eoqxp.3.6.1"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-06-04T00:34:33.306960Z"
+    },
+    {
+      "id": "bug-043",
+      "timestamp": "2026-06-04T01:14:19.320821Z",
+      "error_message": "forensic-events.test.ts failed with catalogFixtures is not defined after adding AgentOps catalog fixture assertions.",
+      "file": "tests/unit/specialist/forensic-events.test.ts",
+      "root_cause": "Initial edit replaced the test assertions before the shared catalogFixtures array was actually inserted, leaving the new test without fixture data.",
+      "fix": "Inserted the catalogFixtures array directly after the shared resource fixture and reran targeted forensic/prometheus tests plus lint.",
+      "tags": [
+        "tests",
+        "telemetry",
+        "forensic",
+        "unitAI-eoqxp.3.5"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-06-04T01:14:19.320872Z"
+    },
+    {
+      "id": "bug-044",
+      "timestamp": "2026-06-04T01:36:22.606619Z",
+      "error_message": "Foreground `sp run smoke-echo --prompt ...` printed successful completion but the CLI process did not exit before timeout.",
+      "file": "src/index.ts; dist/index.js; dist/lib.js",
+      "root_cause": "Top-level CLI dispatcher awaited the subcommand handler but did not explicitly exit on successful subcommand completion. Under Bun the process could remain alive even when `process._getActiveHandles()` and `_getActiveRequests()` were empty after `run()` returned, leaving foreground `sp run` stuck until external timeout.",
+      "fix": "Changed the entrypoint to call `process.exit(process.exitCode ?? 0)` after any subcommand completes successfully while preserving no-subcommand MCP server mode. Rebuilt dist and verified `timeout 30 sp run smoke-echo --prompt ...` exits 0 with the job still inspectable via `sp ps`.",
+      "tags": [
+        "cli",
+        "foreground-run",
+        "bun",
+        "entrypoint",
+        "unitAI-eoqxp.3.6.2"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-06-04T01:36:22.606651Z"
+    },
+    {
+      "id": "bug-045",
+      "timestamp": "2026-06-04T06:41:07.715202Z",
+      "error_message": "sp serve integration tests failed with ECONNREFUSED because the server process exited immediately after printing the listening banner.",
+      "file": "src/index.ts; src/cli/serve.ts; tests/integration/sp-serve.test.ts",
+      "root_cause": "The foreground-run fix explicitly exited after every successful subcommand. `serve` is a long-running subcommand, so returning from startServe after the listen event triggered process.exit and shut the HTTP server down.",
+      "fix": "Exempted `serve` from successful-subcommand auto-exit, documented feed-events in serve help, and added an integration regression for per-job feed-events.",
+      "tags": [
+        "cli",
+        "serve",
+        "telemetry",
+        "forensic",
+        "unitAI-5ljfu"
+      ],
+      "related_bugs": [
+        "bug-044"
+      ],
+      "occurrences": 1,
+      "last_seen": "2026-06-04T06:41:07.715202Z"
     }
   ]
 }

@@ -1393,3 +1393,26 @@
 ## 2026-05-26 — `sp log` status colors + human dedupe
 - `src/cli/log.ts` collapses near-identical human display rows within a 2s window using a normalized event payload key; JSON mode remains full-fidelity.
 - `status=<state>` is color-coded as a whole segment with the restrained palette: done green, error red, cancelled/starting/waiting yellow, running cyan.
+> Manual update: 2026-06-03 — `.wolf/cerebrum.md` and `.wolf/memory.md` recorded the substrate-vs-devops design SSOT distinction clarified during unitAI-69s6t planning.
+> Manual update: 2026-06-03 — unitAI-69s6t updated `/home/dawid/second-mind/1-projects/xtrm/substrate/substrate_design_it.md` (§2.8, §11.3, §12.5) for telemetry projection links, shipped forensic/metrics surfaces, and console lineage/evidence drawer semantics.
+> Manual update: 2026-06-03 — unitAI-0gdjp added `docs/telemetry/agentops-event-catalog.md` and linked it from `docs/telemetry/forensic-event-contract.md`.
+> Manual update: 2026-06-03 — unitAI-eoqxp.1 research refresh closed; evidence pack and scope refinements appended to beads `unitAI-eoqxp`, `unitAI-eoqxp.1`, and children `.1`-`.4`.
+> Manual update: 2026-06-03 — DevOps PRD vault note `/home/dawid/second-mind/1-projects/xtrm/devops/devops-system.md` gained §7.2 parking `unitAI-eoqxp.1` research findings behind telemetry/roadmap/substrate/channels sequencing.
+> Manual update: 2026-06-03 — unitAI-eoqxp.3 extended `docs/telemetry/forensic-event-contract.md`, `docs/telemetry/agentops-event-catalog.md`, and `docs/telemetry/prometheus-projection-contract.md`; created implementation children `unitAI-eoqxp.3.1`-.`3.5`.
+> Manual update: 2026-06-03 — telemetry pricing correction: docs now treat token usage as current reliable signal and defer USD cost metrics until direct API billing/pricing provenance exists.
+> Manual update: 2026-06-03 — unitAI-eoqxp.3.4 added identity/policy/eval forensic label support and optional Prometheus projection over forensic event fixtures.
+> Manual update: 2026-06-04 — unitAI-eoqxp.3.6.1 added `sp ps <job>` fallback from persisted timeline/forensic events when status row is missing.
+> Manual update: 2026-06-04 — unitAI-eoqxp.3.5 expanded forensic/Prometheus tests with full forbidden-label coverage, AgentOps catalog fixtures, and Prometheus forbidden-label parser validation.
+
+- 2026-06-04: `src/index.ts` top-level CLI dispatcher explicitly exits after successful subcommand completion to avoid Bun foreground command hangs; no-subcommand MCP server mode remains long-running.
+> Manual update: 2026-06-04 — unitAI-eoqxp.3.1 added optional session/conversation/trace/span forensic correlation propagation through Pi session meta, supervisor status, SQLite normalization, and feed/log JSON envelopes.
+> Manual update: 2026-06-04 — unitAI-eoqxp.3.2 added MCP forensic normalization for semconv-style MCP events, `_meta` trace/id extraction, OTel attribute hints, and MCP Prometheus projection coverage.
+> Manual update: 2026-06-04 — unitAI-v1fzu updated docs/telemetry shipped-status sections for forensic bridge, session correlation, MCP pre-wiring boundary, and Prometheus projection scope.
+> Manual update: 2026-06-04 — unitAI-7v93b synced eoqxp open children, repo DevOps PRD, and vault devops-system.md to current shipped telemetry bridge / MCP pre-wiring status.
+> Manual update: 2026-06-04 — unitAI-4j22u copied docs/telemetry/*.md into vault folder `/home/dawid/second-mind/1-projects/xtrm/telemetry/` with matching checksums.
+
+## Manual update — 2026-06-04 unitAI-5ljfu
+- `src/specialist/prometheus-projection.ts` — adds bounded chain metrics and forensic gate/evidence projections.
+- `src/specialist/forensic-events.ts` — token split body normalization, git commit evidence body/correlation, `chain_template` allowlist, `raw_diff` forbidden label.
+- `src/cli/serve.ts` / `src/index.ts` — adds per-job feed-events route and keeps `sp serve` long-running after listen.
+- `docs/telemetry/*.md` — console-safe forensic/Prometheus handoff updates.

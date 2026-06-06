@@ -3,7 +3,7 @@ title: Forensic Telemetry Event Contract
 scope: telemetry-forensics
 category: reference
 version: 1.0.0
-updated: 2026-06-02
+updated: 2026-06-04
 source_of_truth_for:
   - "xtrm forensic telemetry envelope"
   - "specialists runtime JSON events"
@@ -19,6 +19,37 @@ summary: "Defines the shared xtrm forensic event envelope, event families, label
 ---
 
 # Forensic Telemetry Event Contract
+
+## Design context
+
+This is the shipped specialists-side implementation contract for the canonical
+DevOps design in `/home/dawid/second-mind/1-projects/xtrm/devops/devops-system.md`.
+Use it as the concrete AgentOps forensic/evidence layer: rich events, identity,
+correlation, redaction, and future journal/recommendation drill-down. Do not use
+this document as the whole DevOps PRD; it is the implemented telemetry substrate
+that the broader design consumes. For the implementation-ready list of event
+names, see `docs/telemetry/agentops-event-catalog.md`.
+
+### Shipped bridge status — 2026-06-04
+
+The specialists runtime now ships the **pre-substrate forensic bridge**:
+
+- canonical `xtrm.forensic.v1` envelope creation and timeline-event normalization;
+- persisted `specialist_forensic_events` rows in observability SQLite;
+- additive forensic payloads in `sp feed --json` and `sp log --json`;
+- `sp forensic <job-id> --json` for persisted forensic event reads;
+- `sp serve` read-only `GET /jobs/:job_id/feed-events` / `GET /api/specialists/jobs/:job_id/feed-events` for ordered normalized per-job event streams;
+- `sp metrics --prometheus` / `sp serve` `GET /metrics` projection over current runtime tables and selected forensic fixtures, including bounded chain/gate/evidence counters;
+- full forbidden-label guard tests for every opaque correlation id in this contract;
+- Pi-generated `session_id` propagation into specialist status and forensic correlation;
+- optional pass-through for `conversation_id`, `trace_id`, `span_id`, and `parent_span_id` when a timeline event or caller supplies them;
+- MCP event normalization/projection **pre-wiring** for future MCP emitters.
+
+Important boundary: **there is not yet a live MCP emitter or cross-process MCP
+`_meta` trace propagation in this repo.** What shipped for MCP is the normalization
+and projection layer: if a future timeline event uses `type: "mcp"`, it is mapped
+to the canonical `mcp.*` names, extracts trace/MCP/JSON-RPC ids from direct fields
+or `_meta`, and keeps those ids in correlation only.
 
 ## 1. Purpose and non-goals
 
@@ -55,6 +86,7 @@ Specialists currently emits or exposes telemetry through these surfaces:
 | `src/specialist/timeline-events.ts` | Current TypeScript event union for specialists timeline events. | Current event names map to event families in §12. |
 | `sp log --json` | Normalized runtime log rows with job/worktree/chain metadata and event body. | Should converge on this envelope for machine consumers. |
 | `sp feed --json` | NDJSON chronological feed. Adds job metadata and metrics to timeline events. | Good operator stream; future fields must remain backward-compatible. |
+| `sp serve` `GET /jobs/:job_id/feed-events` | JSON response containing ordered normalized forensic envelopes for one job plus `(t, seq)` cursor. | Console activity-card/detail stream surface; high-cardinality IDs remain in event correlation/body, not metric labels. |
 | `sp ps --json` | Snapshot of job state and metrics. | Snapshot surface, not an event stream. |
 | `sp result --json` | Durable result output and metrics footer/source. | Result persistence events should link to this surface. |
 | `docs/observability-metrics.md` | Existing metrics contract. | Remains the metrics-side sibling of this forensic contract. |
@@ -186,6 +218,8 @@ Correlation fields are for joining logs/traces/results. They are intentionally h
 | `chain_root_bead_id` | specialists status | Opaque root bead id today. |
 | `epic_id` | specialists status / epic membership | Opaque bd/sp epic id. |
 | `node_id` | node supervisor | Opaque node run/member id when present. |
+| `session_id` | runtime/session layer | Opaque stable session id for a Pi/specialist session. Specialists now persist the Pi-generated session id when available. Distinct from `job_id`. |
+| `conversation_id` | GenAI / substrate channel | Opaque conversation/channel/thread id when available. Currently optional pass-through from timeline/caller context; maps to OTel `gen_ai.conversation.id` where appropriate. |
 | `reused_from_job_id` | startup snapshot | Opaque parent/reuse link. |
 | `worktree_owner_job_id` | startup snapshot | Opaque worktree owner link. |
 | `commit_sha` | git/autocommit events | Full SHA in body/correlation, never metric label. |
@@ -200,6 +234,36 @@ Correlation fields are for joining logs/traces/results. They are intentionally h
 | `span_id` | OTEL/substrate span context | Opaque span id. |
 | `parent_span_id` | OTEL/substrate span context | Opaque causal parent. |
 | `pulse_id` | substrate pulse emitter | Opaque pulse/event-bus id. |
+| `mcp_session_id` | MCP client/server session | Opaque MCP session id. Use for correlation/body only; maps to OTel `mcp.session.id`. |
+| `jsonrpc_request_id` | MCP/JSON-RPC request | Opaque request id. Correlation/body only, never a label. |
+| `eval_id` | evaluation runner | Opaque evaluation run/result id. Correlation/body only. |
+| `policy_decision_id` | policy/authorization layer | Opaque policy decision id. Correlation/body only. |
+| `identity_request_id` | identity/credential layer | Opaque credential or identity request id. Correlation/body only. |
+
+### Session, trace, and conversation discipline
+
+`job_id` is the activation/run id (identity layer L4). It is **not** a session,
+conversation, trace, or span id. Future runtime work must preserve this split:
+
+| Concept | Field | Meaning |
+|---|---|---|
+| Activation / run | `job_id` | One pi session / script invocation / adapter invocation. New per activation. |
+| Keep-alive or orchestrator session | `session_id` | Stable across resumed turns in the same session when available. |
+| Conversation / channel | `conversation_id` | GenAI conversation, substrate channel, or equivalent user-visible thread. |
+| Distributed trace | `trace_id` | Cross-component causal trace. Used for exemplars/log links. |
+| Span | `span_id` / `parent_span_id` | One nested operation: job, turn, model call, tool call, MCP operation, policy check, eval. |
+
+Rules:
+
+1. `session_id`, `conversation_id`, `trace_id`, and span ids are correlation
+   fields, never Prometheus labels.
+2. If an MCP call crosses a process boundary, propagate trace context through
+   the MCP `_meta` field or the best available transport-specific carrier.
+3. If a GenAI `execute_tool` span already encloses an MCP `tools/call`, do not
+   duplicate the semantic tool span; link the MCP operation as a child span or
+   forensic event under the existing tool call.
+4. When trace ids are absent, dashboards link by bounded labels + time range and
+   then filter forensic JSON by `job_id`/`session_id`/`tool_call_id` in body.
 
 ### Chain identity discipline
 
@@ -215,7 +279,11 @@ Dashboards, LogQL queries, gitboard panels, and alerts must treat these as opaqu
 
 ## 6. Event family taxonomy
 
-Event families are bounded categories. New families require updating this section and adding examples/tests.
+Event families are bounded categories. This section is the compact envelope-level
+taxonomy; `docs/telemetry/agentops-event-catalog.md` is the implementation-ready
+catalog of event names, body fields, evidence semantics, and Prometheus
+projection hints. New families require updating this section and adding
+examples/tests.
 
 | Family | Purpose | Example event names |
 |---|---|---|
@@ -223,7 +291,10 @@ Event families are bounded categories. New families require updating this sectio
 | `turn` | Agent turn lifecycle and summaries. | `turn.started`, `turn.completed`, `turn.summarized` |
 | `model` | LLM/provider metadata and changes. | `model.selected`, `model.changed`, `model.finish_reason`, `model.token_usage` |
 | `tool` | Local tool call lifecycle. | `tool.call.started`, `tool.call.completed`, `tool.call.failed` |
-| `mcp` | MCP client/server/session/tool-call telemetry. | `mcp.session.started`, `mcp.tool.called`, `mcp.tool.failed`, `mcp.operation.completed` |
+| `mcp` | MCP client/server/session/tool-call telemetry. | `mcp.connected`, `mcp.disconnected`, `mcp.call.started`, `mcp.call.completed`, `mcp.call.failed`, `mcp.rate_limited` |
+| `identity` | Identity, credential, token, and service-account operations. | `identity.credential.requested`, `identity.credential.issued`, `identity.credential.failed`, `identity.throttled` |
+| `policy` | Permission, approval, and deterministic policy decisions. | `policy.evaluation.started`, `policy.decision.allowed`, `policy.decision.denied`, `policy.mismatch.detected` |
+| `eval` | Evaluation / quality / trajectory scoring over sessions, traces, or outputs. | `eval.started`, `eval.completed`, `eval.failed`, `eval.score.recorded` |
 | `control` | Operator/runtime control actions. | `control.stop.requested`, `control.steer.sent`, `control.resume.sent`, `control.finalize.requested` |
 | `retry` | Retry lifecycle. | `retry.started`, `retry.completed`, `retry.exhausted` |
 | `compaction` | Context compaction lifecycle. | `compaction.started`, `compaction.completed` |
@@ -245,6 +316,15 @@ Where spans are available, model agent/tool activity as nested operations:
 - MCP span: `tools/call` with `mcp.method.name`, `mcp.session.id`, `jsonrpc.request.id`, and transport attributes
 
 The forensic event body may include an `otel` sub-object with prepared attributes, but implementation may remain log-first until OTEL export exists.
+
+Current shipped bridge behavior: timeline events with `type: "mcp"` are normalized
+to `event_family="mcp"` and canonical `mcp.*` event names. The normalizer reads
+`trace_id`, `span_id`, `parent_span_id`, `mcp_session_id`, and
+`jsonrpc_request_id` from either top-level event fields or `_meta`, and emits an
+`otel` object with `mcp.method.name`, `mcp.session.id`, `jsonrpc.request.id`,
+`network.transport`, `gen_ai.operation.name="execute_tool"`, and
+`gen_ai.tool.name` when available. This is pre-wiring only; no real MCP emitter
+exists yet.
 
 ## 7. Loki-friendly logging guidance
 
@@ -355,7 +435,7 @@ Prometheus metrics are projections, not a copy of the forensic body. The detaile
 | `xtrm_specialist_tool_duration_seconds` | histogram | `repo`, `participant_kind`, `participant_role`, `tool`, `result` | tool call duration |
 | `xtrm_specialist_mcp_operations_total` | counter | `repo`, `participant_kind`, `participant_role`, `method`, `result` | `mcp.*` events |
 | `xtrm_specialist_mcp_operation_duration_seconds` | histogram | `repo`, `participant_kind`, `participant_role`, `method`, `result` | MCP events/spans |
-| `xtrm_specialist_tokens_total` | counter | `repo`, `participant_kind`, `participant_role`, `model_provider`, `model`, `direction` | `model.token_usage` with model allowlist |
+| `xtrm_specialist_tokens_total` | counter | `repo`, `participant_kind`, `participant_role`, `model_provider`, `model`, `direction` | `model.token_usage` with model allowlist; `direction=input|output|cache_read|cache_creation|reasoning|tool`, with totals derived by summing directions |
 | `xtrm_service_skills_drift_total` | counter | `repo`, `service_name`, `drift_tier`, `result` | `service_skills.*` events |
 | `xtrm_pulses_total` | counter | `repo`, `service_name`, `event_family`, `result` | `pulse.*` events |
 
@@ -366,6 +446,38 @@ All correlation identifiers in §5 are forbidden as Prometheus labels. Use exemp
 ### Exemplars/correlation strategy
 
 When an implementation supports exemplars, attach one opaque correlation value such as `trace_id` to a histogram sample. Otherwise dashboards should link from aggregate metrics to LogQL queries by bounded labels and time window, then filter by IDs in JSON body.
+
+## 8.1 Token usage and future billing boundary
+
+Current specialists/xtrm usage is subscription-plan based, not directly priced
+per provider API call. Therefore **token usage is the reliable runtime signal**;
+USD spend is not a trustworthy operational metric today.
+
+Every `model.token_usage.recorded` event should report the best available token
+breakdown in the event `body`:
+
+| Field | Meaning |
+|---|---|
+| `input_tokens` | Prompt/input tokens where available. |
+| `output_tokens` | Completion/output tokens where available. |
+| `cache_read_tokens` | Cache read/hit tokens where provider/runtime exposes them. |
+| `cache_creation_tokens` | Cache write/creation tokens where available. |
+| `reasoning_tokens` | Reasoning/thinking tokens where exposed separately. |
+| `tool_tokens` | Tool-call/tool-result tokens where measurable separately. |
+| `total_tokens` | Total reported by provider/runtime, or derived sum when safe. |
+| `usage_source` | `provider_usage`, `runtime_estimate`, `local_estimate`, or `unknown`. |
+
+Prometheus should export token counters, not USD counters. The normal mapping is
+`xtrm_llm_tokens_total{direction="input|output|cache_read|cache_creation|reasoning|tool"}`.
+Dashboards compute total usage with `sum without(direction)(...)` when a split is
+available. Use `direction="total"` only as a fallback when an upstream source
+reports only an unsplit total; do not mix that fallback with split directions in
+the same total panel.
+
+Future API billing may add `body.billing_provenance` and a deferred
+`xtrm_llm_cost_usd_total`, but only after usage comes from direct API billing or
+another explicit, versioned pricing source. Until then, USD values are
+forensic-only notes at most and must not be exported as authoritative metrics.
 
 ## 9. Redaction and secrets policy
 
@@ -648,8 +760,10 @@ Migration rule:
     "output_tokens": 1800,
     "cache_creation_tokens": 1200,
     "cache_read_tokens": 6000,
+    "reasoning_tokens": 0,
+    "tool_tokens": 0,
     "total_tokens": 34000,
-    "cost_usd": 0.42
+    "usage_source": "provider_usage"
   },
   "redaction": { "status": "clean" }
 }
@@ -873,7 +987,7 @@ Implementation beads that emit, normalize, export, or project these events must 
 VALIDATION — forensic telemetry contract
 - [ ] New events are emitted through the shared envelope writer, not hand-built JSON.
 - [ ] Every event has schema_version, timestamp, t_unix_ms, severity, event_family, event_name, event_version, resource, correlation, body, redaction.
-- [ ] job_id/participant_id/bead_id/chain_id/trace_id/span_id/tool_call_id are body/correlation fields only, never labels.
+- [ ] job_id/participant_id/bead_id/chain_id/session_id/conversation_id/trace_id/span_id/tool_call_id/mcp_session_id/eval_id/policy_decision_id are body/correlation fields only, never labels.
 - [ ] Resource labels are bounded and match docs/telemetry/forensic-event-contract.md §4/§7.
 - [ ] Redaction tests cover secrets in tool args, command previews, env-like payloads, and error text.
 - [ ] Legacy TimelineEvent records still parse and display.
@@ -903,12 +1017,18 @@ Specialists now ships the pre-substrate forensic bridge:
 2. Timeline persistence dual-writes canonical rows into `specialist_forensic_events` in observability SQLite.
 3. `sp forensic [job-id] --json` queries persisted forensic envelopes as NDJSON.
 4. `sp log --json` and `sp feed --json` include additive `forensic_event` payloads while preserving legacy fields.
-5. `sp metrics --prometheus` projects low-cardinality metrics from runtime state and job metrics.
-6. Unit and CI checks cover schema/cardinality/redaction and Prometheus exposition syntax.
+5. `sp metrics --prometheus` projects low-cardinality metrics from runtime state, job metrics, and selected forensic event families.
+6. `sp serve` exposes read-only `GET /metrics` for the same Prometheus projection.
+7. `sp serve` exposes read-only per-job `GET /jobs/:job_id/feed-events` and `/api/specialists/jobs/:job_id/feed-events` for console activity-card streams.
+8. Projection now includes bounded `xtrm_chains_total`, `xtrm_chain_duration_seconds`, `xtrm_gate_verdicts_total`, and `xtrm_evidence_refs_total`; chain/job/file/diff drill-down stays in forensic events/evidence.
+9. Unit checks cover schema/cardinality/redaction, full forbidden-label enforcement, AgentOps catalog fixtures, and Prometheus exposition syntax.
+10. `PiAgentSession.meta.sessionId` is persisted as `status.session_id` and forwarded to forensic correlation; conversation/trace/span ids are optional pass-through fields.
+11. MCP normalization/projection is pre-wired for future emitters: `type:"mcp"` timeline events map to canonical `mcp.*` events, support `_meta` trace/MCP/JSON-RPC correlation, and include semconv-style `otel` hints.
 
 Remaining follow-up candidates:
 
 1. Expand native source emission beyond the current persistence-time dual-write bridge where doing so simplifies event-family-specific bodies.
-2. Add service-skills, MCP, process-health, worktree-health, and pulse family emitters when those runtimes need telemetry.
-3. Add an HTTP `/metrics` scrape surface if the CLI/textfile bridge is insufficient for infra.
+2. Add actual live MCP emitters and cross-process MCP `_meta` trace propagation; the current bridge only normalizes future `type:"mcp"` events.
+3. Add service-skills, process-health, worktree-health, and pulse family emitters when those runtimes need telemetry.
 4. Migrate gitboard from text `sp feed` consumption to structured `sp feed --json` / `sp forensic` consumption.
+5. Add a durable event-cursor projection path for long-running exporters if table-derived replay-safe counters become insufficient.

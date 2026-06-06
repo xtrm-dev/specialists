@@ -11,6 +11,7 @@ import {
   parseJournalMode,
   verifyWalMode,
 } from '../../../src/specialist/observability-sqlite.js';
+import { createForensicEvent } from '../../../src/specialist/forensic-events.js';
 import { loadEpicReadinessSummary } from '../../../src/specialist/epic-readiness.js';
 import {
   OBSERVABILITY_SCHEMA_VERSION,
@@ -279,6 +280,41 @@ describe('observability-sqlite', () => {
       expect(customSeqValues).toHaveLength(3);
       expect(customSeqValues.every((seq) => typeof seq === 'number')).toBe(true);
       expect(customSeqValues).toEqual([...customSeqValues].sort((a, b) => (a ?? 0) - (b ?? 0)));
+    });
+  });
+
+  describe('appendForensicEvent', () => {
+    it('allocates unique seq values when caller omits seq', () => {
+      const client = createClient();
+      const event = createForensicEvent({
+        event_family: 'chain',
+        event_name: 'chain.ready_for_review',
+        resource: {
+          service_namespace: 'xtrm',
+          service_name: 'specialists',
+          service_component: 'epic',
+          deployment_environment: 'local',
+          repo: 'specialists',
+          participant_kind: 'specialist',
+          participant_role: 'epic',
+        },
+        correlation: { job_id: 'epic-1', participant_id: 'epic::1' },
+        body: { chain_template: 'epic-1', changed_paths_count: 2, terminal_state: 'merge_ready', result: 'pass' },
+      });
+
+      client.appendForensicEvent('epic-1', 'specialist', undefined, event);
+      client.appendForensicEvent('epic-1', 'specialist', undefined, createForensicEvent({
+        event_family: 'chain',
+        event_name: 'chain.ready_for_review',
+        resource: event.resource,
+        correlation: event.correlation,
+        body: event.body,
+      }));
+
+      const rows = db!.query('SELECT seq, event_json FROM specialist_forensic_events WHERE job_id = ? ORDER BY seq').all('epic-1') as Array<{ seq: number; event_json: string }>;
+      expect(rows).toHaveLength(2);
+      expect(rows[0].seq).toBeLessThan(rows[1].seq);
+      expect(rows.map((row) => JSON.parse(row.event_json) as { correlation?: { job_id?: string } }).every((payload) => payload.correlation?.job_id === 'epic-1')).toBe(true);
     });
   });
 
@@ -834,6 +870,52 @@ describe('observability-sqlite', () => {
       expect(event.correlation.chain_id).toBe('chain-forensic');
       expect(event.body.legacy_timeline_event.args).toBe('[REDACTED]');
       expect(event.redaction.fields).toContain('body.legacy_timeline_event.args');
+    });
+
+    it('persists lifecycle family rows with canonical names and redaction', () => {
+      const client = createClient();
+      const now = Date.now();
+
+      client.upsertStatus({
+        id: 'job-lifecycle',
+        specialist: 'executor',
+        status: 'running',
+        bead_id: 'unitAI-lifecycle',
+        chain_kind: 'chain',
+        chain_id: 'chain-lifecycle',
+        chain_root_job_id: 'job-lifecycle',
+        chain_root_bead_id: 'unitAI-lifecycle',
+        started_at_ms: now - 1_000,
+        updated_at_ms: now,
+        model: 'openai/gpt-5.4-mini',
+        backend: 'openai',
+      } as any);
+
+      const events = [
+        { t: now, type: 'command_completed', command_kind: 'git', duration_ms: 14, command: 'git', args: ['status', '--short'], redacted: true },
+        { t: now + 1, type: 'review_verdict_pass', chain_template: 'chain', changed_paths_count: 2, terminal_state: 'merge_ready', result: 'pass' },
+        { t: now + 2, type: 'chain_ready_for_review', chain_template: 'chain', changed_paths_count: 2, terminal_state: 'merge_ready', result: 'pass' },
+        { t: now + 3, type: 'chain_finalized', chain_template: 'chain', changed_paths_count: 2, terminal_state: 'merged', result: 'success' },
+        { t: now + 4, type: 'worktree_merged', changed_paths_count: 2, merge_ref: 'refs/heads/sp/publish-chain', source_ref: 'refs/heads/feature', target_ref: 'refs/heads/main', result: 'success' },
+      ] as const;
+
+      for (const event of events) {
+        client.appendEvent('job-lifecycle', 'executor', 'unitAI-lifecycle', event as any);
+      }
+
+      const forensicRows = client.readForensicEvents({ jobId: 'job-lifecycle' });
+      expect(forensicRows.map((row) => row.event_name)).toEqual([
+        'command.completed',
+        'review.verdict.pass',
+        'chain.ready_for_review',
+        'chain.finalized',
+        'worktree.merged',
+      ]);
+      expect(forensicRows.every((row) => row.redaction_status === 'redacted')).toBe(true);
+      expect(JSON.parse(forensicRows[0]!.event_json).body.command_kind).toBe('git');
+      expect(JSON.parse(forensicRows[1]!.event_json).body.terminal_state).toBe('merge_ready');
+      expect(JSON.parse(forensicRows[2]!.event_json).body.changed_paths_count).toBe(2);
+      expect(JSON.parse(forensicRows[4]!.event_json).body.merge_ref).toBe('refs/heads/sp/publish-chain');
     });
   });
 

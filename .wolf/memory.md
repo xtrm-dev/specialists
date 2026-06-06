@@ -245,3 +245,62 @@ PR #99 failed GitHub OSV on `qs@6.15.1` in `bun.lock` (`GHSA-q8mj-m7cp-5q26`). F
 ## 2026-06-02 — unitAI-60w93.5 Prometheus projection contract
 - Added docs/telemetry/prometheus-projection-contract.md defining low-cardinality xtrm Prometheus metrics, allowlisted labels, forbidden correlation labels, buckets, exporter architecture, SLO candidates, and ownership split.
 - Linked forensic-event-contract.md and observability-metrics.md to the projection contract; created follow-ups unitAI-60w93.6 exporter prototype and unitAI-60w93.7 infra/console handoff.
+## 2026-06-03 — substrate/devops SSOT distinction
+- User clarified that `substrate_design_it.md` is the broad xtrm substrate/product/collante design across core/substrate/channels/specialists/console.
+- `devops-system.md` is specialists-owned vertical design spanning substrate touchpoints, DevOps, AgentOps telemetry, MCP, IaC, and console; use it as DevOps SSOT, not as a replacement for substrate SSOT.
+## 2026-06-03 — unitAI-69s6t substrate telemetry design pass
+- Updated `second-mind/1-projects/xtrm/substrate/substrate_design_it.md` with explicit Prometheus projection contract link, shipped `sp forensic` / `sp metrics --prometheus` observability surfaces, and a new §12.5 lineage/evidence drawer model for console drill-down.
+- The pass treats substrate as xtrm-wide SSOT and `docs/telemetry/*` as shipped specialists-side implementation contracts, not as the whole substrate design.
+## 2026-06-03 — unitAI-0gdjp AgentOps event catalog
+- Added `docs/telemetry/agentops-event-catalog.md` as the implementation-ready catalog for xtrm AgentOps event names, body fields, evidence semantics, and Prometheus projection eligibility.
+- Linked the catalog from `docs/telemetry/forensic-event-contract.md` design context and §6 event-family taxonomy.
+## 2026-06-03 — unitAI-eoqxp.1 research refresh
+- Completed four researcher passes for AgentOps telemetry gaps, DevOps operating loop, MCP query surfaces, and Terraform/IaC guardrails.
+- Synthesis appended to `unitAI-eoqxp` and `unitAI-eoqxp.1`: telemetry gaps are narrow; DevOps specialist is recommendation-first; query path is Grafana MCP first; Terraform path is fmt/validate/plan/show-json/policy/human approval with no default apply/destroy.
+## 2026-06-03 — DevOps module parked behind foundations
+- Updated `/home/dawid/second-mind/1-projects/xtrm/devops/devops-system.md` §7.2 with `unitAI-eoqxp.1` research findings linked to child beads `.1`-`.4`, plus `69s6t` and `0gdjp`.
+- Decision: keep DevOps findings as parked evidence; focus first on specialists telemetry bridge/event-catalog follow-through, specialists roadmap/runtime cleanup, then substrate/channels before implementing `eoqxp.2`-`.6`.
+## 2026-06-03 — unitAI-eoqxp.3 forensic telemetry increment
+- Extended telemetry contracts for runtime AgentOps gaps: session/conversation/trace correlation discipline, MCP semconv fields, identity/policy/eval event families, cost provenance, and identity/policy metric projections.
+- Created child beads `unitAI-eoqxp.3.1`-.`3.5` for implementation/test follow-through.
+## 2026-06-03 — token telemetry pricing correction
+- User corrected telemetry contract: xtrm/specialists uses subscription plans, not direct API billing; USD cost metrics are misleading today.
+- Updated docs to track token usage first via split directions (`input`, `output`, `cache_read`, `cache_creation`, `reasoning`, `tool`) and derive totals; `direction=total` is fallback-only for unsplit sources.
+- `xtrm_llm_cost_usd_total` is deferred/future-only until explicit API billing/pricing provenance exists.
+## 2026-06-03 — identity/policy/eval forensic support
+- Added runtime support for identity/policy/eval telemetry labels and projection: forbidden correlation IDs include session/conversation/MCP/eval/policy/identity ids; bounded labels include policy_kind/action_kind/credential_kind/eval_kind.
+- Prometheus projection can consume forensic event fixtures for xtrm_identity_operations_total, xtrm_policy_decisions_total, xtrm_policy_mismatches_total, xtrm_eval_runs_total, and xtrm_eval_score without exposing opaque IDs.
+## 2026-06-04 — sp ps event fallback
+- Fixed `sp ps <job> --json` for jobs that have persisted events/forensic rows but no `specialist_jobs.status_json` row.
+- `ps` now synthesizes an inspect status from run_start/run_complete/token_usage events and marks `recovered_from_events: true`. Real job `66534e` resolves correctly.
+## 2026-06-04 — unitAI-eoqxp.3.5 telemetry validation fixtures
+- Expanded `tests/unit/specialist/forensic-events.test.ts` to assert the full `FORBIDDEN_PROMETHEUS_LABELS` set and cover representative AgentOps catalog fixtures for job, MCP, identity, policy, eval, service_skills, pulse, and token-usage provenance without `cost_usd`.
+- Added `tests/unit/specialist/prometheus-projection.test.ts` coverage proving Prometheus text validation rejects forbidden labels such as `job_id`.
+
+## 2026-06-04 — foreground sp run exit
+- Fixed `unitAI-eoqxp.3.6.2`: foreground `sp run smoke-echo --prompt ...` completed the job but Bun did not exit even with no visible active handles/requests after `run()` returned. `src/index.ts` now explicitly exits after successful subcommand completion (`process.exitCode ?? 0`) while preserving MCP server mode when no subcommand is supplied.
+## 2026-06-04 — unitAI-eoqxp.3.1 forensic session correlation
+- `PiAgentSession` now passes its generated `sessionId` through `onMeta`; `Supervisor` persists it as `status.session_id` without changing `job_id` activation semantics.
+- `forensicEventFromTimelineEvent` accepts optional context fields `sessionId`, `conversationId`, `traceId`, `spanId`, and `parentSpanId`, and falls back to same-named snake_case timeline event fields.
+- `sp feed --json`, `sp log --json`, and SQLite forensic normalization forward these optional IDs into `correlation` while Prometheus label guards continue to reject them.
+## 2026-06-04 — unitAI-eoqxp.3.2 MCP forensic semconv alignment
+- `forensicEventFromTimelineEvent` now maps timeline `type: 'mcp'` actions to canonical `mcp.connected`, `mcp.disconnected`, `mcp.call.started`, `mcp.call.completed`, `mcp.call.failed`, `mcp.auth.failed`, `mcp.rate_limited`, and `mcp.latency.observed` event names.
+- MCP forensic events extract `trace_id`, `span_id`, `parent_span_id`, `mcp_session_id`, and `jsonrpc_request_id` from direct fields or `_meta`, include semconv-style `otel` attributes, and keep raw IDs in correlation only.
+- Prometheus projection now supports MCP forensic counters as `xtrm_mcp_operations_total` with bounded `mcp_server`, `mcp_method`, and `result` labels only.
+## 2026-06-04 — docs/telemetry shipped-status sync
+- Updated `docs/telemetry/forensic-event-contract.md`, `docs/telemetry/agentops-event-catalog.md`, and `docs/telemetry/prometheus-projection-contract.md` to distinguish shipped runtime features from future emitters.
+- Key correction: MCP support is currently normalization/projection pre-wiring only; no live MCP emitter or cross-process `_meta` propagation exists yet.
+- Prometheus doc now states shipped projections include job/process/worktree/tool/token plus identity/policy/eval/MCP counters for supplied forensic events, with `sp metrics --prometheus` and `sp serve` `/metrics` as shipped surfaces.
+## 2026-06-04 — eoqxp DevOps telemetry bridge sync
+- Updated open eoqxp child beads (.2/.4/.5/.6) plus parent notes so future work consumes shipped telemetry surfaces instead of re-inventing them.
+- Updated `docs/design/substrate/devops-platform-engineering-prd.md` with current specialists telemetry bridge status, token-first cost semantics, and the live-MCP-emitter boundary (`unitAI-dl02w`).
+- Updated vault `1-projects/xtrm/devops/devops-system.md` with the same boundary: MCP is pre-wired for normalization/projection, but no live MCP emitter or cross-process `_meta` propagation exists yet.
+## 2026-06-04 — telemetry docs copied to second-mind vault
+- Copied all repo telemetry docs (`agentops-event-catalog.md`, `forensic-event-contract.md`, `prometheus-infra-console-handoff.md`, `prometheus-projection-contract.md`) to `/home/dawid/second-mind/1-projects/xtrm/telemetry/`.
+- SHA1 checksums match repo sources. `vaultctl note index`/search did not return useful indexed search results during the copy session, but direct files are present and readable on disk.
+
+## 2026-06-04 — unitAI-5ljfu console-safe telemetry handoff
+- Added `sp serve` per-job forensic feed endpoint (`/jobs/:job_id/feed-events` and `/api/specialists/jobs/:job_id/feed-events`) returning normalized `xtrm.forensic.v1` events with `(t, seq)` cursor for console activity cards.
+- Prometheus projection now emits bounded chain aggregate metrics (`xtrm_chains_total`, `xtrm_chain_duration_seconds`) and projects review gate verdict/evidence-ref forensic counters without job/chain/trace/file/diff labels.
+- Token usage timeline events now normalize explicit split fields plus `usage_source`; git auto-commit events carry commit/changed-path evidence in forensic body/correlation only.
+- Regression caught: `sp serve` exited immediately after listening because top-level subcommand auto-exit did not exempt long-running serve mode; entrypoint now excludes `serve` from successful-subcommand `process.exit`.

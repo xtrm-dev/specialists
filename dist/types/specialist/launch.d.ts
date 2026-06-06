@@ -27,6 +27,7 @@ export interface LaunchSpecialistOptions {
     onMeta?: (meta: {
         backend: string;
         model: string;
+        sessionId?: string;
     }) => void;
     onJobStarted?: (job: {
         id: string;

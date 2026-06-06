@@ -20,6 +20,11 @@ export interface SupervisorStatus {
     last_event_at_ms?: number;
     bead_id?: string;
     node_id?: string;
+    session_id?: string;
+    conversation_id?: string;
+    trace_id?: string;
+    span_id?: string;
+    parent_span_id?: string;
     session_file?: string;
     fifo_path?: string;
     tmux_session?: string;
@@ -89,6 +94,7 @@ export interface SupervisorOptions {
     onMeta?: (meta: {
         backend: string;
         model: string;
+        sessionId?: string;
     }) => void;
     /** Optional callback fired as soon as a job id is allocated and persisted */
     onJobStarted?: (job: {

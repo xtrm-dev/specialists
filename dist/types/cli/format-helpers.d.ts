@@ -36,12 +36,14 @@ export declare function formatDateTime(t: number): string;
  * Format elapsed seconds as compact string (e.g., "42s", "5m 30s").
  */
 export declare function formatElapsed(seconds: number): string;
-export declare function formatCostUsd(costUsd: number | undefined): string | null;
 export declare function formatTokenUsageSummary(tokenUsage: {
     total_tokens?: number;
     input_tokens?: number;
     output_tokens?: number;
-    cost_usd?: number;
+    cache_read_tokens?: number;
+    cache_creation_tokens?: number;
+    reasoning_tokens?: number;
+    tool_tokens?: number;
 } | undefined): string[];
 /**
  * Compact labels for event types (5 chars max, pad for alignment).

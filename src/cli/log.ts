@@ -71,6 +71,11 @@ interface LogRow {
   chainId?: string;
   chainRootJobId?: string;
   chainRootBeadId?: string;
+  sessionId?: string;
+  conversationId?: string;
+  traceId?: string;
+  spanId?: string;
+  parentSpanId?: string;
   event: TimelineEvent;
 }
 
@@ -204,6 +209,11 @@ function toRows(target: DbTarget, statuses: SupervisorStatus[], options: LogOpti
         chainId: status.chain_id,
         chainRootJobId: status.chain_root_job_id,
         chainRootBeadId: status.chain_root_bead_id,
+        sessionId: status.session_id,
+        conversationId: status.conversation_id,
+        traceId: status.trace_id,
+        spanId: status.span_id,
+        parentSpanId: status.parent_span_id,
         event,
       });
     }
@@ -225,6 +235,11 @@ function toRows(target: DbTarget, statuses: SupervisorStatus[], options: LogOpti
         chainId: status.chain_id,
         chainRootJobId: status.chain_root_job_id,
         chainRootBeadId: status.chain_root_bead_id,
+        sessionId: status.session_id,
+        conversationId: status.conversation_id,
+        traceId: status.trace_id,
+        spanId: status.span_id,
+        parentSpanId: status.parent_span_id,
         event: { t: status.last_event_at_ms ?? status.started_at_ms, type: 'status_snapshot' } as unknown as TimelineEvent,
       });
     }
@@ -405,6 +420,11 @@ function printRow(row: LogRow, json: boolean): void {
         chainId: row.chainId,
         chainRootJobId: row.chainRootJobId,
         chainRootBeadId: row.chainRootBeadId,
+        sessionId: row.sessionId,
+        conversationId: row.conversationId,
+        traceId: row.traceId,
+        spanId: row.spanId,
+        parentSpanId: row.parentSpanId,
       }),
     }));
     return;

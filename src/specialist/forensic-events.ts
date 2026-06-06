@@ -37,6 +37,13 @@ export interface ForensicCorrelation {
   trace_id?: string;
   span_id?: string;
   parent_span_id?: string;
+  session_id?: string;
+  conversation_id?: string;
+  mcp_session_id?: string;
+  jsonrpc_request_id?: string;
+  eval_id?: string;
+  policy_decision_id?: string;
+  identity_request_id?: string;
   commit_sha?: string;
   [key: string]: unknown;
 }
@@ -101,12 +108,18 @@ export const FORBIDDEN_PROMETHEUS_LABELS = new Set([
   'trace_id',
   'span_id',
   'parent_span_id',
-  'commit_sha',
-  'jsonrpc_request_id',
+  'session_id',
+  'conversation_id',
   'mcp_session_id',
+  'jsonrpc_request_id',
+  'eval_id',
+  'policy_decision_id',
+  'identity_request_id',
+  'commit_sha',
   'raw_path',
   'raw_command',
   'raw_error',
+  'raw_diff',
   'raw_url',
   'prompt',
   'model_output',
@@ -137,6 +150,15 @@ export const DEFAULT_LABEL_ALLOWLIST = new Set([
   'error_type',
   'drift_tier',
   'pulse_kind',
+  'policy_kind',
+  'action_kind',
+  'resource_kind',
+  'credential_kind',
+  'eval_kind',
+  'chain_template',
+  'gate_kind',
+  'verdict',
+  'severity_level',
   'direction',
   'reason',
   'process_kind',
@@ -214,8 +236,36 @@ export function redactForensicValue<T>(value: T, path = 'body'): RedactionResult
   };
 }
 
+const NON_SENSITIVE_TELEMETRY_BODY_FIELDS = new Set([
+  'input_tokens',
+  'output_tokens',
+  'cache_read_tokens',
+  'cache_creation_tokens',
+  'reasoning_tokens',
+  'tool_tokens',
+  'total_tokens',
+  'usage_source',
+  'credential_kind',
+  'policy_kind',
+  'action_kind',
+  'resource_kind',
+  'eval_kind',
+  'target_kind',
+  'scope_kind',
+  'provider',
+  'ttl_seconds',
+  'retryable',
+  'result',
+  'score',
+  'threshold',
+  'scale',
+  'severity',
+  'reason_code',
+  'mismatch_kind',
+]);
+
 function isSensitiveField(key: string): boolean {
-  if (key === 'input_tokens' || key === 'output_tokens' || key === 'cache_read_tokens' || key === 'cache_creation_tokens') return false;
+  if (NON_SENSITIVE_TELEMETRY_BODY_FIELDS.has(key)) return false;
   return SENSITIVE_FIELD_RE.test(key);
 }
 
@@ -337,6 +387,11 @@ export interface TimelineForensicContext {
   chainRootJobId?: string;
   chainRootBeadId?: string;
   epicId?: string;
+  sessionId?: string;
+  conversationId?: string;
+  traceId?: string;
+  spanId?: string;
+  parentSpanId?: string;
 }
 
 export function forensicEventFromTimelineEvent(
@@ -377,17 +432,173 @@ export function forensicEventFromTimelineEvent(
       chain_root_job_id: context.chainRootJobId,
       chain_root_bead_id: context.chainRootBeadId,
       epic_id: context.epicId,
+      session_id: context.sessionId ?? stringField(event, 'session_id'),
+      conversation_id: context.conversationId ?? stringField(event, 'conversation_id'),
+      trace_id: context.traceId ?? stringField(event, 'trace_id') ?? metaStringField(event, 'trace_id'),
+      span_id: context.spanId ?? stringField(event, 'span_id') ?? metaStringField(event, 'span_id'),
+      parent_span_id: context.parentSpanId ?? stringField(event, 'parent_span_id') ?? metaStringField(event, 'parent_span_id'),
+      mcp_session_id: stringField(event, 'mcp_session_id') ?? metaStringField(event, 'mcp_session_id') ?? metaStringField(event, 'mcp.session.id'),
+      jsonrpc_request_id: stringField(event, 'jsonrpc_request_id') ?? metaStringField(event, 'jsonrpc_request_id') ?? metaStringField(event, 'jsonrpc.request.id'),
       tool_call_id: typeof event.tool_call_id === 'string' ? event.tool_call_id : undefined,
+      commit_sha: typeof event.commit_sha === 'string' ? event.commit_sha : undefined,
     },
-    body: { legacy_timeline_event: event },
+    body: bodyForTimelineEvent(event),
+    otel: otelForTimelineEvent(event),
     redaction: { status: redactionStatusForTimelineEvent(event) },
     t_unix_ms: event.t,
     seq: event.seq,
   });
 }
 
+function stringField(source: Record<string, unknown>, key: string): string | undefined {
+  const value = source[key];
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function metaStringField(source: Record<string, unknown>, key: string): string | undefined {
+  const meta = source._meta;
+  if (!meta || typeof meta !== 'object') return undefined;
+  return stringField(meta as Record<string, unknown>, key);
+}
+
+function numberField(source: Record<string, unknown>, key: string): number | undefined {
+  const value = Number(source[key]);
+  return Number.isFinite(value) ? value : undefined;
+}
+
+function booleanField(source: Record<string, unknown>, key: string): boolean | undefined {
+  const value = source[key];
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+function bodyForTimelineEvent(event: { type: string; [key: string]: unknown }): Record<string, unknown> {
+  if (event.type === 'mcp') {
+    return {
+      legacy_timeline_event: event,
+      mcp_server: stringField(event, 'mcp_server') ?? stringField(event, 'server') ?? 'unknown',
+      mcp_method: stringField(event, 'mcp_method') ?? stringField(event, 'method') ?? 'tools/call',
+      tool_name: stringField(event, 'tool_name') ?? stringField(event, 'tool'),
+      network_transport: stringField(event, 'network_transport') ?? stringField(event, 'transport'),
+      duration_ms: numberField(event, 'duration_ms'),
+      error_type: stringField(event, 'error_type'),
+      status_code: stringField(event, 'status_code'),
+      duplicate_span_suppressed: booleanField(event, 'duplicate_span_suppressed'),
+      trace_carrier: metaStringField(event, 'trace_carrier') ?? (event._meta && typeof event._meta === 'object' ? '_meta' : undefined),
+    };
+  }
+
+  if (event.type === 'token_usage') {
+    return {
+      legacy_timeline_event: event,
+      input_tokens: numberField(event, 'input_tokens') ?? numberField(event, 'input'),
+      output_tokens: numberField(event, 'output_tokens') ?? numberField(event, 'output'),
+      cache_read_tokens: numberField(event, 'cache_read_tokens') ?? numberField(event, 'cache_read'),
+      cache_creation_tokens: numberField(event, 'cache_creation_tokens') ?? numberField(event, 'cache_creation'),
+      reasoning_tokens: numberField(event, 'reasoning_tokens') ?? numberField(event, 'reasoning') ?? numberField(event, 'thinking_tokens'),
+      tool_tokens: numberField(event, 'tool_tokens') ?? numberField(event, 'tool') ?? numberField(event, 'tool_use_tokens'),
+      total_tokens: numberField(event, 'total_tokens') ?? numberField(event, 'total'),
+      usage_source: stringField(event, 'usage_source') ?? stringField(event, 'source') ?? 'runtime_event',
+    };
+  }
+
+  if (event.type === 'run_complete') {
+    return {
+      legacy_timeline_event: event,
+      status: stringField(event, 'status'),
+      output: stringField(event, 'output'),
+      error: stringField(event, 'error'),
+      commit_sha: stringField(event, 'commit_sha'),
+      evidence_refs: evidenceRefsForTimelineEvent(event),
+    };
+  }
+
+  if (event.type === 'auto_commit_success' || event.type === 'auto_commit_skipped' || event.type === 'auto_commit_failed') {
+    const committedFiles = Array.isArray(event.committed_files)
+      ? event.committed_files.filter((file): file is string => typeof file === 'string')
+      : [];
+    return {
+      legacy_timeline_event: event,
+      evidence_kind: event.type === 'auto_commit_success' ? 'commit' : 'report',
+      result: event.type === 'auto_commit_success' ? 'success' : event.type === 'auto_commit_failed' ? 'error' : 'skipped',
+      commit_sha: stringField(event, 'commit_sha'),
+      changed_paths_count: committedFiles.length,
+      changed_paths: committedFiles,
+      evidence_refs: evidenceRefsForTimelineEvent(event),
+      reason: stringField(event, 'reason'),
+    };
+  }
+
+  if (event.type === 'command_completed' || event.type === 'command_failed') {
+    return {
+      legacy_timeline_event: event,
+      command_kind: stringField(event, 'command_kind') ?? 'unknown',
+      duration_ms: numberField(event, 'duration_ms'),
+      status: event.type === 'command_completed' ? 'success' : 'error',
+      command: stringField(event, 'command'),
+      args: Array.isArray(event.args) ? event.args.filter((arg): arg is string => typeof arg === 'string') : undefined,
+      exit_code: numberField(event, 'exit_code'),
+      stderr: stringField(event, 'stderr'),
+      redacted: booleanField(event, 'redacted'),
+    };
+  }
+
+  if (event.type === 'review_verdict_pass' || event.type === 'review_verdict_partial' || event.type === 'review_verdict_fail' || event.type === 'review_verdict_waived') {
+    return {
+      legacy_timeline_event: event,
+      verdict: event.type.replace('review_verdict_', ''),
+      chain_template: stringField(event, 'chain_template'),
+      changed_paths_count: numberField(event, 'changed_paths_count'),
+      terminal_state: stringField(event, 'terminal_state'),
+      result: stringField(event, 'result'),
+    };
+  }
+
+  if (event.type === 'chain_ready_for_review' || event.type === 'chain_finalized') {
+    return {
+      legacy_timeline_event: event,
+      chain_template: stringField(event, 'chain_template'),
+      changed_paths_count: numberField(event, 'changed_paths_count'),
+      terminal_state: stringField(event, 'terminal_state'),
+      result: stringField(event, 'result'),
+    };
+  }
+
+  if (event.type === 'worktree_merged') {
+    return {
+      legacy_timeline_event: event,
+      changed_paths_count: numberField(event, 'changed_paths_count'),
+      merge_ref: stringField(event, 'merge_ref'),
+      source_ref: stringField(event, 'source_ref'),
+      target_ref: stringField(event, 'target_ref'),
+      result: stringField(event, 'result'),
+    };
+  }
+
+  return { legacy_timeline_event: event };
+}
+
+function evidenceRefsForTimelineEvent(event: { [key: string]: unknown }): Array<Record<string, unknown>> | undefined {
+  if (!Array.isArray(event.evidence)) return undefined;
+  const refs = event.evidence.filter((entry): entry is Record<string, unknown> => !!entry && typeof entry === 'object' && !Array.isArray(entry));
+  return refs.length > 0 ? refs : undefined;
+}
+
+function otelForTimelineEvent(event: { type: string; [key: string]: unknown }): Record<string, unknown> | undefined {
+  if (event.type !== 'mcp') return undefined;
+  const method = stringField(event, 'mcp_method') ?? stringField(event, 'method') ?? 'tools/call';
+  return {
+    'mcp.method.name': method,
+    'mcp.session.id': stringField(event, 'mcp_session_id') ?? metaStringField(event, 'mcp_session_id') ?? metaStringField(event, 'mcp.session.id'),
+    'jsonrpc.request.id': stringField(event, 'jsonrpc_request_id') ?? metaStringField(event, 'jsonrpc_request_id') ?? metaStringField(event, 'jsonrpc.request.id'),
+    'network.transport': stringField(event, 'network_transport') ?? stringField(event, 'transport'),
+    'gen_ai.operation.name': 'execute_tool',
+    'gen_ai.tool.name': stringField(event, 'tool_name') ?? stringField(event, 'tool'),
+  };
+}
+
 function familyForTimelineType(type: string): string {
   if (type === 'run_start' || type === 'run_complete' || type === 'status_change' || type === 'payload_breakdown') return 'job';
+  if (type === 'mcp') return 'mcp';
   if (type === 'tool') return 'tool';
   if (type === 'turn' || type === 'turn_summary' || type === 'message' || type === 'text' || type === 'thinking') return 'turn';
   if (type === 'token_usage' || type === 'finish_reason' || type === 'model_change' || type === 'meta') return 'model';
@@ -396,6 +607,10 @@ function familyForTimelineType(type: string): string {
   if (type === 'compaction') return 'compaction';
   if (type === 'error' || type === 'extension_error') return 'error';
   if (type === 'auto_commit_success' || type === 'auto_commit_skipped' || type === 'auto_commit_failed') return 'git';
+  if (type === 'command_completed' || type === 'command_failed') return 'command';
+  if (type === 'review_verdict_pass' || type === 'review_verdict_partial' || type === 'review_verdict_fail' || type === 'review_verdict_waived') return 'review';
+  if (type === 'chain_ready_for_review' || type === 'chain_finalized') return 'chain';
+  if (type === 'worktree_merged') return 'worktree';
   if (type === 'stale_warning') return 'process_health';
   return 'job';
 }
@@ -408,6 +623,7 @@ function eventNameForTimelineEvent(event: { type: string; [key: string]: unknown
     return 'job.completed';
   }
   if (event.type === 'status_change') return 'job.status_changed';
+  if (event.type === 'mcp') return mcpEventNameForTimelineEvent(event);
   if (event.type === 'tool') {
     if (event.phase === 'start') return 'tool.call.started';
     if (event.is_error) return 'tool.call.failed';
@@ -425,12 +641,38 @@ function eventNameForTimelineEvent(event: { type: string; [key: string]: unknown
   if (event.type === 'auto_commit_success') return 'git.auto_commit.succeeded';
   if (event.type === 'auto_commit_skipped') return 'git.auto_commit.skipped';
   if (event.type === 'auto_commit_failed') return 'git.auto_commit.failed';
+  if (event.type === 'command_completed') return 'command.completed';
+  if (event.type === 'command_failed') return 'command.failed';
+  if (event.type === 'review_verdict_pass') return 'review.verdict.pass';
+  if (event.type === 'review_verdict_partial') return 'review.verdict.partial';
+  if (event.type === 'review_verdict_fail') return 'review.verdict.fail';
+  if (event.type === 'review_verdict_waived') return 'review.verdict.waived';
+  if (event.type === 'chain_ready_for_review') return 'chain.ready_for_review';
+  if (event.type === 'chain_finalized') return 'chain.finalized';
+  if (event.type === 'worktree_merged') return 'worktree.merged';
   if (event.type === 'stale_warning') return 'process_health.stale_detected';
   return `${familyForTimelineType(event.type)}.${event.type}`;
 }
 
+function mcpEventNameForTimelineEvent(event: { [key: string]: unknown }): string {
+  const explicit = stringField(event, 'event_name');
+  if (explicit?.startsWith('mcp.')) return explicit;
+
+  const action = stringField(event, 'action') ?? stringField(event, 'phase') ?? stringField(event, 'status');
+  if (action === 'connected') return 'mcp.connected';
+  if (action === 'disconnected') return 'mcp.disconnected';
+  if (action === 'auth_failed') return 'mcp.auth.failed';
+  if (action === 'rate_limited') return 'mcp.rate_limited';
+  if (action === 'latency_observed') return 'mcp.latency.observed';
+  if (action === 'start' || action === 'started') return 'mcp.call.started';
+  if (event.is_error || action === 'failed' || action === 'error') return 'mcp.call.failed';
+  return 'mcp.call.completed';
+}
+
 function severityForTimelineEvent(event: { type: string; [key: string]: unknown }): ForensicSeverity {
-  if (event.type === 'error' || event.type === 'extension_error' || event.type === 'auto_commit_failed') return 'error';
+  if (event.type === 'error' || event.type === 'extension_error' || event.type === 'auto_commit_failed' || event.type === 'command_failed') return 'error';
+  if (event.type === 'mcp' && (event.is_error || mcpEventNameForTimelineEvent(event).endsWith('.failed') || mcpEventNameForTimelineEvent(event) === 'mcp.auth.failed')) return 'error';
+  if (event.type === 'mcp' && mcpEventNameForTimelineEvent(event) === 'mcp.rate_limited') return 'warn';
   if (event.type === 'stale_warning' || event.type === 'control_signal') return 'warn';
   if (event.type === 'run_complete' && event.status === 'ERROR') return 'error';
   if (event.type === 'tool' && event.is_error) return 'error';
@@ -438,6 +680,6 @@ function severityForTimelineEvent(event: { type: string; [key: string]: unknown 
 }
 
 function redactionStatusForTimelineEvent(event: { type: string; [key: string]: unknown }): RedactionStatus {
-  if (event.type === 'tool' || event.type === 'turn_summary' || event.type === 'run_complete') return 'redacted';
+  if (event.type === 'tool' || event.type === 'turn_summary' || event.type === 'run_complete' || event.type === 'command_completed' || event.type === 'command_failed' || event.type === 'review_verdict_pass' || event.type === 'review_verdict_partial' || event.type === 'review_verdict_fail' || event.type === 'review_verdict_waived' || event.type === 'chain_ready_for_review' || event.type === 'chain_finalized' || event.type === 'worktree_merged') return 'redacted';
   return 'clean';
 }
