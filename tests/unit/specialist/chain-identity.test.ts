@@ -8,6 +8,9 @@ describe('chain-identity', () => {
       bead_id: 'unitAI-chain-root',
       worktree_path: '/tmp/worktree-a',
       worktree_owner_job_id: 'job-root',
+      trace_id: 'trace-root',
+      span_id: 'span-root',
+      parent_span_id: 'parent-root',
     });
 
     const reusedJob = derivePersistedChainIdentity(
@@ -17,7 +20,7 @@ describe('chain-identity', () => {
         worktree_path: '/tmp/worktree-a',
         worktree_owner_job_id: 'job-root',
       },
-      { bead_id: 'unitAI-chain-root' },
+      { bead_id: 'unitAI-chain-root', trace_id: chainRoot.trace_id, span_id: chainRoot.span_id, parent_span_id: chainRoot.parent_span_id },
     );
 
     expect(chainRoot).toEqual({
@@ -25,6 +28,9 @@ describe('chain-identity', () => {
       chain_id: 'job-root',
       chain_root_job_id: 'job-root',
       chain_root_bead_id: 'unitAI-chain-root',
+      trace_id: 'trace-root',
+      span_id: 'span-root',
+      parent_span_id: 'parent-root',
     });
 
     expect(reusedJob).toEqual({
@@ -32,6 +38,9 @@ describe('chain-identity', () => {
       chain_id: 'job-root',
       chain_root_job_id: 'job-root',
       chain_root_bead_id: 'unitAI-chain-root',
+      trace_id: 'trace-root',
+      span_id: 'span-root',
+      parent_span_id: 'parent-root',
     });
   });
 
@@ -46,12 +55,13 @@ describe('chain-identity', () => {
       chain_root_bead_id: 'unitAI-chain-root',
     });
 
-    expect(identity).toEqual({
+    expect(identity).toMatchObject({
       chain_kind: 'chain',
       chain_id: 'chain-existing',
       chain_root_job_id: 'job-root',
       chain_root_bead_id: 'unitAI-chain-root',
     });
+    expect(identity.trace_id).toBeTypeOf('string');
   });
 
   it('handles historical rows with missing new columns deterministically', () => {
@@ -60,12 +70,13 @@ describe('chain-identity', () => {
       worktree_path: '/tmp/worktree-legacy',
     });
 
-    expect(historical).toEqual({
+    expect(historical).toMatchObject({
       chain_kind: 'chain',
       chain_id: 'job-historical',
       chain_root_job_id: 'job-historical',
       chain_root_bead_id: undefined,
     });
+    expect(historical.trace_id).toBeTypeOf('string');
   });
 
   it('never misclassifies standalone non-worktree jobs as chain members', () => {

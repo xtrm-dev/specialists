@@ -989,6 +989,9 @@ export class Supervisor {
     return {
       ...status,
       worktree_owner_job_id: identity.chain_root_job_id,
+      trace_id: identity.trace_id,
+      span_id: identity.span_id,
+      parent_span_id: identity.parent_span_id,
       chain_kind: 'chain',
       chain_id: identity.chain_id,
       chain_root_job_id: identity.chain_root_job_id,
@@ -1480,7 +1483,7 @@ export class Supervisor {
     let lastTurnSummaryTextContent = '';
     let lastTurnSummaryIndex = 0;
     let skipFinalKeepAliveInputBeadAppend = false;
-    let latestEvidenceRefs: Array<{ evidence_kind: 'diff' | 'commit' | 'pr'; evidence_ref?: string; evidence_url?: string; evidence_state?: string; base_ref?: string; base_sha?: string; head_sha?: string; pr_id?: string | number; pr_url?: string; pr_state?: string; diff?: { changed_files: Array<{ path: string; added_lines: number; removed_lines: number }>; hunks?: string; hunks_artifact_ref?: string; hunks_inline?: boolean; hunks_truncated?: boolean; } }> | undefined;
+    let latestEvidenceRefs: Array<{ evidence_kind: 'diff' | 'commit' | 'pr'; evidence_ref?: string; evidence_url?: string; evidence_state?: string; base_ref?: string; base_sha?: string; head_sha?: string; pr_id?: string | number; pr_url?: string; pr_state?: string; trace_id?: string; span_id?: string; parent_span_id?: string; diff?: { changed_files: Array<{ path: string; added_lines: number; removed_lines: number }>; hunks?: string; hunks_artifact_ref?: string; hunks_inline?: boolean; hunks_truncated?: boolean; } }> | undefined;
     const getObservedPrEvidenceRef = (worktreePath: string): { pr_id?: number; pr_url?: string; pr_state?: string } | undefined => {
       const result = spawnSync('gh', ['pr', 'view', '--json', 'number,url,state'], { cwd: worktreePath, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
       if (result.status !== 0) return undefined;
@@ -1600,6 +1603,11 @@ export class Supervisor {
         hunks_output: hunksOutput,
         artifact_ref: artifactRef,
       });
+      const traceFields = {
+        ...(statusSnapshot.trace_id ? { trace_id: statusSnapshot.trace_id } : {}),
+        ...(statusSnapshot.span_id ? { span_id: statusSnapshot.span_id } : {}),
+        ...(statusSnapshot.parent_span_id ? { parent_span_id: statusSnapshot.parent_span_id } : {}),
+      };
       const evidenceRefs: NonNullable<typeof latestEvidenceRefs> = [
         {
           evidence_kind: 'diff',
@@ -1608,13 +1616,14 @@ export class Supervisor {
           base_ref: diff.base_ref,
           base_sha: diff.base_sha,
           head_sha: diff.head_sha,
+          ...traceFields,
           diff,
         },
-        { evidence_kind: 'commit', evidence_ref: commitSha, evidence_state: 'complete' },
+        { evidence_kind: 'commit', evidence_ref: commitSha, evidence_state: 'complete', ...traceFields },
       ];
       const prEvidence = getObservedPrEvidenceRef(worktreePath);
       if (prEvidence) {
-        evidenceRefs.push({ evidence_kind: 'pr', evidence_ref: prEvidence.pr_id ? 'pr:' + prEvidence.pr_id : prEvidence.pr_url, evidence_url: prEvidence.pr_url, evidence_state: prEvidence.pr_state, pr_id: prEvidence.pr_id, pr_url: prEvidence.pr_url, pr_state: prEvidence.pr_state });
+        evidenceRefs.push({ evidence_kind: 'pr', evidence_ref: prEvidence.pr_id ? 'pr:' + prEvidence.pr_id : prEvidence.pr_url, evidence_url: prEvidence.pr_url, evidence_state: prEvidence.pr_state, pr_id: prEvidence.pr_id, pr_url: prEvidence.pr_url, pr_state: prEvidence.pr_state, ...traceFields });
       }
       return evidenceRefs;
     };
