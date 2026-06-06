@@ -328,7 +328,7 @@ Gauges should be read from current state, not accumulated from possibly-missed e
 
 ### 6.4 Exemplars and log links
 
-Histograms and selected counters may attach exemplars with `trace_id` when available. If no trace exists, do not use `job_id` or `participant_id` as labels. Instead expose links in dashboards from aggregate series to LogQL/query templates using bounded labels plus time range.
+Histograms and selected counters may attach exemplars with `trace_id` when available. This bridge follows job -> chain -> evidence drill-down: chain status persists trace identity, evidence refs may carry `trace_id` / `span_id` / `parent_span_id`, and exemplars still use `trace_id` only. If no trace exists, do not use `job_id` or `participant_id` as labels. Instead expose links in dashboards from aggregate series to LogQL/query templates using bounded labels plus time range.
 
 Example exemplar shape in OpenMetrics style:
 

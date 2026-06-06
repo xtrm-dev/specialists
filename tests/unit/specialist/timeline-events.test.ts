@@ -101,6 +101,30 @@ describe('timeline-events', () => {
       });
     });
 
+    it('keeps evidence refs with trace drill-down fields', () => {
+      const event = createRunCompleteEvent('COMPLETE', 15, {
+        evidence: [
+          {
+            evidence_kind: 'diff',
+            evidence_ref: 'git:abc123',
+            trace_id: 'trace-1',
+            span_id: 'span-1',
+            parent_span_id: 'parent-1',
+          },
+        ],
+      });
+
+      expect(event.evidence).toEqual([
+        {
+          evidence_kind: 'diff',
+          evidence_ref: 'git:abc123',
+          trace_id: 'trace-1',
+          span_id: 'span-1',
+          parent_span_id: 'parent-1',
+        },
+      ]);
+    });
+
     it('does not include output when not provided', () => {
       const event = createRunCompleteEvent('COMPLETE', 5);
       expect(event.output).toBeUndefined();
