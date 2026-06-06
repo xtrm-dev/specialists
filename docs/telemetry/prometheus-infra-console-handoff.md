@@ -27,6 +27,7 @@ implemented specialists telemetry surfaces in `docs/telemetry/`.
 - Forensic/log contract: `docs/telemetry/forensic-event-contract.md`
 - Current implementation prototype: `sp metrics [--prometheus] [--since <duration|iso>]`
 - Source of truth: runtime state, job metrics, and `xtrm.forensic.v1`; Prometheus is only a projection.
+- Readiness smoke: fixture-backed smoke covers forensic rows, job metrics, evidence refs, and docs/status alignment before gitboard materializer work starts.
 
 ## Ownership split
 

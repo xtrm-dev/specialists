@@ -1,0 +1,127 @@
+[
+  {
+    "schema_version": "xtrm.forensic.v1",
+    "timestamp": "2026-06-06T00:00:00.000Z",
+    "t_unix_ms": 1780000000000,
+    "severity": "info",
+    "event_family": "command",
+    "event_name": "command.completed",
+    "event_version": 1,
+    "resource": {
+      "service_namespace": "xtrm",
+      "service_name": "specialists",
+      "service_component": "smoke",
+      "deployment_environment": "local",
+      "repo": "specialists",
+      "participant_kind": "specialist",
+      "participant_role": "executor"
+    },
+    "correlation": {
+      "job_id": "job-readiness",
+      "chain_id": "chain-readiness"
+    },
+    "body": {
+      "command_kind": "git",
+      "command": "[REDACTED]",
+      "status": "completed"
+    },
+    "redaction": {
+      "status": "redacted",
+      "fields": ["body.command"],
+      "rules": ["sensitive-field-name"]
+    }
+  },
+  {
+    "schema_version": "xtrm.forensic.v1",
+    "timestamp": "2026-06-06T00:00:00.000Z",
+    "t_unix_ms": 1780000001000,
+    "severity": "info",
+    "event_family": "job",
+    "event_name": "job.completed",
+    "event_version": 1,
+    "resource": {
+      "service_namespace": "xtrm",
+      "service_name": "specialists",
+      "service_component": "smoke",
+      "deployment_environment": "local",
+      "repo": "specialists",
+      "participant_kind": "specialist",
+      "participant_role": "executor",
+      "model": "openai/gpt-5.4-mini"
+    },
+    "correlation": {
+      "job_id": "job-readiness",
+      "chain_id": "chain-readiness"
+    },
+    "body": {
+      "turns_total": 3,
+      "tools_total": 5,
+      "input_tokens": 120,
+      "output_tokens": 80,
+      "usage_source": "provider_usage"
+    },
+    "redaction": {
+      "status": "clean"
+    }
+  },
+  {
+    "schema_version": "xtrm.forensic.v1",
+    "timestamp": "2026-06-06T00:00:00.000Z",
+    "t_unix_ms": 1780000002000,
+    "severity": "info",
+    "event_family": "review",
+    "event_name": "review.verdict.pass",
+    "event_version": 1,
+    "resource": {
+      "service_namespace": "xtrm",
+      "service_name": "specialists",
+      "service_component": "smoke",
+      "deployment_environment": "local",
+      "repo": "specialists",
+      "participant_kind": "specialist",
+      "participant_role": "reviewer"
+    },
+    "correlation": {
+      "job_id": "job-readiness",
+      "chain_id": "chain-readiness"
+    },
+    "body": {
+      "verdict": "pass",
+      "result": "pass"
+    },
+    "redaction": {
+      "status": "clean"
+    }
+  },
+  {
+    "schema_version": "xtrm.forensic.v1",
+    "timestamp": "2026-06-06T00:00:00.000Z",
+    "t_unix_ms": 1780000003000,
+    "severity": "info",
+    "event_family": "evidence",
+    "event_name": "evidence.diff.recorded",
+    "event_version": 1,
+    "resource": {
+      "service_namespace": "xtrm",
+      "service_name": "specialists",
+      "service_component": "smoke",
+      "deployment_environment": "local",
+      "repo": "specialists",
+      "participant_kind": "specialist",
+      "participant_role": "executor"
+    },
+    "correlation": {
+      "job_id": "job-readiness",
+      "chain_id": "chain-readiness",
+      "commit_sha": "abc123"
+    },
+    "body": {
+      "changed_files": 2,
+      "diff_ref": "diff:abc123",
+      "commit_sha": "abc123"
+    },
+    "redaction": {
+      "status": "clean"
+    }
+  }
+]
