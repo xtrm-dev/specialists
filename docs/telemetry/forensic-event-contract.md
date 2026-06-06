@@ -1021,7 +1021,7 @@ Specialists now ships the pre-substrate forensic bridge:
 6. `sp serve` exposes read-only `GET /metrics` for the same Prometheus projection.
 7. `sp serve` exposes read-only per-job `GET /jobs/:job_id/feed-events` and `/api/specialists/jobs/:job_id/feed-events` for console activity-card streams.
 8. Projection now includes bounded `xtrm_chains_total`, `xtrm_chain_duration_seconds`, `xtrm_gate_verdicts_total`, and `xtrm_evidence_refs_total`; chain/job/file/diff drill-down stays in forensic events/evidence.
-9. Unit checks cover schema/cardinality/redaction, full forbidden-label enforcement, AgentOps catalog fixtures, and Prometheus exposition syntax.
+9. Unit checks cover schema/cardinality/redaction, full forbidden-label enforcement, AgentOps catalog fixtures, Prometheus exposition syntax, and the readiness smoke that validates forensic rows, job metrics, evidence refs, and docs status alignment.
 10. `PiAgentSession.meta.sessionId` is persisted as `status.session_id` and forwarded to forensic correlation; conversation/trace/span ids are optional pass-through fields.
 11. MCP normalization/projection is pre-wired for future emitters: `type:"mcp"` timeline events map to canonical `mcp.*` events, support `_meta` trace/MCP/JSON-RPC correlation, and include semconv-style `otel` hints.
 

@@ -322,6 +322,8 @@ Preferred for xtrm: **persistent cursor + replayable event history**. This keeps
 
 Current pre-substrate bridge status: `sp metrics --prometheus` uses table-derived counters from durable `specialist_job_metrics` / current-state snapshots rather than incrementing a process-local event stream. Chain metrics are derived by grouping terminal chain jobs internally by opaque chain id, but only export bounded `chain_template` and `result` labels. Repeated renders over the same table state are deterministic; event-cursor projection remains the target for a long-running HTTP exporter.
 
+Readiness smoke status: fixture-backed coverage now proves the shipped projection shape still contains turns/tools/model/token split + `usage_source`, `xtrm.forensic.v1` rows keep `body` + `redaction`, and validation still rejects forbidden labels plus USD leakage.
+
 ### 6.3 Gauges
 
 Gauges should be read from current state, not accumulated from possibly-missed events, when a current state table exists. Examples: active jobs, queue depth, worktree count, process count, pulse queue depth.

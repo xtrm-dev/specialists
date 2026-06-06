@@ -1,0 +1,27 @@
+[
+  {
+    "job_id": "job-readiness",
+    "specialist": "executor",
+    "model": "openai/gpt-5.4-mini",
+    "status": "completed",
+    "chain_kind": "job",
+    "chain_id": "chain-readiness",
+    "bead_id": "unitAI-readiness",
+    "node_id": null,
+    "epic_id": null,
+    "started_at_ms": 1780000000000,
+    "completed_at_ms": 1780000008000,
+    "elapsed_ms": 8000,
+    "active_runtime_ms": 6000,
+    "waiting_ms": 2000,
+    "total_turns": 3,
+    "total_tools": 5,
+    "tool_call_counts_json": "{\"bash\":3,\"read_file\":2}",
+    "token_trajectory_json": "[{\"input_tokens\":120,\"output_tokens\":80,\"cache_read_tokens\":30,\"cache_creation_tokens\":10,\"reasoning_tokens\":15,\"tool_tokens\":5,\"usage_source\":\"provider_usage\"}]",
+    "context_trajectory_json": "[{\"pct\":41}]",
+    "stall_gaps_json": "[]",
+    "run_complete_json": null,
+    "startup_payload_json": null,
+    "updated_at_ms": 1780000009000
+  }
+]
