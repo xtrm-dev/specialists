@@ -36,4 +36,9 @@ paths = [
     '''^\.xtrm/statusline-claim$''',
     '''^\.xtrm/logs/.*''',
     '''^\.xtrm/cache/.*''',
+
+    # Redaction test fixtures contain deliberately-fake secrets (PEM blocks,
+    # token prefixes) to verify the diff-evidence redactor strips them.
+    # See tests/unit/specialist/git-diff-evidence.test.ts and bead unitAI-ub65d.2.
+    '''^tests/unit/specialist/git-diff-evidence\.test\.ts$''',
 ]

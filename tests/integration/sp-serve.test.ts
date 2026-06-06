@@ -209,6 +209,7 @@ describe('sp serve', () => {
     const insert = spawnSync('bun', [join(tempRoot, 'insert-forensic-event.mjs'), dbPath, JSON.stringify(event)], { encoding: 'utf-8' });
     expect(insert.status).toBe(0);
 
+    // nosemgrep: typescript.react.security.react-insecure-request.react-insecure-request
     const response = await fetch(`http://127.0.0.1:${port}/jobs/job-feed/feed-events?family=tool`);
     const body = await response.json() as { job_id: string; events: any[]; next_cursor: { t: number; seq: number } | null };
 
