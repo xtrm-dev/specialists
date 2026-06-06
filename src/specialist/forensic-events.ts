@@ -501,6 +501,17 @@ function bodyForTimelineEvent(event: { type: string; [key: string]: unknown }): 
     };
   }
 
+  if (event.type === 'run_complete') {
+    return {
+      legacy_timeline_event: event,
+      status: stringField(event, 'status'),
+      output: stringField(event, 'output'),
+      error: stringField(event, 'error'),
+      commit_sha: stringField(event, 'commit_sha'),
+      evidence_refs: evidenceRefsForTimelineEvent(event),
+    };
+  }
+
   if (event.type === 'auto_commit_success' || event.type === 'auto_commit_skipped' || event.type === 'auto_commit_failed') {
     const committedFiles = Array.isArray(event.committed_files)
       ? event.committed_files.filter((file): file is string => typeof file === 'string')
@@ -512,6 +523,7 @@ function bodyForTimelineEvent(event: { type: string; [key: string]: unknown }): 
       commit_sha: stringField(event, 'commit_sha'),
       changed_paths_count: committedFiles.length,
       changed_paths: committedFiles,
+      evidence_refs: evidenceRefsForTimelineEvent(event),
       reason: stringField(event, 'reason'),
     };
   }
@@ -563,6 +575,12 @@ function bodyForTimelineEvent(event: { type: string; [key: string]: unknown }): 
   }
 
   return { legacy_timeline_event: event };
+}
+
+function evidenceRefsForTimelineEvent(event: { [key: string]: unknown }): Array<Record<string, unknown>> | undefined {
+  if (!Array.isArray(event.evidence)) return undefined;
+  const refs = event.evidence.filter((entry): entry is Record<string, unknown> => !!entry && typeof entry === 'object' && !Array.isArray(entry));
+  return refs.length > 0 ? refs : undefined;
 }
 
 function otelForTimelineEvent(event: { type: string; [key: string]: unknown }): Record<string, unknown> | undefined {
