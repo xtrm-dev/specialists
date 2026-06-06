@@ -183,14 +183,27 @@ observability. Both use the same event naming and label discipline.
 
 Never label by MCP session id, JSON-RPC id, raw args, result text, URL, or token.
 
-Shipped bridge status (2026-06-04): specialists has no live MCP emitter yet, but
-`src/specialist/forensic-events.ts` already normalizes future timeline events with
-`type: "mcp"` into this catalog. It extracts `mcp_session_id` and
-`jsonrpc_request_id` from direct fields or `_meta`, keeps them in correlation,
-and adds semconv-style `otel` attributes (`mcp.method.name`, `mcp.session.id`,
-`jsonrpc.request.id`, `network.transport`, and GenAI tool hints). Prometheus
-projection currently supports `xtrm_mcp_operations_total`; duration/session
-metrics require real MCP lifecycle emitters.
+Shipped bridge status (2026-06-06): specialists now emits live MCP forensic
+events from the MCP gateway/integration path, and `src/specialist/forensic-events.ts`
+still normalizes `type: "mcp"` timeline events into this catalog. It extracts
+`mcp_session_id` and `jsonrpc_request_id` from direct fields or `_meta`, keeps
+them in correlation, and adds semconv-style `otel` attributes (`mcp.method.name`,
+`mcp.session.id`, `jsonrpc.request.id`, `network.transport`, and GenAI tool
+hints). Prometheus projection supports bounded `xtrm_mcp_operations_total`
+without forbidden labels.
+
+Live coverage matrix (2026-06-06):
+
+| Event | Live in stdio MCP server | Emitted by |
+| --- | --- | --- |
+| `mcp.connected` | yes | `SpecialistsServer.start` |
+| `mcp.disconnected` | yes | `SpecialistsServer.start` (SIGTERM) |
+| `mcp.call.started` | yes | tools/call handler |
+| `mcp.call.completed` | yes | tools/call handler (success) |
+| `mcp.call.failed` | yes | tools/call handler (tool_not_found + execute error) |
+| `mcp.latency.observed` | yes | tools/call handler (both success + error paths) |
+| `mcp.auth.failed` | future | unreachable from current stdio transport — emit when a transport that surfaces auth failures (e.g. HTTP gateway) is added |
+| `mcp.rate_limited` | future | unreachable from current stdio transport — emit when a rate-limiting layer is introduced |
 
 ## 8. Service skills
 

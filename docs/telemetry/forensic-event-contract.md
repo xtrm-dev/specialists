@@ -43,13 +43,13 @@ The specialists runtime now ships the **pre-substrate forensic bridge**:
 - full forbidden-label guard tests for every opaque correlation id in this contract;
 - Pi-generated `session_id` propagation into specialist status and forensic correlation;
 - optional pass-through for `conversation_id`, `trace_id`, `span_id`, and `parent_span_id` when a timeline event or caller supplies them;
-- MCP event normalization/projection **pre-wiring** for future MCP emitters.
+- MCP live emitter support for the Specialists MCP gateway/integration path.
 
-Important boundary: **there is not yet a live MCP emitter or cross-process MCP
-`_meta` trace propagation in this repo.** What shipped for MCP is the normalization
-and projection layer: if a future timeline event uses `type: "mcp"`, it is mapped
-to the canonical `mcp.*` names, extracts trace/MCP/JSON-RPC ids from direct fields
-or `_meta`, and keeps those ids in correlation only.
+Important boundary: live MCP emission is now present for the Specialists MCP
+server; trace/MCP/JSON-RPC ids still stay correlation-only, and `_meta`
+propagation is used when the transport can carry it. Normalization/projection
+still maps `type: "mcp"` timeline events to canonical `mcp.*` names and keeps
+those ids out of labels.
 
 ## 1. Purpose and non-goals
 
