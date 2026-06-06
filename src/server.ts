@@ -156,12 +156,16 @@ export class SpecialistsServer {
 
       try {
         const result = await tool.execute(parsed, onProgress);
-        emitMcpForensicEvent(this.observability, 'mcp.call.completed', context, { mcp_server: MCP_CONFIG.SERVER_NAME, mcp_method: 'tools/call', tool_name: toolName, status_code: 'OK' }, Date.now() - startedAt);
+        const elapsedMs = Date.now() - startedAt;
+        emitMcpForensicEvent(this.observability, 'mcp.call.completed', context, { mcp_server: MCP_CONFIG.SERVER_NAME, mcp_method: 'tools/call', tool_name: toolName, status_code: 'OK' }, elapsedMs);
+        emitMcpForensicEvent(this.observability, 'mcp.latency.observed', context, { mcp_server: MCP_CONFIG.SERVER_NAME, mcp_method: 'tools/call', tool_name: toolName, status_code: 'OK' }, elapsedMs);
         return { content: [{ type: 'text', text: typeof result === 'string' ? result : JSON.stringify(result, null, 2) }], _meta: toMcpMeta(context) };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         logger.error(`Tool ${toolName} failed: ${message}`);
-        emitMcpForensicEvent(this.observability, 'mcp.call.failed', context, { mcp_server: MCP_CONFIG.SERVER_NAME, mcp_method: 'tools/call', tool_name: toolName, status_code: 'ERROR' }, Date.now() - startedAt, error instanceof Error ? error.name : 'internal_error');
+        const elapsedMs = Date.now() - startedAt;
+        emitMcpForensicEvent(this.observability, 'mcp.call.failed', context, { mcp_server: MCP_CONFIG.SERVER_NAME, mcp_method: 'tools/call', tool_name: toolName, status_code: 'ERROR' }, elapsedMs, error instanceof Error ? error.name : 'internal_error');
+        emitMcpForensicEvent(this.observability, 'mcp.latency.observed', context, { mcp_server: MCP_CONFIG.SERVER_NAME, mcp_method: 'tools/call', tool_name: toolName, status_code: 'ERROR' }, elapsedMs);
         throw error;
       }
     });

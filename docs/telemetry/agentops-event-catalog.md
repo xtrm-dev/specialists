@@ -192,6 +192,19 @@ them in correlation, and adds semconv-style `otel` attributes (`mcp.method.name`
 hints). Prometheus projection supports bounded `xtrm_mcp_operations_total`
 without forbidden labels.
 
+Live coverage matrix (2026-06-06):
+
+| Event | Live in stdio MCP server | Emitted by |
+| --- | --- | --- |
+| `mcp.connected` | yes | `SpecialistsServer.start` |
+| `mcp.disconnected` | yes | `SpecialistsServer.start` (SIGTERM) |
+| `mcp.call.started` | yes | tools/call handler |
+| `mcp.call.completed` | yes | tools/call handler (success) |
+| `mcp.call.failed` | yes | tools/call handler (tool_not_found + execute error) |
+| `mcp.latency.observed` | yes | tools/call handler (both success + error paths) |
+| `mcp.auth.failed` | future | unreachable from current stdio transport — emit when a transport that surfaces auth failures (e.g. HTTP gateway) is added |
+| `mcp.rate_limited` | future | unreachable from current stdio transport — emit when a rate-limiting layer is introduced |
+
 ## 8. Service skills
 
 Use `event_family: service_skills` for service-skill activation, drift, sync, and

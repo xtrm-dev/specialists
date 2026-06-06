@@ -65,4 +65,28 @@ describe('MCP forensic live emitter', () => {
       redaction: event.redaction,
     })).not.toThrow();
   });
+
+  it('emits canonical mcp.latency.observed envelope', () => {
+    const appendForensicEvent = vi.fn();
+    const observability = { appendForensicEvent } as const;
+    const context = {
+      mcpSessionId: 'session-1',
+      jsonrpcRequestId: 'req-7',
+      traceId: 'trace-1',
+      spanId: 'span-1',
+    };
+
+    emitMcpForensicEvent(observability, 'mcp.latency.observed', context, {
+      mcp_server: 'specialists',
+      mcp_method: 'tools/call',
+      tool_name: 'use_specialist',
+      status_code: 'OK',
+    }, 123);
+
+    expect(appendForensicEvent).toHaveBeenCalledTimes(1);
+    const [, , , event] = appendForensicEvent.mock.calls[0];
+    expect(event.event_family).toBe('mcp');
+    expect(event.event_name).toBe('mcp.latency.observed');
+    expect(event.body.duration_ms).toBe(123);
+  });
 });
