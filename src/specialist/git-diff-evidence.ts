@@ -22,8 +22,11 @@ const INLINE_HUNKS_LIMIT = 4_000;
 
 // Known-secret token patterns (prefix-anchored, high-confidence)
 const TOKEN_RE = /\b(sk-[a-z0-9_-]{12,}|ghp_[a-z0-9_]{12,}|ghs_[a-z0-9_]{12,}|xox[baprs]-[a-z0-9-]{12,}|AIza[0-9A-Za-z_-]{35,}|ya29\.[0-9A-Za-z_-]{40,})/ig;
-// env/config assignments whose RHS is a secret — key name may carry prefixes like DB_, APP_
-const ENV_SECRET_RE = /[a-z0-9_]*(?:password|passwd|secret|api_?key|auth_?token|access_?token|refresh_?token|private_?key|credential|client_?secret|db_?pass|database_?pass)[a-z0-9_]*\s*[=:]\s*\S+/ig;
+// env/config assignments whose RHS is a secret — covers DB_PASSWORD, APP_KEY, SIGNING_TOKEN, etc.
+// (?<![a-z0-9_]) anchors to a word boundary so the unbounded prefix never causes catastrophic
+// backtracking on large non-matching strings (e.g. diff bodies full of code).
+// Bounded {0,40} quantifiers guard against degenerate input even at the start of a string.
+const ENV_SECRET_RE = /(?<![a-z0-9_])[a-z0-9_]{0,40}(?:password|passwd|secret|api_?key|auth_?token|access_?token|refresh_?token|private_?key|credential|client_?secret|db_?pass|database_?pass|[a-z0-9]{1,20}_(?:key|token|secret))[a-z0-9_]{0,40}\s*[=:]\s*\S+/ig;
 // PEM blocks
 const PEM_BLOCK_RE = /-----BEGIN [A-Z ]*(?:PRIVATE KEY|CERTIFICATE|PUBLIC KEY|ENCRYPTED)[A-Z ]*-----[\s\S]*?-----END [A-Z ]*(?:PRIVATE KEY|CERTIFICATE|PUBLIC KEY|ENCRYPTED)[A-Z ]*-----/ig;
 // Authorization / Cookie headers — capture to end of line so multi-word values (Bearer <token>) are fully redacted
@@ -44,6 +47,10 @@ export function redactGitDiffHunks(hunks: string): string {
     .replace(AUTH_HEADER_RE, '[REDACTED]')
     .replace(TOKEN_RE, '[REDACTED-TOKEN]')
     .replace(EMAIL_RE, '[REDACTED-EMAIL]');
+}
+
+export function willHunksBeInline(hunks: string): boolean {
+  return redactGitDiffHunks(hunks).length <= INLINE_HUNKS_LIMIT;
 }
 
 // Returns an opaque resolver ref; filesystem path stays internal.

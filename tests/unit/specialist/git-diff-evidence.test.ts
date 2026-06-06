@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { existsSync } from 'node:fs';
 import {
   buildGitDiffEvidence,
   parseGitNumstat,
   redactGitDiffHunks,
+  willHunksBeInline,
   writeGitDiffHunksArtifact,
 } from '../../../src/specialist/git-diff-evidence.js';
 
@@ -92,6 +94,33 @@ describe('git-diff-evidence', () => {
       const stored = readFileSync(join(jobDir, 'artifacts', 'hunks.patch'), 'utf8');
       expect(stored).not.toContain('sk-123456789012');
       expect(stored).not.toContain('supersecret');
+    } finally {
+      rmSync(jobDir, { recursive: true, force: true });
+    }
+  });
+
+  it('redacts APP_KEY and underscore-compound secret env names', () => {
+    const out = redactGitDiffHunks(
+      '+APP_KEY=base64:supersecretvalue\n+SIGNING_KEY=sekret\n+APP_PRIVATE_KEY=abc123',
+    );
+    expect(out).not.toContain('base64:supersecretvalue');
+    expect(out).not.toContain('sekret');
+    expect(out).not.toContain('abc123');
+    expect(out).toContain('[REDACTED]');
+  });
+
+  it('willHunksBeInline returns true for small hunks and false for large', () => {
+    expect(willHunksBeInline('diff --git a/x b/x\n-old\n+new\n')).toBe(true);
+    expect(willHunksBeInline('x'.repeat(5_000))).toBe(false);
+  });
+
+  it('inline diff does not create artifact file on disk', () => {
+    const jobDir = mkdtempSync(join(tmpdir(), 'git-diff-inline-'));
+    try {
+      const smallHunks = 'diff --git a/x b/x\n-old\n+new\n';
+      expect(willHunksBeInline(smallHunks)).toBe(true);
+      const artifactsDir = join(jobDir, 'artifacts');
+      expect(existsSync(artifactsDir)).toBe(false);
     } finally {
       rmSync(jobDir, { recursive: true, force: true });
     }

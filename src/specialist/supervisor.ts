@@ -45,7 +45,7 @@ import {
   createChainEvent,
   mapCallbackEventToTimelineEvent,
 } from './timeline-events.js';
-import { buildGitDiffEvidence, writeGitDiffHunksArtifact } from './git-diff-evidence.js';
+import { buildGitDiffEvidence, willHunksBeInline, writeGitDiffHunksArtifact } from './git-diff-evidence.js';
 import type { SessionMetricEvent, SessionRunMetrics, SessionTokenUsage } from '../pi/session.js';
 import type { StallDetectionConfig } from './loader.js';
 import { createObservabilitySqliteClient, type ObservabilitySqliteClient } from './observability-sqlite.js';
@@ -1589,13 +1589,16 @@ export class Supervisor {
       const numstatResult = spawnSync('git', ['diff', '--numstat', '--no-renames', range], { cwd: worktreePath, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
       const hunksResult = spawnSync('git', ['diff', '--unified=0', '--no-ext-diff', '--no-renames', range], { cwd: worktreePath, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
       const hunksOutput = (hunksResult.stdout ?? '').trim();
+      const artifactRef = hunksOutput && !willHunksBeInline(hunksOutput)
+        ? writeGitDiffHunksArtifact(this.jobDir(jobId), 'git-diff-' + commitSha.slice(0, 12) + '.patch', hunksOutput)
+        : undefined;
       const diff = buildGitDiffEvidence({
         base_ref: baseRef,
         base_sha: baseSha,
         head_sha: commitSha,
         numstat_output: (numstatResult.stdout ?? '').trim(),
         hunks_output: hunksOutput,
-        artifact_ref: writeGitDiffHunksArtifact(this.jobDir(jobId), 'git-diff-' + commitSha.slice(0, 12) + '.patch', hunksOutput),
+        artifact_ref: artifactRef,
       });
       const evidenceRefs: NonNullable<typeof latestEvidenceRefs> = [
         {
