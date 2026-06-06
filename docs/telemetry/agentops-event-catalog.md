@@ -183,14 +183,14 @@ observability. Both use the same event naming and label discipline.
 
 Never label by MCP session id, JSON-RPC id, raw args, result text, URL, or token.
 
-Shipped bridge status (2026-06-04): specialists has no live MCP emitter yet, but
-`src/specialist/forensic-events.ts` already normalizes future timeline events with
-`type: "mcp"` into this catalog. It extracts `mcp_session_id` and
-`jsonrpc_request_id` from direct fields or `_meta`, keeps them in correlation,
-and adds semconv-style `otel` attributes (`mcp.method.name`, `mcp.session.id`,
-`jsonrpc.request.id`, `network.transport`, and GenAI tool hints). Prometheus
-projection currently supports `xtrm_mcp_operations_total`; duration/session
-metrics require real MCP lifecycle emitters.
+Shipped bridge status (2026-06-06): specialists now emits live MCP forensic
+events from the MCP gateway/integration path, and `src/specialist/forensic-events.ts`
+still normalizes `type: "mcp"` timeline events into this catalog. It extracts
+`mcp_session_id` and `jsonrpc_request_id` from direct fields or `_meta`, keeps
+them in correlation, and adds semconv-style `otel` attributes (`mcp.method.name`,
+`mcp.session.id`, `jsonrpc.request.id`, `network.transport`, and GenAI tool
+hints). Prometheus projection supports bounded `xtrm_mcp_operations_total`
+without forbidden labels.
 
 ## 8. Service skills
 
