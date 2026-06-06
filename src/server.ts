@@ -147,7 +147,6 @@ export class SpecialistsServer {
       }
 
       const schema = this.toolSchemas[toolName];
-      const parsed = schema ? schema.parse(args) : args;
       const startedAt = Date.now();
 
       const onProgress = (msg: string) => {
@@ -155,6 +154,7 @@ export class SpecialistsServer {
       };
 
       try {
+        const parsed = schema ? schema.parse(args) : args;
         const result = await tool.execute(parsed, onProgress);
         const elapsedMs = Date.now() - startedAt;
         emitMcpForensicEvent(this.observability, 'mcp.call.completed', context, { mcp_server: MCP_CONFIG.SERVER_NAME, mcp_method: 'tools/call', tool_name: toolName, status_code: 'OK' }, elapsedMs);
