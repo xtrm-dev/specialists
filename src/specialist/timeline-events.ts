@@ -377,6 +377,9 @@ export interface TimelineEventEvidenceRef {
   pr_id?: string | number;
   pr_url?: string;
   pr_state?: string;
+  trace_id?: string;
+  span_id?: string;
+  parent_span_id?: string;
   diff?: {
     changed_files: Array<{ path: string; added_lines: number; removed_lines: number }>;
     hunks?: string;
