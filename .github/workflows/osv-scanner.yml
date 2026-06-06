@@ -37,4 +37,10 @@ jobs:
           osv-scanner --version
 
       - name: Scan
-        run: osv-scanner scan source --recursive .
+        # --no-resolve disables transitive dependency resolution. The legacy
+        # requirements.txt at repo root is not consumed by the TypeScript
+        # primary project; resolving its Python transitive graph against
+        # deps.dev intermittently returns rpc Unavailable and exits 127 even
+        # when 0 vulnerabilities are found. Direct-dep scanning still flags
+        # any vulnerable lockfile entries (bun.lock, package.json).
+        run: osv-scanner scan source --recursive --no-resolve .
