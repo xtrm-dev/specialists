@@ -57,19 +57,7 @@ export function stopBlockMessage(summary, claimed) {
 // ── Memory gate messages ─────────────────────────────────────────
 
 export function memoryPromptMessage(claimId, sessionId) {
-  const claimLine = claimId ? `claim \`${claimId}\` was closed.\n` : '';
-  const ackCmd = `bd kv set "memory-gate-done:${sessionId}"`;
-  return (
-    `\u25cf Memory gate: ${claimLine}` +
-    'For each candidate insight, check ALL 4:\n' +
-    '  1. Hard to rediscover from code/docs?\n' +
-    '  2. Not obvious from the current implementation?\n' +
-    '  3. Will affect a future decision?\n' +
-    '  4. Still relevant in ~14 days?\n' +
-    'KEEP (all 4 yes) → `bd remember "<insight>"`\n' +
-    'SKIP examples: file maps, flag inventories, per-issue summaries,\n' +
-    '  wording tweaks, facts obvious from reading the source.\n' +
-    `KEEP: \`${ackCmd} "saved: <key>"\`\n` +
-    `SKIP: \`${ackCmd} "nothing novel — <one-line reason>"\`\n`
-  );
+  const claim = claimId ? `${claimId} ` : '';
+  const ack = `bd kv set "memory-gate-done:${sessionId}"`;
+  return `● Memory gate: ${claim}closed. ack: \`${ack} "saved:<key>"\` | \`${ack} "nothing novel - <reason>"\`\n`;
 }

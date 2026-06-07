@@ -72,3 +72,7 @@ g5np-rpc-extraction/
 # Beads interaction log (runtime, not source)
 .beads/interactions.jsonl
 __pycache__/
+
+# Beads / Dolt files (added by bd init)
+.beads-credential-key
+.beads/proxieddb/

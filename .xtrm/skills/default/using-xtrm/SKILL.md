@@ -33,8 +33,9 @@ Use these command surfaces when the task is operational rather than code-editing
 
 | Need | Command | Notes |
 |------|---------|-------|
-| Refresh xtrm-managed skills/hooks/reports in one repo | `xt update --apply` | Default `xt update` is dry-run; `--apply` writes. |
-| Refresh many repos | `xt update --apply --root <dir>` | Discovers repos with `.xtrm/registry.json`; failures are reported per repo. |
+| Refresh xtrm-managed skills/hooks/reports in one repo | `xt update --apply` | Default `xt update` is dry-run; `--apply` writes. Also reports bd/GitNexus maintenance and applies the bd auto-stage patch. |
+| Refresh many repos under a root | `xt update --apply --root <dir>` | Discovers repos with `.xtrm/registry.json`; failures are reported per repo. |
+| Sweep standard local fleet | `xt update --all-repos` then `xt update --apply --all-repos` | Scans `~/dev` + `~/projects`; dry-run first. Apply patches and commits each changed repo. |
 | Cut a release | `xt release prepare --patch` then `xt release publish` | `prepare` drafts from xt reports; `publish` tags/pushes. If `prepare` fails on changelog script compatibility, check specialists `unitAI-dnmcg` state and use the manual fallback in `/releasing`. |
 | Close a session report | update latest same-day `.xtrm/reports/<date>-*.md` | `session-close-report` prefers one same-day SSOT handoff; do not create duplicate reports unless asked. |
 

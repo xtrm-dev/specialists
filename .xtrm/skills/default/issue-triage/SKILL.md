@@ -2,8 +2,8 @@
 name: issue-triage
 description: >
   Board hygiene pass for a beads project. Walks every open issue, detects
-  duplicates and semantic clusters via `bd find-duplicates` and explorer/
-  overthinker specialists, then rewires the dependency graph using the full
+  duplicates via mechanical `bd find-duplicates`, graph signals via `bv`,
+  and semantic clusters via explorer/overthinker specialists, then rewires the dependency graph using the full
   `bd dep --type` vocabulary (blocks, tracks, related, parent-child,
   discovered-from, until, caused-by, validates, relates-to, supersedes) plus
   `bd duplicate` and `bd supersede`. Each rewire is confirmed with the user
@@ -35,7 +35,7 @@ relationship to its neighbours, or (d) flagged stale.
 
 ```
 Phase 1  Snapshot                → enumerate, detect existing cycles
-Phase 2  Cluster discovery       → find-duplicates (mech + ai) + explorer + overthinker
+Phase 2  Cluster discovery       → mechanical prefilter + bv graph + explorer/GitNexus + overthinker
 Phase 3  Rewire (confirm each)   → apply edges using the right relationship type
 Phase 4  Verify                  → cycles, lint, stale
 Phase 5  Handoff                 → triage report + P0 next-session pickup
@@ -62,21 +62,35 @@ If `bd dep cycles` returns existing cycles, surface them to the user
 
 ## Phase 2 — Cluster Discovery
 
-Two-pass duplicate detection, then specialist synthesis.
+Mechanical duplicate prefiltering, graph context, then specialist synthesis.
+
+`bd find-duplicates --method ai` is **not** the default path. It depends
+on provider configuration and gives pairwise judgements, while this skill
+needs no-key, cluster-level board reasoning. Use specialists for semantic
+duplicate and relationship decisions.
 
 ### 2a. Mechanical pre-filter (cheap, no API)
 ```bash
-bd find-duplicates --status open --method mechanical --threshold 0.4 --json
+bd find-duplicates --status open --method mechanical --threshold 0.4 --json \
+  > .triage/dup-mechanical.json
 ```
 
-### 2b. AI semantic pass (precision)
+### 2b. Graph signals (bv)
+
+Use bv for topology-aware context before asking specialists to cluster.
+Never run bare `bv`; use robot flags only.
+
 ```bash
-bd find-duplicates --status open --method ai --json
+bv --robot-triage  > .triage/bv-triage.json
+bv --robot-alerts   > .triage/bv-alerts.json
 ```
+
+These artifacts surface blockers, stale items, priority mismatches, and
+existing graph structure that title-similarity cannot see.
 
 ### 2c. Codebase overlap (explorer specialist OR GitNexus inline)
 
-Mechanical/AI similarity reads titles + descriptions only. Issues touching
+Mechanical similarity reads titles + descriptions only. Issues touching
 the same files/functions but worded differently slip through. Two paths:
 
 **Path A — GitNexus inline (fast, when an index exists for this repo).**
@@ -94,8 +108,8 @@ report as "no GitNexus reinforcement".
 Dispatch an explorer to scan the repo:
 
 ```bash
-sp run explorer --bead xtrm-drkk \
-  --prompt "Read issues in .triage/open.json. For each pair, report shared file paths or symbol names mentioned in titles/descriptions or implied by the work area. Return JSON: [{a, b, shared_files:[], shared_symbols:[], confidence:0-1}]." \
+sp run explorer --bead <triage-bead-id> \
+  --prompt "Read .triage/open.json plus .triage/bv-triage.json and .triage/bv-alerts.json. Cluster issues by shared implementation surface, file paths, symbols, feature area, and graph context. Return JSON: [{cluster_id, issues:[], shared_files:[], shared_symbols:[], graph_signal:[], confidence:0-1, rationale}]." \
   --context-depth 0 --background
 ```
 
@@ -104,12 +118,13 @@ consumes the same shape from either source.
 
 ### 2d. Synthesis (overthinker specialist)
 
-Hand all three signal sources (mechanical, ai, code-overlap) to an
-**overthinker** for cluster judgement and relationship-type selection:
+Hand the mechanical prefilter, bv graph artifacts, and code-overlap
+clusters to an **overthinker** for final cluster judgement and
+relationship-type selection:
 
 ```bash
-sp run overthinker --bead xtrm-drkk \
-  --prompt "Inputs: .triage/dup-mechanical.json, .triage/dup-ai.json, .triage/code-overlap.json. For each cluster, recommend ONE action from: duplicate, supersede, new-epic, parent-child, blocks, discovered-from, caused-by, validates, tracks, until, relates-to, related, no-op. Return JSON: [{cluster_id, issues:[], action, justification, target?, source?}]." \
+sp run overthinker --bead <triage-bead-id> \
+  --prompt "Inputs: .triage/dup-mechanical.json, .triage/bv-triage.json, .triage/bv-alerts.json, .triage/code-overlap.json. For each cluster, recommend ONE action from: duplicate, supersede, new-epic, parent-child, blocks, discovered-from, caused-by, validates, tracks, until, relates-to, related, no-op. Prefer cluster-level semantic judgement over pairwise title similarity. Return JSON: [{cluster_id, issues:[], action, justification, target?, source?}]." \
   --context-depth 0 --background
 ```
 
@@ -148,7 +163,7 @@ out anything they don't want, and re-run it.
 
 ```bash
 #!/usr/bin/env bash
-# Generated by triaging skill — apply mutations from <triage-bead-id>
+# Generated by issue-triage skill — apply mutations from <triage-bead-id>
 # Review before running. Each command is on its own line.
 set -euo pipefail
 
@@ -222,7 +237,7 @@ bd create \
 | Specialist | Role | Mode |
 |---|---|---|
 | explorer | Read repo to find file/symbol overlap that text similarity misses | READ_ONLY, `--context-depth 0` |
-| overthinker | Synthesise mech + ai + code-overlap into cluster recommendations with relationship types | READ_ONLY, `--context-depth 0` |
+| overthinker | Synthesise mechanical prefilter + bv graph signals + code-overlap into cluster recommendations with relationship types | READ_ONLY, `--context-depth 0` |
 | researcher (optional) | Pull domain context for ambiguous beads (only if registered) | READ_ONLY |
 
 All specialists run with `--bead <triage-bead-id>` so their output appends
@@ -242,7 +257,7 @@ to the triage bead notes for audit.
 
 ## Failure Modes
 
-- `bd find-duplicates --method ai` requires `ANTHROPIC_API_KEY` / `ai.api_key` — if missing, skip and continue with mechanical + specialists only.
+- Do not rely on `bd find-duplicates --method ai` for the default path. If someone explicitly asks to try it and the repo has a configured provider key, treat it as optional advisory input only; specialists remain the semantic source of truth.
 - If explorer or overthinker can't dispatch (`sp ps` shows no slot), fall back to inline reasoning over `.triage/open.json` and flag the report as "specialist-skipped".
 - If the project has < 5 open issues, abort with "board too small to triage" rather than running the full pipeline.
 
@@ -302,7 +317,7 @@ edges plus existing ones can introduce cycles that weren't possible before.
 Before declaring the pass done:
 
 1. Triage bead exists with summary, per-cluster findings, vocabulary used.
-2. `.triage/` directory contains: open.json, cycles.before.txt, dup-mechanical.json, dup-ai.json (if available), code-overlap.json, graph.before.json, graph.after.json, apply.sh.
+2. `.triage/` directory contains: open.json, cycles.before.txt, dup-mechanical.json, bv-triage.json, bv-alerts.json, code-overlap.json, graph.before.json, graph.after.json, apply.sh.
 3. All applied mutations are confirmed in `apply.sh` and the triage bead's "## Apply" section.
 4. `bd dep cycles` returns clean (or unchanged from `.before`).
 5. P0 next-session pickup bead created (or operator declined).

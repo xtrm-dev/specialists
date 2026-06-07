@@ -46,6 +46,16 @@ This is what a correctly installed project looks like. Check each item.
 | `.beads/` exists | Yes |
 | `CLAUDE.md` or `AGENTS.md` exists | Yes |
 
+### Update maintenance
+
+| Check | Expected value |
+|-------|----------------|
+| bd auto-stage patch | `.beads/config.yaml` has `export.git-add: false` |
+| bd pre-commit shim | active pre-commit hook contains `git add -f .beads/issues.jsonl 2>/dev/null || true` outside bd-managed markers |
+| Hook path handling | Honor `core.hooksPath`; bd v1.0.3 `.beads/hooks/pre-commit` is valid when the file exists |
+| `xt update --all-repos` | Dry-runs `~/dev` + `~/projects`; `--apply` patches and commits each changed repo |
+| Dependency maintenance | `xt init` / `xt update` report bd + GitNexus installed/latest, run `bd doctor`, and refresh stale GitNexus indexes |
+
 ## Detection
 
 Run these in order. Report what passes and what drifts.
@@ -73,6 +83,15 @@ node -e "const s=require('./.pi/settings.json'); console.log(s.skills)" 2>/dev/n
 
 # 6. Active view integrity (all entries must be valid symlinks)
 for f in .xtrm/skills/active/*; do [ -L "$f" ] || echo "NOT A SYMLINK: $f"; done
+
+# 7. bd auto-stage patch state (xtrm-h9hqg)
+grep -n '^export\.git-add: false' .beads/config.yaml 2>/dev/null || echo "STALE: bd auto-stage config not disabled"
+hp=$(git config --get core.hooksPath 2>/dev/null || true)
+if [ -n "$hp" ]; then hook="$hp/pre-commit"; else hook=".git/hooks/pre-commit"; fi
+grep -n 'git add -f .beads/issues.jsonl 2>/dev/null || true' "$hook" 2>/dev/null || echo "STALE: bd pre-commit stage shim missing"
+
+# 8. update dry-run (includes dependency maintenance summary)
+xt update --repo .
 ```
 
 ## Implementation Self-Check
@@ -107,6 +126,8 @@ Two commands cover almost all drift. Know which fixes what:
 | Command | Fixes |
 |---------|-------|
 | `xt claude install` | Hooks wiring only (settings.json hooks block) |
+| `xt update --apply --repo .` | Registry-managed assets, bd auto-stage patch, bd/GitNexus maintenance, Pi package assurance |
+| `xt update --apply --all-repos` | Standard local fleet sweep (`~/dev` + `~/projects`), with per-repo commits for changed repos |
 | `xt init -y` | Skills symlink, active/ view rebuild, Pi settings, all phases |
 
 ### Fix: Skills symlink stale or active/ view wrong
@@ -156,6 +177,19 @@ xt pi install
 ```bash
 bd init
 ```
+
+### Fix: bd auto-stage patch missing
+
+Covered by `xt update --apply --repo .` and `xt init -y`. The patch keeps bd writes quiet during normal work while still staging the latest JSONL snapshot during commits.
+
+```bash
+xt update --apply --repo .
+```
+
+Expected end state:
+- `.beads/config.yaml` contains `export.git-add: false`
+- the active pre-commit hook contains `git add -f .beads/issues.jsonl 2>/dev/null || true`
+- if `core.hooksPath=.beads/hooks` and `.beads/hooks/pre-commit` exists, treat it as valid bd v1.0.3 behavior — do not rewrite it just because it is under `.beads/`
 
 ## If updating xtrm-tools itself (not a consumer project)
 
@@ -218,8 +252,9 @@ locally or pulled a new tag.
 ### Dry-run discovery first
 
 ```bash
-xt update --root ~/dev               # walk the tree
-xt update --root ~/projects/mercury  # walk another tree
+xt update --all-repos                # standard local sweep: ~/dev + ~/projects
+xt update --root ~/dev               # walk one explicit tree
+xt update --root ~/projects/mercury  # walk another explicit tree
 ```
 
 Output classifies each discovered repo by `.xtrm/` state:
@@ -238,6 +273,7 @@ refresh.
 ### Apply
 
 ```bash
+xt update --apply --all-repos
 xt update --apply --root ~/dev
 xt update --apply --root ~/projects/mercury
 ```
@@ -245,8 +281,11 @@ xt update --apply --root ~/projects/mercury
 What `--apply` does for each managed repo:
 - Runs the install flow with `force=true` — refreshes `.xtrm/config`, `.xtrm/hooks`, `.xtrm/skills/default` (mirror), `.pi/settings.json`, `.mcp.json`.
 - Writes `dolt.shared-server: true` into `.beads/config.yaml` if not already set (so the worktree's bd routes to the shared dolt server instead of spawning per-worktree subprocesses).
+- Applies the bd auto-stage patch: `export.git-add: false` plus a pre-commit JSONL stage shim outside bd-managed markers.
+- Reports bd/GitNexus maintenance; on apply, attempts safe non-major CLI upgrades, runs `bd doctor --fix --yes`, and refreshes stale GitNexus indexes.
 - Globally installs any missing xt-managed Pi packages.
 - Does NOT touch `incomplete` repos (deliberate — auto-fix would be destructive).
+- With `--all-repos --apply`, commits each changed repo independently as `chore: apply bd auto-stage patch (xtrm-tools auto-applied)`.
 
 ### Bootstrapping `incomplete` repos
 
@@ -434,6 +473,8 @@ cd /path/to/xtrm-tools && npm run build --workspace cli
 npm link
 
 # 3. Sweep across all consumer trees (dry-run first)
+xt update --all-repos
+# or target explicit roots:
 xt update --root ~/dev
 xt update --root ~/projects/mercury
 
@@ -441,6 +482,8 @@ xt update --root ~/projects/mercury
 #    then re-build + re-link + re-sweep.
 
 # 5. Once dry-run is clean, apply across the fleet:
+xt update --apply --all-repos
+# or target explicit roots:
 xt update --apply --root ~/dev
 xt update --apply --root ~/projects/mercury
 
