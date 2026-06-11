@@ -37,10 +37,17 @@ jobs:
           osv-scanner --version
 
       - name: Scan
-        # --no-resolve disables transitive dependency resolution. The legacy
-        # requirements.txt at repo root is not consumed by the TypeScript
-        # primary project; resolving its Python transitive graph against
-        # deps.dev intermittently returns rpc Unavailable and exits 127 even
-        # when 0 vulnerabilities are found. Direct-dep scanning still flags
-        # any vulnerable lockfile entries (bun.lock, package.json).
-        run: osv-scanner scan source --recursive --no-resolve .
+        run: |
+          set +e
+          output="$(osv-scanner scan source --recursive . 2>&1)"
+          code=$?
+          set -e
+          printf '%s\n' "$output"
+          if [ "$code" -eq 0 ]; then
+            exit 0
+          fi
+          if [ "$code" -eq 127 ] && grep -q 'Total 0 packages affected by 0 known vulnerabilities' <<<"$output"; then
+            echo 'osv-scanner exited 127 after resolver extraction errors, but reported 0 known vulnerabilities; treating as pass.'
+            exit 0
+          fi
+          exit "$code"
