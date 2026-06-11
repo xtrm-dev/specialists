@@ -523,7 +523,14 @@ function buildReusedWorktreeAwarenessBlock(options: {
   ].join('\n');
 }
 
-export function buildInjectedReviewerDiffVariables(cwd: string, maxFiles = 20): Record<string, string> {
+type InjectedDiffContext = {
+  source: string;
+  stat: string;
+  files: string;
+  hunks: string;
+};
+
+function buildInjectedDiffContext(cwd: string, maxFiles = 20): InjectedDiffContext | null {
   const read = (command: string): string => {
     try {
       return execSync(command, {
@@ -610,14 +617,46 @@ export function buildInjectedReviewerDiffVariables(cwd: string, maxFiles = 20): 
     if (!hunks.trim()) continue;
 
     return {
-      reviewer_diff_source: `injected diff context (${src.label})`,
-      reviewer_diff_stat: stat || '(no stat)',
-      reviewer_diff_files: files.join('\n'),
-      reviewer_diff_hunks: hunks,
+      source: `injected diff context (${src.label})`,
+      stat: stat || '(no stat)',
+      files: files.join('\n'),
+      hunks,
     };
   }
 
-  return {};
+  return null;
+}
+
+export function buildInjectedReviewerDiffVariables(cwd: string, maxFiles = 20): Record<string, string> {
+  const context = buildInjectedDiffContext(cwd, maxFiles);
+  if (!context) return {};
+
+  return {
+    reviewer_diff_source: context.source,
+    reviewer_diff_stat: context.stat,
+    reviewer_diff_files: context.files,
+    reviewer_diff_hunks: context.hunks,
+  };
+}
+
+export function buildInjectedWriterDiffVariables(cwd: string, maxFiles = 20): Record<string, string> {
+  const context = buildInjectedDiffContext(cwd, maxFiles);
+  if (!context) return {};
+
+  return {
+    writer_diff: [
+      `Source: ${context.source}`,
+      '',
+      'Changed files:',
+      context.files,
+      '',
+      'Diff stat:',
+      context.stat,
+      '',
+      'Diff hunks:',
+      context.hunks,
+    ].join('\n'),
+  };
 }
 
 // ── Handler ────────────────────────────────────────────────────────────────────
@@ -839,11 +878,13 @@ export async function run(): Promise<void> {
   if (args.reuseJobId) {
     const reviewedJobId = extractReviewedJobIdOverride(prompt) ?? args.reuseJobId;
     const injectedReviewerDiffVariables = workingDirectory && args.name === 'reviewer' ? buildInjectedReviewerDiffVariables(workingDirectory) : {};
+    const injectedWriterDiffVariables = workingDirectory && args.name === 'seconder' ? buildInjectedWriterDiffVariables(workingDirectory) : {};
     variables = {
       ...(variables ?? {}),
       reviewed_job_id: reviewedJobId,
       reused_worktree_awareness: buildReusedWorktreeAwarenessBlock({ reusedFromJobId: args.reuseJobId, worktreeOwnerJobId }),
       ...injectedReviewerDiffVariables,
+      ...injectedWriterDiffVariables,
     };
   }
 

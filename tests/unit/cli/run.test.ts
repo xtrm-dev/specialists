@@ -10,7 +10,7 @@ import { BeadsClient } from '../../../src/specialist/beads.js';
 import { SpecialistLoader } from '../../../src/specialist/loader.js';
 import { SpecialistRunner } from '../../../src/specialist/runner.js';
 import { Supervisor } from '../../../src/specialist/supervisor.js';
-import { buildInjectedReviewerDiffVariables, run } from '../../../src/cli/run.js';
+import { buildInjectedReviewerDiffVariables, buildInjectedWriterDiffVariables, run } from '../../../src/cli/run.js';
 
 describe('run CLI', () => {
   const originalArgv = process.argv;
@@ -72,6 +72,34 @@ describe('run CLI', () => {
       reviewer_diff_files: 'src/cli/run.ts',
     }));
     expect(variables.reviewer_diff_files).not.toContain('.xtrm/SKILL.md');
+  });
+
+  it('builds writer_diff from the same worktree diff source as reviewer context', () => {
+    const remoteDir = childProcess.execSync('mktemp -d', { encoding: 'utf8' }).trim();
+    const repoDir = childProcess.execSync('mktemp -d', { encoding: 'utf8' }).trim();
+    childProcess.execSync('git init --bare', { cwd: remoteDir });
+    childProcess.execSync('git init -b main', { cwd: repoDir });
+    childProcess.execSync('git config user.email test@example.com', { cwd: repoDir });
+    childProcess.execSync('git config user.name Test User', { cwd: repoDir });
+    childProcess.execSync('mkdir -p src .xtrm', { cwd: repoDir, shell: '/bin/bash' as never });
+    fs.writeFileSync(`${repoDir}/src/writer.ts`, 'base\n');
+    childProcess.execSync('git add src/writer.ts && git commit -m base', { cwd: repoDir, shell: '/bin/bash' as never });
+    childProcess.execSync(`git remote add origin ${remoteDir}`, { cwd: repoDir, shell: '/bin/bash' as never });
+    childProcess.execSync('git push -u origin main', { cwd: repoDir, shell: '/bin/bash' as never });
+    childProcess.execSync('git fetch origin main', { cwd: repoDir, shell: '/bin/bash' as never });
+    childProcess.execSync('git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main', { cwd: repoDir });
+    childProcess.execSync('git checkout -b feature', { cwd: repoDir, shell: '/bin/bash' as never });
+    fs.writeFileSync(`${repoDir}/src/writer.ts`, 'base\nwriter change\n');
+    childProcess.execSync('git add src/writer.ts && git commit -m change', { cwd: repoDir, shell: '/bin/bash' as never });
+    fs.writeFileSync(`${repoDir}/.xtrm/SKILL.md`, 'noise\n');
+
+    const variables = buildInjectedWriterDiffVariables(repoDir);
+
+    expect(variables.writer_diff).toContain('Source: injected diff context (branch-vs-base diff');
+    expect(variables.writer_diff).toContain('Changed files:\nsrc/writer.ts');
+    expect(variables.writer_diff).toContain('Diff stat:');
+    expect(variables.writer_diff).toContain('+writer change');
+    expect(variables.writer_diff).not.toContain('.xtrm/SKILL.md');
   });
 
   it('uses bead content as the prompt when --bead is provided', async () => {
@@ -615,6 +643,77 @@ describe('run CLI', () => {
     expect(runArgs.variables?.reused_worktree_awareness).toContain('job-root-owner');
     expect(runArgs.variables?.reused_worktree_awareness).toContain('Workspace may contain uncommitted edits');
     expect(runArgs.variables?.reused_worktree_awareness).toContain('git status --short --branch');
+  });
+
+  it('injects writer_diff for seconder when --job reuses a writer worktree', async () => {
+    const remoteDir = childProcess.execSync('mktemp -d', { encoding: 'utf8' }).trim();
+    const repoDir = childProcess.execSync('mktemp -d', { encoding: 'utf8' }).trim();
+    childProcess.execSync('git init --bare', { cwd: remoteDir });
+    childProcess.execSync('git init -b main', { cwd: repoDir });
+    childProcess.execSync('git config user.email test@example.com', { cwd: repoDir });
+    childProcess.execSync('git config user.name Test User', { cwd: repoDir });
+    childProcess.execSync('mkdir -p src', { cwd: repoDir, shell: '/bin/bash' as never });
+    fs.writeFileSync(`${repoDir}/src/writer.ts`, 'base\n');
+    childProcess.execSync('git add src/writer.ts && git commit -m base', { cwd: repoDir, shell: '/bin/bash' as never });
+    childProcess.execSync(`git remote add origin ${remoteDir}`, { cwd: repoDir, shell: '/bin/bash' as never });
+    childProcess.execSync('git push -u origin main', { cwd: repoDir, shell: '/bin/bash' as never });
+    childProcess.execSync('git fetch origin main', { cwd: repoDir, shell: '/bin/bash' as never });
+    childProcess.execSync('git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main', { cwd: repoDir });
+    childProcess.execSync('git checkout -b feature', { cwd: repoDir, shell: '/bin/bash' as never });
+    fs.writeFileSync(`${repoDir}/src/writer.ts`, 'base\nwriter change\n');
+    childProcess.execSync('git add src/writer.ts && git commit -m change', { cwd: repoDir, shell: '/bin/bash' as never });
+
+    process.argv = ['node', 'specialists', 'run', 'seconder', '--prompt', 'review writer', '--job', 'job-writer'];
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
+
+    vi.spyOn(SpecialistLoader.prototype, 'get').mockResolvedValue({
+      specialist: {
+        metadata: { name: 'seconder', version: '1.0.0' },
+        execution: { model: 'gemini', timeout_ms: 5000, mode: 'tool', permission_required: 'READ_ONLY' },
+        prompt: { task_template: 'Do $prompt\n$writer_diff' },
+      },
+    } as any);
+
+    const runnerRun = vi.spyOn(SpecialistRunner.prototype, 'run').mockResolvedValue({
+      output: 'done',
+      durationMs: 5,
+      model: 'gemini',
+      backend: 'google-gemini-cli',
+      promptHash: 'abc123def4567890',
+      specialistVersion: '1.0.0',
+    });
+    vi.spyOn(Supervisor.prototype, 'readStatus').mockImplementation((id: string) => {
+      if (id === 'job-writer') {
+        return {
+          id,
+          specialist: 'executor',
+          status: 'done',
+          started_at_ms: Date.now(),
+          worktree_path: repoDir,
+          worktree_owner_job_id: 'job-root-owner',
+        } as any;
+      }
+      return {
+        id,
+        specialist: 'seconder',
+        status: 'done',
+        started_at_ms: 0,
+        last_event_at_ms: 10,
+      } as any;
+    });
+
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+    await run();
+
+    const runArgs = runnerRun.mock.calls[0][0];
+    expect(runArgs.variables).toEqual(expect.objectContaining({
+      reviewed_job_id: 'job-writer',
+      writer_diff: expect.stringContaining('Diff hunks:'),
+    }));
+    expect(runArgs.variables?.writer_diff).toContain('src/writer.ts');
+    expect(runArgs.variables?.writer_diff).toContain('+writer change');
   });
 
   it('prefers explicit reviewed_job_id override from prompt over --job lineage', async () => {
