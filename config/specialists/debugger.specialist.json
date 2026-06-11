@@ -20,7 +20,7 @@
     },
     "execution": {
       "mode": "tool",
-      "model": "openai-codex/gpt-5.5",
+      "model": "nano-gpt/minimax/minimax-m3:thinking",
       "fallback_model": "openai-codex/gpt-5.4",
       "timeout_ms": 0,
       "stall_timeout_ms": 120000,
@@ -28,7 +28,7 @@
       "response_format": "markdown",
       "output_type": "analysis",
       "permission_required": "HIGH",
-      "thinking_level": "low",
+      "thinking_level": "high",
       "auto_commit": "checkpoint_on_waiting",
       "max_retries": 0,
       "bare": false

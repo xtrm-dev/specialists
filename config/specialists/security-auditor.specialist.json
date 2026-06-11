@@ -17,7 +17,7 @@
     },
     "execution": {
       "mode": "tool",
-      "model": "openai-codex/gpt-5.4",
+      "model": "nano-gpt/minimax/minimax-m3:thinking",
       "fallback_model": "zai/glm-5.1",
       "timeout_ms": 0,
       "stall_timeout_ms": 120000,
@@ -25,7 +25,7 @@
       "output_type": "review",
       "permission_required": "LOW",
       "interactive": true,
-      "thinking_level": "low",
+      "thinking_level": "high",
       "max_retries": 0,
       "bare": false
     },

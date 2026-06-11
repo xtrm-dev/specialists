@@ -16,14 +16,14 @@
     },
     "execution": {
       "mode": "tool",
-      "model": "openai-codex/gpt-5.5",
+      "model": "nano-gpt/deepseek/deepseek-latest",
       "timeout_ms": 0,
       "stall_timeout_ms": 120000,
       "response_format": "markdown",
       "output_type": "review",
       "permission_required": "MEDIUM",
       "interactive": true,
-      "thinking_level": "low",
+      "thinking_level": "high",
       "max_retries": 0,
       "bare": false
     },
