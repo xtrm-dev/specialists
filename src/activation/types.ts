@@ -65,13 +65,15 @@ export type ThinkingLevel = typeof THINKING_LEVELS[number];
 /**
  * A request to activate a Specialist.
  *
- * Independent of TUI state by design. Tracked work is identified by `beadId` only: there is
- * deliberately no free-form task field, because supplementing an incomplete Bead through
+ * Independent of TUI state by design. Tracked work is identified by `issueRef` only:
+ * any locator the shared WorkItemStore resolves (iss_..., XTRM-227, XTRM-184.2.3,
+ * a historical locator, or a legacy imported Beads alias). There is deliberately
+ * no free-form task field, because supplementing an incomplete Issue through
  * delegation prose is how durable work silently loses scope.
  */
 export interface ActivationRequest {
   specialist: string;
-  beadId: string;
+  issueRef: string;
 
   /**
    * Overrides the effective configured model for THIS activation only.
@@ -94,7 +96,7 @@ export interface ActivationRequest {
   coordinatorSessionId?: string;
 
   /**
-   * Up-walk hops along bead.parent for epic lineage in the turn-1 prompt.
+   * Up-walk hops along parent_child edges for epic lineage in the turn-1 prompt.
    * 1 = immediate parent, 2 = parent + grandparent. Absent = no lineage.
    * Distinct from the CLI's downward --context-depth over completed blockers.
    */
@@ -123,7 +125,16 @@ export interface ActivationSnapshot {
   participantId: ParticipantId;
   attemptId: AttemptId;
   specialist: string;
-  beadId: string;
+  /** The substrate issue this activation was bound to (iss_... machine id). */
+  issueId: string;
+  /** Human-readable issue ref (XTRM-227) for rendering and forensics. */
+  issueRef: string;
+  /** The exact revision the ExecutionBinding pinned; a worker never sees "latest". */
+  issueRevision: number;
+  /** Contract hash of the pinned revision. */
+  contractHash: string;
+  /** The immutable ExecutionBinding id (exb_...) recorded at activation start. */
+  executionBindingId: string;
   state: ActivationState;
   access: WorkspaceAccess;
   workspace: WorkspaceIdentity;
@@ -200,7 +211,12 @@ export interface ActivationResult {
   activationId: ActivationId;
   participantId: ParticipantId;
   attemptId: AttemptId;
-  beadId: string;
+  issueId: string;
+  issueRef: string;
+  /** The exact revision/hash this result was produced against. */
+  issueRevision: number;
+  contractHash: string;
+  executionBindingId: string;
 
   status: 'completed' | 'failed' | 'uncertain';
 
@@ -252,7 +268,8 @@ export interface ActivationHandle {
   participantId: ParticipantId;
   attemptId: AttemptId;
   specialist: string;
-  beadId: string;
+  issueId: string;
+  issueRef: string;
   access: WorkspaceAccess;
   workspace: WorkspaceIdentity;
   resolvedModel: string;
@@ -268,7 +285,7 @@ export class DispatchRejectedError extends Error {
     public readonly reason: string,
     public readonly detail: {
       specialist?: string;
-      beadId?: string;
+      issueRef?: string;
       missing?: string[];
       workspace?: string;
       holder?: string;
@@ -281,7 +298,7 @@ export class DispatchRejectedError extends Error {
       'SPECIALIST_DISPATCH_REJECTED',
       '',
       ...(detail.activationId ? [`activation:\n  ${detail.activationId}`, ''] : []),
-      ...(detail.beadId ? [`bead:\n  ${detail.beadId}`, ''] : []),
+      ...(detail.issueRef ? [`issue:\n  ${detail.issueRef}`, ''] : []),
       ...(detail.specialist ? [`specialist:\n  ${detail.specialist}`, ''] : []),
       ...(detail.note ? [`note:\n  ${detail.note}`, ''] : []),
       `reason:\n  ${reason}`,

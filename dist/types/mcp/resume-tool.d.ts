@@ -37,7 +37,7 @@ export declare function createSpecialistResumeTool(getHost: () => NativeActivati
         missing?: string[] | undefined;
         detail?: {
             specialist?: string;
-            beadId?: string;
+            issueRef?: string;
             missing?: string[];
             workspace?: string;
             holder?: string;
@@ -57,6 +57,11 @@ export declare function createSpecialistResumeTool(getHost: () => NativeActivati
         attempt_id: string;
         specialist: string;
         bead_id: string;
+        issue_id: string;
+        issue_ref: string;
+        issue_revision: number;
+        contract_hash: string;
+        execution_binding_id: string;
         state: string;
         access: "read" | "write";
         worktree_path: string;

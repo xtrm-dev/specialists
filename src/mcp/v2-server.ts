@@ -101,7 +101,6 @@ export function buildV2Server(ctx?: McpRequestContext): McpServer {
   // no separate native telemetry store (Phase 7 parity, unchanged from v1).
   const host = new NativeActivationHost({
     loader,
-    beadsClient,
     // One Substrate authority shared with sb/Pi; path from XTRM_STATE_DB or ~/.xtrm/state.db.
     authority: createFileAuthorityWriter(),
     // The push rides the forensic stream the host already emits — no poll, no

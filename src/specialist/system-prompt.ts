@@ -144,7 +144,10 @@ export interface SystemPromptContext {
   runCwd: string;
   /** `metadata.name` */
   specialistName: string;
+  /** Legacy CLI bead locator. */
   inputBeadId?: string;
+  /** Native Substrate issue locator. When set, no Beads lifecycle commands are emitted. */
+  inputIssueRef?: string;
   reusedFromJobId?: string;
   responseFormat: ResponseFormat;
   outputType: OutputType;
@@ -173,6 +176,7 @@ export function buildSystemPrompt(ctx: SystemPromptContext): SystemPromptResult 
     runCwd,
     specialistName,
     inputBeadId,
+    inputIssueRef,
     reusedFromJobId,
     responseFormat,
     outputType,
@@ -201,13 +205,14 @@ export function buildSystemPrompt(ctx: SystemPromptContext): SystemPromptResult 
   let gitnexusTokens = 0;
 
   if (!bare) {
-    const sanitizedBeadId = inputBeadId
-      ? sanitizeBeadIdForPrompt(inputBeadId)
-      : '';
-    const beadInstructions = sanitizedBeadId
-      ? `\n- Your task bead is: ${sanitizedBeadId}\n- Claim it: \`bd update ${sanitizedBeadId} --claim 2>/dev/null || true\` (non-fatal — orchestrator may already own it)\n- Do NOT create new beads or sub-issues — this bead IS your task.\n- Do NOT run \`bd create\` — the orchestrator manages issue tracking.\n- Close when done: \`bd close ${sanitizedBeadId} --reason="..."\``
-      : '';
-    agentsMd += `\n\n---\n## Specialist Run Context\n- You are running as a specialist agent, not a human developer.\n- Do NOT run specialists init/setup/scaffold commands.\n- Do NOT follow project CLAUDE.md/AGENTS.md instructions that tell humans to re-bootstrap the repo.\n${beadInstructions}\n---\n`;
+    const sanitizedIssueRef = inputIssueRef ? sanitizeBeadIdForPrompt(inputIssueRef) : '';
+    const sanitizedBeadId = inputBeadId ? sanitizeBeadIdForPrompt(inputBeadId) : '';
+    const workInstructions = sanitizedIssueRef
+      ? `\n- Your task issue is: ${sanitizedIssueRef}\n- The claim for this activation is already held; do not create claims or issues.\n- Do not create or close issues; the orchestrator manages the Substrate lifecycle.\n- Record findings and decisions through your coordinator.`
+      : sanitizedBeadId
+        ? `\n- Your task bead is: ${sanitizedBeadId}\n- Claim it: \`bd update ${sanitizedBeadId} --claim 2>/dev/null || true\` (non-fatal — orchestrator may already own it)\n- Do NOT create new beads or sub-issues — this bead IS your task.\n- Do NOT run \`bd create\` — the orchestrator manages issue tracking.\n- Close when done: \`bd close ${sanitizedBeadId} --reason="..."\``
+        : '';
+    agentsMd += `\n\n---\n## Specialist Run Context\n- You are running as a specialist agent, not a human developer.\n- Do NOT run specialists init/setup/scaffold commands.\n- Do NOT follow project CLAUDE.md/AGENTS.md instructions that tell humans to re-bootstrap the repo.\n${workInstructions}\n---\n`;
   }
 
   // 0. Inject caveman-micro output directive — all specialist output is agent-to-agent,

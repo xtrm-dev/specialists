@@ -16,9 +16,7 @@
  * otherwise would trade a useful gate for a bureaucratic one.
  */
 import type { BeadRecord } from '../specialist/beads.js';
-/** The 7-section task contract, in the order an operator writes them. */
-export declare const REQUIRED_SECTIONS: readonly ["PROBLEM", "SUCCESS", "SCOPE", "NON_GOALS", "CONSTRAINTS", "VALIDATION", "OUTPUT"];
-export declare const SCRUTINY_LEVELS: readonly ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
+export { extractSections, REQUIRED_SECTIONS } from './contract-sections.js';
 export type BeadGateResult = {
     ok: true;
 } | {
@@ -27,26 +25,10 @@ export type BeadGateResult = {
     missing: string[];
 };
 export interface BeadGateOptions {
-    /**
-     * Reads the `contract` state marker for a Bead, returning e.g. 'ready' or 'draft'.
-     *
-     * Injected so tests need no `bd` binary. The default shells out to `bd state`, which is
-     * the only surface that carries the marker — `bd show --json` does not include it.
-     */
     readContractState?: (beadId: string) => string | undefined;
 }
 /** Read `bd state <id> contract`. Returns undefined when bd is absent or the state is unset. */
 export declare function readContractState(beadId: string): string | undefined;
-/**
- * Split a Bead description into its sections, keyed by canonical heading name.
- *
- * The single parser for the 7-section contract. The gate uses it to decide admission and
- * the StepContract compiler uses it to read section bodies; a second parser would let the
- * two disagree about what a Bead says, which is worse than either being wrong alone.
- * Sections with an empty body are present as empty strings, so callers can tell "absent"
- * from "declared but empty".
- */
-export declare function extractSections(description: string): Map<string, string>;
 /** Max chars of a purpose excerpt carried on a fleet row. Single line, whitespace-collapsed. */
 export declare const PURPOSE_EXCERPT_MAX = 60;
 /**

@@ -100,7 +100,8 @@
     "qs": "6.15.2",
     "yaml": "2.9.0",
     "zod": "3.25.76",
-    "zod-to-json-schema": "3.25.2"
+    "zod-to-json-schema": "3.25.2",
+    "@xtrm/substrate": "file:/home/dawid/dev/xtrm/packages/substrate"
   },
   "devDependencies": {
     "@types/bun": "1.3.14",

@@ -18,6 +18,11 @@ export interface ActivationView {
     attempt_id: string;
     specialist: string;
     bead_id: string;
+    issue_id: string;
+    issue_ref: string;
+    issue_revision: number;
+    contract_hash: string;
+    execution_binding_id: string;
     state: string;
     access: 'read' | 'write';
     worktree_path: string;
@@ -70,6 +75,11 @@ export interface ActivationResultView {
     participant_id: string;
     attempt_id: string;
     bead_id: string;
+    issue_id: string;
+    issue_ref: string;
+    issue_revision: number;
+    contract_hash: string;
+    execution_binding_id: string;
     status: string;
     /** Explicitly `null` rather than absent: a missing key reads as "not projected yet". */
     output: unknown;
@@ -167,7 +177,7 @@ export declare function createSpecialistDispatchTool(getHost: () => NativeActiva
         missing?: string[] | undefined;
         detail?: {
             specialist?: string;
-            beadId?: string;
+            issueRef?: string;
             missing?: string[];
             workspace?: string;
             holder?: string;
@@ -193,6 +203,11 @@ export declare function createSpecialistDispatchTool(getHost: () => NativeActiva
         attempt_id: string;
         specialist: string;
         bead_id: string;
+        issue_id: string;
+        issue_ref: string;
+        issue_revision: number;
+        contract_hash: string;
+        execution_binding_id: string;
         state: string;
         access: "read" | "write";
         worktree_path: string;
@@ -358,7 +373,7 @@ export declare function createSpecialistRetryTool(getHost: () => NativeActivatio
         missing?: string[] | undefined;
         detail?: {
             specialist?: string;
-            beadId?: string;
+            issueRef?: string;
             missing?: string[];
             workspace?: string;
             holder?: string;
@@ -374,6 +389,11 @@ export declare function createSpecialistRetryTool(getHost: () => NativeActivatio
         attempt_id: string;
         specialist: string;
         bead_id: string;
+        issue_id: string;
+        issue_ref: string;
+        issue_revision: number;
+        contract_hash: string;
+        execution_binding_id: string;
         state: string;
         access: "read" | "write";
         worktree_path: string;

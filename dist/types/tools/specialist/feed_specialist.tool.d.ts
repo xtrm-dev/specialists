@@ -32,7 +32,7 @@ export declare function createFeedSpecialistTool(jobsDir: string): {
         error: string;
         job_id: string;
     } | {
-        events: import("../../specialist/timeline-events.js").TimelineEvent[];
+        events: import("../../specialist/timeline-events.ts").TimelineEvent[];
         cursor: number;
         next_cursor: number;
         has_more: boolean;

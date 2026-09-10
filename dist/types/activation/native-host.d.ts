@@ -33,8 +33,7 @@
  * Specialist *waiting and resumable*, never disposed. Disposal is an explicit act.
  */
 import { SpecialistLoader } from '../specialist/loader.js';
-import { BeadsClient } from '../specialist/beads.js';
-import { type BeadGateOptions } from './bead-gate.js';
+import { type SpecialistWorkItemBoundary } from './workitem-store.js';
 import { type InteractionMessage, type PendingAsk } from './interaction.js';
 import { PeerAdapter, type TransportForensicEvent } from './transport/peer-adapter.js';
 import { type PiSdk, type PiAgentSessionEvent } from './pi-sdk.js';
@@ -96,12 +95,16 @@ export interface NativeActivationSessionEventInput {
 export declare const NULL_FORENSIC_SINK: ActivationForensicSink;
 export interface NativeActivationHostDeps {
     loader?: SpecialistLoader;
-    beadsClient?: Pick<BeadsClient, 'readBead'>;
+    /**
+     * The shared Substrate work boundary (ADR §8-§12). When omitted the host
+     * resolves lazily against the canonical store (~/.xtrm/state.db,
+     * XTRM_STATE_DB override) and refuses dispatch fail-closed when that store
+     * is absent or unopenable — never by falling back to another authority.
+     */
+    workItems?: SpecialistWorkItemBoundary;
     forensics?: ActivationForensicSink;
     /** Injected for tests; defaults to resolving the real Pi SDK. */
     loadSdk?: () => Promise<PiSdk>;
-    /** Bead readiness gate seams. Defaults read the real `bd` state marker. */
-    beadGate?: BeadGateOptions;
     /** Defaults to `process.cwd()`. */
     cwd?: string;
     now?: () => number;
@@ -144,10 +147,12 @@ export interface ActivationAttachment {
 }
 export declare class NativeActivationHost {
     private readonly loader;
-    private readonly beadsClient;
+    /** Injected boundary, or undefined to resolve the canonical store lazily. */
+    private readonly workItemsInjected?;
+    /** Lazily-opened canonical boundary; only touched when none was injected. */
+    private workItemsDefault?;
     private readonly forensics;
     private readonly loadSdk;
-    private readonly beadGate;
     private readonly cwd;
     private readonly now;
     private readonly authority;
@@ -179,6 +184,16 @@ export declare class NativeActivationHost {
      * silently is indistinguishable from one that never happened.
      */
     start(request: ActivationRequest): Promise<ActivationHandle>;
+    /**
+     * The shared work boundary for this host.
+     *
+     * Injected wins. Otherwise the canonical store opens lazily on first
+     * dispatch: absent or unopenable refuses fail-closed (§10) — the runtime
+     * never falls back to a second work authority. Opening runs the substrate
+     * migrations, which are append-only and idempotent, so the first dispatch on
+     * a machine whose store exists but predates a migration heals it.
+     */
+    private resolveWorkItems;
     /**
      * Translate Pi session events into Specialists forensic events.
      *
@@ -325,4 +340,6 @@ export declare class NativeActivationHost {
      */
     resume(activationId: string, prompt: string): Promise<ActivationHandle>;
 }
+/** Render a structured work contract back to the 7-section layout the prompt surface reads. */
+export declare function contractToMarkdown(contract: unknown): string;
 //# sourceMappingURL=native-host.d.ts.map

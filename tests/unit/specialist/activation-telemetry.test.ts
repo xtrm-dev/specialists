@@ -15,6 +15,7 @@ vi.mock('node:child_process', async (importOriginal) => {
 });
 
 import { NativeActivationHost } from '../../../src/activation/native-host.js';
+import { testWorkItems } from '../../utils/test-work-items.js';
 import type { ActivationSnapshot } from '../../../src/activation/types.js';
 import { toActivationView } from '../../../src/tools/specialist/activation.tool.js';
 import type { PiSdk, PiAgentSessionLike, PiAgentSessionEvent } from '../../../src/activation/pi-sdk.js';
@@ -31,7 +32,11 @@ function baseSnapshot(overrides: Partial<ActivationSnapshot> = {}): ActivationSn
     participantId: 'part-1',
     attemptId: 'att-1:1',
     specialist: 'researcher',
-    beadId: 'ISSUE-1',
+    issueId: 'iss-1',
+    issueRef: 'ISSUE-1',
+    issueRevision: 1,
+    contractHash: 'hash-test',
+    executionBindingId: 'exb-1',
     state: 'running',
     access: 'read',
     workspace: { repositoryRoot: '/repo', worktreePath: '/repo' },
@@ -170,9 +175,8 @@ describe('host liveStats', () => {
     let now = 1_000_000;
     const session = fakeSession();
     const host = new NativeActivationHost({
-      beadGate: { readContractState: () => undefined },
       loader: { get: async () => specWithThinking() } as never,
-      beadsClient: { readBead: () => BEAD } as never,
+      workItems: testWorkItems({ description: BEAD.description }),
       forensics: { emit: () => {} },
       loadSdk: async () => makeSdk(session),
       cwd: hostWorkspace(),
@@ -181,7 +185,7 @@ describe('host liveStats', () => {
 
     const handle = await host.start({
       specialist: 'researcher',
-      beadId: 'ISSUE-1',
+      issueRef: 'ISSUE-1',
       requestedByParticipantId: 'coordinator',
     });
     await handle.result;
@@ -210,7 +214,6 @@ describe('host liveStats', () => {
 
   it('returns undefined for an unknown activation and omits unset fields', async () => {
     const host = new NativeActivationHost({
-      beadGate: { readContractState: () => undefined },
       cwd: hostWorkspace(),
     });
     expect(host.liveStats('act-nope')).toBeUndefined();

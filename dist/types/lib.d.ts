@@ -7,6 +7,8 @@ export { resolveRuntimeToolContract } from './pi/session.js';
 export { validateBeforeRun } from './specialist/runner.js';
 export { NativeActivationHost } from './activation/native-host.js';
 export type { NativeActivationHostDeps, ActivationForensicSink, ActivationAttachment } from './activation/native-host.js';
+export { openWorkItems, openSubstrateDb, resolveWorkItemDbPath, SubstrateWorkItemsBoundary, } from './activation/workitem-store.js';
+export type { SpecialistWorkItemBoundary, WorkItemView, EpicAncestor, InlineIssueResult, CheckResult, BindResult, } from './activation/workitem-store.js';
 export { DispatchRejectedError, THINKING_LEVELS } from './activation/types.js';
 export type { ActivationId, ActivationRequest, ActivationResult, ActivationSnapshot, ActivationState, ActivationHandle, AttemptId, ParticipantId, PiSessionId, WorkspaceAccess, WorkspaceIdentity, } from './activation/types.js';
 export type { DeliveryState, InteractionKind, InteractionMessage, MessageId, PendingAsk, } from './activation/interaction.js';

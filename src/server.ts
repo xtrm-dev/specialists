@@ -160,7 +160,6 @@ export class SpecialistsServer {
     // no separate native telemetry store, which is what makes Phase 7 parity meaningful.
     this.activationHost = new NativeActivationHost({
       loader,
-      beadsClient,
       // One Substrate authority shared with sb/Pi; path from XTRM_STATE_DB or ~/.xtrm/state.db.
       authority: createFileAuthorityWriter(),
       ...(this.observability ? { forensics: createActivationForensicSink(this.observability) } : {}),

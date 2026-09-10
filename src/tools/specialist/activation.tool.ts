@@ -64,6 +64,11 @@ export interface ActivationView {
   attempt_id: string;
   specialist: string;
   bead_id: string;
+  issue_id: string;
+  issue_ref: string;
+  issue_revision: number;
+  contract_hash: string;
+  execution_binding_id: string;
   state: string;
   access: 'read' | 'write';
   worktree_path: string;
@@ -92,7 +97,12 @@ export function toActivationView(snapshot: ActivationSnapshot, nowMs: number = D
     participant_id: snapshot.participantId,
     attempt_id: snapshot.attemptId,
     specialist: snapshot.specialist,
-    bead_id: snapshot.beadId,
+    bead_id: snapshot.issueRef,
+    issue_id: snapshot.issueId,
+    issue_ref: snapshot.issueRef,
+    issue_revision: snapshot.issueRevision,
+    contract_hash: snapshot.contractHash,
+    execution_binding_id: snapshot.executionBindingId,
     state: snapshot.state,
     access: snapshot.access,
     worktree_path: snapshot.workspace.worktreePath,
@@ -154,6 +164,11 @@ export interface ActivationResultView {
   participant_id: string;
   attempt_id: string;
   bead_id: string;
+  issue_id: string;
+  issue_ref: string;
+  issue_revision: number;
+  contract_hash: string;
+  execution_binding_id: string;
   status: string;
   /** Explicitly `null` rather than absent: a missing key reads as "not projected yet". */
   output: unknown;
@@ -174,7 +189,12 @@ export function toActivationResultView(result: ActivationResult): ActivationResu
     activation_id: result.activationId,
     participant_id: result.participantId,
     attempt_id: result.attemptId,
-    bead_id: result.beadId,
+    bead_id: result.issueRef,
+    issue_id: result.issueId,
+    issue_ref: result.issueRef,
+    issue_revision: result.issueRevision,
+    contract_hash: result.contractHash,
+    execution_binding_id: result.executionBindingId,
     status: result.status,
     output: result.output ?? null,
     validation: result.validation,
@@ -333,7 +353,7 @@ export function createSpecialistDispatchTool(
 
         const handle = await getHost().start({
           specialist: input.specialist,
-          beadId: effectiveBeadId,
+          issueRef: effectiveBeadId,
           // Inline-contract dispatch creates a fresh bead with no parent: no lineage.
           ...(epicContextDepth !== undefined && !autoCreatedBeadId ? { epicContextDepth } : {}),
           ...(input.model_override ? { modelOverride: input.model_override } : {}),

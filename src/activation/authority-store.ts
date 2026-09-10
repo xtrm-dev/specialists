@@ -109,7 +109,7 @@ export interface AuthorityWriter {
   record(
     snapshot: Pick<
       ActivationSnapshot,
-      'activationId' | 'specialist' | 'state' | 'beadId' | 'lastActivityAt'
+      'activationId' | 'specialist' | 'state' | 'issueRef' | 'lastActivityAt'
     >,
   ): void;
   /**
@@ -148,7 +148,7 @@ export function createFileAuthorityWriter(
             snapshot.activationId,
             snapshot.specialist,
             snapshot.state,
-            snapshot.beadId,
+            snapshot.issueRef,
             snapshot.lastActivityAt,
           );
         } finally {

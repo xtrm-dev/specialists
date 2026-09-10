@@ -37,6 +37,7 @@ import { NativeActivationHost } from '../../../src/activation/native-host.js';
 import { REQUIRED_SECTIONS } from '../../../src/activation/bead-gate.js';
 import { CircuitBreaker } from '../../../src/utils/circuitBreaker.js';
 import type { PiSdk, PiAgentSessionLike, PiAgentSessionEvent } from '../../../src/activation/pi-sdk.js';
+import { testWorkItems } from '../../utils/test-work-items.js';
 
 /**
  * PRD Phase 13 — the MCP frontend over NativeActivationHost.
@@ -172,7 +173,6 @@ function hostWith(fixture: HostFixture = {}) {
   } as unknown as PiSdk;
   const events: string[] = [];
   const host = new NativeActivationHost({
-    beadGate: fixture.readContractState ? { readContractState: fixture.readContractState } : NO_STATE,
     loader: { get: async () => ({
       specialist: {
         metadata: { name: 'researcher', version: '1.0.0', description: 'd', category: 'c' },
@@ -187,7 +187,11 @@ function hostWith(fixture: HostFixture = {}) {
         prompt: { system: 'You are the researcher.', task_template: 'Do: {{bead_id}}' },
       },
     }) } as never,
-    beadsClient: { readBead: () => fixture.bead ?? contract() } as never,
+    workItems: testWorkItems({
+      description: (fixture.bead as { description?: string } | undefined)?.description ?? contract().description,
+      title: (fixture.bead as { title?: string } | undefined)?.title,
+      state: fixture.readContractState?.(),
+    }),
     loadSdk: async () => sdk,
     forensics: { emit: (e) => { events.push(e.name); } },
     cwd: workspace.worktreePath,
@@ -459,7 +463,7 @@ describe('specialist_retry — a failed activation is re-run in place, never red
     const retry = createSpecialistRetryTool(() => host);
 
     const handle = await host.start({
-      specialist: 'researcher', beadId: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
     });
     expect((await handle.result).status).toBe('failed');
 
@@ -481,7 +485,7 @@ describe('specialist_retry — a failed activation is re-run in place, never red
     }));
 
     const handle = await host.start({
-      specialist: 'researcher', beadId: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
     });
     await handle.result;
 
@@ -494,7 +498,7 @@ describe('specialist_retry — a failed activation is re-run in place, never red
     const retry = createSpecialistRetryTool(() => host);
 
     const handle = await host.start({
-      specialist: 'researcher', beadId: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
     });
     await handle.result;
     expect(host.inspect(handle.activationId)?.state).toBe('settled');
