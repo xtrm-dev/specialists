@@ -236,8 +236,36 @@ describe('pull_request workflow trust boundary', () => {
     expect(jobs).toBeDefined();
     const protectedScan = jobs?.['protected-scan'];
     const prScan = jobs?.['pr-scan'];
-    expect(isMapping(protectedScan) && protectedScan['runs-on']).toContain('CI_RUNNER');
+    // Was `toContain('CI_RUNNER')` — that assertion PINNED the vulnerability
+    // (unitAI-tmeqw.12). protected-scan resolved to the repository-level
+    // self-hosted runner, and its only guard was `if: github.event_name !=
+    // 'pull_request'` written in a file a pull request can edit.
+    expect(isMapping(protectedScan) && protectedScan['runs-on']).toBe('ubuntu-latest');
     expect(isMapping(protectedScan) && protectedScan.name).toBe('OSV scan (push/schedule hard gate)');
     expect(isMapping(prScan) && prScan.name).toBe('OSV scan');
+  });
+
+  it('no workflow references a self-hosted runner, on any trigger', () => {
+    // The repo-wide invariant established by unitAI-tmeqw.12, and the reason it
+    // is asserted over the raw TEXT rather than the parsed runs-on value.
+    //
+    // findTrustViolations already rejects self-hosted labels, but only for jobs
+    // it can attribute to `pull_request`. That is how protected-scan slipped
+    // through: an `if:` guard excluded it from the pull_request lane while the
+    // file stayed editable by the very pull request the guard was meant to stop.
+    // GitHub assigns a runner BEFORE any in-PR step runs, so no expression
+    // inside these files can be an enforcement boundary.
+    //
+    // This repo is public. The durable property is therefore not "PR jobs avoid
+    // self-hosted" but "this repository names no self-hosted runner at all" —
+    // and it needs guarding, because the runner already regenerated once under a
+    // new id (1155 -> 2463) after the original finding.
+    const offenders: string[] = [];
+    for (const file of readdirSync(WORKFLOW_DIRECTORY).filter((name) => /\.ya?ml$/.test(name))) {
+      const source = readFileSync(join(WORKFLOW_DIRECTORY, file), 'utf8');
+      if (SELF_HOSTED_PATTERN.test(source)) offenders.push(`${file}: names a self-hosted runner`);
+      if (/CI_RUNNER/.test(source)) offenders.push(`${file}: references CI_RUNNER (resolves to self-hosted)`);
+    }
+    expect(offenders).toEqual([]);
   });
 });
