@@ -50,6 +50,8 @@ import {
   specialistStopSchema,
 } from '../tools/specialist/activation.tool.js';
 import { createSpecialistResumeTool, specialistResumeSchema } from './resume-tool.js';
+import { createSubstrateIssueTool, substrateIssueSchema } from '../tools/substrate/issue.tool.js';
+import { resolveSubstrate } from '../substrate/services.js';
 import { NativeActivationHost } from '../activation/native-host.js';
 import { createFileAuthorityWriter } from '../activation/authority-store.js';
 import { RuntimeEventPusher } from '../activation/async-events.js';
@@ -133,6 +135,22 @@ export function buildV2Server(ctx?: McpRequestContext): McpServer {
       server.server.notification(frame as unknown as Parameters<typeof server.server.notification>[0]);
   }
 
+  // Substrate-backed tools are admitted only when Substrate can actually serve them, or
+  // when an operator asks to see the surface anyway.
+  //
+  // Registering them unconditionally was the first instinct — an inert tool that explains
+  // itself tells a coordinator the capability exists, which absence never does. But
+  // `@xtrm/substrate` is unpublished and cannot load under bun (it hard-imports
+  // node:sqlite), so for practically every npm install of this package the tools would be
+  // permanent noise in `tools/list` that can never succeed. Absence is the honest default
+  // there; the diagnosis is still one env var away, and the tool still answers with its
+  // reason once admitted.
+  const substrate = resolveSubstrate();
+  const substrateTools: AnyTool[] =
+    substrate.available || process.env.XTRM_SUBSTRATE_TOOLS === '1'
+      ? [createSubstrateIssueTool()]
+      : [];
+
   const tools: AnyTool[] = [
     createUseSpecialistTool(runner),
     createSpecialistStatusTool(loader, circuitBreaker, getHost, getPusher),
@@ -141,9 +159,11 @@ export function buildV2Server(ctx?: McpRequestContext): McpServer {
     createSpecialistResumeTool(getHost, getPusher),
     createSpecialistStopActivationTool(getHost),
     createSpecialistListTool(loader),
+    ...substrateTools,
   ];
 
   const schemaMap: Record<string, z.ZodTypeAny> = {
+    substrate_issue: substrateIssueSchema,
     use_specialist: useSpecialistSchema,
     specialist_dispatch: specialistDispatchSchema,
     specialist_reply: specialistReplySchema,
