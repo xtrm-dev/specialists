@@ -1572,74 +1572,107 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
     expect(seen).toEqual(['activation_completed']);
   });
 
-  it('rails only the invariant header lines; rows and mutable content carry none (unitAI-beqby.17, unitAI-rrdnt.65)', async () => {
+  it('event cards are compact two-line brackets: dim, no rail, no background, no blank lines (unitAI-rrdnt.65.1)', async () => {
     const mod = await loadExtension();
-    expect(mod.RAIL).toBe('\x1b[38;2;141;127;232m│\x1b[0m');
-
-    // The rail is XTRM chrome. Exactly the two header lines are invariant; the body and
-    // the coordinator instruction are content XTRM did not write and must not claim.
-    const wake = mod.formatSettlementWake({
-      activationId: 'act:aaaa', specialist: 'explorer', beadId: 'bd-1', outcome: 'completed',
-    }).split('\n');
-    expect(wake[0].startsWith(mod.RAIL)).toBe(true);
-    expect(wake[1].startsWith(mod.RAIL)).toBe(true);
-    for (const line of wake.slice(2)) {
-      expect(line.startsWith(mod.RAIL)).toBe(false);
+    const cards = [
+      mod.formatAskWake({
+        activationId: 'act:aaaa', specialist: 'researcher', beadId: 'unitAI-a.1', kind: 'question',
+        body: 'Can Channel delivery remain advisory while state.db stays authoritative?',
+      }, { purpose: 'inspect native wake transport', bead_id: 'unitAI-a.1' }),
+      mod.formatAskWake({
+        activationId: 'act:aaaa', specialist: 'reviewer', beadId: 'unitAI-a.2', kind: 'escalation',
+        body: 'The current implementation cannot preserve the accepted authority invariant.',
+      }, { purpose: 'verify MCP Channel semantics', bead_id: 'unitAI-a.2' }),
+      mod.formatSettlementWake({
+        activationId: 'act:aaaa', specialist: 'executor', beadId: 'unitAI-a.3', outcome: 'completed',
+      }, { bead_id: 'unitAI-a.3', elapsed_s: 134, turn_count: 5, token_usage: { input_tokens: 15000, output_tokens: 3600 } }),
+      mod.formatSettlementWake({
+        activationId: 'act:aaaa', specialist: 'executor', beadId: 'unitAI-a.3', outcome: 'failed',
+        error: 'Provider rate limit exhausted after fallback chain.',
+      }, { resolved_model: 'gpt-5.6-sol', thinking_level: 'high', bead_id: 'unitAI-a.3' }),
+    ];
+    for (const card of cards) {
+      expect(card).not.toContain('│');        // the rail is retired
+      expect(card).not.toContain('48;2');     // no background in an event, ever
+      expect(card).not.toContain('\n\n');     // no blank line anywhere
+      const lines = card.split('\n');
+      expect(lines[0].startsWith('\x1b[2m╭─\x1b[22m  ')).toBe(true);
+      expect(lines[1].startsWith('\x1b[2m╰─\x1b[22m  ')).toBe(true);
+      for (const line of lines.slice(2)) expect(line.startsWith('    ')).toBe(true);
     }
-    // A multiline body must not drag the rail down the terminal: every body line is bare.
-    const ask = mod.formatAskWake({
+
+    // The ask card, exactly.
+    const ask = cards[0];
+    const askLines = plain(ask).split('\n');
+    expect(askLines).toEqual([
+      '╭─  ! researcher · waiting on coordinator',
+      '╰─  unitAI-a.1 · inspect native wake transport',
+      '    Can Channel delivery remain advisory while state.db stays authoritative?',
+      '    Call specialist_status to read this ask\'s message_id from pending_asks, then answer it with specialist_reply. The child is alive and resumable; it stays blocked until you answer.',
+      '    activation act:aaaa',
+    ]);
+    expect(ask).toContain('\x1b[33m!\x1b[39m');                     // warning glyph
+    expect(ask).toContain('\x1b[1mresearcher\x1b[22m');             // bold name
+    expect(askLines[1]).toContain('inspect native wake transport');
+    expect(ask).toContain('\x1b[3minspect native wake transport\x1b[23m'); // italic purpose
+    const askRaw = ask.split('\n');
+    expect(askRaw[3].startsWith('    \x1b[2m\x1b[3m')).toBe(true);  // dim+italic instruction
+    expect(askRaw[4].startsWith('    \x1b[2m')).toBe(true);         // dim activation id
+
+    // Escalation and settlement shapes.
+    expect(plain(cards[1]).split('\n')[0]).toBe('╭─  ! reviewer · escalated');
+    expect(plain(cards[2]).split('\n')).toEqual([
+      '╭─  ✓ executor · finished',
+      '╰─  unitAI-a.3 · 2m14s • 5t • 19k',
+      '    Result validated · resumable',
+      expect.stringContaining('Call specialist_status to read its validated result.'),
+      '    activation act:aaaa',
+    ]);
+    expect(plain(cards[3]).split('\n')).toEqual([
+      '╭─  ✕ executor · failed',
+      '╰─  unitAI-a.3 · gpt-5.6-sol · high',
+      '    Provider rate limit exhausted after fallback chain.',
+      expect.stringContaining('specialist_retry'),
+      '    activation act:aaaa',
+    ]);
+    expect(cards[2]).toContain('\x1b[32m✓\x1b[39m');
+    expect(cards[3]).toContain('\x1b[31m✕\x1b[39m');
+  });
+
+  it('a multiline Specialist body stays verbatim, indented and railless', async () => {
+    const mod = await loadExtension();
+    const lines = mod.formatAskWake({
       activationId: 'act:aaaa', specialist: 'explorer', beadId: 'bd-1', kind: 'question',
       body: 'Line one?\nLine two.\nLine three.',
     }).split('\n');
-    expect(ask[0].startsWith(mod.RAIL)).toBe(true);
-    expect(ask[1].startsWith(mod.RAIL)).toBe(true);
-    for (const line of ask.slice(2)) {
-      expect(line.startsWith(mod.RAIL)).toBe(false);
-    }
-    // Multiline Specialist body, verbatim and unrailed (it is the child's voice).
-    expect(plain(ask.join('\n'))).toContain('Line one?\nLine two.\nLine three.');
-
-    const rows = mod.renderFleetRowLines({
-      activation_id: 'act:x', specialist: 'explorer', bead_id: 'bd-1', state: 'running',
-      resolved_model: 'm', elapsed_s: 41, last_activity_at: Date.now(),
+    expect(plain(lines.join('\n'))).toContain('    Line one?\n    Line two.\n    Line three.');
+    // A paragraph break in the child's text is indented like any other line, so the card
+    // itself never emits a bare blank line.
+    const withGap = mod.formatAskWake({
+      activationId: 'act:aaaa', specialist: 'explorer', beadId: 'bd-1', kind: 'question',
+      body: 'First paragraph.\n\nSecond paragraph.',
     });
-    expect(rows.join('\n')).not.toContain(mod.RAIL);
-    expect(mod.renderFleetHeader({ activations: [], asks: [] })).not.toContain(mod.RAIL);
-    for (const line of mod.renderSectionLines({ activations: [], asks: [] }, { expanded: true })) {
-      expect(line).not.toContain(mod.RAIL);
-    }
+    expect(withGap).not.toContain('\n\n');
+    expect(plain(withGap)).toContain('    First paragraph.\n    \n    Second paragraph.');
   });
 
-  it('wake content keeps the activation id out of header chrome but keeps it for the model', async () => {
+  it('keeps the activation id in the literal message content for the model', async () => {
     const mod = await loadExtension();
     const ok = mod.formatSettlementWake({
       activationId: 'act:aaaa', specialist: 'explorer', beadId: 'bd-1', outcome: 'completed',
     }, { bead_id: 'bd-1', elapsed_s: 134, turn_count: 5, token_usage: { input_tokens: 15000, output_tokens: 3600 } });
-    expect(plain(ok)).toContain('│ ✓ explorer · finished');
-    expect(plain(ok)).toContain('│   bd-1 · 2m14s • 5t • 19k');
+    expect(plain(ok)).toContain('activation act:aaaa');
     expect(ok).toMatch(/specialist_status/);
     expect(ok).toMatch(/finished/);
-    // The activation id leaves the railed header chrome …
-    for (const line of ok.split('\n').filter((l) => l.startsWith(mod.RAIL))) {
-      expect(line).not.toContain('act:');
-    }
-    // … and stays in the literal message content, because the model receives ONLY this
-    // string (`details` is display-only) and specialist_retry takes an activation id.
-    expect(plain(ok)).toContain('activation act:aaaa');
-    // The instruction is styled secondary but remains literal content.
     expect(ok).toContain('\x1b[3m');
-    expect(plain(ok)).toContain('Call specialist_status to read its validated result.');
 
     const bad = mod.formatSettlementWake({
       activationId: 'act:bbbb', specialist: 'executor', outcome: 'failed', error: 'provider 429',
     }, { resolved_model: 'gpt-5.6-sol', thinking_level: 'high' });
-    expect(plain(bad)).toContain('│ ✕ executor · failed');
-    expect(plain(bad)).toContain('gpt-5.6-sol · high');
+    expect(plain(bad).split('\n')[1]).toBe('╰─  — · gpt-5.6-sol · high');
     expect(bad).toMatch(/provider 429/);
-    // A failed activation is retryable in place; saying so is the difference between an
-    // operator retrying and an operator starting over (unitAI-3emr7: specialist_retry,
-    // not specialist_resume — resume keeps a live session, retry re-runs a dead one).
     expect(bad).toMatch(/specialist_retry/);
+    expect(plain(bad)).toContain('activation act:bbbb');
   });
 
   it('the flag description no longer claims the wake is ask-only', async () => {

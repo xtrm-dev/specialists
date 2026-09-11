@@ -494,14 +494,27 @@ render as nothing. No `setWidget` fallback, no poll timer, no `ui.custom` mount 
 the only surface; without it the fleet stays hidden and slash commands report text.
 
 **Wake notifications.** Ask and settle events emit follow-up messages
-(`specialist_ask`/`specialist_settled`). The far-left rail in `#8d7fe8` marks XTRM-generated
-INVARIANT chrome only — the two header lines naming the Specialist, the work and the state. A
-Specialist-authored question body, an escalation body, a variable error string and the
-coordinator instruction are mutable content and carry no rail. The coordinator instruction
-stays literal message content, because it is what the coordinator model acts on, and is styled
-dim and italic so it reads as secondary to a human. The activation id leaves the header chrome
-and remains, dim, in the message body: the model receives only the rendered string (`details`
-is display-only) and `specialist_retry` / `specialist_resume` take an activation id.
+(`specialist_ask`/`specialist_settled`) as a compact two-line EVENT BRACKET, with no rail, no
+blank lines and no background:
+
+```text
+╭─  ! researcher · waiting on coordinator
+╰─  unitAI-a.1 · inspect native wake transport
+    Can Channel delivery remain advisory while state.db stays authoritative?
+    Call specialist_status to obtain the pending message_id, then reply with specialist_reply.
+    activation act:093aeb06-aed
+```
+
+The `╭─`/`╰─` bracket is dim neutral, never the XTRM accent: the event glyph already carries
+the semantic colour, and keeping purple scarce is what keeps the thinking level and the live
+spinner meaningful. Hierarchy comes from typography alone — glyph colour for state, bold
+Specialist name, dim work id, dim+italic purpose and coordinator instruction, plain foreground
+for anything a Specialist wrote. The full-width `│` rail is retired (it squeezed the body
+against the left edge and forced blank-line compensation, reading as a card in a UI whose
+language is typography). The coordinator instruction stays literal message content, because it
+is what the coordinator model acts on; the activation id stays in the content too, dim, on the
+line below the instruction, because the model receives only the rendered string (`details` is
+display-only) and `specialist_retry` / `specialist_resume` take an activation id.
 
 **Control.** `specialist_reply` answers by message ID (unknown IDs reported, never silently
 passed); `specialist_resume` continues the same session; `specialist_stop_activation` disposes

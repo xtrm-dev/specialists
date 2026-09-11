@@ -108,21 +108,11 @@ export const DEFAULT_REQUESTED_BY = 'adapter::pi-extension';
  */
 export const FLEET_MAX_ROWS = 4;
 
-// Wake rail (unitAI-beqby.17): far-left │ gutter in #8d7fe8 (24-bit
-// 38;2;141;127;232).
-//
-// The rail now means one thing only: XTRM-generated INVARIANT chrome. Only the stable
-// header lines of a wake card carry it. A Specialist-authored question body, an escalation
-// body, an error string, a variable result and a coordinator instruction are all mutable
-// content — railing them claimed an XTRM guarantee about text XTRM did not write. Fleet
-// rows and tool-result cards carry no rail at all.
-export const RAIL = '\x1b[38;2;141;127;232m│\x1b[0m';
-
-export function withRail(line) {
-  const text = String(line ?? '');
-  if (!text) return RAIL;
-  return `${RAIL} ${text}`;
-}
+// The #8d7fe8 wake rail is RETIRED (unitAI-beqby.17, superseded by unitAI-rrdnt.65.1). A
+// full-width `│` gutter on every line squeezed the body against the left edge and forced
+// blank-line spacing to compensate, which read as a card or a panel in a UI whose language
+// is typography. A wake is an EVENT and renders as a compact two-line bracket — see the
+// event-card block below.
 
 // ── SGR helpers ──────────────────────────────────────────────────────────────
 //
@@ -483,82 +473,129 @@ export function createAskObserverSink(base, onAsk, onTerminal) {
 }
 
 /**
- * The wake message a blocked child produces. Exported so its shape is testable.
+ * ── Wake/event cards ────────────────────────────────────────────────────────
  *
- * Two shapes in one string, and the boundary between them is the whole point of the
- * redesign: the two header lines are XTRM-generated invariant chrome and carry the rail;
- * everything after them is content XTRM did not write (the Specialist's question) or a
- * literal instruction whose wording is a protocol (the coordinator hint), and carries none.
+ * A wake is an EVENT, not a panel. It renders as one compact object: a two-line bracket and
+ * indented content, with no rail, no blank lines and no background.
+ *
+ *   ╭─  ! researcher · waiting on coordinator
+ *   ╰─  unitAI-a.1 · inspect native wake transport
+ *       Can Channel delivery remain advisory while state.db stays authoritative?
+ *       Call specialist_status to obtain the pending message_id, then reply with specialist_reply.
+ *       activation act:093aeb06-aed
+ *
+ * The bracket is DIM NEUTRAL, never the XTRM accent: the event glyph already carries the
+ * semantic colour, and keeping purple scarce is what keeps the thinking level and the live
+ * spinner meaningful.
+ *
+ * Hierarchy is carried by TYPOGRAPHY alone — no boxes, no backgrounds, no whitespace blocks:
+ * glyph colour for state, bold Specialist name, dim work id, dim+italic purpose and
+ * coordinator instruction, plain foreground for anything a Specialist wrote.
+ */
+const EVENT_TOP = '╭─';
+const EVENT_BOTTOM = '╰─';
+/** Content sits under the bracket's two-space gutter. */
+const EVENT_INDENT = '    ';
+
+/** One bracket line. The body is already styled. */
+function eventLine(bracket, body) {
+  return `${DIM(bracket)}  ${body}`;
+}
+
+/**
+ * Indent a content block under the bracket.
+ *
+ * A blank line inside a Specialist-authored body is indented like every other line, so the
+ * card adds no bare blank line of its own while the author's paragraphing still renders as
+ * a gap.
+ */
+function indentLines(text) {
+  return String(text ?? '').split('\n').map((line) => `${EVENT_INDENT}${line}`);
+}
+
+/** Run cost for a settled event: elapsed • turns • tokens (each part omitted when absent). */
+function costFacts(view) {
+  return [
+    view ? DIM(formatElapsedShort(view.elapsed_s)) : null,
+    view?.turn_count != null ? DIM(`${view.turn_count}t`) : null,
+    ...(view ? [formatSpendShort(view.token_usage)].filter(Boolean).map(DIM) : []),
+  ].filter(Boolean).join(` ${DIM('•')} `);
+}
+
+/** Attribution for a failed event: the model that produced the failure, and its effort. */
+function modelFacts(view) {
+  return [
+    view?.resolved_model ? DIM(view.resolved_model) : null,
+    view?.thinking_level ? ACCENT_BOLD(view.thinking_level) : null,
+  ].filter(Boolean).join(` ${DIM('·')} `);
+}
+
+/**
+ * The coordinator instruction, verbatim.
+ *
+ * This is literal DELIVERY CONTENT, not decoration: the coordinator model reads this string
+ * and acts on it, and `details` is display-only. It is styled dim + italic so it reads as
+ * secondary to a human without being hidden from the model.
+ */
+const ASK_INSTRUCTION =
+  'Call specialist_status to read this ask\'s message_id from pending_asks, then ' +
+  'answer it with specialist_reply. The child is alive and resumable; it stays ' +
+  'blocked until you answer.';
+const RESULT_INSTRUCTION =
+  'Call specialist_status to read its validated result. The activation is settled and ' +
+  'stays resumable until you dispose it with specialist_stop_activation.';
+const FAIL_INSTRUCTION =
+  'Call specialist_status to read the failure detail, then re-run it with specialist_retry ' +
+  '— same activation, same lease, optionally on another model with model_override. ' +
+  'Answer with specialist_reply instead if it is waiting on a question.';
+
+/**
+ * The wake message a blocked child produces. Exported so its shape is testable.
  *
  * `view` is the SAME `ActivationView` the tools serialise — the purpose excerpt and the work
  * id are read from it, never re-derived here. It is optional because a wake is worth
  * delivering even when the snapshot is already gone.
  */
 export function formatAskWake(ask, view) {
-  const verb = ask.kind === 'escalation' ? 'escalated to coordinator' : 'waiting on coordinator';
+  const escalated = ask.kind === 'escalation';
   const purpose = formatPurposeShort(view?.purpose);
   const beadId = ask.beadId ?? view?.bead_id ?? '—';
+  const context = [DIM(beadId), purpose ? ITALIC_DIM(purpose) : null]
+    .filter(Boolean).join(` ${DIM('·')} `);
   return [
-    withRail(`${WARNING('!')} ${BOLD(ask.specialist)} · ${verb}`),
-    withRail(`  ${DIM(beadId)}${purpose ? ` ${DIM('·')} ${ITALIC_DIM(purpose)}` : ''}`),
-    '',
-    ask.body || '(no body)',
-    '',
-    // Literal delivery content, NOT decoration: the coordinator model reads this string and
-    // acts on it. Styling it dim+italic marks it secondary to the human without hiding it
-    // from the model, and the wording is unchanged from the version that shipped.
-    ITALIC_DIM(
-      'Call specialist_status to read this ask\'s message_id from pending_asks, then ' +
-      'answer it with specialist_reply. The child is alive and resumable; it stays ' +
-      'blocked until you answer.',
-    ),
-    '',
-    // The activation id leaves the header chrome (it is a forensic id, and the human header
-    // belongs to the work). It stays in the message CONTENT because the model receives only
-    // this string — `details` is display-only — and specialist_retry / specialist_resume
-    // take an activation id. Dim, last, and outside the railed block.
-    DIM(`activation ${ask.activationId}`),
+    eventLine(EVENT_TOP, `${WARNING('!')} ${BOLD(ask.specialist)} · ${escalated ? 'escalated' : 'waiting on coordinator'}`),
+    eventLine(EVENT_BOTTOM, context),
+    ...indentLines(ask.body || '(no body)'),
+    `${EVENT_INDENT}${ITALIC_DIM(ASK_INSTRUCTION)}`,
+    // The activation id stays in the message CONTENT because the model receives only this
+    // string, and specialist_retry / specialist_resume take an activation id. Dim, and on
+    // the line immediately below the instruction rather than in its own separated block.
+    `${EVENT_INDENT}${DIM(`activation ${ask.activationId}`)}`,
   ].join('\n');
 }
 
 /**
  * The wake message a finished child produces. Exported so its shape is testable.
  *
- * Same header/content split as {@link formatAskWake}: the railed block names the event and
- * the run's cost (completed) or the model that produced the failure (failed); the error
- * string, the coordinator instruction and the activation id below it are not chrome.
- * `view` supplies elapsed/turns/spend and the failure model — all existing snapshot
- * telemetry, projected by `toActivationView`, never recomputed here.
+ * Same compact object as {@link formatAskWake}: the bracket names the event and its context
+ * (run cost when completed, the model when failed); the error string, the status line, the
+ * coordinator instruction and the activation id are indented content. `view` supplies
+ * elapsed/turns/spend and the failure model — all existing snapshot telemetry, projected by
+ * `toActivationView`, never recomputed here.
  */
 export function formatSettlementWake(done, view) {
   const failed = done.outcome === 'failed';
   const beadId = done.beadId ?? view?.bead_id ?? '—';
-  const facts = failed
-    ? [
-      view?.resolved_model ? DIM(view.resolved_model) : null,
-      view?.thinking_level ? ACCENT_BOLD(view.thinking_level) : null,
-    ].filter(Boolean).join(` ${DIM('·')} `)
-    : [
-      view ? DIM(formatElapsedShort(view.elapsed_s)) : null,
-      view?.turn_count != null ? DIM(`${view.turn_count}t`) : null,
-      ...(view ? [formatSpendShort(view.token_usage)].filter(Boolean).map(DIM) : []),
-    ].filter(Boolean).join(` ${DIM('•')} `);
+  const facts = failed ? modelFacts(view) : costFacts(view);
+  const context = [DIM(beadId), facts || null].filter(Boolean).join(` ${DIM('·')} `);
   return [
-    withRail(`${failed ? FAILURE('✕') : SUCCESS('✓')} ${BOLD(done.specialist)} · ${failed ? 'failed' : 'finished'}`),
-    withRail(`  ${DIM(beadId)}${facts ? ` ${DIM('·')} ${facts}` : ''}`),
-    ...(failed && done.error ? ['', done.error] : []),
-    '',
-    // Same protocol-bearing instruction as the ask wake: styled down, still literal.
-    ITALIC_DIM(
-      failed
-        ? 'Call specialist_status to read the failure detail, then re-run it with specialist_retry '
-          + '— same activation, same lease, optionally on another model with model_override. '
-          + 'Answer with specialist_reply instead if it is waiting on a question.'
-        : 'Call specialist_status to read its validated result. The activation is settled and '
-          + 'stays resumable until you dispose it with specialist_stop_activation.',
-    ),
-    '',
-    DIM(`activation ${done.activationId}`),
+    eventLine(EVENT_TOP, `${failed ? FAILURE('✕') : SUCCESS('✓')} ${BOLD(done.specialist)} · ${failed ? 'failed' : 'finished'}`),
+    eventLine(EVENT_BOTTOM, context),
+    ...(failed
+      ? indentLines(done.error ?? 'The activation failed; read specialist_status for the detail.')
+      : indentLines('Result validated · resumable')),
+    `${EVENT_INDENT}${ITALIC_DIM(failed ? FAIL_INSTRUCTION : RESULT_INSTRUCTION)}`,
+    `${EVENT_INDENT}${DIM(`activation ${done.activationId}`)}`,
   ].join('\n');
 }
 
