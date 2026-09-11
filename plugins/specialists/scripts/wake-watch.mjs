@@ -48,6 +48,13 @@ const MAX_MS = Number(process.env.SUBSTRATE_WAKE_MAX_MS ?? 870000);
 const ACTIONABLE = new Set(['settled', 'needs_reply']);
 
 function resolveStorePath() {
+  // SUBSTRATE_DB first: the store belongs to Substrate, which defines that variable and
+  // shares the file with sb and Pi. XTRM_STATE_DB is specialists' own older name for the
+  // same path — still honoured so existing setups are unchanged, but it no longer
+  // overrides the owner's variable (unitAI-0whq0). Must stay identical to
+  // resolveAuthorityDbPath in src/activation/authority-store.ts; these resolve separately.
+  const substrate = (process.env.SUBSTRATE_DB ?? '').trim();
+  if (substrate) return substrate;
   const override = (process.env.XTRM_STATE_DB ?? '').trim();
   if (override) return override;
   return join(homedir(), '.xtrm', 'state.db');
