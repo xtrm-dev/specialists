@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
  * continuity pointer is written and never read, and operator spec §AJ's "PostCompact
  * works" has nothing behind it.
  */
-const scripts = join(dirname(fileURLToPath(import.meta.url)), '../../../plugins/substrate/scripts');
+const scripts = join(dirname(fileURLToPath(import.meta.url)), '../../../plugins/specialists/scripts');
 const preHook = join(scripts, 'precompact.mjs');
 const postHook = join(scripts, 'postcompact.mjs');
 
@@ -37,11 +37,11 @@ function runHook(hook: string, dataDir: string, sessionId: string, storePath?: s
   });
 }
 
-describe('substrate PostCompact hook', () => {
+describe('specialists PostCompact hook', () => {
   it('re-states the activations the pointer names', () => {
     const dir = tmpRoot();
     writeFileSync(
-      join(dir, 'substrate-continuity-s1.json'),
+      join(dir, 'specialists-continuity-s1.json'),
       JSON.stringify({
         store: '/nonexistent/state.db',
         session_id: 's1',
@@ -74,7 +74,7 @@ describe('substrate PostCompact hook', () => {
 
   it('exits 0 and stays silent when the pointer is malformed', () => {
     const dir = tmpRoot();
-    writeFileSync(join(dir, 'substrate-continuity-bad.json'), 'not json');
+    writeFileSync(join(dir, 'specialists-continuity-bad.json'), 'not json');
     const result = runHook(postHook, dir, 'bad');
     expect(result.status).toBe(0);
     expect(result.stdout.trim()).toBe('');

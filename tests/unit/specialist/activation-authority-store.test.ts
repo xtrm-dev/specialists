@@ -26,7 +26,7 @@ function openRead(dbPath: string): ReadDb {
 
 /**
  * The hook's projection, copied verbatim from
- * plugins/substrate/scripts/session-start.mjs. The schema test below runs THIS
+ * plugins/specialists/scripts/session-start.mjs. The schema test below runs THIS
  * string — not a restatement — so drift in either direction fails loudly.
  */
 const HOOK_QUERY = `SELECT activation_id, specialist, state, bead_id, last_activity_at
@@ -219,7 +219,7 @@ describe('authority writer — host lifecycle end to end', () => {
 describe('SessionStart hook — live against the real schema', () => {
   const hookPath = join(
     dirname(fileURLToPath(import.meta.url)),
-    '../../../plugins/substrate/scripts/session-start.mjs',
+    '../../../plugins/specialists/scripts/session-start.mjs',
   );
 
   function seedOverride(): string {

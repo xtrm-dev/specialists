@@ -38,15 +38,15 @@ const EXPECTED_TOOLS = [
   'specialist_list',
 ];
 const PLUGIN_FILES = [
-  'package/plugins/substrate/.claude-plugin/plugin.json',
-  'package/plugins/substrate/hooks/hooks.json',
-  'package/plugins/substrate/.mcp.json',
-  'package/plugins/substrate/scripts/mcp-server.mjs',
-  'package/plugins/substrate/scripts/session-start.mjs',
-  'package/plugins/substrate/scripts/precompact.mjs',
-  'package/plugins/substrate/scripts/postcompact.mjs',
-  'package/plugins/substrate/scripts/wake-watch.mjs',
-  'package/plugins/substrate/skills/using-substrate/SKILL.md',
+  'package/plugins/specialists/.claude-plugin/plugin.json',
+  'package/plugins/specialists/hooks/hooks.json',
+  'package/plugins/specialists/.mcp.json',
+  'package/plugins/specialists/scripts/mcp-server.mjs',
+  'package/plugins/specialists/scripts/session-start.mjs',
+  'package/plugins/specialists/scripts/precompact.mjs',
+  'package/plugins/specialists/scripts/postcompact.mjs',
+  'package/plugins/specialists/scripts/wake-watch.mjs',
+  'package/plugins/specialists/skills/supervising-activations/SKILL.md',
 ];
 
 const failures = [];
@@ -90,7 +90,7 @@ const sdkVer = JSON.parse(
   readFileSync(join(REPO, 'node_modules/@modelcontextprotocol/server/package.json'), 'utf-8'),
 ).version;
 const pluginVer = JSON.parse(
-  readFileSync(join(REPO, 'plugins/substrate/.claude-plugin/plugin.json'), 'utf-8'),
+  readFileSync(join(REPO, 'plugins/specialists/.claude-plugin/plugin.json'), 'utf-8'),
 ).version;
 const commit = run('git', ['rev-parse', 'HEAD'], { cwd: REPO }).stdout.trim();
 say(`claude: ${(claudeVer.stdout || claudeVer.stderr || '').trim()}`);
@@ -123,7 +123,7 @@ const install = run('npm', ['install', TARBALL, '--no-audit', '--no-fund'], {
   cwd: REPO_DIR,
   timeout: 300000,
 });
-const PLUGIN = join(REPO_DIR, 'node_modules/@jaggerxtrm/specialists/plugins/substrate');
+const PLUGIN = join(REPO_DIR, 'node_modules/@jaggerxtrm/specialists/plugins/specialists');
 const installedOk =
   install.status === 0 &&
   PLUGIN_FILES.every((f) => existsSync(join(REPO_DIR, 'node_modules/@jaggerxtrm/specialists', f.slice('package/'.length))));
@@ -131,7 +131,7 @@ link(
   'install',
   installedOk,
   install.status === 0
-    ? `npm installed tarball into scratch repo; plugin at node_modules/@jaggerxtrm/specialists/plugins/substrate`
+    ? `npm installed tarball into scratch repo; plugin at node_modules/@jaggerxtrm/specialists/plugins/specialists`
     : `npm install failed: ${(install.stderr || '').slice(0, 500)}`,
 );
 if (!installedOk) {
@@ -365,7 +365,7 @@ const pre = run('bun', [join(PLUGIN, 'scripts/precompact.mjs')], {
   env: { ...hookEnv, CLAUDE_PLUGIN_DATA: PLUGINDATA },
   timeout: 60000,
 });
-const pointerPath = join(PLUGINDATA, 'substrate-continuity-e5-sess.json');
+const pointerPath = join(PLUGINDATA, 'specialists-continuity-e5-sess.json');
 let pointer = null;
 try {
   pointer = JSON.parse(readFileSync(pointerPath, 'utf-8'));
@@ -463,13 +463,13 @@ const gateList = run('claude', ['--plugin-dir', PLUGIN, 'mcp', 'list'], {
   timeout: 120000,
 });
 const gateListOut = `${gateList.stdout || ''} ${gateList.stderr || ''}`;
-const substrateLine = (gateList.stdout || '')
+const pluginLine = (gateList.stdout || '')
   .split('\n')
-  .find((l) => l.includes('substrate')) || '';
-say('--- claude mcp list (substrate) ---');
-say(substrateLine.trim() || '(no substrate line)');
+  .find((l) => l.includes('plugin:specialists:specialists')) || '';
+say('--- claude mcp list (specialists plugin) ---');
+say(pluginLine.trim() || '(no specialists plugin line)');
 const listBlocked =
-  (ENV_BLOCKED.test(gateListOut) && !substrateLine) || gateList.signal;
+  (ENV_BLOCKED.test(gateListOut) && !pluginLine) || gateList.signal;
 if (listBlocked) {
   // Only when OUR line is absent entirely. A substrate line that says "Failed to connect"
   // is a result, not an environment block — excusing it is how a broken client ships green.
@@ -477,8 +477,8 @@ if (listBlocked) {
 } else {
   link(
     'client-connected',
-    /Connected/.test(substrateLine) && !/Failed to connect/.test(substrateLine),
-    substrateLine.trim() || `exit=${gateList.status}`,
+    /Connected/.test(pluginLine) && !/Failed to connect/.test(pluginLine),
+    pluginLine.trim() || `exit=${gateList.status}`,
   );
 }
 
@@ -489,7 +489,7 @@ const gateTools = run(
     '--plugin-dir',
     PLUGIN,
     '-p',
-    'List every MCP tool name you can see that starts with mcp__plugin_substrate. One per line, nothing else.',
+    'List every MCP tool name you can see that starts with mcp__plugin_specialists. One per line, nothing else.',
   ],
   { cwd: REPO_DIR, timeout: 300000 },
 );
@@ -551,7 +551,7 @@ const gateSkill = run(
     '--plugin-dir',
     PLUGIN,
     '-p',
-    'Is a skill named using-substrate available to you? Reply with its exact invocable name, or NONE.',
+    'Is a skill named supervising-activations available to you? Reply with its exact invocable name, or NONE.',
   ],
   { cwd: REPO_DIR, timeout: 300000 },
 );
@@ -563,9 +563,9 @@ if (ENV_BLOCKED.test(gateSkillOut) || gateSkill.signal) {
 } else {
   link(
     'client-skill',
-    gateSkillOut.includes('substrate:using-substrate'),
-    gateSkillOut.includes('substrate:using-substrate')
-      ? 'skill surfaced as substrate:using-substrate'
+    gateSkillOut.includes('specialists:supervising-activations'),
+    gateSkillOut.includes('specialists:supervising-activations')
+      ? 'skill surfaced as specialists:supervising-activations'
       : `skill not surfaced: ${(gateSkill.stdout || '').trim().slice(0, 120)}`,
   );
 }

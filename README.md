@@ -182,19 +182,19 @@ or enables it for you.
 
 ```bash
 claude plugin marketplace add xtrm-dev/specialists
-claude plugin install substrate@xtrm
+claude plugin install specialists@xtrm
 ```
 
 Verify the server is reachable from Claude Code:
 
 ```bash
 claude mcp list | grep substrate
-# plugin:substrate:substrate: ... - ✔ Connected
+# plugin:specialists:specialists: ... - ✔ Connected
 ```
 
 The plugin requires Bun on `PATH` and reads Substrate's canonical store at `~/.xtrm/state.db`
 (override with `XTRM_STATE_DB` only for operator/test use). To develop against a checkout
-instead of an install, use `claude --plugin-dir ./plugins/substrate`.
+instead of an install, use `claude --plugin-dir ./plugins/specialists`.
 
 ### Global model config
 

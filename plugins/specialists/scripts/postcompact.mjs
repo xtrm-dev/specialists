@@ -35,7 +35,7 @@ function readSessionId() {
 try {
   const sessionId = readSessionId().replace(/[^A-Za-z0-9_-]/g, '_');
   const dir = (process.env.CLAUDE_PLUGIN_DATA ?? '').trim() || tmpdir();
-  const pointerPath = join(dir, `substrate-continuity-${sessionId}.json`);
+  const pointerPath = join(dir, `specialists-continuity-${sessionId}.json`);
   if (existsSync(pointerPath)) {
     const pointer = JSON.parse(readFileSync(pointerPath, 'utf-8'));
     const ids = Array.isArray(pointer?.active_activation_ids) ? pointer.active_activation_ids : [];

@@ -4,7 +4,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /**
- * Wave E1 path discipline (substrate plugin design §6): plugin-owned paths must
+ * Wave E1 path discipline (specialists plugin design §6): plugin-owned paths must
  * be ${CLAUDE_PLUGIN_ROOT}-rooted, the §B forbidden substrings must not appear,
  * and .mcp.json must carry no env block (design §5 correction).
  */
@@ -14,7 +14,7 @@ const PLUGIN_ROOT = join(
   '..',
   '..',
   'plugins',
-  'substrate',
+  'specialists',
 );
 
 function read(rel: string): string {
@@ -29,7 +29,7 @@ const SCRIPT_FILES = [
   'scripts/postcompact.mjs',
 ];
 
-describe('substrate plugin path discipline', () => {
+describe('specialists plugin path discipline', () => {
   it('registers every plugin-owned entrypoint through ${CLAUDE_PLUGIN_ROOT}', () => {
     const hooks = read('hooks/hooks.json');
     expect(hooks).toContain('${CLAUDE_PLUGIN_ROOT}/scripts/session-start.mjs');
@@ -77,7 +77,7 @@ describe('substrate plugin path discipline', () => {
     const mcp = JSON.parse(read('.mcp.json')) as {
       mcpServers: Record<string, { command: string }>;
     };
-    expect(mcp.mcpServers.substrate.command).toBe('bun');
+    expect(mcp.mcpServers.specialists.command).toBe('bun');
     const hooks = JSON.parse(read('hooks/hooks.json')) as {
       hooks: Record<string, Array<{ hooks: Array<{ command?: string }> }>>;
     };
@@ -97,7 +97,7 @@ describe('substrate plugin path discipline', () => {
 
   it('declares its MCP server in the manifest so Claude wires .mcp.json', () => {
     // Without this field Claude Code loads the plugin, validates it, and never
-    // connects the server: the session sees zero substrate tools (unitAI-aiwva.2).
+    // connects the server: the session sees zero specialists tools (unitAI-aiwva.2).
     const manifest = JSON.parse(read('.claude-plugin/plugin.json')) as Record<string, unknown>;
     expect(manifest.mcpServers).toBe('./.mcp.json');
   });
@@ -127,9 +127,9 @@ describe('substrate plugin path discipline', () => {
       plugins: Array<{ name: string; source: string }>;
     };
     expect(marketplace.description, 'strict validate rejects a marketplace with no description').toBeTruthy();
-    const entry = marketplace.plugins.find((candidate) => candidate.name === 'substrate');
-    expect(entry, 'marketplace must offer the substrate plugin').toBeDefined();
-    expect(entry?.source).toBe('./plugins/substrate');
+    const entry = marketplace.plugins.find((candidate) => candidate.name === 'specialists');
+    expect(entry, 'marketplace must offer the specialists plugin').toBeDefined();
+    expect(entry?.source).toBe('./plugins/specialists');
     // The entry must point at the manifest we actually ship.
     const manifest = JSON.parse(read('.claude-plugin/plugin.json')) as { name: string };
     expect(entry?.name).toBe(manifest.name);

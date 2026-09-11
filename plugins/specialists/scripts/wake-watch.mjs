@@ -147,7 +147,7 @@ try {
             ? `${asking} awaiting reply`
             : `${settled} settled`;
       const payload = JSON.stringify({
-        source: 'substrate',
+        source: 'specialists',
         reason,
         activations: fresh.slice(0, 10),
         read_with: 'specialist_status',

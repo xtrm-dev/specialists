@@ -18,7 +18,7 @@ import type { ActivationSnapshot } from './types.js';
 export declare const AUTHORITY_SCHEMA_VERSION = 1;
 /**
  * The exact projection the SessionStart hook queries. Column names must stay
- * column-for-column identical to plugins/substrate/scripts/session-start.mjs:
+ * column-for-column identical to plugins/specialists/scripts/session-start.mjs:
  * activation_id, specialist, state, bead_id, last_activity_at.
  */
 export declare const ACTIVATIONS_DDL = "CREATE TABLE IF NOT EXISTS activations (\n  activation_id TEXT PRIMARY KEY,\n  specialist TEXT NOT NULL,\n  state TEXT NOT NULL,\n  bead_id TEXT,\n  last_activity_at INTEGER NOT NULL\n)";
