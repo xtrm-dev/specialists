@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { openWorkItemBoundary } from '../../src/activation/workitem-store.js';
+import { pathToFileURL } from 'node:url';
+import { openSubstrateDb, openWorkItemBoundary } from '../../src/activation/workitem-store.js';
 
 /**
  * Private-integration parity (xtrm-6qu.7.1.1): exercises the REAL producer
@@ -31,10 +32,36 @@ const CONTRACT = [
   'SCRUTINY', 'LOW — integration probe.',
 ].join('\n');
 
+/**
+ * Test-only world setup: a fresh temp DB has zero projects, and the producer
+ * correctly refuses to guess (resolveProject fails closed). The test — never
+ * the public boundary — therefore creates exactly one deterministic scratch
+ * project first, using the REAL producer migration + IssueService dynamically
+ * loaded from the reviewed checkout. No static or committed private
+ * dependency; production inline dispatch on a project-less store keeps
+ * refusing, which is the honest behaviour (run sb project create/link).
+ */
+async function ensureScratchProject(dbPath: string): Promise<void> {
+  const load = (rel: string): Promise<Record<string, any>> =>
+    import(pathToFileURL(join(SUBSTRATE_DIR, rel)).href) as Promise<Record<string, any>>;
+  const runner = await load('src/store/migrations/runner.ts');
+  const issueSvcMod = await load('src/service/issue-service.ts');
+  const db = openSubstrateDb(dbPath);
+  try {
+    runner.migrate(db);
+    const issues = new issueSvcMod.IssueService(db);
+    issues.createProject({ prefix: 'PRB', name: 'substrate parity scratch' });
+  } finally {
+    (db as unknown as { close(): void }).close();
+  }
+}
+
 describe.skipIf(!LIVE)('substrate parity (private integration)', () => {
   it('migration → inline issue → view/check/bind stable + holder refusal', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'substrate-parity-'));
-    const boundary = await openWorkItemBoundary({ dbPath: join(dir, 'state.db'), substrateDir: SUBSTRATE_DIR });
+    const dbPath = join(dir, 'state.db');
+    await ensureScratchProject(dbPath);
+    const boundary = await openWorkItemBoundary({ dbPath, substrateDir: SUBSTRATE_DIR });
 
     const created = boundary.inlineCreate(CONTRACT, { holder: 'parity::holder', activationId: 'act-parity-1' });
     expect(created.claimId).not.toBeNull();
