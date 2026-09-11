@@ -31,7 +31,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { DatabaseSync } from 'node:sqlite';
-import { extractSections } from './contract-sections.js';
+import { extractSections, scrutinyLevel, validateContractText } from './contract-sections.js';
 
 const require = createRequire(import.meta.url);
 
@@ -300,11 +300,20 @@ export function createWorkItemBoundary(ports: WorkItemPorts): SpecialistWorkItem
         }
         const claimActivation = active.activationId ?? null;
         const reqActivation = req.activationId ?? null;
-        if (claimActivation && claimActivation !== reqActivation) {
-          // Covers both a mismatched activation and an omitted one: dodging
-          // the binding by leaving activationId out is the same bypass.
+        if (claimActivation !== reqActivation) {
+          // Strict equality, both directions: a mismatched activation, an
+          // omitted activationId against a bound claim, and a fabricated
+          // activationId against an unbound claim all refuse. Coordinator
+          // flows must claim WITH the activation id they will dispatch with.
           throw new Error(
-            'dispatch refused: active claim is bound to another activation — dispatch with the claim activation',
+            'dispatch refused: claim activation does not match dispatch activation — claim with the dispatching activation id',
+          );
+        }
+        if (req.claimId != null && req.claimId !== active.id) {
+          // Never silently substitute: a supplied claimId that is not the
+          // live claim is a different binding, not a default.
+          throw new Error(
+            `dispatch refused: supplied claim ${req.claimId} is not the active claim ${active.id}`,
           );
         }
       }
@@ -319,20 +328,15 @@ export function createWorkItemBoundary(ports: WorkItemPorts): SpecialistWorkItem
 
     inlineCreate(contract: string, opts: { title?: string; holder?: string; activationId?: string } = {}): InlineIssueResult {
       // §10: structural validation BEFORE any Issue exists, so a refused
-      // dispatch leaves the board unchanged. The neutral contract parser is the
-      // canonical 7-section reader; missing or empty sections fail here, never
-      // inside a worker prompt.
+      // dispatch leaves the board unchanged. The shared contract-text gate is
+      // the canonical reader; failures land here, never inside a worker prompt.
+      const validation = validateContractText(contract);
+      if (!validation.ok) {
+        throw new Error(`${validation.reason}: ${validation.missing.join(', ')}`);
+      }
       const sections = extractSections(contract);
-      const missing = ['PROBLEM', 'SUCCESS', 'SCOPE', 'NON_GOALS', 'CONSTRAINTS', 'VALIDATION', 'OUTPUT']
-        .filter((s) => !sections.get(s));
-      if (missing.length > 0) {
-        throw new Error(`inline contract is not a usable task contract: required sections are missing or empty: ${missing.join(', ')}`);
-      }
-      const scrutiny = (contract.match(/SCRUTINY\b[^\n]*\n?\s*\**\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i)
-        ?? contract.match(/SCRUTINY\b\s*[:\-—]?\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i))?.[1]?.toUpperCase();
-      if (!scrutiny) {
-        throw new Error('inline contract is not a usable task contract: SCRUTINY must be LOW, MEDIUM, HIGH, or CRITICAL');
-      }
+      // Validated above, so a level exists; the fallback only satisfies the type.
+      const scrutiny = scrutinyLevel(contract) ?? 'MEDIUM';
 
       const problem = sections.get('PROBLEM') ?? '';
       const firstLine = problem.split('\n').map((s) => s.trim()).find(Boolean);
@@ -413,6 +417,23 @@ export async function openWorkItemBoundary(opts: OpenWorkItemsOptions = {}): Pro
   if (!substrateDir) {
     throw new Error(
       'work_item_store_unavailable: no Substrate package configured (set XTRM_SUBSTRATE_DIR to a built @xtrm/substrate checkout)',
+    );
+  }
+  // Package identity BEFORE executing any deep module: a spoofed or wrong
+  // directory must fail closed here, never as a confusing import error — or
+  // worse, by executing untrusted code past the export-presence check.
+  let pkgName: unknown;
+  try {
+    const pkgRaw = await import(pathToFileURL(join(substrateDir, 'package.json')).href, { with: { type: 'json' } });
+    pkgName = (pkgRaw as { default?: { name?: unknown } }).default?.name;
+  } catch (error) {
+    throw new Error(
+      `work_item_store_unavailable: cannot read Substrate package identity at ${substrateDir}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (pkgName !== '@xtrm/substrate') {
+    throw new Error(
+      `work_item_store_unavailable: expected @xtrm/substrate at ${substrateDir}, found ${JSON.stringify(pkgName) ?? 'no name'}`,
     );
   }
   const load = async (rel: string): Promise<Record<string, any>> => {

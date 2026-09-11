@@ -16194,6 +16194,29 @@ function headingOf(line) {
   const inlineBody = split[2].trim();
   return inlineBody ? { name, inlineBody } : { name };
 }
+function scrutinyLevel(description) {
+  const match = description.match(/SCRUTINY\b[^\n]*\n?\s*\**\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i) ?? description.match(/SCRUTINY\b\s*[:\-—]?\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i);
+  return match?.[1]?.toUpperCase();
+}
+function validateContractText(contract) {
+  const sections = extractSections(contract ?? "");
+  const missing = [...REQUIRED_SECTIONS.filter((section) => !sections.get(section))];
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      reason: "inline contract is not a usable task contract: required sections are missing or empty",
+      missing
+    };
+  }
+  if (!scrutinyLevel(contract)) {
+    return {
+      ok: false,
+      reason: `inline contract declares no SCRUTINY level (expected one of ${SCRUTINY_LEVELS.join(", ")})`,
+      missing: ["SCRUTINY"]
+    };
+  }
+  return { ok: true };
+}
 function extractSections(description) {
   const sections = new Map;
   let current;
@@ -16243,10 +16266,6 @@ function extractPurposeExcerpt(description) {
     return flat.length <= PURPOSE_EXCERPT_MAX ? flat : `${flat.slice(0, PURPOSE_EXCERPT_MAX - 1)}…`;
   }
   return;
-}
-function scrutinyLevel(description) {
-  const match = description.match(/SCRUTINY\b[^\n]*\n?\s*\**\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i) ?? description.match(/SCRUTINY\b\s*[:\-—]?\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i);
-  return match?.[1]?.toUpperCase();
 }
 function evaluateBeadReadiness(bead, options = {}) {
   const status = bead.status?.trim().toLowerCase();
@@ -19826,11 +19845,11 @@ function createWorkItemBoundary(ports) {
         }
         const claimActivation = active.activationId ?? null;
         const reqActivation = req.activationId ?? null;
-        if (claimActivation && claimActivation !== reqActivation) {
-          throw new Error("dispatch refused: active claim is bound to another activation — dispatch with the claim activation");
+        if (claimActivation !== reqActivation) {
+          throw new Error("dispatch refused: claim activation does not match dispatch activation — claim with the dispatching activation id");
         }
-        if (claimActivation && !reqActivation) {
-          throw new Error("dispatch refused: active claim carries an activation — omitting activationId to dodge the binding is not allowed");
+        if (req.claimId != null && req.claimId !== active.id) {
+          throw new Error(`dispatch refused: supplied claim ${req.claimId} is not the active claim ${active.id}`);
         }
       }
       const claimId = active?.id ?? req.claimId ?? undefined;
@@ -19838,15 +19857,12 @@ function createWorkItemBoundary(ports) {
       return out.binding;
     },
     inlineCreate(contract, opts = {}) {
+      const validation = validateContractText(contract);
+      if (!validation.ok) {
+        throw new Error(`${validation.reason}: ${validation.missing.join(", ")}`);
+      }
       const sections = extractSections(contract);
-      const missing = ["PROBLEM", "SUCCESS", "SCOPE", "NON_GOALS", "CONSTRAINTS", "VALIDATION", "OUTPUT"].filter((s) => !sections.get(s));
-      if (missing.length > 0) {
-        throw new Error(`inline contract is not a usable task contract: required sections are missing or empty: ${missing.join(", ")}`);
-      }
-      const scrutiny = (contract.match(/SCRUTINY\b[^\n]*\n?\s*\**\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i) ?? contract.match(/SCRUTINY\b\s*[:\-—]?\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i))?.[1]?.toUpperCase();
-      if (!scrutiny) {
-        throw new Error("inline contract is not a usable task contract: SCRUTINY must be LOW, MEDIUM, HIGH, or CRITICAL");
-      }
+      const scrutiny = scrutinyLevel(contract) ?? "MEDIUM";
       const problem = sections.get("PROBLEM") ?? "";
       const firstLine = problem.split(`
 `).map((s) => s.trim()).find(Boolean);
@@ -19888,6 +19904,16 @@ async function openWorkItemBoundary(opts = {}) {
   const substrateDir = (opts.substrateDir ?? (env.XTRM_SUBSTRATE_DIR ?? "")).trim();
   if (!substrateDir) {
     throw new Error("work_item_store_unavailable: no Substrate package configured (set XTRM_SUBSTRATE_DIR to a built @xtrm/substrate checkout)");
+  }
+  let pkgName;
+  try {
+    const pkgRaw = await import(pathToFileURL(join13(substrateDir, "package.json")).href, { with: { type: "json" } });
+    pkgName = pkgRaw.default?.name;
+  } catch (error) {
+    throw new Error(`work_item_store_unavailable: cannot read Substrate package identity at ${substrateDir}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (pkgName !== "@xtrm/substrate") {
+    throw new Error(`work_item_store_unavailable: expected @xtrm/substrate at ${substrateDir}, found ${JSON.stringify(pkgName) ?? "no name"}`);
   }
   const load = async (rel) => {
     try {
@@ -21531,9 +21557,42 @@ class NativeActivationHost {
         note: error instanceof Error ? error.message : String(error)
       });
     }
+    const inlineContract = (request.contract ?? "").trim();
+    let autoCreatedRef;
+    if (inlineContract) {
+      if (request.issueRef) {
+        return reject("contract_and_ref", {
+          note: "contract and issueRef were both provided — provide exactly one"
+        });
+      }
+      try {
+        const created = workItems.inlineCreate(inlineContract, {
+          ...request.title ? { title: request.title } : {},
+          holder: participantId,
+          activationId
+        });
+        autoCreatedRef = created.ref;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.startsWith("inline contract is not a usable task contract")) {
+          const rechecked = validateContractText(inlineContract);
+          return reject("issue_not_dispatchable", {
+            note: message,
+            ...!rechecked.ok ? { missing: rechecked.missing } : {}
+          });
+        }
+        throw error;
+      }
+    }
+    const issueRef = autoCreatedRef ?? request.issueRef ?? "";
+    if (!issueRef) {
+      return reject("no_work_ref", {
+        note: "neither issueRef nor contract was provided — dispatch requires an existing issue or an inline contract"
+      });
+    }
     let view;
     try {
-      view = workItems.view(request.issueRef);
+      view = workItems.view(issueRef);
     } catch (error) {
       return reject("issue_unresolvable", {
         note: error instanceof Error ? error.message : String(error)
@@ -21542,12 +21601,12 @@ class NativeActivationHost {
     let dispatchCheck;
     try {
       dispatchCheck = workItems.check({
-        ref: request.issueRef,
+        ref: issueRef,
         specialist: request.specialist,
         holder: participantId,
         workspace: workspace.worktreePath
       });
-      view = workItems.view(request.issueRef);
+      view = workItems.view(issueRef);
       if (view.revision !== dispatchCheck.revision || view.contractHash !== dispatchCheck.contractHash) {
         return reject("issue_revision_diverged", {
           note: "issue changed between resolution and the read-only dispatch check; retry against the new revision"
@@ -21658,7 +21717,7 @@ class NativeActivationHost {
       tools: toolContract.toolsList.join(","),
       custom_tools: `${ASK_TOOL},${ESCALATE_TOOL}`
     });
-    const epicAncestors = workItems.epicAncestors(request.issueRef, request.epicContextDepth ?? 0);
+    const epicAncestors = workItems.epicAncestors(issueRef, request.epicContextDepth ?? 0);
     const rendered = renderTaskPrompt({
       specialist: specialist.specialist,
       cwd: this.cwd,
@@ -21737,7 +21796,7 @@ class NativeActivationHost {
     let binding;
     try {
       binding = workItems.bind({
-        ref: request.issueRef,
+        ref: issueRef,
         specialist: request.specialist,
         holder: participantId,
         activationId,
@@ -23192,6 +23251,7 @@ function leaseScopeFor(cwd) {
 export {
   verifyExactLineCitation,
   validateLaunchOutcome,
+  validateContractText,
   validateBeforeRun,
   toPendingAskView,
   toActivationView,

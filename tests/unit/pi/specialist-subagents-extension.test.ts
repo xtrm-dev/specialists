@@ -37,7 +37,11 @@ const SNAPSHOT = {
   participantId: 'specialist::explorer',
   attemptId: 'att:aaaa:1',
   specialist: 'explorer',
-  beadId: 'bd-1',
+  issueId: 'iss_bd-1',
+  issueRef: 'bd-1',
+  issueRevision: 1,
+  contractHash: 'hash-test',
+  executionBindingId: 'exb-test',
   state: 'running',
   access: 'read',
   workspace: { repositoryRoot: '/r', worktreePath: '/r/wt' },
@@ -68,21 +72,33 @@ function makeFakeHost() {
   const calls = { start: [], answer: [], stop: [], resume: [], retry: [] };
   const host = {
     start: vi.fn(async (req) => {
-      calls.start.push(req);      return {
+      calls.start.push(req);
+      // Mirrors host-owned creation: a contract with no issueRef synthesizes
+      // the created issue, exactly as NativeActivationHost.start does.
+      const ref = req.issueRef ?? (req.contract ? 'bd-inline-1' : undefined);
+      return {
         activationId: 'act:aaaa',
         participantId: 'specialist::explorer',
         attemptId: 'att:aaaa:1',
         specialist: req.specialist,
-        beadId: req.beadId,
+        issueId: `iss_${ref}`,
+        issueRef: ref,
+        issueRevision: 1,
+        contractHash: 'hash-test',
+        executionBindingId: 'exb-test',
         access: 'read',
         workspace: SNAPSHOT.workspace,
         resolvedModel: req.modelOverride ?? 'm',
-        stepContract: { rootWorkRef: req.beadId, inputs: [1], outputs: [1] },
+        stepContract: { rootWorkRef: ref, inputs: [1], outputs: [1] },
         result: Promise.resolve({
           activationId: 'act:aaaa',
           participantId: 'specialist::explorer',
           attemptId: 'att:aaaa:1',
-          beadId: req.beadId,
+          issueId: `iss_${ref}`,
+          issueRef: ref,
+          issueRevision: 1,
+          contractHash: 'hash-test',
+          executionBindingId: 'exb-test',
           status: 'completed',
           output: 'report',
           validation: { valid: true },
@@ -111,7 +127,8 @@ function makeFakeHost() {
         activationId, participantId: 'specialist::explorer', attemptId: 'att:aaaa:2',
         result: Promise.resolve({
           activationId, participantId: 'specialist::explorer', attemptId: 'att:aaaa:2',
-          beadId: 'bd-1', status: 'completed', output: 'resumed report',
+          issueId: 'iss_bd-1', issueRef: 'bd-1', issueRevision: 1, contractHash: 'hash-test',
+          executionBindingId: 'exb-test', status: 'completed', output: 'resumed report',
           validation: { valid: true }, piSessionId: 'sess-1', configuredModel: 'm',
           resolvedModel: 'm', modelOverride: false, fallbackUsed: false, completedAt: 200,
         }),
@@ -123,7 +140,8 @@ function makeFakeHost() {
         activationId, participantId: 'specialist::explorer', attemptId: 'att:aaaa:2',
         result: Promise.resolve({
           activationId, participantId: 'specialist::explorer', attemptId: 'att:aaaa:2',
-          beadId: 'bd-1', status: 'completed', output: 'retried report',
+          issueId: 'iss_bd-1', issueRef: 'bd-1', issueRevision: 1, contractHash: 'hash-test',
+          executionBindingId: 'exb-test', status: 'completed', output: 'retried report',
           validation: { valid: true }, piSessionId: 'sess-1', configuredModel: 'm',
           resolvedModel: 'm', modelOverride: false, fallbackUsed: false, completedAt: 200,
         }),
@@ -242,7 +260,7 @@ describe('specialist-subagents extension (Pi coordinator surface)', () => {
     const out = resultText(await dispatch.execute('tc1', { specialist: 'explorer', bead_id: 'bd-1' }));
     expect(calls.start[0]).toMatchObject({
       specialist: 'explorer',
-      beadId: 'bd-1',
+      issueRef: 'bd-1',
       requestedByParticipantId: 'adapter::pi-extension',
     });
     expect(out.status).toBe('dispatched');
@@ -314,8 +332,7 @@ describe('specialist-subagents extension (Pi coordinator surface)', () => {
     const mod = await loadExtension();
     const pi = makeFakePi();
     const { host, calls } = makeFakeHost();
-    const createBead = vi.fn(() => 'bd-inline-1');
-    mod.default(pi, { createHost: () => host, createBead });
+    mod.default(pi, { createHost: () => host });
     const out = resultText(await toolNamed(pi, 'specialist_dispatch').execute('tc1', {
       specialist: 'explorer',
       contract: INLINE_CONTRACT,
@@ -346,12 +363,11 @@ describe('specialist-subagents extension (Pi coordinator surface)', () => {
     'SCOPE\nRead-only.\n\nNON_GOALS\nNo writes.\n\nCONSTRAINTS\nRead-only.\n\n' +
     'VALIDATION\nOutput confirms.\n\nOUTPUT\nA short report.\n\nSCRUTINY LOW';
 
-  it('inline contract: gate runs BEFORE creating the bead, refusal leaves the board unchanged (.48)', async () => {
+  it('inline contract: gate runs BEFORE creating the issue, refusal leaves the board unchanged (.48)', async () => {
     const mod = await loadExtension();
     const pi = makeFakePi();
     const { host } = makeFakeHost();
-    const createBead = vi.fn(() => 'bd-new');
-    mod.default(pi, { createHost: () => host, createBead });
+    mod.default(pi, { createHost: () => host });
     const out = resultText(await toolNamed(pi, 'specialist_dispatch').execute('tc1', {
       specialist: 'explorer',
       contract: 'PROBLEM\nMissing everything else.',
@@ -359,7 +375,6 @@ describe('specialist-subagents extension (Pi coordinator surface)', () => {
     expect(out.status).toBe('rejected');
     expect(out.missing).toContain('SUCCESS');
     expect(out.missing).not.toContain('PROBLEM');
-    expect(createBead).not.toHaveBeenCalled();
     expect(host.start).not.toHaveBeenCalled();
 
     // All seven sections present but no SCRUTINY: refused with SCRUTINY missing.
@@ -369,21 +384,22 @@ describe('specialist-subagents extension (Pi coordinator surface)', () => {
     }));
     expect(noScrutiny.status).toBe('rejected');
     expect(noScrutiny.missing).toEqual(['SCRUTINY']);
-    expect(createBead).not.toHaveBeenCalled();
+    expect(host.start).not.toHaveBeenCalled();
   });
 
-  it('inline contract: valid contract creates the bead then dispatches against it (.48)', async () => {
+  it('inline contract: valid contract creates the issue then dispatches against it (.48)', async () => {
     const mod = await loadExtension();
     const pi = makeFakePi();
     const { host, calls } = makeFakeHost();
-    const createBead = vi.fn(() => 'bd-inline-1');
-    mod.default(pi, { createHost: () => host, createBead });
+    mod.default(pi, { createHost: () => host });
     const out = resultText(await toolNamed(pi, 'specialist_dispatch').execute('tc1', {
       specialist: 'explorer',
       contract: INLINE_CONTRACT,
     }));
-    expect(createBead).toHaveBeenCalledTimes(1);
-    expect(calls.start[0]).toMatchObject({ beadId: 'bd-inline-1', specialist: 'explorer' });
+    // Host-owned creation: the contract reaches host.start, which claims WITH
+    // the activation id — no bd subprocess, no createBead seam.
+    expect(calls.start[0]).toMatchObject({ contract: INLINE_CONTRACT, specialist: 'explorer' });
+    expect(calls.start[0]).not.toHaveProperty('issueRef');
     expect(out.status).toBe('dispatched');
   });
 
@@ -391,8 +407,7 @@ describe('specialist-subagents extension (Pi coordinator surface)', () => {
     const mod = await loadExtension();
     const pi = makeFakePi();
     const { host } = makeFakeHost();
-    const createBead = vi.fn();
-    mod.default(pi, { createHost: () => host, createBead });
+    mod.default(pi, { createHost: () => host });
     const out = resultText(await toolNamed(pi, 'specialist_dispatch').execute('tc1', {
       specialist: 'explorer',
       bead_id: 'bd-1',
@@ -400,7 +415,6 @@ describe('specialist-subagents extension (Pi coordinator surface)', () => {
     }));
     expect(out.status).toBe('rejected');
     expect(out.reason).toContain('both bead_id and contract were provided');
-    expect(createBead).not.toHaveBeenCalled();
     expect(host.start).not.toHaveBeenCalled();
   });
 
@@ -699,11 +713,11 @@ describe('specialist-subagents extension (Pi coordinator surface)', () => {
     expect(pi.sent).toHaveLength(1);
   });
 
-  it('tells the caller it created a bead, because the side effect is invisible otherwise', async () => {
+  it('tells the caller it created an issue, because the side effect is invisible otherwise', async () => {
     const mod = await loadExtension();
     const { host } = makeFakeHost();
     const pi = makeFakePi();
-    mod.default(pi, { createHost: () => host, createBead: () => 'bd-created-1' });
+    mod.default(pi, { createHost: () => host });
 
     const contract = [
       'PROBLEM: p', 'SUCCESS: s', 'SCRUTINY: LOW', 'SCOPE: sc',
@@ -714,7 +728,7 @@ describe('specialist-subagents extension (Pi coordinator surface)', () => {
 
     // An operator reported having to infer this and then clean up an orphan bead by hand.
     expect(out.status).toBe('dispatched');
-    expect(out.created_bead_id).toBe('bd-created-1');
+    expect(out.created_bead_id).toBe('bd-inline-1');
     expect(out.created_bead_note).toMatch(/yours to track/i);
   });
 
@@ -763,7 +777,8 @@ describe('specialist-subagents extension (Pi coordinator surface)', () => {
     // product, and it hid this: previous_attempt_id came back equal to attempt_id on a live
     // run (act:25bc5ad5-cc3 reported att:...:2 for both). Model the aliasing.
     const live = { activationId: 'act:aaaa', attemptId: 'att:aaaa:1', specialist: 'explorer',
-      beadId: 'bd-1', state: 'settled', access: 'write', workspace: '/ws',
+      issueId: 'iss_bd-1', issueRef: 'bd-1', issueRevision: 1, contractHash: 'hash-test',
+      executionBindingId: 'exb-test', state: 'settled', access: 'write', workspace: '/ws',
       participantId: 'specialist::explorer', startedAt: 0, lastActivityAt: 0 };
     host.inspect = vi.fn(() => live);
     host.resume = vi.fn(async () => {

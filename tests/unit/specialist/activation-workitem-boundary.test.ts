@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   createWorkItemBoundary,
+  openWorkItemBoundary,
   type ActiveClaimView,
   type DispatchRequest,
   type WorkItemPorts,
@@ -58,9 +62,25 @@ describe('createWorkItemBoundary bind claim-ownership refusal', () => {
     expect(binding.claimId).toBe(42);
   });
 
-  it('binds the live claim for the same holder (coordinator-claims-first, activation pins at bind)', () => {
+  it('binds the live claim when neither side carries an activation', () => {
     const boundary = createWorkItemBoundary(stubPorts({ id: 9, holder: 'holder-a', activationId: null }));
-    const binding = boundary.bind(req());
+    const binding = boundary.bind(req({ activationId: null }));
+    expect(binding.claimId).toBe(9);
+  });
+
+  it('refuses a fabricated activation against an unbound claim', () => {
+    const boundary = createWorkItemBoundary(stubPorts({ id: 9, holder: 'holder-a', activationId: null }));
+    expect(() => boundary.bind(req())).toThrow(/does not match/);
+  });
+
+  it('refuses a supplied claimId that is not the live claim', () => {
+    const boundary = createWorkItemBoundary(stubPorts({ id: 9, holder: 'holder-a', activationId: null }));
+    expect(() => boundary.bind(req({ activationId: null, claimId: 42 }))).toThrow(/not the active claim/);
+  });
+
+  it('accepts a supplied claimId that matches the live claim', () => {
+    const boundary = createWorkItemBoundary(stubPorts({ id: 9, holder: 'holder-a', activationId: null }));
+    const binding = boundary.bind(req({ activationId: null, claimId: 9 }));
     expect(binding.claimId).toBe(9);
   });
 
@@ -77,12 +97,12 @@ describe('createWorkItemBoundary bind claim-ownership refusal', () => {
 
   it('refuses a mismatched activation against a bound claim', () => {
     const boundary = createWorkItemBoundary(stubPorts({ id: 9, holder: 'holder-a', activationId: 'act-1' }));
-    expect(() => boundary.bind(req({ activationId: 'act-2' }))).toThrow(/another activation/);
+    expect(() => boundary.bind(req({ activationId: 'act-2' }))).toThrow(/does not match/);
   });
 
   it('refuses omitting activationId when the claim carries one', () => {
     const boundary = createWorkItemBoundary(stubPorts({ id: 9, holder: 'holder-a', activationId: 'act-1' }));
-    expect(() => boundary.bind(req({ activationId: null }))).toThrow(/bound to another activation/);
+    expect(() => boundary.bind(req({ activationId: null }))).toThrow(/does not match/);
   });
 });
 
@@ -104,5 +124,30 @@ describe('createWorkItemBoundary inline validation', () => {
 
   it('refuses contracts without a SCRUTINY level', () => {
     expect(() => boundary.inlineCreate(contract(''))).toThrow(/SCRUTINY/);
+  });
+});
+
+describe('openWorkItemBoundary package identity', () => {
+  it('fails closed with no substrate directory configured', async () => {
+    await expect(openWorkItemBoundary({ env: { ...process.env, XTRM_SUBSTRATE_DIR: '' } }))
+      .rejects.toThrow(/work_item_store_unavailable/);
+  });
+
+  it('fails closed on a missing directory', async () => {
+    await expect(openWorkItemBoundary({ substrateDir: join(tmpdir(), 'substrate-nope-missing') }))
+      .rejects.toThrow(/work_item_store_unavailable/);
+  });
+
+  it('fails closed on a spoof directory with the wrong package name', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'substrate-spoof-'));
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'totally-legit-substrate' }));
+    await expect(openWorkItemBoundary({ substrateDir: dir }))
+      .rejects.toThrow(/expected @xtrm\/substrate/);
+  });
+
+  it('fails closed on a directory without readable package identity', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'substrate-noid-'));
+    await expect(openWorkItemBoundary({ substrateDir: dir }))
+      .rejects.toThrow(/work_item_store_unavailable/);
   });
 });

@@ -70,6 +70,45 @@ function headingOf(line: string): Heading | undefined {
  * Sections with an empty body are present as empty strings, so callers can tell "absent"
  * from "declared but empty".
  */
+/** Extract the declared SCRUTINY level, if any. */
+export function scrutinyLevel(description: string): string | undefined {
+  const match = description.match(/SCRUTINY\b[^\n]*\n?\s*\**\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i)
+    ?? description.match(/SCRUTINY\b\s*[:\-—]?\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i);
+  return match?.[1]?.toUpperCase();
+}
+
+export type ContractTextValidation =
+  | { ok: true }
+  | { ok: false; reason: string; missing: string[] };
+
+/**
+ * Validate raw contract TEXT against the 7-section + SCRUTINY shape.
+ *
+ * The single gate definition for inline contracts: the host boundary
+ * (authoritative, throws) and the dispatch adapters (refusal shape, returns)
+ * share it, so admission and the pre-check cannot disagree. Pure: no board
+ * access, no subprocess, safe to run before anything is created.
+ */
+export function validateContractText(contract: string): ContractTextValidation {
+  const sections = extractSections(contract ?? '');
+  const missing = [...REQUIRED_SECTIONS.filter((section) => !sections.get(section))];
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      reason: 'inline contract is not a usable task contract: required sections are missing or empty',
+      missing,
+    };
+  }
+  if (!scrutinyLevel(contract)) {
+    return {
+      ok: false,
+      reason: `inline contract declares no SCRUTINY level (expected one of ${SCRUTINY_LEVELS.join(', ')})`,
+      missing: ['SCRUTINY'],
+    };
+  }
+  return { ok: true };
+}
+
 export function extractSections(description: string): Map<string, string> {
   const sections = new Map<string, string>();
   let current: string | undefined;

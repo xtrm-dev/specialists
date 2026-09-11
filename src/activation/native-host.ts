@@ -50,6 +50,7 @@ import {
   type WorkItemView,
 } from './workitem-store.js';
 import { compileStepContract, type StepContract } from './step-contract.js';
+import { validateContractText } from './contract-sections.js';
 import { InteractionTransport, type InteractionMessage, type PendingAsk } from './interaction.js';
 import { createPeerDelivery } from './peer-bridge.js';
 import { PeerAdapter, type TransportForensicEvent } from './transport/peer-adapter.js';
@@ -363,9 +364,52 @@ export class NativeActivationHost {
       });
     }
 
+    // Inline-contract dispatch (§10): the host owns creation — validate →
+    // create → attest → claim through the boundary, then dispatch against the
+    // created issue. Adapters pre-check with validateContractText for the
+    // refusal shape; inlineCreate re-validates authoritatively, so a refusal
+    // here still leaves the board unchanged. Creation runs BEFORE any session
+    // exists and claims WITH this activation's id, satisfying the strict
+    // claim-activation equality the bind path enforces.
+    const inlineContract = (request.contract ?? '').trim();
+    let autoCreatedRef: string | undefined;
+    if (inlineContract) {
+      if (request.issueRef) {
+        return reject('contract_and_ref', {
+          note: 'contract and issueRef were both provided — provide exactly one',
+        });
+      }
+      try {
+        const created = workItems.inlineCreate(inlineContract, {
+          ...(request.title ? { title: request.title } : {}),
+          holder: participantId,
+          activationId,
+        });
+        autoCreatedRef = created.ref;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.startsWith('inline contract is not a usable task contract')) {
+          const rechecked = validateContractText(inlineContract);
+          return reject('issue_not_dispatchable', {
+            note: message,
+            ...(!rechecked.ok ? { missing: rechecked.missing } : {}),
+          });
+        }
+        // Creation infra failure (issue may exist without a claim): surface,
+        // never claim the board is unchanged.
+        throw error;
+      }
+    }
+    const issueRef = autoCreatedRef ?? request.issueRef ?? '';
+    if (!issueRef) {
+      return reject('no_work_ref', {
+        note: 'neither issueRef nor contract was provided — dispatch requires an existing issue or an inline contract',
+      });
+    }
+
     let view: WorkItemView;
     try {
-      view = workItems.view(request.issueRef);
+      view = workItems.view(issueRef);
     } catch (error) {
       return reject('issue_unresolvable', {
         note: error instanceof Error ? error.message : String(error),
@@ -379,7 +423,7 @@ export class NativeActivationHost {
     let dispatchCheck: ReturnType<SpecialistWorkItemBoundary['check']>;
     try {
       dispatchCheck = workItems.check({
-        ref: request.issueRef,
+        ref: issueRef,
         specialist: request.specialist,
         holder: participantId,
         workspace: workspace.worktreePath,
@@ -387,7 +431,7 @@ export class NativeActivationHost {
       // The first view is only for resolution/error reporting. Re-read the
       // admitted revision after the gate so prompt and StepContract cannot use
       // a pre-gate "latest" if an edit raced the read-only check.
-      view = workItems.view(request.issueRef);
+      view = workItems.view(issueRef);
       if (view.revision !== dispatchCheck.revision || view.contractHash !== dispatchCheck.contractHash) {
         return reject('issue_revision_diverged', {
           note: 'issue changed between resolution and the read-only dispatch check; retry against the new revision',
@@ -539,7 +583,7 @@ export class NativeActivationHost {
 
     // §11: lineage comes from Substrate parent_child edges, not a Beads
     // dependency walk, and obeys the same inheritance rules as the store.
-    const epicAncestors = workItems.epicAncestors(request.issueRef, request.epicContextDepth ?? 0);
+    const epicAncestors = workItems.epicAncestors(issueRef, request.epicContextDepth ?? 0);
 
     const rendered = renderTaskPrompt({
       specialist: specialist.specialist,
@@ -658,7 +702,7 @@ export class NativeActivationHost {
     let binding: ReturnType<SpecialistWorkItemBoundary['bind']>;
     try {
       binding = workItems.bind({
-        ref: request.issueRef,
+        ref: issueRef,
         specialist: request.specialist,
         holder: participantId,
         activationId,

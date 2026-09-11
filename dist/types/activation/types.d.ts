@@ -64,7 +64,8 @@ export type ThinkingLevel = typeof THINKING_LEVELS[number];
  */
 export interface ActivationRequest {
     specialist: string;
-    issueRef: string;
+    /** Existing issue locator. Mutually exclusive with `contract`. */
+    issueRef?: string;
     /**
      * Overrides the effective configured model for THIS activation only.
      *
@@ -90,6 +91,16 @@ export interface ActivationRequest {
     epicContextDepth?: number;
     /** Defaults to the coordinator's current worktree. A writer does not get a new one. */
     workspaceHint?: WorkspaceIdentity;
+    /**
+     * Inline task contract, used INSTEAD of issueRef: the host creates the issue
+     * through the work boundary (validation → create → attest → claim) and
+     * dispatches against it. Mutually exclusive with issueRef — never both.
+     * The owning adapter pre-checks with validateContractText for the refusal
+     * shape; this path re-validates authoritatively inside inlineCreate.
+     */
+    contract?: string;
+    /** Optional title for the issue created from `contract`. Ignored with issueRef. */
+    title?: string;
 }
 /** Presentation state. Not necessarily durable workflow state. */
 export type ActivationState = 'starting' | 'running' | 'waiting' | 'needs_reply' | 'escalated' | 'settled' | 'stopping' | 'stopped' | 'failed' | 'uncertain';

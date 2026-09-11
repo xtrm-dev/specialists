@@ -19,7 +19,7 @@
 import { spawnSync } from 'node:child_process';
 import type { BeadRecord } from '../specialist/beads.js';
 
-import { extractSections, REQUIRED_SECTIONS } from './contract-sections.js';
+import { extractSections, REQUIRED_SECTIONS, scrutinyLevel } from './contract-sections.js';
 export { extractSections, REQUIRED_SECTIONS } from './contract-sections.js';
 import { SCRUTINY_LEVELS } from './contract-sections.js';
 
@@ -64,13 +64,6 @@ export function extractPurposeExcerpt(description: string): string | undefined {
     return flat.length <= PURPOSE_EXCERPT_MAX ? flat : `${flat.slice(0, PURPOSE_EXCERPT_MAX - 1)}…`;
   }
   return undefined;
-}
-
-/** Extract the declared SCRUTINY level, if any. */
-function scrutinyLevel(description: string): string | undefined {
-  const match = description.match(/SCRUTINY\b[^\n]*\n?\s*\**\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i)
-    ?? description.match(/SCRUTINY\b\s*[:\-—]?\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i);
-  return match?.[1]?.toUpperCase();
 }
 
 /**

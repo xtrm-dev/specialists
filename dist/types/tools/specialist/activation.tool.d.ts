@@ -188,9 +188,6 @@ export declare function createSpecialistDispatchTool(getHost: () => NativeActiva
         status: "rejected";
         reason: string;
     } | {
-        status: "error";
-        error: string;
-    } | {
         step_contract: {
             root_work_ref: string;
             inputs: number;
@@ -229,7 +226,6 @@ export declare function createSpecialistDispatchTool(getHost: () => NativeActiva
         /** Last session-event time. Per-tool "doing X now" inference is out of scope. */
         last_activity_at: number;
         status: "dispatched";
-        error?: undefined;
     } | {
         step_contract: {
             root_work_ref: string;
@@ -240,7 +236,6 @@ export declare function createSpecialistDispatchTool(getHost: () => NativeActiva
         created_bead_note?: string | undefined;
         activation_id: string;
         status: "dispatched";
-        error?: undefined;
     }>;
 };
 export declare const specialistReplySchema: z.ZodObject<{

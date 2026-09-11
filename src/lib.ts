@@ -64,6 +64,8 @@ export type {
   OpenWorkItemsOptions,
 } from './activation/workitem-store.js';
 
+export { validateContractText } from './activation/contract-sections.js';
+export type { ContractTextValidation } from './activation/contract-sections.js';
 export { DispatchRejectedError, THINKING_LEVELS } from './activation/types.js';
 export type {
   ActivationId,

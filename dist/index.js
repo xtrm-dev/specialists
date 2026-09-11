@@ -20577,6 +20577,29 @@ function headingOf(line) {
   const inlineBody = split[2].trim();
   return inlineBody ? { name, inlineBody } : { name };
 }
+function scrutinyLevel(description) {
+  const match = description.match(/SCRUTINY\b[^\n]*\n?\s*\**\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i) ?? description.match(/SCRUTINY\b\s*[:\-\u2014]?\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i);
+  return match?.[1]?.toUpperCase();
+}
+function validateContractText(contract) {
+  const sections = extractSections(contract ?? "");
+  const missing = [...REQUIRED_SECTIONS.filter((section) => !sections.get(section))];
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      reason: "inline contract is not a usable task contract: required sections are missing or empty",
+      missing
+    };
+  }
+  if (!scrutinyLevel(contract)) {
+    return {
+      ok: false,
+      reason: `inline contract declares no SCRUTINY level (expected one of ${SCRUTINY_LEVELS.join(", ")})`,
+      missing: ["SCRUTINY"]
+    };
+  }
+  return { ok: true };
+}
 function extractSections(description) {
   const sections = new Map;
   let current;
@@ -20640,10 +20663,6 @@ function extractPurposeExcerpt(description) {
     return flat.length <= PURPOSE_EXCERPT_MAX ? flat : `${flat.slice(0, PURPOSE_EXCERPT_MAX - 1)}\u2026`;
   }
   return;
-}
-function scrutinyLevel(description) {
-  const match = description.match(/SCRUTINY\b[^\n]*\n?\s*\**\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i) ?? description.match(/SCRUTINY\b\s*[:\-\u2014]?\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i);
-  return match?.[1]?.toUpperCase();
 }
 function evaluateBeadReadiness(bead, options = {}) {
   const status = bead.status?.trim().toLowerCase();
@@ -20849,21 +20868,6 @@ class BeadsClient {
       "--exit-code",
       String(exitCode)
     ], { stdio: "ignore" });
-  }
-}
-function createBeadFromContract(contract, title) {
-  const problem = extractSections(contract).get("PROBLEM");
-  const firstLine = (problem ?? "").split(`
-`).map((s) => s.trim()).find(Boolean);
-  const resolvedTitle = title ?? (firstLine ?? "Specialist dispatch contract").slice(0, 72);
-  const result = spawnSync10("bd", ["create", resolvedTitle, "--description", contract, "--type", "task", "--priority", "2", "--json"], { encoding: "utf-8", timeout: 20000 });
-  if (result.error || result.status !== 0)
-    return null;
-  try {
-    const parsed = JSON.parse(result.stdout);
-    return typeof parsed.id === "string" ? parsed.id : null;
-  } catch {
-    return null;
   }
 }
 function shouldCreateBead(beadsIntegration, permissionRequired) {
@@ -76897,34 +76901,23 @@ function createSpecialistDispatchTool(getHost, getPusher) {
             reason: "epic_context_depth must be 1 or 2 \u2014 1 walks to the immediate parent epic, " + "2 also includes the grand-epic"
           }, build());
         }
-        let effectiveBeadId = beadId;
-        let autoCreatedBeadId;
-        if (!effectiveBeadId) {
-          if (!contract) {
-            return renderRejection({
-              reason: "neither bead_id nor contract was provided \u2014 dispatch requires a READY Bead " + "(7 sections + SCRUTINY) or an inline contract"
-            }, build());
-          }
-          const gate = evaluateBeadReadiness({
-            id: "<inline>",
-            status: "open",
-            title: input2.title ?? "specialist dispatch",
-            description: contract
-          });
+        const inline2 = !beadId && contract ? contract : undefined;
+        if (!beadId && !inline2) {
+          return renderRejection({
+            reason: "neither bead_id nor contract was provided \u2014 dispatch requires a READY issue " + "(7 sections + SCRUTINY) or an inline contract"
+          }, build());
+        }
+        if (inline2) {
+          const gate = validateContractText(inline2);
           if (!gate.ok) {
             return renderRejection({ reason: gate.reason, missing: gate.missing }, build());
           }
-          const created = createBeadFromContract(contract, input2.title);
-          if (!created) {
-            return { status: "error", error: "bd create failed \u2014 bead not created, board unchanged" };
-          }
-          effectiveBeadId = created;
-          autoCreatedBeadId = created;
         }
         const handle = await getHost().start({
           specialist: input2.specialist,
-          issueRef: effectiveBeadId,
-          ...epicContextDepth !== undefined && !autoCreatedBeadId ? { epicContextDepth } : {},
+          ...beadId ? { issueRef: beadId } : {},
+          ...inline2 ? { contract: inline2, ...input2.title ? { title: input2.title } : {} } : {},
+          ...epicContextDepth !== undefined && !inline2 ? { epicContextDepth } : {},
           ...input2.model_override ? { modelOverride: input2.model_override } : {},
           ...input2.thinking_override ? { thinkingOverride: input2.thinking_override } : {},
           requestedByParticipantId: input2.requested_by ?? "adapter::specialists-mcp",
@@ -76945,8 +76938,8 @@ function createSpecialistDispatchTool(getHost, getPusher) {
         return {
           status: "dispatched",
           ...snapshot ? toActivationView(snapshot) : { activation_id: handle.activationId },
-          ...autoCreatedBeadId ? {
-            created_bead_id: autoCreatedBeadId,
+          ...inline2 ? {
+            created_bead_id: handle.issueRef,
             created_bead_note: "This dispatch CREATED the bead above from your inline contract. It is a " + "durable board record and is yours to track: close it when the work is " + "done, or reassign it. It is not cleaned up automatically."
           } : {},
           step_contract: {
@@ -77043,8 +77036,7 @@ var DIST_LIB_PATH, LOADED_BUILD_ID, specialistDispatchSchema, specialistReplySch
 var init_activation_tool = __esm(() => {
   init_zod();
   init_build_identity();
-  init_bead_gate();
-  init_beads();
+  init_contract_sections();
   init_types4();
   init_types4();
   DIST_LIB_PATH = (() => {
@@ -77265,11 +77257,11 @@ function createWorkItemBoundary(ports) {
         }
         const claimActivation = active.activationId ?? null;
         const reqActivation = req.activationId ?? null;
-        if (claimActivation && claimActivation !== reqActivation) {
-          throw new Error("dispatch refused: active claim is bound to another activation \u2014 dispatch with the claim activation");
+        if (claimActivation !== reqActivation) {
+          throw new Error("dispatch refused: claim activation does not match dispatch activation \u2014 claim with the dispatching activation id");
         }
-        if (claimActivation && !reqActivation) {
-          throw new Error("dispatch refused: active claim carries an activation \u2014 omitting activationId to dodge the binding is not allowed");
+        if (req.claimId != null && req.claimId !== active.id) {
+          throw new Error(`dispatch refused: supplied claim ${req.claimId} is not the active claim ${active.id}`);
         }
       }
       const claimId = active?.id ?? req.claimId ?? undefined;
@@ -77277,15 +77269,12 @@ function createWorkItemBoundary(ports) {
       return out.binding;
     },
     inlineCreate(contract, opts = {}) {
+      const validation = validateContractText(contract);
+      if (!validation.ok) {
+        throw new Error(`${validation.reason}: ${validation.missing.join(", ")}`);
+      }
       const sections = extractSections(contract);
-      const missing = ["PROBLEM", "SUCCESS", "SCOPE", "NON_GOALS", "CONSTRAINTS", "VALIDATION", "OUTPUT"].filter((s) => !sections.get(s));
-      if (missing.length > 0) {
-        throw new Error(`inline contract is not a usable task contract: required sections are missing or empty: ${missing.join(", ")}`);
-      }
-      const scrutiny = (contract.match(/SCRUTINY\b[^\n]*\n?\s*\**\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i) ?? contract.match(/SCRUTINY\b\s*[:\-\u2014]?\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i))?.[1]?.toUpperCase();
-      if (!scrutiny) {
-        throw new Error("inline contract is not a usable task contract: SCRUTINY must be LOW, MEDIUM, HIGH, or CRITICAL");
-      }
+      const scrutiny = scrutinyLevel(contract) ?? "MEDIUM";
       const problem = sections.get("PROBLEM") ?? "";
       const firstLine = problem.split(`
 `).map((s) => s.trim()).find(Boolean);
@@ -77327,6 +77316,16 @@ async function openWorkItemBoundary(opts = {}) {
   const substrateDir = (opts.substrateDir ?? (env.XTRM_SUBSTRATE_DIR ?? "")).trim();
   if (!substrateDir) {
     throw new Error("work_item_store_unavailable: no Substrate package configured (set XTRM_SUBSTRATE_DIR to a built @xtrm/substrate checkout)");
+  }
+  let pkgName;
+  try {
+    const pkgRaw = await import(pathToFileURL(join55(substrateDir, "package.json")).href, { with: { type: "json" } });
+    pkgName = pkgRaw.default?.name;
+  } catch (error2) {
+    throw new Error(`work_item_store_unavailable: cannot read Substrate package identity at ${substrateDir}: ${error2 instanceof Error ? error2.message : String(error2)}`);
+  }
+  if (pkgName !== "@xtrm/substrate") {
+    throw new Error(`work_item_store_unavailable: expected @xtrm/substrate at ${substrateDir}, found ${JSON.stringify(pkgName) ?? "no name"}`);
   }
   const load = async (rel) => {
     try {
@@ -78656,9 +78655,42 @@ class NativeActivationHost {
         note: error2 instanceof Error ? error2.message : String(error2)
       });
     }
+    const inlineContract = (request.contract ?? "").trim();
+    let autoCreatedRef;
+    if (inlineContract) {
+      if (request.issueRef) {
+        return reject("contract_and_ref", {
+          note: "contract and issueRef were both provided \u2014 provide exactly one"
+        });
+      }
+      try {
+        const created = workItems.inlineCreate(inlineContract, {
+          ...request.title ? { title: request.title } : {},
+          holder: participantId,
+          activationId
+        });
+        autoCreatedRef = created.ref;
+      } catch (error2) {
+        const message = error2 instanceof Error ? error2.message : String(error2);
+        if (message.startsWith("inline contract is not a usable task contract")) {
+          const rechecked = validateContractText(inlineContract);
+          return reject("issue_not_dispatchable", {
+            note: message,
+            ...!rechecked.ok ? { missing: rechecked.missing } : {}
+          });
+        }
+        throw error2;
+      }
+    }
+    const issueRef = autoCreatedRef ?? request.issueRef ?? "";
+    if (!issueRef) {
+      return reject("no_work_ref", {
+        note: "neither issueRef nor contract was provided \u2014 dispatch requires an existing issue or an inline contract"
+      });
+    }
     let view;
     try {
-      view = workItems.view(request.issueRef);
+      view = workItems.view(issueRef);
     } catch (error2) {
       return reject("issue_unresolvable", {
         note: error2 instanceof Error ? error2.message : String(error2)
@@ -78667,12 +78699,12 @@ class NativeActivationHost {
     let dispatchCheck;
     try {
       dispatchCheck = workItems.check({
-        ref: request.issueRef,
+        ref: issueRef,
         specialist: request.specialist,
         holder: participantId,
         workspace: workspace.worktreePath
       });
-      view = workItems.view(request.issueRef);
+      view = workItems.view(issueRef);
       if (view.revision !== dispatchCheck.revision || view.contractHash !== dispatchCheck.contractHash) {
         return reject("issue_revision_diverged", {
           note: "issue changed between resolution and the read-only dispatch check; retry against the new revision"
@@ -78783,7 +78815,7 @@ class NativeActivationHost {
       tools: toolContract.toolsList.join(","),
       custom_tools: `${ASK_TOOL},${ESCALATE_TOOL}`
     });
-    const epicAncestors = workItems.epicAncestors(request.issueRef, request.epicContextDepth ?? 0);
+    const epicAncestors = workItems.epicAncestors(issueRef, request.epicContextDepth ?? 0);
     const rendered = renderTaskPrompt({
       specialist: specialist.specialist,
       cwd: this.cwd,
@@ -78862,7 +78894,7 @@ class NativeActivationHost {
     let binding;
     try {
       binding = workItems.bind({
-        ref: request.issueRef,
+        ref: issueRef,
         specialist: request.specialist,
         holder: participantId,
         activationId,
@@ -79562,6 +79594,7 @@ var init_native_host = __esm(() => {
   init_session();
   init_bead_gate();
   init_workitem_store();
+  init_contract_sections();
   init_interaction();
   init_peer_bridge();
   init_peer_adapter();
@@ -79855,6 +79888,7 @@ var init_lib = __esm(() => {
   init_runner();
   init_native_host();
   init_workitem_store();
+  init_contract_sections();
   init_types4();
   init_activation_tool();
   init_async_events();
