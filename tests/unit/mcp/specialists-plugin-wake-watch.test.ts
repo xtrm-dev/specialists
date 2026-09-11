@@ -13,7 +13,7 @@ import { Database } from 'bun:sqlite';
  */
 const hook = join(
   dirname(fileURLToPath(import.meta.url)),
-  '../../../plugins/substrate/scripts/wake-watch.mjs',
+  '../../../plugins/specialists/scripts/wake-watch.mjs',
 );
 
 const roots: string[] = [];
@@ -92,7 +92,7 @@ afterEach(() => {
   while (roots.length > 0) rmSync(roots.pop() as string, { recursive: true, force: true });
 });
 
-describe('substrate idle-wake watcher', () => {
+describe('specialists idle-wake watcher', () => {
   it('does not wake when nothing changes', () => {
     const db = seed([['act:a', 'running']]);
     const r = watch(db, 1500);

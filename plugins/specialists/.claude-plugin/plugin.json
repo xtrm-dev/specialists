@@ -1,0 +1,12 @@
+{
+  "name": "specialists",
+  "description": "Specialists execution runtime in Claude Code: specialist activation and dispatch over MCP, session continuity hooks, and the supervising-activations skill. Consumes the Substrate work authority; it is not Substrate.",
+  "version": "0.1.0",
+  "author": {
+    "name": "XTRM",
+    "url": "https://github.com/xtrm-dev/specialists"
+  },
+  "homepage": "https://github.com/xtrm-dev/specialists#readme",
+  "license": "MIT",
+  "mcpServers": "./.mcp.json"
+}

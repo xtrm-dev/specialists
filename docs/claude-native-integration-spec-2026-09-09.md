@@ -1510,3 +1510,68 @@ follow identity length and never result length (§AA, §AD unchanged).
 Because delivery is unacknowledged and eight gates can each close silently, the
 `asyncRewake` hook is retained as the recovery path with a relaxed 30s cadence. It is no
 longer the primary wake and must not be deleted.
+
+---
+
+# AN. Amendment — the plugin is `specialists`, not `substrate`
+
+Added 2026-09-11 under `unitAI-sjhb9`. Corrects §A.1 and every later section that names this
+plugin `substrate` or its skill `using-substrate`.
+
+## AN.1 What was wrong
+
+§A.1 "Canonical plugin shape" prescribed:
+
+```text
+substrate/
+└── skills/using-substrate/SKILL.md
+```
+
+That name belongs to a different product. **Substrate** is `@xtrm/substrate`
+(`~/dev/xtrm/packages/substrate`) — the work-authority layer, with its own Claude plugin and
+its own `using-substrate` skill whose authority block is byte-frozen and test-enforced.
+**Specialists** is `@jaggerxtrm/specialists` — the execution runtime. Specialists *consumes*
+Substrate; it is not Substrate.
+
+The plugin this spec describes ships from the specialists repo and exposes seven
+`specialist_*` tools. Naming it `substrate` made a specialists product wear another product's
+identity, and it was not cosmetic:
+
+- The install id `substrate@xtrm`, the cache `cache/xtrm/substrate/0.1.0`, and the skill
+  `/substrate:using-substrate` were all claimed on the developer machine by the specialists
+  manifest. Substrate itself was never installed and had no marketplace manifest, so it never
+  got to claim its own name.
+- Both plugins declare plugin name `substrate`, MCP server id `substrate`, skill
+  `using-substrate`, and version `0.1.0`. Under a shared marketplace the install key is
+  byte-identical and the second install overwrites the first, with no field left to
+  disambiguate on.
+- The skill carried a paraphrase of Substrate's authority doctrine — a fourth, unpinned copy
+  of a block Substrate keeps frozen, which §D already forbids as duplicate competing doctrine.
+
+## AN.2 Normative names
+
+| identifier | value |
+|---|---|
+| plugin directory | `plugins/specialists/` |
+| plugin name | `specialists` |
+| marketplace | `xtrm` |
+| install id | `specialists@xtrm` |
+| MCP server id | `specialists` |
+| tool prefix | `mcp__plugin_specialists_specialists__*` |
+| skill | `supervising-activations` |
+| continuity pointer | `specialists-continuity-<session>.json` |
+
+`supervising-activations` deliberately avoids `using-specialists`, which already exists as the
+CLI-side skill in `config/skills/`.
+
+## AN.3 Doctrine ownership
+
+This plugin's skill MUST NOT restate Substrate's authority model. It points at Substrate's
+`using-substrate` skill for that, and states only what is local to itself: that a tool result
+is evidence rather than a decision, and that the store is resolved from `XTRM_STATE_DB`
+defaulting to `~/.xtrm/state.db`.
+
+Where earlier sections of this document say `substrate/`, `using-substrate`, or
+`plugin:substrate:substrate` in reference to THIS plugin, read the table in AN.2 instead.
+References to Substrate as a consumed dependency — the authority store, the work-item
+boundary, the Substrate-backed tools — are correct and unchanged.

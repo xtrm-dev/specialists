@@ -63,7 +63,7 @@ try {
   const dir = (process.env.CLAUDE_PLUGIN_DATA ?? '').trim() || tmpdir();
   mkdirSync(dir, { recursive: true });
   writeFileSync(
-    join(dir, `substrate-continuity-${sessionId}.json`),
+    join(dir, `specialists-continuity-${sessionId}.json`),
     JSON.stringify(
       {
         store: storePath,

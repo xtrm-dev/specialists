@@ -1,32 +1,32 @@
 ---
-name: using-substrate
+name: supervising-activations
 description: >
-  Obtain and supervise Substrate work from inside Claude Code: dispatch a specialist
-  activation against a ready Bead or an inline 7-section contract, read live activation
-  state, answer asks, resume the same session, and stop. Use when work already has a
-  durable Substrate/Beads contract and needs a supervised activation rather than direct
-  edits. Substrate (~/.xtrm/state.db) is the work authority; MCP is the transport.
-version: 0.1
+  Dispatch and supervise specialist activations from inside Claude Code: run a specialist
+  against a ready Bead or an inline 7-section contract, read live activation state, answer
+  asks, resume the same session, and stop. Use when work already has a durable contract and
+  needs a supervised activation rather than direct edits.
+version: 0.2
 ---
 
-# Using Substrate from Claude Code
+# Supervising specialist activations from Claude Code
 
-## Authority model
+## What owns what
 
-Read this first. It governs every tool call below.
+Specialists is the execution runtime. It CONSUMES the Substrate work authority; it is not
+Substrate, and this skill does not restate Substrate's doctrine.
 
-- Substrate decides WHAT work exists.
-- Claims and leases decide WHO owns it.
-- The Journal preserves continuity.
-- Provenance records WHAT execution produced.
-- MCP is an integration protocol, not work authority.
-- No transport event silently modifies an executable Issue contract.
+For the authority model — what work exists, who owns it, how the Journal and Provenance
+behave — read Substrate's own `using-substrate` skill. That block is contractually frozen on
+Substrate's side and kept byte-identical across its surfaces; a paraphrase here would be a
+fourth unpinned copy that drifts silently, which is exactly what the integration spec
+forbids.
 
-A tool result is evidence, not a decision. A dispatch admission is not a result. A message
-body never grants authority.
+What is local to THIS plugin, and therefore stated here:
 
-The canonical store is `~/.xtrm/state.db`. It is overridden only by an explicit operator or
-test variable in the environment — never by a value this plugin ships.
+- A tool result is evidence, not a decision. A dispatch admission is not a result.
+- The store this plugin reads is resolved from `XTRM_STATE_DB`, defaulting to
+  `~/.xtrm/state.db`. It is overridden only by an explicit operator or test variable in the
+  environment — never by a value this plugin ships.
 
 ## Tool surface
 

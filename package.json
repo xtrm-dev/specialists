@@ -35,7 +35,7 @@
     "config/catalog/",
     "config/nodes/",
     "config/hooks/",
-    "plugins/substrate/",
+    "plugins/specialists/",
     "config/pi-extensions/",
     "config/pi-extensions/specialist-subagents/",
     "config/presets.json",

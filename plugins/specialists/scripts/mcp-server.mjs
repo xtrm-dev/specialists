@@ -5,8 +5,8 @@
 // entrypoint starts MCP server mode when given no subcommand.
 //
 // Local-first is load-bearing, not a style choice. `../../../dist/index.js` is correct in
-// BOTH supported layouts — a --plugin-dir checkout (repo/plugins/substrate/scripts) and an
-// npm install (node_modules/@jaggerxtrm/specialists/plugins/substrate/scripts) — so the
+// BOTH supported layouts — a --plugin-dir checkout (repo/plugins/specialists/scripts) and an
+// npm install (node_modules/@jaggerxtrm/specialists/plugins/specialists/scripts) — so the
 // plugin's own build is always the right answer. Asking the package name first is what
 // broke: under bun, `require.resolve('@jaggerxtrm/specialists')` from a plugin directory
 // with no local node_modules resolves into bun's GLOBAL INSTALL CACHE
@@ -33,7 +33,7 @@ function resolveRuntime() {
 const entry = resolveRuntime();
 if (!entry) {
   console.error(
-    'substrate plugin: cannot locate the specialists runtime (Bun runtime required).\n' +
+    'specialists plugin: cannot locate the specialists runtime (Bun runtime required).\n' +
       'Install Bun from https://bun.sh (tested with bun 1.3.14), then ' +
       'install @jaggerxtrm/specialists, or run the plugin from a built checkout ' +
       '(bun run build) so dist/index.js exists.',

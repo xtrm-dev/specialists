@@ -8,7 +8,7 @@ import { Database } from 'bun:sqlite';
 
 const hookPath = join(
   dirname(fileURLToPath(import.meta.url)),
-  '../../../plugins/substrate/scripts/precompact.mjs',
+  '../../../plugins/specialists/scripts/precompact.mjs',
 );
 
 const tmpRoots: string[] = [];
@@ -58,7 +58,7 @@ function run(
 
 function readPointer(dataDir: string, sessionId = 'sess-1') {
   return JSON.parse(
-    readFileSync(join(dataDir, `substrate-continuity-${sessionId}.json`), 'utf-8'),
+    readFileSync(join(dataDir, `specialists-continuity-${sessionId}.json`), 'utf-8'),
   ) as {
     store: string;
     session_id: string;
