@@ -78702,6 +78702,7 @@ class NativeActivationHost {
         ref: issueRef,
         specialist: request.specialist,
         holder: participantId,
+        activationId,
         workspace: workspace.worktreePath
       });
       view = workItems.view(issueRef);

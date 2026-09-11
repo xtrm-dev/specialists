@@ -426,6 +426,11 @@ export class NativeActivationHost {
         ref: issueRef,
         specialist: request.specialist,
         holder: participantId,
+        // The landed producer gate fences claimed dispatch on holder +
+        // activation at CHECK time (anti-steal); the read-only check must
+        // carry the same identity the bind will pin, or live-held issues
+        // refuse here. Unclaimed issues ignore it.
+        activationId,
         workspace: workspace.worktreePath,
       });
       // The first view is only for resolution/error reporting. Re-read the

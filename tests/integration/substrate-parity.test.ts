@@ -42,12 +42,13 @@ describe.skipIf(!LIVE)('substrate parity (private integration)', () => {
     const view = boundary.view(created.ref);
     expect(view.revision).toBe(1);
 
-    const check = boundary.check({ ref: created.ref, holder: 'parity::holder' });
+    const check = boundary.check({ ref: created.ref, specialist: 'researcher', holder: 'parity::holder', activationId: 'act-parity-1' });
     expect(check.revision).toBe(view.revision);
     expect(check.contractHash).toBe(view.contractHash);
 
     const binding = boundary.bind({
       ref: created.ref,
+      specialist: 'researcher',
       holder: 'parity::holder',
       activationId: 'act-parity-1',
       sessionId: 'sess-parity-1',
@@ -60,6 +61,6 @@ describe.skipIf(!LIVE)('substrate parity (private integration)', () => {
     expect(() => boundary.bind({ ref: created.ref, holder: 'parity::intruder', activationId: 'act-evil' }))
       .toThrow(/claimed by/);
 
-    boundary.journal(created.ref, 'parity.probe', { activationId: 'act-parity-1' });
+    boundary.journal(created.ref, 'note', { activationId: 'act-parity-1' });
   });
 });
