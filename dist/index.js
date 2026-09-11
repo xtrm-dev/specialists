@@ -21994,105 +21994,6 @@ function copyCanonicalNodeConfigs(cwd) {
     ok(`re-synced ${refreshed} canonical node config${refreshed === 1 ? "" : "s"} in .specialists/default/nodes/`);
   }
 }
-function installProjectHooks(cwd) {
-  const sourceDir = resolveCanonicalAssetDir("hooks");
-  if (!sourceDir) {
-    skip("no canonical hooks found in package");
-    return;
-  }
-  const xtrmHooksDir = join14(cwd, ".xtrm", "hooks");
-  const targetDir = join14(xtrmHooksDir, "specialists");
-  const claudeHooksDir = join14(cwd, ".claude", "hooks");
-  const hooks = readdirSync5(sourceDir).filter((f) => f.endsWith(".mjs"));
-  if (hooks.length === 0) {
-    skip("no hook files found in package");
-    return;
-  }
-  mkdirSync7(targetDir, { recursive: true });
-  mkdirSync7(claudeHooksDir, { recursive: true });
-  let copied = 0;
-  let skippedCopies = 0;
-  let linked = 0;
-  let rewiredLinks = 0;
-  let skippedLinks = 0;
-  for (const file of hooks) {
-    const src = join14(sourceDir, file);
-    const xtrmDest = join14(targetDir, file);
-    if (existsSync13(xtrmDest)) {
-      skippedCopies++;
-    } else {
-      copyFileSync(src, xtrmDest);
-      copied++;
-    }
-    const claudeHookPath = join14(claudeHooksDir, file);
-    const relativeTarget = `../../.xtrm/hooks/specialists/${file}`;
-    if (existsSync13(claudeHookPath)) {
-      const stats = lstatSync2(claudeHookPath);
-      if (!stats.isSymbolicLink()) {
-        unlinkSync(claudeHookPath);
-        symlinkSync(relativeTarget, claudeHookPath);
-        rewiredLinks++;
-        continue;
-      }
-      const currentTarget = resolve5(dirname7(claudeHookPath), readlinkSync(claudeHookPath));
-      if (currentTarget !== xtrmDest) {
-        unlinkSync(claudeHookPath);
-        symlinkSync(relativeTarget, claudeHookPath);
-        rewiredLinks++;
-        continue;
-      }
-      skippedLinks++;
-      continue;
-    }
-    symlinkSync(relativeTarget, claudeHookPath);
-    linked++;
-  }
-  if (copied > 0)
-    ok(`installed ${copied} hook${copied === 1 ? "" : "s"} to .xtrm/hooks/specialists/`);
-  if (skippedCopies > 0)
-    skip(`${skippedCopies} hook${skippedCopies === 1 ? "" : "s"} already exist in .xtrm/hooks/specialists/ (not overwritten)`);
-  if (linked > 0)
-    ok(`linked ${linked} hook${linked === 1 ? "" : "s"} in .claude/hooks/ -> .xtrm/hooks/specialists/`);
-  if (rewiredLinks > 0)
-    ok(`rewired ${rewiredLinks} legacy hook${rewiredLinks === 1 ? "" : "s"} in .claude/hooks/ -> .xtrm/hooks/specialists/`);
-  if (skippedLinks > 0)
-    skip(`${skippedLinks} hook${skippedLinks === 1 ? "" : "s"} already present in .claude/hooks/ (left unchanged)`);
-}
-function ensureProjectHookWiring(cwd) {
-  const settingsPath = join14(cwd, ".claude", "settings.json");
-  const settingsDir = join14(cwd, ".claude");
-  if (!existsSync13(settingsDir)) {
-    mkdirSync7(settingsDir, { recursive: true });
-  }
-  const settings = loadJson(settingsPath, {});
-  if (!settings.hooks || typeof settings.hooks !== "object") {
-    settings.hooks = {};
-  }
-  const hooksObj = settings.hooks;
-  let changed = false;
-  for (const event of ["UserPromptSubmit", "PostToolUse", "SessionStart"]) {
-    if (Array.isArray(settings[event])) {
-      delete settings[event];
-      changed = true;
-    }
-  }
-  function addHook(event, command) {
-    const eventList = hooksObj[event] ?? [];
-    hooksObj[event] = eventList;
-    const alreadyWired = eventList.some((entry) => entry?.hooks?.some?.((h) => h?.command === command));
-    if (!alreadyWired) {
-      eventList.push({ matcher: "", hooks: [{ type: "command", command }] });
-      changed = true;
-    }
-  }
-  addHook("SessionStart", "node .claude/hooks/specialists-session-start.mjs");
-  if (changed) {
-    saveJson(settingsPath, settings);
-    ok("wired specialists hooks in .claude/settings.json");
-  } else {
-    skip(".claude/settings.json already has specialists hooks");
-  }
-}
 function ensureRootSymlink(rootPath, expectedTargetPath) {
   if (!existsSync13(rootPath)) {
     mkdirSync7(dirname7(rootPath), { recursive: true });
@@ -22351,60 +22252,8 @@ function readJsonObject(path) {
     return {};
   }
 }
-function hasHookCommand(settings, eventName, command) {
-  const hooks = settings.hooks;
-  if (!hooks || typeof hooks !== "object")
-    return false;
-  const eventEntries = hooks[eventName];
-  if (!Array.isArray(eventEntries))
-    return false;
-  return eventEntries.some((entry) => {
-    if (!entry || typeof entry !== "object")
-      return false;
-    const hookItems = entry.hooks;
-    if (!Array.isArray(hookItems))
-      return false;
-    return hookItems.some((hook) => {
-      if (!hook || typeof hook !== "object")
-        return false;
-      return hook.command === command;
-    });
-  });
-}
 function validateInitPostconditions(cwd) {
   const warnings = [];
-  const xtrmHooksDir = join14(cwd, ".xtrm", "hooks", "specialists");
-  const xtrmHookFiles = existsSync13(xtrmHooksDir) ? readdirSync5(xtrmHooksDir).filter((file) => file.endsWith(".mjs")) : [];
-  if (xtrmHookFiles.length === 0) {
-    warnings.push(".xtrm/hooks/specialists/ is missing or has no .mjs hooks");
-  }
-  const claudeHooksDir = join14(cwd, ".claude", "hooks");
-  for (const hookFile of xtrmHookFiles) {
-    const claudeHookPath = join14(claudeHooksDir, hookFile);
-    if (!existsSync13(claudeHookPath)) {
-      warnings.push(`.claude/hooks/${hookFile} is missing`);
-      continue;
-    }
-    const stats = lstatSync2(claudeHookPath);
-    if (!stats.isSymbolicLink()) {
-      warnings.push(`.claude/hooks/${hookFile} is not a symlink`);
-      continue;
-    }
-    const expectedTarget = resolve5(xtrmHooksDir, hookFile);
-    const resolvedTarget = resolve5(dirname7(claudeHookPath), readlinkSync(claudeHookPath));
-    if (resolvedTarget !== expectedTarget) {
-      warnings.push(`.claude/hooks/${hookFile} points to unexpected target`);
-    }
-  }
-  const settings = readJsonObject(join14(cwd, ".claude", "settings.json"));
-  const requiredHookWiring = [
-    { event: "SessionStart", command: "node .claude/hooks/specialists-session-start.mjs" }
-  ];
-  for (const hook of requiredHookWiring) {
-    if (!hasHookCommand(settings, hook.event, hook.command)) {
-      warnings.push(`.claude/settings.json missing hook wiring: ${hook.event} -> ${hook.command}`);
-    }
-  }
   const mcp = readJsonObject(join14(cwd, ".mcp.json"));
   const mcpServers = mcp.mcpServers;
   const specialistsServer = mcpServers && typeof mcpServers === "object" ? mcpServers.specialists : undefined;
@@ -22537,8 +22386,6 @@ ${bold5("specialists init")}
   ensureGitignore(cwd);
   ensureAgentsMd(cwd);
   ensureProjectMcp(cwd);
-  installProjectHooks(cwd);
-  ensureProjectHookWiring(cwd);
   installProjectSkills(cwd, syncSkills);
   ensureObservabilityDb(cwd);
   const postconditionWarnings = validateInitPostconditions(cwd);
@@ -22552,9 +22399,6 @@ ${bold5("specialists init")}
 ${bold5("Done!")}
 `);
   console.log(`  ${dim5("Project-local installation:")}`);
-  console.log(`  .xtrm/hooks/specialists/ ${dim5("# canonical specialists hooks")}`);
-  console.log(`  .claude/hooks/            ${dim5("# symlinks -> .xtrm/hooks/specialists")}`);
-  console.log(`  .claude/settings.json     ${dim5("# hook wiring")}`);
   console.log(`  .xtrm/skills/default/  ${dim5("# canonical skills")}`);
   console.log(`  .xtrm/skills/active/   ${dim5("# flattened active skill root")}`);
   console.log(`  .claude/skills/        ${dim5("# symlink -> .xtrm/skills/active")}`);
@@ -59340,21 +59184,6 @@ function checkXt() {
   ok3(`xt installed  ${dim14(sp("xt", ["--version"]).stdout || "")}`);
   return true;
 }
-function checkHooks() {
-  section3(`Claude Code hooks  (global ${relative5(homedir12(), GLOBAL_HOOKS_DIR)})`);
-  let allPresent = true;
-  for (const name of HOOK_NAMES) {
-    const hookPath = join47(GLOBAL_HOOKS_DIR, name);
-    if (!existsSync44(hookPath)) {
-      fail9(`${hookPath} ${red7("missing")}`);
-      fix("reinstall xtrm-tools (hooks are vendored globally)");
-      allPresent = false;
-    } else {
-      ok3(relative5(homedir12(), hookPath));
-    }
-  }
-  return allPresent;
-}
 function checkVersion() {
   section3("Version check");
   const result = getVersionCheckResult();
@@ -60093,7 +59922,6 @@ ${bold12("specialists doctor")}
   const spOk = checkSpAlias();
   const bdOk = checkBd();
   const xtOk = checkXt();
-  const hooksOk = checkHooks();
   const versionOk = checkVersion();
   const skillDriftOk = checkSkillDrift();
   const userOverlayOk = checkUserOverlayDrift();
@@ -60101,7 +59929,7 @@ ${bold12("specialists doctor")}
   const jobsOk = checkZombieJobs();
   const fragmentsOk = checkClaudeMdFragments();
   const overridesOk = await checkSpecialistOverrides();
-  const allOk = piOk && spOk && bdOk && xtOk && hooksOk && versionOk && skillDriftOk && userOverlayOk && dirsOk && jobsOk && fragmentsOk && overridesOk;
+  const allOk = piOk && spOk && bdOk && xtOk && versionOk && skillDriftOk && userOverlayOk && dirsOk && jobsOk && fragmentsOk && overridesOk;
   console.log("");
   if (allOk) {
     console.log(`  ${green14("\u2713")} ${bold12("All checks passed")}  \u2014 specialists is healthy`);
@@ -60111,7 +59939,7 @@ ${bold12("specialists doctor")}
   }
   console.log("");
 }
-var bold12 = (s) => `\x1B[1m${s}\x1B[0m`, dim14 = (s) => `\x1B[2m${s}\x1B[0m`, green14 = (s) => `\x1B[32m${s}\x1B[0m`, yellow12 = (s) => `\x1B[33m${s}\x1B[0m`, red7 = (s) => `\x1B[31m${s}\x1B[0m`, CWD, SPECIALISTS_DIR, USER_SPECIALISTS_DIR, XTRM_HOME, GLOBAL_HOOKS_DIR, GLOBAL_DEFAULT_SKILLS_DIR, HOOK_NAMES;
+var bold12 = (s) => `\x1B[1m${s}\x1B[0m`, dim14 = (s) => `\x1B[2m${s}\x1B[0m`, green14 = (s) => `\x1B[32m${s}\x1B[0m`, yellow12 = (s) => `\x1B[33m${s}\x1B[0m`, red7 = (s) => `\x1B[31m${s}\x1B[0m`, CWD, SPECIALISTS_DIR, USER_SPECIALISTS_DIR, XTRM_HOME, GLOBAL_DEFAULT_SKILLS_DIR;
 var init_doctor = __esm(() => {
   init_observability_sqlite();
   init_pr_drift_refresh();
@@ -60125,9 +59953,7 @@ var init_doctor = __esm(() => {
   SPECIALISTS_DIR = join47(CWD, ".specialists");
   USER_SPECIALISTS_DIR = join47(SPECIALISTS_DIR, "user");
   XTRM_HOME = join47(homedir12(), ".xtrm");
-  GLOBAL_HOOKS_DIR = join47(XTRM_HOME, "hooks", "specialists");
   GLOBAL_DEFAULT_SKILLS_DIR = join47(XTRM_HOME, "skills", "default");
-  HOOK_NAMES = ["specialists-session-start.mjs"];
 });
 
 // src/specialist/benchmarks.ts
@@ -96640,7 +96466,7 @@ async function run44() {
         "  3. xtrm-tools availability",
         "  4. Specialists MCP registration in .mcp.json",
         "  5. .specialists/ runtime directories",
-        "  6. hook wiring expectations",
+        "  6. Substrate plugin owns the Claude SessionStart hook",
         "  7. zombie job detection",
         "  8. CLAUDE.md fragments (XTRM-MANAGED sentinels) \u2014 delegates to xt claude-sync",
         "  9. drift check for stale managed mirrors (--check-drift / --drift)",

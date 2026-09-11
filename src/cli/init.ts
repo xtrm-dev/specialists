@@ -331,135 +331,6 @@ function copyCanonicalNodeConfigs(cwd: string): void {
 }
 
 /**
- * Install canonical specialists hooks to .xtrm/hooks/specialists/
- * and expose .claude/hooks/* entries as symlinks into .xtrm/hooks/.
- */
-function installProjectHooks(cwd: string): void {
-  const sourceDir = resolveCanonicalAssetDir('hooks');
-
-  if (!sourceDir) {
-    skip('no canonical hooks found in package');
-    return;
-  }
-
-  const xtrmHooksDir = join(cwd, '.xtrm', 'hooks');
-  const targetDir = join(xtrmHooksDir, 'specialists');
-  const claudeHooksDir = join(cwd, '.claude', 'hooks');
-  const hooks = readdirSync(sourceDir).filter(f => f.endsWith('.mjs'));
-
-  if (hooks.length === 0) {
-    skip('no hook files found in package');
-    return;
-  }
-
-  mkdirSync(targetDir, { recursive: true });
-  mkdirSync(claudeHooksDir, { recursive: true });
-
-  let copied = 0;
-  let skippedCopies = 0;
-  let linked = 0;
-  let rewiredLinks = 0;
-  let skippedLinks = 0;
-
-  for (const file of hooks) {
-    const src = join(sourceDir, file);
-    const xtrmDest = join(targetDir, file);
-
-    if (existsSync(xtrmDest)) {
-      skippedCopies++;
-    } else {
-      copyFileSync(src, xtrmDest);
-      copied++;
-    }
-
-    const claudeHookPath = join(claudeHooksDir, file);
-    const relativeTarget = `../../.xtrm/hooks/specialists/${file}`;
-    if (existsSync(claudeHookPath)) {
-      const stats = lstatSync(claudeHookPath);
-      if (!stats.isSymbolicLink()) {
-        unlinkSync(claudeHookPath);
-        symlinkSync(relativeTarget, claudeHookPath);
-        rewiredLinks++;
-        continue;
-      }
-
-      const currentTarget = resolve(dirname(claudeHookPath), readlinkSync(claudeHookPath));
-      if (currentTarget !== xtrmDest) {
-        unlinkSync(claudeHookPath);
-        symlinkSync(relativeTarget, claudeHookPath);
-        rewiredLinks++;
-        continue;
-      }
-
-      skippedLinks++;
-      continue;
-    }
-
-    symlinkSync(relativeTarget, claudeHookPath);
-    linked++;
-  }
-
-  if (copied > 0) ok(`installed ${copied} hook${copied === 1 ? '' : 's'} to .xtrm/hooks/specialists/`);
-  if (skippedCopies > 0) skip(`${skippedCopies} hook${skippedCopies === 1 ? '' : 's'} already exist in .xtrm/hooks/specialists/ (not overwritten)`);
-  if (linked > 0) ok(`linked ${linked} hook${linked === 1 ? '' : 's'} in .claude/hooks/ -> .xtrm/hooks/specialists/`);
-  if (rewiredLinks > 0) ok(`rewired ${rewiredLinks} legacy hook${rewiredLinks === 1 ? '' : 's'} in .claude/hooks/ -> .xtrm/hooks/specialists/`);
-  if (skippedLinks > 0) skip(`${skippedLinks} hook${skippedLinks === 1 ? '' : 's'} already present in .claude/hooks/ (left unchanged)`);
-}
-
-/**
- * Wire hooks in .claude/settings.json
- */
-function ensureProjectHookWiring(cwd: string): void {
-  const settingsPath = join(cwd, '.claude', 'settings.json');
-  
-  // Ensure .claude directory exists
-  const settingsDir = join(cwd, '.claude');
-  if (!existsSync(settingsDir)) {
-    mkdirSync(settingsDir, { recursive: true });
-  }
-
-  const settings = loadJson(settingsPath, {}) as Record<string, unknown>;
-  if (!settings.hooks || typeof settings.hooks !== 'object') {
-    settings.hooks = {};
-  }
-  const hooksObj = settings.hooks as Record<string, any[]>;
-  let changed = false;
-
-  // Clean up stale top-level hook keys from previous buggy versions
-  for (const event of ['UserPromptSubmit', 'PostToolUse', 'SessionStart']) {
-    if (Array.isArray((settings as any)[event])) {
-      delete (settings as any)[event];
-      changed = true;
-    }
-  }
-
-  // Helper to add hook inside settings.hooks (Claude Code's expected format)
-  function addHook(event: string, command: string): void {
-    const eventList = hooksObj[event] ?? [];
-    hooksObj[event] = eventList;
-
-    const alreadyWired = eventList.some((entry: any) =>
-      entry?.hooks?.some?.((h: any) => h?.command === command)
-    );
-
-    if (!alreadyWired) {
-      eventList.push({ matcher: '', hooks: [{ type: 'command', command }] });
-      changed = true;
-    }
-  }
-
-  // Wire hooks with symlinked .claude/hooks/ paths
-  addHook('SessionStart', 'node .claude/hooks/specialists-session-start.mjs');
-
-  if (changed) {
-    saveJson(settingsPath, settings);
-    ok('wired specialists hooks in .claude/settings.json');
-  } else {
-    skip('.claude/settings.json already has specialists hooks');
-  }
-}
-
-/**
  * Ensure .claude/skills and .pi/skills are symlinks to flattened .xtrm active skill root.
  * Creates the symlink if missing (e.g. on a fresh repo where xt install hasn't wired skill roots yet).
  */
@@ -782,66 +653,8 @@ function readJsonObject(path: string): Record<string, unknown> {
   }
 }
 
-function hasHookCommand(settings: Record<string, unknown>, eventName: string, command: string): boolean {
-  const hooks = settings.hooks;
-  if (!hooks || typeof hooks !== 'object') return false;
-  const eventEntries = (hooks as Record<string, unknown>)[eventName];
-  if (!Array.isArray(eventEntries)) return false;
-
-  return eventEntries.some(entry => {
-    if (!entry || typeof entry !== 'object') return false;
-    const hookItems = (entry as Record<string, unknown>).hooks;
-    if (!Array.isArray(hookItems)) return false;
-
-    return hookItems.some(hook => {
-      if (!hook || typeof hook !== 'object') return false;
-      return (hook as Record<string, unknown>).command === command;
-    });
-  });
-}
-
 function validateInitPostconditions(cwd: string): ReadonlyArray<string> {
   const warnings: string[] = [];
-
-  const xtrmHooksDir = join(cwd, '.xtrm', 'hooks', 'specialists');
-  const xtrmHookFiles = existsSync(xtrmHooksDir)
-    ? readdirSync(xtrmHooksDir).filter(file => file.endsWith('.mjs'))
-    : [];
-  if (xtrmHookFiles.length === 0) {
-    warnings.push('.xtrm/hooks/specialists/ is missing or has no .mjs hooks');
-  }
-
-  const claudeHooksDir = join(cwd, '.claude', 'hooks');
-  for (const hookFile of xtrmHookFiles) {
-    const claudeHookPath = join(claudeHooksDir, hookFile);
-    if (!existsSync(claudeHookPath)) {
-      warnings.push(`.claude/hooks/${hookFile} is missing`);
-      continue;
-    }
-
-    const stats = lstatSync(claudeHookPath);
-    if (!stats.isSymbolicLink()) {
-      warnings.push(`.claude/hooks/${hookFile} is not a symlink`);
-      continue;
-    }
-
-    const expectedTarget = resolve(xtrmHooksDir, hookFile);
-    const resolvedTarget = resolve(dirname(claudeHookPath), readlinkSync(claudeHookPath));
-    if (resolvedTarget !== expectedTarget) {
-      warnings.push(`.claude/hooks/${hookFile} points to unexpected target`);
-    }
-  }
-
-  const settings = readJsonObject(join(cwd, '.claude', 'settings.json'));
-  const requiredHookWiring: ReadonlyArray<{ event: string; command: string }> = [
-    { event: 'SessionStart', command: 'node .claude/hooks/specialists-session-start.mjs' },
-  ];
-
-  for (const hook of requiredHookWiring) {
-    if (!hasHookCommand(settings, hook.event, hook.command)) {
-      warnings.push(`.claude/settings.json missing hook wiring: ${hook.event} -> ${hook.command}`);
-    }
-  }
 
   const mcp = readJsonObject(join(cwd, '.mcp.json'));
   const mcpServers = mcp.mcpServers;
@@ -1033,14 +846,10 @@ export async function run(opts: InitOptions = {}): Promise<void> {
   // ── 4. Register MCP at project scope ──────────────────────────────────────
   ensureProjectMcp(cwd);
 
-  // ── 5. Install hooks via .xtrm/hooks/specialists and .claude symlinks ────
-  installProjectHooks(cwd);
-  ensureProjectHookWiring(cwd);
-
-  // ── 6. Install skills via .xtrm default + active symlink roots ────────────
+  // ── 5. Install skills via .xtrm default + active symlink roots ────────────
   installProjectSkills(cwd, syncSkills);
 
-  // ── 7. Initialize observability database (never overwrites existing) ──────
+  // ── 6. Initialize observability database (never overwrites existing) ──────
   ensureObservabilityDb(cwd);
 
   const postconditionWarnings = validateInitPostconditions(cwd);
@@ -1054,9 +863,6 @@ export async function run(opts: InitOptions = {}): Promise<void> {
   // ── Done ──────────────────────────────────────────────────────────────────
   console.log(`\n${bold('Done!')}\n`);
   console.log(`  ${dim('Project-local installation:')}`);
-  console.log(`  .xtrm/hooks/specialists/ ${dim('# canonical specialists hooks')}`);
-  console.log(`  .claude/hooks/            ${dim('# symlinks -> .xtrm/hooks/specialists')}`);
-  console.log(`  .claude/settings.json     ${dim('# hook wiring')}`);
   console.log(`  .xtrm/skills/default/  ${dim('# canonical skills')}`);
   console.log(`  .xtrm/skills/active/   ${dim('# flattened active skill root')}`);
   console.log(`  .claude/skills/        ${dim('# symlink -> .xtrm/skills/active')}`);
