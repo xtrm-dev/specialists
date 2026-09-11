@@ -7,11 +7,10 @@
 // coordinator best placed to use it was the one that could not. These tools close that
 // gap, and they close it by CALLING the host, never by spawning `sp`: a subprocess
 // that runs `sp` would satisfy the letter of "expose the runtime over MCP" and defeat its
-// entire purpose. The one child process reachable from here is the `bd create` inside
-// `createBeadFromContract` for the inline-contract path — the same `bd` CLI the
-// runtime's own BeadsClient uses, never the legacy CLI — and it runs only after the
-// readiness gate passes. The live evidence for acceptance AV asserts the absence of
-// `sp` against the process table rather than against intent.
+// entire purpose. No child process is reachable from here at all: inline-contract
+// creation is owned by `host.start()` through the work boundary (validate → create →
+// attest → claim), never by a `bd` subprocess. The live evidence for acceptance AV
+// asserts the absence of `sp` against the process table rather than against intent.
 //
 // The gates are not re-implemented here, and that is the load-bearing property. Bead
 // readiness, the StepContract compilation, the capability contract, the model gate and
@@ -40,8 +39,7 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { NativeActivationHost } from '../../activation/native-host.js';
 import { describeBuildIdentity, readBuildId } from '../../activation/build-identity.js';
-import { evaluateBeadReadiness } from '../../activation/bead-gate.js';
-import { createBeadFromContract } from '../../specialist/beads.js';
+import { validateContractText } from '../../activation/contract-sections.js';
 import { renderRejection } from '../../activation/rejection.js';
 import { THINKING_LEVELS } from '../../activation/types.js';
 import type { ActivationSnapshot, ActivationTokenUsage } from '../../activation/types.js';
@@ -64,6 +62,11 @@ export interface ActivationView {
   attempt_id: string;
   specialist: string;
   bead_id: string;
+  issue_id: string;
+  issue_ref: string;
+  issue_revision: number;
+  contract_hash: string;
+  execution_binding_id: string;
   state: string;
   access: 'read' | 'write';
   worktree_path: string;
@@ -92,7 +95,12 @@ export function toActivationView(snapshot: ActivationSnapshot, nowMs: number = D
     participant_id: snapshot.participantId,
     attempt_id: snapshot.attemptId,
     specialist: snapshot.specialist,
-    bead_id: snapshot.beadId,
+    bead_id: snapshot.issueRef,
+    issue_id: snapshot.issueId,
+    issue_ref: snapshot.issueRef,
+    issue_revision: snapshot.issueRevision,
+    contract_hash: snapshot.contractHash,
+    execution_binding_id: snapshot.executionBindingId,
     state: snapshot.state,
     access: snapshot.access,
     worktree_path: snapshot.workspace.worktreePath,
@@ -154,6 +162,11 @@ export interface ActivationResultView {
   participant_id: string;
   attempt_id: string;
   bead_id: string;
+  issue_id: string;
+  issue_ref: string;
+  issue_revision: number;
+  contract_hash: string;
+  execution_binding_id: string;
   status: string;
   /** Explicitly `null` rather than absent: a missing key reads as "not projected yet". */
   output: unknown;
@@ -174,7 +187,12 @@ export function toActivationResultView(result: ActivationResult): ActivationResu
     activation_id: result.activationId,
     participant_id: result.participantId,
     attempt_id: result.attemptId,
-    bead_id: result.beadId,
+    bead_id: result.issueRef,
+    issue_id: result.issueId,
+    issue_ref: result.issueRef,
+    issue_revision: result.issueRevision,
+    contract_hash: result.contractHash,
+    execution_binding_id: result.executionBindingId,
     status: result.status,
     output: result.output ?? null,
     validation: result.validation,
@@ -303,39 +321,33 @@ export function createSpecialistDispatchTool(
               '2 also includes the grand-epic',
           }, build());
         }
-        let effectiveBeadId = beadId;
-        let autoCreatedBeadId: string | undefined;
-        if (!effectiveBeadId) {
-          if (!contract) {
-            return renderRejection({
-              reason: 'neither bead_id nor contract was provided — dispatch requires a READY Bead ' +
-                '(7 sections + SCRUTINY) or an inline contract',
-            }, build());
-          }
-          // The SAME gate the host runs at admission, before anything is created: a
-          // refused dispatch leaves the board unchanged.
-          const gate = evaluateBeadReadiness({
-            id: '<inline>',
-            status: 'open',
-            title: input.title ?? 'specialist dispatch',
-            description: contract,
-          });
+        // Inline-contract dispatch creates a fresh issue with no parent: no lineage.
+        const inline = !beadId && contract ? contract : undefined;
+        if (!beadId && !inline) {
+          return renderRejection({
+            reason: 'neither bead_id nor contract was provided — dispatch requires a READY issue ' +
+              '(7 sections + SCRUTINY) or an inline contract',
+          }, build());
+        }
+        if (inline) {
+          // The shared contract-text gate, BEFORE anything is created: a refused
+          // dispatch leaves the board unchanged. The host re-validates
+          // authoritatively inside inlineCreate — same parser, same verdict.
+          const gate = validateContractText(inline);
           if (!gate.ok) {
             return renderRejection({ reason: gate.reason, missing: gate.missing }, build());
           }
-          const created = createBeadFromContract(contract, input.title);
-          if (!created) {
-            return { status: 'error' as const, error: 'bd create failed — bead not created, board unchanged' };
-          }
-          effectiveBeadId = created;
-          autoCreatedBeadId = created;
         }
 
         const handle = await getHost().start({
           specialist: input.specialist,
-          beadId: effectiveBeadId,
-          // Inline-contract dispatch creates a fresh bead with no parent: no lineage.
-          ...(epicContextDepth !== undefined && !autoCreatedBeadId ? { epicContextDepth } : {}),
+          ...(beadId ? { issueRef: beadId } : {}),
+          // The host owns creation: validate → create → attest → claim through
+          // the work boundary, claiming WITH this activation's id.
+          ...(inline
+            ? { contract: inline, ...(input.title ? { title: input.title } : {}) }
+            : {}),
+          ...(epicContextDepth !== undefined && !inline ? { epicContextDepth } : {}),
           ...(input.model_override ? { modelOverride: input.model_override } : {}),
           ...(input.thinking_override ? { thinkingOverride: input.thinking_override } : {}),
           requestedByParticipantId: input.requested_by ?? 'adapter::specialists-mcp',
@@ -375,9 +387,9 @@ export function createSpecialistDispatchTool(
           // is the difference between a coordinator tracking it and an operator finding
           // an orphan bead later — the caller cannot see the side effect otherwise.
           // Pi wording, verbatim: one vocabulary for the same side effect.
-          ...(autoCreatedBeadId
+          ...(inline
             ? {
-              created_bead_id: autoCreatedBeadId,
+              created_bead_id: handle.issueRef,
               created_bead_note:
                 'This dispatch CREATED the bead above from your inline contract. It is a '
                 + 'durable board record and is yours to track: close it when the work is '

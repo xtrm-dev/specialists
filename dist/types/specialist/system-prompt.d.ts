@@ -14,7 +14,10 @@ export interface SystemPromptContext {
     runCwd: string;
     /** `metadata.name` */
     specialistName: string;
+    /** Legacy CLI bead locator. */
     inputBeadId?: string;
+    /** Native Substrate issue locator. When set, no Beads lifecycle commands are emitted. */
+    inputIssueRef?: string;
     reusedFromJobId?: string;
     responseFormat: ResponseFormat;
     outputType: OutputType;

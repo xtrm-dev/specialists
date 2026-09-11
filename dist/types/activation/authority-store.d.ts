@@ -35,7 +35,7 @@ export declare function resolveAuthorityDbPath(env?: NodeJS.ProcessEnv): string;
 export declare function ensureAuthorityStore(dbPath: string): void;
 /** The host persists its Fleet projection through this; tests inject a temp path. */
 export interface AuthorityWriter {
-    record(snapshot: Pick<ActivationSnapshot, 'activationId' | 'specialist' | 'state' | 'beadId' | 'lastActivityAt'>): void;
+    record(snapshot: Pick<ActivationSnapshot, 'activationId' | 'specialist' | 'state' | 'issueRef' | 'lastActivityAt'>): void;
     /**
      * Drop a disposed activation. `stop()` is the only ordinary path to disposal, so
      * the row must go with it — otherwise SessionStart would surface dead work as

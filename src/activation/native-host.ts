@@ -34,15 +34,23 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { SpecialistLoader } from '../specialist/loader.js';
 import { buildSystemPrompt } from '../specialist/system-prompt.js';
 import { renderTaskPrompt } from '../specialist/task-prompt.js';
 import { validateBeforeRun, classifyFallbackError } from '../specialist/runner.js';
 import { resolveRuntimeToolContract } from '../pi/session.js';
 import { resolveModelChain } from '../specialist/model-chain.js';
-import { BeadsClient, collectEpicAncestors } from '../specialist/beads.js';
-import { evaluateBeadReadiness, extractPurposeExcerpt, type BeadGateOptions } from './bead-gate.js';
+import { extractPurposeExcerpt } from './bead-gate.js';
+import {
+  openWorkItemBoundary,
+  resolveWorkItemDbPath,
+  type EpicAncestor,
+  type SpecialistWorkItemBoundary,
+  type WorkItemView,
+} from './workitem-store.js';
 import { compileStepContract, type StepContract } from './step-contract.js';
+import { validateContractText } from './contract-sections.js';
 import { InteractionTransport, type InteractionMessage, type PendingAsk } from './interaction.js';
 import { createPeerDelivery } from './peer-bridge.js';
 import { PeerAdapter, type TransportForensicEvent } from './transport/peer-adapter.js';
@@ -179,12 +187,16 @@ export const NULL_FORENSIC_SINK: ActivationForensicSink = { emit: () => {} };
 
 export interface NativeActivationHostDeps {
   loader?: SpecialistLoader;
-  beadsClient?: Pick<BeadsClient, 'readBead'>;
+  /**
+   * The shared Substrate work boundary (ADR §8-§12). When omitted the host
+   * resolves lazily against the canonical store (~/.xtrm/state.db,
+   * XTRM_STATE_DB override) and refuses dispatch fail-closed when that store
+   * is absent or unopenable — never by falling back to another authority.
+   */
+  workItems?: SpecialistWorkItemBoundary;
   forensics?: ActivationForensicSink;
   /** Injected for tests; defaults to resolving the real Pi SDK. */
   loadSdk?: () => Promise<PiSdk>;
-  /** Bead readiness gate seams. Defaults read the real `bd` state marker. */
-  beadGate?: BeadGateOptions;
   /** Defaults to `process.cwd()`. */
   cwd?: string;
   now?: () => number;
@@ -230,10 +242,12 @@ export interface ActivationAttachment {
 
 export class NativeActivationHost {
   private readonly loader: SpecialistLoader;
-  private readonly beadsClient: Pick<BeadsClient, 'readBead'>;
+  /** Injected boundary, or undefined to resolve the canonical store lazily. */
+  private readonly workItemsInjected?: SpecialistWorkItemBoundary;
+  /** Lazily-opened canonical boundary; only touched when none was injected. */
+  private workItemsDefault?: SpecialistWorkItemBoundary;
   private readonly forensics: ActivationForensicSink;
   private readonly loadSdk: () => Promise<PiSdk>;
-  private readonly beadGate: BeadGateOptions;
   private readonly cwd: string;
   private readonly now: () => number;
   private readonly authority: AuthorityWriter;
@@ -266,10 +280,9 @@ export class NativeActivationHost {
       deps.peer ? { deliver: this.wirePeerDelivery(deps.peer) } : {},
     );
     this.loader = deps.loader ?? new SpecialistLoader({ projectDir: this.cwd });
-    this.beadsClient = deps.beadsClient ?? new BeadsClient();
+    this.workItemsInjected = deps.workItems;
     this.forensics = deps.forensics ?? NULL_FORENSIC_SINK;
     this.loadSdk = deps.loadSdk ?? loadPiSdk;
-    this.beadGate = deps.beadGate ?? {};
     this.now = deps.now ?? (() => Date.now());
     this.authority = deps.authority ?? NULL_AUTHORITY_WRITER;
   }
@@ -290,10 +303,13 @@ export class NativeActivationHost {
     // lineage query joins against.
     const participantId = `specialist::${request.specialist}`;
 
+    // The forensic event field keeps its storage name (bead_id column in
+    // observability.db) but carries the ISSUE ref post-A7; storage-column
+    // renames are fleet-sweep territory, not runtime-boundary territory.
     const emit = (name: string, payload?: Record<string, unknown>) =>
       this.forensics.emit({
         activationId, attemptId, participantId,
-        specialist: request.specialist, beadId: request.beadId, name, payload,
+        specialist: request.specialist, beadId: request.issueRef, name, payload,
       });
 
     emit('activation_requested', {
@@ -306,7 +322,7 @@ export class NativeActivationHost {
       emit('activation_rejected', { reason, ...detail });
       throw new DispatchRejectedError(reason, {
         specialist: request.specialist,
-        beadId: request.beadId,
+        issueRef: request.issueRef,
         ...detail,
       });
     };
@@ -328,16 +344,111 @@ export class NativeActivationHost {
     // them, is worse than no comment.
     const access: WorkspaceAccess = WRITE_TIERS.has(tier) ? 'write' : 'read';
 
-    const bead = this.beadsClient.readBead(request.beadId);
-    if (!bead) return reject('bead_unreadable');
+    // The workspace is resolved BEFORE the work gate: the dispatch gate binds
+    // workspace into its verdict, and hint-or-cwd is available without the
+    // model or tool contracts that follow.
+    const workspace: WorkspaceIdentity = request.workspaceHint ?? {
+      repositoryRoot: this.cwd,
+      worktreePath: this.cwd,
+    };
 
-    // `--bead` is the prompt. A Bead that is not a usable task contract is refused here,
-    // before a model turn is spent guessing at the scope it does not carry.
-    const readiness = evaluateBeadReadiness(bead, this.beadGate);
-    if (!readiness.ok) {
-      return reject('bead_contract_incomplete', {
-        note: readiness.reason,
-        ...(readiness.missing.length > 0 ? { missing: readiness.missing } : {}),
+    // Shared Substrate work boundary (§8-§12). No Beads client, no bd
+    // subprocess, no second readiness derivation: the gate lives in the
+    // substrate dispatch service and this host only renders its refusals.
+    let workItems: SpecialistWorkItemBoundary;
+    try {
+      workItems = await this.resolveWorkItems();
+    } catch (error) {
+      return reject('work_item_store_unavailable', {
+        note: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    // Inline-contract dispatch (§10): the host owns creation — validate →
+    // create → attest → claim through the boundary, then dispatch against the
+    // created issue. Adapters pre-check with validateContractText for the
+    // refusal shape; inlineCreate re-validates authoritatively, so a refusal
+    // here still leaves the board unchanged. Creation runs BEFORE any session
+    // exists and claims WITH this activation's id, satisfying the strict
+    // claim-activation equality the bind path enforces.
+    const inlineContract = (request.contract ?? '').trim();
+    let autoCreatedRef: string | undefined;
+    if (inlineContract) {
+      if (request.issueRef) {
+        return reject('contract_and_ref', {
+          note: 'contract and issueRef were both provided — provide exactly one',
+        });
+      }
+      try {
+        const created = workItems.inlineCreate(inlineContract, {
+          ...(request.title ? { title: request.title } : {}),
+          holder: participantId,
+          activationId,
+        });
+        autoCreatedRef = created.ref;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.startsWith('inline contract is not a usable task contract')) {
+          const rechecked = validateContractText(inlineContract);
+          return reject('issue_not_dispatchable', {
+            note: message,
+            ...(!rechecked.ok ? { missing: rechecked.missing } : {}),
+          });
+        }
+        // Creation infra failure (issue may exist without a claim): surface,
+        // never claim the board is unchanged.
+        throw error;
+      }
+    }
+    const issueRef = autoCreatedRef ?? request.issueRef ?? '';
+    if (!issueRef) {
+      return reject('no_work_ref', {
+        note: 'neither issueRef nor contract was provided — dispatch requires an existing issue or an inline contract',
+      });
+    }
+
+    let view: WorkItemView;
+    try {
+      view = workItems.view(issueRef);
+    } catch (error) {
+      return reject('issue_unresolvable', {
+        note: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    // `--issue` is the prompt. An Issue that is not dispatchable (draft,
+    // unattested, blocked, deferred, terminal) is refused here, before a model
+    // turn is spent guessing at the scope it does not carry. Scope-expanding
+    // requests refuse the same way (§39.1: requestedScope may only narrow).
+    let dispatchCheck: ReturnType<SpecialistWorkItemBoundary['check']>;
+    try {
+      dispatchCheck = workItems.check({
+        ref: issueRef,
+        specialist: request.specialist,
+        holder: participantId,
+        // The landed producer gate fences claimed dispatch on holder +
+        // activation at CHECK time (anti-steal); the read-only check must
+        // carry the same identity the bind will pin, or live-held issues
+        // refuse here. Unclaimed issues ignore it.
+        activationId,
+        workspace: workspace.worktreePath,
+      });
+      // The first view is only for resolution/error reporting. Re-read the
+      // admitted revision after the gate so prompt and StepContract cannot use
+      // a pre-gate "latest" if an edit raced the read-only check.
+      view = workItems.view(issueRef);
+      if (view.revision !== dispatchCheck.revision || view.contractHash !== dispatchCheck.contractHash) {
+        return reject('issue_revision_diverged', {
+          note: 'issue changed between resolution and the read-only dispatch check; retry against the new revision',
+        });
+      }
+    } catch (error) {
+      const note = error instanceof Error ? error.message : String(error);
+      const missing = note.match(/missing(?: required sections)?:\s*([^;]+)/i)?.[1]
+        ?.split(',').map((entry) => entry.trim()).filter(Boolean);
+      return reject('issue_not_dispatchable', {
+        note,
+        ...(missing?.length ? { missing } : {}),
       });
     }
 
@@ -414,11 +525,6 @@ export class NativeActivationHost {
     }
     const resolvedModel = modelCheck.resolvedModel ?? modelChain[modelIndex] ?? requestedModel;
 
-    const workspace: WorkspaceIdentity = request.workspaceHint ?? {
-      repositoryRoot: this.cwd,
-      worktreePath: this.cwd,
-    };
-
     // PRD Phase 10 / §52. A writer takes the lease BEFORE a session exists, so contention
     // is refused without spending a model turn, and so a refused writer never reaches the
     // point where it could mutate anything. A reader takes nothing: it is not entitled to
@@ -447,8 +553,11 @@ export class NativeActivationHost {
 
     // PRD §15: bound this activation to its role. Derived and in-memory — compiling a
     // StepContract creates no issue, chain, or graph (Phase 4, invariant 4).
+    // Compiled from the RESOLVED issue revision: the contract the worker sees
+    // is the contract the gate admitted, not a later "latest" (§9).
     const stepContract = compileStepContract({
-      bead,
+      work: { ref: view.ref, title: view.title, contract: view.contract },
+      revision: dispatchCheck.revision,
       specialist: specialist.specialist.metadata.name,
       responseFormat: execution.response_format,
       now: this.now,
@@ -461,7 +570,7 @@ export class NativeActivationHost {
       non_goals: stepContract.nonGoals.length,
       constraints: stepContract.constraints?.length ?? 0,
       validation: stepContract.validation?.length ?? 0,
-      source_bead_revision: stepContract.provenance.sourceBeadRevision ?? null,
+      source_issue_revision: stepContract.provenance.sourceIssueRevision ?? null,
     });
 
     emit('activation_admitted', {
@@ -477,18 +586,16 @@ export class NativeActivationHost {
       custom_tools: `${ASK_TOOL},${ESCALATE_TOOL}`,
     });
 
-    const epicAncestors = collectEpicAncestors(
-      (id) => this.beadsClient.readBead(id),
-      bead,
-      request.epicContextDepth,
-    );
+    // §11: lineage comes from Substrate parent_child edges, not a Beads
+    // dependency walk, and obeys the same inheritance rules as the store.
+    const epicAncestors = workItems.epicAncestors(issueRef, request.epicContextDepth ?? 0);
 
     const rendered = renderTaskPrompt({
       specialist: specialist.specialist,
       cwd: this.cwd,
-      beadId: request.beadId,
-      bead,
-      epicAncestors,
+      beadId: view.ref,
+      bead: workItemAsRecord(view),
+      epicAncestors: epicAncestors.map(workAncestorAsRecord),
     });
 
     const systemPrompt = buildSystemPrompt({
@@ -497,12 +604,19 @@ export class NativeActivationHost {
       bare: execution.bare ?? false,
       runCwd: this.cwd,
       specialistName: specialist.specialist.metadata.name,
-      inputBeadId: request.beadId,
+      inputIssueRef: view.ref,
       responseFormat: execution.response_format ?? 'text',
       outputType: execution.output_type ?? 'custom',
       outputContractSchema: undefined,
       beadContextText: rendered.beadContextText ?? '',
-      readBeadForMemory: (id) => this.beadsClient.readBead(id),
+      readBeadForMemory: (id) => {
+        try {
+          const v = workItems.view(id);
+          return { title: v.title, description: contractToMarkdown(v.contract) };
+        } catch {
+          return null;
+        }
+      },
     });
 
     emit('activation_starting', { pi_session_id: null });
@@ -584,17 +698,45 @@ export class NativeActivationHost {
 
     const { session } = await sdk.createAgentSession({ ...baseSessionOptions, model: modelCheck.model });
 
+    // §49 dispatch step: the mutation lands at activation start, once the
+    // physical session exists, so the ExecutionBinding can pin the real
+    // session id alongside issue/revision/hash/claim/participant/activation/
+    // attempt/workspace (§9). A concurrent contract edit between the
+    // read-only check above and this binding refuses here — the divergence
+    // check is inside the substrate dispatch gate, never re-derived.
+    let binding: ReturnType<SpecialistWorkItemBoundary['bind']>;
+    try {
+      binding = workItems.bind({
+        ref: issueRef,
+        specialist: request.specialist,
+        holder: participantId,
+        activationId,
+        attemptId,
+        sessionId: session.sessionId,
+        workspace: workspace.worktreePath,
+      });
+    } catch (error) {
+      try { session.dispose(); } catch { /* best effort before refusing */ }
+      return reject('issue_binding_failed', {
+        note: error instanceof Error ? error.message : String(error),
+      });
+    }
+
     const createSessionForModel = async (model: { id?: string; provider?: string }): Promise<PiAgentSessionLike> => {
       const created = await sdk.createAgentSession({ ...baseSessionOptions, model });
       return created.session;
     };
 
-    const purpose = extractPurposeExcerpt(bead.description ?? '');
+    const purpose = purposeExcerptFromContract(view.contract);
     const startedAt = this.now();
     const snapshot: ActivationSnapshot = {
       activationId, participantId, attemptId,
       specialist: request.specialist,
-      beadId: request.beadId,
+      issueId: view.issueId,
+      issueRef: view.ref,
+      issueRevision: binding.issueRevision,
+      contractHash: binding.contractHash,
+      executionBindingId: binding.id,
       state: 'starting',
       access, workspace,
       piSessionId: session.sessionId,
@@ -641,11 +783,36 @@ export class NativeActivationHost {
     return {
       activationId, participantId, attemptId,
       specialist: request.specialist,
-      beadId: request.beadId,
+      issueId: view.issueId,
+      issueRef: view.ref,
       access, workspace, resolvedModel,
       stepContract,
       result,
     };
+  }
+
+  /**
+   * The shared work boundary for this host.
+   *
+   * Injected wins. Otherwise the canonical store opens lazily on first
+   * dispatch: absent or unopenable refuses fail-closed (§10) — the runtime
+   * never falls back to a second work authority. Opening runs the substrate
+   * migrations, which are append-only and idempotent, so the first dispatch on
+   * a machine whose store exists but predates a migration heals it.
+   */
+  private async resolveWorkItems(): Promise<SpecialistWorkItemBoundary> {
+    if (this.workItemsInjected) return this.workItemsInjected;
+    if (this.workItemsDefault) return this.workItemsDefault;
+    const dbPath = resolveWorkItemDbPath();
+    if (!existsSync(dbPath)) {
+      throw new Error(
+        `no Substrate work store at ${dbPath} (set XTRM_STATE_DB or initialize it via xt init / sb)`,
+      );
+    }
+    // Runtime dynamic import from XTRM_SUBSTRATE_DIR; absent package refuses
+    // fail-closed with work_item_store_unavailable — never a second authority.
+    this.workItemsDefault = await openWorkItemBoundary({ dbPath });
+    return this.workItemsDefault;
   }
 
   /**
@@ -683,7 +850,7 @@ export class NativeActivationHost {
       attemptId: snapshot.attemptId,
       participantId: snapshot.participantId,
       specialist: snapshot.specialist,
-      beadId: snapshot.beadId,
+      beadId: snapshot.issueRef,
       piSessionId: snapshot.piSessionId ?? '',
       workspacePath: snapshot.workspace.worktreePath,
       event,
@@ -746,7 +913,11 @@ export class NativeActivationHost {
           activationId: snapshot.activationId,
           participantId: snapshot.participantId,
           attemptId: snapshot.attemptId,
-          beadId: snapshot.beadId,
+          issueId: snapshot.issueId,
+          issueRef: snapshot.issueRef,
+          issueRevision: snapshot.issueRevision,
+          contractHash: snapshot.contractHash,
+          executionBindingId: snapshot.executionBindingId,
           status: 'failed',
           output: undefined,
           validation: { valid: false, errors: [detail] },
@@ -779,7 +950,11 @@ export class NativeActivationHost {
         activationId: snapshot.activationId,
         participantId: snapshot.participantId,
         attemptId: snapshot.attemptId,
-        beadId: snapshot.beadId,
+        issueId: snapshot.issueId,
+        issueRef: snapshot.issueRef,
+        issueRevision: snapshot.issueRevision,
+        contractHash: snapshot.contractHash,
+        executionBindingId: snapshot.executionBindingId,
         status: 'completed',
         output,
         validation,
@@ -803,7 +978,11 @@ export class NativeActivationHost {
         activationId: snapshot.activationId,
         participantId: snapshot.participantId,
         attemptId: snapshot.attemptId,
-        beadId: snapshot.beadId,
+        issueId: snapshot.issueId,
+        issueRef: snapshot.issueRef,
+        issueRevision: snapshot.issueRevision,
+        contractHash: snapshot.contractHash,
+        executionBindingId: snapshot.executionBindingId,
         status: 'failed',
         output: undefined,
         validation: { valid: false, errors: [message] },
@@ -978,7 +1157,7 @@ export class NativeActivationHost {
         if (error instanceof DispatchRejectedError) {
           this.forensics.emit({
             activationId, attemptId, participantId: record.snapshot.participantId,
-            specialist: record.snapshot.specialist, beadId: record.snapshot.beadId,
+            specialist: record.snapshot.specialist, beadId: record.snapshot.issueRef,
             name: 'lease_denied',
             payload: { reason: error.reason, note: error.detail.holder, on: 'retry' },
           });
@@ -994,7 +1173,7 @@ export class NativeActivationHost {
     const emit = (name: string, payload?: Record<string, unknown>) =>
       this.forensics.emit({
         activationId, attemptId, participantId: record.snapshot.participantId,
-        specialist: record.snapshot.specialist, beadId: record.snapshot.beadId, name, payload,
+        specialist: record.snapshot.specialist, beadId: record.snapshot.issueRef, name, payload,
       });
 
     let reusedSession = true;
@@ -1029,7 +1208,9 @@ export class NativeActivationHost {
 
     return {
       activationId, participantId: record.snapshot.participantId, attemptId,
-      specialist: record.snapshot.specialist, beadId: record.snapshot.beadId,
+      specialist: record.snapshot.specialist,
+      issueId: record.snapshot.issueId,
+      issueRef: record.snapshot.issueRef,
       access: record.snapshot.access, workspace: record.snapshot.workspace,
       resolvedModel: record.snapshot.resolvedModel,
       stepContract: record.stepContract,
@@ -1105,7 +1286,7 @@ export class NativeActivationHost {
         attemptId: snapshot.attemptId,
         participantId: snapshot.participantId,
         specialist: snapshot.specialist,
-        beadId: snapshot.beadId,
+        beadId: snapshot.issueRef,
         name: 'lease_released',
         payload: { workspace: snapshot.workspace.worktreePath, reason },
       });
@@ -1115,7 +1296,7 @@ export class NativeActivationHost {
         attemptId: snapshot.attemptId,
         participantId: snapshot.participantId,
         specialist: snapshot.specialist,
-        beadId: snapshot.beadId,
+        beadId: snapshot.issueRef,
         name: 'lease_uncertain',
         payload: {
           workspace: snapshot.workspace.worktreePath,
@@ -1159,7 +1340,7 @@ export class NativeActivationHost {
         attemptId: record.snapshot.attemptId,
         participantId: record.snapshot.participantId,
         specialist: record.snapshot.specialist,
-        beadId: record.snapshot.beadId,
+        beadId: record.snapshot.issueRef,
         name: 'tool_blocked',
         payload: { tool: toolName, note: verdict.reason },
       });
@@ -1244,7 +1425,7 @@ export class NativeActivationHost {
         attemptId: record.snapshot.attemptId,
         participantId: record.snapshot.participantId,
         specialist: record.snapshot.specialist,
-        beadId: record.snapshot.beadId,
+        beadId: record.snapshot.issueRef,
         name: 'activation_disposed',
         payload: { reason },
       });
@@ -1303,7 +1484,7 @@ export class NativeActivationHost {
         if (error instanceof DispatchRejectedError) {
           this.forensics.emit({
             activationId, attemptId, participantId: record.snapshot.participantId,
-            specialist: record.snapshot.specialist, beadId: record.snapshot.beadId,
+            specialist: record.snapshot.specialist, beadId: record.snapshot.issueRef,
             name: 'lease_denied',
             payload: { reason: error.reason, note: error.detail.holder, on: 'resume' },
           });
@@ -1318,7 +1499,7 @@ export class NativeActivationHost {
     const emit = (name: string, payload?: Record<string, unknown>) =>
       this.forensics.emit({
         activationId, attemptId, participantId: record.snapshot.participantId,
-        specialist: record.snapshot.specialist, beadId: record.snapshot.beadId, name, payload,
+        specialist: record.snapshot.specialist, beadId: record.snapshot.issueRef, name, payload,
       });
     // A resumed attempt carried no payload, so an override could not be shown to survive a
     // resume from observability.db — only from memory, which is not evidence.
@@ -1338,13 +1519,72 @@ export class NativeActivationHost {
 
     return {
       activationId, participantId: record.snapshot.participantId, attemptId,
-      specialist: record.snapshot.specialist, beadId: record.snapshot.beadId,
+      specialist: record.snapshot.specialist,
+      issueId: record.snapshot.issueId,
+      issueRef: record.snapshot.issueRef,
       access: record.snapshot.access, workspace: record.snapshot.workspace,
       resolvedModel: record.snapshot.resolvedModel,
       stepContract: record.stepContract,
       result,
     };
   }
+}
+
+/**
+ * Project a resolved issue view onto the record shape the shared prompt
+ * renderer consumes. The renderer's parameter type predates the substrate
+ * boundary and is shared with the legacy CLI surface; the projection keeps
+ * this host decoupled from it without forking the renderer (PR2 migrates the
+ * renderer vocabulary itself).
+ */
+function workItemAsRecord(view: WorkItemView): { id: string; title: string; description?: string } {
+  return { id: view.ref, title: view.title, description: contractToMarkdown(view.contract) };
+}
+
+function workAncestorAsRecord(ancestor: EpicAncestor): { id: string; title: string; description?: string } {
+  return { id: ancestor.ref, title: ancestor.title, ...(ancestor.description ? { description: ancestor.description } : {}) };
+}
+
+/** Capture the same one-line purpose projection as the legacy path, without markdown bullets. */
+function purposeExcerptFromContract(contract: unknown): string {
+  if (contract !== null && typeof contract === 'object') {
+    const c = contract as Record<string, unknown>;
+    const scope = Array.isArray(c['scope']) ? c['scope'].filter((item): item is string => typeof item === 'string') : [];
+    const success = typeof c['success'] === 'string' ? c['success'] : '';
+    const first = scope[0] ?? success;
+    if (first) {
+      const flat = first.trim().replace(/\s+/g, ' ');
+      return flat.length <= 160 ? flat : `${flat.slice(0, 159)}…`;
+    }
+  }
+  return extractPurposeExcerpt(contractToMarkdown(contract)) ?? '';
+}
+
+/** Render a structured work contract back to the 7-section layout the prompt surface reads. */
+export function contractToMarkdown(contract: unknown): string {
+  if (contract === null || typeof contract !== 'object') return '';
+  const c = contract as Record<string, unknown>;
+  const lines: string[] = [];
+  const text = (v: unknown): string => (typeof v === 'string' ? v : '');
+  const list = (v: unknown): string[] => (Array.isArray(v) ? v.map((x) => (typeof x === 'string' ? x : typeof x === 'object' && x !== null ? Object.values(x as Record<string, unknown>).filter((y) => typeof y === 'string').join(': ') : String(x))) : []);
+  const problem = text(c['problem']);
+  if (problem) lines.push(`PROBLEM: ${problem}`);
+  const success = text(c['success']);
+  if (success) lines.push(`SUCCESS: ${success}`);
+  const sections: Array<[string, unknown]> = [
+    ['SCOPE', c['scope']],
+    ['NON_GOALS', c['nonGoals']],
+    ['CONSTRAINTS', c['constraints']],
+    ['VALIDATION', c['validation']],
+    ['OUTPUT', c['output']],
+  ];
+  for (const [name, value] of sections) {
+    const items = list(value);
+    if (items.length === 0) continue;
+    lines.push(`${name}:`);
+    for (const item of items) lines.push(`- ${item}`);
+  }
+  return lines.join('\n');
 }
 
 /** Structural view of a pi assistant message. */

@@ -16166,6 +16166,8 @@ import { spawnSync as spawnSync4 } from "node:child_process";
 
 // src/activation/bead-gate.ts
 import { spawnSync as spawnSync3 } from "node:child_process";
+
+// src/activation/contract-sections.ts
 var REQUIRED_SECTIONS = [
   "PROBLEM",
   "SUCCESS",
@@ -16176,18 +16178,6 @@ var REQUIRED_SECTIONS = [
   "OUTPUT"
 ];
 var SCRUTINY_LEVELS = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
-var NON_DISPATCHABLE_STATUSES = new Set(["closed", "deferred"]);
-function readContractState(beadId) {
-  const result = spawnSync3("bd", ["state", beadId, "contract"], {
-    encoding: "utf-8",
-    stdio: ["ignore", "pipe", "ignore"],
-    timeout: 5000
-  });
-  if (result.error || result.status !== 0)
-    return;
-  const value = result.stdout?.trim().toLowerCase();
-  return value ? value : undefined;
-}
 var ALL_HEADINGS = new Set([...REQUIRED_SECTIONS, "SCRUTINY"]);
 function headingOf(line) {
   const bare = line.trim().replace(/^#+\s*/, "").replace(/\*/g, "").trim();
@@ -16203,6 +16193,29 @@ function headingOf(line) {
     return;
   const inlineBody = split[2].trim();
   return inlineBody ? { name, inlineBody } : { name };
+}
+function scrutinyLevel(description) {
+  const match = description.match(/SCRUTINY\b[^\n]*\n?\s*\**\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i) ?? description.match(/SCRUTINY\b\s*[:\-—]?\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i);
+  return match?.[1]?.toUpperCase();
+}
+function validateContractText(contract) {
+  const sections = extractSections(contract ?? "");
+  const missing = [...REQUIRED_SECTIONS.filter((section) => !sections.get(section))];
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      reason: "inline contract is not a usable task contract: required sections are missing or empty",
+      missing
+    };
+  }
+  if (!scrutinyLevel(contract)) {
+    return {
+      ok: false,
+      reason: `inline contract declares no SCRUTINY level (expected one of ${SCRUTINY_LEVELS.join(", ")})`,
+      missing: ["SCRUTINY"]
+    };
+  }
+  return { ok: true };
 }
 function extractSections(description) {
   const sections = new Map;
@@ -16228,6 +16241,19 @@ function extractSections(description) {
   flush();
   return sections;
 }
+// src/activation/bead-gate.ts
+var NON_DISPATCHABLE_STATUSES = new Set(["closed", "deferred"]);
+function readContractState(beadId) {
+  const result = spawnSync3("bd", ["state", beadId, "contract"], {
+    encoding: "utf-8",
+    stdio: ["ignore", "pipe", "ignore"],
+    timeout: 5000
+  });
+  if (result.error || result.status !== 0)
+    return;
+  const value = result.stdout?.trim().toLowerCase();
+  return value ? value : undefined;
+}
 var PURPOSE_EXCERPT_MAX = 60;
 function extractPurposeExcerpt(description) {
   const sections = extractSections(description ?? "");
@@ -16240,10 +16266,6 @@ function extractPurposeExcerpt(description) {
     return flat.length <= PURPOSE_EXCERPT_MAX ? flat : `${flat.slice(0, PURPOSE_EXCERPT_MAX - 1)}…`;
   }
   return;
-}
-function scrutinyLevel(description) {
-  const match = description.match(/SCRUTINY\b[^\n]*\n?\s*\**\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i) ?? description.match(/SCRUTINY\b\s*[:\-—]?\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i);
-  return match?.[1]?.toUpperCase();
 }
 function evaluateBeadReadiness(bead, options = {}) {
   const status = bead.status?.trim().toLowerCase();
@@ -16317,26 +16339,6 @@ function buildBeadContext(bead, completedBlockers = [], epicAncestors = []) {
   return lines.join(`
 `).trim();
 }
-function collectEpicAncestors(readBead, bead, depth) {
-  if (depth !== 1 && depth !== 2)
-    return [];
-  const ancestors = [];
-  let parentId = bead.parent?.trim();
-  for (let i = 0;i < depth && parentId; i++) {
-    let parent = null;
-    try {
-      parent = readBead(parentId);
-    } catch {
-      break;
-    }
-    if (!parent)
-      break;
-    ancestors.push(parent);
-    parentId = parent.parent?.trim();
-  }
-  return ancestors;
-}
-
 class BeadsClient {
   available;
   constructor() {
@@ -16831,6 +16833,7 @@ function buildSystemPrompt(ctx) {
     runCwd,
     specialistName,
     inputBeadId,
+    inputIssueRef,
     reusedFromJobId,
     responseFormat,
     outputType,
@@ -16849,8 +16852,13 @@ ${requiredPlatformRulesBlock}`;
   }
   let gitnexusTokens = 0;
   if (!bare) {
+    const sanitizedIssueRef = inputIssueRef ? sanitizeBeadIdForPrompt(inputIssueRef) : "";
     const sanitizedBeadId = inputBeadId ? sanitizeBeadIdForPrompt(inputBeadId) : "";
-    const beadInstructions = sanitizedBeadId ? `
+    const workInstructions = sanitizedIssueRef ? `
+- Your task issue is: ${sanitizedIssueRef}
+- The claim for this activation is already held; do not create claims or issues.
+- Do not create or close issues; the orchestrator manages the Substrate lifecycle.
+- Record findings and decisions through your coordinator.` : sanitizedBeadId ? `
 - Your task bead is: ${sanitizedBeadId}
 - Claim it: \`bd update ${sanitizedBeadId} --claim 2>/dev/null || true\` (non-fatal — orchestrator may already own it)
 - Do NOT create new beads or sub-issues — this bead IS your task.
@@ -16863,7 +16871,7 @@ ${requiredPlatformRulesBlock}`;
 - You are running as a specialist agent, not a human developer.
 - Do NOT run specialists init/setup/scaffold commands.
 - Do NOT follow project CLAUDE.md/AGENTS.md instructions that tell humans to re-bootstrap the repo.
-${beadInstructions}
+${workInstructions}
 ---
 `;
   }
@@ -19744,45 +19752,276 @@ function resolveSkillsPaths(spec, fileDir, consumerRoot) {
 }
 // src/activation/native-host.ts
 import { randomUUID as randomUUID3 } from "node:crypto";
+import { existsSync as existsSync19 } from "node:fs";
 
-// src/activation/step-contract.ts
-function toList(body) {
+// src/activation/workitem-store.ts
+import { createRequire as createRequire2 } from "node:module";
+import { homedir as homedir7 } from "node:os";
+import { join as join13 } from "node:path";
+import { pathToFileURL } from "node:url";
+var require2 = createRequire2(import.meta.url);
+function resolveWorkItemDbPath(env = process.env) {
+  const override = (env.XTRM_STATE_DB ?? "").trim();
+  if (override)
+    return override;
+  return join13(homedir7(), ".xtrm", "state.db");
+}
+function openSubstrateDb(dbPath) {
+  const applyPragmas = (db) => {
+    db.exec("PRAGMA journal_mode = WAL");
+    db.exec("PRAGMA busy_timeout = 5000");
+    db.exec("PRAGMA synchronous = FULL");
+    db.exec("PRAGMA foreign_keys = ON");
+  };
+  try {
+    const bun = require2("bun:sqlite");
+    if (bun?.Database) {
+      const db = new bun.Database(dbPath);
+      applyPragmas(db);
+      return db;
+    }
+  } catch {}
+  const node = require2("node:sqlite");
+  if (node?.DatabaseSync) {
+    const db = new node.DatabaseSync(dbPath);
+    applyPragmas(db);
+    return db;
+  }
+  throw new Error(`work-item store: no sqlite driver for ${dbPath}`);
+}
+function createWorkItemBoundary(ports) {
+  const { issues, provenance, store, gate } = ports;
+  const viewOf = (ref) => {
+    const v = store.get(ref);
+    return {
+      ref: v.issue.humanRef,
+      issueId: v.issue.id,
+      revision: v.issue.currentRevision,
+      contractHash: v.issue.currentContractHash,
+      title: v.issue.title,
+      contract: v.contract,
+      readinessState: v.readinessState,
+      dispatchable: v.dispatchable,
+      reasons: v.reasons
+    };
+  };
+  return {
+    view(ref) {
+      return viewOf(ref);
+    },
+    epicAncestors(ref, depth) {
+      if (depth !== 1 && depth !== 2)
+        return [];
+      const ancestors = [];
+      const seen = new Set;
+      let childId = issues.resolveRef(ref).id;
+      for (let i = 0;i < depth; i += 1) {
+        const parent = issues.getParent(childId);
+        if (!parent)
+          break;
+        if (seen.has(parent.id))
+          break;
+        seen.add(parent.id);
+        const rev = issues.getRevision(parent.id, parent.currentRevision);
+        ancestors.push({
+          ref: parent.humanRef,
+          title: parent.title,
+          description: typeof rev.contract === "object" && rev.contract !== null ? String(rev.contract.problem ?? "") : undefined
+        });
+        childId = parent.id;
+      }
+      return ancestors;
+    },
+    check(req) {
+      const check = gate.check(issues, req);
+      return { issueId: check.issueId, revision: check.revision, contractHash: check.contractHash, report: check.report };
+    },
+    bind(req) {
+      const issueId = issues.resolveRef(req.ref).id;
+      const active = issues.getActiveClaim(issueId);
+      if (active) {
+        if (active.holder !== req.holder) {
+          throw new Error(`dispatch refused: issue is claimed by '${active.holder}' — holder '${req.holder}' must claim first`);
+        }
+        const claimActivation = active.activationId ?? null;
+        const reqActivation = req.activationId ?? null;
+        if (claimActivation !== reqActivation) {
+          throw new Error("dispatch refused: claim activation does not match dispatch activation — claim with the dispatching activation id");
+        }
+        if (req.claimId != null && req.claimId !== active.id) {
+          throw new Error(`dispatch refused: supplied claim ${req.claimId} is not the active claim ${active.id}`);
+        }
+      }
+      const claimId = active?.id ?? req.claimId ?? undefined;
+      const out = gate.dispatch(issues, provenance, { ...req, claimId });
+      return out.binding;
+    },
+    inlineCreate(contract, opts = {}) {
+      const validation = validateContractText(contract);
+      if (!validation.ok) {
+        throw new Error(`${validation.reason}: ${validation.missing.join(", ")}`);
+      }
+      const sections = extractSections(contract);
+      const scrutiny = scrutinyLevel(contract) ?? "MEDIUM";
+      const problem = sections.get("PROBLEM") ?? "";
+      const firstLine = problem.split(`
+`).map((s) => s.trim()).find(Boolean);
+      const contractObj = {
+        problem,
+        success: sections.get("SUCCESS") ?? "",
+        scope: splitLines(sections.get("SCOPE")),
+        nonGoals: splitLines(sections.get("NON_GOALS")),
+        constraints: splitLines(sections.get("CONSTRAINTS")),
+        validation: splitLines(sections.get("VALIDATION")).map((check) => ({ check })),
+        output: splitLines(sections.get("OUTPUT")).map((artifact) => ({ artifact }))
+      };
+      const holder = opts.holder ?? "adapter::specialists";
+      const { projectId } = issues.resolveProject({ gitRoot: process.cwd() });
+      const issue = issues.createIssue({
+        projectId,
+        title: opts.title ?? (firstLine ?? "Specialist dispatch contract").slice(0, 72),
+        kind: "task",
+        contract: contractObj,
+        scrutiny,
+        authoredBy: holder
+      });
+      const { claim } = issues.claimReady(issue.id, holder, { outcome: "ready", policy: "default", attestedBy: holder }, { activationId: opts.activationId });
+      return { ref: issues.resolveRef(issue.id).humanRef, issueId: issue.id, claimId: claim.id };
+    },
+    journal(ref, kind, opts = {}) {
+      store.addJournal(ref, kind, opts);
+    }
+  };
+}
+function splitLines(body) {
   if (!body)
     return [];
   return body.split(`
-`).map((line) => line.trim().replace(/^[-*•]\s*/, "").replace(/^\d+[.)]\s*/, "").trim()).filter((line) => line.length > 0);
+`).map((l) => l.trim().replace(/^[-*•]\s*/, "").replace(/^\d+[.)]\s*/, "").trim()).filter((l) => l.length > 0);
+}
+async function openWorkItemBoundary(opts = {}) {
+  const env = opts.env ?? process.env;
+  const substrateDir = (opts.substrateDir ?? (env.XTRM_SUBSTRATE_DIR ?? "")).trim();
+  if (!substrateDir) {
+    throw new Error("work_item_store_unavailable: no Substrate package configured (set XTRM_SUBSTRATE_DIR to a built @xtrm/substrate checkout)");
+  }
+  let pkgName;
+  try {
+    const pkgRaw = await import(pathToFileURL(join13(substrateDir, "package.json")).href, { with: { type: "json" } });
+    pkgName = pkgRaw.default?.name;
+  } catch (error) {
+    throw new Error(`work_item_store_unavailable: cannot read Substrate package identity at ${substrateDir}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (pkgName !== "@xtrm/substrate") {
+    throw new Error(`work_item_store_unavailable: expected @xtrm/substrate at ${substrateDir}, found ${JSON.stringify(pkgName) ?? "no name"}`);
+  }
+  const load = async (rel) => {
+    try {
+      return await import(pathToFileURL(join13(substrateDir, rel)).href);
+    } catch (error) {
+      throw new Error(`work_item_store_unavailable: cannot load Substrate module ${rel}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+  const [runner, issueSvcMod, journalMod, provMod, storeMod, gateMod] = await Promise.all([
+    load("src/store/migrations/runner.ts"),
+    load("src/service/issue-service.ts"),
+    load("src/service/journal-service.ts"),
+    load("src/service/provenance-service.ts"),
+    load("src/workitems/substrate-store.ts"),
+    load("src/workitems/dispatch-gate.ts")
+  ]);
+  for (const [mod, name] of [
+    [runner, "migrate"],
+    [issueSvcMod, "IssueService"],
+    [journalMod, "JournalService"],
+    [provMod, "ProvenanceService"],
+    [storeMod, "SubstrateIssueStore"],
+    [gateMod, "checkDispatch"],
+    [gateMod, "dispatchToSpecialist"]
+  ]) {
+    if (typeof mod[name] === "undefined") {
+      throw new Error(`work_item_store_unavailable: Substrate module is missing export ${name}`);
+    }
+  }
+  const dbPath = opts.dbPath ?? resolveWorkItemDbPath(env);
+  const db = openSubstrateDb(dbPath);
+  runner.migrate(db);
+  const issues = new issueSvcMod.IssueService(db);
+  const journalSvc = new journalMod.JournalService(db, issues);
+  const provenance = new provMod.ProvenanceService(db, issues, journalSvc);
+  const store = new storeMod.SubstrateIssueStore(issues, journalSvc);
+  return createWorkItemBoundary({
+    issues,
+    provenance,
+    store,
+    gate: {
+      check: (i, r) => gateMod.checkDispatch(i, r),
+      dispatch: (i, p, r) => gateMod.dispatchToSpecialist(i, p, r)
+    }
+  });
+}
+var NULL_WORK_ITEMS = {
+  view: () => {
+    throw new Error("no work-item store: test double");
+  },
+  epicAncestors: () => [],
+  check: () => {
+    throw new Error("no work-item store: test double");
+  },
+  bind: () => {
+    throw new Error("no work-item store: test double");
+  },
+  inlineCreate: () => {
+    throw new Error("no work-item store: test double");
+  },
+  journal: () => {}
+};
+
+// src/activation/step-contract.ts
+function asStructured(contract) {
+  const empty = { problem: "", success: "", scope: [], nonGoals: [], constraints: [], validation: [], output: [] };
+  if (contract === null || typeof contract !== "object")
+    return empty;
+  const c = contract;
+  const str = (v) => typeof v === "string" ? v : "";
+  const strList = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+  const objList = (v, key) => (Array.isArray(v) ? v.map((x) => typeof x === "string" ? x : typeof x === "object" && x !== null && typeof x[key] === "string" ? x[key] : "") : []).filter((x) => x.length > 0);
+  return {
+    problem: str(c["problem"]),
+    success: str(c["success"]),
+    scope: strList(c["scope"]),
+    nonGoals: strList(c["nonGoals"]),
+    constraints: strList(c["constraints"]),
+    validation: objList(c["validation"], "check"),
+    output: objList(c["output"], "artifact")
+  };
 }
 function compileStepContract(input) {
-  const { bead, specialist } = input;
+  const { work, revision, specialist } = input;
   const now = input.now ?? (() => Date.now());
-  const sections = extractSections(bead.description ?? "");
-  const scopeText = sections.get("SCOPE") ?? "";
-  const successText = sections.get("SUCCESS") ?? "";
-  const mandate = [successText, scopeText].filter(Boolean).join(`
+  const contract = asStructured(work.contract);
+  const scopeText = contract.scope.join(`
+`);
+  const mandate = [contract.success, scopeText].filter(Boolean).join(`
 
 `);
-  const inputs = [
-    { kind: "bead", ref: bead.id, title: bead.title },
-    ...(bead.dependencies ?? []).filter((dep) => typeof dep?.id === "string" && dep.id.length > 0).map((dep) => ({ kind: "blocker", ref: dep.id }))
-  ];
-  const outputText = sections.get("OUTPUT") ?? "";
-  const outputs = outputText ? [{ description: outputText, ...input.responseFormat ? { format: input.responseFormat } : {} }] : [];
-  const constraints = toList(sections.get("CONSTRAINTS"));
-  const validation = toList(sections.get("VALIDATION")).map((description) => ({ description }));
-  const revision = bead.revision;
+  const inputs = [{ kind: "issue", ref: work.ref, title: work.title }];
+  const outputs = contract.output.map((artifact) => ({ description: artifact, ...input.responseFormat ? { format: input.responseFormat } : {} }));
+  const constraints = contract.constraints;
+  const validation = contract.validation.map((description) => ({ description }));
   return {
-    rootWorkRef: bead.id,
+    rootWorkRef: work.ref,
     mandate,
     inputs,
     outputs,
     scope: { inScope: scopeText },
-    nonGoals: toList(sections.get("NON_GOALS")),
+    nonGoals: contract.nonGoals,
     ...constraints.length > 0 ? { constraints } : {},
     ...validation.length > 0 ? { validation } : {},
     provenance: {
       specialist,
       generatedAt: now(),
-      ...revision === undefined || revision === null ? {} : { sourceBeadRevision: String(revision) }
+      sourceIssueRevision: String(revision)
     }
   };
 }
@@ -19910,19 +20149,19 @@ function composeInteractionMessage(input, identity2) {
 
 // src/activation/transport/pending-store.ts
 import { existsSync as existsSync15, mkdirSync as mkdirSync5, readdirSync as readdirSync2, readFileSync as readFileSync9, renameSync as renameSync2, unlinkSync, writeFileSync as writeFileSync4 } from "node:fs";
-import { join as join13 } from "node:path";
+import { join as join14 } from "node:path";
 var KINDS_AWAITING_REPLY = new Set(["question", "escalation"]);
 function createsPendingAsk(kind) {
   return KINDS_AWAITING_REPLY.has(kind);
 }
 function interactionsRoot(repoRoot) {
-  return join13(repoRoot, ".specialists", "interactions");
+  return join14(repoRoot, ".specialists", "interactions");
 }
 function recordPath(repoRoot, activationId, messageId) {
-  return join13(interactionsRoot(repoRoot), activationId, `${messageId}.json`);
+  return join14(interactionsRoot(repoRoot), activationId, `${messageId}.json`);
 }
 function replyPath(repoRoot, activationId, messageId) {
-  return join13(interactionsRoot(repoRoot), activationId, `${messageId}.reply.json`);
+  return join14(interactionsRoot(repoRoot), activationId, `${messageId}.reply.json`);
 }
 function writeAtomic(path, value, exclusive = false) {
   if (exclusive && existsSync15(path)) {
@@ -19958,7 +20197,7 @@ function create(repoRoot, input) {
     message: input.message,
     delivery: { state: "pending", attempts: [] }
   };
-  mkdirSync5(join13(interactionsRoot(repoRoot), input.activationId), { recursive: true, mode: 448 });
+  mkdirSync5(join14(interactionsRoot(repoRoot), input.activationId), { recursive: true, mode: 448 });
   writeAtomic(recordPath(repoRoot, input.activationId, input.messageId), record, true);
   return record;
 }
@@ -20117,11 +20356,11 @@ import { connect, createServer } from "node:net";
 
 // src/activation/transport/roster.ts
 import { existsSync as existsSync16, readdirSync as readdirSync3, readFileSync as readFileSync10 } from "node:fs";
-import { homedir as homedir7 } from "node:os";
-import { join as join14 } from "node:path";
+import { homedir as homedir8 } from "node:os";
+import { join as join15 } from "node:path";
 var SUPPORTED_PEER_PROTOCOL = 1;
 function defaultRosterDir() {
-  return join14(homedir7(), ".claude", "sessions");
+  return join15(homedir8(), ".claude", "sessions");
 }
 function procProbe() {
   let bootSeconds;
@@ -20200,7 +20439,7 @@ function scanRoster(options = {}) {
       continue;
     let registration;
     try {
-      registration = JSON.parse(readFileSync10(join14(dir, file), "utf-8"));
+      registration = JSON.parse(readFileSync10(join15(dir, file), "utf-8"));
     } catch {
       rejected.push({ file, reason: "unparsable" });
       continue;
@@ -20403,7 +20642,7 @@ function isDeliveredStatus(status) {
 // src/activation/workspace-lease.ts
 import { createHash as createHash5 } from "node:crypto";
 import { existsSync as existsSync17, linkSync, mkdirSync as mkdirSync6, readFileSync as readFileSync11, realpathSync as realpathSync4, renameSync as renameSync3, unlinkSync as unlinkSync2, writeFileSync as writeFileSync5 } from "node:fs";
-import { join as join15 } from "node:path";
+import { join as join16 } from "node:path";
 
 // src/activation/types.ts
 var THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"];
@@ -20417,8 +20656,8 @@ class DispatchRejectedError extends Error {
       "",
       ...detail.activationId ? [`activation:
   ${detail.activationId}`, ""] : [],
-      ...detail.beadId ? [`bead:
-  ${detail.beadId}`, ""] : [],
+      ...detail.issueRef ? [`issue:
+  ${detail.issueRef}`, ""] : [],
       ...detail.specialist ? [`specialist:
   ${detail.specialist}`, ""] : [],
       ...detail.note ? [`note:
@@ -20477,10 +20716,10 @@ function workspaceKey(workspace) {
   return createHash5("sha256").update(resolved).digest("hex").slice(0, 16);
 }
 function leaseDir(workspace) {
-  return join15(workspace.gitCommonDir ?? workspace.repositoryRoot, ".specialists", "leases");
+  return join16(workspace.gitCommonDir ?? workspace.repositoryRoot, ".specialists", "leases");
 }
 function leasePath(workspace) {
-  return join15(leaseDir(workspace), `${workspaceKey(workspace)}.json`);
+  return join16(leaseDir(workspace), `${workspaceKey(workspace)}.json`);
 }
 function inspect(workspace, probe = procLeaseProbe()) {
   const path = leasePath(workspace);
@@ -20754,8 +20993,8 @@ function createAskTools(sdk, ctx) {
 
 // src/activation/pi-sdk.ts
 import { existsSync as existsSync18 } from "node:fs";
-import { join as join16 } from "node:path";
-import { pathToFileURL } from "node:url";
+import { join as join17 } from "node:path";
+import { pathToFileURL as pathToFileURL2 } from "node:url";
 var PI_SDK_PACKAGE = "@earendil-works/pi-coding-agent";
 var REQUIRED_EXPORTS = [
   "createAgentSession",
@@ -20783,9 +21022,9 @@ function piSdkCandidates() {
   const candidates = [PI_SDK_PACKAGE];
   const globalDir = resolveGlobalNodeModulesDir2();
   if (globalDir) {
-    const entry = join16(globalDir, PI_SDK_PACKAGE, "dist", "index.js");
+    const entry = join17(globalDir, PI_SDK_PACKAGE, "dist", "index.js");
     if (existsSync18(entry))
-      candidates.push(pathToFileURL(entry).href);
+      candidates.push(pathToFileURL2(entry).href);
   }
   return candidates;
 }
@@ -21207,8 +21446,8 @@ var RESUMABLE_STATES = new Set(["settled", "waiting", "needs_reply", "escalated"
 var RETRYABLE_STATES = new Set(["failed"]);
 
 // src/activation/authority-store.ts
-import { createRequire as createRequire2 } from "node:module";
-var require2 = createRequire2(import.meta.url);
+import { createRequire as createRequire3 } from "node:module";
+var require3 = createRequire3(import.meta.url);
 var NULL_AUTHORITY_WRITER = { record: () => {}, remove: () => {} };
 
 // src/activation/native-host.ts
@@ -21250,10 +21489,10 @@ var NULL_FORENSIC_SINK = { emit: () => {} };
 
 class NativeActivationHost {
   loader;
-  beadsClient;
+  workItemsInjected;
+  workItemsDefault;
   forensics;
   loadSdk;
-  beadGate;
   cwd;
   now;
   authority;
@@ -21264,10 +21503,9 @@ class NativeActivationHost {
     this.cwd = deps.cwd ?? process.cwd();
     this.interactions = new InteractionTransport(deps.peer ? { deliver: this.wirePeerDelivery(deps.peer) } : {});
     this.loader = deps.loader ?? new SpecialistLoader({ projectDir: this.cwd });
-    this.beadsClient = deps.beadsClient ?? new BeadsClient;
+    this.workItemsInjected = deps.workItems;
     this.forensics = deps.forensics ?? NULL_FORENSIC_SINK;
     this.loadSdk = deps.loadSdk ?? loadPiSdk;
-    this.beadGate = deps.beadGate ?? {};
     this.now = deps.now ?? (() => Date.now());
     this.authority = deps.authority ?? NULL_AUTHORITY_WRITER;
   }
@@ -21280,7 +21518,7 @@ class NativeActivationHost {
       attemptId,
       participantId,
       specialist: request.specialist,
-      beadId: request.beadId,
+      beadId: request.issueRef,
       name,
       payload
     });
@@ -21293,7 +21531,7 @@ class NativeActivationHost {
       emit("activation_rejected", { reason, ...detail });
       throw new DispatchRejectedError(reason, {
         specialist: request.specialist,
-        beadId: request.beadId,
+        issueRef: request.issueRef,
         ...detail
       });
     };
@@ -21307,14 +21545,80 @@ class NativeActivationHost {
     const execution = specialist.specialist.execution;
     const tier = execution.permission_required ?? "READ_ONLY";
     const access = WRITE_TIERS.has(tier) ? "write" : "read";
-    const bead = this.beadsClient.readBead(request.beadId);
-    if (!bead)
-      return reject("bead_unreadable");
-    const readiness = evaluateBeadReadiness(bead, this.beadGate);
-    if (!readiness.ok) {
-      return reject("bead_contract_incomplete", {
-        note: readiness.reason,
-        ...readiness.missing.length > 0 ? { missing: readiness.missing } : {}
+    const workspace = request.workspaceHint ?? {
+      repositoryRoot: this.cwd,
+      worktreePath: this.cwd
+    };
+    let workItems;
+    try {
+      workItems = await this.resolveWorkItems();
+    } catch (error) {
+      return reject("work_item_store_unavailable", {
+        note: error instanceof Error ? error.message : String(error)
+      });
+    }
+    const inlineContract = (request.contract ?? "").trim();
+    let autoCreatedRef;
+    if (inlineContract) {
+      if (request.issueRef) {
+        return reject("contract_and_ref", {
+          note: "contract and issueRef were both provided — provide exactly one"
+        });
+      }
+      try {
+        const created = workItems.inlineCreate(inlineContract, {
+          ...request.title ? { title: request.title } : {},
+          holder: participantId,
+          activationId
+        });
+        autoCreatedRef = created.ref;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.startsWith("inline contract is not a usable task contract")) {
+          const rechecked = validateContractText(inlineContract);
+          return reject("issue_not_dispatchable", {
+            note: message,
+            ...!rechecked.ok ? { missing: rechecked.missing } : {}
+          });
+        }
+        throw error;
+      }
+    }
+    const issueRef = autoCreatedRef ?? request.issueRef ?? "";
+    if (!issueRef) {
+      return reject("no_work_ref", {
+        note: "neither issueRef nor contract was provided — dispatch requires an existing issue or an inline contract"
+      });
+    }
+    let view;
+    try {
+      view = workItems.view(issueRef);
+    } catch (error) {
+      return reject("issue_unresolvable", {
+        note: error instanceof Error ? error.message : String(error)
+      });
+    }
+    let dispatchCheck;
+    try {
+      dispatchCheck = workItems.check({
+        ref: issueRef,
+        specialist: request.specialist,
+        holder: participantId,
+        activationId,
+        workspace: workspace.worktreePath
+      });
+      view = workItems.view(issueRef);
+      if (view.revision !== dispatchCheck.revision || view.contractHash !== dispatchCheck.contractHash) {
+        return reject("issue_revision_diverged", {
+          note: "issue changed between resolution and the read-only dispatch check; retry against the new revision"
+        });
+      }
+    } catch (error) {
+      const note = error instanceof Error ? error.message : String(error);
+      const missing = note.match(/missing(?: required sections)?:\s*([^;]+)/i)?.[1]?.split(",").map((entry) => entry.trim()).filter(Boolean);
+      return reject("issue_not_dispatchable", {
+        note,
+        ...missing?.length ? { missing } : {}
       });
     }
     const toolContract = resolveRuntimeToolContract({
@@ -21369,10 +21673,6 @@ class NativeActivationHost {
       });
     }
     const resolvedModel = modelCheck.resolvedModel ?? modelChain[modelIndex] ?? requestedModel;
-    const workspace = request.workspaceHint ?? {
-      repositoryRoot: this.cwd,
-      worktreePath: this.cwd
-    };
     if (access === "write") {
       try {
         acquire({ workspace, activationId, attemptId, specialist: request.specialist });
@@ -21390,7 +21690,8 @@ class NativeActivationHost {
       emit("lease_acquired", { workspace: workspace.worktreePath });
     }
     const stepContract = compileStepContract({
-      bead,
+      work: { ref: view.ref, title: view.title, contract: view.contract },
+      revision: dispatchCheck.revision,
       specialist: specialist.specialist.metadata.name,
       responseFormat: execution.response_format,
       now: this.now
@@ -21402,7 +21703,7 @@ class NativeActivationHost {
       non_goals: stepContract.nonGoals.length,
       constraints: stepContract.constraints?.length ?? 0,
       validation: stepContract.validation?.length ?? 0,
-      source_bead_revision: stepContract.provenance.sourceBeadRevision ?? null
+      source_issue_revision: stepContract.provenance.sourceIssueRevision ?? null
     });
     emit("activation_admitted", {
       tier,
@@ -21417,13 +21718,13 @@ class NativeActivationHost {
       tools: toolContract.toolsList.join(","),
       custom_tools: `${ASK_TOOL},${ESCALATE_TOOL}`
     });
-    const epicAncestors = collectEpicAncestors((id) => this.beadsClient.readBead(id), bead, request.epicContextDepth);
+    const epicAncestors = workItems.epicAncestors(issueRef, request.epicContextDepth ?? 0);
     const rendered = renderTaskPrompt({
       specialist: specialist.specialist,
       cwd: this.cwd,
-      beadId: request.beadId,
-      bead,
-      epicAncestors
+      beadId: view.ref,
+      bead: workItemAsRecord(view),
+      epicAncestors: epicAncestors.map(workAncestorAsRecord)
     });
     const systemPrompt = buildSystemPrompt({
       systemPromptTemplate: specialist.specialist.prompt.system ?? "",
@@ -21431,12 +21732,19 @@ class NativeActivationHost {
       bare: execution.bare ?? false,
       runCwd: this.cwd,
       specialistName: specialist.specialist.metadata.name,
-      inputBeadId: request.beadId,
+      inputIssueRef: view.ref,
       responseFormat: execution.response_format ?? "text",
       outputType: execution.output_type ?? "custom",
       outputContractSchema: undefined,
       beadContextText: rendered.beadContextText ?? "",
-      readBeadForMemory: (id) => this.beadsClient.readBead(id)
+      readBeadForMemory: (id) => {
+        try {
+          const v = workItems.view(id);
+          return { title: v.title, description: contractToMarkdown(v.contract) };
+        } catch {
+          return null;
+        }
+      }
     });
     emit("activation_starting", { pi_session_id: null });
     const askTools = createAskTools(sdk, {
@@ -21486,18 +21794,41 @@ class NativeActivationHost {
       systemPrompt: systemPrompt.text
     };
     const { session } = await sdk.createAgentSession({ ...baseSessionOptions, model: modelCheck.model });
+    let binding;
+    try {
+      binding = workItems.bind({
+        ref: issueRef,
+        specialist: request.specialist,
+        holder: participantId,
+        activationId,
+        attemptId,
+        sessionId: session.sessionId,
+        workspace: workspace.worktreePath
+      });
+    } catch (error) {
+      try {
+        session.dispose();
+      } catch {}
+      return reject("issue_binding_failed", {
+        note: error instanceof Error ? error.message : String(error)
+      });
+    }
     const createSessionForModel = async (model) => {
       const created = await sdk.createAgentSession({ ...baseSessionOptions, model });
       return created.session;
     };
-    const purpose = extractPurposeExcerpt(bead.description ?? "");
+    const purpose = purposeExcerptFromContract(view.contract);
     const startedAt = this.now();
     const snapshot = {
       activationId,
       participantId,
       attemptId,
       specialist: request.specialist,
-      beadId: request.beadId,
+      issueId: view.issueId,
+      issueRef: view.ref,
+      issueRevision: binding.issueRevision,
+      contractHash: binding.contractHash,
+      executionBindingId: binding.id,
       state: "starting",
       access,
       workspace,
@@ -21539,13 +21870,26 @@ class NativeActivationHost {
       participantId,
       attemptId,
       specialist: request.specialist,
-      beadId: request.beadId,
+      issueId: view.issueId,
+      issueRef: view.ref,
       access,
       workspace,
       resolvedModel,
       stepContract,
       result
     };
+  }
+  async resolveWorkItems() {
+    if (this.workItemsInjected)
+      return this.workItemsInjected;
+    if (this.workItemsDefault)
+      return this.workItemsDefault;
+    const dbPath = resolveWorkItemDbPath();
+    if (!existsSync19(dbPath)) {
+      throw new Error(`no Substrate work store at ${dbPath} (set XTRM_STATE_DB or initialize it via xt init / sb)`);
+    }
+    this.workItemsDefault = await openWorkItemBoundary({ dbPath });
+    return this.workItemsDefault;
   }
   onSessionEvent(snapshot, event, emit) {
     snapshot.lastActivityAt = this.now();
@@ -21562,7 +21906,7 @@ class NativeActivationHost {
       attemptId: snapshot.attemptId,
       participantId: snapshot.participantId,
       specialist: snapshot.specialist,
-      beadId: snapshot.beadId,
+      beadId: snapshot.issueRef,
       piSessionId: snapshot.piSessionId ?? "",
       workspacePath: snapshot.workspace.worktreePath,
       event
@@ -21612,7 +21956,11 @@ class NativeActivationHost {
           activationId: snapshot.activationId,
           participantId: snapshot.participantId,
           attemptId: snapshot.attemptId,
-          beadId: snapshot.beadId,
+          issueId: snapshot.issueId,
+          issueRef: snapshot.issueRef,
+          issueRevision: snapshot.issueRevision,
+          contractHash: snapshot.contractHash,
+          executionBindingId: snapshot.executionBindingId,
           status: "failed",
           output: undefined,
           validation: { valid: false, errors: [detail] },
@@ -21639,7 +21987,11 @@ class NativeActivationHost {
         activationId: snapshot.activationId,
         participantId: snapshot.participantId,
         attemptId: snapshot.attemptId,
-        beadId: snapshot.beadId,
+        issueId: snapshot.issueId,
+        issueRef: snapshot.issueRef,
+        issueRevision: snapshot.issueRevision,
+        contractHash: snapshot.contractHash,
+        executionBindingId: snapshot.executionBindingId,
         status: "completed",
         output,
         validation,
@@ -21662,7 +22014,11 @@ class NativeActivationHost {
         activationId: snapshot.activationId,
         participantId: snapshot.participantId,
         attemptId: snapshot.attemptId,
-        beadId: snapshot.beadId,
+        issueId: snapshot.issueId,
+        issueRef: snapshot.issueRef,
+        issueRevision: snapshot.issueRevision,
+        contractHash: snapshot.contractHash,
+        executionBindingId: snapshot.executionBindingId,
         status: "failed",
         output: undefined,
         validation: { valid: false, errors: [message] },
@@ -21789,7 +22145,7 @@ class NativeActivationHost {
             attemptId,
             participantId: record2.snapshot.participantId,
             specialist: record2.snapshot.specialist,
-            beadId: record2.snapshot.beadId,
+            beadId: record2.snapshot.issueRef,
             name: "lease_denied",
             payload: { reason: error.reason, note: error.detail.holder, on: "retry" }
           });
@@ -21806,7 +22162,7 @@ class NativeActivationHost {
       attemptId,
       participantId: record2.snapshot.participantId,
       specialist: record2.snapshot.specialist,
-      beadId: record2.snapshot.beadId,
+      beadId: record2.snapshot.issueRef,
       name,
       payload
     });
@@ -21840,7 +22196,8 @@ class NativeActivationHost {
       participantId: record2.snapshot.participantId,
       attemptId,
       specialist: record2.snapshot.specialist,
-      beadId: record2.snapshot.beadId,
+      issueId: record2.snapshot.issueId,
+      issueRef: record2.snapshot.issueRef,
       access: record2.snapshot.access,
       workspace: record2.snapshot.workspace,
       resolvedModel: record2.snapshot.resolvedModel,
@@ -21882,7 +22239,7 @@ class NativeActivationHost {
         attemptId: snapshot.attemptId,
         participantId: snapshot.participantId,
         specialist: snapshot.specialist,
-        beadId: snapshot.beadId,
+        beadId: snapshot.issueRef,
         name: "lease_released",
         payload: { workspace: snapshot.workspace.worktreePath, reason }
       });
@@ -21892,7 +22249,7 @@ class NativeActivationHost {
         attemptId: snapshot.attemptId,
         participantId: snapshot.participantId,
         specialist: snapshot.specialist,
-        beadId: snapshot.beadId,
+        beadId: snapshot.issueRef,
         name: "lease_uncertain",
         payload: {
           workspace: snapshot.workspace.worktreePath,
@@ -21916,7 +22273,7 @@ class NativeActivationHost {
         attemptId: record2.snapshot.attemptId,
         participantId: record2.snapshot.participantId,
         specialist: record2.snapshot.specialist,
-        beadId: record2.snapshot.beadId,
+        beadId: record2.snapshot.issueRef,
         name: "tool_blocked",
         payload: { tool: toolName, note: verdict.reason }
       });
@@ -21976,7 +22333,7 @@ class NativeActivationHost {
         attemptId: record2.snapshot.attemptId,
         participantId: record2.snapshot.participantId,
         specialist: record2.snapshot.specialist,
-        beadId: record2.snapshot.beadId,
+        beadId: record2.snapshot.issueRef,
         name: "activation_disposed",
         payload: { reason }
       });
@@ -22019,7 +22376,7 @@ class NativeActivationHost {
             attemptId,
             participantId: record2.snapshot.participantId,
             specialist: record2.snapshot.specialist,
-            beadId: record2.snapshot.beadId,
+            beadId: record2.snapshot.issueRef,
             name: "lease_denied",
             payload: { reason: error.reason, note: error.detail.holder, on: "resume" }
           });
@@ -22035,7 +22392,7 @@ class NativeActivationHost {
       attemptId,
       participantId: record2.snapshot.participantId,
       specialist: record2.snapshot.specialist,
-      beadId: record2.snapshot.beadId,
+      beadId: record2.snapshot.issueRef,
       name,
       payload
     });
@@ -22055,7 +22412,8 @@ class NativeActivationHost {
       participantId: record2.snapshot.participantId,
       attemptId,
       specialist: record2.snapshot.specialist,
-      beadId: record2.snapshot.beadId,
+      issueId: record2.snapshot.issueId,
+      issueRef: record2.snapshot.issueRef,
       access: record2.snapshot.access,
       workspace: record2.snapshot.workspace,
       resolvedModel: record2.snapshot.resolvedModel,
@@ -22063,6 +22421,56 @@ class NativeActivationHost {
       result
     };
   }
+}
+function workItemAsRecord(view) {
+  return { id: view.ref, title: view.title, description: contractToMarkdown(view.contract) };
+}
+function workAncestorAsRecord(ancestor) {
+  return { id: ancestor.ref, title: ancestor.title, ...ancestor.description ? { description: ancestor.description } : {} };
+}
+function purposeExcerptFromContract(contract) {
+  if (contract !== null && typeof contract === "object") {
+    const c = contract;
+    const scope = Array.isArray(c["scope"]) ? c["scope"].filter((item) => typeof item === "string") : [];
+    const success = typeof c["success"] === "string" ? c["success"] : "";
+    const first = scope[0] ?? success;
+    if (first) {
+      const flat = first.trim().replace(/\s+/g, " ");
+      return flat.length <= 160 ? flat : `${flat.slice(0, 159)}…`;
+    }
+  }
+  return extractPurposeExcerpt(contractToMarkdown(contract)) ?? "";
+}
+function contractToMarkdown(contract) {
+  if (contract === null || typeof contract !== "object")
+    return "";
+  const c = contract;
+  const lines = [];
+  const text = (v) => typeof v === "string" ? v : "";
+  const list = (v) => Array.isArray(v) ? v.map((x) => typeof x === "string" ? x : typeof x === "object" && x !== null ? Object.values(x).filter((y) => typeof y === "string").join(": ") : String(x)) : [];
+  const problem = text(c["problem"]);
+  if (problem)
+    lines.push(`PROBLEM: ${problem}`);
+  const success = text(c["success"]);
+  if (success)
+    lines.push(`SUCCESS: ${success}`);
+  const sections = [
+    ["SCOPE", c["scope"]],
+    ["NON_GOALS", c["nonGoals"]],
+    ["CONSTRAINTS", c["constraints"]],
+    ["VALIDATION", c["validation"]],
+    ["OUTPUT", c["output"]]
+  ];
+  for (const [name, value] of sections) {
+    const items = list(value);
+    if (items.length === 0)
+      continue;
+    lines.push(`${name}:`);
+    for (const item of items)
+      lines.push(`- ${item}`);
+  }
+  return lines.join(`
+`);
 }
 function lastAssistantMessage(messages) {
   for (let i = messages.length - 1;i >= 0; i -= 1) {
@@ -22081,7 +22489,7 @@ function textOf(message) {
   return content.filter((part) => typeof part === "object" && part !== null && part.type === "text" && typeof part.text === "string").map((part) => part.text).join("");
 }
 // src/tools/specialist/activation.tool.ts
-import { existsSync as existsSync19 } from "node:fs";
+import { existsSync as existsSync20 } from "node:fs";
 import { fileURLToPath as fileURLToPath5 } from "node:url";
 
 // src/activation/build-identity.ts
@@ -22131,7 +22539,12 @@ function toActivationView(snapshot, nowMs = Date.now()) {
     participant_id: snapshot.participantId,
     attempt_id: snapshot.attemptId,
     specialist: snapshot.specialist,
-    bead_id: snapshot.beadId,
+    bead_id: snapshot.issueRef,
+    issue_id: snapshot.issueId,
+    issue_ref: snapshot.issueRef,
+    issue_revision: snapshot.issueRevision,
+    contract_hash: snapshot.contractHash,
+    execution_binding_id: snapshot.executionBindingId,
     state: snapshot.state,
     access: snapshot.access,
     worktree_path: snapshot.workspace.worktreePath,
@@ -22166,7 +22579,12 @@ function toActivationResultView(result) {
     activation_id: result.activationId,
     participant_id: result.participantId,
     attempt_id: result.attemptId,
-    bead_id: result.beadId,
+    bead_id: result.issueRef,
+    issue_id: result.issueId,
+    issue_ref: result.issueRef,
+    issue_revision: result.issueRevision,
+    contract_hash: result.contractHash,
+    execution_binding_id: result.executionBindingId,
     status: result.status,
     output: result.output ?? null,
     validation: result.validation,
@@ -22184,7 +22602,7 @@ function toActivationResultView(result) {
 var DIST_LIB_PATH = (() => {
   for (const candidate of ["./lib.js", "../../../dist/lib.js"]) {
     const path = fileURLToPath5(new URL(candidate, import.meta.url));
-    if (existsSync19(path))
+    if (existsSync20(path))
       return path;
   }
   return fileURLToPath5(new URL("../../../dist/lib.js", import.meta.url));
@@ -22816,7 +23234,7 @@ async function verifyExactLineCitation(evidence, claim) {
   };
 }
 // src/activation/workspace-reconcile.ts
-import { join as join17 } from "node:path";
+import { join as join18 } from "node:path";
 var PERMITTED = {
   holder_process_gone: new Set(["safe_free", "superseded", "manual_attention_required"]),
   holder_start_mismatch: new Set(["safe_free", "superseded", "manual_attention_required"]),
@@ -22828,18 +23246,20 @@ function leaseScopeFor(cwd) {
   return {
     repositoryRoot: commonRoot ?? cwd,
     worktreePath: cwd,
-    gitCommonDir: commonRoot ? join17(commonRoot, ".git") : undefined
+    gitCommonDir: commonRoot ? join18(commonRoot, ".git") : undefined
   };
 }
 export {
   verifyExactLineCitation,
   validateLaunchOutcome,
+  validateContractText,
   validateBeforeRun,
   toPendingAskView,
   toActivationView,
   toActivationResultView,
   shortBuildId,
   runScriptSpecialist as runScript,
+  resolveWorkItemDbPath,
   resolveRuntimeToolContract,
   resolveObservabilityDbLocation,
   resolveModelChain,
@@ -22849,11 +23269,14 @@ export {
   projectLaunchOutcome,
   parseLaunchOutcome,
   parseCompletionBody,
+  openWorkItemBoundary,
+  openSubstrateDb,
   leaseScopeFor,
   hashFileBytes,
   extractSections,
   evaluateBeadReadiness,
   describeBuildIdentity,
+  createWorkItemBoundary,
   createObservabilitySqliteClientAtPath,
   createBeadFromContract,
   createActivationForensicSink,
@@ -22865,6 +23288,7 @@ export {
   RuntimeEventPusher,
   ResultNotValidatedError,
   NativeActivationHost,
+  NULL_WORK_ITEMS,
   LaunchOutcomeError,
   LAUNCH_OUTCOME_SCHEMA_VERSION,
   DispatchRejectedError,

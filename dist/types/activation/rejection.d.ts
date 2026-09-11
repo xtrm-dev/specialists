@@ -25,7 +25,7 @@ export declare function renderRejection(input: RejectionInput, build?: string): 
     missing?: string[] | undefined;
     detail?: {
         specialist?: string;
-        beadId?: string;
+        issueRef?: string;
         missing?: string[];
         workspace?: string;
         holder?: string;

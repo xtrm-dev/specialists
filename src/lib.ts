@@ -40,7 +40,32 @@ export { validateBeforeRun } from './specialist/runner.js';
 
 export { NativeActivationHost } from './activation/native-host.js';
 export type { NativeActivationHostDeps, ActivationForensicSink, ActivationAttachment } from './activation/native-host.js';
+export {
+  createWorkItemBoundary,
+  openWorkItemBoundary,
+  openSubstrateDb,
+  resolveWorkItemDbPath,
+  NULL_WORK_ITEMS,
+} from './activation/workitem-store.js';
+export type {
+  SpecialistWorkItemBoundary,
+  WorkItemView,
+  EpicAncestor,
+  InlineIssueResult,
+  CheckResult,
+  BindResult,
+  DispatchRequest,
+  ExecutionBindingView,
+  WorkItemPorts,
+  IssueServicePort,
+  IssueStorePort,
+  DispatchGatePort,
+  ActiveClaimView,
+  OpenWorkItemsOptions,
+} from './activation/workitem-store.js';
 
+export { validateContractText } from './activation/contract-sections.js';
+export type { ContractTextValidation } from './activation/contract-sections.js';
 export { DispatchRejectedError, THINKING_LEVELS } from './activation/types.js';
 export type {
   ActivationId,

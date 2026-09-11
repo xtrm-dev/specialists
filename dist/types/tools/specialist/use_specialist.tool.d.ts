@@ -97,11 +97,11 @@ export declare function createUseSpecialistTool(runner: SpecialistRunner): {
         specialistVersion: string;
         promptHash: string;
         beadId?: string;
-        metrics?: import("../../pi/session.js").SessionRunMetrics;
+        metrics?: import("../../pi/session.ts").SessionRunMetrics;
         permissionRequired?: "READ_ONLY" | "LOW" | "MEDIUM" | "HIGH";
         autoCommit?: "never" | "checkpoint_on_waiting" | "checkpoint_on_terminal";
         outputType?: string;
-        payloadBreakdown?: import("../../specialist/payload-measure.js").PayloadBreakdown;
+        payloadBreakdown?: import("../../specialist/payload-measure.ts").PayloadBreakdown;
         status?: undefined;
         error?: undefined;
     }>;

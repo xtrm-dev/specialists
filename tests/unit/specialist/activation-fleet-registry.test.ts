@@ -12,6 +12,7 @@ vi.mock('node:child_process', async (importOriginal) => {
 });
 
 import { NativeActivationHost } from '../../../src/activation/native-host.js';
+import { testWorkItems } from '../../utils/test-work-items.js';
 import { DispatchRejectedError } from '../../../src/activation/types.js';
 import { nextAttemptId } from '../../../src/activation/registry.js';
 import type { PiSdk, PiAgentSessionLike, PiAgentSessionEvent } from '../../../src/activation/pi-sdk.js';
@@ -104,9 +105,8 @@ function readOnlySpec() {
 
 function newHost(session: PiAgentSessionLike) {
   return new NativeActivationHost({
-    beadGate: NO_CONTRACT_STATE,
     loader: loaderFor(readOnlySpec()),
-    beadsClient: { readBead: () => BEAD } as never,
+    workItems: testWorkItems({ description: BEAD.description }),
     loadSdk: async () => makeSdk(session),
     cwd: process.cwd(),
   });
@@ -128,7 +128,7 @@ describe('NativeActivationHost — Fleet registry projection', () => {
     const host = newHost(fakeSession());
 
     const handle = await host.start({
-      specialist: 'researcher', beadId: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
     });
     await handle.result;
 
@@ -144,7 +144,7 @@ describe('NativeActivationHost — Fleet registry projection', () => {
     // it, which is the assertion working.
     const keys = Object.keys(projected[0]).sort();
     expect(keys).toEqual([
-      'access', 'activationId', 'attemptId', 'beadId', 'configuredModel', 'lastActivityAt',
+      'access', 'activationId', 'attemptId', 'issueId', 'issueRef', 'issueRevision', 'contractHash', 'executionBindingId', 'configuredModel', 'lastActivityAt',
       'modelOverride', 'participantId', 'piSessionId', 'purpose', 'requestedModel', 'resolvedModel',
       'specialist', 'startedAt', 'state', 'thinkingOverride', 'workspace',
     ].sort());
@@ -155,7 +155,7 @@ describe('NativeActivationHost — Fleet registry projection', () => {
     const host = newHost(session);
 
     const handle = await host.start({
-      specialist: 'researcher', beadId: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
     });
     await handle.result;
 
@@ -183,7 +183,7 @@ describe('NativeActivationHost — Fleet registry projection', () => {
     const host = newHost(fakeSession());
 
     const handle = await host.start({
-      specialist: 'researcher', beadId: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
     });
     await handle.result;
     expect(handle.attemptId).toMatch(/:1$/);
@@ -210,7 +210,7 @@ describe('NativeActivationHost — Fleet registry projection', () => {
   it('rejects resuming an activation that is not in a resumable state', async () => {
     const host = newHost(fakeSession());
     const handle = await host.start({
-      specialist: 'researcher', beadId: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
     });
     await handle.result;
 

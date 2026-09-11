@@ -6,21 +6,15 @@ import { join } from 'node:path';
 /**
  * MCP dispatch mirror for contract/title/epic_context_depth (unitAI-t2kol.5).
  *
- * The inline path is tool + shared gate + shared bead-creation helper + real host:
- * `createBeadFromContract` is the ONLY seam (mocked — it is the `bd create` side
- * effect, and "refused dispatch leaves the board unchanged" is asserted as
- * "the helper was never called"). Everything else is real: the zod schema, the
- * execute mutual-exclusion checks, `evaluateBeadReadiness`, and
- * `NativeActivationHost.start` with only the Pi SDK and the bead reader faked
- * (same fixture shape as activation-mcp-tools.test.ts).
+ * The inline path is tool + shared text gate + real host + injected work
+ * boundary: creation is host-owned through `boundary.inlineCreate`
+ * (validate → create → attest → claim), never a `bd` subprocess. "Refused
+ * dispatch leaves the board unchanged" is asserted as "inlineCreate was never
+ * called and no session was created". Everything else is real: the zod schema,
+ * the execute mutual-exclusion checks, `validateContractText`, and
+ * `NativeActivationHost.start` with only the Pi SDK and the work boundary
+ * faked (boundary fake from tests/utils/test-work-items.ts).
  */
-
-const { mockCreateBead } = vi.hoisted(() => ({ mockCreateBead: vi.fn() }));
-
-vi.mock('../../../src/specialist/beads.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../src/specialist/beads.js')>();
-  return { ...actual, createBeadFromContract: mockCreateBead };
-});
 
 import {
   createSpecialistDispatchTool,
@@ -28,9 +22,8 @@ import {
 } from '../../../src/tools/specialist/activation.tool.js';
 import { NativeActivationHost } from '../../../src/activation/native-host.js';
 import { REQUIRED_SECTIONS } from '../../../src/activation/bead-gate.js';
+import { testWorkItems } from '../../utils/test-work-items.js';
 import type { PiSdk, PiAgentSessionLike, PiAgentSessionEvent } from '../../../src/activation/pi-sdk.js';
-
-const NO_STATE = { readContractState: () => undefined };
 
 const INLINE_CONTRACT =
   'PROBLEM\nProve the inline-dispatch path.\n\nSUCCESS\nA read-only activation settles.\n\n' +
@@ -88,7 +81,7 @@ afterEach(() => {
   }
 });
 
-function hostWith(fixture: { bead?: unknown; permission?: string } = {}) {
+function hostWith(fixture: { permission?: string; inlineCreate?: (contract: string, opts?: { title?: string; holder?: string; activationId?: string }) => { ref: string; issueId: string; claimId: number | null } } = {}) {
   const sessionsCreated = { count: 0 };
   const root = mkdtempSync(join(tmpdir(), 'mcp-inline-ws-'));
   workspaces.push(root);
@@ -106,8 +99,14 @@ function hostWith(fixture: { bead?: unknown; permission?: string } = {}) {
     createBashTool: () => ({ name: 'bash', execute: async () => 'ran' }),
     createPowerShellTool: () => ({ name: 'powershell', execute: async () => 'ran' }),
   } as unknown as PiSdk;
+  const workItems = testWorkItems({ ref: 'bd-inline-1' });
+  if (fixture.inlineCreate) {
+    vi.spyOn(workItems, 'inlineCreate').mockImplementation(fixture.inlineCreate);
+  } else {
+    vi.spyOn(workItems, 'inlineCreate');
+  }
   const host = new NativeActivationHost({
-    beadGate: NO_STATE,
+    workItems,
     loader: { get: async () => ({
       specialist: {
         metadata: { name: 'researcher', version: '1.0.0', description: 'd', category: 'c' },
@@ -121,18 +120,12 @@ function hostWith(fixture: { bead?: unknown; permission?: string } = {}) {
         prompt: { system: 'You are the researcher.', task_template: 'Do: {{bead_id}}' },
       },
     }) } as never,
-    beadsClient: { readBead: () => fixture.bead ?? contract() } as never,
     loadSdk: async () => sdk,
     forensics: { emit: () => {} },
     cwd: root,
   });
-  return { host, sessionsCreated };
+  return { host, sessionsCreated, workItems };
 }
-
-beforeEach(() => {
-  mockCreateBead.mockReset();
-  mockCreateBead.mockReturnValue('bd-inline-1');
-});
 
 describe('specialist_dispatch schema — contract/title/epic_context_depth mirror Pi', () => {
   it('bead_id is optional and the inline fields exist with Pi-matching descriptions', () => {
@@ -150,7 +143,7 @@ describe('specialist_dispatch schema — contract/title/epic_context_depth mirro
 
 describe('specialist_dispatch inline path — one gate, create only after it passes', () => {
   it('refuses bead_id plus contract instead of picking a precedence', async () => {
-    const { host, sessionsCreated } = hostWith();
+    const { host, sessionsCreated, workItems } = hostWith();
     const tool = createSpecialistDispatchTool(() => host);
 
     const out = await tool.execute({
@@ -159,24 +152,24 @@ describe('specialist_dispatch inline path — one gate, create only after it pas
 
     expect(out.status).toBe('rejected');
     expect(String(out.reason)).toContain('both bead_id and contract were provided');
-    expect(mockCreateBead).not.toHaveBeenCalled();
+    expect(workItems.inlineCreate).not.toHaveBeenCalled();
     expect(sessionsCreated.count).toBe(0);
   });
 
   it('refuses neither bead_id nor contract', async () => {
-    const { host, sessionsCreated } = hostWith();
+    const { host, sessionsCreated, workItems } = hostWith();
     const tool = createSpecialistDispatchTool(() => host);
 
     const out = await tool.execute({ specialist: 'researcher' }) as Record<string, unknown>;
 
     expect(out.status).toBe('rejected');
     expect(String(out.reason)).toContain('neither bead_id nor contract');
-    expect(mockCreateBead).not.toHaveBeenCalled();
+    expect(workItems.inlineCreate).not.toHaveBeenCalled();
     expect(sessionsCreated.count).toBe(0);
   });
 
   it('refuses epic_context_depth outside 1|2 without dispatching', async () => {
-    const { host, sessionsCreated } = hostWith();
+    const { host, sessionsCreated, workItems } = hostWith();
     const tool = createSpecialistDispatchTool(() => host);
 
     for (const bad of [0, 3, -1, 1.5]) {
@@ -186,12 +179,12 @@ describe('specialist_dispatch inline path — one gate, create only after it pas
       expect(out.status).toBe('rejected');
       expect(String(out.reason)).toContain('epic_context_depth must be 1 or 2');
     }
-    expect(mockCreateBead).not.toHaveBeenCalled();
+    expect(workItems.inlineCreate).not.toHaveBeenCalled();
     expect(sessionsCreated.count).toBe(0);
   });
 
   it('gate runs BEFORE creating the bead: a draft inline contract leaves the board unchanged', async () => {
-    const { host, sessionsCreated } = hostWith();
+    const { host, sessionsCreated, workItems } = hostWith();
     const tool = createSpecialistDispatchTool(() => host);
 
     const out = await tool.execute({
@@ -201,7 +194,7 @@ describe('specialist_dispatch inline path — one gate, create only after it pas
     expect(out.status).toBe('rejected');
     expect(out.missing).toContain('SUCCESS');
     expect(out.missing).not.toContain('PROBLEM');
-    expect(mockCreateBead).not.toHaveBeenCalled();
+    expect(workItems.inlineCreate).not.toHaveBeenCalled();
     expect(sessionsCreated.count).toBe(0);
 
     // All seven sections present but no SCRUTINY: refused with SCRUTINY missing.
@@ -211,30 +204,36 @@ describe('specialist_dispatch inline path — one gate, create only after it pas
     }) as Record<string, unknown>;
     expect(noScrutiny.status).toBe('rejected');
     expect(noScrutiny.missing).toEqual(['SCRUTINY']);
-    expect(mockCreateBead).not.toHaveBeenCalled();
+    expect(workItems.inlineCreate).not.toHaveBeenCalled();
   });
 
-  it('valid inline contract creates the bead then dispatches against it', async () => {
-    const { host, sessionsCreated } = hostWith();
+  it('valid inline contract creates the issue then dispatches against it', async () => {
+    const { host, sessionsCreated, workItems } = hostWith();
     const tool = createSpecialistDispatchTool(() => host);
 
     const out = await tool.execute({
       specialist: 'researcher', contract: INLINE_CONTRACT,
     }) as Record<string, unknown>;
 
-    expect(mockCreateBead).toHaveBeenCalledTimes(1);
-    expect(mockCreateBead).toHaveBeenCalledWith(INLINE_CONTRACT, undefined);
+    // Host-owned creation through the boundary: validate → create → attest →
+    // claim, claiming WITH the activation id the bind path pins.
+    expect(workItems.inlineCreate).toHaveBeenCalledTimes(1);
+    const [createdContract, createdOpts] = (workItems.inlineCreate as unknown as { mock: { calls: unknown[][] } }).mock.calls[0];
+    expect(createdContract).toBe(INLINE_CONTRACT);
+    expect(createdOpts).toMatchObject({ holder: 'specialist::researcher' });
+    expect(typeof (createdOpts as { activationId?: unknown }).activationId).toBe('string');
     expect(out.status).toBe('dispatched');
     expect(out.bead_id).toBe('bd-inline-1');
+    expect(out.issue_ref).toBe('bd-inline-1');
     expect(out.created_bead_id).toBe('bd-inline-1');
     expect(String(out.created_bead_note)).toMatch(/yours to track/i);
     expect(sessionsCreated.count).toBe(1);
-    // The created bead reads back through the host Fleet.
-    expect(host.list().map(s => s.beadId)).toContain('bd-inline-1');
+    // The created issue reads back through the host Fleet.
+    expect(host.list().map(s => s.issueRef)).toContain('bd-inline-1');
   });
 
-  it('passes title through to bead creation', async () => {
-    const { host } = hostWith();
+  it('passes title through to issue creation', async () => {
+    const { host, workItems } = hostWith();
     const tool = createSpecialistDispatchTool(() => host);
 
     const out = await tool.execute({
@@ -242,7 +241,8 @@ describe('specialist_dispatch inline path — one gate, create only after it pas
     }) as Record<string, unknown>;
 
     expect(out.status).toBe('dispatched');
-    expect(mockCreateBead).toHaveBeenCalledWith(INLINE_CONTRACT, 'My inline title');
+    const [, createdOpts] = (workItems.inlineCreate as unknown as { mock: { calls: unknown[][] } }).mock.calls[0];
+    expect(createdOpts).toMatchObject({ title: 'My inline title' });
   });
 
   it('drops epic_context_depth for auto-created parentless beads (Pi :932 rule)', async () => {
@@ -270,7 +270,7 @@ describe('specialist_dispatch inline path — one gate, create only after it pas
   });
 
   it('ignores title on the bead_id path, creating nothing', async () => {
-    const { host, sessionsCreated } = hostWith();
+    const { host, sessionsCreated, workItems } = hostWith();
     const startSpy = vi.spyOn(host, 'start');
     const tool = createSpecialistDispatchTool(() => host);
 
@@ -281,22 +281,20 @@ describe('specialist_dispatch inline path — one gate, create only after it pas
     expect(out.status).toBe('dispatched');
     expect(out.bead_id).toBe('ISSUE-1');
     expect(out).not.toHaveProperty('created_bead_id');
-    expect(mockCreateBead).not.toHaveBeenCalled();
-    expect(startSpy.mock.calls[0][0]).toMatchObject({ beadId: 'ISSUE-1' });
+    expect(workItems.inlineCreate).not.toHaveBeenCalled();
+    expect(startSpy.mock.calls[0][0]).toMatchObject({ issueRef: 'ISSUE-1' });
     expect(sessionsCreated.count).toBe(1);
   });
 
-  it('reports bd create failure as an error with the board unchanged', async () => {
-    mockCreateBead.mockReturnValue(null);
-    const { host, sessionsCreated } = hostWith();
+  it('surfaces issue-creation failure without creating a session', async () => {
+    const { host, sessionsCreated } = hostWith({
+      inlineCreate: () => { throw new Error('claim failed: store unavailable'); },
+    });
     const tool = createSpecialistDispatchTool(() => host);
 
-    const out = await tool.execute({
+    await expect(tool.execute({
       specialist: 'researcher', contract: INLINE_CONTRACT,
-    }) as Record<string, unknown>;
-
-    expect(out.status).toBe('error');
-    expect(String(out.error)).toContain('board unchanged');
+    })).rejects.toThrow('claim failed');
     expect(sessionsCreated.count).toBe(0);
   });
 });

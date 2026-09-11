@@ -31,7 +31,6 @@
 // before settlement returns an empty result that looks like a fast failure —
 // budget >= 3 minutes of polling before concluding an activation is stuck.
 
-import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { Type } from 'typebox';
 import {
@@ -39,8 +38,7 @@ import {
   createObservabilitySqliteClientAtPath,
   describeBuildIdentity,
   DispatchRejectedError,
-  evaluateBeadReadiness,
-  extractSections,
+  validateContractText,
   NativeActivationHost,
   resolveModelChain,
   resolveObservabilityDbLocation,
@@ -484,32 +482,6 @@ function specialistSummaryView(summary) {
   };
 }
 
-/**
- * Create a Bead from an inline dispatch contract (unitAI-rrdnt.48).
- *
- * The readiness gate has already passed BEFORE this is called — a refused
- * dispatch must leave the board unchanged. Uses the `bd` CLI exactly like the
- * runtime's own BeadsClient does; the created bead is the durable record every
- * later participant reads. Returns the new bead id, or null on failure.
- */
-export function createBeadFromContract(contract, title) {
-  const problem = extractSections(contract).get('PROBLEM');
-  const firstLine = (problem ?? '').split('\n').map((s) => s.trim()).find(Boolean);
-  const resolvedTitle = title ?? (firstLine ?? 'Specialist dispatch contract').slice(0, 72);
-  const result = spawnSync(
-    'bd',
-    ['create', resolvedTitle, '--description', contract, '--type', 'task', '--priority', '2', '--json'],
-    { encoding: 'utf-8', timeout: 20000 },
-  );
-  if (result.error || result.status !== 0) return null;
-  try {
-    const parsed = JSON.parse(result.stdout);
-    return typeof parsed.id === 'string' ? parsed.id : null;
-  } catch {
-    return null;
-  }
-}
-
 // Build identity (unitAI-rrdnt.55): which dist artifact this session loaded vs what
 // is on disk now. The static dist import below is what keeps one session on one
 // gate, so staleness is structural — the only fix is making it visible. The loaded
@@ -894,37 +866,32 @@ export default function specialistSubagentsExtension(pi, options = {}) {
             'epic_context_depth must be 1 or 2 — 1 walks to the immediate parent epic, 2 also includes the grand-epic',
           ));
         }
-        let effectiveBeadId = beadId;
-        let autoCreatedBeadId;
-        if (!effectiveBeadId) {
-          if (!contract) {
-            return resultOf(inlineRejectionResult(
-              'neither bead_id nor contract was provided — dispatch requires a READY Bead (7 sections + SCRUTINY) or an inline contract',
-            ));
-          }
-          // The SAME gate the host runs at admission, before anything is created.
-          const gate = evaluateBeadReadiness({
-            id: '<inline>',
-            status: 'open',
-            title: params.title ?? 'specialist dispatch',
-            description: contract,
-          });
+        // Inline-contract dispatch creates a fresh issue with no parent: no lineage.
+        const inline = !beadId && contract ? contract : undefined;
+        if (!beadId && !inline) {
+          return resultOf(inlineRejectionResult(
+            'neither bead_id nor contract was provided — dispatch requires a READY issue (7 sections + SCRUTINY) or an inline contract',
+          ));
+        }
+        if (inline) {
+          // The shared contract-text gate, BEFORE anything is created: a refused
+          // dispatch leaves the board unchanged. The host re-validates
+          // authoritatively inside inlineCreate — same parser, same verdict.
+          const gate = validateContractText(inline);
           if (!gate.ok) {
             return resultOf(inlineRejectionResult(gate.reason, gate.missing));
           }
-          const created = (options.createBead ?? createBeadFromContract)(contract, params.title);
-          if (!created) {
-            return resultOf({ status: 'error', error: 'bd create failed — bead not created, board unchanged' });
-          }
-          effectiveBeadId = created;
-          autoCreatedBeadId = created;
         }
 
         const handle = await h.start({
           specialist: params.specialist,
-          beadId: effectiveBeadId,
-          // Inline-contract dispatch creates a fresh bead with no parent: no lineage.
-          ...(epicContextDepth !== undefined && !autoCreatedBeadId ? { epicContextDepth } : {}),
+          ...(beadId ? { issueRef: beadId } : {}),
+          // The host owns creation: validate → create → attest → claim through
+          // the work boundary, claiming WITH this activation's id.
+          ...(inline
+            ? { contract: inline, ...(params.title ? { title: params.title } : {}) }
+            : {}),
+          ...(epicContextDepth !== undefined && !inline ? { epicContextDepth } : {}),
           ...(params.model_override ? { modelOverride: params.model_override } : {}),
           ...(params.thinking_override ? { thinkingOverride: params.thinking_override } : {}),
           requestedByParticipantId: params.requested_by ?? DEFAULT_REQUESTED_BY,
@@ -951,9 +918,9 @@ export default function specialistSubagentsExtension(pi, options = {}) {
               // An inline contract creates a durable board record. Saying so in the RESULT
               // is the difference between a coordinator tracking it and an operator finding
               // an orphan bead later — the caller cannot see the side effect otherwise.
-              ...(autoCreatedBeadId
+              ...(inline
                 ? {
-                  created_bead_id: autoCreatedBeadId,
+                  created_bead_id: handle.issueRef,
                   created_bead_note:
                     'This dispatch CREATED the bead above from your inline contract. It is a '
                     + 'durable board record and is yours to track: close it when the work is '

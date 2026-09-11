@@ -14,6 +14,7 @@ import {
 } from '../../../src/activation/authority-store.js';
 import { NativeActivationHost } from '../../../src/activation/native-host.js';
 import type { PiSdk, PiAgentSessionLike } from '../../../src/activation/pi-sdk.js';
+import type { SpecialistWorkItemBoundary, WorkItemView } from '../../../src/activation/workitem-store.js';
 
 type ReadDb = {
   prepare(sql: string): { all(...p: unknown[]): Array<Record<string, unknown>> };
@@ -80,11 +81,11 @@ describe('authority schema — matches the SessionStart hook column-for-column',
     const dbPath = join(tmpRoot(), 'state.db');
     ensureAuthorityStore(dbPath);
     const writer = createFileAuthorityWriter(dbPath);
-    writer.record({ activationId: 'act:old', specialist: 'researcher', state: 'running', beadId: 'B-1', lastActivityAt: 1000 });
-    writer.record({ activationId: 'act:new', specialist: 'executor', state: 'needs_reply', beadId: 'B-2', lastActivityAt: 3000 });
-    writer.record({ activationId: 'act:mid', specialist: 'researcher', state: 'running', beadId: 'B-3', lastActivityAt: 2000 });
-    writer.record({ activationId: 'act:done', specialist: 'executor', state: 'settled', beadId: 'B-4', lastActivityAt: 9999 });
-    writer.record({ activationId: 'act:gone', specialist: 'executor', state: 'disposed', beadId: 'B-5', lastActivityAt: 9998 });
+    writer.record({ activationId: 'act:old', specialist: 'researcher', state: 'running', issueRef: 'B-1', lastActivityAt: 1000 });
+    writer.record({ activationId: 'act:new', specialist: 'executor', state: 'needs_reply', issueRef: 'B-2', lastActivityAt: 3000 });
+    writer.record({ activationId: 'act:mid', specialist: 'researcher', state: 'running', issueRef: 'B-3', lastActivityAt: 2000 });
+    writer.record({ activationId: 'act:done', specialist: 'executor', state: 'settled', issueRef: 'B-4', lastActivityAt: 9999 });
+    writer.record({ activationId: 'act:gone', specialist: 'executor', state: 'disposed', issueRef: 'B-5', lastActivityAt: 9998 });
 
     const rows = readRows(dbPath);
     expect(rows.map((r) => r.activation_id)).toEqual(['act:new', 'act:mid', 'act:old']);
@@ -104,7 +105,7 @@ describe('authority writer — lifecycle transitions reflected', () => {
   it('upserts state per transition; terminal rows persist but stay filtered', () => {
     const dbPath = join(tmpRoot(), 'state.db');
     const writer = createFileAuthorityWriter(dbPath);
-    const snap = { activationId: 'act:1', specialist: 'researcher', state: 'starting', beadId: 'B-1', lastActivityAt: 1 };
+    const snap = { activationId: 'act:1', specialist: 'researcher', state: 'starting', issueRef: 'B-1', lastActivityAt: 1 };
     writer.record(snap);
     writer.record({ ...snap, state: 'running', lastActivityAt: 2 });
     expect(readRows(dbPath)).toHaveLength(1);
@@ -138,7 +139,7 @@ describe('authority writer — lifecycle transitions reflected', () => {
     const dir = tmpRoot();
     const dbPath = join(dir, 'sub', 'override.db');
     createFileAuthorityWriter(dbPath).record({
-      activationId: 'act:1', specialist: 's', state: 'running', beadId: 'B', lastActivityAt: 1,
+      activationId: 'act:1', specialist: 's', state: 'running', issueRef: 'B', lastActivityAt: 1,
     });
     expect(readRows(dbPath)).toHaveLength(1);
   });
@@ -146,22 +147,21 @@ describe('authority writer — lifecycle transitions reflected', () => {
   it('a throwing writer never breaks the host', async () => {
     const session = fakeSession({ record: {}, assistantText: 'done' });
     const host = new NativeActivationHost({
-      beadGate: { readContractState: () => undefined },
       loader: { get: async () => readOnlySpec() } as never,
-      beadsClient: { readBead: () => BEAD } as never,
+      workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk({}, session),
       cwd: tmpRoot(),
       authority: { record: () => { throw new Error('store on fire'); }, remove: () => { throw new Error('store on fire'); } },
     });
     const handle = await host.start({
-      specialist: 'researcher', beadId: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
     });
     await expect(handle.result).resolves.toMatchObject({ status: 'completed' });
   });
 
   it('NULL writer is a safe default', () => {
     expect(() => NULL_AUTHORITY_WRITER.record({
-      activationId: 'x', specialist: 's', state: 'running', beadId: 'B', lastActivityAt: 1,
+      activationId: 'x', specialist: 's', state: 'running', issueRef: 'B', lastActivityAt: 1,
     })).not.toThrow();
   });
 });
@@ -172,15 +172,14 @@ describe('authority writer — host lifecycle end to end', () => {
     const dbPath = join(dir, 'state.db');
     const session = fakeSession({ record: {}, assistantText: 'done' });
     const host = new NativeActivationHost({
-      beadGate: { readContractState: () => undefined },
       loader: { get: async () => readOnlySpec() } as never,
-      beadsClient: { readBead: () => BEAD } as never,
+      workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk({}, session),
       cwd: dir,
       authority: createFileAuthorityWriter(dbPath),
     });
     const handle = await host.start({
-      specialist: 'researcher', beadId: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
     });
     await handle.result;
     // Settled rows persist but are filtered from the hook's active projection.
@@ -309,6 +308,23 @@ function makeSdk(record: object, session: PiAgentSessionLike): PiSdk {
     createBashTool: () => ({ name: 'bash', execute: async () => 'ran' }),
     createPowerShellTool: () => ({ name: 'powershell', execute: async () => 'ran' }),
   } as unknown as PiSdk;
+}
+
+function fakeWorkItems(): SpecialistWorkItemBoundary {
+  const contract = {
+    problem: 'The thing is unclear.', success: 'The thing is clear.',
+    scope: ['Investigate the thing.'], nonGoals: ['Does not fix the thing.'],
+    constraints: ['Read-only.'], validation: [{ check: 'A written finding.' }],
+    output: [{ artifact: 'A finding.' }],
+  };
+  return {
+    view(ref: string): WorkItemView { return { ref, issueId: `iss_${ref}`, revision: 1, contractHash: 'hash', title: 'Investigate the thing', contract, readinessState: 'claimed', dispatchable: true, reasons: [] }; },
+    epicAncestors: () => [],
+    check: () => ({ issueId: 'iss_ISSUE-1', revision: 1, contractHash: 'hash', report: {} as never }),
+    bind: () => ({ id: 'exb_test', issueId: 'iss_ISSUE-1', issueRevision: 1, contractHash: 'hash', resolvedContextHash: 'context', claimId: 1, participantId: 'specialist::researcher', activationId: 'act:test', attemptId: 'att:test', sessionId: 'pi-sess-123', workspace: '/tmp', baseCommit: null, createdAt: 1 }) as never,
+    inlineCreate: () => ({ ref: 'ISSUE-INLINE', issueId: 'iss_inline', claimId: 1 }),
+    journal: () => {},
+  };
 }
 
 const BEAD = {

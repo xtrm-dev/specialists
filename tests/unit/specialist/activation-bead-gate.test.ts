@@ -3,6 +3,7 @@ import { evaluateBeadReadiness, extractPurposeExcerpt, extractSections, PURPOSE_
 import { NativeActivationHost } from '../../../src/activation/native-host.js';
 import { DispatchRejectedError } from '../../../src/activation/types.js';
 import type { PiSdk, PiAgentSessionLike } from '../../../src/activation/pi-sdk.js';
+import { testWorkItems } from '../../utils/test-work-items.js';
 
 /**
  * PRD Phase 3. The gate's job is to refuse a Bead that is not a usable task contract
@@ -117,7 +118,6 @@ describe('NativeActivationHost — bead gate admission', () => {
     };
     const events: string[] = [];
     const host = new NativeActivationHost({
-      beadGate: NO_STATE,
       loader: { get: async () => ({
         specialist: {
           metadata: { name: 'researcher', version: '1.0.0', description: 'd', category: 'c' },
@@ -125,7 +125,7 @@ describe('NativeActivationHost — bead gate admission', () => {
           prompt: { system: 'You are the researcher.', task_template: 'Do: {{bead_id}}' },
         },
       }) } as never,
-      beadsClient: { readBead: () => bead } as never,
+      workItems: testWorkItems({ description: (bead as { description?: string }).description }),
       loadSdk: async () => sdk,
       forensics: { emit: (e) => { events.push(e.name); } },
       cwd: process.cwd(),
@@ -139,13 +139,13 @@ describe('NativeActivationHost — bead gate admission', () => {
 
     const error = await host.start({
       specialist: 'researcher',
-      beadId: 'ISSUE-1',
+      issueRef: 'ISSUE-1',
       requestedByParticipantId: 'coordinator:test',
     }).catch((e: unknown) => e);
 
     expect(error).toBeInstanceOf(DispatchRejectedError);
     const rejection = error as DispatchRejectedError;
-    expect(rejection.reason).toBe('bead_contract_incomplete');
+    expect(rejection.reason).toBe('issue_not_dispatchable');
     expect(rejection.message).toContain('SUCCESS');
     expect(rejection.message).toContain('AgentSession:\n  not created');
 
@@ -161,7 +161,7 @@ describe('NativeActivationHost — bead gate admission', () => {
 
     await host.start({
       specialist: 'researcher',
-      beadId: 'ISSUE-1',
+      issueRef: 'ISSUE-1',
       requestedByParticipantId: 'coordinator:test',
     }).catch(() => undefined);
 
@@ -281,14 +281,13 @@ describe('extractPurposeExcerpt (unitAI-uvg4j)', () => {
       defineTool: (d) => d,
     };
     const host = new NativeActivationHost({
-      beadGate: NO_STATE,
       loader,
-      beadsClient: { readBead: () => bead } as never,
+      workItems: testWorkItems({ description: (bead as { description?: string }).description }),
       loadSdk: async () => sdk,
       forensics: { emit: () => {} },
       cwd: process.cwd(),
     });
-    const handle = await host.start({ specialist: 'researcher', beadId: 'ISSUE-1', requestedByParticipantId: 'coordinator:test' });
+    const handle = await host.start({ specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator:test' });
     expect(host.inspect(handle.activationId)?.purpose).toBe('researching activation transport');
   });
 });

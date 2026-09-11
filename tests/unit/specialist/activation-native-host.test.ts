@@ -22,6 +22,7 @@ vi.mock('node:child_process', async (importOriginal) => {
 import { NativeActivationHost, type ActivationForensicSink } from '../../../src/activation/native-host.js';
 import { DispatchRejectedError } from '../../../src/activation/types.js';
 import type { PiSdk, PiAgentSessionLike, PiAgentSessionEvent } from '../../../src/activation/pi-sdk.js';
+import type { SpecialistWorkItemBoundary, WorkItemView } from '../../../src/activation/workitem-store.js';
 
 /**
  * Phase 1 acceptance. The load-bearing assertions here are:
@@ -153,6 +154,49 @@ afterEach(() => {
 
 const NO_CONTRACT_STATE = { readContractState: () => undefined };
 
+function fakeWorkItems(options: { state?: string } = {}): SpecialistWorkItemBoundary {
+  const contract = {
+    problem: 'The thing is unclear.',
+    success: 'The thing is clear.',
+    scope: ['Investigate the thing.'],
+    nonGoals: ['Does not fix the thing.'],
+    constraints: ['Read-only.'],
+    validation: [{ check: 'A written finding.' }],
+    output: [{ artifact: 'A finding.' }],
+  };
+  const state = options.state ?? 'claimed';
+  return {
+    view(ref: string): WorkItemView {
+      return {
+        ref,
+        issueId: `iss_${ref}`,
+        revision: 1,
+        contractHash: 'hash-test',
+        title: 'Investigate the thing',
+        contract,
+        readinessState: state,
+        dispatchable: state === 'ready' || state === 'claimed',
+        reasons: state === 'draft' ? ['contract is draft'] : [],
+      };
+    },
+    epicAncestors: () => [],
+    check() {
+      if (state !== 'ready' && state !== 'claimed') throw new Error(`dispatch rejected: issue is ${state}`);
+      return { issueId: 'iss_test', revision: 1, contractHash: 'hash-test', report: { state, revision: 1, contractHash: 'hash-test', reasons: [] } as never };
+    },
+    bind() {
+      return {
+        id: 'exb_test', issueId: 'iss_test', issueRevision: 1, contractHash: 'hash-test',
+        resolvedContextHash: 'context-test', claimId: 1, participantId: 'coordinator',
+        activationId: 'activation-test', attemptId: 'attempt-test', sessionId: 'pi-sess-123',
+        workspace: '/tmp/test-workspace', baseCommit: null, createdAt: Date.now(),
+      } as never;
+    },
+    inlineCreate: () => ({ ref: 'ISSUE-INLINE', issueId: 'iss_inline', claimId: 1 }),
+    journal: () => {},
+  };
+}
+
 function loaderFor(spec: Record<string, unknown>) {
   return { get: async () => spec } as never;
 }
@@ -190,9 +234,8 @@ describe('NativeActivationHost — Phase 1 read-only', () => {
     const sink = collectingSink();
 
     const host = new NativeActivationHost({
-      beadGate: NO_CONTRACT_STATE,
-      loader: loaderFor(readOnlySpec()),
-      beadsClient: { readBead: () => BEAD } as never,
+            loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems(),
       forensics: sink,
       loadSdk: async () => makeSdk(record, session),
       cwd: hostWorkspace(),
@@ -200,7 +243,7 @@ describe('NativeActivationHost — Phase 1 read-only', () => {
 
     const handle = await host.start({
       specialist: 'researcher',
-      beadId: 'ISSUE-1',
+      issueRef: 'ISSUE-1',
       requestedByParticipantId: 'coordinator',
     });
     const result = await handle.result;
@@ -217,15 +260,14 @@ describe('NativeActivationHost — Phase 1 read-only', () => {
     const session = fakeSession({ record });
 
     const host = new NativeActivationHost({
-      beadGate: NO_CONTRACT_STATE,
-      loader: loaderFor(readOnlySpec()),
-      beadsClient: { readBead: () => BEAD } as never,
+            loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk(record, session),
       cwd: hostWorkspace(),
     });
 
     await (await host.start({
-      specialist: 'researcher', beadId: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
     })).result;
 
     const args = record.createArgs!;
@@ -245,15 +287,14 @@ describe('NativeActivationHost — Phase 1 read-only', () => {
     const session = fakeSession({ record });
 
     const host = new NativeActivationHost({
-      beadGate: NO_CONTRACT_STATE,
-      loader: loaderFor(readOnlySpec()),
-      beadsClient: { readBead: () => BEAD } as never,
+            loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk(record, session),
       cwd: hostWorkspace(),
     });
 
     const handle = await host.start({
-      specialist: 'researcher', beadId: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
     });
     await handle.result;
 
@@ -272,16 +313,15 @@ describe('NativeActivationHost — Phase 1 read-only', () => {
     const sink = collectingSink();
 
     const host = new NativeActivationHost({
-      beadGate: NO_CONTRACT_STATE,
-      loader: loaderFor(readOnlySpec()),
-      beadsClient: { readBead: () => BEAD } as never,
+            loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems(),
       forensics: sink,
       loadSdk: async () => makeSdk(record, session),
       cwd: hostWorkspace(),
     });
 
     await (await host.start({
-      specialist: 'researcher', beadId: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
     })).result;
 
     expect(sink.names).toEqual(expect.arrayContaining([
@@ -299,9 +339,8 @@ describe('NativeActivationHost — Phase 1 read-only', () => {
     (spec.specialist.execution as Record<string, unknown>).permission_required = 'HIGH';
 
     const host = new NativeActivationHost({
-      beadGate: NO_CONTRACT_STATE,
-      loader: loaderFor(spec),
-      beadsClient: { readBead: () => BEAD } as never,
+            loader: loaderFor(spec),
+      workItems: fakeWorkItems(),
       forensics: sink,
       loadSdk: async () => makeSdk(record, session),
       cwd: hostWorkspace(),
@@ -312,7 +351,7 @@ describe('NativeActivationHost — Phase 1 read-only', () => {
     // moved from "writers are not supported" to "this workspace is held by someone else" —
     // a statement about contention rather than about a missing phase.
     const handle = await host.start({
-      specialist: 'executor', beadId: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+      specialist: 'executor', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
     });
 
     expect(handle.access).toBe('write');
@@ -322,16 +361,15 @@ describe('NativeActivationHost — Phase 1 read-only', () => {
 
     // Contention is now the real refusal, and it names the holder rather than a phase.
     const second = new NativeActivationHost({
-      beadGate: NO_CONTRACT_STATE,
-      loader: loaderFor(spec),
-      beadsClient: { readBead: () => BEAD } as never,
+            loader: loaderFor(spec),
+      workItems: fakeWorkItems(),
       forensics: sink,
       loadSdk: async () => makeSdk({}, fakeSession({ record: {}, holdOpen: true })),
       cwd: handle.workspace.worktreePath,
     });
 
     const refusal = await second.start({
-      specialist: 'executor', beadId: 'ISSUE-2', requestedByParticipantId: 'coordinator',
+      specialist: 'executor', issueRef: 'ISSUE-2', requestedByParticipantId: 'coordinator',
     }).catch((caught: unknown) => caught as DispatchRejectedError);
 
     expect(refusal).toBeInstanceOf(DispatchRejectedError);
@@ -351,9 +389,8 @@ describe('NativeActivationHost — Phase 1 read-only', () => {
     });
 
     const host = new NativeActivationHost({
-      beadGate: NO_CONTRACT_STATE,
-      loader: loaderFor(readOnlySpec()),
-      beadsClient: { readBead: () => BEAD } as never,
+            loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems(),
       forensics: sink,
       loadSdk: async () => sdk,
       cwd: hostWorkspace(),
@@ -361,7 +398,7 @@ describe('NativeActivationHost — Phase 1 read-only', () => {
 
     await expect(host.start({
       specialist: 'researcher',
-      beadId: 'ISSUE-1',
+      issueRef: 'ISSUE-1',
       requestedByParticipantId: 'coordinator',
       modelOverride: 'bogus/model',
     })).rejects.toThrow(/model_unavailable/);
@@ -375,16 +412,15 @@ describe('NativeActivationHost — Phase 1 read-only', () => {
     const session = fakeSession({ record, assistantText: 'the answer' });
 
     const host = new NativeActivationHost({
-      beadGate: NO_CONTRACT_STATE,
-      loader: loaderFor(readOnlySpec({ thinking_level: 'low' })),
-      beadsClient: { readBead: () => BEAD } as never,
+            loader: loaderFor(readOnlySpec({ thinking_level: 'low' })),
+      workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk(record, session),
       cwd: hostWorkspace(),
     });
 
     const handle = await host.start({
       specialist: 'researcher',
-      beadId: 'ISSUE-1',
+      issueRef: 'ISSUE-1',
       requestedByParticipantId: 'coordinator',
       thinkingOverride: 'high',
     });
@@ -403,16 +439,15 @@ describe('NativeActivationHost — Phase 1 read-only', () => {
     const session = fakeSession({ record, assistantText: 'the answer' });
 
     const host = new NativeActivationHost({
-      beadGate: NO_CONTRACT_STATE,
-      loader: loaderFor(readOnlySpec({ thinking_level: 'low' })),
-      beadsClient: { readBead: () => BEAD } as never,
+            loader: loaderFor(readOnlySpec({ thinking_level: 'low' })),
+      workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk(record, session),
       cwd: hostWorkspace(),
     });
 
     const handle = await host.start({
       specialist: 'researcher',
-      beadId: 'ISSUE-1',
+      issueRef: 'ISSUE-1',
       requestedByParticipantId: 'coordinator',
     });
     const result = await handle.result;
@@ -431,9 +466,8 @@ describe('NativeActivationHost — Phase 1 read-only', () => {
     const sink = collectingSink();
 
     const host = new NativeActivationHost({
-      beadGate: NO_CONTRACT_STATE,
-      loader: loaderFor(readOnlySpec({ thinking_level: 'low' })),
-      beadsClient: { readBead: () => BEAD } as never,
+            loader: loaderFor(readOnlySpec({ thinking_level: 'low' })),
+      workItems: fakeWorkItems(),
       forensics: sink,
       loadSdk: async () => makeSdk(record, session),
       cwd: hostWorkspace(),
@@ -441,7 +475,7 @@ describe('NativeActivationHost — Phase 1 read-only', () => {
 
     await expect(host.start({
       specialist: 'researcher',
-      beadId: 'ISSUE-1',
+      issueRef: 'ISSUE-1',
       requestedByParticipantId: 'coordinator',
       thinkingOverride: 'turbo' as never,
     })).rejects.toThrow(/invalid_thinking_override/);
@@ -525,9 +559,8 @@ describe('NativeActivationHost — defects found by the live smoke', () => {
     const session = fakeSession({ record });
     const sink = collectingSink();
     const host = new NativeActivationHost({
-      beadGate: NO_CONTRACT_STATE,
-      loader: loaderFor(readOnlySpec()),
-      beadsClient: { readBead: () => BEAD } as never,
+            loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk(record, session),
       forensics: sink,
       cwd: hostWorkspace(),
@@ -535,7 +568,7 @@ describe('NativeActivationHost — defects found by the live smoke', () => {
 
     const handle = await host.start({
       specialist: 'researcher',
-      beadId: 'ISSUE-1',
+      issueRef: 'ISSUE-1',
       requestedByParticipantId: 'coordinator:test',
     });
     await handle.result;
@@ -551,9 +584,8 @@ describe('NativeActivationHost — defects found by the live smoke', () => {
     const session = fakeSession({ record });
     const sink = collectingSink();
     const host = new NativeActivationHost({
-      beadGate: NO_CONTRACT_STATE,
-      loader: loaderFor(readOnlySpec()),
-      beadsClient: { readBead: () => BEAD } as never,
+            loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk(record, session),
       forensics: sink,
       cwd: hostWorkspace(),
@@ -561,7 +593,7 @@ describe('NativeActivationHost — defects found by the live smoke', () => {
 
     const handle = await host.start({
       specialist: 'researcher',
-      beadId: 'ISSUE-1',
+      issueRef: 'ISSUE-1',
       requestedByParticipantId: 'coordinator:test',
     });
     await handle.result;
@@ -573,23 +605,22 @@ describe('NativeActivationHost — defects found by the live smoke', () => {
 
     // Compilation is derived and creates nothing: the root ref is the Bead itself, never
     // a synthetic step id that would seed a second work graph.
-    expect(handle.stepContract.rootWorkRef).toBe(handle.beadId);
+    expect(handle.stepContract.rootWorkRef).toBe(handle.issueRef);
   });
 
   it('passes the resolved pi Model object to createAgentSession, never a provider-qualified string', async () => {
     const record: { createArgs?: Record<string, unknown> } = {};
     const session = fakeSession({ record });
     const host = new NativeActivationHost({
-      beadGate: NO_CONTRACT_STATE,
-      loader: loaderFor(readOnlySpec()),
-      beadsClient: { readBead: () => BEAD } as never,
+            loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk(record, session),
       cwd: hostWorkspace(),
     });
 
     const handle = await host.start({
       specialist: 'researcher',
-      beadId: 'ISSUE-1',
+      issueRef: 'ISSUE-1',
       requestedByParticipantId: 'coordinator:test',
     });
     await handle.result;
@@ -610,9 +641,8 @@ describe('NativeActivationHost — defects found by the live smoke', () => {
     });
     const sink = collectingSink();
     const host = new NativeActivationHost({
-      beadGate: NO_CONTRACT_STATE,
-      loader: loaderFor(readOnlySpec()),
-      beadsClient: { readBead: () => BEAD } as never,
+            loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk(record, session),
       forensics: sink,
       cwd: hostWorkspace(),
@@ -620,7 +650,7 @@ describe('NativeActivationHost — defects found by the live smoke', () => {
 
     const handle = await host.start({
       specialist: 'researcher',
-      beadId: 'ISSUE-1',
+      issueRef: 'ISSUE-1',
       requestedByParticipantId: 'coordinator:test',
     });
     const result = await handle.result;
@@ -649,9 +679,8 @@ describe('NativeActivationHost — raw session event hook', () => {
     };
 
     const host = new NativeActivationHost({
-      beadGate: NO_CONTRACT_STATE,
-      loader: loaderFor(readOnlySpec()),
-      beadsClient: { readBead: () => BEAD } as never,
+            loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk(record, session),
       forensics: sink,
       cwd: hostWorkspace(),
@@ -659,7 +688,7 @@ describe('NativeActivationHost — raw session event hook', () => {
 
     const handle = await host.start({
       specialist: 'researcher',
-      beadId: 'ISSUE-1',
+      issueRef: 'ISSUE-1',
       requestedByParticipantId: 'coordinator:test',
     });
     await handle.result;
@@ -679,9 +708,8 @@ describe('NativeActivationHost — raw session event hook', () => {
     const session = fakeSession({ record });
     const seen: Array<Record<string, unknown>> = [];
     const host = new NativeActivationHost({
-      beadGate: NO_CONTRACT_STATE,
-      loader: loaderFor(readOnlySpec()),
-      beadsClient: { readBead: () => BEAD } as never,
+            loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk(record, session),
       forensics: { emit: () => {}, sessionEvent: (i) => { seen.push(i as never); } },
       cwd: hostWorkspace(),
@@ -689,7 +717,7 @@ describe('NativeActivationHost — raw session event hook', () => {
 
     const handle = await host.start({
       specialist: 'researcher',
-      beadId: 'ISSUE-1',
+      issueRef: 'ISSUE-1',
       requestedByParticipantId: 'coordinator:test',
     });
     await handle.result;
@@ -707,9 +735,8 @@ describe('NativeActivationHost — raw session event hook', () => {
     const record: { createArgs?: Record<string, unknown> } = {};
     const session = fakeSession({ record });
     const host = new NativeActivationHost({
-      beadGate: NO_CONTRACT_STATE,
-      loader: loaderFor(readOnlySpec()),
-      beadsClient: { readBead: () => BEAD } as never,
+            loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk(record, session),
       forensics: collectingSink(),
       cwd: hostWorkspace(),
@@ -717,7 +744,7 @@ describe('NativeActivationHost — raw session event hook', () => {
 
     const handle = await host.start({
       specialist: 'researcher',
-      beadId: 'ISSUE-1',
+      issueRef: 'ISSUE-1',
       requestedByParticipantId: 'coordinator:test',
     });
 
@@ -730,9 +757,8 @@ describe('snapshot tokenUsage (unitAI-crjh7)', () => {
     const record: { createArgs?: Record<string, unknown> } = {};
     const session = fakeSession({ record, holdOpen: true });
     const host = new NativeActivationHost({
-      beadGate: NO_CONTRACT_STATE,
-      loader: loaderFor(readOnlySpec()),
-      beadsClient: { readBead: () => BEAD } as never,
+            loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk(record, session),
       forensics: { emit: () => {} },
       cwd: hostWorkspace(),
@@ -740,7 +766,7 @@ describe('snapshot tokenUsage (unitAI-crjh7)', () => {
 
     const handle = await host.start({
       specialist: 'researcher',
-      beadId: 'ISSUE-1',
+      issueRef: 'ISSUE-1',
       requestedByParticipantId: 'coordinator:test',
     });
 
@@ -772,9 +798,8 @@ describe('snapshot tokenUsage (unitAI-crjh7)', () => {
     const record: { createArgs?: Record<string, unknown> } = {};
     const session = fakeSession({ record, holdOpen: true });
     const host = new NativeActivationHost({
-      beadGate: NO_CONTRACT_STATE,
-      loader: loaderFor(readOnlySpec()),
-      beadsClient: { readBead: () => BEAD } as never,
+            loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk(record, session),
       forensics: { emit: () => {} },
       cwd: hostWorkspace(),
@@ -782,7 +807,7 @@ describe('snapshot tokenUsage (unitAI-crjh7)', () => {
 
     const handle = await host.start({
       specialist: 'researcher',
-      beadId: 'ISSUE-1',
+      issueRef: 'ISSUE-1',
       requestedByParticipantId: 'coordinator:test',
     });
     const totals = () => {
@@ -823,16 +848,15 @@ describe('snapshot tokenUsage (unitAI-crjh7)', () => {
       const record: { createArgs?: Record<string, unknown> } = {};
       const session = fakeSession({ record, holdOpen: true });
       const host = new NativeActivationHost({
-        beadGate: NO_CONTRACT_STATE,
-        loader: loaderFor(readOnlySpec()),
-        beadsClient: { readBead: () => BEAD } as never,
+                loader: loaderFor(readOnlySpec()),
+        workItems: fakeWorkItems(),
         loadSdk: async () => makeSdk(record, session),
         forensics: { emit: () => {} },
         cwd: hostWorkspace(),
       });
       const handle = await host.start({
         specialist: 'researcher',
-        beadId: 'ISSUE-1',
+        issueRef: 'ISSUE-1',
         requestedByParticipantId: 'coordinator:test',
       });
       return { host, session, handle };
@@ -895,15 +919,14 @@ describe('dispatch refusals carry their explanation', () => {
   it('names the draft state when a contract:draft bead is refused', async () => {
     const spec = readOnlySpec();
     const host = new NativeActivationHost({
-      beadGate: { readContractState: () => 'draft' },
       loader: loaderFor(spec),
-      beadsClient: { readBead: () => BEAD } as never,
+      workItems: fakeWorkItems({ state: 'draft' }),
       loadSdk: async () => makeSdk({}, fakeSession({ record: {} })),
       cwd: hostWorkspace(),
     });
 
     const error = await host.start({
-      specialist: 'reader', beadId: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+      specialist: 'reader', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
     }).catch((caught: unknown) => caught as DispatchRejectedError);
 
     expect(error).toBeInstanceOf(DispatchRejectedError);
@@ -915,9 +938,8 @@ describe('dispatch refusals carry their explanation', () => {
   it('renders the provider explanation when a model cannot be resolved', async () => {
     const spec = readOnlySpec();
     const host = new NativeActivationHost({
-      beadGate: NO_CONTRACT_STATE,
-      loader: loaderFor(spec),
-      beadsClient: { readBead: () => BEAD } as never,
+            loader: loaderFor(spec),
+      workItems: fakeWorkItems(),
       loadSdk: async () => ({
         ...makeSdk({}, fakeSession({ record: {} })),
         resolveModelScopeWithDiagnostics: () => ({
@@ -930,7 +952,7 @@ describe('dispatch refusals carry their explanation', () => {
 
     const error = await host.start({
       specialist: 'reader',
-      beadId: 'ISSUE-1',
+      issueRef: 'ISSUE-1',
       requestedByParticipantId: 'coordinator',
       execution: { model: 'nowhere/nothing' },
     } as never).catch((caught: unknown) => caught as DispatchRejectedError);
@@ -956,16 +978,15 @@ describe('per-call mutation admission', () => {
     const sink = collectingSink();
 
     const writerHost = new NativeActivationHost({
-      beadGate: NO_CONTRACT_STATE,
-      loader: loaderFor(writerSpec),
-      beadsClient: { readBead: () => BEAD } as never,
+            loader: loaderFor(writerSpec),
+      workItems: fakeWorkItems(),
       forensics: sink,
       loadSdk: async () => makeSdk({}, fakeSession({ record: {}, holdOpen: true })),
       cwd: hostWorkspace(),
     });
 
     const writer = await writerHost.start({
-      specialist: 'executor', beadId: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+      specialist: 'executor', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
     });
 
     // The holder may mutate; a non-mutating call is never gated at all.
@@ -975,15 +996,14 @@ describe('per-call mutation admission', () => {
     // A READER in the same workspace holds no lease, because it is not entitled to one.
     // Refusing it is the capability grant being enforced, not an error state.
     const readerHost = new NativeActivationHost({
-      beadGate: NO_CONTRACT_STATE,
-      loader: loaderFor(readOnlySpec()),
-      beadsClient: { readBead: () => BEAD } as never,
+            loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems(),
       forensics: sink,
       loadSdk: async () => makeSdk({}, fakeSession({ record: {}, holdOpen: true })),
       cwd: writer.workspace.worktreePath,
     });
     const reader = await readerHost.start({
-      specialist: 'reader', beadId: 'ISSUE-2', requestedByParticipantId: 'coordinator',
+      specialist: 'reader', issueRef: 'ISSUE-2', requestedByParticipantId: 'coordinator',
     });
 
     const verdict = readerHost.admitToolCall(reader.activationId, 'write');
@@ -997,9 +1017,8 @@ describe('per-call mutation admission', () => {
 
   it('refuses an unknown activation rather than defaulting to allow', async () => {
     const host = new NativeActivationHost({
-      beadGate: NO_CONTRACT_STATE,
-      loader: loaderFor(readOnlySpec()),
-      beadsClient: { readBead: () => BEAD } as never,
+            loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk({}, fakeSession({ record: {} })),
       cwd: hostWorkspace(),
     });
@@ -1025,15 +1044,14 @@ describe('ask tools reach the child', () => {
   it('names both ask tools in the allowlist without widening it', async () => {
     const record: { createArgs?: Record<string, unknown> } = {};
     const host = new NativeActivationHost({
-      beadGate: NO_CONTRACT_STATE,
-      loader: loaderFor(readOnlySpec()),
-      beadsClient: { readBead: () => BEAD } as never,
+            loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk(record, fakeSession({ record })),
       cwd: hostWorkspace(),
     });
 
     await host.start({
-      specialist: 'reader', beadId: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+      specialist: 'reader', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
     });
 
     const tools = (record.createArgs?.tools ?? []) as string[];
@@ -1067,15 +1085,14 @@ describe('PRD acceptance Z — a resume conflict is refused (unitAI-rrdnt.36)', 
     const shared = hostWorkspace();
 
     const hostA = new NativeActivationHost({
-      beadGate: NO_CONTRACT_STATE,
-      loader: loaderFor(spec),
-      beadsClient: { readBead: () => BEAD } as never,
+            loader: loaderFor(spec),
+      workItems: fakeWorkItems(),
       forensics: collectingSink(),
       loadSdk: async () => makeSdk({}, fakeSession({ record: {} })),
       cwd: shared,
     });
     const a = await hostA.start({
-      specialist: 'executor', beadId: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+      specialist: 'executor', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
     });
     await a.result.catch(() => undefined);
     expect(a.access).toBe('write');
@@ -1084,15 +1101,14 @@ describe('PRD acceptance Z — a resume conflict is refused (unitAI-rrdnt.36)', 
     // which is precisely why Z could never occur.
     const sinkB = collectingSink();
     const hostB = new NativeActivationHost({
-      beadGate: NO_CONTRACT_STATE,
-      loader: loaderFor(spec),
-      beadsClient: { readBead: () => BEAD } as never,
+            loader: loaderFor(spec),
+      workItems: fakeWorkItems(),
       forensics: sinkB,
       loadSdk: async () => makeSdk({}, fakeSession({ record: {}, holdOpen: true })),
       cwd: a.workspace.worktreePath,
     });
     const b = await hostB.start({
-      specialist: 'executor', beadId: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+      specialist: 'executor', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
     });
     expect(sinkB.names).toContain('lease_acquired');
     expect(b.activationId).not.toBe(a.activationId);
@@ -1201,9 +1217,8 @@ describe('NativeActivationHost — fallback walk + retry (unitAI-3emr7)', () => 
     const spec = readOnlySpec({ model: 'primaryprov/primary-model', ...(opts.executionExtra ?? {}) });
     if (opts.permission) (spec.specialist.execution as Record<string, unknown>).permission_required = opts.permission;
     const host = new NativeActivationHost({
-      beadGate: NO_CONTRACT_STATE,
-      loader: loaderFor(spec),
-      beadsClient: { readBead: () => BEAD } as never,
+            loader: loaderFor(spec),
+      workItems: fakeWorkItems(),
       forensics: sink,
       loadSdk: async () => chainSdk(created, opts.sessions, opts.unavailable),
       cwd: hostWorkspace(),
@@ -1218,7 +1233,7 @@ describe('NativeActivationHost — fallback walk + retry (unitAI-3emr7)', () => 
   };
 
   const start = (host: NativeActivationHost) => host.start({
-    specialist: 'researcher', beadId: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
   });
 
   it('walks fallback_models after a thrown FreeUsageLimitError and records the winner', async () => {
@@ -1306,16 +1321,15 @@ describe('NativeActivationHost — fallback walk + retry (unitAI-3emr7)', () => 
   it('refuses retry for live and unknown activations with the right pointer', async () => {
     const record: { createArgs?: Record<string, unknown> } = {};
     const host = new NativeActivationHost({
-      beadGate: NO_CONTRACT_STATE,
-      loader: loaderFor(readOnlySpec()),
-      beadsClient: { readBead: () => BEAD } as never,
+            loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems(),
       forensics: collectingSink(),
       loadSdk: async () => makeSdk(record, fakeSession({ record, holdOpen: true })),
       cwd: hostWorkspace(),
     });
 
     const handle = await host.start({
-      specialist: 'researcher', beadId: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
     });
     const refusal = await host.retry(handle.activationId).catch((caught: unknown) => caught);
     expect((refusal as DispatchRejectedError).reason).toBe('not_resumable');
@@ -1402,7 +1416,7 @@ describe('NativeActivationHost — fallback walk + retry (unitAI-3emr7)', () => 
     const { host, sink } = chainHost({ sessions: [session], permission: 'HIGH' });
 
     const handle = await host.start({
-      specialist: 'executor', beadId: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+      specialist: 'executor', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
     });
     expect(handle.access).toBe('write');
     expect((await handle.result).status).toBe('failed');

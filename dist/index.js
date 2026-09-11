@@ -20374,19 +20374,7 @@ var init_list = __esm(() => {
   };
 });
 
-// src/activation/bead-gate.ts
-import { spawnSync as spawnSync9 } from "child_process";
-function readContractState(beadId) {
-  const result = spawnSync9("bd", ["state", beadId, "contract"], {
-    encoding: "utf-8",
-    stdio: ["ignore", "pipe", "ignore"],
-    timeout: 5000
-  });
-  if (result.error || result.status !== 0)
-    return;
-  const value = result.stdout?.trim().toLowerCase();
-  return value ? value : undefined;
-}
+// src/activation/contract-sections.ts
 function headingOf(line) {
   const bare = line.trim().replace(/^#+\s*/, "").replace(/\*/g, "").trim();
   const canonical = (text) => text.toUpperCase().replace(/[\s-]+/g, "_");
@@ -20401,6 +20389,29 @@ function headingOf(line) {
     return;
   const inlineBody = split[2].trim();
   return inlineBody ? { name, inlineBody } : { name };
+}
+function scrutinyLevel(description) {
+  const match = description.match(/SCRUTINY\b[^\n]*\n?\s*\**\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i) ?? description.match(/SCRUTINY\b\s*[:\-\u2014]?\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i);
+  return match?.[1]?.toUpperCase();
+}
+function validateContractText(contract) {
+  const sections = extractSections(contract ?? "");
+  const missing = [...REQUIRED_SECTIONS.filter((section) => !sections.get(section))];
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      reason: "inline contract is not a usable task contract: required sections are missing or empty",
+      missing
+    };
+  }
+  if (!scrutinyLevel(contract)) {
+    return {
+      ok: false,
+      reason: `inline contract declares no SCRUTINY level (expected one of ${SCRUTINY_LEVELS.join(", ")})`,
+      missing: ["SCRUTINY"]
+    };
+  }
+  return { ok: true };
 }
 function extractSections(description) {
   const sections = new Map;
@@ -20426,6 +20437,34 @@ function extractSections(description) {
   flush();
   return sections;
 }
+var REQUIRED_SECTIONS, SCRUTINY_LEVELS, ALL_HEADINGS;
+var init_contract_sections = __esm(() => {
+  REQUIRED_SECTIONS = [
+    "PROBLEM",
+    "SUCCESS",
+    "SCOPE",
+    "NON_GOALS",
+    "CONSTRAINTS",
+    "VALIDATION",
+    "OUTPUT"
+  ];
+  SCRUTINY_LEVELS = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
+  ALL_HEADINGS = new Set([...REQUIRED_SECTIONS, "SCRUTINY"]);
+});
+
+// src/activation/bead-gate.ts
+import { spawnSync as spawnSync9 } from "child_process";
+function readContractState(beadId) {
+  const result = spawnSync9("bd", ["state", beadId, "contract"], {
+    encoding: "utf-8",
+    stdio: ["ignore", "pipe", "ignore"],
+    timeout: 5000
+  });
+  if (result.error || result.status !== 0)
+    return;
+  const value = result.stdout?.trim().toLowerCase();
+  return value ? value : undefined;
+}
 function extractPurposeExcerpt(description) {
   const sections = extractSections(description ?? "");
   for (const name of ["SCOPE", "SUCCESS"]) {
@@ -20437,10 +20476,6 @@ function extractPurposeExcerpt(description) {
     return flat.length <= PURPOSE_EXCERPT_MAX ? flat : `${flat.slice(0, PURPOSE_EXCERPT_MAX - 1)}\u2026`;
   }
   return;
-}
-function scrutinyLevel(description) {
-  const match = description.match(/SCRUTINY\b[^\n]*\n?\s*\**\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i) ?? description.match(/SCRUTINY\b\s*[:\-\u2014]?\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i);
-  return match?.[1]?.toUpperCase();
 }
 function evaluateBeadReadiness(bead, options = {}) {
   const status = bead.status?.trim().toLowerCase();
@@ -20474,20 +20509,12 @@ function evaluateBeadReadiness(bead, options = {}) {
   }
   return { ok: true };
 }
-var REQUIRED_SECTIONS, SCRUTINY_LEVELS, NON_DISPATCHABLE_STATUSES, ALL_HEADINGS, PURPOSE_EXCERPT_MAX = 60;
+var NON_DISPATCHABLE_STATUSES, PURPOSE_EXCERPT_MAX = 60;
 var init_bead_gate = __esm(() => {
-  REQUIRED_SECTIONS = [
-    "PROBLEM",
-    "SUCCESS",
-    "SCOPE",
-    "NON_GOALS",
-    "CONSTRAINTS",
-    "VALIDATION",
-    "OUTPUT"
-  ];
-  SCRUTINY_LEVELS = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
+  init_contract_sections();
+  init_contract_sections();
+  init_contract_sections();
   NON_DISPATCHABLE_STATUSES = new Set(["closed", "deferred"]);
-  ALL_HEADINGS = new Set([...REQUIRED_SECTIONS, "SCRUTINY"]);
 });
 
 // src/specialist/beads.ts
@@ -20529,25 +20556,6 @@ function buildBeadContext(bead, completedBlockers = [], epicAncestors = []) {
   }
   return lines.join(`
 `).trim();
-}
-function collectEpicAncestors(readBead, bead, depth) {
-  if (depth !== 1 && depth !== 2)
-    return [];
-  const ancestors = [];
-  let parentId = bead.parent?.trim();
-  for (let i = 0;i < depth && parentId; i++) {
-    let parent = null;
-    try {
-      parent = readBead(parentId);
-    } catch {
-      break;
-    }
-    if (!parent)
-      break;
-    ancestors.push(parent);
-    parentId = parent.parent?.trim();
-  }
-  return ancestors;
 }
 
 class BeadsClient {
@@ -20673,21 +20681,6 @@ class BeadsClient {
       "--exit-code",
       String(exitCode)
     ], { stdio: "ignore" });
-  }
-}
-function createBeadFromContract(contract, title) {
-  const problem = extractSections(contract).get("PROBLEM");
-  const firstLine = (problem ?? "").split(`
-`).map((s) => s.trim()).find(Boolean);
-  const resolvedTitle = title ?? (firstLine ?? "Specialist dispatch contract").slice(0, 72);
-  const result = spawnSync10("bd", ["create", resolvedTitle, "--description", contract, "--type", "task", "--priority", "2", "--json"], { encoding: "utf-8", timeout: 20000 });
-  if (result.error || result.status !== 0)
-    return null;
-  try {
-    const parsed = JSON.parse(result.stdout);
-    return typeof parsed.id === "string" ? parsed.id : null;
-  } catch {
-    return null;
   }
 }
 function shouldCreateBead(beadsIntegration, permissionRequired) {
@@ -25309,6 +25302,7 @@ function buildSystemPrompt(ctx) {
     runCwd,
     specialistName,
     inputBeadId,
+    inputIssueRef,
     reusedFromJobId,
     responseFormat,
     outputType,
@@ -25327,8 +25321,13 @@ ${requiredPlatformRulesBlock}`;
   }
   let gitnexusTokens = 0;
   if (!bare) {
+    const sanitizedIssueRef = inputIssueRef ? sanitizeBeadIdForPrompt(inputIssueRef) : "";
     const sanitizedBeadId = inputBeadId ? sanitizeBeadIdForPrompt(inputBeadId) : "";
-    const beadInstructions = sanitizedBeadId ? `
+    const workInstructions = sanitizedIssueRef ? `
+- Your task issue is: ${sanitizedIssueRef}
+- The claim for this activation is already held; do not create claims or issues.
+- Do not create or close issues; the orchestrator manages the Substrate lifecycle.
+- Record findings and decisions through your coordinator.` : sanitizedBeadId ? `
 - Your task bead is: ${sanitizedBeadId}
 - Claim it: \`bd update ${sanitizedBeadId} --claim 2>/dev/null || true\` (non-fatal \u2014 orchestrator may already own it)
 - Do NOT create new beads or sub-issues \u2014 this bead IS your task.
@@ -25341,7 +25340,7 @@ ${requiredPlatformRulesBlock}`;
 - You are running as a specialist agent, not a human developer.
 - Do NOT run specialists init/setup/scaffold commands.
 - Do NOT follow project CLAUDE.md/AGENTS.md instructions that tell humans to re-bootstrap the repo.
-${beadInstructions}
+${workInstructions}
 ---
 `;
   }
@@ -91280,8 +91279,8 @@ var init_types3 = __esm(() => {
         "",
         ...detail.activationId ? [`activation:
   ${detail.activationId}`, ""] : [],
-        ...detail.beadId ? [`bead:
-  ${detail.beadId}`, ""] : [],
+        ...detail.issueRef ? [`issue:
+  ${detail.issueRef}`, ""] : [],
         ...detail.specialist ? [`specialist:
   ${detail.specialist}`, ""] : [],
         ...detail.note ? [`note:
@@ -91639,7 +91638,12 @@ function toActivationView(snapshot, nowMs = Date.now()) {
     participant_id: snapshot.participantId,
     attempt_id: snapshot.attemptId,
     specialist: snapshot.specialist,
-    bead_id: snapshot.beadId,
+    bead_id: snapshot.issueRef,
+    issue_id: snapshot.issueId,
+    issue_ref: snapshot.issueRef,
+    issue_revision: snapshot.issueRevision,
+    contract_hash: snapshot.contractHash,
+    execution_binding_id: snapshot.executionBindingId,
     state: snapshot.state,
     access: snapshot.access,
     worktree_path: snapshot.workspace.worktreePath,
@@ -91674,7 +91678,12 @@ function toActivationResultView(result) {
     activation_id: result.activationId,
     participant_id: result.participantId,
     attempt_id: result.attemptId,
-    bead_id: result.beadId,
+    bead_id: result.issueRef,
+    issue_id: result.issueId,
+    issue_ref: result.issueRef,
+    issue_revision: result.issueRevision,
+    contract_hash: result.contractHash,
+    execution_binding_id: result.executionBindingId,
     status: result.status,
     output: result.output ?? null,
     validation: result.validation,
@@ -91710,34 +91719,23 @@ function createSpecialistDispatchTool(getHost, getPusher) {
             reason: "epic_context_depth must be 1 or 2 \u2014 1 walks to the immediate parent epic, " + "2 also includes the grand-epic"
           }, build2());
         }
-        let effectiveBeadId = beadId;
-        let autoCreatedBeadId;
-        if (!effectiveBeadId) {
-          if (!contract) {
-            return renderRejection({
-              reason: "neither bead_id nor contract was provided \u2014 dispatch requires a READY Bead " + "(7 sections + SCRUTINY) or an inline contract"
-            }, build2());
-          }
-          const gate = evaluateBeadReadiness({
-            id: "<inline>",
-            status: "open",
-            title: input2.title ?? "specialist dispatch",
-            description: contract
-          });
+        const inline2 = !beadId && contract ? contract : undefined;
+        if (!beadId && !inline2) {
+          return renderRejection({
+            reason: "neither bead_id nor contract was provided \u2014 dispatch requires a READY issue " + "(7 sections + SCRUTINY) or an inline contract"
+          }, build2());
+        }
+        if (inline2) {
+          const gate = validateContractText(inline2);
           if (!gate.ok) {
             return renderRejection({ reason: gate.reason, missing: gate.missing }, build2());
           }
-          const created = createBeadFromContract(contract, input2.title);
-          if (!created) {
-            return { status: "error", error: "bd create failed \u2014 bead not created, board unchanged" };
-          }
-          effectiveBeadId = created;
-          autoCreatedBeadId = created;
         }
         const handle = await getHost().start({
           specialist: input2.specialist,
-          beadId: effectiveBeadId,
-          ...epicContextDepth !== undefined && !autoCreatedBeadId ? { epicContextDepth } : {},
+          ...beadId ? { issueRef: beadId } : {},
+          ...inline2 ? { contract: inline2, ...input2.title ? { title: input2.title } : {} } : {},
+          ...epicContextDepth !== undefined && !inline2 ? { epicContextDepth } : {},
           ...input2.model_override ? { modelOverride: input2.model_override } : {},
           ...input2.thinking_override ? { thinkingOverride: input2.thinking_override } : {},
           requestedByParticipantId: input2.requested_by ?? "adapter::specialists-mcp",
@@ -91758,8 +91756,8 @@ function createSpecialistDispatchTool(getHost, getPusher) {
         return {
           status: "dispatched",
           ...snapshot ? toActivationView(snapshot) : { activation_id: handle.activationId },
-          ...autoCreatedBeadId ? {
-            created_bead_id: autoCreatedBeadId,
+          ...inline2 ? {
+            created_bead_id: handle.issueRef,
             created_bead_note: "This dispatch CREATED the bead above from your inline contract. It is a " + "durable board record and is yours to track: close it when the work is " + "done, or reassign it. It is not cleaned up automatically."
           } : {},
           step_contract: {
@@ -91824,8 +91822,7 @@ var DIST_LIB_PATH, LOADED_BUILD_ID, specialistDispatchSchema, specialistReplySch
 var init_activation_tool = __esm(() => {
   init_zod();
   init_build_identity();
-  init_bead_gate();
-  init_beads();
+  init_contract_sections();
   init_types3();
   init_types3();
   DIST_LIB_PATH = (() => {
@@ -91908,50 +91905,265 @@ var init_specialist_status_tool = __esm(() => {
   BACKENDS2 = ["gemini", "qwen", "anthropic", "openai"];
 });
 
-// src/activation/step-contract.ts
-function toList(body) {
+// src/activation/workitem-store.ts
+import { createRequire as createRequire5 } from "module";
+import { homedir as homedir16 } from "os";
+import { join as join55 } from "path";
+import { pathToFileURL } from "url";
+function resolveWorkItemDbPath(env = process.env) {
+  const override = (env.XTRM_STATE_DB ?? "").trim();
+  if (override)
+    return override;
+  return join55(homedir16(), ".xtrm", "state.db");
+}
+function openSubstrateDb(dbPath) {
+  const applyPragmas = (db) => {
+    db.exec("PRAGMA journal_mode = WAL");
+    db.exec("PRAGMA busy_timeout = 5000");
+    db.exec("PRAGMA synchronous = FULL");
+    db.exec("PRAGMA foreign_keys = ON");
+  };
+  try {
+    const bun = require4("bun:sqlite");
+    if (bun?.Database) {
+      const db = new bun.Database(dbPath);
+      applyPragmas(db);
+      return db;
+    }
+  } catch {}
+  const node3 = require4("node:sqlite");
+  if (node3?.DatabaseSync) {
+    const db = new node3.DatabaseSync(dbPath);
+    applyPragmas(db);
+    return db;
+  }
+  throw new Error(`work-item store: no sqlite driver for ${dbPath}`);
+}
+function createWorkItemBoundary(ports) {
+  const { issues, provenance, store, gate } = ports;
+  const viewOf = (ref) => {
+    const v = store.get(ref);
+    return {
+      ref: v.issue.humanRef,
+      issueId: v.issue.id,
+      revision: v.issue.currentRevision,
+      contractHash: v.issue.currentContractHash,
+      title: v.issue.title,
+      contract: v.contract,
+      readinessState: v.readinessState,
+      dispatchable: v.dispatchable,
+      reasons: v.reasons
+    };
+  };
+  return {
+    view(ref) {
+      return viewOf(ref);
+    },
+    epicAncestors(ref, depth) {
+      if (depth !== 1 && depth !== 2)
+        return [];
+      const ancestors = [];
+      const seen = new Set;
+      let childId = issues.resolveRef(ref).id;
+      for (let i = 0;i < depth; i += 1) {
+        const parent = issues.getParent(childId);
+        if (!parent)
+          break;
+        if (seen.has(parent.id))
+          break;
+        seen.add(parent.id);
+        const rev = issues.getRevision(parent.id, parent.currentRevision);
+        ancestors.push({
+          ref: parent.humanRef,
+          title: parent.title,
+          description: typeof rev.contract === "object" && rev.contract !== null ? String(rev.contract.problem ?? "") : undefined
+        });
+        childId = parent.id;
+      }
+      return ancestors;
+    },
+    check(req) {
+      const check = gate.check(issues, req);
+      return { issueId: check.issueId, revision: check.revision, contractHash: check.contractHash, report: check.report };
+    },
+    bind(req) {
+      const issueId = issues.resolveRef(req.ref).id;
+      const active = issues.getActiveClaim(issueId);
+      if (active) {
+        if (active.holder !== req.holder) {
+          throw new Error(`dispatch refused: issue is claimed by '${active.holder}' \u2014 holder '${req.holder}' must claim first`);
+        }
+        const claimActivation = active.activationId ?? null;
+        const reqActivation = req.activationId ?? null;
+        if (claimActivation !== reqActivation) {
+          throw new Error("dispatch refused: claim activation does not match dispatch activation \u2014 claim with the dispatching activation id");
+        }
+        if (req.claimId != null && req.claimId !== active.id) {
+          throw new Error(`dispatch refused: supplied claim ${req.claimId} is not the active claim ${active.id}`);
+        }
+      }
+      const claimId = active?.id ?? req.claimId ?? undefined;
+      const out = gate.dispatch(issues, provenance, { ...req, claimId });
+      return out.binding;
+    },
+    inlineCreate(contract, opts = {}) {
+      const validation = validateContractText(contract);
+      if (!validation.ok) {
+        throw new Error(`${validation.reason}: ${validation.missing.join(", ")}`);
+      }
+      const sections = extractSections(contract);
+      const scrutiny = scrutinyLevel(contract) ?? "MEDIUM";
+      const problem = sections.get("PROBLEM") ?? "";
+      const firstLine = problem.split(`
+`).map((s) => s.trim()).find(Boolean);
+      const contractObj = {
+        problem,
+        success: sections.get("SUCCESS") ?? "",
+        scope: splitLines(sections.get("SCOPE")),
+        nonGoals: splitLines(sections.get("NON_GOALS")),
+        constraints: splitLines(sections.get("CONSTRAINTS")),
+        validation: splitLines(sections.get("VALIDATION")).map((check) => ({ check })),
+        output: splitLines(sections.get("OUTPUT")).map((artifact) => ({ artifact }))
+      };
+      const holder = opts.holder ?? "adapter::specialists";
+      const { projectId } = issues.resolveProject({ gitRoot: process.cwd() });
+      const issue3 = issues.createIssue({
+        projectId,
+        title: opts.title ?? (firstLine ?? "Specialist dispatch contract").slice(0, 72),
+        kind: "task",
+        contract: contractObj,
+        scrutiny,
+        authoredBy: holder
+      });
+      const { claim: claim3 } = issues.claimReady(issue3.id, holder, { outcome: "ready", policy: "default", attestedBy: holder }, { activationId: opts.activationId });
+      return { ref: issues.resolveRef(issue3.id).humanRef, issueId: issue3.id, claimId: claim3.id };
+    },
+    journal(ref, kind, opts = {}) {
+      store.addJournal(ref, kind, opts);
+    }
+  };
+}
+function splitLines(body) {
   if (!body)
     return [];
   return body.split(`
-`).map((line) => line.trim().replace(/^[-*\u2022]\s*/, "").replace(/^\d+[.)]\s*/, "").trim()).filter((line) => line.length > 0);
+`).map((l) => l.trim().replace(/^[-*\u2022]\s*/, "").replace(/^\d+[.)]\s*/, "").trim()).filter((l) => l.length > 0);
+}
+async function openWorkItemBoundary(opts = {}) {
+  const env = opts.env ?? process.env;
+  const substrateDir = (opts.substrateDir ?? (env.XTRM_SUBSTRATE_DIR ?? "")).trim();
+  if (!substrateDir) {
+    throw new Error("work_item_store_unavailable: no Substrate package configured (set XTRM_SUBSTRATE_DIR to a built @xtrm/substrate checkout)");
+  }
+  let pkgName;
+  try {
+    const pkgRaw = await import(pathToFileURL(join55(substrateDir, "package.json")).href, { with: { type: "json" } });
+    pkgName = pkgRaw.default?.name;
+  } catch (error3) {
+    throw new Error(`work_item_store_unavailable: cannot read Substrate package identity at ${substrateDir}: ${error3 instanceof Error ? error3.message : String(error3)}`);
+  }
+  if (pkgName !== "@xtrm/substrate") {
+    throw new Error(`work_item_store_unavailable: expected @xtrm/substrate at ${substrateDir}, found ${JSON.stringify(pkgName) ?? "no name"}`);
+  }
+  const load = async (rel) => {
+    try {
+      return await import(pathToFileURL(join55(substrateDir, rel)).href);
+    } catch (error3) {
+      throw new Error(`work_item_store_unavailable: cannot load Substrate module ${rel}: ${error3 instanceof Error ? error3.message : String(error3)}`);
+    }
+  };
+  const [runner, issueSvcMod, journalMod, provMod, storeMod, gateMod] = await Promise.all([
+    load("src/store/migrations/runner.ts"),
+    load("src/service/issue-service.ts"),
+    load("src/service/journal-service.ts"),
+    load("src/service/provenance-service.ts"),
+    load("src/workitems/substrate-store.ts"),
+    load("src/workitems/dispatch-gate.ts")
+  ]);
+  for (const [mod, name] of [
+    [runner, "migrate"],
+    [issueSvcMod, "IssueService"],
+    [journalMod, "JournalService"],
+    [provMod, "ProvenanceService"],
+    [storeMod, "SubstrateIssueStore"],
+    [gateMod, "checkDispatch"],
+    [gateMod, "dispatchToSpecialist"]
+  ]) {
+    if (typeof mod[name] === "undefined") {
+      throw new Error(`work_item_store_unavailable: Substrate module is missing export ${name}`);
+    }
+  }
+  const dbPath = opts.dbPath ?? resolveWorkItemDbPath(env);
+  const db = openSubstrateDb(dbPath);
+  runner.migrate(db);
+  const issues = new issueSvcMod.IssueService(db);
+  const journalSvc = new journalMod.JournalService(db, issues);
+  const provenance = new provMod.ProvenanceService(db, issues, journalSvc);
+  const store = new storeMod.SubstrateIssueStore(issues, journalSvc);
+  return createWorkItemBoundary({
+    issues,
+    provenance,
+    store,
+    gate: {
+      check: (i, r) => gateMod.checkDispatch(i, r),
+      dispatch: (i, p, r) => gateMod.dispatchToSpecialist(i, p, r)
+    }
+  });
+}
+var require4;
+var init_workitem_store = __esm(() => {
+  init_contract_sections();
+  require4 = createRequire5(import.meta.url);
+});
+
+// src/activation/step-contract.ts
+function asStructured(contract) {
+  const empty = { problem: "", success: "", scope: [], nonGoals: [], constraints: [], validation: [], output: [] };
+  if (contract === null || typeof contract !== "object")
+    return empty;
+  const c = contract;
+  const str = (v) => typeof v === "string" ? v : "";
+  const strList = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+  const objList = (v, key) => (Array.isArray(v) ? v.map((x) => typeof x === "string" ? x : typeof x === "object" && x !== null && typeof x[key] === "string" ? x[key] : "") : []).filter((x) => x.length > 0);
+  return {
+    problem: str(c["problem"]),
+    success: str(c["success"]),
+    scope: strList(c["scope"]),
+    nonGoals: strList(c["nonGoals"]),
+    constraints: strList(c["constraints"]),
+    validation: objList(c["validation"], "check"),
+    output: objList(c["output"], "artifact")
+  };
 }
 function compileStepContract(input2) {
-  const { bead, specialist } = input2;
+  const { work, revision, specialist } = input2;
   const now = input2.now ?? (() => Date.now());
-  const sections = extractSections(bead.description ?? "");
-  const scopeText = sections.get("SCOPE") ?? "";
-  const successText = sections.get("SUCCESS") ?? "";
-  const mandate = [successText, scopeText].filter(Boolean).join(`
+  const contract = asStructured(work.contract);
+  const scopeText = contract.scope.join(`
+`);
+  const mandate = [contract.success, scopeText].filter(Boolean).join(`
 
 `);
-  const inputs = [
-    { kind: "bead", ref: bead.id, title: bead.title },
-    ...(bead.dependencies ?? []).filter((dep) => typeof dep?.id === "string" && dep.id.length > 0).map((dep) => ({ kind: "blocker", ref: dep.id }))
-  ];
-  const outputText = sections.get("OUTPUT") ?? "";
-  const outputs = outputText ? [{ description: outputText, ...input2.responseFormat ? { format: input2.responseFormat } : {} }] : [];
-  const constraints = toList(sections.get("CONSTRAINTS"));
-  const validation = toList(sections.get("VALIDATION")).map((description) => ({ description }));
-  const revision = bead.revision;
+  const inputs = [{ kind: "issue", ref: work.ref, title: work.title }];
+  const outputs = contract.output.map((artifact) => ({ description: artifact, ...input2.responseFormat ? { format: input2.responseFormat } : {} }));
+  const constraints = contract.constraints;
+  const validation = contract.validation.map((description) => ({ description }));
   return {
-    rootWorkRef: bead.id,
+    rootWorkRef: work.ref,
     mandate,
     inputs,
     outputs,
     scope: { inScope: scopeText },
-    nonGoals: toList(sections.get("NON_GOALS")),
+    nonGoals: contract.nonGoals,
     ...constraints.length > 0 ? { constraints } : {},
     ...validation.length > 0 ? { validation } : {},
     provenance: {
       specialist,
       generatedAt: now(),
-      ...revision === undefined || revision === null ? {} : { sourceBeadRevision: String(revision) }
+      sourceIssueRevision: String(revision)
     }
   };
 }
-var init_step_contract = __esm(() => {
-  init_bead_gate();
-});
 
 // src/activation/interaction.ts
 import { randomUUID as randomUUID7 } from "crypto";
@@ -92153,10 +92365,10 @@ var init_peer_bridge = __esm(() => {
 
 // src/activation/transport/roster.ts
 import { existsSync as existsSync52, readdirSync as readdirSync26, readFileSync as readFileSync45 } from "fs";
-import { homedir as homedir16 } from "os";
-import { join as join55 } from "path";
+import { homedir as homedir17 } from "os";
+import { join as join56 } from "path";
 function defaultRosterDir() {
-  return join55(homedir16(), ".claude", "sessions");
+  return join56(homedir17(), ".claude", "sessions");
 }
 function procProbe() {
   let bootSeconds;
@@ -92234,7 +92446,7 @@ function scanRoster(options2 = {}) {
       continue;
     let registration;
     try {
-      registration = JSON.parse(readFileSync45(join55(dir, file), "utf-8"));
+      registration = JSON.parse(readFileSync45(join56(dir, file), "utf-8"));
     } catch {
       rejected.push({ file, reason: "unparsable" });
       continue;
@@ -92545,15 +92757,15 @@ var ASK_TOOL = "ask_coordinator", ESCALATE_TOOL = "escalate_to_coordinator", too
 
 // src/activation/pi-sdk.ts
 import { existsSync as existsSync53 } from "fs";
-import { join as join56 } from "path";
-import { pathToFileURL } from "url";
+import { join as join57 } from "path";
+import { pathToFileURL as pathToFileURL2 } from "url";
 function piSdkCandidates() {
   const candidates = [PI_SDK_PACKAGE];
   const globalDir = resolveGlobalNodeModulesDir2();
   if (globalDir) {
-    const entry = join56(globalDir, PI_SDK_PACKAGE, "dist", "index.js");
+    const entry = join57(globalDir, PI_SDK_PACKAGE, "dist", "index.js");
     if (existsSync53(entry))
-      candidates.push(pathToFileURL(entry).href);
+      candidates.push(pathToFileURL2(entry).href);
   }
   return candidates;
 }
@@ -93007,23 +93219,23 @@ var init_registry = __esm(() => {
 
 // src/activation/authority-store.ts
 import { mkdirSync as mkdirSync22 } from "fs";
-import { createRequire as createRequire5 } from "module";
-import { homedir as homedir17 } from "os";
-import { dirname as dirname23, join as join57 } from "path";
+import { createRequire as createRequire6 } from "module";
+import { homedir as homedir18 } from "os";
+import { dirname as dirname23, join as join58 } from "path";
 function resolveAuthorityDbPath(env = process.env) {
   const override = (env.XTRM_STATE_DB ?? "").trim();
   if (override)
     return override;
-  return join57(homedir17(), ".xtrm", "state.db");
+  return join58(homedir18(), ".xtrm", "state.db");
 }
 function openAuthorityDb(dbPath) {
   try {
-    const bun = require4("bun:sqlite");
+    const bun = require5("bun:sqlite");
     if (bun?.Database)
       return new bun.Database(dbPath);
   } catch {}
   try {
-    const node3 = require4("node:sqlite");
+    const node3 = require5("node:sqlite");
     if (node3?.DatabaseSync) {
       const DatabaseSync = node3.DatabaseSync;
       const inner = new DatabaseSync(dbPath);
@@ -93051,7 +93263,7 @@ function createFileAuthorityWriter(dbPath = resolveAuthorityDbPath()) {
           db.exec(ACTIVATIONS_DDL);
           db.prepare(`INSERT OR REPLACE INTO activations
                (activation_id, specialist, state, bead_id, last_activity_at)
-             VALUES (?, ?, ?, ?, ?)`).run(snapshot.activationId, snapshot.specialist, snapshot.state, snapshot.beadId, snapshot.lastActivityAt);
+             VALUES (?, ?, ?, ?, ?)`).run(snapshot.activationId, snapshot.specialist, snapshot.state, snapshot.issueRef, snapshot.lastActivityAt);
         } finally {
           db.close();
         }
@@ -93072,7 +93284,7 @@ function createFileAuthorityWriter(dbPath = resolveAuthorityDbPath()) {
     }
   };
 }
-var require4, ACTIVATIONS_DDL = `CREATE TABLE IF NOT EXISTS activations (
+var require5, ACTIVATIONS_DDL = `CREATE TABLE IF NOT EXISTS activations (
   activation_id TEXT PRIMARY KEY,
   specialist TEXT NOT NULL,
   state TEXT NOT NULL,
@@ -93080,12 +93292,13 @@ var require4, ACTIVATIONS_DDL = `CREATE TABLE IF NOT EXISTS activations (
   last_activity_at INTEGER NOT NULL
 )`, NULL_AUTHORITY_WRITER;
 var init_authority_store = __esm(() => {
-  require4 = createRequire5(import.meta.url);
+  require5 = createRequire6(import.meta.url);
   NULL_AUTHORITY_WRITER = { record: () => {}, remove: () => {} };
 });
 
 // src/activation/native-host.ts
 import { randomUUID as randomUUID8 } from "crypto";
+import { existsSync as existsSync54 } from "fs";
 function extractTokenUsage(event) {
   const nested = nativeSessionTokenUsage(event);
   if (nested) {
@@ -93112,10 +93325,10 @@ function extractTokenUsage(event) {
 
 class NativeActivationHost {
   loader;
-  beadsClient;
+  workItemsInjected;
+  workItemsDefault;
   forensics;
   loadSdk;
-  beadGate;
   cwd;
   now;
   authority;
@@ -93126,10 +93339,9 @@ class NativeActivationHost {
     this.cwd = deps.cwd ?? process.cwd();
     this.interactions = new InteractionTransport(deps.peer ? { deliver: this.wirePeerDelivery(deps.peer) } : {});
     this.loader = deps.loader ?? new SpecialistLoader({ projectDir: this.cwd });
-    this.beadsClient = deps.beadsClient ?? new BeadsClient;
+    this.workItemsInjected = deps.workItems;
     this.forensics = deps.forensics ?? NULL_FORENSIC_SINK;
     this.loadSdk = deps.loadSdk ?? loadPiSdk;
-    this.beadGate = deps.beadGate ?? {};
     this.now = deps.now ?? (() => Date.now());
     this.authority = deps.authority ?? NULL_AUTHORITY_WRITER;
   }
@@ -93142,7 +93354,7 @@ class NativeActivationHost {
       attemptId,
       participantId,
       specialist: request.specialist,
-      beadId: request.beadId,
+      beadId: request.issueRef,
       name,
       payload
     });
@@ -93155,7 +93367,7 @@ class NativeActivationHost {
       emit("activation_rejected", { reason, ...detail });
       throw new DispatchRejectedError(reason, {
         specialist: request.specialist,
-        beadId: request.beadId,
+        issueRef: request.issueRef,
         ...detail
       });
     };
@@ -93169,14 +93381,80 @@ class NativeActivationHost {
     const execution = specialist.specialist.execution;
     const tier = execution.permission_required ?? "READ_ONLY";
     const access2 = WRITE_TIERS.has(tier) ? "write" : "read";
-    const bead = this.beadsClient.readBead(request.beadId);
-    if (!bead)
-      return reject("bead_unreadable");
-    const readiness = evaluateBeadReadiness(bead, this.beadGate);
-    if (!readiness.ok) {
-      return reject("bead_contract_incomplete", {
-        note: readiness.reason,
-        ...readiness.missing.length > 0 ? { missing: readiness.missing } : {}
+    const workspace = request.workspaceHint ?? {
+      repositoryRoot: this.cwd,
+      worktreePath: this.cwd
+    };
+    let workItems;
+    try {
+      workItems = await this.resolveWorkItems();
+    } catch (error3) {
+      return reject("work_item_store_unavailable", {
+        note: error3 instanceof Error ? error3.message : String(error3)
+      });
+    }
+    const inlineContract = (request.contract ?? "").trim();
+    let autoCreatedRef;
+    if (inlineContract) {
+      if (request.issueRef) {
+        return reject("contract_and_ref", {
+          note: "contract and issueRef were both provided \u2014 provide exactly one"
+        });
+      }
+      try {
+        const created = workItems.inlineCreate(inlineContract, {
+          ...request.title ? { title: request.title } : {},
+          holder: participantId,
+          activationId
+        });
+        autoCreatedRef = created.ref;
+      } catch (error3) {
+        const message = error3 instanceof Error ? error3.message : String(error3);
+        if (message.startsWith("inline contract is not a usable task contract")) {
+          const rechecked = validateContractText(inlineContract);
+          return reject("issue_not_dispatchable", {
+            note: message,
+            ...!rechecked.ok ? { missing: rechecked.missing } : {}
+          });
+        }
+        throw error3;
+      }
+    }
+    const issueRef = autoCreatedRef ?? request.issueRef ?? "";
+    if (!issueRef) {
+      return reject("no_work_ref", {
+        note: "neither issueRef nor contract was provided \u2014 dispatch requires an existing issue or an inline contract"
+      });
+    }
+    let view;
+    try {
+      view = workItems.view(issueRef);
+    } catch (error3) {
+      return reject("issue_unresolvable", {
+        note: error3 instanceof Error ? error3.message : String(error3)
+      });
+    }
+    let dispatchCheck;
+    try {
+      dispatchCheck = workItems.check({
+        ref: issueRef,
+        specialist: request.specialist,
+        holder: participantId,
+        activationId,
+        workspace: workspace.worktreePath
+      });
+      view = workItems.view(issueRef);
+      if (view.revision !== dispatchCheck.revision || view.contractHash !== dispatchCheck.contractHash) {
+        return reject("issue_revision_diverged", {
+          note: "issue changed between resolution and the read-only dispatch check; retry against the new revision"
+        });
+      }
+    } catch (error3) {
+      const note = error3 instanceof Error ? error3.message : String(error3);
+      const missing = note.match(/missing(?: required sections)?:\s*([^;]+)/i)?.[1]?.split(",").map((entry) => entry.trim()).filter(Boolean);
+      return reject("issue_not_dispatchable", {
+        note,
+        ...missing?.length ? { missing } : {}
       });
     }
     const toolContract = resolveRuntimeToolContract({
@@ -93231,10 +93509,6 @@ class NativeActivationHost {
       });
     }
     const resolvedModel = modelCheck.resolvedModel ?? modelChain[modelIndex] ?? requestedModel;
-    const workspace = request.workspaceHint ?? {
-      repositoryRoot: this.cwd,
-      worktreePath: this.cwd
-    };
     if (access2 === "write") {
       try {
         acquire({ workspace, activationId, attemptId, specialist: request.specialist });
@@ -93252,7 +93526,8 @@ class NativeActivationHost {
       emit("lease_acquired", { workspace: workspace.worktreePath });
     }
     const stepContract = compileStepContract({
-      bead,
+      work: { ref: view.ref, title: view.title, contract: view.contract },
+      revision: dispatchCheck.revision,
       specialist: specialist.specialist.metadata.name,
       responseFormat: execution.response_format,
       now: this.now
@@ -93264,7 +93539,7 @@ class NativeActivationHost {
       non_goals: stepContract.nonGoals.length,
       constraints: stepContract.constraints?.length ?? 0,
       validation: stepContract.validation?.length ?? 0,
-      source_bead_revision: stepContract.provenance.sourceBeadRevision ?? null
+      source_issue_revision: stepContract.provenance.sourceIssueRevision ?? null
     });
     emit("activation_admitted", {
       tier,
@@ -93279,13 +93554,13 @@ class NativeActivationHost {
       tools: toolContract.toolsList.join(","),
       custom_tools: `${ASK_TOOL},${ESCALATE_TOOL}`
     });
-    const epicAncestors = collectEpicAncestors((id) => this.beadsClient.readBead(id), bead, request.epicContextDepth);
+    const epicAncestors = workItems.epicAncestors(issueRef, request.epicContextDepth ?? 0);
     const rendered = renderTaskPrompt({
       specialist: specialist.specialist,
       cwd: this.cwd,
-      beadId: request.beadId,
-      bead,
-      epicAncestors
+      beadId: view.ref,
+      bead: workItemAsRecord(view),
+      epicAncestors: epicAncestors.map(workAncestorAsRecord)
     });
     const systemPrompt = buildSystemPrompt({
       systemPromptTemplate: specialist.specialist.prompt.system ?? "",
@@ -93293,12 +93568,19 @@ class NativeActivationHost {
       bare: execution.bare ?? false,
       runCwd: this.cwd,
       specialistName: specialist.specialist.metadata.name,
-      inputBeadId: request.beadId,
+      inputIssueRef: view.ref,
       responseFormat: execution.response_format ?? "text",
       outputType: execution.output_type ?? "custom",
       outputContractSchema: undefined,
       beadContextText: rendered.beadContextText ?? "",
-      readBeadForMemory: (id) => this.beadsClient.readBead(id)
+      readBeadForMemory: (id) => {
+        try {
+          const v = workItems.view(id);
+          return { title: v.title, description: contractToMarkdown(v.contract) };
+        } catch {
+          return null;
+        }
+      }
     });
     emit("activation_starting", { pi_session_id: null });
     const askTools = createAskTools(sdk, {
@@ -93348,18 +93630,41 @@ class NativeActivationHost {
       systemPrompt: systemPrompt.text
     };
     const { session } = await sdk.createAgentSession({ ...baseSessionOptions, model: modelCheck.model });
+    let binding;
+    try {
+      binding = workItems.bind({
+        ref: issueRef,
+        specialist: request.specialist,
+        holder: participantId,
+        activationId,
+        attemptId,
+        sessionId: session.sessionId,
+        workspace: workspace.worktreePath
+      });
+    } catch (error3) {
+      try {
+        session.dispose();
+      } catch {}
+      return reject("issue_binding_failed", {
+        note: error3 instanceof Error ? error3.message : String(error3)
+      });
+    }
     const createSessionForModel = async (model) => {
       const created = await sdk.createAgentSession({ ...baseSessionOptions, model });
       return created.session;
     };
-    const purpose = extractPurposeExcerpt(bead.description ?? "");
+    const purpose = purposeExcerptFromContract(view.contract);
     const startedAt = this.now();
     const snapshot = {
       activationId,
       participantId,
       attemptId,
       specialist: request.specialist,
-      beadId: request.beadId,
+      issueId: view.issueId,
+      issueRef: view.ref,
+      issueRevision: binding.issueRevision,
+      contractHash: binding.contractHash,
+      executionBindingId: binding.id,
       state: "starting",
       access: access2,
       workspace,
@@ -93401,13 +93706,26 @@ class NativeActivationHost {
       participantId,
       attemptId,
       specialist: request.specialist,
-      beadId: request.beadId,
+      issueId: view.issueId,
+      issueRef: view.ref,
       access: access2,
       workspace,
       resolvedModel,
       stepContract,
       result
     };
+  }
+  async resolveWorkItems() {
+    if (this.workItemsInjected)
+      return this.workItemsInjected;
+    if (this.workItemsDefault)
+      return this.workItemsDefault;
+    const dbPath = resolveWorkItemDbPath();
+    if (!existsSync54(dbPath)) {
+      throw new Error(`no Substrate work store at ${dbPath} (set XTRM_STATE_DB or initialize it via xt init / sb)`);
+    }
+    this.workItemsDefault = await openWorkItemBoundary({ dbPath });
+    return this.workItemsDefault;
   }
   onSessionEvent(snapshot, event, emit) {
     snapshot.lastActivityAt = this.now();
@@ -93424,7 +93742,7 @@ class NativeActivationHost {
       attemptId: snapshot.attemptId,
       participantId: snapshot.participantId,
       specialist: snapshot.specialist,
-      beadId: snapshot.beadId,
+      beadId: snapshot.issueRef,
       piSessionId: snapshot.piSessionId ?? "",
       workspacePath: snapshot.workspace.worktreePath,
       event
@@ -93474,7 +93792,11 @@ class NativeActivationHost {
           activationId: snapshot.activationId,
           participantId: snapshot.participantId,
           attemptId: snapshot.attemptId,
-          beadId: snapshot.beadId,
+          issueId: snapshot.issueId,
+          issueRef: snapshot.issueRef,
+          issueRevision: snapshot.issueRevision,
+          contractHash: snapshot.contractHash,
+          executionBindingId: snapshot.executionBindingId,
           status: "failed",
           output: undefined,
           validation: { valid: false, errors: [detail] },
@@ -93501,7 +93823,11 @@ class NativeActivationHost {
         activationId: snapshot.activationId,
         participantId: snapshot.participantId,
         attemptId: snapshot.attemptId,
-        beadId: snapshot.beadId,
+        issueId: snapshot.issueId,
+        issueRef: snapshot.issueRef,
+        issueRevision: snapshot.issueRevision,
+        contractHash: snapshot.contractHash,
+        executionBindingId: snapshot.executionBindingId,
         status: "completed",
         output: output2,
         validation,
@@ -93524,7 +93850,11 @@ class NativeActivationHost {
         activationId: snapshot.activationId,
         participantId: snapshot.participantId,
         attemptId: snapshot.attemptId,
-        beadId: snapshot.beadId,
+        issueId: snapshot.issueId,
+        issueRef: snapshot.issueRef,
+        issueRevision: snapshot.issueRevision,
+        contractHash: snapshot.contractHash,
+        executionBindingId: snapshot.executionBindingId,
         status: "failed",
         output: undefined,
         validation: { valid: false, errors: [message] },
@@ -93651,7 +93981,7 @@ class NativeActivationHost {
             attemptId,
             participantId: record5.snapshot.participantId,
             specialist: record5.snapshot.specialist,
-            beadId: record5.snapshot.beadId,
+            beadId: record5.snapshot.issueRef,
             name: "lease_denied",
             payload: { reason: error3.reason, note: error3.detail.holder, on: "retry" }
           });
@@ -93668,7 +93998,7 @@ class NativeActivationHost {
       attemptId,
       participantId: record5.snapshot.participantId,
       specialist: record5.snapshot.specialist,
-      beadId: record5.snapshot.beadId,
+      beadId: record5.snapshot.issueRef,
       name,
       payload
     });
@@ -93702,7 +94032,8 @@ class NativeActivationHost {
       participantId: record5.snapshot.participantId,
       attemptId,
       specialist: record5.snapshot.specialist,
-      beadId: record5.snapshot.beadId,
+      issueId: record5.snapshot.issueId,
+      issueRef: record5.snapshot.issueRef,
       access: record5.snapshot.access,
       workspace: record5.snapshot.workspace,
       resolvedModel: record5.snapshot.resolvedModel,
@@ -93744,7 +94075,7 @@ class NativeActivationHost {
         attemptId: snapshot.attemptId,
         participantId: snapshot.participantId,
         specialist: snapshot.specialist,
-        beadId: snapshot.beadId,
+        beadId: snapshot.issueRef,
         name: "lease_released",
         payload: { workspace: snapshot.workspace.worktreePath, reason }
       });
@@ -93754,7 +94085,7 @@ class NativeActivationHost {
         attemptId: snapshot.attemptId,
         participantId: snapshot.participantId,
         specialist: snapshot.specialist,
-        beadId: snapshot.beadId,
+        beadId: snapshot.issueRef,
         name: "lease_uncertain",
         payload: {
           workspace: snapshot.workspace.worktreePath,
@@ -93778,7 +94109,7 @@ class NativeActivationHost {
         attemptId: record5.snapshot.attemptId,
         participantId: record5.snapshot.participantId,
         specialist: record5.snapshot.specialist,
-        beadId: record5.snapshot.beadId,
+        beadId: record5.snapshot.issueRef,
         name: "tool_blocked",
         payload: { tool: toolName, note: verdict.reason }
       });
@@ -93838,7 +94169,7 @@ class NativeActivationHost {
         attemptId: record5.snapshot.attemptId,
         participantId: record5.snapshot.participantId,
         specialist: record5.snapshot.specialist,
-        beadId: record5.snapshot.beadId,
+        beadId: record5.snapshot.issueRef,
         name: "activation_disposed",
         payload: { reason }
       });
@@ -93881,7 +94212,7 @@ class NativeActivationHost {
             attemptId,
             participantId: record5.snapshot.participantId,
             specialist: record5.snapshot.specialist,
-            beadId: record5.snapshot.beadId,
+            beadId: record5.snapshot.issueRef,
             name: "lease_denied",
             payload: { reason: error3.reason, note: error3.detail.holder, on: "resume" }
           });
@@ -93897,7 +94228,7 @@ class NativeActivationHost {
       attemptId,
       participantId: record5.snapshot.participantId,
       specialist: record5.snapshot.specialist,
-      beadId: record5.snapshot.beadId,
+      beadId: record5.snapshot.issueRef,
       name,
       payload
     });
@@ -93917,7 +94248,8 @@ class NativeActivationHost {
       participantId: record5.snapshot.participantId,
       attemptId,
       specialist: record5.snapshot.specialist,
-      beadId: record5.snapshot.beadId,
+      issueId: record5.snapshot.issueId,
+      issueRef: record5.snapshot.issueRef,
       access: record5.snapshot.access,
       workspace: record5.snapshot.workspace,
       resolvedModel: record5.snapshot.resolvedModel,
@@ -93925,6 +94257,56 @@ class NativeActivationHost {
       result
     };
   }
+}
+function workItemAsRecord(view) {
+  return { id: view.ref, title: view.title, description: contractToMarkdown(view.contract) };
+}
+function workAncestorAsRecord(ancestor) {
+  return { id: ancestor.ref, title: ancestor.title, ...ancestor.description ? { description: ancestor.description } : {} };
+}
+function purposeExcerptFromContract(contract) {
+  if (contract !== null && typeof contract === "object") {
+    const c = contract;
+    const scope = Array.isArray(c["scope"]) ? c["scope"].filter((item) => typeof item === "string") : [];
+    const success = typeof c["success"] === "string" ? c["success"] : "";
+    const first = scope[0] ?? success;
+    if (first) {
+      const flat = first.trim().replace(/\s+/g, " ");
+      return flat.length <= 160 ? flat : `${flat.slice(0, 159)}\u2026`;
+    }
+  }
+  return extractPurposeExcerpt(contractToMarkdown(contract)) ?? "";
+}
+function contractToMarkdown(contract) {
+  if (contract === null || typeof contract !== "object")
+    return "";
+  const c = contract;
+  const lines = [];
+  const text = (v) => typeof v === "string" ? v : "";
+  const list2 = (v) => Array.isArray(v) ? v.map((x) => typeof x === "string" ? x : typeof x === "object" && x !== null ? Object.values(x).filter((y) => typeof y === "string").join(": ") : String(x)) : [];
+  const problem = text(c["problem"]);
+  if (problem)
+    lines.push(`PROBLEM: ${problem}`);
+  const success = text(c["success"]);
+  if (success)
+    lines.push(`SUCCESS: ${success}`);
+  const sections = [
+    ["SCOPE", c["scope"]],
+    ["NON_GOALS", c["nonGoals"]],
+    ["CONSTRAINTS", c["constraints"]],
+    ["VALIDATION", c["validation"]],
+    ["OUTPUT", c["output"]]
+  ];
+  for (const [name, value] of sections) {
+    const items = list2(value);
+    if (items.length === 0)
+      continue;
+    lines.push(`${name}:`);
+    for (const item of items)
+      lines.push(`- ${item}`);
+  }
+  return lines.join(`
+`);
 }
 function lastAssistantMessage(messages) {
   for (let i = messages.length - 1;i >= 0; i -= 1) {
@@ -93949,9 +94331,9 @@ var init_native_host = __esm(() => {
   init_task_prompt();
   init_runner();
   init_session();
-  init_beads();
   init_bead_gate();
-  init_step_contract();
+  init_workitem_store();
+  init_contract_sections();
   init_interaction();
   init_peer_bridge();
   init_peer_adapter();
@@ -94244,6 +94626,8 @@ var init_lib = __esm(() => {
   init_session();
   init_runner();
   init_native_host();
+  init_workitem_store();
+  init_contract_sections();
   init_types3();
   init_activation_tool();
   init_async_events();
@@ -94378,7 +94762,7 @@ var init_specialist_list_tool = __esm(() => {
 });
 
 // src/mcp/resume-tool.ts
-import { existsSync as existsSync54 } from "fs";
+import { existsSync as existsSync55 } from "fs";
 import { fileURLToPath as fileURLToPath9 } from "url";
 function createSpecialistResumeTool(getHost, getPusher) {
   return {
@@ -94429,7 +94813,7 @@ var init_resume_tool = __esm(() => {
   DIST_LIB_PATH2 = (() => {
     for (const candidate of ["./lib.js", "../../dist/lib.js"]) {
       const path3 = fileURLToPath9(new URL(candidate, import.meta.url));
-      if (existsSync54(path3))
+      if (existsSync55(path3))
         return path3;
     }
     return fileURLToPath9(new URL("../../dist/lib.js", import.meta.url));
@@ -94442,7 +94826,7 @@ var init_resume_tool = __esm(() => {
 });
 
 // src/substrate/services.ts
-import { createRequire as createRequire6 } from "module";
+import { createRequire as createRequire7 } from "module";
 function resolveSubstrate() {
   if (cached7)
     return cached7;
@@ -94455,7 +94839,7 @@ function resolveSubstrate() {
 function load() {
   let mod;
   try {
-    mod = require5("@xtrm/substrate");
+    mod = require6("@xtrm/substrate");
   } catch (error3) {
     const message = error3 instanceof Error ? error3.message : String(error3);
     const reason = /node:sqlite|DatabaseSync|built-in module/i.test(message) ? "runtime_incompatible" : "module_not_resolvable";
@@ -94500,11 +94884,11 @@ function substrateUnavailablePayload(tool, handle) {
     help: UNAVAILABLE_HELP[reason]
   };
 }
-var require5, UNAVAILABLE_HELP, cached7 = null;
+var require6, UNAVAILABLE_HELP, cached7 = null;
 var init_services = __esm(() => {
   init_authority_store();
   init_logger();
-  require5 = createRequire6(import.meta.url);
+  require6 = createRequire7(import.meta.url);
   UNAVAILABLE_HELP = {
     module_not_resolvable: "@xtrm/substrate is not installed. It is unpublished; install it as a local link to enable this surface.",
     runtime_incompatible: "Substrate requires node:sqlite (node >= 24); this server runs under bun, which does not provide it. " + "Substrate needs a sqlite adapter seam before this surface can load here.",
@@ -95013,7 +95397,7 @@ __export(exports_v2_server, {
   serveV2Stdio: () => serveV2Stdio,
   buildV2Server: () => buildV2Server
 });
-import { join as join58 } from "path";
+import { join as join59 } from "path";
 function textResult(result) {
   return { content: [{ type: "text", text: typeof result === "string" ? result : JSON.stringify(result, null, 2) }] };
 }
@@ -95022,13 +95406,12 @@ function buildV2Server(ctx) {
   let channelSend = () => {};
   const circuitBreaker = new CircuitBreaker;
   const loader = new SpecialistLoader;
-  const hooks = new HookEmitter({ tracePath: join58(process.cwd(), ".specialists", "trace.jsonl") });
+  const hooks = new HookEmitter({ tracePath: join59(process.cwd(), ".specialists", "trace.jsonl") });
   const beadsClient = new BeadsClient;
   const runner = new SpecialistRunner({ loader, hooks, circuitBreaker, beadsClient });
   const observability = createObservabilitySqliteClient();
   const host = new NativeActivationHost({
     loader,
-    beadsClient,
     authority: createFileAuthorityWriter(),
     forensics: withChannelPush(createActivationForensicSink(observability), (frame) => channelSend(frame))
   });
