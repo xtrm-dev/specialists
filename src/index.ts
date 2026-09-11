@@ -1329,7 +1329,7 @@ async function run() {
         '  3. xtrm-tools availability',
         '  4. Specialists MCP registration in .mcp.json',
         '  5. .specialists/ runtime directories',
-        '  6. hook wiring expectations',
+        '  6. Substrate plugin owns the Claude SessionStart hook',
         '  7. zombie job detection',
         '  8. CLAUDE.md fragments (XTRM-MANAGED sentinels) — delegates to xt claude-sync',
         '  9. drift check for stale managed mirrors (--check-drift / --drift)',

@@ -47,9 +47,7 @@ const USER_SPECIALISTS_DIR = join(SPECIALISTS_DIR, 'user');
 
 // Global install locations — xtrm-tools now vendors these into ~/.xtrm/ instead of per-repo mirrors.
 const XTRM_HOME = join(homedir(), '.xtrm');
-const GLOBAL_HOOKS_DIR = join(XTRM_HOME, 'hooks', 'specialists');
 const GLOBAL_DEFAULT_SKILLS_DIR = join(XTRM_HOME, 'skills', 'default');
-const HOOK_NAMES = ['specialists-session-start.mjs'] as const;
 
 type JsonRecord = Record<string, unknown>;
 
@@ -113,24 +111,6 @@ function checkXt(): boolean {
   }
   ok(`xt installed  ${dim(sp('xt', ['--version']).stdout || '')}`);
   return true;
-}
-
-function checkHooks(): boolean {
-  section(`Claude Code hooks  (global ${relative(homedir(), GLOBAL_HOOKS_DIR)})`);
-  let allPresent = true;
-
-  for (const name of HOOK_NAMES) {
-    const hookPath = join(GLOBAL_HOOKS_DIR, name);
-    if (!existsSync(hookPath)) {
-      fail(`${hookPath} ${red('missing')}`);
-      fix('reinstall xtrm-tools (hooks are vendored globally)');
-      allPresent = false;
-    } else {
-      ok(relative(homedir(), hookPath));
-    }
-  }
-
-  return allPresent;
 }
 
 function checkVersion(): boolean {
@@ -949,7 +929,6 @@ export async function run(argv: readonly string[] = process.argv.slice(3)): Prom
   const spOk = checkSpAlias();
   const bdOk = checkBd();
   const xtOk = checkXt();
-  const hooksOk = checkHooks();
   const versionOk = checkVersion();
   const skillDriftOk = checkSkillDrift();
   const userOverlayOk = checkUserOverlayDrift();
@@ -958,7 +937,7 @@ export async function run(argv: readonly string[] = process.argv.slice(3)): Prom
   const fragmentsOk = checkClaudeMdFragments();
   const overridesOk = await checkSpecialistOverrides();
 
-  const allOk = piOk && spOk && bdOk && xtOk && hooksOk && versionOk && skillDriftOk && userOverlayOk && dirsOk && jobsOk && fragmentsOk && overridesOk;
+  const allOk = piOk && spOk && bdOk && xtOk && versionOk && skillDriftOk && userOverlayOk && dirsOk && jobsOk && fragmentsOk && overridesOk;
   console.log('');
   if (allOk) {
     console.log(`  ${green('✓')} ${bold('All checks passed')}  — specialists is healthy`);
