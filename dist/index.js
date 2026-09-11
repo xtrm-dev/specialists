@@ -94802,6 +94802,274 @@ var init_issue_tool = __esm(() => {
   });
 });
 
+// src/tools/substrate/journal.tool.ts
+function missing(field2, op) {
+  return { status: "error", error: `missing required field '${field2}' for op '${op}'` };
+}
+function fail10(error3) {
+  return { status: "error", error: error3 instanceof Error ? error3.message : String(error3) };
+}
+function boundEntry(entry) {
+  if (entry === null || typeof entry !== "object" || Array.isArray(entry))
+    return entry;
+  const view = { ...entry };
+  const semantic = view.semantic;
+  if (semantic !== null && typeof semantic === "object" && !Array.isArray(semantic)) {
+    const sem = { ...semantic };
+    if (typeof sem.summary === "string" && sem.summary.length > BODY_CAP) {
+      sem.summary = `${sem.summary.slice(0, BODY_CAP)}\u2026`;
+      sem.truncated = true;
+      sem.bytes = semantic.summary ? String(semantic.summary).length : 0;
+    }
+    view.semantic = sem;
+  }
+  const mechanical = view.mechanical;
+  if (mechanical !== null && typeof mechanical === "object" && !Array.isArray(mechanical)) {
+    const mech = { ...mechanical };
+    for (const field2 of ["changedFiles", "commitsSincePrevious"]) {
+      const arr = mech[field2];
+      if (Array.isArray(arr) && arr.length > LIST_CAP) {
+        mech[field2] = [...arr.slice(0, LIST_CAP)];
+        mech[`${field2}Total`] = arr.length;
+        mech.truncated = true;
+      }
+    }
+    view.mechanical = mech;
+  }
+  return view;
+}
+function createSubstrateJournalTool(getJournal) {
+  return {
+    name: "substrate_journal",
+    description: "Read or append an issue journal entry (Substrate JournalService). " + "Ops: append | get | list | since | latest_checkpoint | checkpoint. " + "since(issue_id, cursor) is the pagination primitive and returns its next cursor. " + "Payloads are bounded: list caps at 50 rows and entry bodies truncate with a marker.",
+    inputSchema: substrateJournalSchema,
+    async execute(input2) {
+      const journal = getJournal();
+      if (!journal)
+        return substrateUnavailablePayload("substrate_journal", resolveSubstrate());
+      try {
+        switch (input2.op) {
+          case "get": {
+            if (!input2.entry_id)
+              return missing("entry_id", "get");
+            return { status: "ok", entry: boundEntry(journal.getEntry(input2.entry_id)) };
+          }
+          case "list": {
+            if (!input2.issue_id)
+              return missing("issue_id", "list");
+            const limit = Math.min(input2.limit ?? LIST_CAP, LIST_CAP);
+            const entries = journal.listEntries(input2.issue_id, {
+              ...input2.kind ? { kind: input2.kind } : {},
+              limit
+            });
+            return {
+              status: "ok",
+              entries: entries.map(boundEntry),
+              count: entries.length,
+              capped: entries.length >= LIST_CAP
+            };
+          }
+          case "since": {
+            if (!input2.issue_id)
+              return missing("issue_id", "since");
+            if (input2.cursor === undefined)
+              return missing("cursor", "since");
+            const delta = journal.since(input2.issue_id, input2.cursor);
+            return {
+              status: "ok",
+              issue_id: delta.issue_id,
+              afterSequence: delta.afterSequence,
+              entries: delta.entries.map(boundEntry),
+              nextCursor: delta.nextCursor
+            };
+          }
+          case "latest_checkpoint": {
+            if (!input2.issue_id)
+              return missing("issue_id", "latest_checkpoint");
+            return { status: "ok", entry: boundEntry(journal.latestCheckpoint(input2.issue_id)) };
+          }
+          case "append": {
+            if (!input2.issue_id)
+              return missing("issue_id", "append");
+            if (!input2.kind)
+              return missing("kind", "append");
+            const entry = journal.appendEntry(input2.issue_id, {
+              kind: input2.kind,
+              ...input2.run_id ? { run_id: input2.run_id } : {},
+              ...input2.participant_id ? { participant_id: input2.participant_id } : {},
+              ...input2.session_id ? { session_id: input2.session_id } : {},
+              ...input2.summary ? { semantic: { summary: input2.summary } } : {}
+            });
+            return { status: "ok", entry: boundEntry(entry) };
+          }
+          case "checkpoint": {
+            if (!input2.issue_id)
+              return missing("issue_id", "checkpoint");
+            const mechanical = journal.collectMechanical(input2.issue_id, {
+              ...input2.run_id ? { run_id: input2.run_id } : {},
+              ...input2.participant_id ? { participant_id: input2.participant_id } : {},
+              ...input2.session_id ? { session_id: input2.session_id } : {}
+            });
+            const entry = journal.appendEntry(input2.issue_id, {
+              kind: "checkpoint",
+              ...input2.run_id ? { run_id: input2.run_id } : {},
+              ...input2.participant_id ? { participant_id: input2.participant_id } : {},
+              ...input2.session_id ? { session_id: input2.session_id } : {},
+              mechanical
+            });
+            return { status: "ok", entry: boundEntry(entry), degraded: false };
+          }
+          default:
+            return { status: "error", error: `unknown op: ${String(input2.op)}` };
+        }
+      } catch (error3) {
+        return fail10(error3);
+      }
+    }
+  };
+}
+var JOURNAL_KINDS, substrateJournalSchema, LIST_CAP = 50, BODY_CAP = 2000;
+var init_journal_tool = __esm(() => {
+  init_zod();
+  init_services();
+  JOURNAL_KINDS = [
+    "checkpoint",
+    "handoff",
+    "milestone",
+    "decision",
+    "finding",
+    "blocker",
+    "compaction",
+    "note"
+  ];
+  substrateJournalSchema = objectType({
+    op: enumType(["append", "get", "list", "since", "latest_checkpoint", "checkpoint"]).describe("Journal operation to run."),
+    issue_id: stringType().optional().describe("Issue the journal belongs to (all ops except get)."),
+    entry_id: stringType().optional().describe("Entry id (get only)."),
+    kind: enumType(JOURNAL_KINDS).optional().describe("Entry kind: required for append, optional filter for list."),
+    cursor: numberType().int().nonnegative().optional().describe("Sequence cursor (since only)."),
+    limit: numberType().int().positive().optional().describe("Max rows (list only, capped at 50)."),
+    summary: stringType().optional().describe("Summary text (append only, stored as semantic.summary)."),
+    run_id: stringType().optional().describe("Execution context passthrough (append/checkpoint only)."),
+    participant_id: stringType().optional().describe("Execution context passthrough (append/checkpoint only)."),
+    session_id: stringType().optional().describe("Execution context passthrough (append/checkpoint only).")
+  });
+});
+
+// src/tools/substrate/provenance.tool.ts
+function cap2(items) {
+  return { items: items.slice(0, MAX_PROVENANCE_ENTRIES), total: items.length, truncated: items.length > MAX_PROVENANCE_ENTRIES };
+}
+function missing2(field2) {
+  return { status: "error", error: `missing required param: ${field2}` };
+}
+function createSubstrateProvenanceTool(getProvenance) {
+  return {
+    name: "substrate_provenance",
+    description: "Provenance reads over Substrate: trace an issue to its commits, receipts and artifacts, " + "look up receipts by commit SHA or PR ref, list bindings/receipts/artifacts, or bundle an issue. " + "Collections are capped at 50 entries with totals; bundle returns the bundle PATH only, never contents. " + "bind_commit is the only mutating op (finalizes a receipt against a commit SHA).",
+    inputSchema: substrateProvenanceSchema,
+    async execute(input2) {
+      const svc = getProvenance();
+      if (!svc)
+        return { ...substrateUnavailablePayload("substrate_provenance", resolveSubstrate()) };
+      try {
+        switch (input2.op) {
+          case "trace": {
+            if (!input2.issue_id)
+              return missing2("issue_id");
+            const t = svc.trace(input2.issue_id);
+            const bindings = cap2(t.bindings);
+            const receipts = cap2(t.receipts);
+            const commits = cap2(t.commits);
+            const prs = cap2(t.prs);
+            const checkpoints = cap2(t.checkpoints);
+            const claims = cap2(t.claims);
+            const externalBindings = cap2(t.externalBindings);
+            const { bindings: _b, receipts: _r, checkpoints: _c, commits: _m, prs: _p, claims: _l, externalBindings: _e, ...rest } = t;
+            return {
+              status: "ok",
+              ...rest,
+              bindings: bindings.items,
+              bindingsTotal: bindings.total,
+              bindingsTruncated: bindings.truncated,
+              receipts: receipts.items,
+              receiptsTotal: receipts.total,
+              receiptsTruncated: receipts.truncated,
+              commits: commits.items,
+              commitsTotal: commits.total,
+              prs: prs.items,
+              prsTotal: prs.total,
+              checkpoints: checkpoints.items,
+              checkpointsTotal: checkpoints.total,
+              claims: claims.items,
+              claimsTotal: claims.total,
+              externalBindings: externalBindings.items,
+              externalBindingsTotal: externalBindings.total
+            };
+          }
+          case "bindings": {
+            if (!input2.issue_id)
+              return missing2("issue_id");
+            const { items, total, truncated } = cap2(svc.listBindings(input2.issue_id));
+            return { status: "ok", bindings: items, total, truncated };
+          }
+          case "receipts": {
+            if (!input2.issue_id)
+              return missing2("issue_id");
+            const { items, total, truncated } = cap2(svc.listReceipts(input2.issue_id));
+            return { status: "ok", receipts: items, total, truncated };
+          }
+          case "find_by_commit": {
+            if (!input2.sha)
+              return missing2("sha");
+            const { items, total, truncated } = cap2(svc.findByCommit(input2.sha));
+            return { status: "ok", matches: items, total, truncated };
+          }
+          case "find_by_pr": {
+            if (!input2.pr)
+              return missing2("pr");
+            const { items, total, truncated } = cap2(svc.findByPr(input2.pr));
+            return { status: "ok", matches: items, total, truncated };
+          }
+          case "artifacts": {
+            if (!input2.receipt_id)
+              return missing2("receipt_id");
+            const { items, total, truncated } = cap2(svc.listArtifacts(input2.receipt_id, { liveOnly: input2.live_only ?? true }));
+            return { status: "ok", artifacts: items, total, truncated };
+          }
+          case "bind_commit": {
+            if (!input2.receipt_id)
+              return missing2("receipt_id");
+            if (!input2.sha)
+              return missing2("sha");
+            return { status: "ok", receipt: svc.bindCommit(input2.receipt_id, input2.sha) };
+          }
+          case "bundle": {
+            if (!input2.issue_id)
+              return missing2("issue_id");
+            return { status: "ok", path: svc.generateBundle(input2.issue_id).path };
+          }
+        }
+      } catch (error3) {
+        return { status: "error", error: error3 instanceof Error ? error3.message : String(error3) };
+      }
+    }
+  };
+}
+var MAX_PROVENANCE_ENTRIES = 50, substrateProvenanceSchema;
+var init_provenance_tool = __esm(() => {
+  init_zod();
+  init_services();
+  substrateProvenanceSchema = objectType({
+    op: enumType(["trace", "bindings", "receipts", "find_by_commit", "find_by_pr", "artifacts", "bind_commit", "bundle"]).describe("Which provenance read to run. bind_commit is the only mutating op."),
+    issue_id: stringType().optional().describe("Issue id (trace, bindings, receipts, bundle)."),
+    receipt_id: stringType().optional().describe("Receipt id (artifacts, bind_commit)."),
+    sha: stringType().optional().describe("Commit SHA (find_by_commit, bind_commit)."),
+    pr: stringType().optional().describe("PR ref (find_by_pr)."),
+    live_only: booleanType().optional().describe("Artifacts op: live bindings only (default true).")
+  });
+});
+
 // src/mcp/request-meta.ts
 import { randomUUID as randomUUID10 } from "crypto";
 function createMcpRequestContext(input2 = {}) {
@@ -94948,7 +95216,11 @@ function buildV2Server(ctx) {
     channelSend = (frame) => server.server.notification(frame);
   }
   const substrate = resolveSubstrate();
-  const substrateTools = substrate.available || process.env.XTRM_SUBSTRATE_TOOLS === "1" ? [createSubstrateIssueTool()] : [];
+  const substrateTools = substrate.available || process.env.XTRM_SUBSTRATE_TOOLS === "1" ? [
+    createSubstrateIssueTool(),
+    createSubstrateJournalTool(() => substrate.services?.journal ?? null),
+    createSubstrateProvenanceTool(() => substrate.services?.provenance ?? null)
+  ] : [];
   const tools = [
     createUseSpecialistTool(runner),
     createSpecialistStatusTool(loader, circuitBreaker, getHost, getPusher),
@@ -94961,6 +95233,8 @@ function buildV2Server(ctx) {
   ];
   const schemaMap = {
     substrate_issue: substrateIssueSchema,
+    substrate_journal: substrateJournalSchema,
+    substrate_provenance: substrateProvenanceSchema,
     use_specialist: useSpecialistSchema,
     specialist_dispatch: specialistDispatchSchema,
     specialist_reply: specialistReplySchema,
@@ -95044,6 +95318,8 @@ var init_v2_server = __esm(() => {
   init_activation_tool();
   init_resume_tool();
   init_issue_tool();
+  init_journal_tool();
+  init_provenance_tool();
   init_services();
   init_native_host();
   init_authority_store();

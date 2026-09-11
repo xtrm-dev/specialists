@@ -11,6 +11,7 @@
 // yields a payload error, never a throw.
 
 import * as z from 'zod';
+import { resolveSubstrate, substrateUnavailablePayload } from '../../substrate/services.js';
 
 const JOURNAL_KINDS = [
   'checkpoint',
@@ -27,8 +28,8 @@ export const substrateJournalSchema = z.object({
   op: z
     .enum(['append', 'get', 'list', 'since', 'latest_checkpoint', 'checkpoint'])
     .describe('Journal operation to run.'),
-  issueId: z.string().optional().describe('Issue the journal belongs to (all ops except get).'),
-  entryId: z.string().optional().describe('Entry id (get only).'),
+  issue_id: z.string().optional().describe('Issue the journal belongs to (all ops except get).'),
+  entry_id: z.string().optional().describe('Entry id (get only).'),
   kind: z
     .enum(JOURNAL_KINDS)
     .optional()
@@ -36,9 +37,9 @@ export const substrateJournalSchema = z.object({
   cursor: z.number().int().nonnegative().optional().describe('Sequence cursor (since only).'),
   limit: z.number().int().positive().optional().describe('Max rows (list only, capped at 50).'),
   summary: z.string().optional().describe('Summary text (append only, stored as semantic.summary).'),
-  runId: z.string().optional().describe('Execution context passthrough (append/checkpoint only).'),
-  participantId: z.string().optional().describe('Execution context passthrough (append/checkpoint only).'),
-  sessionId: z.string().optional().describe('Execution context passthrough (append/checkpoint only).'),
+  run_id: z.string().optional().describe('Execution context passthrough (append/checkpoint only).'),
+  participant_id: z.string().optional().describe('Execution context passthrough (append/checkpoint only).'),
+  session_id: z.string().optional().describe('Execution context passthrough (append/checkpoint only).'),
 });
 
 type JournalInput = z.infer<typeof substrateJournalSchema>;
@@ -48,21 +49,20 @@ type JournalInput = z.infer<typeof substrateJournalSchema>;
 // @xtrm/substrate package; the real service satisfies this shape.
 export interface JournalServiceLike {
   appendEntry(
-    issueId: string,
+    issue_id: string,
     input: Record<string, unknown>,
   ): unknown;
   getEntry(id: string): unknown;
-  listEntries(issueId: string, opts?: { kind?: string; limit?: number }): unknown[];
-  since(issueId: string, cursor: number): { issueId: string; afterSequence: number; entries: unknown[]; nextCursor: number };
-  latestCheckpoint(issueId: string): unknown;
-  collectMechanical(issueId: string, input?: Record<string, unknown>): Record<string, unknown>;
+  listEntries(issue_id: string, opts?: { kind?: string; limit?: number }): unknown[];
+  since(issue_id: string, cursor: number): { issue_id: string; afterSequence: number; entries: unknown[]; nextCursor: number };
+  latestCheckpoint(issue_id: string): unknown;
+  collectMechanical(issue_id: string, input?: Record<string, unknown>): Record<string, unknown>;
 }
 
 export type GetJournal = () => JournalServiceLike | null;
 
 const LIST_CAP = 50;
 const BODY_CAP = 2000;
-const UNAVAILABLE = { status: 'error', error: 'substrate journal unavailable' } as const;
 
 function missing(field: string, op: string) {
   return { status: 'error', error: `missing required field '${field}' for op '${op}'` } as const;
@@ -111,22 +111,22 @@ export function createSubstrateJournalTool(getJournal: GetJournal) {
     description:
       'Read or append an issue journal entry (Substrate JournalService). ' +
       'Ops: append | get | list | since | latest_checkpoint | checkpoint. ' +
-      'since(issueId, cursor) is the pagination primitive and returns its next cursor. ' +
+      'since(issue_id, cursor) is the pagination primitive and returns its next cursor. ' +
       'Payloads are bounded: list caps at 50 rows and entry bodies truncate with a marker.',
     inputSchema: substrateJournalSchema,
     async execute(input: JournalInput) {
       const journal = getJournal();
-      if (!journal) return UNAVAILABLE;
+      if (!journal) return substrateUnavailablePayload('substrate_journal', resolveSubstrate());
       try {
         switch (input.op) {
           case 'get': {
-            if (!input.entryId) return missing('entryId', 'get');
-            return { status: 'ok', entry: boundEntry(journal.getEntry(input.entryId)) };
+            if (!input.entry_id) return missing('entry_id', 'get');
+            return { status: 'ok', entry: boundEntry(journal.getEntry(input.entry_id)) };
           }
           case 'list': {
-            if (!input.issueId) return missing('issueId', 'list');
+            if (!input.issue_id) return missing('issue_id', 'list');
             const limit = Math.min(input.limit ?? LIST_CAP, LIST_CAP);
-            const entries = journal.listEntries(input.issueId, {
+            const entries = journal.listEntries(input.issue_id, {
               ...(input.kind ? { kind: input.kind } : {}),
               limit,
             });
@@ -138,45 +138,45 @@ export function createSubstrateJournalTool(getJournal: GetJournal) {
             };
           }
           case 'since': {
-            if (!input.issueId) return missing('issueId', 'since');
+            if (!input.issue_id) return missing('issue_id', 'since');
             if (input.cursor === undefined) return missing('cursor', 'since');
-            const delta = journal.since(input.issueId, input.cursor);
+            const delta = journal.since(input.issue_id, input.cursor);
             return {
               status: 'ok',
-              issueId: delta.issueId,
+              issue_id: delta.issue_id,
               afterSequence: delta.afterSequence,
               entries: delta.entries.map(boundEntry),
               nextCursor: delta.nextCursor,
             };
           }
           case 'latest_checkpoint': {
-            if (!input.issueId) return missing('issueId', 'latest_checkpoint');
-            return { status: 'ok', entry: boundEntry(journal.latestCheckpoint(input.issueId)) };
+            if (!input.issue_id) return missing('issue_id', 'latest_checkpoint');
+            return { status: 'ok', entry: boundEntry(journal.latestCheckpoint(input.issue_id)) };
           }
           case 'append': {
-            if (!input.issueId) return missing('issueId', 'append');
+            if (!input.issue_id) return missing('issue_id', 'append');
             if (!input.kind) return missing('kind', 'append');
-            const entry = journal.appendEntry(input.issueId, {
+            const entry = journal.appendEntry(input.issue_id, {
               kind: input.kind,
-              ...(input.runId ? { runId: input.runId } : {}),
-              ...(input.participantId ? { participantId: input.participantId } : {}),
-              ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+              ...(input.run_id ? { run_id: input.run_id } : {}),
+              ...(input.participant_id ? { participant_id: input.participant_id } : {}),
+              ...(input.session_id ? { session_id: input.session_id } : {}),
               ...(input.summary ? { semantic: { summary: input.summary } } : {}),
             });
             return { status: 'ok', entry: boundEntry(entry) };
           }
           case 'checkpoint': {
-            if (!input.issueId) return missing('issueId', 'checkpoint');
-            const mechanical = journal.collectMechanical(input.issueId, {
-              ...(input.runId ? { runId: input.runId } : {}),
-              ...(input.participantId ? { participantId: input.participantId } : {}),
-              ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+            if (!input.issue_id) return missing('issue_id', 'checkpoint');
+            const mechanical = journal.collectMechanical(input.issue_id, {
+              ...(input.run_id ? { run_id: input.run_id } : {}),
+              ...(input.participant_id ? { participant_id: input.participant_id } : {}),
+              ...(input.session_id ? { session_id: input.session_id } : {}),
             });
-            const entry = journal.appendEntry(input.issueId, {
+            const entry = journal.appendEntry(input.issue_id, {
               kind: 'checkpoint',
-              ...(input.runId ? { runId: input.runId } : {}),
-              ...(input.participantId ? { participantId: input.participantId } : {}),
-              ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+              ...(input.run_id ? { run_id: input.run_id } : {}),
+              ...(input.participant_id ? { participant_id: input.participant_id } : {}),
+              ...(input.session_id ? { session_id: input.session_id } : {}),
               mechanical,
             });
             return { status: 'ok', entry: boundEntry(entry), degraded: false };
