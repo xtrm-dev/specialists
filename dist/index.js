@@ -94615,6 +94615,193 @@ var init_resume_tool = __esm(() => {
   });
 });
 
+// src/substrate/services.ts
+import { createRequire as createRequire6 } from "module";
+function resolveSubstrate() {
+  if (cached7)
+    return cached7;
+  cached7 = load();
+  if (!cached7.available) {
+    logger.info(`Substrate tool surface inert (${cached7.reason}): ${cached7.detail ?? ""}`.trim());
+  }
+  return cached7;
+}
+function load() {
+  let mod;
+  try {
+    mod = require5("@xtrm/substrate");
+  } catch (error3) {
+    const message = error3 instanceof Error ? error3.message : String(error3);
+    const reason = /node:sqlite|DatabaseSync|built-in module/i.test(message) ? "runtime_incompatible" : "module_not_resolvable";
+    return { available: false, services: null, reason, detail: message };
+  }
+  try {
+    const open3 = mod.openSubstrate;
+    const IssueService = mod.IssueService;
+    const JournalService = mod.JournalService;
+    const ProvenanceService = mod.ProvenanceService;
+    if (!open3 || !IssueService || !JournalService || !ProvenanceService) {
+      return {
+        available: false,
+        services: null,
+        reason: "module_not_resolvable",
+        detail: "resolved @xtrm/substrate does not export the expected service constructors"
+      };
+    }
+    const db = open3(resolveAuthorityDbPath());
+    const issues = new IssueService(db);
+    const journal = new JournalService(db, issues);
+    return {
+      available: true,
+      services: { issues, journal, provenance: new ProvenanceService(db, issues, journal) }
+    };
+  } catch (error3) {
+    return {
+      available: false,
+      services: null,
+      reason: "open_failed",
+      detail: error3 instanceof Error ? error3.message : String(error3)
+    };
+  }
+}
+function substrateUnavailablePayload(tool, handle) {
+  const reason = handle.reason ?? "module_not_resolvable";
+  return {
+    status: "error",
+    error: `substrate unavailable for ${tool}`,
+    reason,
+    detail: handle.detail,
+    help: UNAVAILABLE_HELP[reason]
+  };
+}
+var require5, UNAVAILABLE_HELP, cached7 = null;
+var init_services = __esm(() => {
+  init_authority_store();
+  init_logger();
+  require5 = createRequire6(import.meta.url);
+  UNAVAILABLE_HELP = {
+    module_not_resolvable: "@xtrm/substrate is not installed. It is unpublished; install it as a local link to enable this surface.",
+    runtime_incompatible: "Substrate requires node:sqlite (node >= 24); this server runs under bun, which does not provide it. " + "Substrate needs a sqlite adapter seam before this surface can load here.",
+    open_failed: "The Substrate store could not be opened."
+  };
+});
+
+// src/tools/substrate/issue.tool.ts
+function body(value) {
+  if (typeof value !== "string")
+    return value;
+  if (value.length <= MAX_BODY)
+    return value;
+  return { truncated: true, bytes: value.length, head: value.slice(0, MAX_BODY) };
+}
+function cap(rows) {
+  return { rows: rows.slice(0, MAX_ROWS), total: rows.length, capped: rows.length > MAX_ROWS };
+}
+function require_(input2, fields) {
+  const missing = fields.filter((f) => input2[f] === undefined || input2[f] === null || input2[f] === "");
+  return missing.length > 0 ? `op "${input2.op}" requires: ${missing.join(", ")}` : null;
+}
+function project2(issue3) {
+  if (!issue3 || typeof issue3 !== "object")
+    return issue3;
+  const record5 = { ...issue3 };
+  for (const key of ["contract", "description", "body", "notes"]) {
+    if (key in record5)
+      record5[key] = body(record5[key]);
+  }
+  return record5;
+}
+function createSubstrateIssueTool(getIssues = defaultIssues) {
+  return {
+    name: "substrate_issue",
+    description: "Read and write XTRM work items through Substrate IssueService. Substrate is the authority; " + "this tool is transport. Ops: resolve, get, create, update_contract, project_resolve, " + "project_create, link_checkout, list_links. create and update_contract MUTATE.",
+    async execute(raw) {
+      const input2 = substrateIssueSchema.parse(raw);
+      const issues = getIssues();
+      if (!issues)
+        return substrateUnavailablePayload("substrate_issue", resolveSubstrate());
+      try {
+        switch (input2.op) {
+          case "resolve": {
+            const bad = require_(input2, ["ref"]);
+            if (bad)
+              return { status: "error", error: bad };
+            return { status: "ok", issue: project2(issues.resolveRef(input2.ref)) };
+          }
+          case "get": {
+            const bad = require_(input2, ["issue_id"]);
+            if (bad)
+              return { status: "error", error: bad };
+            return { status: "ok", issue: project2(issues.getIssue(input2.issue_id)) };
+          }
+          case "create": {
+            const bad = require_(input2, ["title", "contract", "project_id"]);
+            if (bad)
+              return { status: "error", error: bad };
+            const created = issues.createIssue({ title: input2.title, contract: input2.contract, projectId: input2.project_id }, input2.idempotency_key ? { idempotencyKey: input2.idempotency_key } : undefined);
+            return { status: "ok", issue: project2(created) };
+          }
+          case "update_contract": {
+            const bad = require_(input2, ["issue_id", "contract"]);
+            if (bad)
+              return { status: "error", error: bad };
+            return { status: "ok", issue: project2(issues.updateContract(input2.issue_id, input2.contract)) };
+          }
+          case "project_resolve": {
+            const resolved = issues.resolveProject(input2.project_id ? { explicit: input2.project_id } : {});
+            return { status: "ok", project: resolved };
+          }
+          case "project_create": {
+            const bad = require_(input2, ["prefix", "name"]);
+            if (bad)
+              return { status: "error", error: bad };
+            return {
+              status: "ok",
+              project: issues.createProject({ prefix: input2.prefix, name: input2.name })
+            };
+          }
+          case "link_checkout": {
+            const bad = require_(input2, ["git_root"]);
+            if (bad)
+              return { status: "error", error: bad };
+            return {
+              status: "ok",
+              link: issues.linkCheckout(input2.git_root, input2.project_id)
+            };
+          }
+          case "list_links": {
+            const { rows, total, capped } = cap(issues.listLinks());
+            return { status: "ok", links: rows, total, capped };
+          }
+        }
+      } catch (error3) {
+        return { status: "error", error: error3 instanceof Error ? error3.message : String(error3) };
+      }
+    }
+  };
+}
+function defaultIssues() {
+  const handle = resolveSubstrate();
+  return handle.available ? handle.services?.issues : null;
+}
+var MAX_ROWS = 50, MAX_BODY = 4000, substrateIssueSchema;
+var init_issue_tool = __esm(() => {
+  init_zod();
+  init_services();
+  substrateIssueSchema = objectType({
+    op: enumType(["resolve", "get", "create", "update_contract", "project_resolve", "project_create", "link_checkout", "list_links"]).describe("Which IssueService operation to run."),
+    ref: stringType().optional().describe('Issue ref for "resolve" (e.g. a prefix-numbered id).'),
+    issue_id: stringType().optional().describe('Issue id for "get" and "update_contract".'),
+    contract: recordType(unknownType()).optional().describe('Contract object for "create" and "update_contract".'),
+    title: stringType().optional().describe('Title for "create".'),
+    project_id: stringType().optional().describe('Project id for "create", "project_resolve" and "link_checkout".'),
+    prefix: stringType().optional().describe('Project prefix for "project_create".'),
+    name: stringType().optional().describe('Project name for "project_create".'),
+    git_root: stringType().optional().describe('Checkout path for "link_checkout".'),
+    idempotency_key: stringType().optional().describe('Idempotency key for "create".')
+  });
+});
+
 // src/mcp/request-meta.ts
 import { randomUUID as randomUUID10 } from "crypto";
 function createMcpRequestContext(input2 = {}) {
@@ -94625,7 +94812,7 @@ function createMcpRequestContext(input2 = {}) {
     spanId: randomUUID10()
   };
 }
-function emitMcpForensicEvent(observability, eventName, context, body, durationMs, errorType) {
+function emitMcpForensicEvent(observability, eventName, context, body2, durationMs, errorType) {
   if (!observability)
     return;
   observability.appendForensicEvent("mcp-gateway", "specialists-mcp", undefined, createForensicEvent({
@@ -94648,7 +94835,7 @@ function emitMcpForensicEvent(observability, eventName, context, body, durationM
       ...context.protocolVersion ? { protocol_version: context.protocolVersion } : {}
     },
     body: {
-      ...body,
+      ...body2,
       ...durationMs !== undefined ? { duration_ms: durationMs } : {},
       ...errorType ? { error_type: errorType } : {}
     },
@@ -94760,6 +94947,8 @@ function buildV2Server(ctx) {
   if (channelEra === "legacy") {
     channelSend = (frame) => server.server.notification(frame);
   }
+  const substrate = resolveSubstrate();
+  const substrateTools = substrate.available || process.env.XTRM_SUBSTRATE_TOOLS === "1" ? [createSubstrateIssueTool()] : [];
   const tools = [
     createUseSpecialistTool(runner),
     createSpecialistStatusTool(loader, circuitBreaker, getHost, getPusher),
@@ -94767,9 +94956,11 @@ function buildV2Server(ctx) {
     createSpecialistReplyTool(getHost),
     createSpecialistResumeTool(getHost, getPusher),
     createSpecialistStopActivationTool(getHost),
-    createSpecialistListTool(loader)
+    createSpecialistListTool(loader),
+    ...substrateTools
   ];
   const schemaMap = {
+    substrate_issue: substrateIssueSchema,
     use_specialist: useSpecialistSchema,
     specialist_dispatch: specialistDispatchSchema,
     specialist_reply: specialistReplySchema,
@@ -94852,6 +95043,8 @@ var init_v2_server = __esm(() => {
   init_specialist_list_tool();
   init_activation_tool();
   init_resume_tool();
+  init_issue_tool();
+  init_services();
   init_native_host();
   init_authority_store();
   init_async_events();
