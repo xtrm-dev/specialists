@@ -16,7 +16,7 @@ export declare const substrateJournalSchema: z.ZodObject<{
     participant_id?: string | undefined;
     issue_id?: string | undefined;
     session_id?: string | undefined;
-    kind?: "compaction" | "decision" | "checkpoint" | "blocker" | "finding" | "note" | "handoff" | "milestone" | undefined;
+    kind?: "compaction" | "decision" | "checkpoint" | "finding" | "note" | "blocker" | "handoff" | "milestone" | undefined;
     limit?: number | undefined;
     entry_id?: string | undefined;
     cursor?: number | undefined;
@@ -27,7 +27,7 @@ export declare const substrateJournalSchema: z.ZodObject<{
     participant_id?: string | undefined;
     issue_id?: string | undefined;
     session_id?: string | undefined;
-    kind?: "compaction" | "decision" | "checkpoint" | "blocker" | "finding" | "note" | "handoff" | "milestone" | undefined;
+    kind?: "compaction" | "decision" | "checkpoint" | "finding" | "note" | "blocker" | "handoff" | "milestone" | undefined;
     limit?: number | undefined;
     entry_id?: string | undefined;
     cursor?: number | undefined;
@@ -71,7 +71,7 @@ export declare function createSubstrateJournalTool(getJournal: GetJournal): {
         participant_id?: string | undefined;
         issue_id?: string | undefined;
         session_id?: string | undefined;
-        kind?: "compaction" | "decision" | "checkpoint" | "blocker" | "finding" | "note" | "handoff" | "milestone" | undefined;
+        kind?: "compaction" | "decision" | "checkpoint" | "finding" | "note" | "blocker" | "handoff" | "milestone" | undefined;
         limit?: number | undefined;
         entry_id?: string | undefined;
         cursor?: number | undefined;
@@ -82,7 +82,7 @@ export declare function createSubstrateJournalTool(getJournal: GetJournal): {
         participant_id?: string | undefined;
         issue_id?: string | undefined;
         session_id?: string | undefined;
-        kind?: "compaction" | "decision" | "checkpoint" | "blocker" | "finding" | "note" | "handoff" | "milestone" | undefined;
+        kind?: "compaction" | "decision" | "checkpoint" | "finding" | "note" | "blocker" | "handoff" | "milestone" | undefined;
         limit?: number | undefined;
         entry_id?: string | undefined;
         cursor?: number | undefined;
