@@ -24,9 +24,12 @@ forbids.
 What is local to THIS plugin, and therefore stated here:
 
 - A tool result is evidence, not a decision. A dispatch admission is not a result.
-- The store this plugin reads is resolved from `XTRM_STATE_DB`, defaulting to
-  `~/.xtrm/state.db`. It is overridden only by an explicit operator or test variable in the
-  environment — never by a value this plugin ships.
+- The store this plugin reads is resolved from `SUBSTRATE_DB`, else `XTRM_STATE_DB`, else
+  `~/.xtrm/state.db`. `SUBSTRATE_DB` comes first because the store belongs to Substrate,
+  which defines that variable and shares the file with sb and Pi; `XTRM_STATE_DB` is this
+  runtime's own older name for the same path and is still honoured. It is overridden only by
+  an explicit operator or test variable in the environment — never by a value this plugin
+  ships.
 
 ## Tool surface
 
