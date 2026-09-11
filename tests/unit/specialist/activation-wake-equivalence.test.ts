@@ -45,7 +45,11 @@ const FULL: ActivationResult = {
   activationId: 'act:equiv00000001',
   participantId: 'node::executor',
   attemptId: 'att:equiv00000001:1',
-  beadId: 'unitAI-aiwva.5',
+  issueId: 'iss-equiv00000001',
+  issueRef: 'unitAI-aiwva.5',
+  issueRevision: 3,
+  contractHash: 'hash-equiv',
+  executionBindingId: 'exb-equiv01',
   status: 'completed',
   output: { summary: 'did the thing', files: ['src/a.ts'] },
   validation: { valid: true, schema: 'none' },
@@ -64,7 +68,11 @@ const MINIMAL: ActivationResult = {
   activationId: 'act:equiv00000002',
   participantId: 'node::executor',
   attemptId: 'att:equiv00000002:1',
-  beadId: 'unitAI-aiwva.5',
+  issueId: 'iss-equiv00000002',
+  issueRef: 'unitAI-aiwva.5',
+  issueRevision: 1,
+  contractHash: 'hash-equiv-min',
+  executionBindingId: 'exb-equiv02',
   status: 'failed',
   output: undefined,
   validation: { valid: false, errors: ['boom'] },
@@ -111,7 +119,8 @@ describe('wake equivalence E(push,status)', () => {
     expect(parsed.activationId).toBe(statusEntry.activation_id);
     expect(parsed.attemptId).toBe(statusEntry.attempt_id);
     expect(parsed.participantId).toBe(statusEntry.participant_id);
-    expect(parsed.beadId).toBe(statusEntry.bead_id);
+    expect(parsed.issueRef).toBe(statusEntry.bead_id);
+    expect(parsed.issueRef).toBe(statusEntry.issue_ref);
 
     // Terminal honesty: completion never claims delivered on the peer-socket transport.
     expect(push.record.delivery.state).not.toBe('delivered');
@@ -159,7 +168,12 @@ describe('wake equivalence E(push,status)', () => {
       'bead_id',
       'completed_at',
       'configured_model',
+      'contract_hash',
+      'execution_binding_id',
       'fallback_used',
+      'issue_id',
+      'issue_ref',
+      'issue_revision',
       'model_override',
       'output',
       'participant_id',
