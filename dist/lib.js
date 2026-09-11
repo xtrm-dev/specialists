@@ -21839,6 +21839,7 @@ class NativeActivationHost {
       modelOverride: Boolean(request.modelOverride),
       ...thinkingLevel ? { thinkingLevel } : {},
       thinkingOverride: request.thinkingOverride !== undefined,
+      turnCount: 0,
       ...purpose ? { purpose } : {},
       startedAt,
       lastActivityAt: startedAt
@@ -21919,6 +21920,9 @@ class NativeActivationHost {
         break;
       case "agent_end":
         emit("turn_completed", { will_retry: Boolean(event.willRetry) });
+        break;
+      case "turn_end":
+        snapshot.turnCount = (snapshot.turnCount ?? 0) + 1;
         break;
       case "agent_settled":
         snapshot.state = "settled";
@@ -22295,6 +22299,7 @@ class NativeActivationHost {
       elapsed_s: Math.max(0, Math.floor((this.now() - snapshot.startedAt) / 1000)),
       last_activity_at: snapshot.lastActivityAt,
       ...snapshot.thinkingLevel ? { thinking_level: snapshot.thinkingLevel } : {},
+      ...snapshot.turnCount !== undefined ? { turn_count: snapshot.turnCount } : {},
       ...snapshot.tokenUsage ? { token_usage: { ...snapshot.tokenUsage } } : {}
     };
   }
@@ -22555,6 +22560,7 @@ function toActivationView(snapshot, nowMs = Date.now()) {
     model_override: snapshot.modelOverride,
     thinking_override: snapshot.thinkingOverride,
     elapsed_s: Math.max(0, Math.floor((nowMs - snapshot.startedAt) / 1000)),
+    ...snapshot.turnCount !== undefined ? { turn_count: snapshot.turnCount } : {},
     ...snapshot.tokenUsage ? { token_usage: { ...snapshot.tokenUsage } } : {},
     ...snapshot.thinkingLevel ? { thinking_level: snapshot.thinkingLevel } : {},
     ...snapshot.purpose ? { purpose: snapshot.purpose } : {},

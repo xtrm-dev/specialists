@@ -96,12 +96,26 @@ export function installCoordinatorFence(pi, deps = {}) {
 /** Default coordinator ParticipantId: <participant_kind>::<participant_role>, matching MCP. */
 export const DEFAULT_REQUESTED_BY = 'adapter::pi-extension';
 
-export const FLEET_MAX_ROWS = 8;
+/**
+ * Specialist ENTRIES rendered before the overflow line — entries, not lines.
+ *
+ * Every entry is a two-line unit now, so the bound was halved deliberately from the
+ * one-line era's 8. Eight two-line workers would be 17 rendered lines under a statusline
+ * that already costs one and would scroll an ordinary terminal; four keeps the section's
+ * ceiling exactly where it was (header + 2x4 + overflow = 10 lines) and buys the second line
+ * for every entry instead of paying for two extra entries nobody can see. The header always
+ * counts the WHOLE Fleet, so a truncated section stays honest about its size.
+ */
+export const FLEET_MAX_ROWS = 4;
 
 // Wake rail (unitAI-beqby.17): far-left │ gutter in #8d7fe8 (24-bit
-// 38;2;141;127;232). Carried only by wake follow-up content
-// (specialist_settled / specialist_ask); fleet rows and tool-result cards
-// carry no rail.
+// 38;2;141;127;232).
+//
+// The rail now means one thing only: XTRM-generated INVARIANT chrome. Only the stable
+// header lines of a wake card carry it. A Specialist-authored question body, an escalation
+// body, an error string, a variable result and a coordinator instruction are all mutable
+// content — railing them claimed an XTRM guarantee about text XTRM did not write. Fleet
+// rows and tool-result cards carry no rail at all.
 export const RAIL = '\x1b[38;2;141;127;232m│\x1b[0m';
 
 export function withRail(line) {
@@ -110,15 +124,84 @@ export function withRail(line) {
   return `${RAIL} ${text}`;
 }
 
+// ── SGR helpers ──────────────────────────────────────────────────────────────
+//
+// Raw escapes, not pi theme helpers, for two reasons that are both structural: the footer
+// section seam hands a renderer `width` and nothing else, so no `theme` object reaches this
+// code; and wake-card styling is embedded in literal MESSAGE CONTENT, which is serialised
+// as a string and never passes through a themed renderer. The accent is the Core footer's
+// XTRM accent (#9a8bff, custom-footer/index.ts) — this file introduces no new palette.
+const DIM = (text) => `\x1b[2m${text}\x1b[22m`;
+const BOLD = (text) => `\x1b[1m${text}\x1b[22m`;
+// Italic is set with `3` and cleared with `23`; `22m` after it clears the dim. Pi theme
+// helpers have no italic token, so the raw SGR is the only way to mark the purpose excerpt.
+const ITALIC_DIM = (text) => `\x1b[2m\x1b[3m${text}\x1b[23m\x1b[22m`;
+const ACCENT = (text) => `\x1b[38;2;154;139;255m${text}\x1b[39m`;
+const ACCENT_BOLD = (text) => `\x1b[38;2;154;139;255m\x1b[1m${text}\x1b[22m\x1b[39m`;
+const WARNING = (text) => `\x1b[33m${text}\x1b[39m`;
+const SUCCESS = (text) => `\x1b[2m\x1b[32m${text}\x1b[39m\x1b[22m`;
+const FAILURE = (text) => `\x1b[31m${text}\x1b[39m`;
+
+/**
+ * Section label chip: light neutral background, dark bold foreground — the ONLY element on
+ * the line that carries a background, and the padding is literal spaces inside the escape
+ * run rather than a terminal-dependent pad. No brand colour: the accent is reserved for the
+ * thinking level and the live spinner, so a label that also glowed would flatten both.
+ */
+const SECTION_LABEL_BG = '\x1b[48;2;208;208;214m';
+const SECTION_LABEL_FG = '\x1b[38;2;22;22;26m';
+export const SECTION_LABEL = 'SPECIALISTS';
+/** Tree connector under the XTRM statusline: `╰─`. Dim, never the chip. */
+export const SECTION_TREE = '\x1b[2m╰─\x1b[22m';
+
+/** Header counts. `running` is live work, `blocked` is outstanding coordinator asks, and
+ * `waiting` is everything else the Fleet is holding for the operator — buckets are
+ * mutually exclusive so the three numbers always sum to the entry count. */
 export function fleetSummaryOf({ activations, asks }) {
   const act = activations ?? [];
   const pending = asks ?? [];
-  const active = act.filter((v) => v.state === 'running').length;
-  return { active, waiting: act.length - active, needsReply: pending.length, total: act.length };
+  const running = act.filter((v) => v.state === 'running' || v.state === 'starting').length;
+  const blocked = pending.length;
+  return {
+    running,
+    waiting: Math.max(0, act.length - running - blocked),
+    blocked,
+    total: act.length,
+  };
 }
 
+/**
+ * The section header — also the collapsed line.
+ *
+ * No command hints. `/specialists inspect` and `/specialists:reply` were permanent fixtures
+ * of a line whose job is to say what the Fleet is doing; they are discoverable through
+ * `/specialists` help and its argument completions, and an idle Fleet says `idle` rather
+ * than quoting a command at an operator who has nothing to do.
+ */
+export function renderFleetHeader({ activations, asks }) {
+  const { running, waiting, blocked, total } = fleetSummaryOf({ activations, asks });
+  const label = `${SECTION_LABEL_BG}${SECTION_LABEL_FG}${BOLD(` ${SECTION_LABEL} `)}\x1b[0m`;
+  // One separator space plus the chip's own trailing pad: `╰─ SPECIALISTS  2 running`.
+  if (total === 0 && blocked === 0) return `${SECTION_TREE}${label} idle`;
+  const parts = [];
+  if (running > 0) parts.push(`${running} running`);
+  if (waiting > 0) parts.push(`${waiting} waiting`);
+  if (blocked > 0) parts.push(`! ${blocked} blocked`);
+  return `${SECTION_TREE}${label} ${parts.join(' • ')}`;
+}
+
+/**
+ * Row-budget duration: seconds under a minute, then `2m14s`, then `1h05m`.
+ *
+ * Seconds stop being scannable past a minute, and a Specialist turn runs for minutes; the
+ * old plain-seconds form rendered `134s`, which a reader has to convert before it means
+ * anything.
+ */
 export function formatElapsedShort(elapsedS) {
-  return `${Math.max(0, Math.floor(elapsedS ?? 0))}s`;
+  const total = Math.max(0, Math.floor(elapsedS ?? 0));
+  if (total < 60) return `${total}s`;
+  if (total < 3600) return `${Math.floor(total / 60)}m${String(total % 60).padStart(2, '0')}s`;
+  return `${Math.floor(total / 3600)}h${String(Math.floor((total % 3600) / 60)).padStart(2, '0')}m`;
 }
 
 /** Row-budget purpose excerpt: single line, whitespace-collapsed, bounded. */
@@ -146,75 +229,116 @@ export function formatSpendShort(tokenUsage) {
   return `${Math.round(total / 1000)}k`;
 }
 
-/** Collapsed line. Needs-reply outranks idle: always shown when nonzero.
- * Names only triggers that work (unitAI-4n9of): arrow keys cannot reach a
- * passive pi extension, so no arrow promise of any kind. */
-export function renderCollapsedLine({ activations, asks }) {
-  const { active, waiting, needsReply, total } = fleetSummaryOf({ activations, asks });
-  if (total === 0 && needsReply === 0) return '  └ specialists · idle · /specialists inspect';
-  const parts = [`${active} active`, `${waiting} waiting`];
-  if (needsReply > 0) parts.push(`${needsReply} need reply`);
-  const hint = needsReply > 0 ? '/specialists inspect · /specialists:reply' : '/specialists inspect';
-  return `  └ specialists · ${parts.join(' · ')} · ${hint}`;
+/**
+ * Calm geometric spinner for a running-and-working entry.
+ *
+ * Replaces the ten-frame braille cycle: four quarter-disc frames at ~220ms read as
+ * "persistently busy" instead of demanding attention, and the frame is still selected
+ * pure-functionally from the injected clock, so the render path owns no timer and no state.
+ */
+export const SPINNER_FRAMES = ['◐', '◓', '◑', '◒'];
+export const SPINNER_FRAME_MS = 220;
+
+/** Quiet-for-this-long means idle rather than working (unchanged threshold). */
+export const IDLE_AFTER_S = 30;
+
+/** States that are live work, as opposed to a terminal or pre-terminal row. */
+const ACTIVE_STATES = new Set(['running', 'starting']);
+
+const isActiveState = (state) => ACTIVE_STATES.has(state);
+
+/**
+ * Seconds since this activation last produced a session event.
+ *
+ * Both units here are milliseconds (`snapshot.lastActivityAt`, `PendingAsk.askedAt` are
+ * `Date.now()`); the previous row renderer subtracted them from a SECONDS clock and so
+ * rendered a 1.7-billion-second idle/waiting figure in production while its fixtures — which
+ * passed seconds — looked right.
+ */
+function idleSeconds(view, nowMs) {
+  if (view.last_activity_at == null) return null;
+  return Math.max(0, Math.floor((nowMs - view.last_activity_at) / 1000));
 }
 
-/** Braille spinner frames (ora dots) for running-and-working rows. The frame
- * is selected pure-functionally from the injected nowMs clock (no timers or
- * state in the render path): the footer section repaints on every TUI render
- * pass, so an 80ms frame advances at ora speed. Tests inject nowMs directly. */
-export const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-export const SPINNER_FRAME_MS = 80;
+function waitingSeconds(ask, nowMs) {
+  return Math.max(0, Math.floor((nowMs - (ask.asked_at ?? nowMs)) / 1000));
+}
 
-/** One row per specialist. Forensic IDs never appear here. An activation with a
- * pending ask renders as a needs-reply row (`!` marker) outranking idle rows.
- * A running-and-working row leads with a spinner frame ticked by nowMs, and
- * the redundant `working` word is collapsed into that marker (the spinner IS
- * the working signal); idle-Xs rows keep their `idle Xs` tail. All other
- * rows keep their existing markers. */
-export function renderFleetRowLine(view, asks = [], nowMs = Date.now()) {
-  const model = view.thinking_level
-    ? `${view.resolved_model ?? '?model'} ${view.thinking_level}`
-    : (view.resolved_model ?? '?model');
-  const ask = (asks ?? []).find((a) => a.activation_id === view.activation_id);
-  if (ask) {
-    const waiting = formatElapsedShort(Date.now() / 1000 - (ask.asked_at ?? Date.now() / 1000));
-    return `    ! ${view.specialist} (${model}) · ${view.bead_id ?? '—'} · needs reply ${waiting}`;
+/**
+ * The one state signal for an entry. Never combined with a word that repeats it.
+ *
+ * `!` outranks the spinner (a child blocked on the coordinator is not working), then the
+ * terminal states, then live work, then the static dot for everything else — including a
+ * running child that has gone quiet past the idle threshold.
+ */
+function stateMarker({ view, blocked, active, nowMs }) {
+  if (blocked) return WARNING('!');
+  if (view.state === 'settled') return SUCCESS('✓');
+  if (view.state === 'failed') return FAILURE('✕');
+  if (active) return ACCENT(SPINNER_FRAMES[Math.floor(nowMs / SPINNER_FRAME_MS) % SPINNER_FRAMES.length]);
+  return '●';
+}
+
+/**
+ * The metric slot on an entry's second line: elapsed • turns • tokens for work in flight or
+ * finished, and the state REASON (`waiting 19s`, `idle 42s`) when there is one to give.
+ *
+ * A blocked or idle child's elapsed/turns/spend are not what an operator is looking for at
+ * that moment — how long it has been stuck is.
+ */
+function rowMetrics({ view, ask, nowMs }) {
+  if (ask) return `waiting ${formatElapsedShort(waitingSeconds(ask, nowMs))}`;
+  const idle = idleSeconds(view, nowMs);
+  if (isActiveState(view.state) && idle != null && idle > IDLE_AFTER_S) {
+    return `idle ${formatElapsedShort(idle)}`;
   }
-  const elapsed = formatElapsedShort(view.elapsed_s);
+  const parts = [formatElapsedShort(view.elapsed_s)];
+  // Turns are a real measurement from dispatch on, so a zero is shown as zero rather than
+  // suppressed — unlike spend, which has no value until a provider reports one.
+  if (view.turn_count != null) parts.push(`${view.turn_count}t`);
   const tokens = formatSpendShort(view.token_usage);
-  const purpose = formatPurposeShort(view.purpose);
-  const idleS = view.last_activity_at != null
-    ? Math.max(0, Math.floor(Date.now() / 1000) - view.last_activity_at)
-    : null;
-  const activity = view.state === 'running'
-    ? (idleS != null && idleS > 30 ? `idle ${formatElapsedShort(idleS)}` : 'working')
-    : view.state;
-  // Zero/absent tokens render as nothing: no "0", no "spent" word (unitAI-d99hb).
-  // Spend renders for every state, not only running: final spend stays visible after settle.
-  const spend = tokens ? ` · ${tokens}` : '';
-  const why = purpose ? ` · ${purpose}` : '';
-  const isWorking = view.state === 'running' && activity === 'working';
-  const marker = isWorking
-    ? SPINNER_FRAMES[Math.floor(nowMs / SPINNER_FRAME_MS) % SPINNER_FRAMES.length]
-    : '●';
-  // Working rows end at spend: the spinner marker already says working.
-  // Every other row keeps its trailing activity word (incl. idle Xs).
-  const tail = isWorking ? '' : ` · ${activity}`;
-  return `    ${marker} ${view.specialist} (${model}) · ${view.bead_id ?? '—'}${why} · ${view.state} ${elapsed}${spend}${tail}`;
+  if (tokens) parts.push(tokens);
+  return parts.join(' • ');
 }
 
-/** Footer-section lines: collapsed + bounded expanded rows with overflow.
- * Expanded by default; needs-reply rows sort first. */
+/**
+ * One Specialist as a TWO-LINE unit, returned as an array so no caller can render half of
+ * it. Forensic ids never appear in either line.
+ *
+ * Line 1 is identity and intent (name, tracked work, purpose); line 2 is the machine-ish
+ * detail (model, thinking level, metrics). Parentheses around the model are gone: with the
+ * second line to itself, the separator carries the grouping and the parens only added
+ * noise.
+ */
+export function renderFleetRowLines(view, asks = [], nowMs = Date.now()) {
+  const ask = (asks ?? []).find((a) => a.activation_id === view.activation_id);
+  const idle = idleSeconds(view, nowMs);
+  const active = isActiveState(view.state) && !ask && !(idle != null && idle > IDLE_AFTER_S);
+  const marker = stateMarker({ view, blocked: Boolean(ask), active, nowMs });
+  const purpose = formatPurposeShort(view.purpose);
+  const primary =
+    `    ${marker} ${BOLD(view.specialist)}  ${DIM(view.bead_id ?? '—')}` +
+    (purpose ? `  ${ITALIC_DIM(purpose)}` : '');
+  const thinking = view.thinking_level ? ` ${DIM('·')} ${ACCENT_BOLD(view.thinking_level)}` : '';
+  const meta =
+    `       ${DIM(view.resolved_model ?? '?model')}${thinking}` +
+    `  ${DIM('•')} ${DIM(rowMetrics({ view, ask, nowMs }))}`;
+  return [primary, meta];
+}
+
+/** Footer-section lines: header + bounded two-line entries with overflow.
+ * Expanded by default; blocked rows sort first. */
 export function renderSectionLines({ activations, asks }, { expanded = true, nowMs = Date.now() } = {}) {
-  const lines = [renderCollapsedLine({ activations, asks })];
+  const lines = [renderFleetHeader({ activations, asks })];
   if (!expanded) return lines;
   const askIds = new Set((asks ?? []).map((a) => a.activation_id));
   const ordered = [...(activations ?? [])].sort(
     (a, b) => Number(askIds.has(b.activation_id)) - Number(askIds.has(a.activation_id)),
   );
-  const rows = ordered.slice(0, FLEET_MAX_ROWS).map((view) => renderFleetRowLine(view, asks, nowMs));
-  lines.push(...rows);
-  const overflow = (activations ?? []).length - rows.length;
+  // Bounded by ENTRIES: each pushed entry is its whole two-line unit.
+  const entries = ordered.slice(0, FLEET_MAX_ROWS);
+  for (const view of entries) lines.push(...renderFleetRowLines(view, asks, nowMs));
+  const overflow = ordered.length - entries.length;
   if (overflow > 0) lines.push(`    +${overflow} more`);
   return lines;
 }
@@ -358,40 +482,84 @@ export function createAskObserverSink(base, onAsk, onTerminal) {
   return wrapped;
 }
 
-/** The wake message a blocked child produces. Exported so its shape is testable. */
-export function formatAskWake(ask) {
-  const what = ask.kind === 'escalation' ? 'ESCALATED' : 'is asking a question';
+/**
+ * The wake message a blocked child produces. Exported so its shape is testable.
+ *
+ * Two shapes in one string, and the boundary between them is the whole point of the
+ * redesign: the two header lines are XTRM-generated invariant chrome and carry the rail;
+ * everything after them is content XTRM did not write (the Specialist's question) or a
+ * literal instruction whose wording is a protocol (the coordinator hint), and carries none.
+ *
+ * `view` is the SAME `ActivationView` the tools serialise — the purpose excerpt and the work
+ * id are read from it, never re-derived here. It is optional because a wake is worth
+ * delivering even when the snapshot is already gone.
+ */
+export function formatAskWake(ask, view) {
+  const verb = ask.kind === 'escalation' ? 'escalated to coordinator' : 'waiting on coordinator';
+  const purpose = formatPurposeShort(view?.purpose);
+  const beadId = ask.beadId ?? view?.bead_id ?? '—';
   return [
-    `Specialist \`${ask.specialist}\` ${what} and is blocked waiting for you.`,
-    '',
-    `activation_id: ${ask.activationId}`,
-    ...(ask.beadId ? [`bead: ${ask.beadId}`] : []),
+    withRail(`${WARNING('!')} ${BOLD(ask.specialist)} · ${verb}`),
+    withRail(`  ${DIM(beadId)}${purpose ? ` ${DIM('·')} ${ITALIC_DIM(purpose)}` : ''}`),
     '',
     ask.body || '(no body)',
     '',
-    'Call specialist_status to read this ask\'s message_id from pending_asks, then ' +
+    // Literal delivery content, NOT decoration: the coordinator model reads this string and
+    // acts on it. Styling it dim+italic marks it secondary to the human without hiding it
+    // from the model, and the wording is unchanged from the version that shipped.
+    ITALIC_DIM(
+      'Call specialist_status to read this ask\'s message_id from pending_asks, then ' +
       'answer it with specialist_reply. The child is alive and resumable; it stays ' +
       'blocked until you answer.',
-  ].map((line) => withRail(line)).join('\n');
+    ),
+    '',
+    // The activation id leaves the header chrome (it is a forensic id, and the human header
+    // belongs to the work). It stays in the message CONTENT because the model receives only
+    // this string — `details` is display-only — and specialist_retry / specialist_resume
+    // take an activation id. Dim, last, and outside the railed block.
+    DIM(`activation ${ask.activationId}`),
+  ].join('\n');
 }
 
-/** The wake message a finished child produces. Exported so its shape is testable. */
-export function formatSettlementWake(done) {
+/**
+ * The wake message a finished child produces. Exported so its shape is testable.
+ *
+ * Same header/content split as {@link formatAskWake}: the railed block names the event and
+ * the run's cost (completed) or the model that produced the failure (failed); the error
+ * string, the coordinator instruction and the activation id below it are not chrome.
+ * `view` supplies elapsed/turns/spend and the failure model — all existing snapshot
+ * telemetry, projected by `toActivationView`, never recomputed here.
+ */
+export function formatSettlementWake(done, view) {
   const failed = done.outcome === 'failed';
+  const beadId = done.beadId ?? view?.bead_id ?? '—';
+  const facts = failed
+    ? [
+      view?.resolved_model ? DIM(view.resolved_model) : null,
+      view?.thinking_level ? ACCENT_BOLD(view.thinking_level) : null,
+    ].filter(Boolean).join(` ${DIM('·')} `)
+    : [
+      view ? DIM(formatElapsedShort(view.elapsed_s)) : null,
+      view?.turn_count != null ? DIM(`${view.turn_count}t`) : null,
+      ...(view ? [formatSpendShort(view.token_usage)].filter(Boolean).map(DIM) : []),
+    ].filter(Boolean).join(` ${DIM('•')} `);
   return [
-    `Specialist \`${done.specialist}\` ${failed ? 'FAILED' : 'finished'} and is no longer running.`,
+    withRail(`${failed ? FAILURE('✕') : SUCCESS('✓')} ${BOLD(done.specialist)} · ${failed ? 'failed' : 'finished'}`),
+    withRail(`  ${DIM(beadId)}${facts ? ` ${DIM('·')} ${facts}` : ''}`),
+    ...(failed && done.error ? ['', done.error] : []),
     '',
-    `activation_id: ${done.activationId}`,
-    ...(done.beadId ? [`bead: ${done.beadId}`] : []),
-    ...(failed && done.error ? ['', `error: ${done.error}`] : []),
+    // Same protocol-bearing instruction as the ask wake: styled down, still literal.
+    ITALIC_DIM(
+      failed
+        ? 'Call specialist_status to read the failure detail, then re-run it with specialist_retry '
+          + '— same activation, same lease, optionally on another model with model_override. '
+          + 'Answer with specialist_reply instead if it is waiting on a question.'
+        : 'Call specialist_status to read its validated result. The activation is settled and '
+          + 'stays resumable until you dispose it with specialist_stop_activation.',
+    ),
     '',
-    failed
-      ? 'Call specialist_status to read the failure detail, then re-run it with specialist_retry ' +
-        '— same activation, same lease, optionally on another model with model_override. ' +
-        'Answer with specialist_reply instead if it is waiting on a question.'
-      : 'Call specialist_status to read its validated result. The activation is settled and '
-        + 'stays resumable until you dispose it with specialist_stop_activation.',
-  ].map((line) => withRail(line)).join('\n');
+    DIM(`activation ${done.activationId}`),
+  ].join('\n');
 }
 
 // ── Result projection ────────────────────────────────────────────────────────
@@ -674,7 +842,7 @@ export default function specialistSubagentsExtension(pi, options = {}) {
     pi.sendMessage(
       {
         customType: 'specialist_settled',
-        content: formatSettlementWake(done),
+        content: formatSettlementWake(done, viewFor(done.activationId)),
         display: true,
         details: done,
       },
@@ -699,7 +867,7 @@ export default function specialistSubagentsExtension(pi, options = {}) {
     pi.sendMessage(
       {
         customType: 'specialist_ask',
-        content: formatAskWake(ask),
+        content: formatAskWake(ask, viewFor(ask.activationId)),
         display: true,
         details: ask,
       },
@@ -737,6 +905,24 @@ export default function specialistSubagentsExtension(pi, options = {}) {
 
   /** One host for the life of the pi process — never per-turn (VALIDATION 5). */
   let host = null;
+
+  /**
+   * The shared activation projection for a wake, or undefined.
+   *
+   * Read through `host` directly rather than `getHost()`: a wake is emitted BY a live host,
+   * so a wake with no host is impossible, and `getHost()` here would construct one from a
+   * notification path. Absent view is survivable — the card keeps its header and body and
+   * simply loses its telemetry line.
+   */
+  const viewFor = (activationId) => {
+    try {
+      const snapshot = host?.inspect(activationId);
+      return snapshot ? toActivationView(snapshot) : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
   const getHost = () => {
     if (!host) {
       // The wrapper is handed to the test seam as well as to the real constructor,

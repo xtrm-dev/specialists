@@ -170,6 +170,17 @@ export interface ActivationSnapshot {
   thinkingLevel?: string;
   /** True iff an explicit `thinkingOverride` was supplied. `thinkingLevel` carries the resolved value. */
   thinkingOverride: boolean;
+  /**
+   * Completed child model turns so far. Initialized to 0 at dispatch; every raw Pi
+   * `turn_end` adds exactly one.
+   *
+   * Cumulative for the LOGICAL ACTIVATION across attempts, not per attempt: the snapshot is
+   * mutated in place by resume and retry, and the Fleet answers "how much work has this
+   * activation done", not "how much of the current attempt". `turn_end` (one finished
+   * assistant message plus its tool results) is the raw per-turn boundary; `agent_start` and
+   * `agent_end` bracket a whole run, and the message/streaming events would double-count.
+   */
+  turnCount?: number;
   /** Cumulative spend counts from the session event stream. Absent until the first usage event. */
   tokenUsage?: ActivationTokenUsage;
   /**
@@ -208,6 +219,8 @@ export interface LiveActivationStats {
   elapsed_s: number;
   last_activity_at: number;
   thinking_level?: string;
+  /** Completed child turns, cumulative for the activation. Omitted when the runtime has none. */
+  turn_count?: number;
   token_usage?: ActivationTokenUsage;
 }
 

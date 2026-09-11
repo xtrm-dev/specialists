@@ -73,6 +73,7 @@ export declare function createSpecialistResumeTool(getHost: () => NativeActivati
         thinking_override: boolean;
         elapsed_s: number;
         token_usage?: import("../activation/types.js").ActivationTokenUsage;
+        turn_count?: number;
         thinking_level?: string;
         purpose?: string;
         last_activity_at: number;

@@ -121,7 +121,7 @@ function specWithThinking() {
   };
 }
 
-function fakeSession(): PiAgentSessionLike & { emit: (e: PiAgentSessionEvent) => void } {
+function fakeSession(opts: { turnsPerPrompt?: number; stopReason?: string; errorMessage?: string } = {}): PiAgentSessionLike & { emit: (e: PiAgentSessionEvent) => void } {
   const listeners: Array<(e: PiAgentSessionEvent) => void> = [];
   const session = {
     sessionId: 'pi-sess-telemetry',
@@ -129,7 +129,12 @@ function fakeSession(): PiAgentSessionLike & { emit: (e: PiAgentSessionEvent) =>
     isIdle: true,
     async prompt() {
       listeners.forEach(l => l({ type: 'agent_start' }));
-      (session.messages as unknown[]).push({ role: 'assistant', content: 'done' });
+      (session.messages as unknown[]).push({
+        role: 'assistant',
+        content: 'done',
+        ...(opts.stopReason ? { stopReason: opts.stopReason } : {}),
+        ...(opts.errorMessage ? { errorMessage: opts.errorMessage } : {}),
+      });
       // Realistic per-message usage: one message_end carrying the final assistant
       // message with nested short-key usage (unitAI-beqby.12). The SDK emits no
       // `token_usage`-typed session event.
@@ -141,6 +146,10 @@ function fakeSession(): PiAgentSessionLike & { emit: (e: PiAgentSessionEvent) =>
           content: [{ type: 'text', text: 'done' }],
         },
       }));
+      // One `turn_end` per completed model turn, exactly as AgentSession emits it.
+      for (let i = 0; i < (opts.turnsPerPrompt ?? 0); i += 1) {
+        listeners.forEach(l => l({ type: 'turn_end', message: { role: 'assistant' }, toolResults: [] }));
+      }
       listeners.forEach(l => l({ type: 'agent_end', willRetry: false }));
       listeners.forEach(l => l({ type: 'agent_settled' }));
     },
@@ -217,5 +226,87 @@ describe('host liveStats', () => {
       cwd: hostWorkspace(),
     });
     expect(host.liveStats('act-nope')).toBeUndefined();
+  });
+});
+
+/**
+ * Canonical turn count (unitAI-rrdnt.65).
+ *
+ * The Fleet needs a per-activation turn count that other frontends can reuse, so it lives on
+ * the activation snapshot and the shared projection — never derived heuristically by a
+ * renderer. `turn_end` is the raw Pi per-turn boundary (one finished assistant message plus
+ * its tool results); `agent_start`/`agent_end` bracket a whole run and the message/streaming
+ * events would count one turn many times.
+ */
+describe('canonical activation turn count', () => {
+  function hostFor(session: PiAgentSessionLike) {
+    return new NativeActivationHost({
+      loader: { get: async () => specWithThinking() } as never,
+      workItems: testWorkItems({ description: BEAD.description }),
+      forensics: { emit: () => {} },
+      loadSdk: async () => makeSdk(session),
+      cwd: hostWorkspace(),
+      now: () => 1_000_000,
+    });
+  }
+
+  const dispatch = (host: NativeActivationHost) =>
+    host.start({ specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator' });
+
+  it('starts at zero, counts once per completed turn, and ignores message/run events', async () => {
+    const session = fakeSession();
+    const host = hostFor(session);
+    const handle = await dispatch(host);
+
+    expect(host.inspect(handle.activationId)?.turnCount).toBe(0);
+
+    // Neither streaming nor run-level boundaries are turns. Counting any of these would
+    // inflate the number the Fleet shows, and `agent_end` fires once for a run that may
+    // contain several turns.
+    session.emit({ type: 'agent_start' });
+    session.emit({ type: 'message_start', message: { role: 'assistant' } });
+    session.emit({ type: 'message_update', message: { role: 'assistant' } });
+    session.emit({ type: 'message_end', message: { role: 'assistant', usage: { input: 10, output: 5 } } });
+    session.emit({ type: 'agent_end', willRetry: false });
+    expect(host.inspect(handle.activationId)?.turnCount).toBe(0);
+
+    session.emit({ type: 'turn_end', message: { role: 'assistant' }, toolResults: [] });
+    expect(host.inspect(handle.activationId)?.turnCount).toBe(1);
+    session.emit({ type: 'turn_end', message: { role: 'assistant' }, toolResults: [] });
+    expect(host.inspect(handle.activationId)?.turnCount).toBe(2);
+
+    await handle.result;
+    const view = toActivationView(host.inspect(handle.activationId)!);
+    expect(view.turn_count).toBe(2);
+    expect(host.liveStats(handle.activationId)?.turn_count).toBe(2);
+  });
+
+  it('counts cumulatively across a resume, because the Fleet shows the activation', async () => {
+    const session = fakeSession({ turnsPerPrompt: 1 });
+    const host = hostFor(session);
+    const handle = await dispatch(host);
+    await handle.result;
+    expect(host.inspect(handle.activationId)?.turnCount).toBe(1);
+
+    const resumed = await host.resume(handle.activationId, 'carry on');
+    await resumed.result;
+
+    // One activation, two attempts, two completed turns: the count follows the activation.
+    expect(host.inspect(handle.activationId)?.activationId).toBe(handle.activationId);
+    expect(host.inspect(handle.activationId)?.attemptId).not.toBe(handle.attemptId);
+    expect(host.inspect(handle.activationId)?.turnCount).toBe(2);
+  });
+
+  it('counts cumulatively across a retry of a failed activation', async () => {
+    // The fake fails every turn, which is enough: only the counter is under test here.
+    const session = fakeSession({ turnsPerPrompt: 1, stopReason: 'error', errorMessage: 'provider 429' });
+    const host = hostFor(session);
+    const handle = await dispatch(host);
+    expect((await handle.result).status).toBe('failed');
+    expect(host.inspect(handle.activationId)?.turnCount).toBe(1);
+
+    const retried = await host.retry(handle.activationId);
+    await retried.result;
+    expect(host.inspect(handle.activationId)?.turnCount).toBe(2);
   });
 });

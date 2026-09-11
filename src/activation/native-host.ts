@@ -751,6 +751,9 @@ export class NativeActivationHost {
       modelOverride: Boolean(request.modelOverride),
       ...(thinkingLevel ? { thinkingLevel } : {}),
       thinkingOverride: request.thinkingOverride !== undefined,
+      // Initialized to 0 rather than left absent: at this point the child has provably
+      // completed no turn, so zero is a measurement and not a zero-fill.
+      turnCount: 0,
       // Captured once at dispatch from the validated contract; the tick stays an in-memory read.
       ...(purpose ? { purpose } : {}),
       startedAt,
@@ -864,6 +867,14 @@ export class NativeActivationHost {
         break;
       case 'agent_end':
         emit('turn_completed', { will_retry: Boolean(event.willRetry) });
+        break;
+      case 'turn_end':
+        // The canonical per-turn boundary: one finished assistant message and its tool
+        // results. Counted here and nowhere else — `agent_start`/`agent_end` bracket a whole
+        // run (a run with tool calls contains several turns), and the message/streaming
+        // events would count one turn many times. Cumulative across attempts by mutation:
+        // resume and retry reuse this snapshot, which is what the Fleet reads.
+        snapshot.turnCount = (snapshot.turnCount ?? 0) + 1;
         break;
       case 'agent_settled':
         snapshot.state = 'settled';
@@ -1370,6 +1381,7 @@ export class NativeActivationHost {
       elapsed_s: Math.max(0, Math.floor((this.now() - snapshot.startedAt) / 1000)),
       last_activity_at: snapshot.lastActivityAt,
       ...(snapshot.thinkingLevel ? { thinking_level: snapshot.thinkingLevel } : {}),
+      ...(snapshot.turnCount !== undefined ? { turn_count: snapshot.turnCount } : {}),
       ...(snapshot.tokenUsage ? { token_usage: { ...snapshot.tokenUsage } } : {}),
     };
   }

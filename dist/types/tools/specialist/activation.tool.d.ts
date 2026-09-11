@@ -37,6 +37,12 @@ export interface ActivationView {
     elapsed_s: number;
     /** Cumulative spend counts. Omitted until the first usage event (never zero-filled). */
     token_usage?: ActivationTokenUsage;
+    /**
+     * Completed child model turns, cumulative for the activation across attempts. Present from
+     * dispatch on (the runtime initializes it to 0 accurately) — omitted only by a projection
+     * of a hand-built snapshot that never carried one.
+     */
+    turn_count?: number;
     /** Thinking level from session creation. Omitted when unset (never fabricated). */
     thinking_level?: string;
     /** One-line purpose excerpt captured at dispatch. Omitted when absent (never fabricated). */
@@ -219,6 +225,12 @@ export declare function createSpecialistDispatchTool(getHost: () => NativeActiva
         elapsed_s: number;
         /** Cumulative spend counts. Omitted until the first usage event (never zero-filled). */
         token_usage?: ActivationTokenUsage;
+        /**
+         * Completed child model turns, cumulative for the activation across attempts. Present from
+         * dispatch on (the runtime initializes it to 0 accurately) — omitted only by a projection
+         * of a hand-built snapshot that never carried one.
+         */
+        turn_count?: number;
         /** Thinking level from session creation. Omitted when unset (never fabricated). */
         thinking_level?: string;
         /** One-line purpose excerpt captured at dispatch. Omitted when absent (never fabricated). */
@@ -403,6 +415,12 @@ export declare function createSpecialistRetryTool(getHost: () => NativeActivatio
         elapsed_s: number;
         /** Cumulative spend counts. Omitted until the first usage event (never zero-filled). */
         token_usage?: ActivationTokenUsage;
+        /**
+         * Completed child model turns, cumulative for the activation across attempts. Present from
+         * dispatch on (the runtime initializes it to 0 accurately) — omitted only by a projection
+         * of a hand-built snapshot that never carried one.
+         */
+        turn_count?: number;
         /** Thinking level from session creation. Omitted when unset (never fabricated). */
         thinking_level?: string;
         /** One-line purpose excerpt captured at dispatch. Omitted when absent (never fabricated). */

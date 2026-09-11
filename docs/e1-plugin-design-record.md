@@ -163,7 +163,8 @@ do not retry with a substitute model.
 Live projection of every activation. Per row: `activation_id`, `specialist`, `bead_id`,
 `state`, `access`, `model_override`, `thinking_override`, `thinking_level` (omitted when
 unset — never fabricate it), `purpose` (a one-line SCOPE-then-SUCCESS excerpt captured once
-at dispatch, omitted when absent), `elapsed_s`, `token_usage`, `last_activity_at`, and the
+at dispatch, omitted when absent), `elapsed_s`, `turn_count` (completed child model turns,
+cumulative across resume and retry), `token_usage`, `last_activity_at`, and the
 validated `result` object on settled activations only.
 
 Forensic IDs never appear in rows. Token usage is a row budget, never a window-context

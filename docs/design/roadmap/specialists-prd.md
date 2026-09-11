@@ -474,20 +474,34 @@ is read later from `specialist_status`, never substituted for an interaction mes
 `activation_id`, `specialist`, `bead_id`, `state`, `access`, `model_override`,
 `thinking_override`, `thinking_level` (omitted when unset, never fabricated), `purpose`
 (one-line SCOPE-then-SUCCESS excerpt captured once at dispatch, omitted when absent),
-`elapsed_s` (in-memory snapshot read, never a query), `token_usage` (monotonic
-non-decreasing per key on both delta-shaped and cumulative-shaped provider usage; row-budget
-short rendering, never a window-context percent), `last_activity_at`, plus the validated
-`result` object on settled activations. Forensic IDs never appear in rows.
+`elapsed_s` (in-memory snapshot read, never a query), `turn_count` (completed child model
+turns — initialized to 0 at dispatch and incremented once per raw Pi `turn_end`, cumulative
+for the logical activation across resume and retry), `token_usage` (monotonic non-decreasing
+per key on both delta-shaped and cumulative-shaped provider usage; row-budget short rendering,
+never a window-context percent), `last_activity_at`, plus the validated `result` object on
+settled activations. Forensic IDs never appear in rows.
 
 **Fleet UI.** A footer-section seam (`registerFooterSection`) renders below the XTRM
-statusline: collapsed line plus at most 8 expanded rows, needs-reply first. Running rows lead
-with a millisecond-resolution spinner; settled rows keep final spend; zero/absent tokens render
-as nothing. No `setWidget` fallback, no poll timer, no `ui.custom` mount — the seam is the
-only surface; without it the fleet stays hidden and slash commands report text.
+statusline. The header is the section label — `╰─ SPECIALISTS`, an inverted chip (light neutral
+background, dark bold foreground) followed by `N running`, `N waiting` and `! N blocked`, or
+`idle` — and carries no command hints. Each Specialist is a TWO-LINE entry, bounded at 4
+entries (the bound counts ENTRIES, not rendered lines): line 1 is the state glyph, the name,
+the tracked work and an italic-dim purpose excerpt; line 2 is `model · thinking` followed by
+`elapsed • turns • tokens`. One state signal per entry, never a word repeating it: the calm
+geometric spinner `◐ ◓ ◑ ◒` at ~220 ms while working, `●` plus `idle Ns` past the 30 s quiet
+threshold, `!` when blocked on the coordinator, `✓` settled, `✕` failed. Zero/absent tokens
+render as nothing. No `setWidget` fallback, no poll timer, no `ui.custom` mount — the seam is
+the only surface; without it the fleet stays hidden and slash commands report text.
 
 **Wake notifications.** Ask and settle events emit follow-up messages
-(`specialist_ask`/`specialist_settled`) carrying a far-left rail in `#8d7fe8`; fleet rows and
-tool-result cards carry no rail.
+(`specialist_ask`/`specialist_settled`). The far-left rail in `#8d7fe8` marks XTRM-generated
+INVARIANT chrome only — the two header lines naming the Specialist, the work and the state. A
+Specialist-authored question body, an escalation body, a variable error string and the
+coordinator instruction are mutable content and carry no rail. The coordinator instruction
+stays literal message content, because it is what the coordinator model acts on, and is styled
+dim and italic so it reads as secondary to a human. The activation id leaves the header chrome
+and remains, dim, in the message body: the model receives only the rendered string (`details`
+is display-only) and `specialist_retry` / `specialist_resume` take an activation id.
 
 **Control.** `specialist_reply` answers by message ID (unknown IDs reported, never silently
 passed); `specialist_resume` continues the same session; `specialist_stop_activation` disposes

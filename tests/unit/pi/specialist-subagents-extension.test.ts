@@ -226,6 +226,18 @@ function resultText(result) {
   return JSON.parse(text.text);
 }
 
+/**
+ * Strip SGR from a rendered line so a test can assert CONTENT separately from styling.
+ * The Fleet and the wake cards intentionally emit raw escapes; comparing whole styled
+ * strings would make every assertion unreadable and every palette tweak a test rewrite.
+ */
+function plain(line) {
+  return String(line).replace(/\x1b\[[0-9;]*m/g, '');
+}
+
+/** A clock aligned to the spinner's frame boundary, so frame assertions are exact. */
+const SPIN_CLOCK = 220_000;
+
 describe('specialist-subagents extension (Pi coordinator surface)', () => {
   it('registers exactly the seven specialist_* tools over the host', async () => {
     const mod = await loadExtension();
@@ -629,6 +641,16 @@ describe('specialist-subagents extension (Pi coordinator surface)', () => {
     // triggerTurn so an IDLE coordinator acts, which is the entire bug.
     expect(pi.sent[0].options).toEqual({ deliverAs: 'followUp', triggerTurn: true });
     expect(pi.sent[0].message.customType).toBe('specialist_ask');
+    // Semantic message details are untouched by the visual redesign: the structured payload
+    // stays the machine-readable half, and only `content` changed shape.
+    expect(pi.sent[0].message.details).toMatchObject({
+      activationId: 'act:aaaa',
+      attemptId: 'att:aaaa:1',
+      specialist: 'explorer',
+      beadId: 'bd-1',
+      kind: 'escalation',
+      body: 'Which option?',
+    });
     expect(pi.sent[0].message.content).toContain('act:aaaa');
     expect(pi.sent[0].message.content).toContain('Which option?');
     // No message_id: onAsk fires before transport.request(), so the projection is
@@ -848,29 +870,35 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     expect(pi.commands.map((c) => c.name)).toEqual(['specialists', 'fleet', 'specialists:reply', 'fleet:reply', 'specialists:stop', 'fleet:stop', 'specialists:resume', 'fleet:resume']);
   });
 
-  it('names /specialists in help and collapsed hints, never /fleet (unitAI-beqby.6)', async () => {
+  it('names /specialists in help, never /fleet, and the header carries no command hint (unitAI-beqby.6, unitAI-rrdnt.65)', async () => {
     const { pi, mod } = await boot();
     for (const cmd of pi.commands) {
       expect(cmd.description).not.toContain('/fleet');
     }
-    expect(mod.renderCollapsedLine({ activations: [], asks: [] })).not.toContain('/fleet');
+    expect(mod.renderFleetHeader({ activations: [], asks: [] })).not.toContain('/fleet');
     const asking = {
       activations: [{
         activation_id: 'act:aaaa', participant_id: 'p', attempt_id: 'a',
         specialist: 'explorer', bead_id: 'bd-1', state: 'running',
-        resolved_model: 'm', elapsed_s: 5, last_activity_at: Math.floor(Date.now() / 1000),
+        resolved_model: 'm', elapsed_s: 5, last_activity_at: Date.now(),
       }],
       asks: [{ message_id: 'msg:1', kind: 'question', activation_id: 'act:aaaa', from: 'x', body: 'Which?' }],
     };
-    expect(mod.renderCollapsedLine(asking)).not.toContain('/fleet');
-    expect(mod.renderCollapsedLine(asking)).toContain('/specialists:reply');
+    const header = mod.renderFleetHeader(asking);
+    expect(header).not.toContain('/fleet');
+    // Hint-free on purpose: the line states Fleet state, and both commands stay
+    // discoverable through /specialists help and its argument completions.
+    expect(header).not.toContain('/specialists:reply');
+    expect(header).not.toContain('/specialists');
+    expect(header).toContain('SPECIALISTS');
+    expect(header).toContain('! 1 blocked');
   });
 
   it('/fleet aliases still reach the /specialists handlers (unitAI-beqby.6)', async () => {
     const { pi, host, ctx, command } = await boot({ hasUI: true, mode: 'tui' });
     await toolNamed(pi, 'specialist_status').execute('tc0', {});
     await command('fleet').handler('inspect', ctx);
-    expect(ctx.painted.notices.at(-1)[0]).toContain('specialists');
+    expect(ctx.painted.notices.at(-1)[0]).toContain('SPECIALISTS');
     const fleetReply = pi.commands.find((c) => c.name === 'fleet:reply');
     host.answer.mockResolvedValueOnce({ messageId: 'msg:1', activationId: 'act:aaaa' });
     await fleetReply.handler('msg:1 alias answer', ctx);
@@ -903,8 +931,8 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     expect(ctx.painted.widgets['specialist-fleet']).toBeUndefined();
     expect(ctx.painted.statuses['specialist-fleet']).toBeUndefined();
     const lines = sections.get('specialist-fleet')(80);
-    expect(lines[0]).toContain('specialists');
-    expect(lines[0]).toContain('need reply');
+    expect(lines[0]).toContain('SPECIALISTS');
+    expect(lines[0]).toContain('! 1 blocked');
   });
 
   it('registers through the globalThis hook when present (core custom-footer loaded)', async () => {
@@ -919,8 +947,8 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
       expect(ctx.painted.widgets['specialist-fleet']).toBeUndefined();
       expect(ctx.painted.statuses['specialist-fleet']).toBeUndefined();
       const lines = sections.get('specialist-fleet')(80);
-      expect(lines[0]).toContain('specialists');
-      expect(lines[0]).toContain('need reply');
+      expect(lines[0]).toContain('SPECIALISTS');
+      expect(lines[0]).toContain('! 1 blocked');
     } finally {
       if (prev === undefined) delete (globalThis as any).__registerFooterSection;
       else (globalThis as any).__registerFooterSection = prev;
@@ -939,51 +967,65 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     }
   });
 
-  it('collapsed line prioritises needs-reply and row lines carry no forensic ids', async () => {
+  it('header counts the Fleet, and every row is a two-line unit with no forensic ids (unitAI-rrdnt.65)', async () => {
     const { mod } = await boot();
-    // unitAI-4n9of: hint names only working triggers, never arrow keys.
-    const idle = mod.renderCollapsedLine({ activations: [], asks: [] });
+    const idle = mod.renderFleetHeader({ activations: [], asks: [] });
+    expect(mod.SECTION_LABEL).toBe('SPECIALISTS');
+    expect(idle).toContain('SPECIALISTS');
     expect(idle).toContain('idle');
-    expect(idle).toContain('/specialists inspect');
+    expect(idle).not.toContain('/specialists');
+    // unitAI-4n9of: no arrow promise of any kind.
     expect(idle).not.toContain('↓');
     expect(idle).not.toContain('←');
     const fleet = {
       activations: [{
         activation_id: 'act:aaaa', participant_id: 'p', attempt_id: 'a',
         specialist: 'explorer', bead_id: 'bd-1', state: 'running',
-        resolved_model: 'm', thinking_level: 'high', elapsed_s: 180,
-        token_usage: { input: 800, output: 400, cache: 0 }, last_activity_at: Math.floor(Date.now() / 1000),
+        resolved_model: 'm', thinking_level: 'high', elapsed_s: 180, turn_count: 4,
+        purpose: 'map the wake transport',
+        token_usage: { input: 800, output: 400, cache: 0 }, last_activity_at: Date.now(),
       }],
       asks: [{ message_id: 'msg:1', kind: 'question', activation_id: 'act:aaaa', from: 'x', body: 'Which option?' }],
     };
-    expect(mod.renderCollapsedLine(fleet)).toContain('1 need reply');
-    expect(mod.renderCollapsedLine(fleet)).toContain('/specialists inspect');
-    expect(mod.renderCollapsedLine(fleet)).toContain('/specialists:reply');
-    expect(mod.renderCollapsedLine(fleet)).not.toContain('↓');
-    expect(mod.renderCollapsedLine(fleet)).not.toContain('←');
+    const header = mod.renderFleetHeader(fleet);
+    expect(header).toContain('! 1 blocked');
+    expect(header).not.toContain('/specialists');
+    expect(header).not.toContain('↓');
+    expect(header).not.toContain('←');
     const rows = mod.renderSectionLines(fleet, { expanded: true });
+    expect(rows).toHaveLength(3); // header + the blocked entry's two lines
     expect(rows[1]).toContain('explorer');
     expect(rows[1]).toContain('bd-1');
-    expect(rows[1]).not.toContain('act:aaaa');
-    expect(rows[1]).not.toContain('msg:1');
+    expect(rows[1]).toContain('map the wake transport');
+    // A blocked entry trades its metrics for the wait, and still names model · thinking.
+    expect(plain(rows[2])).toContain('m · high');
+    expect(plain(rows[2])).toContain('waiting');
+    expect(plain(rows[2])).not.toContain('4t');
+    expect(rows.join('\n')).not.toContain('act:aaaa');
+    expect(rows.join('\n')).not.toContain('msg:1');
   });
 
-  it('bounds expanded rows with an overflow line', async () => {
+  it('bounds expanded entries by ENTRY, never truncating half a two-line unit', async () => {
     const { mod } = await boot();
     const activations = Array.from({ length: mod.FLEET_MAX_ROWS + 3 }, (_, i) => ({
       activation_id: `act:${i}`, specialist: `spec-${i}`, bead_id: 'bd-1', state: 'running',
-      resolved_model: 'm', elapsed_s: 10,
+      resolved_model: 'm', elapsed_s: 10, last_activity_at: Date.now(),
     }));
     const lines = mod.renderSectionLines({ activations, asks: [] }, { expanded: true });
-    expect(lines).toHaveLength(mod.FLEET_MAX_ROWS + 2); // collapsed + rows + overflow
+    // header + TWO lines per entry + overflow: the bound counts entries, not lines.
+    expect(lines).toHaveLength(1 + 2 * mod.FLEET_MAX_ROWS + 1);
+    expect(lines.slice(1, -1)).toHaveLength(2 * mod.FLEET_MAX_ROWS);
     expect(lines.at(-1)).toContain('+3 more');
+    for (const line of lines.slice(1, -1)) {
+      expect(line).toMatch(/^( {4}| {7})\S/);
+    }
   });
 
   it('/specialists inspect degrades to text when ui.custom is unavailable (RPC)', async () => {
     const { command, ctx } = await boot({ hasUI: true, mode: 'tui' });
     ctx.ui.custom = undefined;
     await command('specialists').handler('inspect', ctx);
-    expect(ctx.painted.notices.at(-1)[0]).toContain('specialists');
+    expect(ctx.painted.notices.at(-1)[0]).toContain('SPECIALISTS');
   });
 
   it('clears the widget when the Fleet is empty rather than painting a bare header', async () => {
@@ -1001,10 +1043,10 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     await toolNamed(pi, 'specialist_status').execute('tc0', {});
     await command('specialists').handler('hide', ctx);
     expect(ctx.painted.widgets['specialist-fleet']).toBeUndefined();
-    expect(ctx.painted.notices.at(-1)[0]).toContain('specialists');
+    expect(ctx.painted.notices.at(-1)[0]).toContain('SPECIALISTS');
     await command('specialists').handler('show', ctx);
     expect(ctx.painted.widgets['specialist-fleet']).toBeUndefined();
-    expect(ctx.painted.notices.at(-1)[0]).toContain('specialists');
+    expect(ctx.painted.notices.at(-1)[0]).toContain('SPECIALISTS');
   });
 
   it('/specialists inspect prints the expanded text report and never mounts ui.custom (unitAI-nmxhg)', async () => {
@@ -1015,11 +1057,11 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     await command('specialists').handler('inspect', ctx);
     expect(custom).not.toHaveBeenCalled(); // no custom-pane mount anywhere on the specialists path
     const text = ctx.painted.notices.at(-1)[0];
-    expect(text).toContain('specialists');
-    expect(text).toContain('explorer'); // expanded rows, not the collapsed line alone
+    expect(text).toContain('SPECIALISTS');
+    expect(text).toContain('explorer'); // expanded rows, not the header alone
   });
 
-  it('renders expanded rows by default; /specialists collapse opts out, /specialists expand is a no-op', async () => {
+  it('renders expanded two-line entries by default; /specialists collapse opts out', async () => {
     const { pi, ctx, command, mod } = await boot({ hasUI: true, mode: 'tui' });
     await toolNamed(pi, 'specialist_status').execute('tc0', {});
     // Unit default: no opts means expanded.
@@ -1027,24 +1069,33 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
       activations: [{
         activation_id: 'act:aaaa', specialist: 'researcher', bead_id: 'ISSUE-92',
         state: 'running', resolved_model: 'gpt-5.6-sol', thinking_level: 'high',
-        elapsed_s: 47, token_usage: { input: 1500, output: 600, cache: 0 },
-        last_activity_at: Math.floor(Date.now() / 1000),
+        elapsed_s: 47, turn_count: 3, purpose: 'inspect native wake transport',
+        token_usage: { input_tokens: 1500, output_tokens: 600 },
+        last_activity_at: SPIN_CLOCK,
       }],
       asks: [],
     };
-    const lines = mod.renderSectionLines(fleet, { nowMs: 560 }); // frame 7 = ⠧
-    expect(lines.length).toBeGreaterThan(1);
-    expect(lines[1]).toMatch(/⠧ researcher \(gpt-5\.6-sol high\) · ISSUE-92 · running 47s · 2\.1k/);
-    expect(lines[1]).not.toContain('working'); // spinner marker carries it
-    expect(lines[1]).not.toContain('spent');
-    // Command default: /specialists with no action reports the expanded rows.
+    const lines = mod.renderSectionLines(fleet, { nowMs: SPIN_CLOCK });
+    expect(lines).toHaveLength(3); // header + the entry's two lines
+    expect(plain(lines[0])).toBe('╰─ SPECIALISTS  1 running');
+    // Line 1: glyph, bold name, dim work id, italic-dim purpose.
+    expect(plain(lines[1])).toBe('    ◐ researcher  ISSUE-92  inspect native wake transport');
+    expect(lines[1]).toContain('\x1b[1mresearcher\x1b[22m');
+    expect(lines[1]).toContain('\x1b[2mISSUE-92\x1b[22m');
+    expect(lines[1]).toContain('\x1b[3minspect native wake transport\x1b[23m');
+    // Line 2: model · thinking, then elapsed • turns • tokens.
+    expect(plain(lines[2])).toBe('       gpt-5.6-sol · high  • 47s • 3t • 2.1k');
+    expect(lines[2]).toContain('\x1b[38;2;154;139;255m\x1b[1mhigh\x1b[22m\x1b[39m');
+    expect(lines.join('\n')).not.toContain('working'); // the glyph carries it
+    expect(lines.join('\n')).not.toContain('spent');
+    // Command default: /specialists with no action reports the expanded entries.
     await command('specialists').handler('', ctx);
     expect(ctx.painted.notices.at(-1)[0].split('\n').length).toBeGreaterThan(1);
     expect(ctx.painted.notices.at(-1)[0]).toContain('explorer');
-    // Opt-out: collapse drops to the single line.
+    // Opt-out: collapse drops to the header alone.
     await command('specialists').handler('collapse', ctx);
     expect(ctx.painted.notices.at(-1)[0].split('\n')).toHaveLength(1);
-    // Expand restores the default rows (no-op when already expanded).
+    // Expand restores the default entries (a no-op when already expanded).
     await command('specialists').handler('expand', ctx);
     expect(ctx.painted.notices.at(-1)[0].split('\n').length).toBeGreaterThan(1);
   });
@@ -1060,99 +1111,116 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
       activationId: `act:live${i}`,
       specialist: `spec-${i}`,
       startedAt,
-      lastActivityAt: Math.floor(Date.now() / 1000),
+      lastActivityAt: Date.now(),
     })));
     host.pendingAsks.mockReturnValue([]);
-    const text = (sections.get('specialist-fleet')() ?? []).join('\n');
+    const text = (sections.get('specialist-fleet')() ?? []).map(plain).join('\n');
     // Bare `.map(toActivationView)` passed the element index as nowMs, freezing
-    // every row at 0s. Both rows must show live elapsed, neither 0s.
-    expect(text).toMatch(/spec-0.*4[12]s/);
-    expect(text).toMatch(/spec-1.*4[12]s/);
-    expect(text).not.toMatch(/running 0s/);
+    // every entry at 0s. Both entries must show live elapsed, neither 0s.
+    expect(text).toMatch(/spec-0[\s\S]*4[12]s/);
+    expect(text).toMatch(/spec-1[\s\S]*4[12]s/);
+    // And no entry reads as idle: idle/waiting arithmetic is milliseconds, and these
+    // fixtures are milliseconds — a seconds clock would have rendered both idle.
+    expect(text).not.toMatch(/idle/);
   });
 
   it('zero/absent tokens render as nothing with no "spent" word (unitAI-d99hb)', async () => {
     const { mod } = await boot();
     const base = {
       activation_id: 'act:x', specialist: 'explorer', bead_id: 'bd-1', state: 'running',
-      resolved_model: 'm', elapsed_s: 41, last_activity_at: Math.floor(Date.now() / 1000),
+      resolved_model: 'm', elapsed_s: 41, last_activity_at: Date.now(),
     };
     expect(mod.formatSpendShort(undefined)).toBe('');
     expect(mod.formatSpendShort({ input_tokens: 0, output_tokens: 0 })).toBe('');
     for (const view of [base, { ...base, token_usage: { input_tokens: 0, output_tokens: 0 } }]) {
-      const row = mod.renderFleetRowLine(view, [], 0); // frame 0 = ⠋
-      expect(row).toBe('    ⠋ explorer (m) · bd-1 · running 41s');
-      expect(row).not.toContain('spent');
+      const lines = mod.renderFleetRowLines(view, [], 0); // frame 0 = ◐
+      expect(plain(lines.join('\n'))).toBe('    ◐ explorer  bd-1\n       m  • 41s');
+      expect(lines.join('\n')).not.toContain('spent');
+      expect(lines.join('\n')).not.toContain('tokens');
     }
   });
 
   it('renders live snake_case token usage as a bare count (unitAI-d99hb)', async () => {
     const { mod } = await boot();
     expect(mod.formatSpendShort({ input_tokens: 1500, output_tokens: 600 })).toBe('2.1k');
-    const row = mod.renderFleetRowLine({
+    const lines = mod.renderFleetRowLines({
       activation_id: 'act:x', specialist: 'researcher', bead_id: 'ISSUE-92',
       state: 'running', resolved_model: 'gpt-5.6-sol', thinking_level: 'high',
-      elapsed_s: 47, token_usage: { input_tokens: 1500, output_tokens: 600 },
-      last_activity_at: Math.floor(Date.now() / 1000),
-    }, [], 560);
-    expect(row).toMatch(/running 47s · 2\.1k/);
-    expect(row.startsWith('    ⠧ ')).toBe(true); // 560/80 = frame 7
-    expect(row).not.toContain('working');
-    expect(row).not.toContain('spent');
+      elapsed_s: 47, turn_count: 4, token_usage: { input_tokens: 1500, output_tokens: 600 },
+      last_activity_at: SPIN_CLOCK,
+    }, [], SPIN_CLOCK);
+    expect(plain(lines[1])).toBe('       gpt-5.6-sol · high  • 47s • 4t • 2.1k');
+    expect(plain(lines[0])).toBe('    ◐ researcher  ISSUE-92');
+    expect(lines.join('\n')).not.toContain('working');
+    expect(lines.join('\n')).not.toContain('spent');
   });
 
-  it('working rows tick a ms-resolution spinner from nowMs; working word collapsed (unitAI-beqby.18)', async () => {
+  it('spinner frames, cadence and the single state glyph per entry (unitAI-beqby.18, unitAI-rrdnt.65)', async () => {
     const { mod } = await boot();
+    // Calm geometric cadence, not the braille cycle.
+    expect(mod.SPINNER_FRAMES).toEqual(['◐', '◓', '◑', '◒']);
+    expect(mod.SPINNER_FRAME_MS).toBe(220);
+    expect(mod.SPINNER_FRAME_MS).toBeGreaterThanOrEqual(180);
+    expect(mod.SPINNER_FRAME_MS).toBeLessThanOrEqual(250);
     const base = {
       activation_id: 'act:x', specialist: 'explorer', bead_id: 'bd-1', state: 'running',
-      resolved_model: 'm', last_activity_at: Math.floor(Date.now() / 1000),
+      resolved_model: 'm', last_activity_at: SPIN_CLOCK,
     };
-    const at = (nowMs, view = base) => mod.renderFleetRowLine(view, [], nowMs);
-    // Deterministic: same nowMs always yields the same frame; elapsed_s ticks
-    // the elapsed text only, never the marker (seconds cannot move at ora speed).
-    expect(at(0)).toBe(at(0));
-    expect(at(0)).toBe('    ⠋ explorer (m) · bd-1 · running 0s');
-    expect(at(80)).toBe('    ⠙ explorer (m) · bd-1 · running 0s');
-    expect(at(0, { ...base, elapsed_s: 42 })).toBe('    ⠋ explorer (m) · bd-1 · running 42s');
-    expect(at(0)).not.toContain('working'); // spinner marker carries it
-    // Settled rows keep ● and their tail; idle (>30s quiet) keeps ● + idle Xs;
-    // needs-reply keeps !.
-    expect(mod.renderFleetRowLine({ ...base, state: 'done', elapsed_s: 41 }, [], 0))
-      .toBe('    ● explorer (m) · bd-1 · done 41s · done');
-    expect(mod.renderFleetRowLine({ ...base, elapsed_s: 41, last_activity_at: Math.floor(Date.now() / 1000) - 60 }, [], 0))
-      .toMatch(/^    ● .* · idle 60s/);
-    const askRow = mod.renderFleetRowLine({ ...base, elapsed_s: 41 }, [
-      { activation_id: 'act:x', asked_at: Math.floor(Date.now() / 1000) - 5 },
-    ], 0);
-    expect(askRow.startsWith('    ! ')).toBe(true);
+    const glyph = (view, nowMs, asks = []) => plain(mod.renderFleetRowLines(view, asks, nowMs)[0]);
+    // Deterministic: the frame is a pure function of the injected clock.
+    expect(glyph(base, SPIN_CLOCK)).toBe(glyph(base, SPIN_CLOCK));
+    expect(glyph(base, SPIN_CLOCK)).toBe('    ◐ explorer  bd-1');
+    expect(glyph(base, SPIN_CLOCK + 220)).toBe('    ◓ explorer  bd-1');
+    expect(glyph(base, SPIN_CLOCK + 440)).toBe('    ◑ explorer  bd-1');
+    expect(glyph(base, SPIN_CLOCK + 660)).toBe('    ◒ explorer  bd-1');
+    expect(glyph(base, SPIN_CLOCK + 880)).toBe('    ◐ explorer  bd-1');
+    expect(mod.renderFleetRowLines(base, [], SPIN_CLOCK).join('\n')).not.toContain('working');
+    // Running but quiet past the threshold: static marker, idle duration in the slot.
+    const idle = mod.renderFleetRowLines({ ...base, elapsed_s: 120 }, [], SPIN_CLOCK + 42_000);
+    expect(plain(idle[0])).toBe('    ● explorer  bd-1');
+    expect(plain(idle[1])).toBe('       m  • idle 42s');
+    // Terminal states: one glyph, final metrics still visible.
+    const settled = mod.renderFleetRowLines({ ...base, state: 'settled', elapsed_s: 134, turn_count: 5 }, [], SPIN_CLOCK);
+    expect(plain(settled[0])).toBe('    ✓ explorer  bd-1');
+    expect(plain(settled[1])).toBe('       m  • 2m14s • 5t');
+    expect(plain(mod.renderFleetRowLines({ ...base, state: 'failed' }, [], SPIN_CLOCK)[0]))
+      .toBe('    ✕ explorer  bd-1');
+    // Blocked on the coordinator: `!` outranks the spinner, wait replaces the metrics.
+    const blocked = mod.renderFleetRowLines({ ...base, elapsed_s: 90 }, [
+      { activation_id: 'act:x', asked_at: SPIN_CLOCK - 19_000 },
+    ], SPIN_CLOCK);
+    expect(plain(blocked[0])).toBe('    ! explorer  bd-1');
+    expect(plain(blocked[1])).toBe('       m  • waiting 19s');
   });
 
-  it('needs-reply rows render with a ! marker and sort before idle rows (unitAI-nmxhg)', async () => {
+  it('blocked entries use ! and sort before the rest (unitAI-nmxhg)', async () => {
     const { mod } = await boot();
-    const now = Math.floor(Date.now() / 1000);
+    const now = 1_700_000_000_000;
     const fleet = {
       activations: [
         {
           activation_id: 'act:idle', specialist: 'researcher', bead_id: 'ISSUE-92',
           state: 'running', resolved_model: 'gpt-5.6-sol', thinking_level: 'high',
-          elapsed_s: 47, token_usage: { input: 1500, output: 600, cache: 0 },
+          elapsed_s: 47, turn_count: 2, token_usage: { input_tokens: 1500, output_tokens: 600 },
           last_activity_at: now,
         },
         {
           activation_id: 'act:ask', specialist: 'reviewer', bead_id: 'ISSUE-92',
           state: 'running', resolved_model: 'gpt-5.6-sol', thinking_level: 'high',
-          elapsed_s: 90, token_usage: { input: 500, output: 200, cache: 0 },
-          last_activity_at: now,
+          elapsed_s: 90, last_activity_at: now,
         },
       ],
       asks: [{
         message_id: 'msg:1', kind: 'question', activation_id: 'act:ask',
-        from: 'x', body: 'Which option?', asked_at: now - 31,
+        from: 'x', body: 'Which option?', asked_at: now - 31_000,
       }],
     };
-    const lines = mod.renderSectionLines(fleet, { nowMs: 560 }); // frame 7 = ⠧
-    expect(lines[1]).toMatch(/! reviewer \(gpt-5\.6-sol high\) · ISSUE-92 · needs reply 31s/);
-    expect(lines[2]).toContain('⠧ researcher');
+    const lines = mod.renderSectionLines(fleet, { nowMs: now }).map(plain);
+    expect(lines[0]).toBe('╰─ SPECIALISTS  2 running • ! 1 blocked');
+    expect(lines[1]).toBe('    ! reviewer  ISSUE-92');
+    expect(lines[2]).toBe('       gpt-5.6-sol · high  • waiting 31s');
+    expect(lines[3]).toMatch(/^ {4}[◐◓◑◒] researcher {2}ISSUE-92$/);
+    expect(lines[4]).toBe('       gpt-5.6-sol · high  • 47s • 2t • 2.1k');
     expect(lines.join('\n')).not.toContain('act:ask'); // no forensic ids in rows
   });
 
@@ -1160,7 +1228,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     const { pi, ctx, command } = await boot();
     await toolNamed(pi, 'specialist_status').execute('tc0', {});
     await command('specialists').handler('', ctx);
-    expect(ctx.painted.notices.at(-1)[0]).toContain('specialists');
+    expect(ctx.painted.notices.at(-1)[0]).toContain('SPECIALISTS');
   });
 
   it('/specialists:reply answers by message_id and reports an unknown id instead of silently passing', async () => {
@@ -1504,45 +1572,69 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
     expect(seen).toEqual(['activation_completed']);
   });
 
-  it('wake content carries the #8d7fe8 rail; rows and cards carry none (unitAI-beqby.17)', async () => {
+  it('rails only the invariant header lines; rows and mutable content carry none (unitAI-beqby.17, unitAI-rrdnt.65)', async () => {
     const mod = await loadExtension();
     expect(mod.RAIL).toBe('\x1b[38;2;141;127;232m│\x1b[0m');
+
+    // The rail is XTRM chrome. Exactly the two header lines are invariant; the body and
+    // the coordinator instruction are content XTRM did not write and must not claim.
     const wake = mod.formatSettlementWake({
       activationId: 'act:aaaa', specialist: 'explorer', beadId: 'bd-1', outcome: 'completed',
-    });
-    for (const line of wake.split('\n')) {
-      expect(line.startsWith(mod.RAIL)).toBe(true);
+    }).split('\n');
+    expect(wake[0].startsWith(mod.RAIL)).toBe(true);
+    expect(wake[1].startsWith(mod.RAIL)).toBe(true);
+    for (const line of wake.slice(2)) {
+      expect(line.startsWith(mod.RAIL)).toBe(false);
     }
+    // A multiline body must not drag the rail down the terminal: every body line is bare.
     const ask = mod.formatAskWake({
-      activationId: 'act:aaaa', specialist: 'explorer', beadId: 'bd-1', kind: 'question', body: 'Which?',
-    });
-    for (const line of ask.split('\n')) {
-      expect(line.startsWith(mod.RAIL)).toBe(true);
+      activationId: 'act:aaaa', specialist: 'explorer', beadId: 'bd-1', kind: 'question',
+      body: 'Line one?\nLine two.\nLine three.',
+    }).split('\n');
+    expect(ask[0].startsWith(mod.RAIL)).toBe(true);
+    expect(ask[1].startsWith(mod.RAIL)).toBe(true);
+    for (const line of ask.slice(2)) {
+      expect(line.startsWith(mod.RAIL)).toBe(false);
     }
-    const row = mod.renderFleetRowLine({
+    // Multiline Specialist body, verbatim and unrailed (it is the child's voice).
+    expect(plain(ask.join('\n'))).toContain('Line one?\nLine two.\nLine three.');
+
+    const rows = mod.renderFleetRowLines({
       activation_id: 'act:x', specialist: 'explorer', bead_id: 'bd-1', state: 'running',
-      resolved_model: 'm', elapsed_s: 41, last_activity_at: Math.floor(Date.now() / 1000),
+      resolved_model: 'm', elapsed_s: 41, last_activity_at: Date.now(),
     });
-    expect(row).not.toContain(mod.RAIL);
-    expect(mod.renderCollapsedLine({ activations: [], asks: [] })).not.toContain(mod.RAIL);
+    expect(rows.join('\n')).not.toContain(mod.RAIL);
+    expect(mod.renderFleetHeader({ activations: [], asks: [] })).not.toContain(mod.RAIL);
     for (const line of mod.renderSectionLines({ activations: [], asks: [] }, { expanded: true })) {
       expect(line).not.toContain(mod.RAIL);
     }
   });
 
-  it('names the activation and says what to call next', async () => {
+  it('wake content keeps the activation id out of header chrome but keeps it for the model', async () => {
     const mod = await loadExtension();
     const ok = mod.formatSettlementWake({
       activationId: 'act:aaaa', specialist: 'explorer', beadId: 'bd-1', outcome: 'completed',
-    });
-    expect(ok).toMatch(/act:aaaa/);
+    }, { bead_id: 'bd-1', elapsed_s: 134, turn_count: 5, token_usage: { input_tokens: 15000, output_tokens: 3600 } });
+    expect(plain(ok)).toContain('│ ✓ explorer · finished');
+    expect(plain(ok)).toContain('│   bd-1 · 2m14s • 5t • 19k');
     expect(ok).toMatch(/specialist_status/);
     expect(ok).toMatch(/finished/);
+    // The activation id leaves the railed header chrome …
+    for (const line of ok.split('\n').filter((l) => l.startsWith(mod.RAIL))) {
+      expect(line).not.toContain('act:');
+    }
+    // … and stays in the literal message content, because the model receives ONLY this
+    // string (`details` is display-only) and specialist_retry takes an activation id.
+    expect(plain(ok)).toContain('activation act:aaaa');
+    // The instruction is styled secondary but remains literal content.
+    expect(ok).toContain('\x1b[3m');
+    expect(plain(ok)).toContain('Call specialist_status to read its validated result.');
 
     const bad = mod.formatSettlementWake({
       activationId: 'act:bbbb', specialist: 'executor', outcome: 'failed', error: 'provider 429',
-    });
-    expect(bad).toMatch(/FAILED/);
+    }, { resolved_model: 'gpt-5.6-sol', thinking_level: 'high' });
+    expect(plain(bad)).toContain('│ ✕ executor · failed');
+    expect(plain(bad)).toContain('gpt-5.6-sol · high');
     expect(bad).toMatch(/provider 429/);
     // A failed activation is retryable in place; saying so is the difference between an
     // operator retrying and an operator starting over (unitAI-3emr7: specialist_retry,
