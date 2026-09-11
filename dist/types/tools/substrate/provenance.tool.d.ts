@@ -3,25 +3,25 @@ import * as z from 'zod';
 export declare const MAX_PROVENANCE_ENTRIES = 50;
 export declare const substrateProvenanceSchema: z.ZodObject<{
     op: z.ZodEnum<["trace", "bindings", "receipts", "find_by_commit", "find_by_pr", "artifacts", "bind_commit", "bundle"]>;
-    issueId: z.ZodOptional<z.ZodString>;
-    receiptId: z.ZodOptional<z.ZodString>;
+    issue_id: z.ZodOptional<z.ZodString>;
+    receipt_id: z.ZodOptional<z.ZodString>;
     sha: z.ZodOptional<z.ZodString>;
     pr: z.ZodOptional<z.ZodString>;
-    liveOnly: z.ZodOptional<z.ZodBoolean>;
+    live_only: z.ZodOptional<z.ZodBoolean>;
 }, "strip", z.ZodTypeAny, {
     op: "trace" | "artifacts" | "bindings" | "receipts" | "find_by_commit" | "find_by_pr" | "bind_commit" | "bundle";
     pr?: string | undefined;
+    issue_id?: string | undefined;
     sha?: string | undefined;
-    issueId?: string | undefined;
-    receiptId?: string | undefined;
-    liveOnly?: boolean | undefined;
+    receipt_id?: string | undefined;
+    live_only?: boolean | undefined;
 }, {
     op: "trace" | "artifacts" | "bindings" | "receipts" | "find_by_commit" | "find_by_pr" | "bind_commit" | "bundle";
     pr?: string | undefined;
+    issue_id?: string | undefined;
     sha?: string | undefined;
-    issueId?: string | undefined;
-    receiptId?: string | undefined;
-    liveOnly?: boolean | undefined;
+    receipt_id?: string | undefined;
+    live_only?: boolean | undefined;
 }>;
 export type SubstrateProvenanceInput = z.infer<typeof substrateProvenanceSchema>;
 /**
@@ -29,7 +29,7 @@ export type SubstrateProvenanceInput = z.infer<typeof substrateProvenanceSchema>
  * `unknown` payloads keep this file decoupled from Substrate domain types.
  */
 export interface ProvenanceServiceLike {
-    trace(issueId: string): {
+    trace(issue_id: string): {
         bindings: unknown[];
         receipts: unknown[];
         checkpoints: unknown[];
@@ -39,15 +39,15 @@ export interface ProvenanceServiceLike {
         externalBindings: unknown[];
         [key: string]: unknown;
     };
-    listBindings(issueId: string): unknown[];
-    listReceipts(issueId: string): unknown[];
+    listBindings(issue_id: string): unknown[];
+    listReceipts(issue_id: string): unknown[];
     findByCommit(sha: string): unknown[];
     findByPr(ref: string): unknown[];
-    listArtifacts(receiptId: string, opts?: {
+    listArtifacts(receipt_id: string, opts?: {
         liveOnly?: boolean;
     }): unknown[];
-    bindCommit(receiptId: string, sha: string): unknown;
-    generateBundle(issueId: string): {
+    bindCommit(receipt_id: string, sha: string): unknown;
+    generateBundle(issue_id: string): {
         path: string;
     };
 }
@@ -56,25 +56,25 @@ export declare function createSubstrateProvenanceTool(getProvenance: () => Prove
     description: string;
     inputSchema: z.ZodObject<{
         op: z.ZodEnum<["trace", "bindings", "receipts", "find_by_commit", "find_by_pr", "artifacts", "bind_commit", "bundle"]>;
-        issueId: z.ZodOptional<z.ZodString>;
-        receiptId: z.ZodOptional<z.ZodString>;
+        issue_id: z.ZodOptional<z.ZodString>;
+        receipt_id: z.ZodOptional<z.ZodString>;
         sha: z.ZodOptional<z.ZodString>;
         pr: z.ZodOptional<z.ZodString>;
-        liveOnly: z.ZodOptional<z.ZodBoolean>;
+        live_only: z.ZodOptional<z.ZodBoolean>;
     }, "strip", z.ZodTypeAny, {
         op: "trace" | "artifacts" | "bindings" | "receipts" | "find_by_commit" | "find_by_pr" | "bind_commit" | "bundle";
         pr?: string | undefined;
+        issue_id?: string | undefined;
         sha?: string | undefined;
-        issueId?: string | undefined;
-        receiptId?: string | undefined;
-        liveOnly?: boolean | undefined;
+        receipt_id?: string | undefined;
+        live_only?: boolean | undefined;
     }, {
         op: "trace" | "artifacts" | "bindings" | "receipts" | "find_by_commit" | "find_by_pr" | "bind_commit" | "bundle";
         pr?: string | undefined;
+        issue_id?: string | undefined;
         sha?: string | undefined;
-        issueId?: string | undefined;
-        receiptId?: string | undefined;
-        liveOnly?: boolean | undefined;
+        receipt_id?: string | undefined;
+        live_only?: boolean | undefined;
     }>;
     execute(input: SubstrateProvenanceInput): Promise<{
         bindings: unknown[];

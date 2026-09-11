@@ -7,8 +7,8 @@ import {
 
 function fake(overrides?: Partial<ProvenanceServiceLike>): ProvenanceServiceLike {
   return {
-    trace: (issueId: string) => ({
-      issueId,
+    trace: (issue_id: string) => ({
+      issue_id,
       locator: 'loc',
       bindings: [{ id: 'b1' }],
       receipts: [{ id: 'r1' }],
@@ -23,7 +23,7 @@ function fake(overrides?: Partial<ProvenanceServiceLike>): ProvenanceServiceLike
     findByCommit: () => [{ receipt: { id: 'r1' } }],
     findByPr: () => [{ receipt: { id: 'r2' } }],
     listArtifacts: () => [{ kind: 'commit', value: 'abc' }],
-    bindCommit: (receiptId: string, sha: string) => ({ receiptId, sha }),
+    bindCommit: (receipt_id: string, sha: string) => ({ receipt_id, sha }),
     generateBundle: () => ({ path: '.xtrm/provenance/bundles/b1.json' }),
     ...overrides,
   };
@@ -36,7 +36,7 @@ describe('substrate provenance tool', () => {
     const tool = createSubstrateProvenanceTool(() =>
       fake({
         trace: () => ({
-          issueId: 'I-1',
+          issue_id: 'I-1',
           locator: 'loc',
           bindings: range(80),
           receipts: range(70),
@@ -48,7 +48,7 @@ describe('substrate provenance tool', () => {
         }),
       }),
     );
-    const out = (await tool.execute({ op: 'trace', issueId: 'I-1' })) as Record<string, unknown>;
+    const out = (await tool.execute({ op: 'trace', issue_id: 'I-1' })) as Record<string, unknown>;
     expect(out.status).toBe('ok');
     expect((out.bindings as unknown[]).length).toBe(MAX_PROVENANCE_ENTRIES);
     expect(out.bindingsTotal).toBe(80);
@@ -60,50 +60,52 @@ describe('substrate provenance tool', () => {
 
   it('each read op routes to the service', async () => {
     const tool = createSubstrateProvenanceTool(() => fake());
-    expect(((await tool.execute({ op: 'bindings', issueId: 'I' })) as { status: string }).status).toBe('ok');
-    expect(((await tool.execute({ op: 'receipts', issueId: 'I' })) as { status: string }).status).toBe('ok');
+    expect(((await tool.execute({ op: 'bindings', issue_id: 'I' })) as { status: string }).status).toBe('ok');
+    expect(((await tool.execute({ op: 'receipts', issue_id: 'I' })) as { status: string }).status).toBe('ok');
     expect(((await tool.execute({ op: 'find_by_commit', sha: 'abc' })) as { status: string }).status).toBe('ok');
     expect(((await tool.execute({ op: 'find_by_pr', pr: '12' })) as { status: string }).status).toBe('ok');
-    expect(((await tool.execute({ op: 'artifacts', receiptId: 'r' })) as { status: string }).status).toBe('ok');
-    const bound = (await tool.execute({ op: 'bind_commit', receiptId: 'r', sha: 'abc' })) as {
+    expect(((await tool.execute({ op: 'artifacts', receipt_id: 'r' })) as { status: string }).status).toBe('ok');
+    const bound = (await tool.execute({ op: 'bind_commit', receipt_id: 'r', sha: 'abc' })) as {
       status: string;
       receipt: unknown;
     };
     expect(bound.status).toBe('ok');
-    expect(bound.receipt).toEqual({ receiptId: 'r', sha: 'abc' });
+    expect(bound.receipt).toEqual({ receipt_id: 'r', sha: 'abc' });
   });
 
   it('bundle returns a path only, never contents', async () => {
     const tool = createSubstrateProvenanceTool(() => fake());
-    const out = (await tool.execute({ op: 'bundle', issueId: 'I' })) as Record<string, unknown>;
+    const out = (await tool.execute({ op: 'bundle', issue_id: 'I' })) as Record<string, unknown>;
     expect(out).toEqual({ status: 'ok', path: '.xtrm/provenance/bundles/b1.json' });
   });
 
   it('null service yields an unavailable payload, never a throw', async () => {
     const tool = createSubstrateProvenanceTool(() => null);
     for (const input of [
-      { op: 'trace', issueId: 'I' },
-      { op: 'bundle', issueId: 'I' },
-      { op: 'bind_commit', receiptId: 'r', sha: 's' },
+      { op: 'trace', issue_id: 'I' },
+      { op: 'bundle', issue_id: 'I' },
+      { op: 'bind_commit', receipt_id: 'r', sha: 's' },
     ] as Parameters<typeof tool.execute>[0][]) {
-      await expect(tool.execute(input)).resolves.toEqual({
-        status: 'error',
-        error: 'substrate provenance unavailable',
-      });
+      const r = (await tool.execute(input)) as { status: string; error: string; reason?: string; help?: string };
+      expect(r.status).toBe('error');
+      expect(r.error).toContain('substrate unavailable');
+      // Shared diagnosis contract (.9): every substrate tool reports why, one dialect.
+      expect(r.reason).toBeDefined();
+      expect(r.help).toBeTruthy();
     }
   });
 
   it('missing required params name the field', async () => {
     const tool = createSubstrateProvenanceTool(() => fake());
-    expect(await tool.execute({ op: 'trace' })).toEqual({ status: 'error', error: 'missing required param: issueId' });
+    expect(await tool.execute({ op: 'trace' })).toEqual({ status: 'error', error: 'missing required param: issue_id' });
     expect(await tool.execute({ op: 'find_by_commit' })).toEqual({ status: 'error', error: 'missing required param: sha' });
     expect(await tool.execute({ op: 'find_by_pr' })).toEqual({ status: 'error', error: 'missing required param: pr' });
-    expect(await tool.execute({ op: 'artifacts' })).toEqual({ status: 'error', error: 'missing required param: receiptId' });
-    expect(await tool.execute({ op: 'bind_commit', receiptId: 'r' })).toEqual({
+    expect(await tool.execute({ op: 'artifacts' })).toEqual({ status: 'error', error: 'missing required param: receipt_id' });
+    expect(await tool.execute({ op: 'bind_commit', receipt_id: 'r' })).toEqual({
       status: 'error',
       error: 'missing required param: sha',
     });
-    expect(await tool.execute({ op: 'bundle' })).toEqual({ status: 'error', error: 'missing required param: issueId' });
+    expect(await tool.execute({ op: 'bundle' })).toEqual({ status: 'error', error: 'missing required param: issue_id' });
   });
 
   it('service throws become payload errors', async () => {
@@ -114,7 +116,7 @@ describe('substrate provenance tool', () => {
         },
       }),
     );
-    expect(await tool.execute({ op: 'trace', issueId: 'NOPE' })).toEqual({
+    expect(await tool.execute({ op: 'trace', issue_id: 'NOPE' })).toEqual({
       status: 'error',
       error: 'unknown issue: NOPE',
     });

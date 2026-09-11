@@ -11,6 +11,7 @@
 // structural interface below mirrors the ProvenanceService methods this tool
 // calls; a plain `import type` becomes possible once .9 lands resolution.
 import * as z from 'zod';
+import { resolveSubstrate, substrateUnavailablePayload } from '../../substrate/services.js';
 
 /** Bound for every collection in every payload (unitAI-aiwva.8 lesson). */
 export const MAX_PROVENANCE_ENTRIES = 50;
@@ -19,11 +20,11 @@ export const substrateProvenanceSchema = z.object({
   op: z
     .enum(['trace', 'bindings', 'receipts', 'find_by_commit', 'find_by_pr', 'artifacts', 'bind_commit', 'bundle'])
     .describe('Which provenance read to run. bind_commit is the only mutating op.'),
-  issueId: z.string().optional().describe('Issue id (trace, bindings, receipts, bundle).'),
-  receiptId: z.string().optional().describe('Receipt id (artifacts, bind_commit).'),
+  issue_id: z.string().optional().describe('Issue id (trace, bindings, receipts, bundle).'),
+  receipt_id: z.string().optional().describe('Receipt id (artifacts, bind_commit).'),
   sha: z.string().optional().describe('Commit SHA (find_by_commit, bind_commit).'),
   pr: z.string().optional().describe('PR ref (find_by_pr).'),
-  liveOnly: z.boolean().optional().describe('Artifacts op: live bindings only (default true).'),
+  live_only: z.boolean().optional().describe('Artifacts op: live bindings only (default true).'),
 });
 
 export type SubstrateProvenanceInput = z.infer<typeof substrateProvenanceSchema>;
@@ -33,7 +34,7 @@ export type SubstrateProvenanceInput = z.infer<typeof substrateProvenanceSchema>
  * `unknown` payloads keep this file decoupled from Substrate domain types.
  */
 export interface ProvenanceServiceLike {
-  trace(issueId: string): {
+  trace(issue_id: string): {
     bindings: unknown[];
     receipts: unknown[];
     checkpoints: unknown[];
@@ -43,13 +44,13 @@ export interface ProvenanceServiceLike {
     externalBindings: unknown[];
     [key: string]: unknown;
   };
-  listBindings(issueId: string): unknown[];
-  listReceipts(issueId: string): unknown[];
+  listBindings(issue_id: string): unknown[];
+  listReceipts(issue_id: string): unknown[];
   findByCommit(sha: string): unknown[];
   findByPr(ref: string): unknown[];
-  listArtifacts(receiptId: string, opts?: { liveOnly?: boolean }): unknown[];
-  bindCommit(receiptId: string, sha: string): unknown;
-  generateBundle(issueId: string): { path: string };
+  listArtifacts(receipt_id: string, opts?: { liveOnly?: boolean }): unknown[];
+  bindCommit(receipt_id: string, sha: string): unknown;
+  generateBundle(issue_id: string): { path: string };
 }
 
 function cap<T>(items: T[]): { items: T[]; total: number; truncated: boolean } {
@@ -60,7 +61,6 @@ function missing(field: string): { status: 'error'; error: string } {
   return { status: 'error', error: `missing required param: ${field}` };
 }
 
-const UNAVAILABLE = { status: 'error', error: 'substrate provenance unavailable' } as const;
 
 export function createSubstrateProvenanceTool(getProvenance: () => ProvenanceServiceLike | null) {
   return {
@@ -73,12 +73,12 @@ export function createSubstrateProvenanceTool(getProvenance: () => ProvenanceSer
     inputSchema: substrateProvenanceSchema,
     async execute(input: SubstrateProvenanceInput) {
       const svc = getProvenance();
-      if (!svc) return { ...UNAVAILABLE };
+      if (!svc) return { ...substrateUnavailablePayload('substrate_provenance', resolveSubstrate()) };
       try {
         switch (input.op) {
           case 'trace': {
-            if (!input.issueId) return missing('issueId');
-            const t = svc.trace(input.issueId);
+            if (!input.issue_id) return missing('issue_id');
+            const t = svc.trace(input.issue_id);
             const bindings = cap(t.bindings);
             const receipts = cap(t.receipts);
             const commits = cap(t.commits);
@@ -100,13 +100,13 @@ export function createSubstrateProvenanceTool(getProvenance: () => ProvenanceSer
             };
           }
           case 'bindings': {
-            if (!input.issueId) return missing('issueId');
-            const { items, total, truncated } = cap(svc.listBindings(input.issueId));
+            if (!input.issue_id) return missing('issue_id');
+            const { items, total, truncated } = cap(svc.listBindings(input.issue_id));
             return { status: 'ok', bindings: items, total, truncated };
           }
           case 'receipts': {
-            if (!input.issueId) return missing('issueId');
-            const { items, total, truncated } = cap(svc.listReceipts(input.issueId));
+            if (!input.issue_id) return missing('issue_id');
+            const { items, total, truncated } = cap(svc.listReceipts(input.issue_id));
             return { status: 'ok', receipts: items, total, truncated };
           }
           case 'find_by_commit': {
@@ -120,19 +120,19 @@ export function createSubstrateProvenanceTool(getProvenance: () => ProvenanceSer
             return { status: 'ok', matches: items, total, truncated };
           }
           case 'artifacts': {
-            if (!input.receiptId) return missing('receiptId');
-            const { items, total, truncated } = cap(svc.listArtifacts(input.receiptId, { liveOnly: input.liveOnly ?? true }));
+            if (!input.receipt_id) return missing('receipt_id');
+            const { items, total, truncated } = cap(svc.listArtifacts(input.receipt_id, { liveOnly: input.live_only ?? true }));
             return { status: 'ok', artifacts: items, total, truncated };
           }
           case 'bind_commit': {
-            if (!input.receiptId) return missing('receiptId');
+            if (!input.receipt_id) return missing('receipt_id');
             if (!input.sha) return missing('sha');
-            return { status: 'ok', receipt: svc.bindCommit(input.receiptId, input.sha) };
+            return { status: 'ok', receipt: svc.bindCommit(input.receipt_id, input.sha) };
           }
           case 'bundle': {
-            if (!input.issueId) return missing('issueId');
+            if (!input.issue_id) return missing('issue_id');
             // PATH only — never inline bundle contents (unitAI-aiwva.8 lesson).
-            return { status: 'ok', path: svc.generateBundle(input.issueId).path };
+            return { status: 'ok', path: svc.generateBundle(input.issue_id).path };
           }
         }
       } catch (error) {

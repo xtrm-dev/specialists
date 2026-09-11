@@ -51,6 +51,8 @@ import {
 } from '../tools/specialist/activation.tool.js';
 import { createSpecialistResumeTool, specialistResumeSchema } from './resume-tool.js';
 import { createSubstrateIssueTool, substrateIssueSchema } from '../tools/substrate/issue.tool.js';
+import { createSubstrateJournalTool, substrateJournalSchema } from '../tools/substrate/journal.tool.js';
+import { createSubstrateProvenanceTool, substrateProvenanceSchema } from '../tools/substrate/provenance.tool.js';
 import { resolveSubstrate } from '../substrate/services.js';
 import { NativeActivationHost } from '../activation/native-host.js';
 import { createFileAuthorityWriter } from '../activation/authority-store.js';
@@ -148,7 +150,11 @@ export function buildV2Server(ctx?: McpRequestContext): McpServer {
   const substrate = resolveSubstrate();
   const substrateTools: AnyTool[] =
     substrate.available || process.env.XTRM_SUBSTRATE_TOOLS === '1'
-      ? [createSubstrateIssueTool()]
+      ? [
+          createSubstrateIssueTool(),
+          createSubstrateJournalTool(() => (substrate.services?.journal ?? null) as never),
+          createSubstrateProvenanceTool(() => (substrate.services?.provenance ?? null) as never),
+        ]
       : [];
 
   const tools: AnyTool[] = [
@@ -164,6 +170,8 @@ export function buildV2Server(ctx?: McpRequestContext): McpServer {
 
   const schemaMap: Record<string, z.ZodTypeAny> = {
     substrate_issue: substrateIssueSchema,
+    substrate_journal: substrateJournalSchema,
+    substrate_provenance: substrateProvenanceSchema,
     use_specialist: useSpecialistSchema,
     specialist_dispatch: specialistDispatchSchema,
     specialist_reply: specialistReplySchema,

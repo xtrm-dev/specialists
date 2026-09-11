@@ -1,54 +1,54 @@
 import * as z from 'zod';
 export declare const substrateJournalSchema: z.ZodObject<{
     op: z.ZodEnum<["append", "get", "list", "since", "latest_checkpoint", "checkpoint"]>;
-    issueId: z.ZodOptional<z.ZodString>;
-    entryId: z.ZodOptional<z.ZodString>;
+    issue_id: z.ZodOptional<z.ZodString>;
+    entry_id: z.ZodOptional<z.ZodString>;
     kind: z.ZodOptional<z.ZodEnum<["checkpoint", "handoff", "milestone", "decision", "finding", "blocker", "compaction", "note"]>>;
     cursor: z.ZodOptional<z.ZodNumber>;
     limit: z.ZodOptional<z.ZodNumber>;
     summary: z.ZodOptional<z.ZodString>;
-    runId: z.ZodOptional<z.ZodString>;
-    participantId: z.ZodOptional<z.ZodString>;
-    sessionId: z.ZodOptional<z.ZodString>;
+    run_id: z.ZodOptional<z.ZodString>;
+    participant_id: z.ZodOptional<z.ZodString>;
+    session_id: z.ZodOptional<z.ZodString>;
 }, "strip", z.ZodTypeAny, {
     op: "append" | "list" | "checkpoint" | "get" | "since" | "latest_checkpoint";
     summary?: string | undefined;
+    participant_id?: string | undefined;
+    issue_id?: string | undefined;
+    session_id?: string | undefined;
     kind?: "compaction" | "decision" | "checkpoint" | "blocker" | "finding" | "note" | "handoff" | "milestone" | undefined;
     limit?: number | undefined;
-    participantId?: string | undefined;
+    entry_id?: string | undefined;
     cursor?: number | undefined;
-    sessionId?: string | undefined;
-    issueId?: string | undefined;
-    entryId?: string | undefined;
-    runId?: string | undefined;
+    run_id?: string | undefined;
 }, {
     op: "append" | "list" | "checkpoint" | "get" | "since" | "latest_checkpoint";
     summary?: string | undefined;
+    participant_id?: string | undefined;
+    issue_id?: string | undefined;
+    session_id?: string | undefined;
     kind?: "compaction" | "decision" | "checkpoint" | "blocker" | "finding" | "note" | "handoff" | "milestone" | undefined;
     limit?: number | undefined;
-    participantId?: string | undefined;
+    entry_id?: string | undefined;
     cursor?: number | undefined;
-    sessionId?: string | undefined;
-    issueId?: string | undefined;
-    entryId?: string | undefined;
-    runId?: string | undefined;
+    run_id?: string | undefined;
 }>;
 type JournalInput = z.infer<typeof substrateJournalSchema>;
 export interface JournalServiceLike {
-    appendEntry(issueId: string, input: Record<string, unknown>): unknown;
+    appendEntry(issue_id: string, input: Record<string, unknown>): unknown;
     getEntry(id: string): unknown;
-    listEntries(issueId: string, opts?: {
+    listEntries(issue_id: string, opts?: {
         kind?: string;
         limit?: number;
     }): unknown[];
-    since(issueId: string, cursor: number): {
-        issueId: string;
+    since(issue_id: string, cursor: number): {
+        issue_id: string;
         afterSequence: number;
         entries: unknown[];
         nextCursor: number;
     };
-    latestCheckpoint(issueId: string): unknown;
-    collectMechanical(issueId: string, input?: Record<string, unknown>): Record<string, unknown>;
+    latestCheckpoint(issue_id: string): unknown;
+    collectMechanical(issue_id: string, input?: Record<string, unknown>): Record<string, unknown>;
 }
 export type GetJournal = () => JournalServiceLike | null;
 export declare function createSubstrateJournalTool(getJournal: GetJournal): {
@@ -56,37 +56,37 @@ export declare function createSubstrateJournalTool(getJournal: GetJournal): {
     description: string;
     inputSchema: z.ZodObject<{
         op: z.ZodEnum<["append", "get", "list", "since", "latest_checkpoint", "checkpoint"]>;
-        issueId: z.ZodOptional<z.ZodString>;
-        entryId: z.ZodOptional<z.ZodString>;
+        issue_id: z.ZodOptional<z.ZodString>;
+        entry_id: z.ZodOptional<z.ZodString>;
         kind: z.ZodOptional<z.ZodEnum<["checkpoint", "handoff", "milestone", "decision", "finding", "blocker", "compaction", "note"]>>;
         cursor: z.ZodOptional<z.ZodNumber>;
         limit: z.ZodOptional<z.ZodNumber>;
         summary: z.ZodOptional<z.ZodString>;
-        runId: z.ZodOptional<z.ZodString>;
-        participantId: z.ZodOptional<z.ZodString>;
-        sessionId: z.ZodOptional<z.ZodString>;
+        run_id: z.ZodOptional<z.ZodString>;
+        participant_id: z.ZodOptional<z.ZodString>;
+        session_id: z.ZodOptional<z.ZodString>;
     }, "strip", z.ZodTypeAny, {
         op: "append" | "list" | "checkpoint" | "get" | "since" | "latest_checkpoint";
         summary?: string | undefined;
+        participant_id?: string | undefined;
+        issue_id?: string | undefined;
+        session_id?: string | undefined;
         kind?: "compaction" | "decision" | "checkpoint" | "blocker" | "finding" | "note" | "handoff" | "milestone" | undefined;
         limit?: number | undefined;
-        participantId?: string | undefined;
+        entry_id?: string | undefined;
         cursor?: number | undefined;
-        sessionId?: string | undefined;
-        issueId?: string | undefined;
-        entryId?: string | undefined;
-        runId?: string | undefined;
+        run_id?: string | undefined;
     }, {
         op: "append" | "list" | "checkpoint" | "get" | "since" | "latest_checkpoint";
         summary?: string | undefined;
+        participant_id?: string | undefined;
+        issue_id?: string | undefined;
+        session_id?: string | undefined;
         kind?: "compaction" | "decision" | "checkpoint" | "blocker" | "finding" | "note" | "handoff" | "milestone" | undefined;
         limit?: number | undefined;
-        participantId?: string | undefined;
+        entry_id?: string | undefined;
         cursor?: number | undefined;
-        sessionId?: string | undefined;
-        issueId?: string | undefined;
-        entryId?: string | undefined;
-        runId?: string | undefined;
+        run_id?: string | undefined;
     }>;
     execute(input: JournalInput): Promise<{
         readonly status: "error";
@@ -97,7 +97,7 @@ export declare function createSubstrateJournalTool(getJournal: GetJournal): {
         entries?: undefined;
         count?: undefined;
         capped?: undefined;
-        issueId?: undefined;
+        issue_id?: undefined;
         afterSequence?: undefined;
         nextCursor?: undefined;
         degraded?: undefined;
@@ -108,14 +108,14 @@ export declare function createSubstrateJournalTool(getJournal: GetJournal): {
         count: number;
         capped: boolean;
         entry?: undefined;
-        issueId?: undefined;
+        issue_id?: undefined;
         afterSequence?: undefined;
         nextCursor?: undefined;
         degraded?: undefined;
         error?: undefined;
     } | {
         status: string;
-        issueId: string;
+        issue_id: string;
         afterSequence: number;
         entries: unknown[];
         nextCursor: number;
@@ -131,7 +131,7 @@ export declare function createSubstrateJournalTool(getJournal: GetJournal): {
         entries?: undefined;
         count?: undefined;
         capped?: undefined;
-        issueId?: undefined;
+        issue_id?: undefined;
         afterSequence?: undefined;
         nextCursor?: undefined;
         error?: undefined;
@@ -142,7 +142,7 @@ export declare function createSubstrateJournalTool(getJournal: GetJournal): {
         entries?: undefined;
         count?: undefined;
         capped?: undefined;
-        issueId?: undefined;
+        issue_id?: undefined;
         afterSequence?: undefined;
         nextCursor?: undefined;
         degraded?: undefined;

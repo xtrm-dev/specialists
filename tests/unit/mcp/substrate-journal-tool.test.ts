@@ -8,13 +8,13 @@ import { createSubstrateJournalTool, type JournalServiceLike } from '../../../sr
 function fakeEntry(seq: number, summary = `summary ${seq}`) {
   return {
     id: `jrn_${seq}`,
-    issueId: 'iss-1',
+    issue_id: 'iss-1',
     issueRevision: 1,
     sequence: seq,
-    runId: null,
-    participantId: null,
+    run_id: null,
+    participant_id: null,
     activationId: null,
-    sessionId: null,
+    session_id: null,
     kind: 'note',
     mechanical: null,
     semantic: { summary },
@@ -27,10 +27,10 @@ function fakeJournal(): JournalServiceLike & { entries: ReturnType<typeof fakeEn
   const entries = [fakeEntry(1), fakeEntry(2), fakeEntry(3, 'checkpoint here')];
   return {
     entries,
-    appendEntry(issueId: string, input: Record<string, unknown>) {
+    appendEntry(issue_id: string, input: Record<string, unknown>) {
       const entry = {
         ...fakeEntry(entries.length + 1),
-        issueId,
+        issue_id,
         kind: (input.kind as string) ?? 'note',
         semantic: input.semantic ?? null,
         mechanical: (input.mechanical as null) ?? null,
@@ -47,15 +47,15 @@ function fakeJournal(): JournalServiceLike & { entries: ReturnType<typeof fakeEn
       const rows = opts?.kind ? entries.filter((e) => e.kind === opts.kind) : [...entries];
       return opts?.limit !== undefined ? rows.slice(0, opts.limit) : rows;
     },
-    since(issueId: string, cursor: number) {
+    since(issue_id: string, cursor: number) {
       const rows = entries.filter((e) => e.sequence > cursor);
-      return { issueId, afterSequence: cursor, entries: rows, nextCursor: rows.at(-1)?.sequence ?? cursor };
+      return { issue_id, afterSequence: cursor, entries: rows, nextCursor: rows.at(-1)?.sequence ?? cursor };
     },
     latestCheckpoint(_issueId: string) {
       return null;
     },
-    collectMechanical(issueId: string) {
-      return { issueId, issueRevision: 1, contractHash: 'h', collectedAt: Date.now() };
+    collectMechanical(issue_id: string) {
+      return { issue_id, issueRevision: 1, contractHash: 'h', collectedAt: Date.now() };
     },
   };
 }
@@ -63,7 +63,7 @@ function fakeJournal(): JournalServiceLike & { entries: ReturnType<typeof fakeEn
 describe('substrate journal tool', () => {
   it('get returns a bounded entry', async () => {
     const tool = createSubstrateJournalTool(() => fakeJournal());
-    const result = (await tool.execute({ op: 'get', entryId: 'jrn_1' })) as { status: string; entry: { id: string } };
+    const result = (await tool.execute({ op: 'get', entry_id: 'jrn_1' })) as { status: string; entry: { id: string } };
     expect(result.status).toBe('ok');
     expect(result.entry.id).toBe('jrn_1');
   });
@@ -72,7 +72,7 @@ describe('substrate journal tool', () => {
     const journal = fakeJournal();
     for (let i = 0; i < 60; i++) journal.entries.push(fakeEntry(100 + i));
     const tool = createSubstrateJournalTool(() => journal);
-    const result = (await tool.execute({ op: 'list', issueId: 'iss-1', limit: 500 })) as {
+    const result = (await tool.execute({ op: 'list', issue_id: 'iss-1', limit: 500 })) as {
       status: string;
       entries: unknown[];
       count: number;
@@ -85,7 +85,7 @@ describe('substrate journal tool', () => {
 
   it('since returns the pagination delta with next cursor', async () => {
     const tool = createSubstrateJournalTool(() => fakeJournal());
-    const result = (await tool.execute({ op: 'since', issueId: 'iss-1', cursor: 1 })) as {
+    const result = (await tool.execute({ op: 'since', issue_id: 'iss-1', cursor: 1 })) as {
       status: string;
       entries: { sequence: number }[];
       nextCursor: number;
@@ -97,7 +97,7 @@ describe('substrate journal tool', () => {
 
   it('latest_checkpoint returns null when no checkpoint exists', async () => {
     const tool = createSubstrateJournalTool(() => fakeJournal());
-    const result = (await tool.execute({ op: 'latest_checkpoint', issueId: 'iss-1' })) as {
+    const result = (await tool.execute({ op: 'latest_checkpoint', issue_id: 'iss-1' })) as {
       status: string;
       entry: unknown;
     };
@@ -108,13 +108,13 @@ describe('substrate journal tool', () => {
   it('append stores the summary and checkpoint writes a mechanical entry', async () => {
     const journal = fakeJournal();
     const tool = createSubstrateJournalTool(() => journal);
-    const appended = (await tool.execute({ op: 'append', issueId: 'iss-1', kind: 'finding', summary: 'found it' })) as {
+    const appended = (await tool.execute({ op: 'append', issue_id: 'iss-1', kind: 'finding', summary: 'found it' })) as {
       status: string;
       entry: { kind: string; semantic: { summary: string } };
     };
     expect(appended.status).toBe('ok');
     expect(appended.entry.semantic.summary).toBe('found it');
-    const checkpointed = (await tool.execute({ op: 'checkpoint', issueId: 'iss-1' })) as {
+    const checkpointed = (await tool.execute({ op: 'checkpoint', issue_id: 'iss-1' })) as {
       status: string;
       entry: { kind: string };
       degraded: boolean;
@@ -128,7 +128,7 @@ describe('substrate journal tool', () => {
     const journal = fakeJournal();
     journal.entries.push(fakeEntry(9, 'x'.repeat(5000)));
     const tool = createSubstrateJournalTool(() => journal);
-    const result = (await tool.execute({ op: 'get', entryId: 'jrn_9' })) as {
+    const result = (await tool.execute({ op: 'get', entry_id: 'jrn_9' })) as {
       status: string;
       entry: { semantic: { summary: string; truncated: boolean; bytes: number } };
     };
@@ -140,23 +140,25 @@ describe('substrate journal tool', () => {
   it('null service yields a payload error, never a throw', async () => {
     const tool = createSubstrateJournalTool(() => null);
     for (const op of ['get', 'list', 'since', 'latest_checkpoint', 'append', 'checkpoint'] as const) {
-      const result = (await tool.execute({ op, issueId: 'iss-1', entryId: 'jrn_1', cursor: 0 })) as {
+      const result = (await tool.execute({ op, issue_id: 'iss-1', entry_id: 'jrn_1', cursor: 0 })) as {
         status: string;
         error: string;
       };
       expect(result.status).toBe('error');
-      expect(result.error).toBe('substrate journal unavailable');
+      expect(result.error).toContain('substrate unavailable');
+      // Shared diagnosis contract (.9): every substrate tool reports why, one dialect.
+      expect((result as unknown as { reason?: string }).reason).toBeDefined();
     }
   });
 
   it('per-op validation names the missing field', async () => {
     const tool = createSubstrateJournalTool(() => fakeJournal());
     const cases = [
-      [{ op: 'get' }, 'entryId'],
-      [{ op: 'list' }, 'issueId'],
-      [{ op: 'since', issueId: 'iss-1' }, 'cursor'],
-      [{ op: 'append', issueId: 'iss-1' }, 'kind'],
-      [{ op: 'checkpoint' }, 'issueId'],
+      [{ op: 'get' }, 'entry_id'],
+      [{ op: 'list' }, 'issue_id'],
+      [{ op: 'since', issue_id: 'iss-1' }, 'cursor'],
+      [{ op: 'append', issue_id: 'iss-1' }, 'kind'],
+      [{ op: 'checkpoint' }, 'issue_id'],
     ] as const;
     for (const [args, field] of cases) {
       const result = (await tool.execute(args as never)) as { status: string; error: string };
@@ -167,7 +169,7 @@ describe('substrate journal tool', () => {
 
   it('service throws surface as payload errors', async () => {
     const tool = createSubstrateJournalTool(() => fakeJournal());
-    const result = (await tool.execute({ op: 'get', entryId: 'nope' })) as { status: string; error: string };
+    const result = (await tool.execute({ op: 'get', entry_id: 'nope' })) as { status: string; error: string };
     expect(result.status).toBe('error');
     expect(result.error).toContain('unknown entry');
   });
