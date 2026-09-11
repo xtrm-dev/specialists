@@ -182,7 +182,7 @@ or enables it for you.
 
 ```bash
 claude plugin marketplace add xtrm-dev/specialists
-claude plugin install substrate@specialists
+claude plugin install substrate@xtrm
 ```
 
 Verify the server is reachable from Claude Code:
