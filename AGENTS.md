@@ -11,7 +11,7 @@ Clearly distinguish verified facts, observations, assumptions, inferences, recom
 
 Up to two task systems coexist in this repo. Where the runtime exposes both, use both; do not substitute one for the other. On a runtime with no task tools, beads alone is correct and complete — do not invent or call a native task API the runtime does not expose.
 
-- **Beads (`bd`)** — top-level durable tracking, on every runtime. Authoritative for ownership, dependencies, cross-session memory, and closure. Read the rest of this file and run `bd prime` for beads context before starting work. File, claim, and close work here.
+- **Beads (`bd`)** — top-level durable tracking, on every runtime. Authoritative for ownership, dependencies, cross-session memory, and closure. Read the rest of this file and use targeted lookup (`bd ready`, `bd search "<terms>"`, `bd show <id>`) before starting work; `bd prime` is an opt-in diagnostic, not a session-start step. File, claim, and close work here.
 - **The runtime's own task system, when the runtime has one** — this-session execution tracking. Use it to mirror the active bead and break it into smaller intermediate steps. Ephemeral; does not replace beads. Names differ per runtime; read the runtime's own tool list rather than assuming a name.
 
 Rule: on a runtime that exposes task tools, when you pick up a bead, create native tasks that track it — reference the bead ID in each task title (e.g. `N.N summary — status (worker %NNNN)`) — and add any smaller intermediate steps as native sub-tasks. Beads own the durable record; native tasks own the in-flight breakdown.
@@ -28,11 +28,11 @@ Example native task list mirroring beads:
 # XTRM Agent Workflow
 
 > Full reference: [XTRM-GUIDE.md](XTRM-GUIDE.md)
-> Run `bd prime` at session start (or after context reset) for live beads workflow context.
+> Retrieve memory on demand (commit corpus first, targeted `bd memories` leads); `bd prime` is an opt-in diagnostic, never a session-start step. Full doctrine: `.xtrm/config/instructions/memory-doctrine.md`.
 
 ## Session Start
 
-1. `bd prime` — load workflow context and active claims
+1. Targeted lookup (`bd ready`, `bd search`, `bd show`) — `bd prime` only as opt-in diagnostic
 2. `bv --robot-triage` — graph-aware triage: ranked picks, unblock targets, project health
 3. `bd update <id> --claim` — claim before any file edit
 
