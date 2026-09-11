@@ -43,7 +43,7 @@ import { resolveRuntimeToolContract } from '../pi/session.js';
 import { resolveModelChain } from '../specialist/model-chain.js';
 import { extractPurposeExcerpt } from './bead-gate.js';
 import {
-  openWorkItems,
+  openWorkItemBoundary,
   resolveWorkItemDbPath,
   type EpicAncestor,
   type SpecialistWorkItemBoundary,
@@ -356,7 +356,7 @@ export class NativeActivationHost {
     // substrate dispatch service and this host only renders its refusals.
     let workItems: SpecialistWorkItemBoundary;
     try {
-      workItems = this.resolveWorkItems();
+      workItems = await this.resolveWorkItems();
     } catch (error) {
       return reject('work_item_store_unavailable', {
         note: error instanceof Error ? error.message : String(error),
@@ -562,7 +562,7 @@ export class NativeActivationHost {
       beadContextText: rendered.beadContextText ?? '',
       readBeadForMemory: (id) => {
         try {
-          const v = this.resolveWorkItems().view(id);
+          const v = workItems.view(id);
           return { title: v.title, description: contractToMarkdown(v.contract) };
         } catch {
           return null;
@@ -751,7 +751,7 @@ export class NativeActivationHost {
    * migrations, which are append-only and idempotent, so the first dispatch on
    * a machine whose store exists but predates a migration heals it.
    */
-  private resolveWorkItems(): SpecialistWorkItemBoundary {
+  private async resolveWorkItems(): Promise<SpecialistWorkItemBoundary> {
     if (this.workItemsInjected) return this.workItemsInjected;
     if (this.workItemsDefault) return this.workItemsDefault;
     const dbPath = resolveWorkItemDbPath();
@@ -760,7 +760,9 @@ export class NativeActivationHost {
         `no Substrate work store at ${dbPath} (set XTRM_STATE_DB or initialize it via xt init / sb)`,
       );
     }
-    this.workItemsDefault = openWorkItems(dbPath);
+    // Runtime dynamic import from XTRM_SUBSTRATE_DIR; absent package refuses
+    // fail-closed with work_item_store_unavailable — never a second authority.
+    this.workItemsDefault = await openWorkItemBoundary({ dbPath });
     return this.workItemsDefault;
   }
 

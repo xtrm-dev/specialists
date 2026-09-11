@@ -77175,2773 +77175,16 @@ var init_specialist_status_tool = __esm(() => {
   BACKENDS2 = ["gemini", "qwen", "anthropic", "openai"];
 });
 
-// ../../../../xtrm/packages/substrate/src/store/migrations/001_baseline.ts
-var version2 = 1, name = "baseline-domain-kernel", sql = `
-CREATE TABLE projects (
-  id TEXT PRIMARY KEY,
-  prefix TEXT NOT NULL UNIQUE,
-  name TEXT NOT NULL,
-  created_at INTEGER NOT NULL
-);
-
-CREATE TABLE issues (
-  id TEXT PRIMARY KEY,
-  project_id TEXT NOT NULL REFERENCES projects(id),
-  human_number INTEGER NOT NULL,
-  kind TEXT NOT NULL,
-  title TEXT NOT NULL,
-  lifecycle_state TEXT NOT NULL DEFAULT 'open',
-  priority INTEGER NOT NULL DEFAULT 0,
-  scrutiny TEXT NOT NULL DEFAULT '',
-  current_revision INTEGER NOT NULL DEFAULT 1,
-  current_contract_hash TEXT NOT NULL,
-  defer_until INTEGER NULL,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  UNIQUE (project_id, human_number)
-);
-
-CREATE TABLE issue_revisions (
-  issue_id TEXT NOT NULL REFERENCES issues(id),
-  revision INTEGER NOT NULL,
-  contract_hash TEXT NOT NULL,
-  contract_json TEXT NOT NULL,
-  context_refs_json TEXT NOT NULL DEFAULT '[]',
-  ownership_json TEXT NULL,
-  authored_by TEXT NOT NULL,
-  source_json TEXT NULL,
-  created_at INTEGER NOT NULL,
-  PRIMARY KEY (issue_id, revision)
-);
-
-CREATE TABLE issue_aliases (
-  alias TEXT PRIMARY KEY,
-  issue_id TEXT NOT NULL REFERENCES issues(id),
-  kind TEXT NOT NULL,
-  created_at INTEGER NOT NULL
-);
-
-CREATE TABLE issue_locator_history (
-  project_id TEXT NOT NULL,
-  locator TEXT NOT NULL,
-  issue_id TEXT NOT NULL REFERENCES issues(id),
-  created_at INTEGER NOT NULL,
-  PRIMARY KEY (project_id, locator)
-);
-
-CREATE TABLE issue_edges (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  from_issue TEXT NOT NULL REFERENCES issues(id),
-  to_issue TEXT NOT NULL REFERENCES issues(id),
-  kind TEXT NOT NULL,
-  child_slot INTEGER NULL,
-  active INTEGER NOT NULL DEFAULT 1,
-  created_at INTEGER NOT NULL
-);
-CREATE UNIQUE INDEX ux_active_parent ON issue_edges (to_issue)
-  WHERE kind = 'parent_child' AND active = 1;
-CREATE UNIQUE INDEX ux_parent_slot ON issue_edges (from_issue, child_slot)
-  WHERE kind = 'parent_child';
-
-CREATE TABLE issue_events (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  issue_id TEXT NOT NULL REFERENCES issues(id),
-  type TEXT NOT NULL,
-  payload_json TEXT NOT NULL DEFAULT '{}',
-  created_at INTEGER NOT NULL
-);
-CREATE INDEX ix_events_issue ON issue_events (issue_id, id);
-
--- Key namespaces (bead constraint): human-reference counters, child_slot
--- allocation, and idempotency keys live in distinct namespaces that never
--- collide; keys are never reused across domains.
-CREATE TABLE seq_counters (
-  namespace TEXT NOT NULL,
-  name TEXT NOT NULL,
-  next_val INTEGER NOT NULL,
-  PRIMARY KEY (namespace, name)
-);
-
-CREATE TABLE idempotency_keys (
-  namespace TEXT NOT NULL,
-  key TEXT NOT NULL,
-  result_json TEXT NOT NULL,
-  created_at INTEGER NOT NULL,
-  PRIMARY KEY (namespace, key)
-);
-`;
-
-// ../../../../xtrm/packages/substrate/src/store/migrations/002_projections_sync.ts
-var version3 = 2, name2 = "projections-sync", sql2 = `
-CREATE TABLE external_bindings (
-  issue_id TEXT NOT NULL REFERENCES issues(id),
-  provider TEXT NOT NULL,
-  remote_scope TEXT NOT NULL,
-  remote_id TEXT NOT NULL,
-  remote_key TEXT NULL,
-  url TEXT NULL,
-  mode TEXT NOT NULL,
-  last_pushed_revision INTEGER NULL,
-  last_seen_remote_version TEXT NULL,
-  mapped_content_hash TEXT NULL,
-  sync_state TEXT NOT NULL DEFAULT 'in_sync',
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  PRIMARY KEY (issue_id, provider, remote_scope, remote_id)
-);
-
-CREATE TABLE integration_inbox (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  provider TEXT NOT NULL,
-  event_kind TEXT NOT NULL,
-  idempotency_key TEXT NOT NULL,
-  payload_json TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'received',
-  seen_count INTEGER NOT NULL DEFAULT 1,
-  created_at INTEGER NOT NULL,
-  processed_at INTEGER NULL,
-  UNIQUE (provider, idempotency_key)
-);
-
-CREATE TABLE projection_outbox (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  issue_id TEXT NOT NULL REFERENCES issues(id),
-  provider TEXT NOT NULL,
-  remote_scope TEXT NOT NULL,
-  operation TEXT NOT NULL,
-  payload_json TEXT NOT NULL,
-  mapped_content_hash TEXT NOT NULL,
-  idempotency_key TEXT NOT NULL UNIQUE,
-  status TEXT NOT NULL DEFAULT 'pending',
-  attempts INTEGER NOT NULL DEFAULT 0,
-  next_retry_at INTEGER NOT NULL DEFAULT 0,
-  last_error TEXT NULL,
-  created_at INTEGER NOT NULL
-);
-CREATE INDEX ix_outbox_drain ON projection_outbox (status, next_retry_at);
-`;
-
-// ../../../../xtrm/packages/substrate/src/store/migrations/003_readiness.ts
-var version4 = 3, name3 = "readiness-attestations", sql3 = `
-CREATE TABLE readiness_attestations (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  issue_id TEXT NOT NULL REFERENCES issues(id),
-  issue_revision INTEGER NOT NULL,
-  contract_hash TEXT NOT NULL,
-  outcome TEXT NOT NULL,
-  policy TEXT NOT NULL,
-  attested_by TEXT NOT NULL,
-  evidence_refs_json TEXT NOT NULL DEFAULT '[]',
-  blocking_gaps_json TEXT NOT NULL DEFAULT '[]',
-  created_at INTEGER NOT NULL
-);
-CREATE INDEX ix_attest_issue ON readiness_attestations (issue_id, id);
-`;
-
-// ../../../../xtrm/packages/substrate/src/store/migrations/004_claims_leases.ts
-var version5 = 4, name4 = "claims-workspace-leases", sql4 = `
-CREATE TABLE issue_claims (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  issue_id TEXT NOT NULL REFERENCES issues(id),
-  issue_revision INTEGER NOT NULL,
-  contract_hash TEXT NOT NULL,
-  holder TEXT NOT NULL,
-  activation_id TEXT NULL,
-  acquired_at INTEGER NOT NULL,
-  expires_at INTEGER NOT NULL,
-  released_at INTEGER NULL,
-  generation INTEGER NOT NULL,
-  UNIQUE (issue_id, generation)
-);
-CREATE UNIQUE INDEX ux_open_claim ON issue_claims (issue_id) WHERE released_at IS NULL;
-CREATE INDEX ix_claims_issue ON issue_claims (issue_id, id);
-
-CREATE TABLE workspace_leases (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  workspace TEXT NOT NULL,
-  repository_root TEXT NULL,
-  branch TEXT NULL,
-  holder TEXT NOT NULL,
-  activation_id TEXT NULL,
-  acquired_at INTEGER NOT NULL,
-  expires_at INTEGER NOT NULL,
-  released_at INTEGER NULL,
-  generation INTEGER NOT NULL,
-  UNIQUE (workspace, generation)
-);
-CREATE UNIQUE INDEX ux_open_writer_lease ON workspace_leases (workspace) WHERE released_at IS NULL;
-CREATE INDEX ix_leases_workspace ON workspace_leases (workspace, id);
-`;
-
-// ../../../../xtrm/packages/substrate/src/store/migrations/005_journal.ts
-var version6 = 5, name5 = "issue-journal", sql5 = `
-CREATE TABLE issue_journal (
-  id TEXT PRIMARY KEY,
-  issue_id TEXT NOT NULL REFERENCES issues(id),
-  issue_revision INTEGER NOT NULL,
-  sequence INTEGER NOT NULL,
-  run_id TEXT NULL,
-  participant_id TEXT NULL,
-  activation_id TEXT NULL,
-  session_id TEXT NULL,
-  kind TEXT NOT NULL,
-  mechanical_json TEXT NULL,
-  semantic_json TEXT NULL,
-  refs_json TEXT NOT NULL DEFAULT '[]',
-  created_at INTEGER NOT NULL,
-  UNIQUE (issue_id, sequence)
-);
-CREATE INDEX ix_journal_issue_seq ON issue_journal (issue_id, sequence);
-CREATE INDEX ix_journal_kind ON issue_journal (issue_id, kind, sequence);
-`;
-
-// ../../../../xtrm/packages/substrate/src/store/migrations/006_provenance.ts
-var version7 = 6, name6 = "execution-provenance", sql6 = `
-CREATE TABLE execution_bindings (
-  id TEXT PRIMARY KEY,
-  issue_id TEXT NOT NULL REFERENCES issues(id),
-  issue_revision INTEGER NOT NULL,
-  contract_hash TEXT NOT NULL,
-  resolved_context_hash TEXT NOT NULL,
-  claim_id INTEGER NULL,
-  participant_id TEXT NULL,
-  activation_id TEXT NULL,
-  attempt_id TEXT NULL,
-  session_id TEXT NULL,
-  workspace TEXT NOT NULL,
-  base_commit TEXT NULL,
-  created_at INTEGER NOT NULL
-);
-CREATE INDEX ix_bindings_issue ON execution_bindings (issue_id, created_at);
-
-CREATE TABLE work_receipts (
-  id TEXT PRIMARY KEY,
-  execution_binding_id TEXT NOT NULL REFERENCES execution_bindings(id),
-  issue_id TEXT NOT NULL REFERENCES issues(id),
-  issue_revision INTEGER NOT NULL,
-  contract_hash TEXT NOT NULL,
-  journal_checkpoint_id TEXT NULL,
-  validation_refs_json TEXT NOT NULL DEFAULT '[]',
-  commit_sha TEXT NULL,
-  created_at INTEGER NOT NULL,
-  finalized_at INTEGER NULL
-);
-CREATE INDEX ix_receipts_binding ON work_receipts (execution_binding_id, created_at);
-CREATE INDEX ix_receipts_issue ON work_receipts (issue_id, created_at);
-
-CREATE TABLE artifact_bindings (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  receipt_id TEXT NOT NULL REFERENCES work_receipts(id),
-  kind TEXT NOT NULL,
-  value TEXT NOT NULL,
-  provider TEXT NULL,
-  created_at INTEGER NOT NULL,
-  superseded_at INTEGER NULL,
-  UNIQUE (receipt_id, kind, value)
-);
-CREATE INDEX ix_artifacts_receipt ON artifact_bindings (receipt_id, kind);
-CREATE INDEX ix_artifacts_value ON artifact_bindings (kind, value);
-`;
-
-// ../../../../xtrm/packages/substrate/src/store/migrations/007_checkout_links.ts
-var version8 = 7, name7 = "checkout-links", sql7 = `
-CREATE TABLE checkout_links (
-  git_root TEXT PRIMARY KEY,
-  project_id TEXT NOT NULL REFERENCES projects(id),
-  linked_at INTEGER NOT NULL
-);
-`;
-
-// ../../../../xtrm/packages/substrate/src/store/migrations/runner.ts
-import { createHash as createHash13 } from "crypto";
-function checksum(sql8) {
-  return createHash13("sha256").update(sql8).digest("hex");
-}
-function migrate(db) {
-  db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
-      version INTEGER PRIMARY KEY,
-      name TEXT NOT NULL,
-      checksum TEXT NOT NULL,
-      applied_at INTEGER NOT NULL
-    )`);
-  const applied = new Map;
-  for (const row of db.prepare("SELECT version, name, checksum FROM schema_migrations").all()) {
-    applied.set(row.version, { name: row.name, checksum: row.checksum });
-  }
-  const known = new Map(MIGRATIONS.map((m) => [m.version, m]));
-  for (const v of applied.keys()) {
-    if (!known.has(v))
-      throw new Error(`fail-closed: unknown migration version ${v} in database`);
-  }
-  const done = [];
-  for (const m of MIGRATIONS) {
-    const row = applied.get(m.version);
-    if (row) {
-      if (row.checksum !== checksum(m.sql)) {
-        throw new Error(`fail-closed: landed migration ${m.version} was modified`);
-      }
-      done.push(m.version);
-      continue;
-    }
-    db.exec("BEGIN IMMEDIATE");
-    try {
-      db.exec(m.sql);
-      db.prepare("INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES (?, ?, ?, ?)").run(m.version, m.name, checksum(m.sql), Date.now());
-      db.exec("COMMIT");
-    } catch (err) {
-      try {
-        db.exec("ROLLBACK");
-      } catch {}
-      throw err;
-    }
-    done.push(m.version);
-  }
-  assertSchemaHealthy(db);
-  return done;
-}
-function assertSchemaHealthy(db) {
-  const have = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name));
-  const missing = REQUIRED_TABLES.filter((t) => !have.has(t));
-  if (missing.length > 0)
-    throw new Error(`fail-closed: corrupt schema, missing tables: ${missing.join(", ")}`);
-}
-var MIGRATIONS, REQUIRED_TABLES;
-var init_runner2 = __esm(() => {
-  MIGRATIONS = [
-    { version: version2, name, sql },
-    { version: version3, name: name2, sql: sql2 },
-    { version: version4, name: name3, sql: sql3 },
-    { version: version5, name: name4, sql: sql4 },
-    { version: version6, name: name5, sql: sql5 },
-    { version: version7, name: name6, sql: sql6 },
-    { version: version8, name: name7, sql: sql7 }
-  ];
-  REQUIRED_TABLES = [
-    "projects",
-    "issues",
-    "issue_revisions",
-    "issue_aliases",
-    "issue_locator_history",
-    "issue_edges",
-    "readiness_attestations",
-    "issue_claims",
-    "workspace_leases",
-    "issue_events",
-    "issue_journal",
-    "execution_bindings",
-    "checkout_links",
-    "work_receipts",
-    "artifact_bindings",
-    "seq_counters",
-    "idempotency_keys",
-    "external_bindings",
-    "integration_inbox",
-    "projection_outbox"
-  ];
-});
-
-// ../../../../xtrm/packages/substrate/node_modules/uuid/dist/esm/rng.js
-import { randomFillSync } from "crypto";
-function rng() {
-  if (poolPtr > rnds8Pool.length - 16) {
-    randomFillSync(rnds8Pool);
-    poolPtr = 0;
-  }
-  return rnds8Pool.slice(poolPtr, poolPtr += 16);
-}
-var rnds8Pool, poolPtr;
-var init_rng = __esm(() => {
-  rnds8Pool = new Uint8Array(256);
-  poolPtr = rnds8Pool.length;
-});
-
-// ../../../../xtrm/packages/substrate/node_modules/uuid/dist/esm/stringify.js
-function unsafeStringify(arr, offset = 0) {
-  return (byteToHex[arr[offset + 0]] + byteToHex[arr[offset + 1]] + byteToHex[arr[offset + 2]] + byteToHex[arr[offset + 3]] + "-" + byteToHex[arr[offset + 4]] + byteToHex[arr[offset + 5]] + "-" + byteToHex[arr[offset + 6]] + byteToHex[arr[offset + 7]] + "-" + byteToHex[arr[offset + 8]] + byteToHex[arr[offset + 9]] + "-" + byteToHex[arr[offset + 10]] + byteToHex[arr[offset + 11]] + byteToHex[arr[offset + 12]] + byteToHex[arr[offset + 13]] + byteToHex[arr[offset + 14]] + byteToHex[arr[offset + 15]]).toLowerCase();
-}
-var byteToHex;
-var init_stringify = __esm(() => {
-  byteToHex = [];
-  for (let i = 0;i < 256; ++i) {
-    byteToHex.push((i + 256).toString(16).slice(1));
-  }
-});
-
-// ../../../../xtrm/packages/substrate/node_modules/uuid/dist/esm/v7.js
-function v7(options2, buf, offset) {
-  let bytes;
-  if (options2) {
-    bytes = v7Bytes(options2.random ?? options2.rng?.() ?? rng(), options2.msecs, options2.seq, buf, offset);
-  } else {
-    const now = Date.now();
-    const rnds = rng();
-    updateV7State(_state, now, rnds);
-    bytes = v7Bytes(rnds, _state.msecs, _state.seq, buf, offset);
-  }
-  return buf ?? unsafeStringify(bytes);
-}
-function updateV7State(state, now, rnds) {
-  state.msecs ??= -Infinity;
-  state.seq ??= 0;
-  if (now > state.msecs) {
-    state.seq = rnds[6] << 23 | rnds[7] << 16 | rnds[8] << 8 | rnds[9];
-    state.msecs = now;
-  } else {
-    state.seq = state.seq + 1 | 0;
-    if (state.seq === 0) {
-      state.msecs++;
-    }
-  }
-  return state;
-}
-function v7Bytes(rnds, msecs, seq, buf, offset = 0) {
-  if (rnds.length < 16) {
-    throw new Error("Random bytes length must be >= 16");
-  }
-  if (!buf) {
-    buf = new Uint8Array(16);
-    offset = 0;
-  } else {
-    if (offset < 0 || offset + 16 > buf.length) {
-      throw new RangeError(`UUID byte range ${offset}:${offset + 15} is out of buffer bounds`);
-    }
-  }
-  msecs ??= Date.now();
-  seq ??= rnds[6] * 127 << 24 | rnds[7] << 16 | rnds[8] << 8 | rnds[9];
-  buf[offset++] = msecs / 1099511627776 & 255;
-  buf[offset++] = msecs / 4294967296 & 255;
-  buf[offset++] = msecs / 16777216 & 255;
-  buf[offset++] = msecs / 65536 & 255;
-  buf[offset++] = msecs / 256 & 255;
-  buf[offset++] = msecs & 255;
-  buf[offset++] = 112 | seq >>> 28 & 15;
-  buf[offset++] = seq >>> 20 & 255;
-  buf[offset++] = 128 | seq >>> 14 & 63;
-  buf[offset++] = seq >>> 6 & 255;
-  buf[offset++] = seq << 2 & 255 | rnds[10] & 3;
-  buf[offset++] = rnds[11];
-  buf[offset++] = rnds[12];
-  buf[offset++] = rnds[13];
-  buf[offset++] = rnds[14];
-  buf[offset++] = rnds[15];
-  return buf;
-}
-var _state, v7_default;
-var init_v7 = __esm(() => {
-  init_rng();
-  init_stringify();
-  _state = {};
-  v7_default = v7;
-});
-
-// ../../../../xtrm/packages/substrate/node_modules/uuid/dist/esm/index.js
-var init_esm2 = __esm(() => {
-  init_v7();
-});
-
-// ../../../../xtrm/packages/substrate/src/domain/issue.ts
-function newIssueId() {
-  return `iss_${v7_default()}`;
-}
-function formatHumanRef(prefix, n) {
-  return `${prefix}-${n}`;
-}
-function parseHumanRef(ref) {
-  const m = /^([A-Za-z][A-Za-z0-9]*)-(\d+)$/.exec(ref.trim());
-  if (!m)
-    return null;
-  return { prefix: m[1].toUpperCase(), number: Number(m[2]) };
-}
-var ISSUE_KINDS, LIFECYCLE_STATES;
-var init_issue = __esm(() => {
-  init_esm2();
-  ISSUE_KINDS = ["epic", "task", "bug", "decision", "research", "followup"];
-  LIFECYCLE_STATES = ["open", "deferred", "done", "cancelled", "archived"];
-});
-
-// ../../../../xtrm/packages/substrate/src/domain/contract.ts
-import { createHash as createHash14 } from "crypto";
-function canonicalize(value) {
-  if (Array.isArray(value))
-    return value.map(canonicalize);
-  if (value !== null && typeof value === "object") {
-    const out = {};
-    for (const k of Object.keys(value).sort()) {
-      out[k] = canonicalize(value[k]);
-    }
-    return out;
-  }
-  return value;
-}
-function hashContract(contract) {
-  return createHash14("sha256").update(JSON.stringify(canonicalize(contract))).digest("hex");
-}
-function assertContractShape(contract) {
-  const fail10 = (why) => {
-    throw new Error(`invalid contract: ${why}`);
-  };
-  if (contract === null || typeof contract !== "object" || Array.isArray(contract))
-    fail10("must be an object");
-  const c = contract;
-  if (typeof c["problem"] !== "string" || c["problem"].trim() === "")
-    fail10("problem must be a non-empty string");
-  if (typeof c["success"] !== "string" || c["success"].trim() === "")
-    fail10("success must be a non-empty string");
-  for (const f of ["scope", "nonGoals", "constraints", "validation", "output"]) {
-    if (!Array.isArray(c[f]))
-      fail10(`${f} must be an array`);
-  }
-}
-function isValidScrutiny(value) {
-  return typeof value === "string" && SCRUTINY_LEVELS2.includes(value);
-}
-function validateOwnership(ownership) {
-  const out = [];
-  if (ownership == null)
-    return out;
-  if (typeof ownership !== "object" || Array.isArray(ownership)) {
-    return [{ field: "ownership", code: "ownership-shape", message: "ownership must be an object" }];
-  }
-  for (const f of OWNERSHIP_FIELDS) {
-    const v = ownership[f];
-    if (v === undefined)
-      continue;
-    if (!Array.isArray(v) || v.some((e) => typeof e !== "string" || e.trim() === "")) {
-      out.push({ field: `ownership.${f}`, code: "ownership-shape", message: `ownership.${f} must be an array of non-empty strings` });
-    }
-  }
-  return out;
-}
-function checkPlaceholders(findings, field2, values) {
-  for (const v of values) {
-    if (typeof v === "string" && PLACEHOLDER_RE2.test(v)) {
-      findings.push({ field: field2, code: "placeholder", message: `${field2} contains an unresolved marker` });
-      return;
-    }
-  }
-}
-function nonEmptyStrings(v) {
-  return Array.isArray(v) && v.length > 0 && v.every((e) => typeof e === "string" && e.trim() !== "");
-}
-function validateContractStructure(subject) {
-  const findings = [];
-  const c = subject.contract;
-  if (c === null || typeof c !== "object" || Array.isArray(c)) {
-    return [{ field: "contract", code: "contract-shape", message: "contract must be an object" }];
-  }
-  for (const f of ["problem", "success"]) {
-    if (typeof c[f] !== "string" || c[f].trim() === "") {
-      findings.push({ field: f, code: "required-field", message: `${f} must be a non-empty string` });
-    }
-  }
-  for (const f of ["scope", "nonGoals", "constraints"]) {
-    if (!nonEmptyStrings(c[f])) {
-      findings.push({ field: f, code: "required-field", message: `${f} must be a non-empty array of non-empty strings` });
-    }
-  }
-  const validation = c["validation"];
-  if (!Array.isArray(validation) || validation.length === 0 || validation.some((e) => typeof e !== "object" || e === null || typeof e["check"] !== "string" || e["check"].trim() === "")) {
-    findings.push({ field: "validation", code: "required-field", message: "validation must be a non-empty array of { check: non-empty string }" });
-  }
-  const output2 = c["output"];
-  if (!Array.isArray(output2) || output2.length === 0 || output2.some((e) => typeof e !== "object" || e === null || typeof e["artifact"] !== "string" || e["artifact"].trim() === "")) {
-    findings.push({ field: "output", code: "required-field", message: "output must be a non-empty array of { artifact: non-empty string }" });
-  }
-  checkPlaceholders(findings, "problem", [c["problem"]]);
-  checkPlaceholders(findings, "success", [c["success"]]);
-  for (const f of ["scope", "nonGoals", "constraints"]) {
-    if (Array.isArray(c[f]))
-      checkPlaceholders(findings, f, c[f]);
-  }
-  if (Array.isArray(validation)) {
-    checkPlaceholders(findings, "validation", validation.map((e) => e?.["check"]));
-  }
-  if (Array.isArray(output2)) {
-    checkPlaceholders(findings, "output", output2.map((e) => e?.["artifact"]));
-  }
-  if (!isValidScrutiny(subject.scrutiny)) {
-    findings.push({
-      field: "scrutiny",
-      code: "scrutiny-reference",
-      message: `scrutiny must be one of ${SCRUTINY_LEVELS2.join(", ")}`
-    });
-  }
-  findings.push(...validateOwnership(subject.ownership));
-  findings.push(...validateContextRefs(subject.contextRefs));
-  if (subject.lifecycleState !== undefined && (typeof subject.lifecycleState !== "string" || subject.lifecycleState.trim() === "")) {
-    findings.push({ field: "lifecycleState", code: "lifecycle-state", message: "lifecycle state must be a non-empty string" });
-  }
-  return findings;
-}
-function validateContextRefs(refs) {
-  if (refs === undefined || refs === null)
-    return [];
-  if (!Array.isArray(refs)) {
-    return [{ field: "contextRefs", code: "context-shape", message: "contextRefs must be an array" }];
-  }
-  const out = [];
-  for (let i = 0;i < refs.length; i++) {
-    const e = refs[i];
-    const at = `contextRefs[${i}]`;
-    if (e === null || typeof e !== "object" || Array.isArray(e) || typeof e["key"] !== "string" || e["key"].trim() === "") {
-      out.push({ field: at, code: "context-shape", message: `${at} must be an object with a non-empty string key` });
-      continue;
-    }
-    if (!("value" in e) || e["value"] === undefined) {
-      out.push({ field: at, code: "context-shape", message: `${at} must define a value` });
-    }
-    const kind = e["kind"];
-    if (kind !== undefined && (typeof kind !== "string" || kind.trim() === "")) {
-      out.push({ field: at, code: "context-shape", message: `${at}.kind must be a non-empty string when present` });
-    } else if (kind === "journal" || kind === "memory") {
-      out.push({
-        field: at,
-        code: "journal-authority",
-        message: `${at} uses kind "${kind}": journal entries are continuity, never planning authority (\xA743)`
-      });
-    }
-  }
-  return out;
-}
-var SCRUTINY_LEVELS2, OWNERSHIP_FIELDS, PLACEHOLDER_RE2;
-var init_contract = __esm(() => {
-  SCRUTINY_LEVELS2 = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
-  OWNERSHIP_FIELDS = ["repositories", "paths", "services", "interfaces"];
-  PLACEHOLDER_RE2 = /\b(TBD|TODO|XXX|FIXME)\b/i;
-});
-
-// ../../../../xtrm/packages/substrate/src/domain/readiness.ts
-import { createHash as createHash15 } from "crypto";
-function isAttestationCurrent(attestation, revision, contractHash) {
-  return attestation !== null && attestation.outcome === "ready" && attestation.issueRevision === revision && attestation.contractHash === contractHash;
-}
-function defaultPolicy() {
-  return {
-    ref: DEFAULT_SCRUTINY_POLICY_REF,
-    allow: (level) => ["LOW", "MEDIUM", "HIGH", "CRITICAL"].includes(level)
-  };
-}
-function scrutinyPolicyFor(ref) {
-  const found = SCRUTINY_POLICIES.get(ref);
-  if (!found)
-    throw new Error(`fail-closed: unknown scrutiny policy: ${ref}`);
-  return found;
-}
-function isBlockerSatisfied(blockerLifecycleState) {
-  return blockerLifecycleState === "done" || blockerLifecycleState === "archived";
-}
-function deriveReadiness(inp) {
-  const findings = validateContractStructure(inp);
-  const structurallyValid = findings.length === 0;
-  const attestationCurrent = isAttestationCurrent(inp.attestation, inp.revision, inp.contractHash);
-  const reasons = [];
-  let state;
-  if (TERMINAL_LIFECYCLE.includes(inp.lifecycleState)) {
-    state = "terminal";
-    reasons.push(`lifecycle is terminal (${inp.lifecycleState})`);
-  } else if (inp.deferUntil !== null && inp.deferUntil > inp.now) {
-    state = "deferred";
-    reasons.push("deferred until a future time");
-  } else if (!structurallyValid) {
-    state = "draft";
-    for (const f of findings)
-      reasons.push(`${f.field}: ${f.message}`);
-  } else if (!attestationCurrent) {
-    state = "draft";
-    reasons.push("no current semantic attestation for this revision + contract hash");
-  } else if (inp.unsatisfiedBlockers.length > 0) {
-    state = "blocked";
-    reasons.push(`unsatisfied blockers: ${inp.unsatisfiedBlockers.join(", ")}`);
-  } else if (inp.hasActiveClaim) {
-    state = "claimed";
-    reasons.push("an active claim holds this issue");
-  } else {
-    state = "ready";
-  }
-  if (state === "ready" && inp.attestation) {
-    let allowed = false;
-    try {
-      allowed = scrutinyPolicyFor(inp.attestation.policy).allow(String(inp.scrutiny));
-    } catch {
-      allowed = false;
-    }
-    if (!allowed) {
-      state = "draft";
-      reasons.push(`scrutiny policy "${inp.attestation.policy}" denies level "${String(inp.scrutiny)}"`);
-    }
-  }
-  return {
-    issueId: inp.issueId,
-    revision: inp.revision,
-    contractHash: inp.contractHash,
-    findings,
-    structurallyValid,
-    attestationCurrent,
-    unsatisfiedBlockers: [...inp.unsatisfiedBlockers],
-    state,
-    dispatchable: state === "ready",
-    reasons
-  };
-}
-function scopeCovers(contractScope, requested) {
-  const expanded = requested.filter((r) => !contractScope.some((c) => r === c || r.startsWith(`${c}/`)));
-  return { ok: expanded.length === 0, expanded };
-}
-function resolveInheritedContext(chain) {
-  const merged = new Map;
-  const leafId = chain.length > 0 ? chain[chain.length - 1].issueId : "";
-  for (const link2 of chain) {
-    for (const ref of link2.refs) {
-      if (ref.kind === "journal" || ref.kind === "memory") {
-        throw new Error(`fail-closed: context key "${ref.key}" claims ${ref.kind} authority (\xA743)`);
-      }
-      merged.set(ref.key, {
-        key: ref.key,
-        value: ref.value,
-        sourceIssueId: link2.issueId,
-        sourceRevision: link2.revision,
-        sourceField: "contextRefs",
-        resolutionRule: link2.issueId === leafId ? "own" : "inherited"
-      });
-    }
-  }
-  const entries = [...merged.values()].sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
-  const hash = createHash15("sha256").update(JSON.stringify(entries)).digest("hex");
-  return { entries, hash };
-}
-var SCRUTINY_POLICIES, DEFAULT_SCRUTINY_POLICY_REF = "default", TERMINAL_LIFECYCLE;
-var init_readiness = __esm(() => {
-  init_contract();
-  SCRUTINY_POLICIES = new Map;
-  SCRUTINY_POLICIES.set(DEFAULT_SCRUTINY_POLICY_REF, defaultPolicy());
-  TERMINAL_LIFECYCLE = ["done", "cancelled", "archived"];
-});
-
-// ../../../../xtrm/packages/substrate/src/domain/edge.ts
-function wouldCreateCycle(existing, from, to) {
-  if (from === to)
-    return true;
-  const outgoing = new Map;
-  for (const e of existing) {
-    const list2 = outgoing.get(e.from);
-    if (list2)
-      list2.push(e.to);
-    else
-      outgoing.set(e.from, [e.to]);
-  }
-  const seen = new Set([to]);
-  const stack = [to];
-  while (stack.length > 0) {
-    const cur = stack.pop();
-    if (cur === from)
-      return true;
-    for (const next of outgoing.get(cur) ?? []) {
-      if (!seen.has(next)) {
-        seen.add(next);
-        stack.push(next);
-      }
-    }
-  }
-  return false;
-}
-var EDGE_KINDS;
-var init_edge = __esm(() => {
-  EDGE_KINDS = [
-    "parent_child",
-    "blocks",
-    "relates_to",
-    "discovered_from",
-    "supersedes",
-    "duplicates"
-  ];
-});
-
-// ../../../../xtrm/packages/substrate/src/domain/claim.ts
-function isLiveClaim(c, now) {
-  return c.releasedAt === null && c.expiresAt > now;
-}
-function isLiveLease(l, now) {
-  return l.releasedAt === null && l.expiresAt > now;
-}
-function normalizeWorkspace(input2) {
-  const raw = typeof input2 === "string" ? input2 : input2.worktreePath ?? "";
-  const key = raw.trim().replace(/\/+$/, "");
-  if (!key)
-    throw new Error("workspace must be a non-empty path");
-  return key;
-}
-function sameHolder(row, holder, activationId) {
-  if (row.holder !== holder)
-    return false;
-  const want = activationId ?? null;
-  if (row.activationId === null || want === null)
-    return row.activationId === want;
-  return row.activationId === want;
-}
-var DEFAULT_CLAIM_TTL_MS, DEFAULT_LEASE_TTL_MS;
-var init_claim = __esm(() => {
-  DEFAULT_CLAIM_TTL_MS = 15 * 60 * 1000;
-  DEFAULT_LEASE_TTL_MS = 15 * 60 * 1000;
-});
-
-// ../../../../xtrm/packages/substrate/src/store/transactions.ts
-function withTransaction(db, fn) {
-  const depth = txDepth.get(db) ?? 0;
-  if (depth > 0) {
-    const sp2 = `xtrm_sp_${depth}`;
-    txDepth.set(db, depth + 1);
-    db.exec(`SAVEPOINT ${sp2}`);
-    try {
-      const result = fn();
-      db.exec(`RELEASE ${sp2}`);
-      txDepth.set(db, depth);
-      return result;
-    } catch (err) {
-      try {
-        db.exec(`ROLLBACK TO ${sp2}`);
-        db.exec(`RELEASE ${sp2}`);
-      } catch {}
-      txDepth.set(db, depth);
-      throw err;
-    }
-  }
-  txDepth.set(db, 1);
-  db.exec("BEGIN IMMEDIATE");
-  try {
-    const result = fn();
-    db.exec("COMMIT");
-    txDepth.set(db, 0);
-    return result;
-  } catch (err) {
-    try {
-      db.exec("ROLLBACK");
-    } catch {}
-    txDepth.set(db, 0);
-    throw err;
-  }
-}
-function nextInNamespace(db, namespace, name8) {
-  if (!COUNTER_NAMESPACES.includes(namespace)) {
-    throw new Error(`unknown counter namespace: ${namespace}`);
-  }
-  const row = db.prepare("SELECT next_val AS v FROM seq_counters WHERE namespace = ? AND name = ?").get(namespace, name8);
-  if (!row) {
-    db.prepare("INSERT INTO seq_counters (namespace, name, next_val) VALUES (?, ?, ?)").run(namespace, name8, 2);
-    return 1;
-  }
-  db.prepare("UPDATE seq_counters SET next_val = ? WHERE namespace = ? AND name = ?").run(row.v + 1, namespace, name8);
-  return row.v;
-}
-function mutateOnce(db, namespace, key, fn) {
-  if (!IDEMPOTENCY_NAMESPACES.includes(namespace)) {
-    throw new Error(`unknown idempotency namespace: ${namespace}`);
-  }
-  const prior = db.prepare("SELECT result_json AS r FROM idempotency_keys WHERE namespace = ? AND key = ?").get(namespace, key);
-  if (prior)
-    return JSON.parse(prior.r);
-  const result = fn();
-  db.prepare("INSERT INTO idempotency_keys (namespace, key, result_json, created_at) VALUES (?, ?, ?, ?)").run(namespace, key, JSON.stringify(result), Date.now());
-  return result;
-}
-var COUNTER_NAMESPACES, IDEMPOTENCY_NAMESPACES, txDepth;
-var init_transactions = __esm(() => {
-  COUNTER_NAMESPACES = ["human_ref", "child_slot"];
-  IDEMPOTENCY_NAMESPACES = ["command", "plan", "inbox", "outbox"];
-  txDepth = new WeakMap;
-});
-
-// ../../../../xtrm/packages/substrate/src/service/issue-service.ts
-function row(db, sql8, ...params) {
-  return db.prepare(sql8).get(...params);
-}
-function rows(db, sql8, ...params) {
-  return db.prepare(sql8).all(...params);
-}
-
-class IssueService {
-  db;
-  constructor(db) {
-    this.db = db;
-  }
-  createProject(input2) {
-    const prefix = input2.prefix.trim().toUpperCase();
-    if (!/^[A-Z][A-Z0-9]*$/.test(prefix))
-      throw new Error(`invalid project prefix: ${input2.prefix}`);
-    if (!input2.name.trim())
-      throw new Error("project name must be non-empty");
-    const project2 = {
-      id: input2.id ?? `prj_${prefix.toLowerCase()}`,
-      prefix,
-      name: input2.name,
-      createdAt: Date.now()
-    };
-    return withTransaction(this.db, () => {
-      try {
-        this.db.prepare("INSERT INTO projects (id, prefix, name, created_at) VALUES (?, ?, ?, ?)").run(project2.id, project2.prefix, project2.name, project2.createdAt);
-      } catch {
-        throw new Error(`project already exists: ${project2.id} / ${project2.prefix}`);
-      }
-      return project2;
-    });
-  }
-  getProject(id) {
-    const p = row(this.db, "SELECT id, prefix, name, created_at FROM projects WHERE id = ?", id);
-    if (!p)
-      throw new Error(`unknown project: ${id}`);
-    return { id: p["id"], prefix: p["prefix"], name: p["name"], createdAt: p["created_at"] };
-  }
-  linkCheckout(gitRoot, projectId) {
-    const root = gitRoot.trim();
-    if (!root)
-      throw new Error("not inside a git checkout: cd into a checkout, or pass --project");
-    let target = projectId;
-    if (target === undefined) {
-      const all = rows(this.db, "SELECT id FROM projects ORDER BY id");
-      if (all.length === 0)
-        throw new Error("no projects exist yet: create one first (sb project create), then link it");
-      if (all.length > 1)
-        throw new Error("several projects exist: pass --project <id> to link this checkout explicitly");
-      target = all[0]?.["id"];
-    }
-    this.getProject(target);
-    return withTransaction(this.db, () => {
-      this.db.prepare("INSERT INTO checkout_links (git_root, project_id, linked_at) VALUES (?, ?, ?) ON CONFLICT(git_root) DO UPDATE SET project_id = excluded.project_id, linked_at = excluded.linked_at").run(root, target, Date.now());
-      return { gitRoot: root, projectId: target };
-    });
-  }
-  unlinkCheckout(gitRoot) {
-    const root = gitRoot.trim();
-    if (!root)
-      throw new Error("not inside a git checkout: cd into a checkout, or pass --project");
-    return withTransaction(this.db, () => {
-      const res = this.db.prepare("DELETE FROM checkout_links WHERE git_root = ?").run(root);
-      return res.changes > 0;
-    });
-  }
-  listLinks() {
-    return rows(this.db, "SELECT git_root, project_id, linked_at FROM checkout_links ORDER BY git_root").map((r) => ({
-      gitRoot: r["git_root"],
-      projectId: r["project_id"],
-      linkedAt: r["linked_at"]
-    }));
-  }
-  resolveProject(input2) {
-    if (input2.explicit !== undefined)
-      return { projectId: this.getProject(input2.explicit).id, source: "flag" };
-    if (input2.env !== undefined && input2.env.trim() !== "")
-      return { projectId: this.getProject(input2.env.trim()).id, source: "env" };
-    if (input2.gitRoot) {
-      const link2 = row(this.db, "SELECT project_id FROM checkout_links WHERE git_root = ?", input2.gitRoot);
-      if (link2) {
-        const id = link2["project_id"];
-        try {
-          return { projectId: this.getProject(id).id, source: "link" };
-        } catch {
-          throw new Error(`linked project ${id} no longer exists: re-link this checkout (sb project link --project <id>)`);
-        }
-      }
-    }
-    const all = rows(this.db, "SELECT id, prefix FROM projects ORDER BY id");
-    if (all.length === 1)
-      return { projectId: all[0]?.["id"], source: "single" };
-    if (all.length === 0)
-      throw new Error("no project selected and no projects exist: create one (sb project create) or pass --project");
-    const names = all.map((r) => `${r["id"]} (${r["prefix"]})`).join(", ");
-    throw new Error(`no project selected among several: ${names}. Pass --project <id>, set SUBSTRATE_PROJECT, or link this checkout (sb project link --project <id>)`);
-  }
-  createIssue(input2, opts) {
-    assertContractShape(input2.contract);
-    if (!input2.title.trim())
-      throw new Error("title must be non-empty");
-    if (!ISSUE_KINDS.includes(input2.kind))
-      throw new Error(`unknown kind: ${input2.kind}`);
-    const project2 = this.getProject(input2.projectId);
-    if (input2.parentId)
-      this.requireIssue(input2.parentId);
-    const key = opts?.idempotencyKey;
-    return withTransaction(this.db, () => key ? mutateOnce(this.db, "command", key, () => this.insertIssue(project2, input2)) : this.insertIssue(project2, input2));
-  }
-  insertIssue(project2, input2) {
-    const now = Date.now();
-    const id = newIssueId();
-    const humanNumber = nextInNamespace(this.db, "human_ref", project2.id);
-    const contractHash = hashContract(input2.contract);
-    const ownershipFindings = validateOwnership(input2.ownership);
-    if (ownershipFindings.length > 0)
-      throw new Error(`invalid ownership: ${ownershipFindings[0].message}`);
-    const contextFindings = validateContextRefs(input2.contextRefs ?? []);
-    if (contextFindings.length > 0)
-      throw new Error(`invalid contextRefs: ${contextFindings[0].message}`);
-    this.db.prepare(`INSERT INTO issues (id, project_id, human_number, kind, title, lifecycle_state,
-          priority, scrutiny, current_revision, current_contract_hash, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, 'open', ?, ?, 1, ?, ?, ?)`).run(id, project2.id, humanNumber, input2.kind, input2.title, input2.priority ?? 0, input2.scrutiny ?? "", contractHash, now, now);
-    this.db.prepare(`INSERT INTO issue_revisions (issue_id, revision, contract_hash, contract_json,
-          context_refs_json, ownership_json, authored_by, source_json, created_at)
-         VALUES (?, 1, ?, ?, ?, ?, ?, NULL, ?)`).run(id, contractHash, JSON.stringify(input2.contract), JSON.stringify(input2.contextRefs ?? []), input2.ownership == null ? null : JSON.stringify(input2.ownership), input2.authoredBy ?? "unknown", now);
-    this.appendEvent(id, "issue.created", { humanRef: formatHumanRef(project2.prefix, humanNumber) });
-    for (const a of input2.aliases ?? [])
-      this.insertAlias(id, a.alias, a.kind, now);
-    if (input2.parentId)
-      this.linkParent(id, input2.parentId, now);
-    return this.view(id);
-  }
-  updateContract(issueId, contract, authoredBy, opts) {
-    assertContractShape(contract);
-    const key = opts?.idempotencyKey;
-    return withTransaction(this.db, () => key ? mutateOnce(this.db, "command", key, () => this.revise(issueId, contract, authoredBy, opts?.expectedRevision, opts?.ownership, opts?.contextRefs)) : this.revise(issueId, contract, authoredBy, opts?.expectedRevision, opts?.ownership, opts?.contextRefs));
-  }
-  revise(issueId, contract, authoredBy, expectedRevision, ownership, contextRefs) {
-    const issue2 = this.requireIssue(issueId);
-    if (expectedRevision !== undefined && issue2.currentRevision !== expectedRevision) {
-      throw new Error(`revision conflict on ${issueId}: expected ${expectedRevision}, current ${issue2.currentRevision}`);
-    }
-    const hash = hashContract(contract);
-    if (hash === issue2.currentContractHash && ownership === undefined && contextRefs === undefined) {
-      return { issue: this.view(issueId), created: false };
-    }
-    const current = this.getRevision(issueId, issue2.currentRevision);
-    const nextOwnership = ownership === undefined ? current.ownership : ownership;
-    const nextContextRefs = contextRefs === undefined ? current.contextRefs : contextRefs;
-    const ownershipFindings = validateOwnership(nextOwnership);
-    if (ownershipFindings.length > 0)
-      throw new Error(`invalid ownership: ${ownershipFindings[0].message}`);
-    const contextFindings = validateContextRefs(nextContextRefs);
-    if (contextFindings.length > 0)
-      throw new Error(`invalid contextRefs: ${contextFindings[0].message}`);
-    if (hash === issue2.currentContractHash) {
-      const now2 = Date.now();
-      this.db.prepare("UPDATE issue_revisions SET ownership_json = ?, context_refs_json = ? WHERE issue_id = ? AND revision = ?").run(nextOwnership == null ? null : JSON.stringify(nextOwnership), JSON.stringify(nextContextRefs), issueId, issue2.currentRevision);
-      this.touch(issueId, now2);
-      this.appendEvent(issueId, "issue.metadata", { revision: issue2.currentRevision });
-      return { issue: this.view(issueId), created: false };
-    }
-    const now = Date.now();
-    const revision = issue2.currentRevision + 1;
-    this.db.prepare(`INSERT INTO issue_revisions (issue_id, revision, contract_hash, contract_json,
-          context_refs_json, ownership_json, authored_by, source_json, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)`).run(issueId, revision, hash, JSON.stringify(contract), JSON.stringify(nextContextRefs), nextOwnership == null ? null : JSON.stringify(nextOwnership), authoredBy, now);
-    this.db.prepare("UPDATE issues SET current_revision = ?, current_contract_hash = ?, updated_at = ? WHERE id = ?").run(revision, hash, now, issueId);
-    this.appendEvent(issueId, "issue.revised", { revision, contractHash: hash });
-    return { issue: this.view(issueId), created: true };
-  }
-  resolveRef(ref) {
-    const q = ref.trim();
-    if (q.startsWith("iss_"))
-      return this.view(q);
-    const human = parseHumanRef(q);
-    if (human) {
-      const p = row(this.db, "SELECT id FROM projects WHERE prefix = ?", human.prefix);
-      const hit = p ? row(this.db, "SELECT id FROM issues WHERE project_id = ? AND human_number = ?", p["id"], human.number) : undefined;
-      if (hit)
-        return this.view(hit["id"]);
-    }
-    const alias = row(this.db, "SELECT issue_id FROM issue_aliases WHERE alias = ?", q);
-    if (alias)
-      return this.view(alias["issue_id"]);
-    const hist = row(this.db, "SELECT issue_id FROM issue_locator_history WHERE locator = ?", q);
-    if (hist)
-      return this.view(hist["issue_id"]);
-    const current = this.findByCurrentLocator(q);
-    if (current)
-      return current;
-    throw new Error(`unresolvable ref: ${ref}`);
-  }
-  getIssue(id) {
-    return this.view(id);
-  }
-  listIssues(projectId) {
-    return rows(this.db, "SELECT id FROM issues WHERE project_id = ? ORDER BY human_number", projectId).map((r) => this.view(r["id"]));
-  }
-  getRevision(issueId, revision) {
-    const r = row(this.db, "SELECT * FROM issue_revisions WHERE issue_id = ? AND revision = ?", issueId, revision);
-    if (!r)
-      throw new Error(`unknown revision ${issueId}#${revision}`);
-    return this.toRevision(r);
-  }
-  listRevisions(issueId) {
-    return rows(this.db, "SELECT * FROM issue_revisions WHERE issue_id = ? ORDER BY revision", issueId).map((r) => this.toRevision(r));
-  }
-  listEvents(issueId) {
-    return rows(this.db, "SELECT * FROM issue_events WHERE issue_id = ? ORDER BY id", issueId).map((r) => ({
-      id: r["id"],
-      issueId: r["issue_id"],
-      type: r["type"],
-      payload: JSON.parse(r["payload_json"]),
-      createdAt: r["created_at"]
-    }));
-  }
-  currentLocator(issueId) {
-    const issue2 = this.requireIssue(issueId);
-    const project2 = this.getProject(issue2.projectId);
-    const slots = [];
-    const seen = new Set([issueId]);
-    let cur = issueId;
-    for (;; ) {
-      const edge = row(this.db, "SELECT from_issue, child_slot FROM issue_edges WHERE to_issue = ? AND kind = 'parent_child' AND active = 1", cur);
-      if (!edge)
-        break;
-      slots.unshift(edge["child_slot"]);
-      cur = edge["from_issue"];
-      if (seen.has(cur))
-        throw new Error(`fail-closed: parent cycle detected at ${cur}`);
-      seen.add(cur);
-    }
-    const root = this.requireIssue(cur);
-    const rootProject = this.getProject(root.projectId);
-    const rootRef = formatHumanRef(rootProject.prefix, root.humanNumber);
-    return slots.length === 0 ? rootRef : `${rootRef}.${slots.join(".")}`;
-  }
-  locatorHistory(issueId) {
-    return rows(this.db, "SELECT locator FROM issue_locator_history WHERE issue_id = ? ORDER BY created_at", issueId).map((r) => r["locator"]);
-  }
-  setParent(childId, parentId, opts) {
-    const key = opts?.idempotencyKey;
-    return withTransaction(this.db, () => key ? mutateOnce(this.db, "command", key, () => this.reparent(childId, parentId)) : this.reparent(childId, parentId));
-  }
-  reparent(childId, parentId) {
-    const child = this.requireIssue(childId);
-    const prev = row(this.db, "SELECT id, from_issue FROM issue_edges WHERE to_issue = ? AND kind = 'parent_child' AND active = 1", childId);
-    const prevParent = prev?.["from_issue"] ?? null;
-    if (prevParent === parentId)
-      return this.view(childId);
-    if (parentId) {
-      const parent = this.requireIssue(parentId);
-      if (parent.projectId !== child.projectId)
-        throw new Error("cross-project parenting is not supported in v0");
-      const links = rows(this.db, "SELECT from_issue, to_issue FROM issue_edges WHERE kind = 'parent_child' AND active = 1").map((r) => ({ from: r["to_issue"], to: r["from_issue"] }));
-      if (wouldCreateCycle(links, childId, parentId))
-        throw new Error(`parent cycle rejected: ${parentId} is under ${childId}`);
-    }
-    const now = Date.now();
-    const oldLocator = this.currentLocator(childId);
-    if (prev) {
-      this.db.prepare("UPDATE issue_edges SET active = 0 WHERE id = ?").run(prev["id"]);
-      this.appendEvent(childId, "edge.removed", { kind: "parent_child", parent: prevParent });
-    }
-    this.db.prepare("INSERT INTO issue_locator_history (project_id, locator, issue_id, created_at) VALUES (?, ?, ?, ?)").run(child.projectId, oldLocator, childId, now);
-    if (parentId)
-      this.linkParent(childId, parentId, now);
-    else
-      this.appendEvent(childId, "edge.removed", { kind: "parent_child", parent: prevParent, becameRoot: true });
-    this.touch(childId, now);
-    return this.view(childId);
-  }
-  linkParent(childId, parentId, now) {
-    const slot = nextInNamespace(this.db, "child_slot", parentId);
-    this.db.prepare("INSERT INTO issue_edges (from_issue, to_issue, kind, child_slot, active, created_at) VALUES (?, ?, 'parent_child', ?, 1, ?)").run(parentId, childId, slot, now);
-    this.appendEvent(childId, "edge.added", { kind: "parent_child", parent: parentId, childSlot: slot });
-  }
-  addEdge(fromId, toId, kind, opts) {
-    if (kind === "parent_child")
-      throw new Error("use setParent for parent_child edges");
-    if (fromId === toId)
-      throw new Error("self edges are rejected");
-    if (!EDGE_KINDS.includes(kind))
-      throw new Error(`unknown edge kind: ${kind}`);
-    this.requireIssue(fromId);
-    this.requireIssue(toId);
-    const key = opts?.idempotencyKey;
-    return withTransaction(this.db, () => key ? mutateOnce(this.db, "command", key, () => this.insertEdge(fromId, toId, kind)) : this.insertEdge(fromId, toId, kind));
-  }
-  insertEdge(fromId, toId, kind) {
-    if (kind === "blocks") {
-      const links = rows(this.db, "SELECT from_issue, to_issue FROM issue_edges WHERE kind = 'blocks' AND active = 1").map((r) => ({
-        from: r["from_issue"],
-        to: r["to_issue"]
-      }));
-      if (wouldCreateCycle(links, fromId, toId))
-        throw new Error(`blocks cycle rejected: ${fromId} -> ${toId}`);
-    }
-    const now = Date.now();
-    const id = Number(this.db.prepare("INSERT INTO issue_edges (from_issue, to_issue, kind, child_slot, active, created_at) VALUES (?, ?, ?, NULL, 1, ?) RETURNING id").get(fromId, toId, kind, now).id);
-    this.appendEvent(toId, "edge.added", { kind, from: fromId, edge: id });
-    return { id, fromIssue: fromId, toIssue: toId, kind, childSlot: null, active: true, createdAt: now };
-  }
-  removeEdge(edgeId) {
-    withTransaction(this.db, () => {
-      const e = row(this.db, "SELECT * FROM issue_edges WHERE id = ?", edgeId);
-      if (!e)
-        throw new Error(`unknown edge: ${edgeId}`);
-      if (e["kind"] === "parent_child")
-        throw new Error("use setParent for parent_child edges");
-      if (e["active"] === 0)
-        return;
-      this.db.prepare("UPDATE issue_edges SET active = 0 WHERE id = ?").run(edgeId);
-      this.appendEvent(e["to_issue"], "edge.removed", { kind: e["kind"], edge: edgeId });
-    });
-  }
-  getParent(childId) {
-    const e = row(this.db, "SELECT from_issue FROM issue_edges WHERE to_issue = ? AND kind = 'parent_child' AND active = 1", childId);
-    return e ? this.view(e["from_issue"]) : null;
-  }
-  listChildren(parentId) {
-    return rows(this.db, "SELECT to_issue AS id FROM issue_edges WHERE from_issue = ? AND kind = 'parent_child' AND active = 1 ORDER BY child_slot", parentId).map((r) => this.view(r["id"]));
-  }
-  listActiveEdges() {
-    return rows(this.db, "SELECT * FROM issue_edges WHERE active = 1 ORDER BY id").map((r) => this.toEdge(r));
-  }
-  addAlias(issueId, alias, kind) {
-    const a = alias.trim();
-    if (!a)
-      throw new Error("alias must be non-empty");
-    withTransaction(this.db, () => this.insertAlias(issueId, a, kind, Date.now()));
-  }
-  insertAlias(issueId, alias, kind, now) {
-    this.requireIssue(issueId);
-    try {
-      this.db.prepare("INSERT INTO issue_aliases (alias, issue_id, kind, created_at) VALUES (?, ?, ?, ?)").run(alias, issueId, kind, now);
-    } catch {
-      throw new Error(`alias already registered: ${alias}`);
-    }
-  }
-  listAliases(issueId) {
-    return rows(this.db, "SELECT alias, kind FROM issue_aliases WHERE issue_id = ? ORDER BY alias", issueId).map((r) => ({
-      alias: r["alias"],
-      kind: r["kind"]
-    }));
-  }
-  appendEvent(issueId, type, payload) {
-    const r = this.db.prepare("INSERT INTO issue_events (issue_id, type, payload_json, created_at) VALUES (?, ?, ?, ?) RETURNING id").get(issueId, type, JSON.stringify(payload ?? {}), Date.now());
-    return Number(r.id);
-  }
-  exportProject(projectId) {
-    const project2 = this.getProject(projectId);
-    const issues = rows(this.db, "SELECT id FROM issues WHERE project_id = ? ORDER BY human_number", projectId).map((r) => r["id"]);
-    return {
-      version: 1,
-      project: project2,
-      issues: issues.map((id) => ({
-        issue: this.requireIssue(id),
-        revisions: this.listRevisions(id),
-        aliases: this.listAliases(id),
-        locatorHistory: this.locatorHistory(id)
-      })),
-      edges: rows(this.db, `SELECT e.* FROM issue_edges e JOIN issues i ON i.id = e.from_issue WHERE i.project_id = ? ORDER BY e.id`, projectId).map((r) => this.toEdge(r)),
-      counters: {
-        humanRefNext: row(this.db, "SELECT next_val FROM seq_counters WHERE namespace = 'human_ref' AND name = ?", projectId)?.["next_val"] ?? 1
-      }
-    };
-  }
-  importProject(snapshot) {
-    const data = snapshot;
-    withTransaction(this.db, () => {
-      const now = Date.now();
-      this.db.prepare("INSERT OR IGNORE INTO projects (id, prefix, name, created_at) VALUES (?, ?, ?, ?)").run(data.project.id, data.project.prefix, data.project.name, data.project.createdAt);
-      for (const entry of data.issues) {
-        const i = entry.issue;
-        this.db.prepare(`INSERT OR IGNORE INTO issues (id, project_id, human_number, kind, title, lifecycle_state,
-              priority, scrutiny, current_revision, current_contract_hash, defer_until, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(i.id, i.projectId, i.humanNumber, i.kind, i.title, i.lifecycleState, i.priority, i.scrutiny, i.currentRevision, i.currentContractHash, i.deferUntil, i.createdAt, i.updatedAt);
-        for (const rev of entry.revisions) {
-          this.db.prepare(`INSERT OR IGNORE INTO issue_revisions (issue_id, revision, contract_hash, contract_json,
-                context_refs_json, ownership_json, authored_by, source_json, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(rev.issueId, rev.revision, rev.contractHash, JSON.stringify(rev.contract), JSON.stringify(rev.contextRefs), rev.ownership == null ? null : JSON.stringify(rev.ownership), rev.authoredBy, rev.source == null ? null : JSON.stringify(rev.source), rev.createdAt);
-        }
-        for (const a of entry.aliases) {
-          this.db.prepare("INSERT OR IGNORE INTO issue_aliases (alias, issue_id, kind, created_at) VALUES (?, ?, ?, ?)").run(a.alias, i.id, a.kind, now);
-        }
-        for (const loc of entry.locatorHistory) {
-          this.db.prepare("INSERT OR IGNORE INTO issue_locator_history (project_id, locator, issue_id, created_at) VALUES (?, ?, ?, ?)").run(i.projectId, loc, i.id, now);
-        }
-      }
-      for (const e of data.edges) {
-        this.db.prepare("INSERT INTO issue_edges (from_issue, to_issue, kind, child_slot, active, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(e.fromIssue, e.toIssue, e.kind, e.childSlot, e.active ? 1 : 0, e.createdAt);
-      }
-      const maxHuman = data.issues.reduce((m, e) => Math.max(m, e.issue.humanNumber), 0);
-      this.db.prepare("INSERT OR IGNORE INTO seq_counters (namespace, name, next_val) VALUES ('human_ref', ?, ?)").run(data.project.id, maxHuman + 1);
-      const maxSlot = new Map;
-      for (const e of data.edges) {
-        if (e.kind === "parent_child" && e.childSlot != null) {
-          maxSlot.set(e.fromIssue, Math.max(maxSlot.get(e.fromIssue) ?? 0, e.childSlot));
-        }
-      }
-      for (const [parent, slot] of maxSlot) {
-        this.db.prepare("INSERT OR IGNORE INTO seq_counters (namespace, name, next_val) VALUES ('child_slot', ?, ?)").run(parent, slot + 1);
-      }
-    });
-  }
-  attestReadiness(issueId, input2) {
-    this.assertAttestInput(input2);
-    return withTransaction(this.db, () => this.insertAttestationTx(issueId, input2, Date.now()));
-  }
-  assertAttestInput(input2) {
-    if (input2.outcome !== "ready" && input2.outcome !== "reject")
-      throw new Error(`unknown attestation outcome: ${String(input2.outcome)}`);
-    if (!input2.policy.trim())
-      throw new Error("attestation policy must be non-empty");
-    if (!input2.attestedBy.trim())
-      throw new Error("attestedBy must be non-empty");
-    for (const [field2, values] of [["evidenceRefs", input2.evidenceRefs], ["blockingGaps", input2.blockingGaps]]) {
-      if (values !== undefined && (!Array.isArray(values) || values.some((e) => typeof e !== "string"))) {
-        throw new Error(`${field2} must be an array of strings when present`);
-      }
-    }
-  }
-  insertAttestationTx(issueId, input2, now) {
-    const issue2 = this.requireIssue(issueId);
-    const r = this.db.prepare(`INSERT INTO readiness_attestations
-             (issue_id, issue_revision, contract_hash, outcome, policy, attested_by,
-              evidence_refs_json, blocking_gaps_json, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`).get(issueId, issue2.currentRevision, issue2.currentContractHash, input2.outcome, input2.policy, input2.attestedBy, JSON.stringify(input2.evidenceRefs ?? []), JSON.stringify(input2.blockingGaps ?? []), now);
-    this.appendEvent(issueId, "issue.attested", {
-      outcome: input2.outcome,
-      revision: issue2.currentRevision,
-      contractHash: issue2.currentContractHash
-    });
-    return {
-      id: Number(r.id),
-      issueId,
-      issueRevision: issue2.currentRevision,
-      contractHash: issue2.currentContractHash,
-      outcome: input2.outcome,
-      policy: input2.policy,
-      attestedBy: input2.attestedBy,
-      evidenceRefs: input2.evidenceRefs ?? [],
-      blockingGaps: input2.blockingGaps ?? [],
-      createdAt: now
-    };
-  }
-  latestAttestation(issueId) {
-    this.requireIssue(issueId);
-    const r = row(this.db, "SELECT * FROM readiness_attestations WHERE issue_id = ? ORDER BY id DESC LIMIT 1", issueId);
-    return r ? this.toAttestation(r) : null;
-  }
-  setDeferral(issueId, deferUntil) {
-    if (deferUntil !== null && (!Number.isInteger(deferUntil) || deferUntil < 0)) {
-      throw new Error("deferUntil must be a non-negative integer timestamp or null");
-    }
-    return withTransaction(this.db, () => {
-      this.requireIssue(issueId);
-      const now = Date.now();
-      this.db.prepare("UPDATE issues SET defer_until = ?, updated_at = ? WHERE id = ?").run(deferUntil, now, issueId);
-      this.appendEvent(issueId, "issue.deferred", { deferUntil });
-      return this.view(issueId);
-    });
-  }
-  setScrutiny(issueId, scrutiny) {
-    if (!isValidScrutiny(scrutiny))
-      throw new Error(`invalid scrutiny level: ${scrutiny}`);
-    return withTransaction(this.db, () => {
-      this.requireIssue(issueId);
-      const now = Date.now();
-      this.db.prepare("UPDATE issues SET scrutiny = ?, updated_at = ? WHERE id = ?").run(scrutiny, now, issueId);
-      this.appendEvent(issueId, "issue.metadata", { field: "scrutiny", scrutiny });
-      return this.view(issueId);
-    });
-  }
-  setOwnership(issueId, ownership) {
-    const findings = validateOwnership(ownership);
-    if (findings.length > 0)
-      throw new Error(`invalid ownership: ${findings[0].message}`);
-    return withTransaction(this.db, () => {
-      const issue2 = this.requireIssue(issueId);
-      const now = Date.now();
-      this.db.prepare("UPDATE issue_revisions SET ownership_json = ? WHERE issue_id = ? AND revision = ?").run(ownership == null ? null : JSON.stringify(ownership), issueId, issue2.currentRevision);
-      this.touch(issueId, now);
-      this.appendEvent(issueId, "issue.metadata", { revision: issue2.currentRevision, field: "ownership" });
-      return this.view(issueId);
-    });
-  }
-  setContextRefs(issueId, refs) {
-    const findings = validateContextRefs(refs);
-    if (findings.length > 0)
-      throw new Error(`invalid contextRefs: ${findings[0].message}`);
-    return withTransaction(this.db, () => {
-      const issue2 = this.requireIssue(issueId);
-      const now = Date.now();
-      this.db.prepare("UPDATE issue_revisions SET context_refs_json = ? WHERE issue_id = ? AND revision = ?").run(JSON.stringify(refs), issueId, issue2.currentRevision);
-      this.touch(issueId, now);
-      this.appendEvent(issueId, "issue.metadata", { revision: issue2.currentRevision, field: "contextRefs" });
-      return this.view(issueId);
-    });
-  }
-  unsatisfiedBlockers(issueId) {
-    this.requireIssue(issueId);
-    const blockers = rows(this.db, "SELECT from_issue FROM issue_edges WHERE to_issue = ? AND kind = 'blocks' AND active = 1 ORDER BY from_issue", issueId).map((r) => r["from_issue"]);
-    return blockers.filter((b) => {
-      try {
-        return !isBlockerSatisfied(this.requireIssue(b).lifecycleState);
-      } catch {
-        return true;
-      }
-    });
-  }
-  getReadiness(issueId, opts) {
-    const now = opts?.now ?? Date.now();
-    return this.readinessReport(issueId, now, this.openClaim(issueId, now) !== null);
-  }
-  readinessReport(issueId, now, hasActiveClaim) {
-    const issue2 = this.requireIssue(issueId);
-    const rev = this.getRevision(issueId, issue2.currentRevision);
-    return deriveReadiness({
-      issueId,
-      revision: issue2.currentRevision,
-      contractHash: issue2.currentContractHash,
-      contract: rev.contract,
-      scrutiny: issue2.scrutiny,
-      ownership: rev.ownership,
-      contextRefs: rev.contextRefs,
-      lifecycleState: issue2.lifecycleState,
-      deferUntil: issue2.deferUntil,
-      attestation: this.latestAttestation(issueId),
-      unsatisfiedBlockers: this.unsatisfiedBlockers(issueId),
-      now,
-      hasActiveClaim
-    });
-  }
-  assertDispatchable(issueId, opts) {
-    const report = this.getReadiness(issueId, opts);
-    if (!report.dispatchable) {
-      throw new Error(`not dispatchable: ${issueId} is ${report.state}: ${report.reasons.join("; ")}`);
-    }
-    if (opts?.requestedScope) {
-      const rev = this.getRevision(issueId, report.revision);
-      const contract = rev.contract;
-      const contractScope = Array.isArray(contract.scope) ? contract.scope : [];
-      const { ok: ok4, expanded } = scopeCovers(contractScope, opts.requestedScope);
-      if (!ok4)
-        throw new Error(`scope expansion rejected: ${expanded.join(", ")} outside contract SCOPE (\xA739.1)`);
-    }
-    return report;
-  }
-  getResolvedContext(issueId) {
-    const leaf = this.requireIssue(issueId);
-    const lineage = [issueId];
-    const seen = new Set([issueId]);
-    let cur = issueId;
-    for (;; ) {
-      const parent = this.getParent(cur);
-      if (!parent)
-        break;
-      if (seen.has(parent.id))
-        throw new Error(`fail-closed: parent cycle detected at ${parent.id}`);
-      seen.add(parent.id);
-      lineage.unshift(parent.id);
-      cur = parent.id;
-    }
-    const chain = lineage.map((id) => {
-      const issue2 = this.requireIssue(id);
-      const rev = this.getRevision(id, issue2.currentRevision);
-      return { issueId: id, revision: issue2.currentRevision, refs: rev.contextRefs ?? [] };
-    });
-    const { entries, hash } = resolveInheritedContext(chain);
-    return { issueId, revision: leaf.currentRevision, entries, hash };
-  }
-  claimIssue(issueId, holder, opts) {
-    this.assertHolder(holder);
-    const key = opts?.idempotencyKey;
-    return withTransaction(this.db, () => key ? mutateOnce(this.db, "command", key, () => this.claimTx(issueId, holder, opts?.activationId, opts?.ttlMs, opts?.now ?? Date.now(), opts?.expectedRevision)) : this.claimTx(issueId, holder, opts?.activationId, opts?.ttlMs, opts?.now ?? Date.now(), opts?.expectedRevision));
-  }
-  claimReady(issueId, holder, attestation, opts) {
-    this.assertHolder(holder);
-    this.assertAttestInput(attestation);
-    return withTransaction(this.db, () => {
-      const now = opts?.now ?? Date.now();
-      const att = this.insertAttestationTx(issueId, attestation, now);
-      const claim = this.claimTx(issueId, holder, opts?.activationId, opts?.ttlMs, now, opts?.expectedRevision);
-      return { attestation: att, claim };
-    });
-  }
-  claimTx(issueId, holder, activationId, ttlMs, now, expectedRevision) {
-    const issue2 = this.requireIssue(issueId);
-    if (expectedRevision !== undefined && issue2.currentRevision !== expectedRevision) {
-      throw new Error(`revision conflict on ${issueId}: expected ${expectedRevision}, current ${issue2.currentRevision}`);
-    }
-    const open = this.openClaim(issueId, now);
-    const unclosed = open ?? this.unclosedClaim(issueId);
-    if (unclosed) {
-      if (isLiveClaim(unclosed, now)) {
-        if (sameHolder(unclosed, holder, activationId ?? null))
-          return unclosed;
-        throw new Error(`claim-held: ${issueId} is live-held by ${unclosed.holder} until ${unclosed.expiresAt} (anti-steal)`);
-      }
-      this.closeClaimRow(unclosed.id, now);
-      this.appendEvent(issueId, "claim.expired", {
-        claim: unclosed.id,
-        generation: unclosed.generation,
-        holder: unclosed.holder
-      });
-    }
-    const report = this.readinessReport(issueId, now, false);
-    if (!report.dispatchable) {
-      throw new Error(`not-claimable: ${issueId} is ${report.state}: ${report.reasons.join("; ")}`);
-    }
-    const ttl = ttlMs ?? DEFAULT_CLAIM_TTL_MS;
-    if (!Number.isInteger(ttl) || ttl <= 0)
-      throw new Error("claim ttlMs must be a positive integer");
-    const prev = row(this.db, "SELECT MAX(generation) AS g FROM issue_claims WHERE issue_id = ?", issueId);
-    const generation = (prev?.g ?? 0) + 1;
-    const acquiredAt = now;
-    const r = this.db.prepare(`INSERT INTO issue_claims
-           (issue_id, issue_revision, contract_hash, holder, activation_id,
-            acquired_at, expires_at, released_at, generation)
-         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?) RETURNING id`).get(issueId, issue2.currentRevision, issue2.currentContractHash, holder, activationId ?? null, acquiredAt, acquiredAt + ttl, generation);
-    this.appendEvent(issueId, "claim.acquired", { claim: Number(r.id), generation, holder });
-    return {
-      id: Number(r.id),
-      issueId,
-      issueRevision: issue2.currentRevision,
-      contractHash: issue2.currentContractHash,
-      holder,
-      activationId: activationId ?? null,
-      acquiredAt,
-      expiresAt: acquiredAt + ttl,
-      releasedAt: null,
-      generation
-    };
-  }
-  renewClaim(issueId, holder, opts) {
-    this.assertHolder(holder);
-    return withTransaction(this.db, () => {
-      const now = opts?.now ?? Date.now();
-      const open = this.unclosedClaim(issueId);
-      if (!open)
-        throw new Error(`no-claim: ${issueId} has no open claim to renew`);
-      if (!isLiveClaim(open, now))
-        throw new Error(`claim-expired: ${issueId} generation ${open.generation} expired; reclaim with claimIssue`);
-      if (!sameHolder(open, holder, opts?.activationId ?? null)) {
-        throw new Error(`claim-held: ${issueId} is live-held by ${open.holder} (anti-steal)`);
-      }
-      const ttl = opts?.ttlMs ?? DEFAULT_CLAIM_TTL_MS;
-      if (!Number.isInteger(ttl) || ttl <= 0)
-        throw new Error("claim ttlMs must be a positive integer");
-      const expiresAt = now + ttl;
-      this.db.prepare("UPDATE issue_claims SET expires_at = ? WHERE id = ?").run(expiresAt, open.id);
-      this.appendEvent(issueId, "claim.renewed", { claim: open.id, generation: open.generation, expiresAt });
-      return { ...open, expiresAt };
-    });
-  }
-  releaseClaim(issueId, holder, opts) {
-    this.assertHolder(holder);
-    return withTransaction(this.db, () => {
-      const now = opts?.now ?? Date.now();
-      const open = this.unclosedClaim(issueId);
-      if (!open)
-        return null;
-      if (!sameHolder(open, holder, opts?.activationId ?? null)) {
-        throw new Error(`claim-held: ${issueId} is held by ${open.holder}; only the holder releases (anti-steal)`);
-      }
-      this.closeClaimRow(open.id, now);
-      this.appendEvent(issueId, "claim.released", { claim: open.id, generation: open.generation });
-      return { ...open, releasedAt: now };
-    });
-  }
-  getActiveClaim(issueId, opts) {
-    this.requireIssue(issueId);
-    return this.openClaim(issueId, opts?.now ?? Date.now());
-  }
-  listClaims(issueId) {
-    this.requireIssue(issueId);
-    return rows(this.db, "SELECT * FROM issue_claims WHERE issue_id = ? ORDER BY id", issueId).map((r) => this.toClaim(r));
-  }
-  acquireWriterLease(workspace, holder, opts) {
-    this.assertHolder(holder);
-    const key = opts?.idempotencyKey;
-    return withTransaction(this.db, () => key ? mutateOnce(this.db, "command", key, () => this.acquireLeaseTx(workspace, holder, opts?.activationId, opts?.repositoryRoot, opts?.branch, opts?.ttlMs, opts?.now ?? Date.now())) : this.acquireLeaseTx(workspace, holder, opts?.activationId, opts?.repositoryRoot, opts?.branch, opts?.ttlMs, opts?.now ?? Date.now()));
-  }
-  acquireLeaseTx(workspace, holder, activationId, repositoryRoot, branch, ttlMs, now) {
-    const key = normalizeWorkspace(workspace);
-    if (typeof workspace === "object") {
-      repositoryRoot ??= workspace.repositoryRoot;
-      branch ??= workspace.branch;
-    }
-    const open = this.unclosedLease(key);
-    if (open) {
-      if (isLiveLease(open, now)) {
-        if (sameHolder(open, holder, activationId ?? null))
-          return open;
-        throw new Error(`lease-held: workspace ${key} is write-held by ${open.holder} until ${open.expiresAt} (anti-steal)`);
-      }
-      this.db.prepare("UPDATE workspace_leases SET released_at = ? WHERE id = ?").run(now, open.id);
-    }
-    const ttl = ttlMs ?? DEFAULT_LEASE_TTL_MS;
-    if (!Number.isInteger(ttl) || ttl <= 0)
-      throw new Error("lease ttlMs must be a positive integer");
-    const prev = row(this.db, "SELECT MAX(generation) AS g FROM workspace_leases WHERE workspace = ?", key);
-    const generation = (prev?.g ?? 0) + 1;
-    const r = this.db.prepare(`INSERT INTO workspace_leases
-           (workspace, repository_root, branch, holder, activation_id,
-            acquired_at, expires_at, released_at, generation)
-         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?) RETURNING id`).get(key, repositoryRoot ?? null, branch ?? null, holder, activationId ?? null, now, now + ttl, generation);
-    return {
-      id: Number(r.id),
-      workspace: key,
-      repositoryRoot: repositoryRoot ?? null,
-      branch: branch ?? null,
-      holder,
-      activationId: activationId ?? null,
-      acquiredAt: now,
-      expiresAt: now + ttl,
-      releasedAt: null,
-      generation
-    };
-  }
-  renewWriterLease(workspace, holder, opts) {
-    this.assertHolder(holder);
-    return withTransaction(this.db, () => {
-      const key = normalizeWorkspace(workspace);
-      const now = opts?.now ?? Date.now();
-      const open = this.unclosedLease(key);
-      if (!open)
-        throw new Error(`no-lease: workspace ${key} has no open writer lease to renew`);
-      if (!isLiveLease(open, now))
-        throw new Error(`lease-expired: workspace ${key} generation ${open.generation} expired; re-acquire`);
-      if (!sameHolder(open, holder, opts?.activationId ?? null)) {
-        throw new Error(`lease-held: workspace ${key} is write-held by ${open.holder} (anti-steal)`);
-      }
-      const ttl = opts?.ttlMs ?? DEFAULT_LEASE_TTL_MS;
-      if (!Number.isInteger(ttl) || ttl <= 0)
-        throw new Error("lease ttlMs must be a positive integer");
-      const expiresAt = now + ttl;
-      this.db.prepare("UPDATE workspace_leases SET expires_at = ? WHERE id = ?").run(expiresAt, open.id);
-      return { ...open, expiresAt };
-    });
-  }
-  releaseWriterLease(workspace, holder, opts) {
-    this.assertHolder(holder);
-    return withTransaction(this.db, () => {
-      const key = normalizeWorkspace(workspace);
-      const now = opts?.now ?? Date.now();
-      const open = this.unclosedLease(key);
-      if (!open)
-        return null;
-      if (!sameHolder(open, holder, opts?.activationId ?? null)) {
-        throw new Error(`lease-held: workspace ${key} is held by ${open.holder}; only the holder releases (anti-steal)`);
-      }
-      this.db.prepare("UPDATE workspace_leases SET released_at = ? WHERE id = ?").run(now, open.id);
-      return { ...open, releasedAt: now };
-    });
-  }
-  getWriterLease(workspace, opts) {
-    const key = normalizeWorkspace(workspace);
-    const open = this.unclosedLease(key);
-    const now = opts?.now ?? Date.now();
-    return open && isLiveLease(open, now) ? open : null;
-  }
-  listWorkspaceLeases(workspace) {
-    const rs = workspace === undefined ? rows(this.db, "SELECT * FROM workspace_leases ORDER BY id") : rows(this.db, "SELECT * FROM workspace_leases WHERE workspace = ? ORDER BY id", normalizeWorkspace(workspace));
-    return rs.map((r) => this.toLease(r));
-  }
-  holdsWriterLease(workspace, holder, opts) {
-    const live = this.getWriterLease(workspace, opts);
-    return live !== null && sameHolder(live, holder, opts?.activationId ?? null);
-  }
-  assertCanWrite(workspace, holder, opts) {
-    const key = normalizeWorkspace(workspace);
-    const live = this.getWriterLease(key, opts);
-    if (!live)
-      throw new Error(`lease-fenced: workspace ${key} has no live writer lease held by ${holder}`);
-    if (!sameHolder(live, holder, opts?.activationId ?? null)) {
-      throw new Error(`lease-fenced: workspace ${key} is write-held by ${live.holder}; ${holder} is fenced (C21)`);
-    }
-  }
-  canReadWorkspace() {
-    return true;
-  }
-  assertHolder(holder) {
-    if (!holder.trim())
-      throw new Error("claim/lease holder must be non-empty");
-  }
-  unclosedClaim(issueId) {
-    const r = row(this.db, "SELECT * FROM issue_claims WHERE issue_id = ? AND released_at IS NULL ORDER BY id DESC LIMIT 1", issueId);
-    return r ? this.toClaim(r) : null;
-  }
-  openClaim(issueId, now) {
-    const c = this.unclosedClaim(issueId);
-    return c && isLiveClaim(c, now) ? c : null;
-  }
-  closeClaimRow(id, now) {
-    this.db.prepare("UPDATE issue_claims SET released_at = ? WHERE id = ? AND released_at IS NULL").run(now, id);
-  }
-  unclosedLease(workspace) {
-    const r = row(this.db, "SELECT * FROM workspace_leases WHERE workspace = ? AND released_at IS NULL ORDER BY id DESC LIMIT 1", workspace);
-    return r ? this.toLease(r) : null;
-  }
-  toClaim(r) {
-    return {
-      id: r["id"],
-      issueId: r["issue_id"],
-      issueRevision: r["issue_revision"],
-      contractHash: r["contract_hash"],
-      holder: r["holder"],
-      activationId: r["activation_id"] ?? null,
-      acquiredAt: r["acquired_at"],
-      expiresAt: r["expires_at"],
-      releasedAt: r["released_at"] ?? null,
-      generation: r["generation"]
-    };
-  }
-  toLease(r) {
-    return {
-      id: r["id"],
-      workspace: r["workspace"],
-      repositoryRoot: r["repository_root"] ?? null,
-      branch: r["branch"] ?? null,
-      holder: r["holder"],
-      activationId: r["activation_id"] ?? null,
-      acquiredAt: r["acquired_at"],
-      expiresAt: r["expires_at"],
-      releasedAt: r["released_at"] ?? null,
-      generation: r["generation"]
-    };
-  }
-  toAttestation(r) {
-    return {
-      id: r["id"],
-      issueId: r["issue_id"],
-      issueRevision: r["issue_revision"],
-      contractHash: r["contract_hash"],
-      outcome: r["outcome"],
-      policy: r["policy"],
-      attestedBy: r["attested_by"],
-      evidenceRefs: JSON.parse(r["evidence_refs_json"] ?? "[]"),
-      blockingGaps: JSON.parse(r["blocking_gaps_json"] ?? "[]"),
-      createdAt: r["created_at"]
-    };
-  }
-  requireIssue(id) {
-    const r = row(this.db, "SELECT * FROM issues WHERE id = ?", id);
-    if (!r)
-      throw new Error(`unknown issue: ${id}`);
-    return this.toIssue(r);
-  }
-  view(id) {
-    const issue2 = this.requireIssue(id);
-    const project2 = this.getProject(issue2.projectId);
-    return { ...issue2, humanRef: formatHumanRef(project2.prefix, issue2.humanNumber), locator: this.currentLocator(id) };
-  }
-  findByCurrentLocator(locator) {
-    const roots = rows(this.db, "SELECT id FROM issues");
-    for (const r of roots) {
-      const id = r["id"];
-      try {
-        if (this.currentLocator(id) === locator)
-          return this.view(id);
-      } catch {
-        continue;
-      }
-    }
-    return null;
-  }
-  toIssue(r) {
-    return {
-      id: r["id"],
-      projectId: r["project_id"],
-      humanNumber: r["human_number"],
-      kind: r["kind"],
-      title: r["title"],
-      lifecycleState: r["lifecycle_state"],
-      priority: r["priority"],
-      scrutiny: r["scrutiny"],
-      currentRevision: r["current_revision"],
-      currentContractHash: r["current_contract_hash"],
-      deferUntil: r["defer_until"] ?? null,
-      createdAt: r["created_at"],
-      updatedAt: r["updated_at"]
-    };
-  }
-  toRevision(r) {
-    return {
-      issueId: r["issue_id"],
-      revision: r["revision"],
-      contractHash: r["contract_hash"],
-      contract: JSON.parse(r["contract_json"]),
-      contextRefs: JSON.parse(r["context_refs_json"] ?? "[]"),
-      ownership: r["ownership_json"] == null ? null : JSON.parse(r["ownership_json"]),
-      authoredBy: r["authored_by"],
-      source: r["source_json"] == null ? null : JSON.parse(r["source_json"]),
-      createdAt: r["created_at"]
-    };
-  }
-  toEdge(r) {
-    return {
-      id: r["id"],
-      fromIssue: r["from_issue"],
-      toIssue: r["to_issue"],
-      kind: r["kind"],
-      childSlot: r["child_slot"] ?? null,
-      active: r["active"] === 1,
-      createdAt: r["created_at"]
-    };
-  }
-  touch(issueId, now) {
-    this.db.prepare("UPDATE issues SET updated_at = ? WHERE id = ?").run(now, issueId);
-  }
-  setLifecycleState(issueId, state) {
-    if (!LIFECYCLE_STATES.includes(state))
-      throw new Error(`unknown lifecycle state: ${state}`);
-    return withTransaction(this.db, () => {
-      this.requireIssue(issueId);
-      const now = Date.now();
-      this.db.prepare("UPDATE issues SET lifecycle_state = ?, updated_at = ? WHERE id = ?").run(state, now, issueId);
-      this.appendEvent(issueId, state === "done" ? "issue.done" : "issue.cancelled", { state });
-      return this.view(issueId);
-    });
-  }
-}
-var init_issue_service = __esm(() => {
-  init_issue();
-  init_contract();
-  init_readiness();
-  init_edge();
-  init_claim();
-  init_transactions();
-});
-
-// ../../../../xtrm/packages/substrate/src/domain/journal.ts
-function isJournalKind(value) {
-  return typeof value === "string" && JOURNAL_KINDS.includes(value);
-}
-function newJournalEntryId() {
-  return `jrn_${v7_default()}`;
-}
-function stringArray(value) {
-  return Array.isArray(value) && value.every((e) => typeof e === "string");
-}
-function validateSemanticCheckpoint(value) {
-  const problems = [];
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    return ["semantic checkpoint must be an object"];
-  }
-  const s = value;
-  if (typeof s["summary"] !== "string" || s["summary"].trim() === "") {
-    problems.push("semantic.summary must be a non-empty string");
-  }
-  for (const f of ["completed", "next", "blocked", "openQuestions", "keyDecisions", "materialFindings"]) {
-    if (s[f] !== undefined && !stringArray(s[f]))
-      problems.push(`semantic.${f} must be an array of strings when present`);
-  }
-  if (s["current"] !== undefined && typeof s["current"] !== "string") {
-    problems.push("semantic.current must be a string when present");
-  }
-  return problems;
-}
-function assertSemanticCheckpoint(value) {
-  const problems = validateSemanticCheckpoint(value);
-  if (problems.length > 0)
-    throw new Error(`invalid semantic checkpoint: ${problems[0]}`);
-}
-function validateMechanicalCheckpoint(value) {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    return ["mechanical checkpoint must be an object"];
-  }
-  const m = value;
-  const problems = [];
-  if (typeof m["issueId"] !== "string" || m["issueId"].trim() === "") {
-    problems.push("mechanical.issueId must be a non-empty string");
-  }
-  if (!Number.isInteger(m["issueRevision"]))
-    problems.push("mechanical.issueRevision must be an integer");
-  if (typeof m["contractHash"] !== "string" || m["contractHash"].trim() === "") {
-    problems.push("mechanical.contractHash must be a non-empty string");
-  }
-  for (const f of ["changedFiles", "commitsSincePrevious", "pendingBlockers", "specialistRefs", "pendingAsks"]) {
-    if (m[f] !== undefined && m[f] !== null && !stringArray(m[f])) {
-      problems.push(`mechanical.${f} must be an array of strings when present`);
-    }
-  }
-  return problems;
-}
-function validateEvidenceRefs(refs) {
-  if (!Array.isArray(refs))
-    return ["refs must be an array"];
-  for (let i = 0;i < refs.length; i++) {
-    const e = refs[i];
-    if (e === null || typeof e !== "object" || Array.isArray(e))
-      return [`refs[${i}] must be an object`];
-    if (typeof e["kind"] !== "string" || e["kind"].trim() === "")
-      return [`refs[${i}].kind must be non-empty`];
-    if (typeof e["key"] !== "string" || e["key"].trim() === "")
-      return [`refs[${i}].key must be non-empty`];
-  }
-  return [];
-}
-var JOURNAL_KINDS;
-var init_journal = __esm(() => {
-  init_esm2();
-  JOURNAL_KINDS = [
-    "checkpoint",
-    "handoff",
-    "milestone",
-    "decision",
-    "finding",
-    "blocker",
-    "compaction"
-  ];
-});
-
-// ../../../../xtrm/packages/substrate/src/service/journal-service.ts
-function row2(db, sql8, ...params) {
-  return db.prepare(sql8).get(...params);
-}
-function rows2(db, sql8, ...params) {
-  return db.prepare(sql8).all(...params);
-}
-function trunc(s, max = 2000) {
-  return s.length > max ? `${s.slice(0, max)}\u2026` : s;
-}
-
-class JournalService {
-  db;
-  issues;
-  constructor(db, issues) {
-    this.db = db;
-    this.issues = issues;
-  }
-  appendEntry(issueId, input2) {
-    if (!isJournalKind(input2.kind))
-      throw new Error(`unknown journal kind: ${String(input2.kind)}`);
-    if (input2.refs !== undefined) {
-      const problems = validateEvidenceRefs(input2.refs);
-      if (problems.length > 0)
-        throw new Error(`invalid journal refs: ${problems[0]}`);
-    }
-    if (input2.semantic !== undefined)
-      assertSemanticCheckpoint(input2.semantic);
-    if (input2.mechanical !== undefined) {
-      const problems = validateMechanicalCheckpoint(input2.mechanical);
-      if (problems.length > 0)
-        throw new Error(`invalid mechanical checkpoint: ${problems[0]}`);
-      if (input2.mechanical.issueId !== issueId) {
-        throw new Error("mechanical.issueId must match the appended issue");
-      }
-    }
-    if ((input2.kind === "checkpoint" || input2.kind === "compaction") && input2.mechanical === undefined) {
-      throw new Error(`journal kind "${input2.kind}" requires a mechanical checkpoint (\xA720.4)`);
-    }
-    return withTransaction(this.db, () => {
-      const issue2 = this.issues.getIssue(issueId);
-      const prev = row2(this.db, "SELECT MAX(sequence) AS m FROM issue_journal WHERE issue_id = ?", issueId);
-      const sequence = (prev?.m ?? 0) + 1;
-      const now = Date.now();
-      const id = newJournalEntryId();
-      this.db.prepare(`INSERT INTO issue_journal
-             (id, issue_id, issue_revision, sequence, run_id, participant_id,
-              activation_id, session_id, kind, mechanical_json, semantic_json,
-              refs_json, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, issueId, issue2.currentRevision, sequence, input2.runId ?? null, input2.participantId ?? null, input2.activationId ?? null, input2.sessionId ?? null, input2.kind, input2.mechanical ? JSON.stringify(input2.mechanical) : null, input2.semantic ? JSON.stringify(input2.semantic) : null, JSON.stringify(input2.refs ?? []), now);
-      this.issues.appendEvent(issueId, "journal.appended", { entry: id, sequence, kind: input2.kind });
-      return this.requireEntry(id);
-    });
-  }
-  getEntry(id) {
-    return this.requireEntry(id);
-  }
-  listEntries(issueId, opts) {
-    this.issues.getIssue(issueId);
-    let sql8 = "SELECT * FROM issue_journal WHERE issue_id = ?";
-    const params = [issueId];
-    if (opts?.kind !== undefined) {
-      if (!isJournalKind(opts.kind))
-        throw new Error(`unknown journal kind: ${String(opts.kind)}`);
-      sql8 += " AND kind = ?";
-      params.push(opts.kind);
-    }
-    sql8 += " ORDER BY sequence";
-    if (opts?.limit !== undefined) {
-      if (!Number.isInteger(opts.limit) || opts.limit <= 0)
-        throw new Error("limit must be a positive integer");
-      sql8 += " LIMIT ?";
-      params.push(opts.limit);
-    }
-    return rows2(this.db, sql8, ...params).map((r) => this.toEntry(r));
-  }
-  since(issueId, cursor) {
-    if (!Number.isInteger(cursor) || cursor < 0)
-      throw new Error("cursor must be a non-negative integer sequence");
-    this.issues.getIssue(issueId);
-    const entries = rows2(this.db, "SELECT * FROM issue_journal WHERE issue_id = ? AND sequence > ? ORDER BY sequence", issueId, cursor).map((r) => this.toEntry(r));
-    const top = row2(this.db, "SELECT MAX(sequence) AS m FROM issue_journal WHERE issue_id = ?", issueId);
-    return { issueId, afterSequence: cursor, entries, nextCursor: top?.m ?? cursor };
-  }
-  latestCheckpoint(issueId) {
-    this.issues.getIssue(issueId);
-    const r = row2(this.db, "SELECT * FROM issue_journal WHERE issue_id = ? AND kind IN ('checkpoint', 'compaction') ORDER BY sequence DESC LIMIT 1", issueId);
-    return r ? this.toEntry(r) : null;
-  }
-  collectMechanical(issueId, input2 = {}) {
-    const issue2 = this.issues.getIssue(issueId);
-    const claim = this.issues.getActiveClaim(issueId);
-    const pendingBlockers = this.issues.unsatisfiedBlockers(issueId);
-    const childSummary = this.issues.listChildren(issueId).map((c) => {
-      let checkpointRef = null;
-      try {
-        const latest = this.latestCheckpoint(c.id);
-        checkpointRef = latest ? `${latest.id}#${latest.sequence}` : null;
-      } catch {
-        checkpointRef = null;
-      }
-      return {
-        issueId: c.id,
-        locator: c.locator,
-        lifecycleState: c.lifecycleState,
-        revision: c.currentRevision,
-        checkpointRef,
-        blockedBy: this.issues.unsatisfiedBlockers(c.id)
-      };
-    });
-    const now = Date.now();
-    const merged = {
-      issueId,
-      issueRevision: issue2.currentRevision,
-      contractHash: issue2.currentContractHash,
-      collectedAt: now,
-      claimHolder: claim?.holder ?? null,
-      claimActivationId: claim?.activationId ?? null,
-      claimExpiresAt: claim?.expiresAt ?? null,
-      participantId: input2.participantId ?? null,
-      activationId: input2.activationId ?? null,
-      sessionId: input2.sessionId ?? null,
-      runId: input2.runId ?? null,
-      workspace: input2.workspace ?? null,
-      branch: input2.branch ?? null,
-      baseCommit: input2.baseCommit ?? null,
-      headCommit: input2.headCommit ?? null,
-      changedFiles: input2.changedFiles ?? [],
-      commitsSincePrevious: input2.commitsSincePrevious ?? [],
-      pendingBlockers,
-      childSummary,
-      specialistRefs: input2.specialistRefs ?? [],
-      pendingAsks: input2.pendingAsks ?? [],
-      externalBindings: input2.externalBindings ?? [],
-      cursor: null,
-      ...input2.mechanical
-    };
-    merged.issueId = issueId;
-    merged.issueRevision = issue2.currentRevision;
-    merged.contractHash = issue2.currentContractHash;
-    return merged;
-  }
-  enrichEntry(entryId, semantic) {
-    assertSemanticCheckpoint(semantic);
-    return withTransaction(this.db, () => {
-      const current = this.requireEntry(entryId);
-      this.db.prepare("UPDATE issue_journal SET semantic_json = ? WHERE id = ?").run(JSON.stringify(semantic), entryId);
-      this.issues.appendEvent(current.issueId, "journal.checkpoint_enriched", { entry: entryId, sequence: current.sequence });
-      return this.requireEntry(entryId);
-    });
-  }
-  async checkpoint(issueId, opts = {}) {
-    const kind = opts.kind ?? "checkpoint";
-    const mechanical = this.collectMechanical(issueId, opts);
-    const entry = this.appendEntry(issueId, {
-      kind,
-      runId: opts.runId,
-      participantId: opts.participantId,
-      activationId: opts.activationId,
-      sessionId: opts.sessionId,
-      mechanical,
-      refs: opts.refs
-    });
-    withTransaction(this.db, () => {
-      const stored = this.requireEntry(entry.id);
-      this.db.prepare("UPDATE issue_journal SET mechanical_json = ? WHERE id = ?").run(JSON.stringify({ ...stored.mechanical, cursor: stored.sequence }), entry.id);
-    });
-    const persisted = this.requireEntry(entry.id);
-    if (!opts.summarizer)
-      return { entry: persisted, degraded: false };
-    try {
-      const semantic = await opts.summarizer(persisted, persisted.mechanical);
-      const enriched = this.enrichEntry(persisted.id, semantic);
-      return { entry: enriched, degraded: false };
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      try {
-        this.issues.appendEvent(issueId, "journal.checkpoint_degraded", {
-          entry: persisted.id,
-          sequence: persisted.sequence,
-          reason
-        });
-      } catch {}
-      return { entry: persisted, degraded: true, reason };
-    }
-  }
-  async compactionCheckpoint(issueId, opts = {}) {
-    try {
-      const result = await this.checkpoint(issueId, opts);
-      return { ...result, fallbackToDefault: result.degraded };
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      return { entry: null, degraded: true, reason, fallbackToDefault: true };
-    }
-  }
-  renderCheckpoint(entry) {
-    const lines = [`CHECKPOINT ${entry.id} seq${entry.sequence} ${entry.kind} rev${entry.issueRevision}`];
-    const m = entry.mechanical;
-    if (m) {
-      const bits = [`rev${m.issueRevision} ${m.contractHash.slice(0, 12)}`];
-      if (m.claimHolder)
-        bits.push(`claim ${m.claimHolder}`);
-      if (m.pendingBlockers?.length)
-        bits.push(`blockers ${m.pendingBlockers.join(",")}`);
-      if (m.childSummary?.length) {
-        bits.push(`children ${m.childSummary.map((c) => `${c.locator ?? c.issueId}:${c.lifecycleState ?? "?"}`).join(",")}`);
-      }
-      if (m.headCommit)
-        bits.push(`head ${m.headCommit.slice(0, 12)}`);
-      lines.push(`MECHANICAL: ${bits.join("; ")}`);
-    }
-    const s = entry.semantic;
-    if (!s) {
-      lines.push("SEMANTIC: (mechanical-only; summarizer pending or degraded)");
-      return lines.join(`
-`);
-    }
-    lines.push(`SUMMARY: ${trunc(s.summary)}`);
-    if (s.completed?.length)
-      lines.push(`COMPLETED: ${s.completed.map((e) => trunc(e, 500)).join(" | ")}`);
-    if (s.current)
-      lines.push(`CURRENT: ${trunc(s.current, 500)}`);
-    if (s.next?.length)
-      lines.push(`NEXT: ${s.next.map((e) => trunc(e, 500)).join(" | ")}`);
-    if (s.blocked?.length)
-      lines.push(`BLOCKED: ${s.blocked.map((e) => trunc(e, 500)).join(" | ")}`);
-    if (s.openQuestions?.length)
-      lines.push(`OPEN QUESTIONS: ${s.openQuestions.map((e) => trunc(e, 500)).join(" | ")}`);
-    if (s.keyDecisions?.length)
-      lines.push(`DECISIONS: ${s.keyDecisions.map((e) => trunc(e, 500)).join(" | ")}`);
-    if (s.materialFindings?.length)
-      lines.push(`FINDINGS: ${s.materialFindings.map((e) => trunc(e, 500)).join(" | ")}`);
-    return lines.join(`
-`);
-  }
-  requireEntry(id) {
-    const r = row2(this.db, "SELECT * FROM issue_journal WHERE id = ?", id);
-    if (!r)
-      throw new Error(`unknown journal entry: ${id}`);
-    return this.toEntry(r);
-  }
-  toEntry(r) {
-    const kind = r["kind"];
-    if (!isJournalKind(kind))
-      throw new Error(`fail-closed: corrupt journal kind on ${r["id"]}`);
-    let semantic = null;
-    if (r["semantic_json"] != null) {
-      let parsed;
-      try {
-        parsed = JSON.parse(r["semantic_json"]);
-      } catch {
-        throw new Error(`fail-closed: corrupt semantic checkpoint on ${r["id"]}`);
-      }
-      const problems = validateSemanticCheckpoint(parsed);
-      if (problems.length > 0)
-        throw new Error(`fail-closed: invalid semantic checkpoint on ${r["id"]}: ${problems[0]}`);
-      semantic = parsed;
-    }
-    let mechanical = null;
-    if (r["mechanical_json"] != null) {
-      try {
-        mechanical = JSON.parse(r["mechanical_json"]);
-      } catch {
-        throw new Error(`fail-closed: corrupt mechanical checkpoint on ${r["id"]}`);
-      }
-    }
-    let refs = [];
-    try {
-      refs = JSON.parse(r["refs_json"] ?? "[]");
-    } catch {
-      throw new Error(`fail-closed: corrupt journal refs on ${r["id"]}`);
-    }
-    return {
-      id: r["id"],
-      issueId: r["issue_id"],
-      issueRevision: r["issue_revision"],
-      sequence: r["sequence"],
-      runId: r["run_id"] ?? null,
-      participantId: r["participant_id"] ?? null,
-      activationId: r["activation_id"] ?? null,
-      sessionId: r["session_id"] ?? null,
-      kind,
-      mechanical,
-      semantic,
-      refs,
-      createdAt: r["created_at"]
-    };
-  }
-}
-var init_journal_service = __esm(() => {
-  init_transactions();
-  init_journal();
-});
-
-// ../../../../xtrm/packages/substrate/src/domain/execution-binding.ts
-function newExecutionBindingId() {
-  return `exb_${v7_default()}`;
-}
-function validateDispatchInput(input2) {
-  const problems = [];
-  if (input2 === null || typeof input2 !== "object" || Array.isArray(input2))
-    return ["dispatch input must be an object"];
-  const d = input2;
-  const ws = d["workspace"];
-  if (typeof ws !== "string" && (ws === null || typeof ws !== "object" || Array.isArray(ws))) {
-    problems.push("workspace must be a non-empty path or WorkspaceIdentity");
-  } else if (typeof ws === "string" && ws.trim() === "") {
-    problems.push("workspace must be a non-empty path or WorkspaceIdentity");
-  }
-  for (const f of ["participantId", "activationId", "attemptId", "sessionId", "baseCommit"]) {
-    if (d[f] !== undefined && d[f] !== null && (typeof d[f] !== "string" || d[f].trim() === "")) {
-      problems.push(`${f} must be a non-empty string when present`);
-    }
-  }
-  if (d["claimId"] !== undefined && d["claimId"] !== null && !Number.isInteger(d["claimId"])) {
-    problems.push("claimId must be an integer when present");
-  }
-  return problems;
-}
-var init_execution_binding = __esm(() => {
-  init_esm2();
-});
-
-// ../../../../xtrm/packages/substrate/src/domain/provenance.ts
-function newWorkReceiptId() {
-  return `rcp_${v7_default()}`;
-}
-function newBundleId() {
-  return `bnd_${v7_default()}`;
-}
-function isValidSha(value) {
-  return typeof value === "string" && /^[0-9a-f]{40}$/.test(value);
-}
-function isValidReceiptId(value) {
-  return typeof value === "string" && value.startsWith("rcp_") && value.length > 8;
-}
-function isArtifactKind(value) {
-  return typeof value === "string" && ARTIFACT_KINDS.includes(value);
-}
-function formatTrailers(input2) {
-  return `${TRAILER_ISSUE}: ${input2.issueId}
-${TRAILER_REVISION}: ${input2.issueRevision}
-${TRAILER_RECEIPT}: ${input2.receiptId}`;
-}
-function attachTrailers(message, trailers) {
-  if (message.includes(`${TRAILER_RECEIPT}:`))
-    return message;
-  const trimmed = message.replace(/\s+$/, "");
-  return `${trimmed}
-
-${trailers}
-`;
-}
-var TRAILER_ISSUE = "XTRM-Issue", TRAILER_REVISION = "XTRM-Issue-Revision", TRAILER_RECEIPT = "XTRM-Receipt", ARTIFACT_KINDS;
-var init_provenance = __esm(() => {
-  init_esm2();
-  ARTIFACT_KINDS = ["commit", "pr", "validation", "review", "artifact", "bundle"];
-});
-
-// ../../../../xtrm/packages/substrate/src/service/provenance-service.ts
-import { mkdirSync as mkdirSync22, writeFileSync as writeFileSync25 } from "fs";
-import { join as join55 } from "path";
-function row3(db, sql8, ...params) {
-  return db.prepare(sql8).get(...params);
-}
-function rows3(db, sql8, ...params) {
-  return db.prepare(sql8).all(...params);
-}
-function trunc2(s, max = 500) {
-  return s.length > max ? `${s.slice(0, max)}\u2026` : s;
-}
-
-class ProvenanceService {
-  db;
-  issues;
-  journal;
-  constructor(db, issues, journal) {
-    this.db = db;
-    this.issues = issues;
-    this.journal = journal ?? null;
-  }
-  dispatch(issueId, input2, opts) {
-    const problems = validateDispatchInput(input2);
-    if (problems.length > 0)
-      throw new Error(`invalid dispatch input: ${problems[0]}`);
-    const workspace = normalizeWorkspace(input2.workspace);
-    if (input2.baseCommit !== undefined && input2.baseCommit !== null && !isValidSha(input2.baseCommit)) {
-      throw new Error("baseCommit must be a 40-char hex SHA when present");
-    }
-    const now = opts?.now ?? Date.now();
-    return withTransaction(this.db, () => {
-      const report = this.issues.getReadiness(issueId, { now });
-      if (report.state !== "ready" && report.state !== "claimed") {
-        throw new Error(`not dispatchable: ${issueId} is ${report.state}: ${report.reasons.join("; ")}`);
-      }
-      const resolved = this.issues.getResolvedContext(issueId);
-      const active = this.issues.getActiveClaim(issueId, { now });
-      if (input2.claimId !== undefined && input2.claimId !== null) {
-        if (!active || active.id !== input2.claimId)
-          throw new Error(`dispatch rejected: claim ${input2.claimId} is not the live claim on ${issueId}`);
-      }
-      const id = newExecutionBindingId();
-      this.db.prepare(`INSERT INTO execution_bindings
-             (id, issue_id, issue_revision, contract_hash, resolved_context_hash,
-              claim_id, participant_id, activation_id, attempt_id, session_id,
-              workspace, base_commit, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, issueId, report.revision, report.contractHash, resolved.hash, active?.id ?? null, input2.participantId ?? null, input2.activationId ?? null, input2.attemptId ?? null, input2.sessionId ?? null, workspace, input2.baseCommit ?? null, now);
-      this.issues.appendEvent(issueId, "provenance.dispatched", {
-        binding: id,
-        revision: report.revision,
-        contractHash: report.contractHash,
-        claim: active?.id ?? null
-      });
-      return this.requireBinding(id);
-    });
-  }
-  getBinding(id) {
-    return this.requireBinding(id);
-  }
-  listBindings(issueId) {
-    this.issues.getIssue(issueId);
-    return rows3(this.db, "SELECT * FROM execution_bindings WHERE issue_id = ? ORDER BY created_at, id", issueId).map((r) => this.toBinding(r));
-  }
-  allocateReceipt(bindingId, opts) {
-    if (opts?.validationRefs !== undefined) {
-      for (const ref of opts.validationRefs) {
-        if (!isArtifactKind(ref?.kind))
-          throw new Error(`invalid validation ref kind: ${String(ref?.kind)}`);
-        if (typeof ref?.value !== "string" || ref.value.trim() === "")
-          throw new Error("validation ref value must be non-empty");
-      }
-    }
-    const now = opts?.now ?? Date.now();
-    return withTransaction(this.db, () => {
-      const binding = this.requireBinding(bindingId);
-      const id = newWorkReceiptId();
-      this.db.prepare(`INSERT INTO work_receipts
-             (id, execution_binding_id, issue_id, issue_revision, contract_hash,
-              journal_checkpoint_id, validation_refs_json, commit_sha, created_at, finalized_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL)`).run(id, bindingId, binding.issueId, binding.issueRevision, binding.contractHash, opts?.journalCheckpointId ?? null, JSON.stringify(opts?.validationRefs ?? []), now);
-      this.issues.appendEvent(binding.issueId, "provenance.receipt_allocated", {
-        receipt: id,
-        binding: bindingId,
-        revision: binding.issueRevision
-      });
-      return this.requireReceipt(id);
-    });
-  }
-  getReceipt(id) {
-    if (!isValidReceiptId(id))
-      throw new Error(`unknown receipt: ${id}`);
-    return this.requireReceipt(id);
-  }
-  listReceipts(issueId) {
-    this.issues.getIssue(issueId);
-    return rows3(this.db, "SELECT * FROM work_receipts WHERE issue_id = ? ORDER BY created_at, id", issueId).map((r) => this.toReceipt(r));
-  }
-  bindCommit(receiptId, sha, opts) {
-    if (!isValidSha(sha))
-      throw new Error(`invalid commit SHA: ${String(sha)}`);
-    const now = opts?.now ?? Date.now();
-    return withTransaction(this.db, () => {
-      const receipt = this.requireReceipt(receiptId);
-      this.db.prepare("INSERT OR IGNORE INTO artifact_bindings (receipt_id, kind, value, provider, created_at, superseded_at) VALUES (?, 'commit', ?, NULL, ?, NULL)").run(receiptId, sha, now);
-      this.db.prepare("UPDATE work_receipts SET commit_sha = ?, finalized_at = ? WHERE id = ?").run(sha, now, receiptId);
-      this.issues.appendEvent(receipt.issueId, "provenance.receipt_bound", { receipt: receiptId, sha });
-      return this.requireReceipt(receiptId);
-    });
-  }
-  reconcileRewrite(oldSha, newSha, opts) {
-    if (!isValidSha(oldSha))
-      throw new Error(`invalid old SHA: ${String(oldSha)}`);
-    if (!isValidSha(newSha))
-      throw new Error(`invalid new SHA: ${String(newSha)}`);
-    if (oldSha === newSha)
-      return { reconciled: 0 };
-    const now = opts?.now ?? Date.now();
-    return withTransaction(this.db, () => {
-      const stale = rows3(this.db, "SELECT * FROM artifact_bindings WHERE kind = 'commit' AND value = ? AND superseded_at IS NULL ORDER BY id", oldSha);
-      for (const s of stale) {
-        this.db.prepare("UPDATE artifact_bindings SET superseded_at = ? WHERE id = ?").run(now, s["id"]);
-        this.db.prepare("INSERT OR IGNORE INTO artifact_bindings (receipt_id, kind, value, provider, created_at, superseded_at) VALUES (?, 'commit', ?, NULL, ?, NULL)").run(s["receipt_id"], newSha, now);
-        const receipt = this.requireReceipt(s["receipt_id"]);
-        if (receipt.commitSha === oldSha) {
-          this.db.prepare("UPDATE work_receipts SET commit_sha = ?, finalized_at = ? WHERE id = ?").run(newSha, now, receipt.id);
-        }
-        this.issues.appendEvent(receipt.issueId, "provenance.receipt_rewritten", {
-          receipt: receipt.id,
-          from: oldSha,
-          to: newSha
-        });
-      }
-      return { reconciled: stale.length };
-    });
-  }
-  attachArtifact(receiptId, kind, value, opts) {
-    if (!isArtifactKind(kind))
-      throw new Error(`unknown artifact kind: ${String(kind)}`);
-    if (kind === "commit")
-      throw new Error("use bindCommit for commit SHAs (SHA-validated finalization)");
-    if (typeof value !== "string" || value.trim() === "")
-      throw new Error("artifact value must be non-empty");
-    const now = opts?.now ?? Date.now();
-    return withTransaction(this.db, () => {
-      const receipt = this.requireReceipt(receiptId);
-      this.db.prepare("INSERT OR IGNORE INTO artifact_bindings (receipt_id, kind, value, provider, created_at, superseded_at) VALUES (?, ?, ?, ?, ?, NULL)").run(receiptId, kind, value, opts?.provider ?? null, now);
-      this.issues.appendEvent(receipt.issueId, "provenance.artifact_attached", { receipt: receiptId, kind, value });
-      return this.toArtifact(row3(this.db, "SELECT * FROM artifact_bindings WHERE receipt_id = ? AND kind = ? AND value = ?", receiptId, kind, value));
-    });
-  }
-  listArtifacts(receiptId, opts) {
-    this.requireReceipt(receiptId);
-    const liveOnly = opts?.liveOnly ?? true;
-    return rows3(this.db, liveOnly ? "SELECT * FROM artifact_bindings WHERE receipt_id = ? AND superseded_at IS NULL ORDER BY id" : "SELECT * FROM artifact_bindings WHERE receipt_id = ? ORDER BY id", receiptId).map((r) => this.toArtifact(r));
-  }
-  findByCommit(sha) {
-    if (!isValidSha(sha))
-      return [];
-    const hits = rows3(this.db, "SELECT receipt_id FROM artifact_bindings WHERE kind = 'commit' AND value = ? AND superseded_at IS NULL ORDER BY id", sha);
-    return hits.map((h) => {
-      const receipt = this.requireReceipt(h["receipt_id"]);
-      return { receipt, binding: this.requireBinding(receipt.executionBindingId) };
-    });
-  }
-  findByPr(ref) {
-    if (typeof ref !== "string" || ref.trim() === "")
-      return [];
-    const hits = rows3(this.db, "SELECT receipt_id FROM artifact_bindings WHERE kind = 'pr' AND value = ? AND superseded_at IS NULL ORDER BY id", ref);
-    return hits.map((h) => {
-      const receipt = this.requireReceipt(h["receipt_id"]);
-      return { receipt, binding: this.requireBinding(receipt.executionBindingId) };
-    });
-  }
-  trace(issueId) {
-    const issue2 = this.issues.getIssue(issueId);
-    const bindings = this.listBindings(issueId);
-    const receipts = this.listReceipts(issueId).map((r) => ({ ...r, artifacts: this.listArtifacts(r.id) }));
-    const checkpoints = this.checkpointSummaries(issueId);
-    const commits = [...new Set(receipts.flatMap((r) => r.artifacts).filter((a) => a.kind === "commit").map((a) => a.value))];
-    const prs = receipts.flatMap((r) => r.artifacts).filter((a) => a.kind === "pr").map((a) => ({ value: a.value, provider: a.provider }));
-    const closed = issue2.lifecycleState === "done" || issue2.lifecycleState === "cancelled" || issue2.lifecycleState === "archived";
-    return {
-      issueId,
-      locator: issue2.locator,
-      humanRef: issue2.humanRef,
-      revision: issue2.currentRevision,
-      contractHash: issue2.currentContractHash,
-      lifecycleState: issue2.lifecycleState,
-      attestation: this.issues.latestAttestation(issueId),
-      claims: this.issues.listClaims(issueId),
-      bindings,
-      receipts,
-      checkpoints,
-      commits,
-      prs,
-      externalBindings: this.listExternal(issueId),
-      closureRevision: closed ? issue2.currentRevision : null
-    };
-  }
-  generateBundle(issueId, opts) {
-    const now = opts?.now ?? Date.now();
-    const repoRoot = opts?.repoRoot ?? process.cwd();
-    const bundle = withTransaction(this.db, () => this.buildBundle(issueId, now));
-    const path3 = join55(repoRoot, BUNDLE_DIR, `${bundle.bundleId}.json`);
-    mkdirSync22(join55(repoRoot, BUNDLE_DIR), { recursive: true });
-    writeFileSync25(path3, JSON.stringify(bundle, null, 2) + `
-`);
-    return { bundle, path: path3 };
-  }
-  trailersForCommit(receiptId, message) {
-    const receipt = this.requireReceipt(receiptId);
-    return attachTrailers(message, formatTrailers({
-      issueId: receipt.issueId,
-      issueRevision: receipt.issueRevision,
-      receiptId: receipt.id
-    }));
-  }
-  buildBundle(issueId, now) {
-    const issue2 = this.issues.getIssue(issueId);
-    const bindings = this.listBindings(issueId);
-    if (bindings.length === 0)
-      throw new Error(`no execution binding for ${issueId}: nothing to bundle`);
-    const anchor = bindings[bindings.length - 1];
-    const revision = this.issues.getRevision(issueId, anchor.issueRevision);
-    const receipts = this.listReceipts(issueId).map((r) => ({ ...r, artifacts: this.listArtifacts(r.id) }));
-    const commits = [...new Set(receipts.flatMap((r) => r.artifacts).filter((a) => a.kind === "commit").map((a) => a.value))];
-    const validationRefs = receipts.flatMap((r) => r.validationRefs);
-    for (const r of receipts) {
-      for (const a of r.artifacts) {
-        if (a.kind === "validation")
-          validationRefs.push({ kind: a.kind, value: a.value, provider: a.provider });
-      }
-    }
-    const reviewRefs = receipts.flatMap((r) => r.artifacts).filter((a) => a.kind === "review").map((a) => ({ kind: a.kind, value: a.value, provider: a.provider }));
-    return {
-      bundleId: newBundleId(),
-      issueId,
-      issueRevision: anchor.issueRevision,
-      contractHash: anchor.contractHash,
-      contract: revision.contract,
-      executionBindingIds: bindings.map((b) => b.id),
-      checkpointSummaries: this.checkpointSummaries(issueId),
-      commitShas: commits,
-      validationRefs,
-      reviewRefs,
-      externalBindings: this.listExternal(issueId),
-      createdAt: now
-    };
-  }
-  checkpointSummaries(issueId) {
-    if (!this.journal)
-      return [];
-    return this.journal.listEntries(issueId).filter((e) => e.kind === "checkpoint" || e.kind === "compaction").map((e) => ({
-      entryId: e.id,
-      sequence: e.sequence,
-      kind: e.kind,
-      issueRevision: e.issueRevision,
-      summary: e.semantic ? trunc2(e.semantic.summary) : null
-    }));
-  }
-  listExternal(issueId) {
-    try {
-      return rows3(this.db, "SELECT provider, remote_scope, remote_id, url FROM external_bindings WHERE issue_id = ? ORDER BY provider, remote_scope, remote_id", issueId).map((r) => ({
-        provider: r["provider"],
-        scope: r["remote_scope"],
-        remoteId: r["remote_id"],
-        url: r["url"] ?? null
-      }));
-    } catch {
-      return [];
-    }
-  }
-  requireBinding(id) {
-    const r = row3(this.db, "SELECT * FROM execution_bindings WHERE id = ?", id);
-    if (!r)
-      throw new Error(`unknown execution binding: ${id}`);
-    return this.toBinding(r);
-  }
-  requireReceipt(id) {
-    if (!isValidReceiptId(id))
-      throw new Error(`unknown receipt: ${id}`);
-    const r = row3(this.db, "SELECT * FROM work_receipts WHERE id = ?", id);
-    if (!r)
-      throw new Error(`unknown receipt: ${id}`);
-    return this.toReceipt(r);
-  }
-  toBinding(r) {
-    return {
-      id: r["id"],
-      issueId: r["issue_id"],
-      issueRevision: r["issue_revision"],
-      contractHash: r["contract_hash"],
-      resolvedContextHash: r["resolved_context_hash"],
-      claimId: r["claim_id"] ?? null,
-      participantId: r["participant_id"] ?? null,
-      activationId: r["activation_id"] ?? null,
-      attemptId: r["attempt_id"] ?? null,
-      sessionId: r["session_id"] ?? null,
-      workspace: r["workspace"],
-      baseCommit: r["base_commit"] ?? null,
-      createdAt: r["created_at"]
-    };
-  }
-  toReceipt(r) {
-    let validationRefs = [];
-    try {
-      validationRefs = JSON.parse(r["validation_refs_json"] ?? "[]");
-    } catch {
-      throw new Error(`fail-closed: corrupt validation refs on ${r["id"]}`);
-    }
-    return {
-      id: r["id"],
-      executionBindingId: r["execution_binding_id"],
-      issueId: r["issue_id"],
-      issueRevision: r["issue_revision"],
-      contractHash: r["contract_hash"],
-      journalCheckpointId: r["journal_checkpoint_id"] ?? null,
-      validationRefs,
-      commitSha: r["commit_sha"] ?? null,
-      createdAt: r["created_at"],
-      finalizedAt: r["finalized_at"] ?? null
-    };
-  }
-  toArtifact(r) {
-    const kind = r["kind"];
-    if (!isArtifactKind(kind))
-      throw new Error(`fail-closed: corrupt artifact kind on ${r["id"]}`);
-    return {
-      id: r["id"],
-      receiptId: r["receipt_id"],
-      kind,
-      value: r["value"],
-      provider: r["provider"] ?? null,
-      createdAt: r["created_at"],
-      supersededAt: r["superseded_at"] ?? null
-    };
-  }
-}
-var BUNDLE_DIR = ".xtrm/provenance/bundles";
-var init_provenance_service = __esm(() => {
-  init_transactions();
-  init_claim();
-  init_execution_binding();
-  init_provenance();
-});
-
-// ../../../../xtrm/packages/substrate/src/workitems/substrate-store.ts
-function toClaim(c) {
-  return { issueId: c.issueId, holder: c.holder, claimId: c.id, expiresAt: c.expiresAt, generation: c.generation };
-}
-
-class SubstrateIssueStore {
-  backend = "substrate";
-  issues;
-  journal;
-  constructor(issues, journal) {
-    this.issues = issues;
-    this.journal = journal;
-  }
-  view(id) {
-    const issue2 = this.issues.getIssue(id);
-    const readiness = this.issues.getReadiness(id);
-    const revision = this.issues.getRevision(id, issue2.currentRevision);
-    return {
-      issue: issue2,
-      contract: revision.contract,
-      readinessState: readiness.state,
-      dispatchable: readiness.dispatchable,
-      reasons: readiness.reasons
-    };
-  }
-  get(ref) {
-    return this.view(this.issues.resolveRef(ref).id);
-  }
-  search(project2, query, kind) {
-    const q = (query ?? "").toLowerCase();
-    return this.issues.listIssues(project2).filter((i) => kind ? i.kind === kind : true).filter((i) => q ? `${i.title} ${i.humanRef} ${i.locator}`.toLowerCase().includes(q) : true).map((i) => this.view(i.id));
-  }
-  ready(project2) {
-    return this.issues.listIssues(project2).map((i) => this.view(i.id)).filter((v) => v.dispatchable);
-  }
-  validate(ref) {
-    return this.view(this.issues.resolveRef(ref).id);
-  }
-  resolveContext(ref) {
-    const resolved = this.issues.getResolvedContext(this.issues.resolveRef(ref).id);
-    return { hash: resolved.hash, entryCount: resolved.entries.length };
-  }
-  claim(ref, holder, opts) {
-    const id = this.issues.resolveRef(ref).id;
-    return toClaim(this.issues.claimIssue(id, holder, { activationId: opts?.activationId, ttlMs: opts?.ttlMs }));
-  }
-  claimReady(ref, holder, attestation, opts) {
-    const id = this.issues.resolveRef(ref).id;
-    const { attestation: att, claim } = this.issues.claimReady(id, holder, attestation, {
-      activationId: opts?.activationId,
-      ttlMs: opts?.ttlMs
-    });
-    return { claim: toClaim(claim), attestedRevision: att.issueRevision };
-  }
-  renew(ref, holder, opts) {
-    const id = this.issues.resolveRef(ref).id;
-    return toClaim(this.issues.renewClaim(id, holder, { activationId: opts?.activationId }));
-  }
-  release(ref, holder, opts) {
-    const id = this.issues.resolveRef(ref).id;
-    return this.issues.releaseClaim(id, holder, { activationId: opts?.activationId }) !== null;
-  }
-  update(ref, contract, opts) {
-    const id = this.issues.resolveRef(ref).id;
-    const { issue: issue2, created } = this.issues.updateContract(id, contract, opts?.authoredBy ?? "workitem-store", {
-      expectedRevision: opts?.expectedRevision
-    });
-    return { view: this.view(issue2.id), revisionCreated: created };
-  }
-  addEdge(fromRef, toRef, kind) {
-    const from = this.issues.resolveRef(fromRef).id;
-    const to = this.issues.resolveRef(toRef).id;
-    if (kind === "parent_child") {
-      this.issues.setParent(to, from);
-      return { edgeId: null, kind };
-    }
-    const edge = this.issues.addEdge(from, to, kind);
-    return { edgeId: edge.id, kind: edge.kind };
-  }
-  addJournal(ref, kind, opts) {
-    if (!isJournalKind(kind))
-      throw new Error(`unknown journal kind: ${kind}`);
-    const id = this.issues.resolveRef(ref).id;
-    const entry = this.journal.appendEntry(id, {
-      kind,
-      sessionId: opts?.sessionId,
-      participantId: opts?.participantId,
-      activationId: opts?.activationId
-    });
-    return { entryId: entry.id, sequence: entry.sequence, kind: entry.kind };
-  }
-  async checkpoint(ref, input2) {
-    const id = this.issues.resolveRef(ref).id;
-    const result = await this.journal.checkpoint(id, {
-      sessionId: input2?.sessionId,
-      participantId: input2?.participantId,
-      activationId: input2?.activationId,
-      headCommit: input2?.headCommit,
-      changedFiles: input2?.changedFiles
-    });
-    return { entryId: result.entry.id, sequence: result.entry.sequence, kind: result.entry.kind };
-  }
-  close(ref) {
-    const id = this.issues.resolveRef(ref).id;
-    return this.view(this.issues.setLifecycleState(id, "done").id);
-  }
-  changesSince(ref, afterEventId) {
-    const id = this.issues.resolveRef(ref).id;
-    const events = this.issues.listEvents(id).filter((e) => e.id > afterEventId).map((e) => ({ id: e.id, type: e.type, createdAt: e.createdAt }));
-    return { issueId: id, afterEventId, events, nextCursor: events.length > 0 ? events[events.length - 1].id : afterEventId };
-  }
-}
-var init_substrate_store = __esm(() => {
-  init_journal();
-});
-
-// ../../../../xtrm/packages/substrate/src/workitems/dispatch-gate.ts
-function checkDispatch(issues, req) {
-  if (!req.specialist.trim())
-    throw new Error("dispatch rejected: specialist is required");
-  if (!req.holder.trim())
-    throw new Error("dispatch rejected: holder is required");
-  const id = issues.resolveRef(req.ref).id;
-  const report = issues.getReadiness(id);
-  if (report.state !== "ready" && report.state !== "claimed") {
-    throw new Error(`dispatch rejected: ${id} is ${report.state}: ${report.reasons.join("; ")}`);
-  }
-  if (req.requestedScope) {
-    const revision = issues.getRevision(id, report.revision);
-    const contract = revision.contract;
-    const contractScope = Array.isArray(contract.scope) ? contract.scope : [];
-    const { ok: ok4, expanded } = scopeCovers(contractScope, req.requestedScope);
-    if (!ok4)
-      throw new Error(`dispatch rejected: scope expansion outside contract SCOPE (\xA739.1): ${expanded.join(", ")}`);
-  }
-  return { issueId: id, revision: report.revision, contractHash: report.contractHash, report };
-}
-function dispatchToSpecialist(issues, provenance, req) {
-  const check2 = checkDispatch(issues, req);
-  const binding = provenance.dispatch(check2.issueId, {
-    claimId: req.claimId ?? null,
-    participantId: req.holder,
-    activationId: req.activationId ?? null,
-    attemptId: req.attemptId ?? null,
-    sessionId: req.sessionId ?? null,
-    workspace: req.workspace,
-    baseCommit: req.baseCommit ?? null
-  });
-  if (binding.issueRevision !== check2.revision || binding.contractHash !== check2.contractHash) {
-    throw new Error("dispatch rejected: binding diverged from the gated revision (concurrent edit; repair and retry)");
-  }
-  return { check: check2, binding };
-}
-var init_dispatch_gate = __esm(() => {
-  init_readiness();
-});
-
 // src/activation/workitem-store.ts
 import { createRequire as createRequire5 } from "module";
 import { homedir as homedir16 } from "os";
-import { join as join56 } from "path";
+import { join as join55 } from "path";
+import { pathToFileURL } from "url";
 function resolveWorkItemDbPath(env = process.env) {
   const override = (env.XTRM_STATE_DB ?? "").trim();
   if (override)
     return override;
-  return join56(homedir16(), ".xtrm", "state.db");
+  return join55(homedir16(), ".xtrm", "state.db");
 }
 function openSubstrateDb(dbPath) {
   const applyPragmas = (db) => {
@@ -79966,20 +77209,10 @@ function openSubstrateDb(dbPath) {
   }
   throw new Error(`work-item store: no sqlite driver for ${dbPath}`);
 }
-
-class SubstrateWorkItemsBoundary {
-  issues;
-  journalSvc;
-  provenance;
-  store;
-  constructor(issues, journalSvc, provenance, store) {
-    this.issues = issues;
-    this.journalSvc = journalSvc;
-    this.provenance = provenance;
-    this.store = store;
-  }
-  viewOf(ref) {
-    const v = this.store.get(ref);
+function createWorkItemBoundary(ports) {
+  const { issues, provenance, store, gate } = ports;
+  const viewOf = (ref) => {
+    const v = store.get(ref);
     return {
       ref: v.issue.humanRef,
       issueId: v.issue.id,
@@ -79991,80 +77224,97 @@ class SubstrateWorkItemsBoundary {
       dispatchable: v.dispatchable,
       reasons: v.reasons
     };
-  }
-  view(ref) {
-    return this.viewOf(ref);
-  }
-  epicAncestors(ref, depth) {
-    if (depth !== 1 && depth !== 2)
-      return [];
-    const ancestors = [];
-    const seen = new Set;
-    let childId = this.issues.resolveRef(ref).id;
-    for (let i = 0;i < depth; i += 1) {
-      const parent = this.issues.getParent(childId);
-      if (!parent)
-        break;
-      if (seen.has(parent.id))
-        break;
-      seen.add(parent.id);
-      const rev = this.issues.getRevision(parent.id, parent.currentRevision);
-      ancestors.push({
-        ref: parent.humanRef,
-        title: parent.title,
-        description: typeof rev.contract === "object" && rev.contract !== null ? String(rev.contract.problem ?? "") : undefined
-      });
-      childId = parent.id;
-    }
-    return ancestors;
-  }
-  check(req) {
-    const check2 = checkDispatch(this.issues, req);
-    return { issueId: check2.issueId, revision: check2.revision, contractHash: check2.contractHash, report: check2.report };
-  }
-  bind(req) {
-    const claimId = this.issues.getActiveClaim(this.issues.resolveRef(req.ref).id)?.id ?? req.claimId ?? undefined;
-    const out = dispatchToSpecialist(this.issues, this.provenance, { ...req, claimId });
-    return out.binding;
-  }
-  inlineCreate(contract, opts = {}) {
-    const sections = extractSections(contract);
-    const missing = ["PROBLEM", "SUCCESS", "SCOPE", "NON_GOALS", "CONSTRAINTS", "VALIDATION", "OUTPUT"].filter((s) => !sections.get(s));
-    if (missing.length > 0) {
-      throw new Error(`inline contract is not a usable task contract: required sections are missing or empty: ${missing.join(", ")}`);
-    }
-    const scrutiny = (contract.match(/SCRUTINY\b[^\n]*\n?\s*\**\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i) ?? contract.match(/SCRUTINY\b\s*[:\-\u2014]?\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i))?.[1]?.toUpperCase();
-    if (!scrutiny) {
-      throw new Error("inline contract is not a usable task contract: SCRUTINY must be LOW, MEDIUM, HIGH, or CRITICAL");
-    }
-    const problem = sections.get("PROBLEM") ?? "";
-    const firstLine = problem.split(`
+  };
+  return {
+    view(ref) {
+      return viewOf(ref);
+    },
+    epicAncestors(ref, depth) {
+      if (depth !== 1 && depth !== 2)
+        return [];
+      const ancestors = [];
+      const seen = new Set;
+      let childId = issues.resolveRef(ref).id;
+      for (let i = 0;i < depth; i += 1) {
+        const parent = issues.getParent(childId);
+        if (!parent)
+          break;
+        if (seen.has(parent.id))
+          break;
+        seen.add(parent.id);
+        const rev = issues.getRevision(parent.id, parent.currentRevision);
+        ancestors.push({
+          ref: parent.humanRef,
+          title: parent.title,
+          description: typeof rev.contract === "object" && rev.contract !== null ? String(rev.contract.problem ?? "") : undefined
+        });
+        childId = parent.id;
+      }
+      return ancestors;
+    },
+    check(req) {
+      const check2 = gate.check(issues, req);
+      return { issueId: check2.issueId, revision: check2.revision, contractHash: check2.contractHash, report: check2.report };
+    },
+    bind(req) {
+      const issueId = issues.resolveRef(req.ref).id;
+      const active = issues.getActiveClaim(issueId);
+      if (active) {
+        if (active.holder !== req.holder) {
+          throw new Error(`dispatch refused: issue is claimed by '${active.holder}' \u2014 holder '${req.holder}' must claim first`);
+        }
+        const claimActivation = active.activationId ?? null;
+        const reqActivation = req.activationId ?? null;
+        if (claimActivation && claimActivation !== reqActivation) {
+          throw new Error("dispatch refused: active claim is bound to another activation \u2014 dispatch with the claim activation");
+        }
+        if (claimActivation && !reqActivation) {
+          throw new Error("dispatch refused: active claim carries an activation \u2014 omitting activationId to dodge the binding is not allowed");
+        }
+      }
+      const claimId = active?.id ?? req.claimId ?? undefined;
+      const out = gate.dispatch(issues, provenance, { ...req, claimId });
+      return out.binding;
+    },
+    inlineCreate(contract, opts = {}) {
+      const sections = extractSections(contract);
+      const missing = ["PROBLEM", "SUCCESS", "SCOPE", "NON_GOALS", "CONSTRAINTS", "VALIDATION", "OUTPUT"].filter((s) => !sections.get(s));
+      if (missing.length > 0) {
+        throw new Error(`inline contract is not a usable task contract: required sections are missing or empty: ${missing.join(", ")}`);
+      }
+      const scrutiny = (contract.match(/SCRUTINY\b[^\n]*\n?\s*\**\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i) ?? contract.match(/SCRUTINY\b\s*[:\-\u2014]?\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i))?.[1]?.toUpperCase();
+      if (!scrutiny) {
+        throw new Error("inline contract is not a usable task contract: SCRUTINY must be LOW, MEDIUM, HIGH, or CRITICAL");
+      }
+      const problem = sections.get("PROBLEM") ?? "";
+      const firstLine = problem.split(`
 `).map((s) => s.trim()).find(Boolean);
-    const contractObj = {
-      problem,
-      success: sections.get("SUCCESS") ?? "",
-      scope: splitLines(sections.get("SCOPE")),
-      nonGoals: splitLines(sections.get("NON_GOALS")),
-      constraints: splitLines(sections.get("CONSTRAINTS")),
-      validation: splitLines(sections.get("VALIDATION")).map((check2) => ({ check: check2 })),
-      output: splitLines(sections.get("OUTPUT")).map((artifact) => ({ artifact }))
-    };
-    const holder = opts.holder ?? "adapter::specialists";
-    const { projectId } = this.issues.resolveProject({ gitRoot: process.cwd() });
-    const issue2 = this.issues.createIssue({
-      projectId,
-      title: opts.title ?? (firstLine ?? "Specialist dispatch contract").slice(0, 72),
-      kind: "task",
-      contract: contractObj,
-      scrutiny,
-      authoredBy: holder
-    });
-    const { claim } = this.issues.claimReady(issue2.id, holder, { outcome: "ready", policy: "default", attestedBy: holder }, { activationId: opts.activationId });
-    return { ref: this.issues.resolveRef(issue2.id).humanRef, issueId: issue2.id, claimId: claim.id };
-  }
-  journal(ref, kind, opts = {}) {
-    this.store.addJournal(ref, kind, opts);
-  }
+      const contractObj = {
+        problem,
+        success: sections.get("SUCCESS") ?? "",
+        scope: splitLines(sections.get("SCOPE")),
+        nonGoals: splitLines(sections.get("NON_GOALS")),
+        constraints: splitLines(sections.get("CONSTRAINTS")),
+        validation: splitLines(sections.get("VALIDATION")).map((check2) => ({ check: check2 })),
+        output: splitLines(sections.get("OUTPUT")).map((artifact) => ({ artifact }))
+      };
+      const holder = opts.holder ?? "adapter::specialists";
+      const { projectId } = issues.resolveProject({ gitRoot: process.cwd() });
+      const issue2 = issues.createIssue({
+        projectId,
+        title: opts.title ?? (firstLine ?? "Specialist dispatch contract").slice(0, 72),
+        kind: "task",
+        contract: contractObj,
+        scrutiny,
+        authoredBy: holder
+      });
+      const { claim } = issues.claimReady(issue2.id, holder, { outcome: "ready", policy: "default", attestedBy: holder }, { activationId: opts.activationId });
+      return { ref: issues.resolveRef(issue2.id).humanRef, issueId: issue2.id, claimId: claim.id };
+    },
+    journal(ref, kind, opts = {}) {
+      store.addJournal(ref, kind, opts);
+    }
+  };
 }
 function splitLines(body) {
   if (!body)
@@ -80072,23 +77322,59 @@ function splitLines(body) {
   return body.split(`
 `).map((l) => l.trim().replace(/^[-*\u2022]\s*/, "").replace(/^\d+[.)]\s*/, "").trim()).filter((l) => l.length > 0);
 }
-function openWorkItems(dbPath = resolveWorkItemDbPath()) {
+async function openWorkItemBoundary(opts = {}) {
+  const env = opts.env ?? process.env;
+  const substrateDir = (opts.substrateDir ?? (env.XTRM_SUBSTRATE_DIR ?? "")).trim();
+  if (!substrateDir) {
+    throw new Error("work_item_store_unavailable: no Substrate package configured (set XTRM_SUBSTRATE_DIR to a built @xtrm/substrate checkout)");
+  }
+  const load = async (rel) => {
+    try {
+      return await import(pathToFileURL(join55(substrateDir, rel)).href);
+    } catch (error2) {
+      throw new Error(`work_item_store_unavailable: cannot load Substrate module ${rel}: ${error2 instanceof Error ? error2.message : String(error2)}`);
+    }
+  };
+  const [runner, issueSvcMod, journalMod, provMod, storeMod, gateMod] = await Promise.all([
+    load("src/store/migrations/runner.ts"),
+    load("src/service/issue-service.ts"),
+    load("src/service/journal-service.ts"),
+    load("src/service/provenance-service.ts"),
+    load("src/workitems/substrate-store.ts"),
+    load("src/workitems/dispatch-gate.ts")
+  ]);
+  for (const [mod, name] of [
+    [runner, "migrate"],
+    [issueSvcMod, "IssueService"],
+    [journalMod, "JournalService"],
+    [provMod, "ProvenanceService"],
+    [storeMod, "SubstrateIssueStore"],
+    [gateMod, "checkDispatch"],
+    [gateMod, "dispatchToSpecialist"]
+  ]) {
+    if (typeof mod[name] === "undefined") {
+      throw new Error(`work_item_store_unavailable: Substrate module is missing export ${name}`);
+    }
+  }
+  const dbPath = opts.dbPath ?? resolveWorkItemDbPath(env);
   const db = openSubstrateDb(dbPath);
-  migrate(db);
-  const issues = new IssueService(db);
-  const journal = new JournalService(db, issues);
-  const provenance = new ProvenanceService(db, issues, journal);
-  const store = new SubstrateIssueStore(issues, journal);
-  return new SubstrateWorkItemsBoundary(issues, journal, provenance, store);
+  runner.migrate(db);
+  const issues = new issueSvcMod.IssueService(db);
+  const journalSvc = new journalMod.JournalService(db, issues);
+  const provenance = new provMod.ProvenanceService(db, issues, journalSvc);
+  const store = new storeMod.SubstrateIssueStore(issues, journalSvc);
+  return createWorkItemBoundary({
+    issues,
+    provenance,
+    store,
+    gate: {
+      check: (i, r) => gateMod.checkDispatch(i, r),
+      dispatch: (i, p, r) => gateMod.dispatchToSpecialist(i, p, r)
+    }
+  });
 }
 var require4;
 var init_workitem_store = __esm(() => {
-  init_runner2();
-  init_issue_service();
-  init_journal_service();
-  init_provenance_service();
-  init_substrate_store();
-  init_dispatch_gate();
   init_contract_sections();
   require4 = createRequire5(import.meta.url);
 });
@@ -80343,9 +77629,9 @@ var init_peer_bridge = __esm(() => {
 // src/activation/transport/roster.ts
 import { existsSync as existsSync52, readdirSync as readdirSync26, readFileSync as readFileSync45 } from "fs";
 import { homedir as homedir17 } from "os";
-import { join as join57 } from "path";
+import { join as join56 } from "path";
 function defaultRosterDir() {
-  return join57(homedir17(), ".claude", "sessions");
+  return join56(homedir17(), ".claude", "sessions");
 }
 function procProbe() {
   let bootSeconds;
@@ -80423,7 +77709,7 @@ function scanRoster(options2 = {}) {
       continue;
     let registration;
     try {
-      registration = JSON.parse(readFileSync45(join57(dir, file), "utf-8"));
+      registration = JSON.parse(readFileSync45(join56(dir, file), "utf-8"));
     } catch {
       rejected.push({ file, reason: "unparsable" });
       continue;
@@ -80640,14 +77926,14 @@ function createGuardedTools(sdk, input2) {
   const tools = [];
   const guarded = [];
   const unguardable = [];
-  for (const name8 of input2.toolNames) {
-    const key = name8.trim().toLowerCase();
+  for (const name of input2.toolNames) {
+    const key = name.trim().toLowerCase();
     const factoryName = FACTORY_NAMES[key];
     if (!factoryName)
       continue;
     const factory = sdkAny[factoryName];
     if (!factory) {
-      unguardable.push(name8);
+      unguardable.push(name);
       continue;
     }
     const original = factory(input2.cwd);
@@ -80655,20 +77941,20 @@ function createGuardedTools(sdk, input2) {
     tools.push({
       ...original,
       execute: async (...args) => {
-        const verdict = input2.admit(name8);
+        const verdict = input2.admit(name);
         if (verdict.allow)
           return originalExecute(...args);
         const refusal2 = {
           content: [{
             type: "text",
-            text: `Refused: ${verdict.reason ?? `${name8} is not admitted against this workspace`}`
+            text: `Refused: ${verdict.reason ?? `${name} is not admitted against this workspace`}`
           }],
-          details: { blocked: true, tool: name8 }
+          details: { blocked: true, tool: name }
         };
         return refusal2;
       }
     });
-    guarded.push(name8);
+    guarded.push(name);
   }
   return { tools, guarded, unguardable };
 }
@@ -80734,15 +78020,15 @@ var ASK_TOOL = "ask_coordinator", ESCALATE_TOOL = "escalate_to_coordinator", too
 
 // src/activation/pi-sdk.ts
 import { existsSync as existsSync53 } from "fs";
-import { join as join58 } from "path";
-import { pathToFileURL } from "url";
+import { join as join57 } from "path";
+import { pathToFileURL as pathToFileURL2 } from "url";
 function piSdkCandidates() {
   const candidates = [PI_SDK_PACKAGE];
   const globalDir = resolveGlobalNodeModulesDir2();
   if (globalDir) {
-    const entry = join58(globalDir, PI_SDK_PACKAGE, "dist", "index.js");
+    const entry = join57(globalDir, PI_SDK_PACKAGE, "dist", "index.js");
     if (existsSync53(entry))
-      candidates.push(pathToFileURL(entry).href);
+      candidates.push(pathToFileURL2(entry).href);
   }
   return candidates;
 }
@@ -80754,7 +78040,7 @@ async function loadPiSdk() {
   for (const specifier of attempted) {
     try {
       const mod = await import(specifier);
-      const missing = REQUIRED_EXPORTS.filter((name8) => typeof mod[name8] === "undefined");
+      const missing = REQUIRED_EXPORTS.filter((name) => typeof mod[name] === "undefined");
       if (missing.length > 0) {
         lastError = new Error(`${specifier} is missing exports: ${missing.join(", ")}`);
         continue;
@@ -81195,15 +78481,15 @@ var init_registry = __esm(() => {
 });
 
 // src/activation/authority-store.ts
-import { mkdirSync as mkdirSync23 } from "fs";
+import { mkdirSync as mkdirSync22 } from "fs";
 import { createRequire as createRequire6 } from "module";
 import { homedir as homedir18 } from "os";
-import { dirname as dirname23, join as join59 } from "path";
+import { dirname as dirname23, join as join58 } from "path";
 function resolveAuthorityDbPath(env = process.env) {
   const override = (env.XTRM_STATE_DB ?? "").trim();
   if (override)
     return override;
-  return join59(homedir18(), ".xtrm", "state.db");
+  return join58(homedir18(), ".xtrm", "state.db");
 }
 function openAuthorityDb(dbPath) {
   try {
@@ -81217,9 +78503,9 @@ function openAuthorityDb(dbPath) {
       const DatabaseSync = node.DatabaseSync;
       const inner = new DatabaseSync(dbPath);
       return {
-        exec: (sql8) => inner.exec(sql8),
-        prepare: (sql8) => {
-          const stmt = inner.prepare(sql8);
+        exec: (sql) => inner.exec(sql),
+        prepare: (sql) => {
+          const stmt = inner.prepare(sql);
           return { run: (...params) => stmt.run(...params.map((v) => v === undefined ? null : v)) };
         },
         close: () => inner.close()
@@ -81232,7 +78518,7 @@ function createFileAuthorityWriter(dbPath = resolveAuthorityDbPath()) {
   return {
     record(snapshot) {
       try {
-        mkdirSync23(dirname23(dbPath), { recursive: true });
+        mkdirSync22(dirname23(dbPath), { recursive: true });
         const db = openAuthorityDb(dbPath);
         if (!db)
           return;
@@ -81326,13 +78612,13 @@ class NativeActivationHost {
     const activationId = `act:${randomUUID8().slice(0, 12)}`;
     const attemptId = `att:${activationId.slice(4)}:1`;
     const participantId = `specialist::${request.specialist}`;
-    const emit = (name8, payload) => this.forensics.emit({
+    const emit = (name, payload) => this.forensics.emit({
       activationId,
       attemptId,
       participantId,
       specialist: request.specialist,
       beadId: request.issueRef,
-      name: name8,
+      name,
       payload
     });
     emit("activation_requested", {
@@ -81364,7 +78650,7 @@ class NativeActivationHost {
     };
     let workItems;
     try {
-      workItems = this.resolveWorkItems();
+      workItems = await this.resolveWorkItems();
     } catch (error2) {
       return reject("work_item_store_unavailable", {
         note: error2 instanceof Error ? error2.message : String(error2)
@@ -81518,7 +78804,7 @@ class NativeActivationHost {
       beadContextText: rendered.beadContextText ?? "",
       readBeadForMemory: (id) => {
         try {
-          const v = this.resolveWorkItems().view(id);
+          const v = workItems.view(id);
           return { title: v.title, description: contractToMarkdown(v.contract) };
         } catch {
           return null;
@@ -81658,7 +78944,7 @@ class NativeActivationHost {
       result
     };
   }
-  resolveWorkItems() {
+  async resolveWorkItems() {
     if (this.workItemsInjected)
       return this.workItemsInjected;
     if (this.workItemsDefault)
@@ -81667,7 +78953,7 @@ class NativeActivationHost {
     if (!existsSync54(dbPath)) {
       throw new Error(`no Substrate work store at ${dbPath} (set XTRM_STATE_DB or initialize it via xt init / sb)`);
     }
-    this.workItemsDefault = openWorkItems(dbPath);
+    this.workItemsDefault = await openWorkItemBoundary({ dbPath });
     return this.workItemsDefault;
   }
   onSessionEvent(snapshot, event, emit) {
@@ -81936,13 +79222,13 @@ class NativeActivationHost {
     record4.snapshot.state = "starting";
     record4.snapshot.lastActivityAt = this.now();
     this.save(record4.snapshot);
-    const emit = (name8, payload) => this.forensics.emit({
+    const emit = (name, payload) => this.forensics.emit({
       activationId,
       attemptId,
       participantId: record4.snapshot.participantId,
       specialist: record4.snapshot.specialist,
       beadId: record4.snapshot.issueRef,
-      name: name8,
+      name,
       payload
     });
     let reusedSession = true;
@@ -82166,13 +79452,13 @@ class NativeActivationHost {
     record4.snapshot.attemptId = attemptId;
     record4.snapshot.state = "starting";
     this.save(record4.snapshot);
-    const emit = (name8, payload) => this.forensics.emit({
+    const emit = (name, payload) => this.forensics.emit({
       activationId,
       attemptId,
       participantId: record4.snapshot.participantId,
       specialist: record4.snapshot.specialist,
       beadId: record4.snapshot.issueRef,
-      name: name8,
+      name,
       payload
     });
     emit("activation_resumed", {
@@ -82240,11 +79526,11 @@ function contractToMarkdown(contract) {
     ["VALIDATION", c["validation"]],
     ["OUTPUT", c["output"]]
   ];
-  for (const [name8, value] of sections) {
+  for (const [name, value] of sections) {
     const items = list2(value);
     if (items.length === 0)
       continue;
-    lines.push(`${name8}:`);
+    lines.push(`${name}:`);
     for (const item of items)
       lines.push(`- ${item}`);
   }
@@ -82374,8 +79660,8 @@ var init_async_events = __esm(() => {
 function stringValue(value) {
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
 }
-function statusForLifecycle(name8, current) {
-  switch (name8) {
+function statusForLifecycle(name, current) {
+  switch (name) {
     case "activation_requested":
     case "activation_admitted":
     case "activation_starting":
@@ -82639,9 +79925,9 @@ function createSpecialistListTool(loader) {
     inputSchema: specialistListSchema,
     async execute(input2) {
       const summaries = await loader.list();
-      const rows4 = [];
+      const rows = [];
       for (const summary of summaries) {
-        const row4 = {
+        const row = {
           ...specialistSummaryView(summary),
           access: WRITE_TIERS2.has(summary.permission_required ?? "READ_ONLY") ? "write" : "read"
         };
@@ -82649,30 +79935,30 @@ function createSpecialistListTool(loader) {
         try {
           spec = await loader.get(summary.name);
         } catch (error2) {
-          row4.dispatchable = false;
-          row4.reason = error2 instanceof Error ? error2.message : String(error2);
+          row.dispatchable = false;
+          row.reason = error2 instanceof Error ? error2.message : String(error2);
         }
         if (spec) {
           const capability = await dispatchability(spec);
-          row4.dispatchable = capability.dispatchable;
+          row.dispatchable = capability.dispatchable;
           if (capability.reason)
-            row4.reason = capability.reason;
+            row.reason = capability.reason;
         }
-        rows4.push(row4);
+        rows.push(row);
       }
       const wanted = input2.name;
       if (wanted) {
-        const one = rows4.find((r) => r.name === wanted);
+        const one = rows.find((r) => r.name === wanted);
         return one ? { specialist: one, note: NATIVE_ONLY_NOTE } : {
           error: `Unknown specialist: ${wanted}`,
-          known: rows4.map((r) => r.name),
+          known: rows.map((r) => r.name),
           note: NATIVE_ONLY_NOTE
         };
       }
       if (input2.detail === "full") {
-        return { specialists: rows4, detail: "full", note: NATIVE_ONLY_NOTE };
+        return { specialists: rows, detail: "full", note: NATIVE_ONLY_NOTE };
       }
-      const compact2 = rows4.map((r) => ({
+      const compact2 = rows.map((r) => ({
         name: r.name,
         tier: r.permission_required ?? "READ_ONLY",
         access: r.access,
@@ -82711,7 +79997,7 @@ __export(exports_server, {
   SpecialistsServer: () => SpecialistsServer
 });
 import { randomUUID as randomUUID10 } from "crypto";
-import { join as join60 } from "path";
+import { join as join59 } from "path";
 function createMcpCallContext(sessionId, request = {}) {
   return {
     mcpSessionId: sessionId,
@@ -82770,7 +80056,7 @@ class SpecialistsServer {
   constructor() {
     const circuitBreaker = new CircuitBreaker;
     const loader = new SpecialistLoader;
-    const hooks = new HookEmitter({ tracePath: join60(process.cwd(), ".specialists", "trace.jsonl") });
+    const hooks = new HookEmitter({ tracePath: join59(process.cwd(), ".specialists", "trace.jsonl") });
     const beadsClient = new BeadsClient;
     const runner = new SpecialistRunner({ loader, hooks, circuitBreaker, beadsClient });
     this.observability = createObservabilitySqliteClient();
@@ -82901,9 +80187,9 @@ var init_server3 = __esm(() => {
 // node_modules/@modelcontextprotocol/server/dist/chunk-Br0eD_fh.mjs
 var __create2, __defProp2, __getOwnPropDesc, __getOwnPropNames2, __getProtoOf2, __hasOwnProp2, __commonJSMin = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports), __exportAll = (all, symbols) => {
   let target = {};
-  for (var name8 in all) {
-    __defProp2(target, name8, {
-      get: all[name8],
+  for (var name in all) {
+    __defProp2(target, name, {
+      get: all[name],
       enumerable: true
     });
   }
@@ -83382,12 +80668,12 @@ function merge2(a, b) {
   });
   return clone2(a, def2);
 }
-function partial2(Class2, schema, mask, name8 = "partial") {
+function partial2(Class2, schema, mask, name = "partial") {
   const currDef = schema._zod.def;
   const checks4 = currDef.checks;
   const hasChecks = checks4 && checks4.length > 0;
   if (hasChecks) {
-    throw new Error(`.${name8}() cannot be used on object schemas containing refinements`);
+    throw new Error(`.${name}() cannot be used on object schemas containing refinements`);
   }
   const def2 = mergeDefs(schema._zod.def, {
     get shape() {
@@ -83815,7 +81101,7 @@ function newError(Definition) {
   }
   return new Definition;
 }
-function $constructor2(name8, initializer3, proto, params) {
+function $constructor2(name, initializer3, proto, params) {
   const zodProto = {};
   function Internals(def2) {
     this.def = def2;
@@ -83834,10 +81120,10 @@ function $constructor2(name8, initializer3, proto, params) {
         _zodDesc.value = undefined;
       }
     }
-    if (inst._zod.traits.has(name8)) {
+    if (inst._zod.traits.has(name)) {
       return;
     }
-    inst._zod.traits.add(name8);
+    inst._zod.traits.add(name);
     initializer3(inst, def2);
     if (initialized) {
       const own2 = Object.getPrototypeOf(inst);
@@ -83864,7 +81150,7 @@ function $constructor2(name8, initializer3, proto, params) {
 
   class Definition extends Parent {
   }
-  Object.defineProperty(Definition, "name", { value: name8 });
+  Object.defineProperty(Definition, "name", { value: name });
   function _(def2) {
     const inst = params?.Parent ? newError(Definition) : this;
     init(inst, def2);
@@ -83885,10 +81171,10 @@ function $constructor2(name8, initializer3, proto, params) {
     value: (inst) => {
       if (params?.Parent && inst instanceof params.Parent)
         return true;
-      return inst?._zod?.traits?.has(name8);
+      return inst?._zod?.traits?.has(name);
     }
   });
-  Object.defineProperty(_, "name", { value: name8 });
+  Object.defineProperty(_, "name", { value: name });
   return _;
 }
 function config2(newConfig) {
@@ -83910,8 +81196,8 @@ var init_core3 = __esm(() => {
     }
   };
   $ZodEncodeError = class $ZodEncodeError extends Error {
-    constructor(name8) {
-      super(`Encountered unidirectional transform during encode: ${name8}`);
+    constructor(name) {
+      super(`Encountered unidirectional transform during encode: ${name}`);
       this.name = "ZodEncodeError";
     }
   };
@@ -84165,10 +81451,10 @@ function datetime3(args) {
   const timeRegex2 = args.local ? `${qualified}|${timeSource2({ precision: args.precision })}` : qualified;
   return new RegExp(`^${dateSource2}T(?:${timeRegex2})$`);
 }
-var cuid3, cuid22, ulid2, xid2, ksuid2, nanoid2, duration3, guid2, uuid2 = (version9) => {
-  if (!version9)
+var cuid3, cuid22, ulid2, xid2, ksuid2, nanoid2, duration3, guid2, uuid2 = (version2) => {
+  if (!version2)
     return /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/;
-  return new RegExp(`^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-${version9}[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$`);
+  return new RegExp(`^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-${version2}[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$`);
 }, email2, _emoji3 = `^[\\p{Extended_Pictographic}\\p{Emoji_Component}]+$`, ipv42, ipv62, cidrv42, cidrv62, base642, base64url2, httpProtocol, e1642, dateSource2 = `(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))`, date4, string4 = (params) => {
   const regex = params ? `[\\s\\S]{${params?.minimum ?? 0},${params?.maximum ?? ""}}` : `[\\s\\S]*`;
   return new RegExp(`^${regex}$`);
@@ -84633,9 +81919,9 @@ ${content.join(`
 }
 
 // node_modules/@modelcontextprotocol/core/node_modules/zod/v4/core/versions.js
-var version9;
+var version2;
 var init_versions2 = __esm(() => {
-  version9 = {
+  version2 = {
     major: 4,
     minor: 5,
     patch: 4
@@ -85037,7 +82323,7 @@ var init_schemas4 = __esm(() => {
     inst ?? (inst = {});
     inst._zod.def = def2;
     inst._zod.bag = inst._zod.bag || {};
-    inst._zod.version = version9;
+    inst._zod.version = version2;
     const defChecks = inst._zod.def.checks;
     const checks4 = inst._zod.traits.has("$ZodCheck") ? [inst, ...defChecks ?? []] : defChecks?.length ? [...defChecks] : [];
     for (const ch of checks4) {
@@ -90765,12 +88051,12 @@ function merge3(a, b) {
   });
   return clone3(a, def2);
 }
-function partial3(Class3, schema, mask, name8 = "partial") {
+function partial3(Class3, schema, mask, name = "partial") {
   const currDef = schema._zod.def;
   const checks6 = currDef.checks;
   const hasChecks = checks6 && checks6.length > 0;
   if (hasChecks) {
-    throw new Error(`.${name8}() cannot be used on object schemas containing refinements`);
+    throw new Error(`.${name}() cannot be used on object schemas containing refinements`);
   }
   const def2 = mergeDefs2(schema._zod.def, {
     get shape() {
@@ -91198,7 +88484,7 @@ function newError2(Definition) {
   }
   return new Definition;
 }
-function $constructor3(name8, initializer5, proto, params) {
+function $constructor3(name, initializer5, proto, params) {
   const zodProto = {};
   function Internals(def2) {
     this.def = def2;
@@ -91217,10 +88503,10 @@ function $constructor3(name8, initializer5, proto, params) {
         _zodDesc3.value = undefined;
       }
     }
-    if (inst._zod.traits.has(name8)) {
+    if (inst._zod.traits.has(name)) {
       return;
     }
-    inst._zod.traits.add(name8);
+    inst._zod.traits.add(name);
     initializer5(inst, def2);
     if (initialized) {
       const own3 = Object.getPrototypeOf(inst);
@@ -91247,7 +88533,7 @@ function $constructor3(name8, initializer5, proto, params) {
 
   class Definition extends Parent {
   }
-  Object.defineProperty(Definition, "name", { value: name8 });
+  Object.defineProperty(Definition, "name", { value: name });
   function _(def2) {
     const inst = params?.Parent ? newError2(Definition) : this;
     init(inst, def2);
@@ -91268,10 +88554,10 @@ function $constructor3(name8, initializer5, proto, params) {
     value: (inst) => {
       if (params?.Parent && inst instanceof params.Parent)
         return true;
-      return inst?._zod?.traits?.has(name8);
+      return inst?._zod?.traits?.has(name);
     }
   });
-  Object.defineProperty(_, "name", { value: name8 });
+  Object.defineProperty(_, "name", { value: name });
   return _;
 }
 function config3(newConfig) {
@@ -91290,8 +88576,8 @@ var init_core5 = __esm(() => {
     }
   };
   $ZodEncodeError2 = class $ZodEncodeError2 extends Error {
-    constructor(name8) {
-      super(`Encountered unidirectional transform during encode: ${name8}`);
+    constructor(name) {
+      super(`Encountered unidirectional transform during encode: ${name}`);
       this.name = "ZodEncodeError";
     }
   };
@@ -91545,10 +88831,10 @@ function datetime5(args) {
   const timeRegex2 = args.local ? `${qualified}|${timeSource3({ precision: args.precision })}` : qualified;
   return new RegExp(`^${dateSource3}T(?:${timeRegex2})$`);
 }
-var cuid5, cuid23, ulid3, xid3, ksuid3, nanoid3, duration5, guid3, uuid3 = (version10) => {
-  if (!version10)
+var cuid5, cuid23, ulid3, xid3, ksuid3, nanoid3, duration5, guid3, uuid3 = (version3) => {
+  if (!version3)
     return /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/;
-  return new RegExp(`^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-${version10}[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$`);
+  return new RegExp(`^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-${version3}[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$`);
 }, email3, _emoji5 = `^[\\p{Extended_Pictographic}\\p{Emoji_Component}]+$`, ipv43, ipv63, cidrv43, cidrv63, base643, base64url3, httpProtocol2, e1643, dateSource3 = `(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))`, date7, string7 = (params) => {
   const regex = params ? `[\\s\\S]{${params?.minimum ?? 0},${params?.maximum ?? ""}}` : `[\\s\\S]*`;
   return new RegExp(`^${regex}$`);
@@ -92012,9 +89298,9 @@ ${content.join(`
 }
 
 // node_modules/@modelcontextprotocol/server/node_modules/zod/v4/core/versions.js
-var version10;
+var version3;
 var init_versions3 = __esm(() => {
-  version10 = {
+  version3 = {
     major: 4,
     minor: 5,
     patch: 4
@@ -92416,7 +89702,7 @@ var init_schemas6 = __esm(() => {
     inst ?? (inst = {});
     inst._zod.def = def2;
     inst._zod.bag = inst._zod.bag || {};
-    inst._zod.version = version10;
+    inst._zod.version = version3;
     const defChecks = inst._zod.def.checks;
     const checks6 = inst._zod.traits.has("$ZodCheck") ? [inst, ...defChecks ?? []] : defChecks?.length ? [...defChecks] : [];
     for (const ch of checks6) {
@@ -96860,14 +94146,14 @@ function missingClientCapabilities(required4, declared) {
   }
   return Object.keys(missing).length > 0 ? missing : undefined;
 }
-function isModernProtocolVersion(version11) {
-  return version11 >= FIRST_MODERN_PROTOCOL_VERSION;
+function isModernProtocolVersion(version4) {
+  return version4 >= FIRST_MODERN_PROTOCOL_VERSION;
 }
 function legacyProtocolVersions(versions4) {
-  return versions4.filter((version11) => !isModernProtocolVersion(version11));
+  return versions4.filter((version4) => !isModernProtocolVersion(version4));
 }
 function modernProtocolVersions(versions4) {
-  return versions4.filter((version11) => isModernProtocolVersion(version11));
+  return versions4.filter((version4) => isModernProtocolVersion(version4));
 }
 function appendTextFallbackForNonObject(result) {
   const sc = result.structuredContent;
@@ -99024,8 +96310,8 @@ function getWireResultSchemas() {
   };
   return wireResultSchemasMemo;
 }
-function codecForVersion(version11) {
-  return version11 !== undefined && isModernProtocolVersion(version11) ? rev2026Codec : rev2025Codec;
+function codecForVersion(version4) {
+  return version4 !== undefined && isModernProtocolVersion(version4) ? rev2026Codec : rev2025Codec;
 }
 function classifiedWireEra(classification) {
   if (classification.revision !== undefined)
@@ -99296,10 +96582,10 @@ function promptArgumentsFromStandardSchema(schema) {
   const jsonSchema = standardSchemaToJsonSchema(schema, "input");
   const properties = jsonSchema.properties || {};
   const required4 = jsonSchema.required || [];
-  return Object.entries(properties).map(([name8, prop]) => ({
-    name: name8,
+  return Object.entries(properties).map(([name, prop]) => ({
+    name,
     description: prop?.description,
-    required: required4.includes(name8)
+    required: required4.includes(name)
   }));
 }
 function isJsonObject(value) {
@@ -99340,7 +96626,7 @@ function walkRequestedSchema(converted, vendor) {
   const unsupported = [];
   for (const [key, value] of Object.entries(converted))
     if (key === "properties" && isJsonObject(value))
-      pruned[key] = Object.fromEntries(Object.entries(value).map(([name8, node3]) => [name8, walkProperty(node3, `properties.${name8}`, vendor, unsupported)]));
+      pruned[key] = Object.fromEntries(Object.entries(value).map(([name, node3]) => [name, walkProperty(node3, `properties.${name}`, vendor, unsupported)]));
     else if (ROOT_KEYS.has(key))
       pruned[key] = value;
     else if (!isAnnotationOnlyJsonSchemaKeyword(key))
@@ -99352,7 +96638,7 @@ function walkRequestedSchema(converted, vendor) {
 function describeUnsupportedProperties(pruned, fallback) {
   if (!isJsonObject(pruned.properties))
     return fallback;
-  const offenders = Object.entries(pruned.properties).filter(([, node3]) => !parseSchema(PrimitiveSchemaDefinitionSchema2, node3).success).map(([name8]) => `properties.${name8}`);
+  const offenders = Object.entries(pruned.properties).filter(([, node3]) => !parseSchema(PrimitiveSchemaDefinitionSchema2, node3).success).map(([name]) => `properties.${name}`);
   return offenders.length > 0 ? offenders.join(", ") : fallback;
 }
 function findDroppedConstraintPaths(original, parsed, path3 = "") {
@@ -99435,9 +96721,9 @@ function linkedRoundAbort(outer) {
   };
 }
 function register(key, schema) {
-  const name8 = key.slice(0, -6);
-  _specTypeSchemas[name8] = schema;
-  _isSpecType[name8] = (v) => schema.safeParse(v).success;
+  const name = key.slice(0, -6);
+  _specTypeSchemas[name] = schema;
+  _isSpecType[name] = (v) => schema.safeParse(v).success;
 }
 function bootstrapOutboundCodec(method) {
   switch (method) {
@@ -99522,8 +96808,8 @@ function withRequestStateValue(ctx, value) {
     }
   };
 }
-function setNegotiatedProtocolVersion(instance, version11) {
-  writeNegotiatedProtocolVersion(instance, version11);
+function setNegotiatedProtocolVersion(instance, version4) {
+  writeNegotiatedProtocolVersion(instance, version4);
 }
 function isPlainObject$1(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -99580,28 +96866,28 @@ function serializeMessage2(message) {
   return JSON.stringify(message) + `
 `;
 }
-function validateToolName(name8) {
+function validateToolName(name) {
   const warnings = [];
-  if (name8.length === 0)
+  if (name.length === 0)
     return {
       isValid: false,
       warnings: ["Tool name cannot be empty"]
     };
-  if (name8.length > 128)
+  if (name.length > 128)
     return {
       isValid: false,
-      warnings: [`Tool name exceeds maximum length of 128 characters (current: ${name8.length})`]
+      warnings: [`Tool name exceeds maximum length of 128 characters (current: ${name.length})`]
     };
-  if (name8.includes(" "))
+  if (name.includes(" "))
     warnings.push("Tool name contains spaces, which may cause parsing issues");
-  if (name8.includes(","))
+  if (name.includes(","))
     warnings.push("Tool name contains commas, which may cause parsing issues");
-  if (name8.startsWith("-") || name8.endsWith("-"))
+  if (name.startsWith("-") || name.endsWith("-"))
     warnings.push("Tool name starts or ends with a dash, which may cause parsing issues in some contexts");
-  if (name8.startsWith(".") || name8.endsWith("."))
+  if (name.startsWith(".") || name.endsWith("."))
     warnings.push("Tool name starts or ends with a dot, which may cause parsing issues in some contexts");
-  if (!TOOL_NAME_REGEX.test(name8)) {
-    const invalidChars = [...name8].filter((char) => !/[A-Za-z0-9._-]/.test(char)).filter((char, index, arr) => arr.indexOf(char) === index);
+  if (!TOOL_NAME_REGEX.test(name)) {
+    const invalidChars = [...name].filter((char) => !/[A-Za-z0-9._-]/.test(char)).filter((char, index, arr) => arr.indexOf(char) === index);
     warnings.push(`Tool name contains invalid characters: ${invalidChars.map((c) => `"${c}"`).join(", ")}`, "Allowed characters are: A-Z, a-z, 0-9, underscore (_), dash (-), and dot (.)");
     return {
       isValid: false,
@@ -99613,9 +96899,9 @@ function validateToolName(name8) {
     warnings
   };
 }
-function issueToolNameWarning(name8, warnings) {
+function issueToolNameWarning(name, warnings) {
   if (warnings.length > 0) {
-    console.warn(`Tool name validation warning for "${name8}":`);
+    console.warn(`Tool name validation warning for "${name}":`);
     for (const warning of warnings)
       console.warn(`  - ${warning}`);
     console.warn("Tool registration will proceed, but this may cause compatibility issues.");
@@ -99623,9 +96909,9 @@ function issueToolNameWarning(name8, warnings) {
     console.warn("See SEP: Specify Format for Tool Names (https://github.com/modelcontextprotocol/modelcontextprotocol/issues/986) for more details.");
   }
 }
-function validateAndWarnToolName(name8) {
-  const result = validateToolName(name8);
-  issueToolNameWarning(name8, result.warnings);
+function validateAndWarnToolName(name) {
+  const result = validateToolName(name);
+  issueToolNameWarning(name, result.warnings);
   return result.isValid;
 }
 function isZodV4Schema(v) {
@@ -100765,8 +98051,8 @@ var init_src_CX2iR2pK = __esm(() => {
     _pendingDebouncedNotifications = /* @__PURE__ */ new Set;
     _negotiatedProtocolVersion;
     static {
-      writeNegotiatedProtocolVersion = (instance, version11) => {
-        instance._negotiatedProtocolVersion = version11;
+      writeNegotiatedProtocolVersion = (instance, version4) => {
+        instance._negotiatedProtocolVersion = version4;
       };
     }
     _supportedProtocolVersions;
@@ -101615,9 +98901,9 @@ var init_ajvProvider_CEoC__sr = __esm(() => {
     exports.ValueScope = exports.ValueScopeName = exports.Scope = exports.varKinds = exports.UsedValueState = undefined;
     const code_1 = require_code$1();
     var ValueError = class extends Error {
-      constructor(name8) {
-        super(`CodeGen: "code" for ${name8} not defined`);
-        this.value = name8.value;
+      constructor(name) {
+        super(`CodeGen: "code" for ${name} not defined`);
+        this.value = name.value;
       }
     };
     var UsedValueState;
@@ -101689,8 +98975,8 @@ var init_ajvProvider_CEoC__sr = __esm(() => {
         var _a5;
         if (value.ref === undefined)
           throw new Error("CodeGen: ref must be passed in value");
-        const name8 = this.toName(nameOrPrefix);
-        const { prefix } = name8;
+        const name = this.toName(nameOrPrefix);
+        const { prefix } = name;
         const valueKey = (_a5 = value.key) !== null && _a5 !== undefined ? _a5 : value.ref;
         let vs = this._values[prefix];
         if (vs) {
@@ -101699,15 +98985,15 @@ var init_ajvProvider_CEoC__sr = __esm(() => {
             return _name;
         } else
           vs = this._values[prefix] = /* @__PURE__ */ new Map;
-        vs.set(valueKey, name8);
+        vs.set(valueKey, name);
         const s = this._scope[prefix] || (this._scope[prefix] = []);
         const itemIndex = s.length;
         s[itemIndex] = value.ref;
-        name8.setValue(value, {
+        name.setValue(value, {
           property: prefix,
           itemIndex
         });
-        return name8;
+        return name;
       }
       getValue(prefix, keyOrRef) {
         const vs = this._values[prefix];
@@ -101716,17 +99002,17 @@ var init_ajvProvider_CEoC__sr = __esm(() => {
         return vs.get(keyOrRef);
       }
       scopeRefs(scopeName, values = this._values) {
-        return this._reduceValues(values, (name8) => {
-          if (name8.scopePath === undefined)
-            throw new Error(`CodeGen: name "${name8}" has no value`);
-          return (0, code_1._)`${scopeName}${name8.scopePath}`;
+        return this._reduceValues(values, (name) => {
+          if (name.scopePath === undefined)
+            throw new Error(`CodeGen: name "${name}" has no value`);
+          return (0, code_1._)`${scopeName}${name.scopePath}`;
         });
       }
       scopeCode(values = this._values, usedValues, getCode) {
-        return this._reduceValues(values, (name8) => {
-          if (name8.value === undefined)
-            throw new Error(`CodeGen: name "${name8}" has no value`);
-          return name8.value.code;
+        return this._reduceValues(values, (name) => {
+          if (name.value === undefined)
+            throw new Error(`CodeGen: name "${name}" has no value`);
+          return name.value.code;
         }, usedValues, getCode);
       }
       _reduceValues(values, valueCode, usedValues = {}, getCode) {
@@ -101736,19 +99022,19 @@ var init_ajvProvider_CEoC__sr = __esm(() => {
           if (!vs)
             continue;
           const nameSet = usedValues[prefix] = usedValues[prefix] || /* @__PURE__ */ new Map;
-          vs.forEach((name8) => {
-            if (nameSet.has(name8))
+          vs.forEach((name) => {
+            if (nameSet.has(name))
               return;
-            nameSet.set(name8, UsedValueState.Started);
-            let c = valueCode(name8);
+            nameSet.set(name, UsedValueState.Started);
+            let c = valueCode(name);
             if (c) {
               const def2 = this.opts.es5 ? exports.varKinds.var : exports.varKinds.const;
-              code = (0, code_1._)`${code}${def2} ${name8} = ${c};${this.opts._n}`;
-            } else if (c = getCode === null || getCode === undefined ? undefined : getCode(name8))
+              code = (0, code_1._)`${code}${def2} ${name} = ${c};${this.opts._n}`;
+            } else if (c = getCode === null || getCode === undefined ? undefined : getCode(name))
               code = (0, code_1._)`${code}${c}${this.opts._n}`;
             else
-              throw new ValueError(name8);
-            nameSet.set(name8, UsedValueState.Completed);
+              throw new ValueError(name);
+            nameSet.set(name, UsedValueState.Completed);
           });
         }
         return code;
@@ -101856,10 +99142,10 @@ var init_ajvProvider_CEoC__sr = __esm(() => {
       }
     };
     var Def = class extends Node {
-      constructor(varKind, name8, rhs) {
+      constructor(varKind, name, rhs) {
         super();
         this.varKind = varKind;
-        this.name = name8;
+        this.name = name;
         this.rhs = rhs;
       }
       render({ es5, _n }) {
@@ -102077,28 +99363,28 @@ var init_ajvProvider_CEoC__sr = __esm(() => {
       }
     };
     var ForRange = class extends For {
-      constructor(varKind, name8, from, to) {
+      constructor(varKind, name, from, to) {
         super();
         this.varKind = varKind;
-        this.name = name8;
+        this.name = name;
         this.from = from;
         this.to = to;
       }
       render(opts) {
         const varKind = opts.es5 ? scope_1.varKinds.var : this.varKind;
-        const { name: name8, from, to } = this;
-        return `for(${varKind} ${name8}=${from}; ${name8}<${to}; ${name8}++)` + super.render(opts);
+        const { name, from, to } = this;
+        return `for(${varKind} ${name}=${from}; ${name}<${to}; ${name}++)` + super.render(opts);
       }
       get names() {
         return addExprNames(addExprNames(super.names, this.from), this.to);
       }
     };
     var ForIter = class extends For {
-      constructor(loop, varKind, name8, iterable) {
+      constructor(loop, varKind, name, iterable) {
         super();
         this.loop = loop;
         this.varKind = varKind;
-        this.name = name8;
+        this.name = name;
         this.iterable = iterable;
       }
       render(opts) {
@@ -102115,9 +99401,9 @@ var init_ajvProvider_CEoC__sr = __esm(() => {
       }
     };
     var Func = class extends BlockNode {
-      constructor(name8, args, async) {
+      constructor(name, args, async) {
         super();
-        this.name = name8;
+        this.name = name;
         this.args = args;
         this.async = async;
       }
@@ -102204,9 +99490,9 @@ var init_ajvProvider_CEoC__sr = __esm(() => {
         return this._extScope.name(prefix);
       }
       scopeValue(prefixOrName, value) {
-        const name8 = this._extScope.value(prefixOrName, value);
-        (this._values[name8.prefix] || (this._values[name8.prefix] = /* @__PURE__ */ new Set)).add(name8);
-        return name8;
+        const name = this._extScope.value(prefixOrName, value);
+        (this._values[name.prefix] || (this._values[name.prefix] = /* @__PURE__ */ new Set)).add(name);
+        return name;
       }
       getScopeValue(prefix, keyOrRef) {
         return this._extScope.getValue(prefix, keyOrRef);
@@ -102218,11 +99504,11 @@ var init_ajvProvider_CEoC__sr = __esm(() => {
         return this._extScope.scopeCode(this._values);
       }
       _def(varKind, nameOrPrefix, rhs, constant) {
-        const name8 = this._scope.toName(nameOrPrefix);
+        const name = this._scope.toName(nameOrPrefix);
         if (rhs !== undefined && constant)
-          this._constants[name8.str] = rhs;
-        this._leafNode(new Def(varKind, name8, rhs));
-        return name8;
+          this._constants[name.str] = rhs;
+        this._leafNode(new Def(varKind, name, rhs));
+        return name;
       }
       const(nameOrPrefix, rhs, _constant) {
         return this._def(scope_1.varKinds.const, nameOrPrefix, rhs, _constant);
@@ -102289,25 +99575,25 @@ var init_ajvProvider_CEoC__sr = __esm(() => {
         return this._for(new ForLoop(iteration), forBody);
       }
       forRange(nameOrPrefix, from, to, forBody, varKind = this.opts.es5 ? scope_1.varKinds.var : scope_1.varKinds.let) {
-        const name8 = this._scope.toName(nameOrPrefix);
-        return this._for(new ForRange(varKind, name8, from, to), () => forBody(name8));
+        const name = this._scope.toName(nameOrPrefix);
+        return this._for(new ForRange(varKind, name, from, to), () => forBody(name));
       }
       forOf(nameOrPrefix, iterable, forBody, varKind = scope_1.varKinds.const) {
-        const name8 = this._scope.toName(nameOrPrefix);
+        const name = this._scope.toName(nameOrPrefix);
         if (this.opts.es5) {
           const arr = iterable instanceof code_1.Name ? iterable : this.var("_arr", iterable);
           return this.forRange("_i", 0, (0, code_1._)`${arr}.length`, (i) => {
-            this.var(name8, (0, code_1._)`${arr}[${i}]`);
-            forBody(name8);
+            this.var(name, (0, code_1._)`${arr}[${i}]`);
+            forBody(name);
           });
         }
-        return this._for(new ForIter("of", varKind, name8, iterable), () => forBody(name8));
+        return this._for(new ForIter("of", varKind, name, iterable), () => forBody(name));
       }
       forIn(nameOrPrefix, obj, forBody, varKind = this.opts.es5 ? scope_1.varKinds.var : scope_1.varKinds.const) {
         if (this.opts.ownProperties)
           return this.forOf(nameOrPrefix, (0, code_1._)`Object.keys(${obj})`, forBody);
-        const name8 = this._scope.toName(nameOrPrefix);
-        return this._for(new ForIter("in", varKind, name8, obj), () => forBody(name8));
+        const name = this._scope.toName(nameOrPrefix);
+        return this._for(new ForIter("in", varKind, name, obj), () => forBody(name));
       }
       endFor() {
         return this._endBlockNode(For);
@@ -102362,8 +99648,8 @@ var init_ajvProvider_CEoC__sr = __esm(() => {
         this._nodes.length = len;
         return this;
       }
-      func(name8, args = code_1.nil, async, funcBody) {
-        this._blockNode(new Func(name8, args, async));
+      func(name, args = code_1.nil, async, funcBody) {
+        this._blockNode(new Func(name, args, async));
         if (funcBody)
           this.code(funcBody).endFunc();
         return this;
@@ -104674,8 +101960,8 @@ var init_ajvProvider_CEoC__sr = __esm(() => {
       "urn",
       "urn:uuid"
     ];
-    function isValidSchemeName(name8) {
-      return supportedSchemeNames.indexOf(name8) !== -1;
+    function isValidSchemeName(name) {
+      return supportedSchemeNames.indexOf(name) !== -1;
     }
     function wsIsSecure(wsComponent) {
       if (wsComponent.secure === true)
@@ -105462,10 +102748,10 @@ var init_ajvProvider_CEoC__sr = __esm(() => {
         }
         return this;
       }
-      addFormat(name8, format) {
+      addFormat(name, format) {
         if (typeof format == "string")
           format = new RegExp(format);
-        this.formats[name8] = format;
+        this.formats[name] = format;
         return this;
       }
       errorsText(errors9 = this.errors, { separator = ", ", dataVar = "data" } = {}) {
@@ -105585,10 +102871,10 @@ var init_ajvProvider_CEoC__sr = __esm(() => {
           this.addSchema(optsSchemas[key], key);
     }
     function addInitialFormats() {
-      for (const name8 in this.opts.formats) {
-        const format = this.opts.formats[name8];
+      for (const name in this.opts.formats) {
+        const format = this.opts.formats[name];
         if (format)
-          this.addFormat(name8, format);
+          this.addFormat(name, format);
       }
     }
     function addInitialKeywords(defs) {
@@ -108964,10 +106250,10 @@ var init_ajvProvider_CEoC__sr = __esm(() => {
         (0, limit_1.default)(ajv);
       return ajv;
     };
-    formatsPlugin.get = (name8, mode = "full") => {
-      const f = (mode === "fast" ? formats_1.fastFormats : formats_1.fullFormats)[name8];
+    formatsPlugin.get = (name, mode = "full") => {
+      const f = (mode === "fast" ? formats_1.fastFormats : formats_1.fullFormats)[name];
       if (!f)
-        throw new Error(`Unknown format "${name8}"`);
+        throw new Error(`Unknown format "${name}"`);
       return f;
     };
     function addFormats(ajv, list2, fs3, exportName) {
@@ -109129,13 +106415,13 @@ function convertOutputSchemaJson(outputSchema) {
     return;
   }
 }
-function createPromptHandler(name8, argsSchema, callback) {
+function createPromptHandler(name, argsSchema, callback) {
   if (argsSchema) {
     const typedCallback = callback;
     return async (args, ctx) => {
       const parseResult = await validateStandardSchema(argsSchema, args);
       if (!parseResult.success)
-        throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Invalid arguments for prompt ${name8}: ${parseResult.error}`);
+        throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Invalid arguments for prompt ${name}: ${parseResult.error}`);
       return typedCallback(parseResult.data, ctx);
     };
   } else {
@@ -109347,17 +106633,17 @@ var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CH
   _registeredTools = {};
   _registeredPrompts = {};
   _toolInputSchemaJson = {};
-  toolInputSchemaJson(name8) {
-    const tool = this._registeredTools[name8];
+  toolInputSchemaJson(name) {
+    const tool = this._registeredTools[name];
     if (tool === undefined || !tool.enabled)
       return;
-    if (Object.hasOwn(this._toolInputSchemaJson, name8))
-      return this._toolInputSchemaJson[name8];
+    if (Object.hasOwn(this._toolInputSchemaJson, name))
+      return this._toolInputSchemaJson[name];
     if (tool.inputSchema === undefined)
       return EMPTY_OBJECT_JSON_SCHEMA;
     try {
       const json = standardSchemaToJsonSchema(tool.inputSchema, "input");
-      this._toolInputSchemaJson[name8] = json;
+      this._toolInputSchemaJson[name] = json;
       return json;
     } catch {
       return;
@@ -109385,9 +106671,9 @@ var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CH
     this.server.assertCanSetRequestHandler("tools/list");
     this.server.assertCanSetRequestHandler("tools/call");
     this.server.registerCapabilities({ tools: { listChanged: this.server.getCapabilities().tools?.listChanged ?? true } });
-    this.server.setRequestHandler("tools/list", () => ({ tools: Object.entries(this._registeredTools).filter(([, tool]) => tool.enabled).map(([name8, tool]) => {
+    this.server.setRequestHandler("tools/list", () => ({ tools: Object.entries(this._registeredTools).filter(([, tool]) => tool.enabled).map(([name, tool]) => {
       const toolDefinition = {
-        name: name8,
+        name,
         title: tool.title,
         description: tool.description,
         inputSchema: tool.inputSchema ? standardSchemaToJsonSchema(tool.inputSchema, "input") : EMPTY_OBJECT_JSON_SCHEMA,
@@ -109530,8 +106816,8 @@ var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CH
       return { resources: [...resources, ...templateResources] };
     });
     this.server.setRequestHandler("resources/templates/list", async () => {
-      return { resourceTemplates: Object.entries(this._registeredResourceTemplates).map(([name8, template]) => ({
-        name: name8,
+      return { resourceTemplates: Object.entries(this._registeredResourceTemplates).map(([name, template]) => ({
+        name,
         uriTemplate: template.resourceTemplate.uriTemplate.toString(),
         ...template.metadata
       })) };
@@ -109568,9 +106854,9 @@ var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CH
     this.server.assertCanSetRequestHandler("prompts/list");
     this.server.assertCanSetRequestHandler("prompts/get");
     this.server.registerCapabilities({ prompts: { listChanged: this.server.getCapabilities().prompts?.listChanged ?? true } });
-    this.server.setRequestHandler("prompts/list", () => ({ prompts: Object.entries(this._registeredPrompts).filter(([, prompt]) => prompt.enabled).map(([name8, prompt]) => {
+    this.server.setRequestHandler("prompts/list", () => ({ prompts: Object.entries(this._registeredPrompts).filter(([, prompt]) => prompt.enabled).map(([name, prompt]) => {
       return {
-        name: name8,
+        name,
         title: prompt.title,
         description: prompt.description,
         arguments: prompt.argsSchema ? promptArgumentsFromStandardSchema(prompt.argsSchema) : undefined,
@@ -109588,11 +106874,11 @@ var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CH
     });
     this._promptHandlersInitialized = true;
   }
-  registerResource(name8, uriOrTemplate, config4, readCallback) {
+  registerResource(name, uriOrTemplate, config4, readCallback) {
     const cacheHint = config4.cacheHint;
     let metadata = config4;
     if (cacheHint !== undefined) {
-      assertValidCacheHint(cacheHint, `resource ${name8}`);
+      assertValidCacheHint(cacheHint, `resource ${name}`);
       const rest = { ...config4 };
       delete rest.cacheHint;
       metadata = rest;
@@ -109600,16 +106886,16 @@ var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CH
     if (typeof uriOrTemplate === "string") {
       if (this._registeredResources[uriOrTemplate])
         throw new Error(`Resource ${uriOrTemplate} is already registered`);
-      const registeredResource = this._createRegisteredResource(name8, config4.title, uriOrTemplate, metadata, readCallback);
+      const registeredResource = this._createRegisteredResource(name, config4.title, uriOrTemplate, metadata, readCallback);
       if (cacheHint !== undefined)
         registeredResource.cacheHint = cacheHint;
       this.setResourceRequestHandlers();
       this.sendResourceListChanged();
       return registeredResource;
     } else {
-      if (this._registeredResourceTemplates[name8])
-        throw new Error(`Resource template ${name8} is already registered`);
-      const registeredResourceTemplate = this._createRegisteredResourceTemplate(name8, config4.title, uriOrTemplate, metadata, readCallback);
+      if (this._registeredResourceTemplates[name])
+        throw new Error(`Resource template ${name} is already registered`);
+      const registeredResourceTemplate = this._createRegisteredResourceTemplate(name, config4.title, uriOrTemplate, metadata, readCallback);
       if (cacheHint !== undefined)
         registeredResourceTemplate.cacheHint = cacheHint;
       this.setResourceRequestHandlers();
@@ -109617,9 +106903,9 @@ var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CH
       return registeredResourceTemplate;
     }
   }
-  _createRegisteredResource(name8, title, uri, metadata, readCallback) {
+  _createRegisteredResource(name, title, uri, metadata, readCallback) {
     const registeredResource = {
-      name: name8,
+      name,
       title,
       metadata,
       readCallback,
@@ -109649,7 +106935,7 @@ var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CH
     this._registeredResources[uri] = registeredResource;
     return registeredResource;
   }
-  _createRegisteredResourceTemplate(name8, title, template, metadata, readCallback) {
+  _createRegisteredResourceTemplate(name, title, template, metadata, readCallback) {
     const registeredResourceTemplate = {
       resourceTemplate: template,
       title,
@@ -109660,8 +106946,8 @@ var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CH
       enable: () => registeredResourceTemplate.update({ enabled: true }),
       remove: () => registeredResourceTemplate.update({ name: null }),
       update: (updates) => {
-        if (updates.name !== undefined && updates.name !== name8) {
-          delete this._registeredResourceTemplates[name8];
+        if (updates.name !== undefined && updates.name !== name) {
+          delete this._registeredResourceTemplates[name];
           if (updates.name)
             this._registeredResourceTemplates[updates.name] = registeredResourceTemplate;
         }
@@ -109678,13 +106964,13 @@ var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CH
         this.sendResourceListChanged();
       }
     };
-    this._registeredResourceTemplates[name8] = registeredResourceTemplate;
+    this._registeredResourceTemplates[name] = registeredResourceTemplate;
     const variableNames = template.uriTemplate.variableNames;
     if (Array.isArray(variableNames) && variableNames.some((v) => !!template.completeCallback(v)))
       this.setCompletionRequestHandler();
     return registeredResourceTemplate;
   }
-  _createRegisteredPrompt(name8, title, description, argsSchema, callback, icons, _meta) {
+  _createRegisteredPrompt(name, title, description, argsSchema, callback, icons, _meta) {
     let currentArgsSchema = argsSchema;
     let currentCallback = callback;
     const registeredPrompt = {
@@ -109693,14 +106979,14 @@ var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CH
       argsSchema,
       icons,
       _meta,
-      handler: createPromptHandler(name8, argsSchema, callback),
+      handler: createPromptHandler(name, argsSchema, callback),
       enabled: true,
       disable: () => registeredPrompt.update({ enabled: false }),
       enable: () => registeredPrompt.update({ enabled: true }),
       remove: () => registeredPrompt.update({ name: null }),
       update: (updates) => {
-        if (updates.name !== undefined && updates.name !== name8) {
-          delete this._registeredPrompts[name8];
+        if (updates.name !== undefined && updates.name !== name) {
+          delete this._registeredPrompts[name];
           if (updates.name)
             this._registeredPrompts[updates.name] = registeredPrompt;
         }
@@ -109723,13 +107009,13 @@ var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CH
           needsHandlerRegen = true;
         }
         if (needsHandlerRegen)
-          registeredPrompt.handler = createPromptHandler(name8, currentArgsSchema, currentCallback);
+          registeredPrompt.handler = createPromptHandler(name, currentArgsSchema, currentCallback);
         if (updates.enabled !== undefined)
           registeredPrompt.enabled = updates.enabled;
         this.sendPromptListChanged();
       }
     };
-    this._registeredPrompts[name8] = registeredPrompt;
+    this._registeredPrompts[name] = registeredPrompt;
     if (argsSchema) {
       const shape = getSchemaShape(argsSchema);
       if (shape) {
@@ -109741,15 +107027,15 @@ var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CH
     }
     return registeredPrompt;
   }
-  _createRegisteredTool(name8, title, description, inputSchema, outputSchema, annotations, icons, execution, _meta, handler) {
-    validateAndWarnToolName(name8);
+  _createRegisteredTool(name, title, description, inputSchema, outputSchema, annotations, icons, execution, _meta, handler) {
+    validateAndWarnToolName(name);
     if (inputSchema !== undefined)
       try {
         const json = standardSchemaToJsonSchema(inputSchema, "input");
-        this._toolInputSchemaJson[name8] = json;
+        this._toolInputSchemaJson[name] = json;
         const scan = scanXMcpHeaderDeclarations(json);
         if (!scan.valid)
-          console.warn(`[mcp-sdk] tool '${name8}' carries an invalid x-mcp-header declaration and will be excluded by conforming Streamable HTTP clients: ${scan.reason}`);
+          console.warn(`[mcp-sdk] tool '${name}' carries an invalid x-mcp-header declaration and will be excluded by conforming Streamable HTTP clients: ${scan.reason}`);
       } catch {}
     let currentHandler = handler;
     const registeredTool = {
@@ -109769,15 +107055,15 @@ var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CH
       enable: () => registeredTool.update({ enabled: true }),
       remove: () => registeredTool.update({ name: null }),
       update: (updates) => {
-        if (updates.name !== undefined && updates.name !== name8) {
+        if (updates.name !== undefined && updates.name !== name) {
           if (typeof updates.name === "string")
             validateAndWarnToolName(updates.name);
-          delete this._registeredTools[name8];
-          delete this._toolInputSchemaJson[name8];
+          delete this._registeredTools[name];
+          delete this._toolInputSchemaJson[name];
           if (updates.name) {
             delete this._toolInputSchemaJson[updates.name];
             this._registeredTools[updates.name] = registeredTool;
-            name8 = updates.name;
+            name = updates.name;
           }
         }
         if (updates.title !== undefined)
@@ -109787,7 +107073,7 @@ var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CH
         let needsExecutorRegen = false;
         if (updates.paramsSchema !== undefined) {
           registeredTool.inputSchema = updates.paramsSchema;
-          delete this._toolInputSchemaJson[name8];
+          delete this._toolInputSchemaJson[name];
           needsExecutorRegen = true;
         }
         if (updates.callback !== undefined) {
@@ -109812,22 +107098,22 @@ var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CH
         this.sendToolListChanged();
       }
     };
-    this._registeredTools[name8] = registeredTool;
+    this._registeredTools[name] = registeredTool;
     this.setToolRequestHandlers();
     this.sendToolListChanged();
     return registeredTool;
   }
-  registerTool(name8, config4, cb) {
-    if (this._registeredTools[name8])
-      throw new Error(`Tool ${name8} is already registered`);
+  registerTool(name, config4, cb) {
+    if (this._registeredTools[name])
+      throw new Error(`Tool ${name} is already registered`);
     const { title, description, inputSchema, outputSchema, annotations, icons, _meta } = config4;
-    return this._createRegisteredTool(name8, title, description, normalizeRawShapeSchema(inputSchema), normalizeRawShapeSchema(outputSchema), annotations, icons, undefined, _meta, cb);
+    return this._createRegisteredTool(name, title, description, normalizeRawShapeSchema(inputSchema), normalizeRawShapeSchema(outputSchema), annotations, icons, undefined, _meta, cb);
   }
-  registerPrompt(name8, config4, cb) {
-    if (this._registeredPrompts[name8])
-      throw new Error(`Prompt ${name8} is already registered`);
+  registerPrompt(name, config4, cb) {
+    if (this._registeredPrompts[name])
+      throw new Error(`Prompt ${name} is already registered`);
     const { title, description, argsSchema, icons, _meta } = config4;
-    const registeredPrompt = this._createRegisteredPrompt(name8, title, description, normalizeRawShapeSchema(argsSchema), cb, icons, _meta);
+    const registeredPrompt = this._createRegisteredPrompt(name, title, description, normalizeRawShapeSchema(argsSchema), cb, icons, _meta);
     this.setPromptRequestHandlers();
     this.sendPromptListChanged();
     return registeredPrompt;
@@ -109878,7 +107164,7 @@ var init_mcp_DXXb3Vv3 = __esm(() => {
           server._clientVersion = identity2.clientInfo;
       };
       installDiscoverHandler = (server, servedModernVersions) => {
-        const missing = servedModernVersions.filter((version11) => !server._supportedProtocolVersions.includes(version11));
+        const missing = servedModernVersions.filter((version4) => !server._supportedProtocolVersions.includes(version4));
         if (missing.length > 0)
           server._supportedProtocolVersions = [...server._supportedProtocolVersions, ...missing];
         server.setRequestHandler("server/discover", () => server._ondiscover());
@@ -110809,8 +108095,8 @@ var StdioServerTransport2 = class {
       return;
     return this._wire.send(message, options2);
   }
-  setProtocolVersion = (version11) => {
-    this._wire.setProtocolVersion?.(version11);
+  setProtocolVersion = (version4) => {
+    this._wire.setProtocolVersion?.(version4);
   };
   deliver(message, extra) {
     if (this._closed)
@@ -110983,14 +108269,14 @@ __export(exports_v2_server, {
   serveV2Stdio: () => serveV2Stdio,
   buildV2Server: () => buildV2Server
 });
-import { join as join61 } from "path";
+import { join as join60 } from "path";
 function textResult(result) {
   return { content: [{ type: "text", text: typeof result === "string" ? result : JSON.stringify(result, null, 2) }] };
 }
 function buildV2Server() {
   const circuitBreaker = new CircuitBreaker;
   const loader = new SpecialistLoader;
-  const hooks = new HookEmitter({ tracePath: join61(process.cwd(), ".specialists", "trace.jsonl") });
+  const hooks = new HookEmitter({ tracePath: join60(process.cwd(), ".specialists", "trace.jsonl") });
   const beadsClient = new BeadsClient;
   const runner = new SpecialistRunner({ loader, hooks, circuitBreaker, beadsClient });
   const observability = createObservabilitySqliteClient();

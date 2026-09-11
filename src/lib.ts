@@ -41,10 +41,11 @@ export { validateBeforeRun } from './specialist/runner.js';
 export { NativeActivationHost } from './activation/native-host.js';
 export type { NativeActivationHostDeps, ActivationForensicSink, ActivationAttachment } from './activation/native-host.js';
 export {
-  openWorkItems,
+  createWorkItemBoundary,
+  openWorkItemBoundary,
   openSubstrateDb,
   resolveWorkItemDbPath,
-  SubstrateWorkItemsBoundary,
+  NULL_WORK_ITEMS,
 } from './activation/workitem-store.js';
 export type {
   SpecialistWorkItemBoundary,
@@ -53,6 +54,14 @@ export type {
   InlineIssueResult,
   CheckResult,
   BindResult,
+  DispatchRequest,
+  ExecutionBindingView,
+  WorkItemPorts,
+  IssueServicePort,
+  IssueStorePort,
+  DispatchGatePort,
+  ActiveClaimView,
+  OpenWorkItemsOptions,
 } from './activation/workitem-store.js';
 
 export { DispatchRejectedError, THINKING_LEVELS } from './activation/types.js';
