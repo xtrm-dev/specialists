@@ -93224,9 +93224,12 @@ import { createRequire as createRequire6 } from "module";
 import { homedir as homedir18 } from "os";
 import { dirname as dirname23, join as join58 } from "path";
 function resolveAuthorityDbPath(env = process.env) {
-  const override = (env.XTRM_STATE_DB ?? "").trim();
-  if (override)
-    return override;
+  const substrate = (env.SUBSTRATE_DB ?? "").trim();
+  if (substrate)
+    return substrate;
+  const legacy = (env.XTRM_STATE_DB ?? "").trim();
+  if (legacy)
+    return legacy;
   return join58(homedir18(), ".xtrm", "state.db");
 }
 function openAuthorityDb(dbPath) {

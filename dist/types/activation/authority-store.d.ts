@@ -23,9 +23,23 @@ export declare const AUTHORITY_SCHEMA_VERSION = 1;
  */
 export declare const ACTIVATIONS_DDL = "CREATE TABLE IF NOT EXISTS activations (\n  activation_id TEXT PRIMARY KEY,\n  specialist TEXT NOT NULL,\n  state TEXT NOT NULL,\n  bead_id TEXT,\n  last_activity_at INTEGER NOT NULL\n)";
 /**
- * Resolve the one authority path. Explicit `XTRM_STATE_DB` wins; otherwise the
- * canonical `~/.xtrm/state.db`. Blank override falls back — an unset-feeling value
- * must never become a store path. Takes no cwd/project/plugin input by design.
+ * Resolve the one authority path.
+ *
+ * `SUBSTRATE_DB` wins, then `XTRM_STATE_DB`, then the canonical `~/.xtrm/state.db`.
+ *
+ * The order is ownership, not preference. This store belongs to Substrate, which defines
+ * the resolution as "explicit override, else SUBSTRATE_DB, else ~/.xtrm/state.db", pins it
+ * with its own db-authority test, and shares it with sb and Pi. `XTRM_STATE_DB` is a name
+ * specialists invented for the same file: it appears nowhere in the substrate packages, and
+ * `SUBSTRATE_DB` appeared nowhere here. So an operator redirecting the store the documented
+ * way moved sb and Pi but left specialists writing activations to the default path — two
+ * components disagreeing about where authority lives, silently (unitAI-0whq0).
+ *
+ * `XTRM_STATE_DB` is kept and still honoured, so setups that only set it are unchanged; it
+ * simply no longer overrides the owner's variable.
+ *
+ * Blank falls through — an unset-feeling value must never become a store path. Takes no
+ * cwd/project/plugin input by design.
  */
 export declare function resolveAuthorityDbPath(env?: NodeJS.ProcessEnv): string;
 /**
