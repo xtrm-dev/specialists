@@ -70,6 +70,25 @@ describe('substrate_issue ops', () => {
     ]);
   });
 
+  // unitAI-jz978. Passing no git root relied on Substrate having exactly one project and
+  // defaulting to it. With several, that default became a silent wrong answer, so the
+  // caller's location has to be sent. These assert the ARGUMENT, not a real store: the
+  // tool is service-injected and must not need a resolvable Substrate to be tested.
+  it('resolves by the caller location when no project is named', async () => {
+    const { svc, calls } = fake();
+    await tool(svc).execute({ op: 'project_resolve' });
+    const [, args] = calls.find((c) => c[0] === 'resolveProject')!;
+    expect(args[0]).toEqual({ gitRoot: process.cwd() });
+  });
+
+  it('lets an explicit project win over the caller location', async () => {
+    const { svc, calls } = fake();
+    await tool(svc).execute({ op: 'project_resolve', project_id: 'prj_explicit' });
+    const [, args] = calls.find((c) => c[0] === 'resolveProject')!;
+    // No gitRoot at all: an explicit id is an answer, not a hint to be reconciled.
+    expect(args[0]).toEqual({ explicit: 'prj_explicit' });
+  });
+
   it('names the missing field instead of throwing', async () => {
     const { svc } = fake();
     const r = await tool(svc).execute({ op: 'create', title: 'a' }) as Record<string, unknown>;

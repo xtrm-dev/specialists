@@ -19761,10 +19761,12 @@ import { dirname as dirname9, join as join13 } from "node:path";
 import { pathToFileURL } from "node:url";
 var require2 = createRequire2(import.meta.url);
 var SUBSTRATE_PACKAGE = "@jaggerxtrm/substrate";
-function resolveSubstrateDir(explicit) {
+function resolveSubstrateDir(explicit, resolveInstalled) {
   const trimmed = explicit.trim();
   if (trimmed)
     return trimmed;
+  if (resolveInstalled)
+    return resolveInstalled();
   try {
     return dirname9(require2.resolve(`${SUBSTRATE_PACKAGE}/package.json`));
   } catch {
@@ -19912,7 +19914,7 @@ function splitLines(body) {
 }
 async function openWorkItemBoundary(opts = {}) {
   const env = opts.env ?? process.env;
-  const substrateDir = resolveSubstrateDir(opts.substrateDir ?? env.XTRM_SUBSTRATE_DIR ?? "");
+  const substrateDir = resolveSubstrateDir(opts.substrateDir ?? env.XTRM_SUBSTRATE_DIR ?? "", opts.resolveInstalled);
   if (!substrateDir) {
     throw new Error(`work_item_store_unavailable: no Substrate package configured (install ${SUBSTRATE_PACKAGE}, ` + "or set XTRM_SUBSTRATE_DIR to a checkout of it)");
   }

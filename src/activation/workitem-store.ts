@@ -59,9 +59,10 @@ const SUBSTRATE_PACKAGE = '@jaggerxtrm/substrate';
  * from npm and has never heard of the Substrate repository. Before it existed,
  * dispatch was unavailable to every such user (XTRM-267).
  */
-function resolveSubstrateDir(explicit: string): string | null {
+function resolveSubstrateDir(explicit: string, resolveInstalled?: () => string | null): string | null {
   const trimmed = explicit.trim();
   if (trimmed) return trimmed;
+  if (resolveInstalled) return resolveInstalled();
   try {
     return dirname(require.resolve(`${SUBSTRATE_PACKAGE}/package.json`));
   } catch {
@@ -431,6 +432,16 @@ export interface OpenWorkItemsOptions {
   /** Absolute path to a Substrate checkout. Overrides module resolution; see resolveSubstrateDir. */
   substrateDir?: string;
   env?: NodeJS.ProcessEnv;
+  /**
+   * How to find an INSTALLED Substrate when no explicit path is given. Defaults to real
+   * module resolution.
+   *
+   * Exists so a test can state "nothing is installed" instead of depending on the machine
+   * not having the package (unitAI-7co1i). The absent-Substrate paths were previously
+   * asserted by accident: they passed on CI, which carries no Substrate, and failed the
+   * moment anyone installed it — which publishing it made normal.
+   */
+  resolveInstalled?: () => string | null;
 }
 
 /**
@@ -449,7 +460,10 @@ export interface OpenWorkItemsOptions {
  */
 export async function openWorkItemBoundary(opts: OpenWorkItemsOptions = {}): Promise<SpecialistWorkItemBoundary> {
   const env = opts.env ?? process.env;
-  const substrateDir = resolveSubstrateDir(opts.substrateDir ?? env.XTRM_SUBSTRATE_DIR ?? '');
+  const substrateDir = resolveSubstrateDir(
+    opts.substrateDir ?? env.XTRM_SUBSTRATE_DIR ?? '',
+    opts.resolveInstalled,
+  );
   if (!substrateDir) {
     throw new Error(
       `work_item_store_unavailable: no Substrate package configured (install ${SUBSTRATE_PACKAGE}, ` +

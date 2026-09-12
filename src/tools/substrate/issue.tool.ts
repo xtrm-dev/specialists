@@ -64,7 +64,7 @@ interface IssueServiceLike {
   getIssue(id: string): unknown;
   createIssue(input: unknown, opts?: { idempotencyKey?: string }): unknown;
   updateContract(id: string, contract: unknown): unknown;
-  resolveProject(input: { explicit?: string }): unknown;
+  resolveProject(input: { explicit?: string; gitRoot?: string }): unknown;
   createProject(input: { prefix: string; name: string }): unknown;
   linkCheckout(gitRoot: string, projectId?: string): unknown;
   listLinks(): readonly unknown[];
@@ -118,7 +118,21 @@ export function createSubstrateIssueTool(getIssues: () => IssueServiceLike | nul
             return { status: 'ok', issue: project(issues.updateContract(input.issue_id as string, input.contract)) };
           }
           case 'project_resolve': {
-            const resolved = issues.resolveProject(input.project_id ? { explicit: input.project_id } : {});
+            // An explicit id wins; otherwise resolve by WHERE THE CALLER IS.
+            //
+            // Passing nothing used to work only because Substrate held a single project and
+            // defaulted to it. With several projects that default became a silent wrong
+            // answer — a coordinator in the specialists repo was handed prj_xtrm without
+            // being told — and Substrate now fails closed instead (XTRM-254).
+            //
+            // process.cwd() is deliberately raw: Substrate matches the longest linked
+            // ancestor of any path inside a checkout, so worktrees resolve to their
+            // repository. Canonicalising here would fork that rule across two repos.
+            // Requires @jaggerxtrm/substrate >= 0.1.2; earlier versions lack the ancestor
+            // match and would answer from a different rule.
+            const resolved = issues.resolveProject(
+              input.project_id ? { explicit: input.project_id } : { gitRoot: process.cwd() },
+            );
             return { status: 'ok', project: resolved };
           }
           case 'project_create': {
