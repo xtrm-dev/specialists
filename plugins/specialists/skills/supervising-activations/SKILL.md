@@ -24,6 +24,13 @@ forbids.
 What is local to THIS plugin, and therefore stated here:
 
 - A tool result is evidence, not a decision. A dispatch admission is not a result.
+- **`XTRM_SUBSTRATE_DIR` must be set in the session environment, or dispatch does not work
+  at all.** It points at an `@xtrm/substrate` checkout, which supplies the work-item store
+  that holds the contract. Without it `specialist_dispatch` is refused before any model turn
+  with `work_item_store_unavailable`; the read tools (`specialist_status`, `specialist_list`)
+  keep working, so the surface looks healthy right up until you try to dispatch. It has to be
+  exported into the environment the session was launched with — a value exported after launch
+  does not reach the already-running MCP server.
 - The store this plugin reads is resolved from `SUBSTRATE_DB`, else `XTRM_STATE_DB`, else
   `~/.xtrm/state.db`. `SUBSTRATE_DB` comes first because the store belongs to Substrate,
   which defines that variable and shares the file with sb and Pi; `XTRM_STATE_DB` is this
@@ -37,7 +44,10 @@ Seven tools. The names are exact.
 
 ### specialist_dispatch
 Creates an activation. Supply EXACTLY ONE of:
-- `bead_id` — an existing READY bead, or
+- `bead_id` — a Substrate issue ref (for example `XTRM-240`), already READY. NOT a `bd`
+  bead id: Substrate's issue store and the `bd` board are separate stores, so passing a `bd`
+  id such as `unitAI-ucpcy` is refused with `issue_unresolvable`. To run a specialist against
+  work that only exists in `bd`, pass its contract inline instead, or
 - `contract` — an inline contract: seven sections (PROBLEM, SUCCESS, SCOPE, NON_GOALS,
   CONSTRAINTS, VALIDATION, OUTPUT) plus a SCRUTINY level (LOW | MEDIUM | HIGH | CRITICAL).
   Eight required parts. SCRUTINY is the level, never an eighth section.

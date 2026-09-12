@@ -188,13 +188,26 @@ claude plugin install specialists@xtrm
 Verify the server is reachable from Claude Code:
 
 ```bash
-claude mcp list | grep substrate
+claude mcp list | grep specialists
 # plugin:specialists:specialists: ... - ✔ Connected
 ```
 
-The plugin requires Bun on `PATH` and reads Substrate's canonical store at `~/.xtrm/state.db`
-(override with `XTRM_STATE_DB` only for operator/test use). To develop against a checkout
-instead of an install, use `claude --plugin-dir ./plugins/specialists`.
+**To dispatch, export `XTRM_SUBSTRATE_DIR` before launching the session.** It points at an
+`@xtrm/substrate` checkout, which supplies the work-item store holding the contract. Without
+it `specialist_dispatch` is refused with `work_item_store_unavailable`, while
+`specialist_status` and `specialist_list` keep working — so the plugin looks healthy until
+you try to dispatch. The value must be in the environment the session is *launched* with; a
+shell export afterwards does not reach the already-running MCP server.
+
+```bash
+export XTRM_SUBSTRATE_DIR=/path/to/xtrm/packages/substrate
+claude
+```
+
+The plugin requires Bun on `PATH` and reads Substrate's canonical store, resolved from
+`SUBSTRATE_DB`, else `XTRM_STATE_DB`, else `~/.xtrm/state.db`. `SUBSTRATE_DB` comes first
+because the store belongs to Substrate and is shared with `sb` and Pi. To develop against a
+checkout instead of an install, use `claude --plugin-dir ./plugins/specialists`.
 
 ### Global model config
 
