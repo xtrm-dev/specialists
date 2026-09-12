@@ -169,6 +169,10 @@ export type {
 // workspace identity both rules key on.
 export { admitCoordinatorToolCall } from './activation/workspace-lease.js';
 export { leaseScopeFor } from './activation/workspace-reconcile.js';
+// Read-only lease inspection for the coordinator PreToolUse warning hook
+// (SPECIALISTS-23): the hook must never acquire, rewrite or release a lease, and it must
+// read the SAME verdict the runtime uses rather than re-deriving one.
+export { inspect as inspectWorkspaceLease } from './activation/workspace-lease.js';
 
 // Shared refusal renderer (unitAI-t2kol.4): the single gate-outcome shape both
 // coordinator surfaces use. MCP imports it; the Pi extension follows (recorded follow-up).

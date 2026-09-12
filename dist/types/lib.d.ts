@@ -31,6 +31,7 @@ export type { CitationLine, VerifiedCitationWindow, VerifiedCitationWindowOption
 export type { LaunchOutcome, LaunchOutcomeProjection, LaunchOutcomeErrorCode, LaunchOutcomeAction, LaunchOutcomeIdentity, LaunchOutcomeReadiness, LaunchOutcomeWorktree, LaunchOutcomeRuntime, LaunchOutcomeSafetyProfile, LaunchOutcomeSideEffect, LaunchOutcomeMutationRecord, } from './specialist/launch-outcome.js';
 export { admitCoordinatorToolCall } from './activation/workspace-lease.js';
 export { leaseScopeFor } from './activation/workspace-reconcile.js';
+export { inspect as inspectWorkspaceLease } from './activation/workspace-lease.js';
 export { renderRejection, supersedeStaleRefusal, STALE_RUNTIME_REASON, } from './activation/rejection.js';
 export type { RejectionInput, RefusalPayload } from './activation/rejection.js';
 //# sourceMappingURL=lib.d.ts.map

@@ -23805,6 +23805,7 @@ export {
   openSubstrateDb,
   leaseScopeFor,
   isBuildStale,
+  inspect as inspectWorkspaceLease,
   hashFileBytes,
   extractSections,
   evaluateBeadReadiness,
