@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createObservabilitySqliteClient } from '../specialist/observability-sqlite.js';
 import { refreshPrDriftForJob } from '../specialist/pr-drift-refresh.js';
 import type { PrClassification } from '../specialist/pr-drift-refresh.js';
@@ -13,6 +14,7 @@ import { detectDriftUnderRoot } from '../specialist/drift-detector.js';
 import { auditDeadJobs } from '../specialist/dead-job-audit.js';
 import { SpecialistLoader } from '../specialist/loader.js';
 import { readValidatedGlobalUserConfig } from '../specialist/global-config.js';
+import { runChannelDoctorChecks, type ChannelDoctorInputs } from '../specialist/channel-doctor.js';
 import { formatVersionCheckNudge, getVersionCheckResult, localVersion, readCachedVersionCheck } from './version-check.js';
 
 const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
@@ -110,6 +112,60 @@ function checkXt(): boolean {
     return false;
   }
   ok(`xt installed  ${dim(sp('xt', ['--version']).stdout || '')}`);
+  return true;
+}
+
+const EXPECTED_PLUGIN_NAME = 'specialists';
+const EXPECTED_MARKETPLACE_NAME = 'xtrm'; // spec AN.2
+
+function resolveManagedSettingsPath(): string {
+  return process.platform === 'darwin'
+    ? '/Library/Application Support/ClaudeCode/managed-settings.json'
+    : '/etc/claude-code/managed-settings.json';
+}
+
+function resolveServerSourcePath(): string {
+  const distPath = fileURLToPath(new URL('../../dist/index.js', import.meta.url));
+  if (existsSync(distPath)) return distPath;
+  return fileURLToPath(new URL('../mcp/v2-server.ts', import.meta.url));
+}
+
+function statusIcon(status: 'pass' | 'fail' | 'unknown'): string {
+  if (status === 'pass') return green('✓');
+  if (status === 'fail') return red('✗');
+  return dim('?');
+}
+
+function checkChannels(): boolean {
+  section('Claude Code channel wake  (8-gate chain, spec AM.3)');
+  const report = runChannelDoctorChecks({
+    managedSettingsPath: resolveManagedSettingsPath(),
+    installedPluginsPath: join(homedir(), '.claude', 'plugins', 'installed_plugins.json'),
+    serverSourcePath: resolveServerSourcePath(),
+    expectedPluginName: EXPECTED_PLUGIN_NAME,
+    expectedMarketplaceName: EXPECTED_MARKETPLACE_NAME,
+    isInteractiveTty: Boolean(process.stdout.isTTY),
+  });
+
+  for (const gate of report.gates) {
+    console.log(`  ${statusIcon(gate.status)} [${gate.id}] ${gate.name}`);
+    hint(gate.detail);
+    if (gate.fixHint) fix(gate.fixHint);
+  }
+
+  console.log('');
+  if (report.headlessWarning) warn(report.headlessWarning);
+
+  if (report.firstClosedGate) {
+    fail(`first closed gate: [${report.firstClosedGate.id}] ${report.firstClosedGate.name}`);
+    return false;
+  }
+  const unknownCount = report.gates.filter(g => g.status === 'unknown').length;
+  if (unknownCount > 0) {
+    warn(`no locally-observable gate is closed; ${unknownCount} gate(s) require a live session to confirm`);
+    return true;
+  }
+  ok('all locally-observable gates pass');
   return true;
 }
 
@@ -351,10 +407,11 @@ interface DoctorOptions {
   pr_drift: boolean;
   reap_dead_jobs: boolean;
   dry_run: boolean;
+  channels: boolean;
 }
 
 function parseDoctorArgs(argv: readonly string[]): DoctorOptions {
-  const opts: DoctorOptions = { json: false, drift: false, specialists: false, pr_drift: false, reap_dead_jobs: false, dry_run: false };
+  const opts: DoctorOptions = { json: false, drift: false, specialists: false, pr_drift: false, reap_dead_jobs: false, dry_run: false, channels: false };
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i];
     if (token === '--json') { opts.json = true; continue; }
@@ -362,6 +419,7 @@ function parseDoctorArgs(argv: readonly string[]): DoctorOptions {
     if (token === '--specialists' || token === '--check-specialists') { opts.specialists = true; continue; }
     if (token === '--pr-drift') { opts.pr_drift = true; continue; }
     if (token === '--reap-dead-jobs') { opts.reap_dead_jobs = true; continue; }
+    if (token === '--channels' || token === '--check-channels') { opts.channels = true; continue; }
     if (token === '--dry-run') { opts.dry_run = true; continue; }
     if (token === '--root') { const value = argv[i + 1]; if (!value || value.startsWith('--')) throw new Error('--root requires a value'); opts.root = resolve(value); i += 1; continue; }
     if (token === '--help' || token === '-h') continue;
@@ -916,6 +974,14 @@ export async function run(argv: readonly string[] = process.argv.slice(3)): Prom
 
   if (opts.reap_dead_jobs) {
     await runDoctorReapDeadJobs(opts);
+    return;
+  }
+
+  if (opts.channels) {
+    console.log(`\n${bold('specialists doctor --channels')}\n`);
+    const channelsOk = checkChannels();
+    console.log('');
+    process.exitCode = channelsOk ? 0 : 1;
     return;
   }
 
