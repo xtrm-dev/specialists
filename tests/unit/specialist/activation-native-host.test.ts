@@ -10,6 +10,14 @@ import { join } from 'node:path';
  * afterwards. Everything else in node:child_process stays real — `execSync` is used by
  * tool-catalog resolution and the system-prompt defaults.
  */
+/**
+ * SPECIALISTS-6: the curated extension set must be resolvable without depending on what
+ * the machine happens to have installed. The python-kernel resolver is the one curated
+ * entry that is resolved rather than existsSync-checked, so it is the one stubbed.
+ */
+vi.mock('../../../src/pi/python-kernel-extension.js', () => ({
+  resolvePiExtensionsPythonKernelPath: () => '/fake/pi-extensions/python-kernel',
+}));
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>();
   return {
@@ -1720,5 +1728,120 @@ describe('output contract schema parity (SPECIALISTS-5)', () => {
     );
     expect(legacy).not.toBe('');
     expect(native).toBe(legacy);
+  });
+});
+
+
+/**
+ * SPECIALISTS-6. Two legacy capabilities were absent from the native path: pre-phase
+ * scripts (`runner.ts:1093-1100` — required-script failure refuses before launch, and
+ * `inject_output` stdout reaches the prompt as `$pre_script_output`), and the curated Pi
+ * extension set that `session.ts` re-enables after `--no-extensions`.
+ */
+describe('pre-scripts and curated extensions (SPECIALISTS-6)', () => {
+  const PY_KERNEL = '/fake/pi-extensions/python-kernel';
+
+  function specWithScripts(scripts: Array<Record<string, unknown>>, executionExtra: Record<string, unknown> = {}) {
+    const spec = readOnlySpec(executionExtra) as { specialist: { skills?: Record<string, unknown> } };
+    spec.specialist.skills = { paths: [], scripts };
+    return spec;
+  }
+
+  /** A real executable on disk: validateBeforeRun hard-fails a missing script or bad shebang. */
+  function preScriptFile(workspace: string, name: string, body: string): string {
+    const file = join(workspace, `${name}.sh`);
+    writeFileSync(file, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+    return file;
+  }
+
+  it('injects an optional pre-script stdout into the turn-1 prompt', async () => {
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record });
+    const workspace = hostWorkspace();
+    const script = preScriptFile(workspace, 'pre-ok', 'echo PRE-SCRIPT-MARKER');
+    const spec = specWithScripts([{ phase: 'pre', run: script, inject_output: true }]) as {
+      specialist: { prompt: Record<string, unknown> };
+    };
+    spec.specialist.prompt.task_template = 'Do: $bead_id\nPre: $pre_script_output';
+    const host = new NativeActivationHost({
+      loader: loaderFor(spec),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => makeSdk(record, session),
+      cwd: workspace,
+    });
+    await (await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    })).result;
+
+    expect(session.prompts[0]).toContain('PRE-SCRIPT-MARKER');
+  });
+
+  it('refuses a failing REQUIRED pre-script before any session exists', async () => {
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record });
+    const workspace = hostWorkspace();
+    const script = preScriptFile(workspace, 'pre-fail', 'exit 7');
+    const host = new NativeActivationHost({
+      loader: loaderFor(specWithScripts([
+        { phase: 'pre', run: script, inject_output: false, required: true },
+      ])),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => makeSdk(record, session),
+      cwd: workspace,
+    });
+    const refusal = await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    }).catch((error: unknown) => error);
+
+    expect((refusal as DispatchRejectedError).reason).toBe('required_pre_script_failed');
+    expect(record.createArgs).toBeUndefined();
+  });
+
+  it('gives the write tier the curated extensions and applies same-identity de-duplication', async () => {
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record });
+    const host = new NativeActivationHost({
+      loader: loaderFor(specWithScripts([], {
+        permission_required: 'HIGH',
+        extensions: { 'npm:pi-mcp-adapter': true, [PY_KERNEL]: true },
+      })),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => makeSdk(record, session),
+      cwd: hostWorkspace(),
+    });
+    await (await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    })).result;
+
+    const loader = record.createArgs!.resourceLoader as FakeResourceLoader;
+    const paths = loader.options.additionalExtensionPaths as string[];
+    // The curated python-kernel is injected for a write tier...
+    expect(paths).toContain(PY_KERNEL);
+    // ...exactly once, even though the definition also declares it (unitAI-il2io rule).
+    expect(paths.filter((p) => p === PY_KERNEL)).toHaveLength(1);
+    // A non-local source cannot be loaded by the in-process resource loader and is not
+    // forwarded as if it were a path.
+    expect(paths.some((p) => p.startsWith('npm:'))).toBe(false);
+  });
+
+  it('withholds the write-tier-only curated extensions from a read-only specialist', async () => {
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record });
+    const host = new NativeActivationHost({
+      loader: loaderFor(specWithScripts([])),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => makeSdk(record, session),
+      cwd: hostWorkspace(),
+    });
+    await (await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    })).result;
+
+    const loader = record.createArgs!.resourceLoader as FakeResourceLoader;
+    expect(loader.options.additionalExtensionPaths as string[]).not.toContain(PY_KERNEL);
   });
 });

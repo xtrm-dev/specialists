@@ -38,8 +38,21 @@ import { existsSync } from 'node:fs';
 import { SpecialistLoader } from '../specialist/loader.js';
 import { buildSystemPrompt } from '../specialist/system-prompt.js';
 import { renderTaskPrompt } from '../specialist/task-prompt.js';
-import { validateBeforeRun, classifyFallbackError, resolveOutputContractSchema } from '../specialist/runner.js';
-import { resolveRuntimeToolContract } from '../pi/session.js';
+import {
+  validateBeforeRun,
+  classifyFallbackError,
+  resolveOutputContractSchema,
+  runScript,
+  findRequiredPreScriptFailure,
+  formatRequiredPreScriptFailure,
+  formatScriptOutput,
+} from '../specialist/runner.js';
+import {
+  resolveRuntimeToolContract,
+  resolveCuratedExtensionPaths,
+  resolveExecutionExtensionSelection,
+  deduplicateExtensionSources,
+} from '../pi/session.js';
 import { resolveModelChain } from '../specialist/model-chain.js';
 import { extractPurposeExcerpt } from './bead-gate.js';
 import {
@@ -117,6 +130,15 @@ function extractTokenUsage(event: PiAgentSessionEvent): ActivationTokenUsage | u
 
 /** Permission tiers that can mutate the workspace. Derived from the resolved grant. */
 const WRITE_TIERS = new Set(['MEDIUM', 'HIGH']);
+
+/**
+ * Pi's own non-local extension source prefixes. The legacy CLI passes these straight to
+ * `-e` and pi's package manager fetches them; the in-process `DefaultResourceLoader` takes
+ * filesystem paths only, so they are reported and skipped rather than resolved as a
+ * relative path that cannot exist.
+ */
+const NON_LOCAL_EXTENSION_PREFIXES = ['npm:', 'git:', 'github:', 'http:', 'https:', 'ssh:'];
+
 
 /**
  * The activation's `cwd` and `agentDir` feed pi's resource loader, which is the ONLY
@@ -511,6 +533,25 @@ export class NativeActivationHost {
       });
     }
 
+    // Pre-phase scripts run locally BEFORE an AgentSession exists, matching the legacy
+    // runner (src/specialist/runner.ts:1093-1100): a required script's nonzero exit refuses
+    // the dispatch here, so no model turn is spent and no session is created, and the
+    // captured stdout of every `inject_output` script reaches the prompt as
+    // `$pre_script_output`. validateBeforeRun above already proved each script exists and is
+    // executable, so a missing script refuses before this point rather than as a spawn error.
+    const preScripts = specialist.specialist.skills?.scripts?.filter((s) => s.phase === 'pre') ?? [];
+    const preScriptResults = preScripts.map((script) =>
+      runScript(script.run ?? (script as unknown as { path?: string }).path, this.cwd));
+    const requiredPreFailure = findRequiredPreScriptFailure(preScripts, preScriptResults);
+    if (requiredPreFailure) {
+      return reject('required_pre_script_failed', {
+        note: formatRequiredPreScriptFailure(requiredPreFailure),
+      });
+    }
+    const preScriptOutput = formatScriptOutput(
+      preScriptResults.filter((_, index) => preScripts[index].inject_output),
+    );
+
     const sdk = await this.loadSdk();
     // Fail closed rather than fall back to pi's auto-discovering DefaultResourceLoader:
     // a session that discovers its own skills is the exact defect this closes. The real
@@ -643,6 +684,7 @@ export class NativeActivationHost {
       beadId: view.ref,
       bead: workItemAsRecord(view),
       epicAncestors: epicAncestors.map(workAncestorAsRecord),
+      preScriptOutput,
     });
 
     // Resolved ONCE from the definition, exactly as the legacy call site does
@@ -730,9 +772,44 @@ export class NativeActivationHost {
     // Built ONCE, before any attempt: every session created below — the first, a
     // fallback model, a retry — must see the same declared resources. `reload()` is
     // explicit because createAgentSession only reloads a loader it constructed itself.
+    // The curated extension set the legacy CLI re-enables after `--no-extensions`
+    // (`resolveCuratedExtensionPaths`, shared with src/pi/session.ts so the two runtimes
+    // cannot drift), plus the definition's own declared LOCAL extension sources, with the
+    // same same-identity de-duplication rule (unitAI-il2io). The in-process resource loader
+    // only accepts filesystem paths, so a non-local source is reported and skipped rather
+    // than forwarded as if it were a path.
+    const curatedExtensions = resolveCuratedExtensionPaths({
+      permissionLevel: tier,
+      resolvedToolContract: toolContract,
+    });
+    const declaredExtensions = resolveExecutionExtensionSelection(
+      specialist.specialist.execution?.extensions as Record<string, boolean | null | undefined> | undefined,
+    ).extensionSources;
+    const declaredLocalExtensions: string[] = [];
+    for (const source of declaredExtensions) {
+      if (NON_LOCAL_EXTENSION_PREFIXES.some((prefix) => source.startsWith(prefix))) {
+        process.stderr.write(
+          `[specialists] native activation: extension source '${source}' is not a filesystem path; ` +
+          'the in-process resource loader cannot load it, so it is not injected.\n',
+        );
+        continue;
+      }
+      declaredLocalExtensions.push(source);
+    }
+    const { kept: dynamicExtensions, dropped: droppedExtensions } = deduplicateExtensionSources(
+      curatedExtensions.dedupeAgainstDynamic,
+      declaredLocalExtensions,
+    );
+    for (const { dropped, keptAs } of droppedExtensions) {
+      process.stderr.write(
+        `[python-kernel] DEDUP: skipping duplicate extension source '${dropped}' (same as '${keptAs}'; kept '${keptAs}').\n`,
+      );
+    }
+
     const resourceLoader = createActivationResourceLoader(sdk, {
       cwd: workspace.worktreePath,
       skillPaths: specialist.specialist.skills?.paths ?? [],
+      extensionPaths: [...curatedExtensions.all, ...dynamicExtensions],
     });
     await resourceLoader.reload();
 

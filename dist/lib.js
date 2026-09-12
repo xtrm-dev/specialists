@@ -11494,6 +11494,36 @@ function resolveExecutionExtensionSelection(extensions) {
     offline: !extensionSources.some(isRemoteExtensionSource)
   };
 }
+function resolveCuratedExtensionPaths(options) {
+  const all = [];
+  const piExtDir = join4(homedir2(), ".pi", "agent", "extensions");
+  const permLevel = (options.permissionLevel ?? "").toUpperCase();
+  if (permLevel !== "READ_ONLY") {
+    const qgPath = join4(piExtDir, "quality-gates");
+    if (existsSync5(qgPath))
+      all.push(qgPath);
+  }
+  const pyKernelPath = resolvePiExtensionsPythonKernelPath();
+  if (pyKernelPath && permLevel !== "READ_ONLY")
+    all.push(pyKernelPath);
+  const cavemanPath = join4(piExtDir, "caveman");
+  if (existsSync5(cavemanPath))
+    all.push(cavemanPath);
+  const nvidiaNimPath = join4(homedir2(), ".pi", "agent", "git", "github.com", "xRyul", "pi-nvidia-nim");
+  if (existsSync5(nvidiaNimPath))
+    all.push(nvidiaNimPath);
+  const gitnexusContract = options.resolvedToolContract?.extensions.gitnexus;
+  if (gitnexusContract?.status === "available" && gitnexusContract.packagePath && existsSync5(gitnexusContract.packagePath)) {
+    all.push(gitnexusContract.packagePath);
+  }
+  return {
+    all,
+    dedupeAgainstDynamic: [
+      ...pyKernelPath ? [pyKernelPath] : [],
+      ...gitnexusContract?.status === "available" && gitnexusContract.packagePath ? [gitnexusContract.packagePath] : []
+    ]
+  };
+}
 function resolveGlobalNodeModulesDir2() {
   const candidates = [
     process.env.PI_NPM_GLOBAL_DIR,
@@ -11864,32 +11894,14 @@ class PiAgentSession {
     for (const skillPath of this.options.skillPaths ?? []) {
       args.push("--skill", skillPath);
     }
-    const piExtDir = join4(homedir2(), ".pi", "agent", "extensions");
-    const permLevel = (this.options.permissionLevel ?? "").toUpperCase();
-    if (permLevel !== "READ_ONLY") {
-      const qgPath = join4(piExtDir, "quality-gates");
-      if (existsSync5(qgPath))
-        args.push("-e", qgPath);
+    const curatedExtensions = resolveCuratedExtensionPaths({
+      permissionLevel: this.options.permissionLevel,
+      resolvedToolContract
+    });
+    for (const extensionPath of curatedExtensions.all) {
+      args.push("-e", extensionPath);
     }
-    const pyKernelPath = resolvePiExtensionsPythonKernelPath();
-    if (pyKernelPath && permLevel !== "READ_ONLY") {
-      args.push("-e", pyKernelPath);
-    }
-    const cavemanPath = join4(piExtDir, "caveman");
-    if (existsSync5(cavemanPath))
-      args.push("-e", cavemanPath);
-    const nvidiaNimPath = join4(homedir2(), ".pi", "agent", "git", "github.com", "xRyul", "pi-nvidia-nim");
-    if (existsSync5(nvidiaNimPath))
-      args.push("-e", nvidiaNimPath);
-    const gitnexusContract = resolvedToolContract?.extensions.gitnexus;
-    if (gitnexusContract?.status === "available" && gitnexusContract.packagePath && existsSync5(gitnexusContract.packagePath)) {
-      args.push("-e", gitnexusContract.packagePath);
-    }
-    const autoInjectedForDedup = [
-      ...pyKernelPath ? [pyKernelPath] : [],
-      ...gitnexusContract?.status === "available" && gitnexusContract.packagePath ? [gitnexusContract.packagePath] : []
-    ];
-    const { kept: dedupedSources, dropped: droppedSources } = deduplicateExtensionSources(autoInjectedForDedup, this.options.extensionSources ?? []);
+    const { kept: dedupedSources, dropped: droppedSources } = deduplicateExtensionSources(curatedExtensions.dedupeAgainstDynamic, this.options.extensionSources ?? []);
     for (const { dropped, keptAs } of droppedSources) {
       process.stderr.write(`[python-kernel] DEDUP: skipping duplicate extension source '${dropped}' (same as '${keptAs}'; kept '${keptAs}').
 `);
@@ -21684,6 +21696,7 @@ function extractTokenUsage(event) {
   return;
 }
 var WRITE_TIERS = new Set(["MEDIUM", "HIGH"]);
+var NON_LOCAL_EXTENSION_PREFIXES = ["npm:", "git:", "github:", "http:", "https:", "ssh:"];
 function createActivationResourceLoader(sdk, options) {
   return new sdk.DefaultResourceLoader({
     cwd: options.cwd,
@@ -21850,6 +21863,15 @@ class NativeActivationHost {
         note: error instanceof Error ? error.message : String(error)
       });
     }
+    const preScripts = specialist.specialist.skills?.scripts?.filter((s) => s.phase === "pre") ?? [];
+    const preScriptResults = preScripts.map((script) => runScript(script.run ?? script.path, this.cwd));
+    const requiredPreFailure = findRequiredPreScriptFailure(preScripts, preScriptResults);
+    if (requiredPreFailure) {
+      return reject("required_pre_script_failed", {
+        note: formatRequiredPreScriptFailure(requiredPreFailure)
+      });
+    }
+    const preScriptOutput = formatScriptOutput(preScriptResults.filter((_, index) => preScripts[index].inject_output));
     const sdk = await this.loadSdk();
     if (typeof sdk.DefaultResourceLoader !== "function" || typeof sdk.getAgentDir !== "function") {
       return reject("pi_sdk_resource_loader_unavailable", {
@@ -21942,7 +21964,8 @@ class NativeActivationHost {
       cwd: this.cwd,
       beadId: view.ref,
       bead: workItemAsRecord(view),
-      epicAncestors: epicAncestors.map(workAncestorAsRecord)
+      epicAncestors: epicAncestors.map(workAncestorAsRecord),
+      preScriptOutput
     });
     const responseFormat = execution.response_format ?? "text";
     const outputType = execution.output_type ?? "custom";
@@ -22005,9 +22028,29 @@ class NativeActivationHost {
         note: `these tools mutate and cannot be fenced by the workspace lease on this runtime: ${guardedTools.unguardable.join(", ")}`
       });
     }
+    const curatedExtensions = resolveCuratedExtensionPaths({
+      permissionLevel: tier,
+      resolvedToolContract: toolContract
+    });
+    const declaredExtensions = resolveExecutionExtensionSelection(specialist.specialist.execution?.extensions).extensionSources;
+    const declaredLocalExtensions = [];
+    for (const source of declaredExtensions) {
+      if (NON_LOCAL_EXTENSION_PREFIXES.some((prefix) => source.startsWith(prefix))) {
+        process.stderr.write(`[specialists] native activation: extension source '${source}' is not a filesystem path; ` + `the in-process resource loader cannot load it, so it is not injected.
+`);
+        continue;
+      }
+      declaredLocalExtensions.push(source);
+    }
+    const { kept: dynamicExtensions, dropped: droppedExtensions } = deduplicateExtensionSources(curatedExtensions.dedupeAgainstDynamic, declaredLocalExtensions);
+    for (const { dropped, keptAs } of droppedExtensions) {
+      process.stderr.write(`[python-kernel] DEDUP: skipping duplicate extension source '${dropped}' (same as '${keptAs}'; kept '${keptAs}').
+`);
+    }
     const resourceLoader = createActivationResourceLoader(sdk, {
       cwd: workspace.worktreePath,
-      skillPaths: specialist.specialist.skills?.paths ?? []
+      skillPaths: specialist.specialist.skills?.paths ?? [],
+      extensionPaths: [...curatedExtensions.all, ...dynamicExtensions]
     });
     await resourceLoader.reload();
     const baseSessionOptions = {
