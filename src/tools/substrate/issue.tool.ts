@@ -8,11 +8,11 @@
 // server to describe one domain. The op enum costs one field and keeps the surface
 // legible.
 //
-// The service is INJECTED, never imported. `@xtrm/substrate` is unpublished and cannot
-// load under bun today (it hard-imports node:sqlite, which bun lacks), so a module-scope
-// import would make the whole server fail to start on the runtime we actually ship.
-// Injection also lets the unit tests drive a fake and lets the tool light up unchanged
-// the moment Substrate becomes reachable. See src/substrate/services.ts.
+// The service is INJECTED, never imported. `@jaggerxtrm/substrate` is an optional peer
+// this package does not depend on, so a module-scope import would make the whole server
+// fail to start wherever it is absent. Injection also lets the unit tests drive a fake and
+// lets the tool light up unchanged the moment Substrate becomes reachable.
+// See src/substrate/services.ts.
 //
 // Payloads are bounded and reference-first. `specialist_status` shipped a 2.19 MB
 // response because one section was unbounded (unitAI-aiwva.8); nothing here returns an
