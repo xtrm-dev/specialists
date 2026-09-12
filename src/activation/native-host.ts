@@ -13,13 +13,13 @@
  *     lease before an AgentSession exists; a denied lease is a refusal, not a warning.
  *   - `admitToolCall` re-checks the lease on every mutating tool call, and `guarded-tools.ts`
  *     wraps pi's four mutating builtins so a refusal comes back as a tool RESULT.
- *   - `releaseIfWriter` releases on DISPOSAL and converts a throwing release into
- *     `lease_uncertain` evidence rather than a silent success. It does NOT release on
- *     settle, though `workspace-lease.ts`'s wiring note (call site 3) says it should — so a
- *     settled writer keeps its workspace until an explicit stop, and sequential writer
- *     handoff needs one. That divergence is `unitAI-rrdnt.59` and is a design decision
- *     rather than an oversight to patch: releasing on settle buys automatic handoff and
- *     costs guaranteed resumability.
+ *   - `releaseIfWriter` releases on SETTLE (`agent_settled`), on COMPLETION and on
+ *     DISPOSAL, and converts a throwing release into `lease_uncertain` evidence rather than
+ *     a silent success. A writer therefore holds its workspace for the duration of its turn
+ *     and no longer. `resume()` RE-ACQUIRES the lease, and that acquisition can be REFUSED:
+ *     when another writer already holds the workspace the resume fails with `lease_denied`
+ *     naming the holder. A settled writer is resumable, not lease-holding — a caller must not
+ *     read "the activation is settled" as "the workspace is still mine".
  *   The lease guards the LLM TOOL PATH ONLY. `pi.exec` and `AgentSession.executeBash` do not
  *   fire the tool_call handler (`unitAI-rrdnt.6`, unclosed), so a child reaching the
  *   filesystem that way is not fenced. Do not describe writers as "fenced" without that
@@ -38,8 +38,23 @@ import { existsSync } from 'node:fs';
 import { SpecialistLoader } from '../specialist/loader.js';
 import { buildSystemPrompt } from '../specialist/system-prompt.js';
 import { renderTaskPrompt } from '../specialist/task-prompt.js';
-import { validateBeforeRun, classifyFallbackError } from '../specialist/runner.js';
-import { resolveRuntimeToolContract } from '../pi/session.js';
+import {
+  validateBeforeRun,
+  classifyFallbackError,
+  resolveOutputContractSchema,
+  runScript,
+  findRequiredPreScriptFailure,
+  formatRequiredPreScriptFailure,
+  formatScriptOutput,
+  buildReviewerDiffContext,
+  buildReviewerDiffInstruction,
+} from '../specialist/runner.js';
+import {
+  resolveRuntimeToolContract,
+  resolveCuratedExtensionPaths,
+  resolveExecutionExtensionSelection,
+  deduplicateExtensionSources,
+} from '../pi/session.js';
 import { resolveModelChain } from '../specialist/model-chain.js';
 import { extractPurposeExcerpt } from './bead-gate.js';
 import {
@@ -57,7 +72,7 @@ import { PeerAdapter, type TransportForensicEvent } from './transport/peer-adapt
 import { acquire as acquireLease, admitToolCall, release as releaseLease } from './workspace-lease.js';
 import { createGuardedTools } from './guarded-tools.js';
 import { createAskTools, ASK_TOOL, ESCALATE_TOOL } from './ask-tool.js';
-import { loadPiSdk, type PiSdk, type PiAgentSessionLike, type PiAgentSessionEvent, type PiModelRuntimeLike } from './pi-sdk.js';
+import { loadPiSdk, type PiSdk, type PiAgentSessionLike, type PiAgentSessionEvent, type PiModelRuntimeLike, type PiResourceLoaderLike } from './pi-sdk.js';
 import { nativeSessionTokenUsage, accumulateTokenUsage } from '../specialist/native-activation-observability.js';
 import { createGateModelRuntime, validateModelAvailable } from './model-gate.js';
 import { FleetRegistry, RESUMABLE_STATES, RETRYABLE_STATES, nextAttemptId, type ActivationRecord } from './registry.js';
@@ -117,6 +132,81 @@ function extractTokenUsage(event: PiAgentSessionEvent): ActivationTokenUsage | u
 
 /** Permission tiers that can mutate the workspace. Derived from the resolved grant. */
 const WRITE_TIERS = new Set(['MEDIUM', 'HIGH']);
+
+/**
+ * Pi's own non-local extension source prefixes. The legacy CLI passes these straight to
+ * `-e` and pi's package manager fetches them; the in-process `DefaultResourceLoader` takes
+ * filesystem paths only, so they are reported and skipped rather than resolved as a
+ * relative path that cannot exist.
+ */
+const NON_LOCAL_EXTENSION_PREFIXES = ['npm:', 'git:', 'github:', 'http:', 'https:', 'ssh:'];
+
+
+/**
+ * The activation's `cwd` and `agentDir` feed pi's resource loader, which is the ONLY
+ * seam through which skills, extensions, prompt templates, themes and context files
+ * reach an AgentSession (pi 0.85.1 has no `skills` field on `CreateAgentSessionOptions`).
+ *
+ * The legacy CLI isolates the child and then re-adds exactly the declared skills:
+ * `--no-skills` at src/pi/session.ts:969, one `--skill <resolved path>` per declared
+ * entry at :1001, `--no-extensions` and the curated `-e` set, `--no-context-files`,
+ * `--no-prompt-templates`, `--no-themes`. `noSkills: true` + `additionalSkillPaths` is
+ * the loader equivalent of that pair, and it is what stops the host project's own
+ * skills and `AGENTS.md` from being auto-discovered into a child that never asked for
+ * them.
+ *
+ * `skillPaths` are the SAME resolved paths `validateBeforeRun` hard-fails on
+ * (native-host.ts, `validateBeforeRun(specialist, tier, toolContract)`), so a validated
+ * skill is a loaded skill rather than a silently ignored `--skill` argument. Extension
+ * paths are supplied by the caller; extension injection is a separate child issue and
+ * passes none yet, while `noExtensions: true` already fences ambient ones.
+ */
+/**
+ * The workspace a native activation runs in: the coordinator's own working
+ * directory. ONE source for it, because the rendered Runtime Boundary Rules block,
+ * the session `cwd`, the guarded-tool `cwd` and the workspace lease all key on this
+ * value — two derivations that happen to agree today is exactly how they stop
+ * agreeing tomorrow (SPECIALISTS-21).
+ *
+ * RUN-IN-PLACE IS THE DELIBERATE DESIGN, recorded here rather than in a document
+ * because the next reader of this function is the one who will wonder whether it is
+ * an omission:
+ *   - `xt claude` / `xt pi` already launch the coordinator into an isolated worktree,
+ *     so a per-activation worktree is isolation inside isolation.
+ *   - The workspace LEASE is what provides the single-writer guarantee. That was the
+ *     deliberate design, and a worktree would not add a guarantee the lease lacks.
+ *   - Provisioning would drag the legacy handoff protocol into the native runtime: a
+ *     `worktree_owner_job_id` reuse so a reviewer can read the writer's tree, plus a
+ *     merge back per activation, on a merge path CLAUDE.md declares prohibited and
+ *     known broken pending a separate rework epic.
+ *   - The known cost, accepted: the coordinator is not a lease participant, so a
+ *     coordinator edit and a write-tier activation can interleave. That hazard is
+ *     tracked separately (the coordinator edit warning), and it is not a reason to
+ *     provision worktrees.
+ * Anyone reopening worktree provisioning must first answer the merge-path problem.
+ */
+export function resolveWorkspace(cwd: string): WorkspaceIdentity {
+  return { repositoryRoot: cwd, worktreePath: cwd };
+}
+
+export function createActivationResourceLoader(
+  sdk: PiSdk,
+  options: { cwd: string; skillPaths: string[]; extensionPaths?: string[] },
+): PiResourceLoaderLike {
+  return new sdk.DefaultResourceLoader({
+    cwd: options.cwd,
+    agentDir: sdk.getAgentDir(),
+    noSkills: true,
+    additionalSkillPaths: options.skillPaths,
+    noExtensions: true,
+    additionalExtensionPaths: options.extensionPaths ?? [],
+    // Auto-discovered AGENTS.md and project context files must not silently enter the
+    // child's prompt; the loader CAN be told to skip them, so it is told.
+    noContextFiles: true,
+    noPromptTemplates: true,
+    noThemes: true,
+  });
+}
 
 /**
  * Error classes the fallback walk advances past. The classifier itself is shared with
@@ -189,8 +279,8 @@ export interface NativeActivationHostDeps {
   loader?: SpecialistLoader;
   /**
    * The shared Substrate work boundary (ADR §8-§12). When omitted the host
-   * resolves lazily against the canonical store (~/.xtrm/state.db,
-   * XTRM_STATE_DB override) and refuses dispatch fail-closed when that store
+   * resolves lazily against the canonical store (SUBSTRATE_DB, then
+   * XTRM_STATE_DB, then ~/.xtrm/state.db) and refuses dispatch fail-closed when that store
    * is absent or unopenable — never by falling back to another authority.
    */
   workItems?: SpecialistWorkItemBoundary;
@@ -345,12 +435,9 @@ export class NativeActivationHost {
     const access: WorkspaceAccess = WRITE_TIERS.has(tier) ? 'write' : 'read';
 
     // The workspace is resolved BEFORE the work gate: the dispatch gate binds
-    // workspace into its verdict, and hint-or-cwd is available without the
-    // model or tool contracts that follow.
-    const workspace: WorkspaceIdentity = request.workspaceHint ?? {
-      repositoryRoot: this.cwd,
-      worktreePath: this.cwd,
-    };
+    // workspace into its verdict, and it is available without the model or tool
+    // contracts that follow.
+    const workspace: WorkspaceIdentity = resolveWorkspace(this.cwd);
 
     // Shared Substrate work boundary (§8-§12). No Beads client, no bd
     // subprocess, no second readiness derivation: the gate lives in the
@@ -473,7 +560,35 @@ export class NativeActivationHost {
       });
     }
 
+    // Pre-phase scripts run locally BEFORE an AgentSession exists, matching the legacy
+    // runner (src/specialist/runner.ts:1093-1100): a required script's nonzero exit refuses
+    // the dispatch here, so no model turn is spent and no session is created, and the
+    // captured stdout of every `inject_output` script reaches the prompt as
+    // `$pre_script_output`. validateBeforeRun above already proved each script exists and is
+    // executable, so a missing script refuses before this point rather than as a spawn error.
+    const preScripts = specialist.specialist.skills?.scripts?.filter((s) => s.phase === 'pre') ?? [];
+    const preScriptResults = preScripts.map((script) =>
+      runScript(script.run ?? (script as unknown as { path?: string }).path, this.cwd));
+    const requiredPreFailure = findRequiredPreScriptFailure(preScripts, preScriptResults);
+    if (requiredPreFailure) {
+      return reject('required_pre_script_failed', {
+        note: formatRequiredPreScriptFailure(requiredPreFailure),
+      });
+    }
+    const preScriptOutput = formatScriptOutput(
+      preScriptResults.filter((_, index) => preScripts[index].inject_output),
+    );
+
     const sdk = await this.loadSdk();
+    // Fail closed rather than fall back to pi's auto-discovering DefaultResourceLoader:
+    // a session that discovers its own skills is the exact defect this closes. The real
+    // SDK always exports both (loadPiSdk validates them); only a stale or hand-rolled
+    // SDK injection can land here.
+    if (typeof sdk.DefaultResourceLoader !== 'function' || typeof sdk.getAgentDir !== 'function') {
+      return reject('pi_sdk_resource_loader_unavailable', {
+        note: 'this pi SDK cannot declare which skills a session loads, so the declared-skills contract cannot be honoured',
+      });
+    }
 
     // The full configured chain is the candidate list (unitAI-3emr7 reverses the
     // unitAI-rrdnt.35 never-fallback ruling, which settled every 429 as failed and wasted
@@ -590,24 +705,100 @@ export class NativeActivationHost {
     // dependency walk, and obeys the same inheritance rules as the store.
     const epicAncestors = workItems.epicAncestors(issueRef, request.epicContextDepth ?? 0);
 
+    // Dependency context for completed blockers, from the SAME Substrate edge graph and the
+    // SAME boundary that supplies epicAncestors — never a second traversal. Without this a
+    // child never sees the contracts that unblocked it (SPECIALISTS-22).
+    const completedBlockers = workItems.completedBlockers(issueRef, 1);
+
+    const isReviewer = specialist.specialist.metadata.name === 'reviewer';
+
     const rendered = renderTaskPrompt({
       specialist: specialist.specialist,
-      cwd: this.cwd,
+      // Both the cwd the prompt reports and the boundary it names come from
+      // `workspace`; the session below is created with the same value. No two
+      // derivations to drift.
+      cwd: workspace.worktreePath,
+      worktreeBoundary: workspace.worktreePath,
       beadId: view.ref,
       bead: workItemAsRecord(view),
       epicAncestors: epicAncestors.map(workAncestorAsRecord),
+      completedBlockers: completedBlockers.map(workAncestorAsRecord),
+      preScriptOutput,
+      // Reviewer diff context is EXECUTION-ONLY, so it enters through the hook rather than
+      // the pure renderer — and it must land before the prompt hash, exactly as it does on
+      // the legacy path. Without it the reviewer role loses its diff entirely.
+      ...(isReviewer
+        ? {
+            appendExecutionContext: (task: string, cwd: string, variables: Record<string, string>): string => {
+              try {
+                return `${task}${buildReviewerDiffInstruction(buildReviewerDiffContext(cwd, variables))}`;
+              } catch (error) {
+                process.stderr.write(`[specialist runner] Reviewer diff context unavailable: ${String(error)}\n`);
+                return task;
+              }
+            },
+          }
+        : {}),
     });
+
+    // Mandatory-rules resolution failure: FAIL CLOSED, deliberately.
+    //
+    // The two legacy consumers disagree — `sp run` warns and continues, the read-only
+    // renderer treats it as fatal "precisely so a coordinator can never launch silently
+    // missing its rules". Native dispatch IS a coordinator launch, which is the case the
+    // renderer's fatal policy exists to protect, so a specialist that cannot be given its
+    // mandatory rules is refused here rather than launched without them. Silent omission
+    // is the one option neither legacy consumer chose.
+    if (rendered.mandatoryRulesError) {
+      return reject('mandatory_rules_unavailable', {
+        note: `mandatory rules could not be resolved, and a native activation is never launched without them: ${rendered.mandatoryRulesError}`,
+      });
+    }
+
+    // The same injection metadata the legacy path emits, so the Fleet can answer "which
+    // rules did this activation actually run under".
+    if (rendered.mandatoryRules && rendered.mandatoryRulesBlock?.trim()) {
+      const rules = rendered.mandatoryRules;
+      emit('mandatory_rules_injection', {
+        source: 'mandatory_rules_injection',
+        sets_loaded: rules.setsLoaded,
+        rules_count: rules.ruleCount,
+        inline_rules_count: rules.inlineRulesCount,
+        globals_disabled: rules.globalsDisabled,
+        token_estimate: rules.injectedTokens,
+        budget_limit: rules.budgetLimit,
+        candidate_tokens: rules.candidateTokens,
+        injected_tokens: rules.injectedTokens,
+        injected_section_ids: rules.injectedSectionIds,
+        evicted_section_ids: rules.evictedSectionIds,
+        payload_digest: rules.payloadDigest,
+        outcome: rules.outcome,
+      });
+    }
+
+    // Resolved ONCE from the definition, exactly as the legacy call site does
+    // (src/specialist/runner.ts: `resolveOutputContractSchema(responseFormat, outputType,
+    // prompt.output_schema)`). The native path used to hardcode `undefined`, so every
+    // specialist declaring `prompt.output_schema` was asked for structured output by its
+    // prompt and never told the schema (SPECIALISTS-5).
+    const responseFormat = execution.response_format ?? 'text';
+    const outputType = execution.output_type ?? 'custom';
+    const outputContractSchema = resolveOutputContractSchema(
+      responseFormat,
+      outputType,
+      specialist.specialist.prompt.output_schema,
+    );
 
     const systemPrompt = buildSystemPrompt({
       systemPromptTemplate: specialist.specialist.prompt.system ?? '',
       templateVariables: rendered.beadTemplateVariables ?? {},
       bare: execution.bare ?? false,
-      runCwd: this.cwd,
+      runCwd: workspace.worktreePath,
       specialistName: specialist.specialist.metadata.name,
       inputIssueRef: view.ref,
-      responseFormat: execution.response_format ?? 'text',
-      outputType: execution.output_type ?? 'custom',
-      outputContractSchema: undefined,
+      responseFormat,
+      outputType,
+      outputContractSchema,
       beadContextText: rendered.beadContextText ?? '',
       readBeadForMemory: (id) => {
         try {
@@ -667,6 +858,50 @@ export class NativeActivationHost {
       });
     }
 
+    // Built ONCE, before any attempt: every session created below — the first, a
+    // fallback model, a retry — must see the same declared resources. `reload()` is
+    // explicit because createAgentSession only reloads a loader it constructed itself.
+    // The curated extension set the legacy CLI re-enables after `--no-extensions`
+    // (`resolveCuratedExtensionPaths`, shared with src/pi/session.ts so the two runtimes
+    // cannot drift), plus the definition's own declared LOCAL extension sources, with the
+    // same same-identity de-duplication rule (unitAI-il2io). The in-process resource loader
+    // only accepts filesystem paths, so a non-local source is reported and skipped rather
+    // than forwarded as if it were a path.
+    const curatedExtensions = resolveCuratedExtensionPaths({
+      permissionLevel: tier,
+      resolvedToolContract: toolContract,
+    });
+    const declaredExtensions = resolveExecutionExtensionSelection(
+      specialist.specialist.execution?.extensions as Record<string, boolean | null | undefined> | undefined,
+    ).extensionSources;
+    const declaredLocalExtensions: string[] = [];
+    for (const source of declaredExtensions) {
+      if (NON_LOCAL_EXTENSION_PREFIXES.some((prefix) => source.startsWith(prefix))) {
+        process.stderr.write(
+          `[specialists] native activation: extension source '${source}' is not a filesystem path; ` +
+          'the in-process resource loader cannot load it, so it is not injected.\n',
+        );
+        continue;
+      }
+      declaredLocalExtensions.push(source);
+    }
+    const { kept: dynamicExtensions, dropped: droppedExtensions } = deduplicateExtensionSources(
+      curatedExtensions.dedupeAgainstDynamic,
+      declaredLocalExtensions,
+    );
+    for (const { dropped, keptAs } of droppedExtensions) {
+      process.stderr.write(
+        `[python-kernel] DEDUP: skipping duplicate extension source '${dropped}' (same as '${keptAs}'; kept '${keptAs}').\n`,
+      );
+    }
+
+    const resourceLoader = createActivationResourceLoader(sdk, {
+      cwd: workspace.worktreePath,
+      skillPaths: specialist.specialist.skills?.paths ?? [],
+      extensionPaths: [...curatedExtensions.all, ...dynamicExtensions],
+    });
+    await resourceLoader.reload();
+
     // Session options are built once so every later attempt on a new model — the fallback
     // walk below, a retry with an override — creates its session identically to the first.
     // The ask/escalate tools are shared across attempts on purpose: they key off the live
@@ -674,6 +909,7 @@ export class NativeActivationHost {
     const baseSessionOptions = {
       customTools: [...askTools, ...guardedTools.tools],
       cwd: workspace.worktreePath,
+      resourceLoader,
       // The pi SDK takes a Model object here. Passing the provider-qualified string
       // instead is accepted silently and then fails mid-turn with an unresolved provider.
       model: modelCheck.model,
@@ -809,7 +1045,7 @@ export class NativeActivationHost {
     const dbPath = resolveWorkItemDbPath();
     if (!existsSync(dbPath)) {
       throw new Error(
-        `no Substrate work store at ${dbPath} (set XTRM_STATE_DB or initialize it via xt init / sb)`,
+        `no Substrate work store at ${dbPath} (set SUBSTRATE_DB (or the legacy XTRM_STATE_DB) or initialize it via xt init / sb)`,
       );
     }
     // Runtime dynamic import from XTRM_SUBSTRATE_DIR; absent package refuses
