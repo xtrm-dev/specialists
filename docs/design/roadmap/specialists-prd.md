@@ -494,14 +494,29 @@ render as nothing. No `setWidget` fallback, no poll timer, no `ui.custom` mount 
 the only surface; without it the fleet stays hidden and slash commands report text.
 
 **Wake notifications.** Ask and settle events emit follow-up messages
-(`specialist_ask`/`specialist_settled`). The far-left rail in `#8d7fe8` marks XTRM-generated
-INVARIANT chrome only — the two header lines naming the Specialist, the work and the state. A
-Specialist-authored question body, an escalation body, a variable error string and the
-coordinator instruction are mutable content and carry no rail. The coordinator instruction
-stays literal message content, because it is what the coordinator model acts on, and is styled
-dim and italic so it reads as secondary to a human. The activation id leaves the header chrome
-and remains, dim, in the message body: the model receives only the rendered string (`details`
-is display-only) and `specialist_retry` / `specialist_resume` take an activation id.
+(`specialist_ask`/`specialist_settled`) as one compact railed object — the `#8d7fe8` gutter
+runs down EVERY line, there is no background anywhere, and there are no blank lines:
+
+```text
+│ ! researcher · waiting · XTRM-241 · inspect native wake transport
+│ Does the bracket look right?
+│ Call specialist_status to obtain the pending message_id, then reply with specialist_reply. · activation act:b38da383-b44
+
+│ ✓ executor · XTRM-241 · 42s • 3t • 43k
+│ Call specialist_status to read the validated result. · activation act:b38da383-b44
+```
+
+Header, body and instruction are one object, so the card is 2–3 lines instead of five blocks.
+A line long enough to wrap keeps the rail on every VISUAL line: the message renderer wraps it
+itself rather than letting the TUI wrap under the gutter. Hierarchy is typography and colour —
+glyph for state, bold Specialist name, dim work id, dim+italic purpose and coordinator
+instruction, plain foreground for anything a Specialist wrote; the rail and the live spinner
+are the only purple. Both custom types register a message renderer, so pi paints neither its
+`[specialist_ask]` label nor its `customMessageBg` card box. The coordinator instruction stays
+literal message content, because it is what the coordinator model acts on; the activation id
+stays in the content too, dim, at the end of the instruction line, because the model receives
+only the rendered string (`details` is display-only) and `specialist_retry` /
+`specialist_resume` take an activation id.
 
 **Control.** `specialist_reply` answers by message ID (unknown IDs reported, never silently
 passed); `specialist_resume` continues the same session; `specialist_stop_activation` disposes

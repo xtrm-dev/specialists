@@ -108,16 +108,14 @@ export const DEFAULT_REQUESTED_BY = 'adapter::pi-extension';
  */
 export const FLEET_MAX_ROWS = 4;
 
-// Wake rail (unitAI-beqby.17): far-left │ gutter in #8d7fe8 (24-bit
-// 38;2;141;127;232).
-//
-// The rail now means one thing only: XTRM-generated INVARIANT chrome. Only the stable
-// header lines of a wake card carry it. A Specialist-authored question body, an escalation
-// body, an error string, a variable result and a coordinator instruction are all mutable
-// content — railing them claimed an XTRM guarantee about text XTRM did not write. Fleet
-// rows and tool-result cards carry no rail at all.
+// Wake rail (unitAI-beqby.17, restored by unitAI-rrdnt.65.2): far-left │ gutter in #8d7fe8
+// (24-bit 38;2;141;127;232). It runs down EVERY line of a wake message — header, body,
+// instruction and identity — so the event reads as one continuous object rather than a
+// block of prose. No background, ever; the Fleet footer's label chip is the only inverted
+// surface in the extension.
 export const RAIL = '\x1b[38;2;141;127;232m│\x1b[0m';
 
+/** Prefix one line with the rail. A bare rail keeps an empty line continuous. */
 export function withRail(line) {
   const text = String(line ?? '');
   if (!text) return RAIL;
@@ -483,83 +481,167 @@ export function createAskObserverSink(base, onAsk, onTerminal) {
 }
 
 /**
- * The wake message a blocked child produces. Exported so its shape is testable.
+ * ── Wake/event cards ────────────────────────────────────────────────────────
  *
- * Two shapes in one string, and the boundary between them is the whole point of the
- * redesign: the two header lines are XTRM-generated invariant chrome and carry the rail;
- * everything after them is content XTRM did not write (the Specialist's question) or a
- * literal instruction whose wording is a protocol (the coordinator hint), and carries none.
+ * A wake is an EVENT, not a panel. It is the smallest thing that carries the event, the
+ * context, whatever the Specialist wrote and the one instruction the coordinator must act
+ * on — with the rail running down every line, no background, and no blank lines:
+ *
+ *   │ ! researcher · waiting · XTRM-241 · inspect native wake transport
+ *   │ Does the bracket look right?
+ *   │ Call specialist_status to obtain the pending message_id, then reply with specialist_reply. · activation act:b38da383-b44
+ *
+ *   │ ✓ executor · XTRM-241 · 42s • 3t • 43k
+ *   │ Call specialist_status to read the validated result. · activation act:b38da383-b44
+ *
+ * No `[customType]` label and no background: pi's DEFAULT custom-message component paints a
+ * `customMessageBg` box and a bold `[specialist_ask]` header, which is where the card look
+ * came from. Registering a message renderer (see `installEventCardRenderer`) replaces that
+ * component entirely, so the message renders as the lines this module produces and nothing
+ * else.
+ *
+ * Hierarchy is typography plus colour: glyph for state, bold Specialist name, dim work id,
+ * dim+italic purpose and instruction, plain foreground for anything a Specialist wrote.
+ * Purple stays scarce — the rail and the live spinner only.
+ */
+
+/**
+ * The coordinator instruction, verbatim.
+ *
+ * Literal DELIVERY CONTENT, not decoration: the coordinator model reads this string and acts
+ * on it, and `details` is display-only. Styled dim + italic so it reads as secondary to a
+ * human without being hidden from the model.
+ */
+const ASK_INSTRUCTION =
+  'Call specialist_status to obtain the pending message_id, then reply with specialist_reply.';
+const ESCALATION_INSTRUCTION =
+  'Call specialist_status to inspect the escalation and respond through specialist_reply.';
+const RESULT_INSTRUCTION = 'Call specialist_status to read the validated result.';
+const FAIL_INSTRUCTION =
+  'Call specialist_status for authoritative state, then use specialist_retry if appropriate.';
+
+/** Run cost for a settled event: elapsed • turns • tokens (each part omitted when absent). */
+function costFacts(view) {
+  return [
+    view ? DIM(formatElapsedShort(view.elapsed_s)) : null,
+    view?.turn_count != null ? DIM(`${view.turn_count}t`) : null,
+    ...(view ? [formatSpendShort(view.token_usage)].filter(Boolean).map(DIM) : []),
+  ].filter(Boolean).join(` ${DIM('•')} `);
+}
+
+/** Attribution for a failed event: the model that produced the failure, and its effort. */
+function modelFacts(view) {
+  return [
+    view?.resolved_model ? DIM(view.resolved_model) : null,
+    view?.thinking_level ? ACCENT_BOLD(view.thinking_level) : null,
+  ].filter(Boolean).join(` ${DIM('·')} `);
+}
+
+/** The instruction line, railed, with the activation id that specialist_* tools take. */
+function instructionLine(instruction, activationId) {
+  return withRail(`${ITALIC_DIM(instruction)} ${DIM('·')} ${DIM(`activation ${activationId}`)}`);
+}
+
+/**
+ * The wake message a blocked child produces. Exported so its shape is testable.
  *
  * `view` is the SAME `ActivationView` the tools serialise — the purpose excerpt and the work
  * id are read from it, never re-derived here. It is optional because a wake is worth
  * delivering even when the snapshot is already gone.
  */
 export function formatAskWake(ask, view) {
-  const verb = ask.kind === 'escalation' ? 'escalated to coordinator' : 'waiting on coordinator';
+  const escalated = ask.kind === 'escalation';
   const purpose = formatPurposeShort(view?.purpose);
   const beadId = ask.beadId ?? view?.bead_id ?? '—';
+  // `!` covers both blocked states, so the one word the glyph cannot carry stays.
+  const header = [
+    `${WARNING('!')} ${BOLD(ask.specialist)}`,
+    DIM(escalated ? 'escalated' : 'waiting'),
+    DIM(beadId),
+    purpose ? ITALIC_DIM(purpose) : null,
+  ].filter(Boolean).join(` ${DIM('·')} `);
   return [
-    withRail(`${WARNING('!')} ${BOLD(ask.specialist)} · ${verb}`),
-    withRail(`  ${DIM(beadId)}${purpose ? ` ${DIM('·')} ${ITALIC_DIM(purpose)}` : ''}`),
-    '',
-    ask.body || '(no body)',
-    '',
-    // Literal delivery content, NOT decoration: the coordinator model reads this string and
-    // acts on it. Styling it dim+italic marks it secondary to the human without hiding it
-    // from the model, and the wording is unchanged from the version that shipped.
-    ITALIC_DIM(
-      'Call specialist_status to read this ask\'s message_id from pending_asks, then ' +
-      'answer it with specialist_reply. The child is alive and resumable; it stays ' +
-      'blocked until you answer.',
-    ),
-    '',
-    // The activation id leaves the header chrome (it is a forensic id, and the human header
-    // belongs to the work). It stays in the message CONTENT because the model receives only
-    // this string — `details` is display-only — and specialist_retry / specialist_resume
-    // take an activation id. Dim, last, and outside the railed block.
-    DIM(`activation ${ask.activationId}`),
+    withRail(header),
+    ...String(ask.body || '(no body)').split('\n').map(withRail),
+    instructionLine(escalated ? ESCALATION_INSTRUCTION : ASK_INSTRUCTION, ask.activationId),
   ].join('\n');
 }
 
 /**
  * The wake message a finished child produces. Exported so its shape is testable.
  *
- * Same header/content split as {@link formatAskWake}: the railed block names the event and
- * the run's cost (completed) or the model that produced the failure (failed); the error
- * string, the coordinator instruction and the activation id below it are not chrome.
- * `view` supplies elapsed/turns/spend and the failure model — all existing snapshot
- * telemetry, projected by `toActivationView`, never recomputed here.
+ * Same compact object as {@link formatAskWake}: the header names the event, its work and its
+ * context (run cost when completed, the failing model when failed); the error string, when
+ * there is one, is the only body line. `view` supplies elapsed/turns/spend and the failure
+ * model — all existing snapshot telemetry, projected by `toActivationView`, never
+ * recomputed here.
  */
 export function formatSettlementWake(done, view) {
   const failed = done.outcome === 'failed';
   const beadId = done.beadId ?? view?.bead_id ?? '—';
-  const facts = failed
-    ? [
-      view?.resolved_model ? DIM(view.resolved_model) : null,
-      view?.thinking_level ? ACCENT_BOLD(view.thinking_level) : null,
-    ].filter(Boolean).join(` ${DIM('·')} `)
-    : [
-      view ? DIM(formatElapsedShort(view.elapsed_s)) : null,
-      view?.turn_count != null ? DIM(`${view.turn_count}t`) : null,
-      ...(view ? [formatSpendShort(view.token_usage)].filter(Boolean).map(DIM) : []),
-    ].filter(Boolean).join(` ${DIM('•')} `);
+  const facts = failed ? modelFacts(view) : costFacts(view);
+  const header = [
+    `${failed ? FAILURE('✕') : SUCCESS('✓')} ${BOLD(done.specialist)}`,
+    DIM(beadId),
+    facts || null,
+  ].filter(Boolean).join(` ${DIM('·')} `);
   return [
-    withRail(`${failed ? FAILURE('✕') : SUCCESS('✓')} ${BOLD(done.specialist)} · ${failed ? 'failed' : 'finished'}`),
-    withRail(`  ${DIM(beadId)}${facts ? ` ${DIM('·')} ${facts}` : ''}`),
-    ...(failed && done.error ? ['', done.error] : []),
-    '',
-    // Same protocol-bearing instruction as the ask wake: styled down, still literal.
-    ITALIC_DIM(
-      failed
-        ? 'Call specialist_status to read the failure detail, then re-run it with specialist_retry '
-          + '— same activation, same lease, optionally on another model with model_override. '
-          + 'Answer with specialist_reply instead if it is waiting on a question.'
-        : 'Call specialist_status to read its validated result. The activation is settled and '
-          + 'stays resumable until you dispose it with specialist_stop_activation.',
-    ),
-    '',
-    DIM(`activation ${done.activationId}`),
+    withRail(header),
+    ...(failed && done.error ? [withRail(done.error)] : []),
+    instructionLine(failed ? FAIL_INSTRUCTION : RESULT_INSTRUCTION, done.activationId),
   ].join('\n');
+}
+
+/**
+ * Wrap one already-railed line so the rail repeats on every VISUAL line.
+ *
+ * Without this a long instruction wraps in the TUI and its continuation runs unrailed under
+ * the gutter — the exact "rail covers the top, not the bottom" look the rail exists to
+ * avoid. pi-tui's ANSI-aware wrapper does the work; when it is unavailable (unit tests, a
+ * non-TUI runtime) the line is emitted as-is.
+ */
+export function wrapRailedLine(line, width, wrap = null) {
+  const text = String(line ?? '');
+  if (!text.startsWith(RAIL)) return [text];
+  const body = text.slice(RAIL.length + 1);
+  const budget = Math.floor(width) - 2;
+  if (!wrap || !Number.isFinite(budget) || budget < 8) return [text];
+  const pieces = wrap(body, budget);
+  return (Array.isArray(pieces) ? pieces : [body]).map((piece) => (piece === '' ? RAIL : `${RAIL} ${piece}`));
+}
+
+/**
+ * A message renderer that renders ONLY this module's lines — no `[customType]` label and no
+ * `customMessageBg` box. Returning a component makes pi skip its default card entirely.
+ */
+export function makeEventCardRenderer(getWrap) {
+  return (message) => {
+    const content = typeof message?.content === 'string' ? message.content : '';
+    return {
+      dispose: () => {},
+      invalidate: () => {},
+      render: (width) => String(content)
+        .split('\n')
+        .flatMap((line) => wrapRailedLine(line, Number(width) || 80, getWrap())),
+    };
+  };
+}
+
+/**
+ * ANSI-aware wrapper for {@link makeEventCardRenderer}, resolved once at runtime.
+ *
+ * pi-tui is not a dependency of this extension (it ships with pi), so the import is
+ * optional and its failure is silent: an unwrapped card is still a correct card.
+ */
+let wrapTextWithAnsi = null;
+export function installEventCardRenderer(pi, customType) {
+  if (typeof pi.registerMessageRenderer !== 'function') return;
+  if (!wrapTextWithAnsi) {
+    import('@earendil-works/pi-tui')
+      .then((mod) => { if (typeof mod.wrapTextWithAnsi === 'function') wrapTextWithAnsi = mod.wrapTextWithAnsi; })
+      .catch(() => { /* unwrapped fallback */ });
+  }
+  pi.registerMessageRenderer(customType, makeEventCardRenderer(() => wrapTextWithAnsi));
 }
 
 // ── Result projection ────────────────────────────────────────────────────────
@@ -792,6 +874,13 @@ export default function specialistSubagentsExtension(pi, options = {}) {
   // PRD acceptance U: the coordinator is fenced out of a workspace a Specialist holds.
   // Fails open — see installCoordinatorFence.
   installCoordinatorFence(pi, options);
+
+  // Wake messages render as this module's lines and nothing else: pi's default custom-message
+  // component paints a `customMessageBg` box and a bold `[specialist_ask]` header, which is
+  // exactly the card/panel look the event surface must not have. Guarded — an older pi without
+  // registerMessageRenderer keeps the default rendering and every semantic below.
+  installEventCardRenderer(pi, 'specialist_ask');
+  installEventCardRenderer(pi, 'specialist_settled');
 
   // The wake exists so that an operator who does nothing still learns a child is
   // blocked. The flag turns it off so the DEGRADED path is reproducible on demand:
