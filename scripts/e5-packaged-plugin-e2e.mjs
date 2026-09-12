@@ -396,7 +396,7 @@ const post = run('bun', [join(PLUGIN, 'scripts/postcompact.mjs')], {
 const postOk =
   Boolean(postHookRegistered) &&
   post.status === 0 &&
-  post.stdout.includes('Substrate continuity') &&
+  post.stdout.includes('Activation continuity') &&
   post.stdout.includes('specialist_status');
 say('--- installed postcompact.mjs ---');
 say((post.stdout || '').trim() || '(silent)');

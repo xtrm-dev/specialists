@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Substrate plugin PreCompact hook.
+// specialists plugin PreCompact hook.
 //
 // Writes the Journal continuity pointer (activation IDs currently owned by this session
 // plus the store path) so post-compaction the session re-derives authoritative state
