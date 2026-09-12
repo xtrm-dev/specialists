@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
+import { catalogVersion } from '../../utils/catalog-pin.js';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -123,7 +124,7 @@ describe('resolution diagnostics', () => {
         catalogsPath: join(process.cwd(), 'config', 'catalog', 'index.json'),
       });
 
-      expect(report.catalogCompatibility.join(' | ')).toContain('version mismatch: installed 9.9.9 != catalog 0.6.1');
+      expect(report.catalogCompatibility.join(' | ')).toContain(`version mismatch: installed 9.9.9 != catalog ${catalogVersion('gitnexus')}`);
       expect(report.toolContract.toolsList).toEqual(['read', 'grep', 'find', 'ls', 'bash', 'edit', 'write']);
       expect(report.toolContract.toolsList).not.toContain('gitnexus_query');
     } finally {

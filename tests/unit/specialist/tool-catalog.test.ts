@@ -48,7 +48,7 @@ describe('tool catalog foundation', () => {
     const index = await readCatalog('config/catalog/index.json');
     const gitnexus = index.catalogs.find(c => c.catalog === 'gitnexus');
     expect(gitnexus?.package).toBe('pi-gitnexus');
-    expect(gitnexus?.version).toBe('0.6.1');
+    expect(gitnexus?.version).toBe('0.6.4');
     expect(gitnexus?.source_tiers).toEqual(EXPECTED_GITNEXUS);
   });
 });
