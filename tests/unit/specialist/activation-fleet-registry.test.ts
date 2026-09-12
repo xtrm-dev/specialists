@@ -16,6 +16,7 @@ import { testWorkItems } from '../../utils/test-work-items.js';
 import { DispatchRejectedError } from '../../../src/activation/types.js';
 import { nextAttemptId } from '../../../src/activation/registry.js';
 import type { PiSdk, PiAgentSessionLike, PiAgentSessionEvent } from '../../../src/activation/pi-sdk.js';
+import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
 
 /**
  * Phase 2 acceptance: a persistent Fleet registry and attach/return/resume over the
@@ -56,6 +57,8 @@ function fakeSession(): PiAgentSessionLike & { disposed: boolean; prompts: strin
 function makeSdk(session: PiAgentSessionLike): PiSdk {
   return {
     createAgentSession: async () => ({ session }),
+    DefaultResourceLoader: FakeResourceLoader,
+    getAgentDir: () => FAKE_AGENT_DIR,
     ModelRuntime: { create: async () => ({ hasConfiguredAuth: () => true }) },
     resolveModelScopeWithDiagnostics: () => ({
       scopedModels: [{ model: { id: 'test-model', provider: 'testprov' } }],

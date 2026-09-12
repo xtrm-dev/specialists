@@ -4,6 +4,7 @@ import type { HookEmitter } from './hooks.js';
 import { type CircuitBreaker } from '../utils/circuitBreaker.js';
 import type { RuntimeOriginV1 } from './runtime-origin.js';
 import { type ResolvedToolContract } from './resolved-tool-contract.js';
+import { type ResponseFormat, type OutputType, type JsonSchema } from './system-prompt.js';
 export interface RunOptions {
     name: string;
     prompt: string;
@@ -140,6 +141,25 @@ export declare function validateBeforeRun(spec: {
         };
     };
 }, permissionLevel: string, resolvedToolContract?: ResolvedToolContract): void;
+/**
+ * The single output-contract resolver. Exported (SPECIALISTS-5) because the native host
+ * passes the same result to the same `buildSystemPrompt`: a second copy of this rule is
+ * how the two runtimes drifted, with the native path hardcoding `undefined`.
+ */
+export declare function resolveOutputContractSchema(responseFormat: ResponseFormat, outputType: OutputType, outputSchema: JsonSchema | undefined): JsonSchema | undefined;
+interface ReviewerDiffContext {
+    source: string;
+    stat: string;
+    files: string[];
+    hunks: string;
+}
+/**
+ * Exported (SPECIALISTS-22) so the native host can supply the reviewer role the same
+ * execution-only diff context the legacy runner appends, instead of the reviewer losing
+ * it entirely on the native path. Behaviour unchanged.
+ */
+export declare function buildReviewerDiffContext(cwd: string, variables?: Record<string, string>, maxFiles?: number): ReviewerDiffContext;
+export declare function buildReviewerDiffInstruction(context: ReviewerDiffContext): string;
 export declare function classifyFallbackError(error: unknown): string;
 export declare class SpecialistRunner {
     private deps;

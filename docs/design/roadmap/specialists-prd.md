@@ -461,9 +461,9 @@ The native Pi extension (`config/pi-extensions/specialist-subagents/index.mjs` o
 Claude Code plugin must mirror field-for-field. The following inventory is normative: anything
 here absent from the MCP surface is a parity gap, not a Pi-only feature.
 
-**Dispatch (`specialist_dispatch`).** Exactly one of `bead_id` (an existing READY Bead) or
-`contract` (inline 7-section contract plus SCRUTINY level — eight required parts). The readiness
-gate runs before anything is created; an inline contract creates its bead first. Optional:
+**Dispatch (`specialist_dispatch`).** Exactly one of `issue_ref` (an existing READY issue — any locator the shared WorkItemStore resolves: `iss_...`, human ref, or legacy Bead alias; `bead_id` remains as a permanent compatibility alias for the same locator) or
+`contract` (inline 7-section contract plus SCRUTINY level — eight required parts). Dispatch runs through the WorkItemStore boundary (`SpecialistWorkItemBoundary`: view/check/bind/lineage/inline-create — never a Beads client): the read-only readiness
+check runs before anything is created, `bind` pins the immutable ExecutionBinding over issue/revision/hash/claim/activation, and an inline contract creates its issue first (validate → create → attest → claim). Optional:
 `title`, `model_override` (refused before session creation when unavailable, never silently
 replaced), `thinking_override` (one of `off|minimal|low|medium|high|xhigh`, same fail-closed
 rule), `requested_by`, `coordinator_session_id`, `epic_context_depth` (1 walks to the parent
@@ -471,7 +471,8 @@ epic, 2 also the grand-epic). Returns identity and admission only — never a re
 is read later from `specialist_status`, never substituted for an interaction message.
 
 **Projections.** `specialist_status` maps live snapshots through `toActivationView`:
-`activation_id`, `specialist`, `bead_id`, `state`, `access`, `model_override`,
+`activation_id`, `specialist`, `issue_id`, `issue_ref`, `issue_revision`, `contract_hash`,
+`execution_binding_id` (pinned by the ExecutionBinding at activation start), `bead_id` (compatibility vocabulary only — always equal to `issue_ref`), `state`, `access`, `model_override`,
 `thinking_override`, `thinking_level` (omitted when unset, never fabricated), `purpose`
 (one-line SCOPE-then-SUCCESS excerpt captured once at dispatch, omitted when absent),
 `elapsed_s` (in-memory snapshot read, never a query), `turn_count` (completed child model

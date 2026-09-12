@@ -39,6 +39,23 @@ export function readBuildId(path: string): string {
 }
 
 /**
+ * True when the loaded module and the artifact on disk are both identified and
+ * differ — the running process is stale. An unreadable side cannot rule
+ * staleness out, but it cannot assert it either, so it returns false and the
+ * `describeBuildIdentity` line keeps saying so.
+ *
+ * The single staleness predicate: `describeBuildIdentity` renders the same
+ * comparison, so a caller never derives staleness a second way.
+ */
+export function isBuildStale(loadedId: string, onDiskId: string): boolean {
+  return (
+    loadedId !== UNKNOWN_BUILD_ID &&
+    onDiskId !== UNKNOWN_BUILD_ID &&
+    loadedId !== onDiskId
+  );
+}
+
+/**
  * One line stating which build rendered this outcome and whether the
  * artifact on disk has changed since this process loaded it. When the ids
  * differ the line names staleness outright, so a stale-build refusal can

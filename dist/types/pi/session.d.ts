@@ -192,6 +192,31 @@ export declare function resolveExecutionExtensionSelection(extensions: Readonly<
     extensionSources: string[];
     offline: boolean;
 };
+/**
+ * The curated Pi extension set every Specialist session gets, resolved once for BOTH
+ * surfaces: the legacy CLI turns these into argv `-e` flags (`start()` below), and the
+ * native host hands the same paths to the resource loader's `additionalExtensionPaths`.
+ *
+ * Extracted rather than duplicated (SPECIALISTS-6): the two runtimes drifted by exactly
+ * this kind of copy, and the native path historically injected nothing at all while the
+ * CLI re-enabled this set after `--no-extensions`.
+ */
+export interface CuratedExtensionResolution {
+    /** Every curated path, in the legacy argv order. Only paths that exist are included. */
+    all: string[];
+    /**
+     * The subset that takes part in same-identity de-duplication against a definition's own
+     * `execution.extensions` sources. Preserved verbatim from the pre-extraction code
+     * (unitAI-il2io): the managed python-kernel copy and the gitnexus npm copy are the two a
+     * dev-checkout source can collide with, and Pi aborts with `Tool "python" conflicts`
+     * before turn 0 when both are forwarded. The managed copy wins and every drop is logged.
+     */
+    dedupeAgainstDynamic: string[];
+}
+export declare function resolveCuratedExtensionPaths(options: {
+    permissionLevel?: string;
+    resolvedToolContract?: ResolvedToolContract;
+}): CuratedExtensionResolution;
 export declare function resolveGlobalNodeModulesDir(): string | undefined;
 export declare function validateWriteToolPathAgainstBoundary(toolName: string, toolArgs: Record<string, unknown> | undefined, worktreeBoundary: string | undefined): string | undefined;
 export declare class PiAgentSession {

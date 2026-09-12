@@ -19,6 +19,7 @@ import { testWorkItems } from '../../utils/test-work-items.js';
 import type { ActivationSnapshot } from '../../../src/activation/types.js';
 import { toActivationView } from '../../../src/tools/specialist/activation.tool.js';
 import type { PiSdk, PiAgentSessionLike, PiAgentSessionEvent } from '../../../src/activation/pi-sdk.js';
+import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
 
 /**
  * Fleet telemetry (unitAI-beqby.3): elapsed runtime, token spend, thinking level and
@@ -170,6 +171,8 @@ function fakeSession(opts: { turnsPerPrompt?: number; stopReason?: string; error
 function makeSdk(session: PiAgentSessionLike): PiSdk {
   return {
     createAgentSession: async () => ({ session }),
+    DefaultResourceLoader: FakeResourceLoader,
+    getAgentDir: () => FAKE_AGENT_DIR,
     ModelRuntime: { create: async () => ({ hasConfiguredAuth: () => true }) },
     resolveModelScopeWithDiagnostics: () => ({
       scopedModels: [{ model: { id: 'test-model', provider: 'testprov' } }],

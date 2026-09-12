@@ -36,6 +36,7 @@ import { NativeActivationHost } from '../../../src/activation/native-host.js';
 import { REQUIRED_SECTIONS } from '../../../src/activation/bead-gate.js';
 import { CircuitBreaker } from '../../../src/utils/circuitBreaker.js';
 import type { PiSdk, PiAgentSessionLike, PiAgentSessionEvent } from '../../../src/activation/pi-sdk.js';
+import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
 import { testWorkItems } from '../../utils/test-work-items.js';
 
 /**
@@ -154,6 +155,8 @@ function hostWith(fixture: HostFixture = {}) {
   const session = fakeSession(fixture.failFirst);
   const sdk: PiSdk = {
     createAgentSession: async () => { sessionsCreated.count += 1; return { session }; },
+    DefaultResourceLoader: FakeResourceLoader,
+    getAgentDir: () => FAKE_AGENT_DIR,
     ModelRuntime: { create: async () => ({ hasConfiguredAuth: () => true }) },
     resolveModelScopeWithDiagnostics: () => ({
       scopedModels: [{ model: { id: 'test-model', provider: 'testprov' } }],

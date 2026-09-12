@@ -1,3 +1,31 @@
+> **HISTORICAL — SUPERSEDED. Do not implement from this document.**
+>
+> This record preserves the E1 plugin design as approved 2026-09-09. Each of its
+> prescriptive decisions has since been deliberately superseded in the live tree:
+>
+> - **Plugin renamed:** the plugin lives at `plugins/specialists/` and is named
+>   `specialists` (see `plugins/specialists/.claude-plugin/plugin.json`), not
+>   `plugins/substrate/` / `substrate` as specified in §§1–2 below.
+> - **Skill renamed:** the plugin skill is `supervising-activations`
+>   (`plugins/specialists/skills/supervising-activations/SKILL.md`), not
+>   `using-substrate`. The `using-substrate` name now belongs to Substrate's own
+>   doctrine skill, which this skill cross-references rather than restates.
+> - **Dual-era MCP serving required:** the §16–§17 finding stands — the shipping
+>   Claude Code client negotiates MCP `2025-11-25`, so the server runs
+>   `legacy: 'serve'` (`src/mcp/v2-server.ts`), serving both `2025-11-25` and
+>   `2026-07-28`. The §§0/10/J prescription of strict `2026-07-28`-only
+>   (`legacy: 'reject'`) is rejected, not deferred.
+> - **Claude Channel primary wake:** push into an open session goes over the
+>   Claude peer channel (`src/activation/peer-bridge.ts`, `src/activation/native-host.ts`,
+>   `src/specialist/channel-doctor.ts`), not MCP polling. MCP remains the command
+>   surface only.
+> - **Substrate WorkItemStore migration:** the runtime consumes Substrate durable work
+>   through the WorkItemStore boundary (`src/activation/workitem-store.ts` —
+>   `createWorkItemBoundary` / `openWorkItemBoundary`), never through a Beads client.
+>
+> Everything below this banner is evidence of what was decided at the time, kept
+> intact. It is not current instruction.
+
 # Substrate Claude Code plugin — complete design for file-by-file review
 
 Author: Claude session `specialists-xt-claude-plugin-design`

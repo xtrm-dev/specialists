@@ -107,6 +107,7 @@ export interface ActivationResultView {
 export declare function toActivationResultView(result: ActivationResult): ActivationResultView;
 export declare const specialistDispatchSchema: z.ZodObject<{
     specialist: z.ZodString;
+    issue_ref: z.ZodOptional<z.ZodString>;
     bead_id: z.ZodOptional<z.ZodString>;
     contract: z.ZodOptional<z.ZodString>;
     title: z.ZodOptional<z.ZodString>;
@@ -123,6 +124,7 @@ export declare const specialistDispatchSchema: z.ZodObject<{
     requested_by?: string | undefined;
     model_override?: string | undefined;
     thinking_override?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | undefined;
+    issue_ref?: string | undefined;
     epic_context_depth?: number | undefined;
     coordinator_session_id?: string | undefined;
 }, {
@@ -133,6 +135,7 @@ export declare const specialistDispatchSchema: z.ZodObject<{
     requested_by?: string | undefined;
     model_override?: string | undefined;
     thinking_override?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | undefined;
+    issue_ref?: string | undefined;
     epic_context_depth?: number | undefined;
     coordinator_session_id?: string | undefined;
 }>;
@@ -149,6 +152,7 @@ export declare function createSpecialistDispatchTool(getHost: () => NativeActiva
     description: string;
     inputSchema: z.ZodObject<{
         specialist: z.ZodString;
+        issue_ref: z.ZodOptional<z.ZodString>;
         bead_id: z.ZodOptional<z.ZodString>;
         contract: z.ZodOptional<z.ZodString>;
         title: z.ZodOptional<z.ZodString>;
@@ -165,6 +169,7 @@ export declare function createSpecialistDispatchTool(getHost: () => NativeActiva
         requested_by?: string | undefined;
         model_override?: string | undefined;
         thinking_override?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | undefined;
+        issue_ref?: string | undefined;
         epic_context_depth?: number | undefined;
         coordinator_session_id?: string | undefined;
     }, {
@@ -175,6 +180,7 @@ export declare function createSpecialistDispatchTool(getHost: () => NativeActiva
         requested_by?: string | undefined;
         model_override?: string | undefined;
         thinking_override?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | undefined;
+        issue_ref?: string | undefined;
         epic_context_depth?: number | undefined;
         coordinator_session_id?: string | undefined;
     }>;
@@ -352,8 +358,9 @@ export declare const specialistRetrySchema: z.ZodObject<{
 /**
  * Re-run a failed native activation in place — the native equivalent of `sp retry`.
  *
- * Same activation id, new attempt: the bead, the workspace lease and (without a model
- * override) the session survive the retry. Failed only — a live or waiting activation
+ * Same activation id, new attempt. The Issue and (without a model override) the session
+ * survive the retry; the workspace lease is released as the attempt ends and REACQUIRED
+ * here, so a retry can be refused when another writer holds the workspace. Failed only — a live or waiting activation
  * already has its path (reply for an outstanding question, resume for a settled one,
  * steer/stop for a running one), and retry refuses those states with the right pointer
  * rather than becoming a second dispatch. An escalation or question that CAN wait stays

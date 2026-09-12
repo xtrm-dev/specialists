@@ -103,8 +103,9 @@ export interface ActivationRequest {
    */
   epicContextDepth?: number;
 
-  /** Defaults to the coordinator's current worktree. A writer does not get a new one. */
-  workspaceHint?: WorkspaceIdentity;
+  // No workspace field: the native runtime runs IN PLACE. See the rationale on
+  // `resolveWorkspace` in native-host.ts. A per-activation worktree was rejected
+  // deliberately, not forgotten (SPECIALISTS-21).
 
   /**
    * Inline task contract, used INSTEAD of issueRef: the host creates the issue
@@ -184,7 +185,7 @@ export interface ActivationSnapshot {
   /** Cumulative spend counts from the session event stream. Absent until the first usage event. */
   tokenUsage?: ActivationTokenUsage;
   /**
-   * One-line purpose excerpt captured once at dispatch from the bead contract
+   * One-line purpose excerpt captured once at dispatch from the BOUND Issue contract
    * (first meaningful SCOPE line, else SUCCESS). Absent when unreadable — never fabricated.
    */
   purpose?: string;

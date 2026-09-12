@@ -3,6 +3,7 @@ import { evaluateBeadReadiness, extractPurposeExcerpt, extractSections, PURPOSE_
 import { NativeActivationHost } from '../../../src/activation/native-host.js';
 import { DispatchRejectedError } from '../../../src/activation/types.js';
 import type { PiSdk, PiAgentSessionLike } from '../../../src/activation/pi-sdk.js';
+import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
 import { testWorkItems } from '../../utils/test-work-items.js';
 
 /**
@@ -109,6 +110,8 @@ describe('NativeActivationHost — bead gate admission', () => {
     const session = { sessionId: 's1', messages: [], isIdle: true } as unknown as PiAgentSessionLike;
     const sdk: PiSdk = {
       createAgentSession: async () => { created.count += 1; return { session }; },
+      DefaultResourceLoader: FakeResourceLoader,
+      getAgentDir: () => FAKE_AGENT_DIR,
       ModelRuntime: { create: async () => ({ hasConfiguredAuth: () => true }) },
       resolveModelScopeWithDiagnostics: () => ({
         scopedModels: [{ model: { id: 'test-model', provider: 'testprov' } }],
@@ -273,6 +276,8 @@ describe('extractPurposeExcerpt (unitAI-uvg4j)', () => {
     } as unknown as PiAgentSessionLike;
     const sdk: PiSdk = {
       createAgentSession: async () => { created.count += 1; return { session }; },
+      DefaultResourceLoader: FakeResourceLoader,
+      getAgentDir: () => FAKE_AGENT_DIR,
       ModelRuntime: { create: async () => ({ hasConfiguredAuth: () => true }) },
       resolveModelScopeWithDiagnostics: () => ({
         scopedModels: [{ model: { id: 'test-model', provider: 'testprov' } }],

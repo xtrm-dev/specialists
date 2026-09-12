@@ -89,8 +89,6 @@ export interface ActivationRequest {
      * Distinct from the CLI's downward --context-depth over completed blockers.
      */
     epicContextDepth?: number;
-    /** Defaults to the coordinator's current worktree. A writer does not get a new one. */
-    workspaceHint?: WorkspaceIdentity;
     /**
      * Inline task contract, used INSTEAD of issueRef: the host creates the issue
      * through the work boundary (validation → create → attest → claim) and
@@ -157,7 +155,7 @@ export interface ActivationSnapshot {
     /** Cumulative spend counts from the session event stream. Absent until the first usage event. */
     tokenUsage?: ActivationTokenUsage;
     /**
-     * One-line purpose excerpt captured once at dispatch from the bead contract
+     * One-line purpose excerpt captured once at dispatch from the BOUND Issue contract
      * (first meaningful SCOPE line, else SUCCESS). Absent when unreadable — never fabricated.
      */
     purpose?: string;

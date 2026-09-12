@@ -22,7 +22,7 @@ export { createActivationForensicSink, } from './activation/forensic-sink.js';
 export { createObservabilitySqliteClientAtPath, } from './specialist/observability-sqlite.js';
 export { resolveObservabilityDbLocation } from './specialist/observability-db.js';
 export { evaluateBeadReadiness, extractSections } from './activation/bead-gate.js';
-export { describeBuildIdentity, hashFileBytes, readBuildId, shortBuildId, BUILD_ID_BYTES, UNKNOWN_BUILD_ID, } from './activation/build-identity.js';
+export { describeBuildIdentity, hashFileBytes, isBuildStale, readBuildId, shortBuildId, BUILD_ID_BYTES, UNKNOWN_BUILD_ID, } from './activation/build-identity.js';
 export type { BeadRecord } from './specialist/beads.js';
 export { createBeadFromContract } from './specialist/beads.js';
 export { LAUNCH_OUTCOME_SCHEMA_VERSION, LaunchOutcomeError, parseLaunchOutcome, validateLaunchOutcome, projectLaunchOutcome, } from './specialist/launch-outcome.js';
@@ -31,6 +31,7 @@ export type { CitationLine, VerifiedCitationWindow, VerifiedCitationWindowOption
 export type { LaunchOutcome, LaunchOutcomeProjection, LaunchOutcomeErrorCode, LaunchOutcomeAction, LaunchOutcomeIdentity, LaunchOutcomeReadiness, LaunchOutcomeWorktree, LaunchOutcomeRuntime, LaunchOutcomeSafetyProfile, LaunchOutcomeSideEffect, LaunchOutcomeMutationRecord, } from './specialist/launch-outcome.js';
 export { admitCoordinatorToolCall } from './activation/workspace-lease.js';
 export { leaseScopeFor } from './activation/workspace-reconcile.js';
-export { renderRejection } from './activation/rejection.js';
-export type { RejectionInput } from './activation/rejection.js';
+export { inspect as inspectWorkspaceLease } from './activation/workspace-lease.js';
+export { renderRejection, supersedeStaleRefusal, STALE_RUNTIME_REASON, } from './activation/rejection.js';
+export type { RejectionInput, RefusalPayload } from './activation/rejection.js';
 //# sourceMappingURL=lib.d.ts.map

@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { renderRejection } from '../../../src/activation/rejection.js';
-import { describeBuildIdentity } from '../../../src/activation/build-identity.js';
+import { renderRejection, supersedeStaleRefusal } from '../../../src/activation/rejection.js';
+import { describeBuildIdentity, isBuildStale } from '../../../src/activation/build-identity.js';
 import { DispatchRejectedError } from '../../../src/activation/types.js';
-import { createSpecialistDispatchTool } from '../../../src/tools/specialist/activation.tool.js';
+import { createSpecialistDispatchTool, specialistDispatchSchema } from '../../../src/tools/specialist/activation.tool.js';
 import type { NativeActivationHost } from '../../../src/activation/native-host.js';
 
 /**
@@ -63,6 +63,69 @@ describe('renderRejection', () => {
   });
 });
 
+/**
+ * SPECIALISTS-2. Measured in the field: a long-running MCP server that had loaded an
+ * older `dist/lib.js` refused every dispatch with `work_item_store_unavailable: no
+ * Substrate package configured (install @jaggerxtrm/substrate, ...)` while the SAME
+ * response carried the correct `build: module loaded ..., file on disk ...` line. The
+ * operator was told to install a package that was already installed, and the tooling
+ * already knew why. The comparison existed; it just did not outrank the symptom.
+ */
+describe('staleness outranks the downstream symptom (SPECIALISTS-2)', () => {
+  const STALE_NOTE =
+    'no Substrate package configured (install @jaggerxtrm/substrate, ' +
+    'or set XTRM_SUBSTRATE_DIR to a checkout of it)';
+
+  it('isBuildStale is true only when both ids are known and differ', () => {
+    expect(isBuildStale('aaaabbbbcccc', 'ddddffff0000')).toBe(true);
+    expect(isBuildStale('aaaabbbbcccc', 'aaaabbbbcccc')).toBe(false);
+    // An unreadable side cannot rule staleness out, but it cannot assert it either.
+    expect(isBuildStale('unknown', 'ddddffff0000')).toBe(false);
+    expect(isBuildStale('aaaabbbbcccc', 'unknown')).toBe(false);
+  });
+
+  it('a stale build makes staleness the PRIMARY reason and instructs a restart', () => {
+    const out = renderRejection(
+      { reason: 'work_item_store_unavailable', detail: { note: STALE_NOTE } },
+      STALE_BUILD,
+      true,
+    );
+    expect(out.reason).toMatch(/^stale_runtime:/);
+    expect(out.reason).toContain('Restart the session');
+    // The downstream symptom stays, subordinate, and is never suppressed.
+    expect(out.detail?.refused_by_stale_runtime).toBe('work_item_store_unavailable');
+    expect(out.detail?.note).toBe(STALE_NOTE);
+    expect(out.build).toBe(STALE_BUILD);
+  });
+
+  it('a matching build renders exactly as today', () => {
+    const detail = { note: STALE_NOTE };
+    expect(
+      renderRejection({ reason: 'work_item_store_unavailable', detail }, FRESH_BUILD, false),
+    ).toEqual({
+      status: 'rejected',
+      reason: 'work_item_store_unavailable',
+      detail,
+      build: FRESH_BUILD,
+    });
+  });
+
+  it('staleness does not rewrite a refusal it does not explain', () => {
+    const out = renderRejection(
+      { reason: 'bead_contract_incomplete', detail: { note: 'draft' } },
+      STALE_BUILD,
+      true,
+    );
+    expect(out.reason).toBe('bead_contract_incomplete');
+    expect(out.detail).toEqual({ note: 'draft' });
+  });
+
+  it('supersedeStaleRefusal leaves a payload byte-identical when not stale', () => {
+    const payload = { status: 'rejected' as const, reason: 'work_item_store_unavailable', detail: { note: 'x' } };
+    expect(supersedeStaleRefusal(payload, false, FRESH_BUILD)).toEqual(payload);
+  });
+});
+
 describe('MCP dispatch refusal adoption (unitAI-t2kol.4)', () => {
   function toolWith(start: () => Promise<never>) {
     const host = { start, inspect: () => undefined };
@@ -100,5 +163,77 @@ describe('MCP dispatch refusal adoption (unitAI-t2kol.4)', () => {
     expect(out.missing).toEqual(['PROBLEM', 'SCRUTINY']);
     expect(out.detail).toEqual(error.detail);
     expect(typeof out.build).toBe('string');
+  });
+});
+
+
+/**
+ * SPECIALISTS-20. The dispatch tool's only work-item parameter was named `bead_id`, so every
+ * model reading the schema was taught the pre-Substrate vocabulary at the point of use. The
+ * plumbing already spoke the right language — the branch maps the input straight to
+ * `{ issueRef }` — so the parameter name was the only thing still saying bead.
+ */
+describe('issue_ref is primary, bead_id is a permanent alias (SPECIALISTS-20)', () => {
+  function recordingTool() {
+    const seen: Array<Record<string, unknown>> = [];
+    const host = {
+      start: async (request: Record<string, unknown>) => {
+        seen.push(request);
+        throw new DispatchRejectedError('recorded', {});
+      },
+      inspect: () => undefined,
+    };
+    return { tool: createSpecialistDispatchTool(() => host as unknown as NativeActivationHost), seen };
+  }
+
+  it('resolves issue_ref to the host issueRef at the tool boundary', async () => {
+    const { tool, seen } = recordingTool();
+    await tool.execute({ specialist: 'explorer', issue_ref: 'XTRM-227' });
+    expect(seen[0]?.issueRef).toBe('XTRM-227');
+  });
+
+  it('resolves bead_id to exactly the same host issueRef', async () => {
+    const { tool, seen } = recordingTool();
+    await tool.execute({ specialist: 'explorer', bead_id: 'XTRM-227' });
+    expect(seen[0]?.issueRef).toBe('XTRM-227');
+  });
+
+  it('refuses issue_ref together with bead_id, naming both', async () => {
+    const { tool, seen } = recordingTool();
+    const out = await tool.execute({ specialist: 'explorer', issue_ref: 'XTRM-227', bead_id: 'XTRM-228' }) as Record<string, unknown>;
+    expect(out.status).toBe('rejected');
+    expect(out.reason).toContain('issue_ref');
+    expect(out.reason).toContain('bead_id');
+    expect(seen).toHaveLength(0);
+  });
+
+  it('refuses either alias together with contract, naming both', async () => {
+    for (const alias of [{ issue_ref: 'XTRM-227' }, { bead_id: 'XTRM-227' }]) {
+      const { tool, seen } = recordingTool();
+      const out = await tool.execute({ specialist: 'explorer', ...alias, contract: 'PROBLEM\nx' }) as Record<string, unknown>;
+      expect(out.status).toBe('rejected');
+      expect(out.reason).toContain('contract');
+      expect(out.reason).toContain(alias.issue_ref ? 'issue_ref' : 'bead_id');
+      expect(seen).toHaveLength(0);
+    }
+  });
+
+  it('names all three when none is supplied', async () => {
+    const { tool } = recordingTool();
+    const out = await tool.execute({ specialist: 'explorer' }) as Record<string, unknown>;
+    expect(out.status).toBe('rejected');
+    expect(out.reason).toContain('issue_ref');
+    expect(out.reason).toContain('bead_id');
+    expect(out.reason).toContain('contract');
+  });
+
+  it('documents issue_ref as the primary locator and bead_id as a compatibility alias', () => {
+    const shape = specialistDispatchSchema.shape as Record<string, { description?: string }>;
+    expect(shape.issue_ref.description).toContain('Substrate Issue locator');
+    expect(shape.issue_ref.description).toContain('NOT address the live bd board');
+    expect(shape.bead_id.description).toContain('Permanent compatibility alias for issue_ref');
+    // The old primary explanation must be gone from the alias.
+    expect(shape.bead_id.description).not.toContain('EXISTING READY Bead');
+    expect(shape.bead_id.description).not.toContain('The id of an EXISTING READY');
   });
 });

@@ -25,12 +25,50 @@ export declare const PI_SDK_PACKAGE = "@earendil-works/pi-coding-agent";
  * optional runtime peer: a type-level import would make `tsc` fail wherever pi is not
  * installed. Members are validated at load time by {@link loadPiSdk}.
  */
+/**
+ * Options the native host passes to pi's `DefaultResourceLoader`.
+ *
+ * `no*` flags disable DISCOVERY; the `additional*` arrays are the declared resources
+ * re-added on top. That pair is the loader-level equivalent of the legacy CLI's
+ * `--no-skills --skill <path>` and `--no-extensions -e <path>` (src/pi/session.ts),
+ * and it is what stops ambient skills, extensions and context files leaking in.
+ */
+export interface PiResourceLoaderOptions {
+    cwd: string;
+    agentDir: string;
+    noSkills?: boolean;
+    additionalSkillPaths?: string[];
+    noExtensions?: boolean;
+    additionalExtensionPaths?: string[];
+    noContextFiles?: boolean;
+    noPromptTemplates?: boolean;
+    noThemes?: boolean;
+}
+/** Structural view of a pi `ResourceLoader` — only what the host constructs and reads. */
+export interface PiResourceLoaderLike {
+    reload(): Promise<void>;
+    getSkills(): {
+        skills: Array<{
+            name: string;
+        }>;
+        diagnostics: unknown[];
+    };
+}
 export interface PiSdk {
     createAgentSession: (options?: Record<string, unknown>) => Promise<{
         session: PiAgentSessionLike;
         extensionsResult?: unknown;
         modelFallbackMessage?: string;
     }>;
+    /**
+     * pi 0.85.1 has no `skills` field on `CreateAgentSessionOptions`: skills reach a
+     * session ONLY through the resource loader, which is also the seam for extensions
+     * and context files. The host therefore requires this class from the SDK rather
+     * than accepting pi's auto-discovering default.
+     */
+    DefaultResourceLoader: new (options: PiResourceLoaderOptions) => PiResourceLoaderLike;
+    /** pi's agent config directory (`~/.pi/agent`); the loader needs it explicitly. */
+    getAgentDir: () => string;
     ModelRuntime: {
         create: (options?: Record<string, unknown>) => Promise<PiModelRuntimeLike>;
     };

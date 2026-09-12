@@ -14,6 +14,7 @@ import {
 } from '../../../src/activation/authority-store.js';
 import { NativeActivationHost } from '../../../src/activation/native-host.js';
 import type { PiSdk, PiAgentSessionLike } from '../../../src/activation/pi-sdk.js';
+import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
 import type { SpecialistWorkItemBoundary, WorkItemView } from '../../../src/activation/workitem-store.js';
 
 type ReadDb = {
@@ -297,6 +298,8 @@ function fakeSession(opts: { record: object; assistantText?: string }): PiAgentS
 function makeSdk(record: object, session: PiAgentSessionLike): PiSdk {
   return {
     createAgentSession: async () => ({ session }),
+    DefaultResourceLoader: FakeResourceLoader,
+    getAgentDir: () => FAKE_AGENT_DIR,
     ModelRuntime: { create: async () => ({ hasConfiguredAuth: () => true }) },
     resolveModelScopeWithDiagnostics: () => ({
       scopedModels: [{ model: { id: 'test-model', provider: 'testprov' } }],
@@ -320,6 +323,7 @@ function fakeWorkItems(): SpecialistWorkItemBoundary {
   return {
     view(ref: string): WorkItemView { return { ref, issueId: `iss_${ref}`, revision: 1, contractHash: 'hash', title: 'Investigate the thing', contract, readinessState: 'claimed', dispatchable: true, reasons: [] }; },
     epicAncestors: () => [],
+    completedBlockers: () => [],
     check: () => ({ issueId: 'iss_ISSUE-1', revision: 1, contractHash: 'hash', report: {} as never }),
     bind: () => ({ id: 'exb_test', issueId: 'iss_ISSUE-1', issueRevision: 1, contractHash: 'hash', resolvedContextHash: 'context', claimId: 1, participantId: 'specialist::researcher', activationId: 'act:test', attemptId: 'att:test', sessionId: 'pi-sess-123', workspace: '/tmp', baseCommit: null, createdAt: 1 }) as never,
     inlineCreate: () => ({ ref: 'ISSUE-INLINE', issueId: 'iss_inline', claimId: 1 }),

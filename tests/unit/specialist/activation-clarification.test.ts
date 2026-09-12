@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { createAskTools, ASK_TOOL, ESCALATE_TOOL } from '../../../src/activation/ask-tool.js';
 import { InteractionTransport } from '../../../src/activation/interaction.js';
 import type { PiSdk } from '../../../src/activation/pi-sdk.js';
+import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
 
 /**
  * PRD Phase 6. The property under test is the one that separates a clarification from a
@@ -36,6 +37,8 @@ const call = (tool: Tool, args: unknown) => tool.execute(`call_${++callSeq}`, ar
 function sdkCapturingTools(): PiSdk {
   return {
     createAgentSession: async () => { throw new Error('not used'); },
+    DefaultResourceLoader: FakeResourceLoader,
+    getAgentDir: () => FAKE_AGENT_DIR,
     ModelRuntime: { create: async () => ({ hasConfiguredAuth: () => true }) },
     resolveModelScopeWithDiagnostics: () => ({ scopedModels: [], diagnostics: [] }),
     defineTool: (d) => d,

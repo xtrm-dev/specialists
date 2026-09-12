@@ -27,11 +27,11 @@
 // consumer refuses to inherit a foreign or cross-activation claim.
 
 import { createRequire } from 'node:module';
-import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { DatabaseSync } from 'node:sqlite';
 import { extractSections, scrutinyLevel, validateContractText } from './contract-sections.js';
+import { resolveAuthorityDbPath } from './authority-store.js';
 
 const require = createRequire(import.meta.url);
 
@@ -59,6 +59,17 @@ const SUBSTRATE_PACKAGE = '@jaggerxtrm/substrate';
  * from npm and has never heard of the Substrate repository. Before it existed,
  * dispatch was unavailable to every such user (XTRM-267).
  */
+/**
+ * Where Substrate lives, in precedence order: an explicit checkout, then an injected or
+ * installed resolution, then normal module resolution, then nowhere.
+ *
+ * `resolveInstalled` is the overridable-for-testing seam (unitAI-7co1i, landed on master as
+ * PR #349): a test can STATE "nothing is installed" instead of depending on the machine not
+ * having the package. It defaults to the real module resolution below and is never supplied in
+ * production. SPECIALISTS-24 fixed the same defect independently with an equivalent seam under
+ * a different name; that duplicate was dropped when this branch merged master, so exactly one
+ * seam remains.
+ */
 function resolveSubstrateDir(explicit: string, resolveInstalled?: () => string | null): string | null {
   const trimmed = explicit.trim();
   if (trimmed) return trimmed;
@@ -72,11 +83,18 @@ function resolveSubstrateDir(explicit: string, resolveInstalled?: () => string |
   }
 }
 
-/** Canonical authority path: explicit XTRM_STATE_DB wins, else ~/.xtrm/state.db. */
+/**
+ * The store path every path that opens the work store uses.
+ *
+ * This is a DELEGATION, not a second precedence rule. It used to resolve only
+ * `XTRM_STATE_DB`, so an operator who set `SUBSTRATE_DB` — the owner-defined variable
+ * README.md and the supervising-activations skill tell them to use — got Substrate
+ * services and forensics on one database and dispatch on another, silently, because the
+ * test suite pinned the correct precedence only for the resolver that was NOT on the
+ * dispatch path (SPECIALISTS-3). One rule, one home.
+ */
 export function resolveWorkItemDbPath(env: NodeJS.ProcessEnv = process.env): string {
-  const override = (env.XTRM_STATE_DB ?? '').trim();
-  if (override) return override;
-  return join(homedir(), '.xtrm', 'state.db');
+  return resolveAuthorityDbPath(env);
 }
 
 /**
@@ -134,6 +152,18 @@ export interface EpicAncestor {
   title: string;
   description?: string;
 }
+
+/** One active `blocks`-edge source, flattened for the dependency-context renderer. */
+export interface BlockerIssue {
+  id: string;
+  humanRef: string;
+  title: string;
+  currentRevision: number;
+  lifecycleState: string;
+}
+
+/** Lifecycle states that SATISFY a `blocks` edge (Substrate `isBlockerSatisfied`). */
+const SATISFIED_BLOCKER_STATES = new Set(['done', 'archived']);
 
 /** Result of an inline-contract dispatch (§10): the created issue's identity. */
 export interface InlineIssueResult {
@@ -198,6 +228,12 @@ export interface CheckResult {
 export interface SpecialistWorkItemBoundary {
   view(ref: string): WorkItemView;
   epicAncestors(ref: string, depth: number): EpicAncestor[];
+  /**
+   * Completed `blocks`-edge sources, up to `depth` hops, as dependency context for the
+   * turn-1 prompt. The Substrate edge graph through this boundary is the ONE traversal —
+   * the host never queries the store or walks edges itself (SPECIALISTS-22).
+   */
+  completedBlockers(ref: string, depth: number): EpicAncestor[];
   check(req: DispatchRequest): CheckResult;
   bind(req: DispatchRequest): ExecutionBindingView;
   inlineCreate(contract: string, opts?: { title?: string; holder?: string; activationId?: string }): InlineIssueResult;
@@ -216,6 +252,12 @@ export interface IssueServicePort {
   resolveRef(ref: string): { id: string; humanRef: string };
   getActiveClaim(issueId: string): ActiveClaimView | null;
   getParent(childId: string): { id: string; humanRef: string; title: string; currentRevision: number } | null;
+  /**
+   * Every ACTIVE `blocks` edge whose target is `childId`, resolved to its sources. Optional
+   * so an existing in-memory fake keeps compiling; absent means "no blocker information",
+   * never "no blockers".
+   */
+  getBlockers?(childId: string): BlockerIssue[];
   getRevision(issueId: string, revision: number): { contract: unknown };
   resolveProject(opts: { gitRoot: string }): { projectId: string };
   createIssue(input: {
@@ -311,6 +353,37 @@ export function createWorkItemBoundary(ports: WorkItemPorts): SpecialistWorkItem
         childId = parent.id;
       }
       return ancestors;
+    },
+
+    completedBlockers(ref: string, depth: number): EpicAncestor[] {
+      if (depth !== 1 && depth !== 2) return [];
+      if (!issues.getBlockers) return [];
+      const collected: EpicAncestor[] = [];
+      const seen = new Set<string>();
+      let frontier = [issues.resolveRef(ref).id];
+      for (let hop = 0; hop < depth && frontier.length > 0; hop += 1) {
+        const next: string[] = [];
+        for (const id of frontier) {
+          for (const blocker of issues.getBlockers(id)) {
+            if (seen.has(blocker.id)) continue; // fail-closed: never loop on a corrupt cycle
+            seen.add(blocker.id);
+            // Only SATISFIED blockers are dependency context. An unsatisfied blocker is a
+            // reason the dispatch would have been refused, not context for the child.
+            if (!SATISFIED_BLOCKER_STATES.has(blocker.lifecycleState)) continue;
+            const rev = issues.getRevision(blocker.id, blocker.currentRevision);
+            collected.push({
+              ref: blocker.humanRef,
+              title: blocker.title,
+              description: typeof rev.contract === 'object' && rev.contract !== null
+                ? String((rev.contract as { problem?: string }).problem ?? '')
+                : undefined,
+            });
+            next.push(blocker.id);
+          }
+        }
+        frontier = next;
+      }
+      return collected;
     },
 
     check(req: DispatchRequest): CheckResult {
@@ -516,7 +589,27 @@ export async function openWorkItemBoundary(opts: OpenWorkItemsOptions = {}): Pro
   const dbPath = opts.dbPath ?? resolveWorkItemDbPath(env);
   const db = openSubstrateDb(dbPath);
   runner.migrate(db);
-  const issues = new issueSvcMod.IssueService(db) as IssueServicePort;
+  const issueService = new issueSvcMod.IssueService(db) as IssueServicePort & {
+    listActiveEdges(): Array<{ fromIssue: string; toIssue: string; kind: string; active: boolean }>;
+    getIssue(id: string): { id: string; humanRef: string; title: string; currentRevision: number; lifecycleState: string };
+  };
+  // The blocker traversal lives here, over the producer's own edge list, so the boundary
+  // stays the single consumer surface and no host queries the store directly.
+  issueService.getBlockers = (childId: string): BlockerIssue[] =>
+    issueService
+      .listActiveEdges()
+      .filter((edge) => edge.active && edge.kind === 'blocks' && edge.toIssue === childId)
+      .map((edge) => {
+        const issue = issueService.getIssue(edge.fromIssue);
+        return {
+          id: issue.id,
+          humanRef: issue.humanRef,
+          title: issue.title,
+          currentRevision: issue.currentRevision,
+          lifecycleState: issue.lifecycleState,
+        };
+      });
+  const issues = issueService;
   const journalSvc = new journalMod.JournalService(db, issues);
   const provenance = new provMod.ProvenanceService(db, issues, journalSvc);
   const store = new storeMod.SubstrateIssueStore(issues, journalSvc) as IssueStorePort;
@@ -535,6 +628,7 @@ export async function openWorkItemBoundary(opts: OpenWorkItemsOptions = {}): Pro
 export const NULL_WORK_ITEMS: SpecialistWorkItemBoundary = {
   view: () => { throw new Error('no work-item store: test double'); },
   epicAncestors: () => [],
+  completedBlockers: () => [],
   check: () => { throw new Error('no work-item store: test double'); },
   bind: () => { throw new Error('no work-item store: test double'); },
   inlineCreate: () => { throw new Error('no work-item store: test double'); },

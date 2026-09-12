@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { execSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -10,6 +11,31 @@ import { join } from 'node:path';
  * afterwards. Everything else in node:child_process stays real — `execSync` is used by
  * tool-catalog resolution and the system-prompt defaults.
  */
+/**
+ * SPECIALISTS-6: the curated extension set must be resolvable without depending on what
+ * the machine happens to have installed. The python-kernel resolver is the one curated
+ * entry that is resolved rather than existsSync-checked, so it is the one stubbed.
+ */
+/**
+ * SPECIALISTS-22: force the mandatory-rules resolution to fail so the chosen policy is
+ * exercised rather than asserted. The flag is hoisted because vi.mock factories run before
+ * module body code.
+ */
+const mandatoryRulesFault = vi.hoisted(() => ({ fail: false }));
+vi.mock('../../../src/specialist/mandatory-rules.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../src/specialist/mandatory-rules.js')>();
+  return {
+    ...actual,
+    buildMandatoryRulesInjection: (...args: unknown[]) => {
+      if (mandatoryRulesFault.fail) throw new Error('rules fixture exploded');
+      return (actual.buildMandatoryRulesInjection as (...a: unknown[]) => unknown)(...args);
+    },
+  };
+});
+
+vi.mock('../../../src/pi/python-kernel-extension.js', () => ({
+  resolvePiExtensionsPythonKernelPath: () => '/fake/pi-extensions/python-kernel',
+}));
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>();
   return {
@@ -19,9 +45,12 @@ vi.mock('node:child_process', async (importOriginal) => {
     },
   };
 });
-import { NativeActivationHost, type ActivationForensicSink } from '../../../src/activation/native-host.js';
+import { NativeActivationHost, resolveWorkspace, type ActivationForensicSink } from '../../../src/activation/native-host.js';
+import { buildSystemPrompt } from '../../../src/specialist/system-prompt.js';
+import { resolveOutputContractSchema } from '../../../src/specialist/runner.js';
 import { DispatchRejectedError } from '../../../src/activation/types.js';
 import type { PiSdk, PiAgentSessionLike, PiAgentSessionEvent } from '../../../src/activation/pi-sdk.js';
+import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
 import type { SpecialistWorkItemBoundary, WorkItemView } from '../../../src/activation/workitem-store.js';
 
 /**
@@ -89,6 +118,8 @@ function makeSdk(record: { createArgs?: Record<string, unknown> }, session: PiAg
       record.createArgs = options;
       return { session };
     },
+    DefaultResourceLoader: FakeResourceLoader,
+    getAgentDir: () => FAKE_AGENT_DIR,
     ModelRuntime: { create: async () => ({ hasConfiguredAuth: () => true }) },
     resolveModelScopeWithDiagnostics: () => ({
       scopedModels: [{ model: { id: 'test-model', provider: 'testprov' } }],
@@ -154,7 +185,7 @@ afterEach(() => {
 
 const NO_CONTRACT_STATE = { readContractState: () => undefined };
 
-function fakeWorkItems(options: { state?: string } = {}): SpecialistWorkItemBoundary {
+function fakeWorkItems(options: { state?: string; blockers?: Array<{ ref: string; title: string; description?: string }> } = {}): SpecialistWorkItemBoundary {
   const contract = {
     problem: 'The thing is unclear.',
     success: 'The thing is clear.',
@@ -180,6 +211,7 @@ function fakeWorkItems(options: { state?: string } = {}): SpecialistWorkItemBoun
       };
     },
     epicAncestors: () => [],
+    completedBlockers: () => options.blockers ?? [],
     check() {
       if (state !== 'ready' && state !== 'claimed') throw new Error(`dispatch rejected: issue is ${state}`);
       return { issueId: 'iss_test', revision: 1, contractHash: 'hash-test', report: { state, revision: 1, contractHash: 'hash-test', reasons: [] } as never };
@@ -1281,6 +1313,8 @@ describe('NativeActivationHost — fallback walk + retry (unitAI-3emr7)', () => 
         if (!session) throw new Error(`chainSdk: no session scripted for model attempt ${created.length}`);
         return { session };
       },
+      DefaultResourceLoader: FakeResourceLoader,
+      getAgentDir: () => FAKE_AGENT_DIR,
       ModelRuntime: { create: async () => ({ hasConfiguredAuth: () => true }) },
       resolveModelScopeWithDiagnostics: (patterns: string[]) => {
         if (unavailable.includes(patterns[0])) {
@@ -1522,5 +1556,462 @@ describe('NativeActivationHost — fallback walk + retry (unitAI-3emr7)', () => 
     expect(sink.names).not.toContain('lease_denied');
     expect(sink.names).not.toContain('lease_uncertain');
     expect(sink.names).toContain('activation_retried');
+  });
+});
+
+
+/**
+ * SPECIALISTS-4. The legacy CLI isolates the child and then re-adds its DECLARED
+ * skills (`--no-skills` + `--skill <path>`), and the native host did neither: it
+ * called `createAgentSession` with no `resourceLoader`, so pi auto-discovered the
+ * host project's skills, extensions and `AGENTS.md` while the specialist's own
+ * declared skills were absent — the exact inverse of the contract. Worse, the
+ * turn-1 prompt still commanded `/skill:<name>` for skills the session never got.
+ */
+describe('native resource isolation (SPECIALISTS-4)', () => {
+  /** Real on-disk skill roots: validateBeforeRun hard-fails a path that does not exist. */
+  function skillRoots(workspace: string, names: string[]): string[] {
+    return names.map((name) => {
+      const dir = join(workspace, 'skills', name);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'SKILL.md'), `---\nname: ${name}\n---\n\nbody\n`);
+      return dir;
+    });
+  }
+
+  function specWithSkills(paths: string[]) {
+    const spec = readOnlySpec() as { specialist: Record<string, unknown> };
+    spec.specialist.skills = { paths, scripts: [] };
+    return spec;
+  }
+
+  async function dispatch(spec: Record<string, unknown>, session: PiAgentSessionLike, record: { createArgs?: Record<string, unknown> }) {
+    const host = new NativeActivationHost({
+      loader: loaderFor(spec),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => makeSdk(record, session),
+      cwd: hostWorkspace(),
+    });
+    return host.start({ specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator' });
+  }
+
+  it('hands the session a loader built from the declared skills.paths, with discovery off', async () => {
+    const workspace = hostWorkspace();
+    const declared = skillRoots(workspace, ['gitnexus', 'engineering-quality']);
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record });
+
+    await (await dispatch(specWithSkills(declared), session, record)).result;
+
+    const loader = record.createArgs!.resourceLoader as FakeResourceLoader;
+    expect(loader).toBeInstanceOf(FakeResourceLoader);
+    // The SAME resolved paths validateBeforeRun checked — a validated skill is a loaded one.
+    expect(loader.options.additionalSkillPaths).toEqual(declared);
+    expect(loader.options.cwd).toBeDefined();
+    // Isolation: no ambient skills, extensions, prompt templates, themes or AGENTS.md.
+    expect(loader.options.noSkills).toBe(true);
+    expect(loader.options.noExtensions).toBe(true);
+    expect(loader.options.noContextFiles).toBe(true);
+    expect(loader.options.noPromptTemplates).toBe(true);
+    expect(loader.options.noThemes).toBe(true);
+    expect(loader.reloadCalls).toBeGreaterThan(0);
+    // Exactly the declared skills, and nothing belonging to the host project.
+    expect(loader.getSkills().skills.map((s) => s.name)).toEqual(['gitnexus', 'engineering-quality']);
+  });
+
+  it('a specialist declaring no skills loads none', async () => {
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record });
+
+    await (await dispatch(readOnlySpec(), session, record)).result;
+
+    const loader = record.createArgs!.resourceLoader as FakeResourceLoader;
+    expect(loader.options.additionalSkillPaths).toEqual([]);
+    expect(loader.getSkills().skills).toEqual([]);
+  });
+
+  it('the turn-1 /skill: prefix names only skills the session can actually load', async () => {
+    const workspace = hostWorkspace();
+    const declared = skillRoots(workspace, ['gitnexus', 'engineering-quality']);
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record });
+
+    await (await dispatch(specWithSkills(declared), session, record)).result;
+
+    const loader = record.createArgs!.resourceLoader as FakeResourceLoader;
+    const loadable = new Set(loader.getSkills().skills.map((s) => s.name));
+    const prompt = session.prompts[0] ?? '';
+    const commanded = [...prompt.matchAll(/\/skill:([A-Za-z0-9_-]+)/g)].map((m) => m[1]);
+    // A specialist that declares skills must not open by commanding a skill it cannot load.
+    expect(commanded.length).toBeGreaterThan(0);
+    for (const name of commanded) expect(loadable.has(name)).toBe(true);
+  });
+
+  it('refuses the dispatch rather than auto-discovering when the SDK cannot declare resources', async () => {
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record });
+    const sdk = makeSdk(record, session) as unknown as Record<string, unknown>;
+    delete sdk.DefaultResourceLoader;
+    const host = new NativeActivationHost({
+      loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => sdk as unknown as PiSdk,
+      cwd: hostWorkspace(),
+    });
+
+    const refusal = await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    }).catch((error: unknown) => error);
+
+    expect((refusal as DispatchRejectedError).reason).toBe('pi_sdk_resource_loader_unavailable');
+    expect(record.createArgs).toBeUndefined();
+  });
+});
+
+
+/**
+ * SPECIALISTS-5. Ten of twenty-four specialists declare `prompt.output_schema`, and the
+ * native host hardcoded `outputContractSchema: undefined`, so every one of them lost the
+ * structured-output contract the legacy CLI hands the same definition. The child was asked
+ * for structured output by its prompt and never told the schema.
+ */
+describe('output contract schema parity (SPECIALISTS-5)', () => {
+  const DECLARED_SCHEMA = {
+    type: 'object',
+    properties: {
+      summary: { type: 'string' },
+      confidence: { enum: ['low', 'medium', 'high'] },
+    },
+    required: ['summary'],
+  };
+
+  function specWithSchema() {
+    const spec = readOnlySpec() as { specialist: { prompt: Record<string, unknown>; execution: Record<string, unknown> } };
+    spec.specialist.prompt.output_schema = DECLARED_SCHEMA;
+    spec.specialist.execution.response_format = 'markdown';
+    spec.specialist.execution.output_type = 'analysis';
+    return spec;
+  }
+
+  function outputContractSection(systemPrompt: string): string {
+    const start = systemPrompt.indexOf('## Output Contract');
+    if (start < 0) return '';
+    const rest = systemPrompt.slice(start);
+    const end = rest.indexOf('\n## ', 1);
+    return (end < 0 ? rest : rest.slice(0, end)).trimEnd();
+  }
+
+  async function nativeSystemPrompt(): Promise<string> {
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record });
+    const host = new NativeActivationHost({
+      loader: loaderFor(specWithSchema()),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => makeSdk(record, session),
+      cwd: hostWorkspace(),
+    });
+    await (await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    })).result;
+    return record.createArgs!.systemPrompt as string;
+  }
+
+  it('puts the declared schema in the native system prompt', async () => {
+    const systemPrompt = await nativeSystemPrompt();
+    expect(systemPrompt).toContain('## Output Contract');
+    expect(systemPrompt).toContain('Structure your output to match this schema:');
+    expect(systemPrompt).toContain('"confidence"');
+    expect(systemPrompt).toContain('## Machine-readable block');
+  });
+
+  it('renders the same output contract section the legacy call site renders', async () => {
+    const native = outputContractSection(await nativeSystemPrompt());
+    // Exactly what src/specialist/runner.ts does for the same definition.
+    const legacy = outputContractSection(
+      buildSystemPrompt({
+        systemPromptTemplate: 'You are the researcher.',
+        templateVariables: {},
+        bare: false,
+        runCwd: process.cwd(),
+        specialistName: 'researcher',
+        inputIssueRef: 'ISSUE-1',
+        responseFormat: 'markdown',
+        outputType: 'analysis',
+        outputContractSchema: resolveOutputContractSchema('markdown', 'analysis', DECLARED_SCHEMA),
+        beadContextText: '',
+        readBeadForMemory: () => null,
+      }).text,
+    );
+    expect(legacy).not.toBe('');
+    expect(native).toBe(legacy);
+  });
+});
+
+
+/**
+ * SPECIALISTS-6. Two legacy capabilities were absent from the native path: pre-phase
+ * scripts (`runner.ts:1093-1100` — required-script failure refuses before launch, and
+ * `inject_output` stdout reaches the prompt as `$pre_script_output`), and the curated Pi
+ * extension set that `session.ts` re-enables after `--no-extensions`.
+ */
+describe('pre-scripts and curated extensions (SPECIALISTS-6)', () => {
+  const PY_KERNEL = '/fake/pi-extensions/python-kernel';
+
+  function specWithScripts(scripts: Array<Record<string, unknown>>, executionExtra: Record<string, unknown> = {}) {
+    const spec = readOnlySpec(executionExtra) as { specialist: { skills?: Record<string, unknown> } };
+    spec.specialist.skills = { paths: [], scripts };
+    return spec;
+  }
+
+  /** A real executable on disk: validateBeforeRun hard-fails a missing script or bad shebang. */
+  function preScriptFile(workspace: string, name: string, body: string): string {
+    const file = join(workspace, `${name}.sh`);
+    writeFileSync(file, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+    return file;
+  }
+
+  it('injects an optional pre-script stdout into the turn-1 prompt', async () => {
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record });
+    const workspace = hostWorkspace();
+    const script = preScriptFile(workspace, 'pre-ok', 'echo PRE-SCRIPT-MARKER');
+    const spec = specWithScripts([{ phase: 'pre', run: script, inject_output: true }]) as {
+      specialist: { prompt: Record<string, unknown> };
+    };
+    spec.specialist.prompt.task_template = 'Do: $bead_id\nPre: $pre_script_output';
+    const host = new NativeActivationHost({
+      loader: loaderFor(spec),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => makeSdk(record, session),
+      cwd: workspace,
+    });
+    await (await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    })).result;
+
+    expect(session.prompts[0]).toContain('PRE-SCRIPT-MARKER');
+  });
+
+  it('refuses a failing REQUIRED pre-script before any session exists', async () => {
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record });
+    const workspace = hostWorkspace();
+    const script = preScriptFile(workspace, 'pre-fail', 'exit 7');
+    const host = new NativeActivationHost({
+      loader: loaderFor(specWithScripts([
+        { phase: 'pre', run: script, inject_output: false, required: true },
+      ])),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => makeSdk(record, session),
+      cwd: workspace,
+    });
+    const refusal = await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    }).catch((error: unknown) => error);
+
+    expect((refusal as DispatchRejectedError).reason).toBe('required_pre_script_failed');
+    expect(record.createArgs).toBeUndefined();
+  });
+
+  it('gives the write tier the curated extensions and applies same-identity de-duplication', async () => {
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record });
+    const host = new NativeActivationHost({
+      loader: loaderFor(specWithScripts([], {
+        permission_required: 'HIGH',
+        extensions: { 'npm:pi-mcp-adapter': true, [PY_KERNEL]: true },
+      })),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => makeSdk(record, session),
+      cwd: hostWorkspace(),
+    });
+    await (await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    })).result;
+
+    const loader = record.createArgs!.resourceLoader as FakeResourceLoader;
+    const paths = loader.options.additionalExtensionPaths as string[];
+    // The curated python-kernel is injected for a write tier...
+    expect(paths).toContain(PY_KERNEL);
+    // ...exactly once, even though the definition also declares it (unitAI-il2io rule).
+    expect(paths.filter((p) => p === PY_KERNEL)).toHaveLength(1);
+    // A non-local source cannot be loaded by the in-process resource loader and is not
+    // forwarded as if it were a path.
+    expect(paths.some((p) => p.startsWith('npm:'))).toBe(false);
+  });
+
+  it('withholds the write-tier-only curated extensions from a read-only specialist', async () => {
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record });
+    const host = new NativeActivationHost({
+      loader: loaderFor(specWithScripts([])),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => makeSdk(record, session),
+      cwd: hostWorkspace(),
+    });
+    await (await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    })).result;
+
+    const loader = record.createArgs!.resourceLoader as FakeResourceLoader;
+    expect(loader.options.additionalExtensionPaths as string[]).not.toContain(PY_KERNEL);
+  });
+});
+
+
+/**
+ * SPECIALISTS-22. Three inputs the legacy runner supplies to `renderTaskPrompt` were
+ * missing from the native call site: completed blockers, the reviewer's execution-only diff
+ * context, and any handling at all of `mandatoryRulesError` / `mandatoryRules`.
+ */
+describe('task-prompt composition parity (SPECIALISTS-22)', () => {
+  afterEach(() => { mandatoryRulesFault.fail = false; });
+
+  async function dispatchWith(options: { blockers?: Array<{ ref: string; title: string; description?: string }>; specialist?: string; sink?: ReturnType<typeof collectingSink> }) {
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record });
+    const sink = options.sink ?? collectingSink();
+    const host = new NativeActivationHost({
+      loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems({ blockers: options.blockers }),
+      forensics: sink,
+      loadSdk: async () => makeSdk(record, session),
+      cwd: hostWorkspace(),
+    });
+    const handle = await host.start({
+      specialist: options.specialist ?? 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    });
+    return { session, sink, record, handle };
+  }
+
+  /** `$prompt` must appear in the task template or the bead context never reaches the task. */
+  function specWithPromptTemplate() {
+    const spec = readOnlySpec() as { specialist: { prompt: Record<string, unknown> } };
+    spec.specialist.prompt.task_template = 'Do: $prompt';
+    return spec;
+  }
+
+  async function dispatchWith(options: { blockers?: Array<{ ref: string; title: string; description?: string }>; specialist?: string; cwd?: string }) {
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record });
+    const sink = collectingSink();
+    const spec = specWithPromptTemplate() as { specialist: { metadata: Record<string, unknown> } };
+    // The reviewer hook keys on the RESOLVED definition's name, as the legacy path does.
+    spec.specialist.metadata.name = options.specialist ?? 'researcher';
+    const host = new NativeActivationHost({
+      loader: loaderFor(spec),
+      workItems: fakeWorkItems({ blockers: options.blockers }),
+      forensics: sink,
+      loadSdk: async () => makeSdk(record, session),
+      cwd: options.cwd ?? hostWorkspace(),
+    });
+    let handle: Awaited<ReturnType<NativeActivationHost['start']>> | undefined;
+    let refusal: unknown;
+    try {
+      handle = await host.start({
+        specialist: options.specialist ?? 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+      });
+    } catch (error) {
+      refusal = error;
+    }
+    return { session, sink, record, handle, refusal };
+  }
+
+  it('renders completed blockers as dependency context', async () => {
+    const { session } = await dispatchWith({
+      blockers: [{ ref: 'ISSUE-9', title: 'Unblocked it', description: 'PROBLEM: the schema' }],
+    });
+    expect(session.prompts[0]).toContain('## Context from completed dependencies:');
+    expect(session.prompts[0]).toContain('ISSUE-9');
+    expect(session.prompts[0]).toContain('Unblocked it');
+  });
+
+  it('renders no dependency section when nothing is completed', async () => {
+    const { session } = await dispatchWith({});
+    expect(session.prompts[0]).not.toContain('## Context from completed dependencies:');
+  });
+
+  it('gives a reviewer its diff context, which the native call site never supplied', async () => {
+    // A real repository with a real unstaged change: the diff builder shells out to git,
+    // so a fake cwd would prove nothing.
+    const workspace = hostWorkspace();
+    const run = (command: string) => execSync(command, { cwd: workspace, stdio: 'pipe' });
+    run('git init -q');
+    run('git config user.email t@t.t && git config user.name t');
+    writeFileSync(join(workspace, 'reviewed.txt'), 'one\n');
+    run('git add reviewed.txt && git commit -qm initial');
+    writeFileSync(join(workspace, 'reviewed.txt'), 'one\ntwo\n');
+
+    const { session } = await dispatchWith({ specialist: 'reviewer', cwd: workspace });
+
+    expect(session.prompts[0]).toContain('## Reviewer Diff Context');
+    expect(session.prompts[0]).toContain('reviewed.txt');
+  });
+
+  it('emits the mandatory-rules injection metadata the legacy path emits', async () => {
+    const { sink } = await dispatchWith({});
+    expect(sink.names).toContain('mandatory_rules_injection');
+  });
+
+  it('fails closed when mandatory rules cannot be resolved', async () => {
+    mandatoryRulesFault.fail = true;
+    const { record, refusal, session } = await dispatchWith({});
+    expect((refusal as DispatchRejectedError).reason).toBe('mandatory_rules_unavailable');
+    expect(record.createArgs).toBeUndefined();
+    expect(session.prompts).toHaveLength(0);
+  });
+});
+
+
+/**
+ * SPECIALISTS-21. Run-in-place is the deliberate workspace model for native activation.
+ * The defect was that nothing said so, that `workspaceHint` was a dead parameter reading as
+ * an unfinished feature, and that the rendered Runtime Boundary Rules block derived its cwd
+ * from a different expression than the session did — equal only by coincidence.
+ */
+describe('run-in-place workspace semantics (SPECIALISTS-21)', () => {
+  it('resolves the workspace to the coordinator cwd, one source for both fields', () => {
+    expect(resolveWorkspace('/some/cwd')).toEqual({ repositoryRoot: '/some/cwd', worktreePath: '/some/cwd' });
+  });
+
+  it('names the directory the session actually runs in', async () => {
+    const workspace = hostWorkspace();
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record });
+    const spec = readOnlySpec() as { specialist: { prompt: Record<string, unknown> } };
+    spec.specialist.prompt.task_template = 'Do: $prompt';
+    const host = new NativeActivationHost({
+      loader: loaderFor(spec),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => makeSdk(record, session),
+      cwd: workspace,
+    });
+    await (await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    })).result;
+
+    const prompt = session.prompts[0];
+    const sessionCwd = record.createArgs!.cwd as string;
+    // The block must name the directory the SESSION runs in, not a second one that happens
+    // to agree today.
+    expect(sessionCwd).toBe(workspace);
+    expect(prompt).toContain(`Current cwd: ${sessionCwd}`);
+    expect(prompt).toContain(`Assigned worktree boundary: ${sessionCwd}`);
+  });
+
+  it('has no workspaceHint seam left to read as an unfinished feature', () => {
+    const sources = [
+      readFileSync(new URL('../../../src/activation/native-host.ts', import.meta.url), 'utf8'),
+      readFileSync(new URL('../../../src/activation/types.ts', import.meta.url), 'utf8'),
+    ].join('\n');
+    expect(sources).not.toContain('workspaceHint');
   });
 });

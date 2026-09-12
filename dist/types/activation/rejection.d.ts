@@ -20,7 +20,31 @@ export interface RejectionInput {
     detail?: DispatchRejectedError['detail'];
     missing?: string[];
 }
-export declare function renderRejection(input: RejectionInput, build?: string): {
+/**
+ * Reason text substituted when a stale runtime produced a downstream refusal.
+ * Names the cause, names the remedy, and tells the reader not to act on the
+ * superseded text underneath it. The ids ride the `build` field.
+ */
+export declare const STALE_RUNTIME_REASON: string;
+/** An outcome payload carrying a machine reason and an optional detail envelope. */
+export interface RefusalPayload {
+    reason?: unknown;
+    detail?: unknown;
+    [key: string]: unknown;
+}
+/**
+ * Supersede a downstream refusal reason with the staleness that explains it.
+ *
+ * Returns the payload UNCHANGED — same object shape, same field order — unless
+ * `stale` is true AND the reason is one of the environment-symptom reasons. So a
+ * matching build renders exactly as it did before this branch existed.
+ *
+ * The superseded reason is never suppressed: it moves to
+ * `detail.refused_by_stale_runtime` so a reader has both the cause and the
+ * symptom. `build` is attached by the caller, not here.
+ */
+export declare function supersedeStaleRefusal<T extends RefusalPayload>(payload: T, stale: boolean, build?: string): T;
+export declare function renderRejection(input: RejectionInput, build?: string, stale?: boolean): {
     build?: string | undefined;
     missing?: string[] | undefined;
     detail?: {

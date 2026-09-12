@@ -11494,6 +11494,36 @@ function resolveExecutionExtensionSelection(extensions) {
     offline: !extensionSources.some(isRemoteExtensionSource)
   };
 }
+function resolveCuratedExtensionPaths(options) {
+  const all = [];
+  const piExtDir = join4(homedir2(), ".pi", "agent", "extensions");
+  const permLevel = (options.permissionLevel ?? "").toUpperCase();
+  if (permLevel !== "READ_ONLY") {
+    const qgPath = join4(piExtDir, "quality-gates");
+    if (existsSync5(qgPath))
+      all.push(qgPath);
+  }
+  const pyKernelPath = resolvePiExtensionsPythonKernelPath();
+  if (pyKernelPath && permLevel !== "READ_ONLY")
+    all.push(pyKernelPath);
+  const cavemanPath = join4(piExtDir, "caveman");
+  if (existsSync5(cavemanPath))
+    all.push(cavemanPath);
+  const nvidiaNimPath = join4(homedir2(), ".pi", "agent", "git", "github.com", "xRyul", "pi-nvidia-nim");
+  if (existsSync5(nvidiaNimPath))
+    all.push(nvidiaNimPath);
+  const gitnexusContract = options.resolvedToolContract?.extensions.gitnexus;
+  if (gitnexusContract?.status === "available" && gitnexusContract.packagePath && existsSync5(gitnexusContract.packagePath)) {
+    all.push(gitnexusContract.packagePath);
+  }
+  return {
+    all,
+    dedupeAgainstDynamic: [
+      ...pyKernelPath ? [pyKernelPath] : [],
+      ...gitnexusContract?.status === "available" && gitnexusContract.packagePath ? [gitnexusContract.packagePath] : []
+    ]
+  };
+}
 function resolveGlobalNodeModulesDir2() {
   const candidates = [
     process.env.PI_NPM_GLOBAL_DIR,
@@ -11864,32 +11894,14 @@ class PiAgentSession {
     for (const skillPath of this.options.skillPaths ?? []) {
       args.push("--skill", skillPath);
     }
-    const piExtDir = join4(homedir2(), ".pi", "agent", "extensions");
-    const permLevel = (this.options.permissionLevel ?? "").toUpperCase();
-    if (permLevel !== "READ_ONLY") {
-      const qgPath = join4(piExtDir, "quality-gates");
-      if (existsSync5(qgPath))
-        args.push("-e", qgPath);
+    const curatedExtensions = resolveCuratedExtensionPaths({
+      permissionLevel: this.options.permissionLevel,
+      resolvedToolContract
+    });
+    for (const extensionPath of curatedExtensions.all) {
+      args.push("-e", extensionPath);
     }
-    const pyKernelPath = resolvePiExtensionsPythonKernelPath();
-    if (pyKernelPath && permLevel !== "READ_ONLY") {
-      args.push("-e", pyKernelPath);
-    }
-    const cavemanPath = join4(piExtDir, "caveman");
-    if (existsSync5(cavemanPath))
-      args.push("-e", cavemanPath);
-    const nvidiaNimPath = join4(homedir2(), ".pi", "agent", "git", "github.com", "xRyul", "pi-nvidia-nim");
-    if (existsSync5(nvidiaNimPath))
-      args.push("-e", nvidiaNimPath);
-    const gitnexusContract = resolvedToolContract?.extensions.gitnexus;
-    if (gitnexusContract?.status === "available" && gitnexusContract.packagePath && existsSync5(gitnexusContract.packagePath)) {
-      args.push("-e", gitnexusContract.packagePath);
-    }
-    const autoInjectedForDedup = [
-      ...pyKernelPath ? [pyKernelPath] : [],
-      ...gitnexusContract?.status === "available" && gitnexusContract.packagePath ? [gitnexusContract.packagePath] : []
-    ];
-    const { kept: dedupedSources, dropped: droppedSources } = deduplicateExtensionSources(autoInjectedForDedup, this.options.extensionSources ?? []);
+    const { kept: dedupedSources, dropped: droppedSources } = deduplicateExtensionSources(curatedExtensions.dedupeAgainstDynamic, this.options.extensionSources ?? []);
     for (const { dropped, keptAs } of droppedSources) {
       process.stderr.write(`[python-kernel] DEDUP: skipping duplicate extension source '${dropped}' (same as '${keptAs}'; kept '${keptAs}').
 `);
@@ -17194,6 +17206,331 @@ ${errors.join(`
 `)}`);
   }
 }
+var BASE_OUTPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    summary: { type: "string" },
+    status: { enum: ["success", "partial", "failed", "waiting"] },
+    issues_closed: { type: "array", items: { type: "string" } },
+    issues_created: { type: "array", items: { type: "string" } },
+    follow_ups: { type: "array", items: { type: "string" } },
+    risks: { type: "array", items: { type: "string" } },
+    verification: { type: "array", items: { type: "string" } }
+  },
+  required: ["summary", "status", "issues_closed", "issues_created", "follow_ups", "risks", "verification"]
+};
+var IMPACT_REPORT_SCHEMA = {
+  type: "object",
+  properties: {
+    files_touched: { type: "array", items: { type: "string" } },
+    symbols_analyzed: { type: "array", items: { type: "string" } },
+    highest_risk: { enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"] },
+    tool_invocations: { type: "number" }
+  }
+};
+var OUTPUT_TYPE_SCHEMA_EXTENSIONS = {
+  codegen: {
+    type: "object",
+    properties: {
+      files_changed: { type: "array", items: { type: "string" } },
+      symbols_modified: { type: "array", items: { type: "string" } },
+      lint_pass: { type: "boolean" },
+      tests_pass: { type: "boolean" },
+      impact_report: IMPACT_REPORT_SCHEMA
+    }
+  },
+  analysis: {
+    type: "object",
+    properties: {
+      key_files: { type: "array", items: { type: "string" } },
+      architecture_notes: { type: "string" },
+      recommendations: { type: "array", items: { type: "string" } },
+      impact_report: IMPACT_REPORT_SCHEMA
+    }
+  },
+  review: {
+    type: "object",
+    properties: {
+      verdict: { enum: ["pass", "partial", "fail"] },
+      findings: { type: "array", items: { type: "string" } },
+      recommendation: { type: "string" }
+    }
+  },
+  synthesis: {
+    type: "object",
+    properties: {
+      decisions: { type: "array", items: { type: "string" } },
+      rationale: { type: "string" },
+      next_steps: { type: "array", items: { type: "string" } }
+    }
+  },
+  orchestration: {
+    type: "object",
+    properties: {
+      actions: {
+        type: "array",
+        items: {
+          oneOf: [
+            {
+              type: "object",
+              properties: {
+                type: { enum: ["resume"] },
+                memberId: { type: "string" },
+                task: { type: "string" }
+              },
+              required: ["type", "memberId", "task"]
+            },
+            {
+              type: "object",
+              properties: {
+                type: { enum: ["steer"] },
+                memberId: { type: "string" },
+                message: { type: "string" }
+              },
+              required: ["type", "memberId", "message"]
+            },
+            {
+              type: "object",
+              properties: {
+                type: { enum: ["stop"] },
+                memberId: { type: "string" }
+              },
+              required: ["type", "memberId"]
+            }
+          ]
+        }
+      },
+      blocking_on: {
+        type: "object",
+        properties: {
+          kind: { enum: ["human_input", "member_output", "external_dependency"] },
+          target: { type: "string" },
+          details: { type: "string" }
+        },
+        required: ["kind"]
+      },
+      memory_patch: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            entry_type: { enum: ["fact", "question", "decision"] },
+            entry_id: { type: "string" },
+            summary: { type: "string" },
+            source_member_id: { type: "string" },
+            confidence: { type: "number" },
+            provenance: { type: "object" }
+          },
+          required: ["entry_type", "summary"]
+        }
+      },
+      coordination_state: {
+        type: "object",
+        properties: {
+          current_goal: { type: "string" },
+          active_members: { type: "array", items: { type: "string" } },
+          waiting_on_members: { type: "array", items: { type: "string" } },
+          pending_decisions: { type: "array", items: { type: "string" } },
+          blockers: { type: "array", items: { type: "string" } }
+        }
+      },
+      routing_rationale: { type: "string" },
+      next_trigger: {
+        type: "object",
+        properties: {
+          event: { enum: ["on_member_update", "on_human_input", "on_external_update", "on_timeout", "manual_resume"] },
+          target: { type: "string" },
+          details: { type: "string" }
+        },
+        required: ["event"]
+      }
+    }
+  },
+  workflow: {
+    type: "object",
+    properties: {
+      steps_completed: { type: "array", items: { type: "string" } },
+      first_task: { type: "string" },
+      children: { type: "array", items: { type: "string" } },
+      test_issues: { type: "array", items: { type: "string" } }
+    }
+  },
+  research: {
+    type: "object",
+    properties: {
+      sources_checked: { type: "array", items: { type: "string" } },
+      confidence: { enum: ["low", "medium", "high"] },
+      recommendations: { type: "array", items: { type: "string" } }
+    }
+  }
+};
+function deepMergeSchemas(base, override) {
+  const merged = { ...base };
+  for (const [key, overrideValue] of Object.entries(override)) {
+    const baseValue = merged[key];
+    if (isRecord(baseValue) && isRecord(overrideValue)) {
+      merged[key] = deepMergeSchemas(baseValue, overrideValue);
+      continue;
+    }
+    merged[key] = overrideValue;
+  }
+  return merged;
+}
+function resolveOutputContractSchema(responseFormat, outputType, outputSchema) {
+  if (responseFormat === "text")
+    return;
+  if (responseFormat === "markdown" && !outputSchema)
+    return;
+  let mergedSchema = { ...BASE_OUTPUT_SCHEMA };
+  if (outputType !== "custom") {
+    mergedSchema = deepMergeSchemas(mergedSchema, OUTPUT_TYPE_SCHEMA_EXTENSIONS[outputType]);
+  }
+  if (outputSchema) {
+    mergedSchema = deepMergeSchemas(mergedSchema, outputSchema);
+  }
+  return mergedSchema;
+}
+function shellQuote(value) {
+  return `'${value.replace(/'/g, `'''`)}'`;
+}
+function readCommandOutput(cwd, command) {
+  try {
+    return execSync2(command, {
+      cwd,
+      encoding: "utf8",
+      timeout: 1e4,
+      stdio: ["ignore", "pipe", "pipe"]
+    }).trim();
+  } catch {
+    return "";
+  }
+}
+function resolveDefaultBranch(cwd) {
+  const headRef = readCommandOutput(cwd, "git symbolic-ref refs/remotes/origin/HEAD");
+  if (headRef) {
+    return headRef.split("/").pop() ?? "main";
+  }
+  const remoteHead = readCommandOutput(cwd, "git remote show origin");
+  const match = remoteHead.match(/HEAD branch:\s*(.+)/);
+  return match?.[1]?.trim() || "main";
+}
+function readMergeBase(cwd) {
+  const baseBranch = resolveDefaultBranch(cwd);
+  return readCommandOutput(cwd, `git merge-base ${shellQuote(baseBranch)} HEAD`);
+}
+function extractInjectedFileDiff(hunks, file) {
+  const marker = `### ${file}
+`;
+  const start = hunks.indexOf(marker);
+  if (start < 0)
+    return "";
+  const rest = hunks.slice(start + marker.length);
+  const nextHeader = rest.indexOf(`
+
+### `);
+  return (nextHeader >= 0 ? rest.slice(0, nextHeader) : rest).trim();
+}
+function parseInjectedReviewerDiffContext(variables) {
+  const source = variables?.reviewer_diff_source?.trim();
+  const stat = variables?.reviewer_diff_stat?.trim();
+  const filesRaw = variables?.reviewer_diff_files?.trim();
+  const hunks = variables?.reviewer_diff_hunks?.trim();
+  if (!source || !filesRaw || !hunks)
+    return null;
+  const files = filesRaw.split(`
+`).map((line) => line.trim()).filter(Boolean);
+  if (files.length === 0)
+    return null;
+  return {
+    source,
+    stat: stat || "(no stat)",
+    files,
+    hunks
+  };
+}
+function getPatchSources(cwd, variables) {
+  const mergeBase = readMergeBase(cwd);
+  const injectedContext = parseInjectedReviewerDiffContext(variables);
+  return [
+    ...injectedContext ? [{
+      source: injectedContext.source,
+      stat: injectedContext.stat,
+      files: injectedContext.files,
+      diffForFile: (file) => extractInjectedFileDiff(injectedContext.hunks, file)
+    }] : [],
+    {
+      source: "unstaged diff",
+      stat: readCommandOutput(cwd, "git diff --stat"),
+      files: readCommandOutput(cwd, "git diff --name-only").split(`
+`).map((line) => line.trim()).filter(Boolean),
+      diffForFile: (file) => readCommandOutput(cwd, `git diff -- ${shellQuote(file)}`)
+    },
+    {
+      source: "staged diff",
+      stat: readCommandOutput(cwd, "git diff --cached --stat"),
+      files: readCommandOutput(cwd, "git diff --cached --name-only").split(`
+`).map((line) => line.trim()).filter(Boolean),
+      diffForFile: (file) => readCommandOutput(cwd, `git diff --cached -- ${shellQuote(file)}`)
+    },
+    {
+      source: "branch-vs-base diff",
+      stat: mergeBase ? readCommandOutput(cwd, `git diff --stat ${shellQuote(mergeBase)}..HEAD`) : "",
+      files: mergeBase ? readCommandOutput(cwd, `git diff --name-only ${shellQuote(mergeBase)}..HEAD`).split(`
+`).map((line) => line.trim()).filter(Boolean) : [],
+      diffForFile: (file) => mergeBase ? readCommandOutput(cwd, `git diff ${shellQuote(mergeBase)}..HEAD -- ${shellQuote(file)}`) : ""
+    }
+  ];
+}
+function buildReviewerDiffContext(cwd, variables, maxFiles = 20) {
+  for (const source of getPatchSources(cwd, variables)) {
+    const files = source.files.slice(0, maxFiles);
+    if (files.length === 0)
+      continue;
+    const hunks = files.map((file) => {
+      const diff = source.diffForFile(file);
+      return diff ? `### ${file}
+${diff}` : `### ${file}
+(no hunks)`;
+    }).join(`
+
+`);
+    if (hunks.trim()) {
+      return {
+        source: source.source,
+        stat: source.stat,
+        files,
+        hunks
+      };
+    }
+  }
+  throw new Error("Reviewer startup blocked: no patch context found in injected diff, unstaged diff, staged diff, or branch-vs-base diff.");
+}
+function buildReviewerDiffInstruction(context) {
+  return `
+
+---
+## Reviewer Diff Context
+Review only patch below. Ignore unrelated files, repo-wide exploration, and filesystem hunting.
+If patch context is empty, stop and fail fast.
+
+Patch source:
+${context.source}
+
+Diff stat:
+${context.stat || "(no stat)"}
+
+Changed files:
+${context.files.map((file) => `- ${file}`).join(`
+`)}
+
+Diff hunks:
+${context.hunks}
+---
+`;
+}
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 function classifyFallbackError(error) {
   if (isAuthError(error))
     return "auth";
@@ -19755,11 +20092,28 @@ import { randomUUID as randomUUID3 } from "node:crypto";
 import { existsSync as existsSync19 } from "node:fs";
 
 // src/activation/workitem-store.ts
+import { createRequire as createRequire3 } from "node:module";
+import { dirname as dirname10, join as join14 } from "node:path";
+import { pathToFileURL } from "node:url";
+
+// src/activation/authority-store.ts
 import { createRequire as createRequire2 } from "node:module";
 import { homedir as homedir7 } from "node:os";
 import { dirname as dirname9, join as join13 } from "node:path";
-import { pathToFileURL } from "node:url";
 var require2 = createRequire2(import.meta.url);
+function resolveAuthorityDbPath(env = process.env) {
+  const substrate = (env.SUBSTRATE_DB ?? "").trim();
+  if (substrate)
+    return substrate;
+  const legacy = (env.XTRM_STATE_DB ?? "").trim();
+  if (legacy)
+    return legacy;
+  return join13(homedir7(), ".xtrm", "state.db");
+}
+var NULL_AUTHORITY_WRITER = { record: () => {}, remove: () => {} };
+
+// src/activation/workitem-store.ts
+var require3 = createRequire3(import.meta.url);
 var SUBSTRATE_PACKAGE = "@jaggerxtrm/substrate";
 function resolveSubstrateDir(explicit, resolveInstalled) {
   const trimmed = explicit.trim();
@@ -19768,16 +20122,13 @@ function resolveSubstrateDir(explicit, resolveInstalled) {
   if (resolveInstalled)
     return resolveInstalled();
   try {
-    return dirname9(require2.resolve(`${SUBSTRATE_PACKAGE}/package.json`));
+    return dirname10(require3.resolve(`${SUBSTRATE_PACKAGE}/package.json`));
   } catch {
     return null;
   }
 }
 function resolveWorkItemDbPath(env = process.env) {
-  const override = (env.XTRM_STATE_DB ?? "").trim();
-  if (override)
-    return override;
-  return join13(homedir7(), ".xtrm", "state.db");
+  return resolveAuthorityDbPath(env);
 }
 function openSubstrateDb(dbPath) {
   const applyPragmas = (db) => {
@@ -19787,14 +20138,14 @@ function openSubstrateDb(dbPath) {
     db.exec("PRAGMA foreign_keys = ON");
   };
   try {
-    const bun = require2("bun:sqlite");
+    const bun = require3("bun:sqlite");
     if (bun?.Database) {
       const db = new bun.Database(dbPath);
       applyPragmas(db);
       return db;
     }
   } catch {}
-  const node = require2("node:sqlite");
+  const node = require3("node:sqlite");
   if (node?.DatabaseSync) {
     const db = new node.DatabaseSync(dbPath);
     applyPragmas(db);
@@ -19802,6 +20153,7 @@ function openSubstrateDb(dbPath) {
   }
   throw new Error(`work-item store: no sqlite driver for ${dbPath}`);
 }
+var SATISFIED_BLOCKER_STATES = new Set(["done", "archived"]);
 function createWorkItemBoundary(ports) {
   const { issues, provenance, store, gate } = ports;
   const viewOf = (ref) => {
@@ -19844,6 +20196,36 @@ function createWorkItemBoundary(ports) {
         childId = parent.id;
       }
       return ancestors;
+    },
+    completedBlockers(ref, depth) {
+      if (depth !== 1 && depth !== 2)
+        return [];
+      if (!issues.getBlockers)
+        return [];
+      const collected = [];
+      const seen = new Set;
+      let frontier = [issues.resolveRef(ref).id];
+      for (let hop = 0;hop < depth && frontier.length > 0; hop += 1) {
+        const next = [];
+        for (const id of frontier) {
+          for (const blocker of issues.getBlockers(id)) {
+            if (seen.has(blocker.id))
+              continue;
+            seen.add(blocker.id);
+            if (!SATISFIED_BLOCKER_STATES.has(blocker.lifecycleState))
+              continue;
+            const rev = issues.getRevision(blocker.id, blocker.currentRevision);
+            collected.push({
+              ref: blocker.humanRef,
+              title: blocker.title,
+              description: typeof rev.contract === "object" && rev.contract !== null ? String(rev.contract.problem ?? "") : undefined
+            });
+            next.push(blocker.id);
+          }
+        }
+        frontier = next;
+      }
+      return collected;
     },
     check(req) {
       const check = gate.check(issues, req);
@@ -19920,7 +20302,7 @@ async function openWorkItemBoundary(opts = {}) {
   }
   let pkgName;
   try {
-    const pkgRaw = await import(pathToFileURL(join13(substrateDir, "package.json")).href, { with: { type: "json" } });
+    const pkgRaw = await import(pathToFileURL(join14(substrateDir, "package.json")).href, { with: { type: "json" } });
     pkgName = pkgRaw.default?.name;
   } catch (error) {
     throw new Error(`work_item_store_unavailable: cannot read Substrate package identity at ${substrateDir}: ${error instanceof Error ? error.message : String(error)}`);
@@ -19930,7 +20312,7 @@ async function openWorkItemBoundary(opts = {}) {
   }
   const load = async (rel) => {
     try {
-      return await import(pathToFileURL(join13(substrateDir, rel)).href);
+      return await import(pathToFileURL(join14(substrateDir, rel)).href);
     } catch (error) {
       throw new Error(`work_item_store_unavailable: cannot load Substrate module ${rel}: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -19959,7 +20341,18 @@ async function openWorkItemBoundary(opts = {}) {
   const dbPath = opts.dbPath ?? resolveWorkItemDbPath(env);
   const db = openSubstrateDb(dbPath);
   runner.migrate(db);
-  const issues = new issueSvcMod.IssueService(db);
+  const issueService = new issueSvcMod.IssueService(db);
+  issueService.getBlockers = (childId) => issueService.listActiveEdges().filter((edge) => edge.active && edge.kind === "blocks" && edge.toIssue === childId).map((edge) => {
+    const issue = issueService.getIssue(edge.fromIssue);
+    return {
+      id: issue.id,
+      humanRef: issue.humanRef,
+      title: issue.title,
+      currentRevision: issue.currentRevision,
+      lifecycleState: issue.lifecycleState
+    };
+  });
+  const issues = issueService;
   const journalSvc = new journalMod.JournalService(db, issues);
   const provenance = new provMod.ProvenanceService(db, issues, journalSvc);
   const store = new storeMod.SubstrateIssueStore(issues, journalSvc);
@@ -19978,6 +20371,7 @@ var NULL_WORK_ITEMS = {
     throw new Error("no work-item store: test double");
   },
   epicAncestors: () => [],
+  completedBlockers: () => [],
   check: () => {
     throw new Error("no work-item store: test double");
   },
@@ -20162,19 +20556,19 @@ function composeInteractionMessage(input, identity2) {
 
 // src/activation/transport/pending-store.ts
 import { existsSync as existsSync15, mkdirSync as mkdirSync5, readdirSync as readdirSync2, readFileSync as readFileSync9, renameSync as renameSync2, unlinkSync, writeFileSync as writeFileSync4 } from "node:fs";
-import { join as join14 } from "node:path";
+import { join as join15 } from "node:path";
 var KINDS_AWAITING_REPLY = new Set(["question", "escalation"]);
 function createsPendingAsk(kind) {
   return KINDS_AWAITING_REPLY.has(kind);
 }
 function interactionsRoot(repoRoot) {
-  return join14(repoRoot, ".specialists", "interactions");
+  return join15(repoRoot, ".specialists", "interactions");
 }
 function recordPath(repoRoot, activationId, messageId) {
-  return join14(interactionsRoot(repoRoot), activationId, `${messageId}.json`);
+  return join15(interactionsRoot(repoRoot), activationId, `${messageId}.json`);
 }
 function replyPath(repoRoot, activationId, messageId) {
-  return join14(interactionsRoot(repoRoot), activationId, `${messageId}.reply.json`);
+  return join15(interactionsRoot(repoRoot), activationId, `${messageId}.reply.json`);
 }
 function writeAtomic(path, value, exclusive = false) {
   if (exclusive && existsSync15(path)) {
@@ -20210,7 +20604,7 @@ function create(repoRoot, input) {
     message: input.message,
     delivery: { state: "pending", attempts: [] }
   };
-  mkdirSync5(join14(interactionsRoot(repoRoot), input.activationId), { recursive: true, mode: 448 });
+  mkdirSync5(join15(interactionsRoot(repoRoot), input.activationId), { recursive: true, mode: 448 });
   writeAtomic(recordPath(repoRoot, input.activationId, input.messageId), record, true);
   return record;
 }
@@ -20370,10 +20764,10 @@ import { connect, createServer } from "node:net";
 // src/activation/transport/roster.ts
 import { existsSync as existsSync16, readdirSync as readdirSync3, readFileSync as readFileSync10 } from "node:fs";
 import { homedir as homedir8 } from "node:os";
-import { join as join15 } from "node:path";
+import { join as join16 } from "node:path";
 var SUPPORTED_PEER_PROTOCOL = 1;
 function defaultRosterDir() {
-  return join15(homedir8(), ".claude", "sessions");
+  return join16(homedir8(), ".claude", "sessions");
 }
 function procProbe() {
   let bootSeconds;
@@ -20452,7 +20846,7 @@ function scanRoster(options = {}) {
       continue;
     let registration;
     try {
-      registration = JSON.parse(readFileSync10(join15(dir, file), "utf-8"));
+      registration = JSON.parse(readFileSync10(join16(dir, file), "utf-8"));
     } catch {
       rejected.push({ file, reason: "unparsable" });
       continue;
@@ -20655,7 +21049,7 @@ function isDeliveredStatus(status) {
 // src/activation/workspace-lease.ts
 import { createHash as createHash5 } from "node:crypto";
 import { existsSync as existsSync17, linkSync, mkdirSync as mkdirSync6, readFileSync as readFileSync11, realpathSync as realpathSync4, renameSync as renameSync3, unlinkSync as unlinkSync2, writeFileSync as writeFileSync5 } from "node:fs";
-import { join as join16 } from "node:path";
+import { join as join17 } from "node:path";
 
 // src/activation/types.ts
 var THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"];
@@ -20729,10 +21123,10 @@ function workspaceKey(workspace) {
   return createHash5("sha256").update(resolved).digest("hex").slice(0, 16);
 }
 function leaseDir(workspace) {
-  return join16(workspace.gitCommonDir ?? workspace.repositoryRoot, ".specialists", "leases");
+  return join17(workspace.gitCommonDir ?? workspace.repositoryRoot, ".specialists", "leases");
 }
 function leasePath(workspace) {
-  return join16(leaseDir(workspace), `${workspaceKey(workspace)}.json`);
+  return join17(leaseDir(workspace), `${workspaceKey(workspace)}.json`);
 }
 function inspect(workspace, probe = procLeaseProbe()) {
   const path = leasePath(workspace);
@@ -21006,11 +21400,13 @@ function createAskTools(sdk, ctx) {
 
 // src/activation/pi-sdk.ts
 import { existsSync as existsSync18 } from "node:fs";
-import { join as join17 } from "node:path";
+import { join as join18 } from "node:path";
 import { pathToFileURL as pathToFileURL2 } from "node:url";
 var PI_SDK_PACKAGE = "@earendil-works/pi-coding-agent";
 var REQUIRED_EXPORTS = [
   "createAgentSession",
+  "DefaultResourceLoader",
+  "getAgentDir",
   "ModelRuntime",
   "resolveModelScopeWithDiagnostics",
   "defineTool"
@@ -21035,7 +21431,7 @@ function piSdkCandidates() {
   const candidates = [PI_SDK_PACKAGE];
   const globalDir = resolveGlobalNodeModulesDir2();
   if (globalDir) {
-    const entry = join17(globalDir, PI_SDK_PACKAGE, "dist", "index.js");
+    const entry = join18(globalDir, PI_SDK_PACKAGE, "dist", "index.js");
     if (existsSync18(entry))
       candidates.push(pathToFileURL2(entry).href);
   }
@@ -21458,11 +21854,6 @@ function nextAttemptId(current) {
 var RESUMABLE_STATES = new Set(["settled", "waiting", "needs_reply", "escalated"]);
 var RETRYABLE_STATES = new Set(["failed"]);
 
-// src/activation/authority-store.ts
-import { createRequire as createRequire3 } from "node:module";
-var require3 = createRequire3(import.meta.url);
-var NULL_AUTHORITY_WRITER = { record: () => {}, remove: () => {} };
-
 // src/activation/native-host.ts
 var TOKEN_USAGE_KEYS = [
   "input_tokens",
@@ -21497,6 +21888,23 @@ function extractTokenUsage(event) {
   return;
 }
 var WRITE_TIERS = new Set(["MEDIUM", "HIGH"]);
+var NON_LOCAL_EXTENSION_PREFIXES = ["npm:", "git:", "github:", "http:", "https:", "ssh:"];
+function resolveWorkspace(cwd) {
+  return { repositoryRoot: cwd, worktreePath: cwd };
+}
+function createActivationResourceLoader(sdk, options) {
+  return new sdk.DefaultResourceLoader({
+    cwd: options.cwd,
+    agentDir: sdk.getAgentDir(),
+    noSkills: true,
+    additionalSkillPaths: options.skillPaths,
+    noExtensions: true,
+    additionalExtensionPaths: options.extensionPaths ?? [],
+    noContextFiles: true,
+    noPromptTemplates: true,
+    noThemes: true
+  });
+}
 var FALLBACK_RETRYABLE_CLASSES = new Set(["rate_limit", "timeout", "transient"]);
 var NULL_FORENSIC_SINK = { emit: () => {} };
 
@@ -21558,10 +21966,7 @@ class NativeActivationHost {
     const execution = specialist.specialist.execution;
     const tier = execution.permission_required ?? "READ_ONLY";
     const access = WRITE_TIERS.has(tier) ? "write" : "read";
-    const workspace = request.workspaceHint ?? {
-      repositoryRoot: this.cwd,
-      worktreePath: this.cwd
-    };
+    const workspace = resolveWorkspace(this.cwd);
     let workItems;
     try {
       workItems = await this.resolveWorkItems();
@@ -21650,7 +22055,21 @@ class NativeActivationHost {
         note: error instanceof Error ? error.message : String(error)
       });
     }
+    const preScripts = specialist.specialist.skills?.scripts?.filter((s) => s.phase === "pre") ?? [];
+    const preScriptResults = preScripts.map((script) => runScript(script.run ?? script.path, this.cwd));
+    const requiredPreFailure = findRequiredPreScriptFailure(preScripts, preScriptResults);
+    if (requiredPreFailure) {
+      return reject("required_pre_script_failed", {
+        note: formatRequiredPreScriptFailure(requiredPreFailure)
+      });
+    }
+    const preScriptOutput = formatScriptOutput(preScriptResults.filter((_, index) => preScripts[index].inject_output));
     const sdk = await this.loadSdk();
+    if (typeof sdk.DefaultResourceLoader !== "function" || typeof sdk.getAgentDir !== "function") {
+      return reject("pi_sdk_resource_loader_unavailable", {
+        note: "this pi SDK cannot declare which skills a session loads, so the declared-skills contract cannot be honoured"
+      });
+    }
     const fullChain = resolveModelChain(execution);
     const configuredModel = fullChain[0];
     const modelChain = request.modelOverride ? [request.modelOverride] : fullChain;
@@ -21732,23 +22151,65 @@ class NativeActivationHost {
       custom_tools: `${ASK_TOOL},${ESCALATE_TOOL}`
     });
     const epicAncestors = workItems.epicAncestors(issueRef, request.epicContextDepth ?? 0);
+    const completedBlockers = workItems.completedBlockers(issueRef, 1);
+    const isReviewer = specialist.specialist.metadata.name === "reviewer";
     const rendered = renderTaskPrompt({
       specialist: specialist.specialist,
-      cwd: this.cwd,
+      cwd: workspace.worktreePath,
+      worktreeBoundary: workspace.worktreePath,
       beadId: view.ref,
       bead: workItemAsRecord(view),
-      epicAncestors: epicAncestors.map(workAncestorAsRecord)
+      epicAncestors: epicAncestors.map(workAncestorAsRecord),
+      completedBlockers: completedBlockers.map(workAncestorAsRecord),
+      preScriptOutput,
+      ...isReviewer ? {
+        appendExecutionContext: (task, cwd, variables) => {
+          try {
+            return `${task}${buildReviewerDiffInstruction(buildReviewerDiffContext(cwd, variables))}`;
+          } catch (error) {
+            process.stderr.write(`[specialist runner] Reviewer diff context unavailable: ${String(error)}
+`);
+            return task;
+          }
+        }
+      } : {}
     });
+    if (rendered.mandatoryRulesError) {
+      return reject("mandatory_rules_unavailable", {
+        note: `mandatory rules could not be resolved, and a native activation is never launched without them: ${rendered.mandatoryRulesError}`
+      });
+    }
+    if (rendered.mandatoryRules && rendered.mandatoryRulesBlock?.trim()) {
+      const rules = rendered.mandatoryRules;
+      emit("mandatory_rules_injection", {
+        source: "mandatory_rules_injection",
+        sets_loaded: rules.setsLoaded,
+        rules_count: rules.ruleCount,
+        inline_rules_count: rules.inlineRulesCount,
+        globals_disabled: rules.globalsDisabled,
+        token_estimate: rules.injectedTokens,
+        budget_limit: rules.budgetLimit,
+        candidate_tokens: rules.candidateTokens,
+        injected_tokens: rules.injectedTokens,
+        injected_section_ids: rules.injectedSectionIds,
+        evicted_section_ids: rules.evictedSectionIds,
+        payload_digest: rules.payloadDigest,
+        outcome: rules.outcome
+      });
+    }
+    const responseFormat = execution.response_format ?? "text";
+    const outputType = execution.output_type ?? "custom";
+    const outputContractSchema = resolveOutputContractSchema(responseFormat, outputType, specialist.specialist.prompt.output_schema);
     const systemPrompt = buildSystemPrompt({
       systemPromptTemplate: specialist.specialist.prompt.system ?? "",
       templateVariables: rendered.beadTemplateVariables ?? {},
       bare: execution.bare ?? false,
-      runCwd: this.cwd,
+      runCwd: workspace.worktreePath,
       specialistName: specialist.specialist.metadata.name,
       inputIssueRef: view.ref,
-      responseFormat: execution.response_format ?? "text",
-      outputType: execution.output_type ?? "custom",
-      outputContractSchema: undefined,
+      responseFormat,
+      outputType,
+      outputContractSchema,
       beadContextText: rendered.beadContextText ?? "",
       readBeadForMemory: (id) => {
         try {
@@ -21797,9 +22258,35 @@ class NativeActivationHost {
         note: `these tools mutate and cannot be fenced by the workspace lease on this runtime: ${guardedTools.unguardable.join(", ")}`
       });
     }
+    const curatedExtensions = resolveCuratedExtensionPaths({
+      permissionLevel: tier,
+      resolvedToolContract: toolContract
+    });
+    const declaredExtensions = resolveExecutionExtensionSelection(specialist.specialist.execution?.extensions).extensionSources;
+    const declaredLocalExtensions = [];
+    for (const source of declaredExtensions) {
+      if (NON_LOCAL_EXTENSION_PREFIXES.some((prefix) => source.startsWith(prefix))) {
+        process.stderr.write(`[specialists] native activation: extension source '${source}' is not a filesystem path; ` + `the in-process resource loader cannot load it, so it is not injected.
+`);
+        continue;
+      }
+      declaredLocalExtensions.push(source);
+    }
+    const { kept: dynamicExtensions, dropped: droppedExtensions } = deduplicateExtensionSources(curatedExtensions.dedupeAgainstDynamic, declaredLocalExtensions);
+    for (const { dropped, keptAs } of droppedExtensions) {
+      process.stderr.write(`[python-kernel] DEDUP: skipping duplicate extension source '${dropped}' (same as '${keptAs}'; kept '${keptAs}').
+`);
+    }
+    const resourceLoader = createActivationResourceLoader(sdk, {
+      cwd: workspace.worktreePath,
+      skillPaths: specialist.specialist.skills?.paths ?? [],
+      extensionPaths: [...curatedExtensions.all, ...dynamicExtensions]
+    });
+    await resourceLoader.reload();
     const baseSessionOptions = {
       customTools: [...askTools, ...guardedTools.tools],
       cwd: workspace.worktreePath,
+      resourceLoader,
       model: modelCheck.model,
       ...thinkingLevel ? { thinkingLevel } : {},
       noTools: "builtin",
@@ -21900,7 +22387,7 @@ class NativeActivationHost {
       return this.workItemsDefault;
     const dbPath = resolveWorkItemDbPath();
     if (!existsSync19(dbPath)) {
-      throw new Error(`no Substrate work store at ${dbPath} (set XTRM_STATE_DB or initialize it via xt init / sb)`);
+      throw new Error(`no Substrate work store at ${dbPath} (set SUBSTRATE_DB (or the legacy XTRM_STATE_DB) or initialize it via xt init / sb)`);
     }
     this.workItemsDefault = await openWorkItemBoundary({ dbPath });
     return this.workItemsDefault;
@@ -22532,6 +23019,9 @@ function readBuildId(path) {
     return UNKNOWN_BUILD_ID;
   }
 }
+function isBuildStale(loadedId, onDiskId) {
+  return loadedId !== UNKNOWN_BUILD_ID && onDiskId !== UNKNOWN_BUILD_ID && loadedId !== onDiskId;
+}
 function describeBuildIdentity(loadedId, onDiskId) {
   if (loadedId === UNKNOWN_BUILD_ID || onDiskId === UNKNOWN_BUILD_ID) {
     const known = loadedId !== UNKNOWN_BUILD_ID ? loadedId : onDiskId;
@@ -22544,11 +23034,27 @@ function describeBuildIdentity(loadedId, onDiskId) {
 }
 
 // src/activation/rejection.ts
-function renderRejection(input, build) {
+var STALE_DOWNSTREAM_REASONS = ["work_item_store_unavailable"];
+var STALE_RUNTIME_REASON = "stale_runtime: the runtime serving this session was rebuilt after it loaded, so this " + "refusal came from superseded code. Restart the session, then retry the dispatch — do " + "not act on the refusal text below.";
+function supersedeStaleRefusal(payload, stale, build) {
+  const reason = payload.reason;
+  if (!stale || typeof reason !== "string")
+    return payload;
+  if (!STALE_DOWNSTREAM_REASONS.some((downstream) => reason.includes(downstream)))
+    return payload;
+  const detail = typeof payload.detail === "object" && payload.detail !== null ? payload.detail : {};
+  return {
+    ...payload,
+    reason: build ? `${STALE_RUNTIME_REASON} (${build})` : STALE_RUNTIME_REASON,
+    detail: { ...detail, refused_by_stale_runtime: reason }
+  };
+}
+function renderRejection(input, build, stale = false) {
+  const superseded = supersedeStaleRefusal({ reason: input.reason, ...input.detail ? { detail: input.detail } : {} }, stale, build);
   return {
     status: "rejected",
-    reason: input.reason,
-    ...input.detail ? { detail: input.detail } : {},
+    reason: superseded.reason,
+    ...superseded.detail ? { detail: superseded.detail } : {},
     ...input.missing?.length ? { missing: input.missing } : {},
     ...build ? { build } : {}
   };
@@ -22633,10 +23139,11 @@ var DIST_LIB_PATH = (() => {
 var LOADED_BUILD_ID = readBuildId(DIST_LIB_PATH);
 var specialistDispatchSchema = objectType({
   specialist: stringType().describe("Specialist name, e.g. codebase-explorer"),
-  bead_id: stringType().optional().describe("The id of an EXISTING READY Bead — this activation's task contract, a COMPLETE " + "7-section contract (PROBLEM, SUCCESS, SCOPE, NON_GOALS, CONSTRAINTS, VALIDATION, " + "OUTPUT) plus a SCRUTINY level, which must be exactly one of LOW, MEDIUM, HIGH or " + "CRITICAL. That is EIGHT required parts, not seven; SCRUTINY is the one most often " + "left out. Write each section as a heading: either the section name on its own line " + "with its body beneath, or `PROBLEM: the body` on one line. Both forms are accepted. " + "A draft or incomplete Bead is refused before any model turn. No free-form task " + "text is accepted: a task that needs more definition belongs in the Bead (see the " + "planning skill). Mutually exclusive with contract: provide exactly one of bead_id " + "or contract, never both."),
-  contract: stringType().optional().describe("An INLINE task contract, used instead of bead_id: the SAME readiness gate " + "runs first, then a Bead is created from it and dispatched. The contract " + "must contain all seven sections — PROBLEM, SUCCESS, SCOPE, NON_GOALS, " + "CONSTRAINTS, VALIDATION, OUTPUT — plus a SCRUTINY level, which must be exactly " + "one of LOW, MEDIUM, HIGH or CRITICAL. Note that this is EIGHT required parts, " + "not seven; SCRUTINY is the one most often left out. Write each section as a " + "heading: either the section name on its own line with its body beneath, or " + "`PROBLEM: the body` on one line. Both forms are accepted. " + "A contract missing any section is refused and nothing is created."),
-  title: stringType().optional().describe("Optional title for the Bead created from `contract` (default: derived from PROBLEM). " + "Ignored when bead_id is given."),
-  epic_context_depth: numberType().optional().describe("Walk bead.parent UP this many hops (1 = immediate parent epic, 2 = epic + " + "grand-epic) and render each ancestor contract into the turn-1 prompt as an '" + "'## Epic lineage' section. Must be 1 or 2; anything else is refused. Omit for " + "single-bead dispatch with no lineage. Dropped for beads auto-created from an " + "inline contract (a fresh bead has no parent)."),
+  issue_ref: stringType().optional().describe("The Substrate Issue locator for this activation's task contract — XTRM-227, XTRM-184.2.3, " + "iss_..., a historical locator, or an imported Beads alias. It does NOT address the live bd " + "board: Substrate and bd are separate stores, so a bd id is refused as unresolvable. The " + "issue must be READY: a COMPLETE 7-section contract (PROBLEM, SUCCESS, SCOPE, NON_GOALS, " + "CONSTRAINTS, VALIDATION, OUTPUT) plus a SCRUTINY level, which must be exactly one of LOW, " + "MEDIUM, HIGH or CRITICAL. That is EIGHT required parts, not seven; SCRUTINY is the one most " + "often left out. Write each section as a heading: either the section name on its own line " + "with its body beneath, or `PROBLEM: the body` on one line. Both forms are accepted. " + "A draft or incomplete issue is refused before any model turn. No free-form task text is " + "accepted: a task that needs more definition belongs in the Issue (see the planning skill). " + "Supply EXACTLY ONE of issue_ref, bead_id or contract."),
+  bead_id: stringType().optional().describe("Permanent compatibility alias for issue_ref — the same Substrate Issue locator, resolved at " + "this tool boundary to the same value. Both names are accepted forever and behave identically; " + "prefer issue_ref in new calls. Do not read the name as an address on the live bd board: it " + "carries a Substrate Issue locator, and a bd id is refused as unresolvable. Supply EXACTLY ONE " + "of issue_ref, bead_id or contract."),
+  contract: stringType().optional().describe("An INLINE task contract, used instead of issue_ref: the SAME readiness gate " + "runs first, then a Substrate Issue is created from it and dispatched. The contract " + "must contain all seven sections — PROBLEM, SUCCESS, SCOPE, NON_GOALS, " + "CONSTRAINTS, VALIDATION, OUTPUT — plus a SCRUTINY level, which must be exactly " + "one of LOW, MEDIUM, HIGH or CRITICAL. Note that this is EIGHT required parts, " + "not seven; SCRUTINY is the one most often left out. Write each section as a " + "heading: either the section name on its own line with its body beneath, or " + "`PROBLEM: the body` on one line. Both forms are accepted. " + "A contract missing any section is refused and nothing is created."),
+  title: stringType().optional().describe("Optional title for the Substrate Issue created from `contract` (default: derived from PROBLEM). " + "Ignored when issue_ref (or its bead_id alias) is given."),
+  epic_context_depth: numberType().optional().describe("Walk Substrate parent_child edges UP this many hops (1 = immediate parent Issue, " + "2 = parent + grandparent) and render each ancestor contract into the turn-1 prompt as an '" + "'## Epic lineage' section. Must be 1 or 2; anything else is refused. Omit for " + "a single-Issue dispatch with no lineage. Dropped for Issues auto-created from an " + "inline contract (a fresh Issue has no parent)."),
   model_override: stringType().optional().describe("Override the configured model for THIS activation only. An unavailable model is refused before the session is created, never silently replaced."),
   thinking_override: enumType(THINKING_LEVELS).optional().describe("Override the definition thinking_level for THIS activation only. Absent means the definition level. An unknown value is refused before the session is created."),
   requested_by: stringType().optional().describe("ParticipantId of the requesting coordinator. Defaults to the MCP gateway participant."),
@@ -22653,7 +23160,7 @@ var specialistStopSchema = objectType({
 var specialistRetrySchema = objectType({
   activation_id: stringType().describe("The failed activation to re-run in place."),
   model_override: stringType().optional().describe("Re-run on a named model instead of the one that failed (manual switch after a quota " + "window kills a run). A new session is built for the new model; without this the SAME " + "session is re-prompted and its context survives."),
-  prompt: stringType().optional().describe("Replacement turn prompt. Defaults to the dispatch-time render of the same bead.")
+  prompt: stringType().optional().describe("Replacement turn prompt. Defaults to the dispatch-time render of the same Issue.")
 });
 // src/activation/async-events.ts
 import { randomUUID as randomUUID4 } from "node:crypto";
@@ -23257,7 +23764,7 @@ async function verifyExactLineCitation(evidence, claim) {
   };
 }
 // src/activation/workspace-reconcile.ts
-import { join as join18 } from "node:path";
+import { join as join19 } from "node:path";
 var PERMITTED = {
   holder_process_gone: new Set(["safe_free", "superseded", "manual_attention_required"]),
   holder_start_mismatch: new Set(["safe_free", "superseded", "manual_attention_required"]),
@@ -23269,7 +23776,7 @@ function leaseScopeFor(cwd) {
   return {
     repositoryRoot: commonRoot ?? cwd,
     worktreePath: cwd,
-    gitCommonDir: commonRoot ? join18(commonRoot, ".git") : undefined
+    gitCommonDir: commonRoot ? join19(commonRoot, ".git") : undefined
   };
 }
 export {
@@ -23280,6 +23787,7 @@ export {
   toPendingAskView,
   toActivationView,
   toActivationResultView,
+  supersedeStaleRefusal,
   shortBuildId,
   runScriptSpecialist as runScript,
   resolveWorkItemDbPath,
@@ -23295,6 +23803,8 @@ export {
   openWorkItemBoundary,
   openSubstrateDb,
   leaseScopeFor,
+  isBuildStale,
+  inspect as inspectWorkspaceLease,
   hashFileBytes,
   extractSections,
   evaluateBeadReadiness,
@@ -23308,6 +23818,7 @@ export {
   UNKNOWN_BUILD_ID,
   THINKING_LEVELS,
   SpecialistLoader,
+  STALE_RUNTIME_REASON,
   RuntimeEventPusher,
   ResultNotValidatedError,
   NativeActivationHost,

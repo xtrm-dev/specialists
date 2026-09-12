@@ -563,6 +563,66 @@ export function resolveExecutionExtensionSelection(
   };
 }
 
+/**
+ * The curated Pi extension set every Specialist session gets, resolved once for BOTH
+ * surfaces: the legacy CLI turns these into argv `-e` flags (`start()` below), and the
+ * native host hands the same paths to the resource loader's `additionalExtensionPaths`.
+ *
+ * Extracted rather than duplicated (SPECIALISTS-6): the two runtimes drifted by exactly
+ * this kind of copy, and the native path historically injected nothing at all while the
+ * CLI re-enabled this set after `--no-extensions`.
+ */
+export interface CuratedExtensionResolution {
+  /** Every curated path, in the legacy argv order. Only paths that exist are included. */
+  all: string[];
+  /**
+   * The subset that takes part in same-identity de-duplication against a definition's own
+   * `execution.extensions` sources. Preserved verbatim from the pre-extraction code
+   * (unitAI-il2io): the managed python-kernel copy and the gitnexus npm copy are the two a
+   * dev-checkout source can collide with, and Pi aborts with `Tool "python" conflicts`
+   * before turn 0 when both are forwarded. The managed copy wins and every drop is logged.
+   */
+  dedupeAgainstDynamic: string[];
+}
+
+export function resolveCuratedExtensionPaths(options: {
+  permissionLevel?: string;
+  resolvedToolContract?: ResolvedToolContract;
+}): CuratedExtensionResolution {
+  const all: string[] = [];
+  const piExtDir = join(homedir(), '.pi', 'agent', 'extensions');
+  const permLevel = (options.permissionLevel ?? '').toUpperCase();
+  if (permLevel !== 'READ_ONLY') {
+    const qgPath = join(piExtDir, 'quality-gates');
+    if (existsSync(qgPath)) all.push(qgPath);
+  }
+  // python-kernel: persistent python3 tool (skillbridge/audit/QoL). Resolved from the
+  // @jaggerxtrm/pi-extensions package (global node_modules) like the gitnexus package — not
+  // from ~/.pi/agent/extensions (those loose copies are not managed). Injecting `python`
+  // gives specialists an in-kernel python REPL instead of only bash.
+  const pyKernelPath = resolvePiExtensionsPythonKernelPath();
+  if (pyKernelPath && permLevel !== 'READ_ONLY') all.push(pyKernelPath);
+  // Caveman extension — terse output for agent-to-agent communication.
+  const cavemanPath = join(piExtDir, 'caveman');
+  if (existsSync(cavemanPath)) all.push(cavemanPath);
+  // NVIDIA NIM provider extension — injects chat_template_kwargs and system-role compat.
+  const nvidiaNimPath = join(homedir(), '.pi', 'agent', 'git', 'github.com', 'xRyul', 'pi-nvidia-nim');
+  if (existsSync(nvidiaNimPath)) all.push(nvidiaNimPath);
+  // npm package extension (gitnexus), resolved from global node_modules. Serena injection was
+  // retired with K4 (unitAI-e67up.8).
+  const gitnexusContract = options.resolvedToolContract?.extensions.gitnexus;
+  if (gitnexusContract?.status === 'available' && gitnexusContract.packagePath && existsSync(gitnexusContract.packagePath)) {
+    all.push(gitnexusContract.packagePath);
+  }
+  return {
+    all,
+    dedupeAgainstDynamic: [
+      ...(pyKernelPath ? [pyKernelPath] : []),
+      ...(gitnexusContract?.status === 'available' && gitnexusContract.packagePath ? [gitnexusContract.packagePath] : []),
+    ],
+  };
+}
+
 export function resolveGlobalNodeModulesDir(): string | undefined {
   const candidates = [
     process.env.PI_NPM_GLOBAL_DIR,
@@ -1002,54 +1062,20 @@ export class PiAgentSession {
       args.push('--skill', skillPath);
     }
 
-    // Selectively re-enable useful Pi extensions if installed
-    const piExtDir = join(homedir(), '.pi', 'agent', 'extensions');
-    const permLevel = (this.options.permissionLevel ?? '').toUpperCase();
-    if (permLevel !== 'READ_ONLY') {
-      const qgPath = join(piExtDir, 'quality-gates');
-      if (existsSync(qgPath)) args.push('-e', qgPath);
-    }
-    // python-kernel: persistent python3 tool (skillbridge/audit/QoL). Resolved
-    // from the @jaggerxtrm/pi-extensions package (global node_modules) like the
-    // gitnexus package — not from ~/.pi/agent/extensions (those loose copies
-    // are not managed). Injecting `python` gives specialists an in-kernel
-    // python REPL (e.g. service_knowledge machinery) instead of only bash.
-    // Audits (kernel-side file mutations) are surfaced in tool details when
-    // PI_KERNEL_AUDIT_POLICY=1 (set in hookEnv below).
-    const pyKernelPath = resolvePiExtensionsPythonKernelPath();
-    if (pyKernelPath && permLevel !== 'READ_ONLY') {
-      args.push('-e', pyKernelPath);
-    }
-
-    // Caveman extension — terse output for agent-to-agent communication
-    const cavemanPath = join(piExtDir, 'caveman');
-    if (existsSync(cavemanPath)) args.push('-e', cavemanPath);
-
-    // NVIDIA NIM provider extension (xRyul/pi-nvidia-nim) — injects chat_template_kwargs
-    // and system-role compat for NIM models. Requires pi >= 0.80.3 (legacy stream aliases restored).
-    const nvidiaNimPath = join(homedir(), '.pi', 'agent', 'git', 'github.com', 'xRyul', 'pi-nvidia-nim');
-    if (existsSync(nvidiaNimPath)) args.push('-e', nvidiaNimPath);
-
-    // npm package extensions (gitnexus) - resolve from global node_modules.
-    // These are installed via npm, not as directory extensions in ~/.pi/agent/extensions/.
-    // Serena extension injection was retired with the K4 Serena retirement
-    // (unitAI-e67up.8): legacy `excludeExtensions: ['pi-serena-tools']` entries
-    // remain accepted and simply have nothing to exclude.
-    const gitnexusContract = resolvedToolContract?.extensions.gitnexus;
-    if (gitnexusContract?.status === 'available' && gitnexusContract.packagePath && existsSync(gitnexusContract.packagePath)) {
-      args.push('-e', gitnexusContract.packagePath);
+    // Selectively re-enable useful Pi extensions if installed. The set is resolved by the
+    // shared helper the native host also uses (SPECIALISTS-6), so the two runtimes cannot
+    // drift on which extensions a Specialist gets.
+    const curatedExtensions = resolveCuratedExtensionPaths({
+      permissionLevel: this.options.permissionLevel,
+      resolvedToolContract,
+    });
+    for (const extensionPath of curatedExtensions.all) {
+      args.push('-e', extensionPath);
     }
     // unitAI-il2io: never forward two `-e` sources with the same filesystem
-    // identity. The auto-injected python-kernel (managed npm copy) and a
-    // dev-checkout path from execution.extensions resolve to the same
-    // index.ts; Pi would abort with `Tool "python" conflicts` before turn 0.
-    // The managed copy wins and every drop is logged (no silent shadowing).
-    const autoInjectedForDedup: string[] = [
-      ...(pyKernelPath ? [pyKernelPath] : []),
-      ...(gitnexusContract?.status === 'available' && gitnexusContract.packagePath ? [gitnexusContract.packagePath] : []),
-    ];
+    // identity. The managed copy wins and every drop is logged (no silent shadowing).
     const { kept: dedupedSources, dropped: droppedSources } = deduplicateExtensionSources(
-      autoInjectedForDedup,
+      curatedExtensions.dedupeAgainstDynamic,
       this.options.extensionSources ?? [],
     );
     for (const { dropped, keptAs } of droppedSources) {

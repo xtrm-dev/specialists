@@ -8,6 +8,11 @@ Deep material lives in `docs/` — start with `docs/installation.md`, `docs/boot
 
 **Specialists is an agent-mind runtime for getting real work done.**
 
+Two surfaces: native XTRM activation, where the Substrate Issue is the durable
+executable work authority (see the `specialists` Claude Code plugin below); and
+the Beads-backed job workflow, which remains available through the legacy `sp`
+CLI (`sp run`, `sp feed`, `sp result`, `sp resume`, `sp steer`, `sp stop`).
+
 It is not just “run many agents”. The core idea is that a long single-agent chat becomes cognitively contaminated: old hypotheses, abandoned plans, tool residue, self-review bias, forgotten constraints, and context-window noise all accumulate in one mind. Quality drops because the same context tries to be explorer, implementer, tester, reviewer, security auditor, memory keeper, and release operator at once.
 
 Specialists gives an AI workflow a healthier shape:
@@ -176,7 +181,7 @@ sp list
 
 ### Claude Code plugin (optional)
 
-Specialists ships a Claude Code plugin, `substrate`, that exposes specialist activation as
+Specialists ships a Claude Code plugin, `specialists`, that exposes specialist activation as
 MCP tools and injects live activation state at session start. It is opt-in: nothing installs
 or enables it for you.
 
