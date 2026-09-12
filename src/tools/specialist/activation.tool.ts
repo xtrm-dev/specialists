@@ -251,21 +251,29 @@ function renderDispatchRejection(error: DispatchRejectedError) {
 
 export const specialistDispatchSchema = z.object({
   specialist: z.string().describe('Specialist name, e.g. codebase-explorer'),
-  bead_id: z.string().optional().describe(
-    "The id of an EXISTING READY Bead — this activation's task contract, a COMPLETE " +
-    '7-section contract (PROBLEM, SUCCESS, SCOPE, NON_GOALS, CONSTRAINTS, VALIDATION, ' +
-    'OUTPUT) plus a SCRUTINY level, which must be exactly one of LOW, MEDIUM, HIGH or ' +
-    'CRITICAL. That is EIGHT required parts, not seven; SCRUTINY is the one most often ' +
-    'left out. Write each section as a heading: either the section name on its own line ' +
+  issue_ref: z.string().optional().describe(
+    "The Substrate Issue locator for this activation's task contract — XTRM-227, XTRM-184.2.3, " +
+    'iss_..., a historical locator, or an imported Beads alias. It does NOT address the live bd ' +
+    'board: Substrate and bd are separate stores, so a bd id is refused as unresolvable. The ' +
+    "issue must be READY: a COMPLETE 7-section contract (PROBLEM, SUCCESS, SCOPE, NON_GOALS, " +
+    'CONSTRAINTS, VALIDATION, OUTPUT) plus a SCRUTINY level, which must be exactly one of LOW, ' +
+    'MEDIUM, HIGH or CRITICAL. That is EIGHT required parts, not seven; SCRUTINY is the one most ' +
+    'often left out. Write each section as a heading: either the section name on its own line ' +
     'with its body beneath, or `PROBLEM: the body` on one line. Both forms are accepted. ' +
-    'A draft or incomplete Bead is refused before any model turn. No free-form task ' +
-    'text is accepted: a task that needs more definition belongs in the Bead (see the ' +
-    'planning skill). Mutually exclusive with contract: provide exactly one of bead_id ' +
-    'or contract, never both.',
+    'A draft or incomplete issue is refused before any model turn. No free-form task text is ' +
+    'accepted: a task that needs more definition belongs in the Issue (see the planning skill). ' +
+    'Supply EXACTLY ONE of issue_ref, bead_id or contract.',
+  ),
+  bead_id: z.string().optional().describe(
+    'Permanent compatibility alias for issue_ref — the same Substrate Issue locator, resolved at ' +
+    'this tool boundary to the same value. Both names are accepted forever and behave identically; ' +
+    'prefer issue_ref in new calls. Do not read the name as an address on the live bd board: it ' +
+    'carries a Substrate Issue locator, and a bd id is refused as unresolvable. Supply EXACTLY ONE ' +
+    'of issue_ref, bead_id or contract.',
   ),
   contract: z.string().optional().describe(
-    'An INLINE task contract, used instead of bead_id: the SAME readiness gate ' +
-    'runs first, then a Bead is created from it and dispatched. The contract ' +
+    'An INLINE task contract, used instead of issue_ref: the SAME readiness gate ' +
+    'runs first, then a Substrate Issue is created from it and dispatched. The contract ' +
     'must contain all seven sections — PROBLEM, SUCCESS, SCOPE, NON_GOALS, ' +
     'CONSTRAINTS, VALIDATION, OUTPUT — plus a SCRUTINY level, which must be exactly ' +
     'one of LOW, MEDIUM, HIGH or CRITICAL. Note that this is EIGHT required parts, ' +
@@ -276,7 +284,7 @@ export const specialistDispatchSchema = z.object({
   ),
   title: z.string().optional().describe(
     'Optional title for the Bead created from `contract` (default: derived from PROBLEM). ' +
-    'Ignored when bead_id is given.',
+    'Ignored when issue_ref (or its bead_id alias) is given.',
   ),
   // Deliberately a bare number, not min(1).max(2): out-of-range values must reach
   // execute and come back as a structured refusal via the shared renderer, not as a
@@ -330,15 +338,30 @@ export function createSpecialistDispatchTool(
     async execute(input: z.infer<typeof specialistDispatchSchema>) {
       const build = () => describeBuildIdentity(LOADED_BUILD_ID, readBuildId(DIST_LIB_PATH));
       try {
-        // EITHER an existing bead_id OR an inline contract — never both, and the
-        // readiness gate runs BEFORE any bead is created (same gate the host runs at
+        // EITHER an existing issue ref OR an inline contract — never both, and the
+        // readiness gate runs BEFORE anything is created (same gate the host runs at
         // admission, never a second one). Mirrors the Pi extension dispatch.
-        const beadId = (input.bead_id ?? '').trim();
+        //
+        // `issue_ref` is the primary name and `bead_id` is a permanent compatibility alias for
+        // the SAME value (SPECIALISTS-20). The alias resolves HERE, at the tool boundary: the
+        // host keeps taking exactly one thing, `issueRef`, and no second name is pushed down
+        // into ActivationRequest.
+        const issueRef = (input.issue_ref ?? '').trim();
+        const beadIdAlias = (input.bead_id ?? '').trim();
+        const issueRefValue = issueRef || beadIdAlias;
         const contract = (input.contract ?? '').trim();
-        if (beadId && contract) {
+        const supplied = [
+          ...(issueRef ? ['issue_ref'] : []),
+          ...(beadIdAlias ? ['bead_id'] : []),
+          ...(contract ? ['contract'] : []),
+        ];
+        if (supplied.length > 1) {
+          // Never silently resolved by preference order: a coordinator that passed two is
+          // ambiguous, and guessing which one it meant is how work runs against the wrong contract.
           return renderRejection({
-            reason: 'both bead_id and contract were provided — provide exactly one; ' +
-              'silently preferring one would dispatch against a contract the coordinator did not mean',
+            reason: `both ${supplied.join(' and ')} were provided — provide exactly one of ` +
+              'issue_ref, bead_id or contract; silently preferring one would dispatch against a ' +
+              'contract the coordinator did not mean',
           }, build());
         }
         const epicContextDepth = input.epic_context_depth;
@@ -349,11 +372,11 @@ export function createSpecialistDispatchTool(
           }, build());
         }
         // Inline-contract dispatch creates a fresh issue with no parent: no lineage.
-        const inline = !beadId && contract ? contract : undefined;
-        if (!beadId && !inline) {
+        const inline = !issueRefValue && contract ? contract : undefined;
+        if (!issueRefValue && !inline) {
           return renderRejection({
-            reason: 'neither bead_id nor contract was provided — dispatch requires a READY issue ' +
-              '(7 sections + SCRUTINY) or an inline contract',
+            reason: 'neither issue_ref, bead_id nor contract was provided — dispatch requires a ' +
+              'READY Issue (7 sections + SCRUTINY) or an inline contract',
           }, build());
         }
         if (inline) {
@@ -368,7 +391,7 @@ export function createSpecialistDispatchTool(
 
         const handle = await getHost().start({
           specialist: input.specialist,
-          ...(beadId ? { issueRef: beadId } : {}),
+          ...(issueRefValue ? { issueRef: issueRefValue } : {}),
           // The host owns creation: validate → create → attest → claim through
           // the work boundary, claiming WITH this activation's id.
           ...(inline
