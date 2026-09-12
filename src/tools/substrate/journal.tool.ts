@@ -6,9 +6,9 @@
 // a truncation marker instead of raw unbounded text.
 //
 // The service is injected (getJournal) and typed structurally, never
-// imported: @xtrm/substrate is unpublished while this package ships, so a
-// module-scope import would break the build for every user. A null service
-// yields a payload error, never a throw.
+// imported: @jaggerxtrm/substrate is an optional peer this package does not
+// depend on, so a module-scope import would break the build wherever it is
+// absent. A null service yields a payload error, never a throw.
 
 import * as z from 'zod';
 import { resolveSubstrate, substrateUnavailablePayload } from '../../substrate/services.js';
@@ -46,7 +46,7 @@ type JournalInput = z.infer<typeof substrateJournalSchema>;
 
 // Structural subset of Substrate's JournalService: only the methods this
 // tool calls. Structural typing keeps the build free of the unpublished
-// @xtrm/substrate package; the real service satisfies this shape.
+// @jaggerxtrm/substrate package; the real service satisfies this shape.
 export interface JournalServiceLike {
   appendEntry(
     issue_id: string,

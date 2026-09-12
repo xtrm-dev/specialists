@@ -2,17 +2,27 @@
  * Runtime resolution of the Substrate services that back the Issue, Journal and
  * Provenance tools (unitAI-aiwva.9/.10/.11).
  *
- * Resolution is deliberately OPTIONAL and never throws, for two measured reasons:
+ * Resolution is deliberately OPTIONAL and never throws: Substrate is a separate
+ * product on its own release cadence, and `@jaggerxtrm/specialists` must start and
+ * serve its own tools whether or not that package happens to be installed. Absence
+ * is an ordinary degraded state, never a failed server start.
  *
- *   1. `@xtrm/substrate` is unpublished. `@jaggerxtrm/specialists` ships to users from
- *      npm; a published package cannot hard-depend on one that 404s. For most installs
- *      the module simply is not there, and that must be an ordinary degraded state
- *      rather than a failed server start.
- *   2. It cannot load under bun today. Substrate hard-imports `node:sqlite`
- *      (packages/substrate/src/store/sqlite.ts:1) and declares `engines.node >= 24`,
- *      while this server runs under bun by design — `.mcp.json` uses `command: "bun"`
- *      and `src/index.ts` hard-guards it. bun 1.3.14 has no `node:sqlite`. Until
- *      Substrate grows a sqlite adapter seam, the import fails on the runtime we ship.
+ * CORRECTED 2026-09-12 (XTRM-267). This block previously claimed two blockers, and
+ * both are now wrong in ways worth recording, because either one would send the next
+ * reader chasing a problem that does not exist:
+ *
+ *   1. "`@xtrm/substrate` is unpublished." It is published, as
+ *      `@jaggerxtrm/substrate` — renamed to a scope the project owns, since the npm
+ *      org `xtrm` was never registered.
+ *   2. "It cannot load under bun." Measured false. `src/store/sqlite.ts` carries a
+ *      lazy dual-runtime seam that selects `bun:sqlite` under bun and `node:sqlite`
+ *      under node, so bun never resolves its missing built-in. Verified directly:
+ *      the barrel imports cleanly under bun 1.3.14, and Substrate's own
+ *      `bun-acceptance.ts` passes there.
+ *
+ * So `runtime_incompatible` below is retained as defense against a future regression,
+ * not as a description of the present. The only reason this surface goes inert today
+ * is `module_not_resolvable` — the package is not installed.
  *
  * So the tools are always REGISTERED and always answer. When Substrate is unreachable
  * they answer with a diagnosis naming the reason, which is strictly better than a
@@ -28,6 +38,9 @@ import { resolveAuthorityDbPath } from '../activation/authority-store.js';
 import { logger } from '../utils/logger.js';
 
 const require = createRequire(import.meta.url);
+
+/** The package this surface loads. Must match the loader's own constant in `workitem-store.ts`. */
+const SUBSTRATE_PACKAGE = '@jaggerxtrm/substrate';
 
 /** Why the Substrate surface is inert. Reported verbatim through every tool. */
 export type SubstrateUnavailableReason =
@@ -50,10 +63,11 @@ export interface SubstrateHandle {
 
 const UNAVAILABLE_HELP: Record<SubstrateUnavailableReason, string> = {
   module_not_resolvable:
-    '@xtrm/substrate is not installed. It is unpublished; install it as a local link to enable this surface.',
+    `${SUBSTRATE_PACKAGE} is not installed. Install it to enable this surface.`,
   runtime_incompatible:
-    'Substrate requires node:sqlite (node >= 24); this server runs under bun, which does not provide it. ' +
-    'Substrate needs a sqlite adapter seam before this surface can load here.',
+    'The installed Substrate could not load on this runtime. It ships a dual-runtime sqlite seam ' +
+    '(bun:sqlite under bun, node:sqlite under node), so this indicates a regression in that seam ' +
+    'rather than an expected state.',
   open_failed: 'The Substrate store could not be opened.',
 };
 
@@ -76,7 +90,7 @@ export function resolveSubstrate(): SubstrateHandle {
 function load(): SubstrateHandle {
   let mod: Record<string, unknown>;
   try {
-    mod = require('@xtrm/substrate') as Record<string, unknown>;
+    mod = require(SUBSTRATE_PACKAGE) as Record<string, unknown>;
   } catch (error) {
     // Distinguish "not installed" from "installed but cannot run here". Both are
     // degraded, but only the second is a Substrate-side defect worth reporting upward.
@@ -99,7 +113,7 @@ function load(): SubstrateHandle {
         available: false,
         services: null,
         reason: 'module_not_resolvable',
-        detail: 'resolved @xtrm/substrate does not export the expected service constructors',
+        detail: `resolved ${SUBSTRATE_PACKAGE} does not export the expected service constructors`,
       };
     }
 

@@ -92121,8 +92121,18 @@ var init_specialist_status_tool = __esm(() => {
 // src/activation/workitem-store.ts
 import { createRequire as createRequire5 } from "module";
 import { homedir as homedir16 } from "os";
-import { join as join55 } from "path";
+import { dirname as dirname23, join as join55 } from "path";
 import { pathToFileURL } from "url";
+function resolveSubstrateDir(explicit) {
+  const trimmed = explicit.trim();
+  if (trimmed)
+    return trimmed;
+  try {
+    return dirname23(require4.resolve(`${SUBSTRATE_PACKAGE}/package.json`));
+  } catch {
+    return null;
+  }
+}
 function resolveWorkItemDbPath(env = process.env) {
   const override = (env.XTRM_STATE_DB ?? "").trim();
   if (override)
@@ -92264,9 +92274,9 @@ function splitLines(body) {
 }
 async function openWorkItemBoundary(opts = {}) {
   const env = opts.env ?? process.env;
-  const substrateDir = (opts.substrateDir ?? (env.XTRM_SUBSTRATE_DIR ?? "")).trim();
+  const substrateDir = resolveSubstrateDir(opts.substrateDir ?? env.XTRM_SUBSTRATE_DIR ?? "");
   if (!substrateDir) {
-    throw new Error("work_item_store_unavailable: no Substrate package configured (set XTRM_SUBSTRATE_DIR to a built @xtrm/substrate checkout)");
+    throw new Error(`work_item_store_unavailable: no Substrate package configured (install ${SUBSTRATE_PACKAGE}, ` + "or set XTRM_SUBSTRATE_DIR to a checkout of it)");
   }
   let pkgName;
   try {
@@ -92275,8 +92285,8 @@ async function openWorkItemBoundary(opts = {}) {
   } catch (error3) {
     throw new Error(`work_item_store_unavailable: cannot read Substrate package identity at ${substrateDir}: ${error3 instanceof Error ? error3.message : String(error3)}`);
   }
-  if (pkgName !== "@xtrm/substrate") {
-    throw new Error(`work_item_store_unavailable: expected @xtrm/substrate at ${substrateDir}, found ${JSON.stringify(pkgName) ?? "no name"}`);
+  if (pkgName !== SUBSTRATE_PACKAGE) {
+    throw new Error(`work_item_store_unavailable: expected ${SUBSTRATE_PACKAGE} at ${substrateDir}, found ${JSON.stringify(pkgName) ?? "no name"}`);
   }
   const load = async (rel) => {
     try {
@@ -92323,7 +92333,7 @@ async function openWorkItemBoundary(opts = {}) {
     }
   });
 }
-var require4;
+var require4, SUBSTRATE_PACKAGE = "@jaggerxtrm/substrate";
 var init_workitem_store = __esm(() => {
   init_contract_sections();
   require4 = createRequire5(import.meta.url);
@@ -93434,7 +93444,7 @@ var init_registry = __esm(() => {
 import { mkdirSync as mkdirSync22 } from "fs";
 import { createRequire as createRequire6 } from "module";
 import { homedir as homedir18 } from "os";
-import { dirname as dirname23, join as join58 } from "path";
+import { dirname as dirname24, join as join58 } from "path";
 function resolveAuthorityDbPath(env = process.env) {
   const substrate = (env.SUBSTRATE_DB ?? "").trim();
   if (substrate)
@@ -93471,7 +93481,7 @@ function createFileAuthorityWriter(dbPath = resolveAuthorityDbPath()) {
   return {
     record(snapshot) {
       try {
-        mkdirSync22(dirname23(dbPath), { recursive: true });
+        mkdirSync22(dirname24(dbPath), { recursive: true });
         const db = openAuthorityDb(dbPath);
         if (!db)
           return;
@@ -95060,7 +95070,7 @@ function resolveSubstrate() {
 function load() {
   let mod;
   try {
-    mod = require6("@xtrm/substrate");
+    mod = require6(SUBSTRATE_PACKAGE2);
   } catch (error3) {
     const message = error3 instanceof Error ? error3.message : String(error3);
     const reason = /node:sqlite|DatabaseSync|built-in module/i.test(message) ? "runtime_incompatible" : "module_not_resolvable";
@@ -95076,7 +95086,7 @@ function load() {
         available: false,
         services: null,
         reason: "module_not_resolvable",
-        detail: "resolved @xtrm/substrate does not export the expected service constructors"
+        detail: `resolved ${SUBSTRATE_PACKAGE2} does not export the expected service constructors`
       };
     }
     const db = open3(resolveAuthorityDbPath());
@@ -95105,14 +95115,14 @@ function substrateUnavailablePayload(tool, handle) {
     help: UNAVAILABLE_HELP[reason]
   };
 }
-var require6, UNAVAILABLE_HELP, cached7 = null;
+var require6, SUBSTRATE_PACKAGE2 = "@jaggerxtrm/substrate", UNAVAILABLE_HELP, cached7 = null;
 var init_services = __esm(() => {
   init_authority_store();
   init_logger();
   require6 = createRequire7(import.meta.url);
   UNAVAILABLE_HELP = {
-    module_not_resolvable: "@xtrm/substrate is not installed. It is unpublished; install it as a local link to enable this surface.",
-    runtime_incompatible: "Substrate requires node:sqlite (node >= 24); this server runs under bun, which does not provide it. " + "Substrate needs a sqlite adapter seam before this surface can load here.",
+    module_not_resolvable: `${SUBSTRATE_PACKAGE2} is not installed. Install it to enable this surface.`,
+    runtime_incompatible: "The installed Substrate could not load on this runtime. It ships a dual-runtime sqlite seam " + "(bun:sqlite under bun, node:sqlite under node), so this indicates a regression in that seam " + "rather than an expected state.",
     open_failed: "The Substrate store could not be opened."
   };
 });
