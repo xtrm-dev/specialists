@@ -12,7 +12,7 @@
 // attest → claim), never by a `bd` subprocess. The live evidence for acceptance AV
 // asserts the absence of `sp` against the process table rather than against intent.
 //
-// The gates are not re-implemented here, and that is the load-bearing property. Issue
+// The gates are not re-implemented here, and that is the load-bearing property. Bead
 // readiness, the StepContract compilation, the capability contract, the model gate and
 // (once Phase 10 lands) the workspace writer lease all live inside `host.start()`. A
 // second dispatch path that re-checked them would drift; a second dispatch path that
@@ -38,7 +38,7 @@ import * as z from 'zod';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { NativeActivationHost } from '../../activation/native-host.js';
-import { describeBuildIdentity, isBuildStale, readBuildId } from '../../activation/build-identity.js';
+import { describeBuildIdentity, readBuildId } from '../../activation/build-identity.js';
 import { validateContractText } from '../../activation/contract-sections.js';
 import { renderRejection } from '../../activation/rejection.js';
 import { THINKING_LEVELS } from '../../activation/types.js';
@@ -229,51 +229,23 @@ const DIST_LIB_PATH = (() => {
 })();
 const LOADED_BUILD_ID = readBuildId(DIST_LIB_PATH);
 
-/**
- * Render a host-thrown `DispatchRejectedError` as an MCP tool result.
- *
- * The build comparison is computed ONCE and used for both jobs it serves: the
- * `build` line attached to the envelope, and the verdict on whether staleness
- * outranks the refusal's own reason (SPECIALISTS-2). A runtime that loaded an
- * older `dist/lib.js` used to answer every dispatch with a work-store refusal
- * that told the operator to install a package already installed — while the
- * same payload carried the correct staleness line. The comparison existed; it
- * just did not outrank the symptom.
- */
-function renderDispatchRejection(error: DispatchRejectedError) {
-  const onDiskBuildId = readBuildId(DIST_LIB_PATH);
-  return renderRejection(
-    { reason: error.message, detail: error.detail, missing: error.detail.missing },
-    describeBuildIdentity(LOADED_BUILD_ID, onDiskBuildId),
-    isBuildStale(LOADED_BUILD_ID, onDiskBuildId),
-  );
-}
-
 export const specialistDispatchSchema = z.object({
   specialist: z.string().describe('Specialist name, e.g. codebase-explorer'),
-  issue_ref: z.string().optional().describe(
-    "The Substrate Issue locator for this activation's task contract — XTRM-227, XTRM-184.2.3, " +
-    'iss_..., a historical locator, or an imported Beads alias. It does NOT address the live bd ' +
-    'board: Substrate and bd are separate stores, so a bd id is refused as unresolvable. The ' +
-    "issue must be READY: a COMPLETE 7-section contract (PROBLEM, SUCCESS, SCOPE, NON_GOALS, " +
-    'CONSTRAINTS, VALIDATION, OUTPUT) plus a SCRUTINY level, which must be exactly one of LOW, ' +
-    'MEDIUM, HIGH or CRITICAL. That is EIGHT required parts, not seven; SCRUTINY is the one most ' +
-    'often left out. Write each section as a heading: either the section name on its own line ' +
-    'with its body beneath, or `PROBLEM: the body` on one line. Both forms are accepted. ' +
-    'A draft or incomplete issue is refused before any model turn. No free-form task text is ' +
-    'accepted: a task that needs more definition belongs in the Issue (see the planning skill). ' +
-    'Supply EXACTLY ONE of issue_ref, bead_id or contract.',
-  ),
   bead_id: z.string().optional().describe(
-    'Permanent compatibility alias for issue_ref — the same Substrate Issue locator, resolved at ' +
-    'this tool boundary to the same value. Both names are accepted forever and behave identically; ' +
-    'prefer issue_ref in new calls. Do not read the name as an address on the live bd board: it ' +
-    'carries a Substrate Issue locator, and a bd id is refused as unresolvable. Supply EXACTLY ONE ' +
-    'of issue_ref, bead_id or contract.',
+    "The id of an EXISTING READY Bead — this activation's task contract, a COMPLETE " +
+    '7-section contract (PROBLEM, SUCCESS, SCOPE, NON_GOALS, CONSTRAINTS, VALIDATION, ' +
+    'OUTPUT) plus a SCRUTINY level, which must be exactly one of LOW, MEDIUM, HIGH or ' +
+    'CRITICAL. That is EIGHT required parts, not seven; SCRUTINY is the one most often ' +
+    'left out. Write each section as a heading: either the section name on its own line ' +
+    'with its body beneath, or `PROBLEM: the body` on one line. Both forms are accepted. ' +
+    'A draft or incomplete Bead is refused before any model turn. No free-form task ' +
+    'text is accepted: a task that needs more definition belongs in the Bead (see the ' +
+    'planning skill). Mutually exclusive with contract: provide exactly one of bead_id ' +
+    'or contract, never both.',
   ),
   contract: z.string().optional().describe(
-    'An INLINE task contract, used instead of issue_ref: the SAME readiness gate ' +
-    'runs first, then a Substrate Issue is created from it and dispatched. The contract ' +
+    'An INLINE task contract, used instead of bead_id: the SAME readiness gate ' +
+    'runs first, then a Bead is created from it and dispatched. The contract ' +
     'must contain all seven sections — PROBLEM, SUCCESS, SCOPE, NON_GOALS, ' +
     'CONSTRAINTS, VALIDATION, OUTPUT — plus a SCRUTINY level, which must be exactly ' +
     'one of LOW, MEDIUM, HIGH or CRITICAL. Note that this is EIGHT required parts, ' +
@@ -283,18 +255,18 @@ export const specialistDispatchSchema = z.object({
     'A contract missing any section is refused and nothing is created.',
   ),
   title: z.string().optional().describe(
-    'Optional title for the Substrate Issue created from `contract` (default: derived from PROBLEM). ' +
-    'Ignored when issue_ref (or its bead_id alias) is given.',
+    'Optional title for the Bead created from `contract` (default: derived from PROBLEM). ' +
+    'Ignored when bead_id is given.',
   ),
   // Deliberately a bare number, not min(1).max(2): out-of-range values must reach
   // execute and come back as a structured refusal via the shared renderer, not as a
   // zod throw that surfaces as an opaque MCP error (server.ts parses before execute).
   epic_context_depth: z.number().optional().describe(
-    'Walk Substrate parent_child edges UP this many hops (1 = immediate parent Issue, ' +
-    "2 = parent + grandparent) and render each ancestor contract into the turn-1 prompt as an '" +
+    'Walk bead.parent UP this many hops (1 = immediate parent epic, 2 = epic + ' +
+    "grand-epic) and render each ancestor contract into the turn-1 prompt as an '" +
     "'## Epic lineage' section. Must be 1 or 2; anything else is refused. Omit for " +
-    'a single-Issue dispatch with no lineage. Dropped for Issues auto-created from an ' +
-    'inline contract (a fresh Issue has no parent).',
+    'single-bead dispatch with no lineage. Dropped for beads auto-created from an ' +
+    'inline contract (a fresh bead has no parent).',
   ),
   model_override: z.string().optional().describe(
     'Override the configured model for THIS activation only. An unavailable model is refused before the session is created, never silently replaced.',
@@ -324,49 +296,29 @@ export function createSpecialistDispatchTool(
     name: 'specialist_dispatch' as const,
     description:
       'Dispatch a Specialist on the native in-process runtime. No CLI process is spawned. ' +
-      'Provide EITHER issue_ref (a READY Substrate Issue locator — XTRM-227, XTRM-184.2.3, ' +
-      'iss_..., a historical locator, or an imported Beads alias; bead_id is a permanent ' +
-      'compatibility alias for the same value) OR contract (an inline 7-section contract plus ' +
-      'a SCRUTINY level). Never both. An inline contract is accepted through the SAME pipeline ' +
-      'as an existing Issue: structural validation, Substrate Issue creation, readiness ' +
-      'attestation, claim, ExecutionBinding, activation. The Issue contract IS the prompt and ' +
-      'MUST be complete — PROBLEM, SUCCESS, SCOPE, NON_GOALS, CONSTRAINTS, VALIDATION, OUTPUT ' +
-      'plus a SCRUTINY level, eight required parts, not seven; a draft or incomplete Issue is ' +
-      'refused here, before a model turn is spent guessing at scope it does not carry — fix ' +
-      'the Issue (planning skill), not the dispatch. Returns once the activation is ADMITTED ' +
-      'and started, not when it completes: the Channel push is the PRIMARY wake, ' +
-      'specialist_status is the AUTHORITATIVE read, and polling is the degraded fallback. ' +
-      'Answer a raised question with specialist_reply. Write-capable Specialists (MEDIUM/HIGH ' +
-      'tiers) activate only when they can acquire the workspace lease; otherwise dispatch is ' +
-      'refused with a structured reason.',
+      'Provide EITHER bead_id (an existing READY Bead) OR contract (an inline 7-section ' +
+      'contract: the same readiness gate runs first, then a Bead is created and dispatched). ' +
+      'Never both. Returns once the activation is ADMITTED and started, not when it ' +
+      'completes — poll specialist_status for state and for any question it raises, and ' +
+      'answer with specialist_reply. The Bead is the prompt and MUST be a complete 7-section ' +
+      'contract plus a SCRUTINY level; a draft or incomplete Bead is refused here, before a ' +
+      'model turn is spent guessing at scope it does not carry — if the Bead is not ' +
+      'dispatchable, fix the Bead (planning skill), not the dispatch. Write-capable ' +
+      'Specialists (MEDIUM/HIGH tiers) activate only when they can acquire the workspace ' +
+      'lease; otherwise dispatch is refused with a structured reason.',
     inputSchema: specialistDispatchSchema,
     async execute(input: z.infer<typeof specialistDispatchSchema>) {
       const build = () => describeBuildIdentity(LOADED_BUILD_ID, readBuildId(DIST_LIB_PATH));
       try {
-        // EITHER an existing issue ref OR an inline contract — never both, and the
-        // readiness gate runs BEFORE anything is created (same gate the host runs at
+        // EITHER an existing bead_id OR an inline contract — never both, and the
+        // readiness gate runs BEFORE any bead is created (same gate the host runs at
         // admission, never a second one). Mirrors the Pi extension dispatch.
-        //
-        // `issue_ref` is the primary name and `bead_id` is a permanent compatibility alias for
-        // the SAME value (SPECIALISTS-20). The alias resolves HERE, at the tool boundary: the
-        // host keeps taking exactly one thing, `issueRef`, and no second name is pushed down
-        // into ActivationRequest.
-        const issueRef = (input.issue_ref ?? '').trim();
-        const beadIdAlias = (input.bead_id ?? '').trim();
-        const issueRefValue = issueRef || beadIdAlias;
+        const beadId = (input.bead_id ?? '').trim();
         const contract = (input.contract ?? '').trim();
-        const supplied = [
-          ...(issueRef ? ['issue_ref'] : []),
-          ...(beadIdAlias ? ['bead_id'] : []),
-          ...(contract ? ['contract'] : []),
-        ];
-        if (supplied.length > 1) {
-          // Never silently resolved by preference order: a coordinator that passed two is
-          // ambiguous, and guessing which one it meant is how work runs against the wrong contract.
+        if (beadId && contract) {
           return renderRejection({
-            reason: `both ${supplied.join(' and ')} were provided — provide exactly one of ` +
-              'issue_ref, bead_id or contract; silently preferring one would dispatch against a ' +
-              'contract the coordinator did not mean',
+            reason: 'both bead_id and contract were provided — provide exactly one; ' +
+              'silently preferring one would dispatch against a contract the coordinator did not mean',
           }, build());
         }
         const epicContextDepth = input.epic_context_depth;
@@ -377,11 +329,11 @@ export function createSpecialistDispatchTool(
           }, build());
         }
         // Inline-contract dispatch creates a fresh issue with no parent: no lineage.
-        const inline = !issueRefValue && contract ? contract : undefined;
-        if (!issueRefValue && !inline) {
+        const inline = !beadId && contract ? contract : undefined;
+        if (!beadId && !inline) {
           return renderRejection({
-            reason: 'neither issue_ref, bead_id nor contract was provided — dispatch requires a ' +
-              'READY Issue (7 sections + SCRUTINY) or an inline contract',
+            reason: 'neither bead_id nor contract was provided — dispatch requires a READY issue ' +
+              '(7 sections + SCRUTINY) or an inline contract',
           }, build());
         }
         if (inline) {
@@ -396,7 +348,7 @@ export function createSpecialistDispatchTool(
 
         const handle = await getHost().start({
           specialist: input.specialist,
-          ...(issueRefValue ? { issueRef: issueRefValue } : {}),
+          ...(beadId ? { issueRef: beadId } : {}),
           // The host owns creation: validate → create → attest → claim through
           // the work boundary, claiming WITH this activation's id.
           ...(inline
@@ -462,7 +414,10 @@ export function createSpecialistDispatchTool(
         // would reach Claude as an opaque MCP error string. Shape comes from the shared
         // renderer: `missing` is promoted top-level but never removed from `detail`.
         if (error instanceof DispatchRejectedError) {
-          return renderDispatchRejection(error);
+          return renderRejection(
+            { reason: error.message, detail: error.detail, missing: error.detail.missing },
+            describeBuildIdentity(LOADED_BUILD_ID, readBuildId(DIST_LIB_PATH)),
+          );
         }
         throw error;
       }
@@ -491,9 +446,7 @@ export function createSpecialistReplyTool(getHost: () => NativeActivationHost) {
       'Answer an outstanding Specialist question or escalation by its message_id (read ' +
       'them from specialist_status.pending_asks). The answer returns as that tool call\'s ' +
       'result, so the Specialist continues with its context intact. An unknown or already ' +
-      'answered message_id is reported, not silently accepted. Where the Channel is ' +
-      'available the ask arrives as a push first; specialist_status is the AUTHORITATIVE ' +
-      'read when it does not, and polling is the degraded fallback.',
+      'answered message_id is reported, not silently accepted.',
     inputSchema: specialistReplySchema,
     async execute(input: z.infer<typeof specialistReplySchema>) {
       const message = await getHost().answer(input.message_id, input.body);
@@ -557,16 +510,15 @@ export const specialistRetrySchema = z.object({
     'session is re-prompted and its context survives.',
   ),
   prompt: z.string().optional().describe(
-    'Replacement turn prompt. Defaults to the dispatch-time render of the same Issue.',
+    'Replacement turn prompt. Defaults to the dispatch-time render of the same bead.',
   ),
 });
 
 /**
  * Re-run a failed native activation in place — the native equivalent of `sp retry`.
  *
- * Same activation id, new attempt. The Issue and (without a model override) the session
- * survive the retry; the workspace lease is released as the attempt ends and REACQUIRED
- * here, so a retry can be refused when another writer holds the workspace. Failed only — a live or waiting activation
+ * Same activation id, new attempt: the bead, the workspace lease and (without a model
+ * override) the session survive the retry. Failed only — a live or waiting activation
  * already has its path (reply for an outstanding question, resume for a settled one,
  * steer/stop for a running one), and retry refuses those states with the right pointer
  * rather than becoming a second dispatch. An escalation or question that CAN wait stays
@@ -580,11 +532,10 @@ export function createSpecialistRetryTool(
     name: 'specialist_retry' as const,
     description:
       'Re-run a FAILED native activation in place, optionally on a named model. ' +
-      'Keeps the activation id and the Issue; the workspace lease is REACQUIRED for the new ' +
-      'attempt and can be refused when another writer holds the workspace. Without ' +
-      'model_override the same session is re-prompted with its context intact. Failed only — ' +
-      'answer an outstanding question with specialist_reply and resume a settled activation ' +
-      'with specialist_resume instead.',
+      'Keeps the activation id, the bead and the workspace lease; without model_override ' +
+      'the same session is re-prompted with its context intact. Failed only — answer an ' +
+      'outstanding question with specialist_reply and resume a settled activation with ' +
+      'specialist_resume instead.',
     inputSchema: specialistRetrySchema,
     async execute(input: z.infer<typeof specialistRetrySchema>) {
       try {
@@ -614,7 +565,10 @@ export function createSpecialistRetryTool(
         };
       } catch (error) {
         if (error instanceof DispatchRejectedError) {
-          return renderDispatchRejection(error);
+          return renderRejection(
+            { reason: error.message, detail: error.detail, missing: error.detail.missing },
+            describeBuildIdentity(LOADED_BUILD_ID, readBuildId(DIST_LIB_PATH)),
+          );
         }
         throw error;
       }

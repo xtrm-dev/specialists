@@ -135,59 +135,35 @@ failing context window.
 General inter-agent messaging and wake/reply semantics belong to `/multiplexing`, not
 this skill.
 
-## Native activation — the second runtime (not the `sp` lifecycle above)
+## Native activation — the second runtime
 
-Everything above describes the supervised `sp` job lifecycle. None of its vocabulary
-carries into this section: native activation hosts a Specialist on an in-process Pi
-`AgentSession` rather than spawning `pi` as a subprocess, and it consumes Substrate
-Issues through the WorkItemStore boundary (`src/activation/workitem-store.ts`) — never
-through a Beads client, a `bd` subprocess, or a second readiness derivation. The work
-authority model belongs to Substrate; for what work exists, who owns it, and how
-readiness is decided, read Substrate's own `using-substrate` skill. This section states
-only the Specialists side of the boundary.
+Everything above describes the supervised `sp` job lifecycle. A second runtime — native
+activation — hosts a Specialist on an in-process Pi `AgentSession` rather than spawning
+`pi` as a subprocess. It is dispatchable now, through the `specialist_dispatch` / `specialist_status` /
+`specialist_reply` / `specialist_resume` / `specialist_stop_activation` / `specialist_list`
+tool surface. The former `use_specialist` foreground path has been removed.
 
-Six tools, names exact (`src/mcp/v2-server.ts:172-180`): `specialist_dispatch` /
-`specialist_status` / `specialist_reply` / `specialist_resume` /
-`specialist_stop_activation` / `specialist_list`. The `substrate_issue` /
-`substrate_journal` / `substrate_provenance` surfaces are separate Substrate tools,
-admitted only when Substrate is resolvable. The former `use_specialist` foreground path
-has been removed.
+The two surfaces differ in ways that change how you write and dispatch a bead:
 
-The two runtimes differ in ways that change how you dispatch:
+- **The bead is the whole prompt.** `specialist_dispatch` has no task or prompt field, and
+  refuses a bead that is not a complete 7-section contract with a declared `SCRUTINY`
+  level, before any model turn is spent. Check `bd state <id> contract` first — a bead
+  marked `draft` is refused outright. There is no longer a second entry point that skips
+  that check, so a refused contract must be fixed rather than routed around.
+- **A write-capable Specialist gets no worktree of its own.** It shares the coordinator's,
+  and takes a workspace writer lease at admission instead. Contention is refused naming the
+  holder; an uncertain lease is never stolen.
+- **A child can ask and resume** rather than restarting, through `ask_coordinator` /
+  `escalate_to_coordinator`, answered by `specialist_reply` correlating on `message_id`.
+  Treat this as unproven end to end: those tools reached no Specialist at all before
+  `866d4a35`, and whether a live model calls them is `unitAI-rrdnt.43`, still open.
 
-- **The Substrate Issue is the prompt; there is no task-text field.**
-  `specialist_dispatch` takes exactly one of `issue_ref` (primary; `bead_id` is kept
-  as a permanent alias for the same locator) or `contract` (an inline 7-section
-  contract plus SCRUTINY level, which the host validates, creates, attests and claims
-  through the boundary before dispatching against it — `src/activation/native-host.ts:434-468`).
-  Never both, never neither.
-- **Readiness is the Substrate dispatch gate, not `bd state`.** The read-only `check`
-  refuses draft, unready, blocked, terminal, and scope-expanding Issues before any
-  mutation exists, and `bind` pins the immutable ExecutionBinding over
-  issue/revision/hash/claim/participant/activation/attempt/session/workspace at
-  activation start (`src/activation/workitem-store.ts:315-363`,
-  `src/activation/native-host.ts:483-513,854-870`). A refused contract must be fixed
-  and re-dispatched; there is no second entry point that skips the gate.
-- **A write-capable Specialist gets no worktree of its own.** It shares the
-  coordinator's, and a MEDIUM/HIGH tier takes a workspace writer lease at admission;
-  contention or an uncertain lease is a refusal, and the lease is re-checked on every
-  mutating tool call (`src/activation/native-host.ts:616-640`, `guarded-tools.ts`).
-  The lease is released at settle, at completion and at disposal, so a writer holds its
-  workspace for the duration of its turn and no longer; `specialist_resume` re-acquires it
-  and can be REFUSED with `lease_denied` when another writer holds the workspace
-  (`src/activation/native-host.ts:1033-1036,1121-1124,1600,1655-1672`). A settled activation
-  is resumable, not lease-holding.
-- **A child asks and resumes** rather than restarting. The child asks through
-  `ask_coordinator` / `escalate_to_coordinator`, answered by `specialist_reply`
-  correlating on `message_id`; `specialist_resume` continues the SAME session with a new
-  prompt (activation id kept, attempt advances), and `specialist_stop_activation` is the
-  only ordinary path to disposal (`src/activation/ask-tool.ts`,
-  `src/activation/interaction.ts`, `src/mcp/resume-tool.ts`).
+Before dispatching a writer, read the lease section of `docs/native-activation.md`. The
+per-call mutation guard has no caller yet, so exclusion is enforced at admission and not
+during a turn.
 
-Current reference for the native surface:
-`plugins/specialists/skills/supervising-activations/SKILL.md`, plus the live tool schemas
-in `src/tools/specialist/activation.tool.ts` and `src/mcp/resume-tool.ts`. Do not cite
-`docs/native-activation.md` — it is stale and its rewrite is tracked separately.
+Full reference, including which guarantees are in force and which are not:
+`docs/native-activation.md`.
 
 ## Advanced surfaces are references, not separate skills
 
