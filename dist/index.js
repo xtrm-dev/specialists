@@ -93881,7 +93881,6 @@ class NativeActivationHost {
       case "agent_settled":
         snapshot.state = "settled";
         this.save(snapshot);
-        emit("activation_settled");
         this.releaseIfWriter(snapshot, "settled");
         break;
       case "auto_retry_start":
@@ -93934,9 +93933,14 @@ class NativeActivationHost {
         };
       }
       const output2 = textOf(last);
+      emit("activation_settled");
       emit("output_validation_started");
-      const validation = { valid: true };
-      emit("output_validation_passed");
+      const validation = output2.trim().length > 0 ? { valid: true } : { valid: false, errors: ["empty output: specialist produced no output"] };
+      if (validation.valid) {
+        emit("output_validation_passed");
+      } else {
+        emit("output_validation_failed", { errors: validation.errors });
+      }
       snapshot.state = "settled";
       this.save(snapshot);
       emit("activation_completed", { pi_session_id: session.sessionId, output: output2 });
@@ -95524,7 +95528,7 @@ import { join as join59 } from "path";
 function textResult(result) {
   return { content: [{ type: "text", text: typeof result === "string" ? result : JSON.stringify(result, null, 2) }] };
 }
-function buildV2Server(ctx) {
+function buildV2Server(ctx, options2) {
   const channelEra = ctx?.era ?? "legacy";
   let channelSend = () => {};
   const circuitBreaker = new CircuitBreaker;
@@ -95547,7 +95551,7 @@ function buildV2Server(ctx) {
   if (channelEra === "legacy") {
     channelSend = (frame) => server.server.notification(frame);
   }
-  const substrate = resolveSubstrate();
+  const substrate = options2?.substrate ?? resolveSubstrate();
   const substrateTools = substrate.available || process.env.XTRM_SUBSTRATE_TOOLS === "1" ? [
     createSubstrateIssueTool(),
     createSubstrateJournalTool(() => substrate.services?.journal ?? null),

@@ -36,13 +36,19 @@ describe('substrate_issue availability', () => {
     expect(String(r.help ?? '')).not.toBe('');
   });
 
-  it('reports the real runtime reason on this build', () => {
-    // Substrate hard-imports node:sqlite; bun has none. Pinned so the day it changes,
-    // this test says so rather than silently passing.
+  it('reports a self-consistent runtime reason whether Substrate resolves or not (unitAI-tgdtw)', () => {
+    // Whether @jaggerxtrm/substrate is installed is a property of the machine
+    // running the suite, not something this test controls — so it must not pin
+    // one branch as the expected outcome (that was the bug: it always assumed
+    // absent). Instead it asserts each branch's own shape is internally sound.
     const h = resolveSubstrate();
-    expect(h.available).toBe(false);
-    expect(['module_not_resolvable', 'runtime_incompatible', 'open_failed']).toContain(h.reason);
-    expect(substrateUnavailablePayload('t', h).help.length).toBeGreaterThan(0);
+    if (h.available) {
+      expect(h.reason).toBeUndefined();
+      expect(h.services).not.toBeNull();
+    } else {
+      expect(['module_not_resolvable', 'runtime_incompatible', 'open_failed']).toContain(h.reason);
+      expect(substrateUnavailablePayload('t', h).help.length).toBeGreaterThan(0);
+    }
   });
 });
 

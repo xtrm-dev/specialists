@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/server';
 import type { McpRequestContext } from '@modelcontextprotocol/server';
 import type { StdioServerHandle } from '@modelcontextprotocol/server/stdio';
+import { type SubstrateHandle } from '../substrate/services.js';
 /**
  * Build one server instance. The `serveStdio` factory calls this once per
  * connection; the host inside lives for that connection because a dispatch in
@@ -9,7 +10,17 @@ import type { StdioServerHandle } from '@modelcontextprotocol/server/stdio';
  * handles (activation_id/bead_id), not protocol state: capabilities and the
  * protocol revision are re-read from every request's own envelope.
  */
-export declare function buildV2Server(ctx?: McpRequestContext): McpServer;
+export interface BuildV2ServerOptions {
+    /**
+     * Override the resolved Substrate handle instead of asking `resolveSubstrate()`
+     * for the process-wide, cached-once result. Tests use this to exercise both the
+     * available and unavailable tool surfaces deterministically, independent of
+     * whether `@jaggerxtrm/substrate` happens to be installed on the machine running
+     * them. Production callers never pass this — the real cached resolution applies.
+     */
+    substrate?: SubstrateHandle;
+}
+export declare function buildV2Server(ctx?: McpRequestContext, options?: BuildV2ServerOptions): McpServer;
 /**
  * Official SDK v2 stdio entry. The SDK serves both supported eras from this
  * factory and rejects unsupported protocol revisions.
