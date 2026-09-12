@@ -46,6 +46,8 @@ import {
   findRequiredPreScriptFailure,
   formatRequiredPreScriptFailure,
   formatScriptOutput,
+  buildReviewerDiffContext,
+  buildReviewerDiffInstruction,
 } from '../specialist/runner.js';
 import {
   resolveRuntimeToolContract,
@@ -678,14 +680,72 @@ export class NativeActivationHost {
     // dependency walk, and obeys the same inheritance rules as the store.
     const epicAncestors = workItems.epicAncestors(issueRef, request.epicContextDepth ?? 0);
 
+    // Dependency context for completed blockers, from the SAME Substrate edge graph and the
+    // SAME boundary that supplies epicAncestors — never a second traversal. Without this a
+    // child never sees the contracts that unblocked it (SPECIALISTS-22).
+    const completedBlockers = workItems.completedBlockers(issueRef, 1);
+
+    const isReviewer = specialist.specialist.metadata.name === 'reviewer';
+
     const rendered = renderTaskPrompt({
       specialist: specialist.specialist,
       cwd: this.cwd,
       beadId: view.ref,
       bead: workItemAsRecord(view),
       epicAncestors: epicAncestors.map(workAncestorAsRecord),
+      completedBlockers: completedBlockers.map(workAncestorAsRecord),
       preScriptOutput,
+      // Reviewer diff context is EXECUTION-ONLY, so it enters through the hook rather than
+      // the pure renderer — and it must land before the prompt hash, exactly as it does on
+      // the legacy path. Without it the reviewer role loses its diff entirely.
+      ...(isReviewer
+        ? {
+            appendExecutionContext: (task: string, cwd: string, variables: Record<string, string>): string => {
+              try {
+                return `${task}${buildReviewerDiffInstruction(buildReviewerDiffContext(cwd, variables))}`;
+              } catch (error) {
+                process.stderr.write(`[specialist runner] Reviewer diff context unavailable: ${String(error)}\n`);
+                return task;
+              }
+            },
+          }
+        : {}),
     });
+
+    // Mandatory-rules resolution failure: FAIL CLOSED, deliberately.
+    //
+    // The two legacy consumers disagree — `sp run` warns and continues, the read-only
+    // renderer treats it as fatal "precisely so a coordinator can never launch silently
+    // missing its rules". Native dispatch IS a coordinator launch, which is the case the
+    // renderer's fatal policy exists to protect, so a specialist that cannot be given its
+    // mandatory rules is refused here rather than launched without them. Silent omission
+    // is the one option neither legacy consumer chose.
+    if (rendered.mandatoryRulesError) {
+      return reject('mandatory_rules_unavailable', {
+        note: `mandatory rules could not be resolved, and a native activation is never launched without them: ${rendered.mandatoryRulesError}`,
+      });
+    }
+
+    // The same injection metadata the legacy path emits, so the Fleet can answer "which
+    // rules did this activation actually run under".
+    if (rendered.mandatoryRules && rendered.mandatoryRulesBlock?.trim()) {
+      const rules = rendered.mandatoryRules;
+      emit('mandatory_rules_injection', {
+        source: 'mandatory_rules_injection',
+        sets_loaded: rules.setsLoaded,
+        rules_count: rules.ruleCount,
+        inline_rules_count: rules.inlineRulesCount,
+        globals_disabled: rules.globalsDisabled,
+        token_estimate: rules.injectedTokens,
+        budget_limit: rules.budgetLimit,
+        candidate_tokens: rules.candidateTokens,
+        injected_tokens: rules.injectedTokens,
+        injected_section_ids: rules.injectedSectionIds,
+        evicted_section_ids: rules.evictedSectionIds,
+        payload_digest: rules.payloadDigest,
+        outcome: rules.outcome,
+      });
+    }
 
     // Resolved ONCE from the definition, exactly as the legacy call site does
     // (src/specialist/runner.ts: `resolveOutputContractSchema(responseFormat, outputType,

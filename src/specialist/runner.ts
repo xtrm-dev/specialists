@@ -776,7 +776,12 @@ function getPatchSources(cwd: string, variables?: Record<string, string>): Patch
   ];
 }
 
-function buildReviewerDiffContext(cwd: string, variables?: Record<string, string>, maxFiles = 20): ReviewerDiffContext {
+/**
+ * Exported (SPECIALISTS-22) so the native host can supply the reviewer role the same
+ * execution-only diff context the legacy runner appends, instead of the reviewer losing
+ * it entirely on the native path. Behaviour unchanged.
+ */
+export function buildReviewerDiffContext(cwd: string, variables?: Record<string, string>, maxFiles = 20): ReviewerDiffContext {
   for (const source of getPatchSources(cwd, variables)) {
     const files = source.files.slice(0, maxFiles);
     if (files.length === 0) continue;
@@ -799,7 +804,7 @@ function buildReviewerDiffContext(cwd: string, variables?: Record<string, string
   throw new Error('Reviewer startup blocked: no patch context found in injected diff, unstaged diff, staged diff, or branch-vs-base diff.');
 }
 
-function buildReviewerDiffInstruction(context: ReviewerDiffContext): string {
+export function buildReviewerDiffInstruction(context: ReviewerDiffContext): string {
   return `\n\n---\n## Reviewer Diff Context\nReview only patch below. Ignore unrelated files, repo-wide exploration, and filesystem hunting.\nIf patch context is empty, stop and fail fast.\n\nPatch source:\n${context.source}\n\nDiff stat:\n${context.stat || '(no stat)'}\n\nChanged files:\n${context.files.map((file) => `- ${file}`).join('\n')}\n\nDiff hunks:\n${context.hunks}\n---\n`;
 }
 

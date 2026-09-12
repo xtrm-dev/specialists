@@ -33,6 +33,7 @@ export function testWorkItems(options: {
       return { ref: issueRef, issueId: `iss_${issueRef}`, revision: 1, contractHash: 'hash-test', title: options.title ?? 'A task', contract, readinessState: state, dispatchable: state === 'ready' || state === 'claimed', reasons };
     },
     epicAncestors: () => [],
+    completedBlockers: () => [],
     check(req) {
       if (state !== 'ready' && state !== 'claimed') throw new Error(`dispatch rejected: ${ref} is ${state}: ${reasons.join('; ')}`);
       return { issueId: `iss_${req.ref}`, revision: 1, contractHash: 'hash-test', report: { state, revision: 1, contractHash: 'hash-test', reasons } as never };

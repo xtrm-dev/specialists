@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { execSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,6 +16,23 @@ import { join } from 'node:path';
  * the machine happens to have installed. The python-kernel resolver is the one curated
  * entry that is resolved rather than existsSync-checked, so it is the one stubbed.
  */
+/**
+ * SPECIALISTS-22: force the mandatory-rules resolution to fail so the chosen policy is
+ * exercised rather than asserted. The flag is hoisted because vi.mock factories run before
+ * module body code.
+ */
+const mandatoryRulesFault = vi.hoisted(() => ({ fail: false }));
+vi.mock('../../../src/specialist/mandatory-rules.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../src/specialist/mandatory-rules.js')>();
+  return {
+    ...actual,
+    buildMandatoryRulesInjection: (...args: unknown[]) => {
+      if (mandatoryRulesFault.fail) throw new Error('rules fixture exploded');
+      return (actual.buildMandatoryRulesInjection as (...a: unknown[]) => unknown)(...args);
+    },
+  };
+});
+
 vi.mock('../../../src/pi/python-kernel-extension.js', () => ({
   resolvePiExtensionsPythonKernelPath: () => '/fake/pi-extensions/python-kernel',
 }));
@@ -167,7 +185,7 @@ afterEach(() => {
 
 const NO_CONTRACT_STATE = { readContractState: () => undefined };
 
-function fakeWorkItems(options: { state?: string } = {}): SpecialistWorkItemBoundary {
+function fakeWorkItems(options: { state?: string; blockers?: Array<{ ref: string; title: string; description?: string }> } = {}): SpecialistWorkItemBoundary {
   const contract = {
     problem: 'The thing is unclear.',
     success: 'The thing is clear.',
@@ -193,6 +211,7 @@ function fakeWorkItems(options: { state?: string } = {}): SpecialistWorkItemBoun
       };
     },
     epicAncestors: () => [],
+    completedBlockers: () => options.blockers ?? [],
     check() {
       if (state !== 'ready' && state !== 'claimed') throw new Error(`dispatch rejected: issue is ${state}`);
       return { issueId: 'iss_test', revision: 1, contractHash: 'hash-test', report: { state, revision: 1, contractHash: 'hash-test', reasons: [] } as never };
@@ -1843,5 +1862,109 @@ describe('pre-scripts and curated extensions (SPECIALISTS-6)', () => {
 
     const loader = record.createArgs!.resourceLoader as FakeResourceLoader;
     expect(loader.options.additionalExtensionPaths as string[]).not.toContain(PY_KERNEL);
+  });
+});
+
+
+/**
+ * SPECIALISTS-22. Three inputs the legacy runner supplies to `renderTaskPrompt` were
+ * missing from the native call site: completed blockers, the reviewer's execution-only diff
+ * context, and any handling at all of `mandatoryRulesError` / `mandatoryRules`.
+ */
+describe('task-prompt composition parity (SPECIALISTS-22)', () => {
+  afterEach(() => { mandatoryRulesFault.fail = false; });
+
+  async function dispatchWith(options: { blockers?: Array<{ ref: string; title: string; description?: string }>; specialist?: string; sink?: ReturnType<typeof collectingSink> }) {
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record });
+    const sink = options.sink ?? collectingSink();
+    const host = new NativeActivationHost({
+      loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems({ blockers: options.blockers }),
+      forensics: sink,
+      loadSdk: async () => makeSdk(record, session),
+      cwd: hostWorkspace(),
+    });
+    const handle = await host.start({
+      specialist: options.specialist ?? 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    });
+    return { session, sink, record, handle };
+  }
+
+  /** `$prompt` must appear in the task template or the bead context never reaches the task. */
+  function specWithPromptTemplate() {
+    const spec = readOnlySpec() as { specialist: { prompt: Record<string, unknown> } };
+    spec.specialist.prompt.task_template = 'Do: $prompt';
+    return spec;
+  }
+
+  async function dispatchWith(options: { blockers?: Array<{ ref: string; title: string; description?: string }>; specialist?: string; cwd?: string }) {
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record });
+    const sink = collectingSink();
+    const spec = specWithPromptTemplate() as { specialist: { metadata: Record<string, unknown> } };
+    // The reviewer hook keys on the RESOLVED definition's name, as the legacy path does.
+    spec.specialist.metadata.name = options.specialist ?? 'researcher';
+    const host = new NativeActivationHost({
+      loader: loaderFor(spec),
+      workItems: fakeWorkItems({ blockers: options.blockers }),
+      forensics: sink,
+      loadSdk: async () => makeSdk(record, session),
+      cwd: options.cwd ?? hostWorkspace(),
+    });
+    let handle: Awaited<ReturnType<NativeActivationHost['start']>> | undefined;
+    let refusal: unknown;
+    try {
+      handle = await host.start({
+        specialist: options.specialist ?? 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+      });
+    } catch (error) {
+      refusal = error;
+    }
+    return { session, sink, record, handle, refusal };
+  }
+
+  it('renders completed blockers as dependency context', async () => {
+    const { session } = await dispatchWith({
+      blockers: [{ ref: 'ISSUE-9', title: 'Unblocked it', description: 'PROBLEM: the schema' }],
+    });
+    expect(session.prompts[0]).toContain('## Context from completed dependencies:');
+    expect(session.prompts[0]).toContain('ISSUE-9');
+    expect(session.prompts[0]).toContain('Unblocked it');
+  });
+
+  it('renders no dependency section when nothing is completed', async () => {
+    const { session } = await dispatchWith({});
+    expect(session.prompts[0]).not.toContain('## Context from completed dependencies:');
+  });
+
+  it('gives a reviewer its diff context, which the native call site never supplied', async () => {
+    // A real repository with a real unstaged change: the diff builder shells out to git,
+    // so a fake cwd would prove nothing.
+    const workspace = hostWorkspace();
+    const run = (command: string) => execSync(command, { cwd: workspace, stdio: 'pipe' });
+    run('git init -q');
+    run('git config user.email t@t.t && git config user.name t');
+    writeFileSync(join(workspace, 'reviewed.txt'), 'one\n');
+    run('git add reviewed.txt && git commit -qm initial');
+    writeFileSync(join(workspace, 'reviewed.txt'), 'one\ntwo\n');
+
+    const { session } = await dispatchWith({ specialist: 'reviewer', cwd: workspace });
+
+    expect(session.prompts[0]).toContain('## Reviewer Diff Context');
+    expect(session.prompts[0]).toContain('reviewed.txt');
+  });
+
+  it('emits the mandatory-rules injection metadata the legacy path emits', async () => {
+    const { sink } = await dispatchWith({});
+    expect(sink.names).toContain('mandatory_rules_injection');
+  });
+
+  it('fails closed when mandatory rules cannot be resolved', async () => {
+    mandatoryRulesFault.fail = true;
+    const { record, refusal, session } = await dispatchWith({});
+    expect((refusal as DispatchRejectedError).reason).toBe('mandatory_rules_unavailable');
+    expect(record.createArgs).toBeUndefined();
+    expect(session.prompts).toHaveLength(0);
   });
 });
