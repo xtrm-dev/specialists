@@ -6,7 +6,7 @@
 // Substrate is authority; this tool is transport. It never recomputes a trace
 // locally: WorkItemStore has no trace(), so ProvenanceService.trace is called
 // directly (no pass-through). The service is INJECTED as a getter and typed
-// structurally — @xtrm/substrate is unpublished (npm 404) and does not resolve
+// structurally — @jaggerxtrm/substrate is an optional peer that need not resolve
 // from this repo, so even a type-only import would break `tsc --noEmit`. The
 // structural interface below mirrors the ProvenanceService methods this tool
 // calls; a plain `import type` becomes possible once .9 lands resolution.

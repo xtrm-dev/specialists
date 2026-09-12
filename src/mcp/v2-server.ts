@@ -140,11 +140,14 @@ export function buildV2Server(ctx?: McpRequestContext): McpServer {
   //
   // Registering them unconditionally was the first instinct — an inert tool that explains
   // itself tells a coordinator the capability exists, which absence never does. But
-  // `@xtrm/substrate` is unpublished and cannot load under bun (it hard-imports
-  // node:sqlite), so for practically every npm install of this package the tools would be
-  // permanent noise in `tools/list` that can never succeed. Absence is the honest default
-  // there; the diagnosis is still one env var away, and the tool still answers with its
+  // `@jaggerxtrm/substrate` is a separate product on its own cadence, so for an install
+  // that does not carry it the tools would be permanent noise in `tools/list` that can
+  // never succeed. Absence is the honest default there; the tool still answers with its
   // reason once admitted.
+  //
+  // (Until XTRM-267 this comment also claimed Substrate "cannot load under bun". That was
+  // measured false on 2026-09-12 — it ships a dual-runtime sqlite seam and imports cleanly
+  // under bun. Unresolvable, not incompatible, is the real reason a surface goes inert.)
   const substrate = resolveSubstrate();
   const substrateTools: AnyTool[] =
     substrate.available || process.env.XTRM_SUBSTRATE_TOOLS === '1'

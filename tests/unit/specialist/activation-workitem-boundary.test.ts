@@ -142,12 +142,36 @@ describe('openWorkItemBoundary package identity', () => {
     const dir = mkdtempSync(join(tmpdir(), 'substrate-spoof-'));
     writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'totally-legit-substrate' }));
     await expect(openWorkItemBoundary({ substrateDir: dir }))
-      .rejects.toThrow(/expected @xtrm\/substrate/);
+      .rejects.toThrow(/expected @jaggerxtrm\/substrate/);
   });
 
   it('fails closed on a directory without readable package identity', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'substrate-noid-'));
     await expect(openWorkItemBoundary({ substrateDir: dir }))
       .rejects.toThrow(/work_item_store_unavailable/);
+  });
+
+  // unitAI-ocnfk: XTRM_SUBSTRATE_DIR became an override rather than the only way in.
+  // The identity check is what makes that safe to widen, so it is asserted on the
+  // explicit path here and must never be skipped on the module-resolved one.
+  it('names both remedies when nothing is configured and nothing is installed', async () => {
+    await expect(openWorkItemBoundary({ env: { ...process.env, XTRM_SUBSTRATE_DIR: '' } }))
+      .rejects.toThrow(/install @jaggerxtrm\/substrate.*XTRM_SUBSTRATE_DIR/s);
+  });
+
+  it('prefers an explicit checkout over module resolution', async () => {
+    // A developer pointing at a working tree means it. If an installed copy could
+    // shadow that, local Substrate changes would be untestable from here — which is
+    // the confusion the variable exists to prevent. Proven by the error naming the
+    // spoof directory: resolution stopped at the explicit path.
+    const dir = mkdtempSync(join(tmpdir(), 'substrate-explicit-'));
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'not-substrate' }));
+    await expect(openWorkItemBoundary({ env: { ...process.env, XTRM_SUBSTRATE_DIR: dir } }))
+      .rejects.toThrow(new RegExp(`found "not-substrate"`));
+  });
+
+  it('treats a whitespace-only override as unset rather than as a path', async () => {
+    await expect(openWorkItemBoundary({ env: { ...process.env, XTRM_SUBSTRATE_DIR: '   ' } }))
+      .rejects.toThrow(/no Substrate package configured/);
   });
 });

@@ -204,7 +204,7 @@ export declare function createWorkItemBoundary(ports: WorkItemPorts): Specialist
 /** Options for the runtime opener. */
 export interface OpenWorkItemsOptions {
     dbPath?: string;
-    /** Absolute path to a built @xtrm/substrate checkout. No default: public builds never assume one. */
+    /** Absolute path to a Substrate checkout. Overrides module resolution; see resolveSubstrateDir. */
     substrateDir?: string;
     env?: NodeJS.ProcessEnv;
 }
@@ -212,7 +212,7 @@ export interface OpenWorkItemsOptions {
  * Open the canonical work store and build the boundary over the REAL producer
  * services, dynamic-imported at runtime from an explicit checkout.
  *
- * `substrateDir` (or `XTRM_SUBSTRATE_DIR`) must point at a @xtrm/substrate
+ * `substrateDir` (or `XTRM_SUBSTRATE_DIR`) must point at a @jaggerxtrm/substrate
  * package directory exposing `src/store/migrations/runner.ts`,
  * `src/service/issue-service.ts`, `src/service/journal-service.ts`,
  * `src/service/provenance-service.ts`, `src/workitems/substrate-store.ts` and

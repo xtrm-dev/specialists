@@ -19757,9 +19757,20 @@ import { existsSync as existsSync19 } from "node:fs";
 // src/activation/workitem-store.ts
 import { createRequire as createRequire2 } from "node:module";
 import { homedir as homedir7 } from "node:os";
-import { join as join13 } from "node:path";
+import { dirname as dirname9, join as join13 } from "node:path";
 import { pathToFileURL } from "node:url";
 var require2 = createRequire2(import.meta.url);
+var SUBSTRATE_PACKAGE = "@jaggerxtrm/substrate";
+function resolveSubstrateDir(explicit) {
+  const trimmed = explicit.trim();
+  if (trimmed)
+    return trimmed;
+  try {
+    return dirname9(require2.resolve(`${SUBSTRATE_PACKAGE}/package.json`));
+  } catch {
+    return null;
+  }
+}
 function resolveWorkItemDbPath(env = process.env) {
   const override = (env.XTRM_STATE_DB ?? "").trim();
   if (override)
@@ -19901,9 +19912,9 @@ function splitLines(body) {
 }
 async function openWorkItemBoundary(opts = {}) {
   const env = opts.env ?? process.env;
-  const substrateDir = (opts.substrateDir ?? (env.XTRM_SUBSTRATE_DIR ?? "")).trim();
+  const substrateDir = resolveSubstrateDir(opts.substrateDir ?? env.XTRM_SUBSTRATE_DIR ?? "");
   if (!substrateDir) {
-    throw new Error("work_item_store_unavailable: no Substrate package configured (set XTRM_SUBSTRATE_DIR to a built @xtrm/substrate checkout)");
+    throw new Error(`work_item_store_unavailable: no Substrate package configured (install ${SUBSTRATE_PACKAGE}, ` + "or set XTRM_SUBSTRATE_DIR to a checkout of it)");
   }
   let pkgName;
   try {
@@ -19912,8 +19923,8 @@ async function openWorkItemBoundary(opts = {}) {
   } catch (error) {
     throw new Error(`work_item_store_unavailable: cannot read Substrate package identity at ${substrateDir}: ${error instanceof Error ? error.message : String(error)}`);
   }
-  if (pkgName !== "@xtrm/substrate") {
-    throw new Error(`work_item_store_unavailable: expected @xtrm/substrate at ${substrateDir}, found ${JSON.stringify(pkgName) ?? "no name"}`);
+  if (pkgName !== SUBSTRATE_PACKAGE) {
+    throw new Error(`work_item_store_unavailable: expected ${SUBSTRATE_PACKAGE} at ${substrateDir}, found ${JSON.stringify(pkgName) ?? "no name"}`);
   }
   const load = async (rel) => {
     try {
