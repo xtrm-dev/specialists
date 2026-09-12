@@ -77,7 +77,8 @@ describe('quickstart CLI — run()', () => {
   it('lists all MCP tools', async () => {
     const out = await captureOutput();
     // start_specialist was removed with the deprecated MCP tools in 04384c48.
-    const tools = ['specialist_init', 'list_specialists', 'use_specialist', 'feed_specialist'];
+    // use_specialist was removed in unitAI-xuclj.3 (superseded by specialist_dispatch).
+    const tools = ['specialist_init', 'list_specialists', 'specialist_dispatch', 'feed_specialist'];
     for (const tool of tools) {
       expect(out, `missing MCP tool: ${tool}`).toContain(tool);
     }

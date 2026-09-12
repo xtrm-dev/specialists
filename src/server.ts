@@ -16,18 +16,13 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { randomUUID } from 'node:crypto';
-import { join } from 'node:path';
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { MCP_CONFIG } from './constants.js';
 import { createForensicEvent, deploymentEnvironment } from './specialist/forensic-events.js';
 import { createObservabilitySqliteClient, type ObservabilitySqliteClient } from './specialist/observability-sqlite.js';
 import { SpecialistLoader } from './specialist/loader.js';
-import { SpecialistRunner } from './specialist/runner.js';
-import { HookEmitter } from './specialist/hooks.js';
 import { CircuitBreaker } from './utils/circuitBreaker.js';
-import { BeadsClient } from './specialist/beads.js';
-import { createUseSpecialistTool, useSpecialistSchema } from './tools/specialist/use_specialist.tool.js';
 import { createSpecialistStatusTool } from './tools/specialist/specialist_status.tool.js';
 import { createSpecialistListTool, specialistListSchema } from './tools/specialist/specialist_list.tool.js';
 import {
@@ -150,9 +145,6 @@ export class SpecialistsServer {
   constructor() {
     const circuitBreaker = new CircuitBreaker();
     const loader = new SpecialistLoader();
-    const hooks = new HookEmitter({ tracePath: join(process.cwd(), '.specialists', 'trace.jsonl') });
-    const beadsClient = new BeadsClient();
-    const runner = new SpecialistRunner({ loader, hooks, circuitBreaker, beadsClient });
 
     this.observability = createObservabilitySqliteClient();
 
@@ -172,7 +164,6 @@ export class SpecialistsServer {
     const getPusher = () => this.eventPusher;
 
     this.tools = [
-      createUseSpecialistTool(runner),
       createSpecialistStatusTool(loader, circuitBreaker, getHost, getPusher),
       createSpecialistDispatchTool(getHost, getPusher),
       createSpecialistReplyTool(getHost),
@@ -189,7 +180,6 @@ export class SpecialistsServer {
 
   private setupHandlers(): void {
     const schemaMap: Record<string, z.ZodTypeAny> = {
-      use_specialist: useSpecialistSchema,
       specialist_dispatch: specialistDispatchSchema,
       specialist_reply: specialistReplySchema,
       specialist_retry: specialistRetrySchema,

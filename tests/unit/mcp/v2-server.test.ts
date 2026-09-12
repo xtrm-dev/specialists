@@ -20,7 +20,7 @@ import { buildV2Server } from '../../../src/mcp/v2-server.js';
  * Domain parity (gates, refusals, dispatch) lives in
  * activation-mcp-tools.test.ts / activation-dispatch-inline.test.ts at the
  * tool level plus live probes; here the wire contract is proved:
- * dual-revision negotiation, server/discover, 7-tool surface, resultType,
+ * dual-revision negotiation, server/discover, 6-tool surface, resultType,
  * partitioned errors, and per-request independence.
  */
 
@@ -32,7 +32,6 @@ const META = {
 };
 
 const EXPECTED_TOOLS = [
-  'use_specialist',
   'specialist_status',
   'specialist_dispatch',
   'specialist_reply',
@@ -185,7 +184,7 @@ describe('v2 dual-revision negotiation', () => {
 });
 
 describe('v2 tool surface (t2kol parity)', () => {
-  it('tools/list returns the 7-tool surface in deterministic order with modern resultType', async () => {
+  it('tools/list returns the 6-tool surface in deterministic order with modern resultType', async () => {
     const res = await client.call('tools/list', { _meta: META });
     expect(res.error).toBeUndefined();
     const result = res.result as { tools: Array<{ name: string }>; resultType: string };
@@ -294,8 +293,8 @@ describe('v2 statelessness (no cross-request server state)', () => {
     const second = await client.call('tools/list', { _meta: capsB });
     expect(first.error).toBeUndefined();
     expect(second.error).toBeUndefined();
-    expect((first.result as { tools: unknown[] }).tools.length).toBe(7);
-    expect((second.result as { tools: unknown[] }).tools.length).toBe(7);
+    expect((first.result as { tools: unknown[] }).tools.length).toBe(6);
+    expect((second.result as { tools: unknown[] }).tools.length).toBe(6);
   });
 
   it('a tool call needs no prior handshake or discovery', async () => {
