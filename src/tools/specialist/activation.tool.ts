@@ -12,7 +12,7 @@
 // attest → claim), never by a `bd` subprocess. The live evidence for acceptance AV
 // asserts the absence of `sp` against the process table rather than against intent.
 //
-// The gates are not re-implemented here, and that is the load-bearing property. Bead
+// The gates are not re-implemented here, and that is the load-bearing property. Issue
 // readiness, the StepContract compilation, the capability contract, the model gate and
 // (once Phase 10 lands) the workspace writer lease all live inside `host.start()`. A
 // second dispatch path that re-checked them would drift; a second dispatch path that
@@ -283,18 +283,18 @@ export const specialistDispatchSchema = z.object({
     'A contract missing any section is refused and nothing is created.',
   ),
   title: z.string().optional().describe(
-    'Optional title for the Bead created from `contract` (default: derived from PROBLEM). ' +
+    'Optional title for the Substrate Issue created from `contract` (default: derived from PROBLEM). ' +
     'Ignored when issue_ref (or its bead_id alias) is given.',
   ),
   // Deliberately a bare number, not min(1).max(2): out-of-range values must reach
   // execute and come back as a structured refusal via the shared renderer, not as a
   // zod throw that surfaces as an opaque MCP error (server.ts parses before execute).
   epic_context_depth: z.number().optional().describe(
-    'Walk bead.parent UP this many hops (1 = immediate parent epic, 2 = epic + ' +
-    "grand-epic) and render each ancestor contract into the turn-1 prompt as an '" +
+    'Walk Substrate parent_child edges UP this many hops (1 = immediate parent Issue, ' +
+    "2 = parent + grandparent) and render each ancestor contract into the turn-1 prompt as an '" +
     "'## Epic lineage' section. Must be 1 or 2; anything else is refused. Omit for " +
-    'single-bead dispatch with no lineage. Dropped for beads auto-created from an ' +
-    'inline contract (a fresh bead has no parent).',
+    'a single-Issue dispatch with no lineage. Dropped for Issues auto-created from an ' +
+    'inline contract (a fresh Issue has no parent).',
   ),
   model_override: z.string().optional().describe(
     'Override the configured model for THIS activation only. An unavailable model is refused before the session is created, never silently replaced.',
@@ -324,16 +324,21 @@ export function createSpecialistDispatchTool(
     name: 'specialist_dispatch' as const,
     description:
       'Dispatch a Specialist on the native in-process runtime. No CLI process is spawned. ' +
-      'Provide EITHER bead_id (an existing READY Bead) OR contract (an inline 7-section ' +
-      'contract: the same readiness gate runs first, then a Bead is created and dispatched). ' +
-      'Never both. Returns once the activation is ADMITTED and started, not when it ' +
-      'completes — poll specialist_status for state and for any question it raises, and ' +
-      'answer with specialist_reply. The Bead is the prompt and MUST be a complete 7-section ' +
-      'contract plus a SCRUTINY level; a draft or incomplete Bead is refused here, before a ' +
-      'model turn is spent guessing at scope it does not carry — if the Bead is not ' +
-      'dispatchable, fix the Bead (planning skill), not the dispatch. Write-capable ' +
-      'Specialists (MEDIUM/HIGH tiers) activate only when they can acquire the workspace ' +
-      'lease; otherwise dispatch is refused with a structured reason.',
+      'Provide EITHER issue_ref (a READY Substrate Issue locator — XTRM-227, XTRM-184.2.3, ' +
+      'iss_..., a historical locator, or an imported Beads alias; bead_id is a permanent ' +
+      'compatibility alias for the same value) OR contract (an inline 7-section contract plus ' +
+      'a SCRUTINY level). Never both. An inline contract is accepted through the SAME pipeline ' +
+      'as an existing Issue: structural validation, Substrate Issue creation, readiness ' +
+      'attestation, claim, ExecutionBinding, activation. The Issue contract IS the prompt and ' +
+      'MUST be complete — PROBLEM, SUCCESS, SCOPE, NON_GOALS, CONSTRAINTS, VALIDATION, OUTPUT ' +
+      'plus a SCRUTINY level, eight required parts, not seven; a draft or incomplete Issue is ' +
+      'refused here, before a model turn is spent guessing at scope it does not carry — fix ' +
+      'the Issue (planning skill), not the dispatch. Returns once the activation is ADMITTED ' +
+      'and started, not when it completes: the Channel push is the PRIMARY wake, ' +
+      'specialist_status is the AUTHORITATIVE read, and polling is the degraded fallback. ' +
+      'Answer a raised question with specialist_reply. Write-capable Specialists (MEDIUM/HIGH ' +
+      'tiers) activate only when they can acquire the workspace lease; otherwise dispatch is ' +
+      'refused with a structured reason.',
     inputSchema: specialistDispatchSchema,
     async execute(input: z.infer<typeof specialistDispatchSchema>) {
       const build = () => describeBuildIdentity(LOADED_BUILD_ID, readBuildId(DIST_LIB_PATH));
@@ -486,7 +491,9 @@ export function createSpecialistReplyTool(getHost: () => NativeActivationHost) {
       'Answer an outstanding Specialist question or escalation by its message_id (read ' +
       'them from specialist_status.pending_asks). The answer returns as that tool call\'s ' +
       'result, so the Specialist continues with its context intact. An unknown or already ' +
-      'answered message_id is reported, not silently accepted.',
+      'answered message_id is reported, not silently accepted. Where the Channel is ' +
+      'available the ask arrives as a push first; specialist_status is the AUTHORITATIVE ' +
+      'read when it does not, and polling is the degraded fallback.',
     inputSchema: specialistReplySchema,
     async execute(input: z.infer<typeof specialistReplySchema>) {
       const message = await getHost().answer(input.message_id, input.body);
@@ -550,15 +557,16 @@ export const specialistRetrySchema = z.object({
     'session is re-prompted and its context survives.',
   ),
   prompt: z.string().optional().describe(
-    'Replacement turn prompt. Defaults to the dispatch-time render of the same bead.',
+    'Replacement turn prompt. Defaults to the dispatch-time render of the same Issue.',
   ),
 });
 
 /**
  * Re-run a failed native activation in place — the native equivalent of `sp retry`.
  *
- * Same activation id, new attempt: the bead, the workspace lease and (without a model
- * override) the session survive the retry. Failed only — a live or waiting activation
+ * Same activation id, new attempt. The Issue and (without a model override) the session
+ * survive the retry; the workspace lease is released as the attempt ends and REACQUIRED
+ * here, so a retry can be refused when another writer holds the workspace. Failed only — a live or waiting activation
  * already has its path (reply for an outstanding question, resume for a settled one,
  * steer/stop for a running one), and retry refuses those states with the right pointer
  * rather than becoming a second dispatch. An escalation or question that CAN wait stays
@@ -572,10 +580,11 @@ export function createSpecialistRetryTool(
     name: 'specialist_retry' as const,
     description:
       'Re-run a FAILED native activation in place, optionally on a named model. ' +
-      'Keeps the activation id, the bead and the workspace lease; without model_override ' +
-      'the same session is re-prompted with its context intact. Failed only — answer an ' +
-      'outstanding question with specialist_reply and resume a settled activation with ' +
-      'specialist_resume instead.',
+      'Keeps the activation id and the Issue; the workspace lease is REACQUIRED for the new ' +
+      'attempt and can be refused when another writer holds the workspace. Without ' +
+      'model_override the same session is re-prompted with its context intact. Failed only — ' +
+      'answer an outstanding question with specialist_reply and resume a settled activation ' +
+      'with specialist_resume instead.',
     inputSchema: specialistRetrySchema,
     async execute(input: z.infer<typeof specialistRetrySchema>) {
       try {

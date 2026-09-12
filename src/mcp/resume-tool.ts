@@ -58,7 +58,9 @@ export function createSpecialistResumeTool(
     description:
       'Resume a settled or waiting Specialist with a new prompt, in the SAME session. ' +
       'This is not a second dispatch: the activation_id is kept and the attempt_id advances, ' +
-      'so the child keeps its context and its workspace lease rather than starting over. ' +
+      'so the child keeps its CONTEXT rather than starting over. The writer lease is NOT kept ' +
+      'across settle — it is released at settle and reacquired here, and a resume that loses ' +
+      'the race to another writer is refused with a structured lease_denied reason. ' +
       'Use this after answering a question, or to give a settled Specialist more work. ' +
       'A disposed activation cannot be resumed — that is what makes specialist_stop_activation ' +
       'the irreversible one.',
