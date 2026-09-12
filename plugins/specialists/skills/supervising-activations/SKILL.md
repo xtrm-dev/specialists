@@ -95,11 +95,15 @@ The specialist registry, one compact line per specialist with a dispatchability 
 row. `name` returns one full record; `detail: "full"` returns every field. Read this before
 relying on a remembered role name.
 
-### use_specialist (deprecated for contract-gated work)
-Runs a specialist synchronously and returns its final output. A `bead_id` that
-`specialist_dispatch` would REFUSE — draft, closed, or missing a contract section — still
-runs here and returns a `readiness_warning` naming what is missing. That divergence is why
-it is deprecated: prefer `specialist_dispatch`.
+### use_specialist — removed
+`use_specialist` no longer exists; calling it returns an unknown-tool error. Use
+`specialist_dispatch` and read the result with `specialist_status`.
+
+It ran a specialist synchronously and, unlike `specialist_dispatch`, accepted a work item the
+readiness gate would refuse — draft, closed, or missing a contract section — returning a
+warning instead of refusing. That divergence is why it was removed: one entry point that
+enforces the contract and one that does not is how ungated work gets dispatched. The gate now
+always applies, so a refused contract must be fixed rather than routed around.
 
 ## Working rules
 

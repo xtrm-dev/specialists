@@ -32,7 +32,7 @@
         "tracked_runs",
         "sp_script",
         "sp_serve",
-        "mcp_use_specialist",
+        "mcp_native_activation",
         "pipelines",
         "pi_extensions",
         "child_processes"

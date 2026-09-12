@@ -18,7 +18,12 @@ const waiver = {
   approved_by: 'operator',
   approved_at: '2026-09-03T00:56:00Z',
   limitation: 'Specialists does not provide filesystem or host-read isolation. Model-driven runs and allowed tools, extensions, MCP processes, and child processes can read paths visible to the operating-system identity that runs Specialists.',
-  affected_surfaces: ['tracked_runs', 'sp_script', 'sp_serve', 'mcp_use_specialist', 'pipelines', 'pi_extensions', 'child_processes'],
+  // 'mcp_use_specialist' -> 'mcp_native_activation' (unitAI-fplre): use_specialist was
+  // deleted in #342, but the surface that replaced it carries the SAME filesystem and
+  // host-read exposure the waiver describes. Renamed rather than removed — dropping the
+  // entry would have narrowed a security waiver's declared scope as a side effect of a
+  // tool rename. The count is unchanged on purpose.
+  affected_surfaces: ['tracked_runs', 'sp_script', 'sp_serve', 'mcp_native_activation', 'pipelines', 'pi_extensions', 'child_processes'],
   excluded_uses: ['untrusted_callers', 'public_unauthenticated_ingress', 'cross_tenant_execution', 'multi_tenant_execution', 'confidential_host_data_visible_to_the_runtime_identity'],
   compensating_controls: ['trusted_single_tenant_callers_only', 'private_or_loopback_authenticated_ingress', 'dedicated_container_or_os_account', 'minimal_readable_mounts', 'least_privilege_credentials', 'trusted_specialist_definitions', 'exact_reviewed_extension_sources', 'requested_permission_tiers_fail_closed_when_the_runtime_tool_catalog_is_unavailable_or_invalid'],
   non_controls: ['allow_skills_roots', 'worktree_boundaries', 'permission_tier_names', 'extension_tool_allowlists', 'absolute_path_write_guards'],

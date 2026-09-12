@@ -26,10 +26,34 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// NOT RUN IN CI, and that is a known gap rather than an oversight.
+//
+// This harness drives the real `claude` binary — `claude --version`, `claude plugin
+// validate --strict`, `claude --plugin-dir ... mcp list` — because the things worth
+// checking here are what the CLIENT sees: whether the plugin validates, whether its MCP
+// server connects, which tools and skills actually surface in a session. A bun-only
+// handshake would not cover any of that. GitHub runners have no Claude Code CLI, so the
+// claude-dependent checks fail with exit=undefined there (attempted and reverted,
+// unitAI-uz0bd).
+//
+// The cost of that gap is measured, not hypothetical: when use_specialist was deleted in
+// #342 this harness went red and nothing reported it for a day. It was found by hand,
+// while verifying an unrelated change.
+//
+// So run it manually before a release: `bun scripts/e5-packaged-plugin-e2e.mjs`.
+// Splitting the claude-dependent checks from the ones a runner could execute is tracked
+// separately — partial CI coverage would at least catch the tool-surface drift that
+// actually bit us.
+
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PROTOCOL = '2026-07-28';
+// Deliberately hardcoded, and deliberately NOT derived from the server's own surface:
+// this is the external contract assertion. Deriving it from the thing under test would make
+// it tautological and unable to catch exactly the drift it exists to catch. It DOES mean the
+// list must be updated in the same change that alters the tool surface — `use_specialist`
+// was removed in #342 and this list was not, which is how the harness went red unnoticed
+// (unitAI-uz0bd).
 const EXPECTED_TOOLS = [
-  'use_specialist',
   'specialist_status',
   'specialist_dispatch',
   'specialist_reply',
@@ -250,7 +274,7 @@ try {
     !tools.error &&
       JSON.stringify((tools.result?.tools ?? []).map((t) => t.name)) ===
         JSON.stringify(EXPECTED_TOOLS),
-    `7-tool surface incl. specialist_resume, deterministic order`,
+    `${EXPECTED_TOOLS.length}-tool surface incl. specialist_resume, deterministic order`,
   );
 
   const legacy = await call('initialize', {
