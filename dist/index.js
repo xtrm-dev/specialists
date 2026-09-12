@@ -59077,6 +59077,156 @@ var init_dead_job_audit = __esm(() => {
   init_forensic_events();
 });
 
+// src/specialist/channel-doctor.ts
+import { existsSync as existsSync44, readFileSync as readFileSync37 } from "fs";
+function readJson2(path3) {
+  if (!existsSync44(path3))
+    return { exists: false, value: null, parseError: null };
+  try {
+    return { exists: true, value: JSON.parse(readFileSync37(path3, "utf8")), parseError: null };
+  } catch (err) {
+    return { exists: true, value: null, parseError: err instanceof Error ? err.message : String(err) };
+  }
+}
+function isRecord3(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function checkCapabilityDeclared(serverSourcePath) {
+  const id = 1;
+  const name = "MCP server declares the claude/channel capability";
+  if (!existsSync44(serverSourcePath)) {
+    return { id, name, status: "unknown", detail: `server source not found at ${serverSourcePath}` };
+  }
+  const source = readFileSync37(serverSourcePath, "utf8");
+  const declares = source.includes("CHANNEL_CAPABILITY") && source.includes("experimental");
+  return declares ? { id, name, status: "pass", detail: "server capabilities spread CHANNEL_CAPABILITY into experimental" } : {
+    id,
+    name,
+    status: "fail",
+    detail: "server entrypoint no longer declares the claude/channel capability",
+    fixHint: "restore `experimental: { ...CHANNEL_CAPABILITY }` in the server capabilities object (src/mcp/v2-server.ts)"
+  };
+}
+function unknownLiveGate(id, name, confirmVia) {
+  return { id, name, status: "unknown", detail: `property of a live session, not observable from a CLI \u2014 confirm via ${confirmVia}` };
+}
+function checkOrgPolicy(managedSettingsPath) {
+  const id = 5;
+  const name = "org policy channelsEnabled";
+  const { exists, value, parseError } = readJson2(managedSettingsPath);
+  if (!exists) {
+    return {
+      id,
+      name,
+      status: "pass",
+      detail: `no managed-settings.json at ${managedSettingsPath} \u2014 the gate itself defaults to open, but gate 8's allowlist then falls back to a server-fetched default that does not carry this plugin, so registration still refuses`
+    };
+  }
+  if (parseError) {
+    return { id, name, status: "unknown", detail: `managed-settings.json is not valid JSON: ${parseError}` };
+  }
+  const channelsEnabled = isRecord3(value) ? value.channelsEnabled : undefined;
+  if (channelsEnabled === true) {
+    return { id, name, status: "pass", detail: "channelsEnabled: true" };
+  }
+  return {
+    id,
+    name,
+    status: "fail",
+    detail: `managed-settings.json exists \u2014 this ARMS the gate that absence left open \u2014 but channelsEnabled is ${JSON.stringify(channelsEnabled)}, not true. This is the classic trap: creating the file for the allowlist without also setting channelsEnabled closes a previously-open gate.`,
+    fixHint: `add "channelsEnabled": true to ${managedSettingsPath}`
+  };
+}
+function checkMarketplaceMatch(installedPluginsPath, expectedPluginName, marketplace) {
+  const id = 7;
+  const name = "installed plugin's marketplace matches the entry";
+  const expectedKey = `${expectedPluginName}@${marketplace}`;
+  const { exists, value, parseError } = readJson2(installedPluginsPath);
+  if (!exists) {
+    return {
+      id,
+      name,
+      status: "fail",
+      detail: `no installed_plugins.json at ${installedPluginsPath} \u2014 plugin ${expectedKey} is not installed`,
+      fixHint: `install via the marketplace: expected key "${expectedKey}"`
+    };
+  }
+  if (parseError)
+    return { id, name, status: "unknown", detail: `installed_plugins.json is not valid JSON: ${parseError}` };
+  const plugins = isRecord3(value) && isRecord3(value.plugins) ? value.plugins : {};
+  if (expectedKey in plugins) {
+    return { id, name, status: "pass", detail: `installed under "${expectedKey}"` };
+  }
+  return {
+    id,
+    name,
+    status: "fail",
+    detail: `installed_plugins.json has no "${expectedKey}" entry \u2014 plugin ${expectedPluginName} is installed under a different marketplace, or not installed`,
+    fixHint: `reinstall so the plugin registers as "${expectedKey}"`
+  };
+}
+function checkAllowlist(managedSettingsPath, expectedPluginName, marketplace) {
+  const id = 8;
+  const name = "plugin is on the allowedChannelPlugins allowlist";
+  const { exists, value, parseError } = readJson2(managedSettingsPath);
+  if (!exists) {
+    return {
+      id,
+      name,
+      status: "fail",
+      detail: "no managed-settings.json \u2014 absence arms nothing here, but the server-fetched default allowlist does not carry this plugin, so the outcome is refusal",
+      fixHint: `create ${managedSettingsPath} with allowedChannelPlugins: [{ "plugin": "${expectedPluginName}", "marketplace": "${marketplace}" }]`
+    };
+  }
+  if (parseError)
+    return { id, name, status: "unknown", detail: `managed-settings.json is not valid JSON: ${parseError}` };
+  const allowlist = isRecord3(value) ? value.allowedChannelPlugins : undefined;
+  if (!Array.isArray(allowlist) || allowlist.length === 0) {
+    return {
+      id,
+      name,
+      status: "fail",
+      detail: "managed-settings.json has no allowedChannelPlugins entries",
+      fixHint: `add [{ "plugin": "${expectedPluginName}", "marketplace": "${marketplace}" }]`
+    };
+  }
+  if (allowlist.some((entry) => typeof entry === "string")) {
+    return {
+      id,
+      name,
+      status: "fail",
+      detail: 'allowedChannelPlugins contains string entries \u2014 the schema is an array of {plugin, marketplace} OBJECTS; a string such as "specialists@xtrm" never matches and the channel stays blocked',
+      fixHint: `replace strings with { "plugin": "${expectedPluginName}", "marketplace": "${marketplace}" }`
+    };
+  }
+  const matches2 = allowlist.some((entry) => isRecord3(entry) && entry.plugin === expectedPluginName && entry.marketplace === marketplace);
+  if (matches2)
+    return { id, name, status: "pass", detail: `allowlist contains {plugin: "${expectedPluginName}", marketplace: "${marketplace}"}` };
+  return {
+    id,
+    name,
+    status: "fail",
+    detail: `allowlist present but does not include {plugin: "${expectedPluginName}", marketplace: "${marketplace}"}`,
+    fixHint: `add { "plugin": "${expectedPluginName}", "marketplace": "${marketplace}" } to allowedChannelPlugins`
+  };
+}
+function runChannelDoctorChecks(inputs) {
+  const gates = [
+    checkCapabilityDeclared(inputs.serverSourcePath),
+    unknownLiveGate(2, "connection era is legacy, not modern", "claude --debug --debug-file <path>, look for the legacy-serve negotiation"),
+    unknownLiveGate(3, "provider is first-party (not Bedrock, Vertex, Foundry)", "the session's active provider configuration"),
+    unknownLiveGate(4, "channels feature is available", "the session's feature-flag state"),
+    checkOrgPolicy(inputs.managedSettingsPath),
+    unknownLiveGate(6, "server is named in this session's --channels list", "the launcher argv, e.g. `xt claude` adding --channels plugin:<name>@<marketplace>"),
+    checkMarketplaceMatch(inputs.installedPluginsPath, inputs.expectedPluginName, inputs.expectedMarketplaceName),
+    checkAllowlist(inputs.managedSettingsPath, inputs.expectedPluginName, inputs.expectedMarketplaceName)
+  ];
+  const firstClosedGate = gates.find((g) => g.status === "fail") ?? null;
+  const headlessWarning = inputs.isInteractiveTty ? null : "doctor is running non-interactively (no TTY). Registration itself is interactive-TUI-only \u2014 `claude -p` has no channel path at ANY gate setting, so a pass on every gate below still would not produce a headless wake.";
+  return { gates, firstClosedGate, headlessWarning };
+}
+var init_channel_doctor = () => {};
+
 // src/cli/doctor.ts
 var exports_doctor = {};
 __export(exports_doctor, {
@@ -59090,9 +59240,10 @@ __export(exports_doctor, {
 });
 import { createHash as createHash9 } from "crypto";
 import { spawnSync as spawnSync27 } from "child_process";
-import { existsSync as existsSync44, mkdirSync as mkdirSync16, readdirSync as readdirSync21, readFileSync as readFileSync37, writeFileSync as writeFileSync20 } from "fs";
+import { existsSync as existsSync45, mkdirSync as mkdirSync16, readdirSync as readdirSync21, readFileSync as readFileSync38, writeFileSync as writeFileSync20 } from "fs";
 import { homedir as homedir12 } from "os";
 import { join as join47, relative as relative5, resolve as resolve20 } from "path";
+import { fileURLToPath as fileURLToPath8 } from "url";
 function ok3(msg) {
   console.log(`  ${green14("\u2713")} ${msg}`);
 }
@@ -59121,10 +59272,10 @@ function isInstalled3(bin) {
   return spawnSync27("which", [bin], { encoding: "utf8", timeout: 2000 }).status === 0;
 }
 function loadJson2(path3) {
-  if (!existsSync44(path3))
+  if (!existsSync45(path3))
     return null;
   try {
-    return JSON.parse(readFileSync37(path3, "utf8"));
+    return JSON.parse(readFileSync38(path3, "utf8"));
   } catch {
     return null;
   }
@@ -59167,7 +59318,7 @@ function checkBd() {
     return false;
   }
   ok3(`bd installed  ${dim14(sp("bd", ["--version"]).stdout || "")}`);
-  if (existsSync44(join47(CWD, ".beads")))
+  if (existsSync45(join47(CWD, ".beads")))
     ok3(".beads/ present in project");
   else
     warn3(".beads/ not found in project");
@@ -59181,6 +59332,53 @@ function checkXt() {
     return false;
   }
   ok3(`xt installed  ${dim14(sp("xt", ["--version"]).stdout || "")}`);
+  return true;
+}
+function resolveManagedSettingsPath() {
+  return process.platform === "darwin" ? "/Library/Application Support/ClaudeCode/managed-settings.json" : "/etc/claude-code/managed-settings.json";
+}
+function resolveServerSourcePath() {
+  const distPath = fileURLToPath8(new URL("../../dist/index.js", import.meta.url));
+  if (existsSync45(distPath))
+    return distPath;
+  return fileURLToPath8(new URL("../mcp/v2-server.ts", import.meta.url));
+}
+function statusIcon(status) {
+  if (status === "pass")
+    return green14("\u2713");
+  if (status === "fail")
+    return red7("\u2717");
+  return dim14("?");
+}
+function checkChannels() {
+  section3("Claude Code channel wake  (8-gate chain, spec AM.3)");
+  const report = runChannelDoctorChecks({
+    managedSettingsPath: resolveManagedSettingsPath(),
+    installedPluginsPath: join47(homedir12(), ".claude", "plugins", "installed_plugins.json"),
+    serverSourcePath: resolveServerSourcePath(),
+    expectedPluginName: EXPECTED_PLUGIN_NAME,
+    expectedMarketplaceName: EXPECTED_MARKETPLACE_NAME,
+    isInteractiveTty: Boolean(process.stdout.isTTY)
+  });
+  for (const gate of report.gates) {
+    console.log(`  ${statusIcon(gate.status)} [${gate.id}] ${gate.name}`);
+    hint(gate.detail);
+    if (gate.fixHint)
+      fix(gate.fixHint);
+  }
+  console.log("");
+  if (report.headlessWarning)
+    warn3(report.headlessWarning);
+  if (report.firstClosedGate) {
+    fail9(`first closed gate: [${report.firstClosedGate.id}] ${report.firstClosedGate.name}`);
+    return false;
+  }
+  const unknownCount = report.gates.filter((g) => g.status === "unknown").length;
+  if (unknownCount > 0) {
+    warn3(`no locally-observable gate is closed; ${unknownCount} gate(s) require a live session to confirm`);
+    return true;
+  }
+  ok3("all locally-observable gates pass");
   return true;
 }
 function checkVersion() {
@@ -59205,7 +59403,7 @@ function checkVersion() {
 }
 function hashFile(path3) {
   const hash = createHash9("sha256");
-  hash.update(readFileSync37(path3));
+  hash.update(readFileSync38(path3));
   return hash.digest("hex");
 }
 function collectFileHashes(rootDir) {
@@ -59223,12 +59421,12 @@ function collectFileHashes(rootDir) {
       hashes.set(relPath2, hashFile(fullPath));
     }
   };
-  if (existsSync44(rootDir))
+  if (existsSync45(rootDir))
     visit2(rootDir);
   return hashes;
 }
 function resolvePackageAssetDir(relativePath) {
-  return resolveCanonicalAssetDir(relativePath) ?? (existsSync44(join47(CWD, "config", relativePath)) ? join47(CWD, "config", relativePath) : null);
+  return resolveCanonicalAssetDir(relativePath) ?? (existsSync45(join47(CWD, "config", relativePath)) ? join47(CWD, "config", relativePath) : null);
 }
 function checkSkillDrift() {
   section3(`Skills \u2014 global default pool  (~/${relative5(homedir12(), GLOBAL_DEFAULT_SKILLS_DIR)})`);
@@ -59238,7 +59436,7 @@ function checkSkillDrift() {
     fix("restore config/skills/ or install package assets");
     return false;
   }
-  if (!existsSync44(GLOBAL_DEFAULT_SKILLS_DIR)) {
+  if (!existsSync45(GLOBAL_DEFAULT_SKILLS_DIR)) {
     fail9(`${GLOBAL_DEFAULT_SKILLS_DIR} missing`);
     fix("reinstall xtrm-tools (skills are vendored globally)");
     return false;
@@ -59273,7 +59471,7 @@ function checkSkillDrift() {
 }
 function checkUserOverlayDrift() {
   section3("User specialist overlays");
-  if (!existsSync44(USER_SPECIALISTS_DIR)) {
+  if (!existsSync45(USER_SPECIALISTS_DIR)) {
     ok3("no user overlays present");
     return true;
   }
@@ -59292,7 +59490,7 @@ function checkUserOverlayDrift() {
       warn3(`${name}: failed to parse \u2014 skipping drift check`);
       continue;
     }
-    if (!defaultPath || !existsSync44(defaultPath)) {
+    if (!defaultPath || !existsSync45(defaultPath)) {
       ok3(`${name}: user-only overlay (no package default to drift from)`);
       continue;
     }
@@ -59324,14 +59522,14 @@ function checkRuntimeDirs() {
   const jobsDir = join47(rootDir, "jobs");
   const readyDir = join47(rootDir, "ready");
   let allOk = true;
-  if (!existsSync44(rootDir)) {
+  if (!existsSync45(rootDir)) {
     warn3(".specialists/ not found in current project");
     fix("specialists init");
     allOk = false;
   } else {
     ok3(".specialists/ present");
     for (const [subDir, label] of [[jobsDir, "jobs"], [readyDir, "ready"]]) {
-      if (!existsSync44(subDir)) {
+      if (!existsSync45(subDir)) {
         warn3(`.specialists/${label}/ missing \u2014 auto-creating`);
         mkdirSync16(subDir, { recursive: true });
         ok3(`.specialists/${label}/ created`);
@@ -59346,7 +59544,7 @@ function checkClaudeMdFragments() {
   section3("CLAUDE.md fragments");
   const projectRoot = process.cwd();
   const claudeMd = join47(projectRoot, "CLAUDE.md");
-  if (!existsSync44(claudeMd)) {
+  if (!existsSync45(claudeMd)) {
     warn3("No CLAUDE.md in project root \u2014 skipping fragment check");
     return true;
   }
@@ -59400,7 +59598,7 @@ function checkClaudeMdFragments() {
   return allOk;
 }
 function parseDoctorArgs(argv) {
-  const opts = { json: false, drift: false, specialists: false, pr_drift: false, reap_dead_jobs: false, dry_run: false };
+  const opts = { json: false, drift: false, specialists: false, pr_drift: false, reap_dead_jobs: false, dry_run: false, channels: false };
   for (let i = 0;i < argv.length; i += 1) {
     const token = argv[i];
     if (token === "--json") {
@@ -59421,6 +59619,10 @@ function parseDoctorArgs(argv) {
     }
     if (token === "--reap-dead-jobs") {
       opts.reap_dead_jobs = true;
+      continue;
+    }
+    if (token === "--channels" || token === "--check-channels") {
+      opts.channels = true;
       continue;
     }
     if (token === "--dry-run") {
@@ -59587,7 +59789,7 @@ function compareVersions2(left, right) {
 }
 function setStatusError(statusPath) {
   try {
-    const raw = readFileSync37(statusPath, "utf8");
+    const raw = readFileSync38(statusPath, "utf8");
     const status = JSON.parse(raw);
     status.status = "error";
     writeFileSync20(statusPath, `${JSON.stringify(status, null, 2)}
@@ -59653,10 +59855,10 @@ function cleanupProcesses(jobsDir, dryRun) {
   };
   for (const jobId of entries) {
     const statusPath = join47(jobsDir, jobId, "status.json");
-    if (!existsSync44(statusPath))
+    if (!existsSync45(statusPath))
       continue;
     try {
-      const status = JSON.parse(readFileSync37(statusPath, "utf8"));
+      const status = JSON.parse(readFileSync38(statusPath, "utf8"));
       result.total += 1;
       if (status.status !== "running" && status.status !== "starting")
         continue;
@@ -59742,7 +59944,7 @@ function checkZombieJobs() {
   section3("Background jobs");
   hint(`watchdog mode: ${resolveWatchdogMode()}`);
   const jobsDir = join47(CWD, ".specialists", "jobs");
-  if (!existsSync44(jobsDir)) {
+  if (!existsSync45(jobsDir)) {
     hint("No .specialists/jobs/ \u2014 skipping");
     return true;
   }
@@ -59910,6 +60112,15 @@ ${bold12("specialists doctor --specialists")}
     await runDoctorReapDeadJobs(opts);
     return;
   }
+  if (opts.channels) {
+    console.log(`
+${bold12("specialists doctor --channels")}
+`);
+    const channelsOk = checkChannels();
+    console.log("");
+    process.exitCode = channelsOk ? 0 : 1;
+    return;
+  }
   if (subcommand && subcommand !== "--help" && subcommand !== "-h" && !subcommand.startsWith("--")) {
     console.error(`Unknown doctor subcommand: '${subcommand}'`);
     process.exit(1);
@@ -59938,7 +60149,7 @@ ${bold12("specialists doctor")}
   }
   console.log("");
 }
-var bold12 = (s) => `\x1B[1m${s}\x1B[0m`, dim14 = (s) => `\x1B[2m${s}\x1B[0m`, green14 = (s) => `\x1B[32m${s}\x1B[0m`, yellow12 = (s) => `\x1B[33m${s}\x1B[0m`, red7 = (s) => `\x1B[31m${s}\x1B[0m`, CWD, SPECIALISTS_DIR, USER_SPECIALISTS_DIR, XTRM_HOME, GLOBAL_DEFAULT_SKILLS_DIR;
+var bold12 = (s) => `\x1B[1m${s}\x1B[0m`, dim14 = (s) => `\x1B[2m${s}\x1B[0m`, green14 = (s) => `\x1B[32m${s}\x1B[0m`, yellow12 = (s) => `\x1B[33m${s}\x1B[0m`, red7 = (s) => `\x1B[31m${s}\x1B[0m`, CWD, SPECIALISTS_DIR, USER_SPECIALISTS_DIR, XTRM_HOME, GLOBAL_DEFAULT_SKILLS_DIR, EXPECTED_PLUGIN_NAME = "specialists", EXPECTED_MARKETPLACE_NAME = "xtrm";
 var init_doctor = __esm(() => {
   init_observability_sqlite();
   init_pr_drift_refresh();
@@ -59947,6 +60158,7 @@ var init_doctor = __esm(() => {
   init_dead_job_audit();
   init_loader();
   init_global_config();
+  init_channel_doctor();
   init_version_check();
   CWD = process.cwd();
   SPECIALISTS_DIR = join47(CWD, ".specialists");
@@ -59957,7 +60169,7 @@ var init_doctor = __esm(() => {
 
 // src/specialist/benchmarks.ts
 import { randomUUID as randomUUID4 } from "crypto";
-import { closeSync as closeSync5, existsSync as existsSync45, fsyncSync as fsyncSync2, mkdirSync as mkdirSync17, openSync as openSync6, readFileSync as readFileSync38, renameSync as renameSync6, writeFileSync as writeFileSync21 } from "fs";
+import { closeSync as closeSync5, existsSync as existsSync46, fsyncSync as fsyncSync2, mkdirSync as mkdirSync17, openSync as openSync6, readFileSync as readFileSync39, renameSync as renameSync6, writeFileSync as writeFileSync21 } from "fs";
 import { homedir as homedir13 } from "os";
 import { dirname as dirname21, join as join48 } from "path";
 async function loadBenchmarkSnapshot(options2 = {}) {
@@ -59992,10 +60204,10 @@ async function loadSourceSnapshot(source, options2, warn4) {
   return cached4 ? toSnapshot(cached4) : null;
 }
 function readCache2(path3, options2, warn4) {
-  if (!existsSync45(path3))
+  if (!existsSync46(path3))
     return null;
   try {
-    const parsed = JSON.parse(readFileSync38(path3, "utf8"));
+    const parsed = JSON.parse(readFileSync39(path3, "utf8"));
     assertSnapshotFresh(parsed, options2);
     return parsed;
   } catch (error) {
@@ -60113,7 +60325,7 @@ var init_benchmarks = __esm(() => {
 
 // src/specialist/model-probes.ts
 import { createHash as createHash10, randomUUID as randomUUID5 } from "crypto";
-import { mkdirSync as mkdirSync18, readdirSync as readdirSync22, readFileSync as readFileSync39, writeFileSync as writeFileSync22 } from "fs";
+import { mkdirSync as mkdirSync18, readdirSync as readdirSync22, readFileSync as readFileSync40, writeFileSync as writeFileSync22 } from "fs";
 import { homedir as homedir14 } from "os";
 import { dirname as dirname22, join as join49, resolve as resolve21 } from "path";
 async function runAgenticFollowthroughProbe(model, specName, opts = {}) {
@@ -60167,7 +60379,7 @@ function classifyProbe(metrics) {
 }
 function readJsonl(path3) {
   try {
-    return readFileSync39(path3, "utf8").split(`
+    return readFileSync40(path3, "utf8").split(`
 `).filter((line) => line.trim().length > 0).flatMap((line) => {
       try {
         return [JSON.parse(line)];
@@ -60256,7 +60468,7 @@ __export(exports_setup, {
   run: () => run40
 });
 import { spawnSync as spawnSync28 } from "child_process";
-import { readFileSync as readFileSync40 } from "fs";
+import { readFileSync as readFileSync41 } from "fs";
 function usage4() {
   return [
     "Usage: specialists setup <mode> [options]",
@@ -60515,7 +60727,7 @@ async function buildPlan(preset) {
 function readSetupInput() {
   if (process.stdin.isTTY)
     return {};
-  const raw = readFileSync40(0, "utf8").trim();
+  const raw = readFileSync41(0, "utf8").trim();
   if (raw.length === 0)
     return {};
   return SetupInputSchema.parse(JSON.parse(raw));
@@ -60541,7 +60753,7 @@ function scoreRow(row, preferredProviders) {
   return providerBonus + (row.quality_score ?? row.elo ?? 0);
 }
 function applyPlan(planPath, dryRun) {
-  const plan = SetupPlanSchema.parse(JSON.parse(readFileSync40(planPath, "utf8")));
+  const plan = SetupPlanSchema.parse(JSON.parse(readFileSync41(planPath, "utf8")));
   const path3 = getGlobalUserConfigPath().path;
   const changes = collectPlannedChanges(plan.writes);
   if (dryRun) {
@@ -60755,7 +60967,7 @@ var init_setup = __esm(() => {
 });
 
 // src/cli/serve-hot-reload.ts
-import { existsSync as existsSync46, readdirSync as readdirSync23, statSync as statSync15, watch as fsWatch } from "fs";
+import { existsSync as existsSync47, readdirSync as readdirSync23, statSync as statSync15, watch as fsWatch } from "fs";
 import { join as join50 } from "path";
 function specialistNameFromFile(file) {
   const match = file.match(/^(.+)\.specialist\.(json|yaml)$/);
@@ -60763,7 +60975,7 @@ function specialistNameFromFile(file) {
 }
 function snapshotMtimes(dir) {
   const out = new Map;
-  if (!existsSync46(dir))
+  if (!existsSync47(dir))
     return out;
   const entries = readdirSync23(dir).filter((name) => specialistNameFromFile(name) !== null);
   for (const name of entries) {
@@ -60825,7 +61037,7 @@ function createUserDirWatcher(opts) {
       for (const file of changed)
         queue(file);
     }, opts.pollMs);
-  } else if (existsSync46(opts.userDir)) {
+  } else if (existsSync47(opts.userDir)) {
     try {
       watcher = fsWatch(opts.userDir, { persistent: false }, (_eventType, filename) => {
         queue(filename ? String(filename) : null);
@@ -60868,7 +61080,7 @@ import { randomUUID as randomUUID6 } from "crypto";
 import { once } from "events";
 import { spawnSync as spawnSync29 } from "child_process";
 import { access, readdir as readdir2, readFile as readFile4, constants as constants3 } from "fs/promises";
-import { existsSync as existsSync47 } from "fs";
+import { existsSync as existsSync48 } from "fs";
 import { homedir as homedir15 } from "os";
 import { join as join51 } from "path";
 function createReadinessState() {
@@ -60886,7 +61098,7 @@ function pruneAuditFailures(state, now = Date.now()) {
   }
 }
 async function checkUserDirSpecs(userDir) {
-  if (!existsSync47(userDir))
+  if (!existsSync48(userDir))
     return "empty";
   const entries = await readdir2(userDir).catch(() => []);
   const specFiles = entries.filter((name) => name.endsWith(".specialist.json") || name.endsWith(".specialist.yaml"));
@@ -91075,7 +91287,7 @@ var init_use_specialist_tool = __esm(() => {
 });
 
 // src/activation/transport/pending-store.ts
-import { existsSync as existsSync48, mkdirSync as mkdirSync19, readdirSync as readdirSync24, readFileSync as readFileSync41, renameSync as renameSync7, unlinkSync as unlinkSync2, writeFileSync as writeFileSync23 } from "fs";
+import { existsSync as existsSync49, mkdirSync as mkdirSync19, readdirSync as readdirSync24, readFileSync as readFileSync42, renameSync as renameSync7, unlinkSync as unlinkSync2, writeFileSync as writeFileSync23 } from "fs";
 import { join as join52 } from "path";
 function projectDeliveryState(state) {
   if (state === "delivered")
@@ -91097,7 +91309,7 @@ function replyPath(repoRoot, activationId, messageId) {
   return join52(interactionsRoot(repoRoot), activationId, `${messageId}.reply.json`);
 }
 function writeAtomic(path3, value, exclusive = false) {
-  if (exclusive && existsSync48(path3)) {
+  if (exclusive && existsSync49(path3)) {
     throw new Error(`interaction record already exists: ${path3}`);
   }
   const tmp = `${path3}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
@@ -91112,11 +91324,11 @@ function writeAtomic(path3, value, exclusive = false) {
     throw err;
   }
 }
-function readJson2(path3) {
-  if (!existsSync48(path3))
+function readJson3(path3) {
+  if (!existsSync49(path3))
     return;
   try {
-    return JSON.parse(readFileSync41(path3, "utf-8"));
+    return JSON.parse(readFileSync42(path3, "utf-8"));
   } catch {
     return;
   }
@@ -91135,10 +91347,10 @@ function create(repoRoot, input2) {
   return record4;
 }
 function read(repoRoot, activationId, messageId) {
-  return readJson2(recordPath(repoRoot, activationId, messageId));
+  return readJson3(recordPath(repoRoot, activationId, messageId));
 }
 function readReply(repoRoot, activationId, messageId) {
-  return readJson2(replyPath(repoRoot, activationId, messageId));
+  return readJson3(replyPath(repoRoot, activationId, messageId));
 }
 function recordAttempt(repoRoot, activationId, messageId, attempt) {
   const record4 = read(repoRoot, activationId, messageId);
@@ -91185,13 +91397,13 @@ function recordReplyDelivery(repoRoot, activationId, messageId, reply) {
 }
 function listForActivation(repoRoot, activationId) {
   const dir = join52(interactionsRoot(repoRoot), activationId);
-  if (!existsSync48(dir))
+  if (!existsSync49(dir))
     return [];
   const views = [];
   for (const entry of readdirSync24(dir)) {
     if (!entry.endsWith(".json") || entry.endsWith(".reply.json") || entry.endsWith(".tmp"))
       continue;
-    const record4 = readJson2(join52(dir, entry));
+    const record4 = readJson3(join52(dir, entry));
     if (!record4)
       continue;
     views.push({ ...record4, reply: readReply(repoRoot, activationId, record4.messageId) });
@@ -91200,7 +91412,7 @@ function listForActivation(repoRoot, activationId) {
 }
 function listAll(repoRoot) {
   const root = interactionsRoot(repoRoot);
-  if (!existsSync48(root))
+  if (!existsSync49(root))
     return [];
   return readdirSync24(root).flatMap((activationId) => listForActivation(repoRoot, activationId)).sort((a, b) => a.createdAtMs - b.createdAtMs);
 }
@@ -91311,14 +91523,14 @@ ${detail.missing.map((m) => `  - ${m}`).join(`
 
 // src/activation/workspace-lease.ts
 import { createHash as createHash11 } from "crypto";
-import { existsSync as existsSync49, linkSync, mkdirSync as mkdirSync20, readFileSync as readFileSync42, realpathSync as realpathSync5, renameSync as renameSync8, unlinkSync as unlinkSync3, writeFileSync as writeFileSync24 } from "fs";
+import { existsSync as existsSync50, linkSync, mkdirSync as mkdirSync20, readFileSync as readFileSync43, realpathSync as realpathSync5, renameSync as renameSync8, unlinkSync as unlinkSync3, writeFileSync as writeFileSync24 } from "fs";
 import { join as join53 } from "path";
 function procLeaseProbe() {
   return {
-    canVerify: () => existsSync49("/proc/self/stat"),
+    canVerify: () => existsSync50("/proc/self/stat"),
     startTicks(pid) {
       try {
-        const stat2 = readFileSync42(`/proc/${pid}/stat`, "utf-8");
+        const stat2 = readFileSync43(`/proc/${pid}/stat`, "utf-8");
         const afterComm = stat2.slice(stat2.lastIndexOf(")") + 2).trim().split(/\s+/);
         const ticks = Number(afterComm[19]);
         return Number.isFinite(ticks) ? ticks : undefined;
@@ -91350,11 +91562,11 @@ function leasePath(workspace) {
 }
 function inspect(workspace, probe = procLeaseProbe()) {
   const path3 = leasePath(workspace);
-  if (!existsSync49(path3))
+  if (!existsSync50(path3))
     return { state: "free" };
   let lease;
   try {
-    lease = JSON.parse(readFileSync42(path3, "utf-8"));
+    lease = JSON.parse(readFileSync43(path3, "utf-8"));
     if (typeof lease?.holder?.pid !== "number")
       throw new Error("missing holder");
   } catch {
@@ -91508,13 +91720,13 @@ var init_workspace_lease = __esm(() => {
 });
 
 // src/activation/workspace-reconcile.ts
-import { appendFileSync as appendFileSync6, existsSync as existsSync50, mkdirSync as mkdirSync21, readdirSync as readdirSync25, readFileSync as readFileSync43, unlinkSync as unlinkSync4 } from "fs";
+import { appendFileSync as appendFileSync6, existsSync as existsSync51, mkdirSync as mkdirSync21, readdirSync as readdirSync25, readFileSync as readFileSync44, unlinkSync as unlinkSync4 } from "fs";
 import { join as join54 } from "path";
 function readLogAt(path3) {
-  if (!existsSync50(path3))
+  if (!existsSync51(path3))
     return [];
   const out = [];
-  for (const line of readFileSync43(path3, "utf-8").split(`
+  for (const line of readFileSync44(path3, "utf-8").split(`
 `)) {
     if (!line.trim())
       continue;
@@ -91534,7 +91746,7 @@ function leaseScopeFor(cwd) {
 }
 function projectUncertainWorkspaces(scope, probe = procLeaseProbe()) {
   const dir = leaseDir(scope);
-  if (!existsSync50(dir))
+  if (!existsSync51(dir))
     return [];
   const out = [];
   for (const entry of readdirSync25(dir)) {
@@ -91571,7 +91783,7 @@ function projectUncertainWorkspaces(scope, probe = procLeaseProbe()) {
 }
 function readLeaseFile(path3) {
   try {
-    const lease = JSON.parse(readFileSync43(path3, "utf-8"));
+    const lease = JSON.parse(readFileSync44(path3, "utf-8"));
     return typeof lease?.holder?.pid === "number" && typeof lease.worktreePath === "string" ? lease : undefined;
   } catch {
     return;
@@ -91591,9 +91803,9 @@ var init_workspace_reconcile = __esm(() => {
 
 // src/activation/build-identity.ts
 import { createHash as createHash12 } from "crypto";
-import { readFileSync as readFileSync44 } from "fs";
+import { readFileSync as readFileSync45 } from "fs";
 function hashFileBytes(path3) {
-  return createHash12("sha256").update(readFileSync44(path3)).digest("hex");
+  return createHash12("sha256").update(readFileSync45(path3)).digest("hex");
 }
 function shortBuildId(hash) {
   return hash.slice(0, BUILD_ID_BYTES);
@@ -91630,8 +91842,8 @@ function renderRejection(input2, build2) {
 }
 
 // src/tools/specialist/activation.tool.ts
-import { existsSync as existsSync51 } from "fs";
-import { fileURLToPath as fileURLToPath8 } from "url";
+import { existsSync as existsSync52 } from "fs";
+import { fileURLToPath as fileURLToPath9 } from "url";
 function toActivationView(snapshot, nowMs = Date.now()) {
   return {
     activation_id: snapshot.activationId,
@@ -91828,11 +92040,11 @@ var init_activation_tool = __esm(() => {
   init_types3();
   DIST_LIB_PATH = (() => {
     for (const candidate of ["./lib.js", "../../../dist/lib.js"]) {
-      const path3 = fileURLToPath8(new URL(candidate, import.meta.url));
-      if (existsSync51(path3))
+      const path3 = fileURLToPath9(new URL(candidate, import.meta.url));
+      if (existsSync52(path3))
         return path3;
     }
-    return fileURLToPath8(new URL("../../../dist/lib.js", import.meta.url));
+    return fileURLToPath9(new URL("../../../dist/lib.js", import.meta.url));
   })();
   LOADED_BUILD_ID = readBuildId(DIST_LIB_PATH);
   specialistDispatchSchema = objectType({
@@ -92365,7 +92577,7 @@ var init_peer_bridge = __esm(() => {
 });
 
 // src/activation/transport/roster.ts
-import { existsSync as existsSync52, readdirSync as readdirSync26, readFileSync as readFileSync45 } from "fs";
+import { existsSync as existsSync53, readdirSync as readdirSync26, readFileSync as readFileSync46 } from "fs";
 import { homedir as homedir17 } from "os";
 import { join as join56 } from "path";
 function defaultRosterDir() {
@@ -92378,12 +92590,12 @@ function procProbe() {
     startOf(pid) {
       try {
         if (bootSeconds === undefined) {
-          const match = /^btime (\d+)$/m.exec(readFileSync45("/proc/stat", "utf-8"));
+          const match = /^btime (\d+)$/m.exec(readFileSync46("/proc/stat", "utf-8"));
           if (!match)
             return;
           bootSeconds = Number(match[1]);
         }
-        const stat2 = readFileSync45(`/proc/${pid}/stat`, "utf-8");
+        const stat2 = readFileSync46(`/proc/${pid}/stat`, "utf-8");
         const afterComm = stat2.slice(stat2.lastIndexOf(")") + 2).trim().split(/\s+/);
         const ticksSinceBoot = Number(afterComm[19]);
         if (!Number.isFinite(ticksSinceBoot))
@@ -92440,14 +92652,14 @@ function scanRoster(options2 = {}) {
   const probe = options2.probe ?? procProbe();
   const live = [];
   const rejected = [];
-  if (!existsSync52(dir))
+  if (!existsSync53(dir))
     return { live, rejected };
   for (const file of readdirSync26(dir)) {
     if (!file.endsWith(".json"))
       continue;
     let registration;
     try {
-      registration = JSON.parse(readFileSync45(join56(dir, file), "utf-8"));
+      registration = JSON.parse(readFileSync46(join56(dir, file), "utf-8"));
     } catch {
       rejected.push({ file, reason: "unparsable" });
       continue;
@@ -92757,7 +92969,7 @@ var ASK_TOOL = "ask_coordinator", ESCALATE_TOOL = "escalate_to_coordinator", too
 });
 
 // src/activation/pi-sdk.ts
-import { existsSync as existsSync53 } from "fs";
+import { existsSync as existsSync54 } from "fs";
 import { join as join57 } from "path";
 import { pathToFileURL as pathToFileURL2 } from "url";
 function piSdkCandidates() {
@@ -92765,7 +92977,7 @@ function piSdkCandidates() {
   const globalDir = resolveGlobalNodeModulesDir2();
   if (globalDir) {
     const entry = join57(globalDir, PI_SDK_PACKAGE, "dist", "index.js");
-    if (existsSync53(entry))
+    if (existsSync54(entry))
       candidates.push(pathToFileURL2(entry).href);
   }
   return candidates;
@@ -93302,7 +93514,7 @@ var init_authority_store = __esm(() => {
 
 // src/activation/native-host.ts
 import { randomUUID as randomUUID8 } from "crypto";
-import { existsSync as existsSync54 } from "fs";
+import { existsSync as existsSync55 } from "fs";
 function extractTokenUsage(event) {
   const nested = nativeSessionTokenUsage(event);
   if (nested) {
@@ -93726,7 +93938,7 @@ class NativeActivationHost {
     if (this.workItemsDefault)
       return this.workItemsDefault;
     const dbPath = resolveWorkItemDbPath();
-    if (!existsSync54(dbPath)) {
+    if (!existsSync55(dbPath)) {
       throw new Error(`no Substrate work store at ${dbPath} (set XTRM_STATE_DB or initialize it via xt init / sb)`);
     }
     this.workItemsDefault = await openWorkItemBoundary({ dbPath });
@@ -94771,8 +94983,8 @@ var init_specialist_list_tool = __esm(() => {
 });
 
 // src/mcp/resume-tool.ts
-import { existsSync as existsSync55 } from "fs";
-import { fileURLToPath as fileURLToPath9 } from "url";
+import { existsSync as existsSync56 } from "fs";
+import { fileURLToPath as fileURLToPath10 } from "url";
 function createSpecialistResumeTool(getHost, getPusher) {
   return {
     name: "specialist_resume",
@@ -94821,11 +95033,11 @@ var init_resume_tool = __esm(() => {
   init_activation_tool();
   DIST_LIB_PATH2 = (() => {
     for (const candidate of ["./lib.js", "../../dist/lib.js"]) {
-      const path3 = fileURLToPath9(new URL(candidate, import.meta.url));
-      if (existsSync55(path3))
+      const path3 = fileURLToPath10(new URL(candidate, import.meta.url));
+      if (existsSync56(path3))
         return path3;
     }
-    return fileURLToPath9(new URL("../../dist/lib.js", import.meta.url));
+    return fileURLToPath10(new URL("../../dist/lib.js", import.meta.url));
   })();
   LOADED_BUILD_ID2 = readBuildId(DIST_LIB_PATH2);
   specialistResumeSchema = objectType({
@@ -96864,6 +97076,7 @@ async function run44() {
         "  9. drift check for stale managed mirrors (--check-drift / --drift)",
         " 10. PR drift refresh for tracked jobs (--pr-drift) \u2014 specialists-05q.2",
         " 11. dead-job audit + reap orphans (--reap-dead-jobs [--dry-run]) \u2014 specialists-05q.4",
+        " 12. Claude Code channel-wake 8-gate chain (--channels) \u2014 unitAI-xuclj.1",
         "",
         "Behavior:",
         "  - prints fix hints for failing checks",
@@ -96889,6 +97102,11 @@ async function run44() {
         "    --dry-run              Pair with --reap-dead-jobs: list findings without mutation.",
         "    --json                 Emit JSON envelope { dryRun, found:[{job_id, pid, reason,",
         "                            age_ms}], cancelled }.",
+        "  --channels               Walk the 8-gate Claude Code channel-wake chain (spec AM.3)",
+        "                            and name the first closed gate. Read-only: never writes",
+        "                            /etc/claude-code/managed-settings.json. Gates that are",
+        "                            properties of a live session (era, provider, feature flag,",
+        "                            --channels membership) are always reported unknown.",
         "",
         "Examples:",
         "  specialists doctor",
