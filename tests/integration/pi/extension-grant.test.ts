@@ -14,6 +14,7 @@
 // needs the pi binary, so it stays under the same guard.
 
 import { describe, expect, it } from 'vitest';
+import { catalogVersion } from '../../utils/catalog-pin.js';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
@@ -113,17 +114,42 @@ function cleanSpawnEnv(piBin: string) {
 describe('extension exposure sanity (no Pi needed)', () => {
   it('resolution lists exposed sources and the policy path resolves', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'ext-exposure-sanity-'));
+    const npmGlobalDir = mkdtempSync(join(tmpdir(), 'ext-exposure-npm-global-'));
+    const prevGlobalDir = process.env.PI_NPM_GLOBAL_DIR;
     writeFileSync(join(dir, 'index.mjs'), FIXTURE_EXTENSION, 'utf8');
     try {
-      const contract = resolveRuntimeToolContract({ level: 'READ_ONLY', extensionSources: [dir] });
-      expect(contract?.exposedExtensionSources).toEqual([dir]);
-      // Granted natives are unchanged (allowlist channel input).
-      expect(contract?.nativeTools).toEqual(['read', 'grep', 'find', 'ls']);
+      // Whether `pi-gitnexus` is installed is a property of the MACHINE — CI has none, and a
+      // catalog pin that no longer matches the install leaves it `loaded_unhealthy`. A healthy
+      // gitnexus turns on the `hard` deny that strips native grep/find/ls, so asserting one
+      // exact native list here would assert the host, not the resolver (SPECIALISTS-32). The
+      // fixture supplies the global module dir and exercises BOTH states deterministically.
+      process.env.PI_NPM_GLOBAL_DIR = npmGlobalDir;
+
+      const withoutGitnexus = resolveRuntimeToolContract({ level: 'READ_ONLY', extensionSources: [dir] });
+      expect(withoutGitnexus?.exposedExtensionSources).toEqual([dir]);
+      // No healthy extension: nothing is hard-denied, so every granted native is unchanged.
+      expect(withoutGitnexus?.nativeTools).toEqual(['read', 'grep', 'find', 'ls']);
+
+      mkdirSync(join(npmGlobalDir, 'pi-gitnexus'), { recursive: true });
+      writeFileSync(
+        join(npmGlobalDir, 'pi-gitnexus', 'package.json'),
+        JSON.stringify({ name: 'pi-gitnexus', version: catalogVersion('gitnexus') }),
+      );
+      const withGitnexus = resolveRuntimeToolContract({ level: 'READ_ONLY', extensionSources: [dir] });
+      expect(withGitnexus?.exposedExtensionSources).toEqual([dir]);
+      expect(withGitnexus?.extensions.gitnexus.status).toBe('available');
+      // A healthy gitnexus hard-denies the native search tools, which is the whole point of
+      // the explorer contract; `read` survives, and stays the allowlist channel input.
+      expect(withGitnexus?.nativeTools).toEqual(['read']);
+
       const policyPath = getExtensionToolPolicyExtensionPath();
       expect(policyPath).toBeTruthy();
       expect(existsSync(join(policyPath!, 'index.mjs'))).toBe(true);
     } finally {
+      if (prevGlobalDir === undefined) delete process.env.PI_NPM_GLOBAL_DIR;
+      else process.env.PI_NPM_GLOBAL_DIR = prevGlobalDir;
       rmSync(dir, { recursive: true, force: true });
+      rmSync(npmGlobalDir, { recursive: true, force: true });
     }
   });
 });

@@ -14,6 +14,7 @@ vi.mock('node:child_process', () => ({
 import { execFileSync, spawn } from 'node:child_process';
 import { PiAgentSession, StallTimeoutError, applyExtensionToolPolicyGate, deduplicateExtensionSources, resolveExecutionExtensionSelection, resolveRuntimeToolContract, validateWriteToolPathAgainstBoundary } from '../../../src/pi/session.js';
 import { __resetPiExtensionsPythonKernelPathCacheForTest } from '../../../src/pi/python-kernel-extension.js';
+import { catalogVersion } from '../../utils/catalog-pin.js';
 import { getExtensionToolPolicyExtensionPath, NATIVE_TOOLS_ENV_KEY } from '../../../src/pi/extension-tool-policy-extension.js';
 
 const mockSpawn = spawn as ReturnType<typeof vi.fn>;
@@ -111,6 +112,9 @@ async function withNpmGlobal<T>(setup: (npmGlobalDir: string) => void, run: (npm
     rmSync(npmGlobalDir, { recursive: true, force: true });
   }
 }
+
+/** These fixtures install a MATCHING pi-gitnexus so the extension resolves healthy. */
+const GITNEXUS_CATALOG_VERSION = catalogVersion('gitnexus');
 
 async function withGitnexusInstall<T>(version: string, run: (npmGlobalDir: string) => Promise<T>): Promise<T> {
   return withNpmGlobal(npmGlobalDir => {
@@ -735,7 +739,7 @@ describe('PiAgentSession', () => {
   });
 
   it('resolver is default-on and LOW parity keeps native read', async () => {
-    await withGitnexusInstall('0.6.1', async () => {
+    await withGitnexusInstall(GITNEXUS_CATALOG_VERSION, async () => {
       const session = await PiAgentSession.create({ model: 'gemini', permissionLevel: 'LOW' });
       await session.start();
 
@@ -753,7 +757,7 @@ describe('PiAgentSession', () => {
   });
 
   it('emits resolved --tools before injecting healthy GitNexus extension', async () => {
-    await withGitnexusInstall('0.6.1', async npmGlobalDir => {
+    await withGitnexusInstall(GITNEXUS_CATALOG_VERSION, async npmGlobalDir => {
       const session = await PiAgentSession.create({ model: 'gemini', permissionLevel: 'LOW' });
       await session.start();
 
@@ -769,9 +773,9 @@ describe('PiAgentSession', () => {
   it('loads exact GitNexus packagePath from available resolved tool contract', async () => {
     await withNpmGlobal(npmGlobalDir => {
       mkdirSync(join(npmGlobalDir, 'pi-gitnexus'), { recursive: true });
-      writeFileSync(join(npmGlobalDir, 'pi-gitnexus', 'package.json'), JSON.stringify({ name: 'pi-gitnexus', version: '0.6.1' }));
+      writeFileSync(join(npmGlobalDir, 'pi-gitnexus', 'package.json'), JSON.stringify({ name: 'pi-gitnexus', version: GITNEXUS_CATALOG_VERSION }));
       mkdirSync(join(npmGlobalDir, 'contract-gitnexus'), { recursive: true });
-      writeFileSync(join(npmGlobalDir, 'contract-gitnexus', 'package.json'), JSON.stringify({ name: 'contract-gitnexus', version: '0.6.1' }));
+      writeFileSync(join(npmGlobalDir, 'contract-gitnexus', 'package.json'), JSON.stringify({ name: 'contract-gitnexus', version: GITNEXUS_CATALOG_VERSION }));
     }, async npmGlobalDir => {
       const contractPackagePath = join(npmGlobalDir, 'contract-gitnexus');
       const session = await PiAgentSession.create({
@@ -807,7 +811,7 @@ describe('PiAgentSession', () => {
   });
 
   it('resolveRuntimeToolContract reports healthy extension state and exact --tools contract', async () => {
-    await withGitnexusInstall('0.6.1', async () => {
+    await withGitnexusInstall(GITNEXUS_CATALOG_VERSION, async () => {
       const contract = resolveRuntimeToolContract({ level: 'READ_ONLY' });
       expect(contract?.toolsFlag.split(',')).toEqual(expect.arrayContaining(['read', 'gitnexus_query', 'gitnexus_context']));
       expect(contract?.toolsFlag.split(',')).not.toContain('grep');
@@ -816,7 +820,7 @@ describe('PiAgentSession', () => {
   });
 
   it('resolveRuntimeToolContract reports disabled special case for bare-style opt-out', async () => {
-    await withGitnexusInstall('0.6.1', async () => {
+    await withGitnexusInstall(GITNEXUS_CATALOG_VERSION, async () => {
       const contract = resolveRuntimeToolContract({ level: 'READ_ONLY', excludeExtensions: ['pi-gitnexus'] });
       expect(contract?.toolsFlag).toBe('read,grep,find,ls');
       expect(contract?.extensions.gitnexus?.status).toBe('disabled');
@@ -879,7 +883,7 @@ describe('PiAgentSession', () => {
     });
 
     it('passes hard-denied search tools out of the native allowlist channel', async () => {
-      await withGitnexusInstall('0.6.1', async () => {
+      await withGitnexusInstall(GITNEXUS_CATALOG_VERSION, async () => {
         const { dir, cleanup } = makeExtensionDir();
         try {
           const session = await PiAgentSession.create({
@@ -956,7 +960,7 @@ describe('PiAgentSession', () => {
   });
 
   it('resolver LOW path keeps native read + GitNexus parity without Serena tools', async () => {
-    await withGitnexusInstall('0.6.1', async () => {
+    await withGitnexusInstall(GITNEXUS_CATALOG_VERSION, async () => {
       const session = await PiAgentSession.create({ model: 'gemini', permissionLevel: 'LOW' });
       await session.start();
 
@@ -980,7 +984,7 @@ describe('PiAgentSession', () => {
   });
 
   it("resolver READ_ONLY path honors explorer override and keeps native read", async () => {
-    await withGitnexusInstall('0.6.1', async () => {
+    await withGitnexusInstall(GITNEXUS_CATALOG_VERSION, async () => {
       const session = await PiAgentSession.create({
         model: 'gemini',
         permissionLevel: 'READ_ONLY',
@@ -1009,7 +1013,7 @@ describe('PiAgentSession', () => {
   });
 
   it("mapPermissionToTools('HIGH') includes built-in write, native read, and GitNexus mutating tools, no Serena", async () => {
-    await withGitnexusInstall('0.6.1', async () => {
+    await withGitnexusInstall(GITNEXUS_CATALOG_VERSION, async () => {
       const session = await PiAgentSession.create({ model: 'gemini', permissionLevel: 'HIGH' });
       await session.start();
 
@@ -1036,7 +1040,7 @@ describe('PiAgentSession', () => {
     const prevGlobalDir = process.env.PI_NPM_GLOBAL_DIR;
     try {
       mkdirSync(join(npmGlobalDir, 'pi-gitnexus'), { recursive: true });
-      writeFileSync(join(npmGlobalDir, 'pi-gitnexus', 'package.json'), JSON.stringify({ name: 'pi-gitnexus', version: '0.6.1' }));
+      writeFileSync(join(npmGlobalDir, 'pi-gitnexus', 'package.json'), JSON.stringify({ name: 'pi-gitnexus', version: GITNEXUS_CATALOG_VERSION }));
       mkdirSync(join(npmGlobalDir, 'pi-serena-tools'), { recursive: true });
       process.env.PI_NPM_GLOBAL_DIR = npmGlobalDir;
 
@@ -1060,7 +1064,7 @@ describe('PiAgentSession', () => {
     const prevGlobalDir = process.env.PI_NPM_GLOBAL_DIR;
     try {
       mkdirSync(join(npmGlobalDir, 'pi-gitnexus'), { recursive: true });
-      writeFileSync(join(npmGlobalDir, 'pi-gitnexus', 'package.json'), JSON.stringify({ name: 'pi-gitnexus', version: '0.6.1' }));
+      writeFileSync(join(npmGlobalDir, 'pi-gitnexus', 'package.json'), JSON.stringify({ name: 'pi-gitnexus', version: GITNEXUS_CATALOG_VERSION }));
       mkdirSync(join(npmGlobalDir, 'pi-serena-tools'), { recursive: true });
       process.env.PI_NPM_GLOBAL_DIR = npmGlobalDir;
 
