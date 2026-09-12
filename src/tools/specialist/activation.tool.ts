@@ -38,7 +38,7 @@ import * as z from 'zod';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { NativeActivationHost } from '../../activation/native-host.js';
-import { describeBuildIdentity, readBuildId } from '../../activation/build-identity.js';
+import { describeBuildIdentity, isBuildStale, readBuildId } from '../../activation/build-identity.js';
 import { validateContractText } from '../../activation/contract-sections.js';
 import { renderRejection } from '../../activation/rejection.js';
 import { THINKING_LEVELS } from '../../activation/types.js';
@@ -229,6 +229,26 @@ const DIST_LIB_PATH = (() => {
 })();
 const LOADED_BUILD_ID = readBuildId(DIST_LIB_PATH);
 
+/**
+ * Render a host-thrown `DispatchRejectedError` as an MCP tool result.
+ *
+ * The build comparison is computed ONCE and used for both jobs it serves: the
+ * `build` line attached to the envelope, and the verdict on whether staleness
+ * outranks the refusal's own reason (SPECIALISTS-2). A runtime that loaded an
+ * older `dist/lib.js` used to answer every dispatch with a work-store refusal
+ * that told the operator to install a package already installed — while the
+ * same payload carried the correct staleness line. The comparison existed; it
+ * just did not outrank the symptom.
+ */
+function renderDispatchRejection(error: DispatchRejectedError) {
+  const onDiskBuildId = readBuildId(DIST_LIB_PATH);
+  return renderRejection(
+    { reason: error.message, detail: error.detail, missing: error.detail.missing },
+    describeBuildIdentity(LOADED_BUILD_ID, onDiskBuildId),
+    isBuildStale(LOADED_BUILD_ID, onDiskBuildId),
+  );
+}
+
 export const specialistDispatchSchema = z.object({
   specialist: z.string().describe('Specialist name, e.g. codebase-explorer'),
   bead_id: z.string().optional().describe(
@@ -414,10 +434,7 @@ export function createSpecialistDispatchTool(
         // would reach Claude as an opaque MCP error string. Shape comes from the shared
         // renderer: `missing` is promoted top-level but never removed from `detail`.
         if (error instanceof DispatchRejectedError) {
-          return renderRejection(
-            { reason: error.message, detail: error.detail, missing: error.detail.missing },
-            describeBuildIdentity(LOADED_BUILD_ID, readBuildId(DIST_LIB_PATH)),
-          );
+          return renderDispatchRejection(error);
         }
         throw error;
       }
@@ -565,10 +582,7 @@ export function createSpecialistRetryTool(
         };
       } catch (error) {
         if (error instanceof DispatchRejectedError) {
-          return renderRejection(
-            { reason: error.message, detail: error.detail, missing: error.detail.missing },
-            describeBuildIdentity(LOADED_BUILD_ID, readBuildId(DIST_LIB_PATH)),
-          );
+          return renderDispatchRejection(error);
         }
         throw error;
       }

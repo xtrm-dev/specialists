@@ -91709,6 +91709,9 @@ function readBuildId(path3) {
     return UNKNOWN_BUILD_ID;
   }
 }
+function isBuildStale(loadedId, onDiskId) {
+  return loadedId !== UNKNOWN_BUILD_ID && onDiskId !== UNKNOWN_BUILD_ID && loadedId !== onDiskId;
+}
 function describeBuildIdentity(loadedId, onDiskId) {
   if (loadedId === UNKNOWN_BUILD_ID || onDiskId === UNKNOWN_BUILD_ID) {
     const known = loadedId !== UNKNOWN_BUILD_ID ? loadedId : onDiskId;
@@ -91723,15 +91726,34 @@ var BUILD_ID_BYTES = 12, UNKNOWN_BUILD_ID = "unknown";
 var init_build_identity = () => {};
 
 // src/activation/rejection.ts
-function renderRejection(input2, build2) {
+function supersedeStaleRefusal(payload, stale, build2) {
+  const reason = payload.reason;
+  if (!stale || typeof reason !== "string")
+    return payload;
+  if (!STALE_DOWNSTREAM_REASONS.some((downstream) => reason.includes(downstream)))
+    return payload;
+  const detail = typeof payload.detail === "object" && payload.detail !== null ? payload.detail : {};
+  return {
+    ...payload,
+    reason: build2 ? `${STALE_RUNTIME_REASON} (${build2})` : STALE_RUNTIME_REASON,
+    detail: { ...detail, refused_by_stale_runtime: reason }
+  };
+}
+function renderRejection(input2, build2, stale = false) {
+  const superseded = supersedeStaleRefusal({ reason: input2.reason, ...input2.detail ? { detail: input2.detail } : {} }, stale, build2);
   return {
     status: "rejected",
-    reason: input2.reason,
-    ...input2.detail ? { detail: input2.detail } : {},
+    reason: superseded.reason,
+    ...superseded.detail ? { detail: superseded.detail } : {},
     ...input2.missing?.length ? { missing: input2.missing } : {},
     ...build2 ? { build: build2 } : {}
   };
 }
+var STALE_DOWNSTREAM_REASONS, STALE_RUNTIME_REASON;
+var init_rejection = __esm(() => {
+  STALE_DOWNSTREAM_REASONS = ["work_item_store_unavailable"];
+  STALE_RUNTIME_REASON = "stale_runtime: the runtime serving this session was rebuilt after it loaded, so this " + "refusal came from superseded code. Restart the session, then retry the dispatch \u2014 do " + "not act on the refusal text below.";
+});
 
 // src/tools/specialist/activation.tool.ts
 import { existsSync as existsSync52 } from "fs";
@@ -91803,6 +91825,10 @@ function toActivationResultView(result) {
     completed_at: result.completedAt
   };
 }
+function renderDispatchRejection(error3) {
+  const onDiskBuildId = readBuildId(DIST_LIB_PATH);
+  return renderRejection({ reason: error3.message, detail: error3.detail, missing: error3.detail.missing }, describeBuildIdentity(LOADED_BUILD_ID, onDiskBuildId), isBuildStale(LOADED_BUILD_ID, onDiskBuildId));
+}
 function createSpecialistDispatchTool(getHost, getPusher) {
   return {
     name: "specialist_dispatch",
@@ -91873,7 +91899,7 @@ function createSpecialistDispatchTool(getHost, getPusher) {
         };
       } catch (error3) {
         if (error3 instanceof DispatchRejectedError) {
-          return renderRejection({ reason: error3.message, detail: error3.detail, missing: error3.detail.missing }, describeBuildIdentity(LOADED_BUILD_ID, readBuildId(DIST_LIB_PATH)));
+          return renderDispatchRejection(error3);
         }
         throw error3;
       }
@@ -91928,6 +91954,7 @@ var init_activation_tool = __esm(() => {
   init_zod();
   init_build_identity();
   init_contract_sections();
+  init_rejection();
   init_types3();
   init_types3();
   DIST_LIB_PATH = (() => {
@@ -94768,6 +94795,7 @@ var init_lib = __esm(() => {
   init_citation_evidence();
   init_workspace_lease();
   init_workspace_reconcile();
+  init_rejection();
 });
 
 // src/tools/specialist/specialist_list.tool.ts
@@ -94935,6 +94963,7 @@ var DIST_LIB_PATH2, LOADED_BUILD_ID2, specialistResumeSchema;
 var init_resume_tool = __esm(() => {
   init_zod();
   init_build_identity();
+  init_rejection();
   init_types3();
   init_activation_tool();
   DIST_LIB_PATH2 = (() => {

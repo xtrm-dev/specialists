@@ -116,6 +116,7 @@ export { evaluateBeadReadiness, extractSections } from './activation/bead-gate.j
 export {
   describeBuildIdentity,
   hashFileBytes,
+  isBuildStale,
   readBuildId,
   shortBuildId,
   BUILD_ID_BYTES,
@@ -171,5 +172,9 @@ export { leaseScopeFor } from './activation/workspace-reconcile.js';
 
 // Shared refusal renderer (unitAI-t2kol.4): the single gate-outcome shape both
 // coordinator surfaces use. MCP imports it; the Pi extension follows (recorded follow-up).
-export { renderRejection } from './activation/rejection.js';
-export type { RejectionInput } from './activation/rejection.js';
+export {
+  renderRejection,
+  supersedeStaleRefusal,
+  STALE_RUNTIME_REASON,
+} from './activation/rejection.js';
+export type { RejectionInput, RefusalPayload } from './activation/rejection.js';

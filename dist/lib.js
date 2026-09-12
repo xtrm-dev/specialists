@@ -22530,6 +22530,9 @@ function readBuildId(path) {
     return UNKNOWN_BUILD_ID;
   }
 }
+function isBuildStale(loadedId, onDiskId) {
+  return loadedId !== UNKNOWN_BUILD_ID && onDiskId !== UNKNOWN_BUILD_ID && loadedId !== onDiskId;
+}
 function describeBuildIdentity(loadedId, onDiskId) {
   if (loadedId === UNKNOWN_BUILD_ID || onDiskId === UNKNOWN_BUILD_ID) {
     const known = loadedId !== UNKNOWN_BUILD_ID ? loadedId : onDiskId;
@@ -22542,11 +22545,27 @@ function describeBuildIdentity(loadedId, onDiskId) {
 }
 
 // src/activation/rejection.ts
-function renderRejection(input, build) {
+var STALE_DOWNSTREAM_REASONS = ["work_item_store_unavailable"];
+var STALE_RUNTIME_REASON = "stale_runtime: the runtime serving this session was rebuilt after it loaded, so this " + "refusal came from superseded code. Restart the session, then retry the dispatch — do " + "not act on the refusal text below.";
+function supersedeStaleRefusal(payload, stale, build) {
+  const reason = payload.reason;
+  if (!stale || typeof reason !== "string")
+    return payload;
+  if (!STALE_DOWNSTREAM_REASONS.some((downstream) => reason.includes(downstream)))
+    return payload;
+  const detail = typeof payload.detail === "object" && payload.detail !== null ? payload.detail : {};
+  return {
+    ...payload,
+    reason: build ? `${STALE_RUNTIME_REASON} (${build})` : STALE_RUNTIME_REASON,
+    detail: { ...detail, refused_by_stale_runtime: reason }
+  };
+}
+function renderRejection(input, build, stale = false) {
+  const superseded = supersedeStaleRefusal({ reason: input.reason, ...input.detail ? { detail: input.detail } : {} }, stale, build);
   return {
     status: "rejected",
-    reason: input.reason,
-    ...input.detail ? { detail: input.detail } : {},
+    reason: superseded.reason,
+    ...superseded.detail ? { detail: superseded.detail } : {},
     ...input.missing?.length ? { missing: input.missing } : {},
     ...build ? { build } : {}
   };
@@ -23278,6 +23297,7 @@ export {
   toPendingAskView,
   toActivationView,
   toActivationResultView,
+  supersedeStaleRefusal,
   shortBuildId,
   runScriptSpecialist as runScript,
   resolveWorkItemDbPath,
@@ -23293,6 +23313,7 @@ export {
   openWorkItemBoundary,
   openSubstrateDb,
   leaseScopeFor,
+  isBuildStale,
   hashFileBytes,
   extractSections,
   evaluateBeadReadiness,
@@ -23306,6 +23327,7 @@ export {
   UNKNOWN_BUILD_ID,
   THINKING_LEVELS,
   SpecialistLoader,
+  STALE_RUNTIME_REASON,
   RuntimeEventPusher,
   ResultNotValidatedError,
   NativeActivationHost,

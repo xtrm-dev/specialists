@@ -46,8 +46,10 @@ import {
   SpecialistLoader,
   THINKING_LEVELS,
   admitCoordinatorToolCall,
+  isBuildStale,
   leaseScopeFor,
   readBuildId,
+  supersedeStaleRefusal,
   toActivationResultView,
   toActivationView,
   toPendingAskView,
@@ -750,7 +752,14 @@ export function annexBuildIdentity(
   loadedId = LOADED_BUILD_ID,
   onDiskId = readBuildId(DIST_LIB_PATH),
 ) {
-  return { ...payload, build: describeBuildIdentity(loadedId, onDiskId) };
+  // SPECIALISTS-2: the same comparison that renders the build line decides whether
+  // staleness outranks the refusal's own reason. A stale runtime used to answer every
+  // dispatch with a work-store refusal telling the operator to install a package that
+  // was already installed, while this very payload carried the staleness line.
+  return {
+    ...supersedeStaleRefusal(payload, isBuildStale(loadedId, onDiskId), describeBuildIdentity(loadedId, onDiskId)),
+    build: describeBuildIdentity(loadedId, onDiskId),
+  };
 }
 
 /** Render an inline-contract gate refusal as a structured tool result. */
