@@ -2,17 +2,21 @@
 title: MCP Tools Reference
 scope: mcp-tools
 category: reference
-version: 2.2.0
-updated: 2026-09-09
-synced_at: d6dbaf1f
-description: MCP tool contract for the Specialists server.
+version: 3.0.0
+updated: 2026-09-12
+description: MCP tool contract for the Specialists server, regenerated from the live registration surface.
 source_of_truth_for:
-  - "src/server.ts"
-  - "src/tools/specialist/use_specialist.tool.ts"
+  - "src/mcp/v2-server.ts"
+  - "src/mcp/channel.ts"
+  - "src/mcp/resume-tool.ts"
   - "src/tools/specialist/activation.tool.ts"
   - "src/tools/specialist/specialist_status.tool.ts"
   - "src/tools/specialist/specialist_list.tool.ts"
+  - "src/tools/substrate/issue.tool.ts"
+  - "src/tools/substrate/journal.tool.ts"
+  - "src/tools/substrate/provenance.tool.ts"
   - "src/activation/rejection.ts"
+  - "config/pi-extensions/specialist-subagents/index.mjs"
 domain:
   - mcp
   - tools
@@ -20,64 +24,45 @@ domain:
 
 # MCP Tools Reference
 
-This server exposes six MCP tools over stdio: one legacy synchronous path
-(`use_specialist`) and five native-path tools over the in-process
-`NativeActivationHost` (no `sp` child process is spawned).
+The server (`src/mcp/v2-server.ts`, `buildV2Server`) registers its tools
+explicitly in one array. There are two surfaces:
+
+- **Core Specialists activation tools (always registered, 6):**
+  `specialist_status`, `specialist_dispatch`, `specialist_reply`,
+  `specialist_resume`, `specialist_stop_activation`, `specialist_list`.
+- **Specialists-hosted Substrate service tools (conditional, 3):**
+  `substrate_issue`, `substrate_journal`, `substrate_provenance`. Admitted
+  only when Substrate resolves (`resolveSubstrate()` reports available) or
+  when `XTRM_SUBSTRATE_TOOLS=1` is set for inspection. On an install without
+  Substrate they are absent from `tools/list` by design, not by failure.
+
+No `sp` child process is spawned by any of these tools. All activation tools
+call the in-process `NativeActivationHost` directly.
 
 ## Active tool inventory
 
 | Tool | Purpose |
 |---|---|
-| `use_specialist` | legacy synchronous specialist run, result returned directly in MCP response |
-| `specialist_status` | system health + native Fleet: activations, pending asks, recorded results |
+| `specialist_status` | authoritative read: health plus native Fleet (activations, pending asks, recorded results) |
 | `specialist_dispatch` | admit-and-start a Specialist on the native runtime (async; returns on admission) |
 | `specialist_reply` | answer an outstanding ask by `message_id` |
+| `specialist_resume` | resume a settled or waiting activation in the same session (id kept, attempt advances) |
 | `specialist_stop_activation` | stop and dispose a native activation |
 | `specialist_list` | resolved Specialist registry with per-row dispatchability |
+| `substrate_issue` | read and write XTRM work items through Substrate IssueService (op-discriminated; conditional) |
+| `substrate_journal` | Substrate journal service (conditional) |
+| `substrate_provenance` | Substrate provenance service (conditional) |
 
-Inventory verified against live stdio `tools/list` (6 tools registered).
-
-## `use_specialist`
-
-Legacy path: runs a Specialist through `SpecialistRunner` in foreground and
-returns final output directly in the MCP result.
-
-### Input schema
-
-Source: `src/tools/specialist/use_specialist.tool.ts` (`useSpecialistSchema`).
-
-```ts
-z.object({
-  name: z.string().describe('Specialist identifier (e.g. codebase-explorer)'),
-  prompt: z.string().optional().describe('The task or question for the specialist'),
-  bead_id: z.string().optional().describe('Use an existing bead as the specialist prompt'),
-  variables: z.record(z.string()).optional().describe('Additional $variable substitutions'),
-  backend_override: z.string().optional().describe('Force a specific backend (gemini, qwen, anthropic)'),
-  autonomy_level: z.enum(['READ_ONLY', 'LOW', 'MEDIUM', 'HIGH']).optional().describe('Override permission level for this invocation'),
-  context_depth: z.number().min(0).max(10).optional().describe('Depth of blocker context injection (0 = none, 1 = immediate blockers, etc.)'),
-}).refine((input) => Boolean(input.prompt?.trim() || input.bead_id), {
-  message: 'Either prompt or bead_id is required',
-  path: ['prompt'],
-})
-```
-
-### Behavior highlights
-
-- `bead_id` links execution to an existing bead and uses it as task context.
-- A `bead_id` that `specialist_dispatch` would REFUSE (draft, closed, or
-  missing a contract section) still runs here, but the result carries a
-  `readiness_warning` naming what is missing. That divergence is deprecated:
-  prefer `specialist_dispatch` for contract-gated work.
+Inventory derived from the `tools` array in `src/mcp/v2-server.ts`: six core
+factories plus three Substrate factories behind the availability gate.
 
 ## `specialist_status`
 
-Read-only projection: backend circuit-breaker states, loaded specialists and
-staleness, DB-backed background jobs, plus the native Fleet
-(`activations`, `pending_asks`) and recorded completions
-(`activation_results`). Legacy `sp run` jobs are reported here read-only;
-they remain CLI-managed.
-
-### Input schema
+The authoritative read. Reports backend circuit-breaker states, loaded
+specialist count, the native Fleet (`activations`, `pending_asks`), recorded
+completions (`activation_results`), outstanding peer-channel interactions
+(`pending_interactions`), and workspaces needing reconciliation
+(`uncertain_workspaces`).
 
 Source: `src/tools/specialist/specialist_status.tool.ts` (inline schema; the
 tool takes no arguments).
@@ -89,17 +74,20 @@ z.object({})
 ### Behavior highlights
 
 - `activations` projects the host's own snapshots (`toActivationView`), so an
-  MCP-dispatched activation reads back identically to a CLI-dispatched one.
+  MCP-dispatched activation reads back identically to a Pi-dispatched one.
 - `pending_asks` projects outstanding questions (`toPendingAskView`) — answer
   them with `specialist_reply`.
 - `activation_results` projects the same validated `ActivationResult` the push
-  channel serialises (`toActivationResultView`); see "Push as projection".
+  channel serialises (`toActivationResultView`); see "Notification model".
+- `specialist_status` is the authority. A pushed completion is a projection of
+  the same object readable here; a coordinator that never received the push
+  reads the identical result here.
 
 ## `specialist_dispatch`
 
-Dispatch a Specialist onto the in-process runtime. Provide EITHER `bead_id`
-(an existing READY bead) OR `contract` (an inline contract: the same
-readiness gate runs first, then a bead is created and dispatched). Never both.
+Dispatch a Specialist onto the in-process runtime. Provide EITHER a work
+locator OR `contract` (an inline contract: the same readiness gate runs
+first, then a work record is created and dispatched). Never both.
 
 ### Input schema
 
@@ -109,21 +97,19 @@ Source: `src/tools/specialist/activation.tool.ts`
 ```ts
 z.object({
   specialist: z.string().describe('Specialist name, e.g. codebase-explorer'),
+  issue_ref: z.string().optional().describe(
+    'The locator of an EXISTING READY issue — a Substrate Issue locator such as ' +
+    'XTRM-227, XTRM-184.2.3, an iss_... id, a historical locator, or an imported ' +
+    'Beads alias. This is NOT an address on the live bd board. Mutually exclusive ' +
+    'with contract: provide exactly one of a locator or contract, never both.',
+  ),
   bead_id: z.string().optional().describe(
-    "The id of an EXISTING READY Bead — this activation's task contract, a COMPLETE " +
-    '7-section contract (PROBLEM, SUCCESS, SCOPE, NON_GOALS, CONSTRAINTS, VALIDATION, ' +
-    'OUTPUT) plus a SCRUTINY level, which must be exactly one of LOW, MEDIUM, HIGH or ' +
-    'CRITICAL. That is EIGHT required parts, not seven; SCRUTINY is the one most often ' +
-    'left out. Write each section as a heading: either the section name on its own line ' +
-    'with its body beneath, or `PROBLEM: the body` on one line. Both forms are accepted. ' +
-    'A draft or incomplete Bead is refused before any model turn. No free-form task ' +
-    'text is accepted: a task that needs more definition belongs in the Bead (see the ' +
-    'planning skill). Mutually exclusive with contract: provide exactly one of bead_id ' +
-    'or contract, never both.',
+    'Permanent compatibility alias for issue_ref: the same locator value under ' +
+    'its historical name. Prefer issue_ref in new calls.',
   ),
   contract: z.string().optional().describe(
-    'An INLINE task contract, used instead of bead_id: the SAME readiness gate ' +
-    'runs first, then a Bead is created from it and dispatched. The contract ' +
+    'An INLINE task contract, used instead of a locator: the SAME readiness gate ' +
+    'runs first, then a work record is created from it and dispatched. The contract ' +
     'must contain all seven sections — PROBLEM, SUCCESS, SCOPE, NON_GOALS, ' +
     'CONSTRAINTS, VALIDATION, OUTPUT — plus a SCRUTINY level, which must be exactly ' +
     'one of LOW, MEDIUM, HIGH or CRITICAL. Note that this is EIGHT required parts, ' +
@@ -133,15 +119,15 @@ z.object({
     'A contract missing any section is refused and nothing is created.',
   ),
   title: z.string().optional().describe(
-    'Optional title for the Bead created from `contract` (default: derived from PROBLEM). ' +
-    'Ignored when bead_id is given.',
+    'Optional title for the record created from `contract` (default: derived from PROBLEM). ' +
+    'Ignored when a locator is given.',
   ),
   epic_context_depth: z.number().optional().describe(
-    'Walk bead.parent UP this many hops (1 = immediate parent epic, 2 = epic + ' +
+    'Walk issue.parent UP this many hops (1 = immediate parent epic, 2 = epic + ' +
     "grand-epic) and render each ancestor contract into the turn-1 prompt as an '" +
     "'## Epic lineage' section. Must be 1 or 2; anything else is refused. Omit for " +
-    'single-bead dispatch with no lineage. Dropped for beads auto-created from an ' +
-    'inline contract (a fresh bead has no parent).',
+    'single-issue dispatch with no lineage. Dropped for records auto-created from an ' +
+    'inline contract (a fresh record has no parent).',
   ),
   model_override: z.string().optional().describe(
     'Override the configured model for THIS activation only. An unavailable model is refused before the session is created, never silently replaced.',
@@ -162,13 +148,13 @@ z.object({
 ### Behavior highlights
 
 - Admit-not-block: returns once the activation is ADMITTED and started, NOT
-  when it finishes — poll `specialist_status` for state and for any question
-  it raises, and answer with `specialist_reply`.
-- The bead is the prompt and MUST be a complete 7-section contract plus a
-  SCRUTINY level; a draft or incomplete bead is refused before a model turn is
-  spent. If the bead is not dispatchable, fix the bead (planning skill), not
-  the dispatch.
-- An inline `contract` that passes the gate creates a durable board record;
+  when it finishes — learn about completion and questions through the
+  notification model below, and answer with `specialist_reply`.
+- The issue is the prompt and MUST be a complete 7-section contract plus a
+  SCRUTINY level; a draft or incomplete issue is refused before a model turn
+  is spent. If the issue is not dispatchable, fix the issue (planning skill),
+  not the dispatch.
+- An inline `contract` that passes the gate creates a durable work record;
   the result carries `created_bead_id` plus a `created_bead_note` — track it,
   it is not cleaned up automatically.
 - `epic_context_depth` must be 1 or 2; anything else is a structured refusal
@@ -185,8 +171,6 @@ from `specialist_status.pending_asks`). The answer returns as that tool
 call's result, so the Specialist continues with its context intact. An
 unknown or already-answered `message_id` is reported, not silently accepted.
 
-### Input schema
-
 Source: `src/tools/specialist/activation.tool.ts`
 (`specialistReplySchema`).
 
@@ -199,12 +183,31 @@ z.object({
 })
 ```
 
+## `specialist_resume`
+
+Resume a settled or waiting activation in the SAME session. Not a second
+dispatch: the `activation_id` is kept and the `attempt_id` advances, so the
+child keeps its context and its workspace lease rather than starting over.
+Use this after answering a question, or to give a settled Specialist more
+work. A disposed activation cannot be resumed — that is what makes
+`specialist_stop_activation` the irreversible one.
+
+Source: `src/mcp/resume-tool.ts` (`specialistResumeSchema`; mirrors the Pi
+extension tool of the same name field-for-field).
+
+```ts
+z.object({
+  activation_id: z.string().describe('The settled or waiting activation to resume.'),
+  prompt: z.string().describe('The new instruction for the resumed Specialist.'),
+})
+```
+
 ## `specialist_stop_activation`
 
 Stop and dispose a native activation. This is the only ordinary path to
-disposal — a settled Specialist is waiting and resumable, not finished.
-
-### Input schema
+disposal — a settled Specialist is waiting and resumable, not finished. For
+legacy CLI-started jobs, which are separate processes, use the CLI surface
+instead (see "Retired and out-of-scope surfaces").
 
 Source: `src/tools/specialist/activation.tool.ts`
 (`specialistStopSchema`).
@@ -223,8 +226,6 @@ Compact one line per specialist by default; pass `name` for one full record
 or `detail: "full"` for everything (large — prefer `name`). The loader is
 authoritative; dispatchability reuses the shared admission checks, never a
 second resolver.
-
-### Input schema
 
 Source: `src/tools/specialist/specialist_list.tool.ts`
 (`specialistListSchema`).
@@ -245,6 +246,73 @@ z.object({
   `specialist_dispatch`; do not shell out to the specialists CLI.
 - Write-capable tiers (MEDIUM/HIGH) still need the workspace lease at dispatch
   time.
+
+## Substrate service tools
+
+These tools are hosted by this server but served by Substrate: this server is
+transport, Substrate is the authority. They appear in `tools/list` only when
+Substrate resolves or `XTRM_SUBSTRATE_TOOLS=1` is set.
+
+- `substrate_issue` — one op-discriminated tool over IssueService (`op`:
+  `resolve`, `get`, `create`, `update_contract`, `project_resolve`,
+  `project_create`, `link_checkout`, `list_links`). `create` and
+  `update_contract` mutate. Source:
+  `src/tools/substrate/issue.tool.ts` (`substrateIssueSchema`).
+- `substrate_journal` — Substrate journal service. Source:
+  `src/tools/substrate/journal.tool.ts`.
+- `substrate_provenance` — Substrate provenance service. Source:
+  `src/tools/substrate/provenance.tool.ts`.
+
+When Substrate is unresolvable the tools answer with the shared unavailable
+payload rather than failing at registration; see `src/substrate/services.ts`.
+
+## Retired and out-of-scope surfaces
+
+- **`use_specialist` (retired).** The legacy synchronous specialist run was
+  removed: its module (`src/tools/specialist/use_specialist.tool.ts`) no
+  longer exists and the name is not registered by `buildV2Server`. There is
+  no synchronous dispatch path; use `specialist_dispatch` plus the
+  notification model below.
+- **Legacy `sp` CLI job tools.** The CLI-managed job tools (`stop_specialist`,
+  `resume_specialist`, `feed_specialist`, `steer_specialist`,
+  `list_specialists`, `specialist_init`) are not registered on this MCP
+  server. They are documented with the CLI in
+  [cli-reference.md](cli-reference.md).
+- **Pi extension tools.** The Pi extension
+  (`config/pi-extensions/specialist-subagents/index.mjs`) exposes its own
+  `specialist_*` tools over the same `NativeActivationHost`, including a
+  `specialist_retry` verb this MCP server does not register. That surface is
+  documented with the Pi integration, not here.
+
+## Notification model
+
+Primary, authority, fallback — in that order:
+
+1. **Channel wake (primary).** Actionable transitions (settled, failed,
+   escalation, clarification) push a `notifications/claude/channel` frame.
+   The frame is a REFERENCE, never the payload: it names the activation and
+   tells the coordinator to call `specialist_status`. Delivery is
+   unacknowledged and gated (capability, protocol era, provider, flags); only
+   a legacy-era connection can carry it. Source: `src/mcp/channel.ts`
+   (`withChannelPush`, `buildChannelFrame`).
+2. **`specialist_status` (authoritative read).** The push can be unroutable,
+   held, or refused without ever reporting delivery — so the validated result
+   must be readable without one. `activation_results` projects the SAME
+   object the push serialises. A coordinator that never received the push
+   reads the identical result here; the notification is a projection, never
+   the authority.
+3. **Polling (degraded fallback).** Reading `specialist_status` on a loop is
+   the path taken when no coordinator is listening — suppressed wake
+   (`--no-specialist-wake` on Pi), unroutable push, or a client with no
+   notification path. An ask with no notification stays `pending` and stays
+   readable here. Polling is what remains when the first two lanes fail, not
+   the normal discovery mechanism. The Pi extension wakes via `sendMessage`
+   with `triggerTurn` instead of polling; see
+   `config/pi-extensions/specialist-subagents/index.mjs`.
+
+Provider limits on this transport (preview status, platform availability,
+untrusted inbound, no-ack delivery) are stated in
+[claude-channel-constraints.md](claude-channel-constraints.md).
 
 ## Refusal shape
 
@@ -276,13 +344,6 @@ export function renderRejection(input: RejectionInput, build?: string) {
 - `build` carries the loaded-vs-on-disk build identity
   (`describeBuildIdentity`), so a stale-build refusal is distinguishable from
   a broken-contract refusal.
-- Example — inline contract missing sections:
-  `{"status":"rejected","reason":"bead is not a usable task contract: ...",
-  "missing":["PROBLEM",...],"build":{...}}`.
-- Example — draft bead:
-  `{"status":"rejected","reason":"bead_contract_incomplete",
-  "detail":{"specialist":"...","beadId":"...","note":"bead contract is marked
-  draft — ..."},"build":{...}}`.
 
 ## Coordinator behavior notes
 
@@ -291,20 +352,16 @@ export function renderRejection(input: RejectionInput, build?: string) {
   result, then the notification is pushed); the dispatching call never blocks
   on it, because a coordinator blocked waiting on completion cannot answer the
   clarification that would unblock it.
-- Poll-for-asks: until a push channel is confirmed live, learn about questions
-  by reading — poll `specialist_status.pending_asks` and answer with
-  `specialist_reply`. A reader that cannot see the ask leaves the Specialist
-  stuck forever.
+- Wake-first: Channel wake is the primary discovery mechanism and
+  `specialist_status` is the authority. Poll only when the wake lane is known
+  dead (suppressed, unroutable, or unsupported); a reader that cannot see the
+  ask leaves the Specialist stuck forever.
 - Push-as-projection: a pushed completion serialises the SAME validated
-  `ActivationResult` that `specialist_status.activation_results` projects. A
-  coordinator that never received the push reads the identical object here; the
-  notification is a projection, never the authority. Provider limits on this
-  transport (preview status, platform availability, untrusted inbound, no-ack
-  delivery) are stated in [claude-channel-constraints.md](claude-channel-constraints.md).
+  `ActivationResult` that `specialist_status.activation_results` projects.
 
 ## See also
 
-- [cli-reference.md](cli-reference.md)
+- [cli-reference.md](cli-reference.md) — legacy `sp` CLI job tools
 - [workflow.md](workflow.md)
 - [background-jobs.md](background-jobs.md)
 - [claude-channel-constraints.md](claude-channel-constraints.md)
