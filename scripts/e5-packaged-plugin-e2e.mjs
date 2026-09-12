@@ -28,8 +28,13 @@ import { fileURLToPath } from 'node:url';
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PROTOCOL = '2026-07-28';
+// Deliberately hardcoded, and deliberately NOT derived from the server's own surface:
+// this is the external contract assertion. Deriving it from the thing under test would make
+// it tautological and unable to catch exactly the drift it exists to catch. It DOES mean the
+// list must be updated in the same change that alters the tool surface — `use_specialist`
+// was removed in #342 and this list was not, which is how the harness went red unnoticed
+// (unitAI-uz0bd).
 const EXPECTED_TOOLS = [
-  'use_specialist',
   'specialist_status',
   'specialist_dispatch',
   'specialist_reply',
@@ -250,7 +255,7 @@ try {
     !tools.error &&
       JSON.stringify((tools.result?.tools ?? []).map((t) => t.name)) ===
         JSON.stringify(EXPECTED_TOOLS),
-    `7-tool surface incl. specialist_resume, deterministic order`,
+    `${EXPECTED_TOOLS.length}-tool surface incl. specialist_resume, deterministic order`,
   );
 
   const legacy = await call('initialize', {

@@ -192,12 +192,22 @@ claude mcp list | grep specialists
 # plugin:specialists:specialists: ... - ✔ Connected
 ```
 
-**To dispatch, export `XTRM_SUBSTRATE_DIR` before launching the session.** It points at an
-`@xtrm/substrate` checkout, which supplies the work-item store holding the contract. Without
-it `specialist_dispatch` is refused with `work_item_store_unavailable`, while
-`specialist_status` and `specialist_list` keep working — so the plugin looks healthy until
-you try to dispatch. The value must be in the environment the session is *launched* with; a
-shell export afterwards does not reach the already-running MCP server.
+**Dispatch needs the Substrate work store, which supplies the contract.** It is resolved in
+this order: an explicit `XTRM_SUBSTRATE_DIR`, then normal module resolution of the installed
+`@jaggerxtrm/substrate` package, then failure. Installing the package is enough — no
+environment variable is required:
+
+```bash
+npm install @jaggerxtrm/substrate
+```
+
+Set `XTRM_SUBSTRATE_DIR` only to override that with a local checkout, for example when
+developing Substrate itself. It wins over the installed package when set.
+
+If neither is available, `specialist_dispatch` is refused with `work_item_store_unavailable`
+while `specialist_status` and `specialist_list` keep working — so the plugin looks healthy
+until you try to dispatch. An override must be in the environment the session is *launched*
+with; a shell export afterwards does not reach the already-running MCP server.
 
 ```bash
 export XTRM_SUBSTRATE_DIR=/path/to/xtrm/packages/substrate

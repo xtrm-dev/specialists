@@ -121,9 +121,10 @@ lines.push('specialists status                                 # system health')
 lines.push('specialists doctor                                 # troubleshoot issues');
 lines.push('```');
 lines.push('');
-lines.push('MCP tools (substrate plugin): specialist_dispatch, specialist_status, specialist_reply,');
-lines.push('  specialist_resume, specialist_stop_activation, specialist_list. use_specialist is the');
-lines.push('  deprecated foreground path — it runs a bead specialist_dispatch would refuse.');
+lines.push('MCP tools (specialists plugin): specialist_dispatch, specialist_status,');
+lines.push('  specialist_reply, specialist_resume, specialist_stop_activation, specialist_list.');
+lines.push('  Dispatch is asynchronous: specialist_dispatch returns once the activation is');
+lines.push('  admitted, then read specialist_status and answer any ask with specialist_reply.');
 lines.push('');
 
 // ── 4. Hot tips (version-pinned, current sp release) ───────────────────────

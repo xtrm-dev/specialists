@@ -139,18 +139,17 @@ this skill.
 
 Everything above describes the supervised `sp` job lifecycle. A second runtime — native
 activation — hosts a Specialist on an in-process Pi `AgentSession` rather than spawning
-`pi` as a subprocess. It is dispatchable now, through four MCP tools:
-`specialist_dispatch`, `specialist_status`, `specialist_reply`,
-`specialist_stop_activation`. `use_specialist` remains the legacy path, unchanged, beside
-them.
+`pi` as a subprocess. It is dispatchable now, through the `specialist_dispatch` / `specialist_status` /
+`specialist_reply` / `specialist_resume` / `specialist_stop_activation` / `specialist_list`
+tool surface. The former `use_specialist` foreground path has been removed.
 
 The two surfaces differ in ways that change how you write and dispatch a bead:
 
 - **The bead is the whole prompt.** `specialist_dispatch` has no task or prompt field, and
   refuses a bead that is not a complete 7-section contract with a declared `SCRUTINY`
   level, before any model turn is spent. Check `bd state <id> contract` first — a bead
-  marked `draft` is refused outright. `use_specialist` applies no such check, so a bead
-  refused by one still runs through the other.
+  marked `draft` is refused outright. There is no longer a second entry point that skips
+  that check, so a refused contract must be fixed rather than routed around.
 - **A write-capable Specialist gets no worktree of its own.** It shares the coordinator's,
   and takes a workspace writer lease at admission instead. Contention is refused naming the
   holder; an uncertain lease is never stolen.

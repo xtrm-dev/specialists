@@ -35,6 +35,13 @@ jobs:
         run: bun run lint
       - name: Run test suite
         run: bun run test
+      # The packaged-plugin E2E is the ONLY end-to-end check of the artifact a release
+      # actually ships: it packs this checkout, installs the tarball into a scratch repo,
+      # and drives the plugin's MCP server over a real handshake. It was not wired here
+      # before, so when use_specialist was deleted (#342) the harness went red and nothing
+      # reported it for a full day — found by hand, not by CI (unitAI-uz0bd).
+      - name: Packaged-plugin E2E
+        run: bun scripts/e5-packaged-plugin-e2e.mjs
       # ponytail: the quarantined lane is known-red by construction, so this job
       # reports its size instead of running it. Un-quarantining is bead
       # xtrm-wiy5n.4.11; a green quarantined lane means the list is empty and this
