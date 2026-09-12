@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Substrate plugin SessionStart hook.
+// specialists plugin SessionStart hook.
 //
 // Injects live activation state plus the authority reminder, so a resumed session does
 // not reason about stale activations. Reads the canonical Substrate store

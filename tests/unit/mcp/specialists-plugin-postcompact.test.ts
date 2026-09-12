@@ -63,7 +63,7 @@ describe('specialists PostCompact hook', () => {
     expect(pre.status).toBe(0);
     const post = runHook(postHook, dir, 'rt');
     expect(post.status).toBe(0);
-    expect(post.stdout).toContain('Substrate continuity');
+    expect(post.stdout).toContain('Activation continuity');
   });
 
   it('exits 0 and stays silent when there is no pointer', () => {
