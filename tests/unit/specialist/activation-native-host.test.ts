@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { execSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -45,7 +45,7 @@ vi.mock('node:child_process', async (importOriginal) => {
     },
   };
 });
-import { NativeActivationHost, type ActivationForensicSink } from '../../../src/activation/native-host.js';
+import { NativeActivationHost, resolveWorkspace, type ActivationForensicSink } from '../../../src/activation/native-host.js';
 import { buildSystemPrompt } from '../../../src/specialist/system-prompt.js';
 import { resolveOutputContractSchema } from '../../../src/specialist/runner.js';
 import { DispatchRejectedError } from '../../../src/activation/types.js';
@@ -1966,5 +1966,52 @@ describe('task-prompt composition parity (SPECIALISTS-22)', () => {
     expect((refusal as DispatchRejectedError).reason).toBe('mandatory_rules_unavailable');
     expect(record.createArgs).toBeUndefined();
     expect(session.prompts).toHaveLength(0);
+  });
+});
+
+
+/**
+ * SPECIALISTS-21. Run-in-place is the deliberate workspace model for native activation.
+ * The defect was that nothing said so, that `workspaceHint` was a dead parameter reading as
+ * an unfinished feature, and that the rendered Runtime Boundary Rules block derived its cwd
+ * from a different expression than the session did — equal only by coincidence.
+ */
+describe('run-in-place workspace semantics (SPECIALISTS-21)', () => {
+  it('resolves the workspace to the coordinator cwd, one source for both fields', () => {
+    expect(resolveWorkspace('/some/cwd')).toEqual({ repositoryRoot: '/some/cwd', worktreePath: '/some/cwd' });
+  });
+
+  it('names the directory the session actually runs in', async () => {
+    const workspace = hostWorkspace();
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record });
+    const spec = readOnlySpec() as { specialist: { prompt: Record<string, unknown> } };
+    spec.specialist.prompt.task_template = 'Do: $prompt';
+    const host = new NativeActivationHost({
+      loader: loaderFor(spec),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => makeSdk(record, session),
+      cwd: workspace,
+    });
+    await (await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    })).result;
+
+    const prompt = session.prompts[0];
+    const sessionCwd = record.createArgs!.cwd as string;
+    // The block must name the directory the SESSION runs in, not a second one that happens
+    // to agree today.
+    expect(sessionCwd).toBe(workspace);
+    expect(prompt).toContain(`Current cwd: ${sessionCwd}`);
+    expect(prompt).toContain(`Assigned worktree boundary: ${sessionCwd}`);
+  });
+
+  it('has no workspaceHint seam left to read as an unfinished feature', () => {
+    const sources = [
+      readFileSync(new URL('../../../src/activation/native-host.ts', import.meta.url), 'utf8'),
+      readFileSync(new URL('../../../src/activation/types.ts', import.meta.url), 'utf8'),
+    ].join('\n');
+    expect(sources).not.toContain('workspaceHint');
   });
 });

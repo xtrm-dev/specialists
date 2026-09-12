@@ -103,8 +103,9 @@ export interface ActivationRequest {
    */
   epicContextDepth?: number;
 
-  /** Defaults to the coordinator's current worktree. A writer does not get a new one. */
-  workspaceHint?: WorkspaceIdentity;
+  // No workspace field: the native runtime runs IN PLACE. See the rationale on
+  // `resolveWorkspace` in native-host.ts. A per-activation worktree was rejected
+  // deliberately, not forgotten (SPECIALISTS-21).
 
   /**
    * Inline task contract, used INSTEAD of issueRef: the host creates the issue

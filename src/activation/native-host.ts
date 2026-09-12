@@ -161,6 +161,34 @@ const NON_LOCAL_EXTENSION_PREFIXES = ['npm:', 'git:', 'github:', 'http:', 'https
  * paths are supplied by the caller; extension injection is a separate child issue and
  * passes none yet, while `noExtensions: true` already fences ambient ones.
  */
+/**
+ * The workspace a native activation runs in: the coordinator's own working
+ * directory. ONE source for it, because the rendered Runtime Boundary Rules block,
+ * the session `cwd`, the guarded-tool `cwd` and the workspace lease all key on this
+ * value — two derivations that happen to agree today is exactly how they stop
+ * agreeing tomorrow (SPECIALISTS-21).
+ *
+ * RUN-IN-PLACE IS THE DELIBERATE DESIGN, recorded here rather than in a document
+ * because the next reader of this function is the one who will wonder whether it is
+ * an omission:
+ *   - `xt claude` / `xt pi` already launch the coordinator into an isolated worktree,
+ *     so a per-activation worktree is isolation inside isolation.
+ *   - The workspace LEASE is what provides the single-writer guarantee. That was the
+ *     deliberate design, and a worktree would not add a guarantee the lease lacks.
+ *   - Provisioning would drag the legacy handoff protocol into the native runtime: a
+ *     `worktree_owner_job_id` reuse so a reviewer can read the writer's tree, plus a
+ *     merge back per activation, on a merge path CLAUDE.md declares prohibited and
+ *     known broken pending a separate rework epic.
+ *   - The known cost, accepted: the coordinator is not a lease participant, so a
+ *     coordinator edit and a write-tier activation can interleave. That hazard is
+ *     tracked separately (the coordinator edit warning), and it is not a reason to
+ *     provision worktrees.
+ * Anyone reopening worktree provisioning must first answer the merge-path problem.
+ */
+export function resolveWorkspace(cwd: string): WorkspaceIdentity {
+  return { repositoryRoot: cwd, worktreePath: cwd };
+}
+
 export function createActivationResourceLoader(
   sdk: PiSdk,
   options: { cwd: string; skillPaths: string[]; extensionPaths?: string[] },
@@ -407,12 +435,9 @@ export class NativeActivationHost {
     const access: WorkspaceAccess = WRITE_TIERS.has(tier) ? 'write' : 'read';
 
     // The workspace is resolved BEFORE the work gate: the dispatch gate binds
-    // workspace into its verdict, and hint-or-cwd is available without the
-    // model or tool contracts that follow.
-    const workspace: WorkspaceIdentity = request.workspaceHint ?? {
-      repositoryRoot: this.cwd,
-      worktreePath: this.cwd,
-    };
+    // workspace into its verdict, and it is available without the model or tool
+    // contracts that follow.
+    const workspace: WorkspaceIdentity = resolveWorkspace(this.cwd);
 
     // Shared Substrate work boundary (§8-§12). No Beads client, no bd
     // subprocess, no second readiness derivation: the gate lives in the
@@ -689,7 +714,11 @@ export class NativeActivationHost {
 
     const rendered = renderTaskPrompt({
       specialist: specialist.specialist,
-      cwd: this.cwd,
+      // Both the cwd the prompt reports and the boundary it names come from
+      // `workspace`; the session below is created with the same value. No two
+      // derivations to drift.
+      cwd: workspace.worktreePath,
+      worktreeBoundary: workspace.worktreePath,
       beadId: view.ref,
       bead: workItemAsRecord(view),
       epicAncestors: epicAncestors.map(workAncestorAsRecord),
@@ -764,7 +793,7 @@ export class NativeActivationHost {
       systemPromptTemplate: specialist.specialist.prompt.system ?? '',
       templateVariables: rendered.beadTemplateVariables ?? {},
       bare: execution.bare ?? false,
-      runCwd: this.cwd,
+      runCwd: workspace.worktreePath,
       specialistName: specialist.specialist.metadata.name,
       inputIssueRef: view.ref,
       responseFormat,
