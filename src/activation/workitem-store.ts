@@ -27,11 +27,11 @@
 // consumer refuses to inherit a foreign or cross-activation claim.
 
 import { createRequire } from 'node:module';
-import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { DatabaseSync } from 'node:sqlite';
 import { extractSections, scrutinyLevel, validateContractText } from './contract-sections.js';
+import { resolveAuthorityDbPath } from './authority-store.js';
 
 const require = createRequire(import.meta.url);
 
@@ -71,11 +71,18 @@ function resolveSubstrateDir(explicit: string): string | null {
   }
 }
 
-/** Canonical authority path: explicit XTRM_STATE_DB wins, else ~/.xtrm/state.db. */
+/**
+ * The store path every path that opens the work store uses.
+ *
+ * This is a DELEGATION, not a second precedence rule. It used to resolve only
+ * `XTRM_STATE_DB`, so an operator who set `SUBSTRATE_DB` — the owner-defined variable
+ * README.md and the supervising-activations skill tell them to use — got Substrate
+ * services and forensics on one database and dispatch on another, silently, because the
+ * test suite pinned the correct precedence only for the resolver that was NOT on the
+ * dispatch path (SPECIALISTS-3). One rule, one home.
+ */
 export function resolveWorkItemDbPath(env: NodeJS.ProcessEnv = process.env): string {
-  const override = (env.XTRM_STATE_DB ?? '').trim();
-  if (override) return override;
-  return join(homedir(), '.xtrm', 'state.db');
+  return resolveAuthorityDbPath(env);
 }
 
 /**

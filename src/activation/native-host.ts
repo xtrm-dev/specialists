@@ -279,8 +279,8 @@ export interface NativeActivationHostDeps {
   loader?: SpecialistLoader;
   /**
    * The shared Substrate work boundary (ADR §8-§12). When omitted the host
-   * resolves lazily against the canonical store (~/.xtrm/state.db,
-   * XTRM_STATE_DB override) and refuses dispatch fail-closed when that store
+   * resolves lazily against the canonical store (SUBSTRATE_DB, then
+   * XTRM_STATE_DB, then ~/.xtrm/state.db) and refuses dispatch fail-closed when that store
    * is absent or unopenable — never by falling back to another authority.
    */
   workItems?: SpecialistWorkItemBoundary;
@@ -1045,7 +1045,7 @@ export class NativeActivationHost {
     const dbPath = resolveWorkItemDbPath();
     if (!existsSync(dbPath)) {
       throw new Error(
-        `no Substrate work store at ${dbPath} (set XTRM_STATE_DB or initialize it via xt init / sb)`,
+        `no Substrate work store at ${dbPath} (set SUBSTRATE_DB (or the legacy XTRM_STATE_DB) or initialize it via xt init / sb)`,
       );
     }
     // Runtime dynamic import from XTRM_SUBSTRATE_DIR; absent package refuses

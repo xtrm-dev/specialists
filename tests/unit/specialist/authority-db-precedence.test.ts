@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveAuthorityDbPath } from '../../../src/activation/authority-store.js';
+import { resolveWorkItemDbPath } from '../../../src/activation/workitem-store.js';
 
 /**
  * Store-path precedence (unitAI-0whq0).
@@ -55,5 +56,41 @@ describe('hook scripts resolve identically to the runtime', () => {
     expect(sub, `${name}.mjs must read SUBSTRATE_DB`).toBeGreaterThan(-1);
     expect(legacy, `${name}.mjs must still read XTRM_STATE_DB`).toBeGreaterThan(-1);
     expect(sub, `${name}.mjs must check SUBSTRATE_DB first`).toBeLessThan(legacy);
+  });
+});
+
+
+/**
+ * SPECIALISTS-3. The dispatch path did NOT use `resolveAuthorityDbPath`: it had its own
+ * `resolveWorkItemDbPath`, which read `XTRM_STATE_DB` and never `SUBSTRATE_DB`. An operator
+ * who set only the owner-defined variable got Substrate services and forensics on one
+ * database and dispatch on another, silently — and the suite pinned the precedence only for
+ * the resolver that was not on the dispatch path.
+ */
+describe('the dispatch resolver resolves identically (SPECIALISTS-3)', () => {
+  const envs: Array<[string, NodeJS.ProcessEnv]> = [
+    ['only SUBSTRATE_DB', { SUBSTRATE_DB: '/a/sub.db' } as NodeJS.ProcessEnv],
+    ['only XTRM_STATE_DB', { XTRM_STATE_DB: '/a/legacy.db' } as NodeJS.ProcessEnv],
+    ['both, SUBSTRATE_DB winning', { SUBSTRATE_DB: '/a/sub.db', XTRM_STATE_DB: '/a/legacy.db' } as NodeJS.ProcessEnv],
+    ['blank SUBSTRATE_DB falling through', { SUBSTRATE_DB: '   ', XTRM_STATE_DB: '/a/legacy.db' } as NodeJS.ProcessEnv],
+    ['neither set', {} as NodeJS.ProcessEnv],
+  ];
+
+  it.each(envs)('%s', (_label, env) => {
+    expect(resolveWorkItemDbPath(env)).toBe(resolveAuthorityDbPath(env));
+  });
+
+  it('with only SUBSTRATE_DB set, the dispatch path opens that database', () => {
+    expect(resolveWorkItemDbPath({ SUBSTRATE_DB: '/a/sub.db' } as NodeJS.ProcessEnv)).toBe('/a/sub.db');
+  });
+
+  it('with both set, SUBSTRATE_DB wins on the dispatch path too', () => {
+    expect(
+      resolveWorkItemDbPath({ SUBSTRATE_DB: '/a/sub.db', XTRM_STATE_DB: '/a/legacy.db' } as NodeJS.ProcessEnv),
+    ).toBe('/a/sub.db');
+  });
+
+  it('with neither set, the dispatch path uses the canonical store', () => {
+    expect(resolveWorkItemDbPath({} as NodeJS.ProcessEnv)).toBe(DEFAULT);
   });
 });
