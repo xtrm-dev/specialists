@@ -31,7 +31,6 @@ import {
 } from '../../../src/tools/specialist/activation.tool.js';
 import { createSpecialistStatusTool } from '../../../src/tools/specialist/specialist_status.tool.js';
 import { createSpecialistListTool } from '../../../src/tools/specialist/specialist_list.tool.js';
-import { createUseSpecialistTool } from '../../../src/tools/specialist/use_specialist.tool.js';
 import { createSpecialistResumeTool } from '../../../src/mcp/resume-tool.js';
 import { NativeActivationHost } from '../../../src/activation/native-host.js';
 import { REQUIRED_SECTIONS } from '../../../src/activation/bead-gate.js';
@@ -523,14 +522,13 @@ describe('specialist_retry — a failed activation is re-run in place, never red
   });
 });
 
-describe('7-tool v2 surface inventory', () => {
-  it('exposes exactly the 7 v2 tools in deterministic order', async () => {
+describe('6-tool v2 surface inventory', () => {
+  it('exposes exactly the 6 v2 tools in deterministic order', async () => {
     // Pinned to the same surface as the v2 wire test's EXPECTED_TOOLS
     // (tests/unit/mcp/v2-server.test.ts): the tool-level inventory must agree
     // with what tools/list advertises over the wire.
     const { host } = hostWith();
     const tools = [
-      createUseSpecialistTool({} as never),
       createSpecialistStatusTool({ list: async () => [] } as never, new CircuitBreaker(), () => host),
       createSpecialistDispatchTool(() => host),
       createSpecialistReplyTool(() => host),
@@ -539,7 +537,6 @@ describe('7-tool v2 surface inventory', () => {
       createSpecialistListTool({ list: async () => [] } as never),
     ];
     expect(tools.map((t) => t.name)).toEqual([
-      'use_specialist',
       'specialist_status',
       'specialist_dispatch',
       'specialist_reply',

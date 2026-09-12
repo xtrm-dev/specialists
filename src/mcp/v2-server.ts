@@ -38,7 +38,6 @@ import { SpecialistRunner } from '../specialist/runner.js';
 import { HookEmitter } from '../specialist/hooks.js';
 import { CircuitBreaker } from '../utils/circuitBreaker.js';
 import { BeadsClient } from '../specialist/beads.js';
-import { createUseSpecialistTool, useSpecialistSchema } from '../tools/specialist/use_specialist.tool.js';
 import { createSpecialistStatusTool } from '../tools/specialist/specialist_status.tool.js';
 import { createSpecialistListTool, specialistListSchema } from '../tools/specialist/specialist_list.tool.js';
 import {
@@ -157,7 +156,6 @@ export function buildV2Server(ctx?: McpRequestContext): McpServer {
       : [];
 
   const tools: AnyTool[] = [
-    createUseSpecialistTool(runner),
     createSpecialistStatusTool(loader, circuitBreaker, getHost, getPusher),
     createSpecialistDispatchTool(getHost, getPusher),
     createSpecialistReplyTool(getHost),
@@ -171,7 +169,6 @@ export function buildV2Server(ctx?: McpRequestContext): McpServer {
     substrate_issue: substrateIssueSchema,
     substrate_journal: substrateJournalSchema,
     substrate_provenance: substrateProvenanceSchema,
-    use_specialist: useSpecialistSchema,
     specialist_dispatch: specialistDispatchSchema,
     specialist_reply: specialistReplySchema,
     specialist_resume: specialistResumeSchema,
@@ -243,7 +240,7 @@ export function serveV2Stdio(): StdioServerHandle {
     onerror: (error) => logger.error('MCP v2 transport error', error),
   });
   logger.info(
-    `Specialists MCP Server v2 (2025-11-25 + 2026-07-28, dual-revision) started — 7 tools registered`,
+    `Specialists MCP Server v2 (2025-11-25 + 2026-07-28, dual-revision) started — 6 tools registered`,
   );
   process.on('SIGTERM', () => {
     logger.info('SIGTERM received — shutting down');
