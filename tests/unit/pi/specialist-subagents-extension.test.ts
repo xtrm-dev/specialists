@@ -160,9 +160,12 @@ function makeFakePi({ flags = {} } = {}) {
   const handlers = {};
   const sent = [];
   const registeredFlags = {};
+  /** customType -> renderer, as pi's ExtensionAPI.registerMessageRenderer records them. */
+  const messageRenderers = {};
   return {
     registerTool: (def) => tools.push(def),
     registerCommand: (name, options) => commands.push({ name, ...options }),
+    registerMessageRenderer: (customType, renderer) => { messageRenderers[customType] = renderer; },
     on: (event, handler) => { (handlers[event] ??= []).push(handler); },
     // Variadic, because the two registrations differ in arity: the UI surface is
     // handed (payload, ctx) at session_start and the wake path takes the payload
@@ -178,6 +181,7 @@ function makeFakePi({ flags = {} } = {}) {
     get handlers() { return handlers; },
     get sent() { return sent; },
     get registeredFlags() { return registeredFlags; },
+    get messageRenderers() { return messageRenderers; },
   };
 }
 
@@ -1572,107 +1576,120 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
     expect(seen).toEqual(['activation_completed']);
   });
 
-  it('event cards are compact two-line brackets: dim, no rail, no background, no blank lines (unitAI-rrdnt.65.1)', async () => {
+  it('event cards are railed, compact, background-free and blank-line-free (unitAI-rrdnt.65.2)', async () => {
     const mod = await loadExtension();
     const cards = [
       mod.formatAskWake({
-        activationId: 'act:aaaa', specialist: 'researcher', beadId: 'unitAI-a.1', kind: 'question',
-        body: 'Can Channel delivery remain advisory while state.db stays authoritative?',
-      }, { purpose: 'inspect native wake transport', bead_id: 'unitAI-a.1' }),
+        activationId: 'act:aaaa', specialist: 'researcher', beadId: 'XTRM-241', kind: 'question',
+        body: 'Does the bracket look right?',
+      }, { purpose: 'inspect native wake transport', bead_id: 'XTRM-241' }),
       mod.formatAskWake({
-        activationId: 'act:aaaa', specialist: 'reviewer', beadId: 'unitAI-a.2', kind: 'escalation',
+        activationId: 'act:aaaa', specialist: 'reviewer', beadId: 'XTRM-241', kind: 'escalation',
         body: 'The current implementation cannot preserve the accepted authority invariant.',
-      }, { purpose: 'verify MCP Channel semantics', bead_id: 'unitAI-a.2' }),
+      }, { purpose: 'verify MCP Channel semantics', bead_id: 'XTRM-241' }),
       mod.formatSettlementWake({
-        activationId: 'act:aaaa', specialist: 'executor', beadId: 'unitAI-a.3', outcome: 'completed',
-      }, { bead_id: 'unitAI-a.3', elapsed_s: 134, turn_count: 5, token_usage: { input_tokens: 15000, output_tokens: 3600 } }),
+        activationId: 'act:aaaa', specialist: 'executor', beadId: 'XTRM-241', outcome: 'completed',
+      }, { bead_id: 'XTRM-241', elapsed_s: 42, turn_count: 3, token_usage: { input_tokens: 40000, output_tokens: 3000 } }),
       mod.formatSettlementWake({
-        activationId: 'act:aaaa', specialist: 'executor', beadId: 'unitAI-a.3', outcome: 'failed',
+        activationId: 'act:aaaa', specialist: 'executor', beadId: 'XTRM-241', outcome: 'failed',
         error: 'Provider rate limit exhausted after fallback chain.',
-      }, { resolved_model: 'gpt-5.6-sol', thinking_level: 'high', bead_id: 'unitAI-a.3' }),
+      }, { resolved_model: 'gpt-5.6-sol', thinking_level: 'high', bead_id: 'XTRM-241' }),
     ];
     for (const card of cards) {
-      expect(card).not.toContain('│');        // the rail is retired
-      expect(card).not.toContain('48;2');     // no background in an event, ever
-      expect(card).not.toContain('\n\n');     // no blank line anywhere
-      const lines = card.split('\n');
-      expect(lines[0].startsWith('\x1b[2m╭─\x1b[22m  ')).toBe(true);
-      expect(lines[1].startsWith('\x1b[2m╰─\x1b[22m  ')).toBe(true);
-      for (const line of lines.slice(2)) expect(line.startsWith('    ')).toBe(true);
+      // The rail runs down EVERY line, top to bottom.
+      for (const line of card.split('\n')) expect(line.startsWith(mod.RAIL)).toBe(true);
+      expect(card).not.toContain('48;2');   // no background in an event, ever
+      expect(card).not.toContain('\n\n');   // no blank line anywhere
+      expect(card).not.toContain('╭');      // no brackets
+      expect(card).not.toContain('╰');
     }
 
-    // The ask card, exactly.
-    const ask = cards[0];
-    const askLines = plain(ask).split('\n');
-    expect(askLines).toEqual([
-      '╭─  ! researcher · waiting on coordinator',
-      '╰─  unitAI-a.1 · inspect native wake transport',
-      '    Can Channel delivery remain advisory while state.db stays authoritative?',
-      '    Call specialist_status to read this ask\'s message_id from pending_asks, then answer it with specialist_reply. The child is alive and resumable; it stays blocked until you answer.',
-      '    activation act:aaaa',
+    expect(plain(cards[0]).split('\n')).toEqual([
+      '│ ! researcher · waiting · XTRM-241 · inspect native wake transport',
+      '│ Does the bracket look right?',
+      '│ Call specialist_status to obtain the pending message_id, then reply with specialist_reply. · activation act:aaaa',
     ]);
-    expect(ask).toContain('\x1b[33m!\x1b[39m');                     // warning glyph
-    expect(ask).toContain('\x1b[1mresearcher\x1b[22m');             // bold name
-    expect(askLines[1]).toContain('inspect native wake transport');
-    expect(ask).toContain('\x1b[3minspect native wake transport\x1b[23m'); // italic purpose
-    const askRaw = ask.split('\n');
-    expect(askRaw[3].startsWith('    \x1b[2m\x1b[3m')).toBe(true);  // dim+italic instruction
-    expect(askRaw[4].startsWith('    \x1b[2m')).toBe(true);         // dim activation id
-
-    // Escalation and settlement shapes.
-    expect(plain(cards[1]).split('\n')[0]).toBe('╭─  ! reviewer · escalated');
+    expect(plain(cards[1]).split('\n')).toEqual([
+      '│ ! reviewer · escalated · XTRM-241 · verify MCP Channel semantics',
+      '│ The current implementation cannot preserve the accepted authority invariant.',
+      '│ Call specialist_status to inspect the escalation and respond through specialist_reply. · activation act:aaaa',
+    ]);
     expect(plain(cards[2]).split('\n')).toEqual([
-      '╭─  ✓ executor · finished',
-      '╰─  unitAI-a.3 · 2m14s • 5t • 19k',
-      '    Result validated · resumable',
-      expect.stringContaining('Call specialist_status to read its validated result.'),
-      '    activation act:aaaa',
+      '│ ✓ executor · XTRM-241 · 42s • 3t • 43k',
+      '│ Call specialist_status to read the validated result. · activation act:aaaa',
     ]);
     expect(plain(cards[3]).split('\n')).toEqual([
-      '╭─  ✕ executor · failed',
-      '╰─  unitAI-a.3 · gpt-5.6-sol · high',
-      '    Provider rate limit exhausted after fallback chain.',
-      expect.stringContaining('specialist_retry'),
-      '    activation act:aaaa',
+      '│ ✕ executor · XTRM-241 · gpt-5.6-sol · high',
+      '│ Provider rate limit exhausted after fallback chain.',
+      '│ Call specialist_status for authoritative state, then use specialist_retry if appropriate. · activation act:aaaa',
     ]);
+
+    // Styling: warning/bold/dim/italic per field, instruction dim+italic, id dim.
+    expect(mod.RAIL).toBe('\x1b[38;2;141;127;232m│\x1b[0m');
+    expect(cards[0]).toContain('\x1b[33m!\x1b[39m');
+    expect(cards[0]).toContain('\x1b[1mresearcher\x1b[22m');
+    expect(cards[0]).toContain('\x1b[3minspect native wake transport\x1b[23m');
     expect(cards[2]).toContain('\x1b[32m✓\x1b[39m');
     expect(cards[3]).toContain('\x1b[31m✕\x1b[39m');
+    const instruction = cards[2].split('\n')[1];
+    expect(instruction.startsWith(`${mod.RAIL} \x1b[2m\x1b[3m`)).toBe(true);
+    expect(instruction).toContain(`\x1b[2mactivation act:aaaa\x1b[22m`);
   });
 
-  it('a multiline Specialist body stays verbatim, indented and railless', async () => {
+  it('a multiline Specialist body stays verbatim, railed line by line', async () => {
     const mod = await loadExtension();
-    const lines = mod.formatAskWake({
+    const card = mod.formatAskWake({
       activationId: 'act:aaaa', specialist: 'explorer', beadId: 'bd-1', kind: 'question',
       body: 'Line one?\nLine two.\nLine three.',
-    }).split('\n');
-    expect(plain(lines.join('\n'))).toContain('    Line one?\n    Line two.\n    Line three.');
-    // A paragraph break in the child's text is indented like any other line, so the card
-    // itself never emits a bare blank line.
+    });
+    for (const line of card.split('\n')) expect(line.startsWith(mod.RAIL)).toBe(true);
+    expect(plain(card)).toContain('│ Line one?\n│ Line two.\n│ Line three.');
+    // A paragraph break is a bare rail: continuous gutter, no blank line in the content.
     const withGap = mod.formatAskWake({
       activationId: 'act:aaaa', specialist: 'explorer', beadId: 'bd-1', kind: 'question',
       body: 'First paragraph.\n\nSecond paragraph.',
     });
     expect(withGap).not.toContain('\n\n');
-    expect(plain(withGap)).toContain('    First paragraph.\n    \n    Second paragraph.');
+    expect(plain(withGap)).toContain('│ First paragraph.\n│\n│ Second paragraph.');
+    for (const line of withGap.split('\n')) expect(line.startsWith(mod.RAIL)).toBe(true);
   });
 
-  it('keeps the activation id in the literal message content for the model', async () => {
+  it('wraps a railed line so every VISUAL line keeps the rail (unitAI-rrdnt.65.2)', async () => {
     const mod = await loadExtension();
-    const ok = mod.formatSettlementWake({
-      activationId: 'act:aaaa', specialist: 'explorer', beadId: 'bd-1', outcome: 'completed',
-    }, { bead_id: 'bd-1', elapsed_s: 134, turn_count: 5, token_usage: { input_tokens: 15000, output_tokens: 3600 } });
-    expect(plain(ok)).toContain('activation act:aaaa');
-    expect(ok).toMatch(/specialist_status/);
-    expect(ok).toMatch(/finished/);
-    expect(ok).toContain('\x1b[3m');
+    const line = `${mod.RAIL} ${'word '.repeat(30).trim()}`;
+    // No wrapper available (non-TUI runtime): the line is passed through untouched.
+    expect(mod.wrapRailedLine(line, 40, null)).toEqual([line]);
+    // With a wrapper: every piece is prefixed with the rail, at the reduced budget.
+    const chunks = mod.wrapRailedLine(line, 20, (text, width) => {
+      expect(width).toBe(18);
+      return text.match(/.{1,17}(\s|$)/g).map((c) => c.trim());
+    });
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const chunk of chunks) expect(chunk.startsWith(`${mod.RAIL} `)).toBe(true);
+    // A non-railed line is never touched.
+    expect(mod.wrapRailedLine('plain', 20, () => ['x'])).toEqual(['plain']);
+  });
 
-    const bad = mod.formatSettlementWake({
-      activationId: 'act:bbbb', specialist: 'executor', outcome: 'failed', error: 'provider 429',
-    }, { resolved_model: 'gpt-5.6-sol', thinking_level: 'high' });
-    expect(plain(bad).split('\n')[1]).toBe('╰─  — · gpt-5.6-sol · high');
-    expect(bad).toMatch(/provider 429/);
-    expect(bad).toMatch(/specialist_retry/);
-    expect(plain(bad)).toContain('activation act:bbbb');
+  it('installs a message renderer so pi paints no [customType] label and no background (unitAI-rrdnt.65.2)', async () => {
+    const mod = await loadExtension();
+    const pi = makeFakePi();
+    mod.default(pi, { createHost: () => makeFakeHost().host });
+    expect(Object.keys(pi.messageRenderers).sort()).toEqual(['specialist_ask', 'specialist_settled']);
+
+    const renderer = pi.messageRenderers.specialist_ask;
+    const card = mod.formatAskWake({
+      activationId: 'act:aaaa', specialist: 'explorer', beadId: 'bd-1', kind: 'question', body: 'Which?',
+    }, { purpose: 'inspect the transport', bead_id: 'bd-1' });
+    const component = renderer({ role: 'custom', customType: 'specialist_ask', content: card, display: true, timestamp: 1 }, { expanded: false }, {});
+    expect(typeof component.invalidate).toBe('function');
+    const lines = component.render(80);
+    expect(Array.isArray(lines)).toBe(true);
+    expect(lines.join('\n')).not.toContain('[specialist_ask]');
+    expect(lines.join('\n')).not.toContain('48;2');
+    for (const line of lines) expect(line.startsWith(mod.RAIL)).toBe(true);
+    // Repeated renders agree (no first-call capture), and a missing renderer seam is safe.
+    expect(component.render(80)).toEqual(lines);
+    expect(() => mod.default(makeFakePi(), { createHost: () => makeFakeHost().host })).not.toThrow();
   });
 
   it('the flag description no longer claims the wake is ask-only', async () => {
