@@ -52,7 +52,7 @@ import { createSpecialistResumeTool, specialistResumeSchema } from './resume-too
 import { createSubstrateIssueTool, substrateIssueSchema } from '../tools/substrate/issue.tool.js';
 import { createSubstrateJournalTool, substrateJournalSchema } from '../tools/substrate/journal.tool.js';
 import { createSubstrateProvenanceTool, substrateProvenanceSchema } from '../tools/substrate/provenance.tool.js';
-import { resolveSubstrate } from '../substrate/services.js';
+import { resolveSubstrate, type SubstrateHandle } from '../substrate/services.js';
 import { NativeActivationHost } from '../activation/native-host.js';
 import { createFileAuthorityWriter } from '../activation/authority-store.js';
 import { RuntimeEventPusher } from '../activation/async-events.js';
@@ -80,7 +80,18 @@ function textResult(result: unknown): { content: [{ type: 'text'; text: string }
  * handles (activation_id/bead_id), not protocol state: capabilities and the
  * protocol revision are re-read from every request's own envelope.
  */
-export function buildV2Server(ctx?: McpRequestContext): McpServer {
+export interface BuildV2ServerOptions {
+  /**
+   * Override the resolved Substrate handle instead of asking `resolveSubstrate()`
+   * for the process-wide, cached-once result. Tests use this to exercise both the
+   * available and unavailable tool surfaces deterministically, independent of
+   * whether `@jaggerxtrm/substrate` happens to be installed on the machine running
+   * them. Production callers never pass this — the real cached resolution applies.
+   */
+  substrate?: SubstrateHandle;
+}
+
+export function buildV2Server(ctx?: McpRequestContext, options?: BuildV2ServerOptions): McpServer {
   // Claude Code refuses to register the channel listener on a modern-era
   // connection (no unsolicited notification path), so a push is only wired for
   // a legacy-pinned one. The capability is still declared in both eras: it
@@ -148,7 +159,7 @@ export function buildV2Server(ctx?: McpRequestContext): McpServer {
   // (Until XTRM-267 this comment also claimed Substrate "cannot load under bun". That was
   // measured false on 2026-09-12 — it ships a dual-runtime sqlite seam and imports cleanly
   // under bun. Unresolvable, not incompatible, is the real reason a surface goes inert.)
-  const substrate = resolveSubstrate();
+  const substrate = options?.substrate ?? resolveSubstrate();
   const substrateTools: AnyTool[] =
     substrate.available || process.env.XTRM_SUBSTRATE_TOOLS === '1'
       ? [
