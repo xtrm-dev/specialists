@@ -93881,7 +93881,6 @@ class NativeActivationHost {
       case "agent_settled":
         snapshot.state = "settled";
         this.save(snapshot);
-        emit("activation_settled");
         this.releaseIfWriter(snapshot, "settled");
         break;
       case "auto_retry_start":
@@ -93934,6 +93933,7 @@ class NativeActivationHost {
         };
       }
       const output2 = textOf(last);
+      emit("activation_settled");
       emit("output_validation_started");
       const validation = { valid: true };
       emit("output_validation_passed");
