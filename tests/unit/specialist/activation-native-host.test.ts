@@ -661,6 +661,100 @@ describe('NativeActivationHost — defects found by the live smoke', () => {
     expect(sink.names).toContain('activation_failed');
     expect(sink.names).not.toContain('activation_completed');
   });
+
+  // unitAI-8s7xx: live logs showed one disposal pushing BOTH `completed` (from
+  // `activation_settled`) and `failed` (from `activation_failed`) 10ms apart, because
+  // `agent_settled` fired the terminal `activation_settled` event unconditionally, before
+  // `runToSettled` had inspected stopReason. `fakeSession.prompt()` fires its listeners
+  // (agent_start, agent_end, agent_settled) synchronously before its own promise resolves —
+  // the exact ordering that produced the bug — so this drives a real settle/stopReason
+  // sequence through the host rather than a synthetic single event.
+  it('emits exactly one terminal event for a turn that settles aborted, never both settled and failed', async () => {
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({
+      record,
+      assistantText: '',
+      stopReason: 'aborted',
+      errorMessage: 'The operation was aborted.',
+    });
+    const sink = collectingSink();
+    const host = new NativeActivationHost({
+      loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems(),
+      loadSdk: async () => makeSdk(record, session),
+      forensics: sink,
+      cwd: hostWorkspace(),
+    });
+
+    const handle = await host.start({
+      specialist: 'researcher',
+      issueRef: 'ISSUE-1',
+      requestedByParticipantId: 'coordinator:test',
+    });
+    const result = await handle.result;
+
+    const terminalEvents = sink.names.filter(
+      (name) => name === 'activation_settled' || name === 'activation_completed' || name === 'activation_failed',
+    );
+    expect(terminalEvents).toEqual(['activation_failed']);
+    expect(result.status).toBe('failed');
+  });
+
+  // unitAI-v2om5: `validation.valid` was hardcoded `true` regardless of output, so a
+  // no-op turn (no ask_coordinator call, no text) reported as validated as any real delivery.
+  it.each([
+    ['empty string', ''],
+    ['whitespace only', '   \n\t  '],
+  ])('reports a settled activation with %s output as invalid, not failed', async (_label, assistantText) => {
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record, assistantText });
+    const sink = collectingSink();
+    const host = new NativeActivationHost({
+      loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems(),
+      loadSdk: async () => makeSdk(record, session),
+      forensics: sink,
+      cwd: hostWorkspace(),
+    });
+
+    const handle = await host.start({
+      specialist: 'researcher',
+      issueRef: 'ISSUE-1',
+      requestedByParticipantId: 'coordinator:test',
+    });
+    const result = await handle.result;
+
+    expect(result.status).toBe('completed');
+    expect(result.validation.valid).toBe(false);
+    expect(result.validation.errors?.[0]).toContain('empty output');
+    expect(sink.names).toContain('output_validation_failed');
+    expect(sink.names).not.toContain('output_validation_passed');
+  });
+
+  it('still reports valid: true for non-empty output', async () => {
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record, assistantText: 'the answer' });
+    const sink = collectingSink();
+    const host = new NativeActivationHost({
+      loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems(),
+      loadSdk: async () => makeSdk(record, session),
+      forensics: sink,
+      cwd: hostWorkspace(),
+    });
+
+    const handle = await host.start({
+      specialist: 'researcher',
+      issueRef: 'ISSUE-1',
+      requestedByParticipantId: 'coordinator:test',
+    });
+    const result = await handle.result;
+
+    expect(result.status).toBe('completed');
+    expect(result.validation.valid).toBe(true);
+    expect(sink.names).toContain('output_validation_passed');
+    expect(sink.names).not.toContain('output_validation_failed');
+  });
 });
 
 /**

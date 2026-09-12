@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Substrate plugin PostCompact hook.
+// specialists plugin PostCompact hook.
 //
 // Reads the continuity pointer PreCompact wrote and re-states the durable reference, so a
 // compacted session re-derives authoritative state from ~/.xtrm/state.db instead of trusting
@@ -49,12 +49,12 @@ try {
     const store = typeof pointer?.store === 'string' ? pointer.store : resolveStorePath();
     if (ids.length > 0) {
       console.log(
-        `Substrate continuity: ${ids.length} activation(s) were live before compaction — ` +
+        `Activation continuity: ${ids.length} activation(s) were live before compaction — ` +
           `${ids.join(', ')}. Re-read them with specialist_status; the summary above is not authoritative.`,
       );
     } else {
       console.log(
-        `Substrate continuity: no activations were live before compaction. Authority remains ${store}.`,
+        `Activation continuity: no activations were live before compaction. Authority remains ${store}.`,
       );
     }
   }

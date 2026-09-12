@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Substrate plugin idle-wake watcher (asyncRewake, operator spec §Z/§AA/§AF).
+// specialists plugin idle-wake watcher (asyncRewake, operator spec §Z/§AA/§AF).
 //
 // RECOVERY PATH, NOT THE PRIMARY WAKE. Since unitAI-aiwva.21 the primary wake is a
 // Claude Code Channel push (`src/mcp/channel.ts`): the MCP server sends

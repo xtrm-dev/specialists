@@ -877,9 +877,14 @@ export class NativeActivationHost {
         snapshot.turnCount = (snapshot.turnCount ?? 0) + 1;
         break;
       case 'agent_settled':
+        // Quiescence alone does not say whether the turn succeeded — `runToSettled`
+        // inspects stopReason for that, right after this same `waitForIdle()` resolves,
+        // and is the sole place that emits the terminal `activation_settled`/
+        // `activation_failed` pair (unitAI-8s7xx: emitting it here unconditionally made
+        // an aborted turn push BOTH `completed` and `failed`). The lease release and
+        // state bookkeeping below are unconditional on every settle, aborted or not.
         snapshot.state = 'settled';
         this.save(snapshot);
-        emit('activation_settled');
         this.releaseIfWriter(snapshot, 'settled');
         break;
       case 'auto_retry_start':
@@ -946,11 +951,25 @@ export class NativeActivationHost {
 
       const output = textOf(last);
 
+      // The turn reached idle without an error/aborted stopReason — the one terminal
+      // event this disposal reports (unitAI-8s7xx). Fired here, after stopReason
+      // inspection, instead of unconditionally on every settle in `onSessionEvent`.
+      emit('activation_settled');
+
       emit('output_validation_started');
       // Phase 1 carries no output schema; schema/expected-key enforcement arrives with the
-      // result-contract work. Recorded explicitly so the gap is visible rather than implied.
-      const validation = { valid: true as const };
-      emit('output_validation_passed');
+      // result-contract work (unitAI-v2om5 NON_GOALS). One check is always available
+      // regardless: a specialist that produced no output has not delivered, whitespace
+      // included — so empty/whitespace-only output fails validation on an otherwise
+      // settled (not failed) activation.
+      const validation = output.trim().length > 0
+        ? { valid: true as const }
+        : { valid: false as const, errors: ['empty output: specialist produced no output'] };
+      if (validation.valid) {
+        emit('output_validation_passed');
+      } else {
+        emit('output_validation_failed', { errors: validation.errors });
+      }
 
       snapshot.state = 'settled';
       this.save(snapshot);
