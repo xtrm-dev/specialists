@@ -128,8 +128,18 @@ describe('createWorkItemBoundary inline validation', () => {
 });
 
 describe('openWorkItemBoundary package identity', () => {
+  /**
+   * "Nothing is installed" is a PRECONDITION these tests must establish, not an environment
+   * they may hope for. Resolution ends at `require.resolve` and then at absolute machine
+   * paths, none of which an injected `env` can suppress, so a blank `XTRM_SUBSTRATE_DIR`
+   * proved nothing: with the package linked the opener simply succeeded, and the suite passed
+   * or failed according to the developer's machine (SPECIALISTS-24). The seam defaults to the
+   * real lookup and is what makes the condition explicit.
+   */
+  const NOTHING_INSTALLED = { resolveInstalledSubstrateDir: () => null } as const;
+
   it('fails closed with no substrate directory configured', async () => {
-    await expect(openWorkItemBoundary({ env: { ...process.env, XTRM_SUBSTRATE_DIR: '' } }))
+    await expect(openWorkItemBoundary({ env: { ...process.env, XTRM_SUBSTRATE_DIR: '' }, ...NOTHING_INSTALLED }))
       .rejects.toThrow(/work_item_store_unavailable/);
   });
 
@@ -155,7 +165,7 @@ describe('openWorkItemBoundary package identity', () => {
   // The identity check is what makes that safe to widen, so it is asserted on the
   // explicit path here and must never be skipped on the module-resolved one.
   it('names both remedies when nothing is configured and nothing is installed', async () => {
-    await expect(openWorkItemBoundary({ env: { ...process.env, XTRM_SUBSTRATE_DIR: '' } }))
+    await expect(openWorkItemBoundary({ env: { ...process.env, XTRM_SUBSTRATE_DIR: '' }, ...NOTHING_INSTALLED }))
       .rejects.toThrow(/install @jaggerxtrm\/substrate.*XTRM_SUBSTRATE_DIR/s);
   });
 
@@ -171,7 +181,17 @@ describe('openWorkItemBoundary package identity', () => {
   });
 
   it('treats a whitespace-only override as unset rather than as a path', async () => {
-    await expect(openWorkItemBoundary({ env: { ...process.env, XTRM_SUBSTRATE_DIR: '   ' } }))
+    await expect(openWorkItemBoundary({ env: { ...process.env, XTRM_SUBSTRATE_DIR: '   ' }, ...NOTHING_INSTALLED }))
       .rejects.toThrow(/no Substrate package configured/);
+  });
+
+  it('still fails closed on the untouched resolver when nothing is installed', async () => {
+    // The seam must not be the thing under test: with it absent, the REAL lookup runs. On a
+    // machine where Substrate resolves the opener succeeds; where it does not, it refuses.
+    // Either way the failure mode is fail-closed, never a silent second authority.
+    const outcome = await openWorkItemBoundary({ env: { ...process.env, XTRM_SUBSTRATE_DIR: '' } })
+      .then(() => 'opened' as const, (error: unknown) => String(error));
+    expect(['opened', 'Error: work_item_store_unavailable: no Substrate package configured (install @jaggerxtrm/substrate, or set XTRM_SUBSTRATE_DIR to a checkout of it)'])
+      .toContain(outcome);
   });
 });

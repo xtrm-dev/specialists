@@ -59,9 +59,18 @@ const SUBSTRATE_PACKAGE = '@jaggerxtrm/substrate';
  * from npm and has never heard of the Substrate repository. Before it existed,
  * dispatch was unavailable to every such user (XTRM-267).
  */
-function resolveSubstrateDir(explicit: string): string | null {
-  const trimmed = explicit.trim();
-  if (trimmed) return trimmed;
+/**
+ * Overridable-for-testing seam over the MODULE-RESOLUTION half of substrate lookup, following
+ * the `readBeadForMemory` / `hasGitnexusIndex` idiom in system-prompt.ts. It defaults to the
+ * real lookup and is never overridden in production.
+ *
+ * It exists because a test cannot otherwise state the precondition "nothing is installed":
+ * resolution ends at `require.resolve` and, failing that, at absolute machine paths, none of
+ * which an injected `env` can suppress. Three tests asserted a condition they had no way to
+ * establish, so the suite passed or failed according to whether the developer happened to have
+ * Substrate linked (SPECIALISTS-24).
+ */
+function resolveInstalledSubstrateDir(): string | null {
   try {
     return dirname(require.resolve(`${SUBSTRATE_PACKAGE}/package.json`));
   } catch {
@@ -69,6 +78,15 @@ function resolveSubstrateDir(explicit: string): string | null {
     // the caller turns it into work_item_store_unavailable with both remedies.
     return null;
   }
+}
+
+function resolveSubstrateDir(
+  explicit: string,
+  resolveInstalled: () => string | null = resolveInstalledSubstrateDir,
+): string | null {
+  const trimmed = explicit.trim();
+  if (trimmed) return trimmed;
+  return resolveInstalled();
 }
 
 /**
@@ -493,6 +511,11 @@ export interface OpenWorkItemsOptions {
   /** Absolute path to a Substrate checkout. Overrides module resolution; see resolveSubstrateDir. */
   substrateDir?: string;
   env?: NodeJS.ProcessEnv;
+  /**
+   * Test seam: replace the module-resolution step. Defaults to the real lookup, so production
+   * behaviour is untouched. A test that needs "nothing is installed" returns null here.
+   */
+  resolveInstalledSubstrateDir?: () => string | null;
 }
 
 /**
@@ -511,7 +534,10 @@ export interface OpenWorkItemsOptions {
  */
 export async function openWorkItemBoundary(opts: OpenWorkItemsOptions = {}): Promise<SpecialistWorkItemBoundary> {
   const env = opts.env ?? process.env;
-  const substrateDir = resolveSubstrateDir(opts.substrateDir ?? env.XTRM_SUBSTRATE_DIR ?? '');
+  const substrateDir = resolveSubstrateDir(
+    opts.substrateDir ?? env.XTRM_SUBSTRATE_DIR ?? '',
+    opts.resolveInstalledSubstrateDir,
+  );
   if (!substrateDir) {
     throw new Error(
       `work_item_store_unavailable: no Substrate package configured (install ${SUBSTRATE_PACKAGE}, ` +
