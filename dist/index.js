@@ -25408,6 +25408,7 @@ __export(exports_runner, {
   validateBeforeRun: () => validateBeforeRun,
   sanitizeScriptName: () => sanitizeScriptName,
   runScript: () => runScript,
+  resolveOutputContractSchema: () => resolveOutputContractSchema,
   formatScriptOutput: () => formatScriptOutput,
   formatRequiredPreScriptFailure: () => formatRequiredPreScriptFailure,
   findRequiredPreScriptFailure: () => findRequiredPreScriptFailure,
@@ -93727,6 +93728,9 @@ class NativeActivationHost {
       bead: workItemAsRecord(view),
       epicAncestors: epicAncestors.map(workAncestorAsRecord)
     });
+    const responseFormat = execution.response_format ?? "text";
+    const outputType = execution.output_type ?? "custom";
+    const outputContractSchema = resolveOutputContractSchema(responseFormat, outputType, specialist.specialist.prompt.output_schema);
     const systemPrompt = buildSystemPrompt({
       systemPromptTemplate: specialist.specialist.prompt.system ?? "",
       templateVariables: rendered.beadTemplateVariables ?? {},
@@ -93734,9 +93738,9 @@ class NativeActivationHost {
       runCwd: this.cwd,
       specialistName: specialist.specialist.metadata.name,
       inputIssueRef: view.ref,
-      responseFormat: execution.response_format ?? "text",
-      outputType: execution.output_type ?? "custom",
-      outputContractSchema: undefined,
+      responseFormat,
+      outputType,
+      outputContractSchema,
       beadContextText: rendered.beadContextText ?? "",
       readBeadForMemory: (id) => {
         try {

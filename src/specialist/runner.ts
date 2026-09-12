@@ -637,7 +637,12 @@ function deepMergeSchemas(base: JsonSchema, override: JsonSchema): JsonSchema {
   return merged;
 }
 
-function resolveOutputContractSchema(
+/**
+ * The single output-contract resolver. Exported (SPECIALISTS-5) because the native host
+ * passes the same result to the same `buildSystemPrompt`: a second copy of this rule is
+ * how the two runtimes drifted, with the native path hardcoding `undefined`.
+ */
+export function resolveOutputContractSchema(
   responseFormat: ResponseFormat,
   outputType: OutputType,
   outputSchema: JsonSchema | undefined,

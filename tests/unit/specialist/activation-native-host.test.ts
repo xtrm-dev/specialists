@@ -20,6 +20,8 @@ vi.mock('node:child_process', async (importOriginal) => {
   };
 });
 import { NativeActivationHost, type ActivationForensicSink } from '../../../src/activation/native-host.js';
+import { buildSystemPrompt } from '../../../src/specialist/system-prompt.js';
+import { resolveOutputContractSchema } from '../../../src/specialist/runner.js';
 import { DispatchRejectedError } from '../../../src/activation/types.js';
 import type { PiSdk, PiAgentSessionLike, PiAgentSessionEvent } from '../../../src/activation/pi-sdk.js';
 import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
@@ -1638,5 +1640,85 @@ describe('native resource isolation (SPECIALISTS-4)', () => {
 
     expect((refusal as DispatchRejectedError).reason).toBe('pi_sdk_resource_loader_unavailable');
     expect(record.createArgs).toBeUndefined();
+  });
+});
+
+
+/**
+ * SPECIALISTS-5. Ten of twenty-four specialists declare `prompt.output_schema`, and the
+ * native host hardcoded `outputContractSchema: undefined`, so every one of them lost the
+ * structured-output contract the legacy CLI hands the same definition. The child was asked
+ * for structured output by its prompt and never told the schema.
+ */
+describe('output contract schema parity (SPECIALISTS-5)', () => {
+  const DECLARED_SCHEMA = {
+    type: 'object',
+    properties: {
+      summary: { type: 'string' },
+      confidence: { enum: ['low', 'medium', 'high'] },
+    },
+    required: ['summary'],
+  };
+
+  function specWithSchema() {
+    const spec = readOnlySpec() as { specialist: { prompt: Record<string, unknown>; execution: Record<string, unknown> } };
+    spec.specialist.prompt.output_schema = DECLARED_SCHEMA;
+    spec.specialist.execution.response_format = 'markdown';
+    spec.specialist.execution.output_type = 'analysis';
+    return spec;
+  }
+
+  function outputContractSection(systemPrompt: string): string {
+    const start = systemPrompt.indexOf('## Output Contract');
+    if (start < 0) return '';
+    const rest = systemPrompt.slice(start);
+    const end = rest.indexOf('\n## ', 1);
+    return (end < 0 ? rest : rest.slice(0, end)).trimEnd();
+  }
+
+  async function nativeSystemPrompt(): Promise<string> {
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record });
+    const host = new NativeActivationHost({
+      loader: loaderFor(specWithSchema()),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => makeSdk(record, session),
+      cwd: hostWorkspace(),
+    });
+    await (await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    })).result;
+    return record.createArgs!.systemPrompt as string;
+  }
+
+  it('puts the declared schema in the native system prompt', async () => {
+    const systemPrompt = await nativeSystemPrompt();
+    expect(systemPrompt).toContain('## Output Contract');
+    expect(systemPrompt).toContain('Structure your output to match this schema:');
+    expect(systemPrompt).toContain('"confidence"');
+    expect(systemPrompt).toContain('## Machine-readable block');
+  });
+
+  it('renders the same output contract section the legacy call site renders', async () => {
+    const native = outputContractSection(await nativeSystemPrompt());
+    // Exactly what src/specialist/runner.ts does for the same definition.
+    const legacy = outputContractSection(
+      buildSystemPrompt({
+        systemPromptTemplate: 'You are the researcher.',
+        templateVariables: {},
+        bare: false,
+        runCwd: process.cwd(),
+        specialistName: 'researcher',
+        inputIssueRef: 'ISSUE-1',
+        responseFormat: 'markdown',
+        outputType: 'analysis',
+        outputContractSchema: resolveOutputContractSchema('markdown', 'analysis', DECLARED_SCHEMA),
+        beadContextText: '',
+        readBeadForMemory: () => null,
+      }).text,
+    );
+    expect(legacy).not.toBe('');
+    expect(native).toBe(legacy);
   });
 });

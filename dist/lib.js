@@ -17194,6 +17194,193 @@ ${errors.join(`
 `)}`);
   }
 }
+var BASE_OUTPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    summary: { type: "string" },
+    status: { enum: ["success", "partial", "failed", "waiting"] },
+    issues_closed: { type: "array", items: { type: "string" } },
+    issues_created: { type: "array", items: { type: "string" } },
+    follow_ups: { type: "array", items: { type: "string" } },
+    risks: { type: "array", items: { type: "string" } },
+    verification: { type: "array", items: { type: "string" } }
+  },
+  required: ["summary", "status", "issues_closed", "issues_created", "follow_ups", "risks", "verification"]
+};
+var IMPACT_REPORT_SCHEMA = {
+  type: "object",
+  properties: {
+    files_touched: { type: "array", items: { type: "string" } },
+    symbols_analyzed: { type: "array", items: { type: "string" } },
+    highest_risk: { enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"] },
+    tool_invocations: { type: "number" }
+  }
+};
+var OUTPUT_TYPE_SCHEMA_EXTENSIONS = {
+  codegen: {
+    type: "object",
+    properties: {
+      files_changed: { type: "array", items: { type: "string" } },
+      symbols_modified: { type: "array", items: { type: "string" } },
+      lint_pass: { type: "boolean" },
+      tests_pass: { type: "boolean" },
+      impact_report: IMPACT_REPORT_SCHEMA
+    }
+  },
+  analysis: {
+    type: "object",
+    properties: {
+      key_files: { type: "array", items: { type: "string" } },
+      architecture_notes: { type: "string" },
+      recommendations: { type: "array", items: { type: "string" } },
+      impact_report: IMPACT_REPORT_SCHEMA
+    }
+  },
+  review: {
+    type: "object",
+    properties: {
+      verdict: { enum: ["pass", "partial", "fail"] },
+      findings: { type: "array", items: { type: "string" } },
+      recommendation: { type: "string" }
+    }
+  },
+  synthesis: {
+    type: "object",
+    properties: {
+      decisions: { type: "array", items: { type: "string" } },
+      rationale: { type: "string" },
+      next_steps: { type: "array", items: { type: "string" } }
+    }
+  },
+  orchestration: {
+    type: "object",
+    properties: {
+      actions: {
+        type: "array",
+        items: {
+          oneOf: [
+            {
+              type: "object",
+              properties: {
+                type: { enum: ["resume"] },
+                memberId: { type: "string" },
+                task: { type: "string" }
+              },
+              required: ["type", "memberId", "task"]
+            },
+            {
+              type: "object",
+              properties: {
+                type: { enum: ["steer"] },
+                memberId: { type: "string" },
+                message: { type: "string" }
+              },
+              required: ["type", "memberId", "message"]
+            },
+            {
+              type: "object",
+              properties: {
+                type: { enum: ["stop"] },
+                memberId: { type: "string" }
+              },
+              required: ["type", "memberId"]
+            }
+          ]
+        }
+      },
+      blocking_on: {
+        type: "object",
+        properties: {
+          kind: { enum: ["human_input", "member_output", "external_dependency"] },
+          target: { type: "string" },
+          details: { type: "string" }
+        },
+        required: ["kind"]
+      },
+      memory_patch: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            entry_type: { enum: ["fact", "question", "decision"] },
+            entry_id: { type: "string" },
+            summary: { type: "string" },
+            source_member_id: { type: "string" },
+            confidence: { type: "number" },
+            provenance: { type: "object" }
+          },
+          required: ["entry_type", "summary"]
+        }
+      },
+      coordination_state: {
+        type: "object",
+        properties: {
+          current_goal: { type: "string" },
+          active_members: { type: "array", items: { type: "string" } },
+          waiting_on_members: { type: "array", items: { type: "string" } },
+          pending_decisions: { type: "array", items: { type: "string" } },
+          blockers: { type: "array", items: { type: "string" } }
+        }
+      },
+      routing_rationale: { type: "string" },
+      next_trigger: {
+        type: "object",
+        properties: {
+          event: { enum: ["on_member_update", "on_human_input", "on_external_update", "on_timeout", "manual_resume"] },
+          target: { type: "string" },
+          details: { type: "string" }
+        },
+        required: ["event"]
+      }
+    }
+  },
+  workflow: {
+    type: "object",
+    properties: {
+      steps_completed: { type: "array", items: { type: "string" } },
+      first_task: { type: "string" },
+      children: { type: "array", items: { type: "string" } },
+      test_issues: { type: "array", items: { type: "string" } }
+    }
+  },
+  research: {
+    type: "object",
+    properties: {
+      sources_checked: { type: "array", items: { type: "string" } },
+      confidence: { enum: ["low", "medium", "high"] },
+      recommendations: { type: "array", items: { type: "string" } }
+    }
+  }
+};
+function deepMergeSchemas(base, override) {
+  const merged = { ...base };
+  for (const [key, overrideValue] of Object.entries(override)) {
+    const baseValue = merged[key];
+    if (isRecord(baseValue) && isRecord(overrideValue)) {
+      merged[key] = deepMergeSchemas(baseValue, overrideValue);
+      continue;
+    }
+    merged[key] = overrideValue;
+  }
+  return merged;
+}
+function resolveOutputContractSchema(responseFormat, outputType, outputSchema) {
+  if (responseFormat === "text")
+    return;
+  if (responseFormat === "markdown" && !outputSchema)
+    return;
+  let mergedSchema = { ...BASE_OUTPUT_SCHEMA };
+  if (outputType !== "custom") {
+    mergedSchema = deepMergeSchemas(mergedSchema, OUTPUT_TYPE_SCHEMA_EXTENSIONS[outputType]);
+  }
+  if (outputSchema) {
+    mergedSchema = deepMergeSchemas(mergedSchema, outputSchema);
+  }
+  return mergedSchema;
+}
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 function classifyFallbackError(error) {
   if (isAuthError(error))
     return "auth";
@@ -21757,6 +21944,9 @@ class NativeActivationHost {
       bead: workItemAsRecord(view),
       epicAncestors: epicAncestors.map(workAncestorAsRecord)
     });
+    const responseFormat = execution.response_format ?? "text";
+    const outputType = execution.output_type ?? "custom";
+    const outputContractSchema = resolveOutputContractSchema(responseFormat, outputType, specialist.specialist.prompt.output_schema);
     const systemPrompt = buildSystemPrompt({
       systemPromptTemplate: specialist.specialist.prompt.system ?? "",
       templateVariables: rendered.beadTemplateVariables ?? {},
@@ -21764,9 +21954,9 @@ class NativeActivationHost {
       runCwd: this.cwd,
       specialistName: specialist.specialist.metadata.name,
       inputIssueRef: view.ref,
-      responseFormat: execution.response_format ?? "text",
-      outputType: execution.output_type ?? "custom",
-      outputContractSchema: undefined,
+      responseFormat,
+      outputType,
+      outputContractSchema,
       beadContextText: rendered.beadContextText ?? "",
       readBeadForMemory: (id) => {
         try {

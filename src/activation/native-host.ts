@@ -38,7 +38,7 @@ import { existsSync } from 'node:fs';
 import { SpecialistLoader } from '../specialist/loader.js';
 import { buildSystemPrompt } from '../specialist/system-prompt.js';
 import { renderTaskPrompt } from '../specialist/task-prompt.js';
-import { validateBeforeRun, classifyFallbackError } from '../specialist/runner.js';
+import { validateBeforeRun, classifyFallbackError, resolveOutputContractSchema } from '../specialist/runner.js';
 import { resolveRuntimeToolContract } from '../pi/session.js';
 import { resolveModelChain } from '../specialist/model-chain.js';
 import { extractPurposeExcerpt } from './bead-gate.js';
@@ -645,6 +645,19 @@ export class NativeActivationHost {
       epicAncestors: epicAncestors.map(workAncestorAsRecord),
     });
 
+    // Resolved ONCE from the definition, exactly as the legacy call site does
+    // (src/specialist/runner.ts: `resolveOutputContractSchema(responseFormat, outputType,
+    // prompt.output_schema)`). The native path used to hardcode `undefined`, so every
+    // specialist declaring `prompt.output_schema` was asked for structured output by its
+    // prompt and never told the schema (SPECIALISTS-5).
+    const responseFormat = execution.response_format ?? 'text';
+    const outputType = execution.output_type ?? 'custom';
+    const outputContractSchema = resolveOutputContractSchema(
+      responseFormat,
+      outputType,
+      specialist.specialist.prompt.output_schema,
+    );
+
     const systemPrompt = buildSystemPrompt({
       systemPromptTemplate: specialist.specialist.prompt.system ?? '',
       templateVariables: rendered.beadTemplateVariables ?? {},
@@ -652,9 +665,9 @@ export class NativeActivationHost {
       runCwd: this.cwd,
       specialistName: specialist.specialist.metadata.name,
       inputIssueRef: view.ref,
-      responseFormat: execution.response_format ?? 'text',
-      outputType: execution.output_type ?? 'custom',
-      outputContractSchema: undefined,
+      responseFormat,
+      outputType,
+      outputContractSchema,
       beadContextText: rendered.beadContextText ?? '',
       readBeadForMemory: (id) => {
         try {
