@@ -95528,7 +95528,7 @@ import { join as join59 } from "path";
 function textResult(result) {
   return { content: [{ type: "text", text: typeof result === "string" ? result : JSON.stringify(result, null, 2) }] };
 }
-function buildV2Server(ctx) {
+function buildV2Server(ctx, options2) {
   const channelEra = ctx?.era ?? "legacy";
   let channelSend = () => {};
   const circuitBreaker = new CircuitBreaker;
@@ -95551,7 +95551,7 @@ function buildV2Server(ctx) {
   if (channelEra === "legacy") {
     channelSend = (frame) => server.server.notification(frame);
   }
-  const substrate = resolveSubstrate();
+  const substrate = options2?.substrate ?? resolveSubstrate();
   const substrateTools = substrate.available || process.env.XTRM_SUBSTRATE_TOOLS === "1" ? [
     createSubstrateIssueTool(),
     createSubstrateJournalTool(() => substrate.services?.journal ?? null),

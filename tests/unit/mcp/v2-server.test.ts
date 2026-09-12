@@ -7,6 +7,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import type { StdioServerHandle } from '@modelcontextprotocol/server/stdio';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { buildV2Server } from '../../../src/mcp/v2-server.js';
+import type { SubstrateHandle } from '../../../src/substrate/services.js';
 
 /**
  * SDK v2 wire tests (unitAI-aiwva.7 E3).
@@ -39,6 +40,31 @@ const EXPECTED_TOOLS = [
   'specialist_stop_activation',
   'specialist_list',
 ];
+
+const EXPECTED_TOOLS_WITH_SUBSTRATE = [
+  ...EXPECTED_TOOLS,
+  'substrate_issue',
+  'substrate_journal',
+  'substrate_provenance',
+];
+
+/**
+ * unitAI-tgdtw: the tool surface depends on `resolveSubstrate()`, and that
+ * result depends on whether `@jaggerxtrm/substrate` happens to be installed
+ * on the machine running the suite. An injected handle makes both surfaces
+ * (present and absent) a controlled input to the test instead of an accident
+ * of the environment — see `BuildV2ServerOptions` in `src/mcp/v2-server.ts`.
+ */
+const SUBSTRATE_AVAILABLE: SubstrateHandle = {
+  available: true,
+  services: { issues: {}, journal: {}, provenance: {} },
+};
+const SUBSTRATE_UNAVAILABLE: SubstrateHandle = {
+  available: false,
+  services: null,
+  reason: 'module_not_resolvable',
+  detail: 'forced unavailable for test',
+};
 
 interface JsonRpcResponse {
   jsonrpc: string;
@@ -111,7 +137,11 @@ beforeEach(async () => {
   const stdin = new PassThrough();
   const stdout = new PassThrough();
   const transport = new StdioServerTransport(stdin, stdout);
-  handle = serveStdio(() => buildV2Server(), { transport, legacy: 'serve' });
+  // Baseline suite intentionally exercises the no-Substrate surface (EXPECTED_TOOLS,
+  // 6 tools): inject the unavailable handle so that is a controlled input, not an
+  // accident of whether @jaggerxtrm/substrate happens to be on disk (unitAI-tgdtw).
+  // The Substrate-present surface is exercised separately, below.
+  handle = serveStdio(() => buildV2Server(undefined, { substrate: SUBSTRATE_UNAVAILABLE }), { transport, legacy: 'serve' });
   client = new WireClient(stdin, stdout);
 });
 
@@ -307,5 +337,36 @@ describe('v2 statelessness (no cross-request server state)', () => {
     expect(call.error).toBeUndefined();
     const discover = await client.call('server/discover', { _meta: META });
     expect(discover.error).toBeUndefined();
+  });
+});
+
+/**
+ * unitAI-tgdtw: prove the Substrate-present surface is exercised deliberately,
+ * not left untested because this machine happens not to carry the package.
+ * Each case stands up its own server with an injected handle rather than
+ * relying on the shared `beforeEach` (which always uses the real resolution).
+ */
+describe('v2 tool surface (Substrate injected, unitAI-tgdtw)', () => {
+  async function listToolsWith(substrate: SubstrateHandle): Promise<string[]> {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const transport = new StdioServerTransport(stdin, stdout);
+    const localHandle = serveStdio(() => buildV2Server(undefined, { substrate }), { transport, legacy: 'serve' });
+    const localClient = new WireClient(stdin, stdout);
+    try {
+      const res = await localClient.call('tools/list', { _meta: META });
+      expect(res.error).toBeUndefined();
+      return (res.result as { tools: Array<{ name: string }> }).tools.map((t) => t.name);
+    } finally {
+      await localHandle.close();
+    }
+  }
+
+  it('registers the 9-tool surface when Substrate resolves', async () => {
+    expect(await listToolsWith(SUBSTRATE_AVAILABLE)).toEqual(EXPECTED_TOOLS_WITH_SUBSTRATE);
+  });
+
+  it('registers the 6-tool surface when Substrate does not resolve', async () => {
+    expect(await listToolsWith(SUBSTRATE_UNAVAILABLE)).toEqual(EXPECTED_TOOLS);
   });
 });
