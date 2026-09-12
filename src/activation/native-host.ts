@@ -13,13 +13,13 @@
  *     lease before an AgentSession exists; a denied lease is a refusal, not a warning.
  *   - `admitToolCall` re-checks the lease on every mutating tool call, and `guarded-tools.ts`
  *     wraps pi's four mutating builtins so a refusal comes back as a tool RESULT.
- *   - `releaseIfWriter` releases on DISPOSAL and converts a throwing release into
- *     `lease_uncertain` evidence rather than a silent success. It does NOT release on
- *     settle, though `workspace-lease.ts`'s wiring note (call site 3) says it should — so a
- *     settled writer keeps its workspace until an explicit stop, and sequential writer
- *     handoff needs one. That divergence is `unitAI-rrdnt.59` and is a design decision
- *     rather than an oversight to patch: releasing on settle buys automatic handoff and
- *     costs guaranteed resumability.
+ *   - `releaseIfWriter` releases on SETTLE (`agent_settled`), on COMPLETION and on
+ *     DISPOSAL, and converts a throwing release into `lease_uncertain` evidence rather than
+ *     a silent success. A writer therefore holds its workspace for the duration of its turn
+ *     and no longer. `resume()` RE-ACQUIRES the lease, and that acquisition can be REFUSED:
+ *     when another writer already holds the workspace the resume fails with `lease_denied`
+ *     naming the holder. A settled writer is resumable, not lease-holding — a caller must not
+ *     read "the activation is settled" as "the workspace is still mine".
  *   The lease guards the LLM TOOL PATH ONLY. `pi.exec` and `AgentSession.executeBash` do not
  *   fire the tool_call handler (`unitAI-rrdnt.6`, unclosed), so a child reaching the
  *   filesystem that way is not fenced. Do not describe writers as "fenced" without that

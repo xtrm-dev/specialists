@@ -185,7 +185,7 @@ export interface ActivationSnapshot {
   /** Cumulative spend counts from the session event stream. Absent until the first usage event. */
   tokenUsage?: ActivationTokenUsage;
   /**
-   * One-line purpose excerpt captured once at dispatch from the bead contract
+   * One-line purpose excerpt captured once at dispatch from the BOUND Issue contract
    * (first meaningful SCOPE line, else SUCCESS). Absent when unreadable — never fabricated.
    */
   purpose?: string;
