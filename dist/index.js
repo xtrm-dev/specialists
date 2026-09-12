@@ -20453,18 +20453,6 @@ var init_contract_sections = __esm(() => {
 });
 
 // src/activation/bead-gate.ts
-import { spawnSync as spawnSync9 } from "child_process";
-function readContractState(beadId) {
-  const result = spawnSync9("bd", ["state", beadId, "contract"], {
-    encoding: "utf-8",
-    stdio: ["ignore", "pipe", "ignore"],
-    timeout: 5000
-  });
-  if (result.error || result.status !== 0)
-    return;
-  const value = result.stdout?.trim().toLowerCase();
-  return value ? value : undefined;
-}
 function extractPurposeExcerpt(description) {
   const sections = extractSections(description ?? "");
   for (const name of ["SCOPE", "SUCCESS"]) {
@@ -20477,38 +20465,6 @@ function extractPurposeExcerpt(description) {
   }
   return;
 }
-function evaluateBeadReadiness(bead, options = {}) {
-  const status = bead.status?.trim().toLowerCase();
-  if (status && NON_DISPATCHABLE_STATUSES.has(status)) {
-    return { ok: false, reason: `bead is ${status} and is not dispatchable`, missing: [] };
-  }
-  const contractState = (options.readContractState ?? readContractState)(bead.id);
-  if (contractState === "draft") {
-    return {
-      ok: false,
-      reason: "bead contract is marked draft \u2014 promote it with `bd set-state <id> contract=ready` first",
-      missing: []
-    };
-  }
-  const description = bead.description ?? "";
-  const sections = extractSections(description);
-  const missing = REQUIRED_SECTIONS.filter((section) => !sections.get(section));
-  if (missing.length > 0) {
-    return {
-      ok: false,
-      reason: "bead is not a usable task contract: required sections are missing or empty",
-      missing: [...missing]
-    };
-  }
-  if (!scrutinyLevel(description)) {
-    return {
-      ok: false,
-      reason: `bead declares no SCRUTINY level (expected one of ${SCRUTINY_LEVELS.join(", ")})`,
-      missing: ["SCRUTINY"]
-    };
-  }
-  return { ok: true };
-}
 var NON_DISPATCHABLE_STATUSES, PURPOSE_EXCERPT_MAX = 60;
 var init_bead_gate = __esm(() => {
   init_contract_sections();
@@ -20518,7 +20474,7 @@ var init_bead_gate = __esm(() => {
 });
 
 // src/specialist/beads.ts
-import { spawnSync as spawnSync10 } from "child_process";
+import { spawnSync as spawnSync9 } from "child_process";
 function buildBeadContext(bead, completedBlockers = [], epicAncestors = []) {
   const lines = [`# Task: ${bead.title}`, `## Bead id: ${bead.id}`];
   if (bead.description?.trim()) {
@@ -20567,7 +20523,7 @@ class BeadsClient {
     }
   }
   static checkAvailable() {
-    const result = spawnSync10("bd", ["--version"], { stdio: "ignore" });
+    const result = spawnSync9("bd", ["--version"], { stdio: "ignore" });
     return result.status === 0;
   }
   isAvailable() {
@@ -20576,7 +20532,7 @@ class BeadsClient {
   createBead(specialistName) {
     if (!this.available)
       return null;
-    const result = spawnSync10("bd", ["q", `specialist:${specialistName}`, "--type", "task", "--labels", "specialist"], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
+    const result = spawnSync9("bd", ["q", `specialist:${specialistName}`, "--type", "task", "--labels", "specialist"], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
     if (result.status !== 0)
       return null;
     const id = result.stdout?.trim();
@@ -20585,7 +20541,7 @@ class BeadsClient {
   readBead(id) {
     if (!this.available || !id)
       return null;
-    const result = spawnSync10("bd", ["show", id, "--json"], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], timeout: 5000 });
+    const result = spawnSync9("bd", ["show", id, "--json"], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], timeout: 5000 });
     if (result.error || result.status !== 0 || !result.stdout?.trim())
       return null;
     try {
@@ -20602,7 +20558,7 @@ class BeadsClient {
   getCompletedBlockers(id, depth = 1) {
     if (!this.available || !id || depth < 1)
       return [];
-    const result = spawnSync10("bd", ["dep", "list", id, "--json"], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], timeout: 5000 });
+    const result = spawnSync9("bd", ["dep", "list", id, "--json"], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], timeout: 5000 });
     if (result.error || result.status !== 0 || !result.stdout?.trim())
       return [];
     let deps;
@@ -20629,13 +20585,13 @@ class BeadsClient {
   addDependency(trackingBeadId, inputBeadId) {
     if (!this.available || !trackingBeadId || !inputBeadId)
       return;
-    spawnSync10("bd", ["dep", "add", trackingBeadId, inputBeadId], { stdio: "ignore" });
+    spawnSync9("bd", ["dep", "add", trackingBeadId, inputBeadId], { stdio: "ignore" });
   }
   closeBead(id, status, durationMs, model) {
     if (!this.available || !id)
       return;
     const reason = `${status}, ${Math.round(durationMs)}ms, ${model}`;
-    spawnSync10("bd", ["close", id, "-r", reason], { stdio: "ignore" });
+    spawnSync9("bd", ["close", id, "-r", reason], { stdio: "ignore" });
   }
   closeBeadIfInProgress(id, reason) {
     if (!this.available || !id)
@@ -20645,13 +20601,13 @@ class BeadsClient {
       return false;
     if (bead.status !== "open" && bead.status !== "in_progress")
       return false;
-    const result = spawnSync10("bd", ["close", id, "-r", reason], { stdio: "ignore" });
+    const result = spawnSync9("bd", ["close", id, "-r", reason], { stdio: "ignore" });
     return result.status === 0;
   }
   updateBeadNotes(id, notes) {
     if (!this.available || !id || !notes)
       return { ok: false, error: "beads unavailable or empty payload" };
-    const result = spawnSync10("bd", ["update", id, "--append-notes", notes], {
+    const result = spawnSync9("bd", ["update", id, "--append-notes", notes], {
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "pipe"]
     });
@@ -20667,7 +20623,7 @@ class BeadsClient {
   auditBead(id, toolName, model, exitCode) {
     if (!this.available || !id)
       return;
-    spawnSync10("bd", [
+    spawnSync9("bd", [
       "audit",
       "record",
       "--kind",
@@ -21673,9 +21629,9 @@ var exports_models = {};
 __export(exports_models, {
   run: () => run10
 });
-import { spawnSync as spawnSync11 } from "child_process";
+import { spawnSync as spawnSync10 } from "child_process";
 function parsePiModels() {
-  const r = spawnSync11("pi", ["--list-models"], {
+  const r = spawnSync10("pi", ["--list-models"], {
     encoding: "utf8",
     stdio: "pipe",
     timeout: 8000
@@ -21780,7 +21736,7 @@ __export(exports_init, {
   run: () => run11
 });
 import { copyFileSync, cpSync, existsSync as existsSync13, lstatSync as lstatSync2, mkdirSync as mkdirSync7, readdirSync as readdirSync5, readFileSync as readFileSync12, readlinkSync, renameSync as renameSync3, rmSync as rmSync3, symlinkSync, unlinkSync, writeFileSync as writeFileSync6 } from "fs";
-import { spawnSync as spawnSync12 } from "child_process";
+import { spawnSync as spawnSync11 } from "child_process";
 import { basename as basename4, dirname as dirname7, join as join14, relative as relative2, resolve as resolve5 } from "path";
 function ok(msg) {
   console.log(`  ${green4("\u2713")} ${msg}`);
@@ -21792,7 +21748,7 @@ function warn(msg) {
   console.warn(`  ${yellow5("!")} ${msg}`);
 }
 function isInstalled(bin) {
-  return spawnSync12("which", [bin], { encoding: "utf8", timeout: 2000 }).status === 0;
+  return spawnSync11("which", [bin], { encoding: "utf8", timeout: 2000 }).status === 0;
 }
 function assertXtrmPrerequisites(cwd) {
   const hasXtrmDir = existsSync13(join14(cwd, ".xtrm"));
@@ -25460,7 +25416,7 @@ __export(exports_runner, {
   RequiredPreScriptError: () => RequiredPreScriptError
 });
 import { createHash as createHash4 } from "crypto";
-import { execSync as execSync2, spawnSync as spawnSync13 } from "child_process";
+import { execSync as execSync2, spawnSync as spawnSync12 } from "child_process";
 import { existsSync as existsSync20, readFileSync as readFileSync15 } from "fs";
 import { basename as basename5, resolve as resolve13 } from "path";
 import { homedir as homedir5 } from "os";
@@ -25480,7 +25436,7 @@ function runScript(command, cwd) {
     return { name: "unknown", output: "Missing script command (expected `run` or legacy `path`).", stderr: "", exitCode: 1 };
   }
   const scriptName = sanitizeScriptName(basename5(run13.split(" ")[0]));
-  const result = spawnSync13(run13, {
+  const result = spawnSync12(run13, {
     encoding: "utf8",
     timeout: 30000,
     cwd,
@@ -25600,7 +25556,7 @@ function resolvePath2(p) {
   return p.startsWith("~/") ? resolve13(homedir5(), p.slice(2)) : resolve13(p);
 }
 function commandExists(cmd) {
-  const result = spawnSync13("which", [cmd], { stdio: "ignore" });
+  const result = spawnSync12("which", [cmd], { stdio: "ignore" });
   return result.status === 0;
 }
 function validateShebang(filePath, errors3) {
@@ -27971,7 +27927,7 @@ __export(exports_edit, {
   run: () => run14
 });
 import { existsSync as existsSync23, mkdirSync as mkdirSync10, readFileSync as readFileSync17, writeFileSync as writeFileSync9 } from "fs";
-import { spawnSync as spawnSync14 } from "child_process";
+import { spawnSync as spawnSync13 } from "child_process";
 import { join as join21 } from "path";
 function usage() {
   const aliasList = Object.keys(LEGACY_FIELD_ALIASES).map((v) => `--${v}`).join(", ");
@@ -28529,7 +28485,7 @@ function openInEditor(filePath) {
 Run ${setCommand} in scripts.`);
   }
   const editor = process.env.EDITOR?.trim() || process.env.VISUAL?.trim() || "vi";
-  const result = spawnSync14(editor, [filePath], { stdio: "inherit" });
+  const result = spawnSync13(editor, [filePath], { stdio: "inherit" });
   if (result.error) {
     fail6(`Error: failed to launch $EDITOR (${editor}): ${result.error.message}`);
   }
@@ -28891,7 +28847,7 @@ __export(exports_config, {
   run: () => run15
 });
 import { existsSync as existsSync24, readFileSync as readFileSync18 } from "fs";
-import { spawnSync as spawnSync15 } from "child_process";
+import { spawnSync as spawnSync14 } from "child_process";
 import { dirname as dirname13, join as join23 } from "path";
 import { fileURLToPath as fileURLToPath6 } from "url";
 function usage2() {
@@ -28922,17 +28878,17 @@ function readPackageVersion2(packageJsonPath) {
   }
 }
 function isInsideGitWorktree(projectDir) {
-  const result = spawnSync15("git", ["rev-parse", "--is-inside-work-tree"], { cwd: projectDir, encoding: "utf-8" });
+  const result = spawnSync14("git", ["rev-parse", "--is-inside-work-tree"], { cwd: projectDir, encoding: "utf-8" });
   return result.status === 0 && result.stdout.trim() === "true";
 }
 function getGitCommonDir(projectDir) {
-  const result = spawnSync15("git", ["rev-parse", "--git-common-dir"], { cwd: projectDir, encoding: "utf-8" });
+  const result = spawnSync14("git", ["rev-parse", "--git-common-dir"], { cwd: projectDir, encoding: "utf-8" });
   if (result.status !== 0)
     return;
   return result.stdout.trim() || undefined;
 }
 function getGitTopLevel(projectDir) {
-  const result = spawnSync15("git", ["rev-parse", "--show-toplevel"], { cwd: projectDir, encoding: "utf-8" });
+  const result = spawnSync14("git", ["rev-parse", "--show-toplevel"], { cwd: projectDir, encoding: "utf-8" });
   if (result.status !== 0)
     return;
   return result.stdout.trim() || undefined;
@@ -29042,7 +28998,7 @@ ${usage2()}`);
     console.error(yellow9("\u26A0 hint: use --from-source for worktree-source resolver review"));
   }
   if (flags.has("--from-source") && !import.meta.url.includes("/src/")) {
-    const result = spawnSync15("bunx", ["tsx", "src/index.ts", "config", "show", specialistName, "--resolved"], {
+    const result = spawnSync14("bunx", ["tsx", "src/index.ts", "config", "show", specialistName, "--resolved"], {
       cwd: projectDir,
       encoding: "utf-8",
       stdio: "pipe"
@@ -40117,7 +40073,7 @@ __export(exports_chat, {
   formatChatShow: () => formatChatShow,
   createCleanup: () => createCleanup
 });
-import { spawnSync as spawnSync16 } from "child_process";
+import { spawnSync as spawnSync15 } from "child_process";
 import { appendFileSync as appendFileSync5, readFileSync as readFileSync20, writeFileSync as writeFileSync13 } from "fs";
 function dbg(msg, extra) {
   if (!DEBUG_LOG_PATH)
@@ -40323,7 +40279,7 @@ function buildPrompt(args) {
 }
 function createEphemeralBead(prompt) {
   const title = buildEphemeralBeadTitle(prompt);
-  const result = spawnSync16("bd", ["create", title, "-t", "task", "-p3", "--json"], {
+  const result = spawnSync15("bd", ["create", title, "-t", "task", "-p3", "--json"], {
     cwd: process.cwd(),
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"]
@@ -42651,7 +42607,7 @@ var init_config_source = __esm(() => {
 });
 
 // src/cli/console/runtime.ts
-import { spawnSync as spawnSync17 } from "child_process";
+import { spawnSync as spawnSync16 } from "child_process";
 import { existsSync as existsSync30, readdirSync as readdirSync11, readFileSync as readFileSync24, statSync as statSync10 } from "fs";
 import { basename as basename8, dirname as dirname18, join as join32 } from "path";
 function createRuntimeClient(cwd = process.cwd()) {
@@ -42970,7 +42926,7 @@ class LocalRuntimeClient {
     const location = getGlobalUserConfigPath2();
     const editor = process.env.EDITOR?.trim() || process.env.VISUAL?.trim() || "vi";
     try {
-      const result = spawnSync17(editor, [location.path], { stdio: "inherit" });
+      const result = spawnSync16(editor, [location.path], { stdio: "inherit" });
       if (result.error) {
         return { ok: false, errorClass: result.error.code ?? "editor_failed" };
       }
@@ -43080,7 +43036,7 @@ function kvRow(key, value) {
 function resolveDiffBase(worktreePath, branch) {
   const candidates = ["origin/HEAD", "origin/main", "origin/master", "main", "master"];
   for (const ref of candidates) {
-    const result = spawnSync17("git", ["-C", worktreePath, "merge-base", "HEAD", ref], {
+    const result = spawnSync16("git", ["-C", worktreePath, "merge-base", "HEAD", ref], {
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 1500
@@ -43089,7 +43045,7 @@ function resolveDiffBase(worktreePath, branch) {
       return result.stdout.trim();
   }
   if (branch) {
-    const result = spawnSync17("git", ["-C", worktreePath, "rev-parse", `${branch}@{u}`], {
+    const result = spawnSync16("git", ["-C", worktreePath, "rev-parse", `${branch}@{u}`], {
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 1500
@@ -43097,7 +43053,7 @@ function resolveDiffBase(worktreePath, branch) {
     if (result.status === 0 && result.stdout)
       return result.stdout.trim();
   }
-  const fallback = spawnSync17("git", ["-C", worktreePath, "rev-parse", "HEAD^"], {
+  const fallback = spawnSync16("git", ["-C", worktreePath, "rev-parse", "HEAD^"], {
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "ignore"],
     timeout: 1500
@@ -43128,7 +43084,7 @@ function buildDiffFileResult(file, raw, meta) {
 }
 function runGit(args, cwd, op) {
   const started = Date.now();
-  const result = spawnSync17("git", ["-C", cwd, ...args], {
+  const result = spawnSync16("git", ["-C", cwd, ...args], {
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "pipe"],
     timeout: 1e4,
@@ -43157,7 +43113,7 @@ function fetchBeadDoc(beadId) {
   if (cached4 && now - cached4.at < BEAD_DOC_TTL_MS)
     return cached4.doc;
   const started = now;
-  const result = spawnSync17("bd", ["show", beadId, "--json"], {
+  const result = spawnSync16("bd", ["show", beadId, "--json"], {
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "pipe"],
     timeout: 3000
@@ -45592,7 +45548,7 @@ var init_hooks = () => {};
 // src/specialist/worktree.ts
 import { existsSync as existsSync31, symlinkSync as symlinkSync2, mkdirSync as mkdirSync14, rmSync as rmSync5 } from "fs";
 import { join as join33, resolve as resolve15 } from "path";
-import { spawnSync as spawnSync18, execFileSync as execFileSync2 } from "child_process";
+import { spawnSync as spawnSync17, execFileSync as execFileSync2 } from "child_process";
 function deriveBranchName(beadId, specialistName) {
   return `feature/${beadId}-${slugify(specialistName)}`;
 }
@@ -45606,7 +45562,7 @@ function resolveCommonRoot(cwd) {
   return resolveCommonGitRoot(cwd) ?? cwd;
 }
 function listWorktrees(cwd = process.cwd()) {
-  const result = spawnSync18("git", ["worktree", "list", "--porcelain"], {
+  const result = spawnSync17("git", ["worktree", "list", "--porcelain"], {
     cwd,
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "ignore"]
@@ -45627,7 +45583,7 @@ function resolveCoordinatorBase(cwd = process.cwd()) {
 function readPaneAgentBranch() {
   if (!process.env.TMUX)
     return;
-  const result = spawnSync18("tmux", ["show-options", "-p", "-qv", "@agent_branch"], {
+  const result = spawnSync17("tmux", ["show-options", "-p", "-qv", "@agent_branch"], {
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "ignore"]
   });
@@ -45636,11 +45592,11 @@ function readPaneAgentBranch() {
   return (result.stdout ?? "").trim() || undefined;
 }
 function localBranchExists(branch, cwd) {
-  const result = spawnSync18("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
+  const result = spawnSync17("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
   return result.status === 0 && (result.stdout ?? "").trim().length > 0;
 }
 function rebaseNewBranchOnto(worktreePath, branch, base) {
-  const result = spawnSync18("git", ["checkout", "-B", branch, base], {
+  const result = spawnSync17("git", ["checkout", "-B", branch, base], {
     cwd: worktreePath,
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "pipe"]
@@ -45677,7 +45633,7 @@ function provisionWorktree(options2) {
 }
 function normalizeParentHooksPath(mainRepoRoot) {
   try {
-    const result = spawnSync18("git", ["-C", mainRepoRoot, "config", "--get", "core.hooksPath"], {
+    const result = spawnSync17("git", ["-C", mainRepoRoot, "config", "--get", "core.hooksPath"], {
       stdio: "pipe",
       encoding: "utf8"
     });
@@ -45691,12 +45647,12 @@ function normalizeParentHooksPath(mainRepoRoot) {
     if (current !== ".beads/hooks" && current !== "./.beads/hooks")
       return;
     const absolute = join33(mainRepoRoot, ".beads", "hooks");
-    spawnSync18("git", ["-C", mainRepoRoot, "config", "core.hooksPath", absolute], { stdio: "pipe" });
+    spawnSync17("git", ["-C", mainRepoRoot, "config", "core.hooksPath", absolute], { stdio: "pipe" });
   } catch {}
 }
 function markBeadsSkipWorktree(worktreePath) {
   try {
-    const trackedResult = spawnSync18("git", ["-C", worktreePath, "ls-files", "--", ".beads"], {
+    const trackedResult = spawnSync17("git", ["-C", worktreePath, "ls-files", "--", ".beads"], {
       cwd: worktreePath,
       stdio: "pipe",
       encoding: "utf8"
@@ -45706,7 +45662,7 @@ function markBeadsSkipWorktree(worktreePath) {
     const trackedPaths = (trackedResult.stdout ?? "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
     if (trackedPaths.length === 0)
       return;
-    spawnSync18("git", ["-C", worktreePath, "update-index", "--skip-worktree", "--", ...trackedPaths], {
+    spawnSync17("git", ["-C", worktreePath, "update-index", "--skip-worktree", "--", ...trackedPaths], {
       cwd: worktreePath,
       stdio: "pipe",
       encoding: "utf8"
@@ -45993,7 +45949,7 @@ __export(exports_merge, {
   checkEpicUnresolvedGuard: () => checkEpicUnresolvedGuard,
   assertMainRepoCleanForMerge: () => assertMainRepoCleanForMerge
 });
-import { spawnSync as spawnSync19 } from "child_process";
+import { spawnSync as spawnSync18 } from "child_process";
 import { existsSync as existsSync32, readFileSync as readFileSync26, readdirSync as readdirSync12 } from "fs";
 import { join as join35 } from "path";
 function parseOptions(argv) {
@@ -46032,7 +45988,7 @@ function parseOptions(argv) {
   return { target, rebuild, targetBranch: targetBranch ? validateTargetBranchRef(targetBranch) : undefined };
 }
 function runCommand(command, args, cwd = process.cwd()) {
-  return spawnSync19(command, args, {
+  return spawnSync18(command, args, {
     cwd,
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "pipe"]
@@ -49011,7 +48967,7 @@ __export(exports_node_supervisor, {
   NodeSupervisor: () => NodeSupervisor
 });
 import { createHash as createHash7 } from "crypto";
-import { spawnSync as spawnSync20 } from "child_process";
+import { spawnSync as spawnSync19 } from "child_process";
 function hashOutput(output2, salt) {
   if (!output2)
     return null;
@@ -49056,7 +49012,7 @@ function parseCreatedBeadId(stdout) {
   return match[1];
 }
 function runCommandOrThrow(command, args, cwd = process.cwd()) {
-  const result = spawnSync20(command, args, {
+  const result = spawnSync19(command, args, {
     cwd,
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "pipe"]
@@ -50129,7 +50085,7 @@ class NodeSupervisor {
     if (!this.opts.sourceBeadId)
       return;
     const notes = this.buildCompletionSummary(options2);
-    const result = spawnSync20("bd", ["update", this.opts.sourceBeadId, "--append-notes", notes], {
+    const result = spawnSync19("bd", ["update", this.opts.sourceBeadId, "--append-notes", notes], {
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "pipe"]
     });
@@ -50142,7 +50098,7 @@ class NodeSupervisor {
     }
   }
   runCommand(command, args, cwd) {
-    const result = spawnSync20(command, args, {
+    const result = spawnSync19(command, args, {
       cwd,
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "pipe"]
@@ -50346,8 +50302,8 @@ class NodeSupervisor {
     }
   }
   runFinalQualityGates(cwd) {
-    const lintPass = spawnSync20("npm", ["run", "lint"], { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }).status === 0;
-    const tscPass = spawnSync20("npx", ["tsc", "--noEmit"], { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }).status === 0;
+    const lintPass = spawnSync19("npm", ["run", "lint"], { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }).status === 0;
+    const tscPass = spawnSync19("npx", ["tsc", "--noEmit"], { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }).status === 0;
     return {
       lint: lintPass ? "pass" : "fail",
       tsc: tscPass ? "pass" : "fail"
@@ -51805,9 +51761,9 @@ __export(exports_epic, {
   handleEpicCommand: () => handleEpicCommand,
   handleEpicAbandonCommand: () => handleEpicAbandonCommand
 });
-import { spawnSync as spawnSync21 } from "child_process";
+import { spawnSync as spawnSync20 } from "child_process";
 function runCommand2(command, args, cwd = process.cwd()) {
-  return spawnSync21(command, args, {
+  return spawnSync20(command, args, {
     cwd,
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "pipe"]
@@ -52534,7 +52490,7 @@ __export(exports_status, {
   run: () => run20,
   detectJobOutputMode: () => detectJobOutputMode
 });
-import { spawnSync as spawnSync22 } from "child_process";
+import { spawnSync as spawnSync21 } from "child_process";
 import { existsSync as existsSync36, readFileSync as readFileSync30 } from "fs";
 import { join as join39 } from "path";
 function ok2(msg) {
@@ -52555,7 +52511,7 @@ function section(label) {
 ${bold10(`\u2500\u2500 ${label} ${line}`)}`);
 }
 function cmd(bin, args) {
-  const r = spawnSync22(bin, args, {
+  const r = spawnSync21(bin, args, {
     encoding: "utf8",
     stdio: "pipe",
     timeout: 5000
@@ -52563,7 +52519,7 @@ function cmd(bin, args) {
   return { ok: r.status === 0 && !r.error, stdout: (r.stdout ?? "").trim() };
 }
 function isInstalled2(bin) {
-  return spawnSync22("which", [bin], { encoding: "utf8", timeout: 2000 }).status === 0;
+  return spawnSync21("which", [bin], { encoding: "utf8", timeout: 2000 }).status === 0;
 }
 function formatElapsed2(s) {
   if (s.elapsed_s === undefined)
@@ -53050,11 +53006,11 @@ __export(exports_ps, {
   run: () => run21,
   formatSpawnedByLine: () => formatSpawnedByLine
 });
-import { spawnSync as spawnSync23 } from "child_process";
+import { spawnSync as spawnSync22 } from "child_process";
 function loadBeadIdsForCurrentUser() {
   const ids = new Set;
   try {
-    const result = spawnSync23("bd", ["query", "assignee=me", "--json"], {
+    const result = spawnSync22("bd", ["query", "assignee=me", "--json"], {
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "pipe"],
       timeout: 5000
@@ -53424,7 +53380,7 @@ function formatPayloadStats2(payloadJson) {
   }
 }
 function getBeadTitleFromBd(beadId) {
-  const result = spawnSync23("bd", ["show", beadId, "--json"], {
+  const result = spawnSync22("bd", ["show", beadId, "--json"], {
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "ignore"],
     timeout: 1500
@@ -57224,7 +57180,7 @@ __export(exports_retry, {
   buildRetryArgv: () => buildRetryArgv,
   RETRYABLE_JOB_STATUSES: () => RETRYABLE_JOB_STATUSES
 });
-import { spawnSync as spawnSync24 } from "child_process";
+import { spawnSync as spawnSync23 } from "child_process";
 function parseRetryArgs(argv) {
   let jobId;
   let model;
@@ -57289,7 +57245,7 @@ async function run29() {
       console.error(resolved.error);
       process.exit(1);
     }
-    const child = spawnSync24(process.execPath, [process.argv[1], ...resolved.argv], { stdio: "inherit" });
+    const child = spawnSync23(process.execPath, [process.argv[1], ...resolved.argv], { stdio: "inherit" });
     process.exit(child.status ?? 1);
   } finally {
     await supervisor.dispose();
@@ -57316,7 +57272,7 @@ async function run30() {
 // src/specialist/worktree-gc.ts
 import { existsSync as existsSync41, readdirSync as readdirSync18, readFileSync as readFileSync34 } from "fs";
 import { join as join44 } from "path";
-import { spawnSync as spawnSync25 } from "child_process";
+import { spawnSync as spawnSync24 } from "child_process";
 function readJobStatus2(jobDir) {
   const statusPath = join44(jobDir, "status.json");
   if (!existsSync41(statusPath))
@@ -57384,7 +57340,7 @@ function collectWorktreeGcCandidates(jobsDir) {
   return candidates;
 }
 function removeWorktreeDirectory(worktreePath) {
-  const result = spawnSync25("git", ["worktree", "remove", "--force", worktreePath], {
+  const result = spawnSync24("git", ["worktree", "remove", "--force", worktreePath], {
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -58035,7 +57991,7 @@ var exports_end = {};
 __export(exports_end, {
   run: () => run32
 });
-import { spawnSync as spawnSync26 } from "child_process";
+import { spawnSync as spawnSync25 } from "child_process";
 function parseOptions3(argv) {
   let beadId;
   let epicId;
@@ -58070,7 +58026,7 @@ function parseOptions3(argv) {
   return { beadId, epicId, rebuild, pr };
 }
 function runCommand3(command, args) {
-  const result = spawnSync26(command, args, { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
+  const result = spawnSync25(command, args, { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
   return {
     status: result.status,
     stdout: result.stdout ?? "",
@@ -58769,7 +58725,7 @@ async function run38() {
   lines.push("");
   lines.push(section2("5. Async Job Lifecycle"));
   lines.push("");
-  lines.push(`  ${bold11("MCP pattern")}: ${cmd2("use_specialist")} (foreground, returns result directly)`);
+  lines.push(`  ${bold11("MCP pattern")}: ${cmd2("specialist_dispatch")} (fire-and-forget, poll ${cmd2("specialist_status")} for completion)`);
   lines.push(`  ${bold11("CLI pattern")}: ${cmd2('specialists run <name> --prompt "..."')} prints ${dim13("[job started: <id>]")} to stderr`);
   lines.push(`  ${bold11("Agent pattern")}: ${cmd2('specialists run <name> --prompt "..." --background')} detaches and returns the job id`);
   lines.push(`  ${bold11("Shell pattern")}: ${cmd2('specialists run <name> --prompt "..." &')} native backgrounding, interactive shells only`);
@@ -58883,7 +58839,7 @@ async function run38() {
   lines.push("");
   lines.push(`  ${bold11("specialist_init")}    \u2014 bootstrap: bd init + list specialists`);
   lines.push(`  ${bold11("list_specialists")}   \u2014 discover specialists (project/user/system)`);
-  lines.push(`  ${bold11("use_specialist")}     \u2014 full lifecycle: load \u2192 agents.md \u2192 run \u2192 output`);
+  lines.push(`  ${bold11("specialist_dispatch")} \u2014 start a specialist as a background job, returns immediately`);
   lines.push(`  ${bold11("feed_specialist")}    \u2014 stream events/output by job ID`);
   lines.push(`  ${bold11("steer_specialist")}      \u2014 send a mid-run message to a running job`);
   lines.push(`  ${bold11("resume_specialist")}    \u2014 resume a waiting keep-alive session with a next-turn prompt`);
@@ -59089,7 +59045,7 @@ __export(exports_doctor, {
   cleanupProcesses: () => cleanupProcesses
 });
 import { createHash as createHash9 } from "crypto";
-import { spawnSync as spawnSync27 } from "child_process";
+import { spawnSync as spawnSync26 } from "child_process";
 import { existsSync as existsSync44, mkdirSync as mkdirSync16, readdirSync as readdirSync21, readFileSync as readFileSync37, writeFileSync as writeFileSync20 } from "fs";
 import { homedir as homedir12 } from "os";
 import { join as join47, relative as relative5, resolve as resolve20 } from "path";
@@ -59114,11 +59070,11 @@ function section3(label) {
 ${bold12(`\u2500\u2500 ${label} ${line}`)}`);
 }
 function sp(bin, args) {
-  const r = spawnSync27(bin, args, { encoding: "utf8", stdio: "pipe", timeout: 5000 });
+  const r = spawnSync26(bin, args, { encoding: "utf8", stdio: "pipe", timeout: 5000 });
   return { ok: r.status === 0 && !r.error, stdout: (r.stdout ?? "").trim() };
 }
 function isInstalled3(bin) {
-  return spawnSync27("which", [bin], { encoding: "utf8", timeout: 2000 }).status === 0;
+  return spawnSync26("which", [bin], { encoding: "utf8", timeout: 2000 }).status === 0;
 }
 function loadJson2(path3) {
   if (!existsSync44(path3))
@@ -59355,7 +59311,7 @@ function checkClaudeMdFragments() {
     hint("install xtrm-tools to enable: xt claude-sync --check");
     return true;
   }
-  const result = spawnSync27("xt", ["claude-sync", "--check", "--json", "--cwd", projectRoot], {
+  const result = spawnSync26("xt", ["claude-sync", "--check", "--json", "--cwd", projectRoot], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -60255,7 +60211,7 @@ __export(exports_setup, {
   runApply: () => runApply,
   run: () => run40
 });
-import { spawnSync as spawnSync28 } from "child_process";
+import { spawnSync as spawnSync27 } from "child_process";
 import { readFileSync as readFileSync40 } from "fs";
 function usage4() {
   return [
@@ -60423,7 +60379,7 @@ async function collectDiscoveryState() {
   };
 }
 function parsePiModels2() {
-  const result = spawnSync28("pi", ["--list-models"], { encoding: "utf8", stdio: "pipe", timeout: 8000 });
+  const result = spawnSync27("pi", ["--list-models"], { encoding: "utf8", stdio: "pipe", timeout: 8000 });
   if (result.status !== 0 || result.error)
     return [];
   return result.stdout.split(`
@@ -60574,7 +60530,7 @@ function collectPlannedChanges(writes) {
   return changes;
 }
 function readGlobalField(key) {
-  const getResult = spawnSync28("sp", ["edit", "--global", "--get", key], {
+  const getResult = spawnSync27("sp", ["edit", "--global", "--get", key], {
     encoding: "utf8",
     stdio: "pipe"
   });
@@ -60608,7 +60564,7 @@ function rollbackChanges(applied) {
   return failed;
 }
 function setGlobalField(key, value) {
-  return spawnSync28("sp", ["edit", "--global", "--set", key, value], {
+  return spawnSync27("sp", ["edit", "--global", "--set", key, value], {
     encoding: "utf8",
     stdio: "pipe"
   });
@@ -60866,7 +60822,7 @@ __export(exports_serve, {
 import { createServer } from "http";
 import { randomUUID as randomUUID6 } from "crypto";
 import { once } from "events";
-import { spawnSync as spawnSync29 } from "child_process";
+import { spawnSync as spawnSync28 } from "child_process";
 import { access, readdir as readdir2, readFile as readFile4, constants as constants3 } from "fs/promises";
 import { existsSync as existsSync47 } from "fs";
 import { homedir as homedir15 } from "os";
@@ -61006,7 +60962,7 @@ function parseArgs18(argv) {
   return { port, concurrency, queueTimeoutMs, shutdownGraceMs, projectDir, dbPath, fallbackModel, auditFailureThreshold, allowSkills, allowSkillsRoots, reloadPollMs, readinessCanaryMode, readinessRequiredPiFlags, readinessCanarySpecialist, readinessCanaryTimeoutMs, logLevel };
 }
 function checkPiHelpForFlags(flags = DEFAULT_REQUIRED_PI_FLAGS) {
-  const result = spawnSync29("pi", ["--help"], { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
+  const result = spawnSync28("pi", ["--help"], { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
   if (result.error || result.status === 127)
     return "pi_binary_missing";
   const help = `${result.stdout ?? ""}
@@ -61286,7 +61242,7 @@ __export(exports_script, {
   parseArgs: () => parseArgs19,
   mapExitCode: () => mapExitCode
 });
-import { spawnSync as spawnSync30 } from "child_process";
+import { spawnSync as spawnSync29 } from "child_process";
 function parseVar(entry) {
   const index = entry.indexOf("=");
   if (index <= 0)
@@ -61416,7 +61372,7 @@ function printResult(result, json) {
   console.error(result.error);
 }
 function runUnderLock(lockPath, argv) {
-  const flock = spawnSync30("flock", ["-n", lockPath, "env", "SP_SCRIPT_NO_LOCK=1", process.execPath, process.argv[1], "script", ...argv], {
+  const flock = spawnSync29("flock", ["-n", lockPath, "env", "SP_SCRIPT_NO_LOCK=1", process.execPath, process.argv[1], "script", ...argv], {
     encoding: "utf-8",
     stdio: "inherit"
   });
@@ -61505,7 +61461,7 @@ async function run43() {
     '    specialists run <name> --prompt "..." --raw    # legacy: raw LLM text deltas',
     "",
     "  Async patterns",
-    "    MCP:   use_specialist (foreground, returns result directly)",
+    "    MCP:   specialist_dispatch (fire-and-forget, poll specialist_status for completion)",
     '    CLI:   specialists run <name> --prompt "..."       # job ID prints on stderr',
     "           specialists ps|feed|log|result <job-id>       # observe/progress/debug/final output",
     '    Agent: specialists run <name> --prompt "..." --background  # detached; use from an agent pane',
@@ -91010,70 +90966,6 @@ var init_stdio = __esm(() => {
   init_shimsNode();
 });
 
-// src/tools/specialist/use_specialist.tool.ts
-function createUseSpecialistTool(runner) {
-  return {
-    name: "use_specialist",
-    description: "Run a specialist synchronously and wait for the result. " + "Full lifecycle: load \u2192 agents.md \u2192 pi session \u2192 output. " + "Response includes output, model, durationMs, and beadId (string | undefined). " + "beadId is set when the specialist's beads_integration policy triggered bead creation " + "(default: auto \u2014 creates for LOW/MEDIUM/HIGH permission, skips for READ_ONLY). " + "If beadId is present, use `bd update <beadId> --append-notes` to attach findings. " + "When bead_id is provided, the source bead becomes the specialist prompt and the tracking bead links back to it. " + "Use context_depth to inject outputs from completed blocking dependencies (depth 1 = immediate blockers, 2 = include their blockers too). " + "A bead_id that specialist_dispatch would REFUSE (draft, closed, or missing a contract section) still runs here, but the result carries a readiness_warning naming what is missing. " + "That divergence is deprecated: prefer specialist_dispatch for contract-gated work.",
-    inputSchema: useSpecialistSchema,
-    async execute(input2, onProgress) {
-      let prompt = input2.prompt?.trim() ?? "";
-      let variables = input2.variables;
-      let readinessWarning;
-      if (input2.bead_id) {
-        const beadsClient = new BeadsClient;
-        const bead = beadsClient.readBead(input2.bead_id);
-        if (!bead) {
-          return {
-            status: "error",
-            error: `Unable to read bead '${input2.bead_id}' via bd show --json`
-          };
-        }
-        const readiness = evaluateBeadReadiness(bead);
-        if (!readiness.ok) {
-          readinessWarning = `bead '${input2.bead_id}' would be REFUSED by specialist_dispatch: ${readiness.reason}` + (readiness.missing.length > 0 ? ` (missing: ${readiness.missing.join(", ")})` : "") + ". use_specialist ran it anyway because it predates the bead gate. This divergence is" + " deprecated \u2014 promote the bead and use specialist_dispatch.";
-        }
-        const beadContext = buildBeadContext(bead);
-        prompt = beadContext;
-        variables = {
-          ...input2.variables ?? {},
-          bead_context: beadContext,
-          bead_id: input2.bead_id
-        };
-      }
-      const result = await runner.run({
-        name: input2.name,
-        prompt,
-        variables,
-        backendOverride: input2.backend_override,
-        autonomyLevel: input2.autonomy_level,
-        specialistName: input2.name,
-        specialistPermissions: undefined,
-        inputBeadId: input2.bead_id
-      }, onProgress);
-      return readinessWarning ? { ...result, readiness_warning: readinessWarning } : result;
-    }
-  };
-}
-var useSpecialistSchema;
-var init_use_specialist_tool = __esm(() => {
-  init_zod();
-  init_beads();
-  init_bead_gate();
-  useSpecialistSchema = objectType({
-    name: stringType().describe("Specialist identifier (e.g. codebase-explorer)"),
-    prompt: stringType().optional().describe("The task or question for the specialist"),
-    bead_id: stringType().optional().describe("Use an existing bead as the specialist prompt"),
-    variables: recordType(stringType()).optional().describe("Additional $variable substitutions"),
-    backend_override: stringType().optional().describe("Force a specific backend (gemini, qwen, anthropic)"),
-    autonomy_level: enumType(["READ_ONLY", "LOW", "MEDIUM", "HIGH"]).optional().describe("Override permission level for this invocation"),
-    context_depth: numberType().min(0).max(10).optional().describe("Depth of blocker context injection (0 = none, 1 = immediate blockers, etc.)")
-  }).refine((input2) => Boolean(input2.prompt?.trim() || input2.bead_id), {
-    message: "Either prompt or bead_id is required",
-    path: ["prompt"]
-  });
-});
-
 // src/activation/transport/pending-store.ts
 import { existsSync as existsSync48, mkdirSync as mkdirSync19, readdirSync as readdirSync24, readFileSync as readFileSync41, renameSync as renameSync7, unlinkSync as unlinkSync2, writeFileSync as writeFileSync23 } from "fs";
 import { join as join52 } from "path";
@@ -95450,7 +95342,6 @@ function buildV2Server(ctx) {
     createSubstrateProvenanceTool(() => substrate.services?.provenance ?? null)
   ] : [];
   const tools = [
-    createUseSpecialistTool(runner),
     createSpecialistStatusTool(loader, circuitBreaker, getHost, getPusher),
     createSpecialistDispatchTool(getHost, getPusher),
     createSpecialistReplyTool(getHost),
@@ -95463,7 +95354,6 @@ function buildV2Server(ctx) {
     substrate_issue: substrateIssueSchema,
     substrate_journal: substrateJournalSchema,
     substrate_provenance: substrateProvenanceSchema,
-    use_specialist: useSpecialistSchema,
     specialist_dispatch: specialistDispatchSchema,
     specialist_reply: specialistReplySchema,
     specialist_resume: specialistResumeSchema,
@@ -95521,7 +95411,7 @@ function serveV2Stdio() {
     legacy: "serve",
     onerror: (error3) => logger.error("MCP v2 transport error", error3)
   });
-  logger.info(`Specialists MCP Server v2 (2025-11-25 + 2026-07-28, dual-revision) started \u2014 7 tools registered`);
+  logger.info(`Specialists MCP Server v2 (2025-11-25 + 2026-07-28, dual-revision) started \u2014 6 tools registered`);
   process.on("SIGTERM", () => {
     logger.info("SIGTERM received \u2014 shutting down");
     handle.close().finally(() => process.exit(0));
@@ -95540,7 +95430,6 @@ var init_v2_server = __esm(() => {
   init_hooks();
   init_circuitBreaker();
   init_beads();
-  init_use_specialist_tool();
   init_specialist_status_tool();
   init_specialist_list_tool();
   init_activation_tool();
@@ -95561,7 +95450,7 @@ var init_v2_server = __esm(() => {
 
 // src/index.ts
 init_logger();
-import { spawnSync as spawnSync31 } from "child_process";
+import { spawnSync as spawnSync30 } from "child_process";
 process.on("uncaughtException", (err) => {
   if (err.code === "EBADF" && err.syscall === "close")
     return;
@@ -96209,7 +96098,7 @@ async function run44() {
         "  --worktree requires --bead to derive a deterministic branch name.",
         "",
         "Async execution patterns:",
-        "  MCP:   use_specialist (foreground, returns result directly)",
+        "  MCP:   specialist_dispatch (fire-and-forget, poll specialist_status for completion)",
         "  CLI:   run prints [job started: <id>] on stderr, then use ps/feed/result",
         '  Agent: specialists run <name> --prompt "..." --background   # survives a tool timeout',
         '  Shell: specialists run <name> --prompt "..." &              # interactive shells only',
@@ -96970,7 +96859,7 @@ async function run44() {
   }
   if (sub === "release") {
     console.error("Deprecated. Use `xt release prepare/publish`. This alias will be removed in v4.0.");
-    const result = spawnSync31("xt", ["release", ...process.argv.slice(3)], { stdio: "inherit" });
+    const result = spawnSync30("xt", ["release", ...process.argv.slice(3)], { stdio: "inherit" });
     if (result.error) {
       console.error(`Failed to run xt release: ${result.error.message}`);
       process.exit(1);

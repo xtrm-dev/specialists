@@ -666,7 +666,7 @@ async function run() {
         '  --worktree requires --bead to derive a deterministic branch name.',
         '',
         'Async execution patterns:',
-        '  MCP:   use_specialist (foreground, returns result directly)',
+        '  MCP:   specialist_dispatch (fire-and-forget, poll specialist_status for completion)',
         '  CLI:   run prints [job started: <id>] on stderr, then use ps/feed/result',
         '  Agent: specialists run <name> --prompt "..." --background   # survives a tool timeout',
         '  Shell: specialists run <name> --prompt "..." &              # interactive shells only',
