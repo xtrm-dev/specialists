@@ -95,7 +95,7 @@ export interface CompileStepContractInput {
   now?: () => number;
 }
 
-/** The canonical seven-field contract shape (a structural projection of @xtrm/substrate's WorkContract). */
+/** The canonical seven-field contract shape (a structural projection of @jaggerxtrm/substrate's WorkContract). */
 interface StructuredContract {
   problem: string;
   success: string;

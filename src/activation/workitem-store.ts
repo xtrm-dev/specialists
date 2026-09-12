@@ -5,7 +5,7 @@
 // through a Beads client.
 //
 // STRUCTURAL DECOUPLING (xtrm-6qu.7.1+): this module has NO static dependency
-// on @xtrm/substrate — no import, no package.json entry, nothing for public CI
+// on @jaggerxtrm/substrate — no import, no package.json entry, nothing for public CI
 // to resolve. The Substrate package lives in the PRIVATE xtrm repo; this repo
 // is public, so private code must never be vendored, bundled, or lockfiled
 // here. Integration happens two ways:
@@ -28,12 +28,48 @@
 
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { DatabaseSync } from 'node:sqlite';
 import { extractSections, scrutinyLevel, validateContractText } from './contract-sections.js';
 
 const require = createRequire(import.meta.url);
+
+/**
+ * The one name this loader will execute code from. Checked against the resolved
+ * directory's own package.json before any deep module runs, on EVERY resolution
+ * path — see `openWorkItemBoundary`. Strict equality against this single
+ * constant is the point: a check that accepts two names accepts a spoof.
+ *
+ * Renamed from `@xtrm/substrate` under XTRM-267 when Substrate was published to
+ * a scope the project actually owns.
+ */
+const SUBSTRATE_PACKAGE = '@jaggerxtrm/substrate';
+
+/**
+ * Where Substrate lives, in precedence order: an explicit checkout, then normal
+ * module resolution, then nowhere.
+ *
+ * The explicit path wins deliberately. A developer who points
+ * XTRM_SUBSTRATE_DIR at a working tree means it, and an installed copy silently
+ * shadowing that checkout would make local Substrate changes untestable from
+ * here — the exact confusion the variable exists to avoid.
+ *
+ * Module resolution is what makes the plugin work for someone who installed it
+ * from npm and has never heard of the Substrate repository. Before it existed,
+ * dispatch was unavailable to every such user (XTRM-267).
+ */
+function resolveSubstrateDir(explicit: string): string | null {
+  const trimmed = explicit.trim();
+  if (trimmed) return trimmed;
+  try {
+    return dirname(require.resolve(`${SUBSTRATE_PACKAGE}/package.json`));
+  } catch {
+    // Not installed. Absence is an ordinary state, not an error to report here:
+    // the caller turns it into work_item_store_unavailable with both remedies.
+    return null;
+  }
+}
 
 /** Canonical authority path: explicit XTRM_STATE_DB wins, else ~/.xtrm/state.db. */
 export function resolveWorkItemDbPath(env: NodeJS.ProcessEnv = process.env): string {
@@ -392,7 +428,7 @@ function splitLines(body: string | undefined): string[] {
 /** Options for the runtime opener. */
 export interface OpenWorkItemsOptions {
   dbPath?: string;
-  /** Absolute path to a built @xtrm/substrate checkout. No default: public builds never assume one. */
+  /** Absolute path to a Substrate checkout. Overrides module resolution; see resolveSubstrateDir. */
   substrateDir?: string;
   env?: NodeJS.ProcessEnv;
 }
@@ -401,7 +437,7 @@ export interface OpenWorkItemsOptions {
  * Open the canonical work store and build the boundary over the REAL producer
  * services, dynamic-imported at runtime from an explicit checkout.
  *
- * `substrateDir` (or `XTRM_SUBSTRATE_DIR`) must point at a @xtrm/substrate
+ * `substrateDir` (or `XTRM_SUBSTRATE_DIR`) must point at a @jaggerxtrm/substrate
  * package directory exposing `src/store/migrations/runner.ts`,
  * `src/service/issue-service.ts`, `src/service/journal-service.ts`,
  * `src/service/provenance-service.ts`, `src/workitems/substrate-store.ts` and
@@ -413,10 +449,11 @@ export interface OpenWorkItemsOptions {
  */
 export async function openWorkItemBoundary(opts: OpenWorkItemsOptions = {}): Promise<SpecialistWorkItemBoundary> {
   const env = opts.env ?? process.env;
-  const substrateDir = (opts.substrateDir ?? (env.XTRM_SUBSTRATE_DIR ?? '')).trim();
+  const substrateDir = resolveSubstrateDir(opts.substrateDir ?? env.XTRM_SUBSTRATE_DIR ?? '');
   if (!substrateDir) {
     throw new Error(
-      'work_item_store_unavailable: no Substrate package configured (set XTRM_SUBSTRATE_DIR to a built @xtrm/substrate checkout)',
+      `work_item_store_unavailable: no Substrate package configured (install ${SUBSTRATE_PACKAGE}, ` +
+        'or set XTRM_SUBSTRATE_DIR to a checkout of it)',
     );
   }
   // Package identity BEFORE executing any deep module: a spoofed or wrong
@@ -431,9 +468,9 @@ export async function openWorkItemBoundary(opts: OpenWorkItemsOptions = {}): Pro
       `work_item_store_unavailable: cannot read Substrate package identity at ${substrateDir}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-  if (pkgName !== '@xtrm/substrate') {
+  if (pkgName !== SUBSTRATE_PACKAGE) {
     throw new Error(
-      `work_item_store_unavailable: expected @xtrm/substrate at ${substrateDir}, found ${JSON.stringify(pkgName) ?? 'no name'}`,
+      `work_item_store_unavailable: expected ${SUBSTRATE_PACKAGE} at ${substrateDir}, found ${JSON.stringify(pkgName) ?? 'no name'}`,
     );
   }
   const load = async (rel: string): Promise<Record<string, any>> => {
