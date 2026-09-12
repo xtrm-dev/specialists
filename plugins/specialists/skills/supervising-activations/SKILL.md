@@ -2,7 +2,7 @@
 name: supervising-activations
 description: >
   Dispatch and supervise specialist activations from inside Claude Code: run a specialist
-  against a ready Bead or an inline 7-section contract, read live activation state, answer
+  against a READY Substrate Issue or an inline 7-section contract, read live activation state, answer
   asks, resume the same session, and stop. Use when work already has a durable contract and
   needs a supervised activation rather than direct edits.
 version: 0.2
@@ -25,7 +25,7 @@ What is local to THIS plugin, and therefore stated here:
 
 - A tool result is evidence, not a decision. A dispatch admission is not a result.
 - **`XTRM_SUBSTRATE_DIR` must be set in the session environment, or dispatch does not work
-  at all.** It points at an `@xtrm/substrate` checkout, which supplies the work-item store
+  at all.** It points at a `@jaggerxtrm/substrate` checkout, which supplies the work-item store
   that holds the contract. Without it `specialist_dispatch` is refused before any model turn
   with `work_item_store_unavailable`; the read tools (`specialist_status`, `specialist_list`)
   keep working, so the surface looks healthy right up until you try to dispatch. It has to be
@@ -40,20 +40,26 @@ What is local to THIS plugin, and therefore stated here:
 
 ## Tool surface
 
-Seven tools. The names are exact.
+Six tools are registered on the Specialists MCP server, and the names are exact. A separate
+section below documents the REMOVED `use_specialist` path so no reader mistakes it for live.
 
 ### specialist_dispatch
-Creates an activation. Supply EXACTLY ONE of:
-- `bead_id` — a Substrate issue ref (for example `XTRM-240`), already READY. NOT a `bd`
+Creates an activation. Supply an existing issue ref OR an inline contract — never both:
+- `issue_ref` — a Substrate issue ref (for example `XTRM-240`), already READY. NOT a `bd`
   bead id: Substrate's issue store and the `bd` board are separate stores, so passing a `bd`
   id such as `unitAI-ucpcy` is refused with `issue_unresolvable`. To run a specialist against
-  work that only exists in `bd`, pass its contract inline instead, or
+  work that only exists in `bd`, pass its contract inline instead.
+- `bead_id` — permanent compatibility alias for `issue_ref`: same value, same gate.
+  Prefer `issue_ref` in new calls.
 - `contract` — an inline contract: seven sections (PROBLEM, SUCCESS, SCOPE, NON_GOALS,
   CONSTRAINTS, VALIDATION, OUTPUT) plus a SCRUTINY level (LOW | MEDIUM | HIGH | CRITICAL).
   Eight required parts. SCRUTINY is the level, never an eighth section.
 
-The readiness gate runs BEFORE anything is created. An inline contract creates its bead
-first. Do not dispatch against a `contract:draft` bead — promote it first.
+The text gate runs BEFORE anything is created: an inline contract missing a section is
+refused and the board is unchanged. A contract that passes is created, attested and
+claimed as a real Substrate Issue through the work boundary then bound at activation
+start. A draft or otherwise non-dispatchable Issue is refused before any model turn —
+fix the Issue, never route around the gate.
 
 Optional: `title`, `model_override`, `thinking_override`
 (`off|minimal|low|medium|high|xhigh`), `requested_by`, `coordinator_session_id`,
@@ -67,8 +73,8 @@ session creation when unavailable, and are never silently replaced. Report the r
 do not retry with a substitute model.
 
 ### specialist_status
-Live projection of every activation. Per row: `activation_id`, `specialist`, `bead_id`,
-`state`, `access`, `model_override`, `thinking_override`, `thinking_level` (omitted when
+Live projection of every activation. Per row: `activation_id`, `specialist`, `issue_ref`
+(`bead_id` carries the same ref as a compatibility alias), `state`, `access`, `model_override`, `thinking_override`, `thinking_level` (omitted when
 unset — never fabricate it), `purpose` (a one-line SCOPE-then-SUCCESS excerpt captured once
 at dispatch, omitted when absent), `elapsed_s`, `token_usage`, `last_activity_at`, and the
 validated `result` object on settled activations only.
@@ -83,7 +89,9 @@ passed.
 ### specialist_resume
 Resumes a settled or waiting activation in the SAME session with a new prompt. Not a second
 dispatch: the `activation_id` is kept and the `attempt_id` advances, so the child keeps its
-context and its workspace lease. A disposed activation cannot be resumed.
+context. The workspace lease is not kept across settle — it is released at settle and
+reacquired on resume, so a resume that loses the race to another writer is refused with
+`lease_denied`. A disposed activation cannot be resumed.
 
 ### specialist_stop_activation
 Disposes an activation explicitly. This is the irreversible one. Settled activations stay
@@ -109,7 +117,12 @@ always applies, so a refused contract must be fixed rather than routed around.
 
 - Never shell out to the `specialists` CLI from a session that has these tools. The MCP
   path is in-process; spawning `sp` defeats the native host.
-- Dispatch admission, then poll `specialist_status`. Do not block waiting for a result.
+- Dispatch returns admission, not a result. The Channel push is the primary wake: an
+  actionable transition (settled result, pending ask, escalation) arrives as a channel
+  frame naming the activation — a reference, never the payload. `specialist_status` is
+  the authoritative read for whatever the push names. Polling `specialist_status` is the
+  degraded fallback: a missed push degrades to polling, which reads the same object late,
+  never a different object. Do not block waiting for a result.
 - Every outcome carries a build-identity line. If it names staleness, say so — the runtime
   was rebuilt after load.
 - Stop duty: before ending a session, `specialist_status` and stop what you own.
@@ -120,6 +133,7 @@ always applies, so a refused contract must be fixed rather than routed around.
 
 ## Non-goals
 
-This skill is not a scheduler, not a merge path, and not a second doctrine for beads or
-git. Merge is manual. Beads and git remain the durable work and integration authority.
+This skill is not a scheduler, not a merge path, and not a second work doctrine. Merge is
+manual. Substrate Issues are the durable work authority — see the `using-substrate` skill,
+which owns that doctrine and is not restated here. Git remains the integration authority.
 For CLI-side workflow, see the `using-specialists` skill; it is not restated here.
