@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Substrate plugin MCP launcher.
+// specialists plugin MCP launcher.
 //
 // Resolves the runtime that ships WITH this plugin, then imports it. No argv: the
 // entrypoint starts MCP server mode when given no subcommand.

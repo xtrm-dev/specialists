@@ -1343,6 +1343,13 @@ E3. replace MCP server
     no initialize/initialized
     no Mcp-Session-Id
 
+    AMENDMENT (2026-09-11, §AM.2): this entry describes the wave's ORIGINAL plan and is
+    kept as the historical record — do not act on it as-is. §AM.2 later established the
+    opposite as normative: Claude Code refuses to register the channel listener on a
+    modern-only connection, so `serveStdio(..., { legacy: 'serve' })` is a PRECONDITION
+    for push, not a compatibility concession to drop. Negotiating 2026-07-28 only would
+    silently delete the wake path. Read §AM.2 before touching serveStdio era negotiation.
+
 E4. upgrade MCP tool surface
     Issue
     Journal

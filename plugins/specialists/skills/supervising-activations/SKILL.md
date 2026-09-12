@@ -109,6 +109,10 @@ it is deprecated: prefer `specialist_dispatch`.
 - Every outcome carries a build-identity line. If it names staleness, say so — the runtime
   was rebuilt after load.
 - Stop duty: before ending a session, `specialist_status` and stop what you own.
+- **Channel wake registration is interactive-TUI-only.** `claude -p` (headless automation)
+  has no channel path at any gate setting. A headless run gets hook-only wake — correct, but
+  silent: nothing tells the operator the channel push never registered. Do not expect a
+  channel notification to reach a `-p` session; poll `specialist_status` instead.
 
 ## Non-goals
 
