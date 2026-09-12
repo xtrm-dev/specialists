@@ -131,8 +131,9 @@ function hostWith(fixture: { permission?: string; inlineCreate?: (contract: stri
 }
 
 describe('specialist_dispatch schema — contract/title/epic_context_depth mirror Pi', () => {
-  it('bead_id is optional and the inline fields exist with Pi-matching descriptions', () => {
+  it('the work-item parameters are optional and the inline fields keep their descriptions', () => {
     const shape = specialistDispatchSchema.shape;
+    expect(shape.issue_ref.isOptional()).toBe(true);
     expect(shape.bead_id.isOptional()).toBe(true);
     expect(shape.contract.isOptional()).toBe(true);
     expect(shape.title.isOptional()).toBe(true);
@@ -140,7 +141,10 @@ describe('specialist_dispatch schema — contract/title/epic_context_depth mirro
     expect(String(shape.contract.description)).toContain('SAME readiness gate');
     expect(String(shape.title.description)).toContain('derived from PROBLEM');
     expect(String(shape.epic_context_depth.description)).toContain('## Epic lineage');
-    expect(String(shape.bead_id.description)).toContain('exactly one of bead_id');
+    // issue_ref is primary and bead_id is its permanent alias (SPECIALISTS-20); both say
+    // that exactly one of the three may be supplied.
+    expect(String(shape.issue_ref.description)).toContain('Supply EXACTLY ONE of issue_ref, bead_id or contract');
+    expect(String(shape.bead_id.description)).toContain('Supply EXACTLY ONE of issue_ref, bead_id or contract');
   });
 });
 
@@ -166,7 +170,7 @@ describe('specialist_dispatch inline path — one gate, create only after it pas
     const out = await tool.execute({ specialist: 'researcher' }) as Record<string, unknown>;
 
     expect(out.status).toBe('rejected');
-    expect(String(out.reason)).toContain('neither bead_id nor contract');
+    expect(String(out.reason)).toContain('neither issue_ref, bead_id nor contract');
     expect(workItems.inlineCreate).not.toHaveBeenCalled();
     expect(sessionsCreated.count).toBe(0);
   });
