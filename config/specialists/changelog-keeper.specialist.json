@@ -43,11 +43,11 @@
     },
     "skills": {
       "paths": [
-        "~/.xtrm/skills/default/releasing"
+        "~/.xtrm/skills/optional/xtrm-maintenance/releasing"
       ],
       "scripts": [
         {
-          "run": "bunx tsx .xtrm/skills/default/releasing/scripts/xt-reports.ts $prev_tag $next_tag 50000",
+          "run": "bunx tsx ~/.xtrm/skills/optional/xtrm-maintenance/releasing/scripts/xt-reports.ts $prev_tag $next_tag 50000",
           "phase": "pre",
           "inject_output": true
         }
@@ -67,7 +67,8 @@
       "files_to_watch": [
         "CHANGELOG.md",
         "config/mandatory-rules/changelog-keeper-scope.md",
-        "config/mandatory-rules/changelog-conventions.md"
+        "config/mandatory-rules/changelog-conventions.md",
+        "~/.xtrm/skills/optional/xtrm-maintenance/releasing/SKILL.md"
       ],
       "stale_threshold_days": 30
     },

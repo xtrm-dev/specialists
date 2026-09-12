@@ -1,5 +1,14 @@
 import type { DatabaseSync } from 'node:sqlite';
-/** Canonical authority path: explicit XTRM_STATE_DB wins, else ~/.xtrm/state.db. */
+/**
+ * The store path every path that opens the work store uses.
+ *
+ * This is a DELEGATION, not a second precedence rule. It used to resolve only
+ * `XTRM_STATE_DB`, so an operator who set `SUBSTRATE_DB` — the owner-defined variable
+ * README.md and the supervising-activations skill tell them to use — got Substrate
+ * services and forensics on one database and dispatch on another, silently, because the
+ * test suite pinned the correct precedence only for the resolver that was NOT on the
+ * dispatch path (SPECIALISTS-3). One rule, one home.
+ */
 export declare function resolveWorkItemDbPath(env?: NodeJS.ProcessEnv): string;
 /**
  * Open a SQLite database behind the DatabaseSync surface the work services use.
@@ -29,6 +38,14 @@ export interface EpicAncestor {
     ref: string;
     title: string;
     description?: string;
+}
+/** One active `blocks`-edge source, flattened for the dependency-context renderer. */
+export interface BlockerIssue {
+    id: string;
+    humanRef: string;
+    title: string;
+    currentRevision: number;
+    lifecycleState: string;
 }
 /** Result of an inline-contract dispatch (§10): the created issue's identity. */
 export interface InlineIssueResult {
@@ -93,6 +110,12 @@ export interface CheckResult {
 export interface SpecialistWorkItemBoundary {
     view(ref: string): WorkItemView;
     epicAncestors(ref: string, depth: number): EpicAncestor[];
+    /**
+     * Completed `blocks`-edge sources, up to `depth` hops, as dependency context for the
+     * turn-1 prompt. The Substrate edge graph through this boundary is the ONE traversal —
+     * the host never queries the store or walks edges itself (SPECIALISTS-22).
+     */
+    completedBlockers(ref: string, depth: number): EpicAncestor[];
     check(req: DispatchRequest): CheckResult;
     bind(req: DispatchRequest): ExecutionBindingView;
     inlineCreate(contract: string, opts?: {
@@ -124,6 +147,12 @@ export interface IssueServicePort {
         title: string;
         currentRevision: number;
     } | null;
+    /**
+     * Every ACTIVE `blocks` edge whose target is `childId`, resolved to its sources. Optional
+     * so an existing in-memory fake keeps compiling; absent means "no blocker information",
+     * never "no blockers".
+     */
+    getBlockers?(childId: string): BlockerIssue[];
     getRevision(issueId: string, revision: number): {
         contract: unknown;
     };
@@ -207,6 +236,11 @@ export interface OpenWorkItemsOptions {
     /** Absolute path to a Substrate checkout. Overrides module resolution; see resolveSubstrateDir. */
     substrateDir?: string;
     env?: NodeJS.ProcessEnv;
+    /**
+     * Test seam: replace the module-resolution step. Defaults to the real lookup, so production
+     * behaviour is untouched. A test that needs "nothing is installed" returns null here.
+     */
+    resolveInstalledSubstrateDir?: () => string | null;
 }
 /**
  * Open the canonical work store and build the boundary over the REAL producer

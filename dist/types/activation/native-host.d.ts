@@ -13,13 +13,13 @@
  *     lease before an AgentSession exists; a denied lease is a refusal, not a warning.
  *   - `admitToolCall` re-checks the lease on every mutating tool call, and `guarded-tools.ts`
  *     wraps pi's four mutating builtins so a refusal comes back as a tool RESULT.
- *   - `releaseIfWriter` releases on DISPOSAL and converts a throwing release into
- *     `lease_uncertain` evidence rather than a silent success. It does NOT release on
- *     settle, though `workspace-lease.ts`'s wiring note (call site 3) says it should — so a
- *     settled writer keeps its workspace until an explicit stop, and sequential writer
- *     handoff needs one. That divergence is `unitAI-rrdnt.59` and is a design decision
- *     rather than an oversight to patch: releasing on settle buys automatic handoff and
- *     costs guaranteed resumability.
+ *   - `releaseIfWriter` releases on SETTLE (`agent_settled`), on COMPLETION and on
+ *     DISPOSAL, and converts a throwing release into `lease_uncertain` evidence rather than
+ *     a silent success. A writer therefore holds its workspace for the duration of its turn
+ *     and no longer. `resume()` RE-ACQUIRES the lease, and that acquisition can be REFUSED:
+ *     when another writer already holds the workspace the resume fails with `lease_denied`
+ *     naming the holder. A settled writer is resumable, not lease-holding — a caller must not
+ *     read "the activation is settled" as "the workspace is still mine".
  *   The lease guards the LLM TOOL PATH ONLY. `pi.exec` and `AgentSession.executeBash` do not
  *   fire the tool_call handler (`unitAI-rrdnt.6`, unclosed), so a child reaching the
  *   filesystem that way is not fenced. Do not describe writers as "fenced" without that
@@ -38,7 +38,7 @@ import { type InteractionMessage, type PendingAsk } from './interaction.js';
 import { PeerAdapter, type TransportForensicEvent } from './transport/peer-adapter.js';
 import { type PiSdk, type PiAgentSessionEvent, type PiResourceLoaderLike } from './pi-sdk.js';
 import { type AuthorityWriter } from './authority-store.js';
-import { type ActivationHandle, type ActivationRequest, type ActivationSnapshot, type LiveActivationStats } from './types.js';
+import { type ActivationHandle, type ActivationRequest, type ActivationSnapshot, type LiveActivationStats, type WorkspaceIdentity } from './types.js';
 /**
  * The activation's `cwd` and `agentDir` feed pi's resource loader, which is the ONLY
  * seam through which skills, extensions, prompt templates, themes and context files
@@ -58,6 +58,31 @@ import { type ActivationHandle, type ActivationRequest, type ActivationSnapshot,
  * paths are supplied by the caller; extension injection is a separate child issue and
  * passes none yet, while `noExtensions: true` already fences ambient ones.
  */
+/**
+ * The workspace a native activation runs in: the coordinator's own working
+ * directory. ONE source for it, because the rendered Runtime Boundary Rules block,
+ * the session `cwd`, the guarded-tool `cwd` and the workspace lease all key on this
+ * value — two derivations that happen to agree today is exactly how they stop
+ * agreeing tomorrow (SPECIALISTS-21).
+ *
+ * RUN-IN-PLACE IS THE DELIBERATE DESIGN, recorded here rather than in a document
+ * because the next reader of this function is the one who will wonder whether it is
+ * an omission:
+ *   - `xt claude` / `xt pi` already launch the coordinator into an isolated worktree,
+ *     so a per-activation worktree is isolation inside isolation.
+ *   - The workspace LEASE is what provides the single-writer guarantee. That was the
+ *     deliberate design, and a worktree would not add a guarantee the lease lacks.
+ *   - Provisioning would drag the legacy handoff protocol into the native runtime: a
+ *     `worktree_owner_job_id` reuse so a reviewer can read the writer's tree, plus a
+ *     merge back per activation, on a merge path CLAUDE.md declares prohibited and
+ *     known broken pending a separate rework epic.
+ *   - The known cost, accepted: the coordinator is not a lease participant, so a
+ *     coordinator edit and a write-tier activation can interleave. That hazard is
+ *     tracked separately (the coordinator edit warning), and it is not a reason to
+ *     provision worktrees.
+ * Anyone reopening worktree provisioning must first answer the merge-path problem.
+ */
+export declare function resolveWorkspace(cwd: string): WorkspaceIdentity;
 export declare function createActivationResourceLoader(sdk: PiSdk, options: {
     cwd: string;
     skillPaths: string[];
@@ -121,8 +146,8 @@ export interface NativeActivationHostDeps {
     loader?: SpecialistLoader;
     /**
      * The shared Substrate work boundary (ADR §8-§12). When omitted the host
-     * resolves lazily against the canonical store (~/.xtrm/state.db,
-     * XTRM_STATE_DB override) and refuses dispatch fail-closed when that store
+     * resolves lazily against the canonical store (SUBSTRATE_DB, then
+     * XTRM_STATE_DB, then ~/.xtrm/state.db) and refuses dispatch fail-closed when that store
      * is absent or unopenable — never by falling back to another authority.
      */
     workItems?: SpecialistWorkItemBoundary;

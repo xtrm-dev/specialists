@@ -25425,6 +25425,8 @@ __export(exports_runner, {
   formatRequiredPreScriptFailure: () => formatRequiredPreScriptFailure,
   findRequiredPreScriptFailure: () => findRequiredPreScriptFailure,
   classifyFallbackError: () => classifyFallbackError,
+  buildReviewerDiffInstruction: () => buildReviewerDiffInstruction,
+  buildReviewerDiffContext: () => buildReviewerDiffContext,
   SpecialistRunner: () => SpecialistRunner,
   RequiredPreScriptError: () => RequiredPreScriptError
 });
@@ -91845,16 +91847,23 @@ function renderDispatchRejection(error3) {
 function createSpecialistDispatchTool(getHost, getPusher) {
   return {
     name: "specialist_dispatch",
-    description: "Dispatch a Specialist on the native in-process runtime. No CLI process is spawned. " + "Provide EITHER bead_id (an existing READY Bead) OR contract (an inline 7-section " + "contract: the same readiness gate runs first, then a Bead is created and dispatched). " + "Never both. Returns once the activation is ADMITTED and started, not when it " + "completes \u2014 poll specialist_status for state and for any question it raises, and " + "answer with specialist_reply. The Bead is the prompt and MUST be a complete 7-section " + "contract plus a SCRUTINY level; a draft or incomplete Bead is refused here, before a " + "model turn is spent guessing at scope it does not carry \u2014 if the Bead is not " + "dispatchable, fix the Bead (planning skill), not the dispatch. Write-capable " + "Specialists (MEDIUM/HIGH tiers) activate only when they can acquire the workspace " + "lease; otherwise dispatch is refused with a structured reason.",
+    description: "Dispatch a Specialist on the native in-process runtime. No CLI process is spawned. " + "Provide EITHER issue_ref (a READY Substrate Issue locator \u2014 XTRM-227, XTRM-184.2.3, " + "iss_..., a historical locator, or an imported Beads alias; bead_id is a permanent " + "compatibility alias for the same value) OR contract (an inline 7-section contract plus " + "a SCRUTINY level). Never both. An inline contract is accepted through the SAME pipeline " + "as an existing Issue: structural validation, Substrate Issue creation, readiness " + "attestation, claim, ExecutionBinding, activation. The Issue contract IS the prompt and " + "MUST be complete \u2014 PROBLEM, SUCCESS, SCOPE, NON_GOALS, CONSTRAINTS, VALIDATION, OUTPUT " + "plus a SCRUTINY level, eight required parts, not seven; a draft or incomplete Issue is " + "refused here, before a model turn is spent guessing at scope it does not carry \u2014 fix " + "the Issue (planning skill), not the dispatch. Returns once the activation is ADMITTED " + "and started, not when it completes: the Channel push is the PRIMARY wake, " + "specialist_status is the AUTHORITATIVE read, and polling is the degraded fallback. " + "Answer a raised question with specialist_reply. Write-capable Specialists (MEDIUM/HIGH " + "tiers) activate only when they can acquire the workspace lease; otherwise dispatch is " + "refused with a structured reason.",
     inputSchema: specialistDispatchSchema,
     async execute(input2) {
       const build2 = () => describeBuildIdentity(LOADED_BUILD_ID, readBuildId(DIST_LIB_PATH));
       try {
-        const beadId = (input2.bead_id ?? "").trim();
+        const issueRef = (input2.issue_ref ?? "").trim();
+        const beadIdAlias = (input2.bead_id ?? "").trim();
+        const issueRefValue = issueRef || beadIdAlias;
         const contract = (input2.contract ?? "").trim();
-        if (beadId && contract) {
+        const supplied = [
+          ...issueRef ? ["issue_ref"] : [],
+          ...beadIdAlias ? ["bead_id"] : [],
+          ...contract ? ["contract"] : []
+        ];
+        if (supplied.length > 1) {
           return renderRejection({
-            reason: "both bead_id and contract were provided \u2014 provide exactly one; " + "silently preferring one would dispatch against a contract the coordinator did not mean"
+            reason: `both ${supplied.join(" and ")} were provided \u2014 provide exactly one of ` + "issue_ref, bead_id or contract; silently preferring one would dispatch against a " + "contract the coordinator did not mean"
           }, build2());
         }
         const epicContextDepth = input2.epic_context_depth;
@@ -91863,10 +91872,10 @@ function createSpecialistDispatchTool(getHost, getPusher) {
             reason: "epic_context_depth must be 1 or 2 \u2014 1 walks to the immediate parent epic, " + "2 also includes the grand-epic"
           }, build2());
         }
-        const inline2 = !beadId && contract ? contract : undefined;
-        if (!beadId && !inline2) {
+        const inline2 = !issueRefValue && contract ? contract : undefined;
+        if (!issueRefValue && !inline2) {
           return renderRejection({
-            reason: "neither bead_id nor contract was provided \u2014 dispatch requires a READY issue " + "(7 sections + SCRUTINY) or an inline contract"
+            reason: "neither issue_ref, bead_id nor contract was provided \u2014 dispatch requires a " + "READY Issue (7 sections + SCRUTINY) or an inline contract"
           }, build2());
         }
         if (inline2) {
@@ -91877,7 +91886,7 @@ function createSpecialistDispatchTool(getHost, getPusher) {
         }
         const handle = await getHost().start({
           specialist: input2.specialist,
-          ...beadId ? { issueRef: beadId } : {},
+          ...issueRefValue ? { issueRef: issueRefValue } : {},
           ...inline2 ? { contract: inline2, ...input2.title ? { title: input2.title } : {} } : {},
           ...epicContextDepth !== undefined && !inline2 ? { epicContextDepth } : {},
           ...input2.model_override ? { modelOverride: input2.model_override } : {},
@@ -91922,7 +91931,7 @@ function createSpecialistDispatchTool(getHost, getPusher) {
 function createSpecialistReplyTool(getHost) {
   return {
     name: "specialist_reply",
-    description: "Answer an outstanding Specialist question or escalation by its message_id (read " + "them from specialist_status.pending_asks). The answer returns as that tool call's " + "result, so the Specialist continues with its context intact. An unknown or already " + "answered message_id is reported, not silently accepted.",
+    description: "Answer an outstanding Specialist question or escalation by its message_id (read " + "them from specialist_status.pending_asks). The answer returns as that tool call's " + "result, so the Specialist continues with its context intact. An unknown or already " + "answered message_id is reported, not silently accepted. Where the Channel is " + "available the ask arrives as a push first; specialist_status is the AUTHORITATIVE " + "read when it does not, and polling is the degraded fallback.",
     inputSchema: specialistReplySchema,
     async execute(input2) {
       const message = await getHost().answer(input2.message_id, input2.body);
@@ -91981,10 +91990,11 @@ var init_activation_tool = __esm(() => {
   LOADED_BUILD_ID = readBuildId(DIST_LIB_PATH);
   specialistDispatchSchema = objectType({
     specialist: stringType().describe("Specialist name, e.g. codebase-explorer"),
-    bead_id: stringType().optional().describe("The id of an EXISTING READY Bead \u2014 this activation's task contract, a COMPLETE " + "7-section contract (PROBLEM, SUCCESS, SCOPE, NON_GOALS, CONSTRAINTS, VALIDATION, " + "OUTPUT) plus a SCRUTINY level, which must be exactly one of LOW, MEDIUM, HIGH or " + "CRITICAL. That is EIGHT required parts, not seven; SCRUTINY is the one most often " + "left out. Write each section as a heading: either the section name on its own line " + "with its body beneath, or `PROBLEM: the body` on one line. Both forms are accepted. " + "A draft or incomplete Bead is refused before any model turn. No free-form task " + "text is accepted: a task that needs more definition belongs in the Bead (see the " + "planning skill). Mutually exclusive with contract: provide exactly one of bead_id " + "or contract, never both."),
-    contract: stringType().optional().describe("An INLINE task contract, used instead of bead_id: the SAME readiness gate " + "runs first, then a Bead is created from it and dispatched. The contract " + "must contain all seven sections \u2014 PROBLEM, SUCCESS, SCOPE, NON_GOALS, " + "CONSTRAINTS, VALIDATION, OUTPUT \u2014 plus a SCRUTINY level, which must be exactly " + "one of LOW, MEDIUM, HIGH or CRITICAL. Note that this is EIGHT required parts, " + "not seven; SCRUTINY is the one most often left out. Write each section as a " + "heading: either the section name on its own line with its body beneath, or " + "`PROBLEM: the body` on one line. Both forms are accepted. " + "A contract missing any section is refused and nothing is created."),
-    title: stringType().optional().describe("Optional title for the Bead created from `contract` (default: derived from PROBLEM). " + "Ignored when bead_id is given."),
-    epic_context_depth: numberType().optional().describe("Walk bead.parent UP this many hops (1 = immediate parent epic, 2 = epic + " + "grand-epic) and render each ancestor contract into the turn-1 prompt as an '" + "'## Epic lineage' section. Must be 1 or 2; anything else is refused. Omit for " + "single-bead dispatch with no lineage. Dropped for beads auto-created from an " + "inline contract (a fresh bead has no parent)."),
+    issue_ref: stringType().optional().describe("The Substrate Issue locator for this activation's task contract \u2014 XTRM-227, XTRM-184.2.3, " + "iss_..., a historical locator, or an imported Beads alias. It does NOT address the live bd " + "board: Substrate and bd are separate stores, so a bd id is refused as unresolvable. The " + "issue must be READY: a COMPLETE 7-section contract (PROBLEM, SUCCESS, SCOPE, NON_GOALS, " + "CONSTRAINTS, VALIDATION, OUTPUT) plus a SCRUTINY level, which must be exactly one of LOW, " + "MEDIUM, HIGH or CRITICAL. That is EIGHT required parts, not seven; SCRUTINY is the one most " + "often left out. Write each section as a heading: either the section name on its own line " + "with its body beneath, or `PROBLEM: the body` on one line. Both forms are accepted. " + "A draft or incomplete issue is refused before any model turn. No free-form task text is " + "accepted: a task that needs more definition belongs in the Issue (see the planning skill). " + "Supply EXACTLY ONE of issue_ref, bead_id or contract."),
+    bead_id: stringType().optional().describe("Permanent compatibility alias for issue_ref \u2014 the same Substrate Issue locator, resolved at " + "this tool boundary to the same value. Both names are accepted forever and behave identically; " + "prefer issue_ref in new calls. Do not read the name as an address on the live bd board: it " + "carries a Substrate Issue locator, and a bd id is refused as unresolvable. Supply EXACTLY ONE " + "of issue_ref, bead_id or contract."),
+    contract: stringType().optional().describe("An INLINE task contract, used instead of issue_ref: the SAME readiness gate " + "runs first, then a Substrate Issue is created from it and dispatched. The contract " + "must contain all seven sections \u2014 PROBLEM, SUCCESS, SCOPE, NON_GOALS, " + "CONSTRAINTS, VALIDATION, OUTPUT \u2014 plus a SCRUTINY level, which must be exactly " + "one of LOW, MEDIUM, HIGH or CRITICAL. Note that this is EIGHT required parts, " + "not seven; SCRUTINY is the one most often left out. Write each section as a " + "heading: either the section name on its own line with its body beneath, or " + "`PROBLEM: the body` on one line. Both forms are accepted. " + "A contract missing any section is refused and nothing is created."),
+    title: stringType().optional().describe("Optional title for the Substrate Issue created from `contract` (default: derived from PROBLEM). " + "Ignored when issue_ref (or its bead_id alias) is given."),
+    epic_context_depth: numberType().optional().describe("Walk Substrate parent_child edges UP this many hops (1 = immediate parent Issue, " + "2 = parent + grandparent) and render each ancestor contract into the turn-1 prompt as an '" + "'## Epic lineage' section. Must be 1 or 2; anything else is refused. Omit for " + "a single-Issue dispatch with no lineage. Dropped for Issues auto-created from an " + "inline contract (a fresh Issue has no parent)."),
     model_override: stringType().optional().describe("Override the configured model for THIS activation only. An unavailable model is refused before the session is created, never silently replaced."),
     thinking_override: enumType(THINKING_LEVELS).optional().describe("Override the definition thinking_level for THIS activation only. Absent means the definition level. An unknown value is refused before the session is created."),
     requested_by: stringType().optional().describe("ParticipantId of the requesting coordinator. Defaults to the MCP gateway participant."),
@@ -92001,7 +92011,7 @@ var init_activation_tool = __esm(() => {
   specialistRetrySchema = objectType({
     activation_id: stringType().describe("The failed activation to re-run in place."),
     model_override: stringType().optional().describe("Re-run on a named model instead of the one that failed (manual switch after a quota " + "window kills a run). A new session is built for the new model; without this the SAME " + "session is re-prompted and its context survives."),
-    prompt: stringType().optional().describe("Replacement turn prompt. Defaults to the dispatch-time render of the same bead.")
+    prompt: stringType().optional().describe("Replacement turn prompt. Defaults to the dispatch-time render of the same Issue.")
   });
 });
 
@@ -92050,26 +92060,107 @@ var init_specialist_status_tool = __esm(() => {
   BACKENDS2 = ["gemini", "qwen", "anthropic", "openai"];
 });
 
-// src/activation/workitem-store.ts
+// src/activation/authority-store.ts
+import { mkdirSync as mkdirSync22 } from "fs";
 import { createRequire as createRequire5 } from "module";
 import { homedir as homedir16 } from "os";
 import { dirname as dirname23, join as join55 } from "path";
-import { pathToFileURL } from "url";
-function resolveSubstrateDir(explicit) {
-  const trimmed = explicit.trim();
-  if (trimmed)
-    return trimmed;
+function resolveAuthorityDbPath(env = process.env) {
+  const substrate = (env.SUBSTRATE_DB ?? "").trim();
+  if (substrate)
+    return substrate;
+  const legacy = (env.XTRM_STATE_DB ?? "").trim();
+  if (legacy)
+    return legacy;
+  return join55(homedir16(), ".xtrm", "state.db");
+}
+function openAuthorityDb(dbPath) {
   try {
-    return dirname23(require4.resolve(`${SUBSTRATE_PACKAGE}/package.json`));
+    const bun = require4("bun:sqlite");
+    if (bun?.Database)
+      return new bun.Database(dbPath);
+  } catch {}
+  try {
+    const node3 = require4("node:sqlite");
+    if (node3?.DatabaseSync) {
+      const DatabaseSync = node3.DatabaseSync;
+      const inner = new DatabaseSync(dbPath);
+      return {
+        exec: (sql) => inner.exec(sql),
+        prepare: (sql) => {
+          const stmt = inner.prepare(sql);
+          return { run: (...params) => stmt.run(...params.map((v) => v === undefined ? null : v)) };
+        },
+        close: () => inner.close()
+      };
+    }
+  } catch {}
+  return null;
+}
+function createFileAuthorityWriter(dbPath = resolveAuthorityDbPath()) {
+  return {
+    record(snapshot) {
+      try {
+        mkdirSync22(dirname23(dbPath), { recursive: true });
+        const db = openAuthorityDb(dbPath);
+        if (!db)
+          return;
+        try {
+          db.exec(ACTIVATIONS_DDL);
+          db.prepare(`INSERT OR REPLACE INTO activations
+               (activation_id, specialist, state, bead_id, last_activity_at)
+             VALUES (?, ?, ?, ?, ?)`).run(snapshot.activationId, snapshot.specialist, snapshot.state, snapshot.issueRef, snapshot.lastActivityAt);
+        } finally {
+          db.close();
+        }
+      } catch {}
+    },
+    remove(activationId) {
+      try {
+        const db = openAuthorityDb(dbPath);
+        if (!db)
+          return;
+        try {
+          db.exec(ACTIVATIONS_DDL);
+          db.prepare("DELETE FROM activations WHERE activation_id = ?").run(activationId);
+        } finally {
+          db.close();
+        }
+      } catch {}
+    }
+  };
+}
+var require4, ACTIVATIONS_DDL = `CREATE TABLE IF NOT EXISTS activations (
+  activation_id TEXT PRIMARY KEY,
+  specialist TEXT NOT NULL,
+  state TEXT NOT NULL,
+  bead_id TEXT,
+  last_activity_at INTEGER NOT NULL
+)`, NULL_AUTHORITY_WRITER;
+var init_authority_store = __esm(() => {
+  require4 = createRequire5(import.meta.url);
+  NULL_AUTHORITY_WRITER = { record: () => {}, remove: () => {} };
+});
+
+// src/activation/workitem-store.ts
+import { createRequire as createRequire6 } from "module";
+import { dirname as dirname24, join as join56 } from "path";
+import { pathToFileURL } from "url";
+function resolveInstalledSubstrateDir() {
+  try {
+    return dirname24(require5.resolve(`${SUBSTRATE_PACKAGE}/package.json`));
   } catch {
     return null;
   }
 }
+function resolveSubstrateDir(explicit, resolveInstalled = resolveInstalledSubstrateDir) {
+  const trimmed = explicit.trim();
+  if (trimmed)
+    return trimmed;
+  return resolveInstalled();
+}
 function resolveWorkItemDbPath(env = process.env) {
-  const override = (env.XTRM_STATE_DB ?? "").trim();
-  if (override)
-    return override;
-  return join55(homedir16(), ".xtrm", "state.db");
+  return resolveAuthorityDbPath(env);
 }
 function openSubstrateDb(dbPath) {
   const applyPragmas = (db) => {
@@ -92079,14 +92170,14 @@ function openSubstrateDb(dbPath) {
     db.exec("PRAGMA foreign_keys = ON");
   };
   try {
-    const bun = require4("bun:sqlite");
+    const bun = require5("bun:sqlite");
     if (bun?.Database) {
       const db = new bun.Database(dbPath);
       applyPragmas(db);
       return db;
     }
   } catch {}
-  const node3 = require4("node:sqlite");
+  const node3 = require5("node:sqlite");
   if (node3?.DatabaseSync) {
     const db = new node3.DatabaseSync(dbPath);
     applyPragmas(db);
@@ -92136,6 +92227,36 @@ function createWorkItemBoundary(ports) {
         childId = parent.id;
       }
       return ancestors;
+    },
+    completedBlockers(ref, depth) {
+      if (depth !== 1 && depth !== 2)
+        return [];
+      if (!issues.getBlockers)
+        return [];
+      const collected = [];
+      const seen = new Set;
+      let frontier = [issues.resolveRef(ref).id];
+      for (let hop = 0;hop < depth && frontier.length > 0; hop += 1) {
+        const next = [];
+        for (const id of frontier) {
+          for (const blocker of issues.getBlockers(id)) {
+            if (seen.has(blocker.id))
+              continue;
+            seen.add(blocker.id);
+            if (!SATISFIED_BLOCKER_STATES.has(blocker.lifecycleState))
+              continue;
+            const rev = issues.getRevision(blocker.id, blocker.currentRevision);
+            collected.push({
+              ref: blocker.humanRef,
+              title: blocker.title,
+              description: typeof rev.contract === "object" && rev.contract !== null ? String(rev.contract.problem ?? "") : undefined
+            });
+            next.push(blocker.id);
+          }
+        }
+        frontier = next;
+      }
+      return collected;
     },
     check(req) {
       const check = gate.check(issues, req);
@@ -92206,13 +92327,13 @@ function splitLines(body) {
 }
 async function openWorkItemBoundary(opts = {}) {
   const env = opts.env ?? process.env;
-  const substrateDir = resolveSubstrateDir(opts.substrateDir ?? env.XTRM_SUBSTRATE_DIR ?? "");
+  const substrateDir = resolveSubstrateDir(opts.substrateDir ?? env.XTRM_SUBSTRATE_DIR ?? "", opts.resolveInstalledSubstrateDir);
   if (!substrateDir) {
     throw new Error(`work_item_store_unavailable: no Substrate package configured (install ${SUBSTRATE_PACKAGE}, ` + "or set XTRM_SUBSTRATE_DIR to a checkout of it)");
   }
   let pkgName;
   try {
-    const pkgRaw = await import(pathToFileURL(join55(substrateDir, "package.json")).href, { with: { type: "json" } });
+    const pkgRaw = await import(pathToFileURL(join56(substrateDir, "package.json")).href, { with: { type: "json" } });
     pkgName = pkgRaw.default?.name;
   } catch (error3) {
     throw new Error(`work_item_store_unavailable: cannot read Substrate package identity at ${substrateDir}: ${error3 instanceof Error ? error3.message : String(error3)}`);
@@ -92222,7 +92343,7 @@ async function openWorkItemBoundary(opts = {}) {
   }
   const load = async (rel) => {
     try {
-      return await import(pathToFileURL(join55(substrateDir, rel)).href);
+      return await import(pathToFileURL(join56(substrateDir, rel)).href);
     } catch (error3) {
       throw new Error(`work_item_store_unavailable: cannot load Substrate module ${rel}: ${error3 instanceof Error ? error3.message : String(error3)}`);
     }
@@ -92251,7 +92372,18 @@ async function openWorkItemBoundary(opts = {}) {
   const dbPath = opts.dbPath ?? resolveWorkItemDbPath(env);
   const db = openSubstrateDb(dbPath);
   runner.migrate(db);
-  const issues = new issueSvcMod.IssueService(db);
+  const issueService = new issueSvcMod.IssueService(db);
+  issueService.getBlockers = (childId) => issueService.listActiveEdges().filter((edge) => edge.active && edge.kind === "blocks" && edge.toIssue === childId).map((edge) => {
+    const issue3 = issueService.getIssue(edge.fromIssue);
+    return {
+      id: issue3.id,
+      humanRef: issue3.humanRef,
+      title: issue3.title,
+      currentRevision: issue3.currentRevision,
+      lifecycleState: issue3.lifecycleState
+    };
+  });
+  const issues = issueService;
   const journalSvc = new journalMod.JournalService(db, issues);
   const provenance = new provMod.ProvenanceService(db, issues, journalSvc);
   const store = new storeMod.SubstrateIssueStore(issues, journalSvc);
@@ -92265,10 +92397,12 @@ async function openWorkItemBoundary(opts = {}) {
     }
   });
 }
-var require4, SUBSTRATE_PACKAGE = "@jaggerxtrm/substrate";
+var require5, SUBSTRATE_PACKAGE = "@jaggerxtrm/substrate", SATISFIED_BLOCKER_STATES;
 var init_workitem_store = __esm(() => {
   init_contract_sections();
-  require4 = createRequire5(import.meta.url);
+  init_authority_store();
+  require5 = createRequire6(import.meta.url);
+  SATISFIED_BLOCKER_STATES = new Set(["done", "archived"]);
 });
 
 // src/activation/step-contract.ts
@@ -92521,9 +92655,9 @@ var init_peer_bridge = __esm(() => {
 // src/activation/transport/roster.ts
 import { existsSync as existsSync53, readdirSync as readdirSync26, readFileSync as readFileSync46 } from "fs";
 import { homedir as homedir17 } from "os";
-import { join as join56 } from "path";
+import { join as join57 } from "path";
 function defaultRosterDir() {
-  return join56(homedir17(), ".claude", "sessions");
+  return join57(homedir17(), ".claude", "sessions");
 }
 function procProbe() {
   let bootSeconds;
@@ -92601,7 +92735,7 @@ function scanRoster(options2 = {}) {
       continue;
     let registration;
     try {
-      registration = JSON.parse(readFileSync46(join56(dir, file), "utf-8"));
+      registration = JSON.parse(readFileSync46(join57(dir, file), "utf-8"));
     } catch {
       rejected.push({ file, reason: "unparsable" });
       continue;
@@ -92912,13 +93046,13 @@ var ASK_TOOL = "ask_coordinator", ESCALATE_TOOL = "escalate_to_coordinator", too
 
 // src/activation/pi-sdk.ts
 import { existsSync as existsSync54 } from "fs";
-import { join as join57 } from "path";
+import { join as join58 } from "path";
 import { pathToFileURL as pathToFileURL2 } from "url";
 function piSdkCandidates() {
   const candidates = [PI_SDK_PACKAGE];
   const globalDir = resolveGlobalNodeModulesDir2();
   if (globalDir) {
-    const entry = join57(globalDir, PI_SDK_PACKAGE, "dist", "index.js");
+    const entry = join58(globalDir, PI_SDK_PACKAGE, "dist", "index.js");
     if (existsSync54(entry))
       candidates.push(pathToFileURL2(entry).href);
   }
@@ -93374,88 +93508,6 @@ var init_registry = __esm(() => {
   RETRYABLE_STATES = new Set(["failed"]);
 });
 
-// src/activation/authority-store.ts
-import { mkdirSync as mkdirSync22 } from "fs";
-import { createRequire as createRequire6 } from "module";
-import { homedir as homedir18 } from "os";
-import { dirname as dirname24, join as join58 } from "path";
-function resolveAuthorityDbPath(env = process.env) {
-  const substrate = (env.SUBSTRATE_DB ?? "").trim();
-  if (substrate)
-    return substrate;
-  const legacy = (env.XTRM_STATE_DB ?? "").trim();
-  if (legacy)
-    return legacy;
-  return join58(homedir18(), ".xtrm", "state.db");
-}
-function openAuthorityDb(dbPath) {
-  try {
-    const bun = require5("bun:sqlite");
-    if (bun?.Database)
-      return new bun.Database(dbPath);
-  } catch {}
-  try {
-    const node3 = require5("node:sqlite");
-    if (node3?.DatabaseSync) {
-      const DatabaseSync = node3.DatabaseSync;
-      const inner = new DatabaseSync(dbPath);
-      return {
-        exec: (sql) => inner.exec(sql),
-        prepare: (sql) => {
-          const stmt = inner.prepare(sql);
-          return { run: (...params) => stmt.run(...params.map((v) => v === undefined ? null : v)) };
-        },
-        close: () => inner.close()
-      };
-    }
-  } catch {}
-  return null;
-}
-function createFileAuthorityWriter(dbPath = resolveAuthorityDbPath()) {
-  return {
-    record(snapshot) {
-      try {
-        mkdirSync22(dirname24(dbPath), { recursive: true });
-        const db = openAuthorityDb(dbPath);
-        if (!db)
-          return;
-        try {
-          db.exec(ACTIVATIONS_DDL);
-          db.prepare(`INSERT OR REPLACE INTO activations
-               (activation_id, specialist, state, bead_id, last_activity_at)
-             VALUES (?, ?, ?, ?, ?)`).run(snapshot.activationId, snapshot.specialist, snapshot.state, snapshot.issueRef, snapshot.lastActivityAt);
-        } finally {
-          db.close();
-        }
-      } catch {}
-    },
-    remove(activationId) {
-      try {
-        const db = openAuthorityDb(dbPath);
-        if (!db)
-          return;
-        try {
-          db.exec(ACTIVATIONS_DDL);
-          db.prepare("DELETE FROM activations WHERE activation_id = ?").run(activationId);
-        } finally {
-          db.close();
-        }
-      } catch {}
-    }
-  };
-}
-var require5, ACTIVATIONS_DDL = `CREATE TABLE IF NOT EXISTS activations (
-  activation_id TEXT PRIMARY KEY,
-  specialist TEXT NOT NULL,
-  state TEXT NOT NULL,
-  bead_id TEXT,
-  last_activity_at INTEGER NOT NULL
-)`, NULL_AUTHORITY_WRITER;
-var init_authority_store = __esm(() => {
-  require5 = createRequire6(import.meta.url);
-  NULL_AUTHORITY_WRITER = { record: () => {}, remove: () => {} };
-});
-
 // src/activation/native-host.ts
 import { randomUUID as randomUUID8 } from "crypto";
 import { existsSync as existsSync55 } from "fs";
@@ -93481,6 +93533,9 @@ function extractTokenUsage(event) {
       return usage5;
   }
   return;
+}
+function resolveWorkspace(cwd) {
+  return { repositoryRoot: cwd, worktreePath: cwd };
 }
 function createActivationResourceLoader(sdk, options2) {
   return new sdk.DefaultResourceLoader({
@@ -93554,10 +93609,7 @@ class NativeActivationHost {
     const execution = specialist.specialist.execution;
     const tier = execution.permission_required ?? "READ_ONLY";
     const access2 = WRITE_TIERS.has(tier) ? "write" : "read";
-    const workspace = request.workspaceHint ?? {
-      repositoryRoot: this.cwd,
-      worktreePath: this.cwd
-    };
+    const workspace = resolveWorkspace(this.cwd);
     let workItems;
     try {
       workItems = await this.resolveWorkItems();
@@ -93742,14 +93794,52 @@ class NativeActivationHost {
       custom_tools: `${ASK_TOOL},${ESCALATE_TOOL}`
     });
     const epicAncestors = workItems.epicAncestors(issueRef, request.epicContextDepth ?? 0);
+    const completedBlockers = workItems.completedBlockers(issueRef, 1);
+    const isReviewer = specialist.specialist.metadata.name === "reviewer";
     const rendered = renderTaskPrompt({
       specialist: specialist.specialist,
-      cwd: this.cwd,
+      cwd: workspace.worktreePath,
+      worktreeBoundary: workspace.worktreePath,
       beadId: view.ref,
       bead: workItemAsRecord(view),
       epicAncestors: epicAncestors.map(workAncestorAsRecord),
-      preScriptOutput
+      completedBlockers: completedBlockers.map(workAncestorAsRecord),
+      preScriptOutput,
+      ...isReviewer ? {
+        appendExecutionContext: (task, cwd, variables) => {
+          try {
+            return `${task}${buildReviewerDiffInstruction(buildReviewerDiffContext(cwd, variables))}`;
+          } catch (error3) {
+            process.stderr.write(`[specialist runner] Reviewer diff context unavailable: ${String(error3)}
+`);
+            return task;
+          }
+        }
+      } : {}
     });
+    if (rendered.mandatoryRulesError) {
+      return reject("mandatory_rules_unavailable", {
+        note: `mandatory rules could not be resolved, and a native activation is never launched without them: ${rendered.mandatoryRulesError}`
+      });
+    }
+    if (rendered.mandatoryRules && rendered.mandatoryRulesBlock?.trim()) {
+      const rules = rendered.mandatoryRules;
+      emit("mandatory_rules_injection", {
+        source: "mandatory_rules_injection",
+        sets_loaded: rules.setsLoaded,
+        rules_count: rules.ruleCount,
+        inline_rules_count: rules.inlineRulesCount,
+        globals_disabled: rules.globalsDisabled,
+        token_estimate: rules.injectedTokens,
+        budget_limit: rules.budgetLimit,
+        candidate_tokens: rules.candidateTokens,
+        injected_tokens: rules.injectedTokens,
+        injected_section_ids: rules.injectedSectionIds,
+        evicted_section_ids: rules.evictedSectionIds,
+        payload_digest: rules.payloadDigest,
+        outcome: rules.outcome
+      });
+    }
     const responseFormat = execution.response_format ?? "text";
     const outputType = execution.output_type ?? "custom";
     const outputContractSchema = resolveOutputContractSchema(responseFormat, outputType, specialist.specialist.prompt.output_schema);
@@ -93757,7 +93847,7 @@ class NativeActivationHost {
       systemPromptTemplate: specialist.specialist.prompt.system ?? "",
       templateVariables: rendered.beadTemplateVariables ?? {},
       bare: execution.bare ?? false,
-      runCwd: this.cwd,
+      runCwd: workspace.worktreePath,
       specialistName: specialist.specialist.metadata.name,
       inputIssueRef: view.ref,
       responseFormat,
@@ -93940,7 +94030,7 @@ class NativeActivationHost {
       return this.workItemsDefault;
     const dbPath = resolveWorkItemDbPath();
     if (!existsSync55(dbPath)) {
-      throw new Error(`no Substrate work store at ${dbPath} (set XTRM_STATE_DB or initialize it via xt init / sb)`);
+      throw new Error(`no Substrate work store at ${dbPath} (set SUBSTRATE_DB (or the legacy XTRM_STATE_DB) or initialize it via xt init / sb)`);
     }
     this.workItemsDefault = await openWorkItemBoundary({ dbPath });
     return this.workItemsDefault;
@@ -94995,7 +95085,7 @@ import { fileURLToPath as fileURLToPath10 } from "url";
 function createSpecialistResumeTool(getHost, getPusher) {
   return {
     name: "specialist_resume",
-    description: "Resume a settled or waiting Specialist with a new prompt, in the SAME session. " + "This is not a second dispatch: the activation_id is kept and the attempt_id advances, " + "so the child keeps its context and its workspace lease rather than starting over. " + "Use this after answering a question, or to give a settled Specialist more work. " + "A disposed activation cannot be resumed \u2014 that is what makes specialist_stop_activation " + "the irreversible one.",
+    description: "Resume a settled or waiting Specialist with a new prompt, in the SAME session. " + "This is not a second dispatch: the activation_id is kept and the attempt_id advances, " + "so the child keeps its CONTEXT rather than starting over. The writer lease is NOT kept " + "across settle \u2014 it is released at settle and reacquired here, and a resume that loses " + "the race to another writer is refused with a structured lease_denied reason. " + "Use this after answering a question, or to give a settled Specialist more work. " + "A disposed activation cannot be resumed \u2014 that is what makes specialist_stop_activation " + "the irreversible one.",
     inputSchema: specialistResumeSchema,
     async execute(input2) {
       const build2 = () => describeBuildIdentity(LOADED_BUILD_ID2, readBuildId(DIST_LIB_PATH2));

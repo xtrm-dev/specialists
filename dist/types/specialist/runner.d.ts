@@ -147,6 +147,19 @@ export declare function validateBeforeRun(spec: {
  * how the two runtimes drifted, with the native path hardcoding `undefined`.
  */
 export declare function resolveOutputContractSchema(responseFormat: ResponseFormat, outputType: OutputType, outputSchema: JsonSchema | undefined): JsonSchema | undefined;
+interface ReviewerDiffContext {
+    source: string;
+    stat: string;
+    files: string[];
+    hunks: string;
+}
+/**
+ * Exported (SPECIALISTS-22) so the native host can supply the reviewer role the same
+ * execution-only diff context the legacy runner appends, instead of the reviewer losing
+ * it entirely on the native path. Behaviour unchanged.
+ */
+export declare function buildReviewerDiffContext(cwd: string, variables?: Record<string, string>, maxFiles?: number): ReviewerDiffContext;
+export declare function buildReviewerDiffInstruction(context: ReviewerDiffContext): string;
 export declare function classifyFallbackError(error: unknown): string;
 export declare class SpecialistRunner {
     private deps;
