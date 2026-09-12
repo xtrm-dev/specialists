@@ -92937,6 +92937,8 @@ var init_pi_sdk = __esm(() => {
   init_session();
   REQUIRED_EXPORTS = [
     "createAgentSession",
+    "DefaultResourceLoader",
+    "getAgentDir",
     "ModelRuntime",
     "resolveModelScopeWithDiagnostics",
     "defineTool"
@@ -93467,6 +93469,19 @@ function extractTokenUsage(event) {
   }
   return;
 }
+function createActivationResourceLoader(sdk, options2) {
+  return new sdk.DefaultResourceLoader({
+    cwd: options2.cwd,
+    agentDir: sdk.getAgentDir(),
+    noSkills: true,
+    additionalSkillPaths: options2.skillPaths,
+    noExtensions: true,
+    additionalExtensionPaths: options2.extensionPaths ?? [],
+    noContextFiles: true,
+    noPromptTemplates: true,
+    noThemes: true
+  });
+}
 
 class NativeActivationHost {
   loader;
@@ -93619,6 +93634,11 @@ class NativeActivationHost {
       });
     }
     const sdk = await this.loadSdk();
+    if (typeof sdk.DefaultResourceLoader !== "function" || typeof sdk.getAgentDir !== "function") {
+      return reject("pi_sdk_resource_loader_unavailable", {
+        note: "this pi SDK cannot declare which skills a session loads, so the declared-skills contract cannot be honoured"
+      });
+    }
     const fullChain = resolveModelChain(execution);
     const configuredModel = fullChain[0];
     const modelChain = request.modelOverride ? [request.modelOverride] : fullChain;
@@ -93765,9 +93785,15 @@ class NativeActivationHost {
         note: `these tools mutate and cannot be fenced by the workspace lease on this runtime: ${guardedTools.unguardable.join(", ")}`
       });
     }
+    const resourceLoader = createActivationResourceLoader(sdk, {
+      cwd: workspace.worktreePath,
+      skillPaths: specialist.specialist.skills?.paths ?? []
+    });
+    await resourceLoader.reload();
     const baseSessionOptions = {
       customTools: [...askTools, ...guardedTools.tools],
       cwd: workspace.worktreePath,
+      resourceLoader,
       model: modelCheck.model,
       ...thinkingLevel ? { thinkingLevel } : {},
       noTools: "builtin",

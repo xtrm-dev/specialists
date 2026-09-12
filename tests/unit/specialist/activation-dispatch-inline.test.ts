@@ -24,6 +24,7 @@ import { NativeActivationHost } from '../../../src/activation/native-host.js';
 import { REQUIRED_SECTIONS } from '../../../src/activation/bead-gate.js';
 import { testWorkItems } from '../../utils/test-work-items.js';
 import type { PiSdk, PiAgentSessionLike, PiAgentSessionEvent } from '../../../src/activation/pi-sdk.js';
+import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
 
 const INLINE_CONTRACT =
   'PROBLEM\nProve the inline-dispatch path.\n\nSUCCESS\nA read-only activation settles.\n\n' +
@@ -88,6 +89,8 @@ function hostWith(fixture: { permission?: string; inlineCreate?: (contract: stri
   const session = fakeSession();
   const sdk: PiSdk = {
     createAgentSession: async () => { sessionsCreated.count += 1; return { session }; },
+    DefaultResourceLoader: FakeResourceLoader,
+    getAgentDir: () => FAKE_AGENT_DIR,
     ModelRuntime: { create: async () => ({ hasConfiguredAuth: () => true }) },
     resolveModelScopeWithDiagnostics: () => ({
       scopedModels: [{ model: { id: 'test-model', provider: 'testprov' } }],

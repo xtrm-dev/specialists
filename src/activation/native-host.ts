@@ -57,7 +57,7 @@ import { PeerAdapter, type TransportForensicEvent } from './transport/peer-adapt
 import { acquire as acquireLease, admitToolCall, release as releaseLease } from './workspace-lease.js';
 import { createGuardedTools } from './guarded-tools.js';
 import { createAskTools, ASK_TOOL, ESCALATE_TOOL } from './ask-tool.js';
-import { loadPiSdk, type PiSdk, type PiAgentSessionLike, type PiAgentSessionEvent, type PiModelRuntimeLike } from './pi-sdk.js';
+import { loadPiSdk, type PiSdk, type PiAgentSessionLike, type PiAgentSessionEvent, type PiModelRuntimeLike, type PiResourceLoaderLike } from './pi-sdk.js';
 import { nativeSessionTokenUsage, accumulateTokenUsage } from '../specialist/native-activation-observability.js';
 import { createGateModelRuntime, validateModelAvailable } from './model-gate.js';
 import { FleetRegistry, RESUMABLE_STATES, RETRYABLE_STATES, nextAttemptId, type ActivationRecord } from './registry.js';
@@ -117,6 +117,44 @@ function extractTokenUsage(event: PiAgentSessionEvent): ActivationTokenUsage | u
 
 /** Permission tiers that can mutate the workspace. Derived from the resolved grant. */
 const WRITE_TIERS = new Set(['MEDIUM', 'HIGH']);
+
+/**
+ * The activation's `cwd` and `agentDir` feed pi's resource loader, which is the ONLY
+ * seam through which skills, extensions, prompt templates, themes and context files
+ * reach an AgentSession (pi 0.85.1 has no `skills` field on `CreateAgentSessionOptions`).
+ *
+ * The legacy CLI isolates the child and then re-adds exactly the declared skills:
+ * `--no-skills` at src/pi/session.ts:969, one `--skill <resolved path>` per declared
+ * entry at :1001, `--no-extensions` and the curated `-e` set, `--no-context-files`,
+ * `--no-prompt-templates`, `--no-themes`. `noSkills: true` + `additionalSkillPaths` is
+ * the loader equivalent of that pair, and it is what stops the host project's own
+ * skills and `AGENTS.md` from being auto-discovered into a child that never asked for
+ * them.
+ *
+ * `skillPaths` are the SAME resolved paths `validateBeforeRun` hard-fails on
+ * (native-host.ts, `validateBeforeRun(specialist, tier, toolContract)`), so a validated
+ * skill is a loaded skill rather than a silently ignored `--skill` argument. Extension
+ * paths are supplied by the caller; extension injection is a separate child issue and
+ * passes none yet, while `noExtensions: true` already fences ambient ones.
+ */
+export function createActivationResourceLoader(
+  sdk: PiSdk,
+  options: { cwd: string; skillPaths: string[]; extensionPaths?: string[] },
+): PiResourceLoaderLike {
+  return new sdk.DefaultResourceLoader({
+    cwd: options.cwd,
+    agentDir: sdk.getAgentDir(),
+    noSkills: true,
+    additionalSkillPaths: options.skillPaths,
+    noExtensions: true,
+    additionalExtensionPaths: options.extensionPaths ?? [],
+    // Auto-discovered AGENTS.md and project context files must not silently enter the
+    // child's prompt; the loader CAN be told to skip them, so it is told.
+    noContextFiles: true,
+    noPromptTemplates: true,
+    noThemes: true,
+  });
+}
 
 /**
  * Error classes the fallback walk advances past. The classifier itself is shared with
@@ -474,6 +512,15 @@ export class NativeActivationHost {
     }
 
     const sdk = await this.loadSdk();
+    // Fail closed rather than fall back to pi's auto-discovering DefaultResourceLoader:
+    // a session that discovers its own skills is the exact defect this closes. The real
+    // SDK always exports both (loadPiSdk validates them); only a stale or hand-rolled
+    // SDK injection can land here.
+    if (typeof sdk.DefaultResourceLoader !== 'function' || typeof sdk.getAgentDir !== 'function') {
+      return reject('pi_sdk_resource_loader_unavailable', {
+        note: 'this pi SDK cannot declare which skills a session loads, so the declared-skills contract cannot be honoured',
+      });
+    }
 
     // The full configured chain is the candidate list (unitAI-3emr7 reverses the
     // unitAI-rrdnt.35 never-fallback ruling, which settled every 429 as failed and wasted
@@ -667,6 +714,15 @@ export class NativeActivationHost {
       });
     }
 
+    // Built ONCE, before any attempt: every session created below — the first, a
+    // fallback model, a retry — must see the same declared resources. `reload()` is
+    // explicit because createAgentSession only reloads a loader it constructed itself.
+    const resourceLoader = createActivationResourceLoader(sdk, {
+      cwd: workspace.worktreePath,
+      skillPaths: specialist.specialist.skills?.paths ?? [],
+    });
+    await resourceLoader.reload();
+
     // Session options are built once so every later attempt on a new model — the fallback
     // walk below, a retry with an override — creates its session identically to the first.
     // The ask/escalate tools are shared across attempts on purpose: they key off the live
@@ -674,6 +730,7 @@ export class NativeActivationHost {
     const baseSessionOptions = {
       customTools: [...askTools, ...guardedTools.tools],
       cwd: workspace.worktreePath,
+      resourceLoader,
       // The pi SDK takes a Model object here. Passing the provider-qualified string
       // instead is accepted silently and then fails mid-turn with an unresolved provider.
       model: modelCheck.model,

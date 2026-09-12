@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -22,6 +22,7 @@ vi.mock('node:child_process', async (importOriginal) => {
 import { NativeActivationHost, type ActivationForensicSink } from '../../../src/activation/native-host.js';
 import { DispatchRejectedError } from '../../../src/activation/types.js';
 import type { PiSdk, PiAgentSessionLike, PiAgentSessionEvent } from '../../../src/activation/pi-sdk.js';
+import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
 import type { SpecialistWorkItemBoundary, WorkItemView } from '../../../src/activation/workitem-store.js';
 
 /**
@@ -89,6 +90,8 @@ function makeSdk(record: { createArgs?: Record<string, unknown> }, session: PiAg
       record.createArgs = options;
       return { session };
     },
+    DefaultResourceLoader: FakeResourceLoader,
+    getAgentDir: () => FAKE_AGENT_DIR,
     ModelRuntime: { create: async () => ({ hasConfiguredAuth: () => true }) },
     resolveModelScopeWithDiagnostics: () => ({
       scopedModels: [{ model: { id: 'test-model', provider: 'testprov' } }],
@@ -1281,6 +1284,8 @@ describe('NativeActivationHost — fallback walk + retry (unitAI-3emr7)', () => 
         if (!session) throw new Error(`chainSdk: no session scripted for model attempt ${created.length}`);
         return { session };
       },
+      DefaultResourceLoader: FakeResourceLoader,
+      getAgentDir: () => FAKE_AGENT_DIR,
       ModelRuntime: { create: async () => ({ hasConfiguredAuth: () => true }) },
       resolveModelScopeWithDiagnostics: (patterns: string[]) => {
         if (unavailable.includes(patterns[0])) {
@@ -1522,5 +1527,116 @@ describe('NativeActivationHost — fallback walk + retry (unitAI-3emr7)', () => 
     expect(sink.names).not.toContain('lease_denied');
     expect(sink.names).not.toContain('lease_uncertain');
     expect(sink.names).toContain('activation_retried');
+  });
+});
+
+
+/**
+ * SPECIALISTS-4. The legacy CLI isolates the child and then re-adds its DECLARED
+ * skills (`--no-skills` + `--skill <path>`), and the native host did neither: it
+ * called `createAgentSession` with no `resourceLoader`, so pi auto-discovered the
+ * host project's skills, extensions and `AGENTS.md` while the specialist's own
+ * declared skills were absent — the exact inverse of the contract. Worse, the
+ * turn-1 prompt still commanded `/skill:<name>` for skills the session never got.
+ */
+describe('native resource isolation (SPECIALISTS-4)', () => {
+  /** Real on-disk skill roots: validateBeforeRun hard-fails a path that does not exist. */
+  function skillRoots(workspace: string, names: string[]): string[] {
+    return names.map((name) => {
+      const dir = join(workspace, 'skills', name);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'SKILL.md'), `---\nname: ${name}\n---\n\nbody\n`);
+      return dir;
+    });
+  }
+
+  function specWithSkills(paths: string[]) {
+    const spec = readOnlySpec() as { specialist: Record<string, unknown> };
+    spec.specialist.skills = { paths, scripts: [] };
+    return spec;
+  }
+
+  async function dispatch(spec: Record<string, unknown>, session: PiAgentSessionLike, record: { createArgs?: Record<string, unknown> }) {
+    const host = new NativeActivationHost({
+      loader: loaderFor(spec),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => makeSdk(record, session),
+      cwd: hostWorkspace(),
+    });
+    return host.start({ specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator' });
+  }
+
+  it('hands the session a loader built from the declared skills.paths, with discovery off', async () => {
+    const workspace = hostWorkspace();
+    const declared = skillRoots(workspace, ['gitnexus', 'engineering-quality']);
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record });
+
+    await (await dispatch(specWithSkills(declared), session, record)).result;
+
+    const loader = record.createArgs!.resourceLoader as FakeResourceLoader;
+    expect(loader).toBeInstanceOf(FakeResourceLoader);
+    // The SAME resolved paths validateBeforeRun checked — a validated skill is a loaded one.
+    expect(loader.options.additionalSkillPaths).toEqual(declared);
+    expect(loader.options.cwd).toBeDefined();
+    // Isolation: no ambient skills, extensions, prompt templates, themes or AGENTS.md.
+    expect(loader.options.noSkills).toBe(true);
+    expect(loader.options.noExtensions).toBe(true);
+    expect(loader.options.noContextFiles).toBe(true);
+    expect(loader.options.noPromptTemplates).toBe(true);
+    expect(loader.options.noThemes).toBe(true);
+    expect(loader.reloadCalls).toBeGreaterThan(0);
+    // Exactly the declared skills, and nothing belonging to the host project.
+    expect(loader.getSkills().skills.map((s) => s.name)).toEqual(['gitnexus', 'engineering-quality']);
+  });
+
+  it('a specialist declaring no skills loads none', async () => {
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record });
+
+    await (await dispatch(readOnlySpec(), session, record)).result;
+
+    const loader = record.createArgs!.resourceLoader as FakeResourceLoader;
+    expect(loader.options.additionalSkillPaths).toEqual([]);
+    expect(loader.getSkills().skills).toEqual([]);
+  });
+
+  it('the turn-1 /skill: prefix names only skills the session can actually load', async () => {
+    const workspace = hostWorkspace();
+    const declared = skillRoots(workspace, ['gitnexus', 'engineering-quality']);
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record });
+
+    await (await dispatch(specWithSkills(declared), session, record)).result;
+
+    const loader = record.createArgs!.resourceLoader as FakeResourceLoader;
+    const loadable = new Set(loader.getSkills().skills.map((s) => s.name));
+    const prompt = session.prompts[0] ?? '';
+    const commanded = [...prompt.matchAll(/\/skill:([A-Za-z0-9_-]+)/g)].map((m) => m[1]);
+    // A specialist that declares skills must not open by commanding a skill it cannot load.
+    expect(commanded.length).toBeGreaterThan(0);
+    for (const name of commanded) expect(loadable.has(name)).toBe(true);
+  });
+
+  it('refuses the dispatch rather than auto-discovering when the SDK cannot declare resources', async () => {
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record });
+    const sdk = makeSdk(record, session) as unknown as Record<string, unknown>;
+    delete sdk.DefaultResourceLoader;
+    const host = new NativeActivationHost({
+      loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => sdk as unknown as PiSdk,
+      cwd: hostWorkspace(),
+    });
+
+    const refusal = await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    }).catch((error: unknown) => error);
+
+    expect((refusal as DispatchRejectedError).reason).toBe('pi_sdk_resource_loader_unavailable');
+    expect(record.createArgs).toBeUndefined();
   });
 });

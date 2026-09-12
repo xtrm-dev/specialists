@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { validateModelAvailable } from '../../../src/activation/model-gate.js';
 import type { PiSdk, PiModelRuntimeLike, PiModelScopeResult } from '../../../src/activation/pi-sdk.js';
+import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
 
 /**
  * These cases mirror behaviour reproduced against pi 0.84.3 and re-verified against 0.85.1
@@ -11,6 +12,8 @@ import type { PiSdk, PiModelRuntimeLike, PiModelScopeResult } from '../../../src
 function sdkReturning(result: PiModelScopeResult): PiSdk {
   return {
     createAgentSession: async () => { throw new Error('not used'); },
+    DefaultResourceLoader: FakeResourceLoader,
+    getAgentDir: () => FAKE_AGENT_DIR,
     ModelRuntime: { create: async () => ({ hasConfiguredAuth: () => true }) },
     resolveModelScopeWithDiagnostics: () => result,
     defineTool: (d) => d,
@@ -78,6 +81,8 @@ describe('validateModelAvailable', () => {
   it('rejects rather than throwing when model resolution itself fails', async () => {
     const sdk: PiSdk = {
       createAgentSession: async () => { throw new Error('not used'); },
+      DefaultResourceLoader: FakeResourceLoader,
+      getAgentDir: () => FAKE_AGENT_DIR,
       ModelRuntime: { create: async () => ({ hasConfiguredAuth: () => true }) },
       resolveModelScopeWithDiagnostics: () => { throw new Error('registry exploded'); },
       defineTool: (d) => d,

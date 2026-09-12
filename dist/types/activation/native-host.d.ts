@@ -36,9 +36,33 @@ import { SpecialistLoader } from '../specialist/loader.js';
 import { type SpecialistWorkItemBoundary } from './workitem-store.js';
 import { type InteractionMessage, type PendingAsk } from './interaction.js';
 import { PeerAdapter, type TransportForensicEvent } from './transport/peer-adapter.js';
-import { type PiSdk, type PiAgentSessionEvent } from './pi-sdk.js';
+import { type PiSdk, type PiAgentSessionEvent, type PiResourceLoaderLike } from './pi-sdk.js';
 import { type AuthorityWriter } from './authority-store.js';
 import { type ActivationHandle, type ActivationRequest, type ActivationSnapshot, type LiveActivationStats } from './types.js';
+/**
+ * The activation's `cwd` and `agentDir` feed pi's resource loader, which is the ONLY
+ * seam through which skills, extensions, prompt templates, themes and context files
+ * reach an AgentSession (pi 0.85.1 has no `skills` field on `CreateAgentSessionOptions`).
+ *
+ * The legacy CLI isolates the child and then re-adds exactly the declared skills:
+ * `--no-skills` at src/pi/session.ts:969, one `--skill <resolved path>` per declared
+ * entry at :1001, `--no-extensions` and the curated `-e` set, `--no-context-files`,
+ * `--no-prompt-templates`, `--no-themes`. `noSkills: true` + `additionalSkillPaths` is
+ * the loader equivalent of that pair, and it is what stops the host project's own
+ * skills and `AGENTS.md` from being auto-discovered into a child that never asked for
+ * them.
+ *
+ * `skillPaths` are the SAME resolved paths `validateBeforeRun` hard-fails on
+ * (native-host.ts, `validateBeforeRun(specialist, tier, toolContract)`), so a validated
+ * skill is a loaded skill rather than a silently ignored `--skill` argument. Extension
+ * paths are supplied by the caller; extension injection is a separate child issue and
+ * passes none yet, while `noExtensions: true` already fences ambient ones.
+ */
+export declare function createActivationResourceLoader(sdk: PiSdk, options: {
+    cwd: string;
+    skillPaths: string[];
+    extensionPaths?: string[];
+}): PiResourceLoaderLike;
 /**
  * Sink for activation forensics.
  *
