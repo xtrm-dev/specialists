@@ -207,6 +207,16 @@ export interface OpenWorkItemsOptions {
     /** Absolute path to a Substrate checkout. Overrides module resolution; see resolveSubstrateDir. */
     substrateDir?: string;
     env?: NodeJS.ProcessEnv;
+    /**
+     * How to find an INSTALLED Substrate when no explicit path is given. Defaults to real
+     * module resolution.
+     *
+     * Exists so a test can state "nothing is installed" instead of depending on the machine
+     * not having the package (unitAI-7co1i). The absent-Substrate paths were previously
+     * asserted by accident: they passed on CI, which carries no Substrate, and failed the
+     * moment anyone installed it — which publishing it made normal.
+     */
+    resolveInstalled?: () => string | null;
 }
 /**
  * Open the canonical work store and build the boundary over the REAL producer

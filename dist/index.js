@@ -92015,10 +92015,12 @@ import { createRequire as createRequire5 } from "module";
 import { homedir as homedir16 } from "os";
 import { dirname as dirname23, join as join55 } from "path";
 import { pathToFileURL } from "url";
-function resolveSubstrateDir(explicit) {
+function resolveSubstrateDir(explicit, resolveInstalled) {
   const trimmed = explicit.trim();
   if (trimmed)
     return trimmed;
+  if (resolveInstalled)
+    return resolveInstalled();
   try {
     return dirname23(require4.resolve(`${SUBSTRATE_PACKAGE}/package.json`));
   } catch {
@@ -92166,7 +92168,7 @@ function splitLines(body) {
 }
 async function openWorkItemBoundary(opts = {}) {
   const env = opts.env ?? process.env;
-  const substrateDir = resolveSubstrateDir(opts.substrateDir ?? env.XTRM_SUBSTRATE_DIR ?? "");
+  const substrateDir = resolveSubstrateDir(opts.substrateDir ?? env.XTRM_SUBSTRATE_DIR ?? "", opts.resolveInstalled);
   if (!substrateDir) {
     throw new Error(`work_item_store_unavailable: no Substrate package configured (install ${SUBSTRATE_PACKAGE}, ` + "or set XTRM_SUBSTRATE_DIR to a checkout of it)");
   }
@@ -95085,7 +95087,7 @@ function createSubstrateIssueTool(getIssues = defaultIssues) {
             return { status: "ok", issue: project2(issues.updateContract(input2.issue_id, input2.contract)) };
           }
           case "project_resolve": {
-            const resolved = issues.resolveProject(input2.project_id ? { explicit: input2.project_id } : {});
+            const resolved = issues.resolveProject(input2.project_id ? { explicit: input2.project_id } : { gitRoot: process.cwd() });
             return { status: "ok", project: resolved };
           }
           case "project_create": {

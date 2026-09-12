@@ -127,9 +127,14 @@ describe('createWorkItemBoundary inline validation', () => {
   });
 });
 
+// unitAI-7co1i. "Nothing is installed" is now stated, not assumed. These cases used to pass
+// only because the machine happened to lack @jaggerxtrm/substrate — true on CI, false the
+// moment anyone installs it, which publishing the package made normal.
+const NONE = () => null;
+
 describe('openWorkItemBoundary package identity', () => {
   it('fails closed with no substrate directory configured', async () => {
-    await expect(openWorkItemBoundary({ env: { ...process.env, XTRM_SUBSTRATE_DIR: '' } }))
+    await expect(openWorkItemBoundary({ env: { ...process.env, XTRM_SUBSTRATE_DIR: '' }, resolveInstalled: NONE }))
       .rejects.toThrow(/work_item_store_unavailable/);
   });
 
@@ -155,7 +160,7 @@ describe('openWorkItemBoundary package identity', () => {
   // The identity check is what makes that safe to widen, so it is asserted on the
   // explicit path here and must never be skipped on the module-resolved one.
   it('names both remedies when nothing is configured and nothing is installed', async () => {
-    await expect(openWorkItemBoundary({ env: { ...process.env, XTRM_SUBSTRATE_DIR: '' } }))
+    await expect(openWorkItemBoundary({ env: { ...process.env, XTRM_SUBSTRATE_DIR: '' }, resolveInstalled: NONE }))
       .rejects.toThrow(/install @jaggerxtrm\/substrate.*XTRM_SUBSTRATE_DIR/s);
   });
 
@@ -170,8 +175,20 @@ describe('openWorkItemBoundary package identity', () => {
       .rejects.toThrow(new RegExp(`found "not-substrate"`));
   });
 
+  it('uses an installed Substrate when no override is set', async () => {
+    // The positive case the absent-only tests could never assert: with nothing in the
+    // environment, resolution falls through to the installed package. Proven by the
+    // identity check rejecting THIS directory by name.
+    const dir = mkdtempSync(join(tmpdir(), 'substrate-installed-'));
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'pretend-installed' }));
+    await expect(openWorkItemBoundary({
+      env: { ...process.env, XTRM_SUBSTRATE_DIR: '' },
+      resolveInstalled: () => dir,
+    })).rejects.toThrow(/found "pretend-installed"/);
+  });
+
   it('treats a whitespace-only override as unset rather than as a path', async () => {
-    await expect(openWorkItemBoundary({ env: { ...process.env, XTRM_SUBSTRATE_DIR: '   ' } }))
+    await expect(openWorkItemBoundary({ env: { ...process.env, XTRM_SUBSTRATE_DIR: '   ' }, resolveInstalled: NONE }))
       .rejects.toThrow(/no Substrate package configured/);
   });
 });

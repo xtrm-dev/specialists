@@ -42,6 +42,7 @@ interface IssueServiceLike {
     updateContract(id: string, contract: unknown): unknown;
     resolveProject(input: {
         explicit?: string;
+        gitRoot?: string;
     }): unknown;
     createProject(input: {
         prefix: string;
