@@ -958,9 +958,18 @@ export class NativeActivationHost {
 
       emit('output_validation_started');
       // Phase 1 carries no output schema; schema/expected-key enforcement arrives with the
-      // result-contract work. Recorded explicitly so the gap is visible rather than implied.
-      const validation = { valid: true as const };
-      emit('output_validation_passed');
+      // result-contract work (unitAI-v2om5 NON_GOALS). One check is always available
+      // regardless: a specialist that produced no output has not delivered, whitespace
+      // included — so empty/whitespace-only output fails validation on an otherwise
+      // settled (not failed) activation.
+      const validation = output.trim().length > 0
+        ? { valid: true as const }
+        : { valid: false as const, errors: ['empty output: specialist produced no output'] };
+      if (validation.valid) {
+        emit('output_validation_passed');
+      } else {
+        emit('output_validation_failed', { errors: validation.errors });
+      }
 
       snapshot.state = 'settled';
       this.save(snapshot);

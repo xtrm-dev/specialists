@@ -699,6 +699,62 @@ describe('NativeActivationHost — defects found by the live smoke', () => {
     expect(terminalEvents).toEqual(['activation_failed']);
     expect(result.status).toBe('failed');
   });
+
+  // unitAI-v2om5: `validation.valid` was hardcoded `true` regardless of output, so a
+  // no-op turn (no ask_coordinator call, no text) reported as validated as any real delivery.
+  it.each([
+    ['empty string', ''],
+    ['whitespace only', '   \n\t  '],
+  ])('reports a settled activation with %s output as invalid, not failed', async (_label, assistantText) => {
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record, assistantText });
+    const sink = collectingSink();
+    const host = new NativeActivationHost({
+      loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems(),
+      loadSdk: async () => makeSdk(record, session),
+      forensics: sink,
+      cwd: hostWorkspace(),
+    });
+
+    const handle = await host.start({
+      specialist: 'researcher',
+      issueRef: 'ISSUE-1',
+      requestedByParticipantId: 'coordinator:test',
+    });
+    const result = await handle.result;
+
+    expect(result.status).toBe('completed');
+    expect(result.validation.valid).toBe(false);
+    expect(result.validation.errors?.[0]).toContain('empty output');
+    expect(sink.names).toContain('output_validation_failed');
+    expect(sink.names).not.toContain('output_validation_passed');
+  });
+
+  it('still reports valid: true for non-empty output', async () => {
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record, assistantText: 'the answer' });
+    const sink = collectingSink();
+    const host = new NativeActivationHost({
+      loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems(),
+      loadSdk: async () => makeSdk(record, session),
+      forensics: sink,
+      cwd: hostWorkspace(),
+    });
+
+    const handle = await host.start({
+      specialist: 'researcher',
+      issueRef: 'ISSUE-1',
+      requestedByParticipantId: 'coordinator:test',
+    });
+    const result = await handle.result;
+
+    expect(result.status).toBe('completed');
+    expect(result.validation.valid).toBe(true);
+    expect(sink.names).toContain('output_validation_passed');
+    expect(sink.names).not.toContain('output_validation_failed');
+  });
 });
 
 /**
