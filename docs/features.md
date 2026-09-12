@@ -1536,8 +1536,10 @@ sp clean --dry-run   # preview
 sp clean             # execute
 ```
 
-### MCP single-run flow
+### MCP single-run flow (legacy compatibility)
 
-1. `use_specialist` with `name` + `prompt`/`bead_id`
-2. Read final output directly from MCP response
+The synchronous `use_specialist` path (`name` + `prompt`/`bead_id`) has been
+removed; calling it returns an unknown-tool error. See [mcp-tools.md](mcp-tools.md)
+for the current MCP tool contract. The native path is `specialist_dispatch`
+(admit-only), then `specialist_status` reads and `specialist_reply` answers.
 
