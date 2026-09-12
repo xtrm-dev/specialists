@@ -92146,18 +92146,17 @@ var init_authority_store = __esm(() => {
 import { createRequire as createRequire6 } from "module";
 import { dirname as dirname24, join as join56 } from "path";
 import { pathToFileURL } from "url";
-function resolveInstalledSubstrateDir() {
+function resolveSubstrateDir(explicit, resolveInstalled) {
+  const trimmed = explicit.trim();
+  if (trimmed)
+    return trimmed;
+  if (resolveInstalled)
+    return resolveInstalled();
   try {
     return dirname24(require5.resolve(`${SUBSTRATE_PACKAGE}/package.json`));
   } catch {
     return null;
   }
-}
-function resolveSubstrateDir(explicit, resolveInstalled = resolveInstalledSubstrateDir) {
-  const trimmed = explicit.trim();
-  if (trimmed)
-    return trimmed;
-  return resolveInstalled();
 }
 function resolveWorkItemDbPath(env = process.env) {
   return resolveAuthorityDbPath(env);
@@ -92327,7 +92326,7 @@ function splitLines(body) {
 }
 async function openWorkItemBoundary(opts = {}) {
   const env = opts.env ?? process.env;
-  const substrateDir = resolveSubstrateDir(opts.substrateDir ?? env.XTRM_SUBSTRATE_DIR ?? "", opts.resolveInstalledSubstrateDir);
+  const substrateDir = resolveSubstrateDir(opts.substrateDir ?? env.XTRM_SUBSTRATE_DIR ?? "", opts.resolveInstalled);
   if (!substrateDir) {
     throw new Error(`work_item_store_unavailable: no Substrate package configured (install ${SUBSTRATE_PACKAGE}, ` + "or set XTRM_SUBSTRATE_DIR to a checkout of it)");
   }
@@ -95278,7 +95277,7 @@ function createSubstrateIssueTool(getIssues = defaultIssues) {
             return { status: "ok", issue: project2(issues.updateContract(input2.issue_id, input2.contract)) };
           }
           case "project_resolve": {
-            const resolved = issues.resolveProject(input2.project_id ? { explicit: input2.project_id } : {});
+            const resolved = issues.resolveProject(input2.project_id ? { explicit: input2.project_id } : { gitRoot: process.cwd() });
             return { status: "ok", project: resolved };
           }
           case "project_create": {

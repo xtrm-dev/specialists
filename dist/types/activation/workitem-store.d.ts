@@ -237,10 +237,15 @@ export interface OpenWorkItemsOptions {
     substrateDir?: string;
     env?: NodeJS.ProcessEnv;
     /**
-     * Test seam: replace the module-resolution step. Defaults to the real lookup, so production
-     * behaviour is untouched. A test that needs "nothing is installed" returns null here.
+     * How to find an INSTALLED Substrate when no explicit path is given. Defaults to real
+     * module resolution.
+     *
+     * Exists so a test can state "nothing is installed" instead of depending on the machine
+     * not having the package (unitAI-7co1i). The absent-Substrate paths were previously
+     * asserted by accident: they passed on CI, which carries no Substrate, and failed the
+     * moment anyone installed it — which publishing it made normal.
      */
-    resolveInstalledSubstrateDir?: () => string | null;
+    resolveInstalled?: () => string | null;
 }
 /**
  * Open the canonical work store and build the boundary over the REAL producer

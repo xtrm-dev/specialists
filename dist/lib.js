@@ -20115,18 +20115,17 @@ var NULL_AUTHORITY_WRITER = { record: () => {}, remove: () => {} };
 // src/activation/workitem-store.ts
 var require3 = createRequire3(import.meta.url);
 var SUBSTRATE_PACKAGE = "@jaggerxtrm/substrate";
-function resolveInstalledSubstrateDir() {
+function resolveSubstrateDir(explicit, resolveInstalled) {
+  const trimmed = explicit.trim();
+  if (trimmed)
+    return trimmed;
+  if (resolveInstalled)
+    return resolveInstalled();
   try {
     return dirname10(require3.resolve(`${SUBSTRATE_PACKAGE}/package.json`));
   } catch {
     return null;
   }
-}
-function resolveSubstrateDir(explicit, resolveInstalled = resolveInstalledSubstrateDir) {
-  const trimmed = explicit.trim();
-  if (trimmed)
-    return trimmed;
-  return resolveInstalled();
 }
 function resolveWorkItemDbPath(env = process.env) {
   return resolveAuthorityDbPath(env);
@@ -20297,7 +20296,7 @@ function splitLines(body) {
 }
 async function openWorkItemBoundary(opts = {}) {
   const env = opts.env ?? process.env;
-  const substrateDir = resolveSubstrateDir(opts.substrateDir ?? env.XTRM_SUBSTRATE_DIR ?? "", opts.resolveInstalledSubstrateDir);
+  const substrateDir = resolveSubstrateDir(opts.substrateDir ?? env.XTRM_SUBSTRATE_DIR ?? "", opts.resolveInstalled);
   if (!substrateDir) {
     throw new Error(`work_item_store_unavailable: no Substrate package configured (install ${SUBSTRATE_PACKAGE}, ` + "or set XTRM_SUBSTRATE_DIR to a checkout of it)");
   }

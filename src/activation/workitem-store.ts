@@ -60,17 +60,20 @@ const SUBSTRATE_PACKAGE = '@jaggerxtrm/substrate';
  * dispatch was unavailable to every such user (XTRM-267).
  */
 /**
- * Overridable-for-testing seam over the MODULE-RESOLUTION half of substrate lookup, following
- * the `readBeadForMemory` / `hasGitnexusIndex` idiom in system-prompt.ts. It defaults to the
- * real lookup and is never overridden in production.
+ * Where Substrate lives, in precedence order: an explicit checkout, then an injected or
+ * installed resolution, then normal module resolution, then nowhere.
  *
- * It exists because a test cannot otherwise state the precondition "nothing is installed":
- * resolution ends at `require.resolve` and, failing that, at absolute machine paths, none of
- * which an injected `env` can suppress. Three tests asserted a condition they had no way to
- * establish, so the suite passed or failed according to whether the developer happened to have
- * Substrate linked (SPECIALISTS-24).
+ * `resolveInstalled` is the overridable-for-testing seam (unitAI-7co1i, landed on master as
+ * PR #349): a test can STATE "nothing is installed" instead of depending on the machine not
+ * having the package. It defaults to the real module resolution below and is never supplied in
+ * production. SPECIALISTS-24 fixed the same defect independently with an equivalent seam under
+ * a different name; that duplicate was dropped when this branch merged master, so exactly one
+ * seam remains.
  */
-function resolveInstalledSubstrateDir(): string | null {
+function resolveSubstrateDir(explicit: string, resolveInstalled?: () => string | null): string | null {
+  const trimmed = explicit.trim();
+  if (trimmed) return trimmed;
+  if (resolveInstalled) return resolveInstalled();
   try {
     return dirname(require.resolve(`${SUBSTRATE_PACKAGE}/package.json`));
   } catch {
@@ -78,15 +81,6 @@ function resolveInstalledSubstrateDir(): string | null {
     // the caller turns it into work_item_store_unavailable with both remedies.
     return null;
   }
-}
-
-function resolveSubstrateDir(
-  explicit: string,
-  resolveInstalled: () => string | null = resolveInstalledSubstrateDir,
-): string | null {
-  const trimmed = explicit.trim();
-  if (trimmed) return trimmed;
-  return resolveInstalled();
 }
 
 /**
@@ -512,10 +506,15 @@ export interface OpenWorkItemsOptions {
   substrateDir?: string;
   env?: NodeJS.ProcessEnv;
   /**
-   * Test seam: replace the module-resolution step. Defaults to the real lookup, so production
-   * behaviour is untouched. A test that needs "nothing is installed" returns null here.
+   * How to find an INSTALLED Substrate when no explicit path is given. Defaults to real
+   * module resolution.
+   *
+   * Exists so a test can state "nothing is installed" instead of depending on the machine
+   * not having the package (unitAI-7co1i). The absent-Substrate paths were previously
+   * asserted by accident: they passed on CI, which carries no Substrate, and failed the
+   * moment anyone installed it — which publishing it made normal.
    */
-  resolveInstalledSubstrateDir?: () => string | null;
+  resolveInstalled?: () => string | null;
 }
 
 /**
@@ -536,7 +535,7 @@ export async function openWorkItemBoundary(opts: OpenWorkItemsOptions = {}): Pro
   const env = opts.env ?? process.env;
   const substrateDir = resolveSubstrateDir(
     opts.substrateDir ?? env.XTRM_SUBSTRATE_DIR ?? '',
-    opts.resolveInstalledSubstrateDir,
+    opts.resolveInstalled,
   );
   if (!substrateDir) {
     throw new Error(
