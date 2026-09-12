@@ -21938,7 +21938,6 @@ class NativeActivationHost {
       case "agent_settled":
         snapshot.state = "settled";
         this.save(snapshot);
-        emit("activation_settled");
         this.releaseIfWriter(snapshot, "settled");
         break;
       case "auto_retry_start":
@@ -21991,9 +21990,14 @@ class NativeActivationHost {
         };
       }
       const output = textOf(last);
+      emit("activation_settled");
       emit("output_validation_started");
-      const validation = { valid: true };
-      emit("output_validation_passed");
+      const validation = output.trim().length > 0 ? { valid: true } : { valid: false, errors: ["empty output: specialist produced no output"] };
+      if (validation.valid) {
+        emit("output_validation_passed");
+      } else {
+        emit("output_validation_failed", { errors: validation.errors });
+      }
       snapshot.state = "settled";
       this.save(snapshot);
       emit("activation_completed", { pi_session_id: session.sessionId, output });
