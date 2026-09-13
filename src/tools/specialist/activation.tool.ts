@@ -93,6 +93,13 @@ export interface ActivationView {
   purpose?: string;
   /** Last session-event time. Per-tool "doing X now" inference is out of scope. */
   last_activity_at: number;
+  /**
+   * Tool-surface notes from dispatch (SPECIALISTS-42): contract warnings and downgrade reasons.
+   * Omitted when there were none, so a coordinator can read an empty absence as "nothing was
+   * reduced" rather than as missing data. Not every note is a fault: a specialist that disables an
+   * extension by design reports a deliberate exclusion here too.
+   */
+  tool_contract_notes?: string[];
 }
 
 export function toActivationView(snapshot: ActivationSnapshot, nowMs: number = Date.now()): ActivationView {
@@ -121,6 +128,7 @@ export function toActivationView(snapshot: ActivationSnapshot, nowMs: number = D
     ...(snapshot.tokenUsage ? { token_usage: { ...snapshot.tokenUsage } } : {}),
     ...(snapshot.thinkingLevel ? { thinking_level: snapshot.thinkingLevel } : {}),
     ...(snapshot.purpose ? { purpose: snapshot.purpose } : {}),
+    ...(snapshot.toolContractNotes?.length ? { tool_contract_notes: [...snapshot.toolContractNotes] } : {}),
     last_activity_at: snapshot.lastActivityAt,
   };
 }

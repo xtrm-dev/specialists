@@ -49,7 +49,7 @@ import { mapSpecialistBackend, getProviderArgs } from './backendMap.js';
 import { resolveCanonicalAssetDir } from '../specialist/canonical-asset-resolver.js';
 import { type ExtensionState, type ManifestPolicy, type ManifestPolicyTier, type ToolCatalog } from '../specialist/manifest-resolver.js';
 import { buildResolvedToolContract, type ResolvedToolContract } from '../specialist/resolved-tool-contract.js';
-import { loadToolCatalogIndex, type ToolCatalogIndex } from '../specialist/tool-catalog.js';
+import { loadToolCatalogIndex, type ToolCatalogIndex, resolveCatalogVersionVerdict } from '../specialist/tool-catalog.js';
 
 const TEST_COMMAND_STALL_TIMEOUT_MS = 300_000;
 const GITNEXUS_IMPACT_STALL_TIMEOUT_MS = 300_000;
@@ -287,12 +287,17 @@ function resolveGitnexusRuntime(options: { catalogIndex: ToolCatalogIndex; exclu
     };
   }
 
-  if (gitnexusCatalog && installedVersion !== gitnexusCatalog.version) {
-    return {
-      packageName,
-      packagePath,
-      extensionState: { enabled: true, health: 'loaded_unhealthy', catalogCompatible: false },
-    };
+  // SPECIALISTS-42: compatibility, not identity. A patch release inside the pin's line is
+  // healthy; only a version outside it fails closed, and it says why.
+  if (gitnexusCatalog) {
+    const verdict = resolveCatalogVersionVerdict(installedVersion, gitnexusCatalog.version);
+    if (!verdict.compatible) {
+      return {
+        packageName,
+        packagePath,
+        extensionState: { enabled: true, health: 'loaded_unhealthy', catalogCompatible: false, reason: verdict.reason },
+      };
+    }
   }
 
   return {
@@ -343,12 +348,17 @@ function resolvePiExtensionsPythonKernelRuntime(options: { catalogIndex: ToolCat
     };
   }
 
-  if (catalog && installedVersion !== catalog.version) {
-    return {
-      packageName,
-      packagePath,
-      extensionState: { enabled: true, health: 'loaded_unhealthy', catalogCompatible: false },
-    };
+  // The SAME rule as the gitnexus gate above — one comparator, so the two catalogs cannot
+  // disagree about what compatibility means (SPECIALISTS-42).
+  if (catalog) {
+    const verdict = resolveCatalogVersionVerdict(installedVersion, catalog.version);
+    if (!verdict.compatible) {
+      return {
+        packageName,
+        packagePath,
+        extensionState: { enabled: true, health: 'loaded_unhealthy', catalogCompatible: false, reason: verdict.reason },
+      };
+    }
   }
 
   return {

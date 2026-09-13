@@ -975,6 +975,11 @@ export class NativeActivationHost {
 
     const purpose = purposeExcerptFromContract(view.contract);
     const startedAt = this.now();
+    // SPECIALISTS-42: a reduced tool surface is surfaced at admission, the same way the
+    // build-staleness line is. Deduplicated because the same reason reaches warnings and
+    // downgradeReasons through different paths, and a repeated line reads as two problems.
+    const toolContractNotes = [...new Set([...toolContract.warnings, ...toolContract.downgradeReasons])];
+
     const snapshot: ActivationSnapshot = {
       activationId, participantId, attemptId,
       specialist: request.specialist,
@@ -1004,6 +1009,7 @@ export class NativeActivationHost {
       ...(purpose ? { purpose } : {}),
       startedAt,
       lastActivityAt: startedAt,
+      ...(toolContractNotes.length > 0 ? { toolContractNotes } : {}),
     };
 
     emit('activation_started', { pi_session_id: session.sessionId });

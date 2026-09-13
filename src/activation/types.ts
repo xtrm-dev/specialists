@@ -191,6 +191,13 @@ export interface ActivationSnapshot {
   purpose?: string;
   startedAt: number;
   lastActivityAt: number;
+  /**
+   * Tool-surface notes captured at dispatch (SPECIALISTS-42): the resolved contract's warnings
+   * and downgrade reasons, when there are any. A reduced capability surface is a fact about the
+   * activation, so it belongs on the record the coordinator reads — not only inside the contract
+   * string handed to the child. Omitted when empty (never an empty-array zero-fill).
+   */
+  toolContractNotes?: string[];
 }
 
 /**
