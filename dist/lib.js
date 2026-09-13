@@ -22162,6 +22162,9 @@ class NativeActivationHost {
       epicAncestors: epicAncestors.map(workAncestorAsRecord),
       completedBlockers: completedBlockers.map(workAncestorAsRecord),
       preScriptOutput,
+      variables: {
+        resolved_tool_contract: formatResolvedToolContract(toolContract)
+      },
       ...isReviewer ? {
         appendExecutionContext: (task, cwd, variables) => {
           try {

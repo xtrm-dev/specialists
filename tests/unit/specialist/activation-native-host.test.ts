@@ -1938,6 +1938,34 @@ describe('task-prompt composition parity (SPECIALISTS-22)', () => {
     expect(session.prompts[0]).not.toContain('## Context from completed dependencies:');
   });
 
+  it('injects the resolved tool contract into the task prompt, as the legacy path does', async () => {
+    // Seven shipped specialists interpolate `$resolved_tool_contract`, and explorer's
+    // template tells the model to "Read resolved tool contract first". The renderer resolves
+    // an unsupplied optional placeholder to an EMPTY string, so the native host used to hand
+    // the model a contract block that was not there at all (SPECIALISTS-37). Asserting the
+    // tools VALUES would assert this machine's installed extensions, so this pins the block
+    // and the `--tools` line instead.
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record });
+    const spec = readOnlySpec() as { specialist: { metadata: Record<string, unknown>; prompt: Record<string, unknown> } };
+    spec.specialist.metadata.name = 'researcher';
+    spec.specialist.prompt.task_template = 'Do: $prompt\n\n$resolved_tool_contract';
+    const host = new NativeActivationHost({
+      loader: loaderFor(spec),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => makeSdk(record, session),
+      cwd: hostWorkspace(),
+    });
+
+    await host.start({ specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator' });
+
+    expect(session.prompts[0]).toContain('## Resolved Tool Contract');
+    expect(session.prompts[0]).toMatch(/- --tools: \S+/);
+    // The empty-value path would leave the template's own dangling reference behind.
+    expect(session.prompts[0]).not.toContain('$resolved_tool_contract');
+  });
+
   it('gives a reviewer its diff context, which the native call site never supplied', async () => {
     // A real repository with a real unstaged change: the diff builder shells out to git,
     // so a fake cwd would prove nothing.

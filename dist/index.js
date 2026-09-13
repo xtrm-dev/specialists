@@ -93804,6 +93804,9 @@ class NativeActivationHost {
       epicAncestors: epicAncestors.map(workAncestorAsRecord),
       completedBlockers: completedBlockers.map(workAncestorAsRecord),
       preScriptOutput,
+      variables: {
+        resolved_tool_contract: formatResolvedToolContract(toolContract)
+      },
       ...isReviewer ? {
         appendExecutionContext: (task, cwd, variables) => {
           try {
@@ -94646,6 +94649,7 @@ var init_native_host = __esm(() => {
   init_task_prompt();
   init_runner();
   init_session();
+  init_resolved_tool_contract();
   init_bead_gate();
   init_workitem_store();
   init_contract_sections();

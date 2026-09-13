@@ -55,6 +55,7 @@ import {
   resolveExecutionExtensionSelection,
   deduplicateExtensionSources,
 } from '../pi/session.js';
+import { formatResolvedToolContract } from '../specialist/resolved-tool-contract.js';
 import { resolveModelChain } from '../specialist/model-chain.js';
 import { extractPurposeExcerpt } from './bead-gate.js';
 import {
@@ -724,6 +725,15 @@ export class NativeActivationHost {
       epicAncestors: epicAncestors.map(workAncestorAsRecord),
       completedBlockers: completedBlockers.map(workAncestorAsRecord),
       preScriptOutput,
+      // $resolved_tool_contract: 7 shipped specialists interpolate it, and explorer's template
+      // instructs the model to "Read resolved tool contract first". The renderer treats an
+      // unsupplied optional placeholder as an intentional EMPTY, so omitting it here did not
+      // fail loudly — it silently handed those specialists a contract block that pointed at
+      // nothing. Filled from the SAME `toolContract` already resolved above and passed to
+      // resolveCuratedExtensionPaths, so the prompt and the enforced gate cannot disagree.
+      variables: {
+        resolved_tool_contract: formatResolvedToolContract(toolContract),
+      },
       // Reviewer diff context is EXECUTION-ONLY, so it enters through the hook rather than
       // the pure renderer — and it must land before the prompt hash, exactly as it does on
       // the legacy path. Without it the reviewer role loses its diff entirely.
