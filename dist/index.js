@@ -59734,7 +59734,7 @@ function parseDoctorArgs(argv) {
     throw new Error(`Unknown argument: ${token}`);
   }
   if (opts.require_installed && !opts.catalogs) {
-    throw new Error("--require-installed only applies to --catalogs");
+    throw new Error("--require-installed only applies to --catalogs: run `specialists doctor --catalogs --require-installed`");
   }
   return opts;
 }

@@ -512,7 +512,7 @@ function parseDoctorArgs(argv: readonly string[]): DoctorOptions {
   }
   // A flag that silently does nothing is the failure mode SPECIALISTS-47 exists to remove.
   if (opts.require_installed && !opts.catalogs) {
-    throw new Error('--require-installed only applies to --catalogs');
+    throw new Error('--require-installed only applies to --catalogs: run `specialists doctor --catalogs --require-installed`');
   }
   return opts;
 }

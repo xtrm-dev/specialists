@@ -74,5 +74,25 @@ jobs:
       - name: Point the runtime at the npm global root
         run: echo "PI_NPM_GLOBAL_DIR=$(npm root -g)" >> "$GITHUB_ENV"
 
+      # Runs the SOURCE, not the shipped dist: this job guards the repository's catalog pins
+      # against published extensions, so a divergence that exists only in dist is out of scope here.
+      #
+      # The `ahead` line is the one signal that predicts the next broken pin, and on a green
+      # scheduled run nobody opens the log. So every catalog line goes to the run summary, and
+      # `ahead` also becomes a ::notice:: annotation, visible in the Actions UI. Notice rather than
+      # warning: the runtime accepts an ahead install, and a warning on a healthy state teaches
+      # people to ignore the channel. The exit code is still the doctor's own.
       - name: specialists doctor --catalogs --require-installed
-        run: bun src/index.ts doctor --catalogs --require-installed
+        run: |
+          status=0
+          bun src/index.ts doctor --catalogs --require-installed > doctor.out 2>&1 || status=$?
+          sed -r 's/\x1B\[[0-9;]*[A-Za-z]//g' doctor.out > doctor.txt
+          cat doctor.txt
+          {
+            echo "### Extension catalogs"
+            echo '```'
+            cat doctor.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          grep -E 'ahead of baseline' doctor.txt | sed -r 's/^[[:space:]]*[^[:alnum:]]+[[:space:]]*/::notice title=Catalog pin behind published line::/' || true
+          exit "$status"
