@@ -123,4 +123,33 @@ export type ToolCatalogIndex = z.infer<typeof ToolCatalogIndexSchema>;
 export declare const SPECIALIST_TOOL_PRECEDENCE: readonly ["native", "gitnexus", "python-kernel", "service-knowledge"];
 export declare function validateToolCatalogIndex(value: unknown): ToolCatalogIndex;
 export declare function loadToolCatalogIndex(jsonText: string): ToolCatalogIndex;
+/**
+ * Catalog compatibility (SPECIALISTS-42).
+ *
+ * A catalog's `version` is the build its tool surface was verified against — a baseline, not a
+ * demand that the installed extension be byte-identical to it. The gate used to compare with
+ * `!==`, which meant every patch release of an independently-versioned extension silently erased
+ * that catalog's entire tool surface (the gitnexus pin sat at 0.6.1 from May while 0.6.2, 0.6.3
+ * and 0.6.4 shipped). An installed version satisfies the pin when it is the baseline or a later
+ * build within the same compatibility line — caret-of-baseline:
+ *
+ *   baseline 1.2.0  ->  same major, installed >= baseline
+ *   baseline 0.6.4  ->  same minor, installed >= baseline
+ *   baseline 0.0.3  ->  exact match only
+ *
+ * Prerelease and unparseable versions are NOT compatible and say why. A build we cannot place is
+ * one we cannot claim was verified, so the rule fails closed rather than guessing — and it names
+ * the reason, because a bare `loaded_unhealthy` is what made the original failure invisible.
+ *
+ * Deliberate consequence: semver build metadata (`0.6.4+abc123`) does not match the strict pattern
+ * either, so it fails closed even though semver says metadata carries no precedence. The reason
+ * string names the version, so that shows up as a diagnosable line rather than a silent mismatch.
+ */
+export interface CatalogVersionVerdict {
+    /** True when the installed version is inside the pin's compatibility line. */
+    compatible: boolean;
+    /** Human-readable verdict, suitable for a warning or a diagnostic line. */
+    reason: string;
+}
+export declare function resolveCatalogVersionVerdict(installedVersion: string, baselineVersion: string): CatalogVersionVerdict;
 //# sourceMappingURL=tool-catalog.d.ts.map

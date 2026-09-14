@@ -23561,10 +23561,10 @@ function resolveManifestTools(input2) {
     ...effectivePythonKernelState.includeTools ? pythonKernelTools : []
   ]);
   if (!effectiveGitnexusState.includeTools && requestedGitnexusTools.length > 0) {
-    warnings.push(`gitnexus tools excluded by extension state: ${effectiveGitnexusState.status}`);
+    warnings.push(`gitnexus tools excluded by extension state: ${effectiveGitnexusState.status}${gitnexusState?.reason ? ` (${gitnexusState.reason})` : ""}`);
   }
   if (!effectivePythonKernelState.includeTools && pythonKernelTools.length > 0) {
-    warnings.push(`python-kernel tools excluded by extension state: ${effectivePythonKernelState.status}`);
+    warnings.push(`python-kernel tools excluded by extension state: ${effectivePythonKernelState.status}${pythonKernelState?.reason ? ` (${pythonKernelState.reason})` : ""}`);
   }
   if ((input2.specialistExclusions?.disabledExtensions ?? []).length > 0) {
     warnings.push(`specialist exclusions: ${(input2.specialistExclusions?.disabledExtensions ?? []).join(", ")}`);
@@ -23718,7 +23718,27 @@ function validateToolCatalogIndex(value) {
 function loadToolCatalogIndex(jsonText) {
   return validateToolCatalogIndex(JSON.parse(jsonText));
 }
-var TierSchema, LayerSchema, ToolTierMapSchema, ToolCatalogSchema, ManifestPolicyTierSchema, ToolCatalogIndexSchema;
+function compareVersionTriples(a, b) {
+  return a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+}
+function resolveCatalogVersionVerdict(installedVersion, baselineVersion) {
+  const installed = CATALOG_VERSION_PATTERN.exec(installedVersion);
+  const baseline = CATALOG_VERSION_PATTERN.exec(baselineVersion);
+  if (!installed || !baseline) {
+    return {
+      compatible: false,
+      reason: `version not comparable: installed ${installedVersion} vs catalog ${baselineVersion}`
+    };
+  }
+  const installedTriple = installed.slice(1).map(Number);
+  const baselineTriple = baseline.slice(1).map(Number);
+  const [installedMajor, installedMinor] = installedTriple;
+  const [baselineMajor, baselineMinor] = baselineTriple;
+  const sameLine = baselineMajor > 0 ? installedMajor === baselineMajor : baselineMinor > 0 ? installedMajor === 0 && installedMinor === baselineMinor : installedMajor === 0 && installedMinor === 0 && installedTriple[2] === baselineTriple[2];
+  const atLeastBaseline = compareVersionTriples(installedTriple, baselineTriple) >= 0;
+  return sameLine && atLeastBaseline ? { compatible: true, reason: `installed ${installedVersion} satisfies catalog ${baselineVersion} (caret-of-baseline)` } : { compatible: false, reason: `installed ${installedVersion} is outside the compatible range for catalog ${baselineVersion}` };
+}
+var TierSchema, LayerSchema, ToolTierMapSchema, ToolCatalogSchema, ManifestPolicyTierSchema, ToolCatalogIndexSchema, CATALOG_VERSION_PATTERN;
 var init_tool_catalog = __esm(() => {
   init_zod();
   TierSchema = enumType(["READ_ONLY", "LOW", "MEDIUM", "HIGH"]);
@@ -23740,6 +23760,7 @@ var init_tool_catalog = __esm(() => {
     default_overrides: recordType(TierSchema, ManifestPolicyTierSchema).optional(),
     catalogs: arrayType(ToolCatalogSchema)
   }).passthrough();
+  CATALOG_VERSION_PATTERN = /^(\d+)\.(\d+)\.(\d+)$/;
 });
 
 // src/pi/session.ts
@@ -23834,12 +23855,15 @@ function resolveGitnexusRuntime(options) {
       extensionState: { enabled: true, health: "loaded_unhealthy", catalogCompatible: false }
     };
   }
-  if (gitnexusCatalog && installedVersion !== gitnexusCatalog.version) {
-    return {
-      packageName,
-      packagePath,
-      extensionState: { enabled: true, health: "loaded_unhealthy", catalogCompatible: false }
-    };
+  if (gitnexusCatalog) {
+    const verdict = resolveCatalogVersionVerdict(installedVersion, gitnexusCatalog.version);
+    if (!verdict.compatible) {
+      return {
+        packageName,
+        packagePath,
+        extensionState: { enabled: true, health: "loaded_unhealthy", catalogCompatible: false, reason: verdict.reason }
+      };
+    }
   }
   return {
     packageName,
@@ -23880,12 +23904,15 @@ function resolvePiExtensionsPythonKernelRuntime(options) {
       extensionState: { enabled: true, health: "loaded_unhealthy", catalogCompatible: false }
     };
   }
-  if (catalog && installedVersion !== catalog.version) {
-    return {
-      packageName,
-      packagePath,
-      extensionState: { enabled: true, health: "loaded_unhealthy", catalogCompatible: false }
-    };
+  if (catalog) {
+    const verdict = resolveCatalogVersionVerdict(installedVersion, catalog.version);
+    if (!verdict.compatible) {
+      return {
+        packageName,
+        packagePath,
+        extensionState: { enabled: true, health: "loaded_unhealthy", catalogCompatible: false, reason: verdict.reason }
+      };
+    }
   }
   return {
     packageName,
@@ -28734,14 +28761,15 @@ function classifyExtensionProbe(catalog, input2) {
       reason: "package missing"
     };
   }
-  if (input2.installedVersion !== catalog.version) {
+  const verdict = resolveCatalogVersionVerdict(input2.installedVersion, catalog.version);
+  if (!verdict.compatible) {
     return {
       name: catalog.catalog,
       package: catalog.package,
       version: catalog.version,
       health: "loaded_unhealthy",
       drift: "catalog_mismatch",
-      reason: `version mismatch: installed ${input2.installedVersion} != catalog ${catalog.version}`
+      reason: verdict.reason
     };
   }
   if (!input2.entrypointExists) {
@@ -91799,6 +91827,7 @@ function toActivationView(snapshot, nowMs = Date.now()) {
     ...snapshot.tokenUsage ? { token_usage: { ...snapshot.tokenUsage } } : {},
     ...snapshot.thinkingLevel ? { thinking_level: snapshot.thinkingLevel } : {},
     ...snapshot.purpose ? { purpose: snapshot.purpose } : {},
+    ...snapshot.toolContractNotes?.length ? { tool_contract_notes: [...snapshot.toolContractNotes] } : {},
     last_activity_at: snapshot.lastActivityAt
   };
 }
@@ -93964,6 +93993,7 @@ class NativeActivationHost {
     };
     const purpose = purposeExcerptFromContract(view.contract);
     const startedAt = this.now();
+    const toolContractNotes = [...new Set([...toolContract.warnings, ...toolContract.downgradeReasons])];
     const snapshot = {
       activationId,
       participantId,
@@ -93987,7 +94017,8 @@ class NativeActivationHost {
       turnCount: 0,
       ...purpose ? { purpose } : {},
       startedAt,
-      lastActivityAt: startedAt
+      lastActivityAt: startedAt,
+      ...toolContractNotes.length > 0 ? { toolContractNotes } : {}
     };
     emit("activation_started", { pi_session_id: session.sessionId });
     const unsubscribe = session.subscribe((event) => this.onSessionEvent(snapshot, event, emit));

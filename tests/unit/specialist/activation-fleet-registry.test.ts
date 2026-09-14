@@ -12,6 +12,9 @@ vi.mock('node:child_process', async (importOriginal) => {
 });
 
 import { NativeActivationHost } from '../../../src/activation/native-host.js';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { testWorkItems } from '../../utils/test-work-items.js';
 import { DispatchRejectedError } from '../../../src/activation/types.js';
 import { nextAttemptId } from '../../../src/activation/registry.js';
@@ -127,12 +130,32 @@ describe('nextAttemptId', () => {
 });
 
 describe('NativeActivationHost — Fleet registry projection', () => {
+  /**
+   * Run with the global module dir pinned to an empty fixture.
+   *
+   * Without this the snapshot's key set depends on which extensions the HOST happens to have
+   * installed: the resolved contract only carries `toolContractNotes` when it has warnings, so
+   * the pinned list below was green on a machine with pi-gitnexus installed and red in CI, which
+   * has none. That is the SPECIALISTS-24 defect class — a test asserting the machine rather than
+   * the code — and it is fixed here by fixing the environment, not by loosening the assertion.
+   */
+  function withEmptyGlobalDir<T>(run: () => Promise<T>): Promise<T> {
+    const dir = mkdtempSync(join(tmpdir(), 'fleet-registry-npm-global-'));
+    const previous = process.env.PI_NPM_GLOBAL_DIR;
+    process.env.PI_NPM_GLOBAL_DIR = dir;
+    return run().finally(() => {
+      if (previous === undefined) delete process.env.PI_NPM_GLOBAL_DIR;
+      else process.env.PI_NPM_GLOBAL_DIR = previous;
+      rmSync(dir, { recursive: true, force: true });
+    });
+  }
+
   it('survives across calls: list() and inspect() reflect the same registry after settle', async () => {
     const host = newHost(fakeSession());
 
-    const handle = await host.start({
+    const handle = await withEmptyGlobalDir(() => host.start({
       specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
-    });
+    }));
     await handle.result;
 
     const projected = host.list();
@@ -144,12 +167,14 @@ describe('NativeActivationHost — Fleet registry projection', () => {
     // list is pinned rather than sampled, so ADDING a field fails here on purpose: a new
     // snapshot field is a change to what every coordinator reads, and it should require a
     // deliberate edit. `requestedModel` arrived that way (unitAI-rrdnt.35) and this caught
-    // it, which is the assertion working. `turnCount` arrived the same way (unitAI-rrdnt.65).
+    // it, which is the assertion working. `turnCount` arrived the same way (unitAI-rrdnt.65),
+    // and `toolContractNotes` arrived with SPECIALISTS-42. The global module dir is pinned above
+    // so this list describes the projection, not the extensions installed on the host.
     const keys = Object.keys(projected[0]).sort();
     expect(keys).toEqual([
       'access', 'activationId', 'attemptId', 'issueId', 'issueRef', 'issueRevision', 'contractHash', 'executionBindingId', 'configuredModel', 'lastActivityAt',
       'modelOverride', 'participantId', 'piSessionId', 'purpose', 'requestedModel', 'resolvedModel',
-      'specialist', 'startedAt', 'state', 'thinkingOverride', 'turnCount', 'workspace',
+      'specialist', 'startedAt', 'state', 'thinkingOverride', 'toolContractNotes', 'turnCount', 'workspace',
     ].sort());
   });
 

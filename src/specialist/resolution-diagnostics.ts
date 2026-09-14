@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 
-import { loadToolCatalogIndex } from './tool-catalog.js';
+import { loadToolCatalogIndex, resolveCatalogVersionVerdict } from './tool-catalog.js';
 import {
   resolveManifestTools,
   type ExtensionState,
@@ -94,14 +94,17 @@ export function classifyExtensionProbe(catalog: CatalogRecord, input: { installe
     };
   }
 
-  if (input.installedVersion !== catalog.version) {
+  // The SAME comparator the runtime gate uses (SPECIALISTS-42). Comparing independently here
+  // is how diagnostics and the gate would come to disagree about a version the gate accepts.
+  const verdict = resolveCatalogVersionVerdict(input.installedVersion, catalog.version);
+  if (!verdict.compatible) {
     return {
       name: catalog.catalog,
       package: catalog.package,
       version: catalog.version,
       health: 'loaded_unhealthy',
       drift: 'catalog_mismatch',
-      reason: `version mismatch: installed ${input.installedVersion} != catalog ${catalog.version}`,
+      reason: verdict.reason,
     };
   }
 

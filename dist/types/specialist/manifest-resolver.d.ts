@@ -23,6 +23,12 @@ export interface ExtensionState {
     health: ExtensionHealth;
     enabled?: boolean;
     catalogCompatible?: boolean;
+    /**
+     * Why this state was reached, when the caller knows (SPECIALISTS-42). A bare `loaded_unhealthy`
+     * is what made a stale catalog pin invisible for months: the reason travels with the state and
+     * reaches both the contract warnings and the dispatch result.
+     */
+    reason?: string;
 }
 export interface EffectiveExtensionState {
     status: EffectiveExtensionStatus;

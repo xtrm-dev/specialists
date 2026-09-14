@@ -28,6 +28,12 @@ export interface ExtensionState {
   health: ExtensionHealth;
   enabled?: boolean;
   catalogCompatible?: boolean;
+  /**
+   * Why this state was reached, when the caller knows (SPECIALISTS-42). A bare `loaded_unhealthy`
+   * is what made a stale catalog pin invisible for months: the reason travels with the state and
+   * reaches both the contract warnings and the dispatch result.
+   */
+  reason?: string;
 }
 
 export interface EffectiveExtensionState {
@@ -178,10 +184,10 @@ export function resolveManifestTools(input: ResolverInput): ResolverResult {
   ]);
 
   if (!effectiveGitnexusState.includeTools && requestedGitnexusTools.length > 0) {
-    warnings.push(`gitnexus tools excluded by extension state: ${effectiveGitnexusState.status}`);
+    warnings.push(`gitnexus tools excluded by extension state: ${effectiveGitnexusState.status}${gitnexusState?.reason ? ` (${gitnexusState.reason})` : ''}`);
   }
   if (!effectivePythonKernelState.includeTools && pythonKernelTools.length > 0) {
-    warnings.push(`python-kernel tools excluded by extension state: ${effectivePythonKernelState.status}`);
+    warnings.push(`python-kernel tools excluded by extension state: ${effectivePythonKernelState.status}${pythonKernelState?.reason ? ` (${pythonKernelState.reason})` : ''}`);
   }
   if ((input.specialistExclusions?.disabledExtensions ?? []).length > 0) {
     warnings.push(`specialist exclusions: ${(input.specialistExclusions?.disabledExtensions ?? []).join(', ')}`);

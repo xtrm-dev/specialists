@@ -42,6 +42,17 @@ describe('resolution diagnostics', () => {
     expect(classifyExtensionProbe(CATALOG, { installedVersion: '0.6.1', entrypointExists: true })).toMatchObject({ health: 'loaded_healthy', drift: 'none' });
   });
 
+  it('agrees with the runtime gate that a version inside the pin line is healthy (SPECIALISTS-42)', async () => {
+    const { classifyExtensionProbe } = await loadDiagnostics();
+    // The classifier used to compare with `!==` independently of the gate, so a patch release
+    // above the pin was reported as drift by diagnostics while the runtime refused it too — two
+    // implementations of one rule that could drift apart. Both now route through one comparator.
+    // CATALOG pins 0.6.1, so 0.6.5 is a later build on the same 0.x line.
+    expect(classifyExtensionProbe(CATALOG, { installedVersion: '0.6.5', entrypointExists: true })).toMatchObject({ health: 'loaded_healthy', drift: 'none' });
+    // ...and a 0.x minor bump is still a break.
+    expect(classifyExtensionProbe(CATALOG, { installedVersion: '0.7.0', entrypointExists: true })).toMatchObject({ health: 'loaded_unhealthy', drift: 'catalog_mismatch' });
+  });
+
   it('formats resolved report with attribution and tools', async () => {
     const { classifyExtensionProbe, formatResolvedConfigReport } = await loadDiagnostics();
     const toolContract: ResolvedToolContract = {
@@ -124,7 +135,7 @@ describe('resolution diagnostics', () => {
         catalogsPath: join(process.cwd(), 'config', 'catalog', 'index.json'),
       });
 
-      expect(report.catalogCompatibility.join(' | ')).toContain(`version mismatch: installed 9.9.9 != catalog ${catalogVersion('gitnexus')}`);
+      expect(report.catalogCompatibility.join(' | ')).toContain(`installed 9.9.9 is outside the compatible range for catalog ${catalogVersion('gitnexus')}`);
       expect(report.toolContract.toolsList).toEqual(['read', 'grep', 'find', 'ls', 'bash', 'edit', 'write']);
       expect(report.toolContract.toolsList).not.toContain('gitnexus_query');
     } finally {
