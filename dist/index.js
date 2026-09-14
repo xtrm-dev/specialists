@@ -93620,7 +93620,16 @@ class NativeActivationHost {
       model_override: request.modelOverride ?? null,
       thinking_override: request.thinkingOverride ?? null
     });
+    let releaseOwnLease = null;
+    const releaseLeaseOnRefusal = () => {
+      if (!releaseOwnLease)
+        return;
+      const release2 = releaseOwnLease;
+      releaseOwnLease = null;
+      release2();
+    };
     const reject = (reason, detail = {}) => {
+      releaseLeaseOnRefusal();
       emit("activation_rejected", { reason, ...detail });
       throw new DispatchRejectedError(reason, {
         specialist: request.specialist,
@@ -93792,6 +93801,17 @@ class NativeActivationHost {
         throw error3;
       }
       emit("lease_acquired", { workspace: workspace.worktreePath });
+      releaseOwnLease = () => {
+        try {
+          release(workspace, activationId);
+          emit("lease_released", { workspace: workspace.worktreePath, reason: "activation_refused" });
+        } catch (error3) {
+          emit("lease_release_failed", {
+            workspace: workspace.worktreePath,
+            note: error3 instanceof Error ? error3.message : String(error3)
+          });
+        }
+      };
     }
     const stepContract = compileStepContract({
       work: { ref: view.ref, title: view.title, contract: view.contract },
@@ -93973,15 +93993,25 @@ class NativeActivationHost {
       const active = new Set(candidate.getActiveToolNames());
       return PROMISED_TOOLS.filter((tool) => !active.has(tool));
     };
-    const createVerifiedSession = async (model) => {
+    const createVerifiedSession = async (model, options2 = {}) => {
       const created = await sdk.createAgentSession({ ...baseSessionOptions, model });
       const missing = missingPromisedTools(created.session);
       if (missing.length > 0) {
         created.session.dispose();
-        return reject("tool_contract_unsatisfied", {
+        const detail = {
           missing,
+          ...autoCreatedRef ? { created_ref: autoCreatedRef } : {},
           note: `the session did not expose ${missing.join(", ")}; the resolved contract promised them, ` + "and a native activation is never launched with a smaller tool surface than its contract declares"
-        });
+        };
+        if (options2.viaFallback) {
+          emit("tool_contract_unsatisfied_on_fallback", { missing, model: model.id ?? null });
+          throw new DispatchRejectedError("tool_contract_unsatisfied", {
+            specialist: request.specialist,
+            issueRef: request.issueRef,
+            ...detail
+          });
+        }
+        return reject("tool_contract_unsatisfied", detail);
       }
       return created.session;
     };
@@ -94005,7 +94035,7 @@ class NativeActivationHost {
         note: error3 instanceof Error ? error3.message : String(error3)
       });
     }
-    const createSessionForModel = createVerifiedSession;
+    const createSessionForModel = (model) => createVerifiedSession(model, { viaFallback: true });
     const purpose = purposeExcerptFromContract(view.contract);
     const startedAt = this.now();
     const toolContractNotes = [...new Set([...toolContract.warnings, ...toolContract.downgradeReasons])];
@@ -94057,6 +94087,7 @@ class NativeActivationHost {
     record5.result = result;
     this.registry.register(record5);
     this.save(snapshot);
+    releaseOwnLease = null;
     return {
       activationId,
       participantId,
@@ -94367,7 +94398,16 @@ class NativeActivationHost {
     });
     let reusedSession = true;
     if (overrideModel && overrideResolved && overrideName) {
-      const nextSession = await record5.createSession(overrideModel);
+      let nextSession;
+      try {
+        nextSession = await record5.createSession(overrideModel);
+      } catch (error3) {
+        record5.snapshot.state = "failed";
+        record5.snapshot.lastActivityAt = this.now();
+        this.save(record5.snapshot);
+        this.releaseIfWriter(record5.snapshot, "tool_contract_unsatisfied_on_retry");
+        throw error3;
+      }
       try {
         record5.session.dispose();
       } catch {}
