@@ -20184,7 +20184,7 @@ function openSubstrateDb(dbPath) {
 }
 var SATISFIED_BLOCKER_STATES = new Set(["done", "archived"]);
 function createWorkItemBoundary(ports) {
-  const { issues, provenance, store, gate } = ports;
+  const { issues, provenance, store, gate, journalService, provenanceService } = ports;
   const viewOf = (ref) => {
     const v = store.get(ref);
     return {
@@ -20314,7 +20314,46 @@ function createWorkItemBoundary(ports) {
     },
     journal(ref, kind, opts = {}) {
       store.addJournal(ref, kind, opts);
-    }
+    },
+    ...journalService || provenanceService ? {
+      appendResult(ref, input) {
+        if (!journalService)
+          throw new Error("settlement unavailable: no journal service on this boundary");
+        const issueId = issues.resolveRef(ref).id;
+        const entry = journalService.appendEntry(issueId, {
+          kind: "result",
+          result: input.result,
+          executionContext: input.executionContext ?? null,
+          refs: input.refs ?? [],
+          participantId: input.participantId,
+          activationId: input.activationId,
+          sessionId: input.sessionId
+        });
+        return { entryId: entry.id, sequence: entry.sequence };
+      },
+      allocateReceipt(bindingId) {
+        if (!provenanceService)
+          throw new Error("settlement unavailable: no provenance service on this boundary");
+        const receipt = provenanceService.allocateReceipt(bindingId);
+        return {
+          id: receipt.id,
+          executionBindingId: receipt.executionBindingId,
+          issueId: receipt.issueId,
+          issueRevision: receipt.issueRevision,
+          contractHash: receipt.contractHash
+        };
+      },
+      attachArtifact(receiptId, kind, value) {
+        if (!provenanceService)
+          throw new Error("settlement unavailable: no provenance service on this boundary");
+        const attached = provenanceService.attachArtifact(receiptId, kind, value);
+        return {
+          receiptId: attached.receiptId ?? receiptId,
+          kind: attached.kind ?? kind,
+          value: attached.value ?? value
+        };
+      }
+    } : {}
   };
 }
 function splitLines(body) {
@@ -20392,7 +20431,9 @@ async function openWorkItemBoundary(opts = {}) {
     gate: {
       check: (i, r) => gateMod.checkDispatch(i, r),
       dispatch: (i, p, r) => gateMod.dispatchToSpecialist(i, p, r)
-    }
+    },
+    journalService: journalSvc,
+    provenanceService: provenance
   });
 }
 var NULL_WORK_ITEMS = {
@@ -21885,7 +21926,248 @@ function nextAttemptId(current) {
 var RESUMABLE_STATES = new Set(["settled", "waiting", "needs_reply", "escalated"]);
 var RETRYABLE_STATES = new Set(["failed"]);
 
+// src/activation/settlement-publication.ts
+var SETTLEMENT_CONTEXT_VERSION = 1;
+var SETTLEMENT_RESULT_VERSION = 1;
+var SUMMARY_MAX = 4000;
+var RESULT_ARRAY_MAX = 100;
+var RESULT_ITEM_MAX = 1000;
+function cleanStr(value) {
+  return typeof value === "string" && value.trim() !== "" ? value : undefined;
+}
+function trunc(text, max) {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+function outputText(output) {
+  if (typeof output === "string")
+    return output;
+  if (output === undefined || output === null)
+    return "";
+  try {
+    return JSON.stringify(output);
+  } catch {
+    return String(output);
+  }
+}
+function buildBoundedResult(opts) {
+  const raw = outputText(opts.output);
+  const summary = raw.trim() !== "" ? trunc(raw, SUMMARY_MAX) : "(specialist settled without output; see validation)";
+  const out = {
+    summary,
+    resultVersion: SETTLEMENT_RESULT_VERSION
+  };
+  if (opts.valid) {
+    out.outcome = "completed";
+  } else {
+    const errors2 = (opts.errors ?? ["validation failed"]).filter((e) => e.trim() !== "");
+    out.outcome = trunc(`completed_with_validation_errors: ${errors2.join("; ")}`, SUMMARY_MAX);
+    out.validation = errors2.slice(0, RESULT_ARRAY_MAX).map((e) => trunc(e, RESULT_ITEM_MAX));
+  }
+  const bounded = (refs) => refs.length > 0 ? refs.slice(0, RESULT_ARRAY_MAX).map((r) => trunc(r, RESULT_ITEM_MAX)) : undefined;
+  const artifactRefs = bounded(opts.artifactRefs);
+  const receiptRefs = bounded(opts.receiptRefs);
+  const provenanceRefs = bounded(opts.provenanceRefs);
+  if (artifactRefs)
+    out.artifactRefs = artifactRefs;
+  if (receiptRefs)
+    out.receiptRefs = receiptRefs;
+  if (provenanceRefs)
+    out.provenanceRefs = provenanceRefs;
+  return out;
+}
+function buildSettlementExecutionContext(opts) {
+  const coordinatorParticipantId = cleanStr(opts.coordinatorParticipantId);
+  const participantId = cleanStr(opts.participantId);
+  const coordinatorLeg = coordinatorParticipantId !== undefined && coordinatorParticipantId !== participantId ? {
+    participantId: coordinatorParticipantId,
+    ...cleanStr(opts.coordinatorSessionId) !== undefined ? { sessionId: cleanStr(opts.coordinatorSessionId) } : {}
+  } : cleanStr(opts.coordinatorSessionId) !== undefined ? { sessionId: cleanStr(opts.coordinatorSessionId) } : undefined;
+  const env = opts.env ?? {};
+  const ctx = { version: SETTLEMENT_CONTEXT_VERSION };
+  ctx.actor = { type: "specialist" };
+  if (participantId !== undefined)
+    ctx.participantId = participantId;
+  const agentSessionId = cleanStr(opts.agentSessionId);
+  if (agentSessionId !== undefined)
+    ctx.host = { type: "pi", sessionId: agentSessionId };
+  const xtrmSessionId = cleanStr(env["XTRM_SESSION_ID"]);
+  const xtrmSessionName = cleanStr(env["XTRM_SESSION_NAME"]);
+  if (xtrmSessionId !== undefined)
+    ctx.xtrmSessionId = xtrmSessionId;
+  if (xtrmSessionName !== undefined)
+    ctx.xtrmSessionName = xtrmSessionName;
+  if (coordinatorLeg !== undefined)
+    ctx.coordinator = coordinatorLeg;
+  const specialist = {};
+  const name = cleanStr(opts.specialistName);
+  const activationId = cleanStr(opts.activationId);
+  const attemptId = cleanStr(opts.attemptId);
+  if (name !== undefined)
+    specialist.name = name;
+  if (activationId !== undefined)
+    specialist.activationId = activationId;
+  if (attemptId !== undefined)
+    specialist.attemptId = attemptId;
+  if (agentSessionId !== undefined)
+    specialist.agentSessionId = agentSessionId;
+  if (Object.keys(specialist).length > 0)
+    ctx.specialist = specialist;
+  const workspace = {};
+  const repoPath = cleanStr(opts.repoPath);
+  const worktree = cleanStr(opts.worktree);
+  const branch = cleanStr(opts.branch);
+  const baseCommit = cleanStr(opts.baseCommit);
+  if (repoPath !== undefined)
+    workspace.repoPath = repoPath;
+  if (worktree !== undefined)
+    workspace.worktree = worktree;
+  if (branch !== undefined)
+    workspace.branch = branch;
+  if (baseCommit !== undefined)
+    workspace.baseCommit = baseCommit;
+  if (Object.keys(workspace).length > 0)
+    ctx.workspace = workspace;
+  ctx.timestamp = opts.now ?? Date.now();
+  return ctx;
+}
+function publishSettlement(opts) {
+  const { boundary, store, subject } = opts;
+  const now = opts.now ?? Date.now();
+  const emit = opts.emit ?? (() => {});
+  const executionContext = buildSettlementExecutionContext({
+    participantId: subject.participantId,
+    specialistName: subject.specialist,
+    activationId: subject.activationId,
+    attemptId: subject.attemptId,
+    agentSessionId: subject.piSessionId,
+    coordinatorParticipantId: opts.coordinator?.participantId,
+    coordinatorSessionId: opts.coordinator?.sessionId,
+    repoPath: subject.repositoryRoot,
+    worktree: subject.worktreePath,
+    branch: subject.branch,
+    baseCommit: subject.bindingBaseCommit,
+    env: opts.env,
+    now
+  });
+  const record2 = {
+    activationId: subject.activationId,
+    attemptId: subject.attemptId,
+    specialist: subject.specialist,
+    issueRef: subject.issueRef,
+    issueRevision: subject.issueRevision,
+    contractHash: subject.contractHash,
+    executionBindingId: subject.executionBindingId,
+    status: opts.status,
+    output: opts.output,
+    validation: opts.validation,
+    completedAt: now
+  };
+  let storedRef;
+  try {
+    storedRef = store.save(record2);
+  } catch (error) {
+    const note = error instanceof Error ? error.message : String(error);
+    emit("settlement_store_failed", { note });
+    return { storedRef: "", degraded: `result storage unavailable: ${note}` };
+  }
+  emit("settlement_stored", { ref: storedRef, status: opts.status });
+  if (opts.status !== "completed")
+    return { storedRef };
+  if (!boundary.allocateReceipt || !boundary.appendResult) {
+    emit("settlement_degraded", { note: "work boundary carries no settlement surface; result stored only" });
+    return { storedRef, degraded: "boundary without settlement surface" };
+  }
+  try {
+    const receipt = boundary.allocateReceipt(subject.executionBindingId);
+    emit("settlement_receipt_allocated", { receipt: receipt.id });
+    let artifactValue = storedRef;
+    try {
+      if (boundary.attachArtifact) {
+        const attached = boundary.attachArtifact(receipt.id, "artifact", storedRef);
+        artifactValue = attached.value;
+        emit("settlement_artifact_attached", { receipt: receipt.id, kind: "artifact" });
+      }
+    } catch (error) {
+      emit("settlement_degraded", {
+        note: `artifact attach failed: ${error instanceof Error ? error.message : String(error)}`
+      });
+    }
+    const result = buildBoundedResult({
+      output: opts.output,
+      valid: opts.validation.valid,
+      errors: opts.validation.errors,
+      artifactRefs: [artifactValue],
+      receiptRefs: [receipt.id],
+      provenanceRefs: [subject.executionBindingId, receipt.id]
+    });
+    const entry = boundary.appendResult(subject.issueRef, {
+      result,
+      executionContext,
+      refs: [
+        { kind: "artifact", key: artifactValue },
+        { kind: "receipt", key: receipt.id }
+      ],
+      participantId: subject.participantId,
+      activationId: subject.activationId,
+      sessionId: subject.piSessionId
+    });
+    emit("settlement_result_published", { entry: entry.entryId, receipt: receipt.id });
+    try {
+      store.save({ ...record2, receiptId: receipt.id, journalEntryId: entry.entryId, artifactRef: artifactValue });
+    } catch {}
+    return { storedRef, receiptId: receipt.id, artifactValue, journalEntryId: entry.entryId };
+  } catch (error) {
+    const note = error instanceof Error ? error.message : String(error);
+    emit("settlement_degraded", { note });
+    return { storedRef, degraded: note };
+  }
+}
+
+// src/activation/settlement-store.ts
+import { mkdirSync as mkdirSync7, readFileSync as readFileSync12, readdirSync as readdirSync4, writeFileSync as writeFileSync6 } from "node:fs";
+import { join as join19 } from "node:path";
+function safeSegment(id) {
+  const safe = id.replace(/[^A-Za-z0-9.:_-]/g, "_");
+  if (!safe || safe === "." || safe === "..")
+    throw new Error(`unusable settlement id: ${id}`);
+  return safe;
+}
+function createFileSettlementStore(root) {
+  const pathFor = (activationId, attemptId) => join19(root, safeSegment(activationId), `${safeSegment(attemptId)}.json`);
+  return {
+    save(record2) {
+      const path = pathFor(record2.activationId, record2.attemptId);
+      mkdirSync7(join19(root, safeSegment(record2.activationId)), { recursive: true });
+      writeFileSync6(path, JSON.stringify(record2), "utf8");
+      return `${safeSegment(record2.activationId)}/${safeSegment(record2.attemptId)}.json`;
+    },
+    get(activationId, attemptId) {
+      try {
+        return JSON.parse(readFileSync12(pathFor(activationId, attemptId), "utf8"));
+      } catch {
+        return;
+      }
+    },
+    listAttempts(activationId) {
+      let files;
+      try {
+        files = readdirSync4(join19(root, safeSegment(activationId)));
+      } catch {
+        return [];
+      }
+      const out = [];
+      for (const file of files.filter((f) => f.endsWith(".json")).sort()) {
+        try {
+          out.push(JSON.parse(readFileSync12(join19(root, safeSegment(activationId), file), "utf8")));
+        } catch {}
+      }
+      return out;
+    }
+  };
+}
+
 // src/activation/native-host.ts
+import { join as join20 } from "node:path";
 var TOKEN_USAGE_KEYS = [
   "input_tokens",
   "output_tokens",
@@ -21948,6 +22230,8 @@ class NativeActivationHost {
   cwd;
   now;
   authority;
+  settlements;
+  env;
   registry = new FleetRegistry;
   lastUsageSeen = new WeakMap;
   interactions;
@@ -21960,6 +22244,8 @@ class NativeActivationHost {
     this.loadSdk = deps.loadSdk ?? loadPiSdk;
     this.now = deps.now ?? (() => Date.now());
     this.authority = deps.authority ?? NULL_AUTHORITY_WRITER;
+    this.settlements = deps.settlements ?? createFileSettlementStore(join20(this.cwd, ".specialists", "settlements"));
+    this.env = deps.env ?? process.env;
   }
   async start(request) {
     const activationId = `act:${randomUUID3().slice(0, 12)}`;
@@ -22442,7 +22728,13 @@ class NativeActivationHost {
       result: undefined,
       stepContract,
       initialPrompt: rendered.initial_prompt,
-      createSession: createSessionForModel
+      createSession: createSessionForModel,
+      lineage: {
+        ...request.requestedByParticipantId ? { coordinatorParticipantId: request.requestedByParticipantId } : {},
+        ...request.coordinatorSessionId ? { coordinatorSessionId: request.coordinatorSessionId } : {}
+      },
+      workItems,
+      ...typeof binding.baseCommit === "string" && binding.baseCommit.trim() !== "" ? { bindingBaseCommit: binding.baseCommit } : {}
     };
     const result = this.runWithFallback(record2, {
       modelChain,
@@ -22535,7 +22827,7 @@ class NativeActivationHost {
         break;
     }
   }
-  async runToSettled(snapshot, session, initialPrompt, emit) {
+  async runToSettled(snapshot, session, initialPrompt, emit, record2) {
     try {
       await session.prompt(initialPrompt);
       await session.waitForIdle();
@@ -22545,7 +22837,7 @@ class NativeActivationHost {
         snapshot.state = "failed";
         this.save(snapshot);
         emit("activation_failed", { error: detail, stop_reason: last.stopReason });
-        return {
+        const failedResult = {
           activationId: snapshot.activationId,
           participantId: snapshot.participantId,
           attemptId: snapshot.attemptId,
@@ -22567,6 +22859,8 @@ class NativeActivationHost {
           fallbackUsed: false,
           completedAt: this.now()
         };
+        this.publishTerminalSettlement(snapshot, failedResult, record2, emit);
+        return failedResult;
       }
       const output = textOf(last);
       emit("activation_settled");
@@ -22581,7 +22875,7 @@ class NativeActivationHost {
       this.save(snapshot);
       emit("activation_completed", { pi_session_id: session.sessionId, output });
       this.releaseIfWriter(snapshot, "completed");
-      return {
+      const completedResult = {
         activationId: snapshot.activationId,
         participantId: snapshot.participantId,
         attemptId: snapshot.attemptId,
@@ -22603,13 +22897,15 @@ class NativeActivationHost {
         fallbackUsed: false,
         completedAt: this.now()
       };
+      this.publishTerminalSettlement(snapshot, completedResult, record2, emit);
+      return completedResult;
     } catch (error) {
       snapshot.state = "failed";
       this.save(snapshot);
       const message = error instanceof Error ? error.message : String(error);
       emit("activation_failed", { error: message });
       this.releaseIfWriter(snapshot, "failed");
-      return {
+      const thrownResult = {
         activationId: snapshot.activationId,
         participantId: snapshot.participantId,
         attemptId: snapshot.attemptId,
@@ -22631,12 +22927,48 @@ class NativeActivationHost {
         fallbackUsed: false,
         completedAt: this.now()
       };
+      this.publishTerminalSettlement(snapshot, thrownResult, record2, emit);
+      return thrownResult;
     }
+  }
+  publishTerminalSettlement(snapshot, result, record2, emit) {
+    try {
+      const subject = {
+        activationId: snapshot.activationId,
+        participantId: snapshot.participantId,
+        attemptId: snapshot.attemptId,
+        specialist: snapshot.specialist,
+        issueRef: snapshot.issueRef,
+        issueRevision: snapshot.issueRevision,
+        contractHash: snapshot.contractHash,
+        executionBindingId: snapshot.executionBindingId,
+        ...snapshot.piSessionId ? { piSessionId: snapshot.piSessionId } : {},
+        repositoryRoot: snapshot.workspace.repositoryRoot,
+        worktreePath: snapshot.workspace.worktreePath,
+        ...snapshot.workspace.branch ? { branch: snapshot.workspace.branch } : {},
+        ...record2.bindingBaseCommit ? { bindingBaseCommit: record2.bindingBaseCommit } : {}
+      };
+      publishSettlement({
+        boundary: record2.workItems,
+        store: this.settlements,
+        subject,
+        status: result.status === "completed" ? "completed" : "failed",
+        output: result.output,
+        validation: result.validation,
+        coordinator: {
+          ...record2.lineage.coordinatorParticipantId ? { participantId: record2.lineage.coordinatorParticipantId } : {},
+          ...record2.lineage.coordinatorSessionId ? { sessionId: record2.lineage.coordinatorSessionId } : {}
+        },
+        env: this.env,
+        now: this.now(),
+        emit
+      });
+    } catch {}
   }
   async runWithFallback(record2, ctx) {
     let index = ctx.modelIndex;
     let fallbackUsed = index > 0;
-    let result = await this.runToSettled(record2.snapshot, record2.session, ctx.initialPrompt, ctx.emit);
+    let result = await this.runToSettled(record2.snapshot, record2.session, ctx.initialPrompt, ctx.emit, record2);
     while (result.status === "failed" && index < ctx.modelChain.length - 1) {
       if (this.registry.get(record2.snapshot.activationId) !== record2)
         break;
@@ -22726,7 +23058,7 @@ class NativeActivationHost {
       ctx.emit("activation_started", { pi_session_id: nextSession.sessionId });
       index += 1;
       fallbackUsed = true;
-      result = await this.runToSettled(record2.snapshot, record2.session, ctx.initialPrompt, ctx.emit);
+      result = await this.runToSettled(record2.snapshot, record2.session, ctx.initialPrompt, ctx.emit, record2);
     }
     result.fallbackUsed = fallbackUsed;
     return result;
@@ -22829,7 +23161,7 @@ class NativeActivationHost {
       model_override: record2.snapshot.modelOverride,
       reused_session: reusedSession
     });
-    const result = this.runToSettled(record2.snapshot, record2.session, opts?.prompt ?? record2.initialPrompt, emit);
+    const result = this.runToSettled(record2.snapshot, record2.session, opts?.prompt ?? record2.initialPrompt, emit, record2);
     record2.result = result;
     return {
       activationId,
@@ -23046,7 +23378,7 @@ class NativeActivationHost {
     });
     record2.unsubscribe();
     record2.unsubscribe = record2.session.subscribe((event) => this.onSessionEvent(record2.snapshot, event, emit));
-    const result = this.runToSettled(record2.snapshot, record2.session, prompt, emit);
+    const result = this.runToSettled(record2.snapshot, record2.session, prompt, emit, record2);
     record2.result = result;
     return {
       activationId,
@@ -23135,11 +23467,11 @@ import { fileURLToPath as fileURLToPath5 } from "node:url";
 
 // src/activation/build-identity.ts
 import { createHash as createHash6 } from "node:crypto";
-import { readFileSync as readFileSync12 } from "node:fs";
+import { readFileSync as readFileSync13 } from "node:fs";
 var BUILD_ID_BYTES = 12;
 var UNKNOWN_BUILD_ID = "unknown";
 function hashFileBytes(path) {
-  return createHash6("sha256").update(readFileSync12(path)).digest("hex");
+  return createHash6("sha256").update(readFileSync13(path)).digest("hex");
 }
 function shortBuildId(hash) {
   return hash.slice(0, BUILD_ID_BYTES);
@@ -23897,7 +24229,7 @@ async function verifyExactLineCitation(evidence, claim) {
   };
 }
 // src/activation/workspace-reconcile.ts
-import { join as join19 } from "node:path";
+import { join as join21 } from "node:path";
 var PERMITTED = {
   holder_process_gone: new Set(["safe_free", "superseded", "manual_attention_required"]),
   holder_start_mismatch: new Set(["safe_free", "superseded", "manual_attention_required"]),
@@ -23909,7 +24241,7 @@ function leaseScopeFor(cwd) {
   return {
     repositoryRoot: commonRoot ?? cwd,
     worktreePath: cwd,
-    gitCommonDir: commonRoot ? join19(commonRoot, ".git") : undefined
+    gitCommonDir: commonRoot ? join21(commonRoot, ".git") : undefined
   };
 }
 export {

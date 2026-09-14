@@ -96,6 +96,54 @@ export interface CheckResult {
     report: unknown;
 }
 /**
+ * S1 settlement input: the bounded Journal `result` publication (ADR §39).
+ *
+ * Field-for-field the Substrate ResultPayload shape plus the shared X1
+envelope, mirrored structurally so this module keeps no static dependency on
+ * producer code. Substrate validates every field fail-closed on write; an
+ * oversized summary is rejected there, which is why the host bounds BEFORE
+ * calling (see settlement-publication.ts).
+ */
+export interface SettlementResultInput {
+    result: {
+        summary: string;
+        resultVersion?: number;
+        attempted?: string;
+        outcome?: string;
+        completed?: string[];
+        validation?: string[];
+        findings?: string[];
+        artifactRefs?: string[];
+        receiptRefs?: string[];
+        provenanceRefs?: string[];
+    };
+    executionContext?: unknown;
+    refs?: Array<{
+        kind: string;
+        key: string;
+        value?: unknown;
+    }>;
+    participantId?: string;
+    activationId?: string;
+    sessionId?: string;
+}
+/** Structural projection of the producer's WorkReceipt — the fields the host pins. */
+export interface WorkReceiptView {
+    id: string;
+    executionBindingId: string;
+    issueId: string;
+    issueRevision: number;
+    contractHash: string;
+    [key: string]: unknown;
+}
+/** Structural projection of one producer artifact binding. */
+export interface SettlementArtifactView {
+    receiptId: string;
+    kind: string;
+    value: string;
+    [key: string]: unknown;
+}
+/**
  * The consumer-side work boundary (ADR §8-§12).
  *
  * `check` is the fail-closed read-only gate (draft/unready/blocked/terminal/
@@ -127,6 +175,21 @@ export interface SpecialistWorkItemBoundary {
         participantId?: string;
         activationId?: string;
     }): void;
+    /**
+     * S1 settlement surface (ADR §§38–39). Optional so existing fakes keep
+     * compiling; the host degrades to store-only publication when absent.
+     * `appendResult` writes the bounded Journal `result` with the X1 envelope;
+     * `allocateReceipt` mints the WorkReceipt over a live ExecutionBinding
+     * (revision/hash copied host-side, never from model output); `attachArtifact`
+     * links a non-commit artifact (the runtime result ref) to the receipt.
+     * Commits are never attached here — zero-commit results publish identically.
+     */
+    appendResult?(ref: string, input: SettlementResultInput): {
+        entryId: string;
+        sequence: number;
+    };
+    allocateReceipt?(bindingId: string): WorkReceiptView;
+    attachArtifact?(receiptId: string, kind: string, value: string): SettlementArtifactView;
 }
 /** Structural view of the producer's active claim — the only claim fields the seam reads. */
 export interface ActiveClaimView {
@@ -215,12 +278,53 @@ export interface DispatchGatePort {
         binding: ExecutionBindingView;
     };
 }
+/** Structural port over the producer's journal service (S1 result publication). */
+export interface JournalServicePort {
+    appendEntry(issueId: string, input: {
+        kind: string;
+        result?: unknown;
+        executionContext?: unknown;
+        refs?: Array<{
+            kind: string;
+            key: string;
+            value?: unknown;
+        }>;
+        participantId?: string;
+        activationId?: string;
+        sessionId?: string;
+    }): {
+        id: string;
+        sequence: number;
+    };
+}
+/** Structural port over the producer's provenance service (S1 receipt publication). */
+export interface ProvenanceServicePort {
+    allocateReceipt(bindingId: string): {
+        id: string;
+        executionBindingId: string;
+        issueId: string;
+        issueRevision: number;
+        contractHash: string;
+    };
+    attachArtifact(receiptId: string, kind: string, value: string): {
+        receiptId?: string;
+        kind?: string;
+        value?: string;
+    };
+}
 /** The injected ports `createWorkItemBoundary` programs against. */
 export interface WorkItemPorts {
     issues: IssueServicePort;
     provenance: unknown;
     store: IssueStorePort;
     gate: DispatchGatePort;
+    /**
+     * S1 settlement services. Optional so the private integration job can wire
+     * them independently of the dispatch ports; absent means the boundary
+     * carries no settlement surface and the host stores results only.
+     */
+    journalService?: JournalServicePort;
+    provenanceService?: ProvenanceServicePort;
 }
 /**
  * Build the consumer boundary over injected producer ports.

@@ -33,6 +33,23 @@ export interface ActivationRecord {
    * tools are shared by construction — they key off the live attempt id, not the session.
    */
   createSession: (model: { id?: string; provider?: string }) => Promise<PiAgentSessionLike>;
+  /**
+   * S1 coordinator lineage for automatic settlement publication (ADR §37).
+   * Captured once at dispatch from the request; every attempt publishes with
+   * the same coordinator pair under its own attempt id, so retry/resume legs
+   * stay coherent under one activation.
+   */
+  lineage: { coordinatorParticipantId?: string; coordinatorSessionId?: string };
+  /**
+   * The resolved work boundary for this activation, carried so terminal
+   * settlement publication needs no second resolution (S1).
+   */
+  workItems: import('./workitem-store.js').SpecialistWorkItemBoundary;
+  /**
+   * Base commit pinned on the ExecutionBinding row when the producer exposes
+   * it. Absent means unknown (§98) — never derived here.
+   */
+  bindingBaseCommit?: string;
 }
 
 export class FleetRegistry {
