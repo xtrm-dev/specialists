@@ -59406,7 +59406,7 @@ function checkChannels() {
   ok3("all locally-observable gates pass");
   return true;
 }
-function checkCatalogs() {
+function checkCatalogs(options2 = {}) {
   section3("Extension catalogs");
   let entries;
   try {
@@ -59429,6 +59429,7 @@ function checkCatalogs() {
     return true;
   }
   let failed = false;
+  let absentRequired = false;
   for (const entry of entries) {
     if (entry.level === "out_of_range") {
       console.log(`  ${red7("\u2717")} ${entry.catalog}: ${entry.detail}`);
@@ -59441,15 +59442,26 @@ function checkCatalogs() {
       continue;
     }
     if (entry.level === "absent") {
+      if (options2.requireInstalled) {
+        console.log(`  ${red7("\u2717")} ${entry.catalog}: ${entry.detail}`);
+        fix(`install ${entry.package} where the runtime resolves global packages (PI_NPM_GLOBAL_DIR or the npm global root)`);
+        absentRequired = true;
+        continue;
+      }
       console.log(`  ${dim14("?")} ${entry.catalog}: ${entry.detail}`);
       continue;
     }
     console.log(`  ${green14("\u2713")} ${entry.catalog}: ${entry.detail}`);
   }
+  if (absentRequired) {
+    fail9("--require-installed: a catalog was not found where the runtime resolves installed extensions");
+  }
   if (failed) {
     fail9("a catalog pin is outside the installed version's compatibility line");
     return false;
   }
+  if (absentRequired)
+    return false;
   ok3("every installed extension is inside its catalog pin");
   return true;
 }
@@ -59670,7 +59682,7 @@ function checkClaudeMdFragments() {
   return allOk;
 }
 function parseDoctorArgs(argv) {
-  const opts = { json: false, drift: false, specialists: false, pr_drift: false, reap_dead_jobs: false, dry_run: false, channels: false };
+  const opts = { json: false, drift: false, specialists: false, pr_drift: false, reap_dead_jobs: false, dry_run: false, channels: false, catalogs: false, require_installed: false };
   for (let i = 0;i < argv.length; i += 1) {
     const token = argv[i];
     if (token === "--json") {
@@ -59697,6 +59709,14 @@ function parseDoctorArgs(argv) {
       opts.channels = true;
       continue;
     }
+    if (token === "--catalogs" || token === "--check-catalogs") {
+      opts.catalogs = true;
+      continue;
+    }
+    if (token === "--require-installed") {
+      opts.require_installed = true;
+      continue;
+    }
     if (token === "--dry-run") {
       opts.dry_run = true;
       continue;
@@ -59712,6 +59732,9 @@ function parseDoctorArgs(argv) {
     if (token === "--help" || token === "-h")
       continue;
     throw new Error(`Unknown argument: ${token}`);
+  }
+  if (opts.require_installed && !opts.catalogs) {
+    throw new Error("--require-installed only applies to --catalogs");
   }
   return opts;
 }
@@ -60182,6 +60205,15 @@ ${bold12("specialists doctor --specialists")}
   }
   if (opts.reap_dead_jobs) {
     await runDoctorReapDeadJobs(opts);
+    return;
+  }
+  if (opts.catalogs) {
+    console.log(`
+${bold12("specialists doctor --catalogs")}
+`);
+    const catalogsOk2 = checkCatalogs({ requireInstalled: opts.require_installed });
+    console.log("");
+    process.exitCode = catalogsOk2 ? 0 : 1;
     return;
   }
   if (opts.channels) {
