@@ -1365,6 +1365,15 @@ export class NativeActivationHost {
       this.save(snapshot);
       const message = error instanceof Error ? error.message : String(error);
       emit('activation_failed', { error: message });
+      // SPECIALISTS-51: a rejected prompt is not always a settled one. pi emits agent_settled from a
+      // finally around its agent loop, so a turn that fails by THROWING still settles and the settle
+      // handler releases — but the paths outside that finally (the prompt() preflight and its
+      // activeRun guard) reject without ever emitting it. On those the activation went terminal
+      // holding the lease, held by this long-lived process, and every later writer was refused.
+      // Idempotent by construction: release() returns early for a free workspace, and
+      // releaseIfWriter turns an uncertain or not-held release into evidence rather than stealing.
+      // One seam for all four acquire sites, since each of them ends here.
+      this.releaseIfWriter(snapshot, 'failed');
 
       return {
         activationId: snapshot.activationId,

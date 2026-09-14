@@ -22597,6 +22597,7 @@ class NativeActivationHost {
       this.save(snapshot);
       const message = error instanceof Error ? error.message : String(error);
       emit("activation_failed", { error: message });
+      this.releaseIfWriter(snapshot, "failed");
       return {
         activationId: snapshot.activationId,
         participantId: snapshot.participantId,
