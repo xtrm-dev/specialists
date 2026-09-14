@@ -152,4 +152,35 @@ export interface CatalogVersionVerdict {
     reason: string;
 }
 export declare function resolveCatalogVersionVerdict(installedVersion: string, baselineVersion: string): CatalogVersionVerdict;
+export type CatalogCompatibilityLevel = 'ok' | 'ahead' | 'out_of_range' | 'absent';
+export interface CatalogCompatibilityEntry {
+    catalog: string;
+    package: string;
+    baseline: string;
+    installed?: string;
+    level: CatalogCompatibilityLevel;
+    detail: string;
+}
+/**
+ * Report every catalog pin against the extension actually installed (SPECIALISTS-42 (d)).
+ *
+ * `ahead` is the case the runtime gate deliberately accepts and therefore never mentions: an
+ * install inside the pin's line but newer than the baseline. That is not a failure — the gate is
+ * right to accept it — but it is the only signal that the baseline has stopped being the build the
+ * tool surface was verified against, and it is what lets the pin be bumped BEFORE a minor release
+ * turns the same drift into a closed gate. Without it, relaxing identity to a range would trade a
+ * loud failure at every patch boundary for a silent drift toward a loud failure at the next minor
+ * one.
+ *
+ * Pure: the caller supplies installed versions, so this reports a machine's state without being
+ * tied to one, and can be tested without an install.
+ */
+export declare function describeCatalogCompatibility(input: {
+    catalogs: ReadonlyArray<{
+        catalog: string;
+        package?: string;
+        version: string;
+    }>;
+    resolveInstalledVersion: (packageName: string) => string | undefined;
+}): CatalogCompatibilityEntry[];
 //# sourceMappingURL=tool-catalog.d.ts.map

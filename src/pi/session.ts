@@ -201,7 +201,13 @@ function toRuntimeToolCatalogs(catalogIndex: ToolCatalogIndex): readonly ToolCat
   }));
 }
 
-function loadSharedToolCatalogIndex(cwd: string): ToolCatalogIndex {
+/**
+ * Exported so the doctor reports the SAME catalog the runtime resolves (SPECIALISTS-42 (d)).
+ * A second resolution rule is how two resolvers came to disagree about the store path before
+ * (SPECIALISTS-3); a doctor that inspects a different catalog than the runtime loads would be
+ * the same defect wearing a diagnostic hat.
+ */
+export function loadSharedToolCatalogIndex(cwd: string): ToolCatalogIndex {
   const overridePath = resolve(cwd, '.specialists', 'catalog', 'index.json');
   let overrideExists = false;
   try {
@@ -238,7 +244,14 @@ function loadSharedToolCatalogIndex(cwd: string): ToolCatalogIndex {
   }
 }
 
-function readPackageVersion(packageJsonPath: string): string | undefined {
+/**
+ * The runtime's own package.json version read, exported so the doctor reports the SAME installed
+ * version the gate compares (SPECIALISTS-42 (d) review). A second inline lookup in doctor.ts was
+ * identical today, but identical-today is how two resolvers come to disagree tomorrow — the
+ * doctor would then describe a version the gate never saw, which is the defect this issue is
+ * about wearing a diagnostic hat.
+ */
+export function readPackageVersion(packageJsonPath: string): string | undefined {
   try {
     const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf8')) as { version?: string };
     return typeof pkg.version === 'string' ? pkg.version : undefined;

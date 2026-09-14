@@ -23738,6 +23738,31 @@ function resolveCatalogVersionVerdict(installedVersion, baselineVersion) {
   const atLeastBaseline = compareVersionTriples(installedTriple, baselineTriple) >= 0;
   return sameLine && atLeastBaseline ? { compatible: true, reason: `installed ${installedVersion} satisfies catalog ${baselineVersion} (caret-of-baseline)` } : { compatible: false, reason: `installed ${installedVersion} is outside the compatible range for catalog ${baselineVersion}` };
 }
+function describeCatalogCompatibility(input2) {
+  return input2.catalogs.filter((catalog) => catalog.catalog !== "native").map((catalog) => {
+    const packageName = catalog.package ?? catalog.catalog;
+    const installed = input2.resolveInstalledVersion(packageName);
+    const base = {
+      catalog: catalog.catalog,
+      package: packageName,
+      baseline: catalog.version,
+      ...installed ? { installed } : {}
+    };
+    if (!installed) {
+      return { ...base, level: "absent", detail: `${packageName} is not installed; nothing to verify` };
+    }
+    const verdict = resolveCatalogVersionVerdict(installed, catalog.version);
+    if (!verdict.compatible) {
+      return { ...base, level: "out_of_range", detail: verdict.reason };
+    }
+    const ahead = compareVersionTriples(installed.split(".").map(Number), catalog.version.split(".").map(Number)) > 0;
+    return ahead ? {
+      ...base,
+      level: "ahead",
+      detail: `installed ${installed} is ahead of baseline ${catalog.version} (compatible) \u2014 ` + "bump the catalog pin before the next minor release, while it is still cheap"
+    } : { ...base, level: "ok", detail: `installed ${installed} matches the baseline` };
+  });
+}
 var TierSchema, LayerSchema, ToolTierMapSchema, ToolCatalogSchema, ManifestPolicyTierSchema, ToolCatalogIndexSchema, CATALOG_VERSION_PATTERN;
 var init_tool_catalog = __esm(() => {
   init_zod();
@@ -59381,6 +59406,53 @@ function checkChannels() {
   ok3("all locally-observable gates pass");
   return true;
 }
+function checkCatalogs() {
+  section3("Extension catalogs");
+  let entries;
+  try {
+    const index = loadSharedToolCatalogIndex(process.cwd());
+    const globalDir = resolveGlobalNodeModulesDir2();
+    entries = describeCatalogCompatibility({
+      catalogs: index.catalogs,
+      resolveInstalledVersion: (packageName) => {
+        if (!globalDir)
+          return;
+        return readPackageVersion(join47(globalDir, packageName, "package.json"));
+      }
+    });
+  } catch (error) {
+    warn3(`could not read the tool catalog: ${error instanceof Error ? error.message : String(error)}`);
+    return false;
+  }
+  if (entries.length === 0) {
+    hint("no extension catalogs declared");
+    return true;
+  }
+  let failed = false;
+  for (const entry of entries) {
+    if (entry.level === "out_of_range") {
+      console.log(`  ${red7("\u2717")} ${entry.catalog}: ${entry.detail}`);
+      fix(`bump config/catalog/index.json (${entry.catalog}) or install a version inside the line`);
+      failed = true;
+      continue;
+    }
+    if (entry.level === "ahead") {
+      console.log(`  ${dim14("\xB7")} ${entry.catalog}: ${entry.detail}`);
+      continue;
+    }
+    if (entry.level === "absent") {
+      console.log(`  ${dim14("?")} ${entry.catalog}: ${entry.detail}`);
+      continue;
+    }
+    console.log(`  ${green14("\u2713")} ${entry.catalog}: ${entry.detail}`);
+  }
+  if (failed) {
+    fail9("a catalog pin is outside the installed version's compatibility line");
+    return false;
+  }
+  ok3("every installed extension is inside its catalog pin");
+  return true;
+}
 function checkVersion() {
   section3("Version check");
   const result = getVersionCheckResult();
@@ -60132,6 +60204,7 @@ ${bold12("specialists doctor")}
   const spOk = checkSpAlias();
   const bdOk = checkBd();
   const xtOk = checkXt();
+  const catalogsOk = checkCatalogs();
   const versionOk = checkVersion();
   const skillDriftOk = checkSkillDrift();
   const userOverlayOk = checkUserOverlayDrift();
@@ -60139,7 +60212,7 @@ ${bold12("specialists doctor")}
   const jobsOk = checkZombieJobs();
   const fragmentsOk = checkClaudeMdFragments();
   const overridesOk = await checkSpecialistOverrides();
-  const allOk = piOk && spOk && bdOk && xtOk && versionOk && skillDriftOk && userOverlayOk && dirsOk && jobsOk && fragmentsOk && overridesOk;
+  const allOk = piOk && spOk && bdOk && xtOk && catalogsOk && versionOk && skillDriftOk && userOverlayOk && dirsOk && jobsOk && fragmentsOk && overridesOk;
   console.log("");
   if (allOk) {
     console.log(`  ${green14("\u2713")} ${bold12("All checks passed")}  \u2014 specialists is healthy`);
@@ -60159,6 +60232,8 @@ var init_doctor = __esm(() => {
   init_loader();
   init_global_config();
   init_channel_doctor();
+  init_tool_catalog();
+  init_session();
   init_version_check();
   CWD = process.cwd();
   SPECIALISTS_DIR = join47(CWD, ".specialists");

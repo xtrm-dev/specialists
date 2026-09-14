@@ -48,7 +48,13 @@ describe('tool catalog foundation', () => {
     const index = await readCatalog('config/catalog/index.json');
     const gitnexus = index.catalogs.find(c => c.catalog === 'gitnexus');
     expect(gitnexus?.package).toBe('pi-gitnexus');
-    expect(gitnexus?.version).toBe('0.6.4');
+    // The pin is a compatibility BASELINE, not a fixture value (SPECIALISTS-42). Asserting the
+    // literal '0.6.1' here is what locked in a pin that three releases outgrew, and asserting
+    // '0.6.4' would do the same to the next stale value. So this asserts the shape and the
+    // content the entry is responsible for, not the number: a parseable version, and the tool
+    // surface the READ_ONLY tier claims to provide.
+    expect(gitnexus?.version).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(gitnexus?.source_tiers?.READ_ONLY).toContain('gitnexus_query');
     expect(gitnexus?.source_tiers).toEqual(EXPECTED_GITNEXUS);
   });
 });
