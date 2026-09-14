@@ -178,8 +178,14 @@ function checkChannels(): boolean {
  * runtime refuses that extension and every tool it contributes disappears. An install ahead of
  * the baseline is reported as information, not a fault: the gate accepts it, so nothing else in
  * the system would ever mention that the baseline is no longer what was verified.
+ *
+ * `requireInstalled` exists for the scheduled CI job (SPECIALISTS-47). That job installs the
+ * extensions on purpose, so an `absent` catalog there means the install went somewhere the runtime
+ * does not look (`resolveGlobalNodeModulesDir`), and the section would otherwise pass while having
+ * verified nothing, which is the silent pass the job exists to remove. Interactive doctor runs keep
+ * treating `absent` as information: a machine without an extension is not broken.
  */
-function checkCatalogs(): boolean {
+function checkCatalogs(options: { requireInstalled?: boolean } = {}): boolean {
   section('Extension catalogs');
   let entries: ReturnType<typeof describeCatalogCompatibility>;
   try {
@@ -205,6 +211,7 @@ function checkCatalogs(): boolean {
   }
 
   let failed = false;
+  let absentRequired = false;
   for (const entry of entries) {
     if (entry.level === 'out_of_range') {
       console.log(`  ${red('✗')} ${entry.catalog}: ${entry.detail}`);
@@ -219,16 +226,26 @@ function checkCatalogs(): boolean {
       continue;
     }
     if (entry.level === 'absent') {
+      if (options.requireInstalled) {
+        console.log(`  ${red('✗')} ${entry.catalog}: ${entry.detail}`);
+        fix(`install ${entry.package} where the runtime resolves global packages (PI_NPM_GLOBAL_DIR or the npm global root)`);
+        absentRequired = true;
+        continue;
+      }
       console.log(`  ${dim('?')} ${entry.catalog}: ${entry.detail}`);
       continue;
     }
     console.log(`  ${green('✓')} ${entry.catalog}: ${entry.detail}`);
   }
 
+  if (absentRequired) {
+    fail('--require-installed: a catalog was not found where the runtime resolves installed extensions');
+  }
   if (failed) {
     fail('a catalog pin is outside the installed version\'s compatibility line');
     return false;
   }
+  if (absentRequired) return false;
   ok('every installed extension is inside its catalog pin');
   return true;
 }
@@ -472,10 +489,12 @@ interface DoctorOptions {
   reap_dead_jobs: boolean;
   dry_run: boolean;
   channels: boolean;
+  catalogs: boolean;
+  require_installed: boolean;
 }
 
 function parseDoctorArgs(argv: readonly string[]): DoctorOptions {
-  const opts: DoctorOptions = { json: false, drift: false, specialists: false, pr_drift: false, reap_dead_jobs: false, dry_run: false, channels: false };
+  const opts: DoctorOptions = { json: false, drift: false, specialists: false, pr_drift: false, reap_dead_jobs: false, dry_run: false, channels: false, catalogs: false, require_installed: false };
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i];
     if (token === '--json') { opts.json = true; continue; }
@@ -484,10 +503,16 @@ function parseDoctorArgs(argv: readonly string[]): DoctorOptions {
     if (token === '--pr-drift') { opts.pr_drift = true; continue; }
     if (token === '--reap-dead-jobs') { opts.reap_dead_jobs = true; continue; }
     if (token === '--channels' || token === '--check-channels') { opts.channels = true; continue; }
+    if (token === '--catalogs' || token === '--check-catalogs') { opts.catalogs = true; continue; }
+    if (token === '--require-installed') { opts.require_installed = true; continue; }
     if (token === '--dry-run') { opts.dry_run = true; continue; }
     if (token === '--root') { const value = argv[i + 1]; if (!value || value.startsWith('--')) throw new Error('--root requires a value'); opts.root = resolve(value); i += 1; continue; }
     if (token === '--help' || token === '-h') continue;
     throw new Error(`Unknown argument: ${token}`);
+  }
+  // A flag that silently does nothing is the failure mode SPECIALISTS-47 exists to remove.
+  if (opts.require_installed && !opts.catalogs) {
+    throw new Error('--require-installed only applies to --catalogs');
   }
   return opts;
 }
@@ -1038,6 +1063,16 @@ export async function run(argv: readonly string[] = process.argv.slice(3)): Prom
 
   if (opts.reap_dead_jobs) {
     await runDoctorReapDeadJobs(opts);
+    return;
+  }
+
+  if (opts.catalogs) {
+    // SPECIALISTS-47: the focused section the scheduled CI job runs. It calls the SAME
+    // checkCatalogs the full doctor runs, so the CI verdict cannot drift from the doctor's.
+    console.log(`\n${bold('specialists doctor --catalogs')}\n`);
+    const catalogsOk = checkCatalogs({ requireInstalled: opts.require_installed });
+    console.log('');
+    process.exitCode = catalogsOk ? 0 : 1;
     return;
   }
 

@@ -1,0 +1,78 @@
+name: catalog-compat
+
+permissions:
+  contents: read
+
+# SPECIALISTS-47: the CI half of the catalog guard.
+#
+# The runtime accepts an installed extension inside its catalog pin's caret line and drops every
+# tool it contributes when the install falls outside that line (SPECIALISTS-42). `specialists
+# doctor` reports both states, but only on a machine where someone runs it; the test job installs
+# no extensions, so every catalog reads `absent` there and nothing ever notices a pin falling
+# behind what is published. This job installs the extensions at their published versions and
+# runs the SAME doctor section, so its verdict is the doctor's verdict by construction.
+#
+# Scheduled, never per pull request: it installs moving @latest packages from the network, and a
+# third-party release must not fail unrelated work. It reports; it never bumps a pin, because a
+# pin is a claim that the tool surface was verified against that build.
+
+on:
+  schedule:
+    - cron: '0 12 * * 3'  # Wednesdays 12:00 UTC
+  workflow_dispatch:
+    inputs:
+      pi_gitnexus:
+        description: 'pi-gitnexus version to install (default: latest)'
+        default: 'latest'
+        required: false
+      pi_extensions:
+        description: '@jaggerxtrm/pi-extensions version to install (default: latest)'
+        default: 'latest'
+        required: false
+      pi_service_knowledge:
+        description: '@jaggerxtrm/pi-service-knowledge version to install (default: latest)'
+        default: 'latest'
+        required: false
+
+jobs:
+  catalogs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          # Same pin as tests.yml and telemetry-contract.yml; bump all three together.
+          bun-version: 1.3.14
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # A registry or network failure stops the job HERE, under this step's name, so it can never be
+      # read as a catalog verdict.
+      - name: Install extensions at the requested versions
+        env:
+          PI_GITNEXUS: ${{ inputs.pi_gitnexus || 'latest' }}
+          PI_EXTENSIONS: ${{ inputs.pi_extensions || 'latest' }}
+          PI_SERVICE_KNOWLEDGE: ${{ inputs.pi_service_knowledge || 'latest' }}
+        run: |
+          set -euo pipefail
+          for v in "$PI_GITNEXUS" "$PI_EXTENSIONS" "$PI_SERVICE_KNOWLEDGE"; do
+            if ! [[ "$v" =~ ^(latest|[0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+              echo "::error::invalid version input '$v' (expected 'latest' or x.y.z)"; exit 1
+            fi
+          done
+          npm install -g "pi-gitnexus@$PI_GITNEXUS" \
+            "@jaggerxtrm/pi-extensions@$PI_EXTENSIONS" \
+            "@jaggerxtrm/pi-service-knowledge@$PI_SERVICE_KNOWLEDGE"
+
+      # The runtime resolves installed extensions through resolveGlobalNodeModulesDir, which checks
+      # PI_NPM_GLOBAL_DIR first. Pointing it at npm's actual global root makes the job read the
+      # packages exactly where they were installed; --require-installed then turns any miss into a
+      # failure instead of a silent `absent` pass.
+      - name: Point the runtime at the npm global root
+        run: echo "PI_NPM_GLOBAL_DIR=$(npm root -g)" >> "$GITHUB_ENV"
+
+      - name: specialists doctor --catalogs --require-installed
+        run: bun src/index.ts doctor --catalogs --require-installed
