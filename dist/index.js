@@ -94372,6 +94372,37 @@ class NativeActivationHost {
         attempt_n: index + 2,
         resolved_model: check.resolvedModel ?? nextModel
       });
+      if (record5.snapshot.access === "write") {
+        try {
+          acquire({
+            workspace: record5.snapshot.workspace,
+            activationId: record5.snapshot.activationId,
+            attemptId: record5.snapshot.attemptId,
+            specialist: record5.snapshot.specialist
+          });
+        } catch (error3) {
+          if (error3 instanceof DispatchRejectedError) {
+            this.forensics.emit({
+              activationId: record5.snapshot.activationId,
+              attemptId: record5.snapshot.attemptId,
+              participantId: record5.snapshot.participantId,
+              specialist: record5.snapshot.specialist,
+              beadId: record5.snapshot.issueRef,
+              name: "lease_denied",
+              payload: { reason: error3.reason, note: error3.detail.holder, on: "fallback" }
+            });
+          }
+          ctx.emit("model_fallback", {
+            from_model: fromModel,
+            to_model: nextModel,
+            error_class: errorClass,
+            terminal: true,
+            note: "fallback could not acquire the workspace lease: " + (error3 instanceof Error ? error3.message : String(error3)),
+            resolved_model: fromModel
+          });
+          break;
+        }
+      }
       let nextSession;
       try {
         nextSession = await record5.createSession(check.model);
