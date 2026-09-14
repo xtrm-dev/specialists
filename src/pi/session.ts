@@ -39,7 +39,7 @@ export class StallTimeoutError extends Error {
 //
 import { createHash } from 'node:crypto';
 import { getReadLineNumbersExtensionPath } from './read-line-numbers-extension.js';
-import { getExtensionToolPolicyExtensionPath, NATIVE_TOOLS_ENV_KEY } from './extension-tool-policy-extension.js';
+import { getExtensionToolPolicyExtensionPath, NATIVE_TOOLS_ENV_KEY, REQUIRED_EXTENSION_TOOLS_ENV_KEY } from './extension-tool-policy-extension.js';
 import { resolvePiExtensionsPythonKernelPath } from './python-kernel-extension.js';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
@@ -477,6 +477,8 @@ export function applyExtensionToolPolicyGate(
   args.push('--no-builtin-tools');
   args.push('-e', policyPath);
   env[NATIVE_TOOLS_ENV_KEY] = contract.nativeTools.join(',');
+  // The promise the gate verifies against the live registry (SPECIALISTS-42).
+  env[REQUIRED_EXTENSION_TOOLS_ENV_KEY] = contract.extensionTools.join(',');
 }
 
 function isRemoteExtensionSource(source: string): boolean {

@@ -409,7 +409,41 @@ export class NativeActivationHost {
       thinking_override: request.thinkingOverride ?? null,
     });
 
+    /**
+     * Releases the workspace lease THIS activation took, if it took one.
+     *
+     * A refusal firing after acquisition used to leak the lease (SPECIALISTS-42 review): the
+     * holder is this long-lived MCP server process, so the workspace read as `held` indefinitely
+     * and every later writer was refused with workspace_held_by_another_writer — one refused
+     * write-tier dispatch poisoned the workspace for the life of the process. A fail-closed
+     * refusal that silently blocks all later writers is the same invisibility this issue exists
+     * to remove.
+     *
+     * Gated on our own successful acquisition rather than calling release unconditionally.
+     * `release` cannot release another writer's lease — it inspects the holder and throws
+     * `workspace_lease_not_held_by_caller` — and it throws `workspace_lease_uncertain` rather
+     * than guessing about a holder whose liveness is unknown. So an unconditional call on a
+     * pre-acquisition refusal (an unknown specialist, an empty contract, a contract/ref
+     * conflict) would not free anything: it would convert a clean refusal into a spurious
+     * `lease_release_failed` event. The gate is what keeps this releasing exactly the lease
+     * this activation took, and only when it took one.
+     *
+     * DISARMED once admission succeeds: after that the lease belongs to the snapshot
+     * lifecycle (`releaseIfWriter` on settle, completion and stop), not to this closure.
+     * Leaving it armed let a later fallback or retry attempt reach a start()-scoped release
+     * carrying the wrong lifecycle assumptions.
+     */
+    let releaseOwnLease: (() => void) | null = null;
+    const releaseLeaseOnRefusal = (): void => {
+      if (!releaseOwnLease) return;
+      const release = releaseOwnLease;
+      releaseOwnLease = null;
+      release();
+    };
+
     const reject = (reason: string, detail: Record<string, unknown> = {}): never => {
+      // First, so no refusal path can forget it.
+      releaseLeaseOnRefusal();
       emit('activation_rejected', { reason, ...detail });
       throw new DispatchRejectedError(reason, {
         specialist: request.specialist,
@@ -665,6 +699,19 @@ export class NativeActivationHost {
         throw error;
       }
       emit('lease_acquired', { workspace: workspace.worktreePath });
+      releaseOwnLease = () => {
+        try {
+          releaseLease(workspace, activationId);
+          emit('lease_released', { workspace: workspace.worktreePath, reason: 'activation_refused' });
+        } catch (error) {
+          // A refusal is still a refusal: cleanup failing must not turn it into a different
+          // outcome, exactly as teardown is never failed by a release that could not run.
+          emit('lease_release_failed', {
+            workspace: workspace.worktreePath,
+            note: error instanceof Error ? error.message : String(error),
+          });
+        }
+      };
     }
 
     // PRD §15: bound this activation to its role. Derived and in-memory — compiling a
@@ -942,7 +989,64 @@ export class NativeActivationHost {
       systemPrompt: systemPrompt.text,
     };
 
-    const { session } = await sdk.createAgentSession({ ...baseSessionOptions, model: modelCheck.model });
+    // SPECIALISTS-42 (c): post-load verification on the NATIVE path.
+    //
+    // This runtime does not load the tool-policy gate at all — it relies on pi's `tools`
+    // hard filter, which drops anything it does not name and cannot supply anything it does.
+    // So a tool the contract promised but the runtime does not expose is simply absent, and
+    // before this nothing noticed. The contract is the promise; the live session's active set
+    // is the fact; a Specialist is never launched with a smaller surface than it was told it
+    // had. Verified here rather than in the gate because the gate is not on this path.
+    const PROMISED_TOOLS = [...toolContract.toolsList];
+    const missingPromisedTools = (candidate: PiAgentSessionLike): string[] => {
+      const active = new Set(candidate.getActiveToolNames());
+      return PROMISED_TOOLS.filter((tool) => !active.has(tool));
+    };
+    const createVerifiedSession = async (
+      model: { id?: string; provider?: string },
+      options: { viaFallback?: boolean } = {},
+    ): Promise<PiAgentSessionLike> => {
+      const created = await sdk.createAgentSession({ ...baseSessionOptions, model });
+      const missing = missingPromisedTools(created.session);
+      if (missing.length > 0) {
+        // Fail closed BEFORE the binding and before any model turn: a session missing a
+        // promised tool cannot do the work its contract describes, and continuing would
+        // report success for a run that silently had less capability than it declared.
+        created.session.dispose();
+        const detail = {
+          missing,
+          // An inline contract is created AND claimed before this point, so a refusal here
+          // leaves a durable issue behind. Name it: an orphan nobody is told about is the
+          // failure mode the inline dispatch path already warns about in its result.
+          ...(autoCreatedRef ? { created_ref: autoCreatedRef } : {}),
+          note:
+            `the session did not expose ${missing.join(', ')}; the resolved contract promised them, ` +
+            'and a native activation is never launched with a smaller tool surface than its contract declares',
+        };
+        if (options.viaFallback) {
+          // This activation was already admitted and its handle returned to the caller, so
+          // emitting `activation_rejected` would report an admitted activation as rejected to
+          // anything reading the event stream. Distinct event instead.
+          //
+          // The lease is deliberately NOT released here. Admission disarmed the start()-scoped
+          // release, and the lease belongs to the snapshot lifecycle: the previous attempt
+          // settled, and settling releases through releaseIfWriter. Releasing again from here
+          // would make two owners of one release, and if another writer acquired in the gap the
+          // snapshot-lifecycle release would throw workspace_lease_not_held_by_caller and
+          // surface as a false `lease_uncertain` alarm on a workspace that is actually fine.
+          emit('tool_contract_unsatisfied_on_fallback', { missing, model: model.id ?? null });
+          throw new DispatchRejectedError('tool_contract_unsatisfied', {
+            specialist: request.specialist,
+            issueRef: request.issueRef,
+            ...detail,
+          });
+        }
+        return reject('tool_contract_unsatisfied', detail);
+      }
+      return created.session;
+    };
+
+    const session = await createVerifiedSession(modelCheck.model);
 
     // §49 dispatch step: the mutation lands at activation start, once the
     // physical session exists, so the ExecutionBinding can pin the real
@@ -968,10 +1072,10 @@ export class NativeActivationHost {
       });
     }
 
-    const createSessionForModel = async (model: { id?: string; provider?: string }): Promise<PiAgentSessionLike> => {
-      const created = await sdk.createAgentSession({ ...baseSessionOptions, model });
-      return created.session;
-    };
+    // Same verification on every later attempt: a fallback model or a retry must not be the
+    // one place that runs with an unverified tool surface.
+    const createSessionForModel = (model: { id?: string; provider?: string }) =>
+      createVerifiedSession(model, { viaFallback: true });
 
     const purpose = purposeExcerptFromContract(view.contract);
     const startedAt = this.now();
@@ -1034,6 +1138,12 @@ export class NativeActivationHost {
 
     this.registry.register(record);
     this.save(snapshot);
+
+    // Admission is complete: the lease now belongs to the snapshot lifecycle, so the
+    // start()-scoped release must not fire again. Anything post-admission routes through
+    // releaseIfWriter, which knows the activation and turns an uncertain release into evidence
+    // instead of freeing a workspace that may still be under mutation.
+    releaseOwnLease = null;
 
     return {
       activationId, participantId, attemptId,
@@ -1462,7 +1572,22 @@ export class NativeActivationHost {
     if (overrideModel && overrideResolved && overrideName) {
       // A new model needs a new session — the model is fixed at creation. The failed
       // session is disposed; same-session context survives only on the no-override path.
-      const nextSession = await record.createSession(overrideModel);
+      let nextSession: PiAgentSessionLike;
+      try {
+        nextSession = await record.createSession(overrideModel);
+      } catch (error) {
+        // A refused session left the activation half-advanced otherwise: `state` was set to
+        // 'starting' and saved just above, and nothing after this line runs. Terminal it
+        // explicitly and release through the snapshot lifecycle, which owns the lease after
+        // admission. The failed session stays the live record.session and is deliberately NOT
+        // disposed: it is what a later retry without an override re-prompts, and trading its
+        // context for nothing is the mistake the fallback walk refuses to make.
+        record.snapshot.state = 'failed';
+        record.snapshot.lastActivityAt = this.now();
+        this.save(record.snapshot);
+        this.releaseIfWriter(record.snapshot, 'tool_contract_unsatisfied_on_retry');
+        throw error;
+      }
       try { record.session.dispose(); } catch { /* best effort */ }
       record.unsubscribe();
       record.session = nextSession;

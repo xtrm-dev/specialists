@@ -59,7 +59,13 @@ function fakeSession(): PiAgentSessionLike & { disposed: boolean; prompts: strin
 
 function makeSdk(session: PiAgentSessionLike): PiSdk {
   return {
-    createAgentSession: async () => ({ session }),
+    createAgentSession: async (options?: Record<string, unknown>) => {
+      // Model pi's HARD FILTER: the session exposes exactly the tools it was named. Without
+      // this the fake reports a fixed list, and the post-load verification added by
+      // SPECIALISTS-42 passes for a reason that has nothing to do with the test.
+      if (Array.isArray(options?.tools)) session.getActiveToolNames = () => options!.tools as string[];
+      return { session };
+    },
     DefaultResourceLoader: FakeResourceLoader,
     getAgentDir: () => FAKE_AGENT_DIR,
     ModelRuntime: { create: async () => ({ hasConfiguredAuth: () => true }) },

@@ -38,6 +38,11 @@ export function getExtensionToolPolicyExtensionPath(): string | null {
  *  policy extension. Bounded, comma-separated native tool names. */
 export const NATIVE_TOOLS_ENV_KEY = 'PI_SPECIALIST_ALLOWED_NATIVE_TOOLS';
 
+/** Environment channel carrying the extension tools the resolved contract PROMISED
+ *  (SPECIALISTS-42). The policy extension verifies the session's active set against it and
+ *  refuses to run a model turn when a promised tool is missing. */
+export const REQUIRED_EXTENSION_TOOLS_ENV_KEY = 'PI_SPECIALIST_REQUIRED_EXTENSION_TOOLS';
+
 /** Test-only reset for the module-level cache. */
 export function __resetExtensionToolPolicyExtensionPathCacheForTest(): void {
   cached = undefined;
