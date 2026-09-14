@@ -43,6 +43,7 @@ export declare function createSpecialistResumeTool(getHost: () => NativeActivati
             holder?: string;
             requestedModel?: string;
             activationId?: string;
+            created_ref?: string;
             note?: string;
         } | undefined;
         status: "rejected";

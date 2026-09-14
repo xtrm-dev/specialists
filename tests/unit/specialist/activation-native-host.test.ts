@@ -190,6 +190,12 @@ afterEach(() => {
 
 const NO_CONTRACT_STATE = { readContractState: () => undefined };
 
+/** A valid inline contract: seven sections plus SCRUTINY, so the inline path is reached. */
+const INLINE_CONTRACT =
+  'PROBLEM\nProve the inline-dispatch path.\n\nSUCCESS\nA read-only activation settles.\n\n' +
+  'SCOPE\nRead-only.\n\nNON_GOALS\nNo writes.\n\nCONSTRAINTS\nRead-only.\n\n' +
+  'VALIDATION\nOutput confirms.\n\nOUTPUT\nA short report.\n\nSCRUTINY LOW';
+
 function fakeWorkItems(options: { state?: string; blockers?: Array<{ ref: string; title: string; description?: string }> } = {}): SpecialistWorkItemBoundary {
   const contract = {
     problem: 'The thing is unclear.',
@@ -1437,6 +1443,61 @@ describe('NativeActivationHost — fallback walk + retry (unitAI-3emr7)', () => 
     const result = await handle.result;
     expect(result.fallbackUsed).toBe(true);
     expect(leaseHeldDuringFallback).toBe(true);
+  });
+
+  it('names the created issue when an inline dispatch is refused after creation', async () => {
+    // SPECIALISTS-45. inlineCreate creates AND claims a durable issue BEFORE the lease is taken,
+    // and a refusal never returns the created_bead_id the success path would. Without naming it the
+    // caller is left with a claimed issue it cannot discover. Another writer holds the workspace
+    // here, so the refusal fires after the issue exists.
+    const workspace = hostWorkspace();
+    const spec = readOnlySpec();
+    (spec.specialist.execution as Record<string, unknown>).permission_required = 'HIGH';
+    acquireLease({
+      workspace: resolveWorkspace(workspace),
+      activationId: 'act:other-writer',
+      attemptId: 'att:other-writer:1',
+      specialist: 'other-specialist',
+    });
+    const host = new NativeActivationHost({
+      loader: loaderFor(spec),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => makeSdk({}, fakeSession({})),
+      cwd: workspace,
+    });
+
+    const refusal = await host.start({
+      specialist: 'executor', contract: INLINE_CONTRACT, requestedByParticipantId: 'coordinator',
+    }).catch((caught: unknown) => caught);
+
+    expect(refusal).toBeInstanceOf(DispatchRejectedError);
+    // The acquire's own reason and holder survive: a caller still needs to know who holds it.
+    expect((refusal as DispatchRejectedError).reason).toBe('workspace_held_by_another_writer');
+    expect((refusal as DispatchRejectedError).detail.created_ref).toBe('ISSUE-INLINE');
+    // ...and the human-readable body names it, not just the structured detail.
+    expect(String((refusal as Error).message)).toContain('ISSUE-INLINE');
+  });
+
+  it('names the created issue when the binding refuses an inline dispatch', async () => {
+    // The same rule on the reject() path, which is the one most post-creation refusals use.
+    const workspace = hostWorkspace();
+    const boundary = fakeWorkItems();
+    (boundary as { bind: () => never }).bind = () => { throw new Error('bind blew up'); };
+    const host = new NativeActivationHost({
+      loader: loaderFor(readOnlySpec()),
+      workItems: boundary,
+      forensics: collectingSink(),
+      loadSdk: async () => makeSdk({}, fakeSession({})),
+      cwd: workspace,
+    });
+
+    const refusal = await host.start({
+      specialist: 'researcher', contract: INLINE_CONTRACT, requestedByParticipantId: 'coordinator',
+    }).catch((caught: unknown) => caught);
+
+    expect((refusal as DispatchRejectedError).reason).toBe('issue_binding_failed');
+    expect((refusal as DispatchRejectedError).detail.created_ref).toBe('ISSUE-INLINE');
   });
 
   it('releases the lease when a prompt rejects without settling', async () => {

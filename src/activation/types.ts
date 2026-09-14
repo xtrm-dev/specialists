@@ -324,6 +324,12 @@ export class DispatchRejectedError extends Error {
       holder?: string;
       requestedModel?: string;
       activationId?: string;
+      /**
+       * The issue an inline contract created and claimed before the refusal fired
+       * (SPECIALISTS-45). Named so a caller is told about durable work it cannot otherwise
+       * discover: the refusal never returns the `created_bead_id` the success path would.
+       */
+      created_ref?: string;
       note?: string;
     } = {},
   ) {
@@ -338,6 +344,7 @@ export class DispatchRejectedError extends Error {
       ...(detail.missing?.length ? ['', `missing:\n${detail.missing.map(m => `  - ${m}`).join('\n')}`] : []),
       ...(detail.requestedModel ? ['', `requested model:\n  ${detail.requestedModel}`] : []),
       ...(detail.workspace ? ['', `workspace:\n  ${detail.workspace}`] : []),
+      ...(detail.created_ref ? ['', `created issue (claimed, left behind):\n  ${detail.created_ref}`] : []),
       ...(detail.holder ? ['', `holder:\n  ${detail.holder}`] : []),
       '',
       'AgentSession:\n  not created',

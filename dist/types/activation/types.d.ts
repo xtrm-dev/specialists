@@ -282,6 +282,12 @@ export declare class DispatchRejectedError extends Error {
         holder?: string;
         requestedModel?: string;
         activationId?: string;
+        /**
+         * The issue an inline contract created and claimed before the refusal fired
+         * (SPECIALISTS-45). Named so a caller is told about durable work it cannot otherwise
+         * discover: the refusal never returns the `created_bead_id` the success path would.
+         */
+        created_ref?: string;
         note?: string;
     };
     constructor(reason: string, detail?: {
@@ -292,6 +298,12 @@ export declare class DispatchRejectedError extends Error {
         holder?: string;
         requestedModel?: string;
         activationId?: string;
+        /**
+         * The issue an inline contract created and claimed before the refusal fired
+         * (SPECIALISTS-45). Named so a caller is told about durable work it cannot otherwise
+         * discover: the refusal never returns the `created_bead_id` the success path would.
+         */
+        created_ref?: string;
         note?: string;
     });
 }
