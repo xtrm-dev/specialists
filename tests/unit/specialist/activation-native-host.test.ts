@@ -1439,6 +1439,40 @@ describe('NativeActivationHost — fallback walk + retry (unitAI-3emr7)', () => 
     expect(leaseHeldDuringFallback).toBe(true);
   });
 
+  it('releases the lease when a prompt rejects without settling', async () => {
+    // SPECIALISTS-51. pi emits agent_settled from a finally around its agent loop, so a turn that
+    // fails by THROWING still settles and the settle handler releases. The paths outside that
+    // finally - the prompt() preflight and its activeRun guard - reject without ever emitting it,
+    // and this fake models exactly that: scriptSession throws without a settle event. Before the
+    // fix the activation went terminal still holding the lease, held by this long-lived process.
+    const session = scriptSession([{ throw: new Error('preflight rejected') }]);
+    const workspace = hostWorkspace();
+    const created: unknown[] = [];
+    const sdk = chainSdk(created, [session]);
+    const spec = readOnlySpec({ model: 'primaryprov/primary-model' });
+    (spec.specialist.execution as Record<string, unknown>).permission_required = 'HIGH';
+    const host = new NativeActivationHost({
+      loader: loaderFor(spec),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => sdk,
+      cwd: workspace,
+    });
+
+    const handle = await host.start({
+      specialist: 'executor', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    });
+    const result = await handle.result;
+    const identity = host.inspect(handle.activationId)!.workspace;
+
+    expect(result.status).toBe('failed');
+    expect(existsSync(leasePath(identity))).toBe(false);
+    // acquireLease is the same call start() makes, so this asserts admission, not a flag.
+    expect(() =>
+      acquireLease({ workspace: identity, activationId: 'act:second-writer', attemptId: 'att:second-writer:1', specialist: 'executor' }),
+    ).not.toThrow();
+  });
+
   it('releases the re-acquired lease when the fallback session cannot be created', async () => {
     // SPECIALISTS-46 review. Re-acquiring before the session exists is the right order - a writer
     // takes the lease BEFORE it has a session - but it needs a failure branch: with no session,

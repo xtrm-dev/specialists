@@ -94315,6 +94315,7 @@ class NativeActivationHost {
       this.save(snapshot);
       const message = error3 instanceof Error ? error3.message : String(error3);
       emit("activation_failed", { error: message });
+      this.releaseIfWriter(snapshot, "failed");
       return {
         activationId: snapshot.activationId,
         participantId: snapshot.participantId,
