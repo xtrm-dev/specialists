@@ -55,6 +55,7 @@ export declare function renderRejection(input: RejectionInput, build?: string, s
         holder?: string;
         requestedModel?: string;
         activationId?: string;
+        created_ref?: string;
         note?: string;
     } | undefined;
     status: "rejected";

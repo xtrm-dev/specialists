@@ -441,13 +441,25 @@ export class NativeActivationHost {
       release();
     };
 
+    /**
+     * The issue an inline contract created and claimed, named on every refusal that fires after it.
+     *
+     * An inline dispatch creates AND claims a durable issue before the lease is taken and before the
+     * tool verification runs, so a refusal after that point leaves a claimed issue behind and never
+     * returns the `created_bead_id` that would otherwise tell the caller it exists. Set below, read
+     * here, so no refusal path can forget it — including ones added later. A rejection must not leave
+     * durable work the caller cannot discover (SPECIALISTS-45).
+     */
+    let createdRefForRefusals: string | undefined;
+
     const reject = (reason: string, detail: Record<string, unknown> = {}): never => {
-      // First, so no refusal path can forget it.
+      // Both first, so no refusal path can forget either.
       releaseLeaseOnRefusal();
       emit('activation_rejected', { reason, ...detail });
       throw new DispatchRejectedError(reason, {
         specialist: request.specialist,
         issueRef: request.issueRef,
+        ...(createdRefForRefusals ? { created_ref: createdRefForRefusals } : {}),
         ...detail,
       });
     };
@@ -508,6 +520,7 @@ export class NativeActivationHost {
           activationId,
         });
         autoCreatedRef = created.ref;
+        createdRefForRefusals = created.ref;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (message.startsWith('inline contract is not a usable task contract')) {
@@ -696,6 +709,15 @@ export class NativeActivationHost {
           });
         }
         emit('activation_rejected', { reason: 'workspace_lease_unavailable' });
+        // Rebuilt rather than rethrown so the created ref is named without losing the acquire's own
+        // reason and holder detail: a caller needs to know WHO holds the workspace, and that the
+        // inline contract already left a claimed issue behind (SPECIALISTS-45).
+        if (error instanceof DispatchRejectedError && createdRefForRefusals) {
+          throw new DispatchRejectedError(error.reason, {
+            ...error.detail,
+            created_ref: createdRefForRefusals,
+          });
+        }
         throw error;
       }
       emit('lease_acquired', { workspace: workspace.worktreePath });

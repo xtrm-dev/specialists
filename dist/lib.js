@@ -21107,6 +21107,8 @@ ${detail.missing.map((m) => `  - ${m}`).join(`
   ${detail.requestedModel}`] : [],
       ...detail.workspace ? ["", `workspace:
   ${detail.workspace}`] : [],
+      ...detail.created_ref ? ["", `created issue (claimed, left behind):
+  ${detail.created_ref}`] : [],
       ...detail.holder ? ["", `holder:
   ${detail.holder}`] : [],
       "",
@@ -21985,12 +21987,14 @@ class NativeActivationHost {
       releaseOwnLease = null;
       release2();
     };
+    let createdRefForRefusals;
     const reject = (reason, detail = {}) => {
       releaseLeaseOnRefusal();
       emit("activation_rejected", { reason, ...detail });
       throw new DispatchRejectedError(reason, {
         specialist: request.specialist,
         issueRef: request.issueRef,
+        ...createdRefForRefusals ? { created_ref: createdRefForRefusals } : {},
         ...detail
       });
     };
@@ -22028,6 +22032,7 @@ class NativeActivationHost {
           activationId
         });
         autoCreatedRef = created.ref;
+        createdRefForRefusals = created.ref;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (message.startsWith("inline contract is not a usable task contract")) {
@@ -22155,6 +22160,12 @@ class NativeActivationHost {
           });
         }
         emit("activation_rejected", { reason: "workspace_lease_unavailable" });
+        if (error instanceof DispatchRejectedError && createdRefForRefusals) {
+          throw new DispatchRejectedError(error.reason, {
+            ...error.detail,
+            created_ref: createdRefForRefusals
+          });
+        }
         throw error;
       }
       emit("lease_acquired", { workspace: workspace.worktreePath });

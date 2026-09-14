@@ -202,6 +202,7 @@ export declare function createSpecialistDispatchTool(getHost: () => NativeActiva
             holder?: string;
             requestedModel?: string;
             activationId?: string;
+            created_ref?: string;
             note?: string;
         } | undefined;
         status: "rejected";
@@ -407,6 +408,7 @@ export declare function createSpecialistRetryTool(getHost: () => NativeActivatio
             holder?: string;
             requestedModel?: string;
             activationId?: string;
+            created_ref?: string;
             note?: string;
         } | undefined;
         status: "rejected";
