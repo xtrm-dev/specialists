@@ -1439,6 +1439,44 @@ describe('NativeActivationHost — fallback walk + retry (unitAI-3emr7)', () => 
     expect(leaseHeldDuringFallback).toBe(true);
   });
 
+  it('releases the re-acquired lease when the fallback session cannot be created', async () => {
+    // SPECIALISTS-46 review. Re-acquiring before the session exists is the right order - a writer
+    // takes the lease BEFORE it has a session - but it needs a failure branch: with no session,
+    // nothing settles, and the completion release sits in a branch that never runs. The lease
+    // would then be held by this long-lived process and every later writer refused. The likely
+    // trigger is a fallback walk, which exists because a provider is already misbehaving.
+    const primary = scriptSession([{ text: '', stopReason: 'error', errorMessage: '429: monthly usage limit reached' }]);
+    const workspace = hostWorkspace();
+    const created: unknown[] = [];
+    // No session scripted for the fallback model, so record.createSession throws for it.
+    const sdk = chainSdk(created, [primary]);
+    const spec = readOnlySpec({ model: 'primaryprov/primary-model', fallback_models: ['fallbackprov/fallback-model'] });
+    (spec.specialist.execution as Record<string, unknown>).permission_required = 'HIGH';
+    const sink = collectingSink();
+    const host = new NativeActivationHost({
+      loader: loaderFor(spec),
+      workItems: fakeWorkItems(),
+      forensics: sink,
+      loadSdk: async () => sdk,
+      cwd: workspace,
+    });
+
+    const handle = await host.start({
+      specialist: 'executor', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    });
+    const result = await handle.result;
+    const identity = host.inspect(handle.activationId)!.workspace;
+
+    expect(result.status).toBe('failed');
+    // The lease is gone...
+    expect(existsSync(leasePath(identity))).toBe(false);
+    // ...and the workspace is takeable, which is the consequence that matters. acquireLease is
+    // the same call start() makes, so this asserts admission rather than an internal flag.
+    expect(() =>
+      acquireLease({ workspace: identity, activationId: 'act:second-writer', attemptId: 'att:second-writer:1', specialist: 'executor' }),
+    ).not.toThrow();
+  });
+
   it('ends the fallback walk with a lease reason when the workspace cannot be re-taken', async () => {
     // SPECIALISTS-46, contention half. The walk re-acquires now, so it can also fail to. When it
     // does, the reason must name the lease: a silent model_fallback would send an operator

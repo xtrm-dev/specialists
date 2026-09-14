@@ -1501,6 +1501,14 @@ export class NativeActivationHost {
       try {
         nextSession = await record.createSession(check.model);
       } catch (error) {
+        // The lease was taken above and no session will run under it, so it must go back or it
+        // is held by this long-lived process for the rest of its life (SPECIALISTS-46 review).
+        // Nothing else releases on this path: the settle release needs a session to settle, and
+        // releaseIfWriter on completion sits inside runToSettled's success branch, which never
+        // runs. This is the likely branch too - a fallback walk runs precisely because a
+        // provider is misbehaving, so a failed session creation is expected rather than exotic.
+        // Same shape as retry() after the #354 review.
+        this.releaseIfWriter(record.snapshot, 'fallback_session_unavailable');
         ctx.emit('model_fallback', {
           from_model: fromModel,
           to_model: nextModel,

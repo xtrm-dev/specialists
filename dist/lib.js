@@ -22689,6 +22689,7 @@ class NativeActivationHost {
       try {
         nextSession = await record2.createSession(check.model);
       } catch (error) {
+        this.releaseIfWriter(record2.snapshot, "fallback_session_unavailable");
         ctx.emit("model_fallback", {
           from_model: fromModel,
           to_model: nextModel,
