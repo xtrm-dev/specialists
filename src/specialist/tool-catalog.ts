@@ -109,3 +109,63 @@ export function resolveCatalogVersionVerdict(installedVersion: string, baselineV
     ? { compatible: true, reason: `installed ${installedVersion} satisfies catalog ${baselineVersion} (caret-of-baseline)` }
     : { compatible: false, reason: `installed ${installedVersion} is outside the compatible range for catalog ${baselineVersion}` };
 }
+
+export type CatalogCompatibilityLevel = 'ok' | 'ahead' | 'out_of_range' | 'absent';
+
+export interface CatalogCompatibilityEntry {
+  catalog: string;
+  package: string;
+  baseline: string;
+  installed?: string;
+  level: CatalogCompatibilityLevel;
+  detail: string;
+}
+
+/**
+ * Report every catalog pin against the extension actually installed (SPECIALISTS-42 (d)).
+ *
+ * `ahead` is the case the runtime gate deliberately accepts and therefore never mentions: an
+ * install inside the pin's line but newer than the baseline. That is not a failure — the gate is
+ * right to accept it — but it is the only signal that the baseline has stopped being the build the
+ * tool surface was verified against, and it is what lets the pin be bumped BEFORE a minor release
+ * turns the same drift into a closed gate. Without it, relaxing identity to a range would trade a
+ * loud failure at every patch boundary for a silent drift toward a loud failure at the next minor
+ * one.
+ *
+ * Pure: the caller supplies installed versions, so this reports a machine's state without being
+ * tied to one, and can be tested without an install.
+ */
+export function describeCatalogCompatibility(input: {
+  catalogs: ReadonlyArray<{ catalog: string; package?: string; version: string }>;
+  resolveInstalledVersion: (packageName: string) => string | undefined;
+}): CatalogCompatibilityEntry[] {
+  return input.catalogs
+    .filter((catalog) => catalog.catalog !== 'native')
+    .map((catalog) => {
+      const packageName = catalog.package ?? catalog.catalog;
+      const installed = input.resolveInstalledVersion(packageName);
+      const base = {
+        catalog: catalog.catalog,
+        package: packageName,
+        baseline: catalog.version,
+        ...(installed ? { installed } : {}),
+      };
+      if (!installed) {
+        return { ...base, level: 'absent' as const, detail: `${packageName} is not installed; nothing to verify` };
+      }
+      const verdict = resolveCatalogVersionVerdict(installed, catalog.version);
+      if (!verdict.compatible) {
+        return { ...base, level: 'out_of_range' as const, detail: verdict.reason };
+      }
+      const ahead = compareVersionTriples(installed.split('.').map(Number), catalog.version.split('.').map(Number)) > 0;
+      return ahead
+        ? {
+            ...base,
+            level: 'ahead' as const,
+            detail:
+              `installed ${installed} is ahead of baseline ${catalog.version} (compatible) — ` +
+              'bump the catalog pin before the next minor release, while it is still cheap',
+          }
+        : { ...base, level: 'ok' as const, detail: `installed ${installed} matches the baseline` };
+    });
+}

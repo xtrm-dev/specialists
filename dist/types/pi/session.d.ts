@@ -6,6 +6,7 @@ export declare class StallTimeoutError extends Error {
 }
 import { type ManifestPolicy } from '../specialist/manifest-resolver.js';
 import { type ResolvedToolContract } from '../specialist/resolved-tool-contract.js';
+import { type ToolCatalogIndex } from '../specialist/tool-catalog.js';
 export interface AgentSessionMeta {
     backend: string;
     model: string;
@@ -146,6 +147,21 @@ export declare class RuntimeToolCatalogResolutionError extends Error {
     readonly code = "runtime_tool_catalog_unavailable";
     constructor(reason: RuntimeToolCatalogErrorReason);
 }
+/**
+ * Exported so the doctor reports the SAME catalog the runtime resolves (SPECIALISTS-42 (d)).
+ * A second resolution rule is how two resolvers came to disagree about the store path before
+ * (SPECIALISTS-3); a doctor that inspects a different catalog than the runtime loads would be
+ * the same defect wearing a diagnostic hat.
+ */
+export declare function loadSharedToolCatalogIndex(cwd: string): ToolCatalogIndex;
+/**
+ * The runtime's own package.json version read, exported so the doctor reports the SAME installed
+ * version the gate compares (SPECIALISTS-42 (d) review). A second inline lookup in doctor.ts was
+ * identical today, but identical-today is how two resolvers come to disagree tomorrow — the
+ * doctor would then describe a version the gate never saw, which is the defect this issue is
+ * about wearing a diagnostic hat.
+ */
+export declare function readPackageVersion(packageJsonPath: string): string | undefined;
 export declare function resolveRuntimeToolContract(options: {
     level?: string;
     specialistName?: string;

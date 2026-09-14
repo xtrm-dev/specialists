@@ -15,6 +15,8 @@ import { auditDeadJobs } from '../specialist/dead-job-audit.js';
 import { SpecialistLoader } from '../specialist/loader.js';
 import { readValidatedGlobalUserConfig } from '../specialist/global-config.js';
 import { runChannelDoctorChecks, type ChannelDoctorInputs } from '../specialist/channel-doctor.js';
+import { describeCatalogCompatibility } from '../specialist/tool-catalog.js';
+import { loadSharedToolCatalogIndex, readPackageVersion, resolveGlobalNodeModulesDir } from '../pi/session.js';
 import { formatVersionCheckNudge, getVersionCheckResult, localVersion, readCachedVersionCheck } from './version-check.js';
 
 const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
@@ -166,6 +168,68 @@ function checkChannels(): boolean {
     return true;
   }
   ok('all locally-observable gates pass');
+  return true;
+}
+
+/**
+ * Catalog pins vs the extensions actually installed (SPECIALISTS-42 (d)).
+ *
+ * Fails only on a version outside the pin's compatibility line, which is the state where the
+ * runtime refuses that extension and every tool it contributes disappears. An install ahead of
+ * the baseline is reported as information, not a fault: the gate accepts it, so nothing else in
+ * the system would ever mention that the baseline is no longer what was verified.
+ */
+function checkCatalogs(): boolean {
+  section('Extension catalogs');
+  let entries: ReturnType<typeof describeCatalogCompatibility>;
+  try {
+    const index = loadSharedToolCatalogIndex(process.cwd());
+    const globalDir = resolveGlobalNodeModulesDir();
+    entries = describeCatalogCompatibility({
+      catalogs: index.catalogs,
+      // The runtime's own lookup, not a second copy of it: the doctor must describe the version
+      // the gate actually compares (SPECIALISTS-42 (d) review).
+      resolveInstalledVersion: (packageName) => {
+        if (!globalDir) return undefined;
+        return readPackageVersion(join(globalDir, packageName, 'package.json'));
+      },
+    });
+  } catch (error) {
+    warn(`could not read the tool catalog: ${error instanceof Error ? error.message : String(error)}`);
+    return false;
+  }
+
+  if (entries.length === 0) {
+    hint('no extension catalogs declared');
+    return true;
+  }
+
+  let failed = false;
+  for (const entry of entries) {
+    if (entry.level === 'out_of_range') {
+      console.log(`  ${red('✗')} ${entry.catalog}: ${entry.detail}`);
+      fix(`bump config/catalog/index.json (${entry.catalog}) or install a version inside the line`);
+      failed = true;
+      continue;
+    }
+    if (entry.level === 'ahead') {
+      // Deliberately not a warning: the runtime accepts this, and a doctor that cried wolf on a
+      // healthy install would train people to ignore the one line that predicts the next break.
+      console.log(`  ${dim('·')} ${entry.catalog}: ${entry.detail}`);
+      continue;
+    }
+    if (entry.level === 'absent') {
+      console.log(`  ${dim('?')} ${entry.catalog}: ${entry.detail}`);
+      continue;
+    }
+    console.log(`  ${green('✓')} ${entry.catalog}: ${entry.detail}`);
+  }
+
+  if (failed) {
+    fail('a catalog pin is outside the installed version\'s compatibility line');
+    return false;
+  }
+  ok('every installed extension is inside its catalog pin');
   return true;
 }
 
@@ -995,6 +1059,7 @@ export async function run(argv: readonly string[] = process.argv.slice(3)): Prom
   const spOk = checkSpAlias();
   const bdOk = checkBd();
   const xtOk = checkXt();
+  const catalogsOk = checkCatalogs();
   const versionOk = checkVersion();
   const skillDriftOk = checkSkillDrift();
   const userOverlayOk = checkUserOverlayDrift();
@@ -1003,7 +1068,7 @@ export async function run(argv: readonly string[] = process.argv.slice(3)): Prom
   const fragmentsOk = checkClaudeMdFragments();
   const overridesOk = await checkSpecialistOverrides();
 
-  const allOk = piOk && spOk && bdOk && xtOk && versionOk && skillDriftOk && userOverlayOk && dirsOk && jobsOk && fragmentsOk && overridesOk;
+  const allOk = piOk && spOk && bdOk && xtOk && catalogsOk && versionOk && skillDriftOk && userOverlayOk && dirsOk && jobsOk && fragmentsOk && overridesOk;
   console.log('');
   if (allOk) {
     console.log(`  ${green('✓')} ${bold('All checks passed')}  — specialists is healthy`);
