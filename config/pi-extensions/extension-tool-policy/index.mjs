@@ -49,6 +49,29 @@ function selectActiveTools(allTools, allowedNativeToolsEnv) {
   return active;
 }
 
+/** Environment channel carrying the extension tools the resolved contract promised. */
+const REQUIRED_EXTENSION_TOOLS_ENV_KEY = "PI_SPECIALIST_REQUIRED_EXTENSION_TOOLS";
+
+/**
+ * Promised tools this session did not actually activate (SPECIALISTS-42).
+ *
+ * `tools` is a hard filter in pi, so a tool that is named but absent from the registry, or
+ * registered but not admitted by the selection above, is simply not there — silently. The
+ * resolved contract is the promise; this session's active set is the fact. Reporting the gap
+ * is what turns "the child quietly had fewer tools than its contract declared" into a refusal.
+ *
+ * Empty when the channel is unset: a caller that does not declare a promise is not checked.
+ */
+export function missingPromisedTools(activeTools, requiredEnv) {
+  const required = (requiredEnv ?? "")
+    .split(",")
+    .map((name) => name.trim())
+    .filter((name) => name.length > 0);
+  if (required.length === 0) return [];
+  const active = new Set(activeTools);
+  return required.filter((name) => !active.has(name));
+}
+
 // Reviewed static guidance keyed by known high-leverage tool name. Never
 // generated from untrusted source strings; only looked up by tool name.
 // Conditional and non-mandatory: "use when relevant", not a ceremonial
@@ -96,6 +119,29 @@ export default function extensionToolPolicy(pi) {
         console.error(`[xtrm-tool-policy] failed to clear active tools: ${resetError?.message ?? String(resetError)}`);
         process.exit(1);
       }
+    }
+
+    // SPECIALISTS-42: verify the promise against the fact, AFTER selection and OUTSIDE the
+    // try/catch above. Before this, a contract that named a tool the session did not end up
+    // with produced a child whose real surface was smaller than the contract it was given,
+    // and nothing said so — the same invisibility that let a stale catalog pin erase the
+    // whole gitnexus surface unnoticed. Kept outside the catch deliberately: a refusal here
+    // is not a selection failure, and routing it through that handler would log the wrong
+    // reason and then continue.
+    const missing = missingPromisedTools(pi.getActiveTools(), process.env[REQUIRED_EXTENSION_TOOLS_ENV_KEY]);
+    if (missing.length > 0) {
+      console.error(
+        `[xtrm-tool-policy] contract promises tools this session did not activate: ${missing.join(", ")}. ` +
+          "Refusing to run with a smaller tool surface than the contract declares.",
+      );
+      try {
+        pi.setActiveTools([]);
+      } catch (resetError) {
+        console.error(`[xtrm-tool-policy] failed to clear active tools: ${resetError?.message ?? String(resetError)}`);
+      }
+      // Pi catches handler exceptions and continues, so an empty tool set alone is not a
+      // refusal — the process must end for this to be fail-closed.
+      process.exit(1);
     }
   });
 

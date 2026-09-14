@@ -68,6 +68,78 @@ const BUILTINS: FakeTool[] = [
   { name: 'ls', sourceInfo: { source: 'builtin', path: '<builtin:ls>' } },
 ];
 
+describe('promised-tool verification (SPECIALISTS-42)', () => {
+  it('reports the promised tools a session did not activate, and nothing else', async () => {
+    const policyPath = getExtensionToolPolicyExtensionPath();
+    const mod = await import(resolve(policyPath!));
+    const { missingPromisedTools } = mod as { missingPromisedTools: (a: string[], r?: string) => string[] };
+
+    expect(missingPromisedTools(['read', 'gitnexus_query'], 'read,gitnexus_query')).toEqual([]);
+    expect(missingPromisedTools(['read'], 'read,gitnexus_query')).toEqual(['gitnexus_query']);
+    // A caller that declares no promise is not checked — absent means "nothing to verify",
+    // not "verify everything".
+    expect(missingPromisedTools(['read'], '')).toEqual([]);
+    expect(missingPromisedTools(['read'], undefined)).toEqual([]);
+  });
+
+  it('refuses to run a model turn when the contract promised a tool the session lacks', async () => {
+    const factory = await loadPolicyFactory();
+    const { fake } = makeFakePi([
+      ...BUILTINS,
+      { name: 'gitnexus_query', sourceInfo: { source: 'extension', path: '/gitnexus' } },
+    ]);
+    const previous = process.env.PI_SPECIALIST_REQUIRED_EXTENSION_TOOLS;
+    process.env.PI_SPECIALIST_REQUIRED_EXTENSION_TOOLS = 'read,gitnexus_query,gitnexus_missing';
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    // Pi catches handler exceptions and continues, so fail-closed here means terminating the
+    // process; the mock converts that into a throw so the test can observe it.
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => {
+      throw new Error('process.exit called');
+    }) as never);
+    try {
+      factory(fake as never);
+      expect(() => fake.runSessionStart()).toThrow('process.exit called');
+      // Emptied first, so even a runtime that ignored the exit cannot run a model turn with
+      // an unverified surface.
+      expect(fake.getActive()).toEqual([]);
+      expect(errors.mock.calls.flat().join(' ')).toContain('gitnexus_missing');
+    } finally {
+      exit.mockRestore();
+      errors.mockRestore();
+      if (previous === undefined) delete process.env.PI_SPECIALIST_REQUIRED_EXTENSION_TOOLS;
+      else process.env.PI_SPECIALIST_REQUIRED_EXTENSION_TOOLS = previous;
+    }
+  });
+
+  it('does not refuse when every promised tool is active', async () => {
+    const factory = await loadPolicyFactory();
+    const { fake } = makeFakePi([
+      ...BUILTINS,
+      { name: 'gitnexus_query', sourceInfo: { source: 'extension', path: '/gitnexus' } },
+    ]);
+    const previous = process.env.PI_SPECIALIST_REQUIRED_EXTENSION_TOOLS;
+    const previousNatives = process.env.PI_SPECIALIST_ALLOWED_NATIVE_TOOLS;
+    process.env.PI_SPECIALIST_REQUIRED_EXTENSION_TOOLS = 'read,gitnexus_query';
+    // `read` is a builtin, so it is only admitted when the native allowlist grants it. Without
+    // this the session legitimately has no `read`, and the refusal would be correct.
+    process.env.PI_SPECIALIST_ALLOWED_NATIVE_TOOLS = 'read';
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => {
+      throw new Error('process.exit called');
+    }) as never);
+    try {
+      factory(fake as never);
+      expect(() => fake.runSessionStart()).not.toThrow();
+      expect(fake.getActive()).toEqual(['read', 'gitnexus_query']);
+    } finally {
+      exit.mockRestore();
+      if (previous === undefined) delete process.env.PI_SPECIALIST_REQUIRED_EXTENSION_TOOLS;
+      else process.env.PI_SPECIALIST_REQUIRED_EXTENSION_TOOLS = previous;
+      if (previousNatives === undefined) delete process.env.PI_SPECIALIST_ALLOWED_NATIVE_TOOLS;
+      else process.env.PI_SPECIALIST_ALLOWED_NATIVE_TOOLS = previousNatives;
+    }
+  });
+});
+
 describe('extension tool policy artifact', () => {
   it('activates exactly the granted natives plus extension-class tools', async () => {
     const factory = await loadPolicyFactory();

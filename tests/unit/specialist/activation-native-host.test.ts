@@ -116,6 +116,10 @@ function makeSdk(record: { createArgs?: Record<string, unknown> }, session: PiAg
   return {
     createAgentSession: async (options?: Record<string, unknown>) => {
       record.createArgs = options;
+      // Model pi's HARD FILTER faithfully: the session exposes exactly the tools it was
+      // named, no more. Without this the fake reports a fixed list and every activation
+      // passes the post-load verification for the wrong reason (SPECIALISTS-42).
+      if (Array.isArray(options?.tools)) session.setActiveToolsByName(options.tools as string[]);
       return { session };
     },
     DefaultResourceLoader: FakeResourceLoader,
@@ -1270,6 +1274,10 @@ describe('NativeActivationHost — fallback walk + retry (unitAI-3emr7)', () => 
     const listeners: Array<(e: PiAgentSessionEvent) => void> = [];
     const messages: unknown[] = [];
     let n = 0;
+    // Model pi's HARD FILTER: this session exposes exactly the tools it was named
+    // (SPECIALISTS-42). Reporting a fixed empty set made the post-load verification fire
+    // for a reason that had nothing to do with what these tests are about.
+    let activeTools: string[] = [];
     const session = {
       sessionId: `pi-sess-${(sessionCounter += 1)}`,
       messages,
@@ -1297,8 +1305,8 @@ describe('NativeActivationHost — fallback walk + retry (unitAI-3emr7)', () => 
         listeners.push(l);
         return () => { const i = listeners.indexOf(l); if (i >= 0) listeners.splice(i, 1); };
       },
-      getActiveToolNames: () => [] as string[],
-      setActiveToolsByName() {},
+      getActiveToolNames: () => activeTools,
+      setActiveToolsByName(names: string[]) { activeTools = names; },
       async waitForIdle() {},
     };
     return session as unknown as PiAgentSessionLike & { prompts: string[]; disposed: boolean; sessionId: string };
@@ -1311,6 +1319,10 @@ describe('NativeActivationHost — fallback walk + retry (unitAI-3emr7)', () => 
         created.push((options as { model?: unknown } | undefined)?.model);
         const session = sessions[created.length - 1];
         if (!session) throw new Error(`chainSdk: no session scripted for model attempt ${created.length}`);
+        // Faithful to pi: the session exposes the tools it was named (SPECIALISTS-42).
+        if (Array.isArray((options as { tools?: unknown } | undefined)?.tools)) {
+          session.setActiveToolsByName((options as { tools: string[] }).tools);
+        }
         return { session };
       },
       DefaultResourceLoader: FakeResourceLoader,
@@ -1936,6 +1948,37 @@ describe('task-prompt composition parity (SPECIALISTS-22)', () => {
   it('renders no dependency section when nothing is completed', async () => {
     const { session } = await dispatchWith({});
     expect(session.prompts[0]).not.toContain('## Context from completed dependencies:');
+  });
+
+  it('refuses to launch when the session does not expose a tool the contract promised', async () => {
+    // SPECIALISTS-42 (c): this runtime does not load the tool-policy gate, so the promise is
+    // verified against the live session here. `read` is always in a READ_ONLY contract's
+    // toolsList, so dropping it is a failure on any host, with or without extensions.
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record });
+    const spec = readOnlySpec() as { specialist: { metadata: Record<string, unknown> } };
+    spec.specialist.metadata.name = 'researcher';
+    const sdk = makeSdk(record, session);
+    const original = sdk.createAgentSession;
+    sdk.createAgentSession = async (options?: Record<string, unknown>) => {
+      const created = await original(options);
+      const named = Array.isArray(options?.tools) ? (options!.tools as string[]) : [];
+      // Model pi dropping a promised tool — the failure this verification exists for.
+      session.setActiveToolsByName(named.filter((tool) => tool !== 'read'));
+      return created;
+    };
+    const host = new NativeActivationHost({
+      loader: loaderFor(spec),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => sdk,
+      cwd: hostWorkspace(),
+    });
+
+    await expect(host.start({ specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator' }))
+      .rejects.toThrow(/tool_contract_unsatisfied|did not expose read/);
+    // Disposed rather than left running with an unverified surface.
+    expect(session.disposed).toBe(true);
   });
 
   it('injects the resolved tool contract into the task prompt, as the legacy path does', async () => {

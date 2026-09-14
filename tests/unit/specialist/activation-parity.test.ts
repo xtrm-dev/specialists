@@ -173,6 +173,10 @@ function sdkFor(record: { createArgs?: Record<string, unknown> }, session: PiAge
   return {
     createAgentSession: async (options?: Record<string, unknown>) => {
       record.createArgs = options;
+      // Model pi's HARD FILTER faithfully: the session exposes exactly the tools it was
+      // named, no more. Without this the fake reports a fixed list and every activation
+      // passes the post-load verification for the wrong reason (SPECIALISTS-42).
+      if (Array.isArray(options?.tools)) session.setActiveToolsByName(options.tools as string[]);
       return { session };
     },
     ModelRuntime: { create: async () => ({ hasConfiguredAuth: () => true }) },

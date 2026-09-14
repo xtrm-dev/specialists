@@ -109,7 +109,14 @@ describe('NativeActivationHost — bead gate admission', () => {
   function hostWith(bead: unknown, created: { count: number }) {
     const session = { sessionId: 's1', messages: [], isIdle: true } as unknown as PiAgentSessionLike;
     const sdk: PiSdk = {
-      createAgentSession: async () => { created.count += 1; return { session }; },
+      createAgentSession: async (options?: Record<string, unknown>) => {
+        created.count += 1;
+      // Model pi's HARD FILTER: the session exposes exactly the tools it was named. Without
+      // this the fake reports a fixed list, and the post-load verification added by
+      // SPECIALISTS-42 passes for a reason that has nothing to do with the test.
+      if (Array.isArray(options?.tools)) session.getActiveToolNames = () => options!.tools as string[];
+        return { session };
+      },
       DefaultResourceLoader: FakeResourceLoader,
       getAgentDir: () => FAKE_AGENT_DIR,
       ModelRuntime: { create: async () => ({ hasConfiguredAuth: () => true }) },
@@ -275,7 +282,14 @@ describe('extractPurposeExcerpt (unitAI-uvg4j)', () => {
       async waitForIdle() {},
     } as unknown as PiAgentSessionLike;
     const sdk: PiSdk = {
-      createAgentSession: async () => { created.count += 1; return { session }; },
+      createAgentSession: async (options?: Record<string, unknown>) => {
+        created.count += 1;
+      // Model pi's HARD FILTER: the session exposes exactly the tools it was named. Without
+      // this the fake reports a fixed list, and the post-load verification added by
+      // SPECIALISTS-42 passes for a reason that has nothing to do with the test.
+      if (Array.isArray(options?.tools)) session.getActiveToolNames = () => options!.tools as string[];
+        return { session };
+      },
       DefaultResourceLoader: FakeResourceLoader,
       getAgentDir: () => FAKE_AGENT_DIR,
       ModelRuntime: { create: async () => ({ hasConfiguredAuth: () => true }) },

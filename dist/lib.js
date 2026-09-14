@@ -7017,6 +7017,7 @@ function getExtensionToolPolicyExtensionPath() {
   return cached2;
 }
 var NATIVE_TOOLS_ENV_KEY = "PI_SPECIALIST_ALLOWED_NATIVE_TOOLS";
+var REQUIRED_EXTENSION_TOOLS_ENV_KEY = "PI_SPECIALIST_REQUIRED_EXTENSION_TOOLS";
 
 // src/pi/python-kernel-extension.ts
 import { existsSync as existsSync3 } from "node:fs";
@@ -11443,6 +11444,7 @@ function applyExtensionToolPolicyGate(args, contract, env) {
   args.push("--no-builtin-tools");
   args.push("-e", policyPath);
   env[NATIVE_TOOLS_ENV_KEY] = contract.nativeTools.join(",");
+  env[REQUIRED_EXTENSION_TOOLS_ENV_KEY] = contract.extensionTools.join(",");
 }
 function isRemoteExtensionSource(source) {
   return source.startsWith("npm:") || source.startsWith("git:") || source.startsWith("http://") || source.startsWith("https://");
@@ -22323,7 +22325,24 @@ class NativeActivationHost {
       tools: [...toolContract.toolsList, ASK_TOOL, ESCALATE_TOOL],
       systemPrompt: systemPrompt.text
     };
-    const { session } = await sdk.createAgentSession({ ...baseSessionOptions, model: modelCheck.model });
+    const PROMISED_TOOLS = [...toolContract.toolsList];
+    const missingPromisedTools = (candidate) => {
+      const active = new Set(candidate.getActiveToolNames());
+      return PROMISED_TOOLS.filter((tool) => !active.has(tool));
+    };
+    const createVerifiedSession = async (model) => {
+      const created = await sdk.createAgentSession({ ...baseSessionOptions, model });
+      const missing = missingPromisedTools(created.session);
+      if (missing.length > 0) {
+        created.session.dispose();
+        return reject("tool_contract_unsatisfied", {
+          missing,
+          note: `the session did not expose ${missing.join(", ")}; the resolved contract promised them, ` + "and a native activation is never launched with a smaller tool surface than its contract declares"
+        });
+      }
+      return created.session;
+    };
+    const session = await createVerifiedSession(modelCheck.model);
     let binding;
     try {
       binding = workItems.bind({
@@ -22343,10 +22362,7 @@ class NativeActivationHost {
         note: error instanceof Error ? error.message : String(error)
       });
     }
-    const createSessionForModel = async (model) => {
-      const created = await sdk.createAgentSession({ ...baseSessionOptions, model });
-      return created.session;
-    };
+    const createSessionForModel = createVerifiedSession;
     const purpose = purposeExcerptFromContract(view.contract);
     const startedAt = this.now();
     const toolContractNotes = [...new Set([...toolContract.warnings, ...toolContract.downgradeReasons])];

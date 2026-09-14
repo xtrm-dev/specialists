@@ -154,7 +154,14 @@ function hostWith(fixture: HostFixture = {}) {
   const workspace = tempWorkspace();
   const session = fakeSession(fixture.failFirst);
   const sdk: PiSdk = {
-    createAgentSession: async () => { sessionsCreated.count += 1; return { session }; },
+    createAgentSession: async (options?: Record<string, unknown>) => {
+      sessionsCreated.count += 1;
+      // Model pi's HARD FILTER faithfully: the session exposes exactly the tools it was
+      // named, no more. Without this the fake reports a fixed list and every activation
+      // passes the post-load verification for the wrong reason (SPECIALISTS-42).
+      if (Array.isArray(options?.tools)) session.setActiveToolsByName(options.tools as string[]);
+      return { session };
+    },
     DefaultResourceLoader: FakeResourceLoader,
     getAgentDir: () => FAKE_AGENT_DIR,
     ModelRuntime: { create: async () => ({ hasConfiguredAuth: () => true }) },
