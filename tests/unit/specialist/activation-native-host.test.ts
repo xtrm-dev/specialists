@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { execSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -49,6 +49,7 @@ import { NativeActivationHost, resolveWorkspace, type ActivationForensicSink } f
 import { buildSystemPrompt } from '../../../src/specialist/system-prompt.js';
 import { resolveOutputContractSchema } from '../../../src/specialist/runner.js';
 import { DispatchRejectedError } from '../../../src/activation/types.js';
+import { acquire as acquireLease, leasePath } from '../../../src/activation/workspace-lease.js';
 import type { PiSdk, PiAgentSessionLike, PiAgentSessionEvent } from '../../../src/activation/pi-sdk.js';
 import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
 import type { SpecialistWorkItemBoundary, WorkItemView } from '../../../src/activation/workitem-store.js';
@@ -1402,6 +1403,126 @@ describe('NativeActivationHost — fallback walk + retry (unitAI-3emr7)', () => 
       error_class: 'rate_limit',
       terminal: false,
     });
+  });
+
+  it('re-acquires the writer lease for a fallback attempt after a SETTLED failure', async () => {
+    // SPECIALISTS-46. The thrown-error fallback tests above never settle, so the failed writer
+    // keeps its lease and the walk inherits one by accident. A retryable failure is normally a
+    // settled turn with a bad stopReason, and settling releases the lease unconditionally
+    // (onSessionEvent, agent_settled). The walk then created the next session with no
+    // acquireLease anywhere, so attempt 2 ran holding nothing and every mutating call it made
+    // was refused by admitToolCall: a full model turn spent on writes that could not happen.
+    const primary = scriptSession([{ text: '', stopReason: 'error', errorMessage: '429: monthly usage limit reached' }]);
+    const fallback = scriptSession([{ text: 'recovered' }]);
+    const { host } = chainHost({
+      executionExtra: { fallback_models: ['fallbackprov/fallback-model'] },
+      sessions: [primary, fallback],
+      permission: 'HIGH',
+    });
+
+    const handle = await host.start({
+      specialist: 'executor', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    });
+    const workspace = host.inspect(handle.activationId)!.workspace;
+
+    // Observed at the moment the fallback attempt actually runs, which is the only moment the
+    // question is about. After the activation ends the lease is released either way.
+    let leaseHeldDuringFallback: boolean | undefined;
+    const originalPrompt = fallback.prompt.bind(fallback);
+    fallback.prompt = async (text: string) => {
+      leaseHeldDuringFallback = existsSync(leasePath(workspace));
+      return originalPrompt(text);
+    };
+
+    const result = await handle.result;
+    expect(result.fallbackUsed).toBe(true);
+    expect(leaseHeldDuringFallback).toBe(true);
+  });
+
+  it('releases the re-acquired lease when the fallback session cannot be created', async () => {
+    // SPECIALISTS-46 review. Re-acquiring before the session exists is the right order - a writer
+    // takes the lease BEFORE it has a session - but it needs a failure branch: with no session,
+    // nothing settles, and the completion release sits in a branch that never runs. The lease
+    // would then be held by this long-lived process and every later writer refused. The likely
+    // trigger is a fallback walk, which exists because a provider is already misbehaving.
+    const primary = scriptSession([{ text: '', stopReason: 'error', errorMessage: '429: monthly usage limit reached' }]);
+    const workspace = hostWorkspace();
+    const created: unknown[] = [];
+    // No session scripted for the fallback model, so record.createSession throws for it.
+    const sdk = chainSdk(created, [primary]);
+    const spec = readOnlySpec({ model: 'primaryprov/primary-model', fallback_models: ['fallbackprov/fallback-model'] });
+    (spec.specialist.execution as Record<string, unknown>).permission_required = 'HIGH';
+    const sink = collectingSink();
+    const host = new NativeActivationHost({
+      loader: loaderFor(spec),
+      workItems: fakeWorkItems(),
+      forensics: sink,
+      loadSdk: async () => sdk,
+      cwd: workspace,
+    });
+
+    const handle = await host.start({
+      specialist: 'executor', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    });
+    const result = await handle.result;
+    const identity = host.inspect(handle.activationId)!.workspace;
+
+    expect(result.status).toBe('failed');
+    // The lease is gone...
+    expect(existsSync(leasePath(identity))).toBe(false);
+    // ...and the workspace is takeable, which is the consequence that matters. acquireLease is
+    // the same call start() makes, so this asserts admission rather than an internal flag.
+    expect(() =>
+      acquireLease({ workspace: identity, activationId: 'act:second-writer', attemptId: 'att:second-writer:1', specialist: 'executor' }),
+    ).not.toThrow();
+  });
+
+  it('ends the fallback walk with a lease reason when the workspace cannot be re-taken', async () => {
+    // SPECIALISTS-46, contention half. The walk re-acquires now, so it can also fail to. When it
+    // does, the reason must name the lease: a silent model_fallback would send an operator
+    // looking at the model for what is actually a workspace that could not be taken.
+    const primary = scriptSession([{ text: '', stopReason: 'error', errorMessage: '429: monthly usage limit reached' }]);
+    const fallback = scriptSession([{ text: 'recovered' }]);
+    const workspace = hostWorkspace();
+    const created: unknown[] = [];
+    const sdk = chainSdk(created, [primary, fallback]);
+    const spec = readOnlySpec({ model: 'primaryprov/primary-model', fallback_models: ['fallbackprov/fallback-model'] });
+    (spec.specialist.execution as Record<string, unknown>).permission_required = 'HIGH';
+
+    // The seam the walk itself uses to validate the fallback model. Stealing the workspace here
+    // lands it after attempt 1 settled and released, and before the walk re-acquires.
+    const identity = resolveWorkspace(workspace);
+    const originalResolve = sdk.resolveModelScopeWithDiagnostics;
+    let stolen = false;
+    sdk.resolveModelScopeWithDiagnostics = (patterns: string[]) => {
+      const result = originalResolve(patterns);
+      if (!stolen && patterns[0] === 'fallbackprov/fallback-model') {
+        stolen = true;
+        acquireLease({ workspace: identity, activationId: 'act:other-writer', attemptId: 'att:other-writer:1', specialist: 'other-specialist' });
+      }
+      return result;
+    };
+
+    const sink = collectingSink();
+    const host = new NativeActivationHost({
+      loader: loaderFor(spec),
+      workItems: fakeWorkItems(),
+      forensics: sink,
+      loadSdk: async () => sdk,
+      cwd: workspace,
+    });
+
+    const handle = await host.start({
+      specialist: 'executor', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    });
+    const result = await handle.result;
+
+    expect(stolen).toBe(true);
+    expect(result.status).toBe('failed');
+    expect(sink.events.find(e => e.name === 'lease_denied')?.payload).toMatchObject({ on: 'fallback' });
+    const terminal = sink.events.filter(e => e.name === 'model_fallback').at(-1);
+    expect(terminal?.payload).toMatchObject({ terminal: true });
+    expect(String((terminal?.payload as Record<string, unknown>)?.note)).toContain('workspace lease');
   });
 
   it('walks the chain on the silent stopReason-error path too', async () => {

@@ -1453,10 +1453,62 @@ export class NativeActivationHost {
         attempt_n: index + 2,
         resolved_model: check.resolvedModel ?? nextModel,
       });
+      // SPECIALISTS-46: re-acquire before creating the next session, exactly as retry() does.
+      // Settling releases the lease unconditionally (onSessionEvent, agent_settled), and a
+      // retryable failure is normally a settled turn with a bad stopReason — so without this the
+      // fallback attempt ran holding nothing, and every mutating call it made was refused by
+      // admitToolCall. The result was a full model turn spent on writes that could not happen,
+      // reported as the model's outcome rather than as "fallback could not proceed".
+      // The SAME attempt id: a fallback is a new model under one attempt, not a new attempt.
+      if (record.snapshot.access === 'write') {
+        try {
+          acquireLease({
+            workspace: record.snapshot.workspace,
+            activationId: record.snapshot.activationId,
+            attemptId: record.snapshot.attemptId,
+            specialist: record.snapshot.specialist,
+          });
+        } catch (error) {
+          // Contention ends the walk with a reason that names the lease. A silent
+          // model_fallback here would leave the operator reading a model failure for what is
+          // actually a workspace that could not be taken.
+          if (error instanceof DispatchRejectedError) {
+            this.forensics.emit({
+              activationId: record.snapshot.activationId,
+              attemptId: record.snapshot.attemptId,
+              participantId: record.snapshot.participantId,
+              specialist: record.snapshot.specialist,
+              beadId: record.snapshot.issueRef,
+              name: 'lease_denied',
+              payload: { reason: error.reason, note: error.detail.holder, on: 'fallback' },
+            });
+          }
+          ctx.emit('model_fallback', {
+            from_model: fromModel,
+            to_model: nextModel,
+            error_class: errorClass,
+            terminal: true,
+            note:
+              'fallback could not acquire the workspace lease: ' +
+              (error instanceof Error ? error.message : String(error)),
+            resolved_model: fromModel,
+          });
+          break;
+        }
+      }
+
       let nextSession: PiAgentSessionLike;
       try {
         nextSession = await record.createSession(check.model);
       } catch (error) {
+        // The lease was taken above and no session will run under it, so it must go back or it
+        // is held by this long-lived process for the rest of its life (SPECIALISTS-46 review).
+        // Nothing else releases on this path: the settle release needs a session to settle, and
+        // releaseIfWriter on completion sits inside runToSettled's success branch, which never
+        // runs. This is the likely branch too - a fallback walk runs precisely because a
+        // provider is misbehaving, so a failed session creation is expected rather than exotic.
+        // Same shape as retry() after the #354 review.
+        this.releaseIfWriter(record.snapshot, 'fallback_session_unavailable');
         ctx.emit('model_fallback', {
           from_model: fromModel,
           to_model: nextModel,
