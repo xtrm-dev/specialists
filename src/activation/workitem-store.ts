@@ -26,10 +26,13 @@
 // (xtrm-6qu.7.2): until the producer gate pins same-holder semantics, this
 // consumer refuses to inherit a foreign or cross-activation claim.
 
+import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { DatabaseSync } from 'node:sqlite';
+import { resolveGlobalNodeModulesDir } from '../pi/session.js';
 import { extractSections, scrutinyLevel, validateContractText } from './contract-sections.js';
 import { resolveAuthorityDbPath } from './authority-store.js';
 
@@ -69,6 +72,27 @@ const SUBSTRATE_PACKAGE = '@jaggerxtrm/substrate';
  * production. SPECIALISTS-24 fixed the same defect independently with an equivalent seam under
  * a different name; that duplicate was dropped when this branch merged master, so exactly one
  * seam remains.
+ *
+ * MEASURED (closeout §3), because the answer is counter-intuitive and it decides the install
+ * contract. Typical module resolution is NOT sufficient for the XTRM-managed layout:
+ *
+ *   - Core's `xt init` enrolls Substrate with `npm install --global <checkout>`. On npm 7+ a
+ *     folder install is a SYMLINK, so `<prefix>/lib/node_modules/@jaggerxtrm/substrate` points at
+ *     the checkout and `<prefix>/lib/node_modules/@jaggerxtrm/specialists` points at the
+ *     Specialists checkout.
+ *   - Default resolution dereferences the Specialists symlink and walks the ancestors of the
+ *     CHECKOUT, not of the prefix. Measured on a synthetic prefix with a symlinked Specialists
+ *     checkout that carries no local Substrate: plain `require.resolve` FAILS under node. (Under
+ *     bun it appeared to succeed, but resolved Bun's own install cache, which is an artifact of
+ *     this machine and not the npm global layout.)
+ *   - A TARBALL/registry global install is a real directory and DOES resolve by the ancestor walk,
+ *     which is why the failure is invisible to anyone whose Specialists install is not a folder
+ *     link — the exact shape Core produces.
+ *
+ * So the npm prefix is tried explicitly as a FALLBACK, after normal resolution, via
+ * `resolve(spec, { paths: [<prefix>/lib] })` — measured to find the real checkout behind the
+ * global symlink under BOTH node and bun where plain resolution failed. Precedence is unchanged:
+ * an explicit checkout, then the injected seam, then ordinary resolution, then the prefix.
  */
 function resolveSubstrateDir(explicit: string, resolveInstalled?: () => string | null): string | null {
   const trimmed = explicit.trim();
@@ -77,10 +101,54 @@ function resolveSubstrateDir(explicit: string, resolveInstalled?: () => string |
   try {
     return dirname(require.resolve(`${SUBSTRATE_PACKAGE}/package.json`));
   } catch {
-    // Not installed. Absence is an ordinary state, not an error to report here:
+    // Not resolvable from here. Absence is an ordinary state, not an error to report here:
     // the caller turns it into work_item_store_unavailable with both remedies.
-    return null;
   }
+  return resolveSubstrateFromGlobalPrefix();
+}
+
+/**
+ * Substrate installed under an npm-style global prefix, which the ancestor walk cannot reach
+ * through a symlinked Specialists install. See the measurement note on `resolveSubstrateDir`.
+ *
+ * Each candidate is a `<prefix>/lib` directory, because `resolve(spec, { paths })` appends
+ * `node_modules` itself. Deduplicated and existence-checked so a candidate that cannot possibly
+ * hold the package costs nothing.
+ */
+export function resolveSubstrateFromGlobalPrefix(libDirs?: readonly string[]): string | null {
+  const globalModules = resolveGlobalNodeModulesDir();
+  const runtimePrefix = dirname(dirname(process.execPath));
+  const candidates = uniqueExistingLibDirs(libDirs ?? [
+    globalModules ? dirname(globalModules) : undefined,
+    join(runtimePrefix, 'lib'),
+    // Bun's global install root, which is neither `<prefix>/lib` nor seen by the node walk.
+    join(homedir(), '.bun', 'install', 'global'),
+  ]);
+  for (const libDir of candidates) {
+    try {
+      return dirname(require.resolve(`${SUBSTRATE_PACKAGE}/package.json`, { paths: [libDir] }));
+    } catch {
+      // Try the next prefix. A miss here is not an error: the caller reports the remedies.
+    }
+  }
+  return null;
+}
+
+function uniqueExistingLibDirs(candidates: readonly (string | undefined)[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const normalized = join(candidate);
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    try {
+      if (existsSync(normalized)) out.push(normalized);
+    } catch {
+      // Unreadable candidate: skip it rather than fail the whole resolution.
+    }
+  }
+  return out;
 }
 
 /**
@@ -106,6 +174,14 @@ export function resolveWorkItemDbPath(env: NodeJS.ProcessEnv = process.env): str
  * so params are normalized where the two disagree; nothing else differs on the
  * prepare/exec/close surface. Opening a database is generic sqlite work and
  * carries no Substrate code.
+ *
+ * SPECIALISTS-59: each driver attempt is recorded rather than discarded. The
+ * `node:sqlite` require used to sit OUTSIDE a try, so on bun — where that built-in does not
+ * exist — a genuine open failure (a missing parent directory is the usual cause) was replaced
+ * by the module-resolution error `ResolveMessage: No such built-in module: node:sqlite`. That
+ * string names neither the store nor a remedy, and it escaped the caller's normalized
+ * `work_item_store_unavailable` refusal. Reachable on any host whose HOME has no `.xtrm`
+ * directory: containers, service accounts, systemd units, sudo with a different HOME.
  */
 export function openSubstrateDb(dbPath: string): DatabaseSync {
   const applyPragmas = (db: { exec(sql: string): void }): void => {
@@ -114,6 +190,8 @@ export function openSubstrateDb(dbPath: string): DatabaseSync {
     db.exec('PRAGMA synchronous = FULL');
     db.exec('PRAGMA foreign_keys = ON');
   };
+  /** Why each driver was not used. Reported together, so the real cause is never the last one tried. */
+  const failures: string[] = [];
   try {
     const bun = require('bun:sqlite') as { Database?: new (path: string) => { exec(sql: string): void } };
     if (bun?.Database) {
@@ -121,16 +199,25 @@ export function openSubstrateDb(dbPath: string): DatabaseSync {
       applyPragmas(db);
       return db as unknown as DatabaseSync;
     }
-  } catch {
-    // Fall through to node:sqlite.
+    failures.push('bun:sqlite: module exposes no Database export');
+  } catch (error) {
+    failures.push(`bun:sqlite: ${error instanceof Error ? error.message : String(error)}`);
   }
-  const node = require('node:sqlite') as { DatabaseSync?: new (path: string) => { exec(sql: string): void } };
-  if (node?.DatabaseSync) {
-    const db = new node.DatabaseSync(dbPath);
-    applyPragmas(db);
-    return db as unknown as DatabaseSync;
+  try {
+    const node = require('node:sqlite') as { DatabaseSync?: new (path: string) => { exec(sql: string): void } };
+    if (node?.DatabaseSync) {
+      const db = new node.DatabaseSync(dbPath);
+      applyPragmas(db);
+      return db as unknown as DatabaseSync;
+    }
+    failures.push('node:sqlite: module exposes no DatabaseSync export');
+  } catch (error) {
+    failures.push(`node:sqlite: ${error instanceof Error ? error.message : String(error)}`);
   }
-  throw new Error(`work-item store: no sqlite driver for ${dbPath}`);
+  throw new Error(
+    `work-item store: cannot open the sqlite store at ${dbPath} `
+      + `(bun:sqlite and node:sqlite both unavailable: ${failures.join('; ')})`,
+  );
 }
 
 /** One resolved issue revision, flattened for the admission and render surface. */
@@ -305,7 +392,36 @@ export interface SpecialistWorkItemBoundary {
   appendResult?(ref: string, input: SettlementResultInput): { entryId: string; sequence: number };
   allocateReceipt?(bindingId: string): WorkReceiptView;
   attachArtifact?(receiptId: string, kind: string, value: string): SettlementArtifactView;
+  /**
+   * Reconciliation reads (SPECIALISTS-54). A republish has to prove it is the FIRST publication
+   * of (activation, attempt) before it writes anything, because neither the receipt nor the
+   * Journal append is idempotent.
+   *
+   * TRI-STATE, deliberately. Collapsing "no receipt exists" and "this boundary cannot tell me"
+   * into one falsy answer is how a republish mints a SECOND receipt: the caller cannot
+   * distinguish a proven absence from an unanswerable question, and defaults to the safe-looking
+   * "absent". Optional for the same reason as the writers: a boundary without them defers.
+   */
+  findResultEntry?(ref: string, key: { activationId: string; attemptId: string }): SettlementLookup<{ entryId: string }>;
+  /** The receipt already allocated over a binding, if any. One receipt per binding is the rule. */
+  findReceiptForBinding?(ref: string, bindingId: string): SettlementLookup<{ receiptId: string }>;
 }
+
+/** The attempt an entry belongs to, read from the envelope first and the fake-only flat field second. */
+function attemptOfEntry(entry: { attemptId?: string | null; executionContext?: { specialist?: { attemptId?: string | null } | null } | null }): string | null {
+  return entry.executionContext?.specialist?.attemptId ?? entry.attemptId ?? null;
+}
+
+/**
+ * The answer to "did this already land?".
+ *
+ * `absent` is a PROOF that nothing was written; `unavailable` is the absence of a proof. Only
+ * `absent` licenses a write.
+ */
+export type SettlementLookup<T> =
+  | { status: 'found'; value: T }
+  | { status: 'absent' }
+  | { status: 'unavailable'; reason: string };
 
 /** Structural view of the producer's active claim — the only claim fields the seam reads. */
 export interface ActiveClaimView {
@@ -378,12 +494,28 @@ export interface JournalServicePort {
     activationId?: string;
     sessionId?: string;
   }): { id: string; sequence: number };
+  /** Existing entries, for the settlement reconciliation read (SPECIALISTS-54). */
+  listEntries?(issueId: string, opts?: { kind?: string; limit?: number }): Array<{
+    id: string;
+    kind?: string;
+    activationId?: string | null;
+    /**
+     * NOT a producer field. `issue_journal` has no attempt column (substrate
+     * src/domain/journal.ts:193-211), so the real entry never carries this — it is declared only so
+     * a fake can supply it. The ATTEMPT identity that does exist is
+     * `executionContext.specialist.attemptId`, which is why matching reads that.
+     */
+    attemptId?: string | null;
+    executionContext?: { specialist?: { attemptId?: string | null } | null } | null;
+  }>;
 }
 
 /** Structural port over the producer's provenance service (S1 receipt publication). */
 export interface ProvenanceServicePort {
   allocateReceipt(bindingId: string): { id: string; executionBindingId: string; issueId: string; issueRevision: number; contractHash: string };
   attachArtifact(receiptId: string, kind: string, value: string): { receiptId?: string; kind?: string; value?: string };
+  /** Receipts already allocated for an issue, for the reconciliation read (SPECIALISTS-54). */
+  listReceipts?(issueId: string): Array<{ id: string; executionBindingId: string }>;
 }
 
 /** The injected ports `createWorkItemBoundary` programs against. */
@@ -643,6 +775,50 @@ export function createWorkItemBoundary(ports: WorkItemPorts): SpecialistWorkItem
               value: attached.value ?? value,
             };
           },
+          // Reconciliation reads (SPECIALISTS-54). Every way of failing to answer returns
+          // `unavailable`, never `absent`: a missing method, a service that is not wired, and a
+          // query that throws are all "cannot prove", and treating any of them as "nothing
+          // there" is what would mint a duplicate receipt.
+          findResultEntry(ref: string, key: { activationId: string; attemptId: string }): SettlementLookup<{ entryId: string }> {
+            if (!journalService?.listEntries) {
+              return { status: 'unavailable', reason: 'journal service exposes no entry listing' };
+            }
+            try {
+              const entries = journalService.listEntries(issues.resolveRef(ref).id, { kind: 'result' });
+              const forActivation = entries.filter((entry) => entry.activationId === key.activationId);
+              // The attempt lives in the X1 envelope, NOT as a flat column: `issue_journal` has no
+              // attempt_id (substrate src/domain/journal.ts:193-211). Matching on a flat
+              // `entry.attemptId` compared `null` to a real attempt id and could never succeed, so
+              // an append that had actually landed read as "absent" and the republish appended a
+              // SECOND Journal result.
+              const match = forActivation.find((entry) => attemptOfEntry(entry) === key.attemptId);
+              if (match) return { status: 'found', value: { entryId: match.id } };
+              const unattributed = forActivation.filter((entry) => attemptOfEntry(entry) === null);
+              if (unattributed.length > 0) {
+                // Entries exist for this activation but none names an attempt, so "absent" cannot
+                // be proven — and claiming it would license a duplicate append.
+                return {
+                  status: 'unavailable',
+                  reason: `${unattributed.length} Journal result(s) for this activation carry no attempt attribution`,
+                };
+              }
+              return { status: 'absent' };
+            } catch (error) {
+              return { status: 'unavailable', reason: error instanceof Error ? error.message : String(error) };
+            }
+          },
+          findReceiptForBinding(ref: string, bindingId: string): SettlementLookup<{ receiptId: string }> {
+            if (!provenanceService?.listReceipts) {
+              return { status: 'unavailable', reason: 'provenance service exposes no receipt listing' };
+            }
+            try {
+              const rows = provenanceService.listReceipts(issues.resolveRef(ref).id);
+              const match = rows.find((receipt) => receipt.executionBindingId === bindingId);
+              return match ? { status: 'found', value: { receiptId: match.id } } : { status: 'absent' };
+            } catch (error) {
+              return { status: 'unavailable', reason: error instanceof Error ? error.message : String(error) };
+            }
+          },
         }
       : {}),
   };
@@ -744,12 +920,42 @@ export async function openWorkItemBoundary(opts: OpenWorkItemsOptions = {}): Pro
     }
   }
   const dbPath = opts.dbPath ?? resolveWorkItemDbPath(env);
-  const db = openSubstrateDb(dbPath);
-  runner.migrate(db);
-  const issueService = new issueSvcMod.IssueService(db) as IssueServicePort & {
+  // SPECIALISTS-59: opening the store and running migrations is the point at which the lookup
+  // depends on the HOST rather than on the package. Anything thrown here (an unopenable store, a
+  // migration that refuses, a missing HOME/.xtrm directory) is normalized into the same refusal
+  // the rest of this function uses, so the caller never sees a raw runtime error in place of a
+  // remedy. The drivers' own messages are kept, so the cause is still named.
+  const storeRefusal = (error: unknown): Error => new Error(
+    `work_item_store_unavailable: cannot open the Substrate store at ${dbPath} `
+      + `(set SUBSTRATE_DB or XTRM_STATE_DB to a writable database path, or install `
+      + `${SUBSTRATE_PACKAGE}): ${error instanceof Error ? error.message : String(error)}`,
+  );
+  let db: DatabaseSync;
+  try {
+    db = openSubstrateDb(dbPath);
+    runner.migrate(db);
+  } catch (error) {
+    throw storeRefusal(error);
+  }
+  // Constructing the producer services is host-dependent too: the pinned producer assigns fields,
+  // but a producer that validated on construction would throw here, and that must surface as the
+  // same refusal rather than as a raw error. The previous comment claimed db-open was the last such
+  // point while these four sat outside it.
+  let issueService: IssueServicePort & {
     listActiveEdges(): Array<{ fromIssue: string; toIssue: string; kind: string; active: boolean }>;
     getIssue(id: string): { id: string; humanRef: string; title: string; currentRevision: number; lifecycleState: string };
   };
+  let journalSvc: InstanceType<typeof journalMod.JournalService>;
+  let provenance: InstanceType<typeof provMod.ProvenanceService>;
+  let store: IssueStorePort;
+  try {
+    issueService = new issueSvcMod.IssueService(db) as typeof issueService;
+    journalSvc = new journalMod.JournalService(db, issueService);
+    provenance = new provMod.ProvenanceService(db, issueService, journalSvc);
+    store = new storeMod.SubstrateIssueStore(issueService, journalSvc) as IssueStorePort;
+  } catch (error) {
+    throw storeRefusal(error);
+  }
   // The blocker traversal lives here, over the producer's own edge list, so the boundary
   // stays the single consumer surface and no host queries the store directly.
   issueService.getBlockers = (childId: string): BlockerIssue[] =>
@@ -767,9 +973,6 @@ export async function openWorkItemBoundary(opts: OpenWorkItemsOptions = {}): Pro
         };
       });
   const issues = issueService;
-  const journalSvc = new journalMod.JournalService(db, issues);
-  const provenance = new provMod.ProvenanceService(db, issues, journalSvc);
-  const store = new storeMod.SubstrateIssueStore(issues, journalSvc) as IssueStorePort;
   return createWorkItemBoundary({
     issues,
     provenance,

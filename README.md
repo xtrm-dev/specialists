@@ -199,12 +199,18 @@ claude mcp list | grep specialists
 
 **Dispatch needs the Substrate work store, which supplies the contract.** It is resolved in
 this order: an explicit `XTRM_SUBSTRATE_DIR`, then normal module resolution of the installed
-`@jaggerxtrm/substrate` package, then failure. Installing the package is enough — no
-environment variable is required:
+`@jaggerxtrm/substrate` package, then the npm global prefix, then failure. No environment
+variable is required as long as the package is installed in one of those places:
 
 ```bash
-npm install @jaggerxtrm/substrate
+npm install @jaggerxtrm/substrate           # in the project the session runs in
+npm install --global @jaggerxtrm/substrate  # or beside a globally installed Specialists
 ```
+
+The npm global prefix is searched because a global install from a FOLDER is a symlink:
+default resolution dereferences it and walks the checkout's ancestors, which never reach
+`<prefix>/lib/node_modules`, so a sibling global Substrate would otherwise be invisible. `xt init`
+enrolls Substrate into that prefix, which is why the XTRM-managed path needs no extra step.
 
 Set `XTRM_SUBSTRATE_DIR` only to override that with a local checkout, for example when
 developing Substrate itself. It wins over the installed package when set.

@@ -46,8 +46,7 @@ import {
   findRequiredPreScriptFailure,
   formatRequiredPreScriptFailure,
   formatScriptOutput,
-  buildReviewerDiffContext,
-  buildReviewerDiffInstruction,
+  createReviewerDiffAppendHook,
 } from '../specialist/runner.js';
 import {
   resolveRuntimeToolContract,
@@ -55,7 +54,7 @@ import {
   resolveExecutionExtensionSelection,
   deduplicateExtensionSources,
 } from '../pi/session.js';
-import { formatResolvedToolContract } from '../specialist/resolved-tool-contract.js';
+import { formatResolvedToolContract, type ResolvedToolContract } from '../specialist/resolved-tool-contract.js';
 import { resolveModelChain } from '../specialist/model-chain.js';
 import { extractPurposeExcerpt } from './contract-sections.js';
 import {
@@ -77,7 +76,7 @@ import { loadPiSdk, type PiSdk, type PiAgentSessionLike, type PiAgentSessionEven
 import { nativeSessionTokenUsage, accumulateTokenUsage } from '../specialist/native-activation-observability.js';
 import { createGateModelRuntime, validateModelAvailable } from './model-gate.js';
 import { FleetRegistry, RESUMABLE_STATES, RETRYABLE_STATES, nextAttemptId, type ActivationRecord } from './registry.js';
-import { publishSettlement, type SettlementSubject } from './settlement-publication.js';
+import { publishSettlement, republishPendingSettlements, type SettlementSubject } from './settlement-publication.js';
 import { createFileSettlementStore, type SettlementStore } from './settlement-store.js';
 import { join } from 'node:path';
 import { NULL_AUTHORITY_WRITER, type AuthorityWriter } from './authority-store.js';
@@ -144,6 +143,19 @@ const WRITE_TIERS = new Set(['MEDIUM', 'HIGH']);
  * relative path that cannot exist.
  */
 const NON_LOCAL_EXTENSION_PREFIXES = ['npm:', 'git:', 'github:', 'http:', 'https:', 'ssh:'];
+
+/**
+ * True when an extension source cannot be handed to pi's in-process resource loader as a
+ * path, and must instead be resolved by the pi CLI itself.
+ *
+ * Exported so the native/legacy parity harness can express the one extension divergence that
+ * is real as a CHECKED shape (`native == legacy minus non-local sources`) instead of skipping
+ * the field entirely — a whole-field skip also hides a divergence in the sources both runtimes
+ * CAN load (XTRM-84 section 5).
+ */
+export function isNonLocalExtensionSource(source: string): boolean {
+  return NON_LOCAL_EXTENSION_PREFIXES.some((prefix) => source.startsWith(prefix));
+}
 
 
 /**
@@ -320,6 +332,20 @@ export interface NativeActivationHostDeps {
    * it does not make delivery guaranteed — see docs/design/claude-transport-decision.md §5.
    */
   peer?: PeerDelivery;
+  /**
+   * Admission: the pre-flight gate that decides whether a resolved definition may actually
+   * run on THIS host. Defaults to `validateBeforeRun`, which is the real, fail-closed
+   * production gate — missing skill path, absent external command, required_tool the tier
+   * does not grant.
+   *
+   * It is injectable only so COMPOSITION can be measured independently of ADMISSION
+   * (XTRM-84 4c): the native/legacy parity harness compares what the two runtimes COMPILE
+   * for a shipped definition, and a validator whose verdict depends on which binaries are on
+   * the host's PATH is not part of either runtime's composition. Injecting it here is
+   * narrower than the alternative the harness used before, which was to rewrite the shipped
+   * definition and then compare a definition no user has.
+   */
+  admission?: (specialist: unknown, tier: string, toolContract: ResolvedToolContract) => void;
 }
 
 /** Configuration for pushing interactions to a Claude coordinator. */
@@ -357,6 +383,10 @@ export class NativeActivationHost {
   private readonly now: () => number;
   private readonly authority: AuthorityWriter;
   private readonly settlements: SettlementStore;
+  /** Admission gate. Defaults to the real `validateBeforeRun`; see `NativeActivationHostDeps`. */
+  private readonly admission: (specialist: unknown, tier: string, toolContract: ResolvedToolContract) => void;
+  /** Guards the once-per-process settlement republish pass (SPECIALISTS-54). */
+  private republished = false;
   private readonly env: Record<string, string | undefined>;
 
   private readonly registry = new FleetRegistry();
@@ -393,6 +423,7 @@ export class NativeActivationHost {
     this.now = deps.now ?? (() => Date.now());
     this.authority = deps.authority ?? NULL_AUTHORITY_WRITER;
     this.settlements = deps.settlements ?? createFileSettlementStore(join(this.cwd, '.specialists', 'settlements'));
+    this.admission = deps.admission ?? ((candidate, tier, contract) => validateBeforeRun(candidate as never, tier, contract));
     this.env = deps.env ?? process.env;
   }
 
@@ -497,6 +528,12 @@ export class NativeActivationHost {
         ...detail,
       });
     };
+
+    // SPECIALISTS-54: drain the pending-publication backlog before the first dispatch this
+    // process serves. Not awaited into the refusal path — a backlog must never refuse a
+    // dispatch — but awaited here so the pass has finished before any new settlement is
+    // written, which keeps the reconciliation reads and the writes from interleaving.
+    await this.republishOncePerProcess();
 
     const specialist = await this.loader.get(request.specialist).catch((error: unknown) => {
       return reject('unknown_specialist', {
@@ -630,10 +667,25 @@ export class NativeActivationHost {
       });
     }
 
+    // The definition's declared extension selection, resolved ONCE so the tool contract, the
+    // resource loader and any future consumer cannot disagree. Before SPECIALISTS-57 the tool
+    // contract was resolved without it and the loader resolved it separately twice below.
+    const extensionSelection = resolveExecutionExtensionSelection(specialist.specialist.execution?.extensions);
+
     const toolContract = resolveRuntimeToolContract({
       level: tier,
       specialistName: request.specialist,
       specialistPermissions: specialist.specialist.permissions,
+      // SPECIALISTS-57: the definition's OWN extension selection must reach the tool-contract
+      // resolution, exactly as the legacy runner passes it (src/specialist/runner.ts:1098-1107).
+      // Omitting it made the native path honour `execution.extensions: { gitnexus: false }` in
+      // the resource loader (below) but NOT in the contract: with a healthy gitnexus the
+      // catalog's hard deny then removed grep/find/ls from a specialist that had explicitly
+      // turned gitnexus off to keep them, and `validateBeforeRun` refused the dispatch. On a
+      // runner without gitnexus the deny is inactive and the same specialist dispatched fine,
+      // so the defect was visible only on machines that had the extension installed.
+      excludeExtensions: extensionSelection.excludeExtensions,
+      extensionSources: extensionSelection.extensionSources,
       cwd: this.cwd,
     });
     if (!toolContract || toolContract.toolsList.length === 0) {
@@ -643,8 +695,14 @@ export class NativeActivationHost {
     // validateBeforeRun throws on a hard failure (missing skill path, absent external
     // command, required_tool the tier does not grant). Converted into a structured
     // refusal so the caller sees one rejection shape rather than two error styles.
+    //
+    // The validator is a dependency, not an inlined call, so COMPOSITION and ADMISSION can be
+    // exercised separately (XTRM-84 4c). The default is the real `validateBeforeRun`, so
+    // production admission is unchanged and still fail-closed; a test that wants to compare
+    // what the two runtimes COMPILE for a shipped definition does not have to rewrite the
+    // definition to get past a validator whose outcome depends on the host's PATH.
     try {
-      validateBeforeRun(specialist, tier, toolContract);
+      this.admission(specialist, tier, toolContract);
     } catch (error) {
       return reject('preflight_failed', {
         note: error instanceof Error ? error.message : String(error),
@@ -652,7 +710,7 @@ export class NativeActivationHost {
     }
 
     // Pre-phase scripts run locally BEFORE an AgentSession exists, matching the legacy
-    // runner (src/specialist/runner.ts:1093-1100): a required script's nonzero exit refuses
+    // runner (src/specialist/runner.ts:1120+): a required script's nonzero exit refuses
     // the dispatch here, so no model turn is spent and no session is created, and the
     // captured stdout of every `inject_output` script reaches the prompt as
     // `$pre_script_output`. validateBeforeRun above already proved each script exists and is
@@ -855,14 +913,7 @@ export class NativeActivationHost {
       // the legacy path. Without it the reviewer role loses its diff entirely.
       ...(isReviewer
         ? {
-            appendExecutionContext: (task: string, cwd: string, variables: Record<string, string>): string => {
-              try {
-                return `${task}${buildReviewerDiffInstruction(buildReviewerDiffContext(cwd, variables))}`;
-              } catch (error) {
-                process.stderr.write(`[specialist runner] Reviewer diff context unavailable: ${String(error)}\n`);
-                return task;
-              }
-            },
+            appendExecutionContext: createReviewerDiffAppendHook((message) => process.stderr.write(`${message}\n`)),
           }
         : {}),
     });
@@ -997,12 +1048,10 @@ export class NativeActivationHost {
       permissionLevel: tier,
       resolvedToolContract: toolContract,
     });
-    const declaredExtensions = resolveExecutionExtensionSelection(
-      specialist.specialist.execution?.extensions as Record<string, boolean | null | undefined> | undefined,
-    ).extensionSources;
+    const declaredExtensions = extensionSelection.extensionSources;
     const declaredLocalExtensions: string[] = [];
     for (const source of declaredExtensions) {
-      if (NON_LOCAL_EXTENSION_PREFIXES.some((prefix) => source.startsWith(prefix))) {
+      if (isNonLocalExtensionSource(source)) {
         process.stderr.write(
           `[specialists] native activation: extension source '${source}' is not a filesystem path; ` +
           'the in-process resource loader cannot load it, so it is not injected.\n',
@@ -1260,6 +1309,55 @@ export class NativeActivationHost {
     // fail-closed with work_item_store_unavailable — never a second authority.
     this.workItemsDefault = await openWorkItemBoundary({ dbPath });
     return this.workItemsDefault;
+  }
+
+  /**
+   * Republish settlements whose publication degraded, ONCE per host process (SPECIALISTS-54).
+   *
+   * The trigger is deliberately the first dispatch rather than host construction: a host is
+   * constructed in every test and by every read-only tool call, and a settlement backlog must
+   * not be retried by processes that never publish anything. The first dispatch is the smallest
+   * trigger that covers the post-cutover backlog, which is the case the issue is about — the
+   * records written while the runtime pointed at a pre-result Substrate build.
+   *
+   * Best-effort by the same contract as publication itself: a backlog that cannot be drained
+   * must never refuse the dispatch that triggered the drain.
+   */
+  private async republishOncePerProcess(): Promise<void> {
+    if (this.republished) return;
+    this.republished = true;
+    try {
+      const boundary = await this.resolveWorkItems();
+      const pending = this.settlements.listPendingPublication?.() ?? [];
+      if (pending.length === 0) return;
+      const outcomes = republishPendingSettlements({
+        boundary,
+        store: this.settlements,
+        participantId: 'specialist::settlement-republisher',
+        repositoryRoot: this.cwd,
+        env: this.env,
+        emit: (name, payload) => this.forensics.emit({
+          activationId: 'act:settlement-republisher',
+          attemptId: 'att:settlement-republisher:1',
+          participantId: 'specialist::settlement-republisher',
+          specialist: 'settlement-republisher',
+          name,
+          payload,
+        }),
+      });
+      const unresolved = outcomes.filter((outcome) => outcome.outcome !== 'published');
+      if (unresolved.length > 0) {
+        // Named, not counted: an operator has to be able to find the records.
+        process.stderr.write(
+          `[specialists] ${unresolved.length} settlement(s) still unpublished after republish: `
+            + `${unresolved.map((o) => `${o.activationId}/${o.attemptId}=${o.outcome}`).join(', ')}\n`,
+        );
+      }
+    } catch (error) {
+      process.stderr.write(
+        `[specialists] settlement republish pass failed: ${error instanceof Error ? error.message : String(error)}\n`,
+      );
+    }
   }
 
   /**

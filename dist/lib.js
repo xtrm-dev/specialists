@@ -11502,6 +11502,12 @@ function deduplicateExtensionSources(autoInjected, dynamicSources) {
   }
   return { kept, dropped };
 }
+function sessionResourceFenceArgv() {
+  return {
+    head: ["--no-extensions", "--no-skills"],
+    tail: ["--no-context-files", "--no-prompt-templates", "--no-themes"]
+  };
+}
 function resolveExecutionExtensionSelection(extensions) {
   const excludeExtensions = [];
   const extensionSources = [];
@@ -11890,17 +11896,15 @@ class PiAgentSession {
     const model = this.options.model;
     const extraArgs = getProviderArgs(model);
     const providerArgs = model.includes("/") ? ["--model", model] : ["--provider", mapSpecialistBackend(model)];
+    const resourceFence = sessionResourceFenceArgv();
     const args = [
       "--mode",
       "rpc",
-      "--no-extensions",
-      "--no-skills",
+      ...resourceFence.head,
       ...providerArgs,
       "--no-session",
       ...this.options.offline === false ? [] : ["--offline"],
-      "--no-context-files",
-      "--no-prompt-templates",
-      "--no-themes",
+      ...resourceFence.tail,
       ...extraArgs
     ];
     const resolvedToolContract = this.options.resolvedToolContract ?? resolveRuntimeToolContract({
@@ -17509,6 +17513,17 @@ ${context.hunks}
 ---
 `;
 }
+function createReviewerDiffAppendHook(onUnavailable = (message) => process.stderr.write(`${message}
+`)) {
+  return (task, cwd, variables) => {
+    try {
+      return `${task}${buildReviewerDiffInstruction(buildReviewerDiffContext(cwd, variables))}`;
+    } catch (error) {
+      onUnavailable(`[specialist runner] Reviewer diff context unavailable: ${String(error)}`);
+      return task;
+    }
+  };
+}
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -20080,10 +20095,12 @@ function resolveSkillsPaths(spec, fileDir, consumerRoot) {
 }
 // src/activation/native-host.ts
 import { randomUUID as randomUUID3 } from "node:crypto";
-import { existsSync as existsSync19 } from "node:fs";
+import { existsSync as existsSync20 } from "node:fs";
 
 // src/activation/workitem-store.ts
+import { existsSync as existsSync15 } from "node:fs";
 import { createRequire as createRequire3 } from "node:module";
+import { homedir as homedir8 } from "node:os";
 import { dirname as dirname10, join as join14 } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -20114,9 +20131,40 @@ function resolveSubstrateDir(explicit, resolveInstalled) {
     return resolveInstalled();
   try {
     return dirname10(require3.resolve(`${SUBSTRATE_PACKAGE}/package.json`));
-  } catch {
-    return null;
+  } catch {}
+  return resolveSubstrateFromGlobalPrefix();
+}
+function resolveSubstrateFromGlobalPrefix(libDirs) {
+  const globalModules = resolveGlobalNodeModulesDir2();
+  const runtimePrefix = dirname10(dirname10(process.execPath));
+  const candidates = uniqueExistingLibDirs(libDirs ?? [
+    globalModules ? dirname10(globalModules) : undefined,
+    join14(runtimePrefix, "lib"),
+    join14(homedir8(), ".bun", "install", "global")
+  ]);
+  for (const libDir of candidates) {
+    try {
+      return dirname10(require3.resolve(`${SUBSTRATE_PACKAGE}/package.json`, { paths: [libDir] }));
+    } catch {}
   }
+  return null;
+}
+function uniqueExistingLibDirs(candidates) {
+  const seen = new Set;
+  const out = [];
+  for (const candidate of candidates) {
+    if (!candidate)
+      continue;
+    const normalized = join14(candidate);
+    if (seen.has(normalized))
+      continue;
+    seen.add(normalized);
+    try {
+      if (existsSync15(normalized))
+        out.push(normalized);
+    } catch {}
+  }
+  return out;
 }
 function resolveWorkItemDbPath(env = process.env) {
   return resolveAuthorityDbPath(env);
@@ -20128,6 +20176,7 @@ function openSubstrateDb(dbPath) {
     db.exec("PRAGMA synchronous = FULL");
     db.exec("PRAGMA foreign_keys = ON");
   };
+  const failures = [];
   try {
     const bun = require3("bun:sqlite");
     if (bun?.Database) {
@@ -20135,16 +20184,27 @@ function openSubstrateDb(dbPath) {
       applyPragmas(db);
       return db;
     }
-  } catch {}
-  const node = require3("node:sqlite");
-  if (node?.DatabaseSync) {
-    const db = new node.DatabaseSync(dbPath);
-    applyPragmas(db);
-    return db;
+    failures.push("bun:sqlite: module exposes no Database export");
+  } catch (error) {
+    failures.push(`bun:sqlite: ${error instanceof Error ? error.message : String(error)}`);
   }
-  throw new Error(`work-item store: no sqlite driver for ${dbPath}`);
+  try {
+    const node = require3("node:sqlite");
+    if (node?.DatabaseSync) {
+      const db = new node.DatabaseSync(dbPath);
+      applyPragmas(db);
+      return db;
+    }
+    failures.push("node:sqlite: module exposes no DatabaseSync export");
+  } catch (error) {
+    failures.push(`node:sqlite: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  throw new Error(`work-item store: cannot open the sqlite store at ${dbPath} ` + `(bun:sqlite and node:sqlite both unavailable: ${failures.join("; ")})`);
 }
 var SATISFIED_BLOCKER_STATES = new Set(["done", "archived"]);
+function attemptOfEntry(entry) {
+  return entry.executionContext?.specialist?.attemptId ?? entry.attemptId ?? null;
+}
 function createWorkItemBoundary(ports) {
   const { issues, provenance, store, gate, journalService, provenanceService } = ports;
   const viewOf = (ref) => {
@@ -20324,6 +20384,40 @@ function createWorkItemBoundary(ports) {
           kind: attached.kind ?? kind,
           value: attached.value ?? value
         };
+      },
+      findResultEntry(ref, key) {
+        if (!journalService?.listEntries) {
+          return { status: "unavailable", reason: "journal service exposes no entry listing" };
+        }
+        try {
+          const entries = journalService.listEntries(issues.resolveRef(ref).id, { kind: "result" });
+          const forActivation = entries.filter((entry) => entry.activationId === key.activationId);
+          const match = forActivation.find((entry) => attemptOfEntry(entry) === key.attemptId);
+          if (match)
+            return { status: "found", value: { entryId: match.id } };
+          const unattributed = forActivation.filter((entry) => attemptOfEntry(entry) === null);
+          if (unattributed.length > 0) {
+            return {
+              status: "unavailable",
+              reason: `${unattributed.length} Journal result(s) for this activation carry no attempt attribution`
+            };
+          }
+          return { status: "absent" };
+        } catch (error) {
+          return { status: "unavailable", reason: error instanceof Error ? error.message : String(error) };
+        }
+      },
+      findReceiptForBinding(ref, bindingId) {
+        if (!provenanceService?.listReceipts) {
+          return { status: "unavailable", reason: "provenance service exposes no receipt listing" };
+        }
+        try {
+          const rows = provenanceService.listReceipts(issues.resolveRef(ref).id);
+          const match = rows.find((receipt) => receipt.executionBindingId === bindingId);
+          return match ? { status: "found", value: { receiptId: match.id } } : { status: "absent" };
+        } catch (error) {
+          return { status: "unavailable", reason: error instanceof Error ? error.message : String(error) };
+        }
       }
     } : {}
   };
@@ -20379,9 +20473,26 @@ async function openWorkItemBoundary(opts = {}) {
     }
   }
   const dbPath = opts.dbPath ?? resolveWorkItemDbPath(env);
-  const db = openSubstrateDb(dbPath);
-  runner.migrate(db);
-  const issueService = new issueSvcMod.IssueService(db);
+  const storeRefusal = (error) => new Error(`work_item_store_unavailable: cannot open the Substrate store at ${dbPath} (set SUBSTRATE_DB or XTRM_STATE_DB to a writable database path, or install ${SUBSTRATE_PACKAGE}): ${error instanceof Error ? error.message : String(error)}`);
+  let db;
+  try {
+    db = openSubstrateDb(dbPath);
+    runner.migrate(db);
+  } catch (error) {
+    throw storeRefusal(error);
+  }
+  let issueService;
+  let journalSvc;
+  let provenance;
+  let store;
+  try {
+    issueService = new issueSvcMod.IssueService(db);
+    journalSvc = new journalMod.JournalService(db, issueService);
+    provenance = new provMod.ProvenanceService(db, issueService, journalSvc);
+    store = new storeMod.SubstrateIssueStore(issueService, journalSvc);
+  } catch (error) {
+    throw storeRefusal(error);
+  }
   issueService.getBlockers = (childId) => issueService.listActiveEdges().filter((edge) => edge.active && edge.kind === "blocks" && edge.toIssue === childId).map((edge) => {
     const issue = issueService.getIssue(edge.fromIssue);
     return {
@@ -20393,9 +20504,6 @@ async function openWorkItemBoundary(opts = {}) {
     };
   });
   const issues = issueService;
-  const journalSvc = new journalMod.JournalService(db, issues);
-  const provenance = new provMod.ProvenanceService(db, issues, journalSvc);
-  const store = new storeMod.SubstrateIssueStore(issues, journalSvc);
   return createWorkItemBoundary({
     issues,
     provenance,
@@ -20597,7 +20705,7 @@ function composeInteractionMessage(input, identity2) {
 }
 
 // src/activation/transport/pending-store.ts
-import { existsSync as existsSync15, mkdirSync as mkdirSync5, readdirSync as readdirSync2, readFileSync as readFileSync9, renameSync as renameSync2, unlinkSync, writeFileSync as writeFileSync4 } from "node:fs";
+import { existsSync as existsSync16, mkdirSync as mkdirSync5, readdirSync as readdirSync2, readFileSync as readFileSync9, renameSync as renameSync2, unlinkSync, writeFileSync as writeFileSync4 } from "node:fs";
 import { join as join15 } from "node:path";
 var KINDS_AWAITING_REPLY = new Set(["question", "escalation"]);
 function createsPendingAsk(kind) {
@@ -20613,7 +20721,7 @@ function replyPath(repoRoot, activationId, messageId) {
   return join15(interactionsRoot(repoRoot), activationId, `${messageId}.reply.json`);
 }
 function writeAtomic(path, value, exclusive = false) {
-  if (exclusive && existsSync15(path)) {
+  if (exclusive && existsSync16(path)) {
     throw new Error(`interaction record already exists: ${path}`);
   }
   const tmp = `${path}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
@@ -20629,7 +20737,7 @@ function writeAtomic(path, value, exclusive = false) {
   }
 }
 function readJson(path) {
-  if (!existsSync15(path))
+  if (!existsSync16(path))
     return;
   try {
     return JSON.parse(readFileSync9(path, "utf-8"));
@@ -20804,12 +20912,12 @@ function sleep(ms, signal) {
 import { connect, createServer } from "node:net";
 
 // src/activation/transport/roster.ts
-import { existsSync as existsSync16, readdirSync as readdirSync3, readFileSync as readFileSync10 } from "node:fs";
-import { homedir as homedir8 } from "node:os";
+import { existsSync as existsSync17, readdirSync as readdirSync3, readFileSync as readFileSync10 } from "node:fs";
+import { homedir as homedir9 } from "node:os";
 import { join as join16 } from "node:path";
 var SUPPORTED_PEER_PROTOCOL = 1;
 function defaultRosterDir() {
-  return join16(homedir8(), ".claude", "sessions");
+  return join16(homedir9(), ".claude", "sessions");
 }
 function procProbe() {
   let bootSeconds;
@@ -20881,7 +20989,7 @@ function scanRoster(options = {}) {
   const probe = options.probe ?? procProbe();
   const live = [];
   const rejected = [];
-  if (!existsSync16(dir))
+  if (!existsSync17(dir))
     return { live, rejected };
   for (const file of readdirSync3(dir)) {
     if (!file.endsWith(".json"))
@@ -21090,7 +21198,7 @@ function isDeliveredStatus(status) {
 
 // src/activation/workspace-lease.ts
 import { createHash as createHash5 } from "node:crypto";
-import { existsSync as existsSync17, linkSync, mkdirSync as mkdirSync6, readFileSync as readFileSync11, realpathSync as realpathSync4, renameSync as renameSync3, unlinkSync as unlinkSync2, writeFileSync as writeFileSync5 } from "node:fs";
+import { existsSync as existsSync18, linkSync, mkdirSync as mkdirSync6, readFileSync as readFileSync11, realpathSync as realpathSync4, renameSync as renameSync3, unlinkSync as unlinkSync2, writeFileSync as writeFileSync5 } from "node:fs";
 import { join as join17 } from "node:path";
 
 // src/activation/types.ts
@@ -21139,7 +21247,7 @@ ${detail.missing.map((m) => `  - ${m}`).join(`
 // src/activation/workspace-lease.ts
 function procLeaseProbe() {
   return {
-    canVerify: () => existsSync17("/proc/self/stat"),
+    canVerify: () => existsSync18("/proc/self/stat"),
     startTicks(pid) {
       try {
         const stat2 = readFileSync11(`/proc/${pid}/stat`, "utf-8");
@@ -21174,7 +21282,7 @@ function leasePath(workspace) {
 }
 function inspect(workspace, probe = procLeaseProbe()) {
   const path = leasePath(workspace);
-  if (!existsSync17(path))
+  if (!existsSync18(path))
     return { state: "free" };
   let lease;
   try {
@@ -21352,6 +21460,7 @@ var FACTORY_NAMES = {
   bash: "createBashTool",
   powershell: "createPowerShellTool"
 };
+var GUARDED_TOOL_NAMES = Object.keys(FACTORY_NAMES);
 function createGuardedTools(sdk, input) {
   const sdkAny = sdk;
   const tools = [];
@@ -21443,7 +21552,7 @@ function createAskTools(sdk, ctx) {
 }
 
 // src/activation/pi-sdk.ts
-import { existsSync as existsSync18 } from "node:fs";
+import { existsSync as existsSync19 } from "node:fs";
 import { join as join18 } from "node:path";
 import { pathToFileURL as pathToFileURL2 } from "node:url";
 var PI_SDK_PACKAGE = "@earendil-works/pi-coding-agent";
@@ -21476,7 +21585,7 @@ function piSdkCandidates() {
   const globalDir = resolveGlobalNodeModulesDir2();
   if (globalDir) {
     const entry = join18(globalDir, PI_SDK_PACKAGE, "dist", "index.js");
-    if (existsSync18(entry))
+    if (existsSync19(entry))
       candidates.push(pathToFileURL2(entry).href);
   }
   return candidates;
@@ -22002,6 +22111,169 @@ function buildSettlementExecutionContext(opts) {
   ctx.timestamp = opts.now ?? Date.now();
   return ctx;
 }
+function republishSettlement(opts) {
+  const { boundary, store, record: record2 } = opts;
+  const now = opts.now ?? Date.now();
+  const emit = opts.emit ?? (() => {});
+  if (record2.status !== "completed") {
+    return { outcome: "refused", note: "a failed settlement publishes nothing" };
+  }
+  if (record2.receiptId && record2.journalEntryId) {
+    return { outcome: "published", journalEntryId: record2.journalEntryId, receiptId: record2.receiptId };
+  }
+  if (!boundary.appendResult || !boundary.allocateReceipt) {
+    const note = "work boundary carries no settlement surface; not republishable";
+    saveState(store, record2, "refused", note);
+    emit("settlement_republish_refused", { activationId: record2.activationId, attemptId: record2.attemptId, note });
+    return { outcome: "refused", note };
+  }
+  const defer = (reason) => {
+    saveState(store, record2, "pending", reason);
+    emit("settlement_republish_deferred", {
+      activationId: record2.activationId,
+      attemptId: record2.attemptId,
+      note: reason
+    });
+    return { outcome: "pending", note: reason };
+  };
+  let journalEntryId = record2.journalEntryId;
+  if (!journalEntryId) {
+    if (!boundary.findResultEntry) {
+      return defer("work boundary exposes no Journal reconciliation, so a republish cannot prove it is the first");
+    }
+    const lookup = boundary.findResultEntry(record2.issueRef, {
+      activationId: record2.activationId,
+      attemptId: record2.attemptId
+    });
+    if (lookup.status === "unavailable") {
+      return defer(`Journal reconciliation unavailable: ${lookup.reason}`);
+    }
+    if (lookup.status === "found")
+      journalEntryId = lookup.value.entryId;
+  }
+  let receiptId = record2.receiptId;
+  if (!receiptId) {
+    if (!boundary.findReceiptForBinding) {
+      return defer("work boundary exposes no receipt reconciliation, so a republish cannot prove it is the first");
+    }
+    const lookup = boundary.findReceiptForBinding(record2.issueRef, record2.executionBindingId);
+    if (lookup.status === "unavailable") {
+      return defer(`receipt reconciliation unavailable: ${lookup.reason}`);
+    }
+    if (lookup.status === "found")
+      receiptId = lookup.value.receiptId;
+  }
+  if (journalEntryId) {
+    if (!receiptId) {
+      const note = `Journal result ${journalEntryId} exists but no WorkReceipt is recorded for binding ` + `${record2.executionBindingId} and none is resolvable; the provenance chain cannot be completed`;
+      saveState(store, record2, "refused", note, { journalEntryId });
+      emit("settlement_republish_refused", { activationId: record2.activationId, attemptId: record2.attemptId, note });
+      return { outcome: "refused", note, journalEntryId };
+    }
+    saveState(store, record2, "published", "reconciled with the existing Journal result", {
+      journalEntryId,
+      receiptId
+    });
+    emit("settlement_republish_reconciled", {
+      activationId: record2.activationId,
+      attemptId: record2.attemptId,
+      entry: journalEntryId
+    });
+    return { outcome: "published", journalEntryId, receiptId };
+  }
+  try {
+    const storedRef = store.save(record2);
+    if (!receiptId) {
+      const receipt = boundary.allocateReceipt(record2.executionBindingId);
+      receiptId = receipt.id;
+      emit("settlement_receipt_allocated", { receipt: receipt.id, republish: true });
+    }
+    let artifactValue = record2.artifactRef ?? storedRef;
+    if (boundary.attachArtifact && !record2.artifactRef) {
+      try {
+        artifactValue = boundary.attachArtifact(receiptId, "artifact", storedRef).value;
+        emit("settlement_artifact_attached", { receipt: receiptId, kind: "artifact", republish: true });
+      } catch (error) {
+        emit("settlement_degraded", {
+          note: `artifact attach failed: ${error instanceof Error ? error.message : String(error)}`
+        });
+      }
+    }
+    const entry = boundary.appendResult(record2.issueRef, {
+      result: buildBoundedResult({
+        output: record2.output,
+        valid: record2.validation.valid,
+        errors: record2.validation.errors,
+        artifactRefs: [artifactValue],
+        receiptRefs: [receiptId],
+        provenanceRefs: [record2.executionBindingId, receiptId]
+      }),
+      executionContext: buildSettlementExecutionContext({
+        participantId: opts.participantId,
+        specialistName: record2.specialist,
+        activationId: record2.activationId,
+        attemptId: record2.attemptId,
+        coordinatorParticipantId: opts.coordinator?.participantId,
+        coordinatorSessionId: opts.coordinator?.sessionId,
+        repoPath: opts.repositoryRoot,
+        worktree: opts.worktreePath ?? opts.repositoryRoot,
+        env: opts.env,
+        now
+      }),
+      refs: [
+        { kind: "artifact", key: artifactValue },
+        { kind: "receipt", key: receiptId }
+      ],
+      participantId: opts.participantId,
+      activationId: record2.activationId
+    });
+    store.save({
+      ...record2,
+      receiptId,
+      journalEntryId: entry.entryId,
+      artifactRef: artifactValue,
+      publication: { state: "published", attempts: (record2.publication?.attempts ?? 0) + 1, updatedAt: now }
+    });
+    emit("settlement_result_published", { entry: entry.entryId, receipt: receiptId, republish: true });
+    return { outcome: "published", journalEntryId: entry.entryId, receiptId };
+  } catch (error) {
+    const note = error instanceof Error ? error.message : String(error);
+    saveState(store, record2, "pending", note, { ...receiptId ? { receiptId } : {} });
+    emit("settlement_degraded", { note, republish: true });
+    return { outcome: "pending", note, ...receiptId ? { receiptId } : {} };
+  }
+}
+var REPUBLISH_PASS_LIMIT = 50;
+function republishPendingSettlements(opts) {
+  const emit = opts.emit ?? (() => {});
+  const limit = Math.max(1, opts.limit ?? REPUBLISH_PASS_LIMIT);
+  const pending = (opts.store.listPendingPublication?.() ?? []).slice(0, limit);
+  const outcomes = [];
+  for (const record2 of pending) {
+    try {
+      const result = republishSettlement({
+        boundary: opts.boundary,
+        store: opts.store,
+        record: record2,
+        participantId: opts.participantId,
+        repositoryRoot: opts.repositoryRoot,
+        ...opts.worktreePath ? { worktreePath: opts.worktreePath } : {},
+        ...opts.env ? { env: opts.env } : {},
+        ...opts.now ? { now: opts.now() } : {},
+        emit
+      });
+      outcomes.push({ activationId: record2.activationId, attemptId: record2.attemptId, outcome: result.outcome });
+    } catch (error) {
+      outcomes.push({ activationId: record2.activationId, attemptId: record2.attemptId, outcome: "error" });
+      emit("settlement_republish_error", {
+        activationId: record2.activationId,
+        attemptId: record2.attemptId,
+        note: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+  return outcomes;
+}
 function publishSettlement(opts) {
   const { boundary, store, subject } = opts;
   const now = opts.now ?? Date.now();
@@ -22044,19 +22316,25 @@ function publishSettlement(opts) {
   }
   emit("settlement_stored", { ref: storedRef, status: opts.status });
   if (opts.status !== "completed")
-    return { storedRef };
+    return { storedRef, publicationState: "not-applicable" };
   if (!boundary.allocateReceipt || !boundary.appendResult) {
-    emit("settlement_degraded", { note: "work boundary carries no settlement surface; result stored only" });
-    return { storedRef, degraded: "boundary without settlement surface" };
+    const note = "work boundary carries no settlement surface; result stored only";
+    saveState(store, record2, "refused", note);
+    emit("settlement_degraded", { note });
+    return { storedRef, degraded: "boundary without settlement surface", publicationState: "refused" };
   }
+  let allocatedReceiptId;
+  let allocatedArtifactRef;
   try {
     const receipt = boundary.allocateReceipt(subject.executionBindingId);
+    allocatedReceiptId = receipt.id;
     emit("settlement_receipt_allocated", { receipt: receipt.id });
     let artifactValue = storedRef;
     try {
       if (boundary.attachArtifact) {
         const attached = boundary.attachArtifact(receipt.id, "artifact", storedRef);
         artifactValue = attached.value;
+        allocatedArtifactRef = artifactValue;
         emit("settlement_artifact_attached", { receipt: receipt.id, kind: "artifact" });
       }
     } catch (error) {
@@ -22084,15 +22362,42 @@ function publishSettlement(opts) {
       sessionId: subject.piSessionId
     });
     emit("settlement_result_published", { entry: entry.entryId, receipt: receipt.id });
+    const published = {
+      ...record2,
+      receiptId: receipt.id,
+      journalEntryId: entry.entryId,
+      artifactRef: artifactValue,
+      publication: { state: "published", attempts: (record2.publication?.attempts ?? 0) + 1, updatedAt: now }
+    };
     try {
-      store.save({ ...record2, receiptId: receipt.id, journalEntryId: entry.entryId, artifactRef: artifactValue });
+      store.save(published);
     } catch {}
-    return { storedRef, receiptId: receipt.id, artifactValue, journalEntryId: entry.entryId };
+    return {
+      storedRef,
+      receiptId: receipt.id,
+      artifactValue,
+      journalEntryId: entry.entryId,
+      publicationState: "published"
+    };
   } catch (error) {
     const note = error instanceof Error ? error.message : String(error);
-    emit("settlement_degraded", { note });
-    return { storedRef, degraded: note };
+    saveState(store, record2, "pending", note, {
+      ...allocatedReceiptId ? { receiptId: allocatedReceiptId } : {},
+      ...allocatedArtifactRef ? { artifactRef: allocatedArtifactRef } : {}
+    });
+    emit("settlement_degraded", { note, ...allocatedReceiptId ? { partial_receipt: allocatedReceiptId } : {} });
+    return { storedRef, degraded: note, publicationState: "pending" };
   }
+}
+function saveState(store, record2, state, note, links = {}) {
+  try {
+    const existing = store.get(record2.activationId, record2.attemptId) ?? record2;
+    store.save({
+      ...existing,
+      ...links,
+      publication: { state, note, attempts: (existing.publication?.attempts ?? 0) + 1, updatedAt: Date.now() }
+    });
+  } catch {}
 }
 
 // src/activation/settlement-store.ts
@@ -22103,6 +22408,16 @@ function safeSegment(id) {
   if (!safe || safe === "." || safe === "..")
     throw new Error(`unusable settlement id: ${id}`);
   return safe;
+}
+function isPendingPublication(record2) {
+  return publicationStateOf(record2) === "pending";
+}
+function publicationStateOf(record2) {
+  if (record2.status !== "completed")
+    return "not-applicable";
+  if (record2.journalEntryId && record2.receiptId)
+    return "published";
+  return record2.publication?.state === "refused" ? "refused" : "pending";
 }
 function createFileSettlementStore(root) {
   const pathFor = (activationId, attemptId) => join19(root, safeSegment(activationId), `${safeSegment(attemptId)}.json`);
@@ -22134,8 +22449,40 @@ function createFileSettlementStore(root) {
         } catch {}
       }
       return out;
+    },
+    listPendingPublication() {
+      return readAll().filter(isPendingPublication).sort((a, b) => a.completedAt - b.completedAt);
     }
   };
+  function readAll() {
+    let activations;
+    try {
+      activations = readdirSync4(root);
+    } catch {
+      return [];
+    }
+    const out = [];
+    for (const activation of activations) {
+      for (const record2 of readActivationDir(activation))
+        out.push(record2);
+    }
+    return out;
+  }
+  function readActivationDir(activation) {
+    let files;
+    try {
+      files = readdirSync4(join19(root, activation));
+    } catch {
+      return [];
+    }
+    const out = [];
+    for (const file of files.filter((f) => f.endsWith(".json")).sort()) {
+      try {
+        out.push(JSON.parse(readFileSync12(join19(root, activation, file), "utf8")));
+      } catch {}
+    }
+    return out;
+  }
 }
 
 // src/activation/native-host.ts
@@ -22174,6 +22521,9 @@ function extractTokenUsage(event) {
 }
 var WRITE_TIERS = new Set(["MEDIUM", "HIGH"]);
 var NON_LOCAL_EXTENSION_PREFIXES = ["npm:", "git:", "github:", "http:", "https:", "ssh:"];
+function isNonLocalExtensionSource(source) {
+  return NON_LOCAL_EXTENSION_PREFIXES.some((prefix) => source.startsWith(prefix));
+}
 function resolveWorkspace(cwd) {
   return { repositoryRoot: cwd, worktreePath: cwd };
 }
@@ -22203,6 +22553,8 @@ class NativeActivationHost {
   now;
   authority;
   settlements;
+  admission;
+  republished = false;
   env;
   registry = new FleetRegistry;
   lastUsageSeen = new WeakMap;
@@ -22217,6 +22569,7 @@ class NativeActivationHost {
     this.now = deps.now ?? (() => Date.now());
     this.authority = deps.authority ?? NULL_AUTHORITY_WRITER;
     this.settlements = deps.settlements ?? createFileSettlementStore(join20(this.cwd, ".specialists", "settlements"));
+    this.admission = deps.admission ?? ((candidate, tier, contract) => validateBeforeRun(candidate, tier, contract));
     this.env = deps.env ?? process.env;
   }
   async start(request) {
@@ -22265,6 +22618,7 @@ class NativeActivationHost {
         ...detail
       });
     };
+    await this.republishOncePerProcess();
     const specialist = await this.loader.get(request.specialist).catch((error) => {
       return reject("unknown_specialist", {
         note: error instanceof Error ? error.message : String(error)
@@ -22354,17 +22708,20 @@ class NativeActivationHost {
         ...missing?.length ? { missing } : {}
       });
     }
+    const extensionSelection = resolveExecutionExtensionSelection(specialist.specialist.execution?.extensions);
     const toolContract = resolveRuntimeToolContract({
       level: tier,
       specialistName: request.specialist,
       specialistPermissions: specialist.specialist.permissions,
+      excludeExtensions: extensionSelection.excludeExtensions,
+      extensionSources: extensionSelection.extensionSources,
       cwd: this.cwd
     });
     if (!toolContract || toolContract.toolsList.length === 0) {
       return reject("empty_tool_contract", { tier });
     }
     try {
-      validateBeforeRun(specialist, tier, toolContract);
+      this.admission(specialist, tier, toolContract);
     } catch (error) {
       return reject("preflight_failed", {
         note: error instanceof Error ? error.message : String(error)
@@ -22499,15 +22856,8 @@ class NativeActivationHost {
         resolved_tool_contract: formatResolvedToolContract(toolContract)
       },
       ...isReviewer ? {
-        appendExecutionContext: (task, cwd, variables) => {
-          try {
-            return `${task}${buildReviewerDiffInstruction(buildReviewerDiffContext(cwd, variables))}`;
-          } catch (error) {
-            process.stderr.write(`[specialist runner] Reviewer diff context unavailable: ${String(error)}
-`);
-            return task;
-          }
-        }
+        appendExecutionContext: createReviewerDiffAppendHook((message) => process.stderr.write(`${message}
+`))
       } : {}
     });
     if (rendered.mandatoryRulesError) {
@@ -22598,10 +22948,10 @@ class NativeActivationHost {
       permissionLevel: tier,
       resolvedToolContract: toolContract
     });
-    const declaredExtensions = resolveExecutionExtensionSelection(specialist.specialist.execution?.extensions).extensionSources;
+    const declaredExtensions = extensionSelection.extensionSources;
     const declaredLocalExtensions = [];
     for (const source of declaredExtensions) {
-      if (NON_LOCAL_EXTENSION_PREFIXES.some((prefix) => source.startsWith(prefix))) {
+      if (isNonLocalExtensionSource(source)) {
         process.stderr.write(`[specialists] native activation: extension source '${source}' is not a filesystem path; ` + `the in-process resource loader cannot load it, so it is not injected.
 `);
         continue;
@@ -22757,11 +23107,45 @@ class NativeActivationHost {
     if (this.workItemsDefault)
       return this.workItemsDefault;
     const dbPath = resolveWorkItemDbPath();
-    if (!existsSync19(dbPath)) {
+    if (!existsSync20(dbPath)) {
       throw new Error(`no Substrate work store at ${dbPath} (set SUBSTRATE_DB (or the legacy XTRM_STATE_DB) or initialize it via xt init / sb)`);
     }
     this.workItemsDefault = await openWorkItemBoundary({ dbPath });
     return this.workItemsDefault;
+  }
+  async republishOncePerProcess() {
+    if (this.republished)
+      return;
+    this.republished = true;
+    try {
+      const boundary = await this.resolveWorkItems();
+      const pending = this.settlements.listPendingPublication?.() ?? [];
+      if (pending.length === 0)
+        return;
+      const outcomes = republishPendingSettlements({
+        boundary,
+        store: this.settlements,
+        participantId: "specialist::settlement-republisher",
+        repositoryRoot: this.cwd,
+        env: this.env,
+        emit: (name, payload) => this.forensics.emit({
+          activationId: "act:settlement-republisher",
+          attemptId: "att:settlement-republisher:1",
+          participantId: "specialist::settlement-republisher",
+          specialist: "settlement-republisher",
+          name,
+          payload
+        })
+      });
+      const unresolved = outcomes.filter((outcome) => outcome.outcome !== "published");
+      if (unresolved.length > 0) {
+        process.stderr.write(`[specialists] ${unresolved.length} settlement(s) still unpublished after republish: ` + `${unresolved.map((o) => `${o.activationId}/${o.attemptId}=${o.outcome}`).join(", ")}
+`);
+      }
+    } catch (error) {
+      process.stderr.write(`[specialists] settlement republish pass failed: ${error instanceof Error ? error.message : String(error)}
+`);
+    }
   }
   onSessionEvent(snapshot, event, emit) {
     snapshot.lastActivityAt = this.now();
@@ -23461,7 +23845,7 @@ function legacyOnlyConfigNotes(spec) {
   return notes;
 }
 // src/tools/specialist/activation.tool.ts
-import { existsSync as existsSync20 } from "node:fs";
+import { existsSync as existsSync21 } from "node:fs";
 import { fileURLToPath as fileURLToPath5 } from "node:url";
 
 // src/activation/build-identity.ts
@@ -23596,7 +23980,7 @@ function toActivationResultView(result) {
 var DIST_LIB_PATH = (() => {
   for (const candidate of ["./lib.js", "../../../dist/lib.js"]) {
     const path = fileURLToPath5(new URL(candidate, import.meta.url));
-    if (existsSync20(path))
+    if (existsSync21(path))
       return path;
   }
   return fileURLToPath5(new URL("../../../dist/lib.js", import.meta.url));

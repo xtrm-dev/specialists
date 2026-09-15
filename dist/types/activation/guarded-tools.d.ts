@@ -25,6 +25,15 @@
  */
 import type { PiSdk } from './pi-sdk.js';
 import type { AdmissionVerdict } from './workspace-lease.js';
+/**
+ * The tool names the native runtime reconstructs as lease-guarded custom tools.
+ *
+ * Exported so the native/legacy parity harness can state the `customTools` divergence as a
+ * CHECKED shape — `native.customTools == ask tools + the contract's reconstructible mutating
+ * builtins` — rather than skipping the field, which would also hide the guard losing a tool
+ * (XTRM-84 section 5: the allowlist skipped whole fields, so nothing mapped category to field).
+ */
+export declare const GUARDED_TOOL_NAMES: readonly string[];
 export interface GuardedToolsResult {
     /** Guarded replacements, to be passed as `customTools`. */
     tools: unknown[];

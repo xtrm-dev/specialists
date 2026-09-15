@@ -10,6 +10,7 @@
 // imported from lib — never reimplemented here.
 import * as z from 'zod';
 import { resolveModelChain, resolveRuntimeToolContract, validateBeforeRun } from '../../lib.js';
+import { resolveExecutionExtensionSelection } from '../../pi/session.js';
 import type { SpecialistLoader, SpecialistSummary } from '../../specialist/loader.js';
 import type { Specialist } from '../../specialist/schema.js';
 
@@ -57,12 +58,24 @@ async function dispatchability(spec: Specialist): Promise<{ dispatchable: boolea
   if (modelChain.length === 0) {
     return { dispatchable: false, reason: 'no configured model — pass model_override at dispatch' };
   }
+  // SPECIALISTS-57: this read surface must resolve the contract from the SAME inputs the host
+  // does, and that includes the definition's OWN extension selection. Without it, a definition
+  // that turns an extension OFF (`execution.extensions.gitnexus = false`) is reported here as
+  // undispatchable on exactly the hosts where the deny is active — catalog's hard deny removes
+  // grep/find/ls, preflight fails, and `dispatchable: false` is published for a Specialist that
+  // the runtime would admit. The docstring above promises "the SAME admission checks the host
+  // runs"; this is the argument that made that promise untrue.
+  const extensionSelection = resolveExecutionExtensionSelection(
+    execution.extensions as Record<string, boolean | null | undefined> | undefined,
+  );
   let toolContract;
   try {
     toolContract = resolveRuntimeToolContract({
       level: tier,
       specialistName: spec.specialist.metadata.name,
       specialistPermissions: spec.specialist.permissions,
+      excludeExtensions: extensionSelection.excludeExtensions,
+      extensionSources: extensionSelection.extensionSources,
       cwd: process.cwd(),
     });
   } catch (error) {

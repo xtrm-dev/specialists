@@ -33,6 +33,7 @@
  * Specialist *waiting and resumable*, never disposed. Disposal is an explicit act.
  */
 import { SpecialistLoader } from '../specialist/loader.js';
+import { type ResolvedToolContract } from '../specialist/resolved-tool-contract.js';
 import { type SpecialistWorkItemBoundary } from './workitem-store.js';
 import { type InteractionMessage, type PendingAsk } from './interaction.js';
 import { PeerAdapter, type TransportForensicEvent } from './transport/peer-adapter.js';
@@ -40,6 +41,16 @@ import { type PiSdk, type PiAgentSessionEvent, type PiResourceLoaderLike } from 
 import { type SettlementStore } from './settlement-store.js';
 import { type AuthorityWriter } from './authority-store.js';
 import { type ActivationHandle, type ActivationRequest, type ActivationSnapshot, type LiveActivationStats, type WorkspaceIdentity } from './types.js';
+/**
+ * True when an extension source cannot be handed to pi's in-process resource loader as a
+ * path, and must instead be resolved by the pi CLI itself.
+ *
+ * Exported so the native/legacy parity harness can express the one extension divergence that
+ * is real as a CHECKED shape (`native == legacy minus non-local sources`) instead of skipping
+ * the field entirely — a whole-field skip also hides a divergence in the sources both runtimes
+ * CAN load (XTRM-84 section 5).
+ */
+export declare function isNonLocalExtensionSource(source: string): boolean;
 /**
  * The activation's `cwd` and `agentDir` feed pi's resource loader, which is the ONLY
  * seam through which skills, extensions, prompt templates, themes and context files
@@ -184,6 +195,20 @@ export interface NativeActivationHostDeps {
      * it does not make delivery guaranteed — see docs/design/claude-transport-decision.md §5.
      */
     peer?: PeerDelivery;
+    /**
+     * Admission: the pre-flight gate that decides whether a resolved definition may actually
+     * run on THIS host. Defaults to `validateBeforeRun`, which is the real, fail-closed
+     * production gate — missing skill path, absent external command, required_tool the tier
+     * does not grant.
+     *
+     * It is injectable only so COMPOSITION can be measured independently of ADMISSION
+     * (XTRM-84 4c): the native/legacy parity harness compares what the two runtimes COMPILE
+     * for a shipped definition, and a validator whose verdict depends on which binaries are on
+     * the host's PATH is not part of either runtime's composition. Injecting it here is
+     * narrower than the alternative the harness used before, which was to rewrite the shipped
+     * definition and then compare a definition no user has.
+     */
+    admission?: (specialist: unknown, tier: string, toolContract: ResolvedToolContract) => void;
 }
 /** Configuration for pushing interactions to a Claude coordinator. */
 export interface PeerDelivery {
@@ -218,6 +243,10 @@ export declare class NativeActivationHost {
     private readonly now;
     private readonly authority;
     private readonly settlements;
+    /** Admission gate. Defaults to the real `validateBeforeRun`; see `NativeActivationHostDeps`. */
+    private readonly admission;
+    /** Guards the once-per-process settlement republish pass (SPECIALISTS-54). */
+    private republished;
     private readonly env;
     private readonly registry;
     /**
@@ -257,6 +286,19 @@ export declare class NativeActivationHost {
      * a machine whose store exists but predates a migration heals it.
      */
     private resolveWorkItems;
+    /**
+     * Republish settlements whose publication degraded, ONCE per host process (SPECIALISTS-54).
+     *
+     * The trigger is deliberately the first dispatch rather than host construction: a host is
+     * constructed in every test and by every read-only tool call, and a settlement backlog must
+     * not be retried by processes that never publish anything. The first dispatch is the smallest
+     * trigger that covers the post-cutover backlog, which is the case the issue is about — the
+     * records written while the runtime pointed at a pre-result Substrate build.
+     *
+     * Best-effort by the same contract as publication itself: a backlog that cannot be drained
+     * must never refuse the dispatch that triggered the drain.
+     */
+    private republishOncePerProcess;
     /**
      * Translate Pi session events into Specialists forensic events.
      *

@@ -45,8 +45,11 @@ export const substrateJournalSchema = z.object({
 type JournalInput = z.infer<typeof substrateJournalSchema>;
 
 // Structural subset of Substrate's JournalService: only the methods this
-// tool calls. Structural typing keeps the build free of the unpublished
-// @jaggerxtrm/substrate package; the real service satisfies this shape.
+// tool calls. Structural typing keeps the build free of a STATIC dependency on
+// @jaggerxtrm/substrate, which is a runtime-resolved optional prerequisite rather than an
+// installed dependency of this package (see resolveSubstrateDir in
+// src/activation/workitem-store.ts). It is published; the decoupling is about install
+// topology, not availability.
 export interface JournalServiceLike {
   appendEntry(
     issue_id: string,

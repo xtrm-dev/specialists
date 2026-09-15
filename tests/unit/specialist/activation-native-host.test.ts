@@ -2444,3 +2444,61 @@ describe('run-in-place workspace semantics (SPECIALISTS-21)', () => {
     expect(sources).not.toContain('workspaceHint');
   });
 });
+
+// The `admission` seam (XTRM-84 4c) is injectable so COMPOSITION can be measured without ADMISSION,
+// but nothing tested that the default is still the real gate — so "defaults to validateBeforeRun and
+// stays fail-closed" was asserted by a comment. This is that test. It deliberately does NOT pass
+// `admission`.
+describe('NativeActivationHost — admission defaults to the real pre-flight gate', () => {
+  it('refuses with preflight_failed when the definition declares a skill path that does not exist', async () => {
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const sink = collectingSink();
+    const spec = readOnlySpec();
+    (spec.specialist as Record<string, unknown>).skills = {
+      paths: [join(hostWorkspace(), 'no-such-skill-directory')],
+      scripts: [],
+    };
+    const host = new NativeActivationHost({
+      loader: loaderFor(spec),
+      workItems: fakeWorkItems(),
+      forensics: sink,
+      loadSdk: async () => makeSdk(record, fakeSession({ record })),
+      cwd: hostWorkspace(),
+    });
+
+    const error = await host.start({
+      specialist: 'researcher',
+      issueRef: 'ISSUE-1',
+      requestedByParticipantId: 'coordinator',
+    }).then(() => null, (thrown: unknown) => thrown as Error);
+
+    expect(error, 'the real pre-flight gate must refuse').not.toBeNull();
+    expect(error?.message).toContain('preflight_failed');
+    // No session was created: the refusal happens before an AgentSession exists.
+    expect(record.createArgs).toBeUndefined();
+    expect(sink.names).toContain('activation_rejected');
+  });
+
+  it('refuses when the definition requires a tool the resolved contract does not grant', async () => {
+    // The SPECIALISTS-57 shape at the ADMISSION layer: a declared required_tool the contract
+    // denies is a hard pre-flight failure, not a warning.
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const spec = readOnlySpec();
+    (spec.specialist as Record<string, unknown>).capabilities = { required_tools: ['edit'] };
+    const host = new NativeActivationHost({
+      loader: loaderFor(spec),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => makeSdk(record, fakeSession({ record })),
+      cwd: hostWorkspace(),
+    });
+
+    const error = await host.start({
+      specialist: 'researcher',
+      issueRef: 'ISSUE-1',
+      requestedByParticipantId: 'coordinator',
+    }).then(() => null, (thrown: unknown) => thrown as Error);
+    expect(error?.message).toContain('preflight_failed');
+    expect(record.createArgs).toBeUndefined();
+  });
+});
