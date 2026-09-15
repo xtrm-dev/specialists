@@ -37,6 +37,7 @@ import { type SpecialistWorkItemBoundary } from './workitem-store.js';
 import { type InteractionMessage, type PendingAsk } from './interaction.js';
 import { PeerAdapter, type TransportForensicEvent } from './transport/peer-adapter.js';
 import { type PiSdk, type PiAgentSessionEvent, type PiResourceLoaderLike } from './pi-sdk.js';
+import { type SettlementStore } from './settlement-store.js';
 import { type AuthorityWriter } from './authority-store.js';
 import { type ActivationHandle, type ActivationRequest, type ActivationSnapshot, type LiveActivationStats, type WorkspaceIdentity } from './types.js';
 /**
@@ -158,6 +159,17 @@ export interface NativeActivationHostDeps {
     cwd?: string;
     now?: () => number;
     /**
+     * S1 runtime result storage. Defaults to the file store under
+     * `<cwd>/.specialists/settlements/`; tests inject the memory store.
+     * Best-effort by contract — publication never fails an activation.
+     */
+    settlements?: SettlementStore;
+    /**
+     * Environment the X1 envelope reads the exact R4 contract from
+     * (`XTRM_SESSION_ID`, `XTRM_SESSION_NAME` only). Defaults to process.env.
+     */
+    env?: Record<string, string | undefined>;
+    /**
      * Persists the Fleet projection to the one Substrate authority. Defaults to a
      * no-op (unit tests); production servers inject `createFileAuthorityWriter()`.
      * Best-effort by contract — the writer never throws, so lifecycle never depends
@@ -205,6 +217,8 @@ export declare class NativeActivationHost {
     private readonly cwd;
     private readonly now;
     private readonly authority;
+    private readonly settlements;
+    private readonly env;
     private readonly registry;
     /**
      * Last per-message usage value seen per activation, keyed by live snapshot.
@@ -252,6 +266,20 @@ export declare class NativeActivationHost {
      */
     private onSessionEvent;
     private runToSettled;
+    /**
+     * S1 automatic settlement publication (ADR §38).
+     *
+     * Host-driven: called on every terminal settlement with the live snapshot,
+     * so the Specialist is involved in no step. Intermediate fallback attempts
+     * settle `failed` and store only; the walk's winner publishes. Retry/resume
+     * legs publish under their own attempt id through the same call, because
+     * they funnel through runToSettled after advancing the snapshot.
+     *
+     * Best-effort twice over: publishSettlement degrades internally, and this
+     * guards the call, because settlement evidence must never alter the result
+     * the activation reports.
+     */
+    private publishTerminalSettlement;
     /**
      * Run the turn-1 attempt, walking the model chain on retryable provider failures.
      *

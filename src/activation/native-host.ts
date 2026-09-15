@@ -77,6 +77,9 @@ import { loadPiSdk, type PiSdk, type PiAgentSessionLike, type PiAgentSessionEven
 import { nativeSessionTokenUsage, accumulateTokenUsage } from '../specialist/native-activation-observability.js';
 import { createGateModelRuntime, validateModelAvailable } from './model-gate.js';
 import { FleetRegistry, RESUMABLE_STATES, RETRYABLE_STATES, nextAttemptId, type ActivationRecord } from './registry.js';
+import { publishSettlement, type SettlementSubject } from './settlement-publication.js';
+import { createFileSettlementStore, type SettlementStore } from './settlement-store.js';
+import { join } from 'node:path';
 import { NULL_AUTHORITY_WRITER, type AuthorityWriter } from './authority-store.js';
 import {
   DispatchRejectedError,
@@ -292,6 +295,17 @@ export interface NativeActivationHostDeps {
   cwd?: string;
   now?: () => number;
   /**
+   * S1 runtime result storage. Defaults to the file store under
+   * `<cwd>/.specialists/settlements/`; tests inject the memory store.
+   * Best-effort by contract — publication never fails an activation.
+   */
+  settlements?: SettlementStore;
+  /**
+   * Environment the X1 envelope reads the exact R4 contract from
+   * (`XTRM_SESSION_ID`, `XTRM_SESSION_NAME` only). Defaults to process.env.
+   */
+  env?: Record<string, string | undefined>;
+  /**
    * Persists the Fleet projection to the one Substrate authority. Defaults to a
    * no-op (unit tests); production servers inject `createFileAuthorityWriter()`.
    * Best-effort by contract — the writer never throws, so lifecycle never depends
@@ -342,6 +356,8 @@ export class NativeActivationHost {
   private readonly cwd: string;
   private readonly now: () => number;
   private readonly authority: AuthorityWriter;
+  private readonly settlements: SettlementStore;
+  private readonly env: Record<string, string | undefined>;
 
   private readonly registry = new FleetRegistry();
 
@@ -376,6 +392,8 @@ export class NativeActivationHost {
     this.loadSdk = deps.loadSdk ?? loadPiSdk;
     this.now = deps.now ?? (() => Date.now());
     this.authority = deps.authority ?? NULL_AUTHORITY_WRITER;
+    this.settlements = deps.settlements ?? createFileSettlementStore(join(this.cwd, '.specialists', 'settlements'));
+    this.env = deps.env ?? process.env;
   }
 
   /**
@@ -1151,6 +1169,17 @@ export class NativeActivationHost {
       snapshot, session, unsubscribe,
       result: undefined as unknown as Promise<ActivationResult>,
       stepContract, initialPrompt: rendered.initial_prompt, createSession: createSessionForModel,
+      // S1 coordinator lineage: the dispatcher pair every attempt publishes
+      // under its own attempt id. Carried on the record so retry/resume legs
+      // publish coherently without re-resolving anything.
+      lineage: {
+        ...(request.requestedByParticipantId ? { coordinatorParticipantId: request.requestedByParticipantId } : {}),
+        ...(request.coordinatorSessionId ? { coordinatorSessionId: request.coordinatorSessionId } : {}),
+      },
+      workItems,
+      ...(typeof (binding as { baseCommit?: unknown }).baseCommit === 'string' && ((binding as { baseCommit?: string }).baseCommit as string).trim() !== ''
+        ? { bindingBaseCommit: (binding as { baseCommit?: string }).baseCommit as string }
+        : {}),
     };
     const result = this.runWithFallback(record, {
       modelChain, modelIndex, sdk, modelRuntime,
@@ -1293,6 +1322,7 @@ export class NativeActivationHost {
     session: PiAgentSessionLike,
     initialPrompt: string,
     emit: (name: string, payload?: Record<string, unknown>) => void,
+    record: ActivationRecord,
   ): Promise<ActivationResult> {
     try {
       await session.prompt(initialPrompt);
@@ -1309,7 +1339,7 @@ export class NativeActivationHost {
         snapshot.state = 'failed';
         this.save(snapshot);
         emit('activation_failed', { error: detail, stop_reason: last.stopReason });
-        return {
+        const failedResult: ActivationResult = {
           activationId: snapshot.activationId,
           participantId: snapshot.participantId,
           attemptId: snapshot.attemptId,
@@ -1331,6 +1361,8 @@ export class NativeActivationHost {
           fallbackUsed: false,
           completedAt: this.now(),
         };
+        this.publishTerminalSettlement(snapshot, failedResult, record, emit);
+        return failedResult;
       }
 
       const output = textOf(last);
@@ -1360,7 +1392,7 @@ export class NativeActivationHost {
       emit('activation_completed', { pi_session_id: session.sessionId, output });
       this.releaseIfWriter(snapshot, 'completed');
 
-      return {
+      const completedResult: ActivationResult = {
         activationId: snapshot.activationId,
         participantId: snapshot.participantId,
         attemptId: snapshot.attemptId,
@@ -1382,6 +1414,8 @@ export class NativeActivationHost {
         fallbackUsed: false,
         completedAt: this.now(),
       };
+      this.publishTerminalSettlement(snapshot, completedResult, record, emit);
+      return completedResult;
     } catch (error) {
       snapshot.state = 'failed';
       this.save(snapshot);
@@ -1397,7 +1431,7 @@ export class NativeActivationHost {
       // One seam for all four acquire sites, since each of them ends here.
       this.releaseIfWriter(snapshot, 'failed');
 
-      return {
+      const thrownResult: ActivationResult = {
         activationId: snapshot.activationId,
         participantId: snapshot.participantId,
         attemptId: snapshot.attemptId,
@@ -1419,8 +1453,67 @@ export class NativeActivationHost {
         fallbackUsed: false,
         completedAt: this.now(),
       };
+      this.publishTerminalSettlement(snapshot, thrownResult, record, emit);
+      return thrownResult;
     }
     // Deliberately no dispose(): a settled Specialist remains alive and resumable.
+  }
+
+  /**
+   * S1 automatic settlement publication (ADR §38).
+   *
+   * Host-driven: called on every terminal settlement with the live snapshot,
+   * so the Specialist is involved in no step. Intermediate fallback attempts
+   * settle `failed` and store only; the walk's winner publishes. Retry/resume
+   * legs publish under their own attempt id through the same call, because
+   * they funnel through runToSettled after advancing the snapshot.
+   *
+   * Best-effort twice over: publishSettlement degrades internally, and this
+   * guards the call, because settlement evidence must never alter the result
+   * the activation reports.
+   */
+  private publishTerminalSettlement(
+    snapshot: ActivationSnapshot,
+    result: ActivationResult,
+    record: ActivationRecord,
+    emit: (name: string, payload?: Record<string, unknown>) => void,
+  ): void {
+    try {
+      const subject: SettlementSubject = {
+        activationId: snapshot.activationId,
+        participantId: snapshot.participantId,
+        attemptId: snapshot.attemptId,
+        specialist: snapshot.specialist,
+        issueRef: snapshot.issueRef,
+        issueRevision: snapshot.issueRevision,
+        contractHash: snapshot.contractHash,
+        executionBindingId: snapshot.executionBindingId,
+        ...(snapshot.piSessionId ? { piSessionId: snapshot.piSessionId } : {}),
+        repositoryRoot: snapshot.workspace.repositoryRoot,
+        worktreePath: snapshot.workspace.worktreePath,
+        ...(snapshot.workspace.branch ? { branch: snapshot.workspace.branch } : {}),
+        ...(record.bindingBaseCommit ? { bindingBaseCommit: record.bindingBaseCommit } : {}),
+      };
+      publishSettlement({
+        boundary: record.workItems,
+        store: this.settlements,
+        subject,
+        status: result.status === 'completed' ? 'completed' : 'failed',
+        output: result.output,
+        validation: result.validation,
+        coordinator: {
+          ...(record.lineage.coordinatorParticipantId
+            ? { participantId: record.lineage.coordinatorParticipantId }
+            : {}),
+          ...(record.lineage.coordinatorSessionId ? { sessionId: record.lineage.coordinatorSessionId } : {}),
+        },
+        env: this.env,
+        now: this.now(),
+        emit,
+      });
+    } catch {
+      // Settlement evidence never fails an activation.
+    }
   }
 
   /**
@@ -1453,7 +1546,7 @@ export class NativeActivationHost {
     let index = ctx.modelIndex;
     // A dispatch-time skip (unavailable primary) already advanced past the chain head.
     let fallbackUsed = index > 0;
-    let result = await this.runToSettled(record.snapshot, record.session, ctx.initialPrompt, ctx.emit);
+    let result = await this.runToSettled(record.snapshot, record.session, ctx.initialPrompt, ctx.emit, record);
 
     while (result.status === 'failed' && index < ctx.modelChain.length - 1) {
       if (this.registry.get(record.snapshot.activationId) !== record) break;
@@ -1562,7 +1655,7 @@ export class NativeActivationHost {
       ctx.emit('activation_started', { pi_session_id: nextSession.sessionId });
       index += 1;
       fallbackUsed = true;
-      result = await this.runToSettled(record.snapshot, record.session, ctx.initialPrompt, ctx.emit);
+      result = await this.runToSettled(record.snapshot, record.session, ctx.initialPrompt, ctx.emit, record);
     }
 
     result.fallbackUsed = fallbackUsed;
@@ -1693,7 +1786,7 @@ export class NativeActivationHost {
       reused_session: reusedSession,
     });
 
-    const result = this.runToSettled(record.snapshot, record.session, opts?.prompt ?? record.initialPrompt, emit);
+    const result = this.runToSettled(record.snapshot, record.session, opts?.prompt ?? record.initialPrompt, emit, record);
     record.result = result;
 
     return {
@@ -2005,7 +2098,7 @@ export class NativeActivationHost {
     record.unsubscribe();
     record.unsubscribe = record.session.subscribe((event) => this.onSessionEvent(record.snapshot, event, emit));
 
-    const result = this.runToSettled(record.snapshot, record.session, prompt, emit);
+    const result = this.runToSettled(record.snapshot, record.session, prompt, emit, record);
     record.result = result;
 
     return {
