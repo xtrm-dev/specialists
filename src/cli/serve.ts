@@ -459,7 +459,12 @@ export async function startServe(argv: string[] = process.argv.slice(3)) {
   });
 
   await once(server, 'listening');
-  console.log(`sp serve listening on ${args.port}`);
+  // The port the server actually BOUND, not the one it was asked for. They are the same for a fixed
+  // port, and differ for `--port 0`, where the OS picks one — and a caller that cannot learn the
+  // real port cannot use an ephemeral one. Reporting the input back is not a measurement.
+  const address = server.address();
+  const boundPort = address && typeof address === 'object' ? address.port : args.port;
+  console.log(`sp serve listening on ${boundPort}`);
   return { server, args, db, readinessState };
 }
 

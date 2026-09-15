@@ -61680,7 +61680,9 @@ async function startServe(argv = process.argv.slice(3)) {
     })();
   });
   await once(server, "listening");
-  console.log(`sp serve listening on ${args.port}`);
+  const address = server.address();
+  const boundPort = address && typeof address === "object" ? address.port : args.port;
+  console.log(`sp serve listening on ${boundPort}`);
   return { server, args, db, readinessState };
 }
 async function run41(argv = process.argv.slice(3)) {
