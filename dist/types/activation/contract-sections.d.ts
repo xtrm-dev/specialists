@@ -33,4 +33,15 @@ export type ContractTextValidation = {
  */
 export declare function validateContractText(contract: string): ContractTextValidation;
 export declare function extractSections(description: string): Map<string, string>;
+/** Max chars of a purpose excerpt carried on a fleet row. Single line, whitespace-collapsed. */
+export declare const PURPOSE_EXCERPT_MAX = 60;
+/**
+ * One-line purpose excerpt for a fleet row, from an already-validated contract.
+ *
+ * First meaningful line of SCOPE, falling back to SUCCESS. Cheap and bounded:
+ * whitespace-collapsed, single line, truncated to PURPOSE_EXCERPT_MAX chars.
+ * Returns undefined when neither section yields text — the field is omitted,
+ * never fabricated.
+ */
+export declare function extractPurposeExcerpt(description: string): string | undefined;
 //# sourceMappingURL=contract-sections.d.ts.map

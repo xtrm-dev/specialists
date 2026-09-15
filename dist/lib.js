@@ -16203,9 +16203,6 @@ function renderTemplate(template, variables) {
 }
 
 // src/specialist/beads.ts
-import { spawnSync as spawnSync4 } from "node:child_process";
-
-// src/activation/bead-gate.ts
 import { spawnSync as spawnSync3 } from "node:child_process";
 
 // src/activation/contract-sections.ts
@@ -16282,19 +16279,6 @@ function extractSections(description) {
   flush();
   return sections;
 }
-// src/activation/bead-gate.ts
-var NON_DISPATCHABLE_STATUSES = new Set(["closed", "deferred"]);
-function readContractState(beadId) {
-  const result = spawnSync3("bd", ["state", beadId, "contract"], {
-    encoding: "utf-8",
-    stdio: ["ignore", "pipe", "ignore"],
-    timeout: 5000
-  });
-  if (result.error || result.status !== 0)
-    return;
-  const value = result.stdout?.trim().toLowerCase();
-  return value ? value : undefined;
-}
 var PURPOSE_EXCERPT_MAX = 60;
 function extractPurposeExcerpt(description) {
   const sections = extractSections(description ?? "");
@@ -16307,38 +16291,6 @@ function extractPurposeExcerpt(description) {
     return flat.length <= PURPOSE_EXCERPT_MAX ? flat : `${flat.slice(0, PURPOSE_EXCERPT_MAX - 1)}…`;
   }
   return;
-}
-function evaluateBeadReadiness(bead, options = {}) {
-  const status = bead.status?.trim().toLowerCase();
-  if (status && NON_DISPATCHABLE_STATUSES.has(status)) {
-    return { ok: false, reason: `bead is ${status} and is not dispatchable`, missing: [] };
-  }
-  const contractState = (options.readContractState ?? readContractState)(bead.id);
-  if (contractState === "draft") {
-    return {
-      ok: false,
-      reason: "bead contract is marked draft — promote it with `bd set-state <id> contract=ready` first",
-      missing: []
-    };
-  }
-  const description = bead.description ?? "";
-  const sections = extractSections(description);
-  const missing = REQUIRED_SECTIONS.filter((section) => !sections.get(section));
-  if (missing.length > 0) {
-    return {
-      ok: false,
-      reason: "bead is not a usable task contract: required sections are missing or empty",
-      missing: [...missing]
-    };
-  }
-  if (!scrutinyLevel(description)) {
-    return {
-      ok: false,
-      reason: `bead declares no SCRUTINY level (expected one of ${SCRUTINY_LEVELS.join(", ")})`,
-      missing: ["SCRUTINY"]
-    };
-  }
-  return { ok: true };
 }
 
 // src/specialist/beads.ts
@@ -16389,7 +16341,7 @@ class BeadsClient {
     }
   }
   static checkAvailable() {
-    const result = spawnSync4("bd", ["--version"], { stdio: "ignore" });
+    const result = spawnSync3("bd", ["--version"], { stdio: "ignore" });
     return result.status === 0;
   }
   isAvailable() {
@@ -16398,7 +16350,7 @@ class BeadsClient {
   createBead(specialistName) {
     if (!this.available)
       return null;
-    const result = spawnSync4("bd", ["q", `specialist:${specialistName}`, "--type", "task", "--labels", "specialist"], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
+    const result = spawnSync3("bd", ["q", `specialist:${specialistName}`, "--type", "task", "--labels", "specialist"], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
     if (result.status !== 0)
       return null;
     const id = result.stdout?.trim();
@@ -16407,7 +16359,7 @@ class BeadsClient {
   readBead(id) {
     if (!this.available || !id)
       return null;
-    const result = spawnSync4("bd", ["show", id, "--json"], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], timeout: 5000 });
+    const result = spawnSync3("bd", ["show", id, "--json"], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], timeout: 5000 });
     if (result.error || result.status !== 0 || !result.stdout?.trim())
       return null;
     try {
@@ -16424,7 +16376,7 @@ class BeadsClient {
   getCompletedBlockers(id, depth = 1) {
     if (!this.available || !id || depth < 1)
       return [];
-    const result = spawnSync4("bd", ["dep", "list", id, "--json"], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], timeout: 5000 });
+    const result = spawnSync3("bd", ["dep", "list", id, "--json"], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], timeout: 5000 });
     if (result.error || result.status !== 0 || !result.stdout?.trim())
       return [];
     let deps;
@@ -16451,13 +16403,13 @@ class BeadsClient {
   addDependency(trackingBeadId, inputBeadId) {
     if (!this.available || !trackingBeadId || !inputBeadId)
       return;
-    spawnSync4("bd", ["dep", "add", trackingBeadId, inputBeadId], { stdio: "ignore" });
+    spawnSync3("bd", ["dep", "add", trackingBeadId, inputBeadId], { stdio: "ignore" });
   }
   closeBead(id, status, durationMs, model) {
     if (!this.available || !id)
       return;
     const reason = `${status}, ${Math.round(durationMs)}ms, ${model}`;
-    spawnSync4("bd", ["close", id, "-r", reason], { stdio: "ignore" });
+    spawnSync3("bd", ["close", id, "-r", reason], { stdio: "ignore" });
   }
   closeBeadIfInProgress(id, reason) {
     if (!this.available || !id)
@@ -16467,13 +16419,13 @@ class BeadsClient {
       return false;
     if (bead.status !== "open" && bead.status !== "in_progress")
       return false;
-    const result = spawnSync4("bd", ["close", id, "-r", reason], { stdio: "ignore" });
+    const result = spawnSync3("bd", ["close", id, "-r", reason], { stdio: "ignore" });
     return result.status === 0;
   }
   updateBeadNotes(id, notes) {
     if (!this.available || !id || !notes)
       return { ok: false, error: "beads unavailable or empty payload" };
-    const result = spawnSync4("bd", ["update", id, "--append-notes", notes], {
+    const result = spawnSync3("bd", ["update", id, "--append-notes", notes], {
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "pipe"]
     });
@@ -16489,7 +16441,7 @@ class BeadsClient {
   auditBead(id, toolName, model, exitCode) {
     if (!this.available || !id)
       return;
-    spawnSync4("bd", [
+    spawnSync3("bd", [
       "audit",
       "record",
       "--kind",
@@ -16510,7 +16462,7 @@ function createBeadFromContract(contract, title) {
   const firstLine = (problem ?? "").split(`
 `).map((s) => s.trim()).find(Boolean);
   const resolvedTitle = title ?? (firstLine ?? "Specialist dispatch contract").slice(0, 72);
-  const result = spawnSync4("bd", ["create", resolvedTitle, "--description", contract, "--type", "task", "--priority", "2", "--json"], { encoding: "utf-8", timeout: 20000 });
+  const result = spawnSync3("bd", ["create", resolvedTitle, "--description", contract, "--type", "task", "--priority", "2", "--json"], { encoding: "utf-8", timeout: 20000 });
   if (result.error || result.status !== 0)
     return null;
   try {
@@ -17003,7 +16955,7 @@ ${summaries.join(`
 }
 
 // src/specialist/runner.ts
-import { execSync as execSync2, spawnSync as spawnSync5 } from "node:child_process";
+import { execSync as execSync2, spawnSync as spawnSync4 } from "node:child_process";
 import { existsSync as existsSync10, readFileSync as readFileSync5 } from "node:fs";
 import { basename as basename2, resolve as resolve9 } from "node:path";
 import { homedir as homedir3 } from "node:os";
@@ -17024,7 +16976,7 @@ function runScript(command, cwd) {
     return { name: "unknown", output: "Missing script command (expected `run` or legacy `path`).", stderr: "", exitCode: 1 };
   }
   const scriptName = sanitizeScriptName(basename2(run.split(" ")[0]));
-  const result = spawnSync5(run, {
+  const result = spawnSync4(run, {
     encoding: "utf8",
     timeout: 30000,
     cwd,
@@ -17111,7 +17063,7 @@ function resolvePath2(p) {
   return p.startsWith("~/") ? resolve9(homedir3(), p.slice(2)) : resolve9(p);
 }
 function commandExists(cmd) {
-  const result = spawnSync5("which", [cmd], { stdio: "ignore" });
+  const result = spawnSync4("which", [cmd], { stdio: "ignore" });
   return result.status === 0;
 }
 var SHELL_BUILTINS = new Set([
@@ -23884,6 +23836,52 @@ function createActivationForensicSink(observability) {
       } catch {}
     }
   };
+}
+// src/specialist/bead-gate.ts
+import { spawnSync as spawnSync5 } from "node:child_process";
+var NON_DISPATCHABLE_STATUSES = new Set(["closed", "deferred"]);
+function readContractState(beadId) {
+  const result = spawnSync5("bd", ["state", beadId, "contract"], {
+    encoding: "utf-8",
+    stdio: ["ignore", "pipe", "ignore"],
+    timeout: 5000
+  });
+  if (result.error || result.status !== 0)
+    return;
+  const value = result.stdout?.trim().toLowerCase();
+  return value ? value : undefined;
+}
+function evaluateBeadReadiness(bead, options = {}) {
+  const status = bead.status?.trim().toLowerCase();
+  if (status && NON_DISPATCHABLE_STATUSES.has(status)) {
+    return { ok: false, reason: `bead is ${status} and is not dispatchable`, missing: [] };
+  }
+  const contractState = (options.readContractState ?? readContractState)(bead.id);
+  if (contractState === "draft") {
+    return {
+      ok: false,
+      reason: "bead contract is marked draft — promote it with `bd set-state <id> contract=ready` first",
+      missing: []
+    };
+  }
+  const description = bead.description ?? "";
+  const sections = extractSections(description);
+  const missing = REQUIRED_SECTIONS.filter((section) => !sections.get(section));
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      reason: "bead is not a usable task contract: required sections are missing or empty",
+      missing: [...missing]
+    };
+  }
+  if (!scrutinyLevel(description)) {
+    return {
+      ok: false,
+      reason: `bead declares no SCRUTINY level (expected one of ${SCRUTINY_LEVELS.join(", ")})`,
+      missing: ["SCRUTINY"]
+    };
+  }
+  return { ok: true };
 }
 // src/specialist/launch-outcome.ts
 var LAUNCH_OUTCOME_SCHEMA_VERSION = "xtrm.command-outcome.v1";

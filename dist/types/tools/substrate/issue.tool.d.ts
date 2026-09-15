@@ -14,22 +14,22 @@ export declare const substrateIssueSchema: z.ZodObject<{
     op: "create" | "get" | "resolve" | "update_contract" | "project_resolve" | "project_create" | "link_checkout" | "list_links";
     name?: string | undefined;
     issue_id?: string | undefined;
-    contract?: Record<string, unknown> | undefined;
     title?: string | undefined;
     idempotency_key?: string | undefined;
     ref?: string | undefined;
     prefix?: string | undefined;
+    contract?: Record<string, unknown> | undefined;
     project_id?: string | undefined;
     git_root?: string | undefined;
 }, {
     op: "create" | "get" | "resolve" | "update_contract" | "project_resolve" | "project_create" | "link_checkout" | "list_links";
     name?: string | undefined;
     issue_id?: string | undefined;
-    contract?: Record<string, unknown> | undefined;
     title?: string | undefined;
     idempotency_key?: string | undefined;
     ref?: string | undefined;
     prefix?: string | undefined;
+    contract?: Record<string, unknown> | undefined;
     project_id?: string | undefined;
     git_root?: string | undefined;
 }>;

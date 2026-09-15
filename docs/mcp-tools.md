@@ -278,7 +278,7 @@ payload rather than failing at registration; see `src/substrate/services.ts`.
   notification model below.
 - **Legacy `sp` CLI job tools.** The CLI-managed job tools (`stop_specialist`,
   `resume_specialist`, `feed_specialist`, `steer_specialist`,
-  `list_specialists`, `specialist_init`) are not registered on this MCP
+  `list_specialists`) are not registered on this MCP
   server. They are documented with the CLI in
   [cli-reference.md](cli-reference.md).
 - **Pi extension tools.** The Pi extension

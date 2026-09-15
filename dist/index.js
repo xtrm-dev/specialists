@@ -20437,22 +20437,6 @@ function extractSections(description) {
   flush();
   return sections;
 }
-var REQUIRED_SECTIONS, SCRUTINY_LEVELS, ALL_HEADINGS;
-var init_contract_sections = __esm(() => {
-  REQUIRED_SECTIONS = [
-    "PROBLEM",
-    "SUCCESS",
-    "SCOPE",
-    "NON_GOALS",
-    "CONSTRAINTS",
-    "VALIDATION",
-    "OUTPUT"
-  ];
-  SCRUTINY_LEVELS = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
-  ALL_HEADINGS = new Set([...REQUIRED_SECTIONS, "SCRUTINY"]);
-});
-
-// src/activation/bead-gate.ts
 function extractPurposeExcerpt(description) {
   const sections = extractSections(description ?? "");
   for (const name of ["SCOPE", "SUCCESS"]) {
@@ -20465,12 +20449,19 @@ function extractPurposeExcerpt(description) {
   }
   return;
 }
-var NON_DISPATCHABLE_STATUSES, PURPOSE_EXCERPT_MAX = 60;
-var init_bead_gate = __esm(() => {
-  init_contract_sections();
-  init_contract_sections();
-  init_contract_sections();
-  NON_DISPATCHABLE_STATUSES = new Set(["closed", "deferred"]);
+var REQUIRED_SECTIONS, SCRUTINY_LEVELS, ALL_HEADINGS, PURPOSE_EXCERPT_MAX = 60;
+var init_contract_sections = __esm(() => {
+  REQUIRED_SECTIONS = [
+    "PROBLEM",
+    "SUCCESS",
+    "SCOPE",
+    "NON_GOALS",
+    "CONSTRAINTS",
+    "VALIDATION",
+    "OUTPUT"
+  ];
+  SCRUTINY_LEVELS = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
+  ALL_HEADINGS = new Set([...REQUIRED_SECTIONS, "SCRUTINY"]);
 });
 
 // src/specialist/beads.ts
@@ -20647,7 +20638,7 @@ function shouldCreateBead(beadsIntegration, permissionRequired) {
   return permissionRequired !== "READ_ONLY";
 }
 var init_beads = __esm(() => {
-  init_bead_gate();
+  init_contract_sections();
 });
 
 // src/specialist/templateEngine.ts
@@ -58907,7 +58898,6 @@ async function run38() {
   lines.push("");
   lines.push(`  After ${cmd2("specialists init")}, these MCP tools are available to Claude:`);
   lines.push("");
-  lines.push(`  ${bold11("specialist_init")}    \u2014 bootstrap: bd init + list specialists`);
   lines.push(`  ${bold11("list_specialists")}   \u2014 discover specialists (project/user/system)`);
   lines.push(`  ${bold11("specialist_dispatch")} \u2014 start a specialist as a background job, returns immediately`);
   lines.push(`  ${bold11("feed_specialist")}    \u2014 stream events/output by job ID`);
@@ -95217,7 +95207,7 @@ var init_native_host = __esm(() => {
   init_runner();
   init_session();
   init_resolved_tool_contract();
-  init_bead_gate();
+  init_contract_sections();
   init_workitem_store();
   init_contract_sections();
   init_interaction();
@@ -95502,6 +95492,15 @@ function createActivationForensicSink(observability) {
 var init_forensic_sink = __esm(() => {
   init_native_activation_observability();
   init_timeline_events();
+});
+
+// src/specialist/bead-gate.ts
+var NON_DISPATCHABLE_STATUSES;
+var init_bead_gate = __esm(() => {
+  init_contract_sections();
+  init_contract_sections();
+  init_contract_sections();
+  NON_DISPATCHABLE_STATUSES = new Set(["closed", "deferred"]);
 });
 
 // src/specialist/citation-evidence.ts
@@ -96288,7 +96287,6 @@ __export(exports_v2_server, {
   serveV2Stdio: () => serveV2Stdio,
   buildV2Server: () => buildV2Server
 });
-import { join as join61 } from "path";
 function textResult(result) {
   return { content: [{ type: "text", text: typeof result === "string" ? result : JSON.stringify(result, null, 2) }] };
 }
@@ -96297,9 +96295,6 @@ function buildV2Server(ctx, options2) {
   let channelSend = () => {};
   const circuitBreaker = new CircuitBreaker;
   const loader = new SpecialistLoader;
-  const hooks = new HookEmitter({ tracePath: join61(process.cwd(), ".specialists", "trace.jsonl") });
-  const beadsClient = new BeadsClient;
-  const runner = new SpecialistRunner({ loader, hooks, circuitBreaker, beadsClient });
   const observability = createObservabilitySqliteClient();
   const host = new NativeActivationHost({
     loader,
@@ -96406,10 +96401,7 @@ var init_v2_server = __esm(() => {
   init_constants();
   init_observability_sqlite();
   init_loader();
-  init_runner();
-  init_hooks();
   init_circuitBreaker();
-  init_beads();
   init_specialist_status_tool();
   init_specialist_list_tool();
   init_activation_tool();

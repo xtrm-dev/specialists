@@ -24,7 +24,6 @@
  * server-initiated requests (no sampling/elicitation/roots; long operations
  * return `complete` synchronously, so no `input_required` round-trips).
  */
-import { join } from 'node:path';
 import * as z from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { McpServer, fromJsonSchema, PROTOCOL_VERSION_META_KEY } from '@modelcontextprotocol/server';
@@ -34,10 +33,7 @@ import type { StdioServerHandle } from '@modelcontextprotocol/server/stdio';
 import { MCP_CONFIG } from '../constants.js';
 import { createObservabilitySqliteClient } from '../specialist/observability-sqlite.js';
 import { SpecialistLoader } from '../specialist/loader.js';
-import { SpecialistRunner } from '../specialist/runner.js';
-import { HookEmitter } from '../specialist/hooks.js';
 import { CircuitBreaker } from '../utils/circuitBreaker.js';
-import { BeadsClient } from '../specialist/beads.js';
 import { createSpecialistStatusTool } from '../tools/specialist/specialist_status.tool.js';
 import { createSpecialistListTool, specialistListSchema } from '../tools/specialist/specialist_list.tool.js';
 import {
@@ -101,9 +97,6 @@ export function buildV2Server(ctx?: McpRequestContext, options?: BuildV2ServerOp
   let channelSend: ChannelSend = () => {};
   const circuitBreaker = new CircuitBreaker();
   const loader = new SpecialistLoader();
-  const hooks = new HookEmitter({ tracePath: join(process.cwd(), '.specialists', 'trace.jsonl') });
-  const beadsClient = new BeadsClient();
-  const runner = new SpecialistRunner({ loader, hooks, circuitBreaker, beadsClient });
 
   const observability = createObservabilitySqliteClient();
 

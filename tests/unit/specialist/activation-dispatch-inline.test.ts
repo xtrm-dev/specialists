@@ -21,7 +21,7 @@ import {
   specialistDispatchSchema,
 } from '../../../src/tools/specialist/activation.tool.js';
 import { NativeActivationHost } from '../../../src/activation/native-host.js';
-import { REQUIRED_SECTIONS } from '../../../src/activation/bead-gate.js';
+import { REQUIRED_SECTIONS } from '../../../src/activation/contract-sections.js';
 import { testWorkItems } from '../../utils/test-work-items.js';
 import type { PiSdk, PiAgentSessionLike, PiAgentSessionEvent } from '../../../src/activation/pi-sdk.js';
 import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';

@@ -132,3 +132,25 @@ export function extractSections(description: string): Map<string, string> {
 
   return sections;
 }
+
+/** Max chars of a purpose excerpt carried on a fleet row. Single line, whitespace-collapsed. */
+export const PURPOSE_EXCERPT_MAX = 60;
+
+/**
+ * One-line purpose excerpt for a fleet row, from an already-validated contract.
+ *
+ * First meaningful line of SCOPE, falling back to SUCCESS. Cheap and bounded:
+ * whitespace-collapsed, single line, truncated to PURPOSE_EXCERPT_MAX chars.
+ * Returns undefined when neither section yields text — the field is omitted,
+ * never fabricated.
+ */
+export function extractPurposeExcerpt(description: string): string | undefined {
+  const sections = extractSections(description ?? '');
+  for (const name of ['SCOPE', 'SUCCESS'] as const) {
+    const line = (sections.get(name) ?? '').split('\n').map(s => s.trim()).find(Boolean);
+    if (!line) continue;
+    const flat = line.replace(/\s+/g, ' ');
+    return flat.length <= PURPOSE_EXCERPT_MAX ? flat : `${flat.slice(0, PURPOSE_EXCERPT_MAX - 1)}…`;
+  }
+  return undefined;
+}

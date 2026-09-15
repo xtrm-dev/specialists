@@ -1,4 +1,4 @@
-import { extractSections } from '../../src/activation/bead-gate.js';
+import { extractSections } from '../../src/activation/contract-sections.js';
 import type { SpecialistWorkItemBoundary, WorkItemView } from '../../src/activation/workitem-store.js';
 
 export function testWorkItems(options: {

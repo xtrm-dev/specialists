@@ -57,7 +57,7 @@ import {
 } from '../pi/session.js';
 import { formatResolvedToolContract } from '../specialist/resolved-tool-contract.js';
 import { resolveModelChain } from '../specialist/model-chain.js';
-import { extractPurposeExcerpt } from './bead-gate.js';
+import { extractPurposeExcerpt } from './contract-sections.js';
 import {
   openWorkItemBoundary,
   resolveWorkItemDbPath,
