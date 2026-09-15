@@ -470,9 +470,25 @@ export class NativeActivationHost {
      */
     let createdRefForRefusals: string | undefined;
 
+    /**
+     * Releases the claim the inline issue took, so a refused inline dispatch leaves an issue that is
+     * immediately re-dispatchable instead of one locked for the claim TTL by an activation that
+     * never ran (SPECIALISTS-53). Armed where the issue is created, called from `reject` for the same
+     * reason as the ref: `reject` is defined before `workItems` is assigned and is genuinely called
+     * before that (unknown_specialist), so it cannot reach the boundary directly.
+     */
+    let releaseInlineClaimOnRefusal: (() => void) | null = null;
+    const releaseClaimForRefusal = (): void => {
+      if (!releaseInlineClaimOnRefusal) return;
+      const release = releaseInlineClaimOnRefusal;
+      releaseInlineClaimOnRefusal = null;
+      release();
+    };
+
     const reject = (reason: string, detail: Record<string, unknown> = {}): never => {
-      // Both first, so no refusal path can forget either.
+      // All first, so no refusal path can forget any of them.
       releaseLeaseOnRefusal();
+      releaseClaimForRefusal();
       emit('activation_rejected', { reason, ...detail });
       throw new DispatchRejectedError(reason, {
         specialist: request.specialist,
@@ -539,6 +555,15 @@ export class NativeActivationHost {
         });
         autoCreatedRef = created.ref;
         createdRefForRefusals = created.ref;
+        releaseInlineClaimOnRefusal = () => {
+          try {
+            // The activation id is passed so the boundary releases only a claim THIS activation
+            // took, rather than whatever is live (SPECIALISTS-53 review).
+            workItems.releaseInlineClaim?.(created.ref, { activationId });
+          } catch {
+            // Cleanup must not change the outcome: the refusal is still a refusal.
+          }
+        };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (message.startsWith('inline contract is not a usable task contract')) {
@@ -730,6 +755,10 @@ export class NativeActivationHost {
         // Rebuilt rather than rethrown so the created ref is named without losing the acquire's own
         // reason and holder detail: a caller needs to know WHO holds the workspace, and that the
         // inline contract already left a claimed issue behind (SPECIALISTS-45).
+        // The inline claim is released on this path too: this refusal throws a rebuilt error rather
+        // than going through reject(), so routing the release only through reject would leave the
+        // claim held on exactly the path where the workspace was the problem (SPECIALISTS-53).
+        releaseClaimForRefusal();
         if (error instanceof DispatchRejectedError && createdRefForRefusals) {
           throw new DispatchRejectedError(error.reason, {
             ...error.detail,

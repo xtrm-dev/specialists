@@ -17,11 +17,12 @@ import {
  * Substrate package required.
  */
 
-function stubPorts(active: ActiveClaimView | null): WorkItemPorts {
+function stubPorts(active: ActiveClaimView | null, released: Array<{ issueId: string; holder: string }> = []): WorkItemPorts {
   return {
     issues: {
       resolveRef: (ref) => ({ id: `iss_${ref}`, humanRef: ref }),
       getActiveClaim: () => active,
+      releaseClaim: (issueId: string, holder: string) => { released.push({ issueId, holder }); return { id: 1 }; },
       getParent: () => null,
       getRevision: () => ({ contract: {} }),
       resolveProject: () => ({ projectId: 'proj-test' }),
@@ -53,6 +54,34 @@ function stubPorts(active: ActiveClaimView | null): WorkItemPorts {
 
 const req = (overrides: Partial<DispatchRequest> = {}): DispatchRequest => ({
   ref: 'X', holder: 'holder-a', activationId: 'act-1', ...overrides,
+});
+
+describe('releaseInlineClaim ownership guard (SPECIALISTS-53)', () => {
+  it('releases a claim this activation took, as its recorded holder', () => {
+    const released: Array<{ issueId: string; holder: string }> = [];
+    const boundary = createWorkItemBoundary(stubPorts({ id: 9, holder: 'holder-a', activationId: 'act-1' }, released));
+    expect(boundary.releaseInlineClaim?.('X', { activationId: 'act-1' })).toBe(true);
+    // As the RECORDED holder, read from the claim, not from the caller.
+    expect(released).toEqual([{ issueId: 'iss_X', holder: 'holder-a' }]);
+  });
+
+  it('refuses to release a claim another activation now holds', () => {
+    // The reason this guard exists: releasing "as the recorded holder" would otherwise release
+    // whatever is live. If anything re-claimed between creation and refusal - a TTL edge, a
+    // coordinator racing on created_ref - that holder is someone else, and releasing as them
+    // destroys a claim that is not ours.
+    const released: Array<{ issueId: string; holder: string }> = [];
+    const boundary = createWorkItemBoundary(stubPorts({ id: 9, holder: 'holder-b', activationId: 'act-OTHER' }, released));
+    expect(boundary.releaseInlineClaim?.('X', { activationId: 'act-1' })).toBe(false);
+    expect(released).toEqual([]);
+  });
+
+  it('reports false when there is no live claim', () => {
+    const released: Array<{ issueId: string; holder: string }> = [];
+    const boundary = createWorkItemBoundary(stubPorts(null, released));
+    expect(boundary.releaseInlineClaim?.('X', { activationId: 'act-1' })).toBe(false);
+    expect(released).toEqual([]);
+  });
 });
 
 describe('createWorkItemBoundary bind claim-ownership refusal', () => {

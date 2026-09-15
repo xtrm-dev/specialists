@@ -191,6 +191,9 @@ afterEach(() => {
 const NO_CONTRACT_STATE = { readContractState: () => undefined };
 
 /** A valid inline contract: seven sections plus SCRUTINY, so the inline path is reached. */
+const releasedClaims: string[] = [];
+afterEach(() => { releasedClaims.length = 0; });
+
 const INLINE_CONTRACT =
   'PROBLEM\nProve the inline-dispatch path.\n\nSUCCESS\nA read-only activation settles.\n\n' +
   'SCOPE\nRead-only.\n\nNON_GOALS\nNo writes.\n\nCONSTRAINTS\nRead-only.\n\n' +
@@ -236,6 +239,12 @@ function fakeWorkItems(options: { state?: string; blockers?: Array<{ ref: string
       } as never;
     },
     inlineCreate: () => ({ ref: 'ISSUE-INLINE', issueId: 'iss_inline', claimId: 1 }),
+    // Records what was released, so a test asserts the release happened rather than that a no-op
+    // method exists (SPECIALISTS-53).
+    releaseInlineClaim: (ref: string, opts?: { activationId?: string }) => {
+      releasedClaims.push(opts?.activationId ? `${ref}@${opts.activationId}` : ref);
+      return true;
+    },
     journal: () => {},
   };
 }
@@ -1443,6 +1452,57 @@ describe('NativeActivationHost — fallback walk + retry (unitAI-3emr7)', () => 
     const result = await handle.result;
     expect(result.fallbackUsed).toBe(true);
     expect(leaseHeldDuringFallback).toBe(true);
+  });
+
+  it('releases the claim an inline contract took when the dispatch is refused', async () => {
+    // SPECIALISTS-45 made the orphan discoverable; SPECIALISTS-53 makes it usable. The issue is
+    // created AND claimed with the refusing activation's id, and Substrate's DEFAULT_CLAIM_TTL_MS
+    // is 15 minutes, so a coordinator that reads created_ref and immediately retries hits a claim
+    // held by an activation that never ran. Releasing deletes no work: the issue stays and becomes
+    // re-dispatchable at once.
+    const workspace = hostWorkspace();
+    const spec = readOnlySpec();
+    (spec.specialist.execution as Record<string, unknown>).permission_required = 'HIGH';
+    acquireLease({
+      workspace: resolveWorkspace(workspace),
+      activationId: 'act:other-writer',
+      attemptId: 'att:other-writer:1',
+      specialist: 'other-specialist',
+    });
+    const host = new NativeActivationHost({
+      loader: loaderFor(spec),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => makeSdk({}, fakeSession({})),
+      cwd: workspace,
+    });
+
+    const refusal = await host.start({
+      specialist: 'executor', contract: INLINE_CONTRACT, requestedByParticipantId: 'coordinator',
+    }).catch((caught: unknown) => caught);
+
+    expect((refusal as DispatchRejectedError).detail.created_ref).toBe('ISSUE-INLINE');
+    // The refusing activation's own id is passed, so the boundary can refuse to release a claim
+    // that is no longer ours (SPECIALISTS-53 review).
+    expect(releasedClaims).toHaveLength(1);
+    expect(releasedClaims[0]).toMatch(/^ISSUE-INLINE@act:/);
+  });
+
+  it('keeps the claim when the inline dispatch is admitted', async () => {
+    // The release is for refusals only: an admitted activation holds its claim for real work.
+    const host = new NativeActivationHost({
+      loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => makeSdk({}, fakeSession({})),
+      cwd: hostWorkspace(),
+    });
+
+    await host.start({
+      specialist: 'researcher', contract: INLINE_CONTRACT, requestedByParticipantId: 'coordinator',
+    });
+
+    expect(releasedClaims).toEqual([]);
   });
 
   it('names the created issue when an inline dispatch is refused after creation', async () => {

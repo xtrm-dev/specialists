@@ -284,6 +284,14 @@ export interface SpecialistWorkItemBoundary {
   check(req: DispatchRequest): CheckResult;
   bind(req: DispatchRequest): ExecutionBindingView;
   inlineCreate(contract: string, opts?: { title?: string; holder?: string; activationId?: string }): InlineIssueResult;
+  /**
+   * Release the claim an inline contract took, so a refused inline dispatch leaves an issue that is
+   * immediately re-dispatchable rather than one locked by an activation that never ran
+   * (SPECIALISTS-53). Returns false when there is no live claim or the boundary cannot release.
+   * Optional for the same reason as the port method: the boundary is structural and test doubles
+   * predate it.
+   */
+  releaseInlineClaim?(ref: string, opts?: { activationId?: string }): boolean;
   journal(ref: string, kind: string, opts?: { participantId?: string; activationId?: string }): void;
   /**
    * S1 settlement surface (ADR §§38–39). Optional so existing fakes keep
@@ -310,6 +318,12 @@ export interface ActiveClaimView {
 export interface IssueServicePort {
   resolveRef(ref: string): { id: string; humanRef: string };
   getActiveClaim(issueId: string): ActiveClaimView | null;
+  /**
+   * Release a live claim (SPECIALISTS-53). Optional because this port is structural and several
+   * public-test doubles predate it; a double that omits it has no claim to release. The real
+   * service implements it (substrate issue-service `releaseClaim`).
+   */
+  releaseClaim?(issueId: string, holder: string, opts?: { activationId?: string }): { id: number } | null;
   getParent(childId: string): { id: string; humanRef: string; title: string; currentRevision: number } | null;
   /**
    * Every ACTIVE `blocks` edge whose target is `childId`, resolved to its sources. Optional
@@ -568,6 +582,25 @@ export function createWorkItemBoundary(ports: WorkItemPorts): SpecialistWorkItem
       // The machine id remains available separately, while dispatch returns the
       // human locator that IssueService.resolveRef accepts across all frontends.
       return { ref: issues.resolveRef(issue.id).humanRef, issueId: issue.id, claimId: claim.id };
+    },
+    releaseInlineClaim(ref: string, opts: { activationId?: string } = {}): boolean {
+      const issueId = issues.resolveRef(ref).id;
+      const active = issues.getActiveClaim(issueId);
+      if (!active || !issues.releaseClaim) return false;
+      // Release only a claim THIS activation took. Releasing as the recorded holder is what makes a
+      // release possible at all, and it is also what makes it dangerous: if anything re-claimed
+      // between creation and refusal - a TTL edge, a coordinator racing on created_ref, a future
+      // path that re-claims - the recorded holder is someone else, and releasing as them would
+      // destroy a claim that is not ours. Checked, not assumed (SPECIALISTS-53 review).
+      if (opts.activationId && active.activationId !== opts.activationId) return false;
+      // Still released AS THE RECORDED HOLDER, read from the claim rather than from the caller:
+      // only the recorded holder and activation may release.
+      const released = issues.releaseClaim(
+        issueId,
+        active.holder,
+        active.activationId ? { activationId: active.activationId } : {},
+      );
+      return released !== null;
     },
 
     journal(ref: string, kind: string, opts: { participantId?: string; activationId?: string } = {}): void {

@@ -171,6 +171,16 @@ export interface SpecialistWorkItemBoundary {
         holder?: string;
         activationId?: string;
     }): InlineIssueResult;
+    /**
+     * Release the claim an inline contract took, so a refused inline dispatch leaves an issue that is
+     * immediately re-dispatchable rather than one locked by an activation that never ran
+     * (SPECIALISTS-53). Returns false when there is no live claim or the boundary cannot release.
+     * Optional for the same reason as the port method: the boundary is structural and test doubles
+     * predate it.
+     */
+    releaseInlineClaim?(ref: string, opts?: {
+        activationId?: string;
+    }): boolean;
     journal(ref: string, kind: string, opts?: {
         participantId?: string;
         activationId?: string;
@@ -204,6 +214,16 @@ export interface IssueServicePort {
         humanRef: string;
     };
     getActiveClaim(issueId: string): ActiveClaimView | null;
+    /**
+     * Release a live claim (SPECIALISTS-53). Optional because this port is structural and several
+     * public-test doubles predate it; a double that omits it has no claim to release. The real
+     * service implements it (substrate issue-service `releaseClaim`).
+     */
+    releaseClaim?(issueId: string, holder: string, opts?: {
+        activationId?: string;
+    }): {
+        id: number;
+    } | null;
     getParent(childId: string): {
         id: string;
         humanRef: string;
