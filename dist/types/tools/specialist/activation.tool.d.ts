@@ -56,6 +56,8 @@ export interface ActivationView {
      * extension by design reports a deliberate exclusion here too.
      */
     tool_contract_notes?: string[];
+    /** Spec settings this runtime ignores (SPECIALISTS-52), e.g. legacy-CLI-only beads_* fields. */
+    config_notes?: string[];
 }
 export declare function toActivationView(snapshot: ActivationSnapshot, nowMs?: number): ActivationView;
 /** An outstanding question or escalation, projected for a coordinator that must answer it. */
@@ -258,6 +260,8 @@ export declare function createSpecialistDispatchTool(getHost: () => NativeActiva
          * extension by design reports a deliberate exclusion here too.
          */
         tool_contract_notes?: string[];
+        /** Spec settings this runtime ignores (SPECIALISTS-52), e.g. legacy-CLI-only beads_* fields. */
+        config_notes?: string[];
         status: "dispatched";
     } | {
         step_contract: {
@@ -457,6 +461,8 @@ export declare function createSpecialistRetryTool(getHost: () => NativeActivatio
          * extension by design reports a deliberate exclusion here too.
          */
         tool_contract_notes?: string[];
+        /** Spec settings this runtime ignores (SPECIALISTS-52), e.g. legacy-CLI-only beads_* fields. */
+        config_notes?: string[];
         status: "retried";
     } | {
         activation_id: string;

@@ -528,6 +528,19 @@ export class SpecialistLoader {
    * Blocked-field warnings collected during the most recent list() or get() calls.
    * Returns all warnings when called without a name; filters to one specialist otherwise.
    */
+  /**
+   * `execution.extensions` of the package canonical layer only, before user.json and repo
+   * overrides. Lets doctor tell a global `false` that disables a canonically enabled source
+   * from one that toggles nothing (SPECIALISTS-52).
+   */
+  async getCanonicalExtensions(name: string): Promise<Record<string, boolean>> {
+    const [baseHit] = this.findLayerHits(name);
+    if (!baseHit) return {};
+    const content = await readFile(baseHit.resolved.filePath, 'utf-8');
+    const base = await parseSpecialist(this.toJson(content, baseHit.resolved.deprecatedYaml));
+    return { ...(base.specialist.execution.extensions ?? {}) };
+  }
+
   getBlockedFieldWarnings(name?: string): BlockedFieldWarning[] {
     if (name) return this.blockedFieldWarnings.get(name) ?? [];
     const all: BlockedFieldWarning[] = [];

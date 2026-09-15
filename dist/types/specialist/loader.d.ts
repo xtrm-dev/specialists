@@ -105,6 +105,12 @@ export declare class SpecialistLoader {
      * Blocked-field warnings collected during the most recent list() or get() calls.
      * Returns all warnings when called without a name; filters to one specialist otherwise.
      */
+    /**
+     * `execution.extensions` of the package canonical layer only, before user.json and repo
+     * overrides. Lets doctor tell a global `false` that disables a canonically enabled source
+     * from one that toggles nothing (SPECIALISTS-52).
+     */
+    getCanonicalExtensions(name: string): Promise<Record<string, boolean>>;
     getBlockedFieldWarnings(name?: string): BlockedFieldWarning[];
     /** Resolution of the global user-config path. Returns null only if HOME is unset and XDG_CONFIG_HOME is empty. */
     getGlobalLayerPath(): GlobalUserConfigPath | null;

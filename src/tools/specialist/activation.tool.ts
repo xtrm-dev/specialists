@@ -100,6 +100,8 @@ export interface ActivationView {
    * extension by design reports a deliberate exclusion here too.
    */
   tool_contract_notes?: string[];
+  /** Spec settings this runtime ignores (SPECIALISTS-52), e.g. legacy-CLI-only beads_* fields. */
+  config_notes?: string[];
 }
 
 export function toActivationView(snapshot: ActivationSnapshot, nowMs: number = Date.now()): ActivationView {
@@ -129,6 +131,7 @@ export function toActivationView(snapshot: ActivationSnapshot, nowMs: number = D
     ...(snapshot.thinkingLevel ? { thinking_level: snapshot.thinkingLevel } : {}),
     ...(snapshot.purpose ? { purpose: snapshot.purpose } : {}),
     ...(snapshot.toolContractNotes?.length ? { tool_contract_notes: [...snapshot.toolContractNotes] } : {}),
+    ...(snapshot.configNotes?.length ? { config_notes: [...snapshot.configNotes] } : {}),
     last_activity_at: snapshot.lastActivityAt,
   };
 }

@@ -130,6 +130,7 @@ export const GlobalSpecialistOverrideSchema = z.object({
   execution: OverrideExecutionSchema,
   prompt: OverridePromptSchema.optional(),
   stall_detection: OverrideStallDetectionSchema.optional(),
+  /** Legacy sp CLI only: native activations ignore it (SPECIALISTS-52). */
   beads_write_notes: z.boolean().nullable(),
   notes_mode: z.enum(['full-trail', 'final-only']).nullable().optional(),
   output_file: z.string().nullable().optional(),
@@ -305,6 +306,81 @@ export function mergeGlobalUserConfig(
   }
 
   return { config: merged, added, extended, removed };
+}
+
+export interface GlobalConfigDriftReport {
+  /** Per specialist: dotted template paths absent from the user's entry. */
+  missingFields: Record<string, string[]>;
+  /** `execution.extensions` keys the runtime ignores by name (retired extensions). */
+  retiredExtensions: Array<{ specialist: string; source: string }>;
+  /**
+   * Extension sources set to anything but `true` that no lower layer enables. Only `true`
+   * loads a source and only `gitnexus` honours `false` (resolveExecutionExtensionSelection);
+   * a `false` still matters when it turns off a source the canonical spec enables, so that
+   * case is not reported.
+   */
+  inertExtensions: Array<{ specialist: string; source: string; value: unknown }>;
+  /** Local-path extension sources enabled with `true` whose path does not exist. */
+  missingPathExtensions: Array<{ specialist: string; source: string }>;
+}
+
+const RETIRED_EXTENSION_SOURCES = new Set(['serena']);
+const BUILTIN_EXTENSION_TOGGLES = new Set(['gitnexus']);
+
+function missingTemplatePaths(target: unknown, template: unknown, prefix: string, out: string[]): void {
+  if (template === null || typeof template !== 'object' || Array.isArray(template)) return;
+  const current = target !== null && typeof target === 'object' && !Array.isArray(target)
+    ? target as Record<string, unknown>
+    : undefined;
+  for (const [key, value] of Object.entries(template)) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (!current || !(key in current)) { out.push(path); continue; }
+    missingTemplatePaths(current[key], value, path, out);
+  }
+}
+
+/**
+ * Read-only drift report for an existing global user config (SPECIALISTS-52): the
+ * template fields `sp init --global` would add, and extension keys that look like
+ * configuration but are ignored or broken. Never mutates `existing`; user-added
+ * sources that are enabled and resolvable are not reported.
+ */
+export function analyzeGlobalUserConfigDrift(
+  existing: Readonly<Record<string, unknown>>,
+  template: GlobalUserConfig,
+  options: {
+    pathExists?: (path: string) => boolean;
+    /** True when a layer below user.json enables `source` for `specialist`. */
+    enabledBelow?: (specialist: string, source: string) => boolean;
+  } = {},
+): GlobalConfigDriftReport {
+  const pathExists = options.pathExists ?? existsSync;
+  const enabledBelow = options.enabledBelow ?? (() => false);
+  const report: GlobalConfigDriftReport = {
+    missingFields: {}, retiredExtensions: [], inertExtensions: [], missingPathExtensions: [],
+  };
+  for (const [specialist, entry] of Object.entries(existing)) {
+    if (specialist.startsWith('_')) continue;
+    const templateEntry = template[specialist];
+    if (templateEntry && typeof templateEntry === 'object') {
+      const missing: string[] = [];
+      missingTemplatePaths(entry, templateEntry, '', missing);
+      if (missing.length > 0) report.missingFields[specialist] = missing;
+    }
+    const extensions = (entry as { execution?: { extensions?: unknown } } | null)?.execution?.extensions;
+    if (!extensions || typeof extensions !== 'object') continue;
+    for (const [source, value] of Object.entries(extensions as Record<string, unknown>)) {
+      if (RETIRED_EXTENSION_SOURCES.has(source)) { report.retiredExtensions.push({ specialist, source }); continue; }
+      if (BUILTIN_EXTENSION_TOGGLES.has(source)) continue;
+      if (value !== true) {
+        if (!enabledBelow(specialist, source)) report.inertExtensions.push({ specialist, source, value });
+        continue;
+      }
+      const isLocal = !/^(npm:|git:|https?:\/\/)/.test(source);
+      if (isLocal && !pathExists(source)) report.missingPathExtensions.push({ specialist, source });
+    }
+  }
+  return report;
 }
 
 /**

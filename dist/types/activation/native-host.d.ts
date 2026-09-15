@@ -419,4 +419,13 @@ export declare class NativeActivationHost {
 }
 /** Render a structured work contract back to the 7-section layout the prompt surface reads. */
 export declare function contractToMarkdown(contract: unknown): string;
+/**
+ * SPECIALISTS-52: `beads_integration` and `beads_write_notes` are read only by the legacy sp
+ * CLI. At their defaults they are noise on every spec; a non-default value is a user's intent
+ * that this runtime cannot honour, so it is named rather than dropped.
+ */
+export declare function legacyOnlyConfigNotes(spec: {
+    beads_integration?: string;
+    beads_write_notes?: boolean;
+}): string[];
 //# sourceMappingURL=native-host.d.ts.map

@@ -74,6 +74,7 @@ export declare const GlobalSpecialistOverrideSchema: z.ZodObject<{
     }, {
         waiting_auto_close_ms?: number | null | undefined;
     }>>;
+    /** Legacy sp CLI only: native activations ignore it (SPECIALISTS-52). */
     beads_write_notes: z.ZodNullable<z.ZodBoolean>;
     notes_mode: z.ZodOptional<z.ZodNullable<z.ZodEnum<["full-trail", "final-only"]>>>;
     output_file: z.ZodOptional<z.ZodNullable<z.ZodString>>;
@@ -205,6 +206,7 @@ export declare const GlobalUserConfigSchema: z.ZodEffects<z.ZodRecord<z.ZodStrin
     }, {
         waiting_auto_close_ms?: number | null | undefined;
     }>>;
+    /** Legacy sp CLI only: native activations ignore it (SPECIALISTS-52). */
     beads_write_notes: z.ZodNullable<z.ZodBoolean>;
     notes_mode: z.ZodOptional<z.ZodNullable<z.ZodEnum<["full-trail", "final-only"]>>>;
     output_file: z.ZodOptional<z.ZodNullable<z.ZodString>>;
@@ -345,6 +347,42 @@ export interface GlobalConfigMergeResult {
  * @param template - fresh template built from SpecialistLoader.list()
  */
 export declare function mergeGlobalUserConfig(existing: Readonly<Record<string, unknown>>, template: GlobalUserConfig): GlobalConfigMergeResult;
+export interface GlobalConfigDriftReport {
+    /** Per specialist: dotted template paths absent from the user's entry. */
+    missingFields: Record<string, string[]>;
+    /** `execution.extensions` keys the runtime ignores by name (retired extensions). */
+    retiredExtensions: Array<{
+        specialist: string;
+        source: string;
+    }>;
+    /**
+     * Extension sources set to anything but `true` that no lower layer enables. Only `true`
+     * loads a source and only `gitnexus` honours `false` (resolveExecutionExtensionSelection);
+     * a `false` still matters when it turns off a source the canonical spec enables, so that
+     * case is not reported.
+     */
+    inertExtensions: Array<{
+        specialist: string;
+        source: string;
+        value: unknown;
+    }>;
+    /** Local-path extension sources enabled with `true` whose path does not exist. */
+    missingPathExtensions: Array<{
+        specialist: string;
+        source: string;
+    }>;
+}
+/**
+ * Read-only drift report for an existing global user config (SPECIALISTS-52): the
+ * template fields `sp init --global` would add, and extension keys that look like
+ * configuration but are ignored or broken. Never mutates `existing`; user-added
+ * sources that are enabled and resolvable are not reported.
+ */
+export declare function analyzeGlobalUserConfigDrift(existing: Readonly<Record<string, unknown>>, template: GlobalUserConfig, options?: {
+    pathExists?: (path: string) => boolean;
+    /** True when a layer below user.json enables `source` for `specialist`. */
+    enabledBelow?: (specialist: string, source: string) => boolean;
+}): GlobalConfigDriftReport;
 /**
  * Validate a raw JSON string against the global user-config schema.
  * Returns structured errors; never throws on invalid input.

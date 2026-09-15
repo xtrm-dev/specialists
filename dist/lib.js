@@ -19243,6 +19243,8 @@ var GlobalUserConfigSchema = preprocessType((value) => {
     return value;
   return Object.fromEntries(Object.entries(value).filter(([key]) => !key.startsWith("_")));
 }, recordType(stringType(), GlobalSpecialistOverrideSchema));
+var RETIRED_EXTENSION_SOURCES = new Set(["serena"]);
+var BUILTIN_EXTENSION_TOGGLES = new Set(["gitnexus"]);
 function readGlobalUserConfig(location) {
   if (!location.exists)
     return null;
@@ -19937,6 +19939,14 @@ class SpecialistLoader {
     if (merged.warnings.length)
       this.blockedFieldWarnings.set(name, merged.warnings);
     return merged.spec;
+  }
+  async getCanonicalExtensions(name) {
+    const [baseHit] = this.findLayerHits(name);
+    if (!baseHit)
+      return {};
+    const content = await readFile(baseHit.resolved.filePath, "utf-8");
+    const base = await parseSpecialist(this.toJson(content, baseHit.resolved.deprecatedYaml));
+    return { ...base.specialist.execution.extensions ?? {} };
   }
   getBlockedFieldWarnings(name) {
     if (name)
@@ -22670,6 +22680,7 @@ class NativeActivationHost {
     const purpose = purposeExcerptFromContract(view.contract);
     const startedAt = this.now();
     const toolContractNotes = [...new Set([...toolContract.warnings, ...toolContract.downgradeReasons])];
+    const configNotes = legacyOnlyConfigNotes(specialist.specialist);
     const snapshot = {
       activationId,
       participantId,
@@ -22694,7 +22705,8 @@ class NativeActivationHost {
       ...purpose ? { purpose } : {},
       startedAt,
       lastActivityAt: startedAt,
-      ...toolContractNotes.length > 0 ? { toolContractNotes } : {}
+      ...toolContractNotes.length > 0 ? { toolContractNotes } : {},
+      ...configNotes.length > 0 ? { configNotes } : {}
     };
     emit("activation_started", { pi_session_id: session.sessionId });
     const unsubscribe = session.subscribe((event) => this.onSessionEvent(snapshot, event, emit));
@@ -23438,6 +23450,16 @@ function textOf(message) {
     return "";
   return content.filter((part) => typeof part === "object" && part !== null && part.type === "text" && typeof part.text === "string").map((part) => part.text).join("");
 }
+function legacyOnlyConfigNotes(spec) {
+  const notes = [];
+  if (spec.beads_write_notes === false) {
+    notes.push("beads_write_notes=false applies to the legacy sp CLI only; native activations ignore it and publish their result to the Substrate Journal");
+  }
+  if (spec.beads_integration !== undefined && spec.beads_integration !== "auto") {
+    notes.push(`beads_integration=${spec.beads_integration} applies to the legacy sp CLI only; native activations ignore it`);
+  }
+  return notes;
+}
 // src/tools/specialist/activation.tool.ts
 import { existsSync as existsSync20 } from "node:fs";
 import { fileURLToPath as fileURLToPath5 } from "node:url";
@@ -23529,6 +23551,7 @@ function toActivationView(snapshot, nowMs = Date.now()) {
     ...snapshot.thinkingLevel ? { thinking_level: snapshot.thinkingLevel } : {},
     ...snapshot.purpose ? { purpose: snapshot.purpose } : {},
     ...snapshot.toolContractNotes?.length ? { tool_contract_notes: [...snapshot.toolContractNotes] } : {},
+    ...snapshot.configNotes?.length ? { config_notes: [...snapshot.configNotes] } : {},
     last_activity_at: snapshot.lastActivityAt
   };
 }

@@ -184,6 +184,27 @@ describe('NativeActivationHost — Fleet registry projection', () => {
     ].sort());
   });
 
+  it('records legacy-only beads_* settings as config notes, and none at the defaults (SPECIALISTS-52)', async () => {
+    const legacySpec = readOnlySpec();
+    Object.assign(legacySpec.specialist, { beads_write_notes: false, beads_integration: 'never' });
+    const host = new NativeActivationHost({
+      loader: loaderFor(legacySpec),
+      workItems: testWorkItems({ description: BEAD.description }),
+      loadSdk: async () => makeSdk(fakeSession()),
+      cwd: process.cwd(),
+    });
+    const handle = await host.start({ specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator' });
+    await handle.result;
+    const notes = host.inspect(handle.activationId)?.configNotes ?? [];
+    expect(notes).toHaveLength(2);
+    expect(notes.join('\n')).toMatch(/beads_write_notes=false applies to the legacy sp CLI only/);
+
+    const plain = newHost(fakeSession());
+    const plainHandle = await plain.start({ specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator' });
+    await plainHandle.result;
+    expect(plain.inspect(plainHandle.activationId)?.configNotes).toBeUndefined();
+  });
+
   it('attach observes the live event stream without perturbing the running turn', async () => {
     const session = fakeSession();
     const host = newHost(session);

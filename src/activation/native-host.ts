@@ -1152,6 +1152,7 @@ export class NativeActivationHost {
     // build-staleness line is. Deduplicated because the same reason reaches warnings and
     // downgradeReasons through different paths, and a repeated line reads as two problems.
     const toolContractNotes = [...new Set([...toolContract.warnings, ...toolContract.downgradeReasons])];
+    const configNotes = legacyOnlyConfigNotes(specialist.specialist);
 
     const snapshot: ActivationSnapshot = {
       activationId, participantId, attemptId,
@@ -1183,6 +1184,7 @@ export class NativeActivationHost {
       startedAt,
       lastActivityAt: startedAt,
       ...(toolContractNotes.length > 0 ? { toolContractNotes } : {}),
+      ...(configNotes.length > 0 ? { configNotes } : {}),
     };
 
     emit('activation_started', { pi_session_id: session.sessionId });
@@ -2229,4 +2231,20 @@ function textOf(message: AssistantMessageLike | undefined): string {
       typeof (part as { text?: string }).text === 'string')
     .map(part => part.text)
     .join('');
+}
+
+/**
+ * SPECIALISTS-52: `beads_integration` and `beads_write_notes` are read only by the legacy sp
+ * CLI. At their defaults they are noise on every spec; a non-default value is a user's intent
+ * that this runtime cannot honour, so it is named rather than dropped.
+ */
+export function legacyOnlyConfigNotes(spec: { beads_integration?: string; beads_write_notes?: boolean }): string[] {
+  const notes: string[] = [];
+  if (spec.beads_write_notes === false) {
+    notes.push('beads_write_notes=false applies to the legacy sp CLI only; native activations ignore it and publish their result to the Substrate Journal');
+  }
+  if (spec.beads_integration !== undefined && spec.beads_integration !== 'auto') {
+    notes.push(`beads_integration=${spec.beads_integration} applies to the legacy sp CLI only; native activations ignore it`);
+  }
+  return notes;
 }

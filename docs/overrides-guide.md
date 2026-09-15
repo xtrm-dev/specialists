@@ -14,6 +14,8 @@ The global override surface includes:
 
 The examples below are delta snippets to add inside an existing specialist entry from `sp init --global`; they are not complete standalone `user.json` files. Keep the surrounding generated entry shape, including its `execution`, `prompt`, `stall_detection`, `beads_write_notes`, `skills`, and `mandatory_rules` keys, and change only the highlighted field.
 
+`beads_write_notes` (and the spec-level `beads_integration`) apply to the legacy `sp` CLI only. Native activations, dispatched through the MCP server or the Pi extension, ignore them and publish their result to the Substrate Journal instead; a native activation whose spec sets them to a non-default value reports it in `config_notes`. `specialists doctor` reports fields your `user.json` is missing against the current template, and extension keys that are retired or change nothing; `sp init --global` adds the missing fields without touching existing values.
+
 ## Per-field reference
 
 ### `prompt.system_prompt_mode`

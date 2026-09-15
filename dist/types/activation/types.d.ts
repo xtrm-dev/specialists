@@ -168,6 +168,13 @@ export interface ActivationSnapshot {
      * string handed to the child. Omitted when empty (never an empty-array zero-fill).
      */
     toolContractNotes?: string[];
+    /**
+     * Configuration the resolved spec sets that this runtime does not honour (SPECIALISTS-52):
+     * the legacy-CLI-only `beads_*` fields at a non-default value. Recorded so a user who set
+     * them sees they did nothing here, instead of the setting being ignored silently.
+     * Omitted when empty.
+     */
+    configNotes?: string[];
 }
 /**
  * Cumulative token spend for one activation.

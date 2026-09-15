@@ -13,7 +13,7 @@ import { resolveCanonicalAssetDir } from '../specialist/canonical-asset-resolver
 import { detectDriftUnderRoot } from '../specialist/drift-detector.js';
 import { auditDeadJobs } from '../specialist/dead-job-audit.js';
 import { SpecialistLoader } from '../specialist/loader.js';
-import { readValidatedGlobalUserConfig } from '../specialist/global-config.js';
+import { analyzeGlobalUserConfigDrift, buildGlobalUserConfigTemplate, readValidatedGlobalUserConfig } from '../specialist/global-config.js';
 import { runChannelDoctorChecks, type ChannelDoctorInputs } from '../specialist/channel-doctor.js';
 import { describeCatalogCompatibility } from '../specialist/tool-catalog.js';
 import { loadSharedToolCatalogIndex, readPackageVersion, resolveGlobalNodeModulesDir } from '../pi/session.js';
@@ -643,6 +643,53 @@ async function checkSpecialistOverrides(): Promise<boolean> {
     ok(`mandatory-rules selection: ${selection.length} specialist${selection.length === 1 ? '' : 's'} override template_sets globally`);
     for (const entry of selection) {
       hint(`${entry.name}: template_sets = ${JSON.stringify(entry.template_sets)}  ${dim('(null inherits, [] clears specialist-specific sets; index required/default sets always load)')}`);
+    }
+  }
+
+  // Template drift (SPECIALISTS-52): advisory, never a failure — the file still loads, it just
+  // lags the template or carries extension keys that look like configuration and are not.
+  if (globalLayer.exists) {
+    const { config } = readValidatedGlobalUserConfig(globalLayer);
+    if (config !== null) {
+      const canonical = new Map<string, Record<string, boolean>>();
+      for (const summary of summaries) {
+        try { canonical.set(summary.name, await loader.getCanonicalExtensions(summary.name)); } catch { /* unreadable spec: treat as no canonical extensions */ }
+      }
+      const drift = analyzeGlobalUserConfigDrift(
+        config as Record<string, unknown>,
+        buildGlobalUserConfigTemplate(summaries.map(s => s.name)),
+        { enabledBelow: (name, source) => canonical.get(name)?.[source] === true },
+      );
+      const bySource = <T extends { specialist: string; source: string }>(rows: T[]) => {
+        const grouped = new Map<string, string[]>();
+        for (const row of rows) grouped.set(row.source, [...(grouped.get(row.source) ?? []), row.specialist]);
+        return [...grouped.entries()].sort(([a], [b]) => a.localeCompare(b));
+      };
+      const fieldCounts = new Map<string, number>();
+      for (const paths of Object.values(drift.missingFields)) for (const path of paths) fieldCounts.set(path, (fieldCounts.get(path) ?? 0) + 1);
+      const clean = fieldCounts.size === 0 && drift.retiredExtensions.length === 0
+        && drift.inertExtensions.length === 0 && drift.missingPathExtensions.length === 0;
+      if (clean) {
+        ok('user config matches the current template');
+      } else {
+        if (fieldCounts.size > 0) {
+          warn(`user config lags the template: ${fieldCounts.size} field${fieldCounts.size === 1 ? '' : 's'} missing`);
+          for (const [path, count] of [...fieldCounts.entries()].sort(([a], [b]) => a.localeCompare(b))) hint(`${path}  ${dim(`(missing in ${count} entr${count === 1 ? 'y' : 'ies'})`)}`);
+          fix('sp init --global   (adds missing fields as inherit defaults; keeps every existing value)');
+        }
+        for (const [source, names] of bySource(drift.retiredExtensions)) {
+          warn(`execution.extensions.${source} is retired and ignored  ${dim(`(${names.length} entr${names.length === 1 ? 'y' : 'ies'})`)}`);
+        }
+        for (const [source, names] of bySource(drift.inertExtensions)) {
+          warn(`execution.extensions["${source}"] is not true and nothing below enables it, so it changes nothing  ${dim(`(${names.length} entr${names.length === 1 ? 'y' : 'ies'})`)}`);
+        }
+        for (const [source, names] of bySource(drift.missingPathExtensions)) {
+          warn(`execution.extensions["${source}"] is enabled but the path does not exist  ${dim(`(${names.join(', ')})`)}`);
+        }
+        if (drift.retiredExtensions.length + drift.inertExtensions.length + drift.missingPathExtensions.length > 0) {
+          fix(`remove those keys with sp edit --global, or by hand in ${globalLayer.path}; nothing is removed automatically`);
+        }
+      }
     }
   }
 
