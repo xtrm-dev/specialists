@@ -10,6 +10,31 @@ let tempRoot = '';
 let server: ChildProcess | undefined;
 let serverStdout = '';
 
+/**
+ * Children to kill if this process dies without reaching `afterEach`.
+ *
+ * `afterEach` covers a normal test failure. It does not cover an interrupted run — SIGINT, a killed
+ * vitest worker, a crash — which is exactly how an orphan `sp serve` outlived the suite that started
+ * it and held a fixed port for the next run (SPECIALISTS-48). SIGKILL on exit because there is no
+ * second chance to be polite, and the handler is registered per-child rather than once so a test
+ * that spawns twice is covered too.
+ */
+const liveChildren = new Set<ChildProcess>();
+function trackChild(child: ChildProcess): void {
+  liveChildren.add(child);
+  child.once('exit', () => liveChildren.delete(child));
+}
+function killTrackedChildren(): void {
+  for (const child of liveChildren) {
+    try { child.kill('SIGKILL'); } catch { /* already gone */ }
+  }
+  liveChildren.clear();
+}
+process.on('exit', killTrackedChildren);
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(signal, () => { killTrackedChildren(); process.exit(1); });
+}
+
 beforeEach(() => {
   tempRoot = mkdtempSync(join(tmpdir(), 'sp-serve-'));
   serverStdout = '';
@@ -72,6 +97,7 @@ beforeEach(() => {
 
 afterEach(() => {
   if (server && !server.killed) server.kill('SIGTERM');
+  killTrackedChildren();
   delete process.env.PI_ARGV_LOG;
   delete process.env.PI_FAKE_EXIT_CODE;
   delete process.env.PI_FAKE_STDERR;
@@ -80,19 +106,29 @@ afterEach(() => {
 });
 
 describe('sp serve', () => {
-  async function startServer(port: number, extraArgs: string[] = []): Promise<void> {
-    server = spawn('bun', ['src/index.ts', 'serve', '--port', String(port), '--user-dir', tempRoot, ...extraArgs], {
+  /**
+   * Start a server on an EPHEMERAL port and return the one it actually bound.
+   *
+   * This suite used eleven fixed ports (8123-8133), so two suites running at once collided, and an
+   * interrupted run left an orphan `sp serve` listening on one of them for the next run to trip
+   * over (SPECIALISTS-48). `--port 0` removes the shared resource entirely; the port comes from the
+   * server's own listening line, which reports the bound port.
+   */
+  async function startServer(extraArgs: string[] = []): Promise<number> {
+    server = spawn('bun', ['src/index.ts', 'serve', '--port', '0', '--user-dir', tempRoot, ...extraArgs], {
       cwd: originalCwd,
       env: { ...process.env, PATH: `${join(tempRoot, 'bin')}:${process.env.PATH ?? ''}`, HOME: tempRoot },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-    await new Promise<void>((resolve, reject) => {
+    trackChild(server);
+    return await new Promise<number>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('server start timeout')), 10_000);
       server?.stdout?.on('data', (chunk) => {
         serverStdout += String(chunk);
-        if (String(chunk).includes('sp serve listening on')) {
+        const match = /sp serve listening on (\d+)/.exec(serverStdout);
+        if (match) {
           clearTimeout(timer);
-          resolve();
+          resolve(Number(match[1]));
         }
       });
       if (server) {
@@ -118,8 +154,7 @@ describe('sp serve', () => {
   }
 
   it('logs one structured operational line per generate request by default', async () => {
-    const port = 8128;
-    await startServer(port);
+    const port = await startServer();
 
     const payload = { specialist: 'echo', variables: { name: 'world' }, trace: true };
     const response = await fetch(`http://127.0.0.1:${port}/v1/generate`, {
@@ -146,8 +181,7 @@ describe('sp serve', () => {
   });
 
   it('suppresses generate operational logs when --log-level off', async () => {
-    const port = 8129;
-    await startServer(port, ['--log-level', 'off']);
+    const port = await startServer(['--log-level', 'off']);
 
     const response = await fetch(`http://127.0.0.1:${port}/v1/generate`, {
       method: 'POST',
@@ -163,8 +197,7 @@ describe('sp serve', () => {
   });
 
   it('logs malformed generate requests without logging request bodies', async () => {
-    const port = 8130;
-    await startServer(port);
+    const port = await startServer();
 
     const response = await fetch(`http://127.0.0.1:${port}/v1/generate`, {
       method: 'POST',
@@ -185,8 +218,7 @@ describe('sp serve', () => {
   });
 
   it('serves per-job normalized forensic feed events', async () => {
-    const port = 8132;
-    await startServer(port);
+    const port = await startServer();
 
     const dbPath = join(tempRoot, '.specialists', 'db', 'observability.db');
     const event = {
@@ -271,8 +303,7 @@ describe('sp serve', () => {
     );
     process.env.PI_ARGV_LOG = argvLog;
 
-    const port = 8133;
-    await startServer(port);
+    const port = await startServer();
     // nosemgrep: typescript.react.security.react-insecure-request.react-insecure-request -- isolated loopback test server
     const response = await fetch(`http://127.0.0.1:${port}/v1/generate`, {
       method: 'POST',
@@ -298,8 +329,7 @@ describe('sp serve', () => {
   });
 
   it('metrics responds with Prometheus text regardless of readiness', async () => {
-    const port = 8131;
-    await startServer(port);
+    const port = await startServer();
     const response = await fetch(`http://127.0.0.1:${port}/metrics`);
     const text = await response.text();
     expect(response.status).toBe(200);
@@ -309,8 +339,7 @@ describe('sp serve', () => {
   });
 
   it('healthz responds 200 regardless of readiness', async () => {
-    const port = 8124;
-    await startServer(port);
+    const port = await startServer();
     const response = await fetch(`http://127.0.0.1:${port}/healthz`);
     expect(response.status).toBe(200);
     const body = await response.json() as { ok: boolean };
@@ -318,8 +347,7 @@ describe('sp serve', () => {
   });
 
   it('readyz returns 503 pi_config_unreadable when no pi auth file', async () => {
-    const port = 8125;
-    await startServer(port);
+    const port = await startServer();
     const response = await fetch(`http://127.0.0.1:${port}/readyz`);
     expect(response.status).toBe(503);
     const body = await response.json() as { ready: boolean; reason: string; db_write_failures_total: number };
@@ -331,8 +359,7 @@ describe('sp serve', () => {
   it('readyz returns 200 ready when pi auth + db + spec all present', async () => {
     mkdirSync(join(tempRoot, '.pi', 'agent'), { recursive: true });
     writeFileSync(join(tempRoot, '.pi', 'agent', 'auth.json'), '{}');
-    const port = 8126;
-    await startServer(port);
+    const port = await startServer();
     // Hit /v1/generate first to materialize the DB file (server creates it on init).
     const ready = await fetch(`http://127.0.0.1:${port}/readyz`);
     expect(ready.status).toBe(200);
@@ -341,8 +368,7 @@ describe('sp serve', () => {
   });
 
   it('serves generate and writes observability row', async () => {
-    const port = 8123;
-    await startServer(port);
+    const port = await startServer();
 
     const response = await fetch(`http://127.0.0.1:${port}/v1/generate`, {
       method: 'POST',
@@ -362,9 +388,8 @@ describe('sp serve', () => {
   });
 
   it('uses --db-path as the exact serve observability database file', async () => {
-    const port = 8127;
     const customDbPath = join(tempRoot, 'state', 'observability.db');
-    await startServer(port, ['--db-path', customDbPath]);
+    const port = await startServer(['--db-path', customDbPath]);
 
     const response = await fetch(`http://127.0.0.1:${port}/v1/generate`, {
       method: 'POST',
