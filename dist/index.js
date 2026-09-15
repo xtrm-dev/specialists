@@ -92443,6 +92443,16 @@ function createWorkItemBoundary(ports) {
       const { claim: claim3 } = issues.claimReady(issue3.id, holder, { outcome: "ready", policy: "default", attestedBy: holder }, { activationId: opts.activationId });
       return { ref: issues.resolveRef(issue3.id).humanRef, issueId: issue3.id, claimId: claim3.id };
     },
+    releaseInlineClaim(ref, opts = {}) {
+      const issueId = issues.resolveRef(ref).id;
+      const active = issues.getActiveClaim(issueId);
+      if (!active || !issues.releaseClaim)
+        return false;
+      if (opts.activationId && active.activationId !== opts.activationId)
+        return false;
+      const released = issues.releaseClaim(issueId, active.holder, active.activationId ? { activationId: active.activationId } : {});
+      return released !== null;
+    },
     journal(ref, kind, opts = {}) {
       store.addJournal(ref, kind, opts);
     },
@@ -94012,8 +94022,17 @@ class NativeActivationHost {
       release2();
     };
     let createdRefForRefusals;
+    let releaseInlineClaimOnRefusal = null;
+    const releaseClaimForRefusal = () => {
+      if (!releaseInlineClaimOnRefusal)
+        return;
+      const release2 = releaseInlineClaimOnRefusal;
+      releaseInlineClaimOnRefusal = null;
+      release2();
+    };
     const reject = (reason, detail = {}) => {
       releaseLeaseOnRefusal();
+      releaseClaimForRefusal();
       emit("activation_rejected", { reason, ...detail });
       throw new DispatchRejectedError(reason, {
         specialist: request.specialist,
@@ -94057,6 +94076,11 @@ class NativeActivationHost {
         });
         autoCreatedRef = created.ref;
         createdRefForRefusals = created.ref;
+        releaseInlineClaimOnRefusal = () => {
+          try {
+            workItems.releaseInlineClaim?.(created.ref, { activationId });
+          } catch {}
+        };
       } catch (error3) {
         const message = error3 instanceof Error ? error3.message : String(error3);
         if (message.startsWith("inline contract is not a usable task contract")) {
@@ -94184,6 +94208,7 @@ class NativeActivationHost {
           });
         }
         emit("activation_rejected", { reason: "workspace_lease_unavailable" });
+        releaseClaimForRefusal();
         if (error3 instanceof DispatchRejectedError && createdRefForRefusals) {
           throw new DispatchRejectedError(error3.reason, {
             ...error3.detail,
