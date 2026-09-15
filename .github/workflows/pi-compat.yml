@@ -3,7 +3,12 @@ name: pi-compat
 permissions:
   contents: read
 
-# Detects when reviewed @mariozechner/pi-coding-agent version breaks our spawn flags.
+# Detects when a reviewed pi-coding-agent release breaks the spawn flags the runtime passes.
+#
+# The package name is NOT hardcoded here: it is read from src/activation/pi-sdk.ts, the constant the
+# runtime resolves through. This job previously hardcoded @mariozechner/pi-coding-agent and kept
+# passing for months while the runtime had already moved to @earendil-works/pi-coding-agent, so it
+# was validating a package 21 minor versions behind the one in production (SPECIALISTS-50).
 #
 # Trigger: weekly cron, PRs that touch the spawn surface, manual dispatch.
 
@@ -19,8 +24,10 @@ on:
   workflow_dispatch:
     inputs:
       pi_version:
-        description: 'pi-coding-agent version to test (default: 0.64.0)'
-        default: '0.64.0'
+        # Empty means "derive from the peer range the extension declares", so the default cannot
+        # drift from the line the runtime actually loads.
+        description: 'pi-coding-agent version to test (default: derived from the peer range)'
+        default: ''
         required: false
 
 jobs:
@@ -31,25 +38,48 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Resolve pi version
+      - name: Resolve the pi package and version the runtime loads
         id: pi
         env:
-          INPUT_PI_VERSION: ${{ inputs.pi_version || '0.64.0' }}
+          # Empty means "use the peer range the extension declares", so the default moves with the
+          # line instead of being a second pin to forget.
+          INPUT_PI_VERSION: ${{ inputs.pi_version || '' }}
         run: |
-          PI_VERSION="$INPUT_PI_VERSION"
-          echo "version=$PI_VERSION" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          PACKAGE="$(grep -oE "PI_SDK_PACKAGE = '[^']+'" src/activation/pi-sdk.ts | sed "s/.*'\(.*\)'/\1/")"
+          if [ -z "$PACKAGE" ]; then
+            echo "::error title=pi compat::could not read PI_SDK_PACKAGE from src/activation/pi-sdk.ts"
+            exit 1
+          fi
+          DEFAULT_VERSION="$(PACKAGE="$PACKAGE" node -e '
+            const pkg = require("./config/pi-extensions/specialist-subagents/package.json");
+            const range = (pkg.peerDependencies || {})[process.env.PACKAGE] || "";
+            const match = range.match(/[0-9]+\.[0-9]+\.[0-9]+/);
+            process.stdout.write(match ? match[0] : "");
+          ')"
+          VERSION="${INPUT_PI_VERSION:-$DEFAULT_VERSION}"
+          if [ -z "$VERSION" ]; then
+            echo "::error title=pi compat::no version given and none derivable from the peer range for $PACKAGE"
+            exit 1
+          fi
+          echo "package=$PACKAGE" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Testing $PACKAGE@$VERSION"
 
       - name: Install pi
         run: |
-          npm install -g "@mariozechner/pi-coding-agent@${{ steps.pi.outputs.version }}"
+          npm install -g "${{ steps.pi.outputs.package }}@${{ steps.pi.outputs.version }}"
           pi --version
 
       - name: Smoke spawn flags (script-runner path)
         run: |
           set -e
-          # Required flags used by src/specialist/script-runner.ts.
-          # If pi removes/renames any, --help loses the line and we fail.
-          REQUIRED=(--mode --no-session --no-extensions --no-tools --model --thinking)
+          # Flags src/specialist/script-runner.ts passes TODAY. Re-derived from that file rather
+          # than carried over: the previous list checked --no-tools, which the code does not pass,
+          # while missing --no-builtin-tools, --offline, --no-skills and others it does.
+          REQUIRED=(--append-system-prompt --mode --model --no-context-files --no-extensions \
+            --no-prompt-templates --no-session --no-skills --no-themes --offline --skill \
+            --system-prompt --thinking --tools)
           HELP="$(pi --help 2>&1)"
           MISSING=()
           for flag in "${REQUIRED[@]}"; do
@@ -66,8 +96,10 @@ jobs:
       - name: Smoke spawn flags (RPC session path)
         run: |
           set -e
-          # Required flags used by src/pi/session.ts (--mode rpc).
-          REQUIRED=(--mode --no-session --no-extensions --provider --tools --thinking --skill --append-system-prompt)
+          # Flags src/pi/session.ts passes TODAY (--mode rpc), re-derived from that file.
+          REQUIRED=(--append-system-prompt --mode --model --no-builtin-tools --no-context-files \
+            --no-extensions --no-prompt-templates --no-session --no-skills --no-themes --offline \
+            --provider --skill --system-prompt --thinking --tools)
           HELP="$(pi --help 2>&1)"
           MISSING=()
           for flag in "${REQUIRED[@]}"; do
@@ -96,7 +128,10 @@ jobs:
 
       - name: Build image with reviewed pi
         run: |
-          docker build --build-arg "PI_VERSION=${{ steps.pi.outputs.version }}" -t specialists-service:ci .
+          docker build \
+            --build-arg "PI_PACKAGE=${{ steps.pi.outputs.package }}" \
+            --build-arg "PI_VERSION=${{ steps.pi.outputs.version }}" \
+            -t specialists-service:ci .
 
       - name: Container boot smoke
         run: |
