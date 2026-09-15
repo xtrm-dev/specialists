@@ -21,7 +21,7 @@ export type { EventRoute, RuntimeEventPusherOptions } from './activation/async-e
 export { createActivationForensicSink, } from './activation/forensic-sink.js';
 export { createObservabilitySqliteClientAtPath, } from './specialist/observability-sqlite.js';
 export { resolveObservabilityDbLocation } from './specialist/observability-db.js';
-export { evaluateBeadReadiness, extractSections } from './activation/bead-gate.js';
+export { evaluateBeadReadiness, extractSections } from './specialist/bead-gate.js';
 export { describeBuildIdentity, hashFileBytes, isBuildStale, readBuildId, shortBuildId, BUILD_ID_BYTES, UNKNOWN_BUILD_ID, } from './activation/build-identity.js';
 export type { BeadRecord } from './specialist/beads.js';
 export { createBeadFromContract } from './specialist/beads.js';

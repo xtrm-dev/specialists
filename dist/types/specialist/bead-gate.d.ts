@@ -15,8 +15,8 @@
  * non-empty. Whether SCOPE is a good scope is a judgement no parser makes, and pretending
  * otherwise would trade a useful gate for a bureaucratic one.
  */
-import type { BeadRecord } from '../specialist/beads.js';
-export { extractSections, REQUIRED_SECTIONS } from './contract-sections.js';
+import type { BeadRecord } from './beads.js';
+export { extractSections, REQUIRED_SECTIONS, extractPurposeExcerpt, PURPOSE_EXCERPT_MAX } from '../activation/contract-sections.js';
 export type BeadGateResult = {
     ok: true;
 } | {
@@ -29,17 +29,6 @@ export interface BeadGateOptions {
 }
 /** Read `bd state <id> contract`. Returns undefined when bd is absent or the state is unset. */
 export declare function readContractState(beadId: string): string | undefined;
-/** Max chars of a purpose excerpt carried on a fleet row. Single line, whitespace-collapsed. */
-export declare const PURPOSE_EXCERPT_MAX = 60;
-/**
- * One-line purpose excerpt for a fleet row, from an already-validated contract.
- *
- * First meaningful line of SCOPE, falling back to SUCCESS. Cheap and bounded:
- * whitespace-collapsed, single line, truncated to PURPOSE_EXCERPT_MAX chars.
- * Returns undefined when neither section yields text — the field is omitted,
- * never fabricated.
- */
-export declare function extractPurposeExcerpt(description: string): string | undefined;
 /**
  * Decide whether a Bead is a dispatchable task contract.
  *

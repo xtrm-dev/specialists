@@ -214,7 +214,6 @@ export async function run(): Promise<void> {
   lines.push('');
   lines.push(`  After ${cmd('specialists init')}, these MCP tools are available to Claude:`);
   lines.push('');
-  lines.push(`  ${bold('specialist_init')}    — bootstrap: bd init + list specialists`);
   lines.push(`  ${bold('list_specialists')}   — discover specialists (project/user/system)`);
   lines.push(`  ${bold('specialist_dispatch')} — start a specialist as a background job, returns immediately`);
   lines.push(`  ${bold('feed_specialist')}    — stream events/output by job ID`);

@@ -110,7 +110,7 @@ export { resolveObservabilityDbLocation } from './specialist/observability-db.js
 // Bead readiness gate (unitAI-rrdnt.48): the SAME parser and gate the host runs,
 // exposed so a frontend can gate an inline dispatch contract BEFORE creating a
 // bead — a refused dispatch must leave the board unchanged.
-export { evaluateBeadReadiness, extractSections } from './activation/bead-gate.js';
+export { evaluateBeadReadiness, extractSections } from './specialist/bead-gate.js';
 // Build identity for the stale-build refusal (unitAI-rrdnt.55): the single
 // source of the identity wording every frontend uses.
 export {

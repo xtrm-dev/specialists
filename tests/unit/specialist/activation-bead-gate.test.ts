@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { evaluateBeadReadiness, extractPurposeExcerpt, extractSections, PURPOSE_EXCERPT_MAX, REQUIRED_SECTIONS } from '../../../src/activation/bead-gate.js';
+import { evaluateBeadReadiness, extractPurposeExcerpt, extractSections, PURPOSE_EXCERPT_MAX, REQUIRED_SECTIONS } from '../../../src/specialist/bead-gate.js';
 import { NativeActivationHost } from '../../../src/activation/native-host.js';
 import { DispatchRejectedError } from '../../../src/activation/types.js';
 import type { PiSdk, PiAgentSessionLike } from '../../../src/activation/pi-sdk.js';

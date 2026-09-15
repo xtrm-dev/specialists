@@ -126,23 +126,23 @@ export declare const specialistDispatchSchema: z.ZodObject<{
 }, "strip", z.ZodTypeAny, {
     specialist: string;
     bead_id?: string | undefined;
-    contract?: string | undefined;
     title?: string | undefined;
     requested_by?: string | undefined;
     model_override?: string | undefined;
     thinking_override?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | undefined;
     issue_ref?: string | undefined;
+    contract?: string | undefined;
     epic_context_depth?: number | undefined;
     coordinator_session_id?: string | undefined;
 }, {
     specialist: string;
     bead_id?: string | undefined;
-    contract?: string | undefined;
     title?: string | undefined;
     requested_by?: string | undefined;
     model_override?: string | undefined;
     thinking_override?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | undefined;
     issue_ref?: string | undefined;
+    contract?: string | undefined;
     epic_context_depth?: number | undefined;
     coordinator_session_id?: string | undefined;
 }>;
@@ -171,23 +171,23 @@ export declare function createSpecialistDispatchTool(getHost: () => NativeActiva
     }, "strip", z.ZodTypeAny, {
         specialist: string;
         bead_id?: string | undefined;
-        contract?: string | undefined;
         title?: string | undefined;
         requested_by?: string | undefined;
         model_override?: string | undefined;
         thinking_override?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | undefined;
         issue_ref?: string | undefined;
+        contract?: string | undefined;
         epic_context_depth?: number | undefined;
         coordinator_session_id?: string | undefined;
     }, {
         specialist: string;
         bead_id?: string | undefined;
-        contract?: string | undefined;
         title?: string | undefined;
         requested_by?: string | undefined;
         model_override?: string | undefined;
         thinking_override?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | undefined;
         issue_ref?: string | undefined;
+        contract?: string | undefined;
         epic_context_depth?: number | undefined;
         coordinator_session_id?: string | undefined;
     }>;

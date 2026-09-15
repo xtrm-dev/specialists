@@ -4,7 +4,7 @@
 // All methods are fire-and-forget: never throw, never crash a run.
 
 import { spawnSync } from 'node:child_process';
-import { extractSections } from '../activation/bead-gate.js';
+import { extractSections } from '../activation/contract-sections.js';
 
 
 export interface BeadDependency {

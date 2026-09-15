@@ -33,7 +33,7 @@ import { createSpecialistStatusTool } from '../../../src/tools/specialist/specia
 import { createSpecialistListTool } from '../../../src/tools/specialist/specialist_list.tool.js';
 import { createSpecialistResumeTool } from '../../../src/mcp/resume-tool.js';
 import { NativeActivationHost } from '../../../src/activation/native-host.js';
-import { REQUIRED_SECTIONS } from '../../../src/activation/bead-gate.js';
+import { REQUIRED_SECTIONS } from '../../../src/activation/contract-sections.js';
 import { CircuitBreaker } from '../../../src/utils/circuitBreaker.js';
 import type { PiSdk, PiAgentSessionLike, PiAgentSessionEvent } from '../../../src/activation/pi-sdk.js';
 import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
