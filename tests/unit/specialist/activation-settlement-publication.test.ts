@@ -416,6 +416,51 @@ describe('S1 §39 bounded publication — raw output never reaches the Journal b
   });
 });
 
+describe('S1 degraded publication — evidence never fails the activation', () => {
+  // The runtime loads a producer without the result surface until the Substrate
+  // cutover, so these are the paths every live activation takes in the meantime.
+  it('stores only and emits settlement_degraded when the boundary carries no settlement surface', async () => {
+    const { host, workItems, store, sink } = hostWith();
+    const boundary = workItems.boundary as { appendResult?: unknown; allocateReceipt?: unknown };
+    delete boundary.appendResult;
+    delete boundary.allocateReceipt;
+    const handle = await startResearch(host);
+    const result = await handle.result;
+
+    expect(result.status).toBe('completed');
+    expect(sink.names).toContain('settlement_degraded');
+    expect(workItems.journal).toHaveLength(0);
+    const stored = store.get(handle.activationId, handle.attemptId);
+    expect(stored?.status).toBe('completed');
+    expect(stored?.journalEntryId).toBeUndefined();
+  });
+
+  it('keeps the completed result and the stored record when the Journal append throws', async () => {
+    const { host, workItems, store, sink } = hostWith();
+    workItems.boundary.appendResult = () => { throw new Error('database is locked'); };
+    const handle = await startResearch(host);
+    const result = await handle.result;
+
+    expect(result.status).toBe('completed');
+    expect(result.output).toContain('the cache key omits the tenant');
+    expect(sink.names).toContain('settlement_degraded');
+    expect(sink.names).not.toContain('settlement_result_published');
+    expect(store.get(handle.activationId, handle.attemptId)?.journalEntryId).toBeUndefined();
+  });
+
+  it('keeps the completed result when runtime result storage itself throws', async () => {
+    const { host, workItems, store, sink } = hostWith();
+    store.save = () => { throw new Error('EROFS: read-only file system'); };
+    const handle = await startResearch(host);
+    const result = await handle.result;
+
+    expect(result.status).toBe('completed');
+    expect(sink.names).toContain('settlement_store_failed');
+    expect(workItems.journal).toHaveLength(0);
+    expect(workItems.receipts).toHaveLength(0);
+  });
+});
+
 describe('S1 §40 zero-commit result — no code change still publishes', () => {
   it('produces a durable result and provenance with no commit artifact and no subprocess', async () => {
     const { host, workItems, store } = hostWith();
