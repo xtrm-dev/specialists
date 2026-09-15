@@ -148,7 +148,9 @@ export const SpecialistSchema = z.object({
     /** Write handoff output to this file path via unified job-file writer */
     output_file: z.string().optional(),
     notes_mode: z.enum(['full-trail', 'final-only']).default('full-trail'),
+    /** Legacy sp CLI only (SPECIALISTS-52): the native runtime ignores it and reports a non-default value as a config note. */
     beads_integration: z.enum(['auto', 'always', 'never']).default('auto'),
+    /** Legacy sp CLI only (SPECIALISTS-52): the native runtime ignores it and reports `false` as a config note. */
     beads_write_notes: z.boolean().default(true),
   }).passthrough(),
 }).passthrough();

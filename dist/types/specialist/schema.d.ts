@@ -358,7 +358,9 @@ export declare const SpecialistSchema: z.ZodObject<{
         /** Write handoff output to this file path via unified job-file writer */
         output_file: z.ZodOptional<z.ZodString>;
         notes_mode: z.ZodDefault<z.ZodEnum<["full-trail", "final-only"]>>;
+        /** Legacy sp CLI only (SPECIALISTS-52): the native runtime ignores it and reports a non-default value as a config note. */
         beads_integration: z.ZodDefault<z.ZodEnum<["auto", "always", "never"]>>;
+        /** Legacy sp CLI only (SPECIALISTS-52): the native runtime ignores it and reports `false` as a config note. */
         beads_write_notes: z.ZodDefault<z.ZodBoolean>;
     }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
         metadata: z.ZodObject<{
@@ -715,7 +717,9 @@ export declare const SpecialistSchema: z.ZodObject<{
         /** Write handoff output to this file path via unified job-file writer */
         output_file: z.ZodOptional<z.ZodString>;
         notes_mode: z.ZodDefault<z.ZodEnum<["full-trail", "final-only"]>>;
+        /** Legacy sp CLI only (SPECIALISTS-52): the native runtime ignores it and reports a non-default value as a config note. */
         beads_integration: z.ZodDefault<z.ZodEnum<["auto", "always", "never"]>>;
+        /** Legacy sp CLI only (SPECIALISTS-52): the native runtime ignores it and reports `false` as a config note. */
         beads_write_notes: z.ZodDefault<z.ZodBoolean>;
     }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
         metadata: z.ZodObject<{
@@ -1072,7 +1076,9 @@ export declare const SpecialistSchema: z.ZodObject<{
         /** Write handoff output to this file path via unified job-file writer */
         output_file: z.ZodOptional<z.ZodString>;
         notes_mode: z.ZodDefault<z.ZodEnum<["full-trail", "final-only"]>>;
+        /** Legacy sp CLI only (SPECIALISTS-52): the native runtime ignores it and reports a non-default value as a config note. */
         beads_integration: z.ZodDefault<z.ZodEnum<["auto", "always", "never"]>>;
+        /** Legacy sp CLI only (SPECIALISTS-52): the native runtime ignores it and reports `false` as a config note. */
         beads_write_notes: z.ZodDefault<z.ZodBoolean>;
     }, z.ZodTypeAny, "passthrough">>;
 }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
@@ -1431,7 +1437,9 @@ export declare const SpecialistSchema: z.ZodObject<{
         /** Write handoff output to this file path via unified job-file writer */
         output_file: z.ZodOptional<z.ZodString>;
         notes_mode: z.ZodDefault<z.ZodEnum<["full-trail", "final-only"]>>;
+        /** Legacy sp CLI only (SPECIALISTS-52): the native runtime ignores it and reports a non-default value as a config note. */
         beads_integration: z.ZodDefault<z.ZodEnum<["auto", "always", "never"]>>;
+        /** Legacy sp CLI only (SPECIALISTS-52): the native runtime ignores it and reports `false` as a config note. */
         beads_write_notes: z.ZodDefault<z.ZodBoolean>;
     }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
         metadata: z.ZodObject<{
@@ -1788,7 +1796,9 @@ export declare const SpecialistSchema: z.ZodObject<{
         /** Write handoff output to this file path via unified job-file writer */
         output_file: z.ZodOptional<z.ZodString>;
         notes_mode: z.ZodDefault<z.ZodEnum<["full-trail", "final-only"]>>;
+        /** Legacy sp CLI only (SPECIALISTS-52): the native runtime ignores it and reports a non-default value as a config note. */
         beads_integration: z.ZodDefault<z.ZodEnum<["auto", "always", "never"]>>;
+        /** Legacy sp CLI only (SPECIALISTS-52): the native runtime ignores it and reports `false` as a config note. */
         beads_write_notes: z.ZodDefault<z.ZodBoolean>;
     }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
         metadata: z.ZodObject<{
@@ -2145,7 +2155,9 @@ export declare const SpecialistSchema: z.ZodObject<{
         /** Write handoff output to this file path via unified job-file writer */
         output_file: z.ZodOptional<z.ZodString>;
         notes_mode: z.ZodDefault<z.ZodEnum<["full-trail", "final-only"]>>;
+        /** Legacy sp CLI only (SPECIALISTS-52): the native runtime ignores it and reports a non-default value as a config note. */
         beads_integration: z.ZodDefault<z.ZodEnum<["auto", "always", "never"]>>;
+        /** Legacy sp CLI only (SPECIALISTS-52): the native runtime ignores it and reports `false` as a config note. */
         beads_write_notes: z.ZodDefault<z.ZodBoolean>;
     }, z.ZodTypeAny, "passthrough">>;
 }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
@@ -2504,7 +2516,9 @@ export declare const SpecialistSchema: z.ZodObject<{
         /** Write handoff output to this file path via unified job-file writer */
         output_file: z.ZodOptional<z.ZodString>;
         notes_mode: z.ZodDefault<z.ZodEnum<["full-trail", "final-only"]>>;
+        /** Legacy sp CLI only (SPECIALISTS-52): the native runtime ignores it and reports a non-default value as a config note. */
         beads_integration: z.ZodDefault<z.ZodEnum<["auto", "always", "never"]>>;
+        /** Legacy sp CLI only (SPECIALISTS-52): the native runtime ignores it and reports `false` as a config note. */
         beads_write_notes: z.ZodDefault<z.ZodBoolean>;
     }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
         metadata: z.ZodObject<{
@@ -2861,7 +2875,9 @@ export declare const SpecialistSchema: z.ZodObject<{
         /** Write handoff output to this file path via unified job-file writer */
         output_file: z.ZodOptional<z.ZodString>;
         notes_mode: z.ZodDefault<z.ZodEnum<["full-trail", "final-only"]>>;
+        /** Legacy sp CLI only (SPECIALISTS-52): the native runtime ignores it and reports a non-default value as a config note. */
         beads_integration: z.ZodDefault<z.ZodEnum<["auto", "always", "never"]>>;
+        /** Legacy sp CLI only (SPECIALISTS-52): the native runtime ignores it and reports `false` as a config note. */
         beads_write_notes: z.ZodDefault<z.ZodBoolean>;
     }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
         metadata: z.ZodObject<{
@@ -3218,7 +3234,9 @@ export declare const SpecialistSchema: z.ZodObject<{
         /** Write handoff output to this file path via unified job-file writer */
         output_file: z.ZodOptional<z.ZodString>;
         notes_mode: z.ZodDefault<z.ZodEnum<["full-trail", "final-only"]>>;
+        /** Legacy sp CLI only (SPECIALISTS-52): the native runtime ignores it and reports a non-default value as a config note. */
         beads_integration: z.ZodDefault<z.ZodEnum<["auto", "always", "never"]>>;
+        /** Legacy sp CLI only (SPECIALISTS-52): the native runtime ignores it and reports `false` as a config note. */
         beads_write_notes: z.ZodDefault<z.ZodBoolean>;
     }, z.ZodTypeAny, "passthrough">>;
 }, z.ZodTypeAny, "passthrough">>;

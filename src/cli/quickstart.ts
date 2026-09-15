@@ -181,7 +181,7 @@ export async function run(): Promise<void> {
     '    web_search: false            # allow web search tool',
     '    file_write: true             # allow file writes',
     '',
-    '  beads_integration:',
+    '  beads_integration:            # legacy sp CLI only; native activations ignore it',
     '    auto_create: true            # create a beads issue per run',
     '    issue_type: task             # task | bug | feature',
     '    priority: 2                  # 0=critical … 4=backlog',

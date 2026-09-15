@@ -79,6 +79,7 @@ export declare function createSpecialistResumeTool(getHost: () => NativeActivati
         purpose?: string;
         last_activity_at: number;
         tool_contract_notes?: string[];
+        config_notes?: string[];
         status: "resumed";
         previous_attempt_id: string;
         error?: undefined;

@@ -4612,6 +4612,7 @@ __export(exports_global_config, {
   getGlobalSpecialistOverrideLeafPaths: () => getGlobalSpecialistOverrideLeafPaths,
   buildSpecialistOverrideTemplate: () => buildSpecialistOverrideTemplate,
   buildGlobalUserConfigTemplate: () => buildGlobalUserConfigTemplate,
+  analyzeGlobalUserConfigDrift: () => analyzeGlobalUserConfigDrift,
   SPECIALISTS_SUBDIR: () => SPECIALISTS_SUBDIR,
   GlobalUserConfigSchema: () => GlobalUserConfigSchema,
   GlobalSpecialistOverrideSchema: () => GlobalSpecialistOverrideSchema,
@@ -4736,6 +4737,60 @@ function mergeGlobalUserConfig(existing, template) {
   }
   return { config: merged, added, extended, removed };
 }
+function missingTemplatePaths(target, template, prefix, out) {
+  if (template === null || typeof template !== "object" || Array.isArray(template))
+    return;
+  const current = target !== null && typeof target === "object" && !Array.isArray(target) ? target : undefined;
+  for (const [key, value] of Object.entries(template)) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (!current || !(key in current)) {
+      out.push(path);
+      continue;
+    }
+    missingTemplatePaths(current[key], value, path, out);
+  }
+}
+function analyzeGlobalUserConfigDrift(existing, template, options = {}) {
+  const pathExists = options.pathExists ?? existsSync4;
+  const enabledBelow = options.enabledBelow ?? (() => false);
+  const report = {
+    missingFields: {},
+    retiredExtensions: [],
+    inertExtensions: [],
+    missingPathExtensions: []
+  };
+  for (const [specialist, entry] of Object.entries(existing)) {
+    if (specialist.startsWith("_"))
+      continue;
+    const templateEntry = template[specialist];
+    if (templateEntry && typeof templateEntry === "object") {
+      const missing = [];
+      missingTemplatePaths(entry, templateEntry, "", missing);
+      if (missing.length > 0)
+        report.missingFields[specialist] = missing;
+    }
+    const extensions = entry?.execution?.extensions;
+    if (!extensions || typeof extensions !== "object")
+      continue;
+    for (const [source, value] of Object.entries(extensions)) {
+      if (RETIRED_EXTENSION_SOURCES.has(source)) {
+        report.retiredExtensions.push({ specialist, source });
+        continue;
+      }
+      if (BUILTIN_EXTENSION_TOGGLES.has(source))
+        continue;
+      if (value !== true) {
+        if (!enabledBelow(specialist, source))
+          report.inertExtensions.push({ specialist, source, value });
+        continue;
+      }
+      const isLocal = !/^(npm:|git:|https?:\/\/)/.test(source);
+      if (isLocal && !pathExists(source))
+        report.missingPathExtensions.push({ specialist, source });
+    }
+  }
+  return report;
+}
 function validateGlobalUserConfig(jsonContent) {
   let raw;
   try {
@@ -4804,7 +4859,7 @@ function writeGlobalUserConfig(location, config) {
     throw renameError;
   }
 }
-var CONFIG_FILENAME = "user.json", SPECIALISTS_SUBDIR = "specialists", GLOBAL_USER_CONFIG_DOC = "./overrides-guide.md", OverrideExtensionsSchema, OverrideExecutionSchema, OverridePromptSchema, OverrideStallDetectionSchema, OverrideSkillsSchema, OverrideMandatoryRulesSchema, GlobalSpecialistOverrideSchema, GlobalUserConfigSchema;
+var CONFIG_FILENAME = "user.json", SPECIALISTS_SUBDIR = "specialists", GLOBAL_USER_CONFIG_DOC = "./overrides-guide.md", OverrideExtensionsSchema, OverrideExecutionSchema, OverridePromptSchema, OverrideStallDetectionSchema, OverrideSkillsSchema, OverrideMandatoryRulesSchema, GlobalSpecialistOverrideSchema, GlobalUserConfigSchema, RETIRED_EXTENSION_SOURCES, BUILTIN_EXTENSION_TOGGLES;
 var init_global_config = __esm(() => {
   init_zod();
   init_schema();
@@ -4849,6 +4904,8 @@ var init_global_config = __esm(() => {
       return value;
     return Object.fromEntries(Object.entries(value).filter(([key]) => !key.startsWith("_")));
   }, recordType(stringType(), GlobalSpecialistOverrideSchema));
+  RETIRED_EXTENSION_SOURCES = new Set(["serena"]);
+  BUILTIN_EXTENSION_TOGGLES = new Set(["gitnexus"]);
 });
 
 // node_modules/yaml/dist/nodes/identity.js
@@ -12530,6 +12587,14 @@ class SpecialistLoader {
     if (merged.warnings.length)
       this.blockedFieldWarnings.set(name, merged.warnings);
     return merged.spec;
+  }
+  async getCanonicalExtensions(name) {
+    const [baseHit] = this.findLayerHits(name);
+    if (!baseHit)
+      return {};
+    const content = await readFile(baseHit.resolved.filePath, "utf-8");
+    const base = await parseSpecialist(this.toJson(content, baseHit.resolved.deprecatedYaml));
+    return { ...base.specialist.execution.extensions ?? {} };
   }
   getBlockedFieldWarnings(name) {
     if (name)
@@ -42656,7 +42721,7 @@ var init_config_source = __esm(() => {
     "execution.extensions.serena": "deprecated \xB7 accepted but ignored (Serena retired)",
     "execution.extensions.gitnexus": "true|false \xB7 false disables GitNexus MCP",
     "stall_detection.waiting_auto_close_ms": "ms \xB7 waiting auto-close; e.g. 3600000 (1h)",
-    beads_write_notes: "true|false \xB7 false skips per-turn note append",
+    beads_write_notes: "true|false \xB7 legacy CLI only \xB7 false skips per-turn note append",
     output_file: "absolute path \xB7 always written when set",
     "skills.paths": "string[] \xB7 extra skill folders, appended to spec"
   };
@@ -58869,7 +58934,7 @@ async function run38() {
     "    web_search: false            # allow web search tool",
     "    file_write: true             # allow file writes",
     "",
-    "  beads_integration:",
+    "  beads_integration:            # legacy sp CLI only; native activations ignore it",
     "    auto_create: true            # create a beads issue per run",
     "    issue_type: task             # task | bug | feature",
     "    priority: 2                  # 0=critical \u2026 4=backlog"
@@ -59822,6 +59887,51 @@ async function checkSpecialistOverrides() {
     ok3(`mandatory-rules selection: ${selection.length} specialist${selection.length === 1 ? "" : "s"} override template_sets globally`);
     for (const entry of selection) {
       hint(`${entry.name}: template_sets = ${JSON.stringify(entry.template_sets)}  ${dim14("(null inherits, [] clears specialist-specific sets; index required/default sets always load)")}`);
+    }
+  }
+  if (globalLayer.exists) {
+    const { config } = readValidatedGlobalUserConfig(globalLayer);
+    if (config !== null) {
+      const canonical = new Map;
+      for (const summary of summaries) {
+        try {
+          canonical.set(summary.name, await loader.getCanonicalExtensions(summary.name));
+        } catch {}
+      }
+      const drift = analyzeGlobalUserConfigDrift(config, buildGlobalUserConfigTemplate(summaries.map((s) => s.name)), { enabledBelow: (name, source) => canonical.get(name)?.[source] === true });
+      const bySource = (rows) => {
+        const grouped = new Map;
+        for (const row of rows)
+          grouped.set(row.source, [...grouped.get(row.source) ?? [], row.specialist]);
+        return [...grouped.entries()].sort(([a], [b]) => a.localeCompare(b));
+      };
+      const fieldCounts = new Map;
+      for (const paths of Object.values(drift.missingFields))
+        for (const path3 of paths)
+          fieldCounts.set(path3, (fieldCounts.get(path3) ?? 0) + 1);
+      const clean = fieldCounts.size === 0 && drift.retiredExtensions.length === 0 && drift.inertExtensions.length === 0 && drift.missingPathExtensions.length === 0;
+      if (clean) {
+        ok3("user config matches the current template");
+      } else {
+        if (fieldCounts.size > 0) {
+          warn3(`user config lags the template: ${fieldCounts.size} field${fieldCounts.size === 1 ? "" : "s"} missing`);
+          for (const [path3, count] of [...fieldCounts.entries()].sort(([a], [b]) => a.localeCompare(b)))
+            hint(`${path3}  ${dim14(`(missing in ${count} entr${count === 1 ? "y" : "ies"})`)}`);
+          fix("sp init --global   (adds missing fields as inherit defaults; keeps every existing value)");
+        }
+        for (const [source, names] of bySource(drift.retiredExtensions)) {
+          warn3(`execution.extensions.${source} is retired and ignored  ${dim14(`(${names.length} entr${names.length === 1 ? "y" : "ies"})`)}`);
+        }
+        for (const [source, names] of bySource(drift.inertExtensions)) {
+          warn3(`execution.extensions["${source}"] is not true and nothing below enables it, so it changes nothing  ${dim14(`(${names.length} entr${names.length === 1 ? "y" : "ies"})`)}`);
+        }
+        for (const [source, names] of bySource(drift.missingPathExtensions)) {
+          warn3(`execution.extensions["${source}"] is enabled but the path does not exist  ${dim14(`(${names.join(", ")})`)}`);
+        }
+        if (drift.retiredExtensions.length + drift.inertExtensions.length + drift.missingPathExtensions.length > 0) {
+          fix(`remove those keys with sp edit --global, or by hand in ${globalLayer.path}; nothing is removed automatically`);
+        }
+      }
     }
   }
   const stripFailures = warnings.filter((w) => w.severity === "strip").length;
@@ -91929,6 +92039,7 @@ function toActivationView(snapshot, nowMs = Date.now()) {
     ...snapshot.thinkingLevel ? { thinking_level: snapshot.thinkingLevel } : {},
     ...snapshot.purpose ? { purpose: snapshot.purpose } : {},
     ...snapshot.toolContractNotes?.length ? { tool_contract_notes: [...snapshot.toolContractNotes] } : {},
+    ...snapshot.configNotes?.length ? { config_notes: [...snapshot.configNotes] } : {},
     last_activity_at: snapshot.lastActivityAt
   };
 }
@@ -94456,6 +94567,7 @@ class NativeActivationHost {
     const purpose = purposeExcerptFromContract(view.contract);
     const startedAt = this.now();
     const toolContractNotes = [...new Set([...toolContract.warnings, ...toolContract.downgradeReasons])];
+    const configNotes = legacyOnlyConfigNotes(specialist.specialist);
     const snapshot = {
       activationId,
       participantId,
@@ -94480,7 +94592,8 @@ class NativeActivationHost {
       ...purpose ? { purpose } : {},
       startedAt,
       lastActivityAt: startedAt,
-      ...toolContractNotes.length > 0 ? { toolContractNotes } : {}
+      ...toolContractNotes.length > 0 ? { toolContractNotes } : {},
+      ...configNotes.length > 0 ? { configNotes } : {}
     };
     emit("activation_started", { pi_session_id: session.sessionId });
     const unsubscribe = session.subscribe((event) => this.onSessionEvent(snapshot, event, emit));
@@ -95223,6 +95336,16 @@ function textOf(message) {
   if (!Array.isArray(content))
     return "";
   return content.filter((part) => typeof part === "object" && part !== null && part.type === "text" && typeof part.text === "string").map((part) => part.text).join("");
+}
+function legacyOnlyConfigNotes(spec) {
+  const notes = [];
+  if (spec.beads_write_notes === false) {
+    notes.push("beads_write_notes=false applies to the legacy sp CLI only; native activations ignore it and publish their result to the Substrate Journal");
+  }
+  if (spec.beads_integration !== undefined && spec.beads_integration !== "auto") {
+    notes.push(`beads_integration=${spec.beads_integration} applies to the legacy sp CLI only; native activations ignore it`);
+  }
+  return notes;
 }
 var TOKEN_USAGE_KEYS, WRITE_TIERS, NON_LOCAL_EXTENSION_PREFIXES, FALLBACK_RETRYABLE_CLASSES, NULL_FORENSIC_SINK;
 var init_native_host = __esm(() => {

@@ -69,7 +69,7 @@ const PRIMITIVE_HINT: Record<string, string> = {
   'execution.extensions.serena': 'deprecated · accepted but ignored (Serena retired)',
   'execution.extensions.gitnexus': 'true|false · false disables GitNexus MCP',
   'stall_detection.waiting_auto_close_ms': 'ms · waiting auto-close; e.g. 3600000 (1h)',
-  'beads_write_notes': 'true|false · false skips per-turn note append',
+  'beads_write_notes': 'true|false · legacy CLI only · false skips per-turn note append',
   'output_file': 'absolute path · always written when set',
   'skills.paths': 'string[] · extra skill folders, appended to spec',
 };
