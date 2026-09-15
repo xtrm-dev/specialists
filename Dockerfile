@@ -12,6 +12,10 @@ RUN bun install --frozen-lockfile
 RUN bun run build
 
 FROM docker.io/oven/bun:1.3.14-slim AS runtime
+# The pi package the runtime actually loads (src/activation/pi-sdk.ts PI_SDK_PACKAGE).
+# Overridable, but the default must be the real one: this image is what the pi-compat job boots, and
+# it installed @mariozechner/pi-coding-agent while the runtime had moved on (SPECIALISTS-50).
+ARG PI_PACKAGE=@earendil-works/pi-coding-agent
 ARG PI_VERSION=latest
 WORKDIR /app
 
@@ -26,7 +30,7 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates sqlite3 npm \
   && rm -rf /var/lib/apt/lists/* \
   && useradd --uid 10001 --create-home --home-dir /home/specialists --shell /usr/sbin/nologin specialists \
-  && npm install -g "@mariozechner/pi-coding-agent@${PI_VERSION}"
+  && npm install -g "${PI_PACKAGE}@${PI_VERSION}"
 
 COPY --from=builder /app/dist ./dist
 

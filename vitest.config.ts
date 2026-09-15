@@ -71,7 +71,10 @@ export default defineConfig({
     setupFiles: ['tests/setup/isolate-observability.ts'],
     server: {
       deps: {
-        external: [/^bun:/, /^@mariozechner\/pi/],
+        // Keep the pi runtime packages out of the vite pipeline. Both names are listed: the runtime
+        // loads @earendil-works/pi-coding-agent (src/activation/pi-sdk.ts PI_SDK_PACKAGE), and the
+        // older @mariozechner name is still referenced by historical fixtures (SPECIALISTS-50).
+        external: [/^bun:/, /^@mariozechner\/pi/, /^@earendil-works\/pi/],
       },
     },
     coverage: {
