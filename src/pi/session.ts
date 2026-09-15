@@ -565,6 +565,53 @@ export function deduplicateExtensionSources(
   return { kept, dropped };
 }
 
+/**
+ * The Pi discovery fences the legacy CLI session disables, as the argv fragments it passes.
+ *
+ * XTRM-84: the native/legacy parity harness has to compare the resource fence each runtime
+ * ACTUALLY configures. The native side derives it from the resource-loader options it
+ * constructs (`createActivationResourceLoader`); the legacy side is this argv. Before this
+ * helper existed the harness hardcoded `ambientDiscovery: false` for legacy, so dropping
+ * `--no-context-files` below - which would let auto-discovered context files into every
+ * legacy child - stayed invisible. Reading the fragments the session really passes is what
+ * makes that regression fail a test.
+ *
+ * Split into the two positions the flags occupy in the argv rather than one contiguous list,
+ * because the argv order is load-bearing (`tests/unit/pi/session.test.ts` asserts
+ * `--no-context-files` comes after `--offline`). `start()` splats both halves verbatim, so
+ * this function and the argv cannot diverge.
+ */
+export function sessionResourceFenceArgv(): { head: string[]; tail: string[] } {
+  return {
+    head: ['--no-extensions', '--no-skills'],
+    tail: ['--no-context-files', '--no-prompt-templates', '--no-themes'],
+  };
+}
+
+/**
+ * Which of the five discovery fences a session argv actually disables.
+ *
+ * The inverse of `sessionResourceFenceArgv`: a present flag means the fence is DISABLED,
+ * which is the direction the native resource loader expresses directly (`noSkills: true`).
+ * Unknown flags are ignored, so this can be handed a whole session argv.
+ */
+export function parseSessionResourceFence(argv: readonly string[]): {
+  noSkills: boolean;
+  noExtensions: boolean;
+  noContextFiles: boolean;
+  noPromptTemplates: boolean;
+  noThemes: boolean;
+} {
+  const present = new Set(argv);
+  return {
+    noSkills: present.has('--no-skills'),
+    noExtensions: present.has('--no-extensions'),
+    noContextFiles: present.has('--no-context-files'),
+    noPromptTemplates: present.has('--no-prompt-templates'),
+    noThemes: present.has('--no-themes'),
+  };
+}
+
 export function resolveExecutionExtensionSelection(
   extensions: Readonly<Record<string, boolean | null | undefined>> | undefined,
 ): { excludeExtensions: string[]; extensionSources: string[]; offline: boolean } {
@@ -1048,16 +1095,19 @@ export class PiAgentSession {
       ? ['--model', model]
       : ['--provider', mapSpecialistBackend(model)];
 
+    // Resource fence (XTRM-84): built from the shared projection so the parity harness reads
+    // the flags this session really passes instead of a parallel copy of them. head =
+    // --no-extensions (disable ALL auto-discovered xtrm Pi extensions: beads, session-flow,
+    // etc.) and --no-skills (isolate: discovery pool == declared skills.paths only, re-added
+    // below via --skill); tail = the context-file, prompt-template and theme fences.
+    const resourceFence = sessionResourceFenceArgv();
     const args = [
       '--mode', 'rpc',
-      '--no-extensions',   // disable ALL auto-discovered xtrm Pi extensions (beads, session-flow, etc.)
-      '--no-skills',       // isolate: discovery pool == declared skills.paths only (re-added below via --skill)
+      ...resourceFence.head,
       ...providerArgs,
       '--no-session',
       ...(this.options.offline === false ? [] : ['--offline']),
-      '--no-context-files',
-      '--no-prompt-templates',
-      '--no-themes',
+      ...resourceFence.tail,
       ...extraArgs,
     ];
 

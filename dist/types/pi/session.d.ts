@@ -203,6 +203,40 @@ export declare function deduplicateExtensionSources(autoInjected: readonly strin
         keptAs: string;
     }>;
 };
+/**
+ * The Pi discovery fences the legacy CLI session disables, as the argv fragments it passes.
+ *
+ * XTRM-84: the native/legacy parity harness has to compare the resource fence each runtime
+ * ACTUALLY configures. The native side derives it from the resource-loader options it
+ * constructs (`createActivationResourceLoader`); the legacy side is this argv. Before this
+ * helper existed the harness hardcoded `ambientDiscovery: false` for legacy, so dropping
+ * `--no-context-files` below - which would let auto-discovered context files into every
+ * legacy child - stayed invisible. Reading the fragments the session really passes is what
+ * makes that regression fail a test.
+ *
+ * Split into the two positions the flags occupy in the argv rather than one contiguous list,
+ * because the argv order is load-bearing (`tests/unit/pi/session.test.ts` asserts
+ * `--no-context-files` comes after `--offline`). `start()` splats both halves verbatim, so
+ * this function and the argv cannot diverge.
+ */
+export declare function sessionResourceFenceArgv(): {
+    head: string[];
+    tail: string[];
+};
+/**
+ * Which of the five discovery fences a session argv actually disables.
+ *
+ * The inverse of `sessionResourceFenceArgv`: a present flag means the fence is DISABLED,
+ * which is the direction the native resource loader expresses directly (`noSkills: true`).
+ * Unknown flags are ignored, so this can be handed a whole session argv.
+ */
+export declare function parseSessionResourceFence(argv: readonly string[]): {
+    noSkills: boolean;
+    noExtensions: boolean;
+    noContextFiles: boolean;
+    noPromptTemplates: boolean;
+    noThemes: boolean;
+};
 export declare function resolveExecutionExtensionSelection(extensions: Readonly<Record<string, boolean | null | undefined>> | undefined): {
     excludeExtensions: string[];
     extensionSources: string[];

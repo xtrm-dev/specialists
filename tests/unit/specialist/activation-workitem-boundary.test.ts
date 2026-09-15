@@ -1,10 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import {
   createWorkItemBoundary,
+  openSubstrateDb,
   openWorkItemBoundary,
+  resolveSubstrateFromGlobalPrefix,
   type ActiveClaimView,
   type DispatchRequest,
   type WorkItemPorts,
@@ -229,5 +231,258 @@ describe('openWorkItemBoundary package identity', () => {
       .then(() => 'opened' as const, (error: unknown) => String(error));
     expect(['opened', 'Error: work_item_store_unavailable: no Substrate package configured (install @jaggerxtrm/substrate, or set XTRM_SUBSTRATE_DIR to a checkout of it)'])
       .toContain(outcome);
+  });
+});
+
+// SPECIALISTS-59. The lookup has three failure points and only two of them were normalized.
+// `openSubstrateDb` required `node:sqlite` OUTSIDE a try, and under bun that built-in does not
+// exist — so whenever the bun driver failed to open the file, the caller got
+// `ResolveMessage: No such built-in module: node:sqlite` instead of
+// `work_item_store_unavailable`. The string names neither the store nor a remedy.
+//
+// The trigger is a store whose parent directory does not exist, which is what a bare HOME
+// produces (`$HOME/.xtrm/state.db`). Reachable on containers, service accounts, systemd units,
+// sudo with a different HOME — and invisible in CI, whose runner has a real HOME.
+function stubSubstratePackage(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'substrate-stub-'));
+  const write = (rel: string, body: string): void => {
+    mkdirSync(join(dir, dirname(rel)), { recursive: true });
+    writeFileSync(join(dir, rel), body);
+  };
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: '@jaggerxtrm/substrate', version: '0.0.0' }));
+  write('src/store/migrations/runner.ts', 'export function migrate(): void {}\n');
+  write('src/service/issue-service.ts', [
+    'export class IssueService {',
+    '  constructor(_db: unknown) {}',
+    '  listActiveEdges() { return []; }',
+    '  getIssue(id: string) { return { id, humanRef: id, title: \'t\', currentRevision: 1, lifecycleState: \'open\' }; }',
+    '}',
+  ].join('\n'));
+  write('src/service/journal-service.ts', 'export class JournalService { constructor(_db: unknown, _issues: unknown) {} }\n');
+  write('src/service/provenance-service.ts', 'export class ProvenanceService { constructor(_db: unknown, _issues: unknown, _journal: unknown) {} }\n');
+  write('src/workitems/substrate-store.ts', 'export class SubstrateIssueStore { constructor(_issues: unknown, _journal: unknown) {} }\n');
+  write('src/workitems/dispatch-gate.ts', [
+    'export function checkDispatch(): never { throw new Error(\'not used\'); }',
+    'export function dispatchToSpecialist(): never { throw new Error(\'not used\'); }',
+  ].join('\n'));
+  return dir;
+}
+
+describe('store-open refusal normalization (SPECIALISTS-59)', () => {
+  it('reports an unopenable store by path and driver, never as a raw module-resolution error', () => {
+    // The unit-level regression: the previous head threw `ResolveMessage: No such built-in
+    // module: node:sqlite` here, naming neither the file nor a remedy.
+    const missingParent = join(tmpdir(), `substrate-absent-${Date.now()}`, 'state.db');
+    let thrown: unknown;
+    try {
+      openSubstrateDb(missingParent);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown, 'openSubstrateDb must throw on an unopenable path').toBeInstanceOf(Error);
+    const message = (thrown as Error).message;
+    expect(message).toContain(missingParent);
+    expect(message).toContain('bun:sqlite');
+    expect((thrown as Error).name).not.toBe('ResolveMessage');
+    // The bun driver's message is kept, so the real cause survives the fallback.
+    expect(message).toMatch(/unable to open|no such file|ENOENT/i);
+  });
+
+  it('normalizes the same failure into work_item_store_unavailable, with both remedies', async () => {
+    // The end-to-end requirement: a store whose parent directory does not exist — what a bare
+    // HOME produces — must produce the documented refusal, not a raw driver error. The path is
+    // passed explicitly rather than by mutating process.env.HOME, because `resolveWorkItemDbPath`
+    // derives the DEFAULT from `os.homedir()` (the real environment) and a test that rewrote HOME
+    // for the whole worker would leak into every other suite in the process.
+    const bareHome = mkdtempSync(join(tmpdir(), 'bare-home-'));
+    const storePath = join(bareHome, '.xtrm', 'state.db');
+    let thrown: unknown;
+    try {
+      await openWorkItemBoundary({ substrateDir: stubSubstratePackage(), dbPath: storePath });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown, 'a bare HOME has no store to open').toBeInstanceOf(Error);
+    const message = (thrown as Error).message;
+    expect(message).toMatch(/^work_item_store_unavailable: /);
+    expect((thrown as Error).name).not.toBe('ResolveMessage');
+    // Both remedies, as the issue requires, and the store path, so the operator can act.
+    expect(message).toContain(storePath);
+    expect(message).toMatch(/SUBSTRATE_DB|XTRM_STATE_DB/);
+    expect(message).toContain('install @jaggerxtrm/substrate');
+  });
+
+  it('still opens the store it can open', () => {
+    // The normalization must not turn a working store into a refusal.
+    const dir = mkdtempSync(join(tmpdir(), 'substrate-open-'));
+    const db = openSubstrateDb(join(dir, 'state.db'));
+    expect(db).toBeTruthy();
+    (db as unknown as { close(): void }).close();
+  });
+});
+
+// §3 install contract, measured. The XTRM-managed layout Core's `xt init` produces is a
+// SYMLINKED global install, and default resolution dereferences the symlink and walks the
+// checkout's ancestors — never the npm prefix. These tests pin the fallback against that exact
+// layout, because the machine that found the bug could not reproduce it (its repo-local
+// node_modules/@jaggerxtrm/substrate symlink made plain resolution succeed).
+describe('Substrate global-prefix resolution (§3)', () => {
+  function syntheticPrefix(): { lib: string; substrate: string } {
+    const root = mkdtempSync(join(tmpdir(), 'sb-prefix-'));
+    const lib = join(root, 'lib');
+    const substrate = join(root, 'checkout', 'substrate');
+    mkdirSync(join(lib, 'node_modules', '@jaggerxtrm'), { recursive: true });
+    mkdirSync(substrate, { recursive: true });
+    writeFileSync(join(substrate, 'package.json'), JSON.stringify({ name: '@jaggerxtrm/substrate', version: '0.1.2' }));
+    // npm 7+ `install --global <folder>` symlinks; the resolver must see through this.
+    symlinkSync(substrate, join(lib, 'node_modules', '@jaggerxtrm', 'substrate'), 'dir');
+    return { lib, substrate };
+  }
+
+  it('finds Substrate behind a symlinked global install, where plain resolution cannot', async () => {
+    const { lib, substrate } = syntheticPrefix();
+    expect(resolveSubstrateFromGlobalPrefix([lib])).toBe(substrate);
+  });
+
+  it('returns null for a prefix that does not hold the package', () => {
+    const empty = mkdtempSync(join(tmpdir(), 'sb-empty-'));
+    expect(resolveSubstrateFromGlobalPrefix([join(empty, 'lib')])).toBeNull();
+  });
+
+  it('resolves nothing when the candidate has a package.json under a different name', () => {
+    // The name check happens in openWorkItemBoundary, which must be reached so the refusal can
+    // name the wrong package. Resolution finding the file is what makes that possible.
+    const root = mkdtempSync(join(tmpdir(), 'sb-wrongname-'));
+    const lib = join(root, 'lib');
+    const impostor = join(root, 'impostor');
+    mkdirSync(join(lib, 'node_modules', '@jaggerxtrm'), { recursive: true });
+    mkdirSync(impostor, { recursive: true });
+    writeFileSync(join(impostor, 'package.json'), JSON.stringify({ name: 'not-substrate' }));
+    symlinkSync(impostor, join(lib, 'node_modules', '@jaggerxtrm', 'substrate'), 'dir');
+    // Resolution returns it; `openWorkItemBoundary` then refuses it BY NAME, which is the
+    // behaviour that must not be short-circuited here.
+    expect(resolveSubstrateFromGlobalPrefix([lib])).toBe(impostor);
+  });
+});
+
+// SPECIALISTS-54 reconciliation, against the PRODUCER's real entry shape. The previous version of
+// this read matched a flat `entry.attemptId`, which `issue_journal` does not have (substrate
+// src/domain/journal.ts:193-211) — so it evaluated `null === 'att:…'` and could never succeed, and
+// a republish whose Journal append HAD landed appended a second result entry. Stubbing the read in
+// the publication tests could not see that, which is why this test builds the real boundary.
+describe('settlement reconciliation reads (SPECIALISTS-54)', () => {
+  interface FakeJournalEntry {
+    id: string;
+    activationId: string | null;
+    attemptId?: string | null;
+    executionContext?: { specialist?: { attemptId?: string | null } | null } | null;
+  }
+
+  function boundaryWith(entries: FakeJournalEntry[], receipts: Array<{ id: string; executionBindingId: string }> = []) {
+    return createWorkItemBoundary({
+      issues: {
+        resolveRef: (ref: string) => ({ id: `iss_${ref}`, humanRef: ref }),
+        getActiveClaim: () => null,
+        getParent: () => null,
+        getRevision: () => ({ contract: {} }),
+        resolveProject: () => ({ projectId: 'proj-test' }),
+        createIssue: () => ({ id: 'iss_new' }),
+        claimReady: () => ({ claim: { id: 7 } }),
+      } as unknown as WorkItemPorts['issues'],
+      provenance: {},
+      store: {
+        get: (ref: string) => ({
+          issue: { humanRef: ref, id: `iss_${ref}`, currentRevision: 1, currentContractHash: 'h', title: 'T' },
+          contract: {},
+          readinessState: 'claimed',
+          dispatchable: true,
+          reasons: [],
+        }),
+        addJournal: () => {},
+      } as unknown as WorkItemPorts['store'],
+      gate: {
+        check: () => ({ issueId: 'iss', revision: 1, contractHash: 'h', report: {} }),
+        dispatch: () => ({ binding: { id: 'exb_1', issueId: 'iss', issueRevision: 1, contractHash: 'h', claimId: null } }),
+      } as unknown as WorkItemPorts['gate'],
+      journalService: {
+        appendEntry: () => ({ id: 'jrn_new', sequence: 1 }),
+        listEntries: (_issueId: string, opts?: { kind?: string }) => entries.filter(() => opts?.kind === undefined || true),
+      } as never,
+      provenanceService: {
+        allocateReceipt: () => ({ id: 'rcp_new', executionBindingId: 'exb_1', issueId: 'iss', issueRevision: 1, contractHash: 'h' }),
+        attachArtifact: () => ({ receiptId: 'rcp_new', kind: 'artifact', value: 'v' }),
+        listReceipts: () => receipts,
+      } as never,
+    });
+  }
+
+  it('finds an existing result through the ENVELOPE attempt id, which is where the producer keeps it', () => {
+    const boundary = boundaryWith([
+      { id: 'jrn_1', activationId: 'act-1', executionContext: { specialist: { attemptId: 'att-1:1' } } },
+    ]);
+    expect(boundary.findResultEntry!('X', { activationId: 'act-1', attemptId: 'att-1:1' }))
+      .toEqual({ status: 'found', value: { entryId: 'jrn_1' } });
+  });
+
+  it('distinguishes attempts of one activation', () => {
+    const boundary = boundaryWith([
+      { id: 'jrn_1', activationId: 'act-1', executionContext: { specialist: { attemptId: 'att-1:1' } } },
+    ]);
+    expect(boundary.findResultEntry!('X', { activationId: 'act-1', attemptId: 'att-1:2' }))
+      .toEqual({ status: 'absent' });
+  });
+
+  it('answers UNAVAILABLE rather than absent when an entry cannot be attributed to an attempt', () => {
+    // The exact producer shape that broke the old matcher: a result entry with no attempt column.
+    // "Absent" here would license a second append for an activation that already has a result.
+    const boundary = boundaryWith([{ id: 'jrn_1', activationId: 'act-1' }]);
+    const lookup = boundary.findResultEntry!('X', { activationId: 'act-1', attemptId: 'att-1:1' });
+    expect(lookup.status).toBe('unavailable');
+  });
+
+  it('answers absent only when nothing exists for the activation at all', () => {
+    const boundary = boundaryWith([{ id: 'jrn_1', activationId: 'other-activation' }]);
+    expect(boundary.findResultEntry!('X', { activationId: 'act-1', attemptId: 'att-1:1' }))
+      .toEqual({ status: 'absent' });
+  });
+
+  it('answers unavailable when the journal service cannot list at all', () => {
+    const boundary = createWorkItemBoundary({
+      issues: {
+        resolveRef: (ref: string) => ({ id: `iss_${ref}`, humanRef: ref }),
+        getActiveClaim: () => null,
+        getParent: () => null,
+        getRevision: () => ({ contract: {} }),
+        resolveProject: () => ({ projectId: 'proj-test' }),
+        createIssue: () => ({ id: 'iss_new' }),
+        claimReady: () => ({ claim: { id: 7 } }),
+      } as unknown as WorkItemPorts['issues'],
+      provenance: {},
+      store: {
+        get: (ref: string) => ({
+          issue: { humanRef: ref, id: `iss_${ref}`, currentRevision: 1, currentContractHash: 'h', title: 'T' },
+          contract: {}, readinessState: 'claimed', dispatchable: true, reasons: [],
+        }),
+        addJournal: () => {},
+      } as unknown as WorkItemPorts['store'],
+      gate: {
+        check: () => ({ issueId: 'iss', revision: 1, contractHash: 'h', report: {} }),
+        dispatch: () => ({ binding: { id: 'exb_1', issueId: 'iss', issueRevision: 1, contractHash: 'h', claimId: null } }),
+      } as unknown as WorkItemPorts['gate'],
+      // An older Substrate build: allocation exists, listing does not.
+      journalService: { appendEntry: () => ({ id: 'jrn_new', sequence: 1 }) } as never,
+      provenanceService: {
+        allocateReceipt: () => ({ id: 'rcp_new', executionBindingId: 'exb_1', issueId: 'iss', issueRevision: 1, contractHash: 'h' }),
+        attachArtifact: () => ({ receiptId: 'rcp_new', kind: 'artifact', value: 'v' }),
+      } as never,
+    });
+    expect(boundary.findResultEntry!('X', { activationId: 'act-1', attemptId: 'att-1:1' }).status).toBe('unavailable');
+    expect(boundary.findReceiptForBinding!('X', 'exb_1').status).toBe('unavailable');
+  });
+
+  it('finds a receipt already allocated over the binding', () => {
+    const boundary = boundaryWith([], [{ id: 'rcp_1', executionBindingId: 'exb_1' }]);
+    expect(boundary.findReceiptForBinding!('X', 'exb_1')).toEqual({ status: 'found', value: { receiptId: 'rcp_1' } });
+    expect(boundary.findReceiptForBinding!('X', 'exb_other')).toEqual({ status: 'absent' });
   });
 });

@@ -808,6 +808,32 @@ export function buildReviewerDiffInstruction(context: ReviewerDiffContext): stri
   return `\n\n---\n## Reviewer Diff Context\nReview only patch below. Ignore unrelated files, repo-wide exploration, and filesystem hunting.\nIf patch context is empty, stop and fail fast.\n\nPatch source:\n${context.source}\n\nDiff stat:\n${context.stat || '(no stat)'}\n\nChanged files:\n${context.files.map((file) => `- ${file}`).join('\n')}\n\nDiff hunks:\n${context.hunks}\n---\n`;
 }
 
+/**
+ * The reviewer role's execution-only diff hook, built once for every caller.
+ *
+ * The legacy runner and the native host previously each spelled this hook out inline
+ * (runner.ts:1150, native-host.ts:860), which is exactly the copy-drift shape SPECIALISTS-22's
+ * extraction of the two builders above was meant to end. They are the same behaviour, so they
+ * are one function.
+ *
+ * The failure policy is deliberately part of the shared hook: a reviewer whose diff cannot be
+ * resolved keeps its task PROMPT instead of the dispatch failing, on both paths. The parity
+ * harness calls this same factory (XTRM-84 4b): before that, no test exercised the branch, so
+ * deleting the hook from the native host would not have failed anything.
+ */
+export function createReviewerDiffAppendHook(
+  onUnavailable: (message: string) => void = (message) => process.stderr.write(`${message}\n`),
+): (task: string, cwd: string, variables: Record<string, string>) => string {
+  return (task, cwd, variables) => {
+    try {
+      return `${task}${buildReviewerDiffInstruction(buildReviewerDiffContext(cwd, variables))}`;
+    } catch (error) {
+      onUnavailable(`[specialist runner] Reviewer diff context unavailable: ${String(error)}`);
+      return task;
+    }
+  };
+}
+
 function tryParseJson(input: string): { value?: unknown; error?: string } {
   try {
     return { value: JSON.parse(input) };
@@ -1145,14 +1171,7 @@ export class SpecialistRunner {
         gitnexusSummary: gitnexusSummary || undefined,
         worktreeBoundary: options.worktreeBoundary,
         appendExecutionContext: metadata.name === 'reviewer'
-          ? (task, cwd, variables) => {
-              try {
-                return `${task}${buildReviewerDiffInstruction(buildReviewerDiffContext(cwd, variables))}`;
-              } catch (error) {
-                console.warn(`[specialist runner] Reviewer diff context unavailable: ${String(error)}`);
-                return task;
-              }
-            }
+          ? createReviewerDiffAppendHook((message) => console.warn(message))
           : undefined,
       });
     } catch (error) {

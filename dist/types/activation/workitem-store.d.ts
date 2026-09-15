@@ -1,5 +1,14 @@
 import type { DatabaseSync } from 'node:sqlite';
 /**
+ * Substrate installed under an npm-style global prefix, which the ancestor walk cannot reach
+ * through a symlinked Specialists install. See the measurement note on `resolveSubstrateDir`.
+ *
+ * Each candidate is a `<prefix>/lib` directory, because `resolve(spec, { paths })` appends
+ * `node_modules` itself. Deduplicated and existence-checked so a candidate that cannot possibly
+ * hold the package costs nothing.
+ */
+export declare function resolveSubstrateFromGlobalPrefix(libDirs?: readonly string[]): string | null;
+/**
  * The store path every path that opens the work store uses.
  *
  * This is a DELEGATION, not a second precedence rule. It used to resolve only
@@ -19,6 +28,14 @@ export declare function resolveWorkItemDbPath(env?: NodeJS.ProcessEnv): string;
  * so params are normalized where the two disagree; nothing else differs on the
  * prepare/exec/close surface. Opening a database is generic sqlite work and
  * carries no Substrate code.
+ *
+ * SPECIALISTS-59: each driver attempt is recorded rather than discarded. The
+ * `node:sqlite` require used to sit OUTSIDE a try, so on bun — where that built-in does not
+ * exist — a genuine open failure (a missing parent directory is the usual cause) was replaced
+ * by the module-resolution error `ResolveMessage: No such built-in module: node:sqlite`. That
+ * string names neither the store nor a remedy, and it escaped the caller's normalized
+ * `work_item_store_unavailable` refusal. Reachable on any host whose HOME has no `.xtrm`
+ * directory: containers, service accounts, systemd units, sudo with a different HOME.
  */
 export declare function openSubstrateDb(dbPath: string): DatabaseSync;
 /** One resolved issue revision, flattened for the admission and render surface. */
@@ -200,7 +217,42 @@ export interface SpecialistWorkItemBoundary {
     };
     allocateReceipt?(bindingId: string): WorkReceiptView;
     attachArtifact?(receiptId: string, kind: string, value: string): SettlementArtifactView;
+    /**
+     * Reconciliation reads (SPECIALISTS-54). A republish has to prove it is the FIRST publication
+     * of (activation, attempt) before it writes anything, because neither the receipt nor the
+     * Journal append is idempotent.
+     *
+     * TRI-STATE, deliberately. Collapsing "no receipt exists" and "this boundary cannot tell me"
+     * into one falsy answer is how a republish mints a SECOND receipt: the caller cannot
+     * distinguish a proven absence from an unanswerable question, and defaults to the safe-looking
+     * "absent". Optional for the same reason as the writers: a boundary without them defers.
+     */
+    findResultEntry?(ref: string, key: {
+        activationId: string;
+        attemptId: string;
+    }): SettlementLookup<{
+        entryId: string;
+    }>;
+    /** The receipt already allocated over a binding, if any. One receipt per binding is the rule. */
+    findReceiptForBinding?(ref: string, bindingId: string): SettlementLookup<{
+        receiptId: string;
+    }>;
 }
+/**
+ * The answer to "did this already land?".
+ *
+ * `absent` is a PROOF that nothing was written; `unavailable` is the absence of a proof. Only
+ * `absent` licenses a write.
+ */
+export type SettlementLookup<T> = {
+    status: 'found';
+    value: T;
+} | {
+    status: 'absent';
+} | {
+    status: 'unavailable';
+    reason: string;
+};
 /** Structural view of the producer's active claim — the only claim fields the seam reads. */
 export interface ActiveClaimView {
     id: number;
@@ -316,6 +368,27 @@ export interface JournalServicePort {
         id: string;
         sequence: number;
     };
+    /** Existing entries, for the settlement reconciliation read (SPECIALISTS-54). */
+    listEntries?(issueId: string, opts?: {
+        kind?: string;
+        limit?: number;
+    }): Array<{
+        id: string;
+        kind?: string;
+        activationId?: string | null;
+        /**
+         * NOT a producer field. `issue_journal` has no attempt column (substrate
+         * src/domain/journal.ts:193-211), so the real entry never carries this — it is declared only so
+         * a fake can supply it. The ATTEMPT identity that does exist is
+         * `executionContext.specialist.attemptId`, which is why matching reads that.
+         */
+        attemptId?: string | null;
+        executionContext?: {
+            specialist?: {
+                attemptId?: string | null;
+            } | null;
+        } | null;
+    }>;
 }
 /** Structural port over the producer's provenance service (S1 receipt publication). */
 export interface ProvenanceServicePort {
@@ -331,6 +404,11 @@ export interface ProvenanceServicePort {
         kind?: string;
         value?: string;
     };
+    /** Receipts already allocated for an issue, for the reconciliation read (SPECIALISTS-54). */
+    listReceipts?(issueId: string): Array<{
+        id: string;
+        executionBindingId: string;
+    }>;
 }
 /** The injected ports `createWorkItemBoundary` programs against. */
 export interface WorkItemPorts {

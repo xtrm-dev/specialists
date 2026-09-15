@@ -160,6 +160,20 @@ interface ReviewerDiffContext {
  */
 export declare function buildReviewerDiffContext(cwd: string, variables?: Record<string, string>, maxFiles?: number): ReviewerDiffContext;
 export declare function buildReviewerDiffInstruction(context: ReviewerDiffContext): string;
+/**
+ * The reviewer role's execution-only diff hook, built once for every caller.
+ *
+ * The legacy runner and the native host previously each spelled this hook out inline
+ * (runner.ts:1150, native-host.ts:860), which is exactly the copy-drift shape SPECIALISTS-22's
+ * extraction of the two builders above was meant to end. They are the same behaviour, so they
+ * are one function.
+ *
+ * The failure policy is deliberately part of the shared hook: a reviewer whose diff cannot be
+ * resolved keeps its task PROMPT instead of the dispatch failing, on both paths. The parity
+ * harness calls this same factory (XTRM-84 4b): before that, no test exercised the branch, so
+ * deleting the hook from the native host would not have failed anything.
+ */
+export declare function createReviewerDiffAppendHook(onUnavailable?: (message: string) => void): (task: string, cwd: string, variables: Record<string, string>) => string;
 export declare function classifyFallbackError(error: unknown): string;
 export declare class SpecialistRunner {
     private deps;

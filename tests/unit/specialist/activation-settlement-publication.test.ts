@@ -40,6 +40,7 @@ import { createMemorySettlementStore } from '../../../src/activation/settlement-
 import {
   buildBoundedResult,
   buildSettlementExecutionContext,
+  republishPendingSettlements,
   SUMMARY_MAX,
 } from '../../../src/activation/settlement-publication.js';
 
@@ -532,5 +533,233 @@ describe('S1 publication builders — closed shape, no invented identity', () =>
     // Blank env is unknown, never stored.
     expect(full.xtrmSessionName).toBeUndefined();
     expect(full.xtrmSessionId).toBe('xs');
+  });
+});
+
+// SPECIALISTS-54. A degraded publication used to be recorded only as an ABSENT journalEntryId:
+// "never published" and "published but the link was lost" were the same shape, nothing could
+// enumerate the backlog, and nothing ever republished it. These tests pin the durable state, the
+// reconciliation-guarded republish, and the exactly-once property the issue's constraint demands.
+describe('S1 §54 republish — a degraded publication is recovered exactly once', () => {
+  /**
+   * Reconciliation doubles: what the producer would answer about THIS publication. TRI-STATE, so
+   * a double that cannot answer must say `unavailable` rather than `absent` — the distinction the
+   * duplicate-receipt guard depends on.
+   */
+  function reconcile(boundary: SpecialistWorkItemBoundary): void {
+    boundary.findResultEntry = () => ({ status: 'absent' });
+    boundary.findReceiptForBinding = (_ref, bindingId) =>
+      (boundary as unknown as { __receiptFor?: string }).__receiptFor === bindingId
+        ? { status: 'found', value: { receiptId: 'wr_s1_1' } }
+        : { status: 'absent' };
+  }
+
+  it('marks a degraded publication pending with its reason, so the backlog is enumerable', async () => {
+    const { host, workItems, store } = hostWith();
+    workItems.boundary.appendResult = () => { throw new Error('database is locked'); };
+    const handle = await startResearch(host);
+    await handle.result;
+
+    const record = store.get(handle.activationId, handle.attemptId)!;
+    expect(record.publication?.state).toBe('pending');
+    expect(record.publication?.note).toContain('database is locked');
+    expect(record.journalEntryId).toBeUndefined();
+    // The receipt allocated before the append failed is recorded, so the next pass knows it exists.
+    expect(record.receiptId).toBe('wr_s1_1');
+    expect(store.listPendingPublication()).toEqual([record]);
+  });
+
+  it('completes it on the next pass, reusing the receipt already allocated — exactly once', async () => {
+    const { host, workItems, store } = hostWith();
+    workItems.boundary.appendResult = () => { throw new Error('database is locked'); };
+    const handle = await startResearch(host);
+    await handle.result;
+    expect(workItems.receipts).toHaveLength(1);
+
+    // The failure clears. The receipt leg is already done; only the Journal leg is owed.
+    delete (workItems.boundary as { appendResult?: unknown }).appendResult;
+    workItems.boundary.appendResult = (ref, input) => {
+      const entry = { ref, input, entryId: 'jent_republished', sequence: 1 };
+      workItems.journal.push(entry);
+      return { entryId: entry.entryId, sequence: entry.sequence };
+    };
+    reconcile(workItems.boundary);
+
+    const outcomes = republishPendingSettlements({
+      boundary: workItems.boundary, store, participantId: 'p', repositoryRoot: '/tmp/s1',
+    });
+    expect(outcomes).toEqual([{ activationId: handle.activationId, attemptId: handle.attemptId, outcome: 'published' }]);
+
+    // Exactly once: ONE receipt for the binding's whole life, ONE Journal result.
+    expect(workItems.receipts).toHaveLength(1);
+    expect(workItems.journal).toHaveLength(1);
+    const published = store.get(handle.activationId, handle.attemptId)!;
+    expect(published.publication?.state).toBe('published');
+    expect(published.journalEntryId).toBe('jent_republished');
+    expect(published.receiptId).toBe('wr_s1_1');
+    expect(store.listPendingPublication()).toHaveLength(0);
+  });
+
+  it('writes nothing on a second pass once the record is published', async () => {
+    const { host, workItems, store } = hostWith();
+    reconcile(workItems.boundary);
+    await (await startResearch(host)).result;
+    expect(workItems.journal).toHaveLength(1);
+
+    const first = republishPendingSettlements({ boundary: workItems.boundary, store, participantId: 'p', repositoryRoot: '/tmp/s1' });
+    const second = republishPendingSettlements({ boundary: workItems.boundary, store, participantId: 'p', repositoryRoot: '/tmp/s1' });
+    expect(first).toEqual([]);
+    expect(second).toEqual([]);
+    expect(workItems.journal).toHaveLength(1);
+    expect(workItems.receipts).toHaveLength(1);
+  });
+
+  it('adopts an existing Journal result instead of appending a second one', async () => {
+    const { host, workItems, store } = hostWith();
+    workItems.boundary.appendResult = () => { throw new Error('database is locked'); };
+    const handle = await startResearch(host);
+    await handle.result;
+
+    // The append had in fact landed; only the store link was lost.
+    workItems.boundary.findResultEntry = () => ({ status: 'found', value: { entryId: 'jent_pre_existing' } });
+    workItems.boundary.findReceiptForBinding = () => ({ status: 'found', value: { receiptId: 'wr_s1_1' } });
+    const outcomes = republishPendingSettlements({
+      boundary: workItems.boundary, store, participantId: 'p', repositoryRoot: '/tmp/s1',
+    });
+    expect(outcomes[0]?.outcome).toBe('published');
+    expect(store.get(handle.activationId, handle.attemptId)?.journalEntryId).toBe('jent_pre_existing');
+    expect(workItems.journal).toHaveLength(0); // nothing appended
+    expect(workItems.receipts).toHaveLength(1); // nothing re-minted
+  });
+
+  it('reuses a producer-held receipt when the record lost its link, and never mints a second', async () => {
+    const { host, workItems, store } = hostWith();
+    workItems.boundary.appendResult = () => { throw new Error('database is locked'); };
+    const handle = await startResearch(host);
+    await handle.result;
+    // Simulate the crash-between-steps case: the store never learned about the receipt.
+    const degraded = store.get(handle.activationId, handle.attemptId)!;
+    delete degraded.receiptId;
+    store.save(degraded);
+
+    (workItems.boundary as unknown as { __receiptFor?: string }).__receiptFor = 'exb_s1';
+    reconcile(workItems.boundary);
+    workItems.boundary.appendResult = (ref, input) => {
+      const entry = { ref, input, entryId: 'jent_resumed', sequence: 1 };
+      workItems.journal.push(entry);
+      return { entryId: entry.entryId, sequence: entry.sequence };
+    };
+    const outcomes = republishPendingSettlements({
+      boundary: workItems.boundary, store, participantId: 'p', repositoryRoot: '/tmp/s1',
+    });
+    expect(outcomes[0]?.outcome).toBe('published');
+    expect(workItems.receipts).toHaveLength(1);
+    expect(store.get(handle.activationId, handle.attemptId)?.receiptId).toBe('wr_s1_1');
+  });
+
+  it('defers, writing nothing, when the boundary cannot answer whether it already landed', async () => {
+    const { host, workItems, store } = hostWith();
+    workItems.boundary.appendResult = () => { throw new Error('database is locked'); };
+    const handle = await startResearch(host);
+    await handle.result;
+    const degraded = store.get(handle.activationId, handle.attemptId)!;
+    delete degraded.receiptId; // the failure mode reconciliation exists for
+    store.save(degraded);
+
+    // No reconciliation reads at all: a republish cannot prove it is the first, so it must not run.
+    const outcomes = republishPendingSettlements({
+      boundary: workItems.boundary, store, participantId: 'p', repositoryRoot: '/tmp/s1',
+    });
+    expect(outcomes[0]?.outcome).toBe('pending');
+    expect(workItems.journal).toHaveLength(0);
+    expect(workItems.receipts).toHaveLength(1); // unchanged: still the first attempt's single receipt
+    const record = store.get(handle.activationId, handle.attemptId)!;
+    expect(record.publication?.state).toBe('pending');
+    expect(record.publication?.note).toContain('reconciliation');
+  });
+
+  it('defers on an UNANSWERABLE read rather than treating it as "no receipt exists"', async () => {
+    // The duplicate-receipt hole. A boundary that HAS the settlement surface but cannot answer
+    // "is there already a receipt for this binding" must not be read as "there is none" — an
+    // older Substrate build exposes allocateReceipt and no listing, which is exactly the
+    // pre-cutover shape this issue is about.
+    const { host, workItems, store } = hostWith();
+    workItems.boundary.appendResult = () => { throw new Error('database is locked'); };
+    const handle = await startResearch(host);
+    await handle.result;
+    const degraded = store.get(handle.activationId, handle.attemptId)!;
+    delete degraded.receiptId;
+    store.save(degraded);
+
+    workItems.boundary.findResultEntry = () => ({ status: 'absent' });
+    workItems.boundary.findReceiptForBinding = () => ({ status: 'unavailable', reason: 'provenance service exposes no receipt listing' });
+    const outcomes = republishPendingSettlements({
+      boundary: workItems.boundary, store, participantId: 'p', repositoryRoot: '/tmp/s1',
+    });
+    expect(outcomes[0]?.outcome).toBe('pending');
+    expect(workItems.receipts).toHaveLength(1); // NOT a second one
+    expect(workItems.journal).toHaveLength(0);
+    expect(store.get(handle.activationId, handle.attemptId)?.publication?.note).toContain('unavailable');
+  });
+
+  it('refuses when a Journal result exists but its receipt cannot be reconstructed', async () => {
+    // `published` means BOTH exist. Adopting a journal entry while inventing a receipt would
+    // break the provenance chain the entry's own refs point at, so this is a refusal.
+    const { host, workItems, store } = hostWith();
+    workItems.boundary.appendResult = () => { throw new Error('database is locked'); };
+    const handle = await startResearch(host);
+    await handle.result;
+    const degraded = store.get(handle.activationId, handle.attemptId)!;
+    delete degraded.receiptId;
+    store.save(degraded);
+
+    workItems.boundary.findResultEntry = () => ({ status: 'found', value: { entryId: 'jent_orphan' } });
+    workItems.boundary.findReceiptForBinding = () => ({ status: 'absent' });
+    const outcomes = republishPendingSettlements({
+      boundary: workItems.boundary, store, participantId: 'p', repositoryRoot: '/tmp/s1',
+    });
+    expect(outcomes[0]?.outcome).toBe('refused');
+    const record = store.get(handle.activationId, handle.attemptId)!;
+    expect(record.publication?.state).toBe('refused');
+    expect(record.publication?.note).toContain('cannot be completed');
+    expect(record.journalEntryId).toBe('jent_orphan');
+    expect(record.receiptId).toBeUndefined();
+  });
+
+  it('marks a boundary with no settlement surface refused, which no retry can fix', async () => {
+    const { host, workItems, store } = hostWith();
+    const boundary = workItems.boundary as { appendResult?: unknown; allocateReceipt?: unknown };
+    delete boundary.appendResult;
+    delete boundary.allocateReceipt;
+    const handle = await startResearch(host);
+    await handle.result;
+
+    const record = store.get(handle.activationId, handle.attemptId)!;
+    expect(record.publication?.state).toBe('refused');
+    expect(record.publication?.note).toContain('no settlement surface');
+    // A refused record is not a republish backlog: retrying it is pointless.
+    expect(store.listPendingPublication()).toHaveLength(0);
+    expect(workItems.journal).toHaveLength(0);
+  });
+
+  it('never touches a failed settlement', async () => {
+    const { host, workItems, store } = hostWith({ failFirst: true });
+    const handle = await startResearch(host);
+    const first = await handle.result;
+    expect(first.status).toBe('failed');
+    const failedAttempt = first.attemptId;
+
+    // The retry leg publishes; the failed leg never does, and never enters the backlog.
+    const retried = await host.retry(handle.activationId);
+    await retried.result;
+    expect(store.listPendingPublication()).toHaveLength(0);
+    const failed = store.get(handle.activationId, failedAttempt)!;
+    expect(failed.status).toBe('failed');
+    expect(failed.publication?.state).toBeUndefined();
+
+    const outcomes = republishPendingSettlements({
+      boundary: workItems.boundary, store, participantId: 'p', repositoryRoot: '/tmp/s1',
+    });
+    expect(outcomes).toEqual([]);
   });
 });

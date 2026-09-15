@@ -24121,6 +24121,12 @@ function deduplicateExtensionSources(autoInjected, dynamicSources) {
   }
   return { kept, dropped };
 }
+function sessionResourceFenceArgv() {
+  return {
+    head: ["--no-extensions", "--no-skills"],
+    tail: ["--no-context-files", "--no-prompt-templates", "--no-themes"]
+  };
+}
 function resolveExecutionExtensionSelection(extensions) {
   const excludeExtensions = [];
   const extensionSources = [];
@@ -24507,17 +24513,15 @@ class PiAgentSession {
     const model = this.options.model;
     const extraArgs = getProviderArgs(model);
     const providerArgs = model.includes("/") ? ["--model", model] : ["--provider", mapSpecialistBackend(model)];
+    const resourceFence = sessionResourceFenceArgv();
     const args = [
       "--mode",
       "rpc",
-      "--no-extensions",
-      "--no-skills",
+      ...resourceFence.head,
       ...providerArgs,
       "--no-session",
       ...this.options.offline === false ? [] : ["--offline"],
-      "--no-context-files",
-      "--no-prompt-templates",
-      "--no-themes",
+      ...resourceFence.tail,
       ...extraArgs
     ];
     const resolvedToolContract = this.options.resolvedToolContract ?? resolveRuntimeToolContract({
@@ -25534,6 +25538,7 @@ __export(exports_runner, {
   formatScriptOutput: () => formatScriptOutput,
   formatRequiredPreScriptFailure: () => formatRequiredPreScriptFailure,
   findRequiredPreScriptFailure: () => findRequiredPreScriptFailure,
+  createReviewerDiffAppendHook: () => createReviewerDiffAppendHook,
   classifyFallbackError: () => classifyFallbackError,
   buildReviewerDiffInstruction: () => buildReviewerDiffInstruction,
   buildReviewerDiffContext: () => buildReviewerDiffContext,
@@ -25944,6 +25949,17 @@ ${context.hunks}
 ---
 `;
 }
+function createReviewerDiffAppendHook(onUnavailable = (message) => process.stderr.write(`${message}
+`)) {
+  return (task, cwd, variables) => {
+    try {
+      return `${task}${buildReviewerDiffInstruction(buildReviewerDiffContext(cwd, variables))}`;
+    } catch (error) {
+      onUnavailable(`[specialist runner] Reviewer diff context unavailable: ${String(error)}`);
+      return task;
+    }
+  };
+}
 function tryParseJson(input2) {
   try {
     return { value: JSON.parse(input2) };
@@ -26181,14 +26197,7 @@ ${buildBeadBoundaryInstruction(runCwd, options.worktreeBoundary)}`.trim();
         worktreeOwnerJobId: options.worktreeOwnerJobId,
         gitnexusSummary: gitnexusSummary || undefined,
         worktreeBoundary: options.worktreeBoundary,
-        appendExecutionContext: metadata.name === "reviewer" ? (task, cwd, variables) => {
-          try {
-            return `${task}${buildReviewerDiffInstruction(buildReviewerDiffContext(cwd, variables))}`;
-          } catch (error) {
-            console.warn(`[specialist runner] Reviewer diff context unavailable: ${String(error)}`);
-            return task;
-          }
-        } : undefined
+        appendExecutionContext: metadata.name === "reviewer" ? createReviewerDiffAppendHook((message) => console.warn(message)) : undefined
       });
     } catch (error) {
       if (error instanceof MandatoryRulesBudgetError) {
@@ -92386,7 +92395,9 @@ var init_authority_store = __esm(() => {
 });
 
 // src/activation/workitem-store.ts
+import { existsSync as existsSync53 } from "fs";
 import { createRequire as createRequire6 } from "module";
+import { homedir as homedir17 } from "os";
 import { dirname as dirname24, join as join56 } from "path";
 import { pathToFileURL } from "url";
 function resolveSubstrateDir(explicit, resolveInstalled) {
@@ -92397,9 +92408,40 @@ function resolveSubstrateDir(explicit, resolveInstalled) {
     return resolveInstalled();
   try {
     return dirname24(require5.resolve(`${SUBSTRATE_PACKAGE}/package.json`));
-  } catch {
-    return null;
+  } catch {}
+  return resolveSubstrateFromGlobalPrefix();
+}
+function resolveSubstrateFromGlobalPrefix(libDirs) {
+  const globalModules = resolveGlobalNodeModulesDir2();
+  const runtimePrefix = dirname24(dirname24(process.execPath));
+  const candidates = uniqueExistingLibDirs(libDirs ?? [
+    globalModules ? dirname24(globalModules) : undefined,
+    join56(runtimePrefix, "lib"),
+    join56(homedir17(), ".bun", "install", "global")
+  ]);
+  for (const libDir of candidates) {
+    try {
+      return dirname24(require5.resolve(`${SUBSTRATE_PACKAGE}/package.json`, { paths: [libDir] }));
+    } catch {}
   }
+  return null;
+}
+function uniqueExistingLibDirs(candidates) {
+  const seen = new Set;
+  const out = [];
+  for (const candidate of candidates) {
+    if (!candidate)
+      continue;
+    const normalized = join56(candidate);
+    if (seen.has(normalized))
+      continue;
+    seen.add(normalized);
+    try {
+      if (existsSync53(normalized))
+        out.push(normalized);
+    } catch {}
+  }
+  return out;
 }
 function resolveWorkItemDbPath(env = process.env) {
   return resolveAuthorityDbPath(env);
@@ -92411,6 +92453,7 @@ function openSubstrateDb(dbPath) {
     db.exec("PRAGMA synchronous = FULL");
     db.exec("PRAGMA foreign_keys = ON");
   };
+  const failures = [];
   try {
     const bun = require5("bun:sqlite");
     if (bun?.Database) {
@@ -92418,14 +92461,25 @@ function openSubstrateDb(dbPath) {
       applyPragmas(db);
       return db;
     }
-  } catch {}
-  const node3 = require5("node:sqlite");
-  if (node3?.DatabaseSync) {
-    const db = new node3.DatabaseSync(dbPath);
-    applyPragmas(db);
-    return db;
+    failures.push("bun:sqlite: module exposes no Database export");
+  } catch (error3) {
+    failures.push(`bun:sqlite: ${error3 instanceof Error ? error3.message : String(error3)}`);
   }
-  throw new Error(`work-item store: no sqlite driver for ${dbPath}`);
+  try {
+    const node3 = require5("node:sqlite");
+    if (node3?.DatabaseSync) {
+      const db = new node3.DatabaseSync(dbPath);
+      applyPragmas(db);
+      return db;
+    }
+    failures.push("node:sqlite: module exposes no DatabaseSync export");
+  } catch (error3) {
+    failures.push(`node:sqlite: ${error3 instanceof Error ? error3.message : String(error3)}`);
+  }
+  throw new Error(`work-item store: cannot open the sqlite store at ${dbPath} ` + `(bun:sqlite and node:sqlite both unavailable: ${failures.join("; ")})`);
+}
+function attemptOfEntry(entry) {
+  return entry.executionContext?.specialist?.attemptId ?? entry.attemptId ?? null;
 }
 function createWorkItemBoundary(ports) {
   const { issues, provenance, store, gate, journalService, provenanceService } = ports;
@@ -92606,6 +92660,40 @@ function createWorkItemBoundary(ports) {
           kind: attached.kind ?? kind,
           value: attached.value ?? value
         };
+      },
+      findResultEntry(ref, key) {
+        if (!journalService?.listEntries) {
+          return { status: "unavailable", reason: "journal service exposes no entry listing" };
+        }
+        try {
+          const entries = journalService.listEntries(issues.resolveRef(ref).id, { kind: "result" });
+          const forActivation = entries.filter((entry) => entry.activationId === key.activationId);
+          const match = forActivation.find((entry) => attemptOfEntry(entry) === key.attemptId);
+          if (match)
+            return { status: "found", value: { entryId: match.id } };
+          const unattributed = forActivation.filter((entry) => attemptOfEntry(entry) === null);
+          if (unattributed.length > 0) {
+            return {
+              status: "unavailable",
+              reason: `${unattributed.length} Journal result(s) for this activation carry no attempt attribution`
+            };
+          }
+          return { status: "absent" };
+        } catch (error3) {
+          return { status: "unavailable", reason: error3 instanceof Error ? error3.message : String(error3) };
+        }
+      },
+      findReceiptForBinding(ref, bindingId) {
+        if (!provenanceService?.listReceipts) {
+          return { status: "unavailable", reason: "provenance service exposes no receipt listing" };
+        }
+        try {
+          const rows = provenanceService.listReceipts(issues.resolveRef(ref).id);
+          const match = rows.find((receipt) => receipt.executionBindingId === bindingId);
+          return match ? { status: "found", value: { receiptId: match.id } } : { status: "absent" };
+        } catch (error3) {
+          return { status: "unavailable", reason: error3 instanceof Error ? error3.message : String(error3) };
+        }
       }
     } : {}
   };
@@ -92661,9 +92749,26 @@ async function openWorkItemBoundary(opts = {}) {
     }
   }
   const dbPath = opts.dbPath ?? resolveWorkItemDbPath(env);
-  const db = openSubstrateDb(dbPath);
-  runner.migrate(db);
-  const issueService = new issueSvcMod.IssueService(db);
+  const storeRefusal = (error3) => new Error(`work_item_store_unavailable: cannot open the Substrate store at ${dbPath} (set SUBSTRATE_DB or XTRM_STATE_DB to a writable database path, or install ${SUBSTRATE_PACKAGE}): ${error3 instanceof Error ? error3.message : String(error3)}`);
+  let db;
+  try {
+    db = openSubstrateDb(dbPath);
+    runner.migrate(db);
+  } catch (error3) {
+    throw storeRefusal(error3);
+  }
+  let issueService;
+  let journalSvc;
+  let provenance;
+  let store;
+  try {
+    issueService = new issueSvcMod.IssueService(db);
+    journalSvc = new journalMod.JournalService(db, issueService);
+    provenance = new provMod.ProvenanceService(db, issueService, journalSvc);
+    store = new storeMod.SubstrateIssueStore(issueService, journalSvc);
+  } catch (error3) {
+    throw storeRefusal(error3);
+  }
   issueService.getBlockers = (childId) => issueService.listActiveEdges().filter((edge) => edge.active && edge.kind === "blocks" && edge.toIssue === childId).map((edge) => {
     const issue3 = issueService.getIssue(edge.fromIssue);
     return {
@@ -92675,9 +92780,6 @@ async function openWorkItemBoundary(opts = {}) {
     };
   });
   const issues = issueService;
-  const journalSvc = new journalMod.JournalService(db, issues);
-  const provenance = new provMod.ProvenanceService(db, issues, journalSvc);
-  const store = new storeMod.SubstrateIssueStore(issues, journalSvc);
   return createWorkItemBoundary({
     issues,
     provenance,
@@ -92692,6 +92794,7 @@ async function openWorkItemBoundary(opts = {}) {
 }
 var require5, SUBSTRATE_PACKAGE = "@jaggerxtrm/substrate", SATISFIED_BLOCKER_STATES;
 var init_workitem_store = __esm(() => {
+  init_session();
   init_contract_sections();
   init_authority_store();
   require5 = createRequire6(import.meta.url);
@@ -92946,11 +93049,11 @@ var init_peer_bridge = __esm(() => {
 });
 
 // src/activation/transport/roster.ts
-import { existsSync as existsSync53, readdirSync as readdirSync26, readFileSync as readFileSync46 } from "fs";
-import { homedir as homedir17 } from "os";
+import { existsSync as existsSync54, readdirSync as readdirSync26, readFileSync as readFileSync46 } from "fs";
+import { homedir as homedir18 } from "os";
 import { join as join57 } from "path";
 function defaultRosterDir() {
-  return join57(homedir17(), ".claude", "sessions");
+  return join57(homedir18(), ".claude", "sessions");
 }
 function procProbe() {
   let bootSeconds;
@@ -93021,7 +93124,7 @@ function scanRoster(options2 = {}) {
   const probe = options2.probe ?? procProbe();
   const live = [];
   const rejected = [];
-  if (!existsSync53(dir))
+  if (!existsSync54(dir))
     return { live, rejected };
   for (const file of readdirSync26(dir)) {
     if (!file.endsWith(".json"))
@@ -93277,7 +93380,7 @@ function createGuardedTools(sdk, input2) {
   }
   return { tools, guarded, unguardable };
 }
-var FACTORY_NAMES;
+var FACTORY_NAMES, GUARDED_TOOL_NAMES;
 var init_guarded_tools = __esm(() => {
   FACTORY_NAMES = {
     edit: "createEditTool",
@@ -93285,6 +93388,7 @@ var init_guarded_tools = __esm(() => {
     bash: "createBashTool",
     powershell: "createPowerShellTool"
   };
+  GUARDED_TOOL_NAMES = Object.keys(FACTORY_NAMES);
 });
 
 // src/activation/ask-tool.ts
@@ -93338,7 +93442,7 @@ var ASK_TOOL = "ask_coordinator", ESCALATE_TOOL = "escalate_to_coordinator", too
 });
 
 // src/activation/pi-sdk.ts
-import { existsSync as existsSync54 } from "fs";
+import { existsSync as existsSync55 } from "fs";
 import { join as join58 } from "path";
 import { pathToFileURL as pathToFileURL2 } from "url";
 function piSdkCandidates() {
@@ -93346,7 +93450,7 @@ function piSdkCandidates() {
   const globalDir = resolveGlobalNodeModulesDir2();
   if (globalDir) {
     const entry = join58(globalDir, PI_SDK_PACKAGE, "dist", "index.js");
-    if (existsSync54(entry))
+    if (existsSync55(entry))
       candidates.push(pathToFileURL2(entry).href);
   }
   return candidates;
@@ -93900,6 +94004,168 @@ function buildSettlementExecutionContext(opts) {
   ctx.timestamp = opts.now ?? Date.now();
   return ctx;
 }
+function republishSettlement(opts) {
+  const { boundary, store, record: record5 } = opts;
+  const now = opts.now ?? Date.now();
+  const emit = opts.emit ?? (() => {});
+  if (record5.status !== "completed") {
+    return { outcome: "refused", note: "a failed settlement publishes nothing" };
+  }
+  if (record5.receiptId && record5.journalEntryId) {
+    return { outcome: "published", journalEntryId: record5.journalEntryId, receiptId: record5.receiptId };
+  }
+  if (!boundary.appendResult || !boundary.allocateReceipt) {
+    const note = "work boundary carries no settlement surface; not republishable";
+    saveState(store, record5, "refused", note);
+    emit("settlement_republish_refused", { activationId: record5.activationId, attemptId: record5.attemptId, note });
+    return { outcome: "refused", note };
+  }
+  const defer = (reason) => {
+    saveState(store, record5, "pending", reason);
+    emit("settlement_republish_deferred", {
+      activationId: record5.activationId,
+      attemptId: record5.attemptId,
+      note: reason
+    });
+    return { outcome: "pending", note: reason };
+  };
+  let journalEntryId = record5.journalEntryId;
+  if (!journalEntryId) {
+    if (!boundary.findResultEntry) {
+      return defer("work boundary exposes no Journal reconciliation, so a republish cannot prove it is the first");
+    }
+    const lookup = boundary.findResultEntry(record5.issueRef, {
+      activationId: record5.activationId,
+      attemptId: record5.attemptId
+    });
+    if (lookup.status === "unavailable") {
+      return defer(`Journal reconciliation unavailable: ${lookup.reason}`);
+    }
+    if (lookup.status === "found")
+      journalEntryId = lookup.value.entryId;
+  }
+  let receiptId = record5.receiptId;
+  if (!receiptId) {
+    if (!boundary.findReceiptForBinding) {
+      return defer("work boundary exposes no receipt reconciliation, so a republish cannot prove it is the first");
+    }
+    const lookup = boundary.findReceiptForBinding(record5.issueRef, record5.executionBindingId);
+    if (lookup.status === "unavailable") {
+      return defer(`receipt reconciliation unavailable: ${lookup.reason}`);
+    }
+    if (lookup.status === "found")
+      receiptId = lookup.value.receiptId;
+  }
+  if (journalEntryId) {
+    if (!receiptId) {
+      const note = `Journal result ${journalEntryId} exists but no WorkReceipt is recorded for binding ` + `${record5.executionBindingId} and none is resolvable; the provenance chain cannot be completed`;
+      saveState(store, record5, "refused", note, { journalEntryId });
+      emit("settlement_republish_refused", { activationId: record5.activationId, attemptId: record5.attemptId, note });
+      return { outcome: "refused", note, journalEntryId };
+    }
+    saveState(store, record5, "published", "reconciled with the existing Journal result", {
+      journalEntryId,
+      receiptId
+    });
+    emit("settlement_republish_reconciled", {
+      activationId: record5.activationId,
+      attemptId: record5.attemptId,
+      entry: journalEntryId
+    });
+    return { outcome: "published", journalEntryId, receiptId };
+  }
+  try {
+    const storedRef = store.save(record5);
+    if (!receiptId) {
+      const receipt = boundary.allocateReceipt(record5.executionBindingId);
+      receiptId = receipt.id;
+      emit("settlement_receipt_allocated", { receipt: receipt.id, republish: true });
+    }
+    let artifactValue = record5.artifactRef ?? storedRef;
+    if (boundary.attachArtifact && !record5.artifactRef) {
+      try {
+        artifactValue = boundary.attachArtifact(receiptId, "artifact", storedRef).value;
+        emit("settlement_artifact_attached", { receipt: receiptId, kind: "artifact", republish: true });
+      } catch (error3) {
+        emit("settlement_degraded", {
+          note: `artifact attach failed: ${error3 instanceof Error ? error3.message : String(error3)}`
+        });
+      }
+    }
+    const entry = boundary.appendResult(record5.issueRef, {
+      result: buildBoundedResult({
+        output: record5.output,
+        valid: record5.validation.valid,
+        errors: record5.validation.errors,
+        artifactRefs: [artifactValue],
+        receiptRefs: [receiptId],
+        provenanceRefs: [record5.executionBindingId, receiptId]
+      }),
+      executionContext: buildSettlementExecutionContext({
+        participantId: opts.participantId,
+        specialistName: record5.specialist,
+        activationId: record5.activationId,
+        attemptId: record5.attemptId,
+        coordinatorParticipantId: opts.coordinator?.participantId,
+        coordinatorSessionId: opts.coordinator?.sessionId,
+        repoPath: opts.repositoryRoot,
+        worktree: opts.worktreePath ?? opts.repositoryRoot,
+        env: opts.env,
+        now
+      }),
+      refs: [
+        { kind: "artifact", key: artifactValue },
+        { kind: "receipt", key: receiptId }
+      ],
+      participantId: opts.participantId,
+      activationId: record5.activationId
+    });
+    store.save({
+      ...record5,
+      receiptId,
+      journalEntryId: entry.entryId,
+      artifactRef: artifactValue,
+      publication: { state: "published", attempts: (record5.publication?.attempts ?? 0) + 1, updatedAt: now }
+    });
+    emit("settlement_result_published", { entry: entry.entryId, receipt: receiptId, republish: true });
+    return { outcome: "published", journalEntryId: entry.entryId, receiptId };
+  } catch (error3) {
+    const note = error3 instanceof Error ? error3.message : String(error3);
+    saveState(store, record5, "pending", note, { ...receiptId ? { receiptId } : {} });
+    emit("settlement_degraded", { note, republish: true });
+    return { outcome: "pending", note, ...receiptId ? { receiptId } : {} };
+  }
+}
+function republishPendingSettlements(opts) {
+  const emit = opts.emit ?? (() => {});
+  const limit = Math.max(1, opts.limit ?? REPUBLISH_PASS_LIMIT);
+  const pending = (opts.store.listPendingPublication?.() ?? []).slice(0, limit);
+  const outcomes = [];
+  for (const record5 of pending) {
+    try {
+      const result = republishSettlement({
+        boundary: opts.boundary,
+        store: opts.store,
+        record: record5,
+        participantId: opts.participantId,
+        repositoryRoot: opts.repositoryRoot,
+        ...opts.worktreePath ? { worktreePath: opts.worktreePath } : {},
+        ...opts.env ? { env: opts.env } : {},
+        ...opts.now ? { now: opts.now() } : {},
+        emit
+      });
+      outcomes.push({ activationId: record5.activationId, attemptId: record5.attemptId, outcome: result.outcome });
+    } catch (error3) {
+      outcomes.push({ activationId: record5.activationId, attemptId: record5.attemptId, outcome: "error" });
+      emit("settlement_republish_error", {
+        activationId: record5.activationId,
+        attemptId: record5.attemptId,
+        note: error3 instanceof Error ? error3.message : String(error3)
+      });
+    }
+  }
+  return outcomes;
+}
 function publishSettlement(opts) {
   const { boundary, store, subject } = opts;
   const now = opts.now ?? Date.now();
@@ -93942,19 +94208,25 @@ function publishSettlement(opts) {
   }
   emit("settlement_stored", { ref: storedRef, status: opts.status });
   if (opts.status !== "completed")
-    return { storedRef };
+    return { storedRef, publicationState: "not-applicable" };
   if (!boundary.allocateReceipt || !boundary.appendResult) {
-    emit("settlement_degraded", { note: "work boundary carries no settlement surface; result stored only" });
-    return { storedRef, degraded: "boundary without settlement surface" };
+    const note = "work boundary carries no settlement surface; result stored only";
+    saveState(store, record5, "refused", note);
+    emit("settlement_degraded", { note });
+    return { storedRef, degraded: "boundary without settlement surface", publicationState: "refused" };
   }
+  let allocatedReceiptId;
+  let allocatedArtifactRef;
   try {
     const receipt = boundary.allocateReceipt(subject.executionBindingId);
+    allocatedReceiptId = receipt.id;
     emit("settlement_receipt_allocated", { receipt: receipt.id });
     let artifactValue = storedRef;
     try {
       if (boundary.attachArtifact) {
         const attached = boundary.attachArtifact(receipt.id, "artifact", storedRef);
         artifactValue = attached.value;
+        allocatedArtifactRef = artifactValue;
         emit("settlement_artifact_attached", { receipt: receipt.id, kind: "artifact" });
       }
     } catch (error3) {
@@ -93982,17 +94254,44 @@ function publishSettlement(opts) {
       sessionId: subject.piSessionId
     });
     emit("settlement_result_published", { entry: entry.entryId, receipt: receipt.id });
+    const published = {
+      ...record5,
+      receiptId: receipt.id,
+      journalEntryId: entry.entryId,
+      artifactRef: artifactValue,
+      publication: { state: "published", attempts: (record5.publication?.attempts ?? 0) + 1, updatedAt: now }
+    };
     try {
-      store.save({ ...record5, receiptId: receipt.id, journalEntryId: entry.entryId, artifactRef: artifactValue });
+      store.save(published);
     } catch {}
-    return { storedRef, receiptId: receipt.id, artifactValue, journalEntryId: entry.entryId };
+    return {
+      storedRef,
+      receiptId: receipt.id,
+      artifactValue,
+      journalEntryId: entry.entryId,
+      publicationState: "published"
+    };
   } catch (error3) {
     const note = error3 instanceof Error ? error3.message : String(error3);
-    emit("settlement_degraded", { note });
-    return { storedRef, degraded: note };
+    saveState(store, record5, "pending", note, {
+      ...allocatedReceiptId ? { receiptId: allocatedReceiptId } : {},
+      ...allocatedArtifactRef ? { artifactRef: allocatedArtifactRef } : {}
+    });
+    emit("settlement_degraded", { note, ...allocatedReceiptId ? { partial_receipt: allocatedReceiptId } : {} });
+    return { storedRef, degraded: note, publicationState: "pending" };
   }
 }
-var SETTLEMENT_CONTEXT_VERSION = 1, SETTLEMENT_RESULT_VERSION = 1, SUMMARY_MAX = 4000, RESULT_ARRAY_MAX = 100, RESULT_ITEM_MAX = 1000;
+function saveState(store, record5, state, note, links = {}) {
+  try {
+    const existing = store.get(record5.activationId, record5.attemptId) ?? record5;
+    store.save({
+      ...existing,
+      ...links,
+      publication: { state, note, attempts: (existing.publication?.attempts ?? 0) + 1, updatedAt: Date.now() }
+    });
+  } catch {}
+}
+var SETTLEMENT_CONTEXT_VERSION = 1, SETTLEMENT_RESULT_VERSION = 1, SUMMARY_MAX = 4000, RESULT_ARRAY_MAX = 100, RESULT_ITEM_MAX = 1000, REPUBLISH_PASS_LIMIT = 50;
 
 // src/activation/settlement-store.ts
 import { mkdirSync as mkdirSync23, readFileSync as readFileSync47, readdirSync as readdirSync27, writeFileSync as writeFileSync25 } from "fs";
@@ -94002,6 +94301,16 @@ function safeSegment(id) {
   if (!safe || safe === "." || safe === "..")
     throw new Error(`unusable settlement id: ${id}`);
   return safe;
+}
+function isPendingPublication(record5) {
+  return publicationStateOf(record5) === "pending";
+}
+function publicationStateOf(record5) {
+  if (record5.status !== "completed")
+    return "not-applicable";
+  if (record5.journalEntryId && record5.receiptId)
+    return "published";
+  return record5.publication?.state === "refused" ? "refused" : "pending";
 }
 function createFileSettlementStore(root) {
   const pathFor = (activationId, attemptId) => join59(root, safeSegment(activationId), `${safeSegment(attemptId)}.json`);
@@ -94033,14 +94342,46 @@ function createFileSettlementStore(root) {
         } catch {}
       }
       return out;
+    },
+    listPendingPublication() {
+      return readAll().filter(isPendingPublication).sort((a, b) => a.completedAt - b.completedAt);
     }
   };
+  function readAll() {
+    let activations;
+    try {
+      activations = readdirSync27(root);
+    } catch {
+      return [];
+    }
+    const out = [];
+    for (const activation of activations) {
+      for (const record5 of readActivationDir(activation))
+        out.push(record5);
+    }
+    return out;
+  }
+  function readActivationDir(activation) {
+    let files;
+    try {
+      files = readdirSync27(join59(root, activation));
+    } catch {
+      return [];
+    }
+    const out = [];
+    for (const file of files.filter((f) => f.endsWith(".json")).sort()) {
+      try {
+        out.push(JSON.parse(readFileSync47(join59(root, activation, file), "utf8")));
+      } catch {}
+    }
+    return out;
+  }
 }
 var init_settlement_store = () => {};
 
 // src/activation/native-host.ts
 import { randomUUID as randomUUID8 } from "crypto";
-import { existsSync as existsSync55 } from "fs";
+import { existsSync as existsSync56 } from "fs";
 import { join as join60 } from "path";
 function extractTokenUsage(event) {
   const nested = nativeSessionTokenUsage(event);
@@ -94064,6 +94405,9 @@ function extractTokenUsage(event) {
       return usage5;
   }
   return;
+}
+function isNonLocalExtensionSource(source) {
+  return NON_LOCAL_EXTENSION_PREFIXES.some((prefix) => source.startsWith(prefix));
 }
 function resolveWorkspace(cwd) {
   return { repositoryRoot: cwd, worktreePath: cwd };
@@ -94092,6 +94436,8 @@ class NativeActivationHost {
   now;
   authority;
   settlements;
+  admission;
+  republished = false;
   env;
   registry = new FleetRegistry;
   lastUsageSeen = new WeakMap;
@@ -94106,6 +94452,7 @@ class NativeActivationHost {
     this.now = deps.now ?? (() => Date.now());
     this.authority = deps.authority ?? NULL_AUTHORITY_WRITER;
     this.settlements = deps.settlements ?? createFileSettlementStore(join60(this.cwd, ".specialists", "settlements"));
+    this.admission = deps.admission ?? ((candidate, tier, contract) => validateBeforeRun(candidate, tier, contract));
     this.env = deps.env ?? process.env;
   }
   async start(request) {
@@ -94154,6 +94501,7 @@ class NativeActivationHost {
         ...detail
       });
     };
+    await this.republishOncePerProcess();
     const specialist = await this.loader.get(request.specialist).catch((error3) => {
       return reject("unknown_specialist", {
         note: error3 instanceof Error ? error3.message : String(error3)
@@ -94243,17 +94591,20 @@ class NativeActivationHost {
         ...missing?.length ? { missing } : {}
       });
     }
+    const extensionSelection = resolveExecutionExtensionSelection(specialist.specialist.execution?.extensions);
     const toolContract = resolveRuntimeToolContract({
       level: tier,
       specialistName: request.specialist,
       specialistPermissions: specialist.specialist.permissions,
+      excludeExtensions: extensionSelection.excludeExtensions,
+      extensionSources: extensionSelection.extensionSources,
       cwd: this.cwd
     });
     if (!toolContract || toolContract.toolsList.length === 0) {
       return reject("empty_tool_contract", { tier });
     }
     try {
-      validateBeforeRun(specialist, tier, toolContract);
+      this.admission(specialist, tier, toolContract);
     } catch (error3) {
       return reject("preflight_failed", {
         note: error3 instanceof Error ? error3.message : String(error3)
@@ -94388,15 +94739,8 @@ class NativeActivationHost {
         resolved_tool_contract: formatResolvedToolContract(toolContract)
       },
       ...isReviewer ? {
-        appendExecutionContext: (task, cwd, variables) => {
-          try {
-            return `${task}${buildReviewerDiffInstruction(buildReviewerDiffContext(cwd, variables))}`;
-          } catch (error3) {
-            process.stderr.write(`[specialist runner] Reviewer diff context unavailable: ${String(error3)}
-`);
-            return task;
-          }
-        }
+        appendExecutionContext: createReviewerDiffAppendHook((message) => process.stderr.write(`${message}
+`))
       } : {}
     });
     if (rendered.mandatoryRulesError) {
@@ -94487,10 +94831,10 @@ class NativeActivationHost {
       permissionLevel: tier,
       resolvedToolContract: toolContract
     });
-    const declaredExtensions = resolveExecutionExtensionSelection(specialist.specialist.execution?.extensions).extensionSources;
+    const declaredExtensions = extensionSelection.extensionSources;
     const declaredLocalExtensions = [];
     for (const source of declaredExtensions) {
-      if (NON_LOCAL_EXTENSION_PREFIXES.some((prefix) => source.startsWith(prefix))) {
+      if (isNonLocalExtensionSource(source)) {
         process.stderr.write(`[specialists] native activation: extension source '${source}' is not a filesystem path; ` + `the in-process resource loader cannot load it, so it is not injected.
 `);
         continue;
@@ -94646,11 +94990,45 @@ class NativeActivationHost {
     if (this.workItemsDefault)
       return this.workItemsDefault;
     const dbPath = resolveWorkItemDbPath();
-    if (!existsSync55(dbPath)) {
+    if (!existsSync56(dbPath)) {
       throw new Error(`no Substrate work store at ${dbPath} (set SUBSTRATE_DB (or the legacy XTRM_STATE_DB) or initialize it via xt init / sb)`);
     }
     this.workItemsDefault = await openWorkItemBoundary({ dbPath });
     return this.workItemsDefault;
+  }
+  async republishOncePerProcess() {
+    if (this.republished)
+      return;
+    this.republished = true;
+    try {
+      const boundary = await this.resolveWorkItems();
+      const pending = this.settlements.listPendingPublication?.() ?? [];
+      if (pending.length === 0)
+        return;
+      const outcomes = republishPendingSettlements({
+        boundary,
+        store: this.settlements,
+        participantId: "specialist::settlement-republisher",
+        repositoryRoot: this.cwd,
+        env: this.env,
+        emit: (name, payload) => this.forensics.emit({
+          activationId: "act:settlement-republisher",
+          attemptId: "att:settlement-republisher:1",
+          participantId: "specialist::settlement-republisher",
+          specialist: "settlement-republisher",
+          name,
+          payload
+        })
+      });
+      const unresolved = outcomes.filter((outcome) => outcome.outcome !== "published");
+      if (unresolved.length > 0) {
+        process.stderr.write(`[specialists] ${unresolved.length} settlement(s) still unpublished after republish: ` + `${unresolved.map((o) => `${o.activationId}/${o.attemptId}=${o.outcome}`).join(", ")}
+`);
+      }
+    } catch (error3) {
+      process.stderr.write(`[specialists] settlement republish pass failed: ${error3 instanceof Error ? error3.message : String(error3)}
+`);
+    }
   }
   onSessionEvent(snapshot, event, emit) {
     snapshot.lastActivityAt = this.now();
@@ -95709,12 +96087,15 @@ async function dispatchability(spec) {
   if (modelChain.length === 0) {
     return { dispatchable: false, reason: "no configured model \u2014 pass model_override at dispatch" };
   }
+  const extensionSelection = resolveExecutionExtensionSelection(execution.extensions);
   let toolContract;
   try {
     toolContract = resolveRuntimeToolContract({
       level: tier,
       specialistName: spec.specialist.metadata.name,
       specialistPermissions: spec.specialist.permissions,
+      excludeExtensions: extensionSelection.excludeExtensions,
+      extensionSources: extensionSelection.extensionSources,
       cwd: process.cwd()
     });
   } catch (error3) {
@@ -95793,6 +96174,7 @@ var specialistListSchema, WRITE_TIERS2, NATIVE_ONLY_NOTE = "Dispatch through spe
 var init_specialist_list_tool = __esm(() => {
   init_zod();
   init_lib();
+  init_session();
   specialistListSchema = objectType({
     name: stringType().optional().describe("Return the full record for this one specialist instead of the compact list."),
     detail: enumType(["compact", "full"]).optional().describe('"compact" (default) is one line each; "full" returns every field for every specialist.')
@@ -95801,7 +96183,7 @@ var init_specialist_list_tool = __esm(() => {
 });
 
 // src/mcp/resume-tool.ts
-import { existsSync as existsSync56 } from "fs";
+import { existsSync as existsSync57 } from "fs";
 import { fileURLToPath as fileURLToPath10 } from "url";
 function createSpecialistResumeTool(getHost, getPusher) {
   return {
@@ -95853,7 +96235,7 @@ var init_resume_tool = __esm(() => {
   DIST_LIB_PATH2 = (() => {
     for (const candidate of ["./lib.js", "../../dist/lib.js"]) {
       const path3 = fileURLToPath10(new URL(candidate, import.meta.url));
-      if (existsSync56(path3))
+      if (existsSync57(path3))
         return path3;
     }
     return fileURLToPath10(new URL("../../dist/lib.js", import.meta.url));

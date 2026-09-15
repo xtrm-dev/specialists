@@ -1,5 +1,5 @@
 import type { SpecialistWorkItemBoundary } from './workitem-store.js';
-import type { SettlementStore } from './settlement-store.js';
+import type { SettlementRecord, SettlementStore } from './settlement-store.js';
 /** Envelope version consumed. Mirrors EXECUTION_CONTEXT_VERSION (substrate@a77d094). */
 export declare const SETTLEMENT_CONTEXT_VERSION = 1;
 /** Journal result version stamped. Mirrors RESULT_VERSION (substrate@a77d094). */
@@ -112,6 +112,67 @@ export interface SettlementSubject {
     /** Base commit pinned on the ExecutionBinding row, when the producer exposes it. */
     bindingBaseCommit?: string;
 }
+/**
+ * Republish ONE stored settlement whose publication degraded (SPECIALISTS-54).
+ *
+ * Exactly-once, and the reason it can be exactly-once is RECONCILIATION: the receipt already
+ * allocated over the binding is REUSED, never re-minted. Substrate's `allocateReceipt` mints a
+ * fresh id per call and `issue_journal` has no dedupe key, so a blind re-run of the whole
+ * publication would mint a second receipt — the constraint the issue forbids.
+ *
+ * Resolution order, per leg:
+ *   receipt  — the recorded one, else the producer's (one receipt per binding), else allocate ONE.
+ *   result   — the recorded one, else the producer's for (activation, attempt), else append ONE.
+ *
+ * The only case that defers rather than publishes is a receipt this host cannot determine at all:
+ * no recorded link AND no reconciliation read. Guessing there would risk the duplicate, so the
+ * record stays `pending` with that exact reason — which is the honest outcome for a producer that
+ * cannot answer "did this already land?".
+ */
+export declare function republishSettlement(opts: {
+    boundary: SpecialistWorkItemBoundary;
+    store: SettlementStore;
+    record: SettlementRecord;
+    participantId: string;
+    repositoryRoot: string;
+    worktreePath?: string;
+    coordinator?: {
+        participantId?: string;
+        sessionId?: string;
+    };
+    env?: Record<string, string | undefined>;
+    now?: number;
+    emit?: (name: string, payload?: Record<string, unknown>) => void;
+}): {
+    outcome: 'published' | 'pending' | 'refused';
+    journalEntryId?: string;
+    receiptId?: string;
+    note?: string;
+};
+/**
+ * Republish the whole pending settlement backlog, oldest first.
+ *
+ * One record's failure never stops the pass: a permanently-unpublishable record must not keep
+ * every later one stuck behind it. Returns the per-record outcomes so the caller can log them.
+ */
+/** Records one pass will attempt. Bounds the work the FIRST DISPATCH of a process pays. */
+export declare const REPUBLISH_PASS_LIMIT = 50;
+export declare function republishPendingSettlements(opts: {
+    boundary: SpecialistWorkItemBoundary;
+    store: SettlementStore;
+    participantId: string;
+    repositoryRoot: string;
+    worktreePath?: string;
+    env?: Record<string, string | undefined>;
+    now?: () => number;
+    emit?: (name: string, payload?: Record<string, unknown>) => void;
+    /** Records this pass may attempt. Defaults to REPUBLISH_PASS_LIMIT. */
+    limit?: number;
+}): Array<{
+    activationId: string;
+    attemptId: string;
+    outcome: 'published' | 'pending' | 'refused' | 'error';
+}>;
 export interface PublishSettlementResult {
     /** Runtime storage ref. Always present: even a degraded publication stores. */
     storedRef: string;
@@ -119,6 +180,11 @@ export interface PublishSettlementResult {
     artifactValue?: string;
     journalEntryId?: string;
     degraded?: string;
+    /**
+     * Durable publication state written with the record (SPECIALISTS-54). `pending` means the
+     * settlement is republishable; `refused` means it never will be, and why.
+     */
+    publicationState?: 'published' | 'pending' | 'refused' | 'not-applicable';
 }
 /**
  * Publish one terminal settlement. Automatic and host-driven: the Specialist

@@ -1,3 +1,17 @@
+/**
+ * Publication state of one settlement (SPECIALISTS-54).
+ *
+ * `published` is the only state that means the Journal result and the WorkReceipt both exist.
+ * `pending` is a TRANSIENT failure: the settlement is durable, its publication is not, and a
+ * later republish may still complete it. `refused` is a PERMANENT one: either the work boundary
+ * carries no settlement surface at all (a pre-cutover runtime), or reconciliation found a
+ * partially-completed publication that cannot be resumed without minting a second receipt.
+ *
+ * Before this field existed, a degraded publication was recorded only as an ABSENT
+ * `journalEntryId`, so "never published" and "published but the link was lost" were the same
+ * shape and nothing could enumerate the backlog.
+ */
+export type SettlementPublicationState = 'published' | 'pending' | 'refused';
 /** One terminal settlement of one attempt. Raw output included by design. */
 export interface SettlementRecord {
     activationId: string;
@@ -20,6 +34,19 @@ export interface SettlementRecord {
     journalEntryId?: string;
     artifactRef?: string;
     completedAt: number;
+    /**
+     * Publication state. Absent on records written before this field existed (SPECIALISTS-54) and
+     * on FAILED settlements, which publish nothing by design — both read as "nothing to publish",
+     * never as "published".
+     */
+    publication?: {
+        state: SettlementPublicationState;
+        /** Why the state is not `published`. Always set for `pending` and `refused`. */
+        note?: string;
+        /** How many publication attempts have run, so a stuck record is visible as a count. */
+        attempts: number;
+        updatedAt: number;
+    };
 }
 /**
  * Runtime result storage port. `save` is an upsert on (activationId, attemptId):
@@ -30,11 +57,50 @@ export interface SettlementStore {
     save(record: SettlementRecord): string;
     get(activationId: string, attemptId: string): SettlementRecord | undefined;
     listAttempts(activationId: string): SettlementRecord[];
+    /**
+     * Every `completed` settlement whose publication is not in the `published` state — the
+     * republish backlog (SPECIALISTS-54). Ordered by completion time so the oldest degrades
+     * first, and includes records written before `publication` existed (state read as pending).
+     *
+     * Optional so an existing in-memory double keeps compiling; a store without it reports an
+     * EMPTY backlog rather than a wrong one, and the host treats absence as "not enumerable".
+     */
+    listPendingPublication?(): SettlementRecord[];
 }
+/**
+ * True when a record has a publication that is still owed (SPECIALISTS-54).
+ *
+ * A FAILED settlement is never owed one: it stays runtime-queryable by design and produces no
+ * Journal result and no receipt. A record with no `publication` field predates the field, so
+ * it is treated as owed — that is what makes the pre-cutover backlog visible instead of
+ * silently exempt.
+ */
+export declare function isPendingPublication(record: SettlementRecord): boolean;
+/**
+ * The publication state of a record — the query surface for "is this settlement's Journal result
+ * and WorkReceipt published, still owed, or never going to be?".
+ *
+ * `not-applicable` is a FAILED settlement: it settles nothing to publish and stays queryable as
+ * runtime evidence (ADR §38). An absent `publication` field reads as `pending`, which is what makes
+ * the pre-cutover backlog visible instead of silently exempt.
+ *
+ * `refused` is PERMANENT by definition — no amount of retrying publishes a boundary that carries no
+ * settlement surface, or completes a result whose receipt cannot be reconstructed. It stays
+ * queryable here and is deliberately NOT part of the republish backlog, so a pass cannot become an
+ * infinite retry against a runtime that cannot succeed. Re-attempting one after a runtime UPGRADE
+ * needs an explicit decision, not a silent retry.
+ */
+export declare function publicationStateOf(record: SettlementRecord): SettlementPublicationState | 'not-applicable';
 /** File-backed runtime store. Directories are created lazily on first save. */
 export declare function createFileSettlementStore(root: string): SettlementStore;
-/** In-memory store. Test double — production wires the file store. */
-export declare function createMemorySettlementStore(): SettlementStore & {
+/**
+ * The in-memory store: the port with the backlog read REQUIRED, unlike the optional interface
+ * member. A double that has it should not have to assert its own existence at every call.
+ */
+export interface InMemorySettlementStore extends SettlementStore {
     records: SettlementRecord[];
-};
+    listPendingPublication(): SettlementRecord[];
+}
+/** In-memory store. Test double — production wires the file store. */
+export declare function createMemorySettlementStore(): InMemorySettlementStore;
 //# sourceMappingURL=settlement-store.d.ts.map
