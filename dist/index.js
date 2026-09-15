@@ -22406,6 +22406,7 @@ Add custom specialists to \`.specialists/user/\` to extend defaults.
   GITIGNORE_ENTRIES = [
     ".specialists/jobs/",
     ".specialists/ready/",
+    ".specialists/settlements/",
     ".specialists/db/*.db",
     ".specialists/db/*.db-wal",
     ".specialists/db/*.db-shm"

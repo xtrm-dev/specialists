@@ -284,6 +284,7 @@ describe('init CLI — run()', () => {
     const gitignore = await readFile(join(tempDir, '.gitignore'), 'utf-8');
     expect(gitignore).toContain('.specialists/jobs/');
     expect(gitignore).toContain('.specialists/ready/');
+    expect(gitignore).toContain('.specialists/settlements/');
     expect(gitignore).toContain('.specialists/db/*.db');
     expect(gitignore).toContain('.specialists/db/*.db-wal');
     expect(gitignore).toContain('.specialists/db/*.db-shm');

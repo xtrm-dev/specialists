@@ -108,6 +108,8 @@ const AGENTS_MARKER = '## Specialists';
 const GITIGNORE_ENTRIES = [
   '.specialists/jobs/',
   '.specialists/ready/',
+  // S1 runtime result storage holds full raw model output; never commit it.
+  '.specialists/settlements/',
   '.specialists/db/*.db',
   '.specialists/db/*.db-wal',
   '.specialists/db/*.db-shm',
