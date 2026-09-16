@@ -291,9 +291,14 @@ function provenanceOf(entry: { sourceInfo?: { source?: string }; source?: string
  * also lists platform-gated names such as `powershell`. Never a static list (unitAI-34pyf
  * rejected that pattern for drift).
  *
- * A session without `getAllTools` (older test doubles) yields an empty set: the caller
- * then refuses every discovered name on provenance instead, which is still fail-closed
- * (no widening) and keeps the no-dynamic-sources path byte-identical.
+ * A session without `getAllTools` yields an empty set. That is safe ONLY when the
+ * discovery registry is also unavailable (both-missing): with no provenance map every
+ * discovered name falls to `refusedProvenance` and nothing can be pinned — "no baseline
+ * ⇒ nothing attributable ⇒ nothing pinned" is a closed argument, not a hope. Refusing
+ * there would break old SDKs for no security gain, so both-missing proceeds with no
+ * widening and no refusal. The MIXED case (baseline unavailable while discovery IS
+ * available) refuses inside `discoverDynamicExtensionTools` — that is where a colliding
+ * name could otherwise be pinned. Do not "harden" this into a blanket refusal.
  */
 export async function enumerateBuiltinToolNames(input: {
   sdk: PiSdk;
@@ -357,6 +362,14 @@ export async function discoverDynamicExtensionTools(input: {
   agentDir: string;
   dynamicExtensions: readonly string[];
   model: unknown;
+  /**
+   * Reserved names the child will hold regardless of discovery (F1): the base contract's
+   * granted native tools plus the host's own `ask_coordinator`/`escalate_to_coordinator`.
+   * If the discovery registry shows any of these with a NON-builtin source, an enabled
+   * extension is shadowing a granted name — keeping it out of `pinned` does NOT unload
+   * the extension, so the activation must be refused, not merely unpinned.
+   */
+  reservedNames?: readonly string[];
 }): Promise<DynamicExtensionDiscovery> {
   if (input.dynamicExtensions.length === 0) return EMPTY_DISCOVERY;
   const builtinNames = await enumerateBuiltinToolNames({
@@ -394,12 +407,52 @@ export async function discoverDynamicExtensionTools(input: {
         'a declared source that resolves to nothing is a refusal, not a skip',
       );
     }
-    const registry = created.session.getAllTools?.() ?? [];
+    // Baseline-vs-attribution (F3 decision B): the discovery registry may be unavailable on
+    // old SDKs. With no provenance map every name falls to refusedProvenance and nothing pins
+    // — safe to proceed. The dangerous MIXED case is baseline-empty while attribution IS
+    // available: a colliding name would then look pinnable. Refuse exactly that case below.
+    const discoveryRegistryAvailable = typeof created.session.getAllTools === 'function';
+    const registry = discoveryRegistryAvailable ? created.session.getAllTools!() : [];
     const provenance = new Map(registry.map((entry) => [entry.name, provenanceOf(entry)]));
+    if (!discoveryRegistryAvailable) {
+      // Both-missing: no baseline (builtinNames empty, since the enumeration session also
+      // lacks the accessor on old SDKs) and no attribution. Nothing can be pinned; proceed
+      // with no widening rather than refusing every dynamic activation on old SDKs.
+      // Note: if the baseline WAS established (builtinNames non-empty) but discovery lacks
+      // the registry, the same logic holds — no attribution ⇒ nothing pinned ⇒ safe.
+    } else if (builtinNames.length === 0) {
+      // MIXED case: attribution possible, collision baseline not. A builtin name could
+      // otherwise be pinned. Refuse loudly rather than proceeding with an empty baseline.
+      throw new Error(
+        'cannot establish the builtin baseline registry while the discovery registry is available; ' +
+        'refusing rather than pinning names that cannot be checked for collisions',
+      );
+    }
+    // F1 (CRITICAL): a shadowed GRANTED name executes extension code even when it is never
+    // pinned, because the real session still loads the shadowing extension. The rendered
+    // contract and the name-level promised-vs-active check both pass (the NAME is granted),
+    // while the CODE behind it is the extension's. Refuse loudly, naming the tool and source.
+    const reserved = input.reservedNames ?? [];
+    for (const name of reserved) {
+      const source = provenance.get(name);
+      if (source !== undefined && !BUILTIN_TOOL_SOURCES.has(source)) {
+        throw new Error(
+          `enabled extension shadows granted tool '${name}' (registry source '${source}'); ` +
+          'refusing rather than running extension code under a trusted name',
+        );
+      }
+    }
     const pinned: string[] = [];
     const refusedCollisions: string[] = [];
     const refusedProvenance: string[] = [];
     for (const name of discoveredRaw) {
+      // F2: the host's own ask/escalate names must never be pinned — an extension
+      // registering them collides with the host's customTools. The reserved-name refusal
+      // above already covers the loaded half; this keeps them out of the contract too.
+      if (name === ASK_TOOL || name === ESCALATE_TOOL) {
+        refusedProvenance.push(name);
+        continue;
+      }
       if (builtinSet.has(name)) {
         refusedCollisions.push(name);
         continue;
@@ -1086,11 +1139,18 @@ export class NativeActivationHost {
         agentDir: sdk.getAgentDir(),
         dynamicExtensions,
         model: modelCheck.model,
+        // F1: names the child will hold regardless of pinning. A non-builtin registry
+        // entry for any of these means an enabled extension shadows a trusted name.
+        reservedNames: [...toolContract.nativeTools, ASK_TOOL, ESCALATE_TOOL],
       });
     } catch (error) {
-      return reject('extension_discovery_failed', {
-        note: error instanceof Error ? error.message : String(error),
-      });
+      const note = error instanceof Error ? error.message : String(error);
+      // Loud, specific reason for the shadow case (F1): names the tool and the source.
+      // All other discovery failures stay under the generic fail-closed reason.
+      if (note.includes('shadows granted tool')) {
+        return reject('extension_tool_shadowed', { note });
+      }
+      return reject('extension_discovery_failed', { note });
     }
     const effectiveToolContract = withDiscoveredExtensionTools(toolContract, {
       pinned: discovery.pinned,

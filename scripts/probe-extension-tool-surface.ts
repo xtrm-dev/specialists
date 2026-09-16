@@ -428,11 +428,24 @@ async function main(): Promise<void> {
 
   console.log('\n=== VERDICT ===');
   for (const c of checks) console.log(`${c.ok ? 'PASS' : 'FAIL'}  ${c.name}  — ${c.note}`);
-  const falsifiers = checks.filter((c) => c.name.startsWith('I ') || c.name.startsWith('J') || c.name.startsWith('K ') || c.name.startsWith('L ') || c.name.startsWith('M ') || c.name.startsWith('N ') || c.name.startsWith('P '));
+  // F4: variant I exercises a RAW pin that bypasses the host — it documents the premise
+  // (a colliding name IS pinnable and DOES activate when nothing refuses it) and is now
+  // covered at the host level by T. Keep it visible as evidence for why the host-level
+  // refusal exists, but do NOT let it fail the harness: it is premise documentation,
+  // non-fatal by design.
+  const premise = checks.filter((c) => c.name.startsWith('I '));
+  for (const c of premise) {
+    console.log(`PREMISE (non-fatal, documents why host refusal exists): ${c.ok ? 'PASS' : 'FAIL'}  ${c.name}`);
+  }
+  const falsifiers = checks.filter((c) =>
+    c.name.startsWith('J') || c.name.startsWith('K ') || c.name.startsWith('L ') || c.name.startsWith('M ')
+    || c.name.startsWith('N ') || c.name.startsWith('P ')
+    || c.name.startsWith('Q ') || c.name.startsWith('R ') || c.name.startsWith('S ') || c.name.startsWith('T '),
+  );
   const fired = falsifiers.filter((c) => !c.ok);
-  console.log(`\nfalsifier verdict: ${fired.length === 0 ? 'none fired — discover-then-pin survives its stated falsifiers' : `${fired.length} FIRED — design must change: ${fired.map((c) => c.name).join(', ')}`}`);
+  console.log(`\nhost verdict: ${fired.length === 0 ? 'all host-level checks pass (Q/R/S/T) and no falsifier fires' : `${fired.length} FIRED: ${fired.map((c) => c.name).join(', ')}`}`);
   const timing = results.length > 0 ? Math.round(results.reduce((sum, r) => sum + r.ms, 0) / results.length) : 0;
-  console.log(`mean session creation: ${timing}ms over ${results.length} sessions (the extra discovery session costs one of these)`);
+  console.log(`mean session creation: ${timing}ms over ${results.length} sessions (discovery adds two per dynamic activation: builtin baseline + discovery, both fenced/never-prompted/disposed)`);
 
   rmSync(FIXTURE_ROOT, { recursive: true, force: true });
   process.exit(fired.length === 0 ? 0 : 1);

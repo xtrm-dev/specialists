@@ -156,6 +156,16 @@ describe('resolved tool contract', () => {
     expect(formatResolvedToolContract(effective)).toContain('ext_tool_b');
   });
 
+  it('never lets the host ask/escalate names enter the effective contract (F2)', () => {
+    const base = buildResolvedToolContract({ tier: 'READ_ONLY', catalogs });
+    const effective = withDiscoveredExtensionTools(base, {
+      pinned: ['ask_coordinator', 'escalate_to_coordinator', 'ext_tool_a'],
+    });
+    expect(effective.toolsList).not.toContain('ask_coordinator');
+    expect(effective.toolsList).not.toContain('escalate_to_coordinator');
+    expect(effective.toolsList).toContain('ext_tool_a');
+  });
+
   it('keeps soft-deny tools visible and reports preference signal', () => {
     const contract = buildResolvedToolContract({
       tier: 'LOW',

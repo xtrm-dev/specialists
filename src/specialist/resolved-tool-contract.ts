@@ -163,9 +163,15 @@ export function withDiscoveredExtensionTools(
   }
   const denied = new Set(base.deniedNativeTools);
   const already = new Set(base.toolsList);
-  // Defense in depth: even if the host's builtin-collision filter missed, a denied native
-  // name must never be pinned — it would defeat the tier's denial by shadowing.
-  const safePinned = uniqueOrdered(pinned).filter((name) => !denied.has(name) && !already.has(name));
+  // Defense in depth (F2): the host's own ask/escalate names must never enter the effective
+  // contract — an extension registering them collides with the host's customTools. Kept as
+  // literals with the owner file named so a rename is found: see src/activation/ask-tool.ts
+  // ASK_TOOL / ESCALATE_TOOL. Even if the host's filter missed, a denied native name must
+  // never be pinned either — it would defeat the tier's denial by shadowing.
+  const HOST_TOOLS = new Set(['ask_coordinator', 'escalate_to_coordinator']);
+  const safePinned = uniqueOrdered(pinned).filter(
+    (name) => !denied.has(name) && !already.has(name) && !HOST_TOOLS.has(name),
+  );
   const toolsList = uniqueOrdered([...base.toolsList, ...safePinned]);
   const extensionTools = uniqueOrdered([...base.extensionTools, ...safePinned]);
   const warnings = [

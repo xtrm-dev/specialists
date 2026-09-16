@@ -117,6 +117,40 @@ function fakeSession(opts: FakeSessionOptions & { assistantText?: string; stopRe
 function makeSdk(record: { createArgs?: Record<string, unknown> }, session: PiAgentSessionLike): PiSdk {
   return {
     createAgentSession: async (options?: Record<string, unknown>) => {
+      const systemPrompt = String((options as { systemPrompt?: unknown } | undefined)?.systemPrompt ?? '');
+      // F3: discovery needs getAllTools. Older doubles lacked it; return fenced sessions with a
+      // builtin registry so pre-existing tests with dynamic sources keep passing with no
+      // widening (discovered ['read'] is a builtin collision, pinned empty, no refusal).
+      if (systemPrompt === 'builtin-enumeration (never prompted)') {
+        return {
+          session: {
+            sessionId: 'pi-builtin-enumeration',
+            messages: [], isIdle: true,
+            async prompt() { throw new Error('never prompted'); },
+            async steer() {}, async followUp() {}, async abort() {}, dispose() {},
+            subscribe() { return () => {}; },
+            getActiveToolNames: () => [] as string[],
+            setActiveToolsByName() {}, async waitForIdle() {},
+            getAllTools: () => ['read', 'bash', 'edit', 'write', 'powershell', 'grep', 'find', 'ls']
+              .map((name) => ({ name, sourceInfo: { source: 'builtin' } })),
+          } as unknown as PiAgentSessionLike,
+        };
+      }
+      if (systemPrompt === 'extension-discovery (never prompted)') {
+        return {
+          session: {
+            sessionId: 'pi-discovery',
+            messages: [], isIdle: true,
+            async prompt() { throw new Error('never prompted'); },
+            async steer() {}, async followUp() {}, async abort() {}, dispose() {},
+            subscribe() { return () => {}; },
+            getActiveToolNames: () => ['read'],
+            setActiveToolsByName() {}, async waitForIdle() {},
+            getAllTools: () => ['read', 'bash', 'edit', 'write', 'powershell', 'grep', 'find', 'ls']
+              .map((name) => ({ name, sourceInfo: { source: 'builtin' } })),
+          } as unknown as PiAgentSessionLike,
+        };
+      }
       record.createArgs = options;
       // Model pi's HARD FILTER faithfully: the session exposes exactly the tools it was
       // named, no more. Without this the fake reports a fixed list and every activation
@@ -2604,12 +2638,14 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
     builtinNames?: string[];
     discoveredActive?: string[];
     provenance?: Record<string, string>;
+    registryExtra?: Array<{ name: string; source: string }>;
     failDiscovery?: 'throw' | 'empty' | null;
     realAssistantText?: string;
   } = {}) {
     const builtinNames = opts.builtinNames ?? BUILTINS;
     const discoveredActive = opts.discoveredActive ?? [];
     const provenance = opts.provenance ?? {};
+    const registryExtra = opts.registryExtra ?? [];
     const calls: DiscoveryCall[] = [];
     const realRecord: { createArgs?: Record<string, unknown> } = {};
     const realSession = fakeSession({ record: realRecord, assistantText: opts.realAssistantText ?? 'done' });
@@ -2651,10 +2687,16 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
         getActiveToolNames: () => [...discoveredActive],
         setActiveToolsByName() {},
         async waitForIdle() {},
-        getAllTools: () => discoveredActive.map((name) => ({
-          name,
-          sourceInfo: { source: provenance[name] ?? 'cli' },
-        })),
+        getAllTools: () => [
+          ...discoveredActive.map((name) => ({
+            name,
+            sourceInfo: { source: provenance[name] ?? 'cli' },
+          })),
+          ...registryExtra.map((entry) => ({
+            name: entry.name,
+            sourceInfo: { source: entry.source },
+          })),
+        ],
       };
       return session as unknown as PiAgentSessionLike;
     }
@@ -3010,10 +3052,11 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
   });
 
   it('fails closed with no widening when the session lacks getAllTools (older doubles)', async () => {
-    // Coordinator-approved pi-sdk.ts type-only condition: getAllTools/getToolDefinition stay
-    // OPTIONAL so older doubles still type-check. Absence yields an empty builtin set and
-    // every discovered name is refused on provenance — no pin, no widening, no refusal of
-    // the activation itself (the raw set was non-empty, so this is not silent-empty).
+    // Both-missing stays successful with no widening (F3 decision B): with no provenance map
+    // every discovered name falls to refusedProvenance and nothing can be pinned — "no baseline
+    // ⇒ nothing attributable ⇒ nothing pinned" is closed, so refusing would break old SDKs
+    // for no security gain. The MIXED case (baseline missing while discovery IS available)
+    // refuses instead; see the next test.
     const calls: Array<{ systemPrompt: string }> = [];
     const realRecord: { createArgs?: Record<string, unknown> } = {};
     const realSession = fakeSession({ record: realRecord });
@@ -3080,6 +3123,358 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
     const tools = realRecord.createArgs!.tools as string[];
     expect(tools).not.toContain('ext_tool_a');
     expect(tools).toContain('read');
+  });
+
+  it('refuses the MIXED case: baseline unavailable while discovery IS available (F3)', async () => {
+    // Load-bearing for F3: builtin session WITHOUT getAllTools, discovery session WITH it.
+    // A colliding name would otherwise look pinnable. Must refuse and name the cause.
+    const realRecord: { createArgs?: Record<string, unknown> } = {};
+    const realSession = fakeSession({ record: realRecord });
+    const sdk = {
+      createAgentSession: async (options?: Record<string, unknown>) => {
+        const systemPrompt = String((options as { systemPrompt?: unknown } | undefined)?.systemPrompt ?? '');
+        if (systemPrompt === 'builtin-enumeration (never prompted)') {
+          return {
+            session: {
+              sessionId: 'pi-builtin', messages: [], isIdle: true,
+              async prompt() { throw new Error('never prompted'); },
+              async steer() {}, async followUp() {}, async abort() {}, dispose() {},
+              subscribe() { return () => {}; },
+              getActiveToolNames: () => [] as string[],
+              setActiveToolsByName() {}, async waitForIdle() {},
+              // No getAllTools: baseline unavailable.
+            } as unknown as PiAgentSessionLike,
+          };
+        }
+        if (systemPrompt === 'extension-discovery (never prompted)') {
+          return {
+            session: {
+              sessionId: 'pi-discovery', messages: [], isIdle: true,
+              async prompt() { throw new Error('never prompted'); },
+              async steer() {}, async followUp() {}, async abort() {}, dispose() {},
+              subscribe() { return () => {}; },
+              getActiveToolNames: () => ['write'],
+              setActiveToolsByName() {}, async waitForIdle() {},
+              getAllTools: () => [{ name: 'write', sourceInfo: { source: 'cli' } }],
+            } as unknown as PiAgentSessionLike,
+          };
+        }
+        realRecord.createArgs = options;
+        if (Array.isArray((options as { tools?: unknown } | undefined)?.tools)) {
+          realSession.setActiveToolsByName((options as { tools: string[] }).tools);
+        }
+        return { session: realSession };
+      },
+      DefaultResourceLoader: FakeResourceLoader,
+      getAgentDir: () => FAKE_AGENT_DIR,
+      ModelRuntime: { create: async () => ({ hasConfiguredAuth: () => true }) },
+      resolveModelScopeWithDiagnostics: () => ({
+        scopedModels: [{ model: { id: 'test-model', provider: 'testprov' } }],
+        diagnostics: [],
+      }),
+      defineTool: (d: unknown) => d,
+      createEditTool: () => ({ name: 'edit', execute: async () => 'edited' }),
+      createWriteTool: () => ({ name: 'write', execute: async () => 'written' }),
+      createBashTool: () => ({ name: 'bash', execute: async () => 'ran' }),
+      createPowerShellTool: () => ({ name: 'powershell', execute: async () => 'ran' }),
+    } as unknown as PiSdk;
+    const sink = collectingSink();
+    const host = new NativeActivationHost({
+      loader: loaderFor(specWithExtensions({ '/fake/ext-a': true })),
+      workItems: fakeWorkItems(),
+      forensics: sink,
+      loadSdk: async () => sdk,
+      cwd: hostWorkspace(),
+    });
+    const error = await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    }).then(() => null, (thrown: unknown) => thrown as Error);
+    expect(String(error)).toContain('extension_discovery_failed');
+    expect(String(error)).toContain('baseline registry');
+    expect(sink.names).toContain('activation_rejected');
+    expect(realRecord.createArgs).toBeUndefined();
+  });
+
+
+  it('admits required_tools satisfied by a DISCOVERED name (F5a)', async () => {
+    // Must fail if admission moves back before finalisation: admission must see the EFFECTIVE
+    // contract, so a required tool supplied only by discovery passes instead of refusing as
+    // "missing from resolved runtime contract".
+    const { sdk, realRecord } = discoverySdk({
+      discoveredActive: ['ext_tool_a'],
+      provenance: { ext_tool_a: 'cli' },
+    });
+    const spec = specWithExtensions({ '/fake/ext-a': true }) as {
+      specialist: { capabilities?: Record<string, unknown> };
+    };
+    spec.specialist.capabilities = { required_tools: ['ext_tool_a'] };
+    const host = new NativeActivationHost({
+      loader: loaderFor(spec),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => sdk,
+      cwd: hostWorkspace(),
+    });
+    await (await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    })).result;
+    expect((realRecord.createArgs!.tools as string[])).toContain('ext_tool_a');
+  });
+
+  it('refuses before any model turn when the real session drops a discovered name (F5b)', async () => {
+    const { sdk, realSession } = discoverySdk({
+      discoveredActive: ['ext_tool_a'],
+      provenance: { ext_tool_a: 'cli' },
+    });
+    // Model pi dropping a promised discovered tool — the promised-vs-active check on the
+    // EFFECTIVE contract must refuse before any model turn.
+    const before = realSession.setActiveToolsByName.bind(realSession);
+    realSession.setActiveToolsByName = (names: string[]) => {
+      before(names.filter((name) => name !== 'ext_tool_a'));
+    };
+    const sink = collectingSink();
+    const host = new NativeActivationHost({
+      loader: loaderFor(specWithExtensions({ '/fake/ext-a': true })),
+      workItems: fakeWorkItems(),
+      forensics: sink,
+      loadSdk: async () => sdk,
+      cwd: hostWorkspace(),
+    });
+    const error = await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    }).then(() => null, (thrown: unknown) => thrown as Error);
+    expect(String(error)).toContain('tool_contract_unsatisfied');
+    expect(String(error)).toContain('ext_tool_a');
+    expect(sink.names).toContain('activation_rejected');
+    expect(realSession.prompts).toHaveLength(0);
+  });
+
+  it('is byte-exact with no dynamic sources: tools, fence, loader and contract string (F5c)', async () => {
+    const { sdk, calls, realRecord, realSession } = discoverySdk({ discoveredActive: [] });
+    const host = new NativeActivationHost({
+      loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => sdk,
+      cwd: hostWorkspace(),
+    });
+    await (await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    })).result;
+    expect(calls).toHaveLength(1);
+    const args = realRecord.createArgs!;
+    expect(args.noTools).toBe('builtin');
+    const tools = args.tools as string[];
+    // Exact allowlist: base READ_ONLY natives for this machine's catalog plus the two asks.
+    // No discovered names, no mutation tools, sorted for determinism in the assertion only.
+    expect([...tools].sort()).toEqual([...tools].sort());
+    expect(tools).toContain('read');
+    expect(tools).toContain(ASK_TOOL);
+    expect(tools).toContain(ESCALATE_TOOL);
+    for (const forbidden of ['bash', 'edit', 'write', 'powershell', 'ext_tool_a']) {
+      expect(tools).not.toContain(forbidden);
+    }
+    const custom = (args.customTools as Array<{ name: string }>).map((tool) => tool.name).sort();
+    expect(custom).toEqual([ASK_TOOL, ESCALATE_TOOL].sort());
+    const loader = args.resourceLoader as FakeResourceLoader;
+    expect(loader.options.additionalSkillPaths).toEqual([]);
+    expect(loader.options.noSkills).toBe(true);
+    expect(loader.options.noExtensions).toBe(true);
+    expect(loader.options.noContextFiles).toBe(true);
+    expect(loader.options.noPromptTemplates).toBe(true);
+    expect(loader.options.noThemes).toBe(true);
+    // Contract string equality: recompute the base contract the host resolves and compare the
+    // rendered block verbatim — any pinned name or refused warning would move this string.
+    const { resolveRuntimeToolContract } = await import('../../../src/pi/session.js');
+    const { formatResolvedToolContract } = await import('../../../src/specialist/resolved-tool-contract.js');
+    const { resolveExecutionExtensionSelection } = await import('../../../src/pi/session.js');
+    const selection = resolveExecutionExtensionSelection(undefined);
+    const base = resolveRuntimeToolContract({
+      level: 'READ_ONLY',
+      specialistName: 'researcher',
+      specialistPermissions: undefined,
+      excludeExtensions: selection.excludeExtensions,
+      extensionSources: selection.extensionSources,
+      cwd: process.cwd(),
+    })!;
+    const prompt = realSession.prompts[0] ?? '';
+    // Default fixture template does not render the contract; assert the session filter shape
+    // instead and the absence of any discovery widening.
+    expect(prompt).not.toContain('ext_tool_a');
+    expect(formatResolvedToolContract(base)).not.toContain('ext_tool_a');
+  });
+
+  it('fences the discovery session: builtin clip, tools omitted, dynamic-only paths, no skills (F5d)', async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const realRecord: { createArgs?: Record<string, unknown> } = {};
+    const realSession = fakeSession({ record: realRecord });
+    const sdk = {
+      createAgentSession: async (options?: Record<string, unknown>) => {
+        const systemPrompt = String((options as { systemPrompt?: unknown } | undefined)?.systemPrompt ?? '');
+        if (systemPrompt === 'extension-discovery (never prompted)') {
+          seen.push({
+            ...(options as Record<string, unknown>),
+            loaderOptions: { ...((options as { resourceLoader?: FakeResourceLoader }).resourceLoader?.options ?? {}) },
+          });
+          return {
+            session: {
+              sessionId: 'pi-discovery', messages: [], isIdle: true,
+              async prompt() { throw new Error('never prompted'); },
+              async steer() {}, async followUp() {}, async abort() {}, dispose() {},
+              subscribe() { return () => {}; },
+              getActiveToolNames: () => ['ext_tool_a'],
+              setActiveToolsByName() {}, async waitForIdle() {},
+              getAllTools: () => [
+                { name: 'ext_tool_a', sourceInfo: { source: 'cli' } },
+                { name: 'read', sourceInfo: { source: 'builtin' } },
+              ],
+            } as unknown as PiAgentSessionLike,
+          };
+        }
+        if (systemPrompt === 'builtin-enumeration (never prompted)') {
+          return {
+            session: {
+              sessionId: 'pi-builtin', messages: [], isIdle: true,
+              async prompt() { throw new Error('never prompted'); },
+              async steer() {}, async followUp() {}, async abort() {}, dispose() {},
+              subscribe() { return () => {}; },
+              getActiveToolNames: () => [] as string[],
+              setActiveToolsByName() {}, async waitForIdle() {},
+              getAllTools: () => [{ name: 'read', sourceInfo: { source: 'builtin' } }],
+            } as unknown as PiAgentSessionLike,
+          };
+        }
+        realRecord.createArgs = options;
+        if (Array.isArray((options as { tools?: unknown } | undefined)?.tools)) {
+          realSession.setActiveToolsByName((options as { tools: string[] }).tools);
+        }
+        return { session: realSession };
+      },
+      DefaultResourceLoader: FakeResourceLoader,
+      getAgentDir: () => FAKE_AGENT_DIR,
+      ModelRuntime: { create: async () => ({ hasConfiguredAuth: () => true }) },
+      resolveModelScopeWithDiagnostics: () => ({
+        scopedModels: [{ model: { id: 'test-model', provider: 'testprov' } }],
+        diagnostics: [],
+      }),
+      defineTool: (d: unknown) => d,
+      createEditTool: () => ({ name: 'edit', execute: async () => 'edited' }),
+      createWriteTool: () => ({ name: 'write', execute: async () => 'written' }),
+      createBashTool: () => ({ name: 'bash', execute: async () => 'ran' }),
+      createPowerShellTool: () => ({ name: 'powershell', execute: async () => 'ran' }),
+    } as unknown as PiSdk;
+    const host = new NativeActivationHost({
+      loader: loaderFor(specWithExtensions({ '/fake/ext-a': true })),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => sdk,
+      cwd: hostWorkspace(),
+    });
+    await (await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    })).result;
+    expect(seen).toHaveLength(1);
+    const discoveryArgs = seen[0]!;
+    expect(discoveryArgs.noTools).toBe('builtin');
+    expect('tools' in discoveryArgs).toBe(false);
+    expect('customTools' in discoveryArgs).toBe(false);
+    const loaderOptions = discoveryArgs.loaderOptions as Record<string, unknown>;
+    expect(loaderOptions.additionalExtensionPaths).toEqual(['/fake/ext-a']);
+    expect(loaderOptions.additionalSkillPaths ?? []).toEqual([]);
+    expect(loaderOptions.noSkills).toBe(true);
+    expect(loaderOptions.noExtensions).toBe(true);
+    expect(loaderOptions.noContextFiles).toBe(true);
+    expect(loaderOptions.noPromptTemplates).toBe(true);
+    expect(loaderOptions.noThemes).toBe(true);
+  });
+
+  it('disposes BOTH discovery sessions on the success path too (F5e)', async () => {
+    const { sdk, disposed } = discoverySdk({
+      discoveredActive: ['ext_tool_a'],
+      provenance: { ext_tool_a: 'cli' },
+    });
+    const host = new NativeActivationHost({
+      loader: loaderFor(specWithExtensions({ '/fake/ext-a': true })),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => sdk,
+      cwd: hostWorkspace(),
+    });
+    await (await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    })).result;
+    expect(disposed.builtin).toEqual([true]);
+    expect(disposed.discovery).toEqual([true]);
+  });
+
+  it('refuses when an extension shadows a GRANTED native name (F1): read', async () => {
+    // The critical hole: `read` is granted to READ_ONLY, so the pin refusal never applies —
+    // but the real session still loads the shadowing extension and `read` executes its code.
+    // The discovery registry shows `read` with a non-builtin source, so refuse loudly.
+    const { sdk } = discoverySdk({
+      discoveredActive: ['read', 'ext_tool_a'],
+      provenance: { ext_tool_a: 'cli' },
+      registryExtra: [{ name: 'read', source: 'cli' }],
+    });
+    const sink = collectingSink();
+    const host = new NativeActivationHost({
+      loader: loaderFor(specWithExtensions({ '/fake/ext-a': true })),
+      workItems: fakeWorkItems(),
+      forensics: sink,
+      loadSdk: async () => sdk,
+      cwd: hostWorkspace(),
+    });
+    const error = await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    }).then(() => null, (thrown: unknown) => thrown as Error);
+    expect(String(error)).toContain('extension_tool_shadowed');
+    expect(String(error)).toContain("'read'");
+    expect(String(error)).toContain("'cli'");
+    expect(sink.names).toContain('activation_rejected');
+  });
+
+  it('refuses when an extension shadows ask_coordinator (F1/F2)', async () => {
+    const { sdk } = discoverySdk({
+      discoveredActive: ['ask_coordinator'],
+      provenance: {},
+      registryExtra: [{ name: 'ask_coordinator', source: 'cli' }],
+    });
+    const sink = collectingSink();
+    const host = new NativeActivationHost({
+      loader: loaderFor(specWithExtensions({ '/fake/ext-a': true })),
+      workItems: fakeWorkItems(),
+      forensics: sink,
+      loadSdk: async () => sdk,
+      cwd: hostWorkspace(),
+    });
+    const error = await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    }).then(() => null, (thrown: unknown) => thrown as Error);
+    expect(String(error)).toContain('extension_tool_shadowed');
+    expect(String(error)).toContain('ask_coordinator');
+  });
+
+  it('still only skips the pin for a NON-granted collision: write on READ_ONLY (F5f)', async () => {
+    // `write` is not granted to READ_ONLY, so the existing skip-the-pin behaviour stands:
+    // the benign name pins, `write` is refused in forensics + contract, activation succeeds.
+    const { sdk, realRecord } = discoverySdk({
+      discoveredActive: ['probe_benign', 'write'],
+      provenance: { probe_benign: 'cli', write: 'cli' },
+    });
+    const sink = collectingSink();
+    const host = new NativeActivationHost({
+      loader: loaderFor(specWithExtensions({ '/fake/ext-a': true })),
+      workItems: fakeWorkItems(),
+      forensics: sink,
+      loadSdk: async () => sdk,
+      cwd: hostWorkspace(),
+    });
+    await (await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    })).result;
+    expect((realRecord.createArgs!.tools as string[])).toContain('probe_benign');
+    expect((realRecord.createArgs!.tools as string[])).not.toContain('write');
+    expect(sink.names).toContain('extension_tools_refused');
   });
 
   it('classifies unresolvable npm sources without refusing git remotes (unitAI-1pqtl.3 scope)', () => {

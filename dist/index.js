@@ -23748,7 +23748,8 @@ function withDiscoveredExtensionTools(base, discovered) {
   }
   const denied = new Set(base.deniedNativeTools);
   const already = new Set(base.toolsList);
-  const safePinned = uniqueOrdered2(pinned).filter((name) => !denied.has(name) && !already.has(name));
+  const HOST_TOOLS = new Set(["ask_coordinator", "escalate_to_coordinator"]);
+  const safePinned = uniqueOrdered2(pinned).filter((name) => !denied.has(name) && !already.has(name) && !HOST_TOOLS.has(name));
   const toolsList = uniqueOrdered2([...base.toolsList, ...safePinned]);
   const extensionTools = uniqueOrdered2([...base.extensionTools, ...safePinned]);
   const warnings = [
@@ -94693,12 +94694,27 @@ async function discoverDynamicExtensionTools(input2) {
     if (discoveredRaw.length === 0) {
       throw new Error(`extension discovery yielded no tools for ${input2.dynamicExtensions.length} enabled source(s); ` + "a declared source that resolves to nothing is a refusal, not a skip");
     }
-    const registry3 = created.session.getAllTools?.() ?? [];
+    const discoveryRegistryAvailable = typeof created.session.getAllTools === "function";
+    const registry3 = discoveryRegistryAvailable ? created.session.getAllTools() : [];
     const provenance = new Map(registry3.map((entry) => [entry.name, provenanceOf(entry)]));
+    if (!discoveryRegistryAvailable) {} else if (builtinNames.length === 0) {
+      throw new Error("cannot establish the builtin baseline registry while the discovery registry is available; " + "refusing rather than pinning names that cannot be checked for collisions");
+    }
+    const reserved = input2.reservedNames ?? [];
+    for (const name of reserved) {
+      const source = provenance.get(name);
+      if (source !== undefined && !BUILTIN_TOOL_SOURCES.has(source)) {
+        throw new Error(`enabled extension shadows granted tool '${name}' (registry source '${source}'); ` + "refusing rather than running extension code under a trusted name");
+      }
+    }
     const pinned = [];
     const refusedCollisions = [];
     const refusedProvenance = [];
     for (const name of discoveredRaw) {
+      if (name === ASK_TOOL || name === ESCALATE_TOOL) {
+        refusedProvenance.push(name);
+        continue;
+      }
       if (builtinSet.has(name)) {
         refusedCollisions.push(name);
         continue;
@@ -94983,12 +94999,15 @@ class NativeActivationHost {
         cwd: workspace.worktreePath,
         agentDir: sdk.getAgentDir(),
         dynamicExtensions,
-        model: modelCheck.model
+        model: modelCheck.model,
+        reservedNames: [...toolContract.nativeTools, ASK_TOOL, ESCALATE_TOOL]
       });
     } catch (error3) {
-      return reject("extension_discovery_failed", {
-        note: error3 instanceof Error ? error3.message : String(error3)
-      });
+      const note = error3 instanceof Error ? error3.message : String(error3);
+      if (note.includes("shadows granted tool")) {
+        return reject("extension_tool_shadowed", { note });
+      }
+      return reject("extension_discovery_failed", { note });
     }
     const effectiveToolContract = withDiscoveredExtensionTools(toolContract, {
       pinned: discovery.pinned,

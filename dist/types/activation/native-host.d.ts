@@ -118,9 +118,14 @@ export interface DynamicExtensionDiscovery {
  * also lists platform-gated names such as `powershell`. Never a static list (unitAI-34pyf
  * rejected that pattern for drift).
  *
- * A session without `getAllTools` (older test doubles) yields an empty set: the caller
- * then refuses every discovered name on provenance instead, which is still fail-closed
- * (no widening) and keeps the no-dynamic-sources path byte-identical.
+ * A session without `getAllTools` yields an empty set. That is safe ONLY when the
+ * discovery registry is also unavailable (both-missing): with no provenance map every
+ * discovered name falls to `refusedProvenance` and nothing can be pinned — "no baseline
+ * ⇒ nothing attributable ⇒ nothing pinned" is a closed argument, not a hope. Refusing
+ * there would break old SDKs for no security gain, so both-missing proceeds with no
+ * widening and no refusal. The MIXED case (baseline unavailable while discovery IS
+ * available) refuses inside `discoverDynamicExtensionTools` — that is where a colliding
+ * name could otherwise be pinned. Do not "harden" this into a blanket refusal.
  */
 export declare function enumerateBuiltinToolNames(input: {
     sdk: PiSdk;
@@ -154,6 +159,14 @@ export declare function discoverDynamicExtensionTools(input: {
     agentDir: string;
     dynamicExtensions: readonly string[];
     model: unknown;
+    /**
+     * Reserved names the child will hold regardless of discovery (F1): the base contract's
+     * granted native tools plus the host's own `ask_coordinator`/`escalate_to_coordinator`.
+     * If the discovery registry shows any of these with a NON-builtin source, an enabled
+     * extension is shadowing a granted name — keeping it out of `pinned` does NOT unload
+     * the extension, so the activation must be refused, not merely unpinned.
+     */
+    reservedNames?: readonly string[];
 }): Promise<DynamicExtensionDiscovery>;
 /**
  * The activation's `cwd` and `agentDir` feed pi's resource loader, which is the ONLY
