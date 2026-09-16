@@ -177,7 +177,7 @@ function setupMockImplementations(): void {
 }
 
 vi.mock('../../../src/specialist/observability-sqlite.js', () => ({
-  createObservabilitySqliteClient: () => mockNativeSqlite,
+  createObservabilitySqliteClient: vi.fn(() => mockNativeSqlite),
 }));
 vi.mock('../../../src/specialist/process-health.js', () => ({
   collectProcessHealth: () => ({
@@ -205,6 +205,9 @@ vi.mock('../../../src/specialist/process-health.js', () => ({
 interface PsJson {
   native_activations: Array<{ activation_id: string; bead_id?: string }>;
   native_activations_note: string;
+  native_activation_filters?: {
+    mine: { requested: boolean; applied: boolean; reason?: string };
+  };
 }
 
 describe('ps --mine native activation selection (SPECIALISTS-104)', () => {
@@ -319,24 +322,98 @@ describe('ps --mine native activation selection (SPECIALISTS-104)', () => {
     );
   });
 
-  it('REPORTS the missing ownership authority instead of silently emptying the block', async () => {
-    // No XTRM_SESSION_NAME/XTRM_SESSION_ID: the measured state of an ordinary
-    // `sp ps` invocation. Ownership is UNKNOWN — which must not render as
-    // "you own nothing".
+  it('resolves a holder with zero claims to an EMPTY block, not an unavailable filter', async () => {
+    // Resolved-to-empty is a real answer — this holder owns nothing — and must
+    // stay distinguishable from "ownership could not be resolved".
+    process.env.XTRM_SESSION_NAME = 'session-nobody';
+
     const parsed = await runPs(['--mine']);
 
-    expect(parsed.native_activations_note).toContain('--mine was NOT applied to native activations');
-    expect(parsed.native_activations_note).toContain('XTRM_SESSION_NAME');
-    expect(parsed.native_activations_note).toContain('LAST-KNOWN state from forensics, not live registry state.');
-    // No ownership predicate was invented, and none was applied after the bound.
+    expect(parsed.native_activations).toEqual([]);
+    expect(parsed.native_activation_filters).toEqual({ mine: { requested: true, applied: true } });
+    expect(parsed.native_activations_note).toBe('LAST-KNOWN state from forensics, not live registry state.');
     expect(mockNativeSqlite.listNativeActivationIds).toHaveBeenCalledWith(
-      expect.not.objectContaining({ activationIds: expect.anything() }),
+      expect.objectContaining({ activationIds: [] }),
     );
-    // The block is the unfiltered latest-20 window.
-    expect(nativeIds(parsed)).toHaveLength(20);
   });
 
-  it('renders the inapplicable filter in HUMAN output rather than a bare empty block', async () => {
+  it('FAILS CLOSED when the holder cannot be resolved: --mine selects nothing', async () => {
+    // No XTRM_SESSION_NAME/XTRM_SESSION_ID: the measured state of an ordinary
+    // `sp ps` invocation. Ownership is UNKNOWN, so the conjunct is unknown, so
+    // the candidate set is empty. An explicitly requested filter is never
+    // dropped.
+    const parsed = await runPs(['--mine']);
+
+    expect(parsed.native_activations).toEqual([]);
+    expect(parsed.native_activation_filters).toEqual({
+      mine: { requested: true, applied: false, reason: 'no_session_identity' },
+    });
+    expect(parsed.native_activations_note).toContain('--mine could not be evaluated for native activations');
+    expect(parsed.native_activations_note).toContain('No native activations are shown');
+    // The pre-existing prefix is still the prefix: current consumers of
+    // native_activations_note keep working.
+    expect(parsed.native_activations_note).toContain('LAST-KNOWN state from forensics, not live registry state.');
+  });
+
+  it('MUTATION GUARD: unavailable ownership must not degrade into an unfiltered selection', async () => {
+    // The dangerous simplification is "no identity -> drop the predicate and
+    // return the latest window". That still shows SOME data, so a naive "did
+    // --mine return anything" test passes while the output asserts that 20
+    // unrelated activations satisfy --mine. Pin the shape, not just emptiness.
+    const unfiltered = await runPs([]);
+    const filtered = await runPs(['--mine']);
+
+    // Behavioural: the window this mutant would have leaked is real and
+    // non-empty, and the fail-closed result is not it.
+    expect(nativeIds(unfiltered)).toHaveLength(20);
+    expect(nativeIds(filtered)).toEqual([]);
+    expect(nativeIds(filtered)).not.toEqual(nativeIds(unfiltered));
+
+    // Shape: the unconstrained selection is precisely this call, and no filter
+    // can be evaluated without it having been made.
+    vi.clearAllMocks();
+    await runPs(['--mine']);
+    expect(mockNativeSqlite.listNativeActivationIds).toHaveBeenCalledTimes(0);
+    expect(mockNativeSqlite.readForensicEventsForActivations).toHaveBeenCalledTimes(0);
+  });
+
+  it('reports the --mine filter status even when the observability store is UNAVAILABLE', async () => {
+    // A fresh machine: no observability store. The filter status describes the
+    // REQUEST, so a bare `[]` with no status would reintroduce exactly the
+    // ambiguity this node removes — a consumer could not tell "your store is
+    // empty" from "your filter was never evaluated".
+    // `mockReturnValue` (not `Once`): loadStatuses/epic-readiness reach the
+    // same factory first, so a one-shot override is consumed before the native
+    // block is ever built.
+    const { createObservabilitySqliteClient } = await import('../../../src/specialist/observability-sqlite.js');
+    process.env.XTRM_SESSION_NAME = 'session-mine';
+    vi.mocked(createObservabilitySqliteClient).mockReturnValue(null as never);
+    try {
+      const parsed = await runPs(['--mine']);
+
+      expect(parsed.native_activations).toEqual([]);
+      expect(parsed.native_activation_filters).toEqual({ mine: { requested: true, applied: true } });
+    } finally {
+      vi.mocked(createObservabilitySqliteClient).mockReturnValue(mockNativeSqlite as never);
+    }
+  });
+
+  it('decides fail-closed BEFORE the observability store is consulted', async () => {
+    // Ordering: an unresolvable --mine must not depend on the store at all, so
+    // that the status it reports is the filter's failure and not a store
+    // artifact.
+    const parsed = await runPs(['--mine']);
+
+    expect(parsed.native_activations).toEqual([]);
+    expect(parsed.native_activation_filters).toEqual({
+      mine: { requested: true, applied: false, reason: 'no_session_identity' },
+    });
+    expect(mockNativeSqlite.listNativeActivationIds).toHaveBeenCalledTimes(0);
+    // The store was opened (it is available here) but never used to select.
+    expect(mockNativeSqlite.readForensicEventsForActivations).toHaveBeenCalledTimes(0);
+  });
+
+  it('states in HUMAN output that --mine could not be evaluated, and shows no activations', async () => {
     process.argv = ['node', 'specialists', 'ps', '--mine'];
     const lines: string[] = [];
     vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
@@ -345,12 +422,15 @@ describe('ps --mine native activation selection (SPECIALISTS-104)', () => {
     const { run } = await import('../../../src/cli/ps.js');
     await run();
     const clean = lines.join('\n').replace(/\x1b\[[0-9;]*m/g, '');
+
     expect(clean).toContain('Native activations');
-    expect(clean).toContain('note: --mine was NOT applied to native activations');
-    // The note is not a substitute for the block: the latest activations still
-    // render, so "filtered to nothing" and "could not filter" are visually
-    // distinguishable.
-    expect(clean).toContain('act:foreign-25');
+    expect(clean).toContain('note: --mine could not be evaluated for native activations');
+    expect(clean).toContain('No native activations are shown');
+    // The activations that an unfiltered read WOULD have produced are absent —
+    // a human must not be able to mistake "could not filter" for "yours are
+    // here".
+    expect(clean).not.toContain('act:foreign-25');
+    expect(clean).not.toContain('act:mine-a');
   });
 
   it('leaves the unfiltered and --bead-only paths unchanged', async () => {

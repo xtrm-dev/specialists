@@ -765,10 +765,26 @@ interface NativeCandidatePredicate {
 
 interface NativeActivationBlock {
   activations: NativeActivationSummary[];
-  /** Set when a REQUESTED filter could not be applied to this block. Reported
-   * to the operator instead of being silently converted into an empty
-   * candidate set. */
+  /** Prose for a REQUESTED filter that could not be applied. Rendered to the
+   * operator and appended to `native_activations_note` in JSON. */
   note?: string;
+  /** Structured counterpart to `note`, so a JSON consumer can tell "the filter
+   * matched nothing" from "the filter was never evaluated" WITHOUT parsing
+   * prose. Present only when `--mine` was requested; omitted otherwise so the
+   * default `sp ps --json` schema is unchanged. */
+  filters?: NativeActivationFilters;
+}
+
+interface NativeActivationFilters {
+  mine: {
+    /** The operator asked for this filter. */
+    requested: boolean;
+    /** The filter constrained the candidate set before the activation bound. */
+    applied: boolean;
+    /** Present only when `applied` is false. One of
+     * `NativeOwnershipUnavailableReason` — machine-readable, not prose. */
+    reason?: string;
+  };
 }
 
 /**
@@ -776,17 +792,25 @@ interface NativeActivationBlock {
  *
  * The authority is the Substrate authority store (`issue_claims`); the missing
  * piece is the operator's holder, and `src/specialist/native-activation-ownership.ts`
- * records why no identity can be derived. The block is therefore NOT
- * ownership-filtered, and that is stated — the previous behaviour used a Beads
- * assignee query whose token `me` is unsupported (`bd query assignee=me`
- * returns [] even when the operator has assignments), so the empty result was
- * read as "you own nothing" and every activation was excluded while the
- * documented no-op fallback never fired.
+ * records why no identity can be derived.
+ *
+ * FAIL CLOSED. `--mine` is an EXPLICIT filter request, so the candidate set is
+ * a conjunction that includes ownership. When ownership is unknown the
+ * conjunction is unknown, and an unknown conjunction selects NOTHING — the one
+ * thing it must never select is everything. Dropping the predicate and
+ * returning the unfiltered window (the first shape of this fix) made
+ * `sp ps --mine --json` assert that unrelated activations satisfy `--mine`,
+ * which is a worse failure than an empty list because it is silently wrong.
+ *
+ * The distinction the previous behaviour was protecting is real, and is
+ * preserved — ownership-unavailable is NOT recorded as "you own zero
+ * activations". It is recorded as `filters.mine.applied === false` with a
+ * typed reason, alongside this note.
  */
-function nativeMineUnavailableNote(detail: string): string {
-  return `--mine was NOT applied to native activations: ${detail}. ` +
-    'Ownership for native activations is recorded by Substrate claim holder, which this process cannot resolve; ' +
-    'the block below is the latest activations, not only yours.';
+function nativeMineFailClosedNote(detail: string): string {
+  return `--mine could not be evaluated for native activations: ${detail}. ` +
+    'No native activations are shown: an explicitly requested filter is not dropped, because an unfiltered ' +
+    'block would claim these activations satisfy --mine.';
 }
 
 /**
@@ -799,24 +823,43 @@ function nativeMineUnavailableNote(detail: string): string {
  * selected activations' rows only. No unbounded forensic-table scan.
  */
 function loadNativeActivationBlock(args: PsArgs): NativeActivationBlock {
+  // `--mine` is resolved BEFORE the observability-store guard. The filter
+  // status describes the REQUEST, so it has to be reported even when the store
+  // is absent or unopenable; otherwise `--mine` returns a bare `[]` with no
+  // explanation on a fresh machine, which is the same ambiguity this node
+  // exists to remove.
+  let mineStatus: NativeActivationFilters['mine'] | undefined;
+  let activationIds: readonly string[] | undefined;
+  if (args.mine) {
+    const ownership = resolveNativeActivationOwnership();
+    if (ownership.kind !== 'resolved') {
+      // FAIL CLOSED: unknown ownership contributes an empty candidate set,
+      // never an unfiltered one. The selection query is not run at all — no
+      // filter, no result — so there is no path on which an unrelated
+      // activation can be presented as satisfying `--mine`.
+      return {
+        activations: [],
+        note: nativeMineFailClosedNote(ownership.detail),
+        filters: { mine: { requested: true, applied: false, reason: ownership.reason } },
+      };
+    }
+    // Resolved-to-empty is a real answer: select nothing. Passing an empty
+    // pre-image is deliberate and is not the same as omitting it.
+    activationIds = ownership.activationIds;
+    mineStatus = { requested: true, applied: true };
+  }
+  // `applied` means "the ownership filter was resolved and constrained the
+  // candidate set", so it is reported uniformly regardless of what the
+  // observability store then does.
+  const filters: Pick<NativeActivationBlock, 'filters'> = mineStatus ? { filters: { mine: mineStatus } } : {};
+
   const sqliteClient = createObservabilitySqliteClient();
-  if (!sqliteClient) return { activations: [] };
+  if (!sqliteClient) return { activations: [], ...filters };
   try {
     const predicate: NativeCandidatePredicate = {};
     if (args.sinceMs !== undefined) predicate.sinceMs = args.sinceMs;
     if (args.beadFilter) predicate.beadId = args.beadFilter;
-
-    let note: string | undefined;
-    if (args.mine) {
-      const ownership = resolveNativeActivationOwnership();
-      if (ownership.kind === 'resolved') {
-        // Resolved-to-empty is a real answer: select nothing. Passing an empty
-        // pre-image is deliberate and is not the same as omitting it.
-        predicate.activationIds = ownership.activationIds;
-      } else {
-        note = nativeMineUnavailableNote(ownership.detail);
-      }
-    }
+    if (activationIds !== undefined) predicate.activationIds = activationIds;
 
     // XTRM-93 N3 (unitAI-kmbb9): activation-first selection. The previous
     // reader passed a global row cap (limit 1000) over raw event rows, so one
@@ -830,7 +873,7 @@ function loadNativeActivationBlock(args: PsArgs): NativeActivationBlock {
       limit: NATIVE_ACTIVATION_SELECTION_LIMIT,
       ...predicate,
     });
-    if (ids.length === 0) return { activations: [], ...(note ? { note } : {}) };
+    if (ids.length === 0) return { activations: [], ...filters };
     const rows = sqliteClient.readForensicEventsForActivations(ids, {
       ...(args.sinceMs !== undefined ? { sinceMs: args.sinceMs } : {}),
     });
@@ -843,9 +886,9 @@ function loadNativeActivationBlock(args: PsArgs): NativeActivationBlock {
       if (args.beadFilter && summary.bead_id !== args.beadFilter) return false;
       return true;
     });
-    return { activations, ...(note ? { note } : {}) };
+    return { activations, ...filters };
   } catch {
-    return { activations: [] };
+    return { activations: [], ...filters };
   } finally {
     sqliteClient.close();
   }
@@ -1256,6 +1299,11 @@ function renderJson(
     nodes,
     trees,
     native_activations: nativeActivationBlock.activations.map((summary) => ({ ...summary, last_known: true as const, live: false as const })),
+    // Additive and opt-in: present only when `--mine` was requested, so the
+    // default schema is byte-unchanged. `native_activations: []` is ambiguous
+    // on its own — this key is what makes "no matches" and "could not
+    // evaluate" distinguishable without reading prose.
+    ...(nativeActivationBlock.filters ? { native_activation_filters: nativeActivationBlock.filters } : {}),
     native_activations_note: nativeActivationBlock.note
       // Additive: the existing string stays the prefix so current consumers
       // keep working; a filter that could not be applied appends why instead

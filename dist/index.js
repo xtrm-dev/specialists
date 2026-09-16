@@ -54071,34 +54071,42 @@ function resolveEpicReadinessMap(jobs, includeTerminal) {
     sqlite.close();
   }
 }
-function nativeMineUnavailableNote(detail) {
-  return `--mine was NOT applied to native activations: ${detail}. ` + "Ownership for native activations is recorded by Substrate claim holder, which this process cannot resolve; " + "the block below is the latest activations, not only yours.";
+function nativeMineFailClosedNote(detail) {
+  return `--mine could not be evaluated for native activations: ${detail}. ` + "No native activations are shown: an explicitly requested filter is not dropped, because an unfiltered " + "block would claim these activations satisfy --mine.";
 }
 function loadNativeActivationBlock(args) {
+  let mineStatus;
+  let activationIds;
+  if (args.mine) {
+    const ownership = resolveNativeActivationOwnership();
+    if (ownership.kind !== "resolved") {
+      return {
+        activations: [],
+        note: nativeMineFailClosedNote(ownership.detail),
+        filters: { mine: { requested: true, applied: false, reason: ownership.reason } }
+      };
+    }
+    activationIds = ownership.activationIds;
+    mineStatus = { requested: true, applied: true };
+  }
+  const filters = mineStatus ? { filters: { mine: mineStatus } } : {};
   const sqliteClient = createObservabilitySqliteClient();
   if (!sqliteClient)
-    return { activations: [] };
+    return { activations: [], ...filters };
   try {
     const predicate = {};
     if (args.sinceMs !== undefined)
       predicate.sinceMs = args.sinceMs;
     if (args.beadFilter)
       predicate.beadId = args.beadFilter;
-    let note;
-    if (args.mine) {
-      const ownership = resolveNativeActivationOwnership();
-      if (ownership.kind === "resolved") {
-        predicate.activationIds = ownership.activationIds;
-      } else {
-        note = nativeMineUnavailableNote(ownership.detail);
-      }
-    }
+    if (activationIds !== undefined)
+      predicate.activationIds = activationIds;
     const ids = sqliteClient.listNativeActivationIds({
       limit: NATIVE_ACTIVATION_SELECTION_LIMIT,
       ...predicate
     });
     if (ids.length === 0)
-      return { activations: [], ...note ? { note } : {} };
+      return { activations: [], ...filters };
     const rows = sqliteClient.readForensicEventsForActivations(ids, {
       ...args.sinceMs !== undefined ? { sinceMs: args.sinceMs } : {}
     });
@@ -54107,9 +54115,9 @@ function loadNativeActivationBlock(args) {
         return false;
       return true;
     });
-    return { activations, ...note ? { note } : {} };
+    return { activations, ...filters };
   } catch {
-    return { activations: [] };
+    return { activations: [], ...filters };
   } finally {
     sqliteClient.close();
   }
@@ -54467,6 +54475,7 @@ function renderJson(jobs, nodes, trees, _all, epicReadiness, args, health, nativ
     nodes,
     trees,
     native_activations: nativeActivationBlock.activations.map((summary) => ({ ...summary, last_known: true, live: false })),
+    ...nativeActivationBlock.filters ? { native_activation_filters: nativeActivationBlock.filters } : {},
     native_activations_note: nativeActivationBlock.note ? `LAST-KNOWN state from forensics, not live registry state. ${nativeActivationBlock.note}` : "LAST-KNOWN state from forensics, not live registry state.",
     epics: buildEpicGroups(jobs, epicReadiness),
     epic_readiness: Object.fromEntries([...epicReadiness.entries()].map(([epicId, summary]) => [epicId, summary])),

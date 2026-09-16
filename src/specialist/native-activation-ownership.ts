@@ -48,8 +48,14 @@
 // matched by EXACT string equality against the recorded holder. Exact equality
 // is an identity join; a prefix or substring rule would be a heuristic and
 // would silently widen ownership. When no identity is present the resolution is
-// `unavailable`, and the caller must REPORT that rather than convert it into an
-// empty candidate set.
+// `unavailable`, and the caller must FAIL CLOSED on it: an explicitly requested
+// `--mine` whose candidate set is unknown selects nothing, and the caller
+// reports the missing authority as a typed filter status rather than presenting
+// the unfiltered window as though it satisfied the filter. `unavailable` must
+// never be recorded as "you own zero activations".
+//
+// This module is READ-ONLY over the authority store and never throws; every
+// failure is a typed `unavailable`.
 import { existsSync } from 'node:fs';
 import { resolveAuthorityDbPath } from '../activation/authority-store.js';
 
