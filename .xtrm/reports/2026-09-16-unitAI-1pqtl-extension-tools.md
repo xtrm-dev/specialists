@@ -125,3 +125,262 @@ and a linked worktree at the same commit (`a6b90e6e0fb0`) and deterministic in-c
 
 The committed CLI bundle must always be rebuilt in the main checkout after a worktree-side change,
 because a worktree build of the same source is not that artifact.
+
+---
+
+# True closeout — unitAI-1pqtl extension resolution
+
+**Date** 2026-09-16 · **Authority** `origin/master` = `4dbc226186bbdebbf6813348c89d21053775cee9` ·
+**Status** FUNCTIONALLY CLOSED with accepted/owned residuals · **Release blocker** NO
+
+This section is the durable closeout receipt. It re-derives the state from current master rather
+than restating the landing report above. No extension behaviour was changed while producing it.
+
+## 1. Authority
+
+`git fetch origin --prune` returned no new objects: **`origin/master` has not advanced** since the
+last external verification.
+
+| Ref | SHA |
+|---|---|
+| `origin/master` | `4dbc226186bbdebbf6813348c89d21053775cee9` |
+| local `master` | `4dbc226186bbdebbf6813348c89d21053775cee9` |
+| merge-base(`HEAD`, `origin/master`) | `4dbc226186bbdebbf6813348c89d21053775cee9` |
+| working tree (main checkout and session worktree) | clean — `git status --porcelain` returned 0 entries in both |
+
+Every commit of the release window is an ancestor of current master:
+
+```text
+20b888b4  merge: native dispatch exposes enabled extension tools (unitAI-1pqtl.2)
+6ae4c7ea  fix(unitAI-1pqtl.3): resolve declared git: sources to pi checkout cache
+57a2c758  fix(unitAI-rx1bu): resolve npm: extension sources under native dispatch
+e4ba991b  feat(unitAI-1pqtl.2): discover-then-pin enabled extension tools into the effective contract
+f0f4897a  2fe65f50  refuse shadowed granted names / catalog reserved set + required param
+d2302510  executor(SPECIALISTS-83): bound and observe the double session_start
+36d5a861  fix(SPECIALISTS-88): name the admission mechanism of the path that prints the contract
+4009a09c  docs(native): state which extension sources the native path resolves
+4204b7ea  test(SPECIALISTS-88): pin the native admission mechanism as a negative pair
+4617a710  7216f026  release artifacts + dist rebuild
+4da040a4  docs(report): enabled extension sources under native dispatch
+4dbc2261  chore(release): record the report in the changelog
+```
+
+## 2. Functional behaviours verified by reading the live code path
+
+Not inferred from tests. Each row names the current-master construct that implements it.
+
+| Behaviour | Evidence on current master |
+|---|---|
+| Discovery precedes effective-contract finalisation | `native-host.ts` resolves → `discoverDynamicExtensionTools` → `withDiscoveredExtensionTools` → prompt → admission → session |
+| Discovered tools are pinned into the effective allowlist | `withDiscoveredExtensionTools` appends to `toolsList`/`extensionTools`/`toolsFlag`; `native-host.ts:1643` pins `[...effectiveToolContract.toolsList, ASK_TOOL, ESCALATE_TOOL]` |
+| No model prompt in baseline/discovery sessions | both sessions carry a `systemPrompt` label and are only enumerated then disposed; no `prompt(` call exists on either path |
+| The real session receives the final effective allowlist | `baseSessionOptions.tools` is built once from `effectiveToolContract` and reused by primary, fallback and retry sessions |
+| Promised-vs-active verification still applies | `createVerifiedSession` → `missingPromisedTools` refuses `tool_contract_unsatisfied` before any model turn |
+| Shadow refusal: granted natives, catalog extension tools and ask/escalate | `reservedNames: [...toolContract.nativeTools, ...toolContract.extensionTools, ASK_TOOL, ESCALATE_TOOL]`; a non-builtin registry source throws `enabled extension shadows granted tool '<name>'` → `reject('extension_tool_shadowed')` |
+| Collision refusal against a dynamically enumerated builtin set | `builtinSet` from `enumerateBuiltinToolNames`; colliding names go to `refusedCollisions` |
+| Ask/escalate names unpinnable in a third layer | `HOST_TOOLS = {ask_coordinator, escalate_to_coordinator}` filter inside `withDiscoveredExtensionTools`, plus the per-name skip in the host loop |
+| Fail-closed where intended | empty discovery throws; the mixed baseline-empty/attribution-available case throws; denied native names cannot be pinned even if a caller misses them |
+| `local` / `npm:<pkg>` / `git:<spec>` resolution | `resolveDeclaredExtensionSources` → `resolveNpmExtensionSource` → `resolveGitExtensionSource` (`<agentDir>/git/<spec>`, manifest-required, `..`/absolute rejected) |
+| `http:` / `https:` / `ssh:` / `github:` | in `NON_LOCAL_EXTENSION_PREFIXES`, matched by neither resolver, therefore reported-and-skipped with a remedy line |
+| Two-session invariant (SPECIALISTS-83) | `enumerateBuiltinToolNames` creates its own `noExtensions: true` session with `additionalExtensionPaths: []`; discovery creates a second session carrying the declared sources |
+| The baseline does NOT load dynamic sources | the discovery call passes `additionalExtensionPaths: [...input.dynamicExtensions]`; the baseline passes `[]` |
+| The code records WHY the sessions must not be merged | VETO block on `enumerateBuiltinToolNames` (shadowed builtin appears once with the extension's source, fails `BUILTIN_TOOL_SOURCES`, becomes pinnable) plus the call-site pointer |
+| The double-session telemetry still exists | `emit('extension_discovery_sessions', {fenced_sessions: 2, …})` on success and refusal paths; pinned by the suite at `activation-native-host.test.ts:3801-3850` |
+
+## 3. Probes executed
+
+All three run from the repository root with the documented `TMPDIR=/var/tmp`. Every one creates real
+pi SDK sessions; none spends a model turn.
+
+| Probe | Exit | Result |
+|---|---|---|
+| `scripts/probe-extension-tool-surface.ts` | 0 | `host verdict: all host-level checks pass (Q/R/S/T) and no falsifier fires`; 19 sessions, mean creation 285 ms. Q pinned `[ast_grep, intercom]` → active `[ast_grep, intercom, read]`; R took `ast_grep` from absent to active through the host pin; T refused `write` and rendered `refused extension tool 'write': collides with a builtin tool name`; S did not widen. The single `FAIL I` line is the deliberately non-fatal premise document (F4) |
+| `scripts/probe-git-extension-tool-surface.ts` | 0 | `git:github.com/alonw0/pi-claude-link` → `<agentDir>/git/github.com/alonw0/pi-claude-link`; `discoveredRaw` and `pinned` = `[claude-link]`; real pinned session active = `[claude-link, read]`; `PASS: git checkout resolves and claude-link is active`. The same run printed the reported-and-skipped remedy lines for `git:` with no checkout, `https:`, `http:` and `ssh:` |
+| `scripts/probe-live-extension-admission.ts` (added by this closeout) | 0 | all six checks pass — see below |
+
+The three existing durable probes assert discovery, but none asserted that a discovered tool can
+actually RUN. The added probe closes that gap as the end-to-end acceptance, and is the reason it is a
+repository script rather than an ad-hoc run: the claim is reproducible.
+
+```text
+1 every declaration resolves to a local directory      local=2 skipped=0
+2 each declared source contributes at least one pinned tool
+   pinned=["ast_grep","claude-link"] refusedCollisions=[] refusedProvenance=[]
+3 the rendered contract names discover-then-pin, never the tool-policy gate
+   rendered: - exposed extension sources (registered tools admitted by discover-then-pin
+             into this session's tool allowlist): npm:pi-ast-grep, git:github.com/alonw0/pi-claude-link
+4 the real session exposes every promised tool, discovered ones included
+   active=["ast_grep","claude-link","gitnexus_context","gitnexus_detect_changes",
+           "gitnexus_impact","gitnexus_list_repos","gitnexus_query","read"]  missing=[]
+5a the discovered tool has an invocable definition
+5b the discovered tool executes and returns real matches     found 9 matches
+```
+
+Step 5 invokes `ast_grep` directly through the session-exposed definition, so the invoked
+implementation is the one the extension registered. It is not an LLM tool call.
+
+## 4. Gates
+
+| Gate | Command | Result |
+|---|---|---|
+| Targeted suites | `vitest run` over 6 files | **6 files passed · 164 passed \| 4 skipped (168) · exit 0** |
+| Typecheck | `bun run lint` (`tsc --noEmit`) | exit 0, no diagnostics |
+| Build 1 | `NODE_ENV=test bun run build` in the main checkout | exit 0 |
+| Dist coherence | `git diff --exit-code -- dist/` after build 1 | exit 0 |
+| Build 2 (reproducibility) | `NODE_ENV=test bun run build` again, same checkout | exit 0, then `git diff --exit-code -- dist/` exit 0 |
+| Dist content hash | `sha256` over all of `dist/` before and after | unchanged: `75b0d020fbb3ba3888b4dedb9064ecba8de16a2533656b8c33c5b35ef7898d0b` |
+| Changelog | `node scripts/changelog-update.mjs --check` | exit 0, `CHANGELOG.md: already up to date` |
+| Package payload | `npm pack --dry-run --json` + `scripts/assert-package-payload.sh` (the CI asset list) | `package payload check passed: all required assets present` |
+
+Targeted suite breakdown — the counts are a scoped result, **not** a full-suite result:
+
+```text
+unit/specialist/activation-native-host.test.ts       112 passed
+unit/specialist/execution-profile-parity.test.ts      18 passed
+unit/specialist/activation-parity.test.ts             12 passed
+unit/pi/extension-tool-policy.test.ts                 11 passed   (legacy gate, still relevant)
+unit/specialist/resolved-tool-contract.test.ts        10 passed
+integration/pi/extension-grant.test.ts                 1 passed
+```
+
+The full suite was **not** re-run in this closeout. The targeted green above must not be read as
+"full suite green".
+
+## 5. Branch and worktree cleanup
+
+Proof preceded every deletion. No open pull request pointed at any of these branches
+(`gh pr list --state open` returned only dependabot branches and `fix/unitAI-7edw1-tool-grant-resolver`,
+which is unrelated and was not touched).
+
+| Branch | Tip | Classification | Proof |
+|---|---|---|---|
+| `origin/xt/kuux` | `2fe65f50` | MERGED_BY_ANCESTRY | merge-base = tip; `git rev-list --left-right --count origin/master...origin/xt/kuux` = `12 0` |
+| `origin/fix/unitAI-1pqtl.3-git-source-resolution` | `6ae4c7ea` | MERGED_BY_ANCESTRY | merge-base = tip; `8 0` |
+| `origin/fix/SPECIALISTS-83-double-session-start` | `47813b25` | PATCH-EQUIVALENT STALE POINTER | tip ≠ any master SHA, but `git cherry origin/master` = `-` and `git patch-id` = `3c29ccf7fe8c813b86867f9c00d40118e1185628` for **both** the branch commit and master `d2302510`; the only file difference between the two tips is master's later SPECIALISTS-88 `'discover-then-pin'` argument, i.e. master is strictly ahead |
+| `origin/fix/unitAI-34pyf-extension-tool-grants` | `d444d6d6` | PATCH-EQUIVALENT STALE POINTER | all 11 branch commits return `-` from `git cherry origin/master`; branch is 366 commits behind |
+
+The unitAI-34pyf branch is beyond the three branches named for this closeout. It was included
+because it is the extension tool-grant workstream this epic exists to reach parity with, it carries
+no unique commit, and it has no open PR.
+
+Deleted: the four remote branches above, plus the local pointers `xt/kuux`,
+`fix/unitAI-1pqtl.3-git-source-resolution`, `fix/SPECIALISTS-88-contract-names-real-mechanism`,
+`xt/review-34pyf`, `xt/review-34pyf-v2`.
+
+Worktrees removed: `.xtrm/worktrees/specialists-xt-pi-kuux`,
+`.xtrm/worktrees/specialists-xt-claude-review-34pyf`,
+`.xtrm/worktrees/specialists-xt-claude-review-34pyf-v2`. All three were clean before removal.
+
+No history was lost: after deletion every removed tip is still either an ancestor of master
+(`2fe65f50`, `6ae4c7ea`, `36d5a861`) or retained as an object patch-equivalent to a master commit
+(`47813b25`, `d444d6d6`, `6129ebb1`, `b286e2c8`).
+
+Retained deliberately:
+
+- `master`, `origin/master` — the authority.
+- `xt/8158` and this session's worktree — the branch this closeout was produced on.
+- Every other branch in the repository. This closeout swept only the extension-resolution
+  workstream; the remaining branches were not examined and are not covered by this receipt.
+
+## 6. Accepted residuals
+
+Classified, not blurred. A residual here is owned and recorded, not hidden.
+
+| Residual | Owner | Status on current master |
+|---|---|---|
+| `http:` / `https:` / `ssh:` sources have no local form | accepted by decision (unitAI-1pqtl.3 option A) | Confirmed: reported-and-skipped with a message naming the source and the remedy. Unconditional refusal was rejected because `git:…/pi-claude-link` is enabled fleet-wide and refusal would block every activation |
+| `github:<owner>/<repo>` does not resolve | `unitAI-lq1mw`, P3, **OPEN** | Confirmed open, and it is the correct owner: `github:` is in `NON_LOCAL_EXTENSION_PREFIXES` while `resolveGitExtensionSource` matches only `git:`, so a `github:` declaration takes the skip path. The issue carries the measurement-first instruction and the attribution-label question |
+| Legacy `sp run` does not activate `git:`-sourced tools | recorded; retired by XTRM-93 | Real, documented native/legacy divergence, not a defect to fix here. `docs/native-activation.md` states it, `native-host.ts:143-171` expresses it as a checked parity shape (`native == legacy minus non-local sources`), and the closed unitAI-1pqtl epic names it in its boundary. No separate bead tracks it; see §8 |
+| `unitAI-74xy4` — bind discovery attestation to bytes | `unitAI-74xy4`, P2, **OPEN** | See §7 |
+| A curated extension shadowing a granted native is undetected | accepted with an expiry trigger | Recorded in code at `native-host.ts:1601-1605` (R3.4a). Holds only while the curated set stays host-resolved and in-repo. Expiry trigger: if curated paths ever become user-supplied, this becomes a finding. The SPECIALISTS-85 audit did **not** trip that trigger |
+| Old SDKs without `getAllTools` cannot detect granted-name shadowing | accepted | No widening results (no provenance ⇒ nothing pinnable), but the shadow itself is invisible there |
+| Double session_start per dynamic activation | accepted safety cost | Bounded at exactly two fenced sessions, observed by `extension_discovery_sessions`, and deliberately not optimised away. SPECIALISTS-83 is DONE/TERMINAL in Substrate |
+
+## 7. `unitAI-74xy4`, stated precisely
+
+Not a generic "security follow-up".
+
+- **Invariant it protects.** The contract the operator approved must describe the code that
+  executed. Native dispatch resolves sources once to strings and then loads the bytes more than
+  once: the discovery session, then the real child session. Post-load verification is name-only
+  (`missingPromisedTools` compares `getActiveToolNames()` sets).
+- **What breaks.** A source that mutates between the two loads — npm reinstall, `git pull`,
+  in-place body edit, symlink swap — runs different code under an identical name set while the
+  prompt contract, `activation_admitted.tools`, the forensic pinned list and the `tools` allowlist
+  all describe the pre-mutation registry.
+- **Is the extension implementation safe without it.** Yes, for the property this workstream owns.
+  All four refusals fail closed when they fire; empty discovery refuses; post-load
+  `tool_contract_unsatisfied` refuses; a mutation that removes a pinned name or adds a
+  colliding/shadowing one is caught. The exposure is strictly a same-name-set body swap. The
+  operator enabled the source and its load-time code already runs, so this is an
+  integrity/auditability gap, **not** privilege escalation.
+- **Does it block release.** No. The issue states "Not release-blocking; fixable in a bounded
+  change", and nothing found in this closeout contradicts that.
+- **Closure condition.** Bind attestation to bytes: take content identity at discovery (hash or
+  git commit for `git:` checkouts, resolved-package hash for `npm:`, mtime+hash for local paths),
+  re-verify before prompt render and before every session creation (primary, fallback, retry,
+  resume), record it in `activation_admitted`/snapshot, and refuse on mismatch. The carried smaller
+  findings (A1 per-source attribution, I1 npm `@spec` decorative at load, M3 resume re-verifies
+  nothing) must land with it. The issue names no separate time-based expiry trigger.
+- **Verdict.** Correctly open, correctly scoped, correctly labelled `contract:ready`. Nothing in
+  newer work satisfied it. Left open.
+
+## 8. XTRM-93 interaction
+
+XTRM-93 is a separate board, not this repository's Beads store; `bd show XTRM-93` returns not
+found, and no XTRM-93 item was touched. Its live items in this repository are the Substrate issues
+SPECIALISTS-77, -78, -80, -81, -86, -87 and -92, all OPEN, all out of scope here.
+
+The one hand-off is deliberate: the legacy `sp run` / `git:` divergence is an accepted residual
+that needs no bead of its own **because XTRM-93 retires the legacy execution backend**. If XTRM-93
+decides to keep the legacy path, this residual becomes live work again and needs an owner. The
+closeout records it here so that decision is made with the residual visible.
+
+## 9. Wording audit
+
+Source, docs and skills were searched for claims that contradict the landed architecture. None
+survived:
+
+| Rejected stale claim | Result |
+|---|---|
+| "native extension tools are admitted by the legacy tool-policy gate" | Not present. `resolved-tool-contract.ts` names both mechanisms and defaults to the legacy one only for callers that run the legacy path; the native call site passes `'discover-then-pin'`. `params: 'tool-policy-gate'` remains the documented default, not a native claim |
+| "all registered extension tools are automatically available" | No occurrence in `src/`, `docs/`, `config/` or `.agents/` |
+| "`git:` is unsupported on native" | No occurrence. `docs/native-activation.md` states the resolved cache path and documents the legacy divergence instead |
+| "dynamic extension discovery uses one reusable session" | No occurrence. The veto comments and the docs state two separate fenced sessions |
+
+`docs/native-activation.md` describes the real mechanism in order: resolve → load the declared
+sources in a fenced session → attribute provenance → refuse builtin collisions → pin into the
+effective contract → pin the real session to the finalized allowlist → verify the active set.
+Documentation vNext was not started.
+
+## 10. Defects this closeout found in its own work
+
+Recorded with the same prominence as the passes, because the first run of the added probe reported
+three failures that were mine, not the product's:
+
+1. Ran the live probe with no `extensionSources` argument, so the rendered contract legitimately
+   omitted the exposed-extension-sources line, and reported that as a product failure.
+2. Ran the live probe's session with only the dynamic sources loaded, so the promised gitnexus
+   tools were missing and the promised-vs-active check failed for a reason the host does not have.
+3. Invoked `ast_grep` with `export function $A`, which ast-grep parses with an ERROR node and
+   matches nothing against, then reported "0 matches" as a callability failure.
+
+All three were harness gaps; each was corrected and the corrected probe passes. The first run's
+output is superseded, not deleted: a reader comparing the two runs sees exactly what changed.
+
+## 11. Open follow-ups owned elsewhere
+
+| Item | Owner | Blocks this closeout |
+|---|---|---|
+| bind discovery attestation to bytes | `unitAI-74xy4` (OPEN, P2) | no |
+| resolve `github:` sources to the checkout cache | `unitAI-lq1mw` (OPEN, P3) | no |
+| retire the legacy execution backend | XTRM-93 (external board) | no |
+| per-source rather than class-level attribution; npm `@spec` enforcement; `resume()` re-verification | carried inside `unitAI-74xy4` | no |
+
+## 12. Verdict
+
+**FUNCTIONALLY CLOSED with accepted, owned residuals.** Every claimed extension behaviour is
+present on current master and verified by reading the live code path; every required shipped
+artifact is consistent with source; no unique work was stranded on a branch or worktree; each
+accepted gap is named above with an owner or an expiry trigger. This is not "complete with no
+gaps", and three of the listed residuals remain open by judgement rather than by omission.
