@@ -13,7 +13,7 @@ import {
   rmSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import * as childProcess from 'node:child_process';
 
 // vi.mock at module scope makes the ESM namespace mutable so vi.spyOn works.
@@ -205,7 +205,17 @@ describe('Supervisor', () => {
     const watchdogSpawn = spawnSpy.mock.calls.find(([command, args]) => command === process.execPath && args[0] === '-e');
     expect(watchdogSpawn).toBeDefined();
     const options = watchdogSpawn?.[2] as any;
-    expect(options?.env?.SPECIALISTS_OBSERVABILITY_DB_PATH).toContain('.specialists');
+    // SPECIALISTS-99: this assertion used to read `toContain('.specialists')`, which
+    // pinned the REPOSITORY store path and therefore asserted the isolation bug as the
+    // contract. It passed only while tests/setup/isolate-observability.ts failed to
+    // redirect the store, i.e. only while the suite was reading and writing the shared
+    // authoritative database. The watchdog must be handed an absolute path to the
+    // observability database resolved FOR THIS PROCESS, which under test is the isolated
+    // per-file store. Assert that, not the repository's directory name.
+    const watchdogDbPath = options?.env?.SPECIALISTS_OBSERVABILITY_DB_PATH;
+    expect(typeof watchdogDbPath).toBe('string');
+    expect(isAbsolute(watchdogDbPath)).toBe(true);
+    expect(watchdogDbPath).toMatch(/observability\.db$/);
     expect(options?.env?.SPECIALISTS_STATUS_JOB_ID).toBeDefined();
     expect(options?.env?.SPECIALISTS_STATUS_WATCHDOG_INTERVAL_MS).toBe('5000');
   });
