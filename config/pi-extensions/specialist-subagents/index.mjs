@@ -317,7 +317,7 @@ export function renderFleetRowLines(view, asks = [], nowMs = Date.now()) {
   const marker = stateMarker({ view, blocked: Boolean(ask), active, nowMs });
   const purpose = formatPurposeShort(view.purpose);
   const primary =
-    `    ${marker} ${BOLD(view.specialist)}  ${DIM(view.bead_id ?? '—')}` +
+    `    ${marker} ${BOLD(`${view.specialist}:${view.activation_id.slice(4)}`)}  ${DIM(view.bead_id ?? '—')}` +
     (purpose ? `  ${ITALIC_DIM(purpose)}` : '');
   const thinking = view.thinking_level ? ` ${DIM('·')} ${ACCENT_BOLD(view.thinking_level)}` : '';
   const meta =
