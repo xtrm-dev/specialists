@@ -200,7 +200,7 @@ export function renderFleetOverlay({
   for (const line of detailLines.slice(scroll, scroll + detailBudget)) lines.push(truncate(line, safeWidth));
   while (lines.length < safeHeight - 1) lines.push('');
 
-  lines.push(truncate('↑↓ select · Tab view · / filter · f follow · PgUp/PgDn scroll · Esc close', safeWidth));
+  lines.push(truncate('Esc close · ↑↓ select · Tab view · / filter · f follow · PgUp/PgDn scroll', safeWidth));
   // In an extremely short viewport the structural sections can exceed the target;
   // preserve the header and keybar and trim the middle instead of overflowing.
   if (lines.length > safeHeight) {
