@@ -131,6 +131,37 @@ The session takes `noTools: 'builtin'` with `tools` set to exactly the
 resolved contract's tools plus the two ask tools; omitting `tools` would
 admit every builtin, and `tools: []` would also empty `customTools`.
 
+### Extension sources
+
+The in-process resource loader accepts filesystem paths only, so a declared
+`execution.extensions` source is resolved to a directory before the loader is
+built. A local path passes through; `npm:<pkg>` resolves to the installed
+package directory; `git:<spec>` resolves to pi's own checkout cache
+(`<agent dir>/git/<spec>`) when a readable `package.json` is present there. A
+source with no local form — `http:`, `https:`, `ssh:`, or a `git:`/`npm:` spec
+with no checkout — is reported and skipped, and the message names both the
+source and the remedy rather than only the fact.
+
+The allowlist itself is built from catalog tool names, so the names a resolved
+source actually registers are discovered in a separate fenced session (no
+ambient or curated extensions, no skills, context files, prompt templates or
+themes, `noTools: 'builtin'`, `tools` omitted, never prompted, disposed in a
+`finally`) and pinned into the effective contract before the prompt is
+rendered. A discovered name is pinned only when it is attributable to a
+declared source; a name that collides with a builtin from the dynamically
+enumerated baseline, that cannot be attributed, or that shadows a granted
+native or an ask tool refuses the activation instead.
+
+The cost is operator-visible: a dynamic activation creates two extra fenced
+sessions (one to enumerate the builtin baseline, without which a shadowed
+builtin would be indistinguishable from an extension tool, and one to discover
+the declared sources). Each enabled extension therefore runs its load-time
+work twice per activation. An extension with load-time side effects — a bound
+port, a spawned watcher, a timer — pays that twice.
+
+The legacy CLI path differs: it forwards remote sources to Pi itself, and its
+policy extension does not activate `git:`-sourced tools.
+
 ## The writer lease
 
 The lease provides single-writer exclusion over the worktree path, and it is
