@@ -16,6 +16,7 @@ import type { TimelineEvent, TimelineEventRunComplete, TimelineTokenUsage } from
 import { loadStatuses } from '../specialist/status-load.js';
 import { createObservabilitySqliteClient } from '../specialist/observability-sqlite.js';
 import { formatActivationAge, summarizeNativeActivations, type NativeActivationSummary } from '../specialist/native-activation-summary.js';
+import { resolveNativeActivationOwnership } from '../specialist/native-activation-ownership.js';
 import { resolveNodeRefWithClient } from '../specialist/node-resolve.js';
 import { loadEpicReadinessSummary, syncEpicStateFromReadiness, type EpicReadinessSummary } from '../specialist/epic-readiness.js';
 import { collectProcessHealth, type ProcessHealthProcess, type ProcessHealthReport } from '../specialist/process-health.js';
@@ -739,34 +740,155 @@ function resolveEpicReadinessMap(jobs: readonly SupervisorStatus[], includeTermi
   }
 }
 
-function loadNativeActivationSummaries(args: PsArgs, mineBeadIds?: Set<string>): NativeActivationSummary[] {
+/**
+ * The native activation CANDIDATE SET — XTRM-93 N3 (unitAI-kmbb9 /
+ * SPECIALISTS-104).
+ *
+ * Every predicate whose semantics read "the latest N MATCHING activations"
+ * belongs HERE, because the activation bound is applied inside
+ * `listNativeActivationIds`. A predicate evaluated on the post-limit survivors
+ * can only REMOVE candidates: it can never recover an older matching activation
+ * that the bound excluded, so a late predicate starves silently. That is the
+ * measured defect this node fixes — `--mine` was evaluated after the bound, so
+ * it could report nothing while matching activations existed.
+ *
+ * Only PRESENTATION predicates may run after the selection.
+ */
+interface NativeCandidatePredicate {
+  sinceMs?: number;
+  beadId?: string;
+  /** Ownership pre-image from the Substrate authority store. Resolved outside
+   * SQL because native activation ownership lives in `issue_claims`, not in
+   * the observability store. */
+  activationIds?: readonly string[];
+}
+
+interface NativeActivationBlock {
+  activations: NativeActivationSummary[];
+  /** Prose for a REQUESTED filter that could not be applied. Rendered to the
+   * operator and appended to `native_activations_note` in JSON. */
+  note?: string;
+  /** Structured counterpart to `note`, so a JSON consumer can tell "the filter
+   * matched nothing" from "the filter was never evaluated" WITHOUT parsing
+   * prose. Present only when `--mine` was requested; omitted otherwise so the
+   * default `sp ps --json` schema is unchanged. */
+  filters?: NativeActivationFilters;
+}
+
+interface NativeActivationFilters {
+  mine: {
+    /** The operator asked for this filter. */
+    requested: boolean;
+    /** The filter constrained the candidate set before the activation bound. */
+    applied: boolean;
+    /** Present only when `applied` is false. One of
+     * `NativeOwnershipUnavailableReason` — machine-readable, not prose. */
+    reason?: string;
+  };
+}
+
+/**
+ * `--mine` for the native block, when ownership cannot be resolved.
+ *
+ * The authority is the Substrate authority store (`issue_claims`); the missing
+ * piece is the operator's holder, and `src/specialist/native-activation-ownership.ts`
+ * records why no identity can be derived.
+ *
+ * FAIL CLOSED. `--mine` is an EXPLICIT filter request, so the candidate set is
+ * a conjunction that includes ownership. When ownership is unknown the
+ * conjunction is unknown, and an unknown conjunction selects NOTHING — the one
+ * thing it must never select is everything. Dropping the predicate and
+ * returning the unfiltered window (the first shape of this fix) made
+ * `sp ps --mine --json` assert that unrelated activations satisfy `--mine`,
+ * which is a worse failure than an empty list because it is silently wrong.
+ *
+ * The distinction the previous behaviour was protecting is real, and is
+ * preserved — ownership-unavailable is NOT recorded as "you own zero
+ * activations". It is recorded as `filters.mine.applied === false` with a
+ * typed reason, alongside this note.
+ */
+function nativeMineFailClosedNote(detail: string): string {
+  return `--mine could not be evaluated for native activations: ${detail}. ` +
+    'No native activations are shown: an explicitly requested filter is not dropped, because an unfiltered ' +
+    'block would claim these activations satisfy --mine.';
+}
+
+/**
+ * Build the native activation block: candidate predicate -> latest-N matching
+ * activations -> their forensic histories -> presentation.
+ *
+ * Complexity: stage 1 is one bounded query over `specialist_jobs` (A rows, one
+ * per activation: a temp B-tree sort of A, no new index — measured, see
+ * tests/unit/specialist/native-activation-selection.test.ts); stage 2 reads the
+ * selected activations' rows only. No unbounded forensic-table scan.
+ */
+function loadNativeActivationBlock(args: PsArgs): NativeActivationBlock {
+  // `--mine` is resolved BEFORE the observability-store guard. The filter
+  // status describes the REQUEST, so it has to be reported even when the store
+  // is absent or unopenable; otherwise `--mine` returns a bare `[]` with no
+  // explanation on a fresh machine, which is the same ambiguity this node
+  // exists to remove.
+  let mineStatus: NativeActivationFilters['mine'] | undefined;
+  let activationIds: readonly string[] | undefined;
+  if (args.mine) {
+    const ownership = resolveNativeActivationOwnership();
+    if (ownership.kind !== 'resolved') {
+      // FAIL CLOSED: unknown ownership contributes an empty candidate set,
+      // never an unfiltered one. The selection query is not run at all — no
+      // filter, no result — so there is no path on which an unrelated
+      // activation can be presented as satisfying `--mine`.
+      return {
+        activations: [],
+        note: nativeMineFailClosedNote(ownership.detail),
+        filters: { mine: { requested: true, applied: false, reason: ownership.reason } },
+      };
+    }
+    // Resolved-to-empty is a real answer: select nothing. Passing an empty
+    // pre-image is deliberate and is not the same as omitting it.
+    activationIds = ownership.activationIds;
+    mineStatus = { requested: true, applied: true };
+  }
+  // `applied` means "the ownership filter was resolved and constrained the
+  // candidate set", so it is reported uniformly regardless of what the
+  // observability store then does.
+  const filters: Pick<NativeActivationBlock, 'filters'> = mineStatus ? { filters: { mine: mineStatus } } : {};
+
   const sqliteClient = createObservabilitySqliteClient();
-  if (!sqliteClient) return [];
+  if (!sqliteClient) return { activations: [], ...filters };
   try {
+    const predicate: NativeCandidatePredicate = {};
+    if (args.sinceMs !== undefined) predicate.sinceMs = args.sinceMs;
+    if (args.beadFilter) predicate.beadId = args.beadFilter;
+    if (activationIds !== undefined) predicate.activationIds = activationIds;
+
     // XTRM-93 N3 (unitAI-kmbb9): activation-first selection. The previous
     // reader passed a global row cap (limit 1000) over raw event rows, so one
     // noisy activation (measured 7,804 rows vs a 91k-row table) consumed the
     // whole window and quiet activations were invisible. Now activation ids
     // are chosen first (bounded to the latest N) and only then are their
-    // events fetched with no row cap. --bead is pushed into the id selection
-    // so it returns that bead's latest activations; --mine/--since still
-    // filter afterwards (N carries headroom for them — see below).
+    // events fetched with no row cap. Every candidate-defining filter
+    // (--bead, --since, and the --mine ownership pre-image) is passed INTO the
+    // id selection so the bound can never be applied ahead of it.
     const ids = sqliteClient.listNativeActivationIds({
       limit: NATIVE_ACTIVATION_SELECTION_LIMIT,
-      ...(args.sinceMs !== undefined ? { sinceMs: args.sinceMs } : {}),
-      ...(args.beadFilter ? { beadId: args.beadFilter } : {}),
+      ...predicate,
     });
-    if (ids.length === 0) return [];
+    if (ids.length === 0) return { activations: [], ...filters };
     const rows = sqliteClient.readForensicEventsForActivations(ids, {
       ...(args.sinceMs !== undefined ? { sinceMs: args.sinceMs } : {}),
     });
-    return summarizeNativeActivations(rows).filter((summary) => {
+    const activations = summarizeNativeActivations(rows).filter((summary) => {
+      // PRESENTATION-only guard. The candidate set is already defined above, so
+      // this cannot change candidate ownership; it is kept because a summary's
+      // bead_id is read from the event payload while the selection predicate
+      // reads the job row, and a divergence would otherwise render the wrong
+      // bead.
       if (args.beadFilter && summary.bead_id !== args.beadFilter) return false;
-      if (mineBeadIds && (!summary.bead_id || !mineBeadIds.has(summary.bead_id))) return false;
       return true;
     });
+    return { activations, ...filters };
   } catch {
-    return [];
+    return { activations: [], ...filters };
   } finally {
     sqliteClient.close();
   }
@@ -784,9 +906,10 @@ const NATIVE_ACTIVATION_SELECTION_LIMIT = 20;
 
 const NATIVE_ACTIVATION_DISPLAY_LIMIT = 10;
 
-function renderNativeActivationsBlock(summaries: NativeActivationSummary[]): void {
-  if (summaries.length === 0) return;
+function renderNativeActivationsBlock(summaries: NativeActivationSummary[], note?: string): void {
+  if (summaries.length === 0 && !note) return;
   console.log(bold(cyan('Native activations')) + dim(' · LAST-KNOWN from forensics — not live (the Fleet registry is in-process in the host session)'));
+  if (note) console.log(dim(`  note: ${note}`));
   const now = Date.now();
   for (const summary of summaries.slice(0, NATIVE_ACTIVATION_DISPLAY_LIMIT)) {
     const bead = summary.bead_id ? ` ${summary.bead_id}` : '';
@@ -799,7 +922,7 @@ function renderNativeActivationsBlock(summaries: NativeActivationSummary[]): voi
   console.log('');
 }
 
-function renderHuman(jobs: SupervisorStatus[], nodes: NodeTree[], trees: WorktreeTree[], all: boolean, includeTerminal: boolean, epicReadiness: EpicReadinessMap, health: ProcessHealthReport, includeHealthDetails: boolean, nativeActivations: NativeActivationSummary[] = []): void {
+function renderHuman(jobs: SupervisorStatus[], nodes: NodeTree[], trees: WorktreeTree[], all: boolean, includeTerminal: boolean, epicReadiness: EpicReadinessMap, health: ProcessHealthReport, includeHealthDetails: boolean, nativeActivations: NativeActivationSummary[] = [], nativeActivationsNote?: string): void {
   const beadTitles = buildBeadTitleCache(jobs);
   const renderedJobIds = new Set<string>();
   const epicGroups = buildEpicGroups(jobs, epicReadiness);
@@ -909,7 +1032,7 @@ function renderHuman(jobs: SupervisorStatus[], nodes: NodeTree[], trees: Worktre
     console.log('');
   }
 
-  renderNativeActivationsBlock(nativeActivations);
+  renderNativeActivationsBlock(nativeActivations, nativeActivationsNote);
 
   const renderedJobs = jobs.filter((job) => renderedJobIds.has(job.id));
   const runningCount = renderedJobs.filter((job) => job.status === 'running').length;
@@ -1131,7 +1254,7 @@ function renderJson(
   epicReadiness: EpicReadinessMap,
   args: PsArgs,
   health: ProcessHealthReport,
-  nativeActivations: NativeActivationSummary[] = [],
+  nativeActivationBlock: NativeActivationBlock = { activations: [] },
 ): void {
   console.log(JSON.stringify({
     generated_at_ms: Date.now(),
@@ -1175,8 +1298,18 @@ function renderJson(
     })),
     nodes,
     trees,
-    native_activations: nativeActivations.map((summary) => ({ ...summary, last_known: true as const, live: false as const })),
-    native_activations_note: 'LAST-KNOWN state from forensics, not live registry state.',
+    native_activations: nativeActivationBlock.activations.map((summary) => ({ ...summary, last_known: true as const, live: false as const })),
+    // Additive and opt-in: present only when `--mine` was requested, so the
+    // default schema is byte-unchanged. `native_activations: []` is ambiguous
+    // on its own — this key is what makes "no matches" and "could not
+    // evaluate" distinguishable without reading prose.
+    ...(nativeActivationBlock.filters ? { native_activation_filters: nativeActivationBlock.filters } : {}),
+    native_activations_note: nativeActivationBlock.note
+      // Additive: the existing string stays the prefix so current consumers
+      // keep working; a filter that could not be applied appends why instead
+      // of hiding behind an empty list.
+      ? `LAST-KNOWN state from forensics, not live registry state. ${nativeActivationBlock.note}`
+      : 'LAST-KNOWN state from forensics, not live registry state.',
     epics: buildEpicGroups(jobs, epicReadiness),
     epic_readiness: Object.fromEntries([...epicReadiness.entries()].map(([epicId, summary]) => [epicId, summary])),
     process_health: health,
@@ -1234,14 +1367,14 @@ function render(args: PsArgs): void {
   const nodes = groupByNode(visibleStatuses);
   const trees = groupByTree(visibleStatuses);
   const health = collectProcessHealth();
-  const nativeActivations = loadNativeActivationSummaries(args, mineBeadIds);
+  const nativeActivationBlock = loadNativeActivationBlock(args);
 
   if (args.json) {
-    renderJson(visibleStatuses, nodes, trees, args.all, epicReadiness, args, health, nativeActivations);
+    renderJson(visibleStatuses, nodes, trees, args.all, epicReadiness, args, health, nativeActivationBlock);
     return;
   }
 
-  renderHuman(visibleStatuses, nodes, trees, args.all, args.includeTerminal, epicReadiness, health, args.health, nativeActivations);
+  renderHuman(visibleStatuses, nodes, trees, args.all, args.includeTerminal, epicReadiness, health, args.health, nativeActivationBlock.activations, nativeActivationBlock.note);
 }
 
 function renderBuffered(args: PsArgs): string {

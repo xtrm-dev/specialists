@@ -131,6 +131,20 @@ export interface ListNativeActivationIdsFilters {
      * selection so a bead filter returns that bead's latest activations
      * instead of filtering the global latest-N after the fact). */
     beadId?: string;
+    /**
+     * Candidate pre-image: restrict the selection to these activations.
+     * XTRM-93 N3 (SPECIALISTS-104). Some candidate-defining predicates are
+     * resolved OUTSIDE SQL because their authority is not the observability
+     * store — ownership is the case (`issue_claims.activation_id` in the
+     * Substrate authority store). This parameter is how such a predicate is
+     * applied BEFORE the activation bound instead of to the post-limit
+     * survivors, which is the starvation shape this node exists to prevent.
+     *
+     * An EMPTY array selects nothing: a resolved predicate that matched no
+     * activation is a real answer. An ABSENT array constrains nothing. The two
+     * are deliberately not conflated.
+     */
+    activationIds?: readonly string[];
 }
 export interface JobMetricsRecord {
     job_id: string;
@@ -376,7 +390,13 @@ export interface ObservabilitySqliteClient {
      * activation), never the forensic event table. Forensic-only rows from the
      * retired event_family='activation' vocabulary (frozen 2026-09-08, no job
      * row, no attempt_id) have no specialist_jobs row and are therefore
-     * EXCLUDED as obsolete — they can never enter the current list. */
+     * EXCLUDED as obsolete — they can never enter the current list.
+     *
+     * EVERY filter here is applied before the bound. Callers must pass
+     * candidate-defining predicates in these arguments and must NOT filter the
+     * returned ids afterwards: a post-limit predicate can only remove
+     * candidates, never recover an older matching activation the bound excluded
+     * (SPECIALISTS-104). */
     listNativeActivationIds(filters?: ListNativeActivationIdsFilters): string[];
     /** Fetch every forensic event for the given activation ids (no row cap).
      * The bound lives in the id-selection stage; this stage is index-backed on

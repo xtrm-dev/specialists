@@ -180,4 +180,70 @@ describe('native activation selection (unitAI-kmbb9)', () => {
     expect(eventPlanText).toContain('SEARCH');
     expect(eventPlanText).not.toContain('SCAN');
   });
+
+  // XTRM-93 N3 (SPECIALISTS-104): the candidate pre-image. Ownership is
+  // resolved OUTSIDE SQL (Substrate issue_claims), so the reader takes it as an
+  // id set. It is evaluated in the WHERE clause, i.e. BEFORE the bound — which
+  // is the whole point: a predicate applied to the post-limit survivors can
+  // only remove candidates and can never recover an older matching activation.
+  describe('candidate pre-image (activationIds)', () => {
+    it('restricts the selection to the pre-image, still bounded and newest-first', () => {
+      const { client } = createClient();
+      const { quiets } = buildScenario(client);
+
+      const preImage = [quiets[0], 'act:not-in-the-store'];
+      const ids = client.listNativeActivationIds({ limit: 20, activationIds: preImage });
+      expect(ids).toEqual([quiets[0]]);
+
+      // The pre-image is a WHERE clause, not a post-slice: it composes with
+      // the bound and the ordering rather than being applied afterwards. The
+      // input order is deliberately wrong, so the result order can only come
+      // from the query.
+      const bounded = client.listNativeActivationIds({ limit: 20, activationIds: [quiets[1], quiets[2]] });
+      expect(bounded).toEqual([quiets[2], quiets[1]]);
+    });
+
+    it('selects NOTHING for an empty pre-image (never everything)', () => {
+      const { client } = createClient();
+      buildScenario(client);
+      // A resolved predicate that matched no activation is a real answer. It
+      // must not degrade into "unconstrained", which is what turns an unknown
+      // owner into a hard-excluded block or a silently unfiltered one.
+      expect(client.listNativeActivationIds({ limit: 20, activationIds: [] })).toEqual([]);
+    });
+
+    it('composes the pre-image with --since and --bead before the bound', () => {
+      const { client } = createClient();
+      const { base, quiets } = buildScenario(client);
+      const ids = client.listNativeActivationIds({
+        limit: 20,
+        sinceMs: base - 10_000,
+        beadId: 'unitAI-sel-quiet-1',
+        activationIds: [quiets[0], quiets[1]],
+      });
+      expect(ids).toEqual([quiets[1]]);
+    });
+
+    it('is index-backed for the IN-list form (SEARCH, never SCAN)', () => {
+      const { dbPath } = createClient();
+      db = new Database(dbPath, { readonly: true });
+      const plan = db.query(
+        "EXPLAIN QUERY PLAN SELECT job_id FROM specialist_jobs WHERE job_id >= 'act:' AND job_id < 'act;' AND job_id IN (?, ?) ORDER BY updated_at_ms DESC LIMIT 20",
+      ).all('act:sel-quiet-a', 'act:sel-quiet-b') as Array<Record<string, unknown>>;
+      const planText = JSON.stringify(plan);
+      expect(planText).toContain('SEARCH');
+      expect(planText).not.toContain('SCAN');
+    });
+
+    it('tolerates a pre-image far larger than any observed claim holder', () => {
+      const { client } = createClient();
+      const { quiets } = buildScenario(client);
+      // The largest single Substrate claim holder carries 54 activations today;
+      // this proves the one-flat-IN-list shape has real headroom rather than
+      // silently relying on small data.
+      const bulk = Array.from({ length: 2_000 }, (_, index) => `act:absent-${index}`);
+      const ids = client.listNativeActivationIds({ limit: 20, activationIds: [...bulk, ...quiets] });
+      expect(ids.sort()).toEqual([...quiets].sort());
+    });
+  });
 });
