@@ -32,7 +32,7 @@
  * Session lifetime deliberately exceeds turn lifetime: reaching `agent_settled` makes a
  * Specialist *waiting and resumable*, never disposed. Disposal is an explicit act.
  */
-import { SpecialistLoader } from '../specialist/loader.js';
+import { SpecialistLoader, type StallDetectionConfig } from '../specialist/loader.js';
 import { type ResolvedToolContract } from '../specialist/resolved-tool-contract.js';
 import { type SpecialistWorkItemBoundary } from './workitem-store.js';
 import { type InteractionMessage, type PendingAsk } from './interaction.js';
@@ -406,6 +406,14 @@ export interface NativeActivationHostDeps {
      * definition and then compare a definition no user has.
      */
     admission?: (specialist: unknown, tier: string, toolContract: ResolvedToolContract) => void;
+    /**
+     * Stall detection thresholds, shared with the legacy supervisor path (SPECIALISTS-102).
+     * Only `tool_duration_warn_ms` is read here; the running/waiting reasons stay
+     * legacy-only and are never emitted by this host. Defaults to
+     * STALL_DETECTION_DEFAULTS when omitted — which is also what production does,
+     * since neither production construction site passes it (explicit residual).
+     */
+    stallDetection?: StallDetectionConfig;
 }
 /** Configuration for pushing interactions to a Claude coordinator. */
 export interface PeerDelivery {
@@ -453,6 +461,19 @@ export declare class NativeActivationHost {
      * keeps the same snapshot so counters continue across attempts by construction.
      */
     private readonly lastUsageSeen;
+    /**
+     * Active tool_duration watches, keyed by ACTIVATION id (SPECIALISTS-102).
+     *
+     * Activation-keyed, never session-keyed: the fallback walk, retry() and resume()
+     * all replace record.session under the SAME activation id, and none of those sites
+     * touches this map — so a tool call spanning a replacement keeps its start time
+     * and its warned flag and still warns AT MOST ONCE. Entries die on tool end, on
+     * terminal settle (publishTerminalSettlement) and on stop(); the timer is unref'd
+     * so a missed stop can never pin this long-lived process.
+     */
+    private readonly toolDurationWatch;
+    /** Warn threshold for a single tool call; the shared default unless injected. */
+    private readonly toolDurationWarnMs;
     /**
      * One transport for the whole host. Messages carry their own activationId, so a single
      * instance serves every child and the parent enumerates asks across the Fleet in one
@@ -504,6 +525,27 @@ export declare class NativeActivationHost {
      * that was merely pausing.
      */
     private onSessionEvent;
+    /**
+     * Record the start of one tool call for the tool_duration checker (SPECIALISTS-102).
+     *
+     * A repeat start for the SAME in-flight call (streaming duplicate) keeps its original
+     * start time and warned flag; a genuinely new call replaces the dead one. The poll
+     * timer is per activation and is created lazily, so tool-less activations never tick.
+     */
+    private noteToolStart;
+    /** Clear the watch when the tool call ends; a stray end never kills a live call. */
+    private noteToolEnd;
+    /**
+     * One checker tick: warn at most once per tool call (SPECIALISTS-102).
+     *
+     * Attempt attribution is read LIVE from the registry, never closed over at subscribe
+     * time, and the watch is keyed to the activation — so a call spanning a fallback,
+     * retry or resume replacement still warns exactly once, under the current attempt.
+     * Driven by the interval in production and directly (with the injected clock) in tests.
+     */
+    private checkToolDuration;
+    /** Clear the poll timer and drop the watch. Idempotent; safe on every exit path. */
+    private stopToolDurationWatch;
     private runToSettled;
     /**
      * S1 automatic settlement publication (ADR §38).

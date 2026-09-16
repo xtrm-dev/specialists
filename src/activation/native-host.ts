@@ -35,7 +35,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { SpecialistLoader, parseNpmSourceName } from '../specialist/loader.js';
+import { SpecialistLoader, parseNpmSourceName, STALL_DETECTION_DEFAULTS, type StallDetectionConfig } from '../specialist/loader.js';
 import { buildSystemPrompt } from '../specialist/system-prompt.js';
 import { renderTaskPrompt } from '../specialist/task-prompt.js';
 import {
@@ -136,6 +136,22 @@ function extractTokenUsage(event: PiAgentSessionEvent): ActivationTokenUsage | u
 
 /** Permission tiers that can mutate the workspace. Derived from the resolved grant. */
 const WRITE_TIERS = new Set(['MEDIUM', 'HIGH']);
+
+/**
+ * Poll cadence for the tool_duration checker (SPECIALISTS-102). A cadence, not a
+ * threshold: the threshold stays STALL_DETECTION_DEFAULTS.tool_duration_warn_ms.
+ * Mirrors the legacy 10s stall-watchdog tick (supervisor.ts).
+ */
+const TOOL_DURATION_CHECK_INTERVAL_MS = 10_000;
+
+/** One in-flight tool call watched for over-threshold duration, per activation. */
+interface ToolDurationWatch {
+  tool: string;
+  toolCallId?: string;
+  startMs: number;
+  warned: boolean;
+  timer: ReturnType<typeof setInterval>;
+}
 
 /**
  * Pi's own non-local extension source prefixes. The legacy CLI passes these straight to
@@ -784,6 +800,14 @@ export interface NativeActivationHostDeps {
    * definition and then compare a definition no user has.
    */
   admission?: (specialist: unknown, tier: string, toolContract: ResolvedToolContract) => void;
+  /**
+   * Stall detection thresholds, shared with the legacy supervisor path (SPECIALISTS-102).
+   * Only `tool_duration_warn_ms` is read here; the running/waiting reasons stay
+   * legacy-only and are never emitted by this host. Defaults to
+   * STALL_DETECTION_DEFAULTS when omitted — which is also what production does,
+   * since neither production construction site passes it (explicit residual).
+   */
+  stallDetection?: StallDetectionConfig;
 }
 
 /** Configuration for pushing interactions to a Claude coordinator. */
@@ -838,6 +862,20 @@ export class NativeActivationHost {
   private readonly lastUsageSeen = new WeakMap<object, Record<string, number>>();
 
   /**
+   * Active tool_duration watches, keyed by ACTIVATION id (SPECIALISTS-102).
+   *
+   * Activation-keyed, never session-keyed: the fallback walk, retry() and resume()
+   * all replace record.session under the SAME activation id, and none of those sites
+   * touches this map — so a tool call spanning a replacement keeps its start time
+   * and its warned flag and still warns AT MOST ONCE. Entries die on tool end, on
+   * terminal settle (publishTerminalSettlement) and on stop(); the timer is unref'd
+   * so a missed stop can never pin this long-lived process.
+   */
+  private readonly toolDurationWatch = new Map<string, ToolDurationWatch>();
+  /** Warn threshold for a single tool call; the shared default unless injected. */
+  private readonly toolDurationWarnMs: number;
+
+  /**
    * One transport for the whole host. Messages carry their own activationId, so a single
    * instance serves every child and the parent enumerates asks across the Fleet in one
    * place rather than walking activations.
@@ -862,6 +900,7 @@ export class NativeActivationHost {
     this.authority = deps.authority ?? NULL_AUTHORITY_WRITER;
     this.settlements = deps.settlements ?? createFileSettlementStore(join(this.cwd, '.specialists', 'settlements'));
     this.admission = deps.admission ?? ((candidate, tier, contract) => validateBeforeRun(candidate as never, tier, contract));
+    this.toolDurationWarnMs = deps.stallDetection?.tool_duration_warn_ms ?? STALL_DETECTION_DEFAULTS.tool_duration_warn_ms;
     this.env = deps.env ?? process.env;
   }
 
@@ -1978,9 +2017,98 @@ export class NativeActivationHost {
       case 'compaction_end':
         emit('compaction_completed', { reason: event.reason, aborted: event.aborted });
         break;
+      case 'tool_execution_start':
+        // SPECIALISTS-102: feed the tool_duration checker. No forensic emit here —
+        // the checker emits at most once per call, only when it runs over threshold.
+        this.noteToolStart(snapshot, event);
+        break;
+      case 'tool_execution_end':
+        this.noteToolEnd(snapshot.activationId, event);
+        break;
       default:
         break;
     }
+  }
+
+  /**
+   * Record the start of one tool call for the tool_duration checker (SPECIALISTS-102).
+   *
+   * A repeat start for the SAME in-flight call (streaming duplicate) keeps its original
+   * start time and warned flag; a genuinely new call replaces the dead one. The poll
+   * timer is per activation and is created lazily, so tool-less activations never tick.
+   */
+  private noteToolStart(snapshot: ActivationSnapshot, event: PiAgentSessionEvent): void {
+    // A tool executes only inside a live turn. Stray starts arriving after settle
+    // (replay skew, late delivery) must not arm a watch nobody will end.
+    if (snapshot.state !== 'starting' && snapshot.state !== 'running') return;
+    const tool = typeof event.toolName === 'string' && event.toolName.length > 0 ? event.toolName : 'unknown';
+    const toolCallId = typeof event.toolCallId === 'string' && event.toolCallId.length > 0 ? event.toolCallId : undefined;
+    const existing = this.toolDurationWatch.get(snapshot.activationId);
+    if (existing && toolCallId !== undefined && existing.toolCallId === toolCallId) return;
+    if (existing) clearInterval(existing.timer);
+    const timer = setInterval(() => this.checkToolDuration(snapshot.activationId), TOOL_DURATION_CHECK_INTERVAL_MS);
+    timer.unref();
+    this.toolDurationWatch.set(snapshot.activationId, { tool, toolCallId, startMs: this.now(), warned: false, timer });
+  }
+
+  /** Clear the watch when the tool call ends; a stray end never kills a live call. */
+  private noteToolEnd(activationId: string, event: PiAgentSessionEvent): void {
+    const watch = this.toolDurationWatch.get(activationId);
+    if (!watch) return;
+    const toolCallId = typeof event.toolCallId === 'string' && event.toolCallId.length > 0 ? event.toolCallId : undefined;
+    if (toolCallId !== undefined && watch.toolCallId !== undefined && watch.toolCallId !== toolCallId) return;
+    this.stopToolDurationWatch(activationId);
+  }
+
+  /**
+   * One checker tick: warn at most once per tool call (SPECIALISTS-102).
+   *
+   * Attempt attribution is read LIVE from the registry, never closed over at subscribe
+   * time, and the watch is keyed to the activation — so a call spanning a fallback,
+   * retry or resume replacement still warns exactly once, under the current attempt.
+   * Driven by the interval in production and directly (with the injected clock) in tests.
+   */
+  private checkToolDuration(activationId: string): void {
+    const watch = this.toolDurationWatch.get(activationId);
+    if (!watch || watch.warned) return;
+    const elapsed = this.now() - watch.startMs;
+    if (elapsed <= this.toolDurationWarnMs) return;
+    watch.warned = true;
+    const record = this.registry.get(activationId);
+    // No record (stopped/disposed) means nobody can attribute the row: drop it and the watch.
+    // Same when the turn is no longer live: settle/failure already ended watching below,
+    // so a surviving entry is skew — drop it rather than warning a dead activation.
+    if (!record || (record.snapshot.state !== 'starting' && record.snapshot.state !== 'running')) {
+      this.stopToolDurationWatch(activationId);
+      return;
+    }
+    try {
+      this.forensics.emit({
+        activationId,
+        attemptId: record.snapshot.attemptId,
+        participantId: record.snapshot.participantId,
+        specialist: record.snapshot.specialist,
+        beadId: record.snapshot.issueRef,
+        name: 'stale_warning',
+        payload: {
+          reason: 'tool_duration',
+          silence_ms: elapsed,
+          threshold_ms: this.toolDurationWarnMs,
+          tool: watch.tool,
+        },
+      });
+    } catch {
+      // A timer callback must never throw into the host: forensic evidence
+      // never alters activation behaviour (same rule as onSessionEvent).
+    }
+  }
+
+  /** Clear the poll timer and drop the watch. Idempotent; safe on every exit path. */
+  private stopToolDurationWatch(activationId: string): void {
+    const watch = this.toolDurationWatch.get(activationId);
+    if (!watch) return;
+    clearInterval(watch.timer);
+    this.toolDurationWatch.delete(activationId);
   }
 
   private async runToSettled(
@@ -2180,6 +2308,11 @@ export class NativeActivationHost {
     } catch {
       // Settlement evidence never fails an activation.
     }
+    // Terminal settle ends duration watching for this activation (SPECIALISTS-102):
+    // the single call site all three runToSettled terminal legs funnel through.
+    // Intermediate fallback failures also land here; the walk restarts the watch
+    // lazily on the next tool start, which is a NEW call and warns at most once.
+    this.stopToolDurationWatch(snapshot.activationId);
   }
 
   /**
@@ -2665,6 +2798,8 @@ export class NativeActivationHost {
     try {
       await record.session.abort();
     } finally {
+      // Explicit disposal ends duration watching: no timer survives activation end.
+      this.stopToolDurationWatch(activationId);
       record.unsubscribe();
       record.session.dispose();
       record.snapshot.state = 'stopped';

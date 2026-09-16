@@ -7,6 +7,15 @@ export interface StallDetectionConfig {
     waiting_auto_close_ms?: number | null;
     tool_duration_warn_ms?: number;
 }
+/**
+ * Shared stall-detection defaults (moved verbatim from supervisor.ts, SPECIALISTS-102).
+ *
+ * The type and the defaults live together so lightweight consumers (e.g. the native
+ * activation host) can share the threshold WITHOUT importing the legacy supervisor
+ * module — which would drag spawn/readline/sqlite into bundles that never had them.
+ * supervisor.ts imports this; it does not re-declare it.
+ */
+export declare const STALL_DETECTION_DEFAULTS: Required<StallDetectionConfig>;
 export interface SpecialistSummary {
     name: string;
     description: string;

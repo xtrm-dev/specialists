@@ -12723,7 +12723,7 @@ function resolveSkillsPaths(spec, fileDir, consumerRoot) {
   const resolved = rawPaths.map((p) => resolveSkillPath(p, { consumerRoot, fileDir }));
   spec.specialist.skills.paths = resolved;
 }
-var SpecialistMissingModelError, SpecialistExtensionSourceCollisionError, PROTOTYPE_POLLUTION_KEYS, NPM_NAME_RE, NPM_SCOPED_NAME_RE;
+var STALL_DETECTION_DEFAULTS, SpecialistMissingModelError, SpecialistExtensionSourceCollisionError, PROTOTYPE_POLLUTION_KEYS, NPM_NAME_RE, NPM_SCOPED_NAME_RE;
 var init_loader = __esm(() => {
   init_dist();
   init_schema();
@@ -12731,6 +12731,13 @@ var init_loader = __esm(() => {
   init_global_config();
   init_preset_resolver();
   init_project_pack_skill_resolver();
+  STALL_DETECTION_DEFAULTS = {
+    running_silence_warn_ms: 60000,
+    running_silence_error_ms: 300000,
+    waiting_stale_ms: 3600000,
+    waiting_auto_close_ms: 0,
+    tool_duration_warn_ms: 120000
+  };
   SpecialistMissingModelError = class SpecialistMissingModelError extends Error {
     specialistName;
     constructor(specialistName) {
@@ -20012,12 +20019,13 @@ ${appendError}
     }
   }
 }
-var JOB_TTL_DAYS, PARENT_NOTIFICATION_MAX_BYTES, PARENT_NOTIFICATION_TIMEOUT_MS = 5000, STALL_DETECTION_DEFAULTS, WAITING_AUTO_CLOSE_GRACE_MS = 5000, GITNEXUS_RISK_ORDER, MODEL_CONTEXT_WINDOWS, TERMINAL_COMPLIANCE_VERDICT_REGEX, PASS_COMPLIANCE_VERDICT_REGEX, REVIEW_VERDICT_REGEX, AUTO_COMMIT_NOISE_PREFIXES, STATUS_WATCHDOG_INTERVAL_MS = 5000, STATUS_WATCHDOG_STALE_AFTER_MS = 30000, DEAD_JOB_ERROR = "Process crashed or was killed";
+var JOB_TTL_DAYS, PARENT_NOTIFICATION_MAX_BYTES, PARENT_NOTIFICATION_TIMEOUT_MS = 5000, WAITING_AUTO_CLOSE_GRACE_MS = 5000, GITNEXUS_RISK_ORDER, MODEL_CONTEXT_WINDOWS, TERMINAL_COMPLIANCE_VERDICT_REGEX, PASS_COMPLIANCE_VERDICT_REGEX, REVIEW_VERDICT_REGEX, AUTO_COMMIT_NOISE_PREFIXES, STATUS_WATCHDOG_INTERVAL_MS = 5000, STATUS_WATCHDOG_STALE_AFTER_MS = 30000, DEAD_JOB_ERROR = "Process crashed or was killed";
 var init_supervisor = __esm(() => {
   init_runtime_origin();
   init_job_root();
   init_timeline_events();
   init_git_diff_evidence();
+  init_loader();
   init_observability_sqlite();
   init_observability_db();
   init_epic_lifecycle();
@@ -20027,13 +20035,6 @@ var init_supervisor = __esm(() => {
   init_forensic_events();
   JOB_TTL_DAYS = Number(process.env.SPECIALISTS_JOB_TTL_DAYS ?? 7);
   PARENT_NOTIFICATION_MAX_BYTES = 4 * 1024;
-  STALL_DETECTION_DEFAULTS = {
-    running_silence_warn_ms: 60000,
-    running_silence_error_ms: 300000,
-    waiting_stale_ms: 3600000,
-    waiting_auto_close_ms: 0,
-    tool_duration_warn_ms: 120000
-  };
   GITNEXUS_RISK_ORDER = {
     LOW: 0,
     MEDIUM: 1,
@@ -94255,6 +94256,16 @@ function mapNativeLifecycleEvent(event, context, t = Date.now()) {
         tool_calls: context.toolCalls,
         final: true
       }), t);
+    case "stale_warning": {
+      const payload = record4(event.payload);
+      const reason = stringField2(payload?.reason);
+      const tool = stringField2(payload?.tool);
+      return at(createStaleWarningEvent(reason ?? "tool_duration", {
+        silence_ms: numberField2(payload?.silence_ms) ?? 0,
+        threshold_ms: numberField2(payload?.threshold_ms) ?? 0,
+        ...tool !== undefined ? { tool } : {}
+      }), t);
+    }
     default:
       return null;
   }
@@ -95317,6 +95328,8 @@ class NativeActivationHost {
   env;
   registry = new FleetRegistry;
   lastUsageSeen = new WeakMap;
+  toolDurationWatch = new Map;
+  toolDurationWarnMs;
   interactions;
   constructor(deps = {}) {
     this.cwd = deps.cwd ?? process.cwd();
@@ -95329,6 +95342,7 @@ class NativeActivationHost {
     this.authority = deps.authority ?? NULL_AUTHORITY_WRITER;
     this.settlements = deps.settlements ?? createFileSettlementStore(join60(this.cwd, ".specialists", "settlements"));
     this.admission = deps.admission ?? ((candidate, tier, contract) => validateBeforeRun(candidate, tier, contract));
+    this.toolDurationWarnMs = deps.stallDetection?.tool_duration_warn_ms ?? STALL_DETECTION_DEFAULTS.tool_duration_warn_ms;
     this.env = deps.env ?? process.env;
   }
   async start(request) {
@@ -96002,9 +96016,75 @@ class NativeActivationHost {
       case "compaction_end":
         emit("compaction_completed", { reason: event.reason, aborted: event.aborted });
         break;
+      case "tool_execution_start":
+        this.noteToolStart(snapshot, event);
+        break;
+      case "tool_execution_end":
+        this.noteToolEnd(snapshot.activationId, event);
+        break;
       default:
         break;
     }
+  }
+  noteToolStart(snapshot, event) {
+    if (snapshot.state !== "starting" && snapshot.state !== "running")
+      return;
+    const tool = typeof event.toolName === "string" && event.toolName.length > 0 ? event.toolName : "unknown";
+    const toolCallId = typeof event.toolCallId === "string" && event.toolCallId.length > 0 ? event.toolCallId : undefined;
+    const existing = this.toolDurationWatch.get(snapshot.activationId);
+    if (existing && toolCallId !== undefined && existing.toolCallId === toolCallId)
+      return;
+    if (existing)
+      clearInterval(existing.timer);
+    const timer = setInterval(() => this.checkToolDuration(snapshot.activationId), TOOL_DURATION_CHECK_INTERVAL_MS);
+    timer.unref();
+    this.toolDurationWatch.set(snapshot.activationId, { tool, toolCallId, startMs: this.now(), warned: false, timer });
+  }
+  noteToolEnd(activationId, event) {
+    const watch = this.toolDurationWatch.get(activationId);
+    if (!watch)
+      return;
+    const toolCallId = typeof event.toolCallId === "string" && event.toolCallId.length > 0 ? event.toolCallId : undefined;
+    if (toolCallId !== undefined && watch.toolCallId !== undefined && watch.toolCallId !== toolCallId)
+      return;
+    this.stopToolDurationWatch(activationId);
+  }
+  checkToolDuration(activationId) {
+    const watch = this.toolDurationWatch.get(activationId);
+    if (!watch || watch.warned)
+      return;
+    const elapsed = this.now() - watch.startMs;
+    if (elapsed <= this.toolDurationWarnMs)
+      return;
+    watch.warned = true;
+    const record5 = this.registry.get(activationId);
+    if (!record5 || record5.snapshot.state !== "starting" && record5.snapshot.state !== "running") {
+      this.stopToolDurationWatch(activationId);
+      return;
+    }
+    try {
+      this.forensics.emit({
+        activationId,
+        attemptId: record5.snapshot.attemptId,
+        participantId: record5.snapshot.participantId,
+        specialist: record5.snapshot.specialist,
+        beadId: record5.snapshot.issueRef,
+        name: "stale_warning",
+        payload: {
+          reason: "tool_duration",
+          silence_ms: elapsed,
+          threshold_ms: this.toolDurationWarnMs,
+          tool: watch.tool
+        }
+      });
+    } catch {}
+  }
+  stopToolDurationWatch(activationId) {
+    const watch = this.toolDurationWatch.get(activationId);
+    if (!watch)
+      return;
+    clearInterval(watch.timer);
+    this.toolDurationWatch.delete(activationId);
   }
   async runToSettled(snapshot, session, initialPrompt, emit, record5) {
     try {
@@ -96143,6 +96223,7 @@ class NativeActivationHost {
         emit
       });
     } catch {}
+    this.stopToolDurationWatch(snapshot.activationId);
   }
   async runWithFallback(record5, ctx) {
     let index = ctx.modelIndex;
@@ -96475,6 +96556,7 @@ class NativeActivationHost {
     try {
       await record5.session.abort();
     } finally {
+      this.stopToolDurationWatch(activationId);
       record5.unsubscribe();
       record5.session.dispose();
       record5.snapshot.state = "stopped";
@@ -96650,7 +96732,7 @@ function legacyOnlyConfigNotes(spec) {
   }
   return notes;
 }
-var TOKEN_USAGE_KEYS, WRITE_TIERS, NON_LOCAL_EXTENSION_PREFIXES, defaultExtensionSourceResolutionEnv, EXTENSION_CLASS_SOURCES, BUILTIN_TOOL_SOURCES, EMPTY_DISCOVERY, FALLBACK_RETRYABLE_CLASSES, NULL_FORENSIC_SINK;
+var TOKEN_USAGE_KEYS, WRITE_TIERS, TOOL_DURATION_CHECK_INTERVAL_MS = 1e4, NON_LOCAL_EXTENSION_PREFIXES, defaultExtensionSourceResolutionEnv, EXTENSION_CLASS_SOURCES, BUILTIN_TOOL_SOURCES, EMPTY_DISCOVERY, FALLBACK_RETRYABLE_CLASSES, NULL_FORENSIC_SINK;
 var init_native_host = __esm(() => {
   init_loader();
   init_system_prompt();
