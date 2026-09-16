@@ -76,13 +76,17 @@ describe('oracle mutation matrix (SPECIALISTS-103)', () => {
 
     // The negative leg uses a name with no arm (same state as a removed arm):
     // the mapper returns null and the durable check names the mapper link.
+    // NOTE (SPECIALISTS-102): 'stale_warning' now HAS a mapper arm, so it can no
+    // longer serve as the unmapped exemplar; 'activation_admitted' (a lifecycle
+    // name with no mapper arm) takes that role. Deleting the stale_warning arm
+    // would make the live oracle entry fail on the mapper link instead.
     expect(mapNativeLifecycleEvent(
-      { activationId: 'act:m1', specialist: 'researcher', name: 'stale_warning', payload: {} },
+      { activationId: 'act:m1', specialist: 'researcher', name: 'activation_admitted', payload: {} },
       { startedAtMs: Date.now() },
       1000,
     )).toBeNull();
     expect(() => runDurableNativeCheck({
-      emitName: 'stale_warning',
+      emitName: 'activation_admitted',
       emitPayload: {},
       expectedForensicName: 'process_health.stale_detected',
     })).toThrow(/mapper link MISSING/);

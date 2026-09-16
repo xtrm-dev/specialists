@@ -8,9 +8,8 @@ type ActivePiSession = {
     close(): Promise<void>;
     kill(reason?: Error): void;
 };
-import type { StallDetectionConfig } from './loader.js';
+import { type StallDetectionConfig } from './loader.js';
 export declare function projectMandatoryRulesInjection(data: Partial<MandatoryRulesInjectionProjection>): MandatoryRulesInjectionProjection;
-export declare const STALL_DETECTION_DEFAULTS: Required<StallDetectionConfig>;
 export interface SupervisorOptions {
     runner: SpecialistRunner;
     runOptions: RunOptions;

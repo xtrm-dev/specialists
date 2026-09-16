@@ -81,6 +81,7 @@ export const NATIVE_EMIT_INVENTORY = Object.freeze([
   'settlement_result_published',
   'settlement_store_failed',
   'settlement_stored',
+  'stale_warning',
   'step_contract_compiled',
   'tool_blocked',
   'tool_contract_unsatisfied_on_fallback',

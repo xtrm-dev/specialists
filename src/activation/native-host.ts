@@ -35,7 +35,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { SpecialistLoader, parseNpmSourceName } from '../specialist/loader.js';
+import { SpecialistLoader, parseNpmSourceName, STALL_DETECTION_DEFAULTS, type StallDetectionConfig } from '../specialist/loader.js';
 import { buildSystemPrompt } from '../specialist/system-prompt.js';
 import { renderTaskPrompt } from '../specialist/task-prompt.js';
 import {
@@ -136,6 +136,38 @@ function extractTokenUsage(event: PiAgentSessionEvent): ActivationTokenUsage | u
 
 /** Permission tiers that can mutate the workspace. Derived from the resolved grant. */
 const WRITE_TIERS = new Set(['MEDIUM', 'HIGH']);
+
+/**
+ * Poll cadence for the tool_duration checker (SPECIALISTS-102). A cadence, not a
+ * threshold: the threshold stays STALL_DETECTION_DEFAULTS.tool_duration_warn_ms.
+ * Mirrors the legacy 10s stall-watchdog tick (supervisor.ts).
+ */
+const TOOL_DURATION_CHECK_INTERVAL_MS = 10_000;
+
+/**
+ * Legacy-faithful threshold normalization (Target 2, PR #387 review).
+ *
+ * Legacy spreads the configured value straight through (`{...DEFAULTS,
+ * ...opts.stallDetection}`), so 0 and negatives are honoured as-is (the schema
+ * permits 0; `elapsed > 0` still gates the warn). This matches that: every finite
+ * number passes through INCLUDING 0 and negatives. Non-finite values
+ * (NaN/Infinity/non-number) fall back to undefined so the caller applies the
+ * shared default — legacy would never warn on those (comparisons are false),
+ * native warns per default instead. Garbage-in divergence, documented here
+ * rather than silently clamped.
+ */
+function normalizeToolDurationWarnMs(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+/** One in-flight tool call watched for over-threshold duration, per activation. */
+interface ToolDurationWatch {
+  tool: string;
+  toolCallId?: string;
+  startMs: number;
+  warned: boolean;
+  timer: ReturnType<typeof setInterval>;
+}
 
 /**
  * Pi's own non-local extension source prefixes. The legacy CLI passes these straight to
@@ -784,6 +816,19 @@ export interface NativeActivationHostDeps {
    * definition and then compare a definition no user has.
    */
   admission?: (specialist: unknown, tier: string, toolContract: ResolvedToolContract) => void;
+  /**
+   * Stall detection thresholds, shared with the legacy supervisor path (SPECIALISTS-102).
+   * Only `tool_duration_warn_ms` is read here; the running/waiting reasons stay
+   * legacy-only and are never emitted by this host.
+   *
+   * This is an explicit host-level OVERRIDE: when provided it wins over the
+   * specialist spec (operator/test policy beats packaged default). When omitted the
+   * host resolves the threshold from the dispatched spec's `stall_detection`
+   * (same source legacy `sp run` uses), falling back to STALL_DETECTION_DEFAULTS.
+   * Either way production honours a configured threshold with no construction-site
+   * change, because the host resolves the spec itself on every dispatch.
+   */
+  stallDetection?: StallDetectionConfig;
 }
 
 /** Configuration for pushing interactions to a Claude coordinator. */
@@ -838,6 +883,37 @@ export class NativeActivationHost {
   private readonly lastUsageSeen = new WeakMap<object, Record<string, number>>();
 
   /**
+   * Active tool_duration watches, keyed by ACTIVATION id (SPECIALISTS-102).
+   *
+   * Activation-keyed, never session-keyed: the fallback walk, retry() and resume()
+   * all replace record.session under the SAME activation id, and none of those sites
+   * touches this map — so a replacement can never rebuild or reset the watch, and
+   * at-most-once holds ACROSS attempts (a new attempt arms a new watch only when a
+   * new tool call starts). In production no live watch spans a replacement:
+   * publishTerminalSettlement clears it on every runToSettled terminal leg, the
+   * fallback continues same-attempt, and retry()/resume() start new attempts
+   * post-settle. The synthetic session-swap test pins this keying invariant at
+   * unit level; it is not production traversal of those sites. Entries die on tool
+   * end, on terminal settle (publishTerminalSettlement) and on stop(); the timer
+   * is unref'd so a missed stop can never pin this long-lived process.
+   */
+  private readonly toolDurationWatch = new Map<string, ToolDurationWatch>();
+  /** Warn threshold fallback when an activation has no resolved entry; dep or shared default. */
+  private readonly toolDurationWarnMs: number;
+  /** Explicit host-level override; undefined when no dep was provided (spec applies). */
+  private readonly toolDurationWarnMsByDep: number | undefined;
+  /**
+   * Per-activation warn threshold, resolved once at dispatch (SPECIALISTS-102
+   * parity follow-up): explicit host dep > specialist spec > shared default.
+   *
+   * Lifetime follows the REGISTRY, not the watch: entries are set in start() and
+   * deleted only in stop() (the sole registry.remove site), so retry()/resume()
+   * legs — new attempts under the same activation id — keep the spec threshold
+   * without re-resolving anything. A tool end clears the watch but never this.
+   */
+  private readonly toolDurationWarnMsByActivation = new Map<string, number>();
+
+  /**
    * One transport for the whole host. Messages carry their own activationId, so a single
    * instance serves every child and the parent enumerates asks across the Fleet in one
    * place rather than walking activations.
@@ -862,6 +938,8 @@ export class NativeActivationHost {
     this.authority = deps.authority ?? NULL_AUTHORITY_WRITER;
     this.settlements = deps.settlements ?? createFileSettlementStore(join(this.cwd, '.specialists', 'settlements'));
     this.admission = deps.admission ?? ((candidate, tier, contract) => validateBeforeRun(candidate as never, tier, contract));
+    this.toolDurationWarnMs = normalizeToolDurationWarnMs(deps.stallDetection?.tool_duration_warn_ms) ?? STALL_DETECTION_DEFAULTS.tool_duration_warn_ms;
+    this.toolDurationWarnMsByDep = normalizeToolDurationWarnMs(deps.stallDetection?.tool_duration_warn_ms);
     this.env = deps.env ?? process.env;
   }
 
@@ -982,6 +1060,20 @@ export class NativeActivationHost {
 
     const execution = specialist.specialist.execution;
     const tier = execution.permission_required ?? 'READ_ONLY';
+
+    // SPECIALISTS-102 parity follow-up: honour the specialist's configured threshold
+    // exactly like legacy `sp run` (launch.ts:96 passes spec stall_detection to the
+    // Supervisor). Precedence: explicit host dep (operator/test override) > spec >
+    // shared default. The production construction sites need no change: the host
+    // resolves the spec itself on every dispatch, so a configured threshold reaches
+    // native the same way it reaches legacy.
+    const specToolDurationWarnMs = specialist.specialist.stall_detection?.tool_duration_warn_ms;
+    this.toolDurationWarnMsByActivation.set(
+      activationId,
+      this.toolDurationWarnMsByDep
+        ?? normalizeToolDurationWarnMs(specToolDurationWarnMs)
+        ?? STALL_DETECTION_DEFAULTS.tool_duration_warn_ms,
+    );
 
     // Readers and writers are both admitted. A write tier does not gate admission here; it
     // selects the LEASE path below, and the lease is what makes a single writer safe. The
@@ -1978,9 +2070,99 @@ export class NativeActivationHost {
       case 'compaction_end':
         emit('compaction_completed', { reason: event.reason, aborted: event.aborted });
         break;
+      case 'tool_execution_start':
+        // SPECIALISTS-102: feed the tool_duration checker. No forensic emit here —
+        // the checker emits at most once per call, only when it runs over threshold.
+        this.noteToolStart(snapshot, event);
+        break;
+      case 'tool_execution_end':
+        this.noteToolEnd(snapshot.activationId, event);
+        break;
       default:
         break;
     }
+  }
+
+  /**
+   * Record the start of one tool call for the tool_duration checker (SPECIALISTS-102).
+   *
+   * A repeat start for the SAME in-flight call (streaming duplicate) keeps its original
+   * start time and warned flag; a genuinely new call replaces the dead one. The poll
+   * timer is per activation and is created lazily, so tool-less activations never tick.
+   */
+  private noteToolStart(snapshot: ActivationSnapshot, event: PiAgentSessionEvent): void {
+    // A tool executes only inside a live turn. Stray starts arriving after settle
+    // (replay skew, late delivery) must not arm a watch nobody will end.
+    if (snapshot.state !== 'starting' && snapshot.state !== 'running') return;
+    const tool = typeof event.toolName === 'string' && event.toolName.length > 0 ? event.toolName : 'unknown';
+    const toolCallId = typeof event.toolCallId === 'string' && event.toolCallId.length > 0 ? event.toolCallId : undefined;
+    const existing = this.toolDurationWatch.get(snapshot.activationId);
+    if (existing && toolCallId !== undefined && existing.toolCallId === toolCallId) return;
+    if (existing) clearInterval(existing.timer);
+    const timer = setInterval(() => this.checkToolDuration(snapshot.activationId), TOOL_DURATION_CHECK_INTERVAL_MS);
+    timer.unref();
+    this.toolDurationWatch.set(snapshot.activationId, { tool, toolCallId, startMs: this.now(), warned: false, timer });
+  }
+
+  /** Clear the watch when the tool call ends; a stray end never kills a live call. */
+  private noteToolEnd(activationId: string, event: PiAgentSessionEvent): void {
+    const watch = this.toolDurationWatch.get(activationId);
+    if (!watch) return;
+    const toolCallId = typeof event.toolCallId === 'string' && event.toolCallId.length > 0 ? event.toolCallId : undefined;
+    if (toolCallId !== undefined && watch.toolCallId !== undefined && watch.toolCallId !== toolCallId) return;
+    this.stopToolDurationWatch(activationId);
+  }
+
+  /**
+   * One checker tick: warn at most once per tool call (SPECIALISTS-102) via the
+   * warned flag. Driven by the interval in production and directly (with the
+   * injected clock) in tests. Cross-leg attempt attribution of the emitted row
+   * is owned by SPECIALISTS-113; no claim is made here about which attempt a
+   * spanning call would be attributed to.
+   */
+  private checkToolDuration(activationId: string): void {
+    const watch = this.toolDurationWatch.get(activationId);
+    if (!watch || watch.warned) return;
+    // Per-activation resolution from start(): dep > spec > shared default.
+    const thresholdMs = this.toolDurationWarnMsByActivation.get(activationId) ?? this.toolDurationWarnMs;
+    const elapsed = this.now() - watch.startMs;
+    if (elapsed <= thresholdMs) return;
+    watch.warned = true;
+    const record = this.registry.get(activationId);
+    // No record (stopped/disposed) means nobody can attribute the row: drop it and the watch.
+    // Same when the turn is no longer live: settle/failure already ended watching below,
+    // so a surviving entry is skew — drop it rather than warning a dead activation.
+    if (!record || (record.snapshot.state !== 'starting' && record.snapshot.state !== 'running')) {
+      this.stopToolDurationWatch(activationId);
+      return;
+    }
+    try {
+      this.forensics.emit({
+        activationId,
+        attemptId: record.snapshot.attemptId,
+        participantId: record.snapshot.participantId,
+        specialist: record.snapshot.specialist,
+        beadId: record.snapshot.issueRef,
+        name: 'stale_warning',
+        payload: {
+          reason: 'tool_duration',
+          silence_ms: elapsed,
+          threshold_ms: thresholdMs,
+          tool: watch.tool,
+        },
+      });
+    } catch {
+      // A timer callback must never throw into the host: forensic evidence
+      // never alters activation behaviour (same rule as onSessionEvent).
+    }
+  }
+
+  /** Clear the poll timer and drop the watch. Idempotent; safe on every exit path. */
+  private stopToolDurationWatch(activationId: string): void {
+    const watch = this.toolDurationWatch.get(activationId);
+    if (!watch) return;
+    clearInterval(watch.timer);
+    this.toolDurationWatch.delete(activationId);
   }
 
   private async runToSettled(
@@ -2180,6 +2362,11 @@ export class NativeActivationHost {
     } catch {
       // Settlement evidence never fails an activation.
     }
+    // Terminal settle ends duration watching for this activation (SPECIALISTS-102):
+    // the single call site all three runToSettled terminal legs funnel through.
+    // Intermediate fallback failures also land here; the walk restarts the watch
+    // lazily on the next tool start, which is a NEW call and warns at most once.
+    this.stopToolDurationWatch(snapshot.activationId);
   }
 
   /**
@@ -2665,6 +2852,10 @@ export class NativeActivationHost {
     try {
       await record.session.abort();
     } finally {
+      // Explicit disposal ends duration watching: no timer survives activation end.
+      // The per-activation threshold dies with the registry entry (same lifetime).
+      this.stopToolDurationWatch(activationId);
+      this.toolDurationWarnMsByActivation.delete(activationId);
       record.unsubscribe();
       record.session.dispose();
       record.snapshot.state = 'stopped';

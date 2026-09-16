@@ -17863,6 +17863,16 @@ function createStatusChangeEvent(status, previousStatus) {
     ...previousStatus !== undefined ? { previous_status: previousStatus } : {}
   };
 }
+function createStaleWarningEvent(reason, options) {
+  return {
+    t: Date.now(),
+    type: TIMELINE_EVENT_TYPES.STALE_WARNING,
+    reason,
+    silence_ms: options.silence_ms,
+    threshold_ms: options.threshold_ms,
+    ...options.tool !== undefined ? { tool: options.tool } : {}
+  };
+}
 function createTokenUsageEvent(token_usage, source) {
   return {
     t: Date.now(),
@@ -19750,6 +19760,14 @@ function resolveBareLogicalSkill(skillName, consumerRoot) {
 }
 
 // src/specialist/loader.ts
+var STALL_DETECTION_DEFAULTS = {
+  running_silence_warn_ms: 60000,
+  running_silence_error_ms: 300000,
+  waiting_stale_ms: 3600000,
+  waiting_auto_close_ms: 0,
+  tool_duration_warn_ms: 120000
+};
+
 class SpecialistMissingModelError extends Error {
   specialistName;
   constructor(specialistName) {
@@ -22022,6 +22040,16 @@ function mapNativeLifecycleEvent(event, context, t = Date.now()) {
         tool_calls: context.toolCalls,
         final: true
       }), t);
+    case "stale_warning": {
+      const payload = record(event.payload);
+      const reason = stringField2(payload?.reason);
+      const tool = stringField2(payload?.tool);
+      return at(createStaleWarningEvent(reason ?? "tool_duration", {
+        silence_ms: numberField2(payload?.silence_ms) ?? 0,
+        threshold_ms: numberField2(payload?.threshold_ms) ?? 0,
+        ...tool !== undefined ? { tool } : {}
+      }), t);
+    }
     default:
       return null;
   }
@@ -22828,6 +22856,10 @@ function extractTokenUsage(event) {
   return;
 }
 var WRITE_TIERS = new Set(["MEDIUM", "HIGH"]);
+var TOOL_DURATION_CHECK_INTERVAL_MS = 1e4;
+function normalizeToolDurationWarnMs(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
 var NON_LOCAL_EXTENSION_PREFIXES = ["npm:", "git:", "github:", "http:", "https:", "ssh:"];
 function isNonLocalExtensionSource(source) {
   return NON_LOCAL_EXTENSION_PREFIXES.some((prefix) => source.startsWith(prefix));
@@ -23049,6 +23081,10 @@ class NativeActivationHost {
   env;
   registry = new FleetRegistry;
   lastUsageSeen = new WeakMap;
+  toolDurationWatch = new Map;
+  toolDurationWarnMs;
+  toolDurationWarnMsByDep;
+  toolDurationWarnMsByActivation = new Map;
   interactions;
   constructor(deps = {}) {
     this.cwd = deps.cwd ?? process.cwd();
@@ -23061,6 +23097,8 @@ class NativeActivationHost {
     this.authority = deps.authority ?? NULL_AUTHORITY_WRITER;
     this.settlements = deps.settlements ?? createFileSettlementStore(join20(this.cwd, ".specialists", "settlements"));
     this.admission = deps.admission ?? ((candidate, tier, contract) => validateBeforeRun(candidate, tier, contract));
+    this.toolDurationWarnMs = normalizeToolDurationWarnMs(deps.stallDetection?.tool_duration_warn_ms) ?? STALL_DETECTION_DEFAULTS.tool_duration_warn_ms;
+    this.toolDurationWarnMsByDep = normalizeToolDurationWarnMs(deps.stallDetection?.tool_duration_warn_ms);
     this.env = deps.env ?? process.env;
   }
   async start(request) {
@@ -23119,6 +23157,8 @@ class NativeActivationHost {
       return reject("unknown_specialist");
     const execution = specialist.specialist.execution;
     const tier = execution.permission_required ?? "READ_ONLY";
+    const specToolDurationWarnMs = specialist.specialist.stall_detection?.tool_duration_warn_ms;
+    this.toolDurationWarnMsByActivation.set(activationId, this.toolDurationWarnMsByDep ?? normalizeToolDurationWarnMs(specToolDurationWarnMs) ?? STALL_DETECTION_DEFAULTS.tool_duration_warn_ms);
     const access = WRITE_TIERS.has(tier) ? "write" : "read";
     const workspace = resolveWorkspace(this.cwd);
     let workItems;
@@ -23734,9 +23774,76 @@ class NativeActivationHost {
       case "compaction_end":
         emit("compaction_completed", { reason: event.reason, aborted: event.aborted });
         break;
+      case "tool_execution_start":
+        this.noteToolStart(snapshot, event);
+        break;
+      case "tool_execution_end":
+        this.noteToolEnd(snapshot.activationId, event);
+        break;
       default:
         break;
     }
+  }
+  noteToolStart(snapshot, event) {
+    if (snapshot.state !== "starting" && snapshot.state !== "running")
+      return;
+    const tool = typeof event.toolName === "string" && event.toolName.length > 0 ? event.toolName : "unknown";
+    const toolCallId = typeof event.toolCallId === "string" && event.toolCallId.length > 0 ? event.toolCallId : undefined;
+    const existing = this.toolDurationWatch.get(snapshot.activationId);
+    if (existing && toolCallId !== undefined && existing.toolCallId === toolCallId)
+      return;
+    if (existing)
+      clearInterval(existing.timer);
+    const timer = setInterval(() => this.checkToolDuration(snapshot.activationId), TOOL_DURATION_CHECK_INTERVAL_MS);
+    timer.unref();
+    this.toolDurationWatch.set(snapshot.activationId, { tool, toolCallId, startMs: this.now(), warned: false, timer });
+  }
+  noteToolEnd(activationId, event) {
+    const watch = this.toolDurationWatch.get(activationId);
+    if (!watch)
+      return;
+    const toolCallId = typeof event.toolCallId === "string" && event.toolCallId.length > 0 ? event.toolCallId : undefined;
+    if (toolCallId !== undefined && watch.toolCallId !== undefined && watch.toolCallId !== toolCallId)
+      return;
+    this.stopToolDurationWatch(activationId);
+  }
+  checkToolDuration(activationId) {
+    const watch = this.toolDurationWatch.get(activationId);
+    if (!watch || watch.warned)
+      return;
+    const thresholdMs = this.toolDurationWarnMsByActivation.get(activationId) ?? this.toolDurationWarnMs;
+    const elapsed = this.now() - watch.startMs;
+    if (elapsed <= thresholdMs)
+      return;
+    watch.warned = true;
+    const record2 = this.registry.get(activationId);
+    if (!record2 || record2.snapshot.state !== "starting" && record2.snapshot.state !== "running") {
+      this.stopToolDurationWatch(activationId);
+      return;
+    }
+    try {
+      this.forensics.emit({
+        activationId,
+        attemptId: record2.snapshot.attemptId,
+        participantId: record2.snapshot.participantId,
+        specialist: record2.snapshot.specialist,
+        beadId: record2.snapshot.issueRef,
+        name: "stale_warning",
+        payload: {
+          reason: "tool_duration",
+          silence_ms: elapsed,
+          threshold_ms: thresholdMs,
+          tool: watch.tool
+        }
+      });
+    } catch {}
+  }
+  stopToolDurationWatch(activationId) {
+    const watch = this.toolDurationWatch.get(activationId);
+    if (!watch)
+      return;
+    clearInterval(watch.timer);
+    this.toolDurationWatch.delete(activationId);
   }
   async runToSettled(snapshot, session, initialPrompt, emit, record2) {
     try {
@@ -23875,6 +23982,7 @@ class NativeActivationHost {
         emit
       });
     } catch {}
+    this.stopToolDurationWatch(snapshot.activationId);
   }
   async runWithFallback(record2, ctx) {
     let index = ctx.modelIndex;
@@ -24207,6 +24315,8 @@ class NativeActivationHost {
     try {
       await record2.session.abort();
     } finally {
+      this.stopToolDurationWatch(activationId);
+      this.toolDurationWarnMsByActivation.delete(activationId);
       record2.unsubscribe();
       record2.session.dispose();
       record2.snapshot.state = "stopped";
@@ -24657,6 +24767,11 @@ function statusForSessionEvent(type, current) {
     return "waiting";
   return current;
 }
+var ERROR_STATUS_LIFECYCLE = new Set([
+  "activation_failed",
+  "activation_rejected",
+  "output_validation_failed"
+]);
 function identityOf(state) {
   return { attemptId: state.attemptId, attemptNo: state.attemptNo };
 }
@@ -24736,7 +24851,7 @@ function createActivationForensicSink(observability) {
         if (completedOutput !== undefined)
           state.latestOutput = completedOutput;
         states.set(event.activationId, state);
-        const error = stringValue(event.payload?.error) ?? stringValue(event.payload?.reason);
+        const error = stringValue(event.payload?.error) ?? (ERROR_STATUS_LIFECYCLE.has(event.name) ? stringValue(event.payload?.reason) : undefined);
         const timelineEvent = mapNativeLifecycleEvent(event, {
           startedAtMs: state.startedAtMs,
           workspacePath: state.workspacePath,

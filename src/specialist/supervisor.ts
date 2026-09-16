@@ -57,7 +57,7 @@ type ActivePiSession = {
   close(): Promise<void>;
   kill(reason?: Error): void;
 };
-import type { StallDetectionConfig } from './loader.js';
+import { STALL_DETECTION_DEFAULTS, type StallDetectionConfig } from './loader.js';
 import { createObservabilitySqliteClient, type ObservabilitySqliteClient } from './observability-sqlite.js';
 import { resolveObservabilityDbLocation } from './observability-db.js';
 import { resolveChainId } from './epic-lifecycle.js';
@@ -89,14 +89,6 @@ export function projectMandatoryRulesInjection(
     outcome: data.outcome ?? 'full',
   };
 }
-
-export const STALL_DETECTION_DEFAULTS: Required<StallDetectionConfig> = {
-  running_silence_warn_ms: 60_000,
-  running_silence_error_ms: 300_000,
-  waiting_stale_ms: 3_600_000,
-  waiting_auto_close_ms: 0,
-  tool_duration_warn_ms: 120_000,
-};
 
 const WAITING_AUTO_CLOSE_GRACE_MS = 5_000;
 

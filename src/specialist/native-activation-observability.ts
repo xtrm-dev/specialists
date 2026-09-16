@@ -6,6 +6,7 @@ import {
   createRunStartEvent,
   createControlSignalEvent,
   createSettlementEvent,
+  createStaleWarningEvent,
   createStatusChangeEvent,
   createTokenUsageEvent,
   createTurnSummaryEvent,
@@ -13,6 +14,7 @@ import {
   TIMELINE_EVENT_TYPES,
   type SettlementTimelineType,
   type TimelineEvent,
+  type TimelineEventStaleWarning,
   type TimelineTokenUsage,
 } from './timeline-events.js';
 
@@ -458,6 +460,19 @@ export function mapNativeLifecycleEvent(
         tool_calls: context.toolCalls,
         final: true,
       }), t);
+    // SPECIALISTS-102: the native tool_duration producer (NativeActivationHost
+    // duration checker) reaches the durable store through this arm. The oracle's
+    // emitPayload carries no `reason`, so it defaults to 'tool_duration' here.
+    case 'stale_warning': {
+      const payload = record(event.payload);
+      const reason = stringField(payload?.reason) as TimelineEventStaleWarning['reason'] | undefined;
+      const tool = stringField(payload?.tool);
+      return at(createStaleWarningEvent(reason ?? 'tool_duration', {
+        silence_ms: numberField(payload?.silence_ms) ?? 0,
+        threshold_ms: numberField(payload?.threshold_ms) ?? 0,
+        ...(tool !== undefined ? { tool } : {}),
+      }), t);
+    }
     default:
       // Runtime safety is unchanged: an unknown name still drops without crashing the writer.
       // Totality is a TEST-time obligation enforced by native-mapper-totality.test.ts.

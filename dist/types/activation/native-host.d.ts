@@ -32,7 +32,7 @@
  * Session lifetime deliberately exceeds turn lifetime: reaching `agent_settled` makes a
  * Specialist *waiting and resumable*, never disposed. Disposal is an explicit act.
  */
-import { SpecialistLoader } from '../specialist/loader.js';
+import { SpecialistLoader, type StallDetectionConfig } from '../specialist/loader.js';
 import { type ResolvedToolContract } from '../specialist/resolved-tool-contract.js';
 import { type SpecialistWorkItemBoundary } from './workitem-store.js';
 import { type InteractionMessage, type PendingAsk } from './interaction.js';
@@ -406,6 +406,19 @@ export interface NativeActivationHostDeps {
      * definition and then compare a definition no user has.
      */
     admission?: (specialist: unknown, tier: string, toolContract: ResolvedToolContract) => void;
+    /**
+     * Stall detection thresholds, shared with the legacy supervisor path (SPECIALISTS-102).
+     * Only `tool_duration_warn_ms` is read here; the running/waiting reasons stay
+     * legacy-only and are never emitted by this host.
+     *
+     * This is an explicit host-level OVERRIDE: when provided it wins over the
+     * specialist spec (operator/test policy beats packaged default). When omitted the
+     * host resolves the threshold from the dispatched spec's `stall_detection`
+     * (same source legacy `sp run` uses), falling back to STALL_DETECTION_DEFAULTS.
+     * Either way production honours a configured threshold with no construction-site
+     * change, because the host resolves the spec itself on every dispatch.
+     */
+    stallDetection?: StallDetectionConfig;
 }
 /** Configuration for pushing interactions to a Claude coordinator. */
 export interface PeerDelivery {
@@ -453,6 +466,36 @@ export declare class NativeActivationHost {
      * keeps the same snapshot so counters continue across attempts by construction.
      */
     private readonly lastUsageSeen;
+    /**
+     * Active tool_duration watches, keyed by ACTIVATION id (SPECIALISTS-102).
+     *
+     * Activation-keyed, never session-keyed: the fallback walk, retry() and resume()
+     * all replace record.session under the SAME activation id, and none of those sites
+     * touches this map — so a replacement can never rebuild or reset the watch, and
+     * at-most-once holds ACROSS attempts (a new attempt arms a new watch only when a
+     * new tool call starts). In production no live watch spans a replacement:
+     * publishTerminalSettlement clears it on every runToSettled terminal leg, the
+     * fallback continues same-attempt, and retry()/resume() start new attempts
+     * post-settle. The synthetic session-swap test pins this keying invariant at
+     * unit level; it is not production traversal of those sites. Entries die on tool
+     * end, on terminal settle (publishTerminalSettlement) and on stop(); the timer
+     * is unref'd so a missed stop can never pin this long-lived process.
+     */
+    private readonly toolDurationWatch;
+    /** Warn threshold fallback when an activation has no resolved entry; dep or shared default. */
+    private readonly toolDurationWarnMs;
+    /** Explicit host-level override; undefined when no dep was provided (spec applies). */
+    private readonly toolDurationWarnMsByDep;
+    /**
+     * Per-activation warn threshold, resolved once at dispatch (SPECIALISTS-102
+     * parity follow-up): explicit host dep > specialist spec > shared default.
+     *
+     * Lifetime follows the REGISTRY, not the watch: entries are set in start() and
+     * deleted only in stop() (the sole registry.remove site), so retry()/resume()
+     * legs — new attempts under the same activation id — keep the spec threshold
+     * without re-resolving anything. A tool end clears the watch but never this.
+     */
+    private readonly toolDurationWarnMsByActivation;
     /**
      * One transport for the whole host. Messages carry their own activationId, so a single
      * instance serves every child and the parent enumerates asks across the Fleet in one
@@ -504,6 +547,26 @@ export declare class NativeActivationHost {
      * that was merely pausing.
      */
     private onSessionEvent;
+    /**
+     * Record the start of one tool call for the tool_duration checker (SPECIALISTS-102).
+     *
+     * A repeat start for the SAME in-flight call (streaming duplicate) keeps its original
+     * start time and warned flag; a genuinely new call replaces the dead one. The poll
+     * timer is per activation and is created lazily, so tool-less activations never tick.
+     */
+    private noteToolStart;
+    /** Clear the watch when the tool call ends; a stray end never kills a live call. */
+    private noteToolEnd;
+    /**
+     * One checker tick: warn at most once per tool call (SPECIALISTS-102) via the
+     * warned flag. Driven by the interval in production and directly (with the
+     * injected clock) in tests. Cross-leg attempt attribution of the emitted row
+     * is owned by SPECIALISTS-113; no claim is made here about which attempt a
+     * spanning call would be attributed to.
+     */
+    private checkToolDuration;
+    /** Clear the poll timer and drop the watch. Idempotent; safe on every exit path. */
+    private stopToolDurationWatch;
     private runToSettled;
     /**
      * S1 automatic settlement publication (ADR §38).

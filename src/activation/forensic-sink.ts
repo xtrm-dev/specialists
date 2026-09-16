@@ -89,6 +89,21 @@ function statusForSessionEvent(type: string, current: SupervisorJobStatus): Supe
   return current;
 }
 
+/**
+ * Lifecycle events whose payload `reason` is genuine error text.
+ *
+ * Exactly the events that move the activation to error status (see
+ * statusForLifecycle): a rejection/failure reason IS the error, while a warning
+ * or lifecycle reason (stale_warning, compaction_*, lease_denied, lease_released,
+ * activation_disposed) is not. Those keep their detail in their forensic rows;
+ * the status row stays error-free until something actually fails.
+ */
+const ERROR_STATUS_LIFECYCLE = new Set([
+  'activation_failed',
+  'activation_rejected',
+  'output_validation_failed',
+]);
+
 function identityOf(state: ActivationProjectionState): ObservabilityIdentityProjection {
   return { attemptId: state.attemptId, attemptNo: state.attemptNo };
 }
@@ -203,7 +218,16 @@ export function createActivationForensicSink(
         if (completedOutput !== undefined) state.latestOutput = completedOutput;
         states.set(event.activationId, state);
 
-        const error = stringValue(event.payload?.error) ?? stringValue(event.payload?.reason);
+        // `reason` is a diagnostic discriminator, not an error: legacy only writes
+        // status.error on genuinely failed runs (appendTimelineEvent never calls
+        // setStatus). Project it as error text ONLY when the event itself moves the
+        // activation to error status — otherwise a healthy running activation would
+        // carry error:"tool_duration" (stale_warning, SPECIALISTS-102) or
+        // error:"<compaction reason>" while still running, which operators read as
+        // failure (status.ts prints job.error on ANY status). Keep in sync with the
+        // 'error' arm of statusForLifecycle above.
+        const error = stringValue(event.payload?.error)
+          ?? (ERROR_STATUS_LIFECYCLE.has(event.name) ? stringValue(event.payload?.reason) : undefined);
         const timelineEvent = mapNativeLifecycleEvent(event, {
           startedAtMs: state.startedAtMs,
           workspacePath: state.workspacePath,
