@@ -22623,6 +22623,36 @@ var NON_LOCAL_EXTENSION_PREFIXES = ["npm:", "git:", "github:", "http:", "https:"
 function isNonLocalExtensionSource(source) {
   return NON_LOCAL_EXTENSION_PREFIXES.some((prefix) => source.startsWith(prefix));
 }
+var defaultExtensionSourceResolutionEnv = {
+  globalNodeModulesDir: resolveGlobalNodeModulesDir2,
+  manifestExists: (packagePath) => existsSync20(join20(packagePath, "package.json"))
+};
+function resolveNpmExtensionSource(source, env = defaultExtensionSourceResolutionEnv) {
+  const packageName = parseNpmSourceName(source);
+  if (!packageName)
+    return null;
+  const globalDir = env.globalNodeModulesDir();
+  if (!globalDir)
+    return null;
+  const packagePath = join20(globalDir, packageName);
+  return env.manifestExists(packagePath) ? packagePath : null;
+}
+function resolveDeclaredExtensionSources(sources, env = defaultExtensionSourceResolutionEnv) {
+  const local = [];
+  const skipped = [];
+  for (const source of sources) {
+    if (!isNonLocalExtensionSource(source)) {
+      local.push(source);
+      continue;
+    }
+    const installed = resolveNpmExtensionSource(source, env);
+    if (installed)
+      local.push(installed);
+    else
+      skipped.push(source);
+  }
+  return { local, skipped };
+}
 function resolveWorkspace(cwd) {
   return { repositoryRoot: cwd, worktreePath: cwd };
 }
@@ -23048,14 +23078,10 @@ class NativeActivationHost {
       resolvedToolContract: toolContract
     });
     const declaredExtensions = extensionSelection.extensionSources;
-    const declaredLocalExtensions = [];
-    for (const source of declaredExtensions) {
-      if (isNonLocalExtensionSource(source)) {
-        process.stderr.write(`[specialists] native activation: extension source '${source}' is not a filesystem path; ` + `the in-process resource loader cannot load it, so it is not injected.
+    const { local: declaredLocalExtensions, skipped: skippedDeclaredSources } = resolveDeclaredExtensionSources(declaredExtensions);
+    for (const source of skippedDeclaredSources) {
+      process.stderr.write(`[specialists] native activation: extension source '${source}' is not a filesystem path; ` + `the in-process resource loader cannot load it, so it is not injected.
 `);
-        continue;
-      }
-      declaredLocalExtensions.push(source);
     }
     const { kept: dynamicExtensions, dropped: droppedExtensions } = deduplicateExtensionSources(curatedExtensions.dedupeAgainstDynamic, declaredLocalExtensions);
     for (const { dropped, keptAs } of droppedExtensions) {

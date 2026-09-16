@@ -49,8 +49,39 @@ import { type ActivationHandle, type ActivationRequest, type ActivationSnapshot,
  * is real as a CHECKED shape (`native == legacy minus non-local sources`) instead of skipping
  * the field entirely — a whole-field skip also hides a divergence in the sources both runtimes
  * CAN load (XTRM-84 section 5).
+ *
+ * "Non-local" is not the same as "unloadable" here: an `npm:<pkg>` source is resolvable to
+ * the installed package directory by `resolveNpmExtensionSource`, so the native path loads it
+ * rather than skipping it. Only the sources with no local form (`git:`, `http:`, and an `npm:`
+ * package that is not installed) are reported and skipped.
  */
 export declare function isNonLocalExtensionSource(source: string): boolean;
+/**
+ * Resolve a declared `npm:<pkg>[@<spec>]` source to the installed package directory.
+ *
+ * Returns null unless the package is installed with a readable manifest, so a missing
+ * package still takes the reported-and-skipped path instead of being handed to the loader
+ * as a path that cannot exist. The spec/version is ignored on purpose: the loader wants a
+ * directory, and package pinning is the catalog layer's job, not this one's.
+ *
+ * Injectable so tests can pin the node_modules root instead of inheriting whatever the
+ * machine has installed (the same discipline `resolveCuratedExtensionPaths` follows).
+ */
+export interface ExtensionSourceResolutionEnv {
+    globalNodeModulesDir: () => string | undefined;
+    manifestExists: (packagePath: string) => boolean;
+}
+export declare function resolveNpmExtensionSource(source: string, env?: ExtensionSourceResolutionEnv): string | null;
+/**
+ * Split declared `execution.extensions` sources into the ones the in-process resource
+ * loader can take and the ones it cannot. Local paths pass through untouched; `npm:`
+ * sources are resolved to their installed directory when possible; everything else that is
+ * non-local (`git:`, `http:`) is skipped.
+ */
+export declare function resolveDeclaredExtensionSources(sources: readonly string[], env?: ExtensionSourceResolutionEnv): {
+    local: string[];
+    skipped: string[];
+};
 /**
  * The activation's `cwd` and `agentDir` feed pi's resource loader, which is the ONLY
  * seam through which skills, extensions, prompt templates, themes and context files
