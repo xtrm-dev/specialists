@@ -10,8 +10,8 @@
 | Node | Work item | Activation | State | Commit |
 |---|---|---|---|---|
 | **N0** type extraction | Substrate `SPECIALISTS-77` (`iss_01a0a95a-c577-…`) | `act:758931b7-9ce` | **DONE, verified** | `7aa05abb` |
-| **N2A** result identity | Substrate `SPECIALISTS-78` (`iss_01a0a964-8c97-…`) | `act:47a2b74f-a25` | in progress | — |
-| **N2B** ps observability | not yet created | — | pending | — |
+| **N2A** result identity | Substrate `SPECIALISTS-78` (`iss_01a0a964-8c97-…`) | `act:47a2b74f-a25` | **DONE, verified** | `77a76bf2` |
+| **N2B** ps observability | Substrate `SPECIALISTS-80` (`iss_01a0a96b-9ac9-…`) | `act:51b14a21-af0` | in progress | — |
 
 ---
 
@@ -116,6 +116,76 @@ rather than the Substrate issue, having looked for `SPECIALISTS-77` in `bd`.
 
 ---
 
+## N2A — parse native activation identities atomically
+
+**Contract:** inline, `SCRUTINY: MEDIUM`, carrying the empirically measured identity grammar and an
+explicit ban on git writes (added after N0's executor pushed without authorization).
+
+### The defect
+
+`src/cli/result.ts:93-98` rewrote any ref containing a colon into a node/member pair, so native ids
+— which are minted with colons deliberately (`native-host.ts:507-508`) — were destroyed.
+
+### Before-baseline, captured by the coordinator before the executor touched the file
+
+```
+$ sp result act:758931b7-9ce      -> No node matching ref: act
+$ sp result att:758931b7-9ce:1    -> No node matching ref: att
+$ sp result 00270d                -> works (legacy path)
+```
+
+Using `act:758931b7-9ce` (a real settled activation with a `specialist_jobs` row) rather than a
+fabricated id makes this evidence that the defect is in **parsing**, not in missing data.
+
+### What was implemented
+
+Grammar encoded once in `src/cli/result.ts`, with the rule and its rationale documented next to the
+parse:
+
+```
+legacy job id (no colon)                  -> preserved
+act:<core>       core non-empty, no ':'   -> preserved, NOT split
+att:<core>:<n>   <n> digits               -> preserved, mapped to act:<core> for lookup
+<node>:<member>  not starting act:/att:   -> split on first colon (unchanged)
+any other act:/att: ref                   -> explicit error, never a node lookup
+```
+
+**The `att:` problem was solved rather than assumed away.** `att:` is an attempt *axis*, not a second
+id space — the measured store has **zero** `specialist_jobs` rows keyed by an `att:` id; the column
+`attempt_id` sits on the `act:` row. The implementation therefore maps `att:<core>:<n>` to
+`act:<core>` for the storage lookup instead of inventing a row that does not exist.
+
+### Verification (coordinator-run, exit codes captured without a pipeline)
+
+| ref | exit | result |
+|---|---|---|
+| `act:758931b7-9ce` | **0** | 6111 B stdout, renders the real N0 result |
+| `att:758931b7-9ce:1` | **0** | 6111 B, **byte-identical** to the `act:` form (`cmp`) |
+| `00270d` | **0** | 245 B, legacy path unchanged |
+| `node-1:some-member` | 1 | `No node matching ref: node-1` — legacy split **preserved** |
+| `act:` | 1 | `Error: invalid activation id 'act:': expected 'act:<id>'` |
+| `att:foo` | 1 | `Error: invalid attempt id 'att:foo': expected 'att:<id>:<n>'` |
+| `att::1` | 1 | `Error: invalid attempt id 'att::1': expected 'att:<id>:<n>'` |
+
+| Gate | Result |
+|---|---|
+| `tsc --noEmit` | exit 0 |
+| `tests/unit/cli/result.test.ts` + `tests/integration/cli/result.integration.test.ts` | **26/26 pass** |
+| N0 regression guard (`live-aggregates`, `ps-spawned-by-line`) | **19/19 pass** |
+
+Files changed: `src/cli/result.ts`, `tests/unit/cli/result.test.ts`. Commit `77a76bf2`.
+
+**Process note:** this executor obeyed the no-git-writes constraint — no commit, no push, changes
+left unstaged for coordinator review. That constraint worked and should be carried forward.
+
+### Measurement drift, recorded
+
+The N0 forensic-row count was **404** when the coordinator measured it mid-run and **759** when the
+executor measured it after settlement. Both are correct point-in-time readings. Any count quoted in
+this log is a reading at a stated time, not an invariant.
+
+---
+
 ## Corrections to the audit forced by cutover-prep work
 
 These changed the audit's own conclusions and are recorded in `00-capability-matrix.md`.
@@ -135,8 +205,8 @@ These changed the audit's own conclusions and are recorded in `00-capability-mat
    the wrong end of the correct stream.
 4. **The `sp ps` fix must be identity-based:** native rows now carry no distinct family at all. They
    land in the shared families and are identified only by `job_id = 'act:<uuid>'`. Confirmed live on
-   the N0 activation itself: `act:758931b7-9ce` produced 404 forensic rows across `control`, `job`,
-   `turn`, `model` and `tool`, with `job.started`, `turn.turn`, `model.meta`,
+   the N0 activation itself: `act:758931b7-9ce` produced 404 forensic rows (759 after settlement) across
+   `control`, `job`, `turn`, `model` and `tool`, with `job.started`, `turn.turn`, `model.meta`,
    `tool.call.started/completed`, and `attempt_id = 'att:758931b7-9ce:1'`.
 
 ---
