@@ -3788,4 +3788,91 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
       .toEqual(['npm:absent-pkg']);
     expect(unresolvableNpmSources(['git:github.com/alonw0/pi-claude-link'])).toEqual([]);
   });
+
+  // SPECIALISTS-83: the double session_start is bounded and observable. A dynamic
+  // activation creates exactly two extra fenced sessions (builtin baseline + discovery),
+  // so each enabled extension runs load-time work twice. The `extension_discovery_sessions`
+  // forensic signal states that bound and why; a no-dynamic-source activation creates zero
+  // extra sessions and emits no signal.
+  it('emits the double-session signal on a dynamic activation (SPECIALISTS-83)', async () => {
+    const { sdk, calls, disposed } = discoverySdk({
+      discoveredActive: ['ext_tool_a'],
+      provenance: { ext_tool_a: 'cli' },
+    });
+    const sink = collectingSink();
+    const host = new NativeActivationHost({
+      loader: loaderFor(specWithExtensions({ '/fake/ext-a': true })),
+      workItems: fakeWorkItems(),
+      forensics: sink,
+      loadSdk: async () => sdk,
+      cwd: hostWorkspace(),
+    });
+    await (await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    })).result;
+    // Detection signal exists and states the bound (2) and why.
+    expect(sink.names).toContain('extension_discovery_sessions');
+    const signal = sink.events.find((e) => e.name === 'extension_discovery_sessions') as unknown as
+      { payload?: Record<string, unknown> } | undefined;
+    expect(signal?.payload?.fenced_sessions).toBe(2);
+    expect(String(signal?.payload?.baseline_session ?? '')).toContain('builtin-enumeration');
+    expect(String(signal?.payload?.discovery_session ?? '')).toContain('extension-discovery');
+    expect(String(signal?.payload?.dynamic_sources ?? '')).toContain('/fake/ext-a');
+    expect(String(signal?.payload?.note ?? '')).toContain('twice');
+    // Bounded: exactly one baseline + one discovery session, both disposed, plus the real one.
+    expect(calls.filter((c) => c.systemPrompt === 'builtin-enumeration (never prompted)')).toHaveLength(1);
+    expect(calls.filter((c) => c.systemPrompt === 'extension-discovery (never prompted)')).toHaveLength(1);
+    expect(calls).toHaveLength(3);
+    expect(disposed.builtin).toEqual([true]);
+    expect(disposed.discovery).toEqual([true]);
+  });
+
+  it('emits no double-session signal and creates zero extra sessions without dynamic sources (SPECIALISTS-83)', async () => {
+    const { sdk, calls } = discoverySdk({ discoveredActive: [] });
+    const sink = collectingSink();
+    const host = new NativeActivationHost({
+      loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems(),
+      forensics: sink,
+      loadSdk: async () => sdk,
+      cwd: hostWorkspace(),
+    });
+    await (await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    })).result;
+    expect(sink.names).not.toContain('extension_discovery_sessions');
+    // Zero extra sessions: exactly one createAgentSession (the real one).
+    expect(calls).toHaveLength(1);
+    expect(calls.filter((c) => c.systemPrompt === 'builtin-enumeration (never prompted)')).toHaveLength(0);
+    expect(calls.filter((c) => c.systemPrompt === 'extension-discovery (never prompted)')).toHaveLength(0);
+  });
+
+  it('creates the baseline session with NO additional extension paths (SPECIALISTS-83 executable veto)', async () => {
+    // Load-bearing for the veto recorded on `enumerateBuiltinToolNames`: the baseline must
+    // be enumerated with the dynamic sources ABSENT. MUTATION-CHECK: move the baseline
+    // enumeration into the source-loaded session (give it the dynamic paths) and this test
+    // FAILS — the veto is enforced by this failing test, not by the comment.
+    const { sdk, calls } = discoverySdk({
+      discoveredActive: ['ext_tool_a'],
+      provenance: { ext_tool_a: 'cli' },
+    });
+    const host = new NativeActivationHost({
+      loader: loaderFor(specWithExtensions({ '/fake/ext-a': true })),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => sdk,
+      cwd: hostWorkspace(),
+    });
+    await (await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    })).result;
+    const builtinCalls = calls.filter((c) => c.systemPrompt === 'builtin-enumeration (never prompted)');
+    expect(builtinCalls).toHaveLength(1);
+    expect(builtinCalls[0]!.paths).toEqual([]);
+    // The discovery session DOES carry the declared sources — the contrast is the point:
+    // baseline source-free, discovery source-loaded, never merged.
+    const discoveryCalls = calls.filter((c) => c.systemPrompt === 'extension-discovery (never prompted)');
+    expect(discoveryCalls).toHaveLength(1);
+    expect(discoveryCalls[0]!.paths).toEqual(['/fake/ext-a']);
+  });
 });

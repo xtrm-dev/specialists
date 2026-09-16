@@ -23096,6 +23096,15 @@ class NativeActivationHost {
       process.stderr.write(`[python-kernel] DEDUP: skipping duplicate extension source '${dropped}' (same as '${keptAs}'; kept '${keptAs}').
 `);
     }
+    const emitDiscoverySessionsSignal = () => {
+      emit("extension_discovery_sessions", {
+        fenced_sessions: 2,
+        baseline_session: "builtin-enumeration (never prompted)",
+        discovery_session: "extension-discovery (never prompted)",
+        dynamic_sources: dynamicExtensions.join(","),
+        note: "builtin baseline enumerated with no dynamic sources so a shadowed builtin stays distinguishable from an extension tool; discovery enumerates the declared sources; each enabled extension runs load-time work twice per activation"
+      });
+    };
     let discovery;
     try {
       discovery = await discoverDynamicExtensionTools({
@@ -23107,7 +23116,11 @@ class NativeActivationHost {
         reservedNames: [...toolContract.nativeTools, ...toolContract.extensionTools, ASK_TOOL, ESCALATE_TOOL],
         allowedRemoteSources: expectedRemoteExtensionLabels(declaredExtensions, skippedDeclaredSources)
       });
+      if (dynamicExtensions.length > 0)
+        emitDiscoverySessionsSignal();
     } catch (error) {
+      if (dynamicExtensions.length > 0)
+        emitDiscoverySessionsSignal();
       const note = error instanceof Error ? error.message : String(error);
       if (note.includes("shadows granted tool")) {
         return reject("extension_tool_shadowed", { note });

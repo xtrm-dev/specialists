@@ -173,6 +173,17 @@ export interface DynamicExtensionDiscovery {
  * also lists platform-gated names such as `powershell`. Never a static list (unitAI-34pyf
  * rejected that pattern for drift).
  *
+ * VETO (SPECIALISTS-83): do NOT merge this enumeration into the discovery session below
+ * and do NOT relocate it into a session that has the dynamic sources loaded. The baseline
+ * must be enumerated with the dynamic sources ABSENT, because in a session with them
+ * loaded a shadowed builtin appears ONCE carrying the extension's source (measured:
+ * `getToolDefinition('write')` returns the extension's tool, source `cli`), so it fails
+ * `BUILTIN_TOOL_SOURCES`, disappears from the baseline set — and a NON-GRANTED builtin
+ * such as `write`/`edit`/`bash` for a READ_ONLY child then becomes pinnable. That is a
+ * widening through the very path that exists to prevent it, and the unit doubles cannot
+ * catch it because they hand-place registry entries. The veto holds REGARDLESS of test
+ * results: a change of that shape must not be accepted even if every test passes.
+ *
  * A session without `getAllTools` yields an empty set. That is safe ONLY when the
  * discovery registry is also unavailable (both-missing): with no provenance map every
  * discovered name falls to `refusedProvenance` and nothing can be pinned — "no baseline

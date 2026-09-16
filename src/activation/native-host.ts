@@ -379,6 +379,17 @@ function provenanceOf(entry: { sourceInfo?: { source?: string }; source?: string
  * also lists platform-gated names such as `powershell`. Never a static list (unitAI-34pyf
  * rejected that pattern for drift).
  *
+ * VETO (SPECIALISTS-83): do NOT merge this enumeration into the discovery session below
+ * and do NOT relocate it into a session that has the dynamic sources loaded. The baseline
+ * must be enumerated with the dynamic sources ABSENT, because in a session with them
+ * loaded a shadowed builtin appears ONCE carrying the extension's source (measured:
+ * `getToolDefinition('write')` returns the extension's tool, source `cli`), so it fails
+ * `BUILTIN_TOOL_SOURCES`, disappears from the baseline set — and a NON-GRANTED builtin
+ * such as `write`/`edit`/`bash` for a READ_ONLY child then becomes pinnable. That is a
+ * widening through the very path that exists to prevent it, and the unit doubles cannot
+ * catch it because they hand-place registry entries. The veto holds REGARDLESS of test
+ * results: a change of that shape must not be accepted even if every test passes.
+ *
  * A session without `getAllTools` yields an empty set. That is safe ONLY when the
  * discovery registry is also unavailable (both-missing): with no provenance map every
  * discovered name falls to `refusedProvenance` and nothing can be pinned — "no baseline
@@ -474,6 +485,10 @@ export async function discoverDynamicExtensionTools(input: {
   allowedRemoteSources: readonly string[];
 }): Promise<DynamicExtensionDiscovery> {
   if (input.dynamicExtensions.length === 0) return EMPTY_DISCOVERY;
+  // SPECIALISTS-83 veto: the baseline stays in its own source-free session (see
+  // `enumerateBuiltinToolNames`). Do not fold it into the source-loaded discovery session
+  // below, even if the doubles still pass — they hand-place registry entries and cannot
+  // catch the shadowed-builtin widening the separate baseline exists to prevent.
   const builtinNames = await enumerateBuiltinToolNames({
     sdk: input.sdk,
     cwd: input.cwd,
@@ -1244,6 +1259,22 @@ export class NativeActivationHost {
     // Discovery runs exactly once per activation, before the effective contract, the prompt,
     // admission and any real session — so a child can never hold more than the contract it
     // was shown, and every real/retry/fallback session pins the identical finalized allowlist.
+    //
+    // SPECIALISTS-83: the double session_start is bounded and observable. A dynamic
+    // activation creates exactly two extra fenced sessions (the builtin baseline above plus
+    // the discovery session below), so each enabled extension runs its load-time work twice
+    // per activation. The `extension_discovery_sessions` forensic signal states that bound
+    // and why, so an operator or forensic reader can see the cost; a no-dynamic-source
+    // activation creates zero extra sessions and emits no signal.
+    const emitDiscoverySessionsSignal = (): void => {
+      emit('extension_discovery_sessions', {
+        fenced_sessions: 2,
+        baseline_session: 'builtin-enumeration (never prompted)',
+        discovery_session: 'extension-discovery (never prompted)',
+        dynamic_sources: dynamicExtensions.join(','),
+        note: 'builtin baseline enumerated with no dynamic sources so a shadowed builtin stays distinguishable from an extension tool; discovery enumerates the declared sources; each enabled extension runs load-time work twice per activation',
+      });
+    };
     let discovery: DynamicExtensionDiscovery;
     try {
       discovery = await discoverDynamicExtensionTools({
@@ -1264,7 +1295,9 @@ export class NativeActivationHost {
         // hardcoded list, never a wildcard). REQUIRED with no default, like reservedNames.
         allowedRemoteSources: expectedRemoteExtensionLabels(declaredExtensions, skippedDeclaredSources),
       });
+      if (dynamicExtensions.length > 0) emitDiscoverySessionsSignal();
     } catch (error) {
+      if (dynamicExtensions.length > 0) emitDiscoverySessionsSignal();
       const note = error instanceof Error ? error.message : String(error);
       // Loud, specific reason for the shadow case (F1): names the tool and the source.
       // All other discovery failures stay under the generic fail-closed reason.
