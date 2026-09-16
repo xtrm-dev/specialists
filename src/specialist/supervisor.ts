@@ -51,7 +51,7 @@ import {
   mapCallbackEventToTimelineEvent,
 } from './timeline-events.js';
 import { buildGitDiffEvidence, willHunksBeInline, writeGitDiffHunksArtifact } from './git-diff-evidence.js';
-import type { SessionMetricEvent, SessionRunMetrics, SessionTokenUsage } from '../pi/session.js';
+import type { SessionMetricEvent, SessionRunMetrics, SessionTokenUsage } from './session-metrics-contract.js';
 
 type ActivePiSession = {
   close(): Promise<void>;

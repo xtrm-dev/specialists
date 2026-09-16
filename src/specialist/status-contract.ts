@@ -5,7 +5,7 @@
 // so the native activation path can depend on it without depending on the legacy
 // Supervisor runtime. It must NOT import from supervisor.ts, not even as `import type`.
 
-import type { SessionRunMetrics } from '../pi/session.js';
+import type { SessionRunMetrics } from './session-metrics-contract.js';
 import type { RuntimeOriginV1, SpecialistSpawnOriginV1 } from './runtime-origin.js';
 
 export interface MandatoryRulesInjectionProjection {
