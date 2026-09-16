@@ -135,8 +135,8 @@ describe('summarizeNativeActivations', () => {
     expect(summary.bead_id).toBe('unitAI-89b8i');
     expect(summary.state).toBe('failed');
     expect(summary.detail).toBe('This operation was aborted');
-    expect(summary.turns).toBe(1);
-    expect(summary.event_count).toBe(10);
+    expect(summary.window_turns).toBe(1);
+    expect(summary.window_event_count).toBe(10);
     expect(summary.pi_session_id).toBe('01a07e3c-1ce4-7561-a37a-0c6cbf844fed');
   });
 
@@ -187,7 +187,7 @@ describe('summarizeNativeActivations', () => {
     expect(summary.activation_id).toBe('act:shared-done');
     expect(summary.state).toBe('completed');
     expect(summary.last_event).toBe('job.completed');
-    expect(summary.turns).toBe(2);
+    expect(summary.window_turns).toBe(2);
     expect(summary.pi_session_id).toBe('01a0a95a-cdb1-7e1a-9249-77a0c50d0858');
     expect(summary.state).not.toBe('running');
 
@@ -211,9 +211,48 @@ describe('summarizeNativeActivations', () => {
     expect(midSummary.state).toBe('active');
     expect(midSummary.state).not.toBe('running');
 
-    expect(summarizeNativeActivations([sharedRow('act:w', 'job', 'job.status_changed', T0)])[0]?.state).toBe('settled');
+    const waitingPayload = { legacy_timeline_event: { t: T0, type: 'status_change', status: 'waiting', previous_status: 'running' } };
+    const runningPayload = { legacy_timeline_event: { t: T0, type: 'status_change', status: 'running', previous_status: 'starting' } };
+    const waiting = summarizeNativeActivations([sharedRow('act:w', 'job', 'job.status_changed', T0, { body: waitingPayload })])[0];
+    expect(waiting?.state).toBe('waiting');
+    expect(waiting?.state).not.toBe('settled');
+    expect(waiting?.state).not.toBe('running');
+    const runningChange = summarizeNativeActivations([sharedRow('act:r', 'job', 'job.status_changed', T0, { body: runningPayload })])[0];
+    expect(runningChange?.state).toBe('active');
+    expect(runningChange?.state).not.toBe('running');
+    expect(summarizeNativeActivations([sharedRow('act:u', 'job', 'job.status_changed', T0)])[0]?.state).toBe('unknown');
     expect(summarizeNativeActivations([sharedRow('act:a', 'control', 'control.lease_acquired.recorded', T0)])[0]?.state).toBe('admitted');
     expect(summarizeNativeActivations([sharedRow('act:d', 'control', 'control.lease_denied.recorded', T0)])[0]?.state).toBe('rejected');
+  });
+
+  it('maps failure/error names to failed, never active (MEDIUM 2)', () => {
+    for (const name of ['tool.call.failed', 'error.rpc', 'error.extension', 'command.failed', 'mcp.call.failed', 'git.auto_commit.failed', 'review.verdict.fail'] as const) {
+      const family = name.split('.')[0]!;
+      const [s] = summarizeNativeActivations([sharedRow(`act:f-${name.length}`, family, name, T0)]);
+      expect(s.state).toBe('failed');
+      expect(s.state).not.toBe('active');
+    }
+  });
+
+  it('returns unknown (never active) for ancillary/future names and exposes window counts', () => {
+    for (const [family, name] of [['review', 'review.verdict.pass'], ['chain', 'chain.finalized'], ['worktree', 'worktree.merged'], ['process_health', 'process_health.stale_detected'], ['mcp', 'mcp.custom.future']] as const) {
+      const [s] = summarizeNativeActivations([sharedRow('act:unk', family, name, T0)]);
+      expect(s.state).toBe('unknown');
+      expect(s.state).not.toBe('active');
+      expect(s.state).not.toBe('running');
+    }
+    const rows = [
+      sharedRow('act:win', 'job', 'job.started', T0),
+      sharedRow('act:win', 'turn', 'turn.turn', T0 + 1),
+      sharedRow('act:win', 'turn', 'turn.turn', T0 + 2),
+      sharedRow('act:win', 'turn', 'turn.summarized', T0 + 3),
+    ];
+    const [w] = summarizeNativeActivations(rows);
+    // turn.turn is start+end (2 rows per turn); summarized is the turn signal.
+    expect(w.window_turns).toBe(1);
+    expect(w.window_event_count).toBe(4);
+    expect((w as unknown as Record<string, unknown>)).not.toHaveProperty('event_count');
+    expect((w as unknown as Record<string, unknown>)).not.toHaveProperty('turns');
   });
 });
 

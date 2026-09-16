@@ -514,7 +514,7 @@ function renderForensicTrail(
   console.log(dim(`native activation ${jobId} · LAST-KNOWN trail from forensics — not live (host-session Fleet registry is not visible here)`));
   if (summary) {
     const bead = summary.bead_id ? ` · bead ${summary.bead_id}` : '';
-    console.log(dim(`specialist ${summary.specialist}${bead} · last-known state: ${summary.state} · ${summary.turns} turns · ${summary.event_count} events`));
+    console.log(dim(`specialist ${summary.specialist}${bead} · last-known state: ${summary.state} · ${summary.window_turns} turns in window · ${summary.window_event_count} events in window`));
   }
   for (const row of rows) {
     const short = row.event_name.startsWith('activation.') ? row.event_name.slice('activation.'.length) : row.event_name;

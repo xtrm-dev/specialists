@@ -770,7 +770,7 @@ function renderNativeActivationsBlock(summaries: NativeActivationSummary[]): voi
   for (const summary of summaries.slice(0, NATIVE_ACTIVATION_DISPLAY_LIMIT)) {
     const bead = summary.bead_id ? ` ${summary.bead_id}` : '';
     const detail = summary.detail ? ` · ${summary.detail}` : '';
-    console.log(`  ${summary.activation_id} ${summary.specialist}${bead} ${statusLabel(summary.state as JobState)} · ${summary.event_count} events · ${summary.turns} turns · ${formatActivationAge(now, summary.last_event_at_ms)}${detail}`);
+    console.log(`  ${summary.activation_id} ${summary.specialist}${bead} ${statusLabel(summary.state as JobState)} · ${summary.window_event_count} events in window · ${summary.window_turns} turns in window · ${formatActivationAge(now, summary.last_event_at_ms)}${detail}`);
   }
   if (summaries.length > NATIVE_ACTIVATION_DISPLAY_LIMIT) {
     console.log(dim(`  +${summaries.length - NATIVE_ACTIVATION_DISPLAY_LIMIT} older omitted — narrow with --since/--bead`));

@@ -19,17 +19,47 @@ export interface NativeActivationSummary {
   last_event: string;
   last_event_at_ms: number;
   first_event_at_ms: number;
-  event_count: number;
-  turns: number;
+  /** Window-scoped row count: rows in the queried window, NOT a lifetime total.
+   * The ps query is row-capped (limit 1000), so one large activation can
+   * consume the window and truncate others (row-cap starvation unitAI-kmbb9).
+   * Named window_* so consumers cannot mistake it for a total. */
+  window_event_count: number;
+  /** Window-scoped turn count (turn.summarized in window), NOT a lifetime total. See below. */
+  window_turns: number;
   pi_session_id?: string;
   /** Error / stop reason for failed or disposed activations. */
   detail?: string;
 }
 
-/** Latest-event wins; unknown historical names fall back to the raw suffix.
- * Shared-timeline mid-flight signals (turn/tool/model/retry/...) map to
- * last-known 'active', never 'running' (crashed-host contract). */
-function stateForEventName(eventName: string): string {
+/** Derive waiting/running from a job.status_changed payload. The writer emits
+ * status_change with body.legacy_timeline_event.status (vocabulary-unconstrained;
+ * all 182 native rows to date carry status:"waiting", previous_status:"running").
+ * waiting -> "waiting" (parked, resumable; NOT settled, NOT running).
+ * running -> "active" (crashed-host contract: absence of a terminal event must
+ * never render as live "running", even when the last transition says running).
+ * Unrecognised/missing status -> "unknown" (honest; never running/settled). */
+function statusFromStatusChangePayload(eventJson: string | undefined): string {
+  try {
+    const parsed = JSON.parse(eventJson ?? '') as {
+      body?: { legacy_timeline_event?: { status?: unknown } };
+    };
+    const status = parsed.body?.legacy_timeline_event?.status;
+    if (status === 'waiting') return 'waiting';
+    if (status === 'running') return 'active';
+    return 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+/** Latest-event wins. Producer name set derived from
+ * forensic-events.ts eventNameForTimelineEvent (:832) + familyForTimelineType (:813).
+ * Historical activation.* fallback preserved (retired vocab, do not change).
+ * Shared mid-flight signals map to last-known 'active', never 'running'.
+ * Shared failure/error names map to 'failed', never 'active'.
+ * Anything else shared/ancillary (review/chain/worktree/process_health,
+ * unexpected mcp.* passthrough, future names) maps to 'unknown', never 'active'. */
+function stateForEventName(eventName: string, eventJson?: string): string {
   const short = eventName.startsWith('activation.') ? eventName.slice('activation.'.length) : eventName;
   switch (short) {
     case 'activation_requested': return 'requested';
@@ -50,15 +80,53 @@ function stateForEventName(eventName: string): string {
     case 'job.failed': return 'failed';
     case 'job.cancelled': return 'cancelled';
     case 'job.started': return 'active';
-    case 'job.status_changed': return 'settled';
+    case 'job.status_changed': return statusFromStatusChangePayload(eventJson);
     case 'control.lease_acquired.recorded': return 'admitted';
     case 'control.lease_denied.recorded': return 'rejected';
     case 'control.lease_uncertain.recorded': return 'starting';
+    // Explicit failures (producer eventNameForTimelineEvent): never 'active'.
+    case 'tool.call.failed':
+    case 'error.rpc':
+    case 'error.extension':
+    case 'command.failed':
+    case 'mcp.call.failed':
+    case 'mcp.auth.failed':
+    case 'git.auto_commit.failed':
+    case 'review.verdict.fail':
+      return 'failed';
+    // Explicit mid-flight (producer families): last-known 'active'.
+    case 'tool.call.started':
+    case 'tool.call.completed':
+    case 'turn.turn':
+    case 'turn.message':
+    case 'turn.text':
+    case 'turn.thinking':
+    case 'turn.summarized':
+    case 'model.meta':
+    case 'model.token_usage.recorded':
+    case 'model.finish_reason.recorded':
+    case 'model.changed':
+    case 'retry.start':
+    case 'retry.end':
+    case 'compaction.start':
+    case 'compaction.end':
+    case 'mcp.connected':
+    case 'mcp.disconnected':
+    case 'mcp.rate_limited':
+    case 'mcp.latency.observed':
+    case 'mcp.call.started':
+    case 'mcp.call.completed':
+    case 'git.auto_commit.succeeded':
+    case 'git.auto_commit.skipped':
+    case 'command.completed':
+      return 'active';
     default: break;
   }
   if (eventName.startsWith('activation.')) return short;
-  if (eventName.includes('.')) return 'active';
-  return short;
+  // Non-terminal job/control signals outside the explicit lists
+  // (e.g. job.payload_breakdown, control.tool_blocked.recorded): active, never running.
+  if (eventName.startsWith('job.') || eventName.startsWith('control.')) return 'active';
+  return 'unknown';
 }
 
 interface ParsedBody {
@@ -121,12 +189,17 @@ export function summarizeNativeActivations(rows: readonly ForensicEventRecord[])
       activation_id: activationId,
       specialist: role && role.length > 0 ? role : 'unknown',
       ...(beadId ? { bead_id: beadId } : {}),
-      state: stateForEventName(last.event_name),
+      state: stateForEventName(last.event_name, last.event_json),
       last_event: last.event_name,
       last_event_at_ms: last.t,
       first_event_at_ms: first.t,
-      event_count: ordered.length,
-      turns: ordered.filter((event) => event.event_name === 'activation.turn_started' || event.event_name === 'turn.summarized').length,
+      window_event_count: ordered.length,
+      // LOW: turn.turn is start+end (2 rows per turn via the producer fallback
+      // forensic-events.ts:832/:813; measured act:51b 207 turn.turn vs 104
+      // turn.summarized). turn.summarized is 1 per completed turn and is the
+      // correct turn signal; turn.turn is excluded deliberately to avoid
+      // double-counting. Historical activation.turn_started kept for retired rows.
+      window_turns: ordered.filter((event) => event.event_name === 'activation.turn_started' || event.event_name === 'turn.summarized').length,
       ...(piSessionId ? { pi_session_id: piSessionId } : {}),
       ...(detail ? { detail } : {}),
     });
