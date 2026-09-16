@@ -3253,23 +3253,42 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
   it('never lets a denied native become active through a discovered name', async () => {
     // READ_ONLY with a healthy gitnexus hard-denies grep/find/ls. An extension registering
     // `grep` must not smuggle it back in: it collides with a builtin and is refused.
-    const { sdk, realRecord } = discoverySdk({
-      discoveredActive: ['ext_tool_a', 'grep'],
-      provenance: { ext_tool_a: 'cli', grep: 'cli' },
-    });
-    const host = new NativeActivationHost({
-      loader: loaderFor(specWithExtensions({ '/fake/ext-a': true })),
-      workItems: fakeWorkItems(),
-      forensics: collectingSink(),
-      loadSdk: async () => sdk,
-      cwd: hostWorkspace(),
-    });
-    await (await host.start({
-      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
-    })).result;
-    const tools = realRecord.createArgs!.tools as string[];
-    expect(tools).toContain('ext_tool_a');
-    expect(tools).not.toContain('grep');
+    // Hermetic: pin PI_NPM_GLOBAL_DIR to a fixture with a healthy pi-gitnexus so the hard
+    // deny is active in every environment. Without this the test inherits the ambient
+    // global install: where pi-gitnexus 0.6.4 is installed grep is denied (soft
+    // refusedCollisions, activation succeeds); where no global install exists (CI)
+    // grep is restored to granted and the same registry entry fires the hard
+    // extension_tool_shadowed refusal instead.
+    const fakeNodeModules = hostWorkspace();
+    mkdirSync(join(fakeNodeModules, 'pi-gitnexus'), { recursive: true });
+    writeFileSync(
+      join(fakeNodeModules, 'pi-gitnexus', 'package.json'),
+      JSON.stringify({ name: 'pi-gitnexus', version: '0.6.4' }),
+    );
+    const previousGlobalDir = process.env.PI_NPM_GLOBAL_DIR;
+    process.env.PI_NPM_GLOBAL_DIR = fakeNodeModules;
+    try {
+      const { sdk, realRecord } = discoverySdk({
+        discoveredActive: ['ext_tool_a', 'grep'],
+        provenance: { ext_tool_a: 'cli', grep: 'cli' },
+      });
+      const host = new NativeActivationHost({
+        loader: loaderFor(specWithExtensions({ '/fake/ext-a': true })),
+        workItems: fakeWorkItems(),
+        forensics: collectingSink(),
+        loadSdk: async () => sdk,
+        cwd: hostWorkspace(),
+      });
+      await (await host.start({
+        specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+      })).result;
+      const tools = realRecord.createArgs!.tools as string[];
+      expect(tools).toContain('ext_tool_a');
+      expect(tools).not.toContain('grep');
+    } finally {
+      if (previousGlobalDir === undefined) delete process.env.PI_NPM_GLOBAL_DIR;
+      else process.env.PI_NPM_GLOBAL_DIR = previousGlobalDir;
+    }
   });
 
   it('fails closed with no widening when the session lacks getAllTools (older doubles)', async () => {
