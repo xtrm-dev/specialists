@@ -11,7 +11,10 @@
 |---|---|---|---|---|
 | **N0** type extraction | Substrate `SPECIALISTS-77` (`iss_01a0a95a-c577-…`) | `act:758931b7-9ce` | **DONE, verified** | `7aa05abb` |
 | **N2A** result identity | Substrate `SPECIALISTS-78` (`iss_01a0a964-8c97-…`) | `act:47a2b74f-a25` | **DONE, verified** | `77a76bf2` |
-| **N2B** ps observability | Substrate `SPECIALISTS-80` (`iss_01a0a96b-9ac9-…`) | `act:51b14a21-af0` | in progress | — |
+| **N2B** ps observability | Substrate `SPECIALISTS-80` (`iss_01a0a96b-9ac9-…`) | `act:51b14a21-af0` | **DONE, verified** | `4fbc4a30` |
+| **dist** rebuild | — (CI obligation, not a DAG node) | — | **DONE** | `64e922e6` |
+| **review gate** | Substrate `SPECIALISTS-81` (`iss_01a0a98e-69f3-…`) | `act:e4dafce4-6e2` | in progress | — |
+| N2B follow-up (row-cap starvation) | beads `unitAI-kmbb9`, P1, `contract:draft` | — | filed, not started | — |
 
 ---
 
@@ -183,6 +186,117 @@ left unstaged for coordinator review. That constraint worked and should be carri
 The N0 forensic-row count was **404** when the coordinator measured it mid-run and **759** when the
 executor measured it after settlement. Both are correct point-in-time readings. Any count quoted in
 this log is a reading at a stated time, not an invariant.
+
+---
+
+## N2B — sp ps must consume the current canonical native contract
+
+### The defect, measured rather than assumed
+
+The audit (and Lane C's C-13) said the `sp ps` native block "renders empty". Measured on the unfixed
+code it rendered **40 stale entries** — every one carrying an `act:` id, spanning
+**2026-09-07 17:51 → 2026-09-08 11:11 UTC**, which is exactly the closed historical family. All three
+recent activations were absent, and the operator-facing note reads *"LAST-KNOWN state from
+forensics, not live registry state."*
+
+The mechanism: the query passed `sinceMs: args.sinceMs`, which is `undefined` without `--since`, so
+**no time filter** applied and the historical rows came back. With a window it would have been empty.
+Both observations were reachable; the audit recorded only the one that was tested. The correct
+defect statement is therefore "shows a stale snapshot and hides everything current", not "shows
+nothing" — and the wrong fix (adding a time filter to empty the block) would have made `sp ps` blind
+to every native activation that has ever run in the current vocabulary.
+
+### What was implemented
+
+| File | Change |
+|---|---|
+| `src/cli/ps.ts` | `{eventFamily:'activation'}` → `{jobIdPrefix:'act:', order:'desc'}` |
+| `src/specialist/observability-sqlite.ts` | `jobIdPrefix` filter on `ListForensicEventsFilters` |
+| `src/specialist/native-activation-summary.ts` | state derived from the shared vocabulary; stale header corrected |
+
+Two details worth keeping:
+
+- **The prefix filter is a closed range, not `LIKE`.** SQLite's `LIKE` is case-insensitive by default,
+  which skips the `idx_forensic_events_job_*` indexes. The implementation uses
+  `job_id >= prefix AND job_id < prefix+\uffff`. `EXPLAIN QUERY PLAN` against the real 1.5 GB store
+  confirms `SEARCH … USING COVERING INDEX idx_forensic_events_job_t (job_id>? AND job_id<?)`, not a
+  scan.
+- **`order: 'desc'` is a second, independent defect fix.** The reader defaults to `'asc'`, so on a
+  busy stream the old call sliced the **oldest** rows and discarded the newest — the case
+  `observability-sqlite.ts:1181-1183` explicitly warns about. The audit had recorded only the family
+  problem.
+
+### Verification (coordinator-run)
+
+| Check | Result |
+|---|---|
+| `tsc --noEmit` | exit 0 |
+| ps suites | **37/37 pass** |
+| `bun test` observability-sqlite | **56/56 pass** |
+| prior-node guard (result + live-aggregates) | **33/33 pass** |
+| live `sp ps --json` native block | current activation (`act:51b14a21-af0`, state `completed`) instead of 40 stale |
+| EXPLAIN QUERY PLAN | index-backed `SEARCH`, not `SCAN` |
+
+### NEW DEFECT discovered by N2B, tracked as `unitAI-kmbb9`
+
+`limit: 1000` is a **row** cap, not a per-job cap. One large activation consumes the entire window:
+`act:51b14a21-af0` alone holds **1255 rows**, so `act:758931b7-9ce` (759 rows) and `act:47a2b74f-a25`
+are **absent** from the list. Verified live: the after-fix output contains exactly **one** entry.
+
+So N2B trades "40 stale entries" for "1 current entry". That is a correctness improvement but **not
+legacy parity**, and it is a *new* consequence made visible by the fix rather than a pre-existing
+condition. Secondary effect: `event_count` and `turns` are window counts presented as totals — N2B
+reported its own activation as `1000 events / 72 turns` against true values of `1255 / 87`.
+
+Filed as P1 `contract:draft` rather than fixed, because it is a distinct defect from the one N2B was
+scoped to fix and its resolution needs a design decision (per-job budget vs deriving the activation
+list from `specialist_jobs`, which already holds exactly one row per activation).
+
+---
+
+## dist rebuild — required, and the guard that caught a real problem
+
+`package.json` maps `specialists`/`sp` to `dist/index.js`, `dist/` is committed, and
+`package-payload.yml:75-76` enforces `git diff --exit-code -- dist/`. **N0/N2A/N2B therefore cannot
+ship without a matching rebuild** — a source-only commit fails CI. Committed as `64e922e6`.
+
+All 13 changed paths trace to a specific node (N0: `supervisor`+`status-contract` declarations;
+N2A: `cli/result`; N2B: `cli/ps`, `observability-sqlite`, `native-activation-summary`; plus
+`dist/index.js` and `dist/lib.js`). Verified **deterministic**: two independent builds are
+byte-identical.
+
+**The first build attempt failed, and the failure was informative rather than noise.** `bun run build`
+exited 1 with a guard (unitAI-rrdnt.41):
+
+> build aborted: the bundle was linked against dependencies from OUTSIDE this checkout. … The bundle
+> is wrong, not just untidy: it links against versions this checkout does not declare.
+> Fix: run `bun install` in THIS directory, then build again.
+
+The failed build had already emitted a **partial, wrong** `dist/`. It was reverted rather than
+committed, `bun install` was run in the worktree (174 packages, 619 ms, **no lockfile change**), and
+the rebuild then exited 0. Two `dist` files that appeared modified after the failed build
+(`project-pack-skill-resolver.d.ts`, `timeline-events.d.ts`) show an **empty diff** after the correct
+build, confirming they were artifacts of the bad emit rather than real drift.
+
+**Lesson for the remaining nodes:** any node that changes `src/` must either rebuild `dist/` or the
+package-payload job fails. This belongs in the DAG contract for every subsequent node, not only N10.
+
+---
+
+## Review gate
+
+Dispatched as a `reviewer` activation over all four commits, with an explicit standing instruction
+that every author reported success and those claims are therefore unverified. The contract targets
+ten specific attack surfaces, including whether the `att:` → `act:` mapping silently resolves a
+nonexistent attempt number, whether the summarizer handles every `event_name` the writer can actually
+produce (derived from `forensic-events.ts:813,868` rather than from observed samples), whether the
+regression test would genuinely fail against the old reader, and whether the `prefix+\uffff` sentinel
+can wrongly exclude a valid `job_id`.
+
+**The readiness gate rejected the first attempt**, because the contract used an `OBJECTIVE` heading
+instead of the required `PROBLEM`/`SUCCESS`/`SCOPE`/`NON_GOALS`/`VALIDATION` set, and returned the
+missing list without spending a model turn. The gate works; the lesson is that a contract must use
+the exact section names, not synonyms.
 
 ---
 
