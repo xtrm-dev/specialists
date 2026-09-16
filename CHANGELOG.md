@@ -46,6 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Drop the re-default on the required reserved-names parameter ([1a25853](https://github.com/xtrm-dev/specialists/commit/1a25853e1bae075b8bf141d274b0dc74b0186887))
 - State which extension sources the native path resolves ([4009a09](https://github.com/xtrm-dev/specialists/commit/4009a09c6f07214f32de16b3a103f14b59a0132b))
 - Pin the native admission mechanism as a negative pair ([4204b7e](https://github.com/xtrm-dev/specialists/commit/4204b7ea931cae72702c530b1169fb4912f3edd4))
+- Enabled extension sources under native dispatch (unitAI-1pqtl) ([4da040a](https://github.com/xtrm-dev/specialists/commit/4da040a406f26e059a2b9a8bb7aee57be7162aeb))
 
 ## [3.21.5] - 2026-08-20
 
