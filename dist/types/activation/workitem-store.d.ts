@@ -496,6 +496,16 @@ export interface OpenWorkItemsOptions {
     resolveInstalled?: () => string | null;
 }
 /**
+ * The Substrate SOURCE modules this loader imports, in load order.
+ *
+ * Exported because they are the loadability contract, and more than one surface has to know it:
+ * `openWorkItemBoundary` imports them, and `sp doctor` checks they exist. A package that resolves
+ * by name but does not SHIP these paths (a dist-only publish, or a `files` allowlist that omits
+ * `src/`) installs green and then fails at dispatch — the exact "looks healthy until you try"
+ * shape the doctor check exists to remove. One list, so the two cannot disagree.
+ */
+export declare const SUBSTRATE_REQUIRED_MODULES: readonly ["src/store/migrations/runner.ts", "src/service/issue-service.ts", "src/service/journal-service.ts", "src/service/provenance-service.ts", "src/workitems/substrate-store.ts", "src/workitems/dispatch-gate.ts"];
+/**
  * Open the canonical work store and build the boundary over the REAL producer
  * services, dynamic-imported at runtime from an explicit checkout.
  *

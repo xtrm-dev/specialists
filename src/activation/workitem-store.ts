@@ -859,6 +859,24 @@ export interface OpenWorkItemsOptions {
 }
 
 /**
+ * The Substrate SOURCE modules this loader imports, in load order.
+ *
+ * Exported because they are the loadability contract, and more than one surface has to know it:
+ * `openWorkItemBoundary` imports them, and `sp doctor` checks they exist. A package that resolves
+ * by name but does not SHIP these paths (a dist-only publish, or a `files` allowlist that omits
+ * `src/`) installs green and then fails at dispatch — the exact "looks healthy until you try"
+ * shape the doctor check exists to remove. One list, so the two cannot disagree.
+ */
+export const SUBSTRATE_REQUIRED_MODULES = [
+  'src/store/migrations/runner.ts',
+  'src/service/issue-service.ts',
+  'src/service/journal-service.ts',
+  'src/service/provenance-service.ts',
+  'src/workitems/substrate-store.ts',
+  'src/workitems/dispatch-gate.ts',
+] as const;
+
+/**
  * Open the canonical work store and build the boundary over the REAL producer
  * services, dynamic-imported at runtime from an explicit checkout.
  *
@@ -910,14 +928,9 @@ export async function openWorkItemBoundary(opts: OpenWorkItemsOptions = {}): Pro
       );
     }
   };
-  const [runner, issueSvcMod, journalMod, provMod, storeMod, gateMod] = await Promise.all([
-    load('src/store/migrations/runner.ts'),
-    load('src/service/issue-service.ts'),
-    load('src/service/journal-service.ts'),
-    load('src/service/provenance-service.ts'),
-    load('src/workitems/substrate-store.ts'),
-    load('src/workitems/dispatch-gate.ts'),
-  ]);
+  const [runner, issueSvcMod, journalMod, provMod, storeMod, gateMod] = await Promise.all(
+    SUBSTRATE_REQUIRED_MODULES.map((rel) => load(rel)),
+  );
   for (const [mod, name] of [
     [runner, 'migrate'], [issueSvcMod, 'IssueService'], [journalMod, 'JournalService'],
     [provMod, 'ProvenanceService'], [storeMod, 'SubstrateIssueStore'],

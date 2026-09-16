@@ -59732,14 +59732,7 @@ async function openWorkItemBoundary(opts = {}) {
       throw new Error(`work_item_store_unavailable: cannot load Substrate module ${rel}: ${error instanceof Error ? error.message : String(error)}`);
     }
   };
-  const [runner, issueSvcMod, journalMod, provMod, storeMod, gateMod] = await Promise.all([
-    load("src/store/migrations/runner.ts"),
-    load("src/service/issue-service.ts"),
-    load("src/service/journal-service.ts"),
-    load("src/service/provenance-service.ts"),
-    load("src/workitems/substrate-store.ts"),
-    load("src/workitems/dispatch-gate.ts")
-  ]);
+  const [runner, issueSvcMod, journalMod, provMod, storeMod, gateMod] = await Promise.all(SUBSTRATE_REQUIRED_MODULES.map((rel) => load(rel)));
   for (const [mod, name] of [
     [runner, "migrate"],
     [issueSvcMod, "IssueService"],
@@ -59797,13 +59790,21 @@ async function openWorkItemBoundary(opts = {}) {
     provenanceService: provenance
   });
 }
-var require5, SUBSTRATE_PACKAGE = "@jaggerxtrm/substrate", SATISFIED_BLOCKER_STATES;
+var require5, SUBSTRATE_PACKAGE = "@jaggerxtrm/substrate", SATISFIED_BLOCKER_STATES, SUBSTRATE_REQUIRED_MODULES;
 var init_workitem_store = __esm(() => {
   init_session();
   init_contract_sections();
   init_authority_store();
   require5 = createRequire6(import.meta.url);
   SATISFIED_BLOCKER_STATES = new Set(["done", "archived"]);
+  SUBSTRATE_REQUIRED_MODULES = [
+    "src/store/migrations/runner.ts",
+    "src/service/issue-service.ts",
+    "src/service/journal-service.ts",
+    "src/service/provenance-service.ts",
+    "src/workitems/substrate-store.ts",
+    "src/workitems/dispatch-gate.ts"
+  ];
 });
 
 // src/cli/doctor.ts
@@ -59933,6 +59934,13 @@ function checkSubstrateRuntime() {
       return;
     }
     ok3(`resolved  ${dim14(dir)}`);
+    const missingModules = SUBSTRATE_REQUIRED_MODULES.filter((rel) => !existsSync46(join49(dir, rel)));
+    if (missingModules.length > 0) {
+      warn3(`${missingModules.length} required source module(s) absent under ${dir}`);
+      hint(`missing: ${missingModules.join(", ")}`);
+      fix("install a Substrate build that ships its TypeScript sources");
+      return;
+    }
     const dbPath = resolveWorkItemDbPath();
     if (!existsSync46(dbPath)) {
       warn3(`work store not present at ${dbPath}`);

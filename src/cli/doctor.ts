@@ -17,7 +17,7 @@ import { analyzeGlobalUserConfigDrift, buildGlobalUserConfigTemplate, readValida
 import { runChannelDoctorChecks, type ChannelDoctorInputs } from '../specialist/channel-doctor.js';
 import { describeCatalogCompatibility } from '../specialist/tool-catalog.js';
 import { loadSharedToolCatalogIndex, readPackageVersion, resolveGlobalNodeModulesDir } from '../pi/session.js';
-import { resolveSubstrateDir, resolveWorkItemDbPath } from '../activation/workitem-store.js';
+import { resolveSubstrateDir, resolveWorkItemDbPath, SUBSTRATE_REQUIRED_MODULES } from '../activation/workitem-store.js';
 import { formatVersionCheckNudge, getVersionCheckResult, localVersion, readCachedVersionCheck } from './version-check.js';
 
 const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
@@ -153,6 +153,17 @@ function checkSubstrateRuntime(): void {
       return;
     }
     ok(`resolved  ${dim(dir)}`);
+    // Resolving the PACKAGE is not the same as resolving its MODULES. The loader imports
+    // Substrate's SOURCE paths, so a dist-only publish (or a `files` allowlist that omits `src/`)
+    // installs green and then fails at dispatch with `cannot load Substrate module`. That is the
+    // failure this check exists to surface, so the paths are checked here too.
+    const missingModules = SUBSTRATE_REQUIRED_MODULES.filter((rel) => !existsSync(join(dir, rel)));
+    if (missingModules.length > 0) {
+      warn(`${missingModules.length} required source module(s) absent under ${dir}`);
+      hint(`missing: ${missingModules.join(', ')}`);
+      fix('install a Substrate build that ships its TypeScript sources');
+      return;
+    }
     const dbPath = resolveWorkItemDbPath();
     if (!existsSync(dbPath)) {
       warn(`work store not present at ${dbPath}`);

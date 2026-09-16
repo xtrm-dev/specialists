@@ -20428,6 +20428,14 @@ function splitLines(body) {
   return body.split(`
 `).map((l) => l.trim().replace(/^[-*•]\s*/, "").replace(/^\d+[.)]\s*/, "").trim()).filter((l) => l.length > 0);
 }
+var SUBSTRATE_REQUIRED_MODULES = [
+  "src/store/migrations/runner.ts",
+  "src/service/issue-service.ts",
+  "src/service/journal-service.ts",
+  "src/service/provenance-service.ts",
+  "src/workitems/substrate-store.ts",
+  "src/workitems/dispatch-gate.ts"
+];
 async function openWorkItemBoundary(opts = {}) {
   const env = opts.env ?? process.env;
   const substrateDir = resolveSubstrateDir(opts.substrateDir ?? env.XTRM_SUBSTRATE_DIR ?? "", opts.resolveInstalled);
@@ -20451,14 +20459,7 @@ async function openWorkItemBoundary(opts = {}) {
       throw new Error(`work_item_store_unavailable: cannot load Substrate module ${rel}: ${error instanceof Error ? error.message : String(error)}`);
     }
   };
-  const [runner, issueSvcMod, journalMod, provMod, storeMod, gateMod] = await Promise.all([
-    load("src/store/migrations/runner.ts"),
-    load("src/service/issue-service.ts"),
-    load("src/service/journal-service.ts"),
-    load("src/service/provenance-service.ts"),
-    load("src/workitems/substrate-store.ts"),
-    load("src/workitems/dispatch-gate.ts")
-  ]);
+  const [runner, issueSvcMod, journalMod, provMod, storeMod, gateMod] = await Promise.all(SUBSTRATE_REQUIRED_MODULES.map((rel) => load(rel)));
   for (const [mod, name] of [
     [runner, "migrate"],
     [issueSvcMod, "IssueService"],
