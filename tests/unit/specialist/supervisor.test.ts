@@ -19,8 +19,27 @@ import * as childProcess from 'node:child_process';
 // vi.mock at module scope makes the ESM namespace mutable so vi.spyOn works.
 // Without this, vi.spyOn(childProcess, 'spawnSync') throws
 // "Cannot replace module namespace object's binding's value".
-vi.mock('node:child_process', () => ({}));
+// The factory re-exports the REAL module surface (importOriginal) so production
+// call sites a test does not explicitly stub still reach genuine implementations.
+// A previous empty factory (() => ({})) made every export undefined and failed
+// 48 of 50 tests inside production code (bead unitAI-9n93): every sup.run()
+// reaches spawn() via startDetachedStatusWatchdog, and tmux/git paths reach
+// spawnSync(). Tests that need a stub still install one per-test with vi.spyOn.
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return {
+    ...actual,
+    // Suppress detached side effects: every sup.run() spawns a detached
+    // status watchdog (and checkpoint paths spawn `npx gitnexus analyze`).
+    // Real spawns would leave ~50 watchdog processes monitoring the test
+    // runner and racing its isolated store. Synchronous helpers stay real so
+    // the SQLite-backed supervisor initializes normally. The one test that
+    // asserts watchdog argv/env installs its own vi.spyOn over this stub.
+    spawn: (..._args: any[]) => ({ pid: 1234, unref: () => {} }),
+  };
+});
 import { Supervisor } from '../../../src/specialist/supervisor.js';
+import { SUPERVISOR_CANONICAL_INVENTORY } from './supervisor-canonical-inventory.js';
 import { isJobFileOutputEnabled } from '../../../src/specialist/job-file-output.js';
 import type { SupervisorStatus } from '../../../src/specialist/supervisor.js';
 import { createObservabilitySqliteClient } from '../../../src/specialist/observability-sqlite.js';
@@ -1462,4 +1481,61 @@ describe('Supervisor', () => {
       expect(runStart.bead_id).toBeUndefined();
     });
   });
+});
+
+// NOTE (bead SPECIALISTS-95, XTRM-93 N3.0): the file header says not to add new
+// tests here because the file is quarantined. The two blocks below are the
+// explicitly authorized exceptions: (a) harness-fidelity locks that fail if
+// production gains a node:child_process member the double does not know, and
+// (b) the expected-canonical-event-inventory oracle check. Both run ONLY under
+// `bun run test:supervisor` (quarantined selection), so the default suite is
+// unaffected. Feature tests still belong in sibling files.
+
+describe('child_process double fidelity (unitAI-9n93 harness lock)', () => {
+  it('exposes every production-reached member (spawn, spawnSync, execFileSync)', () => {
+    // Production imports all three (src/specialist/supervisor.ts:22) and
+    // reaches spawn() on every run() via startDetachedStatusWatchdog and
+    // spawnSync() on git/tmux/which paths. An empty mock factory makes each
+    // undefined and fails tests inside production code instead of in their
+    // own assertions.
+    expect(typeof childProcess.spawn).toBe('function');
+    expect(typeof childProcess.spawnSync).toBe('function');
+    expect(typeof childProcess.execFileSync).toBe('function');
+  });
+
+  it('keeps the namespace spyable (mutable double)', () => {
+    // The original intent of the mock (lines 20-21): vi.spyOn on the ESM
+    // namespace must not throw. A faithful double preserves that while also
+    // describing the module it replaces.
+    for (const name of ['spawn', 'spawnSync', 'execFileSync'] as const) {
+      const spy = vi.spyOn(childProcess, name).mockImplementation((() => undefined) as any);
+      expect(vi.isMockFunction((childProcess as any)[name])).toBe(true);
+      spy.mockRestore();
+    }
+  });
+});
+
+describe('canonical event inventory oracle (XTRM-93 N3.0)', () => {
+  // Each entry asserts that the cited SOURCE evidence exists, read as text.
+  // No runtime executes and no event stream is observed: a missing producer
+  // or mapper arm fails even when both engines emit nothing (the differential
+  // false-green this oracle exists to remove). Entries with gapRef set are
+  // KNOWN-OPEN gaps owned by follow-on nodes — their failure is the oracle
+  // working. Do not edit the manifest needles to fit the source.
+  for (const entry of SUPERVISOR_CANONICAL_INVENTORY) {
+    it(`${entry.id}: ${entry.scenario}`, () => {
+      for (const ev of entry.evidence) {
+        const text = readFileSync(new URL(`../../../${ev.file}`, import.meta.url), 'utf-8');
+        expect(
+          text.includes(ev.needle),
+          `[oracle] ${entry.id}: scenario "${entry.scenario}" expects durable signal ` +
+          `"${entry.signal}" but the ${ev.side} evidence is missing: "${ev.needle}" ` +
+          `not found in ${ev.file}` +
+          (entry.gapRef ? ` (${entry.gapRef})` : '') +
+          ` Differential reads ${entry.differentialReads} — ` +
+          (entry.gapRef ? 'a parity reading here is a FALSE GREEN.' : 'both engines satisfy this row.'),
+        ).toBe(true);
+      }
+    });
+  }
 });
