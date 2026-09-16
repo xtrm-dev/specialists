@@ -310,7 +310,7 @@ they change the cutover plan.
    upgrades the claim from git-archaeology inference to time-series proof: the family is a closed
    historical record, not a live stream.
 
-   **Two corrections the database forced, both material to the fix:**
+   **Three corrections the database forced, all material to the fix:**
 
    1. **The fix must be identity-based, not a family swap.** In the current vocabulary there is *no*
       native-specific family: native rows land in the **shared** families (`job`, `turn`, `model`,
@@ -333,6 +333,30 @@ they change the cutover plan.
    from the real canonical DB rather than from a worktree-local absence. The audit's original wording
    said the writer was "deleted by `febef0ad`"; the mechanism is more precisely that the parallel
    vocabulary was retired and native events were re-projected onto the shared timeline families.*
+
+3. **The block does not render EMPTY — it renders a closed historical snapshot, which is worse.**
+   The audit (and Lane C's C-13) said "renders empty". Measured on the unfixed code against the real
+   DB, `sp ps --json` returns **40** `native_activations` entries, every one carrying an `act:` id,
+   with a `last_event_at_ms` range of **2026-09-07 17:51 → 2026-09-08 11:11 UTC** — exactly the span
+   of the 214-row closed family, and nothing after.
+
+   | Probe | Result |
+   |---|---|
+   | `native_activations` entries | **40** (not 0) |
+   | Entries with an `act:` id | 40 of 40 |
+   | `last_event_at_ms` span | 2026-09-07 17:51 → 2026-09-08 11:11 |
+   | `act:758931b7-9ce` (N0) | **MISSING** |
+   | `act:47a2b74f-a25` (N2A) | **MISSING** |
+   | `act:51b14a21-af0` (N2B) | **MISSING** |
+   | Operator note rendered | *"LAST-KNOWN state from forensics, not live registry state."* |
+
+   The reason "empty" looked plausible is that the query passes `sinceMs: args.sinceMs`, and with no
+   `--since` that is `undefined`, so `readForensicEvents` applies **no time filter** and returns the
+   historical rows. With a window it would be empty; without one it presents eight-day-old
+   activations as current. Combined with the note telling the operator this is "last-known state",
+   the output is **actively misleading**: a reader sees 40 native activations, all from before the
+   vocabulary change, and none of the ones that actually ran since. The defect statement for N2B
+   must therefore be "shows a stale snapshot and hides everything current", not "shows nothing".
 
 5. **The shipped artifact is a committed build, so "delete the legacy backend" is not done
    until `dist/` is rebuilt.** `package.json` `bin` maps `specialists`/`sp` → `dist/index.js`, and
