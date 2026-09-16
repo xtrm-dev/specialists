@@ -45,7 +45,7 @@ Native Pi/MCP activation and CLI/legacy execution write the same `.specialists/d
           sp log/feed       sp console      Pi /specialists
 ```
 
-`src/specialist/observability-read-model.ts` is the UI-neutral projection layer introduced by XTRM-96. It owns no timers and caches no runtime truth.
+`src/specialist/observability-read-model.ts` is the UI-neutral projection layer introduced by XTRM-96. It owns no timers and caches no runtime truth. Its read-only projections are exported through `@jaggerxtrm/specialists/lib` for first-party native frontends.
 
 ## 3. LOG semantics
 
@@ -59,6 +59,8 @@ The default operator LOG suppresses high-frequency agent-internal noise:
 - MCP call/latency internals.
 
 Lifecycle, control, error, command, review, git, chain, worktree and related runtime events remain visible. A deliberate `all events`/verbose mode may expose the full forensic firehose, but it must still obey forensic redaction.
+
+The shared reader widens its persisted query geometrically, within a hard bound, when a recent tail is dominated by suppressed noise. This prevents nearby lifecycle/review evidence from disappearing merely because tool traffic is dense.
 
 `sp console` now routes its forensic source through persisted `xtrm.forensic.v1` rows instead of rebuilding forensic rows from legacy timeline events when an observability database is present. Its `sp_feed` source remains unchanged.
 
@@ -98,18 +100,21 @@ For native `act:` rows the Fleet projector therefore normalizes persisted `runni
 
 ### Native Pi `/specialists`
 
-The existing compact Fleet footer remains the glance surface. The intended interactive overlay is a contextual fleet inspector with:
+The existing compact Fleet footer remains the glance surface. The interactive overlay is a contextual fleet inspector with:
 
-- nested Fleet topology;
-- attention-first selection;
+- persisted nested Fleet topology;
+- ancestor-preserving filtering;
+- attention/status markers and selection;
 - `LOG` as the default chronology;
 - `FEED`, `RESULT`, and `DETAIL` projections;
 - `/` filtering;
-- follow/pause semantics;
-- bounded history;
+- follow/pause and scroll semantics;
+- bounded responsive layout;
 - runtime attachment only when a real attachment exists.
 
-The repository currently records a prior Pi `ui.custom` hard-lock (`unitAI-nmxhg`). For that reason XTRM-96 does **not** silently replace the safe text inspector remotely. The overlay mount must be validated against the current installed Pi/TUI locally before it becomes the default `/specialists inspect` path. The read model is deliberately independent of that decision.
+The pure overlay state/layout model is implemented at `config/pi-extensions/specialist-subagents/fleet-overlay.mjs`. It deliberately has no Pi lifecycle calls, SQLite access, timers, or runtime authority. It consumes already-projected safe data and emits bounded terminal lines plus state transitions.
+
+The repository records a prior Pi `ui.custom` hard-lock (`unitAI-nmxhg`). For that reason XTRM-96 does **not** silently replace the safe text inspector remotely. The remaining mount must be validated against the current installed Pi/TUI locally before it becomes the default `/specialists inspect` path. Local mounting should translate Pi input into the pure reducer and feed it projections from the exported read-model seam; it should not reimplement either one.
 
 ## 7. Refresh model
 
@@ -146,18 +151,23 @@ Missing metrics mean **unknown**, never zero.
 Shipped by the first XTRM-96 implementation slice:
 
 - UI-neutral persisted observability read model;
-- bounded forensic chronology with shared redaction renderer;
+- bounded forensic chronology with shared redaction renderer and noisy-tail widening;
 - bounded mixed Fleet projection from persisted status plus `job.started` forensic evidence;
 - persisted parent/child lineage and tmux attachment projection;
 - native mid-flight state normalized to last-known `active` semantics without replaying full histories;
 - result projection;
+- read-model exports through the first-party library seam;
 - `sp console` forensic source bound to persisted `xtrm.forensic.v1` when the database is present;
-- legacy `sp_feed` console source preserved.
+- legacy `sp_feed` console source preserved;
+- pure native Fleet-overlay hierarchy/filter/navigation/mode/follow/scroll/responsive-render model with tests.
 
 Still targeted/local validation:
 
-- mount the interactive Pi overlay on the current Pi version and prove focus/close/input lifecycle;
-- wire overlay follow/pause/filter/detail interaction to the read model;
+- run the canonical package build and commit generated `dist/` artifacts;
+- mount the pure overlay model with `ctx.ui.custom()` on the current installed Pi version;
+- prove focus/close/Escape/input lifecycle and clean disposal in a real TTY;
+- bind live refresh hints to persisted re-reads, without treating hints as truth;
+- exercise LOG/FEED/RESULT/DETAIL, filtering and follow/pause under real native activations;
 - optionally promote `(t, seq, id)` filtering into the SQLite query itself after measuring burst behavior;
 - unify the duplicate default-noise predicate in `sp log` with the read-model predicate after XTRM-93 telemetry PRs settle;
 - E2E mixed-fleet proof: Pi parent -> nested Specialist plus `sp run`/tmux Specialist in one operator surface.
