@@ -3009,6 +3009,13 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
     // The contract rendered into the prompt lists the same set.
     expect(realSession.prompts[0]).toContain('ext_tool_a');
     expect(realSession.prompts[0]).toContain('## Resolved Tool Contract');
+    // SPECIALISTS-88: the exposed-sources line must name the mechanism that actually admits these
+    // tools on THIS path. The negative pair is the load-bearing half — a positive assertion on the
+    // mechanism name would still pass if the formatter's native branch regressed to the gate claim,
+    // because the call site supplies the argument either way. Do not simplify this to a positive
+    // check: the mutation that defeats these two lines is reverting the CALL SITE to the default.
+    expect(realSession.prompts[0]).not.toContain('all registered tools available');
+    expect(realSession.prompts[0]).not.toContain('tool-policy gate');
     // Discovery ran exactly once (builtin + discovery), real session once.
     expect(calls.filter((c) => c.systemPrompt === 'builtin-enumeration (never prompted)')).toHaveLength(1);
     expect(calls.filter((c) => c.systemPrompt === 'extension-discovery (never prompted)')).toHaveLength(1);
