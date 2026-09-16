@@ -15686,6 +15686,48 @@ class SqliteClient {
       `).all(...params, limit);
     }, "readForensicEvents");
   }
+  listNativeActivationIds(filters = {}) {
+    return withRetry(() => {
+      const clauses = [`job_id >= 'act:'`, `job_id < 'act;'`];
+      const params = [];
+      if (filters.sinceMs !== undefined) {
+        clauses.push("updated_at_ms >= ?");
+        params.push(filters.sinceMs);
+      }
+      if (filters.beadId !== undefined) {
+        clauses.push("bead_id = ?");
+        params.push(filters.beadId);
+      }
+      const limit = Math.max(1, Math.min(filters.limit ?? 20, 100));
+      const rows = this.db.query(`
+        SELECT job_id FROM specialist_jobs
+        WHERE ${clauses.join(" AND ")}
+        ORDER BY updated_at_ms DESC
+        LIMIT ?
+      `).all(...params, limit);
+      return rows.map((row) => row.job_id);
+    }, "listNativeActivationIds");
+  }
+  readForensicEventsForActivations(jobIds, filters = {}) {
+    if (jobIds.length === 0)
+      return [];
+    return withRetry(() => {
+      const placeholders = jobIds.map(() => "?").join(",");
+      const params = [...jobIds];
+      let since = "";
+      if (filters.sinceMs !== undefined) {
+        since = " AND t >= ?";
+        params.push(filters.sinceMs);
+      }
+      return this.db.query(`
+        SELECT id, job_id, seq, t, schema_version, event_family, event_name,
+               participant_kind, participant_role, participant_id, attempt_id, redaction_status, event_json
+        FROM specialist_forensic_events
+        WHERE job_id IN (${placeholders})${since}
+        ORDER BY t DESC, seq DESC, id DESC
+      `).all(...params);
+    }, "readForensicEventsForActivations");
+  }
   readLatestToolEvent(jobId) {
     return withRetry(() => {
       const row = this.db.query(`

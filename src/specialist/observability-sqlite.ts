@@ -1190,6 +1190,20 @@ export interface ListForensicEventsFilters {
   order?: 'asc' | 'desc';
 }
 
+/** Filters for {@link ObservabilitySqliteClient.listNativeActivationIds}.
+ * XTRM-93 N3 (unitAI-kmbb9). `limit` bounds ACTIVATION count, never event
+ * rows; clamped to 1..100 so the follow-up event fetch stays proportional
+ * to what `sp ps` renders. */
+export interface ListNativeActivationIdsFilters {
+  limit?: number;
+  /** Only activations touched at/after this epoch ms (maps to --since). */
+  sinceMs?: number;
+  /** Only activations for this bead (maps to --bead; pushed into the id
+   * selection so a bead filter returns that bead's latest activations
+   * instead of filtering the global latest-N after the fact). */
+  beadId?: string;
+}
+
 export interface JobMetricsRecord {
   job_id: string;
   specialist: string;
@@ -1456,6 +1470,20 @@ export interface ObservabilitySqliteClient {
   readEvents(jobId: string): TimelineEvent[];
   readEventsAfterSeq(jobId: string, afterSeq: number): TimelineEvent[];
   readForensicEvents(filters?: ListForensicEventsFilters): ForensicEventRecord[];
+  /** XTRM-93 N3 (unitAI-kmbb9): activation-first id selection for `sp ps`.
+   * Returns the latest-N native activation ids (job_id 'act:' space) ordered
+   * by specialist_jobs.updated_at_ms DESC. The bound is an ACTIVATION count,
+   * not an event count: the query touches only specialist_jobs rows (one per
+   * activation), never the forensic event table. Forensic-only rows from the
+   * retired event_family='activation' vocabulary (frozen 2026-09-08, no job
+   * row, no attempt_id) have no specialist_jobs row and are therefore
+   * EXCLUDED as obsolete — they can never enter the current list. */
+  listNativeActivationIds(filters?: ListNativeActivationIdsFilters): string[];
+  /** Fetch every forensic event for the given activation ids (no row cap).
+   * The bound lives in the id-selection stage; this stage is index-backed on
+   * job_id and touches only the selected activations' rows, never the full
+   * event table. */
+  readForensicEventsForActivations(jobIds: readonly string[], filters?: { sinceMs?: number }): ForensicEventRecord[];
   readLatestToolEvent(jobId: string): TimelineEventTool | null;
   getLastActivityTimestampMs(jobId: string): number | null;
   aggregateJobMetrics(jobId: string): JobMetricsRecord | null;
@@ -2815,6 +2843,53 @@ class SqliteClient implements ObservabilitySqliteClient {
         LIMIT ?
       `).all(...params, limit) as ForensicEventRecord[];
     }, 'readForensicEvents');
+  }
+
+  listNativeActivationIds(filters: ListNativeActivationIdsFilters = {}): string[] {
+    return withRetry(() => {
+      // Stage 1 of the activation-first selection (unitAI-kmbb9): pick the
+      // latest-N activation ids from specialist_jobs (one row per
+      // activation), then fetch events only for those ids. The range filter
+      // is index-backed (sqlite_autoindex_specialist_jobs_1); the ORDER BY is
+      // a temporary sort over at most the 'act:' row count (~hundreds), not
+      // over the ~100k forensic event rows. No composite led by job_id could
+      // serve this ordering (a range on the leading column cannot also
+      // provide it), so no index is added — see the EXPLAIN QUERY PLAN in
+      // tests/unit/specialist/native-activation-selection.test.ts.
+      const clauses = [`job_id >= 'act:'`, `job_id < 'act;'`];
+      const params: Array<string | number> = [];
+      if (filters.sinceMs !== undefined) { clauses.push('updated_at_ms >= ?'); params.push(filters.sinceMs); }
+      if (filters.beadId !== undefined) { clauses.push('bead_id = ?'); params.push(filters.beadId); }
+      const limit = Math.max(1, Math.min(filters.limit ?? 20, 100));
+      const rows = this.db.query(`
+        SELECT job_id FROM specialist_jobs
+        WHERE ${clauses.join(' AND ')}
+        ORDER BY updated_at_ms DESC
+        LIMIT ?
+      `).all(...params, limit) as Array<{ job_id: string }>;
+      return rows.map((row) => row.job_id);
+    }, 'listNativeActivationIds');
+  }
+
+  readForensicEventsForActivations(jobIds: readonly string[], filters: { sinceMs?: number } = {}): ForensicEventRecord[] {
+    if (jobIds.length === 0) return [];
+    return withRetry(() => {
+      // Stage 2 (unitAI-kmbb9): all events for the selected activations, with
+      // NO row cap. The bound is the activation count from stage 1 (<= 100
+      // ids); this query touches only those activations' rows via the
+      // idx_forensic_events_job_* indexes, never the full event table.
+      const placeholders = jobIds.map(() => '?').join(',');
+      const params: Array<string | number> = [...jobIds];
+      let since = '';
+      if (filters.sinceMs !== undefined) { since = ' AND t >= ?'; params.push(filters.sinceMs); }
+      return this.db.query(`
+        SELECT id, job_id, seq, t, schema_version, event_family, event_name,
+               participant_kind, participant_role, participant_id, attempt_id, redaction_status, event_json
+        FROM specialist_forensic_events
+        WHERE job_id IN (${placeholders})${since}
+        ORDER BY t DESC, seq DESC, id DESC
+      `).all(...params) as ForensicEventRecord[];
+    }, 'readForensicEventsForActivations');
   }
 
   readLatestToolEvent(jobId: string): TimelineEventTool | null {

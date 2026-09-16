@@ -119,6 +119,19 @@ export interface ListForensicEventsFilters {
     limit?: number;
     order?: 'asc' | 'desc';
 }
+/** Filters for {@link ObservabilitySqliteClient.listNativeActivationIds}.
+ * XTRM-93 N3 (unitAI-kmbb9). `limit` bounds ACTIVATION count, never event
+ * rows; clamped to 1..100 so the follow-up event fetch stays proportional
+ * to what `sp ps` renders. */
+export interface ListNativeActivationIdsFilters {
+    limit?: number;
+    /** Only activations touched at/after this epoch ms (maps to --since). */
+    sinceMs?: number;
+    /** Only activations for this bead (maps to --bead; pushed into the id
+     * selection so a bead filter returns that bead's latest activations
+     * instead of filtering the global latest-N after the fact). */
+    beadId?: string;
+}
 export interface JobMetricsRecord {
     job_id: string;
     specialist: string;
@@ -356,6 +369,22 @@ export interface ObservabilitySqliteClient {
     readEvents(jobId: string): TimelineEvent[];
     readEventsAfterSeq(jobId: string, afterSeq: number): TimelineEvent[];
     readForensicEvents(filters?: ListForensicEventsFilters): ForensicEventRecord[];
+    /** XTRM-93 N3 (unitAI-kmbb9): activation-first id selection for `sp ps`.
+     * Returns the latest-N native activation ids (job_id 'act:' space) ordered
+     * by specialist_jobs.updated_at_ms DESC. The bound is an ACTIVATION count,
+     * not an event count: the query touches only specialist_jobs rows (one per
+     * activation), never the forensic event table. Forensic-only rows from the
+     * retired event_family='activation' vocabulary (frozen 2026-09-08, no job
+     * row, no attempt_id) have no specialist_jobs row and are therefore
+     * EXCLUDED as obsolete — they can never enter the current list. */
+    listNativeActivationIds(filters?: ListNativeActivationIdsFilters): string[];
+    /** Fetch every forensic event for the given activation ids (no row cap).
+     * The bound lives in the id-selection stage; this stage is index-backed on
+     * job_id and touches only the selected activations' rows, never the full
+     * event table. */
+    readForensicEventsForActivations(jobIds: readonly string[], filters?: {
+        sinceMs?: number;
+    }): ForensicEventRecord[];
     readLatestToolEvent(jobId: string): TimelineEventTool | null;
     getLastActivityTimestampMs(jobId: string): number | null;
     aggregateJobMetrics(jobId: string): JobMetricsRecord | null;
