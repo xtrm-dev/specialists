@@ -7,6 +7,7 @@ the telemetry conclusions in `../03-telemetry-observability.md`, `../telemetry-d
 | | |
 |---|---|
 | Measurement tree | `feature/xtrm-93-n0n2-recon` @ `553b5a23` (XTRM-93 N0/N2 merged onto master `2118b5a3`) |
+| Master moved during this pass | A concurrent session pushed four commits to master: `40d7cbb7`, `458893c9`, `1007b459`, `73170716`. Two of them independently produced work this migration had in flight — see §3.7 and §3.9. The reconciliation was redone onto `73170716` as `e5b2a4f7`, and the N3 findings below were re-checked against it rather than assumed to carry over. |
 | Store | `<git-common-root>/.specialists/db/observability.db`, 1.62 GB, queried read-only in place |
 | Lanes | T1–T10, all complete, artifacts verbatim under `lanes/` |
 | Coordinator evidence | `coordinator/`, written and verified by the coordinator |
@@ -118,16 +119,37 @@ comparing resume legs as turns. A design decision for the identity node.
 
 ### 3.7 `dist/` provenance — the rule was inverted
 
-`bun.lock` pins `@modelcontextprotocol/{core,server}/node_modules/zod` to **4.5.4**; the main checkout has
-drifted to **4.6.2**, so its builds are rejected by the `package-payload` gate, which builds with
-`bun install --frozen-lockfile`. **`origin/master` fails its own package-payload gate** — unnoticed because that
-job triggers on `pull_request` only, never on `push`.
+`bun.lock` pins `@modelcontextprotocol/{core,server}/node_modules/zod` to **4.5.4**; the main checkout drifted
+to **4.6.2**, so its builds are rejected by the `package-payload` gate, which builds with
+`bun install --frozen-lockfile`. At the time of measurement **`origin/master` was failing its own package-payload
+gate** — unnoticed because that job triggers on `pull_request` only, never on `push`.
+
+**UPDATE, and it is an independent confirmation:** a concurrent session landed `1007b459 chore(dist): rebuild
+from the lockfile-resolved dependency set`, moving master's committed `dist/index.js` `fc02ac28` → `9e9a19eb`.
+That blob is **byte-identical to the one a frozen-lockfile build of `2118b5a3` produced when this pass first
+measured the drift**, so the finding was reproduced by a second party from a different direction, not merely
+agreed with. Master's committed dist is now lockfile-compliant, and the CI gate accepts lockfile-faithful
+bundles. **This paragraph's "master fails the gate" statement is therefore historical, not current.**
 
 The artifact is defined by the **lockfile**, not by the checkout. Confirmed twice by CI accepting lockfile-faithful
 bundles (PR #374 and PR #377). Corollary for every N3 node: rebuild `dist` on a lockfile-compliant **base**, or
 the node's bundle diff absorbs the whole pre-existing zod correction — measured at ~221 hunks on a
 non-compliant base versus **8 insertions / 7 deletions** on a compliant one. Evidence:
 `../13-dist-provenance-correction.md`.
+
+### 3.9 A new consumer now parses the activation-id format
+
+Concurrent commit `40d7cbb7` renders the fleet row as `${specialist}:${activation_id.slice(4)}` in
+`config/pi-extensions/specialist-subagents/index.mjs`, replacing a row that showed only the specialist name.
+
+This is presentation-only and adds no telemetry signal, but it **does** introduce a consumer that assumes the
+activation id's `act:` prefix is exactly four characters. Neither the audit nor this pass found any
+representation-parsing consumer before this; the standing rule recorded for `job_id` and `attempt_id` was that
+both are used as opaque keys, and `attempt_id` parsing was explicitly forbidden. This is the first exception,
+and it is a silent-corruption risk rather than a loud one: a future change to the id grammar would mis-slice the
+display without failing anything.
+
+Recorded as a compatibility note for the identity node. It is not a defect in the current grammar.
 
 ### 3.8 `unitAI-9n93` — the legacy oracle
 
