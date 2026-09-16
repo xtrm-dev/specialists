@@ -13,10 +13,10 @@ export declare const substrateIssueSchema: z.ZodObject<{
 }, "strip", z.ZodTypeAny, {
     op: "create" | "get" | "resolve" | "update_contract" | "project_resolve" | "project_create" | "link_checkout" | "list_links";
     name?: string | undefined;
+    ref?: string | undefined;
     issue_id?: string | undefined;
     title?: string | undefined;
     idempotency_key?: string | undefined;
-    ref?: string | undefined;
     prefix?: string | undefined;
     contract?: Record<string, unknown> | undefined;
     project_id?: string | undefined;
@@ -24,10 +24,10 @@ export declare const substrateIssueSchema: z.ZodObject<{
 }, {
     op: "create" | "get" | "resolve" | "update_contract" | "project_resolve" | "project_create" | "link_checkout" | "list_links";
     name?: string | undefined;
+    ref?: string | undefined;
     issue_id?: string | undefined;
     title?: string | undefined;
     idempotency_key?: string | undefined;
-    ref?: string | undefined;
     prefix?: string | undefined;
     contract?: Record<string, unknown> | undefined;
     project_id?: string | undefined;

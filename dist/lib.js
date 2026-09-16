@@ -13580,6 +13580,8 @@ function familyForTimelineType(type) {
     return "worktree";
   if (type === "stale_warning")
     return "process_health";
+  if (type.startsWith("settlement_"))
+    return "settlement";
   return "job";
 }
 function eventNameForTimelineEvent(event) {
@@ -13647,6 +13649,8 @@ function eventNameForTimelineEvent(event) {
     return "worktree.merged";
   if (event.type === "stale_warning")
     return "process_health.stale_detected";
+  if (typeof event.type === "string" && event.type.startsWith("settlement_"))
+    return event.type;
   return `${familyForTimelineType(event.type)}.${event.type}`;
 }
 function mcpEventNameForTimelineEvent(event) {
@@ -13683,6 +13687,10 @@ function severityForTimelineEvent(event) {
     return "error";
   if (event.type === "tool" && event.is_error)
     return "error";
+  if (event.type === "settlement_store_failed" || event.type === "settlement_republish_error")
+    return "error";
+  if (event.type === "settlement_degraded" || event.type === "settlement_republish_deferred" || event.type === "settlement_republish_refused")
+    return "warn";
   return "info";
 }
 function redactionStatusForTimelineEvent(event) {
@@ -17650,6 +17658,16 @@ var TIMELINE_EVENT_TYPES = {
   CHAIN_FINALIZED: "chain_finalized",
   WORKTREE_MERGED: "worktree_merged",
   CONTROL_SIGNAL: "control_signal",
+  SETTLEMENT_STORED: "settlement_stored",
+  SETTLEMENT_RECEIPT_ALLOCATED: "settlement_receipt_allocated",
+  SETTLEMENT_ARTIFACT_ATTACHED: "settlement_artifact_attached",
+  SETTLEMENT_RESULT_PUBLISHED: "settlement_result_published",
+  SETTLEMENT_REPUBLISH_DEFERRED: "settlement_republish_deferred",
+  SETTLEMENT_REPUBLISH_ERROR: "settlement_republish_error",
+  SETTLEMENT_REPUBLISH_RECONCILED: "settlement_republish_reconciled",
+  SETTLEMENT_REPUBLISH_REFUSED: "settlement_republish_refused",
+  SETTLEMENT_DEGRADED: "settlement_degraded",
+  SETTLEMENT_STORE_FAILED: "settlement_store_failed",
   DONE: "done",
   AGENT_END: "agent_end"
 };
@@ -17882,6 +17900,13 @@ function createControlSignalEvent(action, options) {
     type: TIMELINE_EVENT_TYPES.CONTROL_SIGNAL,
     action,
     ...options
+  };
+}
+function createSettlementEvent(type, options) {
+  return {
+    t: Date.now(),
+    type,
+    ...options ?? {}
   };
 }
 
@@ -21728,6 +21753,11 @@ var NATIVE_SESSION_OBSERVABILITY_GAPS = Object.freeze({
   summarization_retry_finished: "The legacy runner has no summarization-retry timeline event.",
   bash_execution_update: "The legacy runner does not persist streaming bash deltas."
 });
+var NATIVE_LIFECYCLE_DELIBERATELY_UNPERSISTED = Object.freeze({
+  extension_discovery_sessions: "Emit site src/activation/native-host.ts emits per-activation discovery cost (2 fenced sessions); no extension telemetry surface exists (no table/column/writer) and the operator ruled extension resolution out of scope for this migration, so creating one is deferred. Absence is explicit, not silent.",
+  extension_tools_discovered: "Emit site src/activation/native-host.ts emits the pinned extension tool list; no extension telemetry surface exists (no table/column/writer) and the operator ruled extension resolution out of scope for this migration, so creating one is deferred. Absence is explicit, not silent.",
+  extension_tools_refused: "Emit site src/activation/native-host.ts emits refused extension tools (collisions/provenance); no extension telemetry surface exists (no table/column/writer) and the operator ruled extension resolution out of scope for this migration, so creating one is deferred. The admission verdict persists on the session; the audit trail does not."
+});
 function at(event, t) {
   return { ...event, t };
 }
@@ -21742,6 +21772,32 @@ function numberField2(value) {
 }
 function booleanField2(value) {
   return typeof value === "boolean" ? value : undefined;
+}
+function settlementDetail(payload) {
+  if (!payload)
+    return {};
+  const detail = {};
+  const str = (key) => {
+    const value = stringField2(payload[key]);
+    if (value !== undefined)
+      detail[key] = value;
+  };
+  str("ref");
+  str("status");
+  str("receipt");
+  str("kind");
+  str("entry");
+  str("note");
+  str("activationId");
+  str("attemptId");
+  str("partial_receipt");
+  const republish = booleanField2(payload.republish);
+  if (republish !== undefined)
+    detail.republish = republish;
+  const contended = booleanField2(payload.contended);
+  if (contended !== undefined)
+    detail.contended = contended;
+  return detail;
 }
 function messageRole(event) {
   return stringField2(record(event.message)?.role);
@@ -21875,6 +21931,72 @@ function mapNativeLifecycleEvent(event, context, t = Date.now()) {
       return at(createControlSignalEvent(event.name, {
         bead_id: event.beadId,
         ...event.payload ?? {}
+      }), t);
+    case "activation_retried":
+    case "lease_release_failed":
+    case "mandatory_rules_injection":
+    case "tool_contract_unsatisfied_on_fallback":
+      return at(createControlSignalEvent(event.name, {
+        bead_id: event.beadId,
+        ...event.payload ?? {}
+      }), t);
+    case "model_fallback":
+      return at({
+        t,
+        type: TIMELINE_EVENT_TYPES.MODEL_CHANGE,
+        action: "cycle_model",
+        ...stringField2(event.payload?.to_model) ? { model: stringField2(event.payload?.to_model) } : {},
+        ...stringField2(event.payload?.from_model) ? { previous_model: stringField2(event.payload?.from_model) } : {}
+      }, t);
+    case "settlement_stored":
+      return at(createSettlementEvent("settlement_stored", {
+        bead_id: event.beadId,
+        ...settlementDetail(record(event.payload))
+      }), t);
+    case "settlement_receipt_allocated":
+      return at(createSettlementEvent("settlement_receipt_allocated", {
+        bead_id: event.beadId,
+        ...settlementDetail(record(event.payload))
+      }), t);
+    case "settlement_artifact_attached":
+      return at(createSettlementEvent("settlement_artifact_attached", {
+        bead_id: event.beadId,
+        ...settlementDetail(record(event.payload))
+      }), t);
+    case "settlement_result_published":
+      return at(createSettlementEvent("settlement_result_published", {
+        bead_id: event.beadId,
+        ...settlementDetail(record(event.payload))
+      }), t);
+    case "settlement_republish_deferred":
+      return at(createSettlementEvent("settlement_republish_deferred", {
+        bead_id: event.beadId,
+        ...settlementDetail(record(event.payload))
+      }), t);
+    case "settlement_republish_error":
+      return at(createSettlementEvent("settlement_republish_error", {
+        bead_id: event.beadId,
+        ...settlementDetail(record(event.payload))
+      }), t);
+    case "settlement_republish_reconciled":
+      return at(createSettlementEvent("settlement_republish_reconciled", {
+        bead_id: event.beadId,
+        ...settlementDetail(record(event.payload))
+      }), t);
+    case "settlement_republish_refused":
+      return at(createSettlementEvent("settlement_republish_refused", {
+        bead_id: event.beadId,
+        ...settlementDetail(record(event.payload))
+      }), t);
+    case "settlement_degraded":
+      return at(createSettlementEvent("settlement_degraded", {
+        bead_id: event.beadId,
+        ...settlementDetail(record(event.payload))
+      }), t);
+    case "settlement_store_failed":
+      return at(createSettlementEvent("settlement_store_failed", {
+        bead_id: event.beadId,
+        ...settlementDetail(record(event.payload))
       }), t);
     case "activation_failed":
     case "activation_rejected":

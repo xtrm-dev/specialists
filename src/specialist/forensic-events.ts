@@ -826,6 +826,10 @@ function familyForTimelineType(type: string): string {
   if (type === 'chain_ready_for_review' || type === 'chain_finalized') return 'chain';
   if (type === 'worktree_merged') return 'worktree';
   if (type === 'stale_warning') return 'process_health';
+  // SPECIALISTS-101: settlement evidence keeps its own family so the 10 names stay distinct.
+  // Additive: no existing type matched this prefix before (mapper dropped them), so no
+  // existing row changes family.
+  if (type.startsWith('settlement_')) return 'settlement';
   return 'job';
 }
 
@@ -865,6 +869,9 @@ function eventNameForTimelineEvent(event: { type: string; [key: string]: unknown
   if (event.type === 'chain_finalized') return 'chain.finalized';
   if (event.type === 'worktree_merged') return 'worktree.merged';
   if (event.type === 'stale_warning') return 'process_health.stale_detected';
+  // SPECIALISTS-101 carrier: settlement_* keep their own event_name (identity mapping).
+  // Additive: these types never reached the writer before (mapper returned null).
+  if (typeof event.type === 'string' && event.type.startsWith('settlement_')) return event.type;
   return `${familyForTimelineType(event.type)}.${event.type}`;
 }
 
@@ -890,6 +897,9 @@ function severityForTimelineEvent(event: { type: string; [key: string]: unknown 
   if (event.type === 'stale_warning' || event.type === 'control_signal') return 'warn';
   if (event.type === 'run_complete' && event.status === 'ERROR') return 'error';
   if (event.type === 'tool' && event.is_error) return 'error';
+  // SPECIALISTS-101: settlement failures are errors, degradations/deferrals/refusals warn, success info.
+  if (event.type === 'settlement_store_failed' || event.type === 'settlement_republish_error') return 'error';
+  if (event.type === 'settlement_degraded' || event.type === 'settlement_republish_deferred' || event.type === 'settlement_republish_refused') return 'warn';
   return 'info';
 }
 

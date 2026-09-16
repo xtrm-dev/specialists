@@ -13,10 +13,10 @@ export declare const substrateJournalSchema: z.ZodObject<{
 }, "strip", z.ZodTypeAny, {
     op: "append" | "list" | "checkpoint" | "get" | "since" | "latest_checkpoint";
     summary?: string | undefined;
+    kind?: "compaction" | "note" | "decision" | "checkpoint" | "finding" | "blocker" | "handoff" | "milestone" | undefined;
     participant_id?: string | undefined;
     issue_id?: string | undefined;
     session_id?: string | undefined;
-    kind?: "compaction" | "decision" | "checkpoint" | "finding" | "note" | "blocker" | "handoff" | "milestone" | undefined;
     limit?: number | undefined;
     entry_id?: string | undefined;
     cursor?: number | undefined;
@@ -24,10 +24,10 @@ export declare const substrateJournalSchema: z.ZodObject<{
 }, {
     op: "append" | "list" | "checkpoint" | "get" | "since" | "latest_checkpoint";
     summary?: string | undefined;
+    kind?: "compaction" | "note" | "decision" | "checkpoint" | "finding" | "blocker" | "handoff" | "milestone" | undefined;
     participant_id?: string | undefined;
     issue_id?: string | undefined;
     session_id?: string | undefined;
-    kind?: "compaction" | "decision" | "checkpoint" | "finding" | "note" | "blocker" | "handoff" | "milestone" | undefined;
     limit?: number | undefined;
     entry_id?: string | undefined;
     cursor?: number | undefined;
@@ -68,10 +68,10 @@ export declare function createSubstrateJournalTool(getJournal: GetJournal): {
     }, "strip", z.ZodTypeAny, {
         op: "append" | "list" | "checkpoint" | "get" | "since" | "latest_checkpoint";
         summary?: string | undefined;
+        kind?: "compaction" | "note" | "decision" | "checkpoint" | "finding" | "blocker" | "handoff" | "milestone" | undefined;
         participant_id?: string | undefined;
         issue_id?: string | undefined;
         session_id?: string | undefined;
-        kind?: "compaction" | "decision" | "checkpoint" | "finding" | "note" | "blocker" | "handoff" | "milestone" | undefined;
         limit?: number | undefined;
         entry_id?: string | undefined;
         cursor?: number | undefined;
@@ -79,10 +79,10 @@ export declare function createSubstrateJournalTool(getJournal: GetJournal): {
     }, {
         op: "append" | "list" | "checkpoint" | "get" | "since" | "latest_checkpoint";
         summary?: string | undefined;
+        kind?: "compaction" | "note" | "decision" | "checkpoint" | "finding" | "blocker" | "handoff" | "milestone" | undefined;
         participant_id?: string | undefined;
         issue_id?: string | undefined;
         session_id?: string | undefined;
-        kind?: "compaction" | "decision" | "checkpoint" | "finding" | "note" | "blocker" | "handoff" | "milestone" | undefined;
         limit?: number | undefined;
         entry_id?: string | undefined;
         cursor?: number | undefined;
