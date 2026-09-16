@@ -101,7 +101,7 @@ import { resolveJobsDir } from './job-root.js';
 import type { TimelineEvent, TimelineEventTool } from './timeline-events.js';
 import { deriveParticipantId, forensicEventFromTimelineEvent, type ForensicEvent } from './forensic-events.js';
 import type { BranchIntegrationEvent } from './branch-integration-events.js';
-import type { SupervisorStatus } from './supervisor.js';
+import type { SupervisorStatus } from './status-contract.js';
 import type { EpicChainRecord, EpicRunRecord } from './epic-lifecycle.js';
 import type { PersistedChainIdentity } from './chain-identity.js';
 
