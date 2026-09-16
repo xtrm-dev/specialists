@@ -1,0 +1,40 @@
+{
+  "content_sha256": "62f1c116625424ebe25da4208b797a00f92a173e035d0f5dda65f224743b6b1c",
+  "diagnostics": {
+    "dangling_relations": [],
+    "derived_dotted_parent_links": [],
+    "multiple_parent_nodes": []
+  },
+  "external_relations": [],
+  "hierarchy": {
+    "children": [],
+    "id": "unitAI-lv1up"
+  },
+  "issues": {
+    "unitAI-lv1up": {
+      "selection_state": "selected",
+      "source": {
+        "_type": "issue",
+        "comment_count": 0,
+        "created_at": "2026-09-09T19:08:48Z",
+        "created_by": "jaggerxtrm",
+        "dependency_count": 0,
+        "dependent_count": 0,
+        "description": "CLAUDE.md:253 writes the usable task contract as PROBLEM / SUCCESS / SCRUTINY / SCOPE / NON_GOALS / CONSTRAINTS / VALIDATION / OUTPUT (eight names for a 7-section contract). bead-gate.ts:22 REQUIRED_SECTIONS is PROBLEM, SUCCESS, SCOPE, NON_GOALS, CONSTRAINTS, VALIDATION, OUTPUT with SCRUTINY_LEVELS separate. Fix the doc line to seven sections plus SCRUTINY level. Found via E1 plugin design review.",
+        "id": "unitAI-lv1up",
+        "issue_type": "task",
+        "owner": "jagger.xtrm@gmail.com",
+        "priority": 3,
+        "status": "open",
+        "title": "CLAUDE.md lists SCRUTINY as a contract section; gate says level",
+        "updated_at": "2026-09-09T19:08:48Z"
+      }
+    }
+  },
+  "relations": [],
+  "repository": "xtrm-dev/specialists",
+  "root_id": "unitAI-lv1up",
+  "root_title": "CLAUDE.md lists SCRUTINY as a contract section; gate says level",
+  "schema_version": "xtrm.board-audit.work-package.v1",
+  "scope": "open"
+}

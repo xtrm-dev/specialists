@@ -1,0 +1,70 @@
+{
+  "content_sha256": "91b556a709908086fe403086b958207d06defc02f8c53e89f3f6761a5896c44f",
+  "desired_issues": {
+    "unitAI-52h1c": {
+      "_type": "issue",
+      "comment_count": 0,
+      "created_at": "2026-09-16T02:53:59Z",
+      "created_by": "jaggerxtrm",
+      "dependency_count": 0,
+      "dependent_count": 0,
+      "description": "PROBLEM\nThe native in-process dispatch (specialist_dispatch / the Fleet) records no dispatcher identity, so a dispatched specialist cannot be attributed to the pane that dispatched it - and because a native activation produces no tmux pane, there is nothing that could carry the child-side lineage the CLI path uses.\n\nGrounding, verified 2026-09-13:\n- config/pi-extensions/specialist-subagents/index.mjs serves the native dispatch and NEVER touches tmux: grep for tmux|TMUX_PANE|@agent returns no calls, only comments. So a native activation has no pane of its own.\n- Its persistent state is the Fleet Registry inside the host - index.mjs:18 \"the Fleet Registry inside the host is the persistent state\" - surfaced through the specialist_status tool (fleetSummaryOf, renderFleetHeader). That registry is the only place a pane-less activation can be linked to its dispatcher.\n- The dispatcher identity is available in-process at dispatch with no lookup: process.env.TMUX_PANE plus that pane's @agent_instance_id - the same three values the CLI half already captures (tmux_session_id, tmux_pane_id, agent_instance_id).\n\nSibling work: unitAI-vc7tl does the same for the CLI/worktree launch path (stamping @agent_parent_session / @agent_parent_pane on the child pane). The consumer display is xtmux-oj2 in the xtmux repo, which needs to know where to read native children from.\n\nSUCCESS\n- Every native activation records, with its activation record, the dispatching pane: tmux_session_id, tmux_pane_id, agent_instance_id - captured at dispatch time, not re-derived later.\n- That identity is exposed wherever activations are already read: the Fleet view/status output, and a documented interface the xtmux picker can consume.\n- An activation dispatched with no tmux context (no TMUX_PANE) records an explicit null/absent dispatcher rather than guessing or inheriting a bystander pane.\n- The interface decision is made and written down: either the registry is authoritative and consumers query it, or the dispatcher's own pane carries a small refreshed option (e.g. @agent_native_activations) and consumers keep reading tmux options. Do not leave both half-built.\n\nSCOPE\n- config/pi-extensions/specialist-subagents/index.mjs and the host/registry modules it uses.\n- Its tests: activation record shape, Fleet exposure, and the no-tmux case.\n\nNON_GOALS\n- The CLI/worktree launch path - that is unitAI-vc7tl.\n- The rendering of nested rows - that is xtmux-oj2.\n- Changing lease, fencing, or activation lifecycle semantics.\n\nCONSTRAINTS\n- Capture at dispatch from the live environment; never re-derive the dispatcher later, since the pane can move or close.\n- Use the tmux SESSION ID ($N), never the session name (mutable and recycled).\n- Absent dispatcher is a valid, meaningful state - never invent one, and never let tmux resolve a bystander pane from a default server.\n- Keep the record shape aligned with the CLI half's field names (tmux_session_id, tmux_pane_id, agent_instance_id) so consumers read one vocabulary.\n- Be restart-aware: the live host reported build skew (\"the runtime was rebuilt after this session loaded it... restart the session to pick up the new build\"), so verification must state which build was exercised.\n\nVALIDATION\n- Dispatch natively from a tmux pane and assert the activation record carries the pane's own $N / %N / instance id.\n- Assert the Fleet/status output exposes the dispatcher.\n- Assert the no-TMUX case records null.\n- State the build/restart conditions under which the check ran.\n\nOUTPUT\nThe dispatcher capture and exposure, tests for the three cases, and the written interface decision that xtmux-oj2 will consume.\n",
+      "external_ref": "bead:xtmux-oj2",
+      "id": "unitAI-52h1c",
+      "issue_type": "feature",
+      "owner": "jagger.xtrm@gmail.com",
+      "priority": 2,
+      "status": "open",
+      "title": "native dispatch: record the dispatching pane with each native activation, and expose it",
+      "updated_at": "2026-09-16T02:53:59Z"
+    }
+  },
+  "diagnostics": {
+    "dangling_relations": [],
+    "derived_dotted_parent_links": [],
+    "multiple_parent_nodes": []
+  },
+  "external_relations": [],
+  "hierarchy": {
+    "children": [],
+    "id": "unitAI-52h1c"
+  },
+  "issues": {
+    "unitAI-52h1c": {
+      "selection_state": "selected",
+      "source": {
+        "_type": "issue",
+        "comment_count": 0,
+        "created_at": "2026-09-16T02:53:59Z",
+        "created_by": "jaggerxtrm",
+        "dependency_count": 0,
+        "dependent_count": 0,
+        "description": "PROBLEM\nThe native in-process dispatch (specialist_dispatch / the Fleet) records no dispatcher identity, so a dispatched specialist cannot be attributed to the pane that dispatched it - and because a native activation produces no tmux pane, there is nothing that could carry the child-side lineage the CLI path uses.\n\nGrounding, verified 2026-09-13:\n- config/pi-extensions/specialist-subagents/index.mjs serves the native dispatch and NEVER touches tmux: grep for tmux|TMUX_PANE|@agent returns no calls, only comments. So a native activation has no pane of its own.\n- Its persistent state is the Fleet Registry inside the host - index.mjs:18 \"the Fleet Registry inside the host is the persistent state\" - surfaced through the specialist_status tool (fleetSummaryOf, renderFleetHeader). That registry is the only place a pane-less activation can be linked to its dispatcher.\n- The dispatcher identity is available in-process at dispatch with no lookup: process.env.TMUX_PANE plus that pane's @agent_instance_id - the same three values the CLI half already captures (tmux_session_id, tmux_pane_id, agent_instance_id).\n\nSibling work: unitAI-vc7tl does the same for the CLI/worktree launch path (stamping @agent_parent_session / @agent_parent_pane on the child pane). The consumer display is xtmux-oj2 in the xtmux repo, which needs to know where to read native children from.\n\nSUCCESS\n- Every native activation records, with its activation record, the dispatching pane: tmux_session_id, tmux_pane_id, agent_instance_id - captured at dispatch time, not re-derived later.\n- That identity is exposed wherever activations are already read: the Fleet view/status output, and a documented interface the xtmux picker can consume.\n- An activation dispatched with no tmux context (no TMUX_PANE) records an explicit null/absent dispatcher rather than guessing or inheriting a bystander pane.\n- The interface decision is made and written down: either the registry is authoritative and consumers query it, or the dispatcher's own pane carries a small refreshed option (e.g. @agent_native_activations) and consumers keep reading tmux options. Do not leave both half-built.\n\nSCOPE\n- config/pi-extensions/specialist-subagents/index.mjs and the host/registry modules it uses.\n- Its tests: activation record shape, Fleet exposure, and the no-tmux case.\n\nNON_GOALS\n- The CLI/worktree launch path - that is unitAI-vc7tl.\n- The rendering of nested rows - that is xtmux-oj2.\n- Changing lease, fencing, or activation lifecycle semantics.\n\nCONSTRAINTS\n- Capture at dispatch from the live environment; never re-derive the dispatcher later, since the pane can move or close.\n- Use the tmux SESSION ID ($N), never the session name (mutable and recycled).\n- Absent dispatcher is a valid, meaningful state - never invent one, and never let tmux resolve a bystander pane from a default server.\n- Keep the record shape aligned with the CLI half's field names (tmux_session_id, tmux_pane_id, agent_instance_id) so consumers read one vocabulary.\n- Be restart-aware: the live host reported build skew (\"the runtime was rebuilt after this session loaded it... restart the session to pick up the new build\"), so verification must state which build was exercised.\n\nVALIDATION\n- Dispatch natively from a tmux pane and assert the activation record carries the pane's own $N / %N / instance id.\n- Assert the Fleet/status output exposes the dispatcher.\n- Assert the no-TMUX case records null.\n- State the build/restart conditions under which the check ran.\n\nOUTPUT\nThe dispatcher capture and exposure, tests for the three cases, and the written interface decision that xtmux-oj2 will consume.\n",
+        "external_ref": "bead:xtmux-oj2",
+        "id": "unitAI-52h1c",
+        "issue_type": "feature",
+        "owner": "jagger.xtrm@gmail.com",
+        "priority": 2,
+        "status": "open",
+        "title": "native dispatch: record the dispatching pane with each native activation, and expose it",
+        "updated_at": "2026-09-16T02:53:59Z"
+      }
+    }
+  },
+  "new_comments": {},
+  "relations": [],
+  "repository": "xtrm-dev/specialists",
+  "root_id": "unitAI-52h1c",
+  "root_title": "native dispatch: record the dispatching pane with each native activation, and expose it",
+  "roundtrip": {
+    "base_package_sha256": "91b556a709908086fe403086b958207d06defc02f8c53e89f3f6761a5896c44f",
+    "base_record_sha256": {
+      "unitAI-52h1c": "894b53244b62140ec6e21d6eb1b2f69ad99b48a32a62513b792c600c74510517"
+    },
+    "edit_contract": "modify desired_issues and new_comments only; issues.*.source is immutable base state",
+    "prepared_at": "2026-09-16T15:59:22Z",
+    "schema_version": "xtrm.board-audit.roundtrip.v1"
+  },
+  "schema_version": "xtrm.board-audit.work-package.v1",
+  "scope": "open"
+}

@@ -1,0 +1,41 @@
+{
+  "content_sha256": "47ec7800a74547118f9b8265e6a136f1509bd8835032b8b6b030ae073f50d0f8",
+  "diagnostics": {
+    "dangling_relations": [],
+    "derived_dotted_parent_links": [],
+    "multiple_parent_nodes": []
+  },
+  "external_relations": [],
+  "hierarchy": {
+    "children": [],
+    "id": "unitAI-4t2e4"
+  },
+  "issues": {
+    "unitAI-4t2e4": {
+      "selection_state": "selected",
+      "source": {
+        "_type": "issue",
+        "comment_count": 0,
+        "created_at": "2026-09-16T15:39:17Z",
+        "created_by": "jaggerxtrm",
+        "dependency_count": 0,
+        "dependent_count": 0,
+        "description": "MEASURED on clean origin/master 2118b5a3, with no local modifications.\n\nCI's own sequence, run in a fresh worktree:\n  bun install --frozen-lockfile   -> 174 packages (added zod-to-json-schema@3.25.2)\n  NODE_ENV=test bun run build     -> exit 0\n  git diff --exit-code -- dist/   -> FAILS: dist/index.js 862 insertions(+), 1292 deletions(-)\n\nSo the committed dist/ was NOT built from the locked dependency set. It matches instead the drifted node_modules in the primary checkout, which is why a build there is byte-clean while CI's frozen-lockfile build is not.\n\nImpact: .github/workflows/package-payload.yml payload-contract and packed-smoke are gated on config/**|src/**|dist/** changes; both fail. Recent merged payload-touching PRs #361-#372 all passed, so this is recent drift, consistent with the two 'chore(release): ... rebuild dist' commits on master (4617a710, 7216f026) baking a drifted build into the committed bundle.\n\nSeparately, the 'tests' workflow fails on master for 6 of 6 recent runs (2118b5a3, 43ceedc5) - a different pre-existing failure.\n\nObserved failure signature in CI: bundler variable renumbering drift (process2.stdin -> process4.stdin, failure3 -> failure), i.e. CI bundles MORE modules than the build that produced the committed dist/.\n\nFirst surfaced by PR #375 (a one-line change to config/pi-extensions/specialist-subagents/index.mjs, which touches NO src/ and NO dist/ file but still triggers the payload workflow). PR #375 is NOT the cause.\n\nLikely fix direction: reconcile node_modules to bun.lock (frozen install), rebuild dist, and land that as its own change; then re-run the payload gate. Root cause of the drift itself is unconfirmed.",
+        "id": "unitAI-4t2e4",
+        "issue_type": "bug",
+        "notes": "RESOLUTION IN PROGRESS (branch fix/fleet-row-identity).\n\nRoot cause CONFIRMED: the primary checkout's node_modules had drifted from bun.lock. Reconciling with 'bun install --frozen-lockfile' reported 19 packages changed; after that, a local build produced exactly the same delta as a fresh frozen-lockfile worktree (862 insertions, 1292 deletions in dist/index.js). The committed dist had been built from the drifted install, which is why local builds were byte-clean against it while CI's frozen-lockfile build was not, and why CI's log showed bundler variable renumbering (process2.stdin -> process4.stdin): CI bundles more modules.\n\nFix: commit 1007b459 rebuilds dist from the lockfile-resolved dependency set. Verified: a build in a clean origin/master worktree with 'bun install --frozen-lockfile' hashes dist/index.js to a9f9893d8810604a60bdabdc4005010a13b40f852dcf5df9bf7bf592f4e51cfe, byte-identical to the committed artifact.\n\nSame drift produced the previously observed dirty dist/index.js in the primary checkout (inlined typebox internals).\n\nALSO UNBLOCKED (same PR, separate pre-existing defect): tests/unit/specialist/activation-native-host.test.ts 'never lets a denied native become active through a discovered name' failed in CI but passed locally. Cause: it assumed a healthy gitnexus without forcing one. resolveGitnexusRuntime probes resolveGlobalNodeModulesDir(); with no global pi-gitnexus the hard deny is inactive, grep stays a granted READ_ONLY native, and the dispatch refuses earlier as an F1 shadow. Reproduced locally by setting PI_NPM_GLOBAL_DIR to an empty dir -> CI's exact message and 1 failed | 111 passed. Fixed in 73170716 by pinning PI_NPM_GLOBAL_DIR to a fixture tree with pi-gitnexus 0.6.4 (the catalog pin). 112 passed in both environments. This failure predates PR 375 and appears in unrelated PR runs 180c6b78, e1a463b8 and 553b5a23.",
+        "owner": "jagger.xtrm@gmail.com",
+        "priority": 1,
+        "status": "open",
+        "title": "dist/ on master is not reproducible from bun.lock — payload-contract and packed-smoke are red for every PR",
+        "updated_at": "2026-09-16T15:55:54Z"
+      }
+    }
+  },
+  "relations": [],
+  "repository": "xtrm-dev/specialists",
+  "root_id": "unitAI-4t2e4",
+  "root_title": "dist/ on master is not reproducible from bun.lock — payload-contract and packed-smoke are red for every PR",
+  "schema_version": "xtrm.board-audit.work-package.v1",
+  "scope": "open"
+}

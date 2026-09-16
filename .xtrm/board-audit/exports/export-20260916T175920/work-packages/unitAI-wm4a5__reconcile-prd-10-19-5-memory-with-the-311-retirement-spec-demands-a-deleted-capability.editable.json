@@ -1,0 +1,70 @@
+{
+  "content_sha256": "1042d1e9c54c2681ee6a721d4d3fb3c35564804eea390c526fdd54eff7233cf4",
+  "desired_issues": {
+    "unitAI-wm4a5": {
+      "_type": "issue",
+      "comment_count": 0,
+      "created_at": "2026-09-10T22:18:55Z",
+      "created_by": "jaggerxtrm",
+      "dependency_count": 0,
+      "dependent_count": 0,
+      "description": "PROBLEM\nCommit 3028f3fa (#311, 'Memory retirement S1-S5') removed the Specialists bd-memory pipeline from master: src/cli/memory.ts and its subcommand, config/hooks/specialists-memory-cache-sync.mjs, the memory-audit-transaction skill, the memory-processor specialist, memories FTS persistence in observability-sqlite, and spawn-prompt memory injection. Verified gone on origin/master.\n\nPRD §10 'Memory requirements' and §19.5 still stand unamended. §19.5 requires five properties: targeted provenance-bearing retrieval; measurable unnecessary retrieval; findings remain candidates until promotion; explicit contradictions/supersession; no unreviewed activation silently changes global knowledge/policy. Those governance properties lived in the deleted pipeline.\n\nNote the distinction, because it is easy to get wrong: the bd CLI's own memory (bd remember / bd recall / bd memories) still works and is in daily use. What was retired is Specialists' governed integration with it. Raw storage survived; promotion, provenance and audit did not.\n\nSo the PRD currently requires a capability the codebase deliberately removed. Until reconciled, §19.5 is unsatisfiable and 'PRD concluded' is unreachable for reasons unrelated to any open lane.\n\nSUCCESS\nPRD §10 and §19.5 either (a) record the retirement and state what, if anything, replaces the governance properties, or (b) name the bead that restores them. Whichever is chosen, a reader can tell that the absence is intentional.\n\nSCOPE\ndocs/design/roadmap/specialists-prd.md §10 and §19.5. Decide and record; do not rebuild the pipeline under this bead.\n\nNON_GOALS\nDo not restore the deleted pipeline here. Do not change bd's own memory behaviour.\n\nCONSTRAINTS\nIf the retirement stands, §19.4/§19.5 promotion-metric language that depends on memory evidence must be checked for orphaned references.\n\nVALIDATION\nNo §19 acceptance criterion depends on a capability absent from the codebase without an explicit note saying so.\n\nOUTPUT\nPRD reconciled with the shipped code; §19.5 becomes assessable either way.\n\nSCRUTINY\nHIGH",
+      "id": "unitAI-wm4a5",
+      "issue_type": "task",
+      "notes": "SUCCESSOR MECHANISM IDENTIFIED 2026-09-11 (via core-xt-pi-7j51, verified against the Core tree). The operator's steer: memory returns later, but the MECHANISM must not be dropped forever. It has not been — it was REPLACED, and the replacement should be what this bead records.\n\nWHAT REPLACES IT: commit/PR-corpus retrieval via preflight(), shipped in the python-kernel prelude (packages/pi-extensions/extensions/python-kernel/index.ts:92-202). Mechanism: git log --follow --no-merges with FULL BODIES (subjects alone hide the why), topic derived from file basename with generic stems walking to the nearest meaningful parent dir, git diff HEAD --stat for pending working state, plus 'bd memories <topic>' as a third arm limited to ~6 keys. Prints a bounded digest (commit count, last n subjects with bodies truncated ~110 chars, diff stat, memory keys) and returns full records. Read-only. 0 commits means WRONG PATH — a failed preflight, not empty history.\n\nWHY IT WINS, and this is what belongs in the PRD rather than a bare deletion:\n- Provenance: every claim traces to hash + date + full body + diff; PR numbers in subjects cross-reference discussion.\n- Staleness resistance: commits are immutable. A written note rots when code moves; git log --follow does not. Doctrine's exact line: 'Commits do not go stale.'\n- Retrieval precision: file-scoped preflight for the one file under edit, instead of bulk injection. 'bd prime' bulk-injects hundreds of memories (~100K tokens in a mature repo).\n- Cost: no second store to sync, index, inject or audit. Git already exists.\n\nFAILURE MODE THE RETIREMENT FIXED, name it in the PRD: 'bulk-injected authority without provenance'. bd prime used as a retrieval channel; memories treated as authority for structure/commands/behavior instead of dated leads; hand-written entries rotting; and the machinery required to maintain them (close-gate, Stop gate, doctrine injection, xt memory CLI, cache-sync/claim-sync hooks, FTS persistence, audit transaction, processor specialist).\n\nDO NOT CONFLATE THE SHAs: 3028f3fa/#311 is the SPECIALISTS-repo retirement. Core's equivalent is 959c7718/#639, with docs sync b81cc8c0 and preflight introduced in e6124b78/#611. Core exported 818 keys to ~/bd-memory-export-20260909.json at retirement; claim/edit/commit gates kept, memory gates removed.\n\nPORTABILITY: preflight() is portable as-is — only assumes git, with the 'bd memories' arm degrading to empty when bd is absent. No Core logic inside it. sk_rebuild() and the .xtrm/cache/service-knowledge.sqlite path are Core-specific and would need retargeting or dropping. Tests to copy if ported: packages/pi-extensions/tests/python-kernel.test.ts, scripts/verify-python-kernel-v2.mjs.\n\nSUGGESTED §19.5 REWRITE (from 7j51, and I agree): replace each governed-memory acceptance criterion with preflight-style commit-corpus retrieval plus targeted 'bd memories' leads, live code as the verifier. That keeps the five properties' INTENT — provenance-bearing, targeted, candidate-not-authority, supersession explicit, no silent global change — while naming a mechanism that actually exists.\n\nReading list instead of retyping: python-kernel/index.ts:92-202 and 840-900; ~/.pi/agent/APPEND_SYSTEM.md 'Memory doctrine: progressive retrieval, never bulk'; Core commits e6124b78, 959c7718, b81cc8c0.",
+      "owner": "jagger.xtrm@gmail.com",
+      "priority": 1,
+      "status": "open",
+      "title": "Reconcile PRD §10/§19.5 memory with the #311 retirement (spec demands a deleted capability)",
+      "updated_at": "2026-09-11T01:11:05Z"
+    }
+  },
+  "diagnostics": {
+    "dangling_relations": [],
+    "derived_dotted_parent_links": [],
+    "multiple_parent_nodes": []
+  },
+  "external_relations": [],
+  "hierarchy": {
+    "children": [],
+    "id": "unitAI-wm4a5"
+  },
+  "issues": {
+    "unitAI-wm4a5": {
+      "selection_state": "selected",
+      "source": {
+        "_type": "issue",
+        "comment_count": 0,
+        "created_at": "2026-09-10T22:18:55Z",
+        "created_by": "jaggerxtrm",
+        "dependency_count": 0,
+        "dependent_count": 0,
+        "description": "PROBLEM\nCommit 3028f3fa (#311, 'Memory retirement S1-S5') removed the Specialists bd-memory pipeline from master: src/cli/memory.ts and its subcommand, config/hooks/specialists-memory-cache-sync.mjs, the memory-audit-transaction skill, the memory-processor specialist, memories FTS persistence in observability-sqlite, and spawn-prompt memory injection. Verified gone on origin/master.\n\nPRD §10 'Memory requirements' and §19.5 still stand unamended. §19.5 requires five properties: targeted provenance-bearing retrieval; measurable unnecessary retrieval; findings remain candidates until promotion; explicit contradictions/supersession; no unreviewed activation silently changes global knowledge/policy. Those governance properties lived in the deleted pipeline.\n\nNote the distinction, because it is easy to get wrong: the bd CLI's own memory (bd remember / bd recall / bd memories) still works and is in daily use. What was retired is Specialists' governed integration with it. Raw storage survived; promotion, provenance and audit did not.\n\nSo the PRD currently requires a capability the codebase deliberately removed. Until reconciled, §19.5 is unsatisfiable and 'PRD concluded' is unreachable for reasons unrelated to any open lane.\n\nSUCCESS\nPRD §10 and §19.5 either (a) record the retirement and state what, if anything, replaces the governance properties, or (b) name the bead that restores them. Whichever is chosen, a reader can tell that the absence is intentional.\n\nSCOPE\ndocs/design/roadmap/specialists-prd.md §10 and §19.5. Decide and record; do not rebuild the pipeline under this bead.\n\nNON_GOALS\nDo not restore the deleted pipeline here. Do not change bd's own memory behaviour.\n\nCONSTRAINTS\nIf the retirement stands, §19.4/§19.5 promotion-metric language that depends on memory evidence must be checked for orphaned references.\n\nVALIDATION\nNo §19 acceptance criterion depends on a capability absent from the codebase without an explicit note saying so.\n\nOUTPUT\nPRD reconciled with the shipped code; §19.5 becomes assessable either way.\n\nSCRUTINY\nHIGH",
+        "id": "unitAI-wm4a5",
+        "issue_type": "task",
+        "notes": "SUCCESSOR MECHANISM IDENTIFIED 2026-09-11 (via core-xt-pi-7j51, verified against the Core tree). The operator's steer: memory returns later, but the MECHANISM must not be dropped forever. It has not been — it was REPLACED, and the replacement should be what this bead records.\n\nWHAT REPLACES IT: commit/PR-corpus retrieval via preflight(), shipped in the python-kernel prelude (packages/pi-extensions/extensions/python-kernel/index.ts:92-202). Mechanism: git log --follow --no-merges with FULL BODIES (subjects alone hide the why), topic derived from file basename with generic stems walking to the nearest meaningful parent dir, git diff HEAD --stat for pending working state, plus 'bd memories <topic>' as a third arm limited to ~6 keys. Prints a bounded digest (commit count, last n subjects with bodies truncated ~110 chars, diff stat, memory keys) and returns full records. Read-only. 0 commits means WRONG PATH — a failed preflight, not empty history.\n\nWHY IT WINS, and this is what belongs in the PRD rather than a bare deletion:\n- Provenance: every claim traces to hash + date + full body + diff; PR numbers in subjects cross-reference discussion.\n- Staleness resistance: commits are immutable. A written note rots when code moves; git log --follow does not. Doctrine's exact line: 'Commits do not go stale.'\n- Retrieval precision: file-scoped preflight for the one file under edit, instead of bulk injection. 'bd prime' bulk-injects hundreds of memories (~100K tokens in a mature repo).\n- Cost: no second store to sync, index, inject or audit. Git already exists.\n\nFAILURE MODE THE RETIREMENT FIXED, name it in the PRD: 'bulk-injected authority without provenance'. bd prime used as a retrieval channel; memories treated as authority for structure/commands/behavior instead of dated leads; hand-written entries rotting; and the machinery required to maintain them (close-gate, Stop gate, doctrine injection, xt memory CLI, cache-sync/claim-sync hooks, FTS persistence, audit transaction, processor specialist).\n\nDO NOT CONFLATE THE SHAs: 3028f3fa/#311 is the SPECIALISTS-repo retirement. Core's equivalent is 959c7718/#639, with docs sync b81cc8c0 and preflight introduced in e6124b78/#611. Core exported 818 keys to ~/bd-memory-export-20260909.json at retirement; claim/edit/commit gates kept, memory gates removed.\n\nPORTABILITY: preflight() is portable as-is — only assumes git, with the 'bd memories' arm degrading to empty when bd is absent. No Core logic inside it. sk_rebuild() and the .xtrm/cache/service-knowledge.sqlite path are Core-specific and would need retargeting or dropping. Tests to copy if ported: packages/pi-extensions/tests/python-kernel.test.ts, scripts/verify-python-kernel-v2.mjs.\n\nSUGGESTED §19.5 REWRITE (from 7j51, and I agree): replace each governed-memory acceptance criterion with preflight-style commit-corpus retrieval plus targeted 'bd memories' leads, live code as the verifier. That keeps the five properties' INTENT — provenance-bearing, targeted, candidate-not-authority, supersession explicit, no silent global change — while naming a mechanism that actually exists.\n\nReading list instead of retyping: python-kernel/index.ts:92-202 and 840-900; ~/.pi/agent/APPEND_SYSTEM.md 'Memory doctrine: progressive retrieval, never bulk'; Core commits e6124b78, 959c7718, b81cc8c0.",
+        "owner": "jagger.xtrm@gmail.com",
+        "priority": 1,
+        "status": "open",
+        "title": "Reconcile PRD §10/§19.5 memory with the #311 retirement (spec demands a deleted capability)",
+        "updated_at": "2026-09-11T01:11:05Z"
+      }
+    }
+  },
+  "new_comments": {},
+  "relations": [],
+  "repository": "xtrm-dev/specialists",
+  "root_id": "unitAI-wm4a5",
+  "root_title": "Reconcile PRD §10/§19.5 memory with the #311 retirement (spec demands a deleted capability)",
+  "roundtrip": {
+    "base_package_sha256": "1042d1e9c54c2681ee6a721d4d3fb3c35564804eea390c526fdd54eff7233cf4",
+    "base_record_sha256": {
+      "unitAI-wm4a5": "cbb3f5aaef191f4bb43eace90d42df977aa7e6d5392c2d8acc5bda66206554de"
+    },
+    "edit_contract": "modify desired_issues and new_comments only; issues.*.source is immutable base state",
+    "prepared_at": "2026-09-16T15:59:26Z",
+    "schema_version": "xtrm.board-audit.roundtrip.v1"
+  },
+  "schema_version": "xtrm.board-audit.work-package.v1",
+  "scope": "open"
+}

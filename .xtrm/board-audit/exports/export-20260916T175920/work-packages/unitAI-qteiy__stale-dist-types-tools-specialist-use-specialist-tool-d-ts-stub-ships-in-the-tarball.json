@@ -1,0 +1,67 @@
+{
+  "content_sha256": "ecd042fa04add0a76654363bb9d92c41203d6a0cd277c577dc151d225a14114f",
+  "diagnostics": {
+    "dangling_relations": [],
+    "derived_dotted_parent_links": [],
+    "multiple_parent_nodes": []
+  },
+  "external_relations": [
+    {
+      "raw": {
+        "created_at": "2026-09-12T05:13:59Z",
+        "created_by": "jaggerxtrm",
+        "depends_on_id": "unitAI-fplre",
+        "issue_id": "unitAI-qteiy",
+        "metadata": "{}",
+        "type": "discovered-from"
+      },
+      "source": "unitAI-qteiy",
+      "source_field": "dependencies",
+      "target": "unitAI-fplre",
+      "target_present_in_snapshot": true,
+      "target_title": "Purge use_specialist from every shipped surface before release",
+      "type": "discovered-from"
+    }
+  ],
+  "hierarchy": {
+    "children": [],
+    "id": "unitAI-qteiy"
+  },
+  "issues": {
+    "unitAI-qteiy": {
+      "selection_state": "selected",
+      "source": {
+        "_type": "issue",
+        "comment_count": 0,
+        "created_at": "2026-09-12T05:13:59Z",
+        "created_by": "jaggerxtrm",
+        "dependencies": [
+          {
+            "created_at": "2026-09-12T05:13:59Z",
+            "created_by": "jaggerxtrm",
+            "depends_on_id": "unitAI-fplre",
+            "issue_id": "unitAI-qteiy",
+            "metadata": "{}",
+            "type": "discovered-from"
+          }
+        ],
+        "dependency_count": 0,
+        "dependent_count": 0,
+        "description": "PROBLEM\ndist/types/tools/specialist/use_specialist.tool.d.ts and its .d.ts.map survive in the build\noutput after the source was deleted in #342, and both are packed (4.5kB + 504B, confirmed in\nnpm pack --dry-run). tsc does not remove orphaned declaration outputs, and the build has no\nclean step for dist/types.\n\nInert: only dist/types/lib.d.ts is reachable through the exports map, so nothing can consume\nit. It is dead weight that names a deleted tool, not a functional defect.\n\nDeliberately left out of unitAI-fplre, which covered shipped PROSE. This is build-output\ncleanliness and conflating the two would have blurred what the release-blocking fix was.\n\nSUCCESS\nThe tarball carries no declaration files for deleted sources.\n\nSCOPE\nThe build pipeline in package.json scripts, or a clean step for dist/types.\n\nNON_GOALS\nDo not hand-delete the two files and call it done — tsc will keep leaving orphans behind on\nevery future deletion. Fix the build or accept the drift knowingly.\n\nCONSTRAINTS\ndist/ is committed and CI diffs it against a fresh build, so any clean step must be\ndeterministic: it has to produce identical output on every machine or it turns every PR red.\n\nVALIDATION\n- Delete a source file, rebuild, confirm no orphan declaration remains.\n- npm pack --dry-run lists no use_specialist artifacts.\n- git diff --exit-code -- dist/ clean after a fresh build.\n\nOUTPUT\nA dist/types that reflects the current source tree.",
+        "id": "unitAI-qteiy",
+        "issue_type": "chore",
+        "owner": "jagger.xtrm@gmail.com",
+        "priority": 3,
+        "status": "open",
+        "title": "Stale dist/types/tools/specialist/use_specialist.tool.d.ts stub ships in the tarball",
+        "updated_at": "2026-09-12T05:13:59Z"
+      }
+    }
+  },
+  "relations": [],
+  "repository": "xtrm-dev/specialists",
+  "root_id": "unitAI-qteiy",
+  "root_title": "Stale dist/types/tools/specialist/use_specialist.tool.d.ts stub ships in the tarball",
+  "schema_version": "xtrm.board-audit.work-package.v1",
+  "scope": "open"
+}

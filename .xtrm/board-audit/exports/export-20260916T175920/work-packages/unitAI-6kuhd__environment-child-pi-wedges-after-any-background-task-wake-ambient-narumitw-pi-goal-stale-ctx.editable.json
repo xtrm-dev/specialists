@@ -1,0 +1,68 @@
+{
+  "content_sha256": "c50b9f883ef5fe9e2322588f60fb4506ba78f9dc9c7673fb6e0450b6041f25ae",
+  "desired_issues": {
+    "unitAI-6kuhd": {
+      "_type": "issue",
+      "comment_count": 0,
+      "created_at": "2026-09-16T11:15:03Z",
+      "created_by": "jaggerxtrm",
+      "dependency_count": 0,
+      "dependent_count": 0,
+      "description": "## PROBLEM\n\nA CHILD pi process (spawned for a fresh-process proof, or any nested pi run) wedges after ANY\nbackground-task wake and never recovers. Five occurrences in one session, each ending in a 1800s\ntimeout with no error reported by the child.\n\nThrowing code: the ambient extension @narumitw/pi-goal, installed at\n~/.pi/agent/npm/node_modules/@narumitw/pi-goal. It keeps a captured extension ctx across session\nreplacement/reload and throws on the first wake:\n\n  \"This extension ctx is stale after session replacement or reload\"\n\nThe process then hangs rather than failing fast, so the symptom is a timeout, not an exception.\n\n## WHY IT IS FILED HERE\n\nIt is NOT this repo's code and not a landing defect - but it silently breaks the fresh-process\nverification pattern this project depends on for artifact-level proofs (a stale interactive session\ncannot verify a rebuilt artifact, so proofs must run from a fresh child). Tracking it locally keeps\nthe hazard and its workaround discoverable; the actual fix belongs upstream (third-party package) or\nin our pi-extensions area, and filing a public issue on a third party's tracker is the owner's call.\n\n## WORKAROUNDS (both used successfully)\n\n1. In the child: use a plain `sleep` + status polling loop instead of relying on a background-task\n   wake.\n2. More robust: have the specialist PUBLISH ITS EVIDENCE to a durable channel (Substrate journal)\n   BEFORE the wake-dependent path completes. In the two proofs that mattered, the specialist had\n   already published, so the dispatcher's timeout did not invalidate the evidence - the journal was\n   read instead of the transcript. A timeout in the harness is not a failed proof.\n\n## EVIDENCE\n\nSPECIALISTS-90 and SPECIALISTS-91 both produced their full evidence and receipts despite their\ndispatcher processes wedging; recorded on unitAI-1pqtl. Memory: child-pi-wedges-after-background-wake.",
+      "id": "unitAI-6kuhd",
+      "issue_type": "bug",
+      "owner": "jagger.xtrm@gmail.com",
+      "priority": 3,
+      "status": "open",
+      "title": "environment: child pi wedges after any background-task wake (ambient @narumitw/pi-goal stale ctx)",
+      "updated_at": "2026-09-16T11:15:03Z"
+    }
+  },
+  "diagnostics": {
+    "dangling_relations": [],
+    "derived_dotted_parent_links": [],
+    "multiple_parent_nodes": []
+  },
+  "external_relations": [],
+  "hierarchy": {
+    "children": [],
+    "id": "unitAI-6kuhd"
+  },
+  "issues": {
+    "unitAI-6kuhd": {
+      "selection_state": "selected",
+      "source": {
+        "_type": "issue",
+        "comment_count": 0,
+        "created_at": "2026-09-16T11:15:03Z",
+        "created_by": "jaggerxtrm",
+        "dependency_count": 0,
+        "dependent_count": 0,
+        "description": "## PROBLEM\n\nA CHILD pi process (spawned for a fresh-process proof, or any nested pi run) wedges after ANY\nbackground-task wake and never recovers. Five occurrences in one session, each ending in a 1800s\ntimeout with no error reported by the child.\n\nThrowing code: the ambient extension @narumitw/pi-goal, installed at\n~/.pi/agent/npm/node_modules/@narumitw/pi-goal. It keeps a captured extension ctx across session\nreplacement/reload and throws on the first wake:\n\n  \"This extension ctx is stale after session replacement or reload\"\n\nThe process then hangs rather than failing fast, so the symptom is a timeout, not an exception.\n\n## WHY IT IS FILED HERE\n\nIt is NOT this repo's code and not a landing defect - but it silently breaks the fresh-process\nverification pattern this project depends on for artifact-level proofs (a stale interactive session\ncannot verify a rebuilt artifact, so proofs must run from a fresh child). Tracking it locally keeps\nthe hazard and its workaround discoverable; the actual fix belongs upstream (third-party package) or\nin our pi-extensions area, and filing a public issue on a third party's tracker is the owner's call.\n\n## WORKAROUNDS (both used successfully)\n\n1. In the child: use a plain `sleep` + status polling loop instead of relying on a background-task\n   wake.\n2. More robust: have the specialist PUBLISH ITS EVIDENCE to a durable channel (Substrate journal)\n   BEFORE the wake-dependent path completes. In the two proofs that mattered, the specialist had\n   already published, so the dispatcher's timeout did not invalidate the evidence - the journal was\n   read instead of the transcript. A timeout in the harness is not a failed proof.\n\n## EVIDENCE\n\nSPECIALISTS-90 and SPECIALISTS-91 both produced their full evidence and receipts despite their\ndispatcher processes wedging; recorded on unitAI-1pqtl. Memory: child-pi-wedges-after-background-wake.",
+        "id": "unitAI-6kuhd",
+        "issue_type": "bug",
+        "owner": "jagger.xtrm@gmail.com",
+        "priority": 3,
+        "status": "open",
+        "title": "environment: child pi wedges after any background-task wake (ambient @narumitw/pi-goal stale ctx)",
+        "updated_at": "2026-09-16T11:15:03Z"
+      }
+    }
+  },
+  "new_comments": {},
+  "relations": [],
+  "repository": "xtrm-dev/specialists",
+  "root_id": "unitAI-6kuhd",
+  "root_title": "environment: child pi wedges after any background-task wake (ambient @narumitw/pi-goal stale ctx)",
+  "roundtrip": {
+    "base_package_sha256": "c50b9f883ef5fe9e2322588f60fb4506ba78f9dc9c7673fb6e0450b6041f25ae",
+    "base_record_sha256": {
+      "unitAI-6kuhd": "57a2d17844580eee072fa656ec38c068be70eb279afb2cdaa740f27167acc011"
+    },
+    "edit_contract": "modify desired_issues and new_comments only; issues.*.source is immutable base state",
+    "prepared_at": "2026-09-16T15:59:22Z",
+    "schema_version": "xtrm.board-audit.roundtrip.v1"
+  },
+  "schema_version": "xtrm.board-audit.work-package.v1",
+  "scope": "open"
+}

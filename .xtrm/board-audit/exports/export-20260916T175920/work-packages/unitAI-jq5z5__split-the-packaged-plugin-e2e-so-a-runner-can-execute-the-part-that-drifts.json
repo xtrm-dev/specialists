@@ -1,0 +1,67 @@
+{
+  "content_sha256": "da53a142054a9c119dfb4b2a68e333d10a4f5d6d2e20c70a8973eef637e85b00",
+  "diagnostics": {
+    "dangling_relations": [],
+    "derived_dotted_parent_links": [],
+    "multiple_parent_nodes": []
+  },
+  "external_relations": [
+    {
+      "raw": {
+        "created_at": "2026-09-12T05:46:01Z",
+        "created_by": "jaggerxtrm",
+        "depends_on_id": "unitAI-uz0bd",
+        "issue_id": "unitAI-jq5z5",
+        "metadata": "{}",
+        "type": "discovered-from"
+      },
+      "source": "unitAI-jq5z5",
+      "source_field": "dependencies",
+      "target": "unitAI-uz0bd",
+      "target_present_in_snapshot": true,
+      "target_title": "Follow-up: e5-packaged-plugin-e2e.mjs still expects deleted use_specialist tool",
+      "type": "discovered-from"
+    }
+  ],
+  "hierarchy": {
+    "children": [],
+    "id": "unitAI-jq5z5"
+  },
+  "issues": {
+    "unitAI-jq5z5": {
+      "selection_state": "selected",
+      "source": {
+        "_type": "issue",
+        "comment_count": 0,
+        "created_at": "2026-09-12T05:46:01Z",
+        "created_by": "jaggerxtrm",
+        "dependencies": [
+          {
+            "created_at": "2026-09-12T05:46:01Z",
+            "created_by": "jaggerxtrm",
+            "depends_on_id": "unitAI-uz0bd",
+            "issue_id": "unitAI-jq5z5",
+            "metadata": "{}",
+            "type": "discovered-from"
+          }
+        ],
+        "dependency_count": 0,
+        "dependent_count": 0,
+        "description": "PROBLEM\nscripts/e5-packaged-plugin-e2e.mjs is the only end-to-end check of the artifact a release\nships, and it cannot run in CI: it invokes the real `claude` binary in six places\n(--version, plugin validate --strict, --plugin-dir ... mcp list), and GitHub runners have no\nClaude Code CLI. Wiring it in was attempted on 2026-09-12 and reverted — every\nclaude-dependent check failed with exit=undefined.\n\nSo the harness runs only when a human remembers. The cost is measured: when use_specialist\nwas deleted in #342 the harness went red and nothing reported it for a day. It was found by\nhand while verifying an unrelated change.\n\nThe checks split cleanly by what they need:\n\n  CLIENT-dependent (need the claude binary):\n    [load] claude plugin validate --strict\n    [claude-live-load], [client-connected], [client-tools], [client-skill]\n  RUNNER-executable (need only node/bun and npm):\n    pack and scratch-install the tarball\n    the raw MCP handshake against plugins/specialists/scripts/mcp-server.mjs\n    tools/list over that handshake  <- THE ONE THAT ACTUALLY DRIFTED\n    the wake-watch hook contract\n    status payload shape and byte budget\n    repo-file exclusion from the scratch install\n\nThe drift that bit us was the tool list, and that is observable from the raw MCP handshake\nwithout any client.\n\nSUCCESS\nThe runner-executable checks run on every PR. The client-dependent ones stay manual and say\nso when skipped, rather than silently reporting green.\n\nSCOPE\nscripts/e5-packaged-plugin-e2e.mjs and .github/workflows/tests.yml.\n\nNON_GOALS\nDo not install or stub the claude binary in CI to force the client checks. A stub would\nassert against our own fake rather than the client, which is the one thing those checks\nexist to avoid.\nDo not delete the client-dependent checks. They cover what a user actually sees and are the\nreason the harness is worth running at all.\n\nCONSTRAINTS\nA skipped check must report as SKIP with its reason, never as PASS. Absence of a failure is\nnot a pass, and this repo has been bitten by exactly that shape of silence.\nThe split must not let the two halves disagree about the expected tool list — one source for\nthat expectation, consumed by both.\n\nVALIDATION\n- On a runner with no claude binary: the runner-executable checks run, the rest report SKIP\n  with a reason, exit code reflects only the checks that ran.\n- Locally with claude present: full run, unchanged behaviour, RESULT: PASS.\n- Remove a tool from the surface and confirm the CI-runnable half goes red.",
+        "id": "unitAI-jq5z5",
+        "issue_type": "feature",
+        "owner": "jagger.xtrm@gmail.com",
+        "priority": 2,
+        "status": "open",
+        "title": "Split the packaged-plugin E2E so a runner can execute the part that drifts",
+        "updated_at": "2026-09-12T05:46:01Z"
+      }
+    }
+  },
+  "relations": [],
+  "repository": "xtrm-dev/specialists",
+  "root_id": "unitAI-jq5z5",
+  "root_title": "Split the packaged-plugin E2E so a runner can execute the part that drifts",
+  "schema_version": "xtrm.board-audit.work-package.v1",
+  "scope": "open"
+}

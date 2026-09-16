@@ -1,0 +1,1 @@
+{"issue_ids":["unitAI-6kuhd"],"open_issue_count":1,"root_id":"unitAI-6kuhd","schema_version":"xtrm.board-audit.pr-root.v1","source_sha256":"57a2d17844580eee072fa656ec38c068be70eb279afb2cdaa740f27167acc011","title":"environment: child pi wedges after any background-task wake (ambient @narumitw/pi-goal stale ctx)"}

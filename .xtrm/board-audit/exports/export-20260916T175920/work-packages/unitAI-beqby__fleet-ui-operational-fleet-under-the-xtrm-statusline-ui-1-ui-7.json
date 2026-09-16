@@ -1,0 +1,98 @@
+{
+  "content_sha256": "bb413bf0c13adbf80b126bd98a02d94591819f1001335a472fa5158346edd5a5",
+  "diagnostics": {
+    "dangling_relations": [],
+    "derived_dotted_parent_links": [],
+    "multiple_parent_nodes": []
+  },
+  "external_relations": [],
+  "hierarchy": {
+    "children": [
+      {
+        "children": [],
+        "id": "unitAI-beqby.10"
+      }
+    ],
+    "id": "unitAI-beqby"
+  },
+  "issues": {
+    "unitAI-beqby": {
+      "selection_state": "context-only",
+      "source": {
+        "_type": "issue",
+        "close_reason": "Complete: UI-1..UI-7 live + eyeballed. Deferred child .10 (inspector surface) persists independently.",
+        "closed_at": "2026-09-09T04:06:38Z",
+        "comment_count": 0,
+        "created_at": "2026-09-08T18:21:25Z",
+        "created_by": "jaggerxtrm",
+        "dependency_count": 0,
+        "dependent_count": 0,
+        "description": "PROBLEM: The Specialist Fleet UI is a debug projection, not an operational fleet, and violates the agreed hierarchy twice over. At specialists head it paints with ctx.ui.setWidget(FLEET_WIDGET_KEY, content, { placement: 'aboveEditor' }) plus a redundant ctx.ui.setStatus(...) line, rendering raw forensic fields (activation_id, access, bead_id, raw counts) above the editor. The agreed hierarchy puts the fleet immediately BELOW the XTRM statusline, owned as a footer section, with collapsed/expanded operational semantics copied from pi-subagents interaction (not its placement).\n\nSUCCESS: (1) Fleet renders as a composable section of the XTRM footer directly below the statusline; no aboveEditor widget, no setStatus line. (2) Collapsed line shows active/waiting/needs-reply + aggregate context/tokens + inspect hint, with needs-reply outranking idle state. (3) Expanded view shows one row per specialist (model/thinking, bead, meaningful state, elapsed, token/window, current activity when available), bounded with overflow, activation_id kept in the inspector only. (4) Keyboard: editor-empty Down/Left activates, Up/Down or j/k selects, Enter attaches the live Specialist AgentSession, Esc returns to coordinator. (5) Proven in a live TUI, not just unit tests.\n\nSCOPE: Specialists repo fleet surface (config/pi-extensions/specialist-subagents/index.mjs fleet widget block, src/tools/specialist/activation.tool.ts projections, src/activation telemetry exposure as needed) plus the footer composition seam in the core repo (core/packages/pi-extensions/extensions/custom-footer/index.ts, sole setFooter owner, currently no section API). Decomposed into child beads; this epic tracks the whole.\n\nNON_GOALS: Claude-side fleet (no Claude TUI surface exists), auto-dispose/TTL policy, changes to pi-subagents itself, docs site updates.\n\nCONSTRAINTS: Footer ownership stays singular -- custom-footer remains the only setFooter caller; the fleet registers a section, never a second footer. Fleet view stays a projection (no cached state between ticks). Operator instruction: every dispatch under this epic passes model_override opencode-go/muse-spark-1.3-contributor. Cross-frontend parity rule applies to any wording both frontends share.\n\nVALIDATION: Live TUI demonstration: fleet visible below the statusline with collapsed line; keyboard nav to expanded rows; Enter attach opens the live child session; needs-reply state outranks idle; unit tests cover row formatting, overflow bound, and section registration fallback. Each child states its own evidence.\n\nOUTPUT: Merged implementation across core seam + specialists fleet, live demo evidence recorded on the implementation bead(s), this epic closed when UI-1..UI-7 all hold live.\n\nSCRUTINY: medium\n\nREFERENCES:\n- Current fleet: specialists config/pi-extensions/specialist-subagents/index.mjs (FLEET_WIDGET_KEY, renderFleetLines, paintFleet).\n- Footer owner: core packages/pi-extensions/extensions/custom-footer/index.ts (setFooter, render(width)).\n- Interaction model: pi-subagents src/ui/agent-widget.ts (setWidget callback form) and src/ui/session-navigator.ts (ui.custom non-overlay mount, keyboard nav).\n- Telemetry: specialists src/activation/forensic-sink.ts (startedAtMs, tokenUsage, elapsed), src/tools/specialist/activation.tool.ts (toActivationView fields).\n- pi SDK widget/custom API: ExtensionAPI types in the pi install (dist/core/extensions/types.d.ts).\n\nAGREED HIERARCHY (target):\nconversation\n────────────────────────────────────────\n› coordinator prompt/editor\n~/mercury/platform(main)  61%/200k  gpt-5.6-sol high  o:18 p:3\nSPECIALISTS · 2 active · 1 waiting · ↓/← inspect\n\nUI-1  Move Fleet into a composable XTRM footer section below statusline. Remove aboveEditor placement.\nUI-2  Remove the redundant ctx.ui.setStatus Fleet indicator.\nUI-3  Adopt pi-subagents collapsed Fleet semantics: active/waiting/needs-reply + aggregate context/tokens + inspect hint.\nUI-4  Adopt its keyboard behavior: Down/Left activate, Up/Down or j/k select, Enter attach, Esc coordinator.\nUI-5  Replace debug-oriented rows with: Specialist, model/thinking, Bead, meaningful state, elapsed, token/window usage, current activity when available.\nUI-6  Keep activation_id, participant_id, attempt_id, access, full result and forensic details in inspector/status, not permanent UI.\nUI-7  Bound the expanded Fleet and use overflow rather than allowing it to consume the terminal.\nNOTE: copy pi-subagents presentation and interaction, NOT its belowEditor placement -- XTRM has the custom footer it lacks, hence the footer-section seam.\n",
+        "id": "unitAI-beqby",
+        "issue_type": "epic",
+        "notes": "OPERATOR LIVE OBSERVATION 2026-09-08: Down/Left do nothing; only the collapsed specialist-active line + arrows render. Root-caused: keys handled only inside ui.custom inspector; no global key API for passive extensions in pi 0.85.1; pi-subagents also opens via slash command only. Split to ready bug unitAI-4n9of (fix the hint, not the keys). WORKAROUND for operator: /fleet inspect opens the keyboard navigator.\nOPERATOR LIVE OBSERVATION 2026-09-08 (severity: session-killing): /fleet inspect causes heavy TUI flicker; operator killed the window and reopened. Suspect 1s paintFleet poll fighting the ui.custom inspector. Split to P1 ready bug unitAI-z49s2. Inspector unusable until fixed; /fleet, /fleet:reply, /fleet:stop (non-custom surfaces) unaffected.\nOPERATOR LIVE OBSERVATION 2026-09-08: collapsed line renders one char per row (~40 rows) above statusline after restart/resume. Both render paths verified type-correct in source; units mock ui so never catch renderer behavior. Hypotheses: resumed-session layout width (H1), stale widget (H2), double-load (H3). Split to P1 ready bug unitAI-dygdq. Awaiting operator discriminating test (fresh session + resize).\nOPERATOR DECISION 2026-09-08: /fleet inspect hard-locks the TUI (fresh session, post string[] fix). Interactive inspector (UI-4 keyboard/attach) deliberately DEFERRED -- ui.custom path itself at fault in this pi version. Replacement: expanded rows by default with full one-row details (ready bead unitAI-nmxhg). unitAI-dygdq fix stands as correct but its surface is removed. Live attach deferred with UI-4; /fleet:reply and /fleet:stop remain the action paths.\nOPERATOR LIVE OBSERVATION 2026-09-08: elapsed works on rows, tokens never display. Root-caused to extractor/shape mismatch (nested message.usage short keys vs top-level snake candidates); forensic event proves 13,852 tokens flowed while snapshot stayed empty. Split to P1 ready bug unitAI-crjh7.\nOPERATOR END-STATE CONFIRMATION 2026-09-08 (master 263b8709 + core seam live, fresh session): 1 placement below statusline PASS, 2 expanded rows PASS, 3 seconds climbing PASS, 4 tool cards PASS, 5 ask flow PASS, 6 inspect text PASS, 7 resume with results PASS (closes unitAI-q02sz). Remaining open: lane .6 operator check + reviewer, .9, .10, .13 rail, .14 view-keys trace, core OSV bump.\nOPERATOR REPORT: row spend reads stuck ~49k and blinks on .13 run. Poll-pair confirms non-monotonic snapshot (input 293->206, output 739->204) = .12 fix bypassed on Spark route. Filed .15 (P1). Rail eyeball still valid; data path independent of render.",
+        "owner": "jagger.xtrm@gmail.com",
+        "priority": 1,
+        "started_at": "2026-09-08T21:26:26Z",
+        "status": "closed",
+        "title": "Fleet UI: operational fleet under the XTRM statusline (UI-1..UI-7)",
+        "updated_at": "2026-09-09T04:06:38Z"
+      }
+    },
+    "unitAI-beqby.10": {
+      "selection_state": "selected",
+      "source": {
+        "_type": "issue",
+        "comment_count": 0,
+        "created_at": "2026-09-08T21:09:38Z",
+        "created_by": "jaggerxtrm",
+        "dependencies": [
+          {
+            "created_at": "2026-09-08T21:09:38Z",
+            "created_by": "jaggerxtrm",
+            "depends_on_id": "unitAI-beqby",
+            "issue_id": "unitAI-beqby.10",
+            "metadata": "{}",
+            "type": "parent-child"
+          }
+        ],
+        "dependency_count": 0,
+        "dependent_count": 0,
+        "description": "PROBLEM: Amendment section 5 and acceptance 8-9 want a command-driven Specialist inspector that opens a native transcript or feed overlay reusing the sp-terminal-overlay UX over the native AgentSession, with no legacy sp feed subprocess for native sessions. The operator deliberately deferred this: the ui.custom path hard-locks the TUI in this pi version even after the flicker fix (unitAI-z49s2) and the string-row fix (unitAI-dygdq), so unitAI-nmxhg removed the inspector mount and /fleet inspect prints a text report instead.\n\nSCOPE (rough): TBD after pi ui.custom reliability is proven. Likely the openFleetInspector path in config/pi-extensions/specialist-subagents/index.mjs plus an overlay component consuming host inspect transcript and events, plus tests. Needs exploration before promotion.\n\nNON_GOALS: Everything until the ui.custom path is trustworthy; keyboard attach stays with xtrm-tui per the amendment.\n\nCONSTRAINTS: TBD at promotion. Promotion requires re-reading current pi extension API behavior and the amendment.\n\nVALIDATION: TBD at promotion; at minimum a flicker-free live inspector session plus unit coverage.\n\nOUTPUT: TBD at promotion.\n\nSCRUTINY: low",
+        "id": "unitAI-beqby.10",
+        "issue_type": "task",
+        "labels": [
+          "contract:ready"
+        ],
+        "notes": "PROBLEM: The in-Pi Specialist inspector proved unreliable because ctx.ui.custom shares Pi's TUI renderer and can hard-lock or corrupt rendering under concurrent Fleet/session updates (unitAI-z49s2, unitAI-nmxhg). A text report is safe but insufficient for live Specialist inspection. Adapt the Herdr inspector concept to plain tmux: the useful part of Herdr is not Herdr-specific UI but separation of concerns -- agent runtime stays in place, inspector runs in its own real terminal pane, control talks back through a stable API. No child Pi process, no sp feed.\n\nSUCCESS: /specialists inspect <activation> opens a stable live Specialist inspector without modifying, pausing, or replacing the coordinator Pi TUI. Inside tmux it opens in a dedicated pane (~40-45% width or lower pane, configurable): structured live transcript, runtime state, tool activity, pending asks, terminal result, plus explicitly requested control operations back to the same NativeActivationHost. Closing or crashing the inspector has no effect on the activation.\n\nSCOPE:\n- SpecialistInspectorProjection (live AgentSession transcript primary; snapshot/liveStats header; pending asks; ActivationResult; observability.db augmentation)\n- Process-local Inspector API over NativeActivationHost over a tiny local IPC surface ($XDG_RUNTIME_DIR/xtrm/specialists/<coordinator-session-id>.sock; protocol: list, inspect, transcript [cursor], watch, reply, steer, resume, stop -- capability-limited, deliberately NOT the full host API: no dispatch, no lease/contract/capability changes)\n- Standalone xtrm specialist inspect TUI client (own terminal; same pi-tui components; zero compositing with Pi renderer -- flicker/hard-lock disappears structurally)\n- TmuxInspectorSurface (detect tmux, split-window, launch client, optional focus; outside tmux print the standalone command)\n- /specialists inspect <activation> launcher\n- Live/watch protocol, bounded cursor-based transcript rendering, structured Markdown/tool rendering, scroll/page/tool-detail/refresh/close controls, pending-ask display, explicit reply(m)/steer(a)/stop(s) input modes, reconnect behavior\n- Herdr adapter compatibility seam (SpecialistInspectorSurface interface: Tmux v0 preferred, Herdr optional, XtrmTui future, InlinePi only if ui.custom proven)\n\nNON_GOALS: No child Pi process; no sp feed; no screen scraping; no full Channels; no MCP server; no remote protocol; no tmux session manager (no ownership/server mgmt/auto-launch/persistence/discovery -- Herdr concerns, inspector is a view into an already-running activation); no AgentSession migration; no true child-chat attach; no xtrm-tui implementation; no ui.custom dependency.\n\nCONSTRAINTS: NativeActivationHost remains authority; inspector is projection/client; one local IPC protocol for all renderers; inspector failure cannot affect activation; control uses existing runtime methods; transcript reads bounded/cursor-based; IPC local-only with restrictive permissions; no raw observability DB writes from inspector; observability is evidence, not control state.\n\nVALIDATION: Running child continues while pane opens/closes; 20 repeated tmux open/close cycles; no coordinator TUI redraw/flicker; transcript follows live output; tool events render; waiting/needs_reply visible; answer resumes same child; settled result visible; inspector crash leaves activation untouched; coordinator shutdown terminates client cleanly; two simultaneous inspectors read-consistent; malformed/unauthorized socket client cannot mutate runtime.\n\nOUTPUT: Shared InspectorProjection; local InspectorServer adapter; standalone inspector TUI; tmux launcher; /specialists inspect integration; Herdr/xtrm-tui adapter seam; tests + live tmux acceptance evidence.\n\nSCRUTINY: medium\nDEFERRED per operator 2026-09-09: full tmux-inspector design stands, unscheduled. Revisit when prioritized.",
+        "owner": "jagger.xtrm@gmail.com",
+        "priority": 4,
+        "started_at": "2026-09-09T02:13:07Z",
+        "status": "blocked",
+        "title": "Specialist Inspector Surface (tmux adapter, Herdr concept)",
+        "updated_at": "2026-09-09T04:05:31Z"
+      }
+    }
+  },
+  "relations": [
+    {
+      "raw": {
+        "created_at": "2026-09-08T21:09:38Z",
+        "created_by": "jaggerxtrm",
+        "depends_on_id": "unitAI-beqby",
+        "issue_id": "unitAI-beqby.10",
+        "metadata": "{}",
+        "type": "parent-child"
+      },
+      "source": "unitAI-beqby.10",
+      "source_field": "dependencies",
+      "target": "unitAI-beqby",
+      "type": "parent-child"
+    }
+  ],
+  "repository": "xtrm-dev/specialists",
+  "root_id": "unitAI-beqby",
+  "root_title": "Fleet UI: operational fleet under the XTRM statusline (UI-1..UI-7)",
+  "schema_version": "xtrm.board-audit.work-package.v1",
+  "scope": "open"
+}

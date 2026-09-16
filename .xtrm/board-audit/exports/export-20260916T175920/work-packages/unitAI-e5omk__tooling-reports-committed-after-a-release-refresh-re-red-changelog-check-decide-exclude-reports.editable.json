@@ -1,0 +1,68 @@
+{
+  "content_sha256": "3df01ed7708e16446eccfbf29c10ee143ce1cce2443a62385ca6a5d6bdbe2b9f",
+  "desired_issues": {
+    "unitAI-e5omk": {
+      "_type": "issue",
+      "comment_count": 0,
+      "created_at": "2026-09-16T11:16:13Z",
+      "created_by": "jaggerxtrm",
+      "dependency_count": 0,
+      "dependent_count": 0,
+      "description": "## PROBLEM\n\n`changelog:check` compares CHANGELOG.md against the generated output for the release range\n(previous tag..HEAD). ANY commit landing after the refresh makes the gate red - including a\ndocumentation commit.\n\nObserved on 2026-09-16: the release commit refreshed the changelog and the gate went green; a\n127-line session report committed immediately afterwards (docs(report) under .xtrm/reports/, no\nsource or dist change) turned the gate red on the default branch. Verified rather than inferred:\n`bun run changelog:check` -> \"CHANGELOG.md: out of date\", exit 1, at the post-report HEAD, while\nthe same command said \"already up to date\" two commits earlier.\n\n## WHY IT MATTERS\n\nLeft unresolved, every post-release documentation or report commit reds the gate on the shared\nbranch until someone refreshes, which trains readers to ignore a red gate - the same failure mode\nas the probe-exit-code trap and the misattributed contract line fixed in this window.\n\n## THE TWO ANSWERS (owner's call, they are not equivalent)\n\nA. ENFORCE REFRESH-LAST: keep the gate as is and treat \"refresh the changelog\" as the final action\n   before a release or tag. The gate keeps meaning \"the changelog reflects HEAD\". Cost: any later\n   commit re-reds it, which is correct but noisy, and it is a process rule that has already been\n   broken once by care rather than by haste.\n\nB. EXCLUDE REPORT/DOC INPUTS: if session reports and internal process docs are not user-facing\n   release content, exclude that path in the changelog configuration so they do not feed it. The\n   gate then stays green after a report lands, at the cost of no longer noticing report commits -\n   which is the intent, since they are not changelog material.\n\nPractitioner's note: B is the stabler answer if reports will keep being committed late in a\nrelease window; A is the answer if the changelog is meant to account for every commit. Decide\ndeliberately rather than by whoever happens to push next.",
+      "id": "unitAI-e5omk",
+      "issue_type": "task",
+      "owner": "jagger.xtrm@gmail.com",
+      "priority": 4,
+      "status": "open",
+      "title": "tooling: reports committed after a release refresh re-red changelog:check (decide: exclude reports from changelog inputs, or enforce refresh-last)",
+      "updated_at": "2026-09-16T11:16:13Z"
+    }
+  },
+  "diagnostics": {
+    "dangling_relations": [],
+    "derived_dotted_parent_links": [],
+    "multiple_parent_nodes": []
+  },
+  "external_relations": [],
+  "hierarchy": {
+    "children": [],
+    "id": "unitAI-e5omk"
+  },
+  "issues": {
+    "unitAI-e5omk": {
+      "selection_state": "selected",
+      "source": {
+        "_type": "issue",
+        "comment_count": 0,
+        "created_at": "2026-09-16T11:16:13Z",
+        "created_by": "jaggerxtrm",
+        "dependency_count": 0,
+        "dependent_count": 0,
+        "description": "## PROBLEM\n\n`changelog:check` compares CHANGELOG.md against the generated output for the release range\n(previous tag..HEAD). ANY commit landing after the refresh makes the gate red - including a\ndocumentation commit.\n\nObserved on 2026-09-16: the release commit refreshed the changelog and the gate went green; a\n127-line session report committed immediately afterwards (docs(report) under .xtrm/reports/, no\nsource or dist change) turned the gate red on the default branch. Verified rather than inferred:\n`bun run changelog:check` -> \"CHANGELOG.md: out of date\", exit 1, at the post-report HEAD, while\nthe same command said \"already up to date\" two commits earlier.\n\n## WHY IT MATTERS\n\nLeft unresolved, every post-release documentation or report commit reds the gate on the shared\nbranch until someone refreshes, which trains readers to ignore a red gate - the same failure mode\nas the probe-exit-code trap and the misattributed contract line fixed in this window.\n\n## THE TWO ANSWERS (owner's call, they are not equivalent)\n\nA. ENFORCE REFRESH-LAST: keep the gate as is and treat \"refresh the changelog\" as the final action\n   before a release or tag. The gate keeps meaning \"the changelog reflects HEAD\". Cost: any later\n   commit re-reds it, which is correct but noisy, and it is a process rule that has already been\n   broken once by care rather than by haste.\n\nB. EXCLUDE REPORT/DOC INPUTS: if session reports and internal process docs are not user-facing\n   release content, exclude that path in the changelog configuration so they do not feed it. The\n   gate then stays green after a report lands, at the cost of no longer noticing report commits -\n   which is the intent, since they are not changelog material.\n\nPractitioner's note: B is the stabler answer if reports will keep being committed late in a\nrelease window; A is the answer if the changelog is meant to account for every commit. Decide\ndeliberately rather than by whoever happens to push next.",
+        "id": "unitAI-e5omk",
+        "issue_type": "task",
+        "owner": "jagger.xtrm@gmail.com",
+        "priority": 4,
+        "status": "open",
+        "title": "tooling: reports committed after a release refresh re-red changelog:check (decide: exclude reports from changelog inputs, or enforce refresh-last)",
+        "updated_at": "2026-09-16T11:16:13Z"
+      }
+    }
+  },
+  "new_comments": {},
+  "relations": [],
+  "repository": "xtrm-dev/specialists",
+  "root_id": "unitAI-e5omk",
+  "root_title": "tooling: reports committed after a release refresh re-red changelog:check (decide: exclude reports from changelog inputs, or enforce refresh-last)",
+  "roundtrip": {
+    "base_package_sha256": "3df01ed7708e16446eccfbf29c10ee143ce1cce2443a62385ca6a5d6bdbe2b9f",
+    "base_record_sha256": {
+      "unitAI-e5omk": "befb9c6348a5dfa517a06bf0e19defd62d9dbf8b9c79ec6235f0870b076e17e6"
+    },
+    "edit_contract": "modify desired_issues and new_comments only; issues.*.source is immutable base state",
+    "prepared_at": "2026-09-16T15:59:23Z",
+    "schema_version": "xtrm.board-audit.roundtrip.v1"
+  },
+  "schema_version": "xtrm.board-audit.work-package.v1",
+  "scope": "open"
+}
