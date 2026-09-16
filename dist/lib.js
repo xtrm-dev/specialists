@@ -15827,6 +15827,7 @@ class SqliteClient {
           continue;
         }
         if (event.type === "run_start") {
+          closePhase(event.t);
           phase = "running";
           phaseStartedAtMs = event.t;
           continue;
@@ -15858,6 +15859,9 @@ class SqliteClient {
         if (event.type === "stale_warning" && event.reason === "tool_duration") {
           stallGaps.push({ t: event.t, tool: event.tool ?? null, silence_ms: event.silence_ms, threshold_ms: event.threshold_ms });
         }
+      }
+      if (events.length > 0) {
+        closePhase(events[events.length - 1].t);
       }
       if (startedAtMs !== null && completedAtMs === null) {
         completedAtMs = events.length > 0 ? events[events.length - 1].t : startedAtMs;
@@ -21744,7 +21748,6 @@ var NATIVE_LIFECYCLE_OBSERVABILITY_GAPS = Object.freeze({
   step_contract_compiled: "Step-contract compilation has no legacy AgentSession event.",
   activation_admitted: "Admission metadata has no legacy timeline event; identity is projected on specialist_jobs.",
   activation_starting: "Session construction has no legacy timeline event; run_start follows once construction succeeds.",
-  activation_resumed: "Resume-from-record has no legacy counterpart; the resumed run re-enters the shared stream at turn_start.",
   output_validation_started: "Native result validation has no legacy timeline event kind.",
   output_validation_passed: "Native result validation has no legacy timeline event kind.",
   output_validation_failed: "Native result validation has no legacy timeline event kind; terminal failure is run_complete.",
@@ -21928,6 +21931,8 @@ function mapNativeLifecycleEvent(event, context, t = Date.now()) {
       }), t);
     case "activation_settled":
       return at(createStatusChangeEvent("waiting", "running"), t);
+    case "activation_resumed":
+      return at(createStatusChangeEvent("running", "waiting"), t);
     case "activation_completed":
       return at(createRunCompleteEvent("COMPLETE", Math.max(0, t - context.startedAtMs) / 1000, {
         model: context.resolvedModel,
