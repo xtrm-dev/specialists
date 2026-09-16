@@ -29,6 +29,24 @@ import { join } from 'node:path';
  */
 export type SettlementPublicationState = 'published' | 'pending' | 'refused';
 
+/**
+ * WHY a record is `refused`, because the two reasons have OPPOSITE lifetimes (SPECIALISTS-66).
+ *
+ * `runtime_lacks_settlement_surface` is a property of the RUNTIME, not of the record: the
+ * boundary this host loaded carried no settlement surface. Runtimes get upgraded, and after an
+ * upgrade the record is publishable again — so it is terminal only for as long as the condition
+ * that produced it holds, and the republish pass re-tests that condition against the CURRENT
+ * boundary rather than trusting the stored state.
+ *
+ * `receipt_unreconstructable` is a property of the RECORD: a Journal result exists whose refs
+ * name a receipt that cannot be resolved or rebuilt. No runtime upgrade changes that, so it is
+ * genuinely terminal.
+ *
+ * Absent on records written before this field existed; those read as terminal, which is the
+ * conservative direction — a republish that never runs cannot mint a duplicate.
+ */
+export type SettlementRefusalReason = 'runtime_lacks_settlement_surface' | 'receipt_unreconstructable';
+
 /** One terminal settlement of one attempt. Raw output included by design. */
 export interface SettlementRecord {
   activationId: string;
@@ -57,6 +75,8 @@ export interface SettlementRecord {
     state: SettlementPublicationState;
     /** Why the state is not `published`. Always set for `pending` and `refused`. */
     note?: string;
+    /** For `refused` only: which of the two refusal lifetimes this is (SPECIALISTS-66). */
+    refusal?: SettlementRefusalReason;
     /** How many publication attempts have run, so a stuck record is visible as a count. */
     attempts: number;
     updatedAt: number;
@@ -81,6 +101,14 @@ export interface SettlementStore {
    * EMPTY backlog rather than a wrong one, and the host treats absence as "not enumerable".
    */
   listPendingPublication?(): SettlementRecord[];
+  /**
+   * Every record refused because the RUNTIME carried no settlement surface (SPECIALISTS-66).
+   *
+   * Separate from the pending backlog because these are republishable only against a boundary
+   * that now HAS that surface. The caller re-tests the runtime condition; the store only
+   * reports which records are waiting on it.
+   */
+  listRuntimeRefused?(): SettlementRecord[];
 }
 
 /** Filename-safe projection of an id. Colon-separated ids (`act:…`) stay readable. */
@@ -98,6 +126,13 @@ function safeSegment(id: string): string {
  * it is treated as owed — that is what makes the pre-cutover backlog visible instead of
  * silently exempt.
  */
+export function isRuntimeRefused(record: SettlementRecord): boolean {
+  return (
+    publicationStateOf(record) === 'refused'
+    && record.publication?.refusal === 'runtime_lacks_settlement_surface'
+  );
+}
+
 export function isPendingPublication(record: SettlementRecord): boolean {
   // One source of truth. `republishPendingSettlements` asks this, and anything reporting the
   // outcome to an operator asks `publicationStateOf`; if the two were computed separately they
@@ -167,6 +202,9 @@ export function createFileSettlementStore(root: string): SettlementStore {
     listPendingPublication(): SettlementRecord[] {
       return readAll().filter(isPendingPublication).sort((a, b) => a.completedAt - b.completedAt);
     },
+    listRuntimeRefused(): SettlementRecord[] {
+      return readAll().filter(isRuntimeRefused).sort((a, b) => a.completedAt - b.completedAt);
+    },
   };
 
   /**
@@ -213,6 +251,7 @@ export function createFileSettlementStore(root: string): SettlementStore {
 export interface InMemorySettlementStore extends SettlementStore {
   records: SettlementRecord[];
   listPendingPublication(): SettlementRecord[];
+  listRuntimeRefused(): SettlementRecord[];
 }
 
 /** In-memory store. Test double — production wires the file store. */
@@ -236,6 +275,9 @@ export function createMemorySettlementStore(): InMemorySettlementStore {
     },
     listPendingPublication(): SettlementRecord[] {
       return records.filter(isPendingPublication).sort((a, b) => a.completedAt - b.completedAt);
+    },
+    listRuntimeRefused(): SettlementRecord[] {
+      return records.filter(isRuntimeRefused).sort((a, b) => a.completedAt - b.completedAt);
     },
   };
 }

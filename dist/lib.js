@@ -20094,7 +20094,7 @@ function resolveSkillsPaths(spec, fileDir, consumerRoot) {
   spec.specialist.skills.paths = resolved;
 }
 // src/activation/native-host.ts
-import { randomUUID as randomUUID3 } from "node:crypto";
+import { randomUUID as randomUUID4 } from "node:crypto";
 import { existsSync as existsSync20 } from "node:fs";
 
 // src/activation/workitem-store.ts
@@ -22008,6 +22008,74 @@ function nextAttemptId(current) {
 var RESUMABLE_STATES = new Set(["settled", "waiting", "needs_reply", "escalated"]);
 var RETRYABLE_STATES = new Set(["failed"]);
 
+// src/activation/settlement-lease.ts
+import { unlinkSync as unlinkSync3 } from "node:fs";
+import { randomUUID as randomUUID3 } from "node:crypto";
+function exclusionWorkspace(subject) {
+  return {
+    repositoryRoot: subject.repositoryRoot,
+    ...subject.gitCommonDir ? { gitCommonDir: subject.gitCommonDir } : {},
+    worktreePath: `settlement:${subject.activationId}:${subject.attemptId}`
+  };
+}
+function withSettlementExclusion(subject, fn, opts = {}) {
+  const workspace = exclusionWorkspace(subject);
+  const holderId = `settlement-publication:${process.pid}:${randomUUID3()}`;
+  const probe = opts.probe ?? procLeaseProbe();
+  const take = () => {
+    try {
+      acquire({ workspace, activationId: holderId, attemptId: subject.attemptId }, probe);
+      return;
+    } catch (error) {
+      const contended = error instanceof DispatchRejectedError;
+      const reason = error instanceof Error ? error.message : String(error);
+      return {
+        contended,
+        reason: contended ? `settlement publication is held elsewhere: ${reason}` : `settlement exclusion could not be taken: ${reason}`
+      };
+    }
+  };
+  let failure = take();
+  if (failure !== undefined && opts.reclaimStale === true && reclaimIfHolderGone(subject, workspace, probe)) {
+    failure = take();
+  }
+  if (failure !== undefined) {
+    return { ok: false, contended: failure.contended, reason: failure.reason };
+  }
+  try {
+    return { ok: true, value: fn() };
+  } finally {
+    try {
+      release(workspace, holderId, probe);
+    } catch {}
+  }
+}
+function reclaimIfHolderGone(subject, workspace, probe) {
+  const mutex = {
+    ...workspace,
+    worktreePath: `settlement-reclaim:${subject.activationId}:${subject.attemptId}`
+  };
+  const mutexHolder = `settlement-reclaim:${process.pid}:${randomUUID3()}`;
+  try {
+    acquire({ workspace: mutex, activationId: mutexHolder, attemptId: subject.attemptId }, probe);
+  } catch {
+    return false;
+  }
+  try {
+    const status = inspect(workspace, probe);
+    if (status.state !== "uncertain" || status.uncertainReason !== "holder_process_gone")
+      return false;
+    unlinkSync3(leasePath(workspace));
+    return true;
+  } catch {
+    return false;
+  } finally {
+    try {
+      release(mutex, mutexHolder, probe);
+    } catch {}
+  }
+}
+
 // src/activation/settlement-publication.ts
 var SETTLEMENT_CONTEXT_VERSION = 1;
 var SETTLEMENT_RESULT_VERSION = 1;
@@ -22123,11 +22191,13 @@ function republishSettlement(opts) {
     return { outcome: "published", journalEntryId: record2.journalEntryId, receiptId: record2.receiptId };
   }
   if (!boundary.appendResult || !boundary.allocateReceipt) {
-    const note = "work boundary carries no settlement surface; not republishable";
-    saveState(store, record2, "refused", note);
+    const note = "work boundary carries no settlement surface; not republishable by THIS runtime";
+    saveState(store, record2, "refused", note, {}, "runtime_lacks_settlement_surface");
     emit("settlement_republish_refused", { activationId: record2.activationId, attemptId: record2.attemptId, note });
     return { outcome: "refused", note };
   }
+  const allocateReceipt = boundary.allocateReceipt;
+  const appendResult = boundary.appendResult;
   const defer = (reason) => {
     saveState(store, record2, "pending", reason);
     emit("settlement_republish_deferred", {
@@ -22137,118 +22207,123 @@ function republishSettlement(opts) {
     });
     return { outcome: "pending", note: reason };
   };
-  let journalEntryId = record2.journalEntryId;
-  if (!journalEntryId) {
-    if (!boundary.findResultEntry) {
-      return defer("work boundary exposes no Journal reconciliation, so a republish cannot prove it is the first");
-    }
-    const lookup = boundary.findResultEntry(record2.issueRef, {
-      activationId: record2.activationId,
-      attemptId: record2.attemptId
-    });
-    if (lookup.status === "unavailable") {
-      return defer(`Journal reconciliation unavailable: ${lookup.reason}`);
-    }
-    if (lookup.status === "found")
-      journalEntryId = lookup.value.entryId;
-  }
-  let receiptId = record2.receiptId;
-  if (!receiptId) {
-    if (!boundary.findReceiptForBinding) {
-      return defer("work boundary exposes no receipt reconciliation, so a republish cannot prove it is the first");
-    }
-    const lookup = boundary.findReceiptForBinding(record2.issueRef, record2.executionBindingId);
-    if (lookup.status === "unavailable") {
-      return defer(`receipt reconciliation unavailable: ${lookup.reason}`);
-    }
-    if (lookup.status === "found")
-      receiptId = lookup.value.receiptId;
-  }
-  if (journalEntryId) {
-    if (!receiptId) {
-      const note = `Journal result ${journalEntryId} exists but no WorkReceipt is recorded for binding ` + `${record2.executionBindingId} and none is resolvable; the provenance chain cannot be completed`;
-      saveState(store, record2, "refused", note, { journalEntryId });
-      emit("settlement_republish_refused", { activationId: record2.activationId, attemptId: record2.attemptId, note });
-      return { outcome: "refused", note, journalEntryId };
-    }
-    saveState(store, record2, "published", "reconciled with the existing Journal result", {
-      journalEntryId,
-      receiptId
-    });
-    emit("settlement_republish_reconciled", {
-      activationId: record2.activationId,
-      attemptId: record2.attemptId,
-      entry: journalEntryId
-    });
-    return { outcome: "published", journalEntryId, receiptId };
-  }
-  try {
-    const storedRef = store.save(record2);
-    if (!receiptId) {
-      const receipt = boundary.allocateReceipt(record2.executionBindingId);
-      receiptId = receipt.id;
-      emit("settlement_receipt_allocated", { receipt: receipt.id, republish: true });
-    }
-    let artifactValue = record2.artifactRef ?? storedRef;
-    if (boundary.attachArtifact && !record2.artifactRef) {
-      try {
-        artifactValue = boundary.attachArtifact(receiptId, "artifact", storedRef).value;
-        emit("settlement_artifact_attached", { receipt: receiptId, kind: "artifact", republish: true });
-      } catch (error) {
-        emit("settlement_degraded", {
-          note: `artifact attach failed: ${error instanceof Error ? error.message : String(error)}`
-        });
+  const reconcileAndPublish = () => {
+    let journalEntryId = record2.journalEntryId;
+    if (!journalEntryId) {
+      if (!boundary.findResultEntry) {
+        return defer("work boundary exposes no Journal reconciliation, so a republish cannot prove it is the first");
       }
+      const lookup = boundary.findResultEntry(record2.issueRef, {
+        activationId: record2.activationId,
+        attemptId: record2.attemptId
+      });
+      if (lookup.status === "unavailable") {
+        return defer(`Journal reconciliation unavailable: ${lookup.reason}`);
+      }
+      if (lookup.status === "found")
+        journalEntryId = lookup.value.entryId;
     }
-    const entry = boundary.appendResult(record2.issueRef, {
-      result: buildBoundedResult({
-        output: record2.output,
-        valid: record2.validation.valid,
-        errors: record2.validation.errors,
-        artifactRefs: [artifactValue],
-        receiptRefs: [receiptId],
-        provenanceRefs: [record2.executionBindingId, receiptId]
-      }),
-      executionContext: buildSettlementExecutionContext({
-        participantId: opts.participantId,
-        specialistName: record2.specialist,
+    let receiptId = record2.receiptId;
+    if (!receiptId) {
+      if (!boundary.findReceiptForBinding) {
+        return defer("work boundary exposes no receipt reconciliation, so a republish cannot prove it is the first");
+      }
+      const lookup = boundary.findReceiptForBinding(record2.issueRef, record2.executionBindingId);
+      if (lookup.status === "unavailable") {
+        return defer(`receipt reconciliation unavailable: ${lookup.reason}`);
+      }
+      if (lookup.status === "found")
+        receiptId = lookup.value.receiptId;
+    }
+    if (journalEntryId) {
+      if (!receiptId) {
+        const note = `Journal result ${journalEntryId} exists but no WorkReceipt is recorded for binding ` + `${record2.executionBindingId} and none is resolvable; the provenance chain cannot be completed`;
+        saveState(store, record2, "refused", note, { journalEntryId }, "receipt_unreconstructable");
+        emit("settlement_republish_refused", { activationId: record2.activationId, attemptId: record2.attemptId, note });
+        return { outcome: "refused", note, journalEntryId };
+      }
+      saveState(store, record2, "published", "reconciled with the existing Journal result", {
+        journalEntryId,
+        receiptId
+      });
+      emit("settlement_republish_reconciled", {
         activationId: record2.activationId,
         attemptId: record2.attemptId,
-        coordinatorParticipantId: opts.coordinator?.participantId,
-        coordinatorSessionId: opts.coordinator?.sessionId,
-        repoPath: opts.repositoryRoot,
-        worktree: opts.worktreePath ?? opts.repositoryRoot,
-        env: opts.env,
-        now
-      }),
-      refs: [
-        { kind: "artifact", key: artifactValue },
-        { kind: "receipt", key: receiptId }
-      ],
-      participantId: opts.participantId,
-      activationId: record2.activationId
-    });
-    store.save({
-      ...record2,
-      receiptId,
-      journalEntryId: entry.entryId,
-      artifactRef: artifactValue,
-      publication: { state: "published", attempts: (record2.publication?.attempts ?? 0) + 1, updatedAt: now }
-    });
-    emit("settlement_result_published", { entry: entry.entryId, receipt: receiptId, republish: true });
-    return { outcome: "published", journalEntryId: entry.entryId, receiptId };
-  } catch (error) {
-    const note = error instanceof Error ? error.message : String(error);
-    saveState(store, record2, "pending", note, { ...receiptId ? { receiptId } : {} });
-    emit("settlement_degraded", { note, republish: true });
-    return { outcome: "pending", note, ...receiptId ? { receiptId } : {} };
-  }
+        entry: journalEntryId
+      });
+      return { outcome: "published", journalEntryId, receiptId };
+    }
+    try {
+      const storedRef = store.save(record2);
+      if (!receiptId) {
+        const receipt = allocateReceipt(record2.executionBindingId);
+        receiptId = receipt.id;
+        emit("settlement_receipt_allocated", { receipt: receipt.id, republish: true });
+      }
+      let artifactValue = record2.artifactRef ?? storedRef;
+      if (boundary.attachArtifact && !record2.artifactRef) {
+        try {
+          artifactValue = boundary.attachArtifact(receiptId, "artifact", storedRef).value;
+          emit("settlement_artifact_attached", { receipt: receiptId, kind: "artifact", republish: true });
+        } catch (error) {
+          emit("settlement_degraded", {
+            note: `artifact attach failed: ${error instanceof Error ? error.message : String(error)}`
+          });
+        }
+      }
+      const entry = appendResult(record2.issueRef, {
+        result: buildBoundedResult({
+          output: record2.output,
+          valid: record2.validation.valid,
+          errors: record2.validation.errors,
+          artifactRefs: [artifactValue],
+          receiptRefs: [receiptId],
+          provenanceRefs: [record2.executionBindingId, receiptId]
+        }),
+        executionContext: buildSettlementExecutionContext({
+          participantId: opts.participantId,
+          specialistName: record2.specialist,
+          activationId: record2.activationId,
+          attemptId: record2.attemptId,
+          coordinatorParticipantId: opts.coordinator?.participantId,
+          coordinatorSessionId: opts.coordinator?.sessionId,
+          repoPath: opts.repositoryRoot,
+          worktree: opts.worktreePath ?? opts.repositoryRoot,
+          env: opts.env,
+          now
+        }),
+        refs: [
+          { kind: "artifact", key: artifactValue },
+          { kind: "receipt", key: receiptId }
+        ],
+        participantId: opts.participantId,
+        activationId: record2.activationId
+      });
+      store.save({
+        ...record2,
+        receiptId,
+        journalEntryId: entry.entryId,
+        artifactRef: artifactValue,
+        publication: { state: "published", attempts: (record2.publication?.attempts ?? 0) + 1, updatedAt: now }
+      });
+      emit("settlement_result_published", { entry: entry.entryId, receipt: receiptId, republish: true });
+      return { outcome: "published", journalEntryId: entry.entryId, receiptId };
+    } catch (error) {
+      const note = error instanceof Error ? error.message : String(error);
+      saveState(store, record2, "pending", note, { ...receiptId ? { receiptId } : {} });
+      emit("settlement_degraded", { note, republish: true });
+      return { outcome: "pending", note, ...receiptId ? { receiptId } : {} };
+    }
+  };
+  const guarded = withSettlementExclusion({ repositoryRoot: opts.repositoryRoot, activationId: record2.activationId, attemptId: record2.attemptId }, reconcileAndPublish, { reclaimStale: true });
+  return guarded.ok ? guarded.value : defer(guarded.reason);
 }
 var REPUBLISH_PASS_LIMIT = 50;
 function republishPendingSettlements(opts) {
   const emit = opts.emit ?? (() => {});
   const limit = Math.max(1, opts.limit ?? REPUBLISH_PASS_LIMIT);
-  const pending = (opts.store.listPendingPublication?.() ?? []).slice(0, limit);
+  const revivable = opts.boundary.appendResult && opts.boundary.allocateReceipt ? opts.store.listRuntimeRefused?.() ?? [] : [];
+  const pending = [...opts.store.listPendingPublication?.() ?? [], ...revivable].sort((a, b) => a.completedAt - b.completedAt).slice(0, limit);
   const outcomes = [];
   for (const record2 of pending) {
     try {
@@ -22320,83 +22395,100 @@ function publishSettlement(opts) {
     return { storedRef, publicationState: "not-applicable" };
   if (!boundary.allocateReceipt || !boundary.appendResult) {
     const note = "work boundary carries no settlement surface; result stored only";
-    saveState(store, record2, "refused", note);
+    saveState(store, record2, "refused", note, {}, "runtime_lacks_settlement_surface");
     emit("settlement_degraded", { note });
     return { storedRef, degraded: "boundary without settlement surface", publicationState: "refused" };
   }
-  let allocatedReceiptId;
-  let allocatedArtifactRef;
-  try {
-    const receipt = boundary.allocateReceipt(subject.executionBindingId);
-    allocatedReceiptId = receipt.id;
-    emit("settlement_receipt_allocated", { receipt: receipt.id });
-    let artifactValue = storedRef;
+  const allocateReceipt = boundary.allocateReceipt;
+  const appendResult = boundary.appendResult;
+  const publishNow = () => {
+    let allocatedReceiptId;
+    let allocatedArtifactRef;
     try {
-      if (boundary.attachArtifact) {
-        const attached = boundary.attachArtifact(receipt.id, "artifact", storedRef);
-        artifactValue = attached.value;
-        allocatedArtifactRef = artifactValue;
-        emit("settlement_artifact_attached", { receipt: receipt.id, kind: "artifact" });
+      const receipt = allocateReceipt(subject.executionBindingId);
+      allocatedReceiptId = receipt.id;
+      emit("settlement_receipt_allocated", { receipt: receipt.id });
+      let artifactValue = storedRef;
+      try {
+        if (boundary.attachArtifact) {
+          const attached = boundary.attachArtifact(receipt.id, "artifact", storedRef);
+          artifactValue = attached.value;
+          allocatedArtifactRef = artifactValue;
+          emit("settlement_artifact_attached", { receipt: receipt.id, kind: "artifact" });
+        }
+      } catch (error) {
+        emit("settlement_degraded", {
+          note: `artifact attach failed: ${error instanceof Error ? error.message : String(error)}`
+        });
       }
-    } catch (error) {
-      emit("settlement_degraded", {
-        note: `artifact attach failed: ${error instanceof Error ? error.message : String(error)}`
+      const result = buildBoundedResult({
+        output: opts.output,
+        valid: opts.validation.valid,
+        errors: opts.validation.errors,
+        artifactRefs: [artifactValue],
+        receiptRefs: [receipt.id],
+        provenanceRefs: [subject.executionBindingId, receipt.id]
       });
+      const entry = appendResult(subject.issueRef, {
+        result,
+        executionContext,
+        refs: [
+          { kind: "artifact", key: artifactValue },
+          { kind: "receipt", key: receipt.id }
+        ],
+        participantId: subject.participantId,
+        activationId: subject.activationId,
+        sessionId: subject.piSessionId
+      });
+      emit("settlement_result_published", { entry: entry.entryId, receipt: receipt.id });
+      const published = {
+        ...record2,
+        receiptId: receipt.id,
+        journalEntryId: entry.entryId,
+        artifactRef: artifactValue,
+        publication: { state: "published", attempts: (record2.publication?.attempts ?? 0) + 1, updatedAt: now }
+      };
+      try {
+        store.save(published);
+      } catch {}
+      return {
+        storedRef,
+        receiptId: receipt.id,
+        artifactValue,
+        journalEntryId: entry.entryId,
+        publicationState: "published"
+      };
+    } catch (error) {
+      const note = error instanceof Error ? error.message : String(error);
+      saveState(store, record2, "pending", note, {
+        ...allocatedReceiptId ? { receiptId: allocatedReceiptId } : {},
+        ...allocatedArtifactRef ? { artifactRef: allocatedArtifactRef } : {}
+      });
+      emit("settlement_degraded", { note, ...allocatedReceiptId ? { partial_receipt: allocatedReceiptId } : {} });
+      return { storedRef, degraded: note, publicationState: "pending" };
     }
-    const result = buildBoundedResult({
-      output: opts.output,
-      valid: opts.validation.valid,
-      errors: opts.validation.errors,
-      artifactRefs: [artifactValue],
-      receiptRefs: [receipt.id],
-      provenanceRefs: [subject.executionBindingId, receipt.id]
-    });
-    const entry = boundary.appendResult(subject.issueRef, {
-      result,
-      executionContext,
-      refs: [
-        { kind: "artifact", key: artifactValue },
-        { kind: "receipt", key: receipt.id }
-      ],
-      participantId: subject.participantId,
-      activationId: subject.activationId,
-      sessionId: subject.piSessionId
-    });
-    emit("settlement_result_published", { entry: entry.entryId, receipt: receipt.id });
-    const published = {
-      ...record2,
-      receiptId: receipt.id,
-      journalEntryId: entry.entryId,
-      artifactRef: artifactValue,
-      publication: { state: "published", attempts: (record2.publication?.attempts ?? 0) + 1, updatedAt: now }
-    };
-    try {
-      store.save(published);
-    } catch {}
-    return {
-      storedRef,
-      receiptId: receipt.id,
-      artifactValue,
-      journalEntryId: entry.entryId,
-      publicationState: "published"
-    };
-  } catch (error) {
-    const note = error instanceof Error ? error.message : String(error);
-    saveState(store, record2, "pending", note, {
-      ...allocatedReceiptId ? { receiptId: allocatedReceiptId } : {},
-      ...allocatedArtifactRef ? { artifactRef: allocatedArtifactRef } : {}
-    });
-    emit("settlement_degraded", { note, ...allocatedReceiptId ? { partial_receipt: allocatedReceiptId } : {} });
-    return { storedRef, degraded: note, publicationState: "pending" };
+  };
+  const guarded = withSettlementExclusion({ repositoryRoot: subject.repositoryRoot, activationId: subject.activationId, attemptId: subject.attemptId }, publishNow);
+  if (!guarded.ok) {
+    saveState(store, record2, "pending", guarded.reason);
+    emit("settlement_degraded", { note: guarded.reason, contended: true });
+    return { storedRef, degraded: guarded.reason, publicationState: "pending" };
   }
+  return guarded.value;
 }
-function saveState(store, record2, state, note, links = {}) {
+function saveState(store, record2, state, note, links = {}, refusal2) {
   try {
     const existing = store.get(record2.activationId, record2.attemptId) ?? record2;
     store.save({
       ...existing,
       ...links,
-      publication: { state, note, attempts: (existing.publication?.attempts ?? 0) + 1, updatedAt: Date.now() }
+      publication: {
+        state,
+        note,
+        ...refusal2 ? { refusal: refusal2 } : {},
+        attempts: (existing.publication?.attempts ?? 0) + 1,
+        updatedAt: Date.now()
+      }
     });
   } catch {}
 }
@@ -22409,6 +22501,9 @@ function safeSegment(id) {
   if (!safe || safe === "." || safe === "..")
     throw new Error(`unusable settlement id: ${id}`);
   return safe;
+}
+function isRuntimeRefused(record2) {
+  return publicationStateOf(record2) === "refused" && record2.publication?.refusal === "runtime_lacks_settlement_surface";
 }
 function isPendingPublication(record2) {
   return publicationStateOf(record2) === "pending";
@@ -22453,6 +22548,9 @@ function createFileSettlementStore(root) {
     },
     listPendingPublication() {
       return readAll().filter(isPendingPublication).sort((a, b) => a.completedAt - b.completedAt);
+    },
+    listRuntimeRefused() {
+      return readAll().filter(isRuntimeRefused).sort((a, b) => a.completedAt - b.completedAt);
     }
   };
   function readAll() {
@@ -22574,7 +22672,7 @@ class NativeActivationHost {
     this.env = deps.env ?? process.env;
   }
   async start(request) {
-    const activationId = `act:${randomUUID3().slice(0, 12)}`;
+    const activationId = `act:${randomUUID4().slice(0, 12)}`;
     const attemptId = `att:${activationId.slice(4)}:1`;
     const participantId = `specialist::${request.specialist}`;
     const emit = (name, payload) => this.forensics.emit({
@@ -24013,7 +24111,7 @@ var specialistRetrySchema = objectType({
   prompt: stringType().optional().describe("Replacement turn prompt. Defaults to the dispatch-time render of the same Issue.")
 });
 // src/activation/async-events.ts
-import { randomUUID as randomUUID4 } from "node:crypto";
+import { randomUUID as randomUUID5 } from "node:crypto";
 class ResultNotValidatedError extends Error {
   activationId;
   constructor(activationId) {
@@ -24033,7 +24131,7 @@ class RuntimeEventPusher {
   constructor(options) {
     this.adapter = options.adapter;
     this.now = options.now ?? (() => Date.now());
-    this.newMessageId = options.newMessageId ?? (() => `msg:${randomUUID4().slice(0, 12)}`);
+    this.newMessageId = options.newMessageId ?? (() => `msg:${randomUUID5().slice(0, 12)}`);
     this.onPush = options.onPush;
   }
   track(activationId, route) {
