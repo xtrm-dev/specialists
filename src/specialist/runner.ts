@@ -9,9 +9,8 @@ import {
   resolveExecutionExtensionSelection,
   resolveRuntimeToolContract,
   type PiSessionOptions,
-  type SessionMetricEvent,
-  type SessionRunMetrics,
 } from '../pi/session.js';
+import type { SessionMetricEvent, SessionRunMetrics } from './session-metrics-contract.js';
 import type { SpecialistLoader } from './loader.js';
 import type { HookEmitter } from './hooks.js';
 import { isAuthError, isRateLimitError, isTransientError, type CircuitBreaker } from '../utils/circuitBreaker.js';

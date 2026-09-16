@@ -15824,6 +15824,10 @@ class SqliteClient {
         clauses.push("job_id = ?");
         params.push(filters.jobId);
       }
+      if (filters.jobIdPrefix) {
+        clauses.push("job_id >= ? AND job_id < ?");
+        params.push(filters.jobIdPrefix, `${filters.jobIdPrefix}\uFFFF`);
+      }
       if (filters.sinceMs !== undefined) {
         clauses.push("t >= ?");
         params.push(filters.sinceMs);
@@ -48819,14 +48823,22 @@ function requireSqliteClient() {
   }
   return sqliteClient;
 }
-function resolveNodeRefWithClient(partialRef, sqliteClient) {
+function tryResolveNodeRefWithClient(partialRef, sqliteClient) {
   const matches = sqliteClient.listNodeRunsByRef(partialRef, ACTIVE_NODE_STATUSES);
   if (matches.length === 1)
-    return matches[0].id;
-  if (matches.length === 0) {
+    return { kind: "resolved", id: matches[0].id };
+  if (matches.length === 0)
+    return { kind: "absent" };
+  return { kind: "ambiguous", matches: matches.map((m) => ({ id: m.id, node_name: m.node_name })) };
+}
+function resolveNodeRefWithClient(partialRef, sqliteClient) {
+  const outcome = tryResolveNodeRefWithClient(partialRef, sqliteClient);
+  if (outcome.kind === "resolved")
+    return outcome.id;
+  if (outcome.kind === "absent") {
     throw new Error(`No node matching ref: ${partialRef}`);
   }
-  throw new Error(`Ambiguous node ref ${partialRef} matches: ${formatNodeRefMatches(matches)}`);
+  throw new Error(`Ambiguous node ref ${partialRef} matches: ${formatNodeRefMatches(outcome.matches)}`);
 }
 function resolveSingleActiveNodeRef(sqliteClient) {
   const client = sqliteClient ?? requireSqliteClient();
@@ -53066,7 +53078,20 @@ var init_status2 = __esm(() => {
 });
 
 // src/specialist/native-activation-summary.ts
-function stateForEventName(eventName) {
+function statusFromStatusChangePayload(eventJson) {
+  try {
+    const parsed = JSON.parse(eventJson ?? "");
+    const status = parsed.body?.legacy_timeline_event?.status;
+    if (status === "waiting")
+      return "waiting";
+    if (status === "running")
+      return "active";
+    return "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+function stateForEventName(eventName, eventJson) {
   const short = eventName.startsWith("activation.") ? eventName.slice("activation.".length) : eventName;
   switch (short) {
     case "activation_requested":
@@ -53092,9 +53117,64 @@ function stateForEventName(eventName) {
       return "disposed";
     case "activation_rejected":
       return "rejected";
+    case "job.completed":
+      return "completed";
+    case "job.failed":
+      return "failed";
+    case "job.cancelled":
+      return "cancelled";
+    case "job.started":
+      return "active";
+    case "job.status_changed":
+      return statusFromStatusChangePayload(eventJson);
+    case "control.lease_acquired.recorded":
+      return "admitted";
+    case "control.lease_denied.recorded":
+      return "rejected";
+    case "control.lease_uncertain.recorded":
+      return "starting";
+    case "tool.call.failed":
+    case "error.rpc":
+    case "error.extension":
+    case "command.failed":
+    case "mcp.call.failed":
+    case "mcp.auth.failed":
+    case "git.auto_commit.failed":
+    case "review.verdict.fail":
+      return "failed";
+    case "tool.call.started":
+    case "tool.call.completed":
+    case "turn.turn":
+    case "turn.message":
+    case "turn.text":
+    case "turn.thinking":
+    case "turn.summarized":
+    case "model.meta":
+    case "model.token_usage.recorded":
+    case "model.finish_reason.recorded":
+    case "model.changed":
+    case "retry.start":
+    case "retry.end":
+    case "compaction.start":
+    case "compaction.end":
+    case "mcp.connected":
+    case "mcp.disconnected":
+    case "mcp.rate_limited":
+    case "mcp.latency.observed":
+    case "mcp.call.started":
+    case "mcp.call.completed":
+    case "git.auto_commit.succeeded":
+    case "git.auto_commit.skipped":
+    case "command.completed":
+      return "active";
     default:
-      return short;
+      break;
   }
+  if (eventName.startsWith("activation."))
+    return short;
+  if (eventName.startsWith("job.") || eventName.startsWith("control."))
+    return "active";
+  return "unknown";
 }
 function parseBody(eventJson) {
   try {
@@ -53102,7 +53182,9 @@ function parseBody(eventJson) {
     const out = {};
     if (typeof parsed.correlation?.bead_id === "string")
       out.bead_id = parsed.correlation.bead_id;
-    if (typeof parsed.body?.pi_session_id === "string")
+    if (typeof parsed.correlation?.pi_session_id === "string")
+      out.pi_session_id = parsed.correlation.pi_session_id;
+    else if (typeof parsed.body?.pi_session_id === "string")
       out.pi_session_id = parsed.body.pi_session_id;
     if (typeof parsed.body?.error === "string")
       out.error = parsed.body.error;
@@ -53139,12 +53221,12 @@ function summarizeNativeActivations(rows) {
       activation_id: activationId,
       specialist: role && role.length > 0 ? role : "unknown",
       ...beadId ? { bead_id: beadId } : {},
-      state: stateForEventName(last.event_name),
+      state: stateForEventName(last.event_name, last.event_json),
       last_event: last.event_name,
       last_event_at_ms: last.t,
       first_event_at_ms: first.t,
-      event_count: ordered.length,
-      turns: ordered.filter((event) => event.event_name === "activation.turn_started").length,
+      window_event_count: ordered.length,
+      window_turns: ordered.filter((event) => event.event_name === "activation.turn_started" || event.event_name === "turn.summarized").length,
       ...piSessionId ? { pi_session_id: piSessionId } : {},
       ...detail ? { detail } : {}
     });
@@ -53737,9 +53819,10 @@ function loadNativeActivationSummaries(args, mineBeadIds) {
     return [];
   try {
     const rows = sqliteClient.readForensicEvents({
-      eventFamily: "activation",
+      jobIdPrefix: "act:",
       sinceMs: args.sinceMs,
-      limit: 1000
+      limit: 1000,
+      order: "desc"
     });
     return summarizeNativeActivations(rows).filter((summary) => {
       if (args.beadFilter && summary.bead_id !== args.beadFilter)
@@ -53762,7 +53845,7 @@ function renderNativeActivationsBlock(summaries) {
   for (const summary of summaries.slice(0, NATIVE_ACTIVATION_DISPLAY_LIMIT)) {
     const bead = summary.bead_id ? ` ${summary.bead_id}` : "";
     const detail = summary.detail ? ` \xB7 ${summary.detail}` : "";
-    console.log(`  ${summary.activation_id} ${summary.specialist}${bead} ${statusLabel(summary.state)} \xB7 ${summary.event_count} events \xB7 ${summary.turns} turns \xB7 ${formatActivationAge(now, summary.last_event_at_ms)}${detail}`);
+    console.log(`  ${summary.activation_id} ${summary.specialist}${bead} ${statusLabel(summary.state)} \xB7 ${summary.window_event_count} events in window \xB7 ${summary.window_turns} turns in window \xB7 ${formatActivationAge(now, summary.last_event_at_ms)}${detail}`);
   }
   if (summaries.length > NATIVE_ACTIVATION_DISPLAY_LIMIT) {
     console.log(dim9(`  +${summaries.length - NATIVE_ACTIVATION_DISPLAY_LIMIT} older omitted \u2014 narrow with --since/--bead`));
@@ -54292,14 +54375,39 @@ var init_ps = __esm(() => {
 // src/cli/result.ts
 var exports_result = {};
 __export(exports_result, {
-  run: () => run22
+  tryResolveJobIdFromNodeMember: () => tryResolveJobIdFromNodeMember,
+  run: () => run22,
+  resolveNativeAttemptToActivationId: () => resolveNativeAttemptToActivationId,
+  resolveJobIdFromNodeMember: () => resolveJobIdFromNodeMember,
+  parseArgs: () => parseArgs11,
+  isNativeAttemptId: () => isNativeAttemptId,
+  isNativeActivationId: () => isNativeActivationId
 });
 import { existsSync as existsSync37, readFileSync as readFileSync31 } from "fs";
 import { join as join40 } from "path";
+function isNativeActivationId(ref) {
+  return /^act:[^:]+$/.test(ref);
+}
+function isNativeAttemptId(ref) {
+  return /^att:[^:]+:\d+$/.test(ref);
+}
+function isNativePrefixRef(ref) {
+  return ref.startsWith("act:") || ref.startsWith("att:");
+}
+function resolveNativeAttemptToActivationId(attemptId) {
+  if (!isNativeAttemptId(attemptId)) {
+    throw new Error(`Invalid attempt id '${attemptId}': expected 'att:<id>:<n>'`);
+  }
+  const coreWithSuffix = attemptId.slice("att:".length);
+  const separatorIndex = coreWithSuffix.lastIndexOf(":");
+  return `act:${coreWithSuffix.slice(0, separatorIndex)}`;
+}
 function parseArgs11(argv) {
   let jobId;
   let nodeId;
   let memberKey;
+  let positionalColonRef;
+  let native = false;
   let wait = false;
   let json = false;
   let timeout;
@@ -54311,6 +54419,10 @@ function parseArgs11(argv) {
     }
     if (token === "--json") {
       json = true;
+      continue;
+    }
+    if (token === "--native") {
+      native = true;
       continue;
     }
     if (token === "--node" && argv[i + 1]) {
@@ -54336,7 +54448,7 @@ function parseArgs11(argv) {
     }
   }
   if (!jobId && !(nodeId && memberKey) && !memberKey) {
-    console.error(`Usage: specialists|sp result <node-ref>:<member> [--wait] [--timeout <seconds>] [--json]
+    console.error(`Usage: specialists|sp result <node-ref>:<member> [--native] [--wait] [--timeout <seconds>] [--json]
        specialists|sp result <job-id> [--wait] [--timeout <seconds>] [--json]
        specialists|sp result --node <node-ref> --member <member-key> [--wait] [--timeout <seconds>] [--json]
        specialists|sp result --member <member-key> [--wait] [--timeout <seconds>] [--json]`);
@@ -54344,6 +54456,7 @@ function parseArgs11(argv) {
   }
   if (jobId && jobId.includes(":") && !nodeId && !memberKey) {
     const separatorIndex = jobId.indexOf(":");
+    positionalColonRef = jobId;
     nodeId = jobId.slice(0, separatorIndex);
     memberKey = jobId.slice(separatorIndex + 1);
     jobId = undefined;
@@ -54357,27 +54470,57 @@ function parseArgs11(argv) {
     process.exit(1);
   }
   if (!jobId && !memberKey) {
-    console.error(`Usage: specialists|sp result <node-ref>:<member> [--wait] [--timeout <seconds>] [--json]
+    console.error(`Usage: specialists|sp result <node-ref>:<member> [--native] [--wait] [--timeout <seconds>] [--json]
        specialists|sp result <job-id> [--wait] [--timeout <seconds>] [--json]
        specialists|sp result --node <node-ref> --member <member-key> [--wait] [--timeout <seconds>] [--json]
        specialists|sp result --member <member-key> [--wait] [--timeout <seconds>] [--json]`);
     process.exit(1);
   }
-  return { jobId, nodeId, memberKey, wait, json, timeout };
+  return { jobId, nodeId, memberKey, positionalColonRef, native, wait, json, timeout };
 }
-function resolveJobIdFromNodeMember(sqliteClient, nodeId, memberKey) {
+function tryResolveJobIdFromNodeMember(sqliteClient, nodeId, memberKey) {
   const nodeRun = sqliteClient.readNodeRun(nodeId);
   if (!nodeRun) {
-    throw new Error(`Node run not found: ${nodeId}`);
+    return { kind: "node_absent" };
   }
   const member = sqliteClient.readNodeMembers(nodeId).find((entry) => entry.member_id === memberKey);
   if (!member) {
-    throw new Error(`Member '${memberKey}' not found in node '${nodeId}'`);
+    return { kind: "member_absent" };
   }
   if (!member.job_id) {
-    throw new Error(`Member '${memberKey}' in node '${nodeId}' has no job id yet`);
+    return { kind: "member_without_job_id" };
   }
-  return member.job_id;
+  return { kind: "resolved", jobId: member.job_id };
+}
+function resolveJobIdFromNodeMember(sqliteClient, nodeId, memberKey) {
+  const outcome = tryResolveJobIdFromNodeMember(sqliteClient, nodeId, memberKey);
+  if (outcome.kind === "resolved")
+    return outcome.jobId;
+  if (outcome.kind === "node_absent") {
+    throw new Error(`Node run not found: ${nodeId}`);
+  }
+  if (outcome.kind === "member_absent") {
+    throw new Error(`Member '${memberKey}' not found in node '${nodeId}'`);
+  }
+  throw new Error(`Member '${memberKey}' in node '${nodeId}' has no job id yet`);
+}
+function findMissingNativeAttemptError(sqliteClient, supervisor, activationId, requestedAttemptId) {
+  const activationStatus = supervisor.readStatus(activationId);
+  if (!activationStatus)
+    return null;
+  if (!sqliteClient) {
+    return `Cannot verify attempt '${requestedAttemptId}' for activation '${activationId}': observability database is unavailable. Run: specialists db setup`;
+  }
+  let attemptRows;
+  try {
+    attemptRows = sqliteClient.readForensicEvents({ jobId: activationId, limit: 1e4 });
+  } catch {
+    return `Cannot verify attempt '${requestedAttemptId}' for activation '${activationId}': forensic read failed.`;
+  }
+  if (!attemptRows.some((row) => row.attempt_id === requestedAttemptId)) {
+    return `No such attempt '${requestedAttemptId}' for activation '${activationId}'.`;
+  }
+  return null;
 }
 function readTimelineEventsForResult(sqliteClient, jobsDir, jobId) {
   if (sqliteClient) {
@@ -54554,15 +54697,85 @@ async function run22() {
       process.stderr.write(dim12(trailingFooter));
   };
   try {
+    let requestedAttemptId;
+    const resolveNativePositional = (raw) => {
+      if (isNativeActivationId(raw))
+        return raw;
+      if (isNativeAttemptId(raw)) {
+        requestedAttemptId = raw;
+        return resolveNativeAttemptToActivationId(raw);
+      }
+      if (raw.startsWith("act:")) {
+        throw new Error(`invalid activation id '${raw}': expected 'act:<id>'`);
+      }
+      throw new Error(`invalid attempt id '${raw}': expected 'att:<id>:<n>'`);
+    };
     const jobId = (() => {
-      if (args.jobId)
+      if (args.positionalColonRef) {
+        const raw = args.positionalColonRef;
+        const nodeRef = args.nodeId;
+        const legacyMemberKey = args.memberKey;
+        if (args.native) {
+          return resolveNativePositional(raw);
+        }
+        if (!sqliteClient) {
+          throw new Error("Observability SQLite DB is unavailable. Run: specialists db setup");
+        }
+        const nodeOutcome = tryResolveNodeRefWithClient(nodeRef, sqliteClient);
+        if (nodeOutcome.kind === "ambiguous") {
+          return resolveNodeRefWithClient(nodeRef, sqliteClient);
+        }
+        if (nodeOutcome.kind === "resolved") {
+          const resolvedId = nodeOutcome.id;
+          const memberOutcome = tryResolveJobIdFromNodeMember(sqliteClient, resolvedId, legacyMemberKey);
+          if (memberOutcome.kind === "resolved")
+            return memberOutcome.jobId;
+          if (isNativeActivationId(raw) || isNativeAttemptId(raw)) {
+            return resolveNativePositional(raw);
+          }
+          if (isNativePrefixRef(raw)) {
+            return resolveNativePositional(raw);
+          }
+          if (memberOutcome.kind === "member_absent") {
+            throw new Error(`Member '${legacyMemberKey}' not found in node '${resolvedId}'`);
+          }
+          if (memberOutcome.kind === "member_without_job_id") {
+            throw new Error(`Member '${legacyMemberKey}' in node '${resolvedId}' has no job id yet`);
+          }
+          throw new Error(`Node run not found: ${resolvedId}`);
+        }
+        if (isNativeActivationId(raw) || isNativeAttemptId(raw)) {
+          return resolveNativePositional(raw);
+        }
+        if (isNativePrefixRef(raw)) {
+          return resolveNativePositional(raw);
+        }
+        throw new Error(`No node matching ref: ${nodeRef}`);
+      }
+      if (args.jobId && isNativeAttemptId(args.jobId)) {
+        requestedAttemptId = args.jobId;
+        return resolveNativeAttemptToActivationId(args.jobId);
+      }
+      if (args.jobId) {
         return args.jobId;
+      }
       if (!sqliteClient || !args.memberKey) {
         throw new Error("Observability SQLite DB is unavailable. Run: specialists db setup");
       }
       const resolvedNodeId = args.nodeId ? resolveNodeRefWithClient(args.nodeId, sqliteClient) : resolveSingleActiveNodeRef(sqliteClient);
       return resolveJobIdFromNodeMember(sqliteClient, resolvedNodeId, args.memberKey);
     })();
+    if (requestedAttemptId) {
+      const attemptError = findMissingNativeAttemptError(sqliteClient, supervisor, jobId, requestedAttemptId);
+      if (attemptError) {
+        if (args.json) {
+          emitJson(null, null, attemptError);
+        } else {
+          console.error(attemptError);
+        }
+        process.exit(1);
+      }
+    }
     const resultPath = join40(jobsDir, jobId, "result.txt");
     const readResultOutput2 = () => {
       try {
@@ -55297,7 +55510,7 @@ function renderForensicTrail(sqliteClient, jobId, json) {
   console.log(dim9(`native activation ${jobId} \xB7 LAST-KNOWN trail from forensics \u2014 not live (host-session Fleet registry is not visible here)`));
   if (summary) {
     const bead = summary.bead_id ? ` \xB7 bead ${summary.bead_id}` : "";
-    console.log(dim9(`specialist ${summary.specialist}${bead} \xB7 last-known state: ${summary.state} \xB7 ${summary.turns} turns \xB7 ${summary.event_count} events`));
+    console.log(dim9(`specialist ${summary.specialist}${bead} \xB7 last-known state: ${summary.state} \xB7 ${summary.window_turns} turns in window \xB7 ${summary.window_event_count} events in window`));
   }
   for (const row of rows) {
     const short = row.event_name.startsWith("activation.") ? row.event_name.slice("activation.".length) : row.event_name;

@@ -9,6 +9,7 @@ const mockSqlite = {
   readEpicRun: vi.fn(() => null),
   listEpicChains: vi.fn(() => []),
   readEvents: vi.fn(() => []),
+  readForensicEvents: vi.fn(() => []),
   readLatestToolEvent: vi.fn(() => null),
   appendEvent: vi.fn(),
   upsertStatus: vi.fn(),
@@ -89,6 +90,8 @@ describe('ps CLI — run()', () => {
     mockSqlite.readEpicRun.mockReturnValue(null);
     mockSqlite.listEpicChains.mockReturnValue([]);
     mockSqlite.readEvents.mockReturnValue([]);
+    mockSqlite.readForensicEvents.mockReset();
+    mockSqlite.readForensicEvents.mockReturnValue([]);
     mockSqlite.readLatestToolEvent.mockReturnValue(null);
     mockSqlite.appendEvent.mockClear();
     mockSqlite.upsertStatus.mockClear();
@@ -132,6 +135,60 @@ describe('ps CLI — run()', () => {
     expect(clean).toMatch(/jobs 0\/0/);
     expect(clean).toContain('running 0');
     expect(clean).toContain('waiting 0');
+  }, TEST_TIMEOUT_MS);
+
+  it('queries native activations by act: identity with newest-first order (MEDIUM 3)', async () => {
+    const t0 = Date.now() - 60_000;
+    const forensicRow = (seq: number, family: string, name: string, at: number, body: Record<string, unknown>) => ({
+      id: seq,
+      job_id: 'act:cli-bind-1',
+      seq,
+      t: at,
+      schema_version: 'xtrm.forensic.v1',
+      event_family: family,
+      event_name: name,
+      participant_kind: 'specialist',
+      participant_role: 'executor',
+      participant_id: 'specialist::executor',
+      attempt_id: 'att:cli-bind-1:1',
+      redaction_status: 'clean',
+      event_json: JSON.stringify({
+        schema_version: 'xtrm.forensic.v1',
+        t_unix_ms: at,
+        event_family: family,
+        event_name: name,
+        resource: { service_namespace: 'xtrm', service_name: 'specialists', service_component: 'runtime', participant_kind: 'specialist', participant_role: 'executor' },
+        correlation: { participant_id: 'specialist::executor', job_id: 'act:cli-bind-1', attempt_id: 'att:cli-bind-1:1', pi_session_id: 'pi-cli-1', session_id: 'pi-cli-1' },
+        body,
+        redaction: { status: 'clean' },
+      }),
+    });
+    const rows = [
+      forensicRow(1, 'job', 'job.started', t0, {}),
+      forensicRow(2, 'job', 'job.status_changed', t0 + 1000, { legacy_timeline_event: { t: t0 + 1000, type: 'status_change', status: 'waiting', previous_status: 'running' } }),
+    ];
+    mockSqlite.readForensicEvents.mockImplementation((filters: unknown) => {
+      const f = filters as { jobIdPrefix?: string; eventFamily?: string };
+      if (f?.jobIdPrefix === 'act:') return rows;
+      return [];
+    });
+    process.argv = ['node', 'specialists', 'ps'];
+    const output: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      output.push(args.map(String).join(' '));
+    });
+    const { run } = await import('../../../src/cli/ps.js');
+    await run();
+    expect(mockSqlite.readForensicEvents).toHaveBeenCalledWith(
+      expect.objectContaining({ jobIdPrefix: 'act:', order: 'desc' }),
+    );
+    const families = mockSqlite.readForensicEvents.mock.calls.map((call) => (call[0] as { eventFamily?: string }).eventFamily);
+    expect(families).not.toContain('activation');
+    const clean = stripAnsi(output.join('\n'));
+    expect(clean).toContain('act:cli-bind-1');
+    expect(clean).toContain('waiting');
+    expect(clean).not.toMatch(/act:cli-bind-1[^\n]*settled/);
+    expect(clean).toContain('in window');
   }, TEST_TIMEOUT_MS);
 
   it('shows compact system health block with process counts by default', async () => {

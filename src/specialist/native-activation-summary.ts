@@ -1,11 +1,12 @@
 // unitAI-rrdnt.47: last-known summaries of native activations for the CLI.
-//
-// Native activations live in an in-process FleetRegistry inside their host
-// session, so a separate CLI process can never read live registry state.
-// What it CAN read is the forensic trail in specialist_forensic_events
-// (event_family='activation'), written since unitAI-rrdnt.37.1.1. Everything
+// XTRM-93 N2B: native activations are re-projected onto the SHARED timeline
+// vocabulary (families job/control/turn/model/tool/retry, e.g. job.started,
+// turn.summarized, tool.call.completed) and distinguished ONLY by job_id
+// identity (the act: id space). There is no native-specific event family;
+// the retired activation.* parallel vocabulary (event_family='activation',
+// written until 2026-09-08) survives only as historical rows. Everything
 // here is therefore LAST-KNOWN state: a crashed host stops writing without
-// a disposed row, so absence of a terminal event must never be rendered as
+// a terminal event, so absence of a terminal event must never be rendered as
 // "running". Callers must label the output accordingly.
 import type { ForensicEventRecord } from './observability-sqlite.js';
 
@@ -18,15 +19,47 @@ export interface NativeActivationSummary {
   last_event: string;
   last_event_at_ms: number;
   first_event_at_ms: number;
-  event_count: number;
-  turns: number;
+  /** Window-scoped row count: rows in the queried window, NOT a lifetime total.
+   * The ps query is row-capped (limit 1000), so one large activation can
+   * consume the window and truncate others (row-cap starvation unitAI-kmbb9).
+   * Named window_* so consumers cannot mistake it for a total. */
+  window_event_count: number;
+  /** Window-scoped turn count (turn.summarized in window), NOT a lifetime total. See below. */
+  window_turns: number;
   pi_session_id?: string;
   /** Error / stop reason for failed or disposed activations. */
   detail?: string;
 }
 
-/** Latest-event wins; unknown names fall back to the raw suffix. */
-function stateForEventName(eventName: string): string {
+/** Derive waiting/running from a job.status_changed payload. The writer emits
+ * status_change with body.legacy_timeline_event.status (vocabulary-unconstrained;
+ * all 182 native rows to date carry status:"waiting", previous_status:"running").
+ * waiting -> "waiting" (parked, resumable; NOT settled, NOT running).
+ * running -> "active" (crashed-host contract: absence of a terminal event must
+ * never render as live "running", even when the last transition says running).
+ * Unrecognised/missing status -> "unknown" (honest; never running/settled). */
+function statusFromStatusChangePayload(eventJson: string | undefined): string {
+  try {
+    const parsed = JSON.parse(eventJson ?? '') as {
+      body?: { legacy_timeline_event?: { status?: unknown } };
+    };
+    const status = parsed.body?.legacy_timeline_event?.status;
+    if (status === 'waiting') return 'waiting';
+    if (status === 'running') return 'active';
+    return 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+/** Latest-event wins. Producer name set derived from
+ * forensic-events.ts eventNameForTimelineEvent (:832) + familyForTimelineType (:813).
+ * Historical activation.* fallback preserved (retired vocab, do not change).
+ * Shared mid-flight signals map to last-known 'active', never 'running'.
+ * Shared failure/error names map to 'failed', never 'active'.
+ * Anything else shared/ancillary (review/chain/worktree/process_health,
+ * unexpected mcp.* passthrough, future names) maps to 'unknown', never 'active'. */
+function stateForEventName(eventName: string, eventJson?: string): string {
   const short = eventName.startsWith('activation.') ? eventName.slice('activation.'.length) : eventName;
   switch (short) {
     case 'activation_requested': return 'requested';
@@ -43,8 +76,57 @@ function stateForEventName(eventName: string): string {
     case 'activation_failed': return 'failed';
     case 'activation_disposed': return 'disposed';
     case 'activation_rejected': return 'rejected';
-    default: return short;
+    case 'job.completed': return 'completed';
+    case 'job.failed': return 'failed';
+    case 'job.cancelled': return 'cancelled';
+    case 'job.started': return 'active';
+    case 'job.status_changed': return statusFromStatusChangePayload(eventJson);
+    case 'control.lease_acquired.recorded': return 'admitted';
+    case 'control.lease_denied.recorded': return 'rejected';
+    case 'control.lease_uncertain.recorded': return 'starting';
+    // Explicit failures (producer eventNameForTimelineEvent): never 'active'.
+    case 'tool.call.failed':
+    case 'error.rpc':
+    case 'error.extension':
+    case 'command.failed':
+    case 'mcp.call.failed':
+    case 'mcp.auth.failed':
+    case 'git.auto_commit.failed':
+    case 'review.verdict.fail':
+      return 'failed';
+    // Explicit mid-flight (producer families): last-known 'active'.
+    case 'tool.call.started':
+    case 'tool.call.completed':
+    case 'turn.turn':
+    case 'turn.message':
+    case 'turn.text':
+    case 'turn.thinking':
+    case 'turn.summarized':
+    case 'model.meta':
+    case 'model.token_usage.recorded':
+    case 'model.finish_reason.recorded':
+    case 'model.changed':
+    case 'retry.start':
+    case 'retry.end':
+    case 'compaction.start':
+    case 'compaction.end':
+    case 'mcp.connected':
+    case 'mcp.disconnected':
+    case 'mcp.rate_limited':
+    case 'mcp.latency.observed':
+    case 'mcp.call.started':
+    case 'mcp.call.completed':
+    case 'git.auto_commit.succeeded':
+    case 'git.auto_commit.skipped':
+    case 'command.completed':
+      return 'active';
+    default: break;
   }
+  if (eventName.startsWith('activation.')) return short;
+  // Non-terminal job/control signals outside the explicit lists
+  // (e.g. job.payload_breakdown, control.tool_blocked.recorded): active, never running.
+  if (eventName.startsWith('job.') || eventName.startsWith('control.')) return 'active';
+  return 'unknown';
 }
 
 interface ParsedBody {
@@ -58,12 +140,13 @@ interface ParsedBody {
 function parseBody(eventJson: string): ParsedBody {
   try {
     const parsed = JSON.parse(eventJson) as {
-      correlation?: { bead_id?: unknown };
+      correlation?: { bead_id?: unknown; pi_session_id?: unknown };
       body?: { pi_session_id?: unknown; error?: unknown; stop_reason?: unknown; reason?: unknown };
     };
     const out: ParsedBody = {};
     if (typeof parsed.correlation?.bead_id === 'string') out.bead_id = parsed.correlation.bead_id;
-    if (typeof parsed.body?.pi_session_id === 'string') out.pi_session_id = parsed.body.pi_session_id;
+    if (typeof parsed.correlation?.pi_session_id === 'string') out.pi_session_id = parsed.correlation.pi_session_id;
+    else if (typeof parsed.body?.pi_session_id === 'string') out.pi_session_id = parsed.body.pi_session_id;
     if (typeof parsed.body?.error === 'string') out.error = parsed.body.error;
     if (typeof parsed.body?.stop_reason === 'string') out.stop_reason = parsed.body.stop_reason;
     if (typeof parsed.body?.reason === 'string') out.reason = parsed.body.reason;
@@ -76,8 +159,9 @@ function parseBody(eventJson: string): ParsedBody {
 /**
  * Group forensic activation rows by job (activation) id and derive one
  * last-known summary per activation, newest first. Pure: takes rows, returns
- * summaries. Rows are expected from readForensicEvents({eventFamily:
- * 'activation'}) but any order is tolerated — latest is picked by (t, seq).
+ * summaries. Rows are expected from readForensicEvents({jobIdPrefix: 'act:',
+ * order: 'desc'}) over the shared families, but any order is tolerated —
+ * latest is picked by (t, seq).
  */
 export function summarizeNativeActivations(rows: readonly ForensicEventRecord[]): NativeActivationSummary[] {
   const byId = new Map<string, ForensicEventRecord[]>();
@@ -105,12 +189,17 @@ export function summarizeNativeActivations(rows: readonly ForensicEventRecord[])
       activation_id: activationId,
       specialist: role && role.length > 0 ? role : 'unknown',
       ...(beadId ? { bead_id: beadId } : {}),
-      state: stateForEventName(last.event_name),
+      state: stateForEventName(last.event_name, last.event_json),
       last_event: last.event_name,
       last_event_at_ms: last.t,
       first_event_at_ms: first.t,
-      event_count: ordered.length,
-      turns: ordered.filter((event) => event.event_name === 'activation.turn_started').length,
+      window_event_count: ordered.length,
+      // LOW: turn.turn is start+end (2 rows per turn via the producer fallback
+      // forensic-events.ts:832/:813; measured act:51b 207 turn.turn vs 104
+      // turn.summarized). turn.summarized is 1 per completed turn and is the
+      // correct turn signal; turn.turn is excluded deliberately to avoid
+      // double-counting. Historical activation.turn_started kept for retired rows.
+      window_turns: ordered.filter((event) => event.event_name === 'activation.turn_started' || event.event_name === 'turn.summarized').length,
       ...(piSessionId ? { pi_session_id: piSessionId } : {}),
       ...(detail ? { detail } : {}),
     });

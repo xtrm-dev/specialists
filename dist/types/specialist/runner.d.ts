@@ -1,4 +1,5 @@
-import { PiAgentSession, type PiSessionOptions, type SessionMetricEvent, type SessionRunMetrics } from '../pi/session.js';
+import { PiAgentSession, type PiSessionOptions } from '../pi/session.js';
+import type { SessionMetricEvent, SessionRunMetrics } from './session-metrics-contract.js';
 import type { SpecialistLoader } from './loader.js';
 import type { HookEmitter } from './hooks.js';
 import { type CircuitBreaker } from '../utils/circuitBreaker.js';

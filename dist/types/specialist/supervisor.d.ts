@@ -1,118 +1,16 @@
 import type { SpecialistRunner, RunOptions } from './runner.js';
-import { type RuntimeOriginV1, type SpecialistSpawnOriginV1 } from './runtime-origin.js';
+import type { MandatoryRulesInjectionProjection, SupervisorJobStatus, SupervisorStatus, SupervisorStatusView } from './status-contract.js';
+export type { MandatoryRulesInjectionProjection, SupervisorJobStatus, SupervisorStatus, SupervisorStatusView } from './status-contract.js';
 import type { BeadsClient } from './beads.js';
 import { type TimelineEvent, type TimelineEventControlSignal, type TimelineEventRunComplete } from './timeline-events.js';
-import type { SessionRunMetrics, SessionTokenUsage } from '../pi/session.js';
+import type { SessionTokenUsage } from './session-metrics-contract.js';
 type ActivePiSession = {
     close(): Promise<void>;
     kill(reason?: Error): void;
 };
 import type { StallDetectionConfig } from './loader.js';
-export interface MandatoryRulesInjectionProjection {
-    sets_loaded: string[];
-    rules_count: number;
-    inline_rules_count: number;
-    globals_disabled: boolean;
-    token_estimate: number;
-    budget_limit: number;
-    candidate_tokens: number;
-    injected_tokens: number;
-    injected_section_ids: string[];
-    evicted_section_ids: string[];
-    payload_digest: string;
-    outcome: 'full' | 'degraded' | 'impossible';
-}
 export declare function projectMandatoryRulesInjection(data: Partial<MandatoryRulesInjectionProjection>): MandatoryRulesInjectionProjection;
 export declare const STALL_DETECTION_DEFAULTS: Required<StallDetectionConfig>;
-export type SupervisorJobStatus = 'starting' | 'running' | 'waiting' | 'done' | 'error' | 'cancelled';
-export interface SupervisorStatus {
-    id: string;
-    specialist: string;
-    status: SupervisorJobStatus;
-    current_event?: string;
-    current_tool?: string;
-    model?: string;
-    backend?: string;
-    output_type?: string;
-    pid?: number;
-    started_at_ms: number;
-    elapsed_s?: number;
-    last_event_at_ms?: number;
-    bead_id?: string;
-    node_id?: string;
-    session_id?: string;
-    conversation_id?: string;
-    trace_id?: string;
-    span_id?: string;
-    parent_span_id?: string;
-    session_file?: string;
-    fifo_path?: string;
-    tmux_session?: string;
-    worktree_path?: string;
-    reused_from_job_id?: string;
-    worktree_owner_job_id?: string;
-    chain_kind?: 'chain' | 'prep';
-    chain_id?: string;
-    chain_root_job_id?: string;
-    chain_root_bead_id?: string;
-    epic_id?: string;
-    branch?: string;
-    startup_payload_json?: string;
-    startup_context?: {
-        job_id?: string;
-        specialist_name?: string;
-        bead_id?: string;
-        reused_from_job_id?: string;
-        worktree_owner_job_id?: string;
-        chain_id?: string;
-        chain_root_job_id?: string;
-        chain_root_bead_id?: string;
-        worktree_path?: string;
-        branch?: string;
-        variables_keys?: string[];
-        reviewed_job_id_present?: boolean;
-        reused_worktree_awareness_present?: boolean;
-        bead_context_present?: boolean;
-        memory_injection?: {
-            static_tokens: number;
-            memory_tokens: number;
-            gitnexus_tokens: number;
-            total_tokens: number;
-        };
-        mandatory_rules_injection?: MandatoryRulesInjectionProjection;
-        skills?: {
-            count: number;
-            activated: string[];
-        };
-        spawn_origin_kind?: 'xtmux.agent_instance' | 'specialist.job' | 'unknown';
-        parent_job_id?: string;
-        root_pane_id?: string;
-        root_agent_instance_id?: string;
-    };
-    metrics?: SessionRunMetrics;
-    context_pct?: number;
-    context_health?: ContextHealth;
-    error?: string;
-    auto_commit_count?: number;
-    last_auto_commit_sha?: string;
-    last_auto_commit_at_ms?: number;
-    pr_url?: string;
-    pr_head_sha?: string;
-    pr_state?: string;
-    pr_merge_state?: string;
-    pr_classification?: string;
-    pr_base_ref?: string;
-    pr_base_sha?: string;
-    pr_drift_checked_at_ms?: number;
-    base_sha_pinned?: string;
-    base_sha_pinned_at_ms?: number;
-    spawn_origin?: SpecialistSpawnOriginV1;
-    parent_job_id?: string;
-    root_runtime_origin?: RuntimeOriginV1;
-}
-export type SupervisorStatusView = SupervisorStatus & {
-    is_dead: boolean;
-};
 export interface SupervisorOptions {
     runner: SpecialistRunner;
     runOptions: RunOptions;
@@ -155,7 +53,6 @@ export declare function shouldPersistHandoffBlock(params: {
     notesMode: 'full-trail' | 'final-only';
     final: boolean;
 }): boolean;
-type ContextHealth = 'OK' | 'MONITOR' | 'WARN' | 'CRITICAL';
 export declare const AUTO_COMMIT_NOISE_PREFIXES: readonly [".xtrm/", ".wolf/", ".specialists/jobs/", ".beads/", ".pi/"];
 /** Detects whether the GitNexus index in `cwd` has embeddings, so a re-analyze
  *  preserves them via `--embeddings`. Reads `.gitnexus/meta.json` and inspects
@@ -235,5 +132,4 @@ export declare class Supervisor {
      */
     run(): Promise<string>;
 }
-export {};
 //# sourceMappingURL=supervisor.d.ts.map
