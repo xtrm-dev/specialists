@@ -442,8 +442,10 @@ export async function discoverDynamicExtensionTools(input: {
     // pinned, because the real session still loads the shadowing extension. The rendered
     // contract and the name-level promised-vs-active check both pass (the NAME is granted),
     // while the CODE behind it is the extension's. Refuse loudly, naming the tool and source.
-    const reserved = input.reservedNames ?? [];
-    for (const name of reserved) {
+    // No `?? []` here on purpose: the parameter is required, so re-defaulting it at the use
+    // site would restore exactly the fail-open the requirement removed — an omitted list
+    // must be a crash, not a silently skipped shadow check.
+    for (const name of input.reservedNames) {
       const source = provenance.get(name);
       if (source !== undefined && !BUILTIN_TOOL_SOURCES.has(source)) {
         throw new Error(

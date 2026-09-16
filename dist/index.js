@@ -94700,8 +94700,7 @@ async function discoverDynamicExtensionTools(input2) {
     if (!discoveryRegistryAvailable) {} else if (builtinNames.length === 0) {
       throw new Error("cannot establish the builtin baseline registry while the discovery registry is available; " + "refusing rather than pinning names that cannot be checked for collisions");
     }
-    const reserved = input2.reservedNames ?? [];
-    for (const name of reserved) {
+    for (const name of input2.reservedNames) {
       const source = provenance.get(name);
       if (source !== undefined && !BUILTIN_TOOL_SOURCES.has(source)) {
         throw new Error(`enabled extension shadows granted tool '${name}' (registry source '${source}'); ` + "refusing rather than running extension code under a trusted name");
