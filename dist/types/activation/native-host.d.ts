@@ -83,6 +83,102 @@ export declare function resolveDeclaredExtensionSources(sources: readonly string
     skipped: string[];
 };
 /**
+ * Sources whose provenance the discover-then-pin gate trusts (unitAI-1pqtl.2).
+ *
+ * The same trust rule the legacy CLI policy extension uses
+ * (`config/pi-extensions/extension-tool-policy/index.mjs`): a tool whose registry entry
+ * reports one of these sources was registered by extension code the operator enabled, not
+ * by pi itself. Provenance ALONE does not prevent the collision — a shadowing name also
+ * reports `cli` — so the builtin-collision refusal below is required as well.
+ */
+export declare const EXTENSION_CLASS_SOURCES: ReadonlySet<string>;
+/** Registry sources that mark a tool as pi's own builtin, never pinnable.
+ *
+ * Version-drift note (R3.4b, no code change): these sets are static. If a future pi labels
+ * a first-party tool with a source string outside `{builtin, sdk}` / `{cli, extension,
+ * package, custom}`, the gates misread it — a builtin-looking name could pin, or every
+ * dynamic activation could refuse on baseline/provenance. If dynamic activations start
+ * refusing after a pi upgrade with "baseline registry" or "non-extension provenance"
+ * notes, look here first and compare `getAllTools()` source strings against these sets.
+ */
+export declare const BUILTIN_TOOL_SOURCES: ReadonlySet<string>;
+/** An `npm:` source that was declared enabled but resolved to nothing. Refused, not skipped. */
+export declare function unresolvableNpmSources(skipped: readonly string[]): string[];
+/** The discover-then-pin verdict for one activation's dynamic sources. */
+export interface DynamicExtensionDiscovery {
+    /** Names safe to pin: extension-class provenance and no builtin collision. */
+    pinned: string[];
+    /** Discovered names refused because they collide with a builtin name. */
+    refusedCollisions: string[];
+    /** Discovered names refused because their provenance is not extension-class. */
+    refusedProvenance: string[];
+    /** Raw active names the discovery session enumerated (before filtering). */
+    discoveredRaw: string[];
+    /** Builtin names enumerated from a session with NO dynamic sources. */
+    builtinNames: string[];
+}
+/**
+ * Enumerate pi's builtin tool names DYNAMICALLY, per pi version (unitAI-1pqtl.2).
+ *
+ * From a fenced session with NO dynamic sources via `getAllTools()` filtered to
+ * `sourceInfo.source` in `{builtin, sdk}`. Uses `getAllTools()`, not the active set:
+ * the default-active set enumerated only `bash/edit/read/write` while `getAllTools()`
+ * also lists platform-gated names such as `powershell`. Never a static list (unitAI-34pyf
+ * rejected that pattern for drift).
+ *
+ * A session without `getAllTools` yields an empty set. That is safe ONLY when the
+ * discovery registry is also unavailable (both-missing): with no provenance map every
+ * discovered name falls to `refusedProvenance` and nothing can be pinned — "no baseline
+ * ⇒ nothing attributable ⇒ nothing pinned" is a closed argument, not a hope. Refusing
+ * there would break old SDKs for no security gain, so both-missing proceeds with no
+ * widening and no refusal. The MIXED case (baseline unavailable while discovery IS
+ * available) refuses inside `discoverDynamicExtensionTools` — that is where a colliding
+ * name could otherwise be pinned. Do not "harden" this into a blanket refusal.
+ */
+export declare function enumerateBuiltinToolNames(input: {
+    sdk: PiSdk;
+    cwd: string;
+    agentDir: string;
+    model: unknown;
+}): Promise<string[]>;
+/**
+ * Discover-then-pin enumeration (unitAI-1pqtl.2).
+ *
+ * Creates a fenced, never-prompted discovery session containing ONLY the resolved,
+ * deduplicated, explicitly-enabled dynamic sources — no skills, no curated extensions, no
+ * ambient discovery, no `customTools`; `noTools: 'builtin'`; `tools` OMITTED — enumerates
+ * `getActiveToolNames()`, and splits the names into pinnable vs refused:
+ * `pin-able = discovered MINUS builtin names`, with positive extension-class provenance
+ * required for every pinned name. Both checks are required: a shadowing `write` also
+ * reports `cli`, so provenance alone does not prevent the collision.
+ *
+ * Returns an empty verdict WITHOUT creating any session when there are no dynamic sources,
+ * so existing behaviour is byte-identical for that path. Otherwise creates exactly one
+ * builtin-enumeration session plus one discovery session, both disposed in `finally`.
+ * Never prompted. No caching.
+ *
+ * Throws on discovery failure (including a silent-empty set: a non-existent extension path
+ * yields an EMPTY set with NO error because `loader.reload()` does not throw). The caller
+ * converts that into a fail-closed refusal before any model turn.
+ */
+export declare function discoverDynamicExtensionTools(input: {
+    sdk: PiSdk;
+    cwd: string;
+    agentDir: string;
+    dynamicExtensions: readonly string[];
+    model: unknown;
+    /**
+     * Reserved names the child will hold regardless of discovery (F1, R3.1): the base
+     * contract's granted native tools PLUS its catalog-granted extension tools PLUS the
+     * host's own `ask_coordinator`/`escalate_to_coordinator`. If the discovery registry
+     * shows any of these with a NON-builtin source, an enabled extension is shadowing a
+     * trusted name — keeping it out of `pinned` does NOT unload the extension, so the
+     * activation must be refused, not merely unpinned. REQUIRED (R3.2): a call site that
+     * omits it silently loses the shadow check, so there is no default.
+     */
+    reservedNames: readonly string[];
+}): Promise<DynamicExtensionDiscovery>;
+/**
  * The activation's `cwd` and `agentDir` feed pi's resource loader, which is the ONLY
  * seam through which skills, extensions, prompt templates, themes and context files
  * reach an AgentSession (pi 0.85.1 has no `skills` field on `CreateAgentSessionOptions`).

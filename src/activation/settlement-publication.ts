@@ -26,7 +26,8 @@
 // services validate every field fail-closed on write.
 
 import type { SpecialistWorkItemBoundary } from './workitem-store.js';
-import type { SettlementRecord, SettlementStore } from './settlement-store.js';
+import type { SettlementRecord, SettlementRefusalReason, SettlementStore } from './settlement-store.js';
+import { withSettlementExclusion } from './settlement-lease.js';
 /** Envelope version consumed. Mirrors EXECUTION_CONTEXT_VERSION (substrate@a77d094). */
 export const SETTLEMENT_CONTEXT_VERSION = 1;
 
@@ -265,11 +266,16 @@ export function republishSettlement(opts: {
     return { outcome: 'published', journalEntryId: record.journalEntryId, receiptId: record.receiptId };
   }
   if (!boundary.appendResult || !boundary.allocateReceipt) {
-    const note = 'work boundary carries no settlement surface; not republishable';
-    saveState(store, record, 'refused', note);
+    const note = 'work boundary carries no settlement surface; not republishable by THIS runtime';
+    saveState(store, record, 'refused', note, {}, 'runtime_lacks_settlement_surface');
     emit('settlement_republish_refused', { activationId: record.activationId, attemptId: record.attemptId, note });
     return { outcome: 'refused', note };
   }
+
+  // Captured after the guard above: the narrowing does not survive into the closure below,
+  // and re-testing inside it would be a second, weaker check of something already proven.
+  const allocateReceipt = boundary.allocateReceipt;
+  const appendResult = boundary.appendResult;
 
   // --- reconciliation: "did this already land?" ------------------------------------------
   // Both legs are read BEFORE anything is written, and an unanswerable read defers the whole
@@ -283,118 +289,135 @@ export function republishSettlement(opts: {
     return { outcome: 'pending', note: reason };
   };
 
-  let journalEntryId = record.journalEntryId;
-  if (!journalEntryId) {
-    if (!boundary.findResultEntry) {
-      return defer('work boundary exposes no Journal reconciliation, so a republish cannot prove it is the first');
-    }
-    const lookup = boundary.findResultEntry(record.issueRef, {
-      activationId: record.activationId,
-      attemptId: record.attemptId,
-    });
-    if (lookup.status === 'unavailable') {
-      return defer(`Journal reconciliation unavailable: ${lookup.reason}`);
-    }
-    if (lookup.status === 'found') journalEntryId = lookup.value.entryId;
-  }
-
-  let receiptId = record.receiptId;
-  if (!receiptId) {
-    if (!boundary.findReceiptForBinding) {
-      return defer('work boundary exposes no receipt reconciliation, so a republish cannot prove it is the first');
-    }
-    const lookup = boundary.findReceiptForBinding(record.issueRef, record.executionBindingId);
-    if (lookup.status === 'unavailable') {
-      return defer(`receipt reconciliation unavailable: ${lookup.reason}`);
-    }
-    if (lookup.status === 'found') receiptId = lookup.value.receiptId;
-  }
-
-  if (journalEntryId) {
-    // The append landed. Adopt it — but `published` means the Journal result AND the receipt
-    // exist, so a missing receipt is NOT publishable here: the entry's own refs name a receipt
-    // that cannot be reconstructed, and inventing one would break the provenance chain rather
-    // than complete it. Refused, loudly, with the reason.
-    if (!receiptId) {
-      const note =
-        `Journal result ${journalEntryId} exists but no WorkReceipt is recorded for binding `
-        + `${record.executionBindingId} and none is resolvable; the provenance chain cannot be completed`;
-      saveState(store, record, 'refused', note, { journalEntryId });
-      emit('settlement_republish_refused', { activationId: record.activationId, attemptId: record.attemptId, note });
-      return { outcome: 'refused', note, journalEntryId };
-    }
-    saveState(store, record, 'published', 'reconciled with the existing Journal result', {
-      journalEntryId,
-      receiptId,
-    });
-    emit('settlement_republish_reconciled', {
-      activationId: record.activationId, attemptId: record.attemptId, entry: journalEntryId,
-    });
-    return { outcome: 'published', journalEntryId, receiptId };
-  }
-
-  try {
-    const storedRef = store.save(record);
-    if (!receiptId) {
-      const receipt = boundary.allocateReceipt(record.executionBindingId);
-      receiptId = receipt.id;
-      emit('settlement_receipt_allocated', { receipt: receipt.id, republish: true });
-    }
-    let artifactValue = record.artifactRef ?? storedRef;
-    if (boundary.attachArtifact && !record.artifactRef) {
-      try {
-        artifactValue = boundary.attachArtifact(receiptId, 'artifact', storedRef).value;
-        emit('settlement_artifact_attached', { receipt: receiptId, kind: 'artifact', republish: true });
-      } catch (error) {
-        emit('settlement_degraded', {
-          note: `artifact attach failed: ${error instanceof Error ? error.message : String(error)}`,
-        });
+  // Reconciliation and the write it licenses run TOGETHER under the settlement exclusion
+  // (SPECIALISTS-66). Reading first and writing after is only exactly-once when no other
+  // process can be mid-publication between the two: 'did this already land?' is TOCTOU
+  // against a live writer, so the reads belong INSIDE the exclusion, not before it.
+  const reconcileAndPublish = (): { outcome: 'published' | 'pending' | 'refused'; journalEntryId?: string; receiptId?: string; note?: string } => {
+    let journalEntryId = record.journalEntryId;
+    if (!journalEntryId) {
+      if (!boundary.findResultEntry) {
+        return defer('work boundary exposes no Journal reconciliation, so a republish cannot prove it is the first');
       }
-    }
-    const entry = boundary.appendResult(record.issueRef, {
-      result: buildBoundedResult({
-        output: record.output,
-        valid: record.validation.valid,
-        errors: record.validation.errors,
-        artifactRefs: [artifactValue],
-        receiptRefs: [receiptId],
-        provenanceRefs: [record.executionBindingId, receiptId],
-      }),
-      executionContext: buildSettlementExecutionContext({
-        participantId: opts.participantId,
-        specialistName: record.specialist,
+      const lookup = boundary.findResultEntry(record.issueRef, {
         activationId: record.activationId,
         attemptId: record.attemptId,
-        coordinatorParticipantId: opts.coordinator?.participantId,
-        coordinatorSessionId: opts.coordinator?.sessionId,
-        repoPath: opts.repositoryRoot,
-        worktree: opts.worktreePath ?? opts.repositoryRoot,
-        env: opts.env,
-        now,
-      }),
-      refs: [
-        { kind: 'artifact', key: artifactValue },
-        { kind: 'receipt', key: receiptId },
-      ],
-      participantId: opts.participantId,
-      activationId: record.activationId,
-    });
-    store.save({
-      ...record,
-      receiptId,
-      journalEntryId: entry.entryId,
-      artifactRef: artifactValue,
-      publication: { state: 'published', attempts: (record.publication?.attempts ?? 0) + 1, updatedAt: now },
-    });
-    emit('settlement_result_published', { entry: entry.entryId, receipt: receiptId, republish: true });
-    return { outcome: 'published', journalEntryId: entry.entryId, receiptId };
-  } catch (error) {
-    const note = error instanceof Error ? error.message : String(error);
-    // Still transient: the receipt is now recorded, so the next pass resumes without re-minting.
-    saveState(store, record, 'pending', note, { ...(receiptId ? { receiptId } : {}) });
-    emit('settlement_degraded', { note, republish: true });
-    return { outcome: 'pending', note, ...(receiptId ? { receiptId } : {}) };
-  }
+      });
+      if (lookup.status === 'unavailable') {
+        return defer(`Journal reconciliation unavailable: ${lookup.reason}`);
+      }
+      if (lookup.status === 'found') journalEntryId = lookup.value.entryId;
+    }
+
+    let receiptId = record.receiptId;
+    if (!receiptId) {
+      if (!boundary.findReceiptForBinding) {
+        return defer('work boundary exposes no receipt reconciliation, so a republish cannot prove it is the first');
+      }
+      const lookup = boundary.findReceiptForBinding(record.issueRef, record.executionBindingId);
+      if (lookup.status === 'unavailable') {
+        return defer(`receipt reconciliation unavailable: ${lookup.reason}`);
+      }
+      if (lookup.status === 'found') receiptId = lookup.value.receiptId;
+    }
+
+    if (journalEntryId) {
+      // The append landed. Adopt it — but `published` means the Journal result AND the receipt
+      // exist, so a missing receipt is NOT publishable here: the entry's own refs name a receipt
+      // that cannot be reconstructed, and inventing one would break the provenance chain rather
+      // than complete it. Refused, loudly, with the reason.
+      if (!receiptId) {
+        const note =
+          `Journal result ${journalEntryId} exists but no WorkReceipt is recorded for binding `
+          + `${record.executionBindingId} and none is resolvable; the provenance chain cannot be completed`;
+        saveState(store, record, 'refused', note, { journalEntryId }, 'receipt_unreconstructable');
+        emit('settlement_republish_refused', { activationId: record.activationId, attemptId: record.attemptId, note });
+        return { outcome: 'refused', note, journalEntryId };
+      }
+      saveState(store, record, 'published', 'reconciled with the existing Journal result', {
+        journalEntryId,
+        receiptId,
+      });
+      emit('settlement_republish_reconciled', {
+        activationId: record.activationId, attemptId: record.attemptId, entry: journalEntryId,
+      });
+      return { outcome: 'published', journalEntryId, receiptId };
+    }
+
+    try {
+      const storedRef = store.save(record);
+      if (!receiptId) {
+        const receipt = allocateReceipt(record.executionBindingId);
+        receiptId = receipt.id;
+        emit('settlement_receipt_allocated', { receipt: receipt.id, republish: true });
+      }
+      let artifactValue = record.artifactRef ?? storedRef;
+      if (boundary.attachArtifact && !record.artifactRef) {
+        try {
+          artifactValue = boundary.attachArtifact(receiptId, 'artifact', storedRef).value;
+          emit('settlement_artifact_attached', { receipt: receiptId, kind: 'artifact', republish: true });
+        } catch (error) {
+          emit('settlement_degraded', {
+            note: `artifact attach failed: ${error instanceof Error ? error.message : String(error)}`,
+          });
+        }
+      }
+      const entry = appendResult(record.issueRef, {
+        result: buildBoundedResult({
+          output: record.output,
+          valid: record.validation.valid,
+          errors: record.validation.errors,
+          artifactRefs: [artifactValue],
+          receiptRefs: [receiptId],
+          provenanceRefs: [record.executionBindingId, receiptId],
+        }),
+        executionContext: buildSettlementExecutionContext({
+          participantId: opts.participantId,
+          specialistName: record.specialist,
+          activationId: record.activationId,
+          attemptId: record.attemptId,
+          coordinatorParticipantId: opts.coordinator?.participantId,
+          coordinatorSessionId: opts.coordinator?.sessionId,
+          repoPath: opts.repositoryRoot,
+          worktree: opts.worktreePath ?? opts.repositoryRoot,
+          env: opts.env,
+          now,
+        }),
+        refs: [
+          { kind: 'artifact', key: artifactValue },
+          { kind: 'receipt', key: receiptId },
+        ],
+        participantId: opts.participantId,
+        activationId: record.activationId,
+      });
+      store.save({
+        ...record,
+        receiptId,
+        journalEntryId: entry.entryId,
+        artifactRef: artifactValue,
+        publication: { state: 'published', attempts: (record.publication?.attempts ?? 0) + 1, updatedAt: now },
+      });
+      emit('settlement_result_published', { entry: entry.entryId, receipt: receiptId, republish: true });
+      return { outcome: 'published', journalEntryId: entry.entryId, receiptId };
+    } catch (error) {
+      const note = error instanceof Error ? error.message : String(error);
+      // Still transient: the receipt is now recorded, so the next pass resumes without re-minting.
+      saveState(store, record, 'pending', note, { ...(receiptId ? { receiptId } : {}) });
+      emit('settlement_degraded', { note, republish: true });
+      return { outcome: 'pending', note, ...(receiptId ? { receiptId } : {}) };
+    }
+  };
+
+  // `reclaimStale` here and nowhere else: the republish pass is the one caller that must be
+  // able to make progress after a holder died mid-publication, and a holder the probe reports
+  // as GONE is a proven absence — with no live writer the reconciliation reads are
+  // authoritative again. Every other uncertain reason is left for recovery to decide.
+  const guarded = withSettlementExclusion(
+    { repositoryRoot: opts.repositoryRoot, activationId: record.activationId, attemptId: record.attemptId },
+    reconcileAndPublish,
+    { reclaimStale: true },
+  );
+  return guarded.ok ? guarded.value : defer(guarded.reason);
 }
 
 /**
@@ -424,7 +447,17 @@ export function republishPendingSettlements(opts: {
   // bounded amount per process and the activation is not held behind it. Oldest first, so a cap
   // still drains in completion order.
   const limit = Math.max(1, opts.limit ?? REPUBLISH_PASS_LIMIT);
-  const pending = (opts.store.listPendingPublication?.() ?? []).slice(0, limit);
+  // Records refused because the RUNTIME carried no settlement surface rejoin the backlog once a
+  // runtime that HAS one runs the pass (SPECIALISTS-66 R5). That condition is a property of the
+  // boundary in front of us, so it is re-tested here rather than read off the stored state — the
+  // upgrade that fixes it happens between processes, where no stored verdict could have seen it.
+  // `receipt_unreconstructable` is never revisited: no upgrade reconstructs a lost receipt.
+  const revivable = (opts.boundary.appendResult && opts.boundary.allocateReceipt)
+    ? (opts.store.listRuntimeRefused?.() ?? [])
+    : [];
+  const pending = [...(opts.store.listPendingPublication?.() ?? []), ...revivable]
+    .sort((a, b) => a.completedAt - b.completedAt)
+    .slice(0, limit);
   const outcomes: Array<{ activationId: string; attemptId: string; outcome: 'published' | 'pending' | 'refused' | 'error' }> = [];
   for (const record of pending) {
     try {
@@ -543,85 +576,110 @@ export function publishSettlement(opts: {
     // of retrying will publish it. Recorded as `refused` with the reason so the backlog is
     // honest about what it is (SPECIALISTS-54).
     const note = 'work boundary carries no settlement surface; result stored only';
-    saveState(store, record, 'refused', note);
+    // Scoped to the RUNTIME, not the record: an upgraded boundary republishes this
+    // (SPECIALISTS-66 R5). The republish pass re-tests the condition rather than trusting it.
+    saveState(store, record, 'refused', note, {}, 'runtime_lacks_settlement_surface');
     emit('settlement_degraded', { note });
     return { storedRef, degraded: 'boundary without settlement surface', publicationState: 'refused' };
   }
 
+  // Captured after the guard above: the narrowing does not survive into the closure below,
+  // and re-testing inside it would be a second, weaker check of something already proven.
+  const allocateReceipt = boundary.allocateReceipt;
+  const appendResult = boundary.appendResult;
+
   // Progress is tracked step by step so a failure can record HOW FAR publication got. Without
   // this a crashed publication was indistinguishable from one that never started, and the only
   // way to tell them apart was a producer read that may not be available (SPECIALISTS-54).
-  let allocatedReceiptId: string | undefined;
-  let allocatedArtifactRef: string | undefined;
-  try {
-    const receipt = boundary.allocateReceipt(subject.executionBindingId);
-    allocatedReceiptId = receipt.id;
-    emit('settlement_receipt_allocated', { receipt: receipt.id });
-    let artifactValue = storedRef;
+  // The publication sequence runs under the settlement exclusion (SPECIALISTS-66). The
+  // reconciliation reads SPECIALISTS-54 added cannot make this exactly-once on their own:
+  // the record is already in another process's backlog from the `store.save` above until the
+  // append returns, so a concurrent republish pass reads absent and duplicates. Contention
+  // degrades to `pending` and never blocks — publication must not alter the activation result.
+  const publishNow = (): PublishSettlementResult => {
+    let allocatedReceiptId: string | undefined;
+    let allocatedArtifactRef: string | undefined;
     try {
-      if (boundary.attachArtifact) {
-        const attached = boundary.attachArtifact(receipt.id, 'artifact', storedRef);
-        artifactValue = attached.value;
-        allocatedArtifactRef = artifactValue;
-        emit('settlement_artifact_attached', { receipt: receipt.id, kind: 'artifact' });
+      const receipt = allocateReceipt(subject.executionBindingId);
+      allocatedReceiptId = receipt.id;
+      emit('settlement_receipt_allocated', { receipt: receipt.id });
+      let artifactValue = storedRef;
+      try {
+        if (boundary.attachArtifact) {
+          const attached = boundary.attachArtifact(receipt.id, 'artifact', storedRef);
+          artifactValue = attached.value;
+          allocatedArtifactRef = artifactValue;
+          emit('settlement_artifact_attached', { receipt: receipt.id, kind: 'artifact' });
+        }
+      } catch (error) {
+        // The receipt is allocated; a missing artifact link degrades the refs,
+        // never the publication.
+        emit('settlement_degraded', {
+          note: `artifact attach failed: ${error instanceof Error ? error.message : String(error)}`,
+        });
       }
-    } catch (error) {
-      // The receipt is allocated; a missing artifact link degrades the refs,
-      // never the publication.
-      emit('settlement_degraded', {
-        note: `artifact attach failed: ${error instanceof Error ? error.message : String(error)}`,
+      const result = buildBoundedResult({
+        output: opts.output,
+        valid: opts.validation.valid,
+        errors: opts.validation.errors,
+        artifactRefs: [artifactValue],
+        receiptRefs: [receipt.id],
+        provenanceRefs: [subject.executionBindingId, receipt.id],
       });
+      const entry = appendResult(subject.issueRef, {
+        result,
+        executionContext,
+        refs: [
+          { kind: 'artifact', key: artifactValue },
+          { kind: 'receipt', key: receipt.id },
+        ],
+        participantId: subject.participantId,
+        activationId: subject.activationId,
+        sessionId: subject.piSessionId,
+      });
+      emit('settlement_result_published', { entry: entry.entryId, receipt: receipt.id });
+      const published: SettlementRecord = {
+        ...record,
+        receiptId: receipt.id,
+        journalEntryId: entry.entryId,
+        artifactRef: artifactValue,
+        publication: { state: 'published', attempts: (record.publication?.attempts ?? 0) + 1, updatedAt: now },
+      };
+      try {
+        store.save(published);
+      } catch {
+        // Links are already durable in Journal + receipt; the store update is convenience.
+      }
+      return {
+        storedRef, receiptId: receipt.id, artifactValue, journalEntryId: entry.entryId, publicationState: 'published',
+      };
+    } catch (error) {
+      const note = error instanceof Error ? error.message : String(error);
+      // TRANSIENT by default: a locked store, a refused write or a producer-side error is what a
+      // later republish exists to retry. `refused` is reserved for the cases above that cannot be
+      // retried, so the backlog is not permanently poisoned by a one-off.
+      //
+      // Whatever DID land is recorded with the state, so the record itself carries the partial
+      // progress instead of the next reader having to re-derive it from the producer.
+      saveState(store, record, 'pending', note, {
+        ...(allocatedReceiptId ? { receiptId: allocatedReceiptId } : {}),
+        ...(allocatedArtifactRef ? { artifactRef: allocatedArtifactRef } : {}),
+      });
+      emit('settlement_degraded', { note, ...(allocatedReceiptId ? { partial_receipt: allocatedReceiptId } : {}) });
+      return { storedRef, degraded: note, publicationState: 'pending' };
     }
-    const result = buildBoundedResult({
-      output: opts.output,
-      valid: opts.validation.valid,
-      errors: opts.validation.errors,
-      artifactRefs: [artifactValue],
-      receiptRefs: [receipt.id],
-      provenanceRefs: [subject.executionBindingId, receipt.id],
-    });
-    const entry = boundary.appendResult(subject.issueRef, {
-      result,
-      executionContext,
-      refs: [
-        { kind: 'artifact', key: artifactValue },
-        { kind: 'receipt', key: receipt.id },
-      ],
-      participantId: subject.participantId,
-      activationId: subject.activationId,
-      sessionId: subject.piSessionId,
-    });
-    emit('settlement_result_published', { entry: entry.entryId, receipt: receipt.id });
-    const published: SettlementRecord = {
-      ...record,
-      receiptId: receipt.id,
-      journalEntryId: entry.entryId,
-      artifactRef: artifactValue,
-      publication: { state: 'published', attempts: (record.publication?.attempts ?? 0) + 1, updatedAt: now },
-    };
-    try {
-      store.save(published);
-    } catch {
-      // Links are already durable in Journal + receipt; the store update is convenience.
-    }
-    return {
-      storedRef, receiptId: receipt.id, artifactValue, journalEntryId: entry.entryId, publicationState: 'published',
-    };
-  } catch (error) {
-    const note = error instanceof Error ? error.message : String(error);
-    // TRANSIENT by default: a locked store, a refused write or a producer-side error is what a
-    // later republish exists to retry. `refused` is reserved for the cases above that cannot be
-    // retried, so the backlog is not permanently poisoned by a one-off.
-    //
-    // Whatever DID land is recorded with the state, so the record itself carries the partial
-    // progress instead of the next reader having to re-derive it from the producer.
-    saveState(store, record, 'pending', note, {
-      ...(allocatedReceiptId ? { receiptId: allocatedReceiptId } : {}),
-      ...(allocatedArtifactRef ? { artifactRef: allocatedArtifactRef } : {}),
-    });
-    emit('settlement_degraded', { note, ...(allocatedReceiptId ? { partial_receipt: allocatedReceiptId } : {}) });
-    return { storedRef, degraded: note, publicationState: 'pending' };
+  };
+
+  const guarded = withSettlementExclusion(
+    { repositoryRoot: subject.repositoryRoot, activationId: subject.activationId, attemptId: subject.attemptId },
+    publishNow,
+  );
+  if (!guarded.ok) {
+    saveState(store, record, 'pending', guarded.reason);
+    emit('settlement_degraded', { note: guarded.reason, contended: true });
+    return { storedRef, degraded: guarded.reason, publicationState: 'pending' };
   }
+  return guarded.value;
 }
 
 /**
@@ -638,13 +696,21 @@ function saveState(
   note: string,
   /** Links discovered by reconciliation, which must not be dropped by a state write. */
   links: { receiptId?: string; journalEntryId?: string; artifactRef?: string } = {},
+  /** Required for `refused`: which refusal lifetime this is (SPECIALISTS-66). */
+  refusal?: SettlementRefusalReason,
 ): void {
   try {
     const existing = store.get(record.activationId, record.attemptId) ?? record;
     store.save({
       ...existing,
       ...links,
-      publication: { state, note, attempts: (existing.publication?.attempts ?? 0) + 1, updatedAt: Date.now() },
+      publication: {
+        state,
+        note,
+        ...(refusal ? { refusal } : {}),
+        attempts: (existing.publication?.attempts ?? 0) + 1,
+        updatedAt: Date.now(),
+      },
     });
   } catch {
     // Best effort by contract.

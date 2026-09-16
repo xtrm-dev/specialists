@@ -7311,6 +7311,33 @@ function buildResolvedToolContract(input) {
     extensions
   };
 }
+function withDiscoveredExtensionTools(base, discovered) {
+  const isList = Array.isArray(discovered);
+  const pinned = isList ? discovered : discovered.pinned ?? [];
+  const refusedCollisions = isList ? [] : discovered.refusedCollisions ?? [];
+  const refusedProvenance = isList ? [] : discovered.refusedProvenance ?? [];
+  if (pinned.length === 0 && refusedCollisions.length === 0 && refusedProvenance.length === 0) {
+    return base;
+  }
+  const denied = new Set(base.deniedNativeTools);
+  const already = new Set(base.toolsList);
+  const HOST_TOOLS = new Set(["ask_coordinator", "escalate_to_coordinator"]);
+  const safePinned = uniqueOrdered2(pinned).filter((name) => !denied.has(name) && !already.has(name) && !HOST_TOOLS.has(name));
+  const toolsList = uniqueOrdered2([...base.toolsList, ...safePinned]);
+  const extensionTools = uniqueOrdered2([...base.extensionTools, ...safePinned]);
+  const warnings = [
+    ...base.warnings,
+    ...uniqueOrdered2(refusedCollisions).map((name) => `refused extension tool '${name}': collides with a builtin tool name`),
+    ...uniqueOrdered2(refusedProvenance).map((name) => `refused extension tool '${name}': non-extension provenance`)
+  ];
+  return {
+    ...base,
+    toolsFlag: toolsList.join(","),
+    toolsList,
+    extensionTools,
+    warnings
+  };
+}
 function formatResolvedToolContract(contract) {
   const lines = [
     "## Resolved Tool Contract",
@@ -20094,7 +20121,7 @@ function resolveSkillsPaths(spec, fileDir, consumerRoot) {
   spec.specialist.skills.paths = resolved;
 }
 // src/activation/native-host.ts
-import { randomUUID as randomUUID3 } from "node:crypto";
+import { randomUUID as randomUUID4 } from "node:crypto";
 import { existsSync as existsSync20 } from "node:fs";
 
 // src/activation/workitem-store.ts
@@ -22008,6 +22035,74 @@ function nextAttemptId(current) {
 var RESUMABLE_STATES = new Set(["settled", "waiting", "needs_reply", "escalated"]);
 var RETRYABLE_STATES = new Set(["failed"]);
 
+// src/activation/settlement-lease.ts
+import { unlinkSync as unlinkSync3 } from "node:fs";
+import { randomUUID as randomUUID3 } from "node:crypto";
+function exclusionWorkspace(subject) {
+  return {
+    repositoryRoot: subject.repositoryRoot,
+    ...subject.gitCommonDir ? { gitCommonDir: subject.gitCommonDir } : {},
+    worktreePath: `settlement:${subject.activationId}:${subject.attemptId}`
+  };
+}
+function withSettlementExclusion(subject, fn, opts = {}) {
+  const workspace = exclusionWorkspace(subject);
+  const holderId = `settlement-publication:${process.pid}:${randomUUID3()}`;
+  const probe = opts.probe ?? procLeaseProbe();
+  const take = () => {
+    try {
+      acquire({ workspace, activationId: holderId, attemptId: subject.attemptId }, probe);
+      return;
+    } catch (error) {
+      const contended = error instanceof DispatchRejectedError;
+      const reason = error instanceof Error ? error.message : String(error);
+      return {
+        contended,
+        reason: contended ? `settlement publication is held elsewhere: ${reason}` : `settlement exclusion could not be taken: ${reason}`
+      };
+    }
+  };
+  let failure = take();
+  if (failure !== undefined && opts.reclaimStale === true && reclaimIfHolderGone(subject, workspace, probe)) {
+    failure = take();
+  }
+  if (failure !== undefined) {
+    return { ok: false, contended: failure.contended, reason: failure.reason };
+  }
+  try {
+    return { ok: true, value: fn() };
+  } finally {
+    try {
+      release(workspace, holderId, probe);
+    } catch {}
+  }
+}
+function reclaimIfHolderGone(subject, workspace, probe) {
+  const mutex = {
+    ...workspace,
+    worktreePath: `settlement-reclaim:${subject.activationId}:${subject.attemptId}`
+  };
+  const mutexHolder = `settlement-reclaim:${process.pid}:${randomUUID3()}`;
+  try {
+    acquire({ workspace: mutex, activationId: mutexHolder, attemptId: subject.attemptId }, probe);
+  } catch {
+    return false;
+  }
+  try {
+    const status = inspect(workspace, probe);
+    if (status.state !== "uncertain" || status.uncertainReason !== "holder_process_gone")
+      return false;
+    unlinkSync3(leasePath(workspace));
+    return true;
+  } catch {
+    return false;
+  } finally {
+    try {
+      release(mutex, mutexHolder, probe);
+    } catch {}
+  }
+}
+
 // src/activation/settlement-publication.ts
 var SETTLEMENT_CONTEXT_VERSION = 1;
 var SETTLEMENT_RESULT_VERSION = 1;
@@ -22123,11 +22218,13 @@ function republishSettlement(opts) {
     return { outcome: "published", journalEntryId: record2.journalEntryId, receiptId: record2.receiptId };
   }
   if (!boundary.appendResult || !boundary.allocateReceipt) {
-    const note = "work boundary carries no settlement surface; not republishable";
-    saveState(store, record2, "refused", note);
+    const note = "work boundary carries no settlement surface; not republishable by THIS runtime";
+    saveState(store, record2, "refused", note, {}, "runtime_lacks_settlement_surface");
     emit("settlement_republish_refused", { activationId: record2.activationId, attemptId: record2.attemptId, note });
     return { outcome: "refused", note };
   }
+  const allocateReceipt = boundary.allocateReceipt;
+  const appendResult = boundary.appendResult;
   const defer = (reason) => {
     saveState(store, record2, "pending", reason);
     emit("settlement_republish_deferred", {
@@ -22137,118 +22234,123 @@ function republishSettlement(opts) {
     });
     return { outcome: "pending", note: reason };
   };
-  let journalEntryId = record2.journalEntryId;
-  if (!journalEntryId) {
-    if (!boundary.findResultEntry) {
-      return defer("work boundary exposes no Journal reconciliation, so a republish cannot prove it is the first");
-    }
-    const lookup = boundary.findResultEntry(record2.issueRef, {
-      activationId: record2.activationId,
-      attemptId: record2.attemptId
-    });
-    if (lookup.status === "unavailable") {
-      return defer(`Journal reconciliation unavailable: ${lookup.reason}`);
-    }
-    if (lookup.status === "found")
-      journalEntryId = lookup.value.entryId;
-  }
-  let receiptId = record2.receiptId;
-  if (!receiptId) {
-    if (!boundary.findReceiptForBinding) {
-      return defer("work boundary exposes no receipt reconciliation, so a republish cannot prove it is the first");
-    }
-    const lookup = boundary.findReceiptForBinding(record2.issueRef, record2.executionBindingId);
-    if (lookup.status === "unavailable") {
-      return defer(`receipt reconciliation unavailable: ${lookup.reason}`);
-    }
-    if (lookup.status === "found")
-      receiptId = lookup.value.receiptId;
-  }
-  if (journalEntryId) {
-    if (!receiptId) {
-      const note = `Journal result ${journalEntryId} exists but no WorkReceipt is recorded for binding ` + `${record2.executionBindingId} and none is resolvable; the provenance chain cannot be completed`;
-      saveState(store, record2, "refused", note, { journalEntryId });
-      emit("settlement_republish_refused", { activationId: record2.activationId, attemptId: record2.attemptId, note });
-      return { outcome: "refused", note, journalEntryId };
-    }
-    saveState(store, record2, "published", "reconciled with the existing Journal result", {
-      journalEntryId,
-      receiptId
-    });
-    emit("settlement_republish_reconciled", {
-      activationId: record2.activationId,
-      attemptId: record2.attemptId,
-      entry: journalEntryId
-    });
-    return { outcome: "published", journalEntryId, receiptId };
-  }
-  try {
-    const storedRef = store.save(record2);
-    if (!receiptId) {
-      const receipt = boundary.allocateReceipt(record2.executionBindingId);
-      receiptId = receipt.id;
-      emit("settlement_receipt_allocated", { receipt: receipt.id, republish: true });
-    }
-    let artifactValue = record2.artifactRef ?? storedRef;
-    if (boundary.attachArtifact && !record2.artifactRef) {
-      try {
-        artifactValue = boundary.attachArtifact(receiptId, "artifact", storedRef).value;
-        emit("settlement_artifact_attached", { receipt: receiptId, kind: "artifact", republish: true });
-      } catch (error) {
-        emit("settlement_degraded", {
-          note: `artifact attach failed: ${error instanceof Error ? error.message : String(error)}`
-        });
+  const reconcileAndPublish = () => {
+    let journalEntryId = record2.journalEntryId;
+    if (!journalEntryId) {
+      if (!boundary.findResultEntry) {
+        return defer("work boundary exposes no Journal reconciliation, so a republish cannot prove it is the first");
       }
+      const lookup = boundary.findResultEntry(record2.issueRef, {
+        activationId: record2.activationId,
+        attemptId: record2.attemptId
+      });
+      if (lookup.status === "unavailable") {
+        return defer(`Journal reconciliation unavailable: ${lookup.reason}`);
+      }
+      if (lookup.status === "found")
+        journalEntryId = lookup.value.entryId;
     }
-    const entry = boundary.appendResult(record2.issueRef, {
-      result: buildBoundedResult({
-        output: record2.output,
-        valid: record2.validation.valid,
-        errors: record2.validation.errors,
-        artifactRefs: [artifactValue],
-        receiptRefs: [receiptId],
-        provenanceRefs: [record2.executionBindingId, receiptId]
-      }),
-      executionContext: buildSettlementExecutionContext({
-        participantId: opts.participantId,
-        specialistName: record2.specialist,
+    let receiptId = record2.receiptId;
+    if (!receiptId) {
+      if (!boundary.findReceiptForBinding) {
+        return defer("work boundary exposes no receipt reconciliation, so a republish cannot prove it is the first");
+      }
+      const lookup = boundary.findReceiptForBinding(record2.issueRef, record2.executionBindingId);
+      if (lookup.status === "unavailable") {
+        return defer(`receipt reconciliation unavailable: ${lookup.reason}`);
+      }
+      if (lookup.status === "found")
+        receiptId = lookup.value.receiptId;
+    }
+    if (journalEntryId) {
+      if (!receiptId) {
+        const note = `Journal result ${journalEntryId} exists but no WorkReceipt is recorded for binding ` + `${record2.executionBindingId} and none is resolvable; the provenance chain cannot be completed`;
+        saveState(store, record2, "refused", note, { journalEntryId }, "receipt_unreconstructable");
+        emit("settlement_republish_refused", { activationId: record2.activationId, attemptId: record2.attemptId, note });
+        return { outcome: "refused", note, journalEntryId };
+      }
+      saveState(store, record2, "published", "reconciled with the existing Journal result", {
+        journalEntryId,
+        receiptId
+      });
+      emit("settlement_republish_reconciled", {
         activationId: record2.activationId,
         attemptId: record2.attemptId,
-        coordinatorParticipantId: opts.coordinator?.participantId,
-        coordinatorSessionId: opts.coordinator?.sessionId,
-        repoPath: opts.repositoryRoot,
-        worktree: opts.worktreePath ?? opts.repositoryRoot,
-        env: opts.env,
-        now
-      }),
-      refs: [
-        { kind: "artifact", key: artifactValue },
-        { kind: "receipt", key: receiptId }
-      ],
-      participantId: opts.participantId,
-      activationId: record2.activationId
-    });
-    store.save({
-      ...record2,
-      receiptId,
-      journalEntryId: entry.entryId,
-      artifactRef: artifactValue,
-      publication: { state: "published", attempts: (record2.publication?.attempts ?? 0) + 1, updatedAt: now }
-    });
-    emit("settlement_result_published", { entry: entry.entryId, receipt: receiptId, republish: true });
-    return { outcome: "published", journalEntryId: entry.entryId, receiptId };
-  } catch (error) {
-    const note = error instanceof Error ? error.message : String(error);
-    saveState(store, record2, "pending", note, { ...receiptId ? { receiptId } : {} });
-    emit("settlement_degraded", { note, republish: true });
-    return { outcome: "pending", note, ...receiptId ? { receiptId } : {} };
-  }
+        entry: journalEntryId
+      });
+      return { outcome: "published", journalEntryId, receiptId };
+    }
+    try {
+      const storedRef = store.save(record2);
+      if (!receiptId) {
+        const receipt = allocateReceipt(record2.executionBindingId);
+        receiptId = receipt.id;
+        emit("settlement_receipt_allocated", { receipt: receipt.id, republish: true });
+      }
+      let artifactValue = record2.artifactRef ?? storedRef;
+      if (boundary.attachArtifact && !record2.artifactRef) {
+        try {
+          artifactValue = boundary.attachArtifact(receiptId, "artifact", storedRef).value;
+          emit("settlement_artifact_attached", { receipt: receiptId, kind: "artifact", republish: true });
+        } catch (error) {
+          emit("settlement_degraded", {
+            note: `artifact attach failed: ${error instanceof Error ? error.message : String(error)}`
+          });
+        }
+      }
+      const entry = appendResult(record2.issueRef, {
+        result: buildBoundedResult({
+          output: record2.output,
+          valid: record2.validation.valid,
+          errors: record2.validation.errors,
+          artifactRefs: [artifactValue],
+          receiptRefs: [receiptId],
+          provenanceRefs: [record2.executionBindingId, receiptId]
+        }),
+        executionContext: buildSettlementExecutionContext({
+          participantId: opts.participantId,
+          specialistName: record2.specialist,
+          activationId: record2.activationId,
+          attemptId: record2.attemptId,
+          coordinatorParticipantId: opts.coordinator?.participantId,
+          coordinatorSessionId: opts.coordinator?.sessionId,
+          repoPath: opts.repositoryRoot,
+          worktree: opts.worktreePath ?? opts.repositoryRoot,
+          env: opts.env,
+          now
+        }),
+        refs: [
+          { kind: "artifact", key: artifactValue },
+          { kind: "receipt", key: receiptId }
+        ],
+        participantId: opts.participantId,
+        activationId: record2.activationId
+      });
+      store.save({
+        ...record2,
+        receiptId,
+        journalEntryId: entry.entryId,
+        artifactRef: artifactValue,
+        publication: { state: "published", attempts: (record2.publication?.attempts ?? 0) + 1, updatedAt: now }
+      });
+      emit("settlement_result_published", { entry: entry.entryId, receipt: receiptId, republish: true });
+      return { outcome: "published", journalEntryId: entry.entryId, receiptId };
+    } catch (error) {
+      const note = error instanceof Error ? error.message : String(error);
+      saveState(store, record2, "pending", note, { ...receiptId ? { receiptId } : {} });
+      emit("settlement_degraded", { note, republish: true });
+      return { outcome: "pending", note, ...receiptId ? { receiptId } : {} };
+    }
+  };
+  const guarded = withSettlementExclusion({ repositoryRoot: opts.repositoryRoot, activationId: record2.activationId, attemptId: record2.attemptId }, reconcileAndPublish, { reclaimStale: true });
+  return guarded.ok ? guarded.value : defer(guarded.reason);
 }
 var REPUBLISH_PASS_LIMIT = 50;
 function republishPendingSettlements(opts) {
   const emit = opts.emit ?? (() => {});
   const limit = Math.max(1, opts.limit ?? REPUBLISH_PASS_LIMIT);
-  const pending = (opts.store.listPendingPublication?.() ?? []).slice(0, limit);
+  const revivable = opts.boundary.appendResult && opts.boundary.allocateReceipt ? opts.store.listRuntimeRefused?.() ?? [] : [];
+  const pending = [...opts.store.listPendingPublication?.() ?? [], ...revivable].sort((a, b) => a.completedAt - b.completedAt).slice(0, limit);
   const outcomes = [];
   for (const record2 of pending) {
     try {
@@ -22320,83 +22422,100 @@ function publishSettlement(opts) {
     return { storedRef, publicationState: "not-applicable" };
   if (!boundary.allocateReceipt || !boundary.appendResult) {
     const note = "work boundary carries no settlement surface; result stored only";
-    saveState(store, record2, "refused", note);
+    saveState(store, record2, "refused", note, {}, "runtime_lacks_settlement_surface");
     emit("settlement_degraded", { note });
     return { storedRef, degraded: "boundary without settlement surface", publicationState: "refused" };
   }
-  let allocatedReceiptId;
-  let allocatedArtifactRef;
-  try {
-    const receipt = boundary.allocateReceipt(subject.executionBindingId);
-    allocatedReceiptId = receipt.id;
-    emit("settlement_receipt_allocated", { receipt: receipt.id });
-    let artifactValue = storedRef;
+  const allocateReceipt = boundary.allocateReceipt;
+  const appendResult = boundary.appendResult;
+  const publishNow = () => {
+    let allocatedReceiptId;
+    let allocatedArtifactRef;
     try {
-      if (boundary.attachArtifact) {
-        const attached = boundary.attachArtifact(receipt.id, "artifact", storedRef);
-        artifactValue = attached.value;
-        allocatedArtifactRef = artifactValue;
-        emit("settlement_artifact_attached", { receipt: receipt.id, kind: "artifact" });
+      const receipt = allocateReceipt(subject.executionBindingId);
+      allocatedReceiptId = receipt.id;
+      emit("settlement_receipt_allocated", { receipt: receipt.id });
+      let artifactValue = storedRef;
+      try {
+        if (boundary.attachArtifact) {
+          const attached = boundary.attachArtifact(receipt.id, "artifact", storedRef);
+          artifactValue = attached.value;
+          allocatedArtifactRef = artifactValue;
+          emit("settlement_artifact_attached", { receipt: receipt.id, kind: "artifact" });
+        }
+      } catch (error) {
+        emit("settlement_degraded", {
+          note: `artifact attach failed: ${error instanceof Error ? error.message : String(error)}`
+        });
       }
-    } catch (error) {
-      emit("settlement_degraded", {
-        note: `artifact attach failed: ${error instanceof Error ? error.message : String(error)}`
+      const result = buildBoundedResult({
+        output: opts.output,
+        valid: opts.validation.valid,
+        errors: opts.validation.errors,
+        artifactRefs: [artifactValue],
+        receiptRefs: [receipt.id],
+        provenanceRefs: [subject.executionBindingId, receipt.id]
       });
+      const entry = appendResult(subject.issueRef, {
+        result,
+        executionContext,
+        refs: [
+          { kind: "artifact", key: artifactValue },
+          { kind: "receipt", key: receipt.id }
+        ],
+        participantId: subject.participantId,
+        activationId: subject.activationId,
+        sessionId: subject.piSessionId
+      });
+      emit("settlement_result_published", { entry: entry.entryId, receipt: receipt.id });
+      const published = {
+        ...record2,
+        receiptId: receipt.id,
+        journalEntryId: entry.entryId,
+        artifactRef: artifactValue,
+        publication: { state: "published", attempts: (record2.publication?.attempts ?? 0) + 1, updatedAt: now }
+      };
+      try {
+        store.save(published);
+      } catch {}
+      return {
+        storedRef,
+        receiptId: receipt.id,
+        artifactValue,
+        journalEntryId: entry.entryId,
+        publicationState: "published"
+      };
+    } catch (error) {
+      const note = error instanceof Error ? error.message : String(error);
+      saveState(store, record2, "pending", note, {
+        ...allocatedReceiptId ? { receiptId: allocatedReceiptId } : {},
+        ...allocatedArtifactRef ? { artifactRef: allocatedArtifactRef } : {}
+      });
+      emit("settlement_degraded", { note, ...allocatedReceiptId ? { partial_receipt: allocatedReceiptId } : {} });
+      return { storedRef, degraded: note, publicationState: "pending" };
     }
-    const result = buildBoundedResult({
-      output: opts.output,
-      valid: opts.validation.valid,
-      errors: opts.validation.errors,
-      artifactRefs: [artifactValue],
-      receiptRefs: [receipt.id],
-      provenanceRefs: [subject.executionBindingId, receipt.id]
-    });
-    const entry = boundary.appendResult(subject.issueRef, {
-      result,
-      executionContext,
-      refs: [
-        { kind: "artifact", key: artifactValue },
-        { kind: "receipt", key: receipt.id }
-      ],
-      participantId: subject.participantId,
-      activationId: subject.activationId,
-      sessionId: subject.piSessionId
-    });
-    emit("settlement_result_published", { entry: entry.entryId, receipt: receipt.id });
-    const published = {
-      ...record2,
-      receiptId: receipt.id,
-      journalEntryId: entry.entryId,
-      artifactRef: artifactValue,
-      publication: { state: "published", attempts: (record2.publication?.attempts ?? 0) + 1, updatedAt: now }
-    };
-    try {
-      store.save(published);
-    } catch {}
-    return {
-      storedRef,
-      receiptId: receipt.id,
-      artifactValue,
-      journalEntryId: entry.entryId,
-      publicationState: "published"
-    };
-  } catch (error) {
-    const note = error instanceof Error ? error.message : String(error);
-    saveState(store, record2, "pending", note, {
-      ...allocatedReceiptId ? { receiptId: allocatedReceiptId } : {},
-      ...allocatedArtifactRef ? { artifactRef: allocatedArtifactRef } : {}
-    });
-    emit("settlement_degraded", { note, ...allocatedReceiptId ? { partial_receipt: allocatedReceiptId } : {} });
-    return { storedRef, degraded: note, publicationState: "pending" };
+  };
+  const guarded = withSettlementExclusion({ repositoryRoot: subject.repositoryRoot, activationId: subject.activationId, attemptId: subject.attemptId }, publishNow);
+  if (!guarded.ok) {
+    saveState(store, record2, "pending", guarded.reason);
+    emit("settlement_degraded", { note: guarded.reason, contended: true });
+    return { storedRef, degraded: guarded.reason, publicationState: "pending" };
   }
+  return guarded.value;
 }
-function saveState(store, record2, state, note, links = {}) {
+function saveState(store, record2, state, note, links = {}, refusal2) {
   try {
     const existing = store.get(record2.activationId, record2.attemptId) ?? record2;
     store.save({
       ...existing,
       ...links,
-      publication: { state, note, attempts: (existing.publication?.attempts ?? 0) + 1, updatedAt: Date.now() }
+      publication: {
+        state,
+        note,
+        ...refusal2 ? { refusal: refusal2 } : {},
+        attempts: (existing.publication?.attempts ?? 0) + 1,
+        updatedAt: Date.now()
+      }
     });
   } catch {}
 }
@@ -22409,6 +22528,9 @@ function safeSegment(id) {
   if (!safe || safe === "." || safe === "..")
     throw new Error(`unusable settlement id: ${id}`);
   return safe;
+}
+function isRuntimeRefused(record2) {
+  return publicationStateOf(record2) === "refused" && record2.publication?.refusal === "runtime_lacks_settlement_surface";
 }
 function isPendingPublication(record2) {
   return publicationStateOf(record2) === "pending";
@@ -22453,6 +22575,9 @@ function createFileSettlementStore(root) {
     },
     listPendingPublication() {
       return readAll().filter(isPendingPublication).sort((a, b) => a.completedAt - b.completedAt);
+    },
+    listRuntimeRefused() {
+      return readAll().filter(isRuntimeRefused).sort((a, b) => a.completedAt - b.completedAt);
     }
   };
   function readAll() {
@@ -22555,6 +22680,129 @@ function resolveDeclaredExtensionSources(sources, env = defaultExtensionSourceRe
   }
   return { local, skipped };
 }
+var EXTENSION_CLASS_SOURCES = new Set(["cli", "extension", "package", "custom"]);
+var BUILTIN_TOOL_SOURCES = new Set(["builtin", "sdk"]);
+var EMPTY_DISCOVERY = {
+  pinned: [],
+  refusedCollisions: [],
+  refusedProvenance: [],
+  discoveredRaw: [],
+  builtinNames: []
+};
+function uniqueOrderedNames(values) {
+  const seen = new Set;
+  const ordered = [];
+  for (const value of values) {
+    if (seen.has(value))
+      continue;
+    seen.add(value);
+    ordered.push(value);
+  }
+  return ordered;
+}
+function provenanceOf(entry) {
+  return entry.sourceInfo?.source ?? entry.source ?? "";
+}
+async function enumerateBuiltinToolNames(input) {
+  const loader = new input.sdk.DefaultResourceLoader({
+    cwd: input.cwd,
+    agentDir: input.agentDir,
+    noSkills: true,
+    additionalSkillPaths: [],
+    noExtensions: true,
+    additionalExtensionPaths: [],
+    noContextFiles: true,
+    noPromptTemplates: true,
+    noThemes: true
+  });
+  await loader.reload();
+  const created = await input.sdk.createAgentSession({
+    resourceLoader: loader,
+    model: input.model,
+    cwd: input.cwd,
+    systemPrompt: "builtin-enumeration (never prompted)"
+  });
+  try {
+    const all = created.session.getAllTools?.() ?? [];
+    return uniqueOrderedNames(all.filter((entry) => BUILTIN_TOOL_SOURCES.has(provenanceOf(entry))).map((entry) => entry.name));
+  } finally {
+    try {
+      created.session.dispose();
+    } catch {}
+  }
+}
+async function discoverDynamicExtensionTools(input) {
+  if (input.dynamicExtensions.length === 0)
+    return EMPTY_DISCOVERY;
+  const builtinNames = await enumerateBuiltinToolNames({
+    sdk: input.sdk,
+    cwd: input.cwd,
+    agentDir: input.agentDir,
+    model: input.model
+  });
+  const builtinSet = new Set(builtinNames);
+  const loader = new input.sdk.DefaultResourceLoader({
+    cwd: input.cwd,
+    agentDir: input.sdk.getAgentDir(),
+    noSkills: true,
+    additionalSkillPaths: [],
+    noExtensions: true,
+    additionalExtensionPaths: [...input.dynamicExtensions],
+    noContextFiles: true,
+    noPromptTemplates: true,
+    noThemes: true
+  });
+  await loader.reload();
+  const created = await input.sdk.createAgentSession({
+    resourceLoader: loader,
+    model: input.model,
+    cwd: input.cwd,
+    noTools: "builtin",
+    systemPrompt: "extension-discovery (never prompted)"
+  });
+  try {
+    const discoveredRaw = uniqueOrderedNames(created.session.getActiveToolNames() ?? []);
+    if (discoveredRaw.length === 0) {
+      throw new Error(`extension discovery yielded no tools for ${input.dynamicExtensions.length} enabled source(s); ` + "a declared source that resolves to nothing is a refusal, not a skip");
+    }
+    const discoveryRegistryAvailable = typeof created.session.getAllTools === "function";
+    const registry = discoveryRegistryAvailable ? created.session.getAllTools() : [];
+    const provenance = new Map(registry.map((entry) => [entry.name, provenanceOf(entry)]));
+    if (!discoveryRegistryAvailable) {} else if (builtinNames.length === 0) {
+      throw new Error("cannot establish the builtin baseline registry while the discovery registry is available; " + "refusing rather than pinning names that cannot be checked for collisions");
+    }
+    for (const name of input.reservedNames) {
+      const source = provenance.get(name);
+      if (source !== undefined && !BUILTIN_TOOL_SOURCES.has(source)) {
+        throw new Error(`enabled extension shadows granted tool '${name}' (registry source '${source}'); ` + "refusing rather than running extension code under a trusted name");
+      }
+    }
+    const pinned = [];
+    const refusedCollisions = [];
+    const refusedProvenance = [];
+    for (const name of discoveredRaw) {
+      if (name === ASK_TOOL || name === ESCALATE_TOOL) {
+        refusedProvenance.push(name);
+        continue;
+      }
+      if (builtinSet.has(name)) {
+        refusedCollisions.push(name);
+        continue;
+      }
+      const source = provenance.get(name) ?? "";
+      if (!EXTENSION_CLASS_SOURCES.has(source)) {
+        refusedProvenance.push(name);
+        continue;
+      }
+      pinned.push(name);
+    }
+    return { pinned, refusedCollisions, refusedProvenance, discoveredRaw, builtinNames };
+  } finally {
+    try {
+      created.session.dispose();
+    } catch {}
+  }
+}
 function resolveWorkspace(cwd) {
   return { repositoryRoot: cwd, worktreePath: cwd };
 }
@@ -22604,7 +22852,7 @@ class NativeActivationHost {
     this.env = deps.env ?? process.env;
   }
   async start(request) {
-    const activationId = `act:${randomUUID3().slice(0, 12)}`;
+    const activationId = `act:${randomUUID4().slice(0, 12)}`;
     const attemptId = `att:${activationId.slice(4)}:1`;
     const participantId = `specialist::${request.specialist}`;
     const emit = (name, payload) => this.forensics.emit({
@@ -22751,13 +22999,6 @@ class NativeActivationHost {
     if (!toolContract || toolContract.toolsList.length === 0) {
       return reject("empty_tool_contract", { tier });
     }
-    try {
-      this.admission(specialist, tier, toolContract);
-    } catch (error) {
-      return reject("preflight_failed", {
-        note: error instanceof Error ? error.message : String(error)
-      });
-    }
     const preScripts = specialist.specialist.skills?.scripts?.filter((s) => s.phase === "pre") ?? [];
     const preScriptResults = preScripts.map((script) => runScript(script.run ?? script.path, this.cwd));
     const requiredPreFailure = findRequiredPreScriptFailure(preScripts, preScriptResults);
@@ -22808,6 +23049,56 @@ class NativeActivationHost {
       });
     }
     const resolvedModel = modelCheck.resolvedModel ?? modelChain[modelIndex] ?? requestedModel;
+    const curatedExtensions = resolveCuratedExtensionPaths({
+      permissionLevel: tier,
+      resolvedToolContract: toolContract
+    });
+    const declaredExtensions = extensionSelection.extensionSources;
+    const { local: declaredLocalExtensions, skipped: skippedDeclaredSources } = resolveDeclaredExtensionSources(declaredExtensions);
+    for (const source of skippedDeclaredSources) {
+      process.stderr.write(`[specialists] native activation: extension source '${source}' is not a filesystem path; ` + `the in-process resource loader cannot load it, so it is not injected.
+`);
+    }
+    const { kept: dynamicExtensions, dropped: droppedExtensions } = deduplicateExtensionSources(curatedExtensions.dedupeAgainstDynamic, declaredLocalExtensions);
+    for (const { dropped, keptAs } of droppedExtensions) {
+      process.stderr.write(`[python-kernel] DEDUP: skipping duplicate extension source '${dropped}' (same as '${keptAs}'; kept '${keptAs}').
+`);
+    }
+    let discovery;
+    try {
+      discovery = await discoverDynamicExtensionTools({
+        sdk,
+        cwd: workspace.worktreePath,
+        agentDir: sdk.getAgentDir(),
+        dynamicExtensions,
+        model: modelCheck.model,
+        reservedNames: [...toolContract.nativeTools, ...toolContract.extensionTools, ASK_TOOL, ESCALATE_TOOL]
+      });
+    } catch (error) {
+      const note = error instanceof Error ? error.message : String(error);
+      if (note.includes("shadows granted tool")) {
+        return reject("extension_tool_shadowed", { note });
+      }
+      return reject("extension_discovery_failed", { note });
+    }
+    const effectiveToolContract = withDiscoveredExtensionTools(toolContract, {
+      pinned: discovery.pinned,
+      refusedCollisions: discovery.refusedCollisions,
+      refusedProvenance: discovery.refusedProvenance
+    });
+    if (discovery.refusedCollisions.length > 0 || discovery.refusedProvenance.length > 0) {
+      emit("extension_tools_refused", {
+        refused_collisions: discovery.refusedCollisions.join(",") || null,
+        refused_provenance: discovery.refusedProvenance.join(",") || null,
+        pinned: discovery.pinned.join(",") || null
+      });
+    }
+    if (discovery.pinned.length > 0) {
+      emit("extension_tools_discovered", {
+        pinned: discovery.pinned.join(","),
+        sources: dynamicExtensions.join(",")
+      });
+    }
     if (access === "write") {
       try {
         acquire({ workspace, activationId, attemptId, specialist: request.specialist });
@@ -22858,19 +23149,6 @@ class NativeActivationHost {
       validation: stepContract.validation?.length ?? 0,
       source_issue_revision: stepContract.provenance.sourceIssueRevision ?? null
     });
-    emit("activation_admitted", {
-      tier,
-      access,
-      configured_model: configuredModel ?? null,
-      requested_model: requestedModel,
-      resolved_model: resolvedModel,
-      model_override: Boolean(request.modelOverride),
-      thinking_level: thinkingLevel ?? null,
-      thinking_override: request.thinkingOverride !== undefined,
-      workspace: workspace.worktreePath,
-      tools: toolContract.toolsList.join(","),
-      custom_tools: `${ASK_TOOL},${ESCALATE_TOOL}`
-    });
     const epicAncestors = workItems.epicAncestors(issueRef, request.epicContextDepth ?? 0);
     const completedBlockers = workItems.completedBlockers(issueRef, 1);
     const isReviewer = specialist.specialist.metadata.name === "reviewer";
@@ -22884,7 +23162,7 @@ class NativeActivationHost {
       completedBlockers: completedBlockers.map(workAncestorAsRecord),
       preScriptOutput,
       variables: {
-        resolved_tool_contract: formatResolvedToolContract(toolContract)
+        resolved_tool_contract: formatResolvedToolContract(effectiveToolContract)
       },
       ...isReviewer ? {
         appendExecutionContext: createReviewerDiffAppendHook((message) => process.stderr.write(`${message}
@@ -22937,6 +23215,26 @@ class NativeActivationHost {
         }
       }
     });
+    try {
+      this.admission(specialist, tier, effectiveToolContract);
+    } catch (error) {
+      return reject("preflight_failed", {
+        note: error instanceof Error ? error.message : String(error)
+      });
+    }
+    emit("activation_admitted", {
+      tier,
+      access,
+      configured_model: configuredModel ?? null,
+      requested_model: requestedModel,
+      resolved_model: resolvedModel,
+      model_override: Boolean(request.modelOverride),
+      thinking_level: thinkingLevel ?? null,
+      thinking_override: request.thinkingOverride !== undefined,
+      workspace: workspace.worktreePath,
+      tools: effectiveToolContract.toolsList.join(","),
+      custom_tools: `${ASK_TOOL},${ESCALATE_TOOL}`
+    });
     emit("activation_starting", { pi_session_id: null });
     const askTools = createAskTools(sdk, {
       transport: this.interactions,
@@ -22962,7 +23260,7 @@ class NativeActivationHost {
       }
     });
     const guardedTools = createGuardedTools(sdk, {
-      toolNames: toolContract.toolsList,
+      toolNames: effectiveToolContract.toolsList,
       cwd: workspace.worktreePath,
       admit: (toolName) => admitToolCall({ toolName, workspace, activationId })
     });
@@ -22974,21 +23272,6 @@ class NativeActivationHost {
       return reject("unguardable_mutating_tools", {
         note: `these tools mutate and cannot be fenced by the workspace lease on this runtime: ${guardedTools.unguardable.join(", ")}`
       });
-    }
-    const curatedExtensions = resolveCuratedExtensionPaths({
-      permissionLevel: tier,
-      resolvedToolContract: toolContract
-    });
-    const declaredExtensions = extensionSelection.extensionSources;
-    const { local: declaredLocalExtensions, skipped: skippedDeclaredSources } = resolveDeclaredExtensionSources(declaredExtensions);
-    for (const source of skippedDeclaredSources) {
-      process.stderr.write(`[specialists] native activation: extension source '${source}' is not a filesystem path; ` + `the in-process resource loader cannot load it, so it is not injected.
-`);
-    }
-    const { kept: dynamicExtensions, dropped: droppedExtensions } = deduplicateExtensionSources(curatedExtensions.dedupeAgainstDynamic, declaredLocalExtensions);
-    for (const { dropped, keptAs } of droppedExtensions) {
-      process.stderr.write(`[python-kernel] DEDUP: skipping duplicate extension source '${dropped}' (same as '${keptAs}'; kept '${keptAs}').
-`);
     }
     const resourceLoader = createActivationResourceLoader(sdk, {
       cwd: workspace.worktreePath,
@@ -23003,10 +23286,10 @@ class NativeActivationHost {
       model: modelCheck.model,
       ...thinkingLevel ? { thinkingLevel } : {},
       noTools: "builtin",
-      tools: [...toolContract.toolsList, ASK_TOOL, ESCALATE_TOOL],
+      tools: [...effectiveToolContract.toolsList, ASK_TOOL, ESCALATE_TOOL],
       systemPrompt: systemPrompt.text
     };
-    const PROMISED_TOOLS = [...toolContract.toolsList];
+    const PROMISED_TOOLS = [...effectiveToolContract.toolsList];
     const missingPromisedTools = (candidate) => {
       const active = new Set(candidate.getActiveToolNames());
       return PROMISED_TOOLS.filter((tool) => !active.has(tool));
@@ -23056,7 +23339,7 @@ class NativeActivationHost {
     const createSessionForModel = (model) => createVerifiedSession(model, { viaFallback: true });
     const purpose = purposeExcerptFromContract(view.contract);
     const startedAt = this.now();
-    const toolContractNotes = [...new Set([...toolContract.warnings, ...toolContract.downgradeReasons])];
+    const toolContractNotes = [...new Set([...effectiveToolContract.warnings, ...effectiveToolContract.downgradeReasons])];
     const configNotes = legacyOnlyConfigNotes(specialist.specialist);
     const snapshot = {
       activationId,
@@ -24039,7 +24322,7 @@ var specialistRetrySchema = objectType({
   prompt: stringType().optional().describe("Replacement turn prompt. Defaults to the dispatch-time render of the same Issue.")
 });
 // src/activation/async-events.ts
-import { randomUUID as randomUUID4 } from "node:crypto";
+import { randomUUID as randomUUID5 } from "node:crypto";
 class ResultNotValidatedError extends Error {
   activationId;
   constructor(activationId) {
@@ -24059,7 +24342,7 @@ class RuntimeEventPusher {
   constructor(options) {
     this.adapter = options.adapter;
     this.now = options.now ?? (() => Date.now());
-    this.newMessageId = options.newMessageId ?? (() => `msg:${randomUUID4().slice(0, 12)}`);
+    this.newMessageId = options.newMessageId ?? (() => `msg:${randomUUID5().slice(0, 12)}`);
     this.onPush = options.onPush;
   }
   track(activationId, route) {
