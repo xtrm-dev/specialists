@@ -140,7 +140,7 @@ Every row uses exactly these columns:
 | CAP-CLI-001 | Run a Specialist to completion in the foreground, streaming output | `sp run <name> --prompt/--bead` | `cli/run.ts:1654` → `specialist/launch.ts:64,71` | `jobs/<id>/{status,result,events}` | `run_start`, `run_complete` | `NativeActivationHost.start` (`native-host.ts:506`) — **no CLI path exists** | native is always async-return; no streaming foreground surface | Specialists-CLI | ADAPTER_NEEDED | **CRITICAL** — the primary verb | DX-EXEC-001, DX-CLI-001 | `cli/run.ts` (blocked) | NATIVE_GAP |
 | CAP-CLI-002 | Detached background dispatch with one launch line | `sp run --background` | `cli/run.ts:1724-1877` | `jobs/latest` | `specialists.background_launch.v1` | none — host is in-process | no native background mechanism | Core | MOVE_TO_CORE | **HIGH** — tmux/agent-pane dispatch form | DX-CLI-002 | none yet | NATIVE_GAP |
 | CAP-CLI-003 | Ask a specialist a quick question in chat | `sp chat` | `cli/chat.ts:3,158` | `jobs/**` | run_* | `NativeActivationHost.start` | chat is a streaming UX; native has no streaming frontend | Specialists-CLI | FRONTEND_ONLY | MEDIUM | DX-CLI-004 | `cli/chat*` | ADAPTER_NEEDED |
-| CAP-CLI-004 | Watch live job activity | `sp console`, `sp status`, `sp ps` | `cli/{console,status,ps}`; `console/runtime.ts:958-981` | `jobs/**`, `observability.db` | read-side | Fleet registry (`activation/registry.ts`) — **in-process only** | native state is unreadable cross-process; `ps` native block is empty (C-13) | Specialists-CLI | FRONTEND_ONLY | HIGH | DX-TEL-005, DX-TEL-013 | none | ADAPTER_NEEDED |
+| CAP-CLI-004 | Watch live job activity | `sp console`, `sp status`, `sp ps` | `cli/{console,status,ps}`; `console/runtime.ts:958-981` | `jobs/**`, `observability.db` | read-side | Fleet registry (`activation/registry.ts`) — **in-process only** | native state is unreadable cross-process; the `ps` native block is read from the shared forensic DB by identity, but its enumeration is **row-bounded and can starve older activations** (CAP-TEL-057..064 residual, `unitAI-kmbb9`) | Specialists-CLI | FRONTEND_ONLY | HIGH | DX-TEL-005, DX-TEL-013 | none | ADAPTER_NEEDED |
 | CAP-CLI-005 | Read a job's result | `sp result <job-id>` | `cli/result.ts:342-367` | `jobs/<id>/result.txt`, `specialist_results` | — | `specialist_results` row is written natively (`forensic-sink.ts:219-236`) | **BROKEN for native ids** — `result.ts:93-98` splits on `:`; `act:` ids unreachable | Specialists-CLI | PRESERVE_NATIVE | **CRITICAL** — live defect | DX-ID-001 | none | NATIVE_GAP |
 | CAP-CLI-006 | Stream/stream-back job events | `sp feed`, `sp log`, `sp forensic` | `cli/{feed,log,forensic}` | `observability.db` (**dual-path**) | read-side | same store, same vocabulary | last-known only for native (`feed.ts:489-524` labels it) | Specialists-CLI | FRONTEND_ONLY | MEDIUM | DX-TEL-001/002 | none | PARITY |
 | CAP-CLI-007 | Prometheus metrics + text exposition | `sp metrics` | `cli/metrics.ts:1` → `prometheus-projection.ts` | `observability.db` | 19 metric families | none | 49 `NATIVE_GAP` telemetry rows; 6 families have no producer at all | Specialists-CLI | PRESERVE_NATIVE | HIGH | DX-TEL-010 | none | NATIVE_GAP |
@@ -182,7 +182,27 @@ Every row uses exactly these columns:
 | CAP-TEL-035..040 | Identity/lineage correlation (trace/span/parent/chain) | — | legacy rows | `trace_id`, `span_id`, `chain_id` | chain metrics | native carries **none** | `xtrm_chains_total` label degrades to `"chain"` | Specialists-native | PRESERVE_NATIVE | MEDIUM | DX-TEL-014 (UNCOMPARABLE) | none | NATIVE_GAP |
 | CAP-TEL-041..048 | Forensic event vocabulary (producers vs classifier-only) | `sp forensic` | sink classifier | `specialist_forensic_events` | — | partial | 6 classified names have no producer (matches open bead `unitAI-rrdnt.38`); 6 metric families have no producer at all | Specialists-native | PRESERVE_NATIVE | MEDIUM | NEW | none | NATIVE_GAP |
 | CAP-TEL-049..056 | Retention / pruning policy | `sp clean`, `sp db` | `pruneObservabilityData` | asymmetric: prunes `specialist_events` only | — | none | forensic/metrics/branch tables never pruned | Specialists-native | PRESERVE_NATIVE | MEDIUM | NEW | none | ADAPTER_NEEDED |
-| CAP-TEL-057..064 | `sp ps` native activation projection | `sp ps` | `ps.ts:747` reads `event_family='activation'` | — | — | **no writer** (deleted by `febef0ad`) | block renders empty; header comment stale | Specialists-CLI | FRONTEND_ONLY | HIGH | DX-TEL-013 | `native-activation-summary.ts` (blocked) | NATIVE_GAP |
+| CAP-TEL-057..064 | `sp ps` native activation projection | `sp ps` | `ps.ts:747` reads `eventFamily:'activation'` → **replaced** by `jobIdPrefix:'act:'` + `order:'desc'` (XTRM-93 N2B, `4fbc4a30`) | — | — | **no writer** for `event_family='activation'` (deleted by `febef0ad`) — correctly **no longer read** | stale family no longer read; native rows are found in the **shared** families by `job_id = 'act:<uuid>'` | Specialists-CLI | FRONTEND_ONLY | HIGH | DX-TEL-013 | `native-activation-summary.ts` (**landed** `4fbc4a30`, review-fixed `6113a710`) | **NATIVE_GAP (RESIDUAL — do NOT read as resolved)** — see the row-cap residual below |
+
+**N2B residual — `sp ps` native enumeration is row-bounded, not activation-bounded (keeps this row a `NATIVE_GAP`).**
+The landed N2B fixes are correct and were independent defects: the retired-family read was replaced by an identity
+prefix, `order:'desc'` was restored, `job.status_changed` is now payload-aware (`waiting` no longer flattens to
+`settled`), failure names no longer map to `active`, and the counts are labelled as window counts. **Those fixes do
+not bound the enumeration defect.** `ps.ts:749` still passes a global `limit: 1000`, and that limit applies to raw
+event **rows**, not to activation ids, so:
+
+| Measure (real shared DB, `<git-common-root>/.specialists/db/observability.db`) | Value |
+|---|---|
+| distinct activations inside the global `ORDER BY t DESC, seq DESC, id DESC LIMIT 1000` window | **1** (`act:9aeabf76-262`, 1000 rows) |
+| distinct `act:` ids that actually have rows | **249** |
+| rows in just the newest 3 activations | 1591 + 765 + 2006 = **4362** |
+
+`latest 1000 events != latest N activations`, and a high-event activation crowds others out entirely. The decisive
+evidence that this is row-density rather than data: the **same command returned 3 activations earlier in this session
+and 1 now**. An operator cannot distinguish a quiet system from a hidden one. Tracked as **`unitAI-kmbb9`** (P1);
+the correct fix is an activation-oriented projection whose limit applies to activation ids (newest N by `MAX(t)`,
+then each activation's own window). XTRM-93 reconciliation chose **option B**: defect left open, capability **not**
+recorded as parity. |
 | CAP-ID-001 | Job identity survives the cutover | `sp result/feed/ps/stop/...` | `[0-9a-f]{6}` (`supervisor.ts:1437`) | `jobs/<id>/**` | `job_id` column | `act:[0-9a-f]{12}` + `att:…:N` (`native-host.ts:507-508`) | **disjoint by construction; no alias, no resolver exists**; `types.ts:19-20`'s "maps to job_id" is a comment, not a mechanism | Specialists-native | ADAPTER_NEEDED | **CRITICAL** | DX-ID-001 | none | NATIVE_GAP |
 | CAP-ID-002 | Attempt identity (retry/resume continuity) | `sp retry/resume` | none — legacy retry mints a new job | — | `attempt_no` (0 for legacy rows) | `attemptId`, advances in place (`registry.ts:81-88`) | no legacy counterpart; `attempt_no=0` must never be aggregated as identity | Specialists-native | PRESERVE_NATIVE | HIGH | DX-ID-004 | none | ADAPTER_NEEDED |
 | CAP-ID-003 | Durable store anchoring | all | git common root (`job-root.ts:34-37`) | `.specialists/jobs` | — | `process.cwd()` (`native-host.ts:494`) | **three stores, two anchors** (corrected): jobs + `observability.db` are both base-root/shared (`observability-db.ts:80-94`, or `$XDG_DATA_HOME/specialists/`), settlements are per-worktree. Native forensic rows and native settlement state therefore land in **different stores**; see consequence #7 | Specialists-native | PRESERVE_NATIVE | HIGH | DX-ID-011 | none | ADAPTER_NEEDED |
@@ -274,10 +294,11 @@ they change the cutover plan.
    naming `xtrm-tools core` as the out-of-tree consumer that "shells out to this verb" because it
    "carries no sqlite dependency". These are byte-compatibility surfaces.
 
-4. **`sp ps`'s native-activation block is an orphaned reader of a deleted telemetry family
-   (Lane C blocker C-13, provenance now resolved).** `src/cli/ps.ts:747` queries
+4. **`sp ps`'s native-activation block was an orphaned reader of a deleted telemetry family
+   (Lane C blocker C-13, provenance now resolved). — RESOLVED BY N2B, with a residual.**
+   *Historical record (true at audit time):* `src/cli/ps.ts:747` queried
    `readForensicEvents({ eventFamily: 'activation' })`, and `src/specialist/native-activation-summary.ts:6`
-   justifies it as *"the forensic trail in specialist_forensic_events (event_family='activation'),
+   justified it as *"the forensic trail in specialist_forensic_events (event_family='activation'),
    written since unitAI-rrdnt.37.1.1"*. **Nothing in `src/` writes that family today.**
    Commit `febef0ad` (**unitAI-rrdnt.20**) deleted it on purpose, stating in its message:
    *"The activation.* parallel vocabulary is gone; one bead query answers both runtimes"* — that
@@ -285,11 +306,13 @@ they change the cutover plan.
    project onto the **legacy** timeline vocabulary through `mapNativeLifecycleEvent`
    (`src/specialist/native-activation-observability.ts:236-305`) and land in families derived from
    the timeline event type (`run_start`, `status_change`, `run_complete`, `control_signal`, …).
-   Net effect: **the `sp ps` native block renders empty, and the header comment in
-   `native-activation-summary.ts` is stale.** This resolves Lane C's U-1 in the in-tree direction:
-   the producer was in this repo and was deliberately removed; an out-of-tree producer is no longer
-   required to explain the observation, though it is not positively ruled out. This is both a
-   **telemetry-parity blocker** and a **live production defect** in its own right (recorded, not
+   *Correction (this pass):* the claim that the block **renders empty** was wrong — see item 3 below.
+   **N2B fixed the reader** (`4fbc4a30`, review-fixed `6113a710`): the retired-family read became an
+   identity prefix (`jobIdPrefix:'act:'`) with `order:'desc'`, and the stale header comment was
+   corrected. **What remains open** is that the enumeration limit applies to event rows rather than
+   activation ids, so older activations can starve — see the `CAP-TEL-057..064` residual and
+   `unitAI-kmbb9`. This is still both a **telemetry-parity** item and a **live production defect**
+   (recorded, not
    fixed, per the audit's no-opportunistic-fix rule).
 
    **Confirmed against the canonical database at cutover-prep time, and the finding is sharper than
@@ -591,8 +614,9 @@ populations so the gate is applied to the right one.
   reuse → **`KEEP_COMPAT`**, not `DELETE_AFTER_CUTOVER`. This resolves the row; it does not delete it.
 - **Resolved by the coordinator:** Lane C U-1 (out-of-tree producer of `event_family='activation'`).
   Commit `febef0ad` (unitAI-rrdnt.20) deleted the in-tree writer deliberately. An out-of-tree
-  producer is not required to explain the empty `sp ps` block, though it is not positively excluded
-  — it is folded into G-2.
+  producer is not required to explain the `sp ps` block, though it is not positively excluded
+  — it is folded into G-2. (The block was never empty; see the item 3 correction. Its content is
+  a stale-then-starved sample of the **shared** families, not the retired `activation` family.)
 - **Informational:** Lane A (10), B (7), C (8), D (7), E (7), F (7), J (10) each list their own
   open questions in their artifacts. They do not decide a capability's status and do not block GO
   individually; the ones that do are promoted to §7.1.
