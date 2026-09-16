@@ -192,4 +192,54 @@ describe('resolved tool contract', () => {
     expect(contract.preferenceSignals).toEqual(['soft deny prefers extension tools for: grep,find,ls']);
     expect(formatResolvedToolContract(contract)).toContain('preference signals: soft deny prefers extension tools for: grep,find,ls');
   });
+
+  // SPECIALISTS-88: the rendered contract must name the mechanism of the path that PRINTS it.
+  // The native activation runtime does not load the tool-policy gate at all (native-host.ts
+  // states that outright, and probe variants C/D measured it: injecting the gate, and ordering
+  // it first, both left the tool list clipped). Naming the gate on that path sends an operator
+  // who is chasing a missing tool to a mechanism and an env channel that are not there.
+  it('names the native admission mechanism on the native path, never the legacy gate (SPECIALISTS-88)', () => {
+    const contract = buildResolvedToolContract({
+      tier: 'READ_ONLY',
+      catalogs,
+      extensionSources: ['npm:pi-ast-grep'],
+    });
+    expect(contract.exposedExtensionSources).toEqual(['npm:pi-ast-grep']);
+
+    const native = formatResolvedToolContract(contract, 'discover-then-pin');
+    expect(native).toContain('discover-then-pin');
+    expect(native).toContain('npm:pi-ast-grep');
+    // The mutation guard, and the reason it is written as a negative: reverting this wording to
+    // the gate claim must FAIL here. A test that only pins the new string would keep passing if
+    // the line regressed to the misattribution this issue exists to remove.
+    expect(native).not.toContain('tool-policy gate');
+    // Likewise the over-promise that made the pre-fix line a lie: the line must not claim every
+    // registered tool is available. What was actually admitted is on the 'active extension tools'
+    // line, which is rendered from the finalised contract.
+    expect(native).not.toContain('all registered tools available');
+  });
+
+  it('keeps the gate wording for callers that still load the gate (SPECIALISTS-88)', () => {
+    const contract = buildResolvedToolContract({
+      tier: 'READ_ONLY',
+      catalogs,
+      extensionSources: ['npm:pi-ast-grep'],
+    });
+    // Default is the legacy mechanism on purpose: runner.ts, script-runner.ts and
+    // resolution-diagnostics.ts render through the gate and must keep saying so.
+    const legacy = formatResolvedToolContract(contract);
+    expect(legacy).toContain('tool-policy gate');
+    expect(legacy).not.toContain('discover-then-pin');
+  });
+
+  it('renders no exposed-sources line when no source is enabled, on either mechanism (SPECIALISTS-88)', () => {
+    const contract = buildResolvedToolContract({ tier: 'READ_ONLY', catalogs });
+    expect(contract.exposedExtensionSources).toEqual([]);
+    for (const admission of ['tool-policy-gate', 'discover-then-pin'] as const) {
+      const rendered = formatResolvedToolContract(contract, admission);
+      expect(rendered).not.toContain('exposed extension sources');
+      expect(rendered).not.toContain('tool-policy gate');
+      expect(rendered).not.toContain('discover-then-pin');
+    }
+  });
 });

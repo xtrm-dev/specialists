@@ -1401,7 +1401,7 @@ export class NativeActivationHost {
       // prompt and the enforced gate cannot disagree: a child never holds more than the
       // contract it was shown (unitAI-1pqtl.2).
       variables: {
-        resolved_tool_contract: formatResolvedToolContract(effectiveToolContract),
+        resolved_tool_contract: formatResolvedToolContract(effectiveToolContract, 'discover-then-pin'),
       },
       // Reviewer diff context is EXECUTION-ONLY, so it enters through the hook rather than
       // the pure renderer — and it must land before the prompt hash, exactly as it does on

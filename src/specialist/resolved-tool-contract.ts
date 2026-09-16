@@ -24,10 +24,13 @@ export interface ResolvedToolContract {
   effectiveTier: ToolTier;
   toolsFlag: string;
   /** Extension sources enabled via `execution.extensions[source] === true`.
-   *  When non-empty the spawn loads the Specialists tool-policy extension
-   *  LAST and gates the session on `--no-builtin-tools`: the policy extension
-   *  re-activates the tier's native tools (bounded env channel) plus every
-   *  tool registered by these sources. Native restrictions stay fail-closed. */
+   *  HOW these sources' tools reach the session is runtime-specific and is NOT one
+   *  mechanism (SPECIALISTS-88): the legacy spawn path loads the Specialists
+   *  tool-policy extension LAST and gates on `--no-builtin-tools`, while the native
+   *  activation runtime does not load that gate at all and instead pins discovered
+   *  names into pi's hard `tools` allowlist. See `ExtensionAdmissionMechanism`;
+   *  renderers must name the mechanism of the path that prints them. Either way the
+   *  tier's native restrictions stay fail-closed. */
   exposedExtensionSources: readonly string[];
   toolsList: readonly string[];
   nativeTools: readonly string[];
@@ -42,10 +45,12 @@ export interface ResolvedToolContract {
 
 interface BuildResolvedToolContractInput extends ResolverInput {
   extensionPackages?: Partial<Record<ToolCatalogName, ExtensionPackageRuntime>>;
-  /** Enabled extension sources (execution.extensions[source] === true) that
-   *  switch the session to the tool-policy gate: --no-builtin-tools plus the
-   *  Specialists-owned policy extension selecting the granted natives and
-   *  all extension-registered tools at session start. */
+  /** Enabled extension sources (execution.extensions[source] === true). On the legacy
+   *  spawn path these switch the session to the tool-policy gate:
+   *  --no-builtin-tools plus the Specialists-owned policy extension selecting the
+   *  granted natives and all extension-registered tools at session start. On the
+   *  native activation path the gate is not loaded; these sources are resolved and
+   *  discovered, and their names are pinned into the `tools` allowlist instead. */
   extensionSources?: readonly string[];
 }
 
@@ -192,13 +197,40 @@ export function withDiscoveredExtensionTools(
   };
 }
 
-export function formatResolvedToolContract(contract: ResolvedToolContract): string {
+/**
+ * Which mechanism admits an enabled source's tools to the session the rendered contract
+ * describes. The two runtimes do NOT share one, and naming the wrong one is a defect rather
+ * than a cosmetic slip: an operator debugging a missing tool follows the mechanism back to
+ * its env channel and its load order, so a prompt that names the tool-policy gate on the
+ * native path sends them to a gate that is not loaded there (SPECIALISTS-88).
+ *
+ *  - `tool-policy-gate`  — the legacy spawn path: the Specialists tool-policy extension is
+ *    loaded LAST and the session is gated on `--no-builtin-tools` (unitAI-34pyf).
+ *  - `discover-then-pin` — the native activation runtime: the gate is NOT loaded; enabled
+ *    extension tools are discovered in a fenced session and pinned into pi's hard `tools`
+ *    allowlist before the prompt is rendered (unitAI-1pqtl.2).
+ *
+ * The default is the legacy mechanism so every existing caller renders exactly what it
+ * rendered before; a caller that runs the native runtime must pass its own mechanism.
+ */
+export type ExtensionAdmissionMechanism = 'tool-policy-gate' | 'discover-then-pin';
+
+function describeAdmission(admission: ExtensionAdmissionMechanism): string {
+  return admission === 'discover-then-pin'
+    ? `registered tools admitted by discover-then-pin into this session's tool allowlist`
+    : 'registered tools admitted by the tool-policy gate';
+}
+
+export function formatResolvedToolContract(
+  contract: ResolvedToolContract,
+  admission: ExtensionAdmissionMechanism = 'tool-policy-gate',
+): string {
   const lines = [
     '## Resolved Tool Contract',
     `- effective tier: ${contract.effectiveTier}`,
     `- --tools: ${contract.toolsFlag || '(none)'}`,
     ...(contract.exposedExtensionSources.length > 0
-      ? [`- exposed extension sources (all registered tools available via tool-policy gate): ${formatList(contract.exposedExtensionSources)}`]
+      ? [`- exposed extension sources (${describeAdmission(admission)}): ${formatList(contract.exposedExtensionSources)}`]
       : []),
     `- actual native tools: ${formatList(contract.nativeTools)}`,
     `- active extension tools: ${formatList(contract.extensionTools)}`,
