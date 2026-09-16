@@ -24,13 +24,18 @@ forbids.
 What is local to THIS plugin, and therefore stated here:
 
 - A tool result is evidence, not a decision. A dispatch admission is not a result.
-- **`XTRM_SUBSTRATE_DIR` must be set in the session environment, or dispatch does not work
-  at all.** It points at a `@jaggerxtrm/substrate` checkout, which supplies the work-item store
-  that holds the contract. Without it `specialist_dispatch` is refused before any model turn
-  with `work_item_store_unavailable`; the read tools (`specialist_status`, `specialist_list`)
-  keep working, so the surface looks healthy right up until you try to dispatch. It has to be
-  exported into the environment the session was launched with — a value exported after launch
-  does not reach the already-running MCP server.
+- **Dispatch needs the Substrate work store, which supplies the contract.** It is resolved
+  without an environment variable, in this order: an explicit `XTRM_SUBSTRATE_DIR`, then normal
+  module resolution of the installed `@jaggerxtrm/substrate`, then the npm global prefix. Set
+  `XTRM_SUBSTRATE_DIR` only to override that with a local checkout.
+  This paragraph previously said `XTRM_SUBSTRATE_DIR` "must be set ... or dispatch does not
+  work at all". That is false, and it is the kind of false instruction that gets a coordinator
+  to export a path it does not need (README.md documents module resolution as sufficient).
+  What IS true: if none of the three sources resolves, `specialist_dispatch` is refused before
+  any model turn with `work_item_store_unavailable`, while `specialist_status` and
+  `specialist_list` keep working — so the surface looks healthy right up until you dispatch.
+  And an override must be in the environment the session was LAUNCHED with; a value exported
+  afterwards does not reach the already-running MCP server.
 - The store this plugin reads is resolved from `SUBSTRATE_DB`, else `XTRM_STATE_DB`, else
   `~/.xtrm/state.db`. `SUBSTRATE_DB` comes first because the store belongs to Substrate,
   which defines that variable and shares the file with sb and Pi; `XTRM_STATE_DB` is this

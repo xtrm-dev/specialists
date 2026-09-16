@@ -1,5 +1,51 @@
 import type { DatabaseSync } from 'node:sqlite';
 /**
+ * Where Substrate lives, in precedence order: an explicit checkout, then normal
+ * module resolution, then nowhere.
+ *
+ * The explicit path wins deliberately. A developer who points
+ * XTRM_SUBSTRATE_DIR at a working tree means it, and an installed copy silently
+ * shadowing that checkout would make local Substrate changes untestable from
+ * here — the exact confusion the variable exists to avoid.
+ *
+ * Module resolution is what makes the plugin work for someone who installed it
+ * from npm and has never heard of the Substrate repository. Before it existed,
+ * dispatch was unavailable to every such user (XTRM-267).
+ */
+/**
+ * Where Substrate lives, in precedence order: an explicit checkout, then an injected or
+ * installed resolution, then normal module resolution, then nowhere.
+ *
+ * `resolveInstalled` is the overridable-for-testing seam (unitAI-7co1i, landed on master as
+ * PR #349): a test can STATE "nothing is installed" instead of depending on the machine not
+ * having the package. It defaults to the real module resolution below and is never supplied in
+ * production. SPECIALISTS-24 fixed the same defect independently with an equivalent seam under
+ * a different name; that duplicate was dropped when this branch merged master, so exactly one
+ * seam remains.
+ *
+ * MEASURED (closeout §3), because the answer is counter-intuitive and it decides the install
+ * contract. Typical module resolution is NOT sufficient for the XTRM-managed layout:
+ *
+ *   - Core's `xt init` enrolls Substrate with `npm install --global <checkout>`. On npm 7+ a
+ *     folder install is a SYMLINK, so `<prefix>/lib/node_modules/@jaggerxtrm/substrate` points at
+ *     the checkout and `<prefix>/lib/node_modules/@jaggerxtrm/specialists` points at the
+ *     Specialists checkout.
+ *   - Default resolution dereferences the Specialists symlink and walks the ancestors of the
+ *     CHECKOUT, not of the prefix. Measured on a synthetic prefix with a symlinked Specialists
+ *     checkout that carries no local Substrate: plain `require.resolve` FAILS under node. (Under
+ *     bun it appeared to succeed, but resolved Bun's own install cache, which is an artifact of
+ *     this machine and not the npm global layout.)
+ *   - A TARBALL/registry global install is a real directory and DOES resolve by the ancestor walk,
+ *     which is why the failure is invisible to anyone whose Specialists install is not a folder
+ *     link — the exact shape Core produces.
+ *
+ * So the npm prefix is tried explicitly as a FALLBACK, after normal resolution, via
+ * `resolve(spec, { paths: [<prefix>/lib] })` — measured to find the real checkout behind the
+ * global symlink under BOTH node and bun where plain resolution failed. Precedence is unchanged:
+ * an explicit checkout, then the injected seam, then ordinary resolution, then the prefix.
+ */
+export declare function resolveSubstrateDir(explicit: string, resolveInstalled?: () => string | null): string | null;
+/**
  * Substrate installed under an npm-style global prefix, which the ancestor walk cannot reach
  * through a symlinked Specialists install. See the measurement note on `resolveSubstrateDir`.
  *

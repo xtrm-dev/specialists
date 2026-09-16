@@ -3,7 +3,7 @@ import { createSubstrateJournalTool, type JournalServiceLike } from '../../../sr
 
 /**
  * Journal tool tests (unitAI-aiwva.10). Fake stands in for the unpublished
- * @xtrm/substrate JournalService; the tool only needs the structural shape.
+ * @jaggerxtrm/substrate JournalService; the tool only needs the structural shape.
  */
 function fakeEntry(seq: number, summary = `summary ${seq}`) {
   return {

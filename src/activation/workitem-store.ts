@@ -6,9 +6,17 @@
 //
 // STRUCTURAL DECOUPLING (xtrm-6qu.7.1+): this module has NO static dependency
 // on @jaggerxtrm/substrate — no import, no package.json entry, nothing for public CI
-// to resolve. The Substrate package lives in the PRIVATE xtrm repo; this repo
-// is public, so private code must never be vendored, bundled, or lockfiled
-// here. Integration happens two ways:
+// to resolve.
+//
+// CORRECTED: this block used to say Substrate "lives in the PRIVATE xtrm repo" and
+// that "private code must never be vendored, bundled, or lockfiled here". Substrate is
+// PUBLISHED, as @jaggerxtrm/substrate — src/substrate/services.ts recorded that correction
+// on 2026-09-12 (XTRM-267) and this block was missed, leaving the load-bearing rationale
+// resting on a false premise. The real reason for the decoupling is install topology, not
+// secrecy: Substrate is an OPTIONAL RUNTIME PREREQUISITE on its own release cadence, and a
+// static dependency would force every legacy-only install to carry it and couple Specialists
+// publishes to its version cuts (the same reasoning docs/installation.md records for
+// xtrm-tools). Integration happens two ways:
 //
 //   1. `createWorkItemBoundary(ports)` — pure factory over injected ports.
 //      Public unit tests inject fakes; the private integration job injects the
@@ -94,7 +102,7 @@ const SUBSTRATE_PACKAGE = '@jaggerxtrm/substrate';
  * global symlink under BOTH node and bun where plain resolution failed. Precedence is unchanged:
  * an explicit checkout, then the injected seam, then ordinary resolution, then the prefix.
  */
-function resolveSubstrateDir(explicit: string, resolveInstalled?: () => string | null): string | null {
+export function resolveSubstrateDir(explicit: string, resolveInstalled?: () => string | null): string | null {
   const trimmed = explicit.trim();
   if (trimmed) return trimmed;
   if (resolveInstalled) return resolveInstalled();

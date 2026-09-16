@@ -8,13 +8,13 @@ import { openSubstrateDb, openWorkItemBoundary } from '../../src/activation/work
 /**
  * Private-integration parity (xtrm-6qu.7.1.1): exercises the REAL producer
  * services through the public seam. Runs ONLY when XTRM_SUBSTRATE_DIR points
- * at a built @xtrm/substrate checkout — public CI has no such checkout, so
+ * at a built @jaggerxtrm/substrate checkout — public CI has no such checkout, so
  * this suite skips there and the public gate stays green with zero private
  * code. The private workflow sets the variable, checks out the pinned public
  * Specialists SHA, and runs this file as the parity gate.
  *
  * Expected private command (bun 1.3.14):
- *   XTRM_SUBSTRATE_DIR=<abs path to @xtrm/substrate> \
+ *   XTRM_SUBSTRATE_DIR=<abs path to @jaggerxtrm/substrate> \
  *     bun --bun vitest run tests/integration/substrate-parity.test.ts
  */
 
