@@ -1,7 +1,8 @@
 // tests/unit/specialist/execution-profile-parity.test.ts
 //
 // SPECIALISTS-55 (one execution profile shape, compared field by field) and XTRM-84 (the
-// decision on what "compared field" means, how the field list is tied to the contract, and
+// decision on what "compared field" means, how far the field list is CHECKED against the contract
+// (a reviewed copy, not a live read — see CONTRACT_CONSTRAINTS_QUOTE_AT_REV2), and
 // how reviewer evidence and admission are handled).
 //
 // Native-vs-legacy parity was restored gap by gap (skills, isolation, output schema,
@@ -125,7 +126,18 @@ import { testWorkItems } from '../../utils/test-work-items.js';
 /**
  * The SPECIALISTS-55 contract, quoted VERBATIM from the issue's `## constraints` section.
  *
- * XTRM-84 decision 4a: the compared-field list must be tied to the contract rather than to a
+ * PROVENANCE: SPECIALISTS-55, revision 2. Recorded because this is a COPY, not a live read, and a
+ * copy needs a revision to be attributable. If the contract text moves, `sb issue show SPECIALISTS-55`
+ * will show a different revision against this one, and the reviewer can see that the quote below
+ * predates it — which is the most a copy can honestly offer.
+ *
+ * NOT A MECHANICAL TIE, and it must not be described as one. Nothing here reads the contract. An
+ * earlier version of this file shelled out to `sb issue show` and swallowed EVERY failure — no CLI,
+ * wrong board, issue not found — so on CI it asserted nothing while looking authoritative; that guard
+ * was deleted rather than repaired. Coordinated drift (edit the quote, the dimension map and both
+ * compilers together) still passes. Only the DECLARED tie is machine-checked.
+ *
+ * XTRM-84 decision 4a: the compared-field list must be DERIVED FROM the contract rather than from a
  * constant somebody typed next to the code — symmetry between the two compilers cannot see a
  * dimension BOTH sides silently omit, which is exactly how `resources` went missing.
  *
@@ -144,7 +156,7 @@ import { testWorkItems } from '../../utils/test-work-items.js';
  * The quote is kept byte-for-byte, INCLUDING the markdown bullet, so the review is a diff and not
  * a judgement call.
  */
-const CONTRACT_CONSTRAINTS = [
+const CONTRACT_CONSTRAINTS_QUOTE_AT_REV2 = [
   '- Compared fields: skills, tools, extensions, scripts, output contract, resources, context inputs, model/thinking, reviewer evidence',
   '- Allowlisted differences only: process topology, lifetime semantics, workspace strategy, interaction transport; each allowlist entry carries a reason',
 ];
@@ -157,7 +169,7 @@ function toDimensionName(field: string): string {
 
 /** The dimensions the contract's compared-fields constraint names. */
 function contractDimensions(): string[] {
-  const line = CONTRACT_CONSTRAINTS.find((entry) => entry.includes('Compared fields:'));
+  const line = CONTRACT_CONSTRAINTS_QUOTE_AT_REV2.find((entry) => entry.includes('Compared fields:'));
   const list = (line ?? '').replace(/^-\s*Compared fields:\s*/, '').trim();
   // Trailing punctuation is stripped so the quote can stay verbatim even if the contract gains it.
   return list.replace(/[.;]\s*$/, '').split(',').map((entry) => toDimensionName(entry)).sort();
@@ -165,7 +177,7 @@ function contractDimensions(): string[] {
 
 /** The divergence categories the contract PERMITS. A divergence outside this set is not allowed. */
 function contractDivergenceCategories(): string[] {
-  const line = CONTRACT_CONSTRAINTS.find((entry) => entry.includes('Allowlisted differences only:'));
+  const line = CONTRACT_CONSTRAINTS_QUOTE_AT_REV2.find((entry) => entry.includes('Allowlisted differences only:'));
   const list = (line ?? '').replace(/^-\s*Allowlisted differences only:\s*/, '');
   return list.split(';')[0]!.split(',').map((entry) => entry.trim()).filter(Boolean).sort();
 }
@@ -736,8 +748,10 @@ function compileLegacyProfile(
 // ---------------------------------------------------------------- the tests
 
 describe('execution profile parity (SPECIALISTS-55, decisions recorded in XTRM-84)', () => {
-  it('ties the compared field list to the contract, so a required dimension cannot be omitted', () => {
-    // XTRM-84 4a. The map is only as good as its tie to the contract: assert that the contract's
+  it('checks the mapped dimensions against the quoted contract line, so a required dimension cannot be dropped from the map', () => {
+    // XTRM-84 4a. The map is only as good as its provenance: assert that the QUOTED contract line's
+    // dimensions are exactly the mapped ones. This catches the map drifting from the quote; it does
+    // NOT catch the quote drifting from the issue (see the provenance note above).
     // own sentence names exactly the dimensions the map implements. A dimension the contract
     // requires and the map lacks is a failure here, and so is a map entry the contract does not
     // name (which must be declared in BEYOND_CONTRACT_DIMENSIONS instead).
