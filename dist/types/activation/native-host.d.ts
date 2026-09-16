@@ -471,10 +471,15 @@ export declare class NativeActivationHost {
      *
      * Activation-keyed, never session-keyed: the fallback walk, retry() and resume()
      * all replace record.session under the SAME activation id, and none of those sites
-     * touches this map — so a tool call spanning a replacement keeps its start time
-     * and its warned flag and still warns AT MOST ONCE. Entries die on tool end, on
-     * terminal settle (publishTerminalSettlement) and on stop(); the timer is unref'd
-     * so a missed stop can never pin this long-lived process.
+     * touches this map — so a replacement can never rebuild or reset the watch, and
+     * at-most-once holds ACROSS attempts (a new attempt arms a new watch only when a
+     * new tool call starts). In production no live watch spans a replacement:
+     * publishTerminalSettlement clears it on every runToSettled terminal leg, the
+     * fallback continues same-attempt, and retry()/resume() start new attempts
+     * post-settle. The synthetic session-swap test pins this keying invariant at
+     * unit level; it is not production traversal of those sites. Entries die on tool
+     * end, on terminal settle (publishTerminalSettlement) and on stop(); the timer
+     * is unref'd so a missed stop can never pin this long-lived process.
      */
     private readonly toolDurationWatch;
     /** Warn threshold fallback when an activation has no resolved entry; dep or shared default. */
@@ -553,12 +558,11 @@ export declare class NativeActivationHost {
     /** Clear the watch when the tool call ends; a stray end never kills a live call. */
     private noteToolEnd;
     /**
-     * One checker tick: warn at most once per tool call (SPECIALISTS-102).
-     *
-     * Attempt attribution is read LIVE from the registry, never closed over at subscribe
-     * time, and the watch is keyed to the activation — so a call spanning a fallback,
-     * retry or resume replacement still warns exactly once, under the current attempt.
-     * Driven by the interval in production and directly (with the injected clock) in tests.
+     * One checker tick: warn at most once per tool call (SPECIALISTS-102) via the
+     * warned flag. Driven by the interval in production and directly (with the
+     * injected clock) in tests. Cross-leg attempt attribution of the emitted row
+     * is owned by SPECIALISTS-113; no claim is made here about which attempt a
+     * spanning call would be attributed to.
      */
     private checkToolDuration;
     /** Clear the poll timer and drop the watch. Idempotent; safe on every exit path. */

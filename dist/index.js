@@ -95126,6 +95126,9 @@ function extractTokenUsage(event) {
   }
   return;
 }
+function normalizeToolDurationWarnMs(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
 function isNonLocalExtensionSource(source) {
   return NON_LOCAL_EXTENSION_PREFIXES.some((prefix) => source.startsWith(prefix));
 }
@@ -95344,8 +95347,8 @@ class NativeActivationHost {
     this.authority = deps.authority ?? NULL_AUTHORITY_WRITER;
     this.settlements = deps.settlements ?? createFileSettlementStore(join60(this.cwd, ".specialists", "settlements"));
     this.admission = deps.admission ?? ((candidate, tier, contract) => validateBeforeRun(candidate, tier, contract));
-    this.toolDurationWarnMs = deps.stallDetection?.tool_duration_warn_ms ?? STALL_DETECTION_DEFAULTS.tool_duration_warn_ms;
-    this.toolDurationWarnMsByDep = deps.stallDetection?.tool_duration_warn_ms;
+    this.toolDurationWarnMs = normalizeToolDurationWarnMs(deps.stallDetection?.tool_duration_warn_ms) ?? STALL_DETECTION_DEFAULTS.tool_duration_warn_ms;
+    this.toolDurationWarnMsByDep = normalizeToolDurationWarnMs(deps.stallDetection?.tool_duration_warn_ms);
     this.env = deps.env ?? process.env;
   }
   async start(request) {
@@ -95405,7 +95408,7 @@ class NativeActivationHost {
     const execution = specialist.specialist.execution;
     const tier = execution.permission_required ?? "READ_ONLY";
     const specToolDurationWarnMs = specialist.specialist.stall_detection?.tool_duration_warn_ms;
-    this.toolDurationWarnMsByActivation.set(activationId, this.toolDurationWarnMsByDep ?? (typeof specToolDurationWarnMs === "number" && Number.isFinite(specToolDurationWarnMs) && specToolDurationWarnMs > 0 ? specToolDurationWarnMs : STALL_DETECTION_DEFAULTS.tool_duration_warn_ms));
+    this.toolDurationWarnMsByActivation.set(activationId, this.toolDurationWarnMsByDep ?? normalizeToolDurationWarnMs(specToolDurationWarnMs) ?? STALL_DETECTION_DEFAULTS.tool_duration_warn_ms);
     const access2 = WRITE_TIERS.has(tier) ? "write" : "read";
     const workspace = resolveWorkspace(this.cwd);
     let workItems;
@@ -96968,11 +96971,6 @@ function createActivationForensicSink(observability) {
         });
         state.lastEventAtMs = now;
         state.status = statusForLifecycle(event.name, state.status);
-        const incomingAttemptNo = nativeAttemptNo(event.attemptId);
-        if (incomingAttemptNo > state.attemptNo) {
-          state.attemptId = event.attemptId;
-          state.attemptNo = incomingAttemptNo;
-        }
         state.workspacePath = stringValue(event.payload?.workspace) ?? state.workspacePath;
         state.piSessionId = stringValue(event.payload?.pi_session_id) ?? state.piSessionId;
         state.resolvedModel = stringValue(event.payload?.resolved_model) ?? state.resolvedModel;
@@ -97029,11 +97027,6 @@ function createActivationForensicSink(observability) {
           state.autoCompactions += 1;
         state.lastEventAtMs = now;
         state.status = statusForSessionEvent(input2.event.type, state.status);
-        const sessionAttemptNo = nativeAttemptNo(input2.attemptId);
-        if (sessionAttemptNo > state.attemptNo) {
-          state.attemptId = input2.attemptId;
-          state.attemptNo = sessionAttemptNo;
-        }
         if (stringValue(input2.piSessionId))
           state.piSessionId = input2.piSessionId;
         state.workspacePath = input2.workspacePath;

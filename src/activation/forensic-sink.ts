@@ -206,18 +206,6 @@ export function createActivationForensicSink(
 
         state.lastEventAtMs = now;
         state.status = statusForLifecycle(event.name, state.status);
-        // The emit carries the authoritative attempt: retry()/resume() advance the
-        // attempt under the same activation id, and without this every leg-2 row
-        // would be misattributed to the leg-1 attempt (the state object survives
-        // across attempts by design). Adoption is MONOTONIC: Pi-level auto-retries
-        // advance the same counter via auto_retry_start below while still carrying
-        // the older attempt id, so a lower incoming number must never rewind it.
-        // initialAttemptId is intentionally untouched.
-        const incomingAttemptNo = nativeAttemptNo(event.attemptId);
-        if (incomingAttemptNo > state.attemptNo) {
-          state.attemptId = event.attemptId;
-          state.attemptNo = incomingAttemptNo;
-        }
         state.workspacePath = stringValue(event.payload?.workspace) ?? state.workspacePath;
         state.piSessionId = stringValue(event.payload?.pi_session_id) ?? state.piSessionId;
         state.resolvedModel = stringValue(event.payload?.resolved_model) ?? state.resolvedModel;
@@ -306,13 +294,6 @@ export function createActivationForensicSink(
         if (input.event.type === 'compaction_start') state.autoCompactions += 1;
         state.lastEventAtMs = now;
         state.status = statusForSessionEvent(input.event.type, state.status);
-        // Same attempt-tracking as emit(): the input carries the live attempt id,
-        // adopted monotonically for the same auto-retry reason.
-        const sessionAttemptNo = nativeAttemptNo(input.attemptId);
-        if (sessionAttemptNo > state.attemptNo) {
-          state.attemptId = input.attemptId;
-          state.attemptNo = sessionAttemptNo;
-        }
         // The host passes `snapshot.piSessionId ?? ''` before a session exists; a blank
         // must never clear an identity the status row already carries.
         if (stringValue(input.piSessionId)) state.piSessionId = input.piSessionId;

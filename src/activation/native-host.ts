@@ -144,6 +144,22 @@ const WRITE_TIERS = new Set(['MEDIUM', 'HIGH']);
  */
 const TOOL_DURATION_CHECK_INTERVAL_MS = 10_000;
 
+/**
+ * Legacy-faithful threshold normalization (Target 2, PR #387 review).
+ *
+ * Legacy spreads the configured value straight through (`{...DEFAULTS,
+ * ...opts.stallDetection}`), so 0 and negatives are honoured as-is (the schema
+ * permits 0; `elapsed > 0` still gates the warn). This matches that: every finite
+ * number passes through INCLUDING 0 and negatives. Non-finite values
+ * (NaN/Infinity/non-number) fall back to undefined so the caller applies the
+ * shared default — legacy would never warn on those (comparisons are false),
+ * native warns per default instead. Garbage-in divergence, documented here
+ * rather than silently clamped.
+ */
+function normalizeToolDurationWarnMs(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
 /** One in-flight tool call watched for over-threshold duration, per activation. */
 interface ToolDurationWatch {
   tool: string;
@@ -871,10 +887,15 @@ export class NativeActivationHost {
    *
    * Activation-keyed, never session-keyed: the fallback walk, retry() and resume()
    * all replace record.session under the SAME activation id, and none of those sites
-   * touches this map — so a tool call spanning a replacement keeps its start time
-   * and its warned flag and still warns AT MOST ONCE. Entries die on tool end, on
-   * terminal settle (publishTerminalSettlement) and on stop(); the timer is unref'd
-   * so a missed stop can never pin this long-lived process.
+   * touches this map — so a replacement can never rebuild or reset the watch, and
+   * at-most-once holds ACROSS attempts (a new attempt arms a new watch only when a
+   * new tool call starts). In production no live watch spans a replacement:
+   * publishTerminalSettlement clears it on every runToSettled terminal leg, the
+   * fallback continues same-attempt, and retry()/resume() start new attempts
+   * post-settle. The synthetic session-swap test pins this keying invariant at
+   * unit level; it is not production traversal of those sites. Entries die on tool
+   * end, on terminal settle (publishTerminalSettlement) and on stop(); the timer
+   * is unref'd so a missed stop can never pin this long-lived process.
    */
   private readonly toolDurationWatch = new Map<string, ToolDurationWatch>();
   /** Warn threshold fallback when an activation has no resolved entry; dep or shared default. */
@@ -917,8 +938,8 @@ export class NativeActivationHost {
     this.authority = deps.authority ?? NULL_AUTHORITY_WRITER;
     this.settlements = deps.settlements ?? createFileSettlementStore(join(this.cwd, '.specialists', 'settlements'));
     this.admission = deps.admission ?? ((candidate, tier, contract) => validateBeforeRun(candidate as never, tier, contract));
-    this.toolDurationWarnMs = deps.stallDetection?.tool_duration_warn_ms ?? STALL_DETECTION_DEFAULTS.tool_duration_warn_ms;
-    this.toolDurationWarnMsByDep = deps.stallDetection?.tool_duration_warn_ms;
+    this.toolDurationWarnMs = normalizeToolDurationWarnMs(deps.stallDetection?.tool_duration_warn_ms) ?? STALL_DETECTION_DEFAULTS.tool_duration_warn_ms;
+    this.toolDurationWarnMsByDep = normalizeToolDurationWarnMs(deps.stallDetection?.tool_duration_warn_ms);
     this.env = deps.env ?? process.env;
   }
 
@@ -1050,9 +1071,8 @@ export class NativeActivationHost {
     this.toolDurationWarnMsByActivation.set(
       activationId,
       this.toolDurationWarnMsByDep
-        ?? (typeof specToolDurationWarnMs === 'number' && Number.isFinite(specToolDurationWarnMs) && specToolDurationWarnMs > 0
-          ? specToolDurationWarnMs
-          : STALL_DETECTION_DEFAULTS.tool_duration_warn_ms),
+        ?? normalizeToolDurationWarnMs(specToolDurationWarnMs)
+        ?? STALL_DETECTION_DEFAULTS.tool_duration_warn_ms,
     );
 
     // Readers and writers are both admitted. A write tier does not gate admission here; it
@@ -2094,12 +2114,11 @@ export class NativeActivationHost {
   }
 
   /**
-   * One checker tick: warn at most once per tool call (SPECIALISTS-102).
-   *
-   * Attempt attribution is read LIVE from the registry, never closed over at subscribe
-   * time, and the watch is keyed to the activation — so a call spanning a fallback,
-   * retry or resume replacement still warns exactly once, under the current attempt.
-   * Driven by the interval in production and directly (with the injected clock) in tests.
+   * One checker tick: warn at most once per tool call (SPECIALISTS-102) via the
+   * warned flag. Driven by the interval in production and directly (with the
+   * injected clock) in tests. Cross-leg attempt attribution of the emitted row
+   * is owned by SPECIALISTS-113; no claim is made here about which attempt a
+   * spanning call would be attributed to.
    */
   private checkToolDuration(activationId: string): void {
     const watch = this.toolDurationWatch.get(activationId);
