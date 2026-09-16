@@ -369,13 +369,15 @@ export function mapNativeLifecycleEvent(
         bead_id: event.beadId,
         ...(event.payload ?? {}),
       } as never), t);
-    // SPECIALISTS-101 model_fallback carrier (coordinator decision): use the EXISTING shared
+    // SPECIALISTS-103 model_fallback carrier (coordinator decision): use the EXISTING shared
     // `model_change` event. There is no `fallback_step` event and none is invented.
     // Action is `cycle_model` (not `set_model`): a fallback walks the configured chain
     // automatically; an explicit operator override would be `set_model`. The closed union
-    // `model_change.action` is NOT widened. Only the canonical model fields are persisted
-    // (parity with the legacy supervisor path, which carries model/previousModel only);
-    // fallback diagnostics (error_class, terminal, note) are not retained on the timeline row.
+    // `model_change.action` is NOT widened. All seven producer keys are preserved onto
+    // the timeline row (from/to_model as model/previous_model, plus error_class,
+    // terminal, note, attempt_n, resolved_model verbatim): the reason a fallback happened
+    // and whether it terminated the activation must survive to the durable forensic row.
+    // `terminal: false` is preserved explicitly (boolean, not truthiness-filtered).
     case 'model_fallback':
       return at({
         t,
@@ -383,6 +385,11 @@ export function mapNativeLifecycleEvent(
         action: 'cycle_model',
         ...(stringField(event.payload?.to_model) ? { model: stringField(event.payload?.to_model) as string } : {}),
         ...(stringField(event.payload?.from_model) ? { previous_model: stringField(event.payload?.from_model) as string } : {}),
+        ...(stringField(event.payload?.error_class) ? { error_class: stringField(event.payload?.error_class) as string } : {}),
+        ...(booleanField(event.payload?.terminal) !== undefined ? { terminal: booleanField(event.payload?.terminal) as boolean } : {}),
+        ...(stringField(event.payload?.note) ? { note: stringField(event.payload?.note) as string } : {}),
+        ...(numberField(event.payload?.attempt_n) !== undefined ? { attempt_n: numberField(event.payload?.attempt_n) as number } : {}),
+        ...(stringField(event.payload?.resolved_model) ? { resolved_model: stringField(event.payload?.resolved_model) as string } : {}),
       }, t);
     // SPECIALISTS-101 settlement carrier (coordinator decision): each settlement_* name keeps
     // its own event_name and gets its own arm. They are 10 distinct signals; collapsing them
