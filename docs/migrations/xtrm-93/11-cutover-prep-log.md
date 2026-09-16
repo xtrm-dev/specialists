@@ -15,9 +15,10 @@
 | **dist** rebuild | — (CI obligation, not a DAG node) | — | **DONE** | `64e922e6` |
 | **review gate** | Substrate `SPECIALISTS-81` (`iss_01a0a98e-69f3-…`) | `act:e4dafce4-6e2` | **DONE** — N0 accepted; N2A/N2B/dist accepted-with-findings | — |
 | **N2A review fix** (attempt existence) | `SPECIALISTS-78` attempt 2 | `act:47a2b74f-a25` | **DONE, verified** | `9766b5b7` |
-| **N2B review fix** (status payload, failure mapping, window labels, CLI test) | `SPECIALISTS-80` attempt 2 | `act:51b14a21-af0` | in progress | — |
+| **N2B review fix** (status payload, failure mapping, window labels, CLI test) | `SPECIALISTS-80` attempt 2 | `act:51b14a21-af0` | **DONE, verified** | `6113a710` |
+| **dist** final rebuild | — | — | **DONE**, deterministic | `93f2cd37` |
 | N2B follow-up (row-cap starvation) | beads `unitAI-kmbb9`, P1, `contract:draft` | — | filed, not started | — |
-| N2A follow-up (fabricated attempt) | beads `unitAI-qpapp`, P1 | — | **CLOSED by the N2A review fix** | — |
+| N2A follow-up (fabricated attempt) | beads `unitAI-qpapp`, P1 | — | **CLOSED** by `9766b5b7` | — |
 
 ---
 
@@ -378,6 +379,37 @@ attempts, so the first monitor reported "settled" while the session was still wo
 attempt. I briefly read that as "the fix produced no changes", which was wrong. The correct watch is
 the job's terminal **status**, attempt-agnostic, plus a stall detector so a hang cannot masquerade as
 progress.
+
+### The N2B fix went beyond the findings it was given
+
+Beyond the four findings, the executor found the **same misleading-count defect on `sp feed`**
+(`src/cli/feed.ts:517`), which the review had not raised, and corrected it identically. It is an
+in-spirit extension rather than a scope violation: the same window counts were rendered as totals on
+another surface.
+
+The rename to `window_event_count` / `window_turns` is a deliberate **breaking** change to `ps --json`
+and `feed --json`. The old names were the lie; the honest surface is worth the break, and it is
+recorded here because a consumer parsing those keys will need to adapt.
+
+**The LOW finding was resolved by measurement, and the reviewer's framing was inverted.** The review
+claimed `turns` undercounts by excluding `turn.turn`. In fact `turn.turn` emits **two** rows per turn
+(start and end, via the producer fallback at `forensic-events.ts:832/:813`) — measured 207 `turn.turn`
+against 104 `turn.summarized` for the same activation. `turn.summarized` is therefore the correct
+signal and counting `turn.turn` would **double**-count. The exclusion is deliberate and the
+measurements are recorded in the code next to the filter.
+
+### Final state
+
+All four activations stopped; no work left running. `unitAI-qpapp` closed by `9766b5b7`.
+`unitAI-kmbb9` remains open and is the one known defect this pass deliberately did not fix.
+
+| Gate | Result |
+|---|---|
+| `tsc --noEmit` | exit 0 |
+| result + ps + summary suites | **82/82 pass** |
+| `bun test` observability-sqlite | **56/56 pass** |
+| `dist` determinism | two builds byte-identical |
+| working tree | clean |
 
 ---
 
