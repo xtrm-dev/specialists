@@ -9,7 +9,6 @@ import {
 import type {
   ForensicEventRecord,
   ListForensicEventsFilters,
-  ListNativeActivationIdsFilters,
 } from '../../../src/specialist/observability-sqlite.js';
 import type { SupervisorStatus } from '../../../src/specialist/status-contract.js';
 
@@ -63,7 +62,6 @@ class FakeSource implements ObservabilityReadSource {
   constructor(
     readonly forensic: ForensicEventRecord[],
     readonly statuses: SupervisorStatus[] = [],
-    readonly nativeIds: string[] = [],
   ) {}
 
   readForensicEvents(filters: ListForensicEventsFilters = {}): ForensicEventRecord[] {
@@ -82,15 +80,6 @@ class FakeSource implements ObservabilityReadSource {
 
   listStatuses(): SupervisorStatus[] {
     return this.statuses;
-  }
-
-  listNativeActivationIds(filters: ListNativeActivationIdsFilters = {}): string[] {
-    return this.nativeIds.slice(0, filters.limit ?? this.nativeIds.length);
-  }
-
-  readForensicEventsForActivations(jobIds: readonly string[], filters: { sinceMs?: number } = {}): ForensicEventRecord[] {
-    const ids = new Set(jobIds);
-    return this.forensic.filter((row) => ids.has(row.job_id) && (filters.sinceMs === undefined || row.t >= filters.sinceMs));
   }
 
   readResult(): string | null {
@@ -137,6 +126,20 @@ describe('observability read model', () => {
     expect(resumed.events.map((ev) => ev.event_name)).toEqual(['job.completed']);
   });
 
+  it('widens a bounded LOG read when the latest tail is dominated by suppressed agent noise', () => {
+    const rows: ForensicEventRecord[] = [
+      record(event('job-noisy', 1, 100, 'job.started'), 1),
+      record(event('job-noisy', 2, 101, 'review.finding', 'review'), 2),
+      record(event('job-noisy', 3, 102, 'job.status_changed'), 3),
+    ];
+    for (let seq = 4; seq <= 40; seq += 1) {
+      rows.push(record(event('job-noisy', seq, 100 + seq, 'tool.call.started', 'tool'), seq));
+    }
+
+    const window = readForensicWindow(new FakeSource(rows), { jobId: 'job-noisy', limit: 2 });
+    expect(window.events.map((ev) => ev.event_name)).toEqual(['review.finding', 'job.status_changed']);
+  });
+
   it('reconstructs nested fleet lineage and persisted tmux attachment without name heuristics', () => {
     const parent = event('job-parent', 1, 100, 'job.started', 'job', {
       links: {
@@ -176,5 +179,13 @@ describe('observability read model', () => {
       agentInstanceId: 'agent-root',
       direct: true,
     });
+  });
+
+  it('labels persisted native mid-flight state as last-known active instead of current running', () => {
+    const source = new FakeSource([], [status('act:123', 'reviewer', 'running', 100)]);
+    const fleet = readFleetSnapshot(source);
+    expect(fleet.byId.get('act:123')?.native).toBe(true);
+    expect(fleet.byId.get('act:123')?.state).toBe('active');
+    expect(fleet.byId.get('act:123')?.attention).toBe('active');
   });
 });
