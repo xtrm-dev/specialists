@@ -23080,6 +23080,8 @@ class NativeActivationHost {
   lastUsageSeen = new WeakMap;
   toolDurationWatch = new Map;
   toolDurationWarnMs;
+  toolDurationWarnMsByDep;
+  toolDurationWarnMsByActivation = new Map;
   interactions;
   constructor(deps = {}) {
     this.cwd = deps.cwd ?? process.cwd();
@@ -23093,6 +23095,7 @@ class NativeActivationHost {
     this.settlements = deps.settlements ?? createFileSettlementStore(join20(this.cwd, ".specialists", "settlements"));
     this.admission = deps.admission ?? ((candidate, tier, contract) => validateBeforeRun(candidate, tier, contract));
     this.toolDurationWarnMs = deps.stallDetection?.tool_duration_warn_ms ?? STALL_DETECTION_DEFAULTS.tool_duration_warn_ms;
+    this.toolDurationWarnMsByDep = deps.stallDetection?.tool_duration_warn_ms;
     this.env = deps.env ?? process.env;
   }
   async start(request) {
@@ -23151,6 +23154,8 @@ class NativeActivationHost {
       return reject("unknown_specialist");
     const execution = specialist.specialist.execution;
     const tier = execution.permission_required ?? "READ_ONLY";
+    const specToolDurationWarnMs = specialist.specialist.stall_detection?.tool_duration_warn_ms;
+    this.toolDurationWarnMsByActivation.set(activationId, this.toolDurationWarnMsByDep ?? (typeof specToolDurationWarnMs === "number" && Number.isFinite(specToolDurationWarnMs) && specToolDurationWarnMs > 0 ? specToolDurationWarnMs : STALL_DETECTION_DEFAULTS.tool_duration_warn_ms));
     const access = WRITE_TIERS.has(tier) ? "write" : "read";
     const workspace = resolveWorkspace(this.cwd);
     let workItems;
@@ -23803,8 +23808,9 @@ class NativeActivationHost {
     const watch = this.toolDurationWatch.get(activationId);
     if (!watch || watch.warned)
       return;
+    const thresholdMs = this.toolDurationWarnMsByActivation.get(activationId) ?? this.toolDurationWarnMs;
     const elapsed = this.now() - watch.startMs;
-    if (elapsed <= this.toolDurationWarnMs)
+    if (elapsed <= thresholdMs)
       return;
     watch.warned = true;
     const record2 = this.registry.get(activationId);
@@ -23823,7 +23829,7 @@ class NativeActivationHost {
         payload: {
           reason: "tool_duration",
           silence_ms: elapsed,
-          threshold_ms: this.toolDurationWarnMs,
+          threshold_ms: thresholdMs,
           tool: watch.tool
         }
       });
@@ -24307,6 +24313,7 @@ class NativeActivationHost {
       await record2.session.abort();
     } finally {
       this.stopToolDurationWatch(activationId);
+      this.toolDurationWarnMsByActivation.delete(activationId);
       record2.unsubscribe();
       record2.session.dispose();
       record2.snapshot.state = "stopped";
@@ -24757,6 +24764,11 @@ function statusForSessionEvent(type, current) {
     return "waiting";
   return current;
 }
+var ERROR_STATUS_LIFECYCLE = new Set([
+  "activation_failed",
+  "activation_rejected",
+  "output_validation_failed"
+]);
 function identityOf(state) {
   return { attemptId: state.attemptId, attemptNo: state.attemptNo };
 }
@@ -24829,6 +24841,11 @@ function createActivationForensicSink(observability) {
         });
         state.lastEventAtMs = now;
         state.status = statusForLifecycle(event.name, state.status);
+        const incomingAttemptNo = nativeAttemptNo(event.attemptId);
+        if (incomingAttemptNo > state.attemptNo) {
+          state.attemptId = event.attemptId;
+          state.attemptNo = incomingAttemptNo;
+        }
         state.workspacePath = stringValue(event.payload?.workspace) ?? state.workspacePath;
         state.piSessionId = stringValue(event.payload?.pi_session_id) ?? state.piSessionId;
         state.resolvedModel = stringValue(event.payload?.resolved_model) ?? state.resolvedModel;
@@ -24836,7 +24853,7 @@ function createActivationForensicSink(observability) {
         if (completedOutput !== undefined)
           state.latestOutput = completedOutput;
         states.set(event.activationId, state);
-        const error = stringValue(event.payload?.error) ?? stringValue(event.payload?.reason);
+        const error = stringValue(event.payload?.error) ?? (ERROR_STATUS_LIFECYCLE.has(event.name) ? stringValue(event.payload?.reason) : undefined);
         const timelineEvent = mapNativeLifecycleEvent(event, {
           startedAtMs: state.startedAtMs,
           workspacePath: state.workspacePath,
@@ -24885,6 +24902,11 @@ function createActivationForensicSink(observability) {
           state.autoCompactions += 1;
         state.lastEventAtMs = now;
         state.status = statusForSessionEvent(input.event.type, state.status);
+        const sessionAttemptNo = nativeAttemptNo(input.attemptId);
+        if (sessionAttemptNo > state.attemptNo) {
+          state.attemptId = input.attemptId;
+          state.attemptNo = sessionAttemptNo;
+        }
         if (stringValue(input.piSessionId))
           state.piSessionId = input.piSessionId;
         state.workspacePath = input.workspacePath;

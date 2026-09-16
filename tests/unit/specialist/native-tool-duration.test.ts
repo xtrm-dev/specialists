@@ -58,9 +58,10 @@ function fakeSession(opts: {
     isIdle: true,
     disposed: false,
     activeTools: ['read', 'bash'],
+    holdOpen: opts.holdOpen ?? false,
     async prompt() {
       listeners.forEach((l) => l({ type: 'agent_start' }));
-      if (opts.holdOpen) return new Promise<never>(() => {});
+      if (session.holdOpen) return new Promise<never>(() => {});
       if (opts.toolStart) {
         listeners.forEach((l) => l({
           type: 'tool_execution_start',
@@ -218,6 +219,18 @@ function readRows(dbPath: string, jobId: string): StaleRow[] {
   }
 }
 
+function readStatus(dbPath: string, jobId: string): { status: string; body: Record<string, unknown> } {
+  const raw = new Database(dbPath);
+  try {
+    const row = raw.query(
+      'SELECT status, status_json FROM specialist_jobs WHERE job_id = ?',
+    ).get(jobId) as { status: string; status_json: string };
+    return { status: row.status, body: JSON.parse(row.status_json) as Record<string, unknown> };
+  } finally {
+    raw.close();
+  }
+}
+
 function staleRows(dbPath: string, jobId: string): Array<StaleRow & { body: Record<string, unknown> }> {
   return readRows(dbPath, jobId)
     .filter((row) => row.event_name === 'process_health.stale_detected')
@@ -257,6 +270,14 @@ describe('native tool_duration producer (SPECIALISTS-102)', () => {
     session.emit({ type: 'tool_execution_start', toolName: 'bash', toolCallId: 'call-1' });
     nowMs += 130_000;
     tick(host, handle.activationId, 3);
+
+    // The blocking-defect guard (review of PR #387): a warning on a HEALTHY running
+    // activation must not masquerade as failure. The status row keeps status
+    // 'running' with NO error, even though the emit payload carries a `reason`.
+    const midRun = readStatus(dbPath, handle.activationId);
+    expect(midRun.status).toBe('running');
+    expect(midRun.body.current_event).toBe('stale_warning');
+    expect(midRun.body.error ?? null).toBeNull();
 
     expect(watchSize(host)).toBe(1);
     await host.stop(handle.activationId);
@@ -496,5 +517,203 @@ describe('native tool_duration producer (SPECIALISTS-102)', () => {
     expect(gaps[0]).toMatchObject({ tool: 'bash', silence_ms: 130_000, threshold_ms: 120_000 });
     expect(typeof gaps[0]!.t).toBe('number');
     void dbPath;
+  });
+});
+
+describe('status.error projection (forensic-sink root-cause fix, PR #387 review)', () => {
+  /**
+   * The sink used to project EVERY payload `reason` onto status.error, so a warning
+   * on a healthy activation wrote error:"tool_duration" onto a running row — which
+   * status.ts prints in red on ANY status and result.ts consumes as failure text.
+   * Legacy never does this (appendTimelineEvent never calls setStatus). The rule now:
+   * `reason` counts as error text ONLY when the event moves the activation to error
+   * status. These tests drive the REAL sink into an isolated store and read back the
+   * status row (status_json) plus the forensic rows, proving the event was NOT
+   * dropped — the error is absent while the evidence persists.
+   */
+  function startedSink(tag: string) {
+    const { dbPath, client, sink } = isolatedStore();
+    const activationId = `act:sink-${tag}`;
+    const base = {
+      activationId,
+      attemptId: `att:sink-${tag}:1`,
+      participantId: 'specialist::researcher',
+      specialist: 'researcher',
+      beadId: 'bd-sink',
+    };
+    sink.emit({ ...base, name: 'activation_started', payload: { pi_session_id: 'pi-1' } });
+    return { dbPath, client, sink, base, activationId };
+  }
+
+  it('stale_warning leaves a running activation error-free (was error:"tool_duration")', () => {
+    const { dbPath, client, sink, base, activationId } = startedSink('warn');
+    sink.emit({
+      ...base,
+      name: 'stale_warning',
+      payload: { reason: 'tool_duration', silence_ms: 130_000, threshold_ms: 120_000, tool: 'bash' },
+    });
+    client.close();
+
+    const status = readStatus(dbPath, activationId);
+    expect(status.status).toBe('running');
+    expect(status.body.current_event).toBe('stale_warning');
+    expect(status.body.error ?? null).toBeNull();
+    // The warning itself still persists — absence of error is not absence of evidence.
+    expect(staleRows(dbPath, activationId)).toHaveLength(1);
+  });
+
+  it('compaction_started leaves a running activation error-free (pre-existing conflation, fixed too)', () => {
+    const { dbPath, client, sink, base, activationId } = startedSink('compact');
+    sink.emit({ ...base, name: 'compaction_started', payload: { reason: 'context pressure' } });
+    client.close();
+
+    const status = readStatus(dbPath, activationId);
+    expect(status.status).toBe('running');
+    expect(status.body.error ?? null).toBeNull();
+  });
+
+  it('control: activation_failed STILL sets error (real errors are not suppressed)', () => {
+    const { dbPath, client, sink, base, activationId } = startedSink('failed');
+    sink.emit({ ...base, name: 'activation_failed', payload: { error: 'boom', stop_reason: 'error' } });
+    client.close();
+
+    const status = readStatus(dbPath, activationId);
+    expect(status.status).toBe('error');
+    expect(status.body.error).toBe('boom');
+  });
+
+  it('control: activation_rejected STILL sets error from reason (rejection reason IS the error)', () => {
+    const { dbPath, client, sink, base, activationId } = startedSink('rejected');
+    sink.emit({ ...base, name: 'activation_rejected', payload: { reason: 'nope', note: 'x' } });
+    client.close();
+
+    const status = readStatus(dbPath, activationId);
+    expect(status.status).toBe('error');
+    expect(status.body.error).toBe('nope');
+  });
+});
+
+describe('spec-configured threshold parity (PR #387 review)', () => {
+  function specWithThreshold(ms: number) {
+    return {
+      specialist: {
+        metadata: { name: 'researcher', version: '1.0.0', description: 'd', category: 'c' },
+        execution: {
+          model: 'testprov/test-model',
+          permission_required: 'READ_ONLY',
+          response_format: 'text',
+          output_type: 'research',
+          bare: false,
+        },
+        prompt: { system: 'You are the researcher.', task_template: 'Do: {{bead_id}}' },
+        // Same source legacy `sp run` reads (launch.ts:96 passes spec stall_detection
+        // to the Supervisor): a configured threshold must reach native identically.
+        stall_detection: { tool_duration_warn_ms: ms },
+      },
+    };
+  }
+
+  it('a spec-configured tool_duration_warn_ms is honoured with no host dep', async () => {
+    let nowMs = 6_000_000;
+    const { dbPath, client, sink } = isolatedStore();
+    const session = fakeSession({ holdOpen: true });
+    const host = new NativeActivationHost({
+      loader: loaderFor(specWithThreshold(2_000)),
+      workItems: fakeWorkItems(),
+      forensics: sink,
+      loadSdk: async () => makeSdk(session),
+      cwd: hostWorkspace(),
+      now: () => nowMs,
+    });
+
+    const handle = await host.start({
+      specialist: 'researcher',
+      issueRef: 'ISSUE-1',
+      requestedByParticipantId: 'coordinator',
+    });
+
+    session.emit({ type: 'tool_execution_start', toolName: 'bash', toolCallId: 'call-1' });
+    // 5_000ms exceeds the configured 2_000 but not the 120_000 default.
+    nowMs += 5_000;
+    tick(host, handle.activationId);
+    await host.stop(handle.activationId);
+    client.close();
+
+    const rows = staleRows(dbPath, handle.activationId);
+    expect(rows).toHaveLength(1);
+    expect((rows[0]!.body.legacy_timeline_event as Record<string, unknown>).threshold_ms).toBe(2_000);
+  });
+
+  it('an explicit host dep wins over the spec (operator/test override)', async () => {
+    let nowMs = 7_000_000;
+    const { dbPath, client, sink } = isolatedStore();
+    const session = fakeSession({ holdOpen: true });
+    const host = new NativeActivationHost({
+      loader: loaderFor(specWithThreshold(500_000)),
+      workItems: fakeWorkItems(),
+      forensics: sink,
+      loadSdk: async () => makeSdk(session),
+      cwd: hostWorkspace(),
+      now: () => nowMs,
+      stallDetection: { tool_duration_warn_ms: 1_000 },
+    });
+
+    const handle = await host.start({
+      specialist: 'researcher',
+      issueRef: 'ISSUE-1',
+      requestedByParticipantId: 'coordinator',
+    });
+
+    session.emit({ type: 'tool_execution_start', toolName: 'bash', toolCallId: 'call-1' });
+    nowMs += 5_000;
+    tick(host, handle.activationId);
+    await host.stop(handle.activationId);
+    client.close();
+
+    const rows = staleRows(dbPath, handle.activationId);
+    expect(rows).toHaveLength(1);
+    expect((rows[0]!.body.legacy_timeline_event as Record<string, unknown>).threshold_ms).toBe(1_000);
+  });
+
+  it('a resumed activation keeps its spec threshold under the new attempt', async () => {
+    let nowMs = 8_000_000;
+    const { dbPath, client, sink } = isolatedStore();
+    const session = fakeSession();
+    const host = new NativeActivationHost({
+      loader: loaderFor(specWithThreshold(2_000)),
+      workItems: fakeWorkItems(),
+      forensics: sink,
+      loadSdk: async () => makeSdk(session),
+      cwd: hostWorkspace(),
+      now: () => nowMs,
+    });
+
+    // Leg 1 settles with no tool activity: no watch, no rows.
+    const handle = await host.start({
+      specialist: 'researcher',
+      issueRef: 'ISSUE-1',
+      requestedByParticipantId: 'coordinator',
+    });
+    expect((await handle.result).status).toBe('completed');
+    expect(staleRows(dbPath, handle.activationId)).toHaveLength(0);
+
+    // Leg 2 drives the REAL resume() site: the session is re-subscribed under a new
+    // attempt id while the activation id (and its resolved threshold) survives.
+    (session as unknown as { holdOpen: boolean }).holdOpen = true;
+    const resumed = await host.resume(handle.activationId, 'follow-up findings');
+    expect(resumed.attemptId).not.toBe(handle.attemptId);
+    session.emit({ type: 'tool_execution_start', toolName: 'bash', toolCallId: 'call-2' });
+    nowMs += 5_000;
+    tick(host, handle.activationId, 3);
+    await host.stop(handle.activationId);
+    client.close();
+
+    // Exactly one warning, for the leg-2 call, attributed to the leg-2 attempt,
+    // measured against the spec threshold — not a double-fire across the site.
+    const rows = staleRows(dbPath, handle.activationId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.attempt_id).toBe(resumed.attemptId);
+    expect((rows[0]!.body.legacy_timeline_event as Record<string, unknown>).threshold_ms).toBe(2_000);
+    expect((rows[0]!.body.legacy_timeline_event as Record<string, unknown>).tool).toBe('bash');
   });
 });

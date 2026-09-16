@@ -89,6 +89,21 @@ function statusForSessionEvent(type: string, current: SupervisorJobStatus): Supe
   return current;
 }
 
+/**
+ * Lifecycle events whose payload `reason` is genuine error text.
+ *
+ * Exactly the events that move the activation to error status (see
+ * statusForLifecycle): a rejection/failure reason IS the error, while a warning
+ * or lifecycle reason (stale_warning, compaction_*, lease_denied, lease_released,
+ * activation_disposed) is not. Those keep their detail in their forensic rows;
+ * the status row stays error-free until something actually fails.
+ */
+const ERROR_STATUS_LIFECYCLE = new Set([
+  'activation_failed',
+  'activation_rejected',
+  'output_validation_failed',
+]);
+
 function identityOf(state: ActivationProjectionState): ObservabilityIdentityProjection {
   return { attemptId: state.attemptId, attemptNo: state.attemptNo };
 }
@@ -191,6 +206,18 @@ export function createActivationForensicSink(
 
         state.lastEventAtMs = now;
         state.status = statusForLifecycle(event.name, state.status);
+        // The emit carries the authoritative attempt: retry()/resume() advance the
+        // attempt under the same activation id, and without this every leg-2 row
+        // would be misattributed to the leg-1 attempt (the state object survives
+        // across attempts by design). Adoption is MONOTONIC: Pi-level auto-retries
+        // advance the same counter via auto_retry_start below while still carrying
+        // the older attempt id, so a lower incoming number must never rewind it.
+        // initialAttemptId is intentionally untouched.
+        const incomingAttemptNo = nativeAttemptNo(event.attemptId);
+        if (incomingAttemptNo > state.attemptNo) {
+          state.attemptId = event.attemptId;
+          state.attemptNo = incomingAttemptNo;
+        }
         state.workspacePath = stringValue(event.payload?.workspace) ?? state.workspacePath;
         state.piSessionId = stringValue(event.payload?.pi_session_id) ?? state.piSessionId;
         state.resolvedModel = stringValue(event.payload?.resolved_model) ?? state.resolvedModel;
@@ -203,7 +230,16 @@ export function createActivationForensicSink(
         if (completedOutput !== undefined) state.latestOutput = completedOutput;
         states.set(event.activationId, state);
 
-        const error = stringValue(event.payload?.error) ?? stringValue(event.payload?.reason);
+        // `reason` is a diagnostic discriminator, not an error: legacy only writes
+        // status.error on genuinely failed runs (appendTimelineEvent never calls
+        // setStatus). Project it as error text ONLY when the event itself moves the
+        // activation to error status — otherwise a healthy running activation would
+        // carry error:"tool_duration" (stale_warning, SPECIALISTS-102) or
+        // error:"<compaction reason>" while still running, which operators read as
+        // failure (status.ts prints job.error on ANY status). Keep in sync with the
+        // 'error' arm of statusForLifecycle above.
+        const error = stringValue(event.payload?.error)
+          ?? (ERROR_STATUS_LIFECYCLE.has(event.name) ? stringValue(event.payload?.reason) : undefined);
         const timelineEvent = mapNativeLifecycleEvent(event, {
           startedAtMs: state.startedAtMs,
           workspacePath: state.workspacePath,
@@ -270,6 +306,13 @@ export function createActivationForensicSink(
         if (input.event.type === 'compaction_start') state.autoCompactions += 1;
         state.lastEventAtMs = now;
         state.status = statusForSessionEvent(input.event.type, state.status);
+        // Same attempt-tracking as emit(): the input carries the live attempt id,
+        // adopted monotonically for the same auto-retry reason.
+        const sessionAttemptNo = nativeAttemptNo(input.attemptId);
+        if (sessionAttemptNo > state.attemptNo) {
+          state.attemptId = input.attemptId;
+          state.attemptNo = sessionAttemptNo;
+        }
         // The host passes `snapshot.piSessionId ?? ''` before a session exists; a blank
         // must never clear an identity the status row already carries.
         if (stringValue(input.piSessionId)) state.piSessionId = input.piSessionId;

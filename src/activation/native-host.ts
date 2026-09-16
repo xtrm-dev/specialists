@@ -803,9 +803,14 @@ export interface NativeActivationHostDeps {
   /**
    * Stall detection thresholds, shared with the legacy supervisor path (SPECIALISTS-102).
    * Only `tool_duration_warn_ms` is read here; the running/waiting reasons stay
-   * legacy-only and are never emitted by this host. Defaults to
-   * STALL_DETECTION_DEFAULTS when omitted — which is also what production does,
-   * since neither production construction site passes it (explicit residual).
+   * legacy-only and are never emitted by this host.
+   *
+   * This is an explicit host-level OVERRIDE: when provided it wins over the
+   * specialist spec (operator/test policy beats packaged default). When omitted the
+   * host resolves the threshold from the dispatched spec's `stall_detection`
+   * (same source legacy `sp run` uses), falling back to STALL_DETECTION_DEFAULTS.
+   * Either way production honours a configured threshold with no construction-site
+   * change, because the host resolves the spec itself on every dispatch.
    */
   stallDetection?: StallDetectionConfig;
 }
@@ -872,8 +877,20 @@ export class NativeActivationHost {
    * so a missed stop can never pin this long-lived process.
    */
   private readonly toolDurationWatch = new Map<string, ToolDurationWatch>();
-  /** Warn threshold for a single tool call; the shared default unless injected. */
+  /** Warn threshold fallback when an activation has no resolved entry; dep or shared default. */
   private readonly toolDurationWarnMs: number;
+  /** Explicit host-level override; undefined when no dep was provided (spec applies). */
+  private readonly toolDurationWarnMsByDep: number | undefined;
+  /**
+   * Per-activation warn threshold, resolved once at dispatch (SPECIALISTS-102
+   * parity follow-up): explicit host dep > specialist spec > shared default.
+   *
+   * Lifetime follows the REGISTRY, not the watch: entries are set in start() and
+   * deleted only in stop() (the sole registry.remove site), so retry()/resume()
+   * legs — new attempts under the same activation id — keep the spec threshold
+   * without re-resolving anything. A tool end clears the watch but never this.
+   */
+  private readonly toolDurationWarnMsByActivation = new Map<string, number>();
 
   /**
    * One transport for the whole host. Messages carry their own activationId, so a single
@@ -901,6 +918,7 @@ export class NativeActivationHost {
     this.settlements = deps.settlements ?? createFileSettlementStore(join(this.cwd, '.specialists', 'settlements'));
     this.admission = deps.admission ?? ((candidate, tier, contract) => validateBeforeRun(candidate as never, tier, contract));
     this.toolDurationWarnMs = deps.stallDetection?.tool_duration_warn_ms ?? STALL_DETECTION_DEFAULTS.tool_duration_warn_ms;
+    this.toolDurationWarnMsByDep = deps.stallDetection?.tool_duration_warn_ms;
     this.env = deps.env ?? process.env;
   }
 
@@ -1021,6 +1039,21 @@ export class NativeActivationHost {
 
     const execution = specialist.specialist.execution;
     const tier = execution.permission_required ?? 'READ_ONLY';
+
+    // SPECIALISTS-102 parity follow-up: honour the specialist's configured threshold
+    // exactly like legacy `sp run` (launch.ts:96 passes spec stall_detection to the
+    // Supervisor). Precedence: explicit host dep (operator/test override) > spec >
+    // shared default. The production construction sites need no change: the host
+    // resolves the spec itself on every dispatch, so a configured threshold reaches
+    // native the same way it reaches legacy.
+    const specToolDurationWarnMs = specialist.specialist.stall_detection?.tool_duration_warn_ms;
+    this.toolDurationWarnMsByActivation.set(
+      activationId,
+      this.toolDurationWarnMsByDep
+        ?? (typeof specToolDurationWarnMs === 'number' && Number.isFinite(specToolDurationWarnMs) && specToolDurationWarnMs > 0
+          ? specToolDurationWarnMs
+          : STALL_DETECTION_DEFAULTS.tool_duration_warn_ms),
+    );
 
     // Readers and writers are both admitted. A write tier does not gate admission here; it
     // selects the LEASE path below, and the lease is what makes a single writer safe. The
@@ -2071,8 +2104,10 @@ export class NativeActivationHost {
   private checkToolDuration(activationId: string): void {
     const watch = this.toolDurationWatch.get(activationId);
     if (!watch || watch.warned) return;
+    // Per-activation resolution from start(): dep > spec > shared default.
+    const thresholdMs = this.toolDurationWarnMsByActivation.get(activationId) ?? this.toolDurationWarnMs;
     const elapsed = this.now() - watch.startMs;
-    if (elapsed <= this.toolDurationWarnMs) return;
+    if (elapsed <= thresholdMs) return;
     watch.warned = true;
     const record = this.registry.get(activationId);
     // No record (stopped/disposed) means nobody can attribute the row: drop it and the watch.
@@ -2093,7 +2128,7 @@ export class NativeActivationHost {
         payload: {
           reason: 'tool_duration',
           silence_ms: elapsed,
-          threshold_ms: this.toolDurationWarnMs,
+          threshold_ms: thresholdMs,
           tool: watch.tool,
         },
       });
@@ -2799,7 +2834,9 @@ export class NativeActivationHost {
       await record.session.abort();
     } finally {
       // Explicit disposal ends duration watching: no timer survives activation end.
+      // The per-activation threshold dies with the registry entry (same lifetime).
       this.stopToolDurationWatch(activationId);
+      this.toolDurationWarnMsByActivation.delete(activationId);
       record.unsubscribe();
       record.session.dispose();
       record.snapshot.state = 'stopped';

@@ -409,9 +409,14 @@ export interface NativeActivationHostDeps {
     /**
      * Stall detection thresholds, shared with the legacy supervisor path (SPECIALISTS-102).
      * Only `tool_duration_warn_ms` is read here; the running/waiting reasons stay
-     * legacy-only and are never emitted by this host. Defaults to
-     * STALL_DETECTION_DEFAULTS when omitted — which is also what production does,
-     * since neither production construction site passes it (explicit residual).
+     * legacy-only and are never emitted by this host.
+     *
+     * This is an explicit host-level OVERRIDE: when provided it wins over the
+     * specialist spec (operator/test policy beats packaged default). When omitted the
+     * host resolves the threshold from the dispatched spec's `stall_detection`
+     * (same source legacy `sp run` uses), falling back to STALL_DETECTION_DEFAULTS.
+     * Either way production honours a configured threshold with no construction-site
+     * change, because the host resolves the spec itself on every dispatch.
      */
     stallDetection?: StallDetectionConfig;
 }
@@ -472,8 +477,20 @@ export declare class NativeActivationHost {
      * so a missed stop can never pin this long-lived process.
      */
     private readonly toolDurationWatch;
-    /** Warn threshold for a single tool call; the shared default unless injected. */
+    /** Warn threshold fallback when an activation has no resolved entry; dep or shared default. */
     private readonly toolDurationWarnMs;
+    /** Explicit host-level override; undefined when no dep was provided (spec applies). */
+    private readonly toolDurationWarnMsByDep;
+    /**
+     * Per-activation warn threshold, resolved once at dispatch (SPECIALISTS-102
+     * parity follow-up): explicit host dep > specialist spec > shared default.
+     *
+     * Lifetime follows the REGISTRY, not the watch: entries are set in start() and
+     * deleted only in stop() (the sole registry.remove site), so retry()/resume()
+     * legs — new attempts under the same activation id — keep the spec threshold
+     * without re-resolving anything. A tool end clears the watch but never this.
+     */
+    private readonly toolDurationWarnMsByActivation;
     /**
      * One transport for the whole host. Messages carry their own activationId, so a single
      * instance serves every child and the parent enumerates asks across the Fleet in one
