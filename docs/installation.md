@@ -52,6 +52,22 @@ Ordered install flow:
 6. Run `sp init --global` if you want machine-level user config
 7. Run `sp init`
 
+**Native dispatch additionally needs `@jaggerxtrm/substrate`** — the work store that supplies the
+task contract. `xt init` enrolls it (`xt init --substrate-dir <checkout>`); without an XTRM-managed
+install, add it yourself:
+
+```bash
+npm install -g @jaggerxtrm/substrate
+```
+
+The legacy `sp` CLI (Beads-backed jobs, Supervisor, worktrees) does **not** need it. It is recorded
+as an optional runtime prerequisite in `_runtime_prerequisites`, resolved at runtime in this order:
+an explicit `XTRM_SUBSTRATE_DIR`, then module resolution of an installed
+`@jaggerxtrm/substrate`, then the npm global prefix — so a globally installed Substrate beside a
+globally installed Specialists is found without a variable. If none resolves,
+`specialist_dispatch` is refused with `work_item_store_unavailable` while the read surfaces keep
+working; `sp doctor` reports this under `substrate (native dispatch)`.
+
 Category A and bootstrap note:
 - `sp list`, `sp doctor --check-drift`, and `sp prune-stale-defaults` are Category A commands.
 - They do not require `xt` or `.xtrm/`.

@@ -90,6 +90,11 @@
       "required": true,
       "scope": "runtime",
       "reason": "specialists init requires xt CLI and .xtrm/ managed by xtrm-tools"
+    },
+    "substrate": {
+      "required": false,
+      "scope": "runtime",
+      "reason": "native dispatch resolves the @jaggerxtrm/substrate work store at runtime; the legacy sp CLI does not need it"
     }
   },
   "dependencies": {

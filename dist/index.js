@@ -59317,6 +59317,495 @@ function runChannelDoctorChecks(inputs) {
 }
 var init_channel_doctor = () => {};
 
+// src/activation/authority-store.ts
+import { mkdirSync as mkdirSync16 } from "fs";
+import { createRequire as createRequire5 } from "module";
+import { homedir as homedir12 } from "os";
+import { dirname as dirname21, join as join47 } from "path";
+function resolveAuthorityDbPath(env = process.env) {
+  const substrate = (env.SUBSTRATE_DB ?? "").trim();
+  if (substrate)
+    return substrate;
+  const legacy = (env.XTRM_STATE_DB ?? "").trim();
+  if (legacy)
+    return legacy;
+  return join47(homedir12(), ".xtrm", "state.db");
+}
+function openAuthorityDb(dbPath) {
+  try {
+    const bun = require4("bun:sqlite");
+    if (bun?.Database)
+      return new bun.Database(dbPath);
+  } catch {}
+  try {
+    const node = require4("node:sqlite");
+    if (node?.DatabaseSync) {
+      const DatabaseSync = node.DatabaseSync;
+      const inner = new DatabaseSync(dbPath);
+      return {
+        exec: (sql) => inner.exec(sql),
+        prepare: (sql) => {
+          const stmt = inner.prepare(sql);
+          return { run: (...params) => stmt.run(...params.map((v) => v === undefined ? null : v)) };
+        },
+        close: () => inner.close()
+      };
+    }
+  } catch {}
+  return null;
+}
+function createFileAuthorityWriter(dbPath = resolveAuthorityDbPath()) {
+  return {
+    record(snapshot) {
+      try {
+        mkdirSync16(dirname21(dbPath), { recursive: true });
+        const db = openAuthorityDb(dbPath);
+        if (!db)
+          return;
+        try {
+          db.exec(ACTIVATIONS_DDL);
+          db.prepare(`INSERT OR REPLACE INTO activations
+               (activation_id, specialist, state, bead_id, last_activity_at)
+             VALUES (?, ?, ?, ?, ?)`).run(snapshot.activationId, snapshot.specialist, snapshot.state, snapshot.issueRef, snapshot.lastActivityAt);
+        } finally {
+          db.close();
+        }
+      } catch {}
+    },
+    remove(activationId) {
+      try {
+        const db = openAuthorityDb(dbPath);
+        if (!db)
+          return;
+        try {
+          db.exec(ACTIVATIONS_DDL);
+          db.prepare("DELETE FROM activations WHERE activation_id = ?").run(activationId);
+        } finally {
+          db.close();
+        }
+      } catch {}
+    }
+  };
+}
+var require4, ACTIVATIONS_DDL = `CREATE TABLE IF NOT EXISTS activations (
+  activation_id TEXT PRIMARY KEY,
+  specialist TEXT NOT NULL,
+  state TEXT NOT NULL,
+  bead_id TEXT,
+  last_activity_at INTEGER NOT NULL
+)`, NULL_AUTHORITY_WRITER;
+var init_authority_store = __esm(() => {
+  require4 = createRequire5(import.meta.url);
+  NULL_AUTHORITY_WRITER = { record: () => {}, remove: () => {} };
+});
+
+// src/activation/workitem-store.ts
+import { existsSync as existsSync45 } from "fs";
+import { createRequire as createRequire6 } from "module";
+import { homedir as homedir13 } from "os";
+import { dirname as dirname22, join as join48 } from "path";
+import { pathToFileURL } from "url";
+function resolveSubstrateDir(explicit, resolveInstalled) {
+  const trimmed = explicit.trim();
+  if (trimmed)
+    return trimmed;
+  if (resolveInstalled)
+    return resolveInstalled();
+  try {
+    return dirname22(require5.resolve(`${SUBSTRATE_PACKAGE}/package.json`));
+  } catch {}
+  return resolveSubstrateFromGlobalPrefix();
+}
+function resolveSubstrateFromGlobalPrefix(libDirs) {
+  const globalModules = resolveGlobalNodeModulesDir2();
+  const runtimePrefix = dirname22(dirname22(process.execPath));
+  const candidates = uniqueExistingLibDirs(libDirs ?? [
+    globalModules ? dirname22(globalModules) : undefined,
+    join48(runtimePrefix, "lib"),
+    join48(homedir13(), ".bun", "install", "global")
+  ]);
+  for (const libDir of candidates) {
+    try {
+      return dirname22(require5.resolve(`${SUBSTRATE_PACKAGE}/package.json`, { paths: [libDir] }));
+    } catch {}
+  }
+  return null;
+}
+function uniqueExistingLibDirs(candidates) {
+  const seen = new Set;
+  const out = [];
+  for (const candidate of candidates) {
+    if (!candidate)
+      continue;
+    const normalized = join48(candidate);
+    if (seen.has(normalized))
+      continue;
+    seen.add(normalized);
+    try {
+      if (existsSync45(normalized))
+        out.push(normalized);
+    } catch {}
+  }
+  return out;
+}
+function resolveWorkItemDbPath(env = process.env) {
+  return resolveAuthorityDbPath(env);
+}
+function openSubstrateDb(dbPath) {
+  const applyPragmas = (db) => {
+    db.exec("PRAGMA journal_mode = WAL");
+    db.exec("PRAGMA busy_timeout = 5000");
+    db.exec("PRAGMA synchronous = FULL");
+    db.exec("PRAGMA foreign_keys = ON");
+  };
+  const failures = [];
+  try {
+    const bun = require5("bun:sqlite");
+    if (bun?.Database) {
+      const db = new bun.Database(dbPath);
+      applyPragmas(db);
+      return db;
+    }
+    failures.push("bun:sqlite: module exposes no Database export");
+  } catch (error) {
+    failures.push(`bun:sqlite: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  try {
+    const node = require5("node:sqlite");
+    if (node?.DatabaseSync) {
+      const db = new node.DatabaseSync(dbPath);
+      applyPragmas(db);
+      return db;
+    }
+    failures.push("node:sqlite: module exposes no DatabaseSync export");
+  } catch (error) {
+    failures.push(`node:sqlite: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  throw new Error(`work-item store: cannot open the sqlite store at ${dbPath} ` + `(bun:sqlite and node:sqlite both unavailable: ${failures.join("; ")})`);
+}
+function attemptOfEntry(entry) {
+  return entry.executionContext?.specialist?.attemptId ?? entry.attemptId ?? null;
+}
+function createWorkItemBoundary(ports) {
+  const { issues, provenance, store, gate, journalService, provenanceService } = ports;
+  const viewOf = (ref) => {
+    const v = store.get(ref);
+    return {
+      ref: v.issue.humanRef,
+      issueId: v.issue.id,
+      revision: v.issue.currentRevision,
+      contractHash: v.issue.currentContractHash,
+      title: v.issue.title,
+      contract: v.contract,
+      readinessState: v.readinessState,
+      dispatchable: v.dispatchable,
+      reasons: v.reasons
+    };
+  };
+  return {
+    view(ref) {
+      return viewOf(ref);
+    },
+    epicAncestors(ref, depth) {
+      if (depth !== 1 && depth !== 2)
+        return [];
+      const ancestors = [];
+      const seen = new Set;
+      let childId = issues.resolveRef(ref).id;
+      for (let i = 0;i < depth; i += 1) {
+        const parent = issues.getParent(childId);
+        if (!parent)
+          break;
+        if (seen.has(parent.id))
+          break;
+        seen.add(parent.id);
+        const rev = issues.getRevision(parent.id, parent.currentRevision);
+        ancestors.push({
+          ref: parent.humanRef,
+          title: parent.title,
+          description: typeof rev.contract === "object" && rev.contract !== null ? String(rev.contract.problem ?? "") : undefined
+        });
+        childId = parent.id;
+      }
+      return ancestors;
+    },
+    completedBlockers(ref, depth) {
+      if (depth !== 1 && depth !== 2)
+        return [];
+      if (!issues.getBlockers)
+        return [];
+      const collected = [];
+      const seen = new Set;
+      let frontier = [issues.resolveRef(ref).id];
+      for (let hop = 0;hop < depth && frontier.length > 0; hop += 1) {
+        const next = [];
+        for (const id of frontier) {
+          for (const blocker of issues.getBlockers(id)) {
+            if (seen.has(blocker.id))
+              continue;
+            seen.add(blocker.id);
+            if (!SATISFIED_BLOCKER_STATES.has(blocker.lifecycleState))
+              continue;
+            const rev = issues.getRevision(blocker.id, blocker.currentRevision);
+            collected.push({
+              ref: blocker.humanRef,
+              title: blocker.title,
+              description: typeof rev.contract === "object" && rev.contract !== null ? String(rev.contract.problem ?? "") : undefined
+            });
+            next.push(blocker.id);
+          }
+        }
+        frontier = next;
+      }
+      return collected;
+    },
+    check(req) {
+      const check = gate.check(issues, req);
+      return { issueId: check.issueId, revision: check.revision, contractHash: check.contractHash, report: check.report };
+    },
+    bind(req) {
+      const issueId = issues.resolveRef(req.ref).id;
+      const active = issues.getActiveClaim(issueId);
+      if (active) {
+        if (active.holder !== req.holder) {
+          throw new Error(`dispatch refused: issue is claimed by '${active.holder}' \u2014 holder '${req.holder}' must claim first`);
+        }
+        const claimActivation = active.activationId ?? null;
+        const reqActivation = req.activationId ?? null;
+        if (claimActivation !== reqActivation) {
+          throw new Error("dispatch refused: claim activation does not match dispatch activation \u2014 claim with the dispatching activation id");
+        }
+        if (req.claimId != null && req.claimId !== active.id) {
+          throw new Error(`dispatch refused: supplied claim ${req.claimId} is not the active claim ${active.id}`);
+        }
+      }
+      const claimId = active?.id ?? req.claimId ?? undefined;
+      const out = gate.dispatch(issues, provenance, { ...req, claimId });
+      return out.binding;
+    },
+    inlineCreate(contract, opts = {}) {
+      const validation = validateContractText(contract);
+      if (!validation.ok) {
+        throw new Error(`${validation.reason}: ${validation.missing.join(", ")}`);
+      }
+      const sections = extractSections(contract);
+      const scrutiny = scrutinyLevel(contract) ?? "MEDIUM";
+      const problem = sections.get("PROBLEM") ?? "";
+      const firstLine = problem.split(`
+`).map((s) => s.trim()).find(Boolean);
+      const contractObj = {
+        problem,
+        success: sections.get("SUCCESS") ?? "",
+        scope: splitLines(sections.get("SCOPE")),
+        nonGoals: splitLines(sections.get("NON_GOALS")),
+        constraints: splitLines(sections.get("CONSTRAINTS")),
+        validation: splitLines(sections.get("VALIDATION")).map((check) => ({ check })),
+        output: splitLines(sections.get("OUTPUT")).map((artifact) => ({ artifact }))
+      };
+      const holder = opts.holder ?? "adapter::specialists";
+      const { projectId } = issues.resolveProject({ gitRoot: process.cwd() });
+      const issue = issues.createIssue({
+        projectId,
+        title: opts.title ?? (firstLine ?? "Specialist dispatch contract").slice(0, 72),
+        kind: "task",
+        contract: contractObj,
+        scrutiny,
+        authoredBy: holder
+      });
+      const { claim } = issues.claimReady(issue.id, holder, { outcome: "ready", policy: "default", attestedBy: holder }, { activationId: opts.activationId });
+      return { ref: issues.resolveRef(issue.id).humanRef, issueId: issue.id, claimId: claim.id };
+    },
+    releaseInlineClaim(ref, opts = {}) {
+      const issueId = issues.resolveRef(ref).id;
+      const active = issues.getActiveClaim(issueId);
+      if (!active || !issues.releaseClaim)
+        return false;
+      if (opts.activationId && active.activationId !== opts.activationId)
+        return false;
+      const released = issues.releaseClaim(issueId, active.holder, active.activationId ? { activationId: active.activationId } : {});
+      return released !== null;
+    },
+    journal(ref, kind, opts = {}) {
+      store.addJournal(ref, kind, opts);
+    },
+    ...journalService || provenanceService ? {
+      appendResult(ref, input2) {
+        if (!journalService)
+          throw new Error("settlement unavailable: no journal service on this boundary");
+        const issueId = issues.resolveRef(ref).id;
+        const entry = journalService.appendEntry(issueId, {
+          kind: "result",
+          result: input2.result,
+          executionContext: input2.executionContext ?? null,
+          refs: input2.refs ?? [],
+          participantId: input2.participantId,
+          activationId: input2.activationId,
+          sessionId: input2.sessionId
+        });
+        return { entryId: entry.id, sequence: entry.sequence };
+      },
+      allocateReceipt(bindingId) {
+        if (!provenanceService)
+          throw new Error("settlement unavailable: no provenance service on this boundary");
+        const receipt = provenanceService.allocateReceipt(bindingId);
+        return {
+          id: receipt.id,
+          executionBindingId: receipt.executionBindingId,
+          issueId: receipt.issueId,
+          issueRevision: receipt.issueRevision,
+          contractHash: receipt.contractHash
+        };
+      },
+      attachArtifact(receiptId, kind, value) {
+        if (!provenanceService)
+          throw new Error("settlement unavailable: no provenance service on this boundary");
+        const attached = provenanceService.attachArtifact(receiptId, kind, value);
+        return {
+          receiptId: attached.receiptId ?? receiptId,
+          kind: attached.kind ?? kind,
+          value: attached.value ?? value
+        };
+      },
+      findResultEntry(ref, key) {
+        if (!journalService?.listEntries) {
+          return { status: "unavailable", reason: "journal service exposes no entry listing" };
+        }
+        try {
+          const entries = journalService.listEntries(issues.resolveRef(ref).id, { kind: "result" });
+          const forActivation = entries.filter((entry) => entry.activationId === key.activationId);
+          const match = forActivation.find((entry) => attemptOfEntry(entry) === key.attemptId);
+          if (match)
+            return { status: "found", value: { entryId: match.id } };
+          const unattributed = forActivation.filter((entry) => attemptOfEntry(entry) === null);
+          if (unattributed.length > 0) {
+            return {
+              status: "unavailable",
+              reason: `${unattributed.length} Journal result(s) for this activation carry no attempt attribution`
+            };
+          }
+          return { status: "absent" };
+        } catch (error) {
+          return { status: "unavailable", reason: error instanceof Error ? error.message : String(error) };
+        }
+      },
+      findReceiptForBinding(ref, bindingId) {
+        if (!provenanceService?.listReceipts) {
+          return { status: "unavailable", reason: "provenance service exposes no receipt listing" };
+        }
+        try {
+          const rows = provenanceService.listReceipts(issues.resolveRef(ref).id);
+          const match = rows.find((receipt) => receipt.executionBindingId === bindingId);
+          return match ? { status: "found", value: { receiptId: match.id } } : { status: "absent" };
+        } catch (error) {
+          return { status: "unavailable", reason: error instanceof Error ? error.message : String(error) };
+        }
+      }
+    } : {}
+  };
+}
+function splitLines(body) {
+  if (!body)
+    return [];
+  return body.split(`
+`).map((l) => l.trim().replace(/^[-*\u2022]\s*/, "").replace(/^\d+[.)]\s*/, "").trim()).filter((l) => l.length > 0);
+}
+async function openWorkItemBoundary(opts = {}) {
+  const env = opts.env ?? process.env;
+  const substrateDir = resolveSubstrateDir(opts.substrateDir ?? env.XTRM_SUBSTRATE_DIR ?? "", opts.resolveInstalled);
+  if (!substrateDir) {
+    throw new Error(`work_item_store_unavailable: no Substrate package configured (install ${SUBSTRATE_PACKAGE}, ` + "or set XTRM_SUBSTRATE_DIR to a checkout of it)");
+  }
+  let pkgName;
+  try {
+    const pkgRaw = await import(pathToFileURL(join48(substrateDir, "package.json")).href, { with: { type: "json" } });
+    pkgName = pkgRaw.default?.name;
+  } catch (error) {
+    throw new Error(`work_item_store_unavailable: cannot read Substrate package identity at ${substrateDir}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (pkgName !== SUBSTRATE_PACKAGE) {
+    throw new Error(`work_item_store_unavailable: expected ${SUBSTRATE_PACKAGE} at ${substrateDir}, found ${JSON.stringify(pkgName) ?? "no name"}`);
+  }
+  const load = async (rel) => {
+    try {
+      return await import(pathToFileURL(join48(substrateDir, rel)).href);
+    } catch (error) {
+      throw new Error(`work_item_store_unavailable: cannot load Substrate module ${rel}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+  const [runner, issueSvcMod, journalMod, provMod, storeMod, gateMod] = await Promise.all([
+    load("src/store/migrations/runner.ts"),
+    load("src/service/issue-service.ts"),
+    load("src/service/journal-service.ts"),
+    load("src/service/provenance-service.ts"),
+    load("src/workitems/substrate-store.ts"),
+    load("src/workitems/dispatch-gate.ts")
+  ]);
+  for (const [mod, name] of [
+    [runner, "migrate"],
+    [issueSvcMod, "IssueService"],
+    [journalMod, "JournalService"],
+    [provMod, "ProvenanceService"],
+    [storeMod, "SubstrateIssueStore"],
+    [gateMod, "checkDispatch"],
+    [gateMod, "dispatchToSpecialist"]
+  ]) {
+    if (typeof mod[name] === "undefined") {
+      throw new Error(`work_item_store_unavailable: Substrate module is missing export ${name}`);
+    }
+  }
+  const dbPath = opts.dbPath ?? resolveWorkItemDbPath(env);
+  const storeRefusal = (error) => new Error(`work_item_store_unavailable: cannot open the Substrate store at ${dbPath} (set SUBSTRATE_DB or XTRM_STATE_DB to a writable database path, or install ${SUBSTRATE_PACKAGE}): ${error instanceof Error ? error.message : String(error)}`);
+  let db;
+  try {
+    db = openSubstrateDb(dbPath);
+    runner.migrate(db);
+  } catch (error) {
+    throw storeRefusal(error);
+  }
+  let issueService;
+  let journalSvc;
+  let provenance;
+  let store;
+  try {
+    issueService = new issueSvcMod.IssueService(db);
+    journalSvc = new journalMod.JournalService(db, issueService);
+    provenance = new provMod.ProvenanceService(db, issueService, journalSvc);
+    store = new storeMod.SubstrateIssueStore(issueService, journalSvc);
+  } catch (error) {
+    throw storeRefusal(error);
+  }
+  issueService.getBlockers = (childId) => issueService.listActiveEdges().filter((edge) => edge.active && edge.kind === "blocks" && edge.toIssue === childId).map((edge) => {
+    const issue = issueService.getIssue(edge.fromIssue);
+    return {
+      id: issue.id,
+      humanRef: issue.humanRef,
+      title: issue.title,
+      currentRevision: issue.currentRevision,
+      lifecycleState: issue.lifecycleState
+    };
+  });
+  const issues = issueService;
+  return createWorkItemBoundary({
+    issues,
+    provenance,
+    store,
+    gate: {
+      check: (i, r) => gateMod.checkDispatch(i, r),
+      dispatch: (i, p, r) => gateMod.dispatchToSpecialist(i, p, r)
+    },
+    journalService: journalSvc,
+    provenanceService: provenance
+  });
+}
+var require5, SUBSTRATE_PACKAGE = "@jaggerxtrm/substrate", SATISFIED_BLOCKER_STATES;
+var init_workitem_store = __esm(() => {
+  init_session();
+  init_contract_sections();
+  init_authority_store();
+  require5 = createRequire6(import.meta.url);
+  SATISFIED_BLOCKER_STATES = new Set(["done", "archived"]);
+});
+
 // src/cli/doctor.ts
 var exports_doctor = {};
 __export(exports_doctor, {
@@ -59330,9 +59819,9 @@ __export(exports_doctor, {
 });
 import { createHash as createHash9 } from "crypto";
 import { spawnSync as spawnSync26 } from "child_process";
-import { existsSync as existsSync45, mkdirSync as mkdirSync16, readdirSync as readdirSync21, readFileSync as readFileSync38, writeFileSync as writeFileSync20 } from "fs";
-import { homedir as homedir12 } from "os";
-import { join as join47, relative as relative5, resolve as resolve20 } from "path";
+import { existsSync as existsSync46, mkdirSync as mkdirSync17, readdirSync as readdirSync21, readFileSync as readFileSync38, writeFileSync as writeFileSync20 } from "fs";
+import { homedir as homedir14 } from "os";
+import { join as join49, relative as relative5, resolve as resolve20 } from "path";
 import { fileURLToPath as fileURLToPath8 } from "url";
 function ok3(msg) {
   console.log(`  ${green14("\u2713")} ${msg}`);
@@ -59362,7 +59851,7 @@ function isInstalled3(bin) {
   return spawnSync26("which", [bin], { encoding: "utf8", timeout: 2000 }).status === 0;
 }
 function loadJson2(path3) {
-  if (!existsSync45(path3))
+  if (!existsSync46(path3))
     return null;
   try {
     return JSON.parse(readFileSync38(path3, "utf8"));
@@ -59408,11 +59897,52 @@ function checkBd() {
     return false;
   }
   ok3(`bd installed  ${dim14(sp("bd", ["--version"]).stdout || "")}`);
-  if (existsSync45(join47(CWD, ".beads")))
+  if (existsSync46(join49(CWD, ".beads")))
     ok3(".beads/ present in project");
   else
     warn3(".beads/ not found in project");
   return true;
+}
+function checkSubstrateRuntime() {
+  section3("substrate (native dispatch)");
+  try {
+    const dir = resolveSubstrateDir(process.env.XTRM_SUBSTRATE_DIR ?? "");
+    if (!dir) {
+      warn3("@jaggerxtrm/substrate not resolvable \u2014 native dispatch will be refused");
+      fix("npm install -g @jaggerxtrm/substrate   (or set XTRM_SUBSTRATE_DIR to a checkout)");
+      hint("the legacy sp CLI does not need it; only specialist_dispatch does");
+      return;
+    }
+    const manifestPath = join49(dir, "package.json");
+    if (!existsSync46(manifestPath)) {
+      warn3(`no package.json at ${dir} \u2014 native dispatch will be refused`);
+      fix("point XTRM_SUBSTRATE_DIR at a @jaggerxtrm/substrate checkout");
+      return;
+    }
+    let name;
+    try {
+      name = JSON.parse(readFileSync38(manifestPath, "utf8")).name;
+    } catch {
+      warn3(`unreadable package identity at ${manifestPath}`);
+      fix("reinstall @jaggerxtrm/substrate, or re-point XTRM_SUBSTRATE_DIR");
+      return;
+    }
+    if (name !== "@jaggerxtrm/substrate") {
+      warn3(`expected @jaggerxtrm/substrate at ${dir}, found ${JSON.stringify(name) ?? "no name"}`);
+      fix("point XTRM_SUBSTRATE_DIR at a @jaggerxtrm/substrate checkout");
+      return;
+    }
+    ok3(`resolved  ${dim14(dir)}`);
+    const dbPath = resolveWorkItemDbPath();
+    if (!existsSync46(dbPath)) {
+      warn3(`work store not present at ${dbPath}`);
+      fix("run `xt init`, or `sb init`, or set SUBSTRATE_DB to an existing store");
+      return;
+    }
+  } catch (error) {
+    warn3(`substrate resolution failed: ${error instanceof Error ? error.message : String(error)}`);
+    fix("install @jaggerxtrm/substrate, or set XTRM_SUBSTRATE_DIR to a checkout");
+  }
 }
 function checkXt() {
   section3("xtrm-tools");
@@ -59429,7 +59959,7 @@ function resolveManagedSettingsPath() {
 }
 function resolveServerSourcePath() {
   const distPath = fileURLToPath8(new URL("../../dist/index.js", import.meta.url));
-  if (existsSync45(distPath))
+  if (existsSync46(distPath))
     return distPath;
   return fileURLToPath8(new URL("../mcp/v2-server.ts", import.meta.url));
 }
@@ -59444,7 +59974,7 @@ function checkChannels() {
   section3("Claude Code channel wake  (8-gate chain, spec AM.3)");
   const report = runChannelDoctorChecks({
     managedSettingsPath: resolveManagedSettingsPath(),
-    installedPluginsPath: join47(homedir12(), ".claude", "plugins", "installed_plugins.json"),
+    installedPluginsPath: join49(homedir14(), ".claude", "plugins", "installed_plugins.json"),
     serverSourcePath: resolveServerSourcePath(),
     expectedPluginName: EXPECTED_PLUGIN_NAME,
     expectedMarketplaceName: EXPECTED_MARKETPLACE_NAME,
@@ -59482,7 +60012,7 @@ function checkCatalogs(options2 = {}) {
       resolveInstalledVersion: (packageName) => {
         if (!globalDir)
           return;
-        return readPackageVersion(join47(globalDir, packageName, "package.json"));
+        return readPackageVersion(join49(globalDir, packageName, "package.json"));
       }
     });
   } catch (error) {
@@ -59559,7 +60089,7 @@ function collectFileHashes(rootDir) {
   const hashes = new Map;
   const visit2 = (dir) => {
     for (const entry of readdirSync21(dir, { withFileTypes: true })) {
-      const fullPath = join47(dir, entry.name);
+      const fullPath = join49(dir, entry.name);
       if (entry.isDirectory()) {
         visit2(fullPath);
         continue;
@@ -59570,22 +60100,22 @@ function collectFileHashes(rootDir) {
       hashes.set(relPath2, hashFile(fullPath));
     }
   };
-  if (existsSync45(rootDir))
+  if (existsSync46(rootDir))
     visit2(rootDir);
   return hashes;
 }
 function resolvePackageAssetDir(relativePath) {
-  return resolveCanonicalAssetDir(relativePath) ?? (existsSync45(join47(CWD, "config", relativePath)) ? join47(CWD, "config", relativePath) : null);
+  return resolveCanonicalAssetDir(relativePath) ?? (existsSync46(join49(CWD, "config", relativePath)) ? join49(CWD, "config", relativePath) : null);
 }
 function checkSkillDrift() {
-  section3(`Skills \u2014 global default pool  (~/${relative5(homedir12(), GLOBAL_DEFAULT_SKILLS_DIR)})`);
+  section3(`Skills \u2014 global default pool  (~/${relative5(homedir14(), GLOBAL_DEFAULT_SKILLS_DIR)})`);
   const canonicalSkillsDir = resolvePackageAssetDir("skills");
   if (!canonicalSkillsDir) {
     fail9("package canonical skills source missing");
     fix("restore config/skills/ or install package assets");
     return false;
   }
-  if (!existsSync45(GLOBAL_DEFAULT_SKILLS_DIR)) {
+  if (!existsSync46(GLOBAL_DEFAULT_SKILLS_DIR)) {
     fail9(`${GLOBAL_DEFAULT_SKILLS_DIR} missing`);
     fix("reinstall xtrm-tools (skills are vendored globally)");
     return false;
@@ -59620,7 +60150,7 @@ function checkSkillDrift() {
 }
 function checkUserOverlayDrift() {
   section3("User specialist overlays");
-  if (!existsSync45(USER_SPECIALISTS_DIR)) {
+  if (!existsSync46(USER_SPECIALISTS_DIR)) {
     ok3("no user overlays present");
     return true;
   }
@@ -59632,14 +60162,14 @@ function checkUserOverlayDrift() {
   const packageSpecialistsDir = resolvePackageAssetDir("specialists");
   let allOk = true;
   for (const name of overlays) {
-    const userPath = join47(USER_SPECIALISTS_DIR, name);
-    const defaultPath = packageSpecialistsDir ? join47(packageSpecialistsDir, name) : "";
+    const userPath = join49(USER_SPECIALISTS_DIR, name);
+    const defaultPath = packageSpecialistsDir ? join49(packageSpecialistsDir, name) : "";
     const userSpec = loadJson2(userPath);
     if (!userSpec) {
       warn3(`${name}: failed to parse \u2014 skipping drift check`);
       continue;
     }
-    if (!defaultPath || !existsSync45(defaultPath)) {
+    if (!defaultPath || !existsSync46(defaultPath)) {
       ok3(`${name}: user-only overlay (no package default to drift from)`);
       continue;
     }
@@ -59667,20 +60197,20 @@ function checkUserOverlayDrift() {
 }
 function checkRuntimeDirs() {
   section3(".specialists/ runtime directories");
-  const rootDir = join47(CWD, ".specialists");
-  const jobsDir = join47(rootDir, "jobs");
-  const readyDir = join47(rootDir, "ready");
+  const rootDir = join49(CWD, ".specialists");
+  const jobsDir = join49(rootDir, "jobs");
+  const readyDir = join49(rootDir, "ready");
   let allOk = true;
-  if (!existsSync45(rootDir)) {
+  if (!existsSync46(rootDir)) {
     warn3(".specialists/ not found in current project");
     fix("specialists init");
     allOk = false;
   } else {
     ok3(".specialists/ present");
     for (const [subDir, label] of [[jobsDir, "jobs"], [readyDir, "ready"]]) {
-      if (!existsSync45(subDir)) {
+      if (!existsSync46(subDir)) {
         warn3(`.specialists/${label}/ missing \u2014 auto-creating`);
-        mkdirSync16(subDir, { recursive: true });
+        mkdirSync17(subDir, { recursive: true });
         ok3(`.specialists/${label}/ created`);
       } else {
         ok3(`.specialists/${label}/ present`);
@@ -59692,8 +60222,8 @@ function checkRuntimeDirs() {
 function checkClaudeMdFragments() {
   section3("CLAUDE.md fragments");
   const projectRoot = process.cwd();
-  const claudeMd = join47(projectRoot, "CLAUDE.md");
-  if (!existsSync45(claudeMd)) {
+  const claudeMd = join49(projectRoot, "CLAUDE.md");
+  if (!existsSync46(claudeMd)) {
     warn3("No CLAUDE.md in project root \u2014 skipping fragment check");
     return true;
   }
@@ -60059,8 +60589,8 @@ function cleanupProcesses(jobsDir, dryRun) {
     zombieJobIds: []
   };
   for (const jobId of entries) {
-    const statusPath = join47(jobsDir, jobId, "status.json");
-    if (!existsSync45(statusPath))
+    const statusPath = join49(jobsDir, jobId, "status.json");
+    if (!existsSync46(statusPath))
       continue;
     try {
       const status = JSON.parse(readFileSync38(statusPath, "utf8"));
@@ -60148,8 +60678,8 @@ function resolveWatchdogMode() {
 function checkZombieJobs() {
   section3("Background jobs");
   hint(`watchdog mode: ${resolveWatchdogMode()}`);
-  const jobsDir = join47(CWD, ".specialists", "jobs");
-  if (!existsSync45(jobsDir)) {
+  const jobsDir = join49(CWD, ".specialists", "jobs");
+  if (!existsSync46(jobsDir)) {
     hint("No .specialists/jobs/ \u2014 skipping");
     return true;
   }
@@ -60346,6 +60876,7 @@ ${bold12("specialists doctor")}
   const spOk = checkSpAlias();
   const bdOk = checkBd();
   const xtOk = checkXt();
+  checkSubstrateRuntime();
   const catalogsOk = checkCatalogs();
   const versionOk = checkVersion();
   const skillDriftOk = checkSkillDrift();
@@ -60376,19 +60907,20 @@ var init_doctor = __esm(() => {
   init_channel_doctor();
   init_tool_catalog();
   init_session();
+  init_workitem_store();
   init_version_check();
   CWD = process.cwd();
-  SPECIALISTS_DIR = join47(CWD, ".specialists");
-  USER_SPECIALISTS_DIR = join47(SPECIALISTS_DIR, "user");
-  XTRM_HOME = join47(homedir12(), ".xtrm");
-  GLOBAL_DEFAULT_SKILLS_DIR = join47(XTRM_HOME, "skills", "default");
+  SPECIALISTS_DIR = join49(CWD, ".specialists");
+  USER_SPECIALISTS_DIR = join49(SPECIALISTS_DIR, "user");
+  XTRM_HOME = join49(homedir14(), ".xtrm");
+  GLOBAL_DEFAULT_SKILLS_DIR = join49(XTRM_HOME, "skills", "default");
 });
 
 // src/specialist/benchmarks.ts
 import { randomUUID as randomUUID4 } from "crypto";
-import { closeSync as closeSync5, existsSync as existsSync46, fsyncSync as fsyncSync2, mkdirSync as mkdirSync17, openSync as openSync6, readFileSync as readFileSync39, renameSync as renameSync6, writeFileSync as writeFileSync21 } from "fs";
-import { homedir as homedir13 } from "os";
-import { dirname as dirname21, join as join48 } from "path";
+import { closeSync as closeSync5, existsSync as existsSync47, fsyncSync as fsyncSync2, mkdirSync as mkdirSync18, openSync as openSync6, readFileSync as readFileSync39, renameSync as renameSync6, writeFileSync as writeFileSync21 } from "fs";
+import { homedir as homedir15 } from "os";
+import { dirname as dirname23, join as join50 } from "path";
 async function loadBenchmarkSnapshot(options2 = {}) {
   const warnings = [];
   const warn4 = (warning) => {
@@ -60421,7 +60953,7 @@ async function loadSourceSnapshot(source, options2, warn4) {
   return cached4 ? toSnapshot(cached4) : null;
 }
 function readCache2(path3, options2, warn4) {
-  if (!existsSync46(path3))
+  if (!existsSync47(path3))
     return null;
   try {
     const parsed = JSON.parse(readFileSync39(path3, "utf8"));
@@ -60504,11 +61036,11 @@ function toSnapshot(cache) {
 function isOffline(options2) {
   return options2.offline === true || process.env.SPECIALISTS_OFFLINE === "1";
 }
-function getBenchmarkCachePath(source, cacheDir = join48(homedir13(), ".cache", "specialists", "benchmarks")) {
-  return join48(cacheDir, `${source}.json`);
+function getBenchmarkCachePath(source, cacheDir = join50(homedir15(), ".cache", "specialists", "benchmarks")) {
+  return join50(cacheDir, `${source}.json`);
 }
 function writeCache2(path3, snapshot) {
-  mkdirSync17(dirname21(path3), { recursive: true, mode: 448 });
+  mkdirSync18(dirname23(path3), { recursive: true, mode: 448 });
   const tmpPath = `${path3}.${process.pid}.${randomUUID4()}.tmp`;
   writeFileSync21(tmpPath, `${JSON.stringify(snapshot, null, 2)}
 `, { mode: 384 });
@@ -60519,7 +61051,7 @@ function writeCache2(path3, snapshot) {
     closeSync5(fd);
   }
   renameSync6(tmpPath, path3);
-  fsyncDirectory(dirname21(path3));
+  fsyncDirectory(dirname23(path3));
 }
 function fsyncDirectory(path3) {
   try {
@@ -60542,13 +61074,13 @@ var init_benchmarks = __esm(() => {
 
 // src/specialist/model-probes.ts
 import { createHash as createHash10, randomUUID as randomUUID5 } from "crypto";
-import { mkdirSync as mkdirSync18, readdirSync as readdirSync22, readFileSync as readFileSync40, writeFileSync as writeFileSync22 } from "fs";
-import { homedir as homedir14 } from "os";
-import { dirname as dirname22, join as join49, resolve as resolve21 } from "path";
+import { mkdirSync as mkdirSync19, readdirSync as readdirSync22, readFileSync as readFileSync40, writeFileSync as writeFileSync22 } from "fs";
+import { homedir as homedir16 } from "os";
+import { dirname as dirname24, join as join51, resolve as resolve21 } from "path";
 async function runAgenticFollowthroughProbe(model, specName, opts = {}) {
   const probeDir = getProbeRunDir(model, specName, opts.cacheDir);
-  mkdirSync18(probeDir, { recursive: true, mode: 448 });
-  writeFileSync22(join49(probeDir, "probe-notes.md"), `# Probe notes
+  mkdirSync19(probeDir, { recursive: true, mode: 448 });
+  writeFileSync22(join51(probeDir, "probe-notes.md"), `# Probe notes
 `, { mode: 384 });
   const run40 = opts.runSpecialist ?? runScriptSpecialist;
   const result = await withTimeout(run40({
@@ -60565,17 +61097,17 @@ async function runAgenticFollowthroughProbe(model, specName, opts = {}) {
   const transcriptPath = writeTranscript(probeDir, result, output2, opts.now ?? new Date);
   const metrics = collectMetrics(probeDir, output2, result);
   const verdict = classifyProbe(metrics);
-  const summaryPath = join49(probeDir, "probe-summary.json");
+  const summaryPath = join51(probeDir, "probe-summary.json");
   const canonicalPath = getProbeCanonicalPath(model, specName, opts.cacheDir);
   const summaryJson = `${JSON.stringify({ verdict, metrics, sample_output: output2, transcript_path: transcriptPath }, null, 2)}
 `;
   writeFileSync22(summaryPath, summaryJson, { mode: 384 });
-  mkdirSync18(dirname22(canonicalPath), { recursive: true, mode: 448 });
+  mkdirSync19(dirname24(canonicalPath), { recursive: true, mode: 448 });
   writeFileSync22(canonicalPath, summaryJson, { mode: 384 });
   return { verdict, metrics, sample_output: output2, transcript_path: transcriptPath };
 }
 function collectMetrics(probeDir, output2, result) {
-  const eventsPath = join49(probeDir, "events.jsonl");
+  const eventsPath = join51(probeDir, "events.jsonl");
   const events = readJsonl(eventsPath);
   const turns = events.filter(isTurnEvent).length;
   const tools = events.filter(isToolEvent).length;
@@ -60635,7 +61167,7 @@ function countFilesOutsideScope(probeDir) {
   }
 }
 function writeTranscript(probeDir, result, output2, now) {
-  const transcriptPath = join49(probeDir, "events.jsonl");
+  const transcriptPath = join51(probeDir, "events.jsonl");
   writeFileSync22(transcriptPath, `${JSON.stringify({ type: "probe_result", at: now.toISOString(), result, output: output2 })}
 `, { flag: "a", mode: 384 });
   return transcriptPath;
@@ -60647,12 +61179,12 @@ function withTimeout(promise, timeoutMs) {
   });
   return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeout));
 }
-function getProbeRunDir(model, specName, cacheDir = join49(homedir14(), ".cache", "specialists", "probes")) {
+function getProbeRunDir(model, specName, cacheDir = join51(homedir16(), ".cache", "specialists", "probes")) {
   return resolve21(getProbeCanonicalPath(model, specName, cacheDir).replace(/\.json$/u, ""), randomUUID5());
 }
-function getProbeCanonicalPath(model, specName, cacheDir = join49(homedir14(), ".cache", "specialists", "probes")) {
+function getProbeCanonicalPath(model, specName, cacheDir = join51(homedir16(), ".cache", "specialists", "probes")) {
   const probeId = createHash10("sha256").update(`${model}\x00${specName}\x00${PROBE_TEMPLATE}`).digest("hex").slice(0, 12);
-  return join49(cacheDir, `${sanitizePathSegment(model)}-${sanitizePathSegment(specName)}-${probeId}.json`);
+  return join51(cacheDir, `${sanitizePathSegment(model)}-${sanitizePathSegment(specName)}-${probeId}.json`);
 }
 function sanitizePathSegment(value) {
   return value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "unknown";
@@ -61184,20 +61716,20 @@ var init_setup = __esm(() => {
 });
 
 // src/cli/serve-hot-reload.ts
-import { existsSync as existsSync47, readdirSync as readdirSync23, statSync as statSync15, watch as fsWatch } from "fs";
-import { join as join50 } from "path";
+import { existsSync as existsSync48, readdirSync as readdirSync23, statSync as statSync15, watch as fsWatch } from "fs";
+import { join as join52 } from "path";
 function specialistNameFromFile(file) {
   const match = file.match(/^(.+)\.specialist\.(json|yaml)$/);
   return match ? match[1] : null;
 }
 function snapshotMtimes(dir) {
   const out = new Map;
-  if (!existsSync47(dir))
+  if (!existsSync48(dir))
     return out;
   const entries = readdirSync23(dir).filter((name) => specialistNameFromFile(name) !== null);
   for (const name of entries) {
     try {
-      out.set(name, statSync15(join50(dir, name)).mtimeMs);
+      out.set(name, statSync15(join52(dir, name)).mtimeMs);
     } catch {}
   }
   return out;
@@ -61254,7 +61786,7 @@ function createUserDirWatcher(opts) {
       for (const file of changed)
         queue(file);
     }, opts.pollMs);
-  } else if (existsSync47(opts.userDir)) {
+  } else if (existsSync48(opts.userDir)) {
     try {
       watcher = fsWatch(opts.userDir, { persistent: false }, (_eventType, filename) => {
         queue(filename ? String(filename) : null);
@@ -61297,9 +61829,9 @@ import { randomUUID as randomUUID6 } from "crypto";
 import { once } from "events";
 import { spawnSync as spawnSync28 } from "child_process";
 import { access, readdir as readdir2, readFile as readFile4, constants as constants3 } from "fs/promises";
-import { existsSync as existsSync48 } from "fs";
-import { homedir as homedir15 } from "os";
-import { join as join51 } from "path";
+import { existsSync as existsSync49 } from "fs";
+import { homedir as homedir17 } from "os";
+import { join as join53 } from "path";
 function createReadinessState() {
   return { shuttingDown: false, auditFailures: [], dbWriteFailuresTotal: 0 };
 }
@@ -61315,7 +61847,7 @@ function pruneAuditFailures(state, now = Date.now()) {
   }
 }
 async function checkUserDirSpecs(userDir) {
-  if (!existsSync48(userDir))
+  if (!existsSync49(userDir))
     return "empty";
   const entries = await readdir2(userDir).catch(() => []);
   const specFiles = entries.filter((name) => name.endsWith(".specialist.json") || name.endsWith(".specialist.yaml"));
@@ -61324,7 +61856,7 @@ async function checkUserDirSpecs(userDir) {
   let validCount = 0;
   for (const file of specFiles) {
     try {
-      const content = await readFile4(join51(userDir, file), "utf-8");
+      const content = await readFile4(join53(userDir, file), "utf-8");
       const json = file.endsWith(".json") ? content : null;
       if (!json)
         continue;
@@ -61342,7 +61874,7 @@ async function evaluateReadiness2(opts) {
   if (opts.state.auditFailures.length > opts.auditFailureThreshold) {
     return { ready: false, reason: "degraded:audit" };
   }
-  const piConfigPath = opts.piConfigPath ?? join51(homedir15(), ".pi", "agent", "auth.json");
+  const piConfigPath = opts.piConfigPath ?? join53(homedir17(), ".pi", "agent", "auth.json");
   try {
     await access(piConfigPath, constants3.R_OK);
   } catch {
@@ -61363,7 +61895,7 @@ async function evaluateReadiness2(opts) {
       warning = canaryFailure;
     }
   }
-  const userDir = join51(opts.projectDir, ".specialists", "user");
+  const userDir = join53(opts.projectDir, ".specialists", "user");
   const userDirResult = await checkUserDirSpecs(userDir);
   if (userDirResult === "empty")
     return { ready: false, reason: "empty_user_dir" };
@@ -61509,7 +62041,7 @@ async function startServe(argv = process.argv.slice(3)) {
     return createObservabilitySqliteClientAtPath(dbLocation.dbPath);
   })();
   const readinessState = createReadinessState();
-  const userDir = join51(args.projectDir, ".specialists", "user");
+  const userDir = join53(args.projectDir, ".specialists", "user");
   const hotReload = createUserDirWatcher({ loader, userDir, pollMs: args.reloadPollMs });
   let active = 0;
   const children = new Set;
@@ -91442,8 +91974,8 @@ var init_stdio = __esm(() => {
 });
 
 // src/activation/transport/pending-store.ts
-import { existsSync as existsSync49, mkdirSync as mkdirSync19, readdirSync as readdirSync24, readFileSync as readFileSync42, renameSync as renameSync7, unlinkSync as unlinkSync2, writeFileSync as writeFileSync23 } from "fs";
-import { join as join52 } from "path";
+import { existsSync as existsSync50, mkdirSync as mkdirSync20, readdirSync as readdirSync24, readFileSync as readFileSync42, renameSync as renameSync7, unlinkSync as unlinkSync2, writeFileSync as writeFileSync23 } from "fs";
+import { join as join54 } from "path";
 function projectDeliveryState(state) {
   if (state === "delivered")
     return "delivered";
@@ -91455,16 +91987,16 @@ function createsPendingAsk(kind) {
   return KINDS_AWAITING_REPLY.has(kind);
 }
 function interactionsRoot(repoRoot) {
-  return join52(repoRoot, ".specialists", "interactions");
+  return join54(repoRoot, ".specialists", "interactions");
 }
 function recordPath(repoRoot, activationId, messageId) {
-  return join52(interactionsRoot(repoRoot), activationId, `${messageId}.json`);
+  return join54(interactionsRoot(repoRoot), activationId, `${messageId}.json`);
 }
 function replyPath(repoRoot, activationId, messageId) {
-  return join52(interactionsRoot(repoRoot), activationId, `${messageId}.reply.json`);
+  return join54(interactionsRoot(repoRoot), activationId, `${messageId}.reply.json`);
 }
 function writeAtomic(path3, value, exclusive = false) {
-  if (exclusive && existsSync49(path3)) {
+  if (exclusive && existsSync50(path3)) {
     throw new Error(`interaction record already exists: ${path3}`);
   }
   const tmp = `${path3}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
@@ -91480,7 +92012,7 @@ function writeAtomic(path3, value, exclusive = false) {
   }
 }
 function readJson3(path3) {
-  if (!existsSync49(path3))
+  if (!existsSync50(path3))
     return;
   try {
     return JSON.parse(readFileSync42(path3, "utf-8"));
@@ -91497,7 +92029,7 @@ function create(repoRoot, input2) {
     message: input2.message,
     delivery: { state: "pending", attempts: [] }
   };
-  mkdirSync19(join52(interactionsRoot(repoRoot), input2.activationId), { recursive: true, mode: 448 });
+  mkdirSync20(join54(interactionsRoot(repoRoot), input2.activationId), { recursive: true, mode: 448 });
   writeAtomic(recordPath(repoRoot, input2.activationId, input2.messageId), record4, true);
   return record4;
 }
@@ -91551,14 +92083,14 @@ function recordReplyDelivery(repoRoot, activationId, messageId, reply) {
   return record4;
 }
 function listForActivation(repoRoot, activationId) {
-  const dir = join52(interactionsRoot(repoRoot), activationId);
-  if (!existsSync49(dir))
+  const dir = join54(interactionsRoot(repoRoot), activationId);
+  if (!existsSync50(dir))
     return [];
   const views = [];
   for (const entry of readdirSync24(dir)) {
     if (!entry.endsWith(".json") || entry.endsWith(".reply.json") || entry.endsWith(".tmp"))
       continue;
-    const record4 = readJson3(join52(dir, entry));
+    const record4 = readJson3(join54(dir, entry));
     if (!record4)
       continue;
     views.push({ ...record4, reply: readReply(repoRoot, activationId, record4.messageId) });
@@ -91567,7 +92099,7 @@ function listForActivation(repoRoot, activationId) {
 }
 function listAll(repoRoot) {
   const root = interactionsRoot(repoRoot);
-  if (!existsSync49(root))
+  if (!existsSync50(root))
     return [];
   return readdirSync24(root).flatMap((activationId) => listForActivation(repoRoot, activationId)).sort((a, b) => a.createdAtMs - b.createdAtMs);
 }
@@ -91680,11 +92212,11 @@ ${detail.missing.map((m) => `  - ${m}`).join(`
 
 // src/activation/workspace-lease.ts
 import { createHash as createHash11 } from "crypto";
-import { existsSync as existsSync50, linkSync, mkdirSync as mkdirSync20, readFileSync as readFileSync43, realpathSync as realpathSync5, renameSync as renameSync8, unlinkSync as unlinkSync3, writeFileSync as writeFileSync24 } from "fs";
-import { join as join53 } from "path";
+import { existsSync as existsSync51, linkSync, mkdirSync as mkdirSync21, readFileSync as readFileSync43, realpathSync as realpathSync5, renameSync as renameSync8, unlinkSync as unlinkSync3, writeFileSync as writeFileSync24 } from "fs";
+import { join as join55 } from "path";
 function procLeaseProbe() {
   return {
-    canVerify: () => existsSync50("/proc/self/stat"),
+    canVerify: () => existsSync51("/proc/self/stat"),
     startTicks(pid) {
       try {
         const stat2 = readFileSync43(`/proc/${pid}/stat`, "utf-8");
@@ -91712,14 +92244,14 @@ function workspaceKey(workspace) {
   return createHash11("sha256").update(resolved).digest("hex").slice(0, 16);
 }
 function leaseDir(workspace) {
-  return join53(workspace.gitCommonDir ?? workspace.repositoryRoot, ".specialists", "leases");
+  return join55(workspace.gitCommonDir ?? workspace.repositoryRoot, ".specialists", "leases");
 }
 function leasePath(workspace) {
-  return join53(leaseDir(workspace), `${workspaceKey(workspace)}.json`);
+  return join55(leaseDir(workspace), `${workspaceKey(workspace)}.json`);
 }
 function inspect(workspace, probe = procLeaseProbe()) {
   const path3 = leasePath(workspace);
-  if (!existsSync50(path3))
+  if (!existsSync51(path3))
     return { state: "free" };
   let lease;
   try {
@@ -91763,7 +92295,7 @@ function acquire(request, probe = procLeaseProbe()) {
     holder: selfHolder(probe),
     acquiredAtMs: Date.now()
   };
-  mkdirSync20(leaseDir(workspace), { recursive: true, mode: 448 });
+  mkdirSync21(leaseDir(workspace), { recursive: true, mode: 448 });
   const staging = `${path3}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
   writeFileSync24(staging, `${JSON.stringify(lease, null, 2)}
 `, { mode: 384 });
@@ -91877,10 +92409,10 @@ var init_workspace_lease = __esm(() => {
 });
 
 // src/activation/workspace-reconcile.ts
-import { appendFileSync as appendFileSync6, existsSync as existsSync51, mkdirSync as mkdirSync21, readdirSync as readdirSync25, readFileSync as readFileSync44, unlinkSync as unlinkSync4 } from "fs";
-import { join as join54 } from "path";
+import { appendFileSync as appendFileSync6, existsSync as existsSync52, mkdirSync as mkdirSync22, readdirSync as readdirSync25, readFileSync as readFileSync44, unlinkSync as unlinkSync4 } from "fs";
+import { join as join56 } from "path";
 function readLogAt(path3) {
-  if (!existsSync51(path3))
+  if (!existsSync52(path3))
     return [];
   const out = [];
   for (const line of readFileSync44(path3, "utf-8").split(`
@@ -91898,23 +92430,23 @@ function leaseScopeFor(cwd) {
   return {
     repositoryRoot: commonRoot ?? cwd,
     worktreePath: cwd,
-    gitCommonDir: commonRoot ? join54(commonRoot, ".git") : undefined
+    gitCommonDir: commonRoot ? join56(commonRoot, ".git") : undefined
   };
 }
 function projectUncertainWorkspaces(scope, probe = procLeaseProbe()) {
   const dir = leaseDir(scope);
-  if (!existsSync51(dir))
+  if (!existsSync52(dir))
     return [];
   const out = [];
   for (const entry of readdirSync25(dir)) {
     if (!entry.endsWith(".json"))
       continue;
     const key = entry.slice(0, -".json".length);
-    const lease = readLeaseFile(join54(dir, entry));
+    const lease = readLeaseFile(join56(dir, entry));
     const status = lease ? inspect({ ...scope, worktreePath: lease.worktreePath }, probe) : { state: "uncertain", uncertainReason: "unreadable_record" };
     if (status.state !== "uncertain")
       continue;
-    const log = readLogAt(join54(dir, `${key}.reconcile.jsonl`));
+    const log = readLogAt(join56(dir, `${key}.reconcile.jsonl`));
     const last = log[log.length - 1];
     out.push({
       workspace_key: key,
@@ -92021,7 +92553,7 @@ var init_rejection = __esm(() => {
 });
 
 // src/tools/specialist/activation.tool.ts
-import { existsSync as existsSync52 } from "fs";
+import { existsSync as existsSync53 } from "fs";
 import { fileURLToPath as fileURLToPath9 } from "url";
 function toActivationView(snapshot, nowMs = Date.now()) {
   return {
@@ -92234,7 +92766,7 @@ var init_activation_tool = __esm(() => {
   DIST_LIB_PATH = (() => {
     for (const candidate of ["./lib.js", "../../../dist/lib.js"]) {
       const path3 = fileURLToPath9(new URL(candidate, import.meta.url));
-      if (existsSync52(path3))
+      if (existsSync53(path3))
         return path3;
     }
     return fileURLToPath9(new URL("../../../dist/lib.js", import.meta.url));
@@ -92310,495 +92842,6 @@ var init_specialist_status_tool = __esm(() => {
   init_workspace_reconcile();
   init_activation_tool();
   BACKENDS2 = ["gemini", "qwen", "anthropic", "openai"];
-});
-
-// src/activation/authority-store.ts
-import { mkdirSync as mkdirSync22 } from "fs";
-import { createRequire as createRequire5 } from "module";
-import { homedir as homedir16 } from "os";
-import { dirname as dirname23, join as join55 } from "path";
-function resolveAuthorityDbPath(env = process.env) {
-  const substrate = (env.SUBSTRATE_DB ?? "").trim();
-  if (substrate)
-    return substrate;
-  const legacy = (env.XTRM_STATE_DB ?? "").trim();
-  if (legacy)
-    return legacy;
-  return join55(homedir16(), ".xtrm", "state.db");
-}
-function openAuthorityDb(dbPath) {
-  try {
-    const bun = require4("bun:sqlite");
-    if (bun?.Database)
-      return new bun.Database(dbPath);
-  } catch {}
-  try {
-    const node3 = require4("node:sqlite");
-    if (node3?.DatabaseSync) {
-      const DatabaseSync = node3.DatabaseSync;
-      const inner = new DatabaseSync(dbPath);
-      return {
-        exec: (sql) => inner.exec(sql),
-        prepare: (sql) => {
-          const stmt = inner.prepare(sql);
-          return { run: (...params) => stmt.run(...params.map((v) => v === undefined ? null : v)) };
-        },
-        close: () => inner.close()
-      };
-    }
-  } catch {}
-  return null;
-}
-function createFileAuthorityWriter(dbPath = resolveAuthorityDbPath()) {
-  return {
-    record(snapshot) {
-      try {
-        mkdirSync22(dirname23(dbPath), { recursive: true });
-        const db = openAuthorityDb(dbPath);
-        if (!db)
-          return;
-        try {
-          db.exec(ACTIVATIONS_DDL);
-          db.prepare(`INSERT OR REPLACE INTO activations
-               (activation_id, specialist, state, bead_id, last_activity_at)
-             VALUES (?, ?, ?, ?, ?)`).run(snapshot.activationId, snapshot.specialist, snapshot.state, snapshot.issueRef, snapshot.lastActivityAt);
-        } finally {
-          db.close();
-        }
-      } catch {}
-    },
-    remove(activationId) {
-      try {
-        const db = openAuthorityDb(dbPath);
-        if (!db)
-          return;
-        try {
-          db.exec(ACTIVATIONS_DDL);
-          db.prepare("DELETE FROM activations WHERE activation_id = ?").run(activationId);
-        } finally {
-          db.close();
-        }
-      } catch {}
-    }
-  };
-}
-var require4, ACTIVATIONS_DDL = `CREATE TABLE IF NOT EXISTS activations (
-  activation_id TEXT PRIMARY KEY,
-  specialist TEXT NOT NULL,
-  state TEXT NOT NULL,
-  bead_id TEXT,
-  last_activity_at INTEGER NOT NULL
-)`, NULL_AUTHORITY_WRITER;
-var init_authority_store = __esm(() => {
-  require4 = createRequire5(import.meta.url);
-  NULL_AUTHORITY_WRITER = { record: () => {}, remove: () => {} };
-});
-
-// src/activation/workitem-store.ts
-import { existsSync as existsSync53 } from "fs";
-import { createRequire as createRequire6 } from "module";
-import { homedir as homedir17 } from "os";
-import { dirname as dirname24, join as join56 } from "path";
-import { pathToFileURL } from "url";
-function resolveSubstrateDir(explicit, resolveInstalled) {
-  const trimmed = explicit.trim();
-  if (trimmed)
-    return trimmed;
-  if (resolveInstalled)
-    return resolveInstalled();
-  try {
-    return dirname24(require5.resolve(`${SUBSTRATE_PACKAGE}/package.json`));
-  } catch {}
-  return resolveSubstrateFromGlobalPrefix();
-}
-function resolveSubstrateFromGlobalPrefix(libDirs) {
-  const globalModules = resolveGlobalNodeModulesDir2();
-  const runtimePrefix = dirname24(dirname24(process.execPath));
-  const candidates = uniqueExistingLibDirs(libDirs ?? [
-    globalModules ? dirname24(globalModules) : undefined,
-    join56(runtimePrefix, "lib"),
-    join56(homedir17(), ".bun", "install", "global")
-  ]);
-  for (const libDir of candidates) {
-    try {
-      return dirname24(require5.resolve(`${SUBSTRATE_PACKAGE}/package.json`, { paths: [libDir] }));
-    } catch {}
-  }
-  return null;
-}
-function uniqueExistingLibDirs(candidates) {
-  const seen = new Set;
-  const out = [];
-  for (const candidate of candidates) {
-    if (!candidate)
-      continue;
-    const normalized = join56(candidate);
-    if (seen.has(normalized))
-      continue;
-    seen.add(normalized);
-    try {
-      if (existsSync53(normalized))
-        out.push(normalized);
-    } catch {}
-  }
-  return out;
-}
-function resolveWorkItemDbPath(env = process.env) {
-  return resolveAuthorityDbPath(env);
-}
-function openSubstrateDb(dbPath) {
-  const applyPragmas = (db) => {
-    db.exec("PRAGMA journal_mode = WAL");
-    db.exec("PRAGMA busy_timeout = 5000");
-    db.exec("PRAGMA synchronous = FULL");
-    db.exec("PRAGMA foreign_keys = ON");
-  };
-  const failures = [];
-  try {
-    const bun = require5("bun:sqlite");
-    if (bun?.Database) {
-      const db = new bun.Database(dbPath);
-      applyPragmas(db);
-      return db;
-    }
-    failures.push("bun:sqlite: module exposes no Database export");
-  } catch (error3) {
-    failures.push(`bun:sqlite: ${error3 instanceof Error ? error3.message : String(error3)}`);
-  }
-  try {
-    const node3 = require5("node:sqlite");
-    if (node3?.DatabaseSync) {
-      const db = new node3.DatabaseSync(dbPath);
-      applyPragmas(db);
-      return db;
-    }
-    failures.push("node:sqlite: module exposes no DatabaseSync export");
-  } catch (error3) {
-    failures.push(`node:sqlite: ${error3 instanceof Error ? error3.message : String(error3)}`);
-  }
-  throw new Error(`work-item store: cannot open the sqlite store at ${dbPath} ` + `(bun:sqlite and node:sqlite both unavailable: ${failures.join("; ")})`);
-}
-function attemptOfEntry(entry) {
-  return entry.executionContext?.specialist?.attemptId ?? entry.attemptId ?? null;
-}
-function createWorkItemBoundary(ports) {
-  const { issues, provenance, store, gate, journalService, provenanceService } = ports;
-  const viewOf = (ref) => {
-    const v = store.get(ref);
-    return {
-      ref: v.issue.humanRef,
-      issueId: v.issue.id,
-      revision: v.issue.currentRevision,
-      contractHash: v.issue.currentContractHash,
-      title: v.issue.title,
-      contract: v.contract,
-      readinessState: v.readinessState,
-      dispatchable: v.dispatchable,
-      reasons: v.reasons
-    };
-  };
-  return {
-    view(ref) {
-      return viewOf(ref);
-    },
-    epicAncestors(ref, depth) {
-      if (depth !== 1 && depth !== 2)
-        return [];
-      const ancestors = [];
-      const seen = new Set;
-      let childId = issues.resolveRef(ref).id;
-      for (let i = 0;i < depth; i += 1) {
-        const parent = issues.getParent(childId);
-        if (!parent)
-          break;
-        if (seen.has(parent.id))
-          break;
-        seen.add(parent.id);
-        const rev = issues.getRevision(parent.id, parent.currentRevision);
-        ancestors.push({
-          ref: parent.humanRef,
-          title: parent.title,
-          description: typeof rev.contract === "object" && rev.contract !== null ? String(rev.contract.problem ?? "") : undefined
-        });
-        childId = parent.id;
-      }
-      return ancestors;
-    },
-    completedBlockers(ref, depth) {
-      if (depth !== 1 && depth !== 2)
-        return [];
-      if (!issues.getBlockers)
-        return [];
-      const collected = [];
-      const seen = new Set;
-      let frontier = [issues.resolveRef(ref).id];
-      for (let hop = 0;hop < depth && frontier.length > 0; hop += 1) {
-        const next = [];
-        for (const id of frontier) {
-          for (const blocker of issues.getBlockers(id)) {
-            if (seen.has(blocker.id))
-              continue;
-            seen.add(blocker.id);
-            if (!SATISFIED_BLOCKER_STATES.has(blocker.lifecycleState))
-              continue;
-            const rev = issues.getRevision(blocker.id, blocker.currentRevision);
-            collected.push({
-              ref: blocker.humanRef,
-              title: blocker.title,
-              description: typeof rev.contract === "object" && rev.contract !== null ? String(rev.contract.problem ?? "") : undefined
-            });
-            next.push(blocker.id);
-          }
-        }
-        frontier = next;
-      }
-      return collected;
-    },
-    check(req) {
-      const check = gate.check(issues, req);
-      return { issueId: check.issueId, revision: check.revision, contractHash: check.contractHash, report: check.report };
-    },
-    bind(req) {
-      const issueId = issues.resolveRef(req.ref).id;
-      const active = issues.getActiveClaim(issueId);
-      if (active) {
-        if (active.holder !== req.holder) {
-          throw new Error(`dispatch refused: issue is claimed by '${active.holder}' \u2014 holder '${req.holder}' must claim first`);
-        }
-        const claimActivation = active.activationId ?? null;
-        const reqActivation = req.activationId ?? null;
-        if (claimActivation !== reqActivation) {
-          throw new Error("dispatch refused: claim activation does not match dispatch activation \u2014 claim with the dispatching activation id");
-        }
-        if (req.claimId != null && req.claimId !== active.id) {
-          throw new Error(`dispatch refused: supplied claim ${req.claimId} is not the active claim ${active.id}`);
-        }
-      }
-      const claimId = active?.id ?? req.claimId ?? undefined;
-      const out = gate.dispatch(issues, provenance, { ...req, claimId });
-      return out.binding;
-    },
-    inlineCreate(contract, opts = {}) {
-      const validation = validateContractText(contract);
-      if (!validation.ok) {
-        throw new Error(`${validation.reason}: ${validation.missing.join(", ")}`);
-      }
-      const sections = extractSections(contract);
-      const scrutiny = scrutinyLevel(contract) ?? "MEDIUM";
-      const problem = sections.get("PROBLEM") ?? "";
-      const firstLine = problem.split(`
-`).map((s) => s.trim()).find(Boolean);
-      const contractObj = {
-        problem,
-        success: sections.get("SUCCESS") ?? "",
-        scope: splitLines(sections.get("SCOPE")),
-        nonGoals: splitLines(sections.get("NON_GOALS")),
-        constraints: splitLines(sections.get("CONSTRAINTS")),
-        validation: splitLines(sections.get("VALIDATION")).map((check) => ({ check })),
-        output: splitLines(sections.get("OUTPUT")).map((artifact) => ({ artifact }))
-      };
-      const holder = opts.holder ?? "adapter::specialists";
-      const { projectId } = issues.resolveProject({ gitRoot: process.cwd() });
-      const issue3 = issues.createIssue({
-        projectId,
-        title: opts.title ?? (firstLine ?? "Specialist dispatch contract").slice(0, 72),
-        kind: "task",
-        contract: contractObj,
-        scrutiny,
-        authoredBy: holder
-      });
-      const { claim: claim3 } = issues.claimReady(issue3.id, holder, { outcome: "ready", policy: "default", attestedBy: holder }, { activationId: opts.activationId });
-      return { ref: issues.resolveRef(issue3.id).humanRef, issueId: issue3.id, claimId: claim3.id };
-    },
-    releaseInlineClaim(ref, opts = {}) {
-      const issueId = issues.resolveRef(ref).id;
-      const active = issues.getActiveClaim(issueId);
-      if (!active || !issues.releaseClaim)
-        return false;
-      if (opts.activationId && active.activationId !== opts.activationId)
-        return false;
-      const released = issues.releaseClaim(issueId, active.holder, active.activationId ? { activationId: active.activationId } : {});
-      return released !== null;
-    },
-    journal(ref, kind, opts = {}) {
-      store.addJournal(ref, kind, opts);
-    },
-    ...journalService || provenanceService ? {
-      appendResult(ref, input2) {
-        if (!journalService)
-          throw new Error("settlement unavailable: no journal service on this boundary");
-        const issueId = issues.resolveRef(ref).id;
-        const entry = journalService.appendEntry(issueId, {
-          kind: "result",
-          result: input2.result,
-          executionContext: input2.executionContext ?? null,
-          refs: input2.refs ?? [],
-          participantId: input2.participantId,
-          activationId: input2.activationId,
-          sessionId: input2.sessionId
-        });
-        return { entryId: entry.id, sequence: entry.sequence };
-      },
-      allocateReceipt(bindingId) {
-        if (!provenanceService)
-          throw new Error("settlement unavailable: no provenance service on this boundary");
-        const receipt = provenanceService.allocateReceipt(bindingId);
-        return {
-          id: receipt.id,
-          executionBindingId: receipt.executionBindingId,
-          issueId: receipt.issueId,
-          issueRevision: receipt.issueRevision,
-          contractHash: receipt.contractHash
-        };
-      },
-      attachArtifact(receiptId, kind, value) {
-        if (!provenanceService)
-          throw new Error("settlement unavailable: no provenance service on this boundary");
-        const attached = provenanceService.attachArtifact(receiptId, kind, value);
-        return {
-          receiptId: attached.receiptId ?? receiptId,
-          kind: attached.kind ?? kind,
-          value: attached.value ?? value
-        };
-      },
-      findResultEntry(ref, key) {
-        if (!journalService?.listEntries) {
-          return { status: "unavailable", reason: "journal service exposes no entry listing" };
-        }
-        try {
-          const entries = journalService.listEntries(issues.resolveRef(ref).id, { kind: "result" });
-          const forActivation = entries.filter((entry) => entry.activationId === key.activationId);
-          const match = forActivation.find((entry) => attemptOfEntry(entry) === key.attemptId);
-          if (match)
-            return { status: "found", value: { entryId: match.id } };
-          const unattributed = forActivation.filter((entry) => attemptOfEntry(entry) === null);
-          if (unattributed.length > 0) {
-            return {
-              status: "unavailable",
-              reason: `${unattributed.length} Journal result(s) for this activation carry no attempt attribution`
-            };
-          }
-          return { status: "absent" };
-        } catch (error3) {
-          return { status: "unavailable", reason: error3 instanceof Error ? error3.message : String(error3) };
-        }
-      },
-      findReceiptForBinding(ref, bindingId) {
-        if (!provenanceService?.listReceipts) {
-          return { status: "unavailable", reason: "provenance service exposes no receipt listing" };
-        }
-        try {
-          const rows = provenanceService.listReceipts(issues.resolveRef(ref).id);
-          const match = rows.find((receipt) => receipt.executionBindingId === bindingId);
-          return match ? { status: "found", value: { receiptId: match.id } } : { status: "absent" };
-        } catch (error3) {
-          return { status: "unavailable", reason: error3 instanceof Error ? error3.message : String(error3) };
-        }
-      }
-    } : {}
-  };
-}
-function splitLines(body) {
-  if (!body)
-    return [];
-  return body.split(`
-`).map((l) => l.trim().replace(/^[-*\u2022]\s*/, "").replace(/^\d+[.)]\s*/, "").trim()).filter((l) => l.length > 0);
-}
-async function openWorkItemBoundary(opts = {}) {
-  const env = opts.env ?? process.env;
-  const substrateDir = resolveSubstrateDir(opts.substrateDir ?? env.XTRM_SUBSTRATE_DIR ?? "", opts.resolveInstalled);
-  if (!substrateDir) {
-    throw new Error(`work_item_store_unavailable: no Substrate package configured (install ${SUBSTRATE_PACKAGE}, ` + "or set XTRM_SUBSTRATE_DIR to a checkout of it)");
-  }
-  let pkgName;
-  try {
-    const pkgRaw = await import(pathToFileURL(join56(substrateDir, "package.json")).href, { with: { type: "json" } });
-    pkgName = pkgRaw.default?.name;
-  } catch (error3) {
-    throw new Error(`work_item_store_unavailable: cannot read Substrate package identity at ${substrateDir}: ${error3 instanceof Error ? error3.message : String(error3)}`);
-  }
-  if (pkgName !== SUBSTRATE_PACKAGE) {
-    throw new Error(`work_item_store_unavailable: expected ${SUBSTRATE_PACKAGE} at ${substrateDir}, found ${JSON.stringify(pkgName) ?? "no name"}`);
-  }
-  const load = async (rel) => {
-    try {
-      return await import(pathToFileURL(join56(substrateDir, rel)).href);
-    } catch (error3) {
-      throw new Error(`work_item_store_unavailable: cannot load Substrate module ${rel}: ${error3 instanceof Error ? error3.message : String(error3)}`);
-    }
-  };
-  const [runner, issueSvcMod, journalMod, provMod, storeMod, gateMod] = await Promise.all([
-    load("src/store/migrations/runner.ts"),
-    load("src/service/issue-service.ts"),
-    load("src/service/journal-service.ts"),
-    load("src/service/provenance-service.ts"),
-    load("src/workitems/substrate-store.ts"),
-    load("src/workitems/dispatch-gate.ts")
-  ]);
-  for (const [mod, name] of [
-    [runner, "migrate"],
-    [issueSvcMod, "IssueService"],
-    [journalMod, "JournalService"],
-    [provMod, "ProvenanceService"],
-    [storeMod, "SubstrateIssueStore"],
-    [gateMod, "checkDispatch"],
-    [gateMod, "dispatchToSpecialist"]
-  ]) {
-    if (typeof mod[name] === "undefined") {
-      throw new Error(`work_item_store_unavailable: Substrate module is missing export ${name}`);
-    }
-  }
-  const dbPath = opts.dbPath ?? resolveWorkItemDbPath(env);
-  const storeRefusal = (error3) => new Error(`work_item_store_unavailable: cannot open the Substrate store at ${dbPath} (set SUBSTRATE_DB or XTRM_STATE_DB to a writable database path, or install ${SUBSTRATE_PACKAGE}): ${error3 instanceof Error ? error3.message : String(error3)}`);
-  let db;
-  try {
-    db = openSubstrateDb(dbPath);
-    runner.migrate(db);
-  } catch (error3) {
-    throw storeRefusal(error3);
-  }
-  let issueService;
-  let journalSvc;
-  let provenance;
-  let store;
-  try {
-    issueService = new issueSvcMod.IssueService(db);
-    journalSvc = new journalMod.JournalService(db, issueService);
-    provenance = new provMod.ProvenanceService(db, issueService, journalSvc);
-    store = new storeMod.SubstrateIssueStore(issueService, journalSvc);
-  } catch (error3) {
-    throw storeRefusal(error3);
-  }
-  issueService.getBlockers = (childId) => issueService.listActiveEdges().filter((edge) => edge.active && edge.kind === "blocks" && edge.toIssue === childId).map((edge) => {
-    const issue3 = issueService.getIssue(edge.fromIssue);
-    return {
-      id: issue3.id,
-      humanRef: issue3.humanRef,
-      title: issue3.title,
-      currentRevision: issue3.currentRevision,
-      lifecycleState: issue3.lifecycleState
-    };
-  });
-  const issues = issueService;
-  return createWorkItemBoundary({
-    issues,
-    provenance,
-    store,
-    gate: {
-      check: (i, r) => gateMod.checkDispatch(i, r),
-      dispatch: (i, p, r) => gateMod.dispatchToSpecialist(i, p, r)
-    },
-    journalService: journalSvc,
-    provenanceService: provenance
-  });
-}
-var require5, SUBSTRATE_PACKAGE = "@jaggerxtrm/substrate", SATISFIED_BLOCKER_STATES;
-var init_workitem_store = __esm(() => {
-  init_session();
-  init_contract_sections();
-  init_authority_store();
-  require5 = createRequire6(import.meta.url);
-  SATISFIED_BLOCKER_STATES = new Set(["done", "archived"]);
 });
 
 // src/activation/step-contract.ts

@@ -17,6 +17,7 @@ import { analyzeGlobalUserConfigDrift, buildGlobalUserConfigTemplate, readValida
 import { runChannelDoctorChecks, type ChannelDoctorInputs } from '../specialist/channel-doctor.js';
 import { describeCatalogCompatibility } from '../specialist/tool-catalog.js';
 import { loadSharedToolCatalogIndex, readPackageVersion, resolveGlobalNodeModulesDir } from '../pi/session.js';
+import { resolveSubstrateDir, resolveWorkItemDbPath } from '../activation/workitem-store.js';
 import { formatVersionCheckNudge, getVersionCheckResult, localVersion, readCachedVersionCheck } from './version-check.js';
 
 const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
@@ -104,6 +105,64 @@ function checkBd(): boolean {
   if (existsSync(join(CWD, '.beads'))) ok('.beads/ present in project');
   else warn('.beads/ not found in project');
   return true;
+}
+
+/**
+ * The work store native dispatch resolves at runtime (SPECIALISTS-57 closeout §3).
+ *
+ * `sp doctor` reported healthy on a machine where `specialist_dispatch` could not work at all:
+ * the resolution is ordinary module resolution of an OPTIONAL runtime prerequisite, so nothing
+ * in the doctor's own surfaces noticed its absence. Reported as a WARNING, not a failure: the
+ * legacy `sp` CLI is fully usable without Substrate, so an install without it is not broken —
+ * it is broken for the NATIVE path only, and the operator has to be told which.
+ *
+ * Deliberately model-call-free and side-effect-free: it resolves the same way the runtime does
+ * (one rule, one home) and never opens the store.
+ */
+function checkSubstrateRuntime(): void {
+  section('substrate (native dispatch)');
+  try {
+    const dir = resolveSubstrateDir(process.env.XTRM_SUBSTRATE_DIR ?? '');
+    if (!dir) {
+      warn('@jaggerxtrm/substrate not resolvable — native dispatch will be refused');
+      fix('npm install -g @jaggerxtrm/substrate   (or set XTRM_SUBSTRATE_DIR to a checkout)');
+      hint('the legacy sp CLI does not need it; only specialist_dispatch does');
+      return;
+    }
+    // Resolving a DIRECTORY is not resolving the PACKAGE: an explicit XTRM_SUBSTRATE_DIR is
+    // returned verbatim, and `openWorkItemBoundary` is what validates its identity. Reporting
+    // "resolved" for a directory that holds nothing would reproduce the exact failure this check
+    // exists to remove — a healthy-looking surface over a dispatch that cannot work.
+    const manifestPath = join(dir, 'package.json');
+    if (!existsSync(manifestPath)) {
+      warn(`no package.json at ${dir} — native dispatch will be refused`);
+      fix('point XTRM_SUBSTRATE_DIR at a @jaggerxtrm/substrate checkout');
+      return;
+    }
+    let name: unknown;
+    try {
+      name = (JSON.parse(readFileSync(manifestPath, 'utf8')) as { name?: unknown }).name;
+    } catch {
+      warn(`unreadable package identity at ${manifestPath}`);
+      fix('reinstall @jaggerxtrm/substrate, or re-point XTRM_SUBSTRATE_DIR');
+      return;
+    }
+    if (name !== '@jaggerxtrm/substrate') {
+      warn(`expected @jaggerxtrm/substrate at ${dir}, found ${JSON.stringify(name) ?? 'no name'}`);
+      fix('point XTRM_SUBSTRATE_DIR at a @jaggerxtrm/substrate checkout');
+      return;
+    }
+    ok(`resolved  ${dim(dir)}`);
+    const dbPath = resolveWorkItemDbPath();
+    if (!existsSync(dbPath)) {
+      warn(`work store not present at ${dbPath}`);
+      fix('run `xt init`, or `sb init`, or set SUBSTRATE_DB to an existing store');
+      return;
+    }
+  } catch (error) {
+    warn(`substrate resolution failed: ${error instanceof Error ? error.message : String(error)}`);
+    fix('install @jaggerxtrm/substrate, or set XTRM_SUBSTRATE_DIR to a checkout');
+  }
 }
 
 function checkXt(): boolean {
@@ -1141,6 +1200,10 @@ export async function run(argv: readonly string[] = process.argv.slice(3)): Prom
   const spOk = checkSpAlias();
   const bdOk = checkBd();
   const xtOk = checkXt();
+  // Advisory only: it does not feed the exit status. A missing Substrate breaks the NATIVE path
+  // and leaves the legacy CLI fully usable, so failing the doctor would misreport a working
+  // install as broken.
+  checkSubstrateRuntime();
   const catalogsOk = checkCatalogs();
   const versionOk = checkVersion();
   const skillDriftOk = checkSkillDrift();

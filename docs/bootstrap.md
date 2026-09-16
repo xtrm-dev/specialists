@@ -39,7 +39,13 @@ Specialists is built on the **[pi coding agent](https://github.com/earendil-work
 
 ## Prerequisites
 
-`specialists init` requires `xt` CLI and a local `.xtrm/` directory. See [docs/installation.md](installation.md) for ordered install steps and runtime-prerequisite details.
+`specialists init` requires `xt` CLI and a local `.xtrm/` directory.
+
+**Native dispatch** additionally requires `@jaggerxtrm/substrate` (the work store that supplies the
+task contract) to be resolvable at runtime — `xt init` enrolls it, or install it with
+`npm install -g @jaggerxtrm/substrate`. The legacy `sp` CLI does not need it. `sp doctor` reports
+the resolution under `substrate (native dispatch)`. See
+[docs/installation.md](installation.md) for ordered install steps and runtime-prerequisite details.
 
 ## Install
 
