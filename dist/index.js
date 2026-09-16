@@ -48823,14 +48823,22 @@ function requireSqliteClient() {
   }
   return sqliteClient;
 }
-function resolveNodeRefWithClient(partialRef, sqliteClient) {
+function tryResolveNodeRefWithClient(partialRef, sqliteClient) {
   const matches = sqliteClient.listNodeRunsByRef(partialRef, ACTIVE_NODE_STATUSES);
   if (matches.length === 1)
-    return matches[0].id;
-  if (matches.length === 0) {
+    return { kind: "resolved", id: matches[0].id };
+  if (matches.length === 0)
+    return { kind: "absent" };
+  return { kind: "ambiguous", matches: matches.map((m) => ({ id: m.id, node_name: m.node_name })) };
+}
+function resolveNodeRefWithClient(partialRef, sqliteClient) {
+  const outcome = tryResolveNodeRefWithClient(partialRef, sqliteClient);
+  if (outcome.kind === "resolved")
+    return outcome.id;
+  if (outcome.kind === "absent") {
     throw new Error(`No node matching ref: ${partialRef}`);
   }
-  throw new Error(`Ambiguous node ref ${partialRef} matches: ${formatNodeRefMatches(matches)}`);
+  throw new Error(`Ambiguous node ref ${partialRef} matches: ${formatNodeRefMatches(outcome.matches)}`);
 }
 function resolveSingleActiveNodeRef(sqliteClient) {
   const client = sqliteClient ?? requireSqliteClient();
@@ -54367,8 +54375,10 @@ var init_ps = __esm(() => {
 // src/cli/result.ts
 var exports_result = {};
 __export(exports_result, {
+  tryResolveJobIdFromNodeMember: () => tryResolveJobIdFromNodeMember,
   run: () => run22,
   resolveNativeAttemptToActivationId: () => resolveNativeAttemptToActivationId,
+  resolveJobIdFromNodeMember: () => resolveJobIdFromNodeMember,
   parseArgs: () => parseArgs11,
   isNativeAttemptId: () => isNativeAttemptId,
   isNativeActivationId: () => isNativeActivationId
@@ -54396,6 +54406,8 @@ function parseArgs11(argv) {
   let jobId;
   let nodeId;
   let memberKey;
+  let positionalColonRef;
+  let native = false;
   let wait = false;
   let json = false;
   let timeout;
@@ -54407,6 +54419,10 @@ function parseArgs11(argv) {
     }
     if (token === "--json") {
       json = true;
+      continue;
+    }
+    if (token === "--native") {
+      native = true;
       continue;
     }
     if (token === "--node" && argv[i + 1]) {
@@ -54432,27 +54448,18 @@ function parseArgs11(argv) {
     }
   }
   if (!jobId && !(nodeId && memberKey) && !memberKey) {
-    console.error(`Usage: specialists|sp result <node-ref>:<member> [--wait] [--timeout <seconds>] [--json]
+    console.error(`Usage: specialists|sp result <node-ref>:<member> [--native] [--wait] [--timeout <seconds>] [--json]
        specialists|sp result <job-id> [--wait] [--timeout <seconds>] [--json]
        specialists|sp result --node <node-ref> --member <member-key> [--wait] [--timeout <seconds>] [--json]
        specialists|sp result --member <member-key> [--wait] [--timeout <seconds>] [--json]`);
     process.exit(1);
   }
   if (jobId && jobId.includes(":") && !nodeId && !memberKey) {
-    if (isNativePrefixRef(jobId)) {
-      if (isNativeActivationId(jobId) || isNativeAttemptId(jobId)) {} else if (jobId.startsWith("act:")) {
-        console.error(`Error: invalid activation id '${jobId}': expected 'act:<id>'`);
-        process.exit(1);
-      } else {
-        console.error(`Error: invalid attempt id '${jobId}': expected 'att:<id>:<n>'`);
-        process.exit(1);
-      }
-    } else {
-      const separatorIndex = jobId.indexOf(":");
-      nodeId = jobId.slice(0, separatorIndex);
-      memberKey = jobId.slice(separatorIndex + 1);
-      jobId = undefined;
-    }
+    const separatorIndex = jobId.indexOf(":");
+    positionalColonRef = jobId;
+    nodeId = jobId.slice(0, separatorIndex);
+    memberKey = jobId.slice(separatorIndex + 1);
+    jobId = undefined;
   }
   if (nodeId !== undefined && nodeId.length === 0) {
     console.error("Error: node ref cannot be empty");
@@ -54463,27 +54470,39 @@ function parseArgs11(argv) {
     process.exit(1);
   }
   if (!jobId && !memberKey) {
-    console.error(`Usage: specialists|sp result <node-ref>:<member> [--wait] [--timeout <seconds>] [--json]
+    console.error(`Usage: specialists|sp result <node-ref>:<member> [--native] [--wait] [--timeout <seconds>] [--json]
        specialists|sp result <job-id> [--wait] [--timeout <seconds>] [--json]
        specialists|sp result --node <node-ref> --member <member-key> [--wait] [--timeout <seconds>] [--json]
        specialists|sp result --member <member-key> [--wait] [--timeout <seconds>] [--json]`);
     process.exit(1);
   }
-  return { jobId, nodeId, memberKey, wait, json, timeout };
+  return { jobId, nodeId, memberKey, positionalColonRef, native, wait, json, timeout };
 }
-function resolveJobIdFromNodeMember(sqliteClient, nodeId, memberKey) {
+function tryResolveJobIdFromNodeMember(sqliteClient, nodeId, memberKey) {
   const nodeRun = sqliteClient.readNodeRun(nodeId);
   if (!nodeRun) {
-    throw new Error(`Node run not found: ${nodeId}`);
+    return { kind: "node_absent" };
   }
   const member = sqliteClient.readNodeMembers(nodeId).find((entry) => entry.member_id === memberKey);
   if (!member) {
-    throw new Error(`Member '${memberKey}' not found in node '${nodeId}'`);
+    return { kind: "member_absent" };
   }
   if (!member.job_id) {
-    throw new Error(`Member '${memberKey}' in node '${nodeId}' has no job id yet`);
+    return { kind: "member_without_job_id" };
   }
-  return member.job_id;
+  return { kind: "resolved", jobId: member.job_id };
+}
+function resolveJobIdFromNodeMember(sqliteClient, nodeId, memberKey) {
+  const outcome = tryResolveJobIdFromNodeMember(sqliteClient, nodeId, memberKey);
+  if (outcome.kind === "resolved")
+    return outcome.jobId;
+  if (outcome.kind === "node_absent") {
+    throw new Error(`Node run not found: ${nodeId}`);
+  }
+  if (outcome.kind === "member_absent") {
+    throw new Error(`Member '${memberKey}' not found in node '${nodeId}'`);
+  }
+  throw new Error(`Member '${memberKey}' in node '${nodeId}' has no job id yet`);
 }
 function findMissingNativeAttemptError(sqliteClient, supervisor, activationId, requestedAttemptId) {
   const activationStatus = supervisor.readStatus(activationId);
@@ -54678,11 +54697,66 @@ async function run22() {
       process.stderr.write(dim12(trailingFooter));
   };
   try {
-    const requestedAttemptId = args.jobId && isNativeAttemptId(args.jobId) ? args.jobId : undefined;
+    let requestedAttemptId;
+    const resolveNativePositional = (raw) => {
+      if (isNativeActivationId(raw))
+        return raw;
+      if (isNativeAttemptId(raw)) {
+        requestedAttemptId = raw;
+        return resolveNativeAttemptToActivationId(raw);
+      }
+      if (raw.startsWith("act:")) {
+        throw new Error(`invalid activation id '${raw}': expected 'act:<id>'`);
+      }
+      throw new Error(`invalid attempt id '${raw}': expected 'att:<id>:<n>'`);
+    };
     const jobId = (() => {
+      if (args.positionalColonRef) {
+        const raw = args.positionalColonRef;
+        const nodeRef = args.nodeId;
+        const legacyMemberKey = args.memberKey;
+        if (args.native) {
+          return resolveNativePositional(raw);
+        }
+        if (!sqliteClient) {
+          throw new Error("Observability SQLite DB is unavailable. Run: specialists db setup");
+        }
+        const nodeOutcome = tryResolveNodeRefWithClient(nodeRef, sqliteClient);
+        if (nodeOutcome.kind === "ambiguous") {
+          return resolveNodeRefWithClient(nodeRef, sqliteClient);
+        }
+        if (nodeOutcome.kind === "resolved") {
+          const resolvedId = nodeOutcome.id;
+          const memberOutcome = tryResolveJobIdFromNodeMember(sqliteClient, resolvedId, legacyMemberKey);
+          if (memberOutcome.kind === "resolved")
+            return memberOutcome.jobId;
+          if (isNativeActivationId(raw) || isNativeAttemptId(raw)) {
+            return resolveNativePositional(raw);
+          }
+          if (isNativePrefixRef(raw)) {
+            return resolveNativePositional(raw);
+          }
+          if (memberOutcome.kind === "member_absent") {
+            throw new Error(`Member '${legacyMemberKey}' not found in node '${resolvedId}'`);
+          }
+          if (memberOutcome.kind === "member_without_job_id") {
+            throw new Error(`Member '${legacyMemberKey}' in node '${resolvedId}' has no job id yet`);
+          }
+          throw new Error(`Node run not found: ${resolvedId}`);
+        }
+        if (isNativeActivationId(raw) || isNativeAttemptId(raw)) {
+          return resolveNativePositional(raw);
+        }
+        if (isNativePrefixRef(raw)) {
+          return resolveNativePositional(raw);
+        }
+        throw new Error(`No node matching ref: ${nodeRef}`);
+      }
+      if (args.jobId && isNativeAttemptId(args.jobId)) {
+        requestedAttemptId = args.jobId;
+        return resolveNativeAttemptToActivationId(args.jobId);
+      }
       if (args.jobId) {
-        if (requestedAttemptId)
-          return resolveNativeAttemptToActivationId(args.jobId);
         return args.jobId;
       }
       if (!sqliteClient || !args.memberKey) {
