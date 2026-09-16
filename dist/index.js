@@ -56311,18 +56311,19 @@ function latestTokenTrajectory(record) {
   const latest = trajectory.at(-1);
   if (!latest)
     return null;
+  const nested = latest.token_usage !== null && typeof latest.token_usage === "object" && !Array.isArray(latest.token_usage) ? latest.token_usage : null;
   const split = {
-    input: Number(latest.input_tokens ?? latest.input ?? 0),
-    output: Number(latest.output_tokens ?? latest.output ?? 0),
-    cache_read: Number(latest.cache_read_tokens ?? latest.cache_read ?? 0),
-    cache_creation: Number(latest.cache_creation_tokens ?? latest.cache_creation ?? 0),
-    reasoning: Number(latest.reasoning_tokens ?? latest.reasoning ?? latest.thinking_tokens ?? 0),
-    tool: Number(latest.tool_tokens ?? latest.tool ?? latest.tool_use_tokens ?? 0)
+    input: Number(nested?.input_tokens ?? nested?.input ?? latest.input_tokens ?? latest.input ?? 0),
+    output: Number(nested?.output_tokens ?? nested?.output ?? latest.output_tokens ?? latest.output ?? 0),
+    cache_read: Number(nested?.cache_read_tokens ?? nested?.cache_read ?? latest.cache_read_tokens ?? latest.cache_read ?? 0),
+    cache_creation: Number(nested?.cache_creation_tokens ?? nested?.cache_creation ?? latest.cache_creation_tokens ?? latest.cache_creation ?? 0),
+    reasoning: Number(nested?.reasoning_tokens ?? nested?.reasoning ?? nested?.thinking_tokens ?? latest.reasoning_tokens ?? latest.reasoning ?? latest.thinking_tokens ?? 0),
+    tool: Number(nested?.tool_tokens ?? nested?.tool ?? nested?.tool_use_tokens ?? latest.tool_tokens ?? latest.tool ?? latest.tool_use_tokens ?? 0)
   };
   const hasSplit = Object.values(split).some((value) => value > 0);
   if (hasSplit)
     return split;
-  const total = Number(latest.total_tokens ?? latest.total ?? 0);
+  const total = Number(nested?.total_tokens ?? nested?.total ?? latest.total_tokens ?? latest.total ?? 0);
   return total > 0 ? { total } : null;
 }
 function forensicEventSamples(events, repo) {
