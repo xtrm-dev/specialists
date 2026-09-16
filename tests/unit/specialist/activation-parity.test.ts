@@ -21,7 +21,7 @@ vi.mock('../../../src/pi/python-kernel-extension.js', () => ({
   resolvePiExtensionsPythonKernelPath: () => PY_KERNEL,
 }));
 
-import { NativeActivationHost, resolveWorkspace, contractToMarkdown, type ActivationForensicSink } from '../../../src/activation/native-host.js';
+import { NativeActivationHost, resolveWorkspace, contractToMarkdown, resolveDeclaredExtensionSources, type ActivationForensicSink } from '../../../src/activation/native-host.js';
 import { ASK_TOOL, ESCALATE_TOOL } from '../../../src/activation/ask-tool.js';
 import { deriveSkillName, renderTaskPrompt } from '../../../src/specialist/task-prompt.js';
 import { buildSystemPrompt, buildOutputContractInstruction } from '../../../src/specialist/system-prompt.js';
@@ -282,9 +282,14 @@ function legacyAssembly(root: string, opts: ProbeOptions, overrides: { reviewer?
 
   const toolContract = resolveRuntimeToolContract({ level: opts.permission ?? 'LOW', specialistName: spec.specialist.metadata.name, cwd: process.cwd() })!;
   const curated = resolveCuratedExtensionPaths({ permissionLevel: opts.permission ?? 'LOW', resolvedToolContract: toolContract });
-  const declared = resolveExecutionExtensionSelection(
-    execution.extensions as Record<string, boolean | null | undefined> | undefined,
-  ).extensionSources.filter((source) => !source.startsWith('npm:'));
+  // unitAI-rx1bu: resolved through the SAME function the native host uses, so parity is
+  // asserted over the real declared source set. The previous `.filter(!npm:)` compared a
+  // subset and hid the one source class the native path used to drop entirely.
+  const declared = resolveDeclaredExtensionSources(
+    resolveExecutionExtensionSelection(
+      execution.extensions as Record<string, boolean | null | undefined> | undefined,
+    ).extensionSources,
+  ).local;
   const { kept } = deduplicateExtensionSources(curated.dedupeAgainstDynamic, declared);
 
   return {

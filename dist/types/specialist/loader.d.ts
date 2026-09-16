@@ -116,5 +116,7 @@ export declare class SpecialistLoader {
     getGlobalLayerPath(): GlobalUserConfigPath | null;
     invalidateCache(name?: string): void;
 }
+/** Extract the npm package identity from an enabled `npm:<name>[@<spec>]` source key, or null. */
+export declare function parseNpmSourceName(key: string): string | null;
 export {};
 //# sourceMappingURL=loader.d.ts.map

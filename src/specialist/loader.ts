@@ -612,7 +612,7 @@ const NPM_NAME_RE = /^[a-z0-9][a-z0-9._~-]{0,213}$/;
 const NPM_SCOPED_NAME_RE = /^@[a-z0-9][a-z0-9._~-]{0,212}\/[a-z0-9][a-z0-9._~-]{0,213}$/;
 
 /** Extract the npm package identity from an enabled `npm:<name>[@<spec>]` source key, or null. */
-function parseNpmSourceName(key: string): string | null {
+export function parseNpmSourceName(key: string): string | null {
   if (!key.startsWith('npm:')) return null;
   const spec = key.slice('npm:'.length);
   let name: string;

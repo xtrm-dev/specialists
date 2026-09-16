@@ -94565,6 +94565,32 @@ function extractTokenUsage(event) {
 function isNonLocalExtensionSource(source) {
   return NON_LOCAL_EXTENSION_PREFIXES.some((prefix) => source.startsWith(prefix));
 }
+function resolveNpmExtensionSource(source, env = defaultExtensionSourceResolutionEnv) {
+  const packageName = parseNpmSourceName(source);
+  if (!packageName)
+    return null;
+  const globalDir = env.globalNodeModulesDir();
+  if (!globalDir)
+    return null;
+  const packagePath = join60(globalDir, packageName);
+  return env.manifestExists(packagePath) ? packagePath : null;
+}
+function resolveDeclaredExtensionSources(sources, env = defaultExtensionSourceResolutionEnv) {
+  const local = [];
+  const skipped = [];
+  for (const source of sources) {
+    if (!isNonLocalExtensionSource(source)) {
+      local.push(source);
+      continue;
+    }
+    const installed = resolveNpmExtensionSource(source, env);
+    if (installed)
+      local.push(installed);
+    else
+      skipped.push(source);
+  }
+  return { local, skipped };
+}
 function resolveWorkspace(cwd) {
   return { repositoryRoot: cwd, worktreePath: cwd };
 }
@@ -94988,14 +95014,10 @@ class NativeActivationHost {
       resolvedToolContract: toolContract
     });
     const declaredExtensions = extensionSelection.extensionSources;
-    const declaredLocalExtensions = [];
-    for (const source of declaredExtensions) {
-      if (isNonLocalExtensionSource(source)) {
-        process.stderr.write(`[specialists] native activation: extension source '${source}' is not a filesystem path; ` + `the in-process resource loader cannot load it, so it is not injected.
+    const { local: declaredLocalExtensions, skipped: skippedDeclaredSources } = resolveDeclaredExtensionSources(declaredExtensions);
+    for (const source of skippedDeclaredSources) {
+      process.stderr.write(`[specialists] native activation: extension source '${source}' is not a filesystem path; ` + `the in-process resource loader cannot load it, so it is not injected.
 `);
-        continue;
-      }
-      declaredLocalExtensions.push(source);
     }
     const { kept: dynamicExtensions, dropped: droppedExtensions } = deduplicateExtensionSources(curatedExtensions.dedupeAgainstDynamic, declaredLocalExtensions);
     for (const { dropped, keptAs } of droppedExtensions) {
@@ -95883,7 +95905,7 @@ function legacyOnlyConfigNotes(spec) {
   }
   return notes;
 }
-var TOKEN_USAGE_KEYS, WRITE_TIERS, NON_LOCAL_EXTENSION_PREFIXES, FALLBACK_RETRYABLE_CLASSES, NULL_FORENSIC_SINK;
+var TOKEN_USAGE_KEYS, WRITE_TIERS, NON_LOCAL_EXTENSION_PREFIXES, defaultExtensionSourceResolutionEnv, FALLBACK_RETRYABLE_CLASSES, NULL_FORENSIC_SINK;
 var init_native_host = __esm(() => {
   init_loader();
   init_system_prompt();
@@ -95917,6 +95939,10 @@ var init_native_host = __esm(() => {
   ];
   WRITE_TIERS = new Set(["MEDIUM", "HIGH"]);
   NON_LOCAL_EXTENSION_PREFIXES = ["npm:", "git:", "github:", "http:", "https:", "ssh:"];
+  defaultExtensionSourceResolutionEnv = {
+    globalNodeModulesDir: resolveGlobalNodeModulesDir2,
+    manifestExists: (packagePath) => existsSync56(join60(packagePath, "package.json"))
+  };
   FALLBACK_RETRYABLE_CLASSES = new Set(["rate_limit", "timeout", "transient"]);
   NULL_FORENSIC_SINK = { emit: () => {} };
 });
