@@ -1,0 +1,464 @@
+# XTRM-93 — Lane C: Telemetry, Observability, Forensics, Metrics
+
+> **Status: LANE C AUDIT ARTIFACT — evidence only. Does not modify source.**
+> Companion delta view: [`telemetry-delta.md`](./telemetry-delta.md).
+> Capability IDs use the `CAP-TEL-###` range declared in
+> [`00-capability-matrix.md`](./00-capability-matrix.md) §1.
+>
+> **This lane is first-class.** The migration is not accepted unless telemetry parity is
+> understood and preserved. `00-capability-matrix.md` §4 already lists
+> "any legacy telemetry signal with no native destination" as a blocking GO condition; §5
+> below is the evidence for that gate.
+
+---
+
+## 0. Method and verified baseline
+
+| Fact | Value | How verified |
+|---|---|---|
+| Audit worktree | `/home/dawid/dev/specialists/.xtrm/worktrees/specialists-xt-pi-akkh` | `pwd` |
+| Worktree HEAD | `6553ef05` (`fix(unitAI-rx1bu): resolve npm: extension sources under native dispatch`) | `git log --oneline -3` |
+| Upstream master (source of truth) | `472b1aef` (`test(parity): stop calling the contract quote a mechanical tie (#373)`) | `git log --oneline -3` |
+| GitNexus index | **current for this tree** — `.gitnexus/meta.json` `lastCommit` = `6553ef05877a263384d6572980cc6e4affc3952a` = worktree HEAD; `gitnexus` CLI 1.6.11 | `cat .gitnexus/meta.json` |
+| GitNexus usage | `node .gitnexus/run.cjs query "telemetry prometheus forensic metrics observability"`; `node .gitnexus/run.cjs impact appendForensicEvent --direction upstream` (returned `risk: UNKNOWN`, 12 max-impacted, 3 ambiguous candidates → confirmed by text search per the GitNexus doctrine) | tool output |
+| Store under audit | `.specialists/db/observability.db` (schema version 15) | `src/specialist/observability-db.ts:5-7,80-94` |
+
+**Path legend used in the tables below** (so every citation stays copy-pasteable):
+
+| Alias | Path |
+|---|---|
+| `obs-sqlite` | `src/specialist/observability-sqlite.ts` |
+| `obs-db` | `src/specialist/observability-db.ts` |
+| `sup` | `src/specialist/supervisor.ts` |
+| `runner` | `src/specialist/runner.ts` |
+| `script-runner` | `src/specialist/script-runner.ts` |
+| `tl` | `src/specialist/timeline-events.ts` |
+| `fe` | `src/specialist/forensic-events.ts` |
+| `tq` | `src/specialist/timeline-query.ts` |
+| `prom` | `src/specialist/prometheus-projection.ts` |
+| `live-agg` | `src/specialist/live-aggregates.ts` |
+| `nat-obs` | `src/specialist/native-activation-observability.ts` |
+| `nat-sum` | `src/specialist/native-activation-summary.ts` |
+| `host` | `src/activation/native-host.ts` |
+| `sink` | `src/activation/forensic-sink.ts` |
+| `settle-pub` | `src/activation/settlement-publication.ts` |
+| `settle-store` | `src/activation/settlement-store.ts` |
+| `async-events` | `src/activation/async-events.ts` |
+
+### 0.1 The single most important structural fact
+
+**Native and legacy write one database and one event vocabulary.** The native adapter projects
+native lifecycle and raw Pi session events onto the *existing* timeline types and writes them
+through the same `appendEvent`/`upsertStatusWithEvents` writer, which mirrors every timeline row
+into `specialist_forensic_events`:
+
+- `sink:1-15` — "Native and legacy activations write one `observability.db` … There is
+  deliberately NO native-subagent telemetry database and no second forensic model."
+- `sink:174` → `obs-sqlite:1367-1372` (`upsertStatusWithEvents`) → `obs-sqlite:1605-1650`
+  (`writeEventRow`) → `obs-sqlite:1651-1684` (`writeForensicEventRow`) →
+  `obs-sqlite:1718-1760` (`insertForensicEventRow`).
+- Production wiring: `src/mcp/v2-server.ts:113` and `src/server.ts:157` construct
+  `createActivationForensicSink(observability)`.
+
+Consequence: **most CAP-TEL rows are `PARITY` or `REUSE_EXISTING_NATIVE`** — the destination
+already exists. The blockers are concentrated in (i) signals whose native *name* has no case in
+the native mapper, (ii) signals only the legacy `Supervisor` produces, and (iii) read surfaces
+that query an event family no producer in this tree writes.
+
+---
+
+## 1. Signal inventory — one row per signal
+
+Every row carries exactly these columns:
+
+`legacy signal | legacy source (file:line) | legacy storage | legacy query surface | field/schema contract | emission timing | native signal | native source (file:line) | native storage | native query surface | parity status | migration action | test required`
+
+Storage notation: `obs.db::<table>`. Query-surface notation uses the shipped commands
+(`sp feed`, `sp log`, `sp forensic`, `sp metrics`, `sp ps`, `sp status`, `sp console`, `sp db`).
+
+### 1.1 Job lifecycle
+
+| legacy signal | legacy source (file:line) | legacy storage | legacy query surface | field/schema contract | emission timing | native signal | native source (file:line) | native storage | native query surface | parity status | migration action | test required |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| CAP-TEL-001 `run_start` | `sup:1629` (file) / `sup:1596-1597` (db); factory `tl:778-793` | `obs.db::specialist_events` + `specialist_forensic_events` (`job.started`) | `sp feed`, `sp log`, `sp forensic --family job` | `{t,seq,type:'run_start',job_id?,specialist_name,bead_id?,worktree_path?}`; forensic body `legacy_timeline_event` + `origin.source/verified`, `launch_mode` (`fe:577`, `fe:700-740`) | once per job, at session start | `run_start` mapped from `activation_started`; `job_id=activationId` | mapping `nat-obs:242-248`; producer `host:1307` | same | same | **PARITY** (identity value differs — §2.6 / delta) | REUSE_EXISTING_NATIVE | differential: legacy job vs native activation must both answer `family=job,name=job.started` |
+| CAP-TEL-002 `run_complete` COMPLETE | `sup:1736` (file), `sup:2890-2891` (+ result); factory `tl:914-946` | `obs.db::specialist_events`, `specialist_forensic_events` (`job.completed`), `specialist_results` | `sp feed`, `sp log`, `sp result`, `sp forensic` | `{t,seq,type:'run_complete',status,elapsed_s,model,backend,bead_id?,output?,token_usage?,finish_reason?,tool_calls?,final,metrics:{...}}` (`tl:266-313`) | once per job, at terminal settle | `run_complete` mapped from `activation_completed`; carries `metrics.turns/auto_retries/auto_compactions` | mapping `nat-obs:251-270`; producer `host:1589`; output persist `sink:219-245` | same + `specialist_jobs.last_output`, `specialist_results` | same | **PARITY** | REUSE_EXISTING_NATIVE | differential: settle output readable from `sp result` after dispose |
+| CAP-TEL-003 `run_complete` ERROR / CANCELLED | `sup:828` (crashed), `sup:2947` (error); forensic `job.failed`/`job.cancelled` `fe:833-837` | same as 002 | same | 002 with `status:'ERROR'\|'CANCELLED'`, `error?` | once per job, on failure/cancel | `run_complete('ERROR')` from `activation_failed`/`activation_rejected` | `nat-obs:291-303`; producers `host:1538,1584,1620,592` | same | same | **PARITY**; `activation_rejected` pre-session maps to ERROR (legacy has no pre-session terminal) | REUSE_EXISTING_NATIVE | differential: rejected-before-session yields exactly one `job.failed` |
+| CAP-TEL-004 `status_change` | `sup:1177` (`appendEvent:status_change`), `sup:1624`, `sup:1978`; factory `tl:811-821` | `obs.db::specialist_events`, `specialist_jobs.status`, `specialist_jobs.status_json` | `sp ps`, `sp status`, `sp log`, `sp metrics` | `{t,seq,type:'status_change',status,previous_status?}`; job row also `status` column (`obs-sqlite:1494-1546`) | every status transition | `status_change('waiting','running')` **only** from `activation_settled` | mapping `nat-obs:249-250`; producer `host:1570` | same | same | **NATIVE_GAP** — no `running` re-entry row on resume; legacy emits running on resume (`sup:1978`) | PRESERVE_NATIVE (add mapping for `activation_resumed`/`agent_start`) | differential: resume transition count legacy vs native |
+| CAP-TEL-005 forensic `job.started`/`job.completed`/`job.failed` | derived `fe:833-840` from 001/002/003 | `obs.db::specialist_forensic_events` | `sp forensic --family job`, `sp feed --json` | envelope `xtrm.forensic.v1` (`fe:1`): `schema_version,timestamp,t_unix_ms,seq,severity,event_family,event_name,event_version,resource,correlation,body,redaction,trace,otel,links,diagnostics` (`fe:242-257`) | same instant as the timeline row (mirror write `obs-sqlite:1651`) | same names | same | same | same | **PARITY** | REUSE_EXISTING_NATIVE | `tests/unit/specialist/observability-sqlite.test.ts:886` pins lifecycle family names |
+| CAP-TEL-006 `dead_declared` (family `lifecycle`) | `src/specialist/dead-job-audit.ts:69-71` | `obs.db::specialist_forensic_events` | `sp forensic --family lifecycle` | `{resource.service_component:'dead-job-audit', correlation:{job_id,bead_id}, body:{job_id,pid,age_ms,reason:'container-restart-orphan'}}` | when the dead-job audit cancels a stale row | NONE | NONE | — | — | **NATIVE_GAP** | PRESERVE_NATIVE (native reaper must emit family `lifecycle`) | new: native stale-activation reap writes `lifecycle/dead_declared` |
+| CAP-TEL-007 parent-notification `job.completed`/`job.failed` | `sup:240-262` (`emitParentNotification`) | `obs.db::specialist_forensic_events` | `sp forensic --family job` | `{event_family:'job', event_name:'job.completed'\|'job.failed', correlation:{job_id,bead_id?,trace_id?,span_id?,parent_span_id?}, body:{transition,job_id,specialist,...}}` | on terminal status, only when `spawn_origin.kind==='xtmux.agent_instance'` and verified | NONE | NONE | — | — | **NATIVE_GAP** | PRESERVE_NATIVE | new: native terminal emits parent notification when spawn origin verified |
+| CAP-TEL-008 `specialist_jobs` status row (`status_json`) | `obs-sqlite:1486-1546` (`writeStatusRow`) | `obs.db::specialist_jobs` | `sp ps`, `sp status`, `sp log`, `sp metrics`, `sp console`, `sp db stats` | `SupervisorStatus` JSON blob + projected columns `specialist,worktree_column,bead_id,node_id,chain_kind,chain_id,chain_root_job_id,chain_root_bead_id,epic_id,status,updated_at_ms,last_output,startup_payload_json,participant_id,pi_session_id,workspace_id,attempt_no,attempt_id` | every status write | same row; native writes `statusOf(...)` projection | `sink:96-127` (`statusOf`), `sink:172-177` | same | same | **PARITY** | REUSE_EXISTING_NATIVE | differential: `sp ps --json` row shape legacy vs native |
+
+### 1.2 Turn, message, text, meta
+
+| legacy signal | legacy source (file:line) | legacy storage | legacy query surface | field/schema contract | emission timing | native signal | native source (file:line) | native storage | native query surface | parity status | migration action | test required |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| CAP-TEL-009 `turn` (phase start/end) | `sup:2280-2360` (via `mapCallbackEventToTimelineEvent`), `tl:654-665` | `obs.db::specialist_events` (+forensic family `turn`) | `sp feed`, `sp log` | `{t,seq,type:'turn',phase:'start'\|'end'}` | per Pi turn boundary | `turn` phase start/end | `nat-obs:324-329` (`turn_start`/`turn_end`) | same | same | **PARITY** | REUSE_EXISTING_NATIVE | `tests/unit/specialist/native-activation-observability.test.ts:290` |
+| CAP-TEL-010 `turn_summary` | `sup:2479-2487`; factory `tl:861-879` | `obs.db::specialist_events` (+forensic `turn.summarized`), feeds `specialist_job_metrics.total_turns` | `sp feed`, `sp db stats` | `{t,seq,type:'turn_summary',turn_index,token_usage?,finish_reason?,content?,context_pct?,context_health?}` | once per completed turn (legacy `SessionMetricEvent.turn_summary`) | `turn_summary` from `message_end` of an assistant message | `nat-obs:352` | same | same | **NATIVE_GAP (counting semantics)** — native emits one per assistant *message*, legacy one per *turn*; both feed `total_turns` (`obs-sqlite:2913-2920`) | PRESERVE_NATIVE (reconcile emission basis) | differential: identical turn count for a multi-message turn |
+| CAP-TEL-011 `message` | `sup:2280-2360`, `tl:647-657` | `obs.db::specialist_events` (+forensic family `turn`) | `sp feed`, `sp log` | `{t,seq,type:'message',phase:'start'\|'end',role:'assistant'\|'toolResult'}` | per Pi message boundary | `message` start/end, roles `assistant`/`toolResult` | `nat-obs:330-356` | same | same | **PARITY** | REUSE_EXISTING_NATIVE | `tests/unit/specialist/timeline-events.test.ts:269` |
+| CAP-TEL-012 `text` | `sup:2400-2412`; `tl:205-214` | `obs.db::specialist_events` (+forensic family `turn`) | `sp feed`, `sp log`, `sp result` | `{t,seq,type:'text',char_count,content}` | once per assistant message with non-empty text, deduped against `lastPersistedAssistantMessage` | `text` with `char_count`+`content` | `nat-obs:348`; dedup not needed (single per `message_end`) | same | same | **PARITY** | REUSE_EXISTING_NATIVE | differential: text persisted exactly once per message |
+| CAP-TEL-013 `thinking` | `sup:2280-2360`, `tl:603-609` | `obs.db::specialist_events` (+forensic family `turn`) | `sp feed`, `sp log` | `{t,seq,type:'thinking',char_count?}` | per thinking delta | `thinking` only for `assistantMessageEvent.type==='thinking_delta'` | `nat-obs:357-363` | same | same | **PARITY** | REUSE_EXISTING_NATIVE | `tests/unit/specialist/timeline-events.test.ts:135` |
+| CAP-TEL-014 `meta` (model/backend) | `sup:1142`, `sup:2529`, `sup:1809,1812,1847,2748`; factory `tl:795-810` | `obs.db::specialist_events` (+forensic family `model`) | `sp feed`, `sp log`, `sp forensic --family model` | `{t,seq,type:'meta',model,source?,data?}` | on model resolution and on synthetic meta sources | `meta(model,provider)` on assistant `message_start` when either is present | `nat-obs:330-337` | same | same | **PARITY** | REUSE_EXISTING_NATIVE | differential: `resource.model` populated for native settlement row |
+| CAP-TEL-015 `payload_breakdown` | `runner:1302-1303`; `sup:2347-2350`; type `tl:134-141`, family `job` (`fe:813-814`) | `obs.db::specialist_events` (forensic family `job`) | `sp feed` (`feed.ts:199-200`), `sp chat` (`chat.ts:457-458`) | `{t,seq,type:'payload_breakdown',payload_breakdown:{components,totals}}` | once per run when the prompt payload is broken down | NONE | NONE | — | — | **NATIVE_GAP** | PRESERVE_NATIVE | new: native dispatch emits `payload_breakdown` |
+| CAP-TEL-016 `agent_end` / `done` | `tl:465-471` (types), `tl:1003-1066` (`parseTimelineEvent` accepts but the canonical completion is `run_complete`, `tl:42-56`) | `obs.db::specialist_events` | — | `{type:'agent_end'\|'done',elapsed_s}` — **explicitly not persisted** ("Do NOT persist", `tl:1117-1120`) | n/a | n/a | `nat-obs:76-77` lists `agent_end` as an intentional session gap | — | — | **INTENTIONAL_DIFFERENCE** | INTENTIONAL_RETIREMENT | `tests/unit/specialist/timeline-events.test.ts` parse coverage only |
+
+### 1.3 Tool calls and scripts
+
+| legacy signal | legacy source (file:line) | legacy storage | legacy query surface | field/schema contract | emission timing | native signal | native source (file:line) | native storage | native query surface | parity status | migration action | test required |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| CAP-TEL-017 `tool` phase=`start` | `sup:2280-2360`; `tl:610-621`, factory `tl:178-204` | `obs.db::specialist_events` (+forensic `tool.call.started`) | `sp feed`, `sp db stats` | `{t,seq,type:'tool',phase:'start',tool,tool_call_id?,args?,result_raw?,started_at?}` | per `tool_execution_start` | `tool` phase start | `nat-obs:364-370` | same | same | **PARITY** | REUSE_EXISTING_NATIVE | `tests/unit/specialist/timeline-events.test.ts:200-256` |
+| CAP-TEL-018 `tool` phase=`update` | same; `tl:622-632` | same | same | `{...,phase:'update',tool,tool_call_id?}` | per `tool_execution_update` | `tool` phase update | `nat-obs:371-376` | same | same | **PARITY** | REUSE_EXISTING_NATIVE | `tests/unit/specialist/timeline-events.test.ts:258` |
+| CAP-TEL-019 `tool` phase=`end` | same; `tl:633-645`; `TOOL_RESULT_SUMMARY_LIMIT=500` (`tl:534-539`) | same | same | `{...,phase:'end',tool,is_error?,result_summary?,result_raw?}` | per `tool_execution_end` | `tool` phase end; `resultContent` → summary | `nat-obs:377-384` | same | same | **PARITY** | REUSE_EXISTING_NATIVE | `tests/unit/specialist/timeline-events.test.ts:149-198` |
+| CAP-TEL-020 forensic `tool.call.started`/`completed`/`failed` | derived `fe:841-846`; severity `error` on `is_error` (`fe:888`) | `obs.db::specialist_forensic_events` | `sp forensic --family tool` | family `tool`; body `legacy_timeline_event` + `gen_ai.tool.name` in `otel` (`fe:808`) | per tool row | same | same | same | same | **PARITY** | REUSE_EXISTING_NATIVE | `tests/unit/specialist/forensic-events.test.ts:399` |
+| CAP-TEL-021 `tool_blocked` | NONE (legacy has no equivalent; `admitToolCall` is native-only, `host:2103-2126`) | — | — | — | — | `control_signal` action `tool_blocked` (body `{tool,note}`), severity `warn` | mapping `nat-obs:286-290`; producer `host:2124` | `obs.db::specialist_events` + forensic `control.tool_blocked.recorded` | `sp forensic --family control` | **INTENTIONAL_DIFFERENCE** (native-only, deliberately mapped to a shared type per `nat-obs:271-282`) | REUSE_EXISTING_NATIVE | `tests/unit/specialist/native-lease-forensics.test.ts:45-56` |
+| CAP-TEL-022 `total_tools` / `tool_call_counts_json` | `obs-sqlite:2891-2894` (projection), `obs-sqlite:2963-2964,2986-3023` (persist) | `obs.db::specialist_job_metrics` | `sp db stats`, `sp metrics` | `total_tools INTEGER`, `tool_call_counts_json TEXT` = `{toolName:count}` | **derived, not emitted** — recomputed on every `aggregateJobMetrics` | same computation (native rows flow through the same function) | `obs-sqlite:2846-3023` | same | same | **PARITY (shared, but see §3 counting divergence C-1)** | REUSE_EXISTING_NATIVE | golden test for `tool_call_counts_json` on a 1-call / 3-row stream |
+
+### 1.4 Model attribution, token usage, context
+
+| legacy signal | legacy source (file:line) | legacy storage | legacy query surface | field/schema contract | emission timing | native signal | native source (file:line) | native storage | native query surface | parity status | migration action | test required |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| CAP-TEL-023 `token_usage` | `sup:2445`; factory `tl:837-847` | `obs.db::specialist_events` (forensic family `model`, name `model.token_usage.recorded` `fe:845`) | `sp feed`, `sp log`, `sp metrics` | `{t,seq,type:'token_usage',token_usage:{input_tokens,output_tokens,cache_creation_tokens,cache_read_tokens,reasoning_tokens,tool_tokens?,total_tokens,usage_source},source}` (`tl:243-252`) | per `SessionMetricEvent.token_usage` | `token_usage` from assistant `message_end` usage | `nat-obs:346-350`; reader `nat-obs:136-149` | same | same | **PARITY** | REUSE_EXISTING_NATIVE | `tests/unit/specialist/forensic-events.test.ts:524` |
+| CAP-TEL-024 `token_trajectory_json` | `obs-sqlite:2907-2921` (append), `3001-3023` (persist) | `obs.db::specialist_job_metrics` | `sp db stats`, `sp metrics` | `Array<{turn_index,t,token_usage}>` (from `turn_summary`) **and** `Array<{t,source,token_usage}>` (from `token_usage`) — one column, two element shapes | derived at aggregate time | same function; native `run_complete.token_usage` is the **session-cumulative** total accumulated by `accumulateTokenUsage` (`nat-obs:177-201`, `sink:284`) | `obs-sqlite:2907-2921` | same | same | **NATIVE_GAP (shape ambiguity)** — two element shapes in one column; `prom:432-457` only reads the last element | PRESERVE_NATIVE | new: pin both element shapes and the `prom` reader against them |
+| CAP-TEL-025 `finish_reason` | `sup:2451`; factory `tl:849-859` | `obs.db::specialist_events` (forensic `model.finish_reason.recorded`) | `sp feed`, `sp log` | `{t,seq,type:'finish_reason',finish_reason,source}` | per metric event | `finish_reason` from `assistantMessage.stopReason` | `nat-obs:351` | same | same | **PARITY** | REUSE_EXISTING_NATIVE | differential: same finish_reason for identical stop |
+| CAP-TEL-026 `model_change` | mapper `tl:710-719`; callback origin `src/pi/session.ts:1557-1565` (`onEvent(type='set_model'\|'cycle_model')`); supervisor call site `sup:2368-2399` (slot `modelChange`) with persist at `sup:2437-2438` | `obs.db::specialist_events` + forensic `model.changed` (`fe:848`, family `model`) | `sp feed`, `sp log`, `sp forensic --family model` | `{t,seq,type:'model_change',action:'set_model'\|'cycle_model',model?,previous_model?}` | per model-change callback | NONE — the native stack's only model transition signal is `model_fallback`, which the native mapper drops (CAP-TEL-027) | NONE | — | — | **NATIVE_GAP** — native model switches (fallback walk) leave no `model.changed` row | PRESERVE_NATIVE | differential: a fallback walk yields one `model.changed` row per hop |
+| CAP-TEL-027 `model_fallback` | legacy: `runner.ts` `fallback_step` (see `docs/testing-quarantine-map.md:169`) | not a timeline type | — | n/a | on model-chain walk | `model_fallback` emitted with `{from_model,to_model,error_class,terminal,attempt_n,resolved_model,note}` | producer `host:1759,1769,1807,1833` and `host:843`; **no case in `mapNativeLifecycleEvent`** (`nat-obs:241-306`) → returns `null` → no row | NONE | NONE | **NATIVE_GAP (blocker C-4)** — fallback attribution is emitted into a sink that drops it; it is *not* listed in `NATIVE_LIFECYCLE_OBSERVABILITY_GAPS` (`nat-obs:50-72`), so the gap is also undocumented | PRESERVE_NATIVE | new: fallback transition must appear as a durable row before cutover |
+| CAP-TEL-028 `context_trajectory_json` / `context_pct` | `obs-sqlite:2915-2917`; legacy `context_pct`/`context_health` set at `sup:2470-2473` via `calculateContextUtilization` | `obs.db::specialist_job_metrics.context_trajectory_json`; `specialist_jobs.status_json.context_pct` | `sp db stats`, `sp console`, `sp metrics`, `sp ps` | `Array<{turn_index,t,context_pct}>`; `live-agg:148-161` computes max/avg/near(^80)/critical(^95) | derived at aggregate time; live status per turn | NONE — `statusOf()` (`sink:96-127`) never sets `context_pct`; `turn_summary` carries `context_pct: undefined` (`nat-obs:352`) | NONE | `turn_summary` row persists with `context_pct` absent; `context_trajectory_json` stays `[]` | `sp ps`, `sp console` (`ctxMaxPct`/`ctxAvgPct`), `sp metrics` | **NATIVE_GAP (blocker C-5)** — context-window accounting is absent for native activations; `sp console` StatsLine shows no context for them | PRESERVE_NATIVE | differential: `context_pct` present and non-null for a native activation |
+| CAP-TEL-029 model/provider attribution in forensic resource | `fe:596-608` (`eventBaseLabels`, `resource.model`, `resource.repo`) | `obs.db::specialist_forensic_events.resource` (inside `event_json`) | `sp forensic --json`, `sp metrics` | `resource:{service_namespace,service_name,service_component,deployment_environment,repo,participant_kind,participant_role,model,backend}` | per forensic row | same, from `context.resolvedModel`/`state.resolvedModel` | `sink:196`; context build `obs-sqlite:1685-1806` | same | same | **PARITY** | REUSE_EXISTING_NATIVE | `tests/smoke/telemetry-readiness.smoke.test.ts:34` (quarantined — see §5) |
+| CAP-TEL-030 `startup_payload_json` | `obs-sqlite:1526` (write), `obs-sqlite:3016` (metrics) | `obs.db::specialist_jobs`, `specialist_job_metrics` | `sp db stats --with-payload`, `sp metrics` (`prom:295-300` reads `chain_template`) | TEXT, JSON; fields read downstream: `chain_template`/`chainTemplate`/`workflow_template`/`workflow`/`chain_kind` (`prom:295-300`) | on every status write, `COALESCE`-preserved (`obs-sqlite:1518`) | native `statusOf` does **not** set `startup_payload_json` | `sink:96-127` | — | — | **NATIVE_GAP (blocker C-6)** — `xtrm_chains_total`/`xtrm_chain_duration_seconds` `chain_template` label degrades to `'chain'` (`prom:303`) for all native activations | PRESERVE_NATIVE | differential: chain template label identical for legacy and native chain members |
+
+### 1.5 Retry, compaction, stall detection
+
+| legacy signal | legacy source (file:line) | legacy storage | legacy query surface | field/schema contract | emission timing | native signal | native source (file:line) | native storage | native query surface | parity status | migration action | test required |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| CAP-TEL-031 `retry` | `sup:2516`; factory `tl:895-912`; forensic name `retry.${phase}` (`fe:847`) | `obs.db::specialist_events` (family `retry`) | `sp feed`, `sp log`, `sp forensic --family retry` | `{t,seq,type:'retry',phase,retry:{attempt,maxAttempts,delayMs,errorMessage}}` | per auto-retry start/end | `retry` phase start/end with `retry` object | `nat-obs:399-416` | same | same | **PARITY** | REUSE_EXISTING_NATIVE | `tests/unit/specialist/native-activation-observability.test.ts:290` |
+| CAP-TEL-032 `compaction` | `sup:2505`; factory `tl:881-893`; forensic `compaction.${phase}` | same (family `compaction`) | `sp feed`, `sp forensic --family compaction` | `{t,seq,type:'compaction',phase,compaction:{tokensBefore,summary,firstKeptEntryId}}` | per compaction start/end | `compaction` start/end | `nat-obs:385-397` | same | same | **PARITY** | REUSE_EXISTING_NATIVE | differential: compaction rows for a forced compaction |
+| CAP-TEL-033 `auto_retries` / `auto_compactions` counters | `sup` run metrics; native `run_complete.metrics.auto_retries/auto_compactions` | `status_json.metrics`, `run_complete.metrics` | `sp ps` (`status.metrics`), `sp feed` | integers | per retry / per compaction, session-cumulative | `state.autoRetries`/`state.autoCompactions` incremented on `auto_retry_start`/`compaction_start`, emitted in `run_complete.metrics` | `sink:264-270`, `sink:216-217`, emission `nat-obs:266-268` | same | same | **PARITY** | REUSE_EXISTING_NATIVE | differential: counts equal for N retries |
+| CAP-TEL-034 `stale_warning` `waiting_stale`/`running_silence`/`running_silence_error` | `sup:1368`, `sup:1416`, `sup:2101`, `sup:2107`; factory `tl:823-835` | `obs.db::specialist_events` (family `process_health`, name `process_health.stale_detected` `fe:867`) | `sp feed`, `sp forensic --family process_health` | `{t,seq,type:'stale_warning',reason,...}`; reason ∈ {`waiting_stale`,`running_silence`,`running_silence_error`,`tool_duration`} | on silence/threshold breach in the legacy supervisor watchdog only | NONE | NONE | — | — | **NATIVE_GAP (blocker C-7)** — the native host has no watchdog; there is no native stall detection at all | PRESERVE_NATIVE | differential: a stalled native activation emits `process_health.stale_detected` |
+| CAP-TEL-035 `stale_warning` reason `tool_duration` → `stall_gaps_json` | `sup:2177`; aggregation `obs-sqlite:2935-2937` | `obs.db::specialist_job_metrics.stall_gaps_json` | `sp db stats`, `sp metrics` | `Array<{t,tool,silence_ms,threshold_ms}>` — only `reason==='tool_duration'` entries are collected (`obs-sqlite:2935`) | derived at aggregate time from `stale_warning` rows | same function, but no native producer of `stale_warning` | `obs-sqlite:2935-2937` | same | same | **NATIVE_GAP** (empty for all native activations) | PRESERVE_NATIVE | covered by C-7 test |
+
+### 1.6 Control signals
+
+| legacy signal | legacy source (file:line) | legacy storage | legacy query surface | field/schema contract | emission timing | native signal | native source (file:line) | native storage | native query surface | parity status | migration action | test required |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| CAP-TEL-036 `control_signal` steer/close/fifo/resume | `sup:1980`, `sup:2558`, `sup:2565`, `sup:2581`, `sup:2585`; factory `tl:947-957` | `obs.db::specialist_events`; forensic name `control.${action}.recorded` (`fe:846`) | `sp feed`, `sp forensic --family control` | `{t,seq,type:'control_signal',action,...}`; actions seen: `resume_consumed`,`steer_consumed`,`steer_failed`,`close_consumed`,`fifo_parse_error` | on each control-verb consumption | NONE | NONE | — | — | **NATIVE_GAP (blocker C-8)** — `sp steer`/`sp resume`/`sp stop` still construct the legacy `Supervisor` (`00-capability-matrix.md` §0 verified baseline), so these remain legacy-only by construction | PRESERVE_NATIVE | differential: native control verb emits `control.<action>.recorded` |
+| CAP-TEL-037 `control_signal` `waiting_auto_close_*` | `sup:2129`, `sup:2144`, `sup:2156` | same | `sp forensic --family control` | `{action:'waiting_auto_close_requested'\|'…completed'\|'…force_requested',...}` | on keep-alive/job auto-close | NONE | NONE | — | — | **NATIVE_GAP** (native has no keep-alive auto-close) | PRESERVE_NATIVE or INTENTIONAL_RETIREMENT (needs product decision) | decision test |
+| CAP-TEL-038 `control_signal` lease admission | NONE (legacy has no workspace lease) | — | — | — | — | `control_signal` actions `lease_acquired`,`lease_denied`,`lease_uncertain`; payload `{reason,note,on:'fallback'\|'retry'\|'resume'}` | mapping `nat-obs:283-290`; producers `host:897,875,1098,1803,1926,2269,2080` | `obs.db::specialist_events` + forensic `control.lease_denied.recorded` etc. | `sp forensic --family control` | **INTENTIONAL_DIFFERENCE** (native-only; design rationale `nat-obs:271-282`) | REUSE_EXISTING_NATIVE | `tests/unit/specialist/native-lease-forensics.test.ts:34` |
+| CAP-TEL-039 forensic `control.<action>.recorded` | derived `fe:846` | `obs.db::specialist_forensic_events` | `sp forensic --family control` | family `control`, severity `warn` (`fe:885`) | with each control row | same | same | same | same | **PARITY** | REUSE_EXISTING_NATIVE | `tests/unit/specialist/forensic-events.test.ts:359` |
+
+### 1.7 Errors
+
+| legacy signal | legacy source (file:line) | legacy storage | legacy query surface | field/schema contract | emission timing | native signal | native source (file:line) | native storage | native query surface | parity status | migration action | test required |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| CAP-TEL-040 `error` (RPC/API) | `sup:2460-2466` (`api_error`), `tl:729-735`; family `error`, name `error.rpc`, severity `error` | `obs.db::specialist_events` + `specialist_forensic_events` | `sp feed`, `sp log` (`log.ts:184-186` isForensicAgentInternal), `sp forensic --family error` | `{t,seq,type:'error',source,error_message}` | per api_error metric event | NONE — native `activation_failed` becomes `run_complete('ERROR')` (`nat-obs:291-303`), not a separate `error` row | NONE | NONE | NONE | **NATIVE_GAP** — provider API errors lose their distinct `error.rpc` forensic row for native activations | PRESERVE_NATIVE | differential: injected 429 yields one `error.rpc` row in both stacks |
+| CAP-TEL-041 `extension_error` | `tl:371-376`, `tl:721-728`; family `error`, name `error.extension` | same | `sp forensic --family error` | `{t,seq,type:'extension_error',extension,error_message}` | per extension error callback | NONE | NONE | — | — | **NATIVE_GAP** | PRESERVE_NATIVE | differential: throwing extension yields `error.extension` |
+| CAP-TEL-042 severity mapping for errors | `fe:886-893` (`severityForTimelineEvent`) | in `event_json.severity` | `sp forensic --severity` (filter exists in `ListForensicEventsFilters`? see UNKNOWN U-3) | `severity ∈ {'info','warn','error'}` | at mirror write | same | same | same | same | **PARITY** | REUSE_EXISTING_NATIVE | `tests/unit/specialist/forensic-events.test.ts:203` |
+
+### 1.8 Review, evidence, commands, git
+
+| legacy signal | legacy source (file:line) | legacy storage | legacy query surface | field/schema contract | emission timing | native signal | native source (file:line) | native storage | native query surface | parity status | migration action | test required |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| CAP-TEL-043 `review_verdict_pass/partial/fail/waived` | `sup:407,423` (regex), `sup:1765`; `control.ts:221`; factory `tl:983-985`; family `review` (`fe:824`) | `obs.db::specialist_events` + forensic `review.verdict.<pass\|partial\|fail\|waived>` | `sp feed`, `sp forensic --family review` | `{t,seq,type,verdict,chain_template?,changed_paths_count?,terminal_state?,result?}` (`fe:762-773`) | when the reviewer output's `## Compliance Verdict` block is parsed | NONE | NONE | — | — | **NATIVE_GAP (blocker C-9)** — native has no reviewer-verdict extraction; `xtrm_gate_verdicts_total` is never produced for native activations | PRESERVE_NATIVE | differential: reviewer specialist yields identical verdict rows |
+| CAP-TEL-044 `command_completed` / `command_failed` | `sup:1938`; factory `tl:979-981`; family `command` (`fe:825`) | `obs.db::specialist_events` + forensic `command.completed`/`command.failed` | `sp feed`, `sp forensic --family command` | `{t,seq,type,command_kind,duration_ms?,command?,args?,exit_code?,stderr?,redacted?}` (`tl:979`) | per executed external command | NONE | NONE | — | — | **NATIVE_GAP** | PRESERVE_NATIVE | differential: auto-commit command yields `command.completed` |
+| CAP-TEL-045 evidence refs | `tl:383-405` (`TimelineEventEvidenceRef`), `sup:1784` (accumulator), `fe:779-793` (`evidence_refs_for_timeline_event`) | `obs.db::specialist_events.event_json.evidence`, `specialist_forensic_events.event_json.body.evidence_refs` | `sp feed --json`, `sp forensic` | `Array<{evidence_kind:'diff'\|'commit'\|'pr',evidence_ref?,evidence_url?,evidence_state?,base_ref?,base_sha?,head_sha?,pr_id?,pr_url?,pr_state?,trace_id?,span_id?,parent_span_id?,diff?}>` | attached to `run_complete` (and git events) when the supervisor collects them | NONE | NONE | — | — | **NATIVE_GAP** — `xtrm_evidence_refs_total` and `family=evidence` are unreachable | PRESERVE_NATIVE | differential: PR-producing run exposes the same evidence refs |
+| CAP-TEL-046 `chain_ready_for_review` | `sup:1757`, `control.ts:214`; factory `tl:987-989`; family `chain` | `obs.db::specialist_events` + forensic `chain.ready_for_review` | `sp feed`, `sp forensic --family chain` | `{t,seq,type,chain_template?,changed_paths_count?,terminal_state?,result?}` (`fe:774-782`) | once per chain when the last member finishes | NONE | NONE | — | — | **NATIVE_GAP** | PRESERVE_NATIVE | differential: chain of 2 yields one `chain.ready_for_review` |
+| CAP-TEL-047 `chain_finalized` | `sup:1757` region, `control.ts:240`; same factory | same | same | same | once per chain on finalize | NONE | NONE | — | — | **NATIVE_GAP** | PRESERVE_NATIVE | differential: `chain.finalized` present |
+| CAP-TEL-048 `worktree_merged` | factory `tl:991-993`; **no producer call site** (`grep createWorktreeMergedEvent src/` → only the factory) | none (no producer) | — | `{t,seq,type:'worktree_merged',changed_paths_count?,merge_ref?,source_ref?,target_ref?,result?}` (`fe:784-792`); family `worktree` | would be on merge | NONE | NONE | — | — | **DEAD_AFTER_CUTOVER** — no producer in either stack; the only merge observation that IS produced is `branch_integration_events` (CAP-TEL-050) | INTENTIONAL_RETIREMENT | delete factory + forensic classifier, or implement `xtrm.branch.integration.v1` as its replacement |
+| CAP-TEL-049 `auto_commit_success`/`skipped`/`failed` | `sup:1943,1948,1960`; factory `tl:958-975`; family `git` (`fe:822`) | `obs.db::specialist_events` + forensic `git.auto_commit.*` | `sp feed`, `sp forensic --family git` | `{t,seq,type,reason?,commit_sha?,committed_files?,evidence?}` | once per run, after the auto-commit decision | NONE | NONE | — | — | **NATIVE_GAP (blocker C-10)** | PRESERVE_NATIVE | differential: auto-commit decision recorded identically |
+| CAP-TEL-050 `branch_integration_events` | `migrateToV14` `obs-sqlite:651-680`; type `src/specialist/branch-integration-events.ts`; producer `obs-sqlite:2092` (`recordBranchIntegration`) | `obs.db::branch_integration_events` | `sp` merge/epic paths; reader `obs-sqlite:2100`+ (`listBranchIntegrations`) | columns `id,t,schema_version,source_job_id,source_branch,source_worktree,target_role,target_branch,target_worktree,status,commit_sha,event_json`; `UNIQUE(source_branch,commit_sha)` | per merge observation | NONE (native merge/publication is substrate-owned; not yet wired) | NONE | — | — | **UNKNOWN** (ownership question: substrate `containers.*` per `obs-sqlite:1-20` bridge note) | MOVE_TO_CORE | see U-5 |
+
+### 1.9 MCP gateway
+
+| legacy signal | legacy source (file:line) | legacy storage | legacy query surface | field/schema contract | emission timing | native signal | native source (file:line) | native storage | native query surface | parity status | migration action | test required |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| CAP-TEL-051 forensic family `mcp` | `src/server.ts:88-99`, `src/mcp/request-meta.ts:44-52`; classifier `fe:817,818,861-871` | `obs.db::specialist_forensic_events` — `job_id='mcp-gateway'`, `specialist='specialists-mcp'` | `sp forensic --family mcp` | names: `mcp.connected`,`mcp.disconnected`,`mcp.auth.failed`,`mcp.rate_limited`,`mcp.latency.observed`,`mcp.call.started`,`mcp.call.completed`,`mcp.call.failed`; severity `error`/`warn`/`info` (`server.ts:94`) | per MCP call/connection event | shared (native MCP v2 server routes through the same gateway emit) | `src/mcp/v2-server.ts:113` | same | same | **PARITY** | REUSE_EXISTING_NATIVE | `tests/unit/server-mcp-forensic.test.ts:23,69` |
+| CAP-TEL-052 `mcp` OTel semconv body | `fe:804-812` (`otelForTimelineEvent`) | `event_json.otel` | `sp forensic --json` | `{'mcp.method.name','mcp.session.id','jsonrpc.request.id','network.transport','gen_ai.operation.name','gen_ai.tool.name'}` | with each `mcp` forensic row | same | same | same | same | **PARITY** | REUSE_EXISTING_NATIVE | `tests/unit/server-mcp-forensic.test.ts:6` |
+
+### 1.10 Settlement publication, degradation, recovery
+
+| legacy signal | legacy source (file:line) | legacy storage | legacy query surface | field/schema contract | emission timing | native signal | native source (file:line) | native storage | native query surface | parity status | migration action | test required |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| CAP-TEL-053 settlement publication telemetry | NONE (legacy `Supervisor` publishes no settlement) | — | — | — | — | 11 emit names: `settlement_store_failed`,`settlement_stored`,`settlement_degraded`,`settlement_receipt_allocated`,`settlement_artifact_attached`,`settlement_result_published` (`settle-pub:565,568,582,605,612,640,668,679`), `settlement_republish_refused`,`settlement_republish_deferred`,`settlement_republish_reconciled`,`settlement_republish_error` (`settle-pub:271,286,341,478`) | producers `settle-pub:565-679,271-478`; routed through `host:1694-1710` (`emit`) and `host:1407-1414` (republisher, `activationId='act:settlement-republisher'`) | **NONE** — `mapNativeLifecycleEvent` (`nat-obs:241-306`) has no `settlement_*` case → returns `null` → zero durable rows | **NONE** | **NATIVE_GAP (BLOCKER C-1)** — degradation/recovery of settlement publication is visible only on `stderr` (`host:1415-1418`) | PRESERVE_NATIVE | new: every `settlement_*` name must have a durable forensic row or an explicit `INTENTIONAL_RETIREMENT` decision |
+| CAP-TEL-054 settlement records | NONE | — | — | — | — | files `<root>/<activationId>/<attemptId>.json`, one per (activation, attempt) | `settle-store:167-208`; state machine `settle-store:30,48,129-164` | filesystem under `.specialists/settlements/` (`host:392-397`) | `SettlementStore.get/listAttempts/listPendingPublication/listRuntimeRefused` — **no CLI surface** | **NATIVE_GAP (blocker C-2)** — no `sp` command reads the settlement store; the backlog (`listPendingPublication`) is enumerable only in-process | PRESERVE_NATIVE | new: `sp` surface for publication state + backlog count |
+
+### 1.11 Schema and store shape
+
+| legacy signal | legacy source (file:line) | legacy storage | legacy query surface | field/schema contract | emission timing | native signal | native source (file:line) | native storage | native query surface | parity status | migration action | test required |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| CAP-TEL-055 `schema_version` table | `obs-sqlite:483-490`, migrations V2–V15 `obs-sqlite:187-1035` | `obs.db::schema_version` (`version INTEGER PRIMARY KEY, applied_at_ms`) | `sp db setup`, `obs-db:140-170` (`isObservabilityDbInitialized`) | max version **15** (`obs-db:7`) | once per migration, idempotent | same store; native adds no table | — | same | same | **PARITY** | REUSE_EXISTING_NATIVE | `tests/unit/specialist/observability-sqlite-v15-identity.test.ts:67` |
+| CAP-TEL-056 `specialist_events` row | `obs-sqlite:501-513`, `1605-1650` | `obs.db::specialist_events` | `sp feed`, `sp log`, `sp status`, `tq` | `id,job_id,seq,specialist,bead_id,t,type,event_json,attempt_id`; indexes `idx_specialist_events_job_seq` (`obs-sqlite:833`), `idx_specialist_events_job_t` (`obs-sqlite:834`), `idx_specialist_events_job_attempt` (`obs-sqlite:743`) | per event | same | `sink:174` → `obs-sqlite:1605` | same | same | **PARITY** | REUSE_EXISTING_NATIVE | `tests/unit/specialist/observability-sqlite.test.ts:815-996` |
+| CAP-TEL-057 `specialist_forensic_events` row | `obs-sqlite:331-350`, `1718-1760` | `obs.db::specialist_forensic_events` | `sp forensic`, `sp feed --json`, `sp log --legacy` | `id,job_id,seq,t,schema_version,event_family,event_name,participant_kind,participant_role,participant_id,redaction_status,event_json,attempt_id`; `UNIQUE(job_id,seq)` | mirrored for every timeline row + direct producers | same | `obs-sqlite:1651-1684` | same | same | **PARITY** | REUSE_EXISTING_NATIVE | `tests/unit/specialist/observability-sqlite.test.ts:841,886,979` |
+| CAP-TEL-058 `specialist_job_metrics` row | `obs-sqlite:296-325` (DDL), `2846-3023` (producer) | `obs.db::specialist_job_metrics` | `sp db stats`, `sp metrics` | see §1.12 rows 063–070 | upserted on every `aggregateJobMetrics` call | same function | `obs-sqlite:2846-3023` | same | same | **PARITY** | REUSE_EXISTING_NATIVE | `tests/unit/specialist/prometheus-projection.test.ts:146` (replay safety) |
+| CAP-TEL-059 `specialist_results` | `obs-sqlite:515-519`, `1808-1816` (`writeResultRow`), `3189-3198` (`deleteResults`) | `obs.db::specialist_results` | `sp result`, `sp feed` | `job_id TEXT PRIMARY KEY, output TEXT NOT NULL, updated_at_ms INTEGER` | with each result-bearing status write | same (native settle output via `sink:219-245`) | `sink:227` → `obs-sqlite:2062-2071` | same | same | **PARITY** | REUSE_EXISTING_NATIVE | `tests/unit/specialist/native-activation-observability.test.ts:230` |
+| CAP-TEL-060 node telemetry (`node_runs`,`node_members`,`node_events`,`node_memory`) | `obs-sqlite:394-478` (V4), `797-814` (V5), `876-923` (V7); producers `obs-sqlite:1818-1940`+ (`upsertNodeRun` … `upsertNodeMemoryWithEvent`); `NodeEventType` union `obs-sqlite:1041-1085` | `obs.db::node_*` | `sp node`, `sp ps` node tree, `sp console` | `node_runs(id,node_name,status,coordinator_job_id,started_at_ms,updated_at_ms,waiting_on,error,memory_namespace,status_json,pr_number,pr_url,pr_head_sha,gate_results,completion_strategy)`; `node_members(...,worktree_path,parent_member_id,replaced_member_id,phase_id,generation)`; `node_events(id,node_run_id,seq,t,type,event_json)`; `node_memory(...,provenance_json,confidence)` | per node/member state change | NONE — the native host models Fleet activations, not nodes | NONE | — | — | **NATIVE_GAP (blocker C-11)** | PRESERVE_NATIVE (native node-coordinator) or MOVE_TO_CORE | differential: `sp ps` node tree for a native node run |
+| CAP-TEL-061 epic telemetry (`epic_runs`,`epic_chain_membership`) | `obs-sqlite:924-977` (V8); producers `obs-sqlite:1548-1591`; readers `obs-sqlite:2450-2700` | `obs.db::epic_*` | `sp epic`, `sp ps` epic readiness | `epic_runs(epic_id,status,status_json,updated_at_ms)`; `epic_chain_membership(chain_id,epic_id,chain_root_bead_id,chain_root_job_id,updated_at_ms)` | per epic/chain transition | NONE | NONE | — | — | **NATIVE_GAP** | PRESERVE_NATIVE or MOVE_TO_CORE | `tests/unit/specialist/observability-sqlite.test.ts:660,699,739` |
+| CAP-TEL-062 PR/base drift columns | `obs-sqlite:612-646` (V13); interface `obs-sqlite:1406-1410`; impl `obs-sqlite:2397-2440` | `obs.db::specialist_jobs.pr_*`, `base_sha_pinned*` | `sp log`, `sp ps` (no dedicated command; `listJobsNeedingPrDriftRefresh`) | `pr_url,pr_head_sha,pr_state,pr_merge_state,pr_classification,pr_base_ref,pr_base_sha,pr_drift_checked_at_ms,base_sha_pinned,base_sha_pinned_at_ms` | lazily refreshed (refresh logic owned by specialists-05q.2, `obs-sqlite:1313-1340`) | NONE | NONE | — | — | **NATIVE_GAP** — bridge targets `containers.pr_*` per `obs-sqlite:1311-1314` | MOVE_TO_CORE | `tests/unit/specialist/observability-sqlite-pr-refresh.test.ts` |
+
+### 1.12 Metric columns of `specialist_job_metrics`
+
+| legacy signal | legacy source (file:line) | legacy storage | legacy query surface | field/schema contract | emission timing | native signal | native source (file:line) | native storage | native query surface | parity status | migration action | test required |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| CAP-TEL-063 `started_at_ms` / `completed_at_ms` / `elapsed_ms` | `obs-sqlite:2885-2886,2900-2908,2939-2948` | `specialist_job_metrics` | `sp db stats`, `sp metrics` (`prom:154-176`) | `INTEGER` epoch ms; `elapsed_ms` from `run_complete.elapsed_s*1000` else last-event minus first | derived | same; native `run_complete.elapsed_s = (t - state.startedAtMs)/1000` where `startedAtMs` is the **sink's first observed event**, not the dispatch time | `nat-obs:252,293` | same | same | **NATIVE_GAP (timing semantics)** — native `started_at_ms` is the first projected event, so it omits dispatch→first-event latency | PRESERVE_NATIVE | differential: `elapsed_ms` within tolerance of wall-clock run duration |
+| CAP-TEL-064 `active_runtime_ms` | `obs-sqlite:2872-2880,2894-2902,2930-2934` (`closePhase`) | `specialist_job_metrics` | `sp metrics` (`prom:167-175`) | `INTEGER` ms accumulated while phase `'running'` (between `run_start`/`status_change('running')` and the next phase change) | derived | same function; native only ever emits one `status_change` (`waiting`) so the state machine never returns to `running` after a settle | `obs-sqlite:2868-2937` | same | same | **NATIVE_GAP (counting semantics, §3 C-2)** | PRESERVE_NATIVE | differential: active time excludes wait for a resumed native activation |
+| CAP-TEL-065 `waiting_ms` | `obs-sqlite:2873-2880,2930-2934`; also `prom:198-210` (`xtrm_job_wait_seconds`) | `specialist_job_metrics` | `sp metrics` | `INTEGER` ms accumulated while phase `'waiting'` | derived | same function | same | same | same | **NATIVE_GAP (counting semantics, §3 C-2)** — over-accrues for resumed native activations | PRESERVE_NATIVE | differential as C-2 |
+| CAP-TEL-066 `stall_gaps_json` | `obs-sqlite:2854,2935-2937` | `specialist_job_metrics` | `sp db stats` | `Array<{t,tool,silence_ms,threshold_ms}>` | derived | no native producer | — | same | same | **NATIVE_GAP** (see CAP-TEL-034/035) | PRESERVE_NATIVE | covered by C-7 |
+| CAP-TEL-067 `run_complete_json` | `obs-sqlite:2856,2940-2945,3017` | `specialist_job_metrics` | `sp db stats` | full serialized `run_complete` event | derived | same | same | same | same | **PARITY** | REUSE_EXISTING_NATIVE | — |
+| CAP-TEL-068 `updated_at_ms` | `obs-sqlite:3019` (from `specialist_jobs.updated_at_ms`) | `specialist_job_metrics` | `sp db stats --since`, `sp metrics --since` | `INTEGER` | derived | same | same | same | same | **PARITY** | REUSE_EXISTING_NATIVE | — |
+| CAP-TEL-069 `model` column | `obs-sqlite:2858,2943` — from `run_complete.model` only | `specialist_job_metrics` | `sp db stats --model`, `sp metrics` | `TEXT NULL` | derived | same; native `run_complete.model` = `context.resolvedModel` | `nat-obs:254,295` | same | same | **PARITY**; NULL when no `run_complete` yet | REUSE_EXISTING_NATIVE | — |
+| CAP-TEL-070 `status` / `chain_kind` / `chain_id` / `bead_id` / `node_id` / `epic_id` | `obs-sqlite:2861-2866,2945-2950` (from `specialist_jobs`) | `specialist_job_metrics` | `sp db stats`, `sp metrics` | denormalized copies | derived | same | same | same | same | **PARITY** | REUSE_EXISTING_NATIVE | — |
+
+### 1.13 Identity and lineage
+
+| legacy signal | legacy source (file:line) | legacy storage | legacy query surface | field/schema contract | emission timing | native signal | native source (file:line) | native storage | native query surface | parity status | migration action | test required |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| CAP-TEL-071 `job_id` | `runner:1547` (`crypto.randomUUID()`); also `sup:1437` (`slice(0,6)` for a different id); `script-runner:467` (`id: traceId`, a UUID from `script-runner:754`) | PK on `specialist_jobs`,`specialist_results`,`specialist_job_metrics`; FK-ish on `specialist_events`,`specialist_forensic_events`,`node_members` | every `sp` command | `TEXT` — legacy value is a UUID | at job creation | **native `job_id` column holds `activationId` = `act:<12 hex>`** (`host:508`; mapping `nat-obs:244`) | `host:508`, `nat-obs:242-248` | same column | same | **NATIVE_GAP (identity value+format)** — see delta §2.1 | PRESERVE_NATIVE | differential: a stable `activation_id ↔ job_id` mapping is queryable for every native row |
+| CAP-TEL-072 `participant_id` | `fe:403-411` (`deriveParticipantId`), `obs-sqlite:710-719,753-756` (V15 backfill) | `specialist_jobs.participant_id`, `specialist_forensic_events.participant_id` | `sp forensic`, `sp ps --mine` | `specialist::<role>`; sentinel `specialist::<unknown>` means "role unrecoverable", must not be aggregated (`obs-sqlite:694-701`) | migration backfill + every status write | same shape: `specialist::${request.specialist}` | `host:517`, `sink:110` via `deriveParticipantId` | same | same | **PARITY** | REUSE_EXISTING_NATIVE | `tests/unit/specialist/forensic-events.test.ts:242,253`; `observability-sqlite-v15-identity.test.ts:353` |
+| CAP-TEL-073 `pi_session_id` | `obs-sqlite:1511` (`status.session_id`), `obs-sqlite:748-752` (V15 backfill from `status_json.$.session_id`) | `specialist_jobs.pi_session_id` | `sp ps`, `sp forensic` | `TEXT NULL`; blank must not clear an existing value (`sink:273-275`) | every status write (`CASE WHEN identity…`) | from `snapshot.piSessionId`; blank guarded | `sink:275`, `obs-sqlite:1515-1516` | same | same | **PARITY** | REUSE_EXISTING_NATIVE | `tests/unit/specialist/native-activation-observability.test.ts:180` |
+| CAP-TEL-074 `workspace_id` | `obs-sqlite:381-384,763-772` | `specialist_jobs.workspace_id` | `sp ps`, lineage queries | `normalize(resolve(worktree_path))` — **no realpath/repo-root normalization**; known ceiling: symlinked path ≠ real path (`obs-sqlite:690-693`) | migration backfill + status write | from `state.workspacePath` | `sink:115` → `obs-sqlite:1489` | same | same | **PARITY** | REUSE_EXISTING_NATIVE | `observability-sqlite-v15-identity.test.ts:329` |
+| CAP-TEL-075 `attempt_no` / `attempt_id` | `obs-sqlite:386-388` (`buildAttemptId` = `` `${jobId}::attempt::${n}` ``), `390-392` (`isRetryStartEvent`), `1621-1640` | `specialist_jobs.attempt_no/attempt_id`, `specialist_events.attempt_id`, `specialist_forensic_events.attempt_id` | `sp forensic --family`, `sp feed` | `attempt_no INTEGER DEFAULT 0`; legacy rows keep `0`/`NULL` (`obs-sqlite:700-701`) | on `retry`+`phase==='start'`, or from supplied identity | **format differs**: native `attemptId = att:<12hex>:<n>` (`host:509`) advanced by `nativeAttemptIdForNo` (`nat-obs:228-233`); resume advances it too (`host:2260`) | `host:509,2260`; `sink:264-267` | same columns | same | **NATIVE_GAP (identity format)** — two incompatible textual formats in one column | PRESERVE_NATIVE | differential: attempt lineage queryable across both formats |
+| CAP-TEL-076 `bead_id` | `sup`/`runner` status; `obs-sqlite:1500` column | `specialist_jobs.bead_id`, `specialist_events.bead_id`, forensic `correlation.bead_id` | `sp ps --bead`, `sp forensic` | `TEXT NULL`; post-A7 carries the ISSUE ref while keeping the storage name (`host:513-516`) | every status write | `event.beadId` from `request.issueRef` | `host:515,189` | same | same | **PARITY (naming only)** — column name is `bead_id`; value is an issue ref | REUSE_EXISTING_NATIVE | differential: `sp ps --bead <issue>` finds a native activation |
+| CAP-TEL-077 chain/epic/node columns | `obs-sqlite:528-544,621-634,924-977` | `specialist_jobs.chain_kind,chain_id,chain_root_job_id,chain_root_bead_id,epic_id,node_id` | `sp ps`, `sp epic`, `sp metrics` (`chain_template`) | as declared | status write | `statusOf` sets none of them (`sink:96-127`) | NONE | — | — | **NATIVE_GAP** — native activations are always `chain_kind='prep'`, `chain_id=NULL` (`obs-sqlite:1494-1500` defaults) | MOVE_TO_CORE | differential: chain membership visible for a native chain member |
+| CAP-TEL-078 `trace_id` / `span_id` / `parent_span_id` | `sup:134-136` (fields), `chain-identity.ts:58` (root `trace_id = randomUUID()`), `sup:1244-1246`, `fe:606` | `status_json.trace_id/span_id/parent_span_id`, forensic `correlation.trace_id/span_id/parent_span_id` | `sp forensic --json`, `sp feed --json` | `TEXT NULL` | at job creation and on forensic projection | `statusOf` sets none of them (`sink:96-127`) | NONE | — | — | **NATIVE_GAP (blocker C-12)** — native activations carry no trace/span correlation, so exemplar drill-down and cross-job tracing are unavailable for them | PRESERVE_NATIVE | differential: native activation exposes a non-null `correlation.trace_id` |
+| CAP-TEL-079 `parent_job_id` / `spawn_origin` / `root_runtime_origin` | read from `status_json` in `obs-sqlite:1685-1806`; projected `fe:505-573` | `status_json.*`, forensic `correlation`/`links.spawned_by`/`links.root_runtime_origin`, body `origin.source`/`origin.verified` | `sp forensic --json`, `sp feed` | whitelisted projections (`fe:505-573`) | on `run_start` projection | NONE — `statusOf` sets no runtime origin | NONE | — | — | **NATIVE_GAP** | PRESERVE_NATIVE | `tests/unit/specialist/forensic-run-start-origin.test.ts` |
+| CAP-TEL-080 `participant_kind` / `participant_role` | `fe:390-400` (`normalizeResource`), `fe:577-584` | `specialist_forensic_events.participant_kind/participant_role`, forensic `resource.*` | `sp forensic`, `sp ps` | `participant_kind` ∈ {`specialist`,`node_member`,`orchestrator`,`pulse_emitter`,`adapter`} (`fe:403-411`) | per forensic row | same; native sets `node_member` only when `nodeId` present (never for native) | `fe:577-579` | same | same | **PARITY** | REUSE_EXISTING_NATIVE | `tests/unit/specialist/forensic-events.test.ts:230` |
+| CAP-TEL-081 `redaction_status` | `fe:344-357`, `fe:898-899` (`redactionStatusForTimelineEvent`), `fe:262-298` (rules `sensitive-field-name`,`secret-pattern`) | `specialist_forensic_events.redaction_status`, `event_json.redaction` | `sp forensic`, `sp log` | `'clean'` for most types; `'redacted'` for `tool`,`turn_summary`,`run_complete`,`command_*`,`review_verdict_*`,`chain_*`,`worktree_merged` | per forensic row | same (shared writer) | `obs-sqlite:1651-1684` | same | same | **PARITY** | REUSE_EXISTING_NATIVE | `forensic-events.test.ts:379`; `console-telemetry-redaction.test.ts:91` |
+| CAP-TEL-082 forensic `schema_version` | `fe:1` (`xtrm.forensic.v1`), `fe:366` | `specialist_forensic_events.schema_version` | `sp forensic`, `sp feed --json` | constant `'xtrm.forensic.v1'` | per row | same | same | same | same | **PARITY** | REUSE_EXISTING_NATIVE | `tests/smoke/telemetry-readiness.smoke.test.ts:26` (quarantined) |
+| CAP-TEL-083 worktree / branch | `obs-sqlite:1497` (`worktree_column`), `sup`/`status_json.branch`; `obs-sqlite:2630` reads `$.branch` | `specialist_jobs.worktree_column`, `status_json.branch` | `sp ps`, `sp metrics` (`xtrm_worktrees`) | `TEXT` | status write | `state.workspacePath` | `sink:194` → `obs-sqlite:1489,1497` | same | same | **PARITY** | REUSE_EXISTING_NATIVE | `tests/unit/specialist/observability-sqlite.test.ts:115` |
+
+### 1.14 Prometheus projection metrics
+
+All rows share: legacy storage = derived from `specialist_jobs` + `specialist_job_metrics` (+ forensic events for 093–101); legacy query surface = `sp metrics` and `GET /metrics`; emission timing = on demand per scrape/render, never persisted; native storage/query surface = identical (native rows flow through the same projection). Native source column therefore reads `prom` for every row. Disposition is cited once here to keep the table readable; per-row detail follows in §2.
+
+| legacy signal | legacy source (file:line) | legacy storage | legacy query surface | field/schema contract | emission timing | native signal | native source (file:line) | native storage | native query surface | parity status | migration action | test required |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| CAP-TEL-084 `xtrm_job_state` (gauge) | `prom:103-111` | none (derived) | `sp metrics`, `GET /metrics` | labels `service_name,participant_kind,repo,participant_role,state` (`prom:326-336`) | per render from `listStatuses()` | same | `prom` | none | same | **PARITY** (native rows included) | REUSE_EXISTING_NATIVE | `tests/unit/specialist/prometheus-projection.test.ts:44` |
+| CAP-TEL-085 `xtrm_job_queue_depth` (gauge) | `prom:113-121` | none | same | labels `service_name,participant_kind,repo,participant_role`; filter `isQueuedStatus` = starting/waiting/queued (`prom:791-795`) | per render | same | `prom` | none | same | **PARITY** | REUSE_EXISTING_NATIVE | `prometheus-projection.test.ts:44` |
+| CAP-TEL-086 `xtrm_processes` (gauge) | `prom:123-131` | none | same | labels `service_name,repo,process_kind,state` (`prom:342-350`) | per render | same | `prom` | none | same | **PARITY** | REUSE_EXISTING_NATIVE | `prometheus-projection.test.ts:44` |
+| CAP-TEL-087 `xtrm_worktrees` (gauge) | `prom:133-142` | none | same | labels `service_name,repo,state ∈ {active,preserved_terminal}` (`prom:352-360`) | per render, `hasWorktree` filter (`prom:797-800`) | same | `prom` | none | same | **PARITY** | REUSE_EXISTING_NATIVE | `prometheus-projection.test.ts:44` |
+| CAP-TEL-088 `xtrm_jobs_total` (counter) | `prom:144-154` | none | same | labels `service_name,participant_kind,repo,participant_role,model,result`; `result` from `resultForStatus` (`prom:806-813`) | per render over terminal metrics | same | `prom` | none | same | **PARITY** | REUSE_EXISTING_NATIVE | `prometheus-projection.test.ts:324` |
+| CAP-TEL-089 `xtrm_job_duration_seconds` (histogram) | `prom:156-166` | none | same | buckets `JOB_DURATION_BUCKETS` (`prom:25`); value `elapsed_ms/1000` | per render | same | `prom` | none | same | **PARITY** | REUSE_EXISTING_NATIVE | `prometheus-projection.test.ts:146` |
+| CAP-TEL-090 `xtrm_job_active_runtime_seconds` (histogram) | `prom:167-176` | none | same | same buckets; value `active_runtime_ms/1000` | per render | same | `prom` | none | same | **PARITY** (see §3 C-2 for the input) | REUSE_EXISTING_NATIVE | differential as C-2 |
+| CAP-TEL-091 `xtrm_chains_total` (counter) | `prom:177-187` | none | same | labels `service_name,repo,chain_template,result`; `chain_template` from `startup_payload_json` (`prom:277-300`) | per render | same | `prom` | none | same | **NATIVE_GAP** — native `startup_payload_json` is NULL → label degrades to `'chain'` (CAP-TEL-030) | PRESERVE_NATIVE | `prometheus-projection.test.ts:110` |
+| CAP-TEL-092 `xtrm_chain_duration_seconds` (histogram) | `prom:189-196` | none | same | buckets `CHAIN_DURATION_BUCKETS` (`prom:27`) | per render | same | `prom` | none | same | **NATIVE_GAP** (input gap CAP-TEL-030/091) | PRESERVE_NATIVE | `prometheus-projection.test.ts:110` |
+| CAP-TEL-093 `xtrm_job_wait_seconds` (histogram) | `prom:198-210` | none | same | buckets `JOB_WAIT_BUCKETS` (`prom:26`); value `waiting_ms/1000` | per render, only when `waits.length > 0` (`prom:199`) | same | `prom` | none | same | **PARITY** (see §3 C-2) | REUSE_EXISTING_NATIVE | differential as C-2 |
+| CAP-TEL-094 `xtrm_turns_total` (counter) | `prom:212-222` | none | same | labels participant set + `result:'success'` (hardcoded, `prom:217`); value `Σ total_turns` over the group | per render | same | `prom` | none | same | **NATIVE_GAP (counting semantics, §3 C-3)** | PRESERVE_NATIVE | differential: turn total for a multi-message turn |
+| CAP-TEL-095 `xtrm_context_usage_ratio` (gauge) | `prom:224-233`, reader `prom:687-698` | none | same | latest `context_trajectory_json` entry, `pct/percentage/context_pct/ratio`, normalised to 0–1 when >1 | per render | same | `prom` | none | same | **NATIVE_GAP** — native `context_trajectory_json` is `[]` (CAP-TEL-028 blocker) | PRESERVE_NATIVE | covered by C-5 test |
+| CAP-TEL-096 `xtrm_tool_calls_total` (counter) | `prom:389-408` | none | same | labels participant set + `tool_name` (normalised ≤60 chars, `prom:832-836`) + `result`; value `Σ tool_call_counts_json` | per render | same | `prom` | none | same | **PARITY (shared)**; see §3 C-1 for the count basis | REUSE_EXISTING_NATIVE | `prometheus-projection.test.ts:76` |
+| CAP-TEL-097 `xtrm_llm_tokens_total` (counter) | `prom:410-457` | none | same | labels participant set + `model_provider` + `direction ∈ {input,output,cache_read,cache_creation,reasoning,tool,total}` | per render | same | `prom` | none | same | **NATIVE_GAP (aggregation, §3 C-4)** — reads only the LAST trajectory element, which for native is a cumulative session total and for legacy a per-turn value | PRESERVE_NATIVE | differential: token total equals the sum of per-turn deltas |
+| CAP-TEL-098 `xtrm_mcp_operations_total` (counter) | `prom:479-496` | none | same | labels service/repo + `mcp_server`,`mcp_method`,`result` (`resultForMcpEvent` `prom:651-658`) | per render over supplied `forensicEvents` | same | `prom` | none | same | **PARITY** | REUSE_EXISTING_NATIVE | `prometheus-projection.test.ts:158` |
+| CAP-TEL-099 `xtrm_gate_verdicts_total` (counter) | `prom:498-509` | none | same | labels service/repo + `participant_role`,`gate_kind`,`verdict` (normalised PASS/PARTIAL/FAIL/WAIVED, `prom:634-640`) | per render | same | `prom` | none | same | **NATIVE_GAP** — no native `review.verdict.*` producer (CAP-TEL-043) | PRESERVE_NATIVE | `prometheus-projection.test.ts:282` |
+| CAP-TEL-100 `xtrm_evidence_refs_total` (counter) | `prom:510-521` | none | same | labels service/repo + `evidence_kind`,`result` | per render | same | `prom` | none | same | **NATIVE_GAP** — no `family=evidence` producer found in `src/` (§2b) | PRESERVE_NATIVE | producer test required before this metric is reachable |
+| CAP-TEL-101 `xtrm_identity_operations_total` (counter) | `prom:522-535` | none | same | labels service/repo + `credential_kind`,`result` (`prom:660-664`) | per render | same | `prom` | none | same | **NATIVE_GAP** — no `family=identity` producer found in `src/` | PRESERVE_NATIVE | producer test required |
+| CAP-TEL-102 `xtrm_policy_decisions_total` (counter) | `prom:536-547` | none | same | labels service/repo + `policy_kind`,`action_kind`,`result` (`prom:666-671`) | per render | same | `prom` | none | same | **NATIVE_GAP** — no `family=policy` producer found in `src/` | PRESERVE_NATIVE | producer test required |
+| CAP-TEL-103 `xtrm_policy_mismatches_total` (counter) | `prom:548-559` | none | same | only for `policy.mismatch.detected` | per render | same | `prom` | none | same | **NATIVE_GAP** | PRESERVE_NATIVE | producer test required |
+| CAP-TEL-104 `xtrm_eval_score` (gauge) | `prom:561-576` | none | same | labels service/repo + `eval_kind` (`result` label deliberately dropped, `prom:474`); value = `body.score` | per render | same | `prom` | none | same | **NATIVE_GAP** — no `family=eval` producer found in `src/` | PRESERVE_NATIVE | producer test required |
+| CAP-TEL-105 `xtrm_eval_runs_total` (counter) | `prom:576-588` | none | same | labels service/repo + `eval_kind`,`result` | per render | same | `prom` | none | same | **NATIVE_GAP** | PRESERVE_NATIVE | producer test required |
+| CAP-TEL-106 `xtrm_prometheus_projection_timestamp_seconds` (gauge) | `prom:237-243` | none | same | labels `service_name,repo` | every render | same | `prom` | none | same | **PARITY** | REUSE_EXISTING_NATIVE | `prometheus-projection.test.ts:44` |
+
+### 1.15 Read surfaces with a producer gap
+
+| legacy signal | legacy source (file:line) | legacy storage | legacy query surface | field/schema contract | emission timing | native signal | native source (file:line) | native storage | native query surface | parity status | migration action | test required |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| CAP-TEL-107 native-activation last-known summary | **no producer** — `ps.ts:746-751` reads `readForensicEvents({eventFamily:'activation'})`, `nat-sum:113` counts `event_name === 'activation.turn_started'` | `specialist_forensic_events` WHERE `event_family='activation'` | `sp ps` "Native activations" block (`ps.ts:767-772`), `sp ps --json` `native_activations` (`ps.ts:1156-1157`) | `NativeActivationSummary{activation_id,specialist,bead_id?,state,last_event,last_event_at_ms,first_event_at_ms,event_count,turns,pi_session_id?,detail?}` (`nat-sum:12-26`) | read-only, on demand | `activation.<name>` names are **read but never written** by this tree: `grep "\"activation_" src/` yields producers in `host`, but the sink's mapper (`sink:181-294` → `nat-obs:241-306`) persists them as `job.*`/`control.*`/`run_complete`, never as `activation.*` | `nat-obs:241-306` | — | — | **DEAD_AFTER_CUTOVER (BLOCKER C-13)** — the block renders empty for every native activation. The integration test that asserts these rows (`tests/integration/activation/native-activation.live.test.ts:220-256`) is `SPECIALISTS_LIVE_SMOKE`-gated and therefore never runs in CI | PRESERVE_NATIVE (repoint the reader at the real vocabulary) | new: `sp ps --json .native_activations` non-empty for a live native dispatch |
+| CAP-TEL-108 console NDJSON error telemetry | `src/cli/console/log.ts` (`logError`, `resetLogErrorMemo`, `ConsoleErrorOp`, `ConsoleView`) | `stderr` NDJSON, not a DB | operator log capture | allowlisted keys `ts,component,view,op,exitCode,durationMs,errorClass,step?,beadId?`; forbidden substrings enforced | per console error, deduped | none (console is legacy-only; no native console) | NONE | — | — | **INTENTIONAL_DIFFERENCE** | FRONTEND_ONLY | `tests/unit/cli/console-telemetry-redaction.test.ts:74` |
+
+---
+
+## 2. Cross-cutting contracts
+
+### (a) Metrics-label cardinality rules
+
+Three independent enforcement layers, all in `src/specialist/forensic-events.ts`:
+
+1. **Deny list** — `FORBIDDEN_PROMETHEUS_LABELS` (`fe:158-201`) names **48** keys that may never
+   become labels, including every unbounded identity: `participant_id`, `job_id`, `bead_id`,
+   `issue_id`, `container_id`, `chain_id`, `chain_root_job_id`, `chain_root_bead_id`, `epic_id`,
+   `node_id`, `pulse_id`, `turn_id`, `tool_call_id`, `trace_id`, `span_id`, `parent_span_id`,
+   `session_id`, `conversation_id`, `mcp_session_id`, `jsonrpc_request_id`, `eval_id`,
+   `policy_decision_id`, `identity_request_id`, `commit_sha`, `raw_path`, `raw_command`,
+   `raw_error`, `raw_diff`, `raw_url`, `prompt`, `model_output`, `user_id`, `email`, `token`,
+   `credential`, plus the xtmux runtime-origin ids `parent_job_id`, `agent_instance_id`,
+   `host_id`, `tmux_session_id`, `tmux_window_id`, `tmux_pane_id`.
+   Enforced by `assertNoForbiddenLabels` (`fe:435-441`), which **throws**.
+2. **Allow list** — `DEFAULT_LABEL_ALLOWLIST` (`fe:204-240`), **35** keys. Enforced by
+   `pickAllowedLabels` (`fe:443-452`), which drops everything not in the set.
+3. **Text validator** — `validatePrometheusProjectionText` (`prom:248-272`) re-parses the
+   rendered exposition and re-runs `assertNoForbiddenLabels` on every sample's label set.
+
+Cardinality ceilings, per metric family:
+
+| Metric group | Label set | Cardinality bound | Evidence |
+|---|---|---|---|
+| `xtrm_job_state`, `xtrm_job_queue_depth`, `xtrm_jobs_total`, `xtrm_job_duration_seconds`, `xtrm_job_active_runtime_seconds`, `xtrm_job_wait_seconds`, `xtrm_turns_total`, `xtrm_context_usage_ratio` | `service_name`, `participant_kind`, `repo`, `participant_role`, `model`, `result`, `state` | bounded by (**installed specialists** × **distinct models in use** × **6 normalised states/results** × **repos**) | `prom:326-375`, `prom:802-813` |
+| `xtrm_processes` | `service_name`, `repo`, `process_kind`, `state` | (repos × 6) | `prom:342-350` |
+| `xtrm_worktrees` | `service_name`, `repo`, `state ∈ {active,preserved_terminal}` | (repos × 2) | `prom:352-360` |
+| `xtrm_chains_total`, `xtrm_chain_duration_seconds` | `service_name`, `repo`, `chain_template`, `result` | (repos × chain templates × 4 results); `chain_template` normalised and capped: >80 chars → `'unknown'` (`prom:308-312`) | `prom:277-300` |
+| `xtrm_tool_calls_total` | participant set + `tool_name` | (specialists × models × tool catalog names × 4 results); `tool_name` >60 chars → `'other'` (`prom:832-836`) | `prom:389-408` |
+| `xtrm_llm_tokens_total` | participant set + `model_provider` + `direction` | (specialists × models × providers × 7 directions) | `prom:410-457` |
+| `xtrm_mcp_operations_total`, `xtrm_gate_verdicts_total`, `xtrm_evidence_refs_total`, `xtrm_identity_operations_total`, `xtrm_policy_decisions_total`, `xtrm_policy_mismatches_total`, `xtrm_eval_score`, `xtrm_eval_runs_total` | `service_name`, `repo` + 1–3 bounded classifier labels | (repos × enumerable classifier values); all values pass `normalizeKind` (lowercase, non-matching → `_`, >80 → `'unknown'`, `prom:672-677`) | `prom:479-588` |
+
+**Residual cardinality risk (not blocked, but must be stated):** the `model` label is
+*normalised but not enumerated* (`prom:819-823` — lowercase, >80 chars → `'other'`). Its
+ceiling is the number of distinct model identifiers the fleet actually runs, i.e. bounded by
+the model catalog and `fallback_model` chains, not by the metric layer. Migration must not add
+a per-activation model identifier (e.g. `resolved_model` with a route suffix) to a label.
+Likewise `participant_role` is bounded only because specialists are a closed catalog; a future
+"dynamic specialist name" feature would break that bound.
+
+**`repo` is an allowlisted label and is derived from `basename(gitRoot)` (`prom:86`) or from
+`resource.repo` (`prom:601`).** Because `workspace_id` (a full path) is forbidden, a worktree
+path can never leak into a label.
+
+### (b) Forensic event-name vocabulary — producers vs classifier-only
+
+Derived from `familyForTimelineType` (`fe:813-830`), `eventNameForTimelineEvent`
+(`fe:832-878`), `mcpEventNameForTimelineEvent` (`fe:861-878`), `severityForTimelineEvent`
+(`fe:886-894`), `redactionStatusForTimelineEvent` (`fe:898-899`), plus producer greps.
+
+**A. Names with a real producer in this tree (per family):**
+
+| Family | Names | Producers |
+|---|---|---|
+| `job` | `job.started`, `job.completed`, `job.failed`, `job.cancelled`, `job.status_changed` | `fe:834-838` from `sup`/`nat-obs`; direct: `sup:240-262` |
+| `turn` | `turn.summarized`, `<fallback>turn.<type>` | `fe:844`; `sup:2479`, `nat-obs:352` |
+| `tool` | `tool.call.started`, `tool.call.completed`, `tool.call.failed` | `fe:841-846` |
+| `model` | `model.token_usage.recorded`, `model.finish_reason.recorded`, `model.changed` | `fe:845,846,848`; token/finish from `sup:2445,2451`; `model.changed` from `src/pi/session.ts:1557-1565` → `sup:2368` → `sup:2437-2438` |
+| `control` | `control.<action>.recorded` — observed actions `resume_consumed`, `steer_consumed`, `steer_failed`, `close_consumed`, `fifo_parse_error`, `waiting_auto_close_requested/completed/force_requested`, `lease_acquired`, `lease_denied`, `lease_uncertain`, `tool_blocked` | `fe:846`; `sup:1151,1980,2558,2565,2581,2585,2129,2144,2156`; `nat-obs:287` |
+| `retry` | `retry.start`, `retry.end`, `<fallback>retry.<phase>` | `fe:847`; `sup:2516`, `nat-obs:399-416` |
+| `compaction` | `compaction.start`, `compaction.end` | `fe:848`; `sup:2505`, `nat-obs:385-397` |
+| `error` | `error.rpc`, `error.extension` | `fe:849-850`; `sup:2460-2466`, `tl:721-728` |
+| `git` | `git.auto_commit.succeeded`, `git.auto_commit.skipped`, `git.auto_commit.failed` | `fe:851-853`; `sup:1943,1948,1960` |
+| `command` | `command.completed`, `command.failed` | `fe:854-855`; `sup:1938` |
+| `review` | `review.verdict.pass`, `.partial`, `.fail`, `.waived` | `fe:856-859`; `sup:1765`, `control.ts:221` |
+| `chain` | `chain.ready_for_review`, `chain.finalized` | `fe:860-861`; `sup:1757`, `control.ts:214,240` |
+| `worktree` | `worktree.merged` | `fe:862`; **no producer** |
+| `process_health` | `process_health.stale_detected` | `fe:867`; `sup:1368,1416,2101,2107,2177` |
+| `mcp` | `mcp.connected`, `mcp.disconnected`, `mcp.auth.failed`, `mcp.rate_limited`, `mcp.latency.observed`, `mcp.call.started`, `mcp.call.completed`, `mcp.call.failed` | `fe:861-871`; `server.ts:88-99`, `request-meta.ts:44-52` |
+| `lifecycle` | `dead_declared` | `dead-job-audit.ts:69-71` |
+| `activation` | `activation.*` | **no producer in this tree** (BLOCKER C-13) |
+
+**B. Names that exist ONLY as sink classifiers — no producer in this tree:**
+
+| Classifier-only name / family | Where declared | Consequence |
+|---|---|---|
+| `evidence.*`, `family='evidence'` | `prom:510-521` | `xtrm_evidence_refs_total` unreachable (CAP-TEL-100) |
+| `identity.credential.issued`, `identity.credential.failed`, `identity.throttled`, `family='identity'` | `prom:522-535`, `prom:660-664` | `xtrm_identity_operations_total` unreachable (CAP-TEL-101) |
+| `policy.decision.allowed`, `policy.decision.denied`, `policy.mismatch.detected`, `family='policy'` | `prom:536-559`, `prom:666-671` | `xtrm_policy_decisions_total`, `xtrm_policy_mismatches_total` unreachable (CAP-TEL-102/103) |
+| `eval.score.recorded`, `eval.completed`, `eval.failed`, `family='eval'` | `prom:561-588`, `prom:673-679` | `xtrm_eval_score`, `xtrm_eval_runs_total` unreachable (CAP-TEL-104/105) |
+| `worktree.merged` | `fe:862`, factory `tl:991-993` | producer-less (CAP-TEL-048): `grep -rn createWorktreeMergedEvent src/` returns only the factory |
+| `activation.*` (whole family) | `ps.ts:747`, `nat-sum:29-48` | reader without writer (CAP-TEL-107) |
+
+**C. Native lifecycle names that are deliberately unmapped** — the authoritative list is
+`NATIVE_LIFECYCLE_OBSERVABILITY_GAPS` (`nat-obs:50-72`, 21 entries) and
+`NATIVE_SESSION_OBSERVABILITY_GAPS` (`nat-obs:75-89`, 12 entries). Any *new* native lifecycle
+name must be added to one of these or it is silently dropped. **`model_fallback` is currently
+silently dropped and appears in neither list** — that is the mechanism behind blocker C-4.
+
+### (c) Prometheus / text exposition contract
+
+| Property | Value | Evidence |
+|---|---|---|
+| Format | `# HELP` / `# TYPE` header per metric, then one sample per line; label names sorted with `localeCompare` | `prom:699-724`, `prom:750-754` |
+| Content type (HTTP) | `text/plain; version=0.0.4; charset=utf-8` | `serve.ts:319` |
+| Content type (`sp metrics`) | none — written raw to stdout | `src/cli/metrics.ts:49` |
+| Types emitted | `counter`, `gauge` (plus `_bucket`/`_sum`/`_count` for histograms, whose `# TYPE ... histogram` header is emitted once) | `prom:699-724`, `prom:726-742` |
+| Histogram emission | `_bucket{…,le="<b>"}` cumulative, `+Inf`, `_sum`, `_count` | `prom:726-742` |
+| Number formatting | `formatNumber` (integer-preserving) | `prom:710,739,740` |
+| Guard | `validatePrometheusProjectionText` — sample-syntax regex, label re-parse, forbidden-label throw | `prom:248-272` |
+| Source of truth | `collectPrometheusProjection` opens `createObservabilitySqliteClient()` and **throws** when unavailable ("Observability SQLite is unavailable; run under Bun with an initialized specialists database.") | `prom:75-82` |
+| Aggregation model | label-keyed `groupBy` over tuples; one sample per distinct tuple; deliberately **does not** consume `live-aggregates.ts` | `prom:1-17`, `live-agg:1-31` |
+| Refresh/interval | none — rendered per call. `sp metrics` = one shot; `GET /metrics` = per scrape | `src/cli/metrics.ts:49`, `serve.ts:316-322` |
+| Exemplars / tracing | none. `docs/telemetry/prometheus-projection-contract.md` claimed "exemplars still use `trace_id` only" — that document **no longer exists** (deleted by `092c0462`, see `docs/testing-quarantine-map.md:141-143`), and no exemplar code exists in `src/` | `tests/smoke/telemetry-readiness.smoke.test.ts:65` (quarantined) |
+| USD cost metric | none exported; no `cost_usd` metric name exists in `src/` | grep; asserted by the quarantined smoke test at `:55` |
+
+### (d) Signals with NO native destination — BLOCKER LIST
+
+These rows fail the `00-capability-matrix.md` §4 gate ("any legacy telemetry signal with no
+native destination"). Each is either a native gap that must be implemented or an intentional
+retirement that needs a cited product decision.
+
+| # | Capability | Signal | Why it blocks | Disposition required |
+|---|---|---|---|---|
+| **C-1** | CAP-TEL-053 | `settlement_*` publication/degradation/recovery telemetry (11 names) | 11 distinct emit sites (`settle-pub:271-679`) feed a mapper (`nat-obs:241-306`) with no matching case; zero durable rows. Degradation is visible only on stderr (`host:1415-1418`). | PRESERVE_NATIVE — map to forensic rows |
+| **C-2** | CAP-TEL-054 | settlement store records + publication backlog | No `sp` surface reads `.specialists/settlements/**`. `listPendingPublication`/`listRuntimeRefused` are in-process only. | PRESERVE_NATIVE — add a query surface |
+| **C-4** | CAP-TEL-027 | `model_fallback` transitions | Emitted at 5 sites (`host:843,1759,1769,1807,1833`), dropped by the mapper, and **absent from both gap lists** (`nat-obs:50-89`). Fallback attribution is unrecoverable. | PRESERVE_NATIVE + document in gaps |
+| **C-5** | CAP-TEL-028, CAP-TEL-095 | context-window accounting (`context_pct`, `context_trajectory_json`) | `statusOf` never sets `context_pct` (`sink:96-127`); `turn_summary` carries `context_pct: undefined` (`nat-obs:352`). `sp console` context health and `xtrm_context_usage_ratio` are empty for every native activation. | PRESERVE_NATIVE |
+| **C-6** | CAP-TEL-030, CAP-TEL-091, CAP-TEL-092 | `startup_payload_json` → `chain_template` | Native `statusOf` omits it; chain metrics lose their label value. | PRESERVE_NATIVE |
+| **C-7** | CAP-TEL-034, CAP-TEL-035, CAP-TEL-066 | stall detection (`stale_warning` ×4 reasons, `stall_gaps_json`) | The native host has no watchdog. No native activation can ever produce a stall row. | PRESERVE_NATIVE |
+| **C-8** | CAP-TEL-036, CAP-TEL-037 | control-signal consumption (`steer_*`, `close_*`, `fifo_parse_error`, `resume_consumed`, `waiting_auto_close_*`) | `sp steer`/`sp stop`/`sp resume` still construct the legacy `Supervisor` (`00-capability-matrix.md` §0), so these are legacy-only by construction. | PRESERVE_NATIVE (with the control-verb migration) |
+| **C-9** | CAP-TEL-043, CAP-TEL-099 | reviewer verdict extraction (`review_verdict_*`) | No native producer; `xtrm_gate_verdicts_total` unreachable for native. | PRESERVE_NATIVE |
+| **C-10** | CAP-TEL-049 | auto-commit telemetry (`auto_commit_*`) | No native producer. | PRESERVE_NATIVE |
+| **C-11** | CAP-TEL-060, CAP-TEL-061, CAP-TEL-062, CAP-TEL-077 | node, epic, PR-drift, chain-membership telemetry | Native `statusOf` sets none of the chain/node/epic columns; no native node or epic model exists. | PRESERVE_NATIVE or MOVE_TO_CORE |
+| **C-12** | CAP-TEL-078, CAP-TEL-079 | `trace_id`/`span_id`/`parent_span_id`, `parent_job_id`/`spawn_origin`/`root_runtime_origin` | Native activations carry no correlation ids, so cross-job tracing and origin provenance are unavailable. | PRESERVE_NATIVE |
+| **C-13** | CAP-TEL-107 | `sp ps` native-activation block | Reader queries `event_family='activation'`; **no writer of that family exists in this tree**. The block renders empty; the assertion that would catch it is `SPECIALISTS_LIVE_SMOKE`-gated. | PRESERVE_NATIVE (repoint reader) or DEAD_AFTER_CUTOVER (delete the block; requires proof the other frontend still wants it) |
+| **C-3** | CAP-TEL-006 | `dead_declared` lifecycle event | Only the legacy dead-job audit emits it; the native reaper has no equivalent. | PRESERVE_NATIVE |
+
+**Also blocking, but as a counting-semantics divergence rather than an absent destination** —
+see §3: C-1 (tool count), C-2 (active/waiting), C-3 (turns), C-4 (tokens).
+
+### (e) Tests currently pinning telemetry behaviour
+
+Default-lane tests (run by `npm test`):
+
+| Test | Pins | Stack |
+|---|---|---|
+| `tests/unit/specialist/observability-sqlite.test.ts` (1353 lines) | WAL enforcement (`:85-113`); `migrateToV4` table/index set (`:115-149`); `specialist_events`/`specialist_forensic_events` write+read, seq allocation, collision behaviour, redaction, family filters (`:298-373`, `:815-996`); `readEventsAfterSeq` (`:815`); context health read (`:513-540`); chain/epic persistence (`:541-738`) | LEGACY (shared writer) |
+| `tests/unit/specialist/observability-sqlite-v15-identity.test.ts` | schema version 15 (`:67`); two `retry` starts → distinct `attempt_id` under one `job_id`+`participant_id` (`:78`); job→participant→attempt→session/workspace forensic chain (`:147`); v14→v15 migration blobs unchanged, legacy attempts stay `NULL`/`0` (`:199`); `normalize(resolve)` workspace rule (`:329`); sentinel `specialist::<unknown>` (`:353`) | LEGACY identity |
+| `tests/unit/specialist/prometheus-projection.test.ts` | forbidden-label rejection (`:37`); low-cardinality contract metrics (`:44`); token split + `total` fallback (`:76`); bounded chain metrics without chain ids (`:110`); replay-safe table counters (`:146`); MCP/identity/policy/eval without opaque ids (`:158,207`); gate verdict + evidence (`:282`); terminal-result normalisation (`:324`) | SHARED projection |
+| `tests/unit/specialist/native-activation-observability.test.ts` | native+legacy under one bead query with full v15 lineage (`:60`); blank session id never clears `pi_session_id` (`:180`); `accumulateTokenUsage` accumulates across messages (`:200`); settle output survives dispose (`:230`); duplicate seq renumbering (`:265`); **gap-list completeness + shared-vocabulary-only rule (`:290`)** | NATIVE |
+| `tests/unit/specialist/native-lease-forensics.test.ts` | lease refusal reason carried in the row (`:34`); `lease_*`/`tool_blocked` no longer claimed as gaps (`:45`); genuinely unmapped names stay gaps (`:53`) | NATIVE |
+| `tests/unit/specialist/forensic-events.test.ts` (723 lines) | envelope stamp (`:203`); legacy→participant normalisation (`:230`); `participant_id` derivation incl. orchestrator/pulse/adapter/node (`:242,253`); unknown top-level field rejection (`:260`); full forbidden-label set (`:264`); AgentOps fixture label safety (`:271`); allowlist picking (`:315`); policy/eval label bounds + secret redaction (`:333,359,379`); timeline→forensic normalisation incl. MCP semconv and token usage split (`:399,446,524`); git evidence kept out of labels (`:557,601,637`); live lifecycle families (`:661`) | SHARED |
+| `tests/unit/specialist/timeline-events.test.ts` (478 lines) | every factory's field contract; tool phase/args/result truncation; message/turn mapping | SHARED |
+| `tests/unit/specialist/timeline-query.test.ts` | DB-first read, file fallback gated by env, job-scoped DB read without status fanout (`:40-107`) | SHARED |
+| `tests/unit/specialist/supervisor-telemetry.test.ts` | file status updates when SQLite unavailable (`:40`); control telemetry never throws (`:64`) | LEGACY degradation |
+| `tests/unit/specialist/activation-telemetry.test.ts` | `toActivationView` elapsed/tokens; omission instead of zero-fill (`:67`); clock-backwards clamp (`:75`); liveStats (`:192`); **canonical turn count: starts at 0, one per completed turn, cumulative across resume and retry (`:250-320`)** | NATIVE |
+| `tests/unit/specialist/observability-isolation.test.ts` | the repository store must never be the test target (`:17,27,33`) | guard |
+| `tests/unit/specialist/observability-db.test.ts` | location resolution | store location |
+| `tests/unit/specialist/forensic-run-start-origin.test.ts` | `origin.source`/`verified` projection | SHARED |
+| `tests/unit/specialist/forensic-renderer.test.ts` | renderer output | FE |
+| `tests/unit/specialist/forensic-deployment-environment.test.ts` | `deployment_environment` | SHARED |
+| `tests/unit/server-mcp-forensic.test.ts` | bounded MCP meta (`:6`); canonical envelope (`:23`); `mcp.latency.observed` (`:69`) | MCP |
+| `tests/unit/cli/feed.test.ts`, `tests/unit/cli/log-forensic-filter.test.ts`, `tests/unit/cli/native-activation-summary.test.ts`, `tests/unit/cli/console-telemetry-redaction.test.ts` | query-surface behaviour; **`native-activation-summary.test.ts` uses synthetic `activation.*` rows (`:35-75`), which is why the reader's dead producer went unnoticed** | FE |
+| `tests/unit/cli/log.test.ts` | **QUARANTINED** (`vitest.config.ts` entry, `xtrm-wiy5n.4.11`) | FE |
+| `tests/unit/cli/chat-feed.test.ts`, `tests/unit/cli/console-perf.test.ts`, `console-view-model.test.ts`, `console-e2e-smoke.test.ts`, `console-key-gating.test.ts`, `console-bead-view.test.ts` | **QUARANTINED** | FE |
+| `tests/unit/specialist/observability-sqlite-pr-refresh.test.ts` | PR drift refresh | LEGACY |
+
+Gated / quarantined tests that *would* pin telemetry:
+
+| Test | Status | Why it matters |
+|---|---|---|
+| `tests/smoke/telemetry-readiness.smoke.test.ts` | **QUARANTINED** (`vitest.config.ts:32`) and half-broken: reads `docs/telemetry/forensic-event-contract.md` and `docs/telemetry/prometheus-projection-contract.md`, both deleted by `092c0462` (`docs/testing-quarantine-map.md:141-143`). | The only end-to-end test asserting the forensic envelope shape + Prometheus text for the gitboard handoff contract. Currently neither runs nor would pass. |
+| `tests/integration/activation/native-activation.live.test.ts` | in the default lane but **`SPECIALISTS_LIVE_SMOKE=1`-gated** (`:37`), so it skips in CI. | It asserts `WHERE event_family='activation'` and `event_name='activation.activation_admitted'` rows (`:219-256`) — exactly the rows no producer writes (C-13). Contradicts `native-activation-observability.test.ts:290`, which asserts those names are intentional gaps. |
+
+**Gap in test coverage that the migration must close:** no test asserts that a *native*
+activation and a *legacy* run produce the **same** forensic row sequence for the same scenario.
+`native-activation-observability.test.ts:60` proves they land in one store under one query, which
+is weaker than parity of the rows themselves.
+
+### (f) UNKNOWNs, with reasons
+
+| # | Unknown | Reason it is unresolved |
+|---|---|---|
+| **U-1** | Whether an out-of-tree producer writes `event_family='activation'` rows into a *shared* `observability.db`. | The names read by `ps.ts:747` / `nat-sum:29-48` have no producer in this tree, yet `nat-sum:1-9` states they were "written since unitAI-rrdnt.37.1.1". Either the producer was deleted by a later commit in this tree, or it lives in another package (`plugins/specialists`, the Pi extension, or `specialists-mcp`). Confirming requires the other repository. |
+| **U-2** | Whether `docs/telemetry/forensic-event-contract.md` and `prometheus-projection-contract.md` now live in the xtrm monorepo, and whether their content still matches the code. | Deleted here by `092c0462` ("declutter docs/ for xtrm monorepo migration") per `docs/testing-quarantine-map.md:141-143`. No copy in this tree. The exposition contract in §(c) is therefore derived from code, not from the doc. |
+| **U-3** | Whether `severity` is filterable from the CLI. | `ListForensicEventsFilters` (`obs-sqlite:1177-1187`) has `jobId, sinceMs, eventFamily, eventName, limit, order` — **no `severity`**; `src/cli/forensic.ts:3-30` adds no `--severity`; `src/index.ts:928` advertises `--family` only. It IS reachable client-side: `sp log --json` emits `{timestamp,job_id,bead_id,repo,db_path,forensic_event:{…}}` and `src/index.ts:1012` documents `severity` as a filterable field **inside** `.forensic_event` (jq only, not a flag). |
+| **U-4** | Whether the native `attempt_id` textual format (`att:<hex>:<n>`) is consumed anywhere that assumes the legacy `::attempt::` format. | No cross-format parser was found in `src/`, but `parseNativeAttempt`-style logic may exist outside `src/`. `impact` on `nativeAttemptIdForNo` returned no resolvable upstream beyond the host. |
+| **U-5** | The target owner of `branch_integration_events` and the `pr_*` columns. | `obs-sqlite:1-20` and `:1311-1314` describe both as pre-substrate bridges to `containers.*`, owned by `specialists-05q.*` and `unitAI-cnpvd.2`. Whether substrate has landed is outside this lane. |
+| **U-6** | Whether `sp console` has any native path at all. | `console/runtime.ts:895,961,988-991` reads only the legacy sqlite client. No native console consumer was found. Recorded as `FRONTEND_ONLY`, but a native console may be intended elsewhere. |
+| **U-7** | The exact wall-clock denominator for native `elapsed_s`. | `nat-obs:252,293` uses `t - context.startedAtMs`, and `context.startedAtMs` is `state.startedAtMs`, set to `Date.now()` at the **first projected event** (`sink:185-190`). Whether dispatch happens materially earlier was not measured. Requires a runtime observation, not a read. |
+| **U-8** | Whether `x-` idempotency or ordering guarantees exist for `specialist_forensic_events` under multi-process writers. | `obs-sqlite:130-164` retries `UNIQUE constraint failed` on `(job_id,seq)`; `obs-sqlite:1605-1620` renumbers. Concurrency behaviour across the MCP server process and a CLI process was not exercised here. |
+
+---
+
+## 3. Counting and aggregation divergences (summary; detail in the delta file)
+
+| # | Divergence | Legacy | Native | Evidence |
+|---|---|---|---|---|
+| **D-1** | `total_tools` / `tool_call_counts_json` count **all** `tool` rows | every `tool` row regardless of phase — start, update and end each increment | identical (shared function) | `obs-sqlite:2891-2894` |
+| **D-2** | `total_tools` vs `status.metrics.tool_calls` | `status.metrics.tool_calls` counts only `phase==='end'` | native `state.toolCalls` pushes only on `phase==='end'` | `sink:286-288` vs `obs-sqlite:2891-2894` |
+| **D-3** | `total_turns` emission basis | one `turn_summary` per **turn** (`sup:2479`) | one `turn_summary` per assistant **message** (`nat-obs:352`) | both feed `total_turns` at `obs-sqlite:2913-2914` |
+| **D-4** | `active_runtime_ms` / `waiting_ms` phase machine | `run_start`→running; `status_change` running↔waiting; terminal closes | only one `status_change('waiting')`; **no running re-entry** on resume | `nat-obs:249-250` vs `sup:1978` |
+| **D-5** | `xtrm_llm_tokens_total` basis | last `token_trajectory` element = last per-turn usage | last element = session-cumulative total (`accumulateTokenUsage`) | `prom:432-457`, `nat-obs:177-201` |
+| **D-6** | `xtrm_turns_total` | `Σ total_turns` with hardcoded `result:"success"` | same, but D-3 changes the sum | `prom:212-222` |
+| **D-7** | `elapsed_ms` / `started_at_ms` origin | supervisor run start | first projected native event | `nat-obs:252`, `sink:185-190` |
+| **D-8** | `attempt_no` default | legacy rows `0`/`NULL`; new legacy jobs start at `1` (`obs-sqlite:1502-1505`) | native always starts at `1` and increments | `obs-sqlite:700-701,1502-1505`, `sink:265` |
+| **D-9** | node telemetry generation | `node_members.generation` maintained | native has no node model | `obs-sqlite:800-807` |
