@@ -88,7 +88,7 @@ The current Pi coordinator may later be shown as a UI-only presentation root. It
 
 Persisted events describe **last-known state**. They do not prove a host is currently alive after a crash or restart. Operator surfaces must not render an activation as live merely because the latest persisted event was mid-flight.
 
-Native activation summaries therefore use last-known vocabulary (`active`, `waiting`, `settled`, `failed`, etc.) and must keep the crashed-host caveat explicit. True live-host controls remain runtime-owned.
+For native `act:` rows the Fleet projector therefore normalizes persisted `running`/`starting` to the last-known state `active`. Waiting/terminal states remain explicit. True live-host controls remain runtime-owned; the Fleet projection does not replay complete activation histories to manufacture liveness.
 
 ## 6. Console and native Pi surfaces
 
@@ -147,9 +147,9 @@ Shipped by the first XTRM-96 implementation slice:
 
 - UI-neutral persisted observability read model;
 - bounded forensic chronology with shared redaction renderer;
-- mixed Fleet projection from persisted status/forensic evidence;
+- bounded mixed Fleet projection from persisted status plus `job.started` forensic evidence;
 - persisted parent/child lineage and tmux attachment projection;
-- native last-known activation summaries;
+- native mid-flight state normalized to last-known `active` semantics without replaying full histories;
 - result projection;
 - `sp console` forensic source bound to persisted `xtrm.forensic.v1` when the database is present;
 - legacy `sp_feed` console source preserved.
