@@ -12,7 +12,7 @@ summary: "Defines additive metrics from Pi RPC surfaced via specialists status/f
 
 # RPC Observability Metrics Contract
 
-> **Bridge-era note (2026-06-02):** this file documents the current RPC/timeline metrics emitted by specialists. New Prometheus-facing metric design lives in `docs/telemetry/prometheus-projection-contract.md`, and forensic event shape lives in `docs/telemetry/forensic-event-contract.md`. Keep this file for source mapping/backward compatibility until the projection exporter lands.
+> **Bridge-era note (reconciled 2026-09-16):** this file is retained as historical/RPC metric source mapping. The previously referenced `docs/telemetry/{prometheus-projection-contract,forensic-event-contract}.md` files are not present on the current repository head and must not be treated as live canon. Current cross-surface ownership — Forensics vs Feed vs Metrics vs Operator UI — is defined in [`docs/observability-architecture.md`](observability-architecture.md). Current XTRM-93 telemetry migration evidence lives under [`docs/migrations/xtrm-93/`](migrations/xtrm-93/). Do not recreate removed telemetry documents merely to satisfy old links.
 
 ## Cross-repo telemetry contract
 
@@ -118,35 +118,3 @@ For every new protocol-derived metric:
 3. Add fixture-driven contract tests from recorded RPC traces.
 4. Require two approvals (maintainer + external reviewer) before stable surfacing.
 5. Keep added fields optional for at least one minor release window.
-
-## Implementation Notes (v2.0)
-
-### Timeline Event Schema
-
-See `src/specialist/timeline-events.ts` for canonical event type definitions:
-- `TimelineEventExtensionError` — extension error events
-- `TimelineEventModelChange` — model change events
-- `TimelineEventCompaction` — enriched with `tokens_before`, `summary`, `first_kept_entry_id`
-- `TimelineEventRetry` — enriched with `attempt`, `max_attempts`, `delay_ms`, `error_message`
-
-### Token Usage Display
-
-Token usage formatting uses shared helpers from `src/cli/format-helpers.js`:
-- `formatTokenUsageSummary()` — produces `input=X · output=Y · total=Z`
-- `formatCostUsd()` — produces `$0.0125` format
-
-Used by:
-- `src/cli/ps.ts` — list and inspect views
-- `src/cli/result.ts` — human-mode result display
-
-### Infrastructure Fixes
-
-**initSchema race condition (2026-04-08):**
-- Fixed DROP/RENAME race in `src/specialist/observability-sqlite.ts`
-- Gates specialist_jobs rebuild to only run when legacy columns are missing
-- Prevents "no such table: specialist_jobs" errors during concurrent init/read
-
-**Loader precedence (2026-04-08):**
-- Fixed in `src/specialist/loader.ts`
-- `config/specialists/` now takes precedence over `.specialists/default/`
-- Ensures `sp edit` changes are not overridden by stale default copies
