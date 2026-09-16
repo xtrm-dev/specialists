@@ -430,6 +430,41 @@ export interface TimelineEventControlSignal extends TimelineEventBase {
 }
 
 /**
+ * Settlement publication evidence (SPECIALISTS-101).
+ *
+ * Each of the 10 settlement_* emit sites keeps its own timeline type so the
+ * forensic event_name equals the emitted name (no collapsing into one generic
+ * arm). The forensic writer maps these 1:1 (family 'settlement', name = type).
+ */
+export type SettlementTimelineType =
+  | 'settlement_stored'
+  | 'settlement_receipt_allocated'
+  | 'settlement_artifact_attached'
+  | 'settlement_result_published'
+  | 'settlement_republish_deferred'
+  | 'settlement_republish_error'
+  | 'settlement_republish_reconciled'
+  | 'settlement_republish_refused'
+  | 'settlement_degraded'
+  | 'settlement_store_failed';
+
+export interface TimelineEventSettlement extends TimelineEventBase {
+  type: SettlementTimelineType;
+  bead_id?: string;
+  ref?: string;
+  status?: string;
+  receipt?: string;
+  kind?: string;
+  entry?: string;
+  note?: string;
+  republish?: boolean;
+  activationId?: string;
+  attemptId?: string;
+  partial_receipt?: string;
+  contended?: boolean;
+}
+
+/**
  * Legacy completion events that still exist in older jobs.
  * These are accepted for backward compatibility while feed v2 migrates history.
  */
@@ -464,6 +499,7 @@ export type TimelineEvent =
   | TimelineEventApiError
   | TimelineEventAutoCommit
   | TimelineEventControlSignal
+  | TimelineEventSettlement
   | TimelineEventLegacyComplete;
 
 // ============================================================================
@@ -503,6 +539,16 @@ export const TIMELINE_EVENT_TYPES = {
   CHAIN_FINALIZED: 'chain_finalized',
   WORKTREE_MERGED: 'worktree_merged',
   CONTROL_SIGNAL: 'control_signal',
+  SETTLEMENT_STORED: 'settlement_stored',
+  SETTLEMENT_RECEIPT_ALLOCATED: 'settlement_receipt_allocated',
+  SETTLEMENT_ARTIFACT_ATTACHED: 'settlement_artifact_attached',
+  SETTLEMENT_RESULT_PUBLISHED: 'settlement_result_published',
+  SETTLEMENT_REPUBLISH_DEFERRED: 'settlement_republish_deferred',
+  SETTLEMENT_REPUBLISH_ERROR: 'settlement_republish_error',
+  SETTLEMENT_REPUBLISH_RECONCILED: 'settlement_republish_reconciled',
+  SETTLEMENT_REPUBLISH_REFUSED: 'settlement_republish_refused',
+  SETTLEMENT_DEGRADED: 'settlement_degraded',
+  SETTLEMENT_STORE_FAILED: 'settlement_store_failed',
   DONE: 'done',
   AGENT_END: 'agent_end',
 } as const;
@@ -953,6 +999,21 @@ export function createControlSignalEvent(
     type: TIMELINE_EVENT_TYPES.CONTROL_SIGNAL,
     action,
     ...options,
+  };
+}
+
+/**
+ * Create a settlement evidence event. The type IS the emitted settlement name
+ * so the forensic event_name equals it (SPECIALISTS-101 carrier decision).
+ */
+export function createSettlementEvent(
+  type: SettlementTimelineType,
+  options?: Omit<TimelineEventSettlement, 't' | 'type'>,
+): TimelineEventSettlement {
+  return {
+    t: Date.now(),
+    type,
+    ...(options ?? {}),
   };
 }
 

@@ -70,6 +70,23 @@ export declare const NATIVE_SESSION_OBSERVABILITY_GAPS: Readonly<{
     readonly summarization_retry_finished: "The legacy runner has no summarization-retry timeline event.";
     readonly bash_execution_update: "The legacy runner does not persist streaming bash deltas.";
 }>;
+/**
+ * Native lifecycle signals that are DELIBERATELY unpersisted (SPECIALISTS-101).
+ *
+ * Each entry carries a non-empty written reason. The totality test enforces that every
+ * emitted name is either handled by an explicit mapper arm below or listed here — a name
+ * in neither fails the test. Runtime safety is unchanged: the mapper's `default: return
+ * null` still drops unknown names without crashing the writer; the obligation is test-time.
+ *
+ * Extension resolution is out of scope for this migration (operator ruling): these three
+ * emit sites exist, no extension telemetry surface exists (no table, no column, no writer),
+ * and creating one is deferred. Making the absence EXPLICIT is the deliverable.
+ */
+export declare const NATIVE_LIFECYCLE_DELIBERATELY_UNPERSISTED: Readonly<{
+    readonly extension_discovery_sessions: "Emit site src/activation/native-host.ts emits per-activation discovery cost (2 fenced sessions); no extension telemetry surface exists (no table/column/writer) and the operator ruled extension resolution out of scope for this migration, so creating one is deferred. Absence is explicit, not silent.";
+    readonly extension_tools_discovered: "Emit site src/activation/native-host.ts emits the pinned extension tool list; no extension telemetry surface exists (no table/column/writer) and the operator ruled extension resolution out of scope for this migration, so creating one is deferred. Absence is explicit, not silent.";
+    readonly extension_tools_refused: "Emit site src/activation/native-host.ts emits refused extension tools (collisions/provenance); no extension telemetry surface exists (no table/column/writer) and the operator ruled extension resolution out of scope for this migration, so creating one is deferred. The admission verdict persists on the session; the audit trail does not.";
+}>;
 /** Canonical reader for the nested message.usage short-key shape Pi session events carry. */
 export declare function nativeSessionTokenUsage(event: PiAgentSessionEvent): TimelineTokenUsage | undefined;
 /** Per-message usage counter keys. `usage_source` is provenance, never a counter. */

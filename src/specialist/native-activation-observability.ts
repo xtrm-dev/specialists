@@ -5,11 +5,13 @@ import {
   createRunCompleteEvent,
   createRunStartEvent,
   createControlSignalEvent,
+  createSettlementEvent,
   createStatusChangeEvent,
   createTokenUsageEvent,
   createTurnSummaryEvent,
   mapCallbackEventToTimelineEvent,
   TIMELINE_EVENT_TYPES,
+  type SettlementTimelineType,
   type TimelineEvent,
   type TimelineTokenUsage,
 } from './timeline-events.js';
@@ -88,6 +90,24 @@ export const NATIVE_SESSION_OBSERVABILITY_GAPS = Object.freeze({
   bash_execution_update: 'The legacy runner does not persist streaming bash deltas.',
 } as const);
 
+/**
+ * Native lifecycle signals that are DELIBERATELY unpersisted (SPECIALISTS-101).
+ *
+ * Each entry carries a non-empty written reason. The totality test enforces that every
+ * emitted name is either handled by an explicit mapper arm below or listed here — a name
+ * in neither fails the test. Runtime safety is unchanged: the mapper's `default: return
+ * null` still drops unknown names without crashing the writer; the obligation is test-time.
+ *
+ * Extension resolution is out of scope for this migration (operator ruling): these three
+ * emit sites exist, no extension telemetry surface exists (no table, no column, no writer),
+ * and creating one is deferred. Making the absence EXPLICIT is the deliverable.
+ */
+export const NATIVE_LIFECYCLE_DELIBERATELY_UNPERSISTED = Object.freeze({
+  'extension_discovery_sessions': 'Emit site src/activation/native-host.ts emits per-activation discovery cost (2 fenced sessions); no extension telemetry surface exists (no table/column/writer) and the operator ruled extension resolution out of scope for this migration, so creating one is deferred. Absence is explicit, not silent.',
+  'extension_tools_discovered': 'Emit site src/activation/native-host.ts emits the pinned extension tool list; no extension telemetry surface exists (no table/column/writer) and the operator ruled extension resolution out of scope for this migration, so creating one is deferred. Absence is explicit, not silent.',
+  'extension_tools_refused': 'Emit site src/activation/native-host.ts emits refused extension tools (collisions/provenance); no extension telemetry surface exists (no table/column/writer) and the operator ruled extension resolution out of scope for this migration, so creating one is deferred. The admission verdict persists on the session; the audit trail does not.',
+} as const);
+
 function at<T extends TimelineEvent>(event: T, t: number): T {
   return { ...event, t };
 }
@@ -107,6 +127,54 @@ function numberField(value: unknown): number | undefined {
 function booleanField(value: unknown): boolean | undefined {
   return typeof value === 'boolean' ? value : undefined;
 }
+
+/**
+ * Project a settlement emit payload onto the settlement timeline shape (SPECIALISTS-101).
+ *
+ * Only the known settlement payload keys are carried; unknown keys are dropped rather than
+ * widening the timeline type. Every emit-site key observed in
+ * src/activation/settlement-publication.ts is covered (ref, status, receipt, kind, entry,
+ * note, republish, activationId, attemptId, partial_receipt, contended).
+ */
+function settlementDetail(payload: Record<string, unknown> | undefined): Omit<TimelineEventSettlementLike, 't' | 'type'> {
+  if (!payload) return {};
+  const detail: Record<string, unknown> = {};
+  const str = (key: string): void => {
+    const value = stringField(payload[key]);
+    if (value !== undefined) detail[key] = value;
+  };
+  str('ref');
+  str('status');
+  str('receipt');
+  str('kind');
+  str('entry');
+  str('note');
+  str('activationId');
+  str('attemptId');
+  str('partial_receipt');
+  const republish = booleanField(payload.republish);
+  if (republish !== undefined) detail.republish = republish;
+  const contended = booleanField(payload.contended);
+  if (contended !== undefined) detail.contended = contended;
+  return detail as Omit<TimelineEventSettlementLike, 't' | 'type'>;
+}
+
+type TimelineEventSettlementLike = {
+  t: number;
+  type: SettlementTimelineType;
+  bead_id?: string;
+  ref?: string;
+  status?: string;
+  receipt?: string;
+  kind?: string;
+  entry?: string;
+  note?: string;
+  republish?: boolean;
+  activationId?: string;
+  attemptId?: string;
+  partial_receipt?: string;
+  contended?: boolean;
+};
 
 function messageRole(event: PiAgentSessionEvent): string | undefined {
   return stringField(record(event.message)?.role);
@@ -288,6 +356,88 @@ export function mapNativeLifecycleEvent(
         bead_id: event.beadId,
         ...(event.payload ?? {}),
       } as never), t);
+    // SPECIALISTS-101: operational lifecycle signals that were silently dropped by
+    // `default: return null`. They share the `control_signal` carrier (same rationale as
+    // the lease group above): admission/operational decisions with no legacy equivalent are
+    // uncomparable, not unimportant. Each keeps its own action (= emitted name) so the
+    // forensic event_name stays distinct (`control.<name>.recorded`).
+    case 'activation_retried':
+    case 'lease_release_failed':
+    case 'mandatory_rules_injection':
+    case 'tool_contract_unsatisfied_on_fallback':
+      return at(createControlSignalEvent(event.name, {
+        bead_id: event.beadId,
+        ...(event.payload ?? {}),
+      } as never), t);
+    // SPECIALISTS-101 model_fallback carrier (coordinator decision): use the EXISTING shared
+    // `model_change` event. There is no `fallback_step` event and none is invented.
+    // Action is `cycle_model` (not `set_model`): a fallback walks the configured chain
+    // automatically; an explicit operator override would be `set_model`. The closed union
+    // `model_change.action` is NOT widened. Only the canonical model fields are persisted
+    // (parity with the legacy supervisor path, which carries model/previousModel only);
+    // fallback diagnostics (error_class, terminal, note) are not retained on the timeline row.
+    case 'model_fallback':
+      return at({
+        t,
+        type: TIMELINE_EVENT_TYPES.MODEL_CHANGE,
+        action: 'cycle_model',
+        ...(stringField(event.payload?.to_model) ? { model: stringField(event.payload?.to_model) as string } : {}),
+        ...(stringField(event.payload?.from_model) ? { previous_model: stringField(event.payload?.from_model) as string } : {}),
+      }, t);
+    // SPECIALISTS-101 settlement carrier (coordinator decision): each settlement_* name keeps
+    // its own event_name and gets its own arm. They are 10 distinct signals; collapsing them
+    // into one generic arm would trade one silent loss for nine. Each returns its own
+    // settlement timeline type so the forensic event_name equals the emitted name.
+    case 'settlement_stored':
+      return at(createSettlementEvent('settlement_stored', {
+        bead_id: event.beadId,
+        ...settlementDetail(record(event.payload)),
+      }), t);
+    case 'settlement_receipt_allocated':
+      return at(createSettlementEvent('settlement_receipt_allocated', {
+        bead_id: event.beadId,
+        ...settlementDetail(record(event.payload)),
+      }), t);
+    case 'settlement_artifact_attached':
+      return at(createSettlementEvent('settlement_artifact_attached', {
+        bead_id: event.beadId,
+        ...settlementDetail(record(event.payload)),
+      }), t);
+    case 'settlement_result_published':
+      return at(createSettlementEvent('settlement_result_published', {
+        bead_id: event.beadId,
+        ...settlementDetail(record(event.payload)),
+      }), t);
+    case 'settlement_republish_deferred':
+      return at(createSettlementEvent('settlement_republish_deferred', {
+        bead_id: event.beadId,
+        ...settlementDetail(record(event.payload)),
+      }), t);
+    case 'settlement_republish_error':
+      return at(createSettlementEvent('settlement_republish_error', {
+        bead_id: event.beadId,
+        ...settlementDetail(record(event.payload)),
+      }), t);
+    case 'settlement_republish_reconciled':
+      return at(createSettlementEvent('settlement_republish_reconciled', {
+        bead_id: event.beadId,
+        ...settlementDetail(record(event.payload)),
+      }), t);
+    case 'settlement_republish_refused':
+      return at(createSettlementEvent('settlement_republish_refused', {
+        bead_id: event.beadId,
+        ...settlementDetail(record(event.payload)),
+      }), t);
+    case 'settlement_degraded':
+      return at(createSettlementEvent('settlement_degraded', {
+        bead_id: event.beadId,
+        ...settlementDetail(record(event.payload)),
+      }), t);
+    case 'settlement_store_failed':
+      return at(createSettlementEvent('settlement_store_failed', {
+        bead_id: event.beadId,
+        ...settlementDetail(record(event.payload)),
+      }), t);
     case 'activation_failed':
     case 'activation_rejected':
       return at(createRunCompleteEvent('ERROR', Math.max(0, t - context.startedAtMs) / 1_000, {
@@ -302,6 +452,8 @@ export function mapNativeLifecycleEvent(
         final: true,
       }), t);
     default:
+      // Runtime safety is unchanged: an unknown name still drops without crashing the writer.
+      // Totality is a TEST-time obligation enforced by native-mapper-totality.test.ts.
       return null;
   }
 }

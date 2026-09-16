@@ -408,6 +408,29 @@ export interface TimelineEventControlSignal extends TimelineEventBase {
     metadata?: Record<string, unknown>;
 }
 /**
+ * Settlement publication evidence (SPECIALISTS-101).
+ *
+ * Each of the 10 settlement_* emit sites keeps its own timeline type so the
+ * forensic event_name equals the emitted name (no collapsing into one generic
+ * arm). The forensic writer maps these 1:1 (family 'settlement', name = type).
+ */
+export type SettlementTimelineType = 'settlement_stored' | 'settlement_receipt_allocated' | 'settlement_artifact_attached' | 'settlement_result_published' | 'settlement_republish_deferred' | 'settlement_republish_error' | 'settlement_republish_reconciled' | 'settlement_republish_refused' | 'settlement_degraded' | 'settlement_store_failed';
+export interface TimelineEventSettlement extends TimelineEventBase {
+    type: SettlementTimelineType;
+    bead_id?: string;
+    ref?: string;
+    status?: string;
+    receipt?: string;
+    kind?: string;
+    entry?: string;
+    note?: string;
+    republish?: boolean;
+    activationId?: string;
+    attemptId?: string;
+    partial_receipt?: string;
+    contended?: boolean;
+}
+/**
  * Legacy completion events that still exist in older jobs.
  * These are accepted for backward compatibility while feed v2 migrates history.
  */
@@ -419,7 +442,7 @@ export interface TimelineEventLegacyComplete extends TimelineEventBase {
  * Union of all timeline event types.
  * This is the canonical type for events.jsonl records.
  */
-export type TimelineEvent = TimelineEventRunStart | TimelineEventPayloadBreakdown | TimelineEventMeta | TimelineEventThinking | TimelineEventTool | TimelineEventText | TimelineEventMessage | TimelineEventTurn | TimelineEventStatusChange | TimelineEventRunComplete | TimelineEventStaleWarning | TimelineEventTokenUsage | TimelineEventFinishReason | TimelineEventTurnSummary | TimelineEventCompaction | TimelineEventRetry | TimelineEventModelChange | TimelineEventExtensionError | TimelineEventApiError | TimelineEventAutoCommit | TimelineEventControlSignal | TimelineEventLegacyComplete;
+export type TimelineEvent = TimelineEventRunStart | TimelineEventPayloadBreakdown | TimelineEventMeta | TimelineEventThinking | TimelineEventTool | TimelineEventText | TimelineEventMessage | TimelineEventTurn | TimelineEventStatusChange | TimelineEventRunComplete | TimelineEventStaleWarning | TimelineEventTokenUsage | TimelineEventFinishReason | TimelineEventTurnSummary | TimelineEventCompaction | TimelineEventRetry | TimelineEventModelChange | TimelineEventExtensionError | TimelineEventApiError | TimelineEventAutoCommit | TimelineEventControlSignal | TimelineEventSettlement | TimelineEventLegacyComplete;
 export declare const TIMELINE_EVENT_TYPES: {
     readonly RUN_START: "run_start";
     readonly META: "meta";
@@ -453,6 +476,16 @@ export declare const TIMELINE_EVENT_TYPES: {
     readonly CHAIN_FINALIZED: "chain_finalized";
     readonly WORKTREE_MERGED: "worktree_merged";
     readonly CONTROL_SIGNAL: "control_signal";
+    readonly SETTLEMENT_STORED: "settlement_stored";
+    readonly SETTLEMENT_RECEIPT_ALLOCATED: "settlement_receipt_allocated";
+    readonly SETTLEMENT_ARTIFACT_ATTACHED: "settlement_artifact_attached";
+    readonly SETTLEMENT_RESULT_PUBLISHED: "settlement_result_published";
+    readonly SETTLEMENT_REPUBLISH_DEFERRED: "settlement_republish_deferred";
+    readonly SETTLEMENT_REPUBLISH_ERROR: "settlement_republish_error";
+    readonly SETTLEMENT_REPUBLISH_RECONCILED: "settlement_republish_reconciled";
+    readonly SETTLEMENT_REPUBLISH_REFUSED: "settlement_republish_refused";
+    readonly SETTLEMENT_DEGRADED: "settlement_degraded";
+    readonly SETTLEMENT_STORE_FAILED: "settlement_store_failed";
     readonly DONE: "done";
     readonly AGENT_END: "agent_end";
 };
@@ -571,6 +604,11 @@ export declare function createRunCompleteEvent(status: 'COMPLETE' | 'ERROR' | 'C
     };
 }): TimelineEventRunComplete;
 export declare function createControlSignalEvent(action: string, options: Omit<TimelineEventControlSignal, 't' | 'type' | 'action'>): TimelineEventControlSignal;
+/**
+ * Create a settlement evidence event. The type IS the emitted settlement name
+ * so the forensic event_name equals it (SPECIALISTS-101 carrier decision).
+ */
+export declare function createSettlementEvent(type: SettlementTimelineType, options?: Omit<TimelineEventSettlement, 't' | 'type'>): TimelineEventSettlement;
 export declare function createAutoCommitEvent(status: 'success' | 'skipped' | 'failed', options?: {
     reason?: string;
     commit_sha?: string;
