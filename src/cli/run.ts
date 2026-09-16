@@ -16,7 +16,7 @@ import { resolveObservabilityDbLocation } from '../specialist/observability-db.j
 import type { TimelineEvent } from '../specialist/timeline-events.js';
 import { evaluateMergeWorthiness, previewBranchMergeDelta } from './merge.js';
 import { formatEventInlineDebounced, type InlineIndicatorPhase } from './format-helpers.js';
-import { isTmuxAvailable, buildSessionName, createTmuxSession, isTmuxSessionAlive } from './tmux-utils.js';
+import { isTmuxAvailable, buildSessionName, createTmuxSession, isTmuxSessionAlive, parentPaneOptions } from './tmux-utils.js';
 import {
   captureRuntimeOrigin,
   decodePropagatedOrigin,
@@ -1717,8 +1717,14 @@ export async function run(): Promise<void> {
   // re-invocation case), it wins over an ambient capture — the child must not
   // rediscover its own sp-* pane.
   const propagatedOrigin = decodePropagatedOrigin(process.env);
+  const ambientCapture = await captureRuntimeOrigin();
   const ambientRuntimeOrigin: RuntimeOriginV1 | undefined =
-    propagatedOrigin ?? (await captureRuntimeOrigin());
+    propagatedOrigin ?? ambientCapture;
+  // Pane-lineage source: the IMMEDIATE dispatching pane. A fresh ambient
+  // capture wins over a propagated forensic origin so a specialist that
+  // dispatches another specialist stamps the middle pane, not the root pane
+  // (unitAI-vc7tl). The forensic binding above keeps propagated-first
+  // precedence (spec §13.2); the pane edge follows the dispatch, not the root.
 
   // ── Background mode: spawn detached child and exit ──────────────────────────
   if (args.background) {
@@ -1758,7 +1764,7 @@ export async function run(): Promise<void> {
         handoffPath,
         feedCommandPrefix,
       });
-      createTmuxSession(sessionName, cwd, tmuxCmd, { [JOB_ID_HANDOFF_PATH_ENV]: handoffPath, ...propagatedEnv });
+      createTmuxSession(sessionName, cwd, tmuxCmd, { [JOB_ID_HANDOFF_PATH_ENV]: handoffPath, ...propagatedEnv }, parentPaneOptions(ambientCapture ?? propagatedOrigin));
     } else {
       // Re-invoke ourselves without --background, fully detached
       const child = cpSpawn(process.execPath, [process.argv[1], ...innerArgs], {

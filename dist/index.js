@@ -17519,7 +17519,29 @@ function isTmuxAvailable() {
 function buildSessionName(specialist, suffix) {
   return `${TMUX_SESSION_PREFIX}-${specialist}-${suffix}`;
 }
-function createTmuxSession(name, cwd, cmd, extraEnv = {}) {
+function parentPaneOptions(origin) {
+  if (!origin?.tmux_session_id || !origin?.tmux_pane_id)
+    return {};
+  return {
+    [AGENT_PARENT_SESSION_OPTION]: origin.tmux_session_id,
+    [AGENT_PARENT_PANE_OPTION]: origin.tmux_pane_id
+  };
+}
+function stampPaneOptions(sessionName, paneOptions) {
+  for (const [key, value] of Object.entries(paneOptions)) {
+    if (!key || !value)
+      continue;
+    const result = spawnSync5("tmux", ["set-option", "-t", sessionName, "-p", key, value], {
+      encoding: "utf8",
+      stdio: "pipe"
+    });
+    if (result.status !== 0) {
+      const detail = (result.stderr ?? "").trim() || "unknown error";
+      console.warn(`[specialists] warning: failed to set ${key} on tmux session "${sessionName}": ${detail}`);
+    }
+  }
+}
+function createTmuxSession(name, cwd, cmd, extraEnv = {}, paneOptions = {}) {
   const exports = [
     "unset CLAUDECODE CLAUDE_CODE_SSE_PORT CLAUDE_CODE_ENTRYPOINT",
     `export SPECIALISTS_TMUX_SESSION=${quoteShellValue(name)}`
@@ -17534,6 +17556,7 @@ function createTmuxSession(name, cwd, cmd, extraEnv = {}) {
     const errorOutput = (result.stderr ?? "").trim() || (result.error?.message ?? "unknown error");
     throw new Error(`Failed to create tmux session "${name}": ${errorOutput}`);
   }
+  stampPaneOptions(name, paneOptions);
 }
 function isTmuxSessionAlive(sessionName) {
   const result = spawnSync5("tmux", ["has-session", "-t", sessionName], {
@@ -17548,7 +17571,7 @@ function isTmuxSessionAlive(sessionName) {
 function killTmuxSession(name) {
   spawnSync5("tmux", ["kill-session", "-t", name], { encoding: "utf8", stdio: "pipe" });
 }
-var TMUX_SESSION_PREFIX = "sp";
+var TMUX_SESSION_PREFIX = "sp", AGENT_PARENT_SESSION_OPTION = "@agent_parent_session", AGENT_PARENT_PANE_OPTION = "@agent_parent_pane";
 var init_tmux_utils = () => {};
 
 // src/specialist/porcelain-parser.ts
@@ -48478,7 +48501,8 @@ async function run19() {
     }
   }
   const propagatedOrigin = decodePropagatedOrigin(process.env);
-  const ambientRuntimeOrigin = propagatedOrigin ?? await captureRuntimeOrigin();
+  const ambientCapture = await captureRuntimeOrigin();
+  const ambientRuntimeOrigin = propagatedOrigin ?? ambientCapture;
   if (args.background) {
     const jobsDir2 = resolveJobsDir();
     const latestPath = join36(jobsDir2, "latest");
@@ -48512,7 +48536,7 @@ async function run19() {
         handoffPath,
         feedCommandPrefix
       });
-      createTmuxSession(sessionName, cwd, tmuxCmd, { [JOB_ID_HANDOFF_PATH_ENV]: handoffPath, ...propagatedEnv });
+      createTmuxSession(sessionName, cwd, tmuxCmd, { [JOB_ID_HANDOFF_PATH_ENV]: handoffPath, ...propagatedEnv }, parentPaneOptions(ambientCapture ?? propagatedOrigin));
     } else {
       const child = cpSpawn(process.execPath, [process.argv[1], ...innerArgs], {
         detached: true,
