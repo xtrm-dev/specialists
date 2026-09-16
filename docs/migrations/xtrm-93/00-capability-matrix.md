@@ -185,7 +185,7 @@ Every row uses exactly these columns:
 | CAP-TEL-057..064 | `sp ps` native activation projection | `sp ps` | `ps.ts:747` reads `event_family='activation'` | — | — | **no writer** (deleted by `febef0ad`) | block renders empty; header comment stale | Specialists-CLI | FRONTEND_ONLY | HIGH | DX-TEL-013 | `native-activation-summary.ts` (blocked) | NATIVE_GAP |
 | CAP-ID-001 | Job identity survives the cutover | `sp result/feed/ps/stop/...` | `[0-9a-f]{6}` (`supervisor.ts:1437`) | `jobs/<id>/**` | `job_id` column | `act:[0-9a-f]{12}` + `att:…:N` (`native-host.ts:507-508`) | **disjoint by construction; no alias, no resolver exists**; `types.ts:19-20`'s "maps to job_id" is a comment, not a mechanism | Specialists-native | ADAPTER_NEEDED | **CRITICAL** | DX-ID-001 | none | NATIVE_GAP |
 | CAP-ID-002 | Attempt identity (retry/resume continuity) | `sp retry/resume` | none — legacy retry mints a new job | — | `attempt_no` (0 for legacy rows) | `attemptId`, advances in place (`registry.ts:81-88`) | no legacy counterpart; `attempt_no=0` must never be aggregated as identity | Specialists-native | PRESERVE_NATIVE | HIGH | DX-ID-004 | none | ADAPTER_NEEDED |
-| CAP-ID-003 | Durable store anchoring | all | git common root (`job-root.ts:34-37`) | `.specialists/jobs` | — | `process.cwd()` (`native-host.ts:494`) | **engines anchor differently**; worktree dispatch writes settlements under the worktree | Specialists-native | PRESERVE_NATIVE | HIGH | DX-ID-011 | none | ADAPTER_NEEDED |
+| CAP-ID-003 | Durable store anchoring | all | git common root (`job-root.ts:34-37`) | `.specialists/jobs` | — | `process.cwd()` (`native-host.ts:494`) | **three stores, two anchors** (corrected): jobs + `observability.db` are both base-root/shared (`observability-db.ts:80-94`, or `$XDG_DATA_HOME/specialists/`), settlements are per-worktree. Native forensic rows and native settlement state therefore land in **different stores**; see consequence #7 | Specialists-native | PRESERVE_NATIVE | HIGH | DX-ID-011 | none | ADAPTER_NEEDED |
 | CAP-ID-004 | Settlement exactly-once + Journal result + provenance | `check_and_publish`, Substrate tools | none | `.specialists/settlements/**` | settlement_* | `settlement-publication.ts`/`-store.ts`/`-lease.ts` (PR #372) | native-only; Journal attempt attribution is envelope-only (unattributed entries defer forever) | Specialists-native | REUSE_EXISTING_NATIVE | MEDIUM | DX-ID-011 | none | PARITY |
 | CAP-ID-005 | Dead-job reaping / GC / TTL | `sp clean`, `sp doctor --reap-dead-jobs` | `clean.ts`, `worktree-gc.ts`, `dead-job-audit.ts` | `jobs/**`, `ready/` | `lifecycle.dead_declared` | none — native stores have **no GC/TTL** | `.specialists/ready/` is documented in 2 places and read by **nobody in `src/`** | Specialists-native | PRESERVE_NATIVE | MEDIUM | NEW | `worktree-gc.ts` (blocked) | NATIVE_GAP |
 | CAP-ID-006 | Worktree-lease as writer exclusion | `worktree.lease` | none (bead+specialist collision refusal) | — | lease_* | `workspace-lease.ts` | native-only; **lease ≠ worktree isolation** (single-writer over a shared tree) | Specialists-native | REUSE_EXISTING_NATIVE | MEDIUM | DX-ID-007 | none | PARITY |
@@ -324,18 +324,48 @@ they change the cutover plan.
    **cutover blocker and a live production defect** on the native path. It is the single highest-value
    fix in the persistence lane.
 
-7. **Durable-store anchoring is inconsistent between the two engines — verified.**
-   Legacy job state anchors to the **git common root**: `resolveJobsDir()` returns
-   `join(resolveCommonGitRoot(cwd) ?? cwd, '.specialists', 'jobs')` (`src/specialist/job-root.ts:34-37`).
-   Native settlement state anchors to **`process.cwd()`**:
-   `src/activation/native-host.ts:494` is
-   `createFileSettlementStore(join(this.cwd, '.specialists', 'settlements'))`, and `this.cwd`
-   defaults to `process.cwd()` (`src/activation/native-host.ts:375`). Interactive `.specialists/**`
-   and authority state add further roots. In a worktree these diverge, so a native activation
-   dispatched from a worktree writes its settlement record **under the worktree**, while the legacy
-   job row lands at the common root. The once-per-process republish pass then only ever sees its
-   own cwd's backlog. This must be resolved before any identity or recovery work leans on store
-   locality.
+7. **Durable-store anchoring: two stores at the git common root, one per worktree — corrected and
+   verified at `6553ef05`.**
+
+   There are **three** durable stores, not two, and they do not share an anchor:
+
+   | Store | Path | Anchor | Shared across worktrees? |
+   |---|---|---|---|
+   | Job state (`status.json`) | `.specialists/jobs/` | git **common** root | **Yes** |
+   | Forensic DB (`observability.db`) | `.specialists/db/observability.db` | git **common** root, or `$XDG_DATA_HOME/specialists/` | **Yes** |
+   | Native settlements | `.specialists/settlements/` | `process.cwd()` | **No — per worktree** |
+
+   - Jobs: `resolveJobsDir()` = `join(resolveCommonGitRoot(cwd) ?? cwd, '.specialists', 'jobs')`
+     (`src/specialist/job-root.ts:34-37`).
+   - Forensic DB: `resolveObservabilityDbLocation()` (`src/specialist/observability-db.ts:80-94`) runs
+     `git rev-parse --path-format=absolute --git-common-dir`, strips the trailing `/.git`, and returns
+     `join(gitRoot, '.specialists', 'db')`. Verified in this worktree: `--git-common-dir` is
+     `/home/dawid/dev/specialists/.git` (→ base root) while `--show-toplevel` is the worktree — the
+     resolver deliberately takes the **former**. On disk: `/home/dawid/dev/specialists/.specialists/db/observability.db`.
+   - Settlements: `createFileSettlementStore(join(this.cwd, '.specialists', 'settlements'))`
+     (`src/activation/native-host.ts:494`), `this.cwd` defaulting to `process.cwd()` (`:375`).
+
+   **Why this matters more than the original wording implied.** A native activation dispatched from a
+   worktree writes its **forensic rows into the shared base-root DB** but its **settlement record into
+   the worktree**. So the evidence and the state that explains it live in different stores, and the
+   once-per-process republish pass only ever sees its own cwd's settlement backlog. Any recovery or
+   orphan-reconciliation work that assumes one store locality is wrong, and B5 (no native orphan
+   reconciler) is harder to close than it first appears: a reconciler anchored to the worktree cannot
+   see the shared forensic rows it needs, and one anchored to the base root cannot see the settlements.
+
+   **`XDG_DATA_HOME` is an anchor override that only the forensic DB has.** When set, the DB moves to
+   `$XDG_DATA_HOME/specialists/` while **jobs stay at the git root** — a writer/reader split the file
+   itself already documents as a real failure class: it records that a test run once migrated the
+   repository's authoritative forensic store in place (unitAI-rrdnt.16, `observability-db.ts:56-72`).
+   Neither the jobs store nor settlements has an equivalent override, so the asymmetry is not
+   symmetric by design; it must be treated as a configuration hazard at cutover.
+
+   *Provenance: this item originally carried only the jobs-vs-settlements half. It was corrected after
+   the operator observed that `observability.db` lives at the base root. The correction replaces a
+   wrong corroboration in the coordinator's handoff — the absence of `.specialists/observability.db`
+   from a worktree is correct behaviour (the real path is `.specialists/db/observability.db`), and
+   should never have been cited as evidence. Lane A already recorded the `XDG_DATA_HOME` override at
+   `01-cli-surface.md:26`; it is consolidated here.*
 
 8. **Beads workflow doctrine is injected into the NATIVE runtime today — a direct violation of the
    migration's non-negotiable rule (Lane F E-1, confirmed verbatim).**
