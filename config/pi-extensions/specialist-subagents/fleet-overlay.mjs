@@ -156,8 +156,10 @@ export function renderFleetOverlay({
   width = 100,
   height = FLEET_OVERLAY_DEFAULT_HEIGHT,
 } = {}) {
-  const safeWidth = Math.max(FLEET_OVERLAY_MIN_WIDTH, Math.floor(width || 0));
-  const safeHeight = Math.max(12, Math.floor(height || 0));
+  // FLEET_OVERLAY_MIN_WIDTH is the preferred mount width, not permission for a
+  // renderer to overflow a smaller terminal. Always respect the actual viewport.
+  const safeWidth = Math.max(1, Math.floor(width || FLEET_OVERLAY_MIN_WIDTH));
+  const safeHeight = Math.max(6, Math.floor(height || FLEET_OVERLAY_DEFAULT_HEIGHT));
   const rows = flattenFleet(snapshot, { filter: inputState?.filter });
   const state = ensureSelection(createFleetOverlayState(inputState), rows);
   const selected = rows.find((row) => row.node.jobId === state.selectedJobId)?.node ?? null;
@@ -172,8 +174,8 @@ export function renderFleetOverlay({
   const lines = [truncate(headerParts.join(' · '), safeWidth)];
   lines.push(truncate(state.filter ? `/ ${state.filter}` : '/ filter', safeWidth));
 
-  const bodyBudget = safeHeight - 5;
-  const fleetBudget = Math.max(3, Math.min(10, Math.floor(bodyBudget * 0.38)));
+  const bodyBudget = Math.max(1, safeHeight - 5);
+  const fleetBudget = Math.max(1, Math.min(10, Math.floor(bodyBudget * 0.38)));
   const selectedIndex = rows.findIndex((row) => row.node.jobId === state.selectedJobId);
   const fleetStart = windowStart(selectedIndex, rows.length, fleetBudget);
   const fleetWindow = rows.slice(fleetStart, fleetStart + fleetBudget);
@@ -199,14 +201,26 @@ export function renderFleetOverlay({
   while (lines.length < safeHeight - 1) lines.push('');
 
   lines.push(truncate('↑↓ select · Tab view · / filter · f follow · PgUp/PgDn scroll · Esc close', safeWidth));
+  // In an extremely short viewport the structural sections can exceed the target;
+  // preserve the header and keybar and trim the middle instead of overflowing.
+  if (lines.length > safeHeight) {
+    return {
+      lines: [lines[0], ...lines.slice(1, safeHeight - 1), lines[lines.length - 1]],
+      state,
+      selected,
+      maxScroll,
+    };
+  }
   return { lines, state, selected, maxScroll };
 }
 
 function contentLines({ state, chronology, result, detail, selected, width }) {
   if (!selected) return ['no activation selected'];
   if (state.mode === 'result') {
-    const text = result?.output ?? result ?? 'result unavailable';
-    return wrapLines(String(text), width);
+    const value = result && typeof result === 'object' && Object.hasOwn(result, 'output')
+      ? result.output
+      : result;
+    return wrapLines(String(value ?? 'result unavailable'), width);
   }
   if (state.mode === 'detail') {
     const safeDetail = detail && typeof detail === 'object' ? detail : defaultDetail(selected);
@@ -233,7 +247,14 @@ function defaultDetail(node) {
 
 function chronologyLine(row, width) {
   const ts = row.ts ?? row.t;
-  const time = typeof ts === 'number' ? new Date(ts).toISOString().slice(11, 19) : String(ts ?? '').slice(0, 8);
+  let time = '';
+  if (typeof ts === 'number') {
+    time = new Date(ts).toISOString().slice(11, 19);
+  } else {
+    const text = String(ts ?? '');
+    const match = text.match(/T(\d{2}:\d{2}:\d{2})/);
+    time = match?.[1] ?? text.slice(0, 8);
+  }
   const type = String(row.type ?? row.event_name ?? '').trim();
   const actor = String(row.actor ?? row.specialist ?? '').trim();
   const payload = String(row.payload ?? row.line ?? '').replace(/\s+/g, ' ').trim();
@@ -275,6 +296,7 @@ function formatValue(value) {
 }
 
 function wrapLines(text, width) {
+  const safeWidth = Math.max(1, width);
   const lines = [];
   for (const sourceLine of String(text).split('\n')) {
     let remaining = sourceLine;
@@ -282,9 +304,9 @@ function wrapLines(text, width) {
       lines.push('');
       continue;
     }
-    while (remaining.length > width) {
-      lines.push(remaining.slice(0, width));
-      remaining = remaining.slice(width);
+    while (remaining.length > safeWidth) {
+      lines.push(remaining.slice(0, safeWidth));
+      remaining = remaining.slice(safeWidth);
     }
     lines.push(remaining);
   }
@@ -292,8 +314,10 @@ function wrapLines(text, width) {
 }
 
 function truncate(text, width) {
+  const safeWidth = Math.max(0, Math.floor(width));
+  if (safeWidth === 0) return '';
   const value = String(text ?? '');
-  if (value.length <= width) return value;
-  if (width <= 1) return value.slice(0, width);
-  return `${value.slice(0, width - 1)}…`;
+  if (value.length <= safeWidth) return value;
+  if (safeWidth === 1) return value.slice(0, 1);
+  return `${value.slice(0, safeWidth - 1)}…`;
 }
