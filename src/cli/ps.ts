@@ -743,11 +743,22 @@ function loadNativeActivationSummaries(args: PsArgs, mineBeadIds?: Set<string>):
   const sqliteClient = createObservabilitySqliteClient();
   if (!sqliteClient) return [];
   try {
-    const rows = sqliteClient.readForensicEvents({
-      jobIdPrefix: 'act:',
-      sinceMs: args.sinceMs,
-      limit: 1000,
-      order: 'desc',
+    // XTRM-93 N3 (unitAI-kmbb9): activation-first selection. The previous
+    // reader passed a global row cap (limit 1000) over raw event rows, so one
+    // noisy activation (measured 7,804 rows vs a 91k-row table) consumed the
+    // whole window and quiet activations were invisible. Now activation ids
+    // are chosen first (bounded to the latest N) and only then are their
+    // events fetched with no row cap. --bead is pushed into the id selection
+    // so it returns that bead's latest activations; --mine/--since still
+    // filter afterwards (N carries headroom for them — see below).
+    const ids = sqliteClient.listNativeActivationIds({
+      limit: NATIVE_ACTIVATION_SELECTION_LIMIT,
+      ...(args.sinceMs !== undefined ? { sinceMs: args.sinceMs } : {}),
+      ...(args.beadFilter ? { beadId: args.beadFilter } : {}),
+    });
+    if (ids.length === 0) return [];
+    const rows = sqliteClient.readForensicEventsForActivations(ids, {
+      ...(args.sinceMs !== undefined ? { sinceMs: args.sinceMs } : {}),
     });
     return summarizeNativeActivations(rows).filter((summary) => {
       if (args.beadFilter && summary.bead_id !== args.beadFilter) return false;
@@ -760,6 +771,16 @@ function loadNativeActivationSummaries(args: PsArgs, mineBeadIds?: Set<string>):
     sqliteClient.close();
   }
 }
+
+// XTRM-93 N3 (unitAI-kmbb9): N=20, twice the human display budget (10), so
+// the '+N older omitted' hint below can render and the --mine/--since
+// post-filters have headroom without a second query. Each extra activation
+// adds its full event history (newest 20 measured ~13.6k rows on 2026-09-16
+// against a 93k-row table), so larger values scale I/O without changing what
+// the operator sees. This bound counts ACTIVATIONS, not event rows, and is
+// deliberately NOT derived from the old 1000-row cap that caused the
+// starvation.
+const NATIVE_ACTIVATION_SELECTION_LIMIT = 20;
 
 const NATIVE_ACTIVATION_DISPLAY_LIMIT = 10;
 

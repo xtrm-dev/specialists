@@ -15853,6 +15853,48 @@ class SqliteClient {
       `).all(...params, limit);
     }, "readForensicEvents");
   }
+  listNativeActivationIds(filters = {}) {
+    return withRetry(() => {
+      const clauses = [`job_id >= 'act:'`, `job_id < 'act;'`];
+      const params = [];
+      if (filters.sinceMs !== undefined) {
+        clauses.push("updated_at_ms >= ?");
+        params.push(filters.sinceMs);
+      }
+      if (filters.beadId !== undefined) {
+        clauses.push("bead_id = ?");
+        params.push(filters.beadId);
+      }
+      const limit = Math.max(1, Math.min(filters.limit ?? 20, 100));
+      const rows = this.db.query(`
+        SELECT job_id FROM specialist_jobs
+        WHERE ${clauses.join(" AND ")}
+        ORDER BY updated_at_ms DESC
+        LIMIT ?
+      `).all(...params, limit);
+      return rows.map((row) => row.job_id);
+    }, "listNativeActivationIds");
+  }
+  readForensicEventsForActivations(jobIds, filters = {}) {
+    if (jobIds.length === 0)
+      return [];
+    return withRetry(() => {
+      const placeholders = jobIds.map(() => "?").join(",");
+      const params = [...jobIds];
+      let since = "";
+      if (filters.sinceMs !== undefined) {
+        since = " AND t >= ?";
+        params.push(filters.sinceMs);
+      }
+      return this.db.query(`
+        SELECT id, job_id, seq, t, schema_version, event_family, event_name,
+               participant_kind, participant_role, participant_id, attempt_id, redaction_status, event_json
+        FROM specialist_forensic_events
+        WHERE job_id IN (${placeholders})${since}
+        ORDER BY t DESC, seq DESC, id DESC
+      `).all(...params);
+    }, "readForensicEventsForActivations");
+  }
   readLatestToolEvent(jobId) {
     return withRetry(() => {
       const row = this.db.query(`
@@ -53818,11 +53860,15 @@ function loadNativeActivationSummaries(args, mineBeadIds) {
   if (!sqliteClient)
     return [];
   try {
-    const rows = sqliteClient.readForensicEvents({
-      jobIdPrefix: "act:",
-      sinceMs: args.sinceMs,
-      limit: 1000,
-      order: "desc"
+    const ids = sqliteClient.listNativeActivationIds({
+      limit: NATIVE_ACTIVATION_SELECTION_LIMIT,
+      ...args.sinceMs !== undefined ? { sinceMs: args.sinceMs } : {},
+      ...args.beadFilter ? { beadId: args.beadFilter } : {}
+    });
+    if (ids.length === 0)
+      return [];
+    const rows = sqliteClient.readForensicEventsForActivations(ids, {
+      ...args.sinceMs !== undefined ? { sinceMs: args.sinceMs } : {}
     });
     return summarizeNativeActivations(rows).filter((summary) => {
       if (args.beadFilter && summary.bead_id !== args.beadFilter)
@@ -54348,7 +54394,7 @@ async function run21() {
     sqliteClient?.close();
   }
 }
-var ACTIVE_STATES2, TERMINAL_STATES2, BEAD_TITLE_CACHE, STATUS_PRIORITY, NATIVE_ACTIVATION_DISPLAY_LIMIT = 10, ANSI_ENTER_ALT_SCREEN = "\x1B[?1049h", ANSI_EXIT_ALT_SCREEN = "\x1B[?1049l", ANSI_HIDE_CURSOR = "\x1B[?25l", ANSI_SHOW_CURSOR = "\x1B[?25h", ANSI_CURSOR_HOME = "\x1B[H", ANSI_ERASE_DOWN = "\x1B[J", ANSI_ESCAPE_SEQUENCE_PATTERN;
+var ACTIVE_STATES2, TERMINAL_STATES2, BEAD_TITLE_CACHE, STATUS_PRIORITY, NATIVE_ACTIVATION_SELECTION_LIMIT = 20, NATIVE_ACTIVATION_DISPLAY_LIMIT = 10, ANSI_ENTER_ALT_SCREEN = "\x1B[?1049h", ANSI_EXIT_ALT_SCREEN = "\x1B[?1049l", ANSI_HIDE_CURSOR = "\x1B[?25l", ANSI_SHOW_CURSOR = "\x1B[?25h", ANSI_CURSOR_HOME = "\x1B[H", ANSI_ERASE_DOWN = "\x1B[J", ANSI_ESCAPE_SEQUENCE_PATTERN;
 var init_ps = __esm(() => {
   init_format_helpers();
   init_theme();
