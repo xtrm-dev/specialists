@@ -342,3 +342,64 @@ Non-blocking but required for a clean record: E6–E12, and an explicit decision
   `bun run src/index.ts result act:deadbeef1234` → **`No node matching ref: act`**.
   `sp result` therefore cannot resolve *any* native activation id. This is confirmed behaviour,
   not inference, and it is a cutover blocker because `sp result` is a preserved CLI surface.
+
+---
+
+## Appendix Z — empirical identity grammar, measured from the canonical store at cutover-prep
+
+> Measured directly from `<git-common-root>/.specialists/db/observability.db` (schema version 15),
+> table `specialist_jobs`, resolving the common root via `resolveObservabilityDbLocation()`.
+> This appendix exists because N2A must define the grammar from data, not from the two examples in
+> the brief. Row counts are the population at the time of measurement.
+
+### Observed `job_id` shapes
+
+| Shape | Rows | Contains `:` |
+|---|---|---|
+| `<6 hex>` (e.g. `00270d`) — legacy dominant | 3040 | no |
+| `<uuid>` 36-char (e.g. `0007c574-26ba-4817-8bbb-b2338aa7bdfb`) — legacy | 496 | no |
+| `act:<12-char id>` (e.g. `act:0293a2bc-f48`) — native activation | 203 | **yes** |
+| assorted odd legacy lengths (5, 8, 10–15, 18) | ~12 | no |
+
+### Observed node id shapes
+
+`node-1`, `node-r1`, `node-r2`, `node-rec-1`, `node-rec-2`, `research-81fc1c10`,
+`research-9ce8944f`, `research-b36c6f64` — **none contains a colon.**
+
+### Consequences that decide the fix
+
+1. **No legacy `job_id` contains a colon, and no node id contains a colon.** The only refs that
+   contain one are the native identities. The `node:member` split in `src/cli/result.ts:93-98`
+   is therefore unambiguous *except* for the native forms, which it destroys.
+2. **The native ids form two shapes, one of which has two colons:**
+   - `act:<id>` — `native-host.ts:507` mints `` `act:${randomUUID().slice(0, 12)}` ``
+   - `att:<id>:<n>` — `native-host.ts:508` mints `` `att:${activationId.slice(4)}:1` ``
+   A `indexOf(':')` split yields `nodeId='att'` and `memberKey='<id>:1'` for the second form, so
+   the attempt form mis-parses even more severely than the activation form.
+3. **`act:` and `att:` are therefore safe to reserve as native prefixes.** Any implementation that
+   exempts these prefixes from the legacy split preserves every existing legacy ref, because no
+   legacy ref can begin with them.
+4. **The fix is sufficient: the result data is already addressable.** `specialist_jobs` carries
+   **203** rows whose `job_id` is an `act:` identity, alongside 3577 legacy rows. `src/cli/result.ts`
+   resolves a job id through `readStatus(jobId)` / `readEvents(jobId)`, so once the id survives
+   parsing intact the native result is retrievable. No new storage is required for N2A.
+5. **`att:` is a second axis, not a second id space.** `specialist_jobs` carries both `attempt_no`
+   and `attempt_id` columns, and `specialist_forensic_events` carries a dedicated nullable
+   `attempt_id` column with its own partial index
+   (`idx_forensic_events_job_attempt (job_id, attempt_id, seq) WHERE attempt_id IS NOT NULL`).
+   Attempt resolution should use those columns rather than string-splitting the ref.
+
+### Grammar cases N2A must test
+
+```
+00270d                      legacy 6-hex job id      -> jobId unchanged
+0007c574-26ba-4817-8bbb-b2338aa7bdfb   legacy uuid   -> jobId unchanged
+node-1:some-member          legacy node:member       -> nodeId+memberKey split (preserved)
+act:0293a2bc-f48            native activation        -> jobId unchanged, NO split
+att:0293a2bc-f48:1          native attempt           -> jobId unchanged, NO split
+act:                        malformed                -> explicit error, not a node lookup
+att:foo                     malformed                -> explicit error
+att::1                      malformed                -> explicit error
+:member                     empty node ref           -> existing error path
+node-1:                     empty member key         -> existing error path
+```

@@ -292,6 +292,48 @@ they change the cutover plan.
    **telemetry-parity blocker** and a **live production defect** in its own right (recorded, not
    fixed, per the audit's no-opportunistic-fix rule).
 
+   **Confirmed against the canonical database at cutover-prep time, and the finding is sharper than
+   the audit recorded.** Read from the real common-root store
+   (`<git-common-root>/.specialists/db/observability.db`, resolved via
+   `resolveObservabilityDbLocation`, schema version 15):
+
+   | Evidence | Value |
+   |---|---|
+   | `activation`-family rows present | 214 (so the empty-query conclusion is *not* "no rows ever") |
+   | Names | `activation.activation_requested`, `activation.activation_settled`, `activation.turn_started`, … |
+   | Last `activation`-family write | **2026-09-08 11:11:09 UTC** |
+   | `febef0ad` commit time | **2026-09-08 11:37:32 UTC** (+02:00 13:37) |
+   | Gap | **26 minutes** — and no write to that family since |
+   | Every other family (job/turn/tool/model/git/control/mcp) | current at 2026-09-16 |
+
+   The producer stopped precisely when the commit that declared the vocabulary *gone* landed. This
+   upgrades the claim from git-archaeology inference to time-series proof: the family is a closed
+   historical record, not a live stream.
+
+   **Two corrections the database forced, both material to the fix:**
+
+   1. **The fix must be identity-based, not a family swap.** In the current vocabulary there is *no*
+      native-specific family: native rows land in the **shared** families (`job`, `turn`, `model`,
+      `tool`, `control`, `git`) and are distinguished only by `job_id = 'act:<uuid>'`
+      (`native-host.ts:507`), with `attempt_id` (`att:<id>:<n>`) as a second axis in its own column.
+      Verified live: `act:0293a2bc-f48` carries `job.started`, `job.status_changed`, `job.completed`,
+      `turn.turn`, `model.meta`, `model.token_usage.recorded`. So `ps` must query by **id prefix**.
+      `ListForensicEventsFilters` (`observability-sqlite.ts:1174-1184`) exposes only an exact
+      `jobId` and an exact `eventFamily` — there is **no prefix filter**, so one must be added.
+      Replacing the literal with another literal would be wrong in both directions.
+   2. **A second, independent defect at the same call site.** `ps.ts:746-750` omits `order`, and the
+      reader defaults to `'asc'` (oldest first). For a busy stream it therefore slices the **oldest**
+      rows in the window and discards the newest — the interface comment at
+      `observability-sqlite.ts:1181-1183` warns about exactly this: *"Use 'desc' to fetch the newest
+      rows when a caller intends to slice the tail of a busy stream."* Fixing only the family would
+      leave `sp ps` rendering the wrong end of the correct stream. Neither of the two
+      `readForensicEvents` callers that could hit this passes `order: 'desc'`.
+
+   *Provenance: substantiated during cutover-prep (N2B) by the operator's instruction to diagnose
+   from the real canonical DB rather than from a worktree-local absence. The audit's original wording
+   said the writer was "deleted by `febef0ad`"; the mechanism is more precisely that the parallel
+   vocabulary was retired and native events were re-projected onto the shared timeline families.*
+
 5. **The shipped artifact is a committed build, so "delete the legacy backend" is not done
    until `dist/` is rebuilt.** `package.json` `bin` maps `specialists`/`sp` → `dist/index.js`, and
    `dist/` is **tracked in git** (397 files; `git ls-files dist/ | wc -l`). `dist/index.js` and
