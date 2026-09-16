@@ -55,7 +55,7 @@ import {
   deduplicateExtensionSources,
   resolveGlobalNodeModulesDir,
 } from '../pi/session.js';
-import { formatResolvedToolContract, type ResolvedToolContract } from '../specialist/resolved-tool-contract.js';
+import { formatResolvedToolContract, withDiscoveredExtensionTools, type ResolvedToolContract } from '../specialist/resolved-tool-contract.js';
 import { resolveModelChain } from '../specialist/model-chain.js';
 import { extractPurposeExcerpt } from './contract-sections.js';
 import {
@@ -224,6 +224,197 @@ export function resolveDeclaredExtensionSources(
     else skipped.push(source);
   }
   return { local, skipped };
+}
+
+/**
+ * Sources whose provenance the discover-then-pin gate trusts (unitAI-1pqtl.2).
+ *
+ * The same trust rule the legacy CLI policy extension uses
+ * (`config/pi-extensions/extension-tool-policy/index.mjs`): a tool whose registry entry
+ * reports one of these sources was registered by extension code the operator enabled, not
+ * by pi itself. Provenance ALONE does not prevent the collision — a shadowing name also
+ * reports `cli` — so the builtin-collision refusal below is required as well.
+ */
+export const EXTENSION_CLASS_SOURCES: ReadonlySet<string> = new Set(['cli', 'extension', 'package', 'custom']);
+
+/** Registry sources that mark a tool as pi's own builtin, never pinnable. */
+export const BUILTIN_TOOL_SOURCES: ReadonlySet<string> = new Set(['builtin', 'sdk']);
+
+/** An `npm:` source that was declared enabled but resolved to nothing. Refused, not skipped. */
+export function unresolvableNpmSources(skipped: readonly string[]): string[] {
+  return skipped.filter((source) => source.startsWith('npm:'));
+}
+
+/** The discover-then-pin verdict for one activation's dynamic sources. */
+export interface DynamicExtensionDiscovery {
+  /** Names safe to pin: extension-class provenance and no builtin collision. */
+  pinned: string[];
+  /** Discovered names refused because they collide with a builtin name. */
+  refusedCollisions: string[];
+  /** Discovered names refused because their provenance is not extension-class. */
+  refusedProvenance: string[];
+  /** Raw active names the discovery session enumerated (before filtering). */
+  discoveredRaw: string[];
+  /** Builtin names enumerated from a session with NO dynamic sources. */
+  builtinNames: string[];
+}
+
+const EMPTY_DISCOVERY: DynamicExtensionDiscovery = {
+  pinned: [],
+  refusedCollisions: [],
+  refusedProvenance: [],
+  discoveredRaw: [],
+  builtinNames: [],
+};
+
+function uniqueOrderedNames(values: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const ordered: string[] = [];
+  for (const value of values) {
+    if (seen.has(value)) continue;
+    seen.add(value);
+    ordered.push(value);
+  }
+  return ordered;
+}
+
+function provenanceOf(entry: { sourceInfo?: { source?: string }; source?: string }): string {
+  return entry.sourceInfo?.source ?? entry.source ?? '';
+}
+
+/**
+ * Enumerate pi's builtin tool names DYNAMICALLY, per pi version (unitAI-1pqtl.2).
+ *
+ * From a fenced session with NO dynamic sources via `getAllTools()` filtered to
+ * `sourceInfo.source` in `{builtin, sdk}`. Uses `getAllTools()`, not the active set:
+ * the default-active set enumerated only `bash/edit/read/write` while `getAllTools()`
+ * also lists platform-gated names such as `powershell`. Never a static list (unitAI-34pyf
+ * rejected that pattern for drift).
+ *
+ * A session without `getAllTools` (older test doubles) yields an empty set: the caller
+ * then refuses every discovered name on provenance instead, which is still fail-closed
+ * (no widening) and keeps the no-dynamic-sources path byte-identical.
+ */
+export async function enumerateBuiltinToolNames(input: {
+  sdk: PiSdk;
+  cwd: string;
+  agentDir: string;
+  model: unknown;
+}): Promise<string[]> {
+  const loader = new input.sdk.DefaultResourceLoader({
+    cwd: input.cwd,
+    agentDir: input.agentDir,
+    noSkills: true,
+    additionalSkillPaths: [],
+    noExtensions: true,
+    additionalExtensionPaths: [],
+    noContextFiles: true,
+    noPromptTemplates: true,
+    noThemes: true,
+  });
+  await loader.reload();
+  const created = await input.sdk.createAgentSession({
+    resourceLoader: loader,
+    model: input.model,
+    cwd: input.cwd,
+    systemPrompt: 'builtin-enumeration (never prompted)',
+  });
+  try {
+    const all = created.session.getAllTools?.() ?? [];
+    return uniqueOrderedNames(
+      all
+        .filter((entry) => BUILTIN_TOOL_SOURCES.has(provenanceOf(entry)))
+        .map((entry) => entry.name),
+    );
+  } finally {
+    try { created.session.dispose(); } catch { /* disposal failures are recorded by absence */ }
+  }
+}
+
+/**
+ * Discover-then-pin enumeration (unitAI-1pqtl.2).
+ *
+ * Creates a fenced, never-prompted discovery session containing ONLY the resolved,
+ * deduplicated, explicitly-enabled dynamic sources — no skills, no curated extensions, no
+ * ambient discovery, no `customTools`; `noTools: 'builtin'`; `tools` OMITTED — enumerates
+ * `getActiveToolNames()`, and splits the names into pinnable vs refused:
+ * `pin-able = discovered MINUS builtin names`, with positive extension-class provenance
+ * required for every pinned name. Both checks are required: a shadowing `write` also
+ * reports `cli`, so provenance alone does not prevent the collision.
+ *
+ * Returns an empty verdict WITHOUT creating any session when there are no dynamic sources,
+ * so existing behaviour is byte-identical for that path. Otherwise creates exactly one
+ * builtin-enumeration session plus one discovery session, both disposed in `finally`.
+ * Never prompted. No caching.
+ *
+ * Throws on discovery failure (including a silent-empty set: a non-existent extension path
+ * yields an EMPTY set with NO error because `loader.reload()` does not throw). The caller
+ * converts that into a fail-closed refusal before any model turn.
+ */
+export async function discoverDynamicExtensionTools(input: {
+  sdk: PiSdk;
+  cwd: string;
+  agentDir: string;
+  dynamicExtensions: readonly string[];
+  model: unknown;
+}): Promise<DynamicExtensionDiscovery> {
+  if (input.dynamicExtensions.length === 0) return EMPTY_DISCOVERY;
+  const builtinNames = await enumerateBuiltinToolNames({
+    sdk: input.sdk,
+    cwd: input.cwd,
+    agentDir: input.agentDir,
+    model: input.model,
+  });
+  const builtinSet = new Set(builtinNames);
+  const loader = new input.sdk.DefaultResourceLoader({
+    cwd: input.cwd,
+    agentDir: input.sdk.getAgentDir(),
+    noSkills: true,
+    additionalSkillPaths: [],
+    noExtensions: true,
+    additionalExtensionPaths: [...input.dynamicExtensions],
+    noContextFiles: true,
+    noPromptTemplates: true,
+    noThemes: true,
+  });
+  await loader.reload();
+  const created = await input.sdk.createAgentSession({
+    resourceLoader: loader,
+    model: input.model,
+    cwd: input.cwd,
+    noTools: 'builtin',
+    systemPrompt: 'extension-discovery (never prompted)',
+  });
+  try {
+    const discoveredRaw = uniqueOrderedNames(created.session.getActiveToolNames() ?? []);
+    if (discoveredRaw.length === 0) {
+      // Silent by construction: loader.reload() does not throw for a non-existent path.
+      throw new Error(
+        `extension discovery yielded no tools for ${input.dynamicExtensions.length} enabled source(s); ` +
+        'a declared source that resolves to nothing is a refusal, not a skip',
+      );
+    }
+    const registry = created.session.getAllTools?.() ?? [];
+    const provenance = new Map(registry.map((entry) => [entry.name, provenanceOf(entry)]));
+    const pinned: string[] = [];
+    const refusedCollisions: string[] = [];
+    const refusedProvenance: string[] = [];
+    for (const name of discoveredRaw) {
+      if (builtinSet.has(name)) {
+        refusedCollisions.push(name);
+        continue;
+      }
+      const source = provenance.get(name) ?? '';
+      if (!EXTENSION_CLASS_SOURCES.has(source)) {
+        refusedProvenance.push(name);
+        continue;
+      }
+      pinned.push(name);
+    }
+    return { pinned, refusedCollisions, refusedProvenance, discoveredRaw, builtinNames };
+  } finally {
+    try { created.session.dispose(); } catch { /* disposal failures are recorded by absence */ }
+  }
 }
 
 
@@ -761,22 +952,11 @@ export class NativeActivationHost {
       return reject('empty_tool_contract', { tier });
     }
 
-    // validateBeforeRun throws on a hard failure (missing skill path, absent external
-    // command, required_tool the tier does not grant). Converted into a structured
-    // refusal so the caller sees one rejection shape rather than two error styles.
-    //
-    // The validator is a dependency, not an inlined call, so COMPOSITION and ADMISSION can be
-    // exercised separately (XTRM-84 4c). The default is the real `validateBeforeRun`, so
-    // production admission is unchanged and still fail-closed; a test that wants to compare
-    // what the two runtimes COMPILE for a shipped definition does not have to rewrite the
-    // definition to get past a validator whose outcome depends on the host's PATH.
-    try {
-      this.admission(specialist, tier, toolContract);
-    } catch (error) {
-      return reject('preflight_failed', {
-        note: error instanceof Error ? error.message : String(error),
-      });
-    }
+    // Admission (`validateBeforeRun`, including `required_tools`) runs AFTER the effective
+    // contract is finalized and the prompt is rendered (unitAI-1pqtl.2 ordering:
+    // discovery -> effective contract -> prompt render -> admission -> session creation),
+    // so a discovered extension tool satisfies `required_tools` instead of refusing as
+    // "missing from resolved runtime contract". See the call site after `renderTaskPrompt`.
 
     // Pre-phase scripts run locally BEFORE an AgentSession exists, matching the legacy
     // runner (src/specialist/runner.ts:1120+): a required script's nonzero exit refuses
@@ -858,6 +1038,79 @@ export class NativeActivationHost {
     }
     const resolvedModel = modelCheck.resolvedModel ?? modelChain[modelIndex] ?? requestedModel;
 
+    // Discover-then-pin (unitAI-1pqtl.2): the definition's declared extension sources,
+    // resolved ONCE so the tool contract, discovery, the resource loader and any future
+    // consumer cannot disagree. The curated set is what the legacy CLI re-enables after
+    // `--no-extensions` (shared helper so the two runtimes cannot drift), plus the
+    // definition's own declared sources with the same-identity de-dup rule (unitAI-il2io).
+    // Resolved here — before discovery, the effective contract, the prompt and admission —
+    // so every later consumer reuses these values instead of re-resolving.
+    const curatedExtensions = resolveCuratedExtensionPaths({
+      permissionLevel: tier,
+      resolvedToolContract: toolContract,
+    });
+    const declaredExtensions = extensionSelection.extensionSources;
+    const { local: declaredLocalExtensions, skipped: skippedDeclaredSources } =
+      resolveDeclaredExtensionSources(declaredExtensions);
+    // Skipped sources (uninstalled `npm:`, remote `git:`/`http:`/`ssh:` with no local form)
+    // stay reported-and-skipped here, unchanged from unitAI-rx1bu. A stricter refusal for
+    // unresolvable enabled sources is unitAI-1pqtl.3's decision — including its blast-radius
+    // finding that refusing would block every activation under the default global config.
+    // This bead refuses the SILENT failure instead: a RESOLVED source whose discovery
+    // yields an empty set (a non-existent path loads with NO error) is a refusal, not a
+    // skip, detected positively inside `discoverDynamicExtensionTools`.
+    for (const source of skippedDeclaredSources) {
+      process.stderr.write(
+        `[specialists] native activation: extension source '${source}' is not a filesystem path; ` +
+        'the in-process resource loader cannot load it, so it is not injected.\n',
+      );
+    }
+    const { kept: dynamicExtensions, dropped: droppedExtensions } = deduplicateExtensionSources(
+      curatedExtensions.dedupeAgainstDynamic,
+      declaredLocalExtensions,
+    );
+    for (const { dropped, keptAs } of droppedExtensions) {
+      process.stderr.write(
+        `[python-kernel] DEDUP: skipping duplicate extension source '${dropped}' (same as '${keptAs}'; kept '${keptAs}').\n`,
+      );
+    }
+
+    // Discovery runs exactly once per activation, before the effective contract, the prompt,
+    // admission and any real session — so a child can never hold more than the contract it
+    // was shown, and every real/retry/fallback session pins the identical finalized allowlist.
+    let discovery: DynamicExtensionDiscovery;
+    try {
+      discovery = await discoverDynamicExtensionTools({
+        sdk,
+        cwd: workspace.worktreePath,
+        agentDir: sdk.getAgentDir(),
+        dynamicExtensions,
+        model: modelCheck.model,
+      });
+    } catch (error) {
+      return reject('extension_discovery_failed', {
+        note: error instanceof Error ? error.message : String(error),
+      });
+    }
+    const effectiveToolContract = withDiscoveredExtensionTools(toolContract, {
+      pinned: discovery.pinned,
+      refusedCollisions: discovery.refusedCollisions,
+      refusedProvenance: discovery.refusedProvenance,
+    });
+    if (discovery.refusedCollisions.length > 0 || discovery.refusedProvenance.length > 0) {
+      emit('extension_tools_refused', {
+        refused_collisions: discovery.refusedCollisions.join(',') || null,
+        refused_provenance: discovery.refusedProvenance.join(',') || null,
+        pinned: discovery.pinned.join(',') || null,
+      });
+    }
+    if (discovery.pinned.length > 0) {
+      emit('extension_tools_discovered', {
+        pinned: discovery.pinned.join(','),
+        sources: dynamicExtensions.join(','),
+      });
+    }
+
     // PRD Phase 10 / §52. A writer takes the lease BEFORE a session exists, so contention
     // is refused without spending a model turn, and so a refused writer never reaches the
     // point where it could mutate anything. A reader takes nothing: it is not entitled to
@@ -932,18 +1185,9 @@ export class NativeActivationHost {
       source_issue_revision: stepContract.provenance.sourceIssueRevision ?? null,
     });
 
-    emit('activation_admitted', {
-      tier, access,
-      configured_model: configuredModel ?? null,
-      requested_model: requestedModel,
-      resolved_model: resolvedModel,
-      model_override: Boolean(request.modelOverride),
-      thinking_level: thinkingLevel ?? null,
-      thinking_override: request.thinkingOverride !== undefined,
-      workspace: workspace.worktreePath,
-      tools: toolContract.toolsList.join(','),
-      custom_tools: `${ASK_TOOL},${ESCALATE_TOOL}`,
-    });
+    // `activation_admitted` telemetry moved after prompt render + admission (unitAI-1pqtl.2):
+    // it must carry the FINALIZED effective allowlist, and admission must see the prompt it
+    // admits. See the emit after `systemPrompt` below.
 
     // §11: lineage comes from Substrate parent_child edges, not a Beads
     // dependency walk, and obeys the same inheritance rules as the store.
@@ -972,10 +1216,11 @@ export class NativeActivationHost {
       // instructs the model to "Read resolved tool contract first". The renderer treats an
       // unsupplied optional placeholder as an intentional EMPTY, so omitting it here did not
       // fail loudly — it silently handed those specialists a contract block that pointed at
-      // nothing. Filled from the SAME `toolContract` already resolved above and passed to
-      // resolveCuratedExtensionPaths, so the prompt and the enforced gate cannot disagree.
+      // nothing. Filled from the FINALIZED effective contract (base + discovered), so the
+      // prompt and the enforced gate cannot disagree: a child never holds more than the
+      // contract it was shown (unitAI-1pqtl.2).
       variables: {
-        resolved_tool_contract: formatResolvedToolContract(toolContract),
+        resolved_tool_contract: formatResolvedToolContract(effectiveToolContract),
       },
       // Reviewer diff context is EXECUTION-ONLY, so it enters through the hook rather than
       // the pure renderer — and it must land before the prompt hash, exactly as it does on
@@ -1056,6 +1301,35 @@ export class NativeActivationHost {
       },
     });
 
+    // Admission AFTER prompt rendering (unitAI-1pqtl.2 ordering): the effective contract is
+    // finalized before the prompt, and the prompt is rendered before admission, so
+    // `required_tools` validation sees discovered extension names instead of refusing them
+    // as "missing from resolved runtime contract". Fail-closed before any model turn and
+    // before any real session exists; the lease taken above is released via `reject()`.
+    //
+    // The validator stays injectable so COMPOSITION and ADMISSION can be exercised
+    // separately (XTRM-84 4c). The default is the real `validateBeforeRun`.
+    try {
+      this.admission(specialist, tier, effectiveToolContract);
+    } catch (error) {
+      return reject('preflight_failed', {
+        note: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    emit('activation_admitted', {
+      tier, access,
+      configured_model: configuredModel ?? null,
+      requested_model: requestedModel,
+      resolved_model: resolvedModel,
+      model_override: Boolean(request.modelOverride),
+      thinking_level: thinkingLevel ?? null,
+      thinking_override: request.thinkingOverride !== undefined,
+      workspace: workspace.worktreePath,
+      tools: effectiveToolContract.toolsList.join(','),
+      custom_tools: `${ASK_TOOL},${ESCALATE_TOOL}`,
+    });
+
     emit('activation_starting', { pi_session_id: null });
 
     // The ask/escalate tools are CUSTOM tools, admitted alongside the resolved allowlist
@@ -1086,7 +1360,7 @@ export class NativeActivationHost {
     // guard each frontend has to remember to call is optional enforcement; this one cannot
     // be skipped, because the frontend is not involved (unitAI-rrdnt.36.2).
     const guardedTools = createGuardedTools(sdk, {
-      toolNames: toolContract.toolsList,
+      toolNames: effectiveToolContract.toolsList,
       cwd: workspace.worktreePath,
       admit: toolName => admitToolCall({ toolName, workspace, activationId }),
     });
@@ -1105,39 +1379,11 @@ export class NativeActivationHost {
     }
 
     // Built ONCE, before any attempt: every session created below — the first, a
-    // fallback model, a retry — must see the same declared resources. `reload()` is
-    // explicit because createAgentSession only reloads a loader it constructed itself.
-    // The curated extension set the legacy CLI re-enables after `--no-extensions`
-    // (`resolveCuratedExtensionPaths`, shared with src/pi/session.ts so the two runtimes
-    // cannot drift), plus the definition's own declared extension sources, with the same
-    // same-identity de-duplication rule (unitAI-il2io). The in-process resource loader only
-    // accepts filesystem paths, so a non-local source is either resolved to its installed
-    // package directory (npm) or reported and skipped rather than forwarded as if it were a
-    // path. Resolved from the SAME `extensionSelection` the contract above was built from, so
-    // the contract and this loader path cannot disagree (unitAI-rx1bu).
-    const curatedExtensions = resolveCuratedExtensionPaths({
-      permissionLevel: tier,
-      resolvedToolContract: toolContract,
-    });
-    const declaredExtensions = extensionSelection.extensionSources;
-    const { local: declaredLocalExtensions, skipped: skippedDeclaredSources } =
-      resolveDeclaredExtensionSources(declaredExtensions);
-    for (const source of skippedDeclaredSources) {
-      process.stderr.write(
-        `[specialists] native activation: extension source '${source}' is not a filesystem path; ` +
-        'the in-process resource loader cannot load it, so it is not injected.\n',
-      );
-    }
-    const { kept: dynamicExtensions, dropped: droppedExtensions } = deduplicateExtensionSources(
-      curatedExtensions.dedupeAgainstDynamic,
-      declaredLocalExtensions,
-    );
-    for (const { dropped, keptAs } of droppedExtensions) {
-      process.stderr.write(
-        `[python-kernel] DEDUP: skipping duplicate extension source '${dropped}' (same as '${keptAs}'; kept '${keptAs}').\n`,
-      );
-    }
-
+    // fallback model, a retry — must see the same declared resources and the identical
+    // finalized allowlist. `reload()` is explicit because createAgentSession only reloads
+    // a loader it constructed itself. Extension paths reuse the discovery-time resolution
+    // above (`curatedExtensions` + `dynamicExtensions`), never re-resolved, so discovery,
+    // the real loader and the effective contract cannot disagree.
     const resourceLoader = createActivationResourceLoader(sdk, {
       cwd: workspace.worktreePath,
       skillPaths: specialist.specialist.skills?.paths ?? [],
@@ -1171,7 +1417,11 @@ export class NativeActivationHost {
       // measured at 50+ including bash, edit, write and powershell. Fail-open is worse than
       // the bug. Naming the two ask tools keeps admission fail-closed and widens nothing —
       // asking is not a workspace operation and neither tool can mutate anything.
-      tools: [...toolContract.toolsList, ASK_TOOL, ESCALATE_TOOL],
+      // Pinned to the FINALIZED effective allowlist (base + discovered): every real, retry
+      // and fallback session is built from these same options, so no attempt can exceed the
+      // contract the child was shown. The hard filter stays: `tools` is never omitted on a
+      // prompted session.
+      tools: [...effectiveToolContract.toolsList, ASK_TOOL, ESCALATE_TOOL],
       systemPrompt: systemPrompt.text,
     };
 
@@ -1183,7 +1433,7 @@ export class NativeActivationHost {
     // before this nothing noticed. The contract is the promise; the live session's active set
     // is the fact; a Specialist is never launched with a smaller surface than it was told it
     // had. Verified here rather than in the gate because the gate is not on this path.
-    const PROMISED_TOOLS = [...toolContract.toolsList];
+    const PROMISED_TOOLS = [...effectiveToolContract.toolsList];
     const missingPromisedTools = (candidate: PiAgentSessionLike): string[] => {
       const active = new Set(candidate.getActiveToolNames());
       return PROMISED_TOOLS.filter((tool) => !active.has(tool));
@@ -1268,7 +1518,7 @@ export class NativeActivationHost {
     // SPECIALISTS-42: a reduced tool surface is surfaced at admission, the same way the
     // build-staleness line is. Deduplicated because the same reason reaches warnings and
     // downgradeReasons through different paths, and a repeated line reads as two problems.
-    const toolContractNotes = [...new Set([...toolContract.warnings, ...toolContract.downgradeReasons])];
+    const toolContractNotes = [...new Set([...effectiveToolContract.warnings, ...effectiveToolContract.downgradeReasons])];
     const configNotes = legacyOnlyConfigNotes(specialist.specialist);
 
     const snapshot: ActivationSnapshot = {

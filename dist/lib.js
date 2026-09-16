@@ -7311,6 +7311,32 @@ function buildResolvedToolContract(input) {
     extensions
   };
 }
+function withDiscoveredExtensionTools(base, discovered) {
+  const isList = Array.isArray(discovered);
+  const pinned = isList ? discovered : discovered.pinned ?? [];
+  const refusedCollisions = isList ? [] : discovered.refusedCollisions ?? [];
+  const refusedProvenance = isList ? [] : discovered.refusedProvenance ?? [];
+  if (pinned.length === 0 && refusedCollisions.length === 0 && refusedProvenance.length === 0) {
+    return base;
+  }
+  const denied = new Set(base.deniedNativeTools);
+  const already = new Set(base.toolsList);
+  const safePinned = uniqueOrdered2(pinned).filter((name) => !denied.has(name) && !already.has(name));
+  const toolsList = uniqueOrdered2([...base.toolsList, ...safePinned]);
+  const extensionTools = uniqueOrdered2([...base.extensionTools, ...safePinned]);
+  const warnings = [
+    ...base.warnings,
+    ...uniqueOrdered2(refusedCollisions).map((name) => `refused extension tool '${name}': collides with a builtin tool name`),
+    ...uniqueOrdered2(refusedProvenance).map((name) => `refused extension tool '${name}': non-extension provenance`)
+  ];
+  return {
+    ...base,
+    toolsFlag: toolsList.join(","),
+    toolsList,
+    extensionTools,
+    warnings
+  };
+}
 function formatResolvedToolContract(contract) {
   const lines = [
     "## Resolved Tool Contract",
@@ -22653,6 +22679,115 @@ function resolveDeclaredExtensionSources(sources, env = defaultExtensionSourceRe
   }
   return { local, skipped };
 }
+var EXTENSION_CLASS_SOURCES = new Set(["cli", "extension", "package", "custom"]);
+var BUILTIN_TOOL_SOURCES = new Set(["builtin", "sdk"]);
+var EMPTY_DISCOVERY = {
+  pinned: [],
+  refusedCollisions: [],
+  refusedProvenance: [],
+  discoveredRaw: [],
+  builtinNames: []
+};
+function uniqueOrderedNames(values) {
+  const seen = new Set;
+  const ordered = [];
+  for (const value of values) {
+    if (seen.has(value))
+      continue;
+    seen.add(value);
+    ordered.push(value);
+  }
+  return ordered;
+}
+function provenanceOf(entry) {
+  return entry.sourceInfo?.source ?? entry.source ?? "";
+}
+async function enumerateBuiltinToolNames(input) {
+  const loader = new input.sdk.DefaultResourceLoader({
+    cwd: input.cwd,
+    agentDir: input.agentDir,
+    noSkills: true,
+    additionalSkillPaths: [],
+    noExtensions: true,
+    additionalExtensionPaths: [],
+    noContextFiles: true,
+    noPromptTemplates: true,
+    noThemes: true
+  });
+  await loader.reload();
+  const created = await input.sdk.createAgentSession({
+    resourceLoader: loader,
+    model: input.model,
+    cwd: input.cwd,
+    systemPrompt: "builtin-enumeration (never prompted)"
+  });
+  try {
+    const all = created.session.getAllTools?.() ?? [];
+    return uniqueOrderedNames(all.filter((entry) => BUILTIN_TOOL_SOURCES.has(provenanceOf(entry))).map((entry) => entry.name));
+  } finally {
+    try {
+      created.session.dispose();
+    } catch {}
+  }
+}
+async function discoverDynamicExtensionTools(input) {
+  if (input.dynamicExtensions.length === 0)
+    return EMPTY_DISCOVERY;
+  const builtinNames = await enumerateBuiltinToolNames({
+    sdk: input.sdk,
+    cwd: input.cwd,
+    agentDir: input.agentDir,
+    model: input.model
+  });
+  const builtinSet = new Set(builtinNames);
+  const loader = new input.sdk.DefaultResourceLoader({
+    cwd: input.cwd,
+    agentDir: input.sdk.getAgentDir(),
+    noSkills: true,
+    additionalSkillPaths: [],
+    noExtensions: true,
+    additionalExtensionPaths: [...input.dynamicExtensions],
+    noContextFiles: true,
+    noPromptTemplates: true,
+    noThemes: true
+  });
+  await loader.reload();
+  const created = await input.sdk.createAgentSession({
+    resourceLoader: loader,
+    model: input.model,
+    cwd: input.cwd,
+    noTools: "builtin",
+    systemPrompt: "extension-discovery (never prompted)"
+  });
+  try {
+    const discoveredRaw = uniqueOrderedNames(created.session.getActiveToolNames() ?? []);
+    if (discoveredRaw.length === 0) {
+      throw new Error(`extension discovery yielded no tools for ${input.dynamicExtensions.length} enabled source(s); ` + "a declared source that resolves to nothing is a refusal, not a skip");
+    }
+    const registry = created.session.getAllTools?.() ?? [];
+    const provenance = new Map(registry.map((entry) => [entry.name, provenanceOf(entry)]));
+    const pinned = [];
+    const refusedCollisions = [];
+    const refusedProvenance = [];
+    for (const name of discoveredRaw) {
+      if (builtinSet.has(name)) {
+        refusedCollisions.push(name);
+        continue;
+      }
+      const source = provenance.get(name) ?? "";
+      if (!EXTENSION_CLASS_SOURCES.has(source)) {
+        refusedProvenance.push(name);
+        continue;
+      }
+      pinned.push(name);
+    }
+    return { pinned, refusedCollisions, refusedProvenance, discoveredRaw, builtinNames };
+  } finally {
+    try {
+      created.session.dispose();
+    } catch {}
+  }
+}
 function resolveWorkspace(cwd) {
   return { repositoryRoot: cwd, worktreePath: cwd };
 }
@@ -22849,13 +22984,6 @@ class NativeActivationHost {
     if (!toolContract || toolContract.toolsList.length === 0) {
       return reject("empty_tool_contract", { tier });
     }
-    try {
-      this.admission(specialist, tier, toolContract);
-    } catch (error) {
-      return reject("preflight_failed", {
-        note: error instanceof Error ? error.message : String(error)
-      });
-    }
     const preScripts = specialist.specialist.skills?.scripts?.filter((s) => s.phase === "pre") ?? [];
     const preScriptResults = preScripts.map((script) => runScript(script.run ?? script.path, this.cwd));
     const requiredPreFailure = findRequiredPreScriptFailure(preScripts, preScriptResults);
@@ -22906,6 +23034,53 @@ class NativeActivationHost {
       });
     }
     const resolvedModel = modelCheck.resolvedModel ?? modelChain[modelIndex] ?? requestedModel;
+    const curatedExtensions = resolveCuratedExtensionPaths({
+      permissionLevel: tier,
+      resolvedToolContract: toolContract
+    });
+    const declaredExtensions = extensionSelection.extensionSources;
+    const { local: declaredLocalExtensions, skipped: skippedDeclaredSources } = resolveDeclaredExtensionSources(declaredExtensions);
+    for (const source of skippedDeclaredSources) {
+      process.stderr.write(`[specialists] native activation: extension source '${source}' is not a filesystem path; ` + `the in-process resource loader cannot load it, so it is not injected.
+`);
+    }
+    const { kept: dynamicExtensions, dropped: droppedExtensions } = deduplicateExtensionSources(curatedExtensions.dedupeAgainstDynamic, declaredLocalExtensions);
+    for (const { dropped, keptAs } of droppedExtensions) {
+      process.stderr.write(`[python-kernel] DEDUP: skipping duplicate extension source '${dropped}' (same as '${keptAs}'; kept '${keptAs}').
+`);
+    }
+    let discovery;
+    try {
+      discovery = await discoverDynamicExtensionTools({
+        sdk,
+        cwd: workspace.worktreePath,
+        agentDir: sdk.getAgentDir(),
+        dynamicExtensions,
+        model: modelCheck.model
+      });
+    } catch (error) {
+      return reject("extension_discovery_failed", {
+        note: error instanceof Error ? error.message : String(error)
+      });
+    }
+    const effectiveToolContract = withDiscoveredExtensionTools(toolContract, {
+      pinned: discovery.pinned,
+      refusedCollisions: discovery.refusedCollisions,
+      refusedProvenance: discovery.refusedProvenance
+    });
+    if (discovery.refusedCollisions.length > 0 || discovery.refusedProvenance.length > 0) {
+      emit("extension_tools_refused", {
+        refused_collisions: discovery.refusedCollisions.join(",") || null,
+        refused_provenance: discovery.refusedProvenance.join(",") || null,
+        pinned: discovery.pinned.join(",") || null
+      });
+    }
+    if (discovery.pinned.length > 0) {
+      emit("extension_tools_discovered", {
+        pinned: discovery.pinned.join(","),
+        sources: dynamicExtensions.join(",")
+      });
+    }
     if (access === "write") {
       try {
         acquire({ workspace, activationId, attemptId, specialist: request.specialist });
@@ -22956,19 +23131,6 @@ class NativeActivationHost {
       validation: stepContract.validation?.length ?? 0,
       source_issue_revision: stepContract.provenance.sourceIssueRevision ?? null
     });
-    emit("activation_admitted", {
-      tier,
-      access,
-      configured_model: configuredModel ?? null,
-      requested_model: requestedModel,
-      resolved_model: resolvedModel,
-      model_override: Boolean(request.modelOverride),
-      thinking_level: thinkingLevel ?? null,
-      thinking_override: request.thinkingOverride !== undefined,
-      workspace: workspace.worktreePath,
-      tools: toolContract.toolsList.join(","),
-      custom_tools: `${ASK_TOOL},${ESCALATE_TOOL}`
-    });
     const epicAncestors = workItems.epicAncestors(issueRef, request.epicContextDepth ?? 0);
     const completedBlockers = workItems.completedBlockers(issueRef, 1);
     const isReviewer = specialist.specialist.metadata.name === "reviewer";
@@ -22982,7 +23144,7 @@ class NativeActivationHost {
       completedBlockers: completedBlockers.map(workAncestorAsRecord),
       preScriptOutput,
       variables: {
-        resolved_tool_contract: formatResolvedToolContract(toolContract)
+        resolved_tool_contract: formatResolvedToolContract(effectiveToolContract)
       },
       ...isReviewer ? {
         appendExecutionContext: createReviewerDiffAppendHook((message) => process.stderr.write(`${message}
@@ -23035,6 +23197,26 @@ class NativeActivationHost {
         }
       }
     });
+    try {
+      this.admission(specialist, tier, effectiveToolContract);
+    } catch (error) {
+      return reject("preflight_failed", {
+        note: error instanceof Error ? error.message : String(error)
+      });
+    }
+    emit("activation_admitted", {
+      tier,
+      access,
+      configured_model: configuredModel ?? null,
+      requested_model: requestedModel,
+      resolved_model: resolvedModel,
+      model_override: Boolean(request.modelOverride),
+      thinking_level: thinkingLevel ?? null,
+      thinking_override: request.thinkingOverride !== undefined,
+      workspace: workspace.worktreePath,
+      tools: effectiveToolContract.toolsList.join(","),
+      custom_tools: `${ASK_TOOL},${ESCALATE_TOOL}`
+    });
     emit("activation_starting", { pi_session_id: null });
     const askTools = createAskTools(sdk, {
       transport: this.interactions,
@@ -23060,7 +23242,7 @@ class NativeActivationHost {
       }
     });
     const guardedTools = createGuardedTools(sdk, {
-      toolNames: toolContract.toolsList,
+      toolNames: effectiveToolContract.toolsList,
       cwd: workspace.worktreePath,
       admit: (toolName) => admitToolCall({ toolName, workspace, activationId })
     });
@@ -23072,21 +23254,6 @@ class NativeActivationHost {
       return reject("unguardable_mutating_tools", {
         note: `these tools mutate and cannot be fenced by the workspace lease on this runtime: ${guardedTools.unguardable.join(", ")}`
       });
-    }
-    const curatedExtensions = resolveCuratedExtensionPaths({
-      permissionLevel: tier,
-      resolvedToolContract: toolContract
-    });
-    const declaredExtensions = extensionSelection.extensionSources;
-    const { local: declaredLocalExtensions, skipped: skippedDeclaredSources } = resolveDeclaredExtensionSources(declaredExtensions);
-    for (const source of skippedDeclaredSources) {
-      process.stderr.write(`[specialists] native activation: extension source '${source}' is not a filesystem path; ` + `the in-process resource loader cannot load it, so it is not injected.
-`);
-    }
-    const { kept: dynamicExtensions, dropped: droppedExtensions } = deduplicateExtensionSources(curatedExtensions.dedupeAgainstDynamic, declaredLocalExtensions);
-    for (const { dropped, keptAs } of droppedExtensions) {
-      process.stderr.write(`[python-kernel] DEDUP: skipping duplicate extension source '${dropped}' (same as '${keptAs}'; kept '${keptAs}').
-`);
     }
     const resourceLoader = createActivationResourceLoader(sdk, {
       cwd: workspace.worktreePath,
@@ -23101,10 +23268,10 @@ class NativeActivationHost {
       model: modelCheck.model,
       ...thinkingLevel ? { thinkingLevel } : {},
       noTools: "builtin",
-      tools: [...toolContract.toolsList, ASK_TOOL, ESCALATE_TOOL],
+      tools: [...effectiveToolContract.toolsList, ASK_TOOL, ESCALATE_TOOL],
       systemPrompt: systemPrompt.text
     };
-    const PROMISED_TOOLS = [...toolContract.toolsList];
+    const PROMISED_TOOLS = [...effectiveToolContract.toolsList];
     const missingPromisedTools = (candidate) => {
       const active = new Set(candidate.getActiveToolNames());
       return PROMISED_TOOLS.filter((tool) => !active.has(tool));
@@ -23154,7 +23321,7 @@ class NativeActivationHost {
     const createSessionForModel = (model) => createVerifiedSession(model, { viaFallback: true });
     const purpose = purposeExcerptFromContract(view.contract);
     const startedAt = this.now();
-    const toolContractNotes = [...new Set([...toolContract.warnings, ...toolContract.downgradeReasons])];
+    const toolContractNotes = [...new Set([...effectiveToolContract.warnings, ...effectiveToolContract.downgradeReasons])];
     const configNotes = legacyOnlyConfigNotes(specialist.specialist);
     const snapshot = {
       activationId,

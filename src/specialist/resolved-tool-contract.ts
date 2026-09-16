@@ -124,6 +124,68 @@ export function buildResolvedToolContract(input: BuildResolvedToolContractInput)
   };
 }
 
+/**
+ * Runtime-discovered extension tools, already filtered by the host's discover-then-pin
+ * gate (unitAI-1pqtl.2).
+ *
+ * `pinned` are the names the discovery session proved are extension-class AND non-colliding;
+ * the refused lists are recorded as contract warnings so the rendered prompt names what was
+ * withheld and why. This helper is pure: it never touches pi, the filesystem, or a session.
+ * A denied native can never enter through here — any pinned name the base contract denies
+ * is dropped even if the caller missed it, so tier denial survives a shadowing extension.
+ */
+export interface DiscoveredExtensionMaterialization {
+  pinned?: readonly string[];
+  refusedCollisions?: readonly string[];
+  refusedProvenance?: readonly string[];
+}
+
+/**
+ * Materialize runtime-discovered names into an EFFECTIVE contract.
+ *
+ * Returns the base contract UNCHANGED (same reference) when there is nothing to pin and
+ * nothing refused, so a specialist with no enabled dynamic sources sees byte-identical
+ * options and contract. Otherwise returns a new contract with the pinned names appended to
+ * `toolsList`/`extensionTools`/`toolsFlag`; `nativeTools`, `deniedNativeTools` and the
+ * per-catalog `extensions` map are untouched because pinned names are never natives and
+ * never belong to a hand-maintained catalog (ToolCatalogName is a closed union).
+ */
+export function withDiscoveredExtensionTools(
+  base: ResolvedToolContract,
+  discovered: DiscoveredExtensionMaterialization | readonly string[],
+): ResolvedToolContract {
+  const isList = Array.isArray(discovered);
+  const pinned = isList ? (discovered as readonly string[]) : ((discovered as DiscoveredExtensionMaterialization).pinned ?? []);
+  const refusedCollisions = isList ? [] : ((discovered as DiscoveredExtensionMaterialization).refusedCollisions ?? []);
+  const refusedProvenance = isList ? [] : ((discovered as DiscoveredExtensionMaterialization).refusedProvenance ?? []);
+  if (pinned.length === 0 && refusedCollisions.length === 0 && refusedProvenance.length === 0) {
+    return base;
+  }
+  const denied = new Set(base.deniedNativeTools);
+  const already = new Set(base.toolsList);
+  // Defense in depth: even if the host's builtin-collision filter missed, a denied native
+  // name must never be pinned — it would defeat the tier's denial by shadowing.
+  const safePinned = uniqueOrdered(pinned).filter((name) => !denied.has(name) && !already.has(name));
+  const toolsList = uniqueOrdered([...base.toolsList, ...safePinned]);
+  const extensionTools = uniqueOrdered([...base.extensionTools, ...safePinned]);
+  const warnings = [
+    ...base.warnings,
+    ...uniqueOrdered(refusedCollisions).map(
+      (name) => `refused extension tool '${name}': collides with a builtin tool name`,
+    ),
+    ...uniqueOrdered(refusedProvenance).map(
+      (name) => `refused extension tool '${name}': non-extension provenance`,
+    ),
+  ];
+  return {
+    ...base,
+    toolsFlag: toolsList.join(','),
+    toolsList,
+    extensionTools,
+    warnings,
+  };
+}
+
 export function formatResolvedToolContract(contract: ResolvedToolContract): string {
   const lines = [
     '## Resolved Tool Contract',

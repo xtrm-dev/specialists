@@ -22,6 +22,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { loadPiSdk } from '../src/activation/pi-sdk.js';
 import { createGateModelRuntime, validateModelAvailable } from '../src/activation/model-gate.js';
+import { discoverDynamicExtensionTools, resolveNpmExtensionSource } from '../src/activation/native-host.js';
+import { withDiscoveredExtensionTools } from '../src/specialist/resolved-tool-contract.js';
 
 const GLOBAL_NODE_MODULES = '/home/dawid/.nvm/versions/node/v24.15.0/lib/node_modules';
 const AST_GREP_DIR = join(GLOBAL_NODE_MODULES, 'pi-ast-grep');
@@ -307,6 +309,121 @@ async function main(): Promise<void> {
       `write source=${String(writeSource)} probe_benign source=${String(benignSource)}`,
     );
     session.dispose();
+  }
+
+  console.log('\n=== HOST-PINNED INTEGRATION (unitAI-1pqtl.2: real sessions through the host\'s own option construction) ===');
+
+  // Q — real executor config: npm:pi-ast-grep + npm:pi-intercom resolved the way the host
+  // resolves them, discovered through the host's discovery step, pinned into a real session.
+  // Evidence must be activation (tool ACTIVE), never "the loader was handed the path".
+  {
+    const astGrep = resolveNpmExtensionSource('npm:pi-ast-grep');
+    const intercom = resolveNpmExtensionSource('npm:pi-intercom');
+    const dynamic = [astGrep, intercom].filter((p): p is string => Boolean(p));
+    console.log(`\nQ: host discovery over resolved executor sources: ${JSON.stringify(dynamic)}`);
+    if (dynamic.length === 0) {
+      check('Q host-pinned executor sources expose ast_grep+intercom', false, 'no npm sources resolved on this machine');
+    } else {
+      let discovery: Awaited<ReturnType<typeof discoverDynamicExtensionTools>> | undefined;
+      let discoveryError: string | undefined;
+      try {
+        discovery = await discoverDynamicExtensionTools({
+          sdk, cwd: process.cwd(), agentDir: sdk.getAgentDir(), dynamicExtensions: dynamic, model,
+        });
+      } catch (error) {
+        discoveryError = error instanceof Error ? error.message : String(error);
+      }
+      console.log(`   discovery pinned=${JSON.stringify(discovery?.pinned)} refusedCollisions=${JSON.stringify(discovery?.refusedCollisions)} refusedProvenance=${JSON.stringify(discovery?.refusedProvenance)} builtinSample=${JSON.stringify(discovery?.builtinNames.slice(0, 8))} err=${discoveryError ?? 'none'}`);
+      const base = [...READ_NATIVE, ...GITNEXUS_TOOLS];
+      const pinned = discovery?.pinned ?? [];
+      const q = await runSession('Q: real session pinned to base + host-discovered (executor config)', {
+        paths: dynamic, tools: [...base, ...pinned],
+      });
+      show(q, `host-pinned executor session; pinned=${JSON.stringify(pinned)}`);
+      const wantAst = dynamic.includes(AST_GREP_DIR) ? q.active.includes('ast_grep') : true;
+      const wantIntercom = dynamic.includes(INTERCOM_DIR) ? q.active.includes('intercom') : true;
+      check(
+        'Q host-pinned executor sources expose ast_grep+intercom',
+        Boolean(discovery) && wantAst && wantIntercom,
+        `pinned=${JSON.stringify(pinned)} active=${JSON.stringify(q.active)}`,
+      );
+    }
+  }
+
+  // R — the previously failing variant F, now through the host pin: local paths
+  // pi-gitnexus + pi-ast-grep go from ast_grep-absent to ast_grep-active.
+  {
+    const dynamic = [GITNEXUS_DIR, AST_GREP_DIR];
+    let discovery: Awaited<ReturnType<typeof discoverDynamicExtensionTools>> | undefined;
+    try {
+      discovery = await discoverDynamicExtensionTools({
+        sdk, cwd: process.cwd(), agentDir: sdk.getAgentDir(), dynamicExtensions: dynamic, model,
+      });
+    } catch (error) {
+      console.log(`   R discovery failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const base = [...READ_NATIVE, ...GITNEXUS_TOOLS];
+    const r = await runSession('R: variant-F paths through the host pin (was absent without it)', {
+      paths: dynamic, tools: [...base, ...(discovery?.pinned ?? [])],
+    });
+    show(r, `pinned=${JSON.stringify(discovery?.pinned)} (F without the pin left ast_grep absent)`);
+    check(
+      'R variant F goes from absent to active through the host pin',
+      Boolean(discovery?.pinned.includes('ast_grep')) && r.active.includes('ast_grep'),
+      `pinned=${JSON.stringify(discovery?.pinned)} active=${JSON.stringify(r.active)}`,
+    );
+  }
+
+  // S — control H through the same construction: no sources, no widening.
+  {
+    const s = await runSession('S: no sources through the host construction (must not widen)', {
+      paths: [], tools: ['read'],
+    });
+    show(s, `expect ["read"] only`);
+    check('S no-source control does not widen', JSON.stringify(s.active) === JSON.stringify(['read']), JSON.stringify(s.active));
+  }
+
+  // T — collision through the host gate: `write` stays refused, the benign name still pins.
+  // Uses the host's own materialization helper so the contract and the session agree.
+  {
+    let discovery: Awaited<ReturnType<typeof discoverDynamicExtensionTools>> | undefined;
+    try {
+      discovery = await discoverDynamicExtensionTools({
+        sdk, cwd: process.cwd(), agentDir: sdk.getAgentDir(), dynamicExtensions: [COLLISION_DIR], model,
+      });
+    } catch (error) {
+      console.log(`   T discovery failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    console.log(`   T discovery: pinned=${JSON.stringify(discovery?.pinned)} refused=${JSON.stringify(discovery?.refusedCollisions)}`);
+    const fakeBase = {
+      effectiveTier: 'READ_ONLY',
+      toolsFlag: 'read',
+      exposedExtensionSources: [],
+      toolsList: ['read'],
+      nativeTools: ['read'],
+      extensionTools: [],
+      deniedNativeTools: [],
+      deniedNativesMode: 'hard',
+      preferenceSignals: [],
+      downgradeReasons: [],
+      warnings: [],
+      extensions: {},
+    } as unknown as Parameters<typeof withDiscoveredExtensionTools>[0];
+    const effective = withDiscoveredExtensionTools(fakeBase, {
+      pinned: discovery?.pinned ?? [],
+      refusedCollisions: discovery?.refusedCollisions ?? [],
+      refusedProvenance: discovery?.refusedProvenance ?? [],
+    });
+    const t = await runSession('T: collision fixture through the host pin (write must stay refused)', {
+      paths: [COLLISION_DIR], tools: [...effective.toolsList, 'read'].filter((v, i, a) => a.indexOf(v) === i),
+    });
+    show(t, `effective tools=${JSON.stringify(effective.toolsList)} warnings=${JSON.stringify(effective.warnings)}`);
+    check(
+      'T collision stays refused through the host pin',
+      Boolean(discovery) && !(discovery?.pinned.includes('write')) && (discovery?.pinned.includes('probe_benign') ?? false)
+        && t.active.includes('probe_benign') && !t.active.includes('write'),
+      `pinned=${JSON.stringify(discovery?.pinned)} active=${JSON.stringify(t.active)}`,
+    );
   }
 
   console.log('\n=== VERDICT ===');

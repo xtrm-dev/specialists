@@ -75,6 +75,15 @@ export interface PiSdk {
     resolveModelScopeWithDiagnostics: (patterns: string[], modelRuntime: PiModelRuntimeLike) => Promise<PiModelScopeResult> | PiModelScopeResult;
     defineTool: (definition: Record<string, unknown>) => unknown;
 }
+/** One entry of pi's tool registry, as returned by `getAllTools()`. */
+export interface PiToolRegistryEntryLike {
+    name: string;
+    sourceInfo?: {
+        source?: string;
+    };
+    source?: string;
+    [key: string]: unknown;
+}
 /** Minimal structural view of a live Pi `AgentSession`. */
 export interface PiAgentSessionLike {
     readonly sessionId: string;
@@ -89,6 +98,9 @@ export interface PiAgentSessionLike {
     getActiveToolNames(): string[];
     setActiveToolsByName(names: string[]): void;
     waitForIdle(): Promise<void>;
+    /** Full registry with per-tool provenance. Present on real pi sessions; absent on older doubles. */
+    getAllTools?: () => PiToolRegistryEntryLike[];
+    getToolDefinition?: (name: string) => unknown;
 }
 /**
  * Session events the host observes.

@@ -37,6 +37,32 @@ interface BuildResolvedToolContractInput extends ResolverInput {
     extensionSources?: readonly string[];
 }
 export declare function buildResolvedToolContract(input: BuildResolvedToolContractInput): ResolvedToolContract;
+/**
+ * Runtime-discovered extension tools, already filtered by the host's discover-then-pin
+ * gate (unitAI-1pqtl.2).
+ *
+ * `pinned` are the names the discovery session proved are extension-class AND non-colliding;
+ * the refused lists are recorded as contract warnings so the rendered prompt names what was
+ * withheld and why. This helper is pure: it never touches pi, the filesystem, or a session.
+ * A denied native can never enter through here — any pinned name the base contract denies
+ * is dropped even if the caller missed it, so tier denial survives a shadowing extension.
+ */
+export interface DiscoveredExtensionMaterialization {
+    pinned?: readonly string[];
+    refusedCollisions?: readonly string[];
+    refusedProvenance?: readonly string[];
+}
+/**
+ * Materialize runtime-discovered names into an EFFECTIVE contract.
+ *
+ * Returns the base contract UNCHANGED (same reference) when there is nothing to pin and
+ * nothing refused, so a specialist with no enabled dynamic sources sees byte-identical
+ * options and contract. Otherwise returns a new contract with the pinned names appended to
+ * `toolsList`/`extensionTools`/`toolsFlag`; `nativeTools`, `deniedNativeTools` and the
+ * per-catalog `extensions` map are untouched because pinned names are never natives and
+ * never belong to a hand-maintained catalog (ToolCatalogName is a closed union).
+ */
+export declare function withDiscoveredExtensionTools(base: ResolvedToolContract, discovered: DiscoveredExtensionMaterialization | readonly string[]): ResolvedToolContract;
 export declare function formatResolvedToolContract(contract: ResolvedToolContract): string;
 export {};
 //# sourceMappingURL=resolved-tool-contract.d.ts.map

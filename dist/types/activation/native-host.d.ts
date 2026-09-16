@@ -83,6 +83,79 @@ export declare function resolveDeclaredExtensionSources(sources: readonly string
     skipped: string[];
 };
 /**
+ * Sources whose provenance the discover-then-pin gate trusts (unitAI-1pqtl.2).
+ *
+ * The same trust rule the legacy CLI policy extension uses
+ * (`config/pi-extensions/extension-tool-policy/index.mjs`): a tool whose registry entry
+ * reports one of these sources was registered by extension code the operator enabled, not
+ * by pi itself. Provenance ALONE does not prevent the collision — a shadowing name also
+ * reports `cli` — so the builtin-collision refusal below is required as well.
+ */
+export declare const EXTENSION_CLASS_SOURCES: ReadonlySet<string>;
+/** Registry sources that mark a tool as pi's own builtin, never pinnable. */
+export declare const BUILTIN_TOOL_SOURCES: ReadonlySet<string>;
+/** An `npm:` source that was declared enabled but resolved to nothing. Refused, not skipped. */
+export declare function unresolvableNpmSources(skipped: readonly string[]): string[];
+/** The discover-then-pin verdict for one activation's dynamic sources. */
+export interface DynamicExtensionDiscovery {
+    /** Names safe to pin: extension-class provenance and no builtin collision. */
+    pinned: string[];
+    /** Discovered names refused because they collide with a builtin name. */
+    refusedCollisions: string[];
+    /** Discovered names refused because their provenance is not extension-class. */
+    refusedProvenance: string[];
+    /** Raw active names the discovery session enumerated (before filtering). */
+    discoveredRaw: string[];
+    /** Builtin names enumerated from a session with NO dynamic sources. */
+    builtinNames: string[];
+}
+/**
+ * Enumerate pi's builtin tool names DYNAMICALLY, per pi version (unitAI-1pqtl.2).
+ *
+ * From a fenced session with NO dynamic sources via `getAllTools()` filtered to
+ * `sourceInfo.source` in `{builtin, sdk}`. Uses `getAllTools()`, not the active set:
+ * the default-active set enumerated only `bash/edit/read/write` while `getAllTools()`
+ * also lists platform-gated names such as `powershell`. Never a static list (unitAI-34pyf
+ * rejected that pattern for drift).
+ *
+ * A session without `getAllTools` (older test doubles) yields an empty set: the caller
+ * then refuses every discovered name on provenance instead, which is still fail-closed
+ * (no widening) and keeps the no-dynamic-sources path byte-identical.
+ */
+export declare function enumerateBuiltinToolNames(input: {
+    sdk: PiSdk;
+    cwd: string;
+    agentDir: string;
+    model: unknown;
+}): Promise<string[]>;
+/**
+ * Discover-then-pin enumeration (unitAI-1pqtl.2).
+ *
+ * Creates a fenced, never-prompted discovery session containing ONLY the resolved,
+ * deduplicated, explicitly-enabled dynamic sources — no skills, no curated extensions, no
+ * ambient discovery, no `customTools`; `noTools: 'builtin'`; `tools` OMITTED — enumerates
+ * `getActiveToolNames()`, and splits the names into pinnable vs refused:
+ * `pin-able = discovered MINUS builtin names`, with positive extension-class provenance
+ * required for every pinned name. Both checks are required: a shadowing `write` also
+ * reports `cli`, so provenance alone does not prevent the collision.
+ *
+ * Returns an empty verdict WITHOUT creating any session when there are no dynamic sources,
+ * so existing behaviour is byte-identical for that path. Otherwise creates exactly one
+ * builtin-enumeration session plus one discovery session, both disposed in `finally`.
+ * Never prompted. No caching.
+ *
+ * Throws on discovery failure (including a silent-empty set: a non-existent extension path
+ * yields an EMPTY set with NO error because `loader.reload()` does not throw). The caller
+ * converts that into a fail-closed refusal before any model turn.
+ */
+export declare function discoverDynamicExtensionTools(input: {
+    sdk: PiSdk;
+    cwd: string;
+    agentDir: string;
+    dynamicExtensions: readonly string[];
+    model: unknown;
+}): Promise<DynamicExtensionDiscovery>;
+/**
  * The activation's `cwd` and `agentDir` feed pi's resource loader, which is the ONLY
  * seam through which skills, extensions, prompt templates, themes and context files
  * reach an AgentSession (pi 0.85.1 has no `skills` field on `CreateAgentSessionOptions`).
