@@ -15,14 +15,9 @@ import {
   type ReconstructedJobNode,
   type ReconstructedLineage,
 } from './runtime-origin-reconstruct.js';
-import {
-  summarizeNativeActivations,
-  type NativeActivationSummary,
-} from './native-activation-summary.js';
 import type {
   ForensicEventRecord,
   ListForensicEventsFilters,
-  ListNativeActivationIdsFilters,
   ObservabilitySqliteClient,
 } from './observability-sqlite.js';
 import type { SupervisorStatus } from './status-contract.js';
@@ -37,11 +32,6 @@ const DEFAULT_FLEET_JOBS = 100;
 export interface ObservabilityReadSource {
   readForensicEvents(filters?: ListForensicEventsFilters): ForensicEventRecord[];
   listStatuses(): SupervisorStatus[];
-  listNativeActivationIds(filters?: ListNativeActivationIdsFilters): string[];
-  readForensicEventsForActivations(
-    jobIds: readonly string[],
-    filters?: { sinceMs?: number },
-  ): ForensicEventRecord[];
   readResult(jobId: string): string | null;
 }
 
@@ -97,13 +87,14 @@ export interface FleetNode {
   /** Persisted/last-known state. This is not a claim that a host is currently live. */
   state: string;
   attention: FleetAttention;
+  /** Native activation id-space (`act:`); useful to label last-known liveness semantics. */
+  native: boolean;
   startedAtMs?: number;
   lastEventAtMs?: number;
   parentJobId?: string;
   children: string[];
   attachment?: RuntimeAttachment;
   lineage?: ReconstructedJobNode;
-  native?: NativeActivationSummary;
 }
 
 export interface FleetSnapshot {
@@ -158,6 +149,7 @@ export function parseForensicRecord(record: ForensicEventRecord): ParsedForensic
     if (typeof event.event_family !== 'string' || typeof event.event_name !== 'string') return null;
     if (!event.correlation || typeof event.correlation !== 'object') return null;
     if (!event.resource || typeof event.resource !== 'object') return null;
+    if (!event.body || typeof event.body !== 'object') return null;
     if (!event.redaction || typeof event.redaction !== 'object') return null;
     return { record, event };
   } catch {
@@ -220,9 +212,9 @@ export function readForensicWindow(
 }
 
 /**
- * Build the persisted mixed fleet. Legacy/tmux and native/Pi activations both
- * live in specialist_jobs, while native forensic summaries refine `act:` state.
- * Lineage is reconstructed only from persisted `job.started` events.
+ * Build a bounded mixed Fleet from persisted status rows plus `job.started`
+ * lineage. Do not read complete event history here: Fleet is refreshable and
+ * must stay proportional to job count, not to historical tool/turn volume.
  */
 export function readFleetSnapshot(
   source: ObservabilityReadSource,
@@ -243,61 +235,30 @@ export function readFleetSnapshot(
     order: 'desc',
   });
   const parsedLineage = parseForensicRecords(lineageRecords);
-  const lineageEvents = parsedLineage.parsed.map(({ event }) => event);
-  const lineage = reconstructLineage(lineageEvents);
-
-  const nativeIds = source.listNativeActivationIds({
-    limit: Math.min(100, limit),
-    ...(options.sinceMs !== undefined ? { sinceMs: options.sinceMs } : {}),
-  });
-  const nativeRows = source.readForensicEventsForActivations(
-    nativeIds,
-    options.sinceMs !== undefined ? { sinceMs: options.sinceMs } : {},
-  );
-  const nativeById = new Map(
-    summarizeNativeActivations(nativeRows).map((summary) => [summary.activation_id, summary] as const),
-  );
+  const lineage = reconstructLineage(parsedLineage.parsed.map(({ event }) => event));
 
   const byId = new Map<string, FleetNode>();
   for (const status of statuses) {
     const lineageNode = lineage.get(status.id);
-    const native = nativeById.get(status.id);
-    const state = native?.state ?? status.status;
+    const native = status.id.startsWith('act:');
+    // Native persisted "running"/"starting" is last-known mid-flight state,
+    // not a live-host guarantee after restart. Normalize it to `active` so a
+    // TUI never manufactures current liveness from stale evidence.
+    const state = native && (status.status === 'running' || status.status === 'starting')
+      ? 'active'
+      : status.status;
     const node: FleetNode = {
       jobId: status.id,
       specialist: status.specialist,
       ...(status.bead_id ? { beadId: status.bead_id } : {}),
       state,
       attention: attentionFor(state),
-      startedAtMs: status.started_at_ms,
-      lastEventAtMs: native?.last_event_at_ms ?? status.last_event_at_ms ?? status.started_at_ms,
-      ...(lineageNode?.parent_job_id ? { parentJobId: lineageNode.parent_job_id } : {}),
-      children: [],
-      ...(lineageNode ? { lineage: lineageNode } : {}),
-      ...(native ? { native } : {}),
-      ...attachmentProjection(lineageNode),
-    };
-    byId.set(node.jobId, node);
-  }
-
-  // A native activation may have forensic evidence but no readable status row
-  // (for example historical migration data). Keep it inspectable, but label the
-  // state as last-known and never manufacture liveness.
-  for (const native of nativeById.values()) {
-    if (byId.has(native.activation_id)) continue;
-    const lineageNode = lineage.get(native.activation_id);
-    const node: FleetNode = {
-      jobId: native.activation_id,
-      specialist: native.specialist,
-      ...(native.bead_id ? { beadId: native.bead_id } : {}),
-      state: native.state,
-      attention: attentionFor(native.state),
-      startedAtMs: native.first_event_at_ms,
-      lastEventAtMs: native.last_event_at_ms,
-      ...(lineageNode?.parent_job_id ? { parentJobId: lineageNode.parent_job_id } : {}),
-      children: [],
-      ...(lineageNode ? { lineage: lineageNode } : {}),
       native,
+      startedAtMs: status.started_at_ms,
+      lastEventAtMs: status.last_event_at_ms ?? status.started_at_ms,
+      ...(lineageNode?.parent_job_id ? { parentJobId: lineageNode.parent_job_id } : {}),
+      children: [],
+      ...(lineageNode ? { lineage: lineageNode } : {}),
       ...attachmentProjection(lineageNode),
     };
     byId.set(node.jobId, node);
