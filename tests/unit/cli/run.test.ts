@@ -1200,6 +1200,7 @@ describe('run CLI', () => {
       process.cwd(),
       expect.stringContaining('"$job_id" --follow'),
       { SPECIALISTS_BG_JOB_ID_PATH: expect.stringContaining('.bg-job-id-sp-code-review-a1b2c3') },
+      {},
     );
     expect(createTmuxSessionSpy.mock.calls[0]?.[2]).toContain(`${process.execPath} /repo/src/index.ts 'run' 'code-review' '--prompt' 'he'\\''llo'`);
     expect(detachedSpawnSpy).not.toHaveBeenCalled();
