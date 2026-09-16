@@ -139,7 +139,12 @@ than restating the landing report above. No extension behaviour was changed whil
 ## 1. Authority
 
 `git fetch origin --prune` returned no new objects: **`origin/master` has not advanced** since the
-last external verification.
+last external verification. `4dbc2261` is therefore the verified baseline.
+
+This section's own two commits are documentation-only and move master past that SHA. They touch
+`.xtrm/reports/`, `scripts/` and `CHANGELOG.md`; they change no file under `src/` and rebuild no
+`dist/`. Any later master SHA whose only difference from `4dbc2261` is those commits is still
+covered by the verification below, which was measured at `4dbc2261`.
 
 | Ref | SHA |
 |---|---|
