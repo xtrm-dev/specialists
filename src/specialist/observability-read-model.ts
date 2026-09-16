@@ -180,25 +180,45 @@ export function parseForensicRecords(records: readonly ForensicEventRecord[]): {
  * gap-free for normal monotonic event timestamps and gives every consumer one
  * cursor contract. A future storage-level cursor can replace the query without
  * changing callers.
+ *
+ * Default LOG hides high-volume tool/turn/model-call rows. To avoid starving
+ * meaningful rows behind a noisy tail, the reader widens the persisted window
+ * geometrically until it has enough visible rows or reaches the hard bound.
  */
 export function readForensicWindow(
   source: ObservabilityReadSource,
   options: ReadForensicWindowOptions,
 ): ForensicWindow {
   const limit = clamp(options.limit ?? DEFAULT_CHRONOLOGY_LIMIT, 1, MAX_CHRONOLOGY_LIMIT);
-  const readAhead = Math.min(MAX_CHRONOLOGY_LIMIT, Math.max(limit + 1, limit * MAX_READ_AHEAD_FACTOR));
-  const filters: ListForensicEventsFilters = {
-    jobId: options.jobId,
-    limit: readAhead,
-    order: options.after ? 'asc' : 'desc',
-    ...(options.after ? { sinceMs: options.after.t } : {}),
-  };
-  const raw = source.readForensicEvents(filters);
-  const { parsed, invalidRecords } = parseForensicRecords(raw);
-  const fresh = options.after
-    ? parsed.filter((entry) => compareCursor(cursorOf(entry), options.after!) > 0)
-    : parsed;
-  const visible = options.allEvents ? fresh : fresh.filter(({ event }) => !isDefaultForensicNoise(event));
+  let readAhead = options.allEvents
+    ? Math.min(MAX_CHRONOLOGY_LIMIT, limit + 1)
+    : Math.min(MAX_CHRONOLOGY_LIMIT, Math.max(limit + 1, limit * MAX_READ_AHEAD_FACTOR));
+  let raw: ForensicEventRecord[] = [];
+  let parsed: ParsedForensicRecord[] = [];
+  let invalidRecords = 0;
+  let visible: ParsedForensicRecord[] = [];
+
+  while (true) {
+    const filters: ListForensicEventsFilters = {
+      jobId: options.jobId,
+      limit: readAhead,
+      order: options.after ? 'asc' : 'desc',
+      ...(options.after ? { sinceMs: options.after.t } : {}),
+    };
+    raw = source.readForensicEvents(filters);
+    const parsedResult = parseForensicRecords(raw);
+    parsed = parsedResult.parsed;
+    invalidRecords = parsedResult.invalidRecords;
+    const fresh = options.after
+      ? parsed.filter((entry) => compareCursor(cursorOf(entry), options.after!) > 0)
+      : parsed;
+    visible = options.allEvents ? fresh : fresh.filter(({ event }) => !isDefaultForensicNoise(event));
+
+    const storageExhausted = raw.length < readAhead;
+    if (visible.length >= limit || storageExhausted || readAhead >= MAX_CHRONOLOGY_LIMIT) break;
+    readAhead = Math.min(MAX_CHRONOLOGY_LIMIT, readAhead * 2);
+  }
+
   const page = options.after ? visible.slice(0, limit) : visible.slice(-limit);
   const last = page[page.length - 1];
 
