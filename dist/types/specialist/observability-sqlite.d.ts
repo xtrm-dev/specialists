@@ -18,7 +18,7 @@ type BunDb = any;
 import type { TimelineEvent, TimelineEventTool } from './timeline-events.js';
 import { type ForensicEvent } from './forensic-events.js';
 import type { BranchIntegrationEvent } from './branch-integration-events.js';
-import type { SupervisorStatus } from './supervisor.js';
+import type { SupervisorStatus } from './status-contract.js';
 import type { EpicChainRecord, EpicRunRecord } from './epic-lifecycle.js';
 import type { PersistedChainIdentity } from './chain-identity.js';
 export declare function parseJournalMode(mode: string | null | undefined): string | null;
@@ -112,6 +112,7 @@ export interface ForensicEventRecord {
 }
 export interface ListForensicEventsFilters {
     jobId?: string;
+    jobIdPrefix?: string;
     sinceMs?: number;
     eventFamily?: string;
     eventName?: string;
