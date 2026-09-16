@@ -251,3 +251,122 @@ describe('result CLI', () => {
     expect(exitSpy).toHaveBeenCalledWith(1);
   });
 });
+
+describe('result CLI identity grammar (XTRM-93 N2A)', () => {
+  const originalArgv = process.argv;
+
+  afterEach(() => {
+    process.argv = originalArgv;
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  async function loadParse(): Promise<typeof import('../../../src/cli/result.js')> {
+    return import('../../../src/cli/result.js');
+  }
+
+  function mockExit(): { errors: string[]; exitSpy: ReturnType<typeof vi.spyOn> } {
+    const errors: string[] = [];
+    vi.spyOn(console, 'error').mockImplementation((msg?: unknown) => {
+      errors.push(String(msg ?? ''));
+    });
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      throw new Error(`exit:${code}`);
+    }) as never);
+    return { errors, exitSpy };
+  }
+
+  it('00270d legacy 6-hex -> jobId preserved', async () => {
+    const { parseArgs } = await loadParse();
+    const args = parseArgs(['00270d']);
+    expect(args.jobId).toBe('00270d');
+    expect(args.nodeId).toBeUndefined();
+    expect(args.memberKey).toBeUndefined();
+  });
+
+  it('legacy uuid -> jobId preserved', async () => {
+    const { parseArgs } = await loadParse();
+    const args = parseArgs(['0007c574-26ba-4817-8bbb-b2338aa7bdfb']);
+    expect(args.jobId).toBe('0007c574-26ba-4817-8bbb-b2338aa7bdfb');
+    expect(args.nodeId).toBeUndefined();
+    expect(args.memberKey).toBeUndefined();
+  });
+
+  it('node-1:some-member legacy node:member -> split preserved', async () => {
+    const { parseArgs } = await loadParse();
+    const args = parseArgs(['node-1:some-member']);
+    expect(args.jobId).toBeUndefined();
+    expect(args.nodeId).toBe('node-1');
+    expect(args.memberKey).toBe('some-member');
+  });
+
+  it('act:0293a2bc-f48 native activation -> jobId preserved, NOT split', async () => {
+    const { parseArgs } = await loadParse();
+    const args = parseArgs(['act:0293a2bc-f48']);
+    expect(args.jobId).toBe('act:0293a2bc-f48');
+    expect(args.nodeId).toBeUndefined();
+    expect(args.memberKey).toBeUndefined();
+  });
+
+  it('att:0293a2bc-f48:1 native attempt -> jobId preserved, NOT split', async () => {
+    const { parseArgs } = await loadParse();
+    const args = parseArgs(['att:0293a2bc-f48:1']);
+    expect(args.jobId).toBe('att:0293a2bc-f48:1');
+    expect(args.nodeId).toBeUndefined();
+    expect(args.memberKey).toBeUndefined();
+  });
+
+  it('att attempt maps to its activation for lookup', async () => {
+    const { resolveNativeAttemptToActivationId } = await loadParse();
+    expect(resolveNativeAttemptToActivationId('att:0293a2bc-f48:1')).toBe('act:0293a2bc-f48');
+    expect(resolveNativeAttemptToActivationId('att:758931b7-9ce:1')).toBe('act:758931b7-9ce');
+  });
+
+  it('act: malformed -> explicit error', async () => {
+    const { parseArgs } = await loadParse();
+    const { errors, exitSpy } = mockExit();
+    expect(() => parseArgs(['act:'])).toThrow('exit:1');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(errors.join('\n')).toContain("invalid activation id 'act:'");
+  });
+
+  it('att:foo malformed -> explicit error', async () => {
+    const { parseArgs } = await loadParse();
+    const { errors, exitSpy } = mockExit();
+    expect(() => parseArgs(['att:foo'])).toThrow('exit:1');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(errors.join('\n')).toContain("invalid attempt id 'att:foo'");
+  });
+
+  it('att::1 malformed -> explicit error', async () => {
+    const { parseArgs } = await loadParse();
+    const { errors, exitSpy } = mockExit();
+    expect(() => parseArgs(['att::1'])).toThrow('exit:1');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(errors.join('\n')).toContain("invalid attempt id 'att::1'");
+  });
+
+  it(':member empty node ref -> existing error path', async () => {
+    const { parseArgs } = await loadParse();
+    const { errors, exitSpy } = mockExit();
+    expect(() => parseArgs([':member'])).toThrow('exit:1');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(errors.join('\n')).toContain('node ref cannot be empty');
+  });
+
+  it('node-1: empty member key -> existing error path', async () => {
+    const { parseArgs } = await loadParse();
+    const { errors, exitSpy } = mockExit();
+    expect(() => parseArgs(['node-1:'])).toThrow('exit:1');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(errors.join('\n')).toContain('member key cannot be empty');
+  });
+
+  it('--node/--member explicit flags are untouched by native prefix rule', async () => {
+    const { parseArgs } = await loadParse();
+    const args = parseArgs(['--node', 'node-1', '--member', 'some-member']);
+    expect(args.jobId).toBeUndefined();
+    expect(args.nodeId).toBe('node-1');
+    expect(args.memberKey).toBe('some-member');
+  });
+});

@@ -55,7 +55,37 @@ interface ResultArgs {
   timeout?: number; // seconds; undefined = no timeout
 }
 
-function parseArgs(argv: string[]): ResultArgs {
+// Identity grammar for `sp result <ref>` (XTRM-93 N2A):
+// - legacy job id: no colon (e.g. 6-hex, uuid) -> jobId preserved.
+// - native activation: `act:<core>` where <core> is non-empty with no colon -> jobId preserved, NOT split.
+// - native attempt: `att:<core>:<n>` where <core> is non-empty with no colon and <n> is digits
+//   -> jobId preserved, later mapped to `act:<core>` for storage lookup.
+// - legacy node:member: `<node-ref>:<member>` where the ref does NOT start with `act:`/`att:`
+//   -> split on the first colon (existing behaviour).
+// - any other ref starting with `act:`/`att:` is malformed -> explicit error, never a node lookup.
+// Rationale: native ids deliberately contain colons (minted in src/activation/native-host.ts as
+// `act:${uuid.slice(0,12)}` / `att:${activationId.slice(4)}:1`, retries only bump `:n` via
+// nextAttemptId in src/activation/registry.ts); the measured store has no legacy job_id and no
+// node_id containing a colon, so reserving `act:`/`att:` preserves every legacy ref.
+export function isNativeActivationId(ref: string): boolean {
+  return /^act:[^:]+$/.test(ref);
+}
+
+export function isNativeAttemptId(ref: string): boolean {
+  return /^att:[^:]+:\d+$/.test(ref);
+}
+
+function isNativePrefixRef(ref: string): boolean {
+  return ref.startsWith('act:') || ref.startsWith('att:');
+}
+
+export function resolveNativeAttemptToActivationId(attemptId: string): string {
+  const coreWithSuffix = attemptId.slice('att:'.length);
+  const separatorIndex = coreWithSuffix.lastIndexOf(':');
+  return `act:${coreWithSuffix.slice(0, separatorIndex)}`;
+}
+
+export function parseArgs(argv: string[]): ResultArgs {
   let jobId: string | undefined;
   let nodeId: string | undefined;
   let memberKey: string | undefined;
@@ -92,10 +122,22 @@ function parseArgs(argv: string[]): ResultArgs {
   }
 
   if (jobId && jobId.includes(':') && !nodeId && !memberKey) {
-    const separatorIndex = jobId.indexOf(':');
-    nodeId = jobId.slice(0, separatorIndex);
-    memberKey = jobId.slice(separatorIndex + 1);
-    jobId = undefined;
+    if (isNativePrefixRef(jobId)) {
+      if (isNativeActivationId(jobId) || isNativeAttemptId(jobId)) {
+        // Native identity: preserve intact for storage lookup (attempt maps to its activation later).
+      } else if (jobId.startsWith('act:')) {
+        console.error(`Error: invalid activation id '${jobId}': expected 'act:<id>'`);
+        process.exit(1);
+      } else {
+        console.error(`Error: invalid attempt id '${jobId}': expected 'att:<id>:<n>'`);
+        process.exit(1);
+      }
+    } else {
+      const separatorIndex = jobId.indexOf(':');
+      nodeId = jobId.slice(0, separatorIndex);
+      memberKey = jobId.slice(separatorIndex + 1);
+      jobId = undefined;
+    }
   }
 
   if (nodeId !== undefined && nodeId.length === 0) {
@@ -340,7 +382,11 @@ export async function run(): Promise<void> {
 
   try {
     const jobId = (() => {
-      if (args.jobId) return args.jobId;
+      if (args.jobId) {
+        // Native attempts share their activation's storage row (`att:<core>:<n>` -> `act:<core>`).
+        if (isNativeAttemptId(args.jobId)) return resolveNativeAttemptToActivationId(args.jobId);
+        return args.jobId;
+      }
       if (!sqliteClient || !args.memberKey) {
         throw new Error('Observability SQLite DB is unavailable. Run: specialists db setup');
       }
