@@ -1083,8 +1083,8 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     expect(lines).toHaveLength(3); // header + the entry's two lines
     expect(plain(lines[0])).toBe('╰─ SPECIALISTS  1 running');
     // Line 1: glyph, bold name, dim work id, italic-dim purpose.
-    expect(plain(lines[1])).toBe('    ◐ researcher  ISSUE-92  inspect native wake transport');
-    expect(lines[1]).toContain('\x1b[1mresearcher\x1b[22m');
+    expect(plain(lines[1])).toBe('    ◐ researcher:aaaa  ISSUE-92  inspect native wake transport');
+    expect(lines[1]).toContain('\x1b[1mresearcher:aaaa\x1b[22m');
     expect(lines[1]).toContain('\x1b[2mISSUE-92\x1b[22m');
     expect(lines[1]).toContain('\x1b[3minspect native wake transport\x1b[23m');
     // Line 2: model · thinking, then elapsed • turns • tokens.
@@ -1138,7 +1138,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     expect(mod.formatSpendShort({ input_tokens: 0, output_tokens: 0 })).toBe('');
     for (const view of [base, { ...base, token_usage: { input_tokens: 0, output_tokens: 0 } }]) {
       const lines = mod.renderFleetRowLines(view, [], 0); // frame 0 = ◐
-      expect(plain(lines.join('\n'))).toBe('    ◐ explorer  bd-1\n       m  • 41s');
+      expect(plain(lines.join('\n'))).toBe('    ◐ explorer:x  bd-1\n       m  • 41s');
       expect(lines.join('\n')).not.toContain('spent');
       expect(lines.join('\n')).not.toContain('tokens');
     }
@@ -1154,7 +1154,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
       last_activity_at: SPIN_CLOCK,
     }, [], SPIN_CLOCK);
     expect(plain(lines[1])).toBe('       gpt-5.6-sol · high  • 47s • 4t • 2.1k');
-    expect(plain(lines[0])).toBe('    ◐ researcher  ISSUE-92');
+    expect(plain(lines[0])).toBe('    ◐ researcher:x  ISSUE-92');
     expect(lines.join('\n')).not.toContain('working');
     expect(lines.join('\n')).not.toContain('spent');
   });
@@ -1173,27 +1173,27 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     const glyph = (view, nowMs, asks = []) => plain(mod.renderFleetRowLines(view, asks, nowMs)[0]);
     // Deterministic: the frame is a pure function of the injected clock.
     expect(glyph(base, SPIN_CLOCK)).toBe(glyph(base, SPIN_CLOCK));
-    expect(glyph(base, SPIN_CLOCK)).toBe('    ◐ explorer  bd-1');
-    expect(glyph(base, SPIN_CLOCK + 220)).toBe('    ◓ explorer  bd-1');
-    expect(glyph(base, SPIN_CLOCK + 440)).toBe('    ◑ explorer  bd-1');
-    expect(glyph(base, SPIN_CLOCK + 660)).toBe('    ◒ explorer  bd-1');
-    expect(glyph(base, SPIN_CLOCK + 880)).toBe('    ◐ explorer  bd-1');
+    expect(glyph(base, SPIN_CLOCK)).toBe('    ◐ explorer:x  bd-1');
+    expect(glyph(base, SPIN_CLOCK + 220)).toBe('    ◓ explorer:x  bd-1');
+    expect(glyph(base, SPIN_CLOCK + 440)).toBe('    ◑ explorer:x  bd-1');
+    expect(glyph(base, SPIN_CLOCK + 660)).toBe('    ◒ explorer:x  bd-1');
+    expect(glyph(base, SPIN_CLOCK + 880)).toBe('    ◐ explorer:x  bd-1');
     expect(mod.renderFleetRowLines(base, [], SPIN_CLOCK).join('\n')).not.toContain('working');
     // Running but quiet past the threshold: static marker, idle duration in the slot.
     const idle = mod.renderFleetRowLines({ ...base, elapsed_s: 120 }, [], SPIN_CLOCK + 42_000);
-    expect(plain(idle[0])).toBe('    ● explorer  bd-1');
+    expect(plain(idle[0])).toBe('    ● explorer:x  bd-1');
     expect(plain(idle[1])).toBe('       m  • idle 42s');
     // Terminal states: one glyph, final metrics still visible.
     const settled = mod.renderFleetRowLines({ ...base, state: 'settled', elapsed_s: 134, turn_count: 5 }, [], SPIN_CLOCK);
-    expect(plain(settled[0])).toBe('    ✓ explorer  bd-1');
+    expect(plain(settled[0])).toBe('    ✓ explorer:x  bd-1');
     expect(plain(settled[1])).toBe('       m  • 2m14s • 5t');
     expect(plain(mod.renderFleetRowLines({ ...base, state: 'failed' }, [], SPIN_CLOCK)[0]))
-      .toBe('    ✕ explorer  bd-1');
+      .toBe('    ✕ explorer:x  bd-1');
     // Blocked on the coordinator: `!` outranks the spinner, wait replaces the metrics.
     const blocked = mod.renderFleetRowLines({ ...base, elapsed_s: 90 }, [
       { activation_id: 'act:x', asked_at: SPIN_CLOCK - 19_000 },
     ], SPIN_CLOCK);
-    expect(plain(blocked[0])).toBe('    ! explorer  bd-1');
+    expect(plain(blocked[0])).toBe('    ! explorer:x  bd-1');
     expect(plain(blocked[1])).toBe('       m  • waiting 19s');
   });
 
@@ -1221,11 +1221,13 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     };
     const lines = mod.renderSectionLines(fleet, { nowMs: now }).map(plain);
     expect(lines[0]).toBe('╰─ SPECIALISTS  2 running • ! 1 blocked');
-    expect(lines[1]).toBe('    ! reviewer  ISSUE-92');
+    expect(lines[1]).toBe('    ! reviewer:ask  ISSUE-92');
     expect(lines[2]).toBe('       gpt-5.6-sol · high  • waiting 31s');
-    expect(lines[3]).toMatch(/^ {4}[◐◓◑◒] researcher {2}ISSUE-92$/);
+    expect(lines[3]).toMatch(/^ {4}[◐◓◑◒] researcher:idle {2}ISSUE-92$/);
     expect(lines[4]).toBe('       gpt-5.6-sol · high  • 47s • 2t • 2.1k');
-    expect(lines.join('\n')).not.toContain('act:ask'); // no forensic ids in rows
+    // Rows carry only the short dispatch token (<specialist>:<id>); the full
+    // forensic `act:` id stays out of the operator surface.
+    expect(lines.join('\n')).not.toContain('act:ask');
   });
 
   it('/specialists reports in text too, so json and print modes are not blind', async () => {
