@@ -1253,7 +1253,9 @@ specialists ps [--json] [--all] [--follow | -f]
 - `--running`: Hide jobs not in an active state (`starting`/`running`/`waiting`). Combine with `--all` to broaden the source set, then narrow.
 - `--bead <id>`: Show only jobs whose `bead_id` matches the given id exactly.
 - `--since <duration>`: Show only jobs that started within the last duration. Accepts `<n>s`, `<n>m`, `<n>h`, `<n>d` (e.g. `30m`, `2h`, `1d`).
-- `--mine`: Show only jobs whose linked bead is currently assigned to the current user (resolved via `bd query "assignee=me" --json`). Falls back to no-op if `bd` is unreachable.
+- `--mine`: Restrict output to the current operator's work. The two views resolve ownership differently, and each reports what it could resolve:
+  - **Jobs:** a bead is "mine" when it is currently assigned to the current user (resolved via `bd query "assignee=me" --json`). Falls back to no-op if `bd` is unreachable.
+  - **Native activations:** ownership is a Substrate claim (`issue_claims.activation_id` against a claim holder), not a Beads assignee. `sp ps` can resolve it only when the session carries an identity (`XTRM_SESSION_NAME`, then `XTRM_SESSION_ID`), matched exactly against the recorded holder. When no identity is present the filter is **not applied** to the native block and `native_activations_note` (plus a `note:` line in human output) says so, rather than rendering an empty list. Ownership filtering is a candidate-defining predicate: it is applied before the activation bound, so it can never be starved by newer unrelated activations.
 - `--include-terminal`: Show epics in `merged` or `abandoned` state. Default hides them to keep the view focused on active work. Legacy alias `--include-merged` is preserved (covers both states now).
 - `--node <id>`: Show only jobs that belong to the given node id.
 - Positional `<job-id>`: Inspect a single job (full status detail) instead of the snapshot.

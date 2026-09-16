@@ -1202,6 +1202,20 @@ export interface ListNativeActivationIdsFilters {
    * selection so a bead filter returns that bead's latest activations
    * instead of filtering the global latest-N after the fact). */
   beadId?: string;
+  /**
+   * Candidate pre-image: restrict the selection to these activations.
+   * XTRM-93 N3 (SPECIALISTS-104). Some candidate-defining predicates are
+   * resolved OUTSIDE SQL because their authority is not the observability
+   * store — ownership is the case (`issue_claims.activation_id` in the
+   * Substrate authority store). This parameter is how such a predicate is
+   * applied BEFORE the activation bound instead of to the post-limit
+   * survivors, which is the starvation shape this node exists to prevent.
+   *
+   * An EMPTY array selects nothing: a resolved predicate that matched no
+   * activation is a real answer. An ABSENT array constrains nothing. The two
+   * are deliberately not conflated.
+   */
+  activationIds?: readonly string[];
 }
 
 export interface JobMetricsRecord {
@@ -1477,7 +1491,13 @@ export interface ObservabilitySqliteClient {
    * activation), never the forensic event table. Forensic-only rows from the
    * retired event_family='activation' vocabulary (frozen 2026-09-08, no job
    * row, no attempt_id) have no specialist_jobs row and are therefore
-   * EXCLUDED as obsolete — they can never enter the current list. */
+   * EXCLUDED as obsolete — they can never enter the current list.
+   *
+   * EVERY filter here is applied before the bound. Callers must pass
+   * candidate-defining predicates in these arguments and must NOT filter the
+   * returned ids afterwards: a post-limit predicate can only remove
+   * candidates, never recover an older matching activation the bound excluded
+   * (SPECIALISTS-104). */
   listNativeActivationIds(filters?: ListNativeActivationIdsFilters): string[];
   /** Fetch every forensic event for the given activation ids (no row cap).
    * The bound lives in the id-selection stage; this stage is index-backed on
@@ -2860,6 +2880,18 @@ class SqliteClient implements ObservabilitySqliteClient {
       const params: Array<string | number> = [];
       if (filters.sinceMs !== undefined) { clauses.push('updated_at_ms >= ?'); params.push(filters.sinceMs); }
       if (filters.beadId !== undefined) { clauses.push('bead_id = ?'); params.push(filters.beadId); }
+      if (filters.activationIds !== undefined) {
+        // A resolved-but-empty pre-image means "this predicate matched no
+        // activation", which is the empty set, not the unconstrained set.
+        if (filters.activationIds.length === 0) return [];
+        // ponytail: one flat IN-list. Ceiling = the driver's bound-parameter
+        // limit, measured at 50,000 on SQLite 3.53 (bun:sqlite) and far above
+        // any observed pre-image (the largest single Substrate claim holder
+        // carries 54 activations). If a holder ever approaches it, chunk the
+        // IN-list and merge on updated_at_ms rather than raising a cap.
+        clauses.push(`job_id IN (${filters.activationIds.map(() => '?').join(', ')})`);
+        params.push(...filters.activationIds);
+      }
       const limit = Math.max(1, Math.min(filters.limit ?? 20, 100));
       const rows = this.db.query(`
         SELECT job_id FROM specialist_jobs

@@ -15706,6 +15706,12 @@ class SqliteClient {
         clauses.push("bead_id = ?");
         params.push(filters.beadId);
       }
+      if (filters.activationIds !== undefined) {
+        if (filters.activationIds.length === 0)
+          return [];
+        clauses.push(`job_id IN (${filters.activationIds.map(() => "?").join(", ")})`);
+        params.push(...filters.activationIds);
+      }
       const limit = Math.max(1, Math.min(filters.limit ?? 20, 100));
       const rows = this.db.query(`
         SELECT job_id FROM specialist_jobs

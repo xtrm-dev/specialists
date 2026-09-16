@@ -15873,6 +15873,12 @@ class SqliteClient {
         clauses.push("bead_id = ?");
         params.push(filters.beadId);
       }
+      if (filters.activationIds !== undefined) {
+        if (filters.activationIds.length === 0)
+          return [];
+        clauses.push(`job_id IN (${filters.activationIds.map(() => "?").join(", ")})`);
+        params.push(...filters.activationIds);
+      }
       const limit = Math.max(1, Math.min(filters.limit ?? 20, 100));
       const rows = this.db.query(`
         SELECT job_id FROM specialist_jobs
@@ -53338,6 +53344,167 @@ function formatActivationAge(nowMs, atMs) {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+// src/activation/authority-store.ts
+import { mkdirSync as mkdirSync16 } from "fs";
+import { createRequire as createRequire5 } from "module";
+import { homedir as homedir12 } from "os";
+import { dirname as dirname21, join as join40 } from "path";
+function resolveAuthorityDbPath(env = process.env) {
+  const substrate = (env.SUBSTRATE_DB ?? "").trim();
+  if (substrate)
+    return substrate;
+  const legacy = (env.XTRM_STATE_DB ?? "").trim();
+  if (legacy)
+    return legacy;
+  return join40(homedir12(), ".xtrm", "state.db");
+}
+function openAuthorityDb(dbPath) {
+  try {
+    const bun = require4("bun:sqlite");
+    if (bun?.Database)
+      return new bun.Database(dbPath);
+  } catch {}
+  try {
+    const node = require4("node:sqlite");
+    if (node?.DatabaseSync) {
+      const DatabaseSync = node.DatabaseSync;
+      const inner = new DatabaseSync(dbPath);
+      return {
+        exec: (sql) => inner.exec(sql),
+        prepare: (sql) => {
+          const stmt = inner.prepare(sql);
+          return { run: (...params) => stmt.run(...params.map((v) => v === undefined ? null : v)) };
+        },
+        close: () => inner.close()
+      };
+    }
+  } catch {}
+  return null;
+}
+function createFileAuthorityWriter(dbPath = resolveAuthorityDbPath()) {
+  return {
+    record(snapshot) {
+      try {
+        mkdirSync16(dirname21(dbPath), { recursive: true });
+        const db = openAuthorityDb(dbPath);
+        if (!db)
+          return;
+        try {
+          db.exec(ACTIVATIONS_DDL);
+          db.prepare(`INSERT OR REPLACE INTO activations
+               (activation_id, specialist, state, bead_id, last_activity_at)
+             VALUES (?, ?, ?, ?, ?)`).run(snapshot.activationId, snapshot.specialist, snapshot.state, snapshot.issueRef, snapshot.lastActivityAt);
+        } finally {
+          db.close();
+        }
+      } catch {}
+    },
+    remove(activationId) {
+      try {
+        const db = openAuthorityDb(dbPath);
+        if (!db)
+          return;
+        try {
+          db.exec(ACTIVATIONS_DDL);
+          db.prepare("DELETE FROM activations WHERE activation_id = ?").run(activationId);
+        } finally {
+          db.close();
+        }
+      } catch {}
+    }
+  };
+}
+var require4, ACTIVATIONS_DDL = `CREATE TABLE IF NOT EXISTS activations (
+  activation_id TEXT PRIMARY KEY,
+  specialist TEXT NOT NULL,
+  state TEXT NOT NULL,
+  bead_id TEXT,
+  last_activity_at INTEGER NOT NULL
+)`, NULL_AUTHORITY_WRITER;
+var init_authority_store = __esm(() => {
+  require4 = createRequire5(import.meta.url);
+  NULL_AUTHORITY_WRITER = { record: () => {}, remove: () => {} };
+});
+
+// src/specialist/native-activation-ownership.ts
+import { existsSync as existsSync37 } from "fs";
+function resolveSessionHolder(env = process.env) {
+  for (const key of ["XTRM_SESSION_NAME", "XTRM_SESSION_ID"]) {
+    const value = (env[key] ?? "").trim();
+    if (value)
+      return value;
+  }
+  return;
+}
+function openReadonly(dbPath) {
+  try {
+    const bun = __require("bun:sqlite");
+    if (bun?.Database) {
+      const db = new bun.Database(dbPath, { readonly: true });
+      return {
+        all: (sql, ...params) => db.query(sql).all(...params),
+        close: () => db.close()
+      };
+    }
+  } catch {}
+  try {
+    const node = __require("node:sqlite");
+    if (node?.DatabaseSync) {
+      const DatabaseSync = node.DatabaseSync;
+      const db = new DatabaseSync(dbPath, { readOnly: true });
+      return {
+        all: (sql, ...params) => db.prepare(sql).all(...params),
+        close: () => db.close()
+      };
+    }
+  } catch {}
+  return null;
+}
+function resolveNativeActivationOwnership(opts = {}) {
+  const holder = resolveSessionHolder(opts.env);
+  if (!holder) {
+    return {
+      kind: "unavailable",
+      reason: "no_session_identity",
+      detail: "this session carries no XTRM_SESSION_NAME/XTRM_SESSION_ID, and Substrate records ownership " + "only against an explicit claim holder, so the current operator cannot be identified"
+    };
+  }
+  const dbPath = opts.dbPath ?? resolveAuthorityDbPath(opts.env);
+  if (!existsSync37(dbPath)) {
+    return {
+      kind: "unavailable",
+      reason: "authority_store_absent",
+      detail: `the Substrate authority store is absent (${dbPath}), so claim holders cannot be read`
+    };
+  }
+  const db = openReadonly(dbPath);
+  if (!db) {
+    return {
+      kind: "unavailable",
+      reason: "authority_store_unreadable",
+      detail: `the Substrate authority store could not be opened read-only (${dbPath})`
+    };
+  }
+  try {
+    const rows = db.all("SELECT DISTINCT activation_id FROM issue_claims WHERE holder = ? AND activation_id IS NOT NULL", holder);
+    const activationIds = rows.map((row) => row.activation_id).filter((id) => typeof id === "string" && id.length > 0);
+    return { kind: "resolved", activationIds, holder };
+  } catch (error) {
+    return {
+      kind: "unavailable",
+      reason: "authority_store_unreadable",
+      detail: `reading claim holders failed: ${error instanceof Error ? error.message : String(error)}`
+    };
+  } finally {
+    try {
+      db.close();
+    } catch {}
+  }
+}
+var init_native_activation_ownership = __esm(() => {
+  init_authority_store();
+});
+
 // src/cli/ps.ts
 var exports_ps = {};
 __export(exports_ps, {
@@ -53904,38 +54071,55 @@ function resolveEpicReadinessMap(jobs, includeTerminal) {
     sqlite.close();
   }
 }
-function loadNativeActivationSummaries(args, mineBeadIds) {
+function nativeMineUnavailableNote(detail) {
+  return `--mine was NOT applied to native activations: ${detail}. ` + "Ownership for native activations is recorded by Substrate claim holder, which this process cannot resolve; " + "the block below is the latest activations, not only yours.";
+}
+function loadNativeActivationBlock(args) {
   const sqliteClient = createObservabilitySqliteClient();
   if (!sqliteClient)
-    return [];
+    return { activations: [] };
   try {
+    const predicate = {};
+    if (args.sinceMs !== undefined)
+      predicate.sinceMs = args.sinceMs;
+    if (args.beadFilter)
+      predicate.beadId = args.beadFilter;
+    let note;
+    if (args.mine) {
+      const ownership = resolveNativeActivationOwnership();
+      if (ownership.kind === "resolved") {
+        predicate.activationIds = ownership.activationIds;
+      } else {
+        note = nativeMineUnavailableNote(ownership.detail);
+      }
+    }
     const ids = sqliteClient.listNativeActivationIds({
       limit: NATIVE_ACTIVATION_SELECTION_LIMIT,
-      ...args.sinceMs !== undefined ? { sinceMs: args.sinceMs } : {},
-      ...args.beadFilter ? { beadId: args.beadFilter } : {}
+      ...predicate
     });
     if (ids.length === 0)
-      return [];
+      return { activations: [], ...note ? { note } : {} };
     const rows = sqliteClient.readForensicEventsForActivations(ids, {
       ...args.sinceMs !== undefined ? { sinceMs: args.sinceMs } : {}
     });
-    return summarizeNativeActivations(rows).filter((summary) => {
+    const activations = summarizeNativeActivations(rows).filter((summary) => {
       if (args.beadFilter && summary.bead_id !== args.beadFilter)
-        return false;
-      if (mineBeadIds && (!summary.bead_id || !mineBeadIds.has(summary.bead_id)))
         return false;
       return true;
     });
+    return { activations, ...note ? { note } : {} };
   } catch {
-    return [];
+    return { activations: [] };
   } finally {
     sqliteClient.close();
   }
 }
-function renderNativeActivationsBlock(summaries) {
-  if (summaries.length === 0)
+function renderNativeActivationsBlock(summaries, note) {
+  if (summaries.length === 0 && !note)
     return;
   console.log(bold10(cyan6("Native activations")) + dim9(" \xB7 LAST-KNOWN from forensics \u2014 not live (the Fleet registry is in-process in the host session)"));
+  if (note)
+    console.log(dim9(`  note: ${note}`));
   const now = Date.now();
   for (const summary of summaries.slice(0, NATIVE_ACTIVATION_DISPLAY_LIMIT)) {
     const bead = summary.bead_id ? ` ${summary.bead_id}` : "";
@@ -53947,7 +54131,7 @@ function renderNativeActivationsBlock(summaries) {
   }
   console.log("");
 }
-function renderHuman(jobs, nodes, trees, all, includeTerminal, epicReadiness, health, includeHealthDetails, nativeActivations = []) {
+function renderHuman(jobs, nodes, trees, all, includeTerminal, epicReadiness, health, includeHealthDetails, nativeActivations = [], nativeActivationsNote) {
   const beadTitles = buildBeadTitleCache(jobs);
   const renderedJobIds = new Set;
   const epicGroups = buildEpicGroups(jobs, epicReadiness);
@@ -54039,7 +54223,7 @@ function renderHuman(jobs, nodes, trees, all, includeTerminal, epicReadiness, he
     console.log(dim9("  no active jobs"));
     console.log("");
   }
-  renderNativeActivationsBlock(nativeActivations);
+  renderNativeActivationsBlock(nativeActivations, nativeActivationsNote);
   const renderedJobs = jobs.filter((job) => renderedJobIds.has(job.id));
   const runningCount = renderedJobs.filter((job) => job.status === "running").length;
   const waitingCount = renderedJobs.filter((job) => job.status === "waiting").length;
@@ -54239,7 +54423,7 @@ ${job.id}  ${job.specialist}  ${getStatusIcon(toJobNode(job))} ${statusLabel(job
   console.log(`
   ${dim9(inspectActions.join(" | "))}`);
 }
-function renderJson(jobs, nodes, trees, _all, epicReadiness, args, health, nativeActivations = []) {
+function renderJson(jobs, nodes, trees, _all, epicReadiness, args, health, nativeActivationBlock = { activations: [] }) {
   console.log(JSON.stringify({
     generated_at_ms: Date.now(),
     include_terminal: args.includeTerminal,
@@ -54282,8 +54466,8 @@ function renderJson(jobs, nodes, trees, _all, epicReadiness, args, health, nativ
     })),
     nodes,
     trees,
-    native_activations: nativeActivations.map((summary) => ({ ...summary, last_known: true, live: false })),
-    native_activations_note: "LAST-KNOWN state from forensics, not live registry state.",
+    native_activations: nativeActivationBlock.activations.map((summary) => ({ ...summary, last_known: true, live: false })),
+    native_activations_note: nativeActivationBlock.note ? `LAST-KNOWN state from forensics, not live registry state. ${nativeActivationBlock.note}` : "LAST-KNOWN state from forensics, not live registry state.",
     epics: buildEpicGroups(jobs, epicReadiness),
     epic_readiness: Object.fromEntries([...epicReadiness.entries()].map(([epicId, summary]) => [epicId, summary])),
     process_health: health
@@ -54342,12 +54526,12 @@ function render(args) {
   const nodes = groupByNode(visibleStatuses);
   const trees = groupByTree(visibleStatuses);
   const health = collectProcessHealth();
-  const nativeActivations = loadNativeActivationSummaries(args, mineBeadIds);
+  const nativeActivationBlock = loadNativeActivationBlock(args);
   if (args.json) {
-    renderJson(visibleStatuses, nodes, trees, args.all, epicReadiness, args, health, nativeActivations);
+    renderJson(visibleStatuses, nodes, trees, args.all, epicReadiness, args, health, nativeActivationBlock);
     return;
   }
-  renderHuman(visibleStatuses, nodes, trees, args.all, args.includeTerminal, epicReadiness, health, args.health, nativeActivations);
+  renderHuman(visibleStatuses, nodes, trees, args.all, args.includeTerminal, epicReadiness, health, args.health, nativeActivationBlock.activations, nativeActivationBlock.note);
 }
 function renderBuffered(args) {
   const lines = [];
@@ -54450,6 +54634,7 @@ var init_ps = __esm(() => {
   init_supervisor();
   init_status_load();
   init_observability_sqlite();
+  init_native_activation_ownership();
   init_node_resolve();
   init_epic_readiness();
   init_process_health();
@@ -54478,8 +54663,8 @@ __export(exports_result, {
   isNativeAttemptId: () => isNativeAttemptId,
   isNativeActivationId: () => isNativeActivationId
 });
-import { existsSync as existsSync37, readFileSync as readFileSync31 } from "fs";
-import { join as join40 } from "path";
+import { existsSync as existsSync38, readFileSync as readFileSync31 } from "fs";
+import { join as join41 } from "path";
 function isNativeActivationId(ref) {
   return /^act:[^:]+$/.test(ref);
 }
@@ -54623,8 +54808,8 @@ function readTimelineEventsForResult(sqliteClient, jobsDir, jobId) {
       return sqliteClient.readEvents(jobId);
     } catch {}
   }
-  const eventsPath = join40(jobsDir, jobId, "events.jsonl");
-  if (!existsSync37(eventsPath))
+  const eventsPath = join41(jobsDir, jobId, "events.jsonl");
+  if (!existsSync38(eventsPath))
     return [];
   return readFileSync31(eventsPath, "utf-8").split(`
 `).map((line) => line.trim()).filter(Boolean).map((line) => parseTimelineEvent(line)).filter((event) => event !== null);
@@ -54769,7 +54954,7 @@ async function run22() {
       error
     }, null, 2));
   };
-  const jobsDir = join40(process.cwd(), ".specialists", "jobs");
+  const jobsDir = join41(process.cwd(), ".specialists", "jobs");
   const supervisor = new Supervisor({ runner: null, runOptions: null, jobsDir });
   const sqliteClient = createObservabilitySqliteClient();
   const emitHumanResult = (output2, status, startupContext, trailingFooter) => {
@@ -54871,7 +55056,7 @@ async function run22() {
         process.exit(1);
       }
     }
-    const resultPath = join40(jobsDir, jobId, "result.txt");
+    const resultPath = join41(jobsDir, jobId, "result.txt");
     const readResultOutput2 = () => {
       try {
         const sqliteResult = sqliteClient?.readResult(jobId) ?? null;
@@ -54880,7 +55065,7 @@ async function run22() {
       } catch (error) {
         console.warn(`SQLite result read failed for job ${jobId}; falling back to result.txt`, error);
       }
-      if (existsSync37(resultPath)) {
+      if (existsSync38(resultPath)) {
         return readFileSync31(resultPath, "utf-8");
       }
       try {
@@ -55099,8 +55284,8 @@ var init_result = __esm(() => {
 });
 
 // src/specialist/timeline-query.ts
-import { existsSync as existsSync38, readdirSync as readdirSync15, readFileSync as readFileSync32 } from "fs";
-import { basename as basename10, join as join41 } from "path";
+import { existsSync as existsSync39, readdirSync as readdirSync15, readFileSync as readFileSync32 } from "fs";
+import { basename as basename10, join as join42 } from "path";
 function readJobEvents(jobDir) {
   const jobId = basename10(jobDir);
   try {
@@ -55112,8 +55297,8 @@ function readJobEvents(jobDir) {
   } catch {}
   if (process.env.SPECIALISTS_JOB_FILE_OUTPUT !== "on")
     return [];
-  const eventsPath = join41(jobDir, "events.jsonl");
-  if (!existsSync38(eventsPath))
+  const eventsPath = join42(jobDir, "events.jsonl");
+  if (!existsSync39(eventsPath))
     return [];
   const content = readFileSync32(eventsPath, "utf-8");
   const lines = content.split(`
@@ -55159,12 +55344,12 @@ function readAllJobEvents(jobsDir, jobId) {
   } catch {}
   if (process.env.SPECIALISTS_JOB_FILE_OUTPUT !== "on")
     return [];
-  if (!existsSync38(jobsDir))
+  if (!existsSync39(jobsDir))
     return [];
   const batches = [];
   const entries = readdirSync15(jobsDir);
   for (const entry of entries) {
-    const jobDir = join41(jobsDir, entry);
+    const jobDir = join42(jobsDir, entry);
     try {
       const stat2 = __require("fs").statSync(jobDir);
       if (!stat2.isDirectory())
@@ -55173,10 +55358,10 @@ function readAllJobEvents(jobsDir, jobId) {
       continue;
     }
     const jobId2 = entry;
-    const statusPath = join41(jobDir, "status.json");
+    const statusPath = join42(jobDir, "status.json");
     let specialist = "unknown";
     let beadId;
-    if (existsSync38(statusPath)) {
+    if (existsSync39(statusPath)) {
       try {
         const status = JSON.parse(readFileSync32(statusPath, "utf-8"));
         specialist = status.specialist ?? "unknown";
@@ -55247,13 +55432,13 @@ __export(exports_feed, {
 });
 import {
   closeSync as closeSync4,
-  existsSync as existsSync39,
+  existsSync as existsSync40,
   openSync as openSync5,
   readFileSync as readFileSync33,
   readdirSync as readdirSync16,
   statSync as statSync12
 } from "fs";
-import { join as join42 } from "path";
+import { join as join43 } from "path";
 function getHumanEventKey2(event) {
   switch (event.type) {
     case "meta":
@@ -55458,7 +55643,7 @@ function readStatusJson(sqliteClient, jobsDir, jobId) {
   } catch (error) {
     console.warn(`SQLite status read failed for job ${jobId}; falling back to status.json`, error);
   }
-  const statusPath = join42(jobsDir, jobId, "status.json");
+  const statusPath = join43(jobsDir, jobId, "status.json");
   const raw = readFileFresh(statusPath);
   if (!raw)
     return null;
@@ -55731,9 +55916,9 @@ function listMatchingJobIds(sqliteClient, jobsDir, options2) {
       jobIds.add(status.id);
     }
   } catch {}
-  if (existsSync39(jobsDir)) {
+  if (existsSync40(jobsDir)) {
     for (const entry of readdirSync16(jobsDir)) {
-      const jobDir = join42(jobsDir, entry);
+      const jobDir = join43(jobsDir, entry);
       try {
         if (!statSync12(jobDir).isDirectory())
           continue;
@@ -55775,7 +55960,7 @@ function readJobEventsFresh(sqliteClient, jobsDir, jobId) {
   } catch (error) {
     console.warn(`SQLite events read failed for job ${jobId}; falling back to events.jsonl`, error);
   }
-  const eventsPath = join42(jobsDir, jobId, "events.jsonl");
+  const eventsPath = join43(jobsDir, jobId, "events.jsonl");
   const content = readFileFresh(eventsPath);
   if (!content)
     return [];
@@ -55799,7 +55984,7 @@ function readJobEventsIncremental(sqliteClient, jobsDir, jobId, afterSeq, fileCa
   } catch (error) {
     console.warn(`SQLite incremental events read failed for job ${jobId}; falling back to events.jsonl`, error);
   }
-  const eventsPath = join42(jobsDir, jobId, "events.jsonl");
+  const eventsPath = join43(jobsDir, jobId, "events.jsonl");
   let stats;
   try {
     stats = statSync12(eventsPath);
@@ -55965,7 +56150,7 @@ async function run23() {
   const options2 = parseArgs12(process.argv.slice(3));
   const sqliteClient = createObservabilitySqliteClient();
   try {
-    const jobsDir = join42(process.cwd(), ".specialists", "jobs");
+    const jobsDir = join43(process.cwd(), ".specialists", "jobs");
     const hasSqliteStatuses = (() => {
       try {
         return (sqliteClient?.listStatuses?.() ?? []).length > 0;
@@ -55973,7 +56158,7 @@ async function run23() {
         return false;
       }
     })();
-    if (!existsSync39(jobsDir) && !hasSqliteStatuses) {
+    if (!existsSync40(jobsDir) && !hasSqliteStatuses) {
       if (options2.jobId && sqliteClient) {
         console.log(dim9(`job ${options2.jobId} not found in .specialists/db/observability.db`));
       } else {
@@ -56903,8 +57088,8 @@ __export(exports_log, {
   run: () => run26,
   isForensicAgentInternal: () => isForensicAgentInternal
 });
-import { existsSync as existsSync40, readdirSync as readdirSync17, statSync as statSync13 } from "fs";
-import { basename as basename12, join as join43 } from "path";
+import { existsSync as existsSync41, readdirSync as readdirSync17, statSync as statSync13 } from "fs";
+import { basename as basename12, join as join44 } from "path";
 function parseSince4(value) {
   if (value.includes("T") || value.includes("-"))
     return new Date(value).getTime();
@@ -56984,7 +57169,7 @@ function parseArgs15(argv) {
 }
 function discoverDbTargets(cwd, repoFilter) {
   const cwdLocation = resolveObservabilityDbLocation(cwd);
-  if (existsSync40(cwdLocation.dbPath)) {
+  if (existsSync41(cwdLocation.dbPath)) {
     const repo = basename12(cwdLocation.gitRoot);
     if (!repoFilter || repo === repoFilter) {
       return [{ repo, root: cwdLocation.gitRoot, dbPath: cwdLocation.dbPath, source: "cwd" }];
@@ -56999,15 +57184,15 @@ function discoverDbTargets(cwd, repoFilter) {
     return [];
   }
   for (const entry of entries) {
-    const root = join43(cwd, entry);
+    const root = join44(cwd, entry);
     try {
       if (!statSync13(root).isDirectory())
         continue;
     } catch {
       continue;
     }
-    const dbPath = join43(root, ".specialists", "db", "observability.db");
-    if (!existsSync40(dbPath))
+    const dbPath = join44(root, ".specialists", "db", "observability.db");
+    if (!existsSync41(dbPath))
       continue;
     if (repoFilter && entry !== repoFilter)
       continue;
@@ -57744,12 +57929,12 @@ async function run30() {
 }
 
 // src/specialist/worktree-gc.ts
-import { existsSync as existsSync41, readdirSync as readdirSync18, readFileSync as readFileSync34 } from "fs";
-import { join as join44 } from "path";
+import { existsSync as existsSync42, readdirSync as readdirSync18, readFileSync as readFileSync34 } from "fs";
+import { join as join45 } from "path";
 import { spawnSync as spawnSync24 } from "child_process";
 function readJobStatus2(jobDir) {
-  const statusPath = join44(jobDir, "status.json");
-  if (!existsSync41(statusPath))
+  const statusPath = join45(jobDir, "status.json");
+  if (!existsSync42(statusPath))
     return null;
   try {
     return JSON.parse(readFileSync34(statusPath, "utf-8"));
@@ -57774,7 +57959,7 @@ function collectWorktreeGcCandidates(jobsDir) {
       const worktreePath = status.worktree_path;
       if (!worktreePath)
         return null;
-      if (!existsSync41(worktreePath))
+      if (!existsSync42(worktreePath))
         return null;
       return {
         jobId: status.id,
@@ -57786,13 +57971,13 @@ function collectWorktreeGcCandidates(jobsDir) {
   }
   if (!getFileFallbackEnabled())
     return [];
-  if (!existsSync41(jobsDir))
+  if (!existsSync42(jobsDir))
     return [];
   const candidates = [];
   for (const entry of readdirSync18(jobsDir, { withFileTypes: true })) {
     if (!entry.isDirectory())
       continue;
-    const status = readJobStatus2(join44(jobsDir, entry.name));
+    const status = readJobStatus2(join45(jobsDir, entry.name));
     if (!status)
       continue;
     if (isActive(status.status))
@@ -57802,7 +57987,7 @@ function collectWorktreeGcCandidates(jobsDir) {
     const { worktree_path: worktreePath, branch } = status;
     if (!worktreePath)
       continue;
-    if (!existsSync41(worktreePath))
+    if (!existsSync42(worktreePath))
       continue;
     candidates.push({
       jobId: status.id,
@@ -57848,8 +58033,8 @@ var exports_clean = {};
 __export(exports_clean, {
   run: () => run31
 });
-import { existsSync as existsSync42, readFileSync as readFileSync35, readdirSync as readdirSync19, rmSync as rmSync7, statSync as statSync14 } from "fs";
-import { join as join45 } from "path";
+import { existsSync as existsSync43, readFileSync as readFileSync35, readdirSync as readdirSync19, rmSync as rmSync7, statSync as statSync14 } from "fs";
+import { join as join46 } from "path";
 function parseDuration2(raw) {
   const match = /^(\d+)(ms|s|m|h|d)$/i.exec(raw.trim());
   if (!match)
@@ -58004,7 +58189,7 @@ function parseOptions2(argv) {
 function readDirectorySizeBytes(directoryPath) {
   let totalBytes = 0;
   for (const entry of readdirSync19(directoryPath, { withFileTypes: true })) {
-    const entryPath = join45(directoryPath, entry.name);
+    const entryPath = join46(directoryPath, entry.name);
     const stats = statSync14(entryPath);
     totalBytes += stats.isDirectory() ? readDirectorySizeBytes(entryPath) : stats.size;
   }
@@ -58012,7 +58197,7 @@ function readDirectorySizeBytes(directoryPath) {
 }
 function containsProtectedSqliteArtifact(directoryPath) {
   for (const entry of readdirSync19(directoryPath, { withFileTypes: true })) {
-    const entryPath = join45(directoryPath, entry.name);
+    const entryPath = join46(directoryPath, entry.name);
     if (entry.isDirectory()) {
       if (containsProtectedSqliteArtifact(entryPath))
         return true;
@@ -58033,11 +58218,11 @@ function getJobTimestamps(status) {
 function readCompletedJobDirectory(baseDirectory, entry) {
   if (!entry.isDirectory())
     return null;
-  const directoryPath = join45(baseDirectory, entry.name);
+  const directoryPath = join46(baseDirectory, entry.name);
   if (containsProtectedSqliteArtifact(directoryPath))
     return null;
-  const statusFilePath = join45(directoryPath, "status.json");
-  if (!existsSync42(statusFilePath))
+  const statusFilePath = join46(directoryPath, "status.json");
+  if (!existsSync43(statusFilePath))
     return null;
   let statusData;
   try {
@@ -58055,8 +58240,8 @@ function collectCompletedJobs(jobsDirectoryPath) {
   const statuses = sqliteClient?.listStatuses() ?? [];
   if (statuses.length > 0) {
     return statuses.filter((status) => COMPLETED_STATUSES.has(status.status)).map((status) => {
-      const directoryPath = join45(jobsDirectoryPath, status.id);
-      if (!existsSync42(directoryPath) || containsProtectedSqliteArtifact(directoryPath))
+      const directoryPath = join46(jobsDirectoryPath, status.id);
+      if (!existsSync43(directoryPath) || containsProtectedSqliteArtifact(directoryPath))
         return null;
       const { createdAtMs, completedAtMs } = getJobTimestamps(status);
       return { id: status.id, directoryPath, completedAtMs, createdAtMs, sizeBytes: readDirectorySizeBytes(directoryPath) };
@@ -58410,7 +58595,7 @@ async function run31() {
     console.log(`Hid ${hiddenCount} terminal row(s) from default ps.`);
     return;
   }
-  if (!existsSync42(jobsDirectoryPath)) {
+  if (!existsSync43(jobsDirectoryPath)) {
     console.log("No jobs directory found.");
     return;
   }
@@ -58932,15 +59117,15 @@ var init_attach = __esm(() => {
 });
 
 // src/specialist/drift-detector.ts
-import { existsSync as existsSync43, readFileSync as readFileSync36, readdirSync as readdirSync20, rmSync as rmSync8 } from "fs";
-import { join as join46, resolve as resolve18, relative as relative4 } from "path";
+import { existsSync as existsSync44, readFileSync as readFileSync36, readdirSync as readdirSync20, rmSync as rmSync8 } from "fs";
+import { join as join47, resolve as resolve18, relative as relative4 } from "path";
 function listFiles(root) {
-  if (!existsSync43(root))
+  if (!existsSync44(root))
     return [];
   const out = [];
   const visit2 = (dir) => {
     for (const entry of readdirSync20(dir, { withFileTypes: true })) {
-      const full = join46(dir, entry.name);
+      const full = join47(dir, entry.name);
       if (entry.isDirectory()) {
         visit2(full);
         continue;
@@ -58975,12 +59160,12 @@ function detectDriftForRepo(repoRoot) {
       { scope: "user", dir: resolve18(repoRoot, ".specialists/user") }
     ];
     for (const { scope, dir } of scopes) {
-      if (!existsSync43(dir))
+      if (!existsSync44(dir))
         continue;
       for (const file of listFiles(dir)) {
         const rel = relPath(file, dir);
-        const canonicalPath = join46(asset.canonicalDir, rel);
-        if (!existsSync43(canonicalPath))
+        const canonicalPath = join47(asset.canonicalDir, rel);
+        if (!existsSync44(canonicalPath))
           continue;
         const bytesEqual = readFileSync36(file).equals(readFileSync36(canonicalPath));
         findings.push(makeFinding(repoRoot, asset.kind, scope, file, canonicalPath, bytesEqual));
@@ -59006,7 +59191,7 @@ function detectDriftUnderRoot(root) {
         continue;
       if (entry.name === "node_modules" || entry.name === ".git")
         continue;
-      visit2(join46(dir, entry.name));
+      visit2(join47(dir, entry.name));
     }
   };
   visit2(resolve18(root));
@@ -59507,9 +59692,9 @@ var init_dead_job_audit = __esm(() => {
 });
 
 // src/specialist/channel-doctor.ts
-import { existsSync as existsSync44, readFileSync as readFileSync37 } from "fs";
+import { existsSync as existsSync45, readFileSync as readFileSync37 } from "fs";
 function readJson2(path3) {
-  if (!existsSync44(path3))
+  if (!existsSync45(path3))
     return { exists: false, value: null, parseError: null };
   try {
     return { exists: true, value: JSON.parse(readFileSync37(path3, "utf8")), parseError: null };
@@ -59523,7 +59708,7 @@ function isRecord3(value) {
 function checkCapabilityDeclared(serverSourcePath) {
   const id = 1;
   const name = "MCP server declares the claude/channel capability";
-  if (!existsSync44(serverSourcePath)) {
+  if (!existsSync45(serverSourcePath)) {
     return { id, name, status: "unknown", detail: `server source not found at ${serverSourcePath}` };
   }
   const source = readFileSync37(serverSourcePath, "utf8");
@@ -59656,90 +59841,8 @@ function runChannelDoctorChecks(inputs) {
 }
 var init_channel_doctor = () => {};
 
-// src/activation/authority-store.ts
-import { mkdirSync as mkdirSync16 } from "fs";
-import { createRequire as createRequire5 } from "module";
-import { homedir as homedir12 } from "os";
-import { dirname as dirname21, join as join47 } from "path";
-function resolveAuthorityDbPath(env = process.env) {
-  const substrate = (env.SUBSTRATE_DB ?? "").trim();
-  if (substrate)
-    return substrate;
-  const legacy = (env.XTRM_STATE_DB ?? "").trim();
-  if (legacy)
-    return legacy;
-  return join47(homedir12(), ".xtrm", "state.db");
-}
-function openAuthorityDb(dbPath) {
-  try {
-    const bun = require4("bun:sqlite");
-    if (bun?.Database)
-      return new bun.Database(dbPath);
-  } catch {}
-  try {
-    const node = require4("node:sqlite");
-    if (node?.DatabaseSync) {
-      const DatabaseSync = node.DatabaseSync;
-      const inner = new DatabaseSync(dbPath);
-      return {
-        exec: (sql) => inner.exec(sql),
-        prepare: (sql) => {
-          const stmt = inner.prepare(sql);
-          return { run: (...params) => stmt.run(...params.map((v) => v === undefined ? null : v)) };
-        },
-        close: () => inner.close()
-      };
-    }
-  } catch {}
-  return null;
-}
-function createFileAuthorityWriter(dbPath = resolveAuthorityDbPath()) {
-  return {
-    record(snapshot) {
-      try {
-        mkdirSync16(dirname21(dbPath), { recursive: true });
-        const db = openAuthorityDb(dbPath);
-        if (!db)
-          return;
-        try {
-          db.exec(ACTIVATIONS_DDL);
-          db.prepare(`INSERT OR REPLACE INTO activations
-               (activation_id, specialist, state, bead_id, last_activity_at)
-             VALUES (?, ?, ?, ?, ?)`).run(snapshot.activationId, snapshot.specialist, snapshot.state, snapshot.issueRef, snapshot.lastActivityAt);
-        } finally {
-          db.close();
-        }
-      } catch {}
-    },
-    remove(activationId) {
-      try {
-        const db = openAuthorityDb(dbPath);
-        if (!db)
-          return;
-        try {
-          db.exec(ACTIVATIONS_DDL);
-          db.prepare("DELETE FROM activations WHERE activation_id = ?").run(activationId);
-        } finally {
-          db.close();
-        }
-      } catch {}
-    }
-  };
-}
-var require4, ACTIVATIONS_DDL = `CREATE TABLE IF NOT EXISTS activations (
-  activation_id TEXT PRIMARY KEY,
-  specialist TEXT NOT NULL,
-  state TEXT NOT NULL,
-  bead_id TEXT,
-  last_activity_at INTEGER NOT NULL
-)`, NULL_AUTHORITY_WRITER;
-var init_authority_store = __esm(() => {
-  require4 = createRequire5(import.meta.url);
-  NULL_AUTHORITY_WRITER = { record: () => {}, remove: () => {} };
-});
-
 // src/activation/workitem-store.ts
-import { existsSync as existsSync45 } from "fs";
+import { existsSync as existsSync46 } from "fs";
 import { createRequire as createRequire6 } from "module";
 import { homedir as homedir13 } from "os";
 import { dirname as dirname22, join as join48 } from "path";
@@ -59781,7 +59884,7 @@ function uniqueExistingLibDirs(candidates) {
       continue;
     seen.add(normalized);
     try {
-      if (existsSync45(normalized))
+      if (existsSync46(normalized))
         out.push(normalized);
     } catch {}
   }
@@ -60159,7 +60262,7 @@ __export(exports_doctor, {
 });
 import { createHash as createHash9 } from "crypto";
 import { spawnSync as spawnSync26 } from "child_process";
-import { existsSync as existsSync46, mkdirSync as mkdirSync17, readdirSync as readdirSync21, readFileSync as readFileSync38, writeFileSync as writeFileSync20 } from "fs";
+import { existsSync as existsSync47, mkdirSync as mkdirSync17, readdirSync as readdirSync21, readFileSync as readFileSync38, writeFileSync as writeFileSync20 } from "fs";
 import { homedir as homedir14 } from "os";
 import { join as join49, relative as relative5, resolve as resolve20 } from "path";
 import { fileURLToPath as fileURLToPath8 } from "url";
@@ -60191,7 +60294,7 @@ function isInstalled3(bin) {
   return spawnSync26("which", [bin], { encoding: "utf8", timeout: 2000 }).status === 0;
 }
 function loadJson2(path3) {
-  if (!existsSync46(path3))
+  if (!existsSync47(path3))
     return null;
   try {
     return JSON.parse(readFileSync38(path3, "utf8"));
@@ -60237,7 +60340,7 @@ function checkBd() {
     return false;
   }
   ok3(`bd installed  ${dim14(sp("bd", ["--version"]).stdout || "")}`);
-  if (existsSync46(join49(CWD, ".beads")))
+  if (existsSync47(join49(CWD, ".beads")))
     ok3(".beads/ present in project");
   else
     warn3(".beads/ not found in project");
@@ -60254,7 +60357,7 @@ function checkSubstrateRuntime() {
       return;
     }
     const manifestPath = join49(dir, "package.json");
-    if (!existsSync46(manifestPath)) {
+    if (!existsSync47(manifestPath)) {
       warn3(`no package.json at ${dir} \u2014 native dispatch will be refused`);
       fix("point XTRM_SUBSTRATE_DIR at a @jaggerxtrm/substrate checkout");
       return;
@@ -60273,7 +60376,7 @@ function checkSubstrateRuntime() {
       return;
     }
     ok3(`resolved  ${dim14(dir)}`);
-    const missingModules = SUBSTRATE_REQUIRED_MODULES.filter((rel) => !existsSync46(join49(dir, rel)));
+    const missingModules = SUBSTRATE_REQUIRED_MODULES.filter((rel) => !existsSync47(join49(dir, rel)));
     if (missingModules.length > 0) {
       warn3(`${missingModules.length} required source module(s) absent under ${dir}`);
       hint(`missing: ${missingModules.join(", ")}`);
@@ -60281,7 +60384,7 @@ function checkSubstrateRuntime() {
       return;
     }
     const dbPath = resolveWorkItemDbPath();
-    if (!existsSync46(dbPath)) {
+    if (!existsSync47(dbPath)) {
       warn3(`work store not present at ${dbPath}`);
       fix("run `xt init`, or `sb init`, or set SUBSTRATE_DB to an existing store");
       return;
@@ -60306,7 +60409,7 @@ function resolveManagedSettingsPath() {
 }
 function resolveServerSourcePath() {
   const distPath = fileURLToPath8(new URL("../../dist/index.js", import.meta.url));
-  if (existsSync46(distPath))
+  if (existsSync47(distPath))
     return distPath;
   return fileURLToPath8(new URL("../mcp/v2-server.ts", import.meta.url));
 }
@@ -60447,12 +60550,12 @@ function collectFileHashes(rootDir) {
       hashes.set(relPath2, hashFile(fullPath));
     }
   };
-  if (existsSync46(rootDir))
+  if (existsSync47(rootDir))
     visit2(rootDir);
   return hashes;
 }
 function resolvePackageAssetDir(relativePath) {
-  return resolveCanonicalAssetDir(relativePath) ?? (existsSync46(join49(CWD, "config", relativePath)) ? join49(CWD, "config", relativePath) : null);
+  return resolveCanonicalAssetDir(relativePath) ?? (existsSync47(join49(CWD, "config", relativePath)) ? join49(CWD, "config", relativePath) : null);
 }
 function checkSkillDrift() {
   section3(`Skills \u2014 global default pool  (~/${relative5(homedir14(), GLOBAL_DEFAULT_SKILLS_DIR)})`);
@@ -60462,7 +60565,7 @@ function checkSkillDrift() {
     fix("restore config/skills/ or install package assets");
     return false;
   }
-  if (!existsSync46(GLOBAL_DEFAULT_SKILLS_DIR)) {
+  if (!existsSync47(GLOBAL_DEFAULT_SKILLS_DIR)) {
     fail9(`${GLOBAL_DEFAULT_SKILLS_DIR} missing`);
     fix("reinstall xtrm-tools (skills are vendored globally)");
     return false;
@@ -60497,7 +60600,7 @@ function checkSkillDrift() {
 }
 function checkUserOverlayDrift() {
   section3("User specialist overlays");
-  if (!existsSync46(USER_SPECIALISTS_DIR)) {
+  if (!existsSync47(USER_SPECIALISTS_DIR)) {
     ok3("no user overlays present");
     return true;
   }
@@ -60516,7 +60619,7 @@ function checkUserOverlayDrift() {
       warn3(`${name}: failed to parse \u2014 skipping drift check`);
       continue;
     }
-    if (!defaultPath || !existsSync46(defaultPath)) {
+    if (!defaultPath || !existsSync47(defaultPath)) {
       ok3(`${name}: user-only overlay (no package default to drift from)`);
       continue;
     }
@@ -60548,14 +60651,14 @@ function checkRuntimeDirs() {
   const jobsDir = join49(rootDir, "jobs");
   const readyDir = join49(rootDir, "ready");
   let allOk = true;
-  if (!existsSync46(rootDir)) {
+  if (!existsSync47(rootDir)) {
     warn3(".specialists/ not found in current project");
     fix("specialists init");
     allOk = false;
   } else {
     ok3(".specialists/ present");
     for (const [subDir, label] of [[jobsDir, "jobs"], [readyDir, "ready"]]) {
-      if (!existsSync46(subDir)) {
+      if (!existsSync47(subDir)) {
         warn3(`.specialists/${label}/ missing \u2014 auto-creating`);
         mkdirSync17(subDir, { recursive: true });
         ok3(`.specialists/${label}/ created`);
@@ -60570,7 +60673,7 @@ function checkClaudeMdFragments() {
   section3("CLAUDE.md fragments");
   const projectRoot = process.cwd();
   const claudeMd = join49(projectRoot, "CLAUDE.md");
-  if (!existsSync46(claudeMd)) {
+  if (!existsSync47(claudeMd)) {
     warn3("No CLAUDE.md in project root \u2014 skipping fragment check");
     return true;
   }
@@ -60937,7 +61040,7 @@ function cleanupProcesses(jobsDir, dryRun) {
   };
   for (const jobId of entries) {
     const statusPath = join49(jobsDir, jobId, "status.json");
-    if (!existsSync46(statusPath))
+    if (!existsSync47(statusPath))
       continue;
     try {
       const status = JSON.parse(readFileSync38(statusPath, "utf8"));
@@ -61026,7 +61129,7 @@ function checkZombieJobs() {
   section3("Background jobs");
   hint(`watchdog mode: ${resolveWatchdogMode()}`);
   const jobsDir = join49(CWD, ".specialists", "jobs");
-  if (!existsSync46(jobsDir)) {
+  if (!existsSync47(jobsDir)) {
     hint("No .specialists/jobs/ \u2014 skipping");
     return true;
   }
@@ -61265,7 +61368,7 @@ var init_doctor = __esm(() => {
 
 // src/specialist/benchmarks.ts
 import { randomUUID as randomUUID4 } from "crypto";
-import { closeSync as closeSync5, existsSync as existsSync47, fsyncSync as fsyncSync2, mkdirSync as mkdirSync18, openSync as openSync6, readFileSync as readFileSync39, renameSync as renameSync6, writeFileSync as writeFileSync21 } from "fs";
+import { closeSync as closeSync5, existsSync as existsSync48, fsyncSync as fsyncSync2, mkdirSync as mkdirSync18, openSync as openSync6, readFileSync as readFileSync39, renameSync as renameSync6, writeFileSync as writeFileSync21 } from "fs";
 import { homedir as homedir15 } from "os";
 import { dirname as dirname23, join as join50 } from "path";
 async function loadBenchmarkSnapshot(options2 = {}) {
@@ -61300,7 +61403,7 @@ async function loadSourceSnapshot(source, options2, warn4) {
   return cached4 ? toSnapshot(cached4) : null;
 }
 function readCache2(path3, options2, warn4) {
-  if (!existsSync47(path3))
+  if (!existsSync48(path3))
     return null;
   try {
     const parsed = JSON.parse(readFileSync39(path3, "utf8"));
@@ -62063,7 +62166,7 @@ var init_setup = __esm(() => {
 });
 
 // src/cli/serve-hot-reload.ts
-import { existsSync as existsSync48, readdirSync as readdirSync23, statSync as statSync15, watch as fsWatch } from "fs";
+import { existsSync as existsSync49, readdirSync as readdirSync23, statSync as statSync15, watch as fsWatch } from "fs";
 import { join as join52 } from "path";
 function specialistNameFromFile(file) {
   const match = file.match(/^(.+)\.specialist\.(json|yaml)$/);
@@ -62071,7 +62174,7 @@ function specialistNameFromFile(file) {
 }
 function snapshotMtimes(dir) {
   const out = new Map;
-  if (!existsSync48(dir))
+  if (!existsSync49(dir))
     return out;
   const entries = readdirSync23(dir).filter((name) => specialistNameFromFile(name) !== null);
   for (const name of entries) {
@@ -62133,7 +62236,7 @@ function createUserDirWatcher(opts) {
       for (const file of changed)
         queue(file);
     }, opts.pollMs);
-  } else if (existsSync48(opts.userDir)) {
+  } else if (existsSync49(opts.userDir)) {
     try {
       watcher = fsWatch(opts.userDir, { persistent: false }, (_eventType, filename) => {
         queue(filename ? String(filename) : null);
@@ -62176,7 +62279,7 @@ import { randomUUID as randomUUID6 } from "crypto";
 import { once } from "events";
 import { spawnSync as spawnSync28 } from "child_process";
 import { access, readdir as readdir2, readFile as readFile4, constants as constants3 } from "fs/promises";
-import { existsSync as existsSync49 } from "fs";
+import { existsSync as existsSync50 } from "fs";
 import { homedir as homedir17 } from "os";
 import { join as join53 } from "path";
 function createReadinessState() {
@@ -62194,7 +62297,7 @@ function pruneAuditFailures(state, now = Date.now()) {
   }
 }
 async function checkUserDirSpecs(userDir) {
-  if (!existsSync49(userDir))
+  if (!existsSync50(userDir))
     return "empty";
   const entries = await readdir2(userDir).catch(() => []);
   const specFiles = entries.filter((name) => name.endsWith(".specialist.json") || name.endsWith(".specialist.yaml"));
@@ -92321,7 +92424,7 @@ var init_stdio = __esm(() => {
 });
 
 // src/activation/transport/pending-store.ts
-import { existsSync as existsSync50, mkdirSync as mkdirSync20, readdirSync as readdirSync24, readFileSync as readFileSync42, renameSync as renameSync7, unlinkSync as unlinkSync2, writeFileSync as writeFileSync23 } from "fs";
+import { existsSync as existsSync51, mkdirSync as mkdirSync20, readdirSync as readdirSync24, readFileSync as readFileSync42, renameSync as renameSync7, unlinkSync as unlinkSync2, writeFileSync as writeFileSync23 } from "fs";
 import { join as join54 } from "path";
 function projectDeliveryState(state) {
   if (state === "delivered")
@@ -92343,7 +92446,7 @@ function replyPath(repoRoot, activationId, messageId) {
   return join54(interactionsRoot(repoRoot), activationId, `${messageId}.reply.json`);
 }
 function writeAtomic(path3, value, exclusive = false) {
-  if (exclusive && existsSync50(path3)) {
+  if (exclusive && existsSync51(path3)) {
     throw new Error(`interaction record already exists: ${path3}`);
   }
   const tmp = `${path3}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
@@ -92359,7 +92462,7 @@ function writeAtomic(path3, value, exclusive = false) {
   }
 }
 function readJson3(path3) {
-  if (!existsSync50(path3))
+  if (!existsSync51(path3))
     return;
   try {
     return JSON.parse(readFileSync42(path3, "utf-8"));
@@ -92431,7 +92534,7 @@ function recordReplyDelivery(repoRoot, activationId, messageId, reply) {
 }
 function listForActivation(repoRoot, activationId) {
   const dir = join54(interactionsRoot(repoRoot), activationId);
-  if (!existsSync50(dir))
+  if (!existsSync51(dir))
     return [];
   const views = [];
   for (const entry of readdirSync24(dir)) {
@@ -92446,7 +92549,7 @@ function listForActivation(repoRoot, activationId) {
 }
 function listAll(repoRoot) {
   const root = interactionsRoot(repoRoot);
-  if (!existsSync50(root))
+  if (!existsSync51(root))
     return [];
   return readdirSync24(root).flatMap((activationId) => listForActivation(repoRoot, activationId)).sort((a, b) => a.createdAtMs - b.createdAtMs);
 }
@@ -92559,11 +92662,11 @@ ${detail.missing.map((m) => `  - ${m}`).join(`
 
 // src/activation/workspace-lease.ts
 import { createHash as createHash11 } from "crypto";
-import { existsSync as existsSync51, linkSync, mkdirSync as mkdirSync21, readFileSync as readFileSync43, realpathSync as realpathSync5, renameSync as renameSync8, unlinkSync as unlinkSync3, writeFileSync as writeFileSync24 } from "fs";
+import { existsSync as existsSync52, linkSync, mkdirSync as mkdirSync21, readFileSync as readFileSync43, realpathSync as realpathSync5, renameSync as renameSync8, unlinkSync as unlinkSync3, writeFileSync as writeFileSync24 } from "fs";
 import { join as join55 } from "path";
 function procLeaseProbe() {
   return {
-    canVerify: () => existsSync51("/proc/self/stat"),
+    canVerify: () => existsSync52("/proc/self/stat"),
     startTicks(pid) {
       try {
         const stat2 = readFileSync43(`/proc/${pid}/stat`, "utf-8");
@@ -92598,7 +92701,7 @@ function leasePath(workspace) {
 }
 function inspect(workspace, probe = procLeaseProbe()) {
   const path3 = leasePath(workspace);
-  if (!existsSync51(path3))
+  if (!existsSync52(path3))
     return { state: "free" };
   let lease;
   try {
@@ -92756,10 +92859,10 @@ var init_workspace_lease = __esm(() => {
 });
 
 // src/activation/workspace-reconcile.ts
-import { appendFileSync as appendFileSync6, existsSync as existsSync52, mkdirSync as mkdirSync22, readdirSync as readdirSync25, readFileSync as readFileSync44, unlinkSync as unlinkSync4 } from "fs";
+import { appendFileSync as appendFileSync6, existsSync as existsSync53, mkdirSync as mkdirSync22, readdirSync as readdirSync25, readFileSync as readFileSync44, unlinkSync as unlinkSync4 } from "fs";
 import { join as join56 } from "path";
 function readLogAt(path3) {
-  if (!existsSync52(path3))
+  if (!existsSync53(path3))
     return [];
   const out = [];
   for (const line of readFileSync44(path3, "utf-8").split(`
@@ -92782,7 +92885,7 @@ function leaseScopeFor(cwd) {
 }
 function projectUncertainWorkspaces(scope, probe = procLeaseProbe()) {
   const dir = leaseDir(scope);
-  if (!existsSync52(dir))
+  if (!existsSync53(dir))
     return [];
   const out = [];
   for (const entry of readdirSync25(dir)) {
@@ -92900,7 +93003,7 @@ var init_rejection = __esm(() => {
 });
 
 // src/tools/specialist/activation.tool.ts
-import { existsSync as existsSync53 } from "fs";
+import { existsSync as existsSync54 } from "fs";
 import { fileURLToPath as fileURLToPath9 } from "url";
 function toActivationView(snapshot, nowMs = Date.now()) {
   return {
@@ -93113,7 +93216,7 @@ var init_activation_tool = __esm(() => {
   DIST_LIB_PATH = (() => {
     for (const candidate of ["./lib.js", "../../../dist/lib.js"]) {
       const path3 = fileURLToPath9(new URL(candidate, import.meta.url));
-      if (existsSync53(path3))
+      if (existsSync54(path3))
         return path3;
     }
     return fileURLToPath9(new URL("../../../dist/lib.js", import.meta.url));
@@ -93439,7 +93542,7 @@ var init_peer_bridge = __esm(() => {
 });
 
 // src/activation/transport/roster.ts
-import { existsSync as existsSync54, readdirSync as readdirSync26, readFileSync as readFileSync46 } from "fs";
+import { existsSync as existsSync55, readdirSync as readdirSync26, readFileSync as readFileSync46 } from "fs";
 import { homedir as homedir18 } from "os";
 import { join as join57 } from "path";
 function defaultRosterDir() {
@@ -93514,7 +93617,7 @@ function scanRoster(options2 = {}) {
   const probe = options2.probe ?? procProbe();
   const live = [];
   const rejected = [];
-  if (!existsSync54(dir))
+  if (!existsSync55(dir))
     return { live, rejected };
   for (const file of readdirSync26(dir)) {
     if (!file.endsWith(".json"))
@@ -93832,7 +93935,7 @@ var ASK_TOOL = "ask_coordinator", ESCALATE_TOOL = "escalate_to_coordinator", too
 });
 
 // src/activation/pi-sdk.ts
-import { existsSync as existsSync55 } from "fs";
+import { existsSync as existsSync56 } from "fs";
 import { join as join58 } from "path";
 import { pathToFileURL as pathToFileURL2 } from "url";
 function piSdkCandidates() {
@@ -93840,7 +93943,7 @@ function piSdkCandidates() {
   const globalDir = resolveGlobalNodeModulesDir2();
   if (globalDir) {
     const entry = join58(globalDir, PI_SDK_PACKAGE, "dist", "index.js");
-    if (existsSync55(entry))
+    if (existsSync56(entry))
       candidates.push(pathToFileURL2(entry).href);
   }
   return candidates;
@@ -94978,7 +95081,7 @@ var init_settlement_store = () => {};
 
 // src/activation/native-host.ts
 import { randomUUID as randomUUID9 } from "crypto";
-import { existsSync as existsSync56 } from "fs";
+import { existsSync as existsSync57 } from "fs";
 import { join as join60 } from "path";
 function extractTokenUsage(event) {
   const nested = nativeSessionTokenUsage(event);
@@ -95801,7 +95904,7 @@ class NativeActivationHost {
     if (this.workItemsDefault)
       return this.workItemsDefault;
     const dbPath = resolveWorkItemDbPath();
-    if (!existsSync56(dbPath)) {
+    if (!existsSync57(dbPath)) {
       throw new Error(`no Substrate work store at ${dbPath} (set SUBSTRATE_DB (or the legacy XTRM_STATE_DB) or initialize it via xt init / sb)`);
     }
     this.workItemsDefault = await openWorkItemBoundary({ dbPath });
@@ -96574,7 +96677,7 @@ var init_native_host = __esm(() => {
   NON_LOCAL_EXTENSION_PREFIXES = ["npm:", "git:", "github:", "http:", "https:", "ssh:"];
   defaultExtensionSourceResolutionEnv = {
     globalNodeModulesDir: resolveGlobalNodeModulesDir2,
-    manifestExists: (packagePath) => existsSync56(join60(packagePath, "package.json")),
+    manifestExists: (packagePath) => existsSync57(join60(packagePath, "package.json")),
     piAgentDir: () => {
       return;
     }
@@ -97011,7 +97114,7 @@ var init_specialist_list_tool = __esm(() => {
 });
 
 // src/mcp/resume-tool.ts
-import { existsSync as existsSync57 } from "fs";
+import { existsSync as existsSync58 } from "fs";
 import { fileURLToPath as fileURLToPath10 } from "url";
 function createSpecialistResumeTool(getHost, getPusher) {
   return {
@@ -97063,7 +97166,7 @@ var init_resume_tool = __esm(() => {
   DIST_LIB_PATH2 = (() => {
     for (const candidate of ["./lib.js", "../../dist/lib.js"]) {
       const path3 = fileURLToPath10(new URL(candidate, import.meta.url));
-      if (existsSync57(path3))
+      if (existsSync58(path3))
         return path3;
     }
     return fileURLToPath10(new URL("../../dist/lib.js", import.meta.url));
