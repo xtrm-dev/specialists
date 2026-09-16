@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { Supervisor } from '../specialist/supervisor.js';
 import { createObservabilitySqliteClient } from '../specialist/observability-sqlite.js';
 import { parseTimelineEvent, type TimelineEvent } from '../specialist/timeline-events.js';
-import { resolveNodeRefWithClient, resolveSingleActiveNodeRef } from '../specialist/node-resolve.js';
+import { resolveNodeRefWithClient, resolveSingleActiveNodeRef, tryResolveNodeRefWithClient } from '../specialist/node-resolve.js';
 import { formatTokenUsageSummary } from './format-helpers.js';
 
 const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
@@ -50,23 +50,39 @@ interface ResultArgs {
   jobId?: string;
   nodeId?: string;
   memberKey?: string;
+  positionalColonRef?: string;
+  native?: boolean;
   wait: boolean;
   json: boolean;
   timeout?: number; // seconds; undefined = no timeout
 }
 
-// Identity grammar for `sp result <ref>` (XTRM-93 N2A):
+// Identity grammar for `sp result <ref>` (XTRM-93 N2A, corrected by the
+// N2A namespace fix):
 // - legacy job id: no colon (e.g. 6-hex, uuid) -> jobId preserved.
-// - native activation: `act:<core>` where <core> is non-empty with no colon -> jobId preserved, NOT split.
-// - native attempt: `att:<core>:<n>` where <core> is non-empty with no colon and <n> is digits
-//   -> jobId preserved, later mapped to `act:<core>` for storage lookup.
-// - legacy node:member: `<node-ref>:<member>` where the ref does NOT start with `act:`/`att:`
-//   -> split on the first colon (existing behaviour).
-// - any other ref starting with `act:`/`att:` is malformed -> explicit error, never a node lookup.
+// - positional colon ref (`<node-ref>:<member>`, split on the first colon) ->
+//   positionalColonRef retains the raw value while nodeId/memberKey carry the
+//   split pair. Identity is NEVER decided by syntax alone: run() attempts the
+//   historical node/member resolution first and only falls through to native
+//   when that pair demonstrably does not exist.
+// - native activation: `act:<core>` where <core> is non-empty with no colon.
+// - native attempt: `att:<core>:<n>` where <core> is non-empty with no colon
+//   and <n> is digits, later mapped to `act:<core>` for storage lookup.
+// - native shape validation lives in run(), not parseArgs: a positional ref
+//   starting with `act:`/`att:` that is malformed as native but resolves as a
+//   legacy pair keeps the legacy result; only a malformed native-looking ref
+//   with no legacy match emits the native grammar error.
+// Correction to the N2A claim: reserving every syntactically valid `act:`/`att:`
+// ref as native BEFORE consulting the node resolver did NOT preserve every
+// legacy ref. Before N2A, the text before the first colon was always a node ref
+// resolved by PREFIX (listNodeRunsByRef matches id LIKE '<ref>%' OR node_name
+// LIKE '<ref>%'), so `act:<member>` and `att:<member>` were valid legacy shapes
+// whenever `act`/`att` uniquely prefixed a live node id or name (e.g. a node
+// named `action-plan`). The reservation silently removed that namespace.
 // Rationale: native ids deliberately contain colons (minted in src/activation/native-host.ts as
 // `act:${uuid.slice(0,12)}` / `att:${activationId.slice(4)}:1`, retries only bump `:n` via
-// nextAttemptId in src/activation/registry.ts); the measured store has no legacy job_id and no
-// node_id containing a colon, so reserving `act:`/`att:` preserves every legacy ref.
+// nextAttemptId in src/activation/registry.ts); the measured store happened to hold
+// no colliding node at the time, which made the defect latent rather than absent.
 // Attempt existence (not just shape) is verified at lookup time in run():
 // `att:<core>:<n>` resolves only if a forensic row for activation `act:<core>`
 // carries exactly that attempt_id. The forensic attempt_id set is authoritative:
@@ -86,7 +102,9 @@ interface ResultArgs {
 // formats are not rejected here.
 // Explicit flags: a positional colon ref combined with --node/--member keeps
 // the legacy positional-wins rule (the colon branch only runs when neither
-// flag was given, and jobId wins downstream) -- unchanged for native refs.
+// flag was given, and jobId wins downstream) -- unchanged. `--native` forces
+// the native interpretation of a positional colon ref and skips the legacy
+// attempt (see run()); without it, legacy wins on collision by design.
 export function isNativeActivationId(ref: string): boolean {
   return /^act:[^:]+$/.test(ref);
 }
@@ -100,7 +118,7 @@ function isNativePrefixRef(ref: string): boolean {
 }
 
 export function resolveNativeAttemptToActivationId(attemptId: string): string {
-  // Precondition: isNativeAttemptId(attemptId); the parse guard guarantees it.
+  // Precondition: isNativeAttemptId(attemptId); the run() guard guarantees it.
   // Fail closed rather than synthesize a malformed activation id from bad input.
   if (!isNativeAttemptId(attemptId)) {
     throw new Error(`Invalid attempt id '${attemptId}': expected 'att:<id>:<n>'`);
@@ -114,6 +132,8 @@ export function parseArgs(argv: string[]): ResultArgs {
   let jobId: string | undefined;
   let nodeId: string | undefined;
   let memberKey: string | undefined;
+  let positionalColonRef: string | undefined;
+  let native = false;
   let wait = false;
   let json = false;
   let timeout: number | undefined;
@@ -123,6 +143,7 @@ export function parseArgs(argv: string[]): ResultArgs {
 
     if (token === '--wait') { wait = true; continue; }
     if (token === '--json') { json = true; continue; }
+    if (token === '--native') { native = true; continue; }
     if (token === '--node' && argv[i + 1]) { nodeId = argv[++i]; continue; }
     if ((token === '--member' || token === '--member-key') && argv[i + 1]) { memberKey = argv[++i]; continue; }
     if (token === '--timeout' && argv[i + 1]) {
@@ -142,27 +163,23 @@ export function parseArgs(argv: string[]): ResultArgs {
   }
 
   if (!jobId && !(nodeId && memberKey) && !memberKey) {
-    console.error('Usage: specialists|sp result <node-ref>:<member> [--wait] [--timeout <seconds>] [--json]\n       specialists|sp result <job-id> [--wait] [--timeout <seconds>] [--json]\n       specialists|sp result --node <node-ref> --member <member-key> [--wait] [--timeout <seconds>] [--json]\n       specialists|sp result --member <member-key> [--wait] [--timeout <seconds>] [--json]');
+    console.error('Usage: specialists|sp result <node-ref>:<member> [--native] [--wait] [--timeout <seconds>] [--json]\n       specialists|sp result <job-id> [--wait] [--timeout <seconds>] [--json]\n       specialists|sp result --node <node-ref> --member <member-key> [--wait] [--timeout <seconds>] [--json]\n       specialists|sp result --member <member-key> [--wait] [--timeout <seconds>] [--json]');
     process.exit(1);
   }
 
   if (jobId && jobId.includes(':') && !nodeId && !memberKey) {
-    if (isNativePrefixRef(jobId)) {
-      if (isNativeActivationId(jobId) || isNativeAttemptId(jobId)) {
-        // Native identity: preserve intact for storage lookup (attempt maps to its activation later).
-      } else if (jobId.startsWith('act:')) {
-        console.error(`Error: invalid activation id '${jobId}': expected 'act:<id>'`);
-        process.exit(1);
-      } else {
-        console.error(`Error: invalid attempt id '${jobId}': expected 'att:<id>:<n>'`);
-        process.exit(1);
-      }
-    } else {
-      const separatorIndex = jobId.indexOf(':');
-      nodeId = jobId.slice(0, separatorIndex);
-      memberKey = jobId.slice(separatorIndex + 1);
-      jobId = undefined;
-    }
+    // Positional colon ref: retain the raw value for run()-time resolution.
+    // Keep the historical first-colon split so nodeId/memberKey are populated
+    // (preserving the pre-N2A "node ref cannot be empty" / "member key cannot
+    // be empty" errors). Do NOT set jobId and do NOT validate or reject
+    // native-looking shapes here -- native shape validation lives in run().
+    // The colon branch only runs when neither explicit flag was given, so the
+    // positional-wins rule with explicit flags is unchanged.
+    const separatorIndex = jobId.indexOf(':');
+    positionalColonRef = jobId;
+    nodeId = jobId.slice(0, separatorIndex);
+    memberKey = jobId.slice(separatorIndex + 1);
+    jobId = undefined;
   }
 
   if (nodeId !== undefined && nodeId.length === 0) {
@@ -176,33 +193,58 @@ export function parseArgs(argv: string[]): ResultArgs {
   }
 
   if (!jobId && !memberKey) {
-    console.error('Usage: specialists|sp result <node-ref>:<member> [--wait] [--timeout <seconds>] [--json]\n       specialists|sp result <job-id> [--wait] [--timeout <seconds>] [--json]\n       specialists|sp result --node <node-ref> --member <member-key> [--wait] [--timeout <seconds>] [--json]\n       specialists|sp result --member <member-key> [--wait] [--timeout <seconds>] [--json]');
+    console.error('Usage: specialists|sp result <node-ref>:<member> [--native] [--wait] [--timeout <seconds>] [--json]\n       specialists|sp result <job-id> [--wait] [--timeout <seconds>] [--json]\n       specialists|sp result --node <node-ref> --member <member-key> [--wait] [--timeout <seconds>] [--json]\n       specialists|sp result --member <member-key> [--wait] [--timeout <seconds>] [--json]');
     process.exit(1);
   }
 
-  return { jobId, nodeId, memberKey, wait, json, timeout };
+  return { jobId, nodeId, memberKey, positionalColonRef, native, wait, json, timeout };
 }
 
-function resolveJobIdFromNodeMember(
+export type TryResolveJobIdResult =
+  | { kind: 'resolved'; jobId: string }
+  | { kind: 'node_absent' }
+  | { kind: 'member_absent' }
+  | { kind: 'member_without_job_id' };
+
+export function tryResolveJobIdFromNodeMember(
   sqliteClient: NonNullable<ReturnType<typeof createObservabilitySqliteClient>>,
   nodeId: string,
   memberKey: string,
-): string {
+): TryResolveJobIdResult {
+  // Non-throwing variant of resolveJobIdFromNodeMember: operational DB
+  // failures thrown by readNodeRun/readNodeMembers propagate to the caller
+  // and must never be flattened into an absent outcome.
   const nodeRun = sqliteClient.readNodeRun(nodeId);
   if (!nodeRun) {
-    throw new Error(`Node run not found: ${nodeId}`);
+    return { kind: 'node_absent' };
   }
 
   const member = sqliteClient.readNodeMembers(nodeId).find((entry) => entry.member_id === memberKey);
   if (!member) {
-    throw new Error(`Member '${memberKey}' not found in node '${nodeId}'`);
+    return { kind: 'member_absent' };
   }
 
   if (!member.job_id) {
-    throw new Error(`Member '${memberKey}' in node '${nodeId}' has no job id yet`);
+    return { kind: 'member_without_job_id' };
   }
 
-  return member.job_id;
+  return { kind: 'resolved', jobId: member.job_id };
+}
+
+export function resolveJobIdFromNodeMember(
+  sqliteClient: NonNullable<ReturnType<typeof createObservabilitySqliteClient>>,
+  nodeId: string,
+  memberKey: string,
+): string {
+  const outcome = tryResolveJobIdFromNodeMember(sqliteClient, nodeId, memberKey);
+  if (outcome.kind === 'resolved') return outcome.jobId;
+  if (outcome.kind === 'node_absent') {
+    throw new Error(`Node run not found: ${nodeId}`);
+  }
+  if (outcome.kind === 'member_absent') {
+    throw new Error(`Member '${memberKey}' not found in node '${nodeId}'`);
+  }
+  throw new Error(`Member '${memberKey}' in node '${nodeId}' has no job id yet`);
 }
 
 function findMissingNativeAttemptError(
@@ -437,14 +479,91 @@ export async function run(): Promise<void> {
   };
 
   try {
-    // The exact native attempt the operator asked for, if any. jobId below is
-    // the activation id (storage belongs to the activation); this keeps the
-    // attempt string for existence validation and error messages.
-    const requestedAttemptId = args.jobId && isNativeAttemptId(args.jobId) ? args.jobId : undefined;
-    const jobId = (() => {
-      if (args.jobId) {
+    // COLLISION POLICY (compatibility-preserving, deterministic): when BOTH a
+    // legacy node/member pair AND a native identity exist for the same
+    // positional string, the LEGACY node/member interpretation wins by default,
+    // because that is what existed before N2A. Native access in that collision
+    // is available only via the explicit `--native` flag. Identity is never
+    // decided by syntax alone.
+    // Resolution order for a positional colon ref (positionalColonRef set):
+    // (a) explicit `--native` -> native path directly, no legacy attempt;
+    // (b) otherwise attempt the legacy pair (first-colon split) through the
+    //     real node/member resolver: `resolved` uses that jobId, `ambiguous`
+    //     surfaces the existing ambiguity error, a thrown operational failure
+    //     surfaces as-is and is never reinterpreted as native;
+    // (c) on legacy `node_absent` / `member_absent` / `member_without_job_id`:
+    //     valid native `act:`/`att:` identity -> native path; malformed
+    //     native-looking ref -> native grammar error; otherwise re-raise the
+    //     matching existing legacy error.
+    let requestedAttemptId: string | undefined;
+    const resolveNativePositional = (raw: string): string => {
+      if (isNativeActivationId(raw)) return raw;
+      if (isNativeAttemptId(raw)) {
+        requestedAttemptId = raw;
         // Native attempts share their activation's storage row (`att:<core>:<n>` -> `act:<core>`).
-        if (requestedAttemptId) return resolveNativeAttemptToActivationId(args.jobId);
+        return resolveNativeAttemptToActivationId(raw);
+      }
+      if (raw.startsWith('act:')) {
+        throw new Error(`invalid activation id '${raw}': expected 'act:<id>'`);
+      }
+      throw new Error(`invalid attempt id '${raw}': expected 'att:<id>:<n>'`);
+    };
+    const jobId = ((): string => {
+      if (args.positionalColonRef) {
+        const raw = args.positionalColonRef;
+        const nodeRef = args.nodeId as string;
+        const legacyMemberKey = args.memberKey as string;
+        if (args.native) {
+          // (a) explicit disambiguator: native path directly.
+          return resolveNativePositional(raw);
+        }
+        // (b) legacy pair first through the real resolver. Operational DB
+        // failures throw out of the try-variants and are never reinterpreted.
+        if (!sqliteClient) {
+          throw new Error('Observability SQLite DB is unavailable. Run: specialists db setup');
+        }
+        const nodeOutcome = tryResolveNodeRefWithClient(nodeRef, sqliteClient);
+        if (nodeOutcome.kind === 'ambiguous') {
+          // Surface the existing ambiguity error with its exact message.
+          return resolveNodeRefWithClient(nodeRef, sqliteClient);
+        }
+        if (nodeOutcome.kind === 'resolved') {
+          const resolvedId = nodeOutcome.id;
+          const memberOutcome = tryResolveJobIdFromNodeMember(sqliteClient, resolvedId, legacyMemberKey);
+          if (memberOutcome.kind === 'resolved') return memberOutcome.jobId;
+          // (c) legacy member miss: native fallback or legacy re-raise.
+          if (isNativeActivationId(raw) || isNativeAttemptId(raw)) {
+            return resolveNativePositional(raw);
+          }
+          if (isNativePrefixRef(raw)) {
+            return resolveNativePositional(raw);
+          }
+          if (memberOutcome.kind === 'member_absent') {
+            throw new Error(`Member '${legacyMemberKey}' not found in node '${resolvedId}'`);
+          }
+          if (memberOutcome.kind === 'member_without_job_id') {
+            throw new Error(`Member '${legacyMemberKey}' in node '${resolvedId}' has no job id yet`);
+          }
+          throw new Error(`Node run not found: ${resolvedId}`);
+        }
+        // (c) legacy node miss: native fallback or legacy re-raise.
+        if (isNativeActivationId(raw) || isNativeAttemptId(raw)) {
+          return resolveNativePositional(raw);
+        }
+        if (isNativePrefixRef(raw)) {
+          return resolveNativePositional(raw);
+        }
+        throw new Error(`No node matching ref: ${nodeRef}`);
+      }
+      // Non-positional path (legacy job id or explicit --node/--member).
+      // The exact native attempt the operator asked for, if any. jobId below is
+      // the activation id (storage belongs to the activation); this keeps the
+      // attempt string for existence validation and error messages.
+      if (args.jobId && isNativeAttemptId(args.jobId)) {
+        requestedAttemptId = args.jobId;
+        return resolveNativeAttemptToActivationId(args.jobId);
+      }
+      if (args.jobId) {
         return args.jobId;
       }
       if (!sqliteClient || !args.memberKey) {

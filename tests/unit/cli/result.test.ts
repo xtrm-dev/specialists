@@ -300,20 +300,25 @@ describe('result CLI identity grammar (XTRM-93 N2A)', () => {
     expect(args.memberKey).toBe('some-member');
   });
 
-  it('act:0293a2bc-f48 native activation -> jobId preserved, NOT split', async () => {
+  it('act:0293a2bc-f48 positional colon ref is retained for legacy-first resolution (N2A fix)', async () => {
+    // N2A-fix: identity is never decided by syntax alone. Parse retains the raw
+    // positional value and the historical first-colon split; run() attempts the
+    // legacy node/member pair first and only falls through to native.
     const { parseArgs } = await loadParse();
     const args = parseArgs(['act:0293a2bc-f48']);
-    expect(args.jobId).toBe('act:0293a2bc-f48');
-    expect(args.nodeId).toBeUndefined();
-    expect(args.memberKey).toBeUndefined();
+    expect(args.jobId).toBeUndefined();
+    expect((args as unknown as { positionalColonRef?: string }).positionalColonRef).toBe('act:0293a2bc-f48');
+    expect(args.nodeId).toBe('act');
+    expect(args.memberKey).toBe('0293a2bc-f48');
   });
 
-  it('att:0293a2bc-f48:1 native attempt -> jobId preserved, NOT split', async () => {
+  it('att:0293a2bc-f48:1 positional colon ref is retained for legacy-first resolution (N2A fix)', async () => {
     const { parseArgs } = await loadParse();
     const args = parseArgs(['att:0293a2bc-f48:1']);
-    expect(args.jobId).toBe('att:0293a2bc-f48:1');
-    expect(args.nodeId).toBeUndefined();
-    expect(args.memberKey).toBeUndefined();
+    expect(args.jobId).toBeUndefined();
+    expect((args as unknown as { positionalColonRef?: string }).positionalColonRef).toBe('att:0293a2bc-f48:1');
+    expect(args.nodeId).toBe('att');
+    expect(args.memberKey).toBe('0293a2bc-f48:1');
   });
 
   it('att attempt maps to its activation for lookup', async () => {
@@ -322,28 +327,36 @@ describe('result CLI identity grammar (XTRM-93 N2A)', () => {
     expect(resolveNativeAttemptToActivationId('att:758931b7-9ce:1')).toBe('act:758931b7-9ce');
   });
 
-  it('act: malformed -> explicit error', async () => {
+  it('act: malformed native shape is NOT rejected at parse (N2A fix moves validation to run())', async () => {
+    // N2A-fix: parse retains the positional value; the native grammar error is
+    // emitted by run() only when the legacy pair demonstrably does not exist.
+    // `act:` has an empty member, so the pre-N2A empty-member error still fires
+    // here (parse preserves the historical empty checks).
     const { parseArgs } = await loadParse();
     const { errors, exitSpy } = mockExit();
     expect(() => parseArgs(['act:'])).toThrow('exit:1');
     expect(exitSpy).toHaveBeenCalledWith(1);
-    expect(errors.join('\n')).toContain("invalid activation id 'act:'");
+    expect(errors.join('\n')).toContain('member key cannot be empty');
   });
 
-  it('att:foo malformed -> explicit error', async () => {
+  it('att:foo malformed native shape is retained at parse (grammar error moves to run())', async () => {
     const { parseArgs } = await loadParse();
-    const { errors, exitSpy } = mockExit();
-    expect(() => parseArgs(['att:foo'])).toThrow('exit:1');
-    expect(exitSpy).toHaveBeenCalledWith(1);
-    expect(errors.join('\n')).toContain("invalid attempt id 'att:foo'");
+    mockExit();
+    const args = parseArgs(['att:foo']);
+    expect(args.jobId).toBeUndefined();
+    expect((args as unknown as { positionalColonRef?: string }).positionalColonRef).toBe('att:foo');
+    expect(args.nodeId).toBe('att');
+    expect(args.memberKey).toBe('foo');
   });
 
-  it('att::1 malformed -> explicit error', async () => {
+  it('att::1 malformed native shape is retained at parse (grammar error moves to run())', async () => {
     const { parseArgs } = await loadParse();
-    const { errors, exitSpy } = mockExit();
-    expect(() => parseArgs(['att::1'])).toThrow('exit:1');
-    expect(exitSpy).toHaveBeenCalledWith(1);
-    expect(errors.join('\n')).toContain("invalid attempt id 'att::1'");
+    mockExit();
+    const args = parseArgs(['att::1']);
+    expect(args.jobId).toBeUndefined();
+    expect((args as unknown as { positionalColonRef?: string }).positionalColonRef).toBe('att::1');
+    expect(args.nodeId).toBe('att');
+    expect(args.memberKey).toBe(':1');
   });
 
   it(':member empty node ref -> existing error path', async () => {
@@ -370,38 +383,45 @@ describe('result CLI identity grammar (XTRM-93 N2A)', () => {
     expect(args.memberKey).toBe('some-member');
   });
 
-  it('att well-formed non-1 suffixes stay preserved at parse (existence is runtime)', async () => {
+  it('att well-formed non-1 suffixes are retained as positional refs at parse (existence is runtime)', async () => {
     const { parseArgs } = await loadParse();
     for (const ref of ['att:758931b7-9ce:0', 'att:758931b7-9ce:2', 'att:758931b7-9ce:99']) {
       const args = parseArgs([ref]);
-      expect(args.jobId).toBe(ref);
-      expect(args.nodeId).toBeUndefined();
-      expect(args.memberKey).toBeUndefined();
+      expect(args.jobId).toBeUndefined();
+      expect((args as unknown as { positionalColonRef?: string }).positionalColonRef).toBe(ref);
+      expect(args.nodeId).toBe('att');
     }
   });
 
-  it('att:<id>:abc malformed -> explicit error', async () => {
+  it('att:<id>:abc malformed native shape is retained at parse (grammar error moves to run())', async () => {
     const { parseArgs } = await loadParse();
-    const { errors, exitSpy } = mockExit();
-    expect(() => parseArgs(['att:758931b7-9ce:abc'])).toThrow('exit:1');
-    expect(exitSpy).toHaveBeenCalledWith(1);
-    expect(errors.join('\n')).toContain("invalid attempt id 'att:758931b7-9ce:abc'");
+    mockExit();
+    const args = parseArgs(['att:758931b7-9ce:abc']);
+    expect(args.jobId).toBeUndefined();
+    expect((args as unknown as { positionalColonRef?: string }).positionalColonRef).toBe('att:758931b7-9ce:abc');
+    expect(args.nodeId).toBe('att');
+    expect(args.memberKey).toBe('758931b7-9ce:abc');
   });
 
-  it('att:<nonexistent>:1 well-formed -> preserved (runtime reports No job found)', async () => {
+  it('att:<nonexistent>:1 is retained as positional ref at parse (runtime reports No job found)', async () => {
     const { parseArgs } = await loadParse();
     const args = parseArgs(['att:nonexistentcore:1']);
-    expect(args.jobId).toBe('att:nonexistentcore:1');
-    expect(args.nodeId).toBeUndefined();
-    expect(args.memberKey).toBeUndefined();
+    expect(args.jobId).toBeUndefined();
+    expect((args as unknown as { positionalColonRef?: string }).positionalColonRef).toBe('att:nonexistentcore:1');
+    expect(args.nodeId).toBe('att');
+    expect(args.memberKey).toBe('nonexistentcore:1');
   });
 
-  it('trailing space is byte-exact (no trim, accepted strictness)', async () => {
-    // Accepted: refs match byte-exact. 'act:foo ' stays a jobId and fails
-    // closed at lookup; trimming would only churn legacy failure modes.
+  it('trailing space is byte-exact and retained as positional ref (no trim, accepted strictness)', async () => {
+    // Accepted: refs match byte-exact. 'act:foo ' is retained as a positional
+    // colon ref (node 'act', member 'foo '); trimming would only churn legacy
+    // failure modes.
     const { parseArgs } = await loadParse();
     const args = parseArgs(['act:foo ']);
-    expect(args.jobId).toBe('act:foo ');
+    expect(args.jobId).toBeUndefined();
+    expect((args as unknown as { positionalColonRef?: string }).positionalColonRef).toBe('act:foo ');
+    expect(args.nodeId).toBe('act');
+    expect(args.memberKey).toBe('foo ');
   });
 
   it('leading space falls through to the legacy node split (accepted strictness)', async () => {
@@ -461,6 +481,13 @@ describe('result CLI native attempt validation', () => {
     vi.resetModules();
     vi.doMock('../../../src/specialist/observability-sqlite.js', () => ({
       createObservabilitySqliteClient: () => ({
+        // N2A-fix: run() attempts the legacy node/member pair first through the
+        // real resolver, so the mock must implement the node surface. An empty
+        // node table means legacy is absent and the native path applies.
+        listNodeRunsByRef: () => [],
+        readNodeRun: () => null,
+        readNodeMembers: () => [],
+        listNodeRunsByStatuses: () => [],
         readStatus: (jobId: string) => (statusId !== null && jobId === statusId
           ? { id: statusId, specialist: 'bug-hunt', status: 'done', started_at_ms: Date.now() - 1000 }
           : null),
@@ -557,5 +584,347 @@ describe('result CLI native attempt validation', () => {
     await run();
     expect(stdout.join('')).toContain('attempt output');
     expect(exitSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('result CLI N2A namespace fix (legacy positional preserved)', () => {
+  const originalArgv = process.argv;
+  let tempRoot: string;
+
+  beforeEach(() => {
+    tempRoot = mkdtempSync(join(tmpdir(), 'sp-result-n2afix-'));
+    mkdirSync(join(tempRoot, '.specialists', 'jobs'), { recursive: true });
+    vi.spyOn(process, 'cwd').mockReturnValue(tempRoot);
+  });
+
+  afterEach(() => {
+    process.argv = originalArgv;
+    if (existsSync(tempRoot)) rmSync(tempRoot, { recursive: true, force: true });
+    vi.doUnmock('../../../src/specialist/observability-sqlite.js');
+    vi.resetModules();
+    vi.restoreAllMocks();
+  });
+
+  type FakeNode = { id: string; node_name: string; status: string };
+  type FakeMember = { node_run_id: string; member_id: string; job_id?: string };
+
+  async function loadRunWithNodes(opts: {
+    nodes: FakeNode[];
+    members: FakeMember[];
+    statuses: Record<string, { id: string; status: string }>;
+    results: Record<string, string>;
+    forensicByActivation?: Record<string, string[]>;
+    listThrows?: boolean;
+  }) {
+    const nodes = opts.nodes;
+    const members = opts.members;
+    const statuses = opts.statuses;
+    const results = opts.results;
+    const forensicByActivation = opts.forensicByActivation ?? {};
+    const listThrows = opts.listThrows ?? false;
+    vi.resetModules();
+    vi.doMock('../../../src/specialist/observability-sqlite.js', () => ({
+      createObservabilitySqliteClient: () => ({
+        // Generic prefix contract mirroring listNodeRunsByRef semantics
+        // (id LIKE '<ref>%' OR node_name LIKE '<ref>%'): no assumption about
+        // act/att prefixes, so `act` genuinely resolves via `action-plan`.
+        listNodeRunsByRef: (ref: string) => {
+          if (listThrows) throw new Error('DB failure: listNodeRunsByRef exploded');
+          return nodes.filter((n) => n.id.startsWith(ref) || n.node_name.startsWith(ref));
+        },
+        listNodeRunsByStatuses: () => [],
+        readNodeRun: (id: string) => nodes.find((n) => n.id === id) ?? null,
+        readNodeMembers: (id: string) =>
+          members
+            .filter((m) => m.node_run_id === id)
+            .map((m) => ({ node_run_id: m.node_run_id, member_id: m.member_id, job_id: m.job_id })),
+        readStatus: (jobId: string) =>
+          (statuses[jobId]
+            ? { id: statuses[jobId]!.id, specialist: 'bug-hunt', status: statuses[jobId]!.status, started_at_ms: Date.now() - 1000 }
+            : null),
+        readEvents: () => [],
+        readResult: (jobId: string) => results[jobId] ?? null,
+        readForensicEvents: (filters?: { jobId?: string }) => {
+          const ids = (filters?.jobId && forensicByActivation[filters.jobId]) || [];
+          return ids.map((attempt_id, index) => ({
+            id: index + 1, job_id: filters?.jobId, seq: index + 1, t: Date.now(),
+            schema_version: 'v15', event_family: 'job', event_name: 'job.started',
+            participant_kind: null, participant_role: null, participant_id: null,
+            attempt_id, redaction_status: 'none', event_json: '{}',
+          }));
+        },
+        close: () => {},
+      }),
+    }));
+    return import('../../../src/cli/result.js');
+  }
+
+  function capture(): { stdout: string[]; errors: string[]; exitSpy: ReturnType<typeof vi.spyOn> } {
+    const stdout: string[] = [];
+    const errors: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      stdout.push(String(chunk));
+      return true;
+    });
+    vi.spyOn(console, 'error').mockImplementation((msg?: unknown) => {
+      errors.push(String(msg ?? ''));
+    });
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      throw new Error(`exit:${code}`);
+    }) as never);
+    return { stdout, errors, exitSpy };
+  }
+
+  it('legacy unique node prefix act + member resolves through the real resolver', async () => {
+    const { run } = await loadRunWithNodes({
+      nodes: [{ id: 'action-plan-node1', node_name: 'action-plan', status: 'running' }],
+      members: [{ node_run_id: 'action-plan-node1', member_id: 'my-member', job_id: 'legacy-job-1' }],
+      statuses: { 'legacy-job-1': { id: 'legacy-job-1', status: 'done' } },
+      results: { 'legacy-job-1': 'LEGACY OUTPUT act' },
+    });
+    process.argv = ['node', 'specialists', 'result', 'act:my-member'];
+    const { stdout, exitSpy } = capture();
+    await run();
+    expect(stdout.join('')).toContain('LEGACY OUTPUT act');
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  it('legacy unique node prefix att + member resolves through the real resolver', async () => {
+    const { run } = await loadRunWithNodes({
+      nodes: [{ id: 'attribution-node1', node_name: 'attribution-sweep', status: 'running' }],
+      members: [{ node_run_id: 'attribution-node1', member_id: 'my-member', job_id: 'legacy-job-2' }],
+      statuses: { 'legacy-job-2': { id: 'legacy-job-2', status: 'done' } },
+      results: { 'legacy-job-2': 'LEGACY OUTPUT att' },
+    });
+    process.argv = ['node', 'specialists', 'result', 'att:my-member'];
+    const { stdout, exitSpy } = capture();
+    await run();
+    expect(stdout.join('')).toContain('LEGACY OUTPUT att');
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  it('act:<id> with no matching legacy node/member falls through to the native result', async () => {
+    const { run } = await loadRunWithNodes({
+      nodes: [],
+      members: [],
+      statuses: { 'act:core': { id: 'act:core', status: 'done' } },
+      results: { 'act:core': 'NATIVE OUTPUT' },
+    });
+    process.argv = ['node', 'specialists', 'result', 'act:core'];
+    const { stdout, exitSpy } = capture();
+    await run();
+    expect(stdout.join('')).toContain('NATIVE OUTPUT');
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  it('att:<id>:<n> with no matching legacy node/member resolves the exact native attempt', async () => {
+    const { run } = await loadRunWithNodes({
+      nodes: [],
+      members: [],
+      statuses: { 'act:core': { id: 'act:core', status: 'done' } },
+      results: { 'act:core': 'NATIVE ATTEMPT OUTPUT' },
+      forensicByActivation: { 'act:core': ['att:core:1', 'att:core:2'] },
+    });
+    process.argv = ['node', 'specialists', 'result', 'att:core:2'];
+    const { stdout, exitSpy } = capture();
+    await run();
+    expect(stdout.join('')).toContain('NATIVE ATTEMPT OUTPUT');
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  it('collision: legacy + native both exist -> legacy wins (documented compatibility default)', async () => {
+    const { run } = await loadRunWithNodes({
+      nodes: [{ id: 'action-plan-node1', node_name: 'action-plan', status: 'running' }],
+      members: [{ node_run_id: 'action-plan-node1', member_id: 'core', job_id: 'legacy-job-1' }],
+      statuses: {
+        'legacy-job-1': { id: 'legacy-job-1', status: 'done' },
+        'act:core': { id: 'act:core', status: 'done' },
+      },
+      results: { 'legacy-job-1': 'LEGACY WINS', 'act:core': 'NATIVE OUTPUT' },
+    });
+    process.argv = ['node', 'specialists', 'result', 'act:core'];
+    const { stdout, exitSpy } = capture();
+    await run();
+    expect(stdout.join('')).toContain('LEGACY WINS');
+    expect(stdout.join('')).not.toContain('NATIVE OUTPUT');
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  it('malformed native-looking value that IS a valid legacy pair keeps the legacy result', async () => {
+    // `act:foo:bar` is malformed as native (act core must not contain a colon)
+    // but valid as legacy (node `act*` + member `foo:bar`).
+    const { run } = await loadRunWithNodes({
+      nodes: [{ id: 'action-plan-node1', node_name: 'action-plan', status: 'running' }],
+      members: [{ node_run_id: 'action-plan-node1', member_id: 'foo:bar', job_id: 'legacy-job-1' }],
+      statuses: { 'legacy-job-1': { id: 'legacy-job-1', status: 'done' } },
+      results: { 'legacy-job-1': 'LEGACY MALFORMED WINS' },
+    });
+    process.argv = ['node', 'specialists', 'result', 'act:foo:bar'];
+    const { stdout, exitSpy } = capture();
+    await run();
+    expect(stdout.join('')).toContain('LEGACY MALFORMED WINS');
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  it('malformed native-looking value with no legacy match emits the native grammar error', async () => {
+    const { run } = await loadRunWithNodes({
+      nodes: [],
+      members: [],
+      statuses: {},
+      results: {},
+    });
+    process.argv = ['node', 'specialists', 'result', 'att:foo'];
+    const { errors, exitSpy } = capture();
+    await expect(run()).rejects.toThrow('exit:1');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(errors.join('\n')).toContain("invalid attempt id 'att:foo'");
+  });
+
+  it('explicit --native forces native when both interpretations exist', async () => {
+    const { run } = await loadRunWithNodes({
+      nodes: [{ id: 'action-plan-node1', node_name: 'action-plan', status: 'running' }],
+      members: [{ node_run_id: 'action-plan-node1', member_id: 'core', job_id: 'legacy-job-1' }],
+      statuses: {
+        'legacy-job-1': { id: 'legacy-job-1', status: 'done' },
+        'act:core': { id: 'act:core', status: 'done' },
+      },
+      results: { 'legacy-job-1': 'LEGACY WINS', 'act:core': 'NATIVE FORCED' },
+    });
+    process.argv = ['node', 'specialists', 'result', 'act:core', '--native'];
+    const { stdout, exitSpy } = capture();
+    await run();
+    expect(stdout.join('')).toContain('NATIVE FORCED');
+    expect(stdout.join('')).not.toContain('LEGACY WINS');
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  it('resolver THROW (DB failure) surfaces as-is and is never reinterpreted as native', async () => {
+    const { run } = await loadRunWithNodes({
+      nodes: [],
+      members: [],
+      statuses: { 'act:core': { id: 'act:core', status: 'done' } },
+      results: { 'act:core': 'NATIVE OUTPUT' },
+      listThrows: true,
+    });
+    process.argv = ['node', 'specialists', 'result', 'act:core'];
+    const { stdout, errors, exitSpy } = capture();
+    await expect(run()).rejects.toThrow('exit:1');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(errors.join('\n')).toContain('DB failure');
+    expect(stdout.join('')).not.toContain('NATIVE OUTPUT');
+  });
+
+  it('ambiguous legacy prefix surfaces the existing ambiguity error', async () => {
+    const { run } = await loadRunWithNodes({
+      nodes: [
+        { id: 'action-plan-1', node_name: 'action-plan', status: 'running' },
+        { id: 'action-plan-2', node_name: 'action-plan-2', status: 'running' },
+      ],
+      members: [],
+      statuses: {},
+      results: {},
+    });
+    process.argv = ['node', 'specialists', 'result', 'act:my-member'];
+    const { errors, exitSpy } = capture();
+    await expect(run()).rejects.toThrow('exit:1');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(errors.join('\n')).toContain('Ambiguous node ref act matches:');
+  });
+
+  it('non-native positional with no legacy match re-raises the legacy node error', async () => {
+    const { run } = await loadRunWithNodes({
+      nodes: [],
+      members: [],
+      statuses: {},
+      results: {},
+    });
+    process.argv = ['node', 'specialists', 'result', 'node-9:my-member'];
+    const { errors, exitSpy } = capture();
+    await expect(run()).rejects.toThrow('exit:1');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(errors.join('\n')).toContain('No node matching ref: node-9');
+  });
+
+  it('parseArgs retains positionalColonRef and --native, and usage mentions --native', async () => {
+    const mod = await import('../../../src/cli/result.js');
+    const args = mod.parseArgs(['act:core', '--native']);
+    expect((args as unknown as { positionalColonRef?: string }).positionalColonRef).toBe('act:core');
+    expect(args.native).toBe(true);
+    expect(args.jobId).toBeUndefined();
+    const errors: string[] = [];
+    vi.spyOn(console, 'error').mockImplementation((msg?: unknown) => {
+      errors.push(String(msg ?? ''));
+    });
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      throw new Error(`exit:${code}`);
+    }) as never);
+    expect(() => mod.parseArgs([])).toThrow('exit:1');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(errors.join('\n')).toContain('--native');
+  });
+
+  it('tryResolveNodeRefWithClient discriminates resolved/absent/ambiguous and propagates throws', async () => {
+    const mod = await import('../../../src/specialist/node-resolve.js');
+    const resolved = mod.tryResolveNodeRefWithClient('act', {
+      listNodeRunsByRef: () => [{ id: 'action-plan-node1', node_name: 'action-plan' }],
+    } as never);
+    expect(resolved).toEqual({ kind: 'resolved', id: 'action-plan-node1' });
+    const absent = mod.tryResolveNodeRefWithClient('missing', {
+      listNodeRunsByRef: () => [],
+    } as never);
+    expect(absent).toEqual({ kind: 'absent' });
+    const ambiguous = mod.tryResolveNodeRefWithClient('act', {
+      listNodeRunsByRef: () => [
+        { id: 'a1', node_name: 'action-plan' },
+        { id: 'a2', node_name: 'action-plan-2' },
+      ],
+    } as never);
+    expect(ambiguous.kind).toBe('ambiguous');
+    expect(() =>
+      mod.tryResolveNodeRefWithClient('act', {
+        listNodeRunsByRef: () => {
+          throw new Error('DB down');
+        },
+      } as never),
+    ).toThrow('DB down');
+    // Throwing wrapper preserves exact messages.
+    expect(() =>
+      mod.resolveNodeRefWithClient('missing', { listNodeRunsByRef: () => [] } as never),
+    ).toThrow('No node matching ref: missing');
+  });
+
+  it('tryResolveJobIdFromNodeMember discriminates all outcomes; wrapper messages are exact', async () => {
+    const mod = await import('../../../src/cli/result.js');
+    const client = (over: Record<string, unknown>) =>
+      ({
+        readNodeRun: () => null,
+        readNodeMembers: () => [],
+        ...over,
+      }) as never;
+    expect(
+      mod.tryResolveJobIdFromNodeMember(client({ readNodeRun: () => ({ id: 'n1' }), readNodeMembers: () => [{ member_id: 'm', job_id: 'j1' }] }), 'n1', 'm'),
+    ).toEqual({ kind: 'resolved', jobId: 'j1' });
+    expect(mod.tryResolveJobIdFromNodeMember(client({}), 'n1', 'm')).toEqual({ kind: 'node_absent' });
+    expect(
+      mod.tryResolveJobIdFromNodeMember(client({ readNodeRun: () => ({ id: 'n1' }) }), 'n1', 'm'),
+    ).toEqual({ kind: 'member_absent' });
+    expect(
+      mod.tryResolveJobIdFromNodeMember(
+        client({ readNodeRun: () => ({ id: 'n1' }), readNodeMembers: () => [{ member_id: 'm' }] }),
+        'n1',
+        'm',
+      ),
+    ).toEqual({ kind: 'member_without_job_id' });
+    expect(() => mod.resolveJobIdFromNodeMember(client({}), 'n1', 'm')).toThrow('Node run not found: n1');
+    expect(() => mod.resolveJobIdFromNodeMember(client({ readNodeRun: () => ({ id: 'n1' }) }), 'n1', 'm')).toThrow(
+      "Member 'm' not found in node 'n1'",
+    );
+    expect(() =>
+      mod.resolveJobIdFromNodeMember(
+        client({ readNodeRun: () => ({ id: 'n1' }), readNodeMembers: () => [{ member_id: 'm' }] }),
+        'n1',
+        'm',
+      ),
+    ).toThrow("Member 'm' in node 'n1' has no job id yet");
   });
 });
