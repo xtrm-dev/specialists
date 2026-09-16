@@ -107,6 +107,31 @@ export {
 } from './specialist/observability-sqlite.js';
 export { resolveObservabilityDbLocation } from './specialist/observability-db.js';
 
+// XTRM-96 operator read model: frontends consume the same persisted forensic
+// chronology/fleet/result projections rather than querying SQLite independently.
+// This is read-only authority; it creates no scheduler, registry, or telemetry store.
+export {
+  asObservabilityReadSource,
+  isDefaultForensicNoise,
+  parseForensicRecord,
+  parseForensicRecords,
+  readFleetSnapshot,
+  readForensicWindow,
+  readResultProjection,
+} from './specialist/observability-read-model.js';
+export type {
+  FleetAttention,
+  FleetNode,
+  FleetSnapshot,
+  ForensicCursor,
+  ForensicWindow,
+  ObservabilityReadSource,
+  ReadFleetOptions,
+  ReadForensicWindowOptions,
+  ResultProjection,
+  RuntimeAttachment,
+} from './specialist/observability-read-model.js';
+
 // Bead readiness gate (unitAI-rrdnt.48): the SAME parser and gate the host runs,
 // exposed so a frontend can gate an inline dispatch contract BEFORE creating a
 // bead — a refused dispatch must leave the board unchanged.
