@@ -31,7 +31,7 @@ import {
   type TimelineEvent,
   type TimelineTokenUsage,
 } from '../specialist/timeline-events.js';
-import type { SupervisorJobStatus, SupervisorStatus } from '../specialist/supervisor.js';
+import type { SupervisorJobStatus, SupervisorStatus } from '../specialist/status-contract.js';
 
 interface ActivationProjectionState {
   initialAttemptId: string;

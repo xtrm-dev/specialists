@@ -1,14 +1,12 @@
 // unitAI-rrdnt.47: tests for summarizeNativeActivations.
-//
-// Provenance: the row shapes below (correlation.bead_id, resource fields,
-// body.attempt_id/pi_session_id/error, event ordering) were copied from
-// LIVE rows measured 2026-09-07 in .specialists/db/observability.db —
-// activation act:198ce538-0c7 (explorer, bead unitAI-89b8i,
-// requested→admitted→step_contract_compiled→starting→started→
-// turn_started→turn_completed→settled→disposed→failed). These are recorded
-// system output, not invented fixtures: if the forensic writer changes its
-// envelope, the honest response is to update this file from a fresh live
-// measurement, not to keep these rows passing.
+// XTRM-93 N2B: native rows now use the SHARED timeline vocabulary
+// (families job/control/turn/model/tool, distinguished by job_id 'act:'
+// prefix). Historical activation.* shapes below are kept for the retired
+// rows still in the store; shared-vocabulary shapes were copied from LIVE
+// rows measured 2026-09-16 in .specialists/db/observability.db —
+// act:758931b7-9ce (executor, settled) and act:edb6af5c-224 (explorer,
+// failed with body.error). If the forensic writer changes its envelope,
+// update from a fresh live measurement, not invented fixtures.
 import { describe, expect, it } from 'vitest';
 import {
   formatActivationAge,
@@ -60,6 +58,10 @@ function row(
 
 const T0 = 1_788_824_247_906;
 
+// Shared-vocabulary row (post-febef0ad): family/name from
+// familyForTimelineType/eventNameForTimelineEvent, identity by job_id
+// 'act:' prefix, pi_session_id in correlation (measured 2026-09-16).
+
 function fullLifecycle(jobId: string): ForensicEventRecord[] {
   return [
     row(jobId, 'activation.activation_requested', T0),
@@ -76,6 +78,55 @@ function fullLifecycle(jobId: string): ForensicEventRecord[] {
   ];
 }
 
+function sharedRow(
+  jobId: string,
+  family: string,
+  eventName: string,
+  t: number,
+  opts: { beadId?: string; piSessionId?: string; body?: Record<string, unknown>; role?: string } = {},
+): ForensicEventRecord {
+  seq += 1;
+  const role = opts.role ?? 'executor';
+  const pi = opts.piSessionId ?? '01a0a95a-cdb1-7e1a-9249-77a0c50d0858';
+  return {
+    id: seq,
+    job_id: jobId,
+    seq,
+    t,
+    schema_version: 'xtrm.forensic.v1',
+    event_family: family,
+    event_name: eventName,
+    participant_kind: 'specialist',
+    participant_role: role,
+    participant_id: `specialist::${role}`,
+    attempt_id: `att:${jobId.slice(4, 12)}:1`,
+    redaction_status: 'clean',
+    event_json: JSON.stringify({
+      schema_version: 'xtrm.forensic.v1',
+      t_unix_ms: t,
+      event_family: family,
+      event_name: eventName,
+      resource: {
+        service_namespace: 'xtrm',
+        service_name: 'specialists',
+        service_component: 'runtime',
+        participant_kind: 'specialist',
+        participant_role: role,
+      },
+      correlation: {
+        participant_id: `specialist::${role}`,
+        job_id: jobId,
+        ...(opts.beadId ? { bead_id: opts.beadId } : {}),
+        attempt_id: `att:${jobId.slice(4, 12)}:1`,
+        pi_session_id: pi,
+        session_id: pi,
+      },
+      body: { ...(opts.body ?? {}) },
+      redaction: { status: 'clean' },
+    }),
+  };
+}
+
 describe('summarizeNativeActivations', () => {
   it('derives failed + error detail from a full measured lifecycle (latest event wins)', () => {
     const [summary] = summarizeNativeActivations(fullLifecycle('act:198ce538-0c7'));
@@ -84,8 +135,8 @@ describe('summarizeNativeActivations', () => {
     expect(summary.bead_id).toBe('unitAI-89b8i');
     expect(summary.state).toBe('failed');
     expect(summary.detail).toBe('This operation was aborted');
-    expect(summary.turns).toBe(1);
-    expect(summary.event_count).toBe(10);
+    expect(summary.window_turns).toBe(1);
+    expect(summary.window_event_count).toBe(10);
     expect(summary.pi_session_id).toBe('01a07e3c-1ce4-7561-a37a-0c6cbf844fed');
   });
 
@@ -120,6 +171,88 @@ describe('summarizeNativeActivations', () => {
 
   it('returns [] for no rows so ps can omit the section', () => {
     expect(summarizeNativeActivations([])).toEqual([]);
+  });
+
+  it('maps shared-vocabulary terminal states (job.completed/failed) with turns from turn.summarized', () => {
+    const done = [
+      sharedRow('act:shared-done', 'control', 'control.lease_acquired.recorded', T0),
+      sharedRow('act:shared-done', 'job', 'job.started', T0 + 1000),
+      sharedRow('act:shared-done', 'turn', 'turn.turn', T0 + 2000),
+      sharedRow('act:shared-done', 'turn', 'turn.summarized', T0 + 3000),
+      sharedRow('act:shared-done', 'turn', 'turn.summarized', T0 + 4000),
+      sharedRow('act:shared-done', 'job', 'job.status_changed', T0 + 5000),
+      sharedRow('act:shared-done', 'job', 'job.completed', T0 + 6000),
+    ];
+    const [summary] = summarizeNativeActivations(done);
+    expect(summary.activation_id).toBe('act:shared-done');
+    expect(summary.state).toBe('completed');
+    expect(summary.last_event).toBe('job.completed');
+    expect(summary.window_turns).toBe(2);
+    expect(summary.pi_session_id).toBe('01a0a95a-cdb1-7e1a-9249-77a0c50d0858');
+    expect(summary.state).not.toBe('running');
+
+    const failed = [
+      sharedRow('act:shared-fail', 'job', 'job.started', T0),
+      sharedRow('act:shared-fail', 'job', 'job.failed', T0 + 1000, { body: { status: 'ERROR', error: 'OpenAI Responses stream ended' } }),
+    ];
+    const [failSummary] = summarizeNativeActivations(failed);
+    expect(failSummary.state).toBe('failed');
+    expect(failSummary.detail).toBe('OpenAI Responses stream ended');
+  });
+
+  it('maps shared-vocabulary mid-flight and admission signals without inventing running', () => {
+    const mid = [
+      sharedRow('act:mid', 'job', 'job.started', T0),
+      sharedRow('act:mid', 'turn', 'turn.message', T0 + 1000),
+      sharedRow('act:mid', 'model', 'model.token_usage.recorded', T0 + 2000),
+      sharedRow('act:mid', 'tool', 'tool.call.started', T0 + 3000),
+    ];
+    const [midSummary] = summarizeNativeActivations(mid);
+    expect(midSummary.state).toBe('active');
+    expect(midSummary.state).not.toBe('running');
+
+    const waitingPayload = { legacy_timeline_event: { t: T0, type: 'status_change', status: 'waiting', previous_status: 'running' } };
+    const runningPayload = { legacy_timeline_event: { t: T0, type: 'status_change', status: 'running', previous_status: 'starting' } };
+    const waiting = summarizeNativeActivations([sharedRow('act:w', 'job', 'job.status_changed', T0, { body: waitingPayload })])[0];
+    expect(waiting?.state).toBe('waiting');
+    expect(waiting?.state).not.toBe('settled');
+    expect(waiting?.state).not.toBe('running');
+    const runningChange = summarizeNativeActivations([sharedRow('act:r', 'job', 'job.status_changed', T0, { body: runningPayload })])[0];
+    expect(runningChange?.state).toBe('active');
+    expect(runningChange?.state).not.toBe('running');
+    expect(summarizeNativeActivations([sharedRow('act:u', 'job', 'job.status_changed', T0)])[0]?.state).toBe('unknown');
+    expect(summarizeNativeActivations([sharedRow('act:a', 'control', 'control.lease_acquired.recorded', T0)])[0]?.state).toBe('admitted');
+    expect(summarizeNativeActivations([sharedRow('act:d', 'control', 'control.lease_denied.recorded', T0)])[0]?.state).toBe('rejected');
+  });
+
+  it('maps failure/error names to failed, never active (MEDIUM 2)', () => {
+    for (const name of ['tool.call.failed', 'error.rpc', 'error.extension', 'command.failed', 'mcp.call.failed', 'git.auto_commit.failed', 'review.verdict.fail'] as const) {
+      const family = name.split('.')[0]!;
+      const [s] = summarizeNativeActivations([sharedRow(`act:f-${name.length}`, family, name, T0)]);
+      expect(s.state).toBe('failed');
+      expect(s.state).not.toBe('active');
+    }
+  });
+
+  it('returns unknown (never active) for ancillary/future names and exposes window counts', () => {
+    for (const [family, name] of [['review', 'review.verdict.pass'], ['chain', 'chain.finalized'], ['worktree', 'worktree.merged'], ['process_health', 'process_health.stale_detected'], ['mcp', 'mcp.custom.future']] as const) {
+      const [s] = summarizeNativeActivations([sharedRow('act:unk', family, name, T0)]);
+      expect(s.state).toBe('unknown');
+      expect(s.state).not.toBe('active');
+      expect(s.state).not.toBe('running');
+    }
+    const rows = [
+      sharedRow('act:win', 'job', 'job.started', T0),
+      sharedRow('act:win', 'turn', 'turn.turn', T0 + 1),
+      sharedRow('act:win', 'turn', 'turn.turn', T0 + 2),
+      sharedRow('act:win', 'turn', 'turn.summarized', T0 + 3),
+    ];
+    const [w] = summarizeNativeActivations(rows);
+    // turn.turn is start+end (2 rows per turn); summarized is the turn signal.
+    expect(w.window_turns).toBe(1);
+    expect(w.window_event_count).toBe(4);
+    expect((w as unknown as Record<string, unknown>)).not.toHaveProperty('event_count');
+    expect((w as unknown as Record<string, unknown>)).not.toHaveProperty('turns');
   });
 });
 

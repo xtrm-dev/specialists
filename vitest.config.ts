@@ -57,6 +57,7 @@ const quarantined = [
   'tests/unit/specialist/worktree.test.ts', // ISSUE: xtrm-wiy5n.4.11
   'tests/unit/tools/specialist/use_specialist.tool.test.ts', // ISSUE: xtrm-wiy5n.4.11
   'tests/unit/xtrm/beads-commit-gate.test.ts', // ISSUE: xtrm-wiy5n.4.11
+  'tests/unit/specialist/supervisor.test.ts', // ISSUE: unitAI-9n93 — FIFO hang in worktree context, run in isolation via `bun run test:supervisor`
 ];
 
 const runQuarantined = process.env.SPECIALISTS_TEST_QUARANTINED === '1';
@@ -104,9 +105,9 @@ export default defineConfig({
       'tests/unit/specialist/observability-sqlite-pr-refresh.test.ts',
       'tests/unit/specialist/observability-db.test.ts',
       'tests/unit/cli/db.test.ts',
-      // FIFO hang in worktree context — run in isolation.
+      // FIFO hang in worktree context — run in isolation (reachable via `bun run test:supervisor`).
       // ISSUE: unitAI-9n93. See tests/unit/specialist/supervisor.test.ts header warning.
-      'tests/unit/specialist/supervisor.test.ts',
+      ...(runQuarantined ? [] : ['tests/unit/specialist/supervisor.test.ts']),
       ...(runQuarantined ? [] : quarantined),
     ],
     testTimeout: 30000

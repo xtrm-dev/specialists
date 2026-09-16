@@ -15657,6 +15657,10 @@ class SqliteClient {
         clauses.push("job_id = ?");
         params.push(filters.jobId);
       }
+      if (filters.jobIdPrefix) {
+        clauses.push("job_id >= ? AND job_id < ?");
+        params.push(filters.jobIdPrefix, `${filters.jobIdPrefix}￿`);
+      }
       if (filters.sinceMs !== undefined) {
         clauses.push("t >= ?");
         params.push(filters.sinceMs);

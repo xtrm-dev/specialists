@@ -14,6 +14,7 @@ import {
 import { createForensicEvent } from '../../../src/specialist/forensic-events.js';
 import { createBranchIntegrationEvent } from '../../../src/specialist/branch-integration-events.js';
 import { loadEpicReadinessSummary } from '../../../src/specialist/epic-readiness.js';
+import { summarizeNativeActivations } from '../../../src/specialist/native-activation-summary.js';
 import {
   OBSERVABILITY_SCHEMA_VERSION,
   ensureObservabilityDbFile,
@@ -973,6 +974,55 @@ describe('observability-sqlite', () => {
       const descTs = descRows.map((r) => r.t);
       expect(descTs).toEqual([...descTs].sort((a, b) => b - a));
       expect(descRows[0]?.t).toBe(now + 9);
+    });
+
+    // XTRM-93 N2B: native activations live in SHARED families (job/turn/tool),
+    // distinguished ONLY by job_id 'act:' prefix. Writer contract under test:
+    // appendEvent -> writeEventRow -> forensicEventFromTimelineEvent ->
+    // familyForTimelineType (the function that decides event_family). A reader
+    // regressed to event_family='activation' finds zero rows and renders empty.
+    it('finds native activations by act: identity with newest-first order (not activation family)', () => {
+      const client = createClient();
+      const now = Date.now();
+      const actOld = 'act:n2b-old-1234';
+      const actNew = 'act:n2b-new-5678';
+      for (const [jobId, base] of [[actOld, now], [actNew, now + 10_000]] as const) {
+        client.upsertStatus({
+          id: jobId,
+          specialist: 'executor',
+          status: 'running',
+          bead_id: 'unitAI-n2b',
+          started_at_ms: base,
+          updated_at_ms: base,
+        } as any);
+        client.appendEvent(jobId, 'executor', 'unitAI-n2b', { t: base, type: 'run_start', specialist: 'executor', bead_id: 'unitAI-n2b' } as any);
+        client.appendEvent(jobId, 'executor', 'unitAI-n2b', { t: base + 1, type: 'turn_summary', turn_index: 1 } as any);
+        client.appendEvent(jobId, 'executor', 'unitAI-n2b', { t: base + 2, type: 'run_complete', status: 'COMPLETE', elapsed_s: 1 } as any);
+      }
+
+      const legacyFamilyRows = client.readForensicEvents({ eventFamily: 'activation' });
+      expect(legacyFamilyRows.filter((r) => r.job_id.startsWith('act:n2b-'))).toHaveLength(0);
+
+      const newest = client.readForensicEvents({ jobIdPrefix: 'act:n2b-', limit: 3, order: 'desc' });
+      expect(newest).toHaveLength(3);
+      expect(newest[0]?.job_id).toBe(actNew);
+      expect(newest[0]?.event_name).toBe('job.completed');
+
+      const oldest = client.readForensicEvents({ jobIdPrefix: 'act:n2b-', limit: 3 });
+      expect(oldest[0]?.job_id).toBe(actOld);
+      expect(oldest[0]?.event_name).toBe('job.started');
+
+      const summaries = summarizeNativeActivations(
+        client.readForensicEvents({ jobIdPrefix: 'act:n2b-', limit: 100, order: 'desc' }),
+      );
+      expect(summaries.map((s) => s.activation_id).sort()).toEqual([actNew, actOld].sort());
+      expect(summaries.find((s) => s.activation_id === actNew)?.state).toBe('completed');
+
+      db = new Database(resolveObservabilityDbLocation(tempRoot).dbPath, { readonly: true });
+      const plan = db.query("EXPLAIN QUERY PLAN SELECT id FROM specialist_forensic_events WHERE job_id >= ? AND job_id < ? ORDER BY t DESC LIMIT 3").all('act:n2b-', 'act:n2b-\uffff') as Array<Record<string, unknown>>;
+      const planText = JSON.stringify(plan);
+      expect(planText).toContain('SEARCH');
+      expect(planText).not.toContain('SCAN');
     });
   });
 
