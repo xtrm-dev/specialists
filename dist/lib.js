@@ -22652,7 +22652,10 @@ function isNonLocalExtensionSource(source) {
 }
 var defaultExtensionSourceResolutionEnv = {
   globalNodeModulesDir: resolveGlobalNodeModulesDir2,
-  manifestExists: (packagePath) => existsSync20(join20(packagePath, "package.json"))
+  manifestExists: (packagePath) => existsSync20(join20(packagePath, "package.json")),
+  piAgentDir: () => {
+    return;
+  }
 };
 function resolveNpmExtensionSource(source, env = defaultExtensionSourceResolutionEnv) {
   const packageName = parseNpmSourceName(source);
@@ -22664,6 +22667,28 @@ function resolveNpmExtensionSource(source, env = defaultExtensionSourceResolutio
   const packagePath = join20(globalDir, packageName);
   return env.manifestExists(packagePath) ? packagePath : null;
 }
+function resolveGitExtensionSource(source, env = defaultExtensionSourceResolutionEnv) {
+  if (!source.startsWith("git:"))
+    return null;
+  const spec = source.slice("git:".length);
+  if (!spec)
+    return null;
+  if (spec.includes("..") || spec.startsWith("/") || spec.startsWith("\\"))
+    return null;
+  const agentDir = env.piAgentDir?.();
+  if (!agentDir)
+    return null;
+  const checkoutPath = join20(agentDir, "git", spec);
+  return env.manifestExists(checkoutPath) ? checkoutPath : null;
+}
+function expectedRemoteExtensionLabels(declaredSources, skippedSources) {
+  const skipped = new Set(skippedSources);
+  return declaredSources.filter((source) => source.startsWith("git:") && !skipped.has(source));
+}
+function formatSkippedExtensionSourceMessage(source) {
+  return `[specialists] native activation: extension source '${source}' has no local checkout; ` + "the in-process resource loader cannot load it, so it is not injected. " + `To load it, install it with pi so a local checkout exists, or remove the enablement.
+`;
+}
 function resolveDeclaredExtensionSources(sources, env = defaultExtensionSourceResolutionEnv) {
   const local = [];
   const skipped = [];
@@ -22673,8 +22698,13 @@ function resolveDeclaredExtensionSources(sources, env = defaultExtensionSourceRe
       continue;
     }
     const installed = resolveNpmExtensionSource(source, env);
-    if (installed)
+    if (installed) {
       local.push(installed);
+      continue;
+    }
+    const checkout = resolveGitExtensionSource(source, env);
+    if (checkout)
+      local.push(checkout);
     else
       skipped.push(source);
   }
@@ -22790,7 +22820,7 @@ async function discoverDynamicExtensionTools(input) {
         continue;
       }
       const source = provenance.get(name) ?? "";
-      if (!EXTENSION_CLASS_SOURCES.has(source)) {
+      if (!EXTENSION_CLASS_SOURCES.has(source) && !input.allowedRemoteSources.includes(source)) {
         refusedProvenance.push(name);
         continue;
       }
@@ -23054,10 +23084,12 @@ class NativeActivationHost {
       resolvedToolContract: toolContract
     });
     const declaredExtensions = extensionSelection.extensionSources;
-    const { local: declaredLocalExtensions, skipped: skippedDeclaredSources } = resolveDeclaredExtensionSources(declaredExtensions);
+    const { local: declaredLocalExtensions, skipped: skippedDeclaredSources } = resolveDeclaredExtensionSources(declaredExtensions, {
+      ...defaultExtensionSourceResolutionEnv,
+      piAgentDir: () => sdk.getAgentDir()
+    });
     for (const source of skippedDeclaredSources) {
-      process.stderr.write(`[specialists] native activation: extension source '${source}' is not a filesystem path; ` + `the in-process resource loader cannot load it, so it is not injected.
-`);
+      process.stderr.write(formatSkippedExtensionSourceMessage(source));
     }
     const { kept: dynamicExtensions, dropped: droppedExtensions } = deduplicateExtensionSources(curatedExtensions.dedupeAgainstDynamic, declaredLocalExtensions);
     for (const { dropped, keptAs } of droppedExtensions) {
@@ -23072,7 +23104,8 @@ class NativeActivationHost {
         agentDir: sdk.getAgentDir(),
         dynamicExtensions,
         model: modelCheck.model,
-        reservedNames: [...toolContract.nativeTools, ...toolContract.extensionTools, ASK_TOOL, ESCALATE_TOOL]
+        reservedNames: [...toolContract.nativeTools, ...toolContract.extensionTools, ASK_TOOL, ESCALATE_TOOL],
+        allowedRemoteSources: expectedRemoteExtensionLabels(declaredExtensions, skippedDeclaredSources)
       });
     } catch (error) {
       const note = error instanceof Error ? error.message : String(error);

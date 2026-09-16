@@ -330,6 +330,7 @@ async function main(): Promise<void> {
         discovery = await discoverDynamicExtensionTools({
           sdk, cwd: process.cwd(), agentDir: sdk.getAgentDir(), dynamicExtensions: dynamic, model,
           reservedNames: [...READ_NATIVE, ...GITNEXUS_TOOLS, 'ask_coordinator', 'escalate_to_coordinator'],
+          allowedRemoteSources: [],
         });
       } catch (error) {
         discoveryError = error instanceof Error ? error.message : String(error);
@@ -363,6 +364,7 @@ async function main(): Promise<void> {
       discovery = await discoverDynamicExtensionTools({
         sdk, cwd: process.cwd(), agentDir: sdk.getAgentDir(), dynamicExtensions: dynamic, model,
           reservedNames: [...READ_NATIVE, 'ask_coordinator', 'escalate_to_coordinator'],
+          allowedRemoteSources: [],
       });
     } catch (error) {
       console.log(`   R discovery failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -396,6 +398,7 @@ async function main(): Promise<void> {
       discovery = await discoverDynamicExtensionTools({
         sdk, cwd: process.cwd(), agentDir: sdk.getAgentDir(), dynamicExtensions: [COLLISION_DIR], model,
         reservedNames: ['read', 'ask_coordinator', 'escalate_to_coordinator'],
+        allowedRemoteSources: [],
       });
     } catch (error) {
       console.log(`   T discovery failed: ${error instanceof Error ? error.message : String(error)}`);

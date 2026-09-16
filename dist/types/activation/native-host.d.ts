@@ -51,9 +51,11 @@ import { type ActivationHandle, type ActivationRequest, type ActivationSnapshot,
  * CAN load (XTRM-84 section 5).
  *
  * "Non-local" is not the same as "unloadable" here: an `npm:<pkg>` source is resolvable to
- * the installed package directory by `resolveNpmExtensionSource`, so the native path loads it
- * rather than skipping it. Only the sources with no local form (`git:`, `http:`, and an `npm:`
- * package that is not installed) are reported and skipped.
+ * the installed package directory by `resolveNpmExtensionSource`, and a `git:<spec>` source
+ * is resolvable to pi's checkout cache by `resolveGitExtensionSource`, so the native path
+ * loads either rather than skipping it. Only the sources with no local form (`http:`,
+ * `https:`, `ssh:`, a `git:` spec with no checkout, and an `npm:` package that is not
+ * installed) are reported and skipped.
  */
 export declare function isNonLocalExtensionSource(source: string): boolean;
 /**
@@ -70,13 +72,58 @@ export declare function isNonLocalExtensionSource(source: string): boolean;
 export interface ExtensionSourceResolutionEnv {
     globalNodeModulesDir: () => string | undefined;
     manifestExists: (packagePath: string) => boolean;
+    /**
+     * pi's agent directory (`sdk.getAgentDir()` in production, fixture-pinned in tests).
+     * The `git:` checkout cache lives under `<agentDir>/git/<spec>`; pi itself maintains
+     * it, so resolution joins under it and never hardcodes `$HOME` or invents a second cache.
+     * Optional so existing callers that only resolve `npm:` keep working; absent means
+     * `git:` sources cannot resolve and take the skip path.
+     */
+    piAgentDir?: () => string | undefined;
 }
+export declare const defaultExtensionSourceResolutionEnv: ExtensionSourceResolutionEnv;
 export declare function resolveNpmExtensionSource(source: string, env?: ExtensionSourceResolutionEnv): string | null;
+/**
+ * Resolve a declared `git:<spec>` source to pi's checkout cache.
+ *
+ * The mapping is the spec minus the scheme, joined under the agent directory pi itself
+ * maintains: `git:github.com/alonw0/pi-claude-link` → `<agentDir>/git/github.com/alonw0/pi-claude-link`
+ * (unitAI-1pqtl.3, same shape as the `npm:` fix in unitAI-rx1bu).
+ *
+ * Returns null unless the checkout exists with a readable manifest, so an absent or broken
+ * checkout takes the reported-and-skipped path rather than a path that cannot load.
+ * Read-only and offline: no clone, no fetch, no network, no writes.
+ *
+ * Injectable via `ExtensionSourceResolutionEnv.piAgentDir` so tests pin a fixture root
+ * instead of reading the machine's real cache.
+ */
+export declare function resolveGitExtensionSource(source: string, env?: ExtensionSourceResolutionEnv): string | null;
+/**
+ * Registry labels expected for the remote sources that resolved (unitAI-1pqtl.3, A′).
+ *
+ * Pure derivation from the declared set: a `git:<spec>` source that resolved (present in
+ * declared, absent from skipped) is expected to label its tools with the declared spec
+ * verbatim — measured against the real pi SDK (`git:github.com/alonw0/pi-claude-link` →
+ * `git:github.com/alonw0/pi-claude-link`). Unresolved specs contribute nothing, and
+ * non-`git:` sources never contribute: attribution covers exactly what this activation
+ * resolved, so a `git:` label for an undeclared spec stays refused by construction.
+ */
+export declare function expectedRemoteExtensionLabels(declaredSources: readonly string[], skippedSources: readonly string[]): string[];
+/**
+ * Message for a declared source the native path cannot load.
+ *
+ * Names the source AND the remedy, not merely the fact of skipping: the operator enabled
+ * the source, so the message must say how to make it load (install it with pi so a local
+ * form exists) or that removing the enablement stops the warning.
+ */
+export declare function formatSkippedExtensionSourceMessage(source: string): string;
 /**
  * Split declared `execution.extensions` sources into the ones the in-process resource
  * loader can take and the ones it cannot. Local paths pass through untouched; `npm:`
- * sources are resolved to their installed directory when possible; everything else that is
- * non-local (`git:`, `http:`) is skipped.
+ * sources are resolved to their installed directory when possible; `git:` sources are
+ * resolved to pi's checkout cache (`<agentDir>/git/<spec>`) when the checkout exists;
+ * everything else non-local (`http:`, `https:`, `ssh:`, uninstalled `npm:`, `git:` with
+ * no checkout) is skipped.
  */
 export declare function resolveDeclaredExtensionSources(sources: readonly string[], env?: ExtensionSourceResolutionEnv): {
     local: string[];
@@ -177,6 +224,18 @@ export declare function discoverDynamicExtensionTools(input: {
      * omits it silently loses the shadow check, so there is no default.
      */
     reservedNames: readonly string[];
+    /**
+     * Registry labels expected for the remote sources THIS activation resolved (unitAI-1pqtl.3, A′).
+     *
+     * Attribution, not a label taxonomy: pi labels a tool loaded from its git checkout cache
+     * with the declared spec verbatim (measured: declared `git:github.com/alonw0/pi-claude-link`
+     * → registry `git:github.com/alonw0/pi-claude-link`), so the expected labels are derived
+     * from the declared set that actually resolved — never from a hardcoded list, never from
+     * a wildcard. A `git:`-labelled tool for a spec this operator never declared is still
+     * refused. REQUIRED for the same fail-open reason as `reservedNames`: no default, so a
+     * call site that omits it is a type error rather than a silently skipped attribution check.
+     */
+    allowedRemoteSources: readonly string[];
 }): Promise<DynamicExtensionDiscovery>;
 /**
  * The activation's `cwd` and `agentDir` feed pi's resource loader, which is the ONLY

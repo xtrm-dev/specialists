@@ -371,7 +371,7 @@ const INTENTIONAL_DIVERGENCES: Partial<Record<ProfileKey, NamedDivergence>> = {
   },
   extensions: {
     category: 'process topology',
-    reason: 'the in-process resource loader takes filesystem paths only, so an installed npm: source is resolved by the native path to its package directory while the legacy CLI forwards the raw npm:/git:/http: spec for pi itself to resolve; native therefore equals the legacy sources that ARE local plus the legacy npm: sources that resolve to an installed package, and drops only the ones with no local form (git:/http:, and an npm: package that is not installed)',
+    reason: 'the in-process resource loader takes filesystem paths only, so an installed npm: source is resolved by the native path to its package directory and a git: source with a checkout is resolved to pi\'s agent git cache (<agentDir>/git/<spec>), while the legacy CLI forwards the raw npm:/git:/http: spec for pi itself to resolve; native therefore equals the legacy sources that ARE local plus the legacy npm: sources that resolve to an installed package (plus git: sources with a checkout, none in the fixture), and drops only the ones with no local form (git: with no checkout, http:/https:/ssh:, and an npm: package that is not installed)',
     // Checked shape, not a skip: the npm: fixture source is installed in the pinned node_modules
     // root, so its resolved directory must appear on the native side. If npm resolution regresses
     // to skipping, native is missing that directory and this fails.

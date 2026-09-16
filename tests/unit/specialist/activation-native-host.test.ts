@@ -45,7 +45,7 @@ vi.mock('node:child_process', async (importOriginal) => {
     },
   };
 });
-import { NativeActivationHost, resolveWorkspace, resolveDeclaredExtensionSources, resolveNpmExtensionSource, unresolvableNpmSources, type ActivationForensicSink } from '../../../src/activation/native-host.js';
+import { NativeActivationHost, resolveWorkspace, resolveDeclaredExtensionSources, resolveNpmExtensionSource, resolveGitExtensionSource, expectedRemoteExtensionLabels, formatSkippedExtensionSourceMessage, unresolvableNpmSources, type ActivationForensicSink } from '../../../src/activation/native-host.js';
 import { ASK_TOOL, ESCALATE_TOOL } from '../../../src/activation/ask-tool.js';
 import { buildSystemPrompt } from '../../../src/specialist/system-prompt.js';
 import { resolveOutputContractSchema } from '../../../src/specialist/runner.js';
@@ -2236,6 +2236,39 @@ describe('pre-scripts and curated extensions (SPECIALISTS-6)', () => {
     }
   });
 
+  it('injects a git source with a present checkout as its cache path (unitAI-1pqtl.3)', async () => {
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record });
+    // Fixture-pinned agent dir, never the machine's real `~/.pi/agent`: the host derives
+    // the cache root from `sdk.getAgentDir()`, so overriding the SDK pins the root.
+    const fakeAgentDir = hostWorkspace();
+    const checkout = join(fakeAgentDir, 'git', 'github.com/alonw0/pi-claude-link');
+    mkdirSync(checkout, { recursive: true });
+    writeFileSync(
+      join(checkout, 'package.json'),
+      JSON.stringify({ name: 'pi-claude-link', version: '0.0.0' }),
+    );
+    const sdk = { ...makeSdk(record, session), getAgentDir: () => fakeAgentDir };
+    const host = new NativeActivationHost({
+      loader: loaderFor(specWithScripts([], {
+        permission_required: 'READ_ONLY',
+        extensions: { 'git:github.com/alonw0/pi-claude-link': true },
+      })),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => sdk,
+      cwd: hostWorkspace(),
+    });
+    await (await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    })).result;
+
+    const loader = record.createArgs!.resourceLoader as FakeResourceLoader;
+    const paths = loader.options.additionalExtensionPaths as string[];
+    expect(paths).toContain(checkout);
+    expect(paths).not.toContain('git:github.com/alonw0/pi-claude-link');
+  });
+
   it('withholds the write-tier-only curated extensions from a read-only specialist', async () => {
     const record: { createArgs?: Record<string, unknown> } = {};
     const session = fakeSession({ record });
@@ -2292,6 +2325,81 @@ describe('pre-scripts and curated extensions (SPECIALISTS-6)', () => {
       );
       expect(local).toEqual(['/local/ext', '/nm/pi-ast-grep']);
       expect(skipped).toEqual(['git:github.com/alonw0/pi-claude-link', 'npm:absent-pkg']);
+    });
+  });
+
+  /**
+   * unitAI-1pqtl.3. A declared `git:<spec>` whose checkout exists under pi's cache
+   * (`<agentDir>/git/<spec>`, pi-maintained, never hardcoded) resolves to that directory
+   * with a readable manifest required — the same shape as the `npm:` fix. No checkout,
+   * no manifest, or no agent dir keeps the reported skip; `http:`/`https:`/`ssh:` never
+   * resolve. The root is always fixture-pinned, never the machine's real cache.
+   */
+  describe('declared extension sources: git checkout resolution (unitAI-1pqtl.3)', () => {
+    const GIT_SPEC = 'github.com/alonw0/pi-claude-link';
+    const GIT_SOURCE = `git:${GIT_SPEC}`;
+    const gitEnv = (agentDir: string | undefined, installed: string[]) => ({
+      globalNodeModulesDir: () => undefined,
+      manifestExists: (packagePath: string) => installed.includes(packagePath),
+      piAgentDir: () => agentDir,
+    });
+
+    it('resolves a present checkout to the cache path', () => {
+      const agentDir = '/fake/agent';
+      const checkout = join(agentDir, 'git', GIT_SPEC);
+      expect(resolveGitExtensionSource(GIT_SOURCE, gitEnv(agentDir, [checkout]))).toBe(checkout);
+    });
+
+    it('returns null for an absent checkout, a missing agent dir, and a non-git source', () => {
+      const agentDir = '/fake/agent';
+      expect(resolveGitExtensionSource(GIT_SOURCE, gitEnv(agentDir, []))).toBeNull();
+      expect(resolveGitExtensionSource(GIT_SOURCE, gitEnv(undefined, [`/other/git/${GIT_SPEC}`]))).toBeNull();
+      expect(resolveGitExtensionSource('npm:pi-ast-grep', gitEnv(agentDir, [`${agentDir}/git/${GIT_SPEC}`]))).toBeNull();
+      expect(resolveGitExtensionSource('git:', gitEnv(agentDir, [join(agentDir, 'git')]))).toBeNull();
+    });
+
+    it('requires a readable manifest: a checkout directory without one does not resolve', () => {
+      // Mutation check: removing the manifestExists gate must make this fail (it would
+      // otherwise hand the loader a path that cannot load).
+      const agentDir = '/fake/agent';
+      expect(resolveGitExtensionSource(GIT_SOURCE, gitEnv(agentDir, []))).toBeNull();
+    });
+
+    it('refuses specs that would escape the cache root', () => {
+      const agentDir = '/fake/agent';
+      expect(resolveGitExtensionSource('git:../evil', gitEnv(agentDir, [join(agentDir, 'evil')]))).toBeNull();
+      expect(resolveGitExtensionSource('git:/absolute/path', gitEnv(agentDir, ['/absolute/path']))).toBeNull();
+    });
+
+    it('resolves git checkouts through the declared-source split while http/https/ssh skip', () => {
+      const agentDir = '/fake/agent';
+      const checkout = join(agentDir, 'git', GIT_SPEC);
+      const { local, skipped } = resolveDeclaredExtensionSources(
+        [GIT_SOURCE, 'https://example.com/ext', 'http://example.com/ext', 'ssh:example.com/ext', '/local/ext'],
+        gitEnv(agentDir, [checkout]),
+      );
+      expect(local).toEqual([checkout, '/local/ext']);
+      expect(skipped).toEqual(['https://example.com/ext', 'http://example.com/ext', 'ssh:example.com/ext']);
+    });
+
+    it('skips a git source with no checkout, with the remedy in the message', () => {
+      const agentDir = '/fake/agent';
+      const { local, skipped } = resolveDeclaredExtensionSources([GIT_SOURCE], gitEnv(agentDir, []));
+      expect(local).toEqual([]);
+      expect(skipped).toEqual([GIT_SOURCE]);
+      const message = formatSkippedExtensionSourceMessage(GIT_SOURCE);
+      expect(message).toContain(GIT_SOURCE);
+      // Remedy, not merely the fact: how to make it load, or how to stop the warning.
+      expect(message.toLowerCase()).toContain('install');
+      expect(message.toLowerCase()).toMatch(/remove|enablement/);
+    });
+
+    it('skipped messages for http/https/ssh also name the source and the remedy', () => {
+      for (const source of ['https://example.com/ext', 'http://example.com/ext', 'ssh:example.com/ext']) {
+        const message = formatSkippedExtensionSourceMessage(source);
+        expect(message).toContain(source);
+        expect(message.toLowerCase()).toContain('install');
+      }
     });
   });
 });
@@ -2641,6 +2749,7 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
     registryExtra?: Array<{ name: string; source: string }>;
     failDiscovery?: 'throw' | 'empty' | null;
     realAssistantText?: string;
+    agentDir?: string;
   } = {}) {
     const builtinNames = opts.builtinNames ?? BUILTINS;
     const discoveredActive = opts.discoveredActive ?? [];
@@ -2749,7 +2858,7 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
         return { session: realSession };
       },
       DefaultResourceLoader: FakeResourceLoader,
-      getAgentDir: () => FAKE_AGENT_DIR,
+      getAgentDir: () => opts.agentDir ?? FAKE_AGENT_DIR,
       ModelRuntime: { create: async () => ({ hasConfiguredAuth: () => true }) },
       resolveModelScopeWithDiagnostics: () => ({
         scopedModels: [{ model: { id: 'test-model', provider: 'testprov' } }],
@@ -2763,6 +2872,111 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
     } as unknown as PiSdk;
     return { sdk, calls, realRecord, realSession, disposed };
   }
+
+  /**
+   * unitAI-1pqtl.3 A′ (attribution, not taxonomy): the provenance gate trusts a `git:`
+   * registry label ONLY when it is the declared spec this activation resolved — never a
+   * wildcard, never a hardcoded list. `EXTENSION_CLASS_SOURCES` stays frozen.
+   */
+  describe('discover-then-pin: git attribution (unitAI-1pqtl.3 A′)', () => {
+    const GIT_SOURCE = 'git:github.com/alonw0/pi-claude-link';
+    const GIT_SPEC = GIT_SOURCE.slice('git:'.length);
+
+    function gitCheckout(agentDir: string): string {
+      const checkout = join(agentDir, 'git', GIT_SPEC);
+      mkdirSync(checkout, { recursive: true });
+      writeFileSync(join(checkout, 'package.json'), JSON.stringify({ name: 'pi-claude-link', version: '0.0.0' }));
+      return checkout;
+    }
+
+    it('derives expected remote labels from the declared resolved set only', () => {
+      expect(expectedRemoteExtensionLabels([GIT_SOURCE], [])).toEqual([GIT_SOURCE]);
+      expect(expectedRemoteExtensionLabels([GIT_SOURCE], [GIT_SOURCE])).toEqual([]);
+      expect(expectedRemoteExtensionLabels(['/local/ext', 'npm:pkg'], [])).toEqual([]);
+      expect(expectedRemoteExtensionLabels([], [])).toEqual([]);
+    });
+
+    it('pins the resolved git source tool through the real path (claude-link active)', async () => {
+      const agentDir = hostWorkspace();
+      const checkout = gitCheckout(agentDir);
+      const { sdk, realRecord, realSession } = discoverySdk({
+        agentDir,
+        discoveredActive: ['claude-link'],
+        provenance: { 'claude-link': GIT_SOURCE },
+      });
+      const sink = collectingSink();
+      const host = new NativeActivationHost({
+        loader: loaderFor(specWithExtensions({ [GIT_SOURCE]: true })),
+        workItems: fakeWorkItems(),
+        forensics: sink,
+        loadSdk: async () => sdk,
+        cwd: hostWorkspace(),
+      });
+      await (await host.start({
+        specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+      })).result;
+      const tools = realRecord.createArgs!.tools as string[];
+      expect(tools).toContain('claude-link');
+      expect(realSession.prompts[0]).toContain('claude-link');
+      expect(sink.names).toContain('extension_tools_discovered');
+      // The resolved directory (not the raw spec) reached the loader.
+      const loader = realRecord.createArgs!.resourceLoader as FakeResourceLoader;
+      expect(loader.options.additionalExtensionPaths as string[]).toContain(checkout);
+    });
+
+    it('refuses a git label for a spec nobody declared (A, not A′)', async () => {
+      // Distinguishes attribution from a wildcard: only the declared spec is expected, so
+      // `git:someone/else` stays refusedProvenance even though it "looks like" a package.
+      const agentDir = hostWorkspace();
+      gitCheckout(agentDir);
+      const { sdk, realRecord } = discoverySdk({
+        agentDir,
+        discoveredActive: ['claude-link', 'stranger-tool'],
+        provenance: { 'claude-link': GIT_SOURCE, 'stranger-tool': 'git:someone/else' },
+      });
+      const sink = collectingSink();
+      const host = new NativeActivationHost({
+        loader: loaderFor(specWithExtensions({ [GIT_SOURCE]: true })),
+        workItems: fakeWorkItems(),
+        forensics: sink,
+        loadSdk: async () => sdk,
+        cwd: hostWorkspace(),
+      });
+      await (await host.start({
+        specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+      })).result;
+      const tools = realRecord.createArgs!.tools as string[];
+      expect(tools).toContain('claude-link');
+      expect(tools).not.toContain('stranger-tool');
+      expect(sink.names).toContain('extension_tools_refused');
+      const refused = sink.events.find((e) => e.name === 'extension_tools_refused') as unknown as
+        { payload?: { refused_provenance?: string | null } } | undefined;
+      expect(String(refused?.payload?.refused_provenance ?? '')).toContain('stranger-tool');
+    });
+
+    it('still refuses when a git-labelled source shadows a reserved name (F1 not bypassed)', async () => {
+      const agentDir = hostWorkspace();
+      gitCheckout(agentDir);
+      const { sdk } = discoverySdk({
+        agentDir,
+        discoveredActive: ['read'],
+        provenance: { read: GIT_SOURCE },
+        registryExtra: [{ name: 'read', source: GIT_SOURCE }],
+      });
+      const host = new NativeActivationHost({
+        loader: loaderFor(specWithExtensions({ [GIT_SOURCE]: true })),
+        workItems: fakeWorkItems(),
+        forensics: collectingSink(),
+        loadSdk: async () => sdk,
+        cwd: hostWorkspace(),
+      });
+      const refusal = await host.start({
+        specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+      }).catch((error: unknown) => error);
+      expect((refusal as DispatchRejectedError).reason).toBe('extension_tool_shadowed');
+      expect(String((refusal as DispatchRejectedError).detail?.note ?? '')).toContain('read');
+    });
+  });
 
   function specWithExtensions(extensions: Record<string, boolean>) {
     const spec = readOnlySpec({ extensions }) as { specialist: { prompt: Record<string, unknown> } };
