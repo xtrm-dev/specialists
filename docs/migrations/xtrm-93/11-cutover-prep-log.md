@@ -218,13 +218,44 @@ Two details worth keeping:
 
 - **The prefix filter is a closed range, not `LIKE`.** SQLite's `LIKE` is case-insensitive by default,
   which skips the `idx_forensic_events_job_*` indexes. The implementation uses
-  `job_id >= prefix AND job_id < prefix+\uffff`. `EXPLAIN QUERY PLAN` against the real 1.5 GB store
-  confirms `SEARCH … USING COVERING INDEX idx_forensic_events_job_t (job_id>? AND job_id<?)`, not a
-  scan.
+  `job_id >= prefix AND job_id < prefix+\uffff`.
+
+  **Corrected citation, from the adversarial review.** This log and the commit message originally
+  claimed the plan was `SEARCH … USING COVERING INDEX idx_forensic_events_job_t … not a SCAN`. That
+  plan belongs to a *simplified* query (`ORDER BY t DESC` only) that the coordinator ran while
+  grounding the node. The **real** query orders by `t DESC, seq DESC, id DESC`, and its plan is:
+
+  ```
+  SEARCH specialist_forensic_events USING INDEX idx_forensic_events_job_seq (job_id>? AND job_id<?)
+  USE TEMP B-TREE FOR ORDER BY
+  ```
+
+  Reproduced by the reviewer and re-confirmed by the coordinator. The substantive claim —
+  **index-backed, not a `SCAN`** — holds, and the `LIKE`-avoidance rationale is correct. The
+  specific index named and the “no sort” implication do not. A covering index is not achievable here
+  because the projection is not a subset of `idx_forensic_events_job_t`, and the sort is unavoidable
+  when ordering across a `job_id` range.
 - **`order: 'desc'` is a second, independent defect fix.** The reader defaults to `'asc'`, so on a
   busy stream the old call sliced the **oldest** rows and discarded the newest — the case
   `observability-sqlite.ts:1181-1183` explicitly warns about. The audit had recorded only the family
   problem.
+
+### `job.status_changed` carries `waiting` — which partly answers open question G-4
+
+Measured: **all 181** native `job.status_changed` rows carry `status: "waiting"` with
+`previous_status: "running"`, inside `body.legacy_timeline_event`.
+
+The summarizer mapped `job.status_changed` to `settled` **unconditionally, without reading the
+payload**, so every parked native activation rendered as settled — hiding exactly the activations an
+operator would want to resume.
+
+This also refines the audit's open question **G-4** ("Is native `waiting` intended to be produced?").
+The audit recorded that `snapshot.state` produces 8 states and that `waiting` is among the unproduced
+ones. The forensic record says otherwise: native `waiting` **is** produced and telemetry-visible — the
+settlement path emits it as a `status_change` — it is simply absent from the in-memory snapshot
+vocabulary. So this is not an unset default; it is a real state whose *scoping differs between the
+snapshot type and the telemetry*, which is why flattening it silently is a defect rather than a
+simplification.
 
 ### Verification (coordinator-run)
 
