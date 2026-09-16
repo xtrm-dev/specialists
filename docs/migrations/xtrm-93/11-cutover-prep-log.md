@@ -13,8 +13,11 @@
 | **N2A** result identity | Substrate `SPECIALISTS-78` (`iss_01a0a964-8c97-…`) | `act:47a2b74f-a25` | **DONE, verified** | `77a76bf2` |
 | **N2B** ps observability | Substrate `SPECIALISTS-80` (`iss_01a0a96b-9ac9-…`) | `act:51b14a21-af0` | **DONE, verified** | `4fbc4a30` |
 | **dist** rebuild | — (CI obligation, not a DAG node) | — | **DONE** | `64e922e6` |
-| **review gate** | Substrate `SPECIALISTS-81` (`iss_01a0a98e-69f3-…`) | `act:e4dafce4-6e2` | in progress | — |
+| **review gate** | Substrate `SPECIALISTS-81` (`iss_01a0a98e-69f3-…`) | `act:e4dafce4-6e2` | **DONE** — N0 accepted; N2A/N2B/dist accepted-with-findings | — |
+| **N2A review fix** (attempt existence) | `SPECIALISTS-78` attempt 2 | `act:47a2b74f-a25` | **DONE, verified** | `9766b5b7` |
+| **N2B review fix** (status payload, failure mapping, window labels, CLI test) | `SPECIALISTS-80` attempt 2 | `act:51b14a21-af0` | in progress | — |
 | N2B follow-up (row-cap starvation) | beads `unitAI-kmbb9`, P1, `contract:draft` | — | filed, not started | — |
+| N2A follow-up (fabricated attempt) | beads `unitAI-qpapp`, P1 | — | **CLOSED by the N2A review fix** | — |
 
 ---
 
@@ -328,6 +331,53 @@ can wrongly exclude a valid `job_id`.
 instead of the required `PROBLEM`/`SUCCESS`/`SCOPE`/`NON_GOALS`/`VALIDATION` set, and returned the
 missing list without spending a model turn. The gate works; the lesson is that a contract must use
 the exact section names, not synonyms.
+
+---
+
+## Review outcome and fix loop
+
+Verdict: **N0 accepted; N2A / N2B / dist accepted-with-findings.** The review substantiated every
+finding with commands, and found defects all four authors had missed.
+
+| Severity | Finding | Disposition |
+|---|---|---|
+| HIGH | `att:<valid-core>:99` exited 0 with a payload byte-identical to `act:<id>` (8013 B, `cmp`) | **fixed** `9766b5b7` |
+| HIGH | `event_count`/`turns` are window counts emitted as totals, unlabelled in human and JSON | in N2B fix |
+| MEDIUM | `job.status_changed` → `settled` unconditionally; all 181 real rows mean `waiting` | in N2B fix |
+| MEDIUM | catch-all `includes('.')` → `'active'` masks `tool.call.failed` / `error.*` (latent, 0 rows today) | in N2B fix |
+| MEDIUM | Regression test binds writer↔filter but **not** the `ps.ts` call site; reverting `ps.ts:747` still passed | in N2B fix |
+| MEDIUM | `EXPLAIN` cited the wrong index | **fixed** `5fcd0e62` (my error, not the executor's) |
+| LOW | grammar over-permissive; explicit-flag bypass | **resolved by documented decision** in `9766b5b7` |
+| LOW | `turns` counts only `turn.summarized`, undercounting ~50 % vs `turn.turn` | in N2B fix |
+
+The reviewer also stated what it could **not** verify — dist determinism, because rebuilding would
+have violated its own read-only constraint. That was already established here independently by
+running two builds and diffing them.
+
+### The N2A fix chose better authority than the brief implied
+
+The fix verifies attempt existence against the **forensic `attempt_id` set** rather than
+`specialist_jobs`, and the reasoning is correct and was confirmed against live data: every minted
+attempt emits forensic rows, while `specialist_jobs.attempt_no/attempt_id` holds only the **latest
+pointer**. Observed directly on a real job: `attempt_no=3` while attempts 1 and 2 exist only in
+forensics. Trusting the job row would have rejected valid attempts.
+
+It fails **closed** on every unverifiable path (attempt absent, database unavailable, forensic read
+failure, rows beyond the client cap) and never falls back to another attempt's result. A missing
+activation keeps the established `No job found` path, so a bad core retains its existing message.
+
+Verified: `att:…:1` and `att:47a2b74f-a25:3` (a genuine non-default attempt) resolve; `att:…:0`, `:2`,
+`:99` and `att:47a2b74f-a25:99` refuse with an explicit error naming the attempt; `act:<id>`,
+`00270d` and the node/member paths unchanged. tsc exit 0; 42/42 result suites (16 new); 42/42
+prior-node guard.
+
+### Monitoring lesson (cost real time)
+
+A monitor scoped to one attempt's terminal event **fires early**: a resumed activation advances
+attempts, so the first monitor reported "settled" while the session was still working on the next
+attempt. I briefly read that as "the fix produced no changes", which was wrong. The correct watch is
+the job's terminal **status**, attempt-agnostic, plus a stall detector so a hang cannot masquerade as
+progress.
 
 ---
 
