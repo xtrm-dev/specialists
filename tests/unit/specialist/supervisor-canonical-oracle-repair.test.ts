@@ -12,7 +12,7 @@
 // property is regressed permanently without editing shipped source.
 
 import { Database } from 'bun:sqlite';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createActivationForensicSink } from '../../../src/activation/forensic-sink.js';
@@ -21,6 +21,10 @@ import {
   NATIVE_LIFECYCLE_DELIBERATELY_UNPERSISTED,
 } from '../../../src/specialist/native-activation-observability.js';
 import { createObservabilitySqliteClientAtPath } from '../../../src/specialist/observability-sqlite.js';
+import {
+  differentialNoteFor,
+  SUPERVISOR_CANONICAL_INVENTORY,
+} from './supervisor-canonical-inventory.js';
 import {
   runAbsentCheck,
   runDurableNativeCheck,
@@ -263,6 +267,68 @@ describe('model_fallback preservation matrix (SPECIALISTS-103)', () => {
       }
     } finally {
       rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('canonical classification metadata cannot contradict the expectation class (SPECIALISTS-103 follow-on)', () => {
+  // The retired field `differentialReads: 'parity' | 'divergence'` had exactly one
+  // consumer: the oracle's failure message. Every one of its eight values was the
+  // constant 'parity', and that constant made the message assert
+  // "both engines satisfy this row" for rows where that is FALSE. The reconciliation
+  // derives the wording from `expectation` (load-bearing) instead of from a redundant
+  // constant, so the message can no longer contradict the class.
+
+  it('the retired differentialReads field is GONE from the inventory (it cannot be reintroduced as a contradictory label)', () => {
+    const withField = SUPERVISOR_CANONICAL_INVENTORY.filter(
+      (entry) => Object.prototype.hasOwnProperty.call(entry, 'differentialReads'),
+    );
+    expect(withField.map((entry) => entry.id)).toEqual([]);
+  });
+
+  it('the evaluator no longer reads the retired field at all (the constant is out of the rendering path)', () => {
+    const evaluator = readFileSync(join(__dirname, 'supervisor.test.ts'), 'utf8');
+    expect(evaluator).not.toContain('differentialReads');
+  });
+
+  it('a DURABLE row RETAINS its intended differential information', () => {
+    const note = differentialNoteFor('EXPECTED_DURABLE');
+    // A legacy-vs-native comparison IS meaningful for a durable row.
+    expect(note).toContain('both engines');
+    expect(note).toMatch(/expected to satisfy/);
+  });
+
+  it('EXPECTED_ABSENT_WITH_REASON is NEVER rendered as feature parity', () => {
+    const note = differentialNoteFor('EXPECTED_ABSENT_WITH_REASON');
+    // Must not claim both sides satisfy the feature merely because both are empty.
+    expect(note).not.toMatch(/both engines are expected to satisfy/);
+    expect(note).toMatch(/\bNOT parity\b/);
+    const absent = SUPERVISOR_CANONICAL_INVENTORY.filter(
+      (entry) => entry.expectation === 'EXPECTED_ABSENT_WITH_REASON',
+    );
+    expect(absent.length).toBeGreaterThan(0);
+    // Every absent row renders the same honest note, whatever its id.
+    for (const entry of absent) {
+      expect(differentialNoteFor(entry.expectation)).toMatch(/\bNOT parity\b/);
+    }
+  });
+
+  it('EXPECTED_RUNTIME_ONLY never claims durable parity', () => {
+    const note = differentialNoteFor('EXPECTED_RUNTIME_ONLY');
+    expect(note).not.toMatch(/both engines are expected to satisfy/);
+    expect(note).toMatch(/NOT durable parity/);
+    const runtimeOnly = SUPERVISOR_CANONICAL_INVENTORY.filter(
+      (entry) => entry.expectation === 'EXPECTED_RUNTIME_ONLY',
+    );
+    expect(runtimeOnly.length).toBeGreaterThan(0);
+  });
+
+  it('no entry of ANY class renders a parity-satisfaction claim it cannot support', () => {
+    for (const entry of SUPERVISOR_CANONICAL_INVENTORY) {
+      const note = differentialNoteFor(entry.expectation);
+      const claimsSatisfaction = /both engines are expected to satisfy/.test(note);
+      // Only a durable expectation may claim a meaningful two-engine comparison.
+      expect(claimsSatisfaction).toBe(entry.expectation === 'EXPECTED_DURABLE');
     }
   });
 });

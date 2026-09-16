@@ -39,7 +39,7 @@ vi.mock('node:child_process', async (importOriginal) => {
   };
 });
 import { Supervisor } from '../../../src/specialist/supervisor.js';
-import { SUPERVISOR_CANONICAL_INVENTORY } from './supervisor-canonical-inventory.js';
+import { differentialNoteFor, SUPERVISOR_CANONICAL_INVENTORY } from './supervisor-canonical-inventory.js';
 import { runAbsentCheck, runDurableEntryCheck, runTokenMetricProjectionCheck } from './supervisor-canonical-proof.js';
 import { isJobFileOutputEnabled } from '../../../src/specialist/job-file-output.js';
 import type { SupervisorStatus } from '../../../src/specialist/supervisor.js';
@@ -1561,8 +1561,8 @@ describe('canonical event inventory oracle (XTRM-93 N3.0, SPECIALISTS-103 repair
           `[oracle] ${entry.id}: scenario "${entry.scenario}" expects ${entry.expectation} signal ` +
           `"${entry.signal}" but the proof failed: ${detail}` +
           (entry.gapRef ? ` (${entry.gapRef})` : '') +
-          ` Differential reads ${entry.differentialReads} — ` +
-          (entry.gapRef ? 'a parity reading here is a FALSE GREEN.' : 'both engines satisfy this row.'),
+          ` Differential: ${differentialNoteFor(entry.expectation)}` +
+          (entry.gapRef ? ' A parity reading here is a FALSE GREEN.' : ''),
         ).toBe(true);
       }
     });

@@ -43,6 +43,37 @@ export type CanonicalExpectationClass =
   | 'EXPECTED_ABSENT_WITH_REASON'
   | 'EXPECTED_RUNTIME_ONLY';
 
+/**
+ * The differential note states ONLY how legacy/native observations compare, and
+ * ONLY where a comparison is meaningful. It is DERIVED from the expectation class
+ * so it can never contradict it.
+ *
+ * SPECIALISTS-103 follow-on: the retired `differentialReads: 'parity' | 'divergence'`
+ * field was removed. It had exactly one consumer (this failure message), every one of
+ * its eight values was the constant 'parity', and that constant made the message assert
+ * "both engines satisfy this row" for rows where the assertion is FALSE:
+ *   - EXPECTED_ABSENT_WITH_REASON: neither engine persists the row, by decision;
+ *   - EXPECTED_RUNTIME_ONLY: durable read-back is outside the row's contract.
+ * A constant whose only effect is a misleading sentence is not differential information.
+ * The real differential information is execution-backed and lives in `durable.via`
+ * ('native-lifecycle' | 'legacy-append') and in the `evidence` sides.
+ */
+export function differentialNoteFor(expectation: CanonicalExpectationClass): string {
+  switch (expectation) {
+    case 'EXPECTED_DURABLE':
+      // A comparison IS meaningful here: both engines are expected to produce the row.
+      return 'both engines are expected to satisfy this row.';
+    case 'EXPECTED_ABSENT_WITH_REASON':
+      return 'NOT parity: this row is a deliberate absence, so neither engine persists it by decision. An empty row on both sides is NOT both-sides-satisfy.';
+    case 'EXPECTED_RUNTIME_ONLY':
+      return 'NOT durable parity: this row is a runtime projection, so a durable legacy-vs-native comparison is outside its contract.';
+    default: {
+      const never: never = expectation;
+      return never;
+    }
+  }
+}
+
 export interface CanonicalInventoryEvidence {
   /** Which side of the contract this needle pins (documentation only). */
   side: 'legacy-producer' | 'native-producer' | 'native-mapper' | 'reader';
@@ -91,8 +122,6 @@ export interface CanonicalInventoryEntry {
   signal: string;
   /** Ordered so the failure message names the FIRST missing link. */
   evidence: readonly CanonicalInventoryEvidence[];
-  /** How a pure differential (legacy-vs-native output) comparison reads today. */
-  differentialReads: 'parity' | 'divergence';
   /** Null for parity rows both engines satisfy; otherwise the owning gap. */
   gapRef: string | null;
   /** SPECIALISTS-103: explicit class. No entry may leave this implicit. */
@@ -114,7 +143,6 @@ export const SUPERVISOR_CANONICAL_INVENTORY: readonly CanonicalInventoryEntry[] 
       { side: 'legacy-producer', file: 'src/specialist/supervisor.ts', needle: 'createRunStartEvent(' },
       { side: 'native-mapper', file: 'src/specialist/native-activation-observability.ts', needle: "case 'activation_started'" },
     ],
-    differentialReads: 'parity',
     gapRef: null,
     expectation: 'EXPECTED_DURABLE',
     durable: {
@@ -132,7 +160,6 @@ export const SUPERVISOR_CANONICAL_INVENTORY: readonly CanonicalInventoryEntry[] 
       { side: 'legacy-producer', file: 'src/specialist/supervisor.ts', needle: "createRunCompleteEvent('COMPLETE'" },
       { side: 'native-mapper', file: 'src/specialist/native-activation-observability.ts', needle: "case 'activation_completed'" },
     ],
-    differentialReads: 'parity',
     gapRef: null,
     expectation: 'EXPECTED_DURABLE',
     durable: {
@@ -149,7 +176,6 @@ export const SUPERVISOR_CANONICAL_INVENTORY: readonly CanonicalInventoryEntry[] 
     evidence: [
       { side: 'legacy-producer', file: 'src/specialist/supervisor.ts', needle: 'createStaleWarningEvent(' },
     ],
-    differentialReads: 'parity',
     gapRef: null,
     expectation: 'EXPECTED_DURABLE',
     durable: {
@@ -165,7 +191,6 @@ export const SUPERVISOR_CANONICAL_INVENTORY: readonly CanonicalInventoryEntry[] 
     evidence: [
       { side: 'native-producer', file: 'src/activation/native-host.ts', needle: "emit('stale_warning'" },
     ],
-    differentialReads: 'parity',
     gapRef: 'NATIVE_GAP (T4/T0d): createStaleWarningEvent has no call site outside supervisor.ts; native stall_gaps_json is unconditionally empty. Owned by SPECIALISTS-102; this durable proof FAILS until that node lands.',
     expectation: 'EXPECTED_DURABLE',
     durable: {
@@ -183,7 +208,6 @@ export const SUPERVISOR_CANONICAL_INVENTORY: readonly CanonicalInventoryEntry[] 
       { side: 'native-producer', file: 'src/activation/native-host.ts', needle: "emit('model_fallback'" },
       { side: 'native-mapper', file: 'src/specialist/native-activation-observability.ts', needle: "case 'model_fallback'" },
     ],
-    differentialReads: 'parity',
     // SPECIALISTS-103: the pre-fix gap text ("5 emit sites, no mapper arm") is
     // HISTORICAL. The mapper arm exists (SPECIALISTS-101) and now preserves the
     // full diagnostic payload (SPECIALISTS-103). The gap is closed; the proof
@@ -214,7 +238,6 @@ export const SUPERVISOR_CANONICAL_INVENTORY: readonly CanonicalInventoryEntry[] 
       { side: 'native-producer', file: 'src/activation/settlement-publication.ts', needle: "emit('settlement_stored'" },
       { side: 'native-mapper', file: 'src/specialist/native-activation-observability.ts', needle: "'settlement_stored'" },
     ],
-    differentialReads: 'parity',
     // SPECIALISTS-103: the pre-fix gap text ("default returns null; 0 durable
     // rows") is HISTORICAL. The settlement arms exist (SPECIALISTS-101); the
     // proof below asserts the durable row.
@@ -234,7 +257,6 @@ export const SUPERVISOR_CANONICAL_INVENTORY: readonly CanonicalInventoryEntry[] 
     evidence: [
       { side: 'reader', file: 'src/specialist/prometheus-projection.ts', needle: 'latest.token_usage' },
     ],
-    differentialReads: 'parity',
     gapRef: 'Fixed by PR #377 (was a shared reader defect: 0 series for BOTH engines, invisible to differential). Reader now reads nested token_usage first with flat fallback.',
     expectation: 'EXPECTED_RUNTIME_ONLY',
     runtime: {
@@ -250,7 +272,6 @@ export const SUPERVISOR_CANONICAL_INVENTORY: readonly CanonicalInventoryEntry[] 
       { side: 'native-producer', file: 'src/activation/native-host.ts', needle: "'extension_discovery_sessions'" },
       { side: 'native-mapper', file: 'src/specialist/native-activation-observability.ts', needle: "'extension_discovery_sessions'" },
     ],
-    differentialReads: 'parity',
     // SPECIALISTS-103: PR #382 made the absence EXPLICIT (operator ruling:
     // extension resolution out of scope; no table/column/writer exists and
     // creating one is deferred). The pre-fix text ("absent from both gap
