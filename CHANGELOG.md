@@ -32,6 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Refuse shadowed granted names, harden ask/escalate, mixed-baseline, probe verdict (round 2) ([f0f4897](https://github.com/xtrm-dev/specialists/commit/f0f4897a85d91de6ce3c334675c02553d22e07a2))
 - R3.1 catalog reserved set, R3.2 required param, R3.3 tests, R3.4 comments ([2fe65f5](https://github.com/xtrm-dev/specialists/commit/2fe65f50c973644ecea6b8451d55e6191ebe8285))
 - Resolve declared git: sources to pi checkout cache with attribution pinning ([6ae4c7e](https://github.com/xtrm-dev/specialists/commit/6ae4c7ea0fb664050c6a77cb554c15d19f9503bb))
+- Name the admission mechanism of the path that prints the contract ([36d5a86](https://github.com/xtrm-dev/specialists/commit/36d5a8617a489f83d32d0b244fe669a9a5fd69fb))
+
+### Other changes
+- Bound and observe the double session_start per dynamic activation ([d230251](https://github.com/xtrm-dev/specialists/commit/d2302510b3fe04a7d986a72f0a374e6797321bea))
 
 ### Project maintenance
 - Remove dead Beads coupling from the native-facing runtime (#361) ([31887a4](https://github.com/xtrm-dev/specialists/commit/31887a4e55d25a57b90f06feef580ae148e29e9d))
@@ -40,6 +44,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stop calling the contract quote a mechanical tie (#373) ([472b1ae](https://github.com/xtrm-dev/specialists/commit/472b1aef5fc02c1f5195090231ee3f0f493ce427))
 - Measure the discover-then-pin falsifiers (unitAI-1pqtl.1) ([280f410](https://github.com/xtrm-dev/specialists/commit/280f410da7f683d8addbbfcf641a8623c4280cd0))
 - Drop the re-default on the required reserved-names parameter ([1a25853](https://github.com/xtrm-dev/specialists/commit/1a25853e1bae075b8bf141d274b0dc74b0186887))
+- State which extension sources the native path resolves ([4009a09](https://github.com/xtrm-dev/specialists/commit/4009a09c6f07214f32de16b3a103f14b59a0132b))
+- Pin the native admission mechanism as a negative pair ([4204b7e](https://github.com/xtrm-dev/specialists/commit/4204b7ea931cae72702c530b1169fb4912f3edd4))
 
 ## [3.21.5] - 2026-08-20
 

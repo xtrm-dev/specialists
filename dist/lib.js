@@ -7338,12 +7338,15 @@ function withDiscoveredExtensionTools(base, discovered) {
     warnings
   };
 }
-function formatResolvedToolContract(contract) {
+function describeAdmission(admission) {
+  return admission === "discover-then-pin" ? `registered tools admitted by discover-then-pin into this session's tool allowlist` : "registered tools admitted by the tool-policy gate";
+}
+function formatResolvedToolContract(contract, admission = "tool-policy-gate") {
   const lines = [
     "## Resolved Tool Contract",
     `- effective tier: ${contract.effectiveTier}`,
     `- --tools: ${contract.toolsFlag || "(none)"}`,
-    ...contract.exposedExtensionSources.length > 0 ? [`- exposed extension sources (all registered tools available via tool-policy gate): ${formatList(contract.exposedExtensionSources)}`] : [],
+    ...contract.exposedExtensionSources.length > 0 ? [`- exposed extension sources (${describeAdmission(admission)}): ${formatList(contract.exposedExtensionSources)}`] : [],
     `- actual native tools: ${formatList(contract.nativeTools)}`,
     `- active extension tools: ${formatList(contract.extensionTools)}`,
     `- denied native tools: ${formatList(contract.deniedNativeTools)}`,
@@ -23208,7 +23211,7 @@ class NativeActivationHost {
       completedBlockers: completedBlockers.map(workAncestorAsRecord),
       preScriptOutput,
       variables: {
-        resolved_tool_contract: formatResolvedToolContract(effectiveToolContract)
+        resolved_tool_contract: formatResolvedToolContract(effectiveToolContract, "discover-then-pin")
       },
       ...isReviewer ? {
         appendExecutionContext: createReviewerDiffAppendHook((message) => process.stderr.write(`${message}
