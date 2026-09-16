@@ -744,9 +744,10 @@ function loadNativeActivationSummaries(args: PsArgs, mineBeadIds?: Set<string>):
   if (!sqliteClient) return [];
   try {
     const rows = sqliteClient.readForensicEvents({
-      eventFamily: 'activation',
+      jobIdPrefix: 'act:',
       sinceMs: args.sinceMs,
       limit: 1000,
+      order: 'desc',
     });
     return summarizeNativeActivations(rows).filter((summary) => {
       if (args.beadFilter && summary.bead_id !== args.beadFilter) return false;

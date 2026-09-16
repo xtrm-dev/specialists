@@ -1,11 +1,12 @@
 // unitAI-rrdnt.47: last-known summaries of native activations for the CLI.
-//
-// Native activations live in an in-process FleetRegistry inside their host
-// session, so a separate CLI process can never read live registry state.
-// What it CAN read is the forensic trail in specialist_forensic_events
-// (event_family='activation'), written since unitAI-rrdnt.37.1.1. Everything
+// XTRM-93 N2B: native activations are re-projected onto the SHARED timeline
+// vocabulary (families job/control/turn/model/tool/retry, e.g. job.started,
+// turn.summarized, tool.call.completed) and distinguished ONLY by job_id
+// identity (the act: id space). There is no native-specific event family;
+// the retired activation.* parallel vocabulary (event_family='activation',
+// written until 2026-09-08) survives only as historical rows. Everything
 // here is therefore LAST-KNOWN state: a crashed host stops writing without
-// a disposed row, so absence of a terminal event must never be rendered as
+// a terminal event, so absence of a terminal event must never be rendered as
 // "running". Callers must label the output accordingly.
 import type { ForensicEventRecord } from './observability-sqlite.js';
 
@@ -25,7 +26,9 @@ export interface NativeActivationSummary {
   detail?: string;
 }
 
-/** Latest-event wins; unknown names fall back to the raw suffix. */
+/** Latest-event wins; unknown historical names fall back to the raw suffix.
+ * Shared-timeline mid-flight signals (turn/tool/model/retry/...) map to
+ * last-known 'active', never 'running' (crashed-host contract). */
 function stateForEventName(eventName: string): string {
   const short = eventName.startsWith('activation.') ? eventName.slice('activation.'.length) : eventName;
   switch (short) {
@@ -43,8 +46,19 @@ function stateForEventName(eventName: string): string {
     case 'activation_failed': return 'failed';
     case 'activation_disposed': return 'disposed';
     case 'activation_rejected': return 'rejected';
-    default: return short;
+    case 'job.completed': return 'completed';
+    case 'job.failed': return 'failed';
+    case 'job.cancelled': return 'cancelled';
+    case 'job.started': return 'active';
+    case 'job.status_changed': return 'settled';
+    case 'control.lease_acquired.recorded': return 'admitted';
+    case 'control.lease_denied.recorded': return 'rejected';
+    case 'control.lease_uncertain.recorded': return 'starting';
+    default: break;
   }
+  if (eventName.startsWith('activation.')) return short;
+  if (eventName.includes('.')) return 'active';
+  return short;
 }
 
 interface ParsedBody {
@@ -58,12 +72,13 @@ interface ParsedBody {
 function parseBody(eventJson: string): ParsedBody {
   try {
     const parsed = JSON.parse(eventJson) as {
-      correlation?: { bead_id?: unknown };
+      correlation?: { bead_id?: unknown; pi_session_id?: unknown };
       body?: { pi_session_id?: unknown; error?: unknown; stop_reason?: unknown; reason?: unknown };
     };
     const out: ParsedBody = {};
     if (typeof parsed.correlation?.bead_id === 'string') out.bead_id = parsed.correlation.bead_id;
-    if (typeof parsed.body?.pi_session_id === 'string') out.pi_session_id = parsed.body.pi_session_id;
+    if (typeof parsed.correlation?.pi_session_id === 'string') out.pi_session_id = parsed.correlation.pi_session_id;
+    else if (typeof parsed.body?.pi_session_id === 'string') out.pi_session_id = parsed.body.pi_session_id;
     if (typeof parsed.body?.error === 'string') out.error = parsed.body.error;
     if (typeof parsed.body?.stop_reason === 'string') out.stop_reason = parsed.body.stop_reason;
     if (typeof parsed.body?.reason === 'string') out.reason = parsed.body.reason;
@@ -76,8 +91,9 @@ function parseBody(eventJson: string): ParsedBody {
 /**
  * Group forensic activation rows by job (activation) id and derive one
  * last-known summary per activation, newest first. Pure: takes rows, returns
- * summaries. Rows are expected from readForensicEvents({eventFamily:
- * 'activation'}) but any order is tolerated — latest is picked by (t, seq).
+ * summaries. Rows are expected from readForensicEvents({jobIdPrefix: 'act:',
+ * order: 'desc'}) over the shared families, but any order is tolerated —
+ * latest is picked by (t, seq).
  */
 export function summarizeNativeActivations(rows: readonly ForensicEventRecord[]): NativeActivationSummary[] {
   const byId = new Map<string, ForensicEventRecord[]>();
@@ -110,7 +126,7 @@ export function summarizeNativeActivations(rows: readonly ForensicEventRecord[])
       last_event_at_ms: last.t,
       first_event_at_ms: first.t,
       event_count: ordered.length,
-      turns: ordered.filter((event) => event.event_name === 'activation.turn_started').length,
+      turns: ordered.filter((event) => event.event_name === 'activation.turn_started' || event.event_name === 'turn.summarized').length,
       ...(piSessionId ? { pi_session_id: piSessionId } : {}),
       ...(detail ? { detail } : {}),
     });

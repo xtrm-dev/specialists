@@ -1176,6 +1176,11 @@ export interface ForensicEventRecord {
 
 export interface ListForensicEventsFilters {
   jobId?: string;
+  // Identity-prefix match on job_id (e.g. 'act:' for native activations).
+  // Implemented as a closed range (case-sensitive, index-backed). Do NOT use
+  // LIKE here: SQLite LIKE is case-insensitive by default and skips the
+  // idx_forensic_events_job_* indexes (verified via EXPLAIN QUERY PLAN).
+  jobIdPrefix?: string;
   sinceMs?: number;
   eventFamily?: string;
   eventName?: string;
@@ -2794,6 +2799,7 @@ class SqliteClient implements ObservabilitySqliteClient {
       const clauses: string[] = [];
       const params: Array<string | number> = [];
       if (filters.jobId) { clauses.push('job_id = ?'); params.push(filters.jobId); }
+      if (filters.jobIdPrefix) { clauses.push('job_id >= ? AND job_id < ?'); params.push(filters.jobIdPrefix, `${filters.jobIdPrefix}\uffff`); }
       if (filters.sinceMs !== undefined) { clauses.push('t >= ?'); params.push(filters.sinceMs); }
       if (filters.eventFamily) { clauses.push('event_family = ?'); params.push(filters.eventFamily); }
       if (filters.eventName) { clauses.push('event_name = ?'); params.push(filters.eventName); }
