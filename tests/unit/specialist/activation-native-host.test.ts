@@ -45,7 +45,7 @@ vi.mock('node:child_process', async (importOriginal) => {
     },
   };
 });
-import { NativeActivationHost, resolveWorkspace, type ActivationForensicSink } from '../../../src/activation/native-host.js';
+import { NativeActivationHost, resolveWorkspace, resolveDeclaredExtensionSources, resolveNpmExtensionSource, type ActivationForensicSink } from '../../../src/activation/native-host.js';
 import { buildSystemPrompt } from '../../../src/specialist/system-prompt.js';
 import { resolveOutputContractSchema } from '../../../src/specialist/runner.js';
 import { DispatchRejectedError } from '../../../src/activation/types.js';
@@ -2157,9 +2157,48 @@ describe('pre-scripts and curated extensions (SPECIALISTS-6)', () => {
     expect(paths).toContain(PY_KERNEL);
     // ...exactly once, even though the definition also declares it (unitAI-il2io rule).
     expect(paths.filter((p) => p === PY_KERNEL)).toHaveLength(1);
-    // A non-local source cannot be loaded by the in-process resource loader and is not
-    // forwarded as if it were a path.
+    // An `npm:` source is never forwarded verbatim: it either resolves to the installed
+    // package directory or is reported and skipped (unitAI-rx1bu). What must never appear
+    // is the bare spec, on any machine. 
     expect(paths.some((p) => p.startsWith('npm:'))).toBe(false);
+  });
+
+  it('injects an installed npm source as its resolved path (unitAI-rx1bu)', async () => {
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record });
+    // `PI_NPM_GLOBAL_DIR` is the resolver's first candidate, so the fixture pins the
+    // node_modules root the host reads without mocking the module the whole suite shares.
+    const fakeNodeModules = hostWorkspace();
+    mkdirSync(join(fakeNodeModules, 'pi-mcp-adapter'), { recursive: true });
+    writeFileSync(
+      join(fakeNodeModules, 'pi-mcp-adapter', 'package.json'),
+      JSON.stringify({ name: 'pi-mcp-adapter', version: '0.0.0' }),
+    );
+    const previousGlobalDir = process.env.PI_NPM_GLOBAL_DIR;
+    process.env.PI_NPM_GLOBAL_DIR = fakeNodeModules;
+    try {
+      const host = new NativeActivationHost({
+        loader: loaderFor(specWithScripts([], {
+          permission_required: 'HIGH',
+          extensions: { 'npm:pi-mcp-adapter': true },
+        })),
+        workItems: fakeWorkItems(),
+        forensics: collectingSink(),
+        loadSdk: async () => makeSdk(record, session),
+        cwd: hostWorkspace(),
+      });
+      await (await host.start({
+        specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+      })).result;
+
+      const loader = record.createArgs!.resourceLoader as FakeResourceLoader;
+      const paths = loader.options.additionalExtensionPaths as string[];
+      expect(paths).toContain(join(fakeNodeModules, 'pi-mcp-adapter'));
+      expect(paths).not.toContain('npm:pi-mcp-adapter');
+    } finally {
+      if (previousGlobalDir === undefined) delete process.env.PI_NPM_GLOBAL_DIR;
+      else process.env.PI_NPM_GLOBAL_DIR = previousGlobalDir;
+    }
   });
 
   it('withholds the write-tier-only curated extensions from a read-only specialist', async () => {
@@ -2178,6 +2217,47 @@ describe('pre-scripts and curated extensions (SPECIALISTS-6)', () => {
 
     const loader = record.createArgs!.resourceLoader as FakeResourceLoader;
     expect(loader.options.additionalExtensionPaths as string[]).not.toContain(PY_KERNEL);
+  });
+
+  /**
+   * unitAI-rx1bu. Every specialist enables `npm:` extension sources in the global user
+   * config, and the legacy CLI forwards them to `-e`, where pi's package manager resolves
+   * them. The native path has to resolve them itself: an `npm:` source that is never
+   * resolved is tool surface the contract believes the session has and the session does
+   * not — which is how `ast_grep` went missing from every native activation.
+   */
+  describe('declared extension sources: npm resolution (unitAI-rx1bu)', () => {
+    const env = (dir: string | undefined, installed: string[]) => ({
+      globalNodeModulesDir: () => dir,
+      manifestExists: (packagePath: string) => installed.includes(packagePath),
+    });
+
+    it('resolves an installed npm package to its directory', () => {
+      expect(resolveNpmExtensionSource('npm:pi-ast-grep', env('/nm', ['/nm/pi-ast-grep'])))
+        .toBe('/nm/pi-ast-grep');
+    });
+
+    it('resolves scoped and version-pinned specs to the package directory, not the spec string', () => {
+      expect(resolveNpmExtensionSource('npm:@scope/pkg@1.2.3', env('/nm', ['/nm/@scope/pkg'])))
+        .toBe('/nm/@scope/pkg');
+      expect(resolveNpmExtensionSource('npm:pi-ast-grep@0.1.0', env('/nm', ['/nm/pi-ast-grep'])))
+        .toBe('/nm/pi-ast-grep');
+    });
+
+    it('returns null for an uninstalled package, a non-npm source, and a missing root', () => {
+      expect(resolveNpmExtensionSource('npm:pi-ast-grep', env('/nm', []))).toBeNull();
+      expect(resolveNpmExtensionSource('git:github.com/alonw0/pi-claude-link', env('/nm', ['/nm/pi-ast-grep']))).toBeNull();
+      expect(resolveNpmExtensionSource('npm:pi-ast-grep', env(undefined, ['/nm/pi-ast-grep']))).toBeNull();
+    });
+
+    it('keeps local paths, resolves npm sources, and reports the rest as skipped', () => {
+      const { local, skipped } = resolveDeclaredExtensionSources(
+        ['/local/ext', 'npm:pi-ast-grep', 'git:github.com/alonw0/pi-claude-link', 'npm:absent-pkg'],
+        env('/nm', ['/nm/pi-ast-grep']),
+      );
+      expect(local).toEqual(['/local/ext', '/nm/pi-ast-grep']);
+      expect(skipped).toEqual(['git:github.com/alonw0/pi-claude-link', 'npm:absent-pkg']);
+    });
   });
 });
 

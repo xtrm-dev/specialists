@@ -35,7 +35,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { SpecialistLoader } from '../specialist/loader.js';
+import { SpecialistLoader, parseNpmSourceName } from '../specialist/loader.js';
 import { buildSystemPrompt } from '../specialist/system-prompt.js';
 import { renderTaskPrompt } from '../specialist/task-prompt.js';
 import {
@@ -53,6 +53,7 @@ import {
   resolveCuratedExtensionPaths,
   resolveExecutionExtensionSelection,
   deduplicateExtensionSources,
+  resolveGlobalNodeModulesDir,
 } from '../pi/session.js';
 import { formatResolvedToolContract, type ResolvedToolContract } from '../specialist/resolved-tool-contract.js';
 import { resolveModelChain } from '../specialist/model-chain.js';
@@ -141,6 +142,12 @@ const WRITE_TIERS = new Set(['MEDIUM', 'HIGH']);
  * `-e` and pi's package manager fetches them; the in-process `DefaultResourceLoader` takes
  * filesystem paths only, so they are reported and skipped rather than resolved as a
  * relative path that cannot exist.
+ *
+ * `npm:` is the one non-local family this path CAN honour, by resolving the already-installed
+ * package under the same global node_modules `resolveCuratedExtensionPaths` reads — see
+ * `resolveNpmExtensionSource`. Without that, every `npm:` source a specialist enables is
+ * silently absent under native dispatch while the legacy CLI still loads it
+ * (unitAI-rx1bu: `npm:pi-ast-grep`, enabled for every specialist in the global user config).
  */
 const NON_LOCAL_EXTENSION_PREFIXES = ['npm:', 'git:', 'github:', 'http:', 'https:', 'ssh:'];
 
@@ -152,9 +159,71 @@ const NON_LOCAL_EXTENSION_PREFIXES = ['npm:', 'git:', 'github:', 'http:', 'https
  * is real as a CHECKED shape (`native == legacy minus non-local sources`) instead of skipping
  * the field entirely — a whole-field skip also hides a divergence in the sources both runtimes
  * CAN load (XTRM-84 section 5).
+ *
+ * "Non-local" is not the same as "unloadable" here: an `npm:<pkg>` source is resolvable to
+ * the installed package directory by `resolveNpmExtensionSource`, so the native path loads it
+ * rather than skipping it. Only the sources with no local form (`git:`, `http:`, and an `npm:`
+ * package that is not installed) are reported and skipped.
  */
 export function isNonLocalExtensionSource(source: string): boolean {
   return NON_LOCAL_EXTENSION_PREFIXES.some((prefix) => source.startsWith(prefix));
+}
+
+/**
+ * Resolve a declared `npm:<pkg>[@<spec>]` source to the installed package directory.
+ *
+ * Returns null unless the package is installed with a readable manifest, so a missing
+ * package still takes the reported-and-skipped path instead of being handed to the loader
+ * as a path that cannot exist. The spec/version is ignored on purpose: the loader wants a
+ * directory, and package pinning is the catalog layer's job, not this one's.
+ *
+ * Injectable so tests can pin the node_modules root instead of inheriting whatever the
+ * machine has installed (the same discipline `resolveCuratedExtensionPaths` follows).
+ */
+export interface ExtensionSourceResolutionEnv {
+  globalNodeModulesDir: () => string | undefined;
+  manifestExists: (packagePath: string) => boolean;
+}
+
+const defaultExtensionSourceResolutionEnv: ExtensionSourceResolutionEnv = {
+  globalNodeModulesDir: resolveGlobalNodeModulesDir,
+  manifestExists: (packagePath) => existsSync(join(packagePath, 'package.json')),
+};
+
+export function resolveNpmExtensionSource(
+  source: string,
+  env: ExtensionSourceResolutionEnv = defaultExtensionSourceResolutionEnv,
+): string | null {
+  const packageName = parseNpmSourceName(source);
+  if (!packageName) return null;
+  const globalDir = env.globalNodeModulesDir();
+  if (!globalDir) return null;
+  const packagePath = join(globalDir, packageName);
+  return env.manifestExists(packagePath) ? packagePath : null;
+}
+
+/**
+ * Split declared `execution.extensions` sources into the ones the in-process resource
+ * loader can take and the ones it cannot. Local paths pass through untouched; `npm:`
+ * sources are resolved to their installed directory when possible; everything else that is
+ * non-local (`git:`, `http:`) is skipped.
+ */
+export function resolveDeclaredExtensionSources(
+  sources: readonly string[],
+  env: ExtensionSourceResolutionEnv = defaultExtensionSourceResolutionEnv,
+): { local: string[]; skipped: string[] } {
+  const local: string[] = [];
+  const skipped: string[] = [];
+  for (const source of sources) {
+    if (!isNonLocalExtensionSource(source)) {
+      local.push(source);
+      continue;
+    }
+    const installed = resolveNpmExtensionSource(source, env);
+    if (installed) local.push(installed);
+    else skipped.push(source);
+  }
+  return { local, skipped };
 }
 
 
@@ -1040,25 +1109,24 @@ export class NativeActivationHost {
     // explicit because createAgentSession only reloads a loader it constructed itself.
     // The curated extension set the legacy CLI re-enables after `--no-extensions`
     // (`resolveCuratedExtensionPaths`, shared with src/pi/session.ts so the two runtimes
-    // cannot drift), plus the definition's own declared LOCAL extension sources, with the
-    // same same-identity de-duplication rule (unitAI-il2io). The in-process resource loader
-    // only accepts filesystem paths, so a non-local source is reported and skipped rather
-    // than forwarded as if it were a path.
+    // cannot drift), plus the definition's own declared extension sources, with the same
+    // same-identity de-duplication rule (unitAI-il2io). The in-process resource loader only
+    // accepts filesystem paths, so a non-local source is either resolved to its installed
+    // package directory (npm) or reported and skipped rather than forwarded as if it were a
+    // path. Resolved from the SAME `extensionSelection` the contract above was built from, so
+    // the contract and this loader path cannot disagree (unitAI-rx1bu).
     const curatedExtensions = resolveCuratedExtensionPaths({
       permissionLevel: tier,
       resolvedToolContract: toolContract,
     });
     const declaredExtensions = extensionSelection.extensionSources;
-    const declaredLocalExtensions: string[] = [];
-    for (const source of declaredExtensions) {
-      if (isNonLocalExtensionSource(source)) {
-        process.stderr.write(
-          `[specialists] native activation: extension source '${source}' is not a filesystem path; ` +
-          'the in-process resource loader cannot load it, so it is not injected.\n',
-        );
-        continue;
-      }
-      declaredLocalExtensions.push(source);
+    const { local: declaredLocalExtensions, skipped: skippedDeclaredSources } =
+      resolveDeclaredExtensionSources(declaredExtensions);
+    for (const source of skippedDeclaredSources) {
+      process.stderr.write(
+        `[specialists] native activation: extension source '${source}' is not a filesystem path; ` +
+        'the in-process resource loader cannot load it, so it is not injected.\n',
+      );
     }
     const { kept: dynamicExtensions, dropped: droppedExtensions } = deduplicateExtensionSources(
       curatedExtensions.dedupeAgainstDynamic,

@@ -57,7 +57,7 @@
 //    absolute value, the test below pins it (`resources`, `outputContractSchema`, `skills`,
 //    `contextInputs`, ...); the rest rely on the two sides being independently sourced.
 // ---------------------------------------------------------------------------------------
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, afterAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -79,6 +79,39 @@ const PY_KERNEL = '/fake/pi-extensions/python-kernel';
 vi.mock('../../../src/pi/python-kernel-extension.js', () => ({
   resolvePiExtensionsPythonKernelPath: () => PY_KERNEL,
 }));
+
+/**
+ * unitAI-rx1bu: the native path resolves an installed `npm:` source to its package directory,
+ * so the sweep must not ask what this machine happens to have installed. Pinned to a fixture
+ * root, the same discipline the python-kernel resolver above is stubbed under.
+ */
+const npmRoot = vi.hoisted(() => ({ dir: '' }));
+vi.mock('../../../src/pi/session.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../src/pi/session.js')>();
+  return { ...actual, resolveGlobalNodeModulesDir: () => npmRoot.dir || undefined };
+});
+const PARITY_NPM_SOURCE = 'npm:pi-parity-probe';
+const PARITY_NPM_PACKAGE = 'pi-parity-probe';
+const PARITY_NPM_ROOT = mkdtempSync(join(tmpdir(), 'parity-node-modules-'));
+npmRoot.dir = PARITY_NPM_ROOT;
+mkdirSync(join(PARITY_NPM_ROOT, PARITY_NPM_PACKAGE), { recursive: true });
+writeFileSync(
+  join(PARITY_NPM_ROOT, PARITY_NPM_PACKAGE, 'package.json'),
+  JSON.stringify({ name: PARITY_NPM_PACKAGE, version: '0.0.0' }),
+);
+afterAll(() => rmSync(PARITY_NPM_ROOT, { recursive: true, force: true }));
+
+/**
+ * The sources the fixture installs, mapped to their expected directory.
+ *
+ * Written out rather than computed with `resolveNpmExtensionSource`, because an expectation
+ * that calls the resolver it is checking cannot fail: it would drop the source from BOTH
+ * sides and pass on a broken resolver. An npm source absent from this map is treated as
+ * uninstalled, which is the shape the native path reports and skips.
+ */
+const INSTALLED_NPM_SOURCES: Record<string, string> = {
+  [PARITY_NPM_SOURCE]: join(PARITY_NPM_ROOT, PARITY_NPM_PACKAGE),
+};
 
 import {
   NativeActivationHost,
@@ -326,10 +359,18 @@ const INTENTIONAL_DIVERGENCES: Partial<Record<ProfileKey, NamedDivergence>> = {
   },
   extensions: {
     category: 'process topology',
-    reason: 'the in-process resource loader takes filesystem paths only; the legacy CLI also forwards npm:/git:/http: specs for pi itself to resolve',
+    reason: 'the in-process resource loader takes filesystem paths only, so an installed npm: source is resolved by the native path to its package directory while the legacy CLI forwards the raw npm:/git:/http: spec for pi itself to resolve; native therefore equals the legacy sources that ARE local plus the legacy npm: sources that resolve to an installed package, and drops only the ones with no local form (git:/http:, and an npm: package that is not installed)',
+    // Checked shape, not a skip: the npm: fixture source is installed in the pinned node_modules
+    // root, so its resolved directory must appear on the native side. If npm resolution regresses
+    // to skipping, native is missing that directory and this fails.
     holds: (native, legacy) => sortedEqual(
       native.extensions,
-      legacy.extensions.filter((source) => !isNonLocalExtensionSource(source)),
+      [
+        ...legacy.extensions.filter((source) => !isNonLocalExtensionSource(source)),
+        ...legacy.extensions
+          .map((source) => INSTALLED_NPM_SOURCES[source])
+          .filter((resolved): resolved is string => resolved !== undefined),
+      ],
     ),
   },
 };
@@ -432,7 +473,7 @@ function definition(root: string, opts: ProbeOptions) {
     output_type: opts.outputType ?? 'analysis',
     bare: false,
     ...(opts.permission === 'HIGH' || opts.gitnexus === false
-      ? { extensions: { ...(opts.permission === 'HIGH' ? { [PY_KERNEL]: true } : {}), ...(opts.gitnexus === false ? { gitnexus: false } : {}) } }
+      ? { extensions: { ...(opts.permission === 'HIGH' ? { [PY_KERNEL]: true, [PARITY_NPM_SOURCE]: true } : {}), ...(opts.gitnexus === false ? { gitnexus: false } : {}) } }
       : {}),
   };
   return {
