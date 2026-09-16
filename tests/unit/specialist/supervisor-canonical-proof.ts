@@ -1,0 +1,318 @@
+// Execution-backed verification for the XTRM-93 N3 canonical oracle (SPECIALISTS-103).
+//
+// Every check here drives REAL code against an ISOLATED store (worktree-local
+// scratch, never the authoritative DB) and asserts on DURABLE rows or DERIVED
+// output. No check reads source text: a registry key, comment, gap-list entry,
+// fixture, or unrelated literal cannot satisfy a durable expectation by
+// construction — the mechanism is visible below (mapper call + forensic row
+// query), not asserted in a comment.
+//
+// M6 injection: runDurableNativeCheck accepts { dropWrites } to simulate "an
+// event that IS mapped but never reaches a durable forensic row". The mapper
+// returns non-null, the writer is stubbed to drop, and the check MUST fail on
+// the missing row. That is the proof the row — not the mapper return — is the
+// bar. M5 uses the same path: a comment containing the event name changes
+// nothing because no source file is ever opened here.
+
+import { Database } from 'bun:sqlite';
+import { mkdirSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { createActivationForensicSink } from '../../../src/activation/forensic-sink.js';
+import {
+  mapNativeLifecycleEvent,
+  NATIVE_LIFECYCLE_DELIBERATELY_UNPERSISTED,
+} from '../../../src/specialist/native-activation-observability.js';
+import { createObservabilitySqliteClientAtPath } from '../../../src/specialist/observability-sqlite.js';
+import { renderPrometheusProjection } from '../../../src/specialist/prometheus-projection.js';
+import { createStaleWarningEvent } from '../../../src/specialist/timeline-events.js';
+import type {
+  CanonicalAbsentProof,
+  CanonicalDurableProof,
+} from './supervisor-canonical-inventory.js';
+
+const SCRATCH_ROOT = join(import.meta.dirname, '..', '..', '.phase7-test-scratch');
+
+export function newIsolatedStore(tag: string): { dbPath: string; root: string } {
+  const root = join(SCRATCH_ROOT, `${tag}-${crypto.randomUUID()}`);
+  mkdirSync(root, { recursive: true });
+  return { dbPath: join(root, 'observability.db'), root };
+}
+
+export function dropIsolatedStore(root: string): void {
+  rmSync(root, { recursive: true, force: true });
+}
+
+interface ForensicRow {
+  event_name: string;
+  attempt_id: string | null;
+  event_json: string;
+}
+
+function readForensicRows(dbPath: string, jobId: string): ForensicRow[] {
+  const raw = new Database(dbPath);
+  try {
+    return raw.query(
+      'SELECT event_name, attempt_id, event_json FROM specialist_forensic_events WHERE job_id = ? ORDER BY seq',
+    ).all(jobId) as ForensicRow[];
+  } finally {
+    raw.close();
+  }
+}
+
+/**
+ * Durable proof via the native lifecycle path: mapper arm + writer must BOTH
+ * hold. Fails naming the mapper link when mapNativeLifecycleEvent returns
+ * null; fails naming the writer link when no forensic row appears. The
+ * `dropWrites` flag forces the M6 state (mapped but never persisted) by
+ * stubbing the writer to a no-op AFTER the mapper has run.
+ */
+export function runDurableNativeCheck(opts: {
+  emitName: string;
+  emitPayload?: Record<string, unknown>;
+  expectedForensicName: string;
+  assertFallbackDiagnostics?: boolean;
+  activationId?: string;
+  dropWrites?: boolean;
+}): { rows: ForensicRow[] } {
+  const {
+    emitName,
+    emitPayload,
+    expectedForensicName,
+    assertFallbackDiagnostics,
+    dropWrites,
+  } = opts;
+  const activationId = opts.activationId ?? `act:oracle-${emitName.replace(/[^a-z]/g, '')}-${crypto.randomUUID().slice(0, 8)}`;
+
+  // Link 1 (mapper) is checked FIRST so the failure names it precisely. This
+  // call is the same function the sink uses below — not a string match.
+  const preview = mapNativeLifecycleEvent(
+    { activationId, specialist: 'researcher', beadId: 'bd-oracle', name: emitName, payload: emitPayload },
+    { startedAtMs: Date.now() },
+    1000,
+  );
+  if (preview === null) {
+    throw new Error(
+      `[oracle] durable proof for "${emitName}": mapper link MISSING — ` +
+      `mapNativeLifecycleEvent returned null (no case arm; a registry key or ` +
+      `comment cannot substitute). Expected a "${expectedForensicName}" row.`,
+    );
+  }
+
+  const { dbPath, root } = newIsolatedStore('oracle-durable');
+  try {
+    const realClient = createObservabilitySqliteClientAtPath(dbPath);
+    if (!realClient) throw new Error('[oracle] isolated store unavailable');
+    // M6 injection point: keep the mapper above intact, drop the write below.
+    const client = dropWrites
+      ? ({ ...realClient, upsertStatusWithEvents: () => {}, upsertStatus: () => {} } as typeof realClient)
+      : realClient;
+    const sink = createActivationForensicSink(client);
+    const attemptId = 'att:oracle:1';
+    sink.emit({
+      activationId,
+      attemptId,
+      participantId: 'specialist::researcher',
+      specialist: 'researcher',
+      beadId: 'bd-oracle',
+      name: emitName,
+      payload: emitPayload,
+    });
+    realClient.close();
+
+    const rows = readForensicRows(dbPath, activationId);
+    const names = rows.map((row) => row.event_name);
+    if (!names.includes(expectedForensicName)) {
+      throw new Error(
+        `[oracle] durable proof for "${emitName}": writer link MISSING — ` +
+        `mapper returned a timeline event but no durable forensic row named ` +
+        `"${expectedForensicName}" exists (found: [${names.join(', ')}]). ` +
+        (dropWrites
+          ? 'Writes were deliberately dropped (M6): the mapper alone is insufficient.'
+          : 'The event is mapped but never reaches a durable row.'),
+      );
+    }
+
+    if (assertFallbackDiagnostics) {
+      const row = rows.find((candidate) => candidate.event_name === expectedForensicName);
+      if (!row) throw new Error('[oracle]unreachable: row asserted above');
+      const parsed = JSON.parse(row.event_json) as {
+        body?: { legacy_timeline_event?: Record<string, unknown> };
+      };
+      const timeline = parsed.body?.legacy_timeline_event ?? {};
+      const payload = emitPayload ?? {};
+      for (const key of ['model', 'previous_model', 'error_class', 'terminal', 'note', 'attempt_n', 'resolved_model'] as const) {
+        const produced = key === 'model'
+          ? payload['to_model']
+          : key === 'previous_model'
+            ? payload['from_model']
+            : payload[key];
+        if (produced === undefined || produced === null) continue;
+        const persisted = timeline[key];
+        if (persisted !== produced) {
+          throw new Error(
+            `[oracle] durable payload for "${emitName}": field "${key}" ` +
+            `produced as ${JSON.stringify(produced)} but persisted as ` +
+            `${JSON.stringify(persisted)} (event_json.body.legacy_timeline_event).`,
+          );
+        }
+      }
+      // Attempt attribution: the durable row carries the emit's attempt.
+      if (row.attempt_id !== attemptId) {
+        throw new Error(
+          `[oracle] attempt attribution for "${emitName}": row attempt_id is ` +
+          `${JSON.stringify(row.attempt_id)}, expected ${JSON.stringify(attemptId)}.`,
+        );
+      }
+    }
+
+    return { rows };
+  } finally {
+    dropIsolatedStore(root);
+  }
+}
+
+/** Durable proof via the legacy writer path (no native mapper involved). */
+export function runDurableLegacyStaleCheck(): { rows: ForensicRow[] } {
+  const jobId = `act:oracle-legacy-stale-${crypto.randomUUID().slice(0, 8)}`;
+  const { dbPath, root } = newIsolatedStore('oracle-legacy');
+  try {
+    const client = createObservabilitySqliteClientAtPath(dbPath);
+    if (!client) throw new Error('[oracle] isolated store unavailable');
+    client.upsertStatus({
+      id: jobId, specialist: 'researcher', status: 'running', bead_id: 'bd-oracle',
+      started_at_ms: Date.now(),
+    } as never);
+    client.appendEvent(jobId, 'researcher', 'bd-oracle', createStaleWarningEvent('waiting_stale', {
+      silence_ms: 1000,
+      threshold_ms: 500,
+    }) as never);
+    client.close();
+
+    const rows = readForensicRows(dbPath, jobId);
+    if (!rows.map((row) => row.event_name).includes('process_health.stale_detected')) {
+      throw new Error(
+        '[oracle] durable proof for legacy stale_warning: writer link MISSING — ' +
+        `createStaleWarningEvent + appendEvent produced no "process_health.stale_detected" row.`,
+      );
+    }
+    return { rows };
+  } finally {
+    dropIsolatedStore(root);
+  }
+}
+
+/**
+ * Absent-with-reason proof: the absence must be a DECISION. Passes only when
+ * all three hold: mapper returns null (no arm), the registry carries a
+ * non-empty written reason, and emitting the name yields zero forensic rows.
+ * An empty or missing reason FAILS even when no row exists.
+ */
+export function runAbsentCheck(proof: CanonicalAbsentProof): { reason: string } {
+  const preview = mapNativeLifecycleEvent(
+    { activationId: 'act:oracle-absent', specialist: 'researcher', name: proof.emitName, payload: {} },
+    { startedAtMs: Date.now() },
+    1000,
+  );
+  if (preview !== null) {
+    throw new Error(
+      `[oracle] absent proof for "${proof.emitName}": mapper arm EXISTS — ` +
+      `the event is persisted, so EXPECTED_ABSENT_WITH_REASON no longer holds. Reclassify to EXPECTED_DURABLE.`,
+    );
+  }
+
+  const reason = (NATIVE_LIFECYCLE_DELIBERATELY_UNPERSISTED as unknown as Record<string, unknown>)[proof.unpersistedKey];
+  if (typeof reason !== 'string' || reason.trim().length === 0) {
+    throw new Error(
+      `[oracle] absent proof for "${proof.emitName}": written reason MISSING or EMPTY — ` +
+      `absence without a non-empty reason in NATIVE_LIFECYCLE_DELIBERATELY_UNPERSISTED is an omission, not a decision.`,
+    );
+  }
+
+  const activationId = `act:oracle-absent-${crypto.randomUUID().slice(0, 8)}`;
+  const { dbPath, root } = newIsolatedStore('oracle-absent');
+  try {
+    const client = createObservabilitySqliteClientAtPath(dbPath);
+    if (!client) throw new Error('[oracle] isolated store unavailable');
+    const sink = createActivationForensicSink(client);
+    sink.emit({
+      activationId,
+      attemptId: 'att:oracle:1',
+      participantId: 'specialist::researcher',
+      specialist: 'researcher',
+      beadId: 'bd-oracle',
+      name: proof.emitName,
+      payload: { pinned: 'oracle-probe' },
+    });
+    client.close();
+    const rows = readForensicRows(dbPath, activationId);
+    if (rows.length !== 0) {
+      throw new Error(
+        `[oracle] absent proof for "${proof.emitName}": expected zero forensic rows, ` +
+        `found [${rows.map((row) => row.event_name).join(', ')}] — a persistence surface exists. Reclassify.`,
+      );
+    }
+  } finally {
+    dropIsolatedStore(root);
+  }
+  return { reason };
+}
+
+/**
+ * Runtime-only proof for the token metric: executes writer -> aggregate ->
+ * render and requires a non-empty xtrm_llm_tokens_total projection. This is
+ * neither a single-row check (the metric aggregates the trajectory) nor an
+ * absence check (the series must exist).
+ */
+export function runTokenMetricProjectionCheck(): { sampleCount: number } {
+  const jobId = `job-oracle-tokens-${crypto.randomUUID().slice(0, 8)}`;
+  const { dbPath, root } = newIsolatedStore('oracle-runtime');
+  try {
+    const client = createObservabilitySqliteClientAtPath(dbPath);
+    if (!client) throw new Error('[oracle] isolated store unavailable');
+    client.upsertStatus({
+      id: jobId, specialist: 'executor', status: 'done',
+      started_at_ms: 1, last_event_at_ms: 5,
+    } as never);
+    client.appendEvent(jobId, 'executor', 'bd-oracle', {
+      t: 70, type: 'turn_summary', turn_index: 1,
+      token_usage: { input_tokens: 1000, output_tokens: 200, total_tokens: 1200 },
+    } as never);
+    client.appendEvent(jobId, 'executor', 'bd-oracle', {
+      t: 80, type: 'token_usage', source: 'turn_end',
+      token_usage: { input_tokens: 2097, output_tokens: 150, total_tokens: 2247 },
+    } as never);
+    client.appendEvent(jobId, 'executor', 'bd-oracle', {
+      t: 100, type: 'run_complete', status: 'COMPLETE', elapsed_s: 0.1,
+    } as never);
+    const metrics = client.aggregateJobMetrics(jobId);
+    const statuses = client.listStatuses();
+    const jobMetrics = client.listJobMetrics({});
+    client.close();
+    if (!metrics) throw new Error('[oracle] runtime proof: aggregateJobMetrics returned null');
+    const text = renderPrometheusProjection({
+      statuses, jobMetrics, repo: 'oracle', nowMs: Date.now(),
+    });
+    const series = text.split('\n').filter((line) => line.startsWith('xtrm_llm_tokens_total'));
+    if (series.length === 0) {
+      throw new Error('[oracle] runtime proof for token-metric-series: no xtrm_llm_tokens_total series projected');
+    }
+    return { sampleCount: series.length };
+  } finally {
+    dropIsolatedStore(root);
+  }
+}
+
+/** Dispatch a durable entry's proof (native vs legacy path). */
+export function runDurableEntryCheck(proof: CanonicalDurableProof): void {
+  if (proof.via === 'native-lifecycle') {
+    if (!proof.emitName) throw new Error('[oracle] durable proof missing emitName');
+    runDurableNativeCheck({
+      emitName: proof.emitName,
+      emitPayload: proof.emitPayload,
+      expectedForensicName: proof.expectedForensicName,
+      assertFallbackDiagnostics: proof.assertFallbackDiagnostics,
+    });
+    return;
+  }
+  runDurableLegacyStaleCheck();
+}

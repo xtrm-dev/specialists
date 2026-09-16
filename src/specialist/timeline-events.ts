@@ -366,6 +366,16 @@ export interface TimelineEventModelChange extends TimelineEventBase {
   action: 'set_model' | 'cycle_model';
   model?: string;
   previous_model?: string;
+  // SPECIALISTS-103: native model_fallback diagnostics, preserved additively.
+  // The closed `action` union is NOT widened; these optional fields carry the
+  // producer payload (src/activation/native-host.ts 5 emit sites) onto the
+  // durable row. Each mirrors a producer key verbatim; absent when the emit
+  // site did not carry it (e.g. attempt_n only on the retry-walk site).
+  error_class?: string;
+  terminal?: boolean;
+  note?: string;
+  attempt_n?: number;
+  resolved_model?: string;
 }
 
 export interface TimelineEventExtensionError extends TimelineEventBase {

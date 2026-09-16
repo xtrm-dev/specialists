@@ -1,5 +1,5 @@
 // Expected canonical event inventory for the XTRM-93 supervisor oracle.
-// Node N3.0 (bead SPECIALISTS-95).
+// Node N3.0 (bead SPECIALISTS-95), expectation model repaired by SPECIALISTS-103.
 //
 // WHAT THIS IS: a declarative manifest of which canonical signals MUST exist
 // for which scenarios. It is authored from the canonical vocabulary — the T1
@@ -7,30 +7,112 @@
 // N3 classification (docs/migrations/xtrm-93/n3/README.md) — NOT harvested
 // from either runtime's observed output. That independence is the point: a
 // differential harness alone is a bad oracle because legacy-emits-nothing +
-// native-emits-nothing reads as PARITY (false green). This inventory fails
-// when a producer or a mapper arm is missing, regardless of what either
-// runtime happens to emit.
+// native-emits-nothing reads as PARITY (false green).
 //
-// HOW IT IS CHECKED: tests in supervisor.test.ts (describe
-// 'canonical event inventory oracle') read the cited SOURCE files as text and
-// assert the cited evidence needles exist. No runtime is executed, no event
-// stream is observed, and nothing here regenerates itself from observed
-// events — this file has no imports and no code path that touches runtime
-// output. Entries whose evidence is missing because the gap is still open
-// (gapRef set) FAIL until a follow-on node closes the gap; that failure is
-// the oracle working, not the oracle being wrong.
+// HOW IT IS CHECKED (SPECIALISTS-103 repair): every entry declares an explicit
+// `expectation` class. The evaluator in supervisor.test.ts (`canonical event
+// inventory oracle`) executes the proof for that class against an ISOLATED
+// store — it never passes on source-string presence:
 //
-// DO NOT "fix" a failing entry by editing the needle to match the current
-// source. If the evidence is missing, the gap is open: record it, do not
-// redefine the contract to fit the implementation.
+// - EXPECTED_DURABLE: satisfied ONLY when driving the named canonical event
+//   through the real mapper + writer produces a durable forensic row whose
+//   event_name equals the emitted name. A registry key, comment, gap-list
+//   entry, fixture, or unrelated literal cannot satisfy it by construction:
+//   the check never reads source text.
+// - EXPECTED_ABSENT_WITH_REASON: satisfied ONLY when (a) the mapper returns
+//   null for the name, (b) a non-empty written reason exists in
+//   NATIVE_LIFECYCLE_DELIBERATELY_UNPERSISTED, and (c) emitting the name
+//   against an isolated store produces zero forensic rows. An empty or
+//   missing reason FAILS: absence must be a decision, not an omission.
+// - EXPECTED_RUNTIME_ONLY: the signal is real but is neither a single durable
+//   row nor a deliberate absence (e.g. an aggregated reader projection).
+//   Satisfied ONLY by executing the runtime path and observing the derived
+//   output. Each entry states why it is neither durable nor absent.
+//
+// The legacy `evidence` needles are retained as documentation (where a human
+// looks), but the evaluator MUST NOT use them for pass/fail. M5 proves a
+// comment or unrelated string containing the event name does not satisfy a
+// durable expectation.
+//
+// DO NOT "fix" a failing entry by editing data to match the current source.
+// If the proof fails, the gap is open: record it, do not redefine the
+// contract to fit the implementation.
+
+export type CanonicalExpectationClass =
+  | 'EXPECTED_DURABLE'
+  | 'EXPECTED_ABSENT_WITH_REASON'
+  | 'EXPECTED_RUNTIME_ONLY';
+
+/**
+ * The differential note states ONLY how legacy/native observations compare, and
+ * ONLY where a comparison is meaningful. It is DERIVED from the expectation class
+ * so it can never contradict it.
+ *
+ * SPECIALISTS-103 follow-on: the retired `differentialReads: 'parity' | 'divergence'`
+ * field was removed. It had exactly one consumer (this failure message), every one of
+ * its eight values was the constant 'parity', and that constant made the message assert
+ * "both engines satisfy this row" for rows where the assertion is FALSE:
+ *   - EXPECTED_ABSENT_WITH_REASON: neither engine persists the row, by decision;
+ *   - EXPECTED_RUNTIME_ONLY: durable read-back is outside the row's contract.
+ * A constant whose only effect is a misleading sentence is not differential information.
+ * The real differential information is execution-backed and lives in `durable.via`
+ * ('native-lifecycle' | 'legacy-append') and in the `evidence` sides.
+ */
+export function differentialNoteFor(expectation: CanonicalExpectationClass): string {
+  switch (expectation) {
+    case 'EXPECTED_DURABLE':
+      // A comparison IS meaningful here: both engines are expected to produce the row.
+      return 'both engines are expected to satisfy this row.';
+    case 'EXPECTED_ABSENT_WITH_REASON':
+      return 'NOT parity: this row is a deliberate absence, so neither engine persists it by decision. An empty row on both sides is NOT both-sides-satisfy.';
+    case 'EXPECTED_RUNTIME_ONLY':
+      return 'NOT durable parity: this row is a runtime projection, so a durable legacy-vs-native comparison is outside its contract.';
+    default: {
+      const never: never = expectation;
+      return never;
+    }
+  }
+}
 
 export interface CanonicalInventoryEvidence {
-  /** Which side of the contract this needle pins. */
+  /** Which side of the contract this needle pins (documentation only). */
   side: 'legacy-producer' | 'native-producer' | 'native-mapper' | 'reader';
-  /** Repo-relative source path inspected as text (never executed). */
+  /** Repo-relative source path (documentation only; never read for pass/fail). */
   file: string;
-  /** Literal substring that must be present in that file. */
+  /** Literal substring (documentation only; never matched for pass/fail). */
   needle: string;
+}
+
+/** Execution proof for EXPECTED_DURABLE: drive the event, expect the row. */
+export interface CanonicalDurableProof {
+  /** How the evaluator drives the event. */
+  via: 'native-lifecycle' | 'legacy-append';
+  /** Native lifecycle name to emit via the forensic sink (via native-lifecycle). */
+  emitName?: string;
+  /** Representative payload for the emit (covers all producer keys where relevant). */
+  emitPayload?: Record<string, unknown>;
+  /** Timeline type to construct + append (via legacy-append). */
+  legacyTimelineType?: 'stale_warning';
+  /** Forensic event_name that must appear in specialist_forensic_events. */
+  expectedForensicName: string;
+  /** When true, the read-back row must also carry the fallback diagnostics. */
+  assertFallbackDiagnostics?: boolean;
+}
+
+/** Execution proof for EXPECTED_ABSENT_WITH_REASON: decision, not omission. */
+export interface CanonicalAbsentProof {
+  /** Key in NATIVE_LIFECYCLE_DELIBERATELY_UNPERSISTED carrying the reason. */
+  unpersistedKey: string;
+  /** Native lifecycle name to emit; must yield zero forensic rows. */
+  emitName: string;
+}
+
+/** Execution proof for EXPECTED_RUNTIME_ONLY: derived output, not a row. */
+export interface CanonicalRuntimeProof {
+  /** Which runtime check the evaluator executes. */
+  check: 'token-metric-projection';
+  /** Why this signal is neither a single durable row nor a deliberate absence. */
+  reason: string;
 }
 
 export interface CanonicalInventoryEntry {
@@ -40,10 +122,16 @@ export interface CanonicalInventoryEntry {
   signal: string;
   /** Ordered so the failure message names the FIRST missing link. */
   evidence: readonly CanonicalInventoryEvidence[];
-  /** How a pure differential (legacy-vs-native output) comparison reads today. */
-  differentialReads: 'parity' | 'divergence';
   /** Null for parity rows both engines satisfy; otherwise the owning gap. */
   gapRef: string | null;
+  /** SPECIALISTS-103: explicit class. No entry may leave this implicit. */
+  expectation: CanonicalExpectationClass;
+  /** Required when expectation is EXPECTED_DURABLE. */
+  durable?: CanonicalDurableProof;
+  /** Required when expectation is EXPECTED_ABSENT_WITH_REASON. */
+  absent?: CanonicalAbsentProof;
+  /** Required when expectation is EXPECTED_RUNTIME_ONLY. */
+  runtime?: CanonicalRuntimeProof;
 }
 
 export const SUPERVISOR_CANONICAL_INVENTORY: readonly CanonicalInventoryEntry[] = [
@@ -55,8 +143,14 @@ export const SUPERVISOR_CANONICAL_INVENTORY: readonly CanonicalInventoryEntry[] 
       { side: 'legacy-producer', file: 'src/specialist/supervisor.ts', needle: 'createRunStartEvent(' },
       { side: 'native-mapper', file: 'src/specialist/native-activation-observability.ts', needle: "case 'activation_started'" },
     ],
-    differentialReads: 'parity',
     gapRef: null,
+    expectation: 'EXPECTED_DURABLE',
+    durable: {
+      via: 'native-lifecycle',
+      emitName: 'activation_started',
+      emitPayload: { pi_session_id: 'pi-oracle-start' },
+      expectedForensicName: 'job.started',
+    },
   },
   {
     id: 'terminal-complete',
@@ -66,8 +160,14 @@ export const SUPERVISOR_CANONICAL_INVENTORY: readonly CanonicalInventoryEntry[] 
       { side: 'legacy-producer', file: 'src/specialist/supervisor.ts', needle: "createRunCompleteEvent('COMPLETE'" },
       { side: 'native-mapper', file: 'src/specialist/native-activation-observability.ts', needle: "case 'activation_completed'" },
     ],
-    differentialReads: 'parity',
     gapRef: null,
+    expectation: 'EXPECTED_DURABLE',
+    durable: {
+      via: 'native-lifecycle',
+      emitName: 'activation_completed',
+      emitPayload: { pi_session_id: 'pi-oracle-terminal', output: 'oracle output' },
+      expectedForensicName: 'job.completed',
+    },
   },
   {
     id: 'legacy-stale-warning',
@@ -76,8 +176,13 @@ export const SUPERVISOR_CANONICAL_INVENTORY: readonly CanonicalInventoryEntry[] 
     evidence: [
       { side: 'legacy-producer', file: 'src/specialist/supervisor.ts', needle: 'createStaleWarningEvent(' },
     ],
-    differentialReads: 'parity',
     gapRef: null,
+    expectation: 'EXPECTED_DURABLE',
+    durable: {
+      via: 'legacy-append',
+      legacyTimelineType: 'stale_warning',
+      expectedForensicName: 'process_health.stale_detected',
+    },
   },
   {
     id: 'native-stale-warning',
@@ -86,8 +191,14 @@ export const SUPERVISOR_CANONICAL_INVENTORY: readonly CanonicalInventoryEntry[] 
     evidence: [
       { side: 'native-producer', file: 'src/activation/native-host.ts', needle: "emit('stale_warning'" },
     ],
-    differentialReads: 'parity',
-    gapRef: 'NATIVE_GAP (T4/T0d): createStaleWarningEvent has no call site outside supervisor.ts; native stall_gaps_json is unconditionally empty.',
+    gapRef: 'NATIVE_GAP (T4/T0d): createStaleWarningEvent has no call site outside supervisor.ts; native stall_gaps_json is unconditionally empty. Owned by SPECIALISTS-102; this durable proof FAILS until that node lands.',
+    expectation: 'EXPECTED_DURABLE',
+    durable: {
+      via: 'native-lifecycle',
+      emitName: 'stale_warning',
+      emitPayload: { silence_ms: 1000, threshold_ms: 500 },
+      expectedForensicName: 'process_health.stale_detected',
+    },
   },
   {
     id: 'model-fallback-mapped',
@@ -97,8 +208,27 @@ export const SUPERVISOR_CANONICAL_INVENTORY: readonly CanonicalInventoryEntry[] 
       { side: 'native-producer', file: 'src/activation/native-host.ts', needle: "emit('model_fallback'" },
       { side: 'native-mapper', file: 'src/specialist/native-activation-observability.ts', needle: "case 'model_fallback'" },
     ],
-    differentialReads: 'parity',
-    gapRef: 'Unlisted drop (T5/T0f): 5 emit sites, no mapper arm, absent from both gap lists — silently discarded by BOTH engines, so differential reads parity.',
+    // SPECIALISTS-103: the pre-fix gap text ("5 emit sites, no mapper arm") is
+    // HISTORICAL. The mapper arm exists (SPECIALISTS-101) and now preserves the
+    // full diagnostic payload (SPECIALISTS-103). The gap is closed; the proof
+    // below asserts the durable payload, not merely the carrier.
+    gapRef: null,
+    expectation: 'EXPECTED_DURABLE',
+    durable: {
+      via: 'native-lifecycle',
+      emitName: 'model_fallback',
+      emitPayload: {
+        from_model: 'prov/a',
+        to_model: 'prov/b',
+        error_class: 'rate_limit',
+        terminal: false,
+        note: 'oracle probe',
+        attempt_n: 2,
+        resolved_model: 'prov/b-resolved',
+      },
+      expectedForensicName: 'model.changed',
+      assertFallbackDiagnostics: true,
+    },
   },
   {
     id: 'settlement-stored-durable',
@@ -108,8 +238,17 @@ export const SUPERVISOR_CANONICAL_INVENTORY: readonly CanonicalInventoryEntry[] 
       { side: 'native-producer', file: 'src/activation/settlement-publication.ts', needle: "emit('settlement_stored'" },
       { side: 'native-mapper', file: 'src/specialist/native-activation-observability.ts', needle: "'settlement_stored'" },
     ],
-    differentialReads: 'parity',
-    gapRef: 'NATIVE_GAP via default-null (T9): mapNativeLifecycleEvent default returns null; 0 durable rows, degradation was stderr-only.',
+    // SPECIALISTS-103: the pre-fix gap text ("default returns null; 0 durable
+    // rows") is HISTORICAL. The settlement arms exist (SPECIALISTS-101); the
+    // proof below asserts the durable row.
+    gapRef: null,
+    expectation: 'EXPECTED_DURABLE',
+    durable: {
+      via: 'native-lifecycle',
+      emitName: 'settlement_stored',
+      emitPayload: { note: 'oracle probe', ref: 'ref-oracle', receipt: 'wr-oracle', entry: 'jent-oracle' },
+      expectedForensicName: 'settlement_stored',
+    },
   },
   {
     id: 'token-metric-series',
@@ -118,8 +257,12 @@ export const SUPERVISOR_CANONICAL_INVENTORY: readonly CanonicalInventoryEntry[] 
     evidence: [
       { side: 'reader', file: 'src/specialist/prometheus-projection.ts', needle: 'latest.token_usage' },
     ],
-    differentialReads: 'parity',
     gapRef: 'Fixed by PR #377 (was a shared reader defect: 0 series for BOTH engines, invisible to differential). Reader now reads nested token_usage first with flat fallback.',
+    expectation: 'EXPECTED_RUNTIME_ONLY',
+    runtime: {
+      check: 'token-metric-projection',
+      reason: 'The signal is an AGGREGATED reader projection over the token trajectory (writer nests counters under token_usage; reader renders xtrm_llm_tokens_total per direction), not a single durable forensic row — so no one event_name proves it. It is not absent either: the writer and reader both exist and the series must be non-empty. Durable-row and absent-with-reason checks are both the wrong shape; only executing writer -> aggregate -> render proves it.',
+    },
   },
   {
     id: 'extension-discovery-evidence',
@@ -129,7 +272,17 @@ export const SUPERVISOR_CANONICAL_INVENTORY: readonly CanonicalInventoryEntry[] 
       { side: 'native-producer', file: 'src/activation/native-host.ts', needle: "'extension_discovery_sessions'" },
       { side: 'native-mapper', file: 'src/specialist/native-activation-observability.ts', needle: "'extension_discovery_sessions'" },
     ],
-    differentialReads: 'parity',
-    gapRef: 'Undocumented drop (T0f): 1 of the 18 emitted-but-unmapped names absent from both gap lists. The refusal verdict persists; the audit trail does not.',
+    // SPECIALISTS-103: PR #382 made the absence EXPLICIT (operator ruling:
+    // extension resolution out of scope; no table/column/writer exists and
+    // creating one is deferred). The pre-fix text ("absent from both gap
+    // lists — silently discarded") described a silent drop; the current state
+    // is a reasoned decision. The durable proof for this name FAILS (no row);
+    // this entry asserts the absence is a decision with a written reason.
+    gapRef: 'Deliberate absence (PR #382, operator ruling): emit site exists; no extension telemetry surface exists and creating one is deferred. Proven by NATIVE_LIFECYCLE_DELIBERATELY_UNPERSISTED reason, not by silence.',
+    expectation: 'EXPECTED_ABSENT_WITH_REASON',
+    absent: {
+      unpersistedKey: 'extension_discovery_sessions',
+      emitName: 'extension_discovery_sessions',
+    },
   },
 ];

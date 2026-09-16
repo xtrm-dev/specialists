@@ -346,6 +346,11 @@ export interface TimelineEventModelChange extends TimelineEventBase {
     action: 'set_model' | 'cycle_model';
     model?: string;
     previous_model?: string;
+    error_class?: string;
+    terminal?: boolean;
+    note?: string;
+    attempt_n?: number;
+    resolved_model?: string;
 }
 export interface TimelineEventExtensionError extends TimelineEventBase {
     type: 'extension_error';

@@ -21946,7 +21946,12 @@ function mapNativeLifecycleEvent(event, context, t = Date.now()) {
         type: TIMELINE_EVENT_TYPES.MODEL_CHANGE,
         action: "cycle_model",
         ...stringField2(event.payload?.to_model) ? { model: stringField2(event.payload?.to_model) } : {},
-        ...stringField2(event.payload?.from_model) ? { previous_model: stringField2(event.payload?.from_model) } : {}
+        ...stringField2(event.payload?.from_model) ? { previous_model: stringField2(event.payload?.from_model) } : {},
+        ...stringField2(event.payload?.error_class) ? { error_class: stringField2(event.payload?.error_class) } : {},
+        ...booleanField2(event.payload?.terminal) !== undefined ? { terminal: booleanField2(event.payload?.terminal) } : {},
+        ...stringField2(event.payload?.note) ? { note: stringField2(event.payload?.note) } : {},
+        ...numberField2(event.payload?.attempt_n) !== undefined ? { attempt_n: numberField2(event.payload?.attempt_n) } : {},
+        ...stringField2(event.payload?.resolved_model) ? { resolved_model: stringField2(event.payload?.resolved_model) } : {}
       }, t);
     case "settlement_stored":
       return at(createSettlementEvent("settlement_stored", {
