@@ -237,7 +237,15 @@ export function resolveDeclaredExtensionSources(
  */
 export const EXTENSION_CLASS_SOURCES: ReadonlySet<string> = new Set(['cli', 'extension', 'package', 'custom']);
 
-/** Registry sources that mark a tool as pi's own builtin, never pinnable. */
+/** Registry sources that mark a tool as pi's own builtin, never pinnable.
+ *
+ * Version-drift note (R3.4b, no code change): these sets are static. If a future pi labels
+ * a first-party tool with a source string outside `{builtin, sdk}` / `{cli, extension,
+ * package, custom}`, the gates misread it — a builtin-looking name could pin, or every
+ * dynamic activation could refuse on baseline/provenance. If dynamic activations start
+ * refusing after a pi upgrade with "baseline registry" or "non-extension provenance"
+ * notes, look here first and compare `getAllTools()` source strings against these sets.
+ */
 export const BUILTIN_TOOL_SOURCES: ReadonlySet<string> = new Set(['builtin', 'sdk']);
 
 /** An `npm:` source that was declared enabled but resolved to nothing. Refused, not skipped. */
@@ -363,13 +371,15 @@ export async function discoverDynamicExtensionTools(input: {
   dynamicExtensions: readonly string[];
   model: unknown;
   /**
-   * Reserved names the child will hold regardless of discovery (F1): the base contract's
-   * granted native tools plus the host's own `ask_coordinator`/`escalate_to_coordinator`.
-   * If the discovery registry shows any of these with a NON-builtin source, an enabled
-   * extension is shadowing a granted name — keeping it out of `pinned` does NOT unload
-   * the extension, so the activation must be refused, not merely unpinned.
+   * Reserved names the child will hold regardless of discovery (F1, R3.1): the base
+   * contract's granted native tools PLUS its catalog-granted extension tools PLUS the
+   * host's own `ask_coordinator`/`escalate_to_coordinator`. If the discovery registry
+   * shows any of these with a NON-builtin source, an enabled extension is shadowing a
+   * trusted name — keeping it out of `pinned` does NOT unload the extension, so the
+   * activation must be refused, not merely unpinned. REQUIRED (R3.2): a call site that
+   * omits it silently loses the shadow check, so there is no default.
    */
-  reservedNames?: readonly string[];
+  reservedNames: readonly string[];
 }): Promise<DynamicExtensionDiscovery> {
   if (input.dynamicExtensions.length === 0) return EMPTY_DISCOVERY;
   const builtinNames = await enumerateBuiltinToolNames({
@@ -1139,9 +1149,13 @@ export class NativeActivationHost {
         agentDir: sdk.getAgentDir(),
         dynamicExtensions,
         model: modelCheck.model,
-        // F1: names the child will hold regardless of pinning. A non-builtin registry
-        // entry for any of these means an enabled extension shadows a trusted name.
-        reservedNames: [...toolContract.nativeTools, ASK_TOOL, ESCALATE_TOOL],
+        // F1 + R3.1: every name the child can hold regardless of pinning — granted natives
+        // ∪ base extensionTools (catalog-granted, e.g. gitnexus_query) ∪ ask/escalate. A
+        // non-builtin registry entry for any of these means an enabled extension shadows a
+        // trusted name; the `already`-filter in the materializer handles the PIN, not the
+        // LOAD, so this must refuse. deniedNativeTools stays excluded (not held) and pinned
+        // names need no protection (extension-attributed by construction).
+        reservedNames: [...toolContract.nativeTools, ...toolContract.extensionTools, ASK_TOOL, ESCALATE_TOOL],
       });
     } catch (error) {
       const note = error instanceof Error ? error.message : String(error);
@@ -1444,6 +1458,11 @@ export class NativeActivationHost {
     // a loader it constructed itself. Extension paths reuse the discovery-time resolution
     // above (`curatedExtensions` + `dynamicExtensions`), never re-resolved, so discovery,
     // the real loader and the effective contract cannot disagree.
+    // Known accepted gap (R3.4a, no behaviour change): the real loader loads curated
+    // extensions too, while discovery loads only dynamic sources — so a CURATED extension
+    // shadowing a granted native is undetected by the reserved-name check. Accepted because
+    // curated paths are host-resolved and in-repo, not operator-supplied: the trust boundary
+    // the shadow refusal protects is the operator-enabled dynamic set. Do not add a scan.
     const resourceLoader = createActivationResourceLoader(sdk, {
       cwd: workspace.worktreePath,
       skillPaths: specialist.specialist.skills?.paths ?? [],

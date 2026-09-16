@@ -92,7 +92,15 @@ export declare function resolveDeclaredExtensionSources(sources: readonly string
  * reports `cli` — so the builtin-collision refusal below is required as well.
  */
 export declare const EXTENSION_CLASS_SOURCES: ReadonlySet<string>;
-/** Registry sources that mark a tool as pi's own builtin, never pinnable. */
+/** Registry sources that mark a tool as pi's own builtin, never pinnable.
+ *
+ * Version-drift note (R3.4b, no code change): these sets are static. If a future pi labels
+ * a first-party tool with a source string outside `{builtin, sdk}` / `{cli, extension,
+ * package, custom}`, the gates misread it — a builtin-looking name could pin, or every
+ * dynamic activation could refuse on baseline/provenance. If dynamic activations start
+ * refusing after a pi upgrade with "baseline registry" or "non-extension provenance"
+ * notes, look here first and compare `getAllTools()` source strings against these sets.
+ */
 export declare const BUILTIN_TOOL_SOURCES: ReadonlySet<string>;
 /** An `npm:` source that was declared enabled but resolved to nothing. Refused, not skipped. */
 export declare function unresolvableNpmSources(skipped: readonly string[]): string[];
@@ -160,13 +168,15 @@ export declare function discoverDynamicExtensionTools(input: {
     dynamicExtensions: readonly string[];
     model: unknown;
     /**
-     * Reserved names the child will hold regardless of discovery (F1): the base contract's
-     * granted native tools plus the host's own `ask_coordinator`/`escalate_to_coordinator`.
-     * If the discovery registry shows any of these with a NON-builtin source, an enabled
-     * extension is shadowing a granted name — keeping it out of `pinned` does NOT unload
-     * the extension, so the activation must be refused, not merely unpinned.
+     * Reserved names the child will hold regardless of discovery (F1, R3.1): the base
+     * contract's granted native tools PLUS its catalog-granted extension tools PLUS the
+     * host's own `ask_coordinator`/`escalate_to_coordinator`. If the discovery registry
+     * shows any of these with a NON-builtin source, an enabled extension is shadowing a
+     * trusted name — keeping it out of `pinned` does NOT unload the extension, so the
+     * activation must be refused, not merely unpinned. REQUIRED (R3.2): a call site that
+     * omits it silently loses the shadow check, so there is no default.
      */
-    reservedNames?: readonly string[];
+    reservedNames: readonly string[];
 }): Promise<DynamicExtensionDiscovery>;
 /**
  * The activation's `cwd` and `agentDir` feed pi's resource loader, which is the ONLY

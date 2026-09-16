@@ -95000,7 +95000,7 @@ class NativeActivationHost {
         agentDir: sdk.getAgentDir(),
         dynamicExtensions,
         model: modelCheck.model,
-        reservedNames: [...toolContract.nativeTools, ASK_TOOL, ESCALATE_TOOL]
+        reservedNames: [...toolContract.nativeTools, ...toolContract.extensionTools, ASK_TOOL, ESCALATE_TOOL]
       });
     } catch (error3) {
       const note = error3 instanceof Error ? error3.message : String(error3);

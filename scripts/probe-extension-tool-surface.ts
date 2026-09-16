@@ -329,6 +329,7 @@ async function main(): Promise<void> {
       try {
         discovery = await discoverDynamicExtensionTools({
           sdk, cwd: process.cwd(), agentDir: sdk.getAgentDir(), dynamicExtensions: dynamic, model,
+          reservedNames: [...READ_NATIVE, ...GITNEXUS_TOOLS, 'ask_coordinator', 'escalate_to_coordinator'],
         });
       } catch (error) {
         discoveryError = error instanceof Error ? error.message : String(error);
@@ -356,8 +357,12 @@ async function main(): Promise<void> {
     const dynamic = [GITNEXUS_DIR, AST_GREP_DIR];
     let discovery: Awaited<ReturnType<typeof discoverDynamicExtensionTools>> | undefined;
     try {
+      // Reserved omits the gitnexus catalog names here on purpose: dynamic legitimately
+      // includes the gitnexus provider itself in this variant-F reconstruction, and R3.1's
+      // catalog-shadow refusal is covered by unit test R3.3a instead. R proves ast_grep.
       discovery = await discoverDynamicExtensionTools({
         sdk, cwd: process.cwd(), agentDir: sdk.getAgentDir(), dynamicExtensions: dynamic, model,
+          reservedNames: [...READ_NATIVE, 'ask_coordinator', 'escalate_to_coordinator'],
       });
     } catch (error) {
       console.log(`   R discovery failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -390,6 +395,7 @@ async function main(): Promise<void> {
     try {
       discovery = await discoverDynamicExtensionTools({
         sdk, cwd: process.cwd(), agentDir: sdk.getAgentDir(), dynamicExtensions: [COLLISION_DIR], model,
+        reservedNames: ['read', 'ask_coordinator', 'escalate_to_coordinator'],
       });
     } catch (error) {
       console.log(`   T discovery failed: ${error instanceof Error ? error.message : String(error)}`);

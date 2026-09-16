@@ -3411,7 +3411,7 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
     // The critical hole: `read` is granted to READ_ONLY, so the pin refusal never applies —
     // but the real session still loads the shadowing extension and `read` executes its code.
     // The discovery registry shows `read` with a non-builtin source, so refuse loudly.
-    const { sdk } = discoverySdk({
+    const { sdk, realRecord, disposed } = discoverySdk({
       discoveredActive: ['read', 'ext_tool_a'],
       provenance: { ext_tool_a: 'cli' },
       registryExtra: [{ name: 'read', source: 'cli' }],
@@ -3431,10 +3431,16 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
     expect(String(error)).toContain("'read'");
     expect(String(error)).toContain("'cli'");
     expect(sink.names).toContain('activation_rejected');
+    // R3.3b: the discovery session was disposed, not leaked.
+    expect(disposed.discovery).toEqual([true]);
+    expect(disposed.builtin).toEqual([true]);
+    // R3.3c: refusal happened BEFORE any real session and before lease work.
+    expect(realRecord.createArgs).toBeUndefined();
+    expect(sink.names).not.toContain('lease_acquired');
   });
 
   it('refuses when an extension shadows ask_coordinator (F1/F2)', async () => {
-    const { sdk } = discoverySdk({
+    const { sdk, realRecord, disposed } = discoverySdk({
       discoveredActive: ['ask_coordinator'],
       provenance: {},
       registryExtra: [{ name: 'ask_coordinator', source: 'cli' }],
@@ -3452,6 +3458,90 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
     }).then(() => null, (thrown: unknown) => thrown as Error);
     expect(String(error)).toContain('extension_tool_shadowed');
     expect(String(error)).toContain('ask_coordinator');
+    expect(disposed.discovery).toEqual([true]);
+    expect(disposed.builtin).toEqual([true]);
+    expect(realRecord.createArgs).toBeUndefined();
+    expect(sink.names).not.toContain('lease_acquired');
+  });
+
+  it('refuses when a dynamic extension shadows a base-contract extension tool (R3.1/R3.3a)', async () => {
+    // R3.1 gap: catalog-granted names (e.g. gitnexus_query) are held in every activation.
+    // A dynamic extension registering one is not ask/escalate and not builtin, so without the
+    // reserved-set addition it would PIN, then be silently dropped by the `!already` filter —
+    // no warning, no refusal — while the real session still loads that extension. Must REFUSE
+    // with extension_tool_shadowed, never silently drop. The shadow name is read from the
+    // LIVE base contract (prefer a catalog extension tool; fall back to a granted native),
+    // so the test holds in any environment and specifically covers the catalog subset where
+    // one exists.
+    const { resolveRuntimeToolContract: resolveBase } = await import('../../../src/pi/session.js');
+    const base = resolveBase({ level: 'READ_ONLY', specialistName: 'researcher', cwd: process.cwd() })!;
+    const catalogName = base.extensionTools[0];
+    const shadowName = catalogName ?? base.nativeTools[0]!;
+    expect(shadowName, 'base contract grants at least one name to shadow').toBeTruthy();
+    const { sdk, realRecord, disposed } = discoverySdk({
+      discoveredActive: [shadowName, 'ext_tool_a'],
+      provenance: { ext_tool_a: 'cli' },
+      registryExtra: [{ name: shadowName, source: 'cli' }],
+    });
+    const sink = collectingSink();
+    const host = new NativeActivationHost({
+      loader: loaderFor(specWithExtensions({ '/fake/ext-a': true })),
+      workItems: fakeWorkItems(),
+      forensics: sink,
+      loadSdk: async () => sdk,
+      cwd: hostWorkspace(),
+    });
+    const error = await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    }).then(() => null, (thrown: unknown) => thrown as Error);
+    // Refusal, not a silent drop: the activation never succeeds with the name quietly held.
+    expect(String(error), `shadowing ${shadowName} (catalog=${catalogName ?? '(none)'}) must refuse`).toContain('extension_tool_shadowed');
+    expect(String(error)).toContain(shadowName);
+    expect(sink.names).toContain('activation_rejected');
+    expect(realRecord.createArgs).toBeUndefined();
+    expect(disposed.discovery).toEqual([true]);
+    if (catalogName) {
+      expect(shadowName).toBe(catalogName);
+    }
+  });
+
+
+  it('refuses a granted-name shadow BEFORE lease acquisition on a writer (R3.3c)', async () => {
+    // Ordering: discovery (and its shadow refusal) runs before the writer lease is taken.
+    // A HIGH-tier activation shadowed on `read` must refuse with no lease_acquired and no
+    // real session — otherwise a refused writer could hold or poison the workspace lease.
+    const { sdk, realRecord, disposed } = discoverySdk({
+      discoveredActive: ['read'],
+      provenance: {},
+      registryExtra: [{ name: 'read', source: 'package' }],
+    });
+    const spec = specWithExtensions({ '/fake/ext-a': true }) as {
+      specialist: { execution: Record<string, unknown> };
+    };
+    spec.specialist.execution.permission_required = 'HIGH';
+    const sink = collectingSink();
+    const workspace = hostWorkspace();
+    const host = new NativeActivationHost({
+      loader: loaderFor(spec),
+      workItems: fakeWorkItems(),
+      forensics: sink,
+      loadSdk: async () => sdk,
+      cwd: workspace,
+    });
+    const error = await host.start({
+      specialist: 'executor', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    }).then(() => null, (thrown: unknown) => thrown as Error);
+    expect(String(error)).toContain('extension_tool_shadowed');
+    expect(sink.names).toContain('activation_rejected');
+    expect(sink.names).not.toContain('lease_acquired');
+    expect(realRecord.createArgs).toBeUndefined();
+    expect(disposed.discovery).toEqual([true]);
+    // The workspace was never taken: a second writer is admitted immediately.
+    const { acquire: acquireLease } = await import('../../../src/activation/workspace-lease.js');
+    const { resolveWorkspace: resolveWs } = await import('../../../src/activation/native-host.js');
+    expect(() =>
+      acquireLease({ workspace: resolveWs(workspace), activationId: 'act:probe', attemptId: 'att:probe:1', specialist: 'probe' }),
+    ).not.toThrow();
   });
 
   it('still only skips the pin for a NON-granted collision: write on READ_ONLY (F5f)', async () => {
