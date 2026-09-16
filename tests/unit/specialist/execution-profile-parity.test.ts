@@ -770,6 +770,19 @@ describe('execution profile parity (SPECIALISTS-55, decisions recorded in XTRM-8
     }
   });
 
+  it('pins the DECLARED extension sources absolutely, so dropping them on both sides still fails', async () => {
+    // The both-sided hole, measured: forcing BOTH compilers to return `extensions: []` left the
+    // entire file green. The curated set cannot be pinned exactly (resolveCuratedExtensionPaths
+    // checks what exists on THIS machine), but the DECLARED sources can — and they are the part
+    // SPECIALISTS-57 was about, where a definition that turns an extension off must be honoured.
+    const root = workspace();
+    const spec = definition(root, { permission: 'HIGH', withSkills: true });
+    const { profile } = await compileNativeProfile(spec, root, 'parity-probe', MODEL_OVERRIDE);
+    expect(profile.extensions, 'a declared, enabled local extension source must reach the session').toContain(PY_KERNEL);
+    // And it survives on the legacy side too, which is the comparison itself.
+    expect(compileLegacyProfile(spec, root, 'parity-probe', MODEL_OVERRIDE).extensions).toContain(PY_KERNEL);
+  });
+
   it('accounts for every option the host passes to createAgentSession', async () => {
     // The mechanical half of 4a: this is not a list of contract fields, it is what the host
     // ACTUALLY passes. Every option is mapped to the profile key(s) that carry it, so a session
@@ -818,6 +831,12 @@ describe('execution profile parity (SPECIALISTS-55, decisions recorded in XTRM-8
     expect(profile.model).toBe(MODEL_OVERRIDE);
     expect(profile.thinking).toBeNull();
     expect(profile.cwd).toBe(root);
+    // `customTools` was NOT pinned, and a native specialist proved why that mattered: with BOTH
+    // compilers forced to return `extensions: []` the whole file still passed, so a change made
+    // identically to both sides was invisible on exactly the dimensions this test exists to guard.
+    // The expected set is derived from the CONTRACT, not from `native.tools` — deriving it from
+    // the profile being tested is what makes a `holds()` predicate self-referential.
+    expect(profile.customTools).toEqual([ASK_TOOL, 'bash', ESCALATE_TOOL]);
     // And the legacy side agrees on every one of them, which is the comparison itself.
     expect(diffProfiles(profile, compileLegacyProfile(spec, root, 'parity-probe', MODEL_OVERRIDE))).toEqual([]);
   });
