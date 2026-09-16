@@ -67,6 +67,26 @@ interface ResultArgs {
 // `act:${uuid.slice(0,12)}` / `att:${activationId.slice(4)}:1`, retries only bump `:n` via
 // nextAttemptId in src/activation/registry.ts); the measured store has no legacy job_id and no
 // node_id containing a colon, so reserving `act:`/`att:` preserves every legacy ref.
+// Attempt existence (not just shape) is verified at lookup time in run():
+// `att:<core>:<n>` resolves only if a forensic row for activation `act:<core>`
+// carries exactly that attempt_id. The forensic attempt_id set is authoritative:
+// every minted attempt emits forensic rows (single-attempt and retried
+// activations alike show the full 1..N set), while
+// specialist_jobs.attempt_no/attempt_id is only the latest pointer (a retried
+// row shows attempt_no=2/attempt_id=:2 while :1 lives on in forensic alone).
+// On any disagreement the forensic set wins: exact attempt_id equality, never
+// a numeric 1..attempt_no range. Unverifiable attempts fail closed with an
+// explicit error naming the attempt -- never another attempt's result.
+// Strictness (accepted, documented): refs match byte-exact -- no trimming, no
+// length cap. Shell argv carries no meaningful surrounding whitespace, and
+// every whitespace variant fails closed today (a trailing space stays in the
+// jobId and misses lookup; a leading space falls through to the legacy node
+// split and misses node lookup), so trimming would only churn legacy failure
+// modes beyond this fix's mandate. Cores are not length-capped so future id
+// formats are not rejected here.
+// Explicit flags: a positional colon ref combined with --node/--member keeps
+// the legacy positional-wins rule (the colon branch only runs when neither
+// flag was given, and jobId wins downstream) -- unchanged for native refs.
 export function isNativeActivationId(ref: string): boolean {
   return /^act:[^:]+$/.test(ref);
 }
@@ -80,6 +100,11 @@ function isNativePrefixRef(ref: string): boolean {
 }
 
 export function resolveNativeAttemptToActivationId(attemptId: string): string {
+  // Precondition: isNativeAttemptId(attemptId); the parse guard guarantees it.
+  // Fail closed rather than synthesize a malformed activation id from bad input.
+  if (!isNativeAttemptId(attemptId)) {
+    throw new Error(`Invalid attempt id '${attemptId}': expected 'att:<id>:<n>'`);
+  }
   const coreWithSuffix = attemptId.slice('att:'.length);
   const separatorIndex = coreWithSuffix.lastIndexOf(':');
   return `act:${coreWithSuffix.slice(0, separatorIndex)}`;
@@ -178,6 +203,37 @@ function resolveJobIdFromNodeMember(
   }
 
   return member.job_id;
+}
+
+function findMissingNativeAttemptError(
+  sqliteClient: ReturnType<typeof createObservabilitySqliteClient>,
+  supervisor: Supervisor,
+  activationId: string,
+  requestedAttemptId: string,
+): string | null {
+  // Returns an explicit refusal naming the attempt when it must not resolve,
+  // or null when the attempt is verified (or the activation itself is
+  // missing, which stays on the existing "No job found" path so a bad core
+  // keeps its established message).
+  const activationStatus = supervisor.readStatus(activationId);
+  if (!activationStatus) return null;
+  if (!sqliteClient) {
+    return `Cannot verify attempt '${requestedAttemptId}' for activation '${activationId}': observability database is unavailable. Run: specialists db setup`;
+  }
+  let attemptRows: Array<{ attempt_id?: string | null }>;
+  try {
+    // Per-activation lookup (WHERE job_id = ?), index-backed; the 10_000 cap
+    // is the client max and covers every observed native activation (largest
+    // is 7_804 forensic rows). A future activation beyond the cap fails
+    // closed below -- never fail-open into another attempt's result.
+    attemptRows = sqliteClient.readForensicEvents({ jobId: activationId, limit: 10_000 });
+  } catch {
+    return `Cannot verify attempt '${requestedAttemptId}' for activation '${activationId}': forensic read failed.`;
+  }
+  if (!attemptRows.some((row) => row.attempt_id === requestedAttemptId)) {
+    return `No such attempt '${requestedAttemptId}' for activation '${activationId}'.`;
+  }
+  return null;
 }
 
 function readTimelineEventsForResult(
@@ -381,10 +437,14 @@ export async function run(): Promise<void> {
   };
 
   try {
+    // The exact native attempt the operator asked for, if any. jobId below is
+    // the activation id (storage belongs to the activation); this keeps the
+    // attempt string for existence validation and error messages.
+    const requestedAttemptId = args.jobId && isNativeAttemptId(args.jobId) ? args.jobId : undefined;
     const jobId = (() => {
       if (args.jobId) {
         // Native attempts share their activation's storage row (`att:<core>:<n>` -> `act:<core>`).
-        if (isNativeAttemptId(args.jobId)) return resolveNativeAttemptToActivationId(args.jobId);
+        if (requestedAttemptId) return resolveNativeAttemptToActivationId(args.jobId);
         return args.jobId;
       }
       if (!sqliteClient || !args.memberKey) {
@@ -397,6 +457,18 @@ export async function run(): Promise<void> {
 
       return resolveJobIdFromNodeMember(sqliteClient, resolvedNodeId, args.memberKey);
     })();
+
+    if (requestedAttemptId) {
+      const attemptError = findMissingNativeAttemptError(sqliteClient, supervisor, jobId, requestedAttemptId);
+      if (attemptError) {
+        if (args.json) {
+          emitJson(null, null, attemptError);
+        } else {
+          console.error(attemptError);
+        }
+        process.exit(1);
+      }
+    }
 
     const resultPath = join(jobsDir, jobId, 'result.txt');
 

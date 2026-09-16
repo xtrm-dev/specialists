@@ -369,4 +369,193 @@ describe('result CLI identity grammar (XTRM-93 N2A)', () => {
     expect(args.nodeId).toBe('node-1');
     expect(args.memberKey).toBe('some-member');
   });
+
+  it('att well-formed non-1 suffixes stay preserved at parse (existence is runtime)', async () => {
+    const { parseArgs } = await loadParse();
+    for (const ref of ['att:758931b7-9ce:0', 'att:758931b7-9ce:2', 'att:758931b7-9ce:99']) {
+      const args = parseArgs([ref]);
+      expect(args.jobId).toBe(ref);
+      expect(args.nodeId).toBeUndefined();
+      expect(args.memberKey).toBeUndefined();
+    }
+  });
+
+  it('att:<id>:abc malformed -> explicit error', async () => {
+    const { parseArgs } = await loadParse();
+    const { errors, exitSpy } = mockExit();
+    expect(() => parseArgs(['att:758931b7-9ce:abc'])).toThrow('exit:1');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(errors.join('\n')).toContain("invalid attempt id 'att:758931b7-9ce:abc'");
+  });
+
+  it('att:<nonexistent>:1 well-formed -> preserved (runtime reports No job found)', async () => {
+    const { parseArgs } = await loadParse();
+    const args = parseArgs(['att:nonexistentcore:1']);
+    expect(args.jobId).toBe('att:nonexistentcore:1');
+    expect(args.nodeId).toBeUndefined();
+    expect(args.memberKey).toBeUndefined();
+  });
+
+  it('trailing space is byte-exact (no trim, accepted strictness)', async () => {
+    // Accepted: refs match byte-exact. 'act:foo ' stays a jobId and fails
+    // closed at lookup; trimming would only churn legacy failure modes.
+    const { parseArgs } = await loadParse();
+    const args = parseArgs(['act:foo ']);
+    expect(args.jobId).toBe('act:foo ');
+  });
+
+  it('leading space falls through to the legacy node split (accepted strictness)', async () => {
+    const { parseArgs } = await loadParse();
+    const args = parseArgs([' act:foo']);
+    expect(args.jobId).toBeUndefined();
+    expect(args.nodeId).toBe(' act');
+    expect(args.memberKey).toBe('foo');
+  });
+
+  it('positional colon ref with --member keeps positional-wins (intended)', async () => {
+    // Same rule as legacy: the colon branch only runs when neither explicit
+    // flag was given, and jobId wins downstream. No new error here.
+    const { parseArgs } = await loadParse();
+    const args = parseArgs(['act:foo:bar', '--member', 'x']);
+    expect(args.jobId).toBe('act:foo:bar');
+    expect(args.memberKey).toBe('x');
+  });
+
+  it('--node/--member with native-looking values goes to node lookup (intended)', async () => {
+    const { parseArgs } = await loadParse();
+    const args = parseArgs(['--node', 'act:foo', '--member', 'bar']);
+    expect(args.jobId).toBeUndefined();
+    expect(args.nodeId).toBe('act:foo');
+    expect(args.memberKey).toBe('bar');
+  });
+
+  it('resolveNativeAttemptToActivationId throws on malformed input (precondition)', async () => {
+    const { resolveNativeAttemptToActivationId } = await loadParse();
+    expect(() => resolveNativeAttemptToActivationId('att:foo:1:2')).toThrow("Invalid attempt id 'att:foo:1:2'");
+    expect(() => resolveNativeAttemptToActivationId('act:foo')).toThrow("Invalid attempt id 'act:foo'");
+  });
+});
+
+describe('result CLI native attempt validation', () => {
+  const originalArgv = process.argv;
+  let tempRoot: string;
+
+  beforeEach(() => {
+    tempRoot = mkdtempSync(join(tmpdir(), 'sp-result-att-test-'));
+    mkdirSync(join(tempRoot, '.specialists', 'jobs'), { recursive: true });
+    vi.spyOn(process, 'cwd').mockReturnValue(tempRoot);
+  });
+
+  afterEach(() => {
+    process.argv = originalArgv;
+    if (existsSync(tempRoot)) rmSync(tempRoot, { recursive: true, force: true });
+    vi.doUnmock('../../../src/specialist/observability-sqlite.js');
+    vi.resetModules();
+    vi.restoreAllMocks();
+  });
+
+  async function loadRunWithAttemptMocks(opts: { statusId: string | null; forensicAttemptIds: string[]; result: string | null }) {
+    const statusId = opts.statusId;
+    const forensicAttemptIds = opts.forensicAttemptIds;
+    const result = opts.result;
+    vi.resetModules();
+    vi.doMock('../../../src/specialist/observability-sqlite.js', () => ({
+      createObservabilitySqliteClient: () => ({
+        readStatus: (jobId: string) => (statusId !== null && jobId === statusId
+          ? { id: statusId, specialist: 'bug-hunt', status: 'done', started_at_ms: Date.now() - 1000 }
+          : null),
+        readEvents: () => [],
+        readResult: (jobId: string) => (statusId !== null && jobId === statusId ? result : null),
+        readForensicEvents: (filters?: { jobId?: string }) => (statusId !== null && filters?.jobId === statusId
+          ? forensicAttemptIds.map((attempt_id, index) => ({
+            id: index + 1, job_id: statusId, seq: index + 1, t: Date.now(),
+            schema_version: 'v15', event_family: 'job', event_name: 'job.started',
+            participant_kind: null, participant_role: null, participant_id: null,
+            attempt_id, redaction_status: 'none', event_json: '{}',
+          }))
+          : []),
+        close: () => {},
+      }),
+    }));
+    return import('../../../src/cli/result.js');
+  }
+
+  function captureOutput(): { stdout: string[]; errors: string[]; logs: string[]; exitSpy: ReturnType<typeof vi.spyOn> } {
+    const stdout: string[] = [];
+    const errors: string[] = [];
+    const logs: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk: any) => {
+      stdout.push(String(chunk));
+      return true;
+    });
+    vi.spyOn(console, 'error').mockImplementation((msg?: unknown) => {
+      errors.push(String(msg ?? ''));
+    });
+    vi.spyOn(console, 'log').mockImplementation((msg?: unknown) => {
+      logs.push(String(msg ?? ''));
+    });
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      throw new Error(`exit:${code}`);
+    }) as never);
+    return { stdout, errors, logs, exitSpy };
+  }
+
+  it('att:<id>:1 resolves when minted', async () => {
+    const { run } = await loadRunWithAttemptMocks({ statusId: 'act:core', forensicAttemptIds: ['att:core:1'], result: 'attempt output' });
+    process.argv = ['node', 'specialists', 'result', 'att:core:1'];
+    const { stdout, exitSpy } = captureOutput();
+    await run();
+    expect(stdout.join('')).toContain('attempt output');
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  it('att:<id>:2 resolves when a retry minted it', async () => {
+    const { run } = await loadRunWithAttemptMocks({ statusId: 'act:core', forensicAttemptIds: ['att:core:1', 'att:core:2'], result: 'attempt output' });
+    process.argv = ['node', 'specialists', 'result', 'att:core:2'];
+    const { stdout, exitSpy } = captureOutput();
+    await run();
+    expect(stdout.join('')).toContain('attempt output');
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  it.each([['att:core:0'], ['att:core:2'], ['att:core:99']])('%s refuses when never minted', async (ref) => {
+    const { run } = await loadRunWithAttemptMocks({ statusId: 'act:core', forensicAttemptIds: ['att:core:1'], result: 'attempt output' });
+    process.argv = ['node', 'specialists', 'result', ref];
+    const { errors, exitSpy } = captureOutput();
+    await expect(run()).rejects.toThrow('exit:1');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(errors.join('\n')).toContain(`No such attempt '${ref}'`);
+    expect(errors.join('\n')).toContain(`for activation 'act:core'`);
+  });
+
+  it('att:<missing>:1 keeps the No-job-found path (bad core unchanged)', async () => {
+    const { run } = await loadRunWithAttemptMocks({ statusId: null, forensicAttemptIds: [], result: null });
+    process.argv = ['node', 'specialists', 'result', 'att:missing:1'];
+    const { errors, exitSpy } = captureOutput();
+    await expect(run()).rejects.toThrow('exit:1');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(errors.join('\n')).toContain('No job found: act:missing');
+    expect(errors.join('\n')).not.toContain('No such attempt');
+  });
+
+  it('--json refusal keeps shape with job null and a naming error', async () => {
+    const { run } = await loadRunWithAttemptMocks({ statusId: 'act:core', forensicAttemptIds: ['att:core:1'], result: 'attempt output' });
+    process.argv = ['node', 'specialists', 'result', 'att:core:99', '--json'];
+    const { logs, exitSpy } = captureOutput();
+    await expect(run()).rejects.toThrow('exit:1');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    const payload = JSON.parse(logs[0] as string) as { job: null; output: null; error: string };
+    expect(payload.job).toBeNull();
+    expect(payload.output).toBeNull();
+    expect(payload.error).toContain("No such attempt 'att:core:99'");
+  });
+
+  it('act:<id> still resolves without attempt validation', async () => {
+    const { run } = await loadRunWithAttemptMocks({ statusId: 'act:core', forensicAttemptIds: ['att:core:1'], result: 'attempt output' });
+    process.argv = ['node', 'specialists', 'result', 'act:core'];
+    const { stdout, exitSpy } = captureOutput();
+    await run();
+    expect(stdout.join('')).toContain('attempt output');
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
 });
