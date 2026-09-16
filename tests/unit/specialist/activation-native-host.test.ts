@@ -3253,23 +3253,47 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
   it('never lets a denied native become active through a discovered name', async () => {
     // READ_ONLY with a healthy gitnexus hard-denies grep/find/ls. An extension registering
     // `grep` must not smuggle it back in: it collides with a builtin and is refused.
-    const { sdk, realRecord } = discoverySdk({
-      discoveredActive: ['ext_tool_a', 'grep'],
-      provenance: { ext_tool_a: 'cli', grep: 'cli' },
-    });
-    const host = new NativeActivationHost({
-      loader: loaderFor(specWithExtensions({ '/fake/ext-a': true })),
-      workItems: fakeWorkItems(),
-      forensics: collectingSink(),
-      loadSdk: async () => sdk,
-      cwd: hostWorkspace(),
-    });
-    await (await host.start({
-      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
-    })).result;
-    const tools = realRecord.createArgs!.tools as string[];
-    expect(tools).toContain('ext_tool_a');
-    expect(tools).not.toContain('grep');
+    //
+    // The healthy-gitnexus premise is PINNED here, not inherited from the machine.
+    // `resolveGitnexusRuntime` probes `resolveGlobalNodeModulesDir()`, and when it finds no
+    // pi-gitnexus the hard deny is inactive: `grep` stays a granted READ_ONLY native, so this
+    // dispatch refuses earlier as an F1 shadow instead of reaching the collision path under
+    // test, and the test then fails on a correct refusal. That made the outcome depend on
+    // whether pi-gitnexus happened to be installed globally, which is why it passed on a dev
+    // box and failed in CI. `PI_NPM_GLOBAL_DIR` is that resolver's first candidate, so pinning
+    // it to a fixture tree selects the healthy branch deterministically.
+    const fakeNodeModules = hostWorkspace();
+    mkdirSync(join(fakeNodeModules, 'pi-gitnexus'), { recursive: true });
+    writeFileSync(
+      join(fakeNodeModules, 'pi-gitnexus', 'package.json'),
+      // Exactly the catalog pin in config/catalog/gitnexus.json; a patch release inside that
+      // line is healthy, so matching it keeps this fixture off the compatibility edge.
+      JSON.stringify({ name: 'pi-gitnexus', version: '0.6.4' }),
+    );
+    const previousGlobalDir = process.env.PI_NPM_GLOBAL_DIR;
+    process.env.PI_NPM_GLOBAL_DIR = fakeNodeModules;
+    try {
+      const { sdk, realRecord } = discoverySdk({
+        discoveredActive: ['ext_tool_a', 'grep'],
+        provenance: { ext_tool_a: 'cli', grep: 'cli' },
+      });
+      const host = new NativeActivationHost({
+        loader: loaderFor(specWithExtensions({ '/fake/ext-a': true })),
+        workItems: fakeWorkItems(),
+        forensics: collectingSink(),
+        loadSdk: async () => sdk,
+        cwd: hostWorkspace(),
+      });
+      await (await host.start({
+        specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+      })).result;
+      const tools = realRecord.createArgs!.tools as string[];
+      expect(tools).toContain('ext_tool_a');
+      expect(tools).not.toContain('grep');
+    } finally {
+      if (previousGlobalDir === undefined) delete process.env.PI_NPM_GLOBAL_DIR;
+      else process.env.PI_NPM_GLOBAL_DIR = previousGlobalDir;
+    }
   });
 
   it('fails closed with no widening when the session lacks getAllTools (older doubles)', async () => {
