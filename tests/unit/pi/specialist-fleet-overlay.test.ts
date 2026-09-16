@@ -94,6 +94,34 @@ describe('native fleet overlay model', () => {
     expect(view.lines.some((line) => line.includes('review.finding'))).toBe(true);
   });
 
+  it('never exceeds a narrow viewport and preserves the close keybar', () => {
+    const fleet = snapshot();
+    const view = renderFleetOverlay({
+      snapshot: fleet,
+      state: createFleetOverlayState({ selectedJobId: 'act:parent123456' }),
+      chronology: [{ ts: '2026-09-16T22:45:12Z', type: 'job.started', actor: 'reviewer', payload: 'status=active' }],
+      width: 28,
+      height: 8,
+    });
+    expect(view.lines).toHaveLength(8);
+    expect(view.lines.every((line) => line.length <= 28)).toBe(true);
+    expect(view.lines.some((line) => line.includes('22:45:12'))).toBe(true);
+    expect(view.lines.at(-1)).toContain('Esc');
+  });
+
+  it('renders a null result as unavailable instead of object coercion', () => {
+    const fleet = snapshot();
+    const view = renderFleetOverlay({
+      snapshot: fleet,
+      state: createFleetOverlayState({ selectedJobId: 'act:parent123456', mode: 'result' }),
+      result: { jobId: 'act:parent123456', output: null, available: false },
+      width: 60,
+      height: 14,
+    });
+    expect(view.lines.some((line) => line.includes('result unavailable'))).toBe(true);
+    expect(view.lines.some((line) => line.includes('[object Object]'))).toBe(false);
+  });
+
   it('renders only persisted runtime attachment metadata in detail mode', () => {
     const fleet = snapshot();
     const state = createFleetOverlayState({ selectedJobId: 'sp:legacy123456', mode: 'detail' });
