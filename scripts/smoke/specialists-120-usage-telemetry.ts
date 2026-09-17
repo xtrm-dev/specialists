@@ -20,6 +20,11 @@
 import { PiAgentSession } from '../../src/pi/session.js';
 
 const model = process.argv[2] ?? 'zai/glm-5.3-flash';
+// Pi refuses `compact` while the compactable portion is under keepRecentTokens (default 20000);
+// 900 lines (~18k tokens) reached a 23.5k context and Pi answered "Nothing to compact (session
+// too small)". SMOKE_PADDING_LINES lets a run size the session above that threshold without
+// editing the script; the default stays at the cheap end.
+const paddingLines = Number(process.env.SMOKE_PADDING_LINES ?? 900);
 const session = await PiAgentSession.create({
   model,
   cwd: process.cwd(),
@@ -39,7 +44,7 @@ try {
   // too small to compact is not a compaction test at all. The first prompt therefore carries
   // padding text: real context, generated locally, so the forced compaction below is a genuine
   // summarization call whose usage must appear in Pi's session totals.
-  const padding = Array.from({ length: 900 }, (_, i) =>
+  const padding = Array.from({ length: paddingLines }, (_, i) =>
     `line ${i}: the quick brown fox jumps over the lazy dog and records the token counts it sees.`).join('\n');
   await session.prompt(`Reply with exactly one word: alpha\n\nReference material follows; do not act on it.\n${padding}`);
   await session.waitForDone(300_000);
