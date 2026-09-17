@@ -41,7 +41,7 @@ import { createHash } from 'node:crypto';
 import { getReadLineNumbersExtensionPath } from './read-line-numbers-extension.js';
 import { getExtensionToolPolicyExtensionPath, NATIVE_TOOLS_ENV_KEY, REQUIRED_EXTENSION_TOOLS_ENV_KEY } from './extension-tool-policy-extension.js';
 import { resolvePiExtensionsPythonKernelPath } from './python-kernel-extension.js';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { isAbsolute, resolve, sep, join, dirname } from 'node:path';
@@ -50,8 +50,19 @@ import { resolveCanonicalAssetDir } from '../specialist/canonical-asset-resolver
 import { type ExtensionState, type ManifestPolicy, type ManifestPolicyTier, type ToolCatalog } from '../specialist/manifest-resolver.js';
 import { buildResolvedToolContract, type ResolvedToolContract } from '../specialist/resolved-tool-contract.js';
 import { loadToolCatalogIndex, type ToolCatalogIndex, resolveCatalogVersionVerdict } from '../specialist/tool-catalog.js';
-import type { SessionMetricEvent, SessionRunMetrics, SessionTokenUsage } from '../specialist/session-metrics-contract.js';
+import {
+  accumulateTokenUsage,
+  normalizeSessionTokenUsage,
+  normalizePiSessionStats,
+  reconcileSessionUsage,
+  type PiSessionStats,
+  type SessionMetricEvent,
+  type SessionRunMetrics,
+  type SessionTokenUsage,
+} from '../specialist/session-metrics-contract.js';
 
+/** Bound on the settlement `get_session_stats` call; see PiSessionOptions.sessionStatsTimeoutMs. */
+const SESSION_STATS_TIMEOUT_MS = 5_000;
 const TEST_COMMAND_STALL_TIMEOUT_MS = 300_000;
 const GITNEXUS_IMPACT_STALL_TIMEOUT_MS = 300_000;
 const TEST_COMMAND_PATTERNS: ReadonlyArray<RegExp> = [
@@ -72,7 +83,15 @@ export interface AgentSessionMeta {
 
 // Session metric shape lives in the neutral contract module; re-exported here
 // so existing importers of pi/session.js keep working unchanged.
-export type { SessionMetricEvent, SessionRunMetrics, SessionTokenUsage } from '../specialist/session-metrics-contract.js';
+export type {
+  PiSessionStats,
+  PiUsageVerbatim,
+  SessionMetricEvent,
+  SessionRunMetrics,
+  SessionTokenUsage,
+  SessionUsageCost,
+  SessionUsageReconciliation,
+} from '../specialist/session-metrics-contract.js';
 
 export interface PiSessionOptions {
   model: string;
@@ -138,6 +157,14 @@ export interface PiSessionOptions {
   stallTimeoutMs?: number;
   /** Extended stall timeout used while known test commands run via bash tool */
   testCommandStallTimeoutMs?: number;
+  /**
+   * Bound on the settlement `get_session_stats` call (SPECIALISTS-120). Settlement must never
+   * hang on telemetry: on expiry the failure is recorded as an explicit event and the run
+   * settles anyway.
+   */
+  sessionStatsTimeoutMs?: number;
+  /** Test seam: inject the Pi version instead of probing the binary. */
+  piVersion?: string;
 }
 
 export const RUNTIME_TOOL_CATALOG_ERROR_MESSAGE =
@@ -667,6 +694,58 @@ export function resolveCuratedExtensionPaths(options: {
   };
 }
 
+let cachedPiVersion: string | undefined;
+let piVersionResolved = false;
+
+/**
+ * Resolve the Pi version actually in use for a run (SPECIALISTS-120 criterion 7).
+ *
+ * Prefers the `pi` binary on PATH — that is what the legacy `sp run` path executes, and a
+ * telemetry row must name the binary that produced it, not a package that happens to be
+ * installed elsewhere. Falls back to the resolved SDK package's `package.json` (the native
+ * activation path loads that package in-process). Cached per process: the version cannot
+ * change under a running session, and probing per run would spawn a process per activation.
+ *
+ * Never throws: an unresolvable version returns `undefined` and the run records no version
+ * rather than failing to start.
+ */
+export function resolvePiVersion(): string | undefined {
+  if (piVersionResolved) return cachedPiVersion;
+  piVersionResolved = true;
+  try {
+    const output = execFileSync('pi', ['--version'], { encoding: 'utf-8', timeout: 5_000, stdio: ['ignore', 'pipe', 'ignore'] });
+    const version = output.trim();
+    if (version.length > 0) {
+      cachedPiVersion = version;
+      return cachedPiVersion;
+    }
+  } catch {
+    // Binary absent or unreadable; fall through to the SDK package.
+  }
+  try {
+    const globalDir = resolveGlobalNodeModulesDir();
+    if (globalDir) {
+      const pkgPath = join(globalDir, '@earendil-works', 'pi-coding-agent', 'package.json');
+      if (existsSync(pkgPath)) {
+        const parsed = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { version?: unknown };
+        if (typeof parsed.version === 'string' && parsed.version.length > 0) {
+          cachedPiVersion = parsed.version;
+          return cachedPiVersion;
+        }
+      }
+    }
+  } catch {
+    // Version telemetry is never worth failing a run over.
+  }
+  return undefined;
+}
+
+/** Test seam: drop the cached Pi version so a test can supply its own environment. */
+export function __resetPiVersionCacheForTest(): void {
+  cachedPiVersion = undefined;
+  piVersionResolved = false;
+}
+
 export function resolveGlobalNodeModulesDir(): string | undefined {
   const candidates = [
     process.env.PI_NPM_GLOBAL_DIR,
@@ -688,53 +767,27 @@ function asNumber(value: unknown): number | undefined {
   return undefined;
 }
 
-function normalizeUsageSource(value: string): SessionTokenUsage['usage_source'] {
-  if (value === 'provider_usage' || value === 'runtime_estimate' || value === 'local_estimate' || value === 'unknown') return value;
-  return 'unknown';
+/**
+ * Read one usage candidate (SPECIALISTS-120).
+ *
+ * `providerReported` is the provenance claim: true only for a value that came out of a
+ * `usage`-shaped field Pi reported (an assistant/toolResult message, a turn/run payload, a
+ * compaction summary call). The parser's last-resort fallback — normalizing a whole event
+ * record — is NOT a provider report and must stay `unknown` rather than inherit
+ * `provider_usage` from the schema default.
+ */
+function normalizeTokenUsage(candidate: unknown, providerReported = true): SessionTokenUsage | undefined {
+  const normalized = normalizeSessionTokenUsage(candidate);
+  if (!normalized) return undefined;
+  if (providerReported && normalized.usage_source === 'unknown' && !hasExplicitUsageSource(candidate)) {
+    normalized.usage_source = 'provider_usage';
+  }
+  return normalized;
 }
 
-function pickFirstNumber(record: Record<string, unknown>, keys: readonly string[]): number | undefined {
-  for (const key of keys) {
-    const value = asNumber(record[key]);
-    if (value !== undefined) return value;
-  }
-  return undefined;
-}
-
-function normalizeTokenUsage(candidate: unknown): SessionTokenUsage | undefined {
-  if (!candidate || typeof candidate !== 'object') return undefined;
-  const usage = candidate as Record<string, unknown>;
-  const normalized: SessionTokenUsage = {
-    input_tokens: pickFirstNumber(usage, ['input_tokens', 'inputTokens', 'prompt_tokens', 'promptTokens', 'input']),
-    output_tokens: pickFirstNumber(usage, ['output_tokens', 'outputTokens', 'completion_tokens', 'completionTokens', 'output']),
-    cache_creation_tokens: pickFirstNumber(usage, ['cache_creation_tokens', 'cacheCreationTokens', 'cache_write_tokens', 'cacheWrite']),
-    cache_read_tokens: pickFirstNumber(usage, ['cache_read_tokens', 'cacheReadTokens', 'cache_hit_tokens', 'cacheRead']),
-    reasoning_tokens: pickFirstNumber(usage, ['reasoning_tokens', 'reasoningTokens', 'thinking_tokens', 'thinkingTokens']),
-    tool_tokens: pickFirstNumber(usage, ['tool_tokens', 'toolTokens', 'tool_use_tokens', 'toolUseTokens']),
-    total_tokens: pickFirstNumber(usage, ['total_tokens', 'totalTokens']),
-    usage_source: typeof usage.usage_source === 'string'
-      ? normalizeUsageSource(usage.usage_source)
-      : 'provider_usage',
-  };
-
-  const hasAny = Object.values(normalized).some(value => value !== undefined);
-  if (!hasAny) return undefined;
-
-  if (normalized.total_tokens === undefined) {
-    const components = [
-      normalized.input_tokens,
-      normalized.output_tokens,
-      normalized.cache_creation_tokens,
-      normalized.cache_read_tokens,
-    ].filter((value): value is number => value !== undefined);
-    if (components.length > 0) {
-      normalized.total_tokens = components.reduce((sum, value) => sum + value, 0);
-    }
-  }
-
-  return Object.fromEntries(
-    Object.entries(normalized).filter(([, value]) => value !== undefined),
-  ) as SessionTokenUsage;
+function hasExplicitUsageSource(candidate: unknown): boolean {
+  if (candidate === null || typeof candidate !== 'object') return false;
+  return typeof (candidate as Record<string, unknown>).usage_source === 'string';
 }
 
 function findFinishReason(payload: unknown): string | undefined {
@@ -778,7 +831,9 @@ function findTokenUsage(payload: unknown): SessionTokenUsage | undefined {
     if (normalized) return normalized;
   }
 
-  return normalizeTokenUsage(record);
+  // Last resort: the event record itself may carry bare counters. It did not come from a
+  // `usage` field, so it must not be labelled provider usage (SPECIALISTS-120 criterion 4).
+  return normalizeTokenUsage(record, false);
 }
 
 function extractMessageTextContent(message: unknown): string {
@@ -1038,6 +1093,19 @@ export class PiAgentSession {
     auto_compactions: 0,
     auto_retries: 0,
   };
+  /**
+   * Summed per-message usage (SPECIALISTS-120 criterion 5). Accumulated on `message_end` only —
+   * the one event per message carrying final usage — so streaming partials cannot double-count.
+   * This is the "summed" side of the reconciliation against Pi's session totals; `_metrics.
+   * token_usage` keeps its historical last-value semantics for existing readers.
+   */
+  private _summedUsage?: SessionTokenUsage;
+  private _summedUsageSeen: Record<string, number> = {};
+  private _sessionStats?: PiSessionStats;
+  private _sessionStatsError?: string;
+  /** Guards once-per-run settlement capture; reset when a new turn starts. */
+  private _sessionStatsCaptured = false;
+  private _piVersion?: string;
   readonly meta: AgentSessionMeta;
 
   private constructor(
@@ -1171,6 +1239,14 @@ export class PiAgentSession {
       // or write from the kernel leave a visible audit trail.
       PI_KERNEL_AUDIT_POLICY: '1',
     };
+
+    // Version telemetry (SPECIALISTS-120 criterion 7): resolved once at session start, so a
+    // run names the Pi that produced it even when the operator swaps versions mid-day.
+    this._piVersion = this._piVersionValue();
+    if (this._piVersion) {
+      this._metrics.pi_version = this._piVersion;
+      this.options.onMetric?.({ type: 'pi_version', pi_version: this._piVersion });
+    }
 
     const sessionCwd = resolve(this.options.cwd ?? process.cwd());
 
@@ -1344,6 +1420,83 @@ export class PiAgentSession {
     this.options.onMetric?.({ type: 'finish_reason', finish_reason: finishReason, source });
   }
 
+  /**
+   * Fold one message's provider-reported usage into the run totals (SPECIALISTS-120).
+   *
+   * The dual-shape rule (per-message deltas vs cumulative counters) is owned by
+   * `accumulateTokenUsage` and shared with the native path, so both runtimes reconcile
+   * against Pi's session stats with the same arithmetic.
+   *
+   * Cost is summed plainly. Known ceiling: a provider that reported cumulative cost per
+   * message would inflate this; none does today, and Pi's own usage totals have the same
+   * assumption.
+   */
+  private _accumulateUsage(usage: SessionTokenUsage | undefined): void {
+    if (!usage) return;
+    this._summedUsage = accumulateTokenUsage(this._summedUsage, usage, this._summedUsageSeen);
+  }
+
+  /**
+   * Persist one message's usage verbatim and accumulate the run totals.
+   *
+   * `message_end` is the single event per message that carries final usage, so it is the only
+   * place the accumulator reads. The metric event is emitted per message so every observed
+   * usage survives to the durable event stream (criterion 1), verbatim.
+   */
+  private _recordMessageUsage(message: Record<string, any> | undefined): void {
+    const usage = normalizeTokenUsage(message?.usage);
+    if (!usage) return;
+    this._accumulateUsage(usage);
+    this.options.onMetric?.({ type: 'token_usage', token_usage: usage, source: 'message_done' });
+  }
+
+  private _piVersionValue(): string | undefined {
+    return this._piVersion ?? this.options.piVersion ?? resolvePiVersion();
+  }
+
+  /**
+   * Capture Pi's terminal session totals at settlement (SPECIALISTS-120 criterion 3).
+   *
+   * Called from `waitForDone()` — i.e. after `agent_end` and BEFORE the runner closes the
+   * process — so the snapshot describes the run that just finished rather than an empty
+   * session. Bounded by `sessionStatsTimeoutMs`: a Pi that never answers costs the run that
+   * wait and nothing more, and the failure is recorded as an explicit event instead of
+   * silently producing a run with no session totals.
+   *
+   * Recorded on the live child ONLY when it is still reachable. A killed or exited process
+   * cannot answer, and asking would burn the full timeout on every failed run.
+   */
+  private async _captureSessionStats(): Promise<void> {
+    if (this._sessionStatsCaptured) return;
+    this._sessionStatsCaptured = true;
+
+    const timeoutMs = this.options.sessionStatsTimeoutMs ?? SESSION_STATS_TIMEOUT_MS;
+    const record = (errorMessage: string): void => {
+      this._sessionStatsError = errorMessage;
+      this._metrics.session_stats_error = errorMessage;
+      this.options.onMetric?.({ type: 'session_stats_error', errorMessage, timeoutMs, source: 'settlement' });
+    };
+
+    if (!this.proc?.stdin || !this.proc.stdin.writable) {
+      record('pi process is not available to answer get_session_stats');
+      return;
+    }
+
+    try {
+      const response = await this.sendCommand({ type: 'get_session_stats' }, timeoutMs);
+      const stats = normalizePiSessionStats(response?.data);
+      if (!stats) {
+        record('get_session_stats returned no usable session totals');
+        return;
+      }
+      this._sessionStats = stats;
+      this._metrics.session_stats = stats;
+      this.options.onMetric?.({ type: 'session_stats', session_stats: stats, source: 'settlement' });
+    } catch (error) {
+      record(error instanceof Error ? error.message : String(error));
+    }
+  }
+
   private _handleEvent(line: string): void {
     let event: Record<string, any>;
     try { event = JSON.parse(line); } catch { return; }
@@ -1382,6 +1535,10 @@ export class PiAgentSession {
 
     if (type === 'message_end') {
       const role = event.message?.role;
+      // SPECIALISTS-120: one capture point per message for the run totals. Pi's AgentMessage
+      // carries final provider usage here, for assistant messages AND for tool-reported usage
+      // on toolResult messages; both contribute to Pi's session totals, so both must be summed.
+      if (role === 'assistant' || role === 'toolResult') this._recordMessageUsage(event.message);
       if (role === 'assistant') {
         const content = extractMessageTextContent(event.message);
         this.options.onEvent?.('message_end_assistant', content ? { content, charCount: content.length } : undefined);
@@ -1490,21 +1647,36 @@ export class PiAgentSession {
     }
 
     // ── Auto-compaction / auto-retry lifecycle events ──────────────────────────
-    if (type === 'auto_compaction_start' || type === 'auto_compaction_end') {
-      if (type === 'auto_compaction_end') {
+    // Pi 0.85.1 emits `compaction_start`/`compaction_end`; older builds emitted
+    // `auto_compaction_*`. Both spellings are accepted so a compaction is never silently
+    // missing from the timeline just because the Pi version changed (SPECIALISTS-120
+    // criterion 2). The internal `auto_compaction_*` vocabulary is preserved for readers.
+    if (type === 'auto_compaction_start' || type === 'auto_compaction_end'
+      || type === 'compaction_start' || type === 'compaction_end') {
+      const isEnd = type === 'auto_compaction_end' || type === 'compaction_end';
+      const legacyType = isEnd ? 'auto_compaction_end' : 'auto_compaction_start';
+      if (isEnd) {
         this._metrics.auto_compactions = (this._metrics.auto_compactions ?? 0) + 1;
       }
+      // CompactionResult is nested under `result` in Pi's AgentSessionEvent and flattened in
+      // older payloads; read both. `usage` is the summarization LLM call's usage, which counts
+      // toward Pi's session totals but never appears on an assistant message.
+      const result = (event.result && typeof event.result === 'object') ? event.result as Record<string, unknown> : undefined;
+      const compactionUsage = normalizeTokenUsage(result?.usage ?? event.usage);
+      if (isEnd) this._accumulateUsage(compactionUsage);
       const compactionDetails = {
-        tokensBefore: asNumber(event.tokensBefore ?? event.tokens_before),
-        summary: findStringValue(event, ['summary']),
-        firstKeptEntryId: findStringValue(event, ['firstKeptEntryId', 'first_kept_entry_id']),
+        tokensBefore: asNumber(event.tokensBefore ?? event.tokens_before ?? result?.tokensBefore),
+        estimatedTokensAfter: asNumber(event.estimatedTokensAfter ?? event.estimated_tokens_after ?? result?.estimatedTokensAfter),
+        summary: findStringValue(result ?? event, ['summary']) ?? findStringValue(event, ['summary']),
+        firstKeptEntryId: findStringValue(result ?? event, ['firstKeptEntryId', 'first_kept_entry_id']),
+        ...(compactionUsage ? { token_usage: compactionUsage } : {}),
       };
       this.options.onMetric?.({
         type: 'compaction',
-        phase: type === 'auto_compaction_start' ? 'start' : 'end',
+        phase: isEnd ? 'end' : 'start',
         ...compactionDetails,
       });
-      this.options.onEvent?.(type, compactionDetails);
+      this.options.onEvent?.(legacyType, compactionDetails);
       return;
     }
     if (type === 'auto_retry_start' || type === 'auto_retry_end') {
@@ -1634,6 +1806,8 @@ export class PiAgentSession {
    */
   async prompt(task: string): Promise<void> {
     this._stallError = undefined;
+    // A new turn re-arms settlement capture: each turn settles with its own session snapshot.
+    this._sessionStatsCaptured = false;
     this._markActivity();
     const response = await this.sendCommand({ type: 'prompt', message: task });
     if (response?.success === false) {
@@ -1648,13 +1822,21 @@ export class PiAgentSession {
    */
   async waitForDone(timeout?: number): Promise<void> {
     const donePromise = this._donePromise ?? Promise.resolve();
-    if (!timeout) return donePromise;
-    return Promise.race([
-      donePromise,
-      new Promise<void>((_, reject) =>
-        setTimeout(() => reject(new Error(`Specialist timed out after ${timeout}ms`)), timeout)
-      ),
-    ]);
+    if (timeout) {
+      await Promise.race([
+        donePromise,
+        new Promise<void>((_, reject) =>
+          setTimeout(() => reject(new Error(`Specialist timed out after ${timeout}ms`)), timeout)
+        ),
+      ]);
+    } else {
+      await donePromise;
+    }
+    // Settlement telemetry is captured HERE, after the run boundary and before the caller
+    // reads metrics or closes the process (SPECIALISTS-120 criterion 3). Awaiting it is safe
+    // only because the capture is bounded and records its own failure — it can delay
+    // settlement by at most `sessionStatsTimeoutMs`, and never blocks it.
+    await this._captureSessionStats();
   }
 
   /**
@@ -1691,7 +1873,20 @@ export class PiAgentSession {
   }
 
   getMetrics(): SessionRunMetrics {
-    return { ...this._metrics, ...(this._metrics.token_usage ? { token_usage: { ...this._metrics.token_usage } } : {}) };
+    // The summed side carries the run's accumulated cost; Pi's session-stats cost lands on
+    // `session_stats.cost`. Comparing the two is the reconciliation (criterion 5).
+    const summedUsage = this._summedUsage;
+    const reconciliation = reconcileSessionUsage(summedUsage, this._sessionStats);
+    const piVersion = this._piVersionValue();
+    return {
+      ...this._metrics,
+      ...(this._metrics.token_usage ? { token_usage: { ...this._metrics.token_usage } } : {}),
+      ...(summedUsage?.cost ? { cost: { ...summedUsage.cost } } : {}),
+      ...(this._sessionStats ? { session_stats: this._sessionStats } : {}),
+      ...(this._sessionStatsError ? { session_stats_error: this._sessionStatsError } : {}),
+      ...(reconciliation ? { reconciliation } : {}),
+      ...(piVersion ? { pi_version: piVersion } : {}),
+    };
   }
 
   /**

@@ -62,6 +62,15 @@
 // CANONICAL TIMELINE EVENT TYPES
 // ============================================================================
 
+// SPECIALISTS-120: telemetry shapes are shared with the neutral session-metrics contract so a
+// cost breakdown or a Pi session snapshot has ONE definition, not one per producer.
+import type {
+  PiSessionStats,
+  PiUsageVerbatim,
+  SessionUsageCost,
+  SessionUsageReconciliation,
+} from './session-metrics-contract.js';
+
 /**
  * Base fields present in every timeline event.
  * Written to events.jsonl as NDJSON (one event per line).
@@ -245,14 +254,30 @@ export interface TimelineTokenUsage {
   output_tokens?: number;
   cache_creation_tokens?: number;
   cache_read_tokens?: number;
+  /** Anthropic 1-hour cache writes (`cacheWrite1h`); a subset of cache_creation_tokens. */
+  cache_write_1h_tokens?: number;
   reasoning_tokens?: number;
   tool_tokens?: number;
   total_tokens?: number;
   usage_source?: 'provider_usage' | 'runtime_estimate' | 'local_estimate' | 'unknown';
+  /** Cost as reported by Pi; never estimated by Specialists. */
+  cost?: SessionUsageCost;
+  /** Pi's provider-reported usage object, verbatim (SPECIALISTS-120). */
+  pi_usage?: PiUsageVerbatim;
 }
 
 export interface TimelineRunMetrics {
   token_usage?: TimelineTokenUsage;
+  /** Summed cost across every usage record observed for the run. */
+  cost?: SessionUsageCost;
+  /** Pi's terminal `get_session_stats` snapshot (Pi session totals, including compaction). */
+  session_stats?: PiSessionStats;
+  /** Failure detail when the settlement `get_session_stats` call failed or timed out. */
+  session_stats_error?: string;
+  /** Summed per-message usage vs the Pi session-stats snapshot. */
+  reconciliation?: SessionUsageReconciliation;
+  /** Pi version recorded for this run (binary on PATH, or the native SDK package). */
+  pi_version?: string;
   finish_reason?: string;
   exit_reason?: string;
   turns?: number;
@@ -290,6 +315,8 @@ export interface TimelineEventRunComplete extends TimelineEventBase {
   finish_reason?: string;
   tool_calls?: string[];
   exit_reason?: string;
+  /** Pi version recorded for this run (SPECIALISTS-120 criterion 7). */
+  pi_version?: string;
   /** Optional additive metrics summary */
   metrics?: TimelineRunMetrics;
   gitnexus_summary?: {
@@ -328,6 +355,32 @@ export interface TimelineEventTokenUsage extends TimelineEventBase {
   source: 'message_done' | 'turn_end' | 'agent_end';
 }
 
+/** Provenance of a `context_pct` value on a turn summary. */
+export type TimelineContextPctSource = 'pi_session_stats' | 'specialists_fallback';
+
+/**
+ * Terminal Pi session-stats snapshot (SPECIALISTS-120).
+ *
+ * Recorded once per run at settlement from Pi's `get_session_stats`, BEFORE the Pi process
+ * exits. Unlike `token_usage` (per-message deltas), this is Pi's own session total: it covers
+ * every assistant message, tool-reported usage and compaction/branch-summary generation,
+ * including history that was compacted away. `context_usage_*` carries Pi's native context
+ * window reading, which Specialists must never recompute.
+ */
+export interface TimelineEventSessionStats extends TimelineEventBase {
+  type: 'session_stats';
+  source: 'settlement';
+  session_stats: PiSessionStats;
+}
+
+/** Explicit failure of the settlement `get_session_stats` call; the job still settles. */
+export interface TimelineEventSessionStatsError extends TimelineEventBase {
+  type: 'session_stats_error';
+  source: 'settlement';
+  error_message: string;
+  timeout_ms?: number;
+}
+
 export interface TimelineEventFinishReason extends TimelineEventBase {
   type: 'finish_reason';
   finish_reason: string;
@@ -342,14 +395,23 @@ export interface TimelineEventTurnSummary extends TimelineEventBase {
   text_content?: string;
   context_pct?: number;
   context_health?: 'OK' | 'MONITOR' | 'WARN' | 'CRITICAL';
+  /**
+   * Where `context_pct` came from. `pi_session_stats` is Pi's own native context reading;
+   * `specialists_fallback` is the local MODEL_CONTEXT_WINDOWS estimate, which covers only
+   * the model families it knows and is never authoritative (SPECIALISTS-120 criterion 2).
+   */
+  context_pct_source?: TimelineContextPctSource;
 }
 
 export interface TimelineEventCompaction extends TimelineEventBase {
   type: 'compaction';
   phase: 'start' | 'end';
   tokens_before?: number;
+  estimated_tokens_after?: number;
   summary?: string;
   first_kept_entry_id?: string;
+  /** Usage of the summarization LLM call; contributes to Pi's session totals. */
+  token_usage?: TimelineTokenUsage;
 }
 
 export interface TimelineEventRetry extends TimelineEventBase {
@@ -500,6 +562,8 @@ export type TimelineEvent =
   | TimelineEventRunComplete
   | TimelineEventStaleWarning
   | TimelineEventTokenUsage
+  | TimelineEventSessionStats
+  | TimelineEventSessionStatsError
   | TimelineEventFinishReason
   | TimelineEventTurnSummary
   | TimelineEventCompaction
@@ -529,6 +593,8 @@ export const TIMELINE_EVENT_TYPES = {
   RUN_COMPLETE: 'run_complete',
   STALE_WARNING: 'stale_warning',
   TOKEN_USAGE: 'token_usage',
+  SESSION_STATS: 'session_stats',
+  SESSION_STATS_ERROR: 'session_stats_error',
   FINISH_REASON: 'finish_reason',
   TURN_SUMMARY: 'turn_summary',
   COMPACTION: 'compaction',
@@ -607,8 +673,10 @@ export function mapCallbackEventToTimelineEvent(
     content?: string;
     compaction?: {
       tokensBefore?: number;
+      estimatedTokensAfter?: number;
       summary?: string;
       firstKeptEntryId?: string;
+      token_usage?: TimelineTokenUsage;
     };
     retry?: {
       attempt?: number;
@@ -723,8 +791,10 @@ export function mapCallbackEventToTimelineEvent(
         type: TIMELINE_EVENT_TYPES.COMPACTION,
         phase: 'start',
         ...(context.compaction?.tokensBefore !== undefined ? { tokens_before: context.compaction.tokensBefore } : {}),
+        ...(context.compaction?.estimatedTokensAfter !== undefined ? { estimated_tokens_after: context.compaction.estimatedTokensAfter } : {}),
         ...(context.compaction?.summary ? { summary: context.compaction.summary } : {}),
         ...(context.compaction?.firstKeptEntryId ? { first_kept_entry_id: context.compaction.firstKeptEntryId } : {}),
+        ...(context.compaction?.token_usage ? { token_usage: context.compaction.token_usage } : {}),
       };
 
     case 'auto_compaction_end':
@@ -734,8 +804,10 @@ export function mapCallbackEventToTimelineEvent(
         type: TIMELINE_EVENT_TYPES.COMPACTION,
         phase: 'end',
         ...(context.compaction?.tokensBefore !== undefined ? { tokens_before: context.compaction.tokensBefore } : {}),
+        ...(context.compaction?.estimatedTokensAfter !== undefined ? { estimated_tokens_after: context.compaction.estimatedTokensAfter } : {}),
         ...(context.compaction?.summary ? { summary: context.compaction.summary } : {}),
         ...(context.compaction?.firstKeptEntryId ? { first_kept_entry_id: context.compaction.firstKeptEntryId } : {}),
+        ...(context.compaction?.token_usage ? { token_usage: context.compaction.token_usage } : {}),
       };
 
     case 'auto_retry_start':
@@ -902,6 +974,27 @@ export function createTokenUsageEvent(
   };
 }
 
+/** Terminal Pi session-stats snapshot, written once per run at settlement (SPECIALISTS-120). */
+export function createSessionStatsEvent(session_stats: PiSessionStats): TimelineEventSessionStats {
+  return {
+    t: Date.now(),
+    type: TIMELINE_EVENT_TYPES.SESSION_STATS,
+    source: 'settlement',
+    session_stats,
+  };
+}
+
+/** Explicit settlement failure: the snapshot is missing and the reason is durable. */
+export function createSessionStatsErrorEvent(errorMessage: string, timeoutMs?: number): TimelineEventSessionStatsError {
+  return {
+    t: Date.now(),
+    type: TIMELINE_EVENT_TYPES.SESSION_STATS_ERROR,
+    source: 'settlement',
+    error_message: errorMessage,
+    ...(timeoutMs !== undefined ? { timeout_ms: timeoutMs } : {}),
+  };
+}
+
 export function createFinishReasonEvent(
   finish_reason: string,
   source: 'message_done' | 'turn_end' | 'agent_end'
@@ -921,6 +1014,7 @@ export function createTurnSummaryEvent(
   textContent?: string,
   contextPct?: number,
   contextHealth?: 'OK' | 'MONITOR' | 'WARN' | 'CRITICAL',
+  contextPctSource?: TimelineContextPctSource,
 ): TimelineEventTurnSummary {
   return {
     t: Date.now(),
@@ -931,20 +1025,23 @@ export function createTurnSummaryEvent(
     ...(textContent ? { text_content: textContent } : {}),
     ...(contextPct !== undefined ? { context_pct: contextPct } : {}),
     ...(contextHealth ? { context_health: contextHealth } : {}),
+    ...(contextPct !== undefined && contextPctSource ? { context_pct_source: contextPctSource } : {}),
   };
 }
 
 export function createCompactionEvent(
   phase: 'start' | 'end',
-  options?: { tokensBefore?: number; summary?: string; firstKeptEntryId?: string },
+  options?: { tokensBefore?: number; estimatedTokensAfter?: number; summary?: string; firstKeptEntryId?: string; tokenUsage?: TimelineTokenUsage },
 ): TimelineEventCompaction {
   return {
     t: Date.now(),
     type: TIMELINE_EVENT_TYPES.COMPACTION,
     phase,
     ...(options?.tokensBefore !== undefined ? { tokens_before: options.tokensBefore } : {}),
+    ...(options?.estimatedTokensAfter !== undefined ? { estimated_tokens_after: options.estimatedTokensAfter } : {}),
     ...(options?.summary ? { summary: options.summary } : {}),
     ...(options?.firstKeptEntryId ? { first_kept_entry_id: options.firstKeptEntryId } : {}),
+    ...(options?.tokenUsage ? { token_usage: options.tokenUsage } : {}),
   };
 }
 
@@ -981,6 +1078,7 @@ export function createRunCompleteEvent(
     tool_calls?: string[];
     exit_reason?: string;
     final?: boolean;
+    pi_version?: string;
     metrics?: TimelineRunMetrics;
     evidence?: TimelineEventEvidenceRef[];
     gitnexus_summary?: {

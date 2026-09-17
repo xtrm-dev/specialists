@@ -54,8 +54,48 @@ function makeFakeProc() {
   const stderrHandlers: Record<string, Function> = {};
   const procHandlers: Record<string, Function> = {};
 
+  // SPECIALISTS-120: the session now captures Pi's terminal session stats from
+  // `waitForDone()`, so an RPC command is sent on that path. The fake answers it by default —
+  // with a well-formed, empty snapshot — so tests that only care about the run boundary are
+  // not silently waiting out the bounded settlement timeout. A test that exercises the failure
+  // path sets `sessionStatsResponder = null` to make Pi stay silent.
+  const fake = {
+    proc: undefined as any,
+    stdin: undefined as any,
+    stdout: undefined as any,
+    stderr: undefined as any,
+    stdoutHandlers,
+    stderrHandlers,
+    procHandlers,
+    sessionStatsResponder: (() => ({
+      sessionId: 'sess-fake',
+      userMessages: 1,
+      assistantMessages: 1,
+      totalMessages: 2,
+      tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      cost: 0,
+    })) as null | (() => Record<string, unknown>),
+  };
+
   const stdin = {
-    write: vi.fn().mockImplementation((_data: any, cb?: any) => { cb?.(); return true; }),
+    write: vi.fn().mockImplementation((data: any, cb?: any) => {
+      cb?.();
+      try {
+        const command = JSON.parse(String(data));
+        if (command?.type === 'get_session_stats' && fake.sessionStatsResponder) {
+          stdoutHandlers['data']?.(Buffer.from(JSON.stringify({
+            id: command.id,
+            type: 'response',
+            command: 'get_session_stats',
+            success: true,
+            data: fake.sessionStatsResponder(),
+          }) + '\n'));
+        }
+      } catch {
+        // Non-JSON writes are not RPC commands.
+      }
+      return true;
+    }),
     end: vi.fn(),
     writable: true,
   };
@@ -84,7 +124,11 @@ function makeFakeProc() {
 
   mockSpawn.mockReturnValue(proc);
 
-  return { proc, stdin, stdout, stderr, stdoutHandlers, stderrHandlers, procHandlers };
+  fake.proc = proc;
+  fake.stdin = stdin;
+  fake.stdout = stdout;
+  fake.stderr = stderr;
+  return fake;
 }
 
 // ── Protocol event injection helper ──────────────────────────────────────────
