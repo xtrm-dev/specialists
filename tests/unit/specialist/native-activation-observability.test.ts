@@ -559,4 +559,115 @@ describe('native compacted-run reconciliation (SPECIALISTS-120 F1)', () => {
     expect(completeMetrics?.reconciliation?.reconciled).toBe(true);
     expect(completeMetrics?.reconciliation?.fields?.total?.delta).toBe(0);
   });
+
+  // SPECIALISTS-120 validation 3, unit-level: the F1 leg above covers one message plus
+  // compaction. This extends the same reconciliation across TWO turns, where the summed side
+  // must accumulate per-message usage over the compaction boundary (assistant + toolResult in
+  // turn 1, the summarization call, then turn 2's post-compaction message) and still match
+  // Pi's session totals exactly at settlement.
+  it('a two-turn native run accumulates usage across the compaction and reconciles with Pi (SPECIALISTS-120)', () => {
+    client = createObservabilitySqliteClientAtPath(dbPath);
+    expect(client).not.toBeNull();
+    const observability = client!;
+    const sink = createActivationForensicSink(observability);
+
+    const base = {
+      activationId: 'act:two-turn',
+      attemptId: 'att:two-turn:1',
+      participantId: 'specialist::executor',
+      specialist: 'executor',
+      beadId: 'bd-two-turn',
+    };
+    sink.emit({ ...base, name: 'activation_requested' });
+    sink.emit({ ...base, name: 'activation_admitted', payload: { resolved_model: 'zai/glm-5.3-flash' } });
+    sink.emit({ ...base, name: 'activation_started', payload: { pi_session_id: 'pi-two-turn' } });
+    const sessionBase = { ...base, piSessionId: 'pi-two-turn', workspacePath: join(tempRoot, 'worktree') };
+
+    const assistantEnd = (input: number, output: number, cost: number) => ({
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        usage: { input, output, totalTokens: input + output, cost: { total: cost } },
+      },
+    });
+
+    // Turn 1: an assistant reply and its tool-reported usage.
+    sink.sessionEvent?.({ ...sessionBase, event: { type: 'turn_start' } });
+    sink.sessionEvent?.({ ...sessionBase, event: assistantEnd(2_000, 30, 0.2) });
+    sink.sessionEvent?.({ ...sessionBase, event: {
+      type: 'message_end',
+      message: { role: 'toolResult', usage: { input: 1_200, output: 10, totalTokens: 1_210, cost: { total: 0.08 } } },
+    } });
+    sink.sessionEvent?.({ ...sessionBase, event: { type: 'turn_end' } });
+
+    // Compaction between the turns: Pi bills the summarization call here, never as a message.
+    sink.sessionEvent?.({ ...sessionBase, event: { type: 'compaction_start', reason: 'threshold' } });
+    sink.sessionEvent?.({ ...sessionBase, event: {
+      type: 'compaction_end',
+      reason: 'threshold',
+      aborted: false,
+      willRetry: false,
+      result: {
+        tokensBefore: 5_000,
+        estimatedTokensAfter: 900,
+        usage: { input: 1_100, output: 12, totalTokens: 1_112, cost: { total: 0.07 } },
+      },
+    } });
+
+    // Turn 2, after the compaction: a fresh assistant reply.
+    sink.sessionEvent?.({ ...sessionBase, event: { type: 'turn_start' } });
+    sink.sessionEvent?.({ ...sessionBase, event: assistantEnd(900, 25, 0.15) });
+    sink.sessionEvent?.({ ...sessionBase, event: { type: 'turn_end' } });
+
+    // Pi's own totals cover all four reports: input 2,000+1,200+1,100+900, output 30+10+12+25,
+    // total 2,030+1,210+1,112+925, cost 0.2+0.08+0.07+0.15.
+    sink.emit({ ...base, name: 'session_stats_captured', payload: {
+      session_stats: {
+        sessionId: 'pi-two-turn',
+        tokens: { input: 5_200, output: 77, cacheRead: 0, cacheWrite: 0, total: 5_277 },
+        cost: 0.5,
+        contextUsage: { tokens: 5_277, contextWindow: 1_000_000, percent: 0.5277 },
+      },
+      pi_version: '0.85.1',
+    } });
+    sink.emit({ ...base, name: 'activation_completed', payload: { pi_session_id: 'pi-two-turn' } });
+
+    const status = observability.readStatus('act:two-turn');
+    expect(status).not.toBeNull();
+    const metrics = status!.metrics;
+
+    // The run really was two turns with one compaction.
+    expect(metrics?.turns).toBe(2);
+    expect(metrics?.auto_compactions).toBe(1);
+
+    // Per-message usage accumulated across BOTH turns, including the toolResult and the
+    // summarization call — not replaced by the last message, not double-counted.
+    expect(metrics?.token_usage?.input_tokens).toBe(5_200);
+    expect(metrics?.token_usage?.output_tokens).toBe(77);
+    expect(metrics?.token_usage?.total_tokens).toBe(5_277);
+    expect(metrics?.token_usage?.cost?.total).toBeCloseTo(0.5, 10);
+
+    // The terminal snapshot reconciles: every field's delta is zero.
+    expect(metrics?.reconciliation?.reconciled).toBe(true);
+    expect(metrics?.reconciliation?.fields.total).toEqual({ summed: 5_277, session_stats: 5_277, delta: 0 });
+    expect(metrics?.reconciliation?.fields.input.delta).toBe(0);
+    expect(metrics?.reconciliation?.fields.output.delta).toBe(0);
+    expect(metrics?.reconciliation?.fields.cost?.delta).toBe(0);
+
+    // run_complete carries the summed totals and the same reconciliation.
+    const complete = observability.readEvents('act:two-turn').find((event) => event.type === 'run_complete');
+    const completeMetrics = (complete as { metrics?: { token_usage?: { total_tokens?: number; input_tokens?: number }; reconciliation?: { reconciled?: boolean } } })?.metrics;
+    expect(completeMetrics?.token_usage?.total_tokens).toBe(5_277);
+    expect(completeMetrics?.token_usage?.input_tokens).toBe(5_200);
+    expect(completeMetrics?.reconciliation?.reconciled).toBe(true);
+
+    // Each turn's assistant usage also survives as its own timeline row; the summarization
+    // call rides on the compaction_end row, so every report stays individually inspectable.
+    const events = observability.readEvents('act:two-turn');
+    expect(events.filter((event) => event.type === 'token_usage')
+      .map((event) => (event as { token_usage?: { total_tokens?: number } }).token_usage?.total_tokens))
+      .toEqual([2_030, 925]);
+    const compactionUsage = events.find((event) => event.type === 'compaction' && event.phase === 'end') as { token_usage?: { total_tokens?: number } } | undefined;
+    expect(compactionUsage?.token_usage?.total_tokens).toBe(1_112);
+  });
 });
