@@ -37,8 +37,8 @@ jobs:
       - name: Run test suite
         run: bun run test
       # ponytail: the quarantined lane is known-red by construction, so this job
-      # reports its size instead of running it. Un-quarantining is bead
-      # xtrm-wiy5n.4.11; a green quarantined lane means the list is empty and this
+      # reports its size instead of running it. Un-quarantining is owned by
+      # SPECIALISTS-121; a green quarantined lane means the list is empty and this
       # step reports 0.
       - name: Report quarantine count
         if: always()
@@ -46,4 +46,114 @@ jobs:
           # grep -c exits 1 on zero matches and run steps use errexit, so an empty
           # quarantine list would fail the job instead of reporting 0.
           COUNT=$(grep -cE "^\s+'tests/.*', // ISSUE:" vitest.config.ts || true)
-          echo "Quarantined suites excluded from this job: **$COUNT** (bead xtrm-wiy5n.4.11)" >> "$GITHUB_STEP_SUMMARY"
+          COUNT121=$(grep -cE "^\s+'tests/.*', // ISSUE: SPECIALISTS-121" vitest.config.ts || true)
+          COUNT9N93=$(grep -cE "^\s+'tests/.*', // ISSUE: unitAI-9n93" vitest.config.ts || true)
+          echo "Quarantined suites NOT executed by this job: $COUNT ($COUNT121 owned by SPECIALISTS-121, $COUNT9N93 owned by unitAI-9n93)."
+          echo "This includes the quarantined tests/unit/specialist/supervisor.test.ts. The canonical N3 event-inventory oracle ALSO runs here as part of the default suite (defence in depth: an oracle failure reds this job too) and is enforced by the dedicated canonical-oracle job."
+          echo "Quarantined suites excluded from this job: **$COUNT** ($COUNT121 SPECIALISTS-121, $COUNT9N93 unitAI-9n93)" >> "$GITHUB_STEP_SUMMARY"
+
+  # SPECIALISTS-118: the four bun:sqlite suites are excluded from vitest
+  # (bun: protocol unsupported in Node; see vitest.config.ts) and run here via
+  # `bun run test:bun`. Each file uses an isolated scratch store (tmpdir +
+  # randomUUID), never the authoritative observability.db.
+  bun-sqlite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          # Pinned so a bun release cannot break every PR at once. Bump in a
+          # deliberate PR alongside .github/workflows/telemetry-contract.yml — keep both in lockstep.
+          bun-version: 1.3.14
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Run bun:sqlite suites
+        run: |
+          # SPECIALISTS-118: contract-required bun:sqlite set. The REQUIRED set
+          # is declared HERE, not inherited from package.json's test:bun list, so
+          # shrinking that list cannot silently reduce coverage: the step asserts
+          # the executed set (per-file output headers plus the aggregate file
+          # count) covers every required file, and fails LOUD naming the file.
+          REQUIRED_FILES=(
+            tests/unit/specialist/observability-sqlite.test.ts
+            tests/unit/specialist/observability-sqlite-pr-refresh.test.ts
+            tests/unit/specialist/observability-db.test.ts
+            tests/unit/cli/db.test.ts
+          )
+          for f in "${REQUIRED_FILES[@]}"; do
+            [ -f "$f" ] || { echo "bun-sqlite RED: required file missing from disk (renamed/deleted?): $f"; exit 1; }
+          done
+          code=0
+          out="$(bun run test:bun 2>&1)" || code=$?
+          printf '%s\n' "$out" | tail -5
+          if [ "$code" -ne 0 ]; then
+            echo "bun-sqlite RED: test:bun failed"
+            exit 1
+          fi
+          # Executed-set assertion: every required file must appear as an
+          # executed per-file header in the runner output, and the aggregate
+          # file count must equal the required-set size. A file dropped from
+          # the test:bun list (or silently skipped) trips one of these two.
+          for f in "${REQUIRED_FILES[@]}"; do
+            printf '%s\n' "$out" | grep -qF "$f:" || { echo "bun-sqlite RED: required file did NOT execute (absent from runner output): $f"; exit 1; }
+          done
+          count="$(printf '%s\n' "$out" | grep -Eo 'Ran [0-9]+ tests across [0-9]+ files' | tail -1 | grep -Eo '[0-9]+ files' | grep -Eo '[0-9]+' || true)"
+          if [ "$count" != "${#REQUIRED_FILES[@]}" ]; then
+            echo "bun-sqlite RED: runner executed $count files, required set holds ${#REQUIRED_FILES[@]} (${REQUIRED_FILES[*]})"
+            exit 1
+          fi
+          echo "bun-sqlite: all ${#REQUIRED_FILES[@]} required files executed."
+
+  # SPECIALISTS-118: the canonical N3 event-inventory oracle is the XTRM-93 N3
+  # freeze acceptance surface. It lives in
+  # tests/unit/specialist/supervisor-canonical-oracle.test.ts (extracted from the
+  # quarantined supervisor.test.ts with no assertion change), runs in the
+  # DEFAULT vitest suite with no quarantine env var, and MUST turn this job RED
+  # when the oracle breaks. Every proof drives real mapper/writer code against
+  # an isolated store, never the authoritative observability.db.
+  canonical-oracle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          # Pinned so a bun release cannot break every PR at once. Bump in a
+          # deliberate PR alongside .github/workflows/telemetry-contract.yml — keep both in lockstep.
+          bun-version: 1.3.14
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Run canonical N3 event-inventory oracle
+        run: |
+          # Vacuity guard (SPECIALISTS-118; pattern from telemetry-contract.yml):
+          # vitest exits 0 for a file whose every test is skipped, so a
+          # fully-skipped oracle would read as GREEN while asserting nothing.
+          # The report must carry at least one PASSED assertion for the oracle
+          # file, or this step fails LOUD.
+          ORACLE_FILE="tests/unit/specialist/supervisor-canonical-oracle.test.ts"
+          REPORT_DIR="$(mktemp -d)"
+          REPORT="$REPORT_DIR/oracle-vitest-report.json"
+          bun --bun vitest run --reporter=default --reporter=json --outputFile="$REPORT" "$ORACLE_FILE"
+          REPORT="$REPORT" ORACLE_FILE="$ORACLE_FILE" bun -e '
+            import { readFileSync } from "node:fs";
+            import { resolve } from "node:path";
+            const report = JSON.parse(readFileSync(process.env.REPORT, "utf8"));
+            const target = resolve(process.env.ORACLE_FILE);
+            const entry = (report.testResults ?? []).find((t) => resolve(t.name) === target);
+            if (!entry) {
+              console.error(`canonical-oracle RED: ${process.env.ORACLE_FILE} did NOT execute (absent from report testResults).`);
+              process.exit(1);
+            }
+            const passed = (entry.assertionResults ?? []).filter((a) => a.status === "passed").length;
+            console.log(`canonical-oracle: executed ${process.env.ORACLE_FILE} (${passed} passed assertions)`);
+            if (passed < 1) {
+              console.error(`canonical-oracle RED: ${process.env.ORACLE_FILE} executed but asserted nothing (zero passed assertions \u2014 fully skipped?).`);
+              process.exit(1);
+            }
+            console.log("canonical-oracle: oracle executed with assertions.");
+          '

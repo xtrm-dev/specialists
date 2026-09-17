@@ -39,8 +39,6 @@ vi.mock('node:child_process', async (importOriginal) => {
   };
 });
 import { Supervisor } from '../../../src/specialist/supervisor.js';
-import { differentialNoteFor, SUPERVISOR_CANONICAL_INVENTORY } from './supervisor-canonical-inventory.js';
-import { runAbsentCheck, runDurableEntryCheck, runTokenMetricProjectionCheck } from './supervisor-canonical-proof.js';
 import { isJobFileOutputEnabled } from '../../../src/specialist/job-file-output.js';
 import type { SupervisorStatus } from '../../../src/specialist/supervisor.js';
 import { createObservabilitySqliteClient } from '../../../src/specialist/observability-sqlite.js';
@@ -1494,13 +1492,14 @@ describe('Supervisor', () => {
   });
 });
 
-// NOTE (bead SPECIALISTS-95, XTRM-93 N3.0): the file header says not to add new
-// tests here because the file is quarantined. The two blocks below are the
-// explicitly authorized exceptions: (a) harness-fidelity locks that fail if
-// production gains a node:child_process member the double does not know, and
-// (b) the expected-canonical-event-inventory oracle check. Both run ONLY under
-// `bun run test:supervisor` (quarantined selection), so the default suite is
-// unaffected. Feature tests still belong in sibling files.
+// NOTE (bead SPECIALISTS-95, XTRM-93 N3.0; oracle extracted by SPECIALISTS-118):
+// the file header says not to add new tests here because the file is
+// quarantined. The block below is the explicitly authorized exception:
+// harness-fidelity locks that fail if production gains a node:child_process
+// member the double does not know. The former second exception, the
+// expected-canonical-event-inventory oracle check, now lives in
+// supervisor-canonical-oracle.test.ts and runs in the default suite.
+// Feature tests still belong in sibling files.
 
 describe('child_process double fidelity (unitAI-9n93 harness lock)', () => {
   it('exposes every production-reached member (spawn, spawnSync, execFileSync)', () => {
@@ -1524,47 +1523,4 @@ describe('child_process double fidelity (unitAI-9n93 harness lock)', () => {
       spy.mockRestore();
     }
   });
-});
-
-describe('canonical event inventory oracle (XTRM-93 N3.0, SPECIALISTS-103 repair)', () => {
-  // Execution-backed oracle: each entry declares an explicit `expectation`
-  // class and the proof for that class runs REAL code against an ISOLATED
-  // store. Source-string presence is NEVER sufficient: the `evidence` needles
-  // in the inventory are documentation only and are not read here. Entries
-  // with gapRef set are KNOWN-OPEN gaps owned by follow-on nodes — their
-  // failure is the oracle working. Do not edit the manifest to fit the source.
-  for (const entry of SUPERVISOR_CANONICAL_INVENTORY) {
-    it(`${entry.id}: ${entry.scenario}`, () => {
-      // The class must be explicit: no entry may leave it implicit.
-      expect(
-        ['EXPECTED_DURABLE', 'EXPECTED_ABSENT_WITH_REASON', 'EXPECTED_RUNTIME_ONLY'].includes(entry.expectation),
-        `[oracle] ${entry.id}: missing explicit expectation class`,
-      ).toBe(true);
-      try {
-        if (entry.expectation === 'EXPECTED_DURABLE') {
-          if (!entry.durable) throw new Error(`[oracle] ${entry.id}: EXPECTED_DURABLE without a durable proof`);
-          runDurableEntryCheck(entry.durable);
-        } else if (entry.expectation === 'EXPECTED_ABSENT_WITH_REASON') {
-          if (!entry.absent) throw new Error(`[oracle] ${entry.id}: EXPECTED_ABSENT_WITH_REASON without an absent proof`);
-          runAbsentCheck(entry.absent);
-        } else {
-          if (!entry.runtime) throw new Error(`[oracle] ${entry.id}: EXPECTED_RUNTIME_ONLY without a runtime proof`);
-          if (entry.runtime.check !== 'token-metric-projection') {
-            throw new Error(`[oracle] ${entry.id}: unknown runtime check "${(entry.runtime as { check: string }).check}"`);
-          }
-          runTokenMetricProjectionCheck();
-        }
-      } catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
-        expect(
-          false,
-          `[oracle] ${entry.id}: scenario "${entry.scenario}" expects ${entry.expectation} signal ` +
-          `"${entry.signal}" but the proof failed: ${detail}` +
-          (entry.gapRef ? ` (${entry.gapRef})` : '') +
-          ` Differential: ${differentialNoteFor(entry.expectation)}` +
-          (entry.gapRef ? ' A parity reading here is a FALSE GREEN.' : ''),
-        ).toBe(true);
-      }
-    });
-  }
 });
