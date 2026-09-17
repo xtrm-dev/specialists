@@ -3,28 +3,54 @@ name: telemetry-contract
 permissions:
   contents: read
 
+# Trigger-set derivation (SPECIALISTS-110): every file that can independently
+# redefine the telemetry contract fires this gate. The contract layers are:
+# vocabulary (timeline-events), envelope/schema (forensic-events), native
+# mapping (native-activation-observability), native write path + producer rule
+# (activation/forensic-sink), shared writer + forensic mirror + job aggregation
+# (observability-sqlite), projection (prometheus-projection), exposition
+# (cli/metrics) — plus the contract tests that pin those layers, and this file.
+# Deliberately NOT triggers (all still executed by the unfiltered tests.yml
+# suite on every PR): emitters that only call the covered layers without
+# defining them (activation/native-host declares the sink interface and emits
+# already-shaped payloads consumed through the covered mapper/sink;
+# specialist/supervisor, runner, loader, script-runner likewise), location and
+# version plumbing (specialist/observability-db), the console scalar core
+# (specialist/live-aggregates, which the projection deliberately does not
+# consume), and read-side store consumers (branch-integration-events,
+# epic-readiness, native-activation-summary, cli/log, cli/db).
 on:
   pull_request:
     paths:
+      - 'src/specialist/timeline-events.ts'
       - 'src/specialist/forensic-events.ts'
+      - 'src/specialist/native-activation-observability.ts'
+      - 'src/activation/forensic-sink.ts'
       - 'src/specialist/prometheus-projection.ts'
       - 'src/specialist/observability-sqlite.ts'
       - 'src/cli/metrics.ts'
       - 'tests/unit/specialist/forensic-events.test.ts'
       - 'tests/unit/specialist/prometheus-projection.test.ts'
       - 'tests/unit/specialist/observability-sqlite.test.ts'
+      - 'tests/unit/specialist/native-activation-observability.test.ts'
+      - 'tests/unit/specialist/native-mapper-totality.test.ts'
       - '.github/workflows/telemetry-contract.yml'
   push:
     branches:
       - master
     paths:
+      - 'src/specialist/timeline-events.ts'
       - 'src/specialist/forensic-events.ts'
+      - 'src/specialist/native-activation-observability.ts'
+      - 'src/activation/forensic-sink.ts'
       - 'src/specialist/prometheus-projection.ts'
       - 'src/specialist/observability-sqlite.ts'
       - 'src/cli/metrics.ts'
       - 'tests/unit/specialist/forensic-events.test.ts'
       - 'tests/unit/specialist/prometheus-projection.test.ts'
       - 'tests/unit/specialist/observability-sqlite.test.ts'
+      - 'tests/unit/specialist/native-activation-observability.test.ts'
+      - 'tests/unit/specialist/native-mapper-totality.test.ts'
       - '.github/workflows/telemetry-contract.yml'
   workflow_dispatch:
 
@@ -42,9 +68,17 @@ jobs:
           bun-version: 1.3.14
       - name: Install dependencies
         run: bun install --frozen-lockfile
-      - name: Validate telemetry contracts and Prometheus exposition parser
+      - name: Validate telemetry contracts, native mapper, and Prometheus exposition parser
         run: |
           bun --bun vitest run \
             tests/unit/specialist/forensic-events.test.ts \
             tests/unit/specialist/prometheus-projection.test.ts \
-            tests/unit/specialist/observability-sqlite.test.ts
+            tests/unit/specialist/native-activation-observability.test.ts \
+            tests/unit/specialist/native-mapper-totality.test.ts
+      - name: Validate observability writer, forensic mirror, and job metrics
+        run: |
+          # observability-sqlite.test.ts uses bun:sqlite and is excluded from the
+          # vitest config (see vitest.config.ts): naming it in a vitest invocation
+          # silently skips it (SPECIALISTS-110), so it runs here under bun test,
+          # the same runner as `bun run test:bun`.
+          bun test tests/unit/specialist/observability-sqlite.test.ts
