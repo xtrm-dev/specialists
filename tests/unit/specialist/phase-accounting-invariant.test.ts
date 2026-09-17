@@ -4,13 +4,44 @@
  * The invariant (contract, not suggestion) — stated against PHASE-RELEVANT events
  * (run_start, status_change{running,waiting,done,error,cancelled}, run_complete):
  *
- *   (I1) PARTITION: active_runtime_ms + waiting_ms == t_last - t_firstPhase,
- *        where t_last is the last event's t (the post-loop flush target) and
- *        t_firstPhase is the first phase-relevant event's t. Every millisecond
- *        the phase machine was open for is attributed EXACTLY ONCE. The reference
- *        span is deliberately NOT the stored elapsed_ms: elapsed_ms is overwritten
- *        per run_complete (`elapsedMs = Math.round(event.elapsed_s * 1000)`) and is
- *        incoherent on multi-round streams (out of scope, SPECIALISTS-94.8/108).
+ *   (I1) PARTITION (shape-conditional): every millisecond the phase machine was
+ *        OPEN for is attributed EXACTLY ONCE — to active_runtime_ms if the open
+ *        phase was running, to waiting_ms if it was waiting. There is NO universal
+ *        sum equality: active_runtime_ms + waiting_ms == t_last - t_firstPhase
+ *        holds ONLY on streams where the phase machine is open over the whole
+ *        reference span. Milliseconds during which NO phase is open (phase is
+ *        null) are attributed NOWHERE, by design of the machine, and appear as
+ *        a residual between the attributed sum and the wall-clock span.
+ *        Counterexample shapes that legitimately produce a residual:
+ *        (i) a terminal event (run_complete closes and clears the phase) followed
+ *            by a phase-opening event (status_change) with a null-phase window
+ *            between them — the window is unattributed;
+ *        (ii) T13, the stored stream of job 312b6a in this file: the first
+ *            run_complete (t=1782174057770) precedes the next status_change
+ *            (t=1782174057928) by 158 ms of null phase, so span 73,615,823 minus
+ *            attributed 4,380 + 73,611,285 leaves a residual of exactly 158 ms.
+ *        The reference span deliberately does NOT use the stored elapsed_ms:
+ *        elapsed_ms is overwritten per run_complete
+ *        (`elapsedMs = Math.round(event.elapsed_s * 1000)`) and is incoherent on
+ *        multi-round streams (out of scope, SPECIALISTS-94.8/108).
+ *   (I1-FLUSH) FLUSH TARGET (implemented reference point): the post-loop flush
+ *        closes a still-open phase at the last event of ANY type
+ *        (`closePhase(events[events.length - 1].t)`,
+ *        src/specialist/observability-sqlite.ts:3069-3077) — NOT at the last
+ *        PHASE-RELEVANT event the contract's I1 is stated against. The two
+ *        reference points diverge whenever trailing non-phase events (meta,
+ *        tool, text, status-load evidence, …) follow the last phase transition.
+ *        Worked example: act:00b4a5f9-f6d carries a single trailing
+ *        meta/status_reconciled row after its last phase event, contributing
+ *        +27,486,449 ms (+7.6351 h) to waiting_ms that the phase-relevant
+ *        reference point would exclude. The bucket is correct by the phase
+ *        machine's own definition — the phase was genuinely open across that
+ *        trailing silence, and no interval is lost or duplicated — but the
+ *        policy (an abandoned activation's trailing silence accrues to the open
+ *        phase's bucket up to the last event of any type) is a decided but
+ *        UNDOCUMENTED behaviour: it is recorded here, not decided here, and the
+ *        product decision itself is owned elsewhere. Do NOT "fix" the flush
+ *        target or reverse the policy in this file; behaviour is frozen.
  *   (I2) ROUTE: a span opened by run_start / status_change{running} lands in
  *        active_runtime_ms; a span opened by status_change{waiting} lands in
  *        waiting_ms.

@@ -20,12 +20,16 @@ Every lane ran read-only. No lane modified the git tree.
 Four of ten lanes, from four different starting points, found the same failure shape: **a reader or classifier
 exists, the producer or mapping does not, and nothing errors.**
 
-| Signal | Mechanism | Measured consequence |
-|---|---|---|
-| `xtrm_llm_tokens_total` | reader reads flat keys; the writer nests under `token_usage` | **0 series**, 748/748 rows confirm the shape (`coordinator/T0c`) |
-| `settlement_*` (10 names, 19 sites) | `mapNativeLifecycleEvent` `default: return null` | **0 durable rows**; degradation was stderr-only |
-| `stale_warning` (native) | `createStaleWarningEvent` has no call site outside `supervisor.ts` | native `stall_gaps_json` is unconditionally empty |
-| `model_fallback` (5 sites) | no mapper arm, absent from both gap lists | silently discarded |
+**CORRECTION 2026-09-17 — every row below is now closed (living document; the original
+measurement is preserved in the lane artifacts).** The silent-absence shape was real at
+measurement time, and all four holes have since been fixed in source:
+
+| Signal | Mechanism (at measurement) | Measured consequence (at measurement) | Status at `6530c226` |
+|---|---|---|---|
+| `xtrm_llm_tokens_total` | reader reads flat keys; the writer nests under `token_usage` | **0 series**, 748/748 rows confirm the shape (`coordinator/T0c`) | CLOSED by PR #377: the reader resolves nested `token_usage` first with flat fallback (`prometheus-projection.ts:442-458`) |
+| `settlement_*` (10 names, 19 sites) | `mapNativeLifecycleEvent` `default: return null` | **0 durable rows**; degradation was stderr-only | CLOSED by PR #382 (mapper totality): each name has its own arm (`native-activation-observability.ts:407-455`) |
+| `stale_warning` (native) | `createStaleWarningEvent` has no call site outside `supervisor.ts` | native `stall_gaps_json` is unconditionally empty | CLOSED by SPECIALISTS-102 / PR #387: the tool-duration checker emits object-form `name: 'stale_warning'` (`native-host.ts:2146`), persisted by the mapper (`native-activation-observability.ts:473-482`) |
+| `model_fallback` (5 sites) | no mapper arm, absent from both gap lists | silently discarded | CLOSED by PR #382 (arm) + PR #384 (diagnostics): maps to `model.changed` preserving all seven diagnostic keys (`native-activation-observability.ts:390-405`) |
 
 Plus, from the taxonomy lane, the generalised count: of **40 emitted lifecycle/settlement names**, only 9 have
 mapper arms; **18 of the 33 unmapped names are absent from both explicit gap lists**
@@ -33,8 +37,9 @@ mapper arms; **18 of the 33 unmapped names are absent from both explicit gap lis
 
 **Why this is the governing finding:** it is invisible to differential testing. Running legacy and native side
 by side yields "both empty", which reads as parity. A parity harness cannot detect a signal that neither
-engine produces. Any N3 acceptance criterion built only on cross-engine comparison will therefore pass while
-these four holes remain open.
+engine produces. Any N3 acceptance criterion built only on cross-engine comparison would therefore have
+passed while these four holes were open — all four are now closed (see the correction above), so this
+paragraph is the historical rationale for the mapper-totality work, not a current defect list.
 
 ## 2. Classification, recomputed
 
@@ -57,6 +62,16 @@ The audit's historical headline was 108 signals / 53 parity / 49 gaps / 13 block
 **Those numbers are not comparable to this table** and should not be quoted together: the audit counted signal
 *rows* across all lanes including metrics and CLI surfaces, whereas this table counts canonical *event names*.
 What can be compared is which specific claims survived, and §4 lists the ones that did not.
+
+**CORRECTION 2026-09-17 — this table predates PRs #382, #387 and #388 and is not recounted here
+(a full 64-name recount is explicitly out of scope).** Known direction of movement since measurement:
+PR #382 (mapper totality) converted the 18 undocumented silent drops into mapped arms (settlement_* ×10,
+`model_fallback`, `activation_retried`, `lease_release_failed`, `mandatory_rules_injection`,
+`tool_contract_unsatisfied_on_fallback`, extension_* ×3 deliberately unpersisted) plus a test-time
+totality obligation, so `NATIVE_GAP` rows of that shape are now mapped or deliberately absent;
+PR #387 added the native `tool_duration` stale-warning producer and mapper arm; PR #388 mapped
+`activation_resumed` to `status_change('running','waiting')` and added the post-loop phase flush.
+Quote the counts above only with this correction attached.
 
 ## 3. Verified defects, with the acceptance consequence of each
 
@@ -90,6 +105,13 @@ feeds `elapsed_ms` only. Any phase open when the stream ends is lost from **both
 clock" is satisfied *by the defect*, because dropping intervals can only shrink the sum. Corrected in the
 parent contract at revision 3. Evidence: `coordinator/T0e-phase-flush.md`.
 
+**CORRECTION 2026-09-17 — CLOSED by PR #388 (SPECIALISTS-106, Lane D).** The post-loop flush ships:
+a phase still open at end-of-stream is closed at the last event's t (`observability-sqlite.ts:3069-3077`),
+landing in the bucket named by the actually-open phase. The present-tense "silently drops" above is
+HISTORICAL. Residual semantics — the flush target is the last event of ANY type (not the last
+phase-relevant event), and null-phase windows stay unattributed — are documented in
+`tests/unit/specialist/phase-accounting-invariant.test.ts` (I1-FLUSH).
+
 ### 3.4 The extension telemetry surface does not exist
 
 `extension_discovery_sessions`, `extension_tools_discovered` and `extension_tools_refused` are emitted
@@ -100,12 +122,23 @@ The brief's §14 requirement that these "must **remain** distinguishable" presum
 is none; that node is a design decision, not a compatibility question. Evidence:
 `coordinator/T0f-extension-telemetry-absent.md`.
 
-### 3.5 Resume and retry are indistinguishable in native telemetry
+### 3.5 Resume and retry are distinguishable in native telemetry (corrected 2026-09-17)
 
-`nextAttemptId` is called on both paths (`native-host.ts:2383` and `:2726`); `activation_resumed` has no mapper
-arm; `activation_retried` has none either. An operator watching `att:X:1 → att:X:2` cannot tell which happened.
-**The brief's §11 list is therefore unsatisfiable as written** — it requires `resumed` and `retrying` as
-distinct covered states, and the two signals carrying that distinction are the two that are dropped.
+**CORRECTION — the indistinguishable verdict below is HISTORICAL.** `activation_resumed` gained a mapper
+arm in PR #388 (`native-activation-observability.ts:320-327`, resume re-enters running as
+`status_change('running','waiting')`), and `activation_retried` has had one since PR #382: it shares the
+`control_signal` carrier with its own action name (`native-activation-observability.ts:373-380`, forensic
+`control.activation_retried.recorded`). A resume and a retry therefore leave distinct durable rows.
+Original measurement, preserved for the record:
+
+`nextAttemptId` was called on both paths (`native-host.ts:2383` and `:2726`); `activation_resumed` had no
+mapper arm; `activation_retried` had none either. An operator watching `att:X:1 → att:X:2` could not tell
+which happened. **The brief's §11 list was therefore judged unsatisfiable as written** — it requires
+`resumed` and `retrying` as distinct covered states, and the two signals carrying that distinction were
+the two that were dropped. (That judgment lapsed with the two mapper arms above.) The attempt-axis
+observation in §3.6 stands: both paths still advance `attempt_id` through the identical function, so the
+*attempt id alone* still does not distinguish them — the distinguishing signal is now the durable row,
+not the attempt id.
 
 ### 3.6 The attempt axis is not comparable across engines
 
@@ -166,9 +199,9 @@ This section is the point of the exercise. Each row is a plausible statement tha
 |---|---|---|---|
 | 1 | Rebuild `dist` in the **main checkout** (unitAI-1pqtl closeout) | Inverted. The main checkout is the **drifted** host; the lockfile defines the artifact | §3.7 |
 | 2 | `xtrm_llm_tokens_total` is per-turn for legacy, cumulative for native (audit TEL-D-014/C4) | The metric has **no series** for either engine. The proposed `aggregation` discriminator would not have fixed it | §3.2 |
-| 3 | `waiting_ms` **absorbs** the post-settle interval (brief §11) | Both intervals undercount when a phase is left open; there is no post-loop flush | §3.3 |
+| 3 | `waiting_ms` **absorbs** the post-settle interval (brief §11) | Both intervals undercount when a phase is left open; there is no post-loop flush — CORRECTED 2026-09-17: the flush ships (PR #388, `obs-sqlite:3069-3077`); this row is HISTORICAL | §3.3 |
 | 4 | `extension_discovery_sessions` exists and must be preserved (brief §14) | Nothing is persisted. Zero rows, no table, no writer | §3.4 |
-| 5 | `resumed` and `retrying` are distinct covered states (brief §11) | The distinguishing signals are both dropped; native resume ≡ retry | §3.5 |
+| 5 | `resumed` and `retrying` are distinct covered states (brief §11) | The distinguishing signals are both dropped; native resume ≡ retry — CORRECTED 2026-09-17: `activation_resumed` maps to running re-entry (PR #388) and `activation_retried` to `control.activation_retried.recorded` (PR #382); this row is HISTORICAL | §3.5 |
 | 6 | The counting divergence is *between* engines (`total_turns`, tokens) | The token defect is a **shared** reader bug: `NATIVE_GAP` **and** `LEGACY_GAP`, not a divergence | §3.2 |
 | 7 | Cardinality safeguards need preserving / "values are unchecked" (T8) | A 30-plus-name key denylist **already enforces** §19's rule. The residual is narrower: values are unbounded for a few allowlisted keys, and there is no series ceiling | `coordinator/T0d` |
 | 8 | Native performs **zero git invocations** → "no longer holds" (T6) | The claim **still holds**. What changed is that native *records* a caller-supplied `baseCommit` — recorded-as-data is not resolved-by-git | `coordinator/T0d` |

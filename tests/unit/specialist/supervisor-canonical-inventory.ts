@@ -189,9 +189,9 @@ export const SUPERVISOR_CANONICAL_INVENTORY: readonly CanonicalInventoryEntry[] 
     scenario: 'a stalled native activation emits a stall signal',
     signal: 'stale_warning (canonical process_health.stale_detected)',
     evidence: [
-      { side: 'native-producer', file: 'src/activation/native-host.ts', needle: "emit('stale_warning'" },
+      { side: 'native-producer', file: 'src/activation/native-host.ts', needle: "name: 'stale_warning'" },
     ],
-    gapRef: 'NATIVE_GAP (T4/T0d): createStaleWarningEvent has no call site outside supervisor.ts; native stall_gaps_json is unconditionally empty. Owned by SPECIALISTS-102; this durable proof FAILS until that node lands.',
+    gapRef: 'Fixed by SPECIALISTS-102 / PR #387 (was NATIVE_GAP T4/T0d: no native watchdog). The native producer is the tool-duration checker (checkToolDuration) emitting object-form name: \'stale_warning\' (native-host.ts:2146), and the mapper arm persists it (native-activation-observability.ts:473); stall_gaps_json aggregates tool_duration rows. The pre-fix gap text is HISTORICAL.',
     expectation: 'EXPECTED_DURABLE',
     durable: {
       via: 'native-lifecycle',
