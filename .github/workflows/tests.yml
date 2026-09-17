@@ -52,7 +52,7 @@ jobs:
           echo "This includes the quarantined tests/unit/specialist/supervisor.test.ts. The canonical N3 event-inventory oracle ALSO runs here as part of the default suite (defence in depth: an oracle failure reds this job too) and is enforced by the dedicated canonical-oracle job."
           echo "Quarantined suites excluded from this job: **$COUNT** ($COUNT121 SPECIALISTS-121, $COUNT9N93 unitAI-9n93)" >> "$GITHUB_STEP_SUMMARY"
 
-  # SPECIALISTS-118: the four bun:sqlite suites are excluded from vitest
+  # SPECIALISTS-118 / SPECIALISTS-120: the five bun:sqlite suites are excluded from vitest
   # (bun: protocol unsupported in Node; see vitest.config.ts) and run here via
   # `bun run test:bun`. Each file uses an isolated scratch store (tmpdir +
   # randomUUID), never the authoritative observability.db.
@@ -79,6 +79,7 @@ jobs:
           # count) covers every required file, and fails LOUD naming the file.
           REQUIRED_FILES=(
             tests/unit/specialist/observability-sqlite.test.ts
+            tests/unit/specialist/observability-sqlite-migration-v16.test.ts
             tests/unit/specialist/observability-sqlite-pr-refresh.test.ts
             tests/unit/specialist/observability-db.test.ts
             tests/unit/cli/db.test.ts
