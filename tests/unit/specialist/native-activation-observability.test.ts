@@ -306,16 +306,25 @@ describe('native activation observability parity', () => {
     expect(mapNativeLifecycleEvent(
       { ...lifecycleBase, name: 'activation_settled' }, lifecycleContext,
     )?.type).toBe('status_change');
+    // XTRM-93 N3: the resume boundary re-enters running (defect 2 fix).
+    expect(mapNativeLifecycleEvent(
+      { ...lifecycleBase, name: 'activation_resumed' }, lifecycleContext,
+    )).toMatchObject({ type: 'status_change', status: 'running' });
 
     expect(Object.keys(NATIVE_LIFECYCLE_OBSERVABILITY_GAPS)).toEqual(expect.arrayContaining([
       'activation_requested', 'step_contract_compiled', 'activation_admitted',
-      'activation_starting', 'activation_resumed', 'output_validation_started',
+      'activation_starting', 'output_validation_started',
       'output_validation_passed', 'output_validation_failed', 'activation_disposed',
       // lease_acquired, lease_denied, lease_uncertain and tool_blocked were listed here and
       // are now MAPPED as control_signal rows (unitAI-rrdnt.58): a blocked write has to leave
       // a durable trace, and "no legacy equivalent" makes them uncomparable rather than
       // unimportant. lease_released and lease_reconciled stay gaps — teardown of a lease that
+      // lease_released and lease_reconciled stay gaps — teardown of a lease that
       // was granted is already implied by the activation's terminal event.
+      // activation_resumed was listed here and is now MAPPED to status_change
+      // running (XTRM-93 N3): resume re-enters running, and the old "re-enters
+      // at turn_start" rationale was false for phase accounting — the
+      // accumulator's turn branch never touches phase.
       'lease_released', 'lease_reconciled',
       'clarification_requested', 'clarification_answered',
       'escalation_raised', 'escalation_resolved',

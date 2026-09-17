@@ -1134,9 +1134,15 @@ describe('observability-sqlite', () => {
       expect(metrics?.active_runtime_ms).toBe(80);
       expect(metrics?.waiting_ms).toBe(10);
       expect(metrics?.elapsed_ms).toBe(100);
-      // active + waiting <= elapsed: the gap between started_at_ms and the first run_start
-      // event is "startup" time, counted in elapsed but neither active nor waiting.
-      expect((metrics?.active_runtime_ms ?? 0) + (metrics?.waiting_ms ?? 0)).toBeLessThanOrEqual(metrics?.elapsed_ms ?? 0);
+      // XTRM-93 N3 (strengthened; was `active + waiting <= elapsed`): the phase
+      // partition is an equation, not an inequality. This stream is fully
+      // bracketed (run_start at 10, run_complete at 100), so the loop closes every
+      // phase and active + waiting covers the phase-relevant span exactly. The
+      // 10 ms before the first run_start is startup time BY DESIGN: it sits in
+      // neither bucket — the invariant span starts at the first phase-relevant
+      // event, not at the first event. The old inequality passed on code
+      // containing every defect in this contract and is kept nowhere as a guard.
+      expect((metrics?.active_runtime_ms ?? 0) + (metrics?.waiting_ms ?? 0)).toBe(100 - 10);
       expect(JSON.parse(metrics?.tool_call_counts_json ?? '{}')).toEqual({ bash: 2 });
       expect(JSON.parse(metrics?.token_trajectory_json ?? '[]')).toHaveLength(2);
       expect(JSON.parse(metrics?.context_trajectory_json ?? '[]')).toEqual([{ turn_index: 1, t: 70, context_pct: 25 }]);

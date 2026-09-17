@@ -3026,6 +3026,10 @@ class SqliteClient implements ObservabilitySqliteClient {
         }
 
         if (event.type === 'run_start') {
+          // A second run_start in the same stream (retry leg, native
+          // model-fallback re-emission) must attribute the prior attempt's open
+          // phase to its bucket — not silently discard it (XTRM-93 N3 defect 3).
+          closePhase(event.t);
           phase = 'running';
           phaseStartedAtMs = event.t;
           continue;
@@ -3060,6 +3064,16 @@ class SqliteClient implements ObservabilitySqliteClient {
         if (event.type === 'stale_warning' && event.reason === 'tool_duration') {
           stallGaps.push({ t: event.t, tool: event.tool ?? null, silence_ms: event.silence_ms, threshold_ms: event.threshold_ms });
         }
+      }
+
+      // Post-loop flush (XTRM-93 N3 defect 1): a phase still open at
+      // end-of-stream is real time the job spent running or waiting. Close it at
+      // the last event's t — the same target the completed_at_ms back-fill below
+      // uses — so no interval is silently dropped from BOTH buckets. The residual
+      // lands in the bucket named by the phase that was actually open; it is
+      // never dumped into waiting_ms by default (I2-ter).
+      if (events.length > 0) {
+        closePhase(events[events.length - 1]!.t);
       }
 
       if (startedAtMs !== null && completedAtMs === null) {

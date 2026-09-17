@@ -47,8 +47,8 @@ export interface NativeLifecycleProjectionContext {
  * vocabulary which Phase 7 removes.
  *
  * Two different debts live here — see the bead notes for the per-name accounting:
- * native-only concepts with no legacy equivalent (lease, interaction, validation,
- * resume — out of scope by NON_GOALS, "does not add event kinds beyond parity") and
+ * native-only concepts with no legacy equivalent (lease, interaction, validation
+ * — out of scope by NON_GOALS, "does not add event kinds beyond parity") and
  * translated aliases whose canonical producer is the raw Pi event stream.
  */
 export const NATIVE_LIFECYCLE_OBSERVABILITY_GAPS = Object.freeze({
@@ -56,7 +56,6 @@ export const NATIVE_LIFECYCLE_OBSERVABILITY_GAPS = Object.freeze({
   step_contract_compiled: 'Step-contract compilation has no legacy AgentSession event.',
   activation_admitted: 'Admission metadata has no legacy timeline event; identity is projected on specialist_jobs.',
   activation_starting: 'Session construction has no legacy timeline event; run_start follows once construction succeeds.',
-  activation_resumed: 'Resume-from-record has no legacy counterpart; the resumed run re-enters the shared stream at turn_start.',
   output_validation_started: 'Native result validation has no legacy timeline event kind.',
   output_validation_passed: 'Native result validation has no legacy timeline event kind.',
   output_validation_failed: 'Native result validation has no legacy timeline event kind; terminal failure is run_complete.',
@@ -318,6 +317,14 @@ export function mapNativeLifecycleEvent(
       }), t);
     case 'activation_settled':
       return at(createStatusChangeEvent('waiting', 'running'), t);
+    case 'activation_resumed':
+      // Resume re-enters RUNNING (XTRM-93 N3 defect 2): parity with the legacy
+      // handleResumeTurn, which emits status_change('running', previousStatus).
+      // The resumed leg is active time, not waiting time. turn_start does NOT do
+      // this — the accumulator's turn branch continues without touching phase —
+      // which is why the former GAPS rationale ("re-enters at turn_start") was
+      // wrong for phase accounting. Shared status_change vocabulary; no new kind.
+      return at(createStatusChangeEvent('running', 'waiting'), t);
     case 'activation_completed':
       return at(createRunCompleteEvent('COMPLETE', Math.max(0, t - context.startedAtMs) / 1_000, {
         model: context.resolvedModel,

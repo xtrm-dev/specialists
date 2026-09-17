@@ -27,8 +27,8 @@ export interface NativeLifecycleProjectionContext {
  * vocabulary which Phase 7 removes.
  *
  * Two different debts live here — see the bead notes for the per-name accounting:
- * native-only concepts with no legacy equivalent (lease, interaction, validation,
- * resume — out of scope by NON_GOALS, "does not add event kinds beyond parity") and
+ * native-only concepts with no legacy equivalent (lease, interaction, validation
+ * — out of scope by NON_GOALS, "does not add event kinds beyond parity") and
  * translated aliases whose canonical producer is the raw Pi event stream.
  */
 export declare const NATIVE_LIFECYCLE_OBSERVABILITY_GAPS: Readonly<{
@@ -36,7 +36,6 @@ export declare const NATIVE_LIFECYCLE_OBSERVABILITY_GAPS: Readonly<{
     readonly step_contract_compiled: "Step-contract compilation has no legacy AgentSession event.";
     readonly activation_admitted: "Admission metadata has no legacy timeline event; identity is projected on specialist_jobs.";
     readonly activation_starting: "Session construction has no legacy timeline event; run_start follows once construction succeeds.";
-    readonly activation_resumed: "Resume-from-record has no legacy counterpart; the resumed run re-enters the shared stream at turn_start.";
     readonly output_validation_started: "Native result validation has no legacy timeline event kind.";
     readonly output_validation_passed: "Native result validation has no legacy timeline event kind.";
     readonly output_validation_failed: "Native result validation has no legacy timeline event kind; terminal failure is run_complete.";
