@@ -1457,16 +1457,20 @@ export class PiAgentSession {
   /**
    * Capture Pi's terminal session totals at settlement (SPECIALISTS-120 criterion 3).
    *
-   * Called from `waitForDone()` — i.e. after `agent_end` and BEFORE the runner closes the
-   * process — so the snapshot describes the run that just finished rather than an empty
-   * session. Bounded by `sessionStatsTimeoutMs`: a Pi that never answers costs the run that
-   * wait and nothing more, and the failure is recorded as an explicit event instead of
-   * silently producing a run with no session totals.
+   * EXPLICIT settlement step, deliberately NOT part of `waitForDone`: the run boundary and
+   * the telemetry capture are different concerns and a caller may want the boundary without
+   * the extra RPC. The runner calls this between `waitForDone()` and `close()`, so the
+   * snapshot describes the run that just finished rather than an empty session, and it is
+   * persisted before the Pi process exits.
+   *
+   * Bounded by `sessionStatsTimeoutMs`: a Pi that never answers costs the run that wait and
+   * nothing more, and the failure is recorded as an explicit event instead of silently
+   * producing a run with no session totals.
    *
    * Recorded on the live child ONLY when it is still reachable. A killed or exited process
    * cannot answer, and asking would burn the full timeout on every failed run.
    */
-  private async _captureSessionStats(): Promise<void> {
+  async captureSessionStats(): Promise<void> {
     if (this._sessionStatsCaptured) return;
     this._sessionStatsCaptured = true;
 
@@ -1822,21 +1826,13 @@ export class PiAgentSession {
    */
   async waitForDone(timeout?: number): Promise<void> {
     const donePromise = this._donePromise ?? Promise.resolve();
-    if (timeout) {
-      await Promise.race([
-        donePromise,
-        new Promise<void>((_, reject) =>
-          setTimeout(() => reject(new Error(`Specialist timed out after ${timeout}ms`)), timeout)
-        ),
-      ]);
-    } else {
-      await donePromise;
-    }
-    // Settlement telemetry is captured HERE, after the run boundary and before the caller
-    // reads metrics or closes the process (SPECIALISTS-120 criterion 3). Awaiting it is safe
-    // only because the capture is bounded and records its own failure — it can delay
-    // settlement by at most `sessionStatsTimeoutMs`, and never blocks it.
-    await this._captureSessionStats();
+    if (!timeout) return donePromise;
+    return Promise.race([
+      donePromise,
+      new Promise<void>((_, reject) =>
+        setTimeout(() => reject(new Error(`Specialist timed out after ${timeout}ms`)), timeout)
+      ),
+    ]);
   }
 
   /**
