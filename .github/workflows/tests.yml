@@ -5,9 +5,10 @@ permissions:
 
 # The suite is the merge gate.
 #
-# Deliberately unfiltered: every other workflow here is path-scoped, and the only
-# vitest call in CI (telemetry-contract.yml) names six files. A pull request that
-# touched none of them ran no tests at all. See bead xtrm-wiy5n.4.26.
+# Deliberately unfiltered: every other workflow here is path-scoped, and the
+# telemetry-contract gate (telemetry-contract.yml) invokes five test files
+# (four via vitest, one via bun test). A pull request that touched none of
+# them ran no tests at all. See bead xtrm-wiy5n.4.26.
 
 on:
   pull_request:
