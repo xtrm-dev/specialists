@@ -287,3 +287,25 @@ established".
 Consistent with the above and with T0b/T2: native leaves no durable branch/HEAD pin, no PR drift, no
 auto-commit, no normalised test evidence and no reviewer-verdict events. Legacy carries all of them. The one
 native addition is the optional recorded base commit described above.
+
+## Correction note (2026-09-17, Lane D documentation closeout)
+
+Point-in-time artifact: the text above is PRESERVED verbatim as the verification record. The
+following claims are SUPERSEDED by shipped source at `6530c226`; do not quote them as current.
+
+- "Verified: native resume and native retry are indistinguishable in telemetry" (lines 228–231:
+  "`activation_resumed` appears **only in the gap list** ... it has no mapper case arm", and
+  "`activation_retried` does **not appear in the mapper at all**") — SUPERSEDED on both counts.
+  `activation_resumed` maps to `status_change('running','waiting')`
+  (`src/specialist/native-activation-observability.ts:320-327`, PR #388), and `activation_retried`
+  shares the `control_signal` carrier under its own action name
+  (`src/specialist/native-activation-observability.ts:373-380`, PR #382 / SPECIALISTS-101). A resume
+  and a retry leave distinct durable rows. The §11-unsatisfiable consequence drawn from the old
+  premise lapses with it; the attempt-axis observation (§3.6 of the N3 README — both paths still
+  advance `attempt_id` through the identical function) stands.
+
+- Additionally found in this file, same subject (line 212: "all three extension signals are emitted
+  and silently discarded") — SUPERSEDED as a defect description by PR #382 (operator ruling): the
+  absence is now DELIBERATE, proven by `NATIVE_LIFECYCLE_DELIBERATELY_UNPERSISTED`, not by silence
+  (see the `extension-discovery-evidence` inventory entry). Creating an extension telemetry
+  surface remains a deferred design decision, not a silent drop.

@@ -319,7 +319,6 @@ describe('native activation observability parity', () => {
       // are now MAPPED as control_signal rows (unitAI-rrdnt.58): a blocked write has to leave
       // a durable trace, and "no legacy equivalent" makes them uncomparable rather than
       // unimportant. lease_released and lease_reconciled stay gaps — teardown of a lease that
-      // lease_released and lease_reconciled stay gaps — teardown of a lease that
       // was granted is already implied by the activation's terminal event.
       // activation_resumed was listed here and is now MAPPED to status_change
       // running (XTRM-93 N3): resume re-enters running, and the old "re-enters
