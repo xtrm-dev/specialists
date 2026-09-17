@@ -3,6 +3,7 @@ import { mkdirSync, rmSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createSourceFile, flattenDiagnosticMessageText, getLeadingCommentRanges, getTrailingCommentRanges, ScriptTarget, SyntaxKind, type DiagnosticWithLocation, type Node } from 'typescript';
 import { createActivationForensicSink } from '../../../src/activation/forensic-sink.js';
 import {
   mapNativeLifecycleEvent,
@@ -23,32 +24,40 @@ import { createObservabilitySqliteClientAtPath } from '../../../src/specialist/o
  *
  * How the inventory is pinned to the sources: the `inventory matches emit sites`
  * test scans every `*.ts` file under `src/activation/` (derived by directory walk,
- * NOT a hard-coded file list) AFTER stripping line and block comments, and
+ * NOT a hard-coded file list) AFTER removing parser-derived line/block comment
+ * ranges using the installed TypeScript parser (no new dependency), and
  * recognises two literal shapes plus an explicit dynamic list:
  *   - call form: `emit('name', ...)` (any receiver, either quote style);
  *   - object form: `forensics.emit({ ..., name: 'name', ... })` — EVERY literal
  *     counts, including names never seen before;
  *   - dynamic form: ternary/computed emits (e.g. `emit(kind ? 'a' : 'b')`), each
- *     name enumerated explicitly in the test and probed over the stripped corpus.
+ *     name enumerated explicitly in the test and probed over the stripped corpus
+ *     as an exact quoted token, NOT verified as an emit argument.
  * A newly emitted literal name with no inventory entry fails the `missing`
- * assertion; an inventory entry whose every site was deleted or commented out
- * fails the `stale` assertion. A commented-out emit is INVISIBLE to this guard
- * by design — commenting out a real producer's only site turns the guard RED
- * (via `stale`), it does not silently stay green.
+ * assertion; a literal inventory entry with no remaining recognised source match
+ * fails the `stale` assertion. Comments are removed; parse errors fail closed with
+ * the file named. A comment alone cannot supply an emit match.
  *
  * WHAT THIS GUARD STILL CANNOT PROVE (read before citing it):
  *   - It cannot prove the producer RUNS. It enumerates source text, never executes
  *     a producer; a name with an emit site and a mapper arm may still never fire
- *     at runtime. The execution-backed canonical oracle
- *     (tests/unit/specialist/supervisor-canonical-proof.ts) proves mapped names
- *     persist, but it is manifest-driven (SUPERVISOR_CANONICAL_INVENTORY) and
- *     cannot enumerate new emits either.
+ *     at runtime. The enforcing execution-backed canonical oracle
+ *     (tests/unit/specialist/supervisor-canonical-oracle.test.ts, using
+ *     supervisor-canonical-proof.ts) checks the manifest's obligations, including
+ *     mapper/writer persistence; it is manifest-driven
+ *     (SUPERVISOR_CANONICAL_INVENTORY), not producer-enumerating, and a synthetic
+ *     sink emit there does not establish that a production producer runs.
  *   - It cannot see a name that appears ONLY inside a computed expression outside
  *     the enumerated dynamic list (e.g. a new ternary pair). New emits must use a
  *     literal call-form or object-form name to be enumerated.
- *   - It is a bounded regex over stripped source, not an AST walk: an unrelated
- *     `name: 'literal'` string in `src/activation/` would surface as `missing`
- *     (fail-closed triage, not silent escape).
+ *   - Dynamic exact-token probes can be satisfied by an unrelated string after
+ *     the actual dynamic emit disappears. They do not establish an emit site.
+ *   - This is bounded text matching, not an AST walk: unrelated `name: 'literal'`
+ *     properties or emit-shaped strings/templates can cause false matches (new
+ *     names fail `missing`; inventoried names can mask deletion). String, regex
+ *     and template literal contents remain text, not semantically resolved code.
+ *   - Parser traversal is ONLY for comment trivia, not emit detection, scope or
+ *     reachability. It rejects invalid TS instead of guessing regex vs division.
  *
  * Runtime safety is unchanged: the mapper's `default: return null` still drops unknown
  * names without crashing the writer. This guard is a TEST-time obligation, not a runtime throw.
@@ -139,59 +148,95 @@ function isMapped(name: string): boolean {
   return mapNativeLifecycleEvent(base(name), CONTEXT, 1000) !== null;
 }
 
-/**
- * Strip line comments and block comments while leaving string
- * literals (single, double, backtick) intact, so a commented-out emit cannot
- * satisfy the inventory and a `//` inside a string (e.g. a URL) cannot hide a
- * real emit on the same line. Newlines are preserved.
- *
- * SIMPLIFIED: single-pass lexer, not a parser — `${}` expressions inside
- * template literals are treated as opaque text. Upgrade when an emit site puts
- * a computed name inside a template expression.
- */
-function stripTypeScriptComments(text: string): string {
-  let out = '';
-  let i = 0;
-  const n = text.length;
-  let quote: string | null = null;
-  while (i < n) {
-    const ch = text[i]!;
-    const next = i + 1 < n ? text[i + 1]! : '';
-    if (quote !== null) {
-      out += ch;
-      if (ch === '\\' && i + 1 < n) {
-        out += next;
-        i += 2;
-        continue;
-      }
-      if (ch === quote) quote = null;
-      i++;
-      continue;
-    }
-    if (ch === "'" || ch === '"' || ch === '`') {
-      quote = ch;
-      out += ch;
-      i++;
-      continue;
-    }
-    if (ch === '/' && next === '/') {
-      while (i < n && text[i] !== '\n') i++;
-      continue;
-    }
-    if (ch === '/' && next === '*') {
-      i += 2;
-      while (i < n && !(text[i] === '*' && i + 1 < n && text[i + 1] === '/')) {
-        if (text[i] === '\n') out += '\n';
-        i++;
-      }
-      i += 2;
-      continue;
-    }
-    out += ch;
-    i++;
+/** Parser-derived trivia only: emit detection below remains bounded text matching. */
+function stripTypeScriptComments(text: string, file = '<source>'): string {
+  const source = createSourceFile(file, text, ScriptTarget.Latest);
+  // TypeScript exposes these at runtime but omits them from the public SourceFile type.
+  const { parseDiagnostics } = source as typeof source & { parseDiagnostics: readonly DiagnosticWithLocation[] };
+  if (!Array.isArray(parseDiagnostics) || parseDiagnostics.length > 0) {
+    throw new Error(`${file}: cannot scan unparsable TypeScript: ${parseDiagnostics?.map(
+      (diagnostic) => flattenDiagnosticMessageText(diagnostic.messageText, '\n'),
+    ).join('; ') ?? 'parse diagnostics unavailable'}`);
   }
-  return out;
+  const ranges = new Map<number, number>();
+  const collect = (node: Node): void => {
+    if (node.kind <= SyntaxKind.LastToken) {
+      // Token boundaries include EOF trivia; never probe within strings or regexes.
+      for (const range of [
+        ...getLeadingCommentRanges(text, node.pos) ?? [],
+        ...getTrailingCommentRanges(text, node.end) ?? [],
+      ]) ranges.set(range.pos, range.end);
+    } else {
+      for (const child of node.getChildren(source)) collect(child);
+    }
+  };
+  collect(source);
+  let out = '';
+  let end = 0;
+  for (const [start, next] of [...ranges].sort(([a], [b]) => a - b)) {
+    // Preserve separation and line breaks: comments must not fuse two tokens.
+    out += text.slice(end, start) + text.slice(start, next).replace(/[^\r\n]/g, ' ');
+    end = next;
+  }
+  return out + text.slice(end);
 }
+
+describe('source comment stripping (SPECIALISTS-111 regression)', () => {
+  it.each([
+    ['EOF line comment', `emit('real'); // emit('ghost')`],
+    ['EOF block comment', `emit('real'); /* emit('ghost') */`],
+    ['leading comments', `// emit('ghost')\n/* emit('ghost') */ emit('real');`],
+    ['template interpolation comments', "const s = `${/* emit('ghost') */ 1}`; emit('real');"],
+  ])('removes %s', (_label, source) => {
+    const stripped = stripTypeScriptComments(source);
+    expect(stripped).not.toContain('ghost');
+    expect(stripped).toContain("emit('real')");
+  });
+
+  it('preserves token separation and newlines', () => {
+    expect(stripTypeScriptComments('const/* gap */name = 1; /*\n gap\n*/'))
+      .toBe('const         name = 1;   \n    \n  ');
+  });
+
+  it('fails closed on parse errors with the source file named', () => {
+    expect(() => stripTypeScriptComments("const re = /unterminated; emit('ghost');", 'broken.ts'))
+      .toThrow(/broken\.ts: cannot scan unparsable TypeScript/);
+  });
+
+  it.each([
+    ['double quote / line comment', `const re = /a"b/; const s = "resync"; // emit('ghost')\nemit('real');`],
+    ['double quote / block comment', `const re = /a"b/; const s = "resync"; /* emit('ghost') */\nemit('real');`],
+    ['single quote / line comment', `const re = /a'b/; const s = 'resync'; // emit('ghost')\nemit('real');`],
+    ['single quote / block comment', `const re = /a'b/; const s = 'resync'; /* emit('ghost') */\nemit('real');`],
+    ['escaped quote', String.raw`const re = /a\"b/; const s = "resync"; /* emit('ghost') */ emit('real');`],
+    ['backtick', 'const re = /a`b/; const s = `resync`; /* emit(\'ghost\') */ emit(\'real\');'],
+    ['line delimiter in regex class', `const re = /[//]/; emit('real'); // emit('ghost')`],
+    ['block delimiter in regex class', `const re = /[/*]/; emit('real'); // emit('ghost')`],
+  ])('removes comment ghosts after regex literals: %s', (_label, source) => {
+    // Exercise the actual helper used by the corpus scan, not a copied scanner.
+    const stripped = stripTypeScriptComments(source);
+    expect(stripped).not.toContain('ghost');
+    expect(stripped).toContain("emit('real')");
+  });
+
+  it.each([
+    ['ordinary strings and URL', `const s = 'ordinary'; const url = "https://example.test/a";`],
+    ['escaped quotes', String.raw`const s = 'it\'s // text'; const t = "a\"b /* text */";`],
+    ['escaped slash regex', String.raw`const re = /a\/b/g;`],
+    ['slash in regex class', `const re = /[/]/;`],
+    ['division', `const n = total / 2;`],
+    ['division then string', `const n = total / 2; const s = "ordinary";`],
+    ['chained division', `const n = total / width / height;`],
+    ['ordinary template', 'const s = `https://example.test/`;'],
+  ])('preserves live emits and removes comment ghosts after %s', (_label, prefix) => {
+    const source = `${prefix} /* emit('block_ghost') */ emit('real'); // emit('line_ghost')\n`;
+    const stripped = stripTypeScriptComments(source);
+    expect(stripped).toContain(prefix);
+    expect(stripped).toContain("emit('real')");
+    expect(stripped).not.toContain('block_ghost');
+    expect(stripped).not.toContain('line_ghost');
+  });
+});
 
 /** Every TypeScript source under a directory, sorted, so a new file cannot escape the scan. */
 function listTypeScriptSources(dir: string): string[] {
@@ -234,7 +279,7 @@ describe('native mapper totality (SPECIALISTS-101)', () => {
     // Comments are stripped BEFORE scanning: an emit that survives only inside a
     // comment is invisible here, so commenting out a real producer's only site
     // fails `stale` instead of staying green.
-    const stripped = sources.map((file) => stripTypeScriptComments(readFileSync(file, 'utf-8')));
+    const stripped = sources.map((file) => stripTypeScriptComments(readFileSync(file, 'utf-8'), file));
     const corpus = stripped.join('\n');
     const found = new Set<string>();
     for (const text of stripped) {
