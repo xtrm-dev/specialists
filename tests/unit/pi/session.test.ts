@@ -1326,6 +1326,143 @@ describe('sendCommand — concurrent dispatch', () => {
     expect(metrics.token_usage?.usage_source).toBe('provider_usage');
   });
 
+  // ── SPECIALISTS-120: verbatim usage + settlement session stats ───────────────
+
+  it('persists a provider Usage verbatim on message_end, including cacheWrite1h and cost', async () => {
+    const onMetric = vi.fn();
+    const session = await PiAgentSession.create({ model: 'gemini', onMetric });
+    await session.start();
+
+    // Anthropic-shaped usage: `cacheWrite1h` and the cost breakdown exist only on some providers.
+    emitLine(fake, {
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        usage: {
+          input: 100,
+          output: 50,
+          cacheRead: 1000,
+          cacheWrite: 2000,
+          cacheWrite1h: 1500,
+          reasoning: 30,
+          totalTokens: 3150,
+          cost: { input: 0.001, output: 0.002, cacheRead: 0.003, cacheWrite: 0.004, total: 0.01 },
+        },
+      },
+    });
+
+    const usageEvent = onMetric.mock.calls.map((c: any[]) => c[0]).find((e: any) => e?.type === 'token_usage');
+    expect(usageEvent, 'a token_usage metric event must be emitted for the message').toBeDefined();
+    expect(usageEvent.token_usage.usage_source).toBe('provider_usage');
+    expect(usageEvent.token_usage.cache_write_1h_tokens).toBe(1500);
+    expect(usageEvent.token_usage.cost).toEqual({ input: 0.001, output: 0.002, cacheRead: 0.003, cacheWrite: 0.004, total: 0.01 });
+    expect(usageEvent.token_usage.pi_usage).toMatchObject({ cacheWrite1h: 1500, totalTokens: 3150 });
+  });
+
+  it('labels usage unknown, not provider_usage, when the event carries no usage field', async () => {
+    const onMetric = vi.fn();
+    const session = await PiAgentSession.create({ model: 'gemini', onMetric });
+    await session.start();
+
+    // Bare counters on the event record, no `usage` object: nothing here is a provider report.
+    emitLine(fake, { type: 'agent_end', input_tokens: 11, output_tokens: 4, messages: [] });
+
+    const usageEvent = onMetric.mock.calls.map((c: any[]) => c[0]).find((e: any) => e?.type === 'token_usage');
+    expect(usageEvent?.token_usage.usage_source).toBe('unknown');
+  });
+
+  it('records compaction estimatedTokensAfter and the summarization usage (Pi 0.85.1 spelling)', async () => {
+    const onMetric = vi.fn();
+    const onEvent = vi.fn();
+    const session = await PiAgentSession.create({ model: 'gemini', onMetric, onEvent });
+    await session.start();
+
+    emitLine(fake, {
+      type: 'compaction_end',
+      reason: 'threshold',
+      aborted: false,
+      willRetry: false,
+      result: {
+        summary: 'summary text',
+        firstKeptEntryId: 'entry-7',
+        tokensBefore: 150000,
+        estimatedTokensAfter: 32000,
+        usage: { input: 32000, output: 1200, cacheRead: 0, cacheWrite: 0, totalTokens: 33200, cost: { total: 0.02 } },
+      },
+    });
+
+    const compactionMetric = onMetric.mock.calls.map((c: any[]) => c[0]).find((e: any) => e?.type === 'compaction');
+    expect(compactionMetric?.phase).toBe('end');
+    expect(compactionMetric?.tokensBefore).toBe(150000);
+    expect(compactionMetric?.estimatedTokensAfter).toBe(32000);
+    expect(compactionMetric?.token_usage?.total_tokens).toBe(33200);
+    // The internal vocabulary is preserved for existing readers.
+    expect(onEvent.mock.calls.map((c: any[]) => c[0])).toContain('auto_compaction_end');
+  });
+
+  it('captureSessionStats records Pi session totals and reconciles them against summed usage', async () => {
+    const onMetric = vi.fn();
+    const session = await PiAgentSession.create({ model: 'gemini', onMetric });
+    await session.start();
+
+    emitLine(fake, {
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        usage: { input: 2142, output: 16, cacheRead: 0, cacheWrite: 0, reasoning: 12, totalTokens: 2158, cost: { total: 0.00016465 } },
+      },
+    });
+    // The harness answers get_session_stats with the same numbers Pi reported per message.
+    fake.sessionStatsResponder = () => ({
+      sessionId: 'sess-live',
+      userMessages: 1,
+      assistantMessages: 1,
+      totalMessages: 2,
+      tokens: { input: 2142, output: 16, cacheRead: 0, cacheWrite: 0, total: 2158 },
+      cost: 0.00016465,
+      contextUsage: { tokens: 2158, contextWindow: 1000000, percent: 0.2158 },
+    });
+
+    await expect(session.captureSessionStats()).resolves.toBeUndefined();
+
+    const statsEvent = onMetric.mock.calls.map((c: any[]) => c[0]).find((e: any) => e?.type === 'session_stats');
+    expect(statsEvent?.session_stats?.tokens?.total).toBe(2158);
+    expect(statsEvent?.session_stats?.contextUsage?.percent).toBe(0.2158);
+
+    const metrics = session.getMetrics();
+    expect(metrics.session_stats?.cost).toBe(0.00016465);
+    expect(metrics.reconciliation?.reconciled).toBe(true);
+    expect(metrics.reconciliation?.fields.total).toEqual({ summed: 2158, session_stats: 2158, delta: 0 });
+  });
+
+  it('captureSessionStats records a failure event on timeout and never throws', async () => {
+    const onMetric = vi.fn();
+    // Pi stays silent: the RPC command is written but never answered.
+    fake.sessionStatsResponder = null;
+    const session = await PiAgentSession.create({ model: 'gemini', onMetric, sessionStatsTimeoutMs: 30 });
+    await session.start();
+
+    await expect(session.captureSessionStats()).resolves.toBeUndefined();
+
+    const failure = onMetric.mock.calls.map((c: any[]) => c[0]).find((e: any) => e?.type === 'session_stats_error');
+    expect(failure, 'a session_stats_error event must be emitted').toBeDefined();
+    expect(failure.errorMessage).toMatch(/timeout/i);
+    expect(failure.timeoutMs).toBe(30);
+    expect(session.getMetrics().session_stats_error).toMatch(/timeout/i);
+    expect(session.getMetrics().session_stats).toBeUndefined();
+  });
+
+  it('captureSessionStats is idempotent: repeated callers share one snapshot per turn', async () => {
+    const onMetric = vi.fn();
+    const session = await PiAgentSession.create({ model: 'gemini', onMetric });
+    await session.start();
+
+    await session.captureSessionStats();
+    await session.captureSessionStats();
+    await session.captureSessionStats();
+    expect(onMetric.mock.calls.map((c: any[]) => c[0]).filter((e: any) => e?.type === 'session_stats')).toHaveLength(1);
+  });
+
   it('auto_compaction_start and auto_compaction_end both fire onEvent("auto_compaction")', async () => {
     const onEvent = vi.fn();
     const session = await PiAgentSession.create({ model: 'gemini', onEvent });
