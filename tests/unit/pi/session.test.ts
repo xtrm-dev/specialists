@@ -16,6 +16,7 @@ import { PiAgentSession, StallTimeoutError, applyExtensionToolPolicyGate, dedupl
 import { __resetPiExtensionsPythonKernelPathCacheForTest } from '../../../src/pi/python-kernel-extension.js';
 import { catalogVersion } from '../../utils/catalog-pin.js';
 import { getExtensionToolPolicyExtensionPath, NATIVE_TOOLS_ENV_KEY } from '../../../src/pi/extension-tool-policy-extension.js';
+import { SESSION_STATS_TIMEOUT_MS } from '../../../src/specialist/session-metrics-contract.js';
 
 const mockSpawn = spawn as ReturnType<typeof vi.fn>;
 const mockExecFileSync = execFileSync as ReturnType<typeof vi.fn>;
@@ -1482,6 +1483,37 @@ describe('sendCommand — concurrent dispatch', () => {
     expect(statsEvent, 'waitForDone() must capture the terminal session stats').toBeDefined();
     expect(statsEvent.session_stats?.sessionId).toBe('sess-fake');
     expect(session.getMetrics().session_stats?.sessionId).toBe('sess-fake');
+  });
+
+  // SPECIALISTS-120 validation 4, through the boundary: the settlement capture is bounded by
+  // the session's own bound, so a Pi that never answers get_session_stats costs the run that
+  // wait and nothing more — the run still settles, and the failure is explicit, not a run
+  // that silently looks like it had no session totals.
+  it('a silent Pi cannot hang settlement: waitForDone resolves with an explicit session_stats_error', async () => {
+    const onMetric = vi.fn();
+    // Pi stays silent: the get_session_stats RPC is written but never answered.
+    fake.sessionStatsResponder = null;
+    const session = await PiAgentSession.create({ model: 'gemini', onMetric, sessionStatsTimeoutMs: 30 });
+    await session.start();
+
+    const promptP = session.prompt('do work');
+    emitLine(fake, { type: 'response', id: 1, success: true });
+    await promptP;
+    emitLine(fake, { type: 'agent_end', messages: [] });
+
+    // The wait is the INJECTED bound (30ms), not the 5s default: settlement must cost the
+    // bound and nothing more, so this stays provable even if the shared constant is raised.
+    const started = Date.now();
+    await expect(session.waitForDone()).resolves.toBeUndefined();
+    expect(Date.now() - started).toBeLessThan(SESSION_STATS_TIMEOUT_MS);
+
+    const failure = onMetric.mock.calls.map((c: any[]) => c[0]).find((e: any) => e?.type === 'session_stats_error');
+    expect(failure, 'the settlement failure must be an explicit event, not silence').toBeDefined();
+    expect(failure.source).toBe('settlement');
+    expect(failure.timeoutMs).toBe(30);
+    expect(failure.errorMessage).toMatch(/timeout/i);
+    expect(session.getMetrics().session_stats_error).toMatch(/timeout/i);
+    expect(session.getMetrics().session_stats).toBeUndefined();
   });
 
   it('waitForDone that times out does not capture: a killed run has no session to ask', async () => {
