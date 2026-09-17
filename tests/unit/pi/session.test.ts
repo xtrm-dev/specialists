@@ -1463,6 +1463,41 @@ describe('sendCommand — concurrent dispatch', () => {
     expect(onMetric.mock.calls.map((c: any[]) => c[0]).filter((e: any) => e?.type === 'session_stats')).toHaveLength(1);
   });
 
+  it('waitForDone captures the settlement snapshot, so every caller of the boundary is covered', async () => {
+    const onMetric = vi.fn();
+    const session = await PiAgentSession.create({ model: 'gemini', onMetric });
+    await session.start();
+
+    const promptP = session.prompt('do work');
+    emitLine(fake, { type: 'response', id: 1, success: true });
+    await promptP;
+    emitLine(fake, { type: 'agent_end', messages: [] });
+
+    // No explicit capture call anywhere: the run boundary itself must ask Pi for its totals.
+    // This is what keeps the terminal snapshot for script-class runs, which only ever call
+    // waitForDone() (legacy `sp` script jobs).
+    await expect(session.waitForDone()).resolves.toBeUndefined();
+
+    const statsEvent = onMetric.mock.calls.map((c: any[]) => c[0]).find((e: any) => e?.type === 'session_stats');
+    expect(statsEvent, 'waitForDone() must capture the terminal session stats').toBeDefined();
+    expect(statsEvent.session_stats?.sessionId).toBe('sess-fake');
+    expect(session.getMetrics().session_stats?.sessionId).toBe('sess-fake');
+  });
+
+  it('waitForDone that times out does not capture: a killed run has no session to ask', async () => {
+    const onMetric = vi.fn();
+    const session = await PiAgentSession.create({ model: 'gemini', onMetric });
+    await session.start();
+
+    // agent_end never fires, so the boundary rejects and the capture is skipped.
+    await expect(session.waitForDone(20)).rejects.toThrow(/timed out after 20ms/i);
+
+    const metricTypes = onMetric.mock.calls.map((c: any[]) => c[0]?.type);
+    expect(metricTypes).not.toContain('session_stats');
+    expect(metricTypes).not.toContain('session_stats_error');
+    expect(session.getMetrics().session_stats).toBeUndefined();
+  });
+
   it('auto_compaction_start and auto_compaction_end both fire onEvent("auto_compaction")', async () => {
     const onEvent = vi.fn();
     const session = await PiAgentSession.create({ model: 'gemini', onEvent });
