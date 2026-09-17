@@ -1,5 +1,6 @@
-import type { PiAgentSessionEvent } from '../activation/pi-sdk.js';
+import type { PiAgentSessionEvent, PiAgentSessionLike } from '../activation/pi-sdk.js';
 import { type TimelineEvent, type TimelineTokenUsage } from './timeline-events.js';
+import { type PiSessionStats } from './session-metrics-contract.js';
 export interface NativeLifecycleEvent {
     activationId: string;
     specialist: string;
@@ -18,6 +19,10 @@ export interface NativeLifecycleProjectionContext {
     turns?: number;
     autoRetries?: number;
     autoCompactions?: number;
+    /** Pi's terminal session snapshot, when the settlement capture succeeded. */
+    sessionStats?: PiSessionStats;
+    /** Pi version recorded for this run (binary on PATH or resolved SDK package). */
+    piVersion?: string;
 }
 /**
  * Native host lifecycle signals with no legacy timeline counterpart.
@@ -86,30 +91,67 @@ export declare const NATIVE_LIFECYCLE_DELIBERATELY_UNPERSISTED: Readonly<{
     readonly extension_tools_discovered: "Emit site src/activation/native-host.ts emits the pinned extension tool list; no extension telemetry surface exists (no table/column/writer) and the operator ruled extension resolution out of scope for this migration, so creating one is deferred. Absence is explicit, not silent.";
     readonly extension_tools_refused: "Emit site src/activation/native-host.ts emits refused extension tools (collisions/provenance); no extension telemetry surface exists (no table/column/writer) and the operator ruled extension resolution out of scope for this migration, so creating one is deferred. The admission verdict persists on the session; the audit trail does not.";
 }>;
-/** Canonical reader for the nested message.usage short-key shape Pi session events carry. */
-export declare function nativeSessionTokenUsage(event: PiAgentSessionEvent): TimelineTokenUsage | undefined;
-/** Per-message usage counter keys. `usage_source` is provenance, never a counter. */
-declare const USAGE_COUNTER_KEYS: readonly ["input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens", "reasoning_tokens", "tool_tokens", "total_tokens"];
 /**
- * Merge one message's usage into a running session total (unitAI-beqby.15).
+ * Canonical reader for the nested message.usage short-key shape Pi session events carry.
  *
- * Providers disagree on the shape: most emit per-message deltas (sum them), but at
- * least one route emits cumulative-per-message counters (summing those explodes the
- * total, replacing it flaps the row down). Decide per MESSAGE, not per key: the
- * message is cumulative only when every carried counter with history grew — one
- * reset counter proves fresh per-message counts and the whole message adds whole.
- * Zero/absent values carry no information and touch neither the total nor lastSeen,
- * so a zero-usage message can neither clear a total nor corrupt the next delta.
+ * SPECIALISTS-120: every provider-reported field survives — including Anthropic's
+ * `cacheWrite1h` and Pi's whole cost breakdown — and the raw object is kept verbatim under
+ * `pi_usage` alongside the normalized projection. Provenance is `provider_usage` because an
+ * `AgentMessage.usage` IS the provider's report; a message event with no `usage` field yields
+ * `undefined` rather than a zero-filled object that would read as a measurement.
  *
- * The result is monotonic non-decreasing per key on both shapes. Known ceiling: a
- * delta-shape message whose every counter happens to grow reads as cumulative and
- * adds only the growth — undercounts slightly, never flaps or explodes.
+ * Reads assistant AND toolResult messages: Pi's session totals include tool-reported usage, so
+ * a sum that skipped toolResult usage could never reconcile with Pi's session snapshot.
  */
-export declare function accumulateTokenUsage<T extends object>(prev: T | undefined, incoming: {
-    [K in (typeof USAGE_COUNTER_KEYS)[number]]?: number;
-} & {
-    usage_source?: unknown;
-}, lastSeen: Record<string, number>): T;
+export declare function nativeSessionTokenUsage(event: PiAgentSessionEvent): TimelineTokenUsage | undefined;
+/**
+ * The events that carry billable Pi usage (SPECIALISTS-120 F1).
+ *
+ * ONE rule, consulted by {@link nativeEventTokenUsage} and by the host accumulator's gate, so
+ * adding an event shape cannot silently update one runtime and not the other.
+ */
+export declare function isNativeUsageEvent(event: PiAgentSessionEvent): boolean;
+/**
+ * Read the billable usage off a native Pi session event (SPECIALISTS-120 F1).
+ *
+ * Two accumulators consume this reader — the host's live activation snapshot and the forensic
+ * sink's durable projection — and they own their state separately by design: the host holds
+ * the in-memory activation, the sink holds the persisted projection, and the sink must stay
+ * usable when fed raw events with no host (its tests and any offline replay do exactly that).
+ * What they must NEVER do is own different RULES, which is what made them disagree:
+ *
+ * - `message_end` carries an assistant or toolResult usage report.
+ * - `compaction_end` carries the summarization call's usage under `result.usage`. Pi bills and
+ *   counts that call in its session totals, and it never arrives as a message, so a rule that
+ *   only read `message_end` under-reported every compacted run and produced a `reconciled=false`
+ *   reconciliation whose delta was exactly the summarization call.
+ *
+ * Both shapes are read through the same canonical reader, so a provider field that survives on
+ * a message survives on a compaction summary too.
+ */
+export declare function nativeEventTokenUsage(event: PiAgentSessionEvent): TimelineTokenUsage | undefined;
+/**
+ * Capture Pi's terminal session stats at settlement (SPECIALISTS-120 criterion 3).
+ *
+ * The native host holds the `AgentSession` in-process, so there is no separate Pi process to
+ * outlive — the equivalent boundary is "before the terminal activation event is emitted".
+ *
+ * Bounded by `timeoutMs`: Pi answering slowly must cost the activation that wait and nothing
+ * more. A failure is RETURNED, never thrown, so the caller records it as an explicit event and
+ * still settles the activation. A session double without `getSessionStats` reports that fact
+ * rather than reporting zeros as if Pi had measured them.
+ */
+export declare function captureNativeSessionStats(session: Pick<PiAgentSessionLike, 'getSessionStats'>, timeoutMs?: number): Promise<{
+    stats?: PiSessionStats;
+    error?: string;
+}>;
+/**
+ * Per-message usage accumulation lives in the neutral session-metrics contract
+ * (SPECIALISTS-120): the legacy RPC runtime needs the same dual-shape rule, and importing it
+ * from a native-activation module would have created a `pi/session -> native-activation ->
+ * pi-sdk -> pi/session` cycle. Re-exported here so existing importers are unchanged.
+ */
+export { accumulateTokenUsage } from './session-metrics-contract.js';
 /** Parse the stable trailing sequence from `att:<activation>:N`. */
 export declare function nativeAttemptNo(attemptId: string): number;
 /** Advance a runtime-owned attempt ID without replacing its identity namespace. */
@@ -121,5 +163,4 @@ export declare function mapNativeLifecycleEvent(event: NativeLifecycleEvent, con
  * One Pi message boundary can produce both the boundary row and the legacy text row.
  */
 export declare function mapNativeSessionEvent(event: PiAgentSessionEvent, t?: number, turnIndex?: number): TimelineEvent[];
-export {};
 //# sourceMappingURL=native-activation-observability.d.ts.map

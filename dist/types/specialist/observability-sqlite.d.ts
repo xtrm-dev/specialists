@@ -169,6 +169,16 @@ export interface JobMetricsRecord {
     stall_gaps_json: string;
     run_complete_json: string | null;
     startup_payload_json: string | null;
+    /** Summed cost total from Pi-reported usage (SPECIALISTS-120). NULL when Pi reported none. */
+    cost_total: number | null;
+    /** Pi's terminal `get_session_stats` snapshot, verbatim. NULL when it was not captured. */
+    session_stats_json: string | null;
+    /** Summed-per-message usage vs Pi session stats. NULL when either side is missing. */
+    usage_reconciliation_json: string | null;
+    /** Pi version in use for the run. NULL on pre-120 rows. */
+    pi_version: string | null;
+    /** Provenance of the last recorded `context_pct`. NULL on pre-120 rows. */
+    context_pct_source: string | null;
     updated_at_ms: number;
 }
 export interface PruneObservabilityReport {
