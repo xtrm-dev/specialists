@@ -70,15 +70,79 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Validate telemetry contracts, native mapper, and Prometheus exposition parser
         run: |
-          bun --bun vitest run \
-            tests/unit/specialist/forensic-events.test.ts \
-            tests/unit/specialist/prometheus-projection.test.ts \
-            tests/unit/specialist/native-activation-observability.test.ts \
+          # Declared telemetry-contract surface for vitest. VITEST_FILES is the
+          # single source of truth: it is BOTH the invocation list AND the
+          # asserted set, so a declared file that vitest silently skips (e.g. a
+          # vitest.config.ts exclusion, SPECIALISTS-110) fails LOUD via the
+          # testResults check below instead of exiting 0 with fewer files run.
+          VITEST_FILES=(
+            tests/unit/specialist/forensic-events.test.ts
+            tests/unit/specialist/prometheus-projection.test.ts
+            tests/unit/specialist/native-activation-observability.test.ts
             tests/unit/specialist/native-mapper-totality.test.ts
+          )
+          REPORT_DIR="$(mktemp -d)"
+          REPORT="$REPORT_DIR/telemetry-vitest-report.json"
+          missing=()
+          for f in "${VITEST_FILES[@]}"; do
+            [ -f "$f" ] || missing+=("$f")
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "telemetry-contract RED: declared vitest files missing from disk (renamed/deleted?): ${missing[*]}"
+            exit 1
+          fi
+          bun --bun vitest run --reporter=default --reporter=json --outputFile="$REPORT" "${VITEST_FILES[@]}"
+          # Machine-checked invariant: every declared file must appear in the
+          # report's testResults (the executed set). Suite counts are NOT used:
+          # numTotalTestSuites overcounts executed files (measured 4 for a 2-file run).
+          REPORT="$REPORT" DECLARED="${VITEST_FILES[*]}" bun -e '
+            import { readFileSync } from "node:fs";
+            import { resolve } from "node:path";
+            const report = JSON.parse(readFileSync(process.env.REPORT, "utf8"));
+            const declared = process.env.DECLARED.split(" ").filter(Boolean).map((f) => resolve(f));
+            const executed = new Set((report.testResults ?? []).map((t) => resolve(t.name)));
+            console.log("telemetry-contract: vitest executed files:");
+            for (const f of executed) console.log(`  executed: ${f}`);
+            const absent = declared.filter((f) => !executed.has(f));
+            if (absent.length > 0) {
+              console.error("telemetry-contract RED: declared vitest files did NOT execute (silent skip?):");
+              for (const f of absent) console.error(`  missing: ${f}`);
+              process.exit(1);
+            }
+            console.log(`telemetry-contract: all ${declared.length} declared vitest files executed.`);
+          '
       - name: Validate observability writer, forensic mirror, and job metrics
         run: |
           # observability-sqlite.test.ts uses bun:sqlite and is excluded from the
           # vitest config (see vitest.config.ts): naming it in a vitest invocation
           # silently skips it (SPECIALISTS-110), so it runs here under bun test,
           # the same runner as `bun run test:bun`.
-          bun test tests/unit/specialist/observability-sqlite.test.ts
+          # BUN_FILES is the single source of truth for this runner: each declared
+          # file gets its own invocation, and the step requires exit 0 AND a
+          # nonzero reported pass count per file. Per-file invocation (instead of
+          # junit parsing) is deliberate: bun test has no config exclude-list that
+          # can silently drop a NAMED file — proven by this very file, which vitest
+          # excludes yet bun test executes — so an aggregate report would add
+          # XML-depth parsing brittleness for no extra signal.
+          BUN_FILES=(
+            tests/unit/specialist/observability-sqlite.test.ts
+          )
+          for f in "${BUN_FILES[@]}"; do
+            [ -f "$f" ] || { echo "telemetry-contract RED: declared bun-test file missing from disk (renamed/deleted?): $f"; exit 1; }
+          done
+          for f in "${BUN_FILES[@]}"; do
+            echo "telemetry-contract: bun test $f"
+            code=0
+            out="$(bun test "$f" 2>&1)" || code=$?
+            printf '%s\n' "$out" | tail -4
+            passes="$(printf '%s\n' "$out" | grep -Eo '[0-9]+ pass' | tail -1 | grep -Eo '[0-9]+' || true)"
+            if [ "$code" -ne 0 ]; then
+              echo "telemetry-contract RED: bun test failed for declared file: $f"
+              exit 1
+            fi
+            if [ -z "$passes" ] || [ "$passes" -le 0 ]; then
+              echo "telemetry-contract RED: bun test executed zero passing tests for declared file: $f"
+              exit 1
+            fi
+            echo "telemetry-contract: executed $f ($passes pass)"
+          done
