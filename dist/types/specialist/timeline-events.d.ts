@@ -142,6 +142,8 @@ export interface TimelineEventMeta extends TimelineEventBase {
     model: string;
     /** Backend provider (e.g., 'anthropic') */
     backend: string;
+    /** Pi version for this run, when known at meta time (SPECIALISTS-120 criterion 7). */
+    pi_version?: string;
     memory_injection?: {
         static_tokens: number;
         memory_tokens: number;
@@ -619,7 +621,9 @@ export declare function createRunStartEvent(specialist: string, beadId?: string,
 /**
  * Create a meta event.
  */
-export declare function createMetaEvent(model: string, backend: string): TimelineEventMeta;
+export declare function createMetaEvent(model: string, backend: string, options?: {
+    piVersion?: string;
+}): TimelineEventMeta;
 /**
  * Create a stale_warning event.
  * Emitted when stuck detection thresholds are crossed.

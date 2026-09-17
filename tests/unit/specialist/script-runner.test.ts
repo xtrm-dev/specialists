@@ -1362,7 +1362,13 @@ describe('runScriptSpecialist PiAgentSession observability bridge', () => {
     expect(statsEvent?.session_stats?.sessionId).toBe('sess-1');
     const statsErrorEvent = events.find((event) => event.type === 'session_stats_error') as { error_message?: string };
     expect(statsErrorEvent?.error_message).toBe('rpc timeout');
-    expect(events.some((event) => event.type === 'meta' && (event as { model?: string }).model === '0.85.1')).toBe(true);
+    const versionEvent = events.find((event) => event.type === 'meta' && event.pi_version === '0.85.1');
+    expect(versionEvent).toMatchObject({
+      type: 'meta',
+      model: 'anthropic/claude-sonnet-4-6',
+      backend: 'anthropic',
+      pi_version: '0.85.1',
+    });
     expect(events.some((event) => event.type === 'tool' && event.phase === 'start' && event.tool === 'bash')).toBe(true);
     expect(events.some((event) => event.type === 'tool' && event.phase === 'end' && event.tool === 'bash')).toBe(true);
   });

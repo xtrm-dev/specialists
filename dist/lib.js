@@ -11455,8 +11455,11 @@ function accumulateCost(existing, incoming, cumulative) {
     const before = typeof previous[key] === "number" && Number.isFinite(previous[key]) ? previous[key] : undefined;
     if (value === undefined && before === undefined)
       continue;
-    if (value === 0 && before !== undefined)
+    if (value === 0 && before !== undefined) {
+      merged[key] = before;
+      hasAny = true;
       continue;
+    }
     const delta = before !== undefined && cumulative && value !== undefined ? value - before : value ?? 0;
     merged[key] = (before ?? 0) + delta;
     hasAny = true;
@@ -18301,12 +18304,13 @@ function createRunStartEvent(specialist, beadId, startupSnapshot) {
     ...startupSnapshot ? { startup_snapshot: startupSnapshot } : {}
   };
 }
-function createMetaEvent(model, backend) {
+function createMetaEvent(model, backend, options) {
   return {
     t: Date.now(),
     type: TIMELINE_EVENT_TYPES.META,
     model,
-    backend
+    backend,
+    ...options?.piVersion !== undefined ? { pi_version: options.piVersion } : {}
   };
 }
 function createStatusChangeEvent(status, previousStatus) {
@@ -19282,7 +19286,7 @@ async function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assista
         if (event.type === "session_stats_error")
           appendTimelineEvent?.(createSessionStatsErrorEvent(event.errorMessage, event.timeoutMs));
         if (event.type === "pi_version")
-          appendTimelineEvent?.(createMetaEvent(event.pi_version, "unknown"));
+          appendTimelineEvent?.(createMetaEvent(model, deriveBackendFromModel(model) ?? "unknown", { piVersion: event.pi_version }));
         if (event.type === "api_error")
           appendTimelineEvent?.(mapCallbackEventToTimelineEvent("api_error", { apiError: event }));
         if (event.type === "compaction")

@@ -132,8 +132,28 @@ describe('accumulateTokenUsage cost handling (SPECIALISTS-120 reviewer findings)
       { input_tokens: 10, output_tokens: 5, total_tokens: 15, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
       seen,
     );
-    expect(second.input_tokens).toBe(110);
-    expect(second.cost).toEqual({ input: 0.001, output: 0.002, cacheRead: 0, cacheWrite: 0, total: 0.003 });
+    expect(second).toMatchObject({
+      input_tokens: 110,
+      cost: { input: 0.001, output: 0.002, cacheRead: 0, cacheWrite: 0, total: 0.003 },
+    });
+  });
+
+  it('a mixed zero/nonzero cost breakdown keeps every accumulated component', () => {
+    const seen: Record<string, number> = {};
+    const first = accumulateTokenUsage(
+      undefined,
+      { input_tokens: 100, output_tokens: 20, total_tokens: 120, cost: { input: 0.001, output: 0.002, cacheRead: 0, cacheWrite: 0, total: 0.003 } },
+      seen,
+    );
+    const second = accumulateTokenUsage(
+      first,
+      { input_tokens: 10, output_tokens: 5, total_tokens: 15, cost: { input: 0, output: 0.001, cacheRead: 0, cacheWrite: 0, total: 0.001 } },
+      seen,
+    );
+    expect(second).toMatchObject({
+      input_tokens: 110,
+      cost: { input: 0.001, output: 0.003, cacheRead: 0, cacheWrite: 0, total: 0.004 },
+    });
   });
 
   it('pins the documented ceiling: identical positive per-message reports infer cumulative and add only growth', () => {
@@ -142,8 +162,7 @@ describe('accumulateTokenUsage cost handling (SPECIALISTS-120 reviewer findings)
     const seen: Record<string, number> = {};
     const first = accumulateTokenUsage(undefined, { input_tokens: 100, output_tokens: 20, total_tokens: 120 }, seen);
     const second = accumulateTokenUsage(first, { input_tokens: 100, output_tokens: 20, total_tokens: 120 }, seen);
-    expect(second.input_tokens).toBe(100);
-    expect(second.total_tokens).toBe(120);
+    expect(second).toMatchObject({ input_tokens: 100, total_tokens: 120 });
   });
 });
 
