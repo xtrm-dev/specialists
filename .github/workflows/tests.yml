@@ -46,9 +46,11 @@ jobs:
           # grep -c exits 1 on zero matches and run steps use errexit, so an empty
           # quarantine list would fail the job instead of reporting 0.
           COUNT=$(grep -cE "^\s+'tests/.*', // ISSUE:" vitest.config.ts || true)
-          echo "Quarantined suites NOT executed by this job: $COUNT (re-enablement owned by SPECIALISTS-121)."
-          echo "This includes the quarantined tests/unit/specialist/supervisor.test.ts; the canonical N3 event-inventory oracle itself runs in the dedicated canonical-oracle job, not here."
-          echo "Quarantined suites excluded from this job: **$COUNT** (SPECIALISTS-121)" >> "$GITHUB_STEP_SUMMARY"
+          COUNT121=$(grep -cE "^\s+'tests/.*', // ISSUE: SPECIALISTS-121" vitest.config.ts || true)
+          COUNT9N93=$(grep -cE "^\s+'tests/.*', // ISSUE: unitAI-9n93" vitest.config.ts || true)
+          echo "Quarantined suites NOT executed by this job: $COUNT ($COUNT121 owned by SPECIALISTS-121, $COUNT9N93 owned by unitAI-9n93)."
+          echo "This includes the quarantined tests/unit/specialist/supervisor.test.ts. The canonical N3 event-inventory oracle ALSO runs here as part of the default suite (defence in depth: an oracle failure reds this job too) and is enforced by the dedicated canonical-oracle job."
+          echo "Quarantined suites excluded from this job: **$COUNT** ($COUNT121 SPECIALISTS-121, $COUNT9N93 unitAI-9n93)" >> "$GITHUB_STEP_SUMMARY"
 
   # SPECIALISTS-118: the four bun:sqlite suites are excluded from vitest
   # (bun: protocol unsupported in Node; see vitest.config.ts) and run here via
@@ -69,7 +71,41 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
       - name: Run bun:sqlite suites
-        run: bun run test:bun
+        run: |
+          # SPECIALISTS-118: contract-required bun:sqlite set. The REQUIRED set
+          # is declared HERE, not inherited from package.json's test:bun list, so
+          # shrinking that list cannot silently reduce coverage: the step asserts
+          # the executed set (per-file output headers plus the aggregate file
+          # count) covers every required file, and fails LOUD naming the file.
+          REQUIRED_FILES=(
+            tests/unit/specialist/observability-sqlite.test.ts
+            tests/unit/specialist/observability-sqlite-pr-refresh.test.ts
+            tests/unit/specialist/observability-db.test.ts
+            tests/unit/cli/db.test.ts
+          )
+          for f in "${REQUIRED_FILES[@]}"; do
+            [ -f "$f" ] || { echo "bun-sqlite RED: required file missing from disk (renamed/deleted?): $f"; exit 1; }
+          done
+          code=0
+          out="$(bun run test:bun 2>&1)" || code=$?
+          printf '%s\n' "$out" | tail -5
+          if [ "$code" -ne 0 ]; then
+            echo "bun-sqlite RED: test:bun failed"
+            exit 1
+          fi
+          # Executed-set assertion: every required file must appear as an
+          # executed per-file header in the runner output, and the aggregate
+          # file count must equal the required-set size. A file dropped from
+          # the test:bun list (or silently skipped) trips one of these two.
+          for f in "${REQUIRED_FILES[@]}"; do
+            printf '%s\n' "$out" | grep -qF "$f:" || { echo "bun-sqlite RED: required file did NOT execute (absent from runner output): $f"; exit 1; }
+          done
+          count="$(printf '%s\n' "$out" | grep -Eo 'Ran [0-9]+ tests across [0-9]+ files' | tail -1 | grep -Eo '[0-9]+ files' | grep -Eo '[0-9]+' || true)"
+          if [ "$count" != "${#REQUIRED_FILES[@]}" ]; then
+            echo "bun-sqlite RED: runner executed $count files, required set holds ${#REQUIRED_FILES[@]} (${REQUIRED_FILES[*]})"
+            exit 1
+          fi
+          echo "bun-sqlite: all ${#REQUIRED_FILES[@]} required files executed."
 
   # SPECIALISTS-118: the canonical N3 event-inventory oracle is the XTRM-93 N3
   # freeze acceptance surface. It lives in
