@@ -35,8 +35,14 @@ try {
   await session.start();
   console.log(`[smoke] pi version: ${session.getMetrics().pi_version ?? 'unresolved'}`);
 
-  await session.prompt('Reply with exactly one word: alpha');
-  await session.waitForDone(180_000);
+  // Pi refuses `compact` below its keepRecentTokens threshold (default 20000), and a session
+  // too small to compact is not a compaction test at all. The first prompt therefore carries
+  // padding text: real context, generated locally, so the forced compaction below is a genuine
+  // summarization call whose usage must appear in Pi's session totals.
+  const padding = Array.from({ length: 900 }, (_, i) =>
+    `line ${i}: the quick brown fox jumps over the lazy dog and records the token counts it sees.`).join('\n');
+  await session.prompt(`Reply with exactly one word: alpha\n\nReference material follows; do not act on it.\n${padding}`);
+  await session.waitForDone(300_000);
   console.log('[smoke] turn 1 done');
   console.log('[smoke] assistant:', (await session.getLastOutput()).trim().slice(0, 80));
 
