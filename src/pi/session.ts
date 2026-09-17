@@ -1457,11 +1457,15 @@ export class PiAgentSession {
   /**
    * Capture Pi's terminal session totals at settlement (SPECIALISTS-120 criterion 3).
    *
-   * EXPLICIT settlement step, deliberately NOT part of `waitForDone`: the run boundary and
-   * the telemetry capture are different concerns and a caller may want the boundary without
-   * the extra RPC. The runner calls this between `waitForDone()` and `close()`, so the
-   * snapshot describes the run that just finished rather than an empty session, and it is
-   * persisted before the Pi process exits.
+   * Called by `waitForDone()` — i.e. after `agent_end` and BEFORE the caller closes the
+   * process — so the snapshot describes the run that just finished rather than an empty
+   * session. It lives at the boundary instead of at the runner's call sites because
+   * `waitForDone()` is the single hook shared by `SpecialistRunner`'s main run, its keep-alive
+   * path via `resume()`, and `script-runner.ts`; a capture owned by the runner would silently
+   * drop the terminal snapshot for script-class runs.
+   *
+   * Public and idempotent: `prompt()` re-arms the one-shot guard once per turn, so an extra
+   * explicit caller (tests, tooling, a future path) is a no-op instead of a second RPC.
    *
    * Bounded by `sessionStatsTimeoutMs`: a Pi that never answers costs the run that wait and
    * nothing more, and the failure is recorded as an explicit event instead of silently
@@ -1823,16 +1827,28 @@ export class PiAgentSession {
 
   /**
    * Wait for the agent to finish. Optionally times out (throws Error on timeout).
+   *
+   * Settlement telemetry is captured at the end of this boundary (SPECIALISTS-120 criterion 3).
+   * `waitForDone()` is the one hook every production caller passes through: `SpecialistRunner`'s
+   * main run, its keep-alive path (`resume()` ends here), and `script-runner.ts`. Capturing at
+   * the boundary is what keeps the terminal snapshot for script-class runs — a capture owned by
+   * the runner would silently miss them.
+   *
+   * A timeout rejection skips the capture: a killed run has no live session to interrogate.
    */
   async waitForDone(timeout?: number): Promise<void> {
     const donePromise = this._donePromise ?? Promise.resolve();
-    if (!timeout) return donePromise;
-    return Promise.race([
-      donePromise,
-      new Promise<void>((_, reject) =>
-        setTimeout(() => reject(new Error(`Specialist timed out after ${timeout}ms`)), timeout)
-      ),
-    ]);
+    if (timeout) {
+      await Promise.race([
+        donePromise,
+        new Promise<void>((_, reject) =>
+          setTimeout(() => reject(new Error(`Specialist timed out after ${timeout}ms`)), timeout)
+        ),
+      ]);
+    } else {
+      await donePromise;
+    }
+    await this.captureSessionStats();
   }
 
   /**

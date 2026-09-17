@@ -95,16 +95,7 @@ export interface RunResult {
 }
 
 type SessionLike = Pick<PiAgentSession, 'start' | 'prompt' | 'waitForDone' | 'getLastOutput' | 'getState' | 'close' | 'kill' | 'meta' | 'steer' | 'resume'>
-  & {
-    getMetrics?: () => SessionRunMetrics;
-    /**
-     * Optional explicit settlement telemetry step (SPECIALISTS-120). Called between the run
-     * boundary and `close()`, never from `waitForDone()`: the boundary and the capture are
-     * different concerns. Bounded and failure-tolerant by construction — the session records
-     * its own failure event and returns, so a Pi that cannot answer never blocks completion.
-     */
-    captureSessionStats?: () => Promise<void>;
-  };
+  & { getMetrics?: () => SessionRunMetrics };
 
 export type SessionFactory = (opts: PiSessionOptions) => Promise<SessionLike>;
 
@@ -1407,10 +1398,10 @@ export class SpecialistRunner {
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
           try {
             await session.prompt(renderedTask);
+            // `waitForDone()` captures settlement telemetry before it returns, so the snapshot
+            // describes this run and is taken before the process is closed below
+            // (SPECIALISTS-120 criterion 3).
             await session.waitForDone(execution.timeout_ms);
-            // Settlement telemetry BEFORE the process is closed below, so Pi's session totals
-            // describe the run that just finished (SPECIALISTS-120 criterion 3).
-            await session.captureSessionStats?.();
             output = await session.getLastOutput();
             runMetrics = session.getMetrics?.();
             sessionBackend = session.meta.backend;
@@ -1462,10 +1453,9 @@ export class SpecialistRunner {
         // Don't close here — caller owns the lifecycle via closeFn.
         keepAliveActive = true;
         const resumeFn = async (msg: string): Promise<string> => {
+          // `resume()` settles through `waitForDone()`, which captures this turn's own session
+          // totals before the next turn rewrites the session (SPECIALISTS-120 criterion 3).
           await session!.resume(msg, execution.timeout_ms);
-          // Each keep-alive turn settles on its own session totals, before the next turn
-          // rewrites the session (SPECIALISTS-120 criterion 3).
-          await session!.captureSessionStats?.();
           return session!.getLastOutput();
         };
         const closeFn = async (): Promise<void> => {
