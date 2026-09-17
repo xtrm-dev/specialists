@@ -39,6 +39,8 @@ import {
   createStatusChangeEvent,
   createStaleWarningEvent,
   createTokenUsageEvent,
+  createSessionStatsEvent,
+  createSessionStatsErrorEvent,
   createFinishReasonEvent,
   createTurnSummaryEvent,
   createCompactionEvent,
@@ -2348,10 +2350,14 @@ export class Supervisor {
               ...(metricEvent.token_usage ? { token_usage: metricEvent.token_usage } : {}),
               ...(metricEvent.finish_reason ? { finish_reason: metricEvent.finish_reason } : {}),
             });
+            // SPECIALISTS-120 criterion 2: this is the LOCAL fallback. It is labelled as such
+            // and is superseded by Pi's native context reading the moment the settlement
+            // session-stats snapshot arrives.
             const contextUtilization = calculateContextUtilization(currentContextTokens, statusSnapshot.model);
             setStatus({
               context_pct: contextUtilization?.context_pct,
               context_health: contextUtilization?.context_health,
+              ...(contextUtilization ? { context_pct_source: 'specialists_fallback' } : {}),
             });
             lastTurnSummaryIndex = metricEvent.turn_index;
             lastTurnSummaryTextContent = turnTextAccumulator;
@@ -2362,6 +2368,7 @@ export class Supervisor {
               turnTextAccumulator || undefined,
               contextUtilization?.context_pct,
               contextUtilization?.context_health,
+              contextUtilization ? 'specialists_fallback' : undefined,
             ));
             if (!keepAliveSession && !runOptions.keepAlive) {
               writeUnifiedHandoff({
@@ -2383,9 +2390,40 @@ export class Supervisor {
             mergeRunMetrics({ auto_compactions: compactions });
             appendTimelineEvent(createCompactionEvent(metricEvent.phase, {
               tokensBefore: metricEvent.tokensBefore,
+              estimatedTokensAfter: metricEvent.estimatedTokensAfter,
               summary: metricEvent.summary,
               firstKeptEntryId: metricEvent.firstKeptEntryId,
+              ...(metricEvent.token_usage ? { tokenUsage: metricEvent.token_usage } : {}),
             }));
+            return;
+          }
+
+          if (metricEvent.type === 'pi_version') {
+            mergeRunMetrics({ pi_version: metricEvent.pi_version });
+            return;
+          }
+
+          // SPECIALISTS-120 criterion 3: Pi's terminal session totals, captured by the session
+          // at settlement before the Pi process exits. Persisted as its own terminal event so a
+          // reader can distinguish Pi's session total from the summed per-message deltas.
+          if (metricEvent.type === 'session_stats') {
+            mergeRunMetrics({ session_stats: metricEvent.session_stats });
+            appendTimelineEvent(createSessionStatsEvent(metricEvent.session_stats));
+            // Pi's native context reading supersedes the local MODEL_CONTEXT_WINDOWS estimate.
+            const contextUsage = metricEvent.session_stats.contextUsage;
+            if (typeof contextUsage?.percent === 'number') {
+              setStatus({
+                context_pct: Number(contextUsage.percent.toFixed(2)),
+                context_health: getContextHealth(contextUsage.percent),
+                context_pct_source: 'pi_session_stats',
+              });
+            }
+            return;
+          }
+
+          if (metricEvent.type === 'session_stats_error') {
+            mergeRunMetrics({ session_stats_error: metricEvent.errorMessage });
+            appendTimelineEvent(createSessionStatsErrorEvent(metricEvent.errorMessage, metricEvent.timeoutMs));
             return;
           }
 

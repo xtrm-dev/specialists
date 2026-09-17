@@ -11,6 +11,7 @@
  * server construct.
  */
 
+import type { PiUsageVerbatim, SessionUsageCost } from '../specialist/session-metrics-contract.js';
 import type { StepContract } from './step-contract.js';
 
 /** Stable logical participant identity — the role, across activations. */
@@ -218,9 +219,19 @@ export interface ActivationTokenUsage {
   output_tokens?: number;
   cache_creation_tokens?: number;
   cache_read_tokens?: number;
+  /** Anthropic 1-hour cache writes (`cacheWrite1h`); a subset of cache_creation_tokens. */
+  cache_write_1h_tokens?: number;
   reasoning_tokens?: number;
   tool_tokens?: number;
   total_tokens?: number;
+  /**
+   * Cost as reported by Pi (SPECIALISTS-120). Carried on the cumulative spend so a native
+   * activation can reconcile its summed cost against Pi's session total instead of reporting
+   * a cost the runtime never collected.
+   */
+  cost?: SessionUsageCost;
+  /** Pi's provider-reported usage, verbatim. Present only when Pi reported it. */
+  pi_usage?: PiUsageVerbatim;
 }
 
 /**

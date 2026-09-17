@@ -54,6 +54,7 @@ import {
   resolveExecutionExtensionSelection,
   deduplicateExtensionSources,
   resolveGlobalNodeModulesDir,
+  resolvePiVersion,
 } from '../pi/session.js';
 import { formatResolvedToolContract, withDiscoveredExtensionTools, type ResolvedToolContract } from '../specialist/resolved-tool-contract.js';
 import { resolveModelChain } from '../specialist/model-chain.js';
@@ -74,7 +75,7 @@ import { acquire as acquireLease, admitToolCall, release as releaseLease } from 
 import { createGuardedTools } from './guarded-tools.js';
 import { createAskTools, ASK_TOOL, ESCALATE_TOOL } from './ask-tool.js';
 import { loadPiSdk, type PiSdk, type PiAgentSessionLike, type PiAgentSessionEvent, type PiModelRuntimeLike, type PiResourceLoaderLike } from './pi-sdk.js';
-import { nativeSessionTokenUsage, accumulateTokenUsage } from '../specialist/native-activation-observability.js';
+import { nativeSessionTokenUsage, accumulateTokenUsage, captureNativeSessionStats, SESSION_STATS_TIMEOUT_MS } from '../specialist/native-activation-observability.js';
 import { createGateModelRuntime, validateModelAvailable } from './model-gate.js';
 import { FleetRegistry, RESUMABLE_STATES, RETRYABLE_STATES, nextAttemptId, type ActivationRecord } from './registry.js';
 import { publishSettlement, republishPendingSettlements, type SettlementSubject } from './settlement-publication.js';
@@ -829,6 +830,13 @@ export interface NativeActivationHostDeps {
    * change, because the host resolves the spec itself on every dispatch.
    */
   stallDetection?: StallDetectionConfig;
+  /**
+   * Bound on the settlement `get_session_stats` capture (SPECIALISTS-120). Defaults to 5s;
+   * tests inject a short bound to prove the failure path without waiting one out.
+   */
+  sessionStatsTimeoutMs?: number;
+  /** Injected for tests; defaults to probing the `pi` binary on PATH. */
+  piVersion?: string;
 }
 
 /** Configuration for pushing interactions to a Claude coordinator. */
@@ -864,6 +872,8 @@ export class NativeActivationHost {
   private readonly loadSdk: () => Promise<PiSdk>;
   private readonly cwd: string;
   private readonly now: () => number;
+  private readonly sessionStatsTimeoutMs?: number;
+  private readonly piVersion?: string;
   private readonly authority: AuthorityWriter;
   private readonly settlements: SettlementStore;
   /** Admission gate. Defaults to the real `validateBeforeRun`; see `NativeActivationHostDeps`. */
@@ -935,6 +945,8 @@ export class NativeActivationHost {
     this.forensics = deps.forensics ?? NULL_FORENSIC_SINK;
     this.loadSdk = deps.loadSdk ?? loadPiSdk;
     this.now = deps.now ?? (() => Date.now());
+    this.sessionStatsTimeoutMs = deps.sessionStatsTimeoutMs;
+    this.piVersion = deps.piVersion;
     this.authority = deps.authority ?? NULL_AUTHORITY_WRITER;
     this.settlements = deps.settlements ?? createFileSettlementStore(join(this.cwd, '.specialists', 'settlements'));
     this.admission = deps.admission ?? ((candidate, tier, contract) => validateBeforeRun(candidate as never, tier, contract));
@@ -2016,6 +2028,26 @@ export class NativeActivationHost {
       }
     }
 
+    // SPECIALISTS-120: compaction summarization is an LLM call Pi bills and counts in its
+    // session totals. It never appears on an assistant message, so a summed side that ignored
+    // it could never reconcile with Pi's own session snapshot.
+    if (event.type === 'compaction_end') {
+      const compactionResult = event.result !== null && typeof event.result === 'object'
+        ? event.result as Record<string, unknown>
+        : undefined;
+      // Read through the SAME canonical reader as message usage: the summarization call's
+      // usage is nested under `result.usage` in Pi's AgentSessionEvent.
+      const usage = extractTokenUsage({
+        type: 'message_end',
+        message: { role: 'assistant', usage: compactionResult?.usage },
+      } as PiAgentSessionEvent);
+      if (usage) {
+        const seen = this.lastUsageSeen.get(snapshot) ?? {};
+        snapshot.tokenUsage = accumulateTokenUsage(snapshot.tokenUsage, usage, seen);
+        this.lastUsageSeen.set(snapshot, seen);
+      }
+    }
+
     // Offer the RAW event before any translation. Deliberately not wrapped in try/catch:
     // the sink swallows its own errors, and a forensic concern must never alter activation
     // behaviour — nor be silently hidden by a catch here.
@@ -2081,6 +2113,35 @@ export class NativeActivationHost {
       default:
         break;
     }
+  }
+
+  /**
+   * Capture and record Pi's terminal session totals (SPECIALISTS-120 criterion 3).
+   *
+   * Emitted BEFORE the terminal activation event, so `activation_completed`'s run_complete row
+   * carries both the snapshot and its reconciliation. A failure is emitted as its own event:
+   * a run whose snapshot is missing must say so, because a silently absent snapshot is
+   * indistinguishable from a run that legitimately had no tokens.
+   */
+  private async captureSessionStats(
+    session: PiAgentSessionLike,
+    emit: (name: string, payload?: Record<string, unknown>) => void,
+  ): Promise<void> {
+    const timeoutMs = this.sessionStatsTimeoutMs ?? SESSION_STATS_TIMEOUT_MS;
+    const piVersion = this.piVersion ?? resolvePiVersion();
+    const { stats, error } = await captureNativeSessionStats(session, timeoutMs);
+    if (stats) {
+      emit('session_stats_captured', {
+        session_stats: stats,
+        ...(piVersion ? { pi_version: piVersion } : {}),
+      });
+      return;
+    }
+    emit('session_stats_failed', {
+      error: error ?? 'session stats unavailable',
+      timeout_ms: timeoutMs,
+      ...(piVersion ? { pi_version: piVersion } : {}),
+    });
   }
 
   /**
@@ -2175,6 +2236,11 @@ export class NativeActivationHost {
     try {
       await session.prompt(initialPrompt);
       await session.waitForIdle();
+
+      // SPECIALISTS-120 criterion 3: Pi's session totals are captured at settlement, before
+      // any terminal activation event, so run_complete can carry the snapshot and its
+      // reconciliation. Bounded and failure-tolerant by construction — see the helper.
+      await this.captureSessionStats(session, emit);
 
       // A settled session is NOT a successful one. pi records a failed turn as an
       // assistant message with stopReason 'error' (or 'aborted') and an errorMessage —
