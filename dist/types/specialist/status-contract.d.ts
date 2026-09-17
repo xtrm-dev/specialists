@@ -83,6 +83,12 @@ export interface SupervisorStatus {
     metrics?: SessionRunMetrics;
     context_pct?: number;
     context_health?: ContextHealth;
+    /**
+     * Provenance of `context_pct` (SPECIALISTS-120 criterion 2): `pi_session_stats` is Pi's own
+     * native context reading; `specialists_fallback` is a local MODEL_CONTEXT_WINDOWS estimate
+     * that covers only the model families it knows.
+     */
+    context_pct_source?: 'pi_session_stats' | 'specialists_fallback';
     error?: string;
     auto_commit_count?: number;
     last_auto_commit_sha?: string;

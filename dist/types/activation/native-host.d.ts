@@ -419,6 +419,13 @@ export interface NativeActivationHostDeps {
      * change, because the host resolves the spec itself on every dispatch.
      */
     stallDetection?: StallDetectionConfig;
+    /**
+     * Bound on the settlement `get_session_stats` capture (SPECIALISTS-120). Defaults to 5s;
+     * tests inject a short bound to prove the failure path without waiting one out.
+     */
+    sessionStatsTimeoutMs?: number;
+    /** Injected for tests; defaults to probing the `pi` binary on PATH. */
+    piVersion?: string;
 }
 /** Configuration for pushing interactions to a Claude coordinator. */
 export interface PeerDelivery {
@@ -451,6 +458,8 @@ export declare class NativeActivationHost {
     private readonly loadSdk;
     private readonly cwd;
     private readonly now;
+    private readonly sessionStatsTimeoutMs?;
+    private readonly piVersion?;
     private readonly authority;
     private readonly settlements;
     /** Admission gate. Defaults to the real `validateBeforeRun`; see `NativeActivationHostDeps`. */
@@ -547,6 +556,15 @@ export declare class NativeActivationHost {
      * that was merely pausing.
      */
     private onSessionEvent;
+    /**
+     * Capture and record Pi's terminal session totals (SPECIALISTS-120 criterion 3).
+     *
+     * Emitted BEFORE the terminal activation event, so `activation_completed`'s run_complete row
+     * carries both the snapshot and its reconciliation. A failure is emitted as its own event:
+     * a run whose snapshot is missing must say so, because a silently absent snapshot is
+     * indistinguishable from a run that legitimately had no tokens.
+     */
+    private captureSessionStats;
     /**
      * Record the start of one tool call for the tool_duration checker (SPECIALISTS-102).
      *
