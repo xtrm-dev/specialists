@@ -119,6 +119,34 @@ describe('reasoning is never added on top of output (SPECIALISTS-120 criterion 6
   });
 });
 
+describe('accumulateTokenUsage cost handling (SPECIALISTS-120 reviewer findings)', () => {
+  it('a zero-weighted cost breakdown after finite cost keeps the accumulated value', () => {
+    const seen: Record<string, number> = {};
+    const first = accumulateTokenUsage(
+      undefined,
+      { input_tokens: 100, output_tokens: 20, total_tokens: 120, cost: { input: 0.001, output: 0.002, cacheRead: 0, cacheWrite: 0, total: 0.003 } },
+      seen,
+    );
+    const second = accumulateTokenUsage(
+      first,
+      { input_tokens: 10, output_tokens: 5, total_tokens: 15, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      seen,
+    );
+    expect(second.input_tokens).toBe(110);
+    expect(second.cost).toEqual({ input: 0.001, output: 0.002, cacheRead: 0, cacheWrite: 0, total: 0.003 });
+  });
+
+  it('pins the documented ceiling: identical positive per-message reports infer cumulative and add only growth', () => {
+    // unitAI-beqby.15 trade-off: a delta-shape message whose every counter happens to
+    // grow reads as cumulative — undercounts slightly, never flaps or explodes.
+    const seen: Record<string, number> = {};
+    const first = accumulateTokenUsage(undefined, { input_tokens: 100, output_tokens: 20, total_tokens: 120 }, seen);
+    const second = accumulateTokenUsage(first, { input_tokens: 100, output_tokens: 20, total_tokens: 120 }, seen);
+    expect(second.input_tokens).toBe(100);
+    expect(second.total_tokens).toBe(120);
+  });
+});
+
 describe('reconcileSessionUsage (SPECIALISTS-120 criterion 5)', () => {
   it('reconciles exactly when summed usage matches the Pi session snapshot, cost included', () => {
     const summed = normalizeSessionTokenUsage(LIVE_PI_USAGE)!;

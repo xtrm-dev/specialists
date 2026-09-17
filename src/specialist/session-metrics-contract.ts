@@ -482,6 +482,9 @@ function accumulateCost(
     const value = typeof next[key] === 'number' && Number.isFinite(next[key]) ? next[key] as number : undefined;
     const before = typeof previous[key] === 'number' && Number.isFinite(previous[key]) ? previous[key] as number : undefined;
     if (value === undefined && before === undefined) continue;
+    // A zero value carries no cost information; keep the accumulated value instead of
+    // letting a zero-weighted cost breakdown clear it (mirrors the counter rule).
+    if (value === 0 && before !== undefined) continue;
     const delta = before !== undefined && cumulative && value !== undefined ? value - before : (value ?? 0);
     merged[key] = (before ?? 0) + delta;
     hasAny = true;
