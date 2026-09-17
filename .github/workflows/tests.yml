@@ -93,4 +93,31 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
       - name: Run canonical N3 event-inventory oracle
-        run: bun --bun vitest run tests/unit/specialist/supervisor-canonical-oracle.test.ts
+        run: |
+          # Vacuity guard (SPECIALISTS-118; pattern from telemetry-contract.yml):
+          # vitest exits 0 for a file whose every test is skipped, so a
+          # fully-skipped oracle would read as GREEN while asserting nothing.
+          # The report must carry at least one PASSED assertion for the oracle
+          # file, or this step fails LOUD.
+          ORACLE_FILE="tests/unit/specialist/supervisor-canonical-oracle.test.ts"
+          REPORT_DIR="$(mktemp -d)"
+          REPORT="$REPORT_DIR/oracle-vitest-report.json"
+          bun --bun vitest run --reporter=default --reporter=json --outputFile="$REPORT" "$ORACLE_FILE"
+          REPORT="$REPORT" ORACLE_FILE="$ORACLE_FILE" bun -e '
+            import { readFileSync } from "node:fs";
+            import { resolve } from "node:path";
+            const report = JSON.parse(readFileSync(process.env.REPORT, "utf8"));
+            const target = resolve(process.env.ORACLE_FILE);
+            const entry = (report.testResults ?? []).find((t) => resolve(t.name) === target);
+            if (!entry) {
+              console.error(`canonical-oracle RED: ${process.env.ORACLE_FILE} did NOT execute (absent from report testResults).`);
+              process.exit(1);
+            }
+            const passed = (entry.assertionResults ?? []).filter((a) => a.status === "passed").length;
+            console.log(`canonical-oracle: executed ${process.env.ORACLE_FILE} (${passed} passed assertions)`);
+            if (passed < 1) {
+              console.error(`canonical-oracle RED: ${process.env.ORACLE_FILE} executed but asserted nothing (zero passed assertions \u2014 fully skipped?).`);
+              process.exit(1);
+            }
+            console.log("canonical-oracle: oracle executed with assertions.");
+          '
