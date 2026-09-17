@@ -3,28 +3,54 @@ name: telemetry-contract
 permissions:
   contents: read
 
+# Trigger-set derivation (SPECIALISTS-110): every file that can independently
+# redefine the telemetry contract fires this gate. The contract layers are:
+# vocabulary (timeline-events), envelope/schema (forensic-events), native
+# mapping (native-activation-observability), native write path + producer rule
+# (activation/forensic-sink), shared writer + forensic mirror + job aggregation
+# (observability-sqlite), projection (prometheus-projection), exposition
+# (cli/metrics) — plus the contract tests that pin those layers, and this file.
+# Deliberately NOT triggers (all still executed by the unfiltered tests.yml
+# suite on every PR): emitters that only call the covered layers without
+# defining them (activation/native-host declares the sink interface and emits
+# already-shaped payloads consumed through the covered mapper/sink;
+# specialist/supervisor, runner, loader, script-runner likewise), location and
+# version plumbing (specialist/observability-db), the console scalar core
+# (specialist/live-aggregates, which the projection deliberately does not
+# consume), and read-side store consumers (branch-integration-events,
+# epic-readiness, native-activation-summary, cli/log, cli/db).
 on:
   pull_request:
     paths:
+      - 'src/specialist/timeline-events.ts'
       - 'src/specialist/forensic-events.ts'
+      - 'src/specialist/native-activation-observability.ts'
+      - 'src/activation/forensic-sink.ts'
       - 'src/specialist/prometheus-projection.ts'
       - 'src/specialist/observability-sqlite.ts'
       - 'src/cli/metrics.ts'
       - 'tests/unit/specialist/forensic-events.test.ts'
       - 'tests/unit/specialist/prometheus-projection.test.ts'
       - 'tests/unit/specialist/observability-sqlite.test.ts'
+      - 'tests/unit/specialist/native-activation-observability.test.ts'
+      - 'tests/unit/specialist/native-mapper-totality.test.ts'
       - '.github/workflows/telemetry-contract.yml'
   push:
     branches:
       - master
     paths:
+      - 'src/specialist/timeline-events.ts'
       - 'src/specialist/forensic-events.ts'
+      - 'src/specialist/native-activation-observability.ts'
+      - 'src/activation/forensic-sink.ts'
       - 'src/specialist/prometheus-projection.ts'
       - 'src/specialist/observability-sqlite.ts'
       - 'src/cli/metrics.ts'
       - 'tests/unit/specialist/forensic-events.test.ts'
       - 'tests/unit/specialist/prometheus-projection.test.ts'
       - 'tests/unit/specialist/observability-sqlite.test.ts'
+      - 'tests/unit/specialist/native-activation-observability.test.ts'
+      - 'tests/unit/specialist/native-mapper-totality.test.ts'
       - '.github/workflows/telemetry-contract.yml'
   workflow_dispatch:
 
@@ -42,9 +68,147 @@ jobs:
           bun-version: 1.3.14
       - name: Install dependencies
         run: bun install --frozen-lockfile
-      - name: Validate telemetry contracts and Prometheus exposition parser
+      - name: Validate telemetry contracts, native mapper, and Prometheus exposition parser
         run: |
-          bun --bun vitest run \
-            tests/unit/specialist/forensic-events.test.ts \
-            tests/unit/specialist/prometheus-projection.test.ts \
+          # Declared telemetry-contract surface for vitest. VITEST_FILES is the
+          # single source of truth: it is BOTH the invocation list AND the
+          # asserted set, so a declared file that vitest silently skips (e.g. a
+          # vitest.config.ts exclusion, SPECIALISTS-110) fails LOUD via the
+          # testResults check below instead of exiting 0 with fewer files run.
+          # A declared file whose every test is skipped is RED BY DESIGN (see
+          # the "asserted nothing" bucket below): a suite that must be
+          # conditionally skipped has to be removed from this array deliberately,
+          # not left in it to report fictional coverage.
+          VITEST_FILES=(
+            tests/unit/specialist/forensic-events.test.ts
+            tests/unit/specialist/prometheus-projection.test.ts
+            tests/unit/specialist/native-activation-observability.test.ts
+            tests/unit/specialist/native-mapper-totality.test.ts
+          )
+          REPORT_DIR="$(mktemp -d)"
+          REPORT="$REPORT_DIR/telemetry-vitest-report.json"
+          missing=()
+          for f in "${VITEST_FILES[@]}"; do
+            [ -f "$f" ] || missing+=("$f")
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "telemetry-contract RED: declared vitest files missing from disk (renamed/deleted?): ${missing[*]}"
+            exit 1
+          fi
+          bun --bun vitest run --reporter=default --reporter=json --outputFile="$REPORT" "${VITEST_FILES[@]}"
+          # Machine-checked invariant: every declared file must appear in the
+          # report's testResults (the executed set) AND carry at least one
+          # PASSED assertion. Suite counts are NOT used: numTotalTestSuites
+          # overcounts executed files (measured 4 for a 2-file run, 9 for a
+          # 4-file run). Presence alone is NOT enough either: vitest records one
+          # testResults entry per collected file with status "passed" even when
+          # every test in it was skipped, so assertionResults[].status is checked
+          # for at least one "passed" — a fully-skipped declared suite is RED.
+          REPORT="$REPORT" DECLARED="${VITEST_FILES[*]}" WORKFLOW=".github/workflows/telemetry-contract.yml" Q="'" bun -e '
+            import { readFileSync } from "node:fs";
+            import { resolve } from "node:path";
+            const report = JSON.parse(readFileSync(process.env.REPORT, "utf8"));
+            const declared = process.env.DECLARED.split(" ").filter(Boolean);
+            const byName = new Map();
+            for (const t of (report.testResults ?? [])) byName.set(resolve(t.name), t);
+            console.log("telemetry-contract: vitest executed files:");
+            for (const [name, t] of byName) {
+              const passed = (t.assertionResults ?? []).filter((a) => a.status === "passed").length;
+              console.log(`  executed: ${name} (${passed} passed assertions)`);
+            }
+            const resolved = declared.map((f) => resolve(f));
+            const notExecuted = resolved.filter((f) => !byName.has(f));
+            const vacuous = resolved.filter((f) => {
+              const t = byName.get(f);
+              return t !== undefined && !((t.assertionResults ?? []).some((a) => a.status === "passed"));
+            });
+            let red = false;
+            if (notExecuted.length > 0) {
+              red = true;
+              console.error("telemetry-contract RED: declared vitest files did NOT execute (absent from report testResults):");
+              for (const f of notExecuted) console.error(`  not executed: ${f}`);
+            }
+            if (vacuous.length > 0) {
+              red = true;
+              console.error("telemetry-contract RED: declared vitest files executed but asserted nothing (zero passed assertions — fully skipped?):");
+              for (const f of vacuous) console.error(`  vacuous: ${f}`);
+            }
+            // Trigger-coverage: every declared test file must appear in the
+            // paths: triggers of this workflow file for both pull_request and push, or
+            // changes to it would not fire the gate. The workflow file is itself
+            // a trigger, so the PR that introduces the drift runs the gate that
+            // rejects it.
+            const wf = readFileSync(process.env.WORKFLOW, "utf8");
+            const prStart = wf.indexOf("\n  pull_request:");
+            const pushStart = wf.indexOf("\n  push:");
+            const dispStart = wf.indexOf("\n  workflow_dispatch:");
+            const regions = { pull_request: "", push: "" };
+            if (prStart !== -1 && pushStart !== -1 && dispStart !== -1 && prStart < pushStart && pushStart < dispStart) {
+              regions.pull_request = wf.slice(prStart, pushStart);
+              regions.push = wf.slice(pushStart, dispStart);
+            }
+            const q = process.env.Q;
+            for (const [section, body] of Object.entries(regions)) {
+              const uncovered = body === "" ? declared : declared.filter((f) => !body.includes(`      - ${q}${f}${q}`));
+              if (uncovered.length > 0) {
+                red = true;
+                console.error(`telemetry-contract RED: declared vitest files missing from ${q}${section}${q} paths: trigger in ${process.env.WORKFLOW}:`);
+                for (const f of uncovered) console.error(`  uncovered: ${f} (section: ${section})`);
+              }
+            }
+            if (red) process.exit(1);
+            console.log(`telemetry-contract: all ${declared.length} declared vitest files executed with assertions and are trigger-covered.`);
+          '
+      - name: Validate observability writer, forensic mirror, and job metrics
+        run: |
+          # observability-sqlite.test.ts uses bun:sqlite and is excluded from the
+          # vitest config (see vitest.config.ts): naming it in a vitest invocation
+          # silently skips it (SPECIALISTS-110), so it runs here under bun test,
+          # the same runner as `bun run test:bun`.
+          # BUN_FILES is the single source of truth for this runner: each declared
+          # file gets its own invocation, and the step requires exit 0 AND a
+          # nonzero reported pass count per file. Per-file invocation (instead of
+          # junit parsing) is deliberate: bun test has no config exclude-list that
+          # can silently drop a NAMED file — proven by this very file, which vitest
+          # excludes yet bun test executes — so an aggregate report would add
+          # XML-depth parsing brittleness for no extra signal.
+          BUN_FILES=(
             tests/unit/specialist/observability-sqlite.test.ts
+          )
+          for f in "${BUN_FILES[@]}"; do
+            [ -f "$f" ] || { echo "telemetry-contract RED: declared bun-test file missing from disk (renamed/deleted?): $f"; exit 1; }
+          done
+          # Trigger-coverage (bun-side companion to the vitest-step check): every
+          # declared bun-test file must appear in the paths: triggers of this
+          # workflow file for both pull_request and push, or changes to it would
+          # not fire the gate.
+          WORKFLOW_FILE=".github/workflows/telemetry-contract.yml"
+          for section in pull_request push; do
+            case "$section" in
+              pull_request) region="$(sed -n '/^  pull_request:/,/^  push:/p' "$WORKFLOW_FILE")";;
+              push) region="$(sed -n '/^  push:/,/^  workflow_dispatch:/p' "$WORKFLOW_FILE")";;
+            esac
+            if [ -z "$region" ]; then
+              echo "telemetry-contract RED: could not locate '$section' trigger section in $WORKFLOW_FILE"
+              exit 1
+            fi
+            for f in "${BUN_FILES[@]}"; do
+              printf '%s\n' "$region" | grep -qF "      - '$f'" || { echo "telemetry-contract RED: declared bun-test file missing from '$section' paths: trigger in $WORKFLOW_FILE: $f"; exit 1; }
+            done
+          done
+          for f in "${BUN_FILES[@]}"; do
+            echo "telemetry-contract: bun test $f"
+            code=0
+            out="$(bun test "$f" 2>&1)" || code=$?
+            printf '%s\n' "$out" | tail -4
+            passes="$(printf '%s\n' "$out" | grep -Eo '[0-9]+ pass' | tail -1 | grep -Eo '[0-9]+' || true)"
+            if [ "$code" -ne 0 ]; then
+              echo "telemetry-contract RED: bun test failed for declared file: $f"
+              exit 1
+            fi
+            if [ -z "$passes" ] || [ "$passes" -le 0 ]; then
+              echo "telemetry-contract RED: bun test executed zero passing tests for declared file: $f"
+              exit 1
+            fi
+            echo "telemetry-contract: executed $f ($passes pass)"
+          done
