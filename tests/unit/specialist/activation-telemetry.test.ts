@@ -221,7 +221,16 @@ describe('host liveStats', () => {
     const view = toActivationView(host.inspect(handle.activationId)!, now);
     expect(view.elapsed_s).toBe(7);
     expect(view.thinking_level).toBe('high');
-    expect(view.token_usage).toEqual({ input_tokens: 100, output_tokens: 50, total_tokens: 150 });
+    // SPECIALISTS-120: the projection carries provenance through the live snapshot too, so
+    // `usage_source` (Pi reported this) and `total_tokens_source` (the runtime accumulated the
+    // total) are asserted here rather than being stripped on the way out.
+    expect(view.token_usage).toEqual({
+      input_tokens: 100,
+      output_tokens: 50,
+      total_tokens: 150,
+      usage_source: 'provider_usage',
+      total_tokens_source: 'derived',
+    });
   });
 
   it('projects purpose when present and omits it when absent (unitAI-uvg4j)', () => {

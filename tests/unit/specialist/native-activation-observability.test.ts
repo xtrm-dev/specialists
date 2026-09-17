@@ -459,3 +459,104 @@ describe('native Pi usage telemetry (SPECIALISTS-120)', () => {
     expect(result.stats?.sessionFile).toBeUndefined();
   });
 });
+
+// ── SPECIALISTS-120 F1: both native accumulators must agree on a compacted run ────────────
+describe('native compacted-run reconciliation (SPECIALISTS-120 F1)', () => {
+  let tempRoot: string;
+  let dbPath: string;
+  let client: ReturnType<typeof createObservabilitySqliteClientAtPath> | null;
+
+  // Worktree-local scratch, not /tmp: the shared box has a 2GB /tmp limit other
+  // sessions keep hitting. Each test owns its subdir and removes it afterwards.
+  const scratchRoot = join(import.meta.dirname, '..', '..', '.phase7-test-scratch');
+
+  beforeEach(() => {
+    tempRoot = join(scratchRoot, `native-compacted-${crypto.randomUUID()}`);
+    mkdirSync(tempRoot, { recursive: true });
+    dbPath = join(tempRoot, 'observability.db');
+    client = null;
+  });
+
+  afterEach(() => {
+    try { client?.close(); } catch { /* ignore */ }
+    rmSync(tempRoot, { recursive: true, force: true });
+  });
+
+  it('a compacted native run folds the summarization usage, so it reconciles with Pi (F1)', () => {
+    client = createObservabilitySqliteClientAtPath(dbPath);
+    expect(client).not.toBeNull();
+    const observability = client!;
+    const sink = createActivationForensicSink(observability);
+
+    const base = {
+      activationId: 'act:compact',
+      attemptId: 'att:compact:1',
+      participantId: 'specialist::executor',
+      specialist: 'executor',
+      beadId: 'bd-compact',
+    };
+    sink.emit({ ...base, name: 'activation_requested' });
+    sink.emit({ ...base, name: 'activation_admitted', payload: { resolved_model: 'zai/glm-5.3-flash' } });
+    sink.emit({ ...base, name: 'activation_started', payload: { pi_session_id: 'pi-compact' } });
+    const sessionBase = { ...base, piSessionId: 'pi-compact', workspacePath: join(tempRoot, 'worktree') };
+
+    // One assistant message, then a compaction. Pi bills the summarization call and counts it
+    // in its session totals, but it never arrives as a `message_end` — it rides on
+    // `compaction_end.result.usage`. Both are provider reports.
+    sink.sessionEvent?.({ ...sessionBase, event: {
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        usage: { input: 1_000, output: 20, totalTokens: 1_020, cost: { total: 0.4 } },
+      },
+    } });
+    sink.sessionEvent?.({ ...sessionBase, event: {
+      type: 'compaction_end',
+      reason: 'threshold',
+      aborted: false,
+      willRetry: false,
+      result: {
+        tokensBefore: 5_000,
+        estimatedTokensAfter: 900,
+        usage: { input: 800, output: 12, totalTokens: 812, cost: { total: 0.1 } },
+      },
+    } });
+
+    // Pi's own session totals include that summarization call: 1_020 + 812 tokens, 0.4 + 0.1.
+    sink.emit({ ...base, name: 'session_stats_captured', payload: {
+      session_stats: {
+        sessionId: 'pi-compact',
+        tokens: { input: 1_800, output: 32, cacheRead: 0, cacheWrite: 0, total: 1_832 },
+        cost: 0.5,
+        contextUsage: { tokens: 1_832, contextWindow: 1_000_000, percent: 21.58 },
+      },
+      pi_version: '0.85.1',
+    } });
+    sink.emit({ ...base, name: 'activation_completed', payload: { pi_session_id: 'pi-compact' } });
+
+    const status = observability.readStatus('act:compact');
+    expect(status).not.toBeNull();
+    const metrics = status!.metrics;
+
+    // The F1 symptom: folding only the mapped TOKEN_USAGE rows left the summed side exactly one
+    // summarization call short (1_020 of 1_832), so the projection said `reconciled: false` with
+    // a delta equal to that call. Both native accumulators must agree with Pi here.
+    expect(metrics?.token_usage?.total_tokens).toBe(1_832);
+    expect(metrics?.token_usage?.input_tokens).toBe(1_800);
+    expect(metrics?.reconciliation?.reconciled).toBe(true);
+    expect(metrics?.reconciliation?.fields.total).toEqual({ summed: 1_832, session_stats: 1_832, delta: 0 });
+    expect(metrics?.reconciliation?.fields.input.delta).toBe(0);
+    expect(metrics?.reconciliation?.fields.cost?.delta).toBe(0);
+
+    // F4: the native status row carries Pi's own context reading with its provenance, using the
+    // same vocabulary the legacy supervisor publishes.
+    expect(status!.context_pct).toBe(21.58);
+    expect(status!.context_pct_source).toBe('pi_session_stats');
+
+    // The terminal timeline row carries the same reconciliation, not just the status row.
+    const complete = observability.readEvents('act:compact').find((event) => event.type === 'run_complete');
+    const completeMetrics = (complete as { metrics?: { reconciliation?: { reconciled?: boolean; fields?: { total?: { delta?: number } } } } })?.metrics;
+    expect(completeMetrics?.reconciliation?.reconciled).toBe(true);
+    expect(completeMetrics?.reconciliation?.fields?.total?.delta).toBe(0);
+  });
+});

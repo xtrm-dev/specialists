@@ -59,12 +59,31 @@ export interface SessionTokenUsage {
   reasoning_tokens?: number;
   tool_tokens?: number;
   total_tokens?: number;
+  /**
+   * Provenance of `total_tokens` (SPECIALISTS-120, criterion 4). `provider` means Pi reported
+   * the total itself; `derived` means Specialists computed it from the provider's components
+   * because Pi omitted it. The object-level `usage_source` stays `provider_usage` in both
+   * cases (the components ARE provider-reported), so without this field a reader cannot tell
+   * a measured total from our arithmetic.
+   *
+   * Absent means no total is present at all.
+   */
+  total_tokens_source?: 'provider' | 'derived';
   usage_source?: 'provider_usage' | 'runtime_estimate' | 'local_estimate' | 'unknown';
   /** Cost for this usage record, as reported by Pi. Never estimated by Specialists. */
   cost?: SessionUsageCost;
   /** Pi's provider-reported usage, verbatim. Present only when Pi reported it. */
   pi_usage?: PiUsageVerbatim;
 }
+
+/**
+ * Bound on the settlement `get_session_stats` call (SPECIALISTS-120 criterion 3).
+ *
+ * ONE constant for both settlement sinks — the legacy RPC runtime (`src/pi/session.ts`) and
+ * the native in-process host — so the two runtimes cannot drift on the same bound. Each
+ * remains free to override it per run through its own option.
+ */
+export const SESSION_STATS_TIMEOUT_MS = 5_000;
 
 /**
  * Pi's `get_session_stats` response, verbatim (SPECIALISTS-120).
@@ -232,53 +251,6 @@ export function reconcileSessionUsage(
   return { reconciled, fields, cost_compared: costCompared };
 }
 
-const SUMMED_COUNTER_KEYS = [
-  'input_tokens',
-  'output_tokens',
-  'cache_creation_tokens',
-  'cache_read_tokens',
-  'cache_write_1h_tokens',
-  'reasoning_tokens',
-  'tool_tokens',
-  'total_tokens',
-] as const;
-
-/**
- * Sum two ALREADY-ADDITIVE usage totals component-wise (SPECIALISTS-120).
- *
- * Distinct from `accumulateTokenUsage`, which decides per message whether a provider reports
- * deltas or cumulative counters. This helper only ever combines totals that are known to be
- * sums, so a plain component-wise addition is correct.
- *
- * `reasoning_tokens` is summed as its own counter and is never folded into `total_tokens` or
- * `output_tokens` (criterion 6).
- */
-export function addSessionUsage(a: SessionTokenUsage | undefined, b: SessionTokenUsage | undefined): SessionTokenUsage | undefined {
-  if (!a) return b;
-  if (!b) return a;
-  const merged: SessionTokenUsage = { ...a };
-  const counters = merged as Record<(typeof SUMMED_COUNTER_KEYS)[number], number | undefined>;
-  for (const key of SUMMED_COUNTER_KEYS) {
-    const left = a[key];
-    const right = b[key];
-    if (left === undefined && right === undefined) continue;
-    counters[key] = (left ?? 0) + (right ?? 0);
-  }
-  const costKeys = ['input', 'output', 'cacheRead', 'cacheWrite', 'total'] as const;
-  if (a.cost || b.cost) {
-    const cost: SessionUsageCost = {};
-    for (const key of costKeys) {
-      const left = a.cost?.[key];
-      const right = b.cost?.[key];
-      if (left === undefined && right === undefined) continue;
-      cost[key] = (left ?? 0) + (right ?? 0);
-    }
-    merged.cost = cost;
-  }
-  if (b.usage_source) merged.usage_source = b.usage_source;
-  return merged;
-}
-
 function usageNumber(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string' && value.trim().length > 0) {
@@ -314,8 +286,12 @@ function readCost(value: unknown): SessionUsageCost | undefined {
  *
  * Returns `undefined` when no numeric field survived: a usage-shaped object carrying no
  * numbers is not usage, and persisting it would claim Pi reported something it did not.
- * The object is copied (not aliased) so a later mutation by the caller cannot rewrite
- * already-persisted telemetry.
+ *
+ * Scope of the copy (do not overstate it): top-level keys are copied and `cost` is re-read
+ * into a fresh object, so a later mutation of the caller's payload cannot rewrite either.
+ * Any other nested provider object (a provider extension field holding an object) stays
+ * SHARED with the caller's payload. This is a shallow copy, and callers must not mutate
+ * nested payload objects after capture.
  */
 export function capturePiUsageVerbatim(candidate: unknown): PiUsageVerbatim | undefined {
   if (candidate === null || typeof candidate !== 'object' || Array.isArray(candidate)) return undefined;
@@ -394,13 +370,43 @@ export function normalizeSessionTokenUsage(candidate: unknown): SessionTokenUsag
       normalized.cache_read_tokens,
     ].filter((value): value is number => value !== undefined);
     if (components.length > 0) {
+      // F3: this total is OUR arithmetic on provider-reported components. Publishing it as
+      // plain `provider_usage` would make a measured number and a computed one
+      // indistinguishable, so the derivation is named on the record itself.
       normalized.total_tokens = components.reduce((sum, value) => sum + value, 0);
+      normalized.total_tokens_source = 'derived';
     }
+  } else {
+    normalized.total_tokens_source = 'provider';
   }
 
   return Object.fromEntries(
     Object.entries(normalized).filter(([, value]) => value !== undefined),
   ) as SessionTokenUsage;
+}
+
+/**
+ * Apply the provenance POLICY in one place (SPECIALISTS-120 criterion 4).
+ *
+ * A usage object read out of a `usage`-shaped field that Pi itself reported IS
+ * `provider_usage` — but only the caller knows that, so the claim can never be inherited
+ * from the normalizer's schema default. Two runtimes used to re-implement this override
+ * (the legacy RPC parser and the native canonical reader); one implementation is what stops
+ * them from drifting. An explicit `usage_source` on the payload always wins, including an
+ * unrecognised one, which stays `unknown` rather than being promoted.
+ *
+ * Only `usage_source` is ever rewritten: `total_tokens_source`'s `derived` label from
+ * {@link normalizeSessionTokenUsage} survives untouched.
+ */
+export function asProviderUsage<T extends SessionTokenUsage>(usage: T | undefined, rawPayload: unknown): T | undefined {
+  if (!usage) return undefined;
+  if (usage.usage_source !== undefined && usage.usage_source !== 'unknown') return usage;
+  const payloadNamesSource = rawPayload !== null
+    && typeof rawPayload === 'object'
+    && typeof (rawPayload as Record<string, unknown>).usage_source === 'string';
+  if (payloadNamesSource) return usage;
+  usage.usage_source = 'provider_usage';
+  return usage;
 }
 
 /** Read Pi's `get_session_stats` response into the neutral snapshot shape, verbatim. */
@@ -522,6 +528,10 @@ export function accumulateTokenUsage<T extends object>(
   if (merged.usage_source === undefined && typeof incoming.usage_source === 'string') {
     merged.usage_source = incoming.usage_source;
   }
+  // A merged total is a SUM of per-message totals, so it is never a single provider report:
+  // labelling it `provider` would restore the F3 ambiguity one level up. Components keep
+  // their own per-message markers on the timeline and metrics rows.
+  if (typeof merged.total_tokens === 'number') merged.total_tokens_source = 'derived';
   const cost = accumulateCost(merged.cost, incoming.cost, cumulative);
   if (cost) merged.cost = cost;
   return merged as T;

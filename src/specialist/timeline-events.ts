@@ -259,6 +259,11 @@ export interface TimelineTokenUsage {
   reasoning_tokens?: number;
   tool_tokens?: number;
   total_tokens?: number;
+  /**
+   * Provenance of `total_tokens` (SPECIALISTS-120 F3): `provider` when Pi reported the total,
+   * `derived` when Specialists computed it from the provider's components because Pi omitted it.
+   */
+  total_tokens_source?: 'provider' | 'derived';
   usage_source?: 'provider_usage' | 'runtime_estimate' | 'local_estimate' | 'unknown';
   /** Cost as reported by Pi; never estimated by Specialists. */
   cost?: SessionUsageCost;

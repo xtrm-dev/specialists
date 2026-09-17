@@ -225,6 +225,15 @@ export interface ActivationTokenUsage {
   tool_tokens?: number;
   total_tokens?: number;
   /**
+   * Provenance of the usage carried here. `provider_usage` means Pi reported it; the value is
+   * carried rather than stripped from the live snapshot, because the durable timeline row can
+   * already express provenance and the in-memory representation must not be the one place that
+   * cannot (SPECIALISTS-120).
+   */
+  usage_source?: 'provider_usage' | 'runtime_estimate' | 'local_estimate' | 'unknown';
+  /** `derived` when the total is Specialists arithmetic on provider components (SPECIALISTS-120 F3). */
+  total_tokens_source?: 'provider' | 'derived';
+  /**
    * Cost as reported by Pi (SPECIALISTS-120). Carried on the cumulative spend so a native
    * activation can reconcile its summed cost against Pi's session total instead of reporting
    * a cost the runtime never collected.

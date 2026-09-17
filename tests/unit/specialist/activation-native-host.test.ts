@@ -749,6 +749,45 @@ describe('NativeActivationHost — defects found by the live smoke', () => {
     expect(sink.names).not.toContain('activation_completed');
   });
 
+  it('records an explicit settlement outcome when the prompt itself rejects (SPECIALISTS-120 F2)', async () => {
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record, assistantText: 'unused' });
+    // A prompt rejection is the path that skips the settle handler entirely: pi throws before
+    // any agent loop runs. The settlement capture must still happen, or the run is
+    // indistinguishable from one Pi never measured.
+    (session as unknown as { prompt: () => Promise<never> }).prompt = async () => {
+      throw new Error('prompt rejected by pi: already streaming');
+    };
+    (session as unknown as { getSessionStats: () => unknown }).getSessionStats = () => ({
+      sessionId: 'pi-sess-123',
+      tokens: { input: 10, output: 2, cacheRead: 0, cacheWrite: 0, total: 12 },
+      cost: 0.0001,
+    });
+
+    const sink = collectingSink();
+    const host = new NativeActivationHost({
+      loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems(),
+      loadSdk: async () => makeSdk(record, session),
+      forensics: sink,
+      cwd: hostWorkspace(),
+    });
+
+    const handle = await host.start({
+      specialist: 'researcher',
+      issueRef: 'ISSUE-1',
+      requestedByParticipantId: 'coordinator:test',
+    });
+    const result = await handle.result;
+
+    expect(result.status).toBe('failed');
+    expect(sink.names).toContain('activation_failed');
+    // F2: the snapshot is recorded BEFORE the terminal failure event, so a reader can tell a
+    // measured run from one whose capture never ran.
+    expect(sink.names).toContain('session_stats_captured');
+    expect(sink.names.indexOf('session_stats_captured')).toBeLessThan(sink.names.indexOf('activation_failed'));
+  });
+
   // unitAI-8s7xx: live logs showed one disposal pushing BOTH `completed` (from
   // `activation_settled`) and `failed` (from `activation_failed`) 10ms apart, because
   // `agent_settled` fired the terminal `activation_settled` event unconditionally, before
@@ -971,6 +1010,11 @@ describe('snapshot tokenUsage (unitAI-crjh7)', () => {
       cache_read_tokens: 100,
       reasoning_tokens: 52,
       total_tokens: 13852,
+      // SPECIALISTS-120: the live snapshot now carries provenance instead of stripping it, so
+      // it can say whether a number is Pi's report; `total_tokens_source` marks the total the
+      // runtime accumulated rather than one Pi reported per message.
+      usage_source: 'provider_usage',
+      total_tokens_source: 'derived',
     });
     expect(host.liveStats(handle.activationId)?.token_usage?.total_tokens).toBe(13852);
   });
