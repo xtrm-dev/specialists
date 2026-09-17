@@ -1,0 +1,4 @@
+# board data: exports, scratch Substrate dbs, blind samples, labels. MMD-585 carries live credentials.
+*
+!.gitignore
+!*.py
