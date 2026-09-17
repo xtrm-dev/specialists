@@ -31,6 +31,8 @@ import {
   createMetaEvent,
   createRunCompleteEvent,
   createRunStartEvent,
+  createSessionStatsErrorEvent,
+  createSessionStatsEvent,
   createTokenUsageEvent,
   createTurnSummaryEvent,
   mapCallbackEventToTimelineEvent,
@@ -1161,6 +1163,14 @@ async function runSingleAttempt(
         if (event.type === 'token_usage') appendTimelineEvent?.(createTokenUsageEvent(event.token_usage, event.source));
         if (event.type === 'finish_reason') appendTimelineEvent?.(createFinishReasonEvent(event.finish_reason, event.source));
         if (event.type === 'turn_summary') appendTimelineEvent?.(createTurnSummaryEvent(event.turn_index, event.token_usage, event.finish_reason));
+        // SPECIALISTS-120: settlement telemetry is part of the run's durable record on
+        // every surface, not just the supervisor path. Persist the terminal snapshot (or
+        // its explicit failure) so script-class jobs keep the same evidence the
+        // supervisor persists; pi_version rides the existing meta event (model/backend
+        // are unknown here, so the version event uses placeholder strings).
+        if (event.type === 'session_stats') appendTimelineEvent?.(createSessionStatsEvent(event.session_stats));
+        if (event.type === 'session_stats_error') appendTimelineEvent?.(createSessionStatsErrorEvent(event.errorMessage, event.timeoutMs));
+        if (event.type === 'pi_version') appendTimelineEvent?.(createMetaEvent(event.pi_version, 'unknown'));
         if (event.type === 'api_error') appendTimelineEvent?.(mapCallbackEventToTimelineEvent('api_error', { apiError: event }));
         if (event.type === 'compaction') appendTimelineEvent?.(mapCallbackEventToTimelineEvent(event.phase === 'start' ? 'auto_compaction_start' : 'auto_compaction_end', { compaction: event }));
         if (event.type === 'retry') appendTimelineEvent?.(mapCallbackEventToTimelineEvent(event.phase === 'start' ? 'auto_retry_start' : 'auto_retry_end', { retry: event }));
