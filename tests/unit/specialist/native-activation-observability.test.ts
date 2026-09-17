@@ -6,8 +6,10 @@ import { createActivationForensicSink } from '../../../src/activation/forensic-s
 import {
   NATIVE_LIFECYCLE_OBSERVABILITY_GAPS,
   NATIVE_SESSION_OBSERVABILITY_GAPS,
+  captureNativeSessionStats,
   mapNativeLifecycleEvent,
   mapNativeSessionEvent,
+  nativeSessionTokenUsage,
 } from '../../../src/specialist/native-activation-observability.js';
 import { createObservabilitySqliteClientAtPath } from '../../../src/specialist/observability-sqlite.js';
 
@@ -336,5 +338,124 @@ describe('native activation observability parity', () => {
       'summarization_retry_scheduled', 'summarization_retry_attempt_start',
       'summarization_retry_finished', 'bash_execution_update',
     ]));
+  });
+});
+
+// ── SPECIALISTS-120: native settlement capture and reconciliation ─────────────
+describe('native Pi usage telemetry (SPECIALISTS-120)', () => {
+  const CONTEXT = { startedAtMs: 1_000 };
+
+  it('nativeSessionTokenUsage carries provider fields verbatim and marks provider provenance', () => {
+    const usage = nativeSessionTokenUsage({
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        usage: {
+          input: 100, output: 50, cacheRead: 1000, cacheWrite: 2000, cacheWrite1h: 1500,
+          reasoning: 30, totalTokens: 3150,
+          cost: { input: 0.001, output: 0.002, cacheRead: 0.003, cacheWrite: 0.004, total: 0.01 },
+        },
+      },
+    });
+    expect(usage?.cache_write_1h_tokens).toBe(1500);
+    expect(usage?.reasoning_tokens).toBe(30);
+    expect(usage?.total_tokens).toBe(3150);
+    expect(usage?.cost?.total).toBe(0.01);
+    expect(usage?.usage_source).toBe('provider_usage');
+    expect(usage?.pi_usage).toMatchObject({ cacheWrite1h: 1500 });
+  });
+
+  it('nativeSessionTokenUsage reads toolResult usage too, so the summed side can match Pi', () => {
+    const usage = nativeSessionTokenUsage({ type: 'message_end', message: { role: 'toolResult', usage: { input: 7, output: 3 } } });
+    expect(usage?.input_tokens).toBe(7);
+    expect(nativeSessionTokenUsage({ type: 'message_end', message: { role: 'user' } })).toBeUndefined();
+    expect(nativeSessionTokenUsage({ type: 'message_end', message: { role: 'assistant' } })).toBeUndefined();
+  });
+
+  it('maps session_stats_captured onto its own terminal timeline type', () => {
+    const event = mapNativeLifecycleEvent({
+      activationId: 'act:120', specialist: 'executor', beadId: 'bd-120', name: 'session_stats_captured',
+      payload: {
+        session_stats: {
+          sessionId: 'sess-120',
+          tokens: { input: 2142, output: 16, cacheRead: 0, cacheWrite: 0, total: 2158 },
+          cost: 0.00016465,
+          contextUsage: { tokens: 2158, contextWindow: 1_000_000, percent: 0.2158 },
+        },
+      },
+    }, CONTEXT, 2_000);
+
+    expect(event?.type).toBe('session_stats');
+    expect((event as { session_stats?: { tokens?: { total?: number } } }).session_stats?.tokens?.total).toBe(2158);
+    expect((event as { source?: string }).source).toBe('settlement');
+  });
+
+  it('maps a capture failure to an explicit error event rather than dropping it', () => {
+    const event = mapNativeLifecycleEvent({
+      activationId: 'act:120', specialist: 'executor', name: 'session_stats_failed',
+      payload: { error: 'get_session_stats did not answer within 25ms', timeout_ms: 25 },
+    }, CONTEXT, 2_000);
+
+    expect(event?.type).toBe('session_stats_error');
+    expect((event as { error_message?: string }).error_message).toMatch(/did not answer/);
+    expect((event as { timeout_ms?: number }).timeout_ms).toBe(25);
+  });
+
+  it('run_complete carries cost, the session snapshot, the reconciliation and the Pi version', () => {
+    const event = mapNativeLifecycleEvent({
+      activationId: 'act:120', specialist: 'executor', beadId: 'bd-120', name: 'activation_completed',
+    }, {
+      ...CONTEXT,
+      resolvedModel: 'zai/glm-5.3-flash',
+      tokenUsage: {
+        input_tokens: 2142, output_tokens: 16, cache_read_tokens: 0, cache_creation_tokens: 0,
+        total_tokens: 2158, cost: { total: 0.00016465 },
+      },
+      sessionStats: {
+        tokens: { input: 2142, output: 16, cacheRead: 0, cacheWrite: 0, total: 2158 },
+        cost: 0.00016465,
+      },
+      piVersion: '0.85.1',
+    }, 3_000);
+
+    expect(event?.type).toBe('run_complete');
+    const complete = event as { pi_version?: string; metrics?: { cost?: { total?: number }; reconciliation?: { reconciled: boolean; fields: Record<string, { delta: number }> }; pi_version?: string } };
+    expect(complete.pi_version).toBe('0.85.1');
+    expect(complete.metrics?.cost?.total).toBeCloseTo(0.00016465, 10);
+    expect(complete.metrics?.pi_version).toBe('0.85.1');
+    expect(complete.metrics?.reconciliation?.reconciled).toBe(true);
+    expect(complete.metrics?.reconciliation?.fields.total.delta).toBe(0);
+  });
+
+  it('captureNativeSessionStats is bounded and reports a non-answering session instead of hanging', async () => {
+    const start = Date.now();
+    const result = await captureNativeSessionStats({ getSessionStats: (() => new Promise(() => {})) as never }, 25);
+    expect(Date.now() - start).toBeLessThan(2_000);
+    expect(result.stats).toBeUndefined();
+    expect(result.error).toMatch(/did not answer within 25ms/);
+  });
+
+  it('captureNativeSessionStats reports a session double without the accessor', async () => {
+    const result = await captureNativeSessionStats({} as never, 25);
+    expect(result.stats).toBeUndefined();
+    expect(result.error).toMatch(/does not expose getSessionStats/);
+  });
+
+  it('captureNativeSessionStats normalizes a live-shaped SessionStats', async () => {
+    const result = await captureNativeSessionStats({
+      getSessionStats: () => ({
+        sessionId: 'sess-live',
+        userMessages: 1,
+        assistantMessages: 1,
+        totalMessages: 2,
+        tokens: { input: 2142, output: 16, cacheRead: 0, cacheWrite: 0, total: 2158 },
+        cost: 0.00016465,
+        contextUsage: { tokens: 2158, contextWindow: 1_000_000, percent: 0.2158 },
+      }),
+    } as never, 1_000);
+    expect(result.error).toBeUndefined();
+    expect(result.stats?.tokens?.total).toBe(2158);
+    expect(result.stats?.contextUsage?.percent).toBe(0.2158);
+    expect(result.stats?.sessionFile).toBeUndefined();
   });
 });

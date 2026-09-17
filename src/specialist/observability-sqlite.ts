@@ -3108,6 +3108,10 @@ class SqliteClient implements ObservabilitySqliteClient {
           if (runMetrics?.reconciliation) usageReconciliationJson = stringifyJson(runMetrics.reconciliation);
           if (typeof event.pi_version === 'string') piVersion = event.pi_version;
           else if (typeof runMetrics?.pi_version === 'string') piVersion = runMetrics.pi_version;
+          const runContextPercent = runMetrics?.session_stats?.contextUsage?.percent;
+          if (typeof runContextPercent === 'number' && Number.isFinite(runContextPercent)) {
+            contextPctSource = 'pi_session_stats';
+          }
           continue;
         }
 
