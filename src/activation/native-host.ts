@@ -75,7 +75,8 @@ import { acquire as acquireLease, admitToolCall, release as releaseLease } from 
 import { createGuardedTools } from './guarded-tools.js';
 import { createAskTools, ASK_TOOL, ESCALATE_TOOL } from './ask-tool.js';
 import { loadPiSdk, type PiSdk, type PiAgentSessionLike, type PiAgentSessionEvent, type PiModelRuntimeLike, type PiResourceLoaderLike } from './pi-sdk.js';
-import { nativeSessionTokenUsage, accumulateTokenUsage, captureNativeSessionStats, SESSION_STATS_TIMEOUT_MS } from '../specialist/native-activation-observability.js';
+import { nativeSessionTokenUsage, nativeEventTokenUsage, isNativeUsageEvent, accumulateTokenUsage, captureNativeSessionStats } from '../specialist/native-activation-observability.js';
+import { SESSION_STATS_TIMEOUT_MS } from '../specialist/session-metrics-contract.js';
 import { createGateModelRuntime, validateModelAvailable } from './model-gate.js';
 import { FleetRegistry, RESUMABLE_STATES, RETRYABLE_STATES, nextAttemptId, type ActivationRecord } from './registry.js';
 import { publishSettlement, republishPendingSettlements, type SettlementSubject } from './settlement-publication.js';
@@ -116,10 +117,14 @@ const TOKEN_USAGE_KEYS = [
  * change must land in the canonical reader, never in a second reader here.
  */
 function extractTokenUsage(event: PiAgentSessionEvent): ActivationTokenUsage | undefined {
-  const nested = nativeSessionTokenUsage(event);
+  // The ONE rule for which events carry usage (`message_end`, `compaction_end`), shared with
+  // the forensic sink's projection so the two native accumulators cannot disagree (F1).
+  const nested = nativeEventTokenUsage(event);
   if (nested) {
-    const { usage_source: _ignored, ...usage } = nested;
-    if (Object.keys(usage).length > 0) return usage;
+    // Provenance and the derived-total label are carried, not stripped: the live snapshot must
+    // be able to say whether a number is Pi's report, and the durable timeline row already can.
+    // Stripping `usage_source` here was the asymmetry the seconder gate flagged.
+    return nested;
   }
   const candidates = [event.token_usage, event.tokenUsage, event.usage];
   for (const candidate of candidates) {
@@ -2017,35 +2022,17 @@ export class NativeActivationHost {
     // Session spend merges one message's provider counts into the running total
     // (unitAI-beqby.15): per-message deltas add whole, cumulative-per-message
     // counters add only their growth, so neither shape flaps the row down nor
-    // explodes it. Accumulate on message_end only — the one event per message
-    // carrying final usage — so streaming partials can never double-count.
-    if (event.type === 'message_end') {
-      const usage = extractTokenUsage(event);
-      if (usage) {
-        const seen = this.lastUsageSeen.get(snapshot) ?? {};
-        snapshot.tokenUsage = accumulateTokenUsage(snapshot.tokenUsage, usage, seen);
-        this.lastUsageSeen.set(snapshot, seen);
-      }
-    }
-
-    // SPECIALISTS-120: compaction summarization is an LLM call Pi bills and counts in its
-    // session totals. It never appears on an assistant message, so a summed side that ignored
-    // it could never reconcile with Pi's own session snapshot.
-    if (event.type === 'compaction_end') {
-      const compactionResult = event.result !== null && typeof event.result === 'object'
-        ? event.result as Record<string, unknown>
-        : undefined;
-      // Read through the SAME canonical reader as message usage: the summarization call's
-      // usage is nested under `result.usage` in Pi's AgentSessionEvent.
-      const usage = extractTokenUsage({
-        type: 'message_end',
-        message: { role: 'assistant', usage: compactionResult?.usage },
-      } as PiAgentSessionEvent);
-      if (usage) {
-        const seen = this.lastUsageSeen.get(snapshot) ?? {};
-        snapshot.tokenUsage = accumulateTokenUsage(snapshot.tokenUsage, usage, seen);
-        this.lastUsageSeen.set(snapshot, seen);
-      }
+    // explodes it. Exactly ONE rule decides which events carry usage
+    // (`isNativeUsageEvent` + `nativeEventTokenUsage`, shared with the forensic sink's
+    // projection), and it covers `compaction_end` as well as `message_end`: the
+    // summarization call is billed by Pi and counted in its session totals, and it never
+    // appears as an assistant message, so a rule that read only `message_end` made every
+    // compacted activation disagree with Pi's own snapshot (SPECIALISTS-120 F1).
+    const usage = isNativeUsageEvent(event) ? extractTokenUsage(event) : undefined;
+    if (usage) {
+      const seen = this.lastUsageSeen.get(snapshot) ?? {};
+      snapshot.tokenUsage = accumulateTokenUsage(snapshot.tokenUsage, usage, seen);
+      this.lastUsageSeen.set(snapshot, seen);
     }
 
     // Offer the RAW event before any translation. Deliberately not wrapped in try/catch:
@@ -2233,6 +2220,17 @@ export class NativeActivationHost {
     emit: (name: string, payload?: Record<string, unknown>) => void,
     record: ActivationRecord,
   ): Promise<ActivationResult> {
+    // SPECIALISTS-120 criterion 3 / F2: the settlement capture also runs on the FAILURE path.
+    // A prompt rejection or a mid-run throw used to settle with no snapshot AND no
+    // `session_stats_failed`, which is indistinguishable from a run Pi never measured. The
+    // absence has to be explicit. `captureSessionStats` never throws and is bounded, so this
+    // cannot block completion, and the flag keeps it to one outcome per attempt.
+    let settlementRecorded = false;
+    const recordSettlementOnce = async (): Promise<void> => {
+      if (settlementRecorded) return;
+      settlementRecorded = true;
+      await this.captureSessionStats(session, emit);
+    };
     try {
       await session.prompt(initialPrompt);
       await session.waitForIdle();
@@ -2240,7 +2238,7 @@ export class NativeActivationHost {
       // SPECIALISTS-120 criterion 3: Pi's session totals are captured at settlement, before
       // any terminal activation event, so run_complete can carry the snapshot and its
       // reconciliation. Bounded and failure-tolerant by construction — see the helper.
-      await this.captureSessionStats(session, emit);
+      await recordSettlementOnce();
 
       // A settled session is NOT a successful one. pi records a failed turn as an
       // assistant message with stopReason 'error' (or 'aborted') and an errorMessage —
@@ -2334,6 +2332,10 @@ export class NativeActivationHost {
       snapshot.state = 'failed';
       this.save(snapshot);
       const message = error instanceof Error ? error.message : String(error);
+      // The run failed by THROWING, not by settling: without this the terminal event would be
+      // the only record, and a reader could not tell "Pi never reported totals" from "the
+      // capture was never attempted" (SPECIALISTS-120 F2). Bounded, never throws.
+      await recordSettlementOnce();
       emit('activation_failed', { error: message });
       // SPECIALISTS-51: a rejected prompt is not always a settled one. pi emits agent_settled from a
       // finally around its agent loop, so a turn that fails by THROWING still settles and the settle

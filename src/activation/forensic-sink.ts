@@ -21,6 +21,7 @@ import {
   mapNativeSessionEvent,
   nativeAttemptIdForNo,
   nativeAttemptNo,
+  nativeEventTokenUsage,
 } from '../specialist/native-activation-observability.js';
 import type {
   ObservabilityIdentityProjection,
@@ -120,6 +121,16 @@ function statusOf(
   error?: string,
 ): SupervisorStatus {
   const elapsedMs = Math.max(0, state.lastEventAtMs - state.startedAtMs);
+  // SPECIALISTS-120 criterion 2 (F4): native status rows publish the same two-value provenance
+  // vocabulary the legacy path uses. Pi's own reading is `pi_session_stats`; with no snapshot
+  // the fields stay ABSENT rather than guessed, because the host never sees the model's context
+  // window and therefore cannot compute the legacy `specialists_fallback` estimate. A `null`
+  // percent (Pi's post-compaction state) is not a reading either and stays absent.
+  // `context_health` is deliberately not published: its threshold table lives with the legacy
+  // supervisor, and every consumer derives health from `context_pct`.
+  const contextPct = typeof state.sessionStats?.contextUsage?.percent === 'number'
+    ? Number(state.sessionStats.contextUsage.percent.toFixed(2))
+    : undefined;
   // SPECIALISTS-120 criterion 5: the run-level reconciliation is exposed on every status
   // projection, so a reader sees the difference between Specialists' summed usage and Pi's
   // session snapshot without re-deriving it.
@@ -150,6 +161,7 @@ function statusOf(
       auto_compactions: state.autoCompactions,
       auto_retries: state.autoRetries,
     },
+    ...(contextPct !== undefined ? { context_pct: contextPct, context_pct_source: 'pi_session_stats' as const } : {}),
     error,
   };
 }
@@ -325,11 +337,18 @@ export function createActivationForensicSink(
         states.set(input.activationId, state);
 
         const timelineEvents = mapNativeSessionEvent(input.event, now, state.turns);
+        // SPECIALISTS-120 F1: fold through the SAME rule the host's live accumulator uses, so a
+        // compacted run's summarization usage reaches the projection as well. Reading only the
+        // mapped TOKEN_USAGE rows missed it — that usage rides on the COMPACTION row — which left
+        // this accumulator disagreeing with the host and with Pi's own session totals, and turned
+        // every compacted activation into `reconciled=false` with a delta of exactly the
+        // summarization call.
+        const eventUsage = nativeEventTokenUsage(input.event);
+        if (eventUsage) state.tokenUsage = accumulateTokenUsage(state.tokenUsage, eventUsage, state.lastUsageSeen);
         for (const timelineEvent of timelineEvents) {
           if (timelineEvent.type === TIMELINE_EVENT_TYPES.TEXT && typeof timelineEvent.content === 'string') {
             state.latestOutput = timelineEvent.content;
           }
-          if (timelineEvent.type === TIMELINE_EVENT_TYPES.TOKEN_USAGE) state.tokenUsage = accumulateTokenUsage(state.tokenUsage, timelineEvent.token_usage, state.lastUsageSeen);
           if (timelineEvent.type === TIMELINE_EVENT_TYPES.FINISH_REASON) state.finishReason = timelineEvent.finish_reason;
           if (timelineEvent.type === TIMELINE_EVENT_TYPES.TOOL && timelineEvent.phase === 'end') {
             state.toolCalls.push(timelineEvent.tool);

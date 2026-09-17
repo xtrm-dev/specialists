@@ -52,17 +52,22 @@ import { buildResolvedToolContract, type ResolvedToolContract } from '../special
 import { loadToolCatalogIndex, type ToolCatalogIndex, resolveCatalogVersionVerdict } from '../specialist/tool-catalog.js';
 import {
   accumulateTokenUsage,
+  asProviderUsage,
   normalizeSessionTokenUsage,
   normalizePiSessionStats,
   reconcileSessionUsage,
+  SESSION_STATS_TIMEOUT_MS,
   type PiSessionStats,
   type SessionMetricEvent,
   type SessionRunMetrics,
   type SessionTokenUsage,
 } from '../specialist/session-metrics-contract.js';
 
-/** Bound on the settlement `get_session_stats` call; see PiSessionOptions.sessionStatsTimeoutMs. */
-const SESSION_STATS_TIMEOUT_MS = 5_000;
+/**
+ * Bound on the settlement `get_session_stats` call; see PiSessionOptions.sessionStatsTimeoutMs.
+ * The value itself is `SESSION_STATS_TIMEOUT_MS` from the neutral contract, shared with the
+ * native settlement sink so the two runtimes cannot drift on the same bound.
+ */
 const TEST_COMMAND_STALL_TIMEOUT_MS = 300_000;
 const GITNEXUS_IMPACT_STALL_TIMEOUT_MS = 300_000;
 const TEST_COMMAND_PATTERNS: ReadonlyArray<RegExp> = [
@@ -779,15 +784,9 @@ function asNumber(value: unknown): number | undefined {
 function normalizeTokenUsage(candidate: unknown, providerReported = true): SessionTokenUsage | undefined {
   const normalized = normalizeSessionTokenUsage(candidate);
   if (!normalized) return undefined;
-  if (providerReported && normalized.usage_source === 'unknown' && !hasExplicitUsageSource(candidate)) {
-    normalized.usage_source = 'provider_usage';
-  }
-  return normalized;
-}
-
-function hasExplicitUsageSource(candidate: unknown): boolean {
-  if (candidate === null || typeof candidate !== 'object') return false;
-  return typeof (candidate as Record<string, unknown>).usage_source === 'string';
+  // The provenance POLICY lives in the contract, so this parser and the native canonical
+  // reader cannot drift on when `provider_usage` may be claimed (SPECIALISTS-120 criterion 4).
+  return providerReported ? asProviderUsage(normalized, candidate) : normalized;
 }
 
 function findFinishReason(payload: unknown): string | undefined {

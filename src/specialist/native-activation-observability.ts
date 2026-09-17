@@ -20,9 +20,11 @@ import {
   type TimelineTokenUsage,
 } from './timeline-events.js';
 import {
+  asProviderUsage,
   normalizePiSessionStats,
   normalizeSessionTokenUsage,
   reconcileSessionUsage,
+  SESSION_STATS_TIMEOUT_MS,
   type PiSessionStats,
   type SessionUsageReconciliation,
 } from './session-metrics-contract.js';
@@ -235,9 +237,48 @@ export function nativeSessionTokenUsage(event: PiAgentSessionEvent): TimelineTok
 
   const normalized = normalizeSessionTokenUsage(usage);
   if (!normalized) return undefined;
-  // An explicit `usage_source` on the payload wins; otherwise this is Pi's provider report.
-  if (normalized.usage_source === 'unknown') normalized.usage_source = 'provider_usage';
-  return normalized as TimelineTokenUsage;
+  // Provenance policy, in one place shared with the legacy RPC parser: an explicit
+  // `usage_source` on the payload wins; otherwise this IS Pi's provider report.
+  return asProviderUsage(normalized, usage) as TimelineTokenUsage;
+}
+
+/**
+ * The events that carry billable Pi usage (SPECIALISTS-120 F1).
+ *
+ * ONE rule, consulted by {@link nativeEventTokenUsage} and by the host accumulator's gate, so
+ * adding an event shape cannot silently update one runtime and not the other.
+ */
+export function isNativeUsageEvent(event: PiAgentSessionEvent): boolean {
+  return event.type === 'message_end' || event.type === 'compaction_end';
+}
+
+/**
+ * Read the billable usage off a native Pi session event (SPECIALISTS-120 F1).
+ *
+ * Two accumulators consume this reader — the host's live activation snapshot and the forensic
+ * sink's durable projection — and they own their state separately by design: the host holds
+ * the in-memory activation, the sink holds the persisted projection, and the sink must stay
+ * usable when fed raw events with no host (its tests and any offline replay do exactly that).
+ * What they must NEVER do is own different RULES, which is what made them disagree:
+ *
+ * - `message_end` carries an assistant or toolResult usage report.
+ * - `compaction_end` carries the summarization call's usage under `result.usage`. Pi bills and
+ *   counts that call in its session totals, and it never arrives as a message, so a rule that
+ *   only read `message_end` under-reported every compacted run and produced a `reconciled=false`
+ *   reconciliation whose delta was exactly the summarization call.
+ *
+ * Both shapes are read through the same canonical reader, so a provider field that survives on
+ * a message survives on a compaction summary too.
+ */
+export function nativeEventTokenUsage(event: PiAgentSessionEvent): TimelineTokenUsage | undefined {
+  if (!isNativeUsageEvent(event)) return undefined;
+  if (event.type === 'message_end') return nativeSessionTokenUsage(event);
+  const result = record(event.result);
+  if (!result) return undefined;
+  return nativeSessionTokenUsage({
+    type: 'message_end',
+    message: { role: 'assistant', usage: result.usage },
+  } as PiAgentSessionEvent);
 }
 
 /**
@@ -274,9 +315,6 @@ export async function captureNativeSessionStats(
     if (timer) clearTimeout(timer);
   }
 }
-
-/** Bound on the native settlement session-stats call. Mirrors the legacy RPC bound. */
-export const SESSION_STATS_TIMEOUT_MS = 5_000;
 
 /**
  * Per-message usage accumulation lives in the neutral session-metrics contract
