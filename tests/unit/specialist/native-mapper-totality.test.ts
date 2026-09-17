@@ -1,6 +1,7 @@
 import { Database } from 'bun:sqlite';
-import { mkdirSync, rmSync, readFileSync } from 'node:fs';
+import { mkdirSync, rmSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createActivationForensicSink } from '../../../src/activation/forensic-sink.js';
 import {
@@ -12,19 +13,42 @@ import {
 import { createObservabilitySqliteClientAtPath } from '../../../src/specialist/observability-sqlite.js';
 
 /**
- * SPECIALISTS-101 totality guard.
+ * SPECIALISTS-101 totality guard, comment-stripping and glob repair (SPECIALISTS-111).
  *
- * Every event name the native host can emit must have an EXPLICIT disposition:
- * either (a) handled by an explicit mapper arm (mapNativeLifecycleEvent returns non-null),
- * or (b) listed in an explicit registry of deliberately-unpersisted names with a non-empty
- * written reason. A name in neither FAILS the test.
+ * Every event name the native host can emit IN ONE OF THE RECOGNISED LITERAL FORMS
+ * must have an EXPLICIT disposition: either (a) handled by an explicit mapper arm
+ * (mapNativeLifecycleEvent returns non-null), or (b) listed in an explicit registry
+ * of deliberately-unpersisted names with a non-empty written reason. A name in
+ * neither FAILS the test.
  *
- * The inventory below is an independent enumeration of emit sites (grep over
- * src/activation/native-host.ts, src/activation/settlement-publication.ts and
- * src/activation/workspace-reconcile.ts for `emit('...')`, `name: '...'` and the two
- * dynamic ternary names). The `inventory matches emit sites` test pins it to the sources
- * so a newly emitted name cannot slip in without updating this file — and the totality
- * test then forces an explicit disposition for it.
+ * How the inventory is pinned to the sources: the `inventory matches emit sites`
+ * test scans every `*.ts` file under `src/activation/` (derived by directory walk,
+ * NOT a hard-coded file list) AFTER stripping line and block comments, and
+ * recognises two literal shapes plus an explicit dynamic list:
+ *   - call form: `emit('name', ...)` (any receiver, either quote style);
+ *   - object form: `forensics.emit({ ..., name: 'name', ... })` — EVERY literal
+ *     counts, including names never seen before;
+ *   - dynamic form: ternary/computed emits (e.g. `emit(kind ? 'a' : 'b')`), each
+ *     name enumerated explicitly in the test and probed over the stripped corpus.
+ * A newly emitted literal name with no inventory entry fails the `missing`
+ * assertion; an inventory entry whose every site was deleted or commented out
+ * fails the `stale` assertion. A commented-out emit is INVISIBLE to this guard
+ * by design — commenting out a real producer's only site turns the guard RED
+ * (via `stale`), it does not silently stay green.
+ *
+ * WHAT THIS GUARD STILL CANNOT PROVE (read before citing it):
+ *   - It cannot prove the producer RUNS. It enumerates source text, never executes
+ *     a producer; a name with an emit site and a mapper arm may still never fire
+ *     at runtime. The execution-backed canonical oracle
+ *     (tests/unit/specialist/supervisor-canonical-proof.ts) proves mapped names
+ *     persist, but it is manifest-driven (SUPERVISOR_CANONICAL_INVENTORY) and
+ *     cannot enumerate new emits either.
+ *   - It cannot see a name that appears ONLY inside a computed expression outside
+ *     the enumerated dynamic list (e.g. a new ternary pair). New emits must use a
+ *     literal call-form or object-form name to be enumerated.
+ *   - It is a bounded regex over stripped source, not an AST walk: an unrelated
+ *     `name: 'literal'` string in `src/activation/` would surface as `missing`
+ *     (fail-closed triage, not silent escape).
  *
  * Runtime safety is unchanged: the mapper's `default: return null` still drops unknown
  * names without crashing the writer. This guard is a TEST-time obligation, not a runtime throw.
@@ -115,6 +139,72 @@ function isMapped(name: string): boolean {
   return mapNativeLifecycleEvent(base(name), CONTEXT, 1000) !== null;
 }
 
+/**
+ * Strip line comments and block comments while leaving string
+ * literals (single, double, backtick) intact, so a commented-out emit cannot
+ * satisfy the inventory and a `//` inside a string (e.g. a URL) cannot hide a
+ * real emit on the same line. Newlines are preserved.
+ *
+ * SIMPLIFIED: single-pass lexer, not a parser — `${}` expressions inside
+ * template literals are treated as opaque text. Upgrade when an emit site puts
+ * a computed name inside a template expression.
+ */
+function stripTypeScriptComments(text: string): string {
+  let out = '';
+  let i = 0;
+  const n = text.length;
+  let quote: string | null = null;
+  while (i < n) {
+    const ch = text[i]!;
+    const next = i + 1 < n ? text[i + 1]! : '';
+    if (quote !== null) {
+      out += ch;
+      if (ch === '\\' && i + 1 < n) {
+        out += next;
+        i += 2;
+        continue;
+      }
+      if (ch === quote) quote = null;
+      i++;
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === '`') {
+      quote = ch;
+      out += ch;
+      i++;
+      continue;
+    }
+    if (ch === '/' && next === '/') {
+      while (i < n && text[i] !== '\n') i++;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      i += 2;
+      while (i < n && !(text[i] === '*' && i + 1 < n && text[i + 1] === '/')) {
+        if (text[i] === '\n') out += '\n';
+        i++;
+      }
+      i += 2;
+      continue;
+    }
+    out += ch;
+    i++;
+  }
+  return out;
+}
+
+/** Every TypeScript source under a directory, sorted, so a new file cannot escape the scan. */
+function listTypeScriptSources(dir: string): string[] {
+  const out: string[] = [];
+  const entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
+  for (const entry of entries) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...listTypeScriptSources(full));
+    else if (entry.isFile() && entry.name.endsWith('.ts')) out.push(full);
+  }
+  return out;
+}
+
 function deliberatelyUnpersistedReason(name: string): string | undefined {
   const lifecycle = (NATIVE_LIFECYCLE_OBSERVABILITY_GAPS as unknown as Record<string, string> | undefined)?.[name];
   if (typeof lifecycle === 'string' && lifecycle.trim().length > 0) return lifecycle;
@@ -129,36 +219,44 @@ function deliberatelyUnpersistedReason(name: string): string | undefined {
 
 describe('native mapper totality (SPECIALISTS-101)', () => {
   it('inventory matches the emit sites (a new emit without an inventory update fails here)', () => {
-    const host = readFileSync(new URL('../../../src/activation/native-host.ts', import.meta.url), 'utf-8');
-    const publication = readFileSync(
-      new URL('../../../src/activation/settlement-publication.ts', import.meta.url),
-      'utf-8',
-    );
-    const reconcile = readFileSync(
-      new URL('../../../src/activation/workspace-reconcile.ts', import.meta.url),
-      'utf-8',
-    );
-    const found = new Set<string>();
-    for (const text of [host, publication, reconcile]) {
-      for (const match of text.matchAll(/emit\('([^']+)'/g)) found.add(match[1]!);
-      for (const match of text.matchAll(/name:\s*'([^']+)'/g)) {
-        const name = match[1]!;
-        // Workspace-reconcile and host direct emits use the lifecycle vocabulary;
-        // ignore non-lifecycle string literals that share the `name:` shape.
-        if ((NATIVE_EMIT_INVENTORY as readonly string[]).includes(name)) found.add(name);
-      }
+    // Derived file set: every TypeScript source under src/activation/, so an emit
+    // added in a new activation file is scanned too (the previous hard-coded
+    // three-file list let any other file escape entirely).
+    const activationDir = fileURLToPath(new URL('../../../src/activation/', import.meta.url));
+    const sources = listTypeScriptSources(activationDir);
+    // The glob must not silently lose the three files this guard was built on.
+    for (const required of ['native-host.ts', 'settlement-publication.ts', 'workspace-reconcile.ts']) {
+      expect(
+        sources.some((file) => file.endsWith(`/${required}`)),
+        `scanned file set lost ${required}`,
+      ).toBe(true);
     }
-    // Dynamic ternary emits have no `emit('literal')` shape; they are still emit sites.
+    // Comments are stripped BEFORE scanning: an emit that survives only inside a
+    // comment is invisible here, so commenting out a real producer's only site
+    // fails `stale` instead of staying green.
+    const stripped = sources.map((file) => stripTypeScriptComments(readFileSync(file, 'utf-8')));
+    const corpus = stripped.join('\n');
+    const found = new Set<string>();
+    for (const text of stripped) {
+      // Call form: emit('name', ...) with any receiver, either quote style.
+      for (const match of text.matchAll(/emit\(\s*['"]([^'"]+)['"]/g)) found.add(match[1]!);
+      // Object form: forensics.emit({ ..., name: 'name', ... }). EVERY literal
+      // counts — filtering to already-inventoried names here is what let a
+      // brand-new object-form name slip past unseen (SPECIALISTS-111).
+      for (const match of text.matchAll(/name:\s*['"]([^'"]+)['"]/g)) found.add(match[1]!);
+    }
+    // Dynamic form: ternary/computed emits match neither shape above, so each name
+    // is enumerated explicitly and probed over the whole stripped corpus.
+    // workspace-reconcile emits via `name: applied ? 'lease_reconciled' : 'lease_uncertain'`.
     for (const dynamic of [
       'escalation_raised',
       'escalation_resolved',
       'clarification_requested',
       'clarification_answered',
+      'lease_reconciled',
     ]) {
-      if (host.includes(`'${dynamic}'`)) found.add(dynamic);
+      if (corpus.includes(`'${dynamic}'`) || corpus.includes(`"${dynamic}"`)) found.add(dynamic);
     }
-    // lease_reconciled is emitted via workspace-reconcile (name: 'lease_reconciled').
-    if (reconcile.includes(`'lease_reconciled'`)) found.add('lease_reconciled');
 
     const inventory = new Set<string>(NATIVE_EMIT_INVENTORY as readonly string[]);
     const missing = [...found].filter((name) => !inventory.has(name)).sort();
