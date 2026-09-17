@@ -244,8 +244,8 @@ describe('observability sqlite migration V16 (SPECIALISTS-120)', () => {
       } as unknown as TimelineEvent,
     ];
 
-    client.upsertStatusWithEvents(status, events);
-    const metrics = client.aggregateJobMetrics(jobId);
+    client!.upsertStatusWithEvents(status, events);
+    const metrics = client!.aggregateJobMetrics(jobId);
     expect(metrics).not.toBeNull();
 
     expect(metrics!.cost_total).toBeCloseTo(0.00016465, 10);
@@ -264,12 +264,12 @@ describe('observability sqlite migration V16 (SPECIALISTS-120)', () => {
     expect(client).not.toBeNull();
 
     const jobId = 'job-nostats';
-    client.upsertStatusWithEvents(
+    client!.upsertStatusWithEvents(
       { id: jobId, specialist: 'executor', status: 'done', started_at_ms: 3_000, last_event_at_ms: 3_100 },
       [{ t: 3_050, type: 'run_complete', status: 'COMPLETE', elapsed_s: 0.1 } as unknown as TimelineEvent],
     );
 
-    const metrics = client.aggregateJobMetrics(jobId);
+    const metrics = client!.aggregateJobMetrics(jobId);
     expect(metrics).not.toBeNull();
     expect(metrics!.cost_total).toBeNull();
     expect(metrics!.session_stats_json).toBeNull();

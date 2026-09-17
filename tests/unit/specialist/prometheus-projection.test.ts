@@ -5,7 +5,7 @@ import type { JobMetricsRecord } from '../../../src/specialist/observability-sql
 import type { SupervisorStatus } from '../../../src/specialist/supervisor.js';
 
 function metric(overrides: Partial<JobMetricsRecord> = {}): JobMetricsRecord {
-  return {
+  const base: JobMetricsRecord = {
     job_id: 'job-1',
     specialist: 'executor',
     model: 'openai/gpt-5.4-mini',
@@ -28,9 +28,16 @@ function metric(overrides: Partial<JobMetricsRecord> = {}): JobMetricsRecord {
     stall_gaps_json: '[]',
     run_complete_json: null,
     startup_payload_json: null,
+    cost_total: null,
+    session_stats_json: null,
+    usage_reconciliation_json: null,
+    pi_version: null,
+    context_pct_source: null,
     updated_at_ms: 10_000,
-    ...overrides,
   };
+  // `Object.assign` keeps the return type `JobMetricsRecord`: spreading the `Partial`
+  // overrides directly would widen every overridable field to `T | undefined`.
+  return Object.assign(base, overrides);
 }
 
 describe('prometheus-projection', () => {
