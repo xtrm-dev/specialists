@@ -223,11 +223,13 @@ describe('XTRM-96 reconciled observability read model', () => {
     const admitted = event('act:model', 1, 'control.activation_admitted.recorded', 'control', {
       correlation: { attempt_id: 'att:model:1', pi_session_id: 'pi-1', workspace_id: 'ws-1' },
       body: {
-        configured_model: 'cfg/model',
-        requested_model: 'alias/model',
-        resolved_model: 'canon/model',
-        model_override: true,
-        thinking_level: 'medium',
+        legacy_timeline_event: {
+          configured_model: 'cfg/model',
+          requested_model: 'alias/model',
+          resolved_model: 'canon/model',
+          model_override: true,
+          thinking_level: 'medium',
+        },
       },
     });
     const finished = event('act:model', 2, 'job.completed', 'job', {
