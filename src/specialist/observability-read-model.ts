@@ -323,24 +323,44 @@ export function readResultProjection(
   source: ObservabilityReadSource,
   ref: { jobId: string; attemptId?: string },
 ): ResultProjection {
-  if (ref.attemptId) {
-    const proof = source.readForensicEvents({
+  const status = source.readStatus(ref.jobId);
+  if (!status) {
+    return {
       jobId: ref.jobId,
-      attemptId: ref.attemptId,
-      limit: 1,
-      order: 'asc',
-    });
-    if (proof.length === 0) {
+      ...(ref.attemptId ? { attemptId: ref.attemptId } : {}),
+      attemptVerified: false,
+      output: null,
+      available: false,
+      error: `No job found: ${ref.jobId}`,
+    };
+  }
+
+  if (ref.attemptId) {
+    let attemptIds: string[];
+    try {
+      attemptIds = source.listForensicAttemptIds(ref.jobId);
+    } catch {
       return {
         jobId: ref.jobId,
         attemptId: ref.attemptId,
         attemptVerified: false,
         output: null,
         available: false,
-        error: `Cannot verify attempt '${ref.attemptId}' for activation '${ref.jobId}' from forensic history`,
+        error: `Cannot verify attempt '${ref.attemptId}' for activation '${ref.jobId}': forensic read failed.`,
+      };
+    }
+    if (!attemptIds.includes(ref.attemptId)) {
+      return {
+        jobId: ref.jobId,
+        attemptId: ref.attemptId,
+        attemptVerified: false,
+        output: null,
+        available: false,
+        error: `No such attempt '${ref.attemptId}' for activation '${ref.jobId}'.`,
       };
     }
   }
+
   const output = source.readResult(ref.jobId);
   return {
     jobId: ref.jobId,
