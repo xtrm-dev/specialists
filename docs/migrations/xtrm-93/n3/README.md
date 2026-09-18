@@ -70,7 +70,8 @@ PR #382 (mapper totality) converted the 18 undocumented silent drops into mapped
 `tool_contract_unsatisfied_on_fallback`, extension_* ×3 deliberately unpersisted) plus a test-time
 totality obligation, so `NATIVE_GAP` rows of that shape are now mapped or deliberately absent;
 PR #387 added the native `tool_duration` stale-warning producer and mapper arm; PR #388 mapped
-`activation_resumed` to `status_change('running','waiting')` and added the post-loop phase flush.
+`activation_resumed` to `status_change('running','waiting')` and added the post-loop phase flush;
+SPECIALISTS-119 set the flush endpoint to the last job-produced event (reader status-load rows excluded).
 Quote the counts above only with this correction attached.
 
 ## 3. Verified defects, with the acceptance consequence of each
@@ -106,11 +107,24 @@ clock" is satisfied *by the defect*, because dropping intervals can only shrink 
 parent contract at revision 3. Evidence: `coordinator/T0e-phase-flush.md`.
 
 **CORRECTION 2026-09-17 — CLOSED by PR #388 (SPECIALISTS-106, Lane D).** The post-loop flush ships:
-a phase still open at end-of-stream is closed at the last event's t (`observability-sqlite.ts:3069-3077`),
-landing in the bucket named by the actually-open phase. The present-tense "silently drops" above is
-HISTORICAL. Residual semantics — the flush target is the last event of ANY type (not the last
-phase-relevant event), and null-phase windows stay unattributed — are documented in
-`tests/unit/specialist/phase-accounting-invariant.test.ts` (I1-FLUSH).
+a phase still open at end-of-stream is closed, landing in the bucket named by the actually-open phase.
+The present-tense "silently drops" above is HISTORICAL.
+
+**CORRECTION 2026-09-18 — endpoint DECIDED by SPECIALISTS-119.** The flush endpoint is the `t` of the
+last **job-produced** event (`observability-sqlite.ts:3090-3109`), not the last event of any type. A
+reader-produced `status-load` reconciliation row — a `meta` row carrying `'status-load'` in
+`source`/`backend`/`data.component`, or `model === 'status_reconciled'` — is EXCLUDED from endpoint
+selection: `status-load.ts` writes it with `t: Date.now()` when a status verb first observes a terminal
+`run_complete`, so it records the OPERATOR'S READ TIME, not activation activity. The prior "last event of
+ANY type" wording is superseded. Null-phase windows (e.g. run_complete → next status_change) stay
+unattributed. Decision, rejected alternative, corpus impact and limits:
+`coordinator/phase-accounting-corpus-receipt.md` and
+tests/unit/specialist/phase-accounting-invariant.test.ts (I1-FLUSH).
+
+**Operator statement (SPECIALISTS-119).** A parked activation's trailing silence is charged to the phase
+open at the activation's own last event; a later `sp ps`/`sp status`/`sp chat`/`sp attach` read is not
+charged, so `waiting_ms` (and `xtrm_job_wait_seconds`) no longer grows with operator read latency, while a
+trailing job-produced non-phase event (tool/text/payload_breakdown) still extends the endpoint.
 
 ### 3.4 The extension telemetry surface does not exist
 
@@ -199,7 +213,7 @@ This section is the point of the exercise. Each row is a plausible statement tha
 |---|---|---|---|
 | 1 | Rebuild `dist` in the **main checkout** (unitAI-1pqtl closeout) | Inverted. The main checkout is the **drifted** host; the lockfile defines the artifact | §3.7 |
 | 2 | `xtrm_llm_tokens_total` is per-turn for legacy, cumulative for native (audit TEL-D-014/C4) | The metric has **no series** for either engine. The proposed `aggregation` discriminator would not have fixed it | §3.2 |
-| 3 | `waiting_ms` **absorbs** the post-settle interval (brief §11) | Both intervals undercount when a phase is left open; there is no post-loop flush — CORRECTED 2026-09-17: the flush ships (PR #388, `obs-sqlite:3069-3077`); this row is HISTORICAL | §3.3 |
+| 3 | `waiting_ms` **absorbs** the post-settle interval (brief §11) | Both intervals undercount when a phase is left open; there is no post-loop flush — CORRECTED 2026-09-17: the flush ships (PR #388, then at `obs-sqlite:3069-3077`); this row is HISTORICAL. CORRECTED 2026-09-18: SPECIALISTS-119 set the flush endpoint to the last JOB-PRODUCED event (reader status-load rows excluded), now at `obs-sqlite:3090-3109` | §3.3 |
 | 4 | `extension_discovery_sessions` exists and must be preserved (brief §14) | Nothing is persisted. Zero rows, no table, no writer | §3.4 |
 | 5 | `resumed` and `retrying` are distinct covered states (brief §11) | The distinguishing signals are both dropped; native resume ≡ retry — CORRECTED 2026-09-17: `activation_resumed` maps to running re-entry (PR #388) and `activation_retried` to `control.activation_retried.recorded` (PR #382); this row is HISTORICAL | §3.5 |
 | 6 | The counting divergence is *between* engines (`total_turns`, tokens) | The token defect is a **shared** reader bug: `NATIVE_GAP` **and** `LEGACY_GAP`, not a divergence | §3.2 |

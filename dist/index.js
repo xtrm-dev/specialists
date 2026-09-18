@@ -14192,6 +14192,12 @@ function buildAttemptId(jobId, attemptNo) {
 function isRetryStartEvent(event) {
   return event.type === "retry" && event.phase === "start";
 }
+function isReaderProducedReconciliationEvent(event) {
+  if (event.type !== "meta")
+    return false;
+  const meta = event;
+  return meta.source === "status-load" || meta.backend === "status-load" || meta.model === "status_reconciled" || meta.data?.component === "status-load";
+}
 function migrateToV4(db) {
   const hasV4 = db.query("SELECT 1 FROM schema_version WHERE version = 4 LIMIT 1").get();
   if (hasV4) {
@@ -16105,8 +16111,16 @@ class SqliteClient {
           stallGaps.push({ t: event.t, tool: event.tool ?? null, silence_ms: event.silence_ms, threshold_ms: event.threshold_ms });
         }
       }
-      if (events.length > 0) {
-        closePhase(events[events.length - 1].t);
+      let flushAtMs = null;
+      for (let i = events.length - 1;i >= 0; i -= 1) {
+        const candidate = events[i];
+        if (isReaderProducedReconciliationEvent(candidate))
+          continue;
+        flushAtMs = candidate.t;
+        break;
+      }
+      if (flushAtMs !== null) {
+        closePhase(flushAtMs);
       }
       if (startedAtMs !== null && completedAtMs === null) {
         completedAtMs = events.length > 0 ? events[events.length - 1].t : startedAtMs;

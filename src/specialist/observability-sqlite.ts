@@ -391,6 +391,27 @@ function isRetryStartEvent(event: { type: string; phase?: unknown }): boolean {
   return event.type === 'retry' && event.phase === 'start';
 }
 
+/**
+ * Reader-produced status-load reconciliation evidence (SPECIALISTS-119).
+ *
+ * `status-load.ts` writes a `meta` row when a status-reading verb first
+ * observes a terminal `run_complete`, stamping it `t: Date.now()` at read time
+ * — the time of the OPERATOR'S READ, not activation activity. It is legitimate
+ * evidence (deduped to one row per job) but it is not the activation's last
+ * observed activity, so it must not close a phase still open at end-of-stream.
+ * Identified only by the properties status-load writes — never by job id or a
+ * timestamp window. `dead_job_detected` carries the same source/backend/
+ * component and is excluded for the same reason.
+ */
+function isReaderProducedReconciliationEvent(event: TimelineEvent): boolean {
+  if (event.type !== 'meta') return false;
+  const meta = event as { source?: unknown; backend?: unknown; model?: unknown; data?: { component?: unknown } };
+  return meta.source === 'status-load'
+    || meta.backend === 'status-load'
+    || meta.model === 'status_reconciled'
+    || meta.data?.component === 'status-load';
+}
+
 function migrateToV4(db: BunDb): void {
   const hasV4 = db.query('SELECT 1 FROM schema_version WHERE version = 4 LIMIT 1').get() as { 1?: number } | undefined;
   if (hasV4) {
@@ -3120,16 +3141,33 @@ class SqliteClient implements ObservabilitySqliteClient {
         }
       }
 
-      // Post-loop flush (XTRM-93 N3 defect 1): a phase still open at
-      // end-of-stream is real time the job spent running or waiting. Close it at
-      // the last event's t — the same target the completed_at_ms back-fill below
-      // uses — so no interval is silently dropped from BOTH buckets. The residual
-      // lands in the bucket named by the phase that was actually open; it is
-      // never dumped into waiting_ms by default (I2-ter).
-      if (events.length > 0) {
-        closePhase(events[events.length - 1]!.t);
+      // Post-loop flush (XTRM-93 N3 defect 1; endpoint policy SPECIALISTS-119):
+      // a phase still open at end-of-stream is real time spent running or
+      // waiting; close it at the `t` of the LAST JOB-PRODUCED event — not the
+      // last event of any type. Reader-produced status-load rows are written by
+      // the observer at read time (`status-load.ts` stamps `t: Date.now()`), so
+      // they are excluded from endpoint selection (the no-job-produced case is
+      // unreachable: only run_start/status_change open a phase, never a reader
+      // row). POLICY LIMIT: the flush attributes exactly [phase start, endpoint]
+      // and I2-ter (residual to the open phase's bucket, never forced into
+      // waiting_ms) holds only to it; a reader-only tail past the endpoint is deliberately left out of BOTH buckets — a visible, intended undercount, not a routing.
+      let flushAtMs: number | null = null;
+      for (let i = events.length - 1; i >= 0; i -= 1) {
+        const candidate = events[i]!;
+        if (isReaderProducedReconciliationEvent(candidate)) continue;
+        flushAtMs = candidate.t;
+        break;
+      }
+      if (flushAtMs !== null) {
+        closePhase(flushAtMs);
       }
 
+      // Divergence from the flush endpoint above, by design: `completedAtMs`
+      // back-fills to the LAST EVENT OF ANY TYPE (reader rows included), while the
+      // flush stops at the last JOB-PRODUCED event. Specialists-119 measured the
+      // divergence as unobservable in the corpus: 88 jobs end in a reader row
+      // (367.52 h of truncated tail) and 0 of them have a stored completed_at_ms at
+      // or after the trailing reader row, so elapsed_ms absorbs no read latency.
       if (startedAtMs !== null && completedAtMs === null) {
         completedAtMs = events.length > 0 ? events[events.length - 1]!.t : startedAtMs;
       }
