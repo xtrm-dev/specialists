@@ -3,8 +3,8 @@ name: using-specialists
 description: >
   Use Specialists as a governed XTRM execution backend for tracked implementation,
   debugging, review, testing, security, documentation, research, and other role-shaped
-  work. Use when work already has a durable XTRM contract and benefits from a distinct
-  specialist role, supervised job lifecycle, review/fix loop, retained evidence, or an
+  work. Use when work already has a durable Substrate Issue contract and benefits from a distinct
+  specialist role, native activation lifecycle, review/fix loop, retained evidence, or an
   advanced Specialists surface such as node/script execution, KPI analysis, or specialist
   definition authoring. Read live `specialists list --full` and `sp help` before relying
   on remembered roles or flags.
@@ -40,13 +40,13 @@ generic native chain runtime is not yet a released contract. Do not pretend it i
 
 ## Contract precondition
 
-A specialist receives a durable XTRM work item. The bead must already be a usable
-contract before dispatch.
+A specialist receives a durable Substrate Issue. The Issue must already be a usable
+contract (attested, ready) before dispatch.
 
-- Read it with `bd show <id>`.
+- Read it with `sb issue show <ref>` (pinned revision + readiness).
 - If it is a draft, incomplete, stale, or contradicted by current code, repair it through
   the XTRM planning/contract workflow before dispatch.
-- Do not use an ad-hoc prompt to smuggle missing requirements around the bead.
+- Do not use an ad-hoc prompt to smuggle missing requirements around the Issue.
 - The same contract-quality rule applies to every XTRM worker, not only Specialists.
 
 The detailed contract-writing doctrine belongs to `/planning`; Specialists consumes it.
@@ -68,7 +68,7 @@ requires a child agent.
 ```text
 contract ready
   -> select live specialist
-  -> dispatch against the bead
+  -> dispatch against the Issue (`issue_ref`; `bead_id` is a permanent alias)
   -> observe job state/evidence
   -> consume the persisted result
   -> verify findings against current tree/state
@@ -199,7 +199,7 @@ capabilities.
 
 ## What this skill deliberately does not own
 
-- Generic bead/contract authoring -> `/planning` and `/using-xtrm`.
+- Generic Issue/contract authoring -> `/planning` and `/using-xtrm`.
 - Session cold-start, context-pressure handoff, resume -> `/starting-and-resuming-work`.
 - Native peer/subagent communication -> `/multiplexing`.
 - Generic code exploration strategy -> `/gitnexus`.

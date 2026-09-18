@@ -6,7 +6,7 @@ receive:
 - correct repository/worktree/branch;
 - required prior commits/results present;
 - no unresolved conflict or dirty state that changes the contract;
-- bead is ready and still matches current code;
+- Issue is attested/ready and the pinned revision still matches current code;
 - no existing worker unexpectedly owns the same mutable surface;
 - required tools/package/runtime are healthy enough to start.
 

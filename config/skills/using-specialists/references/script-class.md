@@ -18,7 +18,7 @@ specialists list --full
 Do not freeze remembered flags or model names into long-lived automation. Pin the behavior
 your caller depends on and verify it in a fresh process.
 
-Switch back to the normal `/using-specialists` lifecycle when work needs a durable bead
+Switch back to the normal `/using-specialists` lifecycle when work needs a durable Issue
 contract, file writes/worktree, resume/steer behavior, independent review/test gates, or
 multi-step implementation/debugging.
 
