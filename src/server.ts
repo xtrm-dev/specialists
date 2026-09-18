@@ -23,16 +23,18 @@ import { createForensicEvent, deploymentEnvironment } from './specialist/forensi
 import { createObservabilitySqliteClient, type ObservabilitySqliteClient } from './specialist/observability-sqlite.js';
 import { SpecialistLoader } from './specialist/loader.js';
 import { CircuitBreaker } from './utils/circuitBreaker.js';
-import { createSpecialistStatusTool } from './tools/specialist/specialist_status.tool.js';
+import { createSpecialistStatusTool, specialistStatusSchema } from './tools/specialist/specialist_status.tool.js';
 import { createSpecialistListTool, specialistListSchema } from './tools/specialist/specialist_list.tool.js';
 import {
   createSpecialistDispatchTool,
   createSpecialistReplyTool,
   createSpecialistRetryTool,
+  createSpecialistSteerTool,
   createSpecialistStopActivationTool,
   specialistDispatchSchema,
   specialistReplySchema,
   specialistRetrySchema,
+  specialistSteerSchema,
   specialistStopSchema,
 } from './tools/specialist/activation.tool.js';
 import { NativeActivationHost } from './activation/native-host.js';
@@ -168,6 +170,7 @@ export class SpecialistsServer {
       createSpecialistDispatchTool(getHost, getPusher),
       createSpecialistReplyTool(getHost),
       createSpecialistRetryTool(getHost, getPusher),
+      createSpecialistSteerTool(getHost),
       createSpecialistStopActivationTool(getHost),
       createSpecialistListTool(loader),
     ];
@@ -180,12 +183,13 @@ export class SpecialistsServer {
 
   private setupHandlers(): void {
     const schemaMap: Record<string, z.ZodTypeAny> = {
+      specialist_status: specialistStatusSchema,
       specialist_dispatch: specialistDispatchSchema,
       specialist_reply: specialistReplySchema,
       specialist_retry: specialistRetrySchema,
+      specialist_steer: specialistSteerSchema,
       specialist_stop_activation: specialistStopSchema,
       specialist_list: specialistListSchema,
-      // specialist_status takes no arguments; the empty-object default applies.
     };
     this.toolSchemas = schemaMap;
 

@@ -238,10 +238,20 @@ describe('specialist_dispatch inline path — one gate, create only after it pas
     expect(typeof (createdOpts as { activationId?: unknown }).activationId).toBe('string');
     expect(out.status).toBe('dispatched');
     expect(out.bead_id).toBe('bd-inline-1');
-    expect(out.issue_ref).toBe('bd-inline-1');
+    // issue_ref is verbose-only; compact keeps bead_id (same ref, compatibility alias).
+    expect(out).not.toHaveProperty('issue_ref');
     expect(out.created_bead_id).toBe('bd-inline-1');
     expect(String(out.created_bead_note)).toMatch(/yours to track/i);
     expect(sessionsCreated.count).toBe(1);
+    // full:true restores the verbose alias alongside bead_id.
+    const { host: host2 } = hostWith();
+    const tool2 = createSpecialistDispatchTool(() => host2);
+    const fullOut = await tool2.execute({
+      specialist: 'researcher', contract: INLINE_CONTRACT, full: true,
+    }) as Record<string, unknown>;
+    expect(fullOut.issue_ref).toBe('bd-inline-1');
+    expect(fullOut.bead_id).toBe('bd-inline-1');
+
     // The created issue reads back through the host Fleet.
     expect(host.list().map(s => s.issueRef)).toContain('bd-inline-1');
   });

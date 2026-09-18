@@ -26,7 +26,9 @@ import {
   createSpecialistDispatchTool,
   createSpecialistReplyTool,
   createSpecialistRetryTool,
+  createSpecialistSteerTool,
   createSpecialistStopActivationTool,
+  toActivationCompactView,
   toActivationView,
 } from '../../../src/tools/specialist/activation.tool.js';
 import { createSpecialistStatusTool } from '../../../src/tools/specialist/specialist_status.tool.js';
@@ -79,6 +81,8 @@ interface HostFixture {
   readContractState?: () => string | undefined;
   /** First turn fails terminally; later turns succeed — drives a real failed activation. */
   failFirst?: { stopReason: string; errorMessage: string };
+  /** Hold the fake session open (never settle) so the activation stays running. */
+  holdOpen?: boolean;
 }
 
 /**
@@ -88,7 +92,7 @@ interface HostFixture {
  * refusal below must leave it at zero, which is the in-process shadow of the process-table
  * assertion the live test makes.
  */
-function fakeSession(failFirst?: { stopReason: string; errorMessage: string }): PiAgentSessionLike {
+function fakeSession(failFirst?: { stopReason: string; errorMessage: string }, holdOpen = false, steered: string[] = []): PiAgentSessionLike {
   const listeners: Array<(e: PiAgentSessionEvent) => void> = [];
   const messages: unknown[] = [];
   let prompts = 0;
@@ -100,6 +104,7 @@ function fakeSession(failFirst?: { stopReason: string; errorMessage: string }): 
     activeTools: ['read', 'grep'],
     async prompt() {
       listeners.forEach(l => l({ type: 'agent_start' }));
+      if (holdOpen) return new Promise<never>(() => {});
       prompts += 1;
       // A fail-first session lets the retry test drive a real failed activation: the
       // dispatch turn fails terminally ('permanent boom' classifies unknown, so no
@@ -112,7 +117,8 @@ function fakeSession(failFirst?: { stopReason: string; errorMessage: string }): 
       listeners.forEach(l => l({ type: 'agent_end', willRetry: false }));
       listeners.forEach(l => l({ type: 'agent_settled' }));
     },
-    async steer() {}, async followUp() {}, async abort() {},
+    async steer(text: string) { steered.push(text); },
+    async followUp() {}, async abort() {},
     dispose() { session.disposed = true; },
     subscribe(l: (e: PiAgentSessionEvent) => void) {
       listeners.push(l);
@@ -152,7 +158,8 @@ afterEach(() => {
 function hostWith(fixture: HostFixture = {}) {
   const sessionsCreated = { count: 0 };
   const workspace = tempWorkspace();
-  const session = fakeSession(fixture.failFirst);
+  const steered: string[] = [];
+  const session = fakeSession(fixture.failFirst, fixture.holdOpen ?? false, steered);
   const sdk: PiSdk = {
     createAgentSession: async (options?: Record<string, unknown>) => {
       sessionsCreated.count += 1;
@@ -205,7 +212,7 @@ function hostWith(fixture: HostFixture = {}) {
     forensics: { emit: (e) => { events.push(e.name); } },
     cwd: workspace.worktreePath,
   });
-  return { host, events, sessionsCreated, workspace };
+  return { host, events, sessionsCreated, workspace, session, steered };
 }
 
 describe('specialist_dispatch — the MCP dispatch path is the same admission path', () => {
@@ -243,6 +250,7 @@ describe('specialist_dispatch — the MCP dispatch path is the same admission pa
       specialist: 'researcher',
       bead_id: 'ISSUE-1',
       model_override: 'testprov/asked-for-model',
+      full: true,
     }) as Record<string, unknown>;
 
     expect(out.status).toBe('dispatched');
@@ -259,6 +267,7 @@ describe('specialist_dispatch — the MCP dispatch path is the same admission pa
       specialist: 'researcher',
       bead_id: 'ISSUE-1',
       thinking_override: 'high',
+      full: true,
     }) as Record<string, unknown>;
 
     expect(out.status).toBe('dispatched');
@@ -270,7 +279,7 @@ describe('specialist_dispatch — the MCP dispatch path is the same admission pa
     const { host } = hostWith({ thinkingLevel: 'low' });
     const tool = createSpecialistDispatchTool(() => host);
 
-    const out = await tool.execute({ specialist: 'researcher', bead_id: 'ISSUE-1' }) as Record<string, unknown>;
+    const out = await tool.execute({ specialist: 'researcher', bead_id: 'ISSUE-1', full: true }) as Record<string, unknown>;
 
     expect(out.status).toBe('dispatched');
     expect(out.thinking_level).toBe('low');
@@ -284,7 +293,7 @@ describe('specialist_dispatch — the MCP dispatch path is the same admission pa
     const { host } = hostWith();
     const tool = createSpecialistDispatchTool(() => host);
 
-    const out = await tool.execute({ specialist: 'researcher', bead_id: 'ISSUE-1' }) as Record<string, unknown>;
+    const out = await tool.execute({ specialist: 'researcher', bead_id: 'ISSUE-1', full: true }) as Record<string, unknown>;
 
     expect(out.model_override).toBe(false);
     expect(out.requested_model).toBe('testprov/test-model');
@@ -383,15 +392,41 @@ describe('specialist_status — an MCP activation reads back identically', () =>
 
     // VALIDATION 4 is an IDENTITY claim, so assert identity: what status reports is the
     // host's own snapshot projected by the same function, not a shape invented for MCP.
+    // Compact is now the default (SPECIALISTS-142); full:true restores the verbose shape.
     // elapsed_s is time-dependent (two projections a millisecond apart can straddle a
     // second boundary), so it is compared separately as a non-negative number.
     const { elapsed_s: _tick, ...reported } = activations[0];
-    const { elapsed_s: _retick, ...reprojected } = toActivationView(host.list()[0]) as Record<string, unknown>;
+    const { elapsed_s: _retick, ...reprojected } = toActivationCompactView(host.list()[0]) as Record<string, unknown>;
     expect(reported).toEqual(reprojected);
     expect(typeof _tick).toBe('number');
     expect(_tick as number).toBeGreaterThanOrEqual(0);
     expect(out).not.toHaveProperty('specialists');
     expect(out).not.toHaveProperty('background_jobs');
+    // Compact drops the forensic/diagnostic tail.
+    expect(activations[0]).not.toHaveProperty('contract_hash');
+    expect(activations[0]).not.toHaveProperty('execution_binding_id');
+    expect(activations[0]).not.toHaveProperty('participant_id');
+  });
+
+  it('restores the verbose shape under full:true (SPECIALISTS-142)', async () => {
+    const { host } = hostWith();
+    const dispatch = createSpecialistDispatchTool(() => host);
+    const status = createSpecialistStatusTool(
+      { list: async () => [] } as never,
+      new CircuitBreaker(),
+      () => host,
+    );
+
+    const dispatched = await dispatch.execute({ specialist: 'researcher', bead_id: 'ISSUE-1' }) as Record<string, unknown>;
+    const out = await status.execute({ full: true }) as Record<string, unknown>;
+    const activations = out.activations as Record<string, unknown>[];
+
+    const { elapsed_s: _tick, ...reported } = activations[0];
+    const { elapsed_s: _retick, ...reprojected } = toActivationView(host.list()[0]) as Record<string, unknown>;
+    expect(reported).toEqual(reprojected);
+    expect(activations[0].activation_id).toBe(dispatched.activation_id);
+    expect(out).toHaveProperty('loaded_count');
+    expect(out).toHaveProperty('backends_health');
   });
 
   it('keeps the host projection compact instead of serializing runtime details', async () => {
@@ -428,7 +463,7 @@ describe('specialist_status — an MCP activation reads back identically', () =>
       () => host as never,
     );
 
-    const out = await status.execute({}) as Record<string, unknown>;
+    const out = await status.execute({ full: true }) as Record<string, unknown>;
     const serialized = JSON.stringify(out);
 
     expect(out).not.toHaveProperty('specialists');
@@ -448,6 +483,26 @@ describe('specialist_status — an MCP activation reads back identically', () =>
       requested_model: 'provider/requested',
       resolved_model: 'provider/resolved',
     })]);
+  });
+
+  it('compact status carries result_status instead of the result body (SPECIALISTS-142)', async () => {
+    const { host } = hostWith();
+    const dispatch = createSpecialistDispatchTool(() => host);
+    const pusherLike = { allResults: () => [] };
+    const status = createSpecialistStatusTool(
+      { list: async () => [] } as never,
+      new CircuitBreaker(),
+      () => host,
+      () => pusherLike as never,
+    );
+    const dispatched = await dispatch.execute({ specialist: 'researcher', bead_id: 'ISSUE-1' }) as Record<string, unknown>;
+    const out = await status.execute({}) as Record<string, unknown>;
+    const activations = out.activations as Record<string, unknown>[];
+    expect(activations).toHaveLength(1);
+    expect(activations[0].activation_id).toBe(dispatched.activation_id);
+    expect(activations[0]).not.toHaveProperty('result');
+    expect(out).not.toHaveProperty('activation_results');
+    expect(out).not.toHaveProperty('loaded_count');
   });
 
   it('reports an empty Fleet rather than failing when no host is wired', async () => {
@@ -543,6 +598,7 @@ describe('6-tool v2 surface inventory', () => {
       createSpecialistDispatchTool(() => host),
       createSpecialistReplyTool(() => host),
       createSpecialistResumeTool(() => host),
+      createSpecialistSteerTool(() => host),
       createSpecialistStopActivationTool(() => host),
       createSpecialistListTool({ list: async () => [] } as never),
     ];
@@ -551,9 +607,60 @@ describe('6-tool v2 surface inventory', () => {
       'specialist_dispatch',
       'specialist_reply',
       'specialist_resume',
+      'specialist_steer',
       'specialist_stop_activation',
       'specialist_list',
     ]);
+  });
+});
+
+describe('specialist_steer — redirecting a running activation (SPECIALISTS-141)', () => {
+  it('steers a running activation through the live session with context intact', async () => {
+    const { host, steered } = hostWith({ holdOpen: true });
+    const dispatch = createSpecialistDispatchTool(() => host);
+    const steer = createSpecialistSteerTool(() => host);
+
+    const dispatched = await dispatch.execute({ specialist: 'researcher', bead_id: 'ISSUE-1' }) as Record<string, unknown>;
+    const out = await steer.execute({
+      activation_id: String(dispatched.activation_id),
+      message: 'focus only on supervisor.ts',
+    }) as Record<string, unknown>;
+    expect(out.status).toBe('steered');
+    expect(out.activation_id).toBe(dispatched.activation_id);
+    expect(out.specialist).toBe('researcher');
+    expect(out.state).toBe('running');
+    // The message reached the LIVE session object: same session, same attempt,
+    // context intact — and the activation is still the same live run.
+    expect(steered).toEqual(['focus only on supervisor.ts']);
+    expect(host.list()).toHaveLength(1);
+    expect(host.list()[0].state).toBe('running');
+    // Compact by default: no forensic tail, no result body.
+    expect(out).not.toHaveProperty('contract_hash');
+    expect(out).not.toHaveProperty('result');
+  });
+
+  it('refuses a settled activation with a pointer to resume', async () => {
+    const { host } = hostWith();
+    const dispatch = createSpecialistDispatchTool(() => host);
+    const steer = createSpecialistSteerTool(() => host);
+
+    const dispatched = await dispatch.execute({ specialist: 'researcher', bead_id: 'ISSUE-1' }) as Record<string, unknown>;
+    await host.stop(String(dispatched.activation_id), 'test');
+    // A stopped activation is gone: unknown_activation.
+    const gone = await steer.execute({
+      activation_id: String(dispatched.activation_id),
+      message: 'too late',
+    }) as Record<string, unknown>;
+    expect(gone.status).toBe('rejected');
+    expect(String(gone.reason)).toMatch(/unknown_activation/);
+  });
+
+  it('reports an unknown activation as a refusal', async () => {
+    const { host } = hostWith();
+    const steer = createSpecialistSteerTool(() => host);
+    const out = await steer.execute({ activation_id: 'act:nope', message: 'hi' }) as Record<string, unknown>;
+    expect(out.status).toBe('rejected');
+    expect(String(out.reason)).toMatch(/unknown_activation/);
   });
 });
 

@@ -2943,6 +2943,47 @@ export class NativeActivationHost {
   }
 
   /**
+   * Steer a RUNNING activation mid-run with a new instruction, keeping its
+   * session and context intact (SPECIALISTS-141).
+   *
+   * This is the channel `specialist_reply` (ask-only) and `specialist_resume`
+   * (settled/waiting only) cannot provide: a quiet executor in `running` or
+   * `starting` state that never raised a question. Delivery goes through the
+   * live `PiAgentSessionLike.steer`, so no new session is built, the attempt id
+   * does not advance, and no lease is touched. Every other state is refused
+   * with a pointer to the tool that owns it (resume for settled/waiting, retry
+   * for failed, reply for outstanding asks, stop for disposal).
+   */
+  async steer(activationId: string, message: string): Promise<void> {
+    const record = this.registry.get(activationId);
+    if (!record) {
+      throw new DispatchRejectedError('unknown_activation', { activationId });
+    }
+    if (record.snapshot.state !== 'running' && record.snapshot.state !== 'starting') {
+      const state = record.snapshot.state;
+      const hint = state === 'settled' || state === 'waiting' || state === 'needs_reply' || state === 'escalated'
+        ? `Activation ${activationId} is ${state} — use resume, which keeps the live session.`
+        : state === 'failed'
+          ? `Activation ${activationId} is failed — use retry to re-run it in place.`
+          : `Activation ${activationId} is ${state} — steer it or stop it first.`;
+      throw new DispatchRejectedError('not_steerable', {
+        activationId,
+        note: `state is "${state}". steer only redirects running activations. ${hint}`,
+      });
+    }
+    await record.session.steer(message);
+    this.forensics.emit({
+      activationId,
+      attemptId: record.snapshot.attemptId,
+      participantId: record.snapshot.participantId,
+      specialist: record.snapshot.specialist,
+      beadId: record.snapshot.issueRef,
+      name: 'activation_steered',
+      payload: {},
+    });
+  }
+
+  /**
    * Attach a listener to a live activation's event stream without perturbing its turn.
    *
    * Subscribing is additive — `PiAgentSessionLike.subscribe` fans out to every listener —

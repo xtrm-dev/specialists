@@ -3,10 +3,13 @@ import type { SpecialistLoader, SpecialistSummary } from '../../specialist/loade
 export declare const specialistListSchema: z.ZodObject<{
     name: z.ZodOptional<z.ZodString>;
     detail: z.ZodOptional<z.ZodEnum<["compact", "full"]>>;
+    full: z.ZodOptional<z.ZodBoolean>;
 }, "strip", z.ZodTypeAny, {
+    full?: boolean | undefined;
     name?: string | undefined;
     detail?: "full" | "compact" | undefined;
 }, {
+    full?: boolean | undefined;
     name?: string | undefined;
     detail?: "full" | "compact" | undefined;
 }>;
@@ -30,10 +33,13 @@ export declare function createSpecialistListTool(loader: SpecialistLoader): {
     inputSchema: z.ZodObject<{
         name: z.ZodOptional<z.ZodString>;
         detail: z.ZodOptional<z.ZodEnum<["compact", "full"]>>;
+        full: z.ZodOptional<z.ZodBoolean>;
     }, "strip", z.ZodTypeAny, {
+        full?: boolean | undefined;
         name?: string | undefined;
         detail?: "full" | "compact" | undefined;
     }, {
+        full?: boolean | undefined;
         name?: string | undefined;
         detail?: "full" | "compact" | undefined;
     }>;

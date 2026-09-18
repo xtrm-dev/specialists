@@ -432,6 +432,7 @@ export function mapNativeLifecycleEvent(
     // uncomparable, not unimportant. Each keeps its own action (= emitted name) so the
     // forensic event_name stays distinct (`control.<name>.recorded`).
     case 'activation_retried':
+    case 'activation_steered':
     case 'lease_release_failed':
     case 'mandatory_rules_injection':
     case 'tool_contract_unsatisfied_on_fallback':

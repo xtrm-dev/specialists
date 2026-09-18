@@ -149,6 +149,70 @@ export interface PendingAskView {
   asked_at: number;
 }
 
+/**
+ * Compact activation summary — the DEFAULT tool-call rendering (SPECIALISTS-142).
+ *
+ * Identity, state, cost and intent: the fields a coordinator polling a Fleet
+ * scans. Forensic and diagnostic fields (participant_id, attempt_id,
+ * issue_id, issue_revision, contract_hash, execution_binding_id,
+ * worktree_path, model_override, thinking_override, last_activity_at,
+ * tool_contract_notes, config_notes) stay available under `full: true` via
+ * `toActivationView`. A settled activation carries only the result STATUS
+ * here — the result body is drill-down under `full`.
+ */
+export interface ActivationCompactView {
+  activation_id: string;
+  specialist: string;
+  bead_id: string;
+  state: string;
+  access: 'read' | 'write';
+  resolved_model: string;
+  thinking_level?: string;
+  elapsed_s: number;
+  turn_count?: number;
+  token_usage?: ActivationTokenUsage;
+  purpose?: string;
+  result_status?: string;
+}
+
+export function toActivationCompactView(snapshot: ActivationSnapshot, nowMs: number = Date.now()): ActivationCompactView {
+  return {
+    activation_id: snapshot.activationId,
+    specialist: snapshot.specialist,
+    bead_id: snapshot.issueRef,
+    state: snapshot.state,
+    access: snapshot.access,
+    resolved_model: snapshot.resolvedModel,
+    ...(snapshot.thinkingLevel ? { thinking_level: snapshot.thinkingLevel } : {}),
+    elapsed_s: Math.max(0, Math.floor((nowMs - snapshot.startedAt) / 1000)),
+    ...(snapshot.turnCount !== undefined ? { turn_count: snapshot.turnCount } : {}),
+    ...(snapshot.tokenUsage ? { token_usage: { ...snapshot.tokenUsage } } : {}),
+    ...(snapshot.purpose ? { purpose: snapshot.purpose } : {}),
+  };
+}
+
+/** Compact ask: the body is load-bearing (the coordinator must answer it), so it
+ * stays; delivery plumbing (`attempt_id`, `to`, `delivery`) is `full`-only. */
+export interface PendingAskCompactView {
+  message_id: string;
+  kind: string;
+  activation_id: string;
+  from: string;
+  body: string;
+  asked_at: number;
+}
+
+export function toPendingAskCompactView(ask: PendingAsk): PendingAskCompactView {
+  return {
+    message_id: ask.message.messageId,
+    kind: ask.message.kind,
+    activation_id: ask.message.activationId,
+    from: ask.message.from,
+    body: ask.message.body,
+    asked_at: ask.askedAt,
+  };
+}
+
 export function toPendingAskView(ask: PendingAsk): PendingAskView {
   return {
     message_id: ask.message.messageId,
@@ -260,6 +324,15 @@ function renderDispatchRejection(error: DispatchRejectedError) {
   );
 }
 
+/** Compact-by-default flag (SPECIALISTS-142): every verbose tool takes `full` and
+ * returns the compact projection unless it is set. `full: true` restores the
+ * pre-142 verbose shape byte-for-shape, so existing consumers opt back in. */
+export const fullFlag = {
+  full: z.boolean().optional().describe(
+    'Return the full verbose payload (pre-SPECIALISTS-142 shape). Default compact.',
+  ),
+};
+
 export const specialistDispatchSchema = z.object({
   specialist: z.string().describe('Specialist name, e.g. codebase-explorer'),
   issue_ref: z.string().optional().describe(
@@ -317,6 +390,7 @@ export const specialistDispatchSchema = z.object({
     'ParticipantId of the requesting coordinator. Defaults to the MCP gateway participant.',
   ),
   coordinator_session_id: z.string().optional().describe('MCP session id, for lineage.'),
+  ...fullFlag,
 });
 
 /**
@@ -446,9 +520,12 @@ export function createSpecialistDispatchTool(
         );
 
         const snapshot = getHost().inspect(handle.activationId);
+        const view = snapshot
+          ? input.full ? toActivationView(snapshot) : toActivationCompactView(snapshot)
+          : { activation_id: handle.activationId };
         return {
           status: 'dispatched' as const,
-          ...(snapshot ? toActivationView(snapshot) : { activation_id: handle.activationId }),
+          ...view,
           // An inline contract creates a durable board record. Saying so in the RESULT
           // is the difference between a coordinator tracking it and an operator finding
           // an orphan bead later — the caller cannot see the side effect otherwise.
@@ -472,6 +549,52 @@ export function createSpecialistDispatchTool(
         // A refusal is the gate working, so it stays a returned tool result — throwing
         // would reach Claude as an opaque MCP error string. Shape comes from the shared
         // renderer: `missing` is promoted top-level but never removed from `detail`.
+        if (error instanceof DispatchRejectedError) {
+          return renderDispatchRejection(error);
+        }
+        throw error;
+      }
+    },
+  };
+}
+
+export const specialistSteerSchema = z.object({
+  activation_id: z.string().describe('The running activation to redirect mid-run.'),
+  message: z.string().describe('Steering instruction delivered into the live session — the child receives it after its current tool calls finish, before the next model call, with context intact.'),
+  ...fullFlag,
+});
+
+/**
+ * Steer a running activation mid-run (SPECIALISTS-141).
+ *
+ * The missing channel: `specialist_reply` answers outstanding asks only, and
+ * `specialist_resume` refuses running activations — so a quiet executor could
+ * only be stopped, never redirected. This delivers into the LIVE session
+ * (`host.steer` → `session.steer`): same session, same attempt, no lease
+ * movement. Refusals point at the owning tool (resume/retry/reply/stop).
+ */
+export function createSpecialistSteerTool(getHost: () => NativeActivationHost) {
+  return {
+    name: 'specialist_steer' as const,
+    description:
+      'Redirect a RUNNING Specialist mid-run with a new instruction, keeping its session ' +
+      'and context intact. Use for a quiet executor that never raised a question; answer an ' +
+      'outstanding ask with specialist_reply, resume a settled activation with ' +
+      'specialist_resume, re-run a failed one with specialist_retry. Refused on any ' +
+      'non-running state with a pointer to the owning tool.',
+    inputSchema: specialistSteerSchema,
+    async execute(input: z.infer<typeof specialistSteerSchema>) {
+      const build = () => describeBuildIdentity(LOADED_BUILD_ID, readBuildId(DIST_LIB_PATH));
+      try {
+        await getHost().steer(input.activation_id, input.message);
+        const snapshot = getHost().inspect(input.activation_id);
+        return {
+          status: 'steered' as const,
+          ...(snapshot
+            ? input.full ? toActivationView(snapshot) : toActivationCompactView(snapshot)
+            : { activation_id: input.activation_id }),
+        };
+      } catch (error) {
         if (error instanceof DispatchRejectedError) {
           return renderDispatchRejection(error);
         }
@@ -570,6 +693,7 @@ export const specialistRetrySchema = z.object({
   prompt: z.string().optional().describe(
     'Replacement turn prompt. Defaults to the dispatch-time render of the same Issue.',
   ),
+  ...fullFlag,
 });
 
 /**
@@ -619,9 +743,12 @@ export function createSpecialistRetryTool(
         );
 
         const snapshot = getHost().inspect(handle.activationId);
+        const view = snapshot
+          ? input.full ? toActivationView(snapshot) : toActivationCompactView(snapshot)
+          : { activation_id: handle.activationId };
         return {
           status: 'retried' as const,
-          ...(snapshot ? toActivationView(snapshot) : { activation_id: handle.activationId }),
+          ...view,
         };
       } catch (error) {
         if (error instanceof DispatchRejectedError) {

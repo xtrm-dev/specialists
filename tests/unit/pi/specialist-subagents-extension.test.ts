@@ -20,6 +20,7 @@ vi.mock('typebox', () => ({
     Object: (props) => ({ type: 'object', properties: props }),
     String: (opts = {}) => ({ type: 'string', ...opts }),
     Integer: (opts = {}) => ({ type: 'integer', ...opts }),
+    Boolean: (opts = {}) => ({ type: 'boolean', ...opts }),
     Optional: (schema) => schema,
   },
 }));
@@ -69,7 +70,7 @@ const ASK = {
 };
 
 function makeFakeHost() {
-  const calls = { start: [], answer: [], stop: [], resume: [], retry: [] };
+  const calls = { start: [], answer: [], stop: [], resume: [], retry: [], steer: [] };
   const host = {
     start: vi.fn(async (req) => {
       calls.start.push(req);
@@ -120,6 +121,16 @@ function makeFakeHost() {
     }),
     stop: vi.fn(async (activationId, reason) => {
       calls.stop.push([activationId, reason]);
+    }),
+    steer: vi.fn(async (activationId, message) => {
+      calls.steer.push([activationId, message]);
+      const snap = host.inspect(activationId);
+      if (!snap || (snap.state !== 'running' && snap.state !== 'starting')) {
+        throw new DispatchRejectedError('not_steerable', {
+          activationId,
+          note: `state is "${snap?.state}"`,
+        });
+      }
     }),
     resume: vi.fn(async (activationId, prompt) => {
       calls.resume.push([activationId, prompt]);
@@ -243,7 +254,7 @@ function plain(line) {
 const SPIN_CLOCK = 220_000;
 
 describe('specialist-subagents extension (Pi coordinator surface)', () => {
-  it('registers exactly the seven specialist_* tools over the host', async () => {
+  it('registers exactly the eight specialist_* tools over the host', async () => {
     const mod = await loadExtension();
     const pi = makeFakePi();
     mod.default(pi);
@@ -253,6 +264,7 @@ describe('specialist-subagents extension (Pi coordinator surface)', () => {
       'specialist_reply',
       'specialist_resume',
       'specialist_retry',
+      'specialist_steer',
       'specialist_stop_activation',
       'specialist_list',
     ]);
@@ -476,20 +488,46 @@ describe('specialist-subagents extension (Pi coordinator surface)', () => {
     await toolNamed(pi, 'specialist_dispatch').execute('tc1', { specialist: 'explorer', bead_id: 'bd-1' });
     await new Promise((r) => setTimeout(r, 0));
     const out = resultText(await toolNamed(pi, 'specialist_status').execute('tc2', {}));
+    // Compact default (SPECIALISTS-142): identity/state/cost/intent + result_status.
     expect(out.activations[0]).toMatchObject({
       activation_id: 'act:aaaa',
       specialist: 'explorer',
       state: 'running',
-      worktree_path: '/r/wt',
-      result: { status: 'completed', output: 'report', validation: { valid: true } },
+      result_status: 'completed',
     });
+    expect(out.activations[0]).not.toHaveProperty('worktree_path');
+    expect(out.activations[0]).not.toHaveProperty('result');
     expect(out.pending_asks[0]).toMatchObject({
       message_id: 'msg:1',
       kind: 'question',
       from: 'specialist::explorer',
       body: 'Which option?',
-      delivery: 'pending',
     });
+    expect(out.pending_asks[0]).not.toHaveProperty('delivery');
+    // full:true restores the verbose shape.
+    const full = resultText(await toolNamed(pi, 'specialist_status').execute('tc3', { full: true }));
+    expect(full.activations[0]).toMatchObject({
+      activation_id: 'act:aaaa',
+      state: 'running',
+      worktree_path: '/r/wt',
+      result: { status: 'completed', output: 'report', validation: { valid: true } },
+    });
+    expect(full.pending_asks[0]).toMatchObject({ message_id: 'msg:1', delivery: 'pending' });
+  });
+
+  it('specialist_steer redirects a running activation and refuses settled ones (SPECIALISTS-141)', async () => {
+    const mod = await loadExtension();
+    const pi = makeFakePi();
+    const { host, calls } = makeFakeHost();
+    mod.default(pi, { createHost: () => host });
+    const steered = resultText(await toolNamed(pi, 'specialist_steer').execute('tc1', { activation_id: 'act:aaaa', message: 'focus now' }));
+    expect(steered.status).toBe('steered');
+    expect(steered.activation_id).toBe('act:aaaa');
+    expect(calls.steer[0]).toEqual(['act:aaaa', 'focus now']);
+    host.inspect.mockReturnValue({ ...SNAPSHOT, state: 'settled' });
+    const refused = resultText(await toolNamed(pi, 'specialist_steer').execute('tc2', { activation_id: 'act:aaaa', message: 'too late' }));
+    expect(refused.status).toBe('rejected');
+    host.inspect.mockReturnValue(SNAPSHOT);
   });
 
   it('reply correlates on message_id only and reports unknown asks as an error result', async () => {
@@ -683,7 +721,10 @@ describe('specialist-subagents extension (Pi coordinator surface)', () => {
     expect(base).toEqual(['escalation_raised']);
     const status = resultText(await toolNamed(pi, 'specialist_status').execute('tc1', {}));
     expect(status.pending_asks[0].message_id).toBe('msg:1');
-    expect(status.pending_asks[0].delivery).toBe('pending');
+    // Compact default drops delivery plumbing; full:true keeps it.
+    expect(status.pending_asks[0]).not.toHaveProperty('delivery');
+    const fullStatus = resultText(await toolNamed(pi, 'specialist_status').execute('tc2', { full: true }));
+    expect(fullStatus.pending_asks[0].delivery).toBe('pending');
     // The suppressed state announces itself; a silent session is unexplainable.
     expect(ctx.notices.some(([msg]) => msg.includes('OFF'))).toBe(true);
   });
@@ -818,7 +859,20 @@ describe('specialist-subagents extension (Pi coordinator surface)', () => {
       .execute('tc1', { activation_id: 'act:aaaa', prompt: 'go' }));
 
     expect(out.previous_attempt_id).toBe('att:aaaa:1');
-    expect(out.attempt_id).toBe('att:aaaa:2');
+    // Compact default (SPECIALISTS-142) drops attempt_id; full:true keeps it.
+    expect(out).not.toHaveProperty('attempt_id');
+    const live2 = { activationId: 'act:bbbb', attemptId: 'att:bbbb:1', specialist: 'explorer',
+      issueId: 'iss_bd-1', issueRef: 'bd-1', issueRevision: 1, contractHash: 'hash-test',
+      executionBindingId: 'exb-test', state: 'settled', access: 'write', workspace: '/ws',
+      participantId: 'specialist::explorer', startedAt: 0, lastActivityAt: 0 };
+    host.inspect = vi.fn(() => live2);
+    host.resume = vi.fn(async () => {
+      live2.attemptId = 'att:bbbb:2';
+      return { activationId: 'act:bbbb', attemptId: 'att:bbbb:2', result: Promise.resolve({}) };
+    });
+    const full = resultText(await toolNamed(pi, 'specialist_resume')
+      .execute('tc2', { activation_id: 'act:bbbb', prompt: 'go', full: true }));
+    expect(full.attempt_id).toBe('att:bbbb:2');
   });
 
   it('refuses an unknown activation without calling the host', async () => {

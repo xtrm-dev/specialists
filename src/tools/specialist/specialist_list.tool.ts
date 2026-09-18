@@ -20,6 +20,10 @@ export const specialistListSchema = z.object({
     .enum(['compact', 'full'])
     .optional()
     .describe('"compact" (default) is one line each; "full" returns every field for every specialist.'),
+  full: z
+    .boolean()
+    .optional()
+    .describe('Alias for detail:"full" (SPECIALISTS-142 one-flag vocabulary). Default compact.'),
 });
 
 const WRITE_TIERS = new Set(['MEDIUM', 'HIGH']);
@@ -147,7 +151,7 @@ export function createSpecialistListTool(loader: SpecialistLoader) {
             };
       }
 
-      if (input.detail === 'full') {
+      if (input.detail === 'full' || input.full === true) {
         return { specialists: rows, detail: 'full', note: NATIVE_ONLY_NOTE };
       }
 

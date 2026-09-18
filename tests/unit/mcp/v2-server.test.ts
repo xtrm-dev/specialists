@@ -21,7 +21,7 @@ import type { SubstrateHandle } from '../../../src/substrate/services.js';
  * Domain parity (gates, refusals, dispatch) lives in
  * activation-mcp-tools.test.ts / activation-dispatch-inline.test.ts at the
  * tool level plus live probes; here the wire contract is proved:
- * dual-revision negotiation, server/discover, 6-tool surface, resultType,
+ * dual-revision negotiation, server/discover, 7-tool surface, resultType,
  * partitioned errors, and per-request independence.
  */
 
@@ -37,6 +37,7 @@ const EXPECTED_TOOLS = [
   'specialist_dispatch',
   'specialist_reply',
   'specialist_resume',
+  'specialist_steer',
   'specialist_stop_activation',
   'specialist_list',
 ];
@@ -138,7 +139,7 @@ beforeEach(async () => {
   const stdout = new PassThrough();
   const transport = new StdioServerTransport(stdin, stdout);
   // Baseline suite intentionally exercises the no-Substrate surface (EXPECTED_TOOLS,
-  // 6 tools): inject the unavailable handle so that is a controlled input, not an
+  // 7 tools): inject the unavailable handle so that is a controlled input, not an
   // accident of whether @jaggerxtrm/substrate happens to be on disk (unitAI-tgdtw).
   // The Substrate-present surface is exercised separately, below.
   handle = serveStdio(() => buildV2Server(undefined, { substrate: SUBSTRATE_UNAVAILABLE }), { transport, legacy: 'serve' });
@@ -214,7 +215,7 @@ describe('v2 dual-revision negotiation', () => {
 });
 
 describe('v2 tool surface (t2kol parity)', () => {
-  it('tools/list returns the 6-tool surface in deterministic order with modern resultType', async () => {
+  it('tools/list returns the 7-tool surface in deterministic order with modern resultType', async () => {
     const res = await client.call('tools/list', { _meta: META });
     expect(res.error).toBeUndefined();
     const result = res.result as { tools: Array<{ name: string }>; resultType: string };
@@ -323,8 +324,8 @@ describe('v2 statelessness (no cross-request server state)', () => {
     const second = await client.call('tools/list', { _meta: capsB });
     expect(first.error).toBeUndefined();
     expect(second.error).toBeUndefined();
-    expect((first.result as { tools: unknown[] }).tools.length).toBe(6);
-    expect((second.result as { tools: unknown[] }).tools.length).toBe(6);
+    expect((first.result as { tools: unknown[] }).tools.length).toBe(7);
+    expect((second.result as { tools: unknown[] }).tools.length).toBe(7);
   });
 
   it('a tool call needs no prior handshake or discovery', async () => {
@@ -362,11 +363,11 @@ describe('v2 tool surface (Substrate injected, unitAI-tgdtw)', () => {
     }
   }
 
-  it('registers the 9-tool surface when Substrate resolves', async () => {
+  it('registers the 10-tool surface when Substrate resolves', async () => {
     expect(await listToolsWith(SUBSTRATE_AVAILABLE)).toEqual(EXPECTED_TOOLS_WITH_SUBSTRATE);
   });
 
-  it('registers the 6-tool surface when Substrate does not resolve', async () => {
+  it('registers the 7-tool surface when Substrate does not resolve', async () => {
     expect(await listToolsWith(SUBSTRATE_UNAVAILABLE)).toEqual(EXPECTED_TOOLS);
   });
 });

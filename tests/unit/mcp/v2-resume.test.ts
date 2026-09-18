@@ -76,7 +76,12 @@ describe('specialist_resume factory (v2)', () => {
     expect(out.status).toBe('resumed');
     expect(out.activation_id).toBe('act:aaaa');
     expect(out.previous_attempt_id).toBe('att:aaaa:1');
-    expect(out.attempt_id).toBe('att:aaaa:2');
+    // Compact default (SPECIALISTS-142) drops attempt_id; full:true restores it.
+    expect(out).not.toHaveProperty('attempt_id');
+    const fresh = makeHost();
+    const fullTool = createSpecialistResumeTool(() => fresh.host as never);
+    const full = await fullTool.execute({ activation_id: 'act:aaaa', prompt: 'again', full: true }) as Record<string, unknown>;
+    expect(full.attempt_id).toBe('att:aaaa:2');
   });
 
   it('reports an unknown activation without calling the host', async () => {

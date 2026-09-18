@@ -41,19 +41,35 @@ call the in-process `NativeActivationHost` directly.
 
 ## Active tool inventory
 
+Tool-call payloads are COMPACT by default (SPECIALISTS-142): `specialist_status`,
+`specialist_dispatch`, `specialist_resume`, `specialist_retry` and the new
+`specialist_steer` return identity, state, cost and intent per activation, and
+status rows carry only the result status. Pass `full: true` for the pre-142
+verbose shape (full `ActivationView` rows, whole validated results, health
+sections) — the same flag on every tool, including `specialist_list` (as an
+alias for `detail: "full"`). Placement: the flag lives on the tool schemas
+(the plugin/MCP surface), not the CLI, because the CLI prints human text
+while the tools return machine JSON. Downstream audit: the Channel push
+frames, `wake-watch.mjs`, `precompact`/`postcompact.mjs` and
+`session-start.mjs` read the store or the push reference — never the verbose
+tool JSON — so compact changes no wake path; `full: true` keeps any script
+that parsed the verbose form working with one flag.
+
 | Tool | Purpose |
 |---|---|
-| `specialist_status` | authoritative read: health plus native Fleet (activations, pending asks, recorded results) |
-| `specialist_dispatch` | admit-and-start a Specialist on the native runtime (async; returns on admission) |
+| `specialist_status` | authoritative read: compact Fleet (activations, pending asks) by default; `full:true` adds results, health, interactions, workspaces |
+| `specialist_dispatch` | admit-and-start a Specialist on the native runtime (async; returns on admission; compact view, `full:true` for verbose) |
 | `specialist_reply` | answer an outstanding ask by `message_id` |
-| `specialist_resume` | resume a settled or waiting activation in the same session (id kept, attempt advances) |
+| `specialist_resume` | resume a settled or waiting activation in the same session (id kept, attempt advances; compact view, `full:true` for verbose) |
+| `specialist_steer` | redirect a RUNNING activation mid-run, session and context intact (SPECIALISTS-141) |
+| `specialist_retry` | re-run a FAILED activation in place (compact view, `full:true` for verbose) |
 | `specialist_stop_activation` | stop and dispose a native activation |
-| `specialist_list` | resolved Specialist registry with per-row dispatchability |
+| `specialist_list` | resolved Specialist registry with per-row dispatchability (compact already; `full:true` aliases `detail:"full"`) |
 | `substrate_issue` | read and write XTRM work items through Substrate IssueService (op-discriminated; conditional) |
 | `substrate_journal` | Substrate journal service (conditional) |
 | `substrate_provenance` | Substrate provenance service (conditional) |
 
-Inventory derived from the `tools` array in `src/mcp/v2-server.ts`: six core
+Inventory derived from the `tools` array in `src/mcp/v2-server.ts`: seven core
 factories plus three Substrate factories behind the availability gate.
 
 ## `specialist_status`
@@ -139,6 +155,7 @@ z.object({
     'ParticipantId of the requesting coordinator. Defaults to the MCP gateway participant.',
   ),
   coordinator_session_id: z.string().optional().describe('MCP session id, for lineage.'),
+  full: z.boolean().optional().describe('Return the full verbose view. Default compact.'),
 })
 ```
 
@@ -202,6 +219,29 @@ extension tool of the same name field-for-field).
 z.object({
   activation_id: z.string().describe('The settled or waiting activation to resume.'),
   prompt: z.string().describe('The new instruction for the resumed Specialist.'),
+  full: z.boolean().optional().describe('Return the full verbose view. Default compact.'),
+})
+```
+
+## `specialist_steer`
+
+Redirect a RUNNING activation mid-run (SPECIALISTS-141). The channel a quiet
+executor was missing: `specialist_reply` answers outstanding asks only and
+`specialist_resume` refuses running activations, so running work was
+stoppable but not redirectable. Delivers into the LIVE session
+(`host.steer` → `session.steer`): same session, same attempt, no lease
+movement. Refused on any non-running state with a pointer to the owning
+tool (resume for settled/waiting, retry for failed, reply for asks, stop
+for disposal).
+
+Source: `src/tools/specialist/activation.tool.ts`
+(`specialistSteerSchema`).
+
+```ts
+z.object({
+  activation_id: z.string().describe('The running activation to redirect mid-run.'),
+  message: z.string().describe('Steering instruction delivered into the live session.'),
+  full: z.boolean().optional().describe('Return the full verbose view. Default compact.'),
 })
 ```
 
@@ -283,9 +323,9 @@ payload rather than failing at registration; see `src/substrate/services.ts`.
   [cli-reference.md](cli-reference.md).
 - **Pi extension tools.** The Pi extension
   (`config/pi-extensions/specialist-subagents/index.mjs`) exposes its own
-  `specialist_*` tools over the same `NativeActivationHost`, including a
-  `specialist_retry` verb this MCP server does not register. That surface is
-  documented with the Pi integration, not here.
+  `specialist_*` tools over the same `NativeActivationHost`, mirroring this
+  surface tool-for-tool including `specialist_steer` and the `full` flag.
+  That surface is documented with the Pi integration, not here.
 
 ## Notification model
 

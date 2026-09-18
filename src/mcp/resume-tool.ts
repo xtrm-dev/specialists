@@ -21,7 +21,7 @@ import { renderRejection } from '../activation/rejection.js';
 import { DispatchRejectedError } from '../activation/types.js';
 import type { NativeActivationHost } from '../activation/native-host.js';
 import type { RuntimeEventPusher } from '../activation/async-events.js';
-import { toActivationView } from '../tools/specialist/activation.tool.js';
+import { toActivationCompactView, toActivationView } from '../tools/specialist/activation.tool.js';
 
 // Same loaded-vs-on-disk artifact comparison the dispatch tool renders: this
 // module runs in two layouts (src/ under tsx/vitest, bundled dist in
@@ -39,6 +39,9 @@ const LOADED_BUILD_ID = readBuildId(DIST_LIB_PATH);
 export const specialistResumeSchema = z.object({
   activation_id: z.string().describe('The settled or waiting activation to resume.'),
   prompt: z.string().describe('The new instruction for the resumed Specialist.'),
+  full: z.boolean().optional().describe(
+    'Return the full verbose view (pre-SPECIALISTS-142 shape). Default compact.',
+  ),
 });
 
 /**
@@ -95,10 +98,13 @@ export function createSpecialistResumeTool(
           () => { /* observed via specialist_status */ },
         );
         const snapshot = getHost().inspect(handle.activationId);
+        const view = snapshot
+          ? input.full ? toActivationView(snapshot) : toActivationCompactView(snapshot)
+          : { activation_id: handle.activationId };
         return {
           status: 'resumed' as const,
           previous_attempt_id: previousAttemptId,
-          ...(snapshot ? toActivationView(snapshot) : { activation_id: handle.activationId }),
+          ...view,
         };
       } catch (error) {
         // A refusal is the gate working, so it stays a returned tool result —

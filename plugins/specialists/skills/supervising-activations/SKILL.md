@@ -45,7 +45,7 @@ What is local to THIS plugin, and therefore stated here:
 
 ## Tool surface
 
-Six tools are registered on the Specialists MCP server, and the names are exact. A separate
+Seven tools are registered on the Specialists MCP server, and the names are exact. A separate
 section below documents the REMOVED `use_specialist` path so no reader mistakes it for live.
 
 ### specialist_dispatch
@@ -78,11 +78,13 @@ session creation when unavailable, and are never silently replaced. Report the r
 do not retry with a substitute model.
 
 ### specialist_status
-Live projection of every activation. Per row: `activation_id`, `specialist`, `issue_ref`
-(`bead_id` carries the same ref as a compatibility alias), `state`, `access`, `model_override`, `thinking_override`, `thinking_level` (omitted when
-unset — never fabricate it), `purpose` (a one-line SCOPE-then-SUCCESS excerpt captured once
-at dispatch, omitted when absent), `elapsed_s`, `token_usage`, `last_activity_at`, and the
-validated `result` object on settled activations only.
+Live projection of every activation. COMPACT by default — per row: `activation_id`,
+`specialist`, `bead_id` (the issue ref), `state`, `access`, `resolved_model`,
+`thinking_level` (omitted when unset — never fabricate it), `elapsed_s`, `turn_count`,
+`token_usage`, `purpose` (a one-line SCOPE-then-SUCCESS excerpt captured once at dispatch,
+omitted when absent), and `result_status` on settled rows only. Pass `full: true` for the
+verbose shape (full rows, whole validated results, health sections). Asks keep their `body`
+in both modes — it is what you answer.
 
 Forensic IDs never appear in rows. Token usage is a row budget, never a window-context
 percentage.
@@ -96,7 +98,15 @@ Resumes a settled or waiting activation in the SAME session with a new prompt. N
 dispatch: the `activation_id` is kept and the `attempt_id` advances, so the child keeps its
 context. The workspace lease is not kept across settle — it is released at settle and
 reacquired on resume, so a resume that loses the race to another writer is refused with
-`lease_denied`. A disposed activation cannot be resumed.
+`lease_denied`. A disposed activation cannot be resumed. Compact view by default;
+`full: true` for verbose.
+
+### specialist_steer
+Redirects a RUNNING activation mid-run with a new instruction — the channel for a quiet
+executor that never raised a question. Same session, same attempt, context intact. Refused
+on any non-running state with a pointer: resume for settled/waiting, retry for failed,
+reply for outstanding asks, stop for disposal. Which tool when: running → steer, waiting on
+you → reply, done-but-more-work → resume, died → retry.
 
 ### specialist_stop_activation
 Disposes an activation explicitly. This is the irreversible one. Settled activations stay
@@ -105,8 +115,8 @@ cascade: stop each activation you are done with.
 
 ### specialist_list
 The specialist registry, one compact line per specialist with a dispatchability verdict per
-row. `name` returns one full record; `detail: "full"` returns every field. Read this before
-relying on a remembered role name.
+row. `name` returns one full record; `detail: "full"` (or `full: true`) returns every field.
+Read this before relying on a remembered role name.
 
 ### use_specialist — removed
 `use_specialist` no longer exists; calling it returns an unknown-tool error. Use

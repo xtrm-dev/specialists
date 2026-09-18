@@ -719,6 +719,19 @@ export declare class NativeActivationHost {
      */
     stop(activationId: string, reason?: string): Promise<void>;
     /**
+     * Steer a RUNNING activation mid-run with a new instruction, keeping its
+     * session and context intact (SPECIALISTS-141).
+     *
+     * This is the channel `specialist_reply` (ask-only) and `specialist_resume`
+     * (settled/waiting only) cannot provide: a quiet executor in `running` or
+     * `starting` state that never raised a question. Delivery goes through the
+     * live `PiAgentSessionLike.steer`, so no new session is built, the attempt id
+     * does not advance, and no lease is touched. Every other state is refused
+     * with a pointer to the tool that owns it (resume for settled/waiting, retry
+     * for failed, reply for outstanding asks, stop for disposal).
+     */
+    steer(activationId: string, message: string): Promise<void>;
+    /**
      * Attach a listener to a live activation's event stream without perturbing its turn.
      *
      * Subscribing is additive — `PiAgentSessionLike.subscribe` fans out to every listener —

@@ -50,8 +50,10 @@ import {
   leaseScopeFor,
   readBuildId,
   supersedeStaleRefusal,
+  toActivationCompactView,
   toActivationResultView,
   toActivationView,
+  toPendingAskCompactView,
   toPendingAskView,
   validateBeforeRun,
 } from '../../../dist/lib.js';
@@ -657,12 +659,15 @@ export function installEventCardRenderer(pi, customType) {
 // and `toPendingAskView` already were (unitAI-kv8ac).
 
 /**
- * Attach a settled result to a shared `ActivationView` when one is available.
+ * Attach a settled result to a shared view when one is available.
  * Additive-only over the MCP vocabulary: never mutates the shared projection.
+ * Compact rows carry only the result STATUS (drill-down under `full`); full
+ * rows carry the whole validated result, as before.
  */
-function withResult(view, result) {
+function withResult(view, result, full = false) {
   if (!result) return view;
-  return { ...view, result: toActivationResultView(result) };
+  if (full) return { ...view, result: toActivationResultView(result) };
+  return { ...view, result_status: result.status ?? 'settled' };
 }
 
 /** Permission tiers that mutate the workspace (mirrors native-host.ts line 57). */
@@ -1131,6 +1136,9 @@ export default function specialistSubagentsExtension(pi, options = {}) {
           maximum: 2,
         }),
       ),
+      full: Type.Optional(Type.Boolean({
+        description: 'Return the full verbose view (pre-SPECIALISTS-142 shape). Default compact.',
+      })),
     }),
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const h = getHost();
@@ -1192,7 +1200,10 @@ export default function specialistSubagentsExtension(pi, options = {}) {
           .catch(() => { /* observed via specialist_status */ });
 
         const snapshot = h.inspect(handle.activationId);
-        const view = snapshot ? toActivationView(snapshot) : { activation_id: handle.activationId };
+        const full = params.full === true;
+        const view = snapshot
+          ? full ? toActivationView(snapshot) : toActivationCompactView(snapshot)
+          : { activation_id: handle.activationId };
         return {
           content: [{
             type: 'text',
@@ -1238,23 +1249,47 @@ export default function specialistSubagentsExtension(pi, options = {}) {
     description:
       'The Fleet: every native activation this process hosts, with its state, and ' +
       'every outstanding question or escalation it is waiting on (answer those with ' +
-      'specialist_reply). Settled activations carry their validated ActivationResult. ' +
+      'specialist_reply). Compact by default — identity, state, cost, intent per row, ' +
+      'settled rows carrying only the result status. Pass full:true for the verbose ' +
+      'shape (full ActivationView rows, whole validated results, health sections). ' +
       'Activations stay listed until stopped: a settled entry is either waiting for ' +
       'a follow-up or waiting to be stopped. Stop with specialist_stop_activation ' +
       'every activation you will not resume. No CLI background jobs are shown — ' +
       'this surface only hosts in-process activations.',
     promptSnippet: 'Show the Specialist Fleet (specialist_status)',
     renderResult: humanResultOf(),
-    parameters: Type.Object({}),
-    async execute() {
+    parameters: Type.Object({
+      full: Type.Optional(Type.Boolean({
+        description: 'Return the full verbose payload (pre-SPECIALISTS-142 shape). Default compact.',
+      })),
+    }),
+    async execute(toolCallId, params = {}) {
       const h = getHost();
+      const full = params.full === true;
+      if (full) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify(annexBuildIdentity({
+              activations: h.list().map((snapshot) =>
+                withResult(toActivationView(snapshot), results.get(snapshot.activationId), true)),
+              pending_asks: h.pendingAsks().map(toPendingAskView),
+            }), null, 2),
+          }],
+          details: {},
+        };
+      }
       return {
         content: [{
           type: 'text',
           text: JSON.stringify(annexBuildIdentity({
-            activations: h.list().map((snapshot) =>
-              withResult(toActivationView(snapshot), results.get(snapshot.activationId))),
-            pending_asks: h.pendingAsks().map(toPendingAskView),
+            activations: h.list().map((snapshot) => ({
+              ...toActivationCompactView(snapshot),
+              ...(results.has(snapshot.activationId)
+                ? { result_status: results.get(snapshot.activationId).status ?? 'settled' }
+                : {}),
+            })),
+            pending_asks: h.pendingAsks().map(toPendingAskCompactView),
           }), null, 2),
         }],
         details: {},
@@ -1336,6 +1371,9 @@ export default function specialistSubagentsExtension(pi, options = {}) {
     parameters: Type.Object({
       activation_id: Type.String({ description: 'The settled or waiting activation to resume.' }),
       prompt: Type.String({ description: 'The new instruction for the resumed Specialist.' }),
+      full: Type.Optional(Type.Boolean({
+        description: 'Return the full verbose view (pre-SPECIALISTS-142 shape). Default compact.',
+      })),
     }),
     async execute(toolCallId, params) {
       const h = getHost();
@@ -1385,13 +1423,17 @@ export default function specialistSubagentsExtension(pi, options = {}) {
         .catch(() => { /* observed via specialist_status */ });
 
       const snapshot = h.inspect(handle.activationId);
+      const full = params.full === true;
+      const view = snapshot
+        ? full ? toActivationView(snapshot) : toActivationCompactView(snapshot)
+        : { activation_id: handle.activationId };
       return {
         content: [{
           type: 'text',
           text: JSON.stringify({
             status: 'resumed',
             previous_attempt_id: previousAttemptId,
-            ...(snapshot ? toActivationView(snapshot) : { activation_id: handle.activationId }),
+            ...view,
           }, null, 2),
         }],
         details: {},
@@ -1422,6 +1464,9 @@ export default function specialistSubagentsExtension(pi, options = {}) {
       activation_id: Type.String({ description: 'The failed activation to re-run.' }),
       model_override: Type.Optional(Type.String({ description: 'Re-run on this model instead of the one that failed.' })),
       prompt: Type.Optional(Type.String({ description: 'Replacement turn prompt. Defaults to the dispatch-time render of the same bead.' })),
+      full: Type.Optional(Type.Boolean({
+        description: 'Return the full verbose view (pre-SPECIALISTS-142 shape). Default compact.',
+      })),
     }),
     async execute(toolCallId, params) {
       const h = getHost();
@@ -1470,14 +1515,94 @@ export default function specialistSubagentsExtension(pi, options = {}) {
         .catch(() => { /* observed via specialist_status */ });
 
       const snapshot = h.inspect(handle.activationId);
+      const full = params.full === true;
+      const view = snapshot
+        ? full ? toActivationView(snapshot) : toActivationCompactView(snapshot)
+        : { activation_id: handle.activationId };
       return {
         content: [{
           type: 'text',
           text: JSON.stringify({
             status: 'retried',
             previous_attempt_id: previousAttemptId,
-            ...(snapshot ? toActivationView(snapshot) : { activation_id: handle.activationId }),
+            ...view,
           }, null, 2),
+        }],
+        details: {},
+      };
+    },
+  });
+
+  // SPECIALISTS-141: the channel a quiet executor was missing. `specialist_reply`
+  // answers outstanding asks only and `specialist_resume` refuses running
+  // activations — this delivers into the LIVE session (same session, same
+  // attempt, no lease movement), so running work is redirectable, not just
+  // stoppable.
+  pi.registerTool({
+    name: 'specialist_steer',
+    label: 'Specialist steer',
+    description:
+      'Redirect a RUNNING Specialist mid-run with a new instruction, keeping its ' +
+      'session and context intact. Use for a quiet executor that never raised a ' +
+      'question; answer an outstanding ask with specialist_reply, resume a settled ' +
+      'activation with specialist_resume, re-run a failed one with ' +
+      'specialist_retry. Refused on any non-running state with a pointer to the ' +
+      'owning tool.',
+    promptSnippet: 'Steer a running Specialist (specialist_steer: activation_id, message)',
+    renderCall: humanCallOf((args) => `Steer ${args.activation_id ?? '?'}`),
+    renderResult: humanResultOf(),
+    parameters: Type.Object({
+      activation_id: Type.String({ description: 'The running activation to redirect mid-run.' }),
+      message: Type.String({
+        description:
+          'Steering instruction delivered into the live session — the child receives ' +
+          'it after its current tool calls finish, before the next model call, with ' +
+          'context intact.',
+      }),
+      full: Type.Optional(Type.Boolean({
+        description: 'Return the full verbose view (pre-SPECIALISTS-142 shape). Default compact.',
+      })),
+    }),
+    async execute(toolCallId, params) {
+      const h = getHost();
+      const before = h.inspect(params.activation_id);
+      if (!before) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              status: 'error',
+              error: `Unknown activation: ${params.activation_id}`,
+              activation_id: params.activation_id,
+            }, null, 2),
+          }],
+          details: {},
+        };
+      }
+      try {
+        await h.steer(params.activation_id, params.message);
+      } catch (error) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              status: 'rejected',
+              activation_id: params.activation_id,
+              reason: error instanceof Error ? error.message : String(error),
+            }, null, 2),
+          }],
+          details: {},
+        };
+      }
+      const snapshot = h.inspect(params.activation_id);
+      const full = params.full === true;
+      const view = snapshot
+        ? full ? toActivationView(snapshot) : toActivationCompactView(snapshot)
+        : { activation_id: params.activation_id };
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ status: 'steered', ...view }, null, 2),
         }],
         details: {},
       };
@@ -1555,6 +1680,9 @@ export default function specialistSubagentsExtension(pi, options = {}) {
       detail: Type.Optional(Type.String({
         description: '"compact" (default) is one line each; "full" returns every field for every specialist.',
       })),
+      full: Type.Optional(Type.Boolean({
+        description: 'Alias for detail:"full" (SPECIALISTS-142 one-flag vocabulary). Default compact.',
+      })),
     }),
     // Progressive disclosure (operator report 2026-09-08). The unconditional form returned
     // 32 specialists x 9 fields = 16,161 bytes across 357 lines, and 44% of that was
@@ -1600,7 +1728,7 @@ export default function specialistSubagentsExtension(pi, options = {}) {
           });
       }
 
-      if (params.detail === 'full') {
+      if (params.detail === 'full' || params.full === true) {
         return resultOf({ specialists: rows, detail: 'full', note: NATIVE_ONLY_NOTE });
       }
 
