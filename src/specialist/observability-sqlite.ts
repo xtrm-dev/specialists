@@ -1260,6 +1260,8 @@ export interface ForensicEventRecord {
 
 export interface ListForensicEventsFilters {
   jobId?: string;
+  /** Explicit job candidate set. Empty means select nothing. */
+  jobIds?: readonly string[];
   // Identity-prefix match on job_id (e.g. 'act:' for native activations).
   // Implemented as a closed range (case-sensitive, index-backed). Do NOT use
   // LIKE here: SQLite LIKE is case-insensitive by default and skips the
@@ -3008,7 +3010,12 @@ class SqliteClient implements ObservabilitySqliteClient {
     return withRetry(() => {
       const clauses: string[] = [];
       const params: Array<string | number> = [];
+      if (filters.jobIds !== undefined && filters.jobIds.length === 0) return [];
       if (filters.jobId) { clauses.push('job_id = ?'); params.push(filters.jobId); }
+      if (filters.jobIds && filters.jobIds.length > 0) {
+        clauses.push(`job_id IN (${filters.jobIds.map(() => '?').join(',')})`);
+        params.push(...filters.jobIds);
+      }
       if (filters.jobIdPrefix) { clauses.push('job_id >= ? AND job_id < ?'); params.push(filters.jobIdPrefix, `${filters.jobIdPrefix}\uffff`); }
       if (filters.sinceMs !== undefined) { clauses.push('t >= ?'); params.push(filters.sinceMs); }
       if (filters.afterSeq !== undefined) {
