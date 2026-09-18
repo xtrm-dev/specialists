@@ -38,10 +38,10 @@ describe('selective loading: the router alone carries stable cross-phase invaria
   const ALWAYS_NEEDED = [
     'specialists list --full',
     'sp help',
-    'bd show <id>',
+    'sb issue show <ref>',
     'A specialist result is a claim, not live truth.',
     'Do not busy-poll.',
-    'generic native chain runtime is not yet a released contract',
+    'Two runtimes exist.',
   ];
 
   for (const marker of ALWAYS_NEEDED) {
