@@ -2949,12 +2949,15 @@ class SqliteClient implements ObservabilitySqliteClient {
       const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
       const limit = Math.max(1, Math.min(filters.limit ?? 1000, 10_000));
       const dir = filters.order === 'desc' ? 'DESC' : 'ASC';
+      const orderBy = filters.afterSeq !== undefined
+        ? `seq ${dir}, id ${dir}`
+        : `t ${dir}, seq ${dir}, id ${dir}`;
       return this.db.query(`
         SELECT id, job_id, seq, t, schema_version, event_family, event_name,
                participant_kind, participant_role, participant_id, attempt_id, redaction_status, event_json
         FROM specialist_forensic_events
         ${where}
-        ORDER BY t ${dir}, seq ${dir}, id ${dir}
+        ORDER BY ${orderBy}
         LIMIT ?
       `).all(...params, limit) as ForensicEventRecord[];
     }, 'readForensicEvents');
