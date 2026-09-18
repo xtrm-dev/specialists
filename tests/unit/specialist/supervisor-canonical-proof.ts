@@ -28,6 +28,7 @@ import { createStaleWarningEvent } from '../../../src/specialist/timeline-events
 import type {
   CanonicalAbsentProof,
   CanonicalDurableProof,
+  CanonicalPersistedFieldAssertion,
 } from './supervisor-canonical-inventory.js';
 
 const SCRATCH_ROOT = join(import.meta.dirname, '..', '..', '.phase7-test-scratch');
@@ -60,17 +61,39 @@ function readForensicRows(dbPath: string, jobId: string): ForensicRow[] {
 }
 
 /**
+ * Resolve a dot path against a parsed forensic event JSON. Returns `undefined`
+ * as soon as a segment is missing or an intermediate value is not an object, so
+ * a renamed or absent persisted field FAILS its assertion instead of passing
+ * vacuously (SPECIALISTS-122).
+ */
+function resolveJsonPath(source: unknown, path: string): unknown {
+  let current: unknown = source;
+  for (const segment of path.split('.')) {
+    if (current === null || typeof current !== 'object') return undefined;
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current;
+}
+
+/**
  * Durable proof via the native lifecycle path: mapper arm + writer must BOTH
  * hold. Fails naming the mapper link when mapNativeLifecycleEvent returns
  * null; fails naming the writer link when no forensic row appears. The
  * `dropWrites` flag forces the M6 state (mapped but never persisted) by
  * stubbing the writer to a no-op AFTER the mapper has run.
+ *
+ * SPECIALISTS-122: `assertPersistedFields` adds generic field assertions on the
+ * PERSISTED row (read back from `specialist_forensic_events`, never from the
+ * mapper's return value). The row it binds is the first one named
+ * `expectedForensicName`, so a payload assertion is only meaningful when the
+ * entry's emit cannot also produce a second row with that name.
  */
 export function runDurableNativeCheck(opts: {
   emitName: string;
   emitPayload?: Record<string, unknown>;
   expectedForensicName: string;
   assertFallbackDiagnostics?: boolean;
+  assertPersistedFields?: readonly CanonicalPersistedFieldAssertion[];
   activationId?: string;
   dropWrites?: boolean;
 }): { rows: ForensicRow[] } {
@@ -79,6 +102,7 @@ export function runDurableNativeCheck(opts: {
     emitPayload,
     expectedForensicName,
     assertFallbackDiagnostics,
+    assertPersistedFields,
     dropWrites,
   } = opts;
   const activationId = opts.activationId ?? `act:oracle-${emitName.replace(/[^a-z]/g, '')}-${crypto.randomUUID().slice(0, 8)}`;
@@ -130,6 +154,24 @@ export function runDurableNativeCheck(opts: {
           ? 'Writes were deliberately dropped (M6): the mapper alone is insufficient.'
           : 'The event is mapped but never reaches a durable row.'),
       );
+    }
+
+    if (assertPersistedFields && assertPersistedFields.length > 0) {
+      const row = rows.find((candidate) => candidate.event_name === expectedForensicName);
+      if (!row) throw new Error('[oracle]unreachable: row asserted above');
+      const persisted = JSON.parse(row.event_json) as Record<string, unknown>;
+      for (const assertion of assertPersistedFields) {
+        const actual = resolveJsonPath(persisted, assertion.path);
+        if (actual !== assertion.equals) {
+          throw new Error(
+            `[oracle] durable payload for "${emitName}": persisted field ` +
+            `"${assertion.path}" is ${JSON.stringify(actual)}, expected ` +
+            `${JSON.stringify(assertion.equals)} (read back from ` +
+            `specialist_forensic_events.event_json — a mapper-level assertion ` +
+            `would not have bound the writer).`,
+          );
+        }
+      }
     }
 
     if (assertFallbackDiagnostics) {
@@ -311,6 +353,7 @@ export function runDurableEntryCheck(proof: CanonicalDurableProof): void {
       emitPayload: proof.emitPayload,
       expectedForensicName: proof.expectedForensicName,
       assertFallbackDiagnostics: proof.assertFallbackDiagnostics,
+      assertPersistedFields: proof.assertPersistedFields,
     });
     return;
   }

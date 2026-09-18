@@ -175,6 +175,82 @@ describe('oracle mutation matrix (SPECIALISTS-103)', () => {
   });
 });
 
+describe('resume re-entry assertion discriminates (SPECIALISTS-122)', () => {
+  // The oracle entry `resume-reentry-status-change` exists because the resume
+  // re-entry leg (waiting -> coordinator resume -> running -> terminal) had no
+  // machine-checked expectation. It is only worth its slot if it FAILS when the
+  // emit is swapped for the leg that shares its forensic NAME — otherwise it is
+  // a denominator increase. M7 below pins both legs by injection (the emit name
+  // is a test input), so the property is regressed permanently without editing
+  // shipped source. The manual source-swap demonstration is reported separately.
+  const RESUME_STATUS_PAIR = [
+    { path: 'body.legacy_timeline_event.status', equals: 'running' },
+    { path: 'body.legacy_timeline_event.previous_status', equals: 'waiting' },
+  ] as const;
+
+  it('the oracle entry carries exactly the assertion this matrix exercises (no manifest/test drift)', () => {
+    const entry = SUPERVISOR_CANONICAL_INVENTORY.find(
+      (candidate) => candidate.id === 'resume-reentry-status-change',
+    );
+    expect(entry?.expectation).toBe('EXPECTED_DURABLE');
+    expect(entry?.durable?.via).toBe('native-lifecycle');
+    expect(entry?.durable?.emitName).toBe('activation_resumed');
+    expect(entry?.durable?.expectedForensicName).toBe('job.status_changed');
+    expect(entry?.durable?.assertPersistedFields).toEqual([...RESUME_STATUS_PAIR]);
+  });
+
+  it('M7 GREEN leg: activation_resumed satisfies the persisted running<-waiting pair', () => {
+    expect(() => runDurableNativeCheck({
+      emitName: 'activation_resumed',
+      expectedForensicName: 'job.status_changed',
+      assertPersistedFields: [...RESUME_STATUS_PAIR],
+    })).not.toThrow();
+  });
+
+  it('M7 RED leg: activation_settled emits the SAME forensic NAME with the mirrored pair, and the assertion turns RED', () => {
+    // A name-only entry would pass here — that is precisely the vacuity this
+    // test forbids. The NAME assertion holds (both rows are job.status_changed),
+    // so the payload assertion must be what fails.
+    expect(() => runDurableNativeCheck({
+      emitName: 'activation_settled',
+      expectedForensicName: 'job.status_changed',
+      assertPersistedFields: [...RESUME_STATUS_PAIR],
+    })).toThrow(/persisted field "body\.legacy_timeline_event\.status" is "waiting", expected "running"/);
+  });
+
+  it('the generic persisted-field assertion FAILS on a mismatched value (not only passes on a match)', () => {
+    expect(() => runDurableNativeCheck({
+      emitName: 'activation_resumed',
+      expectedForensicName: 'job.status_changed',
+      assertPersistedFields: [{ path: 'body.legacy_timeline_event.previous_status', equals: 'running' }],
+    })).toThrow(/persisted field "body\.legacy_timeline_event\.previous_status" is "waiting", expected "running"/);
+  });
+
+  it('the generic persisted-field assertion FAILS on a missing path (a renamed field is not a vacuous pass)', () => {
+    expect(() => runDurableNativeCheck({
+      emitName: 'activation_resumed',
+      expectedForensicName: 'job.status_changed',
+      assertPersistedFields: [{ path: 'body.legacy_timeline_event.no_such_field', equals: 'running' }],
+    })).toThrow(/persisted field "body\.legacy_timeline_event\.no_such_field" is undefined, expected "running"/);
+  });
+
+  it('reads the resume status pair back from the PERSISTED row, not the mapper return value', () => {
+    const { rows } = runDurableNativeCheck({
+      emitName: 'activation_resumed',
+      expectedForensicName: 'job.status_changed',
+      assertPersistedFields: [...RESUME_STATUS_PAIR],
+    });
+    const row = rows.find((candidate) => candidate.event_name === 'job.status_changed');
+    if (!row) throw new Error('unreachable: the check asserted the row exists');
+    const timeline = (JSON.parse(row.event_json) as {
+      body?: { legacy_timeline_event?: Record<string, unknown> };
+    }).body?.legacy_timeline_event ?? {};
+    expect(timeline['type']).toBe('status_change');
+    expect(timeline['status']).toBe('running');
+    expect(timeline['previous_status']).toBe('waiting');
+  });
+});
+
 describe('model_fallback preservation matrix (SPECIALISTS-103)', () => {
   it('reads every producer field back from the durable row by value', () => {
     const { dbPath, root } = isolatedDb('oracle-preserve');
