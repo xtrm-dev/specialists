@@ -38,14 +38,11 @@ export function annotateFleetWithLive(snapshot, { activations = [], asks = [] } 
     const live = activationById.get(node.jobId);
     if (!live) return { ...node };
     const blocked = askIds.has(node.jobId) || live.state === 'needs_reply' || live.state === 'escalated';
-    const attention = blocked ? 'blocked' : liveAttention(live.state);
     return {
       ...node,
-      persistedState: node.persistedState ?? node.state,
-      persistedAttention: node.persistedAttention ?? node.attention,
-      state: live.state,
-      attention,
+      presentationAttention: blocked ? 'blocked' : node.attention,
       live: {
+        state: live.state,
         attemptId: live.attempt_id,
         piSessionId: live.pi_session_id,
         requestedModel: live.requested_model,
@@ -60,24 +57,18 @@ export function annotateFleetWithLive(snapshot, { activations = [], asks = [] } 
   });
 
   const byId = new Map(nextNodes.map((node) => [node.jobId, node]));
+  const effectiveAttention = (node) => node.presentationAttention ?? node.attention;
   const counts = {
     total: nextNodes.length,
-    active: nextNodes.filter((node) => node.attention === 'active').length,
-    waiting: nextNodes.filter((node) => node.attention === 'blocked').length,
-    warning: nextNodes.filter((node) => node.attention === 'warning').length,
-    failed: nextNodes.filter((node) => node.attention === 'failed').length,
-    settled: nextNodes.filter((node) => node.attention === 'settled').length,
+    active: nextNodes.filter((node) => effectiveAttention(node) === 'active').length,
+    waiting: nextNodes.filter((node) => effectiveAttention(node) === 'blocked').length,
+    warning: nextNodes.filter((node) => effectiveAttention(node) === 'warning').length,
+    failed: nextNodes.filter((node) => effectiveAttention(node) === 'failed').length,
+    settled: nextNodes.filter((node) => effectiveAttention(node) === 'settled').length,
   };
   return { ...snapshot, nodes: nextNodes, byId, counts };
 }
 
-function liveAttention(state) {
-  if (state === 'waiting' || state === 'needs_reply' || state === 'escalated') return 'blocked';
-  if (state === 'failed' || state === 'stopped') return 'failed';
-  if (state === 'settled') return 'settled';
-  if (state === 'starting' || state === 'running' || state === 'stopping' || state === 'uncertain') return 'active';
-  return 'idle';
-}
 
 export function createFleetOverlayState(initial = {}) {
   return {
@@ -301,7 +292,9 @@ function defaultDetail(node) {
     job: node.jobId,
     work: node.beadId,
     state: node.state,
-    attention: node.attention,
+    attention: node.presentationAttention ?? node.attention,
+    persisted_attention: node.attention,
+    live_state: node.live?.state,
     event: node.currentEvent,
     tool: node.currentTool,
     parent: node.parentJobId,
@@ -329,7 +322,7 @@ function chronologyLine(row, width) {
 function renderTreeRow({ node, depth }, selected, width) {
   const pointer = selected ? '›' : ' ';
   const connector = depth === 0 ? '' : `${'  '.repeat(Math.max(0, depth - 1))}╰─ `;
-  const glyph = STATE_GLYPH[node.attention] ?? STATE_GLYPH.idle;
+  const glyph = STATE_GLYPH[node.presentationAttention ?? node.attention] ?? STATE_GLYPH.idle;
   const identity = `${node.specialist}:${shortId(node.jobId)}`;
   const work = node.beadId ? `  ${node.beadId}` : '';
   const state = width >= 72 ? `  ${node.state}` : '';
