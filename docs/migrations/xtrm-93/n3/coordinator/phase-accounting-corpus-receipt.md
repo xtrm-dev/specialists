@@ -60,6 +60,7 @@ docs/migrations/xtrm-93/n3/coordinator/laned/laned.py    # per-job phase account
 docs/migrations/xtrm-93/n3/coordinator/laned/laned3.py   # endpoint-kind breakdown for jobs whose endpoint is a reader row
 docs/migrations/xtrm-93/n3/coordinator/laned/laned4.py   # job-by-job comparison, stored-metrics join
 docs/migrations/xtrm-93/n3/coordinator/laned/policy.py   # policy comparison: PRE vs CURRENT vs PROPOSED
+docs/migrations/xtrm-93/n3/coordinator/laned/reader-terminal-population.py   # §4.4 reader-terminal population
 ```
 
 They were originally run from `/tmp/n3freeze/`; that copy is not durable, these are. `laned2.py` (event-shape
@@ -111,7 +112,19 @@ the proposed policy. All 29 affected jobs that have any stored row are inside th
 | running / turn | 12 | 405,008 ms |
 
 Total for the 31 reader-endpoint jobs: 924,284,247 ms (256.75 h). Each job's entire attributed
-tail equals its post-last-phase-event tail, so the whole figure is read latency, not observed work.
+tail equals its post-last-phase-event tail, and the SPECIALISTS-119 decision excludes that tail,
+so the policy treats the whole figure as reader-triggered trailing silence rather than observed
+activation work. That framing is a POLICY choice, not a corpus finding: the corpus cannot prove no
+work happened during the interval (§5.1), only that the interval is bounded by the operator's read
+rather than by the activation's own activity.
+
+**Policy limit (SPECIALISTS-119).** By decision, the trailing silence of a parked or abandoned
+activation — the interval after its last job-produced event and before end-of-stream — is EXCLUDED
+from `waiting_ms`. `waiting_ms` and its Prometheus consumer `xtrm_job_wait_seconds` therefore
+measure **activation-bounded waiting, not wall-clock waiting**: a genuinely parked activation whose
+only later evidence is an operator read reports its trailing silence as zero. That is intended and
+visible in the transformed buckets, not an artifact of the measurement. The measured figures above
+are retained unchanged.
 
 ### 4.3 Reproducibility and drift
 
@@ -123,6 +136,38 @@ definitions. The two figures are recorded as measured; they are not reconciled i
 The single largest affected activation is `act:00b4a5f9-f6d`: current `(active, waiting) =
 (37,417, 28,863,796)` → proposed `(37,417, 1,377,347)` — 27,486,449 ms of the total comes from one
 activation's waiting bucket.
+
+### 4.4 Reader-terminal population
+
+The flush policy truncates the endpoint at the last job-produced event, so any activation whose
+stream ends in a reader-produced row has a tail that lies beyond the endpoint and is attributed to
+neither bucket. `reader-terminal-population.py` measures that population directly:
+
+```
+epoch specialist_events MAX(id) = 1,828,076
+reader rows matching the predicate: 561  {dead_job_detected: 474, status_reconciled: 87}
+jobs whose trailing event is reader-produced: 88
+truncated tail beyond the endpoint: 1,323,070,329 ms (367.52 h)
+jobs whose stored completed_at_ms is at or after the trailing reader row: 0
+```
+
+This population (88) is larger than the 31 jobs whose *buckets* move (§4.1): the other 57 either had
+no phase open at end-of-stream or were affected only in ways that do not change the stored pair. The
+two figures answer different questions and are not interchangeable.
+
+The last line disposes of the divergence between the flush endpoint and the `completed_at_ms`
+back-fill, which still resolves to the last event of any type: on this corpus, **no** stored row has
+`completed_at_ms` at or after its trailing reader row, so `elapsed_ms` absorbs no read latency here.
+The divergence is real in code but unobserved in the stored corpus.
+
+The exclusion applies to both buckets: for the 19 running-endpoint jobs of §4.2 the truncated tail
+would otherwise land in `active_runtime_ms`, so the policy limit in §4.2 covers `active_runtime_ms`
+as well as `waiting_ms`.
+
+Section 4.4 is the committed backing for the figures quoted in the flush comment in
+`src/specialist/observability-sqlite.ts` (88 jobs, 367.52 h, 0 stored rows absorbing the tail) and
+for the divergence between the flush endpoint and the `completed_at_ms` back-fill. Quote those
+figures only together with this section and its epoch.
 
 ## 5. Limits — what this corpus cannot support
 
@@ -156,11 +201,14 @@ cd docs/migrations/xtrm-93/n3/coordinator/laned
 python3 policy.py      # §4.1
 python3 laned3.py      # §4.2
 python3 laned4.py      # stored-metrics join, job by job
+python3 reader-terminal-population.py   # §4.4 reader-terminal population
 ```
 
 The scripts read the store at an absolute path and never write. Running them copies a live corpus, so a
 later run legitimately differs from §4; re-record §2 in that case.
 
 Expected results on the corpus as of section 2: 31 jobs move, 0 with stored metrics, ~9.24e8 ms
-removed, stored-metrics delta range identical under both policies. A materially different result
-means the corpus moved; re-record section 2 before quoting these figures.
+removed, stored-metrics delta range identical under both policies; and, from
+`reader-terminal-population.py`, 561 reader rows (474 `dead_job_detected` + 87 `status_reconciled`),
+88 reader-terminal jobs, ~1.32e9 ms of truncated tail, and 0 stored rows absorbing it. A materially
+different result means the corpus moved; re-record section 2 before quoting these figures.
