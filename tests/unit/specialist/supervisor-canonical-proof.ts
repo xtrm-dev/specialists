@@ -60,19 +60,56 @@ function readForensicRows(dbPath: string, jobId: string): ForensicRow[] {
   }
 }
 
+// Keys that would traverse Object.prototype / Function.prototype. The path
+// strings are authored in this inventory (static, not user-controlled), but the
+// walk is guarded anyway: a segment like `__proto__` or `constructor` would
+// otherwise resolve an INHERITED value instead of returning undefined, and a
+// future caller passing external data must not be able to traverse the
+// prototype chain. Mirrors src/specialist/loader.ts readDottedPath (same
+// deny-list + hasOwnProperty shape). The deny-list and the own-property check
+// also silence Semgrep rule
+// javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop,
+// whose AST-shape match fires regardless of data provenance (see the identical
+// rationale above loader.ts:592 and its inline waiver).
+const PROTOTYPE_POLLUTION_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
 /**
  * Resolve a dot path against a parsed forensic event JSON. Returns `undefined`
- * as soon as a segment is missing or an intermediate value is not an object, so
- * a renamed or absent persisted field FAILS its assertion instead of passing
- * vacuously (SPECIALISTS-122).
+ * as soon as a segment is missing, matches the prototype-pollution deny-list, is
+ * not an OWN property, or an intermediate value is not an object — so a renamed
+ * or absent persisted field FAILS its assertion instead of passing vacuously
+ * (SPECIALISTS-122). Exported so the hardening can be pinned directly by the
+ * focused regression tests.
  */
-function resolveJsonPath(source: unknown, path: string): unknown {
+export function resolveJsonPath(source: unknown, path: string): unknown {
   let current: unknown = source;
   for (const segment of path.split('.')) {
     if (current === null || typeof current !== 'object') return undefined;
-    current = (current as Record<string, unknown>)[segment];
+    if (PROTOTYPE_POLLUTION_KEYS.has(segment)) return undefined;
+    if (!Object.prototype.hasOwnProperty.call(current, segment)) return undefined;
+    current = (current as Record<string, unknown>)[segment]; // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop.prototype-pollution-loop
   }
   return current;
+}
+
+/**
+ * Reject a present-but-EMPTY `assertPersistedFields` (SPECIALISTS-122 round 2,
+ * F3). Without this, `undefined` (omit) and `[]` (present) are both skipped by
+ * the `length > 0` guard, so an entry can advertise field coverage while
+ * asserting nothing. An empty array is not coverage; it is a lie by omission.
+ */
+function assertFieldAssertionsPresent(
+  assertions: readonly CanonicalPersistedFieldAssertion[] | undefined,
+  context: string,
+): void {
+  if (assertions === undefined) return;
+  if (assertions.length === 0) {
+    throw new Error(
+      `[oracle] ${context}: assertPersistedFields is present but EMPTY — an entry ` +
+      `advertising field coverage that asserts nothing is indistinguishable from omitting ` +
+      `the field. Remove it or supply at least one assertion.`,
+    );
+  }
 }
 
 /**
@@ -105,6 +142,7 @@ export function runDurableNativeCheck(opts: {
     assertPersistedFields,
     dropWrites,
   } = opts;
+  assertFieldAssertionsPresent(assertPersistedFields, `durable proof for "${emitName}"`);
   const activationId = opts.activationId ?? `act:oracle-${emitName.replace(/[^a-z]/g, '')}-${crypto.randomUUID().slice(0, 8)}`;
 
   // Link 1 (mapper) is checked FIRST so the failure names it precisely. This
@@ -156,7 +194,7 @@ export function runDurableNativeCheck(opts: {
       );
     }
 
-    if (assertPersistedFields && assertPersistedFields.length > 0) {
+    if (assertPersistedFields) {
       const row = rows.find((candidate) => candidate.event_name === expectedForensicName);
       if (!row) throw new Error('[oracle]unreachable: row asserted above');
       const persisted = JSON.parse(row.event_json) as Record<string, unknown>;
@@ -356,6 +394,18 @@ export function runDurableEntryCheck(proof: CanonicalDurableProof): void {
       assertPersistedFields: proof.assertPersistedFields,
     });
     return;
+  }
+  // F2 (SPECIALISTS-122 round 2): the field lives on the SHARED
+  // CanonicalDurableProof type, but runDurableLegacyStaleCheck never applies it.
+  // A legacy proof declaring it would pass NAME-ONLY while advertising field
+  // coverage. Fail loudly instead of silently ignoring the declaration.
+  if (proof.assertPersistedFields !== undefined) {
+    throw new Error(
+      `[oracle] durable proof via legacy-append declares assertPersistedFields, but ` +
+      `runDurableLegacyStaleCheck NEVER applies it: the entry would pass name-only while ` +
+      `advertising field coverage. Remove the field from the legacy proof or reclassify ` +
+      `it to native-lifecycle.`,
+    );
   }
   runDurableLegacyStaleCheck();
 }

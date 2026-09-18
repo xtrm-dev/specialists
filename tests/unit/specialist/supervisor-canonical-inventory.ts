@@ -56,7 +56,20 @@
 // BUT NOT EXECUTABLE: `L-ADAPTER`/`N-ADAPTER` have zero implementations in src/
 // or tests/, and docs/migrations/xtrm-93/10-differential-acceptance-corpus.md:145
 // states the corpus is a design document, not an executable suite. This
-// inventory is therefore the ONLY execution-backed oracle for the resume leg.
+// inventory entry is therefore the ONLY DEFAULT-SUITE oracle binding the
+// DURABLE resume row. The mapper ARM is separately executed, un-quarantined, by
+// tests/unit/specialist/phase-accounting-invariant.test.ts (lines ~471-480) and
+// tests/unit/specialist/native-activation-observability.test.ts (lines ~341-343);
+// what is unique here is the read-back of the PERSISTED row from
+// specialist_forensic_events, which those mapper-level assertions do not bind.
+//
+// PRODUCER WIRING IS NOT BOUND (SPECIALISTS-122 round 2, finding 7). This entry
+// drives the emit NAME through the real mapper and the real writer; it does NOT
+// prove that the native host ever emits `activation_resumed`. Commenting out the
+// producer emit in src/activation/native-host.ts leaves the canonical oracle
+// GREEN — the inventory is not a producer-coverage oracle. Producer wiring is
+// covered only by the gated live smoke test
+// tests/integration/activation/native-activation.live.test.ts.
 
 export type CanonicalExpectationClass =
   | 'EXPECTED_DURABLE'

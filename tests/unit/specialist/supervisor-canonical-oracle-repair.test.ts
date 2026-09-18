@@ -26,7 +26,9 @@ import {
   SUPERVISOR_CANONICAL_INVENTORY,
 } from './supervisor-canonical-inventory.js';
 import {
+  resolveJsonPath,
   runAbsentCheck,
+  runDurableEntryCheck,
   runDurableNativeCheck,
 } from './supervisor-canonical-proof.js';
 
@@ -248,6 +250,61 @@ describe('resume re-entry assertion discriminates (SPECIALISTS-122)', () => {
     expect(timeline['type']).toBe('status_change');
     expect(timeline['status']).toBe('running');
     expect(timeline['previous_status']).toBe('waiting');
+  });
+});
+
+describe('persisted-field resolver hardening (SPECIALISTS-122 round 2)', () => {
+  // The resolver walks a dot path into the PARSED persistent event JSON. The
+  // prototype-pollution guard is only worth having if it is pinned: without
+  // these tests a future edit could drop the deny-list / hasOwnProperty check
+  // and every shipped entry (whose segments are own properties) would still be
+  // green. Each assertion below observes the RESOLVED VALUE, not just that a
+  // mismatched assertion threw.
+  const source = { body: { legacy_timeline_event: { status: 'running', previous_status: 'waiting' } } };
+
+  it('resolves the prototype-pollution deny-list segments to undefined, not to an inherited value', () => {
+    for (const segment of ['__proto__', 'constructor', 'prototype']) {
+      expect(resolveJsonPath(source, segment)).toBeUndefined();
+      expect(resolveJsonPath(source, `body.legacy_timeline_event.${segment}`)).toBeUndefined();
+    }
+  });
+
+  it('resolves an inherited (non-own) property to undefined instead of reading it', () => {
+    // `toString` is inherited from Object.prototype and is NOT on the deny-list;
+    // only the hasOwnProperty guard makes this undefined. It pins that guard
+    // independently of the deny-list.
+    expect(resolveJsonPath(source, 'toString')).toBeUndefined();
+    expect(resolveJsonPath(source, 'body.legacy_timeline_event.toString')).toBeUndefined();
+  });
+
+  it('still resolves an own property, and still returns undefined once an intermediate is not an object', () => {
+    expect(resolveJsonPath(source, 'body.legacy_timeline_event.status')).toBe('running');
+    expect(resolveJsonPath(source, 'body.legacy_timeline_event.status.deeper')).toBeUndefined();
+  });
+
+  it('F3: a present-but-EMPTY assertPersistedFields array FAILS instead of asserting nothing', () => {
+    expect(() => runDurableNativeCheck({
+      emitName: 'activation_resumed',
+      expectedForensicName: 'job.status_changed',
+      assertPersistedFields: [],
+    })).toThrow(/assertPersistedFields is present but EMPTY/);
+  });
+
+  it('F2: a legacy-append proof declaring assertPersistedFields FAILS loudly instead of passing name-only', () => {
+    expect(() => runDurableEntryCheck({
+      via: 'legacy-append',
+      legacyTimelineType: 'stale_warning',
+      expectedForensicName: 'process_health.stale_detected',
+      assertPersistedFields: [{ path: 'body.legacy_timeline_event.status', equals: 'running' }],
+    })).toThrow(/legacy-append declares assertPersistedFields/);
+  });
+
+  it('F2: the same legacy proof WITHOUT assertPersistedFields still passes (the guard is additive)', () => {
+    expect(() => runDurableEntryCheck({
+      via: 'legacy-append',
+      legacyTimelineType: 'stale_warning',
+      expectedForensicName: 'process_health.stale_detected',
+    })).not.toThrow();
   });
 });
 

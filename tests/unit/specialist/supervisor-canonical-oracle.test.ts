@@ -71,12 +71,36 @@ describe('canonical event inventory oracle (XTRM-93 N3.0, SPECIALISTS-103 repair
 // does) can never fail it; only gutting the manifest turns it RED.
 const MIN_CANONICAL_INVENTORY_ENTRIES = 8;
 
-describe('canonical inventory manifest integrity (SPECIALISTS-118 floor)', () => {
-  it(`holds at least ${MIN_CANONICAL_INVENTORY_ENTRIES} entries`, () => {
+// Exact-manifest pin (SPECIALISTS-122 round 2, probe P1). The floor alone does
+// NOT catch removing a single entry once the inventory is larger than the
+// floor: at 9 entries, deleting ANY one row still satisfies a floor of 8, so an
+// older row (e.g. `start-boundary`) could be narrowed away silently while the
+// oracle stayed green. Pin the exact id set AND each id's expectation class.
+// Any add/remove/reclassify must now appear as a reviewable diff in this guard.
+const CANONICAL_INVENTORY_MANIFEST: readonly { id: string; expectation: CanonicalExpectationClass }[] = [
+  { id: 'start-boundary', expectation: 'EXPECTED_DURABLE' },
+  { id: 'terminal-complete', expectation: 'EXPECTED_DURABLE' },
+  { id: 'resume-reentry-status-change', expectation: 'EXPECTED_DURABLE' },
+  { id: 'legacy-stale-warning', expectation: 'EXPECTED_DURABLE' },
+  { id: 'native-stale-warning', expectation: 'EXPECTED_DURABLE' },
+  { id: 'model-fallback-mapped', expectation: 'EXPECTED_DURABLE' },
+  { id: 'settlement-stored-durable', expectation: 'EXPECTED_DURABLE' },
+  { id: 'token-metric-series', expectation: 'EXPECTED_RUNTIME_ONLY' },
+  { id: 'extension-discovery-evidence', expectation: 'EXPECTED_ABSENT_WITH_REASON' },
+];
+
+describe('canonical inventory manifest integrity (SPECIALISTS-118 floor; SPECIALISTS-122 exact pin)', () => {
+  it(`pins the exact entry-id set and expectation class per id (floor: ${MIN_CANONICAL_INVENTORY_ENTRIES})`, () => {
     expect(
       SUPERVISOR_CANONICAL_INVENTORY.length,
       `[manifest] inventory holds ${SUPERVISOR_CANONICAL_INVENTORY.length} entries, below the SPECIALISTS-118 floor of ${MIN_CANONICAL_INVENTORY_ENTRIES}: entries were removed, narrowing what the oracle enforces while the oracle itself stays green.`,
     ).toBeGreaterThanOrEqual(MIN_CANONICAL_INVENTORY_ENTRIES);
+    const actual = SUPERVISOR_CANONICAL_INVENTORY.map((entry) => `${entry.id}:${entry.expectation}`);
+    const pinned = CANONICAL_INVENTORY_MANIFEST.map((entry) => `${entry.id}:${entry.expectation}`);
+    expect(
+      actual,
+      '[manifest] the inventory id:expectation set drifted from the pinned manifest: an entry was added, removed, renamed or reclassified without updating the guard — the oracle would enforce a different surface than CI reviewed.',
+    ).toEqual(pinned);
   });
 
   it('represents every expectation class at least once', () => {
