@@ -154,7 +154,21 @@ export function flattenFleet(snapshot, { filter = '' } = {}) {
 
   const matches = (node) => {
     if (!needle) return true;
-    return [node.jobId, node.specialist, node.beadId, node.state, node.attention, node.currentEvent, node.currentTool]
+    return [
+      node.jobId,
+      node.specialist,
+      node.beadId,
+      node.state,
+      node.attention,
+      node.presentationAttention,
+      node.currentEvent,
+      node.currentTool,
+      node.live?.state,
+      node.live?.attemptId,
+      node.live?.requestedModel,
+      node.live?.resolvedModel,
+      node.live?.purpose,
+    ]
       .some((value) => String(value ?? '').toLowerCase().includes(needle));
   };
 
