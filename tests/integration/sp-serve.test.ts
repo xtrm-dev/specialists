@@ -48,7 +48,12 @@ beforeEach(() => {
         execution: {
           mode: 'auto',
           model: 'mock/model',
-          timeout_ms: 1000,
+          // Load budget, not a functional assertion (SPECIALISTS-144). These fixtures spawn a real
+          // `pi` subprocess per request; under a loaded box the spawn alone exceeded a 1000ms cap and
+          // the run failed as error_type 'timeout' (measured 1924/2051ms at load ~99 on 12 cores),
+          // surfacing as HTTP 200 with success:false. A genuine hang still fails, either here with a
+          // named timeout or at the suite's 30s per-test timeout.
+          timeout_ms: 20000,
           interactive: false,
           response_format: 'json',
           output_type: 'custom',
@@ -271,7 +276,12 @@ describe('sp serve', () => {
           execution: {
             mode: 'auto',
             model: 'mock/model',
-            timeout_ms: 1000,
+            // Load budget, not a functional assertion (SPECIALISTS-144). These fixtures spawn a real
+            // `pi` subprocess per request; under a loaded box the spawn alone exceeded a 1000ms cap and
+            // the run failed as error_type 'timeout' (measured 1924/2051ms at load ~99 on 12 cores),
+            // surfacing as HTTP 200 with success:false. A genuine hang still fails, either here with a
+            // named timeout or at the suite's 30s per-test timeout.
+            timeout_ms: 20000,
             interactive: false,
             response_format: 'json',
             output_type: 'custom',
