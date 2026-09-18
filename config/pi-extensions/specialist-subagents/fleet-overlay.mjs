@@ -22,6 +22,63 @@ const STATE_GLYPH = Object.freeze({
   idle: '·',
 });
 
+/**
+ * Overlay-only live annotation.
+ *
+ * A host snapshot may enrich a node only after that activation exists in the
+ * persisted Fleet projection. This prevents runtime hints from manufacturing
+ * operator truth before observability.db materializes it.
+ */
+export function annotateFleetWithLive(snapshot, { activations = [], asks = [] } = {}) {
+  const nodes = Array.isArray(snapshot?.nodes) ? snapshot.nodes : [];
+  const activationById = new Map((activations ?? []).map((view) => [view.activation_id, view]));
+  const askIds = new Set((asks ?? []).map((ask) => ask.activation_id));
+
+  const nextNodes = nodes.map((node) => {
+    const live = activationById.get(node.jobId);
+    if (!live) return { ...node };
+    const blocked = askIds.has(node.jobId) || live.state === 'needs_reply' || live.state === 'escalated';
+    const attention = blocked ? 'blocked' : liveAttention(live.state);
+    return {
+      ...node,
+      persistedState: node.persistedState ?? node.state,
+      persistedAttention: node.persistedAttention ?? node.attention,
+      state: live.state,
+      attention,
+      live: {
+        attemptId: live.attempt_id,
+        piSessionId: live.pi_session_id,
+        requestedModel: live.requested_model,
+        resolvedModel: live.resolved_model,
+        modelOverride: live.model_override,
+        turnCount: live.turn_count,
+        tokenUsage: live.token_usage,
+        lastActivityAt: live.last_activity_at,
+        purpose: live.purpose,
+      },
+    };
+  });
+
+  const byId = new Map(nextNodes.map((node) => [node.jobId, node]));
+  const counts = {
+    total: nextNodes.length,
+    active: nextNodes.filter((node) => node.attention === 'active').length,
+    waiting: nextNodes.filter((node) => node.attention === 'blocked').length,
+    warning: nextNodes.filter((node) => node.attention === 'warning').length,
+    failed: nextNodes.filter((node) => node.attention === 'failed').length,
+    settled: nextNodes.filter((node) => node.attention === 'settled').length,
+  };
+  return { ...snapshot, nodes: nextNodes, byId, counts };
+}
+
+function liveAttention(state) {
+  if (state === 'waiting' || state === 'needs_reply' || state === 'escalated') return 'blocked';
+  if (state === 'failed' || state === 'stopped') return 'failed';
+  if (state === 'settled') return 'settled';
+  if (state === 'starting' || state === 'running' || state === 'stopping' || state === 'uncertain') return 'active';
+  return 'idle';
+}
+
 export function createFleetOverlayState(initial = {}) {
   return {
     mode: FLEET_OVERLAY_MODES.includes(initial.mode) ? initial.mode : 'log',
