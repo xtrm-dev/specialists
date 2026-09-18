@@ -289,3 +289,33 @@ a `JobControl` replacement keyed on `activationId`, which does not exist.
 
 **Critical path:** `N0 → N1 → N2 → N3 → N4 → N5 → N6/N7 → N8 → N9 → N10`.
 N6 and N7 can run partly in parallel once N4 lands. N0 is short and unblocks everything downstream.
+
+---
+
+## Node status at the N3 freeze (2026-09-18)
+
+Verified against code and commits, not against board state, because the board had drifted: several node
+beads were still OPEN for work that had long since merged. All XTRM-93 tracking lives in Substrate
+(`sb`); there are zero XTRM-93 beads in the Beads (`bd`) store.
+
+| Node | Status | Evidence | Bead |
+|---|---|---|---|
+| **N0** extract `SupervisorStatus` | **DELIVERED** | `06ff4d19`; `SupervisorStatus` now in `src/specialist/status-contract.ts:30`, imported by `supervisor.ts`, `observability-sqlite.ts` and `activation/forensic-sink.ts`, so the native compile path no longer depends on the legacy supervisor module | SPECIALISTS-77 closed 2026-09-18 |
+| **N0.1** neutral session metric contract | **DELIVERED** | `11a48aad`; contract in `src/specialist/session-metrics-contract.ts`, consumed by `runner.ts`, `supervisor.ts`, `native-activation-observability.ts`, `timeline-events.ts` | SPECIALISTS-86 closed 2026-09-18 |
+| **N1** canonical native service boundary + capability matrix | **PARTIAL / UNVERIFIED** | The capability matrix exists (`00-capability-matrix.md`). No facade or `native-service` module was found by search, and three consumers were checked only by inspection, so this node's "canonical boundary" claim is **not** established here. No bead tracks it | — |
+| **N2** identity + read-only result/status adapters | **DELIVERED** | N2A: `b8f34462` + review fix `0292b225`, positional fix `813e3b01` + dist `0e76b315`; N2B: `ps.ts:18-19` consumes `summarizeNativeActivations` / `resolveNativeActivationOwnership` + review fix `2603358e`, verified at `6113a710`. Adversarial review gate verdict: "N0 accepted; N2A / N2B / dist accepted-with-findings" (`11-cutover-prep-log.md:16,340`) | SPECIALISTS-78, 80, 81, 92 closed 2026-09-18 |
+| **N3** telemetry parity | **FROZEN** | Code baseline `1ff421c2`; freeze record `e34b2255` (`n3/coordinator/N3-FREEZE-AUDIT.md`). Epic deliberately OPEN: 5 of 8 defect children delivered, 3 open with live defects (`SPECIALISTS-95` harness, `107` native metrics row, `108` `elapsed_ms` overwrite). Three epic output artifacts are NOT met — no `N3.0..N3.10` sequence (this DAG's `N0..N7` is the real structure), the differential corpus is a design document, and one matrix row keeps `UNKNOWN` parity | SPECIALISTS-94 OPEN |
+| **N4** `sp run` dispatch onto the native path | **NOT STARTED** | Preconditions and first-node candidates are recorded in `n3/coordinator/N3-FREEZE-AUDIT.md` §10 | — |
+| **N5** control lifecycle | **NOT STARTED** | Depends on N4 | — |
+| **N6** git/worktree/review compatibility | **NOT STARTED, EXTERNALLY BLOCKED** | Cannot complete until Core states whether it consumes `xtrm.branch.integration.v1` and whether it exposes the session worktree path as a contract field | — |
+| **N7** secondary surfaces | **NOT STARTED** | Also needs the script-class product decision | — |
+| **N8–N10** schema cleanup, flag flip, deletion | **NOT STARTED** | N8 depends on N4–N6; N9 is the flag flip; N10 is deletion and rebuild | — |
+
+**Legacy-oracle prerequisite, still open:** `SPECIALISTS-87` (make the Supervisor suite reachable, unitAI-9n93)
+remains OPEN. `tests/unit/specialist/supervisor.test.ts` installs an empty `node:child_process` mock while
+`supervisor.ts` imports `spawn`/`spawnSync`/`execFileSync`, so the legacy oracle cannot run; the quarantined
+run is 38 failed / 18 passed, identical to its own baseline.
+
+**Critical path from here:** the migration's next node is **N4**, whose inputs are `N1` (facade) and `N3`
+(telemetry evidence — now frozen). N1's status above is the one unresolved input: it should be established
+or restated before N4 depends on it.
