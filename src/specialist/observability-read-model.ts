@@ -356,8 +356,8 @@ export function readActivationInspect(source: ObservabilityReadSource, jobId: st
 
   const records = source.readForensicEvents({ jobId, limit: INSPECT_EVENT_LIMIT, order: 'desc' });
   const { parsed } = parseForensicRecords(records);
-  const attempts = [...new Set(records
-    .map((row) => row.attempt_id)
+  const attempts = [...new Set(parsed
+    .map(({ record }) => record.attempt_id)
     .filter((id): id is string => typeof id === 'string' && id.length > 0))];
 
   const latest = parsed[parsed.length - 1]?.event;
@@ -378,7 +378,9 @@ export function readActivationInspect(source: ObservabilityReadSource, jobId: st
     ...(status.model ? { model: status.model } : {}),
     ...(status.backend ? { backend: status.backend } : {}),
     attempts,
-    ...(attempts.length > 0 ? { latestAttemptId: attempts.at(-1) } : {}),
+    ...(typeof parsed.at(-1)?.record.attempt_id === 'string'
+      ? { latestAttemptId: parsed.at(-1)!.record.attempt_id! }
+      : {}),
     ...stringBodyField(admittedBody, 'configured_model', 'configuredModel'),
     ...stringBodyField(admittedBody, 'requested_model', 'requestedModel'),
     ...stringBodyField(admittedBody, 'resolved_model', 'resolvedModel'),
