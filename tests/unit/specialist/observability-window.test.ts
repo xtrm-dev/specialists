@@ -99,6 +99,7 @@ describe('XTRM-96 bounded observability storage reads', () => {
     });
     expect(rows).toHaveLength(1);
     expect(rows[0]?.attempt_id).toBe('att:retry:1');
+    expect(client.listForensicAttemptIds('act:retry')).toEqual(['att:retry:1', 'att:retry:2']);
     client.close();
   });
 
