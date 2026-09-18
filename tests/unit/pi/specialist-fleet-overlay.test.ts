@@ -112,9 +112,10 @@ describe('native fleet overlay model', () => {
 
   it('renders an attempt-aware result projection and fail-closed attempt error', () => {
     const fleet = snapshot();
+    const state = createFleetOverlayState({ selectedJobId: 'act:parent123456', mode: 'result' });
     const view = renderFleetOverlay({
       snapshot: fleet,
-      state: createFleetOverlayState({ selectedJobId: 'act:parent123456', mode: 'result' }),
+      state,
       result: {
         jobId: 'act:parent123456',
         attemptId: 'att:parent123456:2',
