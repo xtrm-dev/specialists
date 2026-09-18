@@ -102,6 +102,13 @@ class FakeSource implements ObservabilityReadSource {
     return filters.limit ? rows.slice(0, filters.limit) : rows;
   }
 
+  listForensicAttemptIds(jobId: string): string[] {
+    return [...new Set(this.forensic
+      .filter((row) => row.job_id === jobId && typeof row.attempt_id === 'string')
+      .sort((a, b) => a.seq - b.seq)
+      .map((row) => row.attempt_id as string))];
+  }
+
   listStatusesWindow(filters: ListStatusesWindowFilters = {}): SupervisorStatus[] {
     this.windows.push(filters);
     const filtered = this.statuses.filter((row) => {
