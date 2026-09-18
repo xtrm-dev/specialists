@@ -64,19 +64,25 @@ Do small, obvious work in the current XTRM agent when delegation would create mo
 coordination than value. XTRM is multi-agent by design; that does not mean every edit
 requires a child agent.
 
-## Basic job lifecycle
+## Dispatch lifecycle (both runtimes)
 
 ```text
-contract ready
+Issue ready (attested)
   -> select live specialist
-  -> dispatch against the Issue (`issue_ref`; `bead_id` is a permanent alias)
-  -> observe job state/evidence
-  -> consume the persisted result
+  -> dispatch: `specialist_dispatch(issue_ref=...)` native,
+     or `sp run <name> --bead <id>` operator surface
+     (`bead_id`/`--bead` are permanent aliases for the Issue ref)
+  -> observe activation/job state (specialist_status / sp ps|feed)
+  -> answer asks (specialist_reply) / steer or resume same session
+  -> consume settlement / persisted result
   -> verify findings against current tree/state
   -> run required review/test/security follow-up
-  -> publish or hand back through the owning XTRM workflow
+  -> record Journal result; explicit Closure elsewhere
+     (settled != published != closed)
 ```
 
+Native-first: `Native activation` below is the primary flow for
+Substrate-backed work. The `sp` CLI is the operator/frontend surface.
 For exact commands and specialized surfaces, load only the relevant reference:
 
 - `references/chain-recipes.md` — role selection and production-diff review shapes.
@@ -136,25 +142,27 @@ failing context window.
 General inter-agent messaging and wake/reply semantics belong to `/multiplexing`, not
 this skill.
 
-## Native activation — the second runtime (not the `sp` lifecycle above)
+## Native activation — primary flow (not the `sp` surface above)
 
-Everything above describes the supervised `sp` job lifecycle. None of its vocabulary
-carries into this section: native activation hosts a Specialist on an in-process Pi
-`AgentSession` rather than spawning `pi` as a subprocess, and it consumes Substrate
-Issues through the WorkItemStore boundary (`src/activation/workitem-store.ts`) — never
-through a Beads client, a `bd` subprocess, or a second readiness derivation. The work
-authority model belongs to Substrate; for what work exists, who owns it, and how
-readiness is decided, read Substrate's own `using-substrate` skill. This section states
-only the Specialists side of the boundary.
+Native activation is the PRIMARY dispatch path for Substrate-backed work:
+it hosts a Specialist on an in-process Pi `AgentSession` and consumes
+Substrate Issues through the WorkItemStore boundary
+(`src/activation/workitem-store.ts`) — never through a Beads client, a `bd`
+subprocess, or a second readiness derivation. The work authority model
+belongs to Substrate; for what work exists, who owns it, and how readiness
+is decided, read Substrate's own `using-substrate` skill. This section
+states only the Specialists side of the boundary.
 
 Six tools, names exact (`src/mcp/v2-server.ts:172-180`): `specialist_dispatch` /
 `specialist_status` / `specialist_reply` / `specialist_resume` /
 `specialist_stop_activation` / `specialist_list`. The `substrate_issue` /
 `substrate_journal` / `substrate_provenance` surfaces are separate Substrate tools,
 admitted only when Substrate is resolvable. The former `use_specialist` foreground path
-has been removed.
+has been removed. Full operator procedure:
+`plugins/specialists/skills/supervising-activations/SKILL.md`.
 
-The two runtimes differ in ways that change how you dispatch:
+The native path differs from the `sp` operator surface in ways that change
+how you dispatch:
 
 - **The Substrate Issue is the prompt; there is no task-text field.**
   `specialist_dispatch` takes exactly one of `issue_ref` (primary; `bead_id` is kept
@@ -185,10 +193,10 @@ The two runtimes differ in ways that change how you dispatch:
   only ordinary path to disposal (`src/activation/ask-tool.ts`,
   `src/activation/interaction.ts`, `src/mcp/resume-tool.ts`).
 
-Current reference for the native surface:
-`plugins/specialists/skills/supervising-activations/SKILL.md`, plus the live tool schemas
-in `src/tools/specialist/activation.tool.ts` and `src/mcp/resume-tool.ts`. Do not cite
-`docs/native-activation.md` — it is stale and its rewrite is tracked separately.
+Live tool schemas: `src/tools/specialist/activation.tool.ts` and
+`src/mcp/resume-tool.ts`. Do not cite `docs/native-activation.md` — it is stale
+and its rewrite is tracked separately. Settlement is evidence: record a Journal
+result, verify, then close explicitly — Closure lives elsewhere.
 
 ## Advanced surfaces are references, not separate skills
 
