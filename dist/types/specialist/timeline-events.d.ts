@@ -56,6 +56,7 @@
  * status.json remains the live mutable state snapshot.
  * result.txt remains final output storage.
  */
+import type { PiSessionStats, PiUsageVerbatim, SessionUsageCost, SessionUsageReconciliation } from './session-metrics-contract.js';
 /**
  * Base fields present in every timeline event.
  * Written to events.jsonl as NDJSON (one event per line).
@@ -141,6 +142,8 @@ export interface TimelineEventMeta extends TimelineEventBase {
     model: string;
     /** Backend provider (e.g., 'anthropic') */
     backend: string;
+    /** Pi version for this run, when known at meta time (SPECIALISTS-120 criterion 7). */
+    pi_version?: string;
     memory_injection?: {
         static_tokens: number;
         memory_tokens: number;
@@ -234,13 +237,34 @@ export interface TimelineTokenUsage {
     output_tokens?: number;
     cache_creation_tokens?: number;
     cache_read_tokens?: number;
+    /** Anthropic 1-hour cache writes (`cacheWrite1h`); a subset of cache_creation_tokens. */
+    cache_write_1h_tokens?: number;
     reasoning_tokens?: number;
     tool_tokens?: number;
     total_tokens?: number;
+    /**
+     * Provenance of `total_tokens` (SPECIALISTS-120 F3): `provider` when Pi reported the total,
+     * `derived` when Specialists computed it from the provider's components because Pi omitted it.
+     */
+    total_tokens_source?: 'provider' | 'derived';
     usage_source?: 'provider_usage' | 'runtime_estimate' | 'local_estimate' | 'unknown';
+    /** Cost as reported by Pi; never estimated by Specialists. */
+    cost?: SessionUsageCost;
+    /** Pi's provider-reported usage object, verbatim (SPECIALISTS-120). */
+    pi_usage?: PiUsageVerbatim;
 }
 export interface TimelineRunMetrics {
     token_usage?: TimelineTokenUsage;
+    /** Summed cost across every usage record observed for the run. */
+    cost?: SessionUsageCost;
+    /** Pi's terminal `get_session_stats` snapshot (Pi session totals, including compaction). */
+    session_stats?: PiSessionStats;
+    /** Failure detail when the settlement `get_session_stats` call failed or timed out. */
+    session_stats_error?: string;
+    /** Summed per-message usage vs the Pi session-stats snapshot. */
+    reconciliation?: SessionUsageReconciliation;
+    /** Pi version recorded for this run (binary on PATH, or the native SDK package). */
+    pi_version?: string;
     finish_reason?: string;
     exit_reason?: string;
     turns?: number;
@@ -277,6 +301,8 @@ export interface TimelineEventRunComplete extends TimelineEventBase {
     finish_reason?: string;
     tool_calls?: string[];
     exit_reason?: string;
+    /** Pi version recorded for this run (SPECIALISTS-120 criterion 7). */
+    pi_version?: string;
     /** Optional additive metrics summary */
     metrics?: TimelineRunMetrics;
     gitnexus_summary?: {
@@ -312,6 +338,29 @@ export interface TimelineEventTokenUsage extends TimelineEventBase {
     token_usage: TimelineTokenUsage;
     source: 'message_done' | 'turn_end' | 'agent_end';
 }
+/** Provenance of a `context_pct` value on a turn summary. */
+export type TimelineContextPctSource = 'pi_session_stats' | 'specialists_fallback';
+/**
+ * Terminal Pi session-stats snapshot (SPECIALISTS-120).
+ *
+ * Recorded once per run at settlement from Pi's `get_session_stats`, BEFORE the Pi process
+ * exits. Unlike `token_usage` (per-message deltas), this is Pi's own session total: it covers
+ * every assistant message, tool-reported usage and compaction/branch-summary generation,
+ * including history that was compacted away. `context_usage_*` carries Pi's native context
+ * window reading, which Specialists must never recompute.
+ */
+export interface TimelineEventSessionStats extends TimelineEventBase {
+    type: 'session_stats';
+    source: 'settlement';
+    session_stats: PiSessionStats;
+}
+/** Explicit failure of the settlement `get_session_stats` call; the job still settles. */
+export interface TimelineEventSessionStatsError extends TimelineEventBase {
+    type: 'session_stats_error';
+    source: 'settlement';
+    error_message: string;
+    timeout_ms?: number;
+}
 export interface TimelineEventFinishReason extends TimelineEventBase {
     type: 'finish_reason';
     finish_reason: string;
@@ -325,13 +374,22 @@ export interface TimelineEventTurnSummary extends TimelineEventBase {
     text_content?: string;
     context_pct?: number;
     context_health?: 'OK' | 'MONITOR' | 'WARN' | 'CRITICAL';
+    /**
+     * Where `context_pct` came from. `pi_session_stats` is Pi's own native context reading;
+     * `specialists_fallback` is the local MODEL_CONTEXT_WINDOWS estimate, which covers only
+     * the model families it knows and is never authoritative (SPECIALISTS-120 criterion 2).
+     */
+    context_pct_source?: TimelineContextPctSource;
 }
 export interface TimelineEventCompaction extends TimelineEventBase {
     type: 'compaction';
     phase: 'start' | 'end';
     tokens_before?: number;
+    estimated_tokens_after?: number;
     summary?: string;
     first_kept_entry_id?: string;
+    /** Usage of the summarization LLM call; contributes to Pi's session totals. */
+    token_usage?: TimelineTokenUsage;
 }
 export interface TimelineEventRetry extends TimelineEventBase {
     type: 'retry';
@@ -447,7 +505,7 @@ export interface TimelineEventLegacyComplete extends TimelineEventBase {
  * Union of all timeline event types.
  * This is the canonical type for events.jsonl records.
  */
-export type TimelineEvent = TimelineEventRunStart | TimelineEventPayloadBreakdown | TimelineEventMeta | TimelineEventThinking | TimelineEventTool | TimelineEventText | TimelineEventMessage | TimelineEventTurn | TimelineEventStatusChange | TimelineEventRunComplete | TimelineEventStaleWarning | TimelineEventTokenUsage | TimelineEventFinishReason | TimelineEventTurnSummary | TimelineEventCompaction | TimelineEventRetry | TimelineEventModelChange | TimelineEventExtensionError | TimelineEventApiError | TimelineEventAutoCommit | TimelineEventControlSignal | TimelineEventSettlement | TimelineEventLegacyComplete;
+export type TimelineEvent = TimelineEventRunStart | TimelineEventPayloadBreakdown | TimelineEventMeta | TimelineEventThinking | TimelineEventTool | TimelineEventText | TimelineEventMessage | TimelineEventTurn | TimelineEventStatusChange | TimelineEventRunComplete | TimelineEventStaleWarning | TimelineEventTokenUsage | TimelineEventSessionStats | TimelineEventSessionStatsError | TimelineEventFinishReason | TimelineEventTurnSummary | TimelineEventCompaction | TimelineEventRetry | TimelineEventModelChange | TimelineEventExtensionError | TimelineEventApiError | TimelineEventAutoCommit | TimelineEventControlSignal | TimelineEventSettlement | TimelineEventLegacyComplete;
 export declare const TIMELINE_EVENT_TYPES: {
     readonly RUN_START: "run_start";
     readonly META: "meta";
@@ -461,6 +519,8 @@ export declare const TIMELINE_EVENT_TYPES: {
     readonly RUN_COMPLETE: "run_complete";
     readonly STALE_WARNING: "stale_warning";
     readonly TOKEN_USAGE: "token_usage";
+    readonly SESSION_STATS: "session_stats";
+    readonly SESSION_STATS_ERROR: "session_stats_error";
     readonly FINISH_REASON: "finish_reason";
     readonly TURN_SUMMARY: "turn_summary";
     readonly COMPACTION: "compaction";
@@ -505,8 +565,10 @@ export declare function mapCallbackEventToTimelineEvent(callbackEvent: string, c
     content?: string;
     compaction?: {
         tokensBefore?: number;
+        estimatedTokensAfter?: number;
         summary?: string;
         firstKeptEntryId?: string;
+        token_usage?: TimelineTokenUsage;
     };
     retry?: {
         attempt?: number;
@@ -559,7 +621,9 @@ export declare function createRunStartEvent(specialist: string, beadId?: string,
 /**
  * Create a meta event.
  */
-export declare function createMetaEvent(model: string, backend: string): TimelineEventMeta;
+export declare function createMetaEvent(model: string, backend: string, options?: {
+    piVersion?: string;
+}): TimelineEventMeta;
 /**
  * Create a stale_warning event.
  * Emitted when stuck detection thresholds are crossed.
@@ -571,12 +635,18 @@ export declare function createStaleWarningEvent(reason: TimelineEventStaleWarnin
     tool?: string;
 }): TimelineEventStaleWarning;
 export declare function createTokenUsageEvent(token_usage: TimelineTokenUsage, source: 'message_done' | 'turn_end' | 'agent_end'): TimelineEventTokenUsage;
+/** Terminal Pi session-stats snapshot, written once per run at settlement (SPECIALISTS-120). */
+export declare function createSessionStatsEvent(session_stats: PiSessionStats): TimelineEventSessionStats;
+/** Explicit settlement failure: the snapshot is missing and the reason is durable. */
+export declare function createSessionStatsErrorEvent(errorMessage: string, timeoutMs?: number): TimelineEventSessionStatsError;
 export declare function createFinishReasonEvent(finish_reason: string, source: 'message_done' | 'turn_end' | 'agent_end'): TimelineEventFinishReason;
-export declare function createTurnSummaryEvent(turn_index: number, token_usage?: TimelineTokenUsage, finish_reason?: string, textContent?: string, contextPct?: number, contextHealth?: 'OK' | 'MONITOR' | 'WARN' | 'CRITICAL'): TimelineEventTurnSummary;
+export declare function createTurnSummaryEvent(turn_index: number, token_usage?: TimelineTokenUsage, finish_reason?: string, textContent?: string, contextPct?: number, contextHealth?: 'OK' | 'MONITOR' | 'WARN' | 'CRITICAL', contextPctSource?: TimelineContextPctSource): TimelineEventTurnSummary;
 export declare function createCompactionEvent(phase: 'start' | 'end', options?: {
     tokensBefore?: number;
+    estimatedTokensAfter?: number;
     summary?: string;
     firstKeptEntryId?: string;
+    tokenUsage?: TimelineTokenUsage;
 }): TimelineEventCompaction;
 export declare function createRetryEvent(phase: 'start' | 'end', options?: {
     attempt?: number;
@@ -599,6 +669,7 @@ export declare function createRunCompleteEvent(status: 'COMPLETE' | 'ERROR' | 'C
     tool_calls?: string[];
     exit_reason?: string;
     final?: boolean;
+    pi_version?: string;
     metrics?: TimelineRunMetrics;
     evidence?: TimelineEventEvidenceRef[];
     gitnexus_summary?: {

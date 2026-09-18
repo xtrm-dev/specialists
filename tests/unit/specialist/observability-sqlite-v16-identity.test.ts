@@ -64,13 +64,15 @@ describe('observability-sqlite v15 identity lineage', () => {
     }
   };
 
-  it('exposes schema version 15', () => {
+  it('exposes the newest schema version', () => {
     const client = createClient();
     closeClient();
     const raw = openRaw();
     const row = raw.query('SELECT MAX(version) AS version FROM schema_version').get() as { version?: number };
-    expect(row.version).toBe(15);
-    expect(OBSERVABILITY_SCHEMA_VERSION).toBe(15);
+    // The ledger row and OBSERVABILITY_SCHEMA_VERSION are one fact in two places; V16 added
+    // cost/session-stats columns and bumped both.
+    expect(row.version).toBe(16);
+    expect(OBSERVABILITY_SCHEMA_VERSION).toBe(16);
     closeRaw();
     void client;
   });

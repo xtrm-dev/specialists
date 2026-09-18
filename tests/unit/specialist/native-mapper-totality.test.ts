@@ -104,6 +104,10 @@ export const NATIVE_EMIT_INVENTORY = Object.freeze([
   'output_validation_started',
   'retry_completed',
   'retry_started',
+  // SPECIALISTS-120 settlement capture: the snapshot and its failure each get their own name,
+  // so a missing snapshot is a durable finding rather than a silently absent row.
+  'session_stats_captured',
+  'session_stats_failed',
   'settlement_artifact_attached',
   'settlement_degraded',
   'settlement_receipt_allocated',

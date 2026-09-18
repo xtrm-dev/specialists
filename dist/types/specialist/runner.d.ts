@@ -76,7 +76,7 @@ export interface RunResult {
     outputType?: string;
     payloadBreakdown?: PayloadBreakdown;
 }
-type SessionLike = Pick<PiAgentSession, 'start' | 'prompt' | 'waitForDone' | 'getLastOutput' | 'getState' | 'close' | 'kill' | 'meta' | 'steer' | 'resume'> & {
+type SessionLike = Pick<PiAgentSession, 'start' | 'prompt' | 'waitForDone' | 'captureSessionStats' | 'getLastOutput' | 'getState' | 'close' | 'kill' | 'meta' | 'steer' | 'resume'> & {
     getMetrics?: () => SessionRunMetrics;
 };
 export type SessionFactory = (opts: PiSessionOptions) => Promise<SessionLike>;

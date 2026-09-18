@@ -715,6 +715,33 @@ function bodyForTimelineEvent(
     };
   }
 
+  if (event.type === 'session_stats' || event.type === 'session_stats_error') {
+    const stats = event.session_stats;
+    const record = stats !== null && typeof stats === 'object' ? stats as Record<string, unknown> : undefined;
+    const tokens = record?.tokens !== null && typeof record?.tokens === 'object'
+      ? record.tokens as Record<string, unknown>
+      : {};
+    const contextUsage = record?.contextUsage !== null && typeof record?.contextUsage === 'object'
+      ? record.contextUsage as Record<string, unknown>
+      : {};
+    const statsRecord = record ?? {};
+    return {
+      legacy_timeline_event: event,
+      // Session-level totals from Pi; distinct from the per-message `token_usage` event.
+      session_input_tokens: numberField(tokens, 'input'),
+      session_output_tokens: numberField(tokens, 'output'),
+      session_cache_read_tokens: numberField(tokens, 'cacheRead'),
+      session_cache_write_tokens: numberField(tokens, 'cacheWrite'),
+      session_total_tokens: numberField(tokens, 'total'),
+      session_cost_total: numberField(statsRecord, 'cost'),
+      context_tokens: numberField(contextUsage, 'tokens'),
+      context_window: numberField(contextUsage, 'contextWindow'),
+      context_percent: numberField(contextUsage, 'percent'),
+      session_stats_available: event.type === 'session_stats',
+      error_message: stringField(event, 'error_message'),
+    };
+  }
+
   if (event.type === 'run_complete') {
     return {
       legacy_timeline_event: event,
@@ -816,6 +843,10 @@ function familyForTimelineType(type: string): string {
   if (type === 'tool') return 'tool';
   if (type === 'turn' || type === 'turn_summary' || type === 'message' || type === 'text' || type === 'thinking') return 'turn';
   if (type === 'token_usage' || type === 'finish_reason' || type === 'model_change' || type === 'meta') return 'model';
+  // SPECIALISTS-120: the terminal Pi session snapshot is a model-spend fact, not a job
+  // lifecycle fact. Without this it would fall through to the `job` default and the
+  // snapshot would be filed under the wrong family.
+  if (type === 'session_stats' || type === 'session_stats_error') return 'model';
   if (type === 'control_signal') return 'control';
   if (type === 'retry') return 'retry';
   if (type === 'compaction') return 'compaction';
@@ -849,6 +880,8 @@ function eventNameForTimelineEvent(event: { type: string; [key: string]: unknown
   }
   if (event.type === 'turn_summary') return 'turn.summarized';
   if (event.type === 'token_usage') return 'model.token_usage.recorded';
+  if (event.type === 'session_stats') return 'model.session_stats.recorded';
+  if (event.type === 'session_stats_error') return 'model.session_stats.failed';
   if (event.type === 'finish_reason') return 'model.finish_reason.recorded';
   if (event.type === 'model_change') return 'model.changed';
   if (event.type === 'control_signal') return `control.${String(event.action ?? 'signal')}.recorded`;
@@ -900,6 +933,9 @@ function severityForTimelineEvent(event: { type: string; [key: string]: unknown 
   // SPECIALISTS-101: settlement failures are errors, degradations/deferrals/refusals warn, success info.
   if (event.type === 'settlement_store_failed' || event.type === 'settlement_republish_error') return 'error';
   if (event.type === 'settlement_degraded' || event.type === 'settlement_republish_deferred' || event.type === 'settlement_republish_refused') return 'warn';
+  // SPECIALISTS-120: a missing settlement snapshot is a telemetry failure the operator must
+  // see, not an invisible absence — the run itself still settles normally.
+  if (event.type === 'session_stats_error') return 'warn';
   return 'info';
 }
 

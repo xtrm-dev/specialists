@@ -98,9 +98,40 @@ export interface PiAgentSessionLike {
     getActiveToolNames(): string[];
     setActiveToolsByName(names: string[]): void;
     waitForIdle(): Promise<void>;
+    /**
+     * Pi's own session token/cost/context totals (SPECIALISTS-120). Aggregates EVERY session
+     * entry — including tool-reported usage, compaction and branch-summary generation, and
+     * history that was compacted away — so it is authoritative where a sum over assistant
+     * messages is not. Absent on older doubles, which must degrade to no snapshot rather than
+     * to a fabricated one.
+     */
+    getSessionStats?: () => PiSessionStatsLike;
     /** Full registry with per-tool provenance. Present on real pi sessions; absent on older doubles. */
     getAllTools?: () => PiToolRegistryEntryLike[];
     getToolDefinition?: (name: string) => unknown;
+}
+/** Structural view of Pi's `SessionStats`. Normalized by `normalizePiSessionStats`. */
+export interface PiSessionStatsLike {
+    sessionFile?: string;
+    sessionId?: string;
+    userMessages?: number;
+    assistantMessages?: number;
+    toolCalls?: number;
+    toolResults?: number;
+    totalMessages?: number;
+    tokens?: {
+        input?: number;
+        output?: number;
+        cacheRead?: number;
+        cacheWrite?: number;
+        total?: number;
+    };
+    cost?: number;
+    contextUsage?: {
+        tokens?: number | null;
+        contextWindow?: number;
+        percent?: number | null;
+    };
 }
 /**
  * Session events the host observes.

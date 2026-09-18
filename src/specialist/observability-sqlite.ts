@@ -624,6 +624,7 @@ export function initSchema(db: BunDb): void {
   migrateToV13(db);
   migrateToV14(db);
   migrateToV15(db);
+  migrateToV16(db);
   verifyWalMode(db);
 }
 
@@ -1262,6 +1263,16 @@ export interface JobMetricsRecord {
   stall_gaps_json: string;
   run_complete_json: string | null;
   startup_payload_json: string | null;
+  /** Summed cost total from Pi-reported usage (SPECIALISTS-120). NULL when Pi reported none. */
+  cost_total: number | null;
+  /** Pi's terminal `get_session_stats` snapshot, verbatim. NULL when it was not captured. */
+  session_stats_json: string | null;
+  /** Summed-per-message usage vs Pi session stats. NULL when either side is missing. */
+  usage_reconciliation_json: string | null;
+  /** Pi version in use for the run. NULL on pre-120 rows. */
+  pi_version: string | null;
+  /** Provenance of the last recorded `context_pct`. NULL on pre-120 rows. */
+  context_pct_source: string | null;
   updated_at_ms: number;
 }
 
@@ -3014,6 +3025,14 @@ class SqliteClient implements ObservabilitySqliteClient {
       let waitingMs = 0;
       let phase: 'running' | 'waiting' | null = null;
       let phaseStartedAtMs: number | null = null;
+      // SPECIALISTS-120 telemetry: the last recorded value wins for the run-level snapshot
+      // fields; `context_pct_source` tracks the LAST producer so a stale fallback cannot
+      // masquerade as Pi's own reading.
+      let costTotal: number | null = null;
+      let sessionStatsJson: string | null = null;
+      let usageReconciliationJson: string | null = null;
+      let piVersion: string | null = null;
+      let contextPctSource: string | null = null;
 
       const closePhase = (endAtMs: number): void => {
         if (phase === null || phaseStartedAtMs === null || endAtMs < phaseStartedAtMs) return;
@@ -3037,7 +3056,30 @@ class SqliteClient implements ObservabilitySqliteClient {
         if (event.type === 'turn_summary') {
           totalTurns += 1;
           if (event.token_usage) tokenTrajectory.push({ turn_index: event.turn_index, t: event.t, token_usage: event.token_usage });
-          if (event.context_pct !== undefined) contextTrajectory.push({ turn_index: event.turn_index, t: event.t, context_pct: event.context_pct });
+          if (event.context_pct !== undefined) {
+            contextTrajectory.push({
+              turn_index: event.turn_index,
+              t: event.t,
+              context_pct: event.context_pct,
+              ...(event.context_pct_source ? { context_pct_source: event.context_pct_source } : {}),
+            });
+            if (event.context_pct_source) contextPctSource = event.context_pct_source;
+          }
+          continue;
+        }
+
+        // SPECIALISTS-120: Pi's terminal session totals. Recorded as a column so a research
+        // query reads exact cost/context without JSON-extracting the event stream.
+        if (event.type === 'session_stats') {
+          sessionStatsJson = stringifyJson(event.session_stats);
+          const statsCost = event.session_stats?.cost;
+          if (typeof statsCost === 'number' && Number.isFinite(statsCost)) costTotal = statsCost;
+          const percent = event.session_stats?.contextUsage?.percent;
+          if (typeof percent === 'number' && Number.isFinite(percent)) contextPctSource = 'pi_session_stats';
+          continue;
+        }
+
+        if (event.type === 'session_stats_error') {
           continue;
         }
 
@@ -3079,6 +3121,18 @@ class SqliteClient implements ObservabilitySqliteClient {
           elapsedMs = Math.round(event.elapsed_s * 1000);
           phase = null;
           phaseStartedAtMs = null;
+          // SPECIALISTS-120: the run-complete metrics are authoritative for the run-level
+          // telemetry columns — they are the values the producing runtime reconciled.
+          const runMetrics = event.metrics;
+          if (runMetrics?.cost?.total !== undefined) costTotal = runMetrics.cost.total;
+          if (runMetrics?.session_stats) sessionStatsJson = stringifyJson(runMetrics.session_stats);
+          if (runMetrics?.reconciliation) usageReconciliationJson = stringifyJson(runMetrics.reconciliation);
+          if (typeof event.pi_version === 'string') piVersion = event.pi_version;
+          else if (typeof runMetrics?.pi_version === 'string') piVersion = runMetrics.pi_version;
+          const runContextPercent = runMetrics?.session_stats?.contextUsage?.percent;
+          if (typeof runContextPercent === 'number' && Number.isFinite(runContextPercent)) {
+            contextPctSource = 'pi_session_stats';
+          }
           continue;
         }
 
@@ -3144,6 +3198,11 @@ class SqliteClient implements ObservabilitySqliteClient {
         stall_gaps_json: stringifyJson(stallGaps),
         run_complete_json: runCompleteJson,
         startup_payload_json: jobRow.startup_payload_json ?? null,
+        cost_total: costTotal,
+        session_stats_json: sessionStatsJson,
+        usage_reconciliation_json: usageReconciliationJson,
+        pi_version: piVersion,
+        context_pct_source: contextPctSource,
         updated_at_ms: jobRow.updated_at_ms,
       };
 
@@ -3152,8 +3211,10 @@ class SqliteClient implements ObservabilitySqliteClient {
           job_id, specialist, model, status, chain_kind, chain_id, bead_id, node_id, epic_id,
           started_at_ms, completed_at_ms, elapsed_ms, active_runtime_ms, waiting_ms, total_turns, total_tools,
           tool_call_counts_json, token_trajectory_json, context_trajectory_json, stall_gaps_json,
-          run_complete_json, startup_payload_json, updated_at_ms
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          run_complete_json, startup_payload_json,
+          cost_total, session_stats_json, usage_reconciliation_json, pi_version, context_pct_source,
+          updated_at_ms
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(job_id) DO UPDATE SET
           specialist = excluded.specialist,
           model = excluded.model,
@@ -3176,12 +3237,19 @@ class SqliteClient implements ObservabilitySqliteClient {
           stall_gaps_json = excluded.stall_gaps_json,
           run_complete_json = excluded.run_complete_json,
           startup_payload_json = excluded.startup_payload_json,
+          cost_total = excluded.cost_total,
+          session_stats_json = excluded.session_stats_json,
+          usage_reconciliation_json = excluded.usage_reconciliation_json,
+          pi_version = excluded.pi_version,
+          context_pct_source = excluded.context_pct_source,
           updated_at_ms = excluded.updated_at_ms;
       `, [
         record.job_id, record.specialist, record.model, record.status, record.chain_kind, record.chain_id, record.bead_id, record.node_id, record.epic_id,
         record.started_at_ms, record.completed_at_ms, record.elapsed_ms, record.active_runtime_ms, record.waiting_ms, record.total_turns, record.total_tools,
         record.tool_call_counts_json, record.token_trajectory_json, record.context_trajectory_json, record.stall_gaps_json,
-        record.run_complete_json, record.startup_payload_json, record.updated_at_ms,
+        record.run_complete_json, record.startup_payload_json,
+        record.cost_total, record.session_stats_json, record.usage_reconciliation_json, record.pi_version, record.context_pct_source,
+        record.updated_at_ms,
       ]);
 
       return record;
@@ -3586,4 +3654,45 @@ export function createObservabilitySqliteClient(cwd: string = process.cwd()): Ob
 export function createObservabilitySqliteClientAtPath(dbPath: string): ObservabilitySqliteClient | null {
   mkdirSync(dirname(dbPath), { recursive: true });
   return openObservabilitySqliteClient(dbPath);
+}
+
+// V16 — Pi usage telemetry (SPECIALISTS-120).
+//
+// Additive nullable columns on specialist_job_metrics. The data itself already rides in the
+// timeline events (`session_stats`, `run_complete.metrics`), but a research reader must be
+// able to query cost and session totals without JSON-extracting every event row — the same
+// reason `active_runtime_ms` and `waiting_ms` are columns rather than event_json reads.
+//
+// `cost_total` and the `*_json` blobs stay NULL for runs recorded before this migration and
+// for runs whose Pi build reported no session stats; NULL means "not reported", never zero.
+// Existing readers are unaffected: every column is nullable and no existing column changes.
+function migrateToV16(db: BunDb): void {
+  const hasV16 = db.query('SELECT 1 FROM schema_version WHERE version = 16 LIMIT 1').get() as { 1?: number } | undefined;
+
+  const metricsColumns = new Set(
+    (db.query('PRAGMA table_info(specialist_job_metrics)').all() as Array<{ name?: string }>)
+      .map((column) => column.name)
+      .filter((name): name is string => typeof name === 'string' && name.length > 0),
+  );
+
+  for (const column of [
+    { name: 'cost_total', definition: 'REAL' },
+    { name: 'session_stats_json', definition: 'TEXT' },
+    { name: 'usage_reconciliation_json', definition: 'TEXT' },
+    { name: 'pi_version', definition: 'TEXT' },
+    { name: 'context_pct_source', definition: 'TEXT' },
+  ]) {
+    if (!metricsColumns.has(column.name)) {
+      db.run(`ALTER TABLE specialist_job_metrics ADD COLUMN ${column.name} ${column.definition}`);
+    }
+  }
+
+  db.run('CREATE INDEX IF NOT EXISTS idx_job_metrics_pi_version ON specialist_job_metrics(pi_version)');
+
+  if (hasV16) return;
+
+  db.run(`
+    INSERT OR IGNORE INTO schema_version (version, applied_at_ms)
+      VALUES (16, strftime('%s', 'now') * 1000);
+  `);
 }

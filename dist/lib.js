@@ -7058,7 +7058,7 @@ function resolvePiExtensionsPythonKernelPath() {
 var SK_PACKAGE_DIR = join3("@jaggerxtrm", "pi-service-knowledge");
 
 // src/pi/session.ts
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { existsSync as existsSync5, lstatSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { homedir as homedir2, tmpdir } from "node:os";
 import { isAbsolute, resolve as resolve4, sep, join as join4, dirname as dirname4 } from "node:path";
@@ -11227,6 +11227,272 @@ function resolveCatalogVersionVerdict(installedVersion, baselineVersion) {
   return sameLine && atLeastBaseline ? { compatible: true, reason: `installed ${installedVersion} satisfies catalog ${baselineVersion} (caret-of-baseline)` } : { compatible: false, reason: `installed ${installedVersion} is outside the compatible range for catalog ${baselineVersion}` };
 }
 
+// src/specialist/session-metrics-contract.ts
+var SESSION_STATS_TIMEOUT_MS = 5000;
+var RECONCILED_FIELDS = ["input", "output", "cacheRead", "cacheWrite", "total"];
+function finite(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+function sameNumber(a, b) {
+  if (a === b)
+    return true;
+  return Math.abs(a - b) <= 0.000000001 * Math.max(1, Math.abs(a), Math.abs(b));
+}
+function reconcileSessionUsage(summed, stats) {
+  const statsTokens = stats?.tokens;
+  if (!statsTokens)
+    return;
+  const summedByField = {
+    input: finite(summed?.input_tokens),
+    output: finite(summed?.output_tokens),
+    cacheRead: finite(summed?.cache_read_tokens),
+    cacheWrite: finite(summed?.cache_creation_tokens),
+    total: finite(summed?.total_tokens)
+  };
+  const statsByField = {
+    input: finite(statsTokens.input),
+    output: finite(statsTokens.output),
+    cacheRead: finite(statsTokens.cacheRead),
+    cacheWrite: finite(statsTokens.cacheWrite),
+    total: finite(statsTokens.total)
+  };
+  const fields = {};
+  let reconciled = true;
+  for (const field of RECONCILED_FIELDS) {
+    const summedValue = summedByField[field] ?? 0;
+    const statsValue = statsByField[field] ?? 0;
+    const delta = summedValue - statsValue;
+    fields[field] = { summed: summedValue, session_stats: statsValue, delta };
+    if (!sameNumber(summedValue, statsValue))
+      reconciled = false;
+  }
+  const summedCost = finite(summed?.cost?.total);
+  const statsCost = finite(stats?.cost);
+  const costCompared = statsCost !== undefined;
+  if (costCompared) {
+    const summedValue = summedCost ?? 0;
+    const delta = summedValue - statsCost;
+    fields.cost = { summed: summedValue, session_stats: statsCost, delta };
+    if (!sameNumber(summedValue, statsCost))
+      reconciled = false;
+  }
+  return { reconciled, fields, cost_compared: costCompared };
+}
+function usageNumber(value) {
+  if (typeof value === "number" && Number.isFinite(value))
+    return value;
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return;
+}
+function pickFirstNumber(record, keys) {
+  for (const key of keys) {
+    const value = usageNumber(record[key]);
+    if (value !== undefined)
+      return value;
+  }
+  return;
+}
+function readCost(value) {
+  if (value === null || typeof value !== "object")
+    return;
+  const record = value;
+  const cost = {
+    input: usageNumber(record.input),
+    output: usageNumber(record.output),
+    cacheRead: usageNumber(record.cacheRead),
+    cacheWrite: usageNumber(record.cacheWrite),
+    total: usageNumber(record.total)
+  };
+  return Object.values(cost).some((entry) => entry !== undefined) ? cost : undefined;
+}
+function capturePiUsageVerbatim(candidate) {
+  if (candidate === null || typeof candidate !== "object" || Array.isArray(candidate))
+    return;
+  const source = candidate;
+  const verbatim = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (value === undefined)
+      continue;
+    verbatim[key] = value;
+  }
+  const numericFields = ["input", "output", "cacheRead", "cacheWrite", "cacheWrite1h", "reasoning", "totalTokens"];
+  if (!numericFields.some((field) => usageNumber(verbatim[field]) !== undefined))
+    return;
+  const cost = readCost(source.cost);
+  if (cost)
+    verbatim.cost = cost;
+  return verbatim;
+}
+var USAGE_SOURCE_VALUES = ["provider_usage", "runtime_estimate", "local_estimate", "unknown"];
+function normalizeUsageSource(value) {
+  return typeof value === "string" && USAGE_SOURCE_VALUES.includes(value) ? value : "unknown";
+}
+function normalizeSessionTokenUsage(candidate) {
+  if (candidate === null || typeof candidate !== "object" || Array.isArray(candidate))
+    return;
+  const usage = candidate;
+  const normalized = {
+    input_tokens: pickFirstNumber(usage, ["input_tokens", "inputTokens", "prompt_tokens", "promptTokens", "input"]),
+    output_tokens: pickFirstNumber(usage, ["output_tokens", "outputTokens", "completion_tokens", "completionTokens", "output"]),
+    cache_creation_tokens: pickFirstNumber(usage, ["cache_creation_tokens", "cacheCreationTokens", "cache_write_tokens", "cacheWrite"]),
+    cache_read_tokens: pickFirstNumber(usage, ["cache_read_tokens", "cacheReadTokens", "cache_hit_tokens", "cacheRead"]),
+    cache_write_1h_tokens: pickFirstNumber(usage, ["cache_write_1h_tokens", "cacheWrite1h", "cache_write_1h"]),
+    reasoning_tokens: pickFirstNumber(usage, ["reasoning_tokens", "reasoningTokens", "thinking_tokens", "thinkingTokens", "reasoning"]),
+    tool_tokens: pickFirstNumber(usage, ["tool_tokens", "toolTokens", "tool_use_tokens", "toolUseTokens"]),
+    total_tokens: pickFirstNumber(usage, ["total_tokens", "totalTokens"]),
+    usage_source: usage.usage_source === undefined ? "unknown" : normalizeUsageSource(usage.usage_source)
+  };
+  const cost = readCost(usage.cost);
+  if (cost)
+    normalized.cost = cost;
+  const piUsage = capturePiUsageVerbatim(usage);
+  if (piUsage)
+    normalized.pi_usage = piUsage;
+  const hasCounter = [
+    normalized.input_tokens,
+    normalized.output_tokens,
+    normalized.cache_creation_tokens,
+    normalized.cache_read_tokens,
+    normalized.cache_write_1h_tokens,
+    normalized.reasoning_tokens,
+    normalized.tool_tokens,
+    normalized.total_tokens
+  ].some((value) => value !== undefined);
+  const hasCost = normalized.cost !== undefined;
+  if (!hasCounter && !hasCost)
+    return;
+  if (normalized.total_tokens === undefined) {
+    const components = [
+      normalized.input_tokens,
+      normalized.output_tokens,
+      normalized.cache_creation_tokens,
+      normalized.cache_read_tokens
+    ].filter((value) => value !== undefined);
+    if (components.length > 0) {
+      normalized.total_tokens = components.reduce((sum, value) => sum + value, 0);
+      normalized.total_tokens_source = "derived";
+    }
+  } else {
+    normalized.total_tokens_source = "provider";
+  }
+  return Object.fromEntries(Object.entries(normalized).filter(([, value]) => value !== undefined));
+}
+function asProviderUsage(usage, rawPayload) {
+  if (!usage)
+    return;
+  if (usage.usage_source !== undefined && usage.usage_source !== "unknown")
+    return usage;
+  const payloadNamesSource = rawPayload !== null && typeof rawPayload === "object" && typeof rawPayload.usage_source === "string";
+  if (payloadNamesSource)
+    return usage;
+  usage.usage_source = "provider_usage";
+  return usage;
+}
+function normalizePiSessionStats(candidate) {
+  if (candidate === null || typeof candidate !== "object" || Array.isArray(candidate))
+    return;
+  const source = candidate;
+  const stats = {};
+  const counters = stats;
+  if (typeof source.sessionFile === "string" && source.sessionFile.length > 0)
+    stats.sessionFile = source.sessionFile;
+  if (typeof source.sessionId === "string" && source.sessionId.length > 0)
+    stats.sessionId = source.sessionId;
+  for (const key of ["userMessages", "assistantMessages", "toolCalls", "toolResults", "totalMessages"]) {
+    const value = usageNumber(source[key]);
+    if (value !== undefined)
+      counters[key] = value;
+  }
+  const tokens = source.tokens;
+  if (tokens !== null && typeof tokens === "object" && !Array.isArray(tokens)) {
+    const tokenRecord = tokens;
+    stats.tokens = {
+      input: usageNumber(tokenRecord.input),
+      output: usageNumber(tokenRecord.output),
+      cacheRead: usageNumber(tokenRecord.cacheRead),
+      cacheWrite: usageNumber(tokenRecord.cacheWrite),
+      total: usageNumber(tokenRecord.total)
+    };
+  }
+  const cost = usageNumber(source.cost);
+  if (cost !== undefined)
+    stats.cost = cost;
+  const contextUsage = source.contextUsage;
+  if (contextUsage !== null && typeof contextUsage === "object" && !Array.isArray(contextUsage)) {
+    const context = contextUsage;
+    stats.contextUsage = {
+      tokens: context.tokens === null ? null : usageNumber(context.tokens),
+      contextWindow: usageNumber(context.contextWindow),
+      percent: context.percent === null ? null : usageNumber(context.percent)
+    };
+  }
+  return Object.keys(stats).length > 0 ? stats : undefined;
+}
+var USAGE_COUNTER_KEYS = [
+  "input_tokens",
+  "output_tokens",
+  "cache_creation_tokens",
+  "cache_read_tokens",
+  "cache_write_1h_tokens",
+  "reasoning_tokens",
+  "tool_tokens",
+  "total_tokens"
+];
+var COST_KEYS = ["input", "output", "cacheRead", "cacheWrite", "total"];
+function accumulateCost(existing, incoming, cumulative) {
+  if (incoming === null || typeof incoming !== "object") {
+    return existing !== null && typeof existing === "object" ? existing : undefined;
+  }
+  const next = incoming;
+  const previous = existing !== null && typeof existing === "object" ? existing : {};
+  const merged = {};
+  let hasAny = false;
+  for (const key of COST_KEYS) {
+    const value = typeof next[key] === "number" && Number.isFinite(next[key]) ? next[key] : undefined;
+    const before = typeof previous[key] === "number" && Number.isFinite(previous[key]) ? previous[key] : undefined;
+    if (value === undefined && before === undefined)
+      continue;
+    if (value === 0 && before !== undefined) {
+      merged[key] = before;
+      hasAny = true;
+      continue;
+    }
+    const delta = before !== undefined && cumulative && value !== undefined ? value - before : value ?? 0;
+    merged[key] = (before ?? 0) + delta;
+    hasAny = true;
+  }
+  if (!hasAny)
+    return existing !== null && typeof existing === "object" ? existing : undefined;
+  return merged;
+}
+function accumulateTokenUsage(prev, incoming, lastSeen) {
+  const merged = { ...prev ?? {} };
+  const carried = USAGE_COUNTER_KEYS.filter((key) => {
+    const value = incoming[key];
+    return typeof value === "number" && Number.isFinite(value) && value > 0;
+  });
+  const cumulative = carried.every((key) => lastSeen[key] === undefined || incoming[key] >= lastSeen[key]);
+  for (const key of carried) {
+    const value = incoming[key];
+    const last = lastSeen[key];
+    const delta = last !== undefined && cumulative ? value - last : value;
+    merged[key] = (typeof merged[key] === "number" ? merged[key] : 0) + delta;
+    lastSeen[key] = value;
+  }
+  if (merged.usage_source === undefined && typeof incoming.usage_source === "string") {
+    merged.usage_source = incoming.usage_source;
+  }
+  if (typeof merged.total_tokens === "number")
+    merged.total_tokens_source = "derived";
+  const cost = accumulateCost(merged.cost, incoming.cost, cumulative);
+  if (cost)
+    merged.cost = cost;
+  return merged;
+}
+
 // src/pi/session.ts
 class SessionKilledError extends Error {
   constructor() {
@@ -11589,6 +11855,35 @@ function resolveCuratedExtensionPaths(options) {
     ]
   };
 }
+var cachedPiVersion;
+var piVersionResolved = false;
+function resolvePiVersion() {
+  if (piVersionResolved)
+    return cachedPiVersion;
+  piVersionResolved = true;
+  try {
+    const output = execFileSync("pi", ["--version"], { encoding: "utf-8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"] });
+    const version = output.trim();
+    if (version.length > 0) {
+      cachedPiVersion = version;
+      return cachedPiVersion;
+    }
+  } catch {}
+  try {
+    const globalDir = resolveGlobalNodeModulesDir2();
+    if (globalDir) {
+      const pkgPath = join4(globalDir, "@earendil-works", "pi-coding-agent", "package.json");
+      if (existsSync5(pkgPath)) {
+        const parsed = JSON.parse(readFileSync(pkgPath, "utf-8"));
+        if (typeof parsed.version === "string" && parsed.version.length > 0) {
+          cachedPiVersion = parsed.version;
+          return cachedPiVersion;
+        }
+      }
+    }
+  } catch {}
+  return;
+}
 function resolveGlobalNodeModulesDir2() {
   const candidates = [
     process.env.PI_NPM_GLOBAL_DIR,
@@ -11608,48 +11903,11 @@ function asNumber(value) {
   }
   return;
 }
-function normalizeUsageSource(value) {
-  if (value === "provider_usage" || value === "runtime_estimate" || value === "local_estimate" || value === "unknown")
-    return value;
-  return "unknown";
-}
-function pickFirstNumber(record, keys) {
-  for (const key of keys) {
-    const value = asNumber(record[key]);
-    if (value !== undefined)
-      return value;
-  }
-  return;
-}
-function normalizeTokenUsage(candidate) {
-  if (!candidate || typeof candidate !== "object")
+function normalizeTokenUsage(candidate, providerReported = true) {
+  const normalized = normalizeSessionTokenUsage(candidate);
+  if (!normalized)
     return;
-  const usage = candidate;
-  const normalized = {
-    input_tokens: pickFirstNumber(usage, ["input_tokens", "inputTokens", "prompt_tokens", "promptTokens", "input"]),
-    output_tokens: pickFirstNumber(usage, ["output_tokens", "outputTokens", "completion_tokens", "completionTokens", "output"]),
-    cache_creation_tokens: pickFirstNumber(usage, ["cache_creation_tokens", "cacheCreationTokens", "cache_write_tokens", "cacheWrite"]),
-    cache_read_tokens: pickFirstNumber(usage, ["cache_read_tokens", "cacheReadTokens", "cache_hit_tokens", "cacheRead"]),
-    reasoning_tokens: pickFirstNumber(usage, ["reasoning_tokens", "reasoningTokens", "thinking_tokens", "thinkingTokens"]),
-    tool_tokens: pickFirstNumber(usage, ["tool_tokens", "toolTokens", "tool_use_tokens", "toolUseTokens"]),
-    total_tokens: pickFirstNumber(usage, ["total_tokens", "totalTokens"]),
-    usage_source: typeof usage.usage_source === "string" ? normalizeUsageSource(usage.usage_source) : "provider_usage"
-  };
-  const hasAny = Object.values(normalized).some((value) => value !== undefined);
-  if (!hasAny)
-    return;
-  if (normalized.total_tokens === undefined) {
-    const components = [
-      normalized.input_tokens,
-      normalized.output_tokens,
-      normalized.cache_creation_tokens,
-      normalized.cache_read_tokens
-    ].filter((value) => value !== undefined);
-    if (components.length > 0) {
-      normalized.total_tokens = components.reduce((sum, value) => sum + value, 0);
-    }
-  }
-  return Object.fromEntries(Object.entries(normalized).filter(([, value]) => value !== undefined));
+  return providerReported ? asProviderUsage(normalized, candidate) : normalized;
 }
 function findFinishReason(payload) {
   if (!payload || typeof payload !== "object")
@@ -11688,7 +11946,7 @@ function findTokenUsage(payload) {
     if (normalized)
       return normalized;
   }
-  return normalizeTokenUsage(record);
+  return normalizeTokenUsage(record, false);
 }
 function extractMessageTextContent(message) {
   if (!message || typeof message !== "object")
@@ -11908,6 +12166,12 @@ class PiAgentSession {
     auto_compactions: 0,
     auto_retries: 0
   };
+  _summedUsage;
+  _summedUsageSeen = {};
+  _sessionStats;
+  _sessionStatsError;
+  _sessionStatsCaptured = false;
+  _piVersion;
   meta;
   constructor(options, meta) {
     this.options = options;
@@ -11995,6 +12259,11 @@ class PiAgentSession {
       CAVEMAN_LEVEL: "full",
       PI_KERNEL_AUDIT_POLICY: "1"
     };
+    this._piVersion = this._piVersionValue();
+    if (this._piVersion) {
+      this._metrics.pi_version = this._piVersion;
+      this.options.onMetric?.({ type: "pi_version", pi_version: this._piVersion });
+    }
     const sessionCwd = resolve4(this.options.cwd ?? process.cwd());
     this.proc = spawn("pi", args, {
       stdio: ["pipe", "pipe", "pipe"],
@@ -12139,6 +12408,49 @@ ${stderrTail}` : ""}`;
     this._metrics.finish_reason = finishReason;
     this.options.onMetric?.({ type: "finish_reason", finish_reason: finishReason, source });
   }
+  _accumulateUsage(usage) {
+    if (!usage)
+      return;
+    this._summedUsage = accumulateTokenUsage(this._summedUsage, usage, this._summedUsageSeen);
+  }
+  _recordMessageUsage(message) {
+    const usage = normalizeTokenUsage(message?.usage);
+    if (!usage)
+      return;
+    this._accumulateUsage(usage);
+    this.options.onMetric?.({ type: "token_usage", token_usage: usage, source: "message_done" });
+  }
+  _piVersionValue() {
+    return this._piVersion ?? this.options.piVersion ?? resolvePiVersion();
+  }
+  async captureSessionStats() {
+    if (this._sessionStatsCaptured)
+      return;
+    this._sessionStatsCaptured = true;
+    const timeoutMs = this.options.sessionStatsTimeoutMs ?? SESSION_STATS_TIMEOUT_MS;
+    const record = (errorMessage) => {
+      this._sessionStatsError = errorMessage;
+      this._metrics.session_stats_error = errorMessage;
+      this.options.onMetric?.({ type: "session_stats_error", errorMessage, timeoutMs, source: "settlement" });
+    };
+    if (!this.proc?.stdin || !this.proc.stdin.writable) {
+      record("pi process is not available to answer get_session_stats");
+      return;
+    }
+    try {
+      const response = await this.sendCommand({ type: "get_session_stats" }, timeoutMs);
+      const stats = normalizePiSessionStats(response?.data);
+      if (!stats) {
+        record("get_session_stats returned no usable session totals");
+        return;
+      }
+      this._sessionStats = stats;
+      this._metrics.session_stats = stats;
+      this.options.onMetric?.({ type: "session_stats", session_stats: stats, source: "settlement" });
+    } catch (error) {
+      record(error instanceof Error ? error.message : String(error));
+    }
+  }
   _handleEvent(line) {
     let event;
     try {
@@ -12175,6 +12487,8 @@ ${stderrTail}` : ""}`;
     }
     if (type === "message_end") {
       const role = event.message?.role;
+      if (role === "assistant" || role === "toolResult")
+        this._recordMessageUsage(event.message);
       if (role === "assistant") {
         const content = extractMessageTextContent(event.message);
         this.options.onEvent?.("message_end_assistant", content ? { content, charCount: content.length } : undefined);
@@ -12263,21 +12577,29 @@ ${stderrTail}` : ""}`;
       this.options.onEvent?.("tool_execution_end", { toolCallId });
       return;
     }
-    if (type === "auto_compaction_start" || type === "auto_compaction_end") {
-      if (type === "auto_compaction_end") {
+    if (type === "auto_compaction_start" || type === "auto_compaction_end" || type === "compaction_start" || type === "compaction_end") {
+      const isEnd = type === "auto_compaction_end" || type === "compaction_end";
+      const legacyType = isEnd ? "auto_compaction_end" : "auto_compaction_start";
+      if (isEnd) {
         this._metrics.auto_compactions = (this._metrics.auto_compactions ?? 0) + 1;
       }
+      const result = event.result && typeof event.result === "object" ? event.result : undefined;
+      const compactionUsage = normalizeTokenUsage(result?.usage ?? event.usage);
+      if (isEnd)
+        this._accumulateUsage(compactionUsage);
       const compactionDetails = {
-        tokensBefore: asNumber(event.tokensBefore ?? event.tokens_before),
-        summary: findStringValue(event, ["summary"]),
-        firstKeptEntryId: findStringValue(event, ["firstKeptEntryId", "first_kept_entry_id"])
+        tokensBefore: asNumber(event.tokensBefore ?? event.tokens_before ?? result?.tokensBefore),
+        estimatedTokensAfter: asNumber(event.estimatedTokensAfter ?? event.estimated_tokens_after ?? result?.estimatedTokensAfter),
+        summary: findStringValue(result ?? event, ["summary"]) ?? findStringValue(event, ["summary"]),
+        firstKeptEntryId: findStringValue(result ?? event, ["firstKeptEntryId", "first_kept_entry_id"]),
+        ...compactionUsage ? { token_usage: compactionUsage } : {}
       };
       this.options.onMetric?.({
         type: "compaction",
-        phase: type === "auto_compaction_start" ? "start" : "end",
+        phase: isEnd ? "end" : "start",
         ...compactionDetails
       });
-      this.options.onEvent?.(type, compactionDetails);
+      this.options.onEvent?.(legacyType, compactionDetails);
       return;
     }
     if (type === "auto_retry_start" || type === "auto_retry_end") {
@@ -12394,6 +12716,7 @@ ${stderrTail}` : ""}`;
   }
   async prompt(task) {
     this._stallError = undefined;
+    this._sessionStatsCaptured = false;
     this._markActivity();
     const response = await this.sendCommand({ type: "prompt", message: task });
     if (response?.success === false) {
@@ -12402,12 +12725,15 @@ ${stderrTail}` : ""}`;
   }
   async waitForDone(timeout) {
     const donePromise = this._donePromise ?? Promise.resolve();
-    if (!timeout)
-      return donePromise;
-    return Promise.race([
-      donePromise,
-      new Promise((_, reject) => setTimeout(() => reject(new Error(`Specialist timed out after ${timeout}ms`)), timeout))
-    ]);
+    if (timeout) {
+      await Promise.race([
+        donePromise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error(`Specialist timed out after ${timeout}ms`)), timeout))
+      ]);
+    } else {
+      await donePromise;
+    }
+    await this.captureSessionStats();
   }
   async getLastOutput() {
     if (!this.proc?.stdin || !this.proc.stdin.writable) {
@@ -12435,7 +12761,18 @@ ${stderrTail}` : ""}`;
     }
   }
   getMetrics() {
-    return { ...this._metrics, ...this._metrics.token_usage ? { token_usage: { ...this._metrics.token_usage } } : {} };
+    const summedUsage = this._summedUsage;
+    const reconciliation = reconcileSessionUsage(summedUsage, this._sessionStats);
+    const piVersion = this._piVersionValue();
+    return {
+      ...this._metrics,
+      ...this._metrics.token_usage ? { token_usage: { ...this._metrics.token_usage } } : {},
+      ...summedUsage?.cost ? { cost: { ...summedUsage.cost } } : {},
+      ...this._sessionStats ? { session_stats: this._sessionStats } : {},
+      ...this._sessionStatsError ? { session_stats_error: this._sessionStatsError } : {},
+      ...reconciliation ? { reconciliation } : {},
+      ...piVersion ? { pi_version: piVersion } : {}
+    };
   }
   async close() {
     if (this._killed)
@@ -13463,6 +13800,27 @@ function bodyForTimelineEvent(event, context) {
       usage_source: stringField(event, "usage_source") ?? stringField(event, "source") ?? "runtime_event"
     };
   }
+  if (event.type === "session_stats" || event.type === "session_stats_error") {
+    const stats = event.session_stats;
+    const record = stats !== null && typeof stats === "object" ? stats : undefined;
+    const tokens = record?.tokens !== null && typeof record?.tokens === "object" ? record.tokens : {};
+    const contextUsage = record?.contextUsage !== null && typeof record?.contextUsage === "object" ? record.contextUsage : {};
+    const statsRecord = record ?? {};
+    return {
+      legacy_timeline_event: event,
+      session_input_tokens: numberField(tokens, "input"),
+      session_output_tokens: numberField(tokens, "output"),
+      session_cache_read_tokens: numberField(tokens, "cacheRead"),
+      session_cache_write_tokens: numberField(tokens, "cacheWrite"),
+      session_total_tokens: numberField(tokens, "total"),
+      session_cost_total: numberField(statsRecord, "cost"),
+      context_tokens: numberField(contextUsage, "tokens"),
+      context_window: numberField(contextUsage, "contextWindow"),
+      context_percent: numberField(contextUsage, "percent"),
+      session_stats_available: event.type === "session_stats",
+      error_message: stringField(event, "error_message")
+    };
+  }
   if (event.type === "run_complete") {
     return {
       legacy_timeline_event: event,
@@ -13560,6 +13918,8 @@ function familyForTimelineType(type) {
     return "turn";
   if (type === "token_usage" || type === "finish_reason" || type === "model_change" || type === "meta")
     return "model";
+  if (type === "session_stats" || type === "session_stats_error")
+    return "model";
   if (type === "control_signal")
     return "control";
   if (type === "retry")
@@ -13609,6 +13969,10 @@ function eventNameForTimelineEvent(event) {
     return "turn.summarized";
   if (event.type === "token_usage")
     return "model.token_usage.recorded";
+  if (event.type === "session_stats")
+    return "model.session_stats.recorded";
+  if (event.type === "session_stats_error")
+    return "model.session_stats.failed";
   if (event.type === "finish_reason")
     return "model.finish_reason.recorded";
   if (event.type === "model_change")
@@ -13690,6 +14054,8 @@ function severityForTimelineEvent(event) {
   if (event.type === "settlement_store_failed" || event.type === "settlement_republish_error")
     return "error";
   if (event.type === "settlement_degraded" || event.type === "settlement_republish_deferred" || event.type === "settlement_republish_refused")
+    return "warn";
+  if (event.type === "session_stats_error")
     return "warn";
   return "info";
 }
@@ -14186,6 +14552,7 @@ function initSchema(db) {
   migrateToV13(db);
   migrateToV14(db);
   migrateToV15(db);
+  migrateToV16(db);
   verifyWalMode(db);
 }
 function migrateToV13(db) {
@@ -15803,6 +16170,11 @@ class SqliteClient {
       let waitingMs = 0;
       let phase = null;
       let phaseStartedAtMs = null;
+      let costTotal = null;
+      let sessionStatsJson = null;
+      let usageReconciliationJson = null;
+      let piVersion = null;
+      let contextPctSource = null;
       const closePhase = (endAtMs) => {
         if (phase === null || phaseStartedAtMs === null || endAtMs < phaseStartedAtMs)
           return;
@@ -15824,8 +16196,29 @@ class SqliteClient {
           totalTurns += 1;
           if (event.token_usage)
             tokenTrajectory.push({ turn_index: event.turn_index, t: event.t, token_usage: event.token_usage });
-          if (event.context_pct !== undefined)
-            contextTrajectory.push({ turn_index: event.turn_index, t: event.t, context_pct: event.context_pct });
+          if (event.context_pct !== undefined) {
+            contextTrajectory.push({
+              turn_index: event.turn_index,
+              t: event.t,
+              context_pct: event.context_pct,
+              ...event.context_pct_source ? { context_pct_source: event.context_pct_source } : {}
+            });
+            if (event.context_pct_source)
+              contextPctSource = event.context_pct_source;
+          }
+          continue;
+        }
+        if (event.type === "session_stats") {
+          sessionStatsJson = stringifyJson(event.session_stats);
+          const statsCost = event.session_stats?.cost;
+          if (typeof statsCost === "number" && Number.isFinite(statsCost))
+            costTotal = statsCost;
+          const percent = event.session_stats?.contextUsage?.percent;
+          if (typeof percent === "number" && Number.isFinite(percent))
+            contextPctSource = "pi_session_stats";
+          continue;
+        }
+        if (event.type === "session_stats_error") {
           continue;
         }
         if (event.type === "token_usage") {
@@ -15860,6 +16253,21 @@ class SqliteClient {
           elapsedMs = Math.round(event.elapsed_s * 1000);
           phase = null;
           phaseStartedAtMs = null;
+          const runMetrics = event.metrics;
+          if (runMetrics?.cost?.total !== undefined)
+            costTotal = runMetrics.cost.total;
+          if (runMetrics?.session_stats)
+            sessionStatsJson = stringifyJson(runMetrics.session_stats);
+          if (runMetrics?.reconciliation)
+            usageReconciliationJson = stringifyJson(runMetrics.reconciliation);
+          if (typeof event.pi_version === "string")
+            piVersion = event.pi_version;
+          else if (typeof runMetrics?.pi_version === "string")
+            piVersion = runMetrics.pi_version;
+          const runContextPercent = runMetrics?.session_stats?.contextUsage?.percent;
+          if (typeof runContextPercent === "number" && Number.isFinite(runContextPercent)) {
+            contextPctSource = "pi_session_stats";
+          }
           continue;
         }
         if (event.type === "stale_warning" && event.reason === "tool_duration") {
@@ -15906,6 +16314,11 @@ class SqliteClient {
         stall_gaps_json: stringifyJson(stallGaps),
         run_complete_json: runCompleteJson,
         startup_payload_json: jobRow.startup_payload_json ?? null,
+        cost_total: costTotal,
+        session_stats_json: sessionStatsJson,
+        usage_reconciliation_json: usageReconciliationJson,
+        pi_version: piVersion,
+        context_pct_source: contextPctSource,
         updated_at_ms: jobRow.updated_at_ms
       };
       this.db.run(`
@@ -15913,8 +16326,10 @@ class SqliteClient {
           job_id, specialist, model, status, chain_kind, chain_id, bead_id, node_id, epic_id,
           started_at_ms, completed_at_ms, elapsed_ms, active_runtime_ms, waiting_ms, total_turns, total_tools,
           tool_call_counts_json, token_trajectory_json, context_trajectory_json, stall_gaps_json,
-          run_complete_json, startup_payload_json, updated_at_ms
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          run_complete_json, startup_payload_json,
+          cost_total, session_stats_json, usage_reconciliation_json, pi_version, context_pct_source,
+          updated_at_ms
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(job_id) DO UPDATE SET
           specialist = excluded.specialist,
           model = excluded.model,
@@ -15937,6 +16352,11 @@ class SqliteClient {
           stall_gaps_json = excluded.stall_gaps_json,
           run_complete_json = excluded.run_complete_json,
           startup_payload_json = excluded.startup_payload_json,
+          cost_total = excluded.cost_total,
+          session_stats_json = excluded.session_stats_json,
+          usage_reconciliation_json = excluded.usage_reconciliation_json,
+          pi_version = excluded.pi_version,
+          context_pct_source = excluded.context_pct_source,
           updated_at_ms = excluded.updated_at_ms;
       `, [
         record.job_id,
@@ -15961,6 +16381,11 @@ class SqliteClient {
         record.stall_gaps_json,
         record.run_complete_json,
         record.startup_payload_json,
+        record.cost_total,
+        record.session_stats_json,
+        record.usage_reconciliation_json,
+        record.pi_version,
+        record.context_pct_source,
         record.updated_at_ms
       ]);
       return record;
@@ -16297,6 +16722,28 @@ function openObservabilitySqliteClient(dbPath) {
 function createObservabilitySqliteClientAtPath(dbPath) {
   mkdirSync3(dirname6(dbPath), { recursive: true });
   return openObservabilitySqliteClient(dbPath);
+}
+function migrateToV16(db) {
+  const hasV16 = db.query("SELECT 1 FROM schema_version WHERE version = 16 LIMIT 1").get();
+  const metricsColumns = new Set(db.query("PRAGMA table_info(specialist_job_metrics)").all().map((column) => column.name).filter((name) => typeof name === "string" && name.length > 0));
+  for (const column of [
+    { name: "cost_total", definition: "REAL" },
+    { name: "session_stats_json", definition: "TEXT" },
+    { name: "usage_reconciliation_json", definition: "TEXT" },
+    { name: "pi_version", definition: "TEXT" },
+    { name: "context_pct_source", definition: "TEXT" }
+  ]) {
+    if (!metricsColumns.has(column.name)) {
+      db.run(`ALTER TABLE specialist_job_metrics ADD COLUMN ${column.name} ${column.definition}`);
+    }
+  }
+  db.run("CREATE INDEX IF NOT EXISTS idx_job_metrics_pi_version ON specialist_job_metrics(pi_version)");
+  if (hasV16)
+    return;
+  db.run(`
+    INSERT OR IGNORE INTO schema_version (version, applied_at_ms)
+      VALUES (16, strftime('%s', 'now') * 1000);
+  `);
 }
 
 // src/specialist/task-prompt.ts
@@ -17662,6 +18109,8 @@ var TIMELINE_EVENT_TYPES = {
   RUN_COMPLETE: "run_complete",
   STALE_WARNING: "stale_warning",
   TOKEN_USAGE: "token_usage",
+  SESSION_STATS: "session_stats",
+  SESSION_STATS_ERROR: "session_stats_error",
   FINISH_REASON: "finish_reason",
   TURN_SUMMARY: "turn_summary",
   COMPACTION: "compaction",
@@ -17770,8 +18219,10 @@ function mapCallbackEventToTimelineEvent(callbackEvent, context) {
         type: TIMELINE_EVENT_TYPES.COMPACTION,
         phase: "start",
         ...context.compaction?.tokensBefore !== undefined ? { tokens_before: context.compaction.tokensBefore } : {},
+        ...context.compaction?.estimatedTokensAfter !== undefined ? { estimated_tokens_after: context.compaction.estimatedTokensAfter } : {},
         ...context.compaction?.summary ? { summary: context.compaction.summary } : {},
-        ...context.compaction?.firstKeptEntryId ? { first_kept_entry_id: context.compaction.firstKeptEntryId } : {}
+        ...context.compaction?.firstKeptEntryId ? { first_kept_entry_id: context.compaction.firstKeptEntryId } : {},
+        ...context.compaction?.token_usage ? { token_usage: context.compaction.token_usage } : {}
       };
     case "auto_compaction_end":
     case "auto_compaction":
@@ -17780,8 +18231,10 @@ function mapCallbackEventToTimelineEvent(callbackEvent, context) {
         type: TIMELINE_EVENT_TYPES.COMPACTION,
         phase: "end",
         ...context.compaction?.tokensBefore !== undefined ? { tokens_before: context.compaction.tokensBefore } : {},
+        ...context.compaction?.estimatedTokensAfter !== undefined ? { estimated_tokens_after: context.compaction.estimatedTokensAfter } : {},
         ...context.compaction?.summary ? { summary: context.compaction.summary } : {},
-        ...context.compaction?.firstKeptEntryId ? { first_kept_entry_id: context.compaction.firstKeptEntryId } : {}
+        ...context.compaction?.firstKeptEntryId ? { first_kept_entry_id: context.compaction.firstKeptEntryId } : {},
+        ...context.compaction?.token_usage ? { token_usage: context.compaction.token_usage } : {}
       };
     case "auto_retry_start":
       return {
@@ -17865,12 +18318,13 @@ function createRunStartEvent(specialist, beadId, startupSnapshot) {
     ...startupSnapshot ? { startup_snapshot: startupSnapshot } : {}
   };
 }
-function createMetaEvent(model, backend) {
+function createMetaEvent(model, backend, options) {
   return {
     t: Date.now(),
     type: TIMELINE_EVENT_TYPES.META,
     model,
-    backend
+    backend,
+    ...options?.piVersion !== undefined ? { pi_version: options.piVersion } : {}
   };
 }
 function createStatusChangeEvent(status, previousStatus) {
@@ -17899,6 +18353,23 @@ function createTokenUsageEvent(token_usage, source) {
     source
   };
 }
+function createSessionStatsEvent(session_stats) {
+  return {
+    t: Date.now(),
+    type: TIMELINE_EVENT_TYPES.SESSION_STATS,
+    source: "settlement",
+    session_stats
+  };
+}
+function createSessionStatsErrorEvent(errorMessage2, timeoutMs) {
+  return {
+    t: Date.now(),
+    type: TIMELINE_EVENT_TYPES.SESSION_STATS_ERROR,
+    source: "settlement",
+    error_message: errorMessage2,
+    ...timeoutMs !== undefined ? { timeout_ms: timeoutMs } : {}
+  };
+}
 function createFinishReasonEvent(finish_reason, source) {
   return {
     t: Date.now(),
@@ -17907,7 +18378,7 @@ function createFinishReasonEvent(finish_reason, source) {
     source
   };
 }
-function createTurnSummaryEvent(turn_index, token_usage, finish_reason, textContent, contextPct, contextHealth) {
+function createTurnSummaryEvent(turn_index, token_usage, finish_reason, textContent, contextPct, contextHealth, contextPctSource) {
   return {
     t: Date.now(),
     type: TIMELINE_EVENT_TYPES.TURN_SUMMARY,
@@ -17916,7 +18387,8 @@ function createTurnSummaryEvent(turn_index, token_usage, finish_reason, textCont
     ...finish_reason ? { finish_reason } : {},
     ...textContent ? { text_content: textContent } : {},
     ...contextPct !== undefined ? { context_pct: contextPct } : {},
-    ...contextHealth ? { context_health: contextHealth } : {}
+    ...contextHealth ? { context_health: contextHealth } : {},
+    ...contextPct !== undefined && contextPctSource ? { context_pct_source: contextPctSource } : {}
   };
 }
 function createRunCompleteEvent(status, elapsed_s, options) {
@@ -18823,6 +19295,12 @@ async function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assista
           appendTimelineEvent?.(createFinishReasonEvent(event.finish_reason, event.source));
         if (event.type === "turn_summary")
           appendTimelineEvent?.(createTurnSummaryEvent(event.turn_index, event.token_usage, event.finish_reason));
+        if (event.type === "session_stats")
+          appendTimelineEvent?.(createSessionStatsEvent(event.session_stats));
+        if (event.type === "session_stats_error")
+          appendTimelineEvent?.(createSessionStatsErrorEvent(event.errorMessage, event.timeoutMs));
+        if (event.type === "pi_version")
+          appendTimelineEvent?.(createMetaEvent(model, deriveBackendFromModel(model) ?? "unknown", { piVersion: event.pi_version }));
         if (event.type === "api_error")
           appendTimelineEvent?.(mapCallbackEventToTimelineEvent("api_error", { apiError: event }));
         if (event.type === "compaction")
@@ -21863,47 +22341,54 @@ function assistantText(event) {
   return text.trim().length > 0 ? text : undefined;
 }
 function nativeSessionTokenUsage(event) {
-  const usage = record(assistantMessage(event)?.usage);
+  const message = record(event.message);
+  const role = stringField2(message?.role);
+  if (role !== "assistant" && role !== "toolResult")
+    return;
+  const usage = record(message?.usage);
   if (!usage)
     return;
-  const projected = {
-    input_tokens: numberField2(usage.input),
-    output_tokens: numberField2(usage.output),
-    cache_creation_tokens: numberField2(usage.cacheWrite),
-    cache_read_tokens: numberField2(usage.cacheRead),
-    reasoning_tokens: numberField2(usage.reasoning),
-    total_tokens: numberField2(usage.totalTokens),
-    usage_source: "provider_usage"
-  };
-  return Object.values(projected).some((value) => typeof value === "number") ? projected : undefined;
+  const normalized = normalizeSessionTokenUsage(usage);
+  if (!normalized)
+    return;
+  return asProviderUsage(normalized, usage);
 }
-var USAGE_COUNTER_KEYS = [
-  "input_tokens",
-  "output_tokens",
-  "cache_creation_tokens",
-  "cache_read_tokens",
-  "reasoning_tokens",
-  "tool_tokens",
-  "total_tokens"
-];
-function accumulateTokenUsage(prev, incoming, lastSeen) {
-  const merged = { ...prev ?? {} };
-  const carried = USAGE_COUNTER_KEYS.filter((key) => {
-    const value = incoming[key];
-    return typeof value === "number" && Number.isFinite(value) && value > 0;
+function isNativeUsageEvent(event) {
+  return event.type === "message_end" || event.type === "compaction_end";
+}
+function nativeEventTokenUsage(event) {
+  if (!isNativeUsageEvent(event))
+    return;
+  if (event.type === "message_end")
+    return nativeSessionTokenUsage(event);
+  const result = record(event.result);
+  if (!result)
+    return;
+  return nativeSessionTokenUsage({
+    type: "message_end",
+    message: { role: "assistant", usage: result.usage }
   });
-  const cumulative = carried.every((key) => lastSeen[key] === undefined || incoming[key] >= lastSeen[key]);
-  for (const key of carried) {
-    const value = incoming[key];
-    const last = lastSeen[key];
-    const delta = last !== undefined && cumulative ? value - last : value;
-    merged[key] = (typeof merged[key] === "number" ? merged[key] : 0) + delta;
-    lastSeen[key] = value;
+}
+async function captureNativeSessionStats(session, timeoutMs = SESSION_STATS_TIMEOUT_MS) {
+  if (typeof session.getSessionStats !== "function") {
+    return { error: "pi session does not expose getSessionStats" };
   }
-  if (merged.usage_source === undefined && typeof incoming.usage_source === "string") {
-    merged.usage_source = incoming.usage_source;
+  let timer;
+  try {
+    const raw = await Promise.race([
+      Promise.resolve().then(() => session.getSessionStats()),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`get_session_stats did not answer within ${timeoutMs}ms`)), timeoutMs);
+      })
+    ]);
+    const stats = normalizePiSessionStats(raw);
+    return stats ? { stats } : { error: "getSessionStats returned no usable session totals" };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  } finally {
+    if (timer)
+      clearTimeout(timer);
   }
-  return merged;
 }
 function resultContent(result) {
   if (typeof result === "string")
@@ -21943,7 +22428,8 @@ function mapNativeLifecycleEvent(event, context, t = Date.now()) {
       return at(createStatusChangeEvent("waiting", "running"), t);
     case "activation_resumed":
       return at(createStatusChangeEvent("running", "waiting"), t);
-    case "activation_completed":
+    case "activation_completed": {
+      const reconciliation = reconcileSessionUsage(context.tokenUsage, context.sessionStats);
       return at(createRunCompleteEvent("COMPLETE", Math.max(0, t - context.startedAtMs) / 1000, {
         model: context.resolvedModel,
         backend: context.resolvedModel?.split("/")[0],
@@ -21953,8 +22439,13 @@ function mapNativeLifecycleEvent(event, context, t = Date.now()) {
         finish_reason: context.finishReason,
         tool_calls: context.toolCalls,
         final: true,
+        pi_version: context.piVersion,
         metrics: {
           token_usage: context.tokenUsage,
+          ...context.tokenUsage?.cost ? { cost: context.tokenUsage.cost } : {},
+          ...context.sessionStats ? { session_stats: context.sessionStats } : {},
+          ...reconciliation ? { reconciliation } : {},
+          ...context.piVersion ? { pi_version: context.piVersion } : {},
           finish_reason: context.finishReason,
           turns: context.turns,
           tool_calls: context.toolCalls?.length,
@@ -21963,6 +22454,7 @@ function mapNativeLifecycleEvent(event, context, t = Date.now()) {
           auto_compactions: context.autoCompactions
         }
       }), t);
+    }
     case "lease_acquired":
     case "lease_denied":
     case "lease_uncertain":
@@ -21992,6 +22484,12 @@ function mapNativeLifecycleEvent(event, context, t = Date.now()) {
         ...numberField2(event.payload?.attempt_n) !== undefined ? { attempt_n: numberField2(event.payload?.attempt_n) } : {},
         ...stringField2(event.payload?.resolved_model) ? { resolved_model: stringField2(event.payload?.resolved_model) } : {}
       }, t);
+    case "session_stats_captured": {
+      const stats = normalizePiSessionStats(event.payload?.session_stats);
+      return stats ? at(createSessionStatsEvent(stats), t) : at(createSessionStatsErrorEvent("session_stats_captured carried no usable snapshot"), t);
+    }
+    case "session_stats_failed":
+      return at(createSessionStatsErrorEvent(stringField2(event.payload?.error) ?? "session stats capture failed", numberField2(event.payload?.timeout_ms)), t);
     case "settlement_stored":
       return at(createSettlementEvent("settlement_stored", {
         bead_id: event.beadId,
@@ -22148,11 +22646,14 @@ function mapNativeSessionEvent(event, t = Date.now(), turnIndex = 0) {
       break;
     case "compaction_end": {
       const result = record(event.result);
+      const summaryUsage = nativeSessionTokenUsage({ type: "message_end", message: { role: "assistant", usage: result?.usage } });
       add(mapCallbackEventToTimelineEvent("auto_compaction_end", {
         compaction: {
           tokensBefore: numberField2(result?.tokensBefore),
+          estimatedTokensAfter: numberField2(result?.estimatedTokensAfter),
           summary: stringField2(result?.summary),
-          firstKeptEntryId: stringField2(result?.firstKeptEntryId)
+          firstKeptEntryId: stringField2(result?.firstKeptEntryId),
+          ...summaryUsage ? { token_usage: summaryUsage } : {}
         }
       }));
       break;
@@ -22848,11 +23349,9 @@ var TOKEN_USAGE_KEYS = [
   "total_tokens"
 ];
 function extractTokenUsage(event) {
-  const nested = nativeSessionTokenUsage(event);
+  const nested = nativeEventTokenUsage(event);
   if (nested) {
-    const { usage_source: _ignored, ...usage } = nested;
-    if (Object.keys(usage).length > 0)
-      return usage;
+    return nested;
   }
   const candidates = [event.token_usage, event.tokenUsage, event.usage];
   for (const candidate of candidates) {
@@ -23089,6 +23588,8 @@ class NativeActivationHost {
   loadSdk;
   cwd;
   now;
+  sessionStatsTimeoutMs;
+  piVersion;
   authority;
   settlements;
   admission;
@@ -23109,6 +23610,8 @@ class NativeActivationHost {
     this.forensics = deps.forensics ?? NULL_FORENSIC_SINK;
     this.loadSdk = deps.loadSdk ?? loadPiSdk;
     this.now = deps.now ?? (() => Date.now());
+    this.sessionStatsTimeoutMs = deps.sessionStatsTimeoutMs;
+    this.piVersion = deps.piVersion;
     this.authority = deps.authority ?? NULL_AUTHORITY_WRITER;
     this.settlements = deps.settlements ?? createFileSettlementStore(join20(this.cwd, ".specialists", "settlements"));
     this.admission = deps.admission ?? ((candidate, tier, contract) => validateBeforeRun(candidate, tier, contract));
@@ -23742,13 +24245,11 @@ class NativeActivationHost {
   }
   onSessionEvent(snapshot, event, emit) {
     snapshot.lastActivityAt = this.now();
-    if (event.type === "message_end") {
-      const usage = extractTokenUsage(event);
-      if (usage) {
-        const seen = this.lastUsageSeen.get(snapshot) ?? {};
-        snapshot.tokenUsage = accumulateTokenUsage(snapshot.tokenUsage, usage, seen);
-        this.lastUsageSeen.set(snapshot, seen);
-      }
+    const usage = isNativeUsageEvent(event) ? extractTokenUsage(event) : undefined;
+    if (usage) {
+      const seen = this.lastUsageSeen.get(snapshot) ?? {};
+      snapshot.tokenUsage = accumulateTokenUsage(snapshot.tokenUsage, usage, seen);
+      this.lastUsageSeen.set(snapshot, seen);
     }
     this.forensics.sessionEvent?.({
       activationId: snapshot.activationId,
@@ -23798,6 +24299,23 @@ class NativeActivationHost {
       default:
         break;
     }
+  }
+  async captureSessionStats(session, emit) {
+    const timeoutMs = this.sessionStatsTimeoutMs ?? SESSION_STATS_TIMEOUT_MS;
+    const piVersion = this.piVersion ?? resolvePiVersion();
+    const { stats, error } = await captureNativeSessionStats(session, timeoutMs);
+    if (stats) {
+      emit("session_stats_captured", {
+        session_stats: stats,
+        ...piVersion ? { pi_version: piVersion } : {}
+      });
+      return;
+    }
+    emit("session_stats_failed", {
+      error: error ?? "session stats unavailable",
+      timeout_ms: timeoutMs,
+      ...piVersion ? { pi_version: piVersion } : {}
+    });
   }
   noteToolStart(snapshot, event) {
     if (snapshot.state !== "starting" && snapshot.state !== "running")
@@ -23861,9 +24379,17 @@ class NativeActivationHost {
     this.toolDurationWatch.delete(activationId);
   }
   async runToSettled(snapshot, session, initialPrompt, emit, record2) {
+    let settlementRecorded = false;
+    const recordSettlementOnce = async () => {
+      if (settlementRecorded)
+        return;
+      settlementRecorded = true;
+      await this.captureSessionStats(session, emit);
+    };
     try {
       await session.prompt(initialPrompt);
       await session.waitForIdle();
+      await recordSettlementOnce();
       const last = lastAssistantMessage(session.messages);
       if (last && (last.stopReason === "error" || last.stopReason === "aborted")) {
         const detail = last.errorMessage ?? `turn ended with stopReason "${last.stopReason}"`;
@@ -23936,6 +24462,7 @@ class NativeActivationHost {
       snapshot.state = "failed";
       this.save(snapshot);
       const message = error instanceof Error ? error.message : String(error);
+      await recordSettlementOnce();
       emit("activation_failed", { error: message });
       this.releaseIfWriter(snapshot, "failed");
       const thrownResult = {
@@ -24792,6 +25319,8 @@ function identityOf(state) {
 }
 function statusOf(activationId, state, currentEvent, error) {
   const elapsedMs = Math.max(0, state.lastEventAtMs - state.startedAtMs);
+  const contextPct = typeof state.sessionStats?.contextUsage?.percent === "number" ? Number(state.sessionStats.contextUsage.percent.toFixed(2)) : undefined;
+  const reconciliation = reconcileSessionUsage(state.tokenUsage, state.sessionStats);
   return {
     id: activationId,
     specialist: state.specialist,
@@ -24807,6 +25336,10 @@ function statusOf(activationId, state, currentEvent, error) {
     worktree_path: state.workspacePath,
     metrics: {
       token_usage: state.tokenUsage,
+      ...state.tokenUsage?.cost ? { cost: state.tokenUsage.cost } : {},
+      ...state.sessionStats ? { session_stats: state.sessionStats } : {},
+      ...reconciliation ? { reconciliation } : {},
+      ...state.piVersion ? { pi_version: state.piVersion } : {},
       finish_reason: state.finishReason,
       turns: state.turns,
       tool_calls: state.toolCalls.length,
@@ -24814,6 +25347,7 @@ function statusOf(activationId, state, currentEvent, error) {
       auto_compactions: state.autoCompactions,
       auto_retries: state.autoRetries
     },
+    ...contextPct !== undefined ? { context_pct: contextPct, context_pct_source: "pi_session_stats" } : {},
     error
   };
 }
@@ -24866,6 +25400,12 @@ function createActivationForensicSink(observability) {
         const completedOutput = event.name === "activation_completed" && typeof event.payload?.output === "string" ? event.payload.output : undefined;
         if (completedOutput !== undefined)
           state.latestOutput = completedOutput;
+        if (event.name === "session_stats_captured" || event.name === "session_stats_failed") {
+          const captured = normalizePiSessionStats(event.payload?.session_stats);
+          if (captured)
+            state.sessionStats = captured;
+          state.piVersion = stringValue(event.payload?.pi_version) ?? state.piVersion;
+        }
         states.set(event.activationId, state);
         const error = stringValue(event.payload?.error) ?? (ERROR_STATUS_LIFECYCLE.has(event.name) ? stringValue(event.payload?.reason) : undefined);
         const timelineEvent = mapNativeLifecycleEvent(event, {
@@ -24878,7 +25418,9 @@ function createActivationForensicSink(observability) {
           toolCalls: state.toolCalls,
           turns: state.turns,
           autoRetries: state.autoRetries,
-          autoCompactions: state.autoCompactions
+          autoCompactions: state.autoCompactions,
+          ...state.sessionStats ? { sessionStats: state.sessionStats } : {},
+          ...state.piVersion ? { piVersion: state.piVersion } : {}
         }, now);
         if (event.name === "activation_completed" && timelineEvent && state.latestOutput !== undefined) {
           const status = statusOf(event.activationId, state, timelineEvent.type, error);
@@ -24920,12 +25462,13 @@ function createActivationForensicSink(observability) {
         state.workspacePath = input.workspacePath;
         states.set(input.activationId, state);
         const timelineEvents = mapNativeSessionEvent(input.event, now, state.turns);
+        const eventUsage = nativeEventTokenUsage(input.event);
+        if (eventUsage)
+          state.tokenUsage = accumulateTokenUsage(state.tokenUsage, eventUsage, state.lastUsageSeen);
         for (const timelineEvent of timelineEvents) {
           if (timelineEvent.type === TIMELINE_EVENT_TYPES.TEXT && typeof timelineEvent.content === "string") {
             state.latestOutput = timelineEvent.content;
           }
-          if (timelineEvent.type === TIMELINE_EVENT_TYPES.TOKEN_USAGE)
-            state.tokenUsage = accumulateTokenUsage(state.tokenUsage, timelineEvent.token_usage, state.lastUsageSeen);
           if (timelineEvent.type === TIMELINE_EVENT_TYPES.FINISH_REASON)
             state.finishReason = timelineEvent.finish_reason;
           if (timelineEvent.type === TIMELINE_EVENT_TYPES.TOOL && timelineEvent.phase === "end") {

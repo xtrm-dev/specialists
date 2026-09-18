@@ -94,7 +94,7 @@ export interface RunResult {
   payloadBreakdown?: PayloadBreakdown;
 }
 
-type SessionLike = Pick<PiAgentSession, 'start' | 'prompt' | 'waitForDone' | 'getLastOutput' | 'getState' | 'close' | 'kill' | 'meta' | 'steer' | 'resume'>
+type SessionLike = Pick<PiAgentSession, 'start' | 'prompt' | 'waitForDone' | 'captureSessionStats' | 'getLastOutput' | 'getState' | 'close' | 'kill' | 'meta' | 'steer' | 'resume'>
   & { getMetrics?: () => SessionRunMetrics };
 
 export type SessionFactory = (opts: PiSessionOptions) => Promise<SessionLike>;
@@ -1398,7 +1398,16 @@ export class SpecialistRunner {
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
           try {
             await session.prompt(renderedTask);
+            // `waitForDone()` captures settlement telemetry before it returns, so the snapshot
+            // describes this run and is taken before the process is closed below
+            // (SPECIALISTS-120 criterion 3).
             await session.waitForDone(execution.timeout_ms);
+            // Rev-3 scope also names an explicit settlement-stats call before session close.
+            // `captureSessionStats()` is idempotent per turn, so this is a no-op after the
+            // boundary capture above — kept deliberately: it keeps the runner correct even if
+            // the boundary's own capture is ever relaxed, and script-runner.ts (the other
+            // waitForDone caller) stays covered by the boundary either way.
+            await session.captureSessionStats?.();
             output = await session.getLastOutput();
             runMetrics = session.getMetrics?.();
             sessionBackend = session.meta.backend;
@@ -1450,6 +1459,8 @@ export class SpecialistRunner {
         // Don't close here — caller owns the lifecycle via closeFn.
         keepAliveActive = true;
         const resumeFn = async (msg: string): Promise<string> => {
+          // `resume()` settles through `waitForDone()`, which captures this turn's own session
+          // totals before the next turn rewrites the session (SPECIALISTS-120 criterion 3).
           await session!.resume(msg, execution.timeout_ms);
           return session!.getLastOutput();
         };

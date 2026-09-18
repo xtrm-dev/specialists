@@ -7,14 +7,14 @@ export declare class StallTimeoutError extends Error {
 import { type ManifestPolicy } from '../specialist/manifest-resolver.js';
 import { type ResolvedToolContract } from '../specialist/resolved-tool-contract.js';
 import { type ToolCatalogIndex } from '../specialist/tool-catalog.js';
-import type { SessionMetricEvent, SessionRunMetrics } from '../specialist/session-metrics-contract.js';
+import { type SessionMetricEvent, type SessionRunMetrics } from '../specialist/session-metrics-contract.js';
 export interface AgentSessionMeta {
     backend: string;
     model: string;
     sessionId: string;
     startedAt: Date;
 }
-export type { SessionMetricEvent, SessionRunMetrics, SessionTokenUsage } from '../specialist/session-metrics-contract.js';
+export type { PiSessionStats, PiUsageVerbatim, SessionMetricEvent, SessionRunMetrics, SessionTokenUsage, SessionUsageCost, SessionUsageReconciliation, } from '../specialist/session-metrics-contract.js';
 export interface PiSessionOptions {
     model: string;
     systemPrompt?: string;
@@ -80,6 +80,14 @@ export interface PiSessionOptions {
     stallTimeoutMs?: number;
     /** Extended stall timeout used while known test commands run via bash tool */
     testCommandStallTimeoutMs?: number;
+    /**
+     * Bound on the settlement `get_session_stats` call (SPECIALISTS-120). Settlement must never
+     * hang on telemetry: on expiry the failure is recorded as an explicit event and the run
+     * settles anyway.
+     */
+    sessionStatsTimeoutMs?: number;
+    /** Test seam: inject the Pi version instead of probing the binary. */
+    piVersion?: string;
 }
 export declare const RUNTIME_TOOL_CATALOG_ERROR_MESSAGE = "Runtime tool catalog unavailable or invalid; refusing to launch with Pi default tools. Reinstall or rebuild Specialists and verify config/catalog/index.json.";
 export type RuntimeToolCatalogErrorReason = 'invalid_permission_tier' | 'project_catalog_invalid' | 'canonical_catalog_unavailable' | 'canonical_catalog_invalid' | 'tool_contract_invalid' | 'empty_tool_contract';
@@ -208,6 +216,21 @@ export declare function resolveCuratedExtensionPaths(options: {
     permissionLevel?: string;
     resolvedToolContract?: ResolvedToolContract;
 }): CuratedExtensionResolution;
+/**
+ * Resolve the Pi version actually in use for a run (SPECIALISTS-120 criterion 7).
+ *
+ * Prefers the `pi` binary on PATH — that is what the legacy `sp run` path executes, and a
+ * telemetry row must name the binary that produced it, not a package that happens to be
+ * installed elsewhere. Falls back to the resolved SDK package's `package.json` (the native
+ * activation path loads that package in-process). Cached per process: the version cannot
+ * change under a running session, and probing per run would spawn a process per activation.
+ *
+ * Never throws: an unresolvable version returns `undefined` and the run records no version
+ * rather than failing to start.
+ */
+export declare function resolvePiVersion(): string | undefined;
+/** Test seam: drop the cached Pi version so a test can supply its own environment. */
+export declare function __resetPiVersionCacheForTest(): void;
 export declare function resolveGlobalNodeModulesDir(): string | undefined;
 export declare function validateWriteToolPathAgainstBoundary(toolName: string, toolArgs: Record<string, unknown> | undefined, worktreeBoundary: string | undefined): string | undefined;
 export declare class PiAgentSession {
@@ -231,6 +254,19 @@ export declare class PiAgentSession {
     private _impactWindowToolCallIds;
     private _impactWindowWithoutIdCount;
     private _metrics;
+    /**
+     * Summed per-message usage (SPECIALISTS-120 criterion 5). Accumulated on `message_end` only —
+     * the one event per message carrying final usage — so streaming partials cannot double-count.
+     * This is the "summed" side of the reconciliation against Pi's session totals; `_metrics.
+     * token_usage` keeps its historical last-value semantics for existing readers.
+     */
+    private _summedUsage?;
+    private _summedUsageSeen;
+    private _sessionStats?;
+    private _sessionStatsError?;
+    /** Guards once-per-run settlement capture; reset when a new turn starts. */
+    private _sessionStatsCaptured;
+    private _piVersion?;
     readonly meta: AgentSessionMeta;
     private constructor();
     static create(options: PiSessionOptions): Promise<PiAgentSession>;
@@ -246,6 +282,48 @@ export declare class PiAgentSession {
     private _markActivity;
     private _updateTokenUsage;
     private _updateFinishReason;
+    /**
+     * Fold one message's provider-reported usage into the run totals (SPECIALISTS-120).
+     *
+     * The dual-shape rule (per-message deltas vs cumulative counters) is owned by
+     * `accumulateTokenUsage` and shared with the native path, so both runtimes reconcile
+     * against Pi's session stats with the same arithmetic.
+     *
+     * Cost is summed plainly. Known ceiling: a provider that reported cumulative cost per
+     * message would inflate this; none does today, and Pi's own usage totals have the same
+     * assumption.
+     */
+    private _accumulateUsage;
+    /**
+     * Persist one message's usage verbatim and accumulate the run totals.
+     *
+     * `message_end` is the single event per message that carries final usage, so it is the only
+     * place the accumulator reads. The metric event is emitted per message so every observed
+     * usage survives to the durable event stream (criterion 1), verbatim.
+     */
+    private _recordMessageUsage;
+    private _piVersionValue;
+    /**
+     * Capture Pi's terminal session totals at settlement (SPECIALISTS-120 criterion 3).
+     *
+     * Called by `waitForDone()` — i.e. after `agent_end` and BEFORE the caller closes the
+     * process — so the snapshot describes the run that just finished rather than an empty
+     * session. It lives at the boundary instead of at the runner's call sites because
+     * `waitForDone()` is the single hook shared by `SpecialistRunner`'s main run, its keep-alive
+     * path via `resume()`, and `script-runner.ts`; a capture owned by the runner would silently
+     * drop the terminal snapshot for script-class runs.
+     *
+     * Public and idempotent: `prompt()` re-arms the one-shot guard once per turn, so an extra
+     * explicit caller (tests, tooling, a future path) is a no-op instead of a second RPC.
+     *
+     * Bounded by `sessionStatsTimeoutMs`: a Pi that never answers costs the run that wait and
+     * nothing more, and the failure is recorded as an explicit event instead of silently
+     * producing a run with no session totals.
+     *
+     * Recorded on the live child ONLY when it is still reachable. A killed or exited process
+     * cannot answer, and asking would burn the full timeout on every failed run.
+     */
+    captureSessionStats(): Promise<void>;
     private _handleEvent;
     /**
      * Send a JSON command to pi's stdin and return a promise for the response.
@@ -260,6 +338,14 @@ export declare class PiAgentSession {
     prompt(task: string): Promise<void>;
     /**
      * Wait for the agent to finish. Optionally times out (throws Error on timeout).
+     *
+     * Settlement telemetry is captured at the end of this boundary (SPECIALISTS-120 criterion 3).
+     * `waitForDone()` is the one hook every production caller passes through: `SpecialistRunner`'s
+     * main run, its keep-alive path (`resume()` ends here), and `script-runner.ts`. Capturing at
+     * the boundary is what keeps the terminal snapshot for script-class runs — a capture owned by
+     * the runner would silently miss them.
+     *
+     * A timeout rejection skips the capture: a killed run has no live session to interrogate.
      */
     waitForDone(timeout?: number): Promise<void>;
     /**

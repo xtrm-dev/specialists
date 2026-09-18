@@ -6,8 +6,10 @@ import { createActivationForensicSink } from '../../../src/activation/forensic-s
 import {
   NATIVE_LIFECYCLE_OBSERVABILITY_GAPS,
   NATIVE_SESSION_OBSERVABILITY_GAPS,
+  captureNativeSessionStats,
   mapNativeLifecycleEvent,
   mapNativeSessionEvent,
+  nativeSessionTokenUsage,
 } from '../../../src/specialist/native-activation-observability.js';
 import { createObservabilitySqliteClientAtPath } from '../../../src/specialist/observability-sqlite.js';
 
@@ -365,5 +367,336 @@ describe('native activation observability parity', () => {
       'summarization_retry_scheduled', 'summarization_retry_attempt_start',
       'summarization_retry_finished', 'bash_execution_update',
     ]));
+  });
+});
+
+// ── SPECIALISTS-120: native settlement capture and reconciliation ─────────────
+describe('native Pi usage telemetry (SPECIALISTS-120)', () => {
+  const CONTEXT = { startedAtMs: 1_000 };
+
+  it('nativeSessionTokenUsage carries provider fields verbatim and marks provider provenance', () => {
+    const usage = nativeSessionTokenUsage({
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        usage: {
+          input: 100, output: 50, cacheRead: 1000, cacheWrite: 2000, cacheWrite1h: 1500,
+          reasoning: 30, totalTokens: 3150,
+          cost: { input: 0.001, output: 0.002, cacheRead: 0.003, cacheWrite: 0.004, total: 0.01 },
+        },
+      },
+    });
+    expect(usage?.cache_write_1h_tokens).toBe(1500);
+    expect(usage?.reasoning_tokens).toBe(30);
+    expect(usage?.total_tokens).toBe(3150);
+    expect(usage?.cost?.total).toBe(0.01);
+    expect(usage?.usage_source).toBe('provider_usage');
+    expect(usage?.pi_usage).toMatchObject({ cacheWrite1h: 1500 });
+  });
+
+  it('nativeSessionTokenUsage reads toolResult usage too, so the summed side can match Pi', () => {
+    const usage = nativeSessionTokenUsage({ type: 'message_end', message: { role: 'toolResult', usage: { input: 7, output: 3 } } });
+    expect(usage?.input_tokens).toBe(7);
+    expect(nativeSessionTokenUsage({ type: 'message_end', message: { role: 'user' } })).toBeUndefined();
+    expect(nativeSessionTokenUsage({ type: 'message_end', message: { role: 'assistant' } })).toBeUndefined();
+  });
+
+  it('maps session_stats_captured onto its own terminal timeline type', () => {
+    const event = mapNativeLifecycleEvent({
+      activationId: 'act:120', specialist: 'executor', beadId: 'bd-120', name: 'session_stats_captured',
+      payload: {
+        session_stats: {
+          sessionId: 'sess-120',
+          tokens: { input: 2142, output: 16, cacheRead: 0, cacheWrite: 0, total: 2158 },
+          cost: 0.00016465,
+          contextUsage: { tokens: 2158, contextWindow: 1_000_000, percent: 0.2158 },
+        },
+      },
+    }, CONTEXT, 2_000);
+
+    expect(event?.type).toBe('session_stats');
+    expect((event as { session_stats?: { tokens?: { total?: number } } }).session_stats?.tokens?.total).toBe(2158);
+    expect((event as { source?: string }).source).toBe('settlement');
+  });
+
+  it('maps a capture failure to an explicit error event rather than dropping it', () => {
+    const event = mapNativeLifecycleEvent({
+      activationId: 'act:120', specialist: 'executor', name: 'session_stats_failed',
+      payload: { error: 'get_session_stats did not answer within 25ms', timeout_ms: 25 },
+    }, CONTEXT, 2_000);
+
+    expect(event?.type).toBe('session_stats_error');
+    expect((event as { error_message?: string }).error_message).toMatch(/did not answer/);
+    expect((event as { timeout_ms?: number }).timeout_ms).toBe(25);
+  });
+
+  it('run_complete carries cost, the session snapshot, the reconciliation and the Pi version', () => {
+    const event = mapNativeLifecycleEvent({
+      activationId: 'act:120', specialist: 'executor', beadId: 'bd-120', name: 'activation_completed',
+    }, {
+      ...CONTEXT,
+      resolvedModel: 'zai/glm-5.3-flash',
+      tokenUsage: {
+        input_tokens: 2142, output_tokens: 16, cache_read_tokens: 0, cache_creation_tokens: 0,
+        total_tokens: 2158, cost: { total: 0.00016465 },
+      },
+      sessionStats: {
+        tokens: { input: 2142, output: 16, cacheRead: 0, cacheWrite: 0, total: 2158 },
+        cost: 0.00016465,
+      },
+      piVersion: '0.85.1',
+    }, 3_000);
+
+    expect(event?.type).toBe('run_complete');
+    const complete = event as { pi_version?: string; metrics?: { cost?: { total?: number }; reconciliation?: { reconciled: boolean; fields: Record<string, { delta: number }> }; pi_version?: string } };
+    expect(complete.pi_version).toBe('0.85.1');
+    expect(complete.metrics?.cost?.total).toBeCloseTo(0.00016465, 10);
+    expect(complete.metrics?.pi_version).toBe('0.85.1');
+    expect(complete.metrics?.reconciliation?.reconciled).toBe(true);
+    expect(complete.metrics?.reconciliation?.fields.total.delta).toBe(0);
+  });
+
+  it('captureNativeSessionStats is bounded and reports a non-answering session instead of hanging', async () => {
+    const start = Date.now();
+    const result = await captureNativeSessionStats({ getSessionStats: (() => new Promise(() => {})) as never }, 25);
+    expect(Date.now() - start).toBeLessThan(2_000);
+    expect(result.stats).toBeUndefined();
+    expect(result.error).toMatch(/did not answer within 25ms/);
+  });
+
+  it('captureNativeSessionStats reports a session double without the accessor', async () => {
+    const result = await captureNativeSessionStats({} as never, 25);
+    expect(result.stats).toBeUndefined();
+    expect(result.error).toMatch(/does not expose getSessionStats/);
+  });
+
+  it('captureNativeSessionStats normalizes a live-shaped SessionStats', async () => {
+    const result = await captureNativeSessionStats({
+      getSessionStats: () => ({
+        sessionId: 'sess-live',
+        userMessages: 1,
+        assistantMessages: 1,
+        totalMessages: 2,
+        tokens: { input: 2142, output: 16, cacheRead: 0, cacheWrite: 0, total: 2158 },
+        cost: 0.00016465,
+        contextUsage: { tokens: 2158, contextWindow: 1_000_000, percent: 0.2158 },
+      }),
+    } as never, 1_000);
+    expect(result.error).toBeUndefined();
+    expect(result.stats?.tokens?.total).toBe(2158);
+    expect(result.stats?.contextUsage?.percent).toBe(0.2158);
+    expect(result.stats?.sessionFile).toBeUndefined();
+  });
+});
+
+// ── SPECIALISTS-120 F1: both native accumulators must agree on a compacted run ────────────
+describe('native compacted-run reconciliation (SPECIALISTS-120 F1)', () => {
+  let tempRoot: string;
+  let dbPath: string;
+  let client: ReturnType<typeof createObservabilitySqliteClientAtPath> | null;
+
+  // Worktree-local scratch, not /tmp: the shared box has a 2GB /tmp limit other
+  // sessions keep hitting. Each test owns its subdir and removes it afterwards.
+  const scratchRoot = join(import.meta.dirname, '..', '..', '.phase7-test-scratch');
+
+  beforeEach(() => {
+    tempRoot = join(scratchRoot, `native-compacted-${crypto.randomUUID()}`);
+    mkdirSync(tempRoot, { recursive: true });
+    dbPath = join(tempRoot, 'observability.db');
+    client = null;
+  });
+
+  afterEach(() => {
+    try { client?.close(); } catch { /* ignore */ }
+    rmSync(tempRoot, { recursive: true, force: true });
+  });
+
+  it('a compacted native run folds the summarization usage, so it reconciles with Pi (F1)', () => {
+    client = createObservabilitySqliteClientAtPath(dbPath);
+    expect(client).not.toBeNull();
+    const observability = client!;
+    const sink = createActivationForensicSink(observability);
+
+    const base = {
+      activationId: 'act:compact',
+      attemptId: 'att:compact:1',
+      participantId: 'specialist::executor',
+      specialist: 'executor',
+      beadId: 'bd-compact',
+    };
+    sink.emit({ ...base, name: 'activation_requested' });
+    sink.emit({ ...base, name: 'activation_admitted', payload: { resolved_model: 'zai/glm-5.3-flash' } });
+    sink.emit({ ...base, name: 'activation_started', payload: { pi_session_id: 'pi-compact' } });
+    const sessionBase = { ...base, piSessionId: 'pi-compact', workspacePath: join(tempRoot, 'worktree') };
+
+    // One assistant message, then a compaction. Pi bills the summarization call and counts it
+    // in its session totals, but it never arrives as a `message_end` — it rides on
+    // `compaction_end.result.usage`. Both are provider reports.
+    sink.sessionEvent?.({ ...sessionBase, event: {
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        usage: { input: 1_000, output: 20, totalTokens: 1_020, cost: { total: 0.4 } },
+      },
+    } });
+    sink.sessionEvent?.({ ...sessionBase, event: {
+      type: 'compaction_end',
+      reason: 'threshold',
+      aborted: false,
+      willRetry: false,
+      result: {
+        tokensBefore: 5_000,
+        estimatedTokensAfter: 900,
+        usage: { input: 800, output: 12, totalTokens: 812, cost: { total: 0.1 } },
+      },
+    } });
+
+    // Pi's own session totals include that summarization call: 1_020 + 812 tokens, 0.4 + 0.1.
+    sink.emit({ ...base, name: 'session_stats_captured', payload: {
+      session_stats: {
+        sessionId: 'pi-compact',
+        tokens: { input: 1_800, output: 32, cacheRead: 0, cacheWrite: 0, total: 1_832 },
+        cost: 0.5,
+        contextUsage: { tokens: 1_832, contextWindow: 1_000_000, percent: 21.58 },
+      },
+      pi_version: '0.85.1',
+    } });
+    sink.emit({ ...base, name: 'activation_completed', payload: { pi_session_id: 'pi-compact' } });
+
+    const status = observability.readStatus('act:compact');
+    expect(status).not.toBeNull();
+    const metrics = status!.metrics;
+
+    // The F1 symptom: folding only the mapped TOKEN_USAGE rows left the summed side exactly one
+    // summarization call short (1_020 of 1_832), so the projection said `reconciled: false` with
+    // a delta equal to that call. Both native accumulators must agree with Pi here.
+    expect(metrics?.token_usage?.total_tokens).toBe(1_832);
+    expect(metrics?.token_usage?.input_tokens).toBe(1_800);
+    expect(metrics?.reconciliation?.reconciled).toBe(true);
+    expect(metrics?.reconciliation?.fields.total).toEqual({ summed: 1_832, session_stats: 1_832, delta: 0 });
+    expect(metrics?.reconciliation?.fields.input.delta).toBe(0);
+    expect(metrics?.reconciliation?.fields.cost?.delta).toBe(0);
+
+    // F4: the native status row carries Pi's own context reading with its provenance, using the
+    // same vocabulary the legacy supervisor publishes.
+    expect(status!.context_pct).toBe(21.58);
+    expect(status!.context_pct_source).toBe('pi_session_stats');
+
+    // The terminal timeline row carries the same reconciliation, not just the status row.
+    const complete = observability.readEvents('act:compact').find((event) => event.type === 'run_complete');
+    const completeMetrics = (complete as { metrics?: { reconciliation?: { reconciled?: boolean; fields?: { total?: { delta?: number } } } } })?.metrics;
+    expect(completeMetrics?.reconciliation?.reconciled).toBe(true);
+    expect(completeMetrics?.reconciliation?.fields?.total?.delta).toBe(0);
+  });
+
+  // SPECIALISTS-120 validation 3, unit-level: the F1 leg above covers one message plus
+  // compaction. This extends the same reconciliation across TWO turns, where the summed side
+  // must accumulate per-message usage over the compaction boundary (assistant + toolResult in
+  // turn 1, the summarization call, then turn 2's post-compaction message) and still match
+  // Pi's session totals exactly at settlement.
+  it('a two-turn native run accumulates usage across the compaction and reconciles with Pi (SPECIALISTS-120)', () => {
+    client = createObservabilitySqliteClientAtPath(dbPath);
+    expect(client).not.toBeNull();
+    const observability = client!;
+    const sink = createActivationForensicSink(observability);
+
+    const base = {
+      activationId: 'act:two-turn',
+      attemptId: 'att:two-turn:1',
+      participantId: 'specialist::executor',
+      specialist: 'executor',
+      beadId: 'bd-two-turn',
+    };
+    sink.emit({ ...base, name: 'activation_requested' });
+    sink.emit({ ...base, name: 'activation_admitted', payload: { resolved_model: 'zai/glm-5.3-flash' } });
+    sink.emit({ ...base, name: 'activation_started', payload: { pi_session_id: 'pi-two-turn' } });
+    const sessionBase = { ...base, piSessionId: 'pi-two-turn', workspacePath: join(tempRoot, 'worktree') };
+
+    const assistantEnd = (input: number, output: number, cost: number) => ({
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        usage: { input, output, totalTokens: input + output, cost: { total: cost } },
+      },
+    });
+
+    // Turn 1: an assistant reply and its tool-reported usage.
+    sink.sessionEvent?.({ ...sessionBase, event: { type: 'turn_start' } });
+    sink.sessionEvent?.({ ...sessionBase, event: assistantEnd(2_000, 30, 0.2) });
+    sink.sessionEvent?.({ ...sessionBase, event: {
+      type: 'message_end',
+      message: { role: 'toolResult', usage: { input: 1_200, output: 10, totalTokens: 1_210, cost: { total: 0.08 } } },
+    } });
+    sink.sessionEvent?.({ ...sessionBase, event: { type: 'turn_end' } });
+
+    // Compaction between the turns: Pi bills the summarization call here, never as a message.
+    sink.sessionEvent?.({ ...sessionBase, event: { type: 'compaction_start', reason: 'threshold' } });
+    sink.sessionEvent?.({ ...sessionBase, event: {
+      type: 'compaction_end',
+      reason: 'threshold',
+      aborted: false,
+      willRetry: false,
+      result: {
+        tokensBefore: 5_000,
+        estimatedTokensAfter: 900,
+        usage: { input: 1_100, output: 12, totalTokens: 1_112, cost: { total: 0.07 } },
+      },
+    } });
+
+    // Turn 2, after the compaction: a fresh assistant reply.
+    sink.sessionEvent?.({ ...sessionBase, event: { type: 'turn_start' } });
+    sink.sessionEvent?.({ ...sessionBase, event: assistantEnd(900, 25, 0.15) });
+    sink.sessionEvent?.({ ...sessionBase, event: { type: 'turn_end' } });
+
+    // Pi's own totals cover all four reports: input 2,000+1,200+1,100+900, output 30+10+12+25,
+    // total 2,030+1,210+1,112+925, cost 0.2+0.08+0.07+0.15.
+    sink.emit({ ...base, name: 'session_stats_captured', payload: {
+      session_stats: {
+        sessionId: 'pi-two-turn',
+        tokens: { input: 5_200, output: 77, cacheRead: 0, cacheWrite: 0, total: 5_277 },
+        cost: 0.5,
+        contextUsage: { tokens: 5_277, contextWindow: 1_000_000, percent: 0.5277 },
+      },
+      pi_version: '0.85.1',
+    } });
+    sink.emit({ ...base, name: 'activation_completed', payload: { pi_session_id: 'pi-two-turn' } });
+
+    const status = observability.readStatus('act:two-turn');
+    expect(status).not.toBeNull();
+    const metrics = status!.metrics;
+
+    // The run really was two turns with one compaction.
+    expect(metrics?.turns).toBe(2);
+    expect(metrics?.auto_compactions).toBe(1);
+
+    // Per-message usage accumulated across BOTH turns, including the toolResult and the
+    // summarization call — not replaced by the last message, not double-counted.
+    expect(metrics?.token_usage?.input_tokens).toBe(5_200);
+    expect(metrics?.token_usage?.output_tokens).toBe(77);
+    expect(metrics?.token_usage?.total_tokens).toBe(5_277);
+    expect(metrics?.token_usage?.cost?.total).toBeCloseTo(0.5, 10);
+
+    // The terminal snapshot reconciles: every field's delta is zero.
+    expect(metrics?.reconciliation?.reconciled).toBe(true);
+    expect(metrics?.reconciliation?.fields.total).toEqual({ summed: 5_277, session_stats: 5_277, delta: 0 });
+    expect(metrics?.reconciliation?.fields.input.delta).toBe(0);
+    expect(metrics?.reconciliation?.fields.output.delta).toBe(0);
+    expect(metrics?.reconciliation?.fields.cost?.delta).toBe(0);
+
+    // run_complete carries the summed totals and the same reconciliation.
+    const complete = observability.readEvents('act:two-turn').find((event) => event.type === 'run_complete');
+    const completeMetrics = (complete as { metrics?: { token_usage?: { total_tokens?: number; input_tokens?: number }; reconciliation?: { reconciled?: boolean } } })?.metrics;
+    expect(completeMetrics?.token_usage?.total_tokens).toBe(5_277);
+    expect(completeMetrics?.token_usage?.input_tokens).toBe(5_200);
+    expect(completeMetrics?.reconciliation?.reconciled).toBe(true);
+
+    // Each turn's assistant usage also survives as its own timeline row; the summarization
+    // call rides on the compaction_end row, so every report stays individually inspectable.
+    const events = observability.readEvents('act:two-turn');
+    expect(events.filter((event) => event.type === 'token_usage')
+      .map((event) => (event as { token_usage?: { total_tokens?: number } }).token_usage?.total_tokens))
+      .toEqual([2_030, 925]);
+    const compactionUsage = events.find((event) => event.type === 'compaction' && event.phase === 'end') as { token_usage?: { total_tokens?: number } } | undefined;
+    expect(compactionUsage?.token_usage?.total_tokens).toBe(1_112);
   });
 });

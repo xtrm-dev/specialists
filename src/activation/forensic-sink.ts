@@ -20,6 +20,7 @@ import {
   mapNativeLifecycleEvent,
   mapNativeSessionEvent,
   nativeAttemptNo,
+  nativeEventTokenUsage,
 } from '../specialist/native-activation-observability.js';
 import type {
   ObservabilityIdentityProjection,
@@ -30,6 +31,7 @@ import {
   type TimelineEvent,
   type TimelineTokenUsage,
 } from '../specialist/timeline-events.js';
+import { normalizePiSessionStats, reconcileSessionUsage, type PiSessionStats } from '../specialist/session-metrics-contract.js';
 import type { SupervisorJobStatus, SupervisorStatus } from '../specialist/status-contract.js';
 
 interface ActivationProjectionState {
@@ -45,6 +47,10 @@ interface ActivationProjectionState {
   resolvedModel?: string;
   latestOutput?: string;
   tokenUsage?: TimelineTokenUsage;
+  /** Pi's terminal session snapshot, captured at settlement. Absent means it was not captured. */
+  sessionStats?: PiSessionStats;
+  /** Pi version recorded for this run. */
+  piVersion?: string;
   /** Last per-message usage values; see accumulateTokenUsage — same dual-shape rule as the host. */
   lastUsageSeen: Record<string, number>;
   finishReason?: string;
@@ -113,6 +119,20 @@ function statusOf(
   error?: string,
 ): SupervisorStatus {
   const elapsedMs = Math.max(0, state.lastEventAtMs - state.startedAtMs);
+  // SPECIALISTS-120 criterion 2 (F4): native status rows publish the same two-value provenance
+  // vocabulary the legacy path uses. Pi's own reading is `pi_session_stats`; with no snapshot
+  // the fields stay ABSENT rather than guessed, because the host never sees the model's context
+  // window and therefore cannot compute the legacy `specialists_fallback` estimate. A `null`
+  // percent (Pi's post-compaction state) is not a reading either and stays absent.
+  // `context_health` is deliberately not published: its threshold table lives with the legacy
+  // supervisor, and every consumer derives health from `context_pct`.
+  const contextPct = typeof state.sessionStats?.contextUsage?.percent === 'number'
+    ? Number(state.sessionStats.contextUsage.percent.toFixed(2))
+    : undefined;
+  // SPECIALISTS-120 criterion 5: the run-level reconciliation is exposed on every status
+  // projection, so a reader sees the difference between Specialists' summed usage and Pi's
+  // session snapshot without re-deriving it.
+  const reconciliation = reconcileSessionUsage(state.tokenUsage, state.sessionStats);
   return {
     id: activationId,
     specialist: state.specialist,
@@ -128,6 +148,10 @@ function statusOf(
     worktree_path: state.workspacePath,
     metrics: {
       token_usage: state.tokenUsage,
+      ...(state.tokenUsage?.cost ? { cost: state.tokenUsage.cost } : {}),
+      ...(state.sessionStats ? { session_stats: state.sessionStats } : {}),
+      ...(reconciliation ? { reconciliation } : {}),
+      ...(state.piVersion ? { pi_version: state.piVersion } : {}),
       finish_reason: state.finishReason,
       turns: state.turns,
       tool_calls: state.toolCalls.length,
@@ -135,6 +159,7 @@ function statusOf(
       auto_compactions: state.autoCompactions,
       auto_retries: state.autoRetries,
     },
+    ...(contextPct !== undefined ? { context_pct: contextPct, context_pct_source: 'pi_session_stats' as const } : {}),
     error,
   };
 }
@@ -215,6 +240,15 @@ export function createActivationForensicSink(
           ? event.payload.output as string
           : undefined;
         if (completedOutput !== undefined) state.latestOutput = completedOutput;
+        // SPECIALISTS-120: the settlement capture arrives as its own lifecycle event, BEFORE
+        // the terminal activation event, so run_complete can carry the snapshot and its
+        // reconciliation. Both outcomes are stashed; a failed capture records the reason
+        // rather than leaving a silently absent snapshot.
+        if (event.name === 'session_stats_captured' || event.name === 'session_stats_failed') {
+          const captured = normalizePiSessionStats(event.payload?.session_stats);
+          if (captured) state.sessionStats = captured;
+          state.piVersion = stringValue(event.payload?.pi_version) ?? state.piVersion;
+        }
         states.set(event.activationId, state);
 
         // `reason` is a diagnostic discriminator, not an error: legacy only writes
@@ -238,6 +272,8 @@ export function createActivationForensicSink(
           turns: state.turns,
           autoRetries: state.autoRetries,
           autoCompactions: state.autoCompactions,
+          ...(state.sessionStats ? { sessionStats: state.sessionStats } : {}),
+          ...(state.piVersion ? { piVersion: state.piVersion } : {}),
         }, now);
         if (event.name === 'activation_completed' && timelineEvent && state.latestOutput !== undefined) {
           // Forensic durability, not display: persist the settle output to
@@ -298,11 +334,18 @@ export function createActivationForensicSink(
         states.set(input.activationId, state);
 
         const timelineEvents = mapNativeSessionEvent(input.event, now, state.turns);
+        // SPECIALISTS-120 F1: fold through the SAME rule the host's live accumulator uses, so a
+        // compacted run's summarization usage reaches the projection as well. Reading only the
+        // mapped TOKEN_USAGE rows missed it — that usage rides on the COMPACTION row — which left
+        // this accumulator disagreeing with the host and with Pi's own session totals, and turned
+        // every compacted activation into `reconciled=false` with a delta of exactly the
+        // summarization call.
+        const eventUsage = nativeEventTokenUsage(input.event);
+        if (eventUsage) state.tokenUsage = accumulateTokenUsage(state.tokenUsage, eventUsage, state.lastUsageSeen);
         for (const timelineEvent of timelineEvents) {
           if (timelineEvent.type === TIMELINE_EVENT_TYPES.TEXT && typeof timelineEvent.content === 'string') {
             state.latestOutput = timelineEvent.content;
           }
-          if (timelineEvent.type === TIMELINE_EVENT_TYPES.TOKEN_USAGE) state.tokenUsage = accumulateTokenUsage(state.tokenUsage, timelineEvent.token_usage, state.lastUsageSeen);
           if (timelineEvent.type === TIMELINE_EVENT_TYPES.FINISH_REASON) state.finishReason = timelineEvent.finish_reason;
           if (timelineEvent.type === TIMELINE_EVENT_TYPES.TOOL && timelineEvent.phase === 'end') {
             state.toolCalls.push(timelineEvent.tool);

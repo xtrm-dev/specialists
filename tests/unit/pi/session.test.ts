@@ -16,6 +16,7 @@ import { PiAgentSession, StallTimeoutError, applyExtensionToolPolicyGate, dedupl
 import { __resetPiExtensionsPythonKernelPathCacheForTest } from '../../../src/pi/python-kernel-extension.js';
 import { catalogVersion } from '../../utils/catalog-pin.js';
 import { getExtensionToolPolicyExtensionPath, NATIVE_TOOLS_ENV_KEY } from '../../../src/pi/extension-tool-policy-extension.js';
+import { SESSION_STATS_TIMEOUT_MS } from '../../../src/specialist/session-metrics-contract.js';
 
 const mockSpawn = spawn as ReturnType<typeof vi.fn>;
 const mockExecFileSync = execFileSync as ReturnType<typeof vi.fn>;
@@ -54,8 +55,48 @@ function makeFakeProc() {
   const stderrHandlers: Record<string, Function> = {};
   const procHandlers: Record<string, Function> = {};
 
+  // SPECIALISTS-120: the session now captures Pi's terminal session stats from
+  // `waitForDone()`, so an RPC command is sent on that path. The fake answers it by default —
+  // with a well-formed, empty snapshot — so tests that only care about the run boundary are
+  // not silently waiting out the bounded settlement timeout. A test that exercises the failure
+  // path sets `sessionStatsResponder = null` to make Pi stay silent.
+  const fake = {
+    proc: undefined as any,
+    stdin: undefined as any,
+    stdout: undefined as any,
+    stderr: undefined as any,
+    stdoutHandlers,
+    stderrHandlers,
+    procHandlers,
+    sessionStatsResponder: (() => ({
+      sessionId: 'sess-fake',
+      userMessages: 1,
+      assistantMessages: 1,
+      totalMessages: 2,
+      tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      cost: 0,
+    })) as null | (() => Record<string, unknown>),
+  };
+
   const stdin = {
-    write: vi.fn().mockImplementation((_data: any, cb?: any) => { cb?.(); return true; }),
+    write: vi.fn().mockImplementation((data: any, cb?: any) => {
+      cb?.();
+      try {
+        const command = JSON.parse(String(data));
+        if (command?.type === 'get_session_stats' && fake.sessionStatsResponder) {
+          stdoutHandlers['data']?.(Buffer.from(JSON.stringify({
+            id: command.id,
+            type: 'response',
+            command: 'get_session_stats',
+            success: true,
+            data: fake.sessionStatsResponder(),
+          }) + '\n'));
+        }
+      } catch {
+        // Non-JSON writes are not RPC commands.
+      }
+      return true;
+    }),
     end: vi.fn(),
     writable: true,
   };
@@ -84,7 +125,11 @@ function makeFakeProc() {
 
   mockSpawn.mockReturnValue(proc);
 
-  return { proc, stdin, stdout, stderr, stdoutHandlers, stderrHandlers, procHandlers };
+  fake.proc = proc;
+  fake.stdin = stdin;
+  fake.stdout = stdout;
+  fake.stderr = stderr;
+  return fake;
 }
 
 // ── Protocol event injection helper ──────────────────────────────────────────
@@ -1280,6 +1325,209 @@ describe('sendCommand — concurrent dispatch', () => {
     expect(metrics.token_usage?.reasoning_tokens).toBe(7);
     expect(metrics.token_usage?.tool_tokens).toBe(3);
     expect(metrics.token_usage?.usage_source).toBe('provider_usage');
+  });
+
+  // ── SPECIALISTS-120: verbatim usage + settlement session stats ───────────────
+
+  it('persists a provider Usage verbatim on message_end, including cacheWrite1h and cost', async () => {
+    const onMetric = vi.fn();
+    const session = await PiAgentSession.create({ model: 'gemini', onMetric });
+    await session.start();
+
+    // Anthropic-shaped usage: `cacheWrite1h` and the cost breakdown exist only on some providers.
+    emitLine(fake, {
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        usage: {
+          input: 100,
+          output: 50,
+          cacheRead: 1000,
+          cacheWrite: 2000,
+          cacheWrite1h: 1500,
+          reasoning: 30,
+          totalTokens: 3150,
+          cost: { input: 0.001, output: 0.002, cacheRead: 0.003, cacheWrite: 0.004, total: 0.01 },
+        },
+      },
+    });
+
+    const usageEvent = onMetric.mock.calls.map((c: any[]) => c[0]).find((e: any) => e?.type === 'token_usage');
+    expect(usageEvent, 'a token_usage metric event must be emitted for the message').toBeDefined();
+    expect(usageEvent.token_usage.usage_source).toBe('provider_usage');
+    expect(usageEvent.token_usage.cache_write_1h_tokens).toBe(1500);
+    expect(usageEvent.token_usage.cost).toEqual({ input: 0.001, output: 0.002, cacheRead: 0.003, cacheWrite: 0.004, total: 0.01 });
+    expect(usageEvent.token_usage.pi_usage).toMatchObject({ cacheWrite1h: 1500, totalTokens: 3150 });
+  });
+
+  it('labels usage unknown, not provider_usage, when the event carries no usage field', async () => {
+    const onMetric = vi.fn();
+    const session = await PiAgentSession.create({ model: 'gemini', onMetric });
+    await session.start();
+
+    // Bare counters on the event record, no `usage` object: nothing here is a provider report.
+    emitLine(fake, { type: 'agent_end', input_tokens: 11, output_tokens: 4, messages: [] });
+
+    const usageEvent = onMetric.mock.calls.map((c: any[]) => c[0]).find((e: any) => e?.type === 'token_usage');
+    expect(usageEvent?.token_usage.usage_source).toBe('unknown');
+  });
+
+  it('records compaction estimatedTokensAfter and the summarization usage (Pi 0.85.1 spelling)', async () => {
+    const onMetric = vi.fn();
+    const onEvent = vi.fn();
+    const session = await PiAgentSession.create({ model: 'gemini', onMetric, onEvent });
+    await session.start();
+
+    emitLine(fake, {
+      type: 'compaction_end',
+      reason: 'threshold',
+      aborted: false,
+      willRetry: false,
+      result: {
+        summary: 'summary text',
+        firstKeptEntryId: 'entry-7',
+        tokensBefore: 150000,
+        estimatedTokensAfter: 32000,
+        usage: { input: 32000, output: 1200, cacheRead: 0, cacheWrite: 0, totalTokens: 33200, cost: { total: 0.02 } },
+      },
+    });
+
+    const compactionMetric = onMetric.mock.calls.map((c: any[]) => c[0]).find((e: any) => e?.type === 'compaction');
+    expect(compactionMetric?.phase).toBe('end');
+    expect(compactionMetric?.tokensBefore).toBe(150000);
+    expect(compactionMetric?.estimatedTokensAfter).toBe(32000);
+    expect(compactionMetric?.token_usage?.total_tokens).toBe(33200);
+    // The internal vocabulary is preserved for existing readers.
+    expect(onEvent.mock.calls.map((c: any[]) => c[0])).toContain('auto_compaction_end');
+  });
+
+  it('captureSessionStats records Pi session totals and reconciles them against summed usage', async () => {
+    const onMetric = vi.fn();
+    const session = await PiAgentSession.create({ model: 'gemini', onMetric });
+    await session.start();
+
+    emitLine(fake, {
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        usage: { input: 2142, output: 16, cacheRead: 0, cacheWrite: 0, reasoning: 12, totalTokens: 2158, cost: { total: 0.00016465 } },
+      },
+    });
+    // The harness answers get_session_stats with the same numbers Pi reported per message.
+    fake.sessionStatsResponder = () => ({
+      sessionId: 'sess-live',
+      userMessages: 1,
+      assistantMessages: 1,
+      totalMessages: 2,
+      tokens: { input: 2142, output: 16, cacheRead: 0, cacheWrite: 0, total: 2158 },
+      cost: 0.00016465,
+      contextUsage: { tokens: 2158, contextWindow: 1000000, percent: 0.2158 },
+    });
+
+    await expect(session.captureSessionStats()).resolves.toBeUndefined();
+
+    const statsEvent = onMetric.mock.calls.map((c: any[]) => c[0]).find((e: any) => e?.type === 'session_stats');
+    expect(statsEvent?.session_stats?.tokens?.total).toBe(2158);
+    expect(statsEvent?.session_stats?.contextUsage?.percent).toBe(0.2158);
+
+    const metrics = session.getMetrics();
+    expect(metrics.session_stats?.cost).toBe(0.00016465);
+    expect(metrics.reconciliation?.reconciled).toBe(true);
+    expect(metrics.reconciliation?.fields.total).toEqual({ summed: 2158, session_stats: 2158, delta: 0 });
+  });
+
+  it('captureSessionStats records a failure event on timeout and never throws', async () => {
+    const onMetric = vi.fn();
+    // Pi stays silent: the RPC command is written but never answered.
+    fake.sessionStatsResponder = null;
+    const session = await PiAgentSession.create({ model: 'gemini', onMetric, sessionStatsTimeoutMs: 30 });
+    await session.start();
+
+    await expect(session.captureSessionStats()).resolves.toBeUndefined();
+
+    const failure = onMetric.mock.calls.map((c: any[]) => c[0]).find((e: any) => e?.type === 'session_stats_error');
+    expect(failure, 'a session_stats_error event must be emitted').toBeDefined();
+    expect(failure.errorMessage).toMatch(/timeout/i);
+    expect(failure.timeoutMs).toBe(30);
+    expect(session.getMetrics().session_stats_error).toMatch(/timeout/i);
+    expect(session.getMetrics().session_stats).toBeUndefined();
+  });
+
+  it('captureSessionStats is idempotent: repeated callers share one snapshot per turn', async () => {
+    const onMetric = vi.fn();
+    const session = await PiAgentSession.create({ model: 'gemini', onMetric });
+    await session.start();
+
+    await session.captureSessionStats();
+    await session.captureSessionStats();
+    await session.captureSessionStats();
+    expect(onMetric.mock.calls.map((c: any[]) => c[0]).filter((e: any) => e?.type === 'session_stats')).toHaveLength(1);
+  });
+
+  it('waitForDone captures the settlement snapshot, so every caller of the boundary is covered', async () => {
+    const onMetric = vi.fn();
+    const session = await PiAgentSession.create({ model: 'gemini', onMetric });
+    await session.start();
+
+    const promptP = session.prompt('do work');
+    emitLine(fake, { type: 'response', id: 1, success: true });
+    await promptP;
+    emitLine(fake, { type: 'agent_end', messages: [] });
+
+    // No explicit capture call anywhere: the run boundary itself must ask Pi for its totals.
+    // This is what keeps the terminal snapshot for script-class runs, which only ever call
+    // waitForDone() (legacy `sp` script jobs).
+    await expect(session.waitForDone()).resolves.toBeUndefined();
+
+    const statsEvent = onMetric.mock.calls.map((c: any[]) => c[0]).find((e: any) => e?.type === 'session_stats');
+    expect(statsEvent, 'waitForDone() must capture the terminal session stats').toBeDefined();
+    expect(statsEvent.session_stats?.sessionId).toBe('sess-fake');
+    expect(session.getMetrics().session_stats?.sessionId).toBe('sess-fake');
+  });
+
+  // SPECIALISTS-120 validation 4, through the boundary: the settlement capture is bounded by
+  // the session's own bound, so a Pi that never answers get_session_stats costs the run that
+  // wait and nothing more — the run still settles, and the failure is explicit, not a run
+  // that silently looks like it had no session totals.
+  it('a silent Pi cannot hang settlement: waitForDone resolves with an explicit session_stats_error', async () => {
+    const onMetric = vi.fn();
+    // Pi stays silent: the get_session_stats RPC is written but never answered.
+    fake.sessionStatsResponder = null;
+    const session = await PiAgentSession.create({ model: 'gemini', onMetric, sessionStatsTimeoutMs: 30 });
+    await session.start();
+
+    const promptP = session.prompt('do work');
+    emitLine(fake, { type: 'response', id: 1, success: true });
+    await promptP;
+    emitLine(fake, { type: 'agent_end', messages: [] });
+
+    // The wait is the INJECTED bound (30ms), not the 5s default: settlement must cost the
+    // bound and nothing more, so this stays provable even if the shared constant is raised.
+    const started = Date.now();
+    await expect(session.waitForDone()).resolves.toBeUndefined();
+    expect(Date.now() - started).toBeLessThan(SESSION_STATS_TIMEOUT_MS);
+
+    const failure = onMetric.mock.calls.map((c: any[]) => c[0]).find((e: any) => e?.type === 'session_stats_error');
+    expect(failure, 'the settlement failure must be an explicit event, not silence').toBeDefined();
+    expect(failure.source).toBe('settlement');
+    expect(failure.timeoutMs).toBe(30);
+    expect(failure.errorMessage).toMatch(/timeout/i);
+    expect(session.getMetrics().session_stats_error).toMatch(/timeout/i);
+    expect(session.getMetrics().session_stats).toBeUndefined();
+  });
+
+  it('waitForDone that times out does not capture: a killed run has no session to ask', async () => {
+    const onMetric = vi.fn();
+    const session = await PiAgentSession.create({ model: 'gemini', onMetric });
+    await session.start();
+
+    // agent_end never fires, so the boundary rejects and the capture is skipped.
+    await expect(session.waitForDone(20)).rejects.toThrow(/timed out after 20ms/i);
+
+    const metricTypes = onMetric.mock.calls.map((c: any[]) => c[0]?.type);
+    expect(metricTypes).not.toContain('session_stats');
+    expect(metricTypes).not.toContain('session_stats_error');
+    expect(session.getMetrics().session_stats).toBeUndefined();
   });
 
   it('auto_compaction_start and auto_compaction_end both fire onEvent("auto_compaction")', async () => {

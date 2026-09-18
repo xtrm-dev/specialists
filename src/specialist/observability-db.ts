@@ -4,7 +4,14 @@ import { join, sep, resolve as resolvePath } from 'node:path';
 
 const OBSERVABILITY_DB_FILENAME = 'observability.db';
 const DEFAULT_DB_DIRECTORY_RELATIVE_TO_GIT_ROOT = ['.specialists', 'db'] as const;
-export const OBSERVABILITY_SCHEMA_VERSION = 15;
+// Identity of the newest migration in `observability-sqlite.ts`. This constant and the
+// `schema_version` ledger row written by the matching `migrateToV<N>` are one fact in two
+// places: bump both in the same change or `observability-sqlite-v16-identity.test.ts` fails.
+// `isObservabilityDbInitialized` treats this value as the REQUIRED ledger row, so a database
+// stamped at an older version reports `false` until it is opened and migrated. That is the
+// behaviour of every prior bump (v10..v15) and is not a breakage: migration is additive,
+// idempotent and re-runs on open, and pre-v16 readers ignore the added nullable columns.
+export const OBSERVABILITY_SCHEMA_VERSION = 16;
 
 export interface ObservabilityDbLocation {
   gitRoot: string;

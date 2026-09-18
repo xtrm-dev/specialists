@@ -1,4 +1,4 @@
-export declare const OBSERVABILITY_SCHEMA_VERSION = 15;
+export declare const OBSERVABILITY_SCHEMA_VERSION = 16;
 export interface ObservabilityDbLocation {
     gitRoot: string;
     dbDirectory: string;

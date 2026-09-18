@@ -1304,6 +1304,9 @@ describe('runScriptSpecialist PiAgentSession observability bridge', () => {
         options.onToolEnd('bash', false, 'tool-1', 'ok', { exitCode: 0 });
         options.onMetric({ type: 'token_usage', token_usage: { input_tokens: 1, output_tokens: 2, total_tokens: 3 }, source: 'turn_end' });
         options.onMetric({ type: 'turn_summary', turn_index: 1, token_usage: { total_tokens: 3 }, finish_reason: 'stop' });
+        options.onMetric({ type: 'session_stats', session_stats: { sessionId: 'sess-1', tokens: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0, total: 3 } }, source: 'settlement' });
+        options.onMetric({ type: 'session_stats_error', errorMessage: 'rpc timeout', timeoutMs: 5000, source: 'settlement' });
+        options.onMetric({ type: 'pi_version', pi_version: '0.85.1' });
       }),
       getLastOutput: vi.fn(async () => 'session output'),
       getStderr: vi.fn(() => ''),
@@ -1349,8 +1352,23 @@ describe('runScriptSpecialist PiAgentSession observability bridge', () => {
       'tool',
       'token_usage',
       'turn_summary',
+      'session_stats',
+      'session_stats_error',
       'run_complete',
     ]));
+    // Settlement telemetry must be durable on script-class runs too (SPECIALISTS-120,
+    // reviewer finding 2): snapshot or explicit failure, plus the run's Pi version.
+    const statsEvent = events.find((event) => event.type === 'session_stats') as { session_stats?: { sessionId?: string } };
+    expect(statsEvent?.session_stats?.sessionId).toBe('sess-1');
+    const statsErrorEvent = events.find((event) => event.type === 'session_stats_error') as { error_message?: string };
+    expect(statsErrorEvent?.error_message).toBe('rpc timeout');
+    const versionEvent = events.find((event) => event.type === 'meta' && event.pi_version === '0.85.1');
+    expect(versionEvent).toMatchObject({
+      type: 'meta',
+      model: 'anthropic/claude-sonnet-4-6',
+      backend: 'anthropic',
+      pi_version: '0.85.1',
+    });
     expect(events.some((event) => event.type === 'tool' && event.phase === 'start' && event.tool === 'bash')).toBe(true);
     expect(events.some((event) => event.type === 'tool' && event.phase === 'end' && event.tool === 'bash')).toBe(true);
   });

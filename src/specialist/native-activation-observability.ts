@@ -1,4 +1,4 @@
-import type { PiAgentSessionEvent } from '../activation/pi-sdk.js';
+import type { PiAgentSessionEvent, PiAgentSessionLike } from '../activation/pi-sdk.js';
 import {
   createFinishReasonEvent,
   createMetaEvent,
@@ -9,6 +9,8 @@ import {
   createStaleWarningEvent,
   createStatusChangeEvent,
   createTokenUsageEvent,
+  createSessionStatsEvent,
+  createSessionStatsErrorEvent,
   createTurnSummaryEvent,
   mapCallbackEventToTimelineEvent,
   TIMELINE_EVENT_TYPES,
@@ -17,6 +19,15 @@ import {
   type TimelineEventStaleWarning,
   type TimelineTokenUsage,
 } from './timeline-events.js';
+import {
+  asProviderUsage,
+  normalizePiSessionStats,
+  normalizeSessionTokenUsage,
+  reconcileSessionUsage,
+  SESSION_STATS_TIMEOUT_MS,
+  type PiSessionStats,
+  type SessionUsageReconciliation,
+} from './session-metrics-contract.js';
 
 export interface NativeLifecycleEvent {
   activationId: string;
@@ -37,6 +48,10 @@ export interface NativeLifecycleProjectionContext {
   turns?: number;
   autoRetries?: number;
   autoCompactions?: number;
+  /** Pi's terminal session snapshot, when the settlement capture succeeded. */
+  sessionStats?: PiSessionStats;
+  /** Pi version recorded for this run (binary on PATH or resolved SDK package). */
+  piVersion?: string;
 }
 
 /**
@@ -201,73 +216,113 @@ function assistantText(event: PiAgentSessionEvent): string | undefined {
   return text.trim().length > 0 ? text : undefined;
 }
 
-/** Canonical reader for the nested message.usage short-key shape Pi session events carry. */
+/**
+ * Canonical reader for the nested message.usage short-key shape Pi session events carry.
+ *
+ * SPECIALISTS-120: every provider-reported field survives — including Anthropic's
+ * `cacheWrite1h` and Pi's whole cost breakdown — and the raw object is kept verbatim under
+ * `pi_usage` alongside the normalized projection. Provenance is `provider_usage` because an
+ * `AgentMessage.usage` IS the provider's report; a message event with no `usage` field yields
+ * `undefined` rather than a zero-filled object that would read as a measurement.
+ *
+ * Reads assistant AND toolResult messages: Pi's session totals include tool-reported usage, so
+ * a sum that skipped toolResult usage could never reconcile with Pi's session snapshot.
+ */
 export function nativeSessionTokenUsage(event: PiAgentSessionEvent): TimelineTokenUsage | undefined {
-  const usage = record(assistantMessage(event)?.usage);
+  const message = record(event.message);
+  const role = stringField(message?.role);
+  if (role !== 'assistant' && role !== 'toolResult') return undefined;
+  const usage = record(message?.usage);
   if (!usage) return undefined;
-  const projected: TimelineTokenUsage = {
-    input_tokens: numberField(usage.input),
-    output_tokens: numberField(usage.output),
-    cache_creation_tokens: numberField(usage.cacheWrite),
-    cache_read_tokens: numberField(usage.cacheRead),
-    reasoning_tokens: numberField(usage.reasoning),
-    total_tokens: numberField(usage.totalTokens),
-    usage_source: 'provider_usage',
-  };
-  return Object.values(projected).some(value => typeof value === 'number') ? projected : undefined;
-}
 
-/** Per-message usage counter keys. `usage_source` is provenance, never a counter. */
-const USAGE_COUNTER_KEYS = [
-  'input_tokens',
-  'output_tokens',
-  'cache_creation_tokens',
-  'cache_read_tokens',
-  'reasoning_tokens',
-  'tool_tokens',
-  'total_tokens',
-] as const;
+  const normalized = normalizeSessionTokenUsage(usage);
+  if (!normalized) return undefined;
+  // Provenance policy, in one place shared with the legacy RPC parser: an explicit
+  // `usage_source` on the payload wins; otherwise this IS Pi's provider report.
+  return asProviderUsage(normalized, usage) as TimelineTokenUsage;
+}
 
 /**
- * Merge one message's usage into a running session total (unitAI-beqby.15).
+ * The events that carry billable Pi usage (SPECIALISTS-120 F1).
  *
- * Providers disagree on the shape: most emit per-message deltas (sum them), but at
- * least one route emits cumulative-per-message counters (summing those explodes the
- * total, replacing it flaps the row down). Decide per MESSAGE, not per key: the
- * message is cumulative only when every carried counter with history grew — one
- * reset counter proves fresh per-message counts and the whole message adds whole.
- * Zero/absent values carry no information and touch neither the total nor lastSeen,
- * so a zero-usage message can neither clear a total nor corrupt the next delta.
- *
- * The result is monotonic non-decreasing per key on both shapes. Known ceiling: a
- * delta-shape message whose every counter happens to grow reads as cumulative and
- * adds only the growth — undercounts slightly, never flaps or explodes.
+ * ONE rule, consulted by {@link nativeEventTokenUsage} and by the host accumulator's gate, so
+ * adding an event shape cannot silently update one runtime and not the other.
  */
-export function accumulateTokenUsage<T extends object>(
-  prev: T | undefined,
-  incoming: { [K in (typeof USAGE_COUNTER_KEYS)[number]]?: number } & { usage_source?: unknown },
-  lastSeen: Record<string, number>,
-): T {
-  const merged = { ...(prev ?? {}) } as Record<string, unknown>;
-  const carried = USAGE_COUNTER_KEYS.filter((key) => {
-    const value = incoming[key];
-    return typeof value === 'number' && Number.isFinite(value) && value > 0;
-  });
-  // Vacuously true on a first message; harmless there because no key has history
-  // and every carried counter adds whole below.
-  const cumulative = carried.every((key) => lastSeen[key] === undefined || (incoming[key] as number) >= (lastSeen[key] as number));
-  for (const key of carried) {
-    const value = incoming[key] as number;
-    const last = lastSeen[key];
-    const delta = last !== undefined && cumulative ? value - last : value;
-    merged[key] = (typeof merged[key] === 'number' ? merged[key] : 0) + delta;
-    lastSeen[key] = value;
-  }
-  if (merged.usage_source === undefined && typeof incoming.usage_source === 'string') {
-    merged.usage_source = incoming.usage_source;
-  }
-  return merged as T;
+export function isNativeUsageEvent(event: PiAgentSessionEvent): boolean {
+  return event.type === 'message_end' || event.type === 'compaction_end';
 }
+
+/**
+ * Read the billable usage off a native Pi session event (SPECIALISTS-120 F1).
+ *
+ * Two accumulators consume this reader — the host's live activation snapshot and the forensic
+ * sink's durable projection — and they own their state separately by design: the host holds
+ * the in-memory activation, the sink holds the persisted projection, and the sink must stay
+ * usable when fed raw events with no host (its tests and any offline replay do exactly that).
+ * What they must NEVER do is own different RULES, which is what made them disagree:
+ *
+ * - `message_end` carries an assistant or toolResult usage report.
+ * - `compaction_end` carries the summarization call's usage under `result.usage`. Pi bills and
+ *   counts that call in its session totals, and it never arrives as a message, so a rule that
+ *   only read `message_end` under-reported every compacted run and produced a `reconciled=false`
+ *   reconciliation whose delta was exactly the summarization call.
+ *
+ * Both shapes are read through the same canonical reader, so a provider field that survives on
+ * a message survives on a compaction summary too.
+ */
+export function nativeEventTokenUsage(event: PiAgentSessionEvent): TimelineTokenUsage | undefined {
+  if (!isNativeUsageEvent(event)) return undefined;
+  if (event.type === 'message_end') return nativeSessionTokenUsage(event);
+  const result = record(event.result);
+  if (!result) return undefined;
+  return nativeSessionTokenUsage({
+    type: 'message_end',
+    message: { role: 'assistant', usage: result.usage },
+  } as PiAgentSessionEvent);
+}
+
+/**
+ * Capture Pi's terminal session stats at settlement (SPECIALISTS-120 criterion 3).
+ *
+ * The native host holds the `AgentSession` in-process, so there is no separate Pi process to
+ * outlive — the equivalent boundary is "before the terminal activation event is emitted".
+ *
+ * Bounded by `timeoutMs`: Pi answering slowly must cost the activation that wait and nothing
+ * more. A failure is RETURNED, never thrown, so the caller records it as an explicit event and
+ * still settles the activation. A session double without `getSessionStats` reports that fact
+ * rather than reporting zeros as if Pi had measured them.
+ */
+export async function captureNativeSessionStats(
+  session: Pick<PiAgentSessionLike, 'getSessionStats'>,
+  timeoutMs = SESSION_STATS_TIMEOUT_MS,
+): Promise<{ stats?: PiSessionStats; error?: string }> {
+  if (typeof session.getSessionStats !== 'function') {
+    return { error: 'pi session does not expose getSessionStats' };
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const raw = await Promise.race([
+      Promise.resolve().then(() => session.getSessionStats!()),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`get_session_stats did not answer within ${timeoutMs}ms`)), timeoutMs);
+      }),
+    ]);
+    const stats = normalizePiSessionStats(raw);
+    return stats ? { stats } : { error: 'getSessionStats returned no usable session totals' };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * Per-message usage accumulation lives in the neutral session-metrics contract
+ * (SPECIALISTS-120): the legacy RPC runtime needs the same dual-shape rule, and importing it
+ * from a native-activation module would have created a `pi/session -> native-activation ->
+ * pi-sdk -> pi/session` cycle. Re-exported here so existing importers are unchanged.
+ */
+export { accumulateTokenUsage } from './session-metrics-contract.js';
 
 function resultContent(result: unknown): string | undefined {
   if (typeof result === 'string') return result;
@@ -325,7 +380,8 @@ export function mapNativeLifecycleEvent(
       // which is why the former GAPS rationale ("re-enters at turn_start") was
       // wrong for phase accounting. Shared status_change vocabulary; no new kind.
       return at(createStatusChangeEvent('running', 'waiting'), t);
-    case 'activation_completed':
+    case 'activation_completed': {
+      const reconciliation = reconcileSessionUsage(context.tokenUsage, context.sessionStats);
       return at(createRunCompleteEvent('COMPLETE', Math.max(0, t - context.startedAtMs) / 1_000, {
         model: context.resolvedModel,
         backend: context.resolvedModel?.split('/')[0],
@@ -335,8 +391,13 @@ export function mapNativeLifecycleEvent(
         finish_reason: context.finishReason,
         tool_calls: context.toolCalls,
         final: true,
+        pi_version: context.piVersion,
         metrics: {
           token_usage: context.tokenUsage,
+          ...(context.tokenUsage?.cost ? { cost: context.tokenUsage.cost } : {}),
+          ...(context.sessionStats ? { session_stats: context.sessionStats } : {}),
+          ...(reconciliation ? { reconciliation } : {}),
+          ...(context.piVersion ? { pi_version: context.piVersion } : {}),
           finish_reason: context.finishReason,
           turns: context.turns,
           tool_calls: context.toolCalls?.length,
@@ -345,6 +406,7 @@ export function mapNativeLifecycleEvent(
           auto_compactions: context.autoCompactions,
         },
       }), t);
+    }
     // Admission control, persisted as `control_signal` -> family `control`, severity `warn`
     // (unitAI-rrdnt.58). Phase 7 originally dropped these on the grounds that lease contention
     // has no legacy runner concept. True, and it does not follow: there is no legacy event to
@@ -400,6 +462,24 @@ export function mapNativeLifecycleEvent(
         ...(numberField(event.payload?.attempt_n) !== undefined ? { attempt_n: numberField(event.payload?.attempt_n) as number } : {}),
         ...(stringField(event.payload?.resolved_model) ? { resolved_model: stringField(event.payload?.resolved_model) as string } : {}),
       }, t);
+    // SPECIALISTS-120 settlement capture. The native host captures Pi's own session totals
+    // before the terminal activation event and emits the outcome under these two names. The
+    // snapshot gets its own timeline type so a reader can tell Pi's session total apart from
+    // the summed per-message `token_usage` rows; the failure gets its own type so a missing
+    // snapshot is a durable finding, not a silent absence.
+    case 'session_stats_captured': {
+      const stats = normalizePiSessionStats(event.payload?.session_stats);
+      // A "captured" signal with no usable snapshot is itself a failure and must still be
+      // persisted: the mapper never returns null here, so no session-stats outcome can vanish.
+      return stats
+        ? at(createSessionStatsEvent(stats), t)
+        : at(createSessionStatsErrorEvent('session_stats_captured carried no usable snapshot'), t);
+    }
+    case 'session_stats_failed':
+      return at(createSessionStatsErrorEvent(
+        stringField(event.payload?.error) ?? 'session stats capture failed',
+        numberField(event.payload?.timeout_ms),
+      ), t);
     // SPECIALISTS-101 settlement carrier (coordinator decision): each settlement_* name keeps
     // its own event_name and gets its own arm. They are 10 distinct signals; collapsing them
     // into one generic arm would trade one silent loss for nine. Each returns its own
@@ -568,11 +648,19 @@ export function mapNativeSessionEvent(
       break;
     case 'compaction_end': {
       const result = record(event.result);
+      // SPECIALISTS-120 criterion 2: Pi reports `estimatedTokensAfter` (the post-compaction
+      // context estimate) and the summarization call's own usage. Both are dropped today, so a
+      // compacted run's timeline cannot say what compaction cost or left behind. The
+      // summarization usage is NOT an assistant message; it is read through the same usage
+      // reader so it lands in one shape.
+      const summaryUsage = nativeSessionTokenUsage({ type: 'message_end', message: { role: 'assistant', usage: result?.usage } } as PiAgentSessionEvent);
       add(mapCallbackEventToTimelineEvent('auto_compaction_end', {
         compaction: {
           tokensBefore: numberField(result?.tokensBefore),
+          estimatedTokensAfter: numberField(result?.estimatedTokensAfter),
           summary: stringField(result?.summary),
           firstKeptEntryId: stringField(result?.firstKeptEntryId),
+          ...(summaryUsage ? { token_usage: summaryUsage } : {}),
         },
       }));
       break;
