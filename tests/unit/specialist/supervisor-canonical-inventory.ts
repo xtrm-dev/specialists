@@ -38,6 +38,39 @@
 // If the proof fails, the gap is open: record it, do not redefine the
 // contract to fit the implementation.
 
+// COVERAGE BOUNDARY — RESUME LEG (SPECIALISTS-122). The entry
+// `resume-reentry-status-change` covers the MACHINE-OBSERVABLE half of
+// `waiting -> coordinator resume -> running -> terminal`: the native
+// `activation_resumed` mapper arm, its durable `job.status_changed` row, and the
+// persisted `running`/`waiting` pair that distinguishes it from
+// `activation_settled` (which produces the same forensic NAME and the mirrored
+// pair). It does NOT cover the coordinator-REPLY half: `clarification_answered`
+// and `escalation_resolved` have no mapper arm and are recorded as DELIBERATELY
+// unpersisted with a written reason in NATIVE_LIFECYCLE_DELIBERATELY_UNPERSISTED
+// (src/specialist/native-activation-observability.ts), so an EXPECTED_DURABLE
+// expectation for a reply event would be WRONG. This entry is not full coverage
+// of `waiting -> reply -> active -> terminal`.
+//
+// The differential corpus scenarios for this leg, DX-TEL-005 (ordered
+// status_change after a settle-then-resume) and DX-CTL-003 (resume), are DEFINED
+// BUT NOT EXECUTABLE: `L-ADAPTER`/`N-ADAPTER` have zero implementations in src/
+// or tests/, and docs/migrations/xtrm-93/10-differential-acceptance-corpus.md:145
+// states the corpus is a design document, not an executable suite. This
+// inventory entry is therefore the ONLY DEFAULT-SUITE oracle binding the
+// DURABLE resume row. The mapper ARM is separately executed, un-quarantined, by
+// tests/unit/specialist/phase-accounting-invariant.test.ts (lines ~471-480) and
+// tests/unit/specialist/native-activation-observability.test.ts (lines ~341-343);
+// what is unique here is the read-back of the PERSISTED row from
+// specialist_forensic_events, which those mapper-level assertions do not bind.
+//
+// PRODUCER WIRING IS NOT BOUND (SPECIALISTS-122 round 2, finding 7). This entry
+// drives the emit NAME through the real mapper and the real writer; it does NOT
+// prove that the native host ever emits `activation_resumed`. Commenting out the
+// producer emit in src/activation/native-host.ts leaves the canonical oracle
+// GREEN — the inventory is not a producer-coverage oracle. Producer wiring is
+// covered only by the gated live smoke test
+// tests/integration/activation/native-activation.live.test.ts.
+
 export type CanonicalExpectationClass =
   | 'EXPECTED_DURABLE'
   | 'EXPECTED_ABSENT_WITH_REASON'
@@ -97,6 +130,40 @@ export interface CanonicalDurableProof {
   expectedForensicName: string;
   /** When true, the read-back row must also carry the fallback diagnostics. */
   assertFallbackDiagnostics?: boolean;
+  /**
+   * SPECIALISTS-122: generic read-back assertions on the PERSISTED row's event
+   * JSON. Required whenever the forensic NAME alone does not identify the event
+   * (two lifecycle names collapsing onto one carrier produce one name).
+   */
+  assertPersistedFields?: readonly CanonicalPersistedFieldAssertion[];
+}
+
+/**
+ * Generic read-back assertion over the PERSISTED forensic row's event JSON
+ * (SPECIALISTS-122).
+ *
+ * WHY A PATH AND NOT A PER-EVENT FLAG: `assertFallbackDiagnostics` above is a
+ * hard-coded boolean whose key list and renames belong to model_fallback; a
+ * second flag for `status`/`previous_status` would repeat that defect instead of
+ * generalising it. A dot path plus an expected value is event-agnostic — a new
+ * entry asserts a new shape with no new code — and it is resolved against the
+ * row read back from `specialist_forensic_events`, so it binds the WRITER's
+ * output rather than the mapper's return value.
+ *
+ * WHY IT DISCRIMINATES: `activation_resumed` and `activation_settled` both map
+ * to the SAME forensic name `job.status_changed`, so an entry asserting only the
+ * name passes for either. The pair asserted for the resume leg
+ * (`status: running`, `previous_status: waiting`) is the resume direction alone;
+ * the settled leg persists the mirror image and FAILS.
+ *
+ * A missing path resolves to `undefined`, which is never strictly equal to the
+ * expected value — a renamed or absent field FAILS rather than passing vacuously.
+ */
+export interface CanonicalPersistedFieldAssertion {
+  /** Dot path into the persisted event JSON, e.g. `body.legacy_timeline_event.status`. */
+  path: string;
+  /** Value the persisted field must equal (strict `===`). */
+  equals: string | number | boolean | null;
 }
 
 /** Execution proof for EXPECTED_ABSENT_WITH_REASON: decision, not omission. */
@@ -167,6 +234,38 @@ export const SUPERVISOR_CANONICAL_INVENTORY: readonly CanonicalInventoryEntry[] 
       emitName: 'activation_completed',
       emitPayload: { pi_session_id: 'pi-oracle-terminal', output: 'oracle output' },
       expectedForensicName: 'job.completed',
+    },
+  },
+  {
+    id: 'resume-reentry-status-change',
+    scenario: 'a coordinator resume re-enters the activation as running (waiting -> resume -> running)',
+    signal: 'activation_resumed (canonical job.status_changed, running <- waiting)',
+    evidence: [
+      { side: 'native-mapper', file: 'src/specialist/native-activation-observability.ts', needle: "case 'activation_resumed'" },
+      { side: 'native-producer', file: 'src/activation/native-host.ts', needle: "emit('activation_resumed'" },
+      { side: 'native-mapper', file: 'src/specialist/timeline-events.ts', needle: 'createStatusChangeEvent(' },
+    ],
+    // The NAME is NON-DISCRIMINATING: activation_settled also maps through
+    // createStatusChangeEvent — (waiting, running) instead of (running, waiting)
+    // — and yields the identical forensic name `job.status_changed`. An entry
+    // asserting only that a `job.status_changed` row exists would pass for a
+    // settled row and prove nothing about resume. The durable proof below
+    // therefore asserts the PERSISTED status pair, not just the row's name.
+    // Contract refs: docs/migrations/xtrm-93/n3/lanes/T1.md (canonical
+    // job.status_changed; activation_resumed maps to status_change('running',
+    // 'waiting')), T4.md ('explicit resume and explicit retry must append
+    // status_change(...->running)'), README.md section 3.5 (resume-vs-retry
+    // distinguishability).
+    gapRef: null,
+    expectation: 'EXPECTED_DURABLE',
+    durable: {
+      via: 'native-lifecycle',
+      emitName: 'activation_resumed',
+      expectedForensicName: 'job.status_changed',
+      assertPersistedFields: [
+        { path: 'body.legacy_timeline_event.status', equals: 'running' },
+        { path: 'body.legacy_timeline_event.previous_status', equals: 'waiting' },
+      ],
     },
   },
   {

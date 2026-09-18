@@ -26,7 +26,9 @@ import {
   SUPERVISOR_CANONICAL_INVENTORY,
 } from './supervisor-canonical-inventory.js';
 import {
+  resolveJsonPath,
   runAbsentCheck,
+  runDurableEntryCheck,
   runDurableNativeCheck,
 } from './supervisor-canonical-proof.js';
 
@@ -172,6 +174,137 @@ describe('oracle mutation matrix (SPECIALISTS-103)', () => {
       expectedForensicName: 'model.changed',
       dropWrites: true,
     })).toThrow(/writer link MISSING/);
+  });
+});
+
+describe('resume re-entry assertion discriminates (SPECIALISTS-122)', () => {
+  // The oracle entry `resume-reentry-status-change` exists because the resume
+  // re-entry leg (waiting -> coordinator resume -> running -> terminal) had no
+  // machine-checked expectation. It is only worth its slot if it FAILS when the
+  // emit is swapped for the leg that shares its forensic NAME — otherwise it is
+  // a denominator increase. M7 below pins both legs by injection (the emit name
+  // is a test input), so the property is regressed permanently without editing
+  // shipped source. The manual source-swap demonstration is reported separately.
+  const RESUME_STATUS_PAIR = [
+    { path: 'body.legacy_timeline_event.status', equals: 'running' },
+    { path: 'body.legacy_timeline_event.previous_status', equals: 'waiting' },
+  ] as const;
+
+  it('the oracle entry carries exactly the assertion this matrix exercises (no manifest/test drift)', () => {
+    const entry = SUPERVISOR_CANONICAL_INVENTORY.find(
+      (candidate) => candidate.id === 'resume-reentry-status-change',
+    );
+    expect(entry?.expectation).toBe('EXPECTED_DURABLE');
+    expect(entry?.durable?.via).toBe('native-lifecycle');
+    expect(entry?.durable?.emitName).toBe('activation_resumed');
+    expect(entry?.durable?.expectedForensicName).toBe('job.status_changed');
+    expect(entry?.durable?.assertPersistedFields).toEqual([...RESUME_STATUS_PAIR]);
+  });
+
+  it('M7 GREEN leg: activation_resumed satisfies the persisted running<-waiting pair', () => {
+    expect(() => runDurableNativeCheck({
+      emitName: 'activation_resumed',
+      expectedForensicName: 'job.status_changed',
+      assertPersistedFields: [...RESUME_STATUS_PAIR],
+    })).not.toThrow();
+  });
+
+  it('M7 RED leg: activation_settled emits the SAME forensic NAME with the mirrored pair, and the assertion turns RED', () => {
+    // A name-only entry would pass here — that is precisely the vacuity this
+    // test forbids. The NAME assertion holds (both rows are job.status_changed),
+    // so the payload assertion must be what fails.
+    expect(() => runDurableNativeCheck({
+      emitName: 'activation_settled',
+      expectedForensicName: 'job.status_changed',
+      assertPersistedFields: [...RESUME_STATUS_PAIR],
+    })).toThrow(/persisted field "body\.legacy_timeline_event\.status" is "waiting", expected "running"/);
+  });
+
+  it('the generic persisted-field assertion FAILS on a mismatched value (not only passes on a match)', () => {
+    expect(() => runDurableNativeCheck({
+      emitName: 'activation_resumed',
+      expectedForensicName: 'job.status_changed',
+      assertPersistedFields: [{ path: 'body.legacy_timeline_event.previous_status', equals: 'running' }],
+    })).toThrow(/persisted field "body\.legacy_timeline_event\.previous_status" is "waiting", expected "running"/);
+  });
+
+  it('the generic persisted-field assertion FAILS on a missing path (a renamed field is not a vacuous pass)', () => {
+    expect(() => runDurableNativeCheck({
+      emitName: 'activation_resumed',
+      expectedForensicName: 'job.status_changed',
+      assertPersistedFields: [{ path: 'body.legacy_timeline_event.no_such_field', equals: 'running' }],
+    })).toThrow(/persisted field "body\.legacy_timeline_event\.no_such_field" is undefined, expected "running"/);
+  });
+
+  it('reads the resume status pair back from the PERSISTED row, not the mapper return value', () => {
+    const { rows } = runDurableNativeCheck({
+      emitName: 'activation_resumed',
+      expectedForensicName: 'job.status_changed',
+      assertPersistedFields: [...RESUME_STATUS_PAIR],
+    });
+    const row = rows.find((candidate) => candidate.event_name === 'job.status_changed');
+    if (!row) throw new Error('unreachable: the check asserted the row exists');
+    const timeline = (JSON.parse(row.event_json) as {
+      body?: { legacy_timeline_event?: Record<string, unknown> };
+    }).body?.legacy_timeline_event ?? {};
+    expect(timeline['type']).toBe('status_change');
+    expect(timeline['status']).toBe('running');
+    expect(timeline['previous_status']).toBe('waiting');
+  });
+});
+
+describe('persisted-field resolver hardening (SPECIALISTS-122 round 2)', () => {
+  // The resolver walks a dot path into the PARSED persistent event JSON. The
+  // prototype-pollution guard is only worth having if it is pinned: without
+  // these tests a future edit could drop the deny-list / hasOwnProperty check
+  // and every shipped entry (whose segments are own properties) would still be
+  // green. Each assertion below observes the RESOLVED VALUE, not just that a
+  // mismatched assertion threw.
+  const source = { body: { legacy_timeline_event: { status: 'running', previous_status: 'waiting' } } };
+
+  it('resolves the prototype-pollution deny-list segments to undefined, not to an inherited value', () => {
+    for (const segment of ['__proto__', 'constructor', 'prototype']) {
+      expect(resolveJsonPath(source, segment)).toBeUndefined();
+      expect(resolveJsonPath(source, `body.legacy_timeline_event.${segment}`)).toBeUndefined();
+    }
+  });
+
+  it('resolves an inherited (non-own) property to undefined instead of reading it', () => {
+    // `toString` is inherited from Object.prototype and is NOT on the deny-list;
+    // only the hasOwnProperty guard makes this undefined. It pins that guard
+    // independently of the deny-list.
+    expect(resolveJsonPath(source, 'toString')).toBeUndefined();
+    expect(resolveJsonPath(source, 'body.legacy_timeline_event.toString')).toBeUndefined();
+  });
+
+  it('still resolves an own property, and still returns undefined once an intermediate is not an object', () => {
+    expect(resolveJsonPath(source, 'body.legacy_timeline_event.status')).toBe('running');
+    expect(resolveJsonPath(source, 'body.legacy_timeline_event.status.deeper')).toBeUndefined();
+  });
+
+  it('F3: a present-but-EMPTY assertPersistedFields array FAILS instead of asserting nothing', () => {
+    expect(() => runDurableNativeCheck({
+      emitName: 'activation_resumed',
+      expectedForensicName: 'job.status_changed',
+      assertPersistedFields: [],
+    })).toThrow(/assertPersistedFields is present but EMPTY/);
+  });
+
+  it('F2: a legacy-append proof declaring assertPersistedFields FAILS loudly instead of passing name-only', () => {
+    expect(() => runDurableEntryCheck({
+      via: 'legacy-append',
+      legacyTimelineType: 'stale_warning',
+      expectedForensicName: 'process_health.stale_detected',
+      assertPersistedFields: [{ path: 'body.legacy_timeline_event.status', equals: 'running' }],
+    })).toThrow(/legacy-append declares assertPersistedFields/);
+  });
+
+  it('F2: the same legacy proof WITHOUT assertPersistedFields still passes (the guard is additive)', () => {
+    expect(() => runDurableEntryCheck({
+      via: 'legacy-append',
+      legacyTimelineType: 'stale_warning',
+      expectedForensicName: 'process_health.stale_detected',
+    })).not.toThrow();
   });
 });
 
