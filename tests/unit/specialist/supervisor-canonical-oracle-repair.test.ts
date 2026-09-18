@@ -18,6 +18,7 @@ import { describe, expect, it } from 'vitest';
 import { createActivationForensicSink } from '../../../src/activation/forensic-sink.js';
 import {
   mapNativeLifecycleEvent,
+  NATIVE_LIFECYCLE_OBSERVABILITY_GAPS,
   NATIVE_LIFECYCLE_DELIBERATELY_UNPERSISTED,
 } from '../../../src/specialist/native-activation-observability.js';
 import { createObservabilitySqliteClientAtPath } from '../../../src/specialist/observability-sqlite.js';
@@ -78,17 +79,22 @@ describe('oracle mutation matrix (SPECIALISTS-103)', () => {
 
     // The negative leg uses a name with no arm (same state as a removed arm):
     // the mapper returns null and the durable check names the mapper link.
-    // NOTE (SPECIALISTS-102): 'stale_warning' now HAS a mapper arm, so it can no
-    // longer serve as the unmapped exemplar; 'activation_admitted' (a lifecycle
-    // name with no mapper arm) takes that role. Deleting the stale_warning arm
-    // would make the live oracle entry fail on the mapper link instead.
+    // NOTE (SPECIALISTS-102, extended by SPECIALISTS-123): 'stale_warning' and
+    // then 'activation_admitted' each acquired a mapper arm, so neither can serve
+    // as the unmapped exemplar any more; 'activation_disposed' (a lifecycle name
+    // with no mapper arm) takes that role. The exemplar is incidental — the
+    // property under test (mapper null -> the durable check fails naming the
+    // mapper link) is unchanged.
+    // Guard against silent rot: if 'activation_disposed' later gains a mapper arm,
+    // this fails here instead of M1 quietly losing its unmapped exemplar.
+    expect(NATIVE_LIFECYCLE_OBSERVABILITY_GAPS).toHaveProperty('activation_disposed');
     expect(mapNativeLifecycleEvent(
-      { activationId: 'act:m1', specialist: 'researcher', name: 'activation_admitted', payload: {} },
+      { activationId: 'act:m1', specialist: 'researcher', name: 'activation_disposed', payload: {} },
       { startedAtMs: Date.now() },
       1000,
     )).toBeNull();
     expect(() => runDurableNativeCheck({
-      emitName: 'activation_admitted',
+      emitName: 'activation_disposed',
       emitPayload: {},
       expectedForensicName: 'process_health.stale_detected',
     })).toThrow(/mapper link MISSING/);

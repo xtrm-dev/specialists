@@ -39,7 +39,6 @@ export interface NativeLifecycleProjectionContext {
 export declare const NATIVE_LIFECYCLE_OBSERVABILITY_GAPS: Readonly<{
     readonly activation_requested: "Dispatch intent precedes the legacy run_start boundary and has no timeline event.";
     readonly step_contract_compiled: "Step-contract compilation has no legacy AgentSession event.";
-    readonly activation_admitted: "Admission metadata has no legacy timeline event; identity is projected on specialist_jobs.";
     readonly activation_starting: "Session construction has no legacy timeline event; run_start follows once construction succeeds.";
     readonly output_validation_started: "Native result validation has no legacy timeline event kind.";
     readonly output_validation_passed: "Native result validation has no legacy timeline event kind.";

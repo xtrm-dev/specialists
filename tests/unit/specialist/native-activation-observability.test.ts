@@ -151,6 +151,10 @@ describe('native activation observability parity', () => {
       WHERE job_id = 'act:native' ORDER BY seq
     `).all() as EventIdentityRow[];
     expect(events.map(row => row.type)).toEqual([
+      // SPECIALISTS-123: activation_admitted now maps onto the shared `control_signal`
+      // carrier, so the admission row is durable. It precedes run_start (the activation
+      // is admitted before a session exists).
+      'control_signal',
       'run_start', 'turn', 'meta', 'message', 'text', 'message', 'token_usage',
       'finish_reason', 'turn_summary', 'tool', 'tool', 'retry', 'retry', 'retry',
       'turn', 'run_complete',
@@ -166,7 +170,31 @@ describe('native activation observability parity', () => {
       FROM specialist_forensic_events WHERE job_id = 'act:native' ORDER BY seq
     `).all() as ForensicIdentityRow[];
     expect(forensic).toHaveLength(events.length);
-    for (let index = 0; index < forensic.length; index += 1) {
+    // SPECIALISTS-123: activation_admitted is durable now, and it is emitted BEFORE
+    // activation_started creates the session (admission is deliberately fail-closed before
+    // any real session exists). It is therefore the ONE native row that legitimately carries
+    // no pi_session_id. The exemption is scoped by IDENTITY, not by a blanket skip: the set of
+    // rows omitting pi_session_id must be EXACTLY the single admission row, and every other
+    // row must still be checked. A future pre-session row cannot slip under this exemption.
+    const correlationOf = (row: ForensicIdentityRow): Record<string, unknown> =>
+      (JSON.parse(row.event_json) as { correlation: Record<string, unknown> }).correlation;
+    const sessionExemptRows = forensic.filter((row) => !('pi_session_id' in correlationOf(row)));
+    expect(sessionExemptRows, 'exactly one pre-session row may omit pi_session_id').toHaveLength(1);
+    expect(sessionExemptRows[0]).toBe(forensic[0]);
+    const admissionEvent = JSON.parse(forensic[0]!.event_json) as {
+      body?: { legacy_timeline_event?: Record<string, unknown> };
+    };
+    expect(admissionEvent.body?.legacy_timeline_event).toMatchObject({
+      type: 'control_signal',
+      action: 'activation_admitted',
+    });
+    expect(correlationOf(forensic[0]!)).toMatchObject({
+      participant_id: 'specialist::researcher',
+      attempt_id: base.attemptId,
+      workspace_id: normalize(resolve(worktreePath)),
+    });
+    // Every non-exempt row (all rows from run_start onward) still adopts the session identity.
+    for (let index = 1; index < forensic.length; index += 1) {
       const row = forensic[index]!;
       const event = JSON.parse(row.event_json) as { correlation: Record<string, unknown> };
       expect(row.attempt_id).toBe(events[index]?.attempt_id);
@@ -343,7 +371,7 @@ describe('native activation observability parity', () => {
     )).toMatchObject({ type: 'status_change', status: 'running' });
 
     expect(Object.keys(NATIVE_LIFECYCLE_OBSERVABILITY_GAPS)).toEqual(expect.arrayContaining([
-      'activation_requested', 'step_contract_compiled', 'activation_admitted',
+      'activation_requested', 'step_contract_compiled',
       'activation_starting', 'output_validation_started',
       'output_validation_passed', 'output_validation_failed', 'activation_disposed',
       // lease_acquired, lease_denied, lease_uncertain and tool_blocked were listed here and

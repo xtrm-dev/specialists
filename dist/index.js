@@ -94726,6 +94726,11 @@ function mapNativeLifecycleEvent(event, context, t = Date.now()) {
         bead_id: event.beadId,
         ...event.payload ?? {}
       }), t);
+    case "activation_admitted":
+      return at(createControlSignalEvent(event.name, {
+        bead_id: event.beadId,
+        ...event.payload ?? {}
+      }), t);
     case "model_fallback":
       return at({
         t,
@@ -94944,7 +94949,6 @@ var init_native_activation_observability = __esm(() => {
   NATIVE_LIFECYCLE_OBSERVABILITY_GAPS = Object.freeze({
     activation_requested: "Dispatch intent precedes the legacy run_start boundary and has no timeline event.",
     step_contract_compiled: "Step-contract compilation has no legacy AgentSession event.",
-    activation_admitted: "Admission metadata has no legacy timeline event; identity is projected on specialist_jobs.",
     activation_starting: "Session construction has no legacy timeline event; run_start follows once construction succeeds.",
     output_validation_started: "Native result validation has no legacy timeline event kind.",
     output_validation_passed: "Native result validation has no legacy timeline event kind.",

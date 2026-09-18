@@ -34,6 +34,7 @@ on:
       - 'tests/unit/specialist/observability-sqlite.test.ts'
       - 'tests/unit/specialist/native-activation-observability.test.ts'
       - 'tests/unit/specialist/native-mapper-totality.test.ts'
+      - 'tests/unit/specialist/native-model-telemetry.test.ts'
       - '.github/workflows/telemetry-contract.yml'
   push:
     branches:
@@ -51,6 +52,7 @@ on:
       - 'tests/unit/specialist/observability-sqlite.test.ts'
       - 'tests/unit/specialist/native-activation-observability.test.ts'
       - 'tests/unit/specialist/native-mapper-totality.test.ts'
+      - 'tests/unit/specialist/native-model-telemetry.test.ts'
       - '.github/workflows/telemetry-contract.yml'
   workflow_dispatch:
 
@@ -84,6 +86,7 @@ jobs:
             tests/unit/specialist/prometheus-projection.test.ts
             tests/unit/specialist/native-activation-observability.test.ts
             tests/unit/specialist/native-mapper-totality.test.ts
+            tests/unit/specialist/native-model-telemetry.test.ts
           )
           REPORT_DIR="$(mktemp -d)"
           REPORT="$REPORT_DIR/telemetry-vitest-report.json"
