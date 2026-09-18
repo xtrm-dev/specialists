@@ -18,4 +18,4 @@ rather than repeated manual sleeps. General peer messaging/reply obligations bel
 `/multiplexing`.
 
 When context pressure threatens the coordinator, persist job IDs, states, pending
-findings/replies, and next action, then hand off through `/starting-and-resuming-work`.
+findings/replies, and next action, then hand off through `/using-xtrm` (Continuity).
