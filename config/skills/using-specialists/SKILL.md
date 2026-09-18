@@ -33,10 +33,11 @@ Use subcommand help before exact invocation when a flag matters. The installed C
 registry are authoritative. Static examples in this skill are shapes, not a promise that
 an old flag still exists.
 
-The current released product supports supervised specialist jobs plus advanced node/script
-surfaces. The programme is moving toward the XTRM
-`ChainSource -> ChainDefinition -> ResolvedChain -> ChainRun` architecture, but that
-generic native chain runtime is not yet a released contract. Do not pretend it is.
+Two runtimes exist. The supervised `sp` job lifecycle below is the current released
+operator surface; the native activation runtime (`Native activation` section) is the
+primary flow for Substrate-backed work and is transitional under XTRM-93 until its
+capability matrix reaches PARITY (see `docs/migrations/xtrm-93/00-capability-matrix.md`).
+Do not present either as the only model.
 
 ## Contract precondition
 
