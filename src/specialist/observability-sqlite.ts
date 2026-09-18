@@ -3088,15 +3088,15 @@ class SqliteClient implements ObservabilitySqliteClient {
       }
 
       // Post-loop flush (XTRM-93 N3 defect 1; endpoint policy SPECIALISTS-119):
-      // a phase still open at end-of-stream is real time the job spent running or
-      // waiting. Close it at the `t` of the LAST JOB-PRODUCED event — not at the
-      // last event of any type — so no interval is silently dropped from BOTH
-      // buckets. Reader-produced status-load reconciliation rows are written by
+      // a phase still open at end-of-stream is real time spent running or
+      // waiting; close it at the `t` of the LAST JOB-PRODUCED event — not the
+      // last event of any type. Reader-produced status-load rows are written by
       // the observer at read time (`status-load.ts` stamps `t: Date.now()`), so
-      // they are excluded from endpoint selection; if the stream holds no
-      // job-produced event the phase is left unflushed rather than attributed to
-      // a reader row. The residual lands in the bucket named by the phase that
-      // was actually open; it is never dumped into waiting_ms by default (I2-ter).
+      // they are excluded from endpoint selection (the no-job-produced case is
+      // unreachable: only run_start/status_change open a phase, never a reader
+      // row). POLICY LIMIT: the flush attributes exactly [phase start, endpoint]
+      // and I2-ter (residual to the open phase's bucket, never forced into
+      // waiting_ms) holds only to it; a reader-only tail past the endpoint is deliberately left out of BOTH buckets — a visible, intended undercount, not a routing.
       let flushAtMs: number | null = null;
       for (let i = events.length - 1; i >= 0; i -= 1) {
         const candidate = events[i]!;
@@ -3108,6 +3108,12 @@ class SqliteClient implements ObservabilitySqliteClient {
         closePhase(flushAtMs);
       }
 
+      // Divergence from the flush endpoint above, by design: `completedAtMs`
+      // back-fills to the LAST EVENT OF ANY TYPE (reader rows included), while the
+      // flush stops at the last JOB-PRODUCED event. Specialists-119 measured the
+      // divergence as unobservable in the corpus: 88 jobs end in a reader row
+      // (367.52 h of truncated tail) and 0 of them have a stored completed_at_ms at
+      // or after the trailing reader row, so elapsed_ms absorbs no read latency.
       if (startedAtMs !== null && completedAtMs === null) {
         completedAtMs = events.length > 0 ? events[events.length - 1]!.t : startedAtMs;
       }

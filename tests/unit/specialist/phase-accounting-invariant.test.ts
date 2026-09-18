@@ -8,6 +8,11 @@
  * so `waiting_ms` (and its consumer `xtrm_job_wait_seconds`) no longer grows with
  * operator read latency, while a job-produced non-phase trailing event
  * (tool/text/payload_breakdown/…) still extends the endpoint.
+ * Consumer consequence: for a parked or abandoned activation whose only later
+ * evidence is an operator read, `waiting_ms`/`active_runtime_ms` — and the served
+ * `xtrm_job_wait_seconds`/`xtrm_job_active_runtime_seconds` — report the
+ * activation-bounded value (trailing silence is zero), not read latency; a job
+ * still emitting job-produced non-phase events reports that silence normally.
  *
  * The invariant (contract, not suggestion). The flush reference point is the CHOSEN
  * one — the `t` of the last JOB-PRODUCED event (see I1-FLUSH) — not the contract's
@@ -15,22 +20,27 @@
  * I1-FLUSH. Phase-relevant events are run_start,
  * status_change{running,waiting,done,error,cancelled}, run_complete:
  *
- *   (I1) PARTITION (shape-conditional): every millisecond the phase machine was
- *        OPEN for is attributed EXACTLY ONCE — to active_runtime_ms if the open
- *        phase was running, to waiting_ms if it was waiting. There is NO universal
- *        sum equality: active_runtime_ms + waiting_ms == t_last - t_firstPhase
- *        holds ONLY on streams where the phase machine is open over the whole
- *        reference span. Milliseconds during which NO phase is open (phase is
- *        null) are attributed NOWHERE, by design of the machine, and appear as
- *        a residual between the attributed sum and the wall-clock span.
- *        Counterexample shapes that legitimately produce a residual:
- *        (i) a terminal event (run_complete closes and clears the phase) followed
- *            by a phase-opening event (status_change) with a null-phase window
- *            between them — the window is unattributed;
- *        (ii) T13, the stored stream of job 312b6a in this file: the first
- *            run_complete (t=1782174057770) precedes the next status_change
- *            (t=1782174057928) by 158 ms of null phase, so span 73,615,823 minus
- *            attributed 4,380 + 73,611,285 leaves a residual of exactly 158 ms.
+ *   (I1) PARTITION (shape-conditional; SPECIALISTS-119 ruling): every millisecond
+ *        of an open-phase interval UP TO the flush endpoint — the `t` of the last
+ *        JOB-PRODUCED event (I1-FLUSH) — is attributed EXACTLY ONCE: to
+ *        active_runtime_ms if the open phase was running, to waiting_ms if it was
+ *        waiting. There is NO universal sum equality. Shapes that leave an
+ *        unattributed residual between the attributed sum and the wall-clock span,
+ *        by design:
+ *        (i) null-phase windows — a terminal event clears the phase before the next
+ *            phase-opening event, so the window is attributed NOWHERE;
+ *        (ii) POLICY UNDERCOUNT (SPECIALISTS-119) — when the only events after the
+ *            chosen endpoint are reader-produced, the interval [endpoint,
+ *            end-of-stream) is DELIBERATELY left out of BOTH buckets. This is a
+ *            visible, intended undercount of wall-clock waiting, not a routing and
+ *            not silent; T6c pins the arithmetic (endpoint is the job-produced
+ *            sc(waiting) at t=500, so [500, 27,486,949) — 27,486,449 ms — is in
+ *            neither bucket);
+ *        (iii) I4's backwards-t guard — a span whose end precedes its start.
+ *        T13 (stored stream of job 312b6a, shape (i)) in this file: the first
+ *        run_complete (t=1782174057770) precedes the next status_change
+ *        (t=1782174057928) by 158 ms of null phase, so span 73,615,823 minus
+ *        attributed 4,380 + 73,611,285 leaves a residual of exactly 158 ms.
  *        The reference span deliberately does NOT use the stored elapsed_ms:
  *        elapsed_ms is overwritten per run_complete
  *        (`elapsedMs = Math.round(event.elapsed_s * 1000)`) and is incoherent on
@@ -45,8 +55,10 @@
  *        observes a terminal run_complete) and its value is the time of the
  *        OPERATOR'S READ, not activation activity; charging it to the open phase
  *        would make `waiting_ms`/`active_runtime_ms` a function of read schedule.
- *        If NO job-produced event exists, the phase is left unflushed rather than
- *        attributed to a reader row.
+ *        If NO job-produced event exists, the phase is left unflushed rather
+ *        than attributed to a reader row; that state is unreachable in practice
+ *        because a phase is only opened by run_start / status_change, which are
+ *        never reader rows (pinned as a control in T6e).
  *        DIVERGENCE FROM CONTRACT I1: I1 above is stated against the last
  *        PHASE-RELEVANT event; this flush uses the last JOB-PRODUCED event. The
  *        two agree when the last event is phase-relevant and diverge on trailing
@@ -73,9 +85,12 @@
  *   (I2) ROUTE: a span opened by run_start / status_change{running} lands in
  *        active_runtime_ms; a span opened by status_change{waiting} lands in
  *        waiting_ms.
- *   (I2-ter) ANTI-NAIVE-FIX: the residual for the final open phase lands in the
- *        bucket named by the phase that was ACTUALLY OPEN — never dumped into
- *        waiting_ms by default.
+ *   (I2-ter) ANTI-NAIVE-FIX (scoped to the chosen endpoint, SPECIALISTS-119): the
+ *        flush attributes exactly [phase start, chosen endpoint] (I1-FLUSH), and
+ *        that interval lands in the bucket named by the phase that was ACTUALLY
+ *        OPEN — never dumped into waiting_ms by default. I2-ter is silent about
+ *        [endpoint, end-of-stream): a reader-only tail there is deliberately left
+ *        in neither bucket (I1(ii)), not routed.
  *   (I4) CLOCK SANITY: a backwards t hits the closePhase guard
  *        (`endAtMs < phaseStartedAtMs` -> drop) and is PINNED here as a known
  *        wall-clock limitation, not silently fixed.
@@ -136,7 +151,8 @@ function turnSummary(t: number, turnIndex = 1): Record<string, unknown> {
   return { t, type: 'turn_summary', turn_index: turnIndex };
 }
 
-/** Exactly what `status-load.ts` persists when a status verb first observes a terminal run_complete. */
+/** The properties `status-load.ts` persists when a status verb first observes a terminal run_complete.
+ *  (It also writes job_id, previous_status, next_status, pid, tmux_session and reason.) */
 function statusLoadEvent(t: number, eventName: 'status_reconciled' | 'dead_job_detected' = 'status_reconciled'): Record<string, unknown> {
   return {
     t,
@@ -250,7 +266,9 @@ describe('phase-accounting invariant (XTRM-93 N3)', () => {
     // event is the reader's meta/status_reconciled row at t=27,486,949 — the
     // operator's first post-terminal status read, not activation activity.
     // BEFORE the endpoint policy: flush at 27,486,949 -> waiting=27,486,449.
-    // AFTER: endpoint is the job-produced sc(waiting)(500) -> waiting=0.
+    // AFTER: endpoint is the job-produced sc(waiting)(500) -> waiting=0. The
+    // interval [500, 27,486,949) (27,486,449 ms) is deliberately attributed to
+    // NEITHER bucket (I1(ii)) — a visible policy undercount of wall-clock waiting.
     const { active, waiting } = aggregate('t6c', [
       runStart(0),
       statusChange(500, 'waiting'),
@@ -275,14 +293,17 @@ describe('phase-accounting invariant (XTRM-93 N3)', () => {
     expect(active + waiting).toBe(1000 - 0);
   });
 
-  it('T6e fail-first (SPECIALISTS-119 edge) — no job-produced event after the open: no reader fallback', () => {
+  it('T6e (SPECIALISTS-119 edge) — reader rows cannot open or extend a phase; reader-only sub-case is a CONTROL', () => {
     // run_start(0) opens running and is the ONLY job-produced event; every later
     // row is reader-written. The flush endpoint is that run_start, so the phase
     // contributes 0 — it is NOT attributed the reader row's read-time t.
     const onlyReaderAfterOpen = aggregate('t6e-open', [runStart(0), statusLoadEvent(5000)]);
     expect(onlyReaderAfterOpen.active).toBe(0);
     expect(onlyReaderAfterOpen.waiting).toBe(0);
-    // A job whose whole stream is reader rows opens no phase at all.
+    // CONTROL, not fail-first: the "stream holds no job-produced event at all"
+    // state is unreachable because a phase can only be opened by run_start /
+    // status_change, which are never reader rows. A whole stream of reader rows
+    // therefore opens no phase at all, by construction.
     const readerOnly = aggregate('t6e-reader-only', [statusLoadEvent(1000), statusLoadEvent(2000)]);
     expect(readerOnly.active).toBe(0);
     expect(readerOnly.waiting).toBe(0);

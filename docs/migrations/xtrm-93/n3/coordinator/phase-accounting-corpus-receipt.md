@@ -111,7 +111,19 @@ the proposed policy. All 29 affected jobs that have any stored row are inside th
 | running / turn | 12 | 405,008 ms |
 
 Total for the 31 reader-endpoint jobs: 924,284,247 ms (256.75 h). Each job's entire attributed
-tail equals its post-last-phase-event tail, so the whole figure is read latency, not observed work.
+tail equals its post-last-phase-event tail, and the SPECIALISTS-119 decision excludes that tail,
+so the policy treats the whole figure as reader-triggered trailing silence rather than observed
+activation work. That framing is a POLICY choice, not a corpus finding: the corpus cannot prove no
+work happened during the interval (§5.1), only that the interval is bounded by the operator's read
+rather than by the activation's own activity.
+
+**Policy limit (SPECIALISTS-119).** By decision, the trailing silence of a parked or abandoned
+activation — the interval after its last job-produced event and before end-of-stream — is EXCLUDED
+from `waiting_ms`. `waiting_ms` and its Prometheus consumer `xtrm_job_wait_seconds` therefore
+measure **activation-bounded waiting, not wall-clock waiting**: a genuinely parked activation whose
+only later evidence is an operator read reports its trailing silence as zero. That is intended and
+visible in the transformed buckets, not an artifact of the measurement. The measured figures above
+are retained unchanged.
 
 ### 4.3 Reproducibility and drift
 
