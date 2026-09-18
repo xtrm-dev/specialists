@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  annotateFleetWithLive,
   createFleetOverlayState,
   flattenFleet,
   reduceFleetOverlayState,
@@ -158,6 +159,48 @@ describe('native fleet overlay model', () => {
     });
     expect(view.lines.some((line) => line.includes('1 warning'))).toBe(true);
     expect(view.lines.some((line) => line.includes('⚠ reviewer:parent1234'))).toBe(true);
+  });
+
+  it('annotates only already-persisted nodes from the live host and never creates phantom fleet rows', () => {
+    const fleet = snapshot();
+    const annotated = annotateFleetWithLive(fleet, {
+      activations: [
+        {
+          activation_id: 'act:parent123456',
+          attempt_id: 'att:parent123456:2',
+          state: 'running',
+          requested_model: 'alias/model',
+          resolved_model: 'canon/model',
+          model_override: true,
+          turn_count: 7,
+          token_usage: { total_tokens: 9000 },
+          last_activity_at: 500,
+          purpose: 'review the migration',
+        },
+        {
+          activation_id: 'act:not-materialized',
+          attempt_id: 'att:not-materialized:1',
+          state: 'running',
+        },
+      ],
+      asks: [{ activation_id: 'act:parent123456' }],
+    });
+
+    expect(annotated.nodes).toHaveLength(3);
+    expect(annotated.byId.has('act:not-materialized')).toBe(false);
+    expect(annotated.byId.get('act:parent123456')).toMatchObject({
+      persistedState: 'active',
+      state: 'running',
+      attention: 'blocked',
+      live: {
+        attemptId: 'att:parent123456:2',
+        requestedModel: 'alias/model',
+        resolvedModel: 'canon/model',
+        turnCount: 7,
+        purpose: 'review the migration',
+      },
+    });
+    expect(annotated.counts.waiting).toBe(2);
   });
 
   it('renders only persisted runtime attachment metadata in detail mode', () => {
