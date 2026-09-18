@@ -89,6 +89,7 @@ class FakeSource implements ObservabilityReadSource {
   readForensicEvents(filters: ListForensicEventsFilters = {}): ForensicEventRecord[] {
     let rows = this.forensic.filter((row) => {
       if (filters.jobId && row.job_id !== filters.jobId) return false;
+      if (filters.jobIds !== undefined && !filters.jobIds.includes(row.job_id)) return false;
       if (filters.jobIdPrefix && !row.job_id.startsWith(filters.jobIdPrefix)) return false;
       if (filters.sinceMs !== undefined && row.t < filters.sinceMs) return false;
       if (filters.afterSeq !== undefined && row.seq <= filters.afterSeq) return false;
