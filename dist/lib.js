@@ -21916,10 +21916,6 @@ function nativeAttemptNo(attemptId) {
   const parsed = Number(match[1]);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 1;
 }
-function nativeAttemptIdForNo(initialAttemptId, attemptNo) {
-  const safeAttemptNo = Number.isSafeInteger(attemptNo) && attemptNo > 0 ? attemptNo : 1;
-  return /:\d+$/.test(initialAttemptId) ? initialAttemptId.replace(/:\d+$/, `:${safeAttemptNo}`) : `${initialAttemptId}:${safeAttemptNo}`;
-}
 function mapNativeLifecycleEvent(event, context, t = Date.now()) {
   switch (event.name) {
     case "activation_started":
@@ -24809,7 +24805,6 @@ function statusOf(activationId, state, currentEvent, error) {
 }
 function newProjectionState(input) {
   return {
-    initialAttemptId: input.attemptId,
     attemptId: input.attemptId,
     attemptNo: nativeAttemptNo(input.attemptId),
     specialist: input.specialist,
@@ -24847,6 +24842,8 @@ function createActivationForensicSink(observability) {
           beadId: event.beadId,
           startedAtMs: now
         });
+        state.attemptId = event.attemptId;
+        state.attemptNo = nativeAttemptNo(event.attemptId);
         state.lastEventAtMs = now;
         state.status = statusForLifecycle(event.name, state.status);
         state.workspacePath = stringValue(event.payload?.workspace) ?? state.workspacePath;
@@ -24894,11 +24891,10 @@ function createActivationForensicSink(observability) {
           beadId: input.beadId,
           startedAtMs: now
         });
-        if (input.event.type === "auto_retry_start") {
-          state.attemptNo += 1;
-          state.attemptId = nativeAttemptIdForNo(state.initialAttemptId, state.attemptNo);
+        state.attemptId = input.attemptId;
+        state.attemptNo = nativeAttemptNo(input.attemptId);
+        if (input.event.type === "auto_retry_start")
           state.autoRetries += 1;
-        }
         if (input.event.type === "turn_start")
           state.turns += 1;
         if (input.event.type === "compaction_start")

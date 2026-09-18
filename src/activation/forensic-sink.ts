@@ -19,7 +19,6 @@ import {
   accumulateTokenUsage,
   mapNativeLifecycleEvent,
   mapNativeSessionEvent,
-  nativeAttemptIdForNo,
   nativeAttemptNo,
 } from '../specialist/native-activation-observability.js';
 import type {
@@ -34,7 +33,6 @@ import {
 import type { SupervisorJobStatus, SupervisorStatus } from '../specialist/status-contract.js';
 
 interface ActivationProjectionState {
-  initialAttemptId: string;
   attemptId: string;
   attemptNo: number;
   specialist: string;
@@ -148,7 +146,6 @@ function newProjectionState(input: {
   startedAtMs: number;
 }): ActivationProjectionState {
   return {
-    initialAttemptId: input.attemptId,
     attemptId: input.attemptId,
     attemptNo: nativeAttemptNo(input.attemptId),
     specialist: input.specialist,
@@ -204,6 +201,8 @@ export function createActivationForensicSink(
           startedAtMs: now,
         });
 
+        state.attemptId = event.attemptId;
+        state.attemptNo = nativeAttemptNo(event.attemptId);
         state.lastEventAtMs = now;
         state.status = statusForLifecycle(event.name, state.status);
         state.workspacePath = stringValue(event.payload?.workspace) ?? state.workspacePath;
@@ -285,11 +284,9 @@ export function createActivationForensicSink(
           startedAtMs: now,
         });
 
-        if (input.event.type === 'auto_retry_start') {
-          state.attemptNo += 1;
-          state.attemptId = nativeAttemptIdForNo(state.initialAttemptId, state.attemptNo);
-          state.autoRetries += 1;
-        }
+        state.attemptId = input.attemptId;
+        state.attemptNo = nativeAttemptNo(input.attemptId);
+        if (input.event.type === 'auto_retry_start') state.autoRetries += 1;
         if (input.event.type === 'turn_start') state.turns += 1;
         if (input.event.type === 'compaction_start') state.autoCompactions += 1;
         state.lastEventAtMs = now;

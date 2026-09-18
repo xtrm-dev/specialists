@@ -20,6 +20,7 @@ vi.mock('node:child_process', async (importOriginal) => {
 
 import { createActivationForensicSink } from '../../../src/activation/forensic-sink.js';
 import { NativeActivationHost } from '../../../src/activation/native-host.js';
+import { createMemorySettlementStore } from '../../../src/activation/settlement-store.js';
 import type { PiAgentSessionEvent, PiAgentSessionLike, PiSdk } from '../../../src/activation/pi-sdk.js';
 import { mapNativeLifecycleEvent } from '../../../src/specialist/native-activation-observability.js';
 import { createObservabilitySqliteClientAtPath } from '../../../src/specialist/observability-sqlite.js';
@@ -817,16 +818,89 @@ describe('spec-configured threshold parity (PR #387 review)', () => {
     await host.stop(handle.activationId);
     client.close();
 
-    // Exactly one warning, for the leg-2 call, measured against the spec
-    // threshold — not a double-fire across the site. NOTE (SPECIALISTS-113):
-    // leg-2 rows are currently attributed to the leg-1 attempt by the sink
-    // (attempt state survives attempts; no single authoritative counter yet),
-    // so NO attempt-id assertion here — asserting either value would enshrine
-    // buggy (:1) or reverted (:2) behaviour as a requirement. The parity this
-    // test owns is existence, at-most-once, and the spec threshold.
+    // Exactly one warning, attributed to the resumed leg (SPECIALISTS-113).
     const rows = staleRows(dbPath, handle.activationId);
     expect(rows).toHaveLength(1);
+    expect(rows[0]!.attempt_id).toBe(resumed.attemptId);
+    expect(readRows(dbPath, handle.activationId)[0]!.attempt_id).toBe(handle.attemptId);
     expect((rows[0]!.body.legacy_timeline_event as Record<string, unknown>).threshold_ms).toBe(2_000);
     expect((rows[0]!.body.legacy_timeline_event as Record<string, unknown>).tool).toBe('bash');
   });
+});
+
+describe('native attempt attribution (SPECIALISTS-113)', () => {
+  it.each(['retry', 'resume', 'resume after two Pi auto-retries'] as const)(
+    '%s persists the host attempt on both timeline and forensic rows', async (entry) => {
+      const { dbPath, client, sink } = isolatedStore();
+      const session = fakeSession();
+      const prompt = session.prompt.bind(session);
+      const settlements = createMemorySettlementStore();
+      let first = true;
+      session.prompt = async (...args) => {
+        if (first) {
+          first = false;
+          if (entry === 'retry') throw new Error('first leg failed');
+          if (entry === 'resume after two Pi auto-retries') {
+            for (const attempt of [1, 2]) {
+              session.emit({ type: 'auto_retry_start', attempt, maxAttempts: 3, delayMs: 1 });
+              session.emit({ type: 'auto_retry_end', attempt, success: true });
+            }
+          }
+        }
+        session.emit({ type: 'turn_start' });
+        await prompt(...args);
+      };
+      const host = new NativeActivationHost({
+        loader: loaderFor(readOnlySpec()), workItems: fakeWorkItems(), forensics: sink,
+        loadSdk: async () => makeSdk(session), cwd: hostWorkspace(), settlements,
+      });
+      const raw = new Database(dbPath);
+      const timeline = () => raw.query(
+        'SELECT seq, type, attempt_id FROM specialist_events WHERE job_id = ? ORDER BY seq',
+      ).all(handle.activationId) as Array<{ seq: number; type: string; attempt_id: string }>;
+      const handle = await host.start({
+        specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+      });
+      try {
+        expect((await handle.result).status).toBe(entry === 'retry' ? 'failed' : 'completed');
+        const before = timeline();
+        expect(before.length).toBeGreaterThan(0);
+        const advanced = entry === 'retry'
+          ? await host.retry(handle.activationId)
+          : await host.resume(handle.activationId, 'second leg');
+        const result = await advanced.result;
+        expect(result.status).toBe('completed');
+        expect(advanced.attemptId).toBe(handle.attemptId.replace(/:1$/, ':2'));
+        const after = timeline().filter(row => row.seq > before.at(-1)!.seq);
+        // Raw store evidence is opt-in, so ordinary suite output stays quiet.
+        if (process.env.SPECIALISTS_ATTEMPT_EVIDENCE) {
+          process.stdout.write(`${JSON.stringify({ entry, hostAttempt: advanced.attemptId, before, after })}\n`);
+        }
+        expect(after.length).toBeGreaterThan(0);
+        expect(new Set(after.map(row => row.attempt_id))).toEqual(new Set([advanced.attemptId]));
+        expect(timeline().slice(0, before.length)).toEqual(before);
+        expect(new Set(before.map(row => row.attempt_id))).toEqual(new Set([handle.attemptId]));
+        expect(after.some(row => row.type === 'turn')).toBe(true);
+        expect(after.some(row => row.type === 'run_complete')).toBe(true);
+        if (entry !== 'retry') expect(after.some(row => row.type === 'status_change')).toBe(true);
+        const forensic = raw.query(
+          'SELECT seq, attempt_id FROM specialist_forensic_events WHERE job_id = ? ORDER BY seq',
+        ).all(handle.activationId);
+        expect(forensic).toEqual(timeline().map(({ seq, attempt_id }) => ({ seq, attempt_id })));
+        expect(raw.query(
+          'SELECT attempt_no, attempt_id FROM specialist_jobs WHERE job_id = ?',
+        ).get(handle.activationId)).toEqual({ attempt_no: 2, attempt_id: advanced.attemptId });
+        expect(settlements.listAttempts(handle.activationId).map(row => row.attemptId).sort())
+          .toEqual([handle.attemptId, advanced.attemptId].sort());
+        expect(settlements.get(handle.activationId, advanced.attemptId)?.attemptId).toBe(result.attemptId);
+        expect(readStatus(dbPath, handle.activationId).body.metrics).toMatchObject({
+          auto_retries: entry === 'resume after two Pi auto-retries' ? 2 : 0,
+        });
+      } finally {
+        await host.stop(handle.activationId);
+        raw.close();
+        client.close();
+      }
+    },
+  );
 });
