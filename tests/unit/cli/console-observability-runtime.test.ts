@@ -60,7 +60,9 @@ describe('console forensic observability adapter', () => {
     });
 
     expect(fallback).not.toHaveBeenCalled();
-    expect(rows.map((row) => row.type)).toEqual(['job.started', 'job.status_changed']);
+    expect(rows.map((row) => row.type)).toEqual(['job', 'job']);
+    expect(rows[0]?.line).toContain('job.started');
+    expect(rows[1]?.line).toContain('job.status_changed');
   });
 
   it('uses fromSeq as a real persisted forensic continuation cursor', async () => {
