@@ -22463,6 +22463,7 @@ function mapNativeLifecycleEvent(event, context, t = Date.now()) {
         ...event.payload ?? {}
       }), t);
     case "activation_retried":
+    case "activation_steered":
     case "lease_release_failed":
     case "mandatory_rules_injection":
     case "tool_contract_unsatisfied_on_fallback":
@@ -24880,6 +24881,30 @@ class NativeActivationHost {
       this.registry.remove(activationId);
     }
   }
+  async steer(activationId, message) {
+    const record2 = this.registry.get(activationId);
+    if (!record2) {
+      throw new DispatchRejectedError("unknown_activation", { activationId });
+    }
+    if (record2.snapshot.state !== "running" && record2.snapshot.state !== "starting") {
+      const state = record2.snapshot.state;
+      const hint = state === "settled" || state === "waiting" || state === "needs_reply" || state === "escalated" ? `Activation ${activationId} is ${state} — use resume, which keeps the live session.` : state === "failed" ? `Activation ${activationId} is failed — use retry to re-run it in place.` : `Activation ${activationId} is ${state} — steer it or stop it first.`;
+      throw new DispatchRejectedError("not_steerable", {
+        activationId,
+        note: `state is "${state}". steer only redirects running activations. ${hint}`
+      });
+    }
+    await record2.session.steer(message);
+    this.forensics.emit({
+      activationId,
+      attemptId: record2.snapshot.attemptId,
+      participantId: record2.snapshot.participantId,
+      specialist: record2.snapshot.specialist,
+      beadId: record2.snapshot.issueRef,
+      name: "activation_steered",
+      payload: {}
+    });
+  }
   attach(activationId, listener) {
     const record2 = this.registry.get(activationId);
     if (!record2)
@@ -25133,6 +25158,31 @@ function toActivationView(snapshot, nowMs = Date.now()) {
     last_activity_at: snapshot.lastActivityAt
   };
 }
+function toActivationCompactView(snapshot, nowMs = Date.now()) {
+  return {
+    activation_id: snapshot.activationId,
+    specialist: snapshot.specialist,
+    bead_id: snapshot.issueRef,
+    state: snapshot.state,
+    access: snapshot.access,
+    resolved_model: snapshot.resolvedModel,
+    ...snapshot.thinkingLevel ? { thinking_level: snapshot.thinkingLevel } : {},
+    elapsed_s: Math.max(0, Math.floor((nowMs - snapshot.startedAt) / 1000)),
+    ...snapshot.turnCount !== undefined ? { turn_count: snapshot.turnCount } : {},
+    ...snapshot.tokenUsage ? { token_usage: { ...snapshot.tokenUsage } } : {},
+    ...snapshot.purpose ? { purpose: snapshot.purpose } : {}
+  };
+}
+function toPendingAskCompactView(ask) {
+  return {
+    message_id: ask.message.messageId,
+    kind: ask.message.kind,
+    activation_id: ask.message.activationId,
+    from: ask.message.from,
+    body: ask.message.body,
+    asked_at: ask.askedAt
+  };
+}
 function toPendingAskView(ask) {
   return {
     message_id: ask.message.messageId,
@@ -25180,6 +25230,9 @@ var DIST_LIB_PATH = (() => {
   return fileURLToPath5(new URL("../../../dist/lib.js", import.meta.url));
 })();
 var LOADED_BUILD_ID = readBuildId(DIST_LIB_PATH);
+var fullFlag = {
+  full: booleanType().optional().describe("Return the full verbose payload (pre-SPECIALISTS-142 shape). Default compact.")
+};
 var specialistDispatchSchema = objectType({
   specialist: stringType().describe("Specialist name, e.g. codebase-explorer"),
   issue_ref: stringType().optional().describe("The Substrate Issue locator for this activation's task contract — XTRM-227, XTRM-184.2.3, " + "iss_..., a historical locator, or an imported Beads alias. It does NOT address the live bd " + "board: Substrate and bd are separate stores, so a bd id is refused as unresolvable. The " + "issue must be READY: a COMPLETE 7-section contract (PROBLEM, SUCCESS, SCOPE, NON_GOALS, " + "CONSTRAINTS, VALIDATION, OUTPUT) plus a SCRUTINY level, which must be exactly one of LOW, " + "MEDIUM, HIGH or CRITICAL. That is EIGHT required parts, not seven; SCRUTINY is the one most " + "often left out. Write each section as a heading: either the section name on its own line " + "with its body beneath, or `PROBLEM: the body` on one line. Both forms are accepted. " + "A draft or incomplete issue is refused before any model turn. No free-form task text is " + "accepted: a task that needs more definition belongs in the Issue (see the planning skill). " + "Supply EXACTLY ONE of issue_ref, bead_id or contract."),
@@ -25190,7 +25243,13 @@ var specialistDispatchSchema = objectType({
   model_override: stringType().optional().describe("Override the configured model for THIS activation only. An unavailable model is refused before the session is created, never silently replaced."),
   thinking_override: enumType(THINKING_LEVELS).optional().describe("Override the definition thinking_level for THIS activation only. Absent means the definition level. An unknown value is refused before the session is created."),
   requested_by: stringType().optional().describe("ParticipantId of the requesting coordinator. Defaults to the MCP gateway participant."),
-  coordinator_session_id: stringType().optional().describe("MCP session id, for lineage.")
+  coordinator_session_id: stringType().optional().describe("MCP session id, for lineage."),
+  ...fullFlag
+});
+var specialistSteerSchema = objectType({
+  activation_id: stringType().describe("The running activation to redirect mid-run."),
+  message: stringType().describe("Steering instruction delivered into the live session — the child receives it after its current tool calls finish, before the next model call, with context intact."),
+  ...fullFlag
 });
 var specialistReplySchema = objectType({
   message_id: stringType().describe('The message_id of the outstanding ask, from specialist_status.pending_asks. Correlation is by message id and nothing else — there is no "answer the latest ask", because with two asks outstanding that is a coin flip.'),
@@ -25203,7 +25262,8 @@ var specialistStopSchema = objectType({
 var specialistRetrySchema = objectType({
   activation_id: stringType().describe("The failed activation to re-run in place."),
   model_override: stringType().optional().describe("Re-run on a named model instead of the one that failed (manual switch after a quota " + "window kills a run). A new session is built for the new model; without this the SAME " + "session is re-prompted and its context survives."),
-  prompt: stringType().optional().describe("Replacement turn prompt. Defaults to the dispatch-time render of the same Issue.")
+  prompt: stringType().optional().describe("Replacement turn prompt. Defaults to the dispatch-time render of the same Issue."),
+  ...fullFlag
 });
 // src/activation/async-events.ts
 import { randomUUID as randomUUID5 } from "node:crypto";
@@ -25895,8 +25955,10 @@ export {
   validateContractText,
   validateBeforeRun,
   toPendingAskView,
+  toPendingAskCompactView,
   toActivationView,
   toActivationResultView,
+  toActivationCompactView,
   supersedeStaleRefusal,
   shortBuildId,
   runScriptSpecialist as runScript,

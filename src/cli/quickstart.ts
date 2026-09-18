@@ -214,13 +214,14 @@ export async function run(): Promise<void> {
   lines.push('');
   lines.push(`  After ${cmd('specialists init')}, these MCP tools are available to Claude:`);
   lines.push('');
-  lines.push(`  ${bold('list_specialists')}   — discover specialists (project/user/system)`);
-  lines.push(`  ${bold('specialist_dispatch')} — start a specialist as a background job, returns immediately`);
-  lines.push(`  ${bold('feed_specialist')}    — stream events/output by job ID`);
-  lines.push(`  ${bold('steer_specialist')}      — send a mid-run message to a running job`);
-  lines.push(`  ${bold('resume_specialist')}    — resume a waiting keep-alive session with a next-turn prompt`);
-  lines.push(`  ${bold('stop_specialist')}      — cancel a running job by ID`);
-  lines.push(`  ${bold('specialist_status')}  — circuit breaker health + staleness`);
+  lines.push(`  ${bold('specialist_list')}            — resolved registry, one compact line per specialist`);
+  lines.push(`  ${bold('specialist_dispatch')}        — admit-and-start a Specialist (async; returns on admission)`);
+  lines.push(`  ${bold('specialist_status')}          — authoritative Fleet read (compact; full:true for verbose)`);
+  lines.push(`  ${bold('specialist_reply')}           — answer an outstanding ask by message_id`);
+  lines.push(`  ${bold('specialist_resume')}          — resume a settled/waiting activation in the same session`);
+  lines.push(`  ${bold('specialist_steer')}           — redirect a RUNNING activation mid-run, context intact`);
+  lines.push(`  ${bold('specialist_retry')}           — re-run a FAILED activation in place`);
+  lines.push(`  ${bold('specialist_stop_activation')} — stop and dispose a native activation`);
   lines.push('');
 
   // ── 10. Common workflows ───────────────────────────────────────────────────

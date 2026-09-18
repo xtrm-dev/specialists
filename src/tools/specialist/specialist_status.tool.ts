@@ -5,10 +5,16 @@ import type { CircuitBreaker } from '../../utils/circuitBreaker.js';
 import { projectOutstandingAsks, type PendingInteractionProjection } from '../../activation/transport/polling.js';
 import { leaseScopeFor, projectUncertainWorkspaces, type UncertainWorkspaceProjection } from '../../activation/workspace-reconcile.js';
 import type { NativeActivationHost } from '../../activation/native-host.js';
-import { toActivationView, toActivationResultView, toPendingAskView, type ActivationResultView, type ActivationView, type PendingAskView } from './activation.tool.js';
+import { toActivationCompactView, toActivationResultView, toActivationView, toPendingAskCompactView, toPendingAskView, type ActivationResultView, type ActivationView, type PendingAskView } from './activation.tool.js';
 import type { RuntimeEventPusher } from '../../activation/async-events.js';
 
 const BACKENDS = ['gemini', 'qwen', 'anthropic', 'openai'];
+
+export const specialistStatusSchema = z.object({
+  full: z.boolean().optional().describe(
+    'Return the full verbose payload (pre-SPECIALISTS-142 shape). Default compact.',
+  ),
+});
 
 /**
  * @param getHost Native runtime, when this process hosts one. Optional so the CLI and the
@@ -27,8 +33,12 @@ export function createSpecialistStatusTool(
   return {
     name: 'specialist_status' as const,
     description: 'System health: backend circuit breaker states, loaded specialist count, and native in-process activations with any question they are waiting on — answer those with specialist_reply.',
-    inputSchema: z.object({}),
-    async execute(_: object) {
+    inputSchema: specialistStatusSchema,
+    async execute(input: z.infer<typeof specialistStatusSchema>) {
+      // Compact default (SPECIALISTS-142): identity, state, cost, intent per row;
+      // pending asks keep their body (the coordinator must answer). `full: true`
+      // restores the pre-142 verbose shape byte-for-shape, so a coordinator or
+      // script that parsed the verbose form opts back in with one flag.
       const list = await loader.list();
 
       // The degraded path from the Claude transport decision: outstanding clarifications
@@ -59,25 +69,41 @@ export function createSpecialistStatusTool(
       // `ActivationSnapshot`, so this is the same whether the activation was dispatched over
       // MCP or by the Pi extension.
       const host = getHost?.();
-      const activations: ActivationView[] = host ? host.list().map(s => toActivationView(s)) : [];
-      const pending_asks: PendingAskView[] = host ? host.pendingAsks().map(toPendingAskView) : [];
-
-      // The read half of Phase 14. A completion notification is pushed toward a live
-      // coordinator, but the push can be unroutable, held or refused and never reports
-      // `delivered` on this channel at all — so the validated result must be readable
-      // without one. This projects the SAME ActivationResult the push serialises, which is
-      // what makes a pushed coordinator and a polling coordinator agree by construction.
-      const activation_results: ActivationResultView[] =
-        getPusher?.()?.allResults().map(toActivationResultView) ?? [];
-
+      if (input.full === true) {
+        const activations: ActivationView[] = host ? host.list().map(s => toActivationView(s)) : [];
+        const pending_asks: PendingAskView[] = host ? host.pendingAsks().map(toPendingAskView) : [];
+        // The read half of Phase 14. A completion notification is pushed toward a live
+        // coordinator, but the push can be unroutable, held or refused and never reports
+        // `delivered` on this channel at all — so the validated result must be readable
+        // without one. This projects the SAME ActivationResult the push serialises, which is
+        // what makes a pushed coordinator and a polling coordinator agree by construction.
+        const activation_results: ActivationResultView[] =
+          getPusher?.()?.allResults().map(toActivationResultView) ?? [];
+        return {
+          loaded_count: list.length,
+          activations,
+          pending_asks,
+          activation_results,
+          pending_interactions,
+          uncertain_workspaces,
+          backends_health: Object.fromEntries(BACKENDS.map(b => [b, circuitBreaker.getState(b)])),
+        };
+      }
+      // Compact default: identity, state, cost, intent per activation; settled rows
+      // carry only the result STATUS (the body is drill-down under `full`).
+      // Pending asks keep the body — it is what the coordinator must answer.
+      // Health/diagnostics sections (loaded_count, backends_health,
+      // pending_interactions, uncertain_workspaces) are `full`-only.
+      const hostResults = getPusher?.()?.allResults() ?? [];
+      const statusById = new Map(hostResults.map(r => [r.activationId, r.status]));
       return {
-        loaded_count: list.length,
-        activations,
-        pending_asks,
-        activation_results,
-        pending_interactions,
-        uncertain_workspaces,
-        backends_health: Object.fromEntries(BACKENDS.map(b => [b, circuitBreaker.getState(b)])),
+        activations: host
+          ? host.list().map(s => ({
+            ...toActivationCompactView(s),
+            ...(statusById.has(s.activationId) ? { result_status: statusById.get(s.activationId) } : {}),
+          }))
+          : [],
+        pending_asks: host ? host.pendingAsks().map(toPendingAskCompactView) : [],
       };
     },
   };

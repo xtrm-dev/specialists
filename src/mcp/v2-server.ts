@@ -10,6 +10,7 @@
  * `Mcp-Session-Id`, or connection-remembered capabilities (§G/H).
  * `server/discover`, `resultType: complete` and serverInfo stamping are owned
  * by the SDK; this module admits the six t2kol tools plus `specialist_resume`
+ * (Wave E4) and `specialist_steer` (SPECIALISTS-141)
  * (Wave E4 Resume-only: the same session continues, id kept, attempt advances).
  *
  * t2kol parity is structural, not re-implemented: the SAME tool factories, the
@@ -34,14 +35,16 @@ import { MCP_CONFIG } from '../constants.js';
 import { createObservabilitySqliteClient } from '../specialist/observability-sqlite.js';
 import { SpecialistLoader } from '../specialist/loader.js';
 import { CircuitBreaker } from '../utils/circuitBreaker.js';
-import { createSpecialistStatusTool } from '../tools/specialist/specialist_status.tool.js';
+import { createSpecialistStatusTool, specialistStatusSchema } from '../tools/specialist/specialist_status.tool.js';
 import { createSpecialistListTool, specialistListSchema } from '../tools/specialist/specialist_list.tool.js';
 import {
   createSpecialistDispatchTool,
   createSpecialistReplyTool,
+  createSpecialistSteerTool,
   createSpecialistStopActivationTool,
   specialistDispatchSchema,
   specialistReplySchema,
+  specialistSteerSchema,
   specialistStopSchema,
 } from '../tools/specialist/activation.tool.js';
 import { createSpecialistResumeTool, specialistResumeSchema } from './resume-tool.js';
@@ -167,6 +170,7 @@ export function buildV2Server(ctx?: McpRequestContext, options?: BuildV2ServerOp
     createSpecialistDispatchTool(getHost, getPusher),
     createSpecialistReplyTool(getHost),
     createSpecialistResumeTool(getHost, getPusher),
+    createSpecialistSteerTool(getHost),
     createSpecialistStopActivationTool(getHost),
     createSpecialistListTool(loader),
     ...substrateTools,
@@ -176,12 +180,13 @@ export function buildV2Server(ctx?: McpRequestContext, options?: BuildV2ServerOp
     substrate_issue: substrateIssueSchema,
     substrate_journal: substrateJournalSchema,
     substrate_provenance: substrateProvenanceSchema,
+    specialist_status: specialistStatusSchema,
     specialist_dispatch: specialistDispatchSchema,
     specialist_reply: specialistReplySchema,
     specialist_resume: specialistResumeSchema,
+    specialist_steer: specialistSteerSchema,
     specialist_stop_activation: specialistStopSchema,
     specialist_list: specialistListSchema,
-    // specialist_status takes no arguments; the empty-object default applies.
   };
 
   for (const tool of tools) {
@@ -247,7 +252,7 @@ export function serveV2Stdio(): StdioServerHandle {
     onerror: (error) => logger.error('MCP v2 transport error', error),
   });
   logger.info(
-    `Specialists MCP Server v2 (2025-11-25 + 2026-07-28, dual-revision) started — 6 tools registered`,
+    `Specialists MCP Server v2 (2025-11-25 + 2026-07-28, dual-revision) started — 7 tools registered`,
   );
   process.on('SIGTERM', () => {
     logger.info('SIGTERM received — shutting down');

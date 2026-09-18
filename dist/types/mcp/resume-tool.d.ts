@@ -4,12 +4,15 @@ import type { RuntimeEventPusher } from '../activation/async-events.js';
 export declare const specialistResumeSchema: z.ZodObject<{
     activation_id: z.ZodString;
     prompt: z.ZodString;
+    full: z.ZodOptional<z.ZodBoolean>;
 }, "strip", z.ZodTypeAny, {
     prompt: string;
     activation_id: string;
+    full?: boolean | undefined;
 }, {
     prompt: string;
     activation_id: string;
+    full?: boolean | undefined;
 }>;
 /**
  * Resume a settled or waiting activation in the SAME session.
@@ -25,12 +28,15 @@ export declare function createSpecialistResumeTool(getHost: () => NativeActivati
     inputSchema: z.ZodObject<{
         activation_id: z.ZodString;
         prompt: z.ZodString;
+        full: z.ZodOptional<z.ZodBoolean>;
     }, "strip", z.ZodTypeAny, {
         prompt: string;
         activation_id: string;
+        full?: boolean | undefined;
     }, {
         prompt: string;
         activation_id: string;
+        full?: boolean | undefined;
     }>;
     execute(input: z.infer<typeof specialistResumeSchema>): Promise<{
         build?: string | undefined;
@@ -80,6 +86,22 @@ export declare function createSpecialistResumeTool(getHost: () => NativeActivati
         last_activity_at: number;
         tool_contract_notes?: string[];
         config_notes?: string[];
+        status: "resumed";
+        previous_attempt_id: string;
+        error?: undefined;
+    } | {
+        activation_id: string;
+        specialist: string;
+        bead_id: string;
+        state: string;
+        access: "read" | "write";
+        resolved_model: string;
+        thinking_level?: string;
+        elapsed_s: number;
+        turn_count?: number;
+        token_usage?: import("../activation/types.js").ActivationTokenUsage;
+        purpose?: string;
+        result_status?: string;
         status: "resumed";
         previous_attempt_id: string;
         error?: undefined;

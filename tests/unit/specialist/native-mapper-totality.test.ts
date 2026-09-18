@@ -79,6 +79,7 @@ export const NATIVE_EMIT_INVENTORY = Object.freeze([
   'activation_requested',
   'activation_resumed',
   'activation_retried',
+  'activation_steered',
   'activation_settled',
   'activation_started',
   'activation_starting',

@@ -60031,13 +60031,14 @@ async function run38() {
   lines.push("");
   lines.push(`  After ${cmd2("specialists init")}, these MCP tools are available to Claude:`);
   lines.push("");
-  lines.push(`  ${bold11("list_specialists")}   \u2014 discover specialists (project/user/system)`);
-  lines.push(`  ${bold11("specialist_dispatch")} \u2014 start a specialist as a background job, returns immediately`);
-  lines.push(`  ${bold11("feed_specialist")}    \u2014 stream events/output by job ID`);
-  lines.push(`  ${bold11("steer_specialist")}      \u2014 send a mid-run message to a running job`);
-  lines.push(`  ${bold11("resume_specialist")}    \u2014 resume a waiting keep-alive session with a next-turn prompt`);
-  lines.push(`  ${bold11("stop_specialist")}      \u2014 cancel a running job by ID`);
-  lines.push(`  ${bold11("specialist_status")}  \u2014 circuit breaker health + staleness`);
+  lines.push(`  ${bold11("specialist_list")}            \u2014 resolved registry, one compact line per specialist`);
+  lines.push(`  ${bold11("specialist_dispatch")}        \u2014 admit-and-start a Specialist (async; returns on admission)`);
+  lines.push(`  ${bold11("specialist_status")}          \u2014 authoritative Fleet read (compact; full:true for verbose)`);
+  lines.push(`  ${bold11("specialist_reply")}           \u2014 answer an outstanding ask by message_id`);
+  lines.push(`  ${bold11("specialist_resume")}          \u2014 resume a settled/waiting activation in the same session`);
+  lines.push(`  ${bold11("specialist_steer")}           \u2014 redirect a RUNNING activation mid-run, context intact`);
+  lines.push(`  ${bold11("specialist_retry")}           \u2014 re-run a FAILED activation in place`);
+  lines.push(`  ${bold11("specialist_stop_activation")} \u2014 stop and dispose a native activation`);
   lines.push("");
   lines.push(section2("10. Common Workflows"));
   lines.push("");
@@ -93571,6 +93572,31 @@ function toActivationView(snapshot, nowMs = Date.now()) {
     last_activity_at: snapshot.lastActivityAt
   };
 }
+function toActivationCompactView(snapshot, nowMs = Date.now()) {
+  return {
+    activation_id: snapshot.activationId,
+    specialist: snapshot.specialist,
+    bead_id: snapshot.issueRef,
+    state: snapshot.state,
+    access: snapshot.access,
+    resolved_model: snapshot.resolvedModel,
+    ...snapshot.thinkingLevel ? { thinking_level: snapshot.thinkingLevel } : {},
+    elapsed_s: Math.max(0, Math.floor((nowMs - snapshot.startedAt) / 1000)),
+    ...snapshot.turnCount !== undefined ? { turn_count: snapshot.turnCount } : {},
+    ...snapshot.tokenUsage ? { token_usage: { ...snapshot.tokenUsage } } : {},
+    ...snapshot.purpose ? { purpose: snapshot.purpose } : {}
+  };
+}
+function toPendingAskCompactView(ask) {
+  return {
+    message_id: ask.message.messageId,
+    kind: ask.message.kind,
+    activation_id: ask.message.activationId,
+    from: ask.message.from,
+    body: ask.message.body,
+    asked_at: ask.askedAt
+  };
+}
 function toPendingAskView(ask) {
   return {
     message_id: ask.message.messageId,
@@ -93675,9 +93701,10 @@ function createSpecialistDispatchTool(getHost, getPusher) {
           await pusher.pushCompletion(handle.activationId).catch(() => {});
         }, () => {});
         const snapshot = getHost().inspect(handle.activationId);
+        const view = snapshot ? input2.full ? toActivationView(snapshot) : toActivationCompactView(snapshot) : { activation_id: handle.activationId };
         return {
           status: "dispatched",
-          ...snapshot ? toActivationView(snapshot) : { activation_id: handle.activationId },
+          ...view,
           ...inline2 ? {
             created_bead_id: handle.issueRef,
             created_bead_note: "This dispatch CREATED the bead above from your inline contract. It is a " + "durable board record and is yours to track: close it when the work is " + "done, or reassign it. It is not cleaned up automatically."
@@ -93687,6 +93714,29 @@ function createSpecialistDispatchTool(getHost, getPusher) {
             inputs: handle.stepContract.inputs.length,
             outputs: handle.stepContract.outputs.length
           }
+        };
+      } catch (error3) {
+        if (error3 instanceof DispatchRejectedError) {
+          return renderDispatchRejection(error3);
+        }
+        throw error3;
+      }
+    }
+  };
+}
+function createSpecialistSteerTool(getHost) {
+  return {
+    name: "specialist_steer",
+    description: "Redirect a RUNNING Specialist mid-run with a new instruction, keeping its session " + "and context intact. Use for a quiet executor that never raised a question; answer an " + "outstanding ask with specialist_reply, resume a settled activation with " + "specialist_resume, re-run a failed one with specialist_retry. Refused on any " + "non-running state with a pointer to the owning tool.",
+    inputSchema: specialistSteerSchema,
+    async execute(input2) {
+      const build2 = () => describeBuildIdentity(LOADED_BUILD_ID, readBuildId(DIST_LIB_PATH));
+      try {
+        await getHost().steer(input2.activation_id, input2.message);
+        const snapshot = getHost().inspect(input2.activation_id);
+        return {
+          status: "steered",
+          ...snapshot ? input2.full ? toActivationView(snapshot) : toActivationCompactView(snapshot) : { activation_id: input2.activation_id }
         };
       } catch (error3) {
         if (error3 instanceof DispatchRejectedError) {
@@ -93740,7 +93790,7 @@ function createSpecialistStopActivationTool(getHost) {
     }
   };
 }
-var DIST_LIB_PATH, LOADED_BUILD_ID, specialistDispatchSchema, specialistReplySchema, specialistStopSchema, specialistRetrySchema;
+var DIST_LIB_PATH, LOADED_BUILD_ID, fullFlag, specialistDispatchSchema, specialistSteerSchema, specialistReplySchema, specialistStopSchema, specialistRetrySchema;
 var init_activation_tool = __esm(() => {
   init_zod();
   init_build_identity();
@@ -93757,6 +93807,9 @@ var init_activation_tool = __esm(() => {
     return fileURLToPath9(new URL("../../../dist/lib.js", import.meta.url));
   })();
   LOADED_BUILD_ID = readBuildId(DIST_LIB_PATH);
+  fullFlag = {
+    full: booleanType().optional().describe("Return the full verbose payload (pre-SPECIALISTS-142 shape). Default compact.")
+  };
   specialistDispatchSchema = objectType({
     specialist: stringType().describe("Specialist name, e.g. codebase-explorer"),
     issue_ref: stringType().optional().describe("The Substrate Issue locator for this activation's task contract \u2014 XTRM-227, XTRM-184.2.3, " + "iss_..., a historical locator, or an imported Beads alias. It does NOT address the live bd " + "board: Substrate and bd are separate stores, so a bd id is refused as unresolvable. The " + "issue must be READY: a COMPLETE 7-section contract (PROBLEM, SUCCESS, SCOPE, NON_GOALS, " + "CONSTRAINTS, VALIDATION, OUTPUT) plus a SCRUTINY level, which must be exactly one of LOW, " + "MEDIUM, HIGH or CRITICAL. That is EIGHT required parts, not seven; SCRUTINY is the one most " + "often left out. Write each section as a heading: either the section name on its own line " + "with its body beneath, or `PROBLEM: the body` on one line. Both forms are accepted. " + "A draft or incomplete issue is refused before any model turn. No free-form task text is " + "accepted: a task that needs more definition belongs in the Issue (see the planning skill). " + "Supply EXACTLY ONE of issue_ref, bead_id or contract."),
@@ -93767,7 +93820,13 @@ var init_activation_tool = __esm(() => {
     model_override: stringType().optional().describe("Override the configured model for THIS activation only. An unavailable model is refused before the session is created, never silently replaced."),
     thinking_override: enumType(THINKING_LEVELS).optional().describe("Override the definition thinking_level for THIS activation only. Absent means the definition level. An unknown value is refused before the session is created."),
     requested_by: stringType().optional().describe("ParticipantId of the requesting coordinator. Defaults to the MCP gateway participant."),
-    coordinator_session_id: stringType().optional().describe("MCP session id, for lineage.")
+    coordinator_session_id: stringType().optional().describe("MCP session id, for lineage."),
+    ...fullFlag
+  });
+  specialistSteerSchema = objectType({
+    activation_id: stringType().describe("The running activation to redirect mid-run."),
+    message: stringType().describe("Steering instruction delivered into the live session \u2014 the child receives it after its current tool calls finish, before the next model call, with context intact."),
+    ...fullFlag
   });
   specialistReplySchema = objectType({
     message_id: stringType().describe('The message_id of the outstanding ask, from specialist_status.pending_asks. Correlation is by message id and nothing else \u2014 there is no "answer the latest ask", because with two asks outstanding that is a coin flip.'),
@@ -93780,7 +93839,8 @@ var init_activation_tool = __esm(() => {
   specialistRetrySchema = objectType({
     activation_id: stringType().describe("The failed activation to re-run in place."),
     model_override: stringType().optional().describe("Re-run on a named model instead of the one that failed (manual switch after a quota " + "window kills a run). A new session is built for the new model; without this the SAME " + "session is re-prompted and its context survives."),
-    prompt: stringType().optional().describe("Replacement turn prompt. Defaults to the dispatch-time render of the same Issue.")
+    prompt: stringType().optional().describe("Replacement turn prompt. Defaults to the dispatch-time render of the same Issue."),
+    ...fullFlag
   });
 });
 
@@ -93789,8 +93849,8 @@ function createSpecialistStatusTool(loader, circuitBreaker, getHost, getPusher) 
   return {
     name: "specialist_status",
     description: "System health: backend circuit breaker states, loaded specialist count, and native in-process activations with any question they are waiting on \u2014 answer those with specialist_reply.",
-    inputSchema: objectType({}),
-    async execute(_) {
+    inputSchema: specialistStatusSchema,
+    async execute(input2) {
       const list2 = await loader.list();
       let pending_interactions = [];
       try {
@@ -93805,28 +93865,42 @@ function createSpecialistStatusTool(loader, circuitBreaker, getHost, getPusher) 
         uncertain_workspaces = [];
       }
       const host = getHost?.();
-      const activations = host ? host.list().map((s) => toActivationView(s)) : [];
-      const pending_asks = host ? host.pendingAsks().map(toPendingAskView) : [];
-      const activation_results = getPusher?.()?.allResults().map(toActivationResultView) ?? [];
+      if (input2.full === true) {
+        const activations = host ? host.list().map((s) => toActivationView(s)) : [];
+        const pending_asks = host ? host.pendingAsks().map(toPendingAskView) : [];
+        const activation_results = getPusher?.()?.allResults().map(toActivationResultView) ?? [];
+        return {
+          loaded_count: list2.length,
+          activations,
+          pending_asks,
+          activation_results,
+          pending_interactions,
+          uncertain_workspaces,
+          backends_health: Object.fromEntries(BACKENDS2.map((b) => [b, circuitBreaker.getState(b)]))
+        };
+      }
+      const hostResults = getPusher?.()?.allResults() ?? [];
+      const statusById = new Map(hostResults.map((r) => [r.activationId, r.status]));
       return {
-        loaded_count: list2.length,
-        activations,
-        pending_asks,
-        activation_results,
-        pending_interactions,
-        uncertain_workspaces,
-        backends_health: Object.fromEntries(BACKENDS2.map((b) => [b, circuitBreaker.getState(b)]))
+        activations: host ? host.list().map((s) => ({
+          ...toActivationCompactView(s),
+          ...statusById.has(s.activationId) ? { result_status: statusById.get(s.activationId) } : {}
+        })) : [],
+        pending_asks: host ? host.pendingAsks().map(toPendingAskCompactView) : []
       };
     }
   };
 }
-var BACKENDS2;
+var BACKENDS2, specialistStatusSchema;
 var init_specialist_status_tool = __esm(() => {
   init_zod();
   init_polling();
   init_workspace_reconcile();
   init_activation_tool();
   BACKENDS2 = ["gemini", "qwen", "anthropic", "openai"];
+  specialistStatusSchema = objectType({
+    full: booleanType().optional().describe("Return the full verbose payload (pre-SPECIALISTS-142 shape). Default compact.")
+  });
 });
 
 // src/activation/step-contract.ts
@@ -94719,6 +94793,7 @@ function mapNativeLifecycleEvent(event, context, t = Date.now()) {
         ...event.payload ?? {}
       }), t);
     case "activation_retried":
+    case "activation_steered":
     case "lease_release_failed":
     case "mandatory_rules_injection":
     case "tool_contract_unsatisfied_on_fallback":
@@ -97161,6 +97236,30 @@ class NativeActivationHost {
       this.registry.remove(activationId);
     }
   }
+  async steer(activationId, message) {
+    const record5 = this.registry.get(activationId);
+    if (!record5) {
+      throw new DispatchRejectedError("unknown_activation", { activationId });
+    }
+    if (record5.snapshot.state !== "running" && record5.snapshot.state !== "starting") {
+      const state = record5.snapshot.state;
+      const hint2 = state === "settled" || state === "waiting" || state === "needs_reply" || state === "escalated" ? `Activation ${activationId} is ${state} \u2014 use resume, which keeps the live session.` : state === "failed" ? `Activation ${activationId} is failed \u2014 use retry to re-run it in place.` : `Activation ${activationId} is ${state} \u2014 steer it or stop it first.`;
+      throw new DispatchRejectedError("not_steerable", {
+        activationId,
+        note: `state is "${state}". steer only redirects running activations. ${hint2}`
+      });
+    }
+    await record5.session.steer(message);
+    this.forensics.emit({
+      activationId,
+      attemptId: record5.snapshot.attemptId,
+      participantId: record5.snapshot.participantId,
+      specialist: record5.snapshot.specialist,
+      beadId: record5.snapshot.issueRef,
+      name: "activation_steered",
+      payload: {}
+    });
+  }
   attach(activationId, listener) {
     const record5 = this.registry.get(activationId);
     if (!record5)
@@ -97781,7 +97880,7 @@ function createSpecialistListTool(loader) {
           note: NATIVE_ONLY_NOTE
         };
       }
-      if (input2.detail === "full") {
+      if (input2.detail === "full" || input2.full === true) {
         return { specialists: rows, detail: "full", note: NATIVE_ONLY_NOTE };
       }
       const compact2 = rows.map((r) => ({
@@ -97810,7 +97909,8 @@ var init_specialist_list_tool = __esm(() => {
   init_session();
   specialistListSchema = objectType({
     name: stringType().optional().describe("Return the full record for this one specialist instead of the compact list."),
-    detail: enumType(["compact", "full"]).optional().describe('"compact" (default) is one line each; "full" returns every field for every specialist.')
+    detail: enumType(["compact", "full"]).optional().describe('"compact" (default) is one line each; "full" returns every field for every specialist.'),
+    full: booleanType().optional().describe('Alias for detail:"full" (SPECIALISTS-142 one-flag vocabulary). Default compact.')
   });
   WRITE_TIERS2 = new Set(["MEDIUM", "HIGH"]);
 });
@@ -97844,10 +97944,11 @@ function createSpecialistResumeTool(getHost, getPusher) {
           await pusher.pushCompletion(handle.activationId).catch(() => {});
         }, () => {});
         const snapshot = getHost().inspect(handle.activationId);
+        const view = snapshot ? input2.full ? toActivationView(snapshot) : toActivationCompactView(snapshot) : { activation_id: handle.activationId };
         return {
           status: "resumed",
           previous_attempt_id: previousAttemptId,
-          ...snapshot ? toActivationView(snapshot) : { activation_id: handle.activationId }
+          ...view
         };
       } catch (error3) {
         if (error3 instanceof DispatchRejectedError) {
@@ -97876,7 +97977,8 @@ var init_resume_tool = __esm(() => {
   LOADED_BUILD_ID2 = readBuildId(DIST_LIB_PATH2);
   specialistResumeSchema = objectType({
     activation_id: stringType().describe("The settled or waiting activation to resume."),
-    prompt: stringType().describe("The new instruction for the resumed Specialist.")
+    prompt: stringType().describe("The new instruction for the resumed Specialist."),
+    full: booleanType().optional().describe("Return the full verbose view (pre-SPECIALISTS-142 shape). Default compact.")
   });
 });
 
@@ -98486,6 +98588,7 @@ function buildV2Server(ctx, options2) {
     createSpecialistDispatchTool(getHost, getPusher),
     createSpecialistReplyTool(getHost),
     createSpecialistResumeTool(getHost, getPusher),
+    createSpecialistSteerTool(getHost),
     createSpecialistStopActivationTool(getHost),
     createSpecialistListTool(loader),
     ...substrateTools
@@ -98494,9 +98597,11 @@ function buildV2Server(ctx, options2) {
     substrate_issue: substrateIssueSchema,
     substrate_journal: substrateJournalSchema,
     substrate_provenance: substrateProvenanceSchema,
+    specialist_status: specialistStatusSchema,
     specialist_dispatch: specialistDispatchSchema,
     specialist_reply: specialistReplySchema,
     specialist_resume: specialistResumeSchema,
+    specialist_steer: specialistSteerSchema,
     specialist_stop_activation: specialistStopSchema,
     specialist_list: specialistListSchema
   };
@@ -98551,7 +98656,7 @@ function serveV2Stdio() {
     legacy: "serve",
     onerror: (error3) => logger.error("MCP v2 transport error", error3)
   });
-  logger.info(`Specialists MCP Server v2 (2025-11-25 + 2026-07-28, dual-revision) started \u2014 6 tools registered`);
+  logger.info(`Specialists MCP Server v2 (2025-11-25 + 2026-07-28, dual-revision) started \u2014 7 tools registered`);
   process.on("SIGTERM", () => {
     logger.info("SIGTERM received \u2014 shutting down");
     handle.close().finally(() => process.exit(0));
