@@ -31,11 +31,11 @@ function status(id: string, state: SupervisorStatus['status']): SupervisorStatus
   };
 }
 
-function forensic(jobId: string, seq: number, attemptId?: string) {
+function forensic(jobId: string, seq: number, attemptId?: string, t = 1_000) {
   return createForensicEvent({
     event_family: 'job',
     event_name: seq === 1 ? 'job.started' : 'job.status_changed',
-    t_unix_ms: 1_000,
+    t_unix_ms: t,
     seq,
     resource: {
       service_namespace: 'xtrm',
@@ -72,8 +72,14 @@ describe('XTRM-96 bounded observability storage reads', () => {
 
   it('continues forensic LOG by per-job seq even when every event has the same timestamp', () => {
     const { client } = store();
+    const times = [1_000, 1_000, 1_000, 900, 1_100, 800];
     for (let seq = 1; seq <= 6; seq += 1) {
-      client.appendForensicEvent('act:same-ms', 'reviewer', undefined, forensic('act:same-ms', seq, 'att:same-ms:1'));
+      client.appendForensicEvent(
+        'act:same-ms',
+        'reviewer',
+        undefined,
+        forensic('act:same-ms', seq, 'att:same-ms:1', times[seq - 1]),
+      );
     }
 
     const rows = client.readForensicEvents({
