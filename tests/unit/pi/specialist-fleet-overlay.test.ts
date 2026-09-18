@@ -189,10 +189,11 @@ describe('native fleet overlay model', () => {
     expect(annotated.nodes).toHaveLength(3);
     expect(annotated.byId.has('act:not-materialized')).toBe(false);
     expect(annotated.byId.get('act:parent123456')).toMatchObject({
-      persistedState: 'active',
-      state: 'running',
-      attention: 'blocked',
+      state: 'active',
+      attention: 'active',
+      presentationAttention: 'blocked',
       live: {
+        state: 'running',
         attemptId: 'att:parent123456:2',
         requestedModel: 'alias/model',
         resolvedModel: 'canon/model',
