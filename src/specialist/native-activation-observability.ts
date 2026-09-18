@@ -69,7 +69,6 @@ export interface NativeLifecycleProjectionContext {
 export const NATIVE_LIFECYCLE_OBSERVABILITY_GAPS = Object.freeze({
   activation_requested: 'Dispatch intent precedes the legacy run_start boundary and has no timeline event.',
   step_contract_compiled: 'Step-contract compilation has no legacy AgentSession event.',
-  activation_admitted: 'Admission metadata has no legacy timeline event; identity is projected on specialist_jobs.',
   activation_starting: 'Session construction has no legacy timeline event; run_start follows once construction succeeds.',
   output_validation_started: 'Native result validation has no legacy timeline event kind.',
   output_validation_passed: 'Native result validation has no legacy timeline event kind.',
@@ -436,6 +435,21 @@ export function mapNativeLifecycleEvent(
     case 'lease_release_failed':
     case 'mandatory_rules_injection':
     case 'tool_contract_unsatisfied_on_fallback':
+      return at(createControlSignalEvent(event.name, {
+        bead_id: event.beadId,
+        ...(event.payload ?? {}),
+      } as never), t);
+    // SPECIALISTS-123: admission metadata persists on the SAME shared `control_signal`
+    // carrier (same rationale as the lease group above): there is no legacy timeline event
+    // to compare against, which makes it uncomparable, not unimportant. The producer has
+    // always carried the model identity (src/activation/native-host.ts emit('activation_admitted')
+    // with configured_model/requested_model/resolved_model/model_override), but with no arm
+    // here the only durable trace was specialist_jobs.status_json.model — the WINNER model,
+    // never configured/requested. After a restart, "which activations ran on something other
+    // than what was asked for" was therefore unanswerable. No new event kind, no new family
+    // and no DDL: `control_signal` already accepts an open payload, and the forensic name is
+    // `control.activation_admitted.recorded`.
+    case 'activation_admitted':
       return at(createControlSignalEvent(event.name, {
         bead_id: event.beadId,
         ...(event.payload ?? {}),
