@@ -363,7 +363,8 @@ export function readActivationInspect(source: ObservabilityReadSource, jobId: st
   const admitted = [...parsed]
     .reverse()
     .find(({ event }) => event.event_name === 'control.activation_admitted.recorded')?.event;
-  const admittedBody = admitted?.body ?? {};
+  const admittedEnvelope = admitted?.body ?? {};
+  const admittedBody = recordBodyField(admittedEnvelope, 'legacy_timeline_event') ?? admittedEnvelope;
   const startRows = source.readForensicEvents({ jobId, eventName: 'job.started', limit: 1, order: 'asc' });
   const startEvents = parseForensicRecords(startRows).parsed.map(({ event }) => event);
   const lineage = reconstructLineage(startEvents);
@@ -402,6 +403,13 @@ export function readActivationInspect(source: ObservabilityReadSource, jobId: st
 
 export function asObservabilityReadSource(client: ObservabilitySqliteClient): ObservabilityReadSource {
   return client;
+}
+
+function recordBodyField(body: Record<string, unknown>, key: string): Record<string, unknown> | undefined {
+  const value = body[key];
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
 }
 
 function stringBodyField<K extends string>(
