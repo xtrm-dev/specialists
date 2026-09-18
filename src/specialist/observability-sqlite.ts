@@ -1540,6 +1540,8 @@ export interface ObservabilitySqliteClient {
   readEvents(jobId: string): TimelineEvent[];
   readEventsAfterSeq(jobId: string, afterSeq: number): TimelineEvent[];
   readForensicEvents(filters?: ListForensicEventsFilters): ForensicEventRecord[];
+  /** Complete durable attempt-id history for one job, ordered by first forensic seq. */
+  listForensicAttemptIds(jobId: string): string[];
   /** XTRM-93 N3 (unitAI-kmbb9): activation-first id selection for `sp ps`.
    * Returns the latest-N native activation ids (job_id 'act:' space) ordered
    * by specialist_jobs.updated_at_ms DESC. The bound is an ACTIVATION count,
@@ -2956,6 +2958,22 @@ class SqliteClient implements ObservabilitySqliteClient {
         LIMIT ?
       `).all(...params, limit) as ForensicEventRecord[];
     }, 'readForensicEvents');
+  }
+
+
+  listForensicAttemptIds(jobId: string): string[] {
+    return withRetry(() => {
+      const rows = this.db.query(`
+        SELECT attempt_id, MIN(seq) AS first_seq
+        FROM specialist_forensic_events
+        WHERE job_id = ? AND attempt_id IS NOT NULL
+        GROUP BY attempt_id
+        ORDER BY first_seq ASC, attempt_id ASC
+      `).all(jobId) as Array<{ attempt_id?: string | null }>;
+      return rows
+        .map((row) => row.attempt_id)
+        .filter((attemptId): attemptId is string => typeof attemptId === 'string' && attemptId.length > 0);
+    }, 'listForensicAttemptIds');
   }
 
   listNativeActivationIds(filters: ListNativeActivationIdsFilters = {}): string[] {
