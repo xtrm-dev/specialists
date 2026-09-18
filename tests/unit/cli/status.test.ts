@@ -77,7 +77,14 @@ async function seedSqliteStatus(rootDir: string, jobId: string, status: Record<s
 }
 
 describe('status CLI — run()', () => {
-  const TEST_TIMEOUT_MS = 20000;
+  /**
+   * run() shells out to real binaries behind bounded timeouts: `isInstalled` twice at 2s and
+   * `cmd` four times at 5s (pi --version, pi --list-models, bd --version, which specialists).
+   * Its own worst case is therefore ~24s, so a 20s budget could fail with no fault in the test
+   * or the code — and on a loaded box `pi --list-models` alone measured 14.2s against its 5s
+   * cap (SPECIALISTS-144). Budget the ceiling, not the happy path.
+   */
+  const TEST_TIMEOUT_MS = 60000;
   const originalArgv = process.argv;
   const originalCwd = process.cwd();
   let tempDir = '';
