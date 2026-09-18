@@ -109,6 +109,17 @@ describe('XTRM-96 bounded observability storage reads', () => {
     client.close();
   });
 
+  it('restricts forensic reads to an explicit job candidate set before the row limit', () => {
+    const { client } = store();
+    client.appendForensicEvent('job-a', 'reviewer', undefined, forensic('job-a', 1));
+    client.appendForensicEvent('job-b', 'reviewer', undefined, forensic('job-b', 1));
+
+    expect(client.readForensicEvents({ jobIds: ['job-b'], limit: 10 }).map((row) => row.job_id))
+      .toEqual(['job-b']);
+    expect(client.readForensicEvents({ jobIds: [], limit: 10 })).toEqual([]);
+    client.close();
+  });
+
   it('rejects an afterSeq cursor without an exact job identity', () => {
     const { client } = store();
     expect(() => client.readForensicEvents({ afterSeq: 1 })).toThrow(/requires exact jobId/);
