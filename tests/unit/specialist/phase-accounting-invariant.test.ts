@@ -1,8 +1,19 @@
 /**
- * XTRM-93 N3 (SPECIALISTS-106): phase-accounting invariant for aggregateJobMetrics.
+ * XTRM-93 N3 (SPECIALISTS-106; endpoint policy SPECIALISTS-119): phase-accounting
+ * invariant for aggregateJobMetrics.
  *
- * The invariant (contract, not suggestion) — stated against PHASE-RELEVANT events
- * (run_start, status_change{running,waiting,done,error,cancelled}, run_complete):
+ * OPERATOR STATEMENT (one sentence): an activation's trailing silence is charged to
+ * whatever phase was open only up to the activation's OWN last event — a later
+ * operator status read (`sp ps`/`sp status`/`sp chat`/`sp attach`) is not charged —
+ * so `waiting_ms` (and its consumer `xtrm_job_wait_seconds`) no longer grows with
+ * operator read latency, while a job-produced non-phase trailing event
+ * (tool/text/payload_breakdown/…) still extends the endpoint.
+ *
+ * The invariant (contract, not suggestion). The flush reference point is the CHOSEN
+ * one — the `t` of the last JOB-PRODUCED event (see I1-FLUSH) — not the contract's
+ * original last-PHASE-RELEVANT-event reference point; the divergence is named in
+ * I1-FLUSH. Phase-relevant events are run_start,
+ * status_change{running,waiting,done,error,cancelled}, run_complete:
  *
  *   (I1) PARTITION (shape-conditional): every millisecond the phase machine was
  *        OPEN for is attributed EXACTLY ONCE — to active_runtime_ms if the open
@@ -24,24 +35,41 @@
  *        elapsed_ms is overwritten per run_complete
  *        (`elapsedMs = Math.round(event.elapsed_s * 1000)`) and is incoherent on
  *        multi-round streams (out of scope, SPECIALISTS-94.8/108).
- *   (I1-FLUSH) FLUSH TARGET (implemented reference point): the post-loop flush
- *        closes a still-open phase at the last event of ANY type
- *        (`closePhase(events[events.length - 1].t)`,
- *        src/specialist/observability-sqlite.ts:3069-3077) — NOT at the last
- *        PHASE-RELEVANT event the contract's I1 is stated against. The two
- *        reference points diverge whenever trailing non-phase events (meta,
- *        tool, text, status-load evidence, …) follow the last phase transition.
- *        Worked example: act:00b4a5f9-f6d carries a single trailing
- *        meta/status_reconciled row after its last phase event, contributing
- *        +27,486,449 ms (+7.6351 h) to waiting_ms that the phase-relevant
- *        reference point would exclude. The bucket is correct by the phase
- *        machine's own definition — the phase was genuinely open across that
- *        trailing silence, and no interval is lost or duplicated — but the
- *        policy (an abandoned activation's trailing silence accrues to the open
- *        phase's bucket up to the last event of any type) is a decided but
- *        UNDOCUMENTED behaviour: it is recorded here, not decided here, and the
- *        product decision itself is owned elsewhere. Do NOT "fix" the flush
- *        target or reverse the policy in this file; behaviour is frozen.
+ *   (I1-FLUSH) FLUSH TARGET (DECIDED by SPECIALISTS-119, not inherited): the
+ *        post-loop flush closes a still-open phase at the `t` of the LAST
+ *        JOB-PRODUCED event. Reader-produced status-load reconciliation evidence
+ *        is EXCLUDED from endpoint selection: a `type==='meta'` row carrying
+ *        `'status-load'` in `source`, `backend` or `data.component`, or carrying
+ *        `model==='status_reconciled'`. Such a row is written by the READER
+ *        (`status-load.ts` stamps `t: Date.now()` when a status verb first
+ *        observes a terminal run_complete) and its value is the time of the
+ *        OPERATOR'S READ, not activation activity; charging it to the open phase
+ *        would make `waiting_ms`/`active_runtime_ms` a function of read schedule.
+ *        If NO job-produced event exists, the phase is left unflushed rather than
+ *        attributed to a reader row.
+ *        DIVERGENCE FROM CONTRACT I1: I1 above is stated against the last
+ *        PHASE-RELEVANT event; this flush uses the last JOB-PRODUCED event. The
+ *        two agree when the last event is phase-relevant and diverge on trailing
+ *        non-phase events. The divergence is deliberate: a trailing JOB-PRODUCED
+ *        non-phase event (tool, text, payload_breakdown, meta) DOES extend the
+ *        endpoint — the phase was genuinely open across that silence — while a
+ *        trailing READER row does not.
+ *        REJECTED ALTERNATIVE (kept for the record): flush to the last event of
+ *        ANY type, as shipped by PR #388. It charges an abandoned activation's
+ *        post-last-activity silence up to the next operator status read. Measured
+ *        on the authoritative store (`specialist_events MAX(id)`
+ *        1,688,620..1,688,904, commit 568170d5): of 271 jobs open at
+ *        end-of-stream, 31 carried a reader-row endpoint accounting for
+ *        924,277,987 ms (256.74 h) of phase time, 100% of it after the job's last
+ *        phase-relevant event, with 0 served metrics rows among them. Worked
+ *        example act:00b4a5f9-f6d: the any-type endpoint
+ *        t=1788910611599 charges +27,486,449 ms (+7.6351 h) to `waiting_ms`
+ *        versus (37417, 1377347) under the chosen endpoint. The rejected
+ *        alternative is cheaply reversible (one endpoint predicate) if the
+ *        operator disagrees.
+ *        Do NOT reverse the flush itself — it is contract-mandated
+ *        (T0e-phase-flush.md §5, SPECIALISTS-94 SUCCESS item 2). Only the
+ *        endpoint selection is decided here.
  *   (I2) ROUTE: a span opened by run_start / status_change{running} lands in
  *        active_runtime_ms; a span opened by status_change{waiting} lands in
  *        waiting_ms.
@@ -106,6 +134,22 @@ function toolEvent(t: number): Record<string, unknown> {
 
 function turnSummary(t: number, turnIndex = 1): Record<string, unknown> {
   return { t, type: 'turn_summary', turn_index: turnIndex };
+}
+
+/** Exactly what `status-load.ts` persists when a status verb first observes a terminal run_complete. */
+function statusLoadEvent(t: number, eventName: 'status_reconciled' | 'dead_job_detected' = 'status_reconciled'): Record<string, unknown> {
+  return {
+    t,
+    type: 'meta',
+    model: eventName,
+    backend: 'status-load',
+    source: 'status-load',
+    data: { component: 'status-load', event: eventName },
+  };
+}
+
+function payloadBreakdown(t: number): Record<string, unknown> {
+  return { t, type: 'payload_breakdown', payload_breakdown: { components: [], totals: { tokens: 0, bytes: 0 } } };
 }
 
 function aggregate(jobId: string, events: Array<Record<string, unknown>>): { active: number; waiting: number; elapsed: number | null } {
@@ -198,6 +242,50 @@ describe('phase-accounting invariant (XTRM-93 N3)', () => {
     expect(active).toBe(500);
     expect(waiting).toBe(0);
     expect(active + waiting).toBe(500 - 0);
+  });
+
+  it('T6c fail-first (SPECIALISTS-119) — a trailing READER status-load row does NOT extend the flush', () => {
+    // act:00b4a5f9-f6d distilled to synthetic clocks: run_start(0) opens running;
+    // sc(waiting)(500) closes active+=500 and opens waiting; the stream's LAST
+    // event is the reader's meta/status_reconciled row at t=27,486,949 — the
+    // operator's first post-terminal status read, not activation activity.
+    // BEFORE the endpoint policy: flush at 27,486,949 -> waiting=27,486,449.
+    // AFTER: endpoint is the job-produced sc(waiting)(500) -> waiting=0.
+    const { active, waiting } = aggregate('t6c', [
+      runStart(0),
+      statusChange(500, 'waiting'),
+      statusLoadEvent(27_486_949),
+    ]);
+    expect(active).toBe(500);
+    expect(waiting).toBe(0);
+    expect(active + waiting).toBe(500 - 0);
+  });
+
+  it('T6d (SPECIALISTS-119) — a trailing JOB-PRODUCED non-phase event STILL extends the flush', () => {
+    // A payload_breakdown row is not phase-relevant but IS produced by the
+    // activation, so the phase was genuinely open across [500,1000): the endpoint
+    // policy must not be misread as "flush to the last phase-relevant event".
+    const { active, waiting } = aggregate('t6d', [
+      runStart(0),
+      statusChange(500, 'waiting'),
+      payloadBreakdown(1000),
+    ]);
+    expect(active).toBe(500);
+    expect(waiting).toBe(500);
+    expect(active + waiting).toBe(1000 - 0);
+  });
+
+  it('T6e fail-first (SPECIALISTS-119 edge) — no job-produced event after the open: no reader fallback', () => {
+    // run_start(0) opens running and is the ONLY job-produced event; every later
+    // row is reader-written. The flush endpoint is that run_start, so the phase
+    // contributes 0 — it is NOT attributed the reader row's read-time t.
+    const onlyReaderAfterOpen = aggregate('t6e-open', [runStart(0), statusLoadEvent(5000)]);
+    expect(onlyReaderAfterOpen.active).toBe(0);
+    expect(onlyReaderAfterOpen.waiting).toBe(0);
+    // A job whose whole stream is reader rows opens no phase at all.
+    const readerOnly = aggregate('t6e-reader-only', [statusLoadEvent(1000), statusLoadEvent(2000)]);
+    expect(readerOnly.active).toBe(0);
+    expect(readerOnly.waiting).toBe(0);
   });
 
   it('T7 fail-first (defect 3) — a second run_start attributes the prior attempt instead of discarding it', () => {
