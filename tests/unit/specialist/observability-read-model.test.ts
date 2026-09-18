@@ -212,11 +212,18 @@ describe('XTRM-96 reconciled observability read model', () => {
     const missing = readResultProjection(source, { jobId: 'act:retry', attemptId: 'att:retry:3' });
     expect(missing.attemptVerified).toBe(false);
     expect(missing.available).toBe(false);
-    expect(missing.error).toMatch(/Cannot verify attempt/);
+    expect(missing.error).toContain("No such attempt 'att:retry:3'");
 
     const proven = readResultProjection(source, { jobId: 'act:retry', attemptId: 'att:retry:1' });
     expect(proven.attemptVerified).toBe(true);
     expect(proven.output).toBe('final result');
+  });
+
+  it('keeps the canonical no-job RESULT distinction', () => {
+    const source = new FakeSource([], []);
+    const result = readResultProjection(source, { jobId: 'act:missing', attemptId: 'att:missing:1' });
+    expect(result.attemptVerified).toBe(false);
+    expect(result.error).toBe('No job found: act:missing');
   });
 
   it('projects current N3 model identity and session metrics into DETAIL from durable state', () => {
