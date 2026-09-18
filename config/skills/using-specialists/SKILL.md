@@ -140,7 +140,7 @@ discoverable through this root without extra active triggers, keeping the catalo
 ## What this skill deliberately does not own
 
 - Generic Issue/contract authoring -> `/planning` and `/using-xtrm`.
-- Session cold-start, context-pressure handoff, resume -> `/starting-and-resuming-work`.
+- Session cold-start, context-pressure handoff, resume -> `/using-xtrm` (Continuity).
 - Native peer/subagent communication -> `/multiplexing`.
 - Generic code exploration strategy -> `/gitnexus`.
 - Future ChainRun semantics that are not released yet -> current XTRM runtime canon.
