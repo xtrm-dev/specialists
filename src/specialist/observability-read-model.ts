@@ -247,6 +247,7 @@ export function readFleetSnapshot(
   });
 
   const lineageRecords = source.readForensicEvents({
+    jobIds: statuses.map((status) => status.id),
     eventName: 'job.started',
     ...(options.sinceMs !== undefined ? { sinceMs: options.sinceMs } : {}),
     limit: Math.min(2_000, Math.max(limit * 4, limit + 1)),
