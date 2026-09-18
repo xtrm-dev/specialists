@@ -138,8 +138,8 @@ describe('native activation observability parity', () => {
       participant_id: 'specialist::researcher',
       pi_session_id: 'native-pi',
       workspace_id: normalize(resolve(worktreePath)),
-      attempt_no: 3,
-      attempt_id: 'att:native:3',
+      attempt_no: 1,
+      attempt_id: base.attemptId,
     });
     expect(jobs[1]?.attempt_id).toBe('legacy-job::attempt::1');
     expect((raw.query(
@@ -155,10 +155,11 @@ describe('native activation observability parity', () => {
       'finish_reason', 'turn_summary', 'tool', 'tool', 'retry', 'retry', 'retry',
       'turn', 'run_complete',
     ]);
-    expect(events.every(row => row.attempt_id !== null)).toBe(true);
-    expect(events.filter(row => row.attempt_id === 'att:native:1')).toHaveLength(11);
-    expect(events.filter(row => row.attempt_id === 'att:native:2')).toHaveLength(2);
-    expect(events.filter(row => row.attempt_id === 'att:native:3')).toHaveLength(3);
+    // Pi auto-retries count activity within the host's attempt; they never mint identity.
+    expect(events.every(row => row.attempt_id === base.attemptId)).toBe(true);
+    const status = raw.query("SELECT status_json FROM specialist_jobs WHERE job_id = 'act:native'")
+      .get() as { status_json: string };
+    expect(JSON.parse(status.status_json).metrics.auto_retries).toBe(2);
 
     const forensic = raw.query(`
       SELECT seq, participant_id, attempt_id, event_json
@@ -177,6 +178,34 @@ describe('native activation observability parity', () => {
         workspace_id: normalize(resolve(worktreePath)),
       });
     }
+  });
+
+  it('adopts each session and lifecycle identity while the job pointer stays latest', () => {
+    client = createObservabilitySqliteClientAtPath(dbPath);
+    expect(client).not.toBeNull();
+    const sink = createActivationForensicSink(client);
+    const base = {
+      activationId: 'act:adopt', attemptId: 'att:adopt:1',
+      participantId: 'specialist::researcher', specialist: 'researcher',
+    };
+    sink.emit({ ...base, name: 'activation_started' });
+    sink.sessionEvent?.({
+      ...base, attemptId: 'att:adopt:2', piSessionId: 'pi-adopt', workspacePath: tempRoot,
+      event: { type: 'auto_retry_start', attempt: 1, maxAttempts: 3, delayMs: 1 },
+    });
+    // A late leg-of-origin event keeps its own identity, not the latest job pointer.
+    sink.emit({ ...base, name: 'activation_settled' });
+    sink.sessionEvent?.({
+      ...base, piSessionId: 'pi-adopt', workspacePath: tempRoot, event: { type: 'turn_start' },
+    });
+    raw = new Database(dbPath);
+    expect(raw.query('SELECT attempt_id FROM specialist_events ORDER BY seq').all()).toEqual([
+      { attempt_id: base.attemptId }, { attempt_id: 'att:adopt:2' },
+      { attempt_id: base.attemptId }, { attempt_id: base.attemptId },
+    ]);
+    expect(raw.query('SELECT attempt_no, attempt_id FROM specialist_jobs').get()).toEqual({
+      attempt_no: 2, attempt_id: 'att:adopt:2',
+    });
   });
 
   it('never lets a blank session identity clear the projected pi_session_id', () => {
