@@ -55,5 +55,9 @@
         ]
       }
     ]
-  }
+  },
+  "description": "Specialists classic lifecycle hooks plus the early-access Claude Mod fleet pane.",
+  "modules": [
+    "./register.tsx"
+  ]
 }
