@@ -34,6 +34,7 @@ const INSPECT_EVENT_LIMIT = 1_000;
 
 export interface ObservabilityReadSource {
   readForensicEvents(filters?: ListForensicEventsFilters): ForensicEventRecord[];
+  listForensicAttemptIds(jobId: string): string[];
   listStatusesWindow(filters?: ListStatusesWindowFilters): SupervisorStatus[];
   readStatus(jobId: string): SupervisorStatus | null;
   readResult(jobId: string): string | null;
@@ -356,16 +357,16 @@ export function readActivationInspect(source: ObservabilityReadSource, jobId: st
 
   const records = source.readForensicEvents({ jobId, limit: INSPECT_EVENT_LIMIT, order: 'desc' });
   const { parsed } = parseForensicRecords(records);
-  const attempts = [...new Set(parsed
-    .map(({ record }) => record.attempt_id)
-    .filter((id): id is string => typeof id === 'string' && id.length > 0))];
+  const attempts = source.listForensicAttemptIds(jobId);
 
   const latest = parsed[parsed.length - 1]?.event;
   const admitted = [...parsed]
     .reverse()
     .find(({ event }) => event.event_name === 'control.activation_admitted.recorded')?.event;
   const admittedBody = admitted?.body ?? {};
-  const lineage = reconstructLineage(parsed.map(({ event }) => event));
+  const startRows = source.readForensicEvents({ jobId, eventName: 'job.started', limit: 1, order: 'asc' });
+  const startEvents = parseForensicRecords(startRows).parsed.map(({ event }) => event);
+  const lineage = reconstructLineage(startEvents);
   const lineageNode = lineage.get(jobId);
 
   return {
@@ -378,9 +379,7 @@ export function readActivationInspect(source: ObservabilityReadSource, jobId: st
     ...(status.model ? { model: status.model } : {}),
     ...(status.backend ? { backend: status.backend } : {}),
     attempts,
-    ...(typeof parsed.at(-1)?.record.attempt_id === 'string'
-      ? { latestAttemptId: parsed.at(-1)!.record.attempt_id! }
-      : {}),
+    ...(attempts.length > 0 ? { latestAttemptId: attempts[attempts.length - 1] } : {}),
     ...stringBodyField(admittedBody, 'configured_model', 'configuredModel'),
     ...stringBodyField(admittedBody, 'requested_model', 'requestedModel'),
     ...stringBodyField(admittedBody, 'resolved_model', 'resolvedModel'),
