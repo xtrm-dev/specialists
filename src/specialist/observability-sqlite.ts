@@ -3118,7 +3118,15 @@ class SqliteClient implements ObservabilitySqliteClient {
           completedAtMs = event.t;
           runCompleteJson = JSON.stringify(event);
           model = event.model ?? model;
-          elapsedMs = Math.round(event.elapsed_s * 1000);
+          // SPECIALISTS-108: the producer's per-round `elapsed_s` is one round's own
+          // wall-clock, not the stream span the phase accumulators measure. Overwriting
+          // per round made `elapsed_ms` describe only the LAST round (73% of stored rows
+          // violate `active + waiting <= elapsed`). Accumulate instead: every round's
+          // elapsed time counts toward the total, the same span the phases partition.
+          // Whole-second producer precision stays a known floor (sub-second rounds
+          // contribute 0); the null-backfill below still covers streams with no
+          // run_complete at all. Phase columns untouched — 106 boundary.
+          elapsedMs = (elapsedMs ?? 0) + Math.max(0, Math.round(event.elapsed_s * 1000));
           phase = null;
           phaseStartedAtMs = null;
           // SPECIALISTS-120: the run-complete metrics are authoritative for the run-level
