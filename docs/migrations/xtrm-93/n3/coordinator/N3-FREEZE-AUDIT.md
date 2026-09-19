@@ -224,3 +224,30 @@ bun --bun vitest run tests/unit/specialist/supervisor-canonical-oracle.test.ts
 A materially different result from the corpus scripts means the live store moved; re-record the epoch
 before quoting any figure from the receipt. Before attributing a local suite failure to code on this host,
 check `uptime` and `pgrep -x yes` for a concurrent load experiment (R13).
+
+## Addendum A (2026-09-19): post-freeze N3 child closures and audit corrections
+
+Base: `origin/master` at `fb830d44` (PR #408 merge). This addendum corrects three
+stale statements in the frozen record above; it does not rewrite history — the
+freeze assessment was correct at `1ff421c2`.
+
+1. **§6 row 94.1 is stale.** SPECIALISTS-95 (harness classification) is CLOSED
+   (commit `4edf222e`, classification doc
+   `docs/migrations/xtrm-93/n3/SPECIALISTS-95-classification.md`). The "empty
+   `node:child_process` mock" premise was already repaired in `7243e534`
+   (real-surface re-export; only `spawn` stubbed, `spawnSync`/`execFileSync`
+   real), and the mock-signature failure count is zero in both directions.
+   The 38/18 quarantined count is now fully attributed (24 file/DB split, 4 +
+   2 positional drift at slots 10/11 and 8/9, 5 stale doubles/assertion drift,
+   2 production divergence, 1 shared-store bleed) with Mechanism E traced to
+   its exact bind site. Residual: the 24-test sqlite-assertion rewrite is a
+   dedicated repair node; follow-ups filed as SPECIALISTS-4202/4203/4204;
+   SPECIALISTS-100 (already open) covers the shared-store case.
+2. **§6 rows 94.7/94.8 are stale.** SPECIALISTS-107 + SPECIALISTS-108 are
+   CLOSED (PR #408, `0f6fb9c` → `fb830d44`): native `specialist_job_metrics`
+   rows are now written by the forensic-sink terminal hook and `elapsed_ms`
+   accumulates per round instead of overwriting.
+3. **§8 R8 count is stale.** The quarantined supervisor count remains 38/18,
+   but it is no longer "environment-contaminated ... identical to its own
+   baseline" as an unexplained noise floor — see (1). The count is now an
+   attributed register, not an unknown.
