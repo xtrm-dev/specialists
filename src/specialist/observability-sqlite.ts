@@ -1198,18 +1198,38 @@ export interface ForensicEventRecord {
 
 export interface ListForensicEventsFilters {
   jobId?: string;
+  /** Explicit job candidate set. Empty means select nothing. */
+  jobIds?: readonly string[];
   // Identity-prefix match on job_id (e.g. 'act:' for native activations).
   // Implemented as a closed range (case-sensitive, index-backed). Do NOT use
   // LIKE here: SQLite LIKE is case-insensitive by default and skips the
   // idx_forensic_events_job_* indexes (verified via EXPLAIN QUERY PLAN).
   jobIdPrefix?: string;
   sinceMs?: number;
+  /**
+   * Exact-job continuation cursor. Forensic seq is UNIQUE within job_id
+   * (idx_forensic_events_job_seq), so this is the stable follow/replay cursor
+   * for operator surfaces. Use with jobId; callers must not infer cross-job
+   * ordering from seq.
+   */
+  afterSeq?: number;
+  /** Exact durable attempt identity (e.g. att:<activation>:2). */
+  attemptId?: string;
   eventFamily?: string;
   eventName?: string;
   limit?: number;
   // Default 'asc' (oldest first) for back-compat. Use 'desc' to fetch the
   // newest rows when a caller intends to slice the tail of a busy stream.
   order?: 'asc' | 'desc';
+}
+
+export interface ListStatusesWindowFilters {
+  /** Hard row bound. Clamped to 1..500. */
+  limit?: number;
+  /** Only jobs touched at/after this epoch ms. */
+  sinceMs?: number;
+  /** Optional persisted status allowlist. */
+  statuses?: readonly SupervisorStatus['status'][];
 }
 
 /** Filters for {@link ObservabilitySqliteClient.listNativeActivationIds}.
@@ -1466,6 +1486,12 @@ export interface ObservabilitySqliteClient {
   queryMemberContextHealth(jobId: string): number | null;
   readStatus(jobId: string): SupervisorStatus | null;
   listStatuses(): SupervisorStatus[];
+  /**
+   * Deterministic bounded status window for refreshable operator surfaces.
+   * Unlike listStatuses(), the bound is applied in SQL before status_json
+   * deserialization.
+   */
+  listStatusesWindow(filters?: ListStatusesWindowFilters): SupervisorStatus[];
   /** Read durable PR/base drift state for a job. Returns null when the job row is missing.
    *  Specialists-05q.1: schema/model only — refresh logic lives in .2. */
   readPrDriftState(jobId: string): PrDriftState | null;
@@ -1516,6 +1542,8 @@ export interface ObservabilitySqliteClient {
   readEvents(jobId: string): TimelineEvent[];
   readEventsAfterSeq(jobId: string, afterSeq: number): TimelineEvent[];
   readForensicEvents(filters?: ListForensicEventsFilters): ForensicEventRecord[];
+  /** Complete durable attempt-id history for one job, ordered by first forensic seq. */
+  listForensicAttemptIds(jobId: string): string[];
   /** XTRM-93 N3 (unitAI-kmbb9): activation-first id selection for `sp ps`.
    * Returns the latest-N native activation ids (job_id 'act:' space) ordered
    * by specialist_jobs.updated_at_ms DESC. The bound is an ACTIVATION count,
@@ -2479,6 +2507,37 @@ class SqliteClient implements ObservabilitySqliteClient {
     }, 'listStatuses');
   }
 
+  listStatusesWindow(filters: ListStatusesWindowFilters = {}): SupervisorStatus[] {
+    return withRetry(() => {
+      const clauses: string[] = [];
+      const params: Array<string | number> = [];
+      if (filters.sinceMs !== undefined) {
+        clauses.push('updated_at_ms >= ?');
+        params.push(filters.sinceMs);
+      }
+      const statuses = filters.statuses?.filter((status) => typeof status === 'string' && status.length > 0) ?? [];
+      if (statuses.length > 0) {
+        clauses.push(`status IN (${statuses.map(() => '?').join(',')})`);
+        params.push(...statuses);
+      }
+      const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+      const limit = Math.max(1, Math.min(filters.limit ?? 100, 500));
+      const rows = this.db.query(`
+        SELECT status_json
+        FROM specialist_jobs
+        ${where}
+        ORDER BY updated_at_ms DESC, job_id DESC
+        LIMIT ?
+      `).all(...params, limit) as Array<{ status_json?: string }>;
+      const result: SupervisorStatus[] = [];
+      for (const row of rows) {
+        if (!row.status_json) continue;
+        try { result.push(JSON.parse(row.status_json) as SupervisorStatus); } catch { /* ignore malformed rows */ }
+      }
+      return result;
+    }, 'listStatusesWindow');
+  }
+
   readPrDriftState(jobId: string): PrDriftState | null {
     return withRetry(() => {
       const row = this.db.query(`
@@ -2878,23 +2937,53 @@ class SqliteClient implements ObservabilitySqliteClient {
     return withRetry(() => {
       const clauses: string[] = [];
       const params: Array<string | number> = [];
+      if (filters.jobIds !== undefined && filters.jobIds.length === 0) return [];
       if (filters.jobId) { clauses.push('job_id = ?'); params.push(filters.jobId); }
+      if (filters.jobIds && filters.jobIds.length > 0) {
+        clauses.push(`job_id IN (${filters.jobIds.map(() => '?').join(',')})`);
+        params.push(...filters.jobIds);
+      }
       if (filters.jobIdPrefix) { clauses.push('job_id >= ? AND job_id < ?'); params.push(filters.jobIdPrefix, `${filters.jobIdPrefix}\uffff`); }
       if (filters.sinceMs !== undefined) { clauses.push('t >= ?'); params.push(filters.sinceMs); }
+      if (filters.afterSeq !== undefined) {
+        if (!filters.jobId) throw new Error('readForensicEvents afterSeq requires exact jobId');
+        clauses.push('seq > ?');
+        params.push(filters.afterSeq);
+      }
+      if (filters.attemptId !== undefined) { clauses.push('attempt_id = ?'); params.push(filters.attemptId); }
       if (filters.eventFamily) { clauses.push('event_family = ?'); params.push(filters.eventFamily); }
       if (filters.eventName) { clauses.push('event_name = ?'); params.push(filters.eventName); }
       const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
       const limit = Math.max(1, Math.min(filters.limit ?? 1000, 10_000));
       const dir = filters.order === 'desc' ? 'DESC' : 'ASC';
+      const orderBy = filters.afterSeq !== undefined
+        ? `seq ${dir}, id ${dir}`
+        : `t ${dir}, seq ${dir}, id ${dir}`;
       return this.db.query(`
         SELECT id, job_id, seq, t, schema_version, event_family, event_name,
                participant_kind, participant_role, participant_id, attempt_id, redaction_status, event_json
         FROM specialist_forensic_events
         ${where}
-        ORDER BY t ${dir}, seq ${dir}, id ${dir}
+        ORDER BY ${orderBy}
         LIMIT ?
       `).all(...params, limit) as ForensicEventRecord[];
     }, 'readForensicEvents');
+  }
+
+
+  listForensicAttemptIds(jobId: string): string[] {
+    return withRetry(() => {
+      const rows = this.db.query(`
+        SELECT attempt_id, MIN(seq) AS first_seq
+        FROM specialist_forensic_events
+        WHERE job_id = ? AND attempt_id IS NOT NULL
+        GROUP BY attempt_id
+        ORDER BY first_seq ASC, attempt_id ASC
+      `).all(jobId) as Array<{ attempt_id?: string | null }>;
+      return rows
+        .map((row) => row.attempt_id)
+        .filter((attemptId): attemptId is string => typeof attemptId === 'string' && attemptId.length > 0);
+    }, 'listForensicAttemptIds');
   }
 
   listNativeActivationIds(filters: ListNativeActivationIdsFilters = {}): string[] {

@@ -493,14 +493,8 @@ describe('result CLI native attempt validation', () => {
           : null),
         readEvents: () => [],
         readResult: (jobId: string) => (statusId !== null && jobId === statusId ? result : null),
-        readForensicEvents: (filters?: { jobId?: string }) => (statusId !== null && filters?.jobId === statusId
-          ? forensicAttemptIds.map((attempt_id, index) => ({
-            id: index + 1, job_id: statusId, seq: index + 1, t: Date.now(),
-            schema_version: 'v15', event_family: 'job', event_name: 'job.started',
-            participant_kind: null, participant_role: null, participant_id: null,
-            attempt_id, redaction_status: 'none', event_json: '{}',
-          }))
-          : []),
+        listForensicAttemptIds: (jobId: string) =>
+          (statusId !== null && jobId === statusId ? [...forensicAttemptIds] : []),
         close: () => {},
       }),
     }));
@@ -644,15 +638,7 @@ describe('result CLI N2A namespace fix (legacy positional preserved)', () => {
             : null),
         readEvents: () => [],
         readResult: (jobId: string) => results[jobId] ?? null,
-        readForensicEvents: (filters?: { jobId?: string }) => {
-          const ids = (filters?.jobId && forensicByActivation[filters.jobId]) || [];
-          return ids.map((attempt_id, index) => ({
-            id: index + 1, job_id: filters?.jobId, seq: index + 1, t: Date.now(),
-            schema_version: 'v15', event_family: 'job', event_name: 'job.started',
-            participant_kind: null, participant_role: null, participant_id: null,
-            attempt_id, redaction_status: 'none', event_json: '{}',
-          }));
-        },
+        listForensicAttemptIds: (jobId: string) => [...(forensicByActivation[jobId] ?? [])],
         close: () => {},
       }),
     }));
