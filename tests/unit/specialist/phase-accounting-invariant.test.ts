@@ -403,7 +403,8 @@ describe('phase-accounting invariant (XTRM-93 N3)', () => {
   it('T13 empirical cross-check — stored stream of job 312b6a reproduces its stored row exactly', () => {
     // Read-only measurement of the authoritative store: 312b6a holds stored
     // active=4380, waiting=73611285, elapsed=10000 (the elapsed overwrite is the
-    // out-of-scope SPECIALISTS-94.8/108 defect: last run_complete elapsed_s=10).
+    // SPECIALISTS-94.8/108 defect: last run_complete elapsed_s=10 — now fixed by
+    // accumulation, so this expectation carries the fixed value 20000 = 10s + 10s).
     // Hand-applying the phase algorithm to the stored (seq,t,type) stream must
     // reproduce the stored row. Caveat: one case, not a property test.
     const { active, waiting, elapsed } = aggregate('job-312b6a', [
@@ -419,7 +420,8 @@ describe('phase-accounting invariant (XTRM-93 N3)', () => {
     ]);
     expect(active).toBe(4380);
     expect(waiting).toBe(73611285);
-    expect(elapsed).toBe(10000);
+    // SPECIALISTS-108: both rounds' elapsed_s=10 now accumulate (was: last wins).
+    expect(elapsed).toBe(20000);
   });
 
   it('EQ1 — contract worked equation: two phases partition exactly (active 50000, waiting 20000)', () => {

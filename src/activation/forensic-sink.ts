@@ -214,6 +214,44 @@ export function createActivationForensicSink(
     }
   };
 
+  /**
+   * Aggregate this activation's metrics row exactly once, at its terminal event
+   * (SPECIALISTS-107).
+   *
+   * The accumulator is a pure function of the durable event stream (`specialist_events`
+   * joined to `specialist_jobs`), so re-running it on the same stream is idempotent —
+   * the writer is `INSERT ... ON CONFLICT(job_id) DO UPDATE` over the full record.
+   * The once-per-activation guard below is therefore delivery control, not correctness:
+   * it keeps a retried/resumed activation from re-scanning its whole stream on every
+   * intermediate terminal leg when nothing changed. Rollback safety: the flag is set
+   * only when the call returns without throwing, so a transient write failure retries
+   * on the next terminal event instead of silently skipping the row forever.
+   *
+   * Failure-isolated like every other sink write: best-effort, never throws, so a
+   * metrics-write failure is diagnostic loss, not activation failure.
+   *
+   * Cost: one bounded `SELECT ... WHERE job_id = ?` stream scan (index-backed on
+   * `idx_specialist_events_job_seq`) plus one upsert — the same cost legacy pays per
+   * completion via `aggregateJobMetricsBestEffort`. No forensic-table scan, no new index.
+   */
+  // Keyed by activation + attempt: a resumed/retried activation is a NEW stream leg whose
+  // later terminal event must re-aggregate (its row must reflect the resumed work), while a
+  // repeated terminal emit for the SAME attempt (e.g. fallback intermediate failures landing
+  // on publishTerminalSettlement) must not re-scan. The underlying writer is idempotent
+  // regardless — same stream in, same record out — so this is delivery control, not
+  // correctness.
+  const aggregatedAtTerminal = new Set<string>();
+  const aggregateTerminalMetrics = (activationId: string, attemptId: string): void => {
+    const key = `${activationId}/${attemptId}`;
+    if (aggregatedAtTerminal.has(key)) return;
+    try {
+      observability.aggregateJobMetrics(activationId);
+      aggregatedAtTerminal.add(key);
+    } catch {
+      // Best-effort: a later terminal event retries. Never throws into the activation.
+    }
+  };
+
   return {
     emit(event) {
       try {
@@ -303,7 +341,38 @@ export function createActivationForensicSink(
           );
         }
 
-        if (event.name === 'activation_disposed') states.delete(event.activationId);
+        // SPECIALISTS-107 reachability: the row this activation's metrics readers need is
+        // materialised at the terminal event, AFTER the projection write above (the job row
+        // must exist for the accumulator's SELECT to find it). The neutral row shape is the
+        // existing `specialist_job_metrics` writer — same table, same columns, same
+        // `ON CONFLICT(job_id) DO UPDATE` — so a native row is indistinguishable from a
+        // legacy one to every downstream reader (Prometheus, `sp db stats`). No
+        // Supervisor-isms are baked in: the accumulator reads only the shared timeline
+        // vocabulary (`run_start` / `status_change` / `run_complete` / `tool` /
+        // `turn_summary` / `stale_warning`), which the mapper already projects natively.
+        // `output_validation_failed` is terminal too (mapped to run_complete ERROR), while
+        // `activation_disposed` (stop path) carries no timeline event by design — see below.
+        if (
+          event.name === 'activation_completed'
+          || event.name === 'activation_failed'
+          || event.name === 'activation_rejected'
+          || event.name === 'output_validation_failed'
+        ) {
+          aggregateTerminalMetrics(event.activationId, event.attemptId);
+        }
+
+        if (event.name === 'activation_disposed') {
+          // A stopped activation never emits a terminal lifecycle event (stop() writes the
+          // status row directly and ends with `activation_disposed`, which the mapper drops
+          // by design). Without this, a stopped activation would leave no metrics row — the
+          // same absence 107 exists to remove. The stream still ends in a terminal status
+          // (`stopped` via the status row), so aggregation reads a coherent, if short, stream.
+          aggregateTerminalMetrics(event.activationId, event.attemptId);
+          states.delete(event.activationId);
+          for (const key of [...aggregatedAtTerminal]) {
+            if (key.startsWith(`${event.activationId}/`)) aggregatedAtTerminal.delete(key);
+          }
+        }
       } catch {
         // Never let an observability write failure abort an activation.
       }

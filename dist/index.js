@@ -16087,7 +16087,7 @@ class SqliteClient {
           completedAtMs = event.t;
           runCompleteJson = JSON.stringify(event);
           model = event.model ?? model;
-          elapsedMs = Math.round(event.elapsed_s * 1000);
+          elapsedMs = (elapsedMs ?? 0) + Math.max(0, Math.round(event.elapsed_s * 1000));
           phase = null;
           phaseStartedAtMs = null;
           const runMetrics = event.metrics;
@@ -97641,6 +97641,16 @@ function createActivationForensicSink(observability) {
       observability.upsertStatus(status, identityOf(state));
     }
   };
+  const aggregatedAtTerminal = new Set;
+  const aggregateTerminalMetrics = (activationId, attemptId) => {
+    const key = `${activationId}/${attemptId}`;
+    if (aggregatedAtTerminal.has(key))
+      return;
+    try {
+      observability.aggregateJobMetrics(activationId);
+      aggregatedAtTerminal.add(key);
+    } catch {}
+  };
   return {
     emit(event) {
       try {
@@ -97695,8 +97705,17 @@ function createActivationForensicSink(observability) {
         } else {
           writeProjection(event.activationId, state, timelineEvent?.type, timelineEvent ? [timelineEvent] : [], error3);
         }
-        if (event.name === "activation_disposed")
+        if (event.name === "activation_completed" || event.name === "activation_failed" || event.name === "activation_rejected" || event.name === "output_validation_failed") {
+          aggregateTerminalMetrics(event.activationId, event.attemptId);
+        }
+        if (event.name === "activation_disposed") {
+          aggregateTerminalMetrics(event.activationId, event.attemptId);
           states.delete(event.activationId);
+          for (const key of [...aggregatedAtTerminal]) {
+            if (key.startsWith(`${event.activationId}/`))
+              aggregatedAtTerminal.delete(key);
+          }
+        }
       } catch {}
     },
     sessionEvent(input2) {
