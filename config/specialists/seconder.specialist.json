@@ -2,7 +2,7 @@
   "specialist": {
     "metadata": {
       "name": "seconder",
-      "version": "3.0.0",
+      "version": "1.3.0",
       "description": "Post-writer seconder gate. Checks Issue-contract scope plus bounded implementation smells, tree/self-report disagreement, silent failure-mode inversion, and root-cause placement before expensive QA. Not for test coverage, security audit, broad reviewer phase-2, or release blessing. READ_ONLY; dual-verdict JSON.",
       "category": "quality",
       "tags": [
