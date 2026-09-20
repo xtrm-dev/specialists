@@ -8,9 +8,9 @@ rules:
   - id: one-line-entries
     level: required
     text: "Keep each changelog entry to one line."
-  - id: bead-references
+  - id: issue-references
     level: required
-    text: "Include bead-id references in parentheses when helpful, like (unitAI-123)."
+    text: "Include durable Issue references in parentheses when helpful. Historical Beads IDs may appear as compatibility aliases but are not preferred current authority."
   - id: conventional-commit-mapping
     level: required
     text: "Map conventional commits to sections: feat -> Added, fix -> Fixed, refactor/perf -> Changed, docs -> Changed, chore -> Changed unless user-facing, revert -> Removed, sec/security -> Security."
