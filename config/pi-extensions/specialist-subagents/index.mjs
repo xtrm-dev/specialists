@@ -1053,34 +1053,43 @@ export default function specialistSubagentsExtension(pi, options = {}) {
     label: 'Specialist dispatch',
     description:
       'Dispatch a Specialist on the native in-process runtime. No CLI process is ' +
-      'spawned. Provide EITHER bead_id (an existing READY Bead — 7 sections plus ' +
-      'SCRUTINY) OR contract (an inline 7-section contract: the same readiness gate ' +
-      'runs first, then a Bead is created and dispatched). Never both. Returns once ' +
-      'the activation is ADMITTED and started, not when it completes — poll ' +
-      'specialist_status for state and for any question it raises, and answer with ' +
-      'specialist_reply. A draft or incomplete contract is refused here, before a model ' +
-      'turn is spent guessing at scope it does not carry — fix the Bead (planning ' +
-      'skill, /planning), not the dispatch. Write-capable Specialists (MEDIUM/HIGH ' +
-      'tiers) activate only when they can acquire the workspace lease. Each dispatch ' +
-      'creates a persistent activation YOU own: stop it with ' +
-      'specialist_stop_activation when you are done with it.',
-    promptSnippet: 'Dispatch an XTRM Specialist (specialist_dispatch: specialist, bead_id)',
-    renderCall: humanCallOf((args) => `Dispatch ${args.specialist ?? '?'} on ${args.bead_id || 'inline contract'}`),
+      'spawned. Provide EITHER issue_ref (primary: an existing READY pinned Substrate ' +
+      'Issue revision), bead_id (legacy compatibility alias for the same Issue locator), ' +
+      'OR contract (an inline 7-section contract: the same readiness gate runs first, ' +
+      'then a Substrate Issue is created, attested, claimed and dispatched). Provide ' +
+      'exactly one work locator/contract. Returns once the activation is ADMITTED and ' +
+      'started, not when it completes; use specialist_status and the event/ask channel ' +
+      'for continuation, and specialist_reply for questions. A draft or incomplete ' +
+      'contract is refused before a model turn is spent guessing at scope — repair the ' +
+      'Issue through planning, not dispatch prose. Write-capable Specialists (MEDIUM/HIGH ' +
+      'tiers) activate only when they can acquire the workspace lease. Settlement/result ' +
+      'is evidence and does not perform Issue Closure. Each dispatch creates a persistent ' +
+      'activation YOU own: stop it with specialist_stop_activation when done.',
+    promptSnippet: 'Dispatch an XTRM Specialist (specialist_dispatch: specialist, issue_ref)',
+    renderCall: humanCallOf((args) => `Dispatch ${args.specialist ?? '?'} on ${args.issue_ref || args.bead_id || 'inline contract'}`),
     renderResult: humanResultOf(),
     parameters: Type.Object({
       specialist: Type.String({ description: 'Specialist name, e.g. codebase-explorer' }),
+      issue_ref: Type.Optional(
+        Type.String({
+          description:
+            'Primary work locator: an EXISTING READY Substrate Issue ref. Mutually exclusive ' +
+            'with bead_id and contract: provide exactly one locator/contract.',
+        }),
+      ),
       bead_id: Type.Optional(
         Type.String({
           description:
-            'The id of an EXISTING READY Bead to dispatch against. Mutually exclusive ' +
-            'with contract: provide exactly one of bead_id or contract, never both.',
+            'Legacy compatibility alias for issue_ref. It resolves through the same Substrate ' +
+            'work boundary and does NOT make Beads the durable authority. Prefer issue_ref in ' +
+            'new calls. Mutually exclusive with issue_ref and contract.',
         }),
       ),
       contract: Type.Optional(
         Type.String({
           description:
-            'An INLINE task contract, used instead of bead_id: the SAME readiness gate ' +
-            'runs first, then a Bead is created from it and dispatched. The contract ' +
+            'An INLINE task contract, used instead of issue_ref/bead_id: the SAME readiness gate ' +
+            'runs first, then a Substrate Issue is created, attested, claimed and dispatched. The contract ' +
             'must contain all seven sections — PROBLEM, SUCCESS, SCOPE, NON_GOALS, ' +
             'CONSTRAINTS, VALIDATION, OUTPUT — plus a SCRUTINY level, which must be exactly ' +
             'one of LOW, MEDIUM, HIGH or CRITICAL. Note that this is EIGHT required parts, ' +
@@ -1098,7 +1107,7 @@ export default function specialistSubagentsExtension(pi, options = {}) {
       ),
       title: Type.Optional(
         Type.String({
-          description: 'Optional title for the Bead created from `contract` (default: derived from PROBLEM).',
+          description: 'Optional title for the Substrate Issue created from `contract` (default: derived from PROBLEM).',
         }),
       ),
       model_override: Type.Optional(
@@ -1129,9 +1138,9 @@ export default function specialistSubagentsExtension(pi, options = {}) {
       epic_context_depth: Type.Optional(
         Type.Integer({
           description:
-            'Walk bead.parent UP this many hops (1 = immediate parent epic, 2 = epic + ' +
-            'grand-epic) and render each ancestor contract into the turn-1 prompt as an ' +
-            "'## Epic lineage' section. Omit for single-bead dispatch with no lineage.",
+            'Walk the Substrate Issue parent relation UP this many hops (1 = immediate parent, ' +
+            "2 = parent + grandparent) and render each ancestor contract into the turn-1 " +
+            "'## Epic lineage' section. Omit when no lineage is requested.",
           minimum: 1,
           maximum: 2,
         }),
@@ -1143,13 +1152,21 @@ export default function specialistSubagentsExtension(pi, options = {}) {
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const h = getHost();
       try {
-        // unitAI-rrdnt.48: EITHER an existing bead_id OR an inline contract —
-        // never both, and the readiness gate runs BEFORE any bead is created.
-        const beadId = (params.bead_id ?? '').trim();
+        // Native authority is a Substrate Issue. issue_ref is primary; bead_id is
+        // a compatibility alias for the same locator. Never accept two locator spellings
+        // or a locator plus inline contract: ambiguity must fail loud before durable work changes.
+        const issueRef = (params.issue_ref ?? '').trim();
+        const beadAlias = (params.bead_id ?? '').trim();
         const contract = (params.contract ?? '').trim();
-        if (beadId && contract) {
+        if (issueRef && beadAlias) {
           return resultOf(inlineRejectionResult(
-            'both bead_id and contract were provided — provide exactly one; silently preferring one would dispatch against a contract the coordinator did not mean',
+            'both issue_ref and bead_id were provided — bead_id is only an alias; provide one locator spelling',
+          ));
+        }
+        const workRef = issueRef || beadAlias;
+        if (workRef && contract) {
+          return resultOf(inlineRejectionResult(
+            'a work locator and contract were both provided — provide exactly one; silently preferring one would dispatch against work the coordinator did not mean',
           ));
         }
         const epicContextDepth = params.epic_context_depth;
@@ -1159,10 +1176,10 @@ export default function specialistSubagentsExtension(pi, options = {}) {
           ));
         }
         // Inline-contract dispatch creates a fresh issue with no parent: no lineage.
-        const inline = !beadId && contract ? contract : undefined;
-        if (!beadId && !inline) {
+        const inline = !workRef && contract ? contract : undefined;
+        if (!workRef && !inline) {
           return resultOf(inlineRejectionResult(
-            'neither bead_id nor contract was provided — dispatch requires a READY issue (7 sections + SCRUTINY) or an inline contract',
+            'neither issue_ref/bead_id nor contract was provided — dispatch requires a READY Substrate Issue or an inline contract',
           ));
         }
         if (inline) {
@@ -1177,7 +1194,7 @@ export default function specialistSubagentsExtension(pi, options = {}) {
 
         const handle = await h.start({
           specialist: params.specialist,
-          ...(beadId ? { issueRef: beadId } : {}),
+          ...(workRef ? { issueRef: workRef } : {}),
           // The host owns creation: validate → create → attest → claim through
           // the work boundary, claiming WITH this activation's id.
           ...(inline
@@ -1210,16 +1227,16 @@ export default function specialistSubagentsExtension(pi, options = {}) {
             text: JSON.stringify(annexBuildIdentity({
               status: 'dispatched',
               ...view,
-              // An inline contract creates a durable board record. Saying so in the RESULT
-              // is the difference between a coordinator tracking it and an operator finding
-              // an orphan bead later — the caller cannot see the side effect otherwise.
+              // Inline dispatch creates durable Substrate work. Surface the primary Issue ref
+              // and retain created_bead_id only as a compatibility alias for old consumers.
               ...(inline
                 ? {
+                  created_issue_ref: handle.issueRef,
                   created_bead_id: handle.issueRef,
-                  created_bead_note:
-                    'This dispatch CREATED the bead above from your inline contract. It is a '
-                    + 'durable board record and is yours to track: close it when the work is '
-                    + 'done, or reassign it. It is not cleaned up automatically.',
+                  created_issue_note:
+                    'This dispatch CREATED the Substrate Issue above from your inline contract. '
+                    + 'Track its Journal/result/provenance explicitly. Specialist settlement is '
+                    + 'evidence, not Issue Closure; use the authorized Substrate lifecycle for Closure.',
                 }
                 : {}),
               step_contract: {
