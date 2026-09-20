@@ -51,7 +51,7 @@ describe('doctor CLI — run()', () => {
   it('prints all section headers', async () => {
     const { combined } = await runDoctor();
     expect(combined).toContain('pi');
-    expect(combined).toContain('beads');
+    expect(combined).toContain('legacy Beads compatibility');
     expect(combined).toContain('xtrm-tools');
     expect(combined).toContain('Claude Code hooks');
     expect(combined).toContain('MCP');
