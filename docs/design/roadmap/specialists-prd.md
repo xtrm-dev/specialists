@@ -19,7 +19,7 @@ Use the following authority order:
 4. [`specialist-execution-protocol.md`](../execution-protocol-design/specialist-execution-protocol.md) defines the deterministic lifecycle of one managed Specialist activation.
 5. This PRD defines accepted Specialists programme scope, `WP-*` continuity, evaluation requirements, rollout gates, and success criteria.
 6. [`current-release-snapshot.md`](current-release-snapshot.md) is the mutable release/landed-state ledger. It may change status classifications without redesigning this PRD.
-7. Repository-local Beads and Git are implementation/task and integration truth. Jira is programme projection, not a step-level source of truth.
+7. Substrate Issues/Journal/Closure are durable work truth; Git is code/integration truth. Jira is programme projection, not a step-level source of truth. Historical Beads data is migration/alias evidence only.
 
 Historical documents under [`history/`](history/) remain provenance only unless this PRD or the roadmap explicitly retains a requirement.
 
@@ -34,7 +34,7 @@ Specialists provides governed role definitions and participant execution semanti
 - skills contain cognition/procedure while deterministic probes, validators, effects, and finalization live in typed runtime contracts;
 - evidence, not self-report or process termination, satisfies chain work;
 - prompt, model, memory, chain, and runtime changes are evaluated with deterministic and calibrated graders before promotion;
-- current Beads, Git, xtmux, XTRM runtime, Channels, telemetry, and Console authorities remain non-duplicated.
+- current Substrate, Git, XTRM runtime/communication, telemetry, and Console authorities remain non-duplicated; historical Beads compatibility never regains durable-work authority.
 
 The system invariant is inherited from the XTRM runtime canon:
 
@@ -292,15 +292,15 @@ Retrieval order is pointer-first:
 
 Channels communication follows the XTRM Channels canon. Participants may share findings, request evidence/context, challenge hypotheses, and propose involvement. Routing remains hard, attention soft, authority hard. Participant communication never rewrites chain topology or grants work authority.
 
-## 9. Work, Beads, and chain materialization
+## 9. Work, Substrate, and chain materialization
 
-Beads remains the runway work/acceptance authority.
+Substrate is the durable work/acceptance authority. A ready pinned Issue revision is the executable contract; Journal/settlement evidence does not rewrite it, and Closure is explicit.
 
 Rules:
 
 - a root work contract may pre-exist chain composition;
 - planning/composition produces an inspectable ChainDefinition before production materialization;
-- after review/freeze, known step work is materialized idempotently using Beads-native hierarchy/readiness/gates/claims where sufficient;
+- after review/freeze, known step work is materialized idempotently through Substrate Issue/revision/readiness/claim relationships; the runtime must not create a second work graph;
 - hierarchy and readiness edges are distinct;
 - Specialists must not maintain a competing blocker/dependency graph;
 - one mutable workspace has one writer lease; planned concurrent writers require separate worktrees and explicit integration topology;
@@ -590,7 +590,7 @@ Canonical families:
 
 | Family | IDs | Current purpose |
 |---|---|---|
-| Programme/document gates | `WP-G00`–`WP-G03` | documentation, Beads capability/reuse, traceability gates |
+| Programme/document gates | `WP-G00`–`WP-G03` | documentation, durable-work capability/reuse, traceability gates (historical Beads requirements map through Substrate migration) |
 | Telemetry integrity | `WP-T01`–`WP-T07` | event/counting correctness, fingerprints, telemetry suite |
 | Eval Core | `WP-E01`–`WP-E10` | storage, graders, backfill, experiments, CLI, scheduling |
 | Prompt/policy | `WP-P01`–`WP-P09` | prompt manifest, output contract, role/runtime policy, evaluated prompt changes |
@@ -613,11 +613,11 @@ Total: **90 identifiers**.
 
 Before creating work:
 
-1. query current repository-local Beads;
+1. query current Substrate Issues/revisions and current repository/Git evidence;
 2. map the intended outcome to existing `WP-*` IDs;
 3. classify existing work as KEEP / REFINE / MERGE / RESEQUENCE / REPLACE / DELIVERED / SUPERSEDED;
-4. create a new Bead only for a genuinely missing executable contract;
-5. preserve discovered-from provenance for new findings.
+4. create/revise a Substrate Issue only for genuinely missing durable work authority, through planning/readiness;
+5. preserve discovery/provenance links for new findings. Historical Beads ids remain aliases/provenance only.
 
 ## 18. Programme sequencing and promotion
 
