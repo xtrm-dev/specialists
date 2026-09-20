@@ -4,7 +4,7 @@
   "shipped_skills": [
     {
       "path": "config/skills/setup-specialists/SKILL.md",
-      "sha256": "41bc76dea803dfddc4879aa4aaa5fe6f236dda42df2a9c67022950b87ba422fc"
+      "sha256": "402f28d7fb9c515af40f3a10c8ec768f9547650956449f21700e330a1eb8cf83"
     },
     {
       "path": "config/skills/update-specialists/SKILL.md",
@@ -68,7 +68,7 @@
     },
     {
       "path": "config/skills/using-specialists/SKILL.md",
-      "sha256": "3faf27cb4461a4c553d35d7f14195c4525ad478d0761324fdad0f27a93711fa2"
+      "sha256": "5e63fc4a0e757c00ab8c88bbbfcc3260d7454435629746acd47ec3d3fa630a88"
     }
   ],
   "shipped_specialists": [
@@ -181,6 +181,9 @@
     },
     {
       "path": "config/mandatory-rules/index.json"
+    },
+    {
+      "path": "config/mandatory-rules/issue-ref-verbatim.md"
     },
     {
       "path": "config/mandatory-rules/json-only-final-output.md"

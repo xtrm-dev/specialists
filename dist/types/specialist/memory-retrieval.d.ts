@@ -1,4 +1,3 @@
-export declare const STATIC_WORKFLOW_RULES_BLOCK: string;
 export interface MemoryRecord {
     key: string;
     value: string;

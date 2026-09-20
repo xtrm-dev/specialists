@@ -12859,72 +12859,6 @@ ${stderrTail}` : ""}`;
 import { existsSync as existsSync6, readFileSync as readFileSync2 } from "node:fs";
 import { createHash as createHash2 } from "node:crypto";
 import { resolve as resolve5 } from "node:path";
-
-// src/specialist/memory-retrieval.ts
-var DEFAULT_STOP_WORDS = new Set([
-  "a",
-  "an",
-  "and",
-  "are",
-  "as",
-  "at",
-  "be",
-  "by",
-  "for",
-  "from",
-  "how",
-  "i",
-  "if",
-  "in",
-  "is",
-  "it",
-  "of",
-  "on",
-  "or",
-  "that",
-  "the",
-  "this",
-  "to",
-  "was",
-  "we",
-  "with",
-  "you",
-  "your",
-  "replace",
-  "implement",
-  "task",
-  "run",
-  "add",
-  "new",
-  "use",
-  "using",
-  "into",
-  "when",
-  "what",
-  "not",
-  "only"
-]);
-var CACHE_MAX_AGE_MS = 60 * 60 * 1000;
-var STATIC_WORKFLOW_RULES_BLOCK = `
-## Beads Workflow Quick Rules
-- Claim work: \`bd update <id> --claim\`
-- Append progress notes: \`bd update <id> --append-notes "..."\`
-- Store reusable insight: \`bd remember "insight"\`
-- Close completed issue: \`bd close <id> --reason "done"\`
-
-## Session close checklist
-1. \`git add <files>\`
-2. \`git commit -m "..."\`
-3. \`git push\`
-`.trim();
-function estimateTokens(text) {
-  return Math.ceil(text.length / 4);
-}
-function estimateInjectedTokens(text) {
-  return estimateTokens(text);
-}
-
-// src/specialist/mandatory-rules.ts
 class MandatoryRulesBudgetError extends Error {
   budgetLimit;
   candidateTokens;
@@ -12949,14 +12883,14 @@ ${sections.map((section) => section.block).join(`
 
 `)}` : "";
 }
-function estimateTokens2(text) {
+function estimateTokens(text) {
   return text ? Math.max(1, Math.ceil(text.length / 4)) : 0;
 }
 function compileMandatoryRulesBudget(candidateSections, budgetLimit) {
   const sections = candidateSections.filter((section) => section.block.trim() && section.ruleCount > 0);
-  const candidateTokens = estimateTokens2(formatSectionsBlock(sections));
+  const candidateTokens = estimateTokens(formatSectionsBlock(sections));
   const mustKeep = sections.filter((section) => section.priority === "must_keep");
-  const floorTokens = estimateTokens2(formatSectionsBlock(mustKeep));
+  const floorTokens = estimateTokens(formatSectionsBlock(mustKeep));
   if (floorTokens > budgetLimit) {
     throw new MandatoryRulesBudgetError(budgetLimit, candidateTokens, floorTokens, [], sections.map((section) => section.setId));
   }
@@ -12964,7 +12898,7 @@ function compileMandatoryRulesBudget(candidateSections, budgetLimit) {
   for (const priority of ["important", "optional"]) {
     for (const section of sections.filter((item) => item.priority === priority)) {
       const proposed = sections.filter((item) => retained.has(item) || item === section);
-      if (estimateTokens2(formatSectionsBlock(proposed)) <= budgetLimit)
+      if (estimateTokens(formatSectionsBlock(proposed)) <= budgetLimit)
         retained.add(section);
     }
   }
@@ -12976,7 +12910,7 @@ function compileMandatoryRulesBudget(candidateSections, budgetLimit) {
     sections: injected,
     budgetLimit,
     candidateTokens,
-    injectedTokens: estimateTokens2(block),
+    injectedTokens: estimateTokens(block),
     injectedSectionIds: injected.map((section) => section.setId),
     evictedSectionIds: evicted.map((section) => section.setId),
     payloadDigest: createHash2("sha256").update(block).digest("hex"),
@@ -13187,15 +13121,7 @@ function buildMandatoryRulesInjection(specialistConfig, budgetLimit = Number.POS
   const sets = collectMandatoryRuleSets(cwd, setIds);
   const inlineRules = mandatoryRules?.inline_rules ?? [];
   const globalsDisabled = mandatoryRules?.disable_default_globals ?? false;
-  const globals = globalsDisabled ? [] : [{
-    id: "workflow-quick-rules",
-    rules: [{
-      id: "workflow-quick-rules-1",
-      level: "required",
-      text: STATIC_WORKFLOW_RULES_BLOCK.trim().replace(/^##\s+Beads Workflow Quick Rules\n/, "").replace(/^- Store reusable insight:.*\n/m, "")
-    }],
-    priority: "must_keep"
-  }];
+  const globals = [];
   const requiredIds = new Set(index?.required_template_sets ?? []);
   const defaultIds = new Set(index?.default_template_sets ?? []);
   const prioritizedSets = sets.map((set) => ({
@@ -17033,7 +16959,7 @@ function createBeadFromContract(contract, title) {
 }
 
 // src/specialist/payload-measure.ts
-function estimateTokens3(text) {
+function estimateTokens2(text) {
   if (!text)
     return 0;
   return Math.max(1, Math.ceil(text.length / 4));
@@ -17042,7 +16968,7 @@ function measureUtf8Bytes(text) {
   return Buffer.byteLength(text, "utf8");
 }
 function measurePayloadComponent(kind, name, text) {
-  return { kind, name, tokens: estimateTokens3(text), bytes: measureUtf8Bytes(text) };
+  return { kind, name, tokens: estimateTokens2(text), bytes: measureUtf8Bytes(text) };
 }
 
 // src/specialist/task-prompt.ts
@@ -17311,6 +17237,60 @@ class CircuitBreaker {
 import { execSync } from "node:child_process";
 import { existsSync as existsSync9 } from "node:fs";
 import { resolve as resolve8 } from "node:path";
+
+// src/specialist/memory-retrieval.ts
+var DEFAULT_STOP_WORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "are",
+  "as",
+  "at",
+  "be",
+  "by",
+  "for",
+  "from",
+  "how",
+  "i",
+  "if",
+  "in",
+  "is",
+  "it",
+  "of",
+  "on",
+  "or",
+  "that",
+  "the",
+  "this",
+  "to",
+  "was",
+  "we",
+  "with",
+  "you",
+  "your",
+  "replace",
+  "implement",
+  "task",
+  "run",
+  "add",
+  "new",
+  "use",
+  "using",
+  "into",
+  "when",
+  "what",
+  "not",
+  "only"
+]);
+var CACHE_MAX_AGE_MS = 60 * 60 * 1000;
+function estimateTokens3(text) {
+  return Math.ceil(text.length / 4);
+}
+function estimateInjectedTokens(text) {
+  return estimateTokens3(text);
+}
+
+// src/specialist/system-prompt.ts
 var OUTPUT_TYPE_GUIDANCE = {
   codegen: "- Codegen focus: include exact file paths, symbols touched, and implementation outcomes.",
   analysis: "- Analysis focus: include architecture understanding and evidence-backed findings.",
@@ -17325,7 +17305,7 @@ function buildOutputContractInstruction(responseFormat, outputType, outputSchema
     return "";
   const lines = ["## Output Contract"];
   if (responseFormat === "markdown") {
-    lines.push("Respond using markdown with canonical sections (include when applicable):", "- `## Summary`", "- `## Status`", "- `## Changes`", "- `## Verification`", "- `## Risks`", "- `## Follow-ups`", "- `## Beads`", "Optional sections when relevant:", "- `## Architecture`", "- `## Acceptance Criteria`", "- `## Machine-readable block`", "Do not impose artificial bullet limits — prioritize completeness and clarity.");
+    lines.push("Respond using markdown with canonical sections (include when applicable):", "- `## Summary`", "- `## Status`", "- `## Changes`", "- `## Verification`", "- `## Risks`", "- `## Follow-ups`", "- `## Work`", "Optional sections when relevant:", "- `## Architecture`", "- `## Acceptance Criteria`", "- `## Machine-readable block`", "Do not impose artificial bullet limits — prioritize completeness and clarity.");
   } else {
     lines.push("Respond with a single valid JSON object only.", "Do not wrap JSON in markdown fences, headers, or prose.");
   }
