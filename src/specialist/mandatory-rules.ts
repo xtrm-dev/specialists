@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
-import { STATIC_WORKFLOW_RULES_BLOCK } from './memory-retrieval.js';
 import { resolveCanonicalAssetDir } from './canonical-asset-resolver.js';
 
 export interface MandatoryRule {
@@ -370,24 +369,14 @@ export function buildMandatoryRulesInjection(
   ];
   const sets = collectMandatoryRuleSets(cwd, setIds);
   const inlineRules = mandatoryRules?.inline_rules ?? [];
-  // workflow-quick-rules global retired from memory text (unitAI-cnca3 S1):
-  // the STATIC block's persistence line is stripped. The set id is kept —
-  // cli/list display + mandatory-rules tests still key on it (whole-global
-  // removal is a follow-up, not S1).
+  // XTRM-93 semantic cutover: native/current prompt doctrine comes only from
+  // required/default/template rule sets. The former Beads workflow quick-rules
+  // block is intentionally not injected: Substrate authority/lifecycle semantics
+  // belong to core-session-boundary + using-substrate/using-xtrm, not a bd ritual.
+  // Keep the compatibility flag observable until schema cleanup, but it no longer
+  // changes the native/current authority contract.
   const globalsDisabled = mandatoryRules?.disable_default_globals ?? false;
-  const globals = globalsDisabled
-    ? []
-    : [{
-        id: 'workflow-quick-rules',
-        rules: [{
-          id: 'workflow-quick-rules-1',
-          level: 'required',
-          text: STATIC_WORKFLOW_RULES_BLOCK.trim()
-            .replace(/^##\s+Beads Workflow Quick Rules\n/, '')
-            .replace(/^- Store reusable insight:.*\n/m, ''),
-        }],
-        priority: 'must_keep' as const,
-      }];
+  const globals: Array<MandatoryRuleSet & { priority: 'must_keep' }> = [];
 
   const requiredIds = new Set(index?.required_template_sets ?? []);
   const defaultIds = new Set(index?.default_template_sets ?? []);
