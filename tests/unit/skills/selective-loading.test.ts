@@ -26,8 +26,8 @@ describe('selective loading: one routed owner per Specialists execution phase', 
     });
   }
 
-  it('keeps generic bead-contract doctrine outside Specialists while retaining its precondition reference', () => {
-    const contract = read('references/bead-contracts.md');
+  it('keeps generic Issue-contract doctrine outside Specialists while retaining its precondition reference', () => {
+    const contract = read('references/issue-contracts.md');
     expect(topHeading(contract)).toBe('Specialist contract precondition');
     expect(contract).toContain('The generic work-contract doctrine belongs to XTRM `/using-xtrm` and `/planning`.');
     expect(router).toContain('The detailed contract-writing doctrine belongs to `/planning`; Specialists consumes it.');
