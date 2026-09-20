@@ -240,8 +240,11 @@ describe('specialist_dispatch inline path — one gate, create only after it pas
     expect(out.bead_id).toBe('bd-inline-1');
     // issue_ref is verbose-only; compact keeps bead_id (same ref, compatibility alias).
     expect(out).not.toHaveProperty('issue_ref');
-    expect(out.created_bead_id).toBe('bd-inline-1');
-    expect(String(out.created_bead_note)).toMatch(/yours to track/i);
+    expect(out.created_issue_ref).toBe('bd-inline-1');
+    expect(String(out.created_issue_note)).toMatch(/Substrate Issue/i);
+    expect(String(out.created_issue_note)).toMatch(/not Issue Closure/i);
+    expect(out.created_bead_id).toBe(out.created_issue_ref);
+    expect(String(out.created_bead_note)).toMatch(/Compatibility alias/i);
     expect(sessionsCreated.count).toBe(1);
     // full:true restores the verbose alias alongside bead_id.
     const { host: host2 } = hostWith();
@@ -304,6 +307,8 @@ describe('specialist_dispatch inline path — one gate, create only after it pas
 
     expect(out.status).toBe('dispatched');
     expect(out.bead_id).toBe('ISSUE-1');
+    expect(out).not.toHaveProperty('created_issue_ref');
+    expect(out).not.toHaveProperty('created_issue_note');
     expect(out).not.toHaveProperty('created_bead_id');
     expect(workItems.inlineCreate).not.toHaveBeenCalled();
     expect(startSpy.mock.calls[0][0]).toMatchObject({ issueRef: 'ISSUE-1' });
