@@ -68,7 +68,7 @@
       "id": 4,
       "eval_name": "merge-publication-flow",
       "prompt": "Reviewer passed an executor chain. What should the orchestrator do next to publish the specialist work?",
-      "expected_output": "Agent follows references/merge-and-integration.md and uses its documented manual git publication workflow only after required gates are confirmed, then closes the bead at the prescribed point.",
+      "expected_output": "Agent follows references/merge-and-integration.md and uses its documented manual git publication workflow only after required gates are confirmed. PASS/merge evidence is recorded through the Journal/result path; Issue Closure remains an explicit authorized Substrate action, not an automatic consequence of merge.",
       "assertions": [
         {
           "name": "uses_manual_git_publication",
@@ -194,20 +194,20 @@
         },
         {
           "name": "does_not_load_irrelevant_references",
-          "description": "Agent does not open Issue-contracts.md, monitoring.md, or dispatch-preconditions.md — they are irrelevant to this phase."
+          "description": "Agent does not open issue-contracts.md, monitoring.md, or dispatch-preconditions.md — they are irrelevant to this phase."
         }
       ],
       "files": []
     },
     {
       "id": 10,
-      "eval_name": "progressive-disclosure-bead-authoring",
+      "eval_name": "progressive-disclosure-issue-authoring",
       "prompt": "I captured a rough idea as a draft Substrate Issue revision. Can I dispatch an executor against it right now?",
       "expected_output": "Agent refuses: rule 15 / the promotion gate forbids dispatching against a draft Issue. It answers from the router alone (the promotion gate is always-needed policy) and points to references/issue-contracts.md only if the full contract shape is needed.",
       "assertions": [
         {
           "name": "refuses_draft_dispatch",
-          "description": "Agent refuses to dispatch and cites the contract:draft promotion gate."
+          "description": "Agent refuses to dispatch a draft/unready Issue and cites the readiness/promotion gate."
         },
         {
           "name": "answers_from_router",
@@ -240,7 +240,7 @@
         },
         {
           "name": "does_not_load_irrelevant_references",
-          "description": "Agent does not open merge-and-integration.md or Issue-contracts.md — the phase is pre-dispatch verification."
+          "description": "Agent does not open merge-and-integration.md or issue-contracts.md — the phase is pre-dispatch verification."
         }
       ],
       "files": []
