@@ -826,9 +826,9 @@ function summarizePayload(payload) {
   switch (payload.status) {
     case 'dispatched':
       return [
-        `Dispatched ${payload.specialist ?? '?'} on ${payload.bead_id ?? '?'} — ${payload.state ?? 'started'} as ${payload.activation_id ?? '?'}` +
+        `Dispatched ${payload.specialist ?? '?'} on ${payload.issue_ref ?? payload.bead_id ?? '?'} — ${payload.state ?? 'started'} as ${payload.activation_id ?? '?'}` +
         `${payload.resolved_model ? ` [${payload.resolved_model}]` : ''}` +
-        `${payload.created_bead_id ? ` (created bead ${payload.created_bead_id})` : ''}`,
+        `${payload.created_issue_ref ? ` (created Issue ${payload.created_issue_ref})` : payload.created_bead_id ? ` (created Issue ${payload.created_bead_id})` : ''}`,
       ];
     case 'answered':
       return [`Answered ${payload.message_id ?? '?'} for ${payload.activation_id ?? '?'}`];
