@@ -2,7 +2,7 @@
 
 `xt release` now reads two synthesis inputs:
 
-1. closed beads + git range signals
+1. Substrate Issue/Closure evidence + git range signals (historical Beads refs are compatibility input only)
 2. xt session reports from `.xtrm/reports/` for same release window
 
 `sp release prepare` / `sp release publish` remain as deprecated aliases for backward compatibility. They proxy to the same release logic and print a deprecation notice on every invocation.
