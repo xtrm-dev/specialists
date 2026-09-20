@@ -1,5 +1,13 @@
 # Chain Templates — Default Catalog (operator quick-start)
 
+> **XTRM-93 semantic status:** the `.formula.json` files remain compatibility `ChainSource`
+> assets, but the Beads `bd mol pour` / `bd dep` materialization procedure documented below is
+> **legacy design history, not current durable-work authority**. Substrate is live and owns
+> Issue/revision/readiness/claim/relationship state. Do not implement new chain materialization by
+> copying the Beads commands below; the current XTRM chain/runtime canon defines the target compiler
+> and Substrate binding. The Beads examples are retained only to explain the compatibility source
+> format and migration provenance.
+
 > **Status:** operator quick-start to the executable `.formula.json` files in this directory.
 >
 > **Canonical design canon** for chain templates lives cross-repo: [xtrm-dev/xtrm docs/substrate/chain_templates.md](https://github.com/xtrm-dev/xtrm/blob/main/docs/substrate/chain_templates.md) (cross-repo: xtrm-dev/xtrm docs/substrate/chain_templates.md). That is where the canonical pipeline every production-diff chain runs (§2), the per-template resolved canonical chains (§3), the pending DevOps-gates gap (§4), composition mechanism (§5), and evolution protocol (§6) live. **Consult the canon first for design questions.** A non-maintained editorial snapshot in `substrate.html` style is archived in the xtrm repo (`docs/substrate/chain_templates.html`). This README covers the operator quick-start: schema notes, pour mechanism, search-path resolution, post-pour edge helper, per-repo extension example.
@@ -12,7 +20,7 @@
 
 A formula defines collaboration topology: participant roles, step contracts, dependencies, gate classes and semantic edge hints. It does **not** duplicate the internal lifecycle of each participant.
 
-Every dispatched step executes through `docs/design/execution-protocol-design/specialist-execution-protocol.md`: context/contract preflight, mandatory-rule acknowledgement, optional memory decision, typed local planning, evidence validation, commit/finalization, result persistence, automatic Bead note, parent notification and cleanup. The resolved chain/reducer consumes the validated result to determine step satisfaction and next-node eligibility.
+Every dispatched step executes through `docs/design/execution-protocol-design/specialist-execution-protocol.md`: context/contract preflight, mandatory-rule acknowledgement, optional memory decision, typed local planning, evidence validation, commit/finalization, result/settlement/provenance persistence, parent notification and cleanup. The resolved chain/reducer consumes the validated result to determine step satisfaction and next-node eligibility.
 
 This boundary keeps promoted chain templates compact and domain-specific instead of turning every formula into a generic workflow DSL.
 
@@ -35,7 +43,7 @@ Catalog table (for full per-template detail with mermaid step diagrams, severity
 | `triage.formula.json` | root → explorer → overthinker | Board health (READ_ONLY, pipeline N/A) |
 | `research-only.formula.json` | root → {explorer or researcher via `{{specialist}}` var} | Investigation (READ_ONLY, pipeline N/A) |
 | `restitch.formula.json` | root → debugger → seconder → test-engineer → test-runner → obligations-scanner → reviewer | Conflict recovery (inherits original chain's pipeline state) |
-| `planning.formula.json` | root → planner | Vague initiative → phased bd issue board (pipeline N/A) |
+| `planning.formula.json` | root → planner | Vague initiative → phased durable Issue contracts (pipeline N/A) |
 | `premortem.formula.json` | root → overthinker | Devil's-advocate before risky decisions (pipeline N/A) |
 | `doc-sync.formula.json` | root → sync-docs | Single-document drift-aware update (pipeline N/A) |
 | `memory-hygiene.formula.json` | root → memory-processor | Stale memory consolidation (pipeline N/A) |
@@ -96,7 +104,7 @@ sp chain wire-edges <molecule-id>:
 
 The helper is ~50 LOC in shell or node. It runs immediately after `bd mol pour` (chained or called by `sp chain plan`). Idempotent: re-running is safe (bd dep add deduplicates by source+target+type).
 
-**Why labels not formula extension:** bd formula's edge support is limited to `needs` (blocks-on). Putting edges in labels keeps formulas portable to vanilla bd while letting our helper layer richer semantics on top. When substrate lands and absorbs chain composition (§22 of friction audit), the edge information ships natively as substrate step-issue relationships — no helper needed at that point.
+**Why labels not formula extension:** bd formula's edge support is limited to `needs` (blocks-on). Putting edges in labels keeps formulas portable to vanilla bd while letting our helper layer richer semantics on top. Substrate has landed; the target materializer must express these relationships through Substrate rather than extending this Beads helper.
 
 ## Selection logic — NOT in formula
 
