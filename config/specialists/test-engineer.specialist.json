@@ -2,7 +2,7 @@
   "specialist": {
     "metadata": {
       "name": "test-engineer",
-      "version": "3.0.0",
+      "version": "1.2.0",
       "description": "Post-implementation test authoring from actual diff. Use for adding/updating tests, fixtures, smoke/E2E harnesses, and telemetry assertions before test-runner. Not for production fixes, broad test execution, generic QA review, or release blessing. HIGH worktree via --job because authoring NEW test/fixture files needs the `write` tool (runtime: write→HIGH, edit→MEDIUM; MEDIUM cannot create files); prompt forbids production source edits unless pinned Issue explicitly authorizes test-helper/export changes.",
       "category": "testing",
       "tags": [
