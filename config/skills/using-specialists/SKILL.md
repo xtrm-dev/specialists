@@ -33,15 +33,14 @@ Use subcommand help before exact invocation when a flag matters. The installed C
 registry are authoritative. Static examples in this skill are shapes, not a promise that
 an old flag still exists.
 
-Two runtimes exist. Native activation (below) is the primary flow for Substrate-backed
-work; the `sp` CLI is the operator/frontend surface, transitional under XTRM-93.
+Two execution paths remain during XTRM-93. Native activation (below) is the primary flow for Substrate-backed work; legacy `sp run`/Supervisor behavior is a compatibility path. Operator CLI projections may coexist, but agent work authority comes from the typed Substrate service.
 
 ## Contract precondition
 
 A specialist receives a durable Substrate Issue. The Issue must already be a usable
 contract (attested, ready) before dispatch.
 
-- Read it with `sb issue show <ref>` (pinned revision + readiness).
+- Read it through the live typed Substrate issue surface (`substrate_issue_get <ref>` on Pi; the equivalent Substrate MCP service on Claude). Never shell out to `sb` from an agent to reconstruct authority.
 - If it is a draft, incomplete, stale, or contradicted by current code, repair it through
   the XTRM planning/contract workflow before dispatch.
 - Do not use an ad-hoc prompt to smuggle missing requirements around the Issue.
