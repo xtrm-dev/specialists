@@ -51,6 +51,14 @@ Use the current typed Substrate surface when available. For exact CLI syntax use
 A durable handoff includes Issue revision + claim state, changed artifacts, validation including failures/skips, active workers, blockers/decisions, and next action. Chat summary alone is not a handoff.
 
 Specialist settlement/result is evidence. Issue Closure is explicit and separate.
+
+## Repository-specific execution invariants
+
+- Use GitNexus/code-intelligence before changing shared symbols; UNKNOWN is not evidence of low impact.
+- Canonical Specialist definitions live under `config/specialists/*.specialist.json`; package-tier changes are direct source edits plus validation, not user override edits.
+- Preserve the staged review chain for substantive production diffs: seconder, test-engineer/test-runner, security when sensitive, obligations scan, then reviewer.
+- `sp merge` / `sp epic merge` remain legacy/broken integration surfaces; Git/Core owns integration.
+- Native write-capable activations use the admitted workspace and writer lease. Legacy per-job worktree behavior must not be generalized into native doctrine.
 <!-- xtrm:end -->
 
 <!-- gitnexus:start -->
