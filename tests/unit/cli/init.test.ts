@@ -53,7 +53,10 @@ describe('init CLI — run()', () => {
     await runInit(tempDir);
     const content = await readFile(join(tempDir, 'AGENTS.md'), 'utf-8');
     expect(content).toContain('## Specialists');
-    expect(content).toContain('specialists run <name> --bead <id>');
+    expect(content).toContain('Substrate owns durable work');
+    expect(content).toContain('specialist_dispatch(issue_ref=...)');
+    expect(content).toContain('settlement/PASS/commit is not Issue Closure');
+    expect(content).not.toContain('Create/claim bead issue');
   });
   it('appends Specialists section to existing AGENTS.md without marker', async () => {
     const existing = '# My Project\n\nSome existing content.\n';
