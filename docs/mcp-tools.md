@@ -172,9 +172,10 @@ z.object({
   SCRUTINY level; a draft or incomplete issue is refused before a model turn
   is spent. If the issue is not dispatchable, fix the issue (planning skill),
   not the dispatch.
-- An inline `contract` that passes the gate creates a durable work record;
-  the result carries `created_bead_id` plus a `created_bead_note` — track it,
-  it is not cleaned up automatically.
+- An inline `contract` that passes the gate creates a durable Substrate Issue.
+  The result carries `created_issue_ref` plus `created_issue_note`. The old
+  `created_bead_id` / `created_bead_note` keys remain compatibility aliases only.
+  Settlement/result is evidence; it does not perform Issue Closure.
 - `epic_context_depth` must be 1 or 2; anything else is a structured refusal
   (bare `z.number()` deliberately, so range errors return the refusal envelope
   instead of an opaque zod throw).
