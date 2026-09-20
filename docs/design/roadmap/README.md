@@ -45,7 +45,7 @@ per-ID historical work-package continuity
   wp-continuity.json
 
 implementation tasks and completion
-  repository-local Beads + Git evidence
+  Substrate Issue/Journal/Closure + Git evidence
 ```
 
 A current-state update may classify an accepted capability as delivered, partial or residual. It may not silently redesign roadmap decisions or remove PRD scope.
@@ -54,7 +54,7 @@ A current-state update may classify an accepted capability as delivered, partial
 
 Fifteen `.formula.json` source assets exist. They are compatibility `ChainSource` assets, not the generic chain ontology and not by themselves a released orchestration product.
 
-Before production promotion, the programme requires the current XTRM chain/runtime gates: generic ChainSource/ChainDefinition loading, pure compilation/freeze to ResolvedChain, Beads materialization, participant execution through the governed runtime, evidence-driven reducer/scheduler semantics, and an end-to-end fixture.
+Before production promotion, the programme requires the current XTRM chain/runtime gates: generic ChainSource/ChainDefinition loading, pure compilation/freeze to ResolvedChain, Substrate-backed work materialization/binding, participant execution through the governed runtime, evidence-driven reducer/scheduler semantics, and an end-to-end fixture.
 
 Do not install or dispatch production chains merely because the source formulas exist.
 
@@ -63,7 +63,7 @@ Do not install or dispatch production chains merely because the source formulas 
 - It is not the cross-domain XTRM runtime canon; use `xtrm-dev/xtrm:docs/runtime/`.
 - It is not the Substrate design; that lives in XTRM `docs/substrate/`.
 - It is not the mutable release ledger; use `current-release-snapshot.md`.
-- It is not the current dispatch queue; use repository-local Beads derived from the current execution plan.
+- It is not the current dispatch queue; use current Substrate work derived from the current execution plan.
 - It is not authority to start every PRD work package concurrently.
 
 ## Current implementation centre
