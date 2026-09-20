@@ -126,4 +126,51 @@ describe('skills-v4 default specialist wiring', () => {
     expect(memorySource).not.toContain('## Beads Workflow Quick Rules');
   });
 
+  it('keeps generated/operator entry points Substrate-first', () => {
+    const initSource = readFileSync(join(repoRoot, 'src', 'cli', 'init.ts'), 'utf8');
+    expect(initSource).toContain('Substrate owns durable work');
+    expect(initSource).toContain('specialist_dispatch(issue_ref=...)');
+    expect(initSource).not.toContain('Create/claim bead issue');
+
+    const helpSource = readFileSync(join(repoRoot, 'src', 'cli', 'help.ts'), 'utf8');
+    expect(helpSource).toContain('Native tracked work (primary)');
+    expect(helpSource).toContain('legacy Beads-backed sp job compatibility surface');
+    expect(helpSource).not.toContain('bead-first workflow');
+
+    const quickstartSource = readFileSync(join(repoRoot, 'src', 'cli', 'quickstart.ts'), 'utf8');
+    expect(quickstartSource).toContain('Native tracked work');
+    expect(quickstartSource).toContain('Legacy sp compatibility');
+  });
+
+  it('keeps Pi native dispatch issue_ref-first with bead_id only as compatibility alias', () => {
+    const extensionSource = readFileSync(
+      join(repoRoot, 'config', 'pi-extensions', 'specialist-subagents', 'index.mjs'),
+      'utf8',
+    );
+    expect(extensionSource).toContain("issue_ref: Type.Optional");
+    expect(extensionSource).toContain('Primary work locator');
+    expect(extensionSource).toContain('Legacy compatibility alias for issue_ref');
+    expect(extensionSource).toContain('created_issue_ref');
+    expect(extensionSource).toContain('settlement is not Issue Closure');
+    expect(extensionSource).not.toContain('existing READY Bead');
+    expect(extensionSource).not.toContain('then a Bead is created');
+  });
+
+  it('keeps the canonical execution skill aligned with the eight native activation tools', () => {
+    const skill = readFileSync(join(repoRoot, 'config', 'skills', 'using-specialists', 'SKILL.md'), 'utf8');
+    expect(skill).toContain('Eight tools');
+    for (const tool of [
+      'specialist_dispatch',
+      'specialist_status',
+      'specialist_reply',
+      'specialist_resume',
+      'specialist_retry',
+      'specialist_steer',
+      'specialist_stop_activation',
+      'specialist_list',
+    ]) {
+      expect(skill).toContain(`\`${tool}\``);
+    }
+  });
+
 });
