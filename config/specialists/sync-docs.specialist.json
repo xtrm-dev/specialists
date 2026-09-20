@@ -2,7 +2,7 @@
   "specialist": {
     "metadata": {
       "name": "sync-docs",
-      "version": "4.0.0",
+      "version": "3.3.0",
       "description": "Single-document documentation synchronizer. Use when exactly one doc needs drift-aware updates from scoped report/commit context. MEDIUM; not for broad rewrites or multi-doc audits.",
       "category": "documentation",
       "updated": "2026-09-20",
