@@ -29,7 +29,7 @@ The accepted cross-domain runtime model lives in the xtrm repository canon at te
 - Supervision splits three ways: ActivationSupervisor owns exactly one direct participant activation lifecycle; the xtmux RuntimeSupervisor owns external/interactive runtimes via terminal backends; the pure reducer/scheduler owns chain progression. None of the three inherits another's authority.
 - Capabilities: `ResolvedCapabilityGrant = f(specialist request, chain/step policy, operator policy, runtime/sandbox capabilities)`; requested capability ≠ granted capability. Legacy `skills.scripts` compile into typed ProbeDefinitions within the prepare-probes/finalize-validators taxonomy; shell scripts are never a privileged implicit preflight API.
 - Channels: communication semantics stay canonical in `xtrm-dev/xtrm:docs/channels/channels.md`; this roadmap does not duplicate them.
-- Beads remains the work/evidence authority; chain materialization into Beads happens only after ResolvedChain freeze, and the materializer never invents a second dependency graph.
+- Substrate remains the durable work authority; chain materialization binds to ready Issue revisions only after ResolvedChain freeze, and the materializer never invents a second dependency graph.
 
 Acceptance test for the integrated milestone unchanged: the SRE vertical-slice workflow runs fully data-defined through the generic loader/compiler/reducer/runtime with zero SRE-specific runtime topology code.
 
@@ -70,7 +70,7 @@ Acceptance test for the integrated milestone unchanged: the SRE vertical-slice w
 
 | Concern | Current authority |
 |---|---|
-| Task contract, readiness, dependencies, gates, and acceptance | Beads |
+| Task contract, revision, readiness, dependencies, claim, Journal continuity, provenance, and Closure | Substrate |
 | Implementation evidence | GitHub |
 | Integration state and commit policy | Git |
 | Specialist jobs and the managed activation protocol | Specialists |
@@ -79,15 +79,15 @@ Acceptance test for the integrated milestone unchanged: the SRE vertical-slice w
 | Program and epic projection | Jira |
 | Multi-repository operator presentation | Console read model |
 
-Beads remains the durable work authority until a reviewed replacement is active. Git remains the integration authority. xtmux owns bridge coordination state; it does not own Specialist jobs, chain state, finalization, or scheduling.
+Substrate is the durable work authority. Git remains the integration authority. Communication/bridge transports coordinate but do not own Specialist activations, chain/work authority, finalization, or scheduling.
 
-Jira contains epics, program state, and release evidence only. It must not duplicate step-level Beads state.
+Jira contains programme projection and major decision/status context only. It must not duplicate step-level Substrate state.
 
 ### 1.2 Public retrieval hierarchy
 
 Use the narrowest durable surface that answers the question:
 
-1. `bd show`, dependency, state, and gate commands for task contracts and acceptance.
+1. the pinned Substrate Issue revision / Resume Capsule / Journal-provenance surfaces for work contract and acceptance.
 2. `xtmux message-get` for an exact message and `xtmux agent-last` for a completed pane turn.
 3. `sp result` for a completed Specialist result.
 4. `sp feed`, `sp log`, and `sp forensic` for runtime event history; use their JSON forms for machine consumers.
@@ -97,11 +97,11 @@ Use the narrowest durable surface that answers the question:
 
 Live pane capture is a bounded diagnostic surface. It is not final-result storage.
 
-### 1.3 Current Beads surface inventory
+### 1.3 Durable-work surface inventory
 
-The v3.3 architecture reuses current Beads primitives instead of rebuilding them in Specialists.
+The current architecture consumes Substrate rather than rebuilding work authority in Specialists. The Beads table below is retained only as a **historical migration map** for capabilities that informed Substrate; it is not current operator doctrine.
 
-| Beads primitive | Current role | Specialists responsibility |
+| Historical Beads primitive | Migration meaning | Current Specialists responsibility |
 |---|---|---|
 | `bd merge-slot` | Exclusive access with holder and queued waiters | Observe and surface lease state; do not create a competing lease authority. |
 | `bd gate` | Typed async conditions for human, timer, GitHub run, GitHub PR, and Bead waits | Consume gate outcomes as validated evidence. |
@@ -111,7 +111,7 @@ The v3.3 architecture reuses current Beads primitives instead of rebuilding them
 | first-class acceptance, design, context, metadata, and wait fields | Structured task contract data | Prefer native fields over another contract serialization. |
 | `bd federation` | Cross-workspace coordination primitive | Evaluate before adding a Specialists-specific cross-repository store. |
 
-Any new Specialists-side primitive must state why the existing Beads primitive is insufficient.
+Any new Specialists-side work primitive must state why the existing Substrate/XTRM authority is insufficient. Do not revive a parallel Beads graph or lifecycle.
 
 ## 2. Current observability and identity design
 
@@ -244,8 +244,8 @@ A bridge without this ledger is an unowned subsystem and cannot enter DO0.
 | Owner | Owns | Does not own |
 |---|---|---|
 | xt | Git, worktree, branch, PR, and integration primitives | Specialist job state, evidence validation, bridge delivery |
-| Specialists | Job runtime, activation protocol, evidence validation, and job observability | Beads task authority, merge-slot arbitration, Git implementation |
-| Beads | Task contracts, dependencies, readiness, gates, acceptance, and merge slots | Runtime telemetry and Specialist execution |
+| Specialists | Activation runtime/protocol, role policy, evidence production/validation, observability | Substrate work authority, Issue Closure, Git integration |
+| Substrate | Issue contracts/revisions, readiness, dependencies/claims, Journal/provenance, Closure | Runtime telemetry and Specialist execution |
 | xtmux | Message delivery, obligations, monitoring, wake delivery, and topology | Specialist jobs, chain advancement, finalization, scheduling |
 | Console | Materialized operator views | Authoritative writes to any runtime or work system |
 | Substrate / Channels | Reviewed future replacement surfaces | Current authority before cutover |
