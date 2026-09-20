@@ -31,7 +31,7 @@
       "template_sets": [
         "sync-docs-scope-discipline",
         "per-turn-handoff-schema",
-        "bead-id-verbatim"
+        "issue-ref-verbatim"
       ]
     },
     "prompt": {
