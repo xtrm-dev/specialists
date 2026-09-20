@@ -117,7 +117,7 @@ UI != scheduler
 xtmux != workflow authority
 ```
 
-No new Specialists feature may introduce a second mutable authority for a concern already owned by Beads, Git, XTRM chain runtime, Channels, telemetry, or xtmux runtime state.
+No new Specialists feature may introduce a second mutable authority for a concern already owned by Substrate, Git, XTRM chain runtime, Channels, telemetry, or runtime coordination state.
 
 ## 5. Deterministic Specialist execution
 
@@ -172,7 +172,7 @@ FINALIZE validates and persists in deterministic order:
 3. scope and capability compliance;
 4. Git/worktree state and commit policy where applicable;
 5. authoritative result;
-6. Beads work/evidence reconciliation;
+6. Substrate Issue/Journal/provenance reconciliation;
 7. typed Channels/handoff notification;
 8. forensic and evaluation facts;
 9. activation-owned cleanup.
@@ -442,9 +442,9 @@ The current interactive `chain-coordinator` is a bridge participant/operator aid
 
 Requirements retained from the interactive programme:
 
-- stable role cognition excludes tracked Bead payload and flattened mandatory-rule blocks;
+- stable role cognition excludes tracked Issue payload and flattened mandatory-rule blocks;
 - direct tracked assignment and preheated standby are distinct modes;
-- tracked Bead/task/rules arrive exactly once as a user assignment after runtime readiness;
+- the pinned Issue/task/rules arrive exactly once as the tracked assignment after runtime readiness;
 - prompt bodies do not leak through argv, pane metadata, message summaries, or low-cardinality telemetry;
 - Pi and Claude remain interactive after assignment;
 - the coordinator consumes validated chain shape rather than hardcoded role sequences;
@@ -607,7 +607,7 @@ Total: **90 identifiers**.
 
 ### 17.1 Status rule
 
-`wp-continuity.json` records documentary status only; before dispatch, refresh current code, releases, Beads, and the XTRM execution plan. A historical `defined` status does not prove that work remains, and an old `delivered` claim does not prove current release identity.
+`wp-continuity.json` records documentary status only; before dispatch, refresh current code, releases, Substrate work state, and the XTRM execution plan. A historical `defined` status does not prove that work remains, and an old `delivered` claim does not prove current release identity.
 
 ### 17.2 No duplicate backlog
 
@@ -661,7 +661,7 @@ Do not promote:
 - output schema validates before authoritative persistence;
 - writer finalization touches/stages only authorized paths and honors commit policy;
 - read-only profiles cannot obtain write/commit capability through task prose;
-- result/Bead handoff/notification/final effects are idempotent;
+- result/Journal/provenance/notification/final effects are idempotent;
 - notification failure cannot rewrite an otherwise valid result verdict;
 - cleanup releases activation-owned transient resources without destroying durable work/evidence.
 
@@ -669,7 +669,7 @@ Do not promote:
 
 - templates, user JSON, ad-hoc typed composition, and imported formulas can converge through the generic ChainSource/ChainDefinition path;
 - approved topology is frozen and revisions are explicit;
-- Beads materialization follows freeze and agrees with native readiness/claim semantics;
+- Substrate Issue materialization follows freeze and agrees with native readiness/claim semantics;
 - a participant executes the assigned step rather than deciding successors;
 - validated evidence, not process exit, satisfies a chain step;
 - crash/restart does not rerun already satisfied authoritative work;
@@ -722,7 +722,7 @@ Before the affected package is dispatched, verify/decide as needed:
 3. secure prompt transport-file lifecycle/expiry policy if still used by the bridge;
 4. exact coordinator conflict-matrix serialization if it remains a bridge artifact;
 5. exact Claude readiness fact source where current hooks do not provide parity;
-6. current Beads memory retrieval/provenance surface before adding wrappers;
+6. current Substrate Journal/provenance and commit-memory retrieval surfaces before adding wrappers;
 7. which deterministic graders may become blocking in the first enforcement wave;
 8. authoritative provider-cost provenance; tokens/time remain primary until cost source is versioned;
 9. trial-count/confidence policy by evaluation suite;
