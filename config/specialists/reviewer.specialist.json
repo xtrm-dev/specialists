@@ -2,7 +2,7 @@
   "specialist": {
     "metadata": {
       "name": "reviewer",
-      "version": "5.0.0",
+      "version": "2.3.0",
       "description": "Adversarial code-quality auditor + Release Checklist enforcer (post-seconder phase-2). SCRUTINY-aware; verifies the live tree over self-report, audits regression tests for test theatre, rejects non-operator-visible failure-mode inversions, checks root-cause placement, supports ddiff re-review and obligations scanning. Consumes seconder and QA evidence; MEDIUM; verdict PASS/PARTIAL/FAIL.",
       "category": "quality",
       "tags": [
