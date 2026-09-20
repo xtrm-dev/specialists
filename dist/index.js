@@ -93695,8 +93695,10 @@ function createSpecialistDispatchTool(getHost, getPusher) {
           status: "dispatched",
           ...view,
           ...inline2 ? {
+            created_issue_ref: handle.issueRef,
+            created_issue_note: "This dispatch CREATED the Substrate Issue above from your inline contract. " + "Track its Journal/result/provenance explicitly. Specialist settlement is " + "evidence, not Issue Closure; use the authorized Substrate lifecycle for Closure.",
             created_bead_id: handle.issueRef,
-            created_bead_note: "This dispatch CREATED the bead above from your inline contract. It is a " + "durable board record and is yours to track: close it when the work is " + "done, or reassign it. It is not cleaned up automatically."
+            created_bead_note: "Compatibility alias: created_issue_ref is the authority. Track Journal/result/" + "provenance explicitly; settlement is not Issue Closure."
           } : {},
           step_contract: {
             root_work_ref: handle.stepContract.rootWorkRef,
