@@ -1064,7 +1064,7 @@ export default function specialistSubagentsExtension(pi, options = {}) {
       'Issue through planning, not dispatch prose. Write-capable Specialists (MEDIUM/HIGH ' +
       'tiers) activate only when they can acquire the workspace lease. Settlement/result ' +
       'is evidence and does not perform Issue Closure. Each dispatch creates a persistent ' +
-      'activation YOU own: stop it with specialist_stop_activation when done.',
+      'activation YOU own: stop it with specialist_stop_activation when you are done with it.',
     promptSnippet: 'Dispatch an XTRM Specialist (specialist_dispatch: specialist, issue_ref)',
     renderCall: humanCallOf((args) => `Dispatch ${args.specialist ?? '?'} on ${args.issue_ref || args.bead_id || 'inline contract'}`),
     renderResult: humanResultOf(),
