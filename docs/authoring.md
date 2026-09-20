@@ -190,7 +190,7 @@ Use `execution.extensions` only for trusted executable extension config.
 - `"text"`: no report template injected (raw behavior)
 - `"json"`: specialist must return one parseable JSON object
 - `"markdown"`: specialist must use canonical report sections:
-  - `## Summary`, `## Status`, `## Changes`, `## Verification`, `## Risks`, `## Follow-ups`, `## Beads`
+  - `## Summary`, `## Status`, `## Changes`, `## Verification`, `## Risks`, `## Follow-ups`, `## Work`
   - Optional: `## Architecture`, `## Acceptance Criteria`, `## Machine-readable block`
 
 **`output_type` (semantic archetype):**
