@@ -90,6 +90,13 @@ Native activation is primary for Substrate-backed work: the ready pinned Issue r
 - Canonical role definitions are JSON under `config/specialists/*.specialist.json`.
 - New/current role prompts must not introduce `bd create/update/close/show` as lifecycle doctrine.
 
+- The production QA chain remains role-structured: writer → seconder → test-engineer → test-runner → security-auditor when sensitive → obligations-scanner → reviewer. Reviewer PASS is evidence, not Closure.
+- Before dispatching dependent work, verify git/workspace state and that prerequisite commits are actually present. Do not paper over stale-base or ownership conflicts with prompt prose.
+- `specialists doctor --pr-drift` and `sp ps --needs-attention` remain operator attention surfaces; use them before claiming a PR/job is clean.
+- GitNexus indexes can go stale after commit/merge; refresh/re-analyze when current impact evidence is UNKNOWN or obviously stale.
+- Package-tier Specialist definitions are edited in `config/specialists/*.specialist.json`, then schema/JSON validated. `sp edit` is the user/global override surface, not the package-authoring surface.
+- Permission tiers are load-bearing: creating new files requires the runtime's write capability (HIGH in the current contract); modifying existing files is a lower grant. Enforce scope with Issue/rule contracts, not by silently lowering permission.
+
 ## Commit messages ARE the changelog
 
 `CHANGELOG.md` is generated from commits by git-cliff (`changelog/cliff.toml`). Write the
