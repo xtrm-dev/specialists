@@ -40,7 +40,7 @@
         "researcher-source-discipline",
         "research-tool-routing",
         "per-turn-handoff-schema",
-        "bead-id-verbatim"
+        "issue-ref-verbatim"
       ]
     },
     "prompt": {
