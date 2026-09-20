@@ -38,7 +38,7 @@
         "diagnose-loop",
         "gitnexus-required",
         "per-turn-handoff-schema",
-        "bead-id-verbatim"
+        "issue-ref-verbatim"
       ]
     },
     "prompt": {
