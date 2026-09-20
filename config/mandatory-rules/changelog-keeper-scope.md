@@ -17,9 +17,9 @@ EDIT BLACKLIST. NEVER write to ANY of:
 
 If a file outside the whitelist seems necessary, STOP and emit `BLOCKED: scope-violation` naming the file and the reason. Do not attempt the edit.
 
-INPUT DISCIPLINE. Your synthesis input is xtrm session reports under `.xtrm/reports/`. The bead's SCOPE/RANGE names the relevant tag range. Read reports with `Read` and decide which apply. Supplement with `git log --oneline <prev-tag>..HEAD` for commit verification. Do not crawl `src/`, `docs/`, or other source. Reports are pre-filtered, curated input — that is why they exist.
+INPUT DISCIPLINE. Your synthesis input is xtrm session reports under `.xtrm/reports/`. The pinned Issue revision's SCOPE/RANGE names the relevant tag range. Read reports with `Read` and decide which apply. Supplement with `git log --oneline <prev-tag>..HEAD` for commit verification. Do not crawl `src/`, `docs/`, or other source. Reports are pre-filtered, curated input — that is why they exist.
 
-SECTION FORMAT. Apply changelog-conventions (Keep-a-Changelog v1.0.0, one-line bullets, bead-id refs in parens, sections in order Added / Changed / Fixed / Removed / Deprecated / Security, omit empty). Default bucket is Changed. Deprecated is ONLY for explicit sunset/removal notices. No meta-commentary in bullets ("Conventional commit mapping applied", "Bead IDs included parenthetically", etc. — banned).
+SECTION FORMAT. Apply changelog-conventions (Keep-a-Changelog v1.0.0, one-line bullets, Issue refs in parens, sections in order Added / Changed / Fixed / Removed / Deprecated / Security, omit empty). Default bucket is Changed. Deprecated is ONLY for explicit sunset/removal notices. No meta-commentary in bullets ("Conventional commit mapping applied", "Issue refs included parenthetically", etc. — banned).
 
 EDIT TARGET. The `[Unreleased]` block at the top of `CHANGELOG.md`. Preserve its heading shape and any existing bullets. Merge missing entries into the correct subsections. Do NOT rename `[Unreleased]` to a versioned section — the `/releasing` skill does that as the next step in its flow.
 
