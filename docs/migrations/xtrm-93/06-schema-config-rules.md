@@ -404,6 +404,19 @@ has no configurable input. Rule 4 is respected: nothing here touches settlement 
 
 ## E) Mandatory-rules leakage analysis
 
+> **CURRENT STATUS — semantic cutover implemented on `fix/xtrm-93-specialist-semantic-cutover`.**
+> The measurements below are preserved as the evidence that justified the change. Their
+> present-tense defect wording is historical on this branch:
+>
+> - the synthetic `workflow-quick-rules` / `STATIC_WORKFLOW_RULES_BLOCK` Beads injection is removed;
+> - `core-session-boundary` names the pinned Substrate Issue revision, Journal/result evidence, and explicit Closure;
+> - canonical role definitions load `issue-ref-verbatim`; `bead-id-verbatim` is quarantined as legacy compatibility only;
+> - `executor-delivery`, `git-workflow-safe`, changelog, sync-docs and security rules use Issue/Journal/Closure semantics;
+> - compatibility fields `beads_integration` / `beads_write_notes` remain until the legacy consumer is unreachable.
+>
+> See `specialist-definition-semantic-cutover.md`. N8 retains the mechanical zero-consumer cleanup; this correctness fix is deliberately pre-N8.
+
+
 ### E-1 The injected globals block IS Beads workflow doctrine (highest-severity leak)
 
 `buildMandatoryRulesInjection` always prepends a synthetic set unless `disable_default_globals` is true:
@@ -425,9 +438,7 @@ has no configurable input. Rule 4 is respected: nothing here touches settlement 
 - Under the native runtime this is **wrong**, not merely stale: native dispatch has no Beads client — `native-host.ts:631-634` says "No Beads client, no `bd` subprocess, no second readiness derivation". A specialist told to run `bd update <id> --claim` would either fail, or shell out to a board the native runtime does not own.
 - `disable_default_globals` is the only switch, and it is a **user-rules-only escape hatch**, not a runtime-owned fix: it also suppresses nothing else (`mandatory-rules.ts:377` gates exactly this one synthetic set). Rule 4 spirit: the runtime, not the definition, should decide whether Beads doctrine is injected.
 
-**Post-cutover action:** delete `mandatory-rules.ts:377-390,402,407,410` and `memory-retrieval.ts:10-21` (§B-3). Do not
-replace with a native equivalent — the native workflow doctrine lives in `required-platform-rules.ts` and the
-`core-session-boundary` set.
+**Disposition:** DELIVERED by the semantic cutover. The synthetic global is removed now because it was a native correctness defect, not a legacy-field cleanup dependency. Native workflow doctrine remains in required platform rules and `core-session-boundary`.
 
 ### E-2 `core-session-boundary` (required set — injected into EVERY specialist, native and legacy)
 
@@ -444,8 +455,7 @@ the same, so the **semantics survive** — this is a vocabulary leak, not a doct
 ship under the native runtime because a specialist that reports "the bead is missing" while the runtime calls it an
 issue produces ambiguous refusal notes.
 
-**Action:** rewrite the noun (Bead → Issue/work item) in `core-session-boundary.md`; keep the set. Do not remove the
-set — it is the native runtime's only always-on XTRM boundary rule.
+**Disposition:** DELIVERED. `core-session-boundary` now names the pinned Substrate Issue revision and preserves the always-on XTRM contract boundary.
 
 ### E-3 `bead-id-verbatim` (6 Beads-token occurrences — highest density)
 
@@ -463,8 +473,7 @@ Referenced by 18 of 19 shipped `template_sets` declarations: `debugger`, `execut
 `specialists-creator`, `sync-docs`, `test-engineer`, `test-runner`, `xt-merge`, plus the `changelog-*` pair via
 `per-turn-handoff-schema` adjacency.
 
-**Action:** rewrite the set to name the runtime-neutral object (`issue ref` / `$issue_ref`) and keep the set id, so
-the 18 `template_sets` references survive. Do not delete the set while those references exist.
+**Disposition:** DELIVERED with a safer split: canonical definitions now reference `issue-ref-verbatim`; `bead-id-verbatim` remains under its old id only as explicitly legacy compatibility, avoiding a false claim that native and legacy identifiers are the same authority.
 
 ### E-4 `executor-delivery` (2 occurrences, one of them an instruction the native runtime cannot satisfy)
 
@@ -477,7 +486,7 @@ the 18 `template_sets` references survive. Do not delete the set while those ref
 
 Referenced by `executor.specialist.json` only.
 
-**Action:** rewrite both nouns; keep the allowlist doctrine (it is runtime-independent and load-bearing).
+**Disposition:** DELIVERED. Scope allowlisting remains load-bearing; lifecycle/output wording now uses pinned Issue + Journal/result + explicit Closure.
 
 ### E-5 `git-workflow-safe` (default set — injected into EVERY specialist)
 
@@ -492,9 +501,7 @@ native runtime the claim is an activation-bound Issue claim owned by the work-it
 (`native-host.ts:650-680`), and no commit is created by the runtime at all (native has zero `auto_commit` readers).
 The "one branch per issue" and "push only after sync" halves remain correct.
 
-**Action:** rewrite to the activation claim semantics, or demote `git-workflow-safe` out of `default_template_sets`
-so it stops being injected into every activation. Note it is also declared explicitly by 3 configs
-(`changelog-keeper`, `executor`) — those references need the same treatment.
+**Disposition:** DELIVERED. The set remains default but now expresses live claim/workspace discipline and explicitly states that commit/push/PASS/settlement do not perform Issue Closure.
 
 ### E-6 `changelog-keeper-scope` (3 occurrences) and `changelog-conventions` (2 occurrences)
 
@@ -504,15 +511,14 @@ so it stops being injected into every activation. Note it is also declared expli
 These encode a Beads-id commit-message convention. Under the native runtime the durable reference is an Issue ref.
 The blacklist line `.beads/**` is harmless but stale if the repo no longer has `.beads/`.
 
-**Action:** replace `bead-id refs` with `issue-ref refs` (or make the id form runtime-neutral). Low priority —
-these affect two specialists only.
+**Disposition:** DELIVERED. Changelog rules use durable Issue refs; `.beads/**` remains only as a file blacklist for legacy workspace noise.
 
 ### E-7 `sync-docs-scope-discipline` (2 occurrences)
 
 `sync-docs-scope-discipline.md`: "The bead's `SCOPE` field MUST name exactly one doc path", "Cross-cutting updates
 are separate beads with their own SCOPE."
 
-**Action:** noun rewrite; the one-doc-per-invocation discipline is runtime-independent and should stay.
+**Disposition:** DELIVERED. The one-doc invariant now binds to the pinned Issue revision's SCOPE.
 
 ### E-8 Verified clean (no Beads doctrine)
 
@@ -531,9 +537,7 @@ Counts by file (grep `-ciE '\b(bead|beads|bd )\b'`): `bead-id-verbatim` 6, `chan
 
 1. It documents a four-tier ladder (lines 12-28) that matches `mandatory-rules.ts:153-177` — **correct** — while
    `docs/surface-ownership.md:11-15` claims the same for specialist definitions, which is **wrong** (§A.13).
-2. It says `disable_default_globals` "suppresses only the inline `STATIC_WORKFLOW_RULES_BLOCK` (the
-   `## Beads Workflow Quick Rules` section emitted as `workflow-quick-rules`)" — **correct** per
-   `mandatory-rules.ts:377-390`, and it correctly notes index-driven sets still load (`:368,393`).
+2. **CORRECTED:** the synthetic `STATIC_WORKFLOW_RULES_BLOCK` / `workflow-quick-rules` path is retired. `disable_default_globals` remains a compatibility field but no longer controls Beads doctrine; required/default index-driven sets remain authoritative.
 3. It calls `.specialists/default/mandatory-rules/` "a mirror of canonical, placed in every downstream project" —
    the *specialist* loader does not read `.specialists/default/` at all (`loader.ts:148-157`); only the mandatory-rules
    loader does. The README is right for mandatory-rules; the sibling doc generalizes it wrongly.
