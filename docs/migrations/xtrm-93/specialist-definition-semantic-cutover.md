@@ -84,3 +84,22 @@ Role-specific rules:
 ## Anti-regression requirement
 
 Canonical current surfaces must not newly introduce Beads lifecycle authority. Tests should fail when current mandatory rules or current role prompts contain unqualified `bd create`, `bd update`, `bd close`, or `bd show` instructions outside an explicitly declared legacy-compatibility surface.
+
+## Residual Beads asset disposition
+
+The semantic cutover does **not** imply zero Beads strings in the repository. Remaining assets are classified by consumer:
+
+| Surface | Disposition | Why it remains |
+|---|---|---|
+| `src/specialist/{beads,bead-gate,bead-notes}.ts` | LEGACY_COMPATIBILITY | Supervisor/Runner backend still consumes them before N9 |
+| `src/cli/{chat,render-bead,node,merge,epic}.ts` and legacy branches in `run/system-prompt` | LEGACY_COMPATIBILITY | real old CLI/NodeSupervisor behavior; removal waits for the relevant XTRM-93 node |
+| `specialist.beads_integration`, `beads_write_notes`, `inputBeadId`, `bead_id` compatibility fields | COMPATIBILITY_DATA | parsed/consumed by old backend or preserved as API aliases; do not teach as authority |
+| `config/mandatory-rules/bead-id-verbatim.md` | LEGACY_COMPATIBILITY | only for explicitly Beads-backed calls; canonical definitions use `issue-ref-verbatim` |
+| `.agents/skills/beads/` | LEGACY_COMPATIBILITY / MIGRATION | historical Beads inspection/import only |
+| `config/specialists/node-coordinator.specialist.json` | LEGACY_COMPATIBILITY | NodeSupervisor API really exposes `create-bead`; N7 decides its future |
+| `scripts/run-executor-benchmark.mjs` | LEGACY_COMPATIBILITY | benchmark is built around `bd` + `sp run --bead --worktree`; migration waits for N4 CLI native dispatch |
+| Beads-named tests and historical fixtures/reports | HISTORICAL / COMPATIBILITY_TEST | preserve old-path regression/provenance until deletion node |
+| `dist/types/**bead**` and bundled legacy code | GENERATED_COMPATIBILITY | compiled output mirrors still-reachable old source; N10 deletes only after N9 |
+
+Current/native assets must not use these surfaces as durable-work doctrine.
+
