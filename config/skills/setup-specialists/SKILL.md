@@ -344,7 +344,7 @@ and are pruned by `sp prune-stale-defaults`.
 |---|---|
 | Your provider's models, set once for everywhere | `--global` |
 | Extension opt-out (e.g. no GitNexus for transcriber) | `--global` |
-| `notes_mode` / `output_file` for chained pipelines | `--global` |
+| `notes_mode` / `output_file` for legacy Supervisor/chained pipelines | `--global` (compatibility only) |
 | `thinking_level`, byte limits, fallback chains | `--global` |
 | Different model just for this repo | per-repo |
 | Override a field NOT allowlisted at the global layer (see below) | per-repo |
@@ -414,8 +414,8 @@ falls through to `$EDITOR` in some environments (open follow-up). Prefer
 | `<name>.execution.extensions.gitnexus` | bool \| null | `false` to skip GitNexus MCP injection. |
 | `<name>.prompt.system_prompt_mode` | enum \| null | `append` (default for package specs) or `replace`. |
 | `<name>.stall_detection.waiting_auto_close_ms` | number \| null | Opt-in waiting auto-close threshold. Graceful close first; forced termination only if close hangs. |
-| `<name>.beads_write_notes` | bool \| null | `false` to disable auto-append to input bead notes. |
-| `<name>.notes_mode` | enum \| null | `full-trail` (default) or `final-only` — see [Handoff modes](#handoff-modes). |
+| `<name>.beads_write_notes` | bool \| null | **Legacy compatibility only.** `false` disables legacy Supervisor bead-note writes; native settlement/Journal is unaffected. |
+| `<name>.notes_mode` | enum \| null | **Legacy compatibility only.** `full-trail` or `final-only` for Supervisor/output-file handoffs; native settlement/result does not derive from this field. |
 | `<name>.output_file` | string \| null | Path to write the rendered handoff block. **No env flag required** since `unitAI-f58ma`. |
 | `<name>.mandatory_rules.template_sets` | string[] \| null | Selects specialist-specific rule sets. `null` inherits the shipped list, `[]` selects none, non-empty replaces. Index required/default sets always load. |
 
@@ -477,7 +477,7 @@ pi --model <provider>/<model> --print "ping"   # must reply: pong
 
 ## Handoff modes
 
-`notes_mode` controls how the rendered handoff block lands in the input bead
+On the legacy Supervisor/Runner surface, `notes_mode` controls how the rendered handoff block lands in the input bead
 notes **and** in the spec's `output_file`. Both are fed from a single source
 (`turn_summary.text_content`) so there is no divergence.
 
@@ -507,8 +507,7 @@ sp edit --global --set sync-docs.output_file ".specialists/sync-docs-result.md"
 echo '.specialists/*-result.md' >> .gitignore   # avoid committing the artifact
 ```
 
-For a human-monitored keep-alive role, leave `notes_mode: null` (= default
-`full-trail`) so you see the trail accumulate in `bd show <id>`.
+For a human-monitored **legacy CLI** keep-alive role, `notes_mode: null` keeps the legacy `full-trail` behavior. Do not use `bd show`/bead notes as the handoff source for native activations; consume persisted result/Journal/forensics instead.
 
 ## Common pitfalls
 
