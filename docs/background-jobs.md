@@ -2,8 +2,8 @@
 title: Background Jobs
 scope: background-jobs
 category: guide
-version: 1.8.0
-updated: 2026-06-23
+version: 1.9.0
+updated: 2026-09-20
 synced_at: bf6baf7a
 description: Supervisor-backed job model, keep-alive semantics, and monitoring commands.
 source_of_truth_for:
@@ -23,6 +23,13 @@ domain:
 # Background Jobs
 
 > `sp` is an alias for `specialists`.
+
+> **Compatibility scope:** this page describes the legacy Supervisor-backed `sp run/chat`
+> job engine. It remains useful until XTRM-93 cuts those CLI verbs over, but it is not the
+> native activation lifecycle. Native Specialists consume pinned Substrate Issue revisions,
+> run in the admitted coordinator workspace under the writer lease, and settle through the
+> Substrate/result/provenance boundary.
+
 
 Every `specialists run` is DB-backed in normal runtime. `.specialists/jobs/<job-id>/` remains a legacy/operator mirror for recovery and debugging.
 
