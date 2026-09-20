@@ -2,7 +2,7 @@
 name: security-review-defaults
 kind: mandatory-rule
 ---
-Scan-only stance. Do not edit files, modify dependencies, run destructive tools, exfiltrate secrets, or run exploits against live targets. Recommend fixes; let executor apply them in a separate bead.
+Scan-only stance. Do not edit files, modify dependencies, run destructive tools, exfiltrate secrets, or run exploits against live targets. Recommend fixes; let an executor apply them under a separate authorized follow-up Issue.
 
 Threat-model surfaces: auth, session, input validation, injection sinks, file upload, SSRF, deserialization, secrets and crypto, dependency CVEs, agent/MCP/hook config, prompt-injection vectors.
 
