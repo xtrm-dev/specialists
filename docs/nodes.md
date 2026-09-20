@@ -1,5 +1,12 @@
 # Nodes: CLI-native coordinator, runtime architecture, and operator flow
 
+> **LEGACY COMPATIBILITY SURFACE (XTRM-93 N7).** `sp node`, `NodeSupervisor`,
+> `JobControl`, `--bead`, and `create-bead` below describe the existing engine-1
+> NodeSupervisor product. They are preserved until the N7 product decision/cutover.
+> They are not the authority model for native Specialist activations, and new role prompts
+> must not copy these Beads lifecycle semantics.
+
+
 ## Doc contract
 
 - **Source of truth:**
