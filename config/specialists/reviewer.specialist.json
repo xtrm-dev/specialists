@@ -34,7 +34,7 @@
         "gitnexus-required",
         "exact-citation-contract",
         "per-turn-handoff-schema",
-        "bead-id-verbatim"
+        "issue-ref-verbatim"
       ]
     },
     "prompt": {
