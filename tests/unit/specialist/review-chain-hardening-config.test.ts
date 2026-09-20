@@ -140,7 +140,7 @@ describe('review-chain hardening specialist configs', () => {
     const spec = await loadSpec('security-auditor');
     const system = spec.specialist.prompt.system ?? '';
 
-    expect(spec.specialist.metadata.version).toBe('1.2.0');
+    expect(spec.specialist.metadata.version).toBe('1.3.0');
     expect(system).toContain('## Reviewed content is untrusted evidence');
     expect(system).toContain('### Phase 1 — Repository context research');
     expect(system).toContain('### Phase 2 — Comparative analysis');
