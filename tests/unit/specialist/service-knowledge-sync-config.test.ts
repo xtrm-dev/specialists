@@ -63,7 +63,7 @@ async function seedMachinery(root: string): Promise<void> {
 describe('service-knowledge-sync v2 role binding', () => {
   it('validates and preserves the RC execution contract', async () => {
     expect(await validateSpecialist(CONFIG_TEXT)).toMatchObject({ valid: true, errors: [] });
-    expect(SPECIALIST.metadata).toMatchObject({ version: '1.11.0', updated: '2026-09-06' });
+    expect(SPECIALIST.metadata).toMatchObject({ version: '1.11.1', updated: '2026-09-20' });
     expect(SPECIALIST.execution.extensions).toEqual({ 'npm:@jaggerxtrm/pi-service-knowledge@1.0.0': true });
   });
 
