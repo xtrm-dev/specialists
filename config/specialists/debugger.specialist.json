@@ -62,7 +62,6 @@
       ],
       "external_commands": [
         "grep",
-        "bd",
         "git"
       ]
     },
