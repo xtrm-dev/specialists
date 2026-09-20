@@ -27,9 +27,10 @@ domain:
 The server (`src/mcp/v2-server.ts`, `buildV2Server`) registers its tools
 explicitly in one array. There are two surfaces:
 
-- **Core Specialists activation tools (always registered, 6):**
+- **Core Specialists activation tools (always registered, 8):**
   `specialist_status`, `specialist_dispatch`, `specialist_reply`,
-  `specialist_resume`, `specialist_stop_activation`, `specialist_list`.
+  `specialist_resume`, `specialist_retry`, `specialist_steer`,
+  `specialist_stop_activation`, `specialist_list`.
 - **Specialists-hosted Substrate service tools (conditional, 3):**
   `substrate_issue`, `substrate_journal`, `substrate_provenance`. Admitted
   only when Substrate resolves (`resolveSubstrate()` reports available) or
@@ -69,7 +70,7 @@ that parsed the verbose form working with one flag.
 | `substrate_journal` | Substrate journal service (conditional) |
 | `substrate_provenance` | Substrate provenance service (conditional) |
 
-Inventory derived from the `tools` array in `src/mcp/v2-server.ts`: seven core
+Inventory derived from the `tools` array in `src/mcp/v2-server.ts`: eight core
 factories plus three Substrate factories behind the availability gate.
 
 ## `specialist_status`
