@@ -1262,7 +1262,7 @@ specialists ps [--json] [--all] [--follow | -f]
 - `--bead <id>`: Show only jobs whose `bead_id` matches the given id exactly.
 - `--since <duration>`: Show only jobs that started within the last duration. Accepts `<n>s`, `<n>m`, `<n>h`, `<n>d` (e.g. `30m`, `2h`, `1d`).
 - `--mine`: Restrict output to the current operator's work. The two views resolve ownership differently, and each reports what it could resolve:
-  - **Jobs:** a bead is "mine" when it is currently assigned to the current user (resolved via `bd query "assignee=me" --json`). Falls back to no-op if `bd` is unreachable.
+  - **Legacy jobs:** this compatibility view still derives "mine" from the old Beads assignee path. That implementation is a known legacy residual (SPECIALISTS-105) and must not be read as current work authority. Native activations do not use it.
   - **Native activations:** ownership is a Substrate claim (`issue_claims.activation_id` against a claim holder), not a Beads assignee. `sp ps` can resolve it only when the session carries an identity (`XTRM_SESSION_NAME`, then `XTRM_SESSION_ID`), matched exactly against the recorded holder. Ownership filtering is a candidate-defining predicate: it is applied before the activation bound, so it can never be starved by newer unrelated activations. Because `--mine` is an explicit request, an unresolvable identity **fails closed** — `native_activations` is empty and the reason is reported (`native_activations_note`, plus a `note:` line in human output), never the unfiltered window presented as yours. `sp ps --mine --json` additionally carries `native_activation_filters.mine` (`{requested, applied, reason}`), so a consumer can distinguish "matched nothing" from "could not be evaluated" without parsing prose. The key is present only when `--mine` was requested; otherwise the default `--json` schema is unchanged.
 - `--include-terminal`: Show epics in `merged` or `abandoned` state. Default hides them to keep the view focused on active work. Legacy alias `--include-merged` is preserved (covers both states now).
 - `--node <id>`: Show only jobs that belong to the given node id.
@@ -1539,7 +1539,9 @@ specialists epic merge unitAI-3f7b --rebuild
 
 ---
 
-## `specialists merge`
+## `specialists merge` — legacy/broken compatibility surface
+
+> This command belongs to the old Beads/Supervisor/worktree publication path and is not the current XTRM integration authority. `sp help` marks merge broken; Core/Git owns current integration. The behavior below is retained as compatibility documentation until XTRM-93 removes the legacy consumer.
 
 ### Synopsis
 
@@ -1557,8 +1559,8 @@ specialists merge <chain-root-bead-id> [--rebuild]
 
 ### Behavior
 
-**Standalone chain merge**:
-1. Read bead via `bd show --json`
+**Legacy standalone chain merge**:
+1. Read compatibility bead via `bd show --json`
 2. Check epic membership via `resolveChainEpicMembership()`
 3. If chain belongs to unresolved epic, **refuse merge** with error message
 4. Preview merge delta and evaluate worthiness (refuse empty/noise-only)
