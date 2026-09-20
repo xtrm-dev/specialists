@@ -1,4 +1,9 @@
 #!/usr/bin/env node
+// LEGACY XTRM-93 COMPATIBILITY HARNESS.
+// This benchmark still drives the old Supervisor/Beads CLI path (bd create/update,
+// sp run --bead --worktree). It is not evidence for native Substrate activation
+// semantics and must not be copied into new orchestration. N4 is the earliest node
+// that can replace its CLI dispatch path without inventing an unsupported surface.
 import { mkdirSync, existsSync, readFileSync, appendFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -260,6 +265,7 @@ function buildSummaryMarkdown(rows, summary) {
 }
 
 function main() {
+  console.error('[legacy benchmark] Supervisor/Beads compatibility harness; not native/Substrate acceptance evidence');
   const options = parseArgs(process.argv.slice(2));
   const config = readConfig(options.configPath);
   const runDir = resolve(options.outputRoot, options.runId);
