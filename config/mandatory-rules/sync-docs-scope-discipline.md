@@ -2,7 +2,7 @@
 name: sync-docs-scope-discipline
 kind: mandatory-rule
 ---
-ONE DOC PER INVOCATION. The bead's `SCOPE` field MUST name exactly one doc path. If `SCOPE` names zero docs, more than one doc, or anything other than a single `docs/<name>.md` (or `CHANGELOG.md` / `README.md` if that IS the SCOPE doc), STOP immediately and emit a `BLOCKED: scope-violation` report. Do not proceed.
+ONE DOC PER INVOCATION. The pinned Issue revision's `SCOPE` field MUST name exactly one doc path. If `SCOPE` names zero docs, more than one doc, or anything other than a single `docs/<name>.md` (or `CHANGELOG.md` / `README.md` if that IS the SCOPE doc), STOP immediately and emit a `BLOCKED: scope-violation` report. Do not proceed.
 
 INPUTS ARE FIXED. Your only sources of truth for what changed in the project:
 - The pre-script output above (latest xt report excerpt + recent master commits).
@@ -23,7 +23,7 @@ The pre-script context plus per-commit `git show -- <paths>` is exhaustive. Read
 
 EXCEPTION (sole allowed source-inspection path): the `git show <hash> -- <paths>` form described above. No other tool, command, or pattern is permitted to read source files. The "DO NOT INSPECT SOURCE FILES" ban applies to every tool *except* this one bounded form.
 
-EDIT BOUNDARY. Edit ONLY your one SCOPE doc. NEVER touch CHANGELOG (unless it IS your SCOPE doc), README, `.xtrm/skills/`, other docs, or any source file. Cross-cutting updates are separate beads with their own SCOPE.
+EDIT BOUNDARY. Edit ONLY your one SCOPE doc. NEVER touch CHANGELOG (unless it IS your SCOPE doc), README, `.xtrm/skills/`, other docs, or any source file. Cross-cutting updates require separate child/follow-up Issues with their own SCOPE, created by the authorized coordinator/planning surface.
 
 NO RE-READING. If you have already gathered context this turn, refer to your prior output. Do NOT re-fetch after compaction. If prior gathered context is unreachable after compaction, STOP and emit `BLOCKED: context-lost-after-compaction` — do not re-run tools to recover.
 
