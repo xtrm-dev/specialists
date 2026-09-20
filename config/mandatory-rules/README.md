@@ -33,13 +33,11 @@ At specialist spawn, the runner resolves sets from:
 The resulting block is appended to the rendered task prompt as
 `## MANDATORY_RULES` with one `### <set-id>` section per set.
 
-> **`disable_default_globals` scope:** it suppresses only the inline
-> `STATIC_WORKFLOW_RULES_BLOCK` (the `## Beads Workflow Quick Rules` section
-> emitted as `workflow-quick-rules`). It does **not** suppress index-driven
-> sets — `default_template_sets` loads exactly like `required_template_sets`.
-> True user-rules-only runs need `disable_default_globals: true` **and** a
-> user overlay index in `.specialists/user/mandatory-rules/index.json` that
-> clears required/default sets.
+> **`disable_default_globals` compatibility note:** the former inline
+> `workflow-quick-rules` Beads block is retired and no longer injected.
+> The field remains temporarily for schema/override compatibility during XTRM-93,
+> but index-driven `required_template_sets` and `default_template_sets` are the
+> current rule authority and are unaffected by this flag.
 
 ## Authoring a rule set
 
@@ -160,7 +158,7 @@ only applies to this repo (e.g. "use bunx here"), put it in
 The injection block is capped at 2000 estimated tokens (`src/specialist/task-prompt.ts`).
 Sections use a stable priority policy:
 
-1. `must_keep`: `workflow-quick-rules`, `required_template_sets`, and specialist inline rules. These sections are never evicted.
+1. `must_keep`: `required_template_sets` and specialist inline rules. These sections are never evicted.
 2. `important`: `default_template_sets`.
 3. `optional`: specialist `template_sets` that are not also required or default sets.
 
