@@ -32,7 +32,7 @@
         "overthinker-4phase",
         "research-tool-routing",
         "per-turn-handoff-schema",
-        "bead-id-verbatim"
+        "issue-ref-verbatim"
       ]
     },
     "prompt": {
