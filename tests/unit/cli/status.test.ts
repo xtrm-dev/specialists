@@ -136,7 +136,7 @@ describe('status CLI — run()', () => {
     expect(clean).toContain('pi');
   }, TEST_TIMEOUT_MS);
 
-  it('prints beads section header', async () => {
+  it('labels Beads as legacy compatibility rather than current issue authority', async () => {
     process.argv = ['node', 'specialists', 'status'];
     const output: string[] = [];
     vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
@@ -145,7 +145,8 @@ describe('status CLI — run()', () => {
     const { run } = await import('../../../src/cli/status.js');
     await run();
     const clean = stripAnsi(output.join('\n'));
-    expect(clean).toContain('beads');
+    expect(clean).toContain('legacy Beads compatibility');
+    expect(clean).not.toContain('run bd init to enable issue tracking');
   }, TEST_TIMEOUT_MS);
 
   it('prints MCP section header', async () => {
