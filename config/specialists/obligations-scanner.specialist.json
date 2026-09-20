@@ -33,7 +33,7 @@
         "explorer-readonly",
         "exact-citation-contract",
         "per-turn-handoff-schema",
-        "bead-id-verbatim"
+        "issue-ref-verbatim"
       ]
     },
     "permissions": {
