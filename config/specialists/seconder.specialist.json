@@ -39,7 +39,7 @@
         "gitnexus-required",
         "code-quality-defaults",
         "per-turn-handoff-schema",
-        "bead-id-verbatim"
+        "issue-ref-verbatim"
       ],
       "disable_default_globals": false,
       "inline_rules": []
