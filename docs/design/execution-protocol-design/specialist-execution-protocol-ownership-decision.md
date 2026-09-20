@@ -60,13 +60,13 @@ The chain reducer decides whether a validated Specialist result satisfies a chai
 | Role permission/capability profile | Specialist definition |
 | Memory policy | Specialist profile plus current task decision |
 | Activation-local plan | Specialist output, schema-validated by runtime |
-| Task mandate and authorized scope | Root/step Bead contract |
+| Task mandate and authorized scope | Pinned root/step Substrate Issue revision / resolved step contract |
 | Required role-specific evidence | Specialist profile plus step contract |
-| Commit/result/Bead-note/message finalization | Specialists runtime |
+| Result/settlement/provenance finalization | Specialists runtime through the Substrate boundary |
 | Chain topology and mandatory gates | Chain template and resolved chain |
 | Runnable/satisfied chain state | Chain reducer over persisted evidence |
 | Delivery and wake | xtmux today; Channels target |
-| Durable task and acceptance state | Beads |
+| Durable work, Journal continuity, claims and Closure | Substrate |
 | Git integration truth | Git |
 
 ---
