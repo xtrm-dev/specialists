@@ -1,5 +1,11 @@
 # using-specialists: progressive disclosure — benchmark and review
 
+> **DATED BENCHMARK / MIGRATION PROVENANCE.** Measurements, command examples and the
+> `bead_id`/launcher vocabulary below describe the v3.7→v3.8 split at the time it was
+> measured. Current doctrine is the live `config/skills/using-specialists/SKILL.md`:
+> typed Substrate Issue service for authority, `issue_ref` primary for native dispatch,
+> and Beads/legacy CLI vocabulary only where explicitly marked compatibility.
+
 Epic `unitAI-6639v`. Compares the pre-split skill (v3.7) with the router + references
 layout (v3.8). Written at close of `unitAI-6639v.3`.
 
