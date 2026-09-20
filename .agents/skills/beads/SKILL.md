@@ -1,80 +1,48 @@
 ---
 name: beads
-description: Use when working in a repository that uses bd or Beads for durable project task tracking, issue dependencies, blocker management, multi-session handoff, or shared work memory. Trigger when the user asks to find ready work, claim or close tasks, create follow-up work, inspect blockers, recover project context, or choose between local planning and persistent project tracking.
+description: >-
+  Legacy Beads compatibility and migration intake only. Use when an explicitly
+  Beads-backed legacy Specialists surface still requires bd, when inspecting
+  historical Beads state, or when preparing/importing Beads data into Substrate.
+  Do not use this skill as the durable-work doctrine for native/current XTRM work.
 ---
 
-# Beads
+# Beads — legacy compatibility only
 
-Use Beads as the shared project task system. Local plans, scratch files, and personal memories are useful, but they are not the durable source of truth for project work.
+> **XTRM cutover:** Substrate owns durable work. For current work use the
+> `using-substrate` and `using-xtrm` doctrine. Historical Beads IDs may resolve as
+> Substrate aliases, but an alias is not work authority.
 
-## First Step
+Use this skill only when one of these is true:
 
-Run:
+- the active command is explicitly documented as a legacy Beads-backed `sp` / Supervisor / NodeSupervisor surface;
+- migration or archaeology requires reading historical Beads state;
+- an import/alias reconciliation step explicitly requires `bd`.
 
-```bash
-bd prime
+Do not generalize legacy commands into native Specialist procedure.
+
+## Native/current rule
+
+For native/current XTRM work:
+
+```text
+pinned ready Substrate Issue revision = executable contract
+Journal                            = continuity/findings/results
+Specialist settlement              = evidence
+Closure                            = explicit durable authority
+Git                                = code/integration truth
 ```
 
-If that prints nothing, check whether the repository has an active Beads workspace:
+Never replace that lifecycle with `bd show`, `bd update --claim`, notes, or `bd close`.
 
-```bash
-bd where
-```
+## Legacy compatibility
 
-## Preferred Route
+When an explicitly legacy surface genuinely requires a Beads ID:
 
-Use the `bd` CLI when shell access is available. It is the most compact and direct Beads interface.
+- copy the ID exactly from authoritative compatibility context or command output;
+- do not infer or regenerate it;
+- keep the operation scoped to that compatibility path;
+- do not treat Beads status/notes as authority for a native activation;
+- do not create parallel durable work in both trackers.
 
-## Core CLI Workflow
-
-1. Find work:
-
-```bash
-bd ready
-bd list --status=open
-bd list --status=in_progress
-```
-
-2. Inspect before editing:
-
-```bash
-bd show <id>
-```
-
-3. Claim work atomically:
-
-```bash
-bd update <id> --claim
-```
-
-4. Create durable follow-up work when implementation reveals new tasks:
-
-```bash
-bd create "Short title" --description="Why this exists and what needs to be done" --type=task --priority=2
-```
-
-5. Close completed work:
-
-```bash
-bd close <id> --reason="Completed"
-```
-
-## What Belongs In Beads
-
-Use Beads for:
-
-- shared project tasks
-- blockers and dependencies
-- discovered follow-up work
-- work that must survive thread reset, compaction, or handoff
-- status that another person or agent should be able to resume
-
-Use agent-local planning tools only for the current turn's execution checklist. Do not treat them as shared project state.
-
-## Rules
-
-- Do not create markdown TODO files as the source of truth when Beads is available.
-- Do not use `bd edit`; it opens an interactive editor. Use `bd update` flags instead.
-- Prefer `--json` when parsing `bd` output programmatically.
-- If hooks are installed, `bd prime` may already be injected. Run it manually when context is missing.
-- Do not auto-close or mutate tasks unless the work is actually complete.
+Use `bd --help` for exact syntax because legacy CLI details may continue to change during XTRM-93.
