@@ -920,9 +920,9 @@ End-to-end flow:
 
 Result: **Pi provides protocol events; Session adapts transport; Supervisor persists lifecycle truth.**
 
-## 9) Edit gate bead-claim KV pattern
+NaN
 
-The beads edit gate hooks (`beads-edit-gate`) check two KV keys before allowing file edits.
+The legacy Beads edit-gate hooks (`beads-edit-gate`) checked two KV keys before allowing file edits.
 
 ### Primary path: session-scoped claim
 
