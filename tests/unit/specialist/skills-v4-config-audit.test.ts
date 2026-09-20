@@ -86,4 +86,44 @@ describe('skills-v4 default specialist wiring', () => {
       expect(readFileSync(join(repoRoot, path), 'utf8')).toContain('buildRequiredPlatformRulesBlock');
     }
   });
+  it('keeps canonical role prompts off the retired Beads lifecycle', () => {
+    const files = readdirSync(specialistsDir).filter((name) => name.endsWith('.specialist.json')).sort();
+    const forbidden = /\bbd\s+(?:show|create|update|close|ready|list|query|dep|prime)\b/;
+    const violations: string[] = [];
+    for (const file of files) {
+      const text = readFileSync(join(specialistsDir, file), 'utf8');
+      if (forbidden.test(text)) violations.push(`${file}: direct bd lifecycle command`);
+      if (text.includes('"bead-id-verbatim"')) violations.push(`${file}: bead-id-verbatim`);
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it('keeps current mandatory rules on Substrate authority while quarantining the legacy bead rule', () => {
+    const rulesDir = join(repoRoot, 'config', 'mandatory-rules');
+    const forbidden = /\bbd\s+(?:show|create|update|close|ready|list|query|dep|prime)\b/;
+    const violations: string[] = [];
+    for (const file of readdirSync(rulesDir).filter((name) => name.endsWith('.md')).sort()) {
+      const text = readFileSync(join(rulesDir, file), 'utf8');
+      if (file !== 'bead-id-verbatim.md' && forbidden.test(text)) violations.push(file);
+    }
+    expect(violations).toEqual([]);
+
+    const boundary = readFileSync(join(rulesDir, 'core-session-boundary.md'), 'utf8');
+    expect(boundary).toContain('pinned Substrate Issue revision');
+    expect(boundary).toContain('Journal');
+    expect(boundary).toContain('not Issue Closure');
+
+    const legacy = readFileSync(join(rulesDir, 'bead-id-verbatim.md'), 'utf8');
+    expect(legacy).toContain('LEGACY COMPATIBILITY ONLY');
+    expect(legacy).toContain('Do not use Beads as durable authority');
+  });
+
+  it('does not inject the retired Beads workflow quick-rules block', () => {
+    const source = readFileSync(join(repoRoot, 'src', 'specialist', 'mandatory-rules.ts'), 'utf8');
+    expect(source).not.toContain('STATIC_WORKFLOW_RULES_BLOCK');
+    expect(source).not.toContain("id: 'workflow-quick-rules'");
+    const memorySource = readFileSync(join(repoRoot, 'src', 'specialist', 'memory-retrieval.ts'), 'utf8');
+    expect(memorySource).not.toContain('## Beads Workflow Quick Rules');
+  });
+
 });
