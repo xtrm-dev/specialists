@@ -7,18 +7,6 @@ const DEFAULT_STOP_WORDS = new Set([
 const MAX_KEYWORDS = 6;
 const CACHE_MAX_AGE_MS = 60 * 60 * 1000;
 
-export const STATIC_WORKFLOW_RULES_BLOCK = `
-## Beads Workflow Quick Rules
-- Claim work: \`bd update <id> --claim\`
-- Append progress notes: \`bd update <id> --append-notes "..."\`
-- Store reusable insight: \`bd remember "insight"\`
-- Close completed issue: \`bd close <id> --reason "done"\`
-
-## Session close checklist
-1. \`git add <files>\`
-2. \`git commit -m "..."\`
-3. \`git push\`
-`.trim();
 
 export interface MemoryRecord {
   key: string;
