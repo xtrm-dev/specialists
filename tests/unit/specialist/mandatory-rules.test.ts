@@ -84,24 +84,22 @@ describe('mandatory rules resolution', () => {
       },
     }));
 
-    expect(result.setsLoaded).toEqual(['workflow-quick-rules', 'core-session-boundary', 'git-workflow-safe', 'specialist-extra']);
+    expect(result.setsLoaded).toEqual(['core-session-boundary', 'git-workflow-safe', 'specialist-extra']);
     expect(result.inlineRulesCount).toBe(1);
-    expect(result.ruleCount).toBe(5);
-    expect(result.block).toContain('### workflow-quick-rules');
+    expect(result.ruleCount).toBe(4);
+    expect(result.block).not.toContain('### workflow-quick-rules');
     expect(result.block).toContain('### core-session-boundary');
     expect(result.block).toContain('### git-workflow-safe');
     expect(result.block).toContain('### specialist-extra');
     expect(result.block).toContain('### specialist-inline-rules');
-    expect((result.block.match(/^### /gm) ?? []).length).toBe(5);
+    expect((result.block.match(/^### /gm) ?? []).length).toBe(4);
     expect(result.sections.map(section => section.setId)).toEqual([
-      'workflow-quick-rules',
       'core-session-boundary',
       'git-workflow-safe',
       'specialist-extra',
       'specialist-inline-rules',
     ]);
     expect(result.sections.map(section => section.priority)).toEqual([
-      'must_keep',
       'must_keep',
       'important',
       'optional',
@@ -120,7 +118,7 @@ describe('mandatory rules resolution', () => {
       },
     }));
 
-    expect(result.setsLoaded).toEqual(['workflow-quick-rules']);
+    expect(result.setsLoaded).toEqual([]);
     expect(warnings.join('\n')).toContain('Missing mandatory-rules set: missing-set');
   });
 
@@ -166,7 +164,7 @@ describe('mandatory rules resolution', () => {
       },
     }));
 
-    expect(result.setsLoaded).toEqual(['workflow-quick-rules', 'core-session-boundary', 'git-workflow-safe', 'specialist-extra']);
+    expect(result.setsLoaded).toEqual(['core-session-boundary', 'git-workflow-safe', 'specialist-extra']);
     expect(result.block).toContain('### specialist-extra');
     expect(result.block).not.toContain('### old-set');
     // Required and default index policy untouched by the replacement.
@@ -197,7 +195,7 @@ describe('mandatory rules resolution', () => {
       },
     }));
 
-    expect(result.setsLoaded).toEqual(['workflow-quick-rules', 'core-session-boundary', 'git-workflow-safe']);
+    expect(result.setsLoaded).toEqual(['core-session-boundary', 'git-workflow-safe']);
     expect(result.block).not.toContain('### stale-set');
     expect(result.block).toContain('### core-session-boundary');
     expect(result.block).toContain('### git-workflow-safe');
@@ -232,7 +230,7 @@ describe('mandatory rules resolution', () => {
     }));
 
     expect(result.inlineRulesCount).toBe(1);
-    expect(result.ruleCount).toBe(2);
+    expect(result.ruleCount).toBe(1);
     expect(result.block).toContain('id: inline-1');
     expect(result.block).toContain('Keep changes focused.');
     expect((result.block.match(/^- \[/gm) ?? []).length).toBe(2);
@@ -263,7 +261,7 @@ describe('mandatory rules resolution', () => {
       specialist: {},
     }));
 
-    expect(result.setsLoaded).toEqual(expect.arrayContaining(['workflow-quick-rules', 'core-session-boundary', 'git-workflow-safe', 'bun-native-tooling']));
+    expect(result.setsLoaded).toEqual(expect.arrayContaining(['core-session-boundary', 'git-workflow-safe', 'bun-native-tooling']));
     expect(result.block).toContain('### bun-native-tooling');
     expect(result.block).toContain('use bunx not npx');
   });
@@ -286,7 +284,7 @@ describe('mandatory rules resolution', () => {
     }));
 
     expect(warnings).toHaveLength(0);
-    expect(result.setsLoaded).toEqual(['workflow-quick-rules', 'bun-native-tooling']);
+    expect(result.setsLoaded).toEqual(['bun-native-tooling']);
     expect(result.block).toContain('### bun-native-tooling');
     expect(result.block).toContain('use bunx not npx');
   });
@@ -306,7 +304,7 @@ describe('mandatory rules resolution', () => {
       specialist: {},
     }));
 
-    expect(result.setsLoaded).toEqual(['workflow-quick-rules', 'bun-native-tooling']);
+    expect(result.setsLoaded).toEqual(['bun-native-tooling']);
     expect(result.block).toContain('### bun-native-tooling');
   });
 
@@ -326,7 +324,7 @@ describe('mandatory rules resolution', () => {
       specialist: {},
     }));
 
-    expect(result.setsLoaded).toEqual(['workflow-quick-rules', 'git-workflow-safe']);
+    expect(result.setsLoaded).toEqual(['git-workflow-safe']);
     expect(result.block).toContain('### git-workflow-safe');
   });
 
@@ -353,7 +351,7 @@ describe('mandatory rules resolution', () => {
     }));
 
     expect(warnings).toHaveLength(0);
-    expect(result.setsLoaded).toEqual(['workflow-quick-rules', 'serena-cheatsheet']);
+    expect(result.setsLoaded).toEqual(['serena-cheatsheet']);
     expect(result.block).toContain('canonical serena rule');
   });
 
@@ -414,7 +412,7 @@ describe('mandatory rules resolution', () => {
       specialist: {},
     }));
 
-    expect(result.setsLoaded).toEqual(['workflow-quick-rules', 'core-session-boundary', 'bun-native-tooling', 'git-workflow-safe']);
+    expect(result.setsLoaded).toEqual(['core-session-boundary', 'bun-native-tooling', 'git-workflow-safe']);
     expect(result.block).toContain('### core-session-boundary');
     expect(result.block).toContain('### git-workflow-safe');
     expect(result.block).toContain('### bun-native-tooling');
@@ -454,8 +452,8 @@ describe('mandatory rules resolution', () => {
     }));
 
     expect(result.block).toContain('### specialist-inline-rules');
-    expect(result.setsLoaded).toEqual(['workflow-quick-rules']);
-    expect(result.ruleCount).toBe(2);
+    expect(result.setsLoaded).toEqual([]);
+    expect(result.ruleCount).toBe(1);
   });
 
   it.each(['../../evil', 'a/b', '..\\evil'] as const)('rejects unsafe set id %s at the sink (path containment, unitAI-klo6k)', unsafeId => {
@@ -471,7 +469,7 @@ describe('mandatory rules resolution', () => {
       }));
       expect(warnings.join('\n')).toContain('Rejecting unsafe mandatory-rules set id');
       expect(result.block).not.toContain('EXTERNAL_SECRET_MARKER');
-      expect(result.setsLoaded).toEqual(['workflow-quick-rules']);
+      expect(result.setsLoaded).toEqual([]);
     } finally {
       rmSync(evilPath, { force: true });
     }
@@ -496,7 +494,7 @@ describe('mandatory rules resolution', () => {
       }));
       expect(warnings.join('\n')).toContain('Rejecting unsafe mandatory-rules set id');
       expect(result.block).not.toContain('EXTERNAL_INDEX_SECRET_MARKER');
-      expect(result.setsLoaded).toEqual(['workflow-quick-rules']);
+      expect(result.setsLoaded).toEqual([]);
     } finally {
       rmSync(evilPath, { force: true });
     }
@@ -606,7 +604,6 @@ describe('mandatory rules budget compiler', () => {
 
   it.each([
     ['executor', [
-      'workflow-quick-rules',
       'core-session-boundary',
       'git-workflow-safe',
       'executor-delivery',
@@ -614,10 +611,9 @@ describe('mandatory rules budget compiler', () => {
       'gitnexus-required',
       'exact-citation-contract',
       'per-turn-handoff-schema',
-      'bead-id-verbatim',
+      'issue-ref-verbatim',
     ]],
     ['reviewer', [
-      'workflow-quick-rules',
       'core-session-boundary',
       'git-workflow-safe',
       'reviewer-verdict-format',
@@ -625,7 +621,7 @@ describe('mandatory rules budget compiler', () => {
       'gitnexus-required',
       'exact-citation-contract',
       'per-turn-handoff-schema',
-      'bead-id-verbatim',
+      'issue-ref-verbatim',
     ]],
   ] as const)('retains the complete %s governance set under the production budget', async (name, expectedIds) => {
     const config = JSON.parse(await readFile(join(process.cwd(), 'config', 'specialists', `${name}.specialist.json`), 'utf-8'));
