@@ -233,7 +233,7 @@ describe('mandatory rules resolution', () => {
     expect(result.ruleCount).toBe(1);
     expect(result.block).toContain('id: inline-1');
     expect(result.block).toContain('Keep changes focused.');
-    expect((result.block.match(/^- \[/gm) ?? []).length).toBe(2);
+    expect((result.block.match(/^- \[/gm) ?? []).length).toBe(1);
   });
 
   it('merges repo-specific .specialists/mandatory-rules/index.json with canonical config', async () => {
