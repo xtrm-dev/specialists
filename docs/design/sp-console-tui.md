@@ -1,8 +1,12 @@
 # `sp console` — grounded TUI design
 
-> Design target for a future `sp console` command in this repo.
+> **LEGACY DESIGN BASELINE — superseded for new XTRM-96 work.**
 >
-> This is **not** a substrate mock. Bind the UI to the runtime that exists today: `sp ps`, `sp feed`, `sp result`, `sp resume/steer/stop`, `sp epic`, `sp node`, and beads (`bd`). The companion HTML is only a visual mock for density, rail, palette, and key feel.
+> This file records the pre-native-console design that bound directly to Supervisor jobs and Beads.
+> Current XTRM-96 work uses the shared persisted Fleet/read model, Substrate work identity and optional
+> runtime attachments. `sp console` must remain a thin consumer of that read model; it must not own a
+> Beads browser or observability authority. The old `bd` examples below are retained as migration
+> provenance for the legacy console only.
 
 ## 0. Reality anchors
 
@@ -14,7 +18,7 @@ Read these before implementation and keep the design in sync with them:
 | Event stream | `src/cli/feed.ts`, `src/specialist/timeline-events.ts`, `src/specialist/timeline-query.ts` | DB-backed timeline, cursor/follow behavior, event filtering |
 | Job state | `src/specialist/supervisor.ts`, `src/specialist/status-load.ts` | `SupervisorStatus`, metrics, context health, worktree/chain/epic fields |
 | Runtime DB | `src/specialist/observability-sqlite.ts`, `src/specialist/observability-db.ts` | `.specialists/db/observability.db` as normal runtime store |
-| Beads | `src/specialist/beads.ts`, `bd list --json` / `bd show --json` (post-v1 browser) | v1 displays linked `bead_id`/title from job status; full bead browsing is post-v1 |
+| Legacy Beads view | old `src/specialist/beads.ts` / `bd` browser path | migration provenance only; new console/Fleet work consumes persisted Issue/read-model identity instead |
 | Existing TUI stack | `src/cli/chat.ts`, `src/cli/attach-tui.ts`, `src/cli/chat/feed.ts`, `src/cli/chat/status.ts` | `@earendil-works/pi-tui` lifecycle and component patterns |
 
 Non-negotiable corrections from older mockups:
@@ -23,7 +27,7 @@ Non-negotiable corrections from older mockups:
 - Do **not** invent substrate containers, steps, contracts, tethers, mailboxes, or waves.
 - Current `sp` does have `epic_id`, derived epic readiness, node runs, worktree reuse chains, and bead-linked jobs. Render those real entities only.
 - **V1 traceability includes terminal jobs**: history toggles, completed feed replay, and result inspection.
-- `bd show` / bead browser navigation is **post-v1**. V1 shows linked bead id/title in job rows but does not open bead detail.
+- The old `bd show` / BeadView plan is legacy-only. New operator surfaces must use the shared read model and Substrate-backed Issue identity.
 - The performance/status strip stays one line at the bottom, immediately above shortcuts.
 
 ## 1. Product shape
@@ -211,7 +215,7 @@ The row's `next` action should drive the default affordance:
 | `error` | result/error detail | feed/log replay |
 | `cancelled` / dead | log/feed replay | result if persisted |
 
-### 5.5 Beads in v1 vs post-v1
+### 5.5 Legacy BeadView design (superseded)
 
 V1 keeps bead traceability in job rows (`bead_id`, bead title, chain root bead) but does **not** open `bd show`. Full bead navigation is post-v1:
 
