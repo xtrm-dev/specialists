@@ -422,16 +422,16 @@ export async function run(): Promise<void> {
     ok(`${vStr}  —  ${pStr}`);
   }
 
-  // 3. beads
-  section('beads  (issue tracker)');
+  // 3. legacy Beads compatibility
+  section('legacy Beads compatibility');
   if (!bdInstalled) {
-    fail(`bd not installed — install ${yellow('bd')} first`);
+    info('bd not installed — native/Substrate Specialists are unaffected; legacy Supervisor/Beads commands are unavailable');
   } else {
-    ok(`bd installed${bdVersion?.ok ? `  ${dim(bdVersion.stdout)}` : ''}`);
+    info(`bd installed${bdVersion?.ok ? `  ${dim(bdVersion.stdout)}` : ''}  ${dim('(legacy compatibility only)')}`);
     if (beadsPresent) {
-      ok('.beads/ present in project');
+      info('.beads/ present — historical/legacy workspace available');
     } else {
-      warn(`.beads/ not found — run ${yellow('bd init')} to enable issue tracking`);
+      ok('no .beads/ workspace — expected for a Substrate-first project');
     }
   }
 
