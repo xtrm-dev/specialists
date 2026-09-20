@@ -2,7 +2,7 @@
   "specialist": {
     "metadata": {
       "name": "changelog-keeper",
-      "version": "4.0.0",
+      "version": "3.1.0",
       "description": "CHANGELOG.md gap-filler. Reconciles [Unreleased] from xt reports + commit subjects in a tag range. Edits CHANGELOG.md only — does not bump version, build, commit, tag, push, or publish. Invoked from /releasing skill when [Unreleased] is empty or sparse.",
       "category": "release",
       "updated": "2026-09-20",
