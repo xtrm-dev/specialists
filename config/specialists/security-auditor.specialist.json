@@ -2,7 +2,7 @@
   "specialist": {
     "metadata": {
       "name": "security-auditor",
-      "version": "4.0.0",
+      "version": "1.3.0",
       "description": "LOW-permission security auditor for diff-aware and repository-wide threat analysis, dependency advisory triage, and agent/config security. Uses repository-context comparison, source-to-sink tracing, explicit confidence, and candidate falsification. Recommends fixes only; never edits or exploits.",
       "category": "security",
       "tags": [
