@@ -7,199 +7,41 @@ Adapt the level of rigor to the context. Use clear technical prose for analysis,
 
 Clearly distinguish verified facts, observations, assumptions, inferences, recommendations, and unresolved questions. Do not report an action as successful without evidence. Preserve exact names for repositories, services, contracts, routes, identifiers, configuration fields, and work items. Do not omit material ownership, dependencies, risks, preconditions, rollback requirements, or verification criteria for the sake of brevity.
 
-## Task Tracking (two-tier)
+## Durable work — Substrate
 
-Two task systems coexist in this repo. Use both; do not substitute one for the other.
+Substrate owns durable work in this repository. Load `/using-xtrm` for system doctrine and `using-substrate` for exact work semantics.
 
-- **Beads (`bd`)** — top-level durable tracking. Authoritative for ownership, dependencies, cross-session memory, and closure. Read the rest of this file and use targeted lookup (`bd ready`, `bd search "<terms>"`, `bd show <id>`) before starting work; `bd prime` is an opt-in diagnostic, not a session-start step. File, claim, and close work here.
-- **Native integrated task system** (`TaskCreate` / `TaskList` / `TaskGet` / `TaskUpdate` / `TaskExecute`) — this-session execution tracking. Use it to mirror the active bead and break it into smaller intermediate steps. Ephemeral; does not replace beads.
+- A **ready pinned Issue revision** is the executable contract.
+- Hold the live claim before mutation when the runtime requires it.
+- Journal/checkpoint records continuity, progress, findings and decisions; it does not rewrite the Issue contract.
+- Worker/Specialist result and settlement are evidence.
+- Commit/push/PASS/settlement do **not** close the Issue.
+- Closure is explicit durable authority by the authorized owner after required validation/evidence.
+- Runtime-local task lists are ephemeral execution tracking and never replace the Issue.
+- Historical Beads IDs may resolve as aliases; Beads is compatibility/migration state, not current authority.
 
-Rule: when you pick up a bead, create native tasks that track it — reference the bead ID in each task title (e.g. `N.N summary — status (worker %NNNN)`) — and add any smaller intermediate steps as native sub-tasks. Beads own the durable record; native tasks own the in-flight breakdown.
+Use the current typed Substrate surface when available. For exact CLI syntax use `sb help --json`; do not preserve stale command recipes in this file.
 
-Example native task list mirroring beads:
-- ◼ N.N smoke container global surface — BLOCKS RELEASE (worker %NNNN)
-- ◼ N.N status test flake under load (worker %NNNN)
-- ◻ Pre-release smoke run against current main branches
-- ◻ Dispatch N.N stale doc metrics + N.N Claude inbox surface
-- ◻ Dispatch N.N, N.N, N.N remaining small beads
 <!-- END INJECTED BLOCK -->
 
 <!-- xtrm:start -->
 # XTRM Agent Workflow
 
-> Full reference: [XTRM-GUIDE.md](XTRM-GUIDE.md) | Session manual: `/using-xtrm` skill
-> Retrieve memory on demand (commit corpus first, targeted `bd memories` leads); `bd prime` is an opt-in diagnostic, never a session-start step. Full doctrine: `.xtrm/config/instructions/memory-doctrine.md`.
-
-## Session Start
-
-1. Targeted lookup (`bd ready`, `bd search`, `bd show`) — `bd prime` only as opt-in diagnostic
-2. `bv --robot-triage` — graph-aware triage: ranked picks, unblock targets, project health
-3. `bd update <id> --claim` — claim before any file edit
-
-## Execution Interaction Policy
-
-- Proceed by default on standard implementation tasks once scope is clear.
-- Do **not** ask repetitive “Proceed? Yes/No” confirmations.
-- Ask for confirmation only when actions are destructive, irreversible, or high-risk (e.g. `rm`, history rewrite, mass deletes, credential rotation, prod-impacting ops).
-- Prefer concise clarifying questions only when requirements are genuinely ambiguous.
-
-## Active Gates (hooks enforce these — not optional)
-
-| Gate | Trigger | Required action |
-|------|---------|-----------------|
-| **Edit** | Write/Edit without active claim | `bd update <id> --claim` |
-| **Commit** | `git commit` while claim is open | `bd close <id>` first, then commit |
-| **Stop** | Session end with unclosed claim | `bd close <id>` |
-| **Dispatch** *(bridge — discipline only, not yet hook-enforced)* | Specialist run against a `contract:draft` bead | Promote first: explore + rewrite full 7-section contract + `bd set-state <id> contract=ready --reason "..."`. Check with `bd state <id> contract` before dispatch. |
-
-## bd Command Reference
-
-```bash
-# Work discovery
-bd ready                               # Unblocked open issues
-bd show <id>                           # Full detail + deps + blockers
-bd list --status=in_progress           # Your active claims
-bd query "status=in_progress AND assignee=me"  # Complex filter
-bd search <text>                       # Full-text search across issues
-
-# Claiming & updating
-bd update <id> --claim                 # Claim (sets you as owner, status→in_progress)
-bd update <id> --append-notes "..."     # Append to existing notes
-bd update <id> --notes "..."           # Replace notes (use --append-notes to append)
-bd update <id> --status=blocked        # Mark blocked
-bd update                              # Update last-touched issue (no ID needed)
-
-# Creating
-bd create --title="..." --description="..." --type=task --priority=2
-# --parent <bead-id>                    nest as <id>.1, .2, … (recursive: .1.1) — default whenever this bead
-#                                        services another bead's work, not only epics
-# --labels contract:draft               capture-for-later: real PROBLEM + rough SCOPE, rest TBD — never dispatchable
-#                                        until promoted (`bd set-state <id> contract=ready`); see using-specialists
-# --deps "discovered-from:<parent-id>"  link follow-ups to source
-# priority: 0=critical  1=high  2=medium  3=low  4=backlog
-# types: task | bug | feature | epic | chore | decision
-
-# Closing
-bd close <id>                          # Close issue
-bd close <id> --reason="Done: ..."     # Close with context
-bd close <id1> <id2> <id3>            # Batch close
-
-# Dependencies
-bd dep add <issue> <depends-on>        # issue depends on depends-on (depends-on blocks issue)
-bd dep <blocker> --blocks <blocked>    # shorthand: blocker blocks blocked
-bd dep relate <a> <b>                  # non-blocking "relates to" link
-bd dep tree <id>                       # visualise dependency tree
-bd blocked                             # show all currently blocked issues
-
-# Health & pre-flight
-bd stats                               # Open/closed/blocked counts
-bd preflight --check                   # Pre-PR readiness (lint, tests, beads)
-bd doctor                              # Diagnose installation issues
-```
-
-## Git Workflow (strict: one branch per issue)
-
-```bash
-git checkout -b feature/<issue-id>-<slug>   # or fix/... chore/...
-bd update <id> --claim                       # claim before any edit
-# ... write code ...
-bd close <id> --reason="..."                 # closes issue
-xt end                                       # push, PR, merge, worktree cleanup
-```
-
-**Never** continue new work on a previously used branch.
-
-## bv — Graph-Aware Triage
-
-bv is a graph-aware triage engine for the beads issue board. Use it instead of `bd ready` when you need ranked picks, dependency-aware scheduling, or project health signals.
-
-> **CRITICAL: Use ONLY `--robot-*` flags. Bare `bv` launches an interactive TUI that blocks your session.**
-
-```bash
-bv --robot-triage             # THE entry point — ranked picks, quick wins, blockers, health
-bv --robot-next               # Single top pick + claim command (minimal output)
-bv --robot-triage --format toon  # Token-optimized output for lower context usage
-```
-
-**Scope boundary:** bv = *what to work on*. `bd` = creating, claiming, closing issues.
-
-| Command | Returns |
-|---------|---------|
-| `--robot-plan` | Parallel execution tracks with unblocks lists |
-| `--robot-insights` | PageRank, betweenness, HITS, cycles, critical path |
-| `--robot-forecast <id\|all>` | ETA predictions with dependency-aware scheduling |
-| `--robot-alerts` | Stale issues, blocking cascades, priority mismatches |
-| `--robot-diff --diff-since <ref>` | Changes since ref: new/closed/modified |
-
-```bash
-bv --recipe actionable --robot-plan    # Pre-filter: ready to work
-bv --robot-triage --robot-triage-by-track  # Group by parallel work streams
-bv --robot-triage | jq '.quick_ref'   # At-a-glance summary
-bv --robot-insights | jq '.Cycles'    # Circular deps — must fix
-```
-
-## Code Intelligence (mandatory before edits)
-
-Use **GitNexus** MCP tools before touching any symbol:
-- `gitnexus_impact({target: "symbolName", direction: "upstream"})` — blast radius
-- `gitnexus_context({name: "symbolName"})` — callers, callees, execution flows
-- `gitnexus_detect_changes()` — verify scope before every commit
-- `gitnexus_query({query: "concept"})` — explore unfamiliar areas
-
-Stop and warn the user if impact returns HIGH or CRITICAL risk.
-
-## Quality Gates (automatic)
-
-Run on every file edit via PostToolUse hooks:
-- **TypeScript/JS**: ESLint + tsc
-- **Python**: ruff + mypy
-
-Gate output appears as hook context. Fix failures before proceeding — do not commit with lint errors.
-
-## Worktree Sessions
-
-- `xt claude` — launch Claude Code in a sandboxed worktree
-- `xt end` — close session: commit / push / PR / cleanup
-<!-- xtrm:end -->
-
-# Project: specialists
-
-> Skills are loaded on demand — don't duplicate skill content here.
-> If a section grows past 30 lines, it probably belongs in a skill.
+> System doctrine: `/using-xtrm`. Durable work doctrine: `using-substrate`.
 
 ## Session start
 
-```bash
-bd ready / bd search / bd show  # targeted lookup (bd prime is opt-in diagnostic only)
-bv --robot-triage --format toon # ranked work + project health
-bd update <id> --claim          # claim before any file edit
-```
-
-`bv` ONLY with `--robot-*` flags — bare `bv` opens a TUI and blocks the session.
-
-## Active gates (hooks enforce — not optional)
-
-| Gate | Trigger | Required action |
-|------|---------|-----------------|
-| Edit | Write/Edit without active claim | `bd update <id> --claim` |
-| Commit | `git commit` while claim is open | `bd close <id>` first |
-| Stop | Session end with unclosed claim | `bd close <id>` |
+- Resume from the pinned Substrate Issue revision + Journal/checkpoint, not Beads state or chat memory.
+- Verify claim/workspace ownership before editing.
+- Use current code/runtime/tests as implementation truth.
 
 ## Execution policy
 
-- Proceed by default once scope is clear. No repetitive "Proceed? Yes/No" prompts.
-- Confirm only for destructive/irreversible/high-risk actions (rm, history rewrite, mass deletes, credential rotation, prod ops).
-- Ask only when requirements are genuinely ambiguous.
+Proceed once the Issue contract is executable. Ask only for genuine ambiguity or destructive/irreversible decisions. Scope expansion requires a new/revised Issue revision, not an informal message.
 
 ## Branching
 
-```bash
-git checkout -b feature/<issue-id>-<slug>   # fix/... chore/... etc.
-# work, close bead, commit
-xt end                                      # push + PR + merge + worktree cleanup
-```
-
-Never continue new work on a previously used branch.
+Use the branch/workspace admitted by the XTRM/Core session topology. Git integration truth is separate from durable Issue Closure.
 
 ## Code intelligence (mandatory before edits)
 
@@ -236,21 +78,17 @@ Hook output appears as context. Fix failures before committing.
 
 ## Specialist orchestration in one paragraph
 
-The legacy `sp` CLI: `--bead` is the prompt — don't run a specialist until the bead is a usable task contract (PROBLEM / SUCCESS / SCRUTINY / SCOPE / NON_GOALS / CONSTRAINTS / VALIDATION / OUTPUT). On that CLI, edit-capable specialists auto-provision a worktree from `--bead`. A NATIVE activation is different: it runs in place, in the coordinator's own directory, and takes a workspace writer lease instead of a worktree — nothing about the native path provisions one. Reviewer reuses the executor workspace via `--job <exec-job>` — `--worktree` and `--job` are mutually exclusive. Keep executor/debugger jobs alive with `--keep-alive` so they're resumable. Default `--context-depth` is 3. **Merge via manual git workflow (Cherry-Pick Playbook or `git merge --no-ff`)** — `sp merge` and `sp epic merge` are prohibited (known broken, awaiting separate rework epic). Per-turn output auto-appends to bead notes; `bd show <id>` is the canonical way to read a handoff. Full reference: `/using-specialists`.
+Native activation is primary for Substrate-backed work: the ready pinned Issue revision is the prompt, the activation runs in the admitted workspace, mutating roles use the writer lease, and settlement/result/provenance return evidence to the coordinator. The legacy `sp run --bead` Supervisor/worktree lifecycle remains reachable only as XTRM-93 compatibility while N4–N9 cut it over. Do not teach its Beads notes/auto-close/worktree semantics as native behavior. Full procedure: `/using-specialists`.
 
 ## Common gotchas (project-specific)
 
-- **Merge is manual.** `sp merge` and `sp epic merge` are prohibited (rule #9 in `/using-specialists`). Use `git merge --no-ff feature/<bead>` for per-chain merges, or `git update-ref` for FF-equivalent when checkout is blocked by transient `.beads/issues.jsonl` churn. Cherry-Pick Playbook is the canonical multi-chain path.
-- **Closing keep-alive specialists.** No `sp finalize` cascade — close each waiting job explicitly with `sp stop <job-id>` after reviewer PASS. Verify with `sp ps` first.
-- **`--worktree` and `--job` are mutually exclusive.** First executor: `--worktree`. Reviewer/fix: `--job <exec-job>`.
-- **Canonical QA+Iron pipeline is mandatory on production diffs.** Shape (canon `docs/design/chain-templates.md` §2.1): writer → **seconder** (fused dual-verdict scope+quality gate; emits `scope_verdict`/`quality_verdict`/`overall_verdict`) → **test-engineer** (authors tests from the diff) → **test-runner** (runs exact commands + classifies failures by owner) → security-auditor (if sensitive surface) → **obligations-scanner** (TODO/FIXME/HACK scan) → reviewer (phase-2 adversarial + Release Checklist). Skip seconder/obligations only for test-only or new-file-only diffs. Reviewer auto-escalates SCRUTINY on sensitive surfaces (auth, config/specialists, lockfiles, migrations, permissions/hooks).
-- **Git State Precondition before any dependent chain dispatch.** `git status` clean + HEAD contains prior chain commits + no orphaned worktrees. Stale-base dispatch → guaranteed debugger-restitch loop. The dispatcher fetch-and-pins the base and refuses with a `stale_base` envelope; override via `sp run ... --accept-stale-base --reason "<text>"` (or pin explicitly with `--base-sha <sha>` / `--base-ref <branch>`). `--force-stale-base` is deprecated.
-- **PR/job attention surfaces.** `specialists doctor --pr-drift` refreshes PR classifications (`clean | needs-rebase | conflicted | blocked | stale | unknown`) via `gh pr view` when `pr_drift_checked_at_ms` is stale (> 5 min) or null; `sp ps --needs-attention` (or `--json` → `attention_reasons[]`) filters to non-clean jobs. After container/host restarts, `specialists doctor --reap-dead-jobs [--dry-run] [--json]` cancels orphan rows (`container-restart-orphan`) and emits `xtrm.forensic.v1 lifecycle.dead_declared`.
-- **GitNexus index goes stale on commit.** PostToolUse hook normally re-indexes after `git commit`/`git merge`; if not, `npx gitnexus analyze` (add `--embeddings` only if `.gitnexus/meta.json` shows `stats.embeddings > 0`).
-- **bd auto-export keeps re-staging `.beads/issues.jsonl`** after every bd op. `.git/info/exclude` blocks `git add` but the already-tracked staged change can still be committed. Stale `.git/index.lock` from bd hooks is safe to `rm -f` when no real git process is running.
-- **Specialists are JSON** (`config/specialists/<name>.specialist.json`) — YAML is a deprecated legacy fallback (`loader.ts:101 deprecatedYaml`).
-- **Package-tier specialists need direct JSON edit** (not `sp edit` — that's user-tier only). Use `jq -e` to validate after edit. `specialists list --full` to confirm registry sees the change.
-- **Edit-capable specialists that CREATE files need permission HIGH, not MEDIUM.** Runtime: `write` (create new files) → HIGH only; `edit` (modify existing) → MEDIUM (`src/specialist/runner.ts:236-237`, `schema.ts:32-33`). A file-authoring specialist (e.g. test-engineer) set to MEDIUM fails pre-run validation at 0s (`tool "write" requires higher permission`). **`sp validate` does NOT catch this — only a live dispatch does.** Enforce a "no production-source edits" boundary via `prompt` + `inline_rules`, never by lowering the tier.
+- `settled != published != closed`: no Specialist verdict or terminal state is Issue Closure.
+- Review/test/security must use the same pinned Issue revision as the writer, not a later mutable tracker read.
+- `--bead` / `bead_id` may be a compatibility alias; inspect the live backend before inferring Beads lifecycle.
+- Native writer activation uses the coordinator workspace + writer lease; legacy `sp run --worktree` is not the native model.
+- `sp merge` / `sp epic merge` remain legacy/broken surfaces; Git/Core owns integration decisions.
+- Canonical role definitions are JSON under `config/specialists/*.specialist.json`.
+- New/current role prompts must not introduce `bd create/update/close/show` as lifecycle doctrine.
 
 ## Commit messages ARE the changelog
 
