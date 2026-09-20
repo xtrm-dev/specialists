@@ -493,13 +493,13 @@ _turn 12 · 8413 ms · 4222 to 167 tok · 2026-06-16 02:11 · git fc9168e2_
 _final · 107106 ms · 18269 to 468 tok · 2026-06-16 02:13 · git fc9168e2_
 ```
 
-| Mode | Bead notes | `output_file` |
+| Mode | Legacy Beads notes | `output_file` |
 |---|---|---|
 | `full-trail` (default) | Append every turn's H3 WAITING block + the H2 FINAL block | Append per turn |
 | `final-only` | Persist only the H2 FINAL block; intermediate turns are skipped | **Overwritten** with just the FINAL block on each run |
 
-Recipe for a chained non-coding pipeline where the next specialist reads the
-previous one's note:
+Legacy compatibility recipe for a chained non-coding pipeline where the next specialist reads the
+previous Supervisor handoff/output:
 
 ```bash
 sp edit --global --set sync-docs.notes_mode final-only
