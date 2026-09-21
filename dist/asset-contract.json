@@ -11,16 +11,16 @@
       "sha256": "f403cee492f7f076bfaaa262917879923663e374a1f410581d147281f6267989"
     },
     {
-      "path": "config/skills/using-specialists/references/bead-contracts.md",
-      "sha256": "5d7dd4faf53be8f8867401c3de6881ede3cc9cb8a72fbc310c21ac77e8e695a9"
-    },
-    {
       "path": "config/skills/using-specialists/references/chain-recipes.md",
       "sha256": "dc7c41da09dce6138e068ad3863fb9cace3a1052f18d0cb0c0994c3d1239bbcd"
     },
     {
       "path": "config/skills/using-specialists/references/dispatch-preconditions.md",
       "sha256": "f45086d100d48d591cd0baf05c314ca9c8846a7255e3dcf98328dccbb425b267"
+    },
+    {
+      "path": "config/skills/using-specialists/references/issue-contracts.md",
+      "sha256": "9cb53c8436c63b6959ad12c9d115b6de9d1f47e18d0003f965c03303148b6f79"
     },
     {
       "path": "config/skills/using-specialists/references/kpi.md",
@@ -40,7 +40,7 @@
     },
     {
       "path": "config/skills/using-specialists/references/registry-and-locations.md",
-      "sha256": "fcb51618f219eacf8c266018b68bef502ce581e253a3dfb9d0654e7cbc0983ba"
+      "sha256": "9118951d4c53336df9bf8c9dd36d543c4993ae2cb377eafd5cddfc1840ecdf63"
     },
     {
       "path": "config/skills/using-specialists/references/script-class.md",
@@ -68,7 +68,7 @@
     },
     {
       "path": "config/skills/using-specialists/SKILL.md",
-      "sha256": "5e63fc4a0e757c00ab8c88bbbfcc3260d7454435629746acd47ec3d3fa630a88"
+      "sha256": "bb769b06b0f4a9dc9403e6816f574fc270462831a002e14afc0d0451d0d7cef9"
     }
   ],
   "shipped_specialists": [

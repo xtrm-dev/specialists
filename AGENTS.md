@@ -131,8 +131,9 @@ sp ps --help
 ```
 
 **Key facts:**
-- MCP exposes only `use_specialist` — use CLI (`sp run`, `sp feed`, `sp result`, `sp resume`, `sp steer`, `sp stop`, `sp edit`) for all orchestration (`sp steer` is the live mid-run control surface)
-- Tracked work requires `--bead <id>`; `--prompt` is for untracked one-offs only
+- Native activation is primary for tracked work: dispatch the eight `specialist_*` tools (`specialist_dispatch(issue_ref=...)` plus `specialist_status` / `specialist_reply` / `specialist_resume` / `specialist_retry` / `specialist_steer` / `specialist_stop_activation` / `specialist_list`). Settlement/PASS is evidence, not Issue Closure.
+- MCP exposes only `use_specialist`; the CLI (`sp run`, `sp feed`, `sp result`, `sp resume`, `sp steer`, `sp stop`, `sp edit`) is the legacy/operator projection, not native authority (`sp steer` is the live mid-run control surface)
+- On that legacy `sp` job surface, tracked work requires `--bead <id>` (a compatibility alias for the Issue ref); `--prompt` is for untracked one-offs only
 - Specialist configs live in `config/specialists/` (shipped) and `.specialists/user/` (overrides); use `sp edit` — not direct JSON edits — to change fields
 - `sp edit --list-presets` shows available model presets for the current install
 - `sp epic abandon <id> --reason "..."` closes stale epics; live members require `--force`. Listed in `sp epic --help`.

@@ -38,13 +38,23 @@ describe('selective loading: the router alone carries stable cross-phase invaria
   const ALWAYS_NEEDED = [
     'specialists list --full',
     'sp help',
-    'sb issue show <ref>',
     'A specialist result is a claim, not live truth.',
     'Do not busy-poll.',
-    'Two runtimes exist.',
   ];
 
-  for (const marker of ALWAYS_NEEDED) {
+  // Post-XTRM-93 semantics. The router must send agents to the typed Substrate work
+  // surface for authority, must forbid reconstructing authority by shelling out to a
+  // legacy tracker CLI, and must label the legacy execution path as compatibility
+  // rather than primary. Reverting any of these to Beads-shell authority goes red.
+  const SUBSTRATE_AUTHORITY_INVARIANTS = [
+    'substrate_issue_get <ref>',
+    'Never shell out to `sb` from an agent to reconstruct authority.',
+    'Two execution paths remain',
+    'Native activation (below) is the primary flow',
+    'legacy `sp run`/Supervisor behavior is a compatibility path',
+  ];
+
+  for (const marker of [...ALWAYS_NEEDED, ...SUBSTRATE_AUTHORITY_INVARIANTS]) {
     it(`router carries "${marker}" without loading a reference`, () => {
       expect(router).toContain(marker);
     });
