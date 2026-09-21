@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
-import { SpecialistLoader, type SpecialistSummary } from '../specialist/loader.js';
+import { SpecialistLoader, SpecialistMissingModelError, type SpecialistSummary } from '../specialist/loader.js';
 import type { Specialist } from '../specialist/schema.js';
 
 const ANSI_RESET = '\x1b[0m';
@@ -163,7 +163,10 @@ function printHeader(summary: SpecialistSummary, model: string | null = summary.
   console.log();
   console.log(`${bold(cyan(summary.name))} ${scope} ${permissionBadge(summary.permission_required)} ${source}`);
   console.log(dim(summary.description));
-  console.log(`${dim('model:')} ${model}`);
+  // A null (or empty) model is a legitimate inspection finding: every shipped
+  // canonical specialist leaves it unset until a global or repo override
+  // supplies one. Report that explicitly instead of printing a bare null.
+  console.log(`${dim('model:')} ${model || yellow('(unset)')}`);
   console.log(`${dim('version:')} ${summary.version}`);
   console.log(`${dim('source:')} ${summary.filePath}`);
 }
@@ -211,22 +214,29 @@ async function selectSpecialistFromCatalog(summaries: readonly SpecialistSummary
   }
 }
 
-function printBySection(spec: Specialist, section: keyof Specialist['specialist'] | 'beads'): void {
+/**
+ * Raw value behind a printable section. `beads` is a synthetic section gathering
+ * the two legacy Beads fields; every other key is a real schema section.
+ * Shared by --section and --raw --section so both select the same thing.
+ */
+function sectionValue(spec: Specialist, section: keyof Specialist['specialist'] | 'beads'): unknown {
   if (section === 'beads') {
-    printGenericSection('beads', yellow, {
+    return {
       beads_integration: spec.specialist.beads_integration,
       beads_write_notes: spec.specialist.beads_write_notes,
-    });
-    return;
+    };
   }
+  return spec.specialist[section];
+}
 
+function printBySection(spec: Specialist, section: keyof Specialist['specialist'] | 'beads'): void {
   if (section === 'prompt') {
     printPromptSection(spec.specialist.prompt);
     return;
   }
 
-  const value = spec.specialist[section];
-  printGenericSection(String(section), section === 'metadata' ? cyan : green, value);
+  const color = section === 'beads' ? yellow : section === 'metadata' ? cyan : green;
+  printGenericSection(String(section), color, sectionValue(spec, section));
 }
 
 function printFullSpecialist(spec: Specialist): void {
@@ -263,7 +273,25 @@ function withSurfaceModel(spec: Specialist, surface?: string): Specialist {
   };
 }
 
-async function printRaw(summary: SpecialistSummary, loader: SpecialistLoader, surface?: string): Promise<void> {
+/**
+ * Load a specialist for INSPECTION. `get()` is the runtime path and deliberately
+ * refuses a null execution.model, which every shipped canonical specialist has
+ * until an override supplies one — so using it here made `sp view --section`
+ * abort instead of showing the config. Fall back to the un-gated effective merge
+ * (same layering, same warnings); every other loader error still propagates.
+ */
+async function loadForInspection(loader: SpecialistLoader, name: string): Promise<Specialist> {
+  try {
+    return await loader.get(name);
+  } catch (error) {
+    if (!(error instanceof SpecialistMissingModelError)) throw error;
+    const effective = await loader.getEffective(name);
+    if (!effective) throw error;
+    return effective;
+  }
+}
+
+async function printRaw(summary: SpecialistSummary, loader: SpecialistLoader, surface?: string, section?: keyof Specialist['specialist'] | 'beads'): Promise<void> {
   // xtmux-1lb.4: emit the MERGED effective spec (package canonical + global
   // user.json + repo overrides), not the file text verbatim. "Raw" now means
   // the machine-readable form of what humans see in `sp view <name>`.
@@ -278,7 +306,14 @@ async function printRaw(summary: SpecialistSummary, loader: SpecialistLoader, su
     console.error(`Specialist not found: ${summary.name}`);
     process.exit(1);
   }
-  console.log(JSON.stringify(withSurfaceModel(spec, surface), null, 2));
+  const resolved = withSurfaceModel(spec, surface);
+  // An explicit --section narrows the payload. Without one, --raw stays the full
+  // merged spec that launchers (xt pi --role) parse.
+  if (!section) {
+    console.log(JSON.stringify(resolved, null, 2));
+    return;
+  }
+  console.log(JSON.stringify({ specialist: { [section]: sectionValue(resolved, section) } }, null, 2));
 }
 
 export async function run(): Promise<void> {
@@ -323,11 +358,11 @@ export async function run(): Promise<void> {
   }
 
   if (args.raw) {
-    await printRaw(selectedSummary, loader, args.surface);
+    await printRaw(selectedSummary, loader, args.surface, args.section);
     return;
   }
 
-  const specialist = withSurfaceModel(await loader.get(selectedSummary.name), args.surface);
+  const specialist = withSurfaceModel(await loadForInspection(loader, selectedSummary.name), args.surface);
   printHeader(selectedSummary, specialist.specialist.execution.model);
 
   if (args.section) {

@@ -12792,11 +12792,13 @@ function renderMatrix(rules, specs) {
 `);
 }
 function parseArgs(argv) {
-  const opts = { json: false };
+  const opts = { json: false, show: false };
   for (let i = 0;i < argv.length; i++) {
     const t = argv[i];
     if (t === "--json")
       opts.json = true;
+    else if (t === "--show")
+      opts.show = true;
     else if (t === "--rule" && argv[i + 1])
       opts.filterRule = argv[++i];
     else if (t === "--specialist" && argv[i + 1])
@@ -12811,12 +12813,18 @@ function parseArgs(argv) {
       process.exit(1);
     }
   }
+  if (opts.show && !opts.filterRule) {
+    process.stderr.write(`Error: --show requires --rule <id>
+`);
+    printUsage();
+    process.exit(1);
+  }
   return opts;
 }
 function printUsage() {
   console.log([
     "",
-    "Usage: specialists list-rules [--rule <id>] [--specialist <name>] [--json]",
+    "Usage: specialists list-rules [--rule <id>] [--specialist <name>] [--show] [--json]",
     "",
     "Show which mandatory rules are loaded by which specialists.",
     "Walks cwd tiers first, then package-canonical fallback.",
@@ -12825,11 +12833,13 @@ function printUsage() {
     "Options:",
     "  --rule <id>          Filter to one rule, list every spec that loads it",
     "  --specialist <name>  Filter to one specialist, list every rule applied",
+    "  --show               With --rule: also print that rule's text, verbatim from its source file",
     "  --json               Structured output (rules[], specialists[])",
     "",
     "Examples:",
     "  specialists list-rules",
     "  specialists list-rules --rule gitnexus-required",
+    "  specialists list-rules --rule gitnexus-required --show",
     "  specialists list-rules --specialist reviewer",
     "  specialists list-rules --json | jq .",
     ""
@@ -12879,6 +12889,48 @@ async function run3() {
   }
   if (opts.filterRule) {
     const matchedSpecs = specs.map((s) => ({ name: s.name, source_tier: s.source_tier, scope: s.applied_rules.find((r) => r.id === opts.filterRule)?.scope })).filter((x) => !!x.scope);
+    if (opts.show) {
+      const rule = rules.find((r) => r.id === opts.filterRule);
+      if (!rule) {
+        process.stderr.write(`Unknown rule: ${opts.filterRule} (no mandatory-rules/${opts.filterRule}.md in any tier)
+`);
+        process.exit(1);
+      }
+      let content;
+      try {
+        content = readFileSync4(rule.source_path, "utf-8");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        process.stderr.write(`Cannot read rule ${rule.id} at ${rule.source_path}: ${message}
+`);
+        process.exit(1);
+      }
+      if (opts.json) {
+        process.stdout.write(JSON.stringify({
+          rule: rule.id,
+          source_path: rule.source_path,
+          source_tier: rule.source_tier,
+          content,
+          applied_to: matchedSpecs
+        }, null, 2) + `
+`);
+        return;
+      }
+      console.log(`
+Rule: ${rule.id}  (tier=${rule.source_tier})`);
+      console.log(`source: ${rule.source_path}
+`);
+      if (matchedSpecs.length === 0) {
+        console.log("  (no specialists pull this rule)");
+      } else {
+        for (const m of matchedSpecs)
+          console.log(`  ${m.name.padEnd(20)} (${m.scope}, tier=${m.source_tier})`);
+      }
+      console.log(`
+${content.trimEnd()}
+`);
+      return;
+    }
     if (opts.json) {
       process.stdout.write(JSON.stringify({ rule: opts.filterRule, applied_to: matchedSpecs }, null, 2) + `
 `);
@@ -21717,7 +21769,7 @@ function printHeader(summary, model = summary.model) {
   console.log();
   console.log(`${bold3(cyan2(summary.name))} ${scope} ${permissionBadge2(summary.permission_required)} ${source}`);
   console.log(dim3(summary.description));
-  console.log(`${dim3("model:")} ${model}`);
+  console.log(`${dim3("model:")} ${model || yellow3("(unset)")}`);
   console.log(`${dim3("version:")} ${summary.version}`);
   console.log(`${dim3("source:")} ${summary.filePath}`);
 }
@@ -21758,20 +21810,22 @@ async function selectSpecialistFromCatalog(summaries) {
     rl.close();
   }
 }
-function printBySection(spec, section) {
+function sectionValue(spec, section) {
   if (section === "beads") {
-    printGenericSection("beads", yellow3, {
+    return {
       beads_integration: spec.specialist.beads_integration,
       beads_write_notes: spec.specialist.beads_write_notes
-    });
-    return;
+    };
   }
+  return spec.specialist[section];
+}
+function printBySection(spec, section) {
   if (section === "prompt") {
     printPromptSection(spec.specialist.prompt);
     return;
   }
-  const value = spec.specialist[section];
-  printGenericSection(String(section), section === "metadata" ? cyan2 : green2, value);
+  const color = section === "beads" ? yellow3 : section === "metadata" ? cyan2 : green2;
+  printGenericSection(String(section), color, sectionValue(spec, section));
 }
 function printFullSpecialist(spec) {
   printBySection(spec, "metadata");
@@ -21802,13 +21856,30 @@ function withSurfaceModel(spec, surface) {
     }
   };
 }
-async function printRaw(summary, loader, surface) {
+async function loadForInspection(loader, name) {
+  try {
+    return await loader.get(name);
+  } catch (error) {
+    if (!(error instanceof SpecialistMissingModelError))
+      throw error;
+    const effective = await loader.getEffective(name);
+    if (!effective)
+      throw error;
+    return effective;
+  }
+}
+async function printRaw(summary, loader, surface, section) {
   const spec = await loader.getEffective(summary.name);
   if (!spec) {
     console.error(`Specialist not found: ${summary.name}`);
     process.exit(1);
   }
-  console.log(JSON.stringify(withSurfaceModel(spec, surface), null, 2));
+  const resolved = withSurfaceModel(spec, surface);
+  if (!section) {
+    console.log(JSON.stringify(resolved, null, 2));
+    return;
+  }
+  console.log(JSON.stringify({ specialist: { [section]: sectionValue(resolved, section) } }, null, 2));
 }
 async function run9() {
   let args;
@@ -21846,10 +21917,10 @@ async function run9() {
     selectedSummary = chosen;
   }
   if (args.raw) {
-    await printRaw(selectedSummary, loader, args.surface);
+    await printRaw(selectedSummary, loader, args.surface, args.section);
     return;
   }
-  const specialist = withSurfaceModel(await loader.get(selectedSummary.name), args.surface);
+  const specialist = withSurfaceModel(await loadForInspection(loader, selectedSummary.name), args.surface);
   printHeader(selectedSummary, specialist.specialist.execution.model);
   if (args.section) {
     printBySection(specialist, args.section);
@@ -63470,6 +63541,7 @@ async function run43() {
     "  specialists setup --discovery --json",
     "  specialists list",
     "  specialists list-rules                            # rule \xD7 specialist matrix",
+    "  specialists list-rules --rule gitnexus-required --show   # print one rule's text verbatim",
     "  specialists view explorer --section prompt",
     "  specialists edit executor --preset power",
     "  specialists edit explorer --get specialist.execution.model",
@@ -63514,7 +63586,7 @@ var init_help = __esm(() => {
   CORE_COMMANDS = [
     ["init", "Bootstrap a project: dirs, workflow injection, project MCP registration"],
     ["list", "List specialists with full descriptions; --compact truncates, --live opens tmux picker"],
-    ["list-rules", "Show mandatory-rule \xD7 specialist matrix; --rule/--specialist filters, --json"],
+    ["list-rules", "Show mandatory-rule \xD7 specialist matrix; --rule/--specialist filters, --rule --show prints the rule text, --json"],
     ["view", "Pretty-print specialist config with readable prompts; --section, --surface, --raw"],
     ["edit", "Edit specialist fields via dot-path: set/get/append/remove, --preset, --list-presets"],
     ["validate", "Validate specialist schema; --target=script adds compatGuard checks"],

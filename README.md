@@ -415,6 +415,7 @@ Every package-class specialist receives mandatory rules at spawn time (bare mode
 ```bash
 sp list-rules
 sp list-rules --rule <rule-id>
+sp list-rules --rule <rule-id> --show    # print that rule's text, verbatim
 sp list-rules --specialist <name>
 sp list-rules --json
 ```
