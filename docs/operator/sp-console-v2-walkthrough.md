@@ -1,5 +1,10 @@
 # `sp console` v2 — operator E2E walkthrough
 
+> **HISTORICAL LEGACY WALKTHROUGH.** This June 2026 procedure validates the old Beads-bound
+> console implementation. It is not the acceptance procedure for XTRM-96/#403 or the native Fleet
+> read model. Commands such as `bd show` below are preserved as evidence of the old surface; new
+> operator acceptance must use the shared persisted read model and Substrate Issue identity.
+
 > Bead: `unitAI-ctb4u.18` — operator E2E walkthrough + debug guide.
 > Subject: the compiled binary at `./sp`, not `bunx tsx src/index.ts`.
 > Time budget: ~30 min, single operator, this repo.

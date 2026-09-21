@@ -45,7 +45,7 @@ What is local to THIS plugin, and therefore stated here:
 
 ## Tool surface
 
-Seven tools are registered on the Specialists MCP server, and the names are exact. A separate
+Eight tools are registered on the Specialists MCP server, and the names are exact. A separate
 section below documents the REMOVED `use_specialist` path so no reader mistakes it for live.
 
 ### specialist_dispatch
@@ -107,6 +107,12 @@ executor that never raised a question. Same session, same attempt, context intac
 on any non-running state with a pointer: resume for settled/waiting, retry for failed,
 reply for outstanding asks, stop for disposal. Which tool when: running → steer, waiting on
 you → reply, done-but-more-work → resume, died → retry.
+
+### specialist_retry
+Retries a FAILED activation in place. The activation identity is retained and a new attempt
+is created; do not use retry as a substitute for resume or steer. An optional model override
+must pass the same fail-closed availability checks as dispatch. Compact view is returned by
+default; use `full: true` only when the verbose state is needed.
 
 ### specialist_stop_activation
 Disposes an activation explicitly. This is the irreversible one. Settled activations stay

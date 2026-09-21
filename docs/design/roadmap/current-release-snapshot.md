@@ -14,7 +14,7 @@ The PRD and roadmap are slow-changing semantic documents. Historical release sna
 
 This file is the compact mutable ledger used before planning or dispatch. It records the latest verified coordinated release identities plus conservative delivered/partial/residual classifications. It does not override accepted architecture or requirements.
 
-The 2026-08-22 refresh verified release/version identity and documentation authority. It did **not** re-run a full source/runtime delivery audit for every historical capability row below; ambiguous residual classifications therefore remain conservative until current code/tests/installed runtime or repository-local Beads prove otherwise.
+The 2026-08-22 refresh verified release/version identity and documentation authority. It did **not** re-run a full source/runtime delivery audit for every historical capability row below; ambiguous residual classifications therefore remain conservative until current code/tests/installed runtime or current Substrate/Git evidence proves otherwise.
 
 ## Authority by claim type
 
@@ -27,7 +27,7 @@ The 2026-08-22 refresh verified release/version identity and documentation autho
 | Accepted Specialists programme scope, invariants, work-package families and success criteria | [`specialists-prd.md`](specialists-prd.md) |
 | Per-ID historical WP continuity | [`wp-continuity.json`](wp-continuity.json) |
 | Portfolio status | Jira projection after reconciliation |
-| Implementation tasks, dependencies and completion | repository-local Beads and Git evidence |
+| Implementation tasks, dependencies, durable results and closure | Substrate Issue/Journal/Closure plus Git evidence |
 
 A release/status refresh may change a capability from planned to delivered. It may not silently redesign an accepted semantic decision or delete PRD scope.
 
@@ -130,7 +130,7 @@ The detailed cross-repository dependencies and promotion gates live in the XTRM 
 ## Before every planning or implementation run
 
 1. Refresh release identities and default heads.
-2. Inspect recent merged PRs and repository-local Beads.
+2. Inspect recent merged PRs and current Substrate work/provenance.
 3. Classify claims as released, source-only, experiment-proven, partial, superseded or unimplemented.
 4. Use the XTRM current execution plan for sequencing.
 5. Use `specialists-roadmap.md` / `specialists-prd.md` / the execution protocol for package semantics and acceptance.

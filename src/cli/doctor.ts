@@ -95,15 +95,14 @@ function checkSpAlias(): boolean {
 }
 
 function checkBd(): boolean {
-  section('beads  (issue tracker)');
+  section('legacy Beads compatibility');
   if (!isInstalled('bd')) {
-    fail('bd not installed');
-    fix('install beads (bd) first');
-    return false;
+    hint('bd not installed — native/Substrate Specialists are healthy; legacy Supervisor/Beads commands are unavailable');
+    return true;
   }
-  ok(`bd installed  ${dim(sp('bd', ['--version']).stdout || '')}`);
-  if (existsSync(join(CWD, '.beads'))) ok('.beads/ present in project');
-  else warn('.beads/ not found in project');
+  hint(`bd installed  ${dim(sp('bd', ['--version']).stdout || '')}  ${dim('(legacy compatibility only)')}`);
+  if (existsSync(join(CWD, '.beads'))) hint('.beads/ present — historical/legacy workspace available');
+  else ok('no .beads/ workspace — expected for a Substrate-first project');
   return true;
 }
 

@@ -65,7 +65,7 @@ Notes:
 ```json
 {
   "status": "success",
-  "summary": "Reviewed diff against bead.",
+  "summary": "Reviewed diff against the pinned Issue revision.",
   "files_changed": ["src/a.ts"],
   "follow_ups": [],
   "risks": [],

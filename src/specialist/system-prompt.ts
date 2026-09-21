@@ -53,7 +53,7 @@ export function buildOutputContractInstruction(
       '- `## Verification`',
       '- `## Risks`',
       '- `## Follow-ups`',
-      '- `## Beads`',
+      '- `## Work`',
       'Optional sections when relevant:',
       '- `## Architecture`',
       '- `## Acceptance Criteria`',
@@ -201,7 +201,7 @@ export function buildSystemPrompt(ctx: SystemPromptContext): SystemPromptResult 
   // Always inject a Specialist Run Context block to override project-level CLAUDE.md/AGENTS.md
   // instructions that are meant for human developers, not specialist agents. Key overrides:
   // - CLAUDE.md often says "run specialists init" — specialists must NEVER do this
-  // - CLAUDE.md edit-gate rules say "bd create before editing" — not applicable inside a specialist
+  // - project-level work-tracker/edit-gate rituals do not override the Specialist's pinned Issue/activation contract
   let gitnexusTokens = 0;
 
   if (!bare) {

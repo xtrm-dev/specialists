@@ -40,7 +40,7 @@ export async function run(): Promise<void> {
   lines.push(`  ${dim('                                            #   creates dirs, wires MCP + hooks, injects context')}`);
   lines.push('');
   lines.push(`  Verify everything is healthy:`);
-  lines.push(`  ${cmd('specialists status')}                        # shows pi, beads, MCP, active jobs`);
+  lines.push(`  ${cmd('specialists status')}                        # runtime health, native/legacy surfaces, active work`);
   lines.push('');
 
   // ── 2. Initialize a project ────────────────────────────────────────────────
@@ -77,14 +77,19 @@ export async function run(): Promise<void> {
   lines.push(`  ${bold('Foreground')} (streams output to stdout):`);
   lines.push(`  ${cmd('specialists run code-review')} ${flag('--prompt')} ${dim('"Review src/api.ts for security issues"')}`);
   lines.push('');
-  lines.push(`  ${bold('Tracked run')} (linked to a beads issue for workflow integration):`);
+  lines.push(`  ${bold('Native tracked work')} (primary):`);
+  lines.push(`  ${dim('  # start from a ready pinned Substrate Issue revision')}`);
+  lines.push(`  ${dim('  # dispatch through specialist_dispatch(issue_ref=...) in the native runtime')}`);
+  lines.push(`  ${dim('  # settlement/result is evidence; Closure remains explicit')}`);
+  lines.push('');
+  lines.push(`  ${bold('Legacy sp compatibility')} (Supervisor/Beads backend while XTRM-93 keeps it reachable):`);
   lines.push(`  ${cmd('specialists run code-review')} ${flag('--bead')} ${dim('unitAI-abc')}`);
-  lines.push(`  ${dim('  # uses bead description as prompt, tracks result in issue')}`);
+  lines.push(`  ${dim('  # compatibility locator; do not generalize this lifecycle into native role doctrine')}`);
   lines.push('');
   lines.push(`  Override model for one run:`);
   lines.push(`  ${cmd('specialists run code-review')} ${flag('--model')} ${dim('anthropic/claude-opus-4-6')} ${flag('--prompt')} ${dim('"..."')}`);
   lines.push('');
-  lines.push(`  Run without beads issue tracking:`);
+  lines.push(`  Legacy CLI: run without Beads tracking:`);
   lines.push(`  ${cmd('specialists run code-review')} ${flag('--no-beads')} ${flag('--prompt')} ${dim('"..."')}`);
   lines.push('');
   lines.push(`  Pipe a prompt from stdin:`);
@@ -94,7 +99,7 @@ export async function run(): Promise<void> {
   // ── 5. Background job lifecycle ────────────────────────────────────────────
   lines.push(section('5. Async Job Lifecycle'));
   lines.push('');
-  lines.push(`  ${bold('MCP pattern')}: ${cmd('specialist_dispatch')} (fire-and-forget, poll ${cmd('specialist_status')} for completion)`);
+  lines.push(`  ${bold('Native MCP pattern')}: ${cmd('specialist_dispatch(issue_ref=...)')} then consume ${cmd('specialist_status')} / event-driven continuation as needed`);
   lines.push(`  ${bold('CLI pattern')}: ${cmd('specialists run <name> --prompt "..."')} prints ${dim('[job started: <id>]')} to stderr`);
   lines.push(`  ${bold('Agent pattern')}: ${cmd('specialists run <name> --prompt "..." --background')} detaches and returns the job id`);
   lines.push(`  ${bold('Shell pattern')}: ${cmd('specialists run <name> --prompt "..." &')} native backgrounding, interactive shells only`);
@@ -181,8 +186,8 @@ export async function run(): Promise<void> {
     '    web_search: false            # allow web search tool',
     '    file_write: true             # allow file writes',
     '',
-    '  beads_integration:            # legacy sp CLI only; native activations ignore it',
-    '    auto_create: true            # create a beads issue per run',
+    '  beads_integration:            # LEGACY sp/Supervisor compatibility only; native ignores it',
+    '    auto_create: true            # legacy tracking behavior only',
     '    issue_type: task             # task | bug | feature',
     '    priority: 2                  # 0=critical … 4=backlog',
   ];
@@ -230,9 +235,12 @@ export async function run(): Promise<void> {
   lines.push(`  ${bold('Foreground review, save to file:')}`);
   lines.push(`  ${cmd('specialists run code-review --prompt "Audit src/" > review.md')}`);
   lines.push('');
-  lines.push(`  ${bold('Tracked run with beads integration:')}`);
+  lines.push(`  ${bold('Native tracked run:')}`);
+  lines.push(`  ${dim('  ready Substrate Issue -> specialist_dispatch(issue_ref=...) -> result/settlement -> explicit Closure')}`);
+  lines.push('');
+  lines.push(`  ${bold('Legacy compatibility run:')}`);
   lines.push(`  ${cmd('specialists run deep-analysis --bead unitAI-abc')}`);
-  lines.push(`  ${dim('  # prompt from bead, result tracked in bead')}`);
+  lines.push(`  ${dim('  # Supervisor/Beads compatibility path only')}`);
   lines.push('');
   lines.push(`  ${bold('Steer a job mid-run:')}`);
   lines.push(`  ${cmd('specialists steer <job-id> "focus only on the auth module"')}`);

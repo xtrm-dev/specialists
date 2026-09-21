@@ -29,7 +29,7 @@
       "template_sets": [
         "test-runner-execution-scope",
         "per-turn-handoff-schema",
-        "bead-id-verbatim"
+        "issue-ref-verbatim"
       ]
     },
     "prompt": {

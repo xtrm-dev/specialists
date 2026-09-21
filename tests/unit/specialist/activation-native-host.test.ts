@@ -2162,6 +2162,14 @@ describe('output contract schema parity (SPECIALISTS-5)', () => {
     expect(systemPrompt).toContain('## Machine-readable block');
   });
 
+  it('keeps native Issue-bound system prompts free of Beads lifecycle doctrine', async () => {
+    const systemPrompt = await nativeSystemPrompt();
+    expect(systemPrompt).toContain('Your task issue is: ISSUE-1');
+    expect(systemPrompt).toContain('The claim for this activation is already held');
+    expect(systemPrompt).not.toContain('Your task bead is:');
+    expect(systemPrompt).not.toMatch(/\bbd\s+(?:show|create|update|close|ready|list|query|dep|prime)\b/);
+  });
+
   it('renders the same output contract section the legacy call site renders', async () => {
     const native = outputContractSection(await nativeSystemPrompt());
     // Exactly what src/specialist/runner.ts does for the same definition.

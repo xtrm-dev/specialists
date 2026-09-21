@@ -69,6 +69,10 @@ function warnMissingOptionalPrerequisites(): void {
 
   warn('Optional CLI prerequisites are missing. Init will continue, but workflow commands may fail:');
   for (const tool of missingTools) {
+    if (tool.name === 'bd') {
+      warn(`bd: optional legacy sp/Supervisor compatibility only; install via ${tool.install}`);
+      continue;
+    }
     warn(`${tool.name}: install via ${tool.install}`);
   }
 }
@@ -77,29 +81,26 @@ const AGENTS_BLOCK = `
 <!-- specialists:start -->
 ## Specialists
 
-Use CLI commands via Bash to run and monitor specialists:
+Specialists is an XTRM execution backend. Substrate owns durable work.
 
-Core specialist commands (CLI-first in pi):
+Native/current tracked flow:
+1. Start from a ready pinned Substrate Issue revision.
+2. Dispatch with the native Specialist surface exposed by the runtime (for example \`specialist_dispatch(issue_ref=...)\`).
+3. Observe persisted status/result/forensics and answer asks through the native control surface.
+4. Verify the result against the pinned contract and current tree/tests.
+5. Record result/provenance through Substrate; settlement/PASS/commit is not Issue Closure.
+6. Closure is explicit and belongs to the authorized durable-work owner.
+
+Core observation/compatibility commands:
 - \`specialists list\`
-- \`specialists run <name> --bead <id>\`
-- \`specialists run <name> --prompt "..."\`
-- \`specialists feed -f\` / \`specialists feed <job-id>\`
-- \`specialists result <job-id>\`
-- \`specialists resume <job-id> "next task"\` (for keep-alive jobs in waiting)
-- \`specialists stop <job-id>\`
+- \`specialists ps\` / \`specialists feed\` / \`specialists result\`
+- legacy \`specialists run <name> --bead <id>\` remains available only while XTRM-93 keeps the Supervisor backend reachable.
 
-For background specialists in pi, prefer the process extension:
-- \`process start\`, \`process list\`, \`process output\`, \`process logs\`, \`process kill\`, \`process clear\`
-- TUI: \`/ps\`, \`/ps:pin\`, \`/ps:logs\`, \`/ps:kill\`, \`/ps:clear\`, \`/ps:dock\`, \`/ps:settings\`
-
-Canonical tracked flow:
-1. Create/claim bead issue
-2. Run specialist with \`--bead <id>\` (for long work, launch via \`process start\`)
-3. Observe progress (\`process output\` / \`process logs\` or \`specialists feed\`)
-4. Read final output (\`specialists result <job-id>\`)
-5. Close/update bead with outcome
-
-Add custom specialists to \`.specialists/user/\` to extend defaults.
+Rules:
+- Do not use Beads notes/status as authority for native work.
+- \`--bead\` / \`bead_id\` may be a compatibility alias; inspect the live surface before inferring backend semantics.
+- Messages coordinate; they do not rewrite SCOPE/SUCCESS/NON_GOALS/CONSTRAINTS/VALIDATION/OUTPUT.
+- Add custom Specialist definitions under \`.specialists/user/\`; current role prompts must preserve pinned-Issue/Journal/settlement/Closure semantics.
 <!-- specialists:end -->
 `.trimStart();
 

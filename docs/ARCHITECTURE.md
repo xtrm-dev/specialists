@@ -31,6 +31,16 @@ domain:
 
 # Specialists Runtime Architecture
 
+> **XTRM-93 architecture boundary:** this document still contains detailed Supervisor/RPC,
+> Beads, per-job worktree, and legacy job-registry sections because that backend remains
+> reachable during the strangler migration. Those sections describe the **legacy CLI
+> compatibility implementation**, not current durable-work authority. Native activations
+> consume pinned Substrate Issue revisions through the WorkItemStore/ExecutionBinding
+> boundary and use settlement/provenance; Substrate owns durable work and explicit Closure.
+> See `docs/native-activation.md`, `config/skills/using-specialists/SKILL.md`, and
+> `docs/migrations/xtrm-93/**` for the current native/migration boundary.
+
+
 This document defines the runtime boundary between:
 
 - **Pi RPC protocol** (`pi/rpc/`) — canonical transport and event contract
@@ -910,9 +920,9 @@ End-to-end flow:
 
 Result: **Pi provides protocol events; Session adapts transport; Supervisor persists lifecycle truth.**
 
-## 9) Edit gate bead-claim KV pattern
+NaN
 
-The beads edit gate hooks (`beads-edit-gate`) check two KV keys before allowing file edits.
+The legacy Beads edit-gate hooks (`beads-edit-gate`) checked two KV keys before allowing file edits.
 
 ### Primary path: session-scoped claim
 

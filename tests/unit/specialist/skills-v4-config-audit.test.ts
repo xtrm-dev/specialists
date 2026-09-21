@@ -86,4 +86,91 @@ describe('skills-v4 default specialist wiring', () => {
       expect(readFileSync(join(repoRoot, path), 'utf8')).toContain('buildRequiredPlatformRulesBlock');
     }
   });
+  it('keeps canonical role prompts off the retired Beads lifecycle', () => {
+    const files = readdirSync(specialistsDir).filter((name) => name.endsWith('.specialist.json')).sort();
+    const forbidden = /\bbd\s+(?:show|create|update|close|ready|list|query|dep|prime)\b/;
+    const violations: string[] = [];
+    for (const file of files) {
+      const text = readFileSync(join(specialistsDir, file), 'utf8');
+      if (forbidden.test(text)) violations.push(`${file}: direct bd lifecycle command`);
+      if (text.includes('"bead-id-verbatim"')) violations.push(`${file}: bead-id-verbatim`);
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it('keeps current mandatory rules on Substrate authority while quarantining the legacy bead rule', () => {
+    const rulesDir = join(repoRoot, 'config', 'mandatory-rules');
+    const forbidden = /\bbd\s+(?:show|create|update|close|ready|list|query|dep|prime)\b/;
+    const violations: string[] = [];
+    for (const file of readdirSync(rulesDir).filter((name) => name.endsWith('.md')).sort()) {
+      const text = readFileSync(join(rulesDir, file), 'utf8');
+      if (file !== 'bead-id-verbatim.md' && forbidden.test(text)) violations.push(file);
+    }
+    expect(violations).toEqual([]);
+
+    const boundary = readFileSync(join(rulesDir, 'core-session-boundary.md'), 'utf8');
+    expect(boundary).toContain('pinned Substrate Issue revision');
+    expect(boundary).toContain('Journal');
+    expect(boundary).toContain('not Issue Closure');
+
+    const legacy = readFileSync(join(rulesDir, 'bead-id-verbatim.md'), 'utf8');
+    expect(legacy).toContain('LEGACY COMPATIBILITY ONLY');
+    expect(legacy).toContain('Do not use Beads as durable authority');
+  });
+
+  it('does not inject the retired Beads workflow quick-rules block', () => {
+    const source = readFileSync(join(repoRoot, 'src', 'specialist', 'mandatory-rules.ts'), 'utf8');
+    expect(source).not.toContain('STATIC_WORKFLOW_RULES_BLOCK');
+    expect(source).not.toContain("id: 'workflow-quick-rules'");
+    const memorySource = readFileSync(join(repoRoot, 'src', 'specialist', 'memory-retrieval.ts'), 'utf8');
+    expect(memorySource).not.toContain('## Beads Workflow Quick Rules');
+  });
+
+  it('keeps generated/operator entry points Substrate-first', () => {
+    const initSource = readFileSync(join(repoRoot, 'src', 'cli', 'init.ts'), 'utf8');
+    expect(initSource).toContain('Substrate owns durable work');
+    expect(initSource).toContain('specialist_dispatch(issue_ref=...)');
+    expect(initSource).not.toContain('Create/claim bead issue');
+
+    const helpSource = readFileSync(join(repoRoot, 'src', 'cli', 'help.ts'), 'utf8');
+    expect(helpSource).toContain('Native tracked work (primary)');
+    expect(helpSource).toContain('legacy Beads-backed sp job compatibility surface');
+    expect(helpSource).not.toContain('bead-first workflow');
+
+    const quickstartSource = readFileSync(join(repoRoot, 'src', 'cli', 'quickstart.ts'), 'utf8');
+    expect(quickstartSource).toContain('Native tracked work');
+    expect(quickstartSource).toContain('Legacy sp compatibility');
+  });
+
+  it('keeps Pi native dispatch issue_ref-first with bead_id only as compatibility alias', () => {
+    const extensionSource = readFileSync(
+      join(repoRoot, 'config', 'pi-extensions', 'specialist-subagents', 'index.mjs'),
+      'utf8',
+    );
+    expect(extensionSource).toContain("issue_ref: Type.Optional");
+    expect(extensionSource).toContain('Primary work locator');
+    expect(extensionSource).toContain('Legacy compatibility alias for issue_ref');
+    expect(extensionSource).toContain('created_issue_ref');
+    expect(extensionSource).toContain('settlement is not Issue Closure');
+    expect(extensionSource).not.toContain('existing READY Bead');
+    expect(extensionSource).not.toContain('then a Bead is created');
+  });
+
+  it('keeps the canonical execution skill aligned with the eight native activation tools', () => {
+    const skill = readFileSync(join(repoRoot, 'config', 'skills', 'using-specialists', 'SKILL.md'), 'utf8');
+    expect(skill).toContain('Eight tools');
+    for (const tool of [
+      'specialist_dispatch',
+      'specialist_status',
+      'specialist_reply',
+      'specialist_resume',
+      'specialist_retry',
+      'specialist_steer',
+      'specialist_stop_activation',
+      'specialist_list',
+    ]) {
+      expect(skill).toContain(`\`${tool}\``);
+    }
+  });
+
 });

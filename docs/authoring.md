@@ -190,7 +190,7 @@ Use `execution.extensions` only for trusted executable extension config.
 - `"text"`: no report template injected (raw behavior)
 - `"json"`: specialist must return one parseable JSON object
 - `"markdown"`: specialist must use canonical report sections:
-  - `## Summary`, `## Status`, `## Changes`, `## Verification`, `## Risks`, `## Follow-ups`, `## Beads`
+  - `## Summary`, `## Status`, `## Changes`, `## Verification`, `## Risks`, `## Follow-ups`, `## Work`
   - Optional: `## Architecture`, `## Acceptance Criteria`, `## Machine-readable block`
 
 **`output_type` (semantic archetype):**
@@ -279,7 +279,7 @@ Use `execution.extensions` only for trusted executable extension config.
         "required": true
       },
       {
-        "run": "bd ready",
+        "run": "git status --short",
         "phase": "pre",
         "inject_output": true
       },
@@ -301,7 +301,7 @@ Use `execution.extensions` only for trusted executable extension config.
 ### `skills.scripts`
 - `run` accepts either:
   - a file path (`./scripts/foo.sh`, `~/scripts/foo.sh`), or
-  - a shell command (`bd ready`, `git status`).
+  - a shell command (`git status --short`, `gh pr status`).
 - `phase` can be `"pre"` or `"post"`.
 - `inject_output: true` makes script stdout available as `$pre_script_output`.
 - `required: true` on a `pre` script makes a nonzero exit abort the run before the model session starts (no fallback/retry). Default `false`: failure is injected/ignored as before.
@@ -327,7 +327,7 @@ Declarative capabilities help validation and tooling (`specialists doctor`, pre-
 {
   "capabilities": {
     "required_tools": ["bash", "read", "grep", "glob"],
-    "external_commands": ["bd", "git", "gh"]
+    "external_commands": ["git", "gh"]
   }
 }
 ```
@@ -349,7 +349,7 @@ If any `external_commands` binary is missing, startup hard-fails and the session
 }
 ```
 
-When set, the specialist writes its **handoff block** to this file on every substantive turn — foreground and `--background`. The content is identical to what is appended to the input bead notes and shown by `sp result`: a markdown heading, the verbatim specialist output, and an italic metadata footer.
+When set on the legacy `sp run`/Supervisor surface, the specialist writes its **handoff block** to this file on every substantive turn. Legacy bead-note persistence may share that content. Native activations publish result/settlement evidence through the Substrate boundary instead; `output_file` is not durable-work authority.
 
 - **No env flag required.** `output_file` is honored whenever it is set (since unitAI-f58ma). It does NOT require `SPECIALISTS_JOB_FILE_OUTPUT` — that flag now only gates the debug file-mirrors (events.jsonl / status.json / result.txt).
 - **Single writer.** In a supervised run (`sp run`) the supervisor owns the file and the runner's own write is suppressed, so the file is never double-written. (In script/serve runs there is no supervisor; the runner writes the raw output instead of the enveloped block.)
@@ -363,12 +363,12 @@ Relative paths resolve from the working directory.
 
 ## `specialist.notes_mode`
 
-Controls how per-turn handoff output is persisted to BOTH the input bead notes and `output_file`.
+**Legacy compatibility field.** Controls how the Supervisor/Runner handoff output is persisted to legacy bead notes and `output_file`. Native activation settlement/Journal semantics do not derive from this field.
 
 | Value | Behavior |
 |---|---|
-| `"full-trail"` (default) | Append every substantive turn. Bead notes / `output_file` accumulate `### … [turn N · WAITING]` blocks, ending with a final `## … [FINAL · DONE]` block. Best for keep-alive specialists where the operator wants the full trail. |
-| `"final-only"` | Persist only the single canonical `## … [FINAL · DONE]` block; intermediate turns are skipped and `output_file` is OVERWRITTEN (not appended). Best for non-coding / chained pipelines where the next specialist reads the previous specialist's bead note or `output_file` as its input and only wants the final result. |
+| `"full-trail"` (default) | Append every substantive turn. Legacy bead notes / `output_file` accumulate `### … [turn N · WAITING]` blocks, ending with a final `## … [FINAL · DONE]` block. Best for keep-alive specialists where the operator wants the full trail. |
+| `"final-only"` | Persist only the single canonical `## … [FINAL · DONE]` block; intermediate turns are skipped and `output_file` is OVERWRITTEN (not appended). Best for non-coding / chained pipelines where the next specialist reads the previous specialist's legacy bead note or `output_file` as its input and only wants the final result. |
 
 Empty turns are never persisted. The handoff block is markdown-native (heading + verbatim body + one italic metadata footer); the model string is normalized (provider prefix stripped, e.g. `nano-gpt/moonshotai/kimi-k2.5` renders as `kimi-k2.5`).
 
@@ -441,15 +441,17 @@ Controls stall detection warnings during specialist execution.
 
 ---
 
-## `specialist.beads_integration` (optional)
+## `specialist.beads_integration` / `beads_write_notes` — legacy compatibility
 
-| Value | Behavior |
+These fields remain in the schema only while the XTRM-93 legacy Supervisor/Runner backend is reachable.
+
+| Field/value | Legacy behavior |
 |---|---|
-| `"auto"` (default) | Create tracking bead when `permission_required` is `LOW` or higher |
-| `"always"` | Always create a tracking bead |
-| `"never"` | Never create a tracking bead |
+| `beads_integration: "auto"` | legacy runner may create a tracking bead for mutating roles |
+| `"always"` / `"never"` | force/disable that legacy behavior |
+| `beads_write_notes` | legacy runner/supervisor bead-note handoff persistence |
 
-`beads_write_notes` (boolean, default `true`) — when `true`, the specialist appends its handoff block to the associated bead's notes on every substantive turn. The appended block is the rendered handoff format described under `notes_mode`: a markdown heading (`### <specialist> · <model> · [turn N · WAITING]` for trail turns, `## … [FINAL · DONE]` for the final turn), the verbatim specialist output, and an italic footer with timing / token / git metadata. Set to `false` to suppress bead-note writes entirely. The same content also feeds `output_file` and `sp result` (one shared content source).
+**Native/current rule:** these fields have no durable-work authority and must not be used to design new role prompts. Native Specialists consume a ready pinned Substrate Issue revision and publish settlement/result/provenance through Substrate. Do not introduce a `substrate_write_notes` analogue.
 
 ---
 
@@ -463,12 +465,12 @@ Always available in `prompt.task_template`:
 | `$cwd` | current working directory (`process.cwd()`) |
 | `$pre_script_output` | combined stdout from `pre` scripts with `inject_output: true` (empty string if none) |
 
-When invoked with bead context (`--bead` / `bead_id`):
+When invoked through a legacy/compatibility `--bead` / `bead_id` surface:
 
 | Variable | Value |
 |---|---|
-| `$bead_context` | full bead content (used in place of plain prompt context) |
-| `$bead_id` | bead identifier |
+| `$bead_context` | compatibility work-contract context; historical name retained by legacy templates |
+| `$bead_id` | compatibility locator/alias; not native durable authority |
 
 Custom variables can be passed at invocation with `--variables key=value` and referenced as `$key`.
 
@@ -535,7 +537,7 @@ specialists list
 4. Smoke test run:
 
 ```bash
-specialists run my-specialist --prompt "ping" --no-beads
+specialists run my-specialist --prompt "ping" --no-beads   # legacy CLI compatibility smoke
 ```
 
 The validator prints `OK <file>` on success and field-level errors on failure.

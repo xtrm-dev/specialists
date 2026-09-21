@@ -17,7 +17,7 @@ domain:
 | [Hook inventory](#hook-inventory) | | Hook | Event | Purpose | |
 | [`specialists-session-start.mjs`](#specialists-session-startmjs) | Behavior: |
 | [Installation notes](#installation-notes) | The current canonical bootstrap is `specialists init` |
-| [Beads hooks](#beads-hooks) | Beads workflow enforcement hooks are owned outside this package |
+| [Legacy Beads hooks](#legacy-beads-hooks) | compatibility hooks are outside Specialists; current durable work is Substrate |
 | [See also](#see-also) | - [workflow |
 <!-- END INDEX -->
 
@@ -25,7 +25,7 @@ domain:
 
 This package bundles hook scripts used by Specialists-aware environments.
 
-Specialists works alongside **[xtrm-tools](https://github.com/Jaggerxtrm/xtrm-tools)**. Specialists owns only its specialist-specific hooks; xtrm-tools owns the broader beads/workflow enforcement hook layer.
+Specialists works inside XTRM. Specialists owns specialist-specific runtime hooks; Core/Substrate own durable-work/session enforcement. Historical Beads hooks may remain as migration compatibility but are not the current work authority.
 
 ## Hook inventory
 
@@ -39,11 +39,7 @@ Behavior:
 
 - lists active background jobs
 - lists available project specialists
-- injects a concise bead-first workflow reminder:
-  - `--bead` for tracked work
-  - `--prompt` for ad-hoc work
-  - `--context-depth` default
-  - `--no-beads` semantics
+- injects Specialist runtime/registry context. Any `--bead` / `--no-beads` guidance describes the legacy CLI compatibility surface; native tracked work is Substrate Issue-backed.
 
 ## Installation notes
 
@@ -58,9 +54,9 @@ xt update --repo <repo> --apply
 
 `specialists init` still manages specialists-specific runtime dirs, MCP registration, and specialists hook wiring. Use `specialists doctor` for runtime health; use `xt doctor` / `xt update` for xtrm-managed hook drift.
 
-## Beads hooks
+## Legacy Beads hooks
 
-Beads workflow enforcement hooks are owned outside this package. Specialists focuses on specialist execution and workflow guidance.
+Beads workflow hooks are legacy/migration compatibility outside this package. Current durable-work authority and lifecycle enforcement belong to Substrate/XTRM. Specialists focuses on activation execution, evidence, and role/runtime policy.
 
 ## See also
 

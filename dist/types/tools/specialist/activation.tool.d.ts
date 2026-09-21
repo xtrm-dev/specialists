@@ -264,6 +264,8 @@ export declare function createSpecialistDispatchTool(getHost: () => NativeActiva
             inputs: number;
             outputs: number;
         };
+        created_issue_ref?: string | undefined;
+        created_issue_note?: string | undefined;
         created_bead_id?: string | undefined;
         created_bead_note?: string | undefined;
         activation_id: string;
@@ -318,6 +320,8 @@ export declare function createSpecialistDispatchTool(getHost: () => NativeActiva
             inputs: number;
             outputs: number;
         };
+        created_issue_ref?: string | undefined;
+        created_issue_note?: string | undefined;
         created_bead_id?: string | undefined;
         created_bead_note?: string | undefined;
         activation_id: string;
@@ -339,6 +343,8 @@ export declare function createSpecialistDispatchTool(getHost: () => NativeActiva
             inputs: number;
             outputs: number;
         };
+        created_issue_ref?: string | undefined;
+        created_issue_note?: string | undefined;
         created_bead_id?: string | undefined;
         created_bead_note?: string | undefined;
         activation_id: string;

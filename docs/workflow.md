@@ -1,114 +1,126 @@
 ---
-title: Bead-First Workflow
+title: Substrate-First Specialists Workflow
 scope: workflow
 category: guide
-version: 1.4.2
-updated: 2026-06-24
-synced_at: bf6baf7a
-description: Canonical tracked and ad-hoc workflow for Specialists.
+version: 2.0.0
+updated: 2026-09-20
+description: Current tracked and compatibility workflow for Specialists.
 source_of_truth_for:
-  - "src/cli/run.ts"
-  - "src/cli/chat.ts"
-  - "src/specialist/runner.ts"
-  - "src/specialist/supervisor.ts"
-  - "src/cli/resume.ts"
-  - "src/cli/steer.ts"
+  - "native activation workflow"
+  - "legacy sp compatibility boundary"
 domain:
   - workflow
-  - beads
+  - substrate
 ---
 
-# Bead-First Workflow
+# Substrate-First Specialists Workflow
 
-> `sp` is an alias for `specialists`.
+> `sp` is an alias for `specialists`. For exact live commands, `sp help` wins.
 
-The canonical flow is bead-first. `specialists run` is always Supervisor-backed and emits a job id.
+## Authority
 
-## Tracked work (primary)
+Current/native work is Substrate-first:
 
-```bash
-bd create "Investigate X" -t task -p 1 --json
-bd update <id> --claim --json
-specialists run <name> --bead <id> [--context-depth N]
-specialists feed -f
-bd close <id> --reason "Done" --json
+```text
+ready pinned Substrate Issue revision
+  -> native Specialist activation
+  -> Journal/result evidence
+  -> settlement / WorkReceipt / provenance
+  -> verification
+  -> explicit Issue Closure by the authorized owner
 ```
 
-Key behavior for `--bead` runs:
-- Bead content is the prompt source.
-- Runner injects bead context variables (`$bead_context`, `$bead_id`).
-- Runner applies a bead-aware system override to prevent sub-bead creation.
-- Supervisor appends specialist output back to the input bead. Terminal bead closure still follows the current workflow gates and memory-ack rules; if `waiting_auto_close_ms` is configured, waiting keep-alive jobs can also close automatically after silence. Verify bead state before committing or publishing.
+A Specialist does not acquire work authority from chat text, pane state, a Beads note, or
+its own completion claim. `settled != published != closed`.
 
-## Ad-hoc work
+Use `using-xtrm` for system doctrine, `using-substrate` for durable work semantics, and
+`using-specialists` for Specialist execution procedure.
+
+## Native tracked work — primary
+
+A ready Issue is the prompt. Dispatch through the current native surface exposed by the
+runtime, for example `specialist_dispatch(issue_ref=...)`.
+
+Native activation:
+
+- validates and pins the Issue revision and contract hash;
+- binds claim/participant/session/workspace identity through ExecutionBinding;
+- runs in the admitted workspace;
+- uses the workspace writer lease for mutating roles;
+- records runtime/forensic evidence;
+- publishes settlement/result/provenance through the Substrate boundary;
+- never creates or closes durable work merely because the activation started or settled.
+
+If the Issue is draft, stale, blocked, or materially ambiguous, repair/re-attest it through
+planning before dispatch. Do not supplement an incomplete contract with hidden prompt prose.
+
+## Findings and follow-up work
+
+Progress, findings, decisions, blockers and results belong in the Journal/result evidence.
+
+If a worker discovers independently durable work outside current SCOPE:
+
+1. report the candidate and evidence;
+2. do not widen the current Issue through chat;
+3. coordinator/planning authority creates or revises a child/follow-up Issue through an
+   available typed Substrate surface;
+4. dispatch only after the new revision is ready.
+
+## Review
+
+Reviewer/seconder/test/security roles must evaluate the exact pinned Issue revision used by
+the implementation activation. Do not re-query mutable tracker state and silently replace
+the reviewed contract with a newer revision.
+
+A PASS verdict is evidence, not Issue Closure.
+
+## Legacy `sp run` workflow — compatibility during XTRM-93
+
+The old Supervisor/Runner CLI remains reachable during the strangler migration. Its
+Beads-backed behavior is compatibility, not current durable-work doctrine.
+
+Examples such as:
 
 ```bash
-specialists run <name> --prompt "..."
-```
-
-Use this for quick untracked tasks.
-
-## Async observation model
-
-For headless or multi-job work, run specialists normally and inspect them with `feed`, `ps`, and `result`:
-
-```bash
-specialists run explorer --bead unitAI-abc
+sp run executor --bead <legacy-id-or-alias>
 sp feed -f
 sp result <job-id>
+sp resume <job-id> "..."
+sp stop <job-id>
 ```
 
-For a human-in-the-loop launch, use `sp chat`:
+may still exercise the legacy job/worktree/Beads lifecycle until N4/N9 removes that
+backend. Do not infer from those flags that native activation is Beads-backed.
 
-```bash
-sp chat explorer --bead unitAI-abc
-```
+`--bead` / `bead_id` may also appear as compatibility aliases for an Issue ref on newer
+frontends. Resolve the actual backend and authority from the live command/tool contract.
 
-`sp chat` opens a TUI that combines a `sp feed -f`-style feed, pinned status row, final result display, and input prompt. Freeform input maps to `steer` while the job is running and `resume` while it is waiting. `/quit` and `Ctrl+C` detach without killing the job; use `/stop` when you intend to stop it.
+### Legacy-only semantics
 
-`--background` may also create a legacy tmux session when tmux is available. `sp attach <job>` reconnects to that tmux session only; it is not yet the chat TUI attach flow. Existing-job TUI attach is tracked separately in bead `unitAI-hx4ln`.
+These remain legacy concerns until their XTRM-93 node is complete:
 
-Use:
-- CLI: run/chat, then inspect with `feed`, `ps`, `result`
-- MCP: `use_specialist` (only exposed tool)
-- Shell backgrounding (`&`) when needed
+- Supervisor job state and legacy keep-alive/waiting behavior;
+- automatic Beads notes/closure;
+- per-job worktree provisioning and stale-base flags;
+- `--no-beads`, Beads dependency-context walks;
+- legacy steer/stop/finalize semantics.
 
-## `--context-depth`
+Do not copy these assumptions into new native roles, mandatory rules, or documentation.
 
-`--context-depth` controls blocker context injection when using `--bead`.
+## Observation
 
-| Value | Meaning |
-|---|---|
-| `0` | Disable dependency context injection |
-| `3` | Walk 3 levels up completed blockers (default) |
-| `N` | Walk N levels up completed blockers |
+Prefer persisted evidence:
 
-## `--no-beads`
+- native: `specialist_status`, persisted result/forensics, and the current Fleet/read model;
+- CLI compatibility: `sp ps`, `sp feed`, `sp result`, `sp log`, `sp forensic`.
 
-`--no-beads` disables tracking bead creation/updates for the run.
-
-Important:
-- It does not disable bead reading when `--bead <id>` is used.
-- Prompt source is still the bead when `--bead` is provided.
-
-## Steering vs resume
-
-- `steer`: for jobs currently `running` (mid-turn redirection)
-- `resume`: for keep-alive jobs in `waiting` (next turn)
-
-Inside `sp chat`, freeform input chooses between those two actions automatically based on the current status. Use explicit `sp steer` / `sp resume` commands when operating outside the chat TUI or from scripts.
-
-Keep-alive may be enabled explicitly (`--keep-alive`) or by specialist YAML (`execution.interactive: true`).
-Use `--no-keep-alive` when you want one-shot behavior for an otherwise interactive specialist.
-
-`resume` is not valid for non-waiting jobs.
-
-## Auto-append bead notes (all specialists)
-
-For **all specialists** invoked with `--bead`, Supervisor appends output notes back to the input bead automatically. This includes READ_ONLY, LOW, MEDIUM, and HIGH specialists.
+Runtime/UI state is not durable work authority.
 
 ## See also
 
-- [background-jobs.md](background-jobs.md)
-- [mcp-tools.md](mcp-tools.md)
-- [authoring.md](authoring.md)
+- `config/skills/using-specialists/SKILL.md`
+- `plugins/specialists/skills/supervising-activations/SKILL.md`
+- `docs/native-activation.md`
+- `docs/mcp-tools.md`
+- `docs/authoring.md`
+- `docs/migrations/xtrm-93/**`

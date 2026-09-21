@@ -208,29 +208,30 @@ a `JobControl` replacement keyed on `activationId`, which does not exist.
 
 ---
 
-## N8 — Schema/config cleanup and Beads-doctrine removal
+## N8 — Schema/config compatibility cleanup (semantic doctrine cut over earlier)
 
 | | |
 |---|---|
 | **inputs** | N4–N6 (the legacy consumers must be unreachable) |
-| **files** | `src/specialist/schema.ts`, `src/specialist/global-config.ts`, `src/specialist/mandatory-rules.ts:377-390`, `src/specialist/memory-retrieval.ts:10-21`, `config/specialists/*.json`, `config/mandatory-rules/**` |
-| **dependency** | N4–N6. Removing `beads_integration`/`beads_write_notes` while the legacy backend still consumes them breaks the legacy path mid-migration. |
-| **acceptance tests** | `DX-EXEC-008` (mandatory rules injection), plus the 84-deletion mechanical list in `06-schema-config-rules.md`. |
+| **files** | `src/specialist/schema.ts`, `src/specialist/global-config.ts`, compatibility fields in `config/specialists/*.json`, generated/user config and remaining legacy adapters |
+| **dependency** | N4–N6 for mechanical compatibility-field removal. The agent-facing Beads doctrine was a current native correctness defect and therefore was extracted into the pre-N8 semantic cutover; it has no reason to wait for dispatch cutover. |
+| **acceptance tests** | 84-deletion mechanical list in `06-schema-config-rules.md`, zero-consumer proof for compatibility fields, plus the already-landed/current doctrine guards that prevent native prompts from regressing to Beads authority. |
 | **rollback point** | Config removal is data-losing for authors; ship a deprecation warning one release before removal. |
 | **old path still reachable?** | **No — by design, this is the first node allowed to remove a legacy consumer.** |
 | **deletion unlocked?** | 22 schema lines, 12 `global-config.ts` lines, 13 per-config field removals, 11 `user.json` key families, 6 stale fields. |
 
-**Two distinct jobs here, and they must not be conflated:**
+**The two jobs were deliberately split:**
 
-1. **Mechanical config cleanup** — 84 discrete deletions, enumerated in Lane F. `execution.mode` is
-   the clearest case: set by 24/24 configs, validated, listed in `sp edit` enums, consumed by
-   nothing, ever.
-2. **The Beads-doctrine violation (§6.1).** This is not cleanup — it is a correctness bug in the
-   native runtime today. `workflow-quick-rules` is injected at `priority: 'must_keep'` into native
-   prompts and contains `bd update <id> --claim` and `bd close <id>`, with the heading stripped as
-   cosmetic cover. `core-session-boundary` (the *required* set on every activation) says the assigned
-   **Bead** is authority. `bead-id-verbatim` is referenced by 18 of 19 `template_sets` and is 100%
-   `bd`-scoped — **rewrite it, do not delete it.**
+1. **Semantic authority cutover — pre-N8 correctness work.** Native/current Specialist prompts,
+   canonical definitions, mandatory rules and agent-facing doctrine must use pinned Substrate
+   Issue revisions, Journal/result evidence and explicit Closure. This work is tracked in
+   `specialist-definition-semantic-cutover.md`. It retires the global Beads quick-rule injection,
+   migrates current roles to `issue-ref-verbatim`, and quarantines `bead-id-verbatim` as legacy
+   compatibility while leaving the old backend functional.
+2. **Mechanical config cleanup — N8.** The 84 discrete deletions remain gated on the old consumers
+   becoming unreachable. `beads_integration`, `beads_write_notes` and other legacy-only fields
+   stay parseable until zero-consumer proof; then schema/generated/user config can be removed without
+   pretending compatibility data is current work doctrine.
 
 ---
 

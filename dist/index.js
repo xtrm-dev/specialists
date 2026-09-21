@@ -190,73 +190,6 @@ async function run2() {
 }
 var init_version = () => {};
 
-// src/specialist/memory-retrieval.ts
-function estimateTokens(text) {
-  return Math.ceil(text.length / 4);
-}
-function estimateInjectedTokens(text) {
-  return estimateTokens(text);
-}
-var DEFAULT_STOP_WORDS, CACHE_MAX_AGE_MS, STATIC_WORKFLOW_RULES_BLOCK;
-var init_memory_retrieval = __esm(() => {
-  DEFAULT_STOP_WORDS = new Set([
-    "a",
-    "an",
-    "and",
-    "are",
-    "as",
-    "at",
-    "be",
-    "by",
-    "for",
-    "from",
-    "how",
-    "i",
-    "if",
-    "in",
-    "is",
-    "it",
-    "of",
-    "on",
-    "or",
-    "that",
-    "the",
-    "this",
-    "to",
-    "was",
-    "we",
-    "with",
-    "you",
-    "your",
-    "replace",
-    "implement",
-    "task",
-    "run",
-    "add",
-    "new",
-    "use",
-    "using",
-    "into",
-    "when",
-    "what",
-    "not",
-    "only"
-  ]);
-  CACHE_MAX_AGE_MS = 60 * 60 * 1000;
-  STATIC_WORKFLOW_RULES_BLOCK = `
-## Beads Workflow Quick Rules
-- Claim work: \`bd update <id> --claim\`
-- Append progress notes: \`bd update <id> --append-notes "..."\`
-- Store reusable insight: \`bd remember "insight"\`
-- Close completed issue: \`bd close <id> --reason "done"\`
-
-## Session close checklist
-1. \`git add <files>\`
-2. \`git commit -m "..."\`
-3. \`git push\`
-`.trim();
-});
-
 // src/specialist/canonical-asset-resolver.ts
 import { existsSync as existsSync2 } from "fs";
 import { fileURLToPath as fileURLToPath2 } from "url";
@@ -282,14 +215,14 @@ ${sections.map((section) => section.block).join(`
 
 `)}` : "";
 }
-function estimateTokens2(text) {
+function estimateTokens(text) {
   return text ? Math.max(1, Math.ceil(text.length / 4)) : 0;
 }
 function compileMandatoryRulesBudget(candidateSections, budgetLimit) {
   const sections = candidateSections.filter((section) => section.block.trim() && section.ruleCount > 0);
-  const candidateTokens = estimateTokens2(formatSectionsBlock(sections));
+  const candidateTokens = estimateTokens(formatSectionsBlock(sections));
   const mustKeep = sections.filter((section) => section.priority === "must_keep");
-  const floorTokens = estimateTokens2(formatSectionsBlock(mustKeep));
+  const floorTokens = estimateTokens(formatSectionsBlock(mustKeep));
   if (floorTokens > budgetLimit) {
     throw new MandatoryRulesBudgetError(budgetLimit, candidateTokens, floorTokens, [], sections.map((section) => section.setId));
   }
@@ -297,7 +230,7 @@ function compileMandatoryRulesBudget(candidateSections, budgetLimit) {
   for (const priority of ["important", "optional"]) {
     for (const section of sections.filter((item) => item.priority === priority)) {
       const proposed = sections.filter((item) => retained.has(item) || item === section);
-      if (estimateTokens2(formatSectionsBlock(proposed)) <= budgetLimit)
+      if (estimateTokens(formatSectionsBlock(proposed)) <= budgetLimit)
         retained.add(section);
     }
   }
@@ -309,7 +242,7 @@ function compileMandatoryRulesBudget(candidateSections, budgetLimit) {
     sections: injected,
     budgetLimit,
     candidateTokens,
-    injectedTokens: estimateTokens2(block),
+    injectedTokens: estimateTokens(block),
     injectedSectionIds: injected.map((section) => section.setId),
     evictedSectionIds: evicted.map((section) => section.setId),
     payloadDigest: createHash("sha256").update(block).digest("hex"),
@@ -520,15 +453,7 @@ function buildMandatoryRulesInjection(specialistConfig, budgetLimit = Number.POS
   const sets = collectMandatoryRuleSets(cwd, setIds);
   const inlineRules = mandatoryRules?.inline_rules ?? [];
   const globalsDisabled = mandatoryRules?.disable_default_globals ?? false;
-  const globals = globalsDisabled ? [] : [{
-    id: "workflow-quick-rules",
-    rules: [{
-      id: "workflow-quick-rules-1",
-      level: "required",
-      text: STATIC_WORKFLOW_RULES_BLOCK.trim().replace(/^##\s+Beads Workflow Quick Rules\n/, "").replace(/^- Store reusable insight:.*\n/m, "")
-    }],
-    priority: "must_keep"
-  }];
+  const globals = [];
   const requiredIds = new Set(index?.required_template_sets ?? []);
   const defaultIds = new Set(index?.default_template_sets ?? []);
   const prioritizedSets = sets.map((set) => ({
@@ -548,7 +473,6 @@ function buildMandatoryRulesInjection(specialistConfig, budgetLimit = Number.POS
 }
 var MandatoryRulesBudgetError;
 var init_mandatory_rules = __esm(() => {
-  init_memory_retrieval();
   init_canonical_asset_resolver();
   MandatoryRulesBudgetError = class MandatoryRulesBudgetError extends Error {
     budgetLimit;
@@ -20274,7 +20198,7 @@ function writeCache(cache) {
 `, "utf8");
 }
 function isFresh(cache) {
-  return Date.now() - cache.checked_at_ms < CACHE_MAX_AGE_MS2;
+  return Date.now() - cache.checked_at_ms < CACHE_MAX_AGE_MS;
 }
 function parseLatestTag(stdout) {
   const tags = stdout.split(`
@@ -20356,13 +20280,13 @@ function markVersionCheckNotified(result) {
     notified_for_tag: result.latestTag
   });
 }
-var require2, packageVersion, localVersion, CACHE_PATH, CACHE_MAX_AGE_MS2, NETWORK_TIMEOUT_MS = 2000;
+var require2, packageVersion, localVersion, CACHE_PATH, CACHE_MAX_AGE_MS, NETWORK_TIMEOUT_MS = 2000;
 var init_version_check = __esm(() => {
   require2 = createRequire2(import.meta.url);
   packageVersion = readBundledPackageVersion();
   localVersion = packageVersion;
   CACHE_PATH = join12(process.cwd(), ".specialists", "version-check.json");
-  CACHE_MAX_AGE_MS2 = 6 * 60 * 60 * 1000;
+  CACHE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 });
 
 // src/cli/list.ts
@@ -21002,7 +20926,7 @@ var init_templateEngine = __esm(() => {
 });
 
 // src/specialist/payload-measure.ts
-function estimateTokens3(text) {
+function estimateTokens2(text) {
   if (!text)
     return 0;
   return Math.max(1, Math.ceil(text.length / 4));
@@ -21011,7 +20935,7 @@ function measureUtf8Bytes(text) {
   return Buffer.byteLength(text, "utf8");
 }
 function measurePayloadComponent(kind, name, text) {
-  return { kind, name, tokens: estimateTokens3(text), bytes: measureUtf8Bytes(text) };
+  return { kind, name, tokens: estimateTokens2(text), bytes: measureUtf8Bytes(text) };
 }
 function summarizePayloadBreakdown(components) {
   return {
@@ -22118,6 +22042,10 @@ function warnMissingOptionalPrerequisites() {
     return;
   warn("Optional CLI prerequisites are missing. Init will continue, but workflow commands may fail:");
   for (const tool of missingTools) {
+    if (tool.name === "bd") {
+      warn(`bd: optional legacy sp/Supervisor compatibility only; install via ${tool.install}`);
+      continue;
+    }
     warn(`${tool.name}: install via ${tool.install}`);
   }
 }
@@ -22715,29 +22643,26 @@ var init_init = __esm(() => {
 <!-- specialists:start -->
 ## Specialists
 
-Use CLI commands via Bash to run and monitor specialists:
+Specialists is an XTRM execution backend. Substrate owns durable work.
 
-Core specialist commands (CLI-first in pi):
+Native/current tracked flow:
+1. Start from a ready pinned Substrate Issue revision.
+2. Dispatch with the native Specialist surface exposed by the runtime (for example \`specialist_dispatch(issue_ref=...)\`).
+3. Observe persisted status/result/forensics and answer asks through the native control surface.
+4. Verify the result against the pinned contract and current tree/tests.
+5. Record result/provenance through Substrate; settlement/PASS/commit is not Issue Closure.
+6. Closure is explicit and belongs to the authorized durable-work owner.
+
+Core observation/compatibility commands:
 - \`specialists list\`
-- \`specialists run <name> --bead <id>\`
-- \`specialists run <name> --prompt "..."\`
-- \`specialists feed -f\` / \`specialists feed <job-id>\`
-- \`specialists result <job-id>\`
-- \`specialists resume <job-id> "next task"\` (for keep-alive jobs in waiting)
-- \`specialists stop <job-id>\`
+- \`specialists ps\` / \`specialists feed\` / \`specialists result\`
+- legacy \`specialists run <name> --bead <id>\` remains available only while XTRM-93 keeps the Supervisor backend reachable.
 
-For background specialists in pi, prefer the process extension:
-- \`process start\`, \`process list\`, \`process output\`, \`process logs\`, \`process kill\`, \`process clear\`
-- TUI: \`/ps\`, \`/ps:pin\`, \`/ps:logs\`, \`/ps:kill\`, \`/ps:clear\`, \`/ps:dock\`, \`/ps:settings\`
-
-Canonical tracked flow:
-1. Create/claim bead issue
-2. Run specialist with \`--bead <id>\` (for long work, launch via \`process start\`)
-3. Observe progress (\`process output\` / \`process logs\` or \`specialists feed\`)
-4. Read final output (\`specialists result <job-id>\`)
-5. Close/update bead with outcome
-
-Add custom specialists to \`.specialists/user/\` to extend defaults.
+Rules:
+- Do not use Beads notes/status as authority for native work.
+- \`--bead\` / \`bead_id\` may be a compatibility alias; inspect the live surface before inferring backend semantics.
+- Messages coordinate; they do not rewrite SCOPE/SUCCESS/NON_GOALS/CONSTRAINTS/VALIDATION/OUTPUT.
+- Add custom Specialist definitions under \`.specialists/user/\`; current role prompts must preserve pinned-Issue/Journal/settlement/Closure semantics.
 <!-- specialists:end -->
 `.trimStart();
   GITIGNORE_ENTRIES = [
@@ -25964,6 +25889,61 @@ function stripJsonFences(text) {
   return text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
 }
 
+// src/specialist/memory-retrieval.ts
+function estimateTokens3(text) {
+  return Math.ceil(text.length / 4);
+}
+function estimateInjectedTokens(text) {
+  return estimateTokens3(text);
+}
+var DEFAULT_STOP_WORDS, CACHE_MAX_AGE_MS2;
+var init_memory_retrieval = __esm(() => {
+  DEFAULT_STOP_WORDS = new Set([
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "by",
+    "for",
+    "from",
+    "how",
+    "i",
+    "if",
+    "in",
+    "is",
+    "it",
+    "of",
+    "on",
+    "or",
+    "that",
+    "the",
+    "this",
+    "to",
+    "was",
+    "we",
+    "with",
+    "you",
+    "your",
+    "replace",
+    "implement",
+    "task",
+    "run",
+    "add",
+    "new",
+    "use",
+    "using",
+    "into",
+    "when",
+    "what",
+    "not",
+    "only"
+  ]);
+  CACHE_MAX_AGE_MS2 = 60 * 60 * 1000;
+});
+
 // src/specialist/system-prompt.ts
 import { execSync } from "child_process";
 import { existsSync as existsSync19 } from "fs";
@@ -25973,7 +25953,7 @@ function buildOutputContractInstruction(responseFormat, outputType, outputSchema
     return "";
   const lines = ["## Output Contract"];
   if (responseFormat === "markdown") {
-    lines.push("Respond using markdown with canonical sections (include when applicable):", "- `## Summary`", "- `## Status`", "- `## Changes`", "- `## Verification`", "- `## Risks`", "- `## Follow-ups`", "- `## Beads`", "Optional sections when relevant:", "- `## Architecture`", "- `## Acceptance Criteria`", "- `## Machine-readable block`", "Do not impose artificial bullet limits \u2014 prioritize completeness and clarity.");
+    lines.push("Respond using markdown with canonical sections (include when applicable):", "- `## Summary`", "- `## Status`", "- `## Changes`", "- `## Verification`", "- `## Risks`", "- `## Follow-ups`", "- `## Work`", "Optional sections when relevant:", "- `## Architecture`", "- `## Acceptance Criteria`", "- `## Machine-readable block`", "Do not impose artificial bullet limits \u2014 prioritize completeness and clarity.");
   } else {
     lines.push("Respond with a single valid JSON object only.", "Do not wrap JSON in markdown fences, headers, or prose.");
   }
@@ -53646,15 +53626,15 @@ ${bold10("specialists status")}
       const pStr = piProviders.size > 0 ? `${piProviders.size} provider${piProviders.size > 1 ? "s" : ""} active  ${dim9(`(${[...piProviders].join(", ")})`)} ` : yellow10("no providers configured \u2014 run pi config");
       ok2(`${vStr}  \u2014  ${pStr}`);
     }
-    section("beads  (issue tracker)");
+    section("legacy Beads compatibility");
     if (!bdInstalled) {
-      fail8(`bd not installed \u2014 install ${yellow10("bd")} first`);
+      info("bd not installed \u2014 native/Substrate Specialists are unaffected; legacy Supervisor/Beads commands are unavailable");
     } else {
-      ok2(`bd installed${bdVersion?.ok ? `  ${dim9(bdVersion.stdout)}` : ""}`);
+      info(`bd installed${bdVersion?.ok ? `  ${dim9(bdVersion.stdout)}` : ""}  ${dim9("(legacy compatibility only)")}`);
       if (beadsPresent) {
-        ok2(".beads/ present in project");
+        info(".beads/ present \u2014 historical/legacy workspace available");
       } else {
-        warn2(`.beads/ not found \u2014 run ${yellow10("bd init")} to enable issue tracking`);
+        ok2("no .beads/ workspace \u2014 expected for a Substrate-first project");
       }
     }
     section("MCP");
@@ -59873,7 +59853,7 @@ async function run38() {
   lines.push(`  ${dim13("                                            #   creates dirs, wires MCP + hooks, injects context")}`);
   lines.push("");
   lines.push(`  Verify everything is healthy:`);
-  lines.push(`  ${cmd2("specialists status")}                        # shows pi, beads, MCP, active jobs`);
+  lines.push(`  ${cmd2("specialists status")}                        # runtime health, native/legacy surfaces, active work`);
   lines.push("");
   lines.push(section2("2. Initialize a Project"));
   lines.push("");
@@ -59904,14 +59884,19 @@ async function run38() {
   lines.push(`  ${bold11("Foreground")} (streams output to stdout):`);
   lines.push(`  ${cmd2("specialists run code-review")} ${flag("--prompt")} ${dim13('"Review src/api.ts for security issues"')}`);
   lines.push("");
-  lines.push(`  ${bold11("Tracked run")} (linked to a beads issue for workflow integration):`);
+  lines.push(`  ${bold11("Native tracked work")} (primary):`);
+  lines.push(`  ${dim13("  # start from a ready pinned Substrate Issue revision")}`);
+  lines.push(`  ${dim13("  # dispatch through specialist_dispatch(issue_ref=...) in the native runtime")}`);
+  lines.push(`  ${dim13("  # settlement/result is evidence; Closure remains explicit")}`);
+  lines.push("");
+  lines.push(`  ${bold11("Legacy sp compatibility")} (Supervisor/Beads backend while XTRM-93 keeps it reachable):`);
   lines.push(`  ${cmd2("specialists run code-review")} ${flag("--bead")} ${dim13("unitAI-abc")}`);
-  lines.push(`  ${dim13("  # uses bead description as prompt, tracks result in issue")}`);
+  lines.push(`  ${dim13("  # compatibility locator; do not generalize this lifecycle into native role doctrine")}`);
   lines.push("");
   lines.push(`  Override model for one run:`);
   lines.push(`  ${cmd2("specialists run code-review")} ${flag("--model")} ${dim13("anthropic/claude-opus-4-6")} ${flag("--prompt")} ${dim13('"..."')}`);
   lines.push("");
-  lines.push(`  Run without beads issue tracking:`);
+  lines.push(`  Legacy CLI: run without Beads tracking:`);
   lines.push(`  ${cmd2("specialists run code-review")} ${flag("--no-beads")} ${flag("--prompt")} ${dim13('"..."')}`);
   lines.push("");
   lines.push(`  Pipe a prompt from stdin:`);
@@ -59919,7 +59904,7 @@ async function run38() {
   lines.push("");
   lines.push(section2("5. Async Job Lifecycle"));
   lines.push("");
-  lines.push(`  ${bold11("MCP pattern")}: ${cmd2("specialist_dispatch")} (fire-and-forget, poll ${cmd2("specialist_status")} for completion)`);
+  lines.push(`  ${bold11("Native MCP pattern")}: ${cmd2("specialist_dispatch(issue_ref=...)")} then consume ${cmd2("specialist_status")} / event-driven continuation as needed`);
   lines.push(`  ${bold11("CLI pattern")}: ${cmd2('specialists run <name> --prompt "..."')} prints ${dim13("[job started: <id>]")} to stderr`);
   lines.push(`  ${bold11("Agent pattern")}: ${cmd2('specialists run <name> --prompt "..." --background')} detaches and returns the job id`);
   lines.push(`  ${bold11("Shell pattern")}: ${cmd2('specialists run <name> --prompt "..." &')} native backgrounding, interactive shells only`);
@@ -60002,8 +59987,8 @@ async function run38() {
     "    web_search: false            # allow web search tool",
     "    file_write: true             # allow file writes",
     "",
-    "  beads_integration:            # legacy sp CLI only; native activations ignore it",
-    "    auto_create: true            # create a beads issue per run",
+    "  beads_integration:            # LEGACY sp/Supervisor compatibility only; native ignores it",
+    "    auto_create: true            # legacy tracking behavior only",
     "    issue_type: task             # task | bug | feature",
     "    priority: 2                  # 0=critical \u2026 4=backlog"
   ];
@@ -60045,9 +60030,12 @@ async function run38() {
   lines.push(`  ${bold11("Foreground review, save to file:")}`);
   lines.push(`  ${cmd2('specialists run code-review --prompt "Audit src/" > review.md')}`);
   lines.push("");
-  lines.push(`  ${bold11("Tracked run with beads integration:")}`);
+  lines.push(`  ${bold11("Native tracked run:")}`);
+  lines.push(`  ${dim13("  ready Substrate Issue -> specialist_dispatch(issue_ref=...) -> result/settlement -> explicit Closure")}`);
+  lines.push("");
+  lines.push(`  ${bold11("Legacy compatibility run:")}`);
   lines.push(`  ${cmd2("specialists run deep-analysis --bead unitAI-abc")}`);
-  lines.push(`  ${dim13("  # prompt from bead, result tracked in bead")}`);
+  lines.push(`  ${dim13("  # Supervisor/Beads compatibility path only")}`);
   lines.push("");
   lines.push(`  ${bold11("Steer a job mid-run:")}`);
   lines.push(`  ${cmd2('specialists steer <job-id> "focus only on the auth module"')}`);
@@ -60869,17 +60857,16 @@ function checkSpAlias() {
   return false;
 }
 function checkBd() {
-  section3("beads  (issue tracker)");
+  section3("legacy Beads compatibility");
   if (!isInstalled3("bd")) {
-    fail9("bd not installed");
-    fix("install beads (bd) first");
-    return false;
+    hint("bd not installed \u2014 native/Substrate Specialists are healthy; legacy Supervisor/Beads commands are unavailable");
+    return true;
   }
-  ok3(`bd installed  ${dim14(sp("bd", ["--version"]).stdout || "")}`);
+  hint(`bd installed  ${dim14(sp("bd", ["--version"]).stdout || "")}  ${dim14("(legacy compatibility only)")}`);
   if (existsSync47(join49(CWD, ".beads")))
-    ok3(".beads/ present in project");
+    hint(".beads/ present \u2014 historical/legacy workspace available");
   else
-    warn3(".beads/ not found in project");
+    ok3("no .beads/ workspace \u2014 expected for a Substrate-first project");
   return true;
 }
 function checkSubstrateRuntime() {
@@ -63416,7 +63403,7 @@ function formatCommands(entries) {
 async function run43() {
   const lines = [
     "",
-    "Specialists lets you run project-scoped specialist agents with a bead-first workflow.",
+    "Specialists provides native Substrate-backed activations plus a legacy Beads-backed sp job compatibility surface.",
     "",
     bold14("Usage:"),
     "  specialists|sp [command]",
@@ -63426,11 +63413,13 @@ async function run43() {
     "",
     bold14("Common flows:"),
     "",
-    "  Tracked work (primary)",
-    '    bd create "Task title" -t task -p 1 --json',
+    "  Native tracked work (primary)",
+    "    # ready pinned Substrate Issue revision -> specialist_dispatch(issue_ref=...)",
+    "    # observe with specialist_status / persisted result; settlement is not Issue Closure",
+    "",
+    "  Legacy sp job compatibility",
     "    specialists chat <name> [prompt...] [--bead <id>] [--prompt <text>] [--context-depth N]",
-    "    specialists ps <job-id> --json     # check status",
-    '    bd close <id> --reason "Done"',
+    "    specialists ps <job-id> --json     # legacy/native persisted projections",
     "",
     "  Interactive TUI",
     "    specialists chat <name> --bead <id>       # launches job + feed/status/result/input TUI",
@@ -63441,12 +63430,12 @@ async function run43() {
     "  Ad-hoc work",
     '    specialists run <name> --prompt "..."',
     "",
-    "  Rules",
-    "    --bead is for tracked work",
+    "  Legacy CLI rules",
+    "    --bead is a legacy/compatibility work locator; it does not make Beads native authority",
     "    --prompt is for quick untracked work",
-    "    chat without --bead auto-creates ephemeral tracked beads",
+    "    chat without --bead may auto-create legacy tracking beads on the Supervisor backend",
     "    --context-depth defaults to 3 with --bead",
-    "    --no-beads does not disable bead reading",
+    "    --no-beads affects the legacy Beads backend only",
     "",
     "  Output modes",
     '    specialists run <name> --prompt "..."          # human (default): formatted event summary',
@@ -63454,7 +63443,7 @@ async function run43() {
     '    specialists run <name> --prompt "..." --raw    # legacy: raw LLM text deltas',
     "",
     "  Async patterns",
-    "    MCP:   specialist_dispatch (fire-and-forget, poll specialist_status for completion)",
+    "    MCP:   specialist_dispatch(issue_ref=...) + specialist_status / event-driven continuation",
     '    CLI:   specialists run <name> --prompt "..."       # job ID prints on stderr',
     "           specialists ps|feed|log|result <job-id>       # observe/progress/debug/final output",
     '    Agent: specialists run <name> --prompt "..." --background  # detached; use from an agent pane',
@@ -93706,8 +93695,10 @@ function createSpecialistDispatchTool(getHost, getPusher) {
           status: "dispatched",
           ...view,
           ...inline2 ? {
+            created_issue_ref: handle.issueRef,
+            created_issue_note: "This dispatch CREATED the Substrate Issue above from your inline contract. " + "Track its Journal/result/provenance explicitly. Specialist settlement is " + "evidence, not Issue Closure; use the authorized Substrate lifecycle for Closure.",
             created_bead_id: handle.issueRef,
-            created_bead_note: "This dispatch CREATED the bead above from your inline contract. It is a " + "durable board record and is yours to track: close it when the work is " + "done, or reassign it. It is not cleaned up automatically."
+            created_bead_note: "Compatibility alias: created_issue_ref is the authority. Track Journal/result/" + "provenance explicitly; settlement is not Issue Closure."
           } : {},
           step_contract: {
             root_work_ref: handle.stepContract.rootWorkRef,

@@ -46,8 +46,11 @@ describe('quickstart CLI — run()', () => {
     expect(out).not.toContain('specialists install');
   });
 
-  it('documents --bead flag for tracked runs', async () => {
+  it('documents native Substrate work first and labels --bead as legacy compatibility', async () => {
     const out = await captureOutput();
+    expect(out).toContain('Native tracked work');
+    expect(out).toContain('Substrate Issue');
+    expect(out).toContain('Legacy sp compatibility');
     expect(out).toContain('--bead');
   });
 
@@ -62,9 +65,10 @@ describe('quickstart CLI — run()', () => {
     expect(out).toContain('paths:');
   });
 
-  it('documents beads_integration in YAML schema', async () => {
+  it('documents beads_integration only as legacy compatibility', async () => {
     const out = await captureOutput();
     expect(out).toContain('beads_integration');
+    expect(out).toContain('LEGACY sp/Supervisor compatibility only');
   });
 
   it('documents hook points', async () => {

@@ -18,7 +18,7 @@ It is not just “run many agents”. The core idea is that a long single-agent 
 Specialists gives an AI workflow a healthier shape:
 
 - the **orchestrator** stays the central executive — it owns the user intent, task identity, evidence, and publication decision;
-- the **bead** is the contract and durable working memory — problem, scope, success criteria, validation, dependencies, and handoffs live there;
+- the **pinned Substrate Issue revision** is the executable work contract — problem, scope, success criteria, validation, dependencies, and authorized work live there; Journal/settlement evidence records what happened without rewriting that authority;
 - **specialists** are fresh, scoped cognitive faculties — explorer, debugger, executor, test-engineer, reviewer, sync-docs, researcher, and domain roles each get only the context, tools, rules, and output contract they need;
 - **structured handoffs** flow back to the orchestrator — results are evidence to consume, not conversational vibes to remember;
 - **workspaces and gates** keep changes publishable — edit-capable roles work in branches/worktrees, reviewer/QA/security roles judge against the contract.
@@ -29,7 +29,7 @@ Specialists sits in the xt/xtrm stack:
 
 - **[pi coding agent](https://github.com/earendil-works/pi-coding-agent)** executes model sessions and exposes tool events/RPC boundaries.
 - **[xtrm-tools](https://github.com/Jaggerxtrm/xtrm-tools)** provides operator workflow: worktree sessions, `.xtrm/` skills/hooks, reports, update tooling, and gates.
-- **[beads](https://github.com/steveyegge/beads)** provides issue IDs, claims, dependencies, task contracts, and durable notes.
+- **Substrate (`@jaggerxtrm/substrate`)** provides durable Issues/revisions, claims, Journal continuity, ExecutionBinding, provenance, and explicit Closure. Beads remains migration/legacy compatibility only.
 
 See [specialists.scheme.md](specialists.scheme.md) for the full rationale.
 
@@ -69,7 +69,7 @@ Specialists replaces context hoarding with **contract-bound cognition**.
 ```mermaid
 flowchart TD
   U[User / project need] --> O[Orchestrator\ncentral executive]
-  O --> B[Bead contract\nproblem · scope · success · validation]
+  O --> B[Substrate Issue revision\nproblem · scope · success · validation]
   B --> Check{Contract ready?}
   Check -->|repair needed| Refine[Refine scope / constraints / outputs]
   Refine --> B
@@ -113,7 +113,7 @@ flowchart TD
   Decision -->|resume / steer| Choose
   Decision -->|fix loop| B
   Decision -->|publish| Merge[Merge / PR / release]
-  Decision -->|done| Close[Close bead + durable notes]
+  Decision -->|done| Close[Explicit Issue Closure\nafter verified evidence]
 ```
 
 This is close to how a human mind works: a central executive does not consciously compute every perception, motor skill, language move, and memory lookup at once. It activates specialized faculties, receives summaries/evidence, and decides what to do next.
@@ -126,14 +126,14 @@ Specialists gives an AI workflow the same structure. The orchestrator remains th
 
 | Need | Use |
 |---|---|
-| Turn vague work into an executable task contract | bead + planner / orchestrator |
+| Turn vague work into an executable task contract | Substrate Issue + planner / orchestrator |
 | Map unfamiliar local code | `sp run explorer --bead <id>` |
 | Diagnose a bug with unknown cause | `sp run debugger --bead <id>` |
 | Implement a scoped change in an isolated workspace | `sp run executor --bead <id> --worktree` |
 | Add tests from the actual implementation diff | `test-engineer` |
 | Run and classify validation commands | `test-runner` |
 | Check scope/quality before final review | `seconder` |
-| Review implementation evidence against the bead contract | `sp run reviewer --bead <id> --job <exec-job>` |
+| Review implementation evidence against the pinned Issue contract | reviewer/seconder against the same pinned revision; legacy `sp run ... --bead` remains a compatibility surface |
 | Research current docs, repos, APIs, papers, or domain evidence | `researcher`, `quant-researcher`, `transcriber` |
 | Sync one stale doc safely | `sync-docs` |
 | Keep service-expert skill docs aligned with code drift | `service-knowledge-sync` |

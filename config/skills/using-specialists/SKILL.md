@@ -33,15 +33,14 @@ Use subcommand help before exact invocation when a flag matters. The installed C
 registry are authoritative. Static examples in this skill are shapes, not a promise that
 an old flag still exists.
 
-Two runtimes exist. Native activation (below) is the primary flow for Substrate-backed
-work; the `sp` CLI is the operator/frontend surface, transitional under XTRM-93.
+Two execution paths remain during XTRM-93. Native activation (below) is the primary flow for Substrate-backed work; legacy `sp run`/Supervisor behavior is a compatibility path. Operator CLI projections may coexist, but agent work authority comes from the typed Substrate service.
 
 ## Contract precondition
 
 A specialist receives a durable Substrate Issue. The Issue must already be a usable
 contract (attested, ready) before dispatch.
 
-- Read it with `sb issue show <ref>` (pinned revision + readiness).
+- Read it through the live typed Substrate issue surface (`substrate_issue_get <ref>` on Pi; the equivalent Substrate MCP service on Claude). Never shell out to `sb` from an agent to reconstruct authority.
 - If it is a draft, incomplete, stale, or contradicted by current code, repair it through
   the XTRM planning/contract workflow before dispatch.
 - Do not use an ad-hoc prompt to smuggle missing requirements around the Issue.
@@ -109,9 +108,10 @@ context ceiling, persist state and hand off. Inter-agent messaging → `/multipl
 Native activation hosts a Specialist on an in-process Pi `AgentSession`, consuming
 Substrate Issues through the WorkItemStore boundary — never a Beads client, a `bd`
 subprocess, or a second readiness derivation. Authority (what work exists, who owns it,
-readiness) belongs to Substrate: read its `using-substrate` skill. Six tools, names
+readiness) belongs to Substrate: read its `using-substrate` skill. Eight tools, names
 exact: `specialist_dispatch` / `specialist_status` / `specialist_reply` /
-`specialist_resume` / `specialist_stop_activation` / `specialist_list`.
+`specialist_resume` / `specialist_retry` / `specialist_steer` /
+`specialist_stop_activation` / `specialist_list`.
 Full operator procedure: `plugins/specialists/skills/supervising-activations/SKILL.md`.
 
 - **The Substrate Issue is the prompt; there is no task-text field.** Exactly one of
@@ -124,9 +124,11 @@ Full operator procedure: `plugins/specialists/skills/supervising-activations/SKI
   the workspace writer lease at admission (re-checked per mutating call); contention
   refuses. The lease releases at settle/completion/disposal; `specialist_resume`
   re-acquires it. A settled activation is resumable, not lease-holding.
-- **A child asks and resumes.** Asks via `ask_coordinator`/`escalate_to_coordinator`,
-  answered by `specialist_reply` on `message_id`; `specialist_resume` continues the
-  SAME session; `specialist_stop_activation` is the only ordinary disposal path.
+- **Control is state-specific.** Asks via `ask_coordinator`/`escalate_to_coordinator`
+  are answered by `specialist_reply` on `message_id`; running work may be redirected
+  with `specialist_steer`; settled/waiting work continues with `specialist_resume`;
+  failed work may re-enter with `specialist_retry`; `specialist_stop_activation` is
+  the irreversible ordinary disposal path.
 
 Settlement is evidence: record a Journal result, verify, then close explicitly —
 Closure lives elsewhere. Do not cite `docs/native-activation.md` (stale; rewrite

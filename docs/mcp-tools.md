@@ -27,9 +27,10 @@ domain:
 The server (`src/mcp/v2-server.ts`, `buildV2Server`) registers its tools
 explicitly in one array. There are two surfaces:
 
-- **Core Specialists activation tools (always registered, 6):**
+- **Core Specialists activation tools (always registered, 8):**
   `specialist_status`, `specialist_dispatch`, `specialist_reply`,
-  `specialist_resume`, `specialist_stop_activation`, `specialist_list`.
+  `specialist_resume`, `specialist_retry`, `specialist_steer`,
+  `specialist_stop_activation`, `specialist_list`.
 - **Specialists-hosted Substrate service tools (conditional, 3):**
   `substrate_issue`, `substrate_journal`, `substrate_provenance`. Admitted
   only when Substrate resolves (`resolveSubstrate()` reports available) or
@@ -69,7 +70,7 @@ that parsed the verbose form working with one flag.
 | `substrate_journal` | Substrate journal service (conditional) |
 | `substrate_provenance` | Substrate provenance service (conditional) |
 
-Inventory derived from the `tools` array in `src/mcp/v2-server.ts`: seven core
+Inventory derived from the `tools` array in `src/mcp/v2-server.ts`: eight core
 factories plus three Substrate factories behind the availability gate.
 
 ## `specialist_status`
@@ -171,9 +172,10 @@ z.object({
   SCRUTINY level; a draft or incomplete issue is refused before a model turn
   is spent. If the issue is not dispatchable, fix the issue (planning skill),
   not the dispatch.
-- An inline `contract` that passes the gate creates a durable work record;
-  the result carries `created_bead_id` plus a `created_bead_note` — track it,
-  it is not cleaned up automatically.
+- An inline `contract` that passes the gate creates a durable Substrate Issue.
+  The result carries `created_issue_ref` plus `created_issue_note`. The old
+  `created_bead_id` / `created_bead_note` keys remain compatibility aliases only.
+  Settlement/result is evidence; it does not perform Issue Closure.
 - `epic_context_depth` must be 1 or 2; anything else is a structured refusal
   (bare `z.number()` deliberately, so range errors return the refusal envelope
   instead of an opaque zod throw).

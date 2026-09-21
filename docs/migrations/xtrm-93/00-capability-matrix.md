@@ -558,7 +558,15 @@ found and proved.
 ### 6.1 Beads workflow doctrine is injected into the native runtime
 
 The rule states: *"Beads-specific workflow doctrine in mandatory-rules must not leak into the native
-runtime."* It leaks today.
+runtime."*
+
+> **CURRENT STATUS:** corrected by the Specialist Definition Semantic Cutover. The measurement below
+> is historical evidence: current canonical prompts no longer inject `workflow-quick-rules`;
+> `core-session-boundary` is Substrate-native; canonical roles use `issue-ref-verbatim`; the old
+> `bead-id-verbatim` set is explicitly legacy compatibility. See
+> `specialist-definition-semantic-cutover.md`.
+
+At audit time, it leaked as follows.
 
 - `src/specialist/memory-retrieval.ts:10-21` defines `STATIC_WORKFLOW_RULES_BLOCK` as a literal
   Beads block (`bd update <id> --claim`, `bd update <id> --append-notes`, `bd remember`, `bd close`,

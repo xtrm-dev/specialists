@@ -2,10 +2,10 @@
 title: Worktree Isolation
 scope: worktrees
 category: reference
-version: 1.4.1
-updated: 2026-05-15
+version: 1.5.0
+updated: 2026-09-20
 synced_at: bf6baf7a
-description: Technical reference for worktree-per-executor isolation — CLI flags, job registry, GC, and chained bead patterns.
+description: Legacy sp/Supervisor worktree-per-job reference retained during XTRM-93; native activations use Core/XTRM workspace ownership and writer leases.
 source_of_truth_for:
   - "src/specialist/job-root.ts"
   - "src/specialist/worktree.ts"
@@ -19,6 +19,13 @@ domain:
 ---
 
 # Worktree Isolation
+
+> **Legacy `sp run` reference.** The automatic worktree-per-executor behavior documented
+> below belongs to the Supervisor/Runner compatibility backend. Native activations do **not**
+> provision a worktree from `--bead`; they execute in the workspace admitted by the
+> coordinator/Core session topology and use the writer lease. XTRM-93 N6 owns the final
+> worktree/branch integration contract.
+
 
 Each edit-permission specialist runs in an isolated git worktree (branch). This prevents concurrent file corruption when multiple executors modify overlapping paths, and produces a clean per-task branch that the orchestrator merges in dependency order.
 

@@ -47,7 +47,7 @@ describe('using-specialists qa-routing evals', () => {
     // agent reaches the right reference and does NOT load irrelevant ones.
     expect(evals.evals.slice(8).map((entry) => entry.eval_name)).toEqual([
       'progressive-disclosure-merge-routing',
-      'progressive-disclosure-bead-authoring',
+      'progressive-disclosure-issue-authoring',
       'progressive-disclosure-no-content-loss',
     ]);
   });

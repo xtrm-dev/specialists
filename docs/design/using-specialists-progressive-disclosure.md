@@ -1,5 +1,11 @@
 # using-specialists: progressive disclosure — benchmark and review
 
+> **DATED BENCHMARK / MIGRATION PROVENANCE.** Measurements, command examples and the
+> `bead_id`/launcher vocabulary below describe the v3.7→v3.8 split at the time it was
+> measured. Current doctrine is the live `config/skills/using-specialists/SKILL.md`:
+> typed Substrate Issue service for authority, `issue_ref` primary for native dispatch,
+> and Beads/legacy CLI vocabulary only where explicitly marked compatibility.
+
 Epic `unitAI-6639v`. Compares the pre-split skill (v3.7) with the router + references
 layout (v3.8). Written at close of `unitAI-6639v.3`.
 
@@ -28,13 +34,13 @@ whether or not it ever merged anything.
 ## Layout
 
 `SKILL.md` keeps only what gates *every* task — the 15 non-negotiable rules,
-orchestration discipline, when to delegate, specialist choice, the promotion gate, bead titles,
+orchestration discipline, when to delegate, specialist choice, the promotion gate, Issue identity,
 SCRUTINY, the escalation matrix, session-end handoff — plus a phase → reference routing table
 and a five-gates index.
 
 | Reference | Owns |
 |---|---|
-| `references/bead-contracts.md` | contract shape, per-type contracts, dependency vocabulary |
+| `references/issue-contracts.md` | contract shape, per-type contracts, dependency vocabulary |
 | `references/chain-recipes.md` | QA+Iron gates, single-chain, epic, review/fix loop, mini-flows |
 | `references/dispatch-preconditions.md` | Git State Precondition, conflict clusters, test-failure maps |
 | `references/monitoring.md` | sleep timers, observability-DB notification, steering, rebuttal |
@@ -48,7 +54,7 @@ and a five-gates index.
 
 Sections were extracted **verbatim by line range via script**, never re-typed or summarized.
 The first cut left the router at 124 lines — under the 250–350 budget. Rather than pad it, the
-sections consulted on *every* task (specialist choice, promotion gate, bead titles, SCRUTINY,
+sections consulted on *every* task (specialist choice, promotion gate, Issue identity, SCRUTINY,
 escalation) were promoted from the references into the router and removed from those references.
 Result: in budget, zero duplication.
 

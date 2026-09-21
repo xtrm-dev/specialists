@@ -40,7 +40,7 @@ The package ships the source copies under `config/skills/`. The active `.xtrm/sk
 
 Location: `config/skills/using-specialists/SKILL.md`
 
-Canonical orchestration doctrine for substantial tracked work. It covers bead contracts, dependency graph shape, conflict-cluster mapping, advisory passes, reviewer rebuttal, debugger-restitch, E2E smoke phases, monitoring cadence, manual publication, and session-end handoff. Use this for multi-step implementation, debugging, reviews, docs sync planning, and specialist orchestration.
+Canonical Specialist execution doctrine for substantial tracked work. Durable authority comes from ready pinned Substrate Issue revisions; the skill covers native activation, role/gate selection, evidence/result consumption, continuation, and the transitional legacy `sp` compatibility surface. Use it together with `using-xtrm` / `using-substrate`; do not treat Beads lifecycle commands as current native doctrine.
 
 ### `using-specialists-auto`
 
@@ -73,7 +73,7 @@ Reconciles specialists/xtrm drift. Current model:
 
 Location: `config/skills/specialists-creator/SKILL.md`
 
-Guides creation and repair of `.specialist.json` files. Use `sp edit`, presets, `sp view`, and validation instead of hand-written ad-hoc JSON. Always choose models from live `pi --list-models`; do not cargo-cult old examples.
+Guides creation and repair of `.specialist.json` files. New/current role prompts must preserve Substrate authority semantics: pinned Issue contract, Journal/result evidence, settlement != Closure. Legacy `beads_*` fields may remain only as compatibility data while XTRM-93 keeps the old backend reachable. Use `sp edit`, presets, `sp view`, and validation instead of hand-written ad-hoc JSON.
 
 ### `setup-specialists`
 

@@ -4,7 +4,7 @@
 **Target repository path:** `docs/design/execution-protocol-design/specialist-execution-protocol.md`  
 **Owner:** `xtrm-dev/specialists`  
 **Protocol identifier:** `specialists.execution.v1`  
-**Scope:** one Specialist activation executing one root or step Bead contract  
+**Scope:** one Specialist activation executing one pinned root/step Substrate Issue revision or resolved step contract  
 **Companions:** `docs/design/roadmap/specialists-roadmap.md`, `docs/design/roadmap/chain-templates/README.md`, the Specialists modernization PRD, `xtrm/docs/channels/channels.md`, and the Substrate design.
 
 ---
@@ -23,7 +23,7 @@ It defines:
 - execution and evidence collection;
 - Git and commit finalization;
 - result persistence;
-- automatic Bead handoff, parent notification, forensic emission and cleanup;
+- automatic result/settlement/provenance publication, parent notification, forensic emission and cleanup;
 - failure, replay and idempotency semantics.
 
 It does **not** define chain topology. Chain templates define which participants and gates exist and how they depend on one another. This protocol defines how one selected participant executes its assigned step safely and reproducibly.
@@ -900,7 +900,7 @@ A dedicated `specialist-execution-protocol-v1` eval suite measures both determin
 
 - Prompt, mandatory-rule and memory bodies are hashed or stored only in protected artifact storage.
 - Full task payloads do not enter process argv, tmux metadata or notification messages.
-- Scope validation prevents an execution profile from silently widening a Bead contract.
+- Scope validation prevents an execution profile from silently widening the pinned Issue/step contract.
 - Read-only roles are enforced by tool and filesystem policy where available, not only prompt prose.
 - Commit staging is path-explicit and preserves unrelated operator state.
 - Evidence and result references are bounded and redacted before external projection.

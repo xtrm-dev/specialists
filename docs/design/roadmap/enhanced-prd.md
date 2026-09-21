@@ -12,4 +12,4 @@ The former `enhanced-prd.md` accumulated the 12–24 July prompt/eval programme,
 
 That content has not been deleted or rewritten: the exact pre-consolidation blob is preserved under `history/`. The current `specialists-prd.md` is the normative reading path for accepted Specialists programme requirements and acceptance criteria.
 
-Do not execute historical rollout instructions, version tables, or Beads disposition appendices from the archived v3.2 document without reconciling them against current code, `current-release-snapshot.md`, the XTRM runtime canon, the current execution plan, and repository-local Beads.
+Do not execute historical rollout instructions, version tables, or Beads disposition appendices from the archived v3.2 document without reconciling them against current code, `current-release-snapshot.md`, the XTRM runtime canon, the current execution plan, current Substrate work state, and Git evidence.

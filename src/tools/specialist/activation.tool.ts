@@ -526,17 +526,20 @@ export function createSpecialistDispatchTool(
         return {
           status: 'dispatched' as const,
           ...view,
-          // An inline contract creates a durable board record. Saying so in the RESULT
-          // is the difference between a coordinator tracking it and an operator finding
-          // an orphan bead later — the caller cannot see the side effect otherwise.
-          // Pi wording, verbatim: one vocabulary for the same side effect.
+          // Inline dispatch creates durable Substrate work. Surface the Issue ref
+          // explicitly; retain the old created_bead_* names only as compatibility aliases
+          // for consumers that predate the semantic cutover.
           ...(inline
             ? {
+              created_issue_ref: handle.issueRef,
+              created_issue_note:
+                'This dispatch CREATED the Substrate Issue above from your inline contract. '
+                + 'Track its Journal/result/provenance explicitly. Specialist settlement is '
+                + 'evidence, not Issue Closure; use the authorized Substrate lifecycle for Closure.',
               created_bead_id: handle.issueRef,
               created_bead_note:
-                'This dispatch CREATED the bead above from your inline contract. It is a '
-                + 'durable board record and is yours to track: close it when the work is '
-                + 'done, or reassign it. It is not cleaned up automatically.',
+                'Compatibility alias: created_issue_ref is the authority. Track Journal/result/'
+                + 'provenance explicitly; settlement is not Issue Closure.',
             }
             : {}),
           step_contract: {

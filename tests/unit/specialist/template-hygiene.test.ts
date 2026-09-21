@@ -18,13 +18,12 @@ function readSpecialistConfig(path: string): SpecialistConfig {
 }
 
 describe('specialist template hygiene', () => {
-  // v3.1.0 (c9b37118) replaced the old "(empty = no bead linked)" note: for sync-docs an
-  // empty bead is a hard BLOCKED, not a benign no-bead run. Assert that stronger contract.
-  it('sync-docs template keeps bead_id guidance explicit', () => {
+  it('sync-docs template binds scope to the pinned Substrate Issue instead of a Beads id', () => {
     const config = readSpecialistConfig('config/specialists/sync-docs.specialist.json');
 
-    expect(config.specialist.prompt.task_template).toContain('Bead context ID: $bead_id');
-    expect(config.specialist.prompt.task_template).toContain('The empty-bead/no-bead case is itself a BLOCKED.');
+    expect(config.specialist.prompt.task_template).toContain('pinned Substrate Issue SCOPE MUST name exactly one documentation path');
+    expect(config.specialist.prompt.task_template).toContain('historical Beads alias');
+    expect(config.specialist.prompt.task_template).not.toContain('Bead context ID: $bead_id');
   });
 
   it('planner template does not include literal $bead_id tokens in system prompt', () => {

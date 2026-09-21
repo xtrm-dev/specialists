@@ -15,7 +15,7 @@ const RETIRED_ROOTS = [
   'using-specialists-auto',
 ];
 const RETAINED_REFERENCES = [
-  'bead-contracts.md',
+  'issue-contracts.md',
   'chain-recipes.md',
   'dispatch-preconditions.md',
   'kpi.md',
@@ -26,7 +26,7 @@ const RETAINED_REFERENCES = [
   'script-class.md',
   'specialist-definitions.md',
 ];
-const ROUTED_REFERENCES = RETAINED_REFERENCES.filter((name) => name !== 'bead-contracts.md');
+const ROUTED_REFERENCES = RETAINED_REFERENCES.filter((name) => name !== 'issue-contracts.md');
 const REQUIRED_DEFINITION_HELPERS = [
   'audit-spec-uniformity.mjs',
   'resolve-specialists-root.mjs',

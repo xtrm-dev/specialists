@@ -15,11 +15,13 @@ describe('help CLI — run()', () => {
     expect(combined).toContain('specialists|sp [command]');
   });
 
-  it('teaches bead-first workflow', () => {
+  it('teaches native Substrate work first and labels Beads as legacy compatibility', () => {
     const combined = captureTopLevelHelp();
-    expect(combined).toContain('bd create');
+    expect(combined).toContain('Native tracked work (primary)');
+    expect(combined).toContain('Substrate Issue');
+    expect(combined).toContain('Legacy sp job compatibility');
     expect(combined).toContain('--bead');
-    expect(combined).toContain('Tracked work');
+    expect(combined).not.toContain('bd create "Task title"');
   });
 
   it('distinguishes tracked vs ad-hoc work', () => {
@@ -35,11 +37,11 @@ describe('help CLI — run()', () => {
     expect(combined).toContain('epic merge [broken]');
   });
 
-  it('mentions --context-depth and --no-beads semantics', () => {
+  it('labels --context-depth and --no-beads as legacy CLI semantics', () => {
     const combined = captureTopLevelHelp();
     expect(combined).toContain('--context-depth');
     expect(combined).toContain('--no-beads');
-    expect(combined).toContain('does not disable bead reading');
+    expect(combined).toContain('legacy Beads backend only');
   });
 
   it('lists core commands plainly', () => {

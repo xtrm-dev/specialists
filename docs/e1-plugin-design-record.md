@@ -592,7 +592,7 @@ without a protocol version returned `-32022 Unsupported protocol version`, `supp
    succeeds in a dev checkout via package self-reference, resolving to the checkout's own
    `dist/index.js`. Branch 2 is a genuine fallback, not the normal dev path.
 4. **Unreproduced status-console flake** claimed unrelated by the lane. Not verified here;
-   a negative is not cheaply provable. Recommend it be tracked in its own bead rather than
+   a negative is not cheaply provable. Recommend it be tracked in its own follow-up Issue rather than
    accepted as noise inside E1.
 
 ### Ruling requested: `.gitignore`
@@ -655,7 +655,7 @@ the SessionStart hook's query against `activations` in `~/.xtrm/state.db` remain
 means a wrong table or column name will present as "no activations" forever. Re-verify the
 query against the real schema when E2 lands.
 
-The status-console flake remains unverified here and should be tracked in its own bead.
+The status-console flake remains unverified here and should be tracked in its own follow-up Issue.
 
 E1 packaging is complete and correct as of `41de1b61`.
 

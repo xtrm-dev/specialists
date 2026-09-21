@@ -2,8 +2,8 @@
 title: Native Activation Runtime
 scope: native-activation
 category: guide
-version: 1.0.0
-updated: 2026-09-12
+version: 1.1.0
+updated: 2026-09-20
 synced_at: SPECIALISTS-13
 description: Primary reference for the native Specialist activation runtime: Substrate work authority, admission order, run-in-place workspaces, the writer-lease lifecycle, and the lease's tool-path-only boundary.
 source_of_truth_for:
@@ -51,10 +51,11 @@ its refusals. (`src/activation/bead-gate.ts` still shells out to
 this host.)
 
 `bead_id` is compatibility vocabulary only. The host dispatch request names
-the work item `issueRef` (mutually exclusive with an inline `contract`). The
-MCP dispatch tool still names its work parameter `bead_id`; every projection
-carries both `bead_id` and `issue_ref` keys with the same value, alongside
-`issue_id`, `issue_revision`, `contract_hash`, and `execution_binding_id`.
+the work item `issueRef` (mutually exclusive with an inline `contract`). The MCP and Pi dispatch surfaces name `issue_ref` as the primary work locator.
+`bead_id` remains a permanent compatibility alias for the same Substrate locator;
+it does not address a live Beads board. Projections may carry both keys with the same
+value for compatibility, alongside `issue_id`, `issue_revision`,
+`contract_hash`, and `execution_binding_id`.
 
 ## Admission order
 

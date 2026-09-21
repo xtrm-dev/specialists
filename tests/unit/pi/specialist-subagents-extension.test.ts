@@ -271,7 +271,11 @@ describe('specialist-subagents extension (Pi coordinator surface)', () => {
     // No free-form task text for tracked work (PRD §10/§14).
     const dispatch = toolNamed(pi, 'specialist_dispatch');
     expect(dispatch.parameters.properties).not.toHaveProperty('task');
+    expect(dispatch.parameters.properties).toHaveProperty('issue_ref');
     expect(dispatch.parameters.properties).toHaveProperty('bead_id');
+    // bead_id remains a compatibility alias; issue_ref is primary.
+    expect(dispatch.parameters.properties.issue_ref.description).toContain('Primary work locator');
+    expect(dispatch.parameters.properties.bead_id.description).toContain('Legacy compatibility alias');
     // .48: inline contract path is a first-class parameter.
     expect(dispatch.parameters.properties).toHaveProperty('contract');
     expect(dispatch.parameters.properties).toHaveProperty('title');
@@ -279,21 +283,30 @@ describe('specialist-subagents extension (Pi coordinator surface)', () => {
     expect(pi.tools.every((t) => typeof t.execute === 'function')).toBe(true);
   });
 
-  it('dispatch calls host.start with a pi-adapter participant default and renders step_contract counts', async () => {
+  it('dispatch uses issue_ref as the primary work locator', async () => {
     const mod = await loadExtension();
     const pi = makeFakePi();
     const { host, calls } = makeFakeHost();
     mod.default(pi, { createHost: () => host });
     const dispatch = toolNamed(pi, 'specialist_dispatch');
-    const out = resultText(await dispatch.execute('tc1', { specialist: 'explorer', bead_id: 'bd-1' }));
+    const out = resultText(await dispatch.execute('tc1', { specialist: 'explorer', issue_ref: 'XTRM-93' }));
     expect(calls.start[0]).toMatchObject({
       specialist: 'explorer',
-      issueRef: 'bd-1',
+      issueRef: 'XTRM-93',
       requestedByParticipantId: 'adapter::pi-extension',
     });
     expect(out.status).toBe('dispatched');
     expect(out.activation_id).toBe('act:aaaa');
-    expect(out.step_contract).toMatchObject({ root_work_ref: 'bd-1', inputs: 1, outputs: 1 });
+    expect(out.step_contract).toMatchObject({ root_work_ref: 'XTRM-93', inputs: 1, outputs: 1 });
+  });
+
+  it('retains bead_id as a compatibility alias for the same Substrate work locator', async () => {
+    const mod = await loadExtension();
+    const pi = makeFakePi();
+    const { host, calls } = makeFakeHost();
+    mod.default(pi, { createHost: () => host });
+    await toolNamed(pi, 'specialist_dispatch').execute('tc1', { specialist: 'explorer', bead_id: 'legacy-alias-1' });
+    expect(calls.start[0]).toMatchObject({ issueRef: 'legacy-alias-1' });
   });
 
   it('honours requested_by / coordinator_session_id / model_override passthrough', async () => {
@@ -431,7 +444,7 @@ describe('specialist-subagents extension (Pi coordinator surface)', () => {
     expect(out.status).toBe('dispatched');
   });
 
-  it('inline contract: bead_id plus contract is a refusal, not a precedence rule (.48)', async () => {
+  it('inline contract: work locator plus contract is a refusal, not a precedence rule (.48)', async () => {
     const mod = await loadExtension();
     const pi = makeFakePi();
     const { host } = makeFakeHost();
@@ -442,18 +455,33 @@ describe('specialist-subagents extension (Pi coordinator surface)', () => {
       contract: INLINE_CONTRACT,
     }));
     expect(out.status).toBe('rejected');
-    expect(out.reason).toContain('both bead_id and contract were provided');
+    expect(out.reason).toContain('a work locator and contract were both provided');
     expect(host.start).not.toHaveBeenCalled();
   });
 
-  it('inline contract: neither bead_id nor contract is a refusal (.48)', async () => {
+  it('issue_ref and bead_id together are rejected instead of picking an authority spelling', async () => {
+    const mod = await loadExtension();
+    const pi = makeFakePi();
+    const { host } = makeFakeHost();
+    mod.default(pi, { createHost: () => host });
+    const out = resultText(await toolNamed(pi, 'specialist_dispatch').execute('tc1', {
+      specialist: 'explorer',
+      issue_ref: 'XTRM-93',
+      bead_id: 'legacy-alias-93',
+    }));
+    expect(out.status).toBe('rejected');
+    expect(out.reason).toContain('both issue_ref and bead_id were provided');
+    expect(host.start).not.toHaveBeenCalled();
+  });
+
+  it('inline contract: neither issue_ref/bead_id nor contract is a refusal (.48)', async () => {
     const mod = await loadExtension();
     const pi = makeFakePi();
     const { host } = makeFakeHost();
     mod.default(pi, { createHost: () => host });
     const out = resultText(await toolNamed(pi, 'specialist_dispatch').execute('tc1', { specialist: 'explorer' }));
     expect(out.status).toBe('rejected');
-    expect(out.reason).toContain('neither bead_id nor contract');
+    expect(out.reason).toContain('neither issue_ref/bead_id nor contract');
     expect(host.start).not.toHaveBeenCalled();
   });
 
@@ -793,21 +821,26 @@ describe('specialist-subagents extension (Pi coordinator surface)', () => {
     const out = resultText(await toolNamed(pi, 'specialist_dispatch')
       .execute('tc1', { specialist: 'explorer', contract }));
 
-    // An operator reported having to infer this and then clean up an orphan bead by hand.
     expect(out.status).toBe('dispatched');
-    expect(out.created_bead_id).toBe('bd-inline-1');
-    expect(out.created_bead_note).toMatch(/yours to track/i);
+    expect(out.created_issue_ref).toBe('bd-inline-1');
+    expect(out.created_issue_note).toMatch(/Substrate Issue/i);
+    expect(out.created_issue_note).toMatch(/not Issue Closure/i);
+    // Backward-compatible field names remain aliases only.
+    expect(out.created_bead_id).toBe(out.created_issue_ref);
+    expect(out.created_bead_note).toMatch(/Compatibility alias/i);
   });
 
-  it('says nothing about created beads when the caller supplied one', async () => {
+  it('says nothing about created work when the caller supplied an Issue ref', async () => {
     const mod = await loadExtension();
     const { host } = makeFakeHost();
     const pi = makeFakePi();
     mod.default(pi, { createHost: () => host });
 
     const out = resultText(await toolNamed(pi, 'specialist_dispatch')
-      .execute('tc1', { specialist: 'explorer', bead_id: 'bd-1' }));
+      .execute('tc1', { specialist: 'explorer', issue_ref: 'XTRM-93' }));
 
+    expect(out.created_issue_ref).toBeUndefined();
+    expect(out.created_issue_note).toBeUndefined();
     expect(out.created_bead_id).toBeUndefined();
     expect(out.created_bead_note).toBeUndefined();
   });

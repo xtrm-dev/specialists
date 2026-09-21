@@ -1,5 +1,12 @@
 # Executor benchmark runner (unitAI-gc2a.3)
 
+> **LEGACY XTRM-93 COMPATIBILITY HARNESS.** This runner creates Beads, invokes
+> `sp run --bead --worktree`, and reviews legacy Supervisor jobs. It is useful only
+> for historical/legacy comparisons while that backend remains reachable. It is **not**
+> the benchmark or acceptance harness for native Substrate activations. Do not use its
+> results as proof of native parity; N4 must provide/choose the native CLI dispatch seam
+> before this script can be migrated correctly.
+
 ## One-command launch
 
 ```bash

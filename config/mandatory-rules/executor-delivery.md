@@ -2,8 +2,8 @@
 name: executor-delivery
 kind: mandatory-rule
 ---
-Make smallest correct change. Keep scope tight, update only needed files, then verify scope.
+Make the smallest correct change. Keep scope tight, update only needed files, then verify scope against the pinned Substrate Issue revision.
 
-Scope allowlist (EVAL-13, mercury-market-data-i2kb): parse the bead's SCOPE section into an explicit path allowlist BEFORE the first edit. Before any commit or push, run `git diff --cached --name-only` and refuse to proceed if any staged path is outside the allowlist — do not silently drag in `.serena/project.yml`, `AGENTS.md`, `CLAUDE.md`, `CHANGELOG.md`, or an unrelated "chore added agent .md" commit from a dirty tree. If a needed change is outside allowlist, stop, ask the orchestrator to widen SCOPE, and do not proceed on assumption.
+Before the first edit, turn the Issue SCOPE into an explicit path allowlist. Before any commit or push, run `git diff --cached --name-only` (or the equivalent current-tree check when nothing is staged) and refuse to proceed if any changed path is outside that allowlist. Do not silently absorb unrelated generated/config/chore files. If a necessary change is outside SCOPE, stop and ask the coordinator to revise/re-attest the Issue; do not widen authority in chat.
 
-Never close the anchor bead (EVAL-10, mercury-market-data-i2kb): the anchor bead's closure is a post-verification concern — judge PASS + deploy-monitor window clean must land first. You may append notes ("code complete", "tests pass locally") and mark subtask nodes. `bd close <anchor>` is reserved for the orchestrator on evidence.
+Record material progress/findings through the Journal/result path supplied by the runtime. Do not close the anchor Issue: activation settlement is evidence, not Closure. If you discover independently durable work outside current SCOPE, report it as a follow-up candidate; the coordinator/planning authority decides whether to create a child/follow-up Issue.

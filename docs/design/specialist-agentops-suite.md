@@ -94,10 +94,10 @@ the reward is **composite and already produced**:
 - **Efficiency reward (from KPI/forensics):** tokens, turns, waiting time, tool-call count,
   retries, fix-loops triggered (`using-kpi`, `observability.db`).
 
-A trajectory = one chain run = `{bead contract (task), specialist config version (skill),
+A trajectory = one chain run = `{pinned Issue/step contract (task), specialist config version (skill),
 transcript + result (output), gate verdicts + KPI (reward)}`.
 
-**Volume caveats (honest):** these trajectories are **not i.i.d.** — different repos, beads,
+**Volume caveats (honest):** these trajectories are **not i.i.d.** — different repos and Issue/task classes,
 task types — and the reward (a gate verdict) is itself a **noisy LLM judge**. So:
 - **Stratify** per-specialist, optionally per-task-type/per-repo; do not pool blindly.
 - High volume *helps* average out judge noise but does not eliminate label bias.
@@ -114,8 +114,8 @@ task types — and the reward (a gate verdict) is itself a **noisy LLM judge**. 
 | **reflect** | Two sources (§5): an offline **evaluator** specialist over many trajectories, *and* **self-proposals** from the specialist at end-of-run. Output is a candidate patch (add/delete/replace), bounded in size. |
 | **aggregate** | Cluster proposals + recurring failure patterns per specialist into a single candidate patch dict. |
 | **select** | Synthesize `candidate config` (a prompt variant), versioned, never written to the live registry. |
-| **update** | **Replaced by a governed apply (§5).** Never autonomous. The "rejected-edit buffer" becomes closed/declined proposal beads — themselves forensic signal. |
-| **evaluate_gate** | Golden-set A/B (§8): run candidate vs current on a frozen held-out bead set, score with the same pipeline, accept **iff** composite reward improves with no gate regression. Human-approved. |
+| **update** | **Replaced by a governed apply (§5).** Never autonomous. The "rejected-edit buffer" becomes closed/declined proposal Issues — themselves forensic signal. |
+| **evaluate_gate** | Golden-set A/B (§8): run candidate vs current on a frozen held-out Issue/contract set, score with the same pipeline, accept **iff** composite reward improves with no gate regression. Human-approved. |
 
 The "train like a neural net" framing (epochs, minibatch, textual learning rate, validation
 gate) maps to: batched stratified rollouts, bounded patch size as the learning rate, and the
@@ -131,7 +131,7 @@ Optimization always terminates in a *proposal*, never a write.
 ```
 rollout (scored runs)
   → reflect (evaluator OR self-proposal)
-    → proposal artifact (standardized bead, §6)
+    → proposal artifact (standardized follow-up Issue, §6)
       → escalation + human/review gate
         → specialists-creator applies the approved patch  [SCRUTINY: config surface]
           → golden-set A/B validates before/after (§8)
@@ -151,7 +151,7 @@ Two proposer roles (the dual-source model):
    the specialist holds the live trajectory context the offline optimizer lacks.
 
 Transport for self-proposals: the channels `proposal` kind (channels.md §5.3), extended with
-a `skill-patch` shape; and/or the standardized bead in §6. Authority is safe because channels
+a `skill-patch` shape; and/or the standardized follow-up Issue in §6. Authority is safe because channels
 §10.1 already rejects body-text authority — a proposal cannot smuggle itself into a write.
 
 The apply step has a natural gated owner: **`specialists-creator`** (already authors/edits
@@ -163,29 +163,27 @@ config-surface SCRUTINY auto-escalation.
 ## 6. The mandatory-rules proposal mechanism (capture = telemetry)
 
 The elegant part: reuse the **`mandatory_rules.template_sets`** infrastructure that already
-injects shared rule packs (`per-turn-handoff-schema`, `bead-id-verbatim`, …) into specialists.
+injects shared rule packs (`per-turn-handoff-schema`, `issue-ref-verbatim`, …) into specialists.
 
 Add a sibling pack — **`improvement-proposal-schema`** — included by every specialist. It
-instructs: *when you detect prompt-level friction during a run, file a standardized, named
-bead* (filing a bead is already allowed — it is exactly the existing `discovered-from`
-follow-up pattern the executor prompt teaches; **applying** it is not):
+instructs: *when you detect prompt-level friction during a run, emit a standardized follow-up Issue candidate through result/Journal evidence*. The authorized coordinator/planning surface decides whether to persist it; the Specialist never creates durable work merely from prompt prose:
 
 - **Title convention (named/standard):** `sp-improve(<specialist>): <one-line>`
 - **Type/tags:** `decision` (or a new `improvement` type), tag `prompt-optimization`
-- **Links:** `discovered-from:<current-bead>`, scoped to the specialist's config file
+- **Links:** discovery/provenance edge to the current Issue/activation, scoped to the specialist's config file
 - **Structured body:** trajectory ref (job/result id), the offending instruction verbatim,
   the proposed patch (candidate text), evidence (what went wrong, KPI cost)
 
-Because these beads are **named and standardized**, they become first-class telemetry:
+Because these proposal Issues are **named and standardized**, they become first-class telemetry:
 
-- **Count** of open `sp-improve(<specialist>)` beads = pending improvement work per specialist.
+- **Count** of open `sp-improve(<specialist>)` proposal Issues = pending improvement work per specialist.
 - **Trigger:** when the count crosses a threshold (or on a schedule), the suite dispatches an
   evaluation run for that specialist. The board *tells* you where work is.
 - **Forensic trace:** every proposal links back to the run that produced it, so you can see
   which prompt rules generate the most friction across the fleet.
 
 This is the answer to "how do we know if there's any work to evaluate": **the standardized
-proposal bead IS the captured signal.** The mandatory rule enforces *capture*; the permission
+proposal Issue IS the captured signal.** The mandatory rule enforces *capture*; the permission
 model + the §5 invariant enforce *non-application*.
 
 ---

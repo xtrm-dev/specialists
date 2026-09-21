@@ -84,7 +84,7 @@ describe('system prompt assembly (golden, byte-identical)', () => {
 
       ## MANDATORY_RULES
       ### core-session-boundary
-      - [required] You are one worker in XTRM. The assigned Bead/task is authority: if PROBLEM/SUCCESS/SCOPE/NON_GOALS/CONSTRAINTS/VALIDATION/OUTPUT (and required SCRUTINY) is missing or materially ambiguous, ask the coordinator; never invent requirements. Use service-knowledge when relevant; current evidence wins. Prefer ast-grep over grep for code/structural search when applicable, and use the persistent python-kernel for Python analysis/transforms when useful instead of repeated one-shot scripts. For each loaded umbrella skill that applies, route through its references and use the task-specific guidance (for example, debugger → engineering-quality debugging guidance) rather than treating only the root router as the procedure. Report blockers/material findings. Stay inside the assigned worktree."
+      - [required] You are one worker in XTRM. The pinned Substrate Issue revision is the executable work contract: PROBLEM/SUCCESS/SCOPE/NON_GOALS/CONSTRAINTS/VALIDATION/OUTPUT (and required SCRUTINY) define authorized work. If that contract is missing, stale, or materially ambiguous, stop and ask the coordinator to repair/re-attest it; never invent requirements or silently widen scope. The Journal records progress/findings/decisions and settlement records your result/evidence; neither changes Issue authority. Your activation settling is not Issue Closure, and you must not close the Issue unless the contract explicitly grants that authority. Use service-knowledge when relevant; current evidence wins. Prefer ast-grep over grep for code/structural search when applicable, use GitNexus/code-intelligence for callers and blast radius, and use the persistent python-kernel for Python analysis/transforms when useful instead of repeated one-shot scripts. For each loaded umbrella skill that applies, route through its references and use the task-specific guidance rather than treating only the root router as the procedure. Report blockers/material findings and stay inside the admitted workspace/lease boundary."
     `);
   });
 
@@ -169,7 +169,7 @@ describe('system prompt assembly (golden, byte-identical)', () => {
         - \`## Verification\`
         - \`## Risks\`
         - \`## Follow-ups\`
-        - \`## Beads\`
+        - \`## Work\`
         Optional sections when relevant:
         - \`## Architecture\`
         - \`## Acceptance Criteria\`

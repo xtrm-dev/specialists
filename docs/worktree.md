@@ -2,8 +2,8 @@
 title: Worktree Integration
 scope: worktree
 category: guide
-version: 1.2.1
-updated: 2026-06-24
+version: 1.3.0
+updated: 2026-09-20
 synced_at: bf6baf7a
 description: xtrm worktree usage alongside Specialists.
 source_of_truth_for:
@@ -18,7 +18,7 @@ domain:
 | Section | Summary |
 |---|---|
 | [Common commands](#common-commands) | xt pi, xt claude, xt attach, xt worktree list, xt end, xt report |
-| [Recommended pattern](#recommended-pattern) | create/claim bead → worktree → specialists --bead → feed → close |
+| [Recommended pattern](#recommended-pattern) | Core/xt workspace → pinned Substrate Issue → native activation → verify/integrate → explicit Closure |
 | [PR queue help](#pr-queue-help) | Use `xt-merge` when you need a specialist to drain the PR queue in FIFO order |
 | [See also](#see-also) | workflow.md, specialists-catalog.md |
 <!-- END INDEX -->
@@ -40,26 +40,21 @@ Specialists can be used alongside xtrm worktree workflows.
 
 ## Recommended pattern
 
-1. create/claim a bead
-2. work in a dedicated worktree
-3. use specialists with `--bead`
-4. monitor with `specialists feed -f`
-5. close the bead and end the worktree session
+For current/native XTRM work:
 
-### Epic-aware session close
+1. start or attach the Core/`xt` session/worktree that owns the workspace;
+2. bind work to a ready pinned Substrate Issue revision and verify the live claim;
+3. dispatch the native Specialist into that admitted workspace — do not ask Specialists to provision a second per-job worktree;
+4. consume persisted status/result/forensics, run the required review/test gates, and integrate through Git/Core;
+5. perform explicit Issue Closure only after the required evidence is accepted; end/clean the Core session separately.
 
-For wave-bound chains, use `xt end --epic <id>` or let auto-detection redirect:
+The legacy `sp run --worktree --bead ...` flow remains a Supervisor compatibility path during XTRM-93. Its Beads lifecycle and per-job worktree semantics are not the native model.
 
-```bash
-# Explicit epic publication
-xt end --epic unitAI-3f7b --pr
+### Session close and publication
 
-# Auto-detect epic from chain membership
-xt end
-# → redirects to sp epic merge if chain belongs to unresolved epic
-```
+Use the current Core/`xt` session integration surface for publication and cleanup. Do not treat the historical `sp epic merge` redirect as current authority: `sp merge` / `sp epic merge` remain legacy/broken surfaces in this programme and are subject to XTRM-93 cutover.
 
-See `docs/worktrees.md` for full `sp end` behavior.
+See `docs/worktrees.md` only for the detailed legacy `sp` worktree implementation.
 
 ## PR queue help
 

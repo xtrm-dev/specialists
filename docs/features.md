@@ -178,7 +178,9 @@ The ALL view auto-scrolls to keep the cursor visible and auto-advances off non-s
 
 ---
 
-Use an existing bead as the run input source:
+### Legacy CLI compatibility: Beads-backed `sp run`
+
+Use an existing legacy bead/compatibility locator as the old Supervisor run input:
 
 ```bash
 sp run executor --bead unitAI-123
@@ -186,7 +188,7 @@ sp run executor --bead unitAI-123
 
 Behavior:
 
-- Reads bead content via `bd show --json`
+- Legacy backend reads bead content via `bd show --json`
 - Builds full run prompt from bead context (`buildBeadContext(...)`)
 - Injects variables:
   - `$bead_context`
@@ -209,7 +211,7 @@ sp run executor --bead unitAI-123 --context-depth 0  # disable blocker injection
 sp run executor --bead unitAI-123 --no-beads
 ```
 
-- `--no-beads` disables bead tracking/updates
+- `--no-beads` disables **legacy** bead tracking/updates
 - Bead reading still works (run input still comes from `--bead`)
 
 ### Prompt source exclusivity

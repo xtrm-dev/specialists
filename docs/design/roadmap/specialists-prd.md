@@ -19,7 +19,7 @@ Use the following authority order:
 4. [`specialist-execution-protocol.md`](../execution-protocol-design/specialist-execution-protocol.md) defines the deterministic lifecycle of one managed Specialist activation.
 5. This PRD defines accepted Specialists programme scope, `WP-*` continuity, evaluation requirements, rollout gates, and success criteria.
 6. [`current-release-snapshot.md`](current-release-snapshot.md) is the mutable release/landed-state ledger. It may change status classifications without redesigning this PRD.
-7. Repository-local Beads and Git are implementation/task and integration truth. Jira is programme projection, not a step-level source of truth.
+7. Substrate Issues/Journal/Closure are durable work truth; Git is code/integration truth. Jira is programme projection, not a step-level source of truth. Historical Beads data is migration/alias evidence only.
 
 Historical documents under [`history/`](history/) remain provenance only unless this PRD or the roadmap explicitly retains a requirement.
 
@@ -34,7 +34,7 @@ Specialists provides governed role definitions and participant execution semanti
 - skills contain cognition/procedure while deterministic probes, validators, effects, and finalization live in typed runtime contracts;
 - evidence, not self-report or process termination, satisfies chain work;
 - prompt, model, memory, chain, and runtime changes are evaluated with deterministic and calibrated graders before promotion;
-- current Beads, Git, xtmux, XTRM runtime, Channels, telemetry, and Console authorities remain non-duplicated.
+- current Substrate, Git, XTRM runtime/communication, telemetry, and Console authorities remain non-duplicated; historical Beads compatibility never regains durable-work authority.
 
 The system invariant is inherited from the XTRM runtime canon:
 
@@ -117,7 +117,7 @@ UI != scheduler
 xtmux != workflow authority
 ```
 
-No new Specialists feature may introduce a second mutable authority for a concern already owned by Beads, Git, XTRM chain runtime, Channels, telemetry, or xtmux runtime state.
+No new Specialists feature may introduce a second mutable authority for a concern already owned by Substrate, Git, XTRM chain runtime, Channels, telemetry, or runtime coordination state.
 
 ## 5. Deterministic Specialist execution
 
@@ -172,7 +172,7 @@ FINALIZE validates and persists in deterministic order:
 3. scope and capability compliance;
 4. Git/worktree state and commit policy where applicable;
 5. authoritative result;
-6. Beads work/evidence reconciliation;
+6. Substrate Issue/Journal/provenance reconciliation;
 7. typed Channels/handoff notification;
 8. forensic and evaluation facts;
 9. activation-owned cleanup.
@@ -292,15 +292,15 @@ Retrieval order is pointer-first:
 
 Channels communication follows the XTRM Channels canon. Participants may share findings, request evidence/context, challenge hypotheses, and propose involvement. Routing remains hard, attention soft, authority hard. Participant communication never rewrites chain topology or grants work authority.
 
-## 9. Work, Beads, and chain materialization
+## 9. Work, Substrate, and chain materialization
 
-Beads remains the runway work/acceptance authority.
+Substrate is the durable work/acceptance authority. A ready pinned Issue revision is the executable contract; Journal/settlement evidence does not rewrite it, and Closure is explicit.
 
 Rules:
 
 - a root work contract may pre-exist chain composition;
 - planning/composition produces an inspectable ChainDefinition before production materialization;
-- after review/freeze, known step work is materialized idempotently using Beads-native hierarchy/readiness/gates/claims where sufficient;
+- after review/freeze, known step work is materialized idempotently through Substrate Issue/revision/readiness/claim relationships; the runtime must not create a second work graph;
 - hierarchy and readiness edges are distinct;
 - Specialists must not maintain a competing blocker/dependency graph;
 - one mutable workspace has one writer lease; planned concurrent writers require separate worktrees and explicit integration topology;
@@ -442,9 +442,9 @@ The current interactive `chain-coordinator` is a bridge participant/operator aid
 
 Requirements retained from the interactive programme:
 
-- stable role cognition excludes tracked Bead payload and flattened mandatory-rule blocks;
+- stable role cognition excludes tracked Issue payload and flattened mandatory-rule blocks;
 - direct tracked assignment and preheated standby are distinct modes;
-- tracked Bead/task/rules arrive exactly once as a user assignment after runtime readiness;
+- the pinned Issue/task/rules arrive exactly once as the tracked assignment after runtime readiness;
 - prompt bodies do not leak through argv, pane metadata, message summaries, or low-cardinality telemetry;
 - Pi and Claude remain interactive after assignment;
 - the coordinator consumes validated chain shape rather than hardcoded role sequences;
@@ -590,7 +590,7 @@ Canonical families:
 
 | Family | IDs | Current purpose |
 |---|---|---|
-| Programme/document gates | `WP-G00`–`WP-G03` | documentation, Beads capability/reuse, traceability gates |
+| Programme/document gates | `WP-G00`–`WP-G03` | documentation, durable-work capability/reuse, traceability gates (historical Beads requirements map through Substrate migration) |
 | Telemetry integrity | `WP-T01`–`WP-T07` | event/counting correctness, fingerprints, telemetry suite |
 | Eval Core | `WP-E01`–`WP-E10` | storage, graders, backfill, experiments, CLI, scheduling |
 | Prompt/policy | `WP-P01`–`WP-P09` | prompt manifest, output contract, role/runtime policy, evaluated prompt changes |
@@ -607,17 +607,17 @@ Total: **90 identifiers**.
 
 ### 17.1 Status rule
 
-`wp-continuity.json` records documentary status only; before dispatch, refresh current code, releases, Beads, and the XTRM execution plan. A historical `defined` status does not prove that work remains, and an old `delivered` claim does not prove current release identity.
+`wp-continuity.json` records documentary status only; before dispatch, refresh current code, releases, Substrate work state, and the XTRM execution plan. A historical `defined` status does not prove that work remains, and an old `delivered` claim does not prove current release identity.
 
 ### 17.2 No duplicate backlog
 
 Before creating work:
 
-1. query current repository-local Beads;
+1. query current Substrate Issues/revisions and current repository/Git evidence;
 2. map the intended outcome to existing `WP-*` IDs;
 3. classify existing work as KEEP / REFINE / MERGE / RESEQUENCE / REPLACE / DELIVERED / SUPERSEDED;
-4. create a new Bead only for a genuinely missing executable contract;
-5. preserve discovered-from provenance for new findings.
+4. create/revise a Substrate Issue only for genuinely missing durable work authority, through planning/readiness;
+5. preserve discovery/provenance links for new findings. Historical Beads ids remain aliases/provenance only.
 
 ## 18. Programme sequencing and promotion
 
@@ -661,7 +661,7 @@ Do not promote:
 - output schema validates before authoritative persistence;
 - writer finalization touches/stages only authorized paths and honors commit policy;
 - read-only profiles cannot obtain write/commit capability through task prose;
-- result/Bead handoff/notification/final effects are idempotent;
+- result/Journal/provenance/notification/final effects are idempotent;
 - notification failure cannot rewrite an otherwise valid result verdict;
 - cleanup releases activation-owned transient resources without destroying durable work/evidence.
 
@@ -669,7 +669,7 @@ Do not promote:
 
 - templates, user JSON, ad-hoc typed composition, and imported formulas can converge through the generic ChainSource/ChainDefinition path;
 - approved topology is frozen and revisions are explicit;
-- Beads materialization follows freeze and agrees with native readiness/claim semantics;
+- Substrate Issue materialization follows freeze and agrees with native readiness/claim semantics;
 - a participant executes the assigned step rather than deciding successors;
 - validated evidence, not process exit, satisfies a chain step;
 - crash/restart does not rerun already satisfied authoritative work;
@@ -722,7 +722,7 @@ Before the affected package is dispatched, verify/decide as needed:
 3. secure prompt transport-file lifecycle/expiry policy if still used by the bridge;
 4. exact coordinator conflict-matrix serialization if it remains a bridge artifact;
 5. exact Claude readiness fact source where current hooks do not provide parity;
-6. current Beads memory retrieval/provenance surface before adding wrappers;
+6. current Substrate Journal/provenance and commit-memory retrieval surfaces before adding wrappers;
 7. which deterministic graders may become blocking in the first enforcement wave;
 8. authoritative provider-cost provenance; tokens/time remain primary until cost source is versioned;
 9. trial-count/confidence policy by evaluation suite;

@@ -29,7 +29,7 @@ The accepted cross-domain runtime model lives in the xtrm repository canon at te
 - Supervision splits three ways: ActivationSupervisor owns exactly one direct participant activation lifecycle; the xtmux RuntimeSupervisor owns external/interactive runtimes via terminal backends; the pure reducer/scheduler owns chain progression. None of the three inherits another's authority.
 - Capabilities: `ResolvedCapabilityGrant = f(specialist request, chain/step policy, operator policy, runtime/sandbox capabilities)`; requested capability ≠ granted capability. Legacy `skills.scripts` compile into typed ProbeDefinitions within the prepare-probes/finalize-validators taxonomy; shell scripts are never a privileged implicit preflight API.
 - Channels: communication semantics stay canonical in `xtrm-dev/xtrm:docs/channels/channels.md`; this roadmap does not duplicate them.
-- Beads remains the work/evidence authority; chain materialization into Beads happens only after ResolvedChain freeze, and the materializer never invents a second dependency graph.
+- Substrate remains the durable work authority; chain materialization binds to ready Issue revisions only after ResolvedChain freeze, and the materializer never invents a second dependency graph.
 
 Acceptance test for the integrated milestone unchanged: the SRE vertical-slice workflow runs fully data-defined through the generic loader/compiler/reducer/runtime with zero SRE-specific runtime topology code.
 
@@ -70,7 +70,7 @@ Acceptance test for the integrated milestone unchanged: the SRE vertical-slice w
 
 | Concern | Current authority |
 |---|---|
-| Task contract, readiness, dependencies, gates, and acceptance | Beads |
+| Task contract, revision, readiness, dependencies, claim, Journal continuity, provenance, and Closure | Substrate |
 | Implementation evidence | GitHub |
 | Integration state and commit policy | Git |
 | Specialist jobs and the managed activation protocol | Specialists |
@@ -79,15 +79,15 @@ Acceptance test for the integrated milestone unchanged: the SRE vertical-slice w
 | Program and epic projection | Jira |
 | Multi-repository operator presentation | Console read model |
 
-Beads remains the durable work authority until a reviewed replacement is active. Git remains the integration authority. xtmux owns bridge coordination state; it does not own Specialist jobs, chain state, finalization, or scheduling.
+Substrate is the durable work authority. Git remains the integration authority. Communication/bridge transports coordinate but do not own Specialist activations, chain/work authority, finalization, or scheduling.
 
-Jira contains epics, program state, and release evidence only. It must not duplicate step-level Beads state.
+Jira contains programme projection and major decision/status context only. It must not duplicate step-level Substrate state.
 
 ### 1.2 Public retrieval hierarchy
 
 Use the narrowest durable surface that answers the question:
 
-1. `bd show`, dependency, state, and gate commands for task contracts and acceptance.
+1. the pinned Substrate Issue revision / Resume Capsule / Journal-provenance surfaces for work contract and acceptance.
 2. `xtmux message-get` for an exact message and `xtmux agent-last` for a completed pane turn.
 3. `sp result` for a completed Specialist result.
 4. `sp feed`, `sp log`, and `sp forensic` for runtime event history; use their JSON forms for machine consumers.
@@ -97,21 +97,21 @@ Use the narrowest durable surface that answers the question:
 
 Live pane capture is a bounded diagnostic surface. It is not final-result storage.
 
-### 1.3 Current Beads surface inventory
+### 1.3 Durable-work surface inventory
 
-The v3.3 architecture reuses current Beads primitives instead of rebuilding them in Specialists.
+The current architecture consumes Substrate rather than rebuilding work authority in Specialists. The Beads table below is retained only as a **historical migration map** for capabilities that informed Substrate; it is not current operator doctrine.
 
-| Beads primitive | Current role | Specialists responsibility |
+| Historical Beads primitive | Migration meaning | Current Specialists responsibility |
 |---|---|---|
 | `bd merge-slot` | Exclusive access with holder and queued waiters | Observe and surface lease state; do not create a competing lease authority. |
 | `bd gate` | Typed async conditions for human, timer, GitHub run, GitHub PR, and Bead waits | Consume gate outcomes as validated evidence. |
-| `bd swarm` | Epic plus child DAG composition and validation | Reuse its graph checks when a future compiler materializes Beads work. |
+| `bd swarm` | Historical epic/child DAG composition precedent | Preserve the validated graph invariants when the compiler materializes Substrate Issues/relationships; never recreate a Beads graph. |
 | `bd state` / `bd set-state` | Multi-dimensional issue state | Use for durable workflow dimensions that belong to work state. |
 | issue `skills` field | Required capability declaration | Resolve execution profiles without duplicating capability metadata. |
 | first-class acceptance, design, context, metadata, and wait fields | Structured task contract data | Prefer native fields over another contract serialization. |
 | `bd federation` | Cross-workspace coordination primitive | Evaluate before adding a Specialists-specific cross-repository store. |
 
-Any new Specialists-side primitive must state why the existing Beads primitive is insufficient.
+Any new Specialists-side work primitive must state why the existing Substrate/XTRM authority is insufficient. Do not revive a parallel Beads graph or lifecycle.
 
 ## 2. Current observability and identity design
 
@@ -159,7 +159,7 @@ Remaining telemetry work is incremental source-family coverage and consumer migr
 
 ### 2.3 Console
 
-Console is a read model over durable runtime and bridge data. It can materialize and correlate current state, history, results, and evidence. It does not become the writer or authority for messages, jobs, chain state, finalization, scheduling, Beads, or Git.
+Console is a read model over durable runtime and bridge data. It can materialize and correlate current state, history, results, and evidence. It does not become the writer or authority for messages, activations, chain state, finalization, scheduling, Substrate durable work, or Git.
 
 ## 3. Opportunity 19 — deterministic Specialist execution protocol
 
@@ -173,10 +173,10 @@ Every managed activation runs through one versioned `specialists.execution.v1` p
 6. validate required evidence;
 7. apply Git and commit policy;
 8. persist one validated result;
-9. hand off the Bead and notify the parent with typed outcomes;
+9. publish the validated result/Journal evidence for the pinned Issue and notify the parent with typed outcomes;
 10. clean up owned resources.
 
-The deterministic shell is implemented once in Specialists. A Specialist definition selects an execution profile and declares role-specific capabilities and evidence. The step Bead carries the current mandate.
+The deterministic shell is implemented once in Specialists. A Specialist definition selects an execution profile and declares role-specific capabilities and evidence. The pinned step Issue revision carries the current mandate.
 
 `job completed` does not mean `step satisfied`. Only validated evidence can advance deterministic state.
 
@@ -184,7 +184,7 @@ The deterministic shell is implemented once in Specialists. A Specialist definit
 
 | Concern | Owner |
 |---|---|
-| Structural contract and acceptance | Beads plus the execution-protocol validator |
+| Structural contract and acceptance | Substrate Issue revision/readiness plus the execution-protocol validator |
 | Activation phase state and protocol events | Specialists |
 | Required evidence schema | Execution profile |
 | Role-specific work | Specialist definition |
@@ -206,15 +206,15 @@ Canonical design: [`../execution-protocol-design/specialist-execution-protocol.m
 
 ## 4. Bridge economics and replacement boundary
 
-Substrate and Channels are future replacement targets. Until reviewed cutover criteria pass:
+Substrate has completed the durable-work authority cutover; Channels/transport convergence remains a separate migration concern. During the remaining strangler period:
 
-- Beads remains task and acceptance authority;
-- Git remains integration authority;
-- xtmux remains bridge delivery and wake authority;
-- Specialists remains the job and execution-protocol runtime;
+- Substrate owns task contracts/revisions, readiness, claims, Journal/provenance and Closure;
+- Git/Core owns integration authority;
+- xtmux remains a compatibility delivery/wake bridge where still used;
+- Specialists owns activation execution/protocol and evidence production;
 - Console remains a read model.
 
-Design intent does not transfer current ownership.
+Legacy Beads/Supervisor surfaces remain compatibility implementations only; their continued reachability does not restore Beads authority.
 
 ### 4.1 Bridge classes
 
@@ -244,11 +244,11 @@ A bridge without this ledger is an unowned subsystem and cannot enter DO0.
 | Owner | Owns | Does not own |
 |---|---|---|
 | xt | Git, worktree, branch, PR, and integration primitives | Specialist job state, evidence validation, bridge delivery |
-| Specialists | Job runtime, activation protocol, evidence validation, and job observability | Beads task authority, merge-slot arbitration, Git implementation |
-| Beads | Task contracts, dependencies, readiness, gates, acceptance, and merge slots | Runtime telemetry and Specialist execution |
+| Specialists | Activation runtime/protocol, role policy, evidence production/validation, observability | Substrate work authority, Issue Closure, Git integration |
+| Substrate | Issue contracts/revisions, readiness, dependencies/claims, Journal/provenance, Closure | Runtime telemetry and Specialist execution |
 | xtmux | Message delivery, obligations, monitoring, wake delivery, and topology | Specialist jobs, chain advancement, finalization, scheduling |
 | Console | Materialized operator views | Authoritative writes to any runtime or work system |
-| Substrate / Channels | Reviewed future replacement surfaces | Current authority before cutover |
+| Channels | Reviewed communication/transport target where shipped | Substrate durable-work authority and Specialist execution |
 
 When Specialists needs a primitive owned elsewhere, it opens or extends work in the owning system and consumes that surface. It does not absorb the primitive.
 
@@ -256,7 +256,7 @@ When Specialists needs a primitive owned elsewhere, it opens or extends work in 
 
 ```text
 R0 — v3.3 documentation and board reconciliation
-  → apply mechanical Beads cleanup
+  → complete historical Beads → Substrate reconciliation
   → close the AC0 record
   → produce one approved DO0 graph through /spec-dispatch
 
@@ -278,7 +278,7 @@ DO0.3 — deterministic advancement
 DO0.4 — activation finalization and recovery
   → validated result
   → Git/commit policy
-  → idempotent persistence, Bead handoff, parent notification, and cleanup
+  → idempotent persistence, Journal/provenance publication, parent notification, and cleanup
   → logical sessions and replay-safe recovery
 
 DO0.5 — coordinator and cognition
@@ -326,7 +326,7 @@ Claude MCP and Pi native tools consume the public CLI/runtime contract. Their fi
 
 Narrow correctness fixes may ship before DO0 when they remain compatible with the future protocol.
 
-| Bead | Scope |
+| Historical work ref | Scope |
 |---|---|
 | `unitAI-63xi3.1` | quota and rate-limit fallback |
 | `unitAI-63xi3.2` | canonical catalog fallback |
@@ -337,7 +337,7 @@ Narrow correctness fixes may ship before DO0 when they remain compatible with th
 
 Do not bury these defects in architecture epics. Do not expand a narrow fix into a competing orchestration subsystem.
 
-## 8. R0 board reconciliation
+## 8. R0 board reconciliation — historical migration record
 
 Review the audit batch before mutation. Then:
 
@@ -346,9 +346,9 @@ Review the audit batch before mutation. Then:
 3. update blocked or human-decision items with exact evidence and one answerable question;
 4. preserve the live bug lane;
 5. relate retained history to replacements instead of leaving two executable plans;
-6. create DO0 Beads only after `/spec-dispatch` approves one graph.
+6. materialize DO0 as Substrate Issues only after the current planning/spec gate approves one graph.
 
-The audit estimate is approximately 30 live relevant Beads, 9 blocked or human-decision Beads, and 123 mechanical close/supersede candidates. The target is approximately 39 active Beads before the DO0 graph is created.
+Historical audit snapshot: approximately 30 live relevant Beads, 9 blocked/human-decision Beads, and 123 mechanical close/supersede candidates existed before the Substrate cutover. These numbers are migration provenance, not a current board target.
 
 ### 8.1 Execution order
 
@@ -358,7 +358,7 @@ The audit estimate is approximately 30 live relevant Beads, 9 blocked or human-d
 4. Merge or close current documentation pull requests.
 5. Approve this v3.3 revision and its PRD companion.
 6. Run `/spec-dispatch` against v3.3 and current repository heads.
-7. Create DO0 Beads and dependencies.
+7. Materialize DO0 Substrate Issues and relationships.
 8. Update Jira at epic and program level only.
 
 ## 9. Exit criteria
@@ -370,7 +370,7 @@ R0 is complete when all conditions hold:
 - executable sections contain no duplicate historical architecture;
 - no future task describes behavior already shipped in Core `0.11.3`, xtmux `0.2.3`, or Specialists `3.21.2`;
 - the future design specifies one compiler, one persisted shape, one reducer, one effect executor, and one activation protocol;
-- old Beads trees are closed, superseded, or explicitly related to replacements;
+- historical Beads trees have an explicit imported/closed/superseded migration disposition;
 - current live bugs remain visible and narrowly scoped;
 - Jira contains only current epics, program state, and release evidence;
 - the next Specialists package check proves that `CHANGELOG.md` is present.
