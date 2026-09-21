@@ -10,7 +10,7 @@ type CommandEntry = [string, string];
 const CORE_COMMANDS: CommandEntry[] = [
   ['init', 'Bootstrap a project: dirs, workflow injection, project MCP registration'],
   ['list', 'List specialists with full descriptions; --compact truncates, --live opens tmux picker'],
-  ['list-rules', 'Show mandatory-rule × specialist matrix; --rule/--specialist filters, --json'],
+  ['list-rules', 'Show mandatory-rule × specialist matrix; --rule/--specialist filters, --rule --show prints the rule text, --json'],
   ['view', 'Pretty-print specialist config with readable prompts; --section, --surface, --raw'],
   ['edit', 'Edit specialist fields via dot-path: set/get/append/remove, --preset, --list-presets'],
   ['validate', 'Validate specialist schema; --target=script adds compatGuard checks'],
@@ -146,6 +146,7 @@ export async function run(): Promise<void> {
     '  specialists setup --discovery --json',
     '  specialists list',
     '  specialists list-rules                            # rule × specialist matrix',
+    '  specialists list-rules --rule gitnexus-required --show   # print one rule\'s text verbatim',
     '  specialists view explorer --section prompt',
     '  specialists edit executor --preset power',
     '  specialists edit explorer --get specialist.execution.model',

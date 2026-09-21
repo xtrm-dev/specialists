@@ -39,6 +39,7 @@ interface SpecialistEntry {
 
 interface ListRulesOptions {
   json: boolean;
+  show: boolean;
   filterRule?: string;
   filterSpecialist?: string;
 }
@@ -159,10 +160,11 @@ function renderMatrix(rules: RuleSetEntry[], specs: SpecialistEntry[]): string {
 }
 
 function parseArgs(argv: readonly string[]): ListRulesOptions {
-  const opts: ListRulesOptions = { json: false };
+  const opts: ListRulesOptions = { json: false, show: false };
   for (let i = 0; i < argv.length; i++) {
     const t = argv[i];
     if (t === '--json') opts.json = true;
+    else if (t === '--show') opts.show = true;
     else if (t === '--rule' && argv[i + 1]) opts.filterRule = argv[++i];
     else if (t === '--specialist' && argv[i + 1]) opts.filterSpecialist = argv[++i];
     else if (t === '--help' || t === '-h') {
@@ -174,13 +176,19 @@ function parseArgs(argv: readonly string[]): ListRulesOptions {
       process.exit(1);
     }
   }
+  // Fail loud rather than accept a flag that would silently do nothing.
+  if (opts.show && !opts.filterRule) {
+    process.stderr.write('Error: --show requires --rule <id>\n');
+    printUsage();
+    process.exit(1);
+  }
   return opts;
 }
 
 function printUsage(): void {
   console.log([
     '',
-    'Usage: specialists list-rules [--rule <id>] [--specialist <name>] [--json]',
+    'Usage: specialists list-rules [--rule <id>] [--specialist <name>] [--show] [--json]',
     '',
     'Show which mandatory rules are loaded by which specialists.',
     'Walks cwd tiers first, then package-canonical fallback.',
@@ -189,11 +197,13 @@ function printUsage(): void {
     'Options:',
     '  --rule <id>          Filter to one rule, list every spec that loads it',
     '  --specialist <name>  Filter to one specialist, list every rule applied',
+    '  --show               With --rule: also print that rule\'s text, verbatim from its source file',
     '  --json               Structured output (rules[], specialists[])',
     '',
     'Examples:',
     '  specialists list-rules',
     '  specialists list-rules --rule gitnexus-required',
+    '  specialists list-rules --rule gitnexus-required --show',
     '  specialists list-rules --specialist reviewer',
     '  specialists list-rules --json | jq .',
     '',
@@ -272,6 +282,44 @@ export async function run(): Promise<void> {
     const matchedSpecs = specs
       .map(s => ({ name: s.name, source_tier: s.source_tier, scope: s.applied_rules.find(r => r.id === opts.filterRule)?.scope }))
       .filter(x => !!x.scope);
+
+    // --show prints the rule's own text. The rule file is the authority, so emit it
+    // verbatim instead of paraphrasing the doctrine it carries.
+    if (opts.show) {
+      const rule = rules.find(r => r.id === opts.filterRule);
+      if (!rule) {
+        process.stderr.write(`Unknown rule: ${opts.filterRule} (no mandatory-rules/${opts.filterRule}.md in any tier)\n`);
+        process.exit(1);
+      }
+      let content: string;
+      try {
+        content = readFileSync(rule.source_path, 'utf-8');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        process.stderr.write(`Cannot read rule ${rule.id} at ${rule.source_path}: ${message}\n`);
+        process.exit(1);
+      }
+      if (opts.json) {
+        process.stdout.write(JSON.stringify({
+          rule: rule.id,
+          source_path: rule.source_path,
+          source_tier: rule.source_tier,
+          content,
+          applied_to: matchedSpecs,
+        }, null, 2) + '\n');
+        return;
+      }
+      console.log(`\nRule: ${rule.id}  (tier=${rule.source_tier})`);
+      console.log(`source: ${rule.source_path}\n`);
+      if (matchedSpecs.length === 0) {
+        console.log('  (no specialists pull this rule)');
+      } else {
+        for (const m of matchedSpecs) console.log(`  ${m.name.padEnd(20)} (${m.scope}, tier=${m.source_tier})`);
+      }
+      console.log(`\n${content.trimEnd()}\n`);
+      return;
+    }
+
     if (opts.json) {
       process.stdout.write(JSON.stringify({ rule: opts.filterRule, applied_to: matchedSpecs }, null, 2) + '\n');
       return;

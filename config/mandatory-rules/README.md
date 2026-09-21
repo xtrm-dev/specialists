@@ -5,7 +5,8 @@ behaviors the model must follow regardless of the specific task.
 
 > **Quick introspection:** `sp list-rules` prints the rule × specialist matrix.
 > Filter with `sp list-rules --rule <id>` or `sp list-rules --specialist <name>`,
-> machine output via `--json`.
+> machine output via `--json`. Add `--show` to a `--rule` filter to print that
+> rule's text verbatim from its resolved source file.
 
 ## Layout (four tiers)
 
