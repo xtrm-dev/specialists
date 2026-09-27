@@ -55,5 +55,9 @@
         ]
       }
     ]
-  }
+  },
+  "description": "Specialists classic lifecycle hooks plus the early-access Claude Mod: the live fleet band above the prompt and /specialists controls.",
+  "modules": [
+    "./register.tsx"
+  ]
 }
