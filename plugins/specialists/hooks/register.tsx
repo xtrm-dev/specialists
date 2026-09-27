@@ -1,7 +1,7 @@
 /* @jsxRuntime classic */
 /* @jsx h */
 /* @jsxFrag Fragment */
-import type { EngineInterface, McpToolResult, On } from 'claude-code'
+import type { Elements, EngineInterface, McpToolResult, On } from 'claude-code'
 
 // The live Specialists fleet of THIS session, drawn in the band above the prompt: the
 // Claude-native twin of the Pi specialist-subagents footer section
@@ -14,6 +14,9 @@ export const MCP_SERVER = 'plugin:specialists:specialists'
 export const COMMAND = 'specialists'
 export const POLL_MS = 2000
 export const FLEET_MAX_ROWS = 6
+/** Above this many activations the band folds to one line and the pane holds the list. */
+export const COLLAPSE_AT = 3
+export const PANE_ID = 'specialists-fleet'
 export const PURPOSE_ROW_MAX = 60
 
 const SPINNER_FRAMES = ['◐', '◓', '◑', '◒']
@@ -45,7 +48,7 @@ export type Ask = {
 export type Fleet = { activations: Activation[]; asks: Ask[] }
 
 const USAGE =
-  'Usage: /specialists [show|hide|expand|collapse] · reply <message_id> <answer> · ' +
+  'Usage: /specialists [status|show|hide|expand|collapse] · reply <message_id> <answer> · ' +
   'steer <activation> <message> · resume <activation> <prompt> · stop <activation> [reason]'
 
 const isActive = (state?: string) => state === 'running' || state === 'starting'
@@ -202,6 +205,7 @@ type State = {
   flash: string | null
   polling: boolean
   timer: { cancel: () => void } | null
+  paneOpen: boolean
 }
 
 async function refresh($: EngineInterface, s: State): Promise<void> {
@@ -230,6 +234,107 @@ async function act($: EngineInterface, s: State, tool: string, args: Record<stri
   return s.flash
 }
 
+/** The elements both sites draw with; the terminal and desktop tables have all four. */
+type Kit = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button' | 'Input'>
+
+/** Opens the fleet pane: docked beside a fullscreen transcript, else inline above the prompt. */
+async function openPane($: EngineInterface, s: State): Promise<void> {
+  await $.ui.open({
+    id: PANE_ID,
+    title: 'Specialists',
+    focus: true,
+    closeOnEscape: true,
+    rows: Math.min(40, s.fleet.activations.length * 2 + 8),
+  })
+  s.paneOpen = true
+  $.ui.invalidate('ui.render')
+}
+
+async function closePane($: EngineInterface, s: State): Promise<void> {
+  await $.ui.close({ id: PANE_ID }).catch(() => undefined)
+  s.paneOpen = false
+  $.ui.invalidate('ui.render')
+}
+
+/**
+ * Rows and the selected row's controls: the one drawing the band and the pane share, so
+ * both sites read and act the same way. `site` keeps element keys apart between them.
+ */
+function fleetBody($: EngineInterface, s: State, ui: Kit, rows: Activation[], site: string) {
+  const { Box, Text, Button, Input } = ui
+  const nowMs = Date.now()
+  const selectedRow = rows.find(a => a.activation_id === s.selected)
+  const selectedAsk = selectedRow && s.fleet.asks.find(a => a.activation_id === selectedRow.activation_id)
+
+  return (
+    <Box flexDirection="column">
+      {rows.map(row => {
+        const ask = s.fleet.asks.find(a => a.activation_id === row.activation_id)
+        const purpose = purposeShort(row.purpose)
+        const isSelected = row.activation_id === s.selected
+        return (
+          <Box key={`${site}:${row.activation_id}`} flexDirection="column">
+            <Button
+              plain
+              key={`row:${row.activation_id}`}
+              onPress={() => { s.selected = isSelected ? null : row.activation_id; s.flash = null; $.ui.invalidate('ui.render') }}
+            >
+              {`${isSelected ? '▾' : ' '} ${markerOf(row, ask, nowMs)} ${row.specialist ?? 'specialist'}:${shortId(row.activation_id)}  ${row.bead_id ?? '—'}${purpose ? `  ${purpose}` : ''}`}
+            </Button>
+            <Text dimColor wrap="truncate-end">
+              {`      ${row.resolved_model ?? '?model'}${row.thinking_level ? ` · ${row.thinking_level}` : ''}  • ${metricsOf(row, ask, nowMs)}`}
+            </Text>
+          </Box>
+        )
+      })}
+
+      {selectedRow ? (
+        <Box flexDirection="column" paddingLeft={4}>
+          <Text dimColor>{selectedRow.activation_id} · {selectedRow.state ?? 'unknown'}</Text>
+          {selectedAsk ? (
+            <>
+              <Text color={ACCENT} wrap="wrap">{selectedAsk.kind ?? 'ask'}: {selectedAsk.body ?? ''}</Text>
+              <Input
+                key={`reply:${selectedAsk.message_id}`}
+                label="reply "
+                placeholder="answer the specialist"
+                submitLabel="reply"
+                autoFocus
+                onSubmit={value => { if (value.trim()) void act($, s, 'specialist_reply', { message_id: selectedAsk.message_id, body: value.trim() }, `Answered ${selectedAsk.message_id}.`) }}
+              />
+            </>
+          ) : isActive(selectedRow.state) ? (
+            <Input
+              key={`steer:${selectedRow.activation_id}`}
+              label="steer "
+              placeholder="redirect the running specialist"
+              submitLabel="steer"
+              onSubmit={value => { if (value.trim()) void act($, s, 'specialist_steer', { activation_id: selectedRow.activation_id, message: value.trim() }, `Steered ${selectedRow.activation_id}.`) }}
+            />
+          ) : (
+            <Input
+              key={`resume:${selectedRow.activation_id}`}
+              label="resume "
+              placeholder="next instruction, same session"
+              submitLabel="resume"
+              onSubmit={value => { if (value.trim()) void act($, s, 'specialist_resume', { activation_id: selectedRow.activation_id, prompt: value.trim() }, `Resumed ${selectedRow.activation_id}.`) }}
+            />
+          )}
+          <Button
+            key={`stop:${selectedRow.activation_id}`}
+            hotkey="x"
+            onPress={() => void act($, s, 'specialist_stop_activation', { activation_id: selectedRow.activation_id, reason: 'operator request' }, `Stopped ${selectedRow.activation_id}.`)}
+          >
+            stop
+          </Button>
+        </Box>
+      ) : null}
+
+      {s.flash ? <Text dimColor>    {s.flash}</Text> : null}
+    </Box>
+  )
+}
+
 export function register(on: On) {
   const s: State = {
     fleet: { activations: [], asks: [] },
@@ -240,6 +345,7 @@ export function register(on: On) {
     flash: null,
     polling: false,
     timer: null,
+    paneOpen: false,
   }
 
   on('session.start', async ($, e, next) => {
@@ -264,13 +370,28 @@ export function register(on: On) {
     const [verb = '', ref = '', ...rest] = trimmed.split(/\s+/)
     const tail = rest.join(' ')
 
-    if (verb === '' || verb === 'show' || verb === 'hide' || verb === 'expand' || verb === 'collapse') {
-      if (verb === 'show' || verb === '') s.visible = true
+    if (verb === '') {
+      await refresh($, s)
+      if (s.paneOpen) {
+        await closePane($, s)
+        return { text: 'Specialists pane hidden' }
+      }
+      await openPane($, s)
+      return { text: 'Specialists pane shown' }
+    }
+
+    if (verb === 'status') {
+      await refresh($, s)
+      return { text: reportOf(s.fleet, s.error, Date.now()) }
+    }
+
+    if (verb === 'show' || verb === 'hide' || verb === 'expand' || verb === 'collapse') {
+      if (verb === 'show') s.visible = true
       if (verb === 'hide') s.visible = false
       if (verb === 'expand') s.expanded = true
       if (verb === 'collapse') s.expanded = false
-      await refresh($, s)
-      return { text: verb === '' ? reportOf(s.fleet, s.error, Date.now()) : `Specialists band: ${verb}` }
+      $.ui.invalidate('ui.render')
+      return { text: `Specialists band: ${verb}` }
     }
 
     if (verb === 'reply') {
@@ -303,11 +424,16 @@ export function register(on: On) {
     if (!s.visible || e.props.hasSurvey || (s.fleet.activations.length === 0 && !s.error)) return next(e)
 
     const { Box, Text, Button, Input } = await $.ui.resolve(e)
-    const nowMs = Date.now()
     const ordered = orderedOf(s.fleet)
-    const shown = s.expanded ? ordered.slice(0, FLEET_MAX_ROWS) : []
-    const selectedRow = s.fleet.activations.find(a => a.activation_id === s.selected)
-    const selectedAsk = selectedRow && s.fleet.asks.find(a => a.activation_id === selectedRow.activation_id)
+    // Folded above COLLAPSE_AT, and while the pane holds the list: the band keeps the
+    // header and the blocked rows only, since an ask must never hide behind a count.
+    const isFolded = s.paneOpen || ordered.length > COLLAPSE_AT
+    const blocked = new Set(s.fleet.asks.map(a => a.activation_id))
+    const rows = !s.expanded
+      ? []
+      : isFolded
+        ? (s.paneOpen ? [] : ordered.filter(a => blocked.has(a.activation_id)))
+        : ordered.slice(0, FLEET_MAX_ROWS)
 
     return (
       <Box flexDirection="column">
@@ -315,79 +441,46 @@ export function register(on: On) {
           <Text dimColor>╰─</Text>
           <Text inverse bold> SPECIALISTS </Text>
           <Text> {headerOf(s.fleet)}</Text>
-          <Button plain dimColor key="toggle" onPress={() => { s.expanded = !s.expanded; $.ui.invalidate('ui.render') }}>
-            {s.expanded ? ' [-]' : ' [+]'}
-          </Button>
-        </Box>
-
-        {s.error ? <Text color="yellow" wrap="truncate-end">    status unavailable · {s.error}</Text> : null}
-
-        {shown.map(row => {
-          const ask = s.fleet.asks.find(a => a.activation_id === row.activation_id)
-          const purpose = purposeShort(row.purpose)
-          const isSelected = row.activation_id === s.selected
-          return (
-            <Box key={row.activation_id} flexDirection="column">
-              <Button
-                plain
-                key={`row:${row.activation_id}`}
-                onPress={() => { s.selected = isSelected ? null : row.activation_id; s.flash = null; $.ui.invalidate('ui.render') }}
-              >
-                {`${isSelected ? '▾' : ' '} ${markerOf(row, ask, nowMs)} ${row.specialist ?? 'specialist'}:${shortId(row.activation_id)}  ${row.bead_id ?? '—'}${purpose ? `  ${purpose}` : ''}`}
-              </Button>
-              <Text dimColor wrap="truncate-end">
-                {`      ${row.resolved_model ?? '?model'}${row.thinking_level ? ` · ${row.thinking_level}` : ''}  • ${metricsOf(row, ask, nowMs)}`}
-              </Text>
-            </Box>
-          )
-        })}
-
-        {s.expanded && ordered.length > shown.length ? <Text dimColor>    +{ordered.length - shown.length} more</Text> : null}
-
-        {s.expanded && selectedRow ? (
-          <Box flexDirection="column" paddingLeft={4}>
-            <Text dimColor>{selectedRow.activation_id} · {selectedRow.state ?? 'unknown'}</Text>
-            {selectedAsk ? (
-              <>
-                <Text color={ACCENT} wrap="wrap">{selectedAsk.kind ?? 'ask'}: {selectedAsk.body ?? ''}</Text>
-                <Input
-                  key={`reply:${selectedAsk.message_id}`}
-                  label="reply "
-                  placeholder="answer the specialist"
-                  submitLabel="reply"
-                  autoFocus
-                  onSubmit={value => { if (value.trim()) void act($, s, 'specialist_reply', { message_id: selectedAsk.message_id, body: value.trim() }, `Answered ${selectedAsk.message_id}.`) }}
-                />
-              </>
-            ) : isActive(selectedRow.state) ? (
-              <Input
-                key={`steer:${selectedRow.activation_id}`}
-                label="steer "
-                placeholder="redirect the running specialist"
-                submitLabel="steer"
-                onSubmit={value => { if (value.trim()) void act($, s, 'specialist_steer', { activation_id: selectedRow.activation_id, message: value.trim() }, `Steered ${selectedRow.activation_id}.`) }}
-              />
-            ) : (
-              <Input
-                key={`resume:${selectedRow.activation_id}`}
-                label="resume "
-                placeholder="next instruction, same session"
-                submitLabel="resume"
-                onSubmit={value => { if (value.trim()) void act($, s, 'specialist_resume', { activation_id: selectedRow.activation_id, prompt: value.trim() }, `Resumed ${selectedRow.activation_id}.`) }}
-              />
-            )}
-            <Button
-              key={`stop:${selectedRow.activation_id}`}
-              hotkey="x"
-              onPress={() => void act($, s, 'specialist_stop_activation', { activation_id: selectedRow.activation_id, reason: 'operator request' }, `Stopped ${selectedRow.activation_id}.`)}
-            >
-              stop
+          {isFolded ? (
+            <Button plain key="open" hotkey="o" onPress={() => void (s.paneOpen ? closePane($, s) : openPane($, s))}>
+              {s.paneOpen ? 'close' : 'open'}
             </Button>
-          </Box>
-        ) : null}
-
-        {s.flash ? <Text dimColor>    {s.flash}</Text> : null}
+          ) : (
+            <Button plain dimColor key="toggle" onPress={() => { s.expanded = !s.expanded; $.ui.invalidate('ui.render') }}>
+              {s.expanded ? ' [-]' : ' [+]'}
+            </Button>
+          )}
+        </Box>
+        {isFolded && !s.paneOpen ? <Text dimColor>    tap open or /specialists for the full fleet</Text> : null}
+        {s.error ? <Text color="yellow" wrap="truncate-end">    status unavailable · {s.error}</Text> : null}
+        {rows.length > 0 || s.flash ? fleetBody($, s, { Box, Text, Button, Input }, rows, 'band') : null}
+        {!isFolded && s.expanded && ordered.length > rows.length ? <Text dimColor>    +{ordered.length - rows.length} more</Text> : null}
       </Box>
     )
+  })
+
+  on('ui.render', { component: 'Pane' }, async ($, e, next) => {
+    // The mobile app draws no Input; it keeps /specialists status.
+    if (e.requestId !== PANE_ID || e.surface === 'mobile') return next(e)
+
+    const { Box, Text, Button, Input } = await $.ui.resolve(e)
+    return (
+      <Box flexDirection="column">
+        <Text bold>{headerOf(s.fleet)}</Text>
+        {s.error ? <Text color="yellow" wrap="truncate-end">status unavailable · {s.error}</Text> : null}
+        {s.fleet.activations.length === 0 ? <Text dimColor>No live activations.</Text> : null}
+        {fleetBody($, s, { Box, Text, Button, Input }, orderedOf(s.fleet), 'pane')}
+        <Text dimColor>esc closes · select a row to reply, steer, resume or stop</Text>
+      </Box>
+    )
+  })
+
+  on('ui.close', { id: PANE_ID }, async ($, e, next) => {
+    const result = await next(e)
+    if (result.deny === undefined) {
+      s.paneOpen = false
+      $.ui.invalidate('ui.render')
+    }
+    return result
   })
 }

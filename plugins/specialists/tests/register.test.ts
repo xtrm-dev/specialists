@@ -1,7 +1,7 @@
 import type { McpToolResult, On, RenderInput } from 'claude-code'
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { MCP_SERVER, POLL_MS } from '../hooks/register'
+import { COLLAPSE_AT, MCP_SERVER, PANE_ID, POLL_MS } from '../hooks/register'
 
 const SESSION = { surface: 'terminal', isInteractive: true, cwd: '/work' } as const
 
@@ -16,6 +16,21 @@ const BAND: RenderInput<'AbovePrompt'> = {
     maxRows: 20,
     bodyColumns: 120,
     scroll: { offset: 0, bodyRows: 19 },
+    view: {},
+  },
+}
+
+const PANE: RenderInput<'Pane'> = {
+  component: 'Pane',
+  surface: 'terminal',
+  requestId: PANE_ID,
+  viewport: { columns: 160, rows: 40, isFullscreen: true },
+  props: {
+    title: 'Specialists',
+    isFocused: true,
+    bodyColumns: 80,
+    placement: 'dock',
+    scroll: { offset: 0, bodyRows: 30 },
     view: {},
   },
 }
@@ -70,8 +85,19 @@ function server(on: On, status: () => McpToolResult | Error) {
   on('command.register', ($, e) => ({ value: { command: e.name } }))
   on('ui.invalidate', () => ({ value: undefined }))
   on('ui.render', { component: 'AbovePrompt' }, () => ({ type: 'Box', props: {}, children: ['engine band'] }) as never)
+  on('ui.render', { component: 'Pane' }, () => ({ type: 'Box', props: {}, children: ['engine pane'] }) as never)
+  on('ui.open', ($, e) => {
+    panes.push({ open: e })
+    return { value: { isPlaced: true } }
+  })
+  on('ui.close', ($, e) => {
+    panes.push({ close: e.id })
+    return { value: undefined }
+  })
   return calls
 }
+
+let panes: unknown[] = []
 
 function textOf(tree: unknown): string {
   if (typeof tree === 'string' || typeof tree === 'number') return String(tree)
@@ -120,7 +146,7 @@ describe('register', () => {
     await $.session.start(SESSION)
     await clock.settle()
 
-    const { text } = await $.command.run(command(''))
+    const { text } = await $.command.run(command('status'))
     expect(text).toContain('status unavailable · server not connected')
     expect(textOf(await $.ui.render(BAND))).toContain('status unavailable · server not connected')
   })
@@ -132,7 +158,7 @@ describe('register', () => {
     await $.session.start(SESSION)
     await clock.settle()
 
-    expect((await $.command.run(command(''))).text).toMatch(/status unavailable · .*no such server/)
+    expect((await $.command.run(command('status'))).text).toMatch(/status unavailable · .*no such server/)
   })
 
   test('a blocked specialist sorts first and is answered from the band', async ($, on) => {
@@ -228,5 +254,59 @@ describe('register', () => {
     await clock.settle()
 
     expect(textOf(await $.ui.render({ ...BAND, props: { ...BAND.props, hasSurvey: true } }))).toBe('engine band')
+  })
+  test(`above ${COLLAPSE_AT} the band folds to one line and keeps blocked rows`, async ($, on) => {
+    const clock = mock.clock(on)
+    const many = [RUNNING, BLOCKED, ...[1, 2].map(n => ({ ...RUNNING, activation_id: `act:0000000${n}-aaa`, specialist: `worker${n}` }))]
+    server(on, () => json({ activations: many, pending_asks: [ASK] }))
+
+    await $.session.start(SESSION)
+    await clock.settle()
+
+    const band = textOf(await $.ui.render(BAND))
+    expect(band).toContain('3 running • ! 1 blocked')
+    expect(band).toContain('open')
+    expect(band, 'the blocked row stays in the band').toContain('debugger:67eff6ec')
+    expect(band, 'running rows move to the pane').not.toContain('executor:4245711d')
+    expect(band).not.toContain('worker1')
+  })
+
+  test('/specialists opens the fleet pane and closes it again', async ($, on) => {
+    const clock = mock.clock(on)
+    panes = []
+    server(on, () => json({ activations: [RUNNING, BLOCKED], pending_asks: [] }))
+
+    await $.session.start(SESSION)
+    await clock.settle()
+
+    expect((await $.command.run(command(''))).text).toBe('Specialists pane shown')
+    expect(panes[0]).toMatchObject({ open: { id: PANE_ID, focus: true, closeOnEscape: true } })
+
+    const pane = textOf(await $.ui.render({ ...PANE, requestId: PANE_ID }))
+    expect(pane).toContain('executor:4245711d')
+    expect(pane).toContain('debugger:67eff6ec')
+
+    const band = textOf(await $.ui.render(BAND))
+    expect(band, 'the band folds while the pane holds the list').toContain('close')
+    expect(band).not.toContain('executor:4245711d')
+
+    expect((await $.command.run(command(''))).text).toBe('Specialists pane hidden')
+    expect(panes).toContainEqual({ close: PANE_ID })
+    expect(textOf(await $.ui.render(BAND))).toContain('executor:4245711d')
+  })
+
+  test('the band open button opens the pane', async ($, on) => {
+    const clock = mock.clock(on)
+    panes = []
+    const many = [1, 2, 3, 4].map(n => ({ ...RUNNING, activation_id: `act:0000000${n}-aaa` }))
+    server(on, () => json({ activations: many, pending_asks: [] }))
+
+    await $.session.start(SESSION)
+    await clock.settle()
+
+    const ui = await $.ui.mount({ ...BAND, plugin: 'specialists' })
+    await ui.press({ key: 'open' })
+    await clock.settle()
+    expect(panes[0]).toMatchObject({ open: { id: PANE_ID } })
   })
 })
