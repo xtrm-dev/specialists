@@ -143,7 +143,7 @@ jobs:
           test -z "$(git status --porcelain --untracked-files=all -- dist/)"
           tarball_name=$(npm pack --pack-destination /tmp --json | jq -r '.[0].filename')
           tarball="/tmp/$tarball_name"
-          test "$tarball_name" = "jaggerxtrm-specialists-3.21.6.tgz"
+          test "$tarball_name" = "jaggerxtrm-specialists-$(node -p "require('./package.json').version").tgz"
           prefix=/tmp/sp-smoke-prefix
           workdir=$(mktemp -d)
           npm install -g --prefix="$prefix" "$tarball"

@@ -11,12 +11,12 @@ const script = path.resolve('scripts/generate-release-attestation.mjs');
 const postprocessScript = path.resolve('scripts/postprocess-build.mjs');
 const dirs: string[] = [];
 const waiver = {
-  release: '3.21.6',
+  release: '4.0.0',
   status: 'approved_bounded_waiver',
   tracking_issue: 'unitAI-641h0',
   approved: true,
   approved_by: 'operator',
-  approved_at: '2026-09-03T00:56:00Z',
+  approved_at: '2026-09-28T17:09:00Z',
   limitation: 'Specialists does not provide filesystem or host-read isolation. Model-driven runs and allowed tools, extensions, MCP processes, and child processes can read paths visible to the operating-system identity that runs Specialists.',
   // 'mcp_use_specialist' -> 'mcp_native_activation' (unitAI-fplre): use_specialist was
   // deleted in #342, but the surface that replaced it carries the SAME filesystem and
@@ -32,8 +32,8 @@ const waiver = {
   write_boundary: 'absolute_paths_only',
   sandbox: 'none',
   read_isolation: 'not_provided',
-  expires_at: '2026-10-03T00:00:00Z',
-  expires_on_release: '3.21.7',
+  expires_at: '2026-10-28T00:00:00Z',
+  expires_on_release: '4.0.1',
   expires_on_condition: 'first_release_that_provides_enforced_host_read_isolation',
   expiry_rule: 'whichever_occurs_first',
   reopen_conditions: ['unauthorized_host_read', 'public_or_cross_tenant_deployment', 'requested_tier_launch_without_explicit_tools', 'readable_mount_expansion', 'misleading_isolation_documentation', 'waiver_expiry'],
@@ -63,7 +63,7 @@ async function makeFixture(opts: { version?: string } = {}) {
   const dir = await mkdtemp(path.join(tmpdir(), 'release-attestation-'));
   dirs.push(dir);
   const repo = path.join(dir, 'repo');
-  const version = opts.version ?? '3.21.6';
+  const version = opts.version ?? '4.0.0';
   for (const input of FIXTURE_INPUTS) {
     const target = path.join(repo, input);
     await mkdir(path.dirname(target), { recursive: true });
@@ -138,7 +138,7 @@ async function mutate(attestation: string, change: (value: any) => void) {
   await writeFile(attestation, JSON.stringify(value));
 }
 
-describe('3.21.6 release attestation', () => {
+describe('4.0.0 release attestation', () => {
   it('generates and validates a detached, source-bound receipt with the bounded waiver', async () => {
     const { repo, tarball, attestation } = await fixture();
     const result = await validate(repo, tarball, attestation);
@@ -150,10 +150,10 @@ describe('3.21.6 release attestation', () => {
     expect(metadata.attestation_status).toBe('final_detached');
     expect(metadata.package).toMatchObject({
       name: '@jaggerxtrm/specialists',
-      version: '3.21.6',
+      version: '4.0.0',
       source_commit: headStdout.trim(),
       git_head: headStdout.trim(),
-      tarball: 'jaggerxtrm-specialists-3.21.6.tgz',
+      tarball: 'jaggerxtrm-specialists-4.0.0.tgz',
     });
     expect(metadata.package.source_commit).toMatch(/^[0-9a-f]{40}$/);
     expect(metadata.pi_runtime.version_or_range).toBe('not-run');
@@ -233,10 +233,10 @@ describe('3.21.6 release attestation', () => {
     expect(metadata.attestation_status).toBe('candidate_template');
     expect(metadata.package).toMatchObject({
       name: '@jaggerxtrm/specialists',
-      version: '3.21.6',
+      version: '4.0.0',
       source_commit: 'not-generated',
       git_head: 'not-generated',
-      tarball: 'jaggerxtrm-specialists-3.21.6.tgz',
+      tarball: 'jaggerxtrm-specialists-4.0.0.tgz',
       sha256: 'not-generated',
     });
     expect(metadata.host_read_isolation).toEqual({ provided: false, waiver });
@@ -283,18 +283,18 @@ describe('generation provenance guards', () => {
   });
 
   it('refuses generation when package.json.version drifts from the waiver release', async () => {
-    const { repo, tarball, attestation } = await makeFixture({ version: '3.21.7' });
+    const { repo, tarball, attestation } = await makeFixture({ version: '4.0.1' });
     const result = await generate(repo, tarball, attestation);
     expect(result.ok).toBe(false);
-    expect(result.error).toContain('does not match waiver release 3.21.6');
+    expect(result.error).toContain('does not match waiver release 4.0.0');
     await expect(stat(attestation)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('enforces the waiver on validation against the wall clock via the shared check', async () => {
     const { enforceWaiver } = await loadGenerator();
-    expect(() => enforceWaiver('3.21.6', Date.parse('2026-10-02T23:59:59Z'))).not.toThrow();
-    expect(() => enforceWaiver('3.21.6', Date.parse('2026-10-03T00:00:00Z'))).toThrow('expired at 2026-10-03T00:00:00Z');
-    expect(() => enforceWaiver('3.21.7', Date.parse('2026-09-03T00:00:00Z'))).toThrow('does not match waiver release 3.21.6');
+    expect(() => enforceWaiver('4.0.0', Date.parse('2026-10-27T23:59:59Z'))).not.toThrow();
+    expect(() => enforceWaiver('4.0.0', Date.parse('2026-10-28T00:00:00Z'))).toThrow('expired at 2026-10-28T00:00:00Z');
+    expect(() => enforceWaiver('4.0.1', Date.parse('2026-09-28T00:00:00Z'))).toThrow('does not match waiver release 4.0.0');
   });
 });
 
