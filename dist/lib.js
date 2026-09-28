@@ -20232,7 +20232,19 @@ function resolveBareLogicalSkill(skillName, consumerRoot) {
   }
   if (matches.length === 1)
     return matches[0];
-  return globalDefaultCandidate(skillName);
+  return repoDefaultCandidate(skillName, canonicalConsumer, canonicalSkillsRoot) ?? globalDefaultCandidate(skillName);
+}
+function repoDefaultCandidate(skillName, canonicalConsumer, canonicalSkillsRoot) {
+  const defaultRoot = join11(canonicalSkillsRoot, "default");
+  try {
+    if (!lstatSync3(defaultRoot).isDirectory())
+      return null;
+  } catch (error) {
+    if (error?.code === "ENOENT")
+      return null;
+    throw wrapFsError(skillName, join11(".xtrm", "skills", "default"), "probing the repo default root", error);
+  }
+  return probeCandidate(skillName, canonicalConsumer, canonicalSkillsRoot, join11(defaultRoot, skillName));
 }
 
 // src/specialist/loader.ts

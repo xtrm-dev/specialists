@@ -12154,7 +12154,19 @@ function resolveBareLogicalSkill(skillName, consumerRoot) {
   }
   if (matches.length === 1)
     return matches[0];
-  return globalDefaultCandidate(skillName);
+  return repoDefaultCandidate(skillName, canonicalConsumer, canonicalSkillsRoot) ?? globalDefaultCandidate(skillName);
+}
+function repoDefaultCandidate(skillName, canonicalConsumer, canonicalSkillsRoot) {
+  const defaultRoot = join4(canonicalSkillsRoot, "default");
+  try {
+    if (!lstatSync(defaultRoot).isDirectory())
+      return null;
+  } catch (error) {
+    if (error?.code === "ENOENT")
+      return null;
+    throw wrapFsError(skillName, join4(".xtrm", "skills", "default"), "probing the repo default root", error);
+  }
+  return probeCandidate(skillName, canonicalConsumer, canonicalSkillsRoot, join4(defaultRoot, skillName));
 }
 var RESERVED_SKILL_ROOTS, ProjectPackSkillAmbiguityError, ProjectPackSkillSecurityError;
 var init_project_pack_skill_resolver = __esm(() => {
