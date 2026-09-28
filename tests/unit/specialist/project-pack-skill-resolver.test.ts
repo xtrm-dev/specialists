@@ -125,8 +125,48 @@ describe('resolveBareLogicalSkill — project-pack tree', () => {
     );
   });
 
-  it('falls back to the global default candidate when only reserved roots claim the skill', async () => {
+  it('falls back to the global default candidate when only non-default reserved roots claim the skill', async () => {
+    for (const reserved of RESERVED_SKILL_ROOTS.filter((r) => r !== 'default')) {
+      await seedReserved(sandbox, reserved, 'service-knowledge');
+    }
+
+    expect(resolveBareLogicalSkill('service-knowledge', sandbox)).toBe(
+      join(homedir(), '.xtrm', 'skills', 'default', 'service-knowledge'),
+    );
+  });
+
+  it('resolves the repo-local default root before the global pool when no project pack matches', async () => {
     for (const reserved of RESERVED_SKILL_ROOTS) await seedReserved(sandbox, reserved, 'service-knowledge');
+
+    expect(resolveBareLogicalSkill('service-knowledge', sandbox)).toBe(
+      join(sandbox, '.xtrm', 'skills', 'default', 'service-knowledge'),
+    );
+  });
+
+  it('prefers a project pack over the repo-local default root', async () => {
+    await seedReserved(sandbox, 'default', 'service-knowledge');
+    await seedPack(sandbox, 'infra', 'service-knowledge');
+
+    expect(resolveBareLogicalSkill('service-knowledge', sandbox)).toBe(
+      join(sandbox, '.xtrm', 'skills', 'infra', 'service-knowledge'),
+    );
+  });
+
+  it('fails closed when the repo-local default skill directory lacks SKILL.md', async () => {
+    await mkdir(join(sandbox, '.xtrm', 'skills', 'default', 'service-knowledge'), { recursive: true });
+
+    const err = attemptResolve('service-knowledge', sandbox);
+    expect(err).not.toBeNull();
+    expect(err!).toMatch(/missing SKILL\.md|ENOENT/);
+    expect(err!).not.toContain(sandbox);
+  });
+
+  it('skips a symlinked repo default root and uses the global pool', async () => {
+    const shared = join(sandbox, 'shared-pool');
+    await mkdir(join(shared, 'service-knowledge'), { recursive: true });
+    await writeFile(join(shared, 'service-knowledge', 'SKILL.md'), '# shared\n');
+    await mkdir(join(sandbox, '.xtrm', 'skills'), { recursive: true });
+    await symlink(shared, join(sandbox, '.xtrm', 'skills', 'default'));
 
     expect(resolveBareLogicalSkill('service-knowledge', sandbox)).toBe(
       join(homedir(), '.xtrm', 'skills', 'default', 'service-knowledge'),

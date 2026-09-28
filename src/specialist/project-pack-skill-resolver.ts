@@ -11,7 +11,10 @@
 //   1. exactly one project-pack match  -> that skill dir (project wins)
 //   2. more than one project-pack match -> hard ambiguity failure (no fallback,
 //      never first filesystem order; unitAI-jndsb.11)
-//   3. zero project-pack matches -> global-default candidate
+//   3. zero project-pack matches -> repo-local default root
+//      <consumerRoot>/.xtrm/skills/default/<name> when it is a real directory
+//      (probed with the same fail-closed rules as a pack candidate)
+//   4. otherwise -> global-default candidate
 //      ~/.xtrm/skills/default/<name> (existence is enforced by the existing
 //      pre-run validator, preserving the deterministic "skill not found" failure)
 //
@@ -342,5 +345,19 @@ export function resolveBareLogicalSkill(skillName: string, consumerRoot: string)
     );
   }
   if (matches.length === 1) return matches[0];
-  return globalDefaultCandidate(skillName);
+  return repoDefaultCandidate(skillName, canonicalConsumer, canonicalSkillsRoot) ?? globalDefaultCandidate(skillName);
+}
+
+// Per-repo installers (e.g. xtrm service-knowledge) write the engine skill to
+// <repo>/.xtrm/skills/default/<skill>; the global pool no longer ships it.
+// A symlinked `default` is a managed link to a shared pool, not repo content.
+function repoDefaultCandidate(skillName: string, canonicalConsumer: string, canonicalSkillsRoot: string): string | null {
+  const defaultRoot = join(canonicalSkillsRoot, 'default');
+  try {
+    if (!lstatSync(defaultRoot).isDirectory()) return null;
+  } catch (error: unknown) {
+    if ((error as { code?: string } | null)?.code === 'ENOENT') return null;
+    throw wrapFsError(skillName, join('.xtrm', 'skills', 'default'), 'probing the repo default root', error);
+  }
+  return probeCandidate(skillName, canonicalConsumer, canonicalSkillsRoot, join(defaultRoot, skillName));
 }
