@@ -13,14 +13,20 @@ import { resolve } from 'node:path';
 import { DispatchRejectedError } from '../../../dist/lib.js';
 
 // The extension imports Type from 'typebox' (resolved from pi's own install at
-// runtime). Under vitest the worktree has no typebox, so stub the few members the
-// factory uses — schemas are captured, never validated, in this test.
+// runtime). Under vitest the worktree has no typebox, so stub the members the
+// factory uses — parameter schemas AND the output schemas — since they are
+// captured, never validated, in this test.
 vi.mock('typebox', () => ({
   Type: {
     Object: (props) => ({ type: 'object', properties: props }),
     String: (opts = {}) => ({ type: 'string', ...opts }),
     Integer: (opts = {}) => ({ type: 'integer', ...opts }),
+    Number: (opts = {}) => ({ type: 'number', ...opts }),
     Boolean: (opts = {}) => ({ type: 'boolean', ...opts }),
+    Array: (items) => ({ type: 'array', items }),
+    Union: (variants) => ({ anyOf: variants }),
+    Unknown: () => ({ type: 'unknown' }),
+    Null: () => ({ type: 'null' }),
     Optional: (schema) => schema,
   },
 }));
@@ -2064,5 +2070,103 @@ describe('renderer component contract (unitAI-q02sz)', () => {
     expect(typeof component.invalidate).toBe('function');
     expect(() => component.invalidate()).not.toThrow();
     expect(Array.isArray(component.render(80))).toBe(true);
+  });
+});
+
+/**
+ * pi 0.99 tool exposure: what a CODEMODE script receives.
+ *
+ * A tool that declares `outputSchema` resolves to its `structuredContent` instead
+ * of its text (docs/extensions.md, "Tool exposure"). Before this, every tool
+ * returned text only, so `specialist_status({full:true})` from a script was a
+ * JSON STRING. The model-facing text is unchanged — the same object is both —
+ * so these tests pin the two channels to each other rather than re-pinning the
+ * payloads the suite above already covers.
+ */
+describe('codemode result contract (pi 0.99 tool exposure)', () => {
+  async function setup() {
+    const mod = await loadExtension();
+    const pi = makeFakePi();
+    const { host } = makeFakeHost();
+    mod.default(pi, { createHost: () => host });
+    return { pi, host, mod };
+  }
+
+  it('declares an outputSchema for every registered tool, and no schema without a tool', async () => {
+    const { pi, mod } = await setup();
+    const names = pi.tools.map((t) => t.name).sort();
+    expect(Object.keys(mod.TOOL_OUTPUT_SCHEMAS).sort()).toEqual(names);
+    for (const tool of pi.tools) {
+      expect(tool.outputSchema).toBe(mod.TOOL_OUTPUT_SCHEMAS[tool.name]);
+      // Codemode lists a namespace under one heading instead of N loose tools.
+      expect(tool.namespace?.name).toBe('specialists');
+    }
+  });
+
+  it.each([
+    ['specialist_dispatch', { specialist: 'explorer', issue_ref: 'XTRM-93' }],
+    ['specialist_status', { full: true }],
+    ['specialist_status', {}],
+    ['specialist_resume', { activation_id: 'act:aaaa', prompt: 'more' }],
+    ['specialist_retry', { activation_id: 'act:aaaa' }],
+    ['specialist_stop_activation', { activation_id: 'act:aaaa' }],
+    ['specialist_list', {}],
+  ] as const)('%s: structuredContent is exactly what the model-facing text renders', async (name, params) => {
+    const { pi } = await setup();
+    const result = await toolNamed(pi, name).execute('tc1', params as any);
+    // Same object, two channels: a script and the model can never disagree.
+    expect(result.structuredContent).toEqual(resultText(result));
+    expect(result.isError).toBeUndefined();
+  });
+
+  it('does not mark an answered reply as a failure', async () => {
+    const { pi, host } = await setup();
+    // The shared double's `answer` returns undefined (nobody waiting), which is
+    // the error path asserted below; here the ask IS outstanding.
+    host.answer = vi.fn(async () => ({
+      messageId: 'msg:1', inReplyTo: 'msg:0', activationId: 'act:aaaa', attemptId: 'att:aaaa:1',
+    })) as any;
+    const answered = await toolNamed(pi, 'specialist_reply').execute('tc1', { message_id: 'msg:1', body: 'x' });
+    expect(answered.isError).toBeUndefined();
+    expect(answered.structuredContent).toEqual(resultText(answered));
+    expect(answered.structuredContent.status).toBe('answered');
+  });
+
+  it('reports a refusal as an error result that still carries its structured payload', async () => {
+    const { pi } = await setup();
+    const dispatch = toolNamed(pi, 'specialist_dispatch');
+    // Two locator spellings: refused by the gate, nothing dispatched.
+    const refused = await dispatch.execute('tc1', { specialist: 'explorer', issue_ref: 'a', bead_id: 'b' });
+    expect(refused.isError).toBe(true);
+    expect(refused.structuredContent.status).toBe('rejected');
+    expect(refused.structuredContent.reason).toContain('bead_id is only an alias');
+    // The payload survives the error marking — that is what tells the
+    // coordinator what to fix, and a throw would have lost it.
+    expect(refused.structuredContent).toEqual(resultText(refused));
+  });
+
+  it('marks an unknown activation and an unknown message_id as errors too', async () => {
+    const mod = await loadExtension();
+    const pi = makeFakePi();
+    const { host } = makeFakeHost();
+    host.inspect = vi.fn(() => undefined);
+    mod.default(pi, { createHost: () => host });
+    const resumed = await toolNamed(pi, 'specialist_resume').execute('tc1', { activation_id: 'act:none', prompt: 'x' });
+    expect(resumed.isError).toBe(true);
+    expect(resumed.structuredContent.status).toBe('error');
+    // specialist_list names its failures with an `error` key and no `status`.
+    const unknown = await toolNamed(pi, 'specialist_list').execute('tc1', { name: 'nope' });
+    expect(unknown.isError).toBe(true);
+    expect(unknown.structuredContent.error).toContain('Unknown specialist: nope');
+  });
+
+  it('does not mark a read-only payload as a failure', async () => {
+    // specialist_status has no `status` field at all. The predicate keys on
+    // `status`/`error`, so a Fleet read must not read as a failure.
+    const { pi } = await setup();
+    const status = await toolNamed(pi, 'specialist_status').execute('tc1', {});
+    expect(status.isError).toBeUndefined();
+    expect(status.structuredContent.activations).toHaveLength(1);
+    expect(status.structuredContent.pending_asks).toHaveLength(1);
   });
 });

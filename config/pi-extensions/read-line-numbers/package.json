@@ -7,7 +7,7 @@
   "type": "module",
   "main": "index.mjs",
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.80.0"
+    "@earendil-works/pi-coding-agent": "^0.99.0"
   },
   "pi": {
     "extensions": [

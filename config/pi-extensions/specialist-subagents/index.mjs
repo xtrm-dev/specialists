@@ -786,15 +786,287 @@ function rejectionResult(error) {
   });
 }
 
-/** Wrap a payload into the pi AgentToolResult shape. */
+// ── Result shapes (pi 0.99 tool exposure) ─────────────────────────────────────
+//
+// Every specialist_* result is built by ONE helper so its two channels cannot
+// drift: `content[].text` is the model-facing JSON the coordinator JSON.parses,
+// and `structuredContent` is the object a codemode script receives. pi resolves a
+// call to `structuredContent` when the tool declares `outputSchema` — error
+// results included — and to the text when it does not (docs/extensions.md, "Tool
+// exposure"). Before 0.99 the eight tools returned text only, so a script
+// calling `specialist_status({full:true})` received a JSON STRING.
+//
+// The schemas MIRROR the shared projections in src/tools/specialist/
+// activation.tool.ts — the exact shapes `toActivationView`,
+// `toActivationCompactView`, `toPendingAskView`, `toPendingAskCompactView` and
+// `toActivationResultView` emit — plus the envelope each tool wraps them in. They
+// are metadata for the tool listing: pi reads `structuredContent` and never
+// validates it against the schema, so a stale schema misleads a script author
+// rather than failing a call. What must not drift is the DATA, and that is
+// enforced by test (structuredContent deep-equals JSON.parse(content[0].text)),
+// not by this file.
+
+const TokenUsage = Type.Object({
+  input_tokens: Type.Optional(Type.Number()),
+  output_tokens: Type.Optional(Type.Number()),
+  cache_creation_tokens: Type.Optional(Type.Number()),
+  cache_read_tokens: Type.Optional(Type.Number()),
+  cache_write_1h_tokens: Type.Optional(Type.Number()),
+  reasoning_tokens: Type.Optional(Type.Number()),
+  tool_tokens: Type.Optional(Type.Number()),
+  total_tokens: Type.Optional(Type.Number()),
+  usage_source: Type.Optional(Type.String()),
+  total_tokens_source: Type.Optional(Type.String()),
+  // Provider-reported cost and the verbatim provider usage block. Declared open:
+  // their inner shape is pi's, not this file's, and nothing here reads them.
+  cost: Type.Optional(Type.Unknown()),
+  pi_usage: Type.Optional(Type.Unknown()),
+});
+
+/** `ActivationResultView` — the settled result a `full:true` Fleet row carries. */
+const ActivationResult = Type.Object({
+  activation_id: Type.String(),
+  participant_id: Type.String(),
+  attempt_id: Type.String(),
+  bead_id: Type.String(),
+  issue_id: Type.String(),
+  issue_ref: Type.String(),
+  issue_revision: Type.Number(),
+  contract_hash: Type.String(),
+  execution_binding_id: Type.String(),
+  status: Type.String(),
+  output: Type.Unknown(),
+  validation: Type.Object({
+    valid: Type.Boolean(),
+    schema: Type.Optional(Type.String()),
+    errors: Type.Optional(Type.Array(Type.String())),
+  }),
+  pi_session_id: Type.Optional(Type.String()),
+  configured_model: Type.Optional(Type.String()),
+  requested_model: Type.Optional(Type.String()),
+  resolved_model: Type.String(),
+  model_override: Type.Boolean(),
+  thinking_level: Type.Optional(Type.String()),
+  thinking_override: Type.Boolean(),
+  fallback_used: Type.Boolean(),
+  completed_at: Type.Number(),
+});
+
+/** `ActivationView` — what `full:true` projects. */
+const ActivationFull = Type.Object({
+  activation_id: Type.String(),
+  participant_id: Type.String(),
+  attempt_id: Type.String(),
+  specialist: Type.String(),
+  bead_id: Type.String(),
+  issue_id: Type.String(),
+  issue_ref: Type.String(),
+  issue_revision: Type.Number(),
+  contract_hash: Type.String(),
+  execution_binding_id: Type.String(),
+  state: Type.String(),
+  access: Type.String(),
+  worktree_path: Type.String(),
+  branch: Type.Optional(Type.String()),
+  pi_session_id: Type.Optional(Type.String()),
+  requested_model: Type.Optional(Type.String()),
+  resolved_model: Type.String(),
+  model_override: Type.Boolean(),
+  thinking_override: Type.Boolean(),
+  elapsed_s: Type.Number(),
+  token_usage: Type.Optional(TokenUsage),
+  turn_count: Type.Optional(Type.Number()),
+  thinking_level: Type.Optional(Type.String()),
+  purpose: Type.Optional(Type.String()),
+  last_activity_at: Type.Number(),
+  tool_contract_notes: Type.Optional(Type.Array(Type.String())),
+  config_notes: Type.Optional(Type.Array(Type.String())),
+  // Attached by `withResult` on a `full:true` Fleet row, never by the view itself.
+  result: Type.Optional(ActivationResult),
+});
+
+/** `ActivationCompactView` — the default projection. */
+const ActivationCompact = Type.Object({
+  activation_id: Type.String(),
+  specialist: Type.String(),
+  bead_id: Type.String(),
+  state: Type.String(),
+  access: Type.String(),
+  resolved_model: Type.String(),
+  thinking_level: Type.Optional(Type.String()),
+  elapsed_s: Type.Number(),
+  turn_count: Type.Optional(Type.Number()),
+  token_usage: Type.Optional(TokenUsage),
+  purpose: Type.Optional(Type.String()),
+  result_status: Type.Optional(Type.String()),
+});
+
+/**
+ * One Fleet row. Which projection it is depends on the `full` argument, so the
+ * row is a union of the two and a script must read the fields both carry
+ * (activation_id, specialist, state) rather than assume either.
+ */
+const ActivationRow = Type.Union([ActivationFull, ActivationCompact]);
+
+const PendingAskFull = Type.Object({
+  message_id: Type.String(),
+  kind: Type.String(),
+  activation_id: Type.String(),
+  attempt_id: Type.String(),
+  from: Type.String(),
+  to: Type.String(),
+  body: Type.String(),
+  delivery: Type.String(),
+  asked_at: Type.Number(),
+});
+
+const PendingAskCompact = Type.Object({
+  message_id: Type.String(),
+  kind: Type.String(),
+  activation_id: Type.String(),
+  from: Type.String(),
+  body: Type.String(),
+  asked_at: Type.Number(),
+});
+
+const PendingAskRow = Type.Union([PendingAskFull, PendingAskCompact]);
+
+/**
+ * The envelope dispatch/resume/retry/steer wrap a projection in.
+ *
+ * Every field is optional but `status` because the projection itself is
+ * conditional: the one field a caller may rely on unconditionally is `status`.
+ * `previous_attempt_id` is resume/retry/steer; the `created_*` and
+ * `step_contract` fields appear only when an inline contract created the Issue.
+ */
+const Envelope = Type.Object({
+  status: Type.String(),
+  activation_id: Type.Optional(Type.String()),
+  specialist: Type.Optional(Type.String()),
+  state: Type.Optional(Type.String()),
+  access: Type.Optional(Type.String()),
+  resolved_model: Type.Optional(Type.String()),
+  elapsed_s: Type.Optional(Type.Number()),
+  turn_count: Type.Optional(Type.Number()),
+  thinking_level: Type.Optional(Type.String()),
+  purpose: Type.Optional(Type.String()),
+  token_usage: Type.Optional(TokenUsage),
+  result_status: Type.Optional(Type.String()),
+  message_id: Type.Optional(Type.String()),
+  in_reply_to: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  attempt_id: Type.Optional(Type.String()),
+  previous_attempt_id: Type.Optional(Type.String()),
+  issue_ref: Type.Optional(Type.String()),
+  created_issue_ref: Type.Optional(Type.String()),
+  created_bead_id: Type.Optional(Type.String()),
+  created_issue_note: Type.Optional(Type.String()),
+  created_bead_note: Type.Optional(Type.String()),
+  step_contract: Type.Optional(Type.Object({
+    root_work_ref: Type.String(),
+    inputs: Type.Number(),
+    outputs: Type.Number(),
+  })),
+  // Refusal fields. `rejected` is a gate refusal (a refused contract, an
+  // unreclaimable lease); `error` is "no such activation / no such message_id".
+  reason: Type.Optional(Type.String()),
+  detail: Type.Optional(Type.Unknown()),
+  error: Type.Optional(Type.String()),
+  missing: Type.Optional(Type.Array(Type.String())),
+  note: Type.Optional(Type.String()),
+  build: Type.Optional(Type.String()),
+});
+
+const Fleet = Type.Object({
+  activations: Type.Array(ActivationRow),
+  pending_asks: Type.Array(PendingAskRow),
+  build: Type.Optional(Type.String()),
+});
+
+const SpecialistRow = Type.Object({
+  name: Type.String(),
+  tier: Type.Optional(Type.String()),
+  access: Type.Optional(Type.String()),
+  permission_required: Type.Optional(Type.String()),
+  category: Type.Optional(Type.String()),
+  // ALWAYS present, even when true: absence would read as "dispatchable", which
+  // is indistinguishable from the field going missing through a bug.
+  dispatchable: Type.Optional(Type.Boolean()),
+  reason: Type.Optional(Type.String()),
+});
+
+const Registry = Type.Object({
+  // `specialists` is the list, the `detail:"full"` array, or a single row when
+  // `name=` matched; `specialist` carries that single row. `count`/`undispatchable`
+  // come with the compact list only.
+  specialists: Type.Optional(Type.Array(SpecialistRow)),
+  specialist: Type.Optional(SpecialistRow),
+  count: Type.Optional(Type.Number()),
+  undispatchable: Type.Optional(Type.Number()),
+  detail: Type.Optional(Type.String()),
+  known: Type.Optional(Type.Array(Type.String())),
+  error: Type.Optional(Type.String()),
+  note: Type.Optional(Type.String()),
+});
+
+/**
+ * `outputSchema` per registered tool, by tool name. One map, referenced by every
+ * `pi.registerTool` call below: a tool cannot declare a schema this map lacks,
+ * and the test asserts the two sets are equal.
+ */
+export const TOOL_OUTPUT_SCHEMAS = {
+  specialist_dispatch: Envelope,
+  specialist_status: Fleet,
+  specialist_reply: Envelope,
+  specialist_resume: Envelope,
+  specialist_retry: Envelope,
+  specialist_steer: Envelope,
+  specialist_stop_activation: Envelope,
+  specialist_list: Registry,
+};
+
+/** The namespace every tool belongs to, so codemode lists them under one heading. */
+const TOOL_NAMESPACE = { name: 'specialists', description: 'Dispatch and supervise XTRM Specialists on the in-process native activation host.' };
+
+/**
+ * A payload that reports a failure rather than an outcome.
+ *
+ * One predicate, not eight decisions: a refused dispatch, an unknown activation,
+ * a message_id nobody is waiting on, and a lease the host can no longer reacquire
+ * are all failures, and all of them used to reach the model as SUCCESSFUL tool
+ * results carrying a `status` field — so a coordinator model reading only the
+ * tool's success saw a refusal as an outcome. `specialist_list` names its
+ * failures with an `error` key and no `status`, which is why both are checked.
+ */
+const isFailurePayload = (payload) =>
+  payload?.status === 'error'
+  || payload?.status === 'rejected'
+  || typeof payload?.error === 'string';
+
+/**
+ * Wrap a payload into the pi AgentToolResult shape.
+ *
+ * `structuredContent` is the SAME object `JSON.stringify` renders, which is what
+ * keeps the model-facing text and the script-facing value from drifting. A
+ * failure carries `isError: true` rather than throwing, so the model sees an error
+ * AND a script still receives the refusal data — the pattern pi's own MCP adapter
+ * uses (docs/extensions.md: "return the result with `isError: true` instead of
+ * throwing"). Throwing would lose the structured refusal, which is the payload
+ * that tells the coordinator what to fix.
+ */
 function resultOf(payload) {
-  return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }], details: {} };
+  return {
+    content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }],
+    structuredContent: payload,
+    ...(isFailurePayload(payload) ? { isError: true } : {}),
+    details: {},
+  };
 }
 
 // ── Human-readable tool-result views (unitAI-55yjs) ──────────────────────────
 //
 // Every specialist_* tool result carries byte-identical machine JSON in
-// content[].text (the coordinator JSON.parses it); renderResult only changes what
+// content[].text (the coordinator JSON.parses it) and the same object again in
+// structuredContent (a codemode script reads it); renderResult only changes what
 // the operator SEES. Each summary below reads ONLY fields the tools already emit
 // — never forensic internals. Unknown shapes fall back to the raw JSON lines, and
 // the expanded view always appends the full JSON underneath.
@@ -1068,6 +1340,8 @@ export default function specialistSubagentsExtension(pi, options = {}) {
     promptSnippet: 'Dispatch an XTRM Specialist (specialist_dispatch: specialist, issue_ref)',
     renderCall: humanCallOf((args) => `Dispatch ${args.specialist ?? '?'} on ${args.issue_ref || args.bead_id || 'inline contract'}`),
     renderResult: humanResultOf(),
+    outputSchema: TOOL_OUTPUT_SCHEMAS.specialist_dispatch,
+    namespace: TOOL_NAMESPACE,
     parameters: Type.Object({
       specialist: Type.String({ description: 'Specialist name, e.g. codebase-explorer' }),
       issue_ref: Type.Optional(
@@ -1221,10 +1495,7 @@ export default function specialistSubagentsExtension(pi, options = {}) {
         const view = snapshot
           ? full ? toActivationView(snapshot) : toActivationCompactView(snapshot)
           : { activation_id: handle.activationId };
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify(annexBuildIdentity({
+        return resultOf(annexBuildIdentity({
               status: 'dispatched',
               ...view,
               // Inline dispatch creates durable Substrate work. Surface the primary Issue ref
@@ -1247,16 +1518,10 @@ export default function specialistSubagentsExtension(pi, options = {}) {
                 inputs: handle.stepContract.inputs.length,
                 outputs: handle.stepContract.outputs.length,
               },
-            }), null, 2),
-          }],
-          details: {},
-        };
+            }))
       } catch (error) {
         if (error instanceof DispatchRejectedError) {
-          return {
-            content: [{ type: 'text', text: JSON.stringify(rejectionResult(error), null, 2) }],
-            details: {},
-          };
+          return resultOf(rejectionResult(error))
         }
         throw error;
       }
@@ -1278,6 +1543,8 @@ export default function specialistSubagentsExtension(pi, options = {}) {
       'this surface only hosts in-process activations.',
     promptSnippet: 'Show the Specialist Fleet (specialist_status)',
     renderResult: humanResultOf(),
+    outputSchema: TOOL_OUTPUT_SCHEMAS.specialist_status,
+    namespace: TOOL_NAMESPACE,
     parameters: Type.Object({
       full: Type.Optional(Type.Boolean({
         description: 'Return the full verbose payload (pre-SPECIALISTS-142 shape). Default compact.',
@@ -1287,22 +1554,13 @@ export default function specialistSubagentsExtension(pi, options = {}) {
       const h = getHost();
       const full = params.full === true;
       if (full) {
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify(annexBuildIdentity({
+        return resultOf(annexBuildIdentity({
               activations: h.list().map((snapshot) =>
                 withResult(toActivationView(snapshot), results.get(snapshot.activationId), true)),
               pending_asks: h.pendingAsks().map(toPendingAskView),
-            }), null, 2),
-          }],
-          details: {},
-        };
+            }))
       }
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify(annexBuildIdentity({
+      return resultOf(annexBuildIdentity({
             activations: h.list().map((snapshot) => ({
               ...toActivationCompactView(snapshot),
               ...(results.has(snapshot.activationId)
@@ -1310,10 +1568,7 @@ export default function specialistSubagentsExtension(pi, options = {}) {
                 : {}),
             })),
             pending_asks: h.pendingAsks().map(toPendingAskCompactView),
-          }), null, 2),
-        }],
-        details: {},
-      };
+          }))
     },
   });
 
@@ -1329,6 +1584,8 @@ export default function specialistSubagentsExtension(pi, options = {}) {
     promptSnippet: 'Answer a Specialist question (specialist_reply: message_id, body)',
     renderCall: humanCallOf((args) => `Reply to ${args.message_id ?? '?'}`),
     renderResult: humanResultOf(),
+    outputSchema: TOOL_OUTPUT_SCHEMAS.specialist_reply,
+    namespace: TOOL_NAMESPACE,
     parameters: Type.Object({
       message_id: Type.String({
         description:
@@ -1341,31 +1598,19 @@ export default function specialistSubagentsExtension(pi, options = {}) {
     async execute(toolCallId, params) {
       const message = await getHost().answer(params.message_id, params.body);
       if (!message) {
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({
+        return resultOf({
               status: 'error',
               error: `No outstanding ask with message_id '${params.message_id}' — it may have been answered already, or its activation may have been disposed.`,
               message_id: params.message_id,
-            }, null, 2),
-          }],
-          details: {},
-        };
+            })
       }
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
+      return resultOf({
             status: 'answered',
             message_id: message.messageId,
             in_reply_to: message.inReplyTo ?? null,
             activation_id: message.activationId,
             attempt_id: message.attemptId,
-          }, null, 2),
-        }],
-        details: {},
-      };
+          })
     },
   });
 
@@ -1388,6 +1633,8 @@ export default function specialistSubagentsExtension(pi, options = {}) {
     promptSnippet: 'Resume a settled Specialist (specialist_resume: activation_id, prompt)',
     renderCall: humanCallOf((args) => `Resume ${args.activation_id ?? '?'}`),
     renderResult: humanResultOf(),
+    outputSchema: TOOL_OUTPUT_SCHEMAS.specialist_resume,
+    namespace: TOOL_NAMESPACE,
     parameters: Type.Object({
       activation_id: Type.String({ description: 'The settled or waiting activation to resume.' }),
       prompt: Type.String({ description: 'The new instruction for the resumed Specialist.' }),
@@ -1406,17 +1653,11 @@ export default function specialistSubagentsExtension(pi, options = {}) {
       // alias the way the real one does.
       const previousAttemptId = before?.attemptId;
       if (!before) {
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({
+        return resultOf({
               status: 'error',
               error: `Unknown activation: ${params.activation_id}`,
               activation_id: params.activation_id,
-            }, null, 2),
-          }],
-          details: {},
-        };
+            })
       }
 
       let handle;
@@ -1425,17 +1666,11 @@ export default function specialistSubagentsExtension(pi, options = {}) {
       } catch (error) {
         // A refused resume is evidence, not a malfunction — the host refuses a disposed or
         // running activation, and a lease it can no longer reacquire.
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({
+        return resultOf({
               status: 'rejected',
               activation_id: params.activation_id,
               reason: error instanceof Error ? error.message : String(error),
-            }, null, 2),
-          }],
-          details: {},
-        };
+            })
       }
 
       handle.result
@@ -1447,17 +1682,11 @@ export default function specialistSubagentsExtension(pi, options = {}) {
       const view = snapshot
         ? full ? toActivationView(snapshot) : toActivationCompactView(snapshot)
         : { activation_id: handle.activationId };
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
+      return resultOf({
             status: 'resumed',
             previous_attempt_id: previousAttemptId,
             ...view,
-          }, null, 2),
-        }],
-        details: {},
-      };
+          })
     },
   });
 
@@ -1480,6 +1709,8 @@ export default function specialistSubagentsExtension(pi, options = {}) {
     promptSnippet: 'Re-run a failed Specialist (specialist_retry: activation_id, model_override?)',
     renderCall: humanCallOf((args) => `Retry ${args.activation_id ?? '?'}`),
     renderResult: humanResultOf(),
+    outputSchema: TOOL_OUTPUT_SCHEMAS.specialist_retry,
+    namespace: TOOL_NAMESPACE,
     parameters: Type.Object({
       activation_id: Type.String({ description: 'The failed activation to re-run.' }),
       model_override: Type.Optional(Type.String({ description: 'Re-run on this model instead of the one that failed.' })),
@@ -1495,17 +1726,11 @@ export default function specialistSubagentsExtension(pi, options = {}) {
       // the previous attempt id is captured before `retry` mutates it in place.
       const previousAttemptId = before?.attemptId;
       if (!before) {
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({
+        return resultOf({
               status: 'error',
               error: `Unknown activation: ${params.activation_id}`,
               activation_id: params.activation_id,
-            }, null, 2),
-          }],
-          details: {},
-        };
+            })
       }
 
       let handle;
@@ -1517,17 +1742,11 @@ export default function specialistSubagentsExtension(pi, options = {}) {
       } catch (error) {
         // A refused retry is evidence, not a malfunction — the host refuses a live
         // activation, an unavailable override, and a lease it can no longer reacquire.
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({
+        return resultOf({
               status: 'rejected',
               activation_id: params.activation_id,
               reason: error instanceof Error ? error.message : String(error),
-            }, null, 2),
-          }],
-          details: {},
-        };
+            })
       }
 
       handle.result
@@ -1539,17 +1758,11 @@ export default function specialistSubagentsExtension(pi, options = {}) {
       const view = snapshot
         ? full ? toActivationView(snapshot) : toActivationCompactView(snapshot)
         : { activation_id: handle.activationId };
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
+      return resultOf({
             status: 'retried',
             previous_attempt_id: previousAttemptId,
             ...view,
-          }, null, 2),
-        }],
-        details: {},
-      };
+          })
     },
   });
 
@@ -1571,6 +1784,8 @@ export default function specialistSubagentsExtension(pi, options = {}) {
     promptSnippet: 'Steer a running Specialist (specialist_steer: activation_id, message)',
     renderCall: humanCallOf((args) => `Steer ${args.activation_id ?? '?'}`),
     renderResult: humanResultOf(),
+    outputSchema: TOOL_OUTPUT_SCHEMAS.specialist_steer,
+    namespace: TOOL_NAMESPACE,
     parameters: Type.Object({
       activation_id: Type.String({ description: 'The running activation to redirect mid-run.' }),
       message: Type.String({
@@ -1587,45 +1802,27 @@ export default function specialistSubagentsExtension(pi, options = {}) {
       const h = getHost();
       const before = h.inspect(params.activation_id);
       if (!before) {
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({
+        return resultOf({
               status: 'error',
               error: `Unknown activation: ${params.activation_id}`,
               activation_id: params.activation_id,
-            }, null, 2),
-          }],
-          details: {},
-        };
+            })
       }
       try {
         await h.steer(params.activation_id, params.message);
       } catch (error) {
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({
+        return resultOf({
               status: 'rejected',
               activation_id: params.activation_id,
               reason: error instanceof Error ? error.message : String(error),
-            }, null, 2),
-          }],
-          details: {},
-        };
+            })
       }
       const snapshot = h.inspect(params.activation_id);
       const full = params.full === true;
       const view = snapshot
         ? full ? toActivationView(snapshot) : toActivationCompactView(snapshot)
         : { activation_id: params.activation_id };
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({ status: 'steered', ...view }, null, 2),
-        }],
-        details: {},
-      };
+      return resultOf({ status: 'steered', ...view })
     },
   });
 
@@ -1642,35 +1839,25 @@ export default function specialistSubagentsExtension(pi, options = {}) {
     promptSnippet: 'Stop a Specialist (specialist_stop_activation: activation_id)',
     renderCall: humanCallOf((args) => `Stop ${args.activation_id ?? '?'}`),
     renderResult: humanResultOf(),
+    outputSchema: TOOL_OUTPUT_SCHEMAS.specialist_stop_activation,
+    namespace: TOOL_NAMESPACE,
     parameters: Type.Object({
       activation_id: Type.String({ description: 'Activation to stop and dispose.' }),
       reason: Type.Optional(Type.String({ description: 'Recorded forensically with the disposal.' })),
     }),
     async execute(toolCallId, params) {
       if (!getHost().inspect(params.activation_id)) {
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({
+        return resultOf({
               status: 'error',
               error: `Unknown activation: ${params.activation_id}`,
               activation_id: params.activation_id,
-            }, null, 2),
-          }],
-          details: {},
-        };
+            })
       }
       await disposeActivation(params.activation_id, params.reason ?? 'pi operator request');
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
+      return resultOf({
             status: 'stopped',
             activation_id: params.activation_id,
-          }, null, 2),
-        }],
-        details: {},
-      };
+          })
     },
   });
 
@@ -1693,6 +1880,8 @@ export default function specialistSubagentsExtension(pi, options = {}) {
       'CLI to run a Specialist.',
     promptSnippet: 'List configured Specialists (specialist_list; name= for detail)',
     renderResult: humanResultOf(),
+    outputSchema: TOOL_OUTPUT_SCHEMAS.specialist_list,
+    namespace: TOOL_NAMESPACE,
     parameters: Type.Object({
       name: Type.Optional(Type.String({
         description: 'Return the full record for this one specialist instead of the compact list.',
