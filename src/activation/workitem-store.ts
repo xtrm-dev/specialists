@@ -859,13 +859,13 @@ export interface OpenWorkItemsOptions {
 }
 
 /**
- * The Substrate SOURCE modules this loader imports, in load order.
+ * The Substrate modules this loader imports, in load order, named by their source path.
  *
  * Exported because they are the loadability contract, and more than one surface has to know it:
- * `openWorkItemBoundary` imports them, and `sp doctor` checks they exist. A package that resolves
- * by name but does not SHIP these paths (a dist-only publish, or a `files` allowlist that omits
- * `src/`) installs green and then fails at dispatch — the exact "looks healthy until you try"
- * shape the doctor check exists to remove. One list, so the two cannot disagree.
+ * `openWorkItemBoundary` imports them, and `sp doctor` checks they exist. Each entry resolves via
+ * `resolveSubstrateModule` to the source file in a checkout or to `dist/src/*.js` in a published
+ * package; a package shipping neither installs green and then fails at dispatch, which is the
+ * shape the doctor check exists to surface. One list, so the two cannot disagree.
  */
 export const SUBSTRATE_REQUIRED_MODULES = [
   'src/store/migrations/runner.ts',
@@ -875,6 +875,18 @@ export const SUBSTRATE_REQUIRED_MODULES = [
   'src/workitems/substrate-store.ts',
   'src/workitems/dispatch-gate.ts',
 ] as const;
+
+/**
+ * Resolve one required module inside a Substrate package directory: the TypeScript source when
+ * the directory is a checkout, otherwise the prebuilt `dist/src/*.js` a published package ships.
+ * Returns null when neither exists.
+ */
+export function resolveSubstrateModule(substrateDir: string, rel: string): string | null {
+  const source = join(substrateDir, rel);
+  if (existsSync(source)) return source;
+  const built = join(substrateDir, 'dist', rel.replace(/\.ts$/, '.js'));
+  return existsSync(built) ? built : null;
+}
 
 /**
  * Open the canonical work store and build the boundary over the REAL producer
@@ -920,8 +932,14 @@ export async function openWorkItemBoundary(opts: OpenWorkItemsOptions = {}): Pro
     );
   }
   const load = async (rel: string): Promise<Record<string, any>> => {
+    const modulePath = resolveSubstrateModule(substrateDir, rel);
+    if (!modulePath) {
+      throw new Error(
+        `work_item_store_unavailable: cannot load Substrate module ${rel}: neither ${rel} nor dist/${rel.replace(/\.ts$/, '.js')} exists under ${substrateDir}`,
+      );
+    }
     try {
-      return (await import(pathToFileURL(join(substrateDir, rel)).href)) as Record<string, any>;
+      return (await import(pathToFileURL(modulePath).href)) as Record<string, any>;
     } catch (error) {
       throw new Error(
         `work_item_store_unavailable: cannot load Substrate module ${rel}: ${error instanceof Error ? error.message : String(error)}`,
