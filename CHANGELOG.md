@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.0.1] - 2026-10-01
+
+### Fixed
+- Load Substrate from published dist builds as well as checkouts ([48c07b5](https://github.com/xtrm-dev/specialists/commit/48c07b5472b256a5766686b45a6258118609f6ca))
+
+### Project maintenance
+- Regenerate dist for the dual-layout Substrate loader ([5612962](https://github.com/xtrm-dev/specialists/commit/56129620e15409d2c2543ee2f09b26cc06bf8013))
+
 ## [4.0.0] - 2026-09-28
 
 ### Added
