@@ -9,20 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- `outputSchema` + `structuredContent` on all eight `specialist_*` coordinator tools, and a
-  `specialists` tool namespace (pi 0.99 tool exposure). A codemode script now receives the
-  Fleet/registry/rejection object instead of the JSON text the model reads. Model-facing text is
-  unchanged: one helper builds both channels from the same object, and a test pins
-  `structuredContent` to `JSON.parse(content[0].text)`.
+## [4.0.2] - 2026-10-01
 
-### Changed
-- A refused dispatch, an unknown activation and an unknown `message_id` are now `isError: true`
-  results instead of successful tool results carrying a `status` field — the coordinator model
-  read a refusal as an outcome. The structured payload is still delivered, so the refusal stays
-  diagnosable.
-- Both bundled pi extensions declare `@earendil-works/pi-coding-agent: ^0.99.0`. The previous
-  ranges (`^0.85.1`, `^0.80.0`) excluded the installed host: a caret on `0.x` pins the minor line.
+### Added
+- Make the coordinator tools reachable from codemode (pi 0.99) ([690d200](https://github.com/xtrm-dev/specialists/commit/690d2003c931148986e7559855819c435e0469c4))
 
 ## [4.0.1] - 2026-10-01
 

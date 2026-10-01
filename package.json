@@ -1,6 +1,6 @@
 {
   "name": "@jaggerxtrm/specialists",
-  "version": "4.0.1",
+  "version": "4.0.2",
   "description": "Specialists — Pi-based orchestration runtime: supervised specialist activation over MCP, with session continuity hooks and CLI workflows for .specialist.json definitions.",
   "repository": {
     "type": "git",
