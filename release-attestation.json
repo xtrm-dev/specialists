@@ -4,10 +4,10 @@
   "scope": "Specialists-local; does not certify Pi compatibility or provide filesystem or host-read isolation.",
   "package": {
     "name": "@jaggerxtrm/specialists",
-    "version": "4.0.0",
+    "version": "4.0.1",
     "source_commit": "not-generated",
     "git_head": "not-generated",
-    "tarball": "jaggerxtrm-specialists-4.0.0.tgz",
+    "tarball": "jaggerxtrm-specialists-4.0.1.tgz",
     "sha256": "not-generated"
   },
   "pi_runtime": {
@@ -21,12 +21,12 @@
   "host_read_isolation": {
     "provided": false,
     "waiver": {
-      "release": "4.0.0",
+      "release": "4.0.1",
       "status": "approved_bounded_waiver",
       "tracking_issue": "unitAI-641h0",
       "approved": true,
       "approved_by": "operator",
-      "approved_at": "2026-09-28T17:09:00Z",
+      "approved_at": "2026-10-01T09:17:00Z",
       "limitation": "Specialists does not provide filesystem or host-read isolation. Model-driven runs and allowed tools, extensions, MCP processes, and child processes can read paths visible to the operating-system identity that runs Specialists.",
       "affected_surfaces": [
         "tracked_runs",
@@ -74,8 +74,8 @@
       "write_boundary": "absolute_paths_only",
       "sandbox": "none",
       "read_isolation": "not_provided",
-      "expires_at": "2026-10-28T00:00:00Z",
-      "expires_on_release": "4.0.1",
+      "expires_at": "2026-10-31T00:00:00Z",
+      "expires_on_release": "4.0.2",
       "expires_on_condition": "first_release_that_provides_enforced_host_read_isolation",
       "expiry_rule": "whichever_occurs_first",
       "reopen_conditions": [
