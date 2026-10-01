@@ -496,15 +496,21 @@ export interface OpenWorkItemsOptions {
     resolveInstalled?: () => string | null;
 }
 /**
- * The Substrate SOURCE modules this loader imports, in load order.
+ * The Substrate modules this loader imports, in load order, named by their source path.
  *
  * Exported because they are the loadability contract, and more than one surface has to know it:
- * `openWorkItemBoundary` imports them, and `sp doctor` checks they exist. A package that resolves
- * by name but does not SHIP these paths (a dist-only publish, or a `files` allowlist that omits
- * `src/`) installs green and then fails at dispatch — the exact "looks healthy until you try"
- * shape the doctor check exists to remove. One list, so the two cannot disagree.
+ * `openWorkItemBoundary` imports them, and `sp doctor` checks they exist. Each entry resolves via
+ * `resolveSubstrateModule` to the source file in a checkout or to `dist/src/*.js` in a published
+ * package; a package shipping neither installs green and then fails at dispatch, which is the
+ * shape the doctor check exists to surface. One list, so the two cannot disagree.
  */
 export declare const SUBSTRATE_REQUIRED_MODULES: readonly ["src/store/migrations/runner.ts", "src/service/issue-service.ts", "src/service/journal-service.ts", "src/service/provenance-service.ts", "src/workitems/substrate-store.ts", "src/workitems/dispatch-gate.ts"];
+/**
+ * Resolve one required module inside a Substrate package directory: the TypeScript source when
+ * the directory is a checkout, otherwise the prebuilt `dist/src/*.js` a published package ships.
+ * Returns null when neither exists.
+ */
+export declare function resolveSubstrateModule(substrateDir: string, rel: string): string | null;
 /**
  * Open the canonical work store and build the boundary over the REAL producer
  * services, dynamic-imported at runtime from an explicit checkout.
