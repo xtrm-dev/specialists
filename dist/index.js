@@ -60758,6 +60758,13 @@ function splitLines(body) {
   return body.split(`
 `).map((l) => l.trim().replace(/^[-*\u2022]\s*/, "").replace(/^\d+[.)]\s*/, "").trim()).filter((l) => l.length > 0);
 }
+function resolveSubstrateModule(substrateDir, rel) {
+  const source = join48(substrateDir, rel);
+  if (existsSync46(source))
+    return source;
+  const built = join48(substrateDir, "dist", rel.replace(/\.ts$/, ".js"));
+  return existsSync46(built) ? built : null;
+}
 async function openWorkItemBoundary(opts = {}) {
   const env = opts.env ?? process.env;
   const substrateDir = resolveSubstrateDir(opts.substrateDir ?? env.XTRM_SUBSTRATE_DIR ?? "", opts.resolveInstalled);
@@ -60775,8 +60782,12 @@ async function openWorkItemBoundary(opts = {}) {
     throw new Error(`work_item_store_unavailable: expected ${SUBSTRATE_PACKAGE} at ${substrateDir}, found ${JSON.stringify(pkgName) ?? "no name"}`);
   }
   const load = async (rel) => {
+    const modulePath = resolveSubstrateModule(substrateDir, rel);
+    if (!modulePath) {
+      throw new Error(`work_item_store_unavailable: cannot load Substrate module ${rel}: neither ${rel} nor dist/${rel.replace(/\.ts$/, ".js")} exists under ${substrateDir}`);
+    }
     try {
-      return await import(pathToFileURL(join48(substrateDir, rel)).href);
+      return await import(pathToFileURL(modulePath).href);
     } catch (error) {
       throw new Error(`work_item_store_unavailable: cannot load Substrate module ${rel}: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -60982,11 +60993,11 @@ function checkSubstrateRuntime() {
       return;
     }
     ok3(`resolved  ${dim14(dir)}`);
-    const missingModules = SUBSTRATE_REQUIRED_MODULES.filter((rel) => !existsSync47(join49(dir, rel)));
+    const missingModules = SUBSTRATE_REQUIRED_MODULES.filter((rel) => !resolveSubstrateModule(dir, rel));
     if (missingModules.length > 0) {
-      warn3(`${missingModules.length} required source module(s) absent under ${dir}`);
+      warn3(`${missingModules.length} required module(s) absent under ${dir} (neither source nor dist/src)`);
       hint(`missing: ${missingModules.join(", ")}`);
-      fix("install a Substrate build that ships its TypeScript sources");
+      fix("reinstall @jaggerxtrm/substrate, or point XTRM_SUBSTRATE_DIR at a checkout");
       return;
     }
     const dbPath = resolveWorkItemDbPath();

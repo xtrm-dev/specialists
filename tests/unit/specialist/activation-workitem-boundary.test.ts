@@ -7,6 +7,7 @@ import {
   openSubstrateDb,
   openWorkItemBoundary,
   resolveSubstrateFromGlobalPrefix,
+  resolveSubstrateModule,
   type ActiveClaimView,
   type DispatchRequest,
   type WorkItemPorts,
@@ -484,5 +485,28 @@ describe('settlement reconciliation reads (SPECIALISTS-54)', () => {
     const boundary = boundaryWith([], [{ id: 'rcp_1', executionBindingId: 'exb_1' }]);
     expect(boundary.findReceiptForBinding!('X', 'exb_1')).toEqual({ status: 'found', value: { receiptId: 'rcp_1' } });
     expect(boundary.findReceiptForBinding!('X', 'exb_other')).toEqual({ status: 'absent' });
+  });
+});
+
+describe('resolveSubstrateModule layouts', () => {
+  const REL = 'src/store/migrations/runner.ts';
+  const touch = (path: string) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, ''); };
+
+  it('prefers the TypeScript source in a checkout', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'substrate-checkout-'));
+    touch(join(dir, REL));
+    touch(join(dir, 'dist', 'src', 'store', 'migrations', 'runner.js'));
+    expect(resolveSubstrateModule(dir, REL)).toBe(join(dir, REL));
+  });
+
+  it('falls back to dist/src/*.js in a published package', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'substrate-published-'));
+    touch(join(dir, 'dist', 'src', 'store', 'migrations', 'runner.js'));
+    expect(resolveSubstrateModule(dir, REL)).toBe(join(dir, 'dist', 'src', 'store', 'migrations', 'runner.js'));
+  });
+
+  it('returns null when neither layout ships the module', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'substrate-empty-'));
+    expect(resolveSubstrateModule(dir, REL)).toBeNull();
   });
 });

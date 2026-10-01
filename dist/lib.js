@@ -21049,6 +21049,13 @@ var SUBSTRATE_REQUIRED_MODULES = [
   "src/workitems/substrate-store.ts",
   "src/workitems/dispatch-gate.ts"
 ];
+function resolveSubstrateModule(substrateDir, rel) {
+  const source = join14(substrateDir, rel);
+  if (existsSync15(source))
+    return source;
+  const built = join14(substrateDir, "dist", rel.replace(/\.ts$/, ".js"));
+  return existsSync15(built) ? built : null;
+}
 async function openWorkItemBoundary(opts = {}) {
   const env = opts.env ?? process.env;
   const substrateDir = resolveSubstrateDir(opts.substrateDir ?? env.XTRM_SUBSTRATE_DIR ?? "", opts.resolveInstalled);
@@ -21066,8 +21073,12 @@ async function openWorkItemBoundary(opts = {}) {
     throw new Error(`work_item_store_unavailable: expected ${SUBSTRATE_PACKAGE} at ${substrateDir}, found ${JSON.stringify(pkgName) ?? "no name"}`);
   }
   const load = async (rel) => {
+    const modulePath = resolveSubstrateModule(substrateDir, rel);
+    if (!modulePath) {
+      throw new Error(`work_item_store_unavailable: cannot load Substrate module ${rel}: neither ${rel} nor dist/${rel.replace(/\.ts$/, ".js")} exists under ${substrateDir}`);
+    }
     try {
-      return await import(pathToFileURL(join14(substrateDir, rel)).href);
+      return await import(pathToFileURL(modulePath).href);
     } catch (error) {
       throw new Error(`work_item_store_unavailable: cannot load Substrate module ${rel}: ${error instanceof Error ? error.message : String(error)}`);
     }
