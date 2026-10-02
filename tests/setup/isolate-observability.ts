@@ -32,6 +32,11 @@ import { createObservabilitySqliteClientAtPath } from '../../src/specialist/obse
 
 const isolated = mkdtempSync(join(tmpdir(), 'specialists-test-db-'));
 
+// Keep `sp init --global` off the operator's live Pi settings. Bun's os.homedir() ignores a
+// runtime HOME change, so tests that only swap process.env.HOME still resolved
+// ~/.pi/agent/settings.json and rewrote it (2026-10-02).
+process.env.PI_CODING_AGENT_DIR = join(isolated, 'pi-agent');
+
 // Anchor on this file's repository, not process.cwd(), so the forbid is stable
 // regardless of where vitest was invoked from. Guard env is cleared first so the
 // resolver returns the true production (shared) directory, not an already-relocated one.

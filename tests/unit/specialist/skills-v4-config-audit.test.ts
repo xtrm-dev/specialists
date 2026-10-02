@@ -144,7 +144,7 @@ describe('skills-v4 default specialist wiring', () => {
 
   it('keeps Pi native dispatch issue_ref-first with bead_id only as compatibility alias', () => {
     const extensionSource = readFileSync(
-      join(repoRoot, 'config', 'pi-extensions', 'specialist-subagents', 'index.mjs'),
+      join(repoRoot, 'config', 'pi-extensions', 'native-specialists', 'index.mjs'),
       'utf8',
     );
     expect(extensionSource).toContain("issue_ref: Type.Optional");

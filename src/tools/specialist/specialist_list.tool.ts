@@ -1,7 +1,7 @@
 // src/tools/specialist/specialist_list.tool.ts
 //
 // MCP mirror of the Pi `specialist_list` registry tool
-// (config/pi-extensions/specialist-subagents/index.mjs). MCP coordinators get the
+// (config/pi-extensions/native-specialists/index.mjs). MCP coordinators get the
 // same registry awareness Pi coordinators have: one compact line per specialist
 // by default, with a dispatchability verdict per row.
 //

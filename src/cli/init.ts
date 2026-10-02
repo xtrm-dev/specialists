@@ -12,6 +12,7 @@ import {
 import { createObservabilitySqliteClientAtPath } from '../specialist/observability-sqlite.js';
 import { resolveCanonicalAssetDir } from '../specialist/canonical-asset-resolver.js';
 import { SpecialistLoader } from '../specialist/loader.js';
+import { registerNativeSpecialists } from '../pi/native-specialists-registration.js';
 import {
   buildGlobalUserConfigTemplate,
   getGlobalUserConfigPath,
@@ -777,6 +778,11 @@ export async function runGlobal(): Promise<void> {
   if (guidePath) {
     ok(`wrote overrides guide at ${guidePath}`);
   }
+
+  const pi = registerNativeSpecialists();
+  if (pi.status === 'skipped') warn(`native-specialists Pi extension not registered: ${pi.reason}`);
+  else if (pi.status === 'present') skip(`native-specialists Pi extension already registered (${pi.source})`);
+  else ok(`native-specialists Pi extension ${pi.status} in ${pi.settingsPath} (${pi.source})`);
 
   console.log(`\n${bold('Done!')}\n`);
   console.log(`  ${dim('Override reference:')} ${yellow(guidePath ?? './overrides-guide.md')}`);

@@ -5,7 +5,7 @@
 // other Node services without spawning the CLI or running sp serve.
 //
 // Native activation seam (unitAI-rrdnt.37): the Pi coordinator extension
-// (config/pi-extensions/specialist-subagents) and the Claude Code MCP server are
+// (config/pi-extensions/native-specialists) and the Claude Code MCP server are
 // frontends over the SAME `NativeActivationHost`; this is the single runtime export
 // through which they reach it. Re-exports only — the classes and types below are
 // defined in src/activation/* and nothing here widens their shape.

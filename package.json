@@ -25,6 +25,7 @@
   "files": [
     "dist/index.js",
     "dist/lib.js",
+    "dist/postinstall.js",
     "dist/types/",
     "dist/asset-contract.json",
     "bin/install.js",
@@ -37,7 +38,6 @@
     "config/hooks/",
     "plugins/specialists/",
     "config/pi-extensions/",
-    "config/pi-extensions/specialist-subagents/",
     "config/presets.json",
     "docs/overrides-guide.md",
     "CHANGELOG.md",
@@ -52,9 +52,10 @@
     "install": "bin/install.js"
   },
   "scripts": {
-    "build": "bun run generate:contract && bun build src/index.ts --target=bun --outfile=dist/index.js && bun build src/lib.ts --target=node --format=esm --outfile=dist/lib.js && tsc --emitDeclarationOnly --declaration --outDir dist/types && node scripts/postprocess-build.mjs",
+    "build": "bun run generate:contract && bun build src/index.ts --target=bun --outfile=dist/index.js && bun build src/lib.ts --target=node --format=esm --outfile=dist/lib.js && bun build src/postinstall.ts --target=node --format=esm --outfile=dist/postinstall.js && tsc --emitDeclarationOnly --declaration --outDir dist/types && node scripts/postprocess-build.mjs",
     "dev": "bun run src/index.ts",
     "start": "bun dist/index.js",
+    "postinstall": "node -e \"import('./dist/postinstall.js').catch(() => {})\"",
     "lint": "tsc --noEmit",
     "test": "bun --bun vitest run",
     "test:quarantined": "timeout 480s env SPECIALISTS_TEST_QUARANTINED=1 bun --bun vitest run",
