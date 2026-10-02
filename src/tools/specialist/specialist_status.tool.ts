@@ -39,37 +39,44 @@ export function createSpecialistStatusTool(
       // pending asks keep their body (the coordinator must answer). `full: true`
       // restores the pre-142 verbose shape byte-for-shape, so a coordinator or
       // script that parsed the verbose form opts back in with one flag.
-      const list = await loader.list();
-
-      // The degraded path from the Claude transport decision: outstanding clarifications
-      // must be readable WITHOUT the peer channel working. Projection only — never a
-      // branch on wire_delivery, which is diagnosis. Absent state is the normal case, so a
-      // repo with no interactions directory yields an empty list rather than an error.
-      let pending_interactions: PendingInteractionProjection[] = [];
-      try {
-        pending_interactions = projectOutstandingAsks(process.cwd());
-      } catch {
-        pending_interactions = [];
-      }
-
-      // A workspace whose writer disappeared mid-mutation is refused to every acquirer until
-      // someone reconciles it, and a refused reconciliation leaves it refused. Both states
-      // are invisible without this: the lease record is under the git common dir and nothing
-      // else reports it, so an operator would see a Specialist that cannot start and no
-      // reason why. Reads the durable lease store only — same contract as the projection
-      // above — and an empty list is the normal case.
-      let uncertain_workspaces: UncertainWorkspaceProjection[] = [];
-      try {
-        uncertain_workspaces = projectUncertainWorkspaces(leaseScopeFor(process.cwd()));
-      } catch {
-        uncertain_workspaces = [];
-      }
-
+      //
+      // Every read below feeds ONLY the verbose payload, so it runs only there
+      // (SPECIALISTS-4217). The compact default is what a coordinator polls, and
+      // computing these for it rebuilt every specialist spec from all four config
+      // layers and forked `git rev-parse` on each call — ~86 ms of CPU per poll that
+      // the compact payload never shows.
+      //
       // The native Fleet is an in-process AgentSession projection. It reads the host's own
       // `ActivationSnapshot`, so this is the same whether the activation was dispatched over
       // MCP or by the Pi extension.
       const host = getHost?.();
       if (input.full === true) {
+        const list = await loader.list();
+
+        // The degraded path from the Claude transport decision: outstanding clarifications
+        // must be readable WITHOUT the peer channel working. Projection only — never a
+        // branch on wire_delivery, which is diagnosis. Absent state is the normal case, so a
+        // repo with no interactions directory yields an empty list rather than an error.
+        let pending_interactions: PendingInteractionProjection[] = [];
+        try {
+          pending_interactions = projectOutstandingAsks(process.cwd());
+        } catch {
+          pending_interactions = [];
+        }
+
+        // A workspace whose writer disappeared mid-mutation is refused to every acquirer until
+        // someone reconciles it, and a refused reconciliation leaves it refused. Both states
+        // are invisible without this: the lease record is under the git common dir and nothing
+        // else reports it, so an operator would see a Specialist that cannot start and no
+        // reason why. Reads the durable lease store only — same contract as the projection
+        // above — and an empty list is the normal case.
+        let uncertain_workspaces: UncertainWorkspaceProjection[] = [];
+        try {
+          uncertain_workspaces = projectUncertainWorkspaces(leaseScopeFor(process.cwd()));
+        } catch {
+          uncertain_workspaces = [];
+        }
+
         const activations: ActivationView[] = host ? host.list().map(s => toActivationView(s)) : [];
         const pending_asks: PendingAskView[] = host ? host.pendingAsks().map(toPendingAskView) : [];
         // The read half of Phase 14. A completion notification is pushed toward a live
