@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.0.3] - 2026-10-02
+
+### Added
+- Rename Pi extension to native-specialists and register it in Pi by default (#418) ([b767969](https://github.com/xtrm-dev/specialists/commit/b767969fde2ff32421e3259fc6126ef6c7e16574))
+
 ## [4.0.2] - 2026-10-01
 
 ### Added

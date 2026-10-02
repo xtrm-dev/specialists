@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "package_version": "4.0.2",
+  "package_version": "4.0.3",
   "shipped_skills": [
     {
       "path": "config/skills/setup-specialists/SKILL.md",
