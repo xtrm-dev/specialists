@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 /**
  * MCP mirror of the Pi `specialist_list` registry tool (unitAI-t2kol.6).
  *
- * Mirrors the Pi reference logic (config/pi-extensions/specialist-subagents):
+ * Mirrors the Pi reference logic (config/pi-extensions/native-specialists):
  * a `loader.get` throw is per-row undispatchable signal, never a listing
  * failure; `name=` unknown returns an error plus known names; compact rows
  * carry no `description`; full rows carry every field; every answer ends with

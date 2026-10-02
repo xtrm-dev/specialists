@@ -48,7 +48,7 @@ Ordered install flow:
 2. Install xtrm-tools globally: `npm install -g xtrm-tools`
 3. Run `xt install`
 4. Run `xt init` in this repo
-5. Install Specialists: `npm install -g @jaggerxtrm/specialists`
+5. Install Specialists: `npm install -g @jaggerxtrm/specialists`. This also registers the `native-specialists` Pi extension in `~/.pi/agent/settings.json` (see below).
 6. Run `sp init --global` if you want machine-level user config
 7. Run `sp init`
 
@@ -78,6 +78,7 @@ Category A and bootstrap note:
 - xtrm-tools is a separate published package; the canonical name is `xtrm-tools` and its CLI is `xt`.
 - Specialists does NOT declare xtrm-tools as a normal dependency, devDependency, or peerDependency. It is recorded as a runtime prerequisite in the underscore-prefixed `_runtime_prerequisites` field in `package.json` (npm ignores underscore-prefixed top-level fields), and enforced at runtime by `sp init` via `assertXtrmPrerequisites` in `src/cli/init.ts`.
 - `sp init --global` sets up machine-level user config. Use it once per operator account when you want shared personal defaults; plain `sp init` stays repo-local.
+- Pi integration: a global install or update (`npm install -g @jaggerxtrm/specialists`) and `sp init --global` add the bundled `config/pi-extensions/native-specialists` directory to the `packages` list in Pi settings (`$PI_CODING_AGENT_DIR/settings.json`, default `~/.pi/agent/settings.json`). The step is idempotent. An existing `…/native-specialists` entry, such as a dev checkout, is kept. A legacy `…/specialist-subagents` entry is migrated. An unreadable settings file is never rewritten. To skip the install-time step, set `SPECIALISTS_SKIP_PI_REGISTRATION=1`. Installs that run with `--ignore-scripts` register on the next `sp init --global`.
 - Rationale: a normal/peer dependency on xtrm-tools would couple specialists publishes to xtrm-tools version cuts and risk transitive-bin ambiguity. Operators install both packages globally; `xt --version` is the source of truth for xtrm CLI presence.
 - Migration: legacy installs that depended on `xtrm-tools` transitively should switch to explicit global install per the ordered flow above.
 

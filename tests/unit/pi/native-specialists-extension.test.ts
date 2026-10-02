@@ -1,6 +1,6 @@
 // Unit tests for the PRIMARY coordinator surface (unitAI-rrdnt.37) — the Pi
 // extension over NativeActivationHost. Exercises the REAL bundled artifact
-// (config/pi-extensions/specialist-subagents/index.mjs) through its factory with
+// (config/pi-extensions/native-specialists/index.mjs) through its factory with
 // a fake pi and an injected host, mirroring tests/unit/pi/extension-tool-policy
 // style. The host is stubbed; NativeActivationHost itself has its own suite
 // (activation-native-host.test.ts).
@@ -31,7 +31,7 @@ vi.mock('typebox', () => ({
   },
 }));
 
-const EXTENSION_PATH = resolve('config/pi-extensions/specialist-subagents/index.mjs');
+const EXTENSION_PATH = resolve('config/pi-extensions/native-specialists/index.mjs');
 
 async function loadExtension() {
   expect(existsSync(EXTENSION_PATH)).toBe(true);
@@ -259,7 +259,7 @@ function plain(line) {
 /** A clock aligned to the spinner's frame boundary, so frame assertions are exact. */
 const SPIN_CLOCK = 220_000;
 
-describe('specialist-subagents extension (Pi coordinator surface)', () => {
+describe('native-specialists extension (Pi coordinator surface)', () => {
   it('registers exactly the eight specialist_* tools over the host', async () => {
     const mod = await loadExtension();
     const pi = makeFakePi();

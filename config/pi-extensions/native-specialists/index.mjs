@@ -1,4 +1,4 @@
-// config/pi-extensions/specialist-subagents/index.mjs
+// config/pi-extensions/native-specialists/index.mjs
 //
 // The PRIMARY coordinator surface named in the PRD — the Pi extension over
 // `NativeActivationHost`. MCP (integrations/claude-code) is the other frontend;
@@ -89,7 +89,7 @@ export function installCoordinatorFence(pi, deps = {}) {
     try {
       const verdict = admit({ toolName: event.toolName, workspace: scopeFor(cwd) });
       if (verdict.allow) return undefined;
-      return { block: true, reason: `specialist-subagents: ${verdict.reason}` };
+      return { block: true, reason: `native-specialists: ${verdict.reason}` };
     } catch {
       // Never let this handler be the reason an operator cannot write.
       return undefined;
@@ -1156,7 +1156,7 @@ function humanCallOf(describe) {
  * @param {{ createHost?: () => NativeActivationHost }} [options] — test seam;
  *   when omitted, one process-lifetime host is created on first tool use.
  */
-export default function specialistSubagentsExtension(pi, options = {}) {
+export default function nativeSpecialistsExtension(pi, options = {}) {
   // PRD acceptance U: the coordinator is fenced out of a workspace a Specialist holds.
   // Fails open — see installCoordinatorFence.
   installCoordinatorFence(pi, options);

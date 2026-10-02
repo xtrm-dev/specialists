@@ -103,8 +103,9 @@ jobs:
             config/pi-extensions/extension-tool-policy/index.mjs \
             config/pi-extensions/read-line-numbers/index.mjs \
             config/pi-extensions/read-line-numbers/package.json \
-            config/pi-extensions/specialist-subagents/index.mjs \
-            config/pi-extensions/specialist-subagents/package.json \
+            config/pi-extensions/native-specialists/index.mjs \
+            config/pi-extensions/native-specialists/package.json \
+            dist/postinstall.js \
             scripts/generate-release-attestation.mjs \
             dist/asset-contract.json \
             LICENSE; then
@@ -146,7 +147,10 @@ jobs:
           test "$tarball_name" = "jaggerxtrm-specialists-$(node -p "require('./package.json').version").tgz"
           prefix=/tmp/sp-smoke-prefix
           workdir=$(mktemp -d)
+          export PI_CODING_AGENT_DIR=$(mktemp -d)
           npm install -g --prefix="$prefix" "$tarball"
+          jq -e --arg p "$prefix/lib/node_modules/@jaggerxtrm/specialists/config/pi-extensions/native-specialists" \
+            '.packages | index($p) != null' "$PI_CODING_AGENT_DIR/settings.json"
           export PATH="$prefix/bin:$PATH"
           cd "$workdir"
           sp --version
