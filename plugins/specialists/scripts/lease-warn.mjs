@@ -49,7 +49,7 @@ if (runtimePath) {
     if (status.state === 'held' && status.lease) {
       const specialist = status.lease.specialist ?? 'a write-tier specialist';
       const message =
-        `specialist-subagents: ${specialist} (${status.lease.activationId}) holds the workspace ` +
+        `native-specialists: ${specialist} (${status.lease.activationId}) holds the workspace ` +
         `lease on ${workspace.worktreePath}. Your edit still applies, but it can interleave with ` +
         'that activation\'s writes and one of the two can be lost. Stop the activation first if ' +
         'you need the file to yourself.';

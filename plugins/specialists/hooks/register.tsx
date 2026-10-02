@@ -4,8 +4,8 @@
 import type { Elements, EngineInterface, McpToolResult, On } from 'claude-code'
 
 // The live Specialists fleet of THIS session, drawn in the band above the prompt: the
-// Claude-native twin of the Pi specialist-subagents footer section
-// (config/pi-extensions/specialist-subagents). Presentation and control only — every read
+// Claude-native twin of the Pi native-specialists footer section
+// (config/pi-extensions/native-specialists). Presentation and control only — every read
 // and every action goes through the session's own Specialists MCP server, whose in-process
 // host is the fleet this session dispatched. No state of its own beyond the last read.
 

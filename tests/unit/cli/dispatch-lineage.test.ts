@@ -1,7 +1,7 @@
 // Step 0 inventory codified (unitAI-vc7tl): of the three dispatch surfaces,
 // only the legacy CLI creates a tmux pane.
 //
-//   (a) pi subagents extension (config/pi-extensions/specialist-subagents/index.mjs)
+//   (a) pi subagents extension (config/pi-extensions/native-specialists/index.mjs)
 //       dispatches onto the in-process NativeActivationHost — the file header
 //       states it never spawns a process, so there is no child pane to stamp.
 //   (b) claude plugin (plugins/specialists/scripts/mcp-server.mjs) only resolves
@@ -22,7 +22,7 @@ import { dirname, join } from 'node:path';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(HERE, '..', '..', '..');
 
-const PI_EXTENSION = join(REPO_ROOT, 'config', 'pi-extensions', 'specialist-subagents', 'index.mjs');
+const PI_EXTENSION = join(REPO_ROOT, 'config', 'pi-extensions', 'native-specialists', 'index.mjs');
 const CLAUDE_PLUGIN_SERVER = join(REPO_ROOT, 'plugins', 'specialists', 'scripts', 'mcp-server.mjs');
 
 // Markers that prove a module creates a tmux pane (and would therefore own a

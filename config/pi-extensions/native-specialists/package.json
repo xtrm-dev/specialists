@@ -1,5 +1,5 @@
 {
-  "name": "@jaggerxtrm-bundled/specialist-subagents",
+  "name": "@jaggerxtrm-bundled/native-specialists",
   "version": "1.0.0",
   "private": true,
   "description": "The PRIMARY coordinator surface: dispatches native XTRM Specialists on the in-process NativeActivationHost (unitAI-rrdnt.37).",

@@ -52,7 +52,7 @@ jobs:
             exit 1
           fi
           DEFAULT_VERSION="$(PACKAGE="$PACKAGE" node -e '
-            const pkg = require("./config/pi-extensions/specialist-subagents/package.json");
+            const pkg = require("./config/pi-extensions/native-specialists/package.json");
             const range = (pkg.peerDependencies || {})[process.env.PACKAGE] || "";
             const match = range.match(/[0-9]+\.[0-9]+\.[0-9]+/);
             process.stdout.write(match ? match[0] : "");

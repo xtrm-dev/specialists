@@ -16,7 +16,7 @@ source_of_truth_for:
   - "src/tools/substrate/journal.tool.ts"
   - "src/tools/substrate/provenance.tool.ts"
   - "src/activation/rejection.ts"
-  - "config/pi-extensions/specialist-subagents/index.mjs"
+  - "config/pi-extensions/native-specialists/index.mjs"
 domain:
   - mcp
   - tools
@@ -324,7 +324,7 @@ payload rather than failing at registration; see `src/substrate/services.ts`.
   server. They are documented with the CLI in
   [cli-reference.md](cli-reference.md).
 - **Pi extension tools.** The Pi extension
-  (`config/pi-extensions/specialist-subagents/index.mjs`) exposes its own
+  (`config/pi-extensions/native-specialists/index.mjs`) exposes its own
   `specialist_*` tools over the same `NativeActivationHost`, mirroring this
   surface tool-for-tool including `specialist_steer` and the `full` flag.
   That surface is documented with the Pi integration, not here.
@@ -353,7 +353,7 @@ Primary, authority, fallback — in that order:
    readable here. Polling is what remains when the first two lanes fail, not
    the normal discovery mechanism. The Pi extension wakes via `sendMessage`
    with `triggerTurn` instead of polling; see
-   `config/pi-extensions/specialist-subagents/index.mjs`.
+   `config/pi-extensions/native-specialists/index.mjs`.
 
 Provider limits on this transport (preview status, platform availability,
 untrusted inbound, no-ack delivery) are stated in

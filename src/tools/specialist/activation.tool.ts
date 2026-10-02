@@ -235,7 +235,7 @@ export function toPendingAskView(ask: PendingAsk): PendingAskView {
  * that already names the activation, so the identity fields are redundant there — but
  * redundant is not divergent, and two functions that describe the same settled activation
  * with different field sets is exactly how a Pi coordinator and a Claude coordinator end
- * up disagreeing about one object (`config/pi-extensions/specialist-subagents/index.mjs`,
+ * up disagreeing about one object (`config/pi-extensions/native-specialists/index.mjs`,
  * unitAI-rrdnt.45). Exported from `lib.js` so the extension imports it rather than
  * restating it, the way it already does for `toActivationView`.
  */
