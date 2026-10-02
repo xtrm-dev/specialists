@@ -94022,21 +94022,21 @@ function createSpecialistStatusTool(loader, circuitBreaker, getHost, getPusher) 
     description: "System health: backend circuit breaker states, loaded specialist count, and native in-process activations with any question they are waiting on \u2014 answer those with specialist_reply.",
     inputSchema: specialistStatusSchema,
     async execute(input2) {
-      const list2 = await loader.list();
-      let pending_interactions = [];
-      try {
-        pending_interactions = projectOutstandingAsks(process.cwd());
-      } catch {
-        pending_interactions = [];
-      }
-      let uncertain_workspaces = [];
-      try {
-        uncertain_workspaces = projectUncertainWorkspaces(leaseScopeFor(process.cwd()));
-      } catch {
-        uncertain_workspaces = [];
-      }
       const host = getHost?.();
       if (input2.full === true) {
+        const list2 = await loader.list();
+        let pending_interactions = [];
+        try {
+          pending_interactions = projectOutstandingAsks(process.cwd());
+        } catch {
+          pending_interactions = [];
+        }
+        let uncertain_workspaces = [];
+        try {
+          uncertain_workspaces = projectUncertainWorkspaces(leaseScopeFor(process.cwd()));
+        } catch {
+          uncertain_workspaces = [];
+        }
         const activations = host ? host.list().map((s) => toActivationView(s)) : [];
         const pending_asks = host ? host.pendingAsks().map(toPendingAskView) : [];
         const activation_results = getPusher?.()?.allResults().map(toActivationResultView) ?? [];
