@@ -192,12 +192,31 @@ claude plugin install specialists@xtrm
 claude plugin install specialists-ui@xtrm   # optional: teammate-style transcript rows
 ```
 
-`specialists-ui` draws the rows the `specialists` plugin raises like Claude Code's own
-teammate rows: a channel wake becomes `● Specialist @explorer:d65bbed4 completed` with a dim
-`use specialist_status for full result` line, and Specialists MCP calls show native labels
-such as `Dispatch @executor → XTRM-4`. It is a separate plugin because Claude Code never runs
-a plugin's own drawing hooks on a row that plugin raised, and the wake comes from the
-`specialists` MCP server. Without it, everything works and the rows show as raw text.
+`specialists-ui` draws the rows the `specialists` plugin raises in Claude Code's own style.
+A channel wake becomes a teammate row, `● Specialist @explorer:d65bbed4 completed`, with a
+dim `use specialist_status for full result` line. A Specialists MCP call becomes a native
+tool row, `● Dispatch(executor · XTRM-4)`, with its result on an indented line under it. It
+is a separate plugin because Claude Code never runs a plugin's own drawing hooks on a row
+that plugin raised, and the wake comes from the `specialists` MCP server. Without it,
+everything works and the rows show as raw text.
+
+#### What the plugins need
+
+| Piece | Needed for | Set up by |
+|---|---|---|
+| Specialists runtime (`@jaggerxtrm/specialists`) | the MCP server; the plugin launcher starts it | `npm install -g @jaggerxtrm/specialists` (see [Install and bootstrap](#install-and-bootstrap)) |
+| Bun on `PATH` | the MCP server and every plugin hook script | install Bun |
+| Substrate work store | `specialist_dispatch` (the contract) | `@jaggerxtrm/substrate` installed, or `XTRM_SUBSTRATE_DIR` (below) |
+| Claude Code with plugin hooks modules (verified on 2.1.288) | the fleet band, the fleet pane, `/specialists`, and all `specialists-ui` rows | a current Claude Code; hooks must not be turned off with `disableAllHooks` |
+| `specialists@xtrm` | MCP tools, session-start state, the fallback wake, the band, pane and command | `claude plugin install specialists@xtrm` |
+| `specialists-ui@xtrm` | teammate-style wake rows and native tool rows | `claude plugin install specialists-ui@xtrm` |
+| `--channels plugin:specialists@xtrm` | the channel wake (primary) | launch flag; `xt claude` passes it for you |
+| Managed settings `channelsEnabled` + `allowedChannelPlugins` | the channel wake (primary) | root, `/etc/claude-code/managed-settings.json` (below) |
+
+The plugin hooks API (the band, pane and rows) is early access in Claude Code and can change
+between releases. If a row or the band stops drawing after a Claude Code update, run
+`claude --debug` and search the log for `ui.render` to see whether a hook was skipped or
+refused.
 
 Verify the server is reachable from Claude Code:
 
@@ -283,6 +302,13 @@ to configure this: the plugin's launcher serves the legacy revision only, so Cla
 downgrades this one server and keeps negotiating normally with every other server. Do not
 set `MCP_PROTOCOL_NEGOTIATION=legacy` for this; it pins every MCP server to the legacy
 handshake.
+
+If the channel wake is not available, a fallback still wakes the session: the plugin's
+`wake-watch` hook starts with each session, watches the Substrate store, and wakes the
+session once when an activation settles or asks a question. It stops after that first wake
+or after about 15 minutes, so it is a safety net, not a replacement for the channel. While
+both are active, one event can wake the session twice; `specialist_status` is the
+authoritative read either way.
 
 Check the result with `specialists doctor --channels`, which reports the first closed gate.
 Channels work only in an interactive session; `claude -p` never receives them. Behaviour
