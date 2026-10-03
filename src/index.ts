@@ -1315,6 +1315,16 @@ async function run() {
     return handler();
   }
 
+  if (sub === 'lease') {
+    if (wantsHelp()) {
+      const { LEASE_USAGE } = await import('./cli/lease.js');
+      console.log(`\n${LEASE_USAGE}\n`);
+      return;
+    }
+    const { run: handler } = await import('./cli/lease.js');
+    return handler();
+  }
+
   if (sub === 'doctor') {
     if (wantsHelp()) {
       console.log([

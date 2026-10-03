@@ -22003,7 +22003,7 @@ function refusal(reason, request, status) {
     specialist: request.specialist,
     workspace: request.workspace.worktreePath,
     holder: describeHolder(status),
-    note: status.state === "uncertain" ? "the previous holder's liveness could not be established; the lease is uncertain, not free" : "exactly one writer holds a mutable workspace at a time"
+    note: status.state === "uncertain" ? "the previous holder's liveness could not be established; the lease is uncertain, not free. " + "An operator resolves it with `specialists lease list`, then " + "`specialists lease reconcile <worktree> --outcome <outcome> --basis <text>` " + "(MCP: specialist_lease_reconcile)" : "exactly one writer holds a mutable workspace at a time"
   });
 }
 var NON_MUTATING_TOOLS = new Set([

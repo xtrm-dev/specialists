@@ -64,6 +64,7 @@ source_of_truth_for:
 | [`specialists config`](#specialists-config) | **DEPRECATED** — use `specialists edit` |
 | [`specialists init`](#specialists-init) | | Flag | Description | |
 | [`specialists doctor`](#specialists-doctor) | No flags |
+| [`specialists lease`](#specialists-lease) | `list`, `reconcile <worktree>`: uncertain writer leases |
 | [`specialists validate`](#specialists-validate) | `--json`: JSON validation output |
 | [`specialists ps`](#specialists-ps) | `--json`: Machine-readable output; `--all`: include terminal jobs; `--follow`/`-f`: live refresh; epic grouping |
 | [`specialists merge`](#specialists-merge) | Standalone chain merge (blocked for epic-owned chains) |
@@ -1176,6 +1177,27 @@ Prefer `sp doctor --check-drift` and `sp prune-stale-defaults` for current packa
 
 - Specialist configs are now **JSON format** (`.specialist.json`). YAML files (`.specialist.yaml`) are no longer created.
 - Existing YAML configs are migrated to JSON on first edit or validation.
+
+---
+
+## `specialists lease`
+
+### Synopsis
+
+```bash
+specialists lease list [--json]
+specialists lease reconcile <worktree> --outcome <safe_free|superseded|manual_attention_required> \
+  --basis <text> [--basis <text> ...] [--superseded-by <act>] [--note <text>] [--json]
+```
+
+A writer that dies mid-run leaves its workspace lease `uncertain`, and every write-capable dispatch into that workspace is refused with `workspace_lease_uncertain`. `lease list` shows each uncertain workspace with its holder activation, specialist, uncertain reason, and the outcomes permitted for that reason. `lease reconcile` records the operator's decision.
+
+The operator states the outcome and the basis; neither is inferred. `--basis` is repeatable and an empty basis is refused. `--superseded-by` is required for `superseded`. The decision is recorded with `decidedBy` set to `operator:<os username>` and appended to the durable reconciliation log beside the lease. The same surface is available to coordinators as the MCP tool `specialist_lease_reconcile` (`action: "list"` or `"reconcile"`).
+
+### Exit codes
+
+- `0`: The list was printed, or the decision was applied.
+- `1`: Usage error, or `reconcile` refused the decision. The `refusalReason` is printed to stderr and the lease is left unchanged.
 
 ---
 
