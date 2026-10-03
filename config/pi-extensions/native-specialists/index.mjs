@@ -112,18 +112,14 @@ export const DEFAULT_REQUESTED_BY = 'adapter::pi-extension';
  */
 export const FLEET_MAX_ROWS = 4;
 
-// Wake rail (unitAI-beqby.17, restored by unitAI-rrdnt.65.2): far-left │ gutter in #8d7fe8
-// (24-bit 38;2;141;127;232). It runs down EVERY line of a wake message — header, body,
-// instruction and identity — so the event reads as one continuous object rather than a
-// block of prose. No background, ever; the Fleet footer's label chip is the only inverted
-// surface in the extension.
-export const RAIL = '\x1b[38;2;141;127;232m│\x1b[0m';
+// Wake cards are unrailed (operator decision): plain lines with a leading white
+// big dot on the header, matching the xtrm-ui tool rows and substrate-suggest
+// cards. RAIL is retained only for backwards compatibility with older sessions.
+export const RAIL = '';
 
-/** Prefix one line with the rail. A bare rail keeps an empty line continuous. */
+/** Identity — the rail is retired; lines render as-is. */
 export function withRail(line) {
-  const text = String(line ?? '');
-  if (!text) return RAIL;
-  return `${RAIL} ${text}`;
+  return String(line ?? '');
 }
 
 // ── SGR helpers ──────────────────────────────────────────────────────────────
@@ -135,9 +131,13 @@ export function withRail(line) {
 // XTRM accent (#9a8bff, custom-footer/index.ts) — this file introduces no new palette.
 const DIM = (text) => `\x1b[2m${text}\x1b[22m`;
 const BOLD = (text) => `\x1b[1m${text}\x1b[22m`;
+/** Plain white big dot — matches the xtrm-ui tool rows and substrate-suggest cards. */
+const DOT = '●';
 // Italic is set with `3` and cleared with `23`; `22m` after it clears the dim. Pi theme
 // helpers have no italic token, so the raw SGR is the only way to mark the purpose excerpt.
 const ITALIC_DIM = (text) => `\x1b[2m\x1b[3m${text}\x1b[23m\x1b[22m`;
+/** Full italic, no dim — the specialist's own result text reads as its voice. */
+const ITALIC = (text) => `\x1b[3m${text}\x1b[23m`;
 const ACCENT = (text) => `\x1b[38;2;154;139;255m${text}\x1b[39m`;
 const ACCENT_BOLD = (text) => `\x1b[38;2;154;139;255m\x1b[1m${text}\x1b[22m\x1b[39m`;
 const WARNING = (text) => `\x1b[33m${text}\x1b[39m`;
@@ -474,6 +474,7 @@ export function createAskObserverSink(base, onAsk, onTerminal) {
             ...identity,
             outcome,
             error: typeof event.payload?.error === 'string' ? event.payload.error : undefined,
+            output: typeof event.payload?.output === 'string' ? event.payload.output : undefined,
           });
         }
       }
@@ -559,14 +560,17 @@ export function formatAskWake(ask, view) {
   const beadId = ask.beadId ?? view?.bead_id ?? '—';
   // `!` covers both blocked states, so the one word the glyph cannot carry stays.
   const header = [
-    `${WARNING('!')} ${BOLD(ask.specialist)}`,
+    `${DOT} ${BOLD(ask.specialist)}`,
     DIM(escalated ? 'escalated' : 'waiting'),
     DIM(beadId),
     purpose ? ITALIC_DIM(purpose) : null,
   ].filter(Boolean).join(` ${DIM('·')} `);
   return [
     withRail(header),
-    ...String(ask.body || '(no body)').split('\n').map(withRail),
+    // Blank body lines are dropped: the rail used to render paragraph breaks
+    // as a bare gutter; unrailed, they would become blank lines, which event
+    // cards never carry.
+    ...String(ask.body || '(no body)').split('\n').filter((line) => line.trim() !== '').map(withRail),
     instructionLine(escalated ? ESCALATION_INSTRUCTION : ASK_INSTRUCTION, ask.activationId),
   ].join('\n');
 }
@@ -580,38 +584,59 @@ export function formatAskWake(ask, view) {
  * model — all existing snapshot telemetry, projected by `toActivationView`, never
  * recomputed here.
  */
-export function formatSettlementWake(done, view) {
+export function formatSettlementWake(done, view, opts = {}) {
   const failed = done.outcome === 'failed';
   const beadId = done.beadId ?? view?.bead_id ?? '—';
   const facts = failed ? modelFacts(view) : costFacts(view);
   const header = [
-    `${failed ? FAILURE('✕') : SUCCESS('✓')} ${BOLD(done.specialist)}`,
+    `${DOT} ${BOLD(done.specialist)}`,
+    DIM(failed ? 'failed' : 'done'),
     DIM(beadId),
     facts || null,
   ].filter(Boolean).join(` ${DIM('·')} `);
   return [
     withRail(header),
+    ...resultLines(opts.resultText ?? done.output, opts),
     ...(failed && done.error ? [withRail(done.error)] : []),
     instructionLine(failed ? FAIL_INSTRUCTION : RESULT_INSTRUCTION, done.activationId),
   ].join('\n');
 }
 
 /**
+ * The specialist's result text, as bounded italic lines under the header.
+ *
+ * Collapsed shows at most RESULT_EXCERPT_LINES lines plus a dim remainder hint
+ * (ctrl+o expands); expanded (`full`) shows every line of the capped text. A
+ * failed card usually has no output at all, in which case this is empty.
+ */
+export const RESULT_EXCERPT_LINES = 3;
+const RESULT_TEXT_CAP = 4000;
+
+function resultLines(output, opts = {}) {
+  const text = typeof output === 'string' ? output.slice(0, RESULT_TEXT_CAP) : '';
+  if (!text.trim()) return [];
+  const lines = text.replace(/\n+$/, '').split('\n').filter((line) => line.trim() !== '');
+  const shown = (opts.full ? lines : lines.slice(0, RESULT_EXCERPT_LINES)).map((line) => ITALIC(line));
+  const out = [...shown];
+  if (!opts.full && lines.length > RESULT_EXCERPT_LINES) {
+    out.push(DIM(`… +${lines.length - RESULT_EXCERPT_LINES} lines · ctrl+o expands`));
+  }
+  return out;
+}
+
+/**
  * Wrap one already-railed line so the rail repeats on every VISUAL line.
  *
- * Without this a long instruction wraps in the TUI and its continuation runs unrailed under
- * the gutter — the exact "rail covers the top, not the bottom" look the rail exists to
- * avoid. pi-tui's ANSI-aware wrapper does the work; when it is unavailable (unit tests, a
+ * Without wrapping a long instruction overflows the terminal width. pi-tui's
+ * ANSI-aware wrapper does the work; when it is unavailable (unit tests, a
  * non-TUI runtime) the line is emitted as-is.
  */
 export function wrapRailedLine(line, width, wrap = null) {
   const text = String(line ?? '');
-  if (!text.startsWith(RAIL)) return [text];
-  const body = text.slice(RAIL.length + 1);
   const budget = Math.floor(width) - 2;
   if (!wrap || !Number.isFinite(budget) || budget < 8) return [text];
-  const pieces = wrap(body, budget);
-  return (Array.isArray(pieces) ? pieces : [body]).map((piece) => (piece === '' ? RAIL : `${RAIL} ${piece}`));
+  const pieces = wrap(text, budget);
+  return Array.isArray(pieces) && pieces.length > 0 ? pieces : [text];
 }
 
 /**
@@ -619,8 +644,12 @@ export function wrapRailedLine(line, width, wrap = null) {
  * `customMessageBg` box. Returning a component makes pi skip its default card entirely.
  */
 export function makeEventCardRenderer(getWrap) {
-  return (message) => {
-    const content = typeof message?.content === 'string' ? message.content : '';
+  return (message, renderCtx = {}) => {
+    // ctrl+o toggles _expanded on the CustomMessageComponent, which re-invokes
+    // this renderer with the flag. A settlement card embeds its full variant in
+    // details.expandedContent at wake time; cards without one render unchanged.
+    const expanded = renderCtx?.expanded === true && typeof message?.details?.expandedContent === 'string';
+    const content = expanded ? message.details.expandedContent : (typeof message?.content === 'string' ? message.content : '');
     return {
       dispose: () => {},
       invalidate: () => {},
@@ -1214,12 +1243,16 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
       }
     }
 
+    const view = viewFor(done.activationId);
     pi.sendMessage(
       {
         customType: 'specialist_settled',
-        content: formatSettlementWake(done, viewFor(done.activationId)),
+        content: formatSettlementWake(done, view, { resultText: done.output }),
         display: true,
-        details: done,
+        details: {
+          ...done,
+          expandedContent: formatSettlementWake(done, view, { resultText: done.output, full: true }),
+        },
       },
       { deliverAs: 'followUp', triggerTurn: true },
     );
