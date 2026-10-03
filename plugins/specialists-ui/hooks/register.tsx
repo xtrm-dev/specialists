@@ -34,6 +34,25 @@ export function ackClassFor(event: string): string {
  * session, so the wake-watch fallback can drop its duplicate. Best-effort:
  * false when HOME is unreadable or the write fails; never throws.
  */
+/**
+ * The activation and event a queued channel prompt carries. On prompt.submit the text is
+ * the whole `<channel source=… activation_id=… event=…>frame</channel>` element, not the
+ * bare frame the transcript row shows, so the tag's attributes are read first and the
+ * frame inside is the fallback.
+ */
+export function channelWakeOf(text: string): { activationId: string; event: string } | null {
+  const tag = /^<channel\b([^>]*)>/.exec(text.trimStart())
+  if (tag) {
+    const attr = (name: string) => new RegExp(`\\b${name}="([^"]*)"`).exec(tag[1]!)?.[1]
+    const activationId = attr('activation_id')
+    const event = attr('event')
+    if (activationId && event) return { activationId, event }
+  }
+  const inner = text.replace(/^\s*<channel\b[^>]*>\s*/, '').replace(/\s*<\/channel>\s*$/, '')
+  const frame = parseChannelFrame(inner)
+  return frame ? { activationId: frame.activationId, event: frame.event } : null
+}
+
 export async function recordWakeAck($: EngineInterface, activationId: string, event: string): Promise<boolean> {
   const home = await $.env.get('HOME')
   if (!home) return false
@@ -245,8 +264,8 @@ export function register(on: On) {
   // push; record it so the slow fallback watcher does not wake the session again
   // for the same activation. The prompt always passes through unchanged.
   on('prompt.submit', { origin: { kind: 'channel', server: MCP_SERVER } }, async ($, e, next) => {
-    const frame = parseChannelFrame(e.text)
-    if (frame) await recordWakeAck($, frame.activationId, frame.event).catch(() => {})
+    const wake = channelWakeOf(e.text)
+    if (wake) await recordWakeAck($, wake.activationId, wake.event).catch(() => {})
     return next(e)
   })
 

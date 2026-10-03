@@ -4,6 +4,7 @@ import type { EngineInterface } from 'claude-code'
 import {
   FALLBACK_WAKE_TEXT,
   ackClassFor,
+  channelWakeOf,
   channelRow,
   errorTextOf,
   eventColor,
@@ -334,6 +335,21 @@ describe('wake dedupe markers', () => {
     } as unknown as EngineInterface
     return { writes, engine }
   }
+
+  test('channelWakeOf reads the wrapped channel prompt prompt.submit receives', () => {
+    // The real queued text (sp-probe, 2026-10-03): the whole <channel> element, not the bare frame.
+    const wrapped =
+      '<channel source="plugin:specialists:specialists" activation_id="act:a5be0de5-9e0" specialist="explorer" event="completed" read_with="specialist_status">\n' +
+      'Specialist explorer: completed (act:a5be0de5-9e0). Call specialist_status for the authoritative result.\n' +
+      '</channel>'
+    expect(channelWakeOf(wrapped)).toEqual({ activationId: 'act:a5be0de5-9e0', event: 'completed' })
+    expect(channelWakeOf('<channel source="x">\nSpecialist explorer: needs_reply (act:ab12cd34-567). x\n</channel>')).toEqual({
+      activationId: 'act:ab12cd34-567',
+      event: 'needs_reply',
+    })
+    expect(channelWakeOf(CHANNEL_TEXT)).toEqual({ activationId: 'act:f6ab7b21-4a3', event: 'completed' })
+    expect(channelWakeOf('hello')).toBeNull()
+  })
 
   test('recordWakeAck writes <HOME>/.xtrm/wake-acks/<id>.<class> for every event class', async () => {
     const { writes, engine } = capture('/home/tester')
