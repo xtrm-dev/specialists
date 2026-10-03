@@ -1,7 +1,7 @@
 /* @jsxRuntime classic */
 /* @jsx h */
 /* @jsxFrag Fragment */
-import type { On } from 'claude-code'
+import type { EngineInterface, On } from 'claude-code'
 
 // Teammate-style transcript rows for Specialists. The Specialists wakes and MCP calls reach
 // the coordinator as raw machine text; these hooks draw them like Claude Code's own teammate
@@ -19,6 +19,45 @@ export const MCP_SERVER = 'plugin:specialists:specialists'
 export const FALLBACK_WAKE_TEXT = 'Specialist activation needs attention'
 
 const ACCENT = '#9a8bff'
+
+/**
+ * The marker class a channel wake is acknowledged under: 'settled' for a
+ * finished activation, 'needs_reply' for one waiting on the coordinator.
+ * Mirrors wake-watch.mjs's own class for the same states.
+ */
+export function ackClassFor(event: string): string {
+  return event === 'escalation' || event === 'needs_reply' ? 'needs_reply' : 'settled'
+}
+
+/**
+ * Records that a Specialists channel wake for `activationId` reached this
+ * session, so the wake-watch fallback can drop its duplicate. Best-effort:
+ * false when HOME is unreadable or the write fails; never throws.
+ */
+/**
+ * The activation and event a queued channel prompt carries. On prompt.submit the text is
+ * the whole `<channel source=… activation_id=… event=…>frame</channel>` element, not the
+ * bare frame the transcript row shows, so the tag's attributes are read first and the
+ * frame inside is the fallback.
+ */
+export function channelWakeOf(text: string): { activationId: string; event: string } | null {
+  const tag = /^<channel\b([^>]*)>/.exec(text.trimStart())
+  if (tag) {
+    const activationId = /\bactivation_id="([^"]*)"/.exec(tag[1]!)?.[1]
+    const event = /\bevent="([^"]*)"/.exec(tag[1]!)?.[1]
+    if (activationId && event) return { activationId, event }
+  }
+  const inner = text.replace(/^\s*<channel\b[^>]*>\s*/, '').replace(/\s*<\/channel>\s*$/, '')
+  const frame = parseChannelFrame(inner)
+  return frame ? { activationId: frame.activationId, event: frame.event } : null
+}
+
+export async function recordWakeAck($: EngineInterface, activationId: string, event: string): Promise<boolean> {
+  const home = await $.env.get('HOME')
+  if (!home) return false
+  await $.fs.write(`${home}/.xtrm/wake-acks/${activationId}.${ackClassFor(event)}`, '')
+  return true
+}
 
 const SPECIALISTS_TOOL = /^mcp__(?:plugin_specialists_)?specialists__(.+)$/
 
@@ -220,6 +259,15 @@ export function toolResultLine(tool: string, output: unknown): { text: string; i
 }
 
 export function register(on: On) {
+  // A channel wake's prompt.submit is how the coordinator actually receives the
+  // push; record it so the slow fallback watcher does not wake the session again
+  // for the same activation. The prompt always passes through unchanged.
+  on('prompt.submit', { origin: { kind: 'channel', server: MCP_SERVER } }, async ($, e, next) => {
+    const wake = channelWakeOf(e.text)
+    if (wake) await recordWakeAck($, wake.activationId, wake.event).catch(() => {})
+    return next(e)
+  })
+
   on('ui.render', { component: 'UserMessage', props: { origin: { kind: 'channel' } } }, async ($, e, next) => {
     if (e.props.isExpanded || e.props.origin.kind !== 'channel' || e.props.origin.server !== MCP_SERVER) return next(e)
     const row = channelRow(e.props.text)

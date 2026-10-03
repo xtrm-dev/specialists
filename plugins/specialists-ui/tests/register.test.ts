@@ -1,13 +1,17 @@
-import { describe, expect, test } from 'claude-code/testing'
+import { describe, expect, test, mock } from 'claude-code/testing'
+import type { EngineInterface } from 'claude-code'
 
 import {
   FALLBACK_WAKE_TEXT,
+  ackClassFor,
+  channelWakeOf,
   channelRow,
   errorTextOf,
   eventColor,
   isSpecialistsTool,
   MCP_SERVER,
   parseChannelFrame,
+  recordWakeAck,
   specialistToolCall,
   toolResultLine,
   type ToolCall,
@@ -319,4 +323,80 @@ describe('transcript rows', () => {
       expect(await resultFor('Bash')).toBe('engine result')
     })
   }
+})
+
+describe('wake dedupe markers', () => {
+  /** A captured engine: env.get returns HOME, fs.write records the path written. */
+  const capture = (home?: string) => {
+    const writes: string[] = []
+    const engine = {
+      env: { get: async (name: string) => (name === 'HOME' ? home : undefined) },
+      fs: { write: async (path: string) => { writes.push(path) } },
+    } as unknown as EngineInterface
+    return { writes, engine }
+  }
+
+  test('channelWakeOf reads the wrapped channel prompt prompt.submit receives', () => {
+    // The real queued text (sp-probe, 2026-10-03): the whole <channel> element, not the bare frame.
+    const wrapped =
+      '<channel source="plugin:specialists:specialists" activation_id="act:a5be0de5-9e0" specialist="explorer" event="completed" read_with="specialist_status">\n' +
+      'Specialist explorer: completed (act:a5be0de5-9e0). Call specialist_status for the authoritative result.\n' +
+      '</channel>'
+    expect(channelWakeOf(wrapped)).toEqual({ activationId: 'act:a5be0de5-9e0', event: 'completed' })
+    expect(channelWakeOf('<channel source="x">\nSpecialist explorer: needs_reply (act:ab12cd34-567). x\n</channel>')).toEqual({
+      activationId: 'act:ab12cd34-567',
+      event: 'needs_reply',
+    })
+    expect(channelWakeOf(CHANNEL_TEXT)).toEqual({ activationId: 'act:f6ab7b21-4a3', event: 'completed' })
+    expect(channelWakeOf('hello')).toBeNull()
+  })
+
+  test('recordWakeAck writes <HOME>/.xtrm/wake-acks/<id>.<class> for every event class', async () => {
+    const { writes, engine } = capture('/home/tester')
+    expect(await recordWakeAck(engine, 'act:f6ab7b21-4a3', 'completed')).toBe(true)
+    expect(await recordWakeAck(engine, 'act:f6ab7b21-4a3', 'failed')).toBe(true)
+    expect(await recordWakeAck(engine, 'act:f6ab7b21-4a3', 'escalation')).toBe(true)
+    expect(await recordWakeAck(engine, 'act:f6ab7b21-4a3', 'needs_reply')).toBe(true)
+    expect(writes).toEqual([
+      '/home/tester/.xtrm/wake-acks/act:f6ab7b21-4a3.settled',
+      '/home/tester/.xtrm/wake-acks/act:f6ab7b21-4a3.settled',
+      '/home/tester/.xtrm/wake-acks/act:f6ab7b21-4a3.needs_reply',
+      '/home/tester/.xtrm/wake-acks/act:f6ab7b21-4a3.needs_reply',
+    ])
+  })
+
+  test('event classes map to their marker class', () => {
+    expect(ackClassFor('completed')).toBe('settled')
+    expect(ackClassFor('failed')).toBe('settled')
+    expect(ackClassFor('escalation')).toBe('needs_reply')
+    expect(ackClassFor('needs_reply')).toBe('needs_reply')
+  })
+
+  test('recordWakeAck writes nothing when HOME is unreadable', async () => {
+    const { writes, engine } = capture(undefined)
+    expect(await recordWakeAck(engine, 'act:x', 'completed')).toBe(false)
+    expect(writes).toEqual([])
+  })
+
+  test('a specialists channel prompt passes through unchanged', async ($, on) => {
+    mock.env(on, { HOME: '/tmp/xtrm-wake-ack-ui-dispatch' })
+    on('prompt.submit', async ($, e) => ({ text: e.text })) // the engine answer beneath the plugin
+
+    const text = 'Specialist explorer: completed (act:disp-eeee). Call specialist_result for the full result.'
+    const result = await $.prompt.submit({ text, wait: false, origin: { kind: 'channel', server: MCP_SERVER } } as never)
+
+    expect((result as { text?: string }).text).toBe(text)
+  })
+
+  test('a non-specialists or composer prompt passes through with the hook untouched', async ($, on) => {
+    mock.env(on, { HOME: '/tmp/xtrm-wake-ack-ui-dispatch' })
+    on('prompt.submit', async ($, e) => ({ text: e.text }))
+
+    const text = 'Specialist explorer: completed (act:other-ffff). Call specialist_result for the full result.'
+    const viaSlack = await $.prompt.submit({ text, wait: false, origin: { kind: 'channel', server: 'slack' } } as never)
+    const viaComposer = await $.prompt.submit({ text: 'hello', wait: false, origin: { kind: 'composer' } } as never)
+
+    expect((viaSlack as { text?: string }).text).toBe(text)
+    expect((viaComposer as { text?: string }).text).toBe('hello')
+  })
 })
