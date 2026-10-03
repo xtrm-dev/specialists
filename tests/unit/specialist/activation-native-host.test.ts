@@ -1539,6 +1539,60 @@ describe('NativeActivationHost — fallback walk + retry (unitAI-3emr7)', () => 
     });
   });
 
+  it('records an intermediate failed leg once and the final failure once (SPECIALISTS-4253)', async () => {
+    // Each failed leg used to emit a plain activation_failed, so the channel pushed "failed"
+    // while the fallback model was still running and again when it failed too.
+    const { host, sink } = chainHost({
+      executionExtra: { fallback_models: ['fallbackprov/fallback-model'] },
+      sessions: [
+        scriptSession([{ text: '', stopReason: 'error', errorMessage: '429: usage limit exceeded' }]),
+        scriptSession([{ text: '', stopReason: 'error', errorMessage: '429: usage limit exceeded' }]),
+      ],
+    });
+
+    const result = await (await start(host)).result;
+
+    expect(result.status).toBe('failed');
+    expect(result.fallbackUsed).toBe(true);
+    const failures = sink.events.filter(e => e.name === 'activation_failed');
+    expect(failures).toHaveLength(2);
+    expect(failures[0]?.payload?.intermediate).toBe(true);
+    expect(failures[1]?.payload?.intermediate).toBeUndefined();
+    // The intermediate leg is recorded before the fallback leg starts.
+    const names = sink.events.map(e => e.name);
+    expect(names.indexOf('activation_failed')).toBeLessThan(names.lastIndexOf('activation_started'));
+  });
+
+  it('leaves only an intermediate failure when the fallback leg completes (SPECIALISTS-4253)', async () => {
+    const { host, sink } = chainHost({
+      executionExtra: { fallback_models: ['fallbackprov/fallback-model'] },
+      sessions: [
+        scriptSession([{ text: '', stopReason: 'error', errorMessage: '429: usage limit exceeded' }]),
+        scriptSession([{ text: 'recovered' }]),
+      ],
+    });
+
+    const result = await (await start(host)).result;
+
+    expect(result.status).toBe('completed');
+    const failures = sink.events.filter(e => e.name === 'activation_failed');
+    expect(failures).toHaveLength(1);
+    expect(failures[0]?.payload?.intermediate).toBe(true);
+  });
+
+  it('emits a plain failure when the walk cannot continue (SPECIALISTS-4253)', async () => {
+    const { host, sink } = chainHost({
+      sessions: [scriptSession([{ text: '', stopReason: 'error', errorMessage: '429: usage limit exceeded' }])],
+    });
+
+    const result = await (await start(host)).result;
+
+    expect(result.status).toBe('failed');
+    const failures = sink.events.filter(e => e.name === 'activation_failed');
+    expect(failures).toHaveLength(1);
+    expect(failures[0]?.payload?.intermediate).toBeUndefined();
+  });
+
   it('re-acquires the writer lease for a fallback attempt after a SETTLED failure', async () => {
     // SPECIALISTS-46. The thrown-error fallback tests above never settle, so the failed writer
     // keeps its lease and the walk inherits one by accident. A retryable failure is normally a
