@@ -230,6 +230,48 @@ The plugin requires Bun on `PATH` and reads Substrate's canonical store, resolve
 because the store belongs to Substrate and is shared with `sb` and Pi. To develop against a
 checkout instead of an install, use `claude --plugin-dir ./plugins/specialists`.
 
+#### Enable the channel wake
+
+When an activation settles, fails, escalates or asks a question, the plugin's MCP server
+pushes a short notice into the coordinator session (a Claude Code Channel). The notice wakes
+an idle session; the authoritative read is still `specialist_status`. Claude Code drops the
+push without any error unless all of the following are true, so configure both parts.
+
+1. Launch the session with the plugin's server named as a channel:
+
+   ```bash
+   claude --channels plugin:specialists@xtrm
+   ```
+
+2. As root, allow the plugin in Claude Code's **managed** settings, in
+   `/etc/claude-code/managed-settings.json` or a file under
+   `/etc/claude-code/managed-settings.d/`:
+
+   ```json
+   {
+     "channelsEnabled": true,
+     "allowedChannelPlugins": [{ "plugin": "specialists", "marketplace": "xtrm" }]
+   }
+   ```
+
+   Set both keys. `~/.claude/settings.json` is not read for either key. Without a managed
+   allowlist, Claude Code uses a default list fetched from Anthropic that does not include
+   this plugin. claude.ai Team and Enterprise plans need `channelsEnabled: true` in every
+   case. For a login that is not claude.ai (an API key, for example), any managed-settings
+   file without `channelsEnabled: true` turns channels off, so a file that only holds the
+   allowlist makes delivery worse, not better.
+
+For local development without root, launch with
+`claude --dangerously-load-development-channels plugin:specialists@xtrm` instead of
+`--channels`. A channel loaded this way skips the allowlist. Use it only for a plugin you
+build yourself.
+
+Check the result with `specialists doctor --channels`, which reports the first closed gate.
+Channels work only in an interactive session; `claude -p` never receives them. Behaviour
+was read from Claude Code 2.1.288; see
+[docs/claude-channel-constraints.md](docs/claude-channel-constraints.md) for the full gate
+chain.
+
 ### Global model config
 
 Package specialist definitions ship with `execution.model = null`. This is intentional: the package defines roles, tools, contracts, and safety boundaries; your machine-level config defines provider/model choices.
