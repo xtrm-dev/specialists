@@ -118,16 +118,16 @@ describe('transcript rows', () => {
     test(`channel wake draws a teammate line and passes ctrl+o through (${surface})`, async ($, on) => {
       on('ui.render', { component: 'UserMessage' }, () => ({ type: 'Box', props: {}, children: ['engine user row'] }) as never)
 
-      const drawn = textOf(
-        await (
-          await $.ui.mount({
-            plugin: 'specialists-ui',
-            surface,
-            component: 'UserMessage',
-            props: { text: CHANNEL_TEXT, origin: { kind: 'channel', server: MCP_SERVER }, isExpanded: false },
-          })
-        ).drawn(),
-      )
+      const tree = await (
+        await $.ui.mount({
+          plugin: 'specialists-ui',
+          surface,
+          component: 'UserMessage',
+          props: { text: CHANNEL_TEXT, origin: { kind: 'channel', server: MCP_SERVER }, isExpanded: false },
+        })
+      ).drawn()
+      expect(Reflect.get(tree as object, 'props'), 'a blank line above, like native rows').toMatchObject({ marginTop: 1 })
+      const drawn = textOf(tree)
       expect(drawn).toContain('●')
       expect(drawn).toContain('@explorer:f6ab7b21')
       expect(drawn).toContain('completed')
