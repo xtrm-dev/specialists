@@ -6,7 +6,7 @@ import { PassThrough } from 'node:stream';
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import type { StdioServerHandle } from '@modelcontextprotocol/server/stdio';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
-import { buildV2Server } from '../../../src/mcp/v2-server.js';
+import { buildV2Server, serveLegacyStdio, stdioEraFromEnv } from '../../../src/mcp/v2-server.js';
 import type { SubstrateHandle } from '../../../src/substrate/services.js';
 
 /**
@@ -211,6 +211,55 @@ describe('v2 dual-revision negotiation', () => {
     client.notify('notifications/initialized', {});
     await new Promise((r) => setTimeout(r, 300));
     expect(client.seen.length).toBe(before);
+  });
+});
+
+/**
+ * SPECIALISTS-4234: Claude Code delivers the channel wake only on a legacy connection
+ * and negotiates modern with any server that answers server/discover. Legacy-only
+ * serving must refuse the modern probe and downgrade a modern initialize, which is the
+ * per-server downgrade Claude Code applies.
+ */
+describe('v2 legacy-only stdio (Claude Code plugin channel push)', () => {
+  let legacyHandle: StdioServerHandle | undefined;
+  let legacyClient: WireClient;
+
+  beforeEach(() => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    legacyHandle = serveLegacyStdio(new StdioServerTransport(stdin, stdout), { substrate: SUBSTRATE_UNAVAILABLE });
+    legacyClient = new WireClient(stdin, stdout);
+  });
+
+  afterEach(async () => {
+    await legacyHandle?.close();
+    legacyHandle = undefined;
+  });
+
+  it('answers the modern server/discover probe with Method not found', async () => {
+    const res = await legacyClient.call('server/discover', { _meta: META });
+    expect(res.error?.code).toBe(-32601);
+  });
+
+  it('downgrades a 2026-07-28 initialize to 2025-11-25 and declares claude/channel', async () => {
+    const init = await legacyClient.call('initialize', {
+      protocolVersion: PROTOCOL,
+      capabilities: {},
+      clientInfo: { name: 'probe', version: '0' },
+    });
+    expect(init.error).toBeUndefined();
+    const result = init.result as Record<string, unknown>;
+    expect(result.protocolVersion).toBe(LEGACY_PROTOCOL);
+    expect(result.capabilities).toMatchObject({ tools: {}, experimental: { 'claude/channel': {} } });
+
+    const list = await legacyClient.call('tools/list', {});
+    expect((list.result as { tools: Array<{ name: string }> }).tools.map((tool) => tool.name)).toEqual(EXPECTED_TOOLS);
+  });
+
+  it('is selected only by SPECIALISTS_MCP_ERA=legacy', () => {
+    expect(stdioEraFromEnv({ SPECIALISTS_MCP_ERA: 'legacy' })).toBe('legacy');
+    expect(stdioEraFromEnv({})).toBe('dual');
+    expect(stdioEraFromEnv({ SPECIALISTS_MCP_ERA: 'modern' })).toBe('dual');
   });
 });
 

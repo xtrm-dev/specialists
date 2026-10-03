@@ -179,11 +179,12 @@ describe('specialists plugin launcher in a marketplace install', () => {
       writeFileSync(join(prefix, 'bin', 'npm'), '');
       const dist = join(prefix, 'lib', 'node_modules', '@jaggerxtrm', 'specialists', 'dist');
       mkdirSync(dist, { recursive: true });
-      writeFileSync(join(dist, 'index.js'), "console.log('FAKE_RUNTIME_STARTED');\n");
+      writeFileSync(join(dist, 'index.js'), "console.log('FAKE_RUNTIME_STARTED era=' + process.env.SPECIALISTS_MCP_ERA);\n");
 
       const run = launch(root, launcher, [join(prefix, 'bin')]);
       expect(run.stderr).toBe('');
-      expect(run.stdout).toContain('FAKE_RUNTIME_STARTED');
+      // Legacy-only serving keeps the channel push alive under Claude Code (SPECIALISTS-4234).
+      expect(run.stdout).toContain('FAKE_RUNTIME_STARTED era=legacy');
       expect(run.status).toBe(0);
     } finally {
       rmSync(root, { recursive: true, force: true });

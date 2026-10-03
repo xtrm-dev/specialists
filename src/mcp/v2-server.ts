@@ -28,8 +28,8 @@
 import * as z from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { McpServer, fromJsonSchema, PROTOCOL_VERSION_META_KEY } from '@modelcontextprotocol/server';
-import { serveStdio } from '@modelcontextprotocol/server/stdio';
-import type { ServerContext, McpRequestContext } from '@modelcontextprotocol/server';
+import { serveStdio, StdioServerTransport } from '@modelcontextprotocol/server/stdio';
+import type { ServerContext, McpRequestContext, Transport } from '@modelcontextprotocol/server';
 import type { StdioServerHandle } from '@modelcontextprotocol/server/stdio';
 import { MCP_CONFIG } from '../constants.js';
 import { createObservabilitySqliteClient } from '../specialist/observability-sqlite.js';
@@ -242,17 +242,56 @@ export function buildV2Server(ctx?: McpRequestContext, options?: BuildV2ServerOp
   return server;
 }
 
+/** Which protocol revisions the stdio entry serves. */
+export type StdioEra = 'dual' | 'legacy';
+
 /**
- * Official SDK v2 stdio entry. The SDK serves both supported eras from this
- * factory and rejects unsupported protocol revisions.
+ * `SPECIALISTS_MCP_ERA=legacy` selects legacy-only serving; anything else keeps the
+ * dual-revision default. The Claude Code plugin's launcher sets it (SPECIALISTS-4234).
  */
-export function serveV2Stdio(): StdioServerHandle {
-  const handle = serveStdio((ctx) => buildV2Server(ctx), {
-    legacy: 'serve',
-    onerror: (error) => logger.error('MCP v2 transport error', error),
+export function stdioEraFromEnv(env: NodeJS.ProcessEnv = process.env): StdioEra {
+  return env.SPECIALISTS_MCP_ERA === 'legacy' ? 'legacy' : 'dual';
+}
+
+/**
+ * Legacy-only stdio serving: one 2025-11-25 instance hand-wired to the transport.
+ *
+ * Claude Code negotiates the modern revision with any server that answers
+ * `server/discover`, and a modern connection has no unsolicited notification path,
+ * so the channel wake is skipped. A hand-wired instance answers `server/discover`
+ * with Method not found and answers a 2026-07-28 `initialize` with 2025-11-25, which
+ * Claude Code accepts as a per-server downgrade: this server goes legacy and every
+ * other server keeps negotiating normally, with no global MCP_PROTOCOL_NEGOTIATION.
+ */
+export function serveLegacyStdio(
+  transport: Transport = new StdioServerTransport(),
+  options?: BuildV2ServerOptions,
+): StdioServerHandle {
+  const server = buildV2Server({ era: 'legacy' }, options);
+  transport.onerror = (error) => logger.error('MCP legacy stdio transport error', error);
+  void server.connect(transport).catch((error: unknown) => {
+    logger.error('MCP legacy stdio connect failed', error);
   });
+  return { close: () => server.close() };
+}
+
+/**
+ * Official SDK v2 stdio entry. By default the SDK serves both supported eras from
+ * this factory and rejects unsupported protocol revisions; `era: 'legacy'` serves
+ * 2025-11-25 alone (see {@link serveLegacyStdio}).
+ */
+export function serveV2Stdio(era: StdioEra = stdioEraFromEnv()): StdioServerHandle {
+  const handle =
+    era === 'legacy'
+      ? serveLegacyStdio()
+      : serveStdio((ctx) => buildV2Server(ctx), {
+          legacy: 'serve',
+          onerror: (error) => logger.error('MCP v2 transport error', error),
+        });
   logger.info(
-    `Specialists MCP Server v2 (2025-11-25 + 2026-07-28, dual-revision) started — 7 tools registered`,
+    era === 'legacy'
+      ? `Specialists MCP Server v2 (2025-11-25 only, legacy stdio for channel push) started — 7 tools registered`
+      : `Specialists MCP Server v2 (2025-11-25 + 2026-07-28, dual-revision) started — 7 tools registered`,
   );
   process.on('SIGTERM', () => {
     logger.info('SIGTERM received — shutting down');

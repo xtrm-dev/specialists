@@ -1488,6 +1488,16 @@ wake path.
 Push and modern-only negotiation are mutually exclusive in this build. Whoever removes
 legacy service must reinstate the hook as primary in the same change.
 
+**Amendment (2026-10-03, SPECIALISTS-4234).** Serving legacy is necessary but not
+sufficient: Claude Code 2.1.288 negotiates 2026-07-28 with any server that answers
+`server/discover`, so a dual-revision server still ends up on a modern connection and the
+push is skipped. The plugin's launcher therefore sets `SPECIALISTS_MCP_ERA=legacy`, and
+`serveV2Stdio` then hand-wires one 2025-11-25 instance (`serveLegacyStdio`). That instance
+answers `server/discover` with Method not found and a 2026-07-28 `initialize` with
+2025-11-25, and Claude Code downgrades this server alone. Every other launch keeps
+dual-revision serving. The client-wide alternative, `MCP_PROTOCOL_NEGOTIATION=legacy`,
+pins every MCP server and is not used.
+
 ## AM.3 Delivery is gated eight ways, each failing silently
 
 Capability declared → era is legacy → first-party provider (not Bedrock, Vertex, Foundry)

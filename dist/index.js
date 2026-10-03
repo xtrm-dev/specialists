@@ -1,18 +1,29 @@
 #!/usr/bin/env bun
 // @bun
+var __create = Object.create;
+var __getProtoOf = Object.getPrototypeOf;
 var __defProp = Object.defineProperty;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __toESM = (mod, isNodeMode, target) => {
+  target = mod != null ? __create(__getProtoOf(mod)) : {};
+  const to = isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
+  for (let key of __getOwnPropNames(mod))
+    if (!__hasOwnProp.call(to, key))
+      __defProp(to, key, {
+        get: () => mod[key],
+        enumerable: true
+      });
+  return to;
+};
 var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports);
-var __returnValue = (v) => v;
-function __exportSetter(name, newValue) {
-  this[name] = __returnValue.bind(null, newValue);
-}
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, {
       get: all[name],
       enumerable: true,
       configurable: true,
-      set: __exportSetter.bind(all, name)
+      set: (newValue) => all[name] = () => newValue
     });
 };
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
@@ -65158,7 +65169,7 @@ var init_esm = __esm(() => {
 });
 
 // node_modules/@modelcontextprotocol/server/dist/chunk-Br0eD_fh.mjs
-var __create, __defProp2, __getOwnPropDesc, __getOwnPropNames, __getProtoOf, __hasOwnProp, __commonJSMin = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports), __exportAll = (all, symbols) => {
+var __create2, __defProp2, __getOwnPropDesc, __getOwnPropNames2, __getProtoOf2, __hasOwnProp2, __commonJSMin = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports), __exportAll = (all, symbols) => {
   let target = {};
   for (var name in all) {
     __defProp2(target, name, {
@@ -65172,9 +65183,9 @@ var __create, __defProp2, __getOwnPropDesc, __getOwnPropNames, __getProtoOf, __h
   return target;
 }, __copyProps = (to, from, except, desc) => {
   if (from && typeof from === "object" || typeof from === "function") {
-    for (var keys = __getOwnPropNames(from), i = 0, n = keys.length, key;i < n; i++) {
+    for (var keys = __getOwnPropNames2(from), i = 0, n = keys.length, key;i < n; i++) {
       key = keys[i];
-      if (!__hasOwnProp.call(to, key) && key !== except) {
+      if (!__hasOwnProp2.call(to, key) && key !== except) {
         __defProp2(to, key, {
           get: ((k) => from[k]).bind(null, key),
           enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable
@@ -65183,17 +65194,17 @@ var __create, __defProp2, __getOwnPropDesc, __getOwnPropNames, __getProtoOf, __h
     }
   }
   return to;
-}, __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(isNodeMode || !mod || !mod.__esModule ? __defProp2(target, "default", {
+}, __toESM2 = (mod, isNodeMode, target) => (target = mod != null ? __create2(__getProtoOf2(mod)) : {}, __copyProps(isNodeMode || !mod || !mod.__esModule ? __defProp2(target, "default", {
   value: mod,
   enumerable: true
 }) : target, mod));
 var init_chunk_Br0eD_fh = __esm(() => {
-  __create = Object.create;
+  __create2 = Object.create;
   __defProp2 = Object.defineProperty;
   __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-  __getOwnPropNames = Object.getOwnPropertyNames;
-  __getProtoOf = Object.getPrototypeOf;
-  __hasOwnProp = Object.prototype.hasOwnProperty;
+  __getOwnPropNames2 = Object.getOwnPropertyNames;
+  __getProtoOf2 = Object.getPrototypeOf;
+  __hasOwnProp2 = Object.prototype.hasOwnProperty;
 });
 
 // node_modules/@modelcontextprotocol/server/dist/dialects-DoSzNhcb.mjs
@@ -69910,7 +69921,7 @@ function finalize(ctx, schema) {
     result.$schema = "http://json-schema.org/draft-07/schema#";
   } else if (ctx.target === "draft-04") {
     result.$schema = "http://json-schema.org/draft-04/schema#";
-  } else if (ctx.target === "openapi-3.0") {}
+  } else if (ctx.target === "openapi-3.0") {} else {}
   if (ctx.external?.uri) {
     const id = ctx.external.registry.get(schema)?.id;
     if (!id)
@@ -77202,7 +77213,7 @@ function finalize2(ctx, schema) {
     result.$schema = "http://json-schema.org/draft-07/schema#";
   } else if (ctx.target === "draft-04") {
     result.$schema = "http://json-schema.org/draft-04/schema#";
-  } else if (ctx.target === "openapi-3.0") {}
+  } else if (ctx.target === "openapi-3.0") {} else {}
   if (ctx.external?.uri) {
     const id = ctx.external.registry.get(schema)?.id;
     if (!id)
@@ -83665,7 +83676,7 @@ var init_src_CX2iR2pK = __esm(() => {
       this.type = type;
     }
   });
-  import_content_type = /* @__PURE__ */ __toESM(require_content_type(), 1);
+  import_content_type = /* @__PURE__ */ __toESM2(require_content_type(), 1);
   STDIO_DEFAULT_MAX_BUFFER_SIZE = 10 * 1024 * 1024;
   TOOL_NAME_REGEX = /^[A-Za-z0-9._-]{1,128}$/;
 });
@@ -91019,7 +91030,7 @@ var init_ajvProvider_CEoC__sr = __esm(() => {
     }
     const TIME = /^(\d\d):(\d\d):(\d\d(?:\.\d+)?)(z|([+-])(\d\d)(?::?(\d\d))?)?$/i;
     function getTime(strictTimeZone) {
-      return function time5(str) {
+      return function time(str) {
         const matches2 = TIME.exec(str);
         if (!matches2)
           return false;
@@ -91243,7 +91254,7 @@ var init_ajvProvider_CEoC__sr = __esm(() => {
   import_ajv = require_ajv();
   import__2019 = require__2019();
   import__2020 = require__2020();
-  import_dist = /* @__PURE__ */ __toESM(require_dist(), 1);
+  import_dist = /* @__PURE__ */ __toESM2(require_dist(), 1);
   addFormats = import_dist.default;
   Ajv = import_ajv.Ajv;
 });
@@ -98741,7 +98752,9 @@ var init_channel = __esm(() => {
 // src/mcp/v2-server.ts
 var exports_v2_server = {};
 __export(exports_v2_server, {
+  stdioEraFromEnv: () => stdioEraFromEnv,
   serveV2Stdio: () => serveV2Stdio,
+  serveLegacyStdio: () => serveLegacyStdio,
   buildV2Server: () => buildV2Server
 });
 function textResult(result) {
@@ -98841,12 +98854,23 @@ function buildV2Server(ctx, options2) {
   }
   return server;
 }
-function serveV2Stdio() {
-  const handle = serveStdio((ctx) => buildV2Server(ctx), {
+function stdioEraFromEnv(env = process.env) {
+  return env.SPECIALISTS_MCP_ERA === "legacy" ? "legacy" : "dual";
+}
+function serveLegacyStdio(transport = new StdioServerTransport, options2) {
+  const server = buildV2Server({ era: "legacy" }, options2);
+  transport.onerror = (error3) => logger.error("MCP legacy stdio transport error", error3);
+  server.connect(transport).catch((error3) => {
+    logger.error("MCP legacy stdio connect failed", error3);
+  });
+  return { close: () => server.close() };
+}
+function serveV2Stdio(era = stdioEraFromEnv()) {
+  const handle = era === "legacy" ? serveLegacyStdio() : serveStdio((ctx) => buildV2Server(ctx), {
     legacy: "serve",
     onerror: (error3) => logger.error("MCP v2 transport error", error3)
   });
-  logger.info(`Specialists MCP Server v2 (2025-11-25 + 2026-07-28, dual-revision) started \u2014 7 tools registered`);
+  logger.info(era === "legacy" ? `Specialists MCP Server v2 (2025-11-25 only, legacy stdio for channel push) started \u2014 7 tools registered` : `Specialists MCP Server v2 (2025-11-25 + 2026-07-28, dual-revision) started \u2014 7 tools registered`);
   process.on("SIGTERM", () => {
     logger.info("SIGTERM received \u2014 shutting down");
     handle.close().finally(() => process.exit(0));
