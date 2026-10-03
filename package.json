@@ -37,6 +37,7 @@
     "config/nodes/",
     "config/hooks/",
     "plugins/specialists/",
+    "plugins/specialists-ui/",
     "config/pi-extensions/",
     "config/presets.json",
     "docs/overrides-guide.md",

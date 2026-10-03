@@ -136,6 +136,23 @@ describe('specialists plugin path discipline', () => {
     const manifest = JSON.parse(read('.claude-plugin/plugin.json')) as { name: string };
     expect(entry?.name).toBe(manifest.name);
   });
+
+  it('offers the specialists-ui companion that draws the rows specialists raises', () => {
+    // Claude Code never runs a plugin's own ui.render hooks on a row that plugin raised, so the
+    // channel wake from the specialists MCP server is drawable only by another plugin (SPECIALISTS-4223).
+    const root = join(PLUGIN_ROOT, '..', '..');
+    const marketplace = JSON.parse(readFileSync(join(root, '.claude-plugin', 'marketplace.json'), 'utf-8')) as {
+      plugins: Array<{ name: string; source: string }>;
+    };
+    const entry = marketplace.plugins.find((candidate) => candidate.name === 'specialists-ui');
+    expect(entry?.source).toBe('./plugins/specialists-ui');
+    const manifest = JSON.parse(
+      readFileSync(join(root, 'plugins', 'specialists-ui', '.claude-plugin', 'plugin.json'), 'utf-8'),
+    ) as { name: string };
+    expect(manifest.name).toBe('specialists-ui');
+    const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8')) as { files: string[] };
+    expect(pkg.files).toContain('plugins/specialists-ui/');
+  });
 });
 
 /**
