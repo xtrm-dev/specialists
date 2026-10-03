@@ -260,13 +260,14 @@ function plain(line) {
 const SPIN_CLOCK = 220_000;
 
 describe('native-specialists extension (Pi coordinator surface)', () => {
-  it('registers exactly the eight specialist_* tools over the host', async () => {
+  it('registers exactly the nine specialist_* tools over the host', async () => {
     const mod = await loadExtension();
     const pi = makeFakePi();
     mod.default(pi);
     expect(pi.tools.map((t) => t.name)).toEqual([
       'specialist_dispatch',
       'specialist_status',
+      'specialist_result',
       'specialist_reply',
       'specialist_resume',
       'specialist_retry',
@@ -547,6 +548,95 @@ describe('native-specialists extension (Pi coordinator surface)', () => {
       result: { status: 'completed', output: 'report', validation: { valid: true } },
     });
     expect(full.pending_asks[0]).toMatchObject({ message_id: 'msg:1', delivery: 'pending' });
+  });
+
+  describe('specialist_result — read one settled activation (SPECIALISTS-4247)', () => {
+    // Dispatch once and let the child result settle into the in-memory results map,
+    // exactly how the status tests do before reading the Fleet.
+    async function settledCoordinator() {
+      const mod = await loadExtension();
+      const pi = makeFakePi();
+      const { host } = makeFakeHost();
+      mod.default(pi, { createHost: () => host });
+      await toolNamed(pi, 'specialist_dispatch').execute('tc1', { specialist: 'explorer', bead_id: 'bd-1' });
+      await new Promise((r) => setTimeout(r, 0));
+      return toolNamed(pi, 'specialist_result');
+    }
+
+    it('returns the full settled result from memory (full id)', async () => {
+      const resultTool = await settledCoordinator();
+      const out = resultText(await resultTool.execute('tc2', { activation_id: 'act:aaaa' }));
+      expect(out).toEqual({
+        activation_id: 'act:aaaa',
+        specialist: 'explorer',
+        issue_ref: 'bd-1',
+        status: 'completed',
+        output: 'report',
+        validation: { valid: true },
+        resolved_model: 'm',
+        completed_at: 100,
+        source: 'memory',
+      });
+    });
+
+    it('resolves a unique short id with and without the act: lead', async () => {
+      const resultTool = await settledCoordinator();
+      // id is act:aaaa → norm is 'aaaa', so 'aa' uniquely matches.
+      expect(resultText(await resultTool.execute('tc2', { activation_id: 'aa' }))).toMatchObject({
+        activation_id: 'act:aaaa',
+        source: 'memory',
+      });
+      expect(resultText(await resultTool.execute('tc3', { activation_id: 'act:aa' }))).toMatchObject({
+        activation_id: 'act:aaaa',
+        source: 'memory',
+      });
+    });
+
+    it('returns not-settled guidance for a live activation with no result yet', async () => {
+      const mod = await loadExtension();
+      const pi = makeFakePi();
+      const { host } = makeFakeHost();
+      mod.default(pi, { createHost: () => host });
+      const resultTool = toolNamed(pi, 'specialist_result');
+      // No dispatch: the results map is empty, but the host still lists act:aaaa as running.
+      const out = resultText(await resultTool.execute('tc1', { activation_id: 'act:aaaa' }));
+      expect(out).toEqual({ activation_id: 'act:aaaa', state: 'running', next: 'specialist_steer' });
+    });
+
+    it('names the candidates for an ambiguous short prefix', async () => {
+      const mod = await loadExtension();
+      const pi = makeFakePi();
+      // Two live activations sharing the prefix 'aaa'.
+      const host = {
+        list: vi.fn(() => [
+          { ...SNAPSHOT, activationId: 'act:aaa1' },
+          { ...SNAPSHOT, activationId: 'act:aaa2' },
+        ]),
+        inspect: vi.fn((id) => ({ ...SNAPSHOT, activationId: id })),
+        pendingAsks: vi.fn(() => []),
+        start: vi.fn(),
+        answer: vi.fn(),
+        stop: vi.fn(),
+        steer: vi.fn(),
+        resume: vi.fn(),
+        retry: vi.fn(),
+      };
+      mod.default(pi, { createHost: () => host });
+      const out = resultText(await toolNamed(pi, 'specialist_result').execute('tc1', { activation_id: 'act:aaa' }));
+      expect(out.error).toMatch(/ambiguous activation prefix 'act:aaa'/);
+      expect([...out.candidates].sort()).toEqual(['act:aaa1', 'act:aaa2'].sort());
+    });
+
+    it('reports an unknown id with the known candidates', async () => {
+      const mod = await loadExtension();
+      const pi = makeFakePi();
+      const { host } = makeFakeHost();
+      mod.default(pi, { createHost: () => host });
+      const resultTool = toolNamed(pi, 'specialist_result');
+      const out = resultText(await resultTool.execute('tc1', { activation_id: 'act:zzzz' }));
+      expect(out.error).toMatch(/unknown activation 'act:zzzz'/);
+      expect(out.candidates).toEqual(['act:aaaa']);
+    });
   });
 
   it('specialist_steer redirects a running activation and refuses settled ones (SPECIALISTS-141)', async () => {
@@ -1711,12 +1801,12 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
     ]);
     expect(plain(cards[2]).split('\n')).toEqual([
       '● executor · done · XTRM-241 · 42s • 3t • 43k',
-      'Call specialist_status to read the validated result. · activation act:aaaa',
+      'Call specialist_result to read the complete result. · activation act:aaaa',
     ]);
     expect(plain(cards[3]).split('\n')).toEqual([
       '● executor · failed · XTRM-241 · gpt-5.6-sol · high',
       'Provider rate limit exhausted after fallback chain.',
-      'Call specialist_status for authoritative state, then use specialist_retry if appropriate. · activation act:aaaa',
+      'Call specialist_result for the full failure detail, then use specialist_retry if appropriate. · activation act:aaaa',
     ]);
 
     // Styling: warning/bold/dim/italic per field, instruction dim+italic, id dim.
