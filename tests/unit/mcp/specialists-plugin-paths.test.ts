@@ -204,3 +204,33 @@ describe('specialists plugin launcher in a marketplace install', () => {
     }
   });
 });
+
+/**
+ * Bun resolves a dynamic import whose specifier is a literal (or a const-folded string) when
+ * it LOADS the file. A bun without node:sqlite (1.3.5) then aborts the whole hook script
+ * before its bun:sqlite branch can run, so the wake, session-start and precompact hooks die
+ * silently (SPECIALISTS-4229). The source check catches it on any bun; the load check
+ * proves each script starts under the bun running the tests.
+ */
+describe('specialists plugin hook scripts load under bun', () => {
+  const BUN = basename(process.execPath).startsWith('bun') ? process.execPath : 'bun';
+  const SQLITE_SCRIPTS = ['scripts/wake-watch.mjs', 'scripts/session-start.mjs', 'scripts/precompact.mjs'];
+
+  it('never names node:sqlite as a literal import specifier', () => {
+    for (const script of SQLITE_SCRIPTS) {
+      expect(read(script), script).not.toMatch(/import\(\s*['"`]node:sqlite['"`]\s*\)/);
+    }
+  });
+
+  it.each(SQLITE_SCRIPTS)('%s loads without a resolution error', (script) => {
+    // No CLAUDE_CODE_ENTRYPOINT: wake-watch exits 0 right after loading instead of watching.
+    const run = spawnSync(BUN, [join(PLUGIN_ROOT, script)], {
+      encoding: 'utf-8',
+      input: '{}',
+      timeout: 15_000,
+      env: { PATH: dirname(BUN), HOME: tmpdir(), SUBSTRATE_DB: join(tmpdir(), 'sp-no-such-store.db') },
+    });
+    expect(run.stderr).not.toContain('Could not resolve');
+    expect(run.status).toBe(0);
+  });
+});

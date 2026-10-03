@@ -36,7 +36,10 @@ async function openStore(storePath) {
   } catch {
     // Not under bun: node:sqlite serves the same prepare/close surface.
   }
-  const { DatabaseSync } = await import('node:sqlite');
+  // Computed on purpose: bun resolves a literal (or const-folded) dynamic import specifier
+  // when it LOADS the file, and a bun without node:sqlite (1.3.5) then aborts the whole
+  // script before the bun:sqlite branch above can run (SPECIALISTS-4229).
+  const { DatabaseSync } = await import(['node', 'sqlite'].join(':'));
   return new DatabaseSync(storePath, { readOnly: true });
 }
 
