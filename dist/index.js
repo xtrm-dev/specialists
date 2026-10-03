@@ -94076,6 +94076,39 @@ function createSpecialistStopActivationTool(getHost) {
     }
   };
 }
+function createSpecialistRetryTool(getHost, getPusher) {
+  return {
+    name: "specialist_retry",
+    description: "Re-run a FAILED native activation in place, optionally on a named model. " + "Keeps the activation id and the Issue; the workspace lease is REACQUIRED for the new " + "attempt and can be refused when another writer holds the workspace. Without " + "model_override the same session is re-prompted with its context intact. Failed only \u2014 " + "answer an outstanding question with specialist_reply and resume a settled activation " + "with specialist_resume instead.",
+    inputSchema: specialistRetrySchema,
+    async execute(input2) {
+      try {
+        const handle = await getHost().retry(input2.activation_id, {
+          ...input2.model_override ? { modelOverride: input2.model_override } : {},
+          ...input2.prompt ? { prompt: input2.prompt } : {}
+        });
+        const pusher = getPusher?.();
+        handle.result.then(async (result) => {
+          if (!pusher)
+            return;
+          pusher.settle(result);
+          await pusher.pushCompletion(handle.activationId).catch(() => {});
+        }, () => {});
+        const snapshot = getHost().inspect(handle.activationId);
+        const view = snapshot ? input2.full ? toActivationView(snapshot) : toActivationCompactView(snapshot) : { activation_id: handle.activationId };
+        return {
+          status: "retried",
+          ...view
+        };
+      } catch (error3) {
+        if (error3 instanceof DispatchRejectedError) {
+          return renderDispatchRejection(error3);
+        }
+        throw error3;
+      }
+    }
+  };
+}
 var DIST_LIB_PATH, LOADED_BUILD_ID, fullFlag, specialistDispatchSchema, specialistSteerSchema, specialistReplySchema, specialistStopSchema, specialistRetrySchema;
 var init_activation_tool = __esm(() => {
   init_zod();
@@ -99230,6 +99263,7 @@ function buildV2Server(ctx, options2) {
     createSpecialistDispatchTool(getHost, getPusher),
     createSpecialistReplyTool(getHost),
     createSpecialistResumeTool(getHost, getPusher),
+    createSpecialistRetryTool(getHost, getPusher),
     createSpecialistSteerTool(getHost),
     createSpecialistStopActivationTool(getHost),
     createSpecialistListTool(loader),
@@ -99245,6 +99279,7 @@ function buildV2Server(ctx, options2) {
     specialist_dispatch: specialistDispatchSchema,
     specialist_reply: specialistReplySchema,
     specialist_resume: specialistResumeSchema,
+    specialist_retry: specialistRetrySchema,
     specialist_steer: specialistSteerSchema,
     specialist_stop_activation: specialistStopSchema,
     specialist_list: specialistListSchema,
