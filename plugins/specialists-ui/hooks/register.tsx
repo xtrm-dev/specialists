@@ -216,7 +216,7 @@ export function register(on: On) {
     const { Box, Text } = await $.ui.resolve(e)
     // Shaped like Claude Code's own teammate row: a coloured ● header, then a dim detail line.
     return (
-      <Box flexDirection="column">
+      <Box flexDirection="column" marginTop={1}>
         <Box>
           <Text color={eventColor(row.event)}>● </Text>
           <Text>Specialist </Text>
@@ -233,7 +233,7 @@ export function register(on: On) {
     if (e.props.isExpanded || e.props.text !== FALLBACK_WAKE_TEXT) return next(e)
     const { Box, Text } = await $.ui.resolve(e)
     return (
-      <Box flexDirection="column">
+      <Box flexDirection="column" marginTop={1}>
         <Box>
           <Text color={WAITING_COLOR}>● </Text>
           <Text bold color={ACCENT}>Specialists</Text>
@@ -270,7 +270,7 @@ export function register(on: On) {
             : null
     const dot = e.props.isRunning ? undefined : e.props.isInterrupted || failed ? FAILED_COLOR : DONE_COLOR
     return (
-      <Box flexDirection="column">
+      <Box flexDirection="column" marginTop={1}>
         <Box>
           <Text color={dot} dimColor={e.props.isRunning}>● </Text>
           <Text bold>{call.name}</Text>
