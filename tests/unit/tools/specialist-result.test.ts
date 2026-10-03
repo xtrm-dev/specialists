@@ -97,7 +97,7 @@ describe('channel actions', () => {
     const frame = (event: string) => buildChannelFrame({ specialist: 'executor', beadId: 'XTRM-1', activationId: 'act:a2924153-111', eventClass: event }).params.content;
     expect(frame('completed')).toContain('Call specialist_result for the full result.');
     expect(frame('failed')).toContain('Call specialist_result for the failure detail.');
-    expect(buildChannelFrame({ specialist: 'executor', activationId: 'act:x', eventClass: 'completed' }).params.meta.read_with).toBe('specialist_status');
+    expect(buildChannelFrame({ specialist: 'executor', activationId: 'act:x', eventClass: 'completed' }).params.meta.read_with).toBe('specialist_result');
     expect(frame('needs_reply')).toContain('specialist_status');
     expect(frame('escalation')).toContain('specialist_status');
   });

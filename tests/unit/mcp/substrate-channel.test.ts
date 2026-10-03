@@ -45,7 +45,7 @@ describe('buildChannelFrame', () => {
       activation_id: 'act:1',
       specialist: 'executor',
       event: 'completed',
-      read_with: 'specialist_status',
+      read_with: 'specialist_result',
       bead_id: 'unitAI-aiwva.21',
     });
     for (const key of Object.keys(params.meta)) {
@@ -71,6 +71,23 @@ describe('buildChannelFrame', () => {
     });
     expect(params.meta.bead_id).toBeUndefined();
     expect(params.meta.activation_id).toBe('act:2');
+  });
+
+  it('points read_with at a result only when the activation settled', () => {
+    const classes = ['completed', 'failed', 'escalation'] as const;
+    const readWith: Record<string, string> = {};
+    for (const eventClass of classes) {
+      readWith[eventClass] = buildChannelFrame({ activationId: 'act:3', specialist: 'executor', eventClass }).params.meta.read_with;
+    }
+    readWith.needs_reply = buildChannelFrame({
+      activationId: 'act:3', specialist: 'executor', eventClass: 'needs_reply',
+    }).params.meta.read_with;
+    expect(readWith).toEqual({
+      completed: 'specialist_result',
+      failed: 'specialist_result',
+      escalation: 'specialist_status',
+      needs_reply: 'specialist_status',
+    });
   });
 });
 

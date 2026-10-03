@@ -6,6 +6,8 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Database } from 'bun:sqlite';
 
+let ackRoots: string[] = [];
+
 /**
  * The idle-wake watcher (unitAI-aiwva.21). Claude Code wakes the model when an
  * asyncRewake hook exits 2, so exit code IS the contract here — and a spurious 2 is
@@ -73,13 +75,19 @@ function flipUntil(dbPath: string, id: string, state: string, cycles = 40) {
  * must state the precondition it is testing under, not borrow it from whoever ran it.
  */
 function watch(dbPath: string, maxMs = 20000, entrypoint = 'cli') {
+  // A per-call empty ack dir keeps every test hermetic: the watcher's default ack dir
+  // is the real HOME's, and a stray marker there would turn a real wake into a silent no-op.
+  const ackRoot = mkdtempSync(join(tmpdir(), 'wake-watch-ack-'));
+  ackRoots.push(ackRoot);
   return spawnSync('bun', [hook], {
     encoding: 'utf-8',
     env: {
       ...process.env,
       CLAUDE_CODE_ENTRYPOINT: entrypoint,
       XTRM_STATE_DB: dbPath,
+      SPECIALISTS_WAKE_ACK_DIR: ackRoot,
       SUBSTRATE_WAKE_POLL_MS: '250',
+      SUBSTRATE_WAKE_GRACE_MS: '50',
       SUBSTRATE_WAKE_MAX_MS: String(maxMs),
     },
     timeout: 60000,
@@ -90,6 +98,7 @@ afterEach(() => {
   // Kill the flip writer first: it holds the sqlite file the cleanup removes.
   while (children.length > 0) { try { children.pop()?.kill('SIGKILL'); } catch { /* already gone */ } }
   while (roots.length > 0) rmSync(roots.pop() as string, { recursive: true, force: true });
+  while (ackRoots.length > 0) rmSync(ackRoots.pop() as string, { recursive: true, force: true });
 });
 
 describe('specialists idle-wake watcher', () => {
@@ -118,7 +127,8 @@ describe('specialists idle-wake watcher', () => {
     expect(payload.activations).toEqual([
       { activation_id: 'act:live', state: 'settled', bead_id: 'B-1' },
     ]);
-    expect(payload.read_with).toBe('specialist_status');
+    // A settled result is readable directly, so the wake points at specialist_result.
+    expect(payload.read_with).toBe('specialist_result');
   });
 
   it('wakes when an activation starts waiting on a reply', () => {
@@ -127,6 +137,8 @@ describe('specialists idle-wake watcher', () => {
     const r = watch(db);
     expect(r.status).toBe(2);
     expect(r.stdout).toContain('awaiting reply');
+    // A waiting ask is read via specialist_status, not a result.
+    expect(JSON.parse(r.stdout.trim().split('\n').pop() as string).read_with).toBe('specialist_status');
   });
 
   it('carries a reference only — no bodies, no forensic ids', () => {

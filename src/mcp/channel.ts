@@ -97,11 +97,14 @@ export function buildChannelFrame(input: {
   beadId?: string;
   eventClass: string;
 }): ChannelFrame {
+  // A result is readable only once an activation finished; a waiting ask must still be
+  // read through specialist_status. Mirrors wake-watch's read_with for the same classes.
+  const settled = input.eventClass === 'completed' || input.eventClass === 'failed';
   const meta: Record<string, string> = {
     activation_id: input.activationId,
     specialist: input.specialist,
     event: input.eventClass,
-    read_with: 'specialist_status',
+    read_with: settled ? 'specialist_result' : 'specialist_status',
   };
   if (input.beadId) meta.bead_id = input.beadId;
 

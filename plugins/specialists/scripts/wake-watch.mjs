@@ -35,7 +35,7 @@
 // Discipline: exit 0 on every failure path. Exit 2 ONLY on a real observed transition —
 // a spurious 2 wakes a session for nothing, which trains the operator to ignore wakes.
 
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 
@@ -46,6 +46,24 @@ const POLL_MS = Number(process.env.SUBSTRATE_WAKE_POLL_MS ?? 30000);
 // watching silently, which is the failure this whole hook exists to avoid.
 const MAX_MS = Number(process.env.SUBSTRATE_WAKE_MAX_MS ?? 870000);
 const ACTIONABLE = new Set(['settled', 'needs_reply']);
+// The primary Channel push arrives well inside this window; a fresh row with an ack marker
+// here was already delivered and must not be woken again by this slow recovery net.
+const WAKE_ACK_GRACE_MS = Number(process.env.SUBSTRATE_WAKE_GRACE_MS ?? 5000);
+// Ack markers are a dedupe hint, never durable: sweep the old ones so the dir cannot grow.
+const WAKE_ACK_MAX_AGE_MS = Number(process.env.SUBSTRATE_WAKE_ACK_MAX_AGE_MS ?? 86400000);
+// The companion specialists-ui plugin writes these markers next to HOME; an override lets a
+// coordinator relocate them (e.g. to a shared volume) as long as both sides agree.
+const ACK_DIR = (process.env.SPECIALISTS_WAKE_ACK_DIR ?? '').trim() || join(homedir(), '.xtrm', 'wake-acks');
+
+/** Marker class for a state: mirrors ackClassFor in plugins/specialists-ui. */
+function ackClass(state) {
+  return state === 'needs_reply' ? 'needs_reply' : 'settled';
+}
+
+/** Whether the coordinator already acknowledged this activation in this state. */
+function acked(activation_id, state) {
+  return existsSync(join(ACK_DIR, `${activation_id}.${ackClass(state)}`));
+}
 
 function resolveStorePath() {
   // SUBSTRATE_DB first: the store belongs to Substrate, which defines that variable and
@@ -97,6 +115,19 @@ async function readActionable(storePath) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** Rows in `current` whose state `seen` does not already hold for that activation. */
+function freshRows(seen, current) {
+  const fresh = [];
+  for (const [id, row] of current) {
+    // §AA: the payload carries retrieval references — the Issue ref rides along with the
+    // activation id so the woken session can reach the durable contract, not just the run.
+    if (seen.get(id)?.state !== row.state) {
+      fresh.push({ activation_id: id, state: row.state, bead_id: row.bead_id });
+    }
+  }
+  return fresh;
+}
+
 // Interactive sessions only. Under `claude -p` the entrypoint is `sdk-cli`, and a hook that
 // blocks there does not merely fail to wake anything (spec §AB says headless may kill
 // background hooks) — it breaks the run outright: every `claude -p` against this plugin
@@ -128,6 +159,22 @@ try {
   }
   const deadline = Date.now() + MAX_MS;
 
+  // Sweep stale ack markers opportunistically at start. Best effort, never fatal: a
+  // stuck lock or missing dir is silent, and an uncleaned marker only delays one wake.
+  try {
+    const now = Date.now();
+    for (const name of readdirSync(ACK_DIR)) {
+      const path = join(ACK_DIR, name);
+      try {
+        if (now - statSync(path).mtimeMs > WAKE_ACK_MAX_AGE_MS) unlinkSync(path);
+      } catch {
+        /* the file vanished under us; not a wake */
+      }
+    }
+  } catch {
+    /* no ack dir yet */
+  }
+
   while (Date.now() < deadline) {
     await sleep(POLL_MS);
     let current;
@@ -137,38 +184,47 @@ try {
       continue; // A transient read (locked db, mid-write) is not a reason to stop watching.
     }
 
-    const fresh = [];
-    for (const [id, row] of current) {
-      // §AA: the payload carries retrieval references — the Issue ref rides along with the
-      // activation id so the woken session can reach the durable contract, not just the run.
-      if (seen.get(id)?.state !== row.state) {
-        fresh.push({ activation_id: id, state: row.state, bead_id: row.bead_id });
-      }
-    }
-    seen = current;
-
+    let fresh = freshRows(seen, current);
     if (fresh.length > 0) {
-      const settled = fresh.filter((f) => f.state === 'settled').length;
-      const asking = fresh.filter((f) => f.state === 'needs_reply').length;
-      const reason =
-        asking > 0 && settled > 0
-          ? `${asking} awaiting reply, ${settled} settled`
-          : asking > 0
-            ? `${asking} awaiting reply`
-            : `${settled} settled`;
-      const payload = JSON.stringify({
-        source: 'specialists',
-        reason,
-        activations: fresh.slice(0, 10),
-        read_with: 'specialist_status',
-      });
-      // Sources disagree on which stream becomes the system reminder: the E6 staging
-      // fragment says stderr, Claude Code's own rewakeMessage schema says "hook output".
-      // Writing both costs one line and removes the question.
-      console.error(payload);
-      console.log(payload);
-      process.exit(2); // The wake. Nothing else in this file may exit 2.
+      // Grace: the primary Channel push usually delivered the wake by now. Drop rows the
+      // coordinator already acknowledged so a delivered event is not woken again by this
+      // slow net; re-read after the grace in case more transitions arrived meanwhile.
+      await sleep(WAKE_ACK_GRACE_MS);
+      let check;
+      try {
+        check = await readActionable(storePath);
+      } catch {
+        check = current; // A transient lock mid-grace; judge against what we already had.
+      }
+      fresh = freshRows(seen, check).filter((f) => !acked(f.activation_id, f.state));
+      seen = check;
+      if (fresh.length === 0) continue; // All acknowledged by the push; keep watching.
+    } else {
+      seen = current;
+      continue;
     }
+
+    const settled = fresh.filter((f) => f.state === 'settled').length;
+    const asking = fresh.filter((f) => f.state === 'needs_reply').length;
+    const reason =
+      asking > 0 && settled > 0
+        ? `${asking} awaiting reply, ${settled} settled`
+        : asking > 0
+          ? `${asking} awaiting reply`
+          : `${settled} settled`;
+    const payload = JSON.stringify({
+      source: 'specialists',
+      reason,
+      activations: fresh.slice(0, 10),
+      // A result is readable only for a settled activation; a waiting ask is read via status.
+      read_with: asking === 0 ? 'specialist_result' : 'specialist_status',
+    });
+    // Sources disagree on which stream becomes the system reminder: the E6 staging
+    // fragment says stderr, Claude Code's own rewakeMessage schema says "hook output".
+    // Writing both costs one line and removes the question.
+    console.error(payload);
+    console.log(payload);
+    process.exit(2); // The wake. Nothing else in this file may exit 2.
   }
 } catch {
   // Silent on every failure path: a watcher must never wake a session by accident.

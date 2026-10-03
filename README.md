@@ -306,9 +306,11 @@ handshake.
 If the channel wake is not available, a fallback still wakes the session: the plugin's
 `wake-watch` hook starts with each session, watches the Substrate store, and wakes the
 session once when an activation settles or asks a question. It stops after that first wake
-or after about 15 minutes, so it is a safety net, not a replacement for the channel. While
-both are active, one event can wake the session twice; `specialist_result` is the
-authoritative read either way.
+or after about 15 minutes, so it is a safety net, not a replacement for the channel. The
+deployed companion `specialists-ui` plugin acknowledges each channel wake (a marker under
+`~/.xtrm/wake-acks`), and this watcher drops any event that marker covers, so a push that
+arrived is not woken a second time; without that plugin it falls back to today's behaviour.
+`specialist_result` is the authoritative read either way.
 
 Check the result with `specialists doctor --channels`, which reports the first closed gate.
 Channels work only in an interactive session; `claude -p` never receives them. Behaviour
