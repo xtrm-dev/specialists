@@ -93897,6 +93897,9 @@ var init_polling = __esm(() => {
 import { createHash as createHash12 } from "crypto";
 import { existsSync as existsSync54, linkSync, mkdirSync as mkdirSync22, readFileSync as readFileSync45, realpathSync as realpathSync5, renameSync as renameSync8, unlinkSync as unlinkSync3, writeFileSync as writeFileSync25 } from "fs";
 import { join as join56 } from "path";
+function workspaceIdentityFor(cwd) {
+  return { repositoryRoot: cwd, worktreePath: cwd };
+}
 function procLeaseProbe() {
   return {
     canVerify: () => existsSync54("/proc/self/stat"),
@@ -94109,12 +94112,7 @@ function readLogAt(path3) {
   return out;
 }
 function leaseScopeFor(cwd) {
-  const commonRoot = resolveCommonGitRoot(cwd);
-  return {
-    repositoryRoot: commonRoot ?? cwd,
-    worktreePath: cwd,
-    gitCommonDir: commonRoot ? join57(commonRoot, ".git") : undefined
-  };
+  return workspaceIdentityFor(cwd);
 }
 function projectUncertainWorkspaces(scope, probe = procLeaseProbe()) {
   const dir = leaseDir(scope);
@@ -94163,7 +94161,6 @@ function readLeaseFile(path3) {
 }
 var PERMITTED;
 var init_workspace_reconcile = __esm(() => {
-  init_job_root();
   init_workspace_lease();
   PERMITTED = {
     holder_process_gone: new Set(["safe_free", "superseded", "manual_attention_required"]),
@@ -96253,7 +96250,7 @@ async function discoverDynamicExtensionTools(input2) {
   }
 }
 function resolveWorkspace(cwd) {
-  return { repositoryRoot: cwd, worktreePath: cwd };
+  return workspaceIdentityFor(cwd);
 }
 function createActivationResourceLoader(sdk, options2) {
   return new sdk.DefaultResourceLoader({

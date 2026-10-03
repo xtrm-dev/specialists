@@ -88,6 +88,15 @@
  */
 import { type ActivationId, type AttemptId, type WorkspaceIdentity } from './types.js';
 /**
+ * Build the one workspace identity used by the native runtime and every lease reader.
+ *
+ * The runtime has historically written leases below the checkout it runs in. Keeping the
+ * repository root equal to that checkout is deliberate: it makes existing
+ * `<cwd>/.specialists/leases` records valid and avoids silently migrating a live lease store.
+ * The worktree path remains the mutation domain and is kept separately for its stable key.
+ */
+export declare function workspaceIdentityFor(cwd: string): WorkspaceIdentity;
+/**
  * What the lease store believes about a workspace.
  *
  * `uncertain` is not a degraded `free`. It is the state in which acquisition is refused
@@ -154,11 +163,12 @@ export declare function workspaceKey(workspace: WorkspaceIdentity): string;
 /**
  * Where lease records live.
  *
- * Under the git common directory when there is one, so every worktree of one repository has
- * its leases in a single discoverable place — while the key still separates them, because
- * the worktree path is the mutation domain. This is runtime state and not a second forensic
- * database: `observability.db` remains the single forensic store and nothing here writes to
- * it.
+ * Under the explicit git common directory when an identity supplies one; otherwise under
+ * `repositoryRoot`. The canonical runtime identity deliberately uses the checkout as its
+ * repository root, preserving the existing `<cwd>/.specialists/leases` store. The key still
+ * separates worktrees because the worktree path is the mutation domain. This is runtime
+ * state and not a second forensic database: `observability.db` remains the single forensic
+ * store and nothing here writes to it.
  */
 export declare function leaseDir(workspace: WorkspaceIdentity): string;
 /**
