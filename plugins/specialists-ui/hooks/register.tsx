@@ -43,9 +43,8 @@ export function ackClassFor(event: string): string {
 export function channelWakeOf(text: string): { activationId: string; event: string } | null {
   const tag = /^<channel\b([^>]*)>/.exec(text.trimStart())
   if (tag) {
-    const attr = (name: string) => new RegExp(`\\b${name}="([^"]*)"`).exec(tag[1]!)?.[1]
-    const activationId = attr('activation_id')
-    const event = attr('event')
+    const activationId = /\bactivation_id="([^"]*)"/.exec(tag[1]!)?.[1]
+    const event = /\bevent="([^"]*)"/.exec(tag[1]!)?.[1]
     if (activationId && event) return { activationId, event }
   }
   const inner = text.replace(/^\s*<channel\b[^>]*>\s*/, '').replace(/\s*<\/channel>\s*$/, '')
