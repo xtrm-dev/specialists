@@ -54,6 +54,16 @@ AbovePrompt band + /specialists
 
 Classic command hooks remain enabled. They are the compatibility path while Claude Mods are early access.
 
+## Transcript rows
+
+A companion plugin, `specialists-ui` (`plugins/specialists-ui`), redraws three specialist events that otherwise reach the coordinator as raw machine text. It is a separate plugin because Claude Code never runs a plugin's own `ui.render` hooks on a row that plugin raised: the debug log says `specialists@xtrm ui.render skipped: re-entry (the plugin's own code raised it; origin specialists)`, and the channel wake comes from the `specialists` plugin's own MCP server. The mod reference does not document this rule (Claude Code 2.1.288). Hooks in a hot-reloaded dev-mods folder are a different plugin, so they draw the row; that is why a dev copy worked while the installed plugin did not.
+
+- a channel wake (`UserMessage`, `origin.kind: 'channel'` from `plugin:specialists:specialists`): the frame `buildChannelFrame` writes is parsed and drawn as a teammate-style row — a `●` coloured by event (`completed` green, `failed` red, `escalation`/`needs_reply` yellow), `Specialist`, a bold `@<specialist>:<short activation id>` in the band accent, the event word and the Issue ref when the frame carries one, then a dim italic `use specialist_status for full result` line. Text that does not parse keeps the engine's row;
+- the wake-watch fallback (`UserMessage`, `origin.kind: 'task-notification'`, text exactly `Specialist activation needs attention`): drawn as one line naming the Specialists fallback wake and the same status hint;
+- Specialists MCP tool calls (`/^mcp__(plugin_specialists_)?specialists__/`): a `ToolGroup` holding one is unfolded in place (`isExpanded: true`), so each call draws as a `ToolUse` row labelled natively (`Dispatch @<specialist> → <issue_ref|bead_id|'inline contract'>`, `Status`, `List specialists`, `Reply → <message_id>`, `Steer`/`Resume`/`Stop`/`Retry @<activation>`, `Issue`, `Journal`, `Provenance`). Running, errored and interrupted states stay visible.
+
+Presentation only: the stored row, and everything the model reads, is untouched — ctrl+o (`props.isExpanded`) always shows the engine's own row. Groups with no Specialists call, and every other row, pass through unchanged.
+
 ## Follow-up
 
 Follow-up, after validation against a supported Claude Code build:
@@ -62,7 +72,7 @@ Follow-up, after validation against a supported Claude Code build:
 2. correlate Claude agent-loop identity with Specialist activation identity without equating them;
 3. decide which classic hooks can be retired only after parity evidence (see anthropics/claude-code#96831: `classic.*` events are not dispatched to modules).
 
-Tests: `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude plugin test plugins/specialists`.
+Tests: `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude plugin test plugins/specialists` and `... plugins/specialists-ui`.
 
 Engine constraint: `$` may be passed only to functions declared at the top level of the module, and every call site spells `$.noun.event(...)`. A closure that receives `$` makes the module fail to load.
 

@@ -1,0 +1,6 @@
+{
+  "description": "Teammate-style transcript rows for the rows the specialists plugin raises: channel wakes, the wake-watch fallback wake, and Specialists MCP tool calls.",
+  "modules": [
+    "./register.tsx"
+  ]
+}
