@@ -98831,11 +98831,12 @@ var init_request_meta = __esm(() => {
 
 // src/mcp/channel.ts
 function buildChannelFrame(input2) {
+  const settled = input2.eventClass === "completed" || input2.eventClass === "failed";
   const meta3 = {
     activation_id: input2.activationId,
     specialist: input2.specialist,
     event: input2.eventClass,
-    read_with: "specialist_status"
+    read_with: settled ? "specialist_result" : "specialist_status"
   };
   if (input2.beadId)
     meta3.bead_id = input2.beadId;
