@@ -12,6 +12,7 @@ import {
   parseChannelFrame,
   POLL_MS,
   specialistToolLabel,
+  eventColor,
 } from '../hooks/register'
 
 const SESSION = { surface: 'terminal', isInteractive: true, cwd: '/work' } as const
@@ -328,6 +329,14 @@ const CHANNEL_TEXT =
   'Specialist explorer on XTRM-464: completed (act:f6ab7b21-4a3). Call specialist_status for the authoritative result.'
 
 describe('transcript rows', () => {
+  test('colours the wake header by event', () => {
+    expect(eventColor('completed')).toBe('green')
+    expect(eventColor('failed')).toBe('red')
+    expect(eventColor('escalation')).toBe('yellow')
+    expect(eventColor('needs_reply')).toBe('yellow')
+    expect(eventColor('something_else')).toBe('#9a8bff')
+  })
+
   test('parses the channel frame and falls back on anything else', () => {
     expect(parseChannelFrame(CHANNEL_TEXT)).toEqual({
       specialist: 'explorer',
@@ -396,7 +405,7 @@ describe('transcript rows', () => {
           })
         ).drawn(),
       )
-      expect(drawn).toContain('✓')
+      expect(drawn).toContain('●')
       expect(drawn).toContain('@explorer:f6ab7b21')
       expect(drawn).toContain('completed')
       expect(drawn).toContain('XTRM-464')

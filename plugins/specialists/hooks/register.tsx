@@ -218,6 +218,18 @@ export function parseChannelFrame(
     : { specialist: specialist!, event: event!, activationId: activationId! }
 }
 
+const DONE_COLOR = 'green'
+const FAILED_COLOR = 'red'
+const WAITING_COLOR = 'yellow'
+
+/** The ● colour a wake row's header takes: done green, failed red, waiting on you yellow. */
+export function eventColor(event: string): string {
+  if (event === 'completed') return DONE_COLOR
+  if (event === 'failed') return FAILED_COLOR
+  if (event === 'escalation' || event === 'needs_reply') return WAITING_COLOR
+  return ACCENT
+}
+
 const EVENT_MARKER: Record<string, string> = {
   completed: '✓',
   failed: '✕',
@@ -587,13 +599,17 @@ export function register(on: On) {
     const row = channelRow(e.props.text)
     if (!row) return next(e)
     const { Box, Text } = await $.ui.resolve(e)
+    // Shaped like Claude Code's own teammate row: a coloured ● header, then a dim detail line.
     return (
-      <Box>
-        <Text>{row.marker} </Text>
-        <Text color={ACCENT}>{row.identity}</Text>
-        <Text> {row.event}</Text>
-        {row.issue ? <Text> {row.issue}</Text> : null}
-        <Text dimColor> · use specialist_status for full result</Text>
+      <Box flexDirection="column">
+        <Box>
+          <Text color={eventColor(row.event)}>● </Text>
+          <Text>Specialist </Text>
+          <Text bold color={ACCENT}>{row.identity}</Text>
+          <Text> {row.event}</Text>
+          {row.issue ? <Text dimColor> · {row.issue}</Text> : null}
+        </Box>
+        <Text dimColor italic>  use specialist_status for full result</Text>
       </Box>
     )
   })
@@ -602,10 +618,13 @@ export function register(on: On) {
     if (e.props.isExpanded || e.props.text !== FALLBACK_WAKE_TEXT) return next(e)
     const { Box, Text } = await $.ui.resolve(e)
     return (
-      <Box>
-        <Text>! </Text>
-        <Text color={ACCENT}>Specialists fallback wake</Text>
-        <Text dimColor> · use specialist_status for full result</Text>
+      <Box flexDirection="column">
+        <Box>
+          <Text color={WAITING_COLOR}>● </Text>
+          <Text bold color={ACCENT}>Specialists</Text>
+          <Text> fallback wake</Text>
+        </Box>
+        <Text dimColor italic>  use specialist_status for full result</Text>
       </Box>
     )
   })
