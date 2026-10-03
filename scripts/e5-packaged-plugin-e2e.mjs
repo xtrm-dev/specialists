@@ -55,6 +55,7 @@ const PROTOCOL = '2026-07-28';
 // (unitAI-uz0bd).
 const EXPECTED_TOOLS = [
   'specialist_status',
+  'specialist_result',
   'specialist_dispatch',
   'specialist_reply',
   'specialist_resume',

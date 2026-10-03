@@ -28,7 +28,7 @@ function textOf(tree: unknown): string {
 const SURFACES = ['terminal', 'desktop'] as const
 
 const CHANNEL_TEXT =
-  'Specialist explorer on XTRM-464: completed (act:f6ab7b21-4a3). Call specialist_status for the authoritative result.'
+  'Specialist explorer on XTRM-464: completed (act:f6ab7b21-4a3). Call specialist_result for the full result.'
 
 describe('transcript rows', () => {
   test('colours the wake header by event', () => {
@@ -74,6 +74,7 @@ describe('transcript rows', () => {
       ['specialist_dispatch', { specialist: 'executor', contract: 'x' }, { name: 'Dispatch', args: 'executor · inline contract' }],
       ['specialist_status', {}, { name: 'Status' }],
       ['specialist_status', { activation_id: 'act:ac8e294a-3a0' }, { name: 'Status', args: 'ac8e294a' }],
+      ['specialist_result', { activation_id: 'act:ac8e294a-3a0' }, { name: 'Result', args: 'ac8e294a' }],
       ['specialist_list', {}, { name: 'List specialists' }],
       ['specialist_reply', { message_id: 'msg-1' }, { name: 'Reply', args: 'msg-1' }],
       ['specialist_steer', { activation_id: 'act:ac8e294a-3a0' }, { name: 'Steer', args: 'ac8e294a' }],
@@ -110,6 +111,12 @@ describe('transcript rows', () => {
       text: 'Unknown activation: act:x',
       isError: true,
     })
+    expect(
+      toolResultLine('mcp__specialists__specialist_result', mcpText({ status: 'done', output: 'a\nb\nc', source: 'memory' })),
+    ).toEqual({ text: 'done · 3 lines', isError: false })
+    expect(
+      toolResultLine('mcp__specialists__specialist_result', mcpText({ status: 'error', error: 'Unknown activation: x' })),
+    ).toEqual({ text: 'Unknown activation: x', isError: true })
     expect(toolResultLine('mcp__specialists__specialist_status', undefined)).toBeNull()
     expect(toolResultLine('Bash', mcpText({ status: 'ok' }))).toBeNull()
   })
@@ -132,7 +139,7 @@ describe('transcript rows', () => {
       expect(drawn).toContain('@explorer:f6ab7b21')
       expect(drawn).toContain('completed')
       expect(drawn).toContain('XTRM-464')
-      expect(drawn).toContain('use specialist_status for full result')
+      expect(drawn).toContain('use specialist_result for full result')
 
       const expanded = await (
         await $.ui.mount({
@@ -188,7 +195,7 @@ describe('transcript rows', () => {
         ).drawn(),
       )
       expect(wake).toContain('Specialists fallback wake')
-      expect(wake).toContain('use specialist_status for full result')
+      expect(wake).toContain('use specialist_result for full result')
 
       const other = textOf(
         await (

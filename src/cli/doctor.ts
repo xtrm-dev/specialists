@@ -7,6 +7,7 @@ import { homedir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createObservabilitySqliteClient } from '../specialist/observability-sqlite.js';
+import { isObservabilityDbMissing, OBSERVABILITY_DB_MISSING_FIX } from '../specialist/observability-db.js';
 import { refreshPrDriftForJob } from '../specialist/pr-drift-refresh.js';
 import type { PrClassification } from '../specialist/pr-drift-refresh.js';
 import { resolveCanonicalAssetDir } from '../specialist/canonical-asset-resolver.js';
@@ -118,6 +119,22 @@ function checkBd(): boolean {
  * Deliberately model-call-free and side-effect-free: it resolves the same way the runtime does
  * (one rule, one home) and never opens the store.
  */
+/**
+ * Advisory: results are persisted to observability.db only when it already exists
+ * (nothing creates it implicitly), so a missing file means `specialist_result` can
+ * answer only from the live server's memory.
+ */
+export function checkObservabilityDb(cwd: string = process.cwd()): boolean {
+  section('observability database');
+  if (isObservabilityDbMissing(cwd)) {
+    warn('observability.db not found — activation results are NOT persisted and are lost when the MCP server restarts');
+    fix(OBSERVABILITY_DB_MISSING_FIX);
+    return false;
+  }
+  ok('observability.db present — activation results are persisted');
+  return true;
+}
+
 function checkSubstrateRuntime(): void {
   section('substrate (native dispatch)');
   try {
@@ -1213,6 +1230,7 @@ export async function run(argv: readonly string[] = process.argv.slice(3)): Prom
   // and leaves the legacy CLI fully usable, so failing the doctor would misreport a working
   // install as broken.
   checkSubstrateRuntime();
+  checkObservabilityDb();
   const catalogsOk = checkCatalogs();
   const versionOk = checkVersion();
   const skillDriftOk = checkSkillDrift();

@@ -35,6 +35,7 @@ import { MCP_CONFIG } from '../constants.js';
 import { createObservabilitySqliteClient } from '../specialist/observability-sqlite.js';
 import { SpecialistLoader } from '../specialist/loader.js';
 import { CircuitBreaker } from '../utils/circuitBreaker.js';
+import { createSpecialistResultTool, specialistResultSchema } from '../tools/specialist/specialist_result.tool.js';
 import { createSpecialistStatusTool, specialistStatusSchema } from '../tools/specialist/specialist_status.tool.js';
 import { createSpecialistListTool, specialistListSchema } from '../tools/specialist/specialist_list.tool.js';
 import {
@@ -167,6 +168,7 @@ export function buildV2Server(ctx?: McpRequestContext, options?: BuildV2ServerOp
 
   const tools: AnyTool[] = [
     createSpecialistStatusTool(loader, circuitBreaker, getHost, getPusher),
+    createSpecialistResultTool(getHost, getPusher),
     createSpecialistDispatchTool(getHost, getPusher),
     createSpecialistReplyTool(getHost),
     createSpecialistResumeTool(getHost, getPusher),
@@ -181,6 +183,7 @@ export function buildV2Server(ctx?: McpRequestContext, options?: BuildV2ServerOp
     substrate_journal: substrateJournalSchema,
     substrate_provenance: substrateProvenanceSchema,
     specialist_status: specialistStatusSchema,
+    specialist_result: specialistResultSchema,
     specialist_dispatch: specialistDispatchSchema,
     specialist_reply: specialistReplySchema,
     specialist_resume: specialistResumeSchema,

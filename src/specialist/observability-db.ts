@@ -100,6 +100,17 @@ export function resolveObservabilityDbLocation(cwd: string = process.cwd()): Obs
   };
 }
 
+/**
+ * True when no observability database exists at the resolved location. Activation
+ * results are persisted to `specialist_results` only when the file exists; the
+ * writers never create it, so a missing file means results live in memory only.
+ */
+export function isObservabilityDbMissing(cwd: string = process.cwd()): boolean {
+  return !existsSync(resolveObservabilityDbLocation(cwd).dbPath);
+}
+
+export const OBSERVABILITY_DB_MISSING_FIX = 'specialists db setup';
+
 export function ensureObservabilityDbFile(location: ObservabilityDbLocation): { created: boolean } {
   mkdirSync(location.dbDirectory, { recursive: true });
 

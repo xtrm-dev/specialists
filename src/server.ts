@@ -23,6 +23,7 @@ import { createForensicEvent, deploymentEnvironment } from './specialist/forensi
 import { createObservabilitySqliteClient, type ObservabilitySqliteClient } from './specialist/observability-sqlite.js';
 import { SpecialistLoader } from './specialist/loader.js';
 import { CircuitBreaker } from './utils/circuitBreaker.js';
+import { createSpecialistResultTool, specialistResultSchema } from './tools/specialist/specialist_result.tool.js';
 import { createSpecialistStatusTool, specialistStatusSchema } from './tools/specialist/specialist_status.tool.js';
 import { createSpecialistListTool, specialistListSchema } from './tools/specialist/specialist_list.tool.js';
 import {
@@ -167,6 +168,7 @@ export class SpecialistsServer {
 
     this.tools = [
       createSpecialistStatusTool(loader, circuitBreaker, getHost, getPusher),
+      createSpecialistResultTool(getHost, getPusher),
       createSpecialistDispatchTool(getHost, getPusher),
       createSpecialistReplyTool(getHost),
       createSpecialistRetryTool(getHost, getPusher),
@@ -184,6 +186,7 @@ export class SpecialistsServer {
   private setupHandlers(): void {
     const schemaMap: Record<string, z.ZodTypeAny> = {
       specialist_status: specialistStatusSchema,
+      specialist_result: specialistResultSchema,
       specialist_dispatch: specialistDispatchSchema,
       specialist_reply: specialistReplySchema,
       specialist_retry: specialistRetrySchema,

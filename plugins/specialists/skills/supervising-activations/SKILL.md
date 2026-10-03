@@ -45,7 +45,7 @@ What is local to THIS plugin, and therefore stated here:
 
 ## Tool surface
 
-Eight tools are registered on the Specialists MCP server, and the names are exact. A separate
+Nine tools are registered on the Specialists MCP server, and the names are exact. A separate
 section below documents the REMOVED `use_specialist` path so no reader mistakes it for live.
 
 ### specialist_dispatch
@@ -71,7 +71,7 @@ Optional: `title`, `model_override`, `thinking_override`
 `epic_context_depth` (1 walks to the parent epic, 2 also the grand-epic).
 
 **Returns identity and admission only — never a result.** Read the result later from
-`specialist_status`. Never substitute a result for an interaction message.
+`specialist_result`. Never substitute a result for an interaction message.
 
 **Overrides fail closed.** `model_override` and `thinking_override` are refused before
 session creation when unavailable, and are never silently replaced. Report the refusal;
@@ -88,6 +88,17 @@ in both modes — it is what you answer.
 
 Forensic IDs never appear in rows. Token usage is a row budget, never a window-context
 percentage.
+
+### specialist_result
+Reads ONE activation's complete result. Input: `activation_id` — the full id or a unique
+short prefix (`a2924153` or `act:a2924153`). A settled activation returns `activation_id`,
+`specialist`, `issue_ref`, `status`, `output` (complete, never truncated), `validation`,
+`resolved_model`, `completed_at` and `source` (`memory` for this server's live results,
+`observability_db` for the durable `specialist_results` row). An activation that has not
+settled returns `state` and `next` (the tool to use instead). An unknown id or an ambiguous
+prefix returns `status: "error"`; an ambiguous prefix lists the candidates. If
+`observability.db` is absent, results older than this server process are unreadable — run
+`specialists db setup` (`specialists doctor` reports it).
 
 ### specialist_reply
 Answers a waiting activation by message ID. An unknown ID is reported, never silently
@@ -126,7 +137,7 @@ Read this before relying on a remembered role name.
 
 ### use_specialist — removed
 `use_specialist` no longer exists; calling it returns an unknown-tool error. Use
-`specialist_dispatch` and read the result with `specialist_status`.
+`specialist_dispatch` and read the result with `specialist_result`.
 
 It ran a specialist synchronously and, unlike `specialist_dispatch`, accepted a work item the
 readiness gate would refuse — draft, closed, or missing a contract section — returning a
@@ -140,8 +151,9 @@ always applies, so a refused contract must be fixed rather than routed around.
   path is in-process; spawning `sp` defeats the native host.
 - Dispatch returns admission, not a result. The Channel push is the primary wake: an
   actionable transition (settled result, pending ask, escalation) arrives as a channel
-  frame naming the activation — a reference, never the payload. `specialist_status` is
-  the authoritative read for whatever the push names. Polling `specialist_status` is the
+  frame naming the activation — a reference, never the payload. `specialist_result` is
+  the authoritative read for a settled or failed result the push names; `specialist_status`
+  covers asks and escalations. Polling `specialist_status` is the
   degraded fallback: a missed push degrades to polling, which reads the same object late,
   never a different object. Do not block waiting for a result.
 - Every outcome carries a build-identity line. If it names staleness, say so — the runtime

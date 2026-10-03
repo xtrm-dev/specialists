@@ -156,12 +156,13 @@ describe('skills-v4 default specialist wiring', () => {
     expect(extensionSource).not.toContain('then a Bead is created');
   });
 
-  it('keeps the canonical execution skill aligned with the eight native activation tools', () => {
+  it('keeps the canonical execution skill aligned with the nine native activation tools', () => {
     const skill = readFileSync(join(repoRoot, 'config', 'skills', 'using-specialists', 'SKILL.md'), 'utf8');
-    expect(skill).toContain('Eight tools');
+    expect(skill).toContain('Nine tools');
     for (const tool of [
       'specialist_dispatch',
       'specialist_status',
+      'specialist_result',
       'specialist_reply',
       'specialist_resume',
       'specialist_retry',

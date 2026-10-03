@@ -70,8 +70,8 @@ const PUSHED_EVENTS: Readonly<Record<string, string>> = {
 
 /** What a coordinator is told to do about each class. One line, no result body. */
 const ACTION: Readonly<Record<string, string>> = {
-  completed: 'Call specialist_status for the authoritative result.',
-  failed: 'Call specialist_status for the authoritative failure detail.',
+  completed: 'Call specialist_result for the full result.',
+  failed: 'Call specialist_result for the failure detail.',
   escalation: 'Call specialist_status to read the escalation, then specialist_reply.',
   needs_reply: 'Call specialist_status to read the pending ask and message_id, then specialist_reply.',
 };
