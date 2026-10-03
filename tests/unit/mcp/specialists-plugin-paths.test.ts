@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { basename, delimiter, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /**
@@ -133,5 +135,72 @@ describe('specialists plugin path discipline', () => {
     // The entry must point at the manifest we actually ship.
     const manifest = JSON.parse(read('.claude-plugin/plugin.json')) as { name: string };
     expect(entry?.name).toBe(manifest.name);
+  });
+});
+
+/**
+ * A marketplace install copies only the plugin folder into Claude Code's cache, so the
+ * launcher's `../../../dist` never exists there and bun's package-name resolution does not
+ * search the npm global prefix (SPECIALISTS-4225). Run the real launcher from a
+ * cache-shaped copy against a fake global prefix; HOME and bun's cache are isolated so no
+ * real runtime is ever found and started.
+ */
+describe('specialists plugin launcher in a marketplace install', () => {
+  const BUN = basename(process.execPath).startsWith('bun') ? process.execPath : 'bun';
+
+  function cacheShapedLauncher(root: string): string {
+    const scripts = join(root, 'plugins', 'cache', 'xtrm', 'specialists', '0.1.0', 'scripts');
+    mkdirSync(scripts, { recursive: true });
+    copyFileSync(join(PLUGIN_ROOT, 'scripts', 'mcp-server.mjs'), join(scripts, 'mcp-server.mjs'));
+    return join(scripts, 'mcp-server.mjs');
+  }
+
+  function launch(root: string, launcher: string, extraPath: string[]) {
+    // --no-install: bun's default auto-install would fetch the published runtime from npm
+    // at the package-name step and start it, which is neither offline nor what is tested.
+    return spawnSync(BUN, ['--no-install', launcher], {
+      cwd: root,
+      encoding: 'utf-8',
+      timeout: 15_000,
+      env: {
+        PATH: [...extraPath, dirname(BUN)].join(delimiter),
+        HOME: root,
+        BUN_INSTALL_CACHE_DIR: join(root, 'bun-cache'),
+      },
+    });
+  }
+
+  it('starts the runtime installed under the prefix of the npm on PATH', () => {
+    const root = mkdtempSync(join(tmpdir(), 'sp-launcher-'));
+    try {
+      const launcher = cacheShapedLauncher(root);
+      const prefix = join(root, 'nvm', 'v25');
+      mkdirSync(join(prefix, 'bin'), { recursive: true });
+      writeFileSync(join(prefix, 'bin', 'npm'), '');
+      const dist = join(prefix, 'lib', 'node_modules', '@jaggerxtrm', 'specialists', 'dist');
+      mkdirSync(dist, { recursive: true });
+      writeFileSync(join(dist, 'index.js'), "console.log('FAKE_RUNTIME_STARTED');\n");
+
+      const run = launch(root, launcher, [join(prefix, 'bin')]);
+      expect(run.stderr).toBe('');
+      expect(run.stdout).toContain('FAKE_RUNTIME_STARTED');
+      expect(run.status).toBe(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('names every location it searched when no runtime exists', () => {
+    const root = mkdtempSync(join(tmpdir(), 'sp-launcher-'));
+    try {
+      const launcher = cacheShapedLauncher(root);
+      const run = launch(root, launcher, []);
+      expect(run.status).toBe(1);
+      expect(run.stderr).toContain('cannot locate the specialists runtime');
+      expect(run.stderr).toContain('Searched:');
+      expect(run.stderr).toContain(join(root, '.bun', 'install', 'global', 'node_modules'));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
