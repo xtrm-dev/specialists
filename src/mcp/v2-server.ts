@@ -42,10 +42,12 @@ import { createSpecialistListTool, specialistListSchema } from '../tools/special
 import {
   createSpecialistDispatchTool,
   createSpecialistReplyTool,
+  createSpecialistRetryTool,
   createSpecialistSteerTool,
   createSpecialistStopActivationTool,
   specialistDispatchSchema,
   specialistReplySchema,
+  specialistRetrySchema,
   specialistSteerSchema,
   specialistStopSchema,
 } from '../tools/specialist/activation.tool.js';
@@ -173,6 +175,7 @@ export function buildV2Server(ctx?: McpRequestContext, options?: BuildV2ServerOp
     createSpecialistDispatchTool(getHost, getPusher),
     createSpecialistReplyTool(getHost),
     createSpecialistResumeTool(getHost, getPusher),
+    createSpecialistRetryTool(getHost, getPusher),
     createSpecialistSteerTool(getHost),
     createSpecialistStopActivationTool(getHost),
     createSpecialistListTool(loader),
@@ -189,6 +192,7 @@ export function buildV2Server(ctx?: McpRequestContext, options?: BuildV2ServerOp
     specialist_dispatch: specialistDispatchSchema,
     specialist_reply: specialistReplySchema,
     specialist_resume: specialistResumeSchema,
+    specialist_retry: specialistRetrySchema,
     specialist_steer: specialistSteerSchema,
     specialist_stop_activation: specialistStopSchema,
     specialist_list: specialistListSchema,

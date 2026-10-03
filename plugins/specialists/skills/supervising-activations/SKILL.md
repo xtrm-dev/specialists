@@ -45,7 +45,8 @@ What is local to THIS plugin, and therefore stated here:
 
 ## Tool surface
 
-Nine tools are registered on the Specialists MCP server, and the names are exact. A separate
+Ten tools are always registered on the Specialists MCP server (plus the three `substrate_*`
+tools when Substrate resolves), and the names are exact. A separate
 section below documents the REMOVED `use_specialist` path so no reader mistakes it for live.
 
 ### specialist_dispatch
@@ -134,6 +135,15 @@ cascade: stop each activation you are done with.
 The specialist registry, one compact line per specialist with a dispatchability verdict per
 row. `name` returns one full record; `detail: "full"` (or `full: true`) returns every field.
 Read this before relying on a remembered role name.
+
+### specialist_lease_reconcile
+Lists uncertain writer leases (`action: "list"`, the default) or resolves one
+(`action: "reconcile"` with `worktree`, `outcome` and `basis`). A lease is uncertain when its
+holder's liveness cannot be established, typically after a crash; every write dispatch into
+that workspace is refused with `workspace_lease_uncertain` until it is reconciled. You state
+the outcome (`safe_free`, `superseded`, `manual_attention_required`) and the evidence; the tool
+never infers either, and a refused outcome returns its `refusal_reason`. CLI equivalent:
+`specialists lease list` / `specialists lease reconcile`.
 
 ### use_specialist — removed
 `use_specialist` no longer exists; calling it returns an unknown-tool error. Use
