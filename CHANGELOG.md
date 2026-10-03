@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.0.4] - 2026-10-03
+
+### Added
+- Unrailed wake cards, white dot chrome, italic result excerpt with ctrl+o expansion ([34b36e8](https://github.com/xtrm-dev/specialists/commit/34b36e803192477c7390c6093095229f440520a6))
+- Draw Specialists wakes and MCP calls as teammate rows ([0726bc1](https://github.com/xtrm-dev/specialists/commit/0726bc1168d70fad8c8ffd62bba2cdaaee8b3c36))
+- Shape Specialists wake rows like Claude Code teammate rows ([a514a67](https://github.com/xtrm-dev/specialists/commit/a514a67a16dcb066f26873d1c99990c889e83d3f))
+- Add specialist_result to the Pi extension ([1c8635d](https://github.com/xtrm-dev/specialists/commit/1c8635d39cfe472aaadce15a24500fa7943400b6))
+- Add specialist_result to read one activation's full result ([56f9dc0](https://github.com/xtrm-dev/specialists/commit/56f9dc0c6a329b99dc01a33164211f24a50ce725))
+
+### Fixed
+- Find a globally installed runtime from a marketplace-installed plugin ([100c5ff](https://github.com/xtrm-dev/specialists/commit/100c5ffd7ad75428ac549463fc1e238941756aea))
+- Load the plugin hook scripts under bun builds without node:sqlite ([ad604b2](https://github.com/xtrm-dev/specialists/commit/ad604b2cc43508a0dab01e6708b56554c6da9076))
+- Serve only the legacy MCP revision under the Claude Code plugin so the channel wake works ([78d20cd](https://github.com/xtrm-dev/specialists/commit/78d20cd936868ee03b7d4ab74007b8f962e437ed))
+- Draw Specialists transcript rows from a companion plugin, specialists-ui ([f79d095](https://github.com/xtrm-dev/specialists/commit/f79d095c9445763b22b37ab99cfbf9635c4da060))
+- Draw Specialists tool calls as native Claude Code tool rows ([45d6da2](https://github.com/xtrm-dev/specialists/commit/45d6da2252b81bf63f6fc1a59f10557812cda245))
+- Indent the Specialists tool result line without the ⎿ marker ([aea4d59](https://github.com/xtrm-dev/specialists/commit/aea4d597e621359af5ffd13d1edc4b76a371fa56))
+- Leave a blank line above each specialists-ui row, like native rows ([e1b3a38](https://github.com/xtrm-dev/specialists/commit/e1b3a38ccdbbbd5a70cf7b6c6ada72e7ec28d225))
+
+### Performance
+- Stop rebuilding the specialist registry on every status poll (SPECIALISTS-4217) (#417) ([1f3bee3](https://github.com/xtrm-dev/specialists/commit/1f3bee3ba75a9fc875e06c6bacc54718d43bef57))
+
+### Project maintenance
+- Document the managed settings and launch flag the channel wake needs ([6bb6995](https://github.com/xtrm-dev/specialists/commit/6bb69959054a32baf30fcfe2c00870be809e9fd8))
+- Regenerate dist with bun 1.3.14 to match CI ([8247e5a](https://github.com/xtrm-dev/specialists/commit/8247e5a6755de851c173d63ab7e6c42cd923c9c9))
+- Name both Claude Code plugins in the README ([827909b](https://github.com/xtrm-dev/specialists/commit/827909ba8d4c260c9e36fcd86d5df4f8b56a2822))
+- List everything the Claude Code plugins need, and the fallback wake ([58ab473](https://github.com/xtrm-dev/specialists/commit/58ab473232bd0503d5f047e2d5c0ae4055504e78))
+- Regenerate the asset contract for the using-specialists skill change ([18d1027](https://github.com/xtrm-dev/specialists/commit/18d1027d8c98b4384129aa093c4def8292078d88))
+- Regenerate dist for specialist_result with bun 1.3.14 ([9a37ebd](https://github.com/xtrm-dev/specialists/commit/9a37ebd3fa63fb80d538098918ca327bc73ccfd4))
+
 ## [4.0.3] - 2026-10-02
 
 ### Added
