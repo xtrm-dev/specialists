@@ -222,6 +222,7 @@ export async function run(): Promise<void> {
   lines.push(`  ${bold('specialist_list')}            — resolved registry, one compact line per specialist`);
   lines.push(`  ${bold('specialist_dispatch')}        — admit-and-start a Specialist (async; returns on admission)`);
   lines.push(`  ${bold('specialist_status')}          — authoritative Fleet read (compact; full:true for verbose)`);
+  lines.push(`  ${bold('specialist_result')}          — one activation's complete result by id or short prefix`);
   lines.push(`  ${bold('specialist_reply')}           — answer an outstanding ask by message_id`);
   lines.push(`  ${bold('specialist_resume')}          — resume a settled/waiting activation in the same session`);
   lines.push(`  ${bold('specialist_steer')}           — redirect a RUNNING activation mid-run, context intact`);

@@ -31,6 +31,7 @@ import {
   toActivationCompactView,
   toActivationView,
 } from '../../../src/tools/specialist/activation.tool.js';
+import { createSpecialistResultTool } from '../../../src/tools/specialist/specialist_result.tool.js';
 import { createSpecialistStatusTool } from '../../../src/tools/specialist/specialist_status.tool.js';
 import { createSpecialistListTool } from '../../../src/tools/specialist/specialist_list.tool.js';
 import { createSpecialistResumeTool } from '../../../src/mcp/resume-tool.js';
@@ -612,6 +613,7 @@ describe('6-tool v2 surface inventory', () => {
     const { host } = hostWith();
     const tools = [
       createSpecialistStatusTool({ list: async () => [] } as never, new CircuitBreaker(), () => host),
+      createSpecialistResultTool(() => host),
       createSpecialistDispatchTool(() => host),
       createSpecialistReplyTool(() => host),
       createSpecialistResumeTool(() => host),
@@ -621,6 +623,7 @@ describe('6-tool v2 surface inventory', () => {
     ];
     expect(tools.map((t) => t.name)).toEqual([
       'specialist_status',
+      'specialist_result',
       'specialist_dispatch',
       'specialist_reply',
       'specialist_resume',

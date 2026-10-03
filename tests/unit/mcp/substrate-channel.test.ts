@@ -56,9 +56,9 @@ describe('buildChannelFrame', () => {
     }
   });
 
-  it('points at specialist_status instead of carrying a result', () => {
+  it('points at specialist_result instead of carrying a result', () => {
     const { params } = buildChannelFrame({ ...EVENT, eventClass: 'completed' });
-    expect(params.content).toContain('specialist_status');
+    expect(params.content).toContain('specialist_result');
     expect(params.content).toContain('act:1');
     // Reference-only discipline: a frame is rendered straight into session
     // context, so its size must follow identity length, never result length.

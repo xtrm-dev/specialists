@@ -148,7 +148,7 @@ describe.skipIf(!runLive)('MCP activation surface — live', () => {
   it('exposes the activation surface over MCP', async () => {
     const names = (await client.listTools()).tools.map(t => t.name);
     expect(names).toEqual(expect.arrayContaining([
-      'specialist_dispatch', 'specialist_reply', 'specialist_status', 'specialist_stop_activation',
+      'specialist_dispatch', 'specialist_reply', 'specialist_status', 'specialist_result', 'specialist_stop_activation',
     ]));
   });
 
