@@ -85,54 +85,127 @@ export function isSpecialistsTool(tool: string): boolean {
 
 const stringArg = (value: unknown): string | undefined => (typeof value === 'string' && value ? value : undefined)
 
+/** One Specialists call as a native tool row heads it: `Name(args)`. */
+export type ToolCall = { name: string; args?: string }
+
+const joined = (...parts: (string | undefined)[]) => parts.filter(Boolean).join(' · ') || undefined
+
 /**
- * The native label one Specialists tool call draws under, or null when the name
+ * The native head one Specialists tool call draws under, or null when the name
  * is not a Specialists tool this Mod knows. Covers both MCP name spellings.
  */
-export function specialistToolLabel(tool: string, input: unknown): string | null {
+export function specialistToolCall(tool: string, input: unknown): ToolCall | null {
   const match = SPECIALISTS_TOOL.exec(tool)
   if (!match) return null
   const args = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>
   const activation = stringArg(args.activation_id)
+  const short = activation ? shortId(activation) : undefined
+  const head = (name: string, text?: string): ToolCall => (text ? { name, args: text } : { name })
   switch (match[1]) {
-    case 'specialist_dispatch': {
-      const target = stringArg(args.issue_ref) ?? stringArg(args.bead_id) ?? 'inline contract'
-      return `Dispatch @${stringArg(args.specialist) ?? 'specialist'} → ${target}`
-    }
+    case 'specialist_dispatch':
+      return head(
+        'Dispatch',
+        joined(stringArg(args.specialist) ?? 'specialist', stringArg(args.issue_ref) ?? stringArg(args.bead_id) ?? 'inline contract'),
+      )
     case 'specialist_status':
-      return 'Status'
+      return head('Status', short)
     case 'specialist_list':
-      return 'List specialists'
+      return head('List specialists', stringArg(args.name))
     case 'specialist_reply':
-      return `Reply → ${stringArg(args.message_id) ?? '?'}`
+      return head('Reply', stringArg(args.message_id))
     case 'specialist_steer':
-      return `Steer @${activation ?? '?'}`
+      return head('Steer', short)
     case 'specialist_resume':
-      return `Resume @${activation ?? '?'}`
+      return head('Resume', short)
     case 'specialist_stop_activation':
-      return `Stop @${activation ?? '?'}`
+      return head('Stop', short)
     case 'specialist_retry':
-      return `Retry @${activation ?? '?'}`
+      return head('Retry', short)
     case 'substrate_issue':
-      return 'Issue'
+      return head('Issue', joined(stringArg(args.op), stringArg(args.ref) ?? stringArg(args.issue_id)))
     case 'substrate_journal':
-      return 'Journal'
+      return head('Journal', joined(stringArg(args.op), stringArg(args.issue_id)))
     case 'substrate_provenance':
-      return 'Provenance'
+      return head(
+        'Provenance',
+        joined(stringArg(args.op), stringArg(args.issue_id) ?? stringArg(args.pr) ?? stringArg(args.sha)?.slice(0, 8) ?? stringArg(args.receipt_id)),
+      )
     default:
       return null
   }
 }
 
+/** The text an MCP result carries: its text blocks joined, or the string itself. */
+function payloadText(output: unknown): string {
+  if (typeof output === 'string') return output
+  const blocks = Array.isArray(output)
+    ? output
+    : output && typeof output === 'object' && Array.isArray((output as { content?: unknown }).content)
+      ? (output as { content: unknown[] }).content
+      : null
+  if (!blocks) return ''
+  return blocks
+    .map(block => (block && typeof block === 'object' && (block as { type?: unknown }).type === 'text' ? String((block as { text?: unknown }).text ?? '') : ''))
+    .join('\n')
+}
+
+function payloadOf(output: unknown): Record<string, unknown> | null {
+  if (output && typeof output === 'object' && !Array.isArray(output) && !('content' in output)) return output as Record<string, unknown>
+  try {
+    const value: unknown = JSON.parse(payloadText(output))
+    return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null
+  } catch {
+    return null
+  }
+}
+
+const firstLine = (text: string) => text.trim().split('\n')[0]!.slice(0, 120)
+
 /** The text an errored call's `output` carries, for the row that shows it. */
 export function errorTextOf(output: unknown): string {
-  if (typeof output === 'string') return output
-  if (output && typeof output === 'object') {
-    const record = output as Record<string, unknown>
-    const text = stringArg(record.error) ?? stringArg(record.message) ?? stringArg(record.text)
-    if (text) return text
-  }
+  const record = payloadOf(output)
+  const text = record ? stringArg(record.error) ?? stringArg(record.message) ?? stringArg(record.text) : undefined
+  if (text) return text
+  const raw = payloadText(output)
+  if (raw) return firstLine(raw)
   return output == null ? 'failed' : JSON.stringify(output)
+}
+
+const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
+
+/**
+ * The one line under a finished Specialists call (the indented result line), read from its JSON
+ * result. A `{ status: 'error' }` payload is an error even when the call itself was not.
+ */
+export function toolResultLine(tool: string, output: unknown): { text: string; isError: boolean } | null {
+  const match = SPECIALISTS_TOOL.exec(tool)
+  if (!match || output == null) return null
+  const record = payloadOf(output)
+  if (!record) {
+    const raw = payloadText(output)
+    return raw ? { text: firstLine(raw), isError: false } : null
+  }
+  if (record.status === 'error') return { text: errorTextOf(output), isError: true }
+  switch (match[1]) {
+    case 'specialist_dispatch': {
+      const id = stringArg(record.activation_id)
+      const text = joined(id ? shortId(id) : undefined, stringArg(record.created_issue_ref) ?? stringArg(record.bead_id), stringArg(record.state))
+      return text ? { text, isError: false } : null
+    }
+    case 'specialist_status': {
+      const activations = Array.isArray(record.activations) ? (record.activations as { state?: unknown }[]) : []
+      const asks = Array.isArray(record.pending_asks) ? record.pending_asks.length : 0
+      const running = activations.filter(a => a?.state === 'running' || a?.state === 'starting').length
+      const parts = [count(activations.length, 'activation'), running ? `${running} running` : undefined, asks ? `${asks} waiting on you` : undefined]
+      return { text: parts.filter(Boolean).join(', '), isError: false }
+    }
+    case 'specialist_list':
+      return Array.isArray(record.specialists) ? { text: count(record.specialists.length, 'specialist'), isError: false } : null
+    default: {
+      const text = stringArg(record.state) ?? stringArg(record.status)
+      return text ? { text, isError: false } : null
+    }
+  }
 }
 
 export function register(on: On) {
@@ -178,17 +251,45 @@ export function register(on: On) {
     return next({ ...e, props: { ...e.props, isExpanded: true } })
   })
 
+  // Drawn the way Claude Code draws its own tools: a state-coloured ●, the bold name with
+  // its arguments, and an indented line with the result, the running state or the error.
   on('ui.render', { component: 'ToolUse', props: { tool: /^mcp__(?:plugin_specialists_)?specialists__/ } }, async ($, e, next) => {
-    const label = specialistToolLabel(e.props.tool, e.props.input)
-    if (!label) return next(e)
+    const call = specialistToolCall(e.props.tool, e.props.input)
+    if (!call) return next(e)
     const { Box, Text } = await $.ui.resolve(e)
-    const state = e.props.isRunning ? 'running' : e.props.isInterrupted ? 'interrupted' : e.props.isErrored ? 'errored' : null
+    const result = toolResultLine(e.props.tool, e.props.output)
+    const failed = e.props.isErrored || result?.isError === true
+    const line = e.props.isRunning
+      ? { text: 'Running…', color: undefined }
+      : e.props.isInterrupted
+        ? { text: 'Interrupted', color: FAILED_COLOR }
+        : failed
+          ? { text: result?.isError ? result.text : errorTextOf(e.props.output), color: FAILED_COLOR }
+          : result
+            ? { text: result.text, color: undefined }
+            : null
+    const dot = e.props.isRunning ? undefined : e.props.isInterrupted || failed ? FAILED_COLOR : DONE_COLOR
     return (
-      <Box>
-        <Text color={ACCENT}>{label}</Text>
-        {state ? <Text dimColor> · {state}</Text> : null}
-        {e.props.isErrored ? <Text color="red"> {errorTextOf(e.props.output)}</Text> : null}
+      <Box flexDirection="column">
+        <Box>
+          <Text color={dot} dimColor={e.props.isRunning}>● </Text>
+          <Text bold>{call.name}</Text>
+          {call.args ? <Text>({call.args})</Text> : null}
+        </Box>
+        {line ? (
+          <Box>
+            <Text>  </Text>
+            <Text color={line.color} dimColor={!line.color}>{line.text}</Text>
+          </Box>
+        ) : null}
       </Box>
     )
+  })
+
+  // A standalone call's result row would repeat the result line the call row already drew.
+  on('ui.render', { component: 'ToolResult', props: { tool: /^mcp__(?:plugin_specialists_)?specialists__/ } }, async ($, e, next) => {
+    if (!specialistToolCall(e.props.tool, undefined)) return next(e)
+    const { Box } = await $.ui.resolve(e)
+    return <Box />
   })
 }
