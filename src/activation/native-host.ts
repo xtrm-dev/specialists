@@ -71,7 +71,12 @@ import { validateContractText } from './contract-sections.js';
 import { InteractionTransport, type InteractionMessage, type PendingAsk } from './interaction.js';
 import { createPeerDelivery } from './peer-bridge.js';
 import { PeerAdapter, type TransportForensicEvent } from './transport/peer-adapter.js';
-import { acquire as acquireLease, admitToolCall, release as releaseLease } from './workspace-lease.js';
+import {
+  acquire as acquireLease,
+  admitToolCall,
+  release as releaseLease,
+  workspaceIdentityFor,
+} from './workspace-lease.js';
 import { createGuardedTools } from './guarded-tools.js';
 import { createAskTools, ASK_TOOL, ESCALATE_TOOL } from './ask-tool.js';
 import { loadPiSdk, type PiSdk, type PiAgentSessionLike, type PiAgentSessionEvent, type PiModelRuntimeLike, type PiResourceLoaderLike } from './pi-sdk.js';
@@ -678,7 +683,7 @@ export async function discoverDynamicExtensionTools(input: {
  * Anyone reopening worktree provisioning must first answer the merge-path problem.
  */
 export function resolveWorkspace(cwd: string): WorkspaceIdentity {
-  return { repositoryRoot: cwd, worktreePath: cwd };
+  return workspaceIdentityFor(cwd);
 }
 
 export function createActivationResourceLoader(

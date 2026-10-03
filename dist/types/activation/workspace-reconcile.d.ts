@@ -184,12 +184,9 @@ export interface UncertainWorkspaceProjection {
 /**
  * The workspace identity whose lease directory holds this checkout's leases.
  *
- * Every worktree of one repository shares one lease directory — that is what makes the
- * whole repository's uncertainty inspectable from any of them — while the key inside still
- * separates them, because the worktree path is the mutation domain. `resolveCommonGitRoot`
- * is the existing helper `.specialists/jobs` is anchored with, reused rather than
- * duplicated; outside a git checkout it yields `cwd`, and the lease directory is then local
- * to it.
+ * The runtime's canonical identity constructor is reused here, so this surface reads the
+ * same `<cwd>/.specialists/leases` directory the dispatch path writes. In particular, it
+ * must not turn the repository root into `.git` or silently migrate the existing store.
  */
 export declare function leaseScopeFor(cwd: string): WorkspaceIdentity;
 /**
