@@ -108,8 +108,8 @@ context ceiling, persist state and hand off. Inter-agent messaging → `/multipl
 Native activation hosts a Specialist on an in-process Pi `AgentSession`, consuming
 Substrate Issues through the WorkItemStore boundary — never a Beads client, a `bd`
 subprocess, or a second readiness derivation. Authority (what work exists, who owns it,
-readiness) belongs to Substrate: read its `using-substrate` skill. Eight tools, names
-exact: `specialist_dispatch` / `specialist_status` / `specialist_reply` /
+readiness) belongs to Substrate: read its `using-substrate` skill. Nine tools, names
+exact: `specialist_dispatch` / `specialist_status` / `specialist_result` / `specialist_reply` /
 `specialist_resume` / `specialist_retry` / `specialist_steer` /
 `specialist_stop_activation` / `specialist_list`.
 Full operator procedure: `plugins/specialists/skills/supervising-activations/SKILL.md`.

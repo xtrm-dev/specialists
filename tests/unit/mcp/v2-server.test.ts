@@ -34,6 +34,7 @@ const META = {
 
 const EXPECTED_TOOLS = [
   'specialist_status',
+  'specialist_result',
   'specialist_dispatch',
   'specialist_reply',
   'specialist_resume',
@@ -373,8 +374,8 @@ describe('v2 statelessness (no cross-request server state)', () => {
     const second = await client.call('tools/list', { _meta: capsB });
     expect(first.error).toBeUndefined();
     expect(second.error).toBeUndefined();
-    expect((first.result as { tools: unknown[] }).tools.length).toBe(7);
-    expect((second.result as { tools: unknown[] }).tools.length).toBe(7);
+    expect((first.result as { tools: unknown[] }).tools.length).toBe(8);
+    expect((second.result as { tools: unknown[] }).tools.length).toBe(8);
   });
 
   it('a tool call needs no prior handshake or discovery', async () => {

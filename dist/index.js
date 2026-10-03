@@ -13037,6 +13037,17 @@ var init_list_rules = __esm(() => {
 });
 
 // src/specialist/observability-db.ts
+var exports_observability_db = {};
+__export(exports_observability_db, {
+  resolveObservabilityDbLocation: () => resolveObservabilityDbLocation,
+  isPathInsideJobsDirectory: () => isPathInsideJobsDirectory,
+  isObservabilityDbMissing: () => isObservabilityDbMissing,
+  isObservabilityDbInitialized: () => isObservabilityDbInitialized,
+  ensureObservabilityDbFile: () => ensureObservabilityDbFile,
+  ensureGitignoreHasObservabilityDbEntries: () => ensureGitignoreHasObservabilityDbEntries,
+  OBSERVABILITY_SCHEMA_VERSION: () => OBSERVABILITY_SCHEMA_VERSION,
+  OBSERVABILITY_DB_MISSING_FIX: () => OBSERVABILITY_DB_MISSING_FIX
+});
 import { chmodSync, existsSync as existsSync8, mkdirSync as mkdirSync2, readFileSync as readFileSync5, writeFileSync as writeFileSync2 } from "fs";
 import { spawnSync as spawnSync2 } from "child_process";
 import { join as join7, sep as sep2, resolve as resolvePath } from "path";
@@ -13093,6 +13104,9 @@ function resolveObservabilityDbLocation(cwd = process.cwd()) {
     source: resolved.source
   };
 }
+function isObservabilityDbMissing(cwd = process.cwd()) {
+  return !existsSync8(resolveObservabilityDbLocation(cwd).dbPath);
+}
 function ensureObservabilityDbFile(location) {
   mkdirSync2(location.dbDirectory, { recursive: true });
   const alreadyExists = existsSync8(location.dbPath);
@@ -13126,11 +13140,44 @@ function ensureGitignoreHasObservabilityDbEntries(gitRoot) {
   writeFileSync2(gitignorePath, `${existing}${block}`, "utf-8");
   return { changed: true };
 }
+function hasSqlite3Binary() {
+  const result = spawnSync2("which", ["sqlite3"], { stdio: "ignore" });
+  return result.status === 0;
+}
+function isObservabilityDbInitialized(location) {
+  if (!existsSync8(location.dbPath) || !hasSqlite3Binary())
+    return false;
+  const tableCheckResult = spawnSync2("sqlite3", ["-json", location.dbPath, "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_version') AS has_schema_version_table;"], {
+    encoding: "utf-8",
+    stdio: ["ignore", "pipe", "ignore"]
+  });
+  if (tableCheckResult.status !== 0)
+    return false;
+  try {
+    const tableCheckRows = JSON.parse(tableCheckResult.stdout.trim());
+    if (tableCheckRows[0]?.has_schema_version_table !== 1)
+      return false;
+  } catch {
+    return false;
+  }
+  const versionCheckResult = spawnSync2("sqlite3", ["-json", location.dbPath, `SELECT EXISTS(SELECT 1 FROM schema_version WHERE version = ${OBSERVABILITY_SCHEMA_VERSION}) AS has_expected_schema_version;`], {
+    encoding: "utf-8",
+    stdio: ["ignore", "pipe", "ignore"]
+  });
+  if (versionCheckResult.status !== 0)
+    return false;
+  try {
+    const versionCheckRows = JSON.parse(versionCheckResult.stdout.trim());
+    return versionCheckRows[0]?.has_expected_schema_version === 1;
+  } catch {
+    return false;
+  }
+}
 function isPathInsideJobsDirectory(pathToCheck, gitRoot) {
   const jobsDirPrefix = `${join7(gitRoot, ".specialists", "jobs")}${sep2}`;
   return pathToCheck.startsWith(jobsDirPrefix);
 }
-var OBSERVABILITY_DB_FILENAME = "observability.db", DEFAULT_DB_DIRECTORY_RELATIVE_TO_GIT_ROOT;
+var OBSERVABILITY_DB_FILENAME = "observability.db", DEFAULT_DB_DIRECTORY_RELATIVE_TO_GIT_ROOT, OBSERVABILITY_SCHEMA_VERSION = 16, OBSERVABILITY_DB_MISSING_FIX = "specialists db setup";
 var init_observability_db = __esm(() => {
   DEFAULT_DB_DIRECTORY_RELATIVE_TO_GIT_ROOT = [".specialists", "db"];
 });
@@ -60187,6 +60234,7 @@ async function run38() {
   lines.push(`  ${bold11("specialist_list")}            \u2014 resolved registry, one compact line per specialist`);
   lines.push(`  ${bold11("specialist_dispatch")}        \u2014 admit-and-start a Specialist (async; returns on admission)`);
   lines.push(`  ${bold11("specialist_status")}          \u2014 authoritative Fleet read (compact; full:true for verbose)`);
+  lines.push(`  ${bold11("specialist_result")}          \u2014 one activation's complete result by id or short prefix`);
   lines.push(`  ${bold11("specialist_reply")}           \u2014 answer an outstanding ask by message_id`);
   lines.push(`  ${bold11("specialist_resume")}          \u2014 resume a settled/waiting activation in the same session`);
   lines.push(`  ${bold11("specialist_steer")}           \u2014 redirect a RUNNING activation mid-run, context intact`);
@@ -60961,7 +61009,8 @@ __export(exports_doctor, {
   renderProcessSummary: () => renderProcessSummary,
   parseVersionTuple: () => parseVersionTuple,
   compareVersions: () => compareVersions2,
-  cleanupProcesses: () => cleanupProcesses
+  cleanupProcesses: () => cleanupProcesses,
+  checkObservabilityDb: () => checkObservabilityDb
 });
 import { createHash as createHash9 } from "crypto";
 import { spawnSync as spawnSync26 } from "child_process";
@@ -61046,6 +61095,16 @@ function checkBd() {
     hint(".beads/ present \u2014 historical/legacy workspace available");
   else
     ok3("no .beads/ workspace \u2014 expected for a Substrate-first project");
+  return true;
+}
+function checkObservabilityDb(cwd = process.cwd()) {
+  section3("observability database");
+  if (isObservabilityDbMissing(cwd)) {
+    warn3("observability.db not found \u2014 activation results are NOT persisted and are lost when the MCP server restarts");
+    fix(OBSERVABILITY_DB_MISSING_FIX);
+    return false;
+  }
+  ok3("observability.db present \u2014 activation results are persisted");
   return true;
 }
 function checkSubstrateRuntime() {
@@ -62029,6 +62088,7 @@ ${bold12("specialists doctor")}
   const bdOk = checkBd();
   const xtOk = checkXt();
   checkSubstrateRuntime();
+  checkObservabilityDb();
   const catalogsOk = checkCatalogs();
   const versionOk = checkVersion();
   const skillDriftOk = checkSkillDrift();
@@ -62050,6 +62110,7 @@ ${bold12("specialists doctor")}
 var bold12 = (s) => `\x1B[1m${s}\x1B[0m`, dim14 = (s) => `\x1B[2m${s}\x1B[0m`, green14 = (s) => `\x1B[32m${s}\x1B[0m`, yellow12 = (s) => `\x1B[33m${s}\x1B[0m`, red7 = (s) => `\x1B[31m${s}\x1B[0m`, CWD, SPECIALISTS_DIR, USER_SPECIALISTS_DIR, XTRM_HOME, GLOBAL_DEFAULT_SKILLS_DIR, EXPECTED_PLUGIN_NAME = "specialists", EXPECTED_MARKETPLACE_NAME = "xtrm";
 var init_doctor = __esm(() => {
   init_observability_sqlite();
+  init_observability_db();
   init_pr_drift_refresh();
   init_canonical_asset_resolver();
   init_drift_detector();
@@ -93128,528 +93189,11 @@ var init_stdio = __esm(() => {
   init_shimsNode();
 });
 
-// src/activation/transport/pending-store.ts
-import { existsSync as existsSync52, mkdirSync as mkdirSync21, readdirSync as readdirSync24, readFileSync as readFileSync43, renameSync as renameSync7, unlinkSync as unlinkSync2, writeFileSync as writeFileSync24 } from "fs";
-import { join as join55 } from "path";
-function projectDeliveryState(state) {
-  if (state === "delivered")
-    return "delivered";
-  if (state === "refused")
-    return "refused";
-  return "pending";
-}
-function createsPendingAsk(kind) {
-  return KINDS_AWAITING_REPLY.has(kind);
-}
-function interactionsRoot(repoRoot) {
-  return join55(repoRoot, ".specialists", "interactions");
-}
-function recordPath(repoRoot, activationId, messageId) {
-  return join55(interactionsRoot(repoRoot), activationId, `${messageId}.json`);
-}
-function replyPath(repoRoot, activationId, messageId) {
-  return join55(interactionsRoot(repoRoot), activationId, `${messageId}.reply.json`);
-}
-function writeAtomic(path3, value, exclusive = false) {
-  if (exclusive && existsSync52(path3)) {
-    throw new Error(`interaction record already exists: ${path3}`);
-  }
-  const tmp = `${path3}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
-  writeFileSync24(tmp, `${JSON.stringify(value, null, 2)}
-`, { mode: 384 });
-  try {
-    renameSync7(tmp, path3);
-  } catch (err) {
-    try {
-      unlinkSync2(tmp);
-    } catch {}
-    throw err;
-  }
-}
-function readJson3(path3) {
-  if (!existsSync52(path3))
-    return;
-  try {
-    return JSON.parse(readFileSync43(path3, "utf-8"));
-  } catch {
-    return;
-  }
-}
-function create(repoRoot, input2) {
-  const record4 = {
-    messageId: input2.messageId,
-    activationId: input2.activationId,
-    kind: input2.kind,
-    createdAtMs: input2.createdAtMs ?? Date.now(),
-    message: input2.message,
-    delivery: { state: "pending", attempts: [] }
-  };
-  mkdirSync21(join55(interactionsRoot(repoRoot), input2.activationId), { recursive: true, mode: 448 });
-  writeAtomic(recordPath(repoRoot, input2.activationId, input2.messageId), record4, true);
-  return record4;
-}
-function read(repoRoot, activationId, messageId) {
-  return readJson3(recordPath(repoRoot, activationId, messageId));
-}
-function readReply(repoRoot, activationId, messageId) {
-  return readJson3(replyPath(repoRoot, activationId, messageId));
-}
-function recordAttempt(repoRoot, activationId, messageId, attempt) {
-  const record4 = read(repoRoot, activationId, messageId);
-  if (!record4)
-    throw new Error(`no interaction record for ${activationId}/${messageId}`);
-  record4.delivery.attempts.push(attempt);
-  if (record4.delivery.state !== "delivered") {
-    record4.delivery.state = attempt.outcome;
-  }
-  writeAtomic(recordPath(repoRoot, activationId, messageId), record4);
-  return record4;
-}
-function recordReceipt(repoRoot, activationId, messageId, receipt) {
-  const record4 = read(repoRoot, activationId, messageId);
-  if (!record4)
-    throw new Error(`no interaction record for ${activationId}/${messageId}`);
-  if (receipt.origMsgId !== messageId) {
-    throw new Error(`receipt orig_msg_id ${receipt.origMsgId} does not match ${messageId}`);
-  }
-  record4.delivery.state = "delivered";
-  record4.delivery.receiptMsgId = receipt.receiptMsgId;
-  record4.delivery.deliveredAtMs = receipt.atMs ?? Date.now();
-  writeAtomic(recordPath(repoRoot, activationId, messageId), record4);
-  return record4;
-}
-function isConfirmable(kind) {
-  return createsPendingAsk(kind);
-}
-function recordReplyDelivery(repoRoot, activationId, messageId, reply) {
-  const record4 = read(repoRoot, activationId, messageId);
-  if (!record4)
-    throw new Error(`no interaction record for ${activationId}/${messageId}`);
-  if (reply.inReplyTo !== messageId) {
-    throw new Error(`reply inReplyTo ${String(reply.inReplyTo)} does not match ${messageId}`);
-  }
-  if (!isConfirmable(record4.kind))
-    return record4;
-  if (record4.delivery.state !== "sent_unconfirmed")
-    return record4;
-  record4.delivery.state = "delivered";
-  record4.delivery.deliveredAtMs = reply.atMs ?? Date.now();
-  writeAtomic(recordPath(repoRoot, activationId, messageId), record4);
-  return record4;
-}
-function listForActivation(repoRoot, activationId) {
-  const dir = join55(interactionsRoot(repoRoot), activationId);
-  if (!existsSync52(dir))
-    return [];
-  const views = [];
-  for (const entry of readdirSync24(dir)) {
-    if (!entry.endsWith(".json") || entry.endsWith(".reply.json") || entry.endsWith(".tmp"))
-      continue;
-    const record4 = readJson3(join55(dir, entry));
-    if (!record4)
-      continue;
-    views.push({ ...record4, reply: readReply(repoRoot, activationId, record4.messageId) });
-  }
-  return views.sort((a, b) => a.createdAtMs - b.createdAtMs);
-}
-function listAll(repoRoot) {
-  const root = interactionsRoot(repoRoot);
-  if (!existsSync52(root))
-    return [];
-  return readdirSync24(root).flatMap((activationId) => listForActivation(repoRoot, activationId)).sort((a, b) => a.createdAtMs - b.createdAtMs);
-}
-var KINDS_AWAITING_REPLY;
-var init_pending_store = __esm(() => {
-  KINDS_AWAITING_REPLY = new Set(["question", "escalation"]);
-});
-
-// src/activation/transport/polling.ts
-function bodyOf(message) {
-  if (typeof message !== "object" || message === null)
-    return;
-  const value = message.body;
-  return typeof value === "string" ? value : undefined;
-}
-function project(view) {
-  return {
-    activation_id: view.activationId,
-    message_id: view.messageId,
-    kind: view.kind,
-    delivery: projectDeliveryState(view.delivery.state),
-    wire_delivery: view.delivery.state,
-    created_at_ms: view.createdAtMs,
-    send_attempts: view.delivery.attempts.length,
-    answered: view.reply !== undefined,
-    awaiting_reply: createsPendingAsk(view.kind) && view.reply === undefined,
-    body: bodyOf(view.message)
-  };
-}
-function projectInteractionsForStatus(repoRoot) {
-  return listAll(repoRoot).map(project);
-}
-function projectOutstandingAsks(repoRoot) {
-  return projectInteractionsForStatus(repoRoot).filter((p) => p.awaiting_reply);
-}
-async function awaitReply(repoRoot, activationId, messageId, options2) {
-  const intervalMs = options2.intervalMs ?? 500;
-  const deadline = Date.now() + options2.timeoutMs;
-  for (;; ) {
-    const reply = readReply(repoRoot, activationId, messageId);
-    if (reply)
-      return reply;
-    if (options2.signal?.aborted)
-      return;
-    const remaining = deadline - Date.now();
-    if (remaining <= 0)
-      return;
-    await sleep4(Math.min(intervalMs, remaining), options2.signal);
-  }
-}
-function sleep4(ms, signal) {
-  return new Promise((resolve23) => {
-    const timer = setTimeout(done, ms);
-    signal?.addEventListener("abort", done, { once: true });
-    function done() {
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", done);
-      resolve23();
-    }
-  });
-}
-var init_polling = __esm(() => {
-  init_pending_store();
-});
-
-// src/activation/types.ts
-var THINKING_LEVELS, DispatchRejectedError;
-var init_types3 = __esm(() => {
-  THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"];
-  DispatchRejectedError = class DispatchRejectedError extends Error {
-    reason;
-    detail;
-    constructor(reason, detail = {}) {
-      const lines = [
-        "SPECIALIST_DISPATCH_REJECTED",
-        "",
-        ...detail.activationId ? [`activation:
-  ${detail.activationId}`, ""] : [],
-        ...detail.issueRef ? [`issue:
-  ${detail.issueRef}`, ""] : [],
-        ...detail.specialist ? [`specialist:
-  ${detail.specialist}`, ""] : [],
-        ...detail.note ? [`note:
-  ${detail.note}`, ""] : [],
-        `reason:
-  ${reason}`,
-        ...detail.missing?.length ? ["", `missing:
-${detail.missing.map((m) => `  - ${m}`).join(`
-`)}`] : [],
-        ...detail.requestedModel ? ["", `requested model:
-  ${detail.requestedModel}`] : [],
-        ...detail.workspace ? ["", `workspace:
-  ${detail.workspace}`] : [],
-        ...detail.created_ref ? ["", `created issue (claimed, left behind):
-  ${detail.created_ref}`] : [],
-        ...detail.holder ? ["", `holder:
-  ${detail.holder}`] : [],
-        "",
-        `AgentSession:
-  not created`
-      ];
-      super(lines.join(`
-`));
-      this.reason = reason;
-      this.detail = detail;
-      this.name = "DispatchRejectedError";
-    }
-  };
-});
-
-// src/activation/workspace-lease.ts
-import { createHash as createHash11 } from "crypto";
-import { existsSync as existsSync53, linkSync, mkdirSync as mkdirSync22, readFileSync as readFileSync44, realpathSync as realpathSync5, renameSync as renameSync8, unlinkSync as unlinkSync3, writeFileSync as writeFileSync25 } from "fs";
-import { join as join56 } from "path";
-function procLeaseProbe() {
-  return {
-    canVerify: () => existsSync53("/proc/self/stat"),
-    startTicks(pid) {
-      try {
-        const stat2 = readFileSync44(`/proc/${pid}/stat`, "utf-8");
-        const afterComm = stat2.slice(stat2.lastIndexOf(")") + 2).trim().split(/\s+/);
-        const ticks = Number(afterComm[19]);
-        return Number.isFinite(ticks) ? ticks : undefined;
-      } catch {
-        return;
-      }
-    }
-  };
-}
-function selfHolder(probe = procLeaseProbe()) {
-  const startTicks = probe.startTicks(process.pid);
-  if (startTicks === undefined) {
-    throw new Error("cannot read this process start time; a lease cannot be acquired without the PID-reuse guard");
-  }
-  return { pid: process.pid, startTicks };
-}
-function workspaceKey(workspace) {
-  let resolved = workspace.worktreePath;
-  try {
-    resolved = realpathSync5(workspace.worktreePath);
-  } catch {}
-  return createHash11("sha256").update(resolved).digest("hex").slice(0, 16);
-}
-function leaseDir(workspace) {
-  return join56(workspace.gitCommonDir ?? workspace.repositoryRoot, ".specialists", "leases");
-}
-function leasePath(workspace) {
-  return join56(leaseDir(workspace), `${workspaceKey(workspace)}.json`);
-}
-function inspect(workspace, probe = procLeaseProbe()) {
-  const path3 = leasePath(workspace);
-  if (!existsSync53(path3))
-    return { state: "free" };
-  let lease;
-  try {
-    lease = JSON.parse(readFileSync44(path3, "utf-8"));
-    if (typeof lease?.holder?.pid !== "number")
-      throw new Error("missing holder");
-  } catch {
-    return { state: "uncertain", uncertainReason: "unreadable_record" };
-  }
-  if (!probe.canVerify()) {
-    return { state: "uncertain", lease, uncertainReason: "liveness_unverifiable" };
-  }
-  const actual = probe.startTicks(lease.holder.pid);
-  if (actual === undefined) {
-    return { state: "uncertain", lease, uncertainReason: "holder_process_gone" };
-  }
-  if (actual !== lease.holder.startTicks) {
-    return { state: "uncertain", lease, uncertainReason: "holder_start_mismatch" };
-  }
-  return { state: "held", lease };
-}
-function acquire(request, probe = procLeaseProbe()) {
-  const { workspace, activationId, attemptId } = request;
-  const path3 = leasePath(workspace);
-  const status = inspect(workspace, probe);
-  if (status.state === "held" && status.lease) {
-    if (status.lease.activationId === activationId) {
-      return rewrite(workspace, { ...status.lease, attemptId });
-    }
-    throw refusal("workspace_held_by_another_writer", request, status);
-  }
-  if (status.state === "uncertain") {
-    throw refusal("workspace_lease_uncertain", request, status);
-  }
-  const lease = {
-    workspaceKey: workspaceKey(workspace),
-    worktreePath: workspace.worktreePath,
-    activationId,
-    attemptId,
-    specialist: request.specialist,
-    holder: selfHolder(probe),
-    acquiredAtMs: Date.now()
-  };
-  mkdirSync22(leaseDir(workspace), { recursive: true, mode: 448 });
-  const staging = `${path3}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
-  writeFileSync25(staging, `${JSON.stringify(lease, null, 2)}
-`, { mode: 384 });
-  try {
-    linkSync(staging, path3);
-  } catch (err) {
-    if (err.code === "EEXIST") {
-      throw refusal("workspace_held_by_another_writer", request, inspect(workspace, probe));
-    }
-    throw err;
-  } finally {
-    try {
-      unlinkSync3(staging);
-    } catch {}
-  }
-  return lease;
-}
-function rewrite(workspace, lease) {
-  const path3 = leasePath(workspace);
-  const staging = `${path3}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
-  writeFileSync25(staging, `${JSON.stringify(lease, null, 2)}
-`, { mode: 384 });
-  renameSync8(staging, path3);
-  return lease;
-}
-function release(workspace, activationId, probe = procLeaseProbe()) {
-  const status = inspect(workspace, probe);
-  if (status.state === "free")
-    return;
-  if (status.state === "uncertain") {
-    throw new DispatchRejectedError("workspace_lease_uncertain", {
-      activationId,
-      workspace: workspace.worktreePath,
-      holder: describeHolder(status),
-      note: "refusing to release a lease whose holder liveness is unknown; recovery is PRD Phase 9"
-    });
-  }
-  if (status.lease && status.lease.activationId !== activationId) {
-    throw new DispatchRejectedError("workspace_lease_not_held_by_caller", {
-      activationId,
-      workspace: workspace.worktreePath,
-      holder: describeHolder(status)
-    });
-  }
-  try {
-    unlinkSync3(leasePath(workspace));
-  } catch (err) {
-    if (err.code !== "ENOENT")
-      throw err;
-  }
-}
-function describeHolder(status) {
-  if (!status.lease)
-    return status.uncertainReason ?? "unknown";
-  const { activationId, specialist, holder } = status.lease;
-  const who = specialist ? `${specialist} ` : "";
-  const why = status.uncertainReason ? ` (${status.uncertainReason})` : "";
-  return `${who}${activationId} pid ${holder.pid}${why}`;
-}
-function refusal(reason, request, status) {
-  return new DispatchRejectedError(reason, {
-    activationId: request.activationId,
-    specialist: request.specialist,
-    workspace: request.workspace.worktreePath,
-    holder: describeHolder(status),
-    note: status.state === "uncertain" ? "the previous holder's liveness could not be established; the lease is uncertain, not free" : "exactly one writer holds a mutable workspace at a time"
-  });
-}
-function isMutatingTool(toolName) {
-  return !NON_MUTATING_TOOLS.has(toolName.trim().toLowerCase());
-}
-function admitToolCall(input2, probe = procLeaseProbe()) {
-  if (!isMutatingTool(input2.toolName))
-    return { allow: true };
-  const status = inspect(input2.workspace, probe);
-  if (status.state === "held" && status.lease?.activationId === input2.activationId) {
-    return { allow: true };
-  }
-  if (status.state === "held") {
-    return {
-      allow: false,
-      reason: `workspace ${input2.workspace.worktreePath} is held by ${describeHolder(status)}; ` + `${input2.toolName} would mutate a workspace this activation does not hold`
-    };
-  }
-  if (status.state === "uncertain") {
-    return {
-      allow: false,
-      reason: `workspace ${input2.workspace.worktreePath} lease is uncertain (${status.uncertainReason}); ` + "mutation is refused until recovery resolves the previous holder"
-    };
-  }
-  return {
-    allow: false,
-    reason: `workspace ${input2.workspace.worktreePath} is not leased by this activation; ` + `${input2.toolName} may not mutate it`
-  };
-}
-var NON_MUTATING_TOOLS;
-var init_workspace_lease = __esm(() => {
-  init_types3();
-  NON_MUTATING_TOOLS = new Set([
-    "read",
-    "grep",
-    "glob",
-    "ls",
-    "list",
-    "search",
-    "view",
-    "todowrite",
-    "websearch",
-    "webfetch"
-  ]);
-});
-
-// src/activation/workspace-reconcile.ts
-import { appendFileSync as appendFileSync6, existsSync as existsSync54, mkdirSync as mkdirSync23, readdirSync as readdirSync25, readFileSync as readFileSync45, unlinkSync as unlinkSync4 } from "fs";
-import { join as join57 } from "path";
-function readLogAt(path3) {
-  if (!existsSync54(path3))
-    return [];
-  const out = [];
-  for (const line of readFileSync45(path3, "utf-8").split(`
-`)) {
-    if (!line.trim())
-      continue;
-    try {
-      out.push(JSON.parse(line));
-    } catch {}
-  }
-  return out;
-}
-function leaseScopeFor(cwd) {
-  const commonRoot = resolveCommonGitRoot(cwd);
-  return {
-    repositoryRoot: commonRoot ?? cwd,
-    worktreePath: cwd,
-    gitCommonDir: commonRoot ? join57(commonRoot, ".git") : undefined
-  };
-}
-function projectUncertainWorkspaces(scope, probe = procLeaseProbe()) {
-  const dir = leaseDir(scope);
-  if (!existsSync54(dir))
-    return [];
-  const out = [];
-  for (const entry of readdirSync25(dir)) {
-    if (!entry.endsWith(".json"))
-      continue;
-    const key = entry.slice(0, -".json".length);
-    const lease = readLeaseFile(join57(dir, entry));
-    const status = lease ? inspect({ ...scope, worktreePath: lease.worktreePath }, probe) : { state: "uncertain", uncertainReason: "unreadable_record" };
-    if (status.state !== "uncertain")
-      continue;
-    const log = readLogAt(join57(dir, `${key}.reconcile.jsonl`));
-    const last = log[log.length - 1];
-    out.push({
-      workspace_key: key,
-      worktree_path: lease?.worktreePath,
-      uncertain_reason: status.uncertainReason,
-      holder_pid: lease?.holder.pid,
-      holder_activation_id: lease?.activationId,
-      holder_specialist: lease?.specialist,
-      acquired_at_ms: lease?.acquiredAtMs,
-      permitted_outcomes: status.uncertainReason ? [...PERMITTED[status.uncertainReason]] : ["manual_attention_required"],
-      reconciliation_attempts: log.length,
-      last_reconciliation: last && {
-        outcome: last.outcome,
-        applied: last.applied,
-        refusal_reason: last.refusalReason,
-        decided_by: last.decidedBy,
-        decided_at_ms: last.decidedAtMs,
-        basis: last.basis
-      }
-    });
-  }
-  return out;
-}
-function readLeaseFile(path3) {
-  try {
-    const lease = JSON.parse(readFileSync45(path3, "utf-8"));
-    return typeof lease?.holder?.pid === "number" && typeof lease.worktreePath === "string" ? lease : undefined;
-  } catch {
-    return;
-  }
-}
-var PERMITTED;
-var init_workspace_reconcile = __esm(() => {
-  init_job_root();
-  init_workspace_lease();
-  PERMITTED = {
-    holder_process_gone: new Set(["safe_free", "superseded", "manual_attention_required"]),
-    holder_start_mismatch: new Set(["safe_free", "superseded", "manual_attention_required"]),
-    unreadable_record: new Set(["superseded", "manual_attention_required"]),
-    liveness_unverifiable: new Set(["manual_attention_required"])
-  };
-});
-
 // src/activation/build-identity.ts
-import { createHash as createHash12 } from "crypto";
-import { readFileSync as readFileSync46 } from "fs";
+import { createHash as createHash11 } from "crypto";
+import { readFileSync as readFileSync43 } from "fs";
 function hashFileBytes(path3) {
-  return createHash12("sha256").update(readFileSync46(path3)).digest("hex");
+  return createHash11("sha256").update(readFileSync43(path3)).digest("hex");
 }
 function shortBuildId(hash) {
   return hash.slice(0, BUILD_ID_BYTES);
@@ -93707,8 +93251,53 @@ var init_rejection = __esm(() => {
   STALE_RUNTIME_REASON = "stale_runtime: the runtime serving this session was rebuilt after it loaded, so this " + "refusal came from superseded code. Restart the session, then retry the dispatch \u2014 do " + "not act on the refusal text below.";
 });
 
+// src/activation/types.ts
+var THINKING_LEVELS, DispatchRejectedError;
+var init_types3 = __esm(() => {
+  THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"];
+  DispatchRejectedError = class DispatchRejectedError extends Error {
+    reason;
+    detail;
+    constructor(reason, detail = {}) {
+      const lines = [
+        "SPECIALIST_DISPATCH_REJECTED",
+        "",
+        ...detail.activationId ? [`activation:
+  ${detail.activationId}`, ""] : [],
+        ...detail.issueRef ? [`issue:
+  ${detail.issueRef}`, ""] : [],
+        ...detail.specialist ? [`specialist:
+  ${detail.specialist}`, ""] : [],
+        ...detail.note ? [`note:
+  ${detail.note}`, ""] : [],
+        `reason:
+  ${reason}`,
+        ...detail.missing?.length ? ["", `missing:
+${detail.missing.map((m) => `  - ${m}`).join(`
+`)}`] : [],
+        ...detail.requestedModel ? ["", `requested model:
+  ${detail.requestedModel}`] : [],
+        ...detail.workspace ? ["", `workspace:
+  ${detail.workspace}`] : [],
+        ...detail.created_ref ? ["", `created issue (claimed, left behind):
+  ${detail.created_ref}`] : [],
+        ...detail.holder ? ["", `holder:
+  ${detail.holder}`] : [],
+        "",
+        `AgentSession:
+  not created`
+      ];
+      super(lines.join(`
+`));
+      this.reason = reason;
+      this.detail = detail;
+      this.name = "DispatchRejectedError";
+    }
+  };
+});
+
 // src/tools/specialist/activation.tool.ts
-import { existsSync as existsSync55 } from "fs";
+import { existsSync as existsSync52 } from "fs";
 import { fileURLToPath as fileURLToPath10 } from "url";
 function toActivationView(snapshot, nowMs = Date.now()) {
   return {
@@ -93972,7 +93561,7 @@ var init_activation_tool = __esm(() => {
   DIST_LIB_PATH = (() => {
     for (const candidate of ["./lib.js", "../../../dist/lib.js"]) {
       const path3 = fileURLToPath10(new URL(candidate, import.meta.url));
-      if (existsSync55(path3))
+      if (existsSync52(path3))
         return path3;
     }
     return fileURLToPath10(new URL("../../../dist/lib.js", import.meta.url));
@@ -94013,6 +93602,575 @@ var init_activation_tool = __esm(() => {
     prompt: stringType().optional().describe("Replacement turn prompt. Defaults to the dispatch-time render of the same Issue."),
     ...fullFlag
   });
+});
+
+// src/tools/specialist/specialist_result.tool.ts
+function normalize2(raw) {
+  const id = raw.trim();
+  return id.startsWith("act:") ? id : `act:${id}`;
+}
+function nextTool(state) {
+  switch (state) {
+    case "running":
+    case "starting":
+      return "specialist_steer (it is still running; wait for the completion wake, then call specialist_result)";
+    case "waiting":
+    case "needs_reply":
+    case "escalated":
+      return "specialist_reply (it is waiting on an answer)";
+    case "failed":
+      return "specialist_retry (it failed and has no settled result)";
+    default:
+      return "specialist_status (it has no settled result yet)";
+  }
+}
+function createSpecialistResultTool(getHost, getPusher, openObservability = () => createObservabilitySqliteClient()) {
+  return {
+    name: "specialist_result",
+    description: "Read the complete result of one settled activation by id (full id or unique short prefix). Returns the full output, never truncated. For an activation that has not settled it names the right next tool.",
+    inputSchema: specialistResultSchema,
+    async execute(input2) {
+      const wanted = normalize2(input2.activation_id);
+      const results = (getPusher?.()?.allResults() ?? []).map(toActivationResultView);
+      const snapshots = getHost?.()?.list() ?? [];
+      const ids = new Set([
+        ...results.map((r) => r.activation_id),
+        ...snapshots.map((s) => s.activationId)
+      ]);
+      const matches2 = ids.has(wanted) ? [wanted] : [...ids].filter((id2) => id2.startsWith(wanted)).sort();
+      if (matches2.length > 1) {
+        return {
+          status: "error",
+          error: `Ambiguous activation prefix: ${input2.activation_id}`,
+          candidates: matches2
+        };
+      }
+      const id = matches2[0] ?? wanted;
+      const hit = results.find((r) => r.activation_id === id);
+      if (hit) {
+        return {
+          activation_id: hit.activation_id,
+          specialist: snapshots.find((s) => s.activationId === id)?.specialist ?? null,
+          issue_ref: hit.issue_ref,
+          status: hit.status,
+          output: hit.output ?? "",
+          validation: hit.validation,
+          resolved_model: hit.resolved_model,
+          completed_at: hit.completed_at,
+          source: "memory"
+        };
+      }
+      let client = null;
+      try {
+        client = openObservability();
+        const output2 = client?.readResult(id) ?? null;
+        if (client && output2 !== null) {
+          const row = client.readStatus(id);
+          return {
+            activation_id: id,
+            specialist: row?.specialist ?? null,
+            issue_ref: row?.bead_id ?? null,
+            status: row?.status ?? "done",
+            output: output2,
+            validation: null,
+            resolved_model: row?.model ?? null,
+            completed_at: row?.last_event_at_ms ?? null,
+            source: "observability_db"
+          };
+        }
+      } catch {} finally {
+        try {
+          client?.close();
+        } catch {}
+      }
+      const snapshot = snapshots.find((s) => s.activationId === id);
+      if (snapshot) {
+        return { activation_id: id, state: snapshot.state, next: nextTool(snapshot.state) };
+      }
+      return { status: "error", error: `Unknown activation: ${input2.activation_id}` };
+    }
+  };
+}
+var specialistResultSchema;
+var init_specialist_result_tool = __esm(() => {
+  init_zod();
+  init_observability_sqlite();
+  init_activation_tool();
+  specialistResultSchema = objectType({
+    activation_id: stringType().min(1).describe("Activation id: the full id or a unique short prefix, e.g. 'act:a2924153' or 'a2924153'.")
+  });
+});
+
+// src/activation/transport/pending-store.ts
+import { existsSync as existsSync53, mkdirSync as mkdirSync21, readdirSync as readdirSync24, readFileSync as readFileSync44, renameSync as renameSync7, unlinkSync as unlinkSync2, writeFileSync as writeFileSync24 } from "fs";
+import { join as join55 } from "path";
+function projectDeliveryState(state) {
+  if (state === "delivered")
+    return "delivered";
+  if (state === "refused")
+    return "refused";
+  return "pending";
+}
+function createsPendingAsk(kind) {
+  return KINDS_AWAITING_REPLY.has(kind);
+}
+function interactionsRoot(repoRoot) {
+  return join55(repoRoot, ".specialists", "interactions");
+}
+function recordPath(repoRoot, activationId, messageId) {
+  return join55(interactionsRoot(repoRoot), activationId, `${messageId}.json`);
+}
+function replyPath(repoRoot, activationId, messageId) {
+  return join55(interactionsRoot(repoRoot), activationId, `${messageId}.reply.json`);
+}
+function writeAtomic(path3, value, exclusive = false) {
+  if (exclusive && existsSync53(path3)) {
+    throw new Error(`interaction record already exists: ${path3}`);
+  }
+  const tmp = `${path3}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+  writeFileSync24(tmp, `${JSON.stringify(value, null, 2)}
+`, { mode: 384 });
+  try {
+    renameSync7(tmp, path3);
+  } catch (err) {
+    try {
+      unlinkSync2(tmp);
+    } catch {}
+    throw err;
+  }
+}
+function readJson3(path3) {
+  if (!existsSync53(path3))
+    return;
+  try {
+    return JSON.parse(readFileSync44(path3, "utf-8"));
+  } catch {
+    return;
+  }
+}
+function create(repoRoot, input2) {
+  const record4 = {
+    messageId: input2.messageId,
+    activationId: input2.activationId,
+    kind: input2.kind,
+    createdAtMs: input2.createdAtMs ?? Date.now(),
+    message: input2.message,
+    delivery: { state: "pending", attempts: [] }
+  };
+  mkdirSync21(join55(interactionsRoot(repoRoot), input2.activationId), { recursive: true, mode: 448 });
+  writeAtomic(recordPath(repoRoot, input2.activationId, input2.messageId), record4, true);
+  return record4;
+}
+function read(repoRoot, activationId, messageId) {
+  return readJson3(recordPath(repoRoot, activationId, messageId));
+}
+function readReply(repoRoot, activationId, messageId) {
+  return readJson3(replyPath(repoRoot, activationId, messageId));
+}
+function recordAttempt(repoRoot, activationId, messageId, attempt) {
+  const record4 = read(repoRoot, activationId, messageId);
+  if (!record4)
+    throw new Error(`no interaction record for ${activationId}/${messageId}`);
+  record4.delivery.attempts.push(attempt);
+  if (record4.delivery.state !== "delivered") {
+    record4.delivery.state = attempt.outcome;
+  }
+  writeAtomic(recordPath(repoRoot, activationId, messageId), record4);
+  return record4;
+}
+function recordReceipt(repoRoot, activationId, messageId, receipt) {
+  const record4 = read(repoRoot, activationId, messageId);
+  if (!record4)
+    throw new Error(`no interaction record for ${activationId}/${messageId}`);
+  if (receipt.origMsgId !== messageId) {
+    throw new Error(`receipt orig_msg_id ${receipt.origMsgId} does not match ${messageId}`);
+  }
+  record4.delivery.state = "delivered";
+  record4.delivery.receiptMsgId = receipt.receiptMsgId;
+  record4.delivery.deliveredAtMs = receipt.atMs ?? Date.now();
+  writeAtomic(recordPath(repoRoot, activationId, messageId), record4);
+  return record4;
+}
+function isConfirmable(kind) {
+  return createsPendingAsk(kind);
+}
+function recordReplyDelivery(repoRoot, activationId, messageId, reply) {
+  const record4 = read(repoRoot, activationId, messageId);
+  if (!record4)
+    throw new Error(`no interaction record for ${activationId}/${messageId}`);
+  if (reply.inReplyTo !== messageId) {
+    throw new Error(`reply inReplyTo ${String(reply.inReplyTo)} does not match ${messageId}`);
+  }
+  if (!isConfirmable(record4.kind))
+    return record4;
+  if (record4.delivery.state !== "sent_unconfirmed")
+    return record4;
+  record4.delivery.state = "delivered";
+  record4.delivery.deliveredAtMs = reply.atMs ?? Date.now();
+  writeAtomic(recordPath(repoRoot, activationId, messageId), record4);
+  return record4;
+}
+function listForActivation(repoRoot, activationId) {
+  const dir = join55(interactionsRoot(repoRoot), activationId);
+  if (!existsSync53(dir))
+    return [];
+  const views = [];
+  for (const entry of readdirSync24(dir)) {
+    if (!entry.endsWith(".json") || entry.endsWith(".reply.json") || entry.endsWith(".tmp"))
+      continue;
+    const record4 = readJson3(join55(dir, entry));
+    if (!record4)
+      continue;
+    views.push({ ...record4, reply: readReply(repoRoot, activationId, record4.messageId) });
+  }
+  return views.sort((a, b) => a.createdAtMs - b.createdAtMs);
+}
+function listAll(repoRoot) {
+  const root = interactionsRoot(repoRoot);
+  if (!existsSync53(root))
+    return [];
+  return readdirSync24(root).flatMap((activationId) => listForActivation(repoRoot, activationId)).sort((a, b) => a.createdAtMs - b.createdAtMs);
+}
+var KINDS_AWAITING_REPLY;
+var init_pending_store = __esm(() => {
+  KINDS_AWAITING_REPLY = new Set(["question", "escalation"]);
+});
+
+// src/activation/transport/polling.ts
+function bodyOf(message) {
+  if (typeof message !== "object" || message === null)
+    return;
+  const value = message.body;
+  return typeof value === "string" ? value : undefined;
+}
+function project(view) {
+  return {
+    activation_id: view.activationId,
+    message_id: view.messageId,
+    kind: view.kind,
+    delivery: projectDeliveryState(view.delivery.state),
+    wire_delivery: view.delivery.state,
+    created_at_ms: view.createdAtMs,
+    send_attempts: view.delivery.attempts.length,
+    answered: view.reply !== undefined,
+    awaiting_reply: createsPendingAsk(view.kind) && view.reply === undefined,
+    body: bodyOf(view.message)
+  };
+}
+function projectInteractionsForStatus(repoRoot) {
+  return listAll(repoRoot).map(project);
+}
+function projectOutstandingAsks(repoRoot) {
+  return projectInteractionsForStatus(repoRoot).filter((p) => p.awaiting_reply);
+}
+async function awaitReply(repoRoot, activationId, messageId, options2) {
+  const intervalMs = options2.intervalMs ?? 500;
+  const deadline = Date.now() + options2.timeoutMs;
+  for (;; ) {
+    const reply = readReply(repoRoot, activationId, messageId);
+    if (reply)
+      return reply;
+    if (options2.signal?.aborted)
+      return;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0)
+      return;
+    await sleep4(Math.min(intervalMs, remaining), options2.signal);
+  }
+}
+function sleep4(ms, signal) {
+  return new Promise((resolve23) => {
+    const timer = setTimeout(done, ms);
+    signal?.addEventListener("abort", done, { once: true });
+    function done() {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
+      resolve23();
+    }
+  });
+}
+var init_polling = __esm(() => {
+  init_pending_store();
+});
+
+// src/activation/workspace-lease.ts
+import { createHash as createHash12 } from "crypto";
+import { existsSync as existsSync54, linkSync, mkdirSync as mkdirSync22, readFileSync as readFileSync45, realpathSync as realpathSync5, renameSync as renameSync8, unlinkSync as unlinkSync3, writeFileSync as writeFileSync25 } from "fs";
+import { join as join56 } from "path";
+function procLeaseProbe() {
+  return {
+    canVerify: () => existsSync54("/proc/self/stat"),
+    startTicks(pid) {
+      try {
+        const stat2 = readFileSync45(`/proc/${pid}/stat`, "utf-8");
+        const afterComm = stat2.slice(stat2.lastIndexOf(")") + 2).trim().split(/\s+/);
+        const ticks = Number(afterComm[19]);
+        return Number.isFinite(ticks) ? ticks : undefined;
+      } catch {
+        return;
+      }
+    }
+  };
+}
+function selfHolder(probe = procLeaseProbe()) {
+  const startTicks = probe.startTicks(process.pid);
+  if (startTicks === undefined) {
+    throw new Error("cannot read this process start time; a lease cannot be acquired without the PID-reuse guard");
+  }
+  return { pid: process.pid, startTicks };
+}
+function workspaceKey(workspace) {
+  let resolved = workspace.worktreePath;
+  try {
+    resolved = realpathSync5(workspace.worktreePath);
+  } catch {}
+  return createHash12("sha256").update(resolved).digest("hex").slice(0, 16);
+}
+function leaseDir(workspace) {
+  return join56(workspace.gitCommonDir ?? workspace.repositoryRoot, ".specialists", "leases");
+}
+function leasePath(workspace) {
+  return join56(leaseDir(workspace), `${workspaceKey(workspace)}.json`);
+}
+function inspect(workspace, probe = procLeaseProbe()) {
+  const path3 = leasePath(workspace);
+  if (!existsSync54(path3))
+    return { state: "free" };
+  let lease;
+  try {
+    lease = JSON.parse(readFileSync45(path3, "utf-8"));
+    if (typeof lease?.holder?.pid !== "number")
+      throw new Error("missing holder");
+  } catch {
+    return { state: "uncertain", uncertainReason: "unreadable_record" };
+  }
+  if (!probe.canVerify()) {
+    return { state: "uncertain", lease, uncertainReason: "liveness_unverifiable" };
+  }
+  const actual = probe.startTicks(lease.holder.pid);
+  if (actual === undefined) {
+    return { state: "uncertain", lease, uncertainReason: "holder_process_gone" };
+  }
+  if (actual !== lease.holder.startTicks) {
+    return { state: "uncertain", lease, uncertainReason: "holder_start_mismatch" };
+  }
+  return { state: "held", lease };
+}
+function acquire(request, probe = procLeaseProbe()) {
+  const { workspace, activationId, attemptId } = request;
+  const path3 = leasePath(workspace);
+  const status = inspect(workspace, probe);
+  if (status.state === "held" && status.lease) {
+    if (status.lease.activationId === activationId) {
+      return rewrite(workspace, { ...status.lease, attemptId });
+    }
+    throw refusal("workspace_held_by_another_writer", request, status);
+  }
+  if (status.state === "uncertain") {
+    throw refusal("workspace_lease_uncertain", request, status);
+  }
+  const lease = {
+    workspaceKey: workspaceKey(workspace),
+    worktreePath: workspace.worktreePath,
+    activationId,
+    attemptId,
+    specialist: request.specialist,
+    holder: selfHolder(probe),
+    acquiredAtMs: Date.now()
+  };
+  mkdirSync22(leaseDir(workspace), { recursive: true, mode: 448 });
+  const staging = `${path3}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+  writeFileSync25(staging, `${JSON.stringify(lease, null, 2)}
+`, { mode: 384 });
+  try {
+    linkSync(staging, path3);
+  } catch (err) {
+    if (err.code === "EEXIST") {
+      throw refusal("workspace_held_by_another_writer", request, inspect(workspace, probe));
+    }
+    throw err;
+  } finally {
+    try {
+      unlinkSync3(staging);
+    } catch {}
+  }
+  return lease;
+}
+function rewrite(workspace, lease) {
+  const path3 = leasePath(workspace);
+  const staging = `${path3}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+  writeFileSync25(staging, `${JSON.stringify(lease, null, 2)}
+`, { mode: 384 });
+  renameSync8(staging, path3);
+  return lease;
+}
+function release(workspace, activationId, probe = procLeaseProbe()) {
+  const status = inspect(workspace, probe);
+  if (status.state === "free")
+    return;
+  if (status.state === "uncertain") {
+    throw new DispatchRejectedError("workspace_lease_uncertain", {
+      activationId,
+      workspace: workspace.worktreePath,
+      holder: describeHolder(status),
+      note: "refusing to release a lease whose holder liveness is unknown; recovery is PRD Phase 9"
+    });
+  }
+  if (status.lease && status.lease.activationId !== activationId) {
+    throw new DispatchRejectedError("workspace_lease_not_held_by_caller", {
+      activationId,
+      workspace: workspace.worktreePath,
+      holder: describeHolder(status)
+    });
+  }
+  try {
+    unlinkSync3(leasePath(workspace));
+  } catch (err) {
+    if (err.code !== "ENOENT")
+      throw err;
+  }
+}
+function describeHolder(status) {
+  if (!status.lease)
+    return status.uncertainReason ?? "unknown";
+  const { activationId, specialist, holder } = status.lease;
+  const who = specialist ? `${specialist} ` : "";
+  const why = status.uncertainReason ? ` (${status.uncertainReason})` : "";
+  return `${who}${activationId} pid ${holder.pid}${why}`;
+}
+function refusal(reason, request, status) {
+  return new DispatchRejectedError(reason, {
+    activationId: request.activationId,
+    specialist: request.specialist,
+    workspace: request.workspace.worktreePath,
+    holder: describeHolder(status),
+    note: status.state === "uncertain" ? "the previous holder's liveness could not be established; the lease is uncertain, not free" : "exactly one writer holds a mutable workspace at a time"
+  });
+}
+function isMutatingTool(toolName) {
+  return !NON_MUTATING_TOOLS.has(toolName.trim().toLowerCase());
+}
+function admitToolCall(input2, probe = procLeaseProbe()) {
+  if (!isMutatingTool(input2.toolName))
+    return { allow: true };
+  const status = inspect(input2.workspace, probe);
+  if (status.state === "held" && status.lease?.activationId === input2.activationId) {
+    return { allow: true };
+  }
+  if (status.state === "held") {
+    return {
+      allow: false,
+      reason: `workspace ${input2.workspace.worktreePath} is held by ${describeHolder(status)}; ` + `${input2.toolName} would mutate a workspace this activation does not hold`
+    };
+  }
+  if (status.state === "uncertain") {
+    return {
+      allow: false,
+      reason: `workspace ${input2.workspace.worktreePath} lease is uncertain (${status.uncertainReason}); ` + "mutation is refused until recovery resolves the previous holder"
+    };
+  }
+  return {
+    allow: false,
+    reason: `workspace ${input2.workspace.worktreePath} is not leased by this activation; ` + `${input2.toolName} may not mutate it`
+  };
+}
+var NON_MUTATING_TOOLS;
+var init_workspace_lease = __esm(() => {
+  init_types3();
+  NON_MUTATING_TOOLS = new Set([
+    "read",
+    "grep",
+    "glob",
+    "ls",
+    "list",
+    "search",
+    "view",
+    "todowrite",
+    "websearch",
+    "webfetch"
+  ]);
+});
+
+// src/activation/workspace-reconcile.ts
+import { appendFileSync as appendFileSync6, existsSync as existsSync55, mkdirSync as mkdirSync23, readdirSync as readdirSync25, readFileSync as readFileSync46, unlinkSync as unlinkSync4 } from "fs";
+import { join as join57 } from "path";
+function readLogAt(path3) {
+  if (!existsSync55(path3))
+    return [];
+  const out = [];
+  for (const line of readFileSync46(path3, "utf-8").split(`
+`)) {
+    if (!line.trim())
+      continue;
+    try {
+      out.push(JSON.parse(line));
+    } catch {}
+  }
+  return out;
+}
+function leaseScopeFor(cwd) {
+  const commonRoot = resolveCommonGitRoot(cwd);
+  return {
+    repositoryRoot: commonRoot ?? cwd,
+    worktreePath: cwd,
+    gitCommonDir: commonRoot ? join57(commonRoot, ".git") : undefined
+  };
+}
+function projectUncertainWorkspaces(scope, probe = procLeaseProbe()) {
+  const dir = leaseDir(scope);
+  if (!existsSync55(dir))
+    return [];
+  const out = [];
+  for (const entry of readdirSync25(dir)) {
+    if (!entry.endsWith(".json"))
+      continue;
+    const key = entry.slice(0, -".json".length);
+    const lease = readLeaseFile(join57(dir, entry));
+    const status = lease ? inspect({ ...scope, worktreePath: lease.worktreePath }, probe) : { state: "uncertain", uncertainReason: "unreadable_record" };
+    if (status.state !== "uncertain")
+      continue;
+    const log = readLogAt(join57(dir, `${key}.reconcile.jsonl`));
+    const last = log[log.length - 1];
+    out.push({
+      workspace_key: key,
+      worktree_path: lease?.worktreePath,
+      uncertain_reason: status.uncertainReason,
+      holder_pid: lease?.holder.pid,
+      holder_activation_id: lease?.activationId,
+      holder_specialist: lease?.specialist,
+      acquired_at_ms: lease?.acquiredAtMs,
+      permitted_outcomes: status.uncertainReason ? [...PERMITTED[status.uncertainReason]] : ["manual_attention_required"],
+      reconciliation_attempts: log.length,
+      last_reconciliation: last && {
+        outcome: last.outcome,
+        applied: last.applied,
+        refusal_reason: last.refusalReason,
+        decided_by: last.decidedBy,
+        decided_at_ms: last.decidedAtMs,
+        basis: last.basis
+      }
+    });
+  }
+  return out;
+}
+function readLeaseFile(path3) {
+  try {
+    const lease = JSON.parse(readFileSync46(path3, "utf-8"));
+    return typeof lease?.holder?.pid === "number" && typeof lease.worktreePath === "string" ? lease : undefined;
+  } catch {
+    return;
+  }
+}
+var PERMITTED;
+var init_workspace_reconcile = __esm(() => {
+  init_job_root();
+  init_workspace_lease();
+  PERMITTED = {
+    holder_process_gone: new Set(["safe_free", "superseded", "manual_attention_required"]),
+    holder_start_mismatch: new Set(["safe_free", "superseded", "manual_attention_required"]),
+    unreadable_record: new Set(["superseded", "manual_attention_required"]),
+    liveness_unverifiable: new Set(["manual_attention_required"])
+  };
 });
 
 // src/tools/specialist/specialist_status.tool.ts
@@ -98731,8 +98889,8 @@ var init_channel = __esm(() => {
     clarification_requested: "needs_reply"
   };
   ACTION = {
-    completed: "Call specialist_status for the authoritative result.",
-    failed: "Call specialist_status for the authoritative failure detail.",
+    completed: "Call specialist_result for the full result.",
+    failed: "Call specialist_result for the failure detail.",
     escalation: "Call specialist_status to read the escalation, then specialist_reply.",
     needs_reply: "Call specialist_status to read the pending ask and message_id, then specialist_reply."
   };
@@ -98777,6 +98935,7 @@ function buildV2Server(ctx, options2) {
   ] : [];
   const tools = [
     createSpecialistStatusTool(loader, circuitBreaker, getHost, getPusher),
+    createSpecialistResultTool(getHost, getPusher),
     createSpecialistDispatchTool(getHost, getPusher),
     createSpecialistReplyTool(getHost),
     createSpecialistResumeTool(getHost, getPusher),
@@ -98790,6 +98949,7 @@ function buildV2Server(ctx, options2) {
     substrate_journal: substrateJournalSchema,
     substrate_provenance: substrateProvenanceSchema,
     specialist_status: specialistStatusSchema,
+    specialist_result: specialistResultSchema,
     specialist_dispatch: specialistDispatchSchema,
     specialist_reply: specialistReplySchema,
     specialist_resume: specialistResumeSchema,
@@ -98875,6 +99035,7 @@ var init_v2_server = __esm(() => {
   init_observability_sqlite();
   init_loader();
   init_circuitBreaker();
+  init_specialist_result_tool();
   init_specialist_status_tool();
   init_specialist_list_tool();
   init_activation_tool();
@@ -100327,6 +100488,10 @@ Run 'specialists help' to see available commands.`);
     process.exit(1);
   }
   logger.info("Starting Specialists MCP Server (v2, 2025-11-25 + 2026-07-28 dual-revision)...");
+  const { isObservabilityDbMissing: isObservabilityDbMissing2, OBSERVABILITY_DB_MISSING_FIX: OBSERVABILITY_DB_MISSING_FIX2 } = await Promise.resolve().then(() => (init_observability_db(), exports_observability_db));
+  if (isObservabilityDbMissing2()) {
+    console.error(`[specialists] observability.db not found: activation results will not be persisted and specialist_result can read only this server's memory. Run '${OBSERVABILITY_DB_MISSING_FIX2}' to enable persistence.`);
+  }
   const { serveV2Stdio: serveV2Stdio2 } = await Promise.resolve().then(() => (init_v2_server(), exports_v2_server));
   serveV2Stdio2();
 }

@@ -8,6 +8,13 @@ export interface ObservabilityDbLocation {
     source: 'git-root' | 'xdg-data-home';
 }
 export declare function resolveObservabilityDbLocation(cwd?: string): ObservabilityDbLocation;
+/**
+ * True when no observability database exists at the resolved location. Activation
+ * results are persisted to `specialist_results` only when the file exists; the
+ * writers never create it, so a missing file means results live in memory only.
+ */
+export declare function isObservabilityDbMissing(cwd?: string): boolean;
+export declare const OBSERVABILITY_DB_MISSING_FIX = "specialists db setup";
 export declare function ensureObservabilityDbFile(location: ObservabilityDbLocation): {
     created: boolean;
 };

@@ -497,7 +497,7 @@ export function createAskObserverSink(base, onAsk, onTerminal) {
  *   │ Call specialist_status to obtain the pending message_id, then reply with specialist_reply. · activation act:b38da383-b44
  *
  *   │ ✓ executor · XTRM-241 · 42s • 3t • 43k
- *   │ Call specialist_status to read the validated result. · activation act:b38da383-b44
+ *   │ Call specialist_result to read the complete result. · activation act:b38da383-b44
  *
  * No `[customType]` label and no background: pi's DEFAULT custom-message component paints a
  * `customMessageBg` box and a bold `[specialist_ask]` header, which is where the card look
@@ -521,9 +521,9 @@ const ASK_INSTRUCTION =
   'Call specialist_status to obtain the pending message_id, then reply with specialist_reply.';
 const ESCALATION_INSTRUCTION =
   'Call specialist_status to inspect the escalation and respond through specialist_reply.';
-const RESULT_INSTRUCTION = 'Call specialist_status to read the validated result.';
+const RESULT_INSTRUCTION = 'Call specialist_result to read the complete result.';
 const FAIL_INSTRUCTION =
-  'Call specialist_status for authoritative state, then use specialist_retry if appropriate.';
+  'Call specialist_result for the full failure detail, then use specialist_retry if appropriate.';
 
 /** Run cost for a settled event: elapsed • turns • tokens (each part omitted when absent). */
 function costFacts(view) {
@@ -1037,6 +1037,28 @@ const Registry = Type.Object({
   note: Type.Optional(Type.String()),
 });
 
+/** One activated specialist's complete settled result, or its not-settled guidance. */
+const Result = Type.Object({
+  activation_id: Type.Optional(Type.String()),
+  specialist: Type.Optional(Type.String()),
+  issue_ref: Type.Optional(Type.String()),
+  status: Type.Optional(Type.String()),
+  output: Type.Optional(Type.Unknown()),
+  validation: Type.Optional(Type.Object({
+    valid: Type.Optional(Type.Boolean()),
+    schema: Type.Optional(Type.String()),
+    errors: Type.Optional(Type.Array(Type.String())),
+  })),
+  resolved_model: Type.Optional(Type.String()),
+  completed_at: Type.Optional(Type.Number()),
+  source: Type.Optional(Type.String()),
+  // Not-settled guidance and structured errors share this schema object.
+  state: Type.Optional(Type.String()),
+  next: Type.Optional(Type.String()),
+  error: Type.Optional(Type.String()),
+  candidates: Type.Optional(Type.Array(Type.String())),
+});
+
 /**
  * `outputSchema` per registered tool, by tool name. One map, referenced by every
  * `pi.registerTool` call below: a tool cannot declare a schema this map lacks,
@@ -1045,6 +1067,7 @@ const Registry = Type.Object({
 export const TOOL_OUTPUT_SCHEMAS = {
   specialist_dispatch: Envelope,
   specialist_status: Fleet,
+  specialist_result: Result,
   specialist_reply: Envelope,
   specialist_resume: Envelope,
   specialist_retry: Envelope,
@@ -1123,6 +1146,18 @@ function summarizePayload(payload) {
   if (payload.specialist && typeof payload.specialist === 'object') {
     const s = payload.specialist;
     return [`${s.name ?? '?'} [${s.permission_required ?? s.tier ?? '?'}]${s.category ? ` (${s.category})` : ''}${s.dispatchable === false ? ` — not dispatchable: ${s.reason ?? 'unknown reason'}` : ''}`];
+  }
+  // specialist_result: a settled result (has `source`) or not-settled guidance (has `next`).
+  if (typeof payload.activation_id === 'string' && typeof payload.source === 'string') {
+    const text = typeof payload.output === 'string' ? payload.output : '';
+    const lines = [`Result · ${payload.specialist ?? '?'} · ${payload.issue_ref ?? payload.activation_id} · ${payload.status ?? '?'} (${payload.source})${payload.resolved_model ? ` [${payload.resolved_model}]` : ''}`];
+    if (text.trim()) {
+      lines.push(...text.trim().split('\n').slice(0, RESULT_EXCERPT_LINES).map((l) => `  ${l.trim()}`));
+    }
+    return lines;
+  }
+  if (typeof payload.activation_id === 'string' && typeof payload.state === 'string' && typeof payload.next === 'string') {
+    return [`${payload.activation_id} not settled — ${payload.state} → ${payload.next}`];
   }
   switch (payload.status) {
     case 'dispatched':
@@ -1602,6 +1637,149 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
             })),
             pending_asks: h.pendingAsks().map(toPendingAskCompactView),
           }))
+    },
+  });
+
+  // Identifiers are correlation keys, not display text. `act:` is a prefix, never part of
+  // the identity, so short ids resolve against the id minus that prefix.
+  const normId = (id) => String(id ?? '').replace(/^act:/, '');
+
+  /**
+   * Resolve an activation_id (full id or a unique short prefix, with or without the
+   * `act:` lead) against the activations this process knows: its in-memory settled
+   * results and its live host snapshots.
+   */
+  function resolveActivationId(input, knownIds) {
+    const needle = normId(input);
+    const full = knownIds.filter((k) => normId(k) === needle);
+    if (full.length === 1) return { id: full[0] };
+    const prefix = knownIds.filter((k) => normId(k).startsWith(needle));
+    if (prefix.length === 1) return { id: prefix[0] };
+    if (prefix.length > 1) return { ambiguous: prefix };
+    return { unknown: true, candidates: [...knownIds] };
+  }
+
+  /** The owning tool for a live-but-unsettled state: steer while running, reply when
+   * blocked on the coordinator, retry after a failure, resume a settled activation. */
+  function nextToolFor(state) {
+    switch (state) {
+      case 'running':
+      case 'starting':
+        return 'specialist_steer';
+      case 'needs_reply':
+      case 'escalated':
+      case 'waiting':
+        return 'specialist_reply';
+      case 'failed':
+        return 'specialist_retry';
+      case 'settled':
+        return 'specialist_resume';
+      default:
+        return 'specialist_status';
+    }
+  }
+
+  /** Every activation id the live host knows, tolerating a host whose listing throws. */
+  function hostInspectIds(h) {
+    try {
+      return (h.list() ?? []).map((s) => s?.activationId).filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
+  /** One host snapshot by id, or undefined when absent/unreadable. */
+  function hostSnapshotOf(h, id) {
+    try {
+      return h.inspect(id) ?? undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** The settled-result shape shared with the MCP frontend. Output is untruncated. */
+  function settledResultView(result, h, id) {
+    const snapshot = hostSnapshotOf(h, id);
+    return {
+      activation_id: result.activationId,
+      specialist: snapshot?.specialist ?? String(result.participantId ?? '').replace(/^specialist::/, ''),
+      issue_ref: result.issueRef,
+      status: result.status,
+      output: result.output ?? null,
+      validation: result.validation,
+      resolved_model: result.resolvedModel,
+      completed_at: result.completedAt,
+      source: 'memory',
+    };
+  }
+
+  pi.registerTool({
+    name: 'specialist_result',
+    label: 'Specialist result',
+    description:
+      'Read ONE settled activation\'s complete result as a single object — the drill-down ' +
+      'specialist_status deliberately withholds from its compact rows and projects whole ' +
+      'only under full:true amidst every other result. Accepts a full activation_id or a ' +
+      'unique short prefix (with or without the act: lead). Lookup reads the in-memory results ' +
+      'of this process (the same result specialist_status projects); a result from before ' +
+      'a restart is not available here. An activation that exists but has no result yet is answered with its ' +
+      'state and the tool that owns it (steer while running, reply while blocked, retry ' +
+      'after failure). An unknown or ambiguous id is a structured error naming the candidates.',
+    promptSnippet: 'Read one Specialist result (specialist_result: activation_id)',
+    renderResult: humanResultOf(),
+    outputSchema: TOOL_OUTPUT_SCHEMAS.specialist_result,
+    namespace: TOOL_NAMESPACE,
+    parameters: Type.Object({
+      activation_id: Type.String({
+        description:
+          'The activation to read. Either the full activation id (act:...) or a unique ' +
+          'short prefix — the leading hex of the id with or without the act: lead, e.g. ' +
+          '`a2924153` or `act:a2924153`. Ambiguous prefixes are refused with the candidates named.',
+      }),
+    }),
+    async execute(toolCallId, params = {}) {
+      const input = String(params.activation_id ?? '').trim();
+      const h = getHost();
+      const knownIds = [...new Set([
+        ...results.keys(),
+        ...hostInspectIds(h),
+      ])];
+      const resolved = resolveActivationId(input, knownIds);
+      if (resolved.ambiguous) {
+        return resultOf({
+              status: 'error',
+              error: `ambiguous activation prefix '${input}' matches ${resolved.ambiguous.length} activations`,
+              candidates: resolved.ambiguous,
+            })
+      }
+      if (resolved.unknown) {
+        return resultOf({
+              status: 'error',
+              error: `unknown activation '${input}' — no matching activation on this coordinator`,
+              candidates: resolved.candidates,
+            })
+      }
+
+      const id = resolved.id;
+      const memory = results.get(id);
+      if (memory) {
+        return resultOf(settledResultView(memory, h, id));
+      }
+
+      const snapshot = hostSnapshotOf(h, id);
+      if (snapshot) {
+        return resultOf({
+              activation_id: id,
+              state: snapshot.state,
+              next: nextToolFor(snapshot.state),
+            })
+      }
+
+      return resultOf({
+            status: 'error',
+            error: `no result for activation '${id}' and it is no longer on this coordinator`,
+            activation_id: id,
+          })
     },
   });
 

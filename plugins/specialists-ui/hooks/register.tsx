@@ -109,6 +109,8 @@ export function specialistToolCall(tool: string, input: unknown): ToolCall | nul
       )
     case 'specialist_status':
       return head('Status', short)
+    case 'specialist_result':
+      return head('Result', short)
     case 'specialist_list':
       return head('List specialists', stringArg(args.name))
     case 'specialist_reply':
@@ -199,6 +201,15 @@ export function toolResultLine(tool: string, output: unknown): { text: string; i
       const parts = [count(activations.length, 'activation'), running ? `${running} running` : undefined, asks ? `${asks} waiting on you` : undefined]
       return { text: parts.filter(Boolean).join(', '), isError: false }
     }
+    case 'specialist_result': {
+      if (record.output == null) {
+        const pending = stringArg(record.state)
+        return pending ? { text: pending, isError: false } : null
+      }
+      const body = typeof record.output === 'string' ? record.output : JSON.stringify(record.output)
+      const lines = body === '' ? 0 : body.split('\n').length
+      return { text: joined(stringArg(record.status), count(lines, 'line')), isError: false }
+    }
     case 'specialist_list':
       return Array.isArray(record.specialists) ? { text: count(record.specialists.length, 'specialist'), isError: false } : null
     default: {
@@ -224,7 +235,7 @@ export function register(on: On) {
           <Text> {row.event}</Text>
           {row.issue ? <Text dimColor> · {row.issue}</Text> : null}
         </Box>
-        <Text dimColor italic>  use specialist_status for full result</Text>
+        <Text dimColor italic>  use specialist_result for full result</Text>
       </Box>
     )
   })
@@ -239,7 +250,7 @@ export function register(on: On) {
           <Text bold color={ACCENT}>Specialists</Text>
           <Text> fallback wake</Text>
         </Box>
-        <Text dimColor italic>  use specialist_status for full result</Text>
+        <Text dimColor italic>  use specialist_result for full result</Text>
       </Box>
     )
   })

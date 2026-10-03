@@ -1459,6 +1459,10 @@ async function run() {
   // No subcommand: one SDK v2 server serves both 2025-11-25 and 2026-07-28;
   // the entrypoint rejects unsupported protocol revisions.
   logger.info("Starting Specialists MCP Server (v2, 2025-11-25 + 2026-07-28 dual-revision)...");
+  const { isObservabilityDbMissing, OBSERVABILITY_DB_MISSING_FIX } = await import("./specialist/observability-db.js");
+  if (isObservabilityDbMissing()) {
+    console.error(`[specialists] observability.db not found: activation results will not be persisted and specialist_result can read only this server's memory. Run '${OBSERVABILITY_DB_MISSING_FIX}' to enable persistence.`);
+  }
   const { serveV2Stdio } = await import("./mcp/v2-server.js");
   serveV2Stdio();
 }

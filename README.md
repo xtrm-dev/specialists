@@ -194,7 +194,7 @@ claude plugin install specialists-ui@xtrm   # optional: teammate-style transcrip
 
 `specialists-ui` draws the rows the `specialists` plugin raises in Claude Code's own style.
 A channel wake becomes a teammate row, `● Specialist @explorer:d65bbed4 completed`, with a
-dim `use specialist_status for full result` line. A Specialists MCP call becomes a native
+dim `use specialist_result for full result` line. A Specialists MCP call becomes a native
 tool row, `● Dispatch(executor · XTRM-4)`, with its result on an indented line under it. It
 is a separate plugin because Claude Code never runs a plugin's own drawing hooks on a row
 that plugin raised, and the wake comes from the `specialists` MCP server. Without it,
@@ -264,7 +264,7 @@ only `./plugins/specialists` gives the runtime without the transcript rows.
 
 When an activation settles, fails, escalates or asks a question, the plugin's MCP server
 pushes a short notice into the coordinator session (a Claude Code Channel). The notice wakes
-an idle session; the authoritative read is still `specialist_status`. Claude Code drops the
+an idle session; the authoritative read of a result is `specialist_result` (`specialist_status` for asks and state). Claude Code drops the
 push without any error unless all of the following are true, so configure both parts.
 
 1. Launch the session with the plugin's server named as a channel:
@@ -307,7 +307,7 @@ If the channel wake is not available, a fallback still wakes the session: the pl
 `wake-watch` hook starts with each session, watches the Substrate store, and wakes the
 session once when an activation settles or asks a question. It stops after that first wake
 or after about 15 minutes, so it is a safety net, not a replacement for the channel. While
-both are active, one event can wake the session twice; `specialist_status` is the
+both are active, one event can wake the session twice; `specialist_result` is the
 authoritative read either way.
 
 Check the result with `specialists doctor --channels`, which reports the first closed gate.
