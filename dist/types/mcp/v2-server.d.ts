@@ -1,5 +1,5 @@
 import { McpServer } from '@modelcontextprotocol/server';
-import type { McpRequestContext } from '@modelcontextprotocol/server';
+import type { McpRequestContext, Transport } from '@modelcontextprotocol/server';
 import type { StdioServerHandle } from '@modelcontextprotocol/server/stdio';
 import { type SubstrateHandle } from '../substrate/services.js';
 /**
@@ -21,9 +21,28 @@ export interface BuildV2ServerOptions {
     substrate?: SubstrateHandle;
 }
 export declare function buildV2Server(ctx?: McpRequestContext, options?: BuildV2ServerOptions): McpServer;
+/** Which protocol revisions the stdio entry serves. */
+export type StdioEra = 'dual' | 'legacy';
 /**
- * Official SDK v2 stdio entry. The SDK serves both supported eras from this
- * factory and rejects unsupported protocol revisions.
+ * `SPECIALISTS_MCP_ERA=legacy` selects legacy-only serving; anything else keeps the
+ * dual-revision default. The Claude Code plugin's launcher sets it (SPECIALISTS-4234).
  */
-export declare function serveV2Stdio(): StdioServerHandle;
+export declare function stdioEraFromEnv(env?: NodeJS.ProcessEnv): StdioEra;
+/**
+ * Legacy-only stdio serving: one 2025-11-25 instance hand-wired to the transport.
+ *
+ * Claude Code negotiates the modern revision with any server that answers
+ * `server/discover`, and a modern connection has no unsolicited notification path,
+ * so the channel wake is skipped. A hand-wired instance answers `server/discover`
+ * with Method not found and answers a 2026-07-28 `initialize` with 2025-11-25, which
+ * Claude Code accepts as a per-server downgrade: this server goes legacy and every
+ * other server keeps negotiating normally, with no global MCP_PROTOCOL_NEGOTIATION.
+ */
+export declare function serveLegacyStdio(transport?: Transport, options?: BuildV2ServerOptions): StdioServerHandle;
+/**
+ * Official SDK v2 stdio entry. By default the SDK serves both supported eras from
+ * this factory and rejects unsupported protocol revisions; `era: 'legacy'` serves
+ * 2025-11-25 alone (see {@link serveLegacyStdio}).
+ */
+export declare function serveV2Stdio(era?: StdioEra): StdioServerHandle;
 //# sourceMappingURL=v2-server.d.ts.map

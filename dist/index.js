@@ -98741,7 +98741,9 @@ var init_channel = __esm(() => {
 // src/mcp/v2-server.ts
 var exports_v2_server = {};
 __export(exports_v2_server, {
+  stdioEraFromEnv: () => stdioEraFromEnv,
   serveV2Stdio: () => serveV2Stdio,
+  serveLegacyStdio: () => serveLegacyStdio,
   buildV2Server: () => buildV2Server
 });
 function textResult(result) {
@@ -98841,12 +98843,23 @@ function buildV2Server(ctx, options2) {
   }
   return server;
 }
-function serveV2Stdio() {
-  const handle = serveStdio((ctx) => buildV2Server(ctx), {
+function stdioEraFromEnv(env = process.env) {
+  return env.SPECIALISTS_MCP_ERA === "legacy" ? "legacy" : "dual";
+}
+function serveLegacyStdio(transport = new StdioServerTransport, options2) {
+  const server = buildV2Server({ era: "legacy" }, options2);
+  transport.onerror = (error3) => logger.error("MCP legacy stdio transport error", error3);
+  server.connect(transport).catch((error3) => {
+    logger.error("MCP legacy stdio connect failed", error3);
+  });
+  return { close: () => server.close() };
+}
+function serveV2Stdio(era = stdioEraFromEnv()) {
+  const handle = era === "legacy" ? serveLegacyStdio() : serveStdio((ctx) => buildV2Server(ctx), {
     legacy: "serve",
     onerror: (error3) => logger.error("MCP v2 transport error", error3)
   });
-  logger.info(`Specialists MCP Server v2 (2025-11-25 + 2026-07-28, dual-revision) started \u2014 7 tools registered`);
+  logger.info(era === "legacy" ? `Specialists MCP Server v2 (2025-11-25 only, legacy stdio for channel push) started \u2014 7 tools registered` : `Specialists MCP Server v2 (2025-11-25 + 2026-07-28, dual-revision) started \u2014 7 tools registered`);
   process.on("SIGTERM", () => {
     logger.info("SIGTERM received \u2014 shutting down");
     handle.close().finally(() => process.exit(0));

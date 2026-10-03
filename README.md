@@ -266,6 +266,13 @@ For local development without root, launch with
 `--channels`. A channel loaded this way skips the allowlist. Use it only for a plugin you
 build yourself.
 
+The push also needs the legacy (2025-11-25) MCP protocol revision, because the stateless
+2026-07-28 revision has no path for a message the server sends unprompted. You do not need
+to configure this: the plugin's launcher serves the legacy revision only, so Claude Code
+downgrades this one server and keeps negotiating normally with every other server. Do not
+set `MCP_PROTOCOL_NEGOTIATION=legacy` for this; it pins every MCP server to the legacy
+handshake.
+
 Check the result with `specialists doctor --channels`, which reports the first closed gate.
 Channels work only in an interactive session; `claude -p` never receives them. Behaviour
 was read from Claude Code 2.1.288; see

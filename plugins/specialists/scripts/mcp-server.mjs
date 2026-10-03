@@ -75,4 +75,11 @@ if (!entry) {
   process.exit(1);
 }
 
+// Claude Code delivers the channel wake only on a legacy (2025-11-25) connection, and it
+// negotiates the modern revision with any server that offers it. Serving legacy alone
+// here makes Claude Code downgrade this one server, so the push works without the global
+// MCP_PROTOCOL_NEGOTIATION=legacy that would also pin every other server (SPECIALISTS-4234).
+// An operator's explicit value wins.
+process.env.SPECIALISTS_MCP_ERA ??= 'legacy';
+
 await import(entry);
