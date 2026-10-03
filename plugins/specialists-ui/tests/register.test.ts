@@ -8,8 +8,13 @@ import {
   isSpecialistsTool,
   MCP_SERVER,
   parseChannelFrame,
-  specialistToolLabel,
+  specialistToolCall,
+  toolResultLine,
+  type ToolCall,
 } from '../hooks/register'
+
+/** An MCP tool result as the ToolUse row's `output` carries it: text blocks of JSON. */
+const mcpText = (value: unknown) => [{ type: 'text', text: JSON.stringify(value, null, 2) }]
 
 function textOf(tree: unknown): string {
   if (typeof tree === 'string' || typeof tree === 'number') return String(tree)
@@ -59,33 +64,54 @@ describe('transcript rows', () => {
     expect(channelRow('not a frame')).toBeNull()
     expect(errorTextOf('the refusal')).toBe('the refusal')
     expect(errorTextOf({ error: 'unknown activation' })).toBe('unknown activation')
+    expect(errorTextOf(mcpText({ status: 'error', error: 'Unknown activation: act:x' }))).toBe('Unknown activation: act:x')
   })
 
-  test('maps every Specialists tool to its label under both name spellings', () => {
-    const cases: [string, unknown, string][] = [
-      ['specialist_dispatch', { specialist: 'executor', issue_ref: 'XTRM-4' }, 'Dispatch @executor → XTRM-4'],
-      ['specialist_dispatch', { specialist: 'executor', bead_id: 'XTRM-5' }, 'Dispatch @executor → XTRM-5'],
-      ['specialist_dispatch', { specialist: 'executor', contract: 'x' }, 'Dispatch @executor → inline contract'],
-      ['specialist_status', {}, 'Status'],
-      ['specialist_list', {}, 'List specialists'],
-      ['specialist_reply', { message_id: 'msg-1' }, 'Reply → msg-1'],
-      ['specialist_steer', { activation_id: 'act:1234' }, 'Steer @act:1234'],
-      ['specialist_resume', { activation_id: 'act:1234' }, 'Resume @act:1234'],
-      ['specialist_stop_activation', { activation_id: 'act:1234' }, 'Stop @act:1234'],
-      ['specialist_retry', { activation_id: 'act:1234' }, 'Retry @act:1234'],
-      ['substrate_issue', {}, 'Issue'],
-      ['substrate_journal', {}, 'Journal'],
-      ['substrate_provenance', {}, 'Provenance'],
+  test('maps every Specialists tool to its native head under both name spellings', () => {
+    const cases: [string, unknown, ToolCall][] = [
+      ['specialist_dispatch', { specialist: 'executor', issue_ref: 'XTRM-4' }, { name: 'Dispatch', args: 'executor · XTRM-4' }],
+      ['specialist_dispatch', { specialist: 'executor', bead_id: 'XTRM-5' }, { name: 'Dispatch', args: 'executor · XTRM-5' }],
+      ['specialist_dispatch', { specialist: 'executor', contract: 'x' }, { name: 'Dispatch', args: 'executor · inline contract' }],
+      ['specialist_status', {}, { name: 'Status' }],
+      ['specialist_status', { activation_id: 'act:ac8e294a-3a0' }, { name: 'Status', args: 'ac8e294a' }],
+      ['specialist_list', {}, { name: 'List specialists' }],
+      ['specialist_reply', { message_id: 'msg-1' }, { name: 'Reply', args: 'msg-1' }],
+      ['specialist_steer', { activation_id: 'act:ac8e294a-3a0' }, { name: 'Steer', args: 'ac8e294a' }],
+      ['specialist_resume', { activation_id: 'act:ac8e294a-3a0' }, { name: 'Resume', args: 'ac8e294a' }],
+      ['specialist_stop_activation', { activation_id: 'act:ac8e294a-3a0' }, { name: 'Stop', args: 'ac8e294a' }],
+      ['specialist_retry', { activation_id: 'act:ac8e294a-3a0' }, { name: 'Retry', args: 'ac8e294a' }],
+      ['substrate_issue', { op: 'get', issue_id: 'XTRM-4' }, { name: 'Issue', args: 'get · XTRM-4' }],
+      ['substrate_journal', { op: 'append', issue_id: 'XTRM-4' }, { name: 'Journal', args: 'append · XTRM-4' }],
+      ['substrate_provenance', { op: 'find_by_pr', pr: '426' }, { name: 'Provenance', args: 'find_by_pr · 426' }],
     ]
-    for (const [bare, input, label] of cases) {
-      expect(specialistToolLabel(`mcp__specialists__${bare}`, input), bare).toBe(label)
-      expect(specialistToolLabel(`mcp__plugin_specialists_specialists__${bare}`, input), bare).toBe(label)
+    for (const [bare, input, head] of cases) {
+      expect(specialistToolCall(`mcp__specialists__${bare}`, input), bare).toEqual(head)
+      expect(specialistToolCall(`mcp__plugin_specialists_specialists__${bare}`, input), bare).toEqual(head)
     }
     expect(isSpecialistsTool('mcp__specialists__specialist_status')).toBe(true)
     expect(isSpecialistsTool('mcp__plugin_specialists_specialists__specialist_status')).toBe(true)
     expect(isSpecialistsTool('Bash')).toBe(false)
-    expect(specialistToolLabel('mcp__specialists__unknown_tool', {})).toBeNull()
-    expect(specialistToolLabel('Bash', {})).toBeNull()
+    expect(specialistToolCall('mcp__specialists__unknown_tool', {})).toBeNull()
+    expect(specialistToolCall('Bash', {})).toBeNull()
+  })
+
+  test('reads one result line from each JSON result', () => {
+    const dispatch = 'mcp__plugin_specialists_specialists__specialist_dispatch'
+    expect(
+      toolResultLine(dispatch, mcpText({ status: 'dispatched', activation_id: 'act:ac8e294a-3a0', created_issue_ref: 'SPECIALISTS-4243', state: 'starting' })),
+    ).toEqual({ text: 'ac8e294a · SPECIALISTS-4243 · starting', isError: false })
+    expect(
+      toolResultLine('mcp__specialists__specialist_status', mcpText({ activations: [{ state: 'running' }, { state: 'settled' }], pending_asks: [{}] })),
+    ).toEqual({ text: '2 activations, 1 running, 1 waiting on you', isError: false })
+    expect(toolResultLine('mcp__specialists__specialist_status', mcpText({ activations: [] }))).toEqual({ text: '0 activations', isError: false })
+    expect(toolResultLine('mcp__specialists__specialist_list', mcpText({ specialists: [{}, {}, {}] }))).toEqual({ text: '3 specialists', isError: false })
+    expect(toolResultLine('mcp__specialists__specialist_stop_activation', mcpText({ status: 'stopped' }))).toEqual({ text: 'stopped', isError: false })
+    expect(toolResultLine('mcp__specialists__specialist_stop_activation', mcpText({ status: 'error', error: 'Unknown activation: act:x' }))).toEqual({
+      text: 'Unknown activation: act:x',
+      isError: true,
+    })
+    expect(toolResultLine('mcp__specialists__specialist_status', undefined)).toBeNull()
+    expect(toolResultLine('Bash', mcpText({ status: 'ok' }))).toBeNull()
   })
 
   for (const surface of SURFACES) {
@@ -241,24 +267,49 @@ describe('transcript rows', () => {
           ).drawn(),
         )
 
-      expect(
-        await caseFor('mcp__specialists__specialist_dispatch', { specialist: 'executor', issue_ref: 'XTRM-4' }),
-      ).toContain('Dispatch @executor → XTRM-4')
-      expect(
-        await caseFor('mcp__plugin_specialists_specialists__specialist_reply', { message_id: 'msg-1' }),
-      ).toContain('Reply → msg-1')
-      expect(await caseFor('mcp__specialists__substrate_journal', {})).toContain('Journal')
+      const dispatched = await caseFor(
+        'mcp__specialists__specialist_dispatch',
+        { specialist: 'executor', issue_ref: 'XTRM-4' },
+        { output: mcpText({ activation_id: 'act:ac8e294a-3a0', bead_id: 'XTRM-4', state: 'starting' }) },
+      )
+      expect(dispatched, 'a native head').toContain('● Dispatch(executor · XTRM-4)')
+      expect(dispatched, 'a native result line').toContain('⎿  ac8e294a · XTRM-4 · starting')
+      expect(await caseFor('mcp__plugin_specialists_specialists__specialist_reply', { message_id: 'msg-1' })).toContain('Reply(msg-1)')
+      expect(await caseFor('mcp__specialists__substrate_journal', {})).toContain('● Journal')
 
       const running = await caseFor('mcp__specialists__specialist_status', {}, { isRunning: true })
       expect(running).toContain('Status')
-      expect(running, 'a running call stays visible').toContain('running')
+      expect(running, 'a running call stays visible').toContain('Running…')
 
       const errored = await caseFor('mcp__specialists__specialist_status', {}, { isErrored: true, output: 'boom: unknown activation' })
-      expect(errored).toContain('errored')
-      expect(errored, 'an errored call shows its error text').toContain('boom: unknown activation')
+      expect(errored, 'an errored call shows its error text').toContain('⎿  boom: unknown activation')
 
-      expect(await caseFor('mcp__specialists__specialist_status', {}, { isInterrupted: true })).toContain('interrupted')
+      const refused = await caseFor(
+        'mcp__specialists__specialist_stop_activation',
+        { activation_id: 'act:d65bbed4-fb7' },
+        { output: mcpText({ status: 'error', error: 'Unknown activation: act:d65bbed4-fb7' }) },
+      )
+      expect(refused, 'an error payload shows as an error').toContain('⎿  Unknown activation: act:d65bbed4-fb7')
+
+      expect(await caseFor('mcp__specialists__specialist_status', {}, { isInterrupted: true })).toContain('Interrupted')
       expect(await caseFor('Bash', {}), 'a non-Specialists tool passes through').toBe('engine tool row')
+    })
+
+    test(`a standalone Specialists result row is folded into the call row (${surface})`, async ($, on) => {
+      on('ui.render', { component: 'ToolResult' }, () => ({ type: 'Box', props: {}, children: ['engine result'] }) as never)
+      const resultFor = async (tool: string) =>
+        textOf(
+          await (
+            await $.ui.mount({
+              plugin: 'specialists-ui',
+              surface,
+              component: 'ToolResult',
+              props: { tool_use_id: 't', tool, output: mcpText({ status: 'stopped' }), isErrored: false },
+            })
+          ).drawn(),
+        )
+      expect(await resultFor('mcp__specialists__specialist_stop_activation')).toBe('')
+      expect(await resultFor('Bash')).toBe('engine result')
     })
   }
 })
