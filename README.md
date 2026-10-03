@@ -188,7 +188,15 @@ or enables it for you.
 ```bash
 claude plugin marketplace add xtrm-dev/specialists
 claude plugin install specialists@xtrm
+claude plugin install specialists-ui@xtrm   # optional: teammate-style transcript rows
 ```
+
+`specialists-ui` draws the rows the `specialists` plugin raises like Claude Code's own
+teammate rows: a channel wake becomes `● Specialist @explorer:d65bbed4 completed` with a dim
+`use specialist_status for full result` line, and Specialists MCP calls show native labels
+such as `Dispatch @executor → XTRM-4`. It is a separate plugin because Claude Code never runs
+a plugin's own drawing hooks on a row that plugin raised, and the wake comes from the
+`specialists` MCP server. Without it, everything works and the rows show as raw text.
 
 Verify the server is reachable from Claude Code:
 

@@ -71,6 +71,9 @@ const PLUGIN_FILES = [
   'package/plugins/specialists/scripts/postcompact.mjs',
   'package/plugins/specialists/scripts/wake-watch.mjs',
   'package/plugins/specialists/skills/supervising-activations/SKILL.md',
+  'package/plugins/specialists-ui/.claude-plugin/plugin.json',
+  'package/plugins/specialists-ui/hooks/hooks.json',
+  'package/plugins/specialists-ui/hooks/register.tsx',
 ];
 
 const failures = [];

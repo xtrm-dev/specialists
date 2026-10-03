@@ -10,6 +10,11 @@
       "name": "specialists",
       "source": "./plugins/specialists",
       "description": "Specialists execution runtime in Claude Code: activation and dispatch over MCP, session continuity hooks, and the supervising-activations skill."
+    },
+    {
+      "name": "specialists-ui",
+      "source": "./plugins/specialists-ui",
+      "description": "Teammate-style transcript rows for Specialists: channel wakes, the fallback wake, and Specialists MCP calls under native labels. Install beside specialists."
     }
   ]
 }
