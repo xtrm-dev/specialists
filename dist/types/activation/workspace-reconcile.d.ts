@@ -201,4 +201,10 @@ export declare function leaseScopeFor(cwd: string): WorkspaceIdentity;
  * yields an empty list rather than an error, because absence is the normal case.
  */
 export declare function projectUncertainWorkspaces(scope: WorkspaceIdentity, probe?: LeaseProcessProbe): UncertainWorkspaceProjection[];
+/**
+ * The author recorded for an operator-driven reconciliation: `<channel>:<os username>`.
+ *
+ * Only identifies who ran the command; it never supplies an outcome or a basis.
+ */
+export declare function operatorIdentity(channel?: 'operator' | 'mcp'): string;
 //# sourceMappingURL=workspace-reconcile.d.ts.map
