@@ -97541,7 +97541,29 @@ class NativeActivationHost {
   async runWithFallback(record5, ctx) {
     let index = ctx.modelIndex;
     let fallbackUsed = index > 0;
-    let result = await this.runToSettled(record5.snapshot, record5.session, ctx.initialPrompt, ctx.emit, record5);
+    let heldFailure;
+    const legEmit = (name, payload) => {
+      if (name === "activation_failed") {
+        heldFailure = payload ?? {};
+        return;
+      }
+      ctx.emit(name, payload);
+    };
+    const flushFailure = (intermediate) => {
+      if (!heldFailure)
+        return;
+      const payload = intermediate ? { ...heldFailure, intermediate: true } : heldFailure;
+      heldFailure = undefined;
+      ctx.emit("activation_failed", payload);
+    };
+    try {
+      return await this.walkFallbackChain(record5, ctx, legEmit, flushFailure, index, fallbackUsed);
+    } finally {
+      flushFailure(false);
+    }
+  }
+  async walkFallbackChain(record5, ctx, legEmit, flushFailure, index, fallbackUsed) {
+    let result = await this.runToSettled(record5.snapshot, record5.session, ctx.initialPrompt, legEmit, record5);
     while (result.status === "failed" && index < ctx.modelChain.length - 1) {
       if (this.registry.get(record5.snapshot.activationId) !== record5)
         break;
@@ -97628,10 +97650,11 @@ class NativeActivationHost {
       record5.snapshot.lastActivityAt = this.now();
       this.save(record5.snapshot);
       record5.unsubscribe = nextSession.subscribe((event) => this.onSessionEvent(record5.snapshot, event, ctx.emit));
+      flushFailure(true);
       ctx.emit("activation_started", { pi_session_id: nextSession.sessionId });
       index += 1;
       fallbackUsed = true;
-      result = await this.runToSettled(record5.snapshot, record5.session, ctx.initialPrompt, ctx.emit, record5);
+      result = await this.runToSettled(record5.snapshot, record5.session, ctx.initialPrompt, legEmit, record5);
     }
     result.fallbackUsed = fallbackUsed;
     return result;
@@ -99184,6 +99207,8 @@ function withChannelPush(base, send) {
       base.emit(event);
       const eventClass = PUSHED_EVENTS[event.name];
       if (!eventClass)
+        return;
+      if (event.payload?.intermediate === true)
         return;
       try {
         const frame = buildChannelFrame({

@@ -24523,7 +24523,29 @@ class NativeActivationHost {
   async runWithFallback(record2, ctx) {
     let index = ctx.modelIndex;
     let fallbackUsed = index > 0;
-    let result = await this.runToSettled(record2.snapshot, record2.session, ctx.initialPrompt, ctx.emit, record2);
+    let heldFailure;
+    const legEmit = (name, payload) => {
+      if (name === "activation_failed") {
+        heldFailure = payload ?? {};
+        return;
+      }
+      ctx.emit(name, payload);
+    };
+    const flushFailure = (intermediate) => {
+      if (!heldFailure)
+        return;
+      const payload = intermediate ? { ...heldFailure, intermediate: true } : heldFailure;
+      heldFailure = undefined;
+      ctx.emit("activation_failed", payload);
+    };
+    try {
+      return await this.walkFallbackChain(record2, ctx, legEmit, flushFailure, index, fallbackUsed);
+    } finally {
+      flushFailure(false);
+    }
+  }
+  async walkFallbackChain(record2, ctx, legEmit, flushFailure, index, fallbackUsed) {
+    let result = await this.runToSettled(record2.snapshot, record2.session, ctx.initialPrompt, legEmit, record2);
     while (result.status === "failed" && index < ctx.modelChain.length - 1) {
       if (this.registry.get(record2.snapshot.activationId) !== record2)
         break;
@@ -24610,10 +24632,11 @@ class NativeActivationHost {
       record2.snapshot.lastActivityAt = this.now();
       this.save(record2.snapshot);
       record2.unsubscribe = nextSession.subscribe((event) => this.onSessionEvent(record2.snapshot, event, ctx.emit));
+      flushFailure(true);
       ctx.emit("activation_started", { pi_session_id: nextSession.sessionId });
       index += 1;
       fallbackUsed = true;
-      result = await this.runToSettled(record2.snapshot, record2.session, ctx.initialPrompt, ctx.emit, record2);
+      result = await this.runToSettled(record2.snapshot, record2.session, ctx.initialPrompt, legEmit, record2);
     }
     result.fallbackUsed = fallbackUsed;
     return result;
