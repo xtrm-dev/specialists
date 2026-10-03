@@ -408,6 +408,23 @@ describe('specialist_status — an MCP activation reads back identically', () =>
     expect(activations[0]).not.toHaveProperty('participant_id');
   });
 
+  it('reads the registry only for full:true (SPECIALISTS-4217)', async () => {
+    // The compact default is what a coordinator polls, several times a second.
+    // Rebuilding every specialist spec from all four config layers on a poll the
+    // payload never shows cost ~86 ms of CPU per call; the compact path must not do it.
+    const { host } = hostWith();
+    const list = vi.fn(async () => []);
+    const status = createSpecialistStatusTool({ list } as never, new CircuitBreaker(), () => host);
+
+    await status.execute({});
+
+    expect(list).not.toHaveBeenCalled();
+
+    await status.execute({ full: true });
+
+    expect(list).toHaveBeenCalled();
+  });
+
   it('restores the verbose shape under full:true (SPECIALISTS-142)', async () => {
     const { host } = hostWith();
     const dispatch = createSpecialistDispatchTool(() => host);
