@@ -181,9 +181,10 @@ sp list
 
 ### Claude Code plugin (optional)
 
-Specialists ships a Claude Code plugin, `specialists`, that exposes specialist activation as
-MCP tools and injects live activation state at session start. It is opt-in: nothing installs
-or enables it for you.
+Specialists ships two Claude Code plugins in the `xtrm` marketplace. `specialists` exposes
+specialist activation as MCP tools and injects live activation state at session start.
+`specialists-ui` is optional and draws the rows `specialists` raises as teammate-style
+transcript rows. Both are opt-in: nothing installs or enables them for you.
 
 ```bash
 claude plugin marketplace add xtrm-dev/specialists
@@ -236,7 +237,9 @@ claude
 The plugin requires Bun on `PATH` and reads Substrate's canonical store, resolved from
 `SUBSTRATE_DB`, else `XTRM_STATE_DB`, else `~/.xtrm/state.db`. `SUBSTRATE_DB` comes first
 because the store belongs to Substrate and is shared with `sb` and Pi. To develop against a
-checkout instead of an install, use `claude --plugin-dir ./plugins/specialists`.
+checkout instead of an install, load both plugins:
+`claude --plugin-dir ./plugins/specialists --plugin-dir ./plugins/specialists-ui`. Loading
+only `./plugins/specialists` gives the runtime without the transcript rows.
 
 #### Enable the channel wake
 
