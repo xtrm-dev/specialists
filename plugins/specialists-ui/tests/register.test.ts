@@ -273,7 +273,7 @@ describe('transcript rows', () => {
         { output: mcpText({ activation_id: 'act:ac8e294a-3a0', bead_id: 'XTRM-4', state: 'starting' }) },
       )
       expect(dispatched, 'a native head').toContain('● Dispatch(executor · XTRM-4)')
-      expect(dispatched, 'a native result line').toContain('⎿  ac8e294a · XTRM-4 · starting')
+      expect(dispatched, 'a native result line').toContain('  ac8e294a · XTRM-4 · starting')
       expect(await caseFor('mcp__plugin_specialists_specialists__specialist_reply', { message_id: 'msg-1' })).toContain('Reply(msg-1)')
       expect(await caseFor('mcp__specialists__substrate_journal', {})).toContain('● Journal')
 
@@ -282,14 +282,14 @@ describe('transcript rows', () => {
       expect(running, 'a running call stays visible').toContain('Running…')
 
       const errored = await caseFor('mcp__specialists__specialist_status', {}, { isErrored: true, output: 'boom: unknown activation' })
-      expect(errored, 'an errored call shows its error text').toContain('⎿  boom: unknown activation')
+      expect(errored, 'an errored call shows its error text').toContain('  boom: unknown activation')
 
       const refused = await caseFor(
         'mcp__specialists__specialist_stop_activation',
         { activation_id: 'act:d65bbed4-fb7' },
         { output: mcpText({ status: 'error', error: 'Unknown activation: act:d65bbed4-fb7' }) },
       )
-      expect(refused, 'an error payload shows as an error').toContain('⎿  Unknown activation: act:d65bbed4-fb7')
+      expect(refused, 'an error payload shows as an error').toContain('  Unknown activation: act:d65bbed4-fb7')
 
       expect(await caseFor('mcp__specialists__specialist_status', {}, { isInterrupted: true })).toContain('Interrupted')
       expect(await caseFor('Bash', {}), 'a non-Specialists tool passes through').toBe('engine tool row')

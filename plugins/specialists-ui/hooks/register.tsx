@@ -174,7 +174,7 @@ export function errorTextOf(output: unknown): string {
 const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 
 /**
- * The one line under a finished Specialists call (the `⎿` line), read from its JSON
+ * The one line under a finished Specialists call (the indented result line), read from its JSON
  * result. A `{ status: 'error' }` payload is an error even when the call itself was not.
  */
 export function toolResultLine(tool: string, output: unknown): { text: string; isError: boolean } | null {
@@ -252,7 +252,7 @@ export function register(on: On) {
   })
 
   // Drawn the way Claude Code draws its own tools: a state-coloured ●, the bold name with
-  // its arguments, and one `⎿` line with the result, the running state or the error.
+  // its arguments, and an indented line with the result, the running state or the error.
   on('ui.render', { component: 'ToolUse', props: { tool: /^mcp__(?:plugin_specialists_)?specialists__/ } }, async ($, e, next) => {
     const call = specialistToolCall(e.props.tool, e.props.input)
     if (!call) return next(e)
@@ -278,7 +278,7 @@ export function register(on: On) {
         </Box>
         {line ? (
           <Box>
-            <Text dimColor>  ⎿  </Text>
+            <Text>  </Text>
             <Text color={line.color} dimColor={!line.color}>{line.text}</Text>
           </Box>
         ) : null}
@@ -286,7 +286,7 @@ export function register(on: On) {
     )
   })
 
-  // A standalone call's result row would repeat the `⎿` line the call row already drew.
+  // A standalone call's result row would repeat the result line the call row already drew.
   on('ui.render', { component: 'ToolResult', props: { tool: /^mcp__(?:plugin_specialists_)?specialists__/ } }, async ($, e, next) => {
     if (!specialistToolCall(e.props.tool, undefined)) return next(e)
     const { Box } = await $.ui.resolve(e)
