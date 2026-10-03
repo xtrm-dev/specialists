@@ -54,6 +54,16 @@ AbovePrompt band + /specialists
 
 Classic command hooks remain enabled. They are the compatibility path while Claude Mods are early access.
 
+## Transcript rows
+
+The Mod also redraws three specialist events that otherwise reach the coordinator as raw machine text:
+
+- a channel wake (`UserMessage`, `origin.kind: 'channel'` from `plugin:specialists:specialists`): the frame `buildChannelFrame` writes is parsed and drawn as one teammate-style line — a marker by event (`completed` ✓, `failed` ✕, `escalation`/`needs_reply` `!`), `@<specialist>:<short activation id>` in the band accent, the event word, the Issue ref when the frame carries one, and a dim `use specialist_status for full result`. Text that does not parse keeps the engine's row;
+- the wake-watch fallback (`UserMessage`, `origin.kind: 'task-notification'`, text exactly `Specialist activation needs attention`): drawn as one line naming the Specialists fallback wake and the same status hint;
+- Specialists MCP tool calls (`/^mcp__(plugin_specialists_)?specialists__/`): a `ToolGroup` holding one is unfolded in place (`isExpanded: true`), so each call draws as a `ToolUse` row labelled natively (`Dispatch @<specialist> → <issue_ref|bead_id|'inline contract'>`, `Status`, `List specialists`, `Reply → <message_id>`, `Steer`/`Resume`/`Stop`/`Retry @<activation>`, `Issue`, `Journal`, `Provenance`). Running, errored and interrupted states stay visible.
+
+Presentation only: the stored row, and everything the model reads, is untouched — ctrl+o (`props.isExpanded`) always shows the engine's own row. Groups with no Specialists call, and every other row, pass through unchanged.
+
 ## Follow-up
 
 Follow-up, after validation against a supported Claude Code build:
