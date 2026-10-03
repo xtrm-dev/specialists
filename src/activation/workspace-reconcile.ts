@@ -67,12 +67,12 @@
 
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { resolveCommonGitRoot } from '../specialist/job-root.js';
 import {
   inspect,
   leaseDir,
   leasePath,
   procLeaseProbe,
+  workspaceIdentityFor,
   type LeaseProcessProbe,
   type LeaseStatus,
   type WorkspaceLease,
@@ -399,20 +399,12 @@ export interface UncertainWorkspaceProjection {
 /**
  * The workspace identity whose lease directory holds this checkout's leases.
  *
- * Every worktree of one repository shares one lease directory — that is what makes the
- * whole repository's uncertainty inspectable from any of them — while the key inside still
- * separates them, because the worktree path is the mutation domain. `resolveCommonGitRoot`
- * is the existing helper `.specialists/jobs` is anchored with, reused rather than
- * duplicated; outside a git checkout it yields `cwd`, and the lease directory is then local
- * to it.
+ * The runtime's canonical identity constructor is reused here, so this surface reads the
+ * same `<cwd>/.specialists/leases` directory the dispatch path writes. In particular, it
+ * must not turn the repository root into `.git` or silently migrate the existing store.
  */
 export function leaseScopeFor(cwd: string): WorkspaceIdentity {
-  const commonRoot = resolveCommonGitRoot(cwd);
-  return {
-    repositoryRoot: commonRoot ?? cwd,
-    worktreePath: cwd,
-    gitCommonDir: commonRoot ? join(commonRoot, '.git') : undefined,
-  };
+  return workspaceIdentityFor(cwd);
 }
 
 /**
