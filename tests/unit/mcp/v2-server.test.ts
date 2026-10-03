@@ -41,6 +41,7 @@ const EXPECTED_TOOLS = [
   'specialist_steer',
   'specialist_stop_activation',
   'specialist_list',
+  'specialist_lease_reconcile',
 ];
 
 const EXPECTED_TOOLS_WITH_SUBSTRATE = [
@@ -374,8 +375,8 @@ describe('v2 statelessness (no cross-request server state)', () => {
     const second = await client.call('tools/list', { _meta: capsB });
     expect(first.error).toBeUndefined();
     expect(second.error).toBeUndefined();
-    expect((first.result as { tools: unknown[] }).tools.length).toBe(8);
-    expect((second.result as { tools: unknown[] }).tools.length).toBe(8);
+    expect((first.result as { tools: unknown[] }).tools.length).toBe(9);
+    expect((second.result as { tools: unknown[] }).tools.length).toBe(9);
   });
 
   it('a tool call needs no prior handshake or discovery', async () => {

@@ -45,6 +45,7 @@ const CORE_COMMANDS: CommandEntry[] = [
   ['attach', 'Legacy tmux attach for jobs with tmux_session; chat-style attach is planned separately'],
   ['status', 'Show health, MCP state, and active jobs'],
   ['ps', 'Show actionable dashboard (active + unresolved terminal problems); --json, --all, --follow, --active, --health, --include-terminal, --include-cleaned'],
+  ['lease', 'List (`lease list`) and reconcile (`lease reconcile <worktree> --outcome ... --basis ...`) uncertain writer leases'],
   ['doctor', 'Diagnose installation/runtime problems; --check-drift reports stale .specialists/default/ snapshots'],
   ['prune-stale-defaults', 'Prune stale .specialists/default snapshots; default removes diverged mirrors too; --dry-run, --keep-diverged, --root <path>'],
   ['setup', 'Discovery + benchmark cache + recommendation plan + global apply workflow'],

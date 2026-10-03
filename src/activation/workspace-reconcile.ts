@@ -66,6 +66,7 @@
  */
 
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync } from 'node:fs';
+import { userInfo } from 'node:os';
 import { join } from 'node:path';
 import {
   inspect,
@@ -471,4 +472,19 @@ function readLeaseFile(path: string): WorkspaceLease | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * The author recorded for an operator-driven reconciliation: `<channel>:<os username>`.
+ *
+ * Only identifies who ran the command; it never supplies an outcome or a basis.
+ */
+export function operatorIdentity(channel: 'operator' | 'mcp' = 'operator'): string {
+  let name = 'unknown';
+  try {
+    name = userInfo().username || name;
+  } catch {
+    // No passwd entry for this uid; the channel prefix alone still names the surface.
+  }
+  return `${channel}:${name}`;
 }

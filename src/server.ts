@@ -24,6 +24,7 @@ import { createObservabilitySqliteClient, type ObservabilitySqliteClient } from 
 import { SpecialistLoader } from './specialist/loader.js';
 import { CircuitBreaker } from './utils/circuitBreaker.js';
 import { createSpecialistResultTool, specialistResultSchema } from './tools/specialist/specialist_result.tool.js';
+import { createSpecialistLeaseReconcileTool, specialistLeaseReconcileSchema } from './tools/specialist/specialist_lease_reconcile.tool.js';
 import { createSpecialistStatusTool, specialistStatusSchema } from './tools/specialist/specialist_status.tool.js';
 import { createSpecialistListTool, specialistListSchema } from './tools/specialist/specialist_list.tool.js';
 import {
@@ -175,6 +176,7 @@ export class SpecialistsServer {
       createSpecialistSteerTool(getHost),
       createSpecialistStopActivationTool(getHost),
       createSpecialistListTool(loader),
+      createSpecialistLeaseReconcileTool(),
     ];
     this.mcpSessionId = randomUUID();
     this.server = new Server({ name: MCP_CONFIG.SERVER_NAME, version: MCP_CONFIG.VERSION }, { capabilities: MCP_CONFIG.CAPABILITIES });
@@ -193,6 +195,7 @@ export class SpecialistsServer {
       specialist_steer: specialistSteerSchema,
       specialist_stop_activation: specialistStopSchema,
       specialist_list: specialistListSchema,
+      specialist_lease_reconcile: specialistLeaseReconcileSchema,
     };
     this.toolSchemas = schemaMap;
 

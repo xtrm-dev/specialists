@@ -681,6 +681,7 @@ src/                   CLI, server, loader, runner, supervisor, MCP tool
 - Prefer `sp console`, `sp ps`, `sp feed`, `sp log`, and `sp result` for operations; inspect raw files only for recovery.
 - Keep package defaults canonical. Put machine preferences in `~/.config/specialists/user.json` and repo exceptions in `.specialists/user/`.
 - Run `sp doctor --specialists` and `xt update --apply` when runtime or xtrm-managed assets drift.
+- When dispatch is refused with `workspace_lease_uncertain`, run `sp lease list`, then `sp lease reconcile <worktree> --outcome <safe_free|superseded|manual_attention_required> --basis <evidence>`. The operator states the outcome; it is never inferred. MCP: `specialist_lease_reconcile`.
 
 ---
 
