@@ -8,10 +8,16 @@ import { type ActivationResultView, type ActivationView, type PendingAskView } f
 import type { RuntimeEventPusher } from '../../activation/async-events.js';
 export declare const specialistStatusSchema: z.ZodObject<{
     full: z.ZodOptional<z.ZodBoolean>;
+    wait_for_change: z.ZodOptional<z.ZodBoolean>;
+    timeout_s: z.ZodOptional<z.ZodNumber>;
 }, "strip", z.ZodTypeAny, {
     full?: boolean | undefined;
+    wait_for_change?: boolean | undefined;
+    timeout_s?: number | undefined;
 }, {
     full?: boolean | undefined;
+    wait_for_change?: boolean | undefined;
+    timeout_s?: number | undefined;
 }>;
 /**
  * @param getHost Native runtime, when this process hosts one. Optional so the CLI and the
@@ -26,10 +32,16 @@ export declare function createSpecialistStatusTool(loader: SpecialistLoader, cir
     description: string;
     inputSchema: z.ZodObject<{
         full: z.ZodOptional<z.ZodBoolean>;
+        wait_for_change: z.ZodOptional<z.ZodBoolean>;
+        timeout_s: z.ZodOptional<z.ZodNumber>;
     }, "strip", z.ZodTypeAny, {
         full?: boolean | undefined;
+        wait_for_change?: boolean | undefined;
+        timeout_s?: number | undefined;
     }, {
         full?: boolean | undefined;
+        wait_for_change?: boolean | undefined;
+        timeout_s?: number | undefined;
     }>;
     execute(input: z.infer<typeof specialistStatusSchema>): Promise<{
         loaded_count: number;
