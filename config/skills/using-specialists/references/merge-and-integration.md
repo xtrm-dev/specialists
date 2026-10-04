@@ -13,6 +13,9 @@ Before integrating Specialist-owned changes:
 6. clean Specialist worktrees/jobs only after their results/changes are durable and no
    fix/review continuation is needed.
 
-Use current `sp`, `xt`, `git`, and repository help/policy for exact commands. If an
+Native activations write in the coordinator's worktree under the writer lease, so their
+changes are already on the coordinator's branch: integrate them with the repository's
+PR workflow. Stop each activation (`specialist_stop_activation`) once its result is durable.
+Use current `xt`, `git`, and repository help/policy for exact commands. If an
 installed merge helper is documented as broken/disabled by current runtime evidence, do
 not use it merely because an older skill version did.

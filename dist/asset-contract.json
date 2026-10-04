@@ -12,11 +12,11 @@
     },
     {
       "path": "config/skills/using-specialists/references/chain-recipes.md",
-      "sha256": "dc7c41da09dce6138e068ad3863fb9cace3a1052f18d0cb0c0994c3d1239bbcd"
+      "sha256": "ea4b8672c4334f9c1b0da5f1053728c865597a31025e2637b0eb5cd5498b7d57"
     },
     {
       "path": "config/skills/using-specialists/references/dispatch-preconditions.md",
-      "sha256": "f45086d100d48d591cd0baf05c314ca9c8846a7255e3dcf98328dccbb425b267"
+      "sha256": "97b135ec31c2b0e6e3500d642002886b1729330655a118edd00b87a126b3c28e"
     },
     {
       "path": "config/skills/using-specialists/references/issue-contracts.md",
@@ -28,11 +28,11 @@
     },
     {
       "path": "config/skills/using-specialists/references/merge-and-integration.md",
-      "sha256": "391cee796f139a4084d7bbf36aacf68cb1b6f2dfb9d2bc32eb2daba67995dc90"
+      "sha256": "857c9e31fb678fe66606caff4018399f41ff77ca90007b8e19e117de5c6cd698"
     },
     {
       "path": "config/skills/using-specialists/references/monitoring.md",
-      "sha256": "bc248d159087258e566029fc3fb0a9150ed43396af4cbc680e11c3564388fdc1"
+      "sha256": "7893b84eafe59d8d765ca1190bf22c320f54014f8b643f0239dc8db030bff81b"
     },
     {
       "path": "config/skills/using-specialists/references/nodes.md",
@@ -40,7 +40,7 @@
     },
     {
       "path": "config/skills/using-specialists/references/registry-and-locations.md",
-      "sha256": "9118951d4c53336df9bf8c9dd36d543c4993ae2cb377eafd5cddfc1840ecdf63"
+      "sha256": "37ff4d9e3181b32611686a1fed680b8984153948f46715958f06882015bd77aa"
     },
     {
       "path": "config/skills/using-specialists/references/script-class.md",
@@ -68,7 +68,7 @@
     },
     {
       "path": "config/skills/using-specialists/SKILL.md",
-      "sha256": "cdd1e6115895f73443aa3d653de028ca6241d32326492f90defdc7ac0e00b407"
+      "sha256": "88b9dd9dbbbc84cf5d43d7483ec31cd73ac41613ac5bbae2071fed5e76552094"
     }
   ],
   "shipped_specialists": [

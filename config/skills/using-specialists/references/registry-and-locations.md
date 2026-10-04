@@ -2,15 +2,9 @@
 
 Do not maintain a static role/model/permission table in this skill.
 
-Use:
-
-```bash
-specialists list --full
-sp help
-sp config show <name> --resolved
-```
-
-and subcommand help for exact syntax.
+Use `specialist_list` (one compact line per role with a dispatchability verdict;
+`name` for one full record, `detail: "full"` for everything). Operators diagnosing an
+environment from a shell use `sp config show <name> --resolved` and `sp help`.
 
 Package-canonical definitions and rules live in the Specialists package/source; global and
 repo overlays may alter effective fields. The resolved config is therefore more useful
