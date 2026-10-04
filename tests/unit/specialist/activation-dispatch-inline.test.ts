@@ -82,7 +82,7 @@ afterEach(() => {
   }
 });
 
-function hostWith(fixture: { permission?: string; inlineCreate?: (contract: string, opts?: { title?: string; holder?: string; activationId?: string }) => { ref: string; issueId: string; claimId: number | null } } = {}) {
+function hostWith(fixture: { events?: Array<{ name: string; beadId?: string }>; permission?: string; inlineCreate?: (contract: string, opts?: { title?: string; holder?: string; activationId?: string }) => { ref: string; issueId: string; claimId: number | null } } = {}) {
   const sessionsCreated = { count: 0 };
   const root = mkdtempSync(join(tmpdir(), 'mcp-inline-ws-'));
   workspaces.push(root);
@@ -131,7 +131,7 @@ function hostWith(fixture: { permission?: string; inlineCreate?: (contract: stri
       },
     }) } as never,
     loadSdk: async () => sdk,
-    forensics: { emit: () => {} },
+    forensics: { emit: (e) => { fixture.events?.push({ name: e.name, beadId: e.beadId }); } },
     cwd: root,
   });
   return { host, sessionsCreated, workItems };
@@ -257,6 +257,18 @@ describe('specialist_dispatch inline path — one gate, create only after it pas
 
     // The created issue reads back through the host Fleet.
     expect(host.list().map(s => s.issueRef)).toContain('bd-inline-1');
+  });
+
+  it('names the created Issue on every event after creation, so the wake carries it', async () => {
+    const events: Array<{ name: string; beadId?: string }> = [];
+    const { host } = hostWith({ events });
+    const tool = createSpecialistDispatchTool(() => host);
+
+    await tool.execute({ specialist: 'researcher', contract: INLINE_CONTRACT });
+
+    const admitted = events.findIndex(e => e.name === 'activation_admitted');
+    expect(admitted).toBeGreaterThanOrEqual(0);
+    expect(events.slice(admitted).map(e => `${e.name}=${e.beadId}`)).toEqual(events.slice(admitted).map(e => `${e.name}=bd-inline-1`));
   });
 
   it('passes title through to issue creation', async () => {

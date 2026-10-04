@@ -1015,10 +1015,14 @@ export class NativeActivationHost {
     // The forensic event field keeps its storage name (bead_id column in
     // observability.db) but carries the ISSUE ref post-A7; storage-column
     // renames are fleet-sweep territory, not runtime-boundary territory.
+    // An inline-contract dispatch has no request.issueRef: its Issue is created inside this
+    // method. `eventIssueRef` is set the moment the ref resolves, so every later event (the
+    // channel wake, the observability rows) names the Issue it ran against.
+    let eventIssueRef = request.issueRef;
     const emit = (name: string, payload?: Record<string, unknown>) =>
       this.forensics.emit({
         activationId, attemptId, participantId,
-        specialist: request.specialist, beadId: request.issueRef, name, payload,
+        specialist: request.specialist, beadId: eventIssueRef, name, payload,
       });
 
     emit('activation_requested', {
@@ -1199,6 +1203,7 @@ export class NativeActivationHost {
       }
     }
     const issueRef = autoCreatedRef ?? request.issueRef ?? '';
+    if (issueRef) eventIssueRef = issueRef;
     if (!issueRef) {
       return reject('no_work_ref', {
         note: 'neither issueRef nor contract was provided — dispatch requires an existing issue or an inline contract',
