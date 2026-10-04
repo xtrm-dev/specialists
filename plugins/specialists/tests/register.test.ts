@@ -139,6 +139,26 @@ describe('register', () => {
     expect(drawn).toContain('2m14s • 3t • 12k')
   })
 
+  test('the watch parks server-side instead of polling at a fixed rate (SPECIALISTS-4218)', async ($, on) => {
+    const clock = mock.clock(on)
+    const fleet = { activations: [] as unknown[], pending_asks: [] as unknown[] }
+    const calls = server(on, () => json(fleet))
+
+    await $.session.start(SESSION)
+    await clock.settle()
+
+    // The immediate paint stays a plain read; the watch itself asks the server to block.
+    expect(calls[0]).toEqual({ server: MCP_SERVER, tool: 'specialist_status', args: {} })
+    expect(calls.slice(1).some(c => (c.args as Record<string, unknown> | undefined)?.wait_for_change === true)).toBe(true)
+
+    // An instantly-answering server (no wait support) must not be hammered: the fast-return
+    // streak parks the watch and the tick takes over — one call per POLL_MS, the pre-4218
+    // cadence, never a spin.
+    const before = calls.length
+    await clock.advance(POLL_MS * 3)
+    expect(calls.length - before).toBe(3)
+  })
+
   test('a failing server is reported, never shown as an empty fleet', async ($, on) => {
     const clock = mock.clock(on)
     server(on, () => ({ content: [{ type: 'text', text: 'server not connected' }], isError: true }))

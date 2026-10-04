@@ -532,6 +532,62 @@ describe('specialist_status — an MCP activation reads back identically', () =>
   });
 });
 
+describe('specialist_status wait_for_change — one parked call instead of a poll loop (SPECIALISTS-4218)', () => {
+  it('returns within 1s of a state change, carrying the post-change projection', async () => {
+    const { host } = hostWith({ holdOpen: true });
+    const dispatch = createSpecialistDispatchTool(() => host);
+    const status = createSpecialistStatusTool(
+      { list: async () => [] } as never,
+      new CircuitBreaker(),
+      () => host,
+    );
+    const dispatched = await dispatch.execute({ specialist: 'researcher', bead_id: 'ISSUE-1' }) as Record<string, unknown>;
+
+    const waiting = status.execute({ wait_for_change: true, timeout_s: 30 });
+    await new Promise(resolve => setTimeout(resolve, 150)); // let the call park
+
+    const t0 = Date.now();
+    await host.stop(dispatched.activation_id as string); // the state change: disposal
+    const out = await waiting as Record<string, unknown>;
+
+    expect(Date.now() - t0, 'woke on the change, not the 30s timeout').toBeLessThan(1000);
+    expect(out).toEqual({ activations: [], pending_asks: [] }); // post-change compact projection
+  });
+
+  it('returns at the timeout when nothing changes, with the unchanged compact payload', async () => {
+    const { host } = hostWith({ holdOpen: true });
+    const dispatch = createSpecialistDispatchTool(() => host);
+    const status = createSpecialistStatusTool(
+      { list: async () => [] } as never,
+      new CircuitBreaker(),
+      () => host,
+    );
+    await dispatch.execute({ specialist: 'researcher', bead_id: 'ISSUE-1' });
+
+    const t0 = Date.now();
+    const out = await status.execute({ wait_for_change: true, timeout_s: 1 }) as Record<string, unknown>;
+    const took = Date.now() - t0;
+
+    expect(took).toBeGreaterThanOrEqual(900);
+    expect(took).toBeLessThan(5000);
+    // Same compact shape as a non-waiting call — the wait delays the answer, it never edits
+    // it. elapsed_s is stripped first: it floors to seconds and a boundary crossing between
+    // the two calls would otherwise flake the comparison.
+    const strip = (v: Record<string, unknown>) =>
+      (v.activations as Record<string, unknown>[]).map(({ elapsed_s: _e, ...row }) => row);
+    expect(strip(out)).toEqual(strip(await status.execute({})));
+    expect(out.pending_asks).toEqual((await status.execute({})).pending_asks);
+  });
+
+  it('ignores the wait when no host is wired — no silent blocking without a Fleet', async () => {
+    const status = createSpecialistStatusTool({ list: async () => [] } as never, new CircuitBreaker());
+    const out = await status.execute({ wait_for_change: true, timeout_s: 5 }) as Record<string, unknown>;
+
+    expect(out.activations).toEqual([]);
+    expect(out.pending_asks).toEqual([]);
+  });
+});
+
 describe('specialist_reply — correlation is by message id and nothing else', () => {
   it('reports an unknown message id instead of silently accepting the answer', async () => {
     const { host } = hostWith();

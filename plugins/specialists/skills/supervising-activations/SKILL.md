@@ -87,6 +87,14 @@ omitted when absent), and `result_status` on settled rows only. Pass `full: true
 verbose shape (full rows, whole validated results, health sections). Asks keep their `body`
 in both modes — it is what you answer.
 
+`wait_for_change: true` (with `timeout_s`, 1-60, default 25) blocks SERVER-SIDE until the
+fleet actually changes — an activation settles or is added or disposed, a result status
+lands, an ask is raised or answered — then returns the same payload. Watching a fleet this
+way costs one MCP request per `timeout_s` while nothing changes and still returns within
+~1 s of a real transition (SPECIALISTS-4218). Volatile fields (elapsed, token usage, turn
+count) do not count as a change. Never replace it with a fast poll loop: every request
+costs the host ~21 ms of CPU even when the answer is empty.
+
 Forensic IDs never appear in rows. Token usage is a row budget, never a window-context
 percentage.
 
@@ -163,8 +171,7 @@ always applies, so a refused contract must be fixed rather than routed around.
   actionable transition (settled result, pending ask, escalation) arrives as a channel
   frame naming the activation — a reference, never the payload. `specialist_result` is
   the authoritative read for a settled or failed result the push names; `specialist_status`
-  covers asks and escalations. Polling `specialist_status` is the
-  degraded fallback: a missed push degrades to polling, which reads the same object late,
+  covers asks and escalations. A missed push degrades to reading the same object late,
   never a different object. Do not block waiting for a result.
 - Every outcome carries a build-identity line. If it names staleness, say so — the runtime
   was rebuilt after load.
@@ -172,7 +179,10 @@ always applies, so a refused contract must be fixed rather than routed around.
 - **Channel wake registration is interactive-TUI-only.** `claude -p` (headless automation)
   has no channel path at any gate setting. A headless run gets hook-only wake — correct, but
   silent: nothing tells the operator the channel push never registered. Do not expect a
-  channel notification to reach a `-p` session; poll `specialist_status` instead.
+  channel notification to reach a `-p` session. When you must watch for a transition, call
+  `specialist_status` with `wait_for_change: true` (and a `timeout_s` under your tool
+  timeout) and re-issue it as it times out — ONE parked call per interval, never a fast
+  poll loop; every MCP request costs the host ~21 ms of CPU (SPECIALISTS-4218).
 
 ## Non-goals
 

@@ -12,7 +12,19 @@ import type { Elements, EngineInterface, McpToolResult, On } from 'claude-code'
 /** The plugin's MCP server as /mcp lists it (`plugin:<plugin>:<server>`). */
 export const MCP_SERVER = 'plugin:specialists:specialists'
 export const COMMAND = 'specialists'
+/**
+ * Fallback cadence when the server has no blocking wait (an older runtime strips the
+ * wait arguments and answers instantly) or when it is failing fast: the band then polls
+ * at this interval, exactly the pre-4218 behaviour. With a server that blocks, calls run
+ * ~WAIT_TIMEOUT_S apart and this timer only re-arms the watch between calls.
+ */
 export const POLL_MS = 2000
+/** Server-side block per watch call. Under the common 30s MCP client tool timeout. */
+export const WAIT_TIMEOUT_S = 25
+/** A call that returns faster than this did not block: the server lacks the wait (or answered a change instantly). */
+const FAST_RETURN_MS = 1000
+/** Consecutive instant returns before the watch parks on the POLL_MS tick: three instant answers are an unsupported wait, not three coincidences. */
+const FAST_STREAK_MAX = 3
 export const FLEET_MAX_ROWS = 6
 /** Above this many activations the band folds to one line and the pane holds the list. */
 export const COLLAPSE_AT = 3
@@ -206,23 +218,59 @@ type State = {
   polling: boolean
   timer: { cancel: () => void } | null
   paneOpen: boolean
+  /** A blocking specialist_status call is in flight (SPECIALISTS-4218). */
+  watching: boolean
+  /** Consecutive sub-second watch returns; parking on the tick after FAST_STREAK_MAX. */
+  fastStreak: number
+}
+
+/** Apply one specialist_status read to the band state and redraw. */
+function apply($: EngineInterface, s: State, read: { ok: true; value: Record<string, unknown> } | { ok: false; error: string }): void {
+  if (read.ok) {
+    s.fleet = fleetOf(read.value)
+    s.error = null
+    if (s.selected && !s.fleet.activations.some(a => a.activation_id === s.selected)) s.selected = null
+  } else {
+    s.error = read.error
+  }
+  $.ui.invalidate('ui.render')
 }
 
 async function refresh($: EngineInterface, s: State): Promise<void> {
   if (s.polling) return
   s.polling = true
   try {
-    const read = await callTool($, 'specialist_status')
-    if (read.ok) {
-      s.fleet = fleetOf(read.value)
-      s.error = null
-      if (s.selected && !s.fleet.activations.some(a => a.activation_id === s.selected)) s.selected = null
-    } else {
-      s.error = read.error
-    }
+    apply($, s, await callTool($, 'specialist_status'))
   } finally {
     s.polling = false
-    $.ui.invalidate('ui.render')
+  }
+}
+
+/**
+ * One blocking-watch cycle (SPECIALISTS-4218): call specialist_status with
+ * wait_for_change so the SERVER parks until the fleet changes or the timeout passes, then
+ * redraw and re-arm. Replaces the fixed 2s poll — the steady request stream that cost every
+ * idle session 0.03-0.1 core of MCP-server CPU. Self-sustaining while the server blocks; a
+ * server that answers instantly (no wait support, or failing fast) is detected by the
+ * streak and parks on the POLL_MS tick instead of spinning.
+ */
+async function watchOnce($: EngineInterface, s: State): Promise<void> {
+  if (s.watching) return
+  s.watching = true
+  try {
+    const startedAt = Date.now()
+    const read = await callTool($, 'specialist_status', { wait_for_change: true, timeout_s: WAIT_TIMEOUT_S })
+    const took = Date.now() - startedAt
+    apply($, s, read)
+    if (took >= FAST_RETURN_MS) {
+      s.fastStreak = 0
+      void watchOnce($, s) // blocked server: re-arm immediately, one call per WAIT_TIMEOUT_S
+    } else if (s.fastStreak < FAST_STREAK_MAX) {
+      s.fastStreak += 1 // maybe a real change answered in <1s: allow a couple before concluding
+      void watchOnce($, s)
+    } // else: instant answers are an unsupported wait — park on the POLL_MS tick
+  } finally {
+    s.watching = false
   }
 }
 
@@ -346,6 +394,8 @@ export function register(on: On) {
     polling: false,
     timer: null,
     paneOpen: false,
+    watching: false,
+    fastStreak: 0,
   }
 
   on('session.start', async ($, e, next) => {
@@ -360,8 +410,13 @@ export function register(on: On) {
       // Another Specialists surface may already serve the command.
     }
     s.timer?.cancel()
-    s.timer = $.clock.every(POLL_MS, () => void refresh($, s))
+    // The tick is the skeleton, not the heartbeat: it re-arms the blocking watch whenever
+    // no call is in flight (server without wait support, or between re-arms), while a
+    // server that blocks makes each call last WAIT_TIMEOUT_S — the request rate of an
+    // idle session drops from one per POLL_MS to one per WAIT_TIMEOUT_S (SPECIALISTS-4218).
+    s.timer = $.clock.every(POLL_MS, () => void watchOnce($, s))
     void refresh($, s)
+    void watchOnce($, s)
     return next(e)
   })
 
