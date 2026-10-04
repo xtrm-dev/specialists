@@ -89,7 +89,6 @@ jobs:
             dist/index.js \
             dist/lib.js \
             dist/types/lib.d.ts \
-            bin/install.js \
             package.json \
             config/specialists/executor.specialist.json \
             config/specialists/reviewer.specialist.json \

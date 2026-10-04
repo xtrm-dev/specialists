@@ -120,7 +120,7 @@ Non-command entry behaviour that is also part of the surface:
   except `serve` (`src/index.ts:1466-1473`).
 - Global `uncaughtException` handler swallows `EBADF` on `close`, otherwise logs and exits 1
   (`src/index.ts:11-15`). Non-Bun runtime exits 1 with an install hint (`:17-24`).
-- Bins: `specialists` and `sp` both → `dist/index.js`; `install` → `bin/install.js` (`package.json` `bin`).
+- Bins: `specialists` and `sp` both → `dist/index.js` (`package.json` `bin`). The deprecated `install` bin was removed in SPECIALISTS-4223 because it shadowed GNU coreutils `install` on `PATH`.
 
 ---
 
