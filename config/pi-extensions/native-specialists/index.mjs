@@ -133,6 +133,16 @@ const DIM = (text) => `\x1b[2m${text}\x1b[22m`;
 const BOLD = (text) => `\x1b[1m${text}\x1b[22m`;
 /** Plain white big dot — matches the xtrm-ui tool rows and substrate-suggest cards. */
 const DOT = '●';
+// The Jev/suggestion design system, shared with core's substrate-suggest cards: the gold
+// band starts at the header TEXT (the dot keeps its own unbanded row) with a dark bold
+// foreground, and everything below is italic on the normal background. One look for every
+// card the operator sees, whichever extension drew it.
+const GOLD_ON = '\x1b[48;2;201;162;39m\x1b[38;2;24;20;16m';
+const GOLD_OFF = '\x1b[49m\x1b[39m';
+/** Header separator: dim, never white, so it reads as a separator on the gold. */
+const SEP_HINT = `\x1b[2m\u00b7\x1b[22m`;
+/** Band a header's text; the caller prepends the dot itself. */
+const bandHeader = (text) => `${GOLD_ON}${text}${GOLD_OFF}`;
 // Italic is set with `3` and cleared with `23`; `22m` after it clears the dim. Pi theme
 // helpers have no italic token, so the raw SGR is the only way to mark the purpose excerpt.
 const ITALIC_DIM = (text) => `\x1b[2m\x1b[3m${text}\x1b[23m\x1b[22m`;
@@ -559,12 +569,12 @@ export function formatAskWake(ask, view) {
   const purpose = formatPurposeShort(view?.purpose);
   const beadId = ask.beadId ?? view?.bead_id ?? '—';
   // `!` covers both blocked states, so the one word the glyph cannot carry stays.
-  const header = [
-    `${DOT} ${BOLD(ask.specialist)}`,
+  const header = `${DOT} ${bandHeader([
+    BOLD(ask.specialist),
     DIM(escalated ? 'escalated' : 'waiting'),
     DIM(beadId),
     purpose ? ITALIC_DIM(purpose) : null,
-  ].filter(Boolean).join(` ${DIM('·')} `);
+  ].filter(Boolean).join(` ${SEP_HINT} `))}`;
   return [
     withRail(header),
     // Blank body lines are dropped: the rail used to render paragraph breaks
@@ -588,12 +598,12 @@ export function formatSettlementWake(done, view, opts = {}) {
   const failed = done.outcome === 'failed';
   const beadId = done.beadId ?? view?.bead_id ?? '—';
   const facts = failed ? modelFacts(view) : costFacts(view);
-  const header = [
-    `${DOT} ${BOLD(done.specialist)}`,
+  const header = `${DOT} ${bandHeader([
+    BOLD(done.specialist),
     DIM(failed ? 'failed' : 'done'),
     DIM(beadId),
     facts || null,
-  ].filter(Boolean).join(` ${DIM('·')} `);
+  ].filter(Boolean).join(` ${SEP_HINT} `))}`;
   return [
     withRail(header),
     ...resultLines(opts.resultText ?? done.output, opts),

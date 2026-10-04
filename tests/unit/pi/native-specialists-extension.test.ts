@@ -1783,7 +1783,13 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
     for (const card of cards) {
       // Unrailed (operator decision): no gutter anywhere.
       expect(card).not.toContain('│');
-      expect(card).not.toContain('48;2');   // no background in an event, ever
+      // Design system: the gold band starts at the header text (line 1) and the
+      // dot stays unbanded; nothing below the header carries a background.
+      const [head, ...body] = card.split('\n');
+      expect(head.startsWith('\u001b[1m\u25cf\u001b[22m ') || head.startsWith('\u25cf ')).toBe(true);
+      expect(head.slice(head.indexOf('\u25cf ') + 2)).toContain('48;2;201;162;39');
+      expect(head.slice(head.indexOf('\u25cf ') + 2)).toContain('38;2;24;20;16');
+      for (const line of body) expect(line).not.toContain('48;2');
       expect(card).not.toContain('\n\n');   // no blank line anywhere
       expect(card).not.toContain('╭');      // no brackets
       expect(card).not.toContain('╰');
@@ -1903,7 +1909,8 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
     const lines = component.render(80);
     expect(Array.isArray(lines)).toBe(true);
     expect(lines.join('\n')).not.toContain('[specialist_ask]');
-    expect(lines.join('\n')).not.toContain('48;2');
+    expect(lines[0].slice(lines[0].indexOf('\u25cf ') + 2)).toContain('48;2;201;162;39');
+    for (const line of lines.slice(1)) expect(line).not.toContain('48;2');
     for (const line of lines) expect(line.startsWith(mod.RAIL)).toBe(true);
     // Repeated renders agree (no first-call capture), and a missing renderer seam is safe.
     expect(component.render(80)).toEqual(lines);
