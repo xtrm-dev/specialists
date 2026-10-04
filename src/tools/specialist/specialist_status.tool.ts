@@ -39,9 +39,22 @@ function fleetFingerprint(
 
 /**
  * Park on the host's fleet-change signal until the actionable fingerprint moves or the
- * deadline passes (SPECIALISTS-4218). The epoch is captured BEFORE the baseline
- * fingerprint, so a change landing between snapshot and registration is still caught
- * (level-triggered wake — see waitForFleetChange).
+ * deadline passes (SPECIALISTS-4218).
+ *
+ * Each iteration CAPTURES the epoch, READS the fingerprint and REGISTERS the waiter
+ * without an await in between. Both halves are load-bearing:
+ *
+ *   - A fingerprint-neutral wake (a finished turn, a retry boundary, a compaction
+ *     marker) moves the epoch but not the fingerprint, so the next iteration must park on
+ *     the epoch it was handed AFTER that wake. Carrying one captured epoch across
+ *     iterations makes every re-park satisfy the level-triggered fast path immediately
+ *     and spin on microtasks until the deadline — 951k fingerprint reads and 1.0 s of CPU
+ *     in a 3 s wait, from ONE neutral wake (SPECIALISTS-4218 review, FAIL).
+ *   - Capturing the epoch and reading the fingerprint with no await between them keeps the
+ *     no-lost-wakeup property: `waitForFleetChange` registers its waiter synchronously, so
+ *     a wake landing in that block either bumps the epoch before registration (the
+ *     fast path returns at once and this loop observes the change) or lands after it (the
+ *     waiter resolves).
  */
 async function waitForFleetChange(
   host: NativeActivationHost,
@@ -49,15 +62,13 @@ async function waitForFleetChange(
   timeoutMs: number,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
-  const epoch = host.fleetChangeEpoch();
   const baseline = fleetFingerprint(host, getPusher?.()?.allResults() ?? []);
   for (;;) {
     const remaining = deadline - Date.now();
     if (remaining <= 0) return;
-    const outcome = await host.waitForFleetChange(remaining, epoch);
-    if (outcome === 'change' && fleetFingerprint(host, getPusher?.()?.allResults() ?? []) !== baseline) return;
-    // A change that left the actionable fingerprint untouched (turn progress, usage
-    // ticks) parks again for what is left of the budget.
+    const epoch = host.fleetChangeEpoch();
+    if (fleetFingerprint(host, getPusher?.()?.allResults() ?? []) !== baseline) return;
+    await host.waitForFleetChange(remaining, epoch);
   }
 }
 

@@ -52,6 +52,8 @@ import { resolveOutputContractSchema } from '../../../src/specialist/runner.js';
 import { DispatchRejectedError } from '../../../src/activation/types.js';
 import { acquire as acquireLease, leasePath } from '../../../src/activation/workspace-lease.js';
 import type { PiSdk, PiAgentSessionLike, PiAgentSessionEvent } from '../../../src/activation/pi-sdk.js';
+import { createSpecialistStatusTool } from '../../../src/tools/specialist/specialist_status.tool.js';
+import { CircuitBreaker } from '../../../src/utils/circuitBreaker.js';
 import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
 import type { SpecialistWorkItemBoundary, WorkItemView } from '../../../src/activation/workitem-store.js';
 
@@ -211,6 +213,67 @@ const BEAD = {
  * reconciled by hand. Same class as the observability.db incident: a test operating on live
  * developer state, invisible until something downstream refuses.
  */
+/**
+ * A session that never settles until `failWith` — keeps a fallback leg in flight.
+ *
+ * Defined at module scope next to the other helpers because the 4218 x 4253 composition
+ * test needs the walk to PAUSE with a failure held, which a scripted session cannot do:
+ * scriptSession settles each leg synchronously inside prompt().
+ */
+function heldSession() {
+  const listeners: Array<(e: PiAgentSessionEvent) => void> = [];
+  const messages: unknown[] = [];
+  let activeTools: string[] = [];
+  let release: (() => void) | undefined;
+  const session = {
+    sessionId: `pi-sess-held-${(heldSessionCounter += 1)}`,
+    prompted: false,
+    messages,
+    isIdle: true,
+    disposed: false,
+    prompts: [] as string[],
+    async prompt(text: string) {
+      session.prompts.push(text);
+      session.prompted = true;
+      listeners.forEach(l => l({ type: 'agent_start' }));
+      await new Promise<void>(resolve => { release = resolve; });
+      messages.push({ role: 'assistant', content: '', stopReason: 'error', errorMessage: '429: usage limit exceeded' });
+      listeners.forEach(l => l({ type: 'agent_end', willRetry: false }));
+      listeners.forEach(l => l({ type: 'agent_settled' }));
+    },
+    failWith(_message: string) { release?.(); },
+    /** A neutral turn completion: bumps the change epoch, moves nothing readable. */
+    progress() { listeners.forEach(l => l({ type: 'agent_end', willRetry: false })); },
+    async steer() {}, async followUp() {}, async abort() {},
+    dispose() { session.disposed = true; },
+    subscribe(l: (e: PiAgentSessionEvent) => void) {
+      listeners.push(l);
+      return () => { const i = listeners.indexOf(l); if (i >= 0) listeners.splice(i, 1); };
+    },
+    getActiveToolNames: () => activeTools,
+    setActiveToolsByName(names: string[]) { activeTools = names; },
+    async waitForIdle() {},
+  };
+  return session as unknown as PiAgentSessionLike & {
+    failWith(message: string): void;
+    prompted: boolean;
+    progress(): void;
+  };
+}
+
+let heldSessionCounter = 0;
+
+const sleep = (ms: number) => new Promise<void>(resolve => { setTimeout(resolve, ms); });
+
+/** Bounded poll for an asynchronous host event; real timers, never a fake clock. */
+async function waitUntil(predicate: () => boolean, timeoutMs = 3000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error('waitUntil: condition never held');
+    await sleep(10);
+  }
+}
+
 const hostWorkspaces: string[] = [];
 function hostWorkspace(): string {
   const root = mkdtempSync(join(tmpdir(), 'native-host-ws-'));
@@ -1591,6 +1654,65 @@ describe('NativeActivationHost — fallback walk + retry (unitAI-3emr7)', () => 
     const failures = sink.events.filter(e => e.name === 'activation_failed');
     expect(failures).toHaveLength(1);
     expect(failures[0]?.payload?.intermediate).toBeUndefined();
+  });
+
+  it('a fallback walk leaves a parked wait parked, and its terminal flush wakes it (4218 × 4253)', async () => {
+    // The two fixes meet on the real fallback path. 4253 holds each failed leg's
+    // activation_failed until the walk decides (intermediate vs terminal); 4218's wait epoch
+    // bumps on forensic EMITS. So across a fallback the sink sees model_fallback, an
+    // INTERMEDIATE activation_failed and a turn_started — none of which changes the
+    // actionable fingerprint — and a wait must survive all of them parked. Only the terminal
+    // flush moves the fingerprint (running -> failed), and it must wake the wait, or a
+    // settled failure would go unseen until the timeout.
+    const held = heldSession();
+    const { host, sink } = chainHost({
+      executionExtra: { fallback_models: ['fallbackprov/fallback-model'] },
+      sessions: [
+        scriptSession([{ text: '', stopReason: 'error', errorMessage: '429: usage limit exceeded' }]),
+        held,
+      ],
+    });
+
+    const handle = await start(host);
+    // Wait for the leg to be genuinely IN FLIGHT, not merely created: `prompted` is set
+    // before the agent_start listener flips state to `running`, so parking on `prompted`
+    // alone can attach the wait mid-flip and race the baseline.
+    await waitUntil(() => held.prompted && host.inspect(handle.activationId)?.state === 'running');
+    expect(sink.events.some(e => e.name === 'model_fallback')).toBe(true);
+    const intermediate = sink.events.filter(e => e.name === 'activation_failed');
+    expect(intermediate, 'leg 1 recorded once, as intermediate').toHaveLength(1);
+    expect(intermediate[0]?.payload?.intermediate).toBe(true);
+
+    let fingerprintReads = 0;
+    const status = createSpecialistStatusTool(
+      { list: async () => [] } as never,
+      new CircuitBreaker(),
+      () => host,
+      () => ({ allResults: () => { fingerprintReads += 1; return []; } }) as never,
+    );
+    let returned = false;
+    const waiting = status.execute({ wait_for_change: true, timeout_s: 5 }).then(out => { returned = true; return out; });
+
+    // Neutral wakes DURING the parked window: a real fleet's turn boundaries arrive exactly
+    // like this. Each must cost one re-park, not a spin.
+    for (let i = 0; i < 6; i += 1) { await sleep(50); held.progress(); }
+    expect(returned, 'model_fallback + intermediate failure + neutral turns leave the wait parked').toBe(false);
+    expect(fingerprintReads, 'one fingerprint read per wake, not a spin').toBeLessThan(30);
+    expect(sink.events.filter(e => e.name === 'activation_failed'), 'no terminal failure yet').toHaveLength(1);
+
+    held.failWith('429: usage limit exceeded');
+    // The wait wakes on the FIRST fingerprint-moving step of the terminal path — the
+    // settle, which flips state — and the terminal activation_failed follows a moment
+    // later. Awaiting the result makes that ordering deterministic instead of a race.
+    const out = await waiting as { activations: Array<{ activation_id: string; state: string }> };
+    const result = await handle.result;
+
+    expect(returned, 'the terminal transition wakes the wait').toBe(true);
+    expect(result.status).toBe('failed');
+    const failures = sink.events.filter(e => e.name === 'activation_failed');
+    expect(failures, 'the held leg is not lost: intermediate AND terminal are both recorded').toHaveLength(2);
+    expect(failures[1]?.payload?.intermediate).toBeUndefined();
+    expect(out.activations[0]?.activation_id).toBe(handle.activationId);
   });
 
   it('re-acquires the writer lease for a fallback attempt after a SETTLED failure', async () => {

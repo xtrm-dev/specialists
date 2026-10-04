@@ -121,6 +121,8 @@ function fakeSession(failFirst?: { stopReason: string; errorMessage: string }, h
     async steer(text: string) { steered.push(text); },
     async followUp() {}, async abort() {},
     dispose() { session.disposed = true; },
+    /** Deliver a raw session event by hand (SPECIALISTS-4218: neutral-wake tests). */
+    emit(event: PiAgentSessionEvent) { listeners.forEach(l => l(event)); },
     subscribe(l: (e: PiAgentSessionEvent) => void) {
       listeners.push(l);
       return () => { const i = listeners.indexOf(l); if (i >= 0) listeners.splice(i, 1); };
@@ -585,6 +587,61 @@ describe('specialist_status wait_for_change — one parked call instead of a pol
 
     expect(out.activations).toEqual([]);
     expect(out.pending_asks).toEqual([]);
+  });
+
+  it('a fingerprint-neutral wake does not spin the wait (SPECIALISTS-4218 review FAIL)', async () => {
+    // A finished turn (`agent_end` -> turn_completed) bumps the change epoch and moves
+    // NOTHING the fingerprint reads: state, result status and asks are unchanged. Carrying
+    // one captured epoch across iterations then re-parked on an epoch it had already
+    // passed, satisfied the level-triggered fast path every time, and spun on microtasks
+    // until the deadline — 951k fingerprint reads and 1.0 s of CPU in a 3 s wait, from ONE
+    // neutral wake. Iteration count is the assertion (deterministic); a CPU assertion here
+    // would only add host-load flake.
+    const { host, session } = hostWith({ holdOpen: true });
+    const dispatch = createSpecialistDispatchTool(() => host);
+    let fingerprintReads = 0;
+    const status = createSpecialistStatusTool(
+      { list: async () => [] } as never,
+      new CircuitBreaker(),
+      () => host,
+      () => ({ allResults: () => { fingerprintReads += 1; return []; } }) as never,
+    );
+    await dispatch.execute({ specialist: 'researcher', bead_id: 'ISSUE-1' });
+
+    const waker = setInterval(() => session.emit({ type: 'agent_end', willRetry: false }), 50);
+    const t0 = Date.now();
+    const out = await status.execute({ wait_for_change: true, timeout_s: 1 }) as Record<string, unknown>;
+    const took = Date.now() - t0;
+    clearInterval(waker);
+
+    expect(took, 'returns at the timeout, since no fingerprint moved').toBeGreaterThanOrEqual(900);
+    // ~20 neutral wakes at 50 ms over 1 s: a parked wait reads the fingerprint once per
+    // wake plus the baseline and the final compare. A spin is orders of magnitude more.
+    expect(fingerprintReads).toBeGreaterThan(2);
+    expect(fingerprintReads, 'one read per wake, not a spin').toBeLessThan(60);
+    expect((out.activations as unknown[])).toHaveLength(1);
+  });
+
+  it('a real change still returns under 1s after neutral wakes (SPECIALISTS-4218)', async () => {
+    const { host, session } = hostWith({ holdOpen: true });
+    const dispatch = createSpecialistDispatchTool(() => host);
+    const status = createSpecialistStatusTool(
+      { list: async () => [] } as never,
+      new CircuitBreaker(),
+      () => host,
+    );
+    const dispatched = await dispatch.execute({ specialist: 'researcher', bead_id: 'ISSUE-1' }) as Record<string, unknown>;
+
+    const waker = setInterval(() => session.emit({ type: 'agent_end', willRetry: false }), 40);
+    const waiting = status.execute({ wait_for_change: true, timeout_s: 30 });
+    await new Promise(resolve => setTimeout(resolve, 200)); // neutral wakes have landed
+    const t0 = Date.now();
+    await host.stop(dispatched.activation_id as string);
+    const out = await waiting as Record<string, unknown>;
+    clearInterval(waker);
+
+    expect(Date.now() - t0, 'neutral wakes must not mask a real transition').toBeLessThan(1000);
+    expect(out.activations).toEqual([]);
   });
 });
 
