@@ -185,7 +185,7 @@ Audit behavior:
 - an unreadable final observation fails closed before Pi starts; no host path is included in the failure
 - compat guard still blocks interactive, worktree, and all `skills.scripts` cases
 
-> **Host-read waiver (4.0.5):** These controls do not create a filesystem read boundary. Allowed tools, extensions, MCP processes, and child processes can still read paths visible to the runtime identity. 4.0.5 permits only trusted single-tenant callers with private authenticated ingress, a dedicated container or OS account, minimal mounts, least-privilege credentials, trusted definitions, and reviewed extension sources. Untrusted, public, cross-tenant, and multi-tenant deployments are excluded. The waiver does not authorize publication and expires at 4.0.6 or on 2026-11-01, whichever comes first.
+> **Host-read waiver (4.0.6):** These controls do not create a filesystem read boundary. Allowed tools, extensions, MCP processes, and child processes can still read paths visible to the runtime identity. 4.0.6 permits only trusted single-tenant callers with private authenticated ingress, a dedicated container or OS account, minimal mounts, least-privilege credentials, trusted definitions, and reviewed extension sources. Untrusted, public, cross-tenant, and multi-tenant deployments are excluded. The waiver does not authorize publication and expires at 4.0.7 or on 2026-11-01, whichever comes first.
 
 ### Hot reload
 
