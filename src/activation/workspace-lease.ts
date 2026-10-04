@@ -278,7 +278,7 @@ export interface AcquireRequest {
 
 export interface RecoveryOutcome {
   applied: boolean;
-  reason?: 'not_recoverable' | 'already_free' | 'raced_by_new_holder';
+  reason?: 'not_recoverable' | 'already_free' | 'raced_by_new_holder' | 'activation_mismatch';
   /** The uncertain reason that was healed. Absent when nothing was healed. */
   observedReason?: string;
   actor?: string;
@@ -301,6 +301,51 @@ export interface RecoveryOutcome {
  * lease (`raced_by_new_holder`). The recovery log keeps the forensic trail that deleting the
  * file would otherwise lose.
  */
+/**
+ * Release a lease on behalf of the activation named in `activationId` (SPECIALISTS-4275).
+ *
+ * Stopping an activation must end its write claim, or the coordinator is fenced by a worker
+ * that no longer exists — observed live: `specialist_stop_activation` disposed the activation
+ * and the lease survived, escalating the workspace to `uncertain`. This is the clean inverse
+ * of `recoverDeadHolder`: it needs no death to justify it, only an exact holder match.
+ *
+ * A non-matching lease is never touched (`activation_mismatch`). The activationId comes from
+ * the coordinator's own stop call, so the match is a claim about ownership, not a guess.
+ */
+export function releaseHolderLease(
+  workspace: WorkspaceIdentity,
+  input: { activationId: ActivationId; actor: string; now?: number },
+): RecoveryOutcome {
+  const path = leasePath(workspace);
+  let lease: WorkspaceLease;
+  try {
+    lease = JSON.parse(readFileSync(path, 'utf-8')) as WorkspaceLease;
+  } catch {
+    return { applied: false, reason: 'already_free' };
+  }
+  if (lease?.activationId !== input.activationId) {
+    return { applied: false, reason: 'activation_mismatch' };
+  }
+  const at = input.now ?? Date.now();
+  try {
+    appendFileSync(
+      join(dirname(path), 'recoveries.jsonl'),
+      `${JSON.stringify({
+        workspace: workspace.worktreePath,
+        holderActivationId: lease.activationId,
+        holderPid: lease.holder.pid,
+        observedReason: 'released_by_holder',
+        actor: input.actor,
+        recoveredAt: at,
+      })}\n`,
+    );
+    rmSync(path, { force: true });
+  } catch {
+    return { applied: false, reason: 'not_recoverable' };
+  }
+  return { applied: true, observedReason: 'released_by_holder', actor: input.actor };
+}
+
 export function recoverDeadHolder(
   workspace: WorkspaceIdentity,
   input: { actor: string; probe?: LeaseProcessProbe; now?: number },

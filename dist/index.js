@@ -1,18 +1,29 @@
 #!/usr/bin/env bun
 // @bun
+var __create = Object.create;
+var __getProtoOf = Object.getPrototypeOf;
 var __defProp = Object.defineProperty;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __toESM = (mod, isNodeMode, target) => {
+  target = mod != null ? __create(__getProtoOf(mod)) : {};
+  const to = isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
+  for (let key of __getOwnPropNames(mod))
+    if (!__hasOwnProp.call(to, key))
+      __defProp(to, key, {
+        get: () => mod[key],
+        enumerable: true
+      });
+  return to;
+};
 var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports);
-var __returnValue = (v) => v;
-function __exportSetter(name, newValue) {
-  this[name] = __returnValue.bind(null, newValue);
-}
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, {
       get: all[name],
       enumerable: true,
       configurable: true,
-      set: __exportSetter.bind(all, name)
+      set: (newValue) => all[name] = () => newValue
     });
 };
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
@@ -60451,8 +60462,8 @@ ${detail.missing.map((m) => `  - ${m}`).join(`
 
 // src/activation/workspace-lease.ts
 import { createHash as createHash8 } from "crypto";
-import { existsSync as existsSync46, linkSync, mkdirSync as mkdirSync18, readFileSync as readFileSync38, realpathSync as realpathSync5, renameSync as renameSync6, unlinkSync as unlinkSync2, writeFileSync as writeFileSync21 } from "fs";
-import { join as join49 } from "path";
+import { appendFileSync as appendFileSync6, existsSync as existsSync46, linkSync, mkdirSync as mkdirSync18, readFileSync as readFileSync38, realpathSync as realpathSync5, renameSync as renameSync6, rmSync as rmSync9, unlinkSync as unlinkSync2, writeFileSync as writeFileSync21 } from "fs";
+import { dirname as dirname23, join as join49 } from "path";
 function workspaceIdentityFor(cwd) {
   return { repositoryRoot: cwd, worktreePath: cwd };
 }
@@ -60633,7 +60644,7 @@ function admitToolCall(input2, probe = procLeaseProbe()) {
     reason: `workspace ${input2.workspace.worktreePath} is not leased by this activation; ` + `${input2.toolName} may not mutate it`
   };
 }
-var NON_MUTATING_TOOLS;
+var NON_MUTATING_TOOLS, WORKSPACE_WRITE_TOOLS, CONTROL_PLANE_TOOLS;
 var init_workspace_lease = __esm(() => {
   init_types3();
   NON_MUTATING_TOOLS = new Set([
@@ -60648,10 +60659,19 @@ var init_workspace_lease = __esm(() => {
     "websearch",
     "webfetch"
   ]);
+  WORKSPACE_WRITE_TOOLS = new Set(["edit", "write", "bash", "powershell"]);
+  CONTROL_PLANE_TOOLS = new Set([
+    "specialist_status",
+    "specialist_reply",
+    "specialist_result",
+    "specialist_stop_activation",
+    "specialist_lease_reconcile",
+    "specialists"
+  ]);
 });
 
 // src/activation/workspace-reconcile.ts
-import { appendFileSync as appendFileSync6, existsSync as existsSync47, mkdirSync as mkdirSync19, readdirSync as readdirSync21, readFileSync as readFileSync39, unlinkSync as unlinkSync3 } from "fs";
+import { appendFileSync as appendFileSync7, existsSync as existsSync47, mkdirSync as mkdirSync19, readdirSync as readdirSync21, readFileSync as readFileSync39, unlinkSync as unlinkSync3 } from "fs";
 import { userInfo } from "os";
 import { join as join50 } from "path";
 function reconcile(workspace, request, options2 = {}) {
@@ -60725,7 +60745,7 @@ function reconciliationLogPath(workspace) {
 }
 function appendRecord(workspace, record) {
   mkdirSync19(leaseDir(workspace), { recursive: true, mode: 448 });
-  appendFileSync6(reconciliationLogPath(workspace), `${JSON.stringify(record)}
+  appendFileSync7(reconciliationLogPath(workspace), `${JSON.stringify(record)}
 `, { mode: 384 });
 }
 function readLogAt(path3) {
@@ -61284,7 +61304,7 @@ var init_channel_doctor = () => {};
 import { existsSync as existsSync49 } from "fs";
 import { createRequire as createRequire6 } from "module";
 import { homedir as homedir14 } from "os";
-import { dirname as dirname23, join as join51 } from "path";
+import { dirname as dirname24, join as join51 } from "path";
 import { pathToFileURL } from "url";
 function resolveSubstrateDir(explicit, resolveInstalled) {
   const trimmed = explicit.trim();
@@ -61293,21 +61313,21 @@ function resolveSubstrateDir(explicit, resolveInstalled) {
   if (resolveInstalled)
     return resolveInstalled();
   try {
-    return dirname23(require5.resolve(`${SUBSTRATE_PACKAGE}/package.json`));
+    return dirname24(require5.resolve(`${SUBSTRATE_PACKAGE}/package.json`));
   } catch {}
   return resolveSubstrateFromGlobalPrefix();
 }
 function resolveSubstrateFromGlobalPrefix(libDirs) {
   const globalModules = resolveGlobalNodeModulesDir2();
-  const runtimePrefix = dirname23(dirname23(process.execPath));
+  const runtimePrefix = dirname24(dirname24(process.execPath));
   const candidates = uniqueExistingLibDirs(libDirs ?? [
-    globalModules ? dirname23(globalModules) : undefined,
+    globalModules ? dirname24(globalModules) : undefined,
     join51(runtimePrefix, "lib"),
     join51(homedir14(), ".bun", "install", "global")
   ]);
   for (const libDir of candidates) {
     try {
-      return dirname23(require5.resolve(`${SUBSTRATE_PACKAGE}/package.json`, { paths: [libDir] }));
+      return dirname24(require5.resolve(`${SUBSTRATE_PACKAGE}/package.json`, { paths: [libDir] }));
     } catch {}
   }
   return null;
@@ -62832,7 +62852,7 @@ var init_doctor = __esm(() => {
 import { randomUUID as randomUUID4 } from "crypto";
 import { closeSync as closeSync5, existsSync as existsSync51, fsyncSync as fsyncSync2, mkdirSync as mkdirSync21, openSync as openSync6, readFileSync as readFileSync42, renameSync as renameSync7, writeFileSync as writeFileSync23 } from "fs";
 import { homedir as homedir16 } from "os";
-import { dirname as dirname24, join as join53 } from "path";
+import { dirname as dirname25, join as join53 } from "path";
 async function loadBenchmarkSnapshot(options2 = {}) {
   const warnings = [];
   const warn4 = (warning) => {
@@ -62952,7 +62972,7 @@ function getBenchmarkCachePath(source, cacheDir = join53(homedir16(), ".cache", 
   return join53(cacheDir, `${source}.json`);
 }
 function writeCache2(path3, snapshot) {
-  mkdirSync21(dirname24(path3), { recursive: true, mode: 448 });
+  mkdirSync21(dirname25(path3), { recursive: true, mode: 448 });
   const tmpPath = `${path3}.${process.pid}.${randomUUID4()}.tmp`;
   writeFileSync23(tmpPath, `${JSON.stringify(snapshot, null, 2)}
 `, { mode: 384 });
@@ -62963,7 +62983,7 @@ function writeCache2(path3, snapshot) {
     closeSync5(fd);
   }
   renameSync7(tmpPath, path3);
-  fsyncDirectory(dirname24(path3));
+  fsyncDirectory(dirname25(path3));
 }
 function fsyncDirectory(path3) {
   try {
@@ -62988,7 +63008,7 @@ var init_benchmarks = __esm(() => {
 import { createHash as createHash11, randomUUID as randomUUID5 } from "crypto";
 import { mkdirSync as mkdirSync22, readdirSync as readdirSync23, readFileSync as readFileSync43, writeFileSync as writeFileSync24 } from "fs";
 import { homedir as homedir17 } from "os";
-import { dirname as dirname25, join as join54, resolve as resolve23 } from "path";
+import { dirname as dirname26, join as join54, resolve as resolve23 } from "path";
 async function runAgenticFollowthroughProbe(model, specName, opts = {}) {
   const probeDir = getProbeRunDir(model, specName, opts.cacheDir);
   mkdirSync22(probeDir, { recursive: true, mode: 448 });
@@ -63014,7 +63034,7 @@ async function runAgenticFollowthroughProbe(model, specName, opts = {}) {
   const summaryJson = `${JSON.stringify({ verdict, metrics, sample_output: output2, transcript_path: transcriptPath }, null, 2)}
 `;
   writeFileSync24(summaryPath, summaryJson, { mode: 384 });
-  mkdirSync22(dirname25(canonicalPath), { recursive: true, mode: 448 });
+  mkdirSync22(dirname26(canonicalPath), { recursive: true, mode: 448 });
   writeFileSync24(canonicalPath, summaryJson, { mode: 384 });
   return { verdict, metrics, sample_output: output2, transcript_path: transcriptPath };
 }
@@ -65919,7 +65939,7 @@ var init_esm = __esm(() => {
 });
 
 // node_modules/@modelcontextprotocol/server/dist/chunk-Br0eD_fh.mjs
-var __create, __defProp2, __getOwnPropDesc, __getOwnPropNames, __getProtoOf, __hasOwnProp, __commonJSMin = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports), __exportAll = (all, symbols) => {
+var __create2, __defProp2, __getOwnPropDesc, __getOwnPropNames2, __getProtoOf2, __hasOwnProp2, __commonJSMin = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports), __exportAll = (all, symbols) => {
   let target = {};
   for (var name in all) {
     __defProp2(target, name, {
@@ -65933,9 +65953,9 @@ var __create, __defProp2, __getOwnPropDesc, __getOwnPropNames, __getProtoOf, __h
   return target;
 }, __copyProps = (to, from, except, desc) => {
   if (from && typeof from === "object" || typeof from === "function") {
-    for (var keys = __getOwnPropNames(from), i = 0, n = keys.length, key;i < n; i++) {
+    for (var keys = __getOwnPropNames2(from), i = 0, n = keys.length, key;i < n; i++) {
       key = keys[i];
-      if (!__hasOwnProp.call(to, key) && key !== except) {
+      if (!__hasOwnProp2.call(to, key) && key !== except) {
         __defProp2(to, key, {
           get: ((k) => from[k]).bind(null, key),
           enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable
@@ -65944,17 +65964,17 @@ var __create, __defProp2, __getOwnPropDesc, __getOwnPropNames, __getProtoOf, __h
     }
   }
   return to;
-}, __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(isNodeMode || !mod || !mod.__esModule ? __defProp2(target, "default", {
+}, __toESM2 = (mod, isNodeMode, target) => (target = mod != null ? __create2(__getProtoOf2(mod)) : {}, __copyProps(isNodeMode || !mod || !mod.__esModule ? __defProp2(target, "default", {
   value: mod,
   enumerable: true
 }) : target, mod));
 var init_chunk_Br0eD_fh = __esm(() => {
-  __create = Object.create;
+  __create2 = Object.create;
   __defProp2 = Object.defineProperty;
   __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-  __getOwnPropNames = Object.getOwnPropertyNames;
-  __getProtoOf = Object.getPrototypeOf;
-  __hasOwnProp = Object.prototype.hasOwnProperty;
+  __getOwnPropNames2 = Object.getOwnPropertyNames;
+  __getProtoOf2 = Object.getPrototypeOf;
+  __hasOwnProp2 = Object.prototype.hasOwnProperty;
 });
 
 // node_modules/@modelcontextprotocol/server/dist/dialects-DoSzNhcb.mjs
@@ -70671,7 +70691,7 @@ function finalize(ctx, schema) {
     result.$schema = "http://json-schema.org/draft-07/schema#";
   } else if (ctx.target === "draft-04") {
     result.$schema = "http://json-schema.org/draft-04/schema#";
-  } else if (ctx.target === "openapi-3.0") {}
+  } else if (ctx.target === "openapi-3.0") {} else {}
   if (ctx.external?.uri) {
     const id = ctx.external.registry.get(schema)?.id;
     if (!id)
@@ -77963,7 +77983,7 @@ function finalize2(ctx, schema) {
     result.$schema = "http://json-schema.org/draft-07/schema#";
   } else if (ctx.target === "draft-04") {
     result.$schema = "http://json-schema.org/draft-04/schema#";
-  } else if (ctx.target === "openapi-3.0") {}
+  } else if (ctx.target === "openapi-3.0") {} else {}
   if (ctx.external?.uri) {
     const id = ctx.external.registry.get(schema)?.id;
     if (!id)
@@ -84426,7 +84446,7 @@ var init_src_CX2iR2pK = __esm(() => {
       this.type = type;
     }
   });
-  import_content_type = /* @__PURE__ */ __toESM(require_content_type(), 1);
+  import_content_type = /* @__PURE__ */ __toESM2(require_content_type(), 1);
   STDIO_DEFAULT_MAX_BUFFER_SIZE = 10 * 1024 * 1024;
   TOOL_NAME_REGEX = /^[A-Za-z0-9._-]{1,128}$/;
 });
@@ -91780,7 +91800,7 @@ var init_ajvProvider_CEoC__sr = __esm(() => {
     }
     const TIME = /^(\d\d):(\d\d):(\d\d(?:\.\d+)?)(z|([+-])(\d\d)(?::?(\d\d))?)?$/i;
     function getTime(strictTimeZone) {
-      return function time5(str) {
+      return function time(str) {
         const matches2 = TIME.exec(str);
         if (!matches2)
           return false;
@@ -92004,7 +92024,7 @@ var init_ajvProvider_CEoC__sr = __esm(() => {
   import_ajv = require_ajv();
   import__2019 = require__2019();
   import__2020 = require__2020();
-  import_dist = /* @__PURE__ */ __toESM(require_dist(), 1);
+  import_dist = /* @__PURE__ */ __toESM2(require_dist(), 1);
   addFormats = import_dist.default;
   Ajv = import_ajv.Ajv;
 });
@@ -98975,6 +98995,8 @@ var init_lib = __esm(() => {
   init_launch_outcome();
   init_citation_evidence();
   init_workspace_lease();
+  init_workspace_lease();
+  init_specialist_lease_reconcile_tool();
   init_workspace_reconcile();
   init_workspace_lease();
   init_rejection();

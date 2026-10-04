@@ -260,7 +260,7 @@ function plain(line) {
 const SPIN_CLOCK = 220_000;
 
 describe('native-specialists extension (Pi coordinator surface)', () => {
-  it('registers exactly the nine specialist_* tools over the host', async () => {
+  it('registers exactly the ten specialist_* tools over the host', async () => {
     const mod = await loadExtension();
     const pi = makeFakePi();
     mod.default(pi);
@@ -273,6 +273,7 @@ describe('native-specialists extension (Pi coordinator surface)', () => {
       'specialist_retry',
       'specialist_steer',
       'specialist_stop_activation',
+      'specialist_lease_reconcile',
       'specialist_list',
     ]);
     // No free-form task text for tracked work (PRD §10/§14).

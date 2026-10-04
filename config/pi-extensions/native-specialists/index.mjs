@@ -46,6 +46,8 @@ import {
   SpecialistLoader,
   THINKING_LEVELS,
   admitCoordinatorToolCall,
+  createSpecialistLeaseReconcileTool,
+  releaseHolderLease,
   isBuildStale,
   leaseScopeFor,
   readBuildId,
@@ -1085,6 +1087,17 @@ export const TOOL_OUTPUT_SCHEMAS = {
   specialist_steer: Envelope,
   specialist_stop_activation: Envelope,
   specialist_list: Registry,
+  // SPECIALISTS-4275: list/reconcile returns the reconcile payload verbatim.
+  specialist_lease_reconcile: Type.Object({
+    uncertain_workspaces: Type.Optional(Type.Array(Type.Unknown(), {
+      description: 'action=list: uncertain leases with the outcomes permitted for each.',
+    })),
+    applied: Type.Optional(Type.Boolean({ description: 'action=reconcile: whether the decision was applied.' })),
+    outcome: Type.Optional(Type.String({ description: 'action=reconcile: the recorded outcome.' })),
+    refusal_reason: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+    status: Type.Optional(Type.String()),
+    error: Type.Optional(Type.String()),
+  }),
 };
 
 /** The namespace every tool belongs to, so codemode lists them under one heading. */
@@ -2076,10 +2089,63 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
             })
       }
       await disposeActivation(params.activation_id, params.reason ?? 'pi operator request');
+      // SPECIALISTS-4275: stopping must END the write claim. Otherwise the coordinator is
+      // fenced by a worker that no longer exists, which is exactly what happened live.
+      let lease_release;
+      try {
+        const view = getHost().inspect(params.activation_id);
+        const scope = leaseScopeFor(view);
+        if (scope?.worktreePath) {
+          lease_release = releaseHolderLease(
+            { worktreePath: scope.worktreePath, repositoryRoot: scope.worktreePath },
+            { activationId: params.activation_id, actor: 'coordinator-stop' },
+          );
+        }
+      } catch {
+        lease_release = undefined; // never fail a stop because a lease could not be read
+      }
       return resultOf({
             status: 'stopped',
             activation_id: params.activation_id,
+            ...(lease_release ? { lease_release } : {}),
           })
+    },
+  });
+
+  // SPECIALISTS-4275: the coordinator's lease affordances, native. This WRAPS the same tool
+  // the MCP surface exposes rather than reimplementing recovery, so the two cannot disagree.
+  const leaseReconcileTool = createSpecialistLeaseReconcileTool();
+  pi.registerTool({
+    name: 'specialist_lease_reconcile',
+    label: 'Workspace lease reconcile',
+    description:
+      'List uncertain writer leases, or resolve one, from inside the session. The coordinator ' +
+      'needs this because a held or uncertain lease fences its own writes and a dead holder ' +
+      'is only recoverable by an operator out of band. The caller states the outcome; it is ' +
+      'never inferred, and a refusal returns its refusal_reason. Normally unnecessary: a lease ' +
+      'whose holder is verifiably gone now heals on its own.',
+    promptSnippet: 'Inspect or resolve a workspace writer lease (specialist_lease_reconcile)',
+    outputSchema: TOOL_OUTPUT_SCHEMAS.specialist_lease_reconcile,
+    namespace: TOOL_NAMESPACE,
+    // TypeBox mirror of the MCP tool's zod schema: the two surfaces take different schema
+    // dialects, so a parity test pins the field names rather than trusting a copy by eye.
+    parameters: {
+      type: 'object',
+      properties: {
+        action: Type.Optional(Type.Union(['list', 'reconcile'])),
+        worktree: Type.Optional(Type.String({ description: "reconcile: the worktree whose lease is uncertain." })),
+        outcome: Type.Optional(Type.Union(['safe_free', 'superseded', 'manual_attention_required'])),
+        basis: Type.Optional(Type.Array(Type.String(), {
+          description: 'reconcile: the durable evidence consulted, one entry per source. Empty is refused.',
+        })),
+        superseded_by: Type.Optional(Type.String({
+          description: "reconcile: required for 'superseded'; the activation that now owns the workspace.",
+        })),
+        note: Type.Optional(Type.String({ description: 'reconcile: free-form note carried into the durable record.' })),
+      },
+    },
+    async execute(toolCallId, params) {
+      return resultOf(await leaseReconcileTool.execute(params));
     },
   });
 

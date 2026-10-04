@@ -21860,8 +21860,8 @@ function isDeliveredStatus(status) {
 
 // src/activation/workspace-lease.ts
 import { createHash as createHash5 } from "node:crypto";
-import { existsSync as existsSync18, linkSync, mkdirSync as mkdirSync6, readFileSync as readFileSync11, realpathSync as realpathSync4, renameSync as renameSync3, unlinkSync as unlinkSync2, writeFileSync as writeFileSync5 } from "node:fs";
-import { join as join16 } from "node:path";
+import { appendFileSync, existsSync as existsSync18, linkSync, mkdirSync as mkdirSync6, readFileSync as readFileSync11, realpathSync as realpathSync4, renameSync as renameSync3, rmSync as rmSync2, unlinkSync as unlinkSync2, writeFileSync as writeFileSync5 } from "node:fs";
+import { dirname as dirname10, join as join16 } from "node:path";
 
 // src/activation/types.ts
 var THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"];
@@ -21969,6 +21969,71 @@ function inspect(workspace, probe = procLeaseProbe()) {
   }
   return { state: "held", lease };
 }
+function releaseHolderLease(workspace, input) {
+  const path = leasePath(workspace);
+  let lease;
+  try {
+    lease = JSON.parse(readFileSync11(path, "utf-8"));
+  } catch {
+    return { applied: false, reason: "already_free" };
+  }
+  if (lease?.activationId !== input.activationId) {
+    return { applied: false, reason: "activation_mismatch" };
+  }
+  const at = input.now ?? Date.now();
+  try {
+    appendFileSync(join16(dirname10(path), "recoveries.jsonl"), `${JSON.stringify({
+      workspace: workspace.worktreePath,
+      holderActivationId: lease.activationId,
+      holderPid: lease.holder.pid,
+      observedReason: "released_by_holder",
+      actor: input.actor,
+      recoveredAt: at
+    })}
+`);
+    rmSync2(path, { force: true });
+  } catch {
+    return { applied: false, reason: "not_recoverable" };
+  }
+  return { applied: true, observedReason: "released_by_holder", actor: input.actor };
+}
+function recoverDeadHolder(workspace, input) {
+  const probe = input.probe ?? procLeaseProbe();
+  const path = leasePath(workspace);
+  const status = inspect(workspace, probe);
+  if (status.state === "free")
+    return { applied: false, reason: "already_free" };
+  if (status.state === "held")
+    return { applied: false, reason: "not_recoverable" };
+  if (status.uncertainReason !== "holder_process_gone" || !status.lease) {
+    return { applied: false, reason: "not_recoverable", observedReason: status.uncertainReason };
+  }
+  let current;
+  try {
+    current = JSON.parse(readFileSync11(path, "utf-8"));
+  } catch {
+    return { applied: false, reason: "already_free" };
+  }
+  if (current?.activationId !== status.lease.activationId || current?.holder?.pid !== status.lease.holder.pid || current?.holder?.startTicks !== status.lease.holder.startTicks) {
+    return { applied: false, reason: "raced_by_new_holder" };
+  }
+  const at = input.now ?? Date.now();
+  try {
+    appendFileSync(join16(dirname10(path), "recoveries.jsonl"), `${JSON.stringify({
+      workspace: workspace.worktreePath,
+      holderActivationId: status.lease.activationId,
+      holderPid: status.lease.holder.pid,
+      observedReason: status.uncertainReason,
+      actor: input.actor,
+      recoveredAt: at
+    })}
+`);
+    rmSync2(path, { force: true });
+  } catch {
+    return { applied: false, reason: "not_recoverable", observedReason: status.uncertainReason };
+  }
+  return { applied: true, observedReason: status.uncertainReason, actor: input.actor };
+}
 function acquire(request, probe = procLeaseProbe()) {
   const { workspace, activationId, attemptId } = request;
   const path = leasePath(workspace);
@@ -22075,8 +22140,25 @@ var NON_MUTATING_TOOLS = new Set([
 function isMutatingTool(toolName) {
   return !NON_MUTATING_TOOLS.has(toolName.trim().toLowerCase());
 }
+var WORKSPACE_WRITE_TOOLS = new Set(["edit", "write", "bash", "powershell"]);
+function isWorkspaceWriteTool(toolName) {
+  return WORKSPACE_WRITE_TOOLS.has(toolName.trim().toLowerCase());
+}
+var CONTROL_PLANE_TOOLS = new Set([
+  "specialist_status",
+  "specialist_reply",
+  "specialist_result",
+  "specialist_stop_activation",
+  "specialist_lease_reconcile",
+  "specialists"
+]);
+function isControlPlaneTool(toolName) {
+  return CONTROL_PLANE_TOOLS.has(toolName.trim().toLowerCase());
+}
 function admitCoordinatorToolCall(input, probe = procLeaseProbe()) {
-  if (!isMutatingTool(input.toolName))
+  if (isControlPlaneTool(input.toolName))
+    return { allow: true };
+  if (!isWorkspaceWriteTool(input.toolName))
     return { allow: true };
   const status = inspect(input.workspace, probe);
   if (status.state === "held") {
@@ -22086,6 +22168,17 @@ function admitCoordinatorToolCall(input, probe = procLeaseProbe()) {
     };
   }
   if (status.state === "uncertain") {
+    if (status.uncertainReason === "holder_process_gone") {
+      const healed = recoverDeadHolder(input.workspace, { actor: "coordinator-fence", probe });
+      if (healed.applied)
+        return { allow: true };
+      if (healed.reason === "raced_by_new_holder") {
+        return {
+          allow: false,
+          reason: `workspace ${input.workspace.worktreePath} was re-leased during recovery; retry`
+        };
+      }
+    }
     return {
       allow: false,
       reason: `workspace ${input.workspace.worktreePath} lease is uncertain (${status.uncertainReason}); ` + "mutation is refused until recovery resolves the previous holder"
@@ -26087,15 +26180,229 @@ async function verifyExactLineCitation(evidence, claim) {
     text: claim.text
   };
 }
+// src/tools/specialist/specialist_lease_reconcile.tool.ts
+import { resolve as resolve11 } from "node:path";
+
 // src/activation/workspace-reconcile.ts
+import { appendFileSync as appendFileSync2, existsSync as existsSync22, mkdirSync as mkdirSync8, readdirSync as readdirSync5, readFileSync as readFileSync14, unlinkSync as unlinkSync4 } from "node:fs";
+import { userInfo } from "node:os";
+import { join as join20 } from "node:path";
 var PERMITTED = {
   holder_process_gone: new Set(["safe_free", "superseded", "manual_attention_required"]),
   holder_start_mismatch: new Set(["safe_free", "superseded", "manual_attention_required"]),
   unreadable_record: new Set(["superseded", "manual_attention_required"]),
   liveness_unverifiable: new Set(["manual_attention_required"])
 };
+function reconcile(workspace, request, options = {}) {
+  const probe = options.probe ?? procLeaseProbe();
+  const now = options.now ?? Date.now;
+  const status = inspect(workspace, probe);
+  const record2 = decide(workspace, request, status, now());
+  appendRecord(workspace, record2);
+  emit(options.forensics, record2, status.lease);
+  return record2;
+}
+function decide(workspace, request, status, decidedAtMs) {
+  const base = {
+    workspaceKey: keyFor(workspace, status.lease),
+    worktreePath: workspace.worktreePath,
+    observedState: status.state,
+    observedUncertainReason: status.uncertainReason,
+    holder: status.lease ? { pid: status.lease.holder.pid, activationId: status.lease.activationId, specialist: status.lease.specialist } : undefined,
+    decidedBy: request.decidedBy,
+    basis: request.basis,
+    supersededBy: request.supersededBy,
+    note: request.note,
+    decidedAtMs
+  };
+  const refuse = (refusalReason, outcome = "manual_attention_required") => ({
+    ...base,
+    applied: false,
+    outcome,
+    proposedOutcome: request.outcome,
+    refusalReason
+  });
+  if (status.state === "held") {
+    return refuse("holder_is_live", "recovered_holder");
+  }
+  if (status.state === "free") {
+    return refuse("workspace_not_uncertain");
+  }
+  if (request.basis.length === 0) {
+    return refuse("insufficient_evidence");
+  }
+  const reason = status.uncertainReason;
+  if (!reason || !PERMITTED[reason].has(request.outcome)) {
+    return refuse("reason_forbids_outcome");
+  }
+  if (request.outcome === "superseded" && !request.supersededBy) {
+    return refuse("successor_not_named");
+  }
+  if (request.outcome === "manual_attention_required") {
+    return { ...base, applied: true, outcome: "manual_attention_required" };
+  }
+  removeLease(workspace);
+  return { ...base, applied: true, outcome: request.outcome };
+}
+function removeLease(workspace) {
+  try {
+    unlinkSync4(leasePath(workspace));
+  } catch (err) {
+    if (err.code !== "ENOENT")
+      throw err;
+  }
+}
+function keyFor(workspace, lease) {
+  return lease?.workspaceKey ?? basenameKey(leasePath(workspace));
+}
+function basenameKey(path) {
+  const file = path.slice(path.lastIndexOf("/") + 1);
+  return file.endsWith(".json") ? file.slice(0, -5) : file;
+}
+function reconciliationLogPath(workspace) {
+  return `${leasePath(workspace).slice(0, -".json".length)}.reconcile.jsonl`;
+}
+function appendRecord(workspace, record2) {
+  mkdirSync8(leaseDir(workspace), { recursive: true, mode: 448 });
+  appendFileSync2(reconciliationLogPath(workspace), `${JSON.stringify(record2)}
+`, { mode: 384 });
+}
+function readLogAt(path) {
+  if (!existsSync22(path))
+    return [];
+  const out = [];
+  for (const line of readFileSync14(path, "utf-8").split(`
+`)) {
+    if (!line.trim())
+      continue;
+    try {
+      out.push(JSON.parse(line));
+    } catch {}
+  }
+  return out;
+}
+function emit(sink, record2, lease) {
+  if (!sink)
+    return;
+  try {
+    sink.emit({
+      activationId: lease?.activationId ?? `workspace:${record2.workspaceKey}`,
+      attemptId: lease?.attemptId ?? "reconciliation",
+      participantId: lease?.specialist ? `specialist::${lease.specialist}` : "specialist::unknown",
+      specialist: lease?.specialist ?? "unknown",
+      name: record2.applied ? "lease_reconciled" : "lease_uncertain",
+      payload: {
+        workspace: record2.worktreePath,
+        workspace_key: record2.workspaceKey,
+        outcome: record2.outcome,
+        applied: record2.applied,
+        proposed_outcome: record2.proposedOutcome,
+        refusal_reason: record2.refusalReason,
+        observed_state: record2.observedState,
+        uncertain_reason: record2.observedUncertainReason,
+        decided_by: record2.decidedBy,
+        basis: record2.basis,
+        superseded_by: record2.supersededBy,
+        note: record2.note,
+        holder_activation_id: record2.holder?.activationId,
+        holder_pid: record2.holder?.pid,
+        attributed_to_workspace: lease === undefined
+      }
+    });
+  } catch {}
+}
 function leaseScopeFor(cwd) {
   return workspaceIdentityFor(cwd);
+}
+function projectUncertainWorkspaces(scope, probe = procLeaseProbe()) {
+  const dir = leaseDir(scope);
+  if (!existsSync22(dir))
+    return [];
+  const out = [];
+  for (const entry of readdirSync5(dir)) {
+    if (!entry.endsWith(".json"))
+      continue;
+    const key = entry.slice(0, -".json".length);
+    const lease = readLeaseFile(join20(dir, entry));
+    const status = lease ? inspect({ ...scope, worktreePath: lease.worktreePath }, probe) : { state: "uncertain", uncertainReason: "unreadable_record" };
+    if (status.state !== "uncertain")
+      continue;
+    const log = readLogAt(join20(dir, `${key}.reconcile.jsonl`));
+    const last = log[log.length - 1];
+    out.push({
+      workspace_key: key,
+      worktree_path: lease?.worktreePath,
+      uncertain_reason: status.uncertainReason,
+      holder_pid: lease?.holder.pid,
+      holder_activation_id: lease?.activationId,
+      holder_specialist: lease?.specialist,
+      acquired_at_ms: lease?.acquiredAtMs,
+      permitted_outcomes: status.uncertainReason ? [...PERMITTED[status.uncertainReason]] : ["manual_attention_required"],
+      reconciliation_attempts: log.length,
+      last_reconciliation: last && {
+        outcome: last.outcome,
+        applied: last.applied,
+        refusal_reason: last.refusalReason,
+        decided_by: last.decidedBy,
+        decided_at_ms: last.decidedAtMs,
+        basis: last.basis
+      }
+    });
+  }
+  return out;
+}
+function readLeaseFile(path) {
+  try {
+    const lease = JSON.parse(readFileSync14(path, "utf-8"));
+    return typeof lease?.holder?.pid === "number" && typeof lease.worktreePath === "string" ? lease : undefined;
+  } catch {
+    return;
+  }
+}
+function operatorIdentity(channel = "operator") {
+  let name = "unknown";
+  try {
+    name = userInfo().username || name;
+  } catch {}
+  return `${channel}:${name}`;
+}
+
+// src/tools/specialist/specialist_lease_reconcile.tool.ts
+var specialistLeaseReconcileSchema = objectType({
+  action: enumType(["list", "reconcile"]).default("list").describe("'list' returns uncertain workspaces with the outcomes permitted for each; 'reconcile' records a decision for one worktree."),
+  worktree: stringType().min(1).optional().describe("reconcile: the worktree whose lease is uncertain."),
+  outcome: enumType(["safe_free", "superseded", "manual_attention_required"]).optional().describe("reconcile: the outcome the operator asserts. Never inferred."),
+  basis: arrayType(stringType()).optional().describe("reconcile: the durable evidence consulted, one entry per source. Empty is refused."),
+  superseded_by: stringType().optional().describe("reconcile: required for 'superseded'; the activation that now owns the workspace."),
+  note: stringType().optional().describe("reconcile: free-form note carried into the durable record.")
+});
+function createSpecialistLeaseReconcileTool(probe) {
+  return {
+    name: "specialist_lease_reconcile",
+    description: "List uncertain writer leases (action 'list', default) or resolve one (action 'reconcile' with worktree, outcome and basis). The caller states the outcome; it is never inferred, and a refusal returns its refusal_reason.",
+    inputSchema: specialistLeaseReconcileSchema,
+    async execute(input) {
+      if (input.action !== "reconcile") {
+        return { uncertain_workspaces: projectUncertainWorkspaces(leaseScopeFor(process.cwd()), probe) };
+      }
+      if (!input.worktree || !input.outcome) {
+        return { status: "error", error: "reconcile requires 'worktree' and 'outcome'" };
+      }
+      const record2 = reconcile(leaseScopeFor(resolve11(input.worktree)), {
+        outcome: input.outcome,
+        decidedBy: operatorIdentity("mcp"),
+        basis: (input.basis ?? []).map((entry) => entry.trim()).filter((entry) => entry.length > 0),
+        ...input.superseded_by ? { supersededBy: input.superseded_by } : {},
+        ...input.note ? { note: input.note } : {}
+      }, { probe });
+      return {
+        applied: record2.applied,
+        outcome: record2.outcome,
+        refusal_reason: record2.refusalReason ?? null,
+        record: record2
+      };
+    }
+  };
 }
 export {
   verifyExactLineCitation,
@@ -26115,6 +26422,8 @@ export {
   resolveObservabilityDbLocation,
   resolveModelChain,
   renderRejection,
+  releaseHolderLease,
+  recoverDeadHolder,
   readVerifiedCitationWindow,
   readBuildId,
   projectLaunchOutcome,
@@ -26123,6 +26432,7 @@ export {
   openWorkItemBoundary,
   openSubstrateDb,
   leaseScopeFor,
+  isControlPlaneTool,
   isBuildStale,
   inspect as inspectWorkspaceLease,
   hashFileBytes,
@@ -26130,6 +26440,7 @@ export {
   evaluateBeadReadiness,
   describeBuildIdentity,
   createWorkItemBoundary,
+  createSpecialistLeaseReconcileTool,
   createObservabilitySqliteClientAtPath,
   createBeadFromContract,
   createActivationForensicSink,

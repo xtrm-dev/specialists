@@ -13,6 +13,7 @@ import {
   isControlPlaneTool,
   isMutatingTool,
   isWorkspaceWriteTool,
+  releaseHolderLease,
   WORKSPACE_WRITE_TOOLS,
   type LeaseProcessProbe,
 } from '../../../src/activation/workspace-lease.js';
@@ -165,6 +166,24 @@ describe('coordinator control plane is exempt from the workspace write fence', (
     );
     expect(recoverDeadHolder(identity, { actor: 'operator:test', probe: liveProbe }).applied).toBe(false);
     expect(inspect(identity, liveProbe).state).toBe('held');
+  });
+
+  it('releases the lease on behalf of a named activation, and only that one (4275)', () => {
+    const root = workspace();
+    const identity = resolveWorkspace(root);
+    acquire(
+      { workspace: identity, activationId: 'act:stopping', attemptId: 'att:stopping:1', specialist: 'executor' },
+      liveProbe,
+    );
+    // A stop for someone else's activation must never free their lease.
+    expect(releaseHolderLease(identity, { activationId: 'act:someone_else', actor: 'coordinator-stop' }))
+      .toMatchObject({ applied: false, reason: 'activation_mismatch' });
+    expect(inspect(identity, liveProbe).state).toBe('held');
+    // The real owner releases it, and the workspace is immediately writable.
+    expect(releaseHolderLease(identity, { activationId: 'act:stopping', actor: 'coordinator-stop' }))
+      .toMatchObject({ applied: true, observedReason: 'released_by_holder', actor: 'coordinator-stop' });
+    expect(inspect(identity, liveProbe).state).toBe('free');
+    expect(admitCoordinatorToolCall({ toolName: 'write', workspace: identity }, liveProbe).allow).toBe(true);
   });
 
   it('still fences a genuine writer while a lease is held', () => {
