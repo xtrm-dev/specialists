@@ -184,6 +184,41 @@ export function verifyWalMode(db: BunDb): void {
   }
 }
 
+/**
+ * Checkpoint threshold in WAL frames. 1000 frames x 4096 B = ~4 MB, which is SQLite's own
+ * default; it is set explicitly here so the WAL bound is a stated invariant of this store
+ * rather than an accident of the linked SQLite build.
+ */
+export const WAL_AUTOCHECKPOINT_PAGES = 1000;
+
+/**
+ * Default `journal_size_limit`. WITHOUT this, the -wal FILE never shrinks: a checkpoint
+ * resets the WAL to frame 0 but leaves the file at its high-water mark, so a single window
+ * in which a reader blocked the checkpoint (or one large write transaction) left the file at
+ * 1.5 GB forever, even with every frame already copied into the main database. Setting the
+ * limit makes SQLite ftruncate the file back to the limit at each reset.
+ */
+export const DEFAULT_WAL_SIZE_LIMIT_BYTES = 64 * 1024 * 1024;
+
+export function resolveWalSizeLimitBytes(): number {
+  const raw = process.env.SPECIALISTS_WAL_SIZE_LIMIT_BYTES?.trim();
+  if (!raw) return DEFAULT_WAL_SIZE_LIMIT_BYTES;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : DEFAULT_WAL_SIZE_LIMIT_BYTES;
+}
+
+/**
+ * The connection pragmas that keep the WAL bounded. Both are per-connection and lock-free,
+ * so every process that opens this database applies them — there is no owner to miss.
+ * WAL_AUTOCHECKPOINT does the checkpointing (on the committing connection) and
+ * journal_size_limit reclaims the file at every reset, which is why no separate
+ * "checkpoint owner" process is required for the steady state.
+ */
+export function applyWalRuntimePragmas(db: BunDb): void {
+  db.run(`PRAGMA wal_autocheckpoint=${WAL_AUTOCHECKPOINT_PAGES}`);
+  db.run(`PRAGMA journal_size_limit=${resolveWalSizeLimitBytes()}`);
+}
+
 function migrateToV2(db: BunDb): void {
   const hasV2 = db.query('SELECT 1 FROM schema_version WHERE version = 2 LIMIT 1').get() as { 1?: number } | undefined;
   if (hasV2) {
@@ -500,6 +535,7 @@ function migrateToV4(db: BunDb): void {
 
 export function initSchema(db: BunDb): void {
   enforceWalMode(db);
+  applyWalRuntimePragmas(db);
 
   // Step 1: core tables + schema_version (must run before migration)
   db.run(`
@@ -1178,6 +1214,23 @@ export interface PruneObservabilityOptions {
   nowMs?: number;
   eventsRetentionMs?: number;
   skipExtract?: boolean;
+  /**
+   * Cutoff for `specialist_forensic_events` (the mcp.call.* / turn / tool forensic rows).
+   * ABSENT means "do not touch this table": forensic rows are the audit surface and the
+   * retention window is an operator decision, not a default (SPECIALISTS-4219).
+   */
+  forensicBeforeMs?: number;
+  /** Cutoff for `node_events`. Absent means "do not touch this table", same reason. */
+  nodeEventsBeforeMs?: number;
+}
+
+export interface WalCheckpointReport {
+  mode: 'PASSIVE' | 'RESTART' | 'TRUNCATE';
+  busy: number;
+  logFrames: number;
+  checkpointedFrames: number;
+  beforeWalBytes: number;
+  afterWalBytes: number;
 }
 
 export interface ForensicEventRecord {
@@ -1285,6 +1338,10 @@ export interface PruneObservabilityReport {
   deletedResults: number;
   deletedJobs: number;
   deletedEpicRuns: number;
+  deletedForensicEvents: number;
+  deletedNodeEvents: number;
+  forensicBeforeMs: number | null;
+  nodeEventsBeforeMs: number | null;
   skippedActiveChainJobs: number;
   extractedJobs: number;
 }
@@ -1545,6 +1602,8 @@ export interface ObservabilitySqliteClient {
   hasActiveJobs(statuses?: readonly string[]): boolean;
   listActiveJobs(statuses?: readonly string[]): Array<{ job_id: string; specialist: string; status: string }>;
   getDatabaseSizeBytes(): number;
+  getWalSizeBytes(): number;
+  checkpointWal(mode?: 'PASSIVE' | 'RESTART' | 'TRUNCATE'): WalCheckpointReport;
   vacuumDatabase(): { beforeBytes: number; afterBytes: number };
   pruneObservabilityData(options: PruneObservabilityOptions): PruneObservabilityReport;
   scanOrphans(): OrphanScanFinding[];
@@ -1566,6 +1625,9 @@ class SqliteClient implements ObservabilitySqliteClient {
     
     // Ensure WAL mode is set (will be no-op if already set by initSchema)
     this.db.run('PRAGMA journal_mode=WAL');
+    // Bound the WAL: explicit checkpoint threshold + file size limit. Both are per
+    // connection, so every specialist process applies them and none can regress the bound.
+    applyWalRuntimePragmas(this.db);
   }
 
   private writeStatusRow(
@@ -3324,6 +3386,29 @@ class SqliteClient implements ObservabilitySqliteClient {
     }, 'listActiveJobs');
   }
 
+  getWalSizeBytes(): number {
+    try {
+      return statSync(`${this.dbPath}-wal`).size;
+    } catch {
+      return 0;
+    }
+  }
+
+  checkpointWal(mode: 'PASSIVE' | 'RESTART' | 'TRUNCATE' = 'PASSIVE'): WalCheckpointReport {
+    const beforeWalBytes = this.getWalSizeBytes();
+    const row = this.db.query(`PRAGMA wal_checkpoint(${mode})`).get() as
+      | { busy?: number; log?: number; checkpointed?: number }
+      | undefined;
+    return {
+      mode,
+      busy: row?.busy ?? 0,
+      logFrames: row?.log ?? 0,
+      checkpointedFrames: row?.checkpointed ?? 0,
+      beforeWalBytes,
+      afterWalBytes: this.getWalSizeBytes(),
+    };
+  }
+
   getDatabaseSizeBytes(): number {
     try {
       return statSync(this.dbPath).size;
@@ -3406,6 +3491,18 @@ class SqliteClient implements ObservabilitySqliteClient {
 
       const eventsCandidates = (this.db.query('SELECT COUNT(*) AS count FROM specialist_events WHERE t < ?').get(eventsCutoffMs) as { count?: number } | undefined)?.count ?? 0;
 
+      // Forensic and node-event retention is opt-in: the caller must name a cutoff, and the
+      // audit surface is never pruned on a default (SPECIALISTS-4219). Both tables are the
+      // high-volume ones — the mcp.call.* rows alone are ~70/s across a multi-session host.
+      const forensicBeforeMs = options.forensicBeforeMs ?? null;
+      const forensicCandidates = forensicBeforeMs === null
+        ? 0
+        : (this.db.query('SELECT COUNT(*) AS count FROM specialist_forensic_events WHERE t < ?').get(forensicBeforeMs) as { count?: number } | undefined)?.count ?? 0;
+      const nodeEventsBeforeMs = options.nodeEventsBeforeMs ?? null;
+      const nodeEventCandidates = nodeEventsBeforeMs === null
+        ? 0
+        : (this.db.query('SELECT COUNT(*) AS count FROM node_events WHERE t < ?').get(nodeEventsBeforeMs) as { count?: number } | undefined)?.count ?? 0;
+
       const epicCandidates = options.includeEpics
         ? ((this.db.query(`
           SELECT COUNT(*) AS count
@@ -3430,6 +3527,10 @@ class SqliteClient implements ObservabilitySqliteClient {
           deletedResults: resultCandidates,
           deletedJobs: jobCandidates,
           deletedEpicRuns: epicCandidates,
+          deletedForensicEvents: forensicCandidates,
+          deletedNodeEvents: nodeEventCandidates,
+          forensicBeforeMs,
+          nodeEventsBeforeMs,
           skippedActiveChainJobs,
           extractedJobs: extractCandidates,
         };
@@ -3492,6 +3593,16 @@ class SqliteClient implements ObservabilitySqliteClient {
       `);
       const deletedJobs = deleteJobs.run(options.beforeMs, ...terminalStatuses, ...activeStatuses).changes ?? 0;
 
+      let deletedForensicEvents = 0;
+      if (forensicBeforeMs !== null) {
+        deletedForensicEvents = this.db.query('DELETE FROM specialist_forensic_events WHERE t < ?').run(forensicBeforeMs).changes ?? 0;
+      }
+
+      let deletedNodeEvents = 0;
+      if (nodeEventsBeforeMs !== null) {
+        deletedNodeEvents = this.db.query('DELETE FROM node_events WHERE t < ?').run(nodeEventsBeforeMs).changes ?? 0;
+      }
+
       let deletedEpicRuns = 0;
       if (options.includeEpics) {
         const deleteEpics = this.db.query(`
@@ -3516,6 +3627,10 @@ class SqliteClient implements ObservabilitySqliteClient {
         deletedResults,
         deletedJobs,
         deletedEpicRuns,
+        deletedForensicEvents,
+        deletedNodeEvents,
+        forensicBeforeMs,
+        nodeEventsBeforeMs,
         skippedActiveChainJobs,
         extractedJobs,
       };

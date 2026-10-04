@@ -1178,6 +1178,56 @@ describe('observability-sqlite', () => {
       const remaining = db.query(`SELECT COUNT(*) AS count FROM specialist_events WHERE job_id = 'job-prune'`).get() as { count: number };
       expect(remaining.count).toBe(1);
     });
+
+    // SPECIALISTS-4219: the forensic mirror and node_events are the high-volume tables, and
+    // both are audit surface. Retention for them is opt-in — a prune with no cutoff of its own
+    // must leave them completely untouched.
+    describe('forensic and node-event retention is opt-in', () => {
+      const seedHighVolumeRows = (): void => {
+        db.run(`INSERT INTO specialist_forensic_events (job_id, seq, t, schema_version, event_family, event_name, redaction_status, event_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          ['mcp-gateway', 1, 10, 'v1', 'mcp', 'mcp.call.completed', 'clean', '{}']);
+        db.run(`INSERT INTO node_events (node_run_id, seq, t, type, event_json) VALUES (?, ?, ?, ?, ?)`,
+          ['node-run-1', 1, 10, 'start', '{}']);
+      };
+
+      const countRows = (table: string): number =>
+        (db!.query(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count;
+
+      it('leaves specialist_forensic_events and node_events alone when no cutoff is given', () => {
+        const client = createClient();
+        db = new Database(resolveObservabilityDbLocation(tempRoot).dbPath);
+        seedHighVolumeRows();
+
+        const report = client.pruneObservabilityData({ beforeMs: 1000, includeEpics: false, apply: true });
+
+        expect(report.forensicBeforeMs).toBeNull();
+        expect(report.nodeEventsBeforeMs).toBeNull();
+        expect(report.deletedForensicEvents).toBe(0);
+        expect(report.deletedNodeEvents).toBe(0);
+        expect(countRows('specialist_forensic_events')).toBe(1);
+        expect(countRows('node_events')).toBe(1);
+      });
+
+      it('counts candidates in dry-run and deletes only the rows past the given cutoff', () => {
+        const client = createClient();
+        db = new Database(resolveObservabilityDbLocation(tempRoot).dbPath);
+        seedHighVolumeRows();
+
+        const dryRun = client.pruneObservabilityData({ beforeMs: 1000, includeEpics: false, apply: false, forensicBeforeMs: 100, nodeEventsBeforeMs: 100 });
+        expect(dryRun.deletedForensicEvents).toBe(1);
+        expect(dryRun.deletedNodeEvents).toBe(1);
+        expect(countRows('specialist_forensic_events')).toBe(1);
+
+        const applied = client.pruneObservabilityData({ beforeMs: 1000, includeEpics: false, apply: true, forensicBeforeMs: 100, nodeEventsBeforeMs: 100 });
+        expect(applied.deletedForensicEvents).toBe(1);
+        expect(applied.deletedNodeEvents).toBe(1);
+        expect(countRows('specialist_forensic_events')).toBe(0);
+        expect(countRows('node_events')).toBe(0);
+
+        // A cutoff in the future deletes nothing: the cutoff is a lower bound on age.
+        client.pruneObservabilityData({ beforeMs: 1000, includeEpics: false, apply: true, forensicBeforeMs: 200 });
+      });
+    });
   });
 
   // V13 — durable PR/base drift fields on specialist_jobs (specialists-05q.1).
