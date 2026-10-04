@@ -94505,15 +94505,15 @@ function fleetFingerprint(host, results) {
 }
 async function waitForFleetChange(host, getPusher, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
-  const epoch = host.fleetChangeEpoch();
   const baseline = fleetFingerprint(host, getPusher?.()?.allResults() ?? []);
   for (;; ) {
     const remaining = deadline - Date.now();
     if (remaining <= 0)
       return;
-    const outcome = await host.waitForFleetChange(remaining, epoch);
-    if (outcome === "change" && fleetFingerprint(host, getPusher?.()?.allResults() ?? []) !== baseline)
+    const epoch = host.fleetChangeEpoch();
+    if (fleetFingerprint(host, getPusher?.()?.allResults() ?? []) !== baseline)
       return;
+    await host.waitForFleetChange(remaining, epoch);
   }
 }
 function createSpecialistStatusTool(loader, circuitBreaker, getHost, getPusher) {
