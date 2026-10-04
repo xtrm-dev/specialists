@@ -436,6 +436,34 @@ export interface AdmissionVerdict {
 }
 
 /**
+ * Tools that reach the Fleet rather than the filesystem.
+ *
+ * These are the coordinator's instruments for managing activations, and none of them writes a
+ * workspace file or runs a command. A WRITE fence has no business stopping them: gating
+ * `specialist_stop_activation` means the coordinator cannot release the very lease that is
+ * fencing it, which is the one deadlock this fence must never create (observed live,
+ * SPECIALISTS-4272). The exemption is unconditional rather than a flag — a tool that cannot
+ * write cannot be a writer, whatever the lease says.
+ *
+ * `specialist_reply` and `specialist_status` are here for the same reason and one more: a
+ * Specialist holding a lease in `needs_reply` is blocked ON the coordinator's answer, so
+ * refusing to read or answer it strands both sides.
+ */
+export const CONTROL_PLANE_TOOLS: ReadonlySet<string> = new Set([
+  'specialist_status',
+  'specialist_reply',
+  'specialist_result',
+  'specialist_stop_activation',
+  'specialist_lease_reconcile',
+  'specialists',
+]);
+
+/** True for a Fleet-management tool, which no write fence may refuse. */
+export function isControlPlaneTool(toolName: string): boolean {
+  return CONTROL_PLANE_TOOLS.has(toolName.trim().toLowerCase());
+}
+
+/**
  * Decide whether the COORDINATOR may mutate a workspace right now.
  *
  * This is deliberately NOT `admitToolCall`, and the difference is the default case.
@@ -455,6 +483,8 @@ export function admitCoordinatorToolCall(
   input: { toolName: string; workspace: WorkspaceIdentity },
   probe: LeaseProcessProbe = procLeaseProbe(),
 ): AdmissionVerdict {
+  // Control plane first: it is exempt under EVERY lease state, including an uncertain one.
+  if (isControlPlaneTool(input.toolName)) return { allow: true };
   if (!isMutatingTool(input.toolName)) return { allow: true };
 
   const status = inspect(input.workspace, probe);
