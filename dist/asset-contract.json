@@ -32,7 +32,7 @@
     },
     {
       "path": "config/skills/using-specialists/references/monitoring.md",
-      "sha256": "897321d192a290100be0d7943fcd440e132d4783b5808c9fcb652e5866b2e25f"
+      "sha256": "d51109b5106b13c7f44f7d46da63b030bf7e6f30d870392c0789fae1f16b0080"
     },
     {
       "path": "config/skills/using-specialists/references/nodes.md",
@@ -68,7 +68,7 @@
     },
     {
       "path": "config/skills/using-specialists/SKILL.md",
-      "sha256": "88b9dd9dbbbc84cf5d43d7483ec31cd73ac41613ac5bbae2071fed5e76552094"
+      "sha256": "78f2436cf5d2be1fcb7049cd9338a03c924c4a1559d4c91c841b2ecdb1b246bd"
     }
   ],
   "shipped_specialists": [

@@ -36,6 +36,7 @@ import { createObservabilitySqliteClient } from '../specialist/observability-sql
 import { SpecialistLoader } from '../specialist/loader.js';
 import { CircuitBreaker } from '../utils/circuitBreaker.js';
 import { createSpecialistResultTool, specialistResultSchema } from '../tools/specialist/specialist_result.tool.js';
+import { createSpecialistFeedTool, specialistFeedSchema } from '../tools/specialist/specialist_feed.tool.js';
 import { createSpecialistLeaseReconcileTool, specialistLeaseReconcileSchema } from '../tools/specialist/specialist_lease_reconcile.tool.js';
 import { createSpecialistStatusTool, specialistStatusSchema } from '../tools/specialist/specialist_status.tool.js';
 import { createSpecialistListTool, specialistListSchema } from '../tools/specialist/specialist_list.tool.js';
@@ -63,7 +64,7 @@ import { PeerAdapter } from '../activation/transport/peer-adapter.js';
 import { createActivationForensicSink } from '../activation/forensic-sink.js';
 import { logger } from '../utils/logger.js';
 import { createMcpRequestContext, emitMcpForensicEvent } from './request-meta.js';
-import { CHANNEL_CAPABILITY, snapshotDetail, withChannelPush, type ChannelDetail, type ChannelFrame, type ChannelSend } from './channel.js';
+import { CHANNEL_CAPABILITY, snapshotDetail, wakeSuppressed, withChannelPush, type ChannelDetail, type ChannelFrame, type ChannelSend } from './channel.js';
 
 type AnyTool = {
   name: string;
@@ -116,13 +117,15 @@ export function buildV2Server(ctx?: McpRequestContext, options?: BuildV2ServerOp
     // The push rides the forensic stream the host already emits — no poll, no
     // bus. A null observability store still gets a channel sink, because the
     // push is not forensics and must not depend on a diagnostic database.
-    forensics: withChannelPush(
-      createActivationForensicSink(observability),
-      (frame) => channelSend(frame),
-      // Called only when an event is pushed, after `host` exists: the brief reads the same
-      // snapshot `specialist_status` projects.
-      (activationId): ChannelDetail => snapshotDetail(host.inspect(activationId)),
-    ),
+    forensics: wakeSuppressed()
+      ? createActivationForensicSink(observability)
+      : withChannelPush(
+        createActivationForensicSink(observability),
+        (frame) => channelSend(frame),
+        // Called only when an event is pushed, after `host` exists: the brief reads the same
+        // snapshot `specialist_status` projects.
+        (activationId): ChannelDetail => snapshotDetail(host.inspect(activationId)),
+      ),
   });
   const getHost = () => host;
 
@@ -175,6 +178,7 @@ export function buildV2Server(ctx?: McpRequestContext, options?: BuildV2ServerOp
   const tools: AnyTool[] = [
     createSpecialistStatusTool(loader, circuitBreaker, getHost, getPusher),
     createSpecialistResultTool(getHost, getPusher),
+    createSpecialistFeedTool(getHost),
     createSpecialistDispatchTool(getHost, getPusher),
     createSpecialistReplyTool(getHost),
     createSpecialistResumeTool(getHost, getPusher),
@@ -192,6 +196,7 @@ export function buildV2Server(ctx?: McpRequestContext, options?: BuildV2ServerOp
     substrate_provenance: substrateProvenanceSchema,
     specialist_status: specialistStatusSchema,
     specialist_result: specialistResultSchema,
+    specialist_feed: specialistFeedSchema,
     specialist_dispatch: specialistDispatchSchema,
     specialist_reply: specialistReplySchema,
     specialist_resume: specialistResumeSchema,

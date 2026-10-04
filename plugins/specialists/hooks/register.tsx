@@ -60,8 +60,17 @@ export type Ask = {
 export type Fleet = { activations: Activation[]; asks: Ask[] }
 
 const USAGE =
-  'Usage: /specialists [status|show|hide|expand|collapse] · reply <message_id> <answer> · ' +
-  'steer <activation> <message> · resume <activation> <prompt> · stop <activation> [reason]'
+  'Usage: /specialists [status [activation]|show|hide|expand|collapse] · result <activation> · ' +
+  'feed <activation> [lines] · reply <message_id> <answer> · steer <activation> <message> · ' +
+  'resume <activation> <prompt> · stop <activation> [reason]'
+
+/** Feed lines the pane's feed view asks for; the newest are kept. */
+export const FEED_LINES = 30
+/** Detail lines drawn in the pane; the band draws fewer so the prompt stays in view. */
+export const DETAIL_PANE_LINES = 24
+export const DETAIL_BAND_LINES = 6
+/** How long a transition toast stays up. */
+export const TOAST_MS = 6000
 
 const isActive = (state?: string) => state === 'running' || state === 'starting'
 
@@ -199,6 +208,50 @@ export function reportOf(fleet: Fleet, error: string | null, nowMs: number): str
   return lines.join('\n')
 }
 
+/**
+ * The toasts one fleet read owes the operator: an activation that newly finished or failed,
+ * and an ask that newly appeared — the Claude Code twin of the Pi extension's `ui.notify`.
+ * Pure over two reads, so a missed read cannot replay old events: the FIRST read after start
+ * (prev null) owes nothing, since everything in it predates this session's view.
+ */
+export function transitionsOf(prev: Fleet | null, next: Fleet): string[] {
+  if (!prev) return []
+  const before = new Map(prev.activations.map(a => [a.activation_id, a.state]))
+  const askedBefore = new Set(prev.asks.map(a => a.message_id))
+  const out: string[] = []
+  for (const row of next.activations) {
+    if (before.get(row.activation_id) === row.state) continue
+    const who = `${row.specialist ?? 'specialist'}:${shortId(row.activation_id)}`
+    if (row.state === 'settled') out.push(`Specialist ${who} finished${row.bead_id ? ` · ${row.bead_id}` : ''}`)
+    if (row.state === 'failed') out.push(`Specialist ${who} FAILED${row.bead_id ? ` · ${row.bead_id}` : ''}`)
+  }
+  for (const ask of next.asks) {
+    if (askedBefore.has(ask.message_id)) continue
+    const row = next.activations.find(a => a.activation_id === ask.activation_id)
+    const who = `${row?.specialist ?? ask.from ?? 'specialist'}:${shortId(ask.activation_id)}`
+    out.push(`Specialist ${who} ${ask.kind === 'escalation' ? 'escalated' : 'asked a question'}`)
+  }
+  return out
+}
+
+/** The lines a result read draws: the output, or why there is none yet. */
+export function resultLinesOf(value: Record<string, unknown>): string[] {
+  if (typeof value.output === 'string') {
+    const head = [value.status, value.resolved_model].filter(v => typeof v === 'string' && v).join(' · ')
+    const body = value.output.trim() ? value.output.replace(/\n+$/, '').split('\n') : ['(empty output)']
+    return head ? [head, ...body] : body
+  }
+  if (typeof value.next === 'string') return [`${String(value.state ?? 'not settled')} · use ${value.next}`]
+  return ['no result']
+}
+
+/** The lines a feed read draws. */
+export function feedLinesOf(value: Record<string, unknown>): string[] {
+  const events = Array.isArray(value.events) ? value.events.filter((e): e is string => typeof e === 'string') : []
+  if (events.length === 0) return ['no events yet']
+  return value.truncated === true ? [`… ${Number(value.total ?? 0) - events.length} earlier events`, ...events] : events
+}
+
 /** An activation by its full id or an unambiguous prefix (with or without `act:`). */
 export function resolveActivation(fleet: Fleet, ref: string): Activation | string {
   const needle = ref.startsWith('act:') ? ref : `act:${ref}`
@@ -222,6 +275,12 @@ type State = {
   watching: boolean
   /** Consecutive sub-second watch returns; parking on the tick after FAST_STREAK_MAX. */
   fastStreak: number
+  /** The result or feed view open under the selected row; null when none is. */
+  detail: { kind: 'result' | 'feed'; id: string; lines: string[] } | null
+  /** The previous successful read, for transition toasts; null until the first one. */
+  last: Fleet | null
+  /** SPECIALISTS_WAKE=off silences toasts, as the Pi extension's --no-specialist-wake does. */
+  quiet: boolean
 }
 
 /** Apply one specialist_status read to the band state and redraw. */
@@ -229,7 +288,13 @@ function apply($: EngineInterface, s: State, read: { ok: true; value: Record<str
   if (read.ok) {
     s.fleet = fleetOf(read.value)
     s.error = null
+    if (!s.quiet) for (const text of transitionsOf(s.last, s.fleet)) $.ui.toast(text, { timeoutMs: TOAST_MS })
+    s.last = s.fleet
     if (s.selected && !s.fleet.activations.some(a => a.activation_id === s.selected)) s.selected = null
+    if (s.detail && s.detail.id !== s.selected) s.detail = null
+    // A live feed keeps up with the activation; a settled one is read once.
+    const row = s.detail?.kind === 'feed' ? s.fleet.activations.find(a => a.activation_id === s.detail!.id) : undefined
+    if (row && isActive(row.state)) void loadDetail($, s, 'feed', row.activation_id)
   } else {
     s.error = read.error
   }
@@ -274,6 +339,32 @@ async function watchOnce($: EngineInterface, s: State): Promise<void> {
   }
 }
 
+/** Read a result or feed into the detail view under the selected row. */
+async function loadDetail($: EngineInterface, s: State, kind: 'result' | 'feed', id: string): Promise<void> {
+  const read = kind === 'result'
+    ? await callTool($, 'specialist_result', { activation_id: id })
+    : await callTool($, 'specialist_feed', { activation_id: id, limit: FEED_LINES })
+  // The operator may have closed or switched the view while the call was in flight.
+  if (s.detail && (s.detail.id !== id || s.detail.kind !== kind)) return
+  s.detail = {
+    kind,
+    id,
+    lines: read.ok ? (kind === 'result' ? resultLinesOf(read.value) : feedLinesOf(read.value)) : [`${kind} unavailable · ${read.error}`],
+  }
+  $.ui.invalidate('ui.render')
+}
+
+function toggleDetail($: EngineInterface, s: State, kind: 'result' | 'feed', id: string): void {
+  if (s.detail?.kind === kind && s.detail.id === id) {
+    s.detail = null
+    $.ui.invalidate('ui.render')
+    return
+  }
+  s.detail = { kind, id, lines: ['loading…'] }
+  $.ui.invalidate('ui.render')
+  void loadDetail($, s, kind, id)
+}
+
 /** One control action; its answer is what the operator sees. */
 async function act($: EngineInterface, s: State, tool: string, args: Record<string, unknown>, done: string): Promise<string> {
   const result = await callTool($, tool, args)
@@ -292,7 +383,7 @@ async function openPane($: EngineInterface, s: State): Promise<void> {
     title: 'Specialists',
     focus: true,
     closeOnEscape: true,
-    rows: Math.min(40, s.fleet.activations.length * 2 + 8),
+    rows: Math.min(48, s.fleet.activations.length * 2 + 8 + DETAIL_PANE_LINES),
   })
   s.paneOpen = true
   $.ui.invalidate('ui.render')
@@ -308,7 +399,7 @@ async function closePane($: EngineInterface, s: State): Promise<void> {
  * Rows and the selected row's controls: the one drawing the band and the pane share, so
  * both sites read and act the same way. `site` keeps element keys apart between them.
  */
-function fleetBody($: EngineInterface, s: State, ui: Kit, rows: Activation[], site: string) {
+function fleetBody($: EngineInterface, s: State, ui: Kit, rows: Activation[], site: string, detailLines: number) {
   const { Box, Text, Button, Input } = ui
   const nowMs = Date.now()
   const selectedRow = rows.find(a => a.activation_id === s.selected)
@@ -368,13 +459,33 @@ function fleetBody($: EngineInterface, s: State, ui: Kit, rows: Activation[], si
               onSubmit={value => { if (value.trim()) void act($, s, 'specialist_resume', { activation_id: selectedRow.activation_id, prompt: value.trim() }, `Resumed ${selectedRow.activation_id}.`) }}
             />
           )}
-          <Button
-            key={`stop:${selectedRow.activation_id}`}
-            hotkey="x"
-            onPress={() => void act($, s, 'specialist_stop_activation', { activation_id: selectedRow.activation_id, reason: 'operator request' }, `Stopped ${selectedRow.activation_id}.`)}
-          >
-            stop
-          </Button>
+          <Box>
+            <Button key={`result:${selectedRow.activation_id}`} hotkey="r" onPress={() => toggleDetail($, s, 'result', selectedRow.activation_id)}>
+              {s.detail?.kind === 'result' ? 'hide result' : 'result'}
+            </Button>
+            <Text> </Text>
+            <Button key={`feed:${selectedRow.activation_id}`} hotkey="f" onPress={() => toggleDetail($, s, 'feed', selectedRow.activation_id)}>
+              {s.detail?.kind === 'feed' ? 'hide feed' : 'feed'}
+            </Button>
+            <Text> </Text>
+            <Button
+              key={`stop:${selectedRow.activation_id}`}
+              hotkey="x"
+              onPress={() => void act($, s, 'specialist_stop_activation', { activation_id: selectedRow.activation_id, reason: 'operator request' }, `Stopped ${selectedRow.activation_id}.`)}
+            >
+              stop
+            </Button>
+          </Box>
+          {s.detail && s.detail.id === selectedRow.activation_id ? (
+            <Box flexDirection="column">
+              {(s.detail.kind === 'feed' ? s.detail.lines.slice(-detailLines) : s.detail.lines.slice(0, detailLines)).map((line, i) => (
+                <Text key={`${site}:detail:${i}`} dimColor={s.detail!.kind === 'feed'} wrap="truncate-end">{line}</Text>
+              ))}
+              {s.detail.lines.length > detailLines ? (
+                <Text dimColor italic>{`… ${s.detail.lines.length - detailLines} more lines · /specialists ${s.detail.kind} ${shortId(selectedRow.activation_id)}`}</Text>
+              ) : null}
+            </Box>
+          ) : null}
         </Box>
       ) : null}
 
@@ -396,19 +507,23 @@ export function register(on: On) {
     paneOpen: false,
     watching: false,
     fastStreak: 0,
+    detail: null,
+    last: null,
+    quiet: false,
   }
 
   on('session.start', async ($, e, next) => {
     try {
       await $.command.register({
         name: COMMAND,
-        description: 'Live Specialists fleet: show/hide the band, reply, steer, resume, stop',
-        argumentHint: '[show|hide|expand|collapse|reply|steer|resume|stop] …',
+        description: 'Live Specialists fleet: status, result, feed, reply, steer, resume, stop',
+        argumentHint: '[status|result|feed|show|hide|expand|collapse|reply|steer|resume|stop] …',
         immediate: true,
       })
     } catch {
       // Another Specialists surface may already serve the command.
     }
+    s.quiet = String((await $.env.get('SPECIALISTS_WAKE').catch(() => undefined)) ?? '').toLowerCase() === 'off'
     s.timer?.cancel()
     // The tick is the skeleton, not the heartbeat: it re-arms the blocking watch whenever
     // no call is in flight (server without wait support, or between re-arms), while a
@@ -435,9 +550,39 @@ export function register(on: On) {
       return { text: 'Specialists pane shown' }
     }
 
-    if (verb === 'status') {
+    if (verb === 'status' && !ref) {
       await refresh($, s)
       return { text: reportOf(s.fleet, s.error, Date.now()) }
+    }
+
+    if (verb === 'status' || verb === 'result' || verb === 'feed') {
+      if (!ref) return { text: USAGE }
+      // result and feed reach earlier-session activations too, so an id the live fleet does
+      // not know goes to the server as given; only an ambiguous live prefix is refused here.
+      await refresh($, s)
+      const target = resolveActivation(s.fleet, ref)
+      if (typeof target === 'string' && target.startsWith('Ambiguous')) return { text: target }
+      const id = typeof target === 'string' ? ref : target.activation_id
+      if (verb === 'status') {
+        if (typeof target === 'string') return { text: target }
+        const ask = s.fleet.asks.find(a => a.activation_id === id)
+        return {
+          text: [
+            `${markerOf(target, ask, Date.now())} ${target.specialist ?? 'specialist'} ${id} · ${target.state ?? 'unknown'}`,
+            `  issue ${target.bead_id ?? '—'} · ${target.resolved_model ?? '?model'}${target.thinking_level ? ` · ${target.thinking_level}` : ''}`,
+            `  ${metricsOf(target, ask, Date.now())}`,
+            ...(target.purpose ? [`  purpose: ${target.purpose}`] : []),
+            ...(ask ? [`  ${ask.kind ?? 'ask'} ${ask.message_id}: ${ask.body ?? ''}`] : []),
+          ].join('\n'),
+        }
+      }
+      if (verb === 'result') {
+        const read = await callTool($, 'specialist_result', { activation_id: id })
+        return { text: read.ok ? resultLinesOf(read.value).join('\n') : `specialist_result refused: ${read.error}` }
+      }
+      const lines = Math.min(200, Math.max(1, Number(rest[0]) || FEED_LINES))
+      const read = await callTool($, 'specialist_feed', { activation_id: id, limit: lines })
+      return { text: read.ok ? feedLinesOf(read.value).join('\n') : `specialist_feed refused: ${read.error}` }
     }
 
     if (verb === 'show' || verb === 'hide' || verb === 'expand' || verb === 'collapse') {
@@ -508,7 +653,7 @@ export function register(on: On) {
         </Box>
         {isFolded && !s.paneOpen ? <Text dimColor>    tap open or /specialists for the full fleet</Text> : null}
         {s.error ? <Text color="yellow" wrap="truncate-end">    status unavailable · {s.error}</Text> : null}
-        {rows.length > 0 || s.flash ? fleetBody($, s, { Box, Text, Button, Input }, rows, 'band') : null}
+        {rows.length > 0 || s.flash ? fleetBody($, s, { Box, Text, Button, Input }, rows, 'band', DETAIL_BAND_LINES) : null}
         {!isFolded && s.expanded && ordered.length > rows.length ? <Text dimColor>    +{ordered.length - rows.length} more</Text> : null}
       </Box>
     )
@@ -524,8 +669,8 @@ export function register(on: On) {
         <Text bold>{headerOf(s.fleet)}</Text>
         {s.error ? <Text color="yellow" wrap="truncate-end">status unavailable · {s.error}</Text> : null}
         {s.fleet.activations.length === 0 ? <Text dimColor>No live activations.</Text> : null}
-        {fleetBody($, s, { Box, Text, Button, Input }, orderedOf(s.fleet), 'pane')}
-        <Text dimColor>esc closes · select a row to reply, steer, resume or stop</Text>
+        {fleetBody($, s, { Box, Text, Button, Input }, orderedOf(s.fleet), 'pane', DETAIL_PANE_LINES)}
+        <Text dimColor>esc closes · select a row to read its result or feed, or to reply, steer, resume or stop</Text>
       </Box>
     )
   })

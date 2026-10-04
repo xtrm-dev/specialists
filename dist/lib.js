@@ -25166,6 +25166,35 @@ function legacyOnlyConfigNotes(spec) {
   }
   return notes;
 }
+// src/constants.ts
+var BACKENDS = {
+  GEMINI: "ask-gemini",
+  CURSOR: "ask-cursor",
+  DROID: "ask-droid",
+  ROVODEV: "ask-rovodev",
+  QWEN: "ask-qwen"
+};
+var AGENT_ROLES = {
+  ARCHITECT: {
+    backend: BACKENDS.GEMINI,
+    specialization: "High-level system design, architecture analysis, and strategic planning",
+    description: "Uses Gemini for deep architectural reasoning, security analysis, and long-term design decisions"
+  },
+  IMPLEMENTER: {
+    name: "ImplementerAgent",
+    backend: BACKENDS.DROID,
+    fallbackBackend: undefined,
+    specialization: "Precise code implementation with production-quality standards",
+    description: "Uses Droid (GLM-4.6) for autonomous agentic tasks and implementation"
+  },
+  TESTER: {
+    name: "TesterAgent",
+    backend: BACKENDS.CURSOR,
+    specialization: "Fast test generation and validation",
+    description: "Uses Cursor Agent (Sonnet 4.5) for rapid test case generation and validation"
+  }
+};
+
 // src/tools/specialist/activation.tool.ts
 import { existsSync as existsSync21 } from "node:fs";
 import { fileURLToPath as fileURLToPath5 } from "node:url";

@@ -5,8 +5,9 @@ import type { EngineInterface, On } from 'claude-code'
 
 // Teammate-style transcript rows for Specialists. The Specialists wakes and MCP calls reach
 // the coordinator as raw machine text; these hooks draw them like Claude Code's own teammate
-// rows. Presentation only: the stored row, and everything the model reads, is untouched, and
-// ctrl+o still shows the original.
+// rows. Presentation only: the stored row, and everything the model reads, is untouched.
+// ctrl+o on a finished or failed wake shows the full result, as the Pi wake card's expanded
+// view does; on any other row it shows the original.
 //
 // Why a plugin of its own: Claude Code never runs a plugin's ui.render hooks on a row that
 // plugin raised ("skipped: re-entry ... the plugin's own code raised it"). The channel wake
@@ -19,6 +20,45 @@ export const MCP_SERVER = 'plugin:specialists:specialists'
 export const FALLBACK_WAKE_TEXT = 'Specialist activation needs attention'
 
 const ACCENT = '#9a8bff'
+
+/** The expanded wake shows at most this much of a result, as the Pi wake card does. */
+export const EXPANDED_RESULT_CHARS = 4000
+
+/**
+ * The full result an expanded wake draws, from one specialist_result read: a result is
+ * immutable once settled, so one read per activation per session is enough.
+ */
+export function expandedLinesOf(value: Record<string, unknown> | null, error?: string): string[] {
+  if (!value) return [`result unavailable · ${error ?? 'no answer'}`]
+  if (value.status === 'error') return [`result unavailable · ${String(value.error ?? 'error')}`]
+  if (typeof value.output !== 'string') return [`no settled result${typeof value.next === 'string' ? ` · use ${value.next}` : ''}`]
+  const text = value.output.slice(0, EXPANDED_RESULT_CHARS).replace(/\n+$/, '')
+  const lines = text.trim() ? text.split('\n') : ['(empty output)']
+  return value.output.length > EXPANDED_RESULT_CHARS
+    ? [...lines, `… ${value.output.length - EXPANDED_RESULT_CHARS} more characters in specialist_result`]
+    : lines
+}
+
+const expanded = new Map<string, string[] | 'loading'>()
+
+/** Read one result for an expanded wake; redraws when it lands. Never throws. */
+async function loadExpanded($: EngineInterface, activationId: string): Promise<void> {
+  expanded.set(activationId, 'loading')
+  try {
+    const result = await $.mcp.call(MCP_SERVER, 'specialist_result', { activation_id: activationId })
+    const text = result.content.map(b => ('text' in b && typeof b.text === 'string' ? b.text : '')).join('')
+    let value: Record<string, unknown> | null = null
+    try {
+      value = JSON.parse(text) as Record<string, unknown>
+    } catch {
+      /* non-JSON answer: reported below */
+    }
+    expanded.set(activationId, expandedLinesOf(value, result.isError ? text : 'unreadable answer'))
+  } catch (cause) {
+    expanded.set(activationId, expandedLinesOf(null, cause instanceof Error ? cause.message : String(cause)))
+  }
+  $.ui.invalidate('ui.render')
+}
 
 /**
  * The marker class a channel wake is acknowledged under: 'settled' for a
@@ -288,9 +328,18 @@ export function register(on: On) {
   })
 
   on('ui.render', { component: 'UserMessage', props: { origin: { kind: 'channel' } } }, async ($, e, next) => {
-    if (e.props.isExpanded || e.props.origin.kind !== 'channel' || e.props.origin.server !== MCP_SERVER) return next(e)
+    if (e.props.origin.kind !== 'channel' || e.props.origin.server !== MCP_SERVER) return next(e)
     const row = channelRow(e.props.text)
     if (!row) return next(e)
+    const settled = row.event === 'completed' || row.event === 'failed'
+    if (e.props.isExpanded && !settled) return next(e)
+    let full: string[] | null = null
+    if (e.props.isExpanded) {
+      const activationId = parseChannelFrame(e.props.text)!.activationId
+      const cached = expanded.get(activationId)
+      if (cached === undefined) void loadExpanded($, activationId)
+      full = Array.isArray(cached) ? cached : ['loading result…']
+    }
     const { Box, Text } = await $.ui.resolve(e)
     // Shaped like Claude Code's own teammate row: a coloured ● header, then a dim detail line.
     return (
@@ -302,14 +351,27 @@ export function register(on: On) {
           <Text> {row.event}</Text>
           {row.issue ? <Text dimColor> · {row.issue}</Text> : null}
         </Box>
-        {row.detail.map((line, i) =>
-          line.startsWith('> ') ? (
-            <Text key={i} italic>  {line.slice(2)}</Text>
-          ) : (
-            <Text key={i} dimColor>  {line}</Text>
-          ),
+        {full ? (
+          <>
+            {row.detail.filter(line => !line.startsWith('> ') && !line.startsWith('… ')).map((line, i) => (
+              <Text key={`c${i}`} dimColor>  {line}</Text>
+            ))}
+            {full.map((line, i) => (
+              <Text key={`r${i}`}>  {line}</Text>
+            ))}
+          </>
+        ) : (
+          <>
+            {row.detail.map((line, i) =>
+              line.startsWith('> ') ? (
+                <Text key={i} italic>  {line.slice(2)}</Text>
+              ) : (
+                <Text key={i} dimColor>  {line}</Text>
+              ),
+            )}
+            <Text dimColor italic>  {row.hint}</Text>
+          </>
         )}
-        <Text dimColor italic>  {row.hint}</Text>
       </Box>
     )
   })

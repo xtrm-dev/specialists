@@ -35,6 +35,7 @@ const META = {
 const EXPECTED_TOOLS = [
   'specialist_status',
   'specialist_result',
+  'specialist_feed',
   'specialist_dispatch',
   'specialist_reply',
   'specialist_resume',

@@ -1,7 +1,7 @@
 import type { McpToolResult, On, RenderInput } from 'claude-code'
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { COLLAPSE_AT, MCP_SERVER, PANE_ID, POLL_MS } from '../hooks/register'
+import { COLLAPSE_AT, MCP_SERVER, PANE_ID, POLL_MS, feedLinesOf, resultLinesOf, transitionsOf } from '../hooks/register'
 
 const SESSION = { surface: 'terminal', isInteractive: true, cwd: '/work' } as const
 
@@ -73,17 +73,21 @@ const json = (value: unknown): McpToolResult => ({
 })
 
 /** The session's Specialists MCP server, answered from memory; every call is recorded. */
-function server(on: On, status: () => McpToolResult | Error) {
+function server(on: On, status: () => McpToolResult | Error, answers: Record<string, unknown> = {}) {
   const calls: { server: string; tool: string; args: Record<string, unknown> }[] = []
   on('mcp.call', ($, e) => {
     calls.push(e)
-    if (e.tool !== 'specialist_status') return { value: json({ status: 'ok' }) }
+    if (e.tool !== 'specialist_status') return { value: json(answers[e.tool] ?? { status: 'ok' }) }
     const answer = status()
     return answer instanceof Error ? { deny: answer.message } : { value: answer }
   })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('command.register', ($, e) => ({ value: { command: e.name } }))
   on('ui.invalidate', () => ({ value: undefined }))
+  on('ui.toast', ($, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
   on('ui.render', { component: 'AbovePrompt' }, () => ({ type: 'Box', props: {}, children: ['engine band'] }) as never)
   on('ui.render', { component: 'Pane' }, () => ({ type: 'Box', props: {}, children: ['engine pane'] }) as never)
   on('ui.open', ($, e) => {
@@ -98,6 +102,10 @@ function server(on: On, status: () => McpToolResult | Error) {
 }
 
 let panes: unknown[] = []
+let toasts: string[] = []
+
+const RESULT = { activation_id: RUNNING.activation_id, status: 'completed', resolved_model: 'm1', output: 'line one\nline two\n' }
+const FEED = { activation_id: RUNNING.activation_id, events: ['12:00:01 #4 tool    read a.ts', '12:00:02 #6 text    done'], last_seq: 6, total: 5, truncated: true }
 
 function textOf(tree: unknown): string {
   if (typeof tree === 'string' || typeof tree === 'number') return String(tree)
@@ -328,5 +336,92 @@ describe('register', () => {
     await ui.press({ key: 'open' })
     await clock.settle()
     expect(panes[0]).toMatchObject({ open: { id: PANE_ID } })
+  })
+
+  test('transitions owe a toast once, and the first read owes none', () => {
+    const before = { activations: [RUNNING, BLOCKED], asks: [] }
+    const after = {
+      activations: [{ ...RUNNING, state: 'settled' }, { ...BLOCKED, state: 'failed' }],
+      asks: [ASK],
+    }
+    expect(transitionsOf(null, after)).toEqual([])
+    expect(transitionsOf(before, after)).toEqual([
+      'Specialist executor:4245711d finished · XTRM-464',
+      'Specialist debugger:67eff6ec FAILED · XTRM-467',
+      'Specialist debugger:67eff6ec asked a question',
+    ])
+    expect(transitionsOf(after, after)).toEqual([])
+  })
+
+  test('result and feed reads become lines', () => {
+    expect(resultLinesOf(RESULT)).toEqual(['completed · m1', 'line one', 'line two'])
+    expect(resultLinesOf({ state: 'running', next: 'specialist_steer' })).toEqual(['running · use specialist_steer'])
+    expect(feedLinesOf(FEED)).toEqual(['… 3 earlier events', ...FEED.events])
+    expect(feedLinesOf({ events: [] })).toEqual(['no events yet'])
+  })
+
+  test('a finished activation toasts once while the band watches', async ($, on) => {
+    const clock = mock.clock(on)
+    toasts = []
+    let fleet = { activations: [RUNNING], pending_asks: [] as unknown[] }
+    server(on, () => json(fleet))
+
+    await $.session.start(SESSION)
+    await clock.settle()
+    expect(toasts).toEqual([])
+
+    fleet = { activations: [{ ...RUNNING, state: 'settled' }], pending_asks: [] }
+    await clock.advance(POLL_MS)
+    await clock.advance(POLL_MS)
+    expect(toasts).toEqual(['Specialist executor:4245711d finished · XTRM-464'])
+  })
+
+  test('/specialists result, feed and status <id> read one activation', async ($, on) => {
+    const clock = mock.clock(on)
+    const calls = server(on, () => json({ activations: [RUNNING], pending_asks: [] }), {
+      specialist_result: RESULT,
+      specialist_feed: FEED,
+    })
+    await $.session.start(SESSION)
+    await clock.settle()
+
+    expect((await $.command.run(command('result 4245711d'))).text).toBe('completed · m1\nline one\nline two')
+    expect(calls.find(c => c.tool === 'specialist_result')?.args).toEqual({ activation_id: RUNNING.activation_id })
+
+    expect((await $.command.run(command('feed 4245711d 12'))).text).toContain('read a.ts')
+    expect(calls.find(c => c.tool === 'specialist_feed')?.args).toEqual({ activation_id: RUNNING.activation_id, limit: 12 })
+
+    // An earlier-session id the live fleet does not know still reaches the server.
+    await $.command.run(command('result act:deadbeef-000'))
+    expect(calls.filter(c => c.tool === 'specialist_result').at(-1)?.args).toEqual({ activation_id: 'act:deadbeef-000' })
+
+    const status = (await $.command.run(command('status 4245711d'))).text
+    expect(status).toContain('executor act:4245711d-4e3 · running')
+    expect(status).toContain('purpose: Implement the fleet band')
+  })
+
+  test('the pane shows a selected row\'s result and feed', async ($, on) => {
+    const clock = mock.clock(on)
+    server(on, () => json({ activations: [RUNNING], pending_asks: [] }), {
+      specialist_result: RESULT,
+      specialist_feed: FEED,
+    })
+    await $.session.start(SESSION)
+    await clock.settle()
+
+    const ui = await $.ui.mount({ ...PANE, plugin: 'specialists' })
+    await ui.press({ key: `row:${RUNNING.activation_id}` })
+    await ui.redraw()
+    await ui.press({ key: `result:${RUNNING.activation_id}` })
+    await clock.settle()
+    await ui.redraw()
+    expect(textOf(await ui.drawn())).toContain('line two')
+
+    await ui.press({ key: `feed:${RUNNING.activation_id}` })
+    await clock.settle()
+    await ui.redraw()
+    const drawn = textOf(await ui.drawn())
+    expect(drawn).toContain('read a.ts')
+    expect(drawn).not.toContain('line two')
   })
 })

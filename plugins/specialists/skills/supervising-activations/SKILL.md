@@ -45,7 +45,7 @@ What is local to THIS plugin, and therefore stated here:
 
 ## Tool surface
 
-Ten tools are always registered on the Specialists MCP server (plus the three `substrate_*`
+Eleven tools are always registered on the Specialists MCP server (plus the three `substrate_*`
 tools when Substrate resolves), and the names are exact. A separate
 section below documents the REMOVED `use_specialist` path so no reader mistakes it for live.
 
@@ -108,6 +108,15 @@ settled returns `state` and `next` (the tool to use instead). An unknown id or a
 prefix returns `status: "error"`; an ambiguous prefix lists the candidates. If
 `observability.db` is absent, results older than this server process are unreadable — run
 `specialists db setup` (`specialists doctor` reports it).
+
+### specialist_feed
+One activation's event feed — the `sp feed` view, for you. `view: "terminal"` (default) gives
+one line per tool call, text block, turn, status change and completion; `view: "forensic"`
+gives every recorded lifecycle event. It reads the durable timeline, so it works on running,
+settled and earlier-session activations. Bounded: the newest `limit` events (default 40, max
+200), each line capped. To follow a running activation, pass the previous call's `last_seq` as
+`since_seq`. Use it to see what a quiet executor is doing before you steer it, or why one
+failed; the result itself stays in `specialist_result`.
 
 ### specialist_reply
 Answers a waiting activation by message ID. An unknown ID is reported, never silently

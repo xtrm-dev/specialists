@@ -10,6 +10,8 @@ lines, the failing model and error, or the ask body). The brief helps you decide
 - `specialist_status` is the authoritative read of live state and pending asks;
 - `specialist_result` returns the full output of a settled activation, from memory or
   `observability.db`, by full id or short prefix;
+- `specialist_feed` (Claude Code) shows what an activation did or is doing, one line per tool
+  call, text block, turn and status change; `since_seq` follows a running one;
 - a missed wake degrades to reading `specialist_status` late, never to a different answer.
   On Claude Code the wake-watch hook is the fallback wake.
 

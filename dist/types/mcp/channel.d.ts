@@ -46,6 +46,17 @@ import type { ActivationSnapshot, ActivationTokenUsage } from '../activation/typ
 export declare const CHANNEL_CAPABILITY: {
     readonly 'claude/channel': {};
 };
+/**
+ * `SPECIALISTS_WAKE=off` turns wakes off: no channel push and no wake-watch fallback, the
+ * Claude Code twin of the Pi extension's `--no-specialist-wake`. Everything stays readable
+ * through specialist_status; only the notification is suppressed.
+ */
+export declare function wakeSuppressed(env?: NodeJS.ProcessEnv): boolean;
+/**
+ * The wake behaviour, stated once to a coordinator at its first dispatch — the moment it
+ * becomes true that a child could start a turn on its own (the Pi extension's announcement).
+ */
+export declare function wakeNotice(env?: NodeJS.ProcessEnv): string;
 /** The notification method Claude Code listens for. */
 export declare const CHANNEL_METHOD = "notifications/claude/channel";
 export interface ChannelFrame {

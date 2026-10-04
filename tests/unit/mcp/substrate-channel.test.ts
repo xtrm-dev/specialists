@@ -5,6 +5,8 @@ import {
   CHANNEL_METHOD,
   buildChannelFrame,
   formatTokens,
+  wakeNotice,
+  wakeSuppressed,
   withChannelPush,
   type ChannelDetail,
   type ChannelFrame,
@@ -253,5 +255,14 @@ describe('wire', () => {
     const hit = received.find((m) => m.method === CHANNEL_METHOD);
     expect(hit).toBeDefined();
     await server.close();
+  });
+});
+
+describe('wake switch', () => {
+  it('SPECIALISTS_WAKE=off suppresses wakes and the notice says so', () => {
+    expect(wakeSuppressed({})).toBe(false);
+    expect(wakeSuppressed({ SPECIALISTS_WAKE: 'OFF' })).toBe(true);
+    expect(wakeNotice({ SPECIALISTS_WAKE: 'off' })).toContain('Wakes are off');
+    expect(wakeNotice({})).toContain('You will be woken');
   });
 });

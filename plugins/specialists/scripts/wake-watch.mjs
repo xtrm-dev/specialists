@@ -134,6 +134,9 @@ function freshRows(seen, current) {
 // returned "No messages returned from query" until this guard existed. A plugin must never
 // cost a user their scripted invocations to serve an interactive feature.
 if ((process.env.CLAUDE_CODE_ENTRYPOINT ?? '') !== 'cli') process.exit(0);
+// SPECIALISTS_WAKE=off turns every wake off, this fallback included (the Pi extension's
+// --no-specialist-wake). specialist_status still answers; the coordinator polls instead.
+if ((process.env.SPECIALISTS_WAKE ?? '').toLowerCase() === 'off') process.exit(0);
 
 try {
   const storePath = resolveStorePath();
