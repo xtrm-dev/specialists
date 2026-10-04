@@ -153,6 +153,24 @@ describe('specialists plugin path discipline', () => {
     const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8')) as { files: string[] };
     expect(pkg.files).toContain('plugins/specialists-ui/');
   });
+
+  it('versions every plugin with the package version so plugin update ships changes', () => {
+    // Claude Code keys the plugin cache and `claude plugin update` on plugin.json "version".
+    // Pinned at 0.1.0, every release was "already at the latest version" (SPECIALISTS-4254).
+    const root = join(PLUGIN_ROOT, '..', '..');
+    const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8')) as {
+      version: string;
+      scripts: Record<string, string>;
+    };
+    for (const name of ['specialists', 'specialists-ui']) {
+      const manifest = JSON.parse(
+        readFileSync(join(root, 'plugins', name, '.claude-plugin', 'plugin.json'), 'utf-8'),
+      ) as { version: string };
+      expect(manifest.version, name).toBe(pkg.version);
+    }
+    expect(pkg.scripts.version).toContain('node scripts/sync-plugin-versions.mjs');
+    expect(pkg.scripts.version).toContain('plugins/*/.claude-plugin/plugin.json');
+  });
 });
 
 /**

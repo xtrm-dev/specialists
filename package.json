@@ -70,7 +70,7 @@
     "changelog": "node scripts/changelog-update.mjs",
     "changelog:check": "node scripts/changelog-update.mjs --check",
     "preversion": "bun run changelog",
-    "version": "node scripts/changelog-update.mjs --tag v$npm_package_version && bun run build && git add CHANGELOG.md dist/",
+    "version": "node scripts/changelog-update.mjs --tag v$npm_package_version && node scripts/sync-plugin-versions.mjs && bun run build && git add CHANGELOG.md dist/ plugins/*/.claude-plugin/plugin.json",
     "typecheck:tests": "tsc -p tsconfig.test.json"
   },
   "keywords": [
