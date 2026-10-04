@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.0.7] - 2026-10-04
+
+### Added
+- Carry a bounded brief in Claude Code channel wakes ([68a5afc](https://github.com/xtrm-dev/specialists/commit/68a5afc515b7b4e35253751168390e22b2b93b2e))
+- Specialist_feed tool, result/feed views in /specialists, wake parity with Pi ([43b5c9c](https://github.com/xtrm-dev/specialists/commit/43b5c9cb1154d357e5913d5ebba627a714e302ac))
+
+### Fixed
+- Bound the WAL file and make forensic retention opt-in (SPECIALISTS-4219) (#445) ([2d83b20](https://github.com/xtrm-dev/specialists/commit/2d83b20f091f1cc8f967afe3a967a38a543c2b37))
+
 ## [4.0.6] - 2026-10-04
 
 ### Added
