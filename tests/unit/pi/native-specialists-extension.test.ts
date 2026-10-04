@@ -260,7 +260,7 @@ function plain(line) {
 const SPIN_CLOCK = 220_000;
 
 describe('native-specialists extension (Pi coordinator surface)', () => {
-  it('registers exactly the nine specialist_* tools over the host', async () => {
+  it('registers exactly the ten specialist_* tools over the host', async () => {
     const mod = await loadExtension();
     const pi = makeFakePi();
     mod.default(pi);
@@ -268,6 +268,7 @@ describe('native-specialists extension (Pi coordinator surface)', () => {
       'specialist_dispatch',
       'specialist_status',
       'specialist_result',
+      'specialist_feed',
       'specialist_reply',
       'specialist_resume',
       'specialist_retry',
@@ -637,6 +638,82 @@ describe('native-specialists extension (Pi coordinator surface)', () => {
       expect(out.error).toMatch(/unknown activation 'act:zzzz'/);
       expect(out.candidates).toEqual(['act:aaaa']);
     });
+  });
+
+  it('specialist_feed reuses the shared factory: same lines as the MCP tool for the same events (SPECIALISTS-4264)', async () => {
+    const mod = await loadExtension();
+    const shared = await import('../../../src/tools/specialist/specialist_feed.tool.js');
+    expect(typeof shared.feedLine).toBe('function');
+    expect(typeof shared.createSpecialistFeedTool).toBe('function');
+    expect(shared.FEED_DEFAULT_LIMIT).toBe(40);
+    expect(shared.FEED_MAX_LIMIT).toBe(200);
+
+    const T = 1_700_000_000_000;
+    const events = [
+      { t: T, seq: 1, type: 'run_start', specialist: 'explorer', bead_id: 'XTRM-1' },
+      { t: T, seq: 2, type: 'tool', tool: 'read', phase: 'start', args: { path: 'src/x.ts' } },
+      { t: T, seq: 3, type: 'run_complete', status: 'COMPLETE', elapsed_s: 16.4, tool_calls: ['read'] },
+    ];
+    const fakeClient = {
+      listNativeActivationIds: () => ['act:feed01'],
+      readEvents: (id) => (id === 'act:feed01' ? events : []),
+      readForensicEvents: () => [],
+      close: () => {},
+    };
+    const pi = makeFakePi();
+    const { host } = makeFakeHost();
+    host.list.mockReturnValue([]);
+    mod.default(pi, { createHost: () => host, openObservability: () => fakeClient });
+    const feed = toolNamed(pi, 'specialist_feed');
+
+    const piOut = resultText(await feed.execute('tc1', { activation_id: 'feed01' }));
+    const mcpOut = await shared.createSpecialistFeedTool(() => undefined, () => fakeClient).execute({ activation_id: 'feed01' });
+    expect(piOut).toEqual(mcpOut);
+    expect(piOut.events).toHaveLength(3);
+    expect(piOut).toMatchObject({ activation_id: 'act:feed01', view: 'terminal', last_seq: 3, truncated: false });
+
+    const followed = resultText(await feed.execute('tc2', { activation_id: 'act:feed01', since_seq: 2 }));
+    expect(followed.events).toHaveLength(1);
+    expect(followed.events[0]).toContain('done');
+    const forensicClient = {
+      ...fakeClient,
+      readForensicEvents: () => [{ seq: 1, t: T, event_name: 'run_start' }, { seq: 2, t: T, event_name: 'run_complete' }],
+    };
+    const piF = makeFakePi();
+    mod.default(piF, { createHost: () => host, openObservability: () => forensicClient });
+    const feedF = toolNamed(piF, 'specialist_feed');
+    const forensic = resultText(await feedF.execute('tc3', { activation_id: 'act:feed01', view: 'forensic' }));
+    expect(forensic.view).toBe('forensic');
+    expect(forensic.events).toHaveLength(2);
+
+    const twoClient = { ...fakeClient, listNativeActivationIds: () => ['act:feed01', 'act:feed02'] };
+    const pi2 = makeFakePi();
+    mod.default(pi2, { createHost: () => host, openObservability: () => twoClient });
+    const feed2 = toolNamed(pi2, 'specialist_feed');
+    expect(resultText(await feed2.execute('tc4', { activation_id: 'feed' }))).toMatchObject({ status: 'error' });
+    expect(resultText(await feed2.execute('tc5', { activation_id: 'nope' }))).toMatchObject({ status: 'error' });
+
+    const pi3 = makeFakePi();
+    mod.default(pi3, { createHost: () => host, openObservability: () => null });
+    expect(resultText(await toolNamed(pi3, 'specialist_feed').execute('tc6', { activation_id: 'x' })))
+      .toMatchObject({ status: 'error' });
+  });
+
+  it('specialist_result names the feed for an earlier-session id (SPECIALISTS-4264)', async () => {
+    const mod = await loadExtension();
+    const pi = makeFakePi();
+    const { host } = makeFakeHost();
+    host.list.mockReturnValue([]);
+    const fakeClient = {
+      listNativeActivationIds: () => ['act:old01'],
+      readEvents: () => [{ t: 1, seq: 1, type: 'run_start', specialist: 'explorer' }],
+      readForensicEvents: () => [],
+      close: () => {},
+    };
+    mod.default(pi, { createHost: () => host, openObservability: () => fakeClient });
+    const out = resultText(await toolNamed(pi, 'specialist_result').execute('tc1', { activation_id: 'old01' }));
+    expect(out.status).toBe('error');
+    expect(out.error).toContain('specialist_feed');
   });
 
   it('specialist_steer redirects a running activation and refuses settled ones (SPECIALISTS-141)', async () => {
@@ -1054,7 +1131,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
 
   it('registers the /specialists operator commands with /fleet compat aliases', async () => {
     const { pi } = await boot();
-    expect(pi.commands.map((c) => c.name)).toEqual(['specialists', 'fleet', 'specialists:reply', 'fleet:reply', 'specialists:stop', 'fleet:stop', 'specialists:resume', 'fleet:resume']);
+    expect(pi.commands.map((c) => c.name)).toEqual(['specialists', 'fleet', 'specialists:reply', 'fleet:reply', 'specialists:stop', 'fleet:stop', 'specialists:resume', 'fleet:resume', 'specialists:result', 'fleet:result', 'specialists:feed', 'fleet:feed']);
   });
 
   it('names /specialists in help, never /fleet, and the header carries no command hint (unitAI-beqby.6, unitAI-rrdnt.65)', async () => {
@@ -1079,6 +1156,61 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     expect(header).not.toContain('/specialists');
     expect(header).toContain('SPECIALISTS');
     expect(header).toContain('! 1 blocked');
+  });
+
+  it('/specialists result|feed|status read one activation, incl. earlier-session ids (SPECIALISTS-4264)', async () => {
+    const T = 1_700_000_000_000;
+    const events = [
+      { t: T, seq: 1, type: 'run_start', specialist: 'explorer', bead_id: 'XTRM-1' },
+      { t: T, seq: 2, type: 'tool', tool: 'read', phase: 'start', args: { path: 'src/x.ts' } },
+      { t: T, seq: 3, type: 'run_complete', status: 'COMPLETE', elapsed_s: 16.4, tool_calls: ['read'] },
+    ];
+    const fakeClient = {
+      listNativeActivationIds: () => ['act:feed01'],
+      readEvents: (id) => (id === 'act:feed01' ? events : []),
+      readForensicEvents: () => [],
+      close: () => {},
+    };
+    const mod = await loadExtension();
+    const pi = makeFakePi();
+    const { host } = makeFakeHost();
+    mod.default(pi, { createHost: () => host, openObservability: () => fakeClient });
+    const ctx = makeFakeCtx({ hasUI: true, mode: 'tui' });
+    await pi.fire('session_start', { type: 'session_start' }, ctx);
+    const command = (name) => pi.commands.find((c) => c.name === name);
+    const lastNotice = () => ctx.painted.notices.at(-1)[0];
+
+    // Live id through the /specialists verb and the dedicated command alike.
+    await command('specialists').handler('feed act:feed01', ctx);
+    expect(lastNotice()).toContain('tool');
+    // Live id + still running: the tail carries the follow hint.
+    host.list.mockReturnValue([{ ...SNAPSHOT, activationId: 'act:feed01' }]);
+    await command('specialists:feed').handler('act:feed01 2', ctx);
+    const tailed = lastNotice().split('\n');
+    expect(tailed).toHaveLength(4);
+    expect(tailed.at(-1)).toContain('since_seq');
+    // Completions complete the live id.
+    expect(command('specialists:feed').getArgumentCompletions('act:fe')[0].value).toBe('act:feed01');
+
+    // Earlier-session id: unknown to the live host, answered from observability.db.
+    host.list.mockReturnValue([]);
+    await command('specialists').handler('feed feed01', ctx);
+    expect(lastNotice()).toContain('tool');
+    await command('specialists').handler('status feed01', ctx);
+    expect(lastNotice()).toContain('earlier-session');
+    await command('specialists').handler('feed nope', ctx);
+    expect(lastNotice()).toContain('refused');
+    await command('specialists').handler('feed', ctx);
+    expect(lastNotice()).toContain('Usage');
+    await command('specialists').handler('result', ctx);
+    expect(lastNotice()).toContain('Usage');
+
+    // /fleet aliases reach the same handlers.
+    await command('fleet:feed').handler('act:feed01', ctx);
+    expect(lastNotice()).toContain('tool');
+
+    // Help names /specialists, never /fleet.
+    for (const cmd of pi.commands) expect(cmd.description).not.toContain('/fleet');
   });
 
   it('/fleet aliases still reach the /specialists handlers (unitAI-beqby.6)', async () => {

@@ -35,9 +35,13 @@ import { fileURLToPath } from 'node:url';
 import { Type } from 'typebox';
 import {
   createActivationForensicSink,
+  createObservabilitySqliteClient,
   createObservabilitySqliteClientAtPath,
+  createSpecialistFeedTool,
   describeBuildIdentity,
   DispatchRejectedError,
+  FEED_DEFAULT_LIMIT,
+  FEED_MAX_LIMIT,
   validateContractText,
   NativeActivationHost,
   resolveModelChain,
@@ -1059,6 +1063,20 @@ const Result = Type.Object({
   candidates: Type.Optional(Type.Array(Type.String())),
 });
 
+/** `specialist_feed` — the event lines for one activation, or a structured refusal. */
+const Feed = Type.Object({
+  activation_id: Type.Optional(Type.String()),
+  view: Type.Optional(Type.String()),
+  events: Type.Optional(Type.Array(Type.String())),
+  last_seq: Type.Optional(Type.Number()),
+  total: Type.Optional(Type.Number()),
+  truncated: Type.Optional(Type.Boolean()),
+  // Structured errors share this schema object.
+  status: Type.Optional(Type.String()),
+  error: Type.Optional(Type.String()),
+  candidates: Type.Optional(Type.Array(Type.String())),
+});
+
 /**
  * `outputSchema` per registered tool, by tool name. One map, referenced by every
  * `pi.registerTool` call below: a tool cannot declare a schema this map lacks,
@@ -1068,6 +1086,7 @@ export const TOOL_OUTPUT_SCHEMAS = {
   specialist_dispatch: Envelope,
   specialist_status: Fleet,
   specialist_result: Result,
+  specialist_feed: Feed,
   specialist_reply: Envelope,
   specialist_resume: Envelope,
   specialist_retry: Envelope,
@@ -1159,6 +1178,17 @@ function summarizePayload(payload) {
   if (typeof payload.activation_id === 'string' && typeof payload.state === 'string' && typeof payload.next === 'string') {
     return [`${payload.activation_id} not settled — ${payload.state} → ${payload.next}`];
   }
+  // specialist_feed: the event lines for one activation (machine JSON identical
+  // to the MCP tool; `events` are the output lines the constraint covers).
+  if (typeof payload.activation_id === 'string' && Array.isArray(payload.events)) {
+    const count = payload.truncated === true
+      ? `${payload.events.length} of ${payload.total ?? '?'} lines`
+      : `${payload.events.length} line(s)`;
+    const lines = [`Feed · ${payload.activation_id} · ${payload.view ?? 'terminal'} · ${count}`];
+    for (const event of payload.events) lines.push(`  ${String(event).trim()}`);
+    if (typeof payload.last_seq === 'number') lines.push(`  last_seq ${payload.last_seq} → pass as since_seq to follow`);
+    return lines;
+  }
   switch (payload.status) {
     case 'dispatched':
       return [
@@ -1217,7 +1247,7 @@ function humanCallOf(describe) {
 
 /**
  * @param {import('@earendil-works/pi-coding-agent').ExtensionAPI} pi
- * @param {{ createHost?: () => NativeActivationHost }} [options] — test seam;
+ * @param {{ createHost?: () => NativeActivationHost, openObservability?: () => import('../../../dist/lib.js').ObservabilitySqliteClient | null }} [options] — test seams;
  *   when omitted, one process-lifetime host is created on first tool use.
  */
 export default function nativeSpecialistsExtension(pi, options = {}) {
@@ -1382,6 +1412,20 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
 
   /** Settled ActivationResults by activation id, collected without blocking a turn. */
   const results = new Map();
+
+  /**
+   * The shared MCP feed factory, never a second formatter (SPECIALISTS-4264).
+   * Input/output lines are identical to the MCP `specialist_feed` by construction:
+   * the factory IS the contract. One instance per extension (the factory is
+   * stateless — it opens the timeline per call), shared by the specialist_feed
+   * tool and the specialist_result earlier-session probe below. The observability
+   * opener is an options seam so tests can inject a fake timeline without
+   * touching the filesystem.
+   */
+  const feedTool = createSpecialistFeedTool(
+    () => { try { return getHost(); } catch { return undefined; } },
+    options.openObservability ?? (() => createObservabilitySqliteClient()),
+  );
 
   const disposeActivation = async (activationId, reason) => {
     await getHost().stop(activationId, reason);
@@ -1752,7 +1796,19 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
               candidates: resolved.ambiguous,
             })
       }
+      // Memory and live host cover this session; earlier sessions persist only in
+      // observability.db, which the shared feed factory already reads
+      // (SPECIALISTS-4264: the feed must answer for settled and earlier-session
+      // activations alike, so a result miss there is worth one probe, not a guess).
       if (resolved.unknown) {
+        const prior = await feedTool.execute({ activation_id: input, limit: 1 });
+        if (!prior.status) {
+          return resultOf({
+                status: 'error',
+                error: `unknown activation '${input}' on this coordinator — no settled result yet; try specialist_feed '${input}' for its event history`,
+                candidates: resolved.candidates,
+              })
+        }
         return resultOf({
               status: 'error',
               error: `unknown activation '${input}' — no matching activation on this coordinator`,
@@ -1780,6 +1836,51 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
             error: `no result for activation '${id}' and it is no longer on this coordinator`,
             activation_id: id,
           })
+    },
+  });
+
+  pi.registerTool({
+    name: 'specialist_feed',
+    label: 'Specialist feed',
+    description:
+      "Read one activation's event feed: tool calls, text, turns, status changes and completion " +
+      "(view 'terminal', default), or every lifecycle event (view 'forensic'). Works on running, settled and " +
+      'earlier-session activations. Pass since_seq (the last call\'s last_seq) to follow a running one.',
+    promptSnippet: 'Read one activation\'s event feed (specialist_feed: activation_id)',
+    renderCall: humanCallOf((args) => `Feed ${args.activation_id ?? '?'}${args.view ? ` (${args.view})` : ''}`),
+    renderResult: humanResultOf(),
+    outputSchema: TOOL_OUTPUT_SCHEMAS.specialist_feed,
+    namespace: TOOL_NAMESPACE,
+    parameters: Type.Object({
+      activation_id: Type.String({
+        description:
+          "Activation id: the full id or a unique short prefix, e.g. 'act:a2924153' or 'a2924153'.",
+      }),
+      view: Type.Optional(Type.String({
+        description:
+          "'terminal' (default): what the specialist did — tool calls, text, turns, status, completion — " +
+          "one line each. 'forensic': every recorded lifecycle event name.",
+      })),
+      since_seq: Type.Optional(Type.Number({
+        description:
+          'Only events with a sequence number above this. Pass the previous call\'s last_seq to follow a running activation.',
+      })),
+      limit: Type.Optional(Type.Number({
+        description:
+          `Newest events to return (default ${FEED_DEFAULT_LIMIT}, max ${FEED_MAX_LIMIT}).`,
+      })),
+    }),
+    async execute(toolCallId, params = {}) {
+      // One shared formatter, never a second one: the factory IS the MCP tool's
+      // input/output contract (SPECIALISTS-4264 constraint 1 — identical lines for
+      // the same activation). `feedLine` correctness is covered by the shared
+      // suite (tests/unit/tools/specialist-feed.test.ts); the Pi surface only
+      // proves the wiring.
+      const input = { activation_id: String(params.activation_id ?? '').trim() };
+      if (params.view !== undefined) input.view = params.view;
+      if (params.since_seq !== undefined) input.since_seq = params.since_seq;
+      if (params.limit !== undefined) input.limit = params.limit;
+      return resultOf(await feedTool.execute(input));
     },
   });
 
@@ -2309,6 +2410,101 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
     return false;
   };
 
+  // ── Per-activation result/feed (SPECIALISTS-4264) ─────────────────────────
+  //
+  // The Claude /specialists pane opens a selected activation's result (r) or live
+  // feed (f); the Pi twin is these two commands, which share the model tools'
+  // readers so the lines are identical. specialist_result covers this session;
+  // the feed answers running, settled AND earlier-session activations through
+  // observability.db, so the feed is the fallback when the result names no id.
+  // No refresh timer lives here: the operator re-issues the command (or passes
+  // since_seq) to follow a running activation — one read per explicit request,
+  // never a background loop inside an extension.
+  const FEED_COMMAND_LINES = 30;
+  const isActiveStateFor = (state) => state === 'running' || state === 'starting';
+  const feedCommandLines = (payload) => {
+    const events = Array.isArray(payload?.events) ? payload.events.filter((e) => typeof e === 'string') : [];
+    if (events.length === 0) return ['no events yet'];
+    return payload.truncated === true ? [`… ${Number(payload.total ?? 0) - events.length} earlier events`, ...events] : events;
+  };
+  const resultCommandLines = (payload) => {
+    if (typeof payload?.output === 'string') {
+      const head = [payload.status, payload.resolved_model].filter((v) => typeof v === 'string' && v).join(' · ');
+      const body = payload.output.trim() ? payload.output.replace(/\n+$/, '').split('\n') : ['(empty output)'];
+      return head ? [head, ...body] : body;
+    }
+    if (typeof payload?.next === 'string') return [`${String(payload.state ?? 'not settled')} · use ${payload.next}`];
+    return ['no result'];
+  };
+  const activationCommandCompletions = (prefix) => {
+    const normalized = String(prefix ?? '').trim();
+    if (normalized.includes(' ')) return null;
+    const items = readFleet().activations
+      .filter((view) => view.activation_id.startsWith(normalized))
+      .map((view) => ({
+        value: view.activation_id,
+        label: view.activation_id,
+        description: `${view.specialist} · ${view.state}`,
+      }));
+    return items.length > 0 ? items : null;
+  };
+  const resolveCommandActivation = (ref) => {
+    const trimmed = String(ref ?? '').trim();
+    if (!trimmed) return { error: 'missing activation id' };
+    const fleet = readFleet();
+    const needle = trimmed.startsWith('act:') ? trimmed : `act:${trimmed}`;
+    // A live row wins when exactly one matches; an earlier-session id goes to
+    // the tools as given — the feed resolves it through observability.db.
+    const hits = fleet.activations.filter((a) => a.activation_id === trimmed || a.activation_id.startsWith(needle));
+    if (hits.length > 1) return { error: `Ambiguous activation: ${trimmed}` };
+    return { id: hits.length === 1 ? hits[0].activation_id : trimmed, fleet };
+  };
+  const resultFeedHandler = async (kind, args, ctx) => {
+    const ref = String(args ?? '').trim().split(/\s+/, 1)[0] ?? '';
+    if (!ref) {
+      report(ctx, `Usage: /specialists:${kind} <activation_id>`, 'warning');
+      return;
+    }
+    const resolved = resolveCommandActivation(ref);
+    if (resolved.error) {
+      report(ctx, resolved.error, 'warning');
+      return;
+    }
+    const { id, fleet } = resolved;
+    if (kind === 'result') {
+      const out = await toolNamedLocal('specialist_result').execute('cmd', { activation_id: id });
+      const payload = out?.structuredContent ?? {};
+      if (payload.status === 'error') {
+        report(ctx, `specialist_result refused: ${payload.error ?? 'unknown error'}`, 'warning');
+        return;
+      }
+      report(ctx, resultCommandLines(payload).join('\n'));
+      return;
+    }
+    // kind === 'feed': the newest lines; `truncated` says how many came before.
+    const rest = String(args ?? '').trim().split(/\s+/).slice(1);
+    const lines = Math.min(200, Math.max(1, Number(rest[0]) || FEED_COMMAND_LINES));
+    const out = await toolNamedLocal('specialist_feed').execute('cmd', { activation_id: id, limit: lines });
+    const payload = out?.structuredContent ?? {};
+    if (payload.status === 'error') {
+      report(ctx, `specialist_feed refused: ${payload.error ?? 'unknown error'}`, 'warning');
+      return;
+    }
+    const running = fleet.activations.some((a) => a.activation_id === (payload.activation_id ?? id) && isActiveStateFor(a.state));
+    const rendered = feedCommandLines(payload);
+    report(ctx, [...rendered, ...(running ? [`… still ${fleet.activations.find((a) => a.activation_id === (payload.activation_id ?? id))?.state ?? 'running'} — re-run with last_seq ${payload.last_seq ?? '?'} as since_seq to follow`] : [])].join('\n'));
+  };
+  // `pi.registerTool` records defs the tests read back through `pi.tools`; the
+  // commands below share the same readers (lookup the registered def directly —
+  // the defs live on `pi.tools`, which the fake and the real pi both expose).
+  const toolNamedLocal = (name) => ({
+    execute: async (toolCallId, params) => {
+      const def = (pi.tools ?? []).find((t) => t.name === name);
+      if (!def) return resultOf({ status: 'error', error: `tool not registered: ${name}` });
+      return def.execute(toolCallId, params);
+    },
+  });
+
   pi.on('session_start', (_event, ctx) => {
     if (!ctx.hasUI) return;
     const seam = findFooterSeam();
@@ -2327,14 +2523,43 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
   };
 
   const specialistsHandler = async (args, ctx) => {
-      const action = args.trim().split(/\s+/, 1)[0] ?? '';
+      const parts = args.trim().split(/\s+/);
+      const action = parts[0] ?? '';
       if (action === 'hide') fleetVisible = false;
       else if (action === 'show') fleetVisible = true;
       else if (action === 'expand') fleetExpanded = true;
       else if (action === 'collapse') fleetExpanded = false;
       else if (action === 'inspect') { await openFleetInspector(ctx); return; }
+      else if (action === 'result') { await resultFeedHandler('result', parts.slice(1).join(' '), ctx); return; }
+      else if (action === 'feed') { await resultFeedHandler('feed', parts.slice(1).join(' '), ctx); return; }
+      else if (action === 'status') {
+        const ref = parts[1] ?? '';
+        if (!ref) {
+          report(ctx, renderFleetSection(readFleet(), { expanded: fleetExpanded }).join('\n'));
+          paintFleet();
+          return;
+        }
+        const resolved = resolveCommandActivation(ref);
+        if (resolved.error) {
+          report(ctx, resolved.error, 'warning');
+          return;
+        }
+        const row = resolved.fleet.activations.find((a) => a.activation_id === resolved.id);
+        if (!row) {
+          report(ctx, `Unknown activation: ${ref} — try /specialists:feed ${ref} for earlier-session history`, 'warning');
+          return;
+        }
+        const ask = resolved.fleet.asks.find((a) => a.activation_id === row.activation_id);
+        report(ctx, [
+          `${row.specialist} ${row.activation_id} · ${row.state ?? 'unknown'}`,
+          `  issue ${row.bead_id ?? '—'} · ${row.resolved_model ?? '?model'}${row.thinking_level ? ` · ${row.thinking_level}` : ''}`,
+          ...(row.purpose ? [`  purpose: ${row.purpose}`] : []),
+          ...(ask ? [`  ${ask.kind ?? 'ask'} ${ask.message_id}: ${ask.body ?? ''}`] : []),
+        ].join('\n'));
+        return;
+      }
       else if (action !== '') {
-        report(ctx, 'Usage: /specialists [show|hide|inspect|expand|collapse]', 'warning');
+        report(ctx, 'Usage: /specialists [show|hide|inspect|expand|collapse|status <activation>|result <activation>|feed <activation> [lines]]', 'warning');
         return;
       }
       // The panel is only half the answer: in json/print mode there is no
@@ -2344,22 +2569,22 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
     };
   const specialistsCompletions = (prefix) => {
       const normalized = prefix.trim().toLowerCase();
-      const items = ['show', 'hide', 'inspect', 'expand', 'collapse']
+      const items = ['show', 'hide', 'inspect', 'expand', 'collapse', 'status', 'result', 'feed']
         .filter((value) => value.startsWith(normalized))
         .map((value) => ({
           value,
           label: value,
-          description: value === 'show' ? 'Show the Fleet panel.' : value === 'hide' ? 'Hide the Fleet panel.' : value === 'inspect' ? 'Print the expanded Fleet report.' : value === 'expand' ? 'Expand rows in the footer section.' : 'Collapse to one line.',
+          description: value === 'show' ? 'Show the Fleet panel.' : value === 'hide' ? 'Hide the Fleet panel.' : value === 'inspect' ? 'Print the expanded Fleet report.' : value === 'expand' ? 'Expand rows in the footer section.' : value === 'collapse' ? 'Collapse to one line.' : value === 'status' ? 'Show one activation.' : value === 'result' ? 'Read one activation\'s result.' : 'Read one activation\'s event feed.',
         }));
       return items.length > 0 ? items : null;
   };
   pi.registerCommand('specialists', {
-    description: 'Show the Specialist Fleet and any pending asks. Usage: /specialists [show|hide|inspect|expand|collapse]',
+    description: 'Show the Specialist Fleet and any pending asks. Usage: /specialists [show|hide|inspect|expand|collapse|status|result|feed <activation>]',
     getArgumentCompletions: specialistsCompletions,
     handler: specialistsHandler,
   });
   pi.registerCommand('fleet', {
-    description: 'Compat alias for /specialists. Usage: /specialists [show|hide|inspect|expand|collapse]',
+    description: 'Compat alias for /specialists. Usage: /specialists [show|hide|inspect|expand|collapse|status|result|feed <activation>]',
     getArgumentCompletions: specialistsCompletions,
     handler: specialistsHandler,
   });
@@ -2488,6 +2713,29 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
     description: 'Compat alias for /specialists:resume. Usage: /specialists:resume <activation_id> <prompt>',
     getArgumentCompletions: activationCompletions,
     handler: resumeHandler,
+  });
+  // Per-activation result/feed (SPECIALISTS-4264): the command twins of the
+  // model tools above, reading an earlier-session id through observability.db
+  // exactly as the Claude /specialists result|feed verbs do.
+  pi.registerCommand('specialists:result', {
+    description: "Read one activation's complete result. Usage: /specialists:result <activation_id>",
+    getArgumentCompletions: activationCommandCompletions,
+    handler: (args, ctx) => resultFeedHandler('result', args, ctx),
+  });
+  pi.registerCommand('fleet:result', {
+    description: "Compat alias for /specialists:result. Usage: /specialists:result <activation_id>",
+    getArgumentCompletions: (prefix) => pi.commands.find((c) => c.name === 'specialists:result')?.getArgumentCompletions?.(prefix) ?? null,
+    handler: (args, ctx) => pi.commands.find((c) => c.name === 'specialists:result').handler(args, ctx),
+  });
+  pi.registerCommand('specialists:feed', {
+    description: "Read one activation's event feed. Usage: /specialists:feed <activation_id> [lines]",
+    getArgumentCompletions: activationCommandCompletions,
+    handler: (args, ctx) => resultFeedHandler('feed', args, ctx),
+  });
+  pi.registerCommand('fleet:feed', {
+    description: "Compat alias for /specialists:feed. Usage: /specialists:feed <activation_id> [lines]",
+    getArgumentCompletions: (prefix) => pi.commands.find((c) => c.name === 'specialists:feed')?.getArgumentCompletions?.(prefix) ?? null,
+    handler: (args, ctx) => pi.commands.find((c) => c.name === 'specialists:feed').handler(args, ctx),
   });
 
   // A child must never outlive the coordinator process. Best-effort: stop and
