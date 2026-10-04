@@ -657,7 +657,7 @@ When `--allow-skills` is active, each skill path is resolved and hashed after al
 
 Without enabled extension sources, script and service execution resolves the requested permission-tier catalog and passes an explicit tool allowlist. With enabled extension sources, it uses `--no-builtin-tools` and the bundled extension policy to activate only granted native and extension tools. Missing, malformed, unreadable, or empty runtime catalog contracts abort before Pi or model startup (fail-closed). Required pre-script failures return `pre_script_failed` without model fallback or retry, and both raw and rendered preflight output are bounded before inclusion. Trusted direct `sp script` callers can separately opt into local scripts or write-capable tiers; `sp serve` remains READ_ONLY and rejects local scripts. Service-knowledge skill sources use a pinned exact npm spec (e.g. `npm:@jaggerxtrm/pi-service-knowledge@1.10.0`); floating or range specs are rejected.
 
-> **No host-read isolation:** These controls do not create a filesystem read boundary. Specialists 4.0.4 permits only trusted single-tenant use under its bounded waiver; untrusted, public, cross-tenant, and multi-tenant deployment is excluded. The waiver does not authorize publication and expires at 4.0.5 or on 2026-11-01, whichever comes first.
+> **No host-read isolation:** These controls do not create a filesystem read boundary. Specialists 4.0.5 permits only trusted single-tenant use under its bounded waiver; untrusted, public, cross-tenant, and multi-tenant deployment is excluded. The waiver does not authorize publication and expires at 4.0.6 or on 2026-11-01, whichever comes first.
 
 ### Output validation
 
