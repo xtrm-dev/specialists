@@ -1,7 +1,9 @@
 # Specialist role and gate recipes
 
-Use `specialists list --full` to discover the live role set. Pick by work shape rather
-than habit.
+Use `specialist_list` to discover the live role set and which roles are dispatchable
+(`name` returns one full record). Pick by work shape rather than habit. Each stage is a
+`specialist_dispatch` against the stage's ready Issue; read its outcome with
+`specialist_result` before dispatching the next one.
 
 Typical sequence:
 

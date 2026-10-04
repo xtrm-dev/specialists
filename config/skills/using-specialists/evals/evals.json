@@ -26,7 +26,7 @@
       "id": 2,
       "eval_name": "role-selection-debugging",
       "prompt": "A specialist chain started failing with a stack trace and inconsistent result state. Who should inspect it, and what command surface should I use to check available flags?",
-      "expected_output": "Agent selects debugger for root-cause analysis, may use test-runner for check execution, and points to sp help/subcommand help before relying on flags.",
+      "expected_output": "Agent selects debugger for root-cause analysis, may use test-runner for check execution, and reads specialist_list before relying on remembered roles.",
       "assertions": [
         {
           "name": "selects_debugging_role",

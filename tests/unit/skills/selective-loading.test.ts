@@ -35,9 +35,12 @@ describe('selective loading: one routed owner per Specialists execution phase', 
 });
 
 describe('selective loading: the router alone carries stable cross-phase invariants', () => {
+  // Native-first (SPECIALISTS-4255): live truth is the native registry and status tools;
+  // the sp CLI is named only as the operator surface.
   const ALWAYS_NEEDED = [
-    'specialists list --full',
-    'sp help',
+    'specialist_list',
+    'specialist_status',
+    'The `sp` CLI — operator surface',
     'A specialist result is a claim, not live truth.',
     'Do not busy-poll.',
   ];

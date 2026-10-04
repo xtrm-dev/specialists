@@ -10,7 +10,9 @@ receive:
 - no existing worker unexpectedly owns the same mutable surface;
 - required tools/package/runtime are healthy enough to start.
 
-Use current `git`, `sp ps`, `git worktree`, XTRM topology, and runtime help as needed.
+Use `specialist_status` for live activations (`full: true` adds uncertain writer leases), plus `git`, `git worktree`,
+and XTRM topology as needed. A writer lease left uncertain by a crash refuses the dispatch;
+resolve it with `specialist_lease_reconcile` (operator CLI: `specialists lease list|reconcile`).
 Do not dispatch from a stale base because the previous job “said it finished.”
 
 If the next lane depends only on a durable result/report rather than source changes,

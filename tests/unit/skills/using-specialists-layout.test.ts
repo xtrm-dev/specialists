@@ -48,7 +48,7 @@ describe('v4 consolidated runtime doctrine', () => {
     const lineCount = body.split('\n').length;
     expect(lineCount).toBeLessThan(220);
     expect(body).toContain('Advanced surfaces are references, not separate skills');
-    expect(body).toContain('The installed CLI and\nregistry are authoritative');
+    expect(body).toContain('The installed runtime and\nregistry are authoritative');
   });
 
   it('retains every Specialists reference and routes every Specialists-owned advanced surface', () => {

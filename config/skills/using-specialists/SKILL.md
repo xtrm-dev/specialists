@@ -6,34 +6,82 @@ description: >
   work. Use when work already has a durable Substrate Issue contract and benefits from a distinct
   specialist role, native activation lifecycle, review/fix loop, retained evidence, or an
   advanced Specialists surface such as node/script execution, KPI analysis, or specialist
-  definition authoring. Read live `specialists list --full` and `sp help` before relying
-  on remembered roles or flags.
-version: 4.4
+  definition authoring. Dispatch and supervise through the native tools of your runtime
+  (Pi extension or Claude Code plugin); read live `specialist_list` before relying on
+  remembered roles.
+version: 5.0
 ---
 
 # Using Specialists
 
 Specialists is one execution backend inside XTRM. XTRM owns the work contract,
 continuity, and system-level coordination. Specialists owns specialist selection,
-job execution, retained results, role boundaries, and specialist-specific review loops.
+activation, retained results, role boundaries, and specialist-specific review loops.
 
 Do not use this skill as a substitute for `/using-xtrm`, `/planning`, or
 `/multiplexing`.
 
-## Start from live truth
+## Use the native surface of your runtime
 
-Before a substantial dispatch:
+An agent dispatches and supervises Specialists through native tools that run in-process.
+It does not shell out to the `sp` CLI for that.
 
-```bash
-specialists list --full
-sp help
+| Runtime | Surface | Operator guidance |
+|---|---|---|
+| Pi | the `native-specialists` extension | the tool descriptions |
+| Claude Code | the `specialists` plugin MCP server; channel push wakes you | `/specialists:supervising-activations` |
+
+Two execution paths remain during XTRM-93. Native activation (below) is the primary flow for Substrate-backed work; legacy `sp run`/Supervisor behavior is a compatibility path for operators. Agent work authority comes from the typed Substrate service.
+
+## Native activation — the primary flow
+
+Native activation hosts a Specialist on an in-process Pi `AgentSession`, consuming
+Substrate Issues through the WorkItemStore boundary — never a Beads client, a `bd`
+subprocess, or a second readiness derivation. Authority (what work exists, who owns it,
+readiness) belongs to Substrate: read its `using-substrate` skill.
+
+Ten tools, names exact: `specialist_list` / `specialist_dispatch` / `specialist_status` /
+`specialist_result` / `specialist_reply` / `specialist_resume` / `specialist_retry` /
+`specialist_steer` / `specialist_stop_activation` / `specialist_lease_reconcile`.
+`specialist_lease_reconcile` is Claude Code (and CLI) only; the Pi extension has the
+other nine. Live schemas: `src/tools/specialist/activation.tool.ts`.
+
+Live truth comes from the tools, not from memory: `specialist_list` is the resolved
+registry with a dispatchability verdict per role; `specialist_status` is the live
+activation projection. The installed runtime and
+registry are authoritative. Static examples in this skill are shapes, not a promise that
+an old field still exists.
+
+```text
+Issue ready (attested)
+  -> specialist_list: choose a dispatchable role
+  -> specialist_dispatch(issue_ref=...)   (bead_id is a permanent alias; or an inline contract)
+  -> wait for the wake: channel push (Claude Code) or a follow-up message (Pi);
+     specialist_status is the authoritative read
+  -> asks: specialist_reply; running: specialist_steer; settled/waiting: specialist_resume;
+     failed (e.g. provider quota): specialist_retry, optionally with model_override
+  -> specialist_result: the full output of the settled activation
+  -> verify findings against the current tree/state
+  -> run the required review/test/security follow-up
+  -> specialist_stop_activation when done; record the Journal result; Closure elsewhere
+     (settled != published != closed)
 ```
 
-Use subcommand help before exact invocation when a flag matters. The installed CLI and
-registry are authoritative. Static examples in this skill are shapes, not a promise that
-an old flag still exists.
-
-Two execution paths remain during XTRM-93. Native activation (below) is the primary flow for Substrate-backed work; legacy `sp run`/Supervisor behavior is a compatibility path. Operator CLI projections may coexist, but agent work authority comes from the typed Substrate service.
+- **The Substrate Issue is the prompt; there is no task-text field.** Exactly one of
+  `issue_ref` (primary; `bead_id` is a permanent alias) or `contract` (inline 7-section
+  contract + SCRUTINY, validated/created/attested/claimed before dispatch).
+- **Readiness is the dispatch gate.** The read-only check refuses draft, unready,
+  blocked, terminal, and scope-expanding Issues; `bind` pins the immutable
+  ExecutionBinding (issue/revision/hash/claim/participant/activation/session/workspace).
+- **Writers share the coordinator's worktree under a lease.** MEDIUM/HIGH tiers take
+  the workspace writer lease at admission (re-checked per mutating call); contention
+  refuses. The lease releases at settle/completion/disposal; `specialist_resume` and
+  `specialist_retry` re-acquire it. A settled activation is resumable, not lease-holding.
+  A lease left uncertain by a crash is resolved with `specialist_lease_reconcile`; the
+  outcome and basis are stated, never inferred.
+- **Control is state-specific.** Asks via `ask_coordinator`/`escalate_to_coordinator`
+  are answered by `specialist_reply` on `message_id`; `specialist_stop_activation` is
+  the irreversible ordinary disposal path.
 
 ## Contract precondition
 
@@ -44,100 +92,52 @@ contract (attested, ready) before dispatch.
 - If it is a draft, incomplete, stale, or contradicted by current code, repair it through
   the XTRM planning/contract workflow before dispatch.
 - Do not use an ad-hoc prompt to smuggle missing requirements around the Issue.
-- The same contract-quality rule applies to every XTRM worker, not only Specialists.
 
 The detailed contract-writing doctrine belongs to `/planning`; Specialists consumes it.
 
 ## Choose a specialist when the role adds value
 
 Use a specialist when the task benefits from a bounded role, independent context,
-explicit permissions, retained evidence, or a review/test/security gate. Resolve the
-actual list from the live registry. Do small, obvious work locally; multi-agent by
-design does not mean every edit needs a child agent.
-
-## Dispatch lifecycle (both runtimes)
-
-```text
-Issue ready (attested)
-  -> select live specialist
-  -> dispatch: `specialist_dispatch(issue_ref=...)` native,
-     or `sp run <name> --bead <id>` operator surface
-     (`bead_id`/`--bead` are permanent aliases for the Issue ref)
-  -> observe activation/job state (specialist_status / sp ps|feed)
-  -> answer asks (specialist_reply) / steer or resume same session
-  -> consume settlement / persisted result
-  -> verify findings against current tree/state
-  -> run required review/test/security follow-up
-  -> record Journal result; explicit Closure elsewhere
-     (settled != published != closed)
-```
-
-For exact commands and specialized surfaces, load only the relevant reference:
-`references/chain-recipes.md` (role/gate recipes), `references/monitoring.md`
-(wait/feed/result, keep-alive, failures), `references/merge-and-integration.md`
-(integration/publication), `references/registry-and-locations.md` (registry),
-`references/dispatch-preconditions.md` (git/worktree prerequisites),
-`references/kpi.md` (cost/stall analysis), `references/nodes.md` (NodeSupervisor),
-`references/script-class.md` (`sp script`/`sp serve`), `references/specialist-definitions.md`
-(definition authoring; helpers under `scripts/specialist-definitions/`).
+explicit permissions, retained evidence, or a review/test/security gate. Do small,
+obvious work locally; multi-agent by design does not mean every edit needs a child agent.
 
 ## Evidence rules
 
-A specialist result is a claim, not live truth. Prefer persisted result evidence and
+A specialist result is a claim, not live truth. Read it with `specialist_result` and
 verify load-bearing claims against tree/tests/runtime before acting. Terminal state is
 not correctness; a valid failing gate needs a fix loop, not reinterpretation.
 
-## Production changes
+## Production changes and dependent waves
 
 Preserve the required review and validation gates: implementation evidence, tests,
 independent/security review as warranted, no unresolved findings hidden by the summary.
-
-## Dependent waves
-
-Before dependent dispatch, re-derive the base: clean tree, prior results present,
-correct branch/worktree, no stale ownership. Stale-base dispatch is a coordination
-defect — fix the state before adding another worker.
+Before dependent dispatch, re-derive the base: clean tree, prior results present, correct
+branch, no stale lease or ownership. Stale-base dispatch is a coordination defect.
 
 ## Monitoring and continuation
 
-Do not busy-poll. Use the wait/feed/result mechanisms and continuation facilities; near
-context ceiling, persist state and hand off. Inter-agent messaging → `/multiplexing`.
+Do not busy-poll. The wake (channel push on Claude Code, a follow-up message on Pi) names the activation;
+read it with `specialist_status`/`specialist_result`. Near the context ceiling, persist
+activation ids and pending asks, then hand off. Inter-agent messaging → `/multiplexing`.
 
-## Native activation — primary flow (not the `sp` surface above)
+## The `sp` CLI — operator surface
 
-Native activation hosts a Specialist on an in-process Pi `AgentSession`, consuming
-Substrate Issues through the WorkItemStore boundary — never a Beads client, a `bd`
-subprocess, or a second readiness derivation. Authority (what work exists, who owns it,
-readiness) belongs to Substrate: read its `using-substrate` skill. Nine tools, names
-exact: `specialist_dispatch` / `specialist_status` / `specialist_result` / `specialist_reply` /
-`specialist_resume` / `specialist_retry` / `specialist_steer` /
-`specialist_stop_activation` / `specialist_list`.
-Full operator procedure: `plugins/specialists/skills/supervising-activations/SKILL.md`.
-
-- **The Substrate Issue is the prompt; there is no task-text field.** Exactly one of
-  `issue_ref` (primary; `bead_id` is a permanent alias) or `contract` (inline 7-section
-  contract + SCRUTINY, validated/created/attested/claimed before dispatch).
-- **Readiness is the dispatch gate.** The read-only check refuses draft, unready,
-  blocked, terminal, and scope-expanding Issues; `bind` pins the immutable
-  ExecutionBinding (issue/revision/hash/claim/participant/activation/session/workspace).
-- **Writers share the coordinator's worktree under a lease.** MEDIUM/HIGH tiers take
-  the workspace writer lease at admission (re-checked per mutating call); contention
-  refuses. The lease releases at settle/completion/disposal; `specialist_resume`
-  re-acquires it. A settled activation is resumable, not lease-holding.
-- **Control is state-specific.** Asks via `ask_coordinator`/`escalate_to_coordinator`
-  are answered by `specialist_reply` on `message_id`; running work may be redirected
-  with `specialist_steer`; settled/waiting work continues with `specialist_resume`;
-  failed work may re-enter with `specialist_retry`; `specialist_stop_activation` is
-  the irreversible ordinary disposal path.
-
-Settlement is evidence: record a Journal result, verify, then close explicitly —
-Closure lives elsewhere. Do not cite `docs/native-activation.md` (stale; rewrite
-tracked separately). Live schemas: `src/tools/specialist/activation.tool.ts`.
+The CLI is for humans, scripts, debugging, and the legacy `sp run`/Supervisor
+compatibility path. An agent that has the native tools does not use it to dispatch or
+monitor. Legitimate operator commands include `specialists doctor`, `specialists lease
+list|reconcile`, `sp config show <name> --resolved`, and the advanced surfaces below; read
+`sp help` for exact syntax.
 
 ## Advanced surfaces are references, not separate skills
 
-KPI analysis, NodeSupervisor, script-class execution, and definition authoring stay
-discoverable through this root without extra active triggers, keeping the catalog small.
+Load only the one you need: `references/chain-recipes.md` (role/gate recipes),
+`references/monitoring.md` (wakes, results, failures), `references/merge-and-integration.md`
+(integration/publication), `references/registry-and-locations.md` (registry),
+`references/dispatch-preconditions.md` (git/workspace prerequisites). Operator surfaces:
+`references/kpi.md` (cost/stall analysis), `references/nodes.md` (NodeSupervisor),
+`references/script-class.md` (`sp script`/`sp serve`), `references/specialist-definitions.md`
+(definition authoring; helpers under `scripts/specialist-definitions/`). They stay
+discoverable through this root without extra triggers, keeping the catalog small.
 
 ## What this skill deliberately does not own
 
