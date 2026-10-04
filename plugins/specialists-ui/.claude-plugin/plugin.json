@@ -1,7 +1,7 @@
 {
   "name": "specialists-ui",
   "description": "Teammate-style transcript rows for Specialists in Claude Code: channel wakes, the fallback wake, and Specialists MCP tool calls under native labels. Companion to the specialists plugin, which raises those rows and therefore cannot draw them itself.",
-  "version": "4.0.8",
+  "version": "4.0.9",
   "author": {
     "name": "XTRM",
     "url": "https://github.com/xtrm-dev/specialists"
