@@ -169,7 +169,9 @@ always applies, so a refused contract must be fixed rather than routed around.
   path is in-process; spawning `sp` defeats the native host.
 - Dispatch returns admission, not a result. The Channel push is the primary wake: an
   actionable transition (settled result, pending ask, escalation) arrives as a channel
-  frame naming the activation — a reference, never the payload. `specialist_result` is
+  frame naming the activation, with a bounded brief: run cost and the first result lines,
+  the failing model and error, or the ask body. The brief helps you decide what to do next;
+  it is never the full result. `specialist_result` is
   the authoritative read for a settled or failed result the push names; `specialist_status`
   covers asks and escalations. A missed push degrades to reading the same object late,
   never a different object. Do not block waiting for a result.

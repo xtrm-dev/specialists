@@ -63,7 +63,7 @@ import { PeerAdapter } from '../activation/transport/peer-adapter.js';
 import { createActivationForensicSink } from '../activation/forensic-sink.js';
 import { logger } from '../utils/logger.js';
 import { createMcpRequestContext, emitMcpForensicEvent } from './request-meta.js';
-import { CHANNEL_CAPABILITY, withChannelPush, type ChannelFrame, type ChannelSend } from './channel.js';
+import { CHANNEL_CAPABILITY, snapshotDetail, withChannelPush, type ChannelDetail, type ChannelFrame, type ChannelSend } from './channel.js';
 
 type AnyTool = {
   name: string;
@@ -109,7 +109,7 @@ export function buildV2Server(ctx?: McpRequestContext, options?: BuildV2ServerOp
 
   // Native activations write the SAME observability.db as the legacy runner —
   // no separate native telemetry store (Phase 7 parity, unchanged from v1).
-  const host = new NativeActivationHost({
+  const host: NativeActivationHost = new NativeActivationHost({
     loader,
     // One Substrate authority shared with sb/Pi; path from XTRM_STATE_DB or ~/.xtrm/state.db.
     authority: createFileAuthorityWriter(),
@@ -119,6 +119,9 @@ export function buildV2Server(ctx?: McpRequestContext, options?: BuildV2ServerOp
     forensics: withChannelPush(
       createActivationForensicSink(observability),
       (frame) => channelSend(frame),
+      // Called only when an event is pushed, after `host` exists: the brief reads the same
+      // snapshot `specialist_status` projects.
+      (activationId): ChannelDetail => snapshotDetail(host.inspect(activationId)),
     ),
   });
   const getHost = () => host;
