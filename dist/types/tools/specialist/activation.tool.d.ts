@@ -194,14 +194,8 @@ export declare const specialistDispatchSchema: z.ZodObject<{
     epic_context_depth?: number | undefined;
     coordinator_session_id?: string | undefined;
 }>;
-/**
- * Dispatch a Specialist onto the in-process runtime.
- *
- * Returns as soon as the activation is admitted and started, NOT when it finishes. The
- * session deliberately outlives the call: a Specialist that reaches `settled` is waiting
- * and resumable, and a tool that blocked until completion would make every clarification
- * a deadlock — the coordinator cannot answer a question it is blocked waiting on.
- */
+/** Test seam: the next dispatch states the wake behaviour again. */
+export declare function resetWakeNotice(): void;
 export declare function createSpecialistDispatchTool(getHost: () => NativeActivationHost, getPusher?: () => RuntimeEventPusher | undefined): {
     name: "specialist_dispatch";
     description: string;
@@ -268,6 +262,7 @@ export declare function createSpecialistDispatchTool(getHost: () => NativeActiva
         created_issue_note?: string | undefined;
         created_bead_id?: string | undefined;
         created_bead_note?: string | undefined;
+        wake_notice?: undefined;
         activation_id: string;
         participant_id: string;
         attempt_id: string;
@@ -324,6 +319,64 @@ export declare function createSpecialistDispatchTool(getHost: () => NativeActiva
         created_issue_note?: string | undefined;
         created_bead_id?: string | undefined;
         created_bead_note?: string | undefined;
+        wake_notice: string;
+        activation_id: string;
+        participant_id: string;
+        attempt_id: string;
+        specialist: string;
+        bead_id: string;
+        issue_id: string;
+        issue_ref: string;
+        issue_revision: number;
+        contract_hash: string;
+        execution_binding_id: string;
+        state: string;
+        access: "read" | "write";
+        worktree_path: string;
+        branch?: string;
+        pi_session_id?: string;
+        /** What was asked for — the override when one was given, the configured model otherwise. */
+        requested_model?: string;
+        resolved_model: string;
+        model_override: boolean;
+        thinking_override: boolean;
+        /** Seconds since dispatch, from the in-memory snapshot — never an observability.db query. */
+        elapsed_s: number;
+        /** Cumulative spend counts. Omitted until the first usage event (never zero-filled). */
+        token_usage?: ActivationTokenUsage;
+        /**
+         * Completed child model turns, cumulative for the activation across attempts. Present from
+         * dispatch on (the runtime initializes it to 0 accurately) — omitted only by a projection
+         * of a hand-built snapshot that never carried one.
+         */
+        turn_count?: number;
+        /** Thinking level from session creation. Omitted when unset (never fabricated). */
+        thinking_level?: string;
+        /** One-line purpose excerpt captured at dispatch. Omitted when absent (never fabricated). */
+        purpose?: string;
+        /** Last session-event time. Per-tool "doing X now" inference is out of scope. */
+        last_activity_at: number;
+        /**
+         * Tool-surface notes from dispatch (SPECIALISTS-42): contract warnings and downgrade reasons.
+         * Omitted when there were none, so a coordinator can read an empty absence as "nothing was
+         * reduced" rather than as missing data. Not every note is a fault: a specialist that disables an
+         * extension by design reports a deliberate exclusion here too.
+         */
+        tool_contract_notes?: string[];
+        /** Spec settings this runtime ignores (SPECIALISTS-52), e.g. legacy-CLI-only beads_* fields. */
+        config_notes?: string[];
+        status: "dispatched";
+    } | {
+        step_contract: {
+            root_work_ref: string;
+            inputs: number;
+            outputs: number;
+        };
+        created_issue_ref?: string | undefined;
+        created_issue_note?: string | undefined;
+        created_bead_id?: string | undefined;
+        created_bead_note?: string | undefined;
+        wake_notice?: undefined;
         activation_id: string;
         specialist: string;
         bead_id: string;
@@ -347,6 +400,44 @@ export declare function createSpecialistDispatchTool(getHost: () => NativeActiva
         created_issue_note?: string | undefined;
         created_bead_id?: string | undefined;
         created_bead_note?: string | undefined;
+        wake_notice: string;
+        activation_id: string;
+        specialist: string;
+        bead_id: string;
+        state: string;
+        access: "read" | "write";
+        resolved_model: string;
+        thinking_level?: string;
+        elapsed_s: number;
+        turn_count?: number;
+        token_usage?: ActivationTokenUsage;
+        purpose?: string;
+        result_status?: string;
+        status: "dispatched";
+    } | {
+        step_contract: {
+            root_work_ref: string;
+            inputs: number;
+            outputs: number;
+        };
+        created_issue_ref?: string | undefined;
+        created_issue_note?: string | undefined;
+        created_bead_id?: string | undefined;
+        created_bead_note?: string | undefined;
+        wake_notice?: undefined;
+        activation_id: string;
+        status: "dispatched";
+    } | {
+        step_contract: {
+            root_work_ref: string;
+            inputs: number;
+            outputs: number;
+        };
+        created_issue_ref?: string | undefined;
+        created_issue_note?: string | undefined;
+        created_bead_id?: string | undefined;
+        created_bead_note?: string | undefined;
+        wake_notice: string;
         activation_id: string;
         status: "dispatched";
     }>;

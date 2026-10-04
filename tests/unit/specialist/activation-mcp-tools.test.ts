@@ -28,6 +28,7 @@ import {
   createSpecialistRetryTool,
   createSpecialistSteerTool,
   createSpecialistStopActivationTool,
+  resetWakeNotice,
   toActivationCompactView,
   toActivationView,
 } from '../../../src/tools/specialist/activation.tool.js';
@@ -238,6 +239,18 @@ describe('specialist_dispatch — the MCP dispatch path is the same admission pa
     // clarification: the coordinator cannot answer a question it is blocked waiting on.
     expect(out).not.toHaveProperty('result');
     expect(out).not.toHaveProperty('output');
+  });
+
+  it('states the wake behaviour at the first dispatch only', async () => {
+    resetWakeNotice();
+    const { host } = hostWith();
+    const tool = createSpecialistDispatchTool(() => host);
+
+    const first = await tool.execute({ specialist: 'researcher', bead_id: 'ISSUE-1' }) as Record<string, unknown>;
+    const second = await tool.execute({ specialist: 'researcher', bead_id: 'ISSUE-1' }) as Record<string, unknown>;
+
+    expect(first.wake_notice).toMatch(/You will be woken|Wakes are off/);
+    expect(second).not.toHaveProperty('wake_notice');
   });
 
   it('carries an override through to the view as REQUESTED, distinct from what resolved', async () => {

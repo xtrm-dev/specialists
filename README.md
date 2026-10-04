@@ -193,12 +193,36 @@ claude plugin install specialists-ui@xtrm   # optional: teammate-style transcrip
 ```
 
 `specialists-ui` draws the rows the `specialists` plugin raises in Claude Code's own style.
-A channel wake becomes a teammate row, `● Specialist @explorer:d65bbed4 completed`, with a
-dim `use specialist_result for full result` line. A Specialists MCP call becomes a native
+A channel wake becomes a teammate row, `● Specialist @explorer:d65bbed4 completed`, with the
+wake's brief under it: run cost and purpose, the first result lines, the failing model and
+error, or the question. ctrl+o on a finished or failed wake shows the full result. A Specialists MCP call becomes a native
 tool row, `● Dispatch(executor · XTRM-4)`, with its result on an indented line under it. It
 is a separate plugin because Claude Code never runs a plugin's own drawing hooks on a row
 that plugin raised, and the wake comes from the `specialists` MCP server. Without it,
 everything works and the rows show as raw text.
+
+#### The `/specialists` command and the fleet band
+
+The `specialists` plugin draws the live fleet above the prompt and opens a fleet pane with
+`/specialists`. Select a row to read its result or its event feed, or to reply, steer, resume
+or stop it. A toast reports each activation that finishes, fails or asks a question.
+
+| Command | Effect |
+|---|---|
+| `/specialists` | open or close the fleet pane |
+| `/specialists status [activation]` | the fleet report, or one activation in detail |
+| `/specialists result <activation>` | the full result of a settled activation |
+| `/specialists feed <activation> [lines]` | the activation's event feed, like `sp feed` |
+| `/specialists reply <message_id> <answer>` | answer a waiting activation |
+| `/specialists steer\|resume\|stop <activation> …` | act on an activation |
+| `/specialists show\|hide\|expand\|collapse` | band visibility |
+
+`<activation>` is a full id or a short prefix. `result` and `feed` also reach activations
+from earlier sessions. The coordinator has the same feed as the `specialist_feed` tool.
+
+To turn every wake off (the channel push, the wake-watch fallback and the toasts), start
+Claude Code with `SPECIALISTS_WAKE=off`. Everything stays readable through `specialist_status`.
+This is the Claude Code equivalent of the Pi extension's `--no-specialist-wake`.
 
 #### Updates
 

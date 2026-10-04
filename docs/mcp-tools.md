@@ -61,6 +61,7 @@ that parsed the verbose form working with one flag.
 |---|---|
 | `specialist_status` | authoritative read: compact Fleet (activations, pending asks) by default; `full:true` adds results, health, interactions, workspaces |
 | `specialist_result` | full output of one settled activation by id or short prefix, from memory or `observability.db` |
+| `specialist_feed` | one activation's event feed, like `sp feed`: tool calls, text, turns, status and completion (`view:"terminal"`, default) or every lifecycle event (`view:"forensic"`); `since_seq` follows a running activation |
 | `specialist_dispatch` | admit-and-start a Specialist on the native runtime (async; returns on admission; compact view, `full:true` for verbose) |
 | `specialist_reply` | answer an outstanding ask by `message_id` |
 | `specialist_resume` | resume a settled or waiting activation in the same session (id kept, attempt advances; compact view, `full:true` for verbose) |
@@ -73,7 +74,7 @@ that parsed the verbose form working with one flag.
 | `substrate_journal` | Substrate journal service (conditional) |
 | `substrate_provenance` | Substrate provenance service (conditional) |
 
-Inventory derived from the `tools` array in `src/mcp/v2-server.ts`: ten core
+Inventory derived from the `tools` array in `src/mcp/v2-server.ts`: eleven core
 factories plus three Substrate factories behind the availability gate.
 
 ## `specialist_status`
@@ -366,7 +367,8 @@ Primary, authority, fallback — in that order:
    reads the identical result here; the notification is a projection, never
    the authority.
 3. **Blocking wait (degraded fallback).** The path taken when no coordinator is
-   listening — suppressed wake (`--no-specialist-wake` on Pi), unroutable push,
+   listening — suppressed wake (`--no-specialist-wake` on Pi, `SPECIALISTS_WAKE=off` on
+   Claude Code), unroutable push,
    or a client with no notification path. Watch with
    `specialist_status {wait_for_change: true, timeout_s: …}`, re-issued as it
    times out: one parked request per budget, and a real transition still

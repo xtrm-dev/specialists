@@ -3,6 +3,8 @@ import type { EngineInterface } from 'claude-code'
 
 import {
   BRIEF_ROW_LINES,
+  EXPANDED_RESULT_CHARS,
+  expandedLinesOf,
   FALLBACK_WAKE_TEXT,
   ackClassFor,
   channelWakeOf,
@@ -137,8 +139,14 @@ describe('transcript rows', () => {
   })
 
   for (const surface of SURFACES) {
-    test(`channel wake draws a teammate line and passes ctrl+o through (${surface})`, async ($, on) => {
+    test(`channel wake draws a teammate line and expands a finished one to its result (${surface})`, async ($, on) => {
       on('ui.render', { component: 'UserMessage' }, () => ({ type: 'Box', props: {}, children: ['engine user row'] }) as never)
+      const reads: unknown[] = []
+      on('mcp.call', ($, e) => {
+        reads.push(e)
+        return { value: { content: mcpText({ activation_id: 'act:f6ab7b21-4a3', status: 'completed', output: 'full line one\nfull line two' }), isError: false } }
+      })
+      on('ui.invalidate', () => ({ value: undefined }))
 
       const tree = await (
         await $.ui.mount({
@@ -170,15 +178,30 @@ describe('transcript rows', () => {
       expect(brief).toContain('Found two paths.')
       expect(brief).not.toContain('> Found')
 
-      const expanded = await (
+      // ctrl+o on a finished wake reads the full result once, then draws it.
+      const expanded = await $.ui.mount({
+        plugin: 'specialists-ui',
+        surface,
+        component: 'UserMessage',
+        props: { text: BRIEF_TEXT, origin: { kind: 'channel', server: MCP_SERVER }, isExpanded: true },
+      })
+      await new Promise(r => setTimeout(r, 0))
+      await expanded.redraw()
+      const full = textOf(await expanded.drawn())
+      expect(reads).toEqual([{ server: MCP_SERVER, tool: 'specialist_result', args: { activation_id: 'act:f6ab7b21-4a3' } }])
+      expect(full).toContain('full line two')
+      expect(full).toContain('42s • 3 turns')
+
+      // An ask keeps the original on ctrl+o: its frame already holds the whole question.
+      const ask = await (
         await $.ui.mount({
           plugin: 'specialists-ui',
           surface,
           component: 'UserMessage',
-          props: { text: CHANNEL_TEXT, origin: { kind: 'channel', server: MCP_SERVER }, isExpanded: true },
+          props: { text: 'Specialist explorer: needs_reply (act:f6ab7b21-4a3). x\n> which?', origin: { kind: 'channel', server: MCP_SERVER }, isExpanded: true },
         })
       ).drawn()
-      expect(textOf(expanded)).toBe('engine user row')
+      expect(textOf(ask)).toBe('engine user row')
     })
 
     test(`other user rows pass through (${surface})`, async ($, on) => {
@@ -423,5 +446,15 @@ describe('wake dedupe markers', () => {
 
     expect((viaSlack as { text?: string }).text).toBe(text)
     expect((viaComposer as { text?: string }).text).toBe('hello')
+  })
+})
+
+describe('expanded wake', () => {
+  test('caps the result and reports what is missing', () => {
+    expect(expandedLinesOf({ output: 'a\nb\n' })).toEqual(['a', 'b'])
+    expect(expandedLinesOf({ output: 'x'.repeat(EXPANDED_RESULT_CHARS + 10) }).at(-1)).toBe('… 10 more characters in specialist_result')
+    expect(expandedLinesOf({ status: 'error', error: 'Unknown activation: x' })).toEqual(['result unavailable · Unknown activation: x'])
+    expect(expandedLinesOf({ state: 'failed', next: 'specialist_retry' })).toEqual(['no settled result · use specialist_retry'])
+    expect(expandedLinesOf(null, 'closed')).toEqual(['result unavailable · closed'])
   })
 })

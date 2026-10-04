@@ -40,11 +40,11 @@ Substrate Issues through the WorkItemStore boundary — never a Beads client, a 
 subprocess, or a second readiness derivation. Authority (what work exists, who owns it,
 readiness) belongs to Substrate: read its `using-substrate` skill.
 
-Ten tools, names exact: `specialist_list` / `specialist_dispatch` / `specialist_status` /
-`specialist_result` / `specialist_reply` / `specialist_resume` / `specialist_retry` /
-`specialist_steer` / `specialist_stop_activation` / `specialist_lease_reconcile`.
-`specialist_lease_reconcile` is Claude Code (and CLI) only; the Pi extension has the
-other nine. Live schemas: `src/tools/specialist/activation.tool.ts`.
+Eleven tools, names exact: `specialist_list` / `specialist_dispatch` / `specialist_status` /
+`specialist_result` / `specialist_feed` / `specialist_reply` / `specialist_resume` /
+`specialist_retry` / `specialist_steer` / `specialist_stop_activation` /
+`specialist_lease_reconcile`. `specialist_feed` and `specialist_lease_reconcile` are Claude
+Code only (the CLI has `sp feed` and `specialists lease`); the Pi extension has the other nine. Live schemas: `src/tools/specialist/activation.tool.ts`.
 
 Live truth comes from the tools, not from memory: `specialist_list` is the resolved
 registry with a dispatchability verdict per role; `specialist_status` is the live

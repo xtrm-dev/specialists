@@ -93760,6 +93760,155 @@ var init_stdio = __esm(() => {
   init_shimsNode();
 });
 
+// src/mcp/channel.ts
+function wakeSuppressed(env = process.env) {
+  return (env.SPECIALISTS_WAKE ?? "").toLowerCase() === "off";
+}
+function wakeNotice(env = process.env) {
+  return wakeSuppressed(env) ? "Wakes are off (SPECIALISTS_WAKE=off): nothing starts a turn when this activation settles, asks or fails. " + "Poll specialist_status with wait_for_change: true." : "You will be woken when this activation settles, asks or fails: a channel push in an interactive session, " + "the wake-watch hook otherwise. Do not poll; if no wake arrives, specialist_status with wait_for_change: true blocks until a change.";
+}
+function formatElapsed4(elapsedS) {
+  const total = Math.max(0, Math.floor(elapsedS));
+  if (total < 60)
+    return `${total}s`;
+  if (total < 3600)
+    return `${Math.floor(total / 60)}m${String(total % 60).padStart(2, "0")}s`;
+  return `${Math.floor(total / 3600)}h${String(Math.floor(total % 3600 / 60)).padStart(2, "0")}m`;
+}
+function formatTokens(usage5) {
+  if (!usage5)
+    return "";
+  const total = ["input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens", "reasoning_tokens", "tool_tokens"].reduce((n, k) => n + (usage5[k] ?? 0), 0);
+  if (total <= 0)
+    return "";
+  if (total < 1000)
+    return `${total} tokens`;
+  if (total < 1e4)
+    return `${(total / 1000).toFixed(1)}k tokens`;
+  return `${Math.round(total / 1000)}k tokens`;
+}
+function snapshotDetail(snapshot, nowMs = Date.now()) {
+  if (!snapshot)
+    return {};
+  return {
+    ...snapshot.purpose ? { purpose: snapshot.purpose } : {},
+    elapsedS: Math.max(0, Math.floor((nowMs - snapshot.startedAt) / 1000)),
+    ...snapshot.turnCount !== undefined ? { turnCount: snapshot.turnCount } : {},
+    ...snapshot.tokenUsage ? { tokenUsage: snapshot.tokenUsage } : {},
+    ...snapshot.resolvedModel ? { model: snapshot.resolvedModel } : {},
+    ...snapshot.thinkingLevel ? { thinkingLevel: snapshot.thinkingLevel } : {}
+  };
+}
+function briefLines(eventClass, detail) {
+  const failed = eventClass === "failed";
+  const facts = failed ? [detail.model, detail.thinkingLevel].filter(Boolean).join(" \xB7 ") : eventClass === "completed" ? [
+    detail.elapsedS !== undefined ? formatElapsed4(detail.elapsedS) : "",
+    detail.turnCount !== undefined ? `${detail.turnCount} turn${detail.turnCount === 1 ? "" : "s"}` : "",
+    formatTokens(detail.tokenUsage)
+  ].filter(Boolean).join(" \u2022 ") : "";
+  const purpose = detail.purpose ? clip(detail.purpose.replace(/\s+/g, " ").trim(), BRIEF_LIMITS.purpose) : "";
+  const lines = [];
+  const context = [facts, purpose ? `purpose: ${purpose}` : ""].filter(Boolean).join(" \xB7 ");
+  if (context)
+    lines.push(context);
+  if (eventClass === "needs_reply" || eventClass === "escalation") {
+    if (detail.body?.trim())
+      lines.push(...quoted(clip(detail.body.trim(), BRIEF_LIMITS.body)));
+  } else if (failed) {
+    if (detail.error?.trim())
+      lines.push(...quoted(clip(detail.error.trim(), BRIEF_LIMITS.error)));
+  } else if (eventClass === "completed" && detail.output?.trim()) {
+    const all = detail.output.split(`
+`).filter((line) => line.trim() !== "");
+    lines.push(...all.slice(0, BRIEF_LIMITS.resultLines).map((line) => `> ${clip(line, BRIEF_LIMITS.resultLine)}`));
+    if (all.length > BRIEF_LIMITS.resultLines) {
+      lines.push(`\u2026 +${all.length - BRIEF_LIMITS.resultLines} more lines in specialist_result`);
+    }
+  }
+  return lines;
+}
+function buildChannelFrame(input2) {
+  const settled = input2.eventClass === "completed" || input2.eventClass === "failed";
+  const meta3 = {
+    activation_id: input2.activationId,
+    specialist: input2.specialist,
+    event: input2.eventClass,
+    read_with: settled ? "specialist_result" : "specialist_status"
+  };
+  if (input2.beadId)
+    meta3.bead_id = input2.beadId;
+  for (const key of Object.keys(meta3)) {
+    if (!META_KEY.test(key))
+      throw new Error(`channel meta key "${key}" fails ${META_KEY.source}`);
+  }
+  const work = input2.beadId ? ` on ${input2.beadId}` : "";
+  const action = ACTION[input2.eventClass] ?? "Call specialist_status for authoritative state.";
+  const head = `Specialist ${input2.specialist}${work}: ${input2.eventClass} (${input2.activationId}). ${action}`;
+  return {
+    method: CHANNEL_METHOD,
+    params: {
+      content: [head, ...briefLines(input2.eventClass, input2.detail ?? {})].join(`
+`),
+      meta: meta3
+    }
+  };
+}
+function withChannelPush(base, send, describe3 = () => ({})) {
+  return {
+    ...base,
+    emit(event) {
+      base.emit(event);
+      const eventClass = PUSHED_EVENTS[event.name];
+      if (!eventClass)
+        return;
+      if (event.payload?.intermediate === true)
+        return;
+      try {
+        const payload = event.payload ?? {};
+        const text = (key) => typeof payload[key] === "string" ? { [key]: payload[key] } : {};
+        const frame = buildChannelFrame({
+          activationId: event.activationId,
+          specialist: event.specialist,
+          ...event.beadId ? { beadId: event.beadId } : {},
+          eventClass,
+          detail: { ...describe3(event.activationId), ...text("body"), ...text("output"), ...text("error") }
+        });
+        Promise.resolve(send(frame)).catch((error3) => {
+          logger.debug(`channel push dropped (${eventClass}): ${String(error3)}`);
+        });
+      } catch (error3) {
+        logger.debug(`channel push not built (${eventClass}): ${String(error3)}`);
+      }
+    }
+  };
+}
+var CHANNEL_CAPABILITY, CHANNEL_METHOD = "notifications/claude/channel", META_KEY, PUSHED_EVENTS, ACTION, BRIEF_LIMITS, clip = (text, max) => text.length <= max ? text : `${text.slice(0, max - 1)}\u2026`, quoted = (text) => text.split(`
+`).filter((line) => line.trim() !== "").map((line) => `> ${line}`);
+var init_channel = __esm(() => {
+  init_logger();
+  CHANNEL_CAPABILITY = { "claude/channel": {} };
+  META_KEY = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+  PUSHED_EVENTS = {
+    activation_completed: "completed",
+    activation_failed: "failed",
+    escalation_raised: "escalation",
+    clarification_requested: "needs_reply"
+  };
+  ACTION = {
+    completed: "Call specialist_result for the full result.",
+    failed: "Call specialist_result for the failure detail. Use specialist_retry if the cause is transient.",
+    escalation: "Call specialist_status to read the escalation, then specialist_reply.",
+    needs_reply: "Call specialist_status to read the pending ask and message_id, then specialist_reply."
+  };
+  BRIEF_LIMITS = {
+    purpose: 120,
+    body: 2000,
+    error: 600,
+    resultLines: 3,
+    resultLine: 240
+  };
+});
+
 // src/activation/build-identity.ts
 import { createHash as createHash12 } from "crypto";
 import { readFileSync as readFileSync45 } from "fs";
@@ -93986,9 +94135,12 @@ function createSpecialistDispatchTool(getHost, getPusher) {
         }, () => {});
         const snapshot = getHost().inspect(handle.activationId);
         const view = snapshot ? input2.full ? toActivationView(snapshot) : toActivationCompactView(snapshot) : { activation_id: handle.activationId };
+        const notice = wakeNoticeGiven ? {} : { wake_notice: wakeNotice() };
+        wakeNoticeGiven = true;
         return {
           status: "dispatched",
           ...view,
+          ...notice,
           ...inline2 ? {
             created_issue_ref: handle.issueRef,
             created_issue_note: "This dispatch CREATED the Substrate Issue above from your inline contract. " + "Track its Journal/result/provenance explicitly. Specialist settlement is " + "evidence, not Issue Closure; use the authorized Substrate lifecycle for Closure.",
@@ -94109,9 +94261,10 @@ function createSpecialistRetryTool(getHost, getPusher) {
     }
   };
 }
-var DIST_LIB_PATH, LOADED_BUILD_ID, fullFlag, specialistDispatchSchema, specialistSteerSchema, specialistReplySchema, specialistStopSchema, specialistRetrySchema;
+var DIST_LIB_PATH, LOADED_BUILD_ID, fullFlag, specialistDispatchSchema, wakeNoticeGiven = false, specialistSteerSchema, specialistReplySchema, specialistStopSchema, specialistRetrySchema;
 var init_activation_tool = __esm(() => {
   init_zod();
+  init_channel();
   init_build_identity();
   init_contract_sections();
   init_rejection();
@@ -94257,6 +94410,152 @@ var init_specialist_result_tool = __esm(() => {
   init_activation_tool();
   specialistResultSchema = objectType({
     activation_id: stringType().min(1).describe("Activation id: the full id or a unique short prefix, e.g. 'act:a2924153' or 'a2924153'.")
+  });
+});
+
+// src/tools/specialist/specialist_feed.tool.ts
+function clock(t) {
+  const d = new Date(t);
+  return [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, "0")).join(":");
+}
+function argSummary(args) {
+  if (!args)
+    return "";
+  for (const key of ["path", "file_path", "command", "query", "pattern", "target", "name", "url"]) {
+    if (typeof args[key] === "string" && args[key])
+      return flat(args[key]);
+  }
+  const first = Object.values(args).find((v) => typeof v === "string" && v);
+  return first ? flat(first) : "";
+}
+function tokens(usage5) {
+  if (!usage5)
+    return "";
+  const total = (usage5.input_tokens ?? 0) + (usage5.output_tokens ?? 0) + (usage5.cache_read_tokens ?? 0) + (usage5.cache_creation_tokens ?? 0);
+  if (total <= 0)
+    return "";
+  return total < 1000 ? `${total} tok` : `${(total / 1000).toFixed(total < 1e4 ? 1 : 0)}k tok`;
+}
+function feedLine(event) {
+  const head = `${clock(event.t)} #${event.seq ?? "?"}`;
+  switch (event.type) {
+    case "run_start":
+      return `${head} start   ${event.specialist}${event.bead_id ? ` on ${event.bead_id}` : ""}`;
+    case "meta":
+      return `${head} model   ${event.model}`;
+    case "tool": {
+      if (event.phase === "update")
+        return null;
+      const arg = argSummary(event.args);
+      if (event.phase === "start")
+        return clip2(`${head} tool    ${event.tool}${arg ? ` ${arg}` : ""}`);
+      const mark = event.is_error ? "\u2715" : "\u2713";
+      const summary = flat(event.result_summary);
+      return clip2(`${head} tool ${mark}  ${event.tool}${summary ? ` \xB7 ${summary}` : ""}`);
+    }
+    case "text": {
+      const body = flat(event.content);
+      return body ? clip2(`${head} text    ${body}`) : null;
+    }
+    case "turn_summary": {
+      const parts = [`turn ${event.turn_index}`, tokens(event.token_usage), event.finish_reason, event.context_pct !== undefined ? `ctx ${Math.round(event.context_pct)}%` : ""].filter(Boolean);
+      return `${head} turn    ${parts.join(" \xB7 ")}`;
+    }
+    case "status_change":
+      return `${head} status  ${event.previous_status ? `${event.previous_status} \u2192 ` : ""}${event.status}`;
+    case "control_signal": {
+      const why = flat(event.reason ?? event.error_message ?? event.message_preview ?? "");
+      return clip2(`${head} control ${event.action}${why ? ` \xB7 ${why}` : ""}`);
+    }
+    case "run_complete": {
+      const elapsed = event.elapsed_s < 10 ? event.elapsed_s.toFixed(1) : String(Math.round(event.elapsed_s));
+      const parts = [event.status, `${elapsed}s`, tokens(event.token_usage), event.tool_calls ? `${event.tool_calls.length} tool calls` : "", event.error ? flat(event.error) : ""].filter(Boolean);
+      return clip2(`${head} done    ${parts.join(" \xB7 ")}`);
+    }
+    default:
+      return null;
+  }
+}
+function normalize3(raw) {
+  const id = raw.trim();
+  return id.startsWith("act:") ? id : `act:${id}`;
+}
+function createSpecialistFeedTool(getHost, openObservability = () => createObservabilitySqliteClient()) {
+  return {
+    name: "specialist_feed",
+    description: "Read one activation's event feed, like `sp feed`: tool calls, text, turns, status changes and completion " + "(view 'terminal', default), or every lifecycle event (view 'forensic'). Works on running, settled and " + "earlier-session activations. Pass since_seq (the last call's last_seq) to follow a running one.",
+    inputSchema: specialistFeedSchema,
+    async execute(input2) {
+      const wanted = normalize3(input2.activation_id);
+      const view = input2.view ?? "terminal";
+      const limit = Math.min(input2.limit ?? FEED_DEFAULT_LIMIT, FEED_MAX_LIMIT);
+      let client = null;
+      try {
+        client = openObservability();
+        if (!client)
+          return { status: "error", error: "observability.db is unavailable; specialist_status still answers for live activations" };
+        const live = (getHost?.()?.list() ?? []).map((s) => s.activationId);
+        const known = new Set([...live, ...client.listNativeActivationIds({ limit: 500 })]);
+        const matches2 = known.has(wanted) ? [wanted] : [...known].filter((id2) => id2.startsWith(wanted)).sort();
+        if (matches2.length > 1) {
+          return { status: "error", error: `Ambiguous activation prefix: ${input2.activation_id}`, candidates: matches2.slice(0, 10) };
+        }
+        const id = matches2[0] ?? wanted;
+        const since = input2.since_seq ?? -1;
+        if (view === "forensic") {
+          const rows = client.readForensicEvents({ jobId: id, limit: 5000 }).filter((r) => r.seq > since);
+          if (rows.length === 0 && since < 0)
+            return { status: "error", error: `No events for activation: ${input2.activation_id}` };
+          const shown2 = rows.slice(-limit);
+          return {
+            activation_id: id,
+            view,
+            events: shown2.map((r) => `${clock(r.t)} #${r.seq} ${r.event_name}`),
+            last_seq: shown2.at(-1)?.seq ?? since,
+            total: rows.length,
+            truncated: rows.length > shown2.length
+          };
+        }
+        const all = client.readEvents(id);
+        if (all.length === 0 && since < 0)
+          return { status: "error", error: `No events for activation: ${input2.activation_id}` };
+        const lines = [];
+        for (const event of all) {
+          if ((event.seq ?? 0) <= since)
+            continue;
+          const line = feedLine(event);
+          if (line)
+            lines.push({ seq: event.seq ?? 0, line });
+        }
+        const shown = lines.slice(-limit);
+        const lastSeq = all.reduce((n, e) => Math.max(n, e.seq ?? 0), since);
+        return {
+          activation_id: id,
+          view,
+          events: shown.map((l) => l.line),
+          last_seq: lastSeq,
+          total: lines.length,
+          truncated: lines.length > shown.length
+        };
+      } catch (error3) {
+        return { status: "error", error: `feed unreadable: ${error3 instanceof Error ? error3.message : String(error3)}` };
+      } finally {
+        try {
+          client?.close();
+        } catch {}
+      }
+    }
+  };
+}
+var FEED_DEFAULT_LIMIT = 40, FEED_MAX_LIMIT = 200, FEED_LINE_MAX = 200, specialistFeedSchema, flat = (text) => String(text ?? "").replace(/\s+/g, " ").trim(), clip2 = (text, max = FEED_LINE_MAX) => text.length <= max ? text : `${text.slice(0, max - 1)}\u2026`;
+var init_specialist_feed_tool = __esm(() => {
+  init_zod();
+  init_observability_sqlite();
+  specialistFeedSchema = objectType({
+    activation_id: stringType().min(1).describe("Activation id: the full id or a unique short prefix, e.g. 'act:a2924153' or 'a2924153'."),
+    view: enumType(["terminal", "forensic"]).optional().describe("'terminal' (default): what the specialist did \u2014 tool calls, text, turns, status, completion \u2014 " + "one line each, like `sp feed`. 'forensic': every recorded lifecycle event name."),
+    since_seq: numberType().int().min(0).optional().describe("Only events with a sequence number above this. Pass the previous call's last_seq to follow a running activation."),
+    limit: numberType().int().min(1).max(FEED_MAX_LIMIT).optional().describe(`Newest events to return (default ${FEED_DEFAULT_LIMIT}, max ${FEED_MAX_LIMIT}).`)
   });
 });
 
@@ -98092,8 +98391,8 @@ function purposeExcerptFromContract(contract) {
     const success = typeof c["success"] === "string" ? c["success"] : "";
     const first = scope[0] ?? success;
     if (first) {
-      const flat = first.trim().replace(/\s+/g, " ");
-      return flat.length <= 160 ? flat : `${flat.slice(0, 159)}\u2026`;
+      const flat2 = first.trim().replace(/\s+/g, " ");
+      return flat2.length <= 160 ? flat2 : `${flat2.slice(0, 159)}\u2026`;
     }
   }
   return extractPurposeExcerpt(contractToMarkdown(contract)) ?? "";
@@ -99237,149 +99536,6 @@ var init_request_meta = __esm(() => {
   init_forensic_events();
 });
 
-// src/mcp/channel.ts
-function formatElapsed4(elapsedS) {
-  const total = Math.max(0, Math.floor(elapsedS));
-  if (total < 60)
-    return `${total}s`;
-  if (total < 3600)
-    return `${Math.floor(total / 60)}m${String(total % 60).padStart(2, "0")}s`;
-  return `${Math.floor(total / 3600)}h${String(Math.floor(total % 3600 / 60)).padStart(2, "0")}m`;
-}
-function formatTokens(usage5) {
-  if (!usage5)
-    return "";
-  const total = ["input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens", "reasoning_tokens", "tool_tokens"].reduce((n, k) => n + (usage5[k] ?? 0), 0);
-  if (total <= 0)
-    return "";
-  if (total < 1000)
-    return `${total} tokens`;
-  if (total < 1e4)
-    return `${(total / 1000).toFixed(1)}k tokens`;
-  return `${Math.round(total / 1000)}k tokens`;
-}
-function snapshotDetail(snapshot, nowMs = Date.now()) {
-  if (!snapshot)
-    return {};
-  return {
-    ...snapshot.purpose ? { purpose: snapshot.purpose } : {},
-    elapsedS: Math.max(0, Math.floor((nowMs - snapshot.startedAt) / 1000)),
-    ...snapshot.turnCount !== undefined ? { turnCount: snapshot.turnCount } : {},
-    ...snapshot.tokenUsage ? { tokenUsage: snapshot.tokenUsage } : {},
-    ...snapshot.resolvedModel ? { model: snapshot.resolvedModel } : {},
-    ...snapshot.thinkingLevel ? { thinkingLevel: snapshot.thinkingLevel } : {}
-  };
-}
-function briefLines(eventClass, detail) {
-  const failed = eventClass === "failed";
-  const facts = failed ? [detail.model, detail.thinkingLevel].filter(Boolean).join(" \xB7 ") : eventClass === "completed" ? [
-    detail.elapsedS !== undefined ? formatElapsed4(detail.elapsedS) : "",
-    detail.turnCount !== undefined ? `${detail.turnCount} turn${detail.turnCount === 1 ? "" : "s"}` : "",
-    formatTokens(detail.tokenUsage)
-  ].filter(Boolean).join(" \u2022 ") : "";
-  const purpose = detail.purpose ? clip(detail.purpose.replace(/\s+/g, " ").trim(), BRIEF_LIMITS.purpose) : "";
-  const lines = [];
-  const context = [facts, purpose ? `purpose: ${purpose}` : ""].filter(Boolean).join(" \xB7 ");
-  if (context)
-    lines.push(context);
-  if (eventClass === "needs_reply" || eventClass === "escalation") {
-    if (detail.body?.trim())
-      lines.push(...quoted(clip(detail.body.trim(), BRIEF_LIMITS.body)));
-  } else if (failed) {
-    if (detail.error?.trim())
-      lines.push(...quoted(clip(detail.error.trim(), BRIEF_LIMITS.error)));
-  } else if (eventClass === "completed" && detail.output?.trim()) {
-    const all = detail.output.split(`
-`).filter((line) => line.trim() !== "");
-    lines.push(...all.slice(0, BRIEF_LIMITS.resultLines).map((line) => `> ${clip(line, BRIEF_LIMITS.resultLine)}`));
-    if (all.length > BRIEF_LIMITS.resultLines) {
-      lines.push(`\u2026 +${all.length - BRIEF_LIMITS.resultLines} more lines in specialist_result`);
-    }
-  }
-  return lines;
-}
-function buildChannelFrame(input2) {
-  const settled = input2.eventClass === "completed" || input2.eventClass === "failed";
-  const meta3 = {
-    activation_id: input2.activationId,
-    specialist: input2.specialist,
-    event: input2.eventClass,
-    read_with: settled ? "specialist_result" : "specialist_status"
-  };
-  if (input2.beadId)
-    meta3.bead_id = input2.beadId;
-  for (const key of Object.keys(meta3)) {
-    if (!META_KEY.test(key))
-      throw new Error(`channel meta key "${key}" fails ${META_KEY.source}`);
-  }
-  const work = input2.beadId ? ` on ${input2.beadId}` : "";
-  const action = ACTION[input2.eventClass] ?? "Call specialist_status for authoritative state.";
-  const head = `Specialist ${input2.specialist}${work}: ${input2.eventClass} (${input2.activationId}). ${action}`;
-  return {
-    method: CHANNEL_METHOD,
-    params: {
-      content: [head, ...briefLines(input2.eventClass, input2.detail ?? {})].join(`
-`),
-      meta: meta3
-    }
-  };
-}
-function withChannelPush(base, send, describe3 = () => ({})) {
-  return {
-    ...base,
-    emit(event) {
-      base.emit(event);
-      const eventClass = PUSHED_EVENTS[event.name];
-      if (!eventClass)
-        return;
-      if (event.payload?.intermediate === true)
-        return;
-      try {
-        const payload = event.payload ?? {};
-        const text = (key) => typeof payload[key] === "string" ? { [key]: payload[key] } : {};
-        const frame = buildChannelFrame({
-          activationId: event.activationId,
-          specialist: event.specialist,
-          ...event.beadId ? { beadId: event.beadId } : {},
-          eventClass,
-          detail: { ...describe3(event.activationId), ...text("body"), ...text("output"), ...text("error") }
-        });
-        Promise.resolve(send(frame)).catch((error3) => {
-          logger.debug(`channel push dropped (${eventClass}): ${String(error3)}`);
-        });
-      } catch (error3) {
-        logger.debug(`channel push not built (${eventClass}): ${String(error3)}`);
-      }
-    }
-  };
-}
-var CHANNEL_CAPABILITY, CHANNEL_METHOD = "notifications/claude/channel", META_KEY, PUSHED_EVENTS, ACTION, BRIEF_LIMITS, clip = (text, max) => text.length <= max ? text : `${text.slice(0, max - 1)}\u2026`, quoted = (text) => text.split(`
-`).filter((line) => line.trim() !== "").map((line) => `> ${line}`);
-var init_channel = __esm(() => {
-  init_logger();
-  CHANNEL_CAPABILITY = { "claude/channel": {} };
-  META_KEY = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
-  PUSHED_EVENTS = {
-    activation_completed: "completed",
-    activation_failed: "failed",
-    escalation_raised: "escalation",
-    clarification_requested: "needs_reply"
-  };
-  ACTION = {
-    completed: "Call specialist_result for the full result.",
-    failed: "Call specialist_result for the failure detail. Use specialist_retry if the cause is transient.",
-    escalation: "Call specialist_status to read the escalation, then specialist_reply.",
-    needs_reply: "Call specialist_status to read the pending ask and message_id, then specialist_reply."
-  };
-  BRIEF_LIMITS = {
-    purpose: 120,
-    body: 2000,
-    error: 600,
-    resultLines: 3,
-    resultLine: 240
-  };
-});
-
 // src/mcp/v2-server.ts
 var exports_v2_server = {};
 __export(exports_v2_server, {
@@ -99400,7 +99556,7 @@ function buildV2Server(ctx, options2) {
   const host = new NativeActivationHost({
     loader,
     authority: createFileAuthorityWriter(),
-    forensics: withChannelPush(createActivationForensicSink(observability), (frame) => channelSend(frame), (activationId) => snapshotDetail(host.inspect(activationId)))
+    forensics: wakeSuppressed() ? createActivationForensicSink(observability) : withChannelPush(createActivationForensicSink(observability), (frame) => channelSend(frame), (activationId) => snapshotDetail(host.inspect(activationId)))
   });
   const getHost = () => host;
   const pusher = new RuntimeEventPusher({
@@ -99420,6 +99576,7 @@ function buildV2Server(ctx, options2) {
   const tools = [
     createSpecialistStatusTool(loader, circuitBreaker, getHost, getPusher),
     createSpecialistResultTool(getHost, getPusher),
+    createSpecialistFeedTool(getHost),
     createSpecialistDispatchTool(getHost, getPusher),
     createSpecialistReplyTool(getHost),
     createSpecialistResumeTool(getHost, getPusher),
@@ -99436,6 +99593,7 @@ function buildV2Server(ctx, options2) {
     substrate_provenance: substrateProvenanceSchema,
     specialist_status: specialistStatusSchema,
     specialist_result: specialistResultSchema,
+    specialist_feed: specialistFeedSchema,
     specialist_dispatch: specialistDispatchSchema,
     specialist_reply: specialistReplySchema,
     specialist_resume: specialistResumeSchema,
@@ -99524,6 +99682,7 @@ var init_v2_server = __esm(() => {
   init_loader();
   init_circuitBreaker();
   init_specialist_result_tool();
+  init_specialist_feed_tool();
   init_specialist_lease_reconcile_tool();
   init_specialist_status_tool();
   init_specialist_list_tool();

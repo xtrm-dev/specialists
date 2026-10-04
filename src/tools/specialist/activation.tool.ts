@@ -35,6 +35,7 @@
 // a projection rather than the authority.
 
 import * as z from 'zod';
+import { wakeNotice } from '../../mcp/channel.js';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { NativeActivationHost } from '../../activation/native-host.js';
@@ -401,6 +402,13 @@ export const specialistDispatchSchema = z.object({
  * and resumable, and a tool that blocked until completion would make every clarification
  * a deadlock — the coordinator cannot answer a question it is blocked waiting on.
  */
+let wakeNoticeGiven = false;
+
+/** Test seam: the next dispatch states the wake behaviour again. */
+export function resetWakeNotice(): void {
+  wakeNoticeGiven = false;
+}
+
 export function createSpecialistDispatchTool(
   getHost: () => NativeActivationHost,
   getPusher?: () => RuntimeEventPusher | undefined,
@@ -523,9 +531,13 @@ export function createSpecialistDispatchTool(
         const view = snapshot
           ? input.full ? toActivationView(snapshot) : toActivationCompactView(snapshot)
           : { activation_id: handle.activationId };
+        // Said once per server process, at the first successful dispatch.
+        const notice = wakeNoticeGiven ? {} : { wake_notice: wakeNotice() };
+        wakeNoticeGiven = true;
         return {
           status: 'dispatched' as const,
           ...view,
+          ...notice,
           // Inline dispatch creates durable Substrate work. Surface the Issue ref
           // explicitly; retain the old created_bead_* names only as compatibility aliases
           // for consumers that predate the semantic cutover.

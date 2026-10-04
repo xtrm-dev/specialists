@@ -47,6 +47,27 @@ import { logger } from '../utils/logger.js';
  */
 export const CHANNEL_CAPABILITY = { 'claude/channel': {} } as const;
 
+/**
+ * `SPECIALISTS_WAKE=off` turns wakes off: no channel push and no wake-watch fallback, the
+ * Claude Code twin of the Pi extension's `--no-specialist-wake`. Everything stays readable
+ * through specialist_status; only the notification is suppressed.
+ */
+export function wakeSuppressed(env: NodeJS.ProcessEnv = process.env): boolean {
+  return (env.SPECIALISTS_WAKE ?? '').toLowerCase() === 'off';
+}
+
+/**
+ * The wake behaviour, stated once to a coordinator at its first dispatch — the moment it
+ * becomes true that a child could start a turn on its own (the Pi extension's announcement).
+ */
+export function wakeNotice(env: NodeJS.ProcessEnv = process.env): string {
+  return wakeSuppressed(env)
+    ? 'Wakes are off (SPECIALISTS_WAKE=off): nothing starts a turn when this activation settles, asks or fails. '
+      + 'Poll specialist_status with wait_for_change: true.'
+    : 'You will be woken when this activation settles, asks or fails: a channel push in an interactive session, '
+      + 'the wake-watch hook otherwise. Do not poll; if no wake arrives, specialist_status with wait_for_change: true blocks until a change.';
+}
+
 /** The notification method Claude Code listens for. */
 export const CHANNEL_METHOD = 'notifications/claude/channel';
 
