@@ -24,7 +24,9 @@ vi.mock('typebox', () => ({
     Number: (opts = {}) => ({ type: 'number', ...opts }),
     Boolean: (opts = {}) => ({ type: 'boolean', ...opts }),
     Array: (items) => ({ type: 'array', items }),
-    Union: (variants) => ({ anyOf: variants }),
+    Union: (variants, opts = {}) => ({ anyOf: variants, ...opts }),
+    Literal: (value) => ({ const: value }),
+    Enum: (values, opts = {}) => ({ enum: Object.values(values), ...opts }),
     Unknown: () => ({ type: 'unknown' }),
     Null: () => ({ type: 'null' }),
     Optional: (schema) => schema,
@@ -180,8 +182,15 @@ function makeFakePi({ flags = {} } = {}) {
   /** customType -> renderer, as pi's ExtensionAPI.registerMessageRenderer records them. */
   const messageRenderers = {};
   return {
+    // Shaped like the real Pi ExtensionAPI (checked against loader.js
+    // createExtensionAPI): register + getters only. There is deliberately NO
+    // `.tools`/`.commands` property — the extension must not read the registry
+    // off `pi` (SPECIALISTS-4264 review blocker 1), and a fake that exposed it
+    // would hide exactly that defect.
     registerTool: (def) => tools.push(def),
     registerCommand: (name, options) => commands.push({ name, ...options }),
+    getAllTools: () => [...tools],
+    getCommands: () => [...commands],
     registerMessageRenderer: (customType, renderer) => { messageRenderers[customType] = renderer; },
     on: (event, handler) => { (handlers[event] ??= []).push(handler); },
     // Variadic, because the two registrations differ in arity: the UI surface is
@@ -193,8 +202,6 @@ function makeFakePi({ flags = {} } = {}) {
     registerFlag: (name, opts) => { registeredFlags[name] = opts; },
     getFlag: (name) => (name in flags ? flags[name] : registeredFlags[name]?.default),
     sendMessage: (message, options) => { sent.push({ message, options }); },
-    get tools() { return tools; },
-    get commands() { return commands; },
     get handlers() { return handlers; },
     get sent() { return sent; },
     get registeredFlags() { return registeredFlags; },
@@ -231,14 +238,15 @@ function makeFakeCtx({ hasUI = true, mode = 'tui', sessionId = 'sess-1' } = {}) 
 /**
  * Look a registered tool up by NAME, never by index.
  *
- * These were `pi.tools[3]` and friends until adding one tool (specialist_resume,
+ * These were registry-index reads until adding one tool (specialist_resume,
  * unitAI-rrdnt.33.1) shifted three of them and produced failures that pointed at the wrong
  * thing — "expected undefined to deeply equal [...]" says nothing about the cause.
  * Registration order is not a contract; the names are.
  */
 function toolNamed(pi, name) {
-  const tool = pi.tools.find((t) => t.name === name);
-  if (!tool) throw new Error(`tool not registered: ${name} (have: ${pi.tools.map(t => t.name).join(', ')})`);
+  const all = pi.getAllTools();
+  const tool = all.find((t) => t.name === name);
+  if (!tool) throw new Error(`tool not registered: ${name} (have: ${all.map(t => t.name).join(', ')})`);
   return tool;
 }
 
@@ -260,14 +268,15 @@ function plain(line) {
 const SPIN_CLOCK = 220_000;
 
 describe('native-specialists extension (Pi coordinator surface)', () => {
-  it('registers exactly the nine specialist_* tools over the host', async () => {
+  it('registers exactly the ten specialist_* tools over the host', async () => {
     const mod = await loadExtension();
     const pi = makeFakePi();
     mod.default(pi);
-    expect(pi.tools.map((t) => t.name)).toEqual([
+    expect(pi.getAllTools().map((t) => t.name)).toEqual([
       'specialist_dispatch',
       'specialist_status',
       'specialist_result',
+      'specialist_feed',
       'specialist_reply',
       'specialist_resume',
       'specialist_retry',
@@ -287,7 +296,7 @@ describe('native-specialists extension (Pi coordinator surface)', () => {
     expect(dispatch.parameters.properties).toHaveProperty('contract');
     expect(dispatch.parameters.properties).toHaveProperty('title');
     // No second permission logic: schemas carry arguments only, never tool grants.
-    expect(pi.tools.every((t) => typeof t.execute === 'function')).toBe(true);
+    expect(pi.getAllTools().every((t) => typeof t.execute === 'function')).toBe(true);
   });
 
   it('dispatch uses issue_ref as the primary work locator', async () => {
@@ -637,6 +646,104 @@ describe('native-specialists extension (Pi coordinator surface)', () => {
       expect(out.error).toMatch(/unknown activation 'act:zzzz'/);
       expect(out.candidates).toEqual(['act:aaaa']);
     });
+  });
+
+  it('specialist_feed reuses the shared factory: same lines as the MCP tool for the same events (SPECIALISTS-4264)', async () => {
+    const mod = await loadExtension();
+    const shared = await import('../../../src/tools/specialist/specialist_feed.tool.js');
+    expect(typeof shared.feedLine).toBe('function');
+    expect(typeof shared.createSpecialistFeedTool).toBe('function');
+    expect(shared.FEED_DEFAULT_LIMIT).toBe(40);
+    expect(shared.FEED_MAX_LIMIT).toBe(200);
+
+    const T = 1_700_000_000_000;
+    const events = [
+      { t: T, seq: 1, type: 'run_start', specialist: 'explorer', bead_id: 'XTRM-1' },
+      { t: T, seq: 2, type: 'tool', tool: 'read', phase: 'start', args: { path: 'src/x.ts' } },
+      { t: T, seq: 3, type: 'run_complete', status: 'COMPLETE', elapsed_s: 16.4, tool_calls: ['read'] },
+    ];
+    const fakeClient = {
+      listNativeActivationIds: () => ['act:feed01'],
+      readEvents: (id) => (id === 'act:feed01' ? events : []),
+      readForensicEvents: () => [],
+      close: () => {},
+    };
+    const pi = makeFakePi();
+    const { host } = makeFakeHost();
+    host.list.mockReturnValue([]);
+    mod.default(pi, { createHost: () => host, openObservability: () => fakeClient });
+    const feed = toolNamed(pi, 'specialist_feed');
+
+    const piOut = resultText(await feed.execute('tc1', { activation_id: 'feed01' }));
+    const mcpOut = await shared.createSpecialistFeedTool(() => undefined, () => fakeClient).execute({ activation_id: 'feed01' });
+    expect(piOut).toEqual(mcpOut);
+    expect(piOut.events).toHaveLength(3);
+    expect(piOut).toMatchObject({ activation_id: 'act:feed01', view: 'terminal', last_seq: 3, truncated: false });
+
+    const followed = resultText(await feed.execute('tc2', { activation_id: 'act:feed01', since_seq: 2 }));
+    expect(followed.events).toHaveLength(1);
+    expect(followed.events[0]).toContain('done');
+    const forensicClient = {
+      ...fakeClient,
+      readForensicEvents: () => [{ seq: 1, t: T, event_name: 'run_start' }, { seq: 2, t: T, event_name: 'run_complete' }],
+    };
+    const piF = makeFakePi();
+    mod.default(piF, { createHost: () => host, openObservability: () => forensicClient });
+    const feedF = toolNamed(piF, 'specialist_feed');
+    const forensic = resultText(await feedF.execute('tc3', { activation_id: 'act:feed01', view: 'forensic' }));
+    expect(forensic.view).toBe('forensic');
+    expect(forensic.events).toHaveLength(2);
+
+    const twoClient = { ...fakeClient, listNativeActivationIds: () => ['act:feed01', 'act:feed02'] };
+    const pi2 = makeFakePi();
+    mod.default(pi2, { createHost: () => host, openObservability: () => twoClient });
+    const feed2 = toolNamed(pi2, 'specialist_feed');
+    expect(resultText(await feed2.execute('tc4', { activation_id: 'feed' }))).toMatchObject({ status: 'error' });
+    expect(resultText(await feed2.execute('tc5', { activation_id: 'nope' }))).toMatchObject({ status: 'error' });
+
+    const pi3 = makeFakePi();
+    mod.default(pi3, { createHost: () => host, openObservability: () => null });
+    expect(resultText(await toolNamed(pi3, 'specialist_feed').execute('tc6', { activation_id: 'x' })))
+      .toMatchObject({ status: 'error' });
+  });
+
+  it('commands call local defs and handlers, never pi.tools/pi.commands (SPECIALISTS-4264 review)', async () => {
+    // The fake exposes only the real Pi ExtensionAPI shape (register + getters).
+    // If the extension read `pi.tools` or `pi.commands`, every alias below would
+    // throw — which is exactly the production defect this guards.
+    const mod = await loadExtension();
+    const pi = makeFakePi();
+    expect(pi.tools).toBeUndefined();
+    expect(pi.commands).toBeUndefined();
+    const { host } = makeFakeHost();
+    mod.default(pi, { createHost: () => host });
+    const ctx = makeFakeCtx({ hasUI: true, mode: 'tui' });
+    await pi.fire('session_start', { type: 'session_start' }, ctx);
+    const cmds = pi.getCommands();
+    const byName = (name) => cmds.find((c) => c.name === name);
+    // /fleet aliases reach the same handlers without a registry lookup: the
+    // arrow wrappers close over the same local handler, so both names always
+    // behave identically even though the fns are distinct objects.
+    host.answer.mockResolvedValueOnce({ messageId: 'msg:1', activationId: 'act:aaaa' });
+    await byName('fleet:reply').handler('msg:1 alias answer', ctx);
+    expect(ctx.painted.notices.at(-1)[0]).toContain('Answered msg:1');
+  });
+
+  it('specialist_result names the feed for an earlier-session id (SPECIALISTS-4264)', async () => {
+    const mod = await loadExtension();
+    const pi = makeFakePi();
+    const { host } = makeFakeHost();
+    host.list.mockReturnValue([]);
+    const fakeClient = {
+      listNativeActivationIds: () => ['act:old01'],
+      readEvents: () => [{ t: 1, seq: 1, type: 'run_start', specialist: 'explorer' }],
+      readForensicEvents: () => [],
+      close: () => {},
+    };
+    mod.default(pi, { createHost: () => host, openObservability: () => fakeClient });
+    const out = resultText(await toolNamed(pi, 'specialist_result').execute('tc1', { activation_id: 'old01' }));
+    expect(out.status).toBe('error');
+    expect(out.error).toContain('specialist_feed');
   });
 
   it('specialist_steer redirects a running activation and refuses settled ones (SPECIALISTS-141)', async () => {
@@ -1048,18 +1155,18 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     mod.default(pi, { createHost: () => host, ...extOptions });
     const ctx = makeFakeCtx(ctxOptions);
     await pi.fire('session_start', { type: 'session_start' }, ctx);
-    const command = (name) => pi.commands.find((c) => c.name === name);
+    const command = (name) => pi.getCommands().find((c) => c.name === name);
     return { pi, host, calls, ctx, command, mod };
   }
 
   it('registers the /specialists operator commands with /fleet compat aliases', async () => {
     const { pi } = await boot();
-    expect(pi.commands.map((c) => c.name)).toEqual(['specialists', 'fleet', 'specialists:reply', 'fleet:reply', 'specialists:stop', 'fleet:stop', 'specialists:resume', 'fleet:resume']);
+    expect(pi.getCommands().map((c) => c.name)).toEqual(['specialists', 'fleet', 'specialists:reply', 'fleet:reply', 'specialists:stop', 'fleet:stop', 'specialists:resume', 'fleet:resume', 'specialists:result', 'fleet:result', 'specialists:feed', 'fleet:feed']);
   });
 
   it('names /specialists in help, never /fleet, and the header carries no command hint (unitAI-beqby.6, unitAI-rrdnt.65)', async () => {
     const { pi, mod } = await boot();
-    for (const cmd of pi.commands) {
+    for (const cmd of pi.getCommands()) {
       expect(cmd.description).not.toContain('/fleet');
     }
     expect(mod.renderFleetHeader({ activations: [], asks: [] })).not.toContain('/fleet');
@@ -1081,12 +1188,218 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     expect(header).toContain('! 1 blocked');
   });
 
+  it('/specialists result|feed|status read one activation, incl. earlier-session ids (SPECIALISTS-4264)', async () => {
+    const T = 1_700_000_000_000;
+    const events = [
+      { t: T, seq: 1, type: 'run_start', specialist: 'explorer', bead_id: 'XTRM-1' },
+      { t: T, seq: 2, type: 'tool', tool: 'read', phase: 'start', args: { path: 'src/x.ts' } },
+      { t: T, seq: 3, type: 'run_complete', status: 'COMPLETE', elapsed_s: 16.4, tool_calls: ['read'] },
+    ];
+    const fakeClient = {
+      listNativeActivationIds: () => ['act:feed01'],
+      readEvents: (id) => (id === 'act:feed01' ? events : []),
+      readForensicEvents: () => [],
+      close: () => {},
+    };
+    const mod = await loadExtension();
+    const pi = makeFakePi();
+    const { host } = makeFakeHost();
+    mod.default(pi, { createHost: () => host, openObservability: () => fakeClient });
+    const ctx = makeFakeCtx({ hasUI: true, mode: 'tui' });
+    await pi.fire('session_start', { type: 'session_start' }, ctx);
+    const command = (name) => pi.getCommands().find((c) => c.name === name);
+    const lastNotice = () => ctx.painted.notices.at(-1)[0];
+
+    // Live id through the /specialists verb and the dedicated command alike.
+    await command('specialists').handler('feed act:feed01', ctx);
+    expect(lastNotice()).toContain('tool');
+    // Live id + still running: the tail carries the follow hint.
+    host.list.mockReturnValue([{ ...SNAPSHOT, activationId: 'act:feed01' }]);
+    await command('specialists:feed').handler('act:feed01 2', ctx);
+    const tailed = lastNotice().split('\n');
+    expect(tailed).toHaveLength(4);
+    expect(tailed.at(-1)).toContain('since_seq');
+    // Completions complete the live id.
+    expect(command('specialists:feed').getArgumentCompletions('act:fe')[0].value).toBe('act:feed01');
+
+    // Earlier-session id: unknown to the live host, answered from observability.db.
+    host.list.mockReturnValue([]);
+    await command('specialists').handler('feed feed01', ctx);
+    expect(lastNotice()).toContain('tool');
+    await command('specialists').handler('status feed01', ctx);
+    expect(lastNotice()).toContain('earlier-session');
+    await command('specialists').handler('feed nope', ctx);
+    expect(lastNotice()).toContain('refused');
+    await command('specialists').handler('feed', ctx);
+    expect(lastNotice()).toContain('Usage');
+    await command('specialists').handler('result', ctx);
+    expect(lastNotice()).toContain('Usage');
+
+    // /fleet aliases reach the same handlers.
+    await command('fleet:feed').handler('act:feed01', ctx);
+    expect(lastNotice()).toContain('tool');
+
+    // Help names /specialists, never /fleet.
+    for (const cmd of pi.getCommands()) expect(cmd.description).not.toContain('/fleet');
+  });
+
+  it('live feed follows a running activation on Fleet change, no settle or ask (SPECIALISTS-4264 review round 2)', async () => {
+    const T = 1_700_000_000_000;
+    // Timeline grows between reads: the follow-up read sees the new turn.
+    // seqs are append-only (4 follows 3): reusing seq 2 would fail the
+    // since_seq filter and prove nothing about cursor following.
+    let grown = false;
+    const eventsFor = () => [
+      { t: T, seq: 1, type: 'run_start', specialist: 'explorer', bead_id: 'XTRM-1' },
+      { t: T, seq: 2, type: 'turn_summary', turn_index: 1, token_usage: { input_tokens: 100 }, finish_reason: 'stop' },
+      ...(grown ? [{ t: T, seq: 3, type: 'turn_summary', turn_index: 2, token_usage: { input_tokens: 100 }, finish_reason: 'stop' }] : []),
+    ];
+    const fakeClient = {
+      listNativeActivationIds: () => ['act:feed01'],
+      readEvents: (id) => (id === 'act:feed01' ? eventsFor() : []),
+      readForensicEvents: () => [],
+      close: () => {},
+    };
+    const mod = await loadExtension();
+    const pi = makeFakePi();
+    const { host } = makeFakeHost();
+    host.list.mockReturnValue([{ ...SNAPSHOT, activationId: 'act:feed01', state: 'running' }]);
+    // Fleet-change signal the follow loop parks in: resolve waiters on demand.
+    let waiters = [];
+    host.fleetChangeEpoch = vi.fn(() => 7);
+    host.waitForFleetChange = vi.fn(() => new Promise((resolve) => { waiters.push(resolve); }));
+    const flush = async () => { await vi.advanceTimersByTimeAsync(0); };
+    mod.default(pi, { createHost: () => host, openObservability: () => fakeClient });
+    const sections = new Map();
+    const registerFooterSection = (key, render) => { sections.set(key, render); return () => { sections.delete(key); }; };
+    const pi2 = makeFakePi();
+    mod.default(pi2, { createHost: () => host, openObservability: () => fakeClient, registerFooterSection });
+    const ctx = makeFakeCtx({ hasUI: true, mode: 'tui' });
+    await pi2.fire('session_start', { type: 'session_start' }, ctx);
+    await toolNamed(pi2, 'specialist_status').execute('tc0', {});
+    const cmds = pi2.getCommands();
+    await cmds.find((c) => c.name === 'specialists:feed').handler('act:feed01', ctx);
+    await flush();
+    const render = sections.get('specialist-fleet');
+    const linesBefore = render().map(plain).join('\n');
+    expect(linesBefore).toContain('turn 1');
+    expect(linesBefore).not.toContain('turn 2');
+    // One turn advances with no settle and no ask: the change wakes the parked
+    // loop, which re-reads from the cursor and appends only the new lines.
+    grown = true;
+    waiters.splice(0).forEach((resolve) => resolve('change'));
+    await flush();
+    const linesAfter = render().map(plain).join('\n');
+    expect(linesAfter).toContain('turn 1');
+    expect(linesAfter).toContain('turn 2');
+    // Settling stops the loop: a further change resolves nothing new.
+    host.list.mockReturnValue([{ ...SNAPSHOT, activationId: 'act:feed01', state: 'settled' }]);
+    waiters.splice(0).forEach((resolve) => resolve('change'));
+    await flush();
+    // session_shutdown stops background work: the parked waiter is abandoned.
+    await pi2.fire('session_shutdown', { type: 'session_shutdown', reason: 'quit' });
+    expect(host.stop).toHaveBeenCalled();
+  });
+
+  it('wake refreshes the selected fleet detail without a command (SPECIALISTS-4264)', async () => {
+    const T = 1_700_000_000_000;
+    const events = [
+      { t: T, seq: 1, type: 'run_start', specialist: 'explorer', bead_id: 'XTRM-1' },
+      { t: T, seq: 2, type: 'tool', tool: 'read', phase: 'start', args: { path: 'src/x.ts' } },
+    ];
+    const fakeClient = {
+      listNativeActivationIds: () => ['act:feed01'],
+      readEvents: (id) => (id === 'act:feed01' ? events : []),
+      readForensicEvents: () => [],
+      close: () => {},
+    };
+    const mod = await loadExtension();
+    const pi = makeFakePi();
+    const sections = new Map();
+    const registerFooterSection = (key, render) => { sections.set(key, render); return () => { sections.delete(key); }; };
+    // Capture the sink wrapper: createHost receives { wrapSink }, so wrap the
+    // sink it builds and fire an ask through it — the production wake path.
+    let wrapSink;
+    const { host } = makeFakeHost();
+    mod.default(pi, {
+      createHost: ({ wrapSink: w }) => { wrapSink = w; return host; },
+      openObservability: () => fakeClient,
+      registerFooterSection,
+    });
+    const ctx = makeFakeCtx({ hasUI: true, mode: 'tui' });
+    await pi.fire('session_start', { type: 'session_start' }, ctx);
+    await toolNamed(pi, 'specialist_status').execute('tc0', {});
+    const cmds = pi.getCommands();
+    await cmds.find((c) => c.name === 'specialists:feed').handler('act:feed01', ctx);
+    await vi.advanceTimersByTimeAsync(0);
+    const render = sections.get('specialist-fleet');
+    expect(render().map(plain).join('\n')).toContain('▾ feed act:feed01');
+    // A settlement wake for the selected activation refreshes its detail: the
+    // sink wrapper the host was built with emits activation_completed.
+    const sink = wrapSink({ emit: () => {} });
+    sink.emit({ activationId: 'act:feed01', attemptId: 'att:feed01:1', specialist: 'explorer', name: 'activation_completed', payload: { output: 'done report' } });
+    await vi.advanceTimersByTimeAsync(0);
+    const after = render().map(plain).join('\n');
+    expect(after).toContain('▾ feed act:feed01');
+    expect(pi.sent.some((m) => m.message.customType === 'specialist_settled')).toBe(true);
+  });
+
+  it('fleet section renders the selected result/feed detail and refreshes on wake (SPECIALISTS-4264)', async () => {
+    const T = 1_700_000_000_000;
+    const events = [
+      { t: T, seq: 1, type: 'run_start', specialist: 'explorer', bead_id: 'XTRM-1' },
+      { t: T, seq: 2, type: 'tool', tool: 'read', phase: 'start', args: { path: 'src/x.ts' } },
+      { t: T, seq: 3, type: 'run_complete', status: 'COMPLETE', elapsed_s: 16.4, tool_calls: ['read'] },
+    ];
+    const fakeClient = {
+      listNativeActivationIds: () => ['act:feed01'],
+      readEvents: (id) => (id === 'act:feed01' ? events : []),
+      readForensicEvents: () => [],
+      close: () => {},
+    };
+    const mod = await loadExtension();
+    const pi = makeFakePi();
+    const { host } = makeFakeHost();
+    mod.default(pi, { createHost: () => host, openObservability: () => fakeClient });
+    const sections = new Map();
+    const registerFooterSection = (key, render) => { sections.set(key, render); return () => { sections.delete(key); }; };
+    const ctx = makeFakeCtx({ hasUI: true, mode: 'tui' });
+    await pi.fire('session_start', { type: 'session_start' }, ctx);
+    // No seam registered yet on this path: register through the options seam.
+    const pi2 = makeFakePi();
+    mod.default(pi2, { createHost: () => host, openObservability: () => fakeClient, registerFooterSection });
+    const ctx2 = makeFakeCtx({ hasUI: true, mode: 'tui' });
+    await pi2.fire('session_start', { type: 'session_start' }, ctx2);
+    expect(sections.has('specialist-fleet')).toBe(true);
+    await toolNamed(pi2, 'specialist_status').execute('tc0', {});
+    const render = sections.get('specialist-fleet');
+    // Before selection: rows plus the select hint, no detail.
+    const before = render().map(plain).join('\n');
+    expect(before).toContain('SPECIALISTS');
+    expect(before).toContain('select a row');
+    // Select via command: the section shows the feed under the rows.
+    const cmds = pi2.getCommands();
+    await cmds.find((c) => c.name === 'specialists:feed').handler('act:feed01', ctx2);
+    await vi.advanceTimersByTimeAsync(0);
+    const after = render().map(plain).join('\n');
+    expect(after).toContain('▾ feed act:feed01');
+    expect(after).toContain('tool');
+    // Pure projection units: loading state and settled tail.
+    expect(mod.renderDetailLines({ kind: 'result', id: 'act:x' }, null)[1]).toContain('loading');
+    const settled = mod.renderDetailLines(
+      { kind: 'feed', id: 'act:x' },
+      { id: 'act:x', kind: 'feed', lines: ['l1'], lastSeq: 3, settled: true },
+    ).map(plain).join('\n');
+    expect(settled).toContain('l1');
+    expect(settled).not.toContain('live');
+  });
+
   it('/fleet aliases still reach the /specialists handlers (unitAI-beqby.6)', async () => {
     const { pi, host, ctx, command } = await boot({ hasUI: true, mode: 'tui' });
     await toolNamed(pi, 'specialist_status').execute('tc0', {});
     await command('fleet').handler('inspect', ctx);
     expect(ctx.painted.notices.at(-1)[0]).toContain('SPECIALISTS');
-    const fleetReply = pi.commands.find((c) => c.name === 'fleet:reply');
+    const fleetReply = pi.getCommands().find((c) => c.name === 'fleet:reply');
     host.answer.mockResolvedValueOnce({ messageId: 'msg:1', activationId: 'act:aaaa' });
     await fleetReply.handler('msg:1 alias answer', ctx);
     expect(ctx.painted.notices.at(-1)[0]).toContain('Answered msg:1');
@@ -1665,7 +1978,7 @@ describe('dispatch guidance must not route work off the native runtime', () => {
     const pi = makeFakePi();
     mod.default(pi, { createHost: () => makeFakeHost().host });
 
-    for (const tool of pi.tools as Array<{ name: string; description?: string;
+    for (const tool of pi.getAllTools() as Array<{ name: string; description?: string;
       parameters?: { properties?: Record<string, { description?: string }> } }>) {
       const text = [
         tool.description ?? '',
@@ -2217,9 +2530,9 @@ describe('codemode result contract (pi 0.99 tool exposure)', () => {
 
   it('declares an outputSchema for every registered tool, and no schema without a tool', async () => {
     const { pi, mod } = await setup();
-    const names = pi.tools.map((t) => t.name).sort();
+    const names = pi.getAllTools().map((t) => t.name).sort();
     expect(Object.keys(mod.TOOL_OUTPUT_SCHEMAS).sort()).toEqual(names);
-    for (const tool of pi.tools) {
+    for (const tool of pi.getAllTools()) {
       expect(tool.outputSchema).toBe(mod.TOOL_OUTPUT_SCHEMAS[tool.name]);
       // Codemode lists a namespace under one heading instead of N loose tools.
       expect(tool.namespace?.name).toBe('specialists');
