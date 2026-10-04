@@ -71,6 +71,16 @@ describe('specialist_feed', () => {
     expect(none).toMatchObject({ events: [], last_seq: 10 });
   });
 
+  it('clamps a limit that bypassed the schema, so the feed stays bounded', async () => {
+    for (const limit of [0, -3, Number.NaN]) {
+      const out = (await tool.execute({ activation_id: '13a65caa', limit } as never)) as Feed;
+      expect(out.events.length).toBeLessThanOrEqual(limit === 0 || limit === -3 ? 1 : 40);
+      expect(out.events.length).toBeGreaterThan(0);
+    }
+    const huge = (await tool.execute({ activation_id: '13a65caa', limit: 10_000 } as never)) as Feed;
+    expect(huge.events.length).toBeLessThanOrEqual(200);
+  });
+
   it('serves the forensic view', async () => {
     const out = (await tool.execute({ activation_id: '13a65caa', view: 'forensic' })) as Feed;
     expect(out.events).toEqual(['12:56:46 #1 e1', '12:56:46 #2 e2', '12:56:46 #3 e3']);

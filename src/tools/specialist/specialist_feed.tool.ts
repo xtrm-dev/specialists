@@ -127,7 +127,10 @@ export function createSpecialistFeedTool(
     async execute(input: FeedInput) {
       const wanted = normalize(input.activation_id);
       const view = input.view ?? 'terminal';
-      const limit = Math.min(input.limit ?? FEED_DEFAULT_LIMIT, FEED_MAX_LIMIT);
+      // Clamped here, not only by the zod schema: the Pi extension calls execute() directly,
+      // and a limit of 0 would make slice(-0) return every line, unbounded.
+      const wantedLimit = Number.isFinite(input.limit) ? Math.floor(input.limit as number) : FEED_DEFAULT_LIMIT;
+      const limit = Math.min(Math.max(wantedLimit, 1), FEED_MAX_LIMIT);
 
       let client: ObservabilitySqliteClient | null = null;
       try {
