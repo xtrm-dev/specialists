@@ -341,7 +341,10 @@ payload rather than failing at registration; see `src/substrate/services.ts`.
 - **Pi extension tools.** The Pi extension
   (`config/pi-extensions/native-specialists/index.mjs`) exposes its own
   `specialist_*` tools over the same `NativeActivationHost`, mirroring this
-  surface tool-for-tool including `specialist_steer` and the `full` flag.
+  surface tool-for-tool including `specialist_steer`, `specialist_feed`
+  (same lines as the MCP tool, via the shared factory in
+  `src/tools/specialist/specialist_feed.tool.ts`), and the `full` flag —
+  only `specialist_lease_reconcile` remains Claude Code only.
   That surface is documented with the Pi integration, not here.
 
 ## Notification model

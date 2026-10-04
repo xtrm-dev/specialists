@@ -16682,6 +16682,12 @@ function openObservabilitySqliteClient(dbPath) {
     return null;
   }
 }
+function createObservabilitySqliteClient(cwd = process.cwd()) {
+  const location = resolveObservabilityDbLocation(cwd);
+  if (!existsSync8(location.dbPath))
+    return null;
+  return openObservabilitySqliteClient(location.dbPath);
+}
 function createObservabilitySqliteClientAtPath(dbPath) {
   mkdirSync3(dirname5(dbPath), { recursive: true });
   return openObservabilitySqliteClient(dbPath);
@@ -25698,6 +25704,151 @@ function createActivationForensicSink(observability) {
     }
   };
 }
+// src/tools/specialist/specialist_feed.tool.ts
+var FEED_DEFAULT_LIMIT = 40;
+var FEED_MAX_LIMIT = 200;
+var FEED_LINE_MAX = 200;
+var specialistFeedSchema = objectType({
+  activation_id: stringType().min(1).describe("Activation id: the full id or a unique short prefix, e.g. 'act:a2924153' or 'a2924153'."),
+  view: enumType(["terminal", "forensic"]).optional().describe("'terminal' (default): what the specialist did — tool calls, text, turns, status, completion — " + "one line each, like `sp feed`. 'forensic': every recorded lifecycle event name."),
+  since_seq: numberType().int().min(0).optional().describe("Only events with a sequence number above this. Pass the previous call's last_seq to follow a running activation."),
+  limit: numberType().int().min(1).max(FEED_MAX_LIMIT).optional().describe(`Newest events to return (default ${FEED_DEFAULT_LIMIT}, max ${FEED_MAX_LIMIT}).`)
+});
+var flat = (text) => String(text ?? "").replace(/\s+/g, " ").trim();
+var clip = (text, max = FEED_LINE_MAX) => text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+function clock(t) {
+  const d = new Date(t);
+  return [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, "0")).join(":");
+}
+function argSummary(args) {
+  if (!args)
+    return "";
+  for (const key of ["path", "file_path", "command", "query", "pattern", "target", "name", "url"]) {
+    if (typeof args[key] === "string" && args[key])
+      return flat(args[key]);
+  }
+  const first = Object.values(args).find((v) => typeof v === "string" && v);
+  return first ? flat(first) : "";
+}
+function tokens(usage) {
+  if (!usage)
+    return "";
+  const total = (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0) + (usage.cache_read_tokens ?? 0) + (usage.cache_creation_tokens ?? 0);
+  if (total <= 0)
+    return "";
+  return total < 1000 ? `${total} tok` : `${(total / 1000).toFixed(total < 1e4 ? 1 : 0)}k tok`;
+}
+function feedLine(event) {
+  const head = `${clock(event.t)} #${event.seq ?? "?"}`;
+  switch (event.type) {
+    case "run_start":
+      return `${head} start   ${event.specialist}${event.bead_id ? ` on ${event.bead_id}` : ""}`;
+    case "meta":
+      return `${head} model   ${event.model}`;
+    case "tool": {
+      if (event.phase === "update")
+        return null;
+      const arg = argSummary(event.args);
+      if (event.phase === "start")
+        return clip(`${head} tool    ${event.tool}${arg ? ` ${arg}` : ""}`);
+      const mark = event.is_error ? "✕" : "✓";
+      const summary = flat(event.result_summary);
+      return clip(`${head} tool ${mark}  ${event.tool}${summary ? ` · ${summary}` : ""}`);
+    }
+    case "text": {
+      const body = flat(event.content);
+      return body ? clip(`${head} text    ${body}`) : null;
+    }
+    case "turn_summary": {
+      const parts = [`turn ${event.turn_index}`, tokens(event.token_usage), event.finish_reason, event.context_pct !== undefined ? `ctx ${Math.round(event.context_pct)}%` : ""].filter(Boolean);
+      return `${head} turn    ${parts.join(" · ")}`;
+    }
+    case "status_change":
+      return `${head} status  ${event.previous_status ? `${event.previous_status} → ` : ""}${event.status}`;
+    case "control_signal": {
+      const why = flat(event.reason ?? event.error_message ?? event.message_preview ?? "");
+      return clip(`${head} control ${event.action}${why ? ` · ${why}` : ""}`);
+    }
+    case "run_complete": {
+      const elapsed = event.elapsed_s < 10 ? event.elapsed_s.toFixed(1) : String(Math.round(event.elapsed_s));
+      const parts = [event.status, `${elapsed}s`, tokens(event.token_usage), event.tool_calls ? `${event.tool_calls.length} tool calls` : "", event.error ? flat(event.error) : ""].filter(Boolean);
+      return clip(`${head} done    ${parts.join(" · ")}`);
+    }
+    default:
+      return null;
+  }
+}
+function normalize2(raw) {
+  const id = raw.trim();
+  return id.startsWith("act:") ? id : `act:${id}`;
+}
+function createSpecialistFeedTool(getHost, openObservability = () => createObservabilitySqliteClient()) {
+  return {
+    name: "specialist_feed",
+    description: "Read one activation's event feed, like `sp feed`: tool calls, text, turns, status changes and completion " + "(view 'terminal', default), or every lifecycle event (view 'forensic'). Works on running, settled and " + "earlier-session activations. Pass since_seq (the last call's last_seq) to follow a running one.",
+    inputSchema: specialistFeedSchema,
+    async execute(input) {
+      const wanted = normalize2(input.activation_id);
+      const view = input.view ?? "terminal";
+      const limit = Math.min(input.limit ?? FEED_DEFAULT_LIMIT, FEED_MAX_LIMIT);
+      let client = null;
+      try {
+        client = openObservability();
+        if (!client)
+          return { status: "error", error: "observability.db is unavailable; specialist_status still answers for live activations" };
+        const live = (getHost?.()?.list() ?? []).map((s) => s.activationId);
+        const known = new Set([...live, ...client.listNativeActivationIds({ limit: 500 })]);
+        const matches = known.has(wanted) ? [wanted] : [...known].filter((id2) => id2.startsWith(wanted)).sort();
+        if (matches.length > 1) {
+          return { status: "error", error: `Ambiguous activation prefix: ${input.activation_id}`, candidates: matches.slice(0, 10) };
+        }
+        const id = matches[0] ?? wanted;
+        const since = input.since_seq ?? -1;
+        if (view === "forensic") {
+          const rows = client.readForensicEvents({ jobId: id, limit: 5000 }).filter((r) => r.seq > since);
+          if (rows.length === 0 && since < 0)
+            return { status: "error", error: `No events for activation: ${input.activation_id}` };
+          const shown2 = rows.slice(-limit);
+          return {
+            activation_id: id,
+            view,
+            events: shown2.map((r) => `${clock(r.t)} #${r.seq} ${r.event_name}`),
+            last_seq: shown2.at(-1)?.seq ?? since,
+            total: rows.length,
+            truncated: rows.length > shown2.length
+          };
+        }
+        const all = client.readEvents(id);
+        if (all.length === 0 && since < 0)
+          return { status: "error", error: `No events for activation: ${input.activation_id}` };
+        const lines = [];
+        for (const event of all) {
+          if ((event.seq ?? 0) <= since)
+            continue;
+          const line = feedLine(event);
+          if (line)
+            lines.push({ seq: event.seq ?? 0, line });
+        }
+        const shown = lines.slice(-limit);
+        const lastSeq = all.reduce((n, e) => Math.max(n, e.seq ?? 0), since);
+        return {
+          activation_id: id,
+          view,
+          events: shown.map((l) => l.line),
+          last_seq: lastSeq,
+          total: lines.length,
+          truncated: lines.length > shown.length
+        };
+      } catch (error) {
+        return { status: "error", error: `feed unreadable: ${error instanceof Error ? error.message : String(error)}` };
+      } finally {
+        try {
+          client?.close();
+        } catch {}
+      }
+    }
+  };
+}
 // src/specialist/bead-gate.ts
 import { spawnSync as spawnSync4 } from "node:child_process";
 var NON_DISPATCHABLE_STATUSES = new Set(["closed", "deferred"]);
@@ -26108,6 +26259,7 @@ export {
   toActivationResultView,
   toActivationCompactView,
   supersedeStaleRefusal,
+  specialistFeedSchema,
   shortBuildId,
   runScriptSpecialist as runScript,
   resolveWorkItemDbPath,
@@ -26126,11 +26278,14 @@ export {
   isBuildStale,
   inspect as inspectWorkspaceLease,
   hashFileBytes,
+  feedLine,
   extractSections,
   evaluateBeadReadiness,
   describeBuildIdentity,
   createWorkItemBoundary,
+  createSpecialistFeedTool,
   createObservabilitySqliteClientAtPath,
+  createObservabilitySqliteClient,
   createBeadFromContract,
   createActivationForensicSink,
   completionBody,
@@ -26145,6 +26300,9 @@ export {
   NULL_WORK_ITEMS,
   LaunchOutcomeError,
   LAUNCH_OUTCOME_SCHEMA_VERSION,
+  FEED_MAX_LIMIT,
+  FEED_LINE_MAX,
+  FEED_DEFAULT_LIMIT,
   DispatchRejectedError,
   BUILD_ID_BYTES
 };

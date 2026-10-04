@@ -98968,6 +98968,7 @@ var init_lib = __esm(() => {
   init_async_events();
   init_forensic_sink();
   init_observability_sqlite();
+  init_specialist_feed_tool();
   init_observability_db();
   init_bead_gate();
   init_build_identity();
