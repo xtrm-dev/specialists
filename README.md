@@ -200,6 +200,21 @@ is a separate plugin because Claude Code never runs a plugin's own drawing hooks
 that plugin raised, and the wake comes from the `specialists` MCP server. Without it,
 everything works and the rows show as raw text.
 
+#### Updates
+
+The plugins and the runtime update separately. Both carry the package version.
+
+- **Plugins** come from GitHub. Claude Code does not auto-update a third-party marketplace
+  by default. To turn it on, run `/plugin`, open **Marketplaces**, select `xtrm`, and choose
+  **Enable auto-update**. For a whole fleet, set `"autoUpdate": true` on the `xtrm` entry of
+  `extraKnownMarketplaces` in managed settings. Without auto-update, run
+  `claude plugin marketplace update xtrm`, then `claude plugin update specialists@xtrm` (and
+  `specialists-ui@xtrm`). Run `/reload-plugins` or restart to apply.
+- **The runtime** comes from npm, and Claude Code never updates it. Run
+  `npm i -g @jaggerxtrm/specialists@latest`, then restart Claude Code. When the plugin and the
+  runtime versions differ, the plugin's MCP launcher writes a warning to stderr with the
+  exact install command, and starts anyway.
+
 #### What the plugins need
 
 | Piece | Needed for | Set up by |
