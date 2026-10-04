@@ -28,7 +28,6 @@
     "dist/postinstall.js",
     "dist/types/",
     "dist/asset-contract.json",
-    "bin/install.js",
     "scripts/generate-release-attestation.mjs",
     "config/specialists/",
     "config/mandatory-rules/",
@@ -49,8 +48,7 @@
   ],
   "bin": {
     "specialists": "dist/index.js",
-    "sp": "dist/index.js",
-    "install": "bin/install.js"
+    "sp": "dist/index.js"
   },
   "scripts": {
     "build": "bun run generate:contract && bun build src/index.ts --target=bun --outfile=dist/index.js && bun build src/lib.ts --target=node --format=esm --outfile=dist/lib.js && bun build src/postinstall.ts --target=node --format=esm --outfile=dist/postinstall.js && tsc --emitDeclarationOnly --declaration --outDir dist/types && node scripts/postprocess-build.mjs",

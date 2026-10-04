@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Remove the `install` package bin so it no longer shadows GNU coreutils `install` on `PATH` after a global install (SPECIALISTS-4223). Use `specialists init`.
+
 ## [4.0.5] - 2026-10-04
 
 ### Added
