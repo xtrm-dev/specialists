@@ -9,8 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.0.6] - 2026-10-04
+
+### Added
+- Warn when the plugin and the runtime versions differ (SPECIALISTS-4256) ([7528bc0](https://github.com/xtrm-dev/specialists/commit/7528bc03a264e20352a37ad6542d0b790e136031))
+
 ### Fixed
-- Remove the `install` package bin so it no longer shadows GNU coreutils `install` on `PATH` after a global install (SPECIALISTS-4223). Use `specialists init`.
+- Block server-side instead of polling specialist_status (SPECIALISTS-4218) (#439) ([514ff74](https://github.com/xtrm-dev/specialists/commit/514ff749c5f4f7ea2dfa7ba023b84c73850e6ff3))
+- Version the Claude Code plugins with the package version (SPECIALISTS-4254) ([2734130](https://github.com/xtrm-dev/specialists/commit/2734130c54c497ffb60fa8a346d71bc9ae973f52))
+- Remove install bin that shadowed coreutils install (#443) ([629cef3](https://github.com/xtrm-dev/specialists/commit/629cef37685919efa2d90c2dc4cd1806431c32d5))
+
+### Project maintenance
+- Teach native Specialists tools first in the using-specialists skill (SPECIALISTS-4255) ([4335eac](https://github.com/xtrm-dev/specialists/commit/4335eac5d1a54eff6802c678705986171cee6b5e))
 
 ## [4.0.5] - 2026-10-04
 
