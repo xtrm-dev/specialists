@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.0.5] - 2026-10-04
+
+### Added
+- Add an operator surface to list and reconcile uncertain writer leases (SPECIALISTS-4251) ([3d3b7e8](https://github.com/xtrm-dev/specialists/commit/3d3b7e8e204adeae58e9fddf4552c89696d9d47f))
+
+### Fixed
+- Dedupe process channel wake vs wake-watch fallback (SPECIALISTS-4214) ([3521f83](https://github.com/xtrm-dev/specialists/commit/3521f83fcf97a18b232ca913777f6cd24e95b1cd))
+- Read the wake ack from the wrapped channel prompt ([e5d21f8](https://github.com/xtrm-dev/specialists/commit/e5d21f8cbeb84b77641c6d4d2eab7cd51e629873))
+- Match the channel tag attributes with literal patterns ([f601306](https://github.com/xtrm-dev/specialists/commit/f6013068f9629b084f3689a17920fbb393ce6f7d))
+- Read leases from the directory the runtime writes them to (SPECIALISTS-4250) ([3f9082f](https://github.com/xtrm-dev/specialists/commit/3f9082f942fcfeebaa20f4737a017c52e814864a))
+- Expose specialist_retry on the v2 MCP server (SPECIALISTS-4252) ([1d67f86](https://github.com/xtrm-dev/specialists/commit/1d67f86ad769415d798f01d10b764a15cbc3934c))
+- Push one failed wake per fallback walk, not one per failed model leg (SPECIALISTS-4253) ([f4c72ce](https://github.com/xtrm-dev/specialists/commit/f4c72ce62218a8e702a73f48ee73ea6ad549cfdb))
+
+### Project maintenance
+- Publish to npm with trusted publishing (GitHub OIDC) ([adb5309](https://github.com/xtrm-dev/specialists/commit/adb5309006712e73d47b3498e3ff7c96ae4593c9))
+- Regenerate dist for the channel read_with change with bun 1.3.14 ([f2aaaa0](https://github.com/xtrm-dev/specialists/commit/f2aaaa058a8ab46c8eb03e2017e577e54fe00a35))
+- Regenerate dist for the lease identity fix with bun 1.3.14 ([aa6e40f](https://github.com/xtrm-dev/specialists/commit/aa6e40f6cc2402c1e4e121f4311fcce5e7c7c288))
+- Regenerate dist for the lease operator surface with bun 1.3.14 ([5c81fa7](https://github.com/xtrm-dev/specialists/commit/5c81fa78e7a7ae18973e256747d2a93c85fe1c76))
+- Regenerate dist for the v2 retry registration with bun 1.3.14 ([6f9cf2c](https://github.com/xtrm-dev/specialists/commit/6f9cf2c06c134d33b1ccd86e90c8293e60ef7cfc))
+- Regenerate dist for the fallback failed-wake fix with bun 1.3.14 ([89fc910](https://github.com/xtrm-dev/specialists/commit/89fc910a5cff9dd701ef351ca0db585d1befdac5))
+
 ## [4.0.4] - 2026-10-03
 
 ### Added
