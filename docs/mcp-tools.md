@@ -3,7 +3,7 @@ title: MCP Tools Reference
 scope: mcp-tools
 category: reference
 version: 3.0.0
-updated: 2026-09-12
+updated: 2026-10-04
 description: MCP tool contract for the Specialists server, regenerated from the live registration surface.
 source_of_truth_for:
   - "src/mcp/v2-server.ts"
@@ -84,11 +84,14 @@ completions (`activation_results`), outstanding peer-channel interactions
 (`pending_interactions`), and workspaces needing reconciliation
 (`uncertain_workspaces`).
 
-Source: `src/tools/specialist/specialist_status.tool.ts` (inline schema; the
-tool takes no arguments).
+Source: `src/tools/specialist/specialist_status.tool.ts`.
 
 ```ts
-z.object({})
+z.object({
+  full: z.boolean().optional(),               // pre-142 verbose shape; compact by default
+  wait_for_change: z.boolean().optional(),    // park server-side until the fleet changes
+  timeout_s: z.number().int().min(1).max(60).optional(),  // wait budget; default 25
+})
 ```
 
 ### Behavior highlights
@@ -102,6 +105,14 @@ z.object({})
 - `specialist_status` is the authority. A pushed completion is a projection of
   the same object readable here; a coordinator that never received the push
   reads the identical result here.
+- `wait_for_change` parks server-side until the fleet actually changes — an
+  activation settles, is added or disposed, a result status lands, an ask is
+  raised or answered — then returns the SAME payload, or the payload unchanged
+  at `timeout_s`. The wake is event-driven (a `fleetChangeEpoch` on the host,
+  bumped by every forensic emit and by an answered ask), so a real transition
+  returns in well under a second while an idle waiter costs no CPU and holds no
+  database handle. Volatile display fields (`elapsed_s`, `token_usage`,
+  `turn_count`) are not a change. SPECIALISTS-4218.
 
 ## `specialist_dispatch`
 
@@ -349,12 +360,17 @@ Primary, authority, fallback — in that order:
    object the push serialises. A coordinator that never received the push
    reads the identical result here; the notification is a projection, never
    the authority.
-3. **Polling (degraded fallback).** Reading `specialist_status` on a loop is
-   the path taken when no coordinator is listening — suppressed wake
-   (`--no-specialist-wake` on Pi), unroutable push, or a client with no
-   notification path. An ask with no notification stays `pending` and stays
-   readable here. Polling is what remains when the first two lanes fail, not
-   the normal discovery mechanism. The Pi extension wakes via `sendMessage`
+3. **Blocking wait (degraded fallback).** The path taken when no coordinator is
+   listening — suppressed wake (`--no-specialist-wake` on Pi), unroutable push,
+   or a client with no notification path. Watch with
+   `specialist_status {wait_for_change: true, timeout_s: …}`, re-issued as it
+   times out: one parked request per budget, and a real transition still
+   returns in well under a second. An ask with no notification stays `pending`
+   and stays readable here. A fast poll LOOP is not the fallback and should
+   not be written: every MCP request costs server CPU even when the fleet is
+   empty, and a fixed-rate loop costs it whether or not anything changed
+   (SPECIALISTS-4218 — the shipped fleet band did exactly that, at one request
+   per 2 s per session, forever). The Pi extension wakes via `sendMessage`
    with `triggerTurn` instead of polling; see
    `config/pi-extensions/native-specialists/index.mjs`.
 
@@ -401,9 +417,10 @@ export function renderRejection(input: RejectionInput, build?: string) {
   on it, because a coordinator blocked waiting on completion cannot answer the
   clarification that would unblock it.
 - Wake-first: Channel wake is the primary discovery mechanism and
-  `specialist_status` is the authority. Poll only when the wake lane is known
-  dead (suppressed, unroutable, or unsupported); a reader that cannot see the
-  ask leaves the Specialist stuck forever.
+  `specialist_status` is the authority. When the wake lane is known dead
+  (suppressed, unroutable, or unsupported), watch with `wait_for_change`
+  rather than a poll loop; a reader that cannot see the ask leaves the
+  Specialist stuck forever.
 - Push-as-projection: a pushed completion serialises the SAME validated
   `ActivationResult` that `specialist_status.activation_results` projects.
 

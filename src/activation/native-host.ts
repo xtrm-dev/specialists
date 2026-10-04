@@ -772,6 +772,26 @@ export interface NativeActivationSessionEventInput {
 /** Discards events. Used only where forensics are genuinely not wanted (unit tests). */
 export const NULL_FORENSIC_SINK: ActivationForensicSink = { emit: () => {} };
 
+/**
+ * Wrap a forensic sink so every emit also wakes fleet-change waiters (SPECIALISTS-4218).
+ *
+ * Composition in the style of `withChannelPush`: the host already funnels every
+ * Fleet-visible mutation (dispatch, transition, ask raised, steer, stop, settle) through
+ * `forensics.emit`, so riding that stream adds exactly one wake seam and no second event
+ * bus. The wake runs AFTER the base emit — a waiter woken before the write could re-read
+ * the projection before the change it was told about exists.
+ */
+function withFleetWake(base: ActivationForensicSink, wake: () => void): ActivationForensicSink {
+  const emit = base.emit.bind(base);
+  return {
+    ...base,
+    emit(event) {
+      emit(event);
+      wake();
+    },
+  };
+}
+
 export interface NativeActivationHostDeps {
   loader?: SpecialistLoader;
   /**
@@ -895,6 +915,15 @@ export class NativeActivationHost {
   private readonly registry = new FleetRegistry();
 
   /**
+   * Fleet-change watch (SPECIALISTS-4218): a monotonic epoch bumped on every forensic
+   * emit and every answered ask, plus the waiters parked on the next bump. Every mutation
+   * of what `list()`/`pendingAsks()` project routes through one of those two seams, so a
+   * `specialist_status` call can block on this instead of polling.
+   */
+  private fleetEpoch = 0;
+  private readonly fleetWaiters = new Set<() => void>();
+
+  /**
    * Last per-message usage value seen per activation, keyed by live snapshot.
    * Feeds accumulateTokenUsage so delta-shape and cumulative-shape providers both
    * project monotonic totals. WeakMap: the entry dies with the snapshot, and resume
@@ -952,7 +981,9 @@ export class NativeActivationHost {
     );
     this.loader = deps.loader ?? new SpecialistLoader({ projectDir: this.cwd });
     this.workItemsInjected = deps.workItems;
-    this.forensics = deps.forensics ?? NULL_FORENSIC_SINK;
+    // Fleet-change watch: wrapping the sink here covers every emit call site the host
+    // already has and every future one, the same guarantee withChannelPush buys for push.
+    this.forensics = withFleetWake(deps.forensics ?? NULL_FORENSIC_SINK, () => this.wakeFleetWaiters());
     this.loadSdk = deps.loadSdk ?? loadPiSdk;
     this.now = deps.now ?? (() => Date.now());
     this.sessionStatsTimeoutMs = deps.sessionStatsTimeoutMs;
@@ -2779,7 +2810,7 @@ export class NativeActivationHost {
     const ask = this.interactions.pendingAsks().find(a => a.message.messageId === messageId);
     if (!ask) return undefined;
 
-    return this.interactions.send({
+    const reply = await this.interactions.send({
       kind: 'reply',
       from: ask.message.to,
       to: ask.message.from,
@@ -2788,6 +2819,12 @@ export class NativeActivationHost {
       body,
       inReplyTo: messageId,
     });
+    // An answered ask changes pendingAsks() with no forensic emit of its own — the raise
+    // had one (clarification_requested), the resolution is only this transport send. Parked
+    // fleet-change waiters must see the ask disappear within the latency bound, not at
+    // their timeout (SPECIALISTS-4218).
+    this.wakeFleetWaiters();
+    return reply;
   }
 
   /**
@@ -2951,6 +2988,42 @@ export class NativeActivationHost {
   /** The Fleet projection: every activation this process knows about, transport-neutral. */
   list(): ActivationSnapshot[] {
     return this.registry.list();
+  }
+
+  /** Monotonic Fleet-change epoch; see {@link waitForFleetChange}. */
+  fleetChangeEpoch(): number {
+    return this.fleetEpoch;
+  }
+
+  /**
+   * Park until the Fleet epoch passes `sinceEpoch` — or, when it already has, resolve
+   * immediately — and return 'change'; 'timeout' after `timeoutMs` (SPECIALISTS-4218).
+   *
+   * Level-triggered on purpose: a wake that lands between the caller's snapshot and its
+   * registration is still caught by the epoch comparison, so a change cannot be missed to
+   * a race and then sit unseen until the timeout. Pure in-process promise: no timer-backed
+   * database handle, no read transaction held while parked (the observability.db WAL
+   * constraint), no CPU while waiting.
+   */
+  waitForFleetChange(timeoutMs: number, sinceEpoch = this.fleetEpoch): Promise<'change' | 'timeout'> {
+    if (this.fleetEpoch > sinceEpoch) return Promise.resolve('change');
+    return new Promise((resolve) => {
+      const settle = (outcome: 'change' | 'timeout') => {
+        clearTimeout(timer);
+        this.fleetWaiters.delete(wake);
+        resolve(outcome);
+      };
+      const wake = () => settle('change');
+      const timer = setTimeout(() => settle('timeout'), Math.max(0, timeoutMs));
+      this.fleetWaiters.add(wake);
+    });
+  }
+
+  /** Bump the epoch and wake every parked waiter. Forensic emits and answered asks. */
+  private wakeFleetWaiters(): void {
+    this.fleetEpoch += 1;
+    for (const wake of this.fleetWaiters) wake();
+    this.fleetWaiters.clear();
   }
 
   /**

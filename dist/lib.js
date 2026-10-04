@@ -23573,6 +23573,16 @@ function createActivationResourceLoader(sdk, options) {
 }
 var FALLBACK_RETRYABLE_CLASSES = new Set(["rate_limit", "timeout", "transient"]);
 var NULL_FORENSIC_SINK = { emit: () => {} };
+function withFleetWake(base, wake) {
+  const emit = base.emit.bind(base);
+  return {
+    ...base,
+    emit(event) {
+      emit(event);
+      wake();
+    }
+  };
+}
 
 class NativeActivationHost {
   loader;
@@ -23590,6 +23600,8 @@ class NativeActivationHost {
   republished = false;
   env;
   registry = new FleetRegistry;
+  fleetEpoch = 0;
+  fleetWaiters = new Set;
   lastUsageSeen = new WeakMap;
   toolDurationWatch = new Map;
   toolDurationWarnMs;
@@ -23601,7 +23613,7 @@ class NativeActivationHost {
     this.interactions = new InteractionTransport(deps.peer ? { deliver: this.wirePeerDelivery(deps.peer) } : {});
     this.loader = deps.loader ?? new SpecialistLoader({ projectDir: this.cwd });
     this.workItemsInjected = deps.workItems;
-    this.forensics = deps.forensics ?? NULL_FORENSIC_SINK;
+    this.forensics = withFleetWake(deps.forensics ?? NULL_FORENSIC_SINK, () => this.wakeFleetWaiters());
     this.loadSdk = deps.loadSdk ?? loadPiSdk;
     this.now = deps.now ?? (() => Date.now());
     this.sessionStatsTimeoutMs = deps.sessionStatsTimeoutMs;
@@ -24759,7 +24771,7 @@ class NativeActivationHost {
     const ask = this.interactions.pendingAsks().find((a) => a.message.messageId === messageId);
     if (!ask)
       return;
-    return this.interactions.send({
+    const reply = await this.interactions.send({
       kind: "reply",
       from: ask.message.to,
       to: ask.message.from,
@@ -24768,6 +24780,8 @@ class NativeActivationHost {
       body,
       inReplyTo: messageId
     });
+    this.wakeFleetWaiters();
+    return reply;
   }
   save(snapshot) {
     try {
@@ -24865,6 +24879,29 @@ class NativeActivationHost {
   }
   list() {
     return this.registry.list();
+  }
+  fleetChangeEpoch() {
+    return this.fleetEpoch;
+  }
+  waitForFleetChange(timeoutMs, sinceEpoch = this.fleetEpoch) {
+    if (this.fleetEpoch > sinceEpoch)
+      return Promise.resolve("change");
+    return new Promise((resolve10) => {
+      const settle = (outcome) => {
+        clearTimeout(timer);
+        this.fleetWaiters.delete(wake);
+        resolve10(outcome);
+      };
+      const wake = () => settle("change");
+      const timer = setTimeout(() => settle("timeout"), Math.max(0, timeoutMs));
+      this.fleetWaiters.add(wake);
+    });
+  }
+  wakeFleetWaiters() {
+    this.fleetEpoch += 1;
+    for (const wake of this.fleetWaiters)
+      wake();
+    this.fleetWaiters.clear();
   }
   async stop(activationId, reason = "operator request") {
     const record2 = this.registry.get(activationId);

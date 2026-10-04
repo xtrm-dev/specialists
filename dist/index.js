@@ -94497,13 +94497,36 @@ var init_polling = __esm(() => {
 });
 
 // src/tools/specialist/specialist_status.tool.ts
+function fleetFingerprint(host, results) {
+  const activations = host.list().map((s) => `${s.activationId}:${s.state}`).sort();
+  const settled = results.map((r) => `${r.activationId}:${r.status}`).sort();
+  const asks = host.pendingAsks().map((a) => a.message.messageId).sort();
+  return JSON.stringify([activations, settled, asks]);
+}
+async function waitForFleetChange(host, getPusher, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  const baseline = fleetFingerprint(host, getPusher?.()?.allResults() ?? []);
+  for (;; ) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0)
+      return;
+    const epoch = host.fleetChangeEpoch();
+    if (fleetFingerprint(host, getPusher?.()?.allResults() ?? []) !== baseline)
+      return;
+    await host.waitForFleetChange(remaining, epoch);
+  }
+}
 function createSpecialistStatusTool(loader, circuitBreaker, getHost, getPusher) {
   return {
     name: "specialist_status",
-    description: "System health: backend circuit breaker states, loaded specialist count, and native in-process activations with any question they are waiting on \u2014 answer those with specialist_reply.",
+    description: "System health: backend circuit breaker states, loaded specialist count, and native in-process activations with any question they are waiting on \u2014 answer those with specialist_reply. Pass wait_for_change with timeout_s to block server-side until the fleet actually changes instead of polling.",
     inputSchema: specialistStatusSchema,
     async execute(input2) {
       const host = getHost?.();
+      if (input2.wait_for_change === true && host) {
+        const timeoutS = Math.min(Math.max(input2.timeout_s ?? 25, 1), 60);
+        await waitForFleetChange(host, getPusher, timeoutS * 1000);
+      }
       if (input2.full === true) {
         const list3 = await loader.list();
         let pending_interactions = [];
@@ -94551,7 +94574,9 @@ var init_specialist_status_tool = __esm(() => {
   init_activation_tool();
   BACKENDS2 = ["gemini", "qwen", "anthropic", "openai"];
   specialistStatusSchema = objectType({
-    full: booleanType().optional().describe("Return the full verbose payload (pre-SPECIALISTS-142 shape). Default compact.")
+    full: booleanType().optional().describe("Return the full verbose payload (pre-SPECIALISTS-142 shape). Default compact."),
+    wait_for_change: booleanType().optional().describe("Block until the compact Fleet projection actually changes (activation state/result, pending asks) or the timeout passes, then return the same payload as a normal call. One blocking call replaces a poll loop: ~1 call per timeout while nothing changes, and a real transition still returns within ~1s. Ignored when this server hosts no native Fleet."),
+    timeout_s: numberType().int().min(1).max(60).optional().describe("How long wait_for_change may block, in seconds (1-60, default 25). Keep it under the client tool-call timeout.")
   });
 });
 
@@ -96591,6 +96616,16 @@ function createActivationResourceLoader(sdk, options2) {
     noThemes: true
   });
 }
+function withFleetWake(base, wake) {
+  const emit2 = base.emit.bind(base);
+  return {
+    ...base,
+    emit(event) {
+      emit2(event);
+      wake();
+    }
+  };
+}
 
 class NativeActivationHost {
   loader;
@@ -96608,6 +96643,8 @@ class NativeActivationHost {
   republished = false;
   env;
   registry = new FleetRegistry;
+  fleetEpoch = 0;
+  fleetWaiters = new Set;
   lastUsageSeen = new WeakMap;
   toolDurationWatch = new Map;
   toolDurationWarnMs;
@@ -96619,7 +96656,7 @@ class NativeActivationHost {
     this.interactions = new InteractionTransport(deps.peer ? { deliver: this.wirePeerDelivery(deps.peer) } : {});
     this.loader = deps.loader ?? new SpecialistLoader({ projectDir: this.cwd });
     this.workItemsInjected = deps.workItems;
-    this.forensics = deps.forensics ?? NULL_FORENSIC_SINK;
+    this.forensics = withFleetWake(deps.forensics ?? NULL_FORENSIC_SINK, () => this.wakeFleetWaiters());
     this.loadSdk = deps.loadSdk ?? loadPiSdk;
     this.now = deps.now ?? (() => Date.now());
     this.sessionStatsTimeoutMs = deps.sessionStatsTimeoutMs;
@@ -97777,7 +97814,7 @@ class NativeActivationHost {
     const ask = this.interactions.pendingAsks().find((a) => a.message.messageId === messageId);
     if (!ask)
       return;
-    return this.interactions.send({
+    const reply = await this.interactions.send({
       kind: "reply",
       from: ask.message.to,
       to: ask.message.from,
@@ -97786,6 +97823,8 @@ class NativeActivationHost {
       body,
       inReplyTo: messageId
     });
+    this.wakeFleetWaiters();
+    return reply;
   }
   save(snapshot) {
     try {
@@ -97883,6 +97922,29 @@ class NativeActivationHost {
   }
   list() {
     return this.registry.list();
+  }
+  fleetChangeEpoch() {
+    return this.fleetEpoch;
+  }
+  waitForFleetChange(timeoutMs, sinceEpoch = this.fleetEpoch) {
+    if (this.fleetEpoch > sinceEpoch)
+      return Promise.resolve("change");
+    return new Promise((resolve25) => {
+      const settle = (outcome) => {
+        clearTimeout(timer);
+        this.fleetWaiters.delete(wake);
+        resolve25(outcome);
+      };
+      const wake = () => settle("change");
+      const timer = setTimeout(() => settle("timeout"), Math.max(0, timeoutMs));
+      this.fleetWaiters.add(wake);
+    });
+  }
+  wakeFleetWaiters() {
+    this.fleetEpoch += 1;
+    for (const wake of this.fleetWaiters)
+      wake();
+    this.fleetWaiters.clear();
   }
   async stop(activationId, reason = "operator request") {
     const record5 = this.registry.get(activationId);

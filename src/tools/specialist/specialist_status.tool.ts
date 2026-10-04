@@ -14,7 +14,63 @@ export const specialistStatusSchema = z.object({
   full: z.boolean().optional().describe(
     'Return the full verbose payload (pre-SPECIALISTS-142 shape). Default compact.',
   ),
+  wait_for_change: z.boolean().optional().describe(
+    'Block until the compact Fleet projection actually changes (activation state/result, pending asks) or the timeout passes, then return the same payload as a normal call. One blocking call replaces a poll loop: ~1 call per timeout while nothing changes, and a real transition still returns within ~1s. Ignored when this server hosts no native Fleet.',
+  ),
+  timeout_s: z
+    .number()
+    .int()
+    .min(1)
+    .max(60)
+    .optional()
+    .describe('How long wait_for_change may block, in seconds (1-60, default 25). Keep it under the client tool-call timeout.'),
 });
+
+/** Fields the wait compares — the actionable set. Volatile display fields (elapsed_s, token_usage) are excluded so a running activation's turn noise does not unblock the wait. */
+function fleetFingerprint(
+  host: NativeActivationHost,
+  results: { activationId: string; status: string }[],
+): string {
+  const activations = host.list().map(s => `${s.activationId}:${s.state}`).sort();
+  const settled = results.map(r => `${r.activationId}:${r.status}`).sort();
+  const asks = host.pendingAsks().map(a => a.message.messageId).sort();
+  return JSON.stringify([activations, settled, asks]);
+}
+
+/**
+ * Park on the host's fleet-change signal until the actionable fingerprint moves or the
+ * deadline passes (SPECIALISTS-4218).
+ *
+ * Each iteration CAPTURES the epoch, READS the fingerprint and REGISTERS the waiter
+ * without an await in between. Both halves are load-bearing:
+ *
+ *   - A fingerprint-neutral wake (a finished turn, a retry boundary, a compaction
+ *     marker) moves the epoch but not the fingerprint, so the next iteration must park on
+ *     the epoch it was handed AFTER that wake. Carrying one captured epoch across
+ *     iterations makes every re-park satisfy the level-triggered fast path immediately
+ *     and spin on microtasks until the deadline — 951k fingerprint reads and 1.0 s of CPU
+ *     in a 3 s wait, from ONE neutral wake (SPECIALISTS-4218 review, FAIL).
+ *   - Capturing the epoch and reading the fingerprint with no await between them keeps the
+ *     no-lost-wakeup property: `waitForFleetChange` registers its waiter synchronously, so
+ *     a wake landing in that block either bumps the epoch before registration (the
+ *     fast path returns at once and this loop observes the change) or lands after it (the
+ *     waiter resolves).
+ */
+async function waitForFleetChange(
+  host: NativeActivationHost,
+  getPusher: (() => RuntimeEventPusher | undefined) | undefined,
+  timeoutMs: number,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  const baseline = fleetFingerprint(host, getPusher?.()?.allResults() ?? []);
+  for (;;) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return;
+    const epoch = host.fleetChangeEpoch();
+    if (fleetFingerprint(host, getPusher?.()?.allResults() ?? []) !== baseline) return;
+    await host.waitForFleetChange(remaining, epoch);
+  }
+}
 
 /**
  * @param getHost Native runtime, when this process hosts one. Optional so the CLI and the
@@ -32,7 +88,8 @@ export function createSpecialistStatusTool(
 ) {
   return {
     name: 'specialist_status' as const,
-    description: 'System health: backend circuit breaker states, loaded specialist count, and native in-process activations with any question they are waiting on — answer those with specialist_reply.',
+    description:
+      'System health: backend circuit breaker states, loaded specialist count, and native in-process activations with any question they are waiting on — answer those with specialist_reply. Pass wait_for_change with timeout_s to block server-side until the fleet actually changes instead of polling.',
     inputSchema: specialistStatusSchema,
     async execute(input: z.infer<typeof specialistStatusSchema>) {
       // Compact default (SPECIALISTS-142): identity, state, cost, intent per row;
@@ -50,6 +107,15 @@ export function createSpecialistStatusTool(
       // `ActivationSnapshot`, so this is the same whether the activation was dispatched over
       // MCP or by the Pi extension.
       const host = getHost?.();
+      // Blocking wait (SPECIALISTS-4218): park FIRST, answer SECOND, so the returned
+      // payload is the post-change projection. No host means nothing to wait on and no
+      // Fleet to report — fall straight through. The wait holds no database handle; the
+      // timeout is clamped to the schema's 1-60s with a 25s default that sits under the
+      // common 30s MCP client tool timeout.
+      if (input.wait_for_change === true && host) {
+        const timeoutS = Math.min(Math.max(input.timeout_s ?? 25, 1), 60);
+        await waitForFleetChange(host, getPusher, timeoutS * 1000);
+      }
       if (input.full === true) {
         const list = await loader.list();
 

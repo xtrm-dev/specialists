@@ -469,6 +469,14 @@ export declare class NativeActivationHost {
     private readonly env;
     private readonly registry;
     /**
+     * Fleet-change watch (SPECIALISTS-4218): a monotonic epoch bumped on every forensic
+     * emit and every answered ask, plus the waiters parked on the next bump. Every mutation
+     * of what `list()`/`pendingAsks()` project routes through one of those two seams, so a
+     * `specialist_status` call can block on this instead of polling.
+     */
+    private fleetEpoch;
+    private readonly fleetWaiters;
+    /**
      * Last per-message usage value seen per activation, keyed by live snapshot.
      * Feeds accumulateTokenUsage so delta-shape and cumulative-shape providers both
      * project monotonic totals. WeakMap: the entry dies with the snapshot, and resume
@@ -713,6 +721,21 @@ export declare class NativeActivationHost {
     private wirePeerDelivery;
     /** The Fleet projection: every activation this process knows about, transport-neutral. */
     list(): ActivationSnapshot[];
+    /** Monotonic Fleet-change epoch; see {@link waitForFleetChange}. */
+    fleetChangeEpoch(): number;
+    /**
+     * Park until the Fleet epoch passes `sinceEpoch` — or, when it already has, resolve
+     * immediately — and return 'change'; 'timeout' after `timeoutMs` (SPECIALISTS-4218).
+     *
+     * Level-triggered on purpose: a wake that lands between the caller's snapshot and its
+     * registration is still caught by the epoch comparison, so a change cannot be missed to
+     * a race and then sit unseen until the timeout. Pure in-process promise: no timer-backed
+     * database handle, no read transaction held while parked (the observability.db WAL
+     * constraint), no CPU while waiting.
+     */
+    waitForFleetChange(timeoutMs: number, sinceEpoch?: number): Promise<'change' | 'timeout'>;
+    /** Bump the epoch and wake every parked waiter. Forensic emits and answered asks. */
+    private wakeFleetWaiters;
     /**
      * Explicitly stop and dispose an activation.
      *
