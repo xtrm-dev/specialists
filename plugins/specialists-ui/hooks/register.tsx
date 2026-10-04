@@ -173,7 +173,10 @@ export function channelRow(text: string): ChannelRow | null {
     event: frame.event,
     ...(frame.issue ? { issue: frame.issue } : {}),
     detail: shown,
-    hint: EVENT_HINT[frame.event] ?? 'use specialist_status for authoritative state',
+    // The brief's own "… +N more lines in specialist_result" already says where the rest is.
+    hint: shown.some(line => line.startsWith('… ') && line.includes('specialist_result'))
+      ? ''
+      : EVENT_HINT[frame.event] ?? 'use specialist_status for authoritative state',
   }
 }
 
@@ -209,6 +212,10 @@ export function specialistToolCall(tool: string, input: unknown): ToolCall | nul
       return head('Status', short)
     case 'specialist_result':
       return head('Result', short)
+    case 'specialist_feed':
+      return head('Feed', joined(short, args.view === 'forensic' ? 'forensic' : undefined, typeof args.since_seq === 'number' ? `since #${args.since_seq}` : undefined))
+    case 'specialist_lease_reconcile':
+      return head('Leases', stringArg(args.op) ?? stringArg(args.workspace))
     case 'specialist_list':
       return head('List specialists', stringArg(args.name))
     case 'specialist_reply':
@@ -308,6 +315,12 @@ export function toolResultLine(tool: string, output: unknown): { text: string; i
       const lines = body === '' ? 0 : body.split('\n').length
       return { text: joined(stringArg(record.status), count(lines, 'line')), isError: false }
     }
+    case 'specialist_feed': {
+      const events = Array.isArray(record.events) ? record.events.length : 0
+      const total = typeof record.total === 'number' ? record.total : events
+      const last = typeof record.last_seq === 'number' ? `last #${record.last_seq}` : undefined
+      return { text: joined(record.truncated === true ? `${events} of ${total} events` : count(events, 'event'), last)!, isError: false }
+    }
     case 'specialist_list':
       return Array.isArray(record.specialists) ? { text: count(record.specialists.length, 'specialist'), isError: false } : null
     default: {
@@ -369,7 +382,7 @@ export function register(on: On) {
                 <Text key={i} dimColor>  {line}</Text>
               ),
             )}
-            <Text dimColor italic>  {row.hint}</Text>
+            {row.hint ? <Text dimColor italic>  {row.hint}</Text> : null}
           </>
         )}
       </Box>

@@ -71,6 +71,8 @@ describe('transcript rows', () => {
       hint: 'use specialist_result for full result',
     })
     expect(channelRow(BRIEF_TEXT)?.detail).toEqual(['42s • 3 turns · purpose: map the wake path', '> Found two paths.'])
+    // A brief that already says where the rest is drops the hint, which would repeat it.
+    expect(channelRow(`${BRIEF_TEXT}\n… +1 more lines in specialist_result`)?.hint).toBe('')
     expect(channelRow('Specialist explorer: needs_reply (act:f6ab7b21-4a3). x')?.hint).toContain('specialist_reply')
     const long = [CHANNEL_TEXT, ...Array.from({ length: 8 }, (_, i) => `> line ${i}`)].join('\n')
     expect(channelRow(long)?.detail).toHaveLength(BRIEF_ROW_LINES + 1)
@@ -92,6 +94,9 @@ describe('transcript rows', () => {
       ['specialist_status', {}, { name: 'Status' }],
       ['specialist_status', { activation_id: 'act:ac8e294a-3a0' }, { name: 'Status', args: 'ac8e294a' }],
       ['specialist_result', { activation_id: 'act:ac8e294a-3a0' }, { name: 'Result', args: 'ac8e294a' }],
+      ['specialist_feed', { activation_id: '610bbb00' }, { name: 'Feed', args: '610bbb00' }],
+      ['specialist_feed', { activation_id: 'act:610bbb00-e05', view: 'forensic', since_seq: 24 }, { name: 'Feed', args: '610bbb00 · forensic · since #24' }],
+      ['specialist_lease_reconcile', {}, { name: 'Leases' }],
       ['specialist_list', {}, { name: 'List specialists' }],
       ['specialist_reply', { message_id: 'msg-1' }, { name: 'Reply', args: 'msg-1' }],
       ['specialist_steer', { activation_id: 'act:ac8e294a-3a0' }, { name: 'Steer', args: 'ac8e294a' }],
@@ -131,6 +136,12 @@ describe('transcript rows', () => {
     expect(
       toolResultLine('mcp__specialists__specialist_result', mcpText({ status: 'done', output: 'a\nb\nc', source: 'memory' })),
     ).toEqual({ text: 'done · 3 lines', isError: false })
+    expect(
+      toolResultLine('mcp__specialists__specialist_feed', mcpText({ events: ['a', 'b'], last_seq: 43, total: 16, truncated: true })),
+    ).toEqual({ text: '2 of 16 events · last #43', isError: false })
+    expect(
+      toolResultLine('mcp__specialists__specialist_feed', mcpText({ events: ['a'], last_seq: 3, total: 1, truncated: false })),
+    ).toEqual({ text: '1 event · last #3', isError: false })
     expect(
       toolResultLine('mcp__specialists__specialist_result', mcpText({ status: 'error', error: 'Unknown activation: x' })),
     ).toEqual({ text: 'Unknown activation: x', isError: true })
