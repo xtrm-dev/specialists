@@ -20,7 +20,7 @@
 // (SPECIALISTS-4225). The global-prefix candidates mirror resolveSubstrateFromGlobalPrefix in
 // src/activation/workitem-store.ts, without a child process: this runs on every session start.
 import { createRequire } from 'node:module';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -73,6 +73,27 @@ if (!entry) {
       `Searched:\n  ${searched.join('\n  ')}`,
   );
   process.exit(1);
+}
+
+// A marketplace install updates this plugin from GitHub and the runtime from npm, separately,
+// so the two can drift (SPECIALISTS-4256). Both carry the package version, so a difference
+// is a real skew: say so once, name the fix, and start anyway. Unreadable versions stay silent.
+function versionSkew(runtimeEntry) {
+  try {
+    const plugin = JSON.parse(readFileSync(new URL('../.claude-plugin/plugin.json', import.meta.url), 'utf8')).version;
+    const runtime = JSON.parse(readFileSync(join(dirname(dirname(runtimeEntry)), 'package.json'), 'utf8')).version;
+    return plugin && runtime && plugin !== runtime ? { plugin, runtime } : null;
+  } catch {
+    return null;
+  }
+}
+
+const skew = versionSkew(entry);
+if (skew) {
+  console.error(
+    `specialists plugin: plugin ${skew.plugin} is running against runtime ${skew.runtime}. ` +
+      `Update the runtime with: npm i -g @jaggerxtrm/specialists@${skew.plugin}`,
+  );
 }
 
 // Claude Code delivers the channel wake only on a legacy (2025-11-25) connection, and it

@@ -226,6 +226,35 @@ describe('specialists plugin launcher in a marketplace install', () => {
     }
   });
 
+  it('warns once when the plugin and the runtime versions differ, and still starts', () => {
+    const root = mkdtempSync(join(tmpdir(), 'sp-launcher-'));
+    try {
+      const launcher = cacheShapedLauncher(root);
+      const pluginDir = join(dirname(launcher), '..', '.claude-plugin');
+      mkdirSync(pluginDir, { recursive: true });
+      writeFileSync(join(pluginDir, 'plugin.json'), JSON.stringify({ name: 'specialists', version: '9.9.9' }));
+      const prefix = join(root, 'nvm', 'v25');
+      mkdirSync(join(prefix, 'bin'), { recursive: true });
+      writeFileSync(join(prefix, 'bin', 'npm'), '');
+      const pkg = join(prefix, 'lib', 'node_modules', '@jaggerxtrm', 'specialists');
+      mkdirSync(join(pkg, 'dist'), { recursive: true });
+      writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: '@jaggerxtrm/specialists', version: '1.0.0' }));
+      writeFileSync(join(pkg, 'dist', 'index.js'), "console.log('FAKE_RUNTIME_STARTED');\n");
+
+      const skewed = launch(root, launcher, [join(prefix, 'bin')]);
+      expect(skewed.status).toBe(0);
+      expect(skewed.stdout).toContain('FAKE_RUNTIME_STARTED');
+      expect(skewed.stderr).toContain('plugin 9.9.9 is running against runtime 1.0.0');
+      expect(skewed.stderr).toContain('npm i -g @jaggerxtrm/specialists@9.9.9');
+
+      writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: '@jaggerxtrm/specialists', version: '9.9.9' }));
+      const matched = launch(root, launcher, [join(prefix, 'bin')]);
+      expect(matched.stderr).toBe('');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('names every location it searched when no runtime exists', () => {
     const root = mkdtempSync(join(tmpdir(), 'sp-launcher-'));
     try {
