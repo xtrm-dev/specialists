@@ -94617,7 +94617,8 @@ function createSpecialistFeedTool(getHost, openObservability = () => createObser
     async execute(input2) {
       const wanted = normalize3(input2.activation_id);
       const view = input2.view ?? "terminal";
-      const limit = Math.min(input2.limit ?? FEED_DEFAULT_LIMIT, FEED_MAX_LIMIT);
+      const wantedLimit = Number.isFinite(input2.limit) ? Math.floor(input2.limit) : FEED_DEFAULT_LIMIT;
+      const limit = Math.min(Math.max(wantedLimit, 1), FEED_MAX_LIMIT);
       let client = null;
       try {
         client = openObservability();
