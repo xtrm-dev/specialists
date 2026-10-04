@@ -34,6 +34,10 @@ interface PruneOptions {
   apply: boolean;
   includeEpics: boolean;
   skipExtract: boolean;
+  /** Undefined = forensic table is not pruned at all (default; audit surface). */
+  forensicBeforeMs?: number;
+  /** Undefined = node_events is not pruned at all (default). */
+  nodeEventsBeforeMs?: number;
 }
 
 interface ExtractOptions {
@@ -94,7 +98,7 @@ function parseBeforeArgument(raw: string): number {
 function printDbHelp(): void {
   console.log([
     '',
-    'Usage: specialists db <setup|backfill|vacuum|prune|extract|stats|benchmark-export>',
+    'Usage: specialists db <setup|backfill|vacuum|checkpoint|prune|extract|stats|benchmark-export>',
     '',
     'Human-only commands for shared observability SQLite database maintenance and migration.',
     '',
@@ -103,8 +107,10 @@ function printDbHelp(): void {
     '  [BOOTSTRAP] init                   Alias for setup',
     '  [MIGRATION] backfill [--events]    Import historical .specialists/jobs/*/status.json rows',
     '  [MIGRATION] vacuum                 Run SQLite VACUUM (refuses when running/starting jobs exist)',
+    '  [MAINTENANCE] checkpoint [--truncate]           Checkpoint the WAL (PASSIVE default)',
     '  [MIGRATION] prune --before <iso|duration>      Prune old rows (default dry-run)',
     '              [--dry-run] [--apply] [--include-epics] [--skip-extract]',
+    '              [--forensic-before <iso|dur>] [--node-events-before <iso|dur>]',
     '  [MIGRATION] extract [--job <id>] [--all-missing] [--since <dur>] [--help]',
     '  [QUERY] stats [--spec <name>] [--model <glob>] [--since <dur>] [--format json|table] [--with-payload] [--help]',
     '  [ANALYSIS] benchmark-export [--output <path>] [--include-prep-jobs] [--epic-id <id>]',
@@ -114,13 +120,20 @@ function printDbHelp(): void {
     '  - prune removes specialist_results and terminal specialist_jobs older than --before',
     '  - prune never touches active-chain jobs',
     '  - prune never touches epic_runs unless --include-epics',
+    '  - prune never touches specialist_forensic_events or node_events unless their own',
+    '    --forensic-before / --node-events-before cutoff is given (audit surface)',
+    '  - checkpoint PASSIVE is safe against the live shared database at any time',
+    '  - checkpoint --truncate reclaims the -wal file and refuses while jobs are active',
     '',
     'Examples:',
     '  specialists db setup',
     '  specialists db backfill --events',
     '  specialists db vacuum',
+    '  specialists db checkpoint',
+    '  specialists db checkpoint --truncate',
     '  specialists db prune --before 30d --dry-run',
     '  specialists db prune --before 2026-01-01T00:00:00Z --apply --include-epics',
+    '  specialists db prune --before 90d --forensic-before 14d --apply',
     '',
   ].join('\n'));
 }
@@ -177,6 +190,8 @@ function parseBackfillOptions(argv: readonly string[]): BackfillOptions {
 
 function parsePruneOptions(argv: readonly string[]): PruneOptions {
   let beforeValue: string | null = null;
+  let forensicBeforeValue: string | null = null;
+  let nodeEventsBeforeValue: string | null = null;
   let apply = false;
   let dryRun = true;
   let includeEpics = false;
@@ -214,6 +229,22 @@ function parsePruneOptions(argv: readonly string[]): PruneOptions {
       continue;
     }
 
+    if (argument === '--forensic-before') {
+      const value = argv[index + 1];
+      if (!value) throw new Error('Missing value for --forensic-before');
+      forensicBeforeValue = value;
+      index += 1;
+      continue;
+    }
+
+    if (argument === '--node-events-before') {
+      const value = argv[index + 1];
+      if (!value) throw new Error('Missing value for --node-events-before');
+      nodeEventsBeforeValue = value;
+      index += 1;
+      continue;
+    }
+
     throw new Error(`Unknown option for db prune: '${argument}'`);
   }
 
@@ -224,6 +255,8 @@ function parsePruneOptions(argv: readonly string[]): PruneOptions {
     apply: apply && !dryRun,
     includeEpics,
     skipExtract,
+    forensicBeforeMs: forensicBeforeValue ? parseBeforeArgument(forensicBeforeValue) : undefined,
+    nodeEventsBeforeMs: nodeEventsBeforeValue ? parseBeforeArgument(nodeEventsBeforeValue) : undefined,
   };
 }
 
@@ -500,6 +533,43 @@ function runVacuum(): void {
   }
 }
 
+/**
+ * Run one WAL checkpoint by hand. PASSIVE never blocks and is always safe against the live,
+ * shared database; RESTART/TRUNCATE reclaim the -wal FILE (SQLite never shrinks it on its
+ * own) but TRUNCATE waits for readers, so it refuses while jobs are active (SPECIALISTS-4219).
+ */
+function runCheckpoint(argv: readonly string[]): void {
+  let mode: 'PASSIVE' | 'RESTART' | 'TRUNCATE' = 'PASSIVE';
+  for (const argument of argv) {
+    if (argument === '--truncate') { mode = 'TRUNCATE'; continue; }
+    if (argument === '--restart') { mode = 'RESTART'; continue; }
+    if (argument === '--passive') { mode = 'PASSIVE'; continue; }
+    throw new Error(`Unknown option for db checkpoint: '${argument}'`);
+  }
+
+  const sqliteClient = createObservabilitySqliteClient();
+  if (!sqliteClient) {
+    throw new Error('Failed to initialize observability SQLite schema. Run `specialists db setup` first and ensure sqlite3 is installed.');
+  }
+
+  try {
+    const activeJobs = sqliteClient.listActiveJobs(['running', 'starting']);
+    if (mode === 'TRUNCATE' && activeJobs.length > 0) {
+      const listing = activeJobs.slice(0, 5).map(job => `${job.job_id}:${job.status}`).join(', ');
+      throw new Error(`Refusing TRUNCATE checkpoint while active jobs exist (${activeJobs.length}): ${listing}`);
+    }
+
+    const report = sqliteClient.checkpointWal(mode);
+    console.log(`\n${bold('specialists db checkpoint')}\n`);
+    console.log(`  ${green('✓')} mode: ${report.mode}`);
+    console.log(`  ${green('✓')} wal frames: ${report.checkpointedFrames}/${report.logFrames} checkpointed${report.busy ? ` (busy: ${report.busy} - a reader holds an old snapshot)` : ''}`);
+    console.log(`  ${green('✓')} wal size: ${formatBytes(report.beforeWalBytes)} -> ${formatBytes(report.afterWalBytes)}`);
+    console.log('');
+  } finally {
+    sqliteClient.close();
+  }
+}
+
 function runPrune(options: PruneOptions): void {
   const sqliteClient = createObservabilitySqliteClient();
   if (!sqliteClient) {
@@ -512,6 +582,8 @@ function runPrune(options: PruneOptions): void {
       includeEpics: options.includeEpics,
       apply: options.apply,
       skipExtract: options.skipExtract,
+      forensicBeforeMs: options.forensicBeforeMs,
+      nodeEventsBeforeMs: options.nodeEventsBeforeMs,
     });
 
     console.log(`\n${bold('specialists db prune')}\n`);
@@ -522,6 +594,8 @@ function runPrune(options: PruneOptions): void {
     console.log(`  ${green('✓')} specialist_results: ${report.deletedResults}`);
     console.log(`  ${green('✓')} specialist_jobs: ${report.deletedJobs}`);
     console.log(`  ${green('✓')} extracted jobs: ${report.extractedJobs}`);
+    console.log(`  ${report.forensicBeforeMs === null ? yellow('○') : green('✓')} specialist_forensic_events: ${report.deletedForensicEvents} ${report.forensicBeforeMs === null ? '(untouched, use --forensic-before)' : `(before ${new Date(report.forensicBeforeMs).toISOString()})`}`);
+    console.log(`  ${report.nodeEventsBeforeMs === null ? yellow('○') : green('✓')} node_events: ${report.deletedNodeEvents} ${report.nodeEventsBeforeMs === null ? '(untouched, use --node-events-before)' : `(before ${new Date(report.nodeEventsBeforeMs).toISOString()})`}`);
     console.log(`  ${report.includeEpics ? green('✓') : yellow('○')} epic_runs: ${report.deletedEpicRuns} ${report.includeEpics ? '' : '(skipped, use --include-epics)'}`);
     console.log(`  ${yellow('○')} skipped active-chain jobs: ${report.skippedActiveChainJobs}`);
     console.log('');
@@ -890,6 +964,11 @@ export async function run(argv: readonly string[] = process.argv.slice(3)): Prom
 
   if (subcommand === 'vacuum') {
     runVacuum();
+    return;
+  }
+
+  if (subcommand === 'checkpoint') {
+    runCheckpoint(argv.slice(1));
     return;
   }
 

@@ -14046,6 +14046,17 @@ function verifyWalMode(db) {
     throw new Error(`WAL journal mode is not active (got: ${mode ?? "null"})`);
   }
 }
+function resolveWalSizeLimitBytes() {
+  const raw = process.env.SPECIALISTS_WAL_SIZE_LIMIT_BYTES?.trim();
+  if (!raw)
+    return DEFAULT_WAL_SIZE_LIMIT_BYTES;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : DEFAULT_WAL_SIZE_LIMIT_BYTES;
+}
+function applyWalRuntimePragmas(db) {
+  db.run(`PRAGMA wal_autocheckpoint=${WAL_AUTOCHECKPOINT_PAGES}`);
+  db.run(`PRAGMA journal_size_limit=${resolveWalSizeLimitBytes()}`);
+}
 function migrateToV2(db) {
   const hasV2 = db.query("SELECT 1 FROM schema_version WHERE version = 2 LIMIT 1").get();
   if (hasV2) {
@@ -14315,6 +14326,7 @@ function migrateToV4(db) {
 }
 function initSchema(db) {
   enforceWalMode(db);
+  applyWalRuntimePragmas(db);
   db.run(`
     CREATE TABLE IF NOT EXISTS schema_version (
       version     INTEGER PRIMARY KEY,
@@ -14777,6 +14789,7 @@ class SqliteClient {
     this.db = new Ctor(dbPath);
     this.db.run(`PRAGMA busy_timeout=${BUSY_TIMEOUT_MS}`);
     this.db.run("PRAGMA journal_mode=WAL");
+    applyWalRuntimePragmas(this.db);
   }
   writeStatusRow(status, lastOutput, identity2) {
     const statusJson = JSON.stringify(status);
@@ -16328,6 +16341,25 @@ class SqliteClient {
       `).all(...statuses);
     }, "listActiveJobs");
   }
+  getWalSizeBytes() {
+    try {
+      return statSync2(`${this.dbPath}-wal`).size;
+    } catch {
+      return 0;
+    }
+  }
+  checkpointWal(mode = "PASSIVE") {
+    const beforeWalBytes = this.getWalSizeBytes();
+    const row = this.db.query(`PRAGMA wal_checkpoint(${mode})`).get();
+    return {
+      mode,
+      busy: row?.busy ?? 0,
+      logFrames: row?.log ?? 0,
+      checkpointedFrames: row?.checkpointed ?? 0,
+      beforeWalBytes,
+      afterWalBytes: this.getWalSizeBytes()
+    };
+  }
   getDatabaseSizeBytes() {
     try {
       return statSync2(this.dbPath).size;
@@ -16400,6 +16432,10 @@ class SqliteClient {
           WHERE t < ?
         `).get(eventsCutoffMs)?.count ?? 0;
       const eventsCandidates = this.db.query("SELECT COUNT(*) AS count FROM specialist_events WHERE t < ?").get(eventsCutoffMs)?.count ?? 0;
+      const forensicBeforeMs = options.forensicBeforeMs ?? null;
+      const forensicCandidates = forensicBeforeMs === null ? 0 : this.db.query("SELECT COUNT(*) AS count FROM specialist_forensic_events WHERE t < ?").get(forensicBeforeMs)?.count ?? 0;
+      const nodeEventsBeforeMs = options.nodeEventsBeforeMs ?? null;
+      const nodeEventCandidates = nodeEventsBeforeMs === null ? 0 : this.db.query("SELECT COUNT(*) AS count FROM node_events WHERE t < ?").get(nodeEventsBeforeMs)?.count ?? 0;
       const epicCandidates = options.includeEpics ? this.db.query(`
           SELECT COUNT(*) AS count
           FROM epic_runs epic
@@ -16421,6 +16457,10 @@ class SqliteClient {
           deletedResults: resultCandidates,
           deletedJobs: jobCandidates,
           deletedEpicRuns: epicCandidates,
+          deletedForensicEvents: forensicCandidates,
+          deletedNodeEvents: nodeEventCandidates,
+          forensicBeforeMs,
+          nodeEventsBeforeMs,
           skippedActiveChainJobs,
           extractedJobs: extractCandidates
         };
@@ -16478,6 +16518,14 @@ class SqliteClient {
           )
       `);
       const deletedJobs = deleteJobs.run(options.beforeMs, ...terminalStatuses, ...activeStatuses).changes ?? 0;
+      let deletedForensicEvents = 0;
+      if (forensicBeforeMs !== null) {
+        deletedForensicEvents = this.db.query("DELETE FROM specialist_forensic_events WHERE t < ?").run(forensicBeforeMs).changes ?? 0;
+      }
+      let deletedNodeEvents = 0;
+      if (nodeEventsBeforeMs !== null) {
+        deletedNodeEvents = this.db.query("DELETE FROM node_events WHERE t < ?").run(nodeEventsBeforeMs).changes ?? 0;
+      }
       let deletedEpicRuns = 0;
       if (options.includeEpics) {
         const deleteEpics = this.db.query(`
@@ -16501,6 +16549,10 @@ class SqliteClient {
         deletedResults,
         deletedJobs,
         deletedEpicRuns,
+        deletedForensicEvents,
+        deletedNodeEvents,
+        forensicBeforeMs,
+        nodeEventsBeforeMs,
         skippedActiveChainJobs,
         extractedJobs
       };
@@ -16649,11 +16701,12 @@ function migrateToV16(db) {
       VALUES (16, strftime('%s', 'now') * 1000);
   `);
 }
-var _BunDatabase = null, _probed = false, BUSY_TIMEOUT_MS = 5000, MAX_RETRY_ATTEMPTS = 5, BASE_RETRY_DELAY_MS = 50, STALE_CLAIM_AGE_MS = 60000;
+var _BunDatabase = null, _probed = false, BUSY_TIMEOUT_MS = 5000, MAX_RETRY_ATTEMPTS = 5, BASE_RETRY_DELAY_MS = 50, WAL_AUTOCHECKPOINT_PAGES = 1000, DEFAULT_WAL_SIZE_LIMIT_BYTES, STALE_CLAIM_AGE_MS = 60000;
 var init_observability_sqlite = __esm(() => {
   init_observability_db();
   init_job_root();
   init_forensic_events();
+  DEFAULT_WAL_SIZE_LIMIT_BYTES = 64 * 1024 * 1024;
 });
 
 // src/specialist/runtime-origin.ts
@@ -22943,7 +22996,7 @@ function parseBeforeArgument(raw) {
 function printDbHelp() {
   console.log([
     "",
-    "Usage: specialists db <setup|backfill|vacuum|prune|extract|stats|benchmark-export>",
+    "Usage: specialists db <setup|backfill|vacuum|checkpoint|prune|extract|stats|benchmark-export>",
     "",
     "Human-only commands for shared observability SQLite database maintenance and migration.",
     "",
@@ -22952,8 +23005,10 @@ function printDbHelp() {
     "  [BOOTSTRAP] init                   Alias for setup",
     "  [MIGRATION] backfill [--events]    Import historical .specialists/jobs/*/status.json rows",
     "  [MIGRATION] vacuum                 Run SQLite VACUUM (refuses when running/starting jobs exist)",
+    "  [MAINTENANCE] checkpoint [--truncate]           Checkpoint the WAL (PASSIVE default)",
     "  [MIGRATION] prune --before <iso|duration>      Prune old rows (default dry-run)",
     "              [--dry-run] [--apply] [--include-epics] [--skip-extract]",
+    "              [--forensic-before <iso|dur>] [--node-events-before <iso|dur>]",
     "  [MIGRATION] extract [--job <id>] [--all-missing] [--since <dur>] [--help]",
     "  [QUERY] stats [--spec <name>] [--model <glob>] [--since <dur>] [--format json|table] [--with-payload] [--help]",
     "  [ANALYSIS] benchmark-export [--output <path>] [--include-prep-jobs] [--epic-id <id>]",
@@ -22963,13 +23018,20 @@ function printDbHelp() {
     "  - prune removes specialist_results and terminal specialist_jobs older than --before",
     "  - prune never touches active-chain jobs",
     "  - prune never touches epic_runs unless --include-epics",
+    "  - prune never touches specialist_forensic_events or node_events unless their own",
+    "    --forensic-before / --node-events-before cutoff is given (audit surface)",
+    "  - checkpoint PASSIVE is safe against the live shared database at any time",
+    "  - checkpoint --truncate reclaims the -wal file and refuses while jobs are active",
     "",
     "Examples:",
     "  specialists db setup",
     "  specialists db backfill --events",
     "  specialists db vacuum",
+    "  specialists db checkpoint",
+    "  specialists db checkpoint --truncate",
     "  specialists db prune --before 30d --dry-run",
     "  specialists db prune --before 2026-01-01T00:00:00Z --apply --include-epics",
+    "  specialists db prune --before 90d --forensic-before 14d --apply",
     ""
   ].join(`
 `));
@@ -23010,6 +23072,8 @@ function parseBackfillOptions(argv) {
 }
 function parsePruneOptions(argv) {
   let beforeValue = null;
+  let forensicBeforeValue = null;
+  let nodeEventsBeforeValue = null;
   let apply = false;
   let dryRun = true;
   let includeEpics = false;
@@ -23042,6 +23106,22 @@ function parsePruneOptions(argv) {
       skipExtract = true;
       continue;
     }
+    if (argument === "--forensic-before") {
+      const value = argv[index + 1];
+      if (!value)
+        throw new Error("Missing value for --forensic-before");
+      forensicBeforeValue = value;
+      index += 1;
+      continue;
+    }
+    if (argument === "--node-events-before") {
+      const value = argv[index + 1];
+      if (!value)
+        throw new Error("Missing value for --node-events-before");
+      nodeEventsBeforeValue = value;
+      index += 1;
+      continue;
+    }
     throw new Error(`Unknown option for db prune: '${argument}'`);
   }
   if (!beforeValue)
@@ -23050,7 +23130,9 @@ function parsePruneOptions(argv) {
     beforeMs: parseBeforeArgument(beforeValue),
     apply: apply && !dryRun,
     includeEpics,
-    skipExtract
+    skipExtract,
+    forensicBeforeMs: forensicBeforeValue ? parseBeforeArgument(forensicBeforeValue) : undefined,
+    nodeEventsBeforeMs: nodeEventsBeforeValue ? parseBeforeArgument(nodeEventsBeforeValue) : undefined
   };
 }
 function printExtractHelp() {
@@ -23299,6 +23381,45 @@ ${bold6("specialists db vacuum")}
     sqliteClient.close();
   }
 }
+function runCheckpoint(argv) {
+  let mode = "PASSIVE";
+  for (const argument of argv) {
+    if (argument === "--truncate") {
+      mode = "TRUNCATE";
+      continue;
+    }
+    if (argument === "--restart") {
+      mode = "RESTART";
+      continue;
+    }
+    if (argument === "--passive") {
+      mode = "PASSIVE";
+      continue;
+    }
+    throw new Error(`Unknown option for db checkpoint: '${argument}'`);
+  }
+  const sqliteClient = createObservabilitySqliteClient();
+  if (!sqliteClient) {
+    throw new Error("Failed to initialize observability SQLite schema. Run `specialists db setup` first and ensure sqlite3 is installed.");
+  }
+  try {
+    const activeJobs = sqliteClient.listActiveJobs(["running", "starting"]);
+    if (mode === "TRUNCATE" && activeJobs.length > 0) {
+      const listing = activeJobs.slice(0, 5).map((job) => `${job.job_id}:${job.status}`).join(", ");
+      throw new Error(`Refusing TRUNCATE checkpoint while active jobs exist (${activeJobs.length}): ${listing}`);
+    }
+    const report = sqliteClient.checkpointWal(mode);
+    console.log(`
+${bold6("specialists db checkpoint")}
+`);
+    console.log(`  ${green5("\u2713")} mode: ${report.mode}`);
+    console.log(`  ${green5("\u2713")} wal frames: ${report.checkpointedFrames}/${report.logFrames} checkpointed${report.busy ? ` (busy: ${report.busy} - a reader holds an old snapshot)` : ""}`);
+    console.log(`  ${green5("\u2713")} wal size: ${formatBytes(report.beforeWalBytes)} -> ${formatBytes(report.afterWalBytes)}`);
+    console.log("");
+  } finally {
+    sqliteClient.close();
+  }
+}
 function runPrune(options) {
   const sqliteClient = createObservabilitySqliteClient();
   if (!sqliteClient) {
@@ -23309,7 +23430,9 @@ function runPrune(options) {
       beforeMs: options.beforeMs,
       includeEpics: options.includeEpics,
       apply: options.apply,
-      skipExtract: options.skipExtract
+      skipExtract: options.skipExtract,
+      forensicBeforeMs: options.forensicBeforeMs,
+      nodeEventsBeforeMs: options.nodeEventsBeforeMs
     });
     console.log(`
 ${bold6("specialists db prune")}
@@ -23321,6 +23444,8 @@ ${bold6("specialists db prune")}
     console.log(`  ${green5("\u2713")} specialist_results: ${report.deletedResults}`);
     console.log(`  ${green5("\u2713")} specialist_jobs: ${report.deletedJobs}`);
     console.log(`  ${green5("\u2713")} extracted jobs: ${report.extractedJobs}`);
+    console.log(`  ${report.forensicBeforeMs === null ? yellow6("\u25CB") : green5("\u2713")} specialist_forensic_events: ${report.deletedForensicEvents} ${report.forensicBeforeMs === null ? "(untouched, use --forensic-before)" : `(before ${new Date(report.forensicBeforeMs).toISOString()})`}`);
+    console.log(`  ${report.nodeEventsBeforeMs === null ? yellow6("\u25CB") : green5("\u2713")} node_events: ${report.deletedNodeEvents} ${report.nodeEventsBeforeMs === null ? "(untouched, use --node-events-before)" : `(before ${new Date(report.nodeEventsBeforeMs).toISOString()})`}`);
     console.log(`  ${report.includeEpics ? green5("\u2713") : yellow6("\u25CB")} epic_runs: ${report.deletedEpicRuns} ${report.includeEpics ? "" : "(skipped, use --include-epics)"}`);
     console.log(`  ${yellow6("\u25CB")} skipped active-chain jobs: ${report.skippedActiveChainJobs}`);
     console.log("");
@@ -23606,6 +23731,10 @@ async function run12(argv = process.argv.slice(3)) {
   }
   if (subcommand === "vacuum") {
     runVacuum();
+    return;
+  }
+  if (subcommand === "checkpoint") {
+    runCheckpoint(argv.slice(1));
     return;
   }
   if (subcommand === "prune") {

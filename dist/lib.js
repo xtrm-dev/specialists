@@ -14082,6 +14082,19 @@ function verifyWalMode(db) {
     throw new Error(`WAL journal mode is not active (got: ${mode ?? "null"})`);
   }
 }
+var WAL_AUTOCHECKPOINT_PAGES = 1000;
+var DEFAULT_WAL_SIZE_LIMIT_BYTES = 64 * 1024 * 1024;
+function resolveWalSizeLimitBytes() {
+  const raw = process.env.SPECIALISTS_WAL_SIZE_LIMIT_BYTES?.trim();
+  if (!raw)
+    return DEFAULT_WAL_SIZE_LIMIT_BYTES;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : DEFAULT_WAL_SIZE_LIMIT_BYTES;
+}
+function applyWalRuntimePragmas(db) {
+  db.run(`PRAGMA wal_autocheckpoint=${WAL_AUTOCHECKPOINT_PAGES}`);
+  db.run(`PRAGMA journal_size_limit=${resolveWalSizeLimitBytes()}`);
+}
 function migrateToV2(db) {
   const hasV2 = db.query("SELECT 1 FROM schema_version WHERE version = 2 LIMIT 1").get();
   if (hasV2) {
@@ -14351,6 +14364,7 @@ function migrateToV4(db) {
 }
 function initSchema(db) {
   enforceWalMode(db);
+  applyWalRuntimePragmas(db);
   db.run(`
     CREATE TABLE IF NOT EXISTS schema_version (
       version     INTEGER PRIMARY KEY,
@@ -14814,6 +14828,7 @@ class SqliteClient {
     this.db = new Ctor(dbPath);
     this.db.run(`PRAGMA busy_timeout=${BUSY_TIMEOUT_MS}`);
     this.db.run("PRAGMA journal_mode=WAL");
+    applyWalRuntimePragmas(this.db);
   }
   writeStatusRow(status, lastOutput, identity) {
     const statusJson = JSON.stringify(status);
@@ -16365,6 +16380,25 @@ class SqliteClient {
       `).all(...statuses);
     }, "listActiveJobs");
   }
+  getWalSizeBytes() {
+    try {
+      return statSync2(`${this.dbPath}-wal`).size;
+    } catch {
+      return 0;
+    }
+  }
+  checkpointWal(mode = "PASSIVE") {
+    const beforeWalBytes = this.getWalSizeBytes();
+    const row = this.db.query(`PRAGMA wal_checkpoint(${mode})`).get();
+    return {
+      mode,
+      busy: row?.busy ?? 0,
+      logFrames: row?.log ?? 0,
+      checkpointedFrames: row?.checkpointed ?? 0,
+      beforeWalBytes,
+      afterWalBytes: this.getWalSizeBytes()
+    };
+  }
   getDatabaseSizeBytes() {
     try {
       return statSync2(this.dbPath).size;
@@ -16437,6 +16471,10 @@ class SqliteClient {
           WHERE t < ?
         `).get(eventsCutoffMs)?.count ?? 0;
       const eventsCandidates = this.db.query("SELECT COUNT(*) AS count FROM specialist_events WHERE t < ?").get(eventsCutoffMs)?.count ?? 0;
+      const forensicBeforeMs = options.forensicBeforeMs ?? null;
+      const forensicCandidates = forensicBeforeMs === null ? 0 : this.db.query("SELECT COUNT(*) AS count FROM specialist_forensic_events WHERE t < ?").get(forensicBeforeMs)?.count ?? 0;
+      const nodeEventsBeforeMs = options.nodeEventsBeforeMs ?? null;
+      const nodeEventCandidates = nodeEventsBeforeMs === null ? 0 : this.db.query("SELECT COUNT(*) AS count FROM node_events WHERE t < ?").get(nodeEventsBeforeMs)?.count ?? 0;
       const epicCandidates = options.includeEpics ? this.db.query(`
           SELECT COUNT(*) AS count
           FROM epic_runs epic
@@ -16458,6 +16496,10 @@ class SqliteClient {
           deletedResults: resultCandidates,
           deletedJobs: jobCandidates,
           deletedEpicRuns: epicCandidates,
+          deletedForensicEvents: forensicCandidates,
+          deletedNodeEvents: nodeEventCandidates,
+          forensicBeforeMs,
+          nodeEventsBeforeMs,
           skippedActiveChainJobs,
           extractedJobs: extractCandidates
         };
@@ -16515,6 +16557,14 @@ class SqliteClient {
           )
       `);
       const deletedJobs = deleteJobs.run(options.beforeMs, ...terminalStatuses, ...activeStatuses).changes ?? 0;
+      let deletedForensicEvents = 0;
+      if (forensicBeforeMs !== null) {
+        deletedForensicEvents = this.db.query("DELETE FROM specialist_forensic_events WHERE t < ?").run(forensicBeforeMs).changes ?? 0;
+      }
+      let deletedNodeEvents = 0;
+      if (nodeEventsBeforeMs !== null) {
+        deletedNodeEvents = this.db.query("DELETE FROM node_events WHERE t < ?").run(nodeEventsBeforeMs).changes ?? 0;
+      }
       let deletedEpicRuns = 0;
       if (options.includeEpics) {
         const deleteEpics = this.db.query(`
@@ -16538,6 +16588,10 @@ class SqliteClient {
         deletedResults,
         deletedJobs,
         deletedEpicRuns,
+        deletedForensicEvents,
+        deletedNodeEvents,
+        forensicBeforeMs,
+        nodeEventsBeforeMs,
         skippedActiveChainJobs,
         extractedJobs
       };

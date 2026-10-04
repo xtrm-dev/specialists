@@ -24,6 +24,29 @@ import type { PersistedChainIdentity } from './chain-identity.js';
 export declare function parseJournalMode(mode: string | null | undefined): string | null;
 export declare function enforceWalMode(db: BunDb): void;
 export declare function verifyWalMode(db: BunDb): void;
+/**
+ * Checkpoint threshold in WAL frames. 1000 frames x 4096 B = ~4 MB, which is SQLite's own
+ * default; it is set explicitly here so the WAL bound is a stated invariant of this store
+ * rather than an accident of the linked SQLite build.
+ */
+export declare const WAL_AUTOCHECKPOINT_PAGES = 1000;
+/**
+ * Default `journal_size_limit`. WITHOUT this, the -wal FILE never shrinks: a checkpoint
+ * resets the WAL to frame 0 but leaves the file at its high-water mark, so a single window
+ * in which a reader blocked the checkpoint (or one large write transaction) left the file at
+ * 1.5 GB forever, even with every frame already copied into the main database. Setting the
+ * limit makes SQLite ftruncate the file back to the limit at each reset.
+ */
+export declare const DEFAULT_WAL_SIZE_LIMIT_BYTES: number;
+export declare function resolveWalSizeLimitBytes(): number;
+/**
+ * The connection pragmas that keep the WAL bounded. Both are per-connection and lock-free,
+ * so every process that opens this database applies them — there is no owner to miss.
+ * WAL_AUTOCHECKPOINT does the checkpointing (on the committing connection) and
+ * journal_size_limit reclaims the file at every reset, which is why no separate
+ * "checkpoint owner" process is required for the steady state.
+ */
+export declare function applyWalRuntimePragmas(db: BunDb): void;
 export declare function initSchema(db: BunDb): void;
 export type NodeRunStatus = 'created' | 'starting' | 'running' | 'waiting' | 'degraded' | 'awaiting_merge' | 'fixing_after_review' | 'failed' | 'error' | 'done' | 'stopped';
 export type NodeEventType = 'node_created' | 'node_started' | 'node_state_changed' | 'member_started' | 'member_state_changed' | 'member_output_received' | 'member_failed' | 'member_recovered' | 'member_respawned' | 'member_job_rebound' | 'member_disabled' | 'coordinator_resumed' | 'coordinator_resume_state' | 'coordinator_resume_skipped' | 'coordinator_first_turn_context_built' | 'coordinator_output_received' | 'coordinator_output_invalid' | 'coordinator_repair_requested' | 'memory_updated' | 'memory_patch_rejected' | 'memory_patch_deduplicated' | 'action_queued' | 'action_written' | 'action_observed' | 'action_superseded' | 'action_completed' | 'action_failed' | 'action_dropped' | 'node_recovered' | 'node_waiting' | 'node_done' | 'node_error' | 'node_stopped' | 'phase_started' | 'phase_completed' | 'bead_created' | 'worktree_provisioned' | 'member_spawned_dynamic' | 'member_replaced' | 'coordinator_restarted' | 'pr_created' | 'pr_updated' | 'node_completed';
@@ -94,6 +117,22 @@ export interface PruneObservabilityOptions {
     nowMs?: number;
     eventsRetentionMs?: number;
     skipExtract?: boolean;
+    /**
+     * Cutoff for `specialist_forensic_events` (the mcp.call.* / turn / tool forensic rows).
+     * ABSENT means "do not touch this table": forensic rows are the audit surface and the
+     * retention window is an operator decision, not a default (SPECIALISTS-4219).
+     */
+    forensicBeforeMs?: number;
+    /** Cutoff for `node_events`. Absent means "do not touch this table", same reason. */
+    nodeEventsBeforeMs?: number;
+}
+export interface WalCheckpointReport {
+    mode: 'PASSIVE' | 'RESTART' | 'TRUNCATE';
+    busy: number;
+    logFrames: number;
+    checkpointedFrames: number;
+    beforeWalBytes: number;
+    afterWalBytes: number;
 }
 export interface ForensicEventRecord {
     id: number;
@@ -190,6 +229,10 @@ export interface PruneObservabilityReport {
     deletedResults: number;
     deletedJobs: number;
     deletedEpicRuns: number;
+    deletedForensicEvents: number;
+    deletedNodeEvents: number;
+    forensicBeforeMs: number | null;
+    nodeEventsBeforeMs: number | null;
     skippedActiveChainJobs: number;
     extractedJobs: number;
 }
@@ -432,6 +475,8 @@ export interface ObservabilitySqliteClient {
         status: string;
     }>;
     getDatabaseSizeBytes(): number;
+    getWalSizeBytes(): number;
+    checkpointWal(mode?: 'PASSIVE' | 'RESTART' | 'TRUNCATE'): WalCheckpointReport;
     vacuumDatabase(): {
         beforeBytes: number;
         afterBytes: number;
