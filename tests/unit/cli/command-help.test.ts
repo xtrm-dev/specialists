@@ -160,7 +160,9 @@ describe('command-specific --help', () => {
     expect(captureIndexHelp(['epic', 'abandon', '--help'])).toContain('specialists epic abandon <epic-id> --reason <text>');
     expect(captureIndexHelp(['epic', 'merge', '--help'])).toMatch(/specialists epic merge <epic-id>.*\[broken\]/);
     expect(captureIndexHelp(['epic', '--help'])).not.toContain('specialists epic merge unitAI');
-    expect(captureIndexHelp(['db', 'setup', '--help'])).toContain('specialists db <setup|backfill|vacuum|prune|extract|stats|benchmark-export>');
+    // `checkpoint` joined the surface in SPECIALISTS-4219: it is the operator-side WAL
+    // reclaim, and the usage line is the contract this asserts.
+    expect(captureIndexHelp(['db', 'setup', '--help'])).toContain('specialists db <setup|backfill|vacuum|checkpoint|prune|extract|stats|benchmark-export>');
   });
 
   it('top-level help advertises only current epic/report surfaces', () => {
