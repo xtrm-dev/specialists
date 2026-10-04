@@ -617,6 +617,7 @@ export declare class NativeActivationHost {
      * activation must never resurrect.
      */
     private runWithFallback;
+    private walkFallbackChain;
     /**
      * Re-run a FAILED activation in place — the native equivalent of `sp retry`.
      *

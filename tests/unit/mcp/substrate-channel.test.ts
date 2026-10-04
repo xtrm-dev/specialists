@@ -116,6 +116,15 @@ describe('withChannelPush', () => {
     expect(seen).toHaveLength(6);
   });
 
+  it('does not push an intermediate failed fallback leg, but still forwards it (SPECIALISTS-4253)', () => {
+    const { sent, seen, sink } = recorder();
+    sink.emit({ ...EVENT, name: 'activation_failed', payload: { error: '429', intermediate: true } });
+    sink.emit({ ...EVENT, name: 'activation_failed', payload: { error: '429' } });
+
+    expect(seen).toEqual(['activation_failed', 'activation_failed']);
+    expect(sent.map((f) => f.params.meta.event)).toEqual(['failed']);
+  });
+
   it('forwards every event to the wrapped sink', () => {
     const { seen, sink } = recorder();
     sink.emit({ ...EVENT, name: 'turn_started' });

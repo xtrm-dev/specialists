@@ -146,6 +146,9 @@ export function withChannelPush(base: ActivationForensicSink, send: ChannelSend)
 
       const eventClass = PUSHED_EVENTS[event.name];
       if (!eventClass) return;
+      // A failed model leg that a fallback leg follows is progress, not an outcome
+      // (SPECIALISTS-4253): the walk's final result is pushed instead.
+      if (event.payload?.intermediate === true) return;
 
       try {
         const frame = buildChannelFrame({

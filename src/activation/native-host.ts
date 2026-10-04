@@ -2472,7 +2472,47 @@ export class NativeActivationHost {
     let index = ctx.modelIndex;
     // A dispatch-time skip (unavailable primary) already advanced past the chain head.
     let fallbackUsed = index > 0;
-    let result = await this.runToSettled(record.snapshot, record.session, ctx.initialPrompt, ctx.emit, record);
+    // SPECIALISTS-4253: a leg's activation_failed is held until the walk decides. A leg that
+    // a fallback follows is recorded as `intermediate`, which the channel does not push;
+    // otherwise the coordinator was woken with "failed" while the next model was still
+    // running, and woken again if that one failed too. The forensic event is never dropped.
+    let heldFailure: Record<string, unknown> | undefined;
+    const legEmit = (name: string, payload?: Record<string, unknown>): void => {
+      if (name === 'activation_failed') {
+        heldFailure = payload ?? {};
+        return;
+      }
+      ctx.emit(name, payload);
+    };
+    const flushFailure = (intermediate: boolean): void => {
+      if (!heldFailure) return;
+      const payload = intermediate ? { ...heldFailure, intermediate: true } : heldFailure;
+      heldFailure = undefined;
+      ctx.emit('activation_failed', payload);
+    };
+    try {
+      return await this.walkFallbackChain(record, ctx, legEmit, flushFailure, index, fallbackUsed);
+    } finally {
+      flushFailure(false);
+    }
+  }
+
+  private async walkFallbackChain(
+    record: ActivationRecord,
+    ctx: {
+      modelChain: string[];
+      modelIndex: number;
+      sdk: PiSdk;
+      modelRuntime: PiModelRuntimeLike;
+      initialPrompt: string;
+      emit: (name: string, payload?: Record<string, unknown>) => void;
+    },
+    legEmit: (name: string, payload?: Record<string, unknown>) => void,
+    flushFailure: (intermediate: boolean) => void,
+    index: number,
+    fallbackUsed: boolean,
+  ): Promise<ActivationResult> {
+    let result = await this.runToSettled(record.snapshot, record.session, ctx.initialPrompt, legEmit, record);
 
     while (result.status === 'failed' && index < ctx.modelChain.length - 1) {
       if (this.registry.get(record.snapshot.activationId) !== record) break;
@@ -2578,10 +2618,11 @@ export class NativeActivationHost {
       record.snapshot.lastActivityAt = this.now();
       this.save(record.snapshot);
       record.unsubscribe = nextSession.subscribe((event) => this.onSessionEvent(record.snapshot, event, ctx.emit));
+      flushFailure(true);
       ctx.emit('activation_started', { pi_session_id: nextSession.sessionId });
       index += 1;
       fallbackUsed = true;
-      result = await this.runToSettled(record.snapshot, record.session, ctx.initialPrompt, ctx.emit, record);
+      result = await this.runToSettled(record.snapshot, record.session, ctx.initialPrompt, legEmit, record);
     }
 
     result.fallbackUsed = fallbackUsed;
