@@ -580,7 +580,8 @@ export function formatAskWake(ask, view) {
     // Blank body lines are dropped: the rail used to render paragraph breaks
     // as a bare gutter; unrailed, they would become blank lines, which event
     // cards never carry.
-    ...String(ask.body || '(no body)').split('\n').filter((line) => line.trim() !== '').map(withRail),
+    // Design system: the body below a header is italic, on the normal background.
+    ...String(ask.body || '(no body)').split('\n').filter((line) => line.trim() !== '').map((line) => ITALIC(withRail(line))),
     instructionLine(escalated ? ESCALATION_INSTRUCTION : ASK_INSTRUCTION, ask.activationId),
   ].join('\n');
 }
