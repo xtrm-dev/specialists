@@ -1,9 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import {
+  BRIEF_LIMITS,
   CHANNEL_CAPABILITY,
   CHANNEL_METHOD,
   buildChannelFrame,
+  formatTokens,
   withChannelPush,
+  type ChannelDetail,
   type ChannelFrame,
 } from '../../../src/mcp/channel.js';
 import type { ActivationForensicSink } from '../../../src/activation/native-host.js';
@@ -91,11 +94,77 @@ describe('buildChannelFrame', () => {
   });
 });
 
+describe('channel brief', () => {
+  const content = (eventClass: string, detail: ChannelDetail) =>
+    buildChannelFrame({ ...EVENT, eventClass, detail }).params.content.split('\n');
+
+  it('keeps the identity line first and unchanged, so specialists-ui still parses it', () => {
+    const [head] = content('completed', { output: 'done', elapsedS: 42 });
+    expect(head).toBe('Specialist executor on unitAI-aiwva.21: completed (act:1). Call specialist_result for the full result.');
+  });
+
+  it('carries run cost, purpose and the first result lines for a completion', () => {
+    const lines = content('completed', {
+      elapsedS: 185, turnCount: 3,
+      tokenUsage: { input_tokens: 40_000, output_tokens: 2_500, total_tokens: 42_500 },
+      purpose: 'inspect   native wake\ntransport',
+      output: 'line one\n\nline two\nline three\nline four\nline five',
+    });
+    expect(lines.slice(1)).toEqual([
+      '3m05s • 3 turns • 43k tokens · purpose: inspect native wake transport',
+      '> line one',
+      '> line two',
+      '> line three',
+      '… +2 more lines in specialist_result',
+    ]);
+  });
+
+  it('carries the failing model and the error for a failure', () => {
+    const lines = content('failed', { model: 'commandcode/z-ai/glm-5.3-flash', thinkingLevel: 'high', error: '429 rate limited' });
+    expect(lines.slice(1)).toEqual(['commandcode/z-ai/glm-5.3-flash · high', '> 429 rate limited']);
+    expect(lines[0]).toContain('specialist_retry');
+  });
+
+  it('carries the ask body verbatim for asks and escalations', () => {
+    for (const eventClass of ['needs_reply', 'escalation']) {
+      const lines = content(eventClass, { purpose: 'p', body: 'Does the bracket look right?\nOption A or B?' });
+      expect(lines.slice(1)).toEqual(['purpose: p', '> Does the bracket look right?', '> Option A or B?']);
+    }
+  });
+
+  it('stays bounded whatever the Specialist wrote', () => {
+    const huge = 'x'.repeat(50_000);
+    const lines = (eventClass: string, detail: ChannelDetail) => buildChannelFrame({ ...EVENT, eventClass, detail }).params.content;
+    expect(lines('completed', { output: `${huge}\n${huge}\n${huge}\n${huge}`, purpose: huge }).length).toBeLessThan(1200);
+    expect(lines('needs_reply', { body: huge }).length).toBeLessThan(BRIEF_LIMITS.body + 400);
+    expect(lines('failed', { error: huge }).length).toBeLessThan(BRIEF_LIMITS.error + 400);
+  });
+
+  it('never fabricates a zero spend', () => {
+    expect(formatTokens(undefined)).toBe('');
+    expect(formatTokens({ total_tokens: 900 })).toBe('');
+    expect(formatTokens({ input_tokens: 900 })).toBe('900 tokens');
+  });
+});
+
 describe('withChannelPush', () => {
+  it('builds the brief from the event payload plus the snapshot', () => {
+    const sent: ChannelFrame[] = [];
+    const sink = withChannelPush({ emit: () => {} }, (f) => { sent.push(f); }, () => ({ turnCount: 2, purpose: 'p' }));
+    sink.emit({ ...EVENT, name: 'activation_completed', payload: { output: 'answer' } });
+    sink.emit({ ...EVENT, name: 'clarification_requested', payload: { body: 'which file?' } });
+    sink.emit({ ...EVENT, name: 'activation_failed', payload: { error: 'boom' } });
+    expect(sent.map((f) => f.params.content.split('\n').slice(1))).toEqual([
+      ['2 turns · purpose: p', '> answer'],
+      ['purpose: p', '> which file?'],
+      ['purpose: p', '> boom'],
+    ]);
+  });
+
   it('pushes only actionable transitions', () => {
     const { sent, sink } = recorder();
     for (const name of [
-      'activation_settled', 'activation_failed',
+      'activation_completed', 'activation_failed',
       'escalation_raised', 'clarification_requested',
     ]) sink.emit({ ...EVENT, name });
 
@@ -109,11 +178,13 @@ describe('withChannelPush', () => {
     for (const name of [
       'turn_started', 'turn_completed', 'retry_started',
       'compaction_started', 'lease_acquired', 'activation_admitted',
+      // Emitted just before activation_completed on the same path; pushing both would wake twice.
+      'activation_settled',
     ]) sink.emit({ ...EVENT, name });
 
     // Progress is why the poller was expensive; pushing it would rebuild that cost.
     expect(sent).toHaveLength(0);
-    expect(seen).toHaveLength(6);
+    expect(seen).toHaveLength(7);
   });
 
   it('does not push an intermediate failed fallback leg, but still forwards it (SPECIALISTS-4253)', () => {

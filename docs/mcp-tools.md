@@ -349,8 +349,13 @@ Primary, authority, fallback — in that order:
 
 1. **Channel wake (primary).** Actionable transitions (settled, failed,
    escalation, clarification) push a `notifications/claude/channel` frame.
-   The frame is a REFERENCE, never the payload: it names the activation and
-   tells the coordinator to call `specialist_status`. Delivery is
+   The first line names the activation and the tool to read it with
+   (`specialist_result` for a settled or failed activation, `specialist_status`
+   for an ask). The lines under it are a bounded brief, the same context a Pi
+   wake card carries: run cost and purpose for a completion with its first 3
+   result lines, the failing model and the error for a failure, the purpose
+   and the ask body for an ask. Each part is capped (`BRIEF_LIMITS`); the full
+   result stays in `specialist_result`. Delivery is
    unacknowledged and gated (capability, protocol era, provider, flags); only
    a legacy-era connection can carry it. Source: `src/mcp/channel.ts`
    (`withChannelPush`, `buildChannelFrame`).

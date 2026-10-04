@@ -2,6 +2,7 @@ import { describe, expect, test, mock } from 'claude-code/testing'
 import type { EngineInterface } from 'claude-code'
 
 import {
+  BRIEF_ROW_LINES,
   FALLBACK_WAKE_TEXT,
   ackClassFor,
   channelWakeOf,
@@ -34,6 +35,9 @@ const SURFACES = ['terminal', 'desktop'] as const
 const CHANNEL_TEXT =
   'Specialist explorer on XTRM-464: completed (act:f6ab7b21-4a3). Call specialist_result for the full result.'
 
+/** The same frame with the brief the server writes under the identity line. */
+const BRIEF_TEXT = `${CHANNEL_TEXT}\n42s • 3 turns · purpose: map the wake path\n> Found two paths.`
+
 describe('transcript rows', () => {
   test('colours the wake header by event', () => {
     expect(eventColor('completed')).toBe('green')
@@ -61,7 +65,14 @@ describe('transcript rows', () => {
       identity: '@explorer:f6ab7b21',
       event: 'completed',
       issue: 'XTRM-464',
+      detail: [],
+      hint: 'use specialist_result for full result',
     })
+    expect(channelRow(BRIEF_TEXT)?.detail).toEqual(['42s • 3 turns · purpose: map the wake path', '> Found two paths.'])
+    expect(channelRow('Specialist explorer: needs_reply (act:f6ab7b21-4a3). x')?.hint).toContain('specialist_reply')
+    const long = [CHANNEL_TEXT, ...Array.from({ length: 8 }, (_, i) => `> line ${i}`)].join('\n')
+    expect(channelRow(long)?.detail).toHaveLength(BRIEF_ROW_LINES + 1)
+    expect(channelRow(long)?.detail.at(-1)).toBe('… +3 lines · ctrl+o expands')
     expect(channelRow('Specialist explorer: failed (act:f6ab7b21-4a3). x')?.marker).toBe('✕')
     expect(channelRow('Specialist explorer: escalation (act:f6ab7b21-4a3). x')?.marker).toBe('!')
     expect(channelRow('Specialist explorer: needs_reply (act:f6ab7b21-4a3). x')?.marker).toBe('!')
@@ -144,6 +155,20 @@ describe('transcript rows', () => {
       expect(drawn).toContain('completed')
       expect(drawn).toContain('XTRM-464')
       expect(drawn).toContain('use specialist_result for full result')
+
+      const brief = textOf(
+        await (
+          await $.ui.mount({
+            plugin: 'specialists-ui',
+            surface,
+            component: 'UserMessage',
+            props: { text: BRIEF_TEXT, origin: { kind: 'channel', server: MCP_SERVER }, isExpanded: false },
+          })
+        ).drawn(),
+      )
+      expect(brief).toContain('42s • 3 turns · purpose: map the wake path')
+      expect(brief).toContain('Found two paths.')
+      expect(brief).not.toContain('> Found')
 
       const expanded = await (
         await $.ui.mount({

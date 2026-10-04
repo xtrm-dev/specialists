@@ -11,11 +11,15 @@
  *
  * Three properties decide the shape, and each is enforced rather than assumed:
  *
- *   - **The push is a REFERENCE, never the payload.** `content` names the
- *     activation and says to call `specialist_status`; the result, contract and
- *     transcript stay in the authority store. A channel frame is rendered
- *     straight into the session's context, so a body here is an unbounded
- *     context cost paid on an event the reader may not care about (spec AD/AA).
+ *   - **The push is a bounded BRIEF, never the payload.** The first line names
+ *     the activation and the tool to read it with; the lines under it carry
+ *     the same context a Pi wake card carries — purpose, run cost, failing
+ *     model, the ask body, the error and a few result lines — each capped. The
+ *     full result, contract and transcript stay in the authority store. A
+ *     channel frame is rendered straight into the session's context, so an
+ *     uncapped body would be an unbounded cost paid on every event (spec
+ *     AD/AA); a capped brief saves the round trip the coordinator would
+ *     otherwise spend just to decide whether the event matters.
  *   - **Delivery is unacknowledged and gated eight ways.** Capability, protocol
  *     era, provider, feature flag, org policy, `--channels` membership,
  *     marketplace match and plugin allowlist — each failing gate is a SILENT
@@ -34,6 +38,7 @@
  * actually enforces.
  */
 import type { ActivationForensicSink } from '../activation/native-host.js';
+import type { ActivationSnapshot, ActivationTokenUsage } from '../activation/types.js';
 import { logger } from '../utils/logger.js';
 
 /**
@@ -62,7 +67,10 @@ const META_KEY = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
  * built to remove.
  */
 const PUSHED_EVENTS: Readonly<Record<string, string>> = {
-  activation_settled: 'completed',
+  // `activation_completed`, not `activation_settled`: the host emits both, in that order and
+  // synchronously, on the same success path, but only the second carries the output the
+  // brief excerpts.
+  activation_completed: 'completed',
   activation_failed: 'failed',
   escalation_raised: 'escalation',
   clarification_requested: 'needs_reply',
@@ -71,7 +79,7 @@ const PUSHED_EVENTS: Readonly<Record<string, string>> = {
 /** What a coordinator is told to do about each class. One line, no result body. */
 const ACTION: Readonly<Record<string, string>> = {
   completed: 'Call specialist_result for the full result.',
-  failed: 'Call specialist_result for the failure detail.',
+  failed: 'Call specialist_result for the failure detail. Use specialist_retry if the cause is transient.',
   escalation: 'Call specialist_status to read the escalation, then specialist_reply.',
   needs_reply: 'Call specialist_status to read the pending ask and message_id, then specialist_reply.',
 };
@@ -85,17 +93,121 @@ export interface ChannelFrame {
 export type ChannelSend = (frame: ChannelFrame) => void | Promise<unknown>;
 
 /**
+ * Context a brief carries under the identity line. Every field is optional: a wake is
+ * worth delivering even when the snapshot is already gone.
+ */
+export interface ChannelDetail {
+  purpose?: string;
+  elapsedS?: number;
+  turnCount?: number;
+  tokenUsage?: ActivationTokenUsage;
+  model?: string;
+  thinkingLevel?: string;
+  /** The ask/escalation body, verbatim (capped). */
+  body?: string;
+  /** The completed activation's output; only its first lines are shown. */
+  output?: string;
+  /** The failure detail (capped). */
+  error?: string;
+}
+
+/** Caps that keep a brief bounded whatever the Specialist wrote. */
+export const BRIEF_LIMITS = {
+  purpose: 120,
+  body: 2000,
+  error: 600,
+  resultLines: 3,
+  resultLine: 240,
+} as const;
+
+const clip = (text: string, max: number) => (text.length <= max ? text : `${text.slice(0, max - 1)}…`);
+
+/** Elapsed as a short clock: 42s, 3m05s, 1h02m. */
+export function formatElapsed(elapsedS: number): string {
+  const total = Math.max(0, Math.floor(elapsedS));
+  if (total < 60) return `${total}s`;
+  if (total < 3600) return `${Math.floor(total / 60)}m${String(total % 60).padStart(2, '0')}s`;
+  return `${Math.floor(total / 3600)}h${String(Math.floor((total % 3600) / 60)).padStart(2, '0')}m`;
+}
+
+/**
+ * Spend as a token count. `total_tokens` is a rollup, never a summand — adding it would
+ * double-count (unitAI-d99hb). Returns '' when nothing was reported, never a fabricated 0.
+ */
+export function formatTokens(usage: ActivationTokenUsage | undefined): string {
+  if (!usage) return '';
+  const total = (['input_tokens', 'output_tokens', 'cache_creation_tokens', 'cache_read_tokens', 'reasoning_tokens', 'tool_tokens'] as const)
+    .reduce((n, k) => n + (usage[k] ?? 0), 0);
+  if (total <= 0) return '';
+  if (total < 1000) return `${total} tokens`;
+  if (total < 10000) return `${(total / 1000).toFixed(1)}k tokens`;
+  return `${Math.round(total / 1000)}k tokens`;
+}
+
+/** The snapshot facts a brief reads — the same ones `specialist_status` projects. */
+export function snapshotDetail(snapshot: ActivationSnapshot | undefined, nowMs: number = Date.now()): ChannelDetail {
+  if (!snapshot) return {};
+  return {
+    ...(snapshot.purpose ? { purpose: snapshot.purpose } : {}),
+    elapsedS: Math.max(0, Math.floor((nowMs - snapshot.startedAt) / 1000)),
+    ...(snapshot.turnCount !== undefined ? { turnCount: snapshot.turnCount } : {}),
+    ...(snapshot.tokenUsage ? { tokenUsage: snapshot.tokenUsage } : {}),
+    ...(snapshot.resolvedModel ? { model: snapshot.resolvedModel } : {}),
+    ...(snapshot.thinkingLevel ? { thinkingLevel: snapshot.thinkingLevel } : {}),
+  };
+}
+
+/** Specialist-authored text, quoted so it reads as the child's words, not an instruction. */
+const quoted = (text: string) => text.split('\n').filter((line) => line.trim() !== '').map((line) => `> ${line}`);
+
+/**
+ * The lines under the identity line, in the order the Pi wake card uses: context (run cost
+ * for a completion, the failing model for a failure, plus the purpose), then whatever the
+ * Specialist wrote.
+ */
+function briefLines(eventClass: string, detail: ChannelDetail): string[] {
+  const failed = eventClass === 'failed';
+  const facts = failed
+    ? [detail.model, detail.thinkingLevel].filter(Boolean).join(' · ')
+    : eventClass === 'completed'
+      ? [
+          detail.elapsedS !== undefined ? formatElapsed(detail.elapsedS) : '',
+          detail.turnCount !== undefined ? `${detail.turnCount} turn${detail.turnCount === 1 ? '' : 's'}` : '',
+          formatTokens(detail.tokenUsage),
+        ].filter(Boolean).join(' • ')
+      : '';
+  const purpose = detail.purpose ? clip(detail.purpose.replace(/\s+/g, ' ').trim(), BRIEF_LIMITS.purpose) : '';
+  const lines: string[] = [];
+  const context = [facts, purpose ? `purpose: ${purpose}` : ''].filter(Boolean).join(' · ');
+  if (context) lines.push(context);
+
+  if (eventClass === 'needs_reply' || eventClass === 'escalation') {
+    if (detail.body?.trim()) lines.push(...quoted(clip(detail.body.trim(), BRIEF_LIMITS.body)));
+  } else if (failed) {
+    if (detail.error?.trim()) lines.push(...quoted(clip(detail.error.trim(), BRIEF_LIMITS.error)));
+  } else if (eventClass === 'completed' && detail.output?.trim()) {
+    const all = detail.output.split('\n').filter((line) => line.trim() !== '');
+    lines.push(...all.slice(0, BRIEF_LIMITS.resultLines).map((line) => `> ${clip(line, BRIEF_LIMITS.resultLine)}`));
+    if (all.length > BRIEF_LIMITS.resultLines) {
+      lines.push(`… +${all.length - BRIEF_LIMITS.resultLines} more lines in specialist_result`);
+    }
+  }
+  return lines;
+}
+
+/**
  * Build the frame for one transition.
  *
- * Exported so a test can assert the reference-only discipline directly: the
- * frame is a pure function of the identity fields, and there is no parameter
- * through which a result body could reach it.
+ * Exported so a test can assert the bounds directly. The first line is a fixed shape that
+ * specialists-ui parses — `Specialist <name>[ on <issue>]: <event> (<activation_id>). <action>`
+ * — and must not change; the brief goes on the lines under it.
  */
 export function buildChannelFrame(input: {
   activationId: string;
   specialist: string;
   beadId?: string;
   eventClass: string;
+  detail?: ChannelDetail;
 }): ChannelFrame {
   // A result is readable only once an activation finished; a waiting ask must still be
   // read through specialist_status. Mirrors wake-watch's read_with for the same classes.
@@ -115,10 +227,11 @@ export function buildChannelFrame(input: {
 
   const work = input.beadId ? ` on ${input.beadId}` : '';
   const action = ACTION[input.eventClass] ?? 'Call specialist_status for authoritative state.';
+  const head = `Specialist ${input.specialist}${work}: ${input.eventClass} (${input.activationId}). ${action}`;
   return {
     method: CHANNEL_METHOD,
     params: {
-      content: `Specialist ${input.specialist}${work}: ${input.eventClass} (${input.activationId}). ${action}`,
+      content: [head, ...briefLines(input.eventClass, input.detail ?? {})].join('\n'),
       meta,
     },
   };
@@ -138,7 +251,11 @@ export function buildChannelFrame(input: {
  * answers. Letting a transport error escape would make a cosmetic notification
  * able to fail an activation.
  */
-export function withChannelPush(base: ActivationForensicSink, send: ChannelSend): ActivationForensicSink {
+export function withChannelPush(
+  base: ActivationForensicSink,
+  send: ChannelSend,
+  describe: (activationId: string) => ChannelDetail = () => ({}),
+): ActivationForensicSink {
   return {
     ...base,
     emit(event) {
@@ -151,11 +268,14 @@ export function withChannelPush(base: ActivationForensicSink, send: ChannelSend)
       if (event.payload?.intermediate === true) return;
 
       try {
+        const payload = event.payload ?? {};
+        const text = (key: string) => (typeof payload[key] === 'string' ? { [key]: payload[key] as string } : {});
         const frame = buildChannelFrame({
           activationId: event.activationId,
           specialist: event.specialist,
           ...(event.beadId ? { beadId: event.beadId } : {}),
           eventClass,
+          detail: { ...describe(event.activationId), ...text('body'), ...text('output'), ...text('error') },
         });
         void Promise.resolve(send(frame)).catch((error: unknown) => {
           logger.debug(`channel push dropped (${eventClass}): ${String(error)}`);

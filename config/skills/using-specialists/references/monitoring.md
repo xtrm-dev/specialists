@@ -4,7 +4,8 @@ Monitor by state transition and evidence, not by tight polling.
 
 The native wake is primary. On Claude Code a channel push names the activation and the
 tool to read it with; on Pi the extension delivers a follow-up message that starts a turn.
-The push is a reference, never the payload:
+The push names the activation and carries a bounded brief (run cost and the first result
+lines, the failing model and error, or the ask body). The brief helps you decide what to do next. It is never the full result:
 
 - `specialist_status` is the authoritative read of live state and pending asks;
 - `specialist_result` returns the full output of a settled activation, from memory or

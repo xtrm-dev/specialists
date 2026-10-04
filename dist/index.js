@@ -99367,6 +99367,66 @@ var init_request_meta = __esm(() => {
 });
 
 // src/mcp/channel.ts
+function formatElapsed4(elapsedS) {
+  const total = Math.max(0, Math.floor(elapsedS));
+  if (total < 60)
+    return `${total}s`;
+  if (total < 3600)
+    return `${Math.floor(total / 60)}m${String(total % 60).padStart(2, "0")}s`;
+  return `${Math.floor(total / 3600)}h${String(Math.floor(total % 3600 / 60)).padStart(2, "0")}m`;
+}
+function formatTokens(usage5) {
+  if (!usage5)
+    return "";
+  const total = ["input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens", "reasoning_tokens", "tool_tokens"].reduce((n, k) => n + (usage5[k] ?? 0), 0);
+  if (total <= 0)
+    return "";
+  if (total < 1000)
+    return `${total} tokens`;
+  if (total < 1e4)
+    return `${(total / 1000).toFixed(1)}k tokens`;
+  return `${Math.round(total / 1000)}k tokens`;
+}
+function snapshotDetail(snapshot, nowMs = Date.now()) {
+  if (!snapshot)
+    return {};
+  return {
+    ...snapshot.purpose ? { purpose: snapshot.purpose } : {},
+    elapsedS: Math.max(0, Math.floor((nowMs - snapshot.startedAt) / 1000)),
+    ...snapshot.turnCount !== undefined ? { turnCount: snapshot.turnCount } : {},
+    ...snapshot.tokenUsage ? { tokenUsage: snapshot.tokenUsage } : {},
+    ...snapshot.resolvedModel ? { model: snapshot.resolvedModel } : {},
+    ...snapshot.thinkingLevel ? { thinkingLevel: snapshot.thinkingLevel } : {}
+  };
+}
+function briefLines(eventClass, detail) {
+  const failed = eventClass === "failed";
+  const facts = failed ? [detail.model, detail.thinkingLevel].filter(Boolean).join(" \xB7 ") : eventClass === "completed" ? [
+    detail.elapsedS !== undefined ? formatElapsed4(detail.elapsedS) : "",
+    detail.turnCount !== undefined ? `${detail.turnCount} turn${detail.turnCount === 1 ? "" : "s"}` : "",
+    formatTokens(detail.tokenUsage)
+  ].filter(Boolean).join(" \u2022 ") : "";
+  const purpose = detail.purpose ? clip(detail.purpose.replace(/\s+/g, " ").trim(), BRIEF_LIMITS.purpose) : "";
+  const lines = [];
+  const context = [facts, purpose ? `purpose: ${purpose}` : ""].filter(Boolean).join(" \xB7 ");
+  if (context)
+    lines.push(context);
+  if (eventClass === "needs_reply" || eventClass === "escalation") {
+    if (detail.body?.trim())
+      lines.push(...quoted(clip(detail.body.trim(), BRIEF_LIMITS.body)));
+  } else if (failed) {
+    if (detail.error?.trim())
+      lines.push(...quoted(clip(detail.error.trim(), BRIEF_LIMITS.error)));
+  } else if (eventClass === "completed" && detail.output?.trim()) {
+    const all = detail.output.split(`
+`).filter((line) => line.trim() !== "");
+    lines.push(...all.slice(0, BRIEF_LIMITS.resultLines).map((line) => `> ${clip(line, BRIEF_LIMITS.resultLine)}`));
+    if (all.length > BRIEF_LIMITS.resultLines) {
+      lines.push(`\u2026 +${all.length - BRIEF_LIMITS.resultLines} more lines in specialist_result`);
+    }
+  }
+  return lines;
+}
 function buildChannelFrame(input2) {
   const settled = input2.eventClass === "completed" || input2.eventClass === "failed";
   const meta3 = {
@@ -99383,15 +99443,17 @@ function buildChannelFrame(input2) {
   }
   const work = input2.beadId ? ` on ${input2.beadId}` : "";
   const action = ACTION[input2.eventClass] ?? "Call specialist_status for authoritative state.";
+  const head = `Specialist ${input2.specialist}${work}: ${input2.eventClass} (${input2.activationId}). ${action}`;
   return {
     method: CHANNEL_METHOD,
     params: {
-      content: `Specialist ${input2.specialist}${work}: ${input2.eventClass} (${input2.activationId}). ${action}`,
+      content: [head, ...briefLines(input2.eventClass, input2.detail ?? {})].join(`
+`),
       meta: meta3
     }
   };
 }
-function withChannelPush(base, send) {
+function withChannelPush(base, send, describe3 = () => ({})) {
   return {
     ...base,
     emit(event) {
@@ -99402,11 +99464,14 @@ function withChannelPush(base, send) {
       if (event.payload?.intermediate === true)
         return;
       try {
+        const payload = event.payload ?? {};
+        const text = (key) => typeof payload[key] === "string" ? { [key]: payload[key] } : {};
         const frame = buildChannelFrame({
           activationId: event.activationId,
           specialist: event.specialist,
           ...event.beadId ? { beadId: event.beadId } : {},
-          eventClass
+          eventClass,
+          detail: { ...describe3(event.activationId), ...text("body"), ...text("output"), ...text("error") }
         });
         Promise.resolve(send(frame)).catch((error3) => {
           logger.debug(`channel push dropped (${eventClass}): ${String(error3)}`);
@@ -99417,22 +99482,30 @@ function withChannelPush(base, send) {
     }
   };
 }
-var CHANNEL_CAPABILITY, CHANNEL_METHOD = "notifications/claude/channel", META_KEY, PUSHED_EVENTS, ACTION;
+var CHANNEL_CAPABILITY, CHANNEL_METHOD = "notifications/claude/channel", META_KEY, PUSHED_EVENTS, ACTION, BRIEF_LIMITS, clip = (text, max) => text.length <= max ? text : `${text.slice(0, max - 1)}\u2026`, quoted = (text) => text.split(`
+`).filter((line) => line.trim() !== "").map((line) => `> ${line}`);
 var init_channel = __esm(() => {
   init_logger();
   CHANNEL_CAPABILITY = { "claude/channel": {} };
   META_KEY = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
   PUSHED_EVENTS = {
-    activation_settled: "completed",
+    activation_completed: "completed",
     activation_failed: "failed",
     escalation_raised: "escalation",
     clarification_requested: "needs_reply"
   };
   ACTION = {
     completed: "Call specialist_result for the full result.",
-    failed: "Call specialist_result for the failure detail.",
+    failed: "Call specialist_result for the failure detail. Use specialist_retry if the cause is transient.",
     escalation: "Call specialist_status to read the escalation, then specialist_reply.",
     needs_reply: "Call specialist_status to read the pending ask and message_id, then specialist_reply."
+  };
+  BRIEF_LIMITS = {
+    purpose: 120,
+    body: 2000,
+    error: 600,
+    resultLines: 3,
+    resultLine: 240
   };
 });
 
@@ -99456,7 +99529,7 @@ function buildV2Server(ctx, options2) {
   const host = new NativeActivationHost({
     loader,
     authority: createFileAuthorityWriter(),
-    forensics: withChannelPush(createActivationForensicSink(observability), (frame) => channelSend(frame))
+    forensics: withChannelPush(createActivationForensicSink(observability), (frame) => channelSend(frame), (activationId) => snapshotDetail(host.inspect(activationId)))
   });
   const getHost = () => host;
   const pusher = new RuntimeEventPusher({

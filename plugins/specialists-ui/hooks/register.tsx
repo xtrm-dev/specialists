@@ -104,17 +104,36 @@ export function markerForEvent(event: string): string {
   return EVENT_MARKER[event] ?? '●'
 }
 
-/** The parts one teammate-style channel row draws, or null when unreadable. */
-export type ChannelRow = { marker: string; identity: string; event: string; issue?: string }
+/** The next move a collapsed wake row names, by event. */
+const EVENT_HINT: Record<string, string> = {
+  completed: 'use specialist_result for full result',
+  failed: 'specialist_result for detail · specialist_retry if transient',
+  escalation: 'specialist_status for the message_id, then specialist_reply',
+  needs_reply: 'specialist_status for the message_id, then specialist_reply',
+}
+
+/** Collapsed rows show at most this many brief lines; ctrl+o shows the whole frame. */
+export const BRIEF_ROW_LINES = 5
+
+/**
+ * The parts one teammate-style channel row draws, or null when unreadable. `detail` is the
+ * brief under the frame's identity line (context, then quoted Specialist text).
+ */
+export type ChannelRow = { marker: string; identity: string; event: string; issue?: string; detail: string[]; hint: string }
 
 export function channelRow(text: string): ChannelRow | null {
   const frame = parseChannelFrame(text)
   if (!frame) return null
+  const detail = text.split('\n').slice(1).filter((line) => line.trim() !== '')
+  const shown = detail.slice(0, BRIEF_ROW_LINES)
+  if (detail.length > BRIEF_ROW_LINES) shown.push(`… +${detail.length - BRIEF_ROW_LINES} lines · ctrl+o expands`)
   return {
     marker: markerForEvent(frame.event),
     identity: `@${frame.specialist}:${shortId(frame.activationId)}`,
     event: frame.event,
     ...(frame.issue ? { issue: frame.issue } : {}),
+    detail: shown,
+    hint: EVENT_HINT[frame.event] ?? 'use specialist_status for authoritative state',
   }
 }
 
@@ -283,7 +302,14 @@ export function register(on: On) {
           <Text> {row.event}</Text>
           {row.issue ? <Text dimColor> · {row.issue}</Text> : null}
         </Box>
-        <Text dimColor italic>  use specialist_result for full result</Text>
+        {row.detail.map((line, i) =>
+          line.startsWith('> ') ? (
+            <Text key={i} italic>  {line.slice(2)}</Text>
+          ) : (
+            <Text key={i} dimColor>  {line}</Text>
+          ),
+        )}
+        <Text dimColor italic>  {row.hint}</Text>
       </Box>
     )
   })
