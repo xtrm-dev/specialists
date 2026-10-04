@@ -1786,6 +1786,16 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
       expect(card).not.toContain('│');
       // Design system: the gold band starts at the header text (line 1) and the
       // dot stays unbanded; nothing below the header carries a background.
+      // Bold spans the WHOLE band: no `22m` may clear it before the band closes.
+      for (const card of cards) {
+        const banded = card.split('\n')[0].slice(card.split('\n')[0].indexOf('\u25cf ') + 2);
+        const close = banded.indexOf('\u001b[49m');
+        const open = banded.slice(0, close);
+        expect(banded.startsWith('\u001b[48;2;201;162;39m\u001b[38;2;24;20;16m\u001b[1m')).toBe(true);
+        // The ONLY 22m inside the band is the one that closes it: nothing in the middle
+        // may clear bold, which is the bug this pins.
+        expect(open.lastIndexOf('\u001b[22m')).toBe(open.length - '\u001b[22m'.length);
+      }
       const [head, ...body] = card.split('\n');
       expect(head.startsWith('\u001b[1m\u25cf\u001b[22m ') || head.startsWith('\u25cf ')).toBe(true);
       expect(head.slice(head.indexOf('\u25cf ') + 2)).toContain('48;2;201;162;39');
@@ -1818,8 +1828,10 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
 
     // Styling: warning/bold/dim/italic per field, instruction dim+italic, id dim.
     expect(cards[0]).toContain('●');
-    expect(cards[0]).toContain('\x1b[1mresearcher\x1b[22m');
-    expect(cards[0]).toContain('\x1b[3minspect native wake transport\x1b[23m');
+    // Bold is opened once for the whole band, not per segment: the name is the first
+    // segment inside it, and no 22m appears before the band's close.
+    expect(cards[0]).toContain('\x1b[48;2;201;162;39m\x1b[38;2;24;20;16m\x1b[1mresearcher');
+    expect(cards[0]).toContain('\x1b[3minspect native wake transport\x1b[23m'); // purpose stays italic in-band
     expect(cards[2]).toContain('done');
     expect(cards[3]).toContain('failed');
     const instruction = cards[2].split('\n')[1];

@@ -142,9 +142,28 @@ const DOT = '●';
 const GOLD_ON = '\x1b[48;2;201;162;39m\x1b[38;2;24;20;16m';
 const GOLD_OFF = '\x1b[49m\x1b[39m';
 /** Header separator: dim, never white, so it reads as a separator on the gold. */
-const SEP_HINT = `\x1b[2m\u00b7\x1b[22m`;
-/** Band a header's text; the caller prepends the dot itself. */
-const bandHeader = (text) => `${GOLD_ON}${text}${GOLD_OFF}`;
+const SEP_HINT = `\x1b[2m\u00b7\x1b[1m`;
+/**
+ * Band a header's text; the caller prepends the dot itself.
+ *
+ * Bold spans the WHOLE band: `\x1b[22m` clears bold AND dim for the rest of the line, so
+ * every subordinate segment closes its dim with `\x1b[1m` (dim off, bold back on) rather
+ * than `\x1b[22m`. Closing the band with one `\x1b[22m` at the end is what keeps that from
+ * cascading - appending a fresh `\x1b[1m` per segment instead would grow without bound.
+ */
+const stripAnsi = (text) => String(text).replace(/\x1b\[[0-9;]*m/g, '');
+/**
+ * Dim a fact string that carries its own escapes (`costFacts` builds `43s • 7t • 46k` with
+ * dim segments). Those internal `22m`s would clear bold mid-band, so the escapes are dropped
+ * and each fact is re-dimmed through `sub`.
+ */
+const FACT_SEP = ` \x1b[2m\u2022\x1b[1m `;
+const dimAll = (text) => stripAnsi(text).split(' \u2022 ').map(sub).join(FACT_SEP);
+/** Dim inside the band: closes dim with `1m`, which restores bold rather than clearing it. */
+const sub = (text) => `\x1b[2m${text}\x1b[1m`;
+/** Dim + italic inside the band; `22m` clears bold, so it is reopened explicitly. */
+const italicSub = (text) => `\x1b[2m\x1b[3m${text}\x1b[23m\x1b[1m`;
+const bandHeader = (text) => `${GOLD_ON}\x1b[1m${text}\x1b[22m${GOLD_OFF}`;
 // Italic is set with `3` and cleared with `23`; `22m` after it clears the dim. Pi theme
 // helpers have no italic token, so the raw SGR is the only way to mark the purpose excerpt.
 const ITALIC_DIM = (text) => `\x1b[2m\x1b[3m${text}\x1b[23m\x1b[22m`;
@@ -572,10 +591,10 @@ export function formatAskWake(ask, view) {
   const beadId = ask.beadId ?? view?.bead_id ?? '—';
   // `!` covers both blocked states, so the one word the glyph cannot carry stays.
   const header = `${DOT} ${bandHeader([
-    BOLD(ask.specialist),
-    DIM(escalated ? 'escalated' : 'waiting'),
-    DIM(beadId),
-    purpose ? ITALIC_DIM(purpose) : null,
+    ask.specialist,
+    sub(escalated ? 'escalated' : 'waiting'),
+    sub(beadId),
+    purpose ? italicSub(purpose) : null,
   ].filter(Boolean).join(` ${SEP_HINT} `))}`;
   return [
     withRail(header),
@@ -602,10 +621,10 @@ export function formatSettlementWake(done, view, opts = {}) {
   const beadId = done.beadId ?? view?.bead_id ?? '—';
   const facts = failed ? modelFacts(view) : costFacts(view);
   const header = `${DOT} ${bandHeader([
-    BOLD(done.specialist),
-    DIM(failed ? 'failed' : 'done'),
-    DIM(beadId),
-    facts || null,
+    done.specialist,
+    sub(failed ? 'failed' : 'done'),
+    sub(beadId),
+    facts ? dimAll(facts) : null,
   ].filter(Boolean).join(` ${SEP_HINT} `))}`;
   return [
     withRail(header),
