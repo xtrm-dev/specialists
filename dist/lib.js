@@ -23683,12 +23683,13 @@ class NativeActivationHost {
     const activationId = `act:${randomUUID4().slice(0, 12)}`;
     const attemptId = `att:${activationId.slice(4)}:1`;
     const participantId = `specialist::${request.specialist}`;
+    let eventIssueRef = request.issueRef;
     const emit = (name, payload) => this.forensics.emit({
       activationId,
       attemptId,
       participantId,
       specialist: request.specialist,
-      beadId: request.issueRef,
+      beadId: eventIssueRef,
       name,
       payload
     });
@@ -23781,6 +23782,8 @@ class NativeActivationHost {
       }
     }
     const issueRef = autoCreatedRef ?? request.issueRef ?? "";
+    if (issueRef)
+      eventIssueRef = issueRef;
     if (!issueRef) {
       return reject("no_work_ref", {
         note: "neither issueRef nor contract was provided — dispatch requires an existing issue or an inline contract"
