@@ -1,12 +1,15 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 import { resolveWorkspace } from '../../../src/activation/native-host.js';
 import { GUARDED_TOOL_NAMES } from '../../../src/activation/guarded-tools.js';
 import {
   acquire,
   admitCoordinatorToolCall,
+  recoverDeadHolder,
+  inspect,
+  leasePath,
   isControlPlaneTool,
   isMutatingTool,
   isWorkspaceWriteTool,
@@ -105,6 +108,63 @@ describe('coordinator control plane is exempt from the workspace write fence', (
     const identity = resolveWorkspace(root);
     const verdict = admitCoordinatorToolCall({ toolName: 'python', workspace: identity }, liveProbe);
     expect(verdict.allow).toBe(true);
+  });
+
+  it('heals a verifiably dead holder in place, so the workspace frees itself (4274)', () => {
+    const root = workspace();
+    const identity = resolveWorkspace(root);
+    acquire(
+      { workspace: identity, activationId: 'act:dead', attemptId: 'att:dead:1', specialist: 'executor' },
+      liveProbe,
+    );
+    const deadProbe: LeaseProcessProbe = { canVerify: () => true, startTicks: () => undefined };
+    // Dead holder reads uncertain, exactly as it did live...
+    expect(inspect(identity, deadProbe)).toMatchObject({ state: 'uncertain', uncertainReason: 'holder_process_gone' });
+    // ...and the fence heals it rather than escalating to an operator command.
+    const verdict = admitCoordinatorToolCall({ toolName: 'write', workspace: identity }, deadProbe);
+    expect(verdict.allow).toBe(true);
+    expect(inspect(identity, deadProbe).state).toBe('free');
+  });
+
+  it('still blocks when the holder might be alive', () => {
+    const root = workspace();
+    const identity = resolveWorkspace(root);
+    acquire(
+      { workspace: identity, activationId: 'act:blind', attemptId: 'att:blind:1', specialist: 'executor' },
+      liveProbe,
+    );
+    for (const probe of [
+      { canVerify: () => false, startTicks: () => undefined }, // liveness_unverifiable
+      { canVerify: () => true, startTicks: () => 999 }, // holder_start_mismatch (pid reused)
+    ] as LeaseProcessProbe[]) {
+      const verdict = admitCoordinatorToolCall({ toolName: 'write', workspace: identity }, probe);
+      expect(verdict.allow).toBe(false);
+      expect(verdict.reason).toContain('uncertain');
+    }
+  });
+
+  it('records the recovery with actor and observed reason, and refuses to race a new holder', () => {
+    const root = workspace();
+    const identity = resolveWorkspace(root);
+    acquire(
+      { workspace: identity, activationId: 'act:dead2', attemptId: 'att:dead2:1', specialist: 'executor' },
+      liveProbe,
+    );
+    const deadProbe: LeaseProcessProbe = { canVerify: () => true, startTicks: () => undefined };
+    const healed = recoverDeadHolder(identity, { actor: 'operator:test', probe: deadProbe, now: 1_700_000_000_000 });
+    expect(healed).toMatchObject({ applied: true, observedReason: 'holder_process_gone', actor: 'operator:test' });
+    // Forensics survive the delete.
+    const log = readFileSync(join(dirname(leasePath(identity)), 'recoveries.jsonl'), 'utf-8');
+    expect(JSON.parse(log.trim())).toMatchObject({ holderActivationId: 'act:dead2', observedReason: 'holder_process_gone' });
+    // Idempotent: a second call finds nothing to heal.
+    expect(recoverDeadHolder(identity, { actor: 'operator:test', probe: deadProbe }).applied).toBe(false);
+    // A live lease is never healed, even if a caller asks.
+    acquire(
+      { workspace: identity, activationId: 'act:live', attemptId: 'att:live:1', specialist: 'executor' },
+      liveProbe,
+    );
+    expect(recoverDeadHolder(identity, { actor: 'operator:test', probe: liveProbe }).applied).toBe(false);
+    expect(inspect(identity, liveProbe).state).toBe('held');
   });
 
   it('still fences a genuine writer while a lease is held', () => {

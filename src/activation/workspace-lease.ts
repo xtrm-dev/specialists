@@ -88,8 +88,8 @@
  */
 
 import { createHash } from 'node:crypto';
-import { existsSync, linkSync, mkdirSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { appendFileSync, existsSync, linkSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { DispatchRejectedError, type ActivationId, type AttemptId, type WorkspaceIdentity } from './types.js';
 
 /**
@@ -274,6 +274,80 @@ export interface AcquireRequest {
   activationId: ActivationId;
   attemptId: AttemptId;
   specialist?: string;
+}
+
+export interface RecoveryOutcome {
+  applied: boolean;
+  reason?: 'not_recoverable' | 'already_free' | 'raced_by_new_holder';
+  /** The uncertain reason that was healed. Absent when nothing was healed. */
+  observedReason?: string;
+  actor?: string;
+}
+
+/**
+ * Heal a lease whose holder is verifiably GONE, and only that one (SPECIALISTS-4274).
+ *
+ * `inspect` deliberately reports `uncertain` for a dead holder: the process may have died
+ * mid-write, and silence is not evidence of a clean tree. But a dead holder that escalates
+ * forever is worse — observed live, the workspace stayed fenced until an operator ran the
+ * reconcile command out of band, with no in-session way to run it.
+ *
+ * So `uncertain` stays reserved for holders that MIGHT be alive: `liveness_unverifiable`,
+ * `holder_start_mismatch` and `unreadable_record` still block. `holder_process_gone` is
+ * terminal, and terminal heals.
+ *
+ * Concurrency: the lease file is re-read and compared against the record the decision was
+ * based on, so a coordinator that raced a fresh `acquire` refuses to delete the new holder's
+ * lease (`raced_by_new_holder`). The recovery log keeps the forensic trail that deleting the
+ * file would otherwise lose.
+ */
+export function recoverDeadHolder(
+  workspace: WorkspaceIdentity,
+  input: { actor: string; probe?: LeaseProcessProbe; now?: number },
+): RecoveryOutcome {
+  const probe = input.probe ?? procLeaseProbe();
+  const path = leasePath(workspace);
+  const status = inspect(workspace, probe);
+  if (status.state === 'free') return { applied: false, reason: 'already_free' };
+  if (status.state === 'held') return { applied: false, reason: 'not_recoverable' };
+  if (status.uncertainReason !== 'holder_process_gone' || !status.lease) {
+    return { applied: false, reason: 'not_recoverable', observedReason: status.uncertainReason };
+  }
+
+  // Re-read and compare: never delete a lease that changed under us.
+  let current: WorkspaceLease;
+  try {
+    current = JSON.parse(readFileSync(path, 'utf-8')) as WorkspaceLease;
+  } catch {
+    return { applied: false, reason: 'already_free' };
+  }
+  if (
+    current?.activationId !== status.lease.activationId
+    || current?.holder?.pid !== status.lease.holder.pid
+    || current?.holder?.startTicks !== status.lease.holder.startTicks
+  ) {
+    return { applied: false, reason: 'raced_by_new_holder' };
+  }
+
+  const at = input.now ?? Date.now();
+  try {
+    appendFileSync(
+      join(dirname(path), 'recoveries.jsonl'),
+      `${JSON.stringify({
+        workspace: workspace.worktreePath,
+        holderActivationId: status.lease.activationId,
+        holderPid: status.lease.holder.pid,
+        observedReason: status.uncertainReason,
+        actor: input.actor,
+        recoveredAt: at,
+      })}\n`,
+    );
+    rmSync(path, { force: true });
+  } catch {
+    // A failed heal must never be mistaken for a free workspace.
+    return { applied: false, reason: 'not_recoverable', observedReason: status.uncertainReason };
+  }
+  return { applied: true, observedReason: status.uncertainReason, actor: input.actor };
 }
 
 /**
@@ -524,6 +598,17 @@ export function admitCoordinatorToolCall(
     };
   }
   if (status.state === 'uncertain') {
+    // A verifiably dead holder heals in place; anything that might still be alive blocks.
+    if (status.uncertainReason === 'holder_process_gone') {
+      const healed = recoverDeadHolder(input.workspace, { actor: 'coordinator-fence', probe });
+      if (healed.applied) return { allow: true };
+      if (healed.reason === 'raced_by_new_holder') {
+        return {
+          allow: false,
+          reason: `workspace ${input.workspace.worktreePath} was re-leased during recovery; retry`,
+        };
+      }
+    }
     return {
       allow: false,
       reason: `workspace ${input.workspace.worktreePath} lease is uncertain (${status.uncertainReason}); `
