@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.0.8] - 2026-10-04
+
+### Fixed
+- Draw specialist_feed as a native row and drop the duplicate wake hint ([d67ff89](https://github.com/xtrm-dev/specialists/commit/d67ff89d919cf6fe28e1e372e5d1b7d5a5fec7c2))
+- Name the created Issue on events of an inline-contract dispatch ([128f0b6](https://github.com/xtrm-dev/specialists/commit/128f0b6a4969c94437ef2008588dcd0947bdf9f5))
+
 ## [4.0.7] - 2026-10-04
 
 ### Added
