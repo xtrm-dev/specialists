@@ -16,12 +16,12 @@ const fingerprints = {
   resolved_tool_contract_fixture_sha256: digestFiles(['config/catalog/index.json', 'config/specialists/explorer.specialist.json', 'config/specialists/overthinker.specialist.json', 'config/specialists/obligations-scanner.specialist.json']),
 };
 const waiver = {
-  release: '4.0.8',
+  release: '4.0.9',
   status: 'approved_bounded_waiver',
   tracking_issue: 'unitAI-641h0',
   approved: true,
   approved_by: 'operator',
-  approved_at: '2026-10-04T12:50:30Z',
+  approved_at: '2026-10-04T23:18:31Z',
   limitation: 'Specialists does not provide filesystem or host-read isolation. Model-driven runs and allowed tools, extensions, MCP processes, and child processes can read paths visible to the operating-system identity that runs Specialists.',
   affected_surfaces: ['tracked_runs', 'sp_script', 'sp_serve', 'mcp_native_activation', 'pipelines', 'pi_extensions', 'child_processes'],
   excluded_uses: ['untrusted_callers', 'public_unauthenticated_ingress', 'cross_tenant_execution', 'multi_tenant_execution', 'confidential_host_data_visible_to_the_runtime_identity'],
@@ -33,7 +33,7 @@ const waiver = {
   sandbox: 'none',
   read_isolation: 'not_provided',
   expires_at: '2026-11-01T00:00:00Z',
-  expires_on_release: '4.0.9',
+  expires_on_release: '4.0.10',
   expires_on_condition: 'first_release_that_provides_enforced_host_read_isolation',
   expiry_rule: 'whichever_occurs_first',
   reopen_conditions: ['unauthorized_host_read', 'public_or_cross_tenant_deployment', 'requested_tier_launch_without_explicit_tools', 'readable_mount_expansion', 'misleading_isolation_documentation', 'waiver_expiry'],

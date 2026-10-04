@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.0.9] - 2026-10-04
+
+### Added
+- Specialist_feed on the native-specialists extension (SPECIALISTS-4264) (#452) ([e40499b](https://github.com/xtrm-dev/specialists/commit/e40499b4cbb67cdd1ad8c4f74c290bd78004a81e))
+
+### Fixed
+- Clamp specialist_feed limit inside the tool, not only in the schema (#453) ([2cb23b0](https://github.com/xtrm-dev/specialists/commit/2cb23b0b3c7ec80bebe00d604961332ff40a1b07))
+
+### Project maintenance
+- Regenerate dist for the feed limit clamp ([e73304a](https://github.com/xtrm-dev/specialists/commit/e73304a40bc2bb64948f1a78dbd4645f9201c3d6))
+
 ## [4.0.8] - 2026-10-04
 
 ### Fixed
