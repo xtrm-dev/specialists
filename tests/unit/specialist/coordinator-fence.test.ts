@@ -3,7 +3,16 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { resolveWorkspace } from '../../../src/activation/native-host.js';
-import { acquire, admitCoordinatorToolCall, isControlPlaneTool, type LeaseProcessProbe } from '../../../src/activation/workspace-lease.js';
+import { GUARDED_TOOL_NAMES } from '../../../src/activation/guarded-tools.js';
+import {
+  acquire,
+  admitCoordinatorToolCall,
+  isControlPlaneTool,
+  isMutatingTool,
+  isWorkspaceWriteTool,
+  WORKSPACE_WRITE_TOOLS,
+  type LeaseProcessProbe,
+} from '../../../src/activation/workspace-lease.js';
 
 /**
  * SPECIALISTS-4272: the coordinator's control plane must never be fenced by the workspace
@@ -73,6 +82,29 @@ describe('coordinator control plane is exempt from the workspace write fence', (
     expect(isControlPlaneTool(' specialist_reply ')).toBe(true);
     expect(isControlPlaneTool('bash')).toBe(false);
     expect(isControlPlaneTool('write')).toBe(false);
+  });
+
+  it('classifies the coordinator fence by a WRITE ALLOWLIST, not a read denylist (4273)', () => {
+    // Refused: the four tools that can write a file or run a command.
+    for (const tool of ['bash', 'write', 'edit', 'powershell']) expect(isWorkspaceWriteTool(tool), tool).toBe(true);
+    // Allowed: read-adjacent tools the denylist forgot, observed live.
+    for (const tool of ['ls', 'find', 'python', 'structured_return', 'grep', 'read']) {
+      expect(isWorkspaceWriteTool(tool), tool).toBe(false);
+    }
+    // Default-allow: a tool that did not exist when this list was written is not fenced.
+    expect(isWorkspaceWriteTool('some_future_shell')).toBe(false);
+    // Parity: the fence set and the guarded-tool reconstruction are the same tools.
+    expect([...WORKSPACE_WRITE_TOOLS].sort()).toEqual([...GUARDED_TOOL_NAMES].sort());
+    // The Specialist-side denylist is untouched and still strict about `python`.
+    expect(isMutatingTool('python')).toBe(true);
+    expect(isMutatingTool('read')).toBe(false);
+  });
+
+  it('lets the coordinator run a read-only python cell while a lease is held', () => {
+    const root = heldWorkspace();
+    const identity = resolveWorkspace(root);
+    const verdict = admitCoordinatorToolCall({ toolName: 'python', workspace: identity }, liveProbe);
+    expect(verdict.allow).toBe(true);
   });
 
   it('still fences a genuine writer while a lease is held', () => {

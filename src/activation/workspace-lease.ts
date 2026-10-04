@@ -429,6 +429,32 @@ export function isMutatingTool(toolName: string): boolean {
   return !NON_MUTATING_TOOLS.has(toolName.trim().toLowerCase());
 }
 
+/**
+ * The tools that can actually write a workspace file or run a command.
+ *
+ * This is the INVERSE question to `isMutatingTool`, and the coordinator fence is the only
+ * place that asks it (SPECIALISTS-4273). That fence exists to stop two writers colliding in
+ * one worktree — not to capability-gate the operator's own agent — so it must refuse what
+ * genuinely writes and allow the rest. Under the denylist it refused a plain `ls`, a `find`
+ * and a read-only python cell, because nobody had listed them (observed live).
+ *
+ * The set is the same four pi builtins that `guarded-tools.ts` reconstructs, so the fence and
+ * the guarded-tool reconstruction cannot drift; a parity test pins them together.
+ *
+ * The trade-off, stated rather than hidden: a tool that mutates but is not in this set (a
+ * future shell wrapper, `python` executing a script that writes) is NOT fenced for the
+ * coordinator. That is deliberate — the coordinator is not a delegated writer, and a fence
+ * that blocks reading is worse than one that misses an exotic writer. The Specialist side is
+ * unaffected: `admitToolCall` keeps the strict denylist, so a read-tier activation still may
+ * not touch anything it cannot prove harmless.
+ */
+export const WORKSPACE_WRITE_TOOLS: ReadonlySet<string> = new Set(['edit', 'write', 'bash', 'powershell']);
+
+/** True for a tool the coordinator fence treats as a workspace writer. */
+export function isWorkspaceWriteTool(toolName: string): boolean {
+  return WORKSPACE_WRITE_TOOLS.has(toolName.trim().toLowerCase());
+}
+
 /** The verdict a `tool_call` handler converts into `{ block: true }` plus a reason. */
 export interface AdmissionVerdict {
   allow: boolean;
@@ -485,7 +511,9 @@ export function admitCoordinatorToolCall(
 ): AdmissionVerdict {
   // Control plane first: it is exempt under EVERY lease state, including an uncertain one.
   if (isControlPlaneTool(input.toolName)) return { allow: true };
-  if (!isMutatingTool(input.toolName)) return { allow: true };
+  // Then the write allowlist. This is deliberately NOT isMutatingTool: the coordinator fence
+  // must refuse concurrent writers, not everything it cannot prove read-only.
+  if (!isWorkspaceWriteTool(input.toolName)) return { allow: true };
 
   const status = inspect(input.workspace, probe);
   if (status.state === 'held') {
