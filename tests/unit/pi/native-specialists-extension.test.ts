@@ -1243,6 +1243,64 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     for (const cmd of pi.getCommands()) expect(cmd.description).not.toContain('/fleet');
   });
 
+  it('live feed follows a running activation on Fleet change, no settle or ask (SPECIALISTS-4264 review round 2)', async () => {
+    const T = 1_700_000_000_000;
+    // Timeline grows between reads: the follow-up read sees the new turn.
+    // seqs are append-only (4 follows 3): reusing seq 2 would fail the
+    // since_seq filter and prove nothing about cursor following.
+    let grown = false;
+    const eventsFor = () => [
+      { t: T, seq: 1, type: 'run_start', specialist: 'explorer', bead_id: 'XTRM-1' },
+      { t: T, seq: 2, type: 'turn_summary', turn_index: 1, token_usage: { input_tokens: 100 }, finish_reason: 'stop' },
+      ...(grown ? [{ t: T, seq: 3, type: 'turn_summary', turn_index: 2, token_usage: { input_tokens: 100 }, finish_reason: 'stop' }] : []),
+    ];
+    const fakeClient = {
+      listNativeActivationIds: () => ['act:feed01'],
+      readEvents: (id) => (id === 'act:feed01' ? eventsFor() : []),
+      readForensicEvents: () => [],
+      close: () => {},
+    };
+    const mod = await loadExtension();
+    const pi = makeFakePi();
+    const { host } = makeFakeHost();
+    host.list.mockReturnValue([{ ...SNAPSHOT, activationId: 'act:feed01', state: 'running' }]);
+    // Fleet-change signal the follow loop parks in: resolve waiters on demand.
+    let waiters = [];
+    host.fleetChangeEpoch = vi.fn(() => 7);
+    host.waitForFleetChange = vi.fn(() => new Promise((resolve) => { waiters.push(resolve); }));
+    const flush = async () => { await vi.advanceTimersByTimeAsync(0); };
+    mod.default(pi, { createHost: () => host, openObservability: () => fakeClient });
+    const sections = new Map();
+    const registerFooterSection = (key, render) => { sections.set(key, render); return () => { sections.delete(key); }; };
+    const pi2 = makeFakePi();
+    mod.default(pi2, { createHost: () => host, openObservability: () => fakeClient, registerFooterSection });
+    const ctx = makeFakeCtx({ hasUI: true, mode: 'tui' });
+    await pi2.fire('session_start', { type: 'session_start' }, ctx);
+    await toolNamed(pi2, 'specialist_status').execute('tc0', {});
+    const cmds = pi2.getCommands();
+    await cmds.find((c) => c.name === 'specialists:feed').handler('act:feed01', ctx);
+    await flush();
+    const render = sections.get('specialist-fleet');
+    const linesBefore = render().map(plain).join('\n');
+    expect(linesBefore).toContain('turn 1');
+    expect(linesBefore).not.toContain('turn 2');
+    // One turn advances with no settle and no ask: the change wakes the parked
+    // loop, which re-reads from the cursor and appends only the new lines.
+    grown = true;
+    waiters.splice(0).forEach((resolve) => resolve('change'));
+    await flush();
+    const linesAfter = render().map(plain).join('\n');
+    expect(linesAfter).toContain('turn 1');
+    expect(linesAfter).toContain('turn 2');
+    // Settling stops the loop: a further change resolves nothing new.
+    host.list.mockReturnValue([{ ...SNAPSHOT, activationId: 'act:feed01', state: 'settled' }]);
+    waiters.splice(0).forEach((resolve) => resolve('change'));
+    await flush();
+    // session_shutdown stops background work: the parked waiter is abandoned.
+    await pi2.fire('session_shutdown', { type: 'session_shutdown', reason: 'quit' });
+    expect(host.stop).toHaveBeenCalled();
+  });
+
   it('wake refreshes the selected fleet detail without a command (SPECIALISTS-4264)', async () => {
     const T = 1_700_000_000_000;
     const events = [

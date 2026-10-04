@@ -1501,12 +1501,14 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
   const DETAIL_SELECT_HINT = 'select a row: /specialists result|feed <activation>';
 
   // Async state advances through `refreshFleetDetail`: the commands refresh the
-  // selection they just opened, and the two settlement/ask wakes refresh it when
-  // a child settles or asks (the Claude pane refreshes on status change, not on
-  // a timer). The footer seam calls renderBelow as a plain function on its own
-  // cycle, so the section always paints the last completed read, never a
-  // pending promise. No timers, no polling, no execute-body wrapping.
-  const refreshFleetDetail = async () => {
+  // selection they just opened, the two settlement/ask wakes refresh it when a
+  // child settles or asks, and the fleet-change follow loop below refreshes it
+  // on every Fleet change while the selection is live (the Claude pane
+  // refreshes on status change, not on a timer). The footer seam calls
+  // renderBelow as a plain function on its own cycle, so the section always
+  // paints the last completed read, never a pending promise. No timers, no
+  // polling, no execute-body wrapping.
+  const refreshFleetDetail = async (followCursor = null) => {
     const sel = fleetDetail;
     if (!sel) return;
     try {
@@ -1516,26 +1518,42 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
         fleetDetailCache = { id: sel.id, kind: sel.kind, lines: resultCommandLines(payload), lastSeq: null, settled: true };
         return;
       }
-      const out = await feedToolDef('section', { activation_id: sel.id, limit: FEED_SECTION_LINES });
+      // A live feed follows from its cursor: only events newer than the last
+      // completed read are appended, so each refresh is bounded and lines
+      // never duplicate across refreshes.
+      const since = followCursor ?? fleetDetailCache?.lastSeq ?? null;
+      const input = { activation_id: sel.id, limit: FEED_SECTION_LINES };
+      if (since != null && fleetDetailCache?.id === sel.id && fleetDetailCache?.kind === sel.kind) input.since_seq = since;
+      const out = await feedToolDef('section', input);
       const payload = out?.structuredContent ?? {};
       if (payload.status === 'error') {
         fleetDetailCache = { id: sel.id, kind: sel.kind, lines: [`feed unavailable · ${payload.error ?? 'unknown error'}`], lastSeq: null, settled: true };
         return;
       }
-      const events = (Array.isArray(payload.events) ? payload.events : []).filter((e) => typeof e === 'string');
+      const fresh = (Array.isArray(payload.events) ? payload.events : []).filter((e) => typeof e === 'string');
+      const prior = fleetDetailCache?.id === (payload.activation_id ?? sel.id) && fleetDetailCache?.kind === sel.kind && since != null
+        ? (fleetDetailCache.lines ?? [])
+        : [];
       const fleet = readFleet();
       const live = fleet.activations.some((a) => a.activation_id === (payload.activation_id ?? sel.id) && isActiveStateFor(a.state));
-      fleetDetailCache = { id: payload.activation_id ?? sel.id, kind: sel.kind, lines: feedCommandLines(payload), lastSeq: payload.last_seq ?? null, settled: !live };
+      fleetDetailCache = {
+        id: payload.activation_id ?? sel.id,
+        kind: sel.kind,
+        lines: [...prior, ...fresh].slice(-FEED_SECTION_LINES),
+        lastSeq: payload.last_seq ?? fleetDetailCache?.lastSeq ?? null,
+        settled: !live,
+      };
     } catch {
       // A failed refresh keeps the previous cache: the section degrades to
       // stale lines rather than dropping the view.
     }
   };
-  // Every settlement or ask may have changed the fleet (a turn advanced a
-  // feed, a child finished), so the selected detail follows those events — the
-  // Claude pane's refresh-on-status-change, without a timer and without
-  // wrapping every tool's execute body.
-  const noteFleetActivity = () => { void refreshFleetDetail(); };
+  // Every settlement, ask, or Fleet change may have advanced the feed, so the
+  // selected detail follows those events — the Claude pane's
+  // refresh-on-status-change, without a timer and without wrapping every
+  // tool's execute body. Wakes refresh through `refreshFleetDetailRef` above;
+  // live feeds follow through the fleet-change loop further below, kicked by
+  // the feed command and reseeded on session_start.
   fleetDetailRef.current = null; // reassigned below by selection; kept in sync
   const syncDetailRef = () => { fleetDetailRef.current = fleetDetail; };
   refreshFleetDetailRef.current = refreshFleetDetail;
@@ -2548,7 +2566,8 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
   // specialist_result covers this session; the feed answers running, settled
   // AND earlier-session activations through observability.db, so the feed is
   // the fallback when the result names no id. Refresh is event-driven (ask and
-  // settlement wakes via noteFleetActivity), never a timer or background loop.
+  // settlement wakes, plus the fleet-change follow loop while a feed is live),
+  // never a timer or background loop.
   const activationCommandCompletions = (prefix) => {
     const normalized = String(prefix ?? '').trim();
     if (normalized.includes(' ')) return null;
@@ -2612,6 +2631,10 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
     }
     const running = fleet.activations.some((a) => a.activation_id === (payload.activation_id ?? id) && isActiveStateFor(a.state));
     fleetDetailCache = { id: payload.activation_id ?? id, kind, lines: feedCommandLines(payload), lastSeq: payload.last_seq ?? null, settled: !running };
+    // A freshly opened live feed starts the follow loop; the loop parks in
+    // waitForFleetChange and refreshes on every Fleet change until the
+    // activation settles (or the selection moves on).
+    if (running) kickFollowLoop();
     const rendered = feedCommandLines(payload);
     report(ctx, [...rendered, ...(running ? [`… still ${fleet.activations.find((a) => a.activation_id === (payload.activation_id ?? id))?.state ?? 'running'} — re-run with last_seq ${payload.last_seq ?? '?'} as since_seq to follow`] : [])].join('\n'));
   };
@@ -2622,7 +2645,55 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
   const resultToolDef = resultExecute;
   const feedToolDef = feedExecute;
 
+  // Fleet-change follow loop (SPECIALISTS-4264 review round 2): while a feed
+  // selection is live, park in the SAME host.waitForFleetChange the
+  // specialist_status blocking wait uses and refresh the selection on every
+  // Fleet change — the Claude pane's refresh-on-status-change, without a timer
+  // and without polling. Level-triggered, so a change landing between the
+  // liveness check and the park resolves immediately (no lost wakeup, no spin).
+  // One loop per process, idempotent across session restarts (followRunning
+  // guard); session_shutdown sets followStopped, which unblocks the loop at
+  // its next park or refresh boundary (extension lifecycle: no background work
+  // survives the session).
+  const FOLLOW_WAIT_MS = 25_000;
+  let followRunning = false;
+  let followStopped = false;
+  const followLoop = async () => {
+    if (followRunning) return;
+    followRunning = true;
+    try {
+      for (;;) {
+        if (followStopped) return;
+        const sel = fleetDetail;
+        const live = sel?.kind === 'feed'
+          && readFleet().activations.some((a) => a.activation_id === sel.id && isActiveStateFor(a.state));
+        if (!live) return;
+        let h;
+        try { h = getHost(); } catch { return; }
+        if (typeof h?.waitForFleetChange !== 'function' || typeof h?.fleetChangeEpoch !== 'function') return;
+        const epoch = h.fleetChangeEpoch();
+        const outcome = await h.waitForFleetChange(FOLLOW_WAIT_MS, epoch);
+        if (followStopped) return;
+        // Re-check liveness after the park: the selection may have settled or
+        // changed while parked, and a settled feed must not re-read.
+        const now = fleetDetail;
+        if (!now || now.kind !== 'feed' || now.id !== sel.id) continue;
+        if (!readFleet().activations.some((a) => a.activation_id === now.id && isActiveStateFor(a.state))) {
+          await refreshFleetDetail();
+          return;
+        }
+        if (outcome === 'change') await refreshFleetDetail(fleetDetailCache?.lastSeq ?? null);
+      }
+    } finally {
+      followRunning = false;
+    }
+  };
+  const kickFollowLoop = () => { void followLoop(); };
+
   pi.on('session_start', (_event, ctx) => {
+    // A restart must not leave a stale stop behind: a new session may select a
+    // live feed again, and the loop is idempotent while one already runs.
+    followStopped = false;
     if (!ctx.hasUI) return;
     const seam = findFooterSeam();
     if (seam && !fleetUnregister) {
@@ -2865,6 +2936,9 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
   // A child must never outlive the coordinator process. Best-effort: stop and
   // dispose every live activation when the pi session shuts down.
   pi.on('session_shutdown', async () => {
+    // Stop the follow loop first: no parked waiter or in-flight refresh may
+    // touch the host while its activations are being disposed below.
+    followStopped = true;
     try { fleetUnregister?.(); } catch {}
     fleetUnregister = null;
     if (!host) return;
