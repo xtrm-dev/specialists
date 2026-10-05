@@ -12,7 +12,7 @@ summary: "Defines additive metrics from Pi RPC surfaced via specialists status/f
 
 # RPC Observability Metrics Contract
 
-> **Bridge-era note (2026-06-02):** this file documents the current RPC/timeline metrics emitted by specialists. New Prometheus-facing metric design lives in `docs/telemetry/prometheus-projection-contract.md`, and forensic event shape lives in `docs/telemetry/forensic-event-contract.md`. Keep this file for source mapping/backward compatibility until the projection exporter lands.
+> **Bridge-era note (reconciled 2026-09-18):** this file is retained as historical/RPC metric source mapping. The previously referenced `docs/telemetry/{prometheus-projection-contract,forensic-event-contract}.md` files are not present in this repository after the documented xtrm-monorepo migration and must not be treated as live local canon. Current cross-surface ownership is defined in [`docs/observability-architecture.md`](observability-architecture.md); current XTRM-93 telemetry evidence and residuals live under [`docs/migrations/xtrm-93/`](migrations/xtrm-93/).
 
 ## Cross-repo telemetry contract
 

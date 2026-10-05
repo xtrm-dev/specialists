@@ -11,6 +11,8 @@ import type { SupervisorStatus } from '../specialist/supervisor.js';
 import type { TimelineEvent } from '../specialist/timeline-events.js';
 import { forensicEventFromTimelineEvent, type ForensicEvent } from '../specialist/forensic-events.js';
 import { forensicEventToRow, formatRenderedRowColumns, type RenderedRow } from '../specialist/forensic-renderer.js';
+import { isForensicAgentInternal } from '../specialist/forensic-presentation.js';
+export { isForensicAgentInternal } from '../specialist/forensic-presentation.js';
 import type { ForensicEventRecord, ListForensicEventsFilters } from '../specialist/observability-sqlite.js';
 import {
   bold,
@@ -173,25 +175,6 @@ function matches(status: SupervisorStatus, options: LogOptions): boolean {
   if (options.beadId && status.bead_id !== options.beadId) return false;
   if (options.nodeId && status.node_id !== options.nodeId) return false;
   return true;
-}
-
-// Mirrors isRuntimeEvent for the forensic path. Agent-internal noise
-// (turn/tool/token_usage/finish_reason/meta/mcp.call.*) is hidden by
-// default; runtime families (job/control/error/git/command/review/chain/
-// worktree/process_health/retry/compaction, plus model.changed and
-// mcp.connected|disconnected|auth.failed|rate_limited) pass through.
-// --all-events restores the full firehose.
-export function isForensicAgentInternal(event: ForensicEvent): boolean {
-  if (event.event_family === 'turn') return true;
-  if (event.event_family === 'tool') return true;
-  const name = event.event_name;
-  return name === 'model.token_usage.recorded'
-    || name === 'model.finish_reason.recorded'
-    || name.startsWith('model.meta')
-    || name === 'mcp.call.started'
-    || name === 'mcp.call.completed'
-    || name === 'mcp.call.failed'
-    || name === 'mcp.latency.observed';
 }
 
 function isRuntimeEvent(event: TimelineEvent): boolean {
