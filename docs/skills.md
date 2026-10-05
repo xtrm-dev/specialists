@@ -60,26 +60,11 @@ Location: `config/skills/releasing/SKILL.md`
 
 Release workflow driver. Owns version bump, changelog promotion, build, commit, tag, push, and npm publish. It may dispatch `changelog-keeper` to fill `[Unreleased]` gaps, but `changelog-keeper` itself does not publish.
 
-### `update-specialists`
-
-Location: `config/skills/update-specialists/SKILL.md`
-
-Reconciles specialists/xtrm drift. Current model:
-
-- Category A runtime assets: verify with `sp doctor --check-drift`; prune stale `.specialists/default/` snapshots with `sp prune-stale-defaults`.
-- Category B filesystem assets: verify with `xt doctor --cwd <repo> --json`; refresh with `xt update --repo <repo> --apply` or `xt update --root <root> --apply`.
-
 ### `specialists-creator`
 
 Location: `config/skills/specialists-creator/SKILL.md`
 
 Guides creation and repair of `.specialist.json` files. New/current role prompts must preserve Substrate authority semantics: pinned Issue contract, Journal/result evidence, settlement != Closure. Legacy `beads_*` fields may remain only as compatibility data while XTRM-93 keeps the old backend reachable. Use `sp edit`, presets, `sp view`, and validation instead of hand-written ad-hoc JSON.
-
-### `setup-specialists`
-
-Location: `config/skills/setup-specialists/SKILL.md`
-
-First-run Specialists setup workflow. Bootstraps `~/.config/specialists/user.json`, checks local Pi models, applies cross-repo `sp edit --global` overrides, and now covers interactive keep-alive defaults plus waiting auto-close settings.
 
 ### Other package skills
 

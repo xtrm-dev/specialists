@@ -3,14 +3,6 @@
   "package_version": "4.0.9",
   "shipped_skills": [
     {
-      "path": "config/skills/setup-specialists/SKILL.md",
-      "sha256": "402f28d7fb9c515af40f3a10c8ec768f9547650956449f21700e330a1eb8cf83"
-    },
-    {
-      "path": "config/skills/update-specialists/SKILL.md",
-      "sha256": "f403cee492f7f076bfaaa262917879923663e374a1f410581d147281f6267989"
-    },
-    {
       "path": "config/skills/using-specialists/references/chain-recipes.md",
       "sha256": "ea4b8672c4334f9c1b0da5f1053728c865597a31025e2637b0eb5cd5498b7d57"
     },
