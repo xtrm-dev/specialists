@@ -259,7 +259,7 @@ export async function runProbeOnly(args: ParsedArgs): Promise<void> {
 export async function runInteractive(args: ParsedArgs): Promise<void> {
   const text = renderInteractiveWorkflow();
   if (args.json) {
-    console.log(JSON.stringify({ workflow: text, skill_reference: 'setup-specialists' }, null, 2));
+    console.log(JSON.stringify({ workflow: text }, null, 2));
     return;
   }
   console.log(text);
@@ -607,7 +607,7 @@ function renderInteractiveWorkflow(): string {
     '  5. Run sp setup --apply <plan.json> [--dry-run]',
     '  6. Optional: sp setup --probe-only <model> <spec>',
     '',
-    `  Skill reference: ${dim('setup-specialists')}`,
+    `  Skill reference: ${dim('docs/skills.md')}`,
     '',
   ].join('\n');
 }
