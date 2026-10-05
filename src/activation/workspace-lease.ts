@@ -88,8 +88,8 @@
  */
 
 import { createHash } from 'node:crypto';
-import { existsSync, linkSync, mkdirSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { appendFileSync, existsSync, linkSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { DispatchRejectedError, type ActivationId, type AttemptId, type WorkspaceIdentity } from './types.js';
 
 /**
@@ -276,6 +276,125 @@ export interface AcquireRequest {
   specialist?: string;
 }
 
+export interface RecoveryOutcome {
+  applied: boolean;
+  reason?: 'not_recoverable' | 'already_free' | 'raced_by_new_holder' | 'activation_mismatch';
+  /** The uncertain reason that was healed. Absent when nothing was healed. */
+  observedReason?: string;
+  actor?: string;
+}
+
+/**
+ * Heal a lease whose holder is verifiably GONE, and only that one (SPECIALISTS-4274).
+ *
+ * `inspect` deliberately reports `uncertain` for a dead holder: the process may have died
+ * mid-write, and silence is not evidence of a clean tree. But a dead holder that escalates
+ * forever is worse — observed live, the workspace stayed fenced until an operator ran the
+ * reconcile command out of band, with no in-session way to run it.
+ *
+ * So `uncertain` stays reserved for holders that MIGHT be alive: `liveness_unverifiable`,
+ * `holder_start_mismatch` and `unreadable_record` still block. `holder_process_gone` is
+ * terminal, and terminal heals.
+ *
+ * Concurrency: the lease file is re-read and compared against the record the decision was
+ * based on, so a coordinator that raced a fresh `acquire` refuses to delete the new holder's
+ * lease (`raced_by_new_holder`). The recovery log keeps the forensic trail that deleting the
+ * file would otherwise lose.
+ */
+/**
+ * Release a lease on behalf of the activation named in `activationId` (SPECIALISTS-4275).
+ *
+ * Stopping an activation must end its write claim, or the coordinator is fenced by a worker
+ * that no longer exists — observed live: `specialist_stop_activation` disposed the activation
+ * and the lease survived, escalating the workspace to `uncertain`. This is the clean inverse
+ * of `recoverDeadHolder`: it needs no death to justify it, only an exact holder match.
+ *
+ * A non-matching lease is never touched (`activation_mismatch`). The activationId comes from
+ * the coordinator's own stop call, so the match is a claim about ownership, not a guess.
+ */
+export function releaseHolderLease(
+  workspace: WorkspaceIdentity,
+  input: { activationId: ActivationId; actor: string; now?: number },
+): RecoveryOutcome {
+  const path = leasePath(workspace);
+  let lease: WorkspaceLease;
+  try {
+    lease = JSON.parse(readFileSync(path, 'utf-8')) as WorkspaceLease;
+  } catch {
+    return { applied: false, reason: 'already_free' };
+  }
+  if (lease?.activationId !== input.activationId) {
+    return { applied: false, reason: 'activation_mismatch' };
+  }
+  const at = input.now ?? Date.now();
+  try {
+    appendFileSync(
+      join(dirname(path), 'recoveries.jsonl'),
+      `${JSON.stringify({
+        workspace: workspace.worktreePath,
+        holderActivationId: lease.activationId,
+        holderPid: lease.holder.pid,
+        observedReason: 'released_by_holder',
+        actor: input.actor,
+        recoveredAt: at,
+      })}\n`,
+    );
+    rmSync(path, { force: true });
+  } catch {
+    return { applied: false, reason: 'not_recoverable' };
+  }
+  return { applied: true, observedReason: 'released_by_holder', actor: input.actor };
+}
+
+export function recoverDeadHolder(
+  workspace: WorkspaceIdentity,
+  input: { actor: string; probe?: LeaseProcessProbe; now?: number },
+): RecoveryOutcome {
+  const probe = input.probe ?? procLeaseProbe();
+  const path = leasePath(workspace);
+  const status = inspect(workspace, probe);
+  if (status.state === 'free') return { applied: false, reason: 'already_free' };
+  if (status.state === 'held') return { applied: false, reason: 'not_recoverable' };
+  if (status.uncertainReason !== 'holder_process_gone' || !status.lease) {
+    return { applied: false, reason: 'not_recoverable', observedReason: status.uncertainReason };
+  }
+
+  // Re-read and compare: never delete a lease that changed under us.
+  let current: WorkspaceLease;
+  try {
+    current = JSON.parse(readFileSync(path, 'utf-8')) as WorkspaceLease;
+  } catch {
+    return { applied: false, reason: 'already_free' };
+  }
+  if (
+    current?.activationId !== status.lease.activationId
+    || current?.holder?.pid !== status.lease.holder.pid
+    || current?.holder?.startTicks !== status.lease.holder.startTicks
+  ) {
+    return { applied: false, reason: 'raced_by_new_holder' };
+  }
+
+  const at = input.now ?? Date.now();
+  try {
+    appendFileSync(
+      join(dirname(path), 'recoveries.jsonl'),
+      `${JSON.stringify({
+        workspace: workspace.worktreePath,
+        holderActivationId: status.lease.activationId,
+        holderPid: status.lease.holder.pid,
+        observedReason: status.uncertainReason,
+        actor: input.actor,
+        recoveredAt: at,
+      })}\n`,
+    );
+    rmSync(path, { force: true });
+  } catch {
+    // A failed heal must never be mistaken for a free workspace.
+    return { applied: false, reason: 'not_recoverable', observedReason: status.uncertainReason };
+  }
+  return { applied: true, observedReason: status.uncertainReason, actor: input.actor };
+}
+
 /**
  * Take the writer lease for a workspace, or refuse with the holder named.
  *
@@ -429,10 +548,64 @@ export function isMutatingTool(toolName: string): boolean {
   return !NON_MUTATING_TOOLS.has(toolName.trim().toLowerCase());
 }
 
+/**
+ * The tools that can actually write a workspace file or run a command.
+ *
+ * This is the INVERSE question to `isMutatingTool`, and the coordinator fence is the only
+ * place that asks it (SPECIALISTS-4273). That fence exists to stop two writers colliding in
+ * one worktree — not to capability-gate the operator's own agent — so it must refuse what
+ * genuinely writes and allow the rest. Under the denylist it refused a plain `ls`, a `find`
+ * and a read-only python cell, because nobody had listed them (observed live).
+ *
+ * The set is the same four pi builtins that `guarded-tools.ts` reconstructs, so the fence and
+ * the guarded-tool reconstruction cannot drift; a parity test pins them together.
+ *
+ * The trade-off, stated rather than hidden: a tool that mutates but is not in this set (a
+ * future shell wrapper, `python` executing a script that writes) is NOT fenced for the
+ * coordinator. That is deliberate — the coordinator is not a delegated writer, and a fence
+ * that blocks reading is worse than one that misses an exotic writer. The Specialist side is
+ * unaffected: `admitToolCall` keeps the strict denylist, so a read-tier activation still may
+ * not touch anything it cannot prove harmless.
+ */
+export const WORKSPACE_WRITE_TOOLS: ReadonlySet<string> = new Set(['edit', 'write', 'bash', 'powershell']);
+
+/** True for a tool the coordinator fence treats as a workspace writer. */
+export function isWorkspaceWriteTool(toolName: string): boolean {
+  return WORKSPACE_WRITE_TOOLS.has(toolName.trim().toLowerCase());
+}
+
 /** The verdict a `tool_call` handler converts into `{ block: true }` plus a reason. */
 export interface AdmissionVerdict {
   allow: boolean;
   reason?: string;
+}
+
+/**
+ * Tools that reach the Fleet rather than the filesystem.
+ *
+ * These are the coordinator's instruments for managing activations, and none of them writes a
+ * workspace file or runs a command. A WRITE fence has no business stopping them: gating
+ * `specialist_stop_activation` means the coordinator cannot release the very lease that is
+ * fencing it, which is the one deadlock this fence must never create (observed live,
+ * SPECIALISTS-4272). The exemption is unconditional rather than a flag — a tool that cannot
+ * write cannot be a writer, whatever the lease says.
+ *
+ * `specialist_reply` and `specialist_status` are here for the same reason and one more: a
+ * Specialist holding a lease in `needs_reply` is blocked ON the coordinator's answer, so
+ * refusing to read or answer it strands both sides.
+ */
+export const CONTROL_PLANE_TOOLS: ReadonlySet<string> = new Set([
+  'specialist_status',
+  'specialist_reply',
+  'specialist_result',
+  'specialist_stop_activation',
+  'specialist_lease_reconcile',
+  'specialists',
+]);
+
+/** True for a Fleet-management tool, which no write fence may refuse. */
+export function isControlPlaneTool(toolName: string): boolean {
+  return CONTROL_PLANE_TOOLS.has(toolName.trim().toLowerCase());
 }
 
 /**
@@ -455,7 +628,11 @@ export function admitCoordinatorToolCall(
   input: { toolName: string; workspace: WorkspaceIdentity },
   probe: LeaseProcessProbe = procLeaseProbe(),
 ): AdmissionVerdict {
-  if (!isMutatingTool(input.toolName)) return { allow: true };
+  // Control plane first: it is exempt under EVERY lease state, including an uncertain one.
+  if (isControlPlaneTool(input.toolName)) return { allow: true };
+  // Then the write allowlist. This is deliberately NOT isMutatingTool: the coordinator fence
+  // must refuse concurrent writers, not everything it cannot prove read-only.
+  if (!isWorkspaceWriteTool(input.toolName)) return { allow: true };
 
   const status = inspect(input.workspace, probe);
   if (status.state === 'held') {
@@ -466,6 +643,17 @@ export function admitCoordinatorToolCall(
     };
   }
   if (status.state === 'uncertain') {
+    // A verifiably dead holder heals in place; anything that might still be alive blocks.
+    if (status.uncertainReason === 'holder_process_gone') {
+      const healed = recoverDeadHolder(input.workspace, { actor: 'coordinator-fence', probe });
+      if (healed.applied) return { allow: true };
+      if (healed.reason === 'raced_by_new_holder') {
+        return {
+          allow: false,
+          reason: `workspace ${input.workspace.worktreePath} was re-leased during recovery; retry`,
+        };
+      }
+    }
     return {
       allow: false,
       reason: `workspace ${input.workspace.worktreePath} lease is uncertain (${status.uncertainReason}); `

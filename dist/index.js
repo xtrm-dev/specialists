@@ -60451,8 +60451,8 @@ ${detail.missing.map((m) => `  - ${m}`).join(`
 
 // src/activation/workspace-lease.ts
 import { createHash as createHash8 } from "crypto";
-import { existsSync as existsSync46, linkSync, mkdirSync as mkdirSync18, readFileSync as readFileSync38, realpathSync as realpathSync5, renameSync as renameSync6, unlinkSync as unlinkSync2, writeFileSync as writeFileSync21 } from "fs";
-import { join as join49 } from "path";
+import { appendFileSync as appendFileSync6, existsSync as existsSync46, linkSync, mkdirSync as mkdirSync18, readFileSync as readFileSync38, realpathSync as realpathSync5, renameSync as renameSync6, rmSync as rmSync9, unlinkSync as unlinkSync2, writeFileSync as writeFileSync21 } from "fs";
+import { dirname as dirname23, join as join49 } from "path";
 function workspaceIdentityFor(cwd) {
   return { repositoryRoot: cwd, worktreePath: cwd };
 }
@@ -60633,7 +60633,7 @@ function admitToolCall(input2, probe = procLeaseProbe()) {
     reason: `workspace ${input2.workspace.worktreePath} is not leased by this activation; ` + `${input2.toolName} may not mutate it`
   };
 }
-var NON_MUTATING_TOOLS;
+var NON_MUTATING_TOOLS, WORKSPACE_WRITE_TOOLS, CONTROL_PLANE_TOOLS;
 var init_workspace_lease = __esm(() => {
   init_types3();
   NON_MUTATING_TOOLS = new Set([
@@ -60648,10 +60648,19 @@ var init_workspace_lease = __esm(() => {
     "websearch",
     "webfetch"
   ]);
+  WORKSPACE_WRITE_TOOLS = new Set(["edit", "write", "bash", "powershell"]);
+  CONTROL_PLANE_TOOLS = new Set([
+    "specialist_status",
+    "specialist_reply",
+    "specialist_result",
+    "specialist_stop_activation",
+    "specialist_lease_reconcile",
+    "specialists"
+  ]);
 });
 
 // src/activation/workspace-reconcile.ts
-import { appendFileSync as appendFileSync6, existsSync as existsSync47, mkdirSync as mkdirSync19, readdirSync as readdirSync21, readFileSync as readFileSync39, unlinkSync as unlinkSync3 } from "fs";
+import { appendFileSync as appendFileSync7, existsSync as existsSync47, mkdirSync as mkdirSync19, readdirSync as readdirSync21, readFileSync as readFileSync39, unlinkSync as unlinkSync3 } from "fs";
 import { userInfo } from "os";
 import { join as join50 } from "path";
 function reconcile(workspace, request, options2 = {}) {
@@ -60725,7 +60734,7 @@ function reconciliationLogPath(workspace) {
 }
 function appendRecord(workspace, record) {
   mkdirSync19(leaseDir(workspace), { recursive: true, mode: 448 });
-  appendFileSync6(reconciliationLogPath(workspace), `${JSON.stringify(record)}
+  appendFileSync7(reconciliationLogPath(workspace), `${JSON.stringify(record)}
 `, { mode: 384 });
 }
 function readLogAt(path3) {
@@ -61284,7 +61293,7 @@ var init_channel_doctor = () => {};
 import { existsSync as existsSync49 } from "fs";
 import { createRequire as createRequire6 } from "module";
 import { homedir as homedir14 } from "os";
-import { dirname as dirname23, join as join51 } from "path";
+import { dirname as dirname24, join as join51 } from "path";
 import { pathToFileURL } from "url";
 function resolveSubstrateDir(explicit, resolveInstalled) {
   const trimmed = explicit.trim();
@@ -61293,21 +61302,21 @@ function resolveSubstrateDir(explicit, resolveInstalled) {
   if (resolveInstalled)
     return resolveInstalled();
   try {
-    return dirname23(require5.resolve(`${SUBSTRATE_PACKAGE}/package.json`));
+    return dirname24(require5.resolve(`${SUBSTRATE_PACKAGE}/package.json`));
   } catch {}
   return resolveSubstrateFromGlobalPrefix();
 }
 function resolveSubstrateFromGlobalPrefix(libDirs) {
   const globalModules = resolveGlobalNodeModulesDir2();
-  const runtimePrefix = dirname23(dirname23(process.execPath));
+  const runtimePrefix = dirname24(dirname24(process.execPath));
   const candidates = uniqueExistingLibDirs(libDirs ?? [
-    globalModules ? dirname23(globalModules) : undefined,
+    globalModules ? dirname24(globalModules) : undefined,
     join51(runtimePrefix, "lib"),
     join51(homedir14(), ".bun", "install", "global")
   ]);
   for (const libDir of candidates) {
     try {
-      return dirname23(require5.resolve(`${SUBSTRATE_PACKAGE}/package.json`, { paths: [libDir] }));
+      return dirname24(require5.resolve(`${SUBSTRATE_PACKAGE}/package.json`, { paths: [libDir] }));
     } catch {}
   }
   return null;
@@ -62832,7 +62841,7 @@ var init_doctor = __esm(() => {
 import { randomUUID as randomUUID4 } from "crypto";
 import { closeSync as closeSync5, existsSync as existsSync51, fsyncSync as fsyncSync2, mkdirSync as mkdirSync21, openSync as openSync6, readFileSync as readFileSync42, renameSync as renameSync7, writeFileSync as writeFileSync23 } from "fs";
 import { homedir as homedir16 } from "os";
-import { dirname as dirname24, join as join53 } from "path";
+import { dirname as dirname25, join as join53 } from "path";
 async function loadBenchmarkSnapshot(options2 = {}) {
   const warnings = [];
   const warn4 = (warning) => {
@@ -62952,7 +62961,7 @@ function getBenchmarkCachePath(source, cacheDir = join53(homedir16(), ".cache", 
   return join53(cacheDir, `${source}.json`);
 }
 function writeCache2(path3, snapshot) {
-  mkdirSync21(dirname24(path3), { recursive: true, mode: 448 });
+  mkdirSync21(dirname25(path3), { recursive: true, mode: 448 });
   const tmpPath = `${path3}.${process.pid}.${randomUUID4()}.tmp`;
   writeFileSync23(tmpPath, `${JSON.stringify(snapshot, null, 2)}
 `, { mode: 384 });
@@ -62963,7 +62972,7 @@ function writeCache2(path3, snapshot) {
     closeSync5(fd);
   }
   renameSync7(tmpPath, path3);
-  fsyncDirectory(dirname24(path3));
+  fsyncDirectory(dirname25(path3));
 }
 function fsyncDirectory(path3) {
   try {
@@ -62988,7 +62997,7 @@ var init_benchmarks = __esm(() => {
 import { createHash as createHash11, randomUUID as randomUUID5 } from "crypto";
 import { mkdirSync as mkdirSync22, readdirSync as readdirSync23, readFileSync as readFileSync43, writeFileSync as writeFileSync24 } from "fs";
 import { homedir as homedir17 } from "os";
-import { dirname as dirname25, join as join54, resolve as resolve23 } from "path";
+import { dirname as dirname26, join as join54, resolve as resolve23 } from "path";
 async function runAgenticFollowthroughProbe(model, specName, opts = {}) {
   const probeDir = getProbeRunDir(model, specName, opts.cacheDir);
   mkdirSync22(probeDir, { recursive: true, mode: 448 });
@@ -63014,7 +63023,7 @@ async function runAgenticFollowthroughProbe(model, specName, opts = {}) {
   const summaryJson = `${JSON.stringify({ verdict, metrics, sample_output: output2, transcript_path: transcriptPath }, null, 2)}
 `;
   writeFileSync24(summaryPath, summaryJson, { mode: 384 });
-  mkdirSync22(dirname25(canonicalPath), { recursive: true, mode: 448 });
+  mkdirSync22(dirname26(canonicalPath), { recursive: true, mode: 448 });
   writeFileSync24(canonicalPath, summaryJson, { mode: 384 });
   return { verdict, metrics, sample_output: output2, transcript_path: transcriptPath };
 }
@@ -98976,6 +98985,8 @@ var init_lib = __esm(() => {
   init_launch_outcome();
   init_citation_evidence();
   init_workspace_lease();
+  init_workspace_lease();
+  init_specialist_lease_reconcile_tool();
   init_workspace_reconcile();
   init_workspace_lease();
   init_rejection();

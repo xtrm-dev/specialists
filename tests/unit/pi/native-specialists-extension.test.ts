@@ -282,6 +282,7 @@ describe('native-specialists extension (Pi coordinator surface)', () => {
       'specialist_retry',
       'specialist_steer',
       'specialist_stop_activation',
+      'specialist_lease_reconcile',
       'specialist_list',
     ]);
     // No free-form task text for tracked work (PRD §10/§14).
@@ -2096,7 +2097,28 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
     for (const card of cards) {
       // Unrailed (operator decision): no gutter anywhere.
       expect(card).not.toContain('│');
-      expect(card).not.toContain('48;2');   // no background in an event, ever
+      // Design system: the gold band starts at the header text (line 1) and the
+      // dot stays unbanded; nothing below the header carries a background.
+      // The band owns its foreground: no token inside it may carry its own colour, so an
+      // accent-coloured thinking level cannot sit on the gold.
+      const bandedText = cards[3].split('\n')[0].slice(0, cards[3].split('\n')[0].indexOf('\u001b[49m'));
+      expect(bandedText).not.toContain('\x1b[38;2;154;139;255m');
+      expect(bandedText).toContain('\x1b[3');
+      // Bold spans the WHOLE band: no `22m` may clear it before the band closes.
+      for (const card of cards) {
+        const banded = card.split('\n')[0].slice(card.split('\n')[0].indexOf('\u25cf ') + 2);
+        const close = banded.indexOf('\u001b[49m');
+        const open = banded.slice(0, close);
+        expect(banded.startsWith('\u001b[48;2;201;162;39m\u001b[38;2;24;20;16m\u001b[1m')).toBe(true);
+        // The ONLY 22m inside the band is the one that closes it: nothing in the middle
+        // may clear bold, which is the bug this pins.
+        expect(open.lastIndexOf('\u001b[22m')).toBe(open.length - '\u001b[22m'.length);
+      }
+      const [head, ...body] = card.split('\n');
+      expect(head.startsWith('\u001b[1m\u25cf\u001b[22m ') || head.startsWith('\u25cf ')).toBe(true);
+      expect(head.slice(head.indexOf('\u25cf ') + 2)).toContain('48;2;201;162;39');
+      expect(head.slice(head.indexOf('\u25cf ') + 2)).toContain('38;2;24;20;16');
+      for (const line of body) expect(line).not.toContain('48;2');
       expect(card).not.toContain('\n\n');   // no blank line anywhere
       expect(card).not.toContain('╭');      // no brackets
       expect(card).not.toContain('╰');
@@ -2124,8 +2146,10 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
 
     // Styling: warning/bold/dim/italic per field, instruction dim+italic, id dim.
     expect(cards[0]).toContain('●');
-    expect(cards[0]).toContain('\x1b[1mresearcher\x1b[22m');
-    expect(cards[0]).toContain('\x1b[3minspect native wake transport\x1b[23m');
+    // Bold is opened once for the whole band, not per segment: the name is the first
+    // segment inside it, and no 22m appears before the band's close.
+    expect(cards[0]).toContain('\x1b[48;2;201;162;39m\x1b[38;2;24;20;16m\x1b[1mresearcher');
+    expect(cards[0]).toContain('\x1b[3minspect native wake transport\x1b[23m'); // purpose stays italic in-band
     expect(cards[2]).toContain('done');
     expect(cards[3]).toContain('failed');
     const instruction = cards[2].split('\n')[1];
@@ -2216,7 +2240,8 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
     const lines = component.render(80);
     expect(Array.isArray(lines)).toBe(true);
     expect(lines.join('\n')).not.toContain('[specialist_ask]');
-    expect(lines.join('\n')).not.toContain('48;2');
+    expect(lines[0].slice(lines[0].indexOf('\u25cf ') + 2)).toContain('48;2;201;162;39');
+    for (const line of lines.slice(1)) expect(line).not.toContain('48;2');
     for (const line of lines) expect(line.startsWith(mod.RAIL)).toBe(true);
     // Repeated renders agree (no first-call capture), and a missing renderer seam is safe.
     expect(component.render(80)).toEqual(lines);

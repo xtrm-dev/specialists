@@ -192,6 +192,51 @@ export interface AcquireRequest {
     attemptId: AttemptId;
     specialist?: string;
 }
+export interface RecoveryOutcome {
+    applied: boolean;
+    reason?: 'not_recoverable' | 'already_free' | 'raced_by_new_holder' | 'activation_mismatch';
+    /** The uncertain reason that was healed. Absent when nothing was healed. */
+    observedReason?: string;
+    actor?: string;
+}
+/**
+ * Heal a lease whose holder is verifiably GONE, and only that one (SPECIALISTS-4274).
+ *
+ * `inspect` deliberately reports `uncertain` for a dead holder: the process may have died
+ * mid-write, and silence is not evidence of a clean tree. But a dead holder that escalates
+ * forever is worse — observed live, the workspace stayed fenced until an operator ran the
+ * reconcile command out of band, with no in-session way to run it.
+ *
+ * So `uncertain` stays reserved for holders that MIGHT be alive: `liveness_unverifiable`,
+ * `holder_start_mismatch` and `unreadable_record` still block. `holder_process_gone` is
+ * terminal, and terminal heals.
+ *
+ * Concurrency: the lease file is re-read and compared against the record the decision was
+ * based on, so a coordinator that raced a fresh `acquire` refuses to delete the new holder's
+ * lease (`raced_by_new_holder`). The recovery log keeps the forensic trail that deleting the
+ * file would otherwise lose.
+ */
+/**
+ * Release a lease on behalf of the activation named in `activationId` (SPECIALISTS-4275).
+ *
+ * Stopping an activation must end its write claim, or the coordinator is fenced by a worker
+ * that no longer exists — observed live: `specialist_stop_activation` disposed the activation
+ * and the lease survived, escalating the workspace to `uncertain`. This is the clean inverse
+ * of `recoverDeadHolder`: it needs no death to justify it, only an exact holder match.
+ *
+ * A non-matching lease is never touched (`activation_mismatch`). The activationId comes from
+ * the coordinator's own stop call, so the match is a claim about ownership, not a guess.
+ */
+export declare function releaseHolderLease(workspace: WorkspaceIdentity, input: {
+    activationId: ActivationId;
+    actor: string;
+    now?: number;
+}): RecoveryOutcome;
+export declare function recoverDeadHolder(workspace: WorkspaceIdentity, input: {
+    actor: string;
+    probe?: LeaseProcessProbe;
+    now?: number;
+}): RecoveryOutcome;
 /**
  * Take the writer lease for a workspace, or refuse with the holder named.
  *
@@ -214,11 +259,50 @@ export declare function acquire(request: AcquireRequest, probe?: LeaseProcessPro
  */
 export declare function release(workspace: WorkspaceIdentity, activationId: ActivationId, probe?: LeaseProcessProbe): void;
 export declare function isMutatingTool(toolName: string): boolean;
+/**
+ * The tools that can actually write a workspace file or run a command.
+ *
+ * This is the INVERSE question to `isMutatingTool`, and the coordinator fence is the only
+ * place that asks it (SPECIALISTS-4273). That fence exists to stop two writers colliding in
+ * one worktree — not to capability-gate the operator's own agent — so it must refuse what
+ * genuinely writes and allow the rest. Under the denylist it refused a plain `ls`, a `find`
+ * and a read-only python cell, because nobody had listed them (observed live).
+ *
+ * The set is the same four pi builtins that `guarded-tools.ts` reconstructs, so the fence and
+ * the guarded-tool reconstruction cannot drift; a parity test pins them together.
+ *
+ * The trade-off, stated rather than hidden: a tool that mutates but is not in this set (a
+ * future shell wrapper, `python` executing a script that writes) is NOT fenced for the
+ * coordinator. That is deliberate — the coordinator is not a delegated writer, and a fence
+ * that blocks reading is worse than one that misses an exotic writer. The Specialist side is
+ * unaffected: `admitToolCall` keeps the strict denylist, so a read-tier activation still may
+ * not touch anything it cannot prove harmless.
+ */
+export declare const WORKSPACE_WRITE_TOOLS: ReadonlySet<string>;
+/** True for a tool the coordinator fence treats as a workspace writer. */
+export declare function isWorkspaceWriteTool(toolName: string): boolean;
 /** The verdict a `tool_call` handler converts into `{ block: true }` plus a reason. */
 export interface AdmissionVerdict {
     allow: boolean;
     reason?: string;
 }
+/**
+ * Tools that reach the Fleet rather than the filesystem.
+ *
+ * These are the coordinator's instruments for managing activations, and none of them writes a
+ * workspace file or runs a command. A WRITE fence has no business stopping them: gating
+ * `specialist_stop_activation` means the coordinator cannot release the very lease that is
+ * fencing it, which is the one deadlock this fence must never create (observed live,
+ * SPECIALISTS-4272). The exemption is unconditional rather than a flag — a tool that cannot
+ * write cannot be a writer, whatever the lease says.
+ *
+ * `specialist_reply` and `specialist_status` are here for the same reason and one more: a
+ * Specialist holding a lease in `needs_reply` is blocked ON the coordinator's answer, so
+ * refusing to read or answer it strands both sides.
+ */
+export declare const CONTROL_PLANE_TOOLS: ReadonlySet<string>;
+/** True for a Fleet-management tool, which no write fence may refuse. */
+export declare function isControlPlaneTool(toolName: string): boolean;
 /**
  * Decide whether the COORDINATOR may mutate a workspace right now.
  *
