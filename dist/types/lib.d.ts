@@ -19,7 +19,9 @@ export type { ActivationView, ActivationCompactView, ActivationResultView, Pendi
 export { RuntimeEventPusher, ResultNotValidatedError, completionBody, parseCompletionBody } from './activation/async-events.js';
 export type { EventRoute, RuntimeEventPusherOptions } from './activation/async-events.js';
 export { createActivationForensicSink, } from './activation/forensic-sink.js';
-export { createObservabilitySqliteClientAtPath, } from './specialist/observability-sqlite.js';
+export { createObservabilitySqliteClientAtPath, createObservabilitySqliteClient, } from './specialist/observability-sqlite.js';
+export type { ObservabilitySqliteClient } from './specialist/observability-sqlite.js';
+export { createSpecialistFeedTool, feedLine, specialistFeedSchema, FEED_DEFAULT_LIMIT, FEED_MAX_LIMIT, FEED_LINE_MAX, } from './tools/specialist/specialist_feed.tool.js';
 export { resolveObservabilityDbLocation } from './specialist/observability-db.js';
 export { evaluateBeadReadiness, extractSections } from './specialist/bead-gate.js';
 export { describeBuildIdentity, hashFileBytes, isBuildStale, readBuildId, shortBuildId, BUILD_ID_BYTES, UNKNOWN_BUILD_ID, } from './activation/build-identity.js';

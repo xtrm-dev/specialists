@@ -2,7 +2,7 @@ import { createRequire } from "node:module";
 var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports);
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
-// node_modules/yaml/dist/nodes/identity.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/nodes/identity.js
 var require_identity = __commonJS((exports) => {
   var ALIAS = Symbol.for("yaml.alias");
   var DOC = Symbol.for("yaml.document");
@@ -56,7 +56,7 @@ var require_identity = __commonJS((exports) => {
   exports.isSeq = isSeq;
 });
 
-// node_modules/yaml/dist/visit.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/visit.js
 var require_visit = __commonJS((exports) => {
   var identity = require_identity();
   var BREAK = Symbol("break visit");
@@ -211,7 +211,7 @@ var require_visit = __commonJS((exports) => {
   exports.visitAsync = visitAsync;
 });
 
-// node_modules/yaml/dist/doc/directives.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/doc/directives.js
 var require_directives = __commonJS((exports) => {
   var identity = require_identity();
   var visit = require_visit();
@@ -363,7 +363,7 @@ var require_directives = __commonJS((exports) => {
   exports.Directives = Directives;
 });
 
-// node_modules/yaml/dist/doc/anchors.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/doc/anchors.js
 var require_anchors = __commonJS((exports) => {
   var identity = require_identity();
   var visit = require_visit();
@@ -425,7 +425,7 @@ var require_anchors = __commonJS((exports) => {
   exports.findNewAnchor = findNewAnchor;
 });
 
-// node_modules/yaml/dist/doc/applyReviver.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/doc/applyReviver.js
 var require_applyReviver = __commonJS((exports) => {
   function applyReviver(reviver, obj, key, val) {
     if (val && typeof val === "object") {
@@ -472,7 +472,7 @@ var require_applyReviver = __commonJS((exports) => {
   exports.applyReviver = applyReviver;
 });
 
-// node_modules/yaml/dist/nodes/toJS.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/nodes/toJS.js
 var require_toJS = __commonJS((exports) => {
   var identity = require_identity();
   function toJS(value, arg, ctx) {
@@ -499,7 +499,7 @@ var require_toJS = __commonJS((exports) => {
   exports.toJS = toJS;
 });
 
-// node_modules/yaml/dist/nodes/Node.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/nodes/Node.js
 var require_Node = __commonJS((exports) => {
   var applyReviver = require_applyReviver();
   var identity = require_identity();
@@ -536,7 +536,7 @@ var require_Node = __commonJS((exports) => {
   exports.NodeBase = NodeBase;
 });
 
-// node_modules/yaml/dist/nodes/Alias.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/nodes/Alias.js
 var require_Alias = __commonJS((exports) => {
   var anchors = require_anchors();
   var visit = require_visit();
@@ -646,7 +646,7 @@ var require_Alias = __commonJS((exports) => {
   exports.Alias = Alias;
 });
 
-// node_modules/yaml/dist/nodes/Scalar.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/nodes/Scalar.js
 var require_Scalar = __commonJS((exports) => {
   var identity = require_identity();
   var Node = require_Node();
@@ -674,7 +674,7 @@ var require_Scalar = __commonJS((exports) => {
   exports.isScalarValue = isScalarValue;
 });
 
-// node_modules/yaml/dist/doc/createNode.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/doc/createNode.js
 var require_createNode = __commonJS((exports) => {
   var Alias = require_Alias();
   var identity = require_identity();
@@ -746,7 +746,7 @@ var require_createNode = __commonJS((exports) => {
   exports.createNode = createNode;
 });
 
-// node_modules/yaml/dist/nodes/Collection.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/nodes/Collection.js
 var require_Collection = __commonJS((exports) => {
   var createNode = require_createNode();
   var identity = require_identity();
@@ -861,7 +861,7 @@ var require_Collection = __commonJS((exports) => {
   exports.isEmptyPath = isEmptyPath;
 });
 
-// node_modules/yaml/dist/stringify/stringifyComment.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/stringify/stringifyComment.js
 var require_stringifyComment = __commonJS((exports) => {
   var stringifyComment = (str) => str.replace(/^(?!$)(?: $)?/gm, "#");
   function indentComment(comment, indent) {
@@ -878,7 +878,7 @@ var require_stringifyComment = __commonJS((exports) => {
   exports.stringifyComment = stringifyComment;
 });
 
-// node_modules/yaml/dist/stringify/foldFlowLines.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/stringify/foldFlowLines.js
 var require_foldFlowLines = __commonJS((exports) => {
   var FOLD_FLOW = "flow";
   var FOLD_BLOCK = "block";
@@ -1015,7 +1015,7 @@ ${indent}${text.slice(fold + 1, end2)}`;
   exports.foldFlowLines = foldFlowLines;
 });
 
-// node_modules/yaml/dist/stringify/stringifyString.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/stringify/stringifyString.js
 var require_stringifyString = __commonJS((exports) => {
   var Scalar = require_Scalar();
   var foldFlowLines = require_foldFlowLines();
@@ -1313,7 +1313,7 @@ ${indent}`);
   exports.stringifyString = stringifyString;
 });
 
-// node_modules/yaml/dist/stringify/stringify.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/stringify/stringify.js
 var require_stringify = __commonJS((exports) => {
   var anchors = require_anchors();
   var identity = require_identity();
@@ -1434,7 +1434,7 @@ ${ctx.indent}${str}`;
   exports.stringify = stringify;
 });
 
-// node_modules/yaml/dist/stringify/stringifyPair.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/stringify/stringifyPair.js
 var require_stringifyPair = __commonJS((exports) => {
   var identity = require_identity();
   var Scalar = require_Scalar();
@@ -1570,7 +1570,7 @@ ${ctx.indent}`;
   exports.stringifyPair = stringifyPair;
 });
 
-// node_modules/yaml/dist/log.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/log.js
 var require_log = __commonJS((exports) => {
   var node_process = __require("process");
   function debug(logLevel, ...messages) {
@@ -1589,7 +1589,7 @@ var require_log = __commonJS((exports) => {
   exports.warn = warn;
 });
 
-// node_modules/yaml/dist/schema/yaml-1.1/merge.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/schema/yaml-1.1/merge.js
 var require_merge = __commonJS((exports) => {
   var identity = require_identity();
   var Scalar = require_Scalar();
@@ -1646,7 +1646,7 @@ var require_merge = __commonJS((exports) => {
   exports.merge = merge;
 });
 
-// node_modules/yaml/dist/nodes/addPairToJSMap.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/nodes/addPairToJSMap.js
 var require_addPairToJSMap = __commonJS((exports) => {
   var log = require_log();
   var merge = require_merge();
@@ -1707,7 +1707,7 @@ var require_addPairToJSMap = __commonJS((exports) => {
   exports.addPairToJSMap = addPairToJSMap;
 });
 
-// node_modules/yaml/dist/nodes/Pair.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/nodes/Pair.js
 var require_Pair = __commonJS((exports) => {
   var createNode = require_createNode();
   var stringifyPair = require_stringifyPair();
@@ -1745,7 +1745,7 @@ var require_Pair = __commonJS((exports) => {
   exports.createPair = createPair;
 });
 
-// node_modules/yaml/dist/stringify/stringifyCollection.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/stringify/stringifyCollection.js
 var require_stringifyCollection = __commonJS((exports) => {
   var identity = require_identity();
   var stringify = require_stringify();
@@ -1897,7 +1897,7 @@ ${indent}${end}`;
   exports.stringifyCollection = stringifyCollection;
 });
 
-// node_modules/yaml/dist/nodes/YAMLMap.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/nodes/YAMLMap.js
 var require_YAMLMap = __commonJS((exports) => {
   var stringifyCollection = require_stringifyCollection();
   var addPairToJSMap = require_addPairToJSMap();
@@ -2024,7 +2024,7 @@ var require_YAMLMap = __commonJS((exports) => {
   exports.findPair = findPair;
 });
 
-// node_modules/yaml/dist/schema/common/map.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/schema/common/map.js
 var require_map = __commonJS((exports) => {
   var identity = require_identity();
   var YAMLMap = require_YAMLMap();
@@ -2043,7 +2043,7 @@ var require_map = __commonJS((exports) => {
   exports.map = map;
 });
 
-// node_modules/yaml/dist/nodes/YAMLSeq.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/nodes/YAMLSeq.js
 var require_YAMLSeq = __commonJS((exports) => {
   var createNode = require_createNode();
   var stringifyCollection = require_stringifyCollection();
@@ -2136,7 +2136,7 @@ var require_YAMLSeq = __commonJS((exports) => {
   exports.YAMLSeq = YAMLSeq;
 });
 
-// node_modules/yaml/dist/schema/common/seq.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/schema/common/seq.js
 var require_seq = __commonJS((exports) => {
   var identity = require_identity();
   var YAMLSeq = require_YAMLSeq();
@@ -2155,7 +2155,7 @@ var require_seq = __commonJS((exports) => {
   exports.seq = seq;
 });
 
-// node_modules/yaml/dist/schema/common/string.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/schema/common/string.js
 var require_string = __commonJS((exports) => {
   var stringifyString = require_stringifyString();
   var string = {
@@ -2171,7 +2171,7 @@ var require_string = __commonJS((exports) => {
   exports.string = string;
 });
 
-// node_modules/yaml/dist/schema/common/null.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/schema/common/null.js
 var require_null = __commonJS((exports) => {
   var Scalar = require_Scalar();
   var nullTag = {
@@ -2186,7 +2186,7 @@ var require_null = __commonJS((exports) => {
   exports.nullTag = nullTag;
 });
 
-// node_modules/yaml/dist/schema/core/bool.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/schema/core/bool.js
 var require_bool = __commonJS((exports) => {
   var Scalar = require_Scalar();
   var boolTag = {
@@ -2207,7 +2207,7 @@ var require_bool = __commonJS((exports) => {
   exports.boolTag = boolTag;
 });
 
-// node_modules/yaml/dist/stringify/stringifyNumber.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/stringify/stringifyNumber.js
 var require_stringifyNumber = __commonJS((exports) => {
   function stringifyNumber({ format, minFractionDigits, tag, value }) {
     if (typeof value === "bigint")
@@ -2231,7 +2231,7 @@ var require_stringifyNumber = __commonJS((exports) => {
   exports.stringifyNumber = stringifyNumber;
 });
 
-// node_modules/yaml/dist/schema/core/float.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/schema/core/float.js
 var require_float = __commonJS((exports) => {
   var Scalar = require_Scalar();
   var stringifyNumber = require_stringifyNumber();
@@ -2274,7 +2274,7 @@ var require_float = __commonJS((exports) => {
   exports.floatNaN = floatNaN;
 });
 
-// node_modules/yaml/dist/schema/core/int.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/schema/core/int.js
 var require_int = __commonJS((exports) => {
   var stringifyNumber = require_stringifyNumber();
   var intIdentify = (value) => typeof value === "bigint" || Number.isInteger(value);
@@ -2316,7 +2316,7 @@ var require_int = __commonJS((exports) => {
   exports.intOct = intOct;
 });
 
-// node_modules/yaml/dist/schema/core/schema.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/schema/core/schema.js
 var require_schema = __commonJS((exports) => {
   var map = require_map();
   var _null = require_null();
@@ -2341,7 +2341,7 @@ var require_schema = __commonJS((exports) => {
   exports.schema = schema;
 });
 
-// node_modules/yaml/dist/schema/json/schema.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/schema/json/schema.js
 var require_schema2 = __commonJS((exports) => {
   var Scalar = require_Scalar();
   var map = require_map();
@@ -2405,7 +2405,7 @@ var require_schema2 = __commonJS((exports) => {
   exports.schema = schema;
 });
 
-// node_modules/yaml/dist/schema/yaml-1.1/binary.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/schema/yaml-1.1/binary.js
 var require_binary = __commonJS((exports) => {
   var node_buffer = __require("buffer");
   var Scalar = require_Scalar();
@@ -2460,7 +2460,7 @@ var require_binary = __commonJS((exports) => {
   exports.binary = binary;
 });
 
-// node_modules/yaml/dist/schema/yaml-1.1/pairs.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/schema/yaml-1.1/pairs.js
 var require_pairs = __commonJS((exports) => {
   var identity = require_identity();
   var Pair = require_Pair();
@@ -2535,7 +2535,7 @@ ${cn.comment}` : item.comment;
   exports.resolvePairs = resolvePairs;
 });
 
-// node_modules/yaml/dist/schema/yaml-1.1/omap.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/schema/yaml-1.1/omap.js
 var require_omap = __commonJS((exports) => {
   var identity = require_identity();
   var toJS = require_toJS();
@@ -2607,7 +2607,7 @@ var require_omap = __commonJS((exports) => {
   exports.omap = omap;
 });
 
-// node_modules/yaml/dist/schema/yaml-1.1/bool.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/schema/yaml-1.1/bool.js
 var require_bool2 = __commonJS((exports) => {
   var Scalar = require_Scalar();
   function boolStringify({ value, source }, ctx) {
@@ -2636,7 +2636,7 @@ var require_bool2 = __commonJS((exports) => {
   exports.trueTag = trueTag;
 });
 
-// node_modules/yaml/dist/schema/yaml-1.1/float.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/schema/yaml-1.1/float.js
 var require_float2 = __commonJS((exports) => {
   var Scalar = require_Scalar();
   var stringifyNumber = require_stringifyNumber();
@@ -2682,7 +2682,7 @@ var require_float2 = __commonJS((exports) => {
   exports.floatNaN = floatNaN;
 });
 
-// node_modules/yaml/dist/schema/yaml-1.1/int.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/schema/yaml-1.1/int.js
 var require_int2 = __commonJS((exports) => {
   var stringifyNumber = require_stringifyNumber();
   var intIdentify = (value) => typeof value === "bigint" || Number.isInteger(value);
@@ -2758,7 +2758,7 @@ var require_int2 = __commonJS((exports) => {
   exports.intOct = intOct;
 });
 
-// node_modules/yaml/dist/schema/yaml-1.1/set.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/schema/yaml-1.1/set.js
 var require_set = __commonJS((exports) => {
   var identity = require_identity();
   var Pair = require_Pair();
@@ -2841,7 +2841,7 @@ var require_set = __commonJS((exports) => {
   exports.set = set;
 });
 
-// node_modules/yaml/dist/schema/yaml-1.1/timestamp.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/schema/yaml-1.1/timestamp.js
 var require_timestamp = __commonJS((exports) => {
   var stringifyNumber = require_stringifyNumber();
   function parseSexagesimal(str, asBigInt) {
@@ -2923,7 +2923,7 @@ var require_timestamp = __commonJS((exports) => {
   exports.timestamp = timestamp;
 });
 
-// node_modules/yaml/dist/schema/yaml-1.1/schema.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/schema/yaml-1.1/schema.js
 var require_schema3 = __commonJS((exports) => {
   var map = require_map();
   var _null = require_null();
@@ -2964,7 +2964,7 @@ var require_schema3 = __commonJS((exports) => {
   exports.schema = schema;
 });
 
-// node_modules/yaml/dist/schema/tags.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/schema/tags.js
 var require_tags = __commonJS((exports) => {
   var map = require_map();
   var _null = require_null();
@@ -3055,7 +3055,7 @@ var require_tags = __commonJS((exports) => {
   exports.getTags = getTags;
 });
 
-// node_modules/yaml/dist/schema/Schema.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/schema/Schema.js
 var require_Schema = __commonJS((exports) => {
   var identity = require_identity();
   var map = require_map();
@@ -3085,7 +3085,7 @@ var require_Schema = __commonJS((exports) => {
   exports.Schema = Schema;
 });
 
-// node_modules/yaml/dist/stringify/stringifyDocument.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/stringify/stringifyDocument.js
 var require_stringifyDocument = __commonJS((exports) => {
   var identity = require_identity();
   var stringify = require_stringify();
@@ -3165,7 +3165,7 @@ var require_stringifyDocument = __commonJS((exports) => {
   exports.stringifyDocument = stringifyDocument;
 });
 
-// node_modules/yaml/dist/doc/Document.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/doc/Document.js
 var require_Document = __commonJS((exports) => {
   var Alias = require_Alias();
   var Collection = require_Collection();
@@ -3400,7 +3400,7 @@ var require_Document = __commonJS((exports) => {
   exports.Document = Document;
 });
 
-// node_modules/yaml/dist/errors.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/errors.js
 var require_errors = __commonJS((exports) => {
   class YAMLError extends Error {
     constructor(name, pos, code, message) {
@@ -3465,7 +3465,7 @@ ${pointer}
   exports.prettifyError = prettifyError;
 });
 
-// node_modules/yaml/dist/compose/resolve-props.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/compose/resolve-props.js
 var require_resolve_props = __commonJS((exports) => {
   function resolveProps(tokens, { flow, indicator, next, offset, onError, parentIndent, startOnNewline }) {
     let spaceBefore = false;
@@ -3595,7 +3595,7 @@ var require_resolve_props = __commonJS((exports) => {
   exports.resolveProps = resolveProps;
 });
 
-// node_modules/yaml/dist/compose/util-contains-newline.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/compose/util-contains-newline.js
 var require_util_contains_newline = __commonJS((exports) => {
   function containsNewline(key) {
     if (!key)
@@ -3635,7 +3635,7 @@ var require_util_contains_newline = __commonJS((exports) => {
   exports.containsNewline = containsNewline;
 });
 
-// node_modules/yaml/dist/compose/util-flow-indent-check.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/compose/util-flow-indent-check.js
 var require_util_flow_indent_check = __commonJS((exports) => {
   var utilContainsNewline = require_util_contains_newline();
   function flowIndentCheck(indent, fc, onError) {
@@ -3650,7 +3650,7 @@ var require_util_flow_indent_check = __commonJS((exports) => {
   exports.flowIndentCheck = flowIndentCheck;
 });
 
-// node_modules/yaml/dist/compose/util-map-includes.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/compose/util-map-includes.js
 var require_util_map_includes = __commonJS((exports) => {
   var identity = require_identity();
   function mapIncludes(ctx, items, search) {
@@ -3663,7 +3663,7 @@ var require_util_map_includes = __commonJS((exports) => {
   exports.mapIncludes = mapIncludes;
 });
 
-// node_modules/yaml/dist/compose/resolve-block-map.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/compose/resolve-block-map.js
 var require_resolve_block_map = __commonJS((exports) => {
   var Pair = require_Pair();
   var YAMLMap = require_YAMLMap();
@@ -3770,7 +3770,7 @@ var require_resolve_block_map = __commonJS((exports) => {
   exports.resolveBlockMap = resolveBlockMap;
 });
 
-// node_modules/yaml/dist/compose/resolve-block-seq.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/compose/resolve-block-seq.js
 var require_resolve_block_seq = __commonJS((exports) => {
   var YAMLSeq = require_YAMLSeq();
   var resolveProps = require_resolve_props();
@@ -3818,7 +3818,7 @@ var require_resolve_block_seq = __commonJS((exports) => {
   exports.resolveBlockSeq = resolveBlockSeq;
 });
 
-// node_modules/yaml/dist/compose/resolve-end.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/compose/resolve-end.js
 var require_resolve_end = __commonJS((exports) => {
   function resolveEnd(end, offset, reqSpace, onError) {
     let comment = "";
@@ -3858,7 +3858,7 @@ var require_resolve_end = __commonJS((exports) => {
   exports.resolveEnd = resolveEnd;
 });
 
-// node_modules/yaml/dist/compose/resolve-flow-collection.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/compose/resolve-flow-collection.js
 var require_resolve_flow_collection = __commonJS((exports) => {
   var identity = require_identity();
   var Pair = require_Pair();
@@ -4049,7 +4049,7 @@ var require_resolve_flow_collection = __commonJS((exports) => {
   exports.resolveFlowCollection = resolveFlowCollection;
 });
 
-// node_modules/yaml/dist/compose/compose-collection.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/compose/compose-collection.js
 var require_compose_collection = __commonJS((exports) => {
   var identity = require_identity();
   var Scalar = require_Scalar();
@@ -4111,7 +4111,7 @@ var require_compose_collection = __commonJS((exports) => {
   exports.composeCollection = composeCollection;
 });
 
-// node_modules/yaml/dist/compose/resolve-block-scalar.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/compose/resolve-block-scalar.js
 var require_resolve_block_scalar = __commonJS((exports) => {
   var Scalar = require_Scalar();
   function resolveBlockScalar(ctx, scalar, onError) {
@@ -4304,7 +4304,7 @@ var require_resolve_block_scalar = __commonJS((exports) => {
   exports.resolveBlockScalar = resolveBlockScalar;
 });
 
-// node_modules/yaml/dist/compose/resolve-flow-scalar.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/compose/resolve-flow-scalar.js
 var require_resolve_flow_scalar = __commonJS((exports) => {
   var Scalar = require_Scalar();
   var resolveEnd = require_resolve_end();
@@ -4521,7 +4521,7 @@ var require_resolve_flow_scalar = __commonJS((exports) => {
   exports.resolveFlowScalar = resolveFlowScalar;
 });
 
-// node_modules/yaml/dist/compose/compose-scalar.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/compose/compose-scalar.js
 var require_compose_scalar = __commonJS((exports) => {
   var identity = require_identity();
   var Scalar = require_Scalar();
@@ -4599,7 +4599,7 @@ var require_compose_scalar = __commonJS((exports) => {
   exports.composeScalar = composeScalar;
 });
 
-// node_modules/yaml/dist/compose/util-empty-scalar-position.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/compose/util-empty-scalar-position.js
 var require_util_empty_scalar_position = __commonJS((exports) => {
   function emptyScalarPosition(offset, before, pos) {
     if (before) {
@@ -4626,7 +4626,7 @@ var require_util_empty_scalar_position = __commonJS((exports) => {
   exports.emptyScalarPosition = emptyScalarPosition;
 });
 
-// node_modules/yaml/dist/compose/compose-node.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/compose/compose-node.js
 var require_compose_node = __commonJS((exports) => {
   var Alias = require_Alias();
   var identity = require_identity();
@@ -4729,7 +4729,7 @@ var require_compose_node = __commonJS((exports) => {
   exports.composeNode = composeNode;
 });
 
-// node_modules/yaml/dist/compose/compose-doc.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/compose/compose-doc.js
 var require_compose_doc = __commonJS((exports) => {
   var Document = require_Document();
   var composeNode = require_compose_node();
@@ -4769,7 +4769,7 @@ var require_compose_doc = __commonJS((exports) => {
   exports.composeDoc = composeDoc;
 });
 
-// node_modules/yaml/dist/compose/composer.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/compose/composer.js
 var require_composer = __commonJS((exports) => {
   var node_process = __require("process");
   var directives = require_directives();
@@ -4960,7 +4960,7 @@ ${end.comment}` : end.comment;
   exports.Composer = Composer;
 });
 
-// node_modules/yaml/dist/parse/cst-scalar.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/parse/cst-scalar.js
 var require_cst_scalar = __commonJS((exports) => {
   var resolveBlockScalar = require_resolve_block_scalar();
   var resolveFlowScalar = require_resolve_flow_scalar();
@@ -5150,7 +5150,7 @@ var require_cst_scalar = __commonJS((exports) => {
   exports.setScalarValue = setScalarValue;
 });
 
-// node_modules/yaml/dist/parse/cst-stringify.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/parse/cst-stringify.js
 var require_cst_stringify = __commonJS((exports) => {
   var stringify = (cst) => ("type" in cst) ? stringifyToken(cst) : stringifyItem(cst);
   function stringifyToken(token) {
@@ -5208,7 +5208,7 @@ var require_cst_stringify = __commonJS((exports) => {
   exports.stringify = stringify;
 });
 
-// node_modules/yaml/dist/parse/cst-visit.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/parse/cst-visit.js
 var require_cst_visit = __commonJS((exports) => {
   var BREAK = Symbol("break visit");
   var SKIP = Symbol("skip children");
@@ -5267,7 +5267,7 @@ var require_cst_visit = __commonJS((exports) => {
   exports.visit = visit;
 });
 
-// node_modules/yaml/dist/parse/cst.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/parse/cst.js
 var require_cst = __commonJS((exports) => {
   var cstScalar = require_cst_scalar();
   var cstStringify = require_cst_stringify();
@@ -5368,7 +5368,7 @@ var require_cst = __commonJS((exports) => {
   exports.tokenType = tokenType;
 });
 
-// node_modules/yaml/dist/parse/lexer.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/parse/lexer.js
 var require_lexer = __commonJS((exports) => {
   var cst = require_cst();
   function isEmpty(ch) {
@@ -5965,7 +5965,7 @@ var require_lexer = __commonJS((exports) => {
   exports.Lexer = Lexer;
 });
 
-// node_modules/yaml/dist/parse/line-counter.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/parse/line-counter.js
 var require_line_counter = __commonJS((exports) => {
   class LineCounter {
     constructor() {
@@ -5993,7 +5993,7 @@ var require_line_counter = __commonJS((exports) => {
   exports.LineCounter = LineCounter;
 });
 
-// node_modules/yaml/dist/parse/parser.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/parse/parser.js
 var require_parser = __commonJS((exports) => {
   var node_process = __require("process");
   var cst = require_cst();
@@ -6849,7 +6849,7 @@ var require_parser = __commonJS((exports) => {
   exports.Parser = Parser;
 });
 
-// node_modules/yaml/dist/public-api.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/public-api.js
 var require_public_api = __commonJS((exports) => {
   var composer = require_composer();
   var Document = require_Document();
@@ -7368,7 +7368,7 @@ function formatResolvedToolContract(contract, admission = "tool-policy-gate") {
 `);
 }
 
-// node_modules/zod/v3/helpers/util.js
+// ../../home/dawid/dev/specialists/node_modules/zod/v3/helpers/util.js
 var util;
 (function(util2) {
   util2.assertEqual = (_) => {};
@@ -7499,7 +7499,7 @@ var getParsedType = (data) => {
   }
 };
 
-// node_modules/zod/v3/ZodError.js
+// ../../home/dawid/dev/specialists/node_modules/zod/v3/ZodError.js
 var ZodIssueCode = util.arrayToEnum([
   "invalid_type",
   "invalid_literal",
@@ -7613,7 +7613,7 @@ ZodError.create = (issues) => {
   return error;
 };
 
-// node_modules/zod/v3/locales/en.js
+// ../../home/dawid/dev/specialists/node_modules/zod/v3/locales/en.js
 var errorMap = (issue, _ctx) => {
   let message;
   switch (issue.code) {
@@ -7716,13 +7716,13 @@ var errorMap = (issue, _ctx) => {
 };
 var en_default = errorMap;
 
-// node_modules/zod/v3/errors.js
+// ../../home/dawid/dev/specialists/node_modules/zod/v3/errors.js
 var overrideErrorMap = en_default;
 function getErrorMap() {
   return overrideErrorMap;
 }
 
-// node_modules/zod/v3/helpers/parseUtil.js
+// ../../home/dawid/dev/specialists/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
   const { data, path, errorMaps, issueData } = params;
   const fullPath = [...path, ...issueData.path || []];
@@ -7828,14 +7828,14 @@ var isDirty = (x) => x.status === "dirty";
 var isValid = (x) => x.status === "valid";
 var isAsync = (x) => typeof Promise !== "undefined" && x instanceof Promise;
 
-// node_modules/zod/v3/helpers/errorUtil.js
+// ../../home/dawid/dev/specialists/node_modules/zod/v3/helpers/errorUtil.js
 var errorUtil;
 (function(errorUtil2) {
   errorUtil2.errToObj = (message) => typeof message === "string" ? { message } : message || {};
   errorUtil2.toString = (message) => typeof message === "string" ? message : message?.message;
 })(errorUtil || (errorUtil = {}));
 
-// node_modules/zod/v3/types.js
+// ../../home/dawid/dev/specialists/node_modules/zod/v3/types.js
 class ParseInputLazyPath {
   constructor(parent, value, path, key) {
     this._cachedPath = [];
@@ -16682,6 +16682,12 @@ function openObservabilitySqliteClient(dbPath) {
     return null;
   }
 }
+function createObservabilitySqliteClient(cwd = process.cwd()) {
+  const location = resolveObservabilityDbLocation(cwd);
+  if (!existsSync8(location.dbPath))
+    return null;
+  return openObservabilitySqliteClient(location.dbPath);
+}
 function createObservabilitySqliteClientAtPath(dbPath) {
   mkdirSync3(dirname5(dbPath), { recursive: true });
   return openObservabilitySqliteClient(dbPath);
@@ -19553,7 +19559,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { basename as basename3, join as join11 } from "node:path";
 import { existsSync as existsSync14 } from "node:fs";
 
-// node_modules/yaml/dist/index.js
+// ../../home/dawid/dev/specialists/node_modules/yaml/dist/index.js
 var composer = require_composer();
 var Document = require_Document();
 var Schema = require_Schema();
@@ -25791,6 +25797,152 @@ function createActivationForensicSink(observability) {
     }
   };
 }
+// src/tools/specialist/specialist_feed.tool.ts
+var FEED_DEFAULT_LIMIT = 40;
+var FEED_MAX_LIMIT = 200;
+var FEED_LINE_MAX = 200;
+var specialistFeedSchema = objectType({
+  activation_id: stringType().min(1).describe("Activation id: the full id or a unique short prefix, e.g. 'act:a2924153' or 'a2924153'."),
+  view: enumType(["terminal", "forensic"]).optional().describe("'terminal' (default): what the specialist did — tool calls, text, turns, status, completion — " + "one line each, like `sp feed`. 'forensic': every recorded lifecycle event name."),
+  since_seq: numberType().int().min(0).optional().describe("Only events with a sequence number above this. Pass the previous call's last_seq to follow a running activation."),
+  limit: numberType().int().min(1).max(FEED_MAX_LIMIT).optional().describe(`Newest events to return (default ${FEED_DEFAULT_LIMIT}, max ${FEED_MAX_LIMIT}).`)
+});
+var flat = (text) => String(text ?? "").replace(/\s+/g, " ").trim();
+var clip = (text, max = FEED_LINE_MAX) => text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+function clock(t) {
+  const d = new Date(t);
+  return [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, "0")).join(":");
+}
+function argSummary(args) {
+  if (!args)
+    return "";
+  for (const key of ["path", "file_path", "command", "query", "pattern", "target", "name", "url"]) {
+    if (typeof args[key] === "string" && args[key])
+      return flat(args[key]);
+  }
+  const first = Object.values(args).find((v) => typeof v === "string" && v);
+  return first ? flat(first) : "";
+}
+function tokens(usage) {
+  if (!usage)
+    return "";
+  const total = (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0) + (usage.cache_read_tokens ?? 0) + (usage.cache_creation_tokens ?? 0);
+  if (total <= 0)
+    return "";
+  return total < 1000 ? `${total} tok` : `${(total / 1000).toFixed(total < 1e4 ? 1 : 0)}k tok`;
+}
+function feedLine(event) {
+  const head = `${clock(event.t)} #${event.seq ?? "?"}`;
+  switch (event.type) {
+    case "run_start":
+      return `${head} start   ${event.specialist}${event.bead_id ? ` on ${event.bead_id}` : ""}`;
+    case "meta":
+      return `${head} model   ${event.model}`;
+    case "tool": {
+      if (event.phase === "update")
+        return null;
+      const arg = argSummary(event.args);
+      if (event.phase === "start")
+        return clip(`${head} tool    ${event.tool}${arg ? ` ${arg}` : ""}`);
+      const mark = event.is_error ? "✕" : "✓";
+      const summary = flat(event.result_summary);
+      return clip(`${head} tool ${mark}  ${event.tool}${summary ? ` · ${summary}` : ""}`);
+    }
+    case "text": {
+      const body = flat(event.content);
+      return body ? clip(`${head} text    ${body}`) : null;
+    }
+    case "turn_summary": {
+      const parts = [`turn ${event.turn_index}`, tokens(event.token_usage), event.finish_reason, event.context_pct !== undefined ? `ctx ${Math.round(event.context_pct)}%` : ""].filter(Boolean);
+      return `${head} turn    ${parts.join(" · ")}`;
+    }
+    case "status_change":
+      return `${head} status  ${event.previous_status ? `${event.previous_status} → ` : ""}${event.status}`;
+    case "control_signal": {
+      const why = flat(event.reason ?? event.error_message ?? event.message_preview ?? "");
+      return clip(`${head} control ${event.action}${why ? ` · ${why}` : ""}`);
+    }
+    case "run_complete": {
+      const elapsed = event.elapsed_s < 10 ? event.elapsed_s.toFixed(1) : String(Math.round(event.elapsed_s));
+      const parts = [event.status, `${elapsed}s`, tokens(event.token_usage), event.tool_calls ? `${event.tool_calls.length} tool calls` : "", event.error ? flat(event.error) : ""].filter(Boolean);
+      return clip(`${head} done    ${parts.join(" · ")}`);
+    }
+    default:
+      return null;
+  }
+}
+function normalize2(raw) {
+  const id = raw.trim();
+  return id.startsWith("act:") ? id : `act:${id}`;
+}
+function createSpecialistFeedTool(getHost, openObservability = () => createObservabilitySqliteClient()) {
+  return {
+    name: "specialist_feed",
+    description: "Read one activation's event feed, like `sp feed`: tool calls, text, turns, status changes and completion " + "(view 'terminal', default), or every lifecycle event (view 'forensic'). Works on running, settled and " + "earlier-session activations. Pass since_seq (the last call's last_seq) to follow a running one.",
+    inputSchema: specialistFeedSchema,
+    async execute(input) {
+      const wanted = normalize2(input.activation_id);
+      const view = input.view ?? "terminal";
+      const wantedLimit = Number.isFinite(input.limit) ? Math.floor(input.limit) : FEED_DEFAULT_LIMIT;
+      const limit = Math.min(Math.max(wantedLimit, 1), FEED_MAX_LIMIT);
+      let client = null;
+      try {
+        client = openObservability();
+        if (!client)
+          return { status: "error", error: "observability.db is unavailable; specialist_status still answers for live activations" };
+        const live = (getHost?.()?.list() ?? []).map((s) => s.activationId);
+        const known = new Set([...live, ...client.listNativeActivationIds({ limit: 500 })]);
+        const matches = known.has(wanted) ? [wanted] : [...known].filter((id2) => id2.startsWith(wanted)).sort();
+        if (matches.length > 1) {
+          return { status: "error", error: `Ambiguous activation prefix: ${input.activation_id}`, candidates: matches.slice(0, 10) };
+        }
+        const id = matches[0] ?? wanted;
+        const since = input.since_seq ?? -1;
+        if (view === "forensic") {
+          const rows = client.readForensicEvents({ jobId: id, limit: 5000 }).filter((r) => r.seq > since);
+          if (rows.length === 0 && since < 0)
+            return { status: "error", error: `No events for activation: ${input.activation_id}` };
+          const shown2 = rows.slice(-limit);
+          return {
+            activation_id: id,
+            view,
+            events: shown2.map((r) => `${clock(r.t)} #${r.seq} ${r.event_name}`),
+            last_seq: shown2.at(-1)?.seq ?? since,
+            total: rows.length,
+            truncated: rows.length > shown2.length
+          };
+        }
+        const all = client.readEvents(id);
+        if (all.length === 0 && since < 0)
+          return { status: "error", error: `No events for activation: ${input.activation_id}` };
+        const lines = [];
+        for (const event of all) {
+          if ((event.seq ?? 0) <= since)
+            continue;
+          const line = feedLine(event);
+          if (line)
+            lines.push({ seq: event.seq ?? 0, line });
+        }
+        const shown = lines.slice(-limit);
+        const lastSeq = all.reduce((n, e) => Math.max(n, e.seq ?? 0), since);
+        return {
+          activation_id: id,
+          view,
+          events: shown.map((l) => l.line),
+          last_seq: lastSeq,
+          total: lines.length,
+          truncated: lines.length > shown.length
+        };
+      } catch (error) {
+        return { status: "error", error: `feed unreadable: ${error instanceof Error ? error.message : String(error)}` };
+      } finally {
+        try {
+          client?.close();
+        } catch {}
+      }
+    }
+  };
+}
 // src/specialist/bead-gate.ts
 import { spawnSync as spawnSync4 } from "node:child_process";
 var NON_DISPATCHABLE_STATUSES = new Set(["closed", "deferred"]);
@@ -26415,6 +26567,7 @@ export {
   toActivationResultView,
   toActivationCompactView,
   supersedeStaleRefusal,
+  specialistFeedSchema,
   shortBuildId,
   runScriptSpecialist as runScript,
   resolveWorkItemDbPath,
@@ -26437,12 +26590,15 @@ export {
   isBuildStale,
   inspect as inspectWorkspaceLease,
   hashFileBytes,
+  feedLine,
   extractSections,
   evaluateBeadReadiness,
   describeBuildIdentity,
   createWorkItemBoundary,
   createSpecialistLeaseReconcileTool,
+  createSpecialistFeedTool,
   createObservabilitySqliteClientAtPath,
+  createObservabilitySqliteClient,
   createBeadFromContract,
   createActivationForensicSink,
   completionBody,
@@ -26458,6 +26614,9 @@ export {
   NULL_WORK_ITEMS,
   LaunchOutcomeError,
   LAUNCH_OUTCOME_SCHEMA_VERSION,
+  FEED_MAX_LIMIT,
+  FEED_LINE_MAX,
+  FEED_DEFAULT_LIMIT,
   DispatchRejectedError,
   BUILD_ID_BYTES
 };

@@ -43,8 +43,9 @@ readiness) belongs to Substrate: read its `using-substrate` skill.
 Eleven tools, names exact: `specialist_list` / `specialist_dispatch` / `specialist_status` /
 `specialist_result` / `specialist_feed` / `specialist_reply` / `specialist_resume` /
 `specialist_retry` / `specialist_steer` / `specialist_stop_activation` /
-`specialist_lease_reconcile`. `specialist_feed` and `specialist_lease_reconcile` are Claude
-Code only (the CLI has `sp feed` and `specialists lease`); the Pi extension has the other nine. Live schemas: `src/tools/specialist/activation.tool.ts`.
+`specialist_lease_reconcile`. Only `specialist_lease_reconcile` is Claude
+Code only (the CLI has `specialists lease`); the Pi extension has the other ten, including
+`specialist_feed` with the same lines as the MCP tool. Live schemas: `src/tools/specialist/activation.tool.ts`.
 
 Live truth comes from the tools, not from memory: `specialist_list` is the resolved
 registry with a dispatchability verdict per role; `specialist_status` is the live

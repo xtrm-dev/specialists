@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "package_version": "4.0.8",
+  "package_version": "4.0.9",
   "shipped_skills": [
     {
       "path": "config/skills/setup-specialists/SKILL.md",
@@ -32,7 +32,7 @@
     },
     {
       "path": "config/skills/using-specialists/references/monitoring.md",
-      "sha256": "d51109b5106b13c7f44f7d46da63b030bf7e6f30d870392c0789fae1f16b0080"
+      "sha256": "47ead8b37be8dc75fe8334f44249c1de1bd0dc135df173b83467c556a8cd6043"
     },
     {
       "path": "config/skills/using-specialists/references/nodes.md",
@@ -68,7 +68,7 @@
     },
     {
       "path": "config/skills/using-specialists/SKILL.md",
-      "sha256": "78f2436cf5d2be1fcb7049cd9338a03c924c4a1559d4c91c841b2ecdb1b246bd"
+      "sha256": "0e85ff72144ef3d528950c6263b46d23c23d3f300f87ab6255fadc1a14b861d2"
     }
   ],
   "shipped_specialists": [
