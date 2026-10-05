@@ -153,11 +153,17 @@ const SEP_HINT = `\x1b[2m\u00b7\x1b[1m`;
  */
 const stripAnsi = (text) => String(text).replace(/\x1b\[[0-9;]*m/g, '');
 /**
- * Dim a fact string that carries its own escapes (`costFacts` builds `43s • 7t • 46k` with
- * dim segments). Those internal `22m`s would clear bold mid-band, so the escapes are dropped
- * and each fact is re-dimmed through `sub`.
+ * Dim a facts string that carries its own escapes (`costFacts` builds `43s • 7t • 46k`).
+ * Those internal `22m`s would clear bold mid-band, so escapes are dropped and each fact is
+ * re-dimmed through `sub`.
  */
 const FACT_SEP = ` \x1b[2m\u2022\x1b[1m `;
+/**
+ * Dim a facts string inside the band. It STRIPS colour first: the band owns its foreground
+ * completely, so no token inside it may carry its own colour. An accent-coloured `high` on
+ * gold is light purple on yellow - poor contrast, and a break of the dark-foreground rule.
+ * Subordinate segments are dimmed, never recoloured.
+ */
 const dimAll = (text) => stripAnsi(text).split(' \u2022 ').map(sub).join(FACT_SEP);
 /** Dim inside the band: closes dim with `1m`, which restores bold rather than clearing it. */
 const sub = (text) => `\x1b[2m${text}\x1b[1m`;

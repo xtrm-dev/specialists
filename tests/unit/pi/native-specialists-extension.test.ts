@@ -1786,6 +1786,11 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
       expect(card).not.toContain('│');
       // Design system: the gold band starts at the header text (line 1) and the
       // dot stays unbanded; nothing below the header carries a background.
+      // The band owns its foreground: no token inside it may carry its own colour, so an
+      // accent-coloured thinking level cannot sit on the gold.
+      const bandedText = cards[3].split('\n')[0].slice(0, cards[3].split('\n')[0].indexOf('\u001b[49m'));
+      expect(bandedText).not.toContain('\x1b[38;2;154;139;255m');
+      expect(bandedText).toContain('\x1b[3');
       // Bold spans the WHOLE band: no `22m` may clear it before the band closes.
       for (const card of cards) {
         const banded = card.split('\n')[0].slice(card.split('\n')[0].indexOf('\u25cf ') + 2);
