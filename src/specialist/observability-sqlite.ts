@@ -1220,6 +1220,14 @@ export interface PruneObservabilityOptions {
    * retention window is an operator decision, not a default (SPECIALISTS-4219).
    */
   forensicBeforeMs?: number;
+  /**
+   * Cutoff for `specialist_forensic_events` rows with event_family='mcp'
+   * (mcp.call.* status-polling noise, ~65% of forensic rows).
+   * When set alongside forensicBeforeMs, mcp rows use this cutoff and all
+   * other families use forensicBeforeMs. When set alone, only mcp rows are pruned.
+   * Recommended: mcp 2d, all other forensic families 14d (SPECIALISTS-4224).
+   */
+  forensicMcpBeforeMs?: number;
   /** Cutoff for `node_events`. Absent means "do not touch this table", same reason. */
   nodeEventsBeforeMs?: number;
 }
@@ -1342,6 +1350,8 @@ export interface PruneObservabilityReport {
   deletedNodeEvents: number;
   forensicBeforeMs: number | null;
   nodeEventsBeforeMs: number | null;
+  /** Echo of the mcp-family cutoff when per-family retention was requested. */
+  forensicMcpBeforeMs: number | null;
   skippedActiveChainJobs: number;
   extractedJobs: number;
 }
@@ -3494,10 +3504,20 @@ class SqliteClient implements ObservabilitySqliteClient {
       // Forensic and node-event retention is opt-in: the caller must name a cutoff, and the
       // audit surface is never pruned on a default (SPECIALISTS-4219). Both tables are the
       // high-volume ones — the mcp.call.* rows alone are ~70/s across a multi-session host.
+      // Per-family retention (SPECIALISTS-4224): mcp rows are status-polling noise
+      // (recommended 2d), all other forensic families are audit surface (recommended 14d).
       const forensicBeforeMs = options.forensicBeforeMs ?? null;
-      const forensicCandidates = forensicBeforeMs === null
-        ? 0
-        : (this.db.query('SELECT COUNT(*) AS count FROM specialist_forensic_events WHERE t < ?').get(forensicBeforeMs) as { count?: number } | undefined)?.count ?? 0;
+      const forensicMcpBeforeMs = options.forensicMcpBeforeMs ?? null;
+      const ACTIVE_GUARD = `job_id NOT IN (SELECT job_id FROM specialist_jobs WHERE status IN ('running','starting'))`;
+      const countForensic = (family: 'mcp' | 'non-mcp' | 'all', cutoff: number): number => {
+        const familyClause = family === 'mcp' ? `AND event_family = 'mcp'` : family === 'non-mcp' ? `AND event_family != 'mcp'` : '';
+        return (this.db.query(`SELECT COUNT(*) AS count FROM specialist_forensic_events WHERE t < ? ${familyClause} AND ${ACTIVE_GUARD}`).get(cutoff) as { count?: number } | undefined)?.count ?? 0;
+      };
+      const forensicCandidates = forensicMcpBeforeMs !== null && forensicBeforeMs !== null
+        ? countForensic('mcp', forensicMcpBeforeMs) + countForensic('non-mcp', forensicBeforeMs)
+        : forensicMcpBeforeMs !== null
+          ? countForensic('mcp', forensicMcpBeforeMs)
+          : forensicBeforeMs === null ? 0 : countForensic('all', forensicBeforeMs);
       const nodeEventsBeforeMs = options.nodeEventsBeforeMs ?? null;
       const nodeEventCandidates = nodeEventsBeforeMs === null
         ? 0
@@ -3530,11 +3550,30 @@ class SqliteClient implements ObservabilitySqliteClient {
           deletedForensicEvents: forensicCandidates,
           deletedNodeEvents: nodeEventCandidates,
           forensicBeforeMs,
+          forensicMcpBeforeMs,
           nodeEventsBeforeMs,
           skippedActiveChainJobs,
           extractedJobs: extractCandidates,
         };
       }
+
+      // Batched deletes (SPECIALISTS-4224): one large DELETE writes one large WAL burst.
+      // Delete by rowid batches with a PASSIVE checkpoint between batches so the WAL
+      // stays at or below journal_size_limit during a multi-million-row prune.
+      const PRUNE_BATCH_ROWS = 50_000;
+      const batchedDelete = (table: string, whereSql: string, params: readonly unknown[]): number => {
+        let total = 0;
+        for (;;) {
+          const row = this.db.query(
+            `DELETE FROM ${table} WHERE rowid IN (SELECT rowid FROM ${table} WHERE ${whereSql} LIMIT ${PRUNE_BATCH_ROWS})`
+          ).run(...(params as unknown[]));
+          const changed = row.changes ?? 0;
+          total += changed;
+          if (changed < PRUNE_BATCH_ROWS) break;
+          try { this.checkpointWal('PASSIVE'); } catch { /* best-effort bound */ }
+        }
+        return total;
+      };
 
       let extractedJobs = 0;
       if (!options.skipExtract) {
@@ -3554,9 +3593,7 @@ class SqliteClient implements ObservabilitySqliteClient {
         }
       }
 
-      const deleteResults = this.db.query(`
-        DELETE FROM specialist_results
-        WHERE updated_at_ms < ?
+      const deletedResults = batchedDelete('specialist_results', `updated_at_ms < ?
           AND (
             job_id NOT IN (SELECT job_id FROM specialist_jobs WHERE chain_id IS NOT NULL)
             OR job_id IN (
@@ -3570,16 +3607,11 @@ class SqliteClient implements ObservabilitySqliteClient {
                       AND active.status IN (${activeStatuses.map(() => '?').join(', ')})
                  )
             )
-          )
-      `);
-      const deletedResults = deleteResults.run(options.beforeMs, ...activeStatuses).changes ?? 0;
+          )`, [options.beforeMs, ...activeStatuses]);
 
-      const deleteEvents = this.db.query('DELETE FROM specialist_events WHERE t < ?');
-      const deletedEvents = deleteEvents.run(eventsCutoffMs).changes ?? 0;
+      const deletedEvents = batchedDelete('specialist_events', 't < ?', [eventsCutoffMs]);
 
-      const deleteJobs = this.db.query(`
-        DELETE FROM specialist_jobs
-        WHERE updated_at_ms < ?
+      const deletedJobs = batchedDelete('specialist_jobs', `updated_at_ms < ?
           AND status IN (${terminalStatuses.map(() => '?').join(', ')})
           AND (
             chain_id IS NULL
@@ -3589,18 +3621,21 @@ class SqliteClient implements ObservabilitySqliteClient {
               WHERE active.chain_id = specialist_jobs.chain_id
                 AND active.status IN (${activeStatuses.map(() => '?').join(', ')})
             )
-          )
-      `);
-      const deletedJobs = deleteJobs.run(options.beforeMs, ...terminalStatuses, ...activeStatuses).changes ?? 0;
+          )`, [options.beforeMs, ...terminalStatuses, ...activeStatuses]);
 
       let deletedForensicEvents = 0;
-      if (forensicBeforeMs !== null) {
-        deletedForensicEvents = this.db.query('DELETE FROM specialist_forensic_events WHERE t < ?').run(forensicBeforeMs).changes ?? 0;
+      if (forensicMcpBeforeMs !== null && forensicBeforeMs !== null) {
+        deletedForensicEvents += batchedDelete('specialist_forensic_events', `event_family = 'mcp' AND t < ? AND ${ACTIVE_GUARD}`, [forensicMcpBeforeMs]);
+        deletedForensicEvents += batchedDelete('specialist_forensic_events', `event_family != 'mcp' AND t < ? AND ${ACTIVE_GUARD}`, [forensicBeforeMs]);
+      } else if (forensicMcpBeforeMs !== null) {
+        deletedForensicEvents = batchedDelete('specialist_forensic_events', `event_family = 'mcp' AND t < ? AND ${ACTIVE_GUARD}`, [forensicMcpBeforeMs]);
+      } else if (forensicBeforeMs !== null) {
+        deletedForensicEvents = batchedDelete('specialist_forensic_events', `t < ? AND ${ACTIVE_GUARD}`, [forensicBeforeMs]);
       }
 
       let deletedNodeEvents = 0;
       if (nodeEventsBeforeMs !== null) {
-        deletedNodeEvents = this.db.query('DELETE FROM node_events WHERE t < ?').run(nodeEventsBeforeMs).changes ?? 0;
+        deletedNodeEvents = batchedDelete('node_events', 't < ?', [nodeEventsBeforeMs]);
       }
 
       let deletedEpicRuns = 0;
@@ -3630,6 +3665,7 @@ class SqliteClient implements ObservabilitySqliteClient {
         deletedForensicEvents,
         deletedNodeEvents,
         forensicBeforeMs,
+        forensicMcpBeforeMs,
         nodeEventsBeforeMs,
         skippedActiveChainJobs,
         extractedJobs,

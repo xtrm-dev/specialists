@@ -123,6 +123,14 @@ export interface PruneObservabilityOptions {
      * retention window is an operator decision, not a default (SPECIALISTS-4219).
      */
     forensicBeforeMs?: number;
+    /**
+     * Cutoff for `specialist_forensic_events` rows with event_family='mcp'
+     * (mcp.call.* status-polling noise, ~65% of forensic rows).
+     * When set alongside forensicBeforeMs, mcp rows use this cutoff and all
+     * other families use forensicBeforeMs. When set alone, only mcp rows are pruned.
+     * Recommended: mcp 2d, all other forensic families 14d (SPECIALISTS-4224).
+     */
+    forensicMcpBeforeMs?: number;
     /** Cutoff for `node_events`. Absent means "do not touch this table", same reason. */
     nodeEventsBeforeMs?: number;
 }
@@ -233,6 +241,8 @@ export interface PruneObservabilityReport {
     deletedNodeEvents: number;
     forensicBeforeMs: number | null;
     nodeEventsBeforeMs: number | null;
+    /** Echo of the mcp-family cutoff when per-family retention was requested. */
+    forensicMcpBeforeMs: number | null;
     skippedActiveChainJobs: number;
     extractedJobs: number;
 }
