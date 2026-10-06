@@ -36,8 +36,14 @@ interface PruneOptions {
   skipExtract: boolean;
   /** Undefined = forensic table is not pruned at all (default; audit surface). */
   forensicBeforeMs?: number;
+  /** Undefined = only the global forensic cutoff applies. Set to prune mcp.call.* noise on a shorter window (recommended 2d, others 14d). */
+  forensicMcpBeforeMs?: number;
   /** Undefined = node_events is not pruned at all (default). */
   nodeEventsBeforeMs?: number;
+}
+
+export function checkpointIsPartial(mode: 'PASSIVE' | 'RESTART' | 'TRUNCATE', busy: number): boolean {
+  return mode !== 'PASSIVE' && busy !== 0;
 }
 
 interface ExtractOptions {
@@ -110,7 +116,7 @@ function printDbHelp(): void {
     '  [MAINTENANCE] checkpoint [--truncate]           Checkpoint the WAL (PASSIVE default)',
     '  [MIGRATION] prune --before <iso|duration>      Prune old rows (default dry-run)',
     '              [--dry-run] [--apply] [--include-epics] [--skip-extract]',
-    '              [--forensic-before <iso|dur>] [--node-events-before <iso|dur>]',
+    '              [--forensic-before <iso|dur>] [--forensic-mcp-before <iso|dur>] [--node-events-before <iso|dur>]',
     '  [MIGRATION] extract [--job <id>] [--all-missing] [--since <dur>] [--help]',
     '  [QUERY] stats [--spec <name>] [--model <glob>] [--since <dur>] [--format json|table] [--with-payload] [--help]',
     '  [ANALYSIS] benchmark-export [--output <path>] [--include-prep-jobs] [--epic-id <id>]',
@@ -122,6 +128,8 @@ function printDbHelp(): void {
     '  - prune never touches epic_runs unless --include-epics',
     '  - prune never touches specialist_forensic_events or node_events unless their own',
     '    --forensic-before / --node-events-before cutoff is given (audit surface)',
+    '  - forensic per-family retention: --forensic-mcp-before prunes mcp.call.* noise only;',
+    '    recommended mcp 2d, all other forensic families 14d (interim global 7d)',
     '  - checkpoint PASSIVE is safe against the live shared database at any time',
     '  - checkpoint --truncate reclaims the -wal file and refuses while jobs are active',
     '',
@@ -191,6 +199,7 @@ function parseBackfillOptions(argv: readonly string[]): BackfillOptions {
 function parsePruneOptions(argv: readonly string[]): PruneOptions {
   let beforeValue: string | null = null;
   let forensicBeforeValue: string | null = null;
+  let forensicMcpBeforeValue: string | null = null;
   let nodeEventsBeforeValue: string | null = null;
   let apply = false;
   let dryRun = true;
@@ -237,6 +246,14 @@ function parsePruneOptions(argv: readonly string[]): PruneOptions {
       continue;
     }
 
+    if (argument === '--forensic-mcp-before') {
+      const value = argv[index + 1];
+      if (!value) throw new Error('Missing value for --forensic-mcp-before');
+      forensicMcpBeforeValue = value;
+      index += 1;
+      continue;
+    }
+
     if (argument === '--node-events-before') {
       const value = argv[index + 1];
       if (!value) throw new Error('Missing value for --node-events-before');
@@ -256,6 +273,7 @@ function parsePruneOptions(argv: readonly string[]): PruneOptions {
     includeEpics,
     skipExtract,
     forensicBeforeMs: forensicBeforeValue ? parseBeforeArgument(forensicBeforeValue) : undefined,
+    forensicMcpBeforeMs: forensicMcpBeforeValue ? parseBeforeArgument(forensicMcpBeforeValue) : undefined,
     nodeEventsBeforeMs: nodeEventsBeforeValue ? parseBeforeArgument(nodeEventsBeforeValue) : undefined,
   };
 }
@@ -560,11 +578,17 @@ function runCheckpoint(argv: readonly string[]): void {
     }
 
     const report = sqliteClient.checkpointWal(mode);
+    const partial = checkpointIsPartial(report.mode, report.busy);
     console.log(`\n${bold('specialists db checkpoint')}\n`);
     console.log(`  ${green('✓')} mode: ${report.mode}`);
-    console.log(`  ${green('✓')} wal frames: ${report.checkpointedFrames}/${report.logFrames} checkpointed${report.busy ? ` (busy: ${report.busy} - a reader holds an old snapshot)` : ''}`);
+    if (partial) {
+      console.log(`  ${yellow('○ partial')} wal frames: ${report.checkpointedFrames}/${report.logFrames} checkpointed (busy: ${report.busy} - a reader holds an old snapshot)`);
+    } else {
+      console.log(`  ${green('✓')} wal frames: ${report.checkpointedFrames}/${report.logFrames} checkpointed${report.busy ? ` (busy: ${report.busy} - a reader holds an old snapshot)` : ''}`);
+    }
     console.log(`  ${green('✓')} wal size: ${formatBytes(report.beforeWalBytes)} -> ${formatBytes(report.afterWalBytes)}`);
     console.log('');
+    if (partial) process.exitCode = 1;
   } finally {
     sqliteClient.close();
   }
@@ -583,6 +607,7 @@ function runPrune(options: PruneOptions): void {
       apply: options.apply,
       skipExtract: options.skipExtract,
       forensicBeforeMs: options.forensicBeforeMs,
+      forensicMcpBeforeMs: options.forensicMcpBeforeMs,
       nodeEventsBeforeMs: options.nodeEventsBeforeMs,
     });
 
@@ -594,7 +619,7 @@ function runPrune(options: PruneOptions): void {
     console.log(`  ${green('✓')} specialist_results: ${report.deletedResults}`);
     console.log(`  ${green('✓')} specialist_jobs: ${report.deletedJobs}`);
     console.log(`  ${green('✓')} extracted jobs: ${report.extractedJobs}`);
-    console.log(`  ${report.forensicBeforeMs === null ? yellow('○') : green('✓')} specialist_forensic_events: ${report.deletedForensicEvents} ${report.forensicBeforeMs === null ? '(untouched, use --forensic-before)' : `(before ${new Date(report.forensicBeforeMs).toISOString()})`}`);
+    console.log(`  ${report.forensicBeforeMs === null && report.forensicMcpBeforeMs === null ? yellow('○') : green('✓')} specialist_forensic_events: ${report.deletedForensicEvents} ${report.forensicBeforeMs === null && report.forensicMcpBeforeMs === null ? '(untouched, use --forensic-before)' : `(before ${report.forensicBeforeMs === null ? '-' : new Date(report.forensicBeforeMs).toISOString()}${report.forensicMcpBeforeMs === null ? '' : `, mcp before ${new Date(report.forensicMcpBeforeMs).toISOString()}`})`}`);
     console.log(`  ${report.nodeEventsBeforeMs === null ? yellow('○') : green('✓')} node_events: ${report.deletedNodeEvents} ${report.nodeEventsBeforeMs === null ? '(untouched, use --node-events-before)' : `(before ${new Date(report.nodeEventsBeforeMs).toISOString()})`}`);
     console.log(`  ${report.includeEpics ? green('✓') : yellow('○')} epic_runs: ${report.deletedEpicRuns} ${report.includeEpics ? '' : '(skipped, use --include-epics)'}`);
     console.log(`  ${yellow('○')} skipped active-chain jobs: ${report.skippedActiveChainJobs}`);
