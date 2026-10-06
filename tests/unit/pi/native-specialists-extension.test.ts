@@ -2631,3 +2631,73 @@ describe('codemode result contract (pi 0.99 tool exposure)', () => {
     expect(status.structuredContent.pending_asks).toHaveLength(1);
   });
 });
+
+/**
+ * Gateway schema validity (SPECIALISTS-4229).
+ *
+ * The commandcode/opencode-go gateway validates every tool's `parameters`
+ * with the JSON-Schema rule that each subschema position holds a boolean
+ * or an object. `Type.Union` of raw strings (`Type.Union(['list', ...])`)
+ * emits `anyOf` with bare-string members, and the gateway 400s the whole
+ * model call naming those strings. Every registered tool's parameters must
+ * satisfy the rule; the lease-reconcile enums additionally pin their values.
+ */
+function assertGatewayValidSchema(node, path, violations) {
+  if (typeof node === 'boolean') return;
+  if (node === null || typeof node !== 'object') {
+    violations.push(`${path}: not a boolean or object`);
+    return;
+  }
+  if (Array.isArray(node)) {
+    node.forEach((item, i) => assertGatewayValidSchema(item, `${path}[${i}]`, violations));
+    return;
+  }
+  for (const [key, value] of Object.entries(node)) {
+    if (key === 'properties' && value !== null && typeof value === 'object' && !Array.isArray(value)) {
+      for (const [prop, sub] of Object.entries(value)) {
+        if (typeof sub !== 'boolean' && (sub === null || typeof sub !== 'object' || Array.isArray(sub))) {
+          violations.push(`${path}.properties.${prop}: not a boolean or object`);
+        } else {
+          assertGatewayValidSchema(sub, `${path}.properties.${prop}`, violations);
+        }
+      }
+    } else if ((key === 'anyOf' || key === 'oneOf' || key === 'allOf') && Array.isArray(value)) {
+      value.forEach((member, i) => {
+        if (typeof member !== 'boolean' && (member === null || typeof member !== 'object' || Array.isArray(member))) {
+          violations.push(`${path}.${key}[${i}]: not a boolean or object`);
+        } else {
+          assertGatewayValidSchema(member, `${path}.${key}[${i}]`, violations);
+        }
+      });
+    } else if (key === 'items' || key === 'additionalProperties') {
+      if (value !== null && typeof value === 'object') assertGatewayValidSchema(value, `${path}.${key}`, violations);
+    } else if (value !== null && typeof value === 'object') {
+      assertGatewayValidSchema(value, `${path}.${key}`, violations);
+    }
+  }
+}
+
+describe('native-specialists extension tool schemas are gateway-valid', () => {
+  it('every registered tool parameters satisfies boolean-or-object subschemas', async () => {
+    const mod = await loadExtension();
+    const pi = makeFakePi();
+    mod.default(pi);
+    const violations = [];
+    for (const tool of pi.getAllTools()) {
+      if (tool.parameters !== undefined) {
+        assertGatewayValidSchema(tool.parameters, tool.name, violations);
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it('lease-reconcile action/outcome accept exactly the documented values', async () => {
+    const mod = await loadExtension();
+    const pi = makeFakePi();
+    mod.default(pi);
+    const params = toolNamed(pi, 'specialist_lease_reconcile').parameters;
+    const members = (prop) => params.properties[prop].anyOf.map((m) => m.const ?? m.enum);
+    expect(members('action').sort()).toEqual(['list', 'reconcile']);
+    expect(members('outcome').sort()).toEqual(['manual_attention_required', 'safe_free', 'superseded']);
+  });
+});

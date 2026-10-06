@@ -2412,9 +2412,9 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
     parameters: {
       type: 'object',
       properties: {
-        action: Type.Optional(Type.Union(['list', 'reconcile'])),
+        action: Type.Optional(Type.Union([Type.Literal('list'), Type.Literal('reconcile')])),
         worktree: Type.Optional(Type.String({ description: "reconcile: the worktree whose lease is uncertain." })),
-        outcome: Type.Optional(Type.Union(['safe_free', 'superseded', 'manual_attention_required'])),
+        outcome: Type.Optional(Type.Union([Type.Literal('safe_free'), Type.Literal('superseded'), Type.Literal('manual_attention_required')])),
         basis: Type.Optional(Type.Array(Type.String(), {
           description: 'reconcile: the durable evidence consulted, one entry per source. Empty is refused.',
         })),
