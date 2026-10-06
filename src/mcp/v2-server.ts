@@ -17,7 +17,7 @@
  * SAME zod schemas (kept as the parse authority), the SAME SpecialistLoader
  * authority, the SAME readiness gate inside `host.start()`, and the SAME
  * shared `renderRejection` renderer. The SDK cannot consume zod v3 schemas, so
- * tools are advertised via `fromJsonSchema(zodToJsonSchema(...))` — one JSON
+ * tools are advertised via `fromJsonSchema(toMcpInputSchema(...))` — one JSON
  * Schema object per tool, generated from the same schema that parses.
  *
  * Deliberately absent per §§M/N: wire progress push (deprecated Logging
@@ -26,7 +26,7 @@
  * return `complete` synchronously, so no `input_required` round-trips).
  */
 import * as z from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { toMcpInputSchema } from './tool-schema.js';
 import { McpServer, fromJsonSchema, PROTOCOL_VERSION_META_KEY } from '@modelcontextprotocol/server';
 import { serveStdio, StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import type { ServerContext, McpRequestContext, Transport } from '@modelcontextprotocol/server';
@@ -213,7 +213,7 @@ export function buildV2Server(ctx?: McpRequestContext, options?: BuildV2ServerOp
       tool.name,
       {
         description: tool.description,
-        inputSchema: fromJsonSchema(zodToJsonSchema(schema) as Record<string, unknown>),
+        inputSchema: fromJsonSchema(toMcpInputSchema(schema)),
       },
       async (args: unknown, ctx: ServerContext) => {
         // RequestMetaEnvelope is typed `{}` (neutral layer); the reserved keys are present at runtime (probed). Read through a record view keyed by the SDK constant.

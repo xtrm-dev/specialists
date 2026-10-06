@@ -65927,6 +65927,34 @@ var init_esm = __esm(() => {
   init_zodToJsonSchema();
 });
 
+// src/mcp/tool-schema.ts
+function toMcpInputSchema(schema) {
+  const json = zodToJsonSchema(schema);
+  stripKeys(json, STRIPPED_KEYS);
+  return json;
+}
+function stripKeys(node, keys) {
+  if (Array.isArray(node)) {
+    for (const item of node)
+      stripKeys(item, keys);
+    return;
+  }
+  if (node !== null && typeof node === "object") {
+    const record2 = node;
+    for (const key of Object.keys(record2)) {
+      if (keys.has(key))
+        delete record2[key];
+      else
+        stripKeys(record2[key], keys);
+    }
+  }
+}
+var STRIPPED_KEYS;
+var init_tool_schema = __esm(() => {
+  init_esm();
+  STRIPPED_KEYS = new Set(["$schema", "default"]);
+});
+
 // node_modules/@modelcontextprotocol/server/dist/chunk-Br0eD_fh.mjs
 var __create, __defProp2, __getOwnPropDesc, __getOwnPropNames, __getProtoOf, __hasOwnProp, __commonJSMin = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports), __exportAll = (all, symbols) => {
   let target = {};
@@ -99752,7 +99780,7 @@ function buildV2Server(ctx, options2) {
     const schema = schemaMap[tool.name] ?? objectType({});
     server.registerTool(tool.name, {
       description: tool.description,
-      inputSchema: fromJsonSchema2(zodToJsonSchema(schema))
+      inputSchema: fromJsonSchema2(toMcpInputSchema(schema))
     }, async (args, ctx2) => {
       const envelope = ctx2.mcpReq.envelope;
       const context = createMcpRequestContext({
@@ -99819,7 +99847,7 @@ function serveV2Stdio(era = stdioEraFromEnv()) {
 }
 var init_v2_server = __esm(() => {
   init_zod();
-  init_esm();
+  init_tool_schema();
   init_dist3();
   init_stdio();
   init_constants();
