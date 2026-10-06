@@ -2139,35 +2139,39 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
     }
 
     expect(plain(cards[0]).split('\n')).toEqual([
-      '● researcher · waiting · XTRM-241 · inspect native wake transport',
-      'Does the bracket look right?',
-      'Call specialist_status to obtain the pending message_id, then reply with specialist_reply. · activation act:aaaa',
+      '● researcher:act:aaaa · waiting · XTRM-241 · inspect native wake transport',
+      '  Does the bracket look right?',
+      '  Call specialist_status to obtain the pending message_id, then reply with specialist_reply. · activation act:aaaa',
     ]);
     expect(plain(cards[1]).split('\n')).toEqual([
-      '● reviewer · escalated · XTRM-241 · verify MCP Channel semantics',
-      'The current implementation cannot preserve the accepted authority invariant.',
-      'Call specialist_status to inspect the escalation and respond through specialist_reply. · activation act:aaaa',
+      '● reviewer:act:aaaa · escalated · XTRM-241 · verify MCP Channel semantics',
+      '  The current implementation cannot preserve the accepted authority invariant.',
+      '  Call specialist_status to inspect the escalation and respond through specialist_reply. · activation act:aaaa',
     ]);
     expect(plain(cards[2]).split('\n')).toEqual([
-      '● executor · done · XTRM-241 · 42s • 3t • 43k',
-      'Call specialist_result to read the complete result. · activation act:aaaa',
+      '● executor:act:aaaa · done · XTRM-241 · 42s • 3t • 43k',
+      '  Call specialist_result to read the complete result. · activation act:aaaa',
     ]);
     expect(plain(cards[3]).split('\n')).toEqual([
-      '● executor · failed · XTRM-241 · gpt-5.6-sol · high',
-      'Provider rate limit exhausted after fallback chain.',
-      'Call specialist_result for the full failure detail, then use specialist_retry if appropriate. · activation act:aaaa',
+      '● executor:act:aaaa · failed · XTRM-241 · gpt-5.6-sol · high',
+      '  Provider rate limit exhausted after fallback chain.',
+      '  Call specialist_result for the full failure detail, then use specialist_retry if appropriate. · activation act:aaaa',
     ]);
 
     // Styling: warning/bold/dim/italic per field, instruction dim+italic, id dim.
     expect(cards[0]).toContain('●');
     // Bold is opened once for the whole band, not per segment: the name is the first
     // segment inside it, and no 22m appears before the band's close.
-    expect(cards[0]).toContain('\x1b[48;2;201;162;39m\x1b[38;2;24;20;16m\x1b[1mresearcher');
-    expect(cards[0]).toContain('\x1b[3minspect native wake transport\x1b[23m'); // purpose stays italic in-band
+    expect(cards[0]).toContain('\x1b[48;2;201;162;39m\x1b[38;2;24;20;16m\x1b[1mresearcher:act:aaaa');
+    // Run facts sit AFTER the band closes, bold-dimmed on the normal background.
+    expect(cards[2]).toContain('\x1b[49m\x1b[39m \x1b[1m\x1b[2m·\x1b[22m \x1b[1m\x1b[2m42s\x1b[22m');
+    // Every line below the header indents two spaces: empty space under the dot.
+    for (const line of cards[2].split('\n').slice(1)) expect(line.startsWith('  ')).toBe(true);
+    expect(cards[0]).toContain('\x1b[2m\x1b[3minspect native wake transport\x1b[23m'); // purpose italic-dim after the band
     expect(cards[2]).toContain('done');
     expect(cards[3]).toContain('failed');
     const instruction = cards[2].split('\n')[1];
-    expect(instruction.startsWith('\x1b[2m\x1b[3m')).toBe(true);
+    expect(instruction.startsWith('  \x1b[2m\x1b[3m')).toBe(true); // indented under the dot
     expect(instruction).toContain(`\x1b[2mactivation act:aaaa\x1b[22m`);
   });
 
@@ -2178,14 +2182,14 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
       body: 'Line one?\nLine two.\nLine three.',
     });
     expect(card).not.toContain('│');
-    expect(plain(card)).toContain('Line one?\nLine two.\nLine three.');
+    expect(plain(card)).toContain('  Line one?\n  Line two.\n  Line three.');
     // A paragraph break must not introduce a blank line in the content.
     const withGap = mod.formatAskWake({
       activationId: 'act:aaaa', specialist: 'explorer', beadId: 'bd-1', kind: 'question',
       body: 'First paragraph.\n\nSecond paragraph.',
     });
     expect(withGap).not.toContain('\n\n');
-    expect(plain(withGap)).toContain('First paragraph.\nSecond paragraph.');
+    expect(plain(withGap)).toContain('  First paragraph.\n  Second paragraph.');
   });
 
   it('settlement cards embed a 3-line italic result excerpt, expandable via details', async () => {
