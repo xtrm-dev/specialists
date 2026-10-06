@@ -16472,7 +16472,13 @@ class SqliteClient {
         `).get(eventsCutoffMs)?.count ?? 0;
       const eventsCandidates = this.db.query("SELECT COUNT(*) AS count FROM specialist_events WHERE t < ?").get(eventsCutoffMs)?.count ?? 0;
       const forensicBeforeMs = options.forensicBeforeMs ?? null;
-      const forensicCandidates = forensicBeforeMs === null ? 0 : this.db.query("SELECT COUNT(*) AS count FROM specialist_forensic_events WHERE t < ?").get(forensicBeforeMs)?.count ?? 0;
+      const forensicMcpBeforeMs = options.forensicMcpBeforeMs ?? null;
+      const ACTIVE_GUARD = `job_id NOT IN (SELECT job_id FROM specialist_jobs WHERE status IN ('running','starting'))`;
+      const countForensic = (family, cutoff) => {
+        const familyClause = family === "mcp" ? `AND event_family = 'mcp'` : family === "non-mcp" ? `AND event_family != 'mcp'` : "";
+        return this.db.query(`SELECT COUNT(*) AS count FROM specialist_forensic_events WHERE t < ? ${familyClause} AND ${ACTIVE_GUARD}`).get(cutoff)?.count ?? 0;
+      };
+      const forensicCandidates = forensicMcpBeforeMs !== null && forensicBeforeMs !== null ? countForensic("mcp", forensicMcpBeforeMs) + countForensic("non-mcp", forensicBeforeMs) : forensicMcpBeforeMs !== null ? countForensic("mcp", forensicMcpBeforeMs) : forensicBeforeMs === null ? 0 : countForensic("all", forensicBeforeMs);
       const nodeEventsBeforeMs = options.nodeEventsBeforeMs ?? null;
       const nodeEventCandidates = nodeEventsBeforeMs === null ? 0 : this.db.query("SELECT COUNT(*) AS count FROM node_events WHERE t < ?").get(nodeEventsBeforeMs)?.count ?? 0;
       const epicCandidates = options.includeEpics ? this.db.query(`
@@ -16499,11 +16505,27 @@ class SqliteClient {
           deletedForensicEvents: forensicCandidates,
           deletedNodeEvents: nodeEventCandidates,
           forensicBeforeMs,
+          forensicMcpBeforeMs,
           nodeEventsBeforeMs,
           skippedActiveChainJobs,
           extractedJobs: extractCandidates
         };
       }
+      const PRUNE_BATCH_ROWS = 50000;
+      const batchedDelete = (table, whereSql, params) => {
+        let total = 0;
+        for (;; ) {
+          const row = this.db.query(`DELETE FROM ${table} WHERE rowid IN (SELECT rowid FROM ${table} WHERE ${whereSql} LIMIT ${PRUNE_BATCH_ROWS})`).run(...params);
+          const changed = row.changes ?? 0;
+          total += changed;
+          if (changed < PRUNE_BATCH_ROWS)
+            break;
+          try {
+            this.checkpointWal("PASSIVE");
+          } catch {}
+        }
+        return total;
+      };
       let extractedJobs = 0;
       if (!options.skipExtract) {
         const jobsToExtract = this.db.query(`
@@ -16521,9 +16543,7 @@ class SqliteClient {
           extractedJobs += 1;
         }
       }
-      const deleteResults = this.db.query(`
-        DELETE FROM specialist_results
-        WHERE updated_at_ms < ?
+      const deletedResults = batchedDelete("specialist_results", `updated_at_ms < ?
           AND (
             job_id NOT IN (SELECT job_id FROM specialist_jobs WHERE chain_id IS NOT NULL)
             OR job_id IN (
@@ -16537,14 +16557,9 @@ class SqliteClient {
                       AND active.status IN (${activeStatuses.map(() => "?").join(", ")})
                  )
             )
-          )
-      `);
-      const deletedResults = deleteResults.run(options.beforeMs, ...activeStatuses).changes ?? 0;
-      const deleteEvents = this.db.query("DELETE FROM specialist_events WHERE t < ?");
-      const deletedEvents = deleteEvents.run(eventsCutoffMs).changes ?? 0;
-      const deleteJobs = this.db.query(`
-        DELETE FROM specialist_jobs
-        WHERE updated_at_ms < ?
+          )`, [options.beforeMs, ...activeStatuses]);
+      const deletedEvents = batchedDelete("specialist_events", "t < ?", [eventsCutoffMs]);
+      const deletedJobs = batchedDelete("specialist_jobs", `updated_at_ms < ?
           AND status IN (${terminalStatuses.map(() => "?").join(", ")})
           AND (
             chain_id IS NULL
@@ -16554,16 +16569,19 @@ class SqliteClient {
               WHERE active.chain_id = specialist_jobs.chain_id
                 AND active.status IN (${activeStatuses.map(() => "?").join(", ")})
             )
-          )
-      `);
-      const deletedJobs = deleteJobs.run(options.beforeMs, ...terminalStatuses, ...activeStatuses).changes ?? 0;
+          )`, [options.beforeMs, ...terminalStatuses, ...activeStatuses]);
       let deletedForensicEvents = 0;
-      if (forensicBeforeMs !== null) {
-        deletedForensicEvents = this.db.query("DELETE FROM specialist_forensic_events WHERE t < ?").run(forensicBeforeMs).changes ?? 0;
+      if (forensicMcpBeforeMs !== null && forensicBeforeMs !== null) {
+        deletedForensicEvents += batchedDelete("specialist_forensic_events", `event_family = 'mcp' AND t < ? AND ${ACTIVE_GUARD}`, [forensicMcpBeforeMs]);
+        deletedForensicEvents += batchedDelete("specialist_forensic_events", `event_family != 'mcp' AND t < ? AND ${ACTIVE_GUARD}`, [forensicBeforeMs]);
+      } else if (forensicMcpBeforeMs !== null) {
+        deletedForensicEvents = batchedDelete("specialist_forensic_events", `event_family = 'mcp' AND t < ? AND ${ACTIVE_GUARD}`, [forensicMcpBeforeMs]);
+      } else if (forensicBeforeMs !== null) {
+        deletedForensicEvents = batchedDelete("specialist_forensic_events", `t < ? AND ${ACTIVE_GUARD}`, [forensicBeforeMs]);
       }
       let deletedNodeEvents = 0;
       if (nodeEventsBeforeMs !== null) {
-        deletedNodeEvents = this.db.query("DELETE FROM node_events WHERE t < ?").run(nodeEventsBeforeMs).changes ?? 0;
+        deletedNodeEvents = batchedDelete("node_events", "t < ?", [nodeEventsBeforeMs]);
       }
       let deletedEpicRuns = 0;
       if (options.includeEpics) {
@@ -16591,6 +16609,7 @@ class SqliteClient {
         deletedForensicEvents,
         deletedNodeEvents,
         forensicBeforeMs,
+        forensicMcpBeforeMs,
         nodeEventsBeforeMs,
         skippedActiveChainJobs,
         extractedJobs

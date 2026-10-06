@@ -16369,7 +16369,13 @@ class SqliteClient {
         `).get(eventsCutoffMs)?.count ?? 0;
       const eventsCandidates = this.db.query("SELECT COUNT(*) AS count FROM specialist_events WHERE t < ?").get(eventsCutoffMs)?.count ?? 0;
       const forensicBeforeMs = options.forensicBeforeMs ?? null;
-      const forensicCandidates = forensicBeforeMs === null ? 0 : this.db.query("SELECT COUNT(*) AS count FROM specialist_forensic_events WHERE t < ?").get(forensicBeforeMs)?.count ?? 0;
+      const forensicMcpBeforeMs = options.forensicMcpBeforeMs ?? null;
+      const ACTIVE_GUARD = `job_id NOT IN (SELECT job_id FROM specialist_jobs WHERE status IN ('running','starting'))`;
+      const countForensic = (family, cutoff) => {
+        const familyClause = family === "mcp" ? `AND event_family = 'mcp'` : family === "non-mcp" ? `AND event_family != 'mcp'` : "";
+        return this.db.query(`SELECT COUNT(*) AS count FROM specialist_forensic_events WHERE t < ? ${familyClause} AND ${ACTIVE_GUARD}`).get(cutoff)?.count ?? 0;
+      };
+      const forensicCandidates = forensicMcpBeforeMs !== null && forensicBeforeMs !== null ? countForensic("mcp", forensicMcpBeforeMs) + countForensic("non-mcp", forensicBeforeMs) : forensicMcpBeforeMs !== null ? countForensic("mcp", forensicMcpBeforeMs) : forensicBeforeMs === null ? 0 : countForensic("all", forensicBeforeMs);
       const nodeEventsBeforeMs = options.nodeEventsBeforeMs ?? null;
       const nodeEventCandidates = nodeEventsBeforeMs === null ? 0 : this.db.query("SELECT COUNT(*) AS count FROM node_events WHERE t < ?").get(nodeEventsBeforeMs)?.count ?? 0;
       const epicCandidates = options.includeEpics ? this.db.query(`
@@ -16396,11 +16402,27 @@ class SqliteClient {
           deletedForensicEvents: forensicCandidates,
           deletedNodeEvents: nodeEventCandidates,
           forensicBeforeMs,
+          forensicMcpBeforeMs,
           nodeEventsBeforeMs,
           skippedActiveChainJobs,
           extractedJobs: extractCandidates
         };
       }
+      const PRUNE_BATCH_ROWS = 50000;
+      const batchedDelete = (table, whereSql, params) => {
+        let total = 0;
+        for (;; ) {
+          const row = this.db.query(`DELETE FROM ${table} WHERE rowid IN (SELECT rowid FROM ${table} WHERE ${whereSql} LIMIT ${PRUNE_BATCH_ROWS})`).run(...params);
+          const changed = row.changes ?? 0;
+          total += changed;
+          if (changed < PRUNE_BATCH_ROWS)
+            break;
+          try {
+            this.checkpointWal("PASSIVE");
+          } catch {}
+        }
+        return total;
+      };
       let extractedJobs = 0;
       if (!options.skipExtract) {
         const jobsToExtract = this.db.query(`
@@ -16418,9 +16440,7 @@ class SqliteClient {
           extractedJobs += 1;
         }
       }
-      const deleteResults = this.db.query(`
-        DELETE FROM specialist_results
-        WHERE updated_at_ms < ?
+      const deletedResults = batchedDelete("specialist_results", `updated_at_ms < ?
           AND (
             job_id NOT IN (SELECT job_id FROM specialist_jobs WHERE chain_id IS NOT NULL)
             OR job_id IN (
@@ -16434,14 +16454,9 @@ class SqliteClient {
                       AND active.status IN (${activeStatuses.map(() => "?").join(", ")})
                  )
             )
-          )
-      `);
-      const deletedResults = deleteResults.run(options.beforeMs, ...activeStatuses).changes ?? 0;
-      const deleteEvents = this.db.query("DELETE FROM specialist_events WHERE t < ?");
-      const deletedEvents = deleteEvents.run(eventsCutoffMs).changes ?? 0;
-      const deleteJobs = this.db.query(`
-        DELETE FROM specialist_jobs
-        WHERE updated_at_ms < ?
+          )`, [options.beforeMs, ...activeStatuses]);
+      const deletedEvents = batchedDelete("specialist_events", "t < ?", [eventsCutoffMs]);
+      const deletedJobs = batchedDelete("specialist_jobs", `updated_at_ms < ?
           AND status IN (${terminalStatuses.map(() => "?").join(", ")})
           AND (
             chain_id IS NULL
@@ -16451,16 +16466,19 @@ class SqliteClient {
               WHERE active.chain_id = specialist_jobs.chain_id
                 AND active.status IN (${activeStatuses.map(() => "?").join(", ")})
             )
-          )
-      `);
-      const deletedJobs = deleteJobs.run(options.beforeMs, ...terminalStatuses, ...activeStatuses).changes ?? 0;
+          )`, [options.beforeMs, ...terminalStatuses, ...activeStatuses]);
       let deletedForensicEvents = 0;
-      if (forensicBeforeMs !== null) {
-        deletedForensicEvents = this.db.query("DELETE FROM specialist_forensic_events WHERE t < ?").run(forensicBeforeMs).changes ?? 0;
+      if (forensicMcpBeforeMs !== null && forensicBeforeMs !== null) {
+        deletedForensicEvents += batchedDelete("specialist_forensic_events", `event_family = 'mcp' AND t < ? AND ${ACTIVE_GUARD}`, [forensicMcpBeforeMs]);
+        deletedForensicEvents += batchedDelete("specialist_forensic_events", `event_family != 'mcp' AND t < ? AND ${ACTIVE_GUARD}`, [forensicBeforeMs]);
+      } else if (forensicMcpBeforeMs !== null) {
+        deletedForensicEvents = batchedDelete("specialist_forensic_events", `event_family = 'mcp' AND t < ? AND ${ACTIVE_GUARD}`, [forensicMcpBeforeMs]);
+      } else if (forensicBeforeMs !== null) {
+        deletedForensicEvents = batchedDelete("specialist_forensic_events", `t < ? AND ${ACTIVE_GUARD}`, [forensicBeforeMs]);
       }
       let deletedNodeEvents = 0;
       if (nodeEventsBeforeMs !== null) {
-        deletedNodeEvents = this.db.query("DELETE FROM node_events WHERE t < ?").run(nodeEventsBeforeMs).changes ?? 0;
+        deletedNodeEvents = batchedDelete("node_events", "t < ?", [nodeEventsBeforeMs]);
       }
       let deletedEpicRuns = 0;
       if (options.includeEpics) {
@@ -16488,6 +16506,7 @@ class SqliteClient {
         deletedForensicEvents,
         deletedNodeEvents,
         forensicBeforeMs,
+        forensicMcpBeforeMs,
         nodeEventsBeforeMs,
         skippedActiveChainJobs,
         extractedJobs
@@ -22838,6 +22857,9 @@ Rules:
 // src/cli/db.ts
 import { existsSync as existsSync15, mkdirSync as mkdirSync9, readdirSync as readdirSync6, readFileSync as readFileSync14, writeFileSync as writeFileSync8 } from "fs";
 import { dirname as dirname9, join as join16, resolve as resolve7 } from "path";
+function checkpointIsPartial(mode, busy) {
+  return mode !== "PASSIVE" && busy !== 0;
+}
 function formatBytes(bytes) {
   if (bytes < 1024)
     return `${bytes} B`;
@@ -22895,7 +22917,7 @@ function printDbHelp() {
     "  [MAINTENANCE] checkpoint [--truncate]           Checkpoint the WAL (PASSIVE default)",
     "  [MIGRATION] prune --before <iso|duration>      Prune old rows (default dry-run)",
     "              [--dry-run] [--apply] [--include-epics] [--skip-extract]",
-    "              [--forensic-before <iso|dur>] [--node-events-before <iso|dur>]",
+    "              [--forensic-before <iso|dur>] [--forensic-mcp-before <iso|dur>] [--node-events-before <iso|dur>]",
     "  [MIGRATION] extract [--job <id>] [--all-missing] [--since <dur>] [--help]",
     "  [QUERY] stats [--spec <name>] [--model <glob>] [--since <dur>] [--format json|table] [--with-payload] [--help]",
     "  [ANALYSIS] benchmark-export [--output <path>] [--include-prep-jobs] [--epic-id <id>]",
@@ -22907,6 +22929,8 @@ function printDbHelp() {
     "  - prune never touches epic_runs unless --include-epics",
     "  - prune never touches specialist_forensic_events or node_events unless their own",
     "    --forensic-before / --node-events-before cutoff is given (audit surface)",
+    "  - forensic per-family retention: --forensic-mcp-before prunes mcp.call.* noise only;",
+    "    recommended mcp 2d, all other forensic families 14d (interim global 7d)",
     "  - checkpoint PASSIVE is safe against the live shared database at any time",
     "  - checkpoint --truncate reclaims the -wal file and refuses while jobs are active",
     "",
@@ -22960,6 +22984,7 @@ function parseBackfillOptions(argv) {
 function parsePruneOptions(argv) {
   let beforeValue = null;
   let forensicBeforeValue = null;
+  let forensicMcpBeforeValue = null;
   let nodeEventsBeforeValue = null;
   let apply = false;
   let dryRun = true;
@@ -23001,6 +23026,14 @@ function parsePruneOptions(argv) {
       index += 1;
       continue;
     }
+    if (argument === "--forensic-mcp-before") {
+      const value = argv[index + 1];
+      if (!value)
+        throw new Error("Missing value for --forensic-mcp-before");
+      forensicMcpBeforeValue = value;
+      index += 1;
+      continue;
+    }
     if (argument === "--node-events-before") {
       const value = argv[index + 1];
       if (!value)
@@ -23019,6 +23052,7 @@ function parsePruneOptions(argv) {
     includeEpics,
     skipExtract,
     forensicBeforeMs: forensicBeforeValue ? parseBeforeArgument(forensicBeforeValue) : undefined,
+    forensicMcpBeforeMs: forensicMcpBeforeValue ? parseBeforeArgument(forensicMcpBeforeValue) : undefined,
     nodeEventsBeforeMs: nodeEventsBeforeValue ? parseBeforeArgument(nodeEventsBeforeValue) : undefined
   };
 }
@@ -23296,13 +23330,20 @@ function runCheckpoint(argv) {
       throw new Error(`Refusing TRUNCATE checkpoint while active jobs exist (${activeJobs.length}): ${listing}`);
     }
     const report = sqliteClient.checkpointWal(mode);
+    const partial = checkpointIsPartial(report.mode, report.busy);
     console.log(`
 ${bold6("specialists db checkpoint")}
 `);
     console.log(`  ${green5("\u2713")} mode: ${report.mode}`);
-    console.log(`  ${green5("\u2713")} wal frames: ${report.checkpointedFrames}/${report.logFrames} checkpointed${report.busy ? ` (busy: ${report.busy} - a reader holds an old snapshot)` : ""}`);
+    if (partial) {
+      console.log(`  ${yellow6("\u25CB partial")} wal frames: ${report.checkpointedFrames}/${report.logFrames} checkpointed (busy: ${report.busy} - a reader holds an old snapshot)`);
+    } else {
+      console.log(`  ${green5("\u2713")} wal frames: ${report.checkpointedFrames}/${report.logFrames} checkpointed${report.busy ? ` (busy: ${report.busy} - a reader holds an old snapshot)` : ""}`);
+    }
     console.log(`  ${green5("\u2713")} wal size: ${formatBytes(report.beforeWalBytes)} -> ${formatBytes(report.afterWalBytes)}`);
     console.log("");
+    if (partial)
+      process.exitCode = 1;
   } finally {
     sqliteClient.close();
   }
@@ -23319,6 +23360,7 @@ function runPrune(options) {
       apply: options.apply,
       skipExtract: options.skipExtract,
       forensicBeforeMs: options.forensicBeforeMs,
+      forensicMcpBeforeMs: options.forensicMcpBeforeMs,
       nodeEventsBeforeMs: options.nodeEventsBeforeMs
     });
     console.log(`
@@ -23331,7 +23373,7 @@ ${bold6("specialists db prune")}
     console.log(`  ${green5("\u2713")} specialist_results: ${report.deletedResults}`);
     console.log(`  ${green5("\u2713")} specialist_jobs: ${report.deletedJobs}`);
     console.log(`  ${green5("\u2713")} extracted jobs: ${report.extractedJobs}`);
-    console.log(`  ${report.forensicBeforeMs === null ? yellow6("\u25CB") : green5("\u2713")} specialist_forensic_events: ${report.deletedForensicEvents} ${report.forensicBeforeMs === null ? "(untouched, use --forensic-before)" : `(before ${new Date(report.forensicBeforeMs).toISOString()})`}`);
+    console.log(`  ${report.forensicBeforeMs === null && report.forensicMcpBeforeMs === null ? yellow6("\u25CB") : green5("\u2713")} specialist_forensic_events: ${report.deletedForensicEvents} ${report.forensicBeforeMs === null && report.forensicMcpBeforeMs === null ? "(untouched, use --forensic-before)" : `(before ${report.forensicBeforeMs === null ? "-" : new Date(report.forensicBeforeMs).toISOString()}${report.forensicMcpBeforeMs === null ? "" : `, mcp before ${new Date(report.forensicMcpBeforeMs).toISOString()}`})`}`);
     console.log(`  ${report.nodeEventsBeforeMs === null ? yellow6("\u25CB") : green5("\u2713")} node_events: ${report.deletedNodeEvents} ${report.nodeEventsBeforeMs === null ? "(untouched, use --node-events-before)" : `(before ${new Date(report.nodeEventsBeforeMs).toISOString()})`}`);
     console.log(`  ${report.includeEpics ? green5("\u2713") : yellow6("\u25CB")} epic_runs: ${report.deletedEpicRuns} ${report.includeEpics ? "" : "(skipped, use --include-epics)"}`);
     console.log(`  ${yellow6("\u25CB")} skipped active-chain jobs: ${report.skippedActiveChainJobs}`);
