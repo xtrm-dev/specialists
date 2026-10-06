@@ -2108,61 +2108,59 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
         error: 'Provider rate limit exhausted after fallback chain.',
       }, { resolved_model: 'gpt-5.6-sol', thinking_level: 'high', bead_id: 'XTRM-241' }),
     ];
-    for (const card of cards) {
-      // Unrailed (operator decision): no gutter anywhere.
-      expect(card).not.toContain('│');
-      // Design system: the gold band starts at the header text (line 1) and the
-      // dot stays unbanded; nothing below the header carries a background.
-      // The band owns its foreground: no token inside it may carry its own colour, so an
-      // accent-coloured thinking level cannot sit on the gold.
-      const bandedText = cards[3].split('\n')[0].slice(0, cards[3].split('\n')[0].indexOf('\u001b[49m'));
-      expect(bandedText).not.toContain('\x1b[38;2;154;139;255m');
-      expect(bandedText).toContain('\x1b[3');
-      // Bold spans the WHOLE band: no `22m` may clear it before the band closes.
-      for (const card of cards) {
-        const banded = card.split('\n')[0].slice(card.split('\n')[0].indexOf('\u25cf ') + 2);
-        const close = banded.indexOf('\u001b[49m');
-        const open = banded.slice(0, close);
-        expect(banded.startsWith('\u001b[48;2;201;162;39m\u001b[38;2;24;20;16m\u001b[1m')).toBe(true);
-        // The ONLY 22m inside the band is the one that closes it: nothing in the middle
-        // may clear bold, which is the bug this pins.
+    const GOLD = '\u001b[48;2;201;162;39m';
+    const ROYAL = '\u001b[48;2;65;105;225m';
+    const EMBER = '\x1b[48;2;200;58;24m';
+    const SLATE = '\u001b[48;2;128;128;128m';
+    const leadOf = [GOLD, GOLD, ROYAL, EMBER];
+    cards.forEach((card, index) => {
+      const [head, ...body] = card.split('\n');
+      // Lead band colour follows the outcome; the slate band is identical everywhere.
+      expect(head).toContain(leadOf[index]);
+      expect(head).toContain(SLATE);
+      // The full-height divider lives inside bands only — never on body lines.
+      expect(head).toContain('\u2502');
+      for (const line of body) {
+        expect(line).not.toContain('48;2');
+        expect(line).not.toContain('\u2502');
+      }
+      // Bold spans each WHOLE band: no `22m` may clear it before its close.
+      for (const match of head.matchAll(/\u001b\[48;2;[0-9;]+m[\s\S]*?\u001b\[49m/g)) {
+        const open = match[0].slice(0, -'\u001b[49m'.length);
         expect(open.lastIndexOf('\u001b[22m')).toBe(open.length - '\u001b[22m'.length);
       }
-      const [head, ...body] = card.split('\n');
-      expect(head.startsWith('\u001b[1m\u25cf\u001b[22m ') || head.startsWith('\u25cf ')).toBe(true);
-      expect(head.slice(head.indexOf('\u25cf ') + 2)).toContain('48;2;201;162;39');
-      expect(head.slice(head.indexOf('\u25cf ') + 2)).toContain('38;2;24;20;16');
-      for (const line of body) expect(line).not.toContain('48;2');
+      expect(head.startsWith('\u25cf ')).toBe(true);
       expect(card).not.toContain('\n\n');   // no blank line anywhere
       expect(card).not.toContain('╭');      // no brackets
       expect(card).not.toContain('╰');
-    }
+    });
 
     expect(plain(cards[0]).split('\n')).toEqual([
-      '● researcher:act:aaaa · waiting · XTRM-241 · inspect native wake transport',
+      '● researcher:act:aaaa waiting │ XTRM-241 · inspect native wake transport',
       '  Does the bracket look right?',
       '  Call specialist_status to obtain the pending message_id, then reply with specialist_reply. · activation act:aaaa',
     ]);
     expect(plain(cards[1]).split('\n')).toEqual([
-      '● reviewer:act:aaaa · escalated · XTRM-241 · verify MCP Channel semantics',
+      '● reviewer:act:aaaa escalated │ XTRM-241 · verify MCP Channel semantics',
       '  The current implementation cannot preserve the accepted authority invariant.',
       '  Call specialist_status to inspect the escalation and respond through specialist_reply. · activation act:aaaa',
     ]);
     expect(plain(cards[2]).split('\n')).toEqual([
-      '● executor:act:aaaa · done · XTRM-241 · 42s • 3t • 43k',
+      '● executor:act:aaaa done │ XTRM-241 · 42s • 3t • 43k',
       '  Call specialist_result to read the complete result. · activation act:aaaa',
     ]);
     expect(plain(cards[3]).split('\n')).toEqual([
-      '● executor:act:aaaa · failed · XTRM-241 · gpt-5.6-sol · high',
+      '● executor:act:aaaa failed │ XTRM-241 · gpt-5.6-sol · high',
       '  Provider rate limit exhausted after fallback chain.',
       '  Call specialist_result for the full failure detail, then use specialist_retry if appropriate. · activation act:aaaa',
     ]);
 
     // Styling: warning/bold/dim/italic per field, instruction dim+italic, id dim.
     expect(cards[0]).toContain('●');
-    // Bold is opened once for the whole band, not per segment: the name is the first
-    // segment inside it, and no 22m appears before the band's close.
+    // Lead band opens once, name first: gold for asks, royal for done, ember for failed.
     expect(cards[0]).toContain('\x1b[48;2;201;162;39m\x1b[38;2;24;20;16m\x1b[1mresearcher:act:aaaa');
+    expect(cards[2]).toContain('\x1b[48;2;65;105;225m\x1b[38;2;255;255;255m\x1b[1mexecutor:act:aaaa');
+    expect(cards[3]).toContain('\x1b[48;2;200;58;24m\x1b[38;2;255;255;255m\x1b[1mexecutor:act:aaaa');
     // Run facts sit AFTER the band closes, bold-dimmed on the normal background.
     expect(cards[2]).toContain('\x1b[49m\x1b[39m \x1b[1m\x1b[2m·\x1b[22m \x1b[1m\x1b[2m42s\x1b[22m');
     // Every line below the header indents two spaces: empty space under the dot.
@@ -2181,7 +2179,7 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
       activationId: 'act:aaaa', specialist: 'explorer', beadId: 'bd-1', kind: 'question',
       body: 'Line one?\nLine two.\nLine three.',
     });
-    expect(card).not.toContain('│');
+    expect(card.split('\n').slice(1).join('\n')).not.toContain('│'); // divider lives in bands only
     expect(plain(card)).toContain('  Line one?\n  Line two.\n  Line three.');
     // A paragraph break must not introduce a blank line in the content.
     const withGap = mod.formatAskWake({
