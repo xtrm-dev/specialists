@@ -160,24 +160,16 @@ const SEP_HINT = `\x1b[2m\u00b7\x1b[1m`;
  * than `\x1b[22m`. Closing the band with one `\x1b[22m` at the end is what keeps that from
  * cascading - appending a fresh `\x1b[1m` per segment instead would grow without bound.
  */
-const stripAnsi = (text) => String(text).replace(/\x1b\[[0-9;]*m/g, '');
-/**
- * Dim a facts string that carries its own escapes (`costFacts` builds `43s • 7t • 46k`).
- * Those internal `22m`s would clear bold mid-band, so escapes are dropped and each fact is
- * re-dimmed through `sub`.
- */
-const FACT_SEP = ` \x1b[2m\u2022\x1b[1m `;
-/**
- * Dim a facts string inside the band. It STRIPS colour first: the band owns its foreground
- * completely, so no token inside it may carry its own colour. An accent-coloured `high` on
- * gold is light purple on yellow - poor contrast, and a break of the dark-foreground rule.
- * Subordinate segments are dimmed, never recoloured.
- */
-const dimAll = (text) => stripAnsi(text).split(' \u2022 ').map(sub).join(FACT_SEP);
 /** Dim inside the band: closes dim with `1m`, which restores bold rather than clearing it. */
 const sub = (text) => `\x1b[2m${text}\x1b[1m`;
-/** Dim + italic inside the band; `22m` clears bold, so it is reopened explicitly. */
-const italicSub = (text) => `\x1b[2m\x1b[3m${text}\x1b[23m\x1b[1m`;
+/**
+ * Bold + dim on the normal background — the run facts after the gold band
+ * (`43s • 8t • 205k`). The band owns the dark foreground; out here the facts
+ * keep full bold weight at dim intensity instead.
+ */
+const BOLD_DIM = (text) => `\x1b[1m\x1b[2m${text}\x1b[22m`;
+const FACT_SEP_PLAIN = ` ${BOLD_DIM('\u2022')} `;
+const FACT_SEP_DOT = ` ${BOLD_DIM('\u00b7')} `;
 const bandHeader = (text) => `${GOLD_ON}\x1b[1m${text}\x1b[22m${GOLD_OFF}`;
 // Italic is set with `3` and cleared with `23`; `22m` after it clears the dim. Pi theme
 // helpers have no italic token, so the raw SGR is the only way to mark the purpose excerpt.
@@ -597,19 +589,23 @@ const FAIL_INSTRUCTION =
 /** Run cost for a settled event: elapsed • turns • tokens (each part omitted when absent). */
 function costFacts(view) {
   return [
-    view ? DIM(formatElapsedShort(view.elapsed_s)) : null,
-    view?.turn_count != null ? DIM(`${view.turn_count}t`) : null,
-    ...(view ? [formatSpendShort(view.token_usage)].filter(Boolean).map(DIM) : []),
-  ].filter(Boolean).join(` ${DIM('•')} `);
+    view ? BOLD_DIM(formatElapsedShort(view.elapsed_s)) : null,
+    view?.turn_count != null ? BOLD_DIM(`${view.turn_count}t`) : null,
+    ...(view ? [formatSpendShort(view.token_usage)].filter(Boolean).map(BOLD_DIM) : []),
+  ].filter(Boolean).join(FACT_SEP_PLAIN);
 }
 
 /** Attribution for a failed event: the model that produced the failure, and its effort. */
 function modelFacts(view) {
   return [
-    view?.resolved_model ? DIM(view.resolved_model) : null,
+    view?.resolved_model ? BOLD_DIM(view.resolved_model) : null,
     view?.thinking_level ? ACCENT_BOLD(view.thinking_level) : null,
-  ].filter(Boolean).join(` ${DIM('·')} `);
+  ].filter(Boolean).join(FACT_SEP_DOT);
 }
+
+/** Two-space indent for every line below a wake header: empty space under the dot. */
+const INDENT = '  ';
+const indentBody = (lines) => lines.map((line, index) => (index === 0 ? line : `${INDENT}${line}`));
 
 /** The instruction line, railed, with the activation id that specialist_* tools take. */
 function instructionLine(instruction, activationId) {
@@ -628,13 +624,14 @@ export function formatAskWake(ask, view) {
   const purpose = formatPurposeShort(view?.purpose);
   const beadId = ask.beadId ?? view?.bead_id ?? '—';
   // `!` covers both blocked states, so the one word the glyph cannot carry stays.
+  // The band names specialist:activation · state · work only; the purpose excerpt
+  // follows on the normal background, and every line below indents under the dot.
   const header = `${DOT} ${bandHeader([
-    ask.specialist,
+    `${ask.specialist}:${ask.activationId}`,
     sub(escalated ? 'escalated' : 'waiting'),
     sub(beadId),
-    purpose ? italicSub(purpose) : null,
-  ].filter(Boolean).join(` ${SEP_HINT} `))}`;
-  return [
+  ].filter(Boolean).join(` ${SEP_HINT} `))}${purpose ? ` ${BOLD_DIM('·')} ${ITALIC_DIM(purpose)}` : ''}`;
+  return indentBody([
     withRail(header),
     // Blank body lines are dropped: the rail used to render paragraph breaks
     // as a bare gutter; unrailed, they would become blank lines, which event
@@ -642,7 +639,7 @@ export function formatAskWake(ask, view) {
     // Design system: the body below a header is italic, on the normal background.
     ...String(ask.body || '(no body)').split('\n').filter((line) => line.trim() !== '').map((line) => ITALIC(withRail(line))),
     instructionLine(escalated ? ESCALATION_INSTRUCTION : ASK_INSTRUCTION, ask.activationId),
-  ].join('\n');
+  ]).join('\n');
 }
 
 /**
@@ -659,17 +656,16 @@ export function formatSettlementWake(done, view, opts = {}) {
   const beadId = done.beadId ?? view?.bead_id ?? '—';
   const facts = failed ? modelFacts(view) : costFacts(view);
   const header = `${DOT} ${bandHeader([
-    done.specialist,
+    `${done.specialist}:${done.activationId}`,
     sub(failed ? 'failed' : 'done'),
     sub(beadId),
-    facts ? dimAll(facts) : null,
-  ].filter(Boolean).join(` ${SEP_HINT} `))}`;
-  return [
+  ].filter(Boolean).join(` ${SEP_HINT} `))}${facts ? ` ${BOLD_DIM('·')} ${facts}` : ''}`;
+  return indentBody([
     withRail(header),
     ...resultLines(opts.resultText ?? done.output, opts),
     ...(failed && done.error ? [withRail(done.error)] : []),
     instructionLine(failed ? FAIL_INSTRUCTION : RESULT_INSTRUCTION, done.activationId),
-  ].join('\n');
+  ]).join('\n');
 }
 
 /**
