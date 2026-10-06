@@ -378,7 +378,7 @@ export function renderFleetRowLines(view, asks = [], nowMs = Date.now()) {
  * Expanded by default; blocked rows sort first. `detail` selects one activation's
  * result or feed rendered under the rows (SPECIALISTS-4264); the cache carries
  * the last completed read, so the section never awaits. */
-export function renderSectionLines({ activations, asks }, { expanded = true, nowMs = Date.now(), detail = null, detailCache = null, detailHint = null } = {}) {
+export function renderSectionLines({ activations, asks }, { expanded = true, nowMs = Date.now(), detail = null, detailCache = null } = {}) {
   const lines = [renderFleetHeader({ activations, asks })];
   if (!expanded) return lines;
   const askIds = new Set((asks ?? []).map((a) => a.activation_id));
@@ -391,7 +391,6 @@ export function renderSectionLines({ activations, asks }, { expanded = true, now
   const overflow = ordered.length - entries.length;
   if (overflow > 0) lines.push(`    +${overflow} more`);
   if (detail) lines.push(...renderDetailLines(detail, detailCache));
-  else if (detailHint && ordered.length > 0) lines.push(`    ${DIM(detailHint)}`);
   return lines;
 }
 
@@ -1552,7 +1551,6 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
   };
 
   const FEED_SECTION_LINES = FEED_SECTION_LINES_EXPORTED;
-  const DETAIL_SELECT_HINT = 'select a row: /specialists result|feed <activation>';
 
   // Async state advances through `refreshFleetDetail`: the commands refresh the
   // selection they just opened, the two settlement/ask wakes refresh it when a
@@ -1622,7 +1620,6 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
       nowMs: Date.now(),
       detail: fleetDetail,
       detailCache: fleetDetailCache,
-      detailHint: DETAIL_SELECT_HINT,
     });
   };
 

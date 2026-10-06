@@ -1374,10 +1374,10 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     expect(sections.has('specialist-fleet')).toBe(true);
     await toolNamed(pi2, 'specialist_status').execute('tc0', {});
     const render = sections.get('specialist-fleet');
-    // Before selection: rows plus the select hint, no detail.
+    // Before selection: rows with no detail and no select hint.
     const before = render().map(plain).join('\n');
     expect(before).toContain('SPECIALISTS');
-    expect(before).toContain('select a row');
+    expect(before).not.toContain('select a row');
     // Select via command: the section shows the feed under the rows.
     const cmds = pi2.getCommands();
     await cmds.find((c) => c.name === 'specialists:feed').handler('act:feed01', ctx2);
