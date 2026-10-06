@@ -26024,7 +26024,13 @@ function errorMessage(error) {
   if (error instanceof Error) {
     return error.name ? `${error.name}: ${error.message}` : error.message;
   }
-  return typeof error === "string" ? error : JSON.stringify(error);
+  if (typeof error === "string")
+    return error;
+  try {
+    return JSON.stringify(error) ?? String(error);
+  } catch {
+    return String(error);
+  }
 }
 function isAuthError(error) {
   if (!error)
