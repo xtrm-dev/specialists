@@ -150,8 +150,18 @@ const DOT = '●';
 // card the operator sees, whichever extension drew it.
 const GOLD_ON = '\x1b[48;2;201;162;39m\x1b[38;2;24;20;16m';
 const GOLD_OFF = '\x1b[49m\x1b[39m';
-/** Header separator: dim, never white, so it reads as a separator on the gold. */
-const SEP_HINT = `\x1b[2m\u00b7\x1b[1m`;
+/** Royal blue lead band: settled successfully. White bold foreground. */
+const ROYAL_ON = '\x1b[48;2;65;105;225m\x1b[38;2;255;255;255m';
+/** Red-orange lead band: settled with failure. White bold foreground. */
+const EMBER_ON = '\x1b[48;2;200;58;24m\x1b[38;2;255;255;255m';
+/** Gray second band (state + work id) shared by every card. Black foreground. */
+const SLATE_ON = '\x1b[48;2;128;128;128m\x1b[38;2;0;0;0m';
+const BAND_OFF = '\x1b[49m\x1b[39m';
+/**
+ * Full-height divider inside bands (U+2502 spans the whole cell, unlike `|`).
+ * Inherits the band foreground; never leaves the header line.
+ */
+const DIV = ' \u2502 ';
 /**
  * Band a header's text; the caller prepends the dot itself.
  *
@@ -170,7 +180,16 @@ const sub = (text) => `\x1b[2m${text}\x1b[1m`;
 const BOLD_DIM = (text) => `\x1b[1m\x1b[2m${text}\x1b[22m`;
 const FACT_SEP_PLAIN = ` ${BOLD_DIM('\u2022')} `;
 const FACT_SEP_DOT = ` ${BOLD_DIM('\u00b7')} `;
-const bandHeader = (text) => `${GOLD_ON}\x1b[1m${text}\x1b[22m${GOLD_OFF}`;
+/**
+ * Lead band by outcome: royal blue for done, red-orange for failed, gold for
+ * asks (waiting / escalated). Only ever wraps `specialist:activation`.
+ */
+const leadBand = (kind, text) => {
+  const on = kind === 'done' ? ROYAL_ON : kind === 'failed' ? EMBER_ON : GOLD_ON;
+  return `${on}\x1b[1m${text}\x1b[22m${BAND_OFF}`;
+};
+/** Slate band: state + work id, identical on every card. */
+const slateBand = (text) => `${SLATE_ON}\x1b[1m${text}\x1b[22m${BAND_OFF}`;
 // Italic is set with `3` and cleared with `23`; `22m` after it clears the dim. Pi theme
 // helpers have no italic token, so the raw SGR is the only way to mark the purpose excerpt.
 const ITALIC_DIM = (text) => `\x1b[2m\x1b[3m${text}\x1b[23m\x1b[22m`;
@@ -624,13 +643,13 @@ export function formatAskWake(ask, view) {
   const purpose = formatPurposeShort(view?.purpose);
   const beadId = ask.beadId ?? view?.bead_id ?? '—';
   // `!` covers both blocked states, so the one word the glyph cannot carry stays.
-  // The band names specialist:activation · state · work only; the purpose excerpt
-  // follows on the normal background, and every line below indents under the dot.
-  const header = `${DOT} ${bandHeader([
-    `${ask.specialist}:${ask.activationId}`,
+  // Gold lead band (ask family) names specialist:activation; the slate band names
+  // state + work; the purpose excerpt follows on the normal background, and every
+  // line below indents under the dot.
+  const header = `${DOT} ${leadBand(escalated ? 'escalated' : 'waiting', `${ask.specialist}:${ask.activationId}`)} ${slateBand([
     sub(escalated ? 'escalated' : 'waiting'),
     sub(beadId),
-  ].filter(Boolean).join(` ${SEP_HINT} `))}${purpose ? ` ${BOLD_DIM('·')} ${ITALIC_DIM(purpose)}` : ''}`;
+  ].filter(Boolean).join(DIV))}${purpose ? ` ${BOLD_DIM('·')} ${ITALIC_DIM(purpose)}` : ''}`;
   return indentBody([
     withRail(header),
     // Blank body lines are dropped: the rail used to render paragraph breaks
@@ -655,11 +674,10 @@ export function formatSettlementWake(done, view, opts = {}) {
   const failed = done.outcome === 'failed';
   const beadId = done.beadId ?? view?.bead_id ?? '—';
   const facts = failed ? modelFacts(view) : costFacts(view);
-  const header = `${DOT} ${bandHeader([
-    `${done.specialist}:${done.activationId}`,
+  const header = `${DOT} ${leadBand(failed ? 'failed' : 'done', `${done.specialist}:${done.activationId}`)} ${slateBand([
     sub(failed ? 'failed' : 'done'),
     sub(beadId),
-  ].filter(Boolean).join(` ${SEP_HINT} `))}${facts ? ` ${BOLD_DIM('·')} ${facts}` : ''}`;
+  ].filter(Boolean).join(DIV))}${facts ? ` ${BOLD_DIM('·')} ${facts}` : ''}`;
   return indentBody([
     withRail(header),
     ...resultLines(opts.resultText ?? done.output, opts),
