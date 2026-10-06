@@ -286,7 +286,7 @@ describe('peer adapter — a send is not a delivery', () => {
 
     // A peer that accepts the bytes and says nothing. This is the silent-never-delivered
     // failure mode; the adapter must not report success.
-    const server: Server = createServer(conn => { conn.on('end', () => conn.end()); conn.on('error', () => {}); });
+    const server: Server = createServer(conn => { conn.resume(); conn.on('end', () => conn.end()); conn.on('error', () => {}); });
     await new Promise<void>(res => server.listen(socketPath, () => res()));
 
     try {
@@ -313,7 +313,7 @@ describe('peer adapter — a send is not a delivery', () => {
     const dir = join(root, 'sessions');
     const socketPath = join(root, 'peer.sock');
     writeRoster(dir, [registration({ messagingSocketPath: socketPath })]);
-    const server: Server = createServer(conn => { conn.on('end', () => conn.end()); conn.on('error', () => {}); });
+    const server: Server = createServer(conn => { conn.resume(); conn.on('end', () => conn.end()); conn.on('error', () => {}); });
     await new Promise<void>(res => server.listen(socketPath, () => res()));
 
     try {
@@ -368,7 +368,7 @@ describe('peer adapter — a send is not a delivery', () => {
     const dir = join(root, 'sessions');
     const socketPath = join(root, 'peer.sock');
     writeRoster(dir, [registration({ messagingSocketPath: socketPath })]);
-    const server: Server = createServer(conn => { conn.on('end', () => conn.end()); conn.on('error', () => {}); });
+    const server: Server = createServer(conn => { conn.resume(); conn.on('end', () => conn.end()); conn.on('error', () => {}); });
     await new Promise<void>(res => server.listen(socketPath, () => res()));
 
     try {
@@ -436,7 +436,7 @@ describe('reply-as-delivery — the only confirmation this transport can produce
   async function pushed(dir: string, kind: string, messageId: string) {
     const socketPath = join(root, 'peer.sock');
     writeRoster(dir, [registration({ messagingSocketPath: socketPath })]);
-    const server: Server = createServer(conn => { conn.on('end', () => conn.end()); conn.on('error', () => {}); });
+    const server: Server = createServer(conn => { conn.resume(); conn.on('end', () => conn.end()); conn.on('error', () => {}); });
     await new Promise<void>(res => server.listen(socketPath, () => res()));
     const adapter = new PeerAdapter({
       repoRoot: root, rosterDir: dir, probe: live, receiptTimeoutMs: 20,
