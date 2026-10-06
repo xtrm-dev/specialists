@@ -4,7 +4,7 @@
 // spawn errors/timeouts are represented (unitAI-x64ys).
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
-import { runScript, sanitizeScriptName } from '../../../src/specialist/runner.js';
+import { extractPreScriptErrorLine, findRequiredPreScriptFailure, formatRequiredPreScriptFailure, runScript, sanitizeDisplayName, sanitizeScriptName, scriptDisplayName } from '../../../src/specialist/runner.js';
 
 const cwd = tmpdir();
 
@@ -48,6 +48,56 @@ describe('runScript execution contract', () => {
     const result = runScript('yes 0123456789 | head -c 20000000', cwd);
     expect(result.exitCode).not.toBe(0);
     expect(result.output.length).toBeLessThanOrEqual(1024 * 1024 + 2);
+  });
+
+  it('threads a human-readable label through to the rejection without changing the derived name', () => {
+    const result = runScript('exit 3', cwd, 'service-knowledge scope+drift');
+    expect(result.name).toBe('exit');
+    expect(result.displayName).toBe('service-knowledge scope+drift');
+    const failure = findRequiredPreScriptFailure(
+      [{ phase: 'pre', required: true, label: 'service-knowledge scope+drift' }],
+      [result],
+    );
+    expect(failure?.displayName).toBe('service-knowledge scope+drift');
+    expect(formatRequiredPreScriptFailure(failure!)).toContain("'service-knowledge scope+drift'");
+  });
+
+  it('falls back to the derived name when no label is provided', () => {
+    const result = runScript('exit 3', cwd);
+    expect(result.displayName).toBeUndefined();
+    const failure = findRequiredPreScriptFailure([{ phase: 'pre', required: true }], [result]);
+    expect(failure?.displayName).toBeUndefined();
+    expect(formatRequiredPreScriptFailure(failure!).split('\n')[0]).toBe(
+      "Required pre-script 'exit' failed with exit code 3.",
+    );
+  });
+
+  it('surfaces the PRE_SCRIPT_ERROR line even when head-truncated stdout would hide it', () => {
+    const stdout = `${'PRE_SCRIPT_SCOPE: filler\n'.repeat(500)}PRE_SCRIPT_ERROR: ERROR: drift_detector.py failed with exit_code=3\nPRE_SCRIPT_DATA_END\n`;
+    const text = formatRequiredPreScriptFailure({
+      name: ':',
+      displayName: 'service-knowledge scope+drift',
+      exitCode: 1,
+      stdout,
+      stderr: '',
+    });
+    expect(text).toContain("'service-knowledge scope+drift'");
+    expect(text).not.toContain("pre-script ':'");
+    expect(text).toContain('Cause: PRE_SCRIPT_ERROR: ERROR: drift_detector.py failed with exit_code=3');
+    expect(extractPreScriptErrorLine(stdout, '')).toBe(
+      'PRE_SCRIPT_ERROR: ERROR: drift_detector.py failed with exit_code=3',
+    );
+    expect(extractPreScriptErrorLine('no envelope here', '')).toBeNull();
+  });
+
+  it('sanitizes human-readable labels without rejecting spaces or plus signs', () => {
+    expect(sanitizeDisplayName('service-knowledge scope+drift')).toBe('service-knowledge scope+drift');
+    expect(sanitizeDisplayName('  padded  ')).toBe('padded');
+    expect(sanitizeDisplayName('\x00\x1b')).toBe('unknown');
+    expect(sanitizeDisplayName('x'.repeat(500)).length).toBe(128);
+    expect(scriptDisplayName({ label: 'service-knowledge scope+drift' })).toBe('service-knowledge scope+drift');
+    expect(scriptDisplayName({ phase: 'pre' })).toBeUndefined();
+    expect(scriptDisplayName(null)).toBeUndefined();
   });
 
   it('renders control-safe bounded script names', () => {

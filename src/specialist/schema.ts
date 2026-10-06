@@ -73,6 +73,9 @@ const ScriptEntrySchema = z.object({
   inject_output: z.boolean().default(false),
   /** `pre` only: nonzero exit aborts the run before the model session starts. Default false. */
   required: z.boolean().optional(),
+  /** Human-readable label for `required_pre_script_failed` rejections (e.g. `service-knowledge scope+drift`).
+   *  Falls back to the derived shell first-token when omitted. */
+  label: z.string().max(128).optional(),
 }).passthrough();
 
 const SkillsSchema = z.object({
@@ -157,7 +160,7 @@ export const SpecialistSchema = z.object({
 
 export type Specialist = z.infer<typeof SpecialistSchema>;
 export type SpecialistPermissions = NonNullable<Specialist['specialist']['permissions']>;
-export type ScriptEntry = { run: string; phase: 'pre' | 'post'; inject_output: boolean; required?: boolean };
+export type ScriptEntry = { run: string; phase: 'pre' | 'post'; inject_output: boolean; required?: boolean; label?: string };
 
 // ── Layered field-merge contract ──────────────────────────────────────────────
 // Drives SpecialistLoader layered merge (package base + global + default + user).

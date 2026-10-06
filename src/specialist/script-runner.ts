@@ -21,7 +21,7 @@ import { buildRequiredPlatformRulesBlock } from './required-platform-rules.js';
 import { resolveModelChain } from './model-chain.js';
 import { ensureObservabilityDbFile, resolveObservabilityDbLocation } from './observability-db.js';
 import { createObservabilitySqliteClient, createObservabilitySqliteClientAtPath } from './observability-sqlite.js';
-import { formatScriptOutput, findRequiredPreScriptFailure, formatRequiredPreScriptFailure, runScript, validateBeforeRun } from './runner.js';
+import { formatScriptOutput, findRequiredPreScriptFailure, formatRequiredPreScriptFailure, runScript, scriptDisplayName, validateBeforeRun } from './runner.js';
 import type { ScriptEntry, Specialist } from './schema.js';
 import type { SupervisorStatus } from './supervisor.js';
 import { formatResolvedToolContract, type ResolvedToolContract } from './resolved-tool-contract.js';
@@ -784,7 +784,7 @@ export async function runScriptSpecialist(input: ScriptGenerateRequest, options:
     const executableScripts = trust.allowLocalScripts ? localScripts : [];
     const preScripts = executableScripts.filter((script) => script.phase === 'pre');
     const postScripts = executableScripts.filter((script) => script.phase === 'post');
-    const preScriptResults = preScripts.map((script) => runScript(getLocalScriptCommand(script), baseDir));
+    const preScriptResults = preScripts.map((script) => runScript(getLocalScriptCommand(script), baseDir, scriptDisplayName(script)));
     const requiredPreFailure = findRequiredPreScriptFailure(preScripts, preScriptResults);
     if (requiredPreFailure) {
       const modelCandidates = collectModelCandidates(input, spec, options);

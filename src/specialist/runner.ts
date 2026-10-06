@@ -126,6 +126,8 @@ interface RunnerDeps {
 
 interface ScriptResult {
   name: string;
+  /** Human-readable label from the specialist definition (`skills.scripts[].label`), if present. */
+  displayName?: string;
   output: string;
   stderr: string;
   exitCode: number;
@@ -141,6 +143,26 @@ export function sanitizeScriptName(name: string): string {
   return /^[A-Za-z0-9:][A-Za-z0-9._:-]{0,127}$/.test(cleaned) ? cleaned : 'unknown';
 }
 
+/** Human-readable pre-script label for rejection messages. Unlike {@link sanitizeScriptName}
+ *  (which guards the `<script name="...">` wrapper), spaces, `+`, `/` and `.` are kept so a
+ *  definition can name the operation (e.g. `service-knowledge scope+drift`) instead of the
+ *  shell first-token (`:`). Control characters are stripped and output is bounded. */
+export function sanitizeDisplayName(name: string): string {
+  const cleaned = name.replace(/[\u0000-\u001f\u007f-\u009f]/g, '').trim().slice(0, 128);
+  return cleaned || 'unknown';
+}
+
+/** Read the human-readable label off a script entry, if the definition provides one. */
+export function scriptDisplayName(script: unknown): string | undefined {
+  if (typeof script !== 'object' || script === null) return undefined;
+  const record = script as Record<string, unknown>;
+  for (const key of ['label', 'displayName'] as const) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) return sanitizeDisplayName(value);
+  }
+  return undefined;
+}
+
 const SCRIPT_OUTPUT_LIMIT_BYTES = 1024 * 1024;
 
 // Hard byte cap applied in-process: not every runtime honors spawnSync maxBuffer.
@@ -150,13 +172,14 @@ function capStream(value: string, limitBytes: number = SCRIPT_OUTPUT_LIMIT_BYTES
   return buf.subarray(0, limitBytes).toString('utf8');
 }
 
-export function runScript(command: string | undefined, cwd: string): ScriptResult {
+export function runScript(command: string | undefined, cwd: string, displayName?: string): ScriptResult {
   const run = (command ?? '').trim();
   if (!run) {
     return { name: 'unknown', output: 'Missing script command (expected `run` or legacy `path`).', stderr: '', exitCode: 1 };
   }
 
   const scriptName = sanitizeScriptName(basename(run.split(' ')[0]));
+  const label = typeof displayName === 'string' && displayName.trim() ? sanitizeDisplayName(displayName) : undefined;
   // shell: true keeps the previous execSync /bin/sh -c semantics: `run` is a
   // shell command string, never re-tokenized (unitAI-x64ys).
   // nosemgrep: javascript.lang.security.audit.spawn-shell-true.spawn-shell-true -- trusted opt-in script definitions require shell grammar.
@@ -171,7 +194,7 @@ export function runScript(command: string | undefined, cwd: string): ScriptResul
   const output = capStream(result.stdout ?? '');
   const stderr = capStream(result.stderr ?? '');
   if (exitCode === 0 && !result.error) {
-    return { name: scriptName, output, stderr, exitCode: 0 };
+    return { name: scriptName, ...(label ? { displayName: label } : {}), output, stderr, exitCode: 0 };
   }
   const rawErrorCode = (result.error as NodeJS.ErrnoException | undefined)?.code;
   const spawnError = typeof rawErrorCode === 'string' && /^[A-Z0-9_]{1,32}$/.test(rawErrorCode)
@@ -180,6 +203,7 @@ export function runScript(command: string | undefined, cwd: string): ScriptResul
   const notes = [stderr.trim(), spawnError ? `spawn error: ${spawnError}` : ''].filter(Boolean).join('\n');
   return {
     name: scriptName,
+    ...(label ? { displayName: label } : {}),
     output,
     stderr: notes,
     exitCode,
@@ -190,6 +214,8 @@ export function runScript(command: string | undefined, cwd: string): ScriptResul
 
 export interface RequiredPreScriptFailure {
   name: string;
+  /** Human-readable label from the specialist definition, when the entry provides one. */
+  displayName?: string;
   exitCode: number;
   stdout: string;
   stderr: string;
@@ -201,7 +227,7 @@ export interface RequiredPreScriptFailure {
  *  `required: true` whose result is nonzero aborts the run. Optional scripts
  *  (required omitted/false) never gate — legacy injection behavior is kept. */
 export function findRequiredPreScriptFailure(
-  scripts: ReadonlyArray<{ phase?: string; required?: boolean }>,
+  scripts: ReadonlyArray<{ phase?: string; required?: boolean; label?: unknown; displayName?: unknown }>,
   results: ReadonlyArray<ScriptResult>,
 ): RequiredPreScriptFailure | null {
   for (let i = 0; i < scripts.length; i += 1) {
@@ -209,8 +235,10 @@ export function findRequiredPreScriptFailure(
     if (script.phase !== 'pre' || script.required !== true) continue;
     const result = results[i];
     if (result && result.exitCode !== 0) {
+      const displayName = scriptDisplayName(script) ?? result.displayName;
       return {
         name: result.name,
+        ...(displayName ? { displayName } : {}),
         exitCode: result.exitCode,
         stdout: result.output,
         stderr: result.stderr,
@@ -240,12 +268,29 @@ function sanitizeDiagnostic(text: string, limitBytes: number): string {
   return `${slice}\n... (truncated)`;
 }
 
+/** First `PRE_SCRIPT_ERROR:` line from captured output, if the failing script emitted one.
+ *
+ *  Pre-scripts that follow the `PRE_SCRIPT_DATA_BEGIN ... PRE_SCRIPT_ERROR ... PRE_SCRIPT_DATA_END`
+ *  envelope (e.g. service-knowledge scope+drift) print the machine-readable error AFTER the
+ *  bulk payload, so a head-truncated stdout diagnostic hides it. Surfacing the line verbatim
+ *  keeps the rejection actionable no matter how large the preceding payload was. */
+export function extractPreScriptErrorLine(stdout: string, stderr: string): string | null {
+  const match = `${stdout}\n${stderr}`.match(/PRE_SCRIPT_ERROR:[^\r\n]*/);
+  if (!match) return null;
+  const line = match[0].replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, '').trim();
+  if (!line) return null;
+  return line.length > 500 ? `${line.slice(0, 500)}\n... (truncated)` : line;
+}
+
 export function formatRequiredPreScriptFailure(failure: RequiredPreScriptFailure): string {
   const context = failure.signal
     ? ` (signal ${failure.signal})`
     : failure.spawnError ? ` (${failure.spawnError})` : '';
+  const display = failure.displayName ?? failure.name;
+  const cause = extractPreScriptErrorLine(failure.stdout, failure.stderr);
   return [
-    `Required pre-script '${failure.name}' failed with exit code ${failure.exitCode}${context}.`,
+    `Required pre-script '${display}' failed with exit code ${failure.exitCode}${context}.`,
+    ...(cause ? [`Cause: ${cause}`] : []),
     'The run was aborted before the model session started; no model fallback or retry is performed.',
     `--- stdout (bounded to ${PRE_SCRIPT_DIAGNOSTIC_LIMIT_BYTES} bytes) ---`,
     sanitizeDiagnostic(failure.stdout, PRE_SCRIPT_DIAGNOSTIC_LIMIT_BYTES),
@@ -1127,7 +1172,7 @@ export class SpecialistRunner {
 
     const preScripts = spec.specialist.skills?.scripts?.filter(s => s.phase === 'pre') ?? [];
     const preScriptResults = preScripts
-      .map(s => runScript(s.run ?? (s as unknown as { path?: string }).path, runCwd));
+      .map(s => runScript(s.run ?? (s as unknown as { path?: string }).path, runCwd, scriptDisplayName(s)));
     const requiredPreFailure = findRequiredPreScriptFailure(preScripts, preScriptResults);
     if (requiredPreFailure) {
       throw new RequiredPreScriptError(formatRequiredPreScriptFailure(requiredPreFailure));

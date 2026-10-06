@@ -45,6 +45,7 @@ import {
   runScript,
   findRequiredPreScriptFailure,
   formatRequiredPreScriptFailure,
+  scriptDisplayName,
   formatScriptOutput,
   createReviewerDiffAppendHook,
 } from '../specialist/runner.js';
@@ -1294,7 +1295,7 @@ export class NativeActivationHost {
     // executable, so a missing script refuses before this point rather than as a spawn error.
     const preScripts = specialist.specialist.skills?.scripts?.filter((s) => s.phase === 'pre') ?? [];
     const preScriptResults = preScripts.map((script) =>
-      runScript(script.run ?? (script as unknown as { path?: string }).path, this.cwd));
+      runScript(script.run ?? (script as unknown as { path?: string }).path, this.cwd, scriptDisplayName(script)));
     const requiredPreFailure = findRequiredPreScriptFailure(preScripts, preScriptResults);
     if (requiredPreFailure) {
       return reject('required_pre_script_failed', {

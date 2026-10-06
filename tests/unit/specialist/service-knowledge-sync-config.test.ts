@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SpecialistLoader } from '../../../src/specialist/loader.js';
 import { SpecialistSchema, validateSpecialist } from '../../../src/specialist/schema.js';
-import { formatScriptOutput, runScript, validateBeforeRun } from '../../../src/specialist/runner.js';
+import { findRequiredPreScriptFailure, formatRequiredPreScriptFailure, formatScriptOutput, runScript, validateBeforeRun } from '../../../src/specialist/runner.js';
 import { buildSkillPrefix } from '../../../src/specialist/task-prompt.js';
 
 const REPO = resolve(__dirname, '../../..');
@@ -63,7 +63,7 @@ async function seedMachinery(root: string): Promise<void> {
 describe('service-knowledge-sync v2 role binding', () => {
   it('validates and preserves the RC execution contract', async () => {
     expect(await validateSpecialist(CONFIG_TEXT)).toMatchObject({ valid: true, errors: [] });
-    expect(SPECIALIST.metadata).toMatchObject({ version: '1.11.1', updated: '2026-09-20' });
+    expect(SPECIALIST.metadata).toMatchObject({ version: '1.11.2', updated: '2026-10-06' });
     expect(SPECIALIST.execution.extensions).toEqual({ 'npm:@jaggerxtrm/pi-service-knowledge@1.0.0': true });
   });
 
@@ -107,7 +107,7 @@ describe('service-knowledge-sync v2 role binding', () => {
   });
 
   it('unsets inherited selectors and passes validation through the leading shell builtin', () => {
-    expect(SPECIALIST.skills?.scripts?.[0]).toMatchObject({ phase: 'pre', inject_output: true, required: true });
+    expect(SPECIALIST.skills?.scripts?.[0]).toMatchObject({ phase: 'pre', inject_output: true, required: true, label: 'service-knowledge scope+drift' });
     expect(SCRIPT).toMatch(/^: ; unset SERVICE_REGISTRY_PATH CLAUDE_PROJECT_DIR XTRM_PACK;/);
     expect(SCRIPT).not.toMatch(/\b(?:export|set)\s+(?:SERVICE_REGISTRY_PATH|CLAUDE_PROJECT_DIR|XTRM_PACK)/);
     expect(() => validateBeforeRun({
@@ -212,12 +212,17 @@ describe('service-knowledge-sync v2 role binding', () => {
 
     const result = runScript(SCRIPT, root);
 
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(0);
     expect(result.output).toContain('PRE_SCRIPT_SCOPE: scope: registry loaded');
-    expect(result.output).toContain('PRE_SCRIPT_ERROR: ERROR: drift_detector.py output exceeded 65536 bytes');
-    expect(result.output).not.toContain('PRE_SCRIPT_DRIFT: ');
+    expect(result.output).toContain('PRE_SCRIPT_DRIFT: drift summary:');
+    expect(result.output).toContain('degraded, not failed');
+    expect(result.output).toMatch(/PRE_SCRIPT_DRIFT:.*truncated:.*more/);
+    expect(result.output).not.toContain('PRE_SCRIPT_ERROR:');
     expect(result.output.endsWith('PRE_SCRIPT_DATA_END\n')).toBe(true);
-    expect(Buffer.byteLength(result.output)).toBeLessThan(512);
+    expect(Buffer.byteLength(result.output)).toBeLessThanOrEqual(HELPER_RENDERED_OUTPUT_LIMIT_BYTES + 512);
+    for (const line of result.output.trim().split('\n').slice(1, -1)) {
+      expect(line).toMatch(/^PRE_SCRIPT_(?:SCOPE|DRIFT|ERROR): /);
+    }
   });
 
   it('rejects rendered label amplification below the raw boundary with fixed bounded output', async () => {
@@ -233,12 +238,94 @@ describe('service-knowledge-sync v2 role binding', () => {
 
     const result = runScript(SCRIPT, root);
 
-    expect(result.exitCode).toBe(1);
-    expect(result.output).toContain('PRE_SCRIPT_ERROR: ERROR: drift_detector.py rendered output exceeded 131072 bytes');
-    expect(result.output).not.toContain('PRE_SCRIPT_DRIFT: ');
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain('PRE_SCRIPT_SCOPE: scope: registry loaded');
+    expect(result.output).toContain('PRE_SCRIPT_DRIFT: drift summary:');
+    expect(result.output).toMatch(/PRE_SCRIPT_DRIFT:.*truncated:.*more/);
+    expect(result.output).not.toContain('PRE_SCRIPT_ERROR:');
     expect(result.output.endsWith('PRE_SCRIPT_DATA_END\n')).toBe(true);
-    expect(Buffer.byteLength(result.output)).toBeLessThan(512);
+    expect(Buffer.byteLength(result.output)).toBeLessThanOrEqual(HELPER_RENDERED_OUTPUT_LIMIT_BYTES + 512);
     expect(HELPER_RAW_OUTPUT_LIMIT_BYTES).toBe(65_536);
+  });
+
+  it('degrades a 70 KB structured drift scan to a bounded per-service summary', async () => {
+    const root = await seedConsumer(['infra']);
+    await seedMachinery(root);
+    const scripts = join(root, '.xtrm', 'skills', 'default', 'service-knowledge', 'scripts');
+    await writeFile(join(scripts, 'drift_detector.py'), [
+      'import sys',
+      'assert sys.argv[1:] == ["scan"]',
+      'for i in range(800):',
+      '    svc = f"svc-{(i % 3) + 1}"',
+      '    print(f"service: {svc} drifted file src/m{i:04d}.py tier=high tier_source=gitnexus gitnexus_status=ok")',
+      '',
+    ].join('\n'));
+
+    const result = runScript(SCRIPT, root);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toMatch(/PRE_SCRIPT_DRIFT: drift summary: 800 lines \(\d+ bytes\) across 3 service\(s\);/);
+    expect(result.output).toContain('PRE_SCRIPT_DRIFT: service="svc-1": 267 drifted file(s)');
+    expect(result.output).toContain('PRE_SCRIPT_DRIFT: service="svc-2": 267 drifted file(s)');
+    expect(result.output).toContain('PRE_SCRIPT_DRIFT: service="svc-3": 266 drifted file(s)');
+    expect(result.output).toMatch(/PRE_SCRIPT_DRIFT: service="svc-1": truncated: 247 more/);
+    expect(result.output).not.toContain('PRE_SCRIPT_ERROR:');
+    expect(result.output.endsWith('PRE_SCRIPT_DATA_END\n')).toBe(true);
+    expect(Buffer.byteLength(result.output)).toBeLessThanOrEqual(HELPER_RENDERED_OUTPUT_LIMIT_BYTES + 512);
+  });
+
+  it('scopes the drift summary to the target service named by the issue contract', async () => {
+    const root = await seedConsumer(['infra']);
+    await seedMachinery(root);
+    const scripts = join(root, '.xtrm', 'skills', 'default', 'service-knowledge', 'scripts');
+    await writeFile(join(scripts, 'drift_detector.py'), [
+      'import sys',
+      'assert sys.argv[1:] == ["scan"]',
+      'for i in range(60):',
+      '    svc = f"svc-{(i % 3) + 1}"',
+      '    print(f"service: {svc} drifted file src/m{i:04d}.py tier=high")',
+      '',
+    ].join('\n'));
+    const scoped = SCRIPT.replace(
+      'python3 -c',
+      'SERVICE_KNOWLEDGE_TARGET_SERVICE=svc-2 python3 -c',
+    );
+
+    const result = runScript(scoped, root);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain('scoped to service "svc-2"');
+    expect(result.output).toContain('PRE_SCRIPT_DRIFT: service="svc-2": 20 drifted file(s)');
+    expect(result.output).not.toContain('service="svc-1"');
+    expect(result.output).not.toContain('service="svc-3"');
+    expect(result.output).not.toContain('PRE_SCRIPT_ERROR:');
+  });
+
+  it('surfaces the PRE_SCRIPT_ERROR line and the readable pre-script name on a forced script error', async () => {
+    const root = await seedConsumer(['infra']);
+    await seedMachinery(root);
+    const scripts = join(root, '.xtrm', 'skills', 'default', 'service-knowledge', 'scripts');
+    await writeFile(join(scripts, 'drift_detector.py'), [
+      'import sys',
+      'assert sys.argv[1:] == ["scan"]',
+      'print("drift useful tail")',
+      'raise SystemExit(3)',
+      '',
+    ].join('\n'));
+
+    const result = runScript(SCRIPT, root);
+    expect(result.exitCode).toBe(3);
+    expect(result.output).toContain('PRE_SCRIPT_ERROR: ERROR: drift_detector.py failed with exit_code=3');
+    const label = (SPECIALIST.skills?.scripts?.[0] as { label?: string }).label ?? '';
+    expect(label).toBe('service-knowledge scope+drift');
+    const failure = findRequiredPreScriptFailure(
+      [{ phase: 'pre', required: true, label }],
+      [{ name: result.name, output: result.output, stderr: result.stderr, exitCode: result.exitCode }],
+    );
+    const rejection = formatRequiredPreScriptFailure(failure!);
+    expect(rejection).toContain("'service-knowledge scope+drift'");
+    expect(rejection).not.toContain("pre-script ':'");
+    expect(rejection).toContain('PRE_SCRIPT_ERROR: ERROR: drift_detector.py failed with exit_code=3');
   });
 
   it('uses production helpers to retain ERROR and exit_code when scope fails without running drift', async () => {
