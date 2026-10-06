@@ -60633,7 +60633,7 @@ function admitToolCall(input2, probe = procLeaseProbe()) {
     reason: `workspace ${input2.workspace.worktreePath} is not leased by this activation; ` + `${input2.toolName} may not mutate it`
   };
 }
-var NON_MUTATING_TOOLS, WORKSPACE_WRITE_TOOLS, CONTROL_PLANE_TOOLS;
+var NON_MUTATING_TOOLS, WORKSPACE_WRITE_TOOLS;
 var init_workspace_lease = __esm(() => {
   init_types3();
   NON_MUTATING_TOOLS = new Set([
@@ -60649,14 +60649,6 @@ var init_workspace_lease = __esm(() => {
     "webfetch"
   ]);
   WORKSPACE_WRITE_TOOLS = new Set(["edit", "write", "bash", "powershell"]);
-  CONTROL_PLANE_TOOLS = new Set([
-    "specialist_status",
-    "specialist_reply",
-    "specialist_result",
-    "specialist_stop_activation",
-    "specialist_lease_reconcile",
-    "specialists"
-  ]);
 });
 
 // src/activation/workspace-reconcile.ts

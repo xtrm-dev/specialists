@@ -260,64 +260,54 @@ export declare function acquire(request: AcquireRequest, probe?: LeaseProcessPro
 export declare function release(workspace: WorkspaceIdentity, activationId: ActivationId, probe?: LeaseProcessProbe): void;
 export declare function isMutatingTool(toolName: string): boolean;
 /**
- * The tools that can actually write a workspace file or run a command.
+ * The four tools that can actually write a workspace file or run a command.
  *
- * This is the INVERSE question to `isMutatingTool`, and the coordinator fence is the only
- * place that asks it (SPECIALISTS-4273). That fence exists to stop two writers colliding in
- * one worktree — not to capability-gate the operator's own agent — so it must refuse what
- * genuinely writes and allow the rest. Under the denylist it refused a plain `ls`, a `find`
- * and a read-only python cell, because nobody had listed them (observed live).
+ * This is the INVERSE question to `isMutatingTool`, and it now scopes the coordinator's
+ * non-blocking WARNING rather than a block (SPECIALISTS-4273, operator decision 2026-10-06).
+ * The set is the same four pi builtins that `guarded-tools.ts` reconstructs, so the warning
+ * and the guarded-tool reconstruction cannot drift; a parity test pins them together.
  *
- * The set is the same four pi builtins that `guarded-tools.ts` reconstructs, so the fence and
- * the guarded-tool reconstruction cannot drift; a parity test pins them together.
+ * A tool that mutates but is not in this set (a future shell wrapper, `python` executing a
+ * script that writes) does not even warn. That is deliberate: the coordinator is not a
+ * delegated writer and is fully waived from the lease, so the advisory is best-effort and a
+ * quiet read is better than a noisy one.
  *
- * The trade-off, stated rather than hidden: a tool that mutates but is not in this set (a
- * future shell wrapper, `python` executing a script that writes) is NOT fenced for the
- * coordinator. That is deliberate — the coordinator is not a delegated writer, and a fence
- * that blocks reading is worse than one that misses an exotic writer. The Specialist side is
- * unaffected: `admitToolCall` keeps the strict denylist, so a read-tier activation still may
- * not touch anything it cannot prove harmless.
+ * The Specialist side is unaffected: `admitToolCall` keeps the strict `isMutatingTool`
+ * denylist, so a read-tier activation still may not touch anything it cannot prove harmless.
  */
 export declare const WORKSPACE_WRITE_TOOLS: ReadonlySet<string>;
-/** True for a tool the coordinator fence treats as a workspace writer. */
+/** True for a tool the coordinator advisory treats as a workspace writer. */
 export declare function isWorkspaceWriteTool(toolName: string): boolean;
 /** The verdict a `tool_call` handler converts into `{ block: true }` plus a reason. */
 export interface AdmissionVerdict {
     allow: boolean;
     reason?: string;
+    /**
+     * Coordinator-only, non-blocking advisory. When set, `allow` is true: the coordinator is
+     * never refused, it is only told that a Specialist is writing the same worktree.
+     */
+    warning?: string;
 }
 /**
- * Tools that reach the Fleet rather than the filesystem.
+ * Advise the coordinator about a workspace a Specialist is writing.
  *
- * These are the coordinator's instruments for managing activations, and none of them writes a
- * workspace file or runs a command. A WRITE fence has no business stopping them: gating
- * `specialist_stop_activation` means the coordinator cannot release the very lease that is
- * fencing it, which is the one deadlock this fence must never create (observed live,
- * SPECIALISTS-4272). The exemption is unconditional rather than a flag — a tool that cannot
- * write cannot be a writer, whatever the lease says.
+ * The coordinator is FULLY WAIVED from the workspace lease (operator decision 2026-10-06): it
+ * never holds a lease, it is never fenced by one, and it may edit a worktree a Specialist is
+ * writing. Concurrent coordinator edits are accepted behaviour — the same position the Claude
+ * `PreToolUse` lease-warn hook already takes. This function therefore never returns
+ * `allow: false`; the most it does is return a non-blocking `warning` for a workspace-writer
+ * tool while a lease is held or uncertain.
  *
- * `specialist_reply` and `specialist_status` are here for the same reason and one more: a
- * Specialist holding a lease in `needs_reply` is blocked ON the coordinator's answer, so
- * refusing to read or answer it strands both sides.
- */
-export declare const CONTROL_PLANE_TOOLS: ReadonlySet<string>;
-/** True for a Fleet-management tool, which no write fence may refuse. */
-export declare function isControlPlaneTool(toolName: string): boolean;
-/**
- * Decide whether the COORDINATOR may mutate a workspace right now.
+ * This is deliberately NOT `admitToolCall`, which refuses an unleased workspace because a
+ * Specialist must HOLD a lease to mutate. Reusing that predicate for the coordinator would
+ * refuse every write whenever no Specialist was running, which is almost always
+ * (unitAI-rrdnt.61). A coordinator that cannot edit its own repository is not a fence.
  *
- * This is deliberately NOT `admitToolCall`, and the difference is the default case.
- * `admitToolCall` refuses an unleased workspace, because a Specialist must HOLD a lease to
- * mutate — that is the capability grant being enforced. The coordinator never holds one, so
- * reusing that predicate would refuse every coordinator write whenever no Specialist happened
- * to be running, which is almost always (unitAI-rrdnt.61). A coordinator that cannot edit its
- * own repository is not a fence.
- *
- * The rule here is the mirror image: a free workspace is the coordinator's to write, and only
- * an ACTIVE holder or an uncertain lease takes it away. Both functions read the same
- * `inspect`, so they can never disagree about WHO holds the lease — only about what the
- * absence of one means, which is exactly the thing that legitimately differs between a
- * delegated Specialist and the operator who dispatched it.
+ * XTRM-109: a provably dead holder is still reclaimed on every coordinator-reachable path, so
+ * a stale lease does not survive behind a read and block the NEXT dispatch's `acquire()`. The
+ * reclaim is best-effort and race-safe, and it never touches a holder that might be alive —
+ * `liveness_unverifiable` and `holder_start_mismatch` stay `uncertain`, which keeps the
+ * PID-reuse guard meaningful.
  */
 export declare function admitCoordinatorToolCall(input: {
     toolName: string;

@@ -22150,44 +22150,16 @@ var WORKSPACE_WRITE_TOOLS = new Set(["edit", "write", "bash", "powershell"]);
 function isWorkspaceWriteTool(toolName) {
   return WORKSPACE_WRITE_TOOLS.has(toolName.trim().toLowerCase());
 }
-var CONTROL_PLANE_TOOLS = new Set([
-  "specialist_status",
-  "specialist_reply",
-  "specialist_result",
-  "specialist_stop_activation",
-  "specialist_lease_reconcile",
-  "specialists"
-]);
-function isControlPlaneTool(toolName) {
-  return CONTROL_PLANE_TOOLS.has(toolName.trim().toLowerCase());
-}
 function admitCoordinatorToolCall(input, probe = procLeaseProbe()) {
-  if (isControlPlaneTool(input.toolName))
-    return { allow: true };
-  if (!isWorkspaceWriteTool(input.toolName))
-    return { allow: true };
-  const status = inspect(input.workspace, probe);
-  if (status.state === "held") {
-    return {
-      allow: false,
-      reason: `workspace ${input.workspace.worktreePath} is held by ${describeHolder(status)}; ` + `${input.toolName} would mutate a workspace a Specialist is currently writing`
-    };
+  let status = inspect(input.workspace, probe);
+  if (status.state === "uncertain" && status.uncertainReason === "holder_process_gone") {
+    recoverDeadHolder(input.workspace, { actor: "coordinator-fence", probe });
+    status = inspect(input.workspace, probe);
   }
-  if (status.state === "uncertain") {
-    if (status.uncertainReason === "holder_process_gone") {
-      const healed = recoverDeadHolder(input.workspace, { actor: "coordinator-fence", probe });
-      if (healed.applied)
-        return { allow: true };
-      if (healed.reason === "raced_by_new_holder") {
-        return {
-          allow: false,
-          reason: `workspace ${input.workspace.worktreePath} was re-leased during recovery; retry`
-        };
-      }
-    }
+  if (isWorkspaceWriteTool(input.toolName) && status.state !== "free") {
     return {
-      allow: false,
-      reason: `workspace ${input.workspace.worktreePath} lease is uncertain (${status.uncertainReason}); ` + "mutation is refused until recovery resolves the previous holder"
+      allow: true,
+      warning: `workspace ${input.workspace.worktreePath} is held by ${describeHolder(status)}; ` + `${input.toolName} still applies and can interleave with the Specialist's writes`
     };
   }
   return { allow: true };
@@ -26586,7 +26558,6 @@ export {
   openSubstrateDb,
   leaseScopeFor,
   isWorkspaceWriteTool,
-  isControlPlaneTool,
   isBuildStale,
   inspect as inspectWorkspaceLease,
   hashFileBytes,

@@ -32,7 +32,7 @@ export { readVerifiedCitationWindow, verifyExactLineCitation, } from './speciali
 export type { CitationLine, VerifiedCitationWindow, VerifiedCitationWindowOptions, RawPiReadEvidence, ExactLineClaim, ExactLineCitationResult, } from './specialist/citation-evidence.js';
 export type { LaunchOutcome, LaunchOutcomeProjection, LaunchOutcomeErrorCode, LaunchOutcomeAction, LaunchOutcomeIdentity, LaunchOutcomeReadiness, LaunchOutcomeWorktree, LaunchOutcomeRuntime, LaunchOutcomeSafetyProfile, LaunchOutcomeSideEffect, LaunchOutcomeMutationRecord, } from './specialist/launch-outcome.js';
 export { admitCoordinatorToolCall } from './activation/workspace-lease.js';
-export { isControlPlaneTool, isWorkspaceWriteTool, recoverDeadHolder, releaseHolderLease, WORKSPACE_WRITE_TOOLS } from './activation/workspace-lease.js';
+export { isWorkspaceWriteTool, recoverDeadHolder, releaseHolderLease, WORKSPACE_WRITE_TOOLS } from './activation/workspace-lease.js';
 export { createSpecialistLeaseReconcileTool } from './tools/specialist/specialist_lease_reconcile.tool.js';
 export { leaseScopeFor } from './activation/workspace-reconcile.js';
 export { inspect as inspectWorkspaceLease } from './activation/workspace-lease.js';
