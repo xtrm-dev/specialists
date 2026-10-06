@@ -10,7 +10,6 @@ import {
   recoverDeadHolder,
   inspect,
   leasePath,
-  isControlPlaneTool,
   isMutatingTool,
   isWorkspaceWriteTool,
   releaseHolderLease,
@@ -19,10 +18,10 @@ import {
 } from '../../../src/activation/workspace-lease.js';
 
 /**
- * SPECIALISTS-4272: the coordinator's control plane must never be fenced by the workspace
- * write fence. The live deadlock was a Specialist holding a lease in needs_reply while the
- * coordinator was refused specialist_status, specialist_reply AND specialist_stop_activation —
- * the only tools that could have resolved it.
+ * XTRM-109: the coordinator is FULLY WAIVED from the workspace writer lease. It is never
+ * blocked — a workspace-writer tool only produces a non-blocking WARNING while a Specialist
+ * holds the worktree. A provably dead holder is still reclaimed on every coordinator-reachable
+ * path, so a stale lease does not block the next dispatch's acquire().
  */
 
 const roots: string[] = [];
@@ -51,96 +50,107 @@ function heldWorkspace(): string {
   return root;
 }
 
-/** Fails the test if inspect() is ever consulted: the exemption must be unconditional. */
-const mustNotInspect: never = undefined as never;
-
-const CONTROL = [
-  'specialist_status',
-  'specialist_reply',
-  'specialist_result',
-  'specialist_stop_activation',
-  'specialist_lease_reconcile',
+const WRITE_TOOLS = ['edit', 'write', 'bash', 'powershell'];
+const READ_AND_FLEET_TOOLS = [
+  'read', 'grep', 'ls', 'python', 'specialist_status', 'specialist_result', 'specialist_stop_activation',
 ];
 
-describe('coordinator control plane is exempt from the workspace write fence', () => {
-  it('allows every control-plane tool while a lease is HELD', () => {
+describe('coordinator is waived from the workspace lease (warn-only)', () => {
+  it('never blocks a writer while a lease is HELD, and warns with the holder', () => {
     const root = heldWorkspace();
     const identity = resolveWorkspace(root);
-    for (const tool of CONTROL) {
-      const verdict = admitCoordinatorToolCall({ toolName: tool, workspace: identity }, mustNotInspect);
-      expect(verdict.allow, `${tool} must not be fenced by a held lease`).toBe(true);
-      expect(verdict.reason).toBeUndefined();
+    for (const tool of WRITE_TOOLS) {
+      const verdict = admitCoordinatorToolCall({ toolName: tool, workspace: identity }, liveProbe);
+      expect(verdict.allow, `${tool} must never be fenced`).toBe(true);
+      expect(verdict.warning, `${tool} should warn while a holder is live`).toMatch(/held by executor act:holder/);
+    }
+    // The live holder is untouched: warning is not recovery.
+    expect(inspect(identity, liveProbe).state).toBe('held');
+  });
+
+  it('allows reads and Fleet tools with no warning', () => {
+    const root = heldWorkspace();
+    const identity = resolveWorkspace(root);
+    for (const tool of READ_AND_FLEET_TOOLS) {
+      const verdict = admitCoordinatorToolCall({ toolName: tool, workspace: identity }, liveProbe);
+      expect(verdict.allow, tool).toBe(true);
+      expect(verdict.warning, tool).toBeUndefined();
     }
   });
 
-  it('allows every control-plane tool while a lease is UNCERTAIN or FREE', () => {
+  it('allows a writer with no warning when the workspace is free', () => {
     const root = workspace();
-    const identity = resolveWorkspace(root); // no lease file at all -> free
-    for (const tool of CONTROL) {
-      expect(admitCoordinatorToolCall({ toolName: tool, workspace: identity }, mustNotInspect).allow, tool).toBe(true);
-    }
+    const identity = resolveWorkspace(root);
+    const verdict = admitCoordinatorToolCall({ toolName: 'write', workspace: identity }, liveProbe);
+    expect(verdict.allow).toBe(true);
+    expect(verdict.warning).toBeUndefined();
   });
 
-  it('recognises control-plane names case-insensitively and with surrounding space', () => {
-    expect(isControlPlaneTool('Specialist_Status')).toBe(true);
-    expect(isControlPlaneTool(' specialist_reply ')).toBe(true);
-    expect(isControlPlaneTool('bash')).toBe(false);
-    expect(isControlPlaneTool('write')).toBe(false);
-  });
-
-  it('classifies the coordinator fence by a WRITE ALLOWLIST, not a read denylist (4273)', () => {
-    // Refused: the four tools that can write a file or run a command.
+  it('classifies writers by a WRITE ALLOWLIST, not a read denylist (SPECIALISTS-4273)', () => {
     for (const tool of ['bash', 'write', 'edit', 'powershell']) expect(isWorkspaceWriteTool(tool), tool).toBe(true);
-    // Allowed: read-adjacent tools the denylist forgot, observed live.
     for (const tool of ['ls', 'find', 'python', 'structured_return', 'grep', 'read']) {
       expect(isWorkspaceWriteTool(tool), tool).toBe(false);
     }
-    // Default-allow: a tool that did not exist when this list was written is not fenced.
+    // Default-quiet: a tool that did not exist when this list was written does not warn.
     expect(isWorkspaceWriteTool('some_future_shell')).toBe(false);
-    // Parity: the fence set and the guarded-tool reconstruction are the same tools.
+    // Parity: the advisory set and the guarded-tool reconstruction are the same tools.
     expect([...WORKSPACE_WRITE_TOOLS].sort()).toEqual([...GUARDED_TOOL_NAMES].sort());
     // The Specialist-side denylist is untouched and still strict about `python`.
     expect(isMutatingTool('python')).toBe(true);
     expect(isMutatingTool('read')).toBe(false);
   });
 
-  it('lets the coordinator run a read-only python cell while a lease is held', () => {
-    const root = heldWorkspace();
-    const identity = resolveWorkspace(root);
-    const verdict = admitCoordinatorToolCall({ toolName: 'python', workspace: identity }, liveProbe);
-    expect(verdict.allow).toBe(true);
-  });
-
-  it('heals a verifiably dead holder in place, so the workspace frees itself (4274)', () => {
+  it('reclaims a stale dead-pid lease on a read-only status call (XTRM-109)', () => {
     const root = workspace();
     const identity = resolveWorkspace(root);
     acquire(
-      { workspace: identity, activationId: 'act:dead', attemptId: 'att:dead:1', specialist: 'executor' },
+      { workspace: identity, activationId: 'act:stale', attemptId: 'att:stale:1', specialist: 'executor' },
       liveProbe,
     );
     const deadProbe: LeaseProcessProbe = { canVerify: () => true, startTicks: () => undefined };
-    // Dead holder reads uncertain, exactly as it did live...
     expect(inspect(identity, deadProbe)).toMatchObject({ state: 'uncertain', uncertainReason: 'holder_process_gone' });
-    // ...and the fence heals it rather than escalating to an operator command.
-    const verdict = admitCoordinatorToolCall({ toolName: 'write', workspace: identity }, deadProbe);
+
+    // A read is not blocked, and it is coordinator-reachable recovery: the stale lease is
+    // reclaimed, so a coordinator that only polls status never needs an out-of-band rm.
+    const verdict = admitCoordinatorToolCall({ toolName: 'specialist_status', workspace: identity }, deadProbe);
     expect(verdict.allow).toBe(true);
     expect(inspect(identity, deadProbe).state).toBe('free');
+    const log = readFileSync(join(dirname(leasePath(identity)), 'recoveries.jsonl'), 'utf-8');
+    expect(JSON.parse(log.trim())).toMatchObject({
+      holderActivationId: 'act:stale', observedReason: 'holder_process_gone', actor: 'coordinator-fence',
+    });
   });
 
-  it('still blocks when the holder might be alive', () => {
+  it('reclaims a stale dead-pid lease on a writer call, without warning about a dead holder', () => {
     const root = workspace();
     const identity = resolveWorkspace(root);
     acquire(
-      { workspace: identity, activationId: 'act:blind', attemptId: 'att:blind:1', specialist: 'executor' },
+      { workspace: identity, activationId: 'act:stale-write', attemptId: 'att:stale-write:1', specialist: 'executor' },
       liveProbe,
     );
-    for (const probe of [
-      { canVerify: () => false, startTicks: () => undefined }, // liveness_unverifiable
-      { canVerify: () => true, startTicks: () => 999 }, // holder_start_mismatch (pid reused)
-    ] as LeaseProcessProbe[]) {
-      const verdict = admitCoordinatorToolCall({ toolName: 'write', workspace: identity }, probe);
-      expect(verdict.allow).toBe(false);
-      expect(verdict.reason).toContain('uncertain');
+    const deadProbe: LeaseProcessProbe = { canVerify: () => true, startTicks: () => undefined };
+    const verdict = admitCoordinatorToolCall({ toolName: 'write', workspace: identity }, deadProbe);
+    expect(verdict.allow).toBe(true);
+    expect(verdict.warning).toBeUndefined();
+    expect(inspect(identity, deadProbe).state).toBe('free');
+  });
+
+  it('never reclaims a lease whose holder might still be alive (PID-reuse guard stays)', () => {
+    const root = workspace();
+    const identity = resolveWorkspace(root);
+    acquire(
+      { workspace: identity, activationId: 'act:maybe-alive', attemptId: 'att:maybe-alive:1', specialist: 'executor' },
+      liveProbe,
+    );
+    const mismatch: LeaseProcessProbe = { canVerify: () => true, startTicks: () => 999 };
+    const blind: LeaseProcessProbe = { canVerify: () => false, startTicks: () => undefined };
+    for (const probe of [mismatch, blind]) {
+      // A writer still runs — waived, warned, never blocked...
+      const write = admitCoordinatorToolCall({ toolName: 'write', workspace: identity }, probe);
+      expect(write.allow).toBe(true);
+      expect(write.warning).toMatch(/held by executor act:maybe-alive/);
+      // ...and the lease is NOT auto-freed.
+      expect(inspect(identity, probe).state).toBe('uncertain');
     }
   });
 
@@ -179,21 +189,10 @@ describe('coordinator control plane is exempt from the workspace write fence', (
     expect(releaseHolderLease(identity, { activationId: 'act:someone_else', actor: 'coordinator-stop' }))
       .toMatchObject({ applied: false, reason: 'activation_mismatch' });
     expect(inspect(identity, liveProbe).state).toBe('held');
-    // The real owner releases it, and the workspace is immediately writable.
+    // The real owner releases it, and the workspace is immediately free.
     expect(releaseHolderLease(identity, { activationId: 'act:stopping', actor: 'coordinator-stop' }))
       .toMatchObject({ applied: true, observedReason: 'released_by_holder', actor: 'coordinator-stop' });
     expect(inspect(identity, liveProbe).state).toBe('free');
     expect(admitCoordinatorToolCall({ toolName: 'write', workspace: identity }, liveProbe).allow).toBe(true);
-  });
-
-  it('still fences a genuine writer while a lease is held', () => {
-    const root = heldWorkspace();
-    const identity = resolveWorkspace(root);
-    const verdict = admitCoordinatorToolCall(
-      { toolName: 'write', workspace: identity },
-      liveProbe,
-    );
-    expect(verdict.allow).toBe(false);
-    expect(verdict.reason).toContain('is held by');
   });
 });

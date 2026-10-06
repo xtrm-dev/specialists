@@ -173,14 +173,13 @@ export type {
   LaunchOutcomeMutationRecord,
 } from './specialist/launch-outcome.js';
 
-// Coordinator-side workspace fence (unitAI-rrdnt.61). `admitCoordinatorToolCall` is the
-// coordinator's admission rule and is deliberately NOT `admitToolCall` — see its docstring for
-// why the default on an unleased workspace differs. `leaseScopeFor` turns a cwd into the
-// workspace identity both rules key on.
+// Coordinator-side workspace advisory (unitAI-rrdnt.61). The coordinator is fully waived from
+// the lease and is never blocked; `admitCoordinatorToolCall` only returns a non-blocking
+// warning. `leaseScopeFor` turns a cwd into the workspace identity it keys on.
 export { admitCoordinatorToolCall } from './activation/workspace-lease.js';
 // SPECIALISTS-4275: the coordinator needs its lease affordances in-session, and the Pi
 // extension wraps these rather than reimplementing the recovery logic.
-export { isControlPlaneTool, isWorkspaceWriteTool, recoverDeadHolder, releaseHolderLease, WORKSPACE_WRITE_TOOLS } from './activation/workspace-lease.js';
+export { isWorkspaceWriteTool, recoverDeadHolder, releaseHolderLease, WORKSPACE_WRITE_TOOLS } from './activation/workspace-lease.js';
 export { createSpecialistLeaseReconcileTool } from './tools/specialist/specialist_lease_reconcile.tool.js';
 export { leaseScopeFor } from './activation/workspace-reconcile.js';
 // Read-only lease inspection for the coordinator PreToolUse warning hook

@@ -66,36 +66,41 @@ import {
 
 
 /**
- * Fence the COORDINATOR out of a workspace a Specialist is writing (PRD acceptance U,
+ * Advise the COORDINATOR when a Specialist is writing the same workspace (PRD acceptance U,
  * unitAI-rrdnt.61).
  *
- * `pi.on('tool_call')` fires before a tool executes and can block — the per-call hook
- * workspace-lease.ts §5.9 requires, and the one `setActiveToolsByName` cannot provide.
+ * `pi.on('tool_call')` fires before a tool executes. This handler NEVER blocks: the coordinator
+ * is fully waived from the workspace lease (operator decision 2026-10-06), so a coordinator edit
+ * alongside a live Specialist is accepted behaviour — the same position the Claude `PreToolUse`
+ * lease-warn hook already takes. When a writer tool touches a leased worktree the handler
+ * surfaces a non-blocking notice and lets the call through.
  *
- * FAILS OPEN, on purpose and without exception. This handler runs on the operator's own
- * session: a bug here that threw or refused wrongly would stop them editing their own
- * repository, and the failure would surface as an unexplained refusal with no obvious cause.
- * A fence that occasionally misses a block is recoverable; one that wrongly blocks the
- * operator is not.
+ * FAILS OPEN, on purpose and without exception. This runs on the operator's own session: a bug
+ * here must never be the reason they cannot edit their own repository.
  *
  * It uses `admitCoordinatorToolCall`, NOT the Specialist-side `admitToolCall`. The latter
  * refuses an UNLEASED workspace, because a Specialist must hold a lease to mutate — applying
  * that to the coordinator would refuse every write whenever no Specialist was running.
  *
- * The boundary this does NOT cover, stated rather than implied: `pi.exec` and direct
- * `node:fs` inside extension code (H3/H4) are not interposable on Pi 0.85.1, so this fences
- * every mutation the coordinator's MODEL can initiate and no more.
+ * The boundary this does NOT cover: `pi.exec` and direct `node:fs` inside extension code
+ * (H3/H4) are not interposable, so this advises on the coordinator's MODEL-initiated calls only.
  */
 export function installCoordinatorFence(pi, deps = {}) {
   const scopeFor = deps.leaseScopeFor ?? leaseScopeFor;
   const admit = deps.admitCoordinatorToolCall ?? admitCoordinatorToolCall;
   const cwd = deps.cwd ?? process.cwd();
 
-  pi.on('tool_call', (event) => {
+  pi.on('tool_call', (event, ctx) => {
     try {
       const verdict = admit({ toolName: event.toolName, workspace: scopeFor(cwd) });
-      if (verdict.allow) return undefined;
-      return { block: true, reason: `native-specialists: ${verdict.reason}` };
+      if (verdict.warning) {
+        try {
+          ctx?.ui?.notify?.(`native-specialists: ${verdict.warning}`, 'warning');
+        } catch {
+          // A warning must never fail the call it describes.
+        }
+      }
+      return undefined;
     } catch {
       // Never let this handler be the reason an operator cannot write.
       return undefined;
@@ -1335,8 +1340,8 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
   // keep the refs above both lanes.
   const fleetDetailRef = { current: null };
   const refreshFleetDetailRef = { current: async () => {} };
-  // PRD acceptance U: the coordinator is fenced out of a workspace a Specialist holds.
-  // Fails open — see installCoordinatorFence.
+  // PRD acceptance U: advise the coordinator when a Specialist holds the workspace it is
+  // writing. Never blocks (the coordinator is fully waived); see installCoordinatorFence.
   installCoordinatorFence(pi, options);
 
   // Wake messages render as this module's lines and nothing else: pi's default custom-message
