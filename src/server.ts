@@ -17,7 +17,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { toMcpInputSchema } from './mcp/tool-schema.js';
 import { MCP_CONFIG } from './constants.js';
 import { createForensicEvent, deploymentEnvironment } from './specialist/forensic-events.js';
 import { createObservabilitySqliteClient, type ObservabilitySqliteClient } from './specialist/observability-sqlite.js';
@@ -204,7 +204,7 @@ export class SpecialistsServer {
       const tools = this.tools.map((tool) => ({
         name: tool.name,
         description: tool.description,
-        inputSchema: zodToJsonSchema(schemaMap[tool.name] ?? z.object({})),
+        inputSchema: toMcpInputSchema(schemaMap[tool.name] ?? z.object({})),
       }));
       logger.debug(`Returning ${tools.length} tools`);
       return { tools };
