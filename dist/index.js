@@ -4435,7 +4435,8 @@ var init_schema = __esm(() => {
     run: stringType(),
     phase: enumType(["pre", "post"]),
     inject_output: booleanType().default(false),
-    required: booleanType().optional()
+    required: booleanType().optional(),
+    label: stringType().max(128).optional()
   }).passthrough();
   SkillsSchema = objectType({
     paths: arrayType(stringType()).optional(),
@@ -26397,6 +26398,7 @@ __export(exports_runner, {
   formatScriptOutput: () => formatScriptOutput,
   resolveOutputContractSchema: () => resolveOutputContractSchema,
   runScript: () => runScript,
+  scriptDisplayName: () => scriptDisplayName,
   validateBeforeRun: () => validateBeforeRun
 });
 import { createHash as createHash4 } from "crypto";
@@ -26408,18 +26410,34 @@ function sanitizeScriptName(name) {
   const cleaned = name.replace(/[\u0000-\u001f\u007f-\u009f"\\<>]/g, "").slice(0, 128);
   return /^[A-Za-z0-9:][A-Za-z0-9._:-]{0,127}$/.test(cleaned) ? cleaned : "unknown";
 }
+function sanitizeDisplayName(name) {
+  const cleaned = name.replace(/[\u0000-\u001f\u007f-\u009f]/g, "").trim().slice(0, 128);
+  return cleaned || "unknown";
+}
+function scriptDisplayName(script) {
+  if (typeof script !== "object" || script === null)
+    return;
+  const record = script;
+  for (const key of ["label", "displayName"]) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim())
+      return sanitizeDisplayName(value);
+  }
+  return;
+}
 function capStream(value, limitBytes = SCRIPT_OUTPUT_LIMIT_BYTES) {
   const buf = Buffer.from(value, "utf8");
   if (buf.length <= limitBytes)
     return value;
   return buf.subarray(0, limitBytes).toString("utf8");
 }
-function runScript(command, cwd) {
+function runScript(command, cwd, displayName) {
   const run = (command ?? "").trim();
   if (!run) {
     return { name: "unknown", output: "Missing script command (expected `run` or legacy `path`).", stderr: "", exitCode: 1 };
   }
   const scriptName = sanitizeScriptName(basename5(run.split(" ")[0]));
+  const label = typeof displayName === "string" && displayName.trim() ? sanitizeDisplayName(displayName) : undefined;
   const result = spawnSync12(run, {
     encoding: "utf8",
     timeout: 30000,
@@ -26431,7 +26449,7 @@ function runScript(command, cwd) {
   const output = capStream(result.stdout ?? "");
   const stderr = capStream(result.stderr ?? "");
   if (exitCode === 0 && !result.error) {
-    return { name: scriptName, output, stderr, exitCode: 0 };
+    return { name: scriptName, ...label ? { displayName: label } : {}, output, stderr, exitCode: 0 };
   }
   const rawErrorCode = result.error?.code;
   const spawnError = typeof rawErrorCode === "string" && /^[A-Z0-9_]{1,32}$/.test(rawErrorCode) ? rawErrorCode : result.error ? "SPAWN_ERROR" : undefined;
@@ -26439,6 +26457,7 @@ function runScript(command, cwd) {
 `);
   return {
     name: scriptName,
+    ...label ? { displayName: label } : {},
     output,
     stderr: notes,
     exitCode,
@@ -26453,8 +26472,10 @@ function findRequiredPreScriptFailure(scripts, results) {
       continue;
     const result = results[i];
     if (result && result.exitCode !== 0) {
+      const displayName = scriptDisplayName(script) ?? result.displayName;
       return {
         name: result.name,
+        ...displayName ? { displayName } : {},
         exitCode: result.exitCode,
         stdout: result.output,
         stderr: result.stderr,
@@ -26475,10 +26496,24 @@ function sanitizeDiagnostic(text, limitBytes) {
   return `${slice}
 ... (truncated)`;
 }
+function extractPreScriptErrorLine(stdout, stderr) {
+  const match = `${stdout}
+${stderr}`.match(/PRE_SCRIPT_ERROR:[^\r\n]*/);
+  if (!match)
+    return null;
+  const line = match[0].replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, "").trim();
+  if (!line)
+    return null;
+  return line.length > 500 ? `${line.slice(0, 500)}
+... (truncated)` : line;
+}
 function formatRequiredPreScriptFailure(failure) {
   const context = failure.signal ? ` (signal ${failure.signal})` : failure.spawnError ? ` (${failure.spawnError})` : "";
+  const display = failure.displayName ?? failure.name;
+  const cause = extractPreScriptErrorLine(failure.stdout, failure.stderr);
   return [
-    `Required pre-script '${failure.name}' failed with exit code ${failure.exitCode}${context}.`,
+    `Required pre-script '${display}' failed with exit code ${failure.exitCode}${context}.`,
+    ...cause ? [`Cause: ${cause}`] : [],
     "The run was aborted before the model session started; no model fallback or retry is performed.",
     `--- stdout (bounded to ${PRE_SCRIPT_DIAGNOSTIC_LIMIT_BYTES} bytes) ---`,
     sanitizeDiagnostic(failure.stdout, PRE_SCRIPT_DIAGNOSTIC_LIMIT_BYTES),
@@ -27022,7 +27057,7 @@ ${buildBeadBoundaryInstruction(runCwd, options.worktreeBoundary)}`.trim();
     validateBeforeRun(spec, permissionLevel, resolvedToolContract);
     const runCwd = resolve14(options.workingDirectory ?? process.cwd());
     const preScripts = spec.specialist.skills?.scripts?.filter((s) => s.phase === "pre") ?? [];
-    const preScriptResults = preScripts.map((s) => runScript(s.run ?? s.path, runCwd));
+    const preScriptResults = preScripts.map((s) => runScript(s.run ?? s.path, runCwd, scriptDisplayName(s)));
     const requiredPreFailure = findRequiredPreScriptFailure(preScripts, preScriptResults);
     if (requiredPreFailure) {
       throw new RequiredPreScriptError(formatRequiredPreScriptFailure(requiredPreFailure));
@@ -28153,7 +28188,7 @@ async function runScriptSpecialist(input, options) {
     const executableScripts = trust.allowLocalScripts ? localScripts : [];
     const preScripts = executableScripts.filter((script) => script.phase === "pre");
     const postScripts = executableScripts.filter((script) => script.phase === "post");
-    const preScriptResults = preScripts.map((script) => runScript(getLocalScriptCommand(script), baseDir));
+    const preScriptResults = preScripts.map((script) => runScript(getLocalScriptCommand(script), baseDir, scriptDisplayName(script)));
     const requiredPreFailure = findRequiredPreScriptFailure(preScripts, preScriptResults);
     if (requiredPreFailure) {
       const modelCandidates = collectModelCandidates(input, spec, options);
@@ -92264,7 +92299,7 @@ class NativeActivationHost {
       return reject("empty_tool_contract", { tier });
     }
     const preScripts = specialist.specialist.skills?.scripts?.filter((s) => s.phase === "pre") ?? [];
-    const preScriptResults = preScripts.map((script) => runScript(script.run ?? script.path, this.cwd));
+    const preScriptResults = preScripts.map((script) => runScript(script.run ?? script.path, this.cwd, scriptDisplayName(script)));
     const requiredPreFailure = findRequiredPreScriptFailure(preScripts, preScriptResults);
     if (requiredPreFailure) {
       return reject("required_pre_script_failed", {

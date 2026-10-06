@@ -93,6 +93,8 @@ interface RunnerDeps {
 }
 interface ScriptResult {
     name: string;
+    /** Human-readable label from the specialist definition (`skills.scripts[].label`), if present. */
+    displayName?: string;
     output: string;
     stderr: string;
     exitCode: number;
@@ -103,9 +105,18 @@ interface ScriptResult {
  *  script-controlled command string cannot break the `<script name="...">`
  *  wrapper or terminal rendering (unitAI-x64ys). */
 export declare function sanitizeScriptName(name: string): string;
-export declare function runScript(command: string | undefined, cwd: string): ScriptResult;
+/** Human-readable pre-script label for rejection messages. Unlike {@link sanitizeScriptName}
+ *  (which guards the `<script name="...">` wrapper), spaces, `+`, `/` and `.` are kept so a
+ *  definition can name the operation (e.g. `service-knowledge scope+drift`) instead of the
+ *  shell first-token (`:`). Control characters are stripped and output is bounded. */
+export declare function sanitizeDisplayName(name: string): string;
+/** Read the human-readable label off a script entry, if the definition provides one. */
+export declare function scriptDisplayName(script: unknown): string | undefined;
+export declare function runScript(command: string | undefined, cwd: string, displayName?: string): ScriptResult;
 export interface RequiredPreScriptFailure {
     name: string;
+    /** Human-readable label from the specialist definition, when the entry provides one. */
+    displayName?: string;
     exitCode: number;
     stdout: string;
     stderr: string;
@@ -118,11 +129,20 @@ export interface RequiredPreScriptFailure {
 export declare function findRequiredPreScriptFailure(scripts: ReadonlyArray<{
     phase?: string;
     required?: boolean;
+    label?: unknown;
+    displayName?: unknown;
 }>, results: ReadonlyArray<ScriptResult>): RequiredPreScriptFailure | null;
 export declare class RequiredPreScriptError extends Error {
     readonly code = "pre_script_failed";
     constructor(message: string);
 }
+/** First `PRE_SCRIPT_ERROR:` line from captured output, if the failing script emitted one.
+ *
+ *  Pre-scripts that follow the `PRE_SCRIPT_DATA_BEGIN ... PRE_SCRIPT_ERROR ... PRE_SCRIPT_DATA_END`
+ *  envelope (e.g. service-knowledge scope+drift) print the machine-readable error AFTER the
+ *  bulk payload, so a head-truncated stdout diagnostic hides it. Surfacing the line verbatim
+ *  keeps the rejection actionable no matter how large the preceding payload was. */
+export declare function extractPreScriptErrorLine(stdout: string, stderr: string): string | null;
 export declare function formatRequiredPreScriptFailure(failure: RequiredPreScriptFailure): string;
 export declare function formatScriptOutput(results: ScriptResult[]): string;
 export declare function validateBeforeRun(spec: {
