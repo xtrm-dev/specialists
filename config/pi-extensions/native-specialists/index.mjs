@@ -144,53 +144,25 @@ const DIM = (text) => `\x1b[2m${text}\x1b[22m`;
 const BOLD = (text) => `\x1b[1m${text}\x1b[22m`;
 /** Plain white big dot — matches the xtrm-ui tool rows and substrate-suggest cards. */
 const DOT = '●';
-// The Jev/suggestion design system, shared with core's substrate-suggest cards: the gold
-// band starts at the header TEXT (the dot keeps its own unbanded row) with a dark bold
-// foreground, and everything below is italic on the normal background. One look for every
-// card the operator sees, whichever extension drew it.
-const GOLD_ON = '\x1b[48;2;201;162;39m\x1b[38;2;24;20;16m';
-const GOLD_OFF = '\x1b[49m\x1b[39m';
-/** Royal blue lead band: settled successfully. White bold foreground. */
-const ROYAL_ON = '\x1b[48;2;65;105;225m\x1b[38;2;255;255;255m';
-/** Red-orange lead band: settled with failure. White bold foreground. */
-const EMBER_ON = '\x1b[48;2;200;58;24m\x1b[38;2;255;255;255m';
-/** Gray second band (state + work id) shared by every card. Black foreground. */
-const SLATE_ON = '\x1b[48;2;128;128;128m\x1b[38;2;0;0;0m';
-const BAND_OFF = '\x1b[49m\x1b[39m';
-/**
- * Full-height divider inside bands (U+2502 spans the whole cell, unlike `|`).
- * Inherits the band foreground; never leaves the header line.
- */
-const DIV = ' \u2502 ';
-/**
- * Band a header's text; the caller prepends the dot itself.
- *
- * Bold spans the WHOLE band: `\x1b[22m` clears bold AND dim for the rest of the line, so
- * every subordinate segment closes its dim with `\x1b[1m` (dim off, bold back on) rather
- * than `\x1b[22m`. Closing the band with one `\x1b[22m` at the end is what keeps that from
- * cascading - appending a fresh `\x1b[1m` per segment instead would grow without bound.
- */
-/** Dim inside the band: closes dim with `1m`, which restores bold rather than clearing it. */
-const sub = (text) => `\x1b[2m${text}\x1b[1m`;
-/**
- * Bold + dim on the normal background — the run facts after the gold band
- * (`43s • 8t • 205k`). The band owns the dark foreground; out here the facts
- * keep full bold weight at dim intensity instead.
- */
-const BOLD_DIM = (text) => `\x1b[1m\x1b[2m${text}\x1b[22m`;
-const FACT_SEP_PLAIN = ` ${BOLD_DIM('\u2022')} `;
-const FACT_SEP_DOT = ` ${BOLD_DIM('\u00b7')} `;
-/**
- * Lead band by outcome: royal blue for done, red-orange for failed and
- * escalated (both demand immediate attention), gold for asked questions.
- * Only ever wraps `specialist:activation`.
- */
-const leadBand = (kind, text) => {
-  const on = kind === 'done' ? ROYAL_ON : kind === 'failed' || kind === 'escalated' ? EMBER_ON : GOLD_ON;
-  return `${on}\x1b[1m${text}\x1b[22m${BAND_OFF}`;
+// Text-only headers: no background fills anywhere. The header is one bold row —
+// white name, tinted state, dim bead — and run metadata moves to a dim footer.
+// Tints are lightened for AA text contrast on a dark terminal (all >= 7:1).
+const FG_OFF = '\x1b[39m';
+const NAME_TEXT = (text) => `\x1b[38;2;255;255;255m${text}${FG_OFF}`;
+const STATE_TINT = {
+  done: '\x1b[38;2;120;160;255m',
+  asked: '\x1b[38;2;232;190;70m',
+  failed: '\x1b[38;2;255;110;70m',
+  escalated: '\x1b[38;2;255;110;70m',
 };
-/** Slate band: state + work id, identical on every card. */
-const slateBand = (text) => `${SLATE_ON}\x1b[1m${text}\x1b[22m${BAND_OFF}`;
+/**
+ * One minimal header for every wake card: dot, white bold name, tinted state,
+ * dim bead — separated by double spaces, no dividers, no backgrounds.
+ * `\x1b[39m` resets foreground only, so the row-wide bold survives to the
+ * single closing `\x1b[22m`; only the bead opens dim, and it closes the row.
+ */
+const wakeHeader = (name, state, bead) =>
+  `${DOT} \x1b[1m${NAME_TEXT(name)}  ${STATE_TINT[state]}${state}${FG_OFF}  \x1b[2m${bead}\x1b[22m`;
 // Italic is set with `3` and cleared with `23`; `22m` after it clears the dim. Pi theme
 // helpers have no italic token, so the raw SGR is the only way to mark the purpose excerpt.
 const ITALIC_DIM = (text) => `\x1b[2m\x1b[3m${text}\x1b[23m\x1b[22m`;
@@ -573,12 +545,13 @@ export function createAskObserverSink(base, onAsk, onTerminal) {
  * context, whatever the Specialist wrote and the one instruction the coordinator must act
  * on — with the rail running down every line, no background, and no blank lines:
  *
- *   │ ! researcher:act:b38da383-b44 · asked │ XTRM-241
+ *   │ ! researcher:act:b38da383-b44  asked  XTRM-241
  *   │ Does the bracket look right?
  *   │ Call specialist_status to obtain the pending message_id, then reply with specialist_reply. · activation act:b38da383-b44
  *
- *   │ ✓ executor · XTRM-241 · 42s • 3t • 43k
+ *   │ ✓ executor:act:b38da383-b44  done  XTRM-241
  *   │ Call specialist_result to read the complete result. · activation act:b38da383-b44
+ *   │ 42s • 3t • 43k
  *
  * No `[customType]` label and no background: pi's DEFAULT custom-message component paints a
  * `customMessageBg` box and a bold `[specialist_ask]` header, which is where the card look
@@ -609,18 +582,18 @@ const FAIL_INSTRUCTION =
 /** Run cost for a settled event: elapsed • turns • tokens (each part omitted when absent). */
 function costFacts(view) {
   return [
-    view ? BOLD_DIM(formatElapsedShort(view.elapsed_s)) : null,
-    view?.turn_count != null ? BOLD_DIM(`${view.turn_count}t`) : null,
-    ...(view ? [formatSpendShort(view.token_usage)].filter(Boolean).map(BOLD_DIM) : []),
-  ].filter(Boolean).join(FACT_SEP_PLAIN);
+    view ? formatElapsedShort(view.elapsed_s) : null,
+    view?.turn_count != null ? `${view.turn_count}t` : null,
+    ...(view ? [formatSpendShort(view.token_usage)].filter(Boolean) : []),
+  ].filter(Boolean).join(' • ');
 }
 
 /** Attribution for a failed event: the model that produced the failure, and its effort. */
 function modelFacts(view) {
   return [
-    view?.resolved_model ? BOLD_DIM(view.resolved_model) : null,
-    view?.thinking_level ? ACCENT_BOLD(view.thinking_level) : null,
-  ].filter(Boolean).join(FACT_SEP_DOT);
+    view?.resolved_model ?? null,
+    view?.thinking_level ? ACCENT(view.thinking_level) : null,
+  ].filter(Boolean).join(' · ');
 }
 
 /** Two-space indent for every line below a wake header: empty space under the dot. */
@@ -644,11 +617,9 @@ export function formatAskWake(ask, view) {
   const beadId = ask.beadId ?? view?.bead_id ?? '—';
   // The state word names what happened: `asked` (blocked on your reply) vs
   // `escalated` (raised for intervention) — never the overloaded `waiting`,
-  // which core also uses for idle keep-alive jobs. Same split colors the lead.
-  const header = `${DOT} ${leadBand(escalated ? 'escalated' : 'asked', `${ask.specialist}:${ask.activationId}`)}${slateBand(` ${[
-    sub(escalated ? 'escalated' : 'asked'),
-    sub(beadId),
-  ].filter(Boolean).join(DIV)}`)}`;
+  // which core also uses for idle keep-alive jobs. Asks carry no run metadata,
+  // so there is no footer: header, question, instruction.
+  const header = wakeHeader(`${ask.specialist}:${ask.activationId}`, escalated ? 'escalated' : 'asked', beadId);
   return indentBody([
     withRail(header),
     // Blank body lines are dropped: the rail used to render paragraph breaks
@@ -672,15 +643,14 @@ export function formatSettlementWake(done, view, opts = {}) {
   const failed = done.outcome === 'failed';
   const beadId = done.beadId ?? view?.bead_id ?? '—';
   const facts = failed ? modelFacts(view) : costFacts(view);
-  const header = `${DOT} ${leadBand(failed ? 'failed' : 'done', `${done.specialist}:${done.activationId}`)}${slateBand(` ${[
-    sub(failed ? 'failed' : 'done'),
-    sub(beadId),
-  ].filter(Boolean).join(DIV)}`)}${facts ? ` ${BOLD_DIM('·')} ${facts}` : ''}`;
+  const header = wakeHeader(`${done.specialist}:${done.activationId}`, failed ? 'failed' : 'done', beadId);
   return indentBody([
     withRail(header),
     ...resultLines(opts.resultText ?? done.output, opts),
     ...(failed && done.error ? [withRail(done.error)] : []),
     instructionLine(failed ? FAIL_INSTRUCTION : RESULT_INSTRUCTION, done.activationId),
+    // Run metadata lives here now, dimmed, CC-statusline style — never in the header.
+    ...(facts ? [withRail(DIM(facts))] : []),
   ]).join('\n');
 }
 
