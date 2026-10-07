@@ -181,11 +181,12 @@ const BOLD_DIM = (text) => `\x1b[1m\x1b[2m${text}\x1b[22m`;
 const FACT_SEP_PLAIN = ` ${BOLD_DIM('\u2022')} `;
 const FACT_SEP_DOT = ` ${BOLD_DIM('\u00b7')} `;
 /**
- * Lead band by outcome: royal blue for done, red-orange for failed, gold for
- * asks (waiting / escalated). Only ever wraps `specialist:activation`.
+ * Lead band by outcome: royal blue for done, red-orange for failed and
+ * escalated (both demand immediate attention), gold for asked questions.
+ * Only ever wraps `specialist:activation`.
  */
 const leadBand = (kind, text) => {
-  const on = kind === 'done' ? ROYAL_ON : kind === 'failed' ? EMBER_ON : GOLD_ON;
+  const on = kind === 'done' ? ROYAL_ON : kind === 'failed' || kind === 'escalated' ? EMBER_ON : GOLD_ON;
   return `${on}\x1b[1m${text}\x1b[22m${BAND_OFF}`;
 };
 /** Slate band: state + work id, identical on every card. */
@@ -346,7 +347,7 @@ function stateMarker({ view, blocked, active, nowMs }) {
  * that moment — how long it has been stuck is.
  */
 function rowMetrics({ view, ask, nowMs }) {
-  if (ask) return `waiting ${formatElapsedShort(waitingSeconds(ask, nowMs))}`;
+  if (ask) return `asked ${formatElapsedShort(waitingSeconds(ask, nowMs))}`;
   const idle = idleSeconds(view, nowMs);
   if (isActiveState(view.state) && idle != null && idle > IDLE_AFTER_S) {
     return `idle ${formatElapsedShort(idle)}`;
@@ -572,7 +573,7 @@ export function createAskObserverSink(base, onAsk, onTerminal) {
  * context, whatever the Specialist wrote and the one instruction the coordinator must act
  * on — with the rail running down every line, no background, and no blank lines:
  *
- *   │ ! researcher · waiting · XTRM-241 · inspect native wake transport
+ *   │ ! researcher:act:b38da383-b44 · asked │ XTRM-241
  *   │ Does the bracket look right?
  *   │ Call specialist_status to obtain the pending message_id, then reply with specialist_reply. · activation act:b38da383-b44
  *
@@ -640,23 +641,20 @@ function instructionLine(instruction, activationId) {
  */
 export function formatAskWake(ask, view) {
   const escalated = ask.kind === 'escalation';
-  const purpose = formatPurposeShort(view?.purpose);
   const beadId = ask.beadId ?? view?.bead_id ?? '—';
-  // `!` covers both blocked states, so the one word the glyph cannot carry stays.
-  // Gold lead band (ask family) names specialist:activation; the slate band names
-  // state + work; the purpose excerpt follows on the normal background, and every
-  // line below indents under the dot.
-  const header = `${DOT} ${leadBand(escalated ? 'escalated' : 'waiting', `${ask.specialist}:${ask.activationId}`)} ${slateBand([
-    sub(escalated ? 'escalated' : 'waiting'),
+  // The state word names what happened: `asked` (blocked on your reply) vs
+  // `escalated` (raised for intervention) — never the overloaded `waiting`,
+  // which core also uses for idle keep-alive jobs. Same split colors the lead.
+  const header = `${DOT} ${leadBand(escalated ? 'escalated' : 'asked', `${ask.specialist}:${ask.activationId}`)}${slateBand(` ${[
+    sub(escalated ? 'escalated' : 'asked'),
     sub(beadId),
-  ].filter(Boolean).join(DIV))}${purpose ? ` ${BOLD_DIM('·')} ${ITALIC_DIM(purpose)}` : ''}`;
+  ].filter(Boolean).join(DIV)}`)}`;
   return indentBody([
     withRail(header),
     // Blank body lines are dropped: the rail used to render paragraph breaks
     // as a bare gutter; unrailed, they would become blank lines, which event
     // cards never carry.
-    // Design system: the body below a header is italic, on the normal background.
-    ...String(ask.body || '(no body)').split('\n').filter((line) => line.trim() !== '').map((line) => ITALIC(withRail(line))),
+    ...String(ask.body || '(no body)').split('\n').filter((line) => line.trim() !== '').map((line) => withRail(line)),
     instructionLine(escalated ? ESCALATION_INSTRUCTION : ASK_INSTRUCTION, ask.activationId),
   ]).join('\n');
 }
@@ -674,10 +672,10 @@ export function formatSettlementWake(done, view, opts = {}) {
   const failed = done.outcome === 'failed';
   const beadId = done.beadId ?? view?.bead_id ?? '—';
   const facts = failed ? modelFacts(view) : costFacts(view);
-  const header = `${DOT} ${leadBand(failed ? 'failed' : 'done', `${done.specialist}:${done.activationId}`)} ${slateBand([
+  const header = `${DOT} ${leadBand(failed ? 'failed' : 'done', `${done.specialist}:${done.activationId}`)}${slateBand(` ${[
     sub(failed ? 'failed' : 'done'),
     sub(beadId),
-  ].filter(Boolean).join(DIV))}${facts ? ` ${BOLD_DIM('·')} ${facts}` : ''}`;
+  ].filter(Boolean).join(DIV)}`)}${facts ? ` ${BOLD_DIM('·')} ${facts}` : ''}`;
   return indentBody([
     withRail(header),
     ...resultLines(opts.resultText ?? done.output, opts),

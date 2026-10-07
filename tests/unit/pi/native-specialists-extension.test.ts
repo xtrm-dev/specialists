@@ -1500,7 +1500,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     expect(rows[1]).toContain('map the wake transport');
     // A blocked entry trades its metrics for the wait, and still names model · thinking.
     expect(plain(rows[2])).toContain('m · high');
-    expect(plain(rows[2])).toContain('waiting');
+    expect(plain(rows[2])).toContain('asked');
     expect(plain(rows[2])).not.toContain('4t');
     expect(rows.join('\n')).not.toContain('act:aaaa');
     expect(rows.join('\n')).not.toContain('msg:1');
@@ -1691,7 +1691,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
       { activation_id: 'act:x', asked_at: SPIN_CLOCK - 19_000 },
     ], SPIN_CLOCK);
     expect(plain(blocked[0])).toBe('    ! explorer:x  bd-1');
-    expect(plain(blocked[1])).toBe('       m  • waiting 19s');
+    expect(plain(blocked[1])).toBe('       m  • asked 19s');
   });
 
   it('blocked entries use ! and sort before the rest (unitAI-nmxhg)', async () => {
@@ -1719,7 +1719,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     const lines = mod.renderSectionLines(fleet, { nowMs: now }).map(plain);
     expect(lines[0]).toBe('╰─ SPECIALISTS  2 running • ! 1 blocked');
     expect(lines[1]).toBe('    ! reviewer:ask  ISSUE-92');
-    expect(lines[2]).toBe('       gpt-5.6-sol · high  • waiting 31s');
+    expect(lines[2]).toBe('       gpt-5.6-sol · high  • asked 31s');
     expect(lines[3]).toMatch(/^ {4}[◐◓◑◒] researcher:idle {2}ISSUE-92$/);
     expect(lines[4]).toBe('       gpt-5.6-sol · high  • 47s • 2t • 2.1k');
     // Rows carry only the short dispatch token (<specialist>:<id>); the full
@@ -2112,7 +2112,7 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
     const ROYAL = '\u001b[48;2;65;105;225m';
     const EMBER = '\x1b[48;2;200;58;24m';
     const SLATE = '\u001b[48;2;128;128;128m';
-    const leadOf = [GOLD, GOLD, ROYAL, EMBER];
+    const leadOf = [GOLD, EMBER, ROYAL, EMBER];
     cards.forEach((card, index) => {
       const [head, ...body] = card.split('\n');
       // Lead band colour follows the outcome; the slate band is identical everywhere.
@@ -2136,12 +2136,12 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
     });
 
     expect(plain(cards[0]).split('\n')).toEqual([
-      '● researcher:act:aaaa waiting │ XTRM-241 · inspect native wake transport',
+      '● researcher:act:aaaa asked │ XTRM-241',
       '  Does the bracket look right?',
       '  Call specialist_status to obtain the pending message_id, then reply with specialist_reply. · activation act:aaaa',
     ]);
     expect(plain(cards[1]).split('\n')).toEqual([
-      '● reviewer:act:aaaa escalated │ XTRM-241 · verify MCP Channel semantics',
+      '● reviewer:act:aaaa escalated │ XTRM-241',
       '  The current implementation cannot preserve the accepted authority invariant.',
       '  Call specialist_status to inspect the escalation and respond through specialist_reply. · activation act:aaaa',
     ]);
@@ -2159,13 +2159,22 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
     expect(cards[0]).toContain('●');
     // Lead band opens once, name first: gold for asks, royal for done, ember for failed.
     expect(cards[0]).toContain('\x1b[48;2;201;162;39m\x1b[38;2;24;20;16m\x1b[1mresearcher:act:aaaa');
+    // asked vs escalated: different words, different lead colors (gold vs ember).
+    expect(plain(cards[1]).split('\n')[0]).toContain('escalated │ XTRM-241');
     expect(cards[2]).toContain('\x1b[48;2;65;105;225m\x1b[38;2;255;255;255m\x1b[1mexecutor:act:aaaa');
     expect(cards[3]).toContain('\x1b[48;2;200;58;24m\x1b[38;2;255;255;255m\x1b[1mexecutor:act:aaaa');
+    // Bands attach: no normal-background gap between the lead close and the gray open.
+    for (const card of cards) {
+      expect(card).toContain('\x1b[22m\x1b[49m\x1b[39m\x1b[48;2;128;128;128m');
+    }
     // Run facts sit AFTER the band closes, bold-dimmed on the normal background.
     expect(cards[2]).toContain('\x1b[49m\x1b[39m \x1b[1m\x1b[2m·\x1b[22m \x1b[1m\x1b[2m42s\x1b[22m');
     // Every line below the header indents two spaces: empty space under the dot.
     for (const line of cards[2].split('\n').slice(1)) expect(line.startsWith('  ')).toBe(true);
-    expect(cards[0]).toContain('\x1b[2m\x1b[3minspect native wake transport\x1b[23m'); // purpose italic-dim after the band
+    // The purpose stays off the ask header: bead + specialist identify the work.
+    expect(cards[0].split('\n')[0]).not.toContain('inspect native wake transport');
+    // The question speaks in the worker's plain voice: no italic anywhere on its line.
+    expect(cards[0].split('\n')[1]).toBe('  Does the bracket look right?');
     expect(cards[2]).toContain('done');
     expect(cards[3]).toContain('failed');
     const instruction = cards[2].split('\n')[1];
