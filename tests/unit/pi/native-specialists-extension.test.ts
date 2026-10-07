@@ -1585,7 +1585,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     expect(lines[1]).toContain('\x1b[2mISSUE-92\x1b[22m');
     expect(lines[1]).toContain('\x1b[3minspect native wake transport\x1b[23m');
     // Line 2: model · thinking, then elapsed • turns • tokens.
-    expect(plain(lines[2])).toBe('       gpt-5.6-sol · high  • 47s • 3t • 2.1k');
+    expect(plain(lines[2])).toBe('       gpt-5.6-sol · high  • 47s • 3 turns • 2.1k');
     expect(lines[2]).toContain('\x1b[38;2;154;139;255m\x1b[1mhigh\x1b[22m\x1b[39m');
     expect(lines.join('\n')).not.toContain('working'); // the glyph carries it
     expect(lines.join('\n')).not.toContain('spent');
@@ -1650,7 +1650,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
       elapsed_s: 47, turn_count: 4, token_usage: { input_tokens: 1500, output_tokens: 600 },
       last_activity_at: SPIN_CLOCK,
     }, [], SPIN_CLOCK);
-    expect(plain(lines[1])).toBe('       gpt-5.6-sol · high  • 47s • 4t • 2.1k');
+    expect(plain(lines[1])).toBe('       gpt-5.6-sol · high  • 47s • 4 turns • 2.1k');
     expect(plain(lines[0])).toBe('    ◐ researcher:x  ISSUE-92');
     expect(lines.join('\n')).not.toContain('working');
     expect(lines.join('\n')).not.toContain('spent');
@@ -1683,7 +1683,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     // Terminal states: one glyph, final metrics still visible.
     const settled = mod.renderFleetRowLines({ ...base, state: 'settled', elapsed_s: 134, turn_count: 5 }, [], SPIN_CLOCK);
     expect(plain(settled[0])).toBe('    ✓ explorer:x  bd-1');
-    expect(plain(settled[1])).toBe('       m  • 2m14s • 5t');
+    expect(plain(settled[1])).toBe('       m  • 2m14s • 5 turns');
     expect(plain(mod.renderFleetRowLines({ ...base, state: 'failed' }, [], SPIN_CLOCK)[0]))
       .toBe('    ✕ explorer:x  bd-1');
     // Blocked on the coordinator: `!` outranks the spinner, wait replaces the metrics.
@@ -1721,7 +1721,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     expect(lines[1]).toBe('    ! reviewer:ask  ISSUE-92');
     expect(lines[2]).toBe('       gpt-5.6-sol · high  • asked 31s');
     expect(lines[3]).toMatch(/^ {4}[◐◓◑◒] researcher:idle {2}ISSUE-92$/);
-    expect(lines[4]).toBe('       gpt-5.6-sol · high  • 47s • 2t • 2.1k');
+    expect(lines[4]).toBe('       gpt-5.6-sol · high  • 47s • 2 turns • 2.1k');
     // Rows carry only the short dispatch token (<specialist>:<id>); the full
     // forensic `act:` id stays out of the operator surface.
     expect(lines.join('\n')).not.toContain('act:ask');
@@ -2139,7 +2139,7 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
     expect(plain(cards[2]).split('\n')).toEqual([
       '● executor:act:aaaa  done  XTRM-241',
       '  Call specialist_result to read the complete result. · activation act:aaaa',
-      '  42s • 3t • 43k',
+      '  42s • 3 turns • 43k',
     ]);
     expect(plain(cards[3]).split('\n')).toEqual([
       '● executor:act:aaaa  failed  XTRM-241',
@@ -2159,8 +2159,13 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
     expect(cards[3]).toContain('\x1b[38;2;255;110;70mfailed');
     // Metadata lives in the dim footer now, never in the header.
     expect(cards[0].split('\n')).toHaveLength(3); // asks carry no metadata: no footer
-    expect(cards[2].split('\n')[2]).toBe('  \x1b[2m42s • 3t • 43k\x1b[22m');
+    expect(cards[2].split('\n')[2]).toBe('  \x1b[2m42s • 3 turns • 43k\x1b[22m');
     expect(plain(cards[3].split('\n')[3])).toContain('gpt-5.6-sol · high');
+    // Singular/plural: 1 turn, 2 turns.
+    const singular = mod.formatSettlementWake({
+      activationId: 'act:aaaa', specialist: 'executor', beadId: 'XTRM-241', outcome: 'completed',
+    }, { bead_id: 'XTRM-241', elapsed_s: 5, turn_count: 1 });
+    expect(plain(singular).split('\n')[2]).toBe('  5s • 1 turn');
     // Every line below the header indents two spaces: empty space under the dot.
     for (const line of cards[2].split('\n').slice(1)) expect(line.startsWith('  ')).toBe(true);
     // The purpose stays off the ask header: bead + specialist identify the work.
@@ -2201,7 +2206,7 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
     const lines = collapsed.split('\n');
     // header + 3 italic excerpt lines + hint + instruction + dim footer
     expect(lines).toHaveLength(7);
-    expect(lines[6]).toBe('  \x1b[2m42s • 3t • 43k\x1b[22m');
+    expect(lines[6]).toBe('  \x1b[2m42s • 3 turns • 43k\x1b[22m');
     expect(lines[1]).toContain('\x1b[3mline one\x1b[23m');
     expect(lines[3]).toContain('\x1b[3mline three\x1b[23m');
     expect(lines[4]).toContain('+2 lines');

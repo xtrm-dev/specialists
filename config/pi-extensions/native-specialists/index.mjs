@@ -327,7 +327,7 @@ function rowMetrics({ view, ask, nowMs }) {
   const parts = [formatElapsedShort(view.elapsed_s)];
   // Turns are a real measurement from dispatch on, so a zero is shown as zero rather than
   // suppressed — unlike spend, which has no value until a provider reports one.
-  if (view.turn_count != null) parts.push(`${view.turn_count}t`);
+  if (view.turn_count != null) parts.push(`${view.turn_count} turn${view.turn_count === 1 ? '' : 's'}`);
   const tokens = formatSpendShort(view.token_usage);
   if (tokens) parts.push(tokens);
   return parts.join(' • ');
@@ -583,7 +583,7 @@ const FAIL_INSTRUCTION =
 function costFacts(view) {
   return [
     view ? formatElapsedShort(view.elapsed_s) : null,
-    view?.turn_count != null ? `${view.turn_count}t` : null,
+    view?.turn_count != null ? `${view.turn_count} turn${view.turn_count === 1 ? '' : 's'}` : null,
     ...(view ? [formatSpendShort(view.token_usage)].filter(Boolean) : []),
   ].filter(Boolean).join(' • ');
 }
