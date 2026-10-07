@@ -2108,27 +2108,18 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
         error: 'Provider rate limit exhausted after fallback chain.',
       }, { resolved_model: 'gpt-5.6-sol', thinking_level: 'high', bead_id: 'XTRM-241' }),
     ];
-    const GOLD = '\u001b[48;2;201;162;39m';
-    const ROYAL = '\u001b[48;2;65;105;225m';
-    const EMBER = '\x1b[48;2;200;58;24m';
-    const SLATE = '\u001b[48;2;128;128;128m';
-    const leadOf = [GOLD, EMBER, ROYAL, EMBER];
+    const WHITE = '\u001b[38;2;255;255;255m';
+    const TINT = ['\u001b[38;2;232;190;70m', '\u001b[38;2;255;110;70m', '\u001b[38;2;120;160;255m', '\u001b[38;2;255;110;70m'];
     cards.forEach((card, index) => {
       const [head, ...body] = card.split('\n');
-      // Lead band colour follows the outcome; the slate band is identical everywhere.
-      expect(head).toContain(leadOf[index]);
-      expect(head).toContain(SLATE);
-      // The full-height divider lives inside bands only — never on body lines.
-      expect(head).toContain('\u2502');
-      for (const line of body) {
-        expect(line).not.toContain('48;2');
-        expect(line).not.toContain('\u2502');
-      }
-      // Bold spans each WHOLE band: no `22m` may clear it before its close.
-      for (const match of head.matchAll(/\u001b\[48;2;[0-9;]+m[\s\S]*?\u001b\[49m/g)) {
-        const open = match[0].slice(0, -'\u001b[49m'.length);
-        expect(open.lastIndexOf('\u001b[22m')).toBe(open.length - '\u001b[22m'.length);
-      }
+      // Text-only headers: no background fills, no dividers, anywhere on the card.
+      expect(card).not.toContain('48;2');
+      expect(card).not.toContain('\u2502');
+      // One bold row: white name, tinted state, dim bead, double-spaced.
+      expect(head.startsWith('\u25cf \u001b[1m')).toBe(true);
+      expect(head.endsWith('\u001b[22m')).toBe(true);
+      expect(head).toContain(WHITE);
+      expect(head).toContain(TINT[index]);
       expect(head.startsWith('\u25cf ')).toBe(true);
       expect(card).not.toContain('\n\n');   // no blank line anywhere
       expect(card).not.toContain('╭');      // no brackets
@@ -2136,39 +2127,40 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
     });
 
     expect(plain(cards[0]).split('\n')).toEqual([
-      '● researcher:act:aaaa asked │ XTRM-241',
+      '● researcher:act:aaaa  asked  XTRM-241',
       '  Does the bracket look right?',
       '  Call specialist_status to obtain the pending message_id, then reply with specialist_reply. · activation act:aaaa',
     ]);
     expect(plain(cards[1]).split('\n')).toEqual([
-      '● reviewer:act:aaaa escalated │ XTRM-241',
+      '● reviewer:act:aaaa  escalated  XTRM-241',
       '  The current implementation cannot preserve the accepted authority invariant.',
       '  Call specialist_status to inspect the escalation and respond through specialist_reply. · activation act:aaaa',
     ]);
     expect(plain(cards[2]).split('\n')).toEqual([
-      '● executor:act:aaaa done │ XTRM-241 · 42s • 3t • 43k',
+      '● executor:act:aaaa  done  XTRM-241',
       '  Call specialist_result to read the complete result. · activation act:aaaa',
+      '  42s • 3t • 43k',
     ]);
     expect(plain(cards[3]).split('\n')).toEqual([
-      '● executor:act:aaaa failed │ XTRM-241 · gpt-5.6-sol · high',
+      '● executor:act:aaaa  failed  XTRM-241',
       '  Provider rate limit exhausted after fallback chain.',
       '  Call specialist_result for the full failure detail, then use specialist_retry if appropriate. · activation act:aaaa',
+      '  gpt-5.6-sol · high',
     ]);
 
-    // Styling: warning/bold/dim/italic per field, instruction dim+italic, id dim.
+    // Styling: white name, tinted state, dim bead; question plain-voiced.
     expect(cards[0]).toContain('●');
-    // Lead band opens once, name first: gold for asks, royal for done, ember for failed.
-    expect(cards[0]).toContain('\x1b[48;2;201;162;39m\x1b[38;2;24;20;16m\x1b[1mresearcher:act:aaaa');
-    // asked vs escalated: different words, different lead colors (gold vs ember).
-    expect(plain(cards[1]).split('\n')[0]).toContain('escalated │ XTRM-241');
-    expect(cards[2]).toContain('\x1b[48;2;65;105;225m\x1b[38;2;255;255;255m\x1b[1mexecutor:act:aaaa');
-    expect(cards[3]).toContain('\x1b[48;2;200;58;24m\x1b[38;2;255;255;255m\x1b[1mexecutor:act:aaaa');
-    // Bands attach: no normal-background gap between the lead close and the gray open.
-    for (const card of cards) {
-      expect(card).toContain('\x1b[22m\x1b[49m\x1b[39m\x1b[48;2;128;128;128m');
-    }
-    // Run facts sit AFTER the band closes, bold-dimmed on the normal background.
-    expect(cards[2]).toContain('\x1b[49m\x1b[39m \x1b[1m\x1b[2m·\x1b[22m \x1b[1m\x1b[2m42s\x1b[22m');
+    // Name first in white, then the tinted state word: gold asked, ember escalated.
+    expect(cards[0]).toContain('\x1b[38;2;255;255;255mresearcher:act:aaaa\x1b[39m  \x1b[38;2;232;190;70masked');
+    // asked vs escalated: different words, different tints (gold vs ember).
+    expect(plain(cards[1]).split('\n')[0]).toContain('escalated  XTRM-241');
+    expect(cards[1]).toContain('\x1b[38;2;255;110;70mescalated');
+    expect(cards[2]).toContain('\x1b[38;2;120;160;255mdone');
+    expect(cards[3]).toContain('\x1b[38;2;255;110;70mfailed');
+    // Metadata lives in the dim footer now, never in the header.
+    expect(cards[0].split('\n')).toHaveLength(3); // asks carry no metadata: no footer
+    expect(cards[2].split('\n')[2]).toBe('  \x1b[2m42s • 3t • 43k\x1b[22m');
+    expect(plain(cards[3].split('\n')[3])).toContain('gpt-5.6-sol · high');
     // Every line below the header indents two spaces: empty space under the dot.
     for (const line of cards[2].split('\n').slice(1)) expect(line.startsWith('  ')).toBe(true);
     // The purpose stays off the ask header: bead + specialist identify the work.
@@ -2207,8 +2199,9 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
 
     const collapsed = mod.formatSettlementWake(done, view, { resultText: output });
     const lines = collapsed.split('\n');
-    // header + 3 italic excerpt lines + hint + instruction
-    expect(lines).toHaveLength(6);
+    // header + 3 italic excerpt lines + hint + instruction + dim footer
+    expect(lines).toHaveLength(7);
+    expect(lines[6]).toBe('  \x1b[2m42s • 3t • 43k\x1b[22m');
     expect(lines[1]).toContain('\x1b[3mline one\x1b[23m');
     expect(lines[3]).toContain('\x1b[3mline three\x1b[23m');
     expect(lines[4]).toContain('+2 lines');
@@ -2220,9 +2213,9 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
     expect(expanded).toContain('\x1b[3mline five\x1b[23m');
     expect(expanded).not.toContain('ctrl+o expands');
 
-    // No output: identical to the plain card, no excerpt machinery.
+    // No output: header + instruction + footer.
     const plain = mod.formatSettlementWake(done, view);
-    expect(plain.split('\n')).toHaveLength(2);
+    expect(plain.split('\n')).toHaveLength(3);
   });
 
   it('the event card renderer switches to details.expandedContent when ctrl+o expands', async () => {
@@ -2265,8 +2258,8 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
     const lines = component.render(80);
     expect(Array.isArray(lines)).toBe(true);
     expect(lines.join('\n')).not.toContain('[specialist_ask]');
-    expect(lines[0].slice(lines[0].indexOf('\u25cf ') + 2)).toContain('48;2;201;162;39');
-    for (const line of lines.slice(1)) expect(line).not.toContain('48;2');
+    expect(lines[0].slice(lines[0].indexOf('\u25cf ') + 2)).toContain('38;2;255;255;255mexplorer:act:aaaa');
+    for (const line of lines) expect(line).not.toContain('48;2');
     for (const line of lines) expect(line.startsWith(mod.RAIL)).toBe(true);
     // Repeated renders agree (no first-call capture), and a missing renderer seam is safe.
     expect(component.render(80)).toEqual(lines);
