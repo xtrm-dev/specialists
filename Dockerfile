@@ -1,4 +1,4 @@
-FROM docker.io/oven/bun:1.3.14 AS builder
+FROM docker.io/oven/bun:1.4.2 AS builder
 WORKDIR /app
 
 COPY package.json bun.lock bunfig.toml tsconfig.json vitest.config.ts ./
@@ -11,7 +11,7 @@ COPY .gitignore ./.gitignore
 RUN bun install --frozen-lockfile
 RUN bun run build
 
-FROM docker.io/oven/bun:1.3.14-slim AS runtime
+FROM docker.io/oven/bun:1.4.2-slim AS runtime
 # The pi package the runtime actually loads (src/activation/pi-sdk.ts PI_SDK_PACKAGE).
 # Overridable, but the default must be the real one: this image is what the pi-compat job boots, and
 # it installed @mariozechner/pi-coding-agent while the runtime had moved on (SPECIALISTS-50).
