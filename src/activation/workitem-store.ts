@@ -40,7 +40,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { DatabaseSync } from 'node:sqlite';
-import { resolveGlobalNodeModulesDir } from '../pi/session.js';
+import { resolveGlobalNodeModulesDirs } from '../pi/session.js';
 import { extractSections, scrutinyLevel, validateContractText } from './contract-sections.js';
 import { resolveAuthorityDbPath } from './authority-store.js';
 
@@ -124,10 +124,14 @@ export function resolveSubstrateDir(explicit: string, resolveInstalled?: () => s
  * hold the package costs nothing.
  */
 export function resolveSubstrateFromGlobalPrefix(libDirs?: readonly string[]): string | null {
-  const globalModules = resolveGlobalNodeModulesDir();
   const runtimePrefix = dirname(dirname(process.execPath));
   const candidates = uniqueExistingLibDirs(libDirs ?? [
-    globalModules ? dirname(globalModules) : undefined,
+    // EVERY global modules root, not just the first that exists. Root existence says nothing about
+    // this package being inside it: bun's own root exists on a box where Substrate was installed
+    // under nvm, and stopping at that first existing root is exactly what produced
+    // "no Substrate package configured" for the bun-spawned Claude plugin MCP server while the
+    // identical code resolved fine under node.
+    ...resolveGlobalNodeModulesDirs().map(modulesDir => dirname(modulesDir)),
     join(runtimePrefix, 'lib'),
     // Bun's global install root, which is neither `<prefix>/lib` nor seen by the node walk.
     join(homedir(), '.bun', 'install', 'global'),
