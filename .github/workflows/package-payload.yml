@@ -104,6 +104,7 @@ jobs:
             config/pi-extensions/read-line-numbers/package.json \
             config/pi-extensions/native-specialists/index.mjs \
             config/pi-extensions/native-specialists/package.json \
+            config/workflows/reviewer-chain.agentrun.json \
             dist/postinstall.js \
             scripts/generate-release-attestation.mjs \
             dist/asset-contract.json \
