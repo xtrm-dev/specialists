@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.0.10] - 2026-10-13
+
+### Added
+- Codemode/kernel composition guidance in executor/debugger/test-engineer/planner/researcher prompts (SPECIALISTS-4260) ([c833986](https://github.com/xtrm-dev/specialists/commit/c83398687102a85b4b1e074291ce8e2953c6d5e4))
+- Review-chain AgentRun workflow + ocr delegation wiring for reviewer/seconder (SPECIALISTS-4261) ([320a3e1](https://github.com/xtrm-dev/specialists/commit/320a3e1fd5246021446a377aad38ef7cca7c7bc4))
+- Declare the codemode skill, defer the ocr/agentrun lane to the review reference ([aff78ed](https://github.com/xtrm-dev/specialists/commit/aff78ed5d346bbc0947eedf846bacb46892567ef))
+- Declare open-code-review for reviewer and seconder ([9fceb2f](https://github.com/xtrm-dev/specialists/commit/9fceb2f94f529aa654b9fb58eff5c25d472e7ef3))
+
+### Fixed
+- The coordinator is never fenced out of its own workspace (#455) ([fb41ddb](https://github.com/xtrm-dev/specialists/commit/fb41ddb5ee32355f7a41e86dd3cdfbb7e2c3b908))
+- Advertise OpenAI-compatible tool schemas (SPECIALISTS-4228) (#457) ([5e9678a](https://github.com/xtrm-dev/specialists/commit/5e9678ab540a5f42b867fe8a0d7ce8d2d6475cba))
+- Declare lease-reconcile unions as Type.Literal (SPECIALISTS-4229) (#458) ([738417e](https://github.com/xtrm-dev/specialists/commit/738417ec409ff932390ef731933f57e4c553f966))
+- Never throw when stringifying non-Error payloads (SPECIALISTS-4232) (#461) ([be52fad](https://github.com/xtrm-dev/specialists/commit/be52fadf8436a13b99dc468a6fa3d81080340b59))
+- Bounded drift summary on overflow, target scoping, readable pre-script rejection (#463) ([c11675b](https://github.com/xtrm-dev/specialists/commit/c11675b3a2e622c22dccba8087e161c2853d327a))
+- Checkpoint busy exit code, batched prune, per-family forensic retention (#464) ([41a2772](https://github.com/xtrm-dev/specialists/commit/41a277249ce1be759a8f939d5c5846b3f4c6886d))
+- Gold band names specialist:act:id, facts move out bold-dim, body indents under the dot (#465) ([89e5787](https://github.com/xtrm-dev/specialists/commit/89e5787e0cfb33d0db00c050adba0ec4c859fb68))
+- Status-colored lead band, gray state band, full-height dividers (#466) ([c5f6808](https://github.com/xtrm-dev/specialists/commit/c5f6808ac0dae1fe754d90d95d6e7041de03d722))
+- Gray state band, plain-voiced questions, asked vs escalated (#467) ([a50a463](https://github.com/xtrm-dev/specialists/commit/a50a4631fe8dffd927a77ff1ad148bb9d931b6ca))
+- Text-only headers, metadata footer (SPECIALISTS-4246) (#468) ([bf9578c](https://github.com/xtrm-dev/specialists/commit/bf9578c41208b7501ee7f4b8ebdd97d5c2e456ca))
+- Ship config/workflows/ and assert reviewer-chain in the payload contract (SPECIALISTS-4261) ([9dc64b3](https://github.com/xtrm-dev/specialists/commit/9dc64b39b5bd617870712b2d2a1753a2ea7a6335))
+
+### Other changes
+- Remove native footer select-a-row hint (SPECIALISTS-4235) (#462) ([ec26ae6](https://github.com/xtrm-dev/specialists/commit/ec26ae6fe0374ebd057be7b445bcd6650d50d815))
+
+### Project maintenance
+- Force proxy-addr to 2.0.8 via overrides (SPECIALISTS-4230) (#459) ([bfda1e4](https://github.com/xtrm-dev/specialists/commit/bfda1e47419fd630b6a749be3740f8f9c0099c46))
+- Bump bun 1.3.14 to 1.4.2 (SPECIALISTS-4231) (#460) ([c176acc](https://github.com/xtrm-dev/specialists/commit/c176accdc794170c6b79c47d4297bb4d68b028f8))
+- Pin codemode in the skills-v4 wiring audit ([d21a5de](https://github.com/xtrm-dev/specialists/commit/d21a5de48e1e5b6d3ec64b65de67e82f3791bbd4))
+
 ## [4.0.9] - 2026-10-04
 
 ### Added
