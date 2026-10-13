@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.0.10] - 2026-10-13
+
+### Added
+- Codemode/kernel composition guidance + review-chain AgentRun workflow (SPECIALISTS-4260, 4261) (#469) ([97307ef](https://github.com/xtrm-dev/specialists/commit/97307ef5348a7fb0655c8e50274e02e7ea782904))
+
+### Fixed
+- The coordinator is never fenced out of its own workspace (#455) ([fb41ddb](https://github.com/xtrm-dev/specialists/commit/fb41ddb5ee32355f7a41e86dd3cdfbb7e2c3b908))
+- Advertise OpenAI-compatible tool schemas (SPECIALISTS-4228) (#457) ([5e9678a](https://github.com/xtrm-dev/specialists/commit/5e9678ab540a5f42b867fe8a0d7ce8d2d6475cba))
+- Declare lease-reconcile unions as Type.Literal (SPECIALISTS-4229) (#458) ([738417e](https://github.com/xtrm-dev/specialists/commit/738417ec409ff932390ef731933f57e4c553f966))
+- Never throw when stringifying non-Error payloads (SPECIALISTS-4232) (#461) ([be52fad](https://github.com/xtrm-dev/specialists/commit/be52fadf8436a13b99dc468a6fa3d81080340b59))
+- Bounded drift summary on overflow, target scoping, readable pre-script rejection (#463) ([c11675b](https://github.com/xtrm-dev/specialists/commit/c11675b3a2e622c22dccba8087e161c2853d327a))
+- Checkpoint busy exit code, batched prune, per-family forensic retention (#464) ([41a2772](https://github.com/xtrm-dev/specialists/commit/41a277249ce1be759a8f939d5c5846b3f4c6886d))
+- Gold band names specialist:act:id, facts move out bold-dim, body indents under the dot (#465) ([89e5787](https://github.com/xtrm-dev/specialists/commit/89e5787e0cfb33d0db00c050adba0ec4c859fb68))
+- Status-colored lead band, gray state band, full-height dividers (#466) ([c5f6808](https://github.com/xtrm-dev/specialists/commit/c5f6808ac0dae1fe754d90d95d6e7041de03d722))
+- Gray state band, plain-voiced questions, asked vs escalated (#467) ([a50a463](https://github.com/xtrm-dev/specialists/commit/a50a4631fe8dffd927a77ff1ad148bb9d931b6ca))
+- Text-only headers, metadata footer (SPECIALISTS-4246) (#468) ([bf9578c](https://github.com/xtrm-dev/specialists/commit/bf9578c41208b7501ee7f4b8ebdd97d5c2e456ca))
+- Spell out turn counts (1 turn, N turns) (#470) ([4cfc3f4](https://github.com/xtrm-dev/specialists/commit/4cfc3f49bbe38f65f4debb6f3fa03818228ffcc0))
+
+### Other changes
+- Remove native footer select-a-row hint (SPECIALISTS-4235) (#462) ([ec26ae6](https://github.com/xtrm-dev/specialists/commit/ec26ae6fe0374ebd057be7b445bcd6650d50d815))
+
+### Project maintenance
+- Force proxy-addr to 2.0.8 via overrides (SPECIALISTS-4230) (#459) ([bfda1e4](https://github.com/xtrm-dev/specialists/commit/bfda1e47419fd630b6a749be3740f8f9c0099c46))
+- Bump bun 1.3.14 to 1.4.2 (SPECIALISTS-4231) (#460) ([c176acc](https://github.com/xtrm-dev/specialists/commit/c176accdc794170c6b79c47d4297bb4d68b028f8))
+
 ## [4.0.9] - 2026-10-04
 
 ### Added
