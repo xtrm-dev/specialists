@@ -16,7 +16,6 @@ FROM docker.io/oven/bun:1.3.14-slim AS runtime
 # Overridable, but the default must be the real one: this image is what the pi-compat job boots, and
 # it installed @mariozechner/pi-coding-agent while the runtime had moved on (SPECIALISTS-50).
 ARG PI_PACKAGE=@earendil-works/pi-coding-agent
-ARG PI_VERSION=latest
 WORKDIR /app
 
 ENV NODE_ENV=production
@@ -25,6 +24,12 @@ ENV HOME=/home/specialists
 # Runtime working directory is /work — the consumer's project root mount.
 # /app holds the dist/ bundle; /work holds .specialists/ (specs + observability.db).
 # Overridable via compose `working_dir:` if a consumer wants a different layout.
+
+# Pin the pi runtime (DARTHFEEDOR-1207): PI_VERSION=latest produced images where a
+# provider 401 surfaced as 'pi produced no assistant text' instead of an auth error.
+# Bump deliberately, after validating the new pi against the specialists runtime —
+# not implicitly on the next image build.
+ARG PI_VERSION=0.99.1
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates sqlite3 npm \
