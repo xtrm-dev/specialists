@@ -23732,6 +23732,9 @@ function resolveWorkspace(cwd) {
   return workspaceIdentityFor(cwd);
 }
 function createActivationResourceLoader(sdk, options) {
+  const wantsCodemode = (options.extensionPaths ?? []).includes(BUILTIN_CODEMODE_EXTENSION);
+  const codemodeFactory = wantsCodemode && typeof sdk.createCodemodeExtension === "function" ? sdk.createCodemodeExtension() : undefined;
+  const codemodeName = BUILTIN_CODEMODE_EXTENSION.replace("builtin:", "");
   return new sdk.DefaultResourceLoader({
     cwd: options.cwd,
     agentDir: sdk.getAgentDir(),
@@ -23739,6 +23742,7 @@ function createActivationResourceLoader(sdk, options) {
     additionalSkillPaths: options.skillPaths,
     noExtensions: true,
     additionalExtensionPaths: options.extensionPaths ?? [],
+    ...codemodeFactory !== undefined ? { extensionFactories: [{ name: codemodeName, factory: codemodeFactory, replaceable: true, builtin: true }] } : {},
     noContextFiles: true,
     noPromptTemplates: true,
     noThemes: true
