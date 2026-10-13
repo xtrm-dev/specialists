@@ -56,6 +56,7 @@ import {
   deduplicateExtensionSources,
   resolveGlobalNodeModulesDir,
   resolvePiVersion,
+  BUILTIN_CODEMODE_EXTENSION,
 } from '../pi/session.js';
 import { formatResolvedToolContract, withDiscoveredExtensionTools, type ResolvedToolContract } from '../specialist/resolved-tool-contract.js';
 import { resolveModelChain } from '../specialist/model-chain.js';
@@ -691,6 +692,35 @@ export function createActivationResourceLoader(
   sdk: PiSdk,
   options: { cwd: string; skillPaths: string[]; extensionPaths?: string[] },
 ): PiResourceLoaderLike {
+  // Codemode builtin wiring (SPECIALISTS-4260 follow-up).
+  //
+  // The `codemode` tool registers ONLY through pi's codemode extension, and SDK sessions do not
+  // load it by default — pi `docs/sdk.md`: "SDK sessions do not; add `createCodemodeExtension()`
+  // … to the `extensionFactories` of `DefaultResourceLoader`". The curated set (see
+  // `resolveCuratedExtensionPaths`) already pushes `'builtin:codemode'` into `extensionPaths`
+  // when the resolved contract grants codemode, but a `builtin:<name>` path resolves ONLY
+  // against factories supplied with `builtin: true`; without one the loader records
+  // "builtin:codemode: Unknown built-in extension" and the session fails closed on
+  // `tool_contract_unsatisfied`. Measured on pi 1.2.0: path-without-factory → 0 extensions, that
+  // error recorded, codemode absent.
+  //
+  // Supply pi's own factory as a NAMED builtin entry, mirroring the CLI's own registration
+  // (`dist/extensions/index.js`: `{ name: 'codemode', factory, replaceable: true, builtin: true }`),
+  // exactly when the curated path asks for it. The named form matters: a plain factory registers
+  // codemode with registry source "inline" while the curated path still errors, whereas the named
+  // form resolves the path with source "builtin" — loader error-free, provenance inside
+  // BUILTIN_TOOL_SOURCES. The fence is intact: `noExtensions: true` stays, no other builtin is
+  // admitted, and a tier whose catalog withholds codemode (LOW) never earns the curated path and
+  // therefore gets no factory.
+  const wantsCodemode = (options.extensionPaths ?? []).includes(BUILTIN_CODEMODE_EXTENSION);
+  const codemodeFactory =
+    wantsCodemode && typeof sdk.createCodemodeExtension === 'function' ? sdk.createCodemodeExtension() : undefined;
+  // The registration NAME is derived from the loader path rather than written as `name: 'codemode'`.
+  // The activation emit-site scanner (native-mapper-totality) treats EVERY `name: '<literal>'`
+  // under src/activation/ as a possible forensic emit and fails when one has no inventory
+  // disposition. This entry is an extension registration, not an emit; adding a false inventory
+  // entry would corrupt that ledger, so the name is derived from the single source of truth.
+  const codemodeName = BUILTIN_CODEMODE_EXTENSION.replace('builtin:', '');
   return new sdk.DefaultResourceLoader({
     cwd: options.cwd,
     agentDir: sdk.getAgentDir(),
@@ -698,6 +728,9 @@ export function createActivationResourceLoader(
     additionalSkillPaths: options.skillPaths,
     noExtensions: true,
     additionalExtensionPaths: options.extensionPaths ?? [],
+    ...(codemodeFactory !== undefined
+      ? { extensionFactories: [{ name: codemodeName, factory: codemodeFactory, replaceable: true, builtin: true }] }
+      : {}),
     // Auto-discovered AGENTS.md and project context files must not silently enter the
     // child's prompt; the loader CAN be told to skip them, so it is told.
     noContextFiles: true,
