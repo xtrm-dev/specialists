@@ -24940,6 +24940,9 @@ function resolveCuratedExtensionPaths(options) {
   if (gitnexusContract?.status === "available" && gitnexusContract.packagePath && existsSync19(gitnexusContract.packagePath)) {
     all.push(gitnexusContract.packagePath);
   }
+  if ((options.resolvedToolContract?.nativeTools ?? []).includes("codemode")) {
+    all.push(BUILTIN_CODEMODE_EXTENSION);
+  }
   return {
     all,
     dedupeAgainstDynamic: [
@@ -25323,10 +25326,6 @@ class PiAgentSession {
     }
     if (resolvedToolContract?.toolsFlag && (resolvedToolContract.exposedExtensionSources?.length ?? 0) === 0) {
       args.push("--tools", resolvedToolContract.toolsFlag);
-    }
-    for (const [tool, extension] of Object.entries(BUILTIN_TOOL_EXTENSIONS)) {
-      if (resolvedToolContract?.nativeTools.includes(tool))
-        args.push("-e", extension);
     }
     if (this.options.thinkingLevel) {
       args.push("--thinking", this.options.thinkingLevel);
@@ -25967,7 +25966,7 @@ ${stderrTail}` : ""}`;
     await this.waitForDone(timeout);
   }
 }
-var SessionKilledError, StallTimeoutError, TEST_COMMAND_STALL_TIMEOUT_MS = 300000, GITNEXUS_IMPACT_STALL_TIMEOUT_MS = 300000, TEST_COMMAND_PATTERNS, RUNTIME_TOOL_CATALOG_ERROR_MESSAGE = "Runtime tool catalog unavailable or invalid; refusing to launch with Pi default tools. Reinstall or rebuild Specialists and verify config/catalog/index.json.", RuntimeToolCatalogResolutionError, BUILTIN_TOOL_EXTENSIONS, cachedPiVersion, piVersionResolved = false, WRITE_BOUNDARY_TOOL_NAMES, WORKTREE_BOUNDARY_ENV_KEY = "SPECIALISTS_WORKTREE_BOUNDARY";
+var SessionKilledError, StallTimeoutError, TEST_COMMAND_STALL_TIMEOUT_MS = 300000, GITNEXUS_IMPACT_STALL_TIMEOUT_MS = 300000, TEST_COMMAND_PATTERNS, RUNTIME_TOOL_CATALOG_ERROR_MESSAGE = "Runtime tool catalog unavailable or invalid; refusing to launch with Pi default tools. Reinstall or rebuild Specialists and verify config/catalog/index.json.", RuntimeToolCatalogResolutionError, BUILTIN_CODEMODE_EXTENSION = "builtin:codemode", cachedPiVersion, piVersionResolved = false, WRITE_BOUNDARY_TOOL_NAMES, WORKTREE_BOUNDARY_ENV_KEY = "SPECIALISTS_WORKTREE_BOUNDARY";
 var init_session = __esm(() => {
   init_read_line_numbers_extension();
   init_extension_tool_policy_extension();
@@ -26006,7 +26005,6 @@ var init_session = __esm(() => {
       this.name = "RuntimeToolCatalogResolutionError";
     }
   };
-  BUILTIN_TOOL_EXTENSIONS = { codemode: "builtin:codemode" };
   WRITE_BOUNDARY_TOOL_NAMES = new Set(["edit", "write", "multiEdit", "notebookEdit"]);
 });
 

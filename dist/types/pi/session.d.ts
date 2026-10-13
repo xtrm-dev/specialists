@@ -172,6 +172,23 @@ export declare function sessionResourceFenceArgv(): {
     head: string[];
     tail: string[];
 };
+/** The built-in Pi extension carrying the `codemode` tool; a `builtin:<name>` loader path. */
+export declare const BUILTIN_CODEMODE_EXTENSION = "builtin:codemode";
+/**
+ * Built-in Pi tools a resolved contract may grant, mapped to the built-in extension that
+ * registers them.
+ *
+ * The CLI fence passes `--no-extensions`, which also disables built-in extensions (see the Pi
+ * docs, `docs/cli.md`: "Disables discovered, configured, and built-in extensions"), and the
+ * native loader loads only the extension paths it is given. Either way a granted built-in tool
+ * registers only when its extension is named — `resolveCuratedExtensionPaths` owns that, so this
+ * map documents which built-in tools depend on it.
+ *
+ * Activation stays gated downstream: the tool-policy extension activates builtin-sourced tools
+ * only when the contract names them among the granted natives, and the native path's `tools`
+ * allowlist carries the same list. Loading the extension is a declaration, not an authorization.
+ */
+export declare const BUILTIN_TOOL_EXTENSIONS: Readonly<Record<string, string>>;
 /**
  * Which of the five discovery fences a session argv actually disables.
  *

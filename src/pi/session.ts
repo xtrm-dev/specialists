@@ -592,21 +592,24 @@ export function sessionResourceFenceArgv(): { head: string[]; tail: string[] } {
   };
 }
 
+/** The built-in Pi extension carrying the `codemode` tool; a `builtin:<name>` loader path. */
+export const BUILTIN_CODEMODE_EXTENSION = 'builtin:codemode';
+
 /**
  * Built-in Pi tools a resolved contract may grant, mapped to the built-in extension that
  * registers them.
  *
- * The resource fence passes `--no-extensions`, which also disables built-in extensions (see
- * the Pi docs, `docs/cli.md`: "Disables discovered, configured, and built-in extensions"),
- * so a granted built-in tool never reaches the registry however the allowlist is written —
- * `-e builtin:<name>` is the documented way to load one explicitly.
+ * The CLI fence passes `--no-extensions`, which also disables built-in extensions (see the Pi
+ * docs, `docs/cli.md`: "Disables discovered, configured, and built-in extensions"), and the
+ * native loader loads only the extension paths it is given. Either way a granted built-in tool
+ * registers only when its extension is named — `resolveCuratedExtensionPaths` owns that, so this
+ * map documents which built-in tools depend on it.
  *
- * Activation stays gated downstream: the tool-policy extension activates builtin-sourced
- * tools only when the contract names them among the granted natives, and without the policy
- * gate the `--tools` flag carries the same list. Adding a built-in here is therefore a
- * declaration, not an authorization.
+ * Activation stays gated downstream: the tool-policy extension activates builtin-sourced tools
+ * only when the contract names them among the granted natives, and the native path's `tools`
+ * allowlist carries the same list. Loading the extension is a declaration, not an authorization.
  */
-const BUILTIN_TOOL_EXTENSIONS: Readonly<Record<string, string>> = { codemode: 'builtin:codemode' };
+export const BUILTIN_TOOL_EXTENSIONS: Readonly<Record<string, string>> = { codemode: BUILTIN_CODEMODE_EXTENSION };
 
 /**
  * Which of the five discovery fences a session argv actually disables.
@@ -705,6 +708,16 @@ export function resolveCuratedExtensionPaths(options: {
   const gitnexusContract = options.resolvedToolContract?.extensions.gitnexus;
   if (gitnexusContract?.status === 'available' && gitnexusContract.packagePath && existsSync(gitnexusContract.packagePath)) {
     all.push(gitnexusContract.packagePath);
+  }
+  // codemode: the built-in Pi extension that registers the `codemode` tool. Both spawn paths fence
+  // ambient discovery — the CLI via `--no-extensions`, the native loader by loading only what it
+  // is given — so a granted built-in tool never registers unless its extension is named here. The
+  // session's `tools` allowlist cannot conjure a tool that was never loaded, which is how the
+  // codemode guidance shipped in the role prompts while the tool stayed unreachable
+  // (SPECIALISTS-4260). The loader takes `builtin:<name>` paths directly (see the SDK's
+  // resource-loader.d.ts), so no package resolution is involved.
+  if ((options.resolvedToolContract?.nativeTools ?? []).includes('codemode')) {
+    all.push(BUILTIN_CODEMODE_EXTENSION);
   }
   return {
     all,
@@ -1244,13 +1257,9 @@ export class PiAgentSession {
       args.push('--tools', resolvedToolContract.toolsFlag);
     }
 
-    // Load the built-in extension behind any built-in tool the contract grants (codemode),
-    // because the fence above disabled built-in extensions. SPECIALISTS-4260: without this
-    // the codemode skill was declared and loaded while the tool behind it could never
-    // activate, so the role prompts naming it were inert.
-    for (const [tool, extension] of Object.entries(BUILTIN_TOOL_EXTENSIONS)) {
-      if (resolvedToolContract?.nativeTools.includes(tool)) args.push('-e', extension);
-    }
+    // Built-in tools the contract grants are loaded through resolveCuratedExtensionPaths below
+    // (`builtin:<name>` loader paths), so the CLI and native spawn paths cannot disagree about
+    // whether the extension behind a granted tool is present.
 
     // Thinking level (models that don't support it ignore the flag)
     if (this.options.thinkingLevel) {

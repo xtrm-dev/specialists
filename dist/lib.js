@@ -11804,7 +11804,7 @@ function sessionResourceFenceArgv() {
     tail: ["--no-context-files", "--no-prompt-templates", "--no-themes"]
   };
 }
-var BUILTIN_TOOL_EXTENSIONS = { codemode: "builtin:codemode" };
+var BUILTIN_CODEMODE_EXTENSION = "builtin:codemode";
 function resolveExecutionExtensionSelection(extensions) {
   const excludeExtensions = [];
   const extensionSources = [];
@@ -11847,6 +11847,9 @@ function resolveCuratedExtensionPaths(options) {
   const gitnexusContract = options.resolvedToolContract?.extensions.gitnexus;
   if (gitnexusContract?.status === "available" && gitnexusContract.packagePath && existsSync5(gitnexusContract.packagePath)) {
     all.push(gitnexusContract.packagePath);
+  }
+  if ((options.resolvedToolContract?.nativeTools ?? []).includes("codemode")) {
+    all.push(BUILTIN_CODEMODE_EXTENSION);
   }
   return {
     all,
@@ -12235,10 +12238,6 @@ class PiAgentSession {
     }
     if (resolvedToolContract?.toolsFlag && (resolvedToolContract.exposedExtensionSources?.length ?? 0) === 0) {
       args.push("--tools", resolvedToolContract.toolsFlag);
-    }
-    for (const [tool, extension] of Object.entries(BUILTIN_TOOL_EXTENSIONS)) {
-      if (resolvedToolContract?.nativeTools.includes(tool))
-        args.push("-e", extension);
     }
     if (this.options.thinkingLevel) {
       args.push("--thinking", this.options.thinkingLevel);
