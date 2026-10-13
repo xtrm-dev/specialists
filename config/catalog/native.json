@@ -4,9 +4,9 @@
   "version": "3.11.0",
   "precedence": 0,
   "source_tiers": {
-    "READ_ONLY": ["read", "grep", "find", "ls"],
+    "READ_ONLY": ["read", "grep", "find", "ls", "codemode"],
     "LOW": ["read", "grep", "find", "ls", "bash"],
-    "MEDIUM": ["read", "grep", "find", "ls", "bash", "edit"],
-    "HIGH": ["read", "grep", "find", "ls", "bash", "edit", "write"]
+    "MEDIUM": ["read", "grep", "find", "ls", "bash", "edit", "codemode"],
+    "HIGH": ["read", "grep", "find", "ls", "bash", "edit", "write", "codemode"]
   }
 }

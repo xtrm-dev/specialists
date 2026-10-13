@@ -131,7 +131,7 @@ describe('manifest resolver', () => {
       },
     });
 
-    expect(resolved.toolsList).toEqual(['read', 'grep', 'find', 'ls']);
+    expect(resolved.toolsList).toEqual(['read', 'grep', 'find', 'ls', 'codemode']);
     expect(resolved.toolsList).not.toContain('gitnexus_query');
     expect(resolved.deniedNatives).toEqual([]);
     expect(resolved.downgradeReasons).toEqual([]);
@@ -179,7 +179,7 @@ describe('manifest resolver', () => {
         extensionState,
       });
 
-      expect(restored.toolsList).toEqual(['read', 'grep', 'find', 'ls']);
+      expect(restored.toolsList).toEqual(['read', 'grep', 'find', 'ls', 'codemode']);
       expect(restored.tools).not.toContain('gitnexus_query');
       expect(restored.deniedNatives).toEqual([]);
       expect(restored.downgradeReasons).toContain(`restored native fallback for grep,find,ls due to ${reason}`);

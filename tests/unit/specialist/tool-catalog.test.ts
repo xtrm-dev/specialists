@@ -6,10 +6,10 @@ import { join } from 'node:path';
 const EXPECTED_CONFLICT_SEMANTICS = '(1) most restrictive wins for tool inclusion\n * (2) exception: runtime health degradation or catalog incompatibility restores native fallbacks\n * (3) hard-deny in specialist override does not override runtime health downgrade';
 
 const EXPECTED_NATIVE = {
-  READ_ONLY: ['read', 'grep', 'find', 'ls'],
+  READ_ONLY: ['read', 'grep', 'find', 'ls', 'codemode'],
   LOW: ['read', 'grep', 'find', 'ls', 'bash'],
-  MEDIUM: ['read', 'grep', 'find', 'ls', 'bash', 'edit'],
-  HIGH: ['read', 'grep', 'find', 'ls', 'bash', 'edit', 'write'],
+  MEDIUM: ['read', 'grep', 'find', 'ls', 'bash', 'edit', 'codemode'],
+  HIGH: ['read', 'grep', 'find', 'ls', 'bash', 'edit', 'write', 'codemode'],
 };
 
 const EXPECTED_GITNEXUS = {

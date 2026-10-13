@@ -113,7 +113,7 @@ describe('resolution diagnostics', () => {
         catalogsPath: join(process.cwd(), 'config', 'catalog', 'index.json'),
       });
 
-      expect(report.toolContract.toolsList).toEqual(['read', 'grep', 'find', 'ls']);
+      expect(report.toolContract.toolsList).toEqual(['read', 'grep', 'find', 'ls', 'codemode']);
       expect(report.toolContract.toolsList).not.toContain('gitnexus_query');
     } finally {
       rmSync(npmGlobalDir, { recursive: true, force: true });
@@ -136,7 +136,7 @@ describe('resolution diagnostics', () => {
       });
 
       expect(report.catalogCompatibility.join(' | ')).toContain(`installed 9.9.9 is outside the compatible range for catalog ${catalogVersion('gitnexus')}`);
-      expect(report.toolContract.toolsList).toEqual(['read', 'grep', 'find', 'ls', 'bash', 'edit', 'write']);
+      expect(report.toolContract.toolsList).toEqual(['read', 'grep', 'find', 'ls', 'bash', 'edit', 'write', 'codemode']);
       expect(report.toolContract.toolsList).not.toContain('gitnexus_query');
     } finally {
       rmSync(npmGlobalDir, { recursive: true, force: true });
