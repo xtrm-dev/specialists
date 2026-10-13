@@ -116,6 +116,29 @@ export {
   FEED_LINE_MAX,
 } from './tools/specialist/specialist_feed.tool.js';
 export { resolveObservabilityDbLocation } from './specialist/observability-db.js';
+export {
+  asObservabilityReadSource,
+  parseForensicRecord,
+  parseForensicRecords,
+  readActivationInspect,
+  readFleetSnapshot,
+  readForensicWindow,
+  readResultProjection,
+} from './specialist/observability-read-model.js';
+export type {
+  ActivationInspect,
+  FleetAttention,
+  FleetNode,
+  FleetSnapshot,
+  ForensicCursor,
+  ForensicWindow,
+  ObservabilityReadSource,
+  ReadFleetOptions,
+  ReadForensicWindowOptions,
+  ResultProjection,
+  RuntimeAttachment,
+} from './specialist/observability-read-model.js';
+export { isForensicAgentInternal } from './specialist/forensic-presentation.js';
 
 // Bead readiness gate (unitAI-rrdnt.48): the SAME parser and gate the host runs,
 // exposed so a frontend can gate an inline dispatch contract BEFORE creating a
