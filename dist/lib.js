@@ -7059,7 +7059,7 @@ var SK_PACKAGE_DIR = join3("@jaggerxtrm", "pi-service-knowledge");
 
 // src/pi/session.ts
 import { spawn, execFileSync } from "node:child_process";
-import { existsSync as existsSync5, lstatSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { existsSync as existsSync5, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { homedir as homedir2, tmpdir } from "node:os";
 import { isAbsolute, resolve as resolve4, sep, join as join4, dirname as dirname4 } from "node:path";
 
@@ -11885,15 +11885,35 @@ function resolvePiVersion() {
   } catch {}
   return;
 }
-function resolveGlobalNodeModulesDir2() {
+function resolveGlobalNodeModulesDirs(deps = {}) {
+  const env = deps.env ?? process.env;
+  const home = deps.home ?? homedir2();
+  const execPath = deps.execPath ?? process.execPath;
+  const exists = deps.exists ?? existsSync5;
+  const readDir = deps.readDir ?? ((path) => readdirSync(path));
   const candidates = [
-    process.env.PI_NPM_GLOBAL_DIR,
-    process.env.NPM_CONFIG_PREFIX ? join4(process.env.NPM_CONFIG_PREFIX, "lib", "node_modules") : undefined,
-    process.env.npm_config_prefix ? join4(process.env.npm_config_prefix, "lib", "node_modules") : undefined,
-    process.env.NVM_BIN ? join4(dirname4(process.env.NVM_BIN), "lib", "node_modules") : undefined,
-    join4(homedir2(), ".nvm/versions/node", process.version, "lib", "node_modules")
+    env.PI_NPM_GLOBAL_DIR,
+    env.NPM_CONFIG_PREFIX ? join4(env.NPM_CONFIG_PREFIX, "lib", "node_modules") : undefined,
+    env.npm_config_prefix ? join4(env.npm_config_prefix, "lib", "node_modules") : undefined,
+    env.NVM_BIN ? join4(dirname4(env.NVM_BIN), "lib", "node_modules") : undefined,
+    join4(dirname4(dirname4(execPath)), "lib", "node_modules"),
+    env.BUN_INSTALL ? join4(env.BUN_INSTALL, "install", "global", "node_modules") : undefined,
+    join4(home, ".bun", "install", "global", "node_modules"),
+    join4(home, ".nvm/versions/node", process.version, "lib", "node_modules"),
+    ...nvmNodeModulesDirs(home, readDir)
   ].filter((candidate) => Boolean(candidate));
-  return candidates.find((candidate) => existsSync5(candidate));
+  return [...new Set(candidates)].filter((candidate) => exists(candidate));
+}
+function resolveGlobalNodeModulesDir2(deps = {}) {
+  return resolveGlobalNodeModulesDirs(deps)[0];
+}
+function nvmNodeModulesDirs(home, readDir) {
+  const root = join4(home, ".nvm", "versions", "node");
+  try {
+    return readDir(root).filter((version) => version.startsWith("v")).sort().reverse().map((version) => join4(root, version, "lib", "node_modules"));
+  } catch {
+    return [];
+  }
 }
 function asNumber(value) {
   if (typeof value === "number" && Number.isFinite(value))
@@ -20123,7 +20143,7 @@ function formatReferenceLocation(specialist, fieldPath) {
 }
 
 // src/specialist/project-pack-skill-resolver.ts
-import { accessSync as accessSync2, constants as constants2, readdirSync, lstatSync as lstatSync3, realpathSync as realpathSync3 } from "node:fs";
+import { accessSync as accessSync2, constants as constants2, readdirSync as readdirSync2, lstatSync as lstatSync3, realpathSync as realpathSync3 } from "node:fs";
 import { homedir as homedir6 } from "node:os";
 import { join as join10, relative as relative2, isAbsolute as isAbsolute3 } from "node:path";
 var RESERVED_SKILL_ROOTS = [
@@ -20272,7 +20292,7 @@ function resolveBareLogicalSkill(skillName, consumerRoot) {
   let packs = [];
   let entries;
   try {
-    entries = readdirSync(canonicalSkillsRoot, { withFileTypes: true });
+    entries = readdirSync2(canonicalSkillsRoot, { withFileTypes: true });
   } catch (error) {
     if (error?.code === "ENOENT")
       return globalDefaultCandidate(skillName);
@@ -20821,10 +20841,9 @@ function resolveSubstrateDir(explicit, resolveInstalled) {
   return resolveSubstrateFromGlobalPrefix();
 }
 function resolveSubstrateFromGlobalPrefix(libDirs) {
-  const globalModules = resolveGlobalNodeModulesDir2();
   const runtimePrefix = dirname9(dirname9(process.execPath));
   const candidates = uniqueExistingLibDirs(libDirs ?? [
-    globalModules ? dirname9(globalModules) : undefined,
+    ...resolveGlobalNodeModulesDirs().map((modulesDir) => dirname9(modulesDir)),
     join13(runtimePrefix, "lib"),
     join13(homedir8(), ".bun", "install", "global")
   ]);
@@ -21403,7 +21422,7 @@ function composeInteractionMessage(input, identity) {
 }
 
 // src/activation/transport/pending-store.ts
-import { existsSync as existsSync16, mkdirSync as mkdirSync5, readdirSync as readdirSync2, readFileSync as readFileSync9, renameSync as renameSync2, unlinkSync, writeFileSync as writeFileSync4 } from "node:fs";
+import { existsSync as existsSync16, mkdirSync as mkdirSync5, readdirSync as readdirSync3, readFileSync as readFileSync9, renameSync as renameSync2, unlinkSync, writeFileSync as writeFileSync4 } from "node:fs";
 import { join as join14 } from "node:path";
 var KINDS_AWAITING_REPLY = new Set(["question", "escalation"]);
 function createsPendingAsk(kind) {
@@ -21610,7 +21629,7 @@ function sleep(ms, signal) {
 import { connect, createServer } from "node:net";
 
 // src/activation/transport/roster.ts
-import { existsSync as existsSync17, readdirSync as readdirSync3, readFileSync as readFileSync10 } from "node:fs";
+import { existsSync as existsSync17, readdirSync as readdirSync4, readFileSync as readFileSync10 } from "node:fs";
 import { homedir as homedir9 } from "node:os";
 import { join as join15 } from "node:path";
 var SUPPORTED_PEER_PROTOCOL = 1;
@@ -21689,7 +21708,7 @@ function scanRoster(options = {}) {
   const rejected = [];
   if (!existsSync17(dir))
     return { live, rejected };
-  for (const file of readdirSync3(dir)) {
+  for (const file of readdirSync4(dir)) {
     if (!file.endsWith(".json"))
       continue;
     let registration;
@@ -23396,7 +23415,7 @@ function saveState(store, record, state, note, links = {}, refusal) {
 }
 
 // src/activation/settlement-store.ts
-import { mkdirSync as mkdirSync7, readFileSync as readFileSync12, readdirSync as readdirSync4, writeFileSync as writeFileSync6 } from "node:fs";
+import { mkdirSync as mkdirSync7, readFileSync as readFileSync12, readdirSync as readdirSync5, writeFileSync as writeFileSync6 } from "node:fs";
 import { join as join18 } from "node:path";
 function safeSegment(id) {
   const safe = id.replace(/[^A-Za-z0-9.:_-]/g, "_");
@@ -23436,7 +23455,7 @@ function createFileSettlementStore(root) {
     listAttempts(activationId) {
       let files;
       try {
-        files = readdirSync4(join18(root, safeSegment(activationId)));
+        files = readdirSync5(join18(root, safeSegment(activationId)));
       } catch {
         return [];
       }
@@ -23458,7 +23477,7 @@ function createFileSettlementStore(root) {
   function readAll() {
     let activations;
     try {
-      activations = readdirSync4(root);
+      activations = readdirSync5(root);
     } catch {
       return [];
     }
@@ -23472,7 +23491,7 @@ function createFileSettlementStore(root) {
   function readActivationDir(activation) {
     let files;
     try {
-      files = readdirSync4(join18(root, activation));
+      files = readdirSync5(join18(root, activation));
     } catch {
       return [];
     }
@@ -26338,7 +26357,7 @@ async function verifyExactLineCitation(evidence, claim) {
 import { resolve as resolve11 } from "node:path";
 
 // src/activation/workspace-reconcile.ts
-import { appendFileSync as appendFileSync2, existsSync as existsSync22, mkdirSync as mkdirSync8, readdirSync as readdirSync5, readFileSync as readFileSync14, unlinkSync as unlinkSync4 } from "node:fs";
+import { appendFileSync as appendFileSync2, existsSync as existsSync22, mkdirSync as mkdirSync8, readdirSync as readdirSync6, readFileSync as readFileSync14, unlinkSync as unlinkSync4 } from "node:fs";
 import { userInfo } from "node:os";
 import { join as join20 } from "node:path";
 var PERMITTED = {
@@ -26473,7 +26492,7 @@ function projectUncertainWorkspaces(scope, probe = procLeaseProbe()) {
   if (!existsSync22(dir))
     return [];
   const out = [];
-  for (const entry of readdirSync5(dir)) {
+  for (const entry of readdirSync6(dir)) {
     if (!entry.endsWith(".json"))
       continue;
     const key = entry.slice(0, -".json".length);

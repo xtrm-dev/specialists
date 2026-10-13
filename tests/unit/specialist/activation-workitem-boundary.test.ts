@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { resolveGlobalNodeModulesDirs } from '../../../src/pi/session.js';
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -508,5 +509,56 @@ describe('resolveSubstrateModule layouts', () => {
   it('returns null when neither layout ships the module', () => {
     const dir = mkdtempSync(join(tmpdir(), 'substrate-empty-'));
     expect(resolveSubstrateModule(dir, REL)).toBeNull();
+  });
+});
+
+/**
+ * Global-modules prefix enumeration (SPECIALISTS-4271).
+ *
+ * Root existence says nothing about a package being inside it. Bun's own roots exist on a box
+ * where Substrate was installed under nvm, so stopping at the first existing root made
+ * `@jaggerxtrm/substrate` unresolvable to the bun-spawned Claude plugin MCP server while the same
+ * code resolved it under node. These pin the two properties that fix it: every existing root is
+ * kept, and the nvm scan does not depend on the running interpreter's version string (bun reports
+ * its own emulated version, so a `process.version`-derived path can name a directory that cannot
+ * exist).
+ */
+describe('global modules prefix enumeration', () => {
+  it('keeps every existing root, in precedence order', () => {
+    const roots = resolveGlobalNodeModulesDirs({
+      env: { PI_NPM_GLOBAL_DIR: '/explicit/node_modules', BUN_INSTALL: '/bun' },
+      home: '/home/u',
+      execPath: '/bun/bin/bun',
+      exists: (path) =>
+        [
+          '/explicit/node_modules',
+          '/bun/lib/node_modules',
+          '/bun/install/global/node_modules',
+          '/home/u/.nvm/versions/node/v24.15.0/lib/node_modules',
+        ].includes(path),
+      readDir: (path) => (path === '/home/u/.nvm/versions/node' ? ['v24.15.0'] : []),
+    });
+
+    expect(roots[0]).toBe('/explicit/node_modules'); // explicit override wins
+    expect(roots).toContain('/bun/install/global/node_modules'); // bun's real global root
+    // The durable part: found without any knowledge of which interpreter installed it.
+    expect(roots).toContain('/home/u/.nvm/versions/node/v24.15.0/lib/node_modules');
+  });
+
+  it('scans nvm versions newest-first and ignores non-version entries', () => {
+    const newestFirst = [
+      '/home/u/.nvm/versions/node/v24.15.0/lib/node_modules',
+      '/home/u/.nvm/versions/node/v22.1.0/lib/node_modules',
+    ];
+    const roots = resolveGlobalNodeModulesDirs({
+      env: {},
+      home: '/home/u',
+      execPath: '/bun/bin/bun',
+      exists: (path) => newestFirst.includes(path),
+      readDir: (path) =>
+        path === '/home/u/.nvm/versions/node' ? ['v22.1.0', 'v24.15.0', 'lts', '.cache'] : [],
+    });
+
+    expect(roots).toEqual(newestFirst); // v24 before v22; 'lts'/' .cache' never become candidates
   });
 });
