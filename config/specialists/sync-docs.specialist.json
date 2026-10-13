@@ -41,7 +41,8 @@
     },
     "skills": {
       "paths": [
-        "~/.xtrm/skills/optional/xtrm-maintenance/sync-docs/"
+        "~/.xtrm/skills/optional/xtrm-maintenance/sync-docs/",
+        "codemode"
       ],
       "scripts": [
         {

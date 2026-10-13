@@ -35,7 +35,8 @@
     },
     "skills": {
       "paths": [
-        "using-specialists"
+        "using-specialists",
+        "codemode"
       ]
     },
     "capabilities": {

@@ -43,7 +43,8 @@
     "skills": {
       "paths": [
         "service-knowledge",
-        "gitnexus"
+        "gitnexus",
+        "codemode"
       ],
       "scripts": [
         {

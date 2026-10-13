@@ -32,7 +32,9 @@
       "task_template": "Transform the following input using the brief above. Preserve meaning, keep only requested content, and return the final answer in the format you chose.\n\n$prompt"
     },
     "skills": {
-      "paths": [],
+      "paths": [
+        "codemode"
+      ],
       "scripts": []
     },
     "capabilities": {
