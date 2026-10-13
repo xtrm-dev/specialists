@@ -50,7 +50,8 @@
     },
     "skills": {
       "paths": [
-        "~/.xtrm/skills/optional/research-methods/research/SKILL.md"
+        "~/.xtrm/skills/optional/research-methods/research/SKILL.md",
+        "codemode"
       ],
       "scripts": []
     },

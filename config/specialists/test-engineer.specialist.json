@@ -97,7 +97,8 @@
     "skills": {
       "paths": [
         "planning",
-        "engineering-quality"
+        "engineering-quality",
+        "codemode"
       ],
       "scripts": []
     },

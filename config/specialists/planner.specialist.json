@@ -57,7 +57,8 @@
     },
     "skills": {
       "paths": [
-        "planning"
+        "planning",
+        "codemode"
       ],
       "scripts": []
     },

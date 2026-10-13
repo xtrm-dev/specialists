@@ -84,7 +84,9 @@
       "system_prompt_mode": "append"
     },
     "skills": {
-      "paths": [],
+      "paths": [
+        "codemode"
+      ],
       "scripts": [
         {
           "run": "git diff --stat HEAD 2>/dev/null || true",
