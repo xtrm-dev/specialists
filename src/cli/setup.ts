@@ -607,7 +607,7 @@ function renderInteractiveWorkflow(): string {
     '  5. Run sp setup --apply <plan.json> [--dry-run]',
     '  6. Optional: sp setup --probe-only <model> <spec>',
     '',
-    `  Skill reference: ${dim('docs/skills.md')}`,
+    `  Skill reference: ${dim('using-specialists')}`,
     '',
   ].join('\n');
 }
