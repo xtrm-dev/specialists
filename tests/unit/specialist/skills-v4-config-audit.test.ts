@@ -38,24 +38,39 @@ describe('skills-v4 default specialist wiring', () => {
     expect(violations).toEqual([]);
   });
 
+  it('wires the codemode skill into every shipped specialist definition', () => {
+    // Fleet rule, not a per-role favour: the codemode TOOL is granted to every tier
+    // (native catalog READ_ONLY/LOW/MEDIUM/HIGH), and a session reaches the codemode
+    // SKILL only through skills.paths. A definition that omits it gets the tool with no
+    // routing doctrine behind it, so the exemption list is deliberately empty.
+    const files = readdirSync(specialistsDir).filter((name) => name.endsWith('.specialist.json')).sort();
+    const missing = files.filter((file) => {
+      const paths = readSpec(file.replace('.specialist.json', '')).specialist.skills?.paths ?? [];
+      return !paths.includes('codemode');
+    });
+    expect(files.length).toBeGreaterThan(0);
+    expect(missing).toEqual([]);
+  });
+
   it('wires v4 umbrellas to specialists that materially depend on them', () => {
     expect(readSpec('planner').specialist.skills.paths).toEqual(['planning', 'codemode']);
-    expect(readSpec('chain-coordinator').specialist.skills.paths).toEqual(['using-specialists']);
-    expect(readSpec('node-coordinator').specialist.skills.paths).toEqual(['using-specialists']);
-    expect(readSpec('specialists-creator').specialist.skills.paths).toEqual(['using-specialists']);
+    expect(readSpec('chain-coordinator').specialist.skills.paths).toEqual(['using-specialists', 'codemode']);
+    expect(readSpec('node-coordinator').specialist.skills.paths).toEqual(['using-specialists', 'codemode']);
+    expect(readSpec('specialists-creator').specialist.skills.paths).toEqual(['using-specialists', 'codemode']);
     expect(readSpec('debugger').specialist.skills.paths).toEqual(['engineering-quality', 'gitnexus', 'codemode']);
-    expect(readSpec('explorer').specialist.skills.paths).toEqual(['gitnexus']);
+    expect(readSpec('explorer').specialist.skills.paths).toEqual(['gitnexus', 'codemode']);
     expect(readSpec('seconder').specialist.skills.paths).toEqual(['engineering-quality', 'gitnexus', 'codemode', 'open-code-review']);
     expect(readSpec('test-engineer').specialist.skills.paths).toEqual(['planning', 'engineering-quality', 'codemode']);
     expect(readSpec('researcher').specialist.skills.paths).toEqual(['~/.xtrm/skills/optional/research-methods/research/SKILL.md', 'codemode']);
     expect(readSpec('security-auditor').specialist.skills.paths).toEqual([
       '~/.xtrm/skills/optional/security-ops/security-ops/SKILL.md',
       '~/.xtrm/skills/optional/research-methods/research/SKILL.md',
+      'codemode',
     ]);
-    expect(readSpec('sync-docs').specialist.skills.paths).toEqual(['~/.xtrm/skills/optional/xtrm-maintenance/sync-docs/']);
-    expect(readSpec('service-knowledge-sync').specialist.skills.paths).toEqual(['service-knowledge', 'gitnexus']);
+    expect(readSpec('sync-docs').specialist.skills.paths).toEqual(['~/.xtrm/skills/optional/xtrm-maintenance/sync-docs/', 'codemode']);
+    expect(readSpec('service-knowledge-sync').specialist.skills.paths).toEqual(['service-knowledge', 'gitnexus', 'codemode']);
     expect(readSpec('reviewer').specialist.skills.paths).toEqual(['engineering-quality', 'gitnexus', 'codemode', 'open-code-review']);
-    expect(readSpec('xt-merge').specialist.skills.paths).toEqual([]);
+    expect(readSpec('xt-merge').specialist.skills.paths).toEqual(['codemode']);
   });
 
   it('keeps the fleet boundary required even when ordinary global quick rules are disabled', () => {

@@ -38,14 +38,16 @@
       "system_prompt_mode": "append"
     },
     "skills": {
+      "paths": [
+        "codemode"
+      ],
       "scripts": [
         {
           "phase": "pre",
           "inject_output": true,
           "run": "if [ -n \"${TEST_RUNNER_EXACT_COMMANDS:-}\" ]; then echo '[test-runner] exact-command mode \u2014 awaiting orchestrator/test-engineer command list'; printf '%s\\n' \"$TEST_RUNNER_EXACT_COMMANDS\"; elif [ -f package.json ]; then echo '[test-runner] manifest fallback: package.json \u2014 running bun --bun vitest run'; bun --bun vitest run 2>&1 | tail -100; elif [ -f pyproject.toml ] || [ -f pytest.ini ] || [ -f setup.cfg ]; then echo '[test-runner] manifest fallback: pyproject.toml/pytest.ini/setup.cfg \u2014 running python3 -m pytest'; python3 -m pytest --tb=short 2>&1 | tail -100; elif [ -f Cargo.toml ]; then echo '[test-runner] manifest fallback: Cargo.toml \u2014 running cargo test'; cargo test --quiet 2>&1 | tail -100; elif [ -f go.mod ]; then echo '[test-runner] manifest fallback: go.mod \u2014 running go test'; go test ./... 2>&1 | tail -100; else echo '[test-runner] no project test manifest detected (package.json, pyproject.toml, pytest.ini, setup.cfg, Cargo.toml, go.mod). No-op pre-script; awaiting orchestrator-supplied exact command.'; fi"
         }
-      ],
-      "paths": []
+      ]
     },
     "capabilities": {
       "required_tools": [],

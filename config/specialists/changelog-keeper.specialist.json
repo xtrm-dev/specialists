@@ -43,7 +43,8 @@
     },
     "skills": {
       "paths": [
-        "~/.xtrm/skills/optional/xtrm-maintenance/releasing"
+        "~/.xtrm/skills/optional/xtrm-maintenance/releasing",
+        "codemode"
       ],
       "scripts": [
         {

@@ -84,7 +84,8 @@
     "skills": {
       "paths": [
         "~/.xtrm/skills/optional/security-ops/security-ops/SKILL.md",
-        "~/.xtrm/skills/optional/research-methods/research/SKILL.md"
+        "~/.xtrm/skills/optional/research-methods/research/SKILL.md",
+        "codemode"
       ],
       "scripts": []
     },

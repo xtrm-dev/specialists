@@ -106,6 +106,12 @@
         }
       }
     },
+    "skills": {
+      "paths": [
+        "codemode"
+      ],
+      "scripts": []
+    },
     "capabilities": {
       "required_tools": [
         "read",
