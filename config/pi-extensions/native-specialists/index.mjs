@@ -262,6 +262,16 @@ export function formatSpendShort(tokenUsage) {
 }
 
 /**
+ * Turn count, spelled out: `1 turn` / `3 turns`. Null renders nothing, a real zero renders
+ * `0 turns` — turns are measured from dispatch on, so a zero is a measurement, not a
+ * missing value (unlike spend, which has no value until a provider reports one).
+ */
+export function formatTurnsShort(turnCount) {
+  if (turnCount === null || turnCount === undefined) return '';
+  return `${turnCount} turn${turnCount === 1 ? '' : 's'}`;
+}
+
+/**
  * Calm geometric spinner for a running-and-working entry.
  *
  * Replaces the ten-frame braille cycle: four quarter-disc frames at ~220ms read as
@@ -327,10 +337,10 @@ function rowMetrics({ view, ask, nowMs }) {
   const parts = [formatElapsedShort(view.elapsed_s)];
   // Turns are a real measurement from dispatch on, so a zero is shown as zero rather than
   // suppressed — unlike spend, which has no value until a provider reports one.
-  if (view.turn_count != null) parts.push(`${view.turn_count} turn${view.turn_count === 1 ? '' : 's'}`);
+  parts.push(formatTurnsShort(view.turn_count));
   const tokens = formatSpendShort(view.token_usage);
   if (tokens) parts.push(tokens);
-  return parts.join(' • ');
+  return parts.filter(Boolean).join(' • ');
 }
 
 /**
@@ -583,7 +593,7 @@ const FAIL_INSTRUCTION =
 function costFacts(view) {
   return [
     view ? formatElapsedShort(view.elapsed_s) : null,
-    view?.turn_count != null ? `${view.turn_count} turn${view.turn_count === 1 ? '' : 's'}` : null,
+    formatTurnsShort(view?.turn_count) || null,
     ...(view ? [formatSpendShort(view.token_usage)].filter(Boolean) : []),
   ].filter(Boolean).join(' • ');
 }
