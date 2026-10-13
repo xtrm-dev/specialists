@@ -35,6 +35,7 @@
     "config/catalog/",
     "config/nodes/",
     "config/hooks/",
+    "config/workflows/",
     "plugins/specialists/",
     "plugins/specialists-ui/",
     "config/pi-extensions/",
