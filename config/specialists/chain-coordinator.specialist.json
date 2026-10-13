@@ -2,14 +2,14 @@
   "specialist": {
     "metadata": {
       "name": "chain-coordinator",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "description": "Compatibility coordinator for one pinned XTRM/Substrate Issue or task-group. Coordinates Specialist activations and reports to the parent; never implements and never owns durable Issue lifecycle.",
       "category": "orchestration",
       "tags": [
         "coordinator",
         "interactive"
       ],
-      "updated": "2026-09-20"
+      "updated": "2026-10-13"
     },
     "execution": {
       "mode": "tool",

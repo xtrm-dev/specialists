@@ -2,7 +2,7 @@
   "specialist": {
     "metadata": {
       "name": "quant-researcher",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "description": "Quant evidence researcher. Use for mathematical finance formulas, exchange conventions, academic papers, package semantics, DeepWiki repo scans, and GitHub implementation snippets. Not for local code audits or edits; LOW research only.",
       "category": "quant-research",
       "tags": [
@@ -14,7 +14,7 @@
         "deepwiki",
         "finance"
       ],
-      "updated": "2026-09-06"
+      "updated": "2026-10-13"
     },
     "execution": {
       "mode": "tool",

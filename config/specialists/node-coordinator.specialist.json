@@ -2,7 +2,7 @@
   "specialist": {
     "metadata": {
       "name": "node-coordinator",
-      "version": "1.5.0",
+      "version": "1.5.1",
       "description": "LEGACY NodeSupervisor compatibility coordinator for research-node runs. Uses the existing sp node command surface; not the native Substrate activation authority and not for new durable workflow design.",
       "category": "orchestration",
       "tags": [
@@ -13,7 +13,7 @@
         "keep-alive",
         "worktree"
       ],
-      "updated": "2026-09-20"
+      "updated": "2026-10-13"
     },
     "execution": {
       "mode": "tool",

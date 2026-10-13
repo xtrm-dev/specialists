@@ -2,7 +2,7 @@
   "specialist": {
     "metadata": {
       "name": "service-knowledge-sync",
-      "version": "1.11.2",
+      "version": "1.11.3",
       "description": "Service Knowledge Librarian: resolves the consumer project-pack Service Knowledge skill while running registry scope and drift machinery from repo-local scripts.",
       "category": "documentation",
       "tags": [
@@ -12,7 +12,7 @@
         "librarian",
         "skill-docs"
       ],
-      "updated": "2026-10-06"
+      "updated": "2026-10-13"
     },
     "execution": {
       "mode": "tool",

@@ -2,10 +2,10 @@
   "specialist": {
     "metadata": {
       "name": "changelog-drafter",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "description": "READ_ONLY changelog drafting surface for xt release prepare. Use for bundle synthesis only; no publishing, tagging, commits, or file edits.",
       "category": "release",
-      "updated": "2026-05-05",
+      "updated": "2026-10-13",
       "tags": [
         "changelog",
         "release",

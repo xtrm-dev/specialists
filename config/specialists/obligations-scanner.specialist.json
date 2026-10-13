@@ -2,7 +2,7 @@
   "specialist": {
     "metadata": {
       "name": "obligations-scanner",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "description": "Cheap READ_ONLY pre-review marker scan (Iron-style obligations tracking). Scans executor diff for TODO/FIXME/HACK/XXX/TEMP/NOTE(release)/WIP in production code. Returns structured JSON the reviewer consumes. Verdict CLEAN | OBLIGATIONS_FOUND | BLOCKED. Target <30s. Not a gate itself — reviewer enforces.",
       "category": "quality",
       "tags": [
@@ -12,7 +12,7 @@
         "read-only",
         "iron-style"
       ],
-      "updated": "2026-09-20"
+      "updated": "2026-10-13"
     },
     "execution": {
       "mode": "tool",

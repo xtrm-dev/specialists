@@ -2,7 +2,7 @@
   "specialist": {
     "metadata": {
       "name": "explorer",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "description": "READ_ONLY codebase mapper for unknown architecture, call flows, dependencies, and implementation options. Use before executor when you need evidence, not edits. Not for bugs with symptoms; use debugger.",
       "category": "analysis",
       "tags": [
@@ -11,7 +11,7 @@
         "exploration",
         "gitnexus"
       ],
-      "updated": "2026-09-06"
+      "updated": "2026-10-13"
     },
     "execution": {
       "mode": "tool",
