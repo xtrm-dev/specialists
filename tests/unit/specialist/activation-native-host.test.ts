@@ -4215,7 +4215,7 @@ describe('createActivationResourceLoader codemode builtin', () => {
     expect(factories[0]!.factory).toBe(CODEMODE_FACTORY);
   });
 
-  it('supplies no factory for a tier whose catalog withholds codemode (LOW)', () => {
+  it('supplies no factory when no builtin path is passed (the path is the gate)', () => {
     const loader = createActivationResourceLoader(loaderSdk(true), {
       cwd: '/tmp/x',
       skillPaths: [],

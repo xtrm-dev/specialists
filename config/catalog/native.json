@@ -5,7 +5,7 @@
   "precedence": 0,
   "source_tiers": {
     "READ_ONLY": ["read", "grep", "find", "ls", "codemode"],
-    "LOW": ["read", "grep", "find", "ls", "bash"],
+    "LOW": ["read", "grep", "find", "ls", "bash", "codemode"],
     "MEDIUM": ["read", "grep", "find", "ls", "bash", "edit", "codemode"],
     "HIGH": ["read", "grep", "find", "ls", "bash", "edit", "write", "codemode"]
   }

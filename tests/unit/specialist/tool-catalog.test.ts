@@ -7,7 +7,7 @@ const EXPECTED_CONFLICT_SEMANTICS = '(1) most restrictive wins for tool inclusio
 
 const EXPECTED_NATIVE = {
   READ_ONLY: ['read', 'grep', 'find', 'ls', 'codemode'],
-  LOW: ['read', 'grep', 'find', 'ls', 'bash'],
+  LOW: ['read', 'grep', 'find', 'ls', 'bash', 'codemode'],
   MEDIUM: ['read', 'grep', 'find', 'ls', 'bash', 'edit', 'codemode'],
   HIGH: ['read', 'grep', 'find', 'ls', 'bash', 'edit', 'write', 'codemode'],
 };
