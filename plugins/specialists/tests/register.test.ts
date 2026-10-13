@@ -144,7 +144,7 @@ describe('register', () => {
     expect(drawn).toContain('executor:4245711d')
     expect(drawn).toContain('XTRM-464')
     expect(drawn).toContain('Implement the fleet band')
-    expect(drawn).toContain('2m14s • 3t • 12k')
+    expect(drawn).toContain('2m14s • 3 turns • 12k')
   })
 
   test('the watch parks server-side instead of polling at a fixed rate (SPECIALISTS-4218)', async ($, on) => {

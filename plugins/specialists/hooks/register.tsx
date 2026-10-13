@@ -177,10 +177,17 @@ export function markerOf(row: Activation, ask: Ask | undefined, nowMs: number): 
   return '●'
 }
 
+/** Turn count, spelled out: `1 turn` / `3 turns`. Mirrors the Pi extension's formatTurnsShort. */
+export function turnsShort(turnCount?: number): string {
+  if (turnCount === null || turnCount === undefined) return ''
+  return `${turnCount} turn${turnCount === 1 ? '' : 's'}`
+}
+
 export function metricsOf(row: Activation, ask: Ask | undefined, nowMs: number): string {
   if (ask) return `waiting ${elapsedShort((nowMs - (ask.asked_at ?? nowMs)) / 1000)}`
   const parts = [elapsedShort(row.elapsed_s)]
-  if (row.turn_count != null) parts.push(`${row.turn_count}t`)
+  const turns = turnsShort(row.turn_count)
+  if (turns) parts.push(turns)
   const spend = spendShort(row.token_usage)
   if (spend) parts.push(spend)
   if (row.result_status) parts.push(row.result_status)
