@@ -12,7 +12,7 @@ vi.mock('node:child_process', () => ({
 }));
 
 import { execFileSync, spawn } from 'node:child_process';
-import { PiAgentSession, StallTimeoutError, applyExtensionToolPolicyGate, deduplicateExtensionSources, resolveExecutionExtensionSelection, resolveRuntimeToolContract, validateWriteToolPathAgainstBoundary } from '../../../src/pi/session.js';
+import { PiAgentSession, StallTimeoutError, applyExtensionToolPolicyGate, deduplicateExtensionSources, resolveCuratedExtensionPaths, resolveExecutionExtensionSelection, resolveRuntimeToolContract, validateWriteToolPathAgainstBoundary } from '../../../src/pi/session.js';
 import { __resetPiExtensionsPythonKernelPathCacheForTest } from '../../../src/pi/python-kernel-extension.js';
 import { catalogVersion } from '../../utils/catalog-pin.js';
 import { getExtensionToolPolicyExtensionPath, NATIVE_TOOLS_ENV_KEY } from '../../../src/pi/extension-tool-policy-extension.js';
@@ -960,6 +960,18 @@ describe('PiAgentSession', () => {
       expect(flagIndex).toBeGreaterThan(-1);
       expect(args[flagIndex - 1]).toBe('-e');
       expect(getToolsArg(args)?.split(',')).toContain('codemode');
+    });
+
+    it('routes the granted codemode extension through the curated list the native loader uses', () => {
+      // The native activation builds its resource loader from resolveCuratedExtensionPaths, so a
+      // granted builtin tool must appear here or the loader never loads the extension that
+      // registers it — the allowlist cannot conjure a tool that was never loaded.
+      const granted = resolveRuntimeToolContract({ level: 'READ_ONLY' });
+      const curated = resolveCuratedExtensionPaths({ permissionLevel: 'READ_ONLY', resolvedToolContract: granted });
+      expect(curated.all).toContain('builtin:codemode');
+
+      const withheld = resolveCuratedExtensionPaths({ permissionLevel: 'LOW', resolvedToolContract: resolveRuntimeToolContract({ level: 'LOW' }) });
+      expect(withheld.all).not.toContain('builtin:codemode');
     });
 
     it('does not load builtin:codemode for a tier the catalog does not grant it to', async () => {
