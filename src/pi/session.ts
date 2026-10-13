@@ -593,6 +593,22 @@ export function sessionResourceFenceArgv(): { head: string[]; tail: string[] } {
 }
 
 /**
+ * Built-in Pi tools a resolved contract may grant, mapped to the built-in extension that
+ * registers them.
+ *
+ * The resource fence passes `--no-extensions`, which also disables built-in extensions (see
+ * the Pi docs, `docs/cli.md`: "Disables discovered, configured, and built-in extensions"),
+ * so a granted built-in tool never reaches the registry however the allowlist is written —
+ * `-e builtin:<name>` is the documented way to load one explicitly.
+ *
+ * Activation stays gated downstream: the tool-policy extension activates builtin-sourced
+ * tools only when the contract names them among the granted natives, and without the policy
+ * gate the `--tools` flag carries the same list. Adding a built-in here is therefore a
+ * declaration, not an authorization.
+ */
+const BUILTIN_TOOL_EXTENSIONS: Readonly<Record<string, string>> = { codemode: 'builtin:codemode' };
+
+/**
  * Which of the five discovery fences a session argv actually disables.
  *
  * The inverse of `sessionResourceFenceArgv`: a present flag means the fence is DISABLED,
@@ -1164,6 +1180,14 @@ export class PiAgentSession {
     }
     if (resolvedToolContract?.toolsFlag && (resolvedToolContract.exposedExtensionSources?.length ?? 0) === 0) {
       args.push('--tools', resolvedToolContract.toolsFlag);
+    }
+
+    // Load the built-in extension behind any built-in tool the contract grants (codemode),
+    // because the fence above disabled built-in extensions. SPECIALISTS-4260: without this
+    // the codemode skill was declared and loaded while the tool behind it could never
+    // activate, so the role prompts naming it were inert.
+    for (const [tool, extension] of Object.entries(BUILTIN_TOOL_EXTENSIONS)) {
+      if (resolvedToolContract?.nativeTools.includes(tool)) args.push('-e', extension);
     }
 
     // Thinking level (models that don't support it ignore the flag)

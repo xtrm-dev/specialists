@@ -50,7 +50,8 @@
           "read",
           "grep",
           "find",
-          "ls"
+          "ls",
+          "codemode"
         ],
         "LOW": [
           "read",
@@ -65,7 +66,8 @@
           "find",
           "ls",
           "bash",
-          "edit"
+          "edit",
+          "codemode"
         ],
         "HIGH": [
           "read",
@@ -74,7 +76,8 @@
           "ls",
           "bash",
           "edit",
-          "write"
+          "write",
+          "codemode"
         ]
       }
     },
