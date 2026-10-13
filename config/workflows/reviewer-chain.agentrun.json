@@ -1,0 +1,110 @@
+{
+  "v": 2,
+  "name": "reviewer-chain-gate",
+  "schemas": {
+    "Input": {
+      "type": "object",
+      "properties": {
+        "note": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "note"
+      ],
+      "additionalProperties": false
+    },
+    "SeconderTriage": {
+      "type": "object",
+      "properties": {
+        "supported": {
+          "type": "boolean"
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "supported",
+        "summary"
+      ],
+      "additionalProperties": false
+    },
+    "ReviewerVerdict": {
+      "type": "object",
+      "properties": {
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "PASS",
+            "PARTIAL",
+            "FAIL"
+          ]
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "verdict",
+        "rationale"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "input": {
+    "schemaId": "Input"
+  },
+  "output": {
+    "schemaId": "ReviewerVerdict",
+    "path": "verdict"
+  },
+  "root": {
+    "node": "chain",
+    "steps": [
+      {
+        "node": "extract",
+        "label": "seconder-triage",
+        "instructions": "Read the review note. If it lacks concrete scope (which files changed and which contract sections apply), return supported=false with a one-line summary of what is missing. Otherwise return supported=true with a one-line summary of the change. Transcribe only; do not judge quality and invent nothing.",
+        "state": {
+          "note": "{note}"
+        },
+        "requires": [
+          "note"
+        ],
+        "tools": [],
+        "out": "SeconderTriage",
+        "as": "triage"
+      },
+      {
+        "node": "escalate",
+        "label": "request-scope",
+        "when": {
+          "predicate": "field_equals",
+          "path": "triage.supported",
+          "value": false
+        },
+        "kind": "needs_input",
+        "stage": "scoping",
+        "summary": "Need the changed-file list and applicable contract sections before a verdict can be produced."
+      },
+      {
+        "node": "extract",
+        "label": "reviewer-verdict",
+        "instructions": "Given the supported triage summary, return a conservative verdict: PASS only if the summary names concrete changed files and applicable contract sections; otherwise PARTIAL. One-line rationale. Do not invent evidence.",
+        "state": {
+          "triage": "{triage}"
+        },
+        "requires": [
+          "triage"
+        ],
+        "tools": [],
+        "out": "ReviewerVerdict",
+        "as": "verdict"
+      }
+    ]
+  }
+}
