@@ -2,14 +2,15 @@
   "specialist": {
     "metadata": {
       "name": "bare",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "description": "TEMPLATE \u2014 do not dispatch. Copy from the installed @jaggerxtrm/specialists package to .specialists/user/<your-name>.specialist.json and customize for your own task. Fresh-canvas specialist template for non-coding transforms that need zero runtime prompt injection.",
       "category": "template",
       "tags": [
         "template",
         "bare-mode",
         "copy-me"
-      ]
+      ],
+      "updated": "2026-10-13"
     },
     "execution": {
       "bare": true,

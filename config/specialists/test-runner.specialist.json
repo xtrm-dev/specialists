@@ -2,7 +2,7 @@
   "specialist": {
     "metadata": {
       "name": "test-runner",
-      "version": "2.0.1",
+      "version": "2.0.2",
       "description": "LOW-permission test execution and failure interpretation. Prefers exact commands from test-engineer/orchestrator, then falls back to manifest-detected runner only when no exact command is provided. Runs smoke/E2E/live-contract checks when requested, captures requested log/telemetry evidence, and classifies failures by owner. Does not implement fixes or write tests; hand findings to debugger/executor or test-engineer.",
       "category": "testing",
       "tags": [
@@ -10,7 +10,7 @@
         "debugging",
         "polyglot"
       ],
-      "updated": "2026-06-01"
+      "updated": "2026-10-13"
     },
     "execution": {
       "mode": "tool",
