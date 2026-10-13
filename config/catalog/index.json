@@ -58,7 +58,8 @@
           "grep",
           "find",
           "ls",
-          "bash"
+          "bash",
+          "codemode"
         ],
         "MEDIUM": [
           "read",
