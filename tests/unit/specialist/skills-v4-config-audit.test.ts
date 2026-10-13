@@ -45,7 +45,7 @@ describe('skills-v4 default specialist wiring', () => {
     expect(readSpec('specialists-creator').specialist.skills.paths).toEqual(['using-specialists']);
     expect(readSpec('debugger').specialist.skills.paths).toEqual(['engineering-quality', 'gitnexus', 'codemode']);
     expect(readSpec('explorer').specialist.skills.paths).toEqual(['gitnexus']);
-    expect(readSpec('seconder').specialist.skills.paths).toEqual(['engineering-quality', 'gitnexus', 'codemode']);
+    expect(readSpec('seconder').specialist.skills.paths).toEqual(['engineering-quality', 'gitnexus', 'codemode', 'open-code-review']);
     expect(readSpec('test-engineer').specialist.skills.paths).toEqual(['planning', 'engineering-quality', 'codemode']);
     expect(readSpec('researcher').specialist.skills.paths).toEqual(['~/.xtrm/skills/optional/research-methods/research/SKILL.md', 'codemode']);
     expect(readSpec('security-auditor').specialist.skills.paths).toEqual([
@@ -54,7 +54,7 @@ describe('skills-v4 default specialist wiring', () => {
     ]);
     expect(readSpec('sync-docs').specialist.skills.paths).toEqual(['~/.xtrm/skills/optional/xtrm-maintenance/sync-docs/']);
     expect(readSpec('service-knowledge-sync').specialist.skills.paths).toEqual(['service-knowledge', 'gitnexus']);
-    expect(readSpec('reviewer').specialist.skills.paths).toEqual(['engineering-quality', 'gitnexus', 'codemode']);
+    expect(readSpec('reviewer').specialist.skills.paths).toEqual(['engineering-quality', 'gitnexus', 'codemode', 'open-code-review']);
     expect(readSpec('xt-merge').specialist.skills.paths).toEqual([]);
   });
 

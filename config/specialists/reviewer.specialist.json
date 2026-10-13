@@ -46,7 +46,8 @@
       "paths": [
         "engineering-quality",
         "gitnexus",
-        "codemode"
+        "codemode",
+        "open-code-review"
       ],
       "scripts": []
     },
