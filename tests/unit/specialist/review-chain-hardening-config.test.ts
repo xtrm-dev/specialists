@@ -40,6 +40,7 @@ describe('review-chain hardening specialist configs', () => {
 
     expect(spec.specialist.metadata.version).toBe('2.3.1');
     expect(system).toContain('ocr-preflight.mjs');
+    expect(system).toContain('Run the ocr lane in one codemode cell');
     expect(system).toContain('must exit 0 before you report coverage');
     expect(system).toContain('the tree is the implementation truth');
     expect(system).toContain('Where claimed coverage and the tree disagree, the tree wins');
