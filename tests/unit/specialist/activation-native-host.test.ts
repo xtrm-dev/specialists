@@ -45,12 +45,12 @@ vi.mock('node:child_process', async (importOriginal) => {
     },
   };
 });
-import { NativeActivationHost, createActivationResourceLoader, resolveWorkspace, resolveDeclaredExtensionSources, resolveNpmExtensionSource, resolveGitExtensionSource, expectedRemoteExtensionLabels, formatSkippedExtensionSourceMessage, unresolvableNpmSources, type ActivationForensicSink } from '../../../src/activation/native-host.js';
+import { NativeActivationHost, createActivationResourceLoader, createNativeToolAdmission, resolveWorkspace, resolveDeclaredExtensionSources, resolveNpmExtensionSource, resolveGitExtensionSource, expectedRemoteExtensionLabels, formatSkippedExtensionSourceMessage, unresolvableNpmSources, type ActivationForensicSink } from '../../../src/activation/native-host.js';
 import { ASK_TOOL, ESCALATE_TOOL } from '../../../src/activation/ask-tool.js';
 import { buildSystemPrompt } from '../../../src/specialist/system-prompt.js';
 import { resolveOutputContractSchema } from '../../../src/specialist/runner.js';
 import { DispatchRejectedError } from '../../../src/activation/types.js';
-import { acquire as acquireLease, leasePath } from '../../../src/activation/workspace-lease.js';
+import { acquire as acquireLease, leasePath, release as releaseLease, workspaceIdentityFor } from '../../../src/activation/workspace-lease.js';
 import type { PiSdk, PiAgentSessionLike, PiAgentSessionEvent } from '../../../src/activation/pi-sdk.js';
 import { createSpecialistStatusTool } from '../../../src/tools/specialist/specialist_status.tool.js';
 import { CircuitBreaker } from '../../../src/utils/circuitBreaker.js';
@@ -2392,6 +2392,62 @@ describe('permission-guard native surface', () => {
     } finally {
       if (previousTier === undefined) delete process.env[TIER_KEY];
       else process.env[TIER_KEY] = previousTier;
+    }
+  });
+});
+
+/**
+ * Lease admission for sandboxed bash (SPECIALISTS-4294 follow-on).
+ *
+ * Live probe act:1cad8f58-2ec on the fresh guard build showed the permission guard
+ * PASSING (no bwrap-self-check refusal) while execution died one layer down: the
+ * lease refuses every bash call from a leaseless READ activation because
+ * `isMutatingTool('bash')` is true. But a guard-wrapped bash cannot mutate the
+ * workspace (`--ro-bind / /`), so refusing it is over-broad — and it makes the
+ * #484/#485 READ_ONLY bash grant inert on the native path for a second reason.
+ * `createNativeToolAdmission` carves out exactly guard-loaded bash; these pin it.
+ */
+describe('native tool admission for guarded bash', () => {
+  it('allows bash without a lease when the guard is loaded', () => {
+    const admit = createNativeToolAdmission({
+      guardLoaded: true,
+      workspace: workspaceIdentityFor(hostWorkspace()),
+      activationId: 'reader-1',
+    });
+    expect(admit('bash')).toEqual({ allow: true });
+    expect(admit('BASH')).toEqual({ allow: true });
+  });
+
+  it('still refuses bash without a lease when the guard is not loaded', () => {
+    const admit = createNativeToolAdmission({
+      guardLoaded: false,
+      workspace: workspaceIdentityFor(hostWorkspace()),
+      activationId: 'reader-1',
+    });
+    const verdict = admit('bash');
+    expect(verdict.allow).toBe(false);
+    expect(verdict.reason ?? '').toContain('not leased');
+  });
+
+  it('carve-out is bash-only: edit stays refused without a lease', () => {
+    const admit = createNativeToolAdmission({
+      guardLoaded: true,
+      workspace: workspaceIdentityFor(hostWorkspace()),
+      activationId: 'reader-1',
+    });
+    expect(admit('edit').allow).toBe(false);
+    expect(admit('write').allow).toBe(false);
+  });
+
+  it('writer admission is unchanged: a held lease allows everything', () => {
+    const workspace = workspaceIdentityFor(hostWorkspace());
+    acquireLease({ workspace, activationId: 'writer-1', attemptId: 'a1', specialist: 'writer' });
+    try {
+      const admit = createNativeToolAdmission({ guardLoaded: false, workspace, activationId: 'writer-1' });
+      expect(admit('bash').allow).toBe(true);
+      expect(admit('edit').allow).toBe(true);
+    } finally {
+      releaseLease(workspace, 'writer-1');
     }
   });
 });

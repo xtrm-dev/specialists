@@ -741,6 +741,32 @@ export function createActivationResourceLoader(
 }
 
 /**
+ * Lease admission for the native session's reconstructed tools (SPECIALISTS-4294).
+ *
+ * Phase-1 permission-guard carve-out: every bash call in a guard-loaded session runs
+ * through the guard's `tool_call` wrapper first (block or bwrap-sandbox), and the
+ * sandbox boundary (`--ro-bind / /`, private /tmp+/run, no net) cannot mutate the
+ * workspace — so the lease, which exists to stop unleased MUTATION, has nothing to
+ * refuse. Without the guard loaded, bash stays a lease refusal like any other
+ * mutator (and granted-but-unloaded bash is already a dispatch refusal).
+ *
+ * `guardLoaded` (the guard IS in this session's extension set) is the load-bearing
+ * fact, not the tier that caused it: the curated set admits the guard for READ_ONLY
+ * only, so writers never satisfy it and their admission is unchanged, as is every
+ * non-bash tool.
+ */
+export function createNativeToolAdmission(input: {
+  guardLoaded: boolean;
+  workspace: WorkspaceIdentity;
+  activationId: string;
+}): (toolName: string) => { allow: boolean; reason?: string } {
+  return (toolName) => {
+    if (toolName.trim().toLowerCase() === 'bash' && input.guardLoaded) return { allow: true };
+    return admitToolCall({ toolName, workspace: input.workspace, activationId: input.activationId });
+  };
+}
+
+/**
  * Error classes the fallback walk advances past. The classifier itself is shared with
  * the CLI runner (`classifyFallbackError` in runner.ts) — this set is only the native
  * half of the CLI's `isTransient && !isAuth` rule, restated as classes so the two
@@ -1761,7 +1787,13 @@ export class NativeActivationHost {
     const guardedTools = createGuardedTools(sdk, {
       toolNames: effectiveToolContract.toolsList,
       cwd: workspace.worktreePath,
-      admit: toolName => admitToolCall({ toolName, workspace, activationId }),
+      // Lease admission with the phase-1 guard carve-out: sandboxed bash in a
+      // guard-loaded session is not a mutation, so the lease does not refuse it.
+      admit: createNativeToolAdmission({
+        guardLoaded: curatedExtensions.all.includes(getPermissionGuardExtensionPath() ?? ''),
+        workspace,
+        activationId,
+      }),
     });
 
     if (guardedTools.unguardable.length > 0) {
