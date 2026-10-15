@@ -127,7 +127,7 @@ xt update --repo <repo> --apply
 xt update --root <projects-root> --apply
 ```
 
-Omit `--apply` for a dry run. See [skills.md](skills.md), [hooks.md](hooks.md), and the `update-specialists` skill for the operator-facing flow.
+Omit `--apply` for a dry run. See [skills.md](skills.md) and [hooks.md](hooks.md) for the operator-facing flow.
 
 ## Pin a specialist version
 
