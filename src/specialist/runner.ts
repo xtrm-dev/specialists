@@ -399,7 +399,11 @@ function validateShebang(filePath: string, errors: string[]): void {
 
 /** Pi tools known to be gated by permission level. Tools not in this map are assumed available at all levels. */
 const PERMISSION_GATED_TOOLS: Record<string, string[]> = {
-  bash:  ['LOW', 'MEDIUM', 'HIGH'],
+  // bash at READ_ONLY is the phase-1 permission guard (SPECIALISTS-4285):
+  // sandboxed via the guard extension when SPECIALISTS_PERMISSION_GUARD=1.
+  // Flag-off stays correct because validateBeforeRun also requires the tool
+  // in the resolved contract, which withholds bash without the guard.
+  bash:  ['READ_ONLY', 'LOW', 'MEDIUM', 'HIGH'],
   edit:  ['MEDIUM', 'HIGH'],
   write: ['HIGH'],
 };

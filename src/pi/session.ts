@@ -40,6 +40,7 @@ export class StallTimeoutError extends Error {
 import { createHash } from 'node:crypto';
 import { getReadLineNumbersExtensionPath } from './read-line-numbers-extension.js';
 import { getExtensionToolPolicyExtensionPath, NATIVE_TOOLS_ENV_KEY, REQUIRED_EXTENSION_TOOLS_ENV_KEY } from './extension-tool-policy-extension.js';
+import { getPermissionGuardExtensionPath, isPermissionGuardEnabled, resolvePermissionGuardForSpawn, shouldGrantGuardedBash } from './permission-guard-extension.js';
 import { resolvePiExtensionsPythonKernelPath } from './python-kernel-extension.js';
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
@@ -417,6 +418,9 @@ export function resolveRuntimeToolContract(options: {
   try {
     contract = buildResolvedToolContract({
       tier,
+      // Phase-1 permission guard (SPECIALISTS-4285): sandboxed bash for
+      // READ_ONLY only when the flag is on AND the guard artifact resolves.
+      grantGuardedBash: shouldGrantGuardedBash(tier),
       catalogs: runtimeCatalogs,
       catalogDefaultOverrides: catalogIndex.default_overrides,
       manifestPolicy: options.specialistPermissions ? { permissions: options.specialistPermissions } : undefined,
@@ -445,6 +449,21 @@ export function resolveRuntimeToolContract(options: {
   }
   if (!contract.toolsFlag.trim()) {
     throw new RuntimeToolCatalogResolutionError('empty_tool_contract');
+  }
+  if (
+    tier === 'READ_ONLY' &&
+    isPermissionGuardEnabled() &&
+    !contract.nativeTools.includes('bash')
+  ) {
+    // Flag on but the grant withheld (guard artifact missing): say so on the
+    // contract rather than silently running READ_ONLY without bash.
+    contract = {
+      ...contract,
+      warnings: [
+        ...contract.warnings,
+        'permission-guard: SPECIALISTS_PERMISSION_GUARD=1 but the guard artifact is missing; READ_ONLY bash withheld',
+      ],
+    };
   }
   return contract;
 }
@@ -718,6 +737,17 @@ export function resolveCuratedExtensionPaths(options: {
   // resource-loader.d.ts), so no package resolution is involved.
   if ((options.resolvedToolContract?.nativeTools ?? []).includes('codemode')) {
     all.push(BUILTIN_CODEMODE_EXTENSION);
+  }
+  // Phase-1 permission guard (SPECIALISTS-4285): sandboxed bash for READ_ONLY
+  // when SPECIALISTS_PERMISSION_GUARD=1. Owned here — the single curated set
+  // both runtimes consume (legacy CLI argv AND native loader extensionPaths)
+  // — so the two surfaces cannot drift on whether the guard is loaded, and
+  // the parity harness (which compiles the legacy profile from this helper)
+  // sees the same set the real spawn gets. shouldGrantGuardedBash is false
+  // when the flag is off or the artifact is missing: nothing loads, and the
+  // resolver withholds bash by the same predicate.
+  if (shouldGrantGuardedBash(permLevel)) {
+    all.push(getPermissionGuardExtensionPath()!);
   }
   return {
     all,
@@ -1317,10 +1347,16 @@ export class PiAgentSession {
     const readLineNumbersPath = getReadLineNumbersExtensionPath();
     if (readLineNumbersPath) args.push('-e', readLineNumbersPath);
 
+    // Phase-1 permission guard tier channel (SPECIALISTS-4285): the -e comes
+    // from the curated set above; the env tells the guard its tier.
+    // Fail-closed (throws) when wanted but missing.
+    const policyEnv: Record<string, string> = {};
+    const guard = resolvePermissionGuardForSpawn(this.options.permissionLevel);
+    if (guard) Object.assign(policyEnv, guard.tierEnv);
+
     // Extension tool policy (unitAI-34pyf): appended LAST (-e) so every
     // configured source is registered before session_start. Re-activates the
     // granted natives + all extension-registered tools under --no-builtin-tools.
-    const policyEnv: Record<string, string> = {};
     applyExtensionToolPolicyGate(args, resolvedToolContract, policyEnv);
 
     const hookEnv = {

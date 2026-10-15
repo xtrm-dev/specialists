@@ -1,0 +1,17 @@
+{
+  "name": "@jaggerxtrm-bundled/permission-guard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Sandboxed bash for READ_ONLY specialists: bubblewrap boundary, fail closed, flagged (SPECIALISTS-4285 phase 1).",
+  "license": "MIT",
+  "type": "module",
+  "main": "index.mjs",
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.99.0"
+  },
+  "pi": {
+    "extensions": [
+      "./index.mjs"
+    ]
+  }
+}

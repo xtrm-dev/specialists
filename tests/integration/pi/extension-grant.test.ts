@@ -13,7 +13,20 @@
 // existing convention); the malformed-source failure leg needs no model but
 // needs the pi binary, so it stays under the same guard.
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+// Exact-toolset assertions predate the phase-1 permission guard
+// (SPECIALISTS-4285): pin the flag off so they do not float with the
+// ambient environment.
+let savedPermissionGuardFlag: string | undefined;
+beforeEach(() => {
+  savedPermissionGuardFlag = process.env.SPECIALISTS_PERMISSION_GUARD;
+  delete process.env.SPECIALISTS_PERMISSION_GUARD;
+});
+afterEach(() => {
+  if (savedPermissionGuardFlag === undefined) delete process.env.SPECIALISTS_PERMISSION_GUARD;
+  else process.env.SPECIALISTS_PERMISSION_GUARD = savedPermissionGuardFlag;
+});
 import { catalogVersion } from '../../utils/catalog-pin.js';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readdirSync } from 'node:fs';

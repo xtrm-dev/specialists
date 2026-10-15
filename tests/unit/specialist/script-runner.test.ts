@@ -607,6 +607,60 @@ describe('runScriptSpecialist resolved tool contract', () => {
   });
 });
 
+describe('permission-guard raw-spawn surface (SPECIALISTS-4285)', () => {
+  const GUARD_KEY = 'SPECIALISTS_PERMISSION_GUARD';
+  const TIER_KEY = 'PI_SPECIALIST_PERMISSION_TIER';
+  let previousGuard: string | undefined;
+  let previousTier: string | undefined;
+
+  beforeEach(() => {
+    previousGuard = process.env[GUARD_KEY];
+    previousTier = process.env[TIER_KEY];
+  });
+
+  afterEach(() => {
+    if (previousGuard === undefined) delete process.env[GUARD_KEY];
+    else process.env[GUARD_KEY] = previousGuard;
+    if (previousTier === undefined) delete process.env[TIER_KEY];
+    else process.env[TIER_KEY] = previousTier;
+  });
+
+  async function runRawSpawn(): Promise<{ args: string[]; env?: Record<string, string> }> {
+    const child = createSpawnMock();
+    const resultPromise = runScriptSpecialist(
+      { specialist: 'changelog-drafter', template: 'draft $name', variables: { name: 'notes' } },
+      { loader: makeLoader(baseSpec as never) as never, projectDir: '.' },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    child.stdout.emit('data', Buffer.from(`${JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }] } })}\n`));
+    child.emit('close', 0);
+    await resultPromise;
+    return { args: spawnMock.mock.calls[0][1] as string[], env: (spawnMock.mock.calls[0][2] as { env?: Record<string, string> })?.env };
+  }
+
+  function extensionPaths(args: string[]): string[] {
+    return args
+      .map((arg, index) => (arg === '-e' ? args[index + 1] : null))
+      .filter((value): value is string => Boolean(value));
+  }
+
+  it('loads the guard -e with the tier channel for READ_ONLY when the flag is on', async () => {
+    process.env[GUARD_KEY] = '1';
+    const { getPermissionGuardExtensionPath } = await import('../../../src/pi/permission-guard-extension.js');
+    const { args, env } = await runRawSpawn();
+    expect(extensionPaths(args)).toContain(getPermissionGuardExtensionPath());
+    expect(env?.[TIER_KEY]).toBe('READ_ONLY');
+  });
+
+  it('loads nothing extra when the flag is off', async () => {
+    delete process.env[GUARD_KEY];
+    const { getPermissionGuardExtensionPath } = await import('../../../src/pi/permission-guard-extension.js');
+    const { args, env } = await runRawSpawn();
+    expect(extensionPaths(args)).not.toContain(getPermissionGuardExtensionPath());
+    expect(env?.[TIER_KEY]).toBeUndefined();
+  });
+});
+
 describe('collectRequiredOutputKeys', () => {
   it('returns expected_output_keys for text-format specs', () => {
     const spec = {

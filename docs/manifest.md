@@ -70,7 +70,7 @@ The flat tool list emitted to `pi --tools` is the union of each catalog's `sourc
 
 | Tier | Native | GitNexus |
 |------|--------|----------|
-| `READ_ONLY` | read, grep, find, ls | read tools (query/context/impact/detect_changes/list_repos) |
+| `READ_ONLY` | read, grep, find, ls (+ bash sandboxed, flag-gated — see below) | read tools (query/context/impact/detect_changes/list_repos) |
 | `LOW` | + bash | same as READ_ONLY |
 | `MEDIUM` | + edit | + rename, cypher |
 | `HIGH` | + write | same as MEDIUM |
@@ -153,6 +153,30 @@ Why: explorer is meant to discover code through the symbol/process graph. GitNex
 - **Tier defaults are correct.** Most specialists are in this bucket.
 - You're tempted to copy explorer's block into another specialist "just in case." Don't — drift is a real cost, and the file then has to track catalog changes by hand.
 - You want to *add* tools beyond the tier default. The override block can only deny natives, not extend the catalog. Adjust the catalog file or change the specialist's tier instead.
+
+## Sandboxed bash for READ_ONLY (phase 1 permission guard)
+
+READ_ONLY specialists have no bash by default, so read-only roles cannot run
+deterministic read-only commands (`git diff`, `ocr delegate preview`,
+linters). With `SPECIALISTS_PERMISSION_GUARD=1`, READ_ONLY gains a `bash`
+tool whose every invocation — direct or nested from a codemode cell — runs
+inside bubblewrap: whole filesystem read-only, a private writable `/tmp`,
+`/run` masked (no user bus / docker socket) with pid+ipc namespaces,
+network unshared, credential paths masked (`~/.ssh`, `~/.aws`, `~/.gnupg`,
+`.config/gh`, `.config/gcloud`, `.config/glab-cli`, `.docker`, `.netrc`,
+`.npmrc`, `.git-credentials`, `.pi/agent*`, `.claude/.credentials*`), `--clearenv`
+with an allowlist (PATH HOME USER LOGNAME SHELL LANG LC_* TERM PI_*),
+`--die-with-parent --new-session`.
+The run cwd comes from the session (worktree) context, and bwrap is invoked
+by absolute path.
+
+The boundary is the OS sandbox, not command-pattern rules. If bwrap is
+unavailable or fails its startup self-check, bash is refused with a clear
+reason — never run raw. With the flag off, tool sets are byte-for-byte
+unchanged. The guard loads on all three launch surfaces (CLI spawn, raw CLI
+spawn, native activation via MCP or the native-specialists extension); a
+surface that cannot load the guard withholds READ_ONLY bash. LOW/MEDIUM/HIGH
+write confinement and network allowlists are phase 2.
 
 ## Inspecting the resolution
 

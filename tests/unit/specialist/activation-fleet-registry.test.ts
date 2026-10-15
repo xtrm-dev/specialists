@@ -74,6 +74,14 @@ function makeSdk(session: PiAgentSessionLike): PiSdk {
       diagnostics: [],
     }),
     defineTool: (d) => d,
+    // The mutating builtins pi exports (SPECIALISTS-4285): the host
+    // reconstructs these as lease-guarded custom tools and refuses a dispatch
+    // when it cannot. Phase-1 guarded READ_ONLY bash reaches this path with
+    // the flag on; model the real surface.
+    createEditTool: () => ({ name: 'edit', execute: async () => 'edited' }),
+    createWriteTool: () => ({ name: 'write', execute: async () => 'written' }),
+    createBashTool: () => ({ name: 'bash', execute: async () => 'ran' }),
+    createPowerShellTool: () => ({ name: 'powershell', execute: async () => 'ran' }),
   };
 }
 

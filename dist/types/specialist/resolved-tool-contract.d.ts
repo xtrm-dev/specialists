@@ -32,6 +32,13 @@ export interface ResolvedToolContract {
     extensions: Partial<Record<Exclude<ToolCatalogName, 'native'>, ResolvedExtensionContract>>;
 }
 interface BuildResolvedToolContractInput extends ResolverInput {
+    /**
+     * Phase-1 permission guard (SPECIALISTS-4285): grant sandboxed `bash` to
+     * READ_ONLY. Set ONLY by resolveRuntimeToolContract via
+     * shouldGrantGuardedBash (flag on AND guard artifact resolvable) — never
+     * set directly, so a surface that cannot load the guard cannot grant the tool.
+     */
+    grantGuardedBash?: boolean;
     extensionPackages?: Partial<Record<ToolCatalogName, ExtensionPackageRuntime>>;
     /** Enabled extension sources (execution.extensions[source] === true). On the legacy
      *  spawn path these switch the session to the tool-policy gate:
