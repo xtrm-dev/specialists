@@ -209,7 +209,12 @@ describe('permission-guard fail-closed behavior', () => {
 
   it('uses ctx.cwd (the session worktree), never input.cwd or process.cwd()', async () => {
     const m = await loadGuard();
-    await m.bwrapSelfCheck((_bin: string, _args: string[], _opts: unknown, cb: (e: null) => void) => cb(null));
+    await m.bwrapSelfCheck((_bin: string, _args: string[], _opts: unknown, cb: (e: null) => void) => cb(null),
+    {
+      path: { delimiter: ':', join: (...parts: string[]) => parts.join('/') },
+      fs: { accessSync: () => {}, constants: { X_OK: 1 } },
+      pathEnv: '/fakebin',
+    });
     const fake = makeFakePi();
     m.default(fake);
     // input.cwd is NOT part of Pi's bash schema — even when present it must not win.
@@ -223,7 +228,12 @@ describe('permission-guard fail-closed behavior', () => {
 
   it('wraps bash after a passing self-check, including nested codemode calls', async () => {
     const m = await loadGuard();
-    await m.bwrapSelfCheck((_bin: string, _args: string[], _opts: unknown, cb: (e: null) => void) => cb(null));
+    await m.bwrapSelfCheck((_bin: string, _args: string[], _opts: unknown, cb: (e: null) => void) => cb(null),
+    {
+      path: { delimiter: ':', join: (...parts: string[]) => parts.join('/') },
+      fs: { accessSync: () => {}, constants: { X_OK: 1 } },
+      pathEnv: '/fakebin',
+    });
     const fake = makeFakePi();
     m.default(fake);
     for (const event of [
@@ -242,7 +252,12 @@ describe('permission-guard fail-closed behavior', () => {
 
   it('refuses non-READ_ONLY tiers when the channel names them', async () => {
     const m = await loadGuard();
-    await m.bwrapSelfCheck((_bin: string, _args: string[], _opts: unknown, cb: (e: null) => void) => cb(null));
+    await m.bwrapSelfCheck((_bin: string, _args: string[], _opts: unknown, cb: (e: null) => void) => cb(null),
+    {
+      path: { delimiter: ':', join: (...parts: string[]) => parts.join('/') },
+      fs: { accessSync: () => {}, constants: { X_OK: 1 } },
+      pathEnv: '/fakebin',
+    });
     process.env.PI_SPECIALIST_PERMISSION_TIER = 'LOW';
     try {
       const fake = makeFakePi();
@@ -268,6 +283,11 @@ describe('permission-guard fail-closed behavior', () => {
     const m = await loadGuard();
     const check = await m.bwrapSelfCheck((_b: string, _a: string[], _o: unknown, cb: (e: Error) => void) =>
       cb(new Error('bwrap: command not found')),
+    {
+      path: { delimiter: ':', join: (...parts: string[]) => parts.join('/') },
+      fs: { accessSync: () => {}, constants: { X_OK: 1 } },
+      pathEnv: '/fakebin',
+    },
     );
     expect(check.ok).toBe(false);
     expect(check.detail).toContain('command not found');
