@@ -23965,7 +23965,8 @@ function resolvePermissionGuardForSpawn(tier) {
     return null;
   const path = getPermissionGuardExtensionPath();
   if (!path) {
-    throw new Error("[permission-guard] guard enabled for READ_ONLY but the guard artifact " + "config/pi-extensions/permission-guard is missing; refusing launch without the sandbox.");
+    console.warn("[permission-guard] guard artifact config/pi-extensions/permission-guard is missing; " + "READ_ONLY bash withheld.");
+    return null;
   }
   return { path, tierEnv: { [PERMISSION_GUARD_TIER_ENV_KEY]: "READ_ONLY" } };
 }

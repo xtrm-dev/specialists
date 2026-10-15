@@ -1,7 +1,7 @@
 // Resolver gating for the phase-1 permission guard (SPECIALISTS-4285):
-// READ_ONLY gains sandboxed bash only when SPECIALISTS_PERMISSION_GUARD=1
-// AND the guard artifact resolves; every other combination leaves tool sets
-// byte-for-byte identical.
+// READ_ONLY gains sandboxed bash unless SPECIALISTS_PERMISSION_GUARD is 0/false
+// (SPECIALISTS-4290 default-on) AND the guard artifact resolves; otherwise
+// tool sets are identical to the pre-guard ones.
 
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { buildResolvedToolContract } from '../../../src/specialist/resolved-tool-contract.js';
@@ -32,7 +32,7 @@ afterEach(() => {
 });
 
 describe('permission-guard resolver gating', () => {
-  it('flag off: READ_ONLY has no bash (byte-for-byte unchanged)', () => {
+  it('opted out: READ_ONLY has no bash (byte-for-byte unchanged)', () => {
     process.env[PERMISSION_GUARD_ENV_KEY] = '0';
     const contract = buildResolvedToolContract({ tier: 'READ_ONLY', catalogs: CATALOGS });
     expect(contract.toolsList).not.toContain('bash');
@@ -40,7 +40,7 @@ describe('permission-guard resolver gating', () => {
     expect(contract.toolsFlag.split(',')).not.toContain('bash');
   });
 
-  it('flag on: READ_ONLY gains bash in toolsList, nativeTools and toolsFlag', () => {
+  it('guard on: READ_ONLY gains bash in toolsList, nativeTools and toolsFlag', () => {
     process.env[PERMISSION_GUARD_ENV_KEY] = '1';
     const contract = buildResolvedToolContract({
       tier: 'READ_ONLY',

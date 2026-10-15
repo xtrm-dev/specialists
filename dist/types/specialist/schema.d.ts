@@ -42,7 +42,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
             /** Controls which pi tools are available to the agent.
-             *  READ_ONLY : read, grep, find, ls        (no bash, no writes)
+             *  READ_ONLY : read, grep, find, ls        (+ bwrap-sandboxed bash unless opted out; no writes)
              *  LOW       : + bash                       (inspect/run, no file edits)
              *  MEDIUM    : + edit                       (can edit existing files)
              *  HIGH      : + write                      (full access — create new files)
@@ -80,7 +80,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
             /** Controls which pi tools are available to the agent.
-             *  READ_ONLY : read, grep, find, ls        (no bash, no writes)
+             *  READ_ONLY : read, grep, find, ls        (+ bwrap-sandboxed bash unless opted out; no writes)
              *  LOW       : + bash                       (inspect/run, no file edits)
              *  MEDIUM    : + edit                       (can edit existing files)
              *  HIGH      : + write                      (full access — create new files)
@@ -118,7 +118,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
             /** Controls which pi tools are available to the agent.
-             *  READ_ONLY : read, grep, find, ls        (no bash, no writes)
+             *  READ_ONLY : read, grep, find, ls        (+ bwrap-sandboxed bash unless opted out; no writes)
              *  LOW       : + bash                       (inspect/run, no file edits)
              *  MEDIUM    : + edit                       (can edit existing files)
              *  HIGH      : + write                      (full access — create new files)
@@ -428,7 +428,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
             /** Controls which pi tools are available to the agent.
-             *  READ_ONLY : read, grep, find, ls        (no bash, no writes)
+             *  READ_ONLY : read, grep, find, ls        (+ bwrap-sandboxed bash unless opted out; no writes)
              *  LOW       : + bash                       (inspect/run, no file edits)
              *  MEDIUM    : + edit                       (can edit existing files)
              *  HIGH      : + write                      (full access — create new files)
@@ -466,7 +466,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
             /** Controls which pi tools are available to the agent.
-             *  READ_ONLY : read, grep, find, ls        (no bash, no writes)
+             *  READ_ONLY : read, grep, find, ls        (+ bwrap-sandboxed bash unless opted out; no writes)
              *  LOW       : + bash                       (inspect/run, no file edits)
              *  MEDIUM    : + edit                       (can edit existing files)
              *  HIGH      : + write                      (full access — create new files)
@@ -504,7 +504,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
             /** Controls which pi tools are available to the agent.
-             *  READ_ONLY : read, grep, find, ls        (no bash, no writes)
+             *  READ_ONLY : read, grep, find, ls        (+ bwrap-sandboxed bash unless opted out; no writes)
              *  LOW       : + bash                       (inspect/run, no file edits)
              *  MEDIUM    : + edit                       (can edit existing files)
              *  HIGH      : + write                      (full access — create new files)
@@ -814,7 +814,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
             /** Controls which pi tools are available to the agent.
-             *  READ_ONLY : read, grep, find, ls        (no bash, no writes)
+             *  READ_ONLY : read, grep, find, ls        (+ bwrap-sandboxed bash unless opted out; no writes)
              *  LOW       : + bash                       (inspect/run, no file edits)
              *  MEDIUM    : + edit                       (can edit existing files)
              *  HIGH      : + write                      (full access — create new files)
@@ -852,7 +852,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
             /** Controls which pi tools are available to the agent.
-             *  READ_ONLY : read, grep, find, ls        (no bash, no writes)
+             *  READ_ONLY : read, grep, find, ls        (+ bwrap-sandboxed bash unless opted out; no writes)
              *  LOW       : + bash                       (inspect/run, no file edits)
              *  MEDIUM    : + edit                       (can edit existing files)
              *  HIGH      : + write                      (full access — create new files)
@@ -890,7 +890,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
             /** Controls which pi tools are available to the agent.
-             *  READ_ONLY : read, grep, find, ls        (no bash, no writes)
+             *  READ_ONLY : read, grep, find, ls        (+ bwrap-sandboxed bash unless opted out; no writes)
              *  LOW       : + bash                       (inspect/run, no file edits)
              *  MEDIUM    : + edit                       (can edit existing files)
              *  HIGH      : + write                      (full access — create new files)
@@ -1202,7 +1202,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
             /** Controls which pi tools are available to the agent.
-             *  READ_ONLY : read, grep, find, ls        (no bash, no writes)
+             *  READ_ONLY : read, grep, find, ls        (+ bwrap-sandboxed bash unless opted out; no writes)
              *  LOW       : + bash                       (inspect/run, no file edits)
              *  MEDIUM    : + edit                       (can edit existing files)
              *  HIGH      : + write                      (full access — create new files)
@@ -1240,7 +1240,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
             /** Controls which pi tools are available to the agent.
-             *  READ_ONLY : read, grep, find, ls        (no bash, no writes)
+             *  READ_ONLY : read, grep, find, ls        (+ bwrap-sandboxed bash unless opted out; no writes)
              *  LOW       : + bash                       (inspect/run, no file edits)
              *  MEDIUM    : + edit                       (can edit existing files)
              *  HIGH      : + write                      (full access — create new files)
@@ -1278,7 +1278,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
             /** Controls which pi tools are available to the agent.
-             *  READ_ONLY : read, grep, find, ls        (no bash, no writes)
+             *  READ_ONLY : read, grep, find, ls        (+ bwrap-sandboxed bash unless opted out; no writes)
              *  LOW       : + bash                       (inspect/run, no file edits)
              *  MEDIUM    : + edit                       (can edit existing files)
              *  HIGH      : + write                      (full access — create new files)
@@ -1588,7 +1588,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
             /** Controls which pi tools are available to the agent.
-             *  READ_ONLY : read, grep, find, ls        (no bash, no writes)
+             *  READ_ONLY : read, grep, find, ls        (+ bwrap-sandboxed bash unless opted out; no writes)
              *  LOW       : + bash                       (inspect/run, no file edits)
              *  MEDIUM    : + edit                       (can edit existing files)
              *  HIGH      : + write                      (full access — create new files)
@@ -1626,7 +1626,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
             /** Controls which pi tools are available to the agent.
-             *  READ_ONLY : read, grep, find, ls        (no bash, no writes)
+             *  READ_ONLY : read, grep, find, ls        (+ bwrap-sandboxed bash unless opted out; no writes)
              *  LOW       : + bash                       (inspect/run, no file edits)
              *  MEDIUM    : + edit                       (can edit existing files)
              *  HIGH      : + write                      (full access — create new files)
@@ -1664,7 +1664,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
             /** Controls which pi tools are available to the agent.
-             *  READ_ONLY : read, grep, find, ls        (no bash, no writes)
+             *  READ_ONLY : read, grep, find, ls        (+ bwrap-sandboxed bash unless opted out; no writes)
              *  LOW       : + bash                       (inspect/run, no file edits)
              *  MEDIUM    : + edit                       (can edit existing files)
              *  HIGH      : + write                      (full access — create new files)
@@ -1974,7 +1974,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
             /** Controls which pi tools are available to the agent.
-             *  READ_ONLY : read, grep, find, ls        (no bash, no writes)
+             *  READ_ONLY : read, grep, find, ls        (+ bwrap-sandboxed bash unless opted out; no writes)
              *  LOW       : + bash                       (inspect/run, no file edits)
              *  MEDIUM    : + edit                       (can edit existing files)
              *  HIGH      : + write                      (full access — create new files)
@@ -2012,7 +2012,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
             /** Controls which pi tools are available to the agent.
-             *  READ_ONLY : read, grep, find, ls        (no bash, no writes)
+             *  READ_ONLY : read, grep, find, ls        (+ bwrap-sandboxed bash unless opted out; no writes)
              *  LOW       : + bash                       (inspect/run, no file edits)
              *  MEDIUM    : + edit                       (can edit existing files)
              *  HIGH      : + write                      (full access — create new files)
@@ -2050,7 +2050,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
             /** Controls which pi tools are available to the agent.
-             *  READ_ONLY : read, grep, find, ls        (no bash, no writes)
+             *  READ_ONLY : read, grep, find, ls        (+ bwrap-sandboxed bash unless opted out; no writes)
              *  LOW       : + bash                       (inspect/run, no file edits)
              *  MEDIUM    : + edit                       (can edit existing files)
              *  HIGH      : + write                      (full access — create new files)
@@ -2362,7 +2362,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
             /** Controls which pi tools are available to the agent.
-             *  READ_ONLY : read, grep, find, ls        (no bash, no writes)
+             *  READ_ONLY : read, grep, find, ls        (+ bwrap-sandboxed bash unless opted out; no writes)
              *  LOW       : + bash                       (inspect/run, no file edits)
              *  MEDIUM    : + edit                       (can edit existing files)
              *  HIGH      : + write                      (full access — create new files)
@@ -2400,7 +2400,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
             /** Controls which pi tools are available to the agent.
-             *  READ_ONLY : read, grep, find, ls        (no bash, no writes)
+             *  READ_ONLY : read, grep, find, ls        (+ bwrap-sandboxed bash unless opted out; no writes)
              *  LOW       : + bash                       (inspect/run, no file edits)
              *  MEDIUM    : + edit                       (can edit existing files)
              *  HIGH      : + write                      (full access — create new files)
@@ -2438,7 +2438,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
             /** Controls which pi tools are available to the agent.
-             *  READ_ONLY : read, grep, find, ls        (no bash, no writes)
+             *  READ_ONLY : read, grep, find, ls        (+ bwrap-sandboxed bash unless opted out; no writes)
              *  LOW       : + bash                       (inspect/run, no file edits)
              *  MEDIUM    : + edit                       (can edit existing files)
              *  HIGH      : + write                      (full access — create new files)
@@ -2748,7 +2748,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
             /** Controls which pi tools are available to the agent.
-             *  READ_ONLY : read, grep, find, ls        (no bash, no writes)
+             *  READ_ONLY : read, grep, find, ls        (+ bwrap-sandboxed bash unless opted out; no writes)
              *  LOW       : + bash                       (inspect/run, no file edits)
              *  MEDIUM    : + edit                       (can edit existing files)
              *  HIGH      : + write                      (full access — create new files)
@@ -2786,7 +2786,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
             /** Controls which pi tools are available to the agent.
-             *  READ_ONLY : read, grep, find, ls        (no bash, no writes)
+             *  READ_ONLY : read, grep, find, ls        (+ bwrap-sandboxed bash unless opted out; no writes)
              *  LOW       : + bash                       (inspect/run, no file edits)
              *  MEDIUM    : + edit                       (can edit existing files)
              *  HIGH      : + write                      (full access — create new files)
@@ -2824,7 +2824,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
             /** Controls which pi tools are available to the agent.
-             *  READ_ONLY : read, grep, find, ls        (no bash, no writes)
+             *  READ_ONLY : read, grep, find, ls        (+ bwrap-sandboxed bash unless opted out; no writes)
              *  LOW       : + bash                       (inspect/run, no file edits)
              *  MEDIUM    : + edit                       (can edit existing files)
              *  HIGH      : + write                      (full access — create new files)
@@ -3134,7 +3134,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
             /** Controls which pi tools are available to the agent.
-             *  READ_ONLY : read, grep, find, ls        (no bash, no writes)
+             *  READ_ONLY : read, grep, find, ls        (+ bwrap-sandboxed bash unless opted out; no writes)
              *  LOW       : + bash                       (inspect/run, no file edits)
              *  MEDIUM    : + edit                       (can edit existing files)
              *  HIGH      : + write                      (full access — create new files)
@@ -3172,7 +3172,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
             /** Controls which pi tools are available to the agent.
-             *  READ_ONLY : read, grep, find, ls        (no bash, no writes)
+             *  READ_ONLY : read, grep, find, ls        (+ bwrap-sandboxed bash unless opted out; no writes)
              *  LOW       : + bash                       (inspect/run, no file edits)
              *  MEDIUM    : + edit                       (can edit existing files)
              *  HIGH      : + write                      (full access — create new files)
@@ -3210,7 +3210,7 @@ export declare const SpecialistSchema: z.ZodObject<{
             /** Semantic output archetype used for structured output contracts and schema extensions. */
             output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
             /** Controls which pi tools are available to the agent.
-             *  READ_ONLY : read, grep, find, ls        (no bash, no writes)
+             *  READ_ONLY : read, grep, find, ls        (+ bwrap-sandboxed bash unless opted out; no writes)
              *  LOW       : + bash                       (inspect/run, no file edits)
              *  MEDIUM    : + edit                       (can edit existing files)
              *  HIGH      : + write                      (full access — create new files)

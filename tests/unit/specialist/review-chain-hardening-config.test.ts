@@ -129,6 +129,8 @@ describe('review-chain hardening specialist configs', () => {
     expect(spec.specialist.metadata.version).toBe('1.4.0');
     expect(system).toContain("this role's bash is sandboxed");
     expect(system).not.toContain('this role has no bash');
+    expect(system).toContain('ocr-preflight.mjs preflight --from "$(git merge-base origin/HEAD HEAD)" --to HEAD');
+    expect(system).toContain('eight-call budget');
     expect(system).not.toContain('delegation uses preview, rule');
     expect(system).toContain('## Tree-first evidence discipline');
     expect(system).toContain('## Bounded failure-mode inversion check');

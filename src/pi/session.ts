@@ -419,7 +419,7 @@ export function resolveRuntimeToolContract(options: {
     contract = buildResolvedToolContract({
       tier,
       // Phase-1 permission guard (SPECIALISTS-4285): sandboxed bash for
-      // READ_ONLY only when the flag is on AND the guard artifact resolves.
+      // READ_ONLY only when the guard is not opted out AND its artifact resolves.
       grantGuardedBash: shouldGrantGuardedBash(tier),
       catalogs: runtimeCatalogs,
       catalogDefaultOverrides: catalogIndex.default_overrides,
@@ -455,7 +455,7 @@ export function resolveRuntimeToolContract(options: {
     isPermissionGuardEnabled() &&
     !contract.nativeTools.includes('bash')
   ) {
-    // Flag on but the grant withheld (guard artifact missing): say so on the
+    // Guard enabled but the grant withheld (guard artifact missing): say so on the
     // contract rather than silently running READ_ONLY without bash.
     contract = {
       ...contract,

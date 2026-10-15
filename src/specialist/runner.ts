@@ -401,7 +401,7 @@ function validateShebang(filePath: string, errors: string[]): void {
 const PERMISSION_GATED_TOOLS: Record<string, string[]> = {
   // bash at READ_ONLY is the phase-1 permission guard (SPECIALISTS-4285):
   // sandboxed via the guard extension unless SPECIALISTS_PERMISSION_GUARD=0.
-  // Flag-off stays correct because validateBeforeRun also requires the tool
+  // Opted-out (SPECIALISTS_PERMISSION_GUARD=0) stays correct because validateBeforeRun also requires the tool
   // in the resolved contract, which withholds bash without the guard.
   bash:  ['READ_ONLY', 'LOW', 'MEDIUM', 'HIGH'],
   edit:  ['MEDIUM', 'HIGH'],

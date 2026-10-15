@@ -70,7 +70,7 @@ The flat tool list emitted to `pi --tools` is the union of each catalog's `sourc
 
 | Tier | Native | GitNexus |
 |------|--------|----------|
-| `READ_ONLY` | read, grep, find, ls (+ bash sandboxed, flag-gated — see below) | read tools (query/context/impact/detect_changes/list_repos) |
+| `READ_ONLY` | read, grep, find, ls (+ bash sandboxed by default — see below) | read tools (query/context/impact/detect_changes/list_repos) |
 | `LOW` | + bash | same as READ_ONLY |
 | `MEDIUM` | + edit | + rename, cypher |
 | `HIGH` | + write | same as MEDIUM |
@@ -172,8 +172,8 @@ by absolute path.
 
 The boundary is the OS sandbox, not command-pattern rules. If bwrap is
 unavailable or fails its startup self-check, bash is refused with a clear
-reason — never run raw. With the flag off, tool sets are byte-for-byte
-unchanged. The guard loads on all three launch surfaces (CLI spawn, raw CLI
+reason — never run raw. With `SPECIALISTS_PERMISSION_GUARD=0` (or `false`;
+no other value opts out), READ_ONLY has no bash. The guard loads on all three launch surfaces (CLI spawn, raw CLI
 spawn, native activation via MCP or the native-specialists extension); a
 surface that cannot load the guard withholds READ_ONLY bash. LOW/MEDIUM/HIGH
 write confinement and network allowlists are phase 2.

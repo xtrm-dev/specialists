@@ -2,7 +2,7 @@
   "name": "@jaggerxtrm-bundled/permission-guard",
   "version": "1.0.0",
   "private": true,
-  "description": "Sandboxed bash for READ_ONLY specialists: bubblewrap boundary, fail closed, flagged (SPECIALISTS-4285 phase 1).",
+  "description": "Sandboxed bash for READ_ONLY specialists: bubblewrap boundary, fail closed, default-on (SPECIALISTS-4285/4290).",
   "license": "MIT",
   "type": "module",
   "main": "index.mjs",
