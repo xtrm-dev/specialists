@@ -399,7 +399,10 @@ export function renderDetailLines(detail, cache) {
   const head = `    ${DIM('▾')} ${BOLD(detail.kind)} ${DIM(detail.id)}`;
   if (!cache || cache.id !== detail.id || cache.kind !== detail.kind) return [head, `      ${DIM('loading…')}`];
   const shown = (cache.lines ?? []).slice(-FEED_SECTION_LINES_EXPORTED);
-  const out = [head, ...shown.map((l) => `      ${l}`)];
+  // Emitted outside the slice: the marker describes the whole read, so a long result
+  // must not push it out of view with the tail (SPECIALISTS-4280).
+  const marker = cache.unadjudicated === true ? [`      ${DIM(adjudicationLabel(cache.issueRef))}`] : [];
+  const out = [head, ...marker, ...shown.map((l) => `      ${l}`)];
   if ((cache.lines ?? []).length > shown.length) out.push(`      ${DIM(`… +${cache.lines.length - shown.length} more`)}`);
   if (!cache.settled && detail.kind === 'feed') out.push(`      ${DIM(`live · last_seq ${cache.lastSeq ?? '?'} — /specialists feed ${detail.id} follows`)}`);
   return out;
@@ -654,9 +657,14 @@ export function formatSettlementWake(done, view, opts = {}) {
   const beadId = done.beadId ?? view?.bead_id ?? '—';
   const facts = failed ? modelFacts(view) : costFacts(view);
   const header = wakeHeader(`${done.specialist}:${done.activationId}`, failed ? 'failed' : 'done', beadId);
+  const body = resultLines(opts.resultText ?? done.output, opts);
   return indentBody([
     withRail(header),
-    ...resultLines(opts.resultText ?? done.output, opts),
+    // The marker sits between the header and the body, on the line a reader passes to
+    // reach the conclusion (SPECIALISTS-4280). Only cards that actually show a result
+    // carry it: a card with no body has no headline to misread.
+    ...(body.length > 0 ? [withRail(DIM(adjudicationLabel(beadId)))] : []),
+    ...body,
     ...(failed && done.error ? [withRail(done.error)] : []),
     instructionLine(failed ? FAIL_INSTRUCTION : RESULT_INSTRUCTION, done.activationId),
     // Run metadata lives here now, dimmed, CC-statusline style — never in the header.
@@ -684,6 +692,24 @@ function resultLines(output, opts = {}) {
     out.push(DIM(`… +${lines.length - RESULT_EXCERPT_LINES} lines · ctrl+o expands`));
   }
   return out;
+}
+
+/**
+ * The adjudication marker every rendered Specialist RESULT carries (SPECIALISTS-4280).
+ *
+ * A settlement card shows the specialist's OWN conclusion, and it is emitted once at wake
+ * time - before any coordinator could adjudicate it. Substrate owns that adjudication
+ * (journal + closure on the Issue); this surface only points at it. Stating the fact that is
+ * knowable in advance - this is an unadjudicated self-report - is what stops a reader taking
+ * a headline like `CODEMODE TOOL: ABSENT` for fleet truth, which is exactly what happened on
+ * SPECIALISTS-4278. No Substrate read is involved and no verdict is inferred, so the marker
+ * is never wrong and never goes stale; the card never has to know its own future.
+ */
+export function adjudicationLabel(issueRef) {
+  // '—' is the card's own "no Issue ref" placeholder: it names no record to check, so it
+  // must not be printed as if it were one.
+  const record = typeof issueRef === 'string' && issueRef !== '' && issueRef !== '—' ? issueRef : 'the Issue';
+  return `unadjudicated self-report · not verified · adjudication: ${record} journal/closure`;
 }
 
 /**
@@ -1559,7 +1585,7 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
       if (sel.kind === 'result') {
         const out = await resultToolDef('section', { activation_id: sel.id });
         const payload = out?.structuredContent ?? {};
-        fleetDetailCache = { id: sel.id, kind: sel.kind, lines: resultCommandLines(payload), lastSeq: null, settled: true };
+        fleetDetailCache = { id: sel.id, kind: sel.kind, lines: resultCommandLines(payload), lastSeq: null, settled: true, unadjudicated: true, issueRef: payload.issue_ref ?? null };
         return;
       }
       // A live feed follows from its cursor: only events newer than the last
@@ -2711,7 +2737,7 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
         report(ctx, `specialist_result refused: ${payload.error ?? 'unknown error'}`, 'warning');
         return;
       }
-      fleetDetailCache = { id, kind, lines: resultCommandLines(payload), lastSeq: null, settled: true };
+      fleetDetailCache = { id, kind, lines: resultCommandLines(payload), lastSeq: null, settled: true, unadjudicated: true, issueRef: payload.issue_ref ?? null };
       report(ctx, resultCommandLines(payload).join('\n'));
       return;
     }
