@@ -33,7 +33,7 @@ afterEach(() => {
 
 describe('permission-guard resolver gating', () => {
   it('flag off: READ_ONLY has no bash (byte-for-byte unchanged)', () => {
-    delete process.env[PERMISSION_GUARD_ENV_KEY];
+    process.env[PERMISSION_GUARD_ENV_KEY] = '0';
     const contract = buildResolvedToolContract({ tier: 'READ_ONLY', catalogs: CATALOGS });
     expect(contract.toolsList).not.toContain('bash');
     expect(contract.nativeTools).not.toContain('bash');
@@ -76,5 +76,28 @@ describe('permission-guard resolver gating', () => {
       const without = buildResolvedToolContract({ tier, catalogs: CATALOGS });
       expect(withGrant.toolsFlag).toBe(without.toolsFlag);
     }
+  });
+});
+
+// SPECIALISTS-4290: the guard is default-on; only an explicit '0'/'false' opts out.
+describe('isPermissionGuardEnabled default (SPECIALISTS-4290)', () => {
+  it.each([
+    [undefined, true],
+    ['', true],
+    ['1', true],
+    ['true', true],
+    ['0', false],
+    ['false', false],
+    [' FALSE ', false],
+  ])('%j -> %s', async (value, expected) => {
+    const { isPermissionGuardEnabled } = await import('../../../src/pi/permission-guard-extension.js');
+    const env: NodeJS.ProcessEnv = value === undefined ? {} : { [PERMISSION_GUARD_ENV_KEY]: value };
+    expect(isPermissionGuardEnabled(env)).toBe(expected);
+  });
+
+  it('grants READ_ONLY sandboxed bash with no env set', async () => {
+    const { shouldGrantGuardedBash } = await import('../../../src/pi/permission-guard-extension.js');
+    expect(shouldGrantGuardedBash('READ_ONLY', {})).toBe(true);
+    expect(shouldGrantGuardedBash('READ_ONLY', { [PERMISSION_GUARD_ENV_KEY]: '0' })).toBe(false);
   });
 });

@@ -151,7 +151,7 @@ function getToolsArg(args: readonly string[]): string | undefined {
 let savedPermissionGuardFlag: string | undefined;
 beforeEach(() => {
   savedPermissionGuardFlag = process.env.SPECIALISTS_PERMISSION_GUARD;
-  delete process.env.SPECIALISTS_PERMISSION_GUARD;
+  process.env.SPECIALISTS_PERMISSION_GUARD = '0';
 });
 afterEach(() => {
   if (savedPermissionGuardFlag === undefined) delete process.env.SPECIALISTS_PERMISSION_GUARD;
@@ -1740,7 +1740,7 @@ describe('permission-guard CLI surface', () => {
   });
 
   it('loads nothing extra when the flag is off (byte-for-byte unchanged)', async () => {
-    delete process.env.SPECIALISTS_PERMISSION_GUARD;
+    process.env.SPECIALISTS_PERMISSION_GUARD = '0';
     const { getPermissionGuardExtensionPath } = await import('../../../src/pi/permission-guard-extension.js');
     const session = await PiAgentSession.create({ model: 'gemini', permissionLevel: 'READ_ONLY' });
     await session.start();

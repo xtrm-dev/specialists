@@ -22,7 +22,7 @@ const CANDIDATES = [
   join(HERE, '..', '..', '..', REL),
 ];
 
-/** Flag that arms the phase-1 guard. Default off: flag-off behaviour is byte-for-byte unchanged. */
+/** Opt-out for the permission guard. Default on (SPECIALISTS-4290); '0' or 'false' disables it, restoring the pre-guard tool sets. */
 export const PERMISSION_GUARD_ENV_KEY = 'SPECIALISTS_PERMISSION_GUARD';
 
 /** Bounded channel carrying the specialist tier to the guard inside the child session. */
@@ -44,7 +44,7 @@ export function getPermissionGuardExtensionPath(): string | null {
 
 export function isPermissionGuardEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   const raw = (env[PERMISSION_GUARD_ENV_KEY] ?? '').trim().toLowerCase();
-  return raw === '1' || raw === 'true';
+  return raw !== '0' && raw !== 'false';
 }
 
 /**
@@ -86,7 +86,7 @@ export function resolvePermissionGuardForSpawn(
   const path = getPermissionGuardExtensionPath();
   if (!path) {
     throw new Error(
-      '[permission-guard] SPECIALISTS_PERMISSION_GUARD=1 for READ_ONLY but the guard artifact ' +
+      '[permission-guard] guard enabled for READ_ONLY but the guard artifact ' +
         'config/pi-extensions/permission-guard is missing; refusing launch without the sandbox.',
     );
   }

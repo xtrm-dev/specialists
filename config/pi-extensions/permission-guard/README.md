@@ -2,8 +2,8 @@
 
 Sandboxed `bash` for READ_ONLY specialists. Loaded via `-e <this dir>`
 (legacy CLI spawns) or the resource loader's `extensionPaths` (native
-activation) when `SPECIALISTS_PERMISSION_GUARD=1` and the resolved contract
-grants READ_ONLY bash.
+activation) by default (SPECIALISTS-4290) whenever the resolved contract
+grants READ_ONLY bash. `SPECIALISTS_PERMISSION_GUARD=0` (or `false`) opts out.
 
 ## How it works
 

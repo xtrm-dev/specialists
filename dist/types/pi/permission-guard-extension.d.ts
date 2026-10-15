@@ -1,4 +1,4 @@
-/** Flag that arms the phase-1 guard. Default off: flag-off behaviour is byte-for-byte unchanged. */
+/** Opt-out for the permission guard. Default on (SPECIALISTS-4290); '0' or 'false' disables it, restoring the pre-guard tool sets. */
 export declare const PERMISSION_GUARD_ENV_KEY = "SPECIALISTS_PERMISSION_GUARD";
 /** Bounded channel carrying the specialist tier to the guard inside the child session. */
 export declare const PERMISSION_GUARD_TIER_ENV_KEY = "PI_SPECIALIST_PERMISSION_TIER";

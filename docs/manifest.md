@@ -156,10 +156,10 @@ Why: explorer is meant to discover code through the symbol/process graph. GitNex
 
 ## Sandboxed bash for READ_ONLY (phase 1 permission guard)
 
-READ_ONLY specialists have no bash by default, so read-only roles cannot run
-deterministic read-only commands (`git diff`, `ocr delegate preview`,
-linters). With `SPECIALISTS_PERMISSION_GUARD=1`, READ_ONLY gains a `bash`
-tool whose every invocation — direct or nested from a codemode cell — runs
+Every specialist gets bash. READ_ONLY specialists get a sandboxed `bash`
+(default on since SPECIALISTS-4290; opt out with `SPECIALISTS_PERMISSION_GUARD=0`),
+so read-only roles can run deterministic read-only commands (`git diff`,
+`ocr delegate preview`, linters). That `bash` is a tool whose every invocation — direct or nested from a codemode cell — runs
 inside bubblewrap: whole filesystem read-only, a private writable `/tmp`,
 `/run` masked (no user bus / docker socket) with pid+ipc namespaces,
 network unshared, credential paths masked (`~/.ssh`, `~/.aws`, `~/.gnupg`,

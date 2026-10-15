@@ -461,7 +461,7 @@ export function resolveRuntimeToolContract(options: {
       ...contract,
       warnings: [
         ...contract.warnings,
-        'permission-guard: SPECIALISTS_PERMISSION_GUARD=1 but the guard artifact is missing; READ_ONLY bash withheld',
+        'permission-guard: guard enabled but the guard artifact is missing; READ_ONLY bash withheld',
       ],
     };
   }
@@ -739,7 +739,7 @@ export function resolveCuratedExtensionPaths(options: {
     all.push(BUILTIN_CODEMODE_EXTENSION);
   }
   // Phase-1 permission guard (SPECIALISTS-4285): sandboxed bash for READ_ONLY
-  // when SPECIALISTS_PERMISSION_GUARD=1. Owned here — the single curated set
+  // unless SPECIALISTS_PERMISSION_GUARD=0. Owned here — the single curated set
   // both runtimes consume (legacy CLI argv AND native loader extensionPaths)
   // — so the two surfaces cannot drift on whether the guard is loaded, and
   // the parity harness (which compiles the legacy profile from this helper)

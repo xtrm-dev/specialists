@@ -1789,7 +1789,7 @@ export class NativeActivationHost {
     // curated paths are host-resolved and in-repo, not operator-supplied: the trust boundary
     // the shadow refusal protects is the operator-enabled dynamic set. Do not add a scan.
     // Phase-1 permission guard (SPECIALISTS-4285): sandboxed bash for
-    // READ_ONLY when SPECIALISTS_PERMISSION_GUARD=1. The guard -e rides the
+    // READ_ONLY unless SPECIALISTS_PERMISSION_GUARD=0. The guard -e rides the
     // curated set above; READ_ONLY bash granted but not loaded is a dispatch
     // refusal, never an unsandboxed session — a surface that cannot load the
     // guard must not grant READ_ONLY bash. (LOW/MEDIUM/HIGH grant bash via

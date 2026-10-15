@@ -293,7 +293,7 @@ afterEach(() => {
 let savedPermissionGuardFlag: string | undefined;
 beforeEach(() => {
   savedPermissionGuardFlag = process.env.SPECIALISTS_PERMISSION_GUARD;
-  delete process.env.SPECIALISTS_PERMISSION_GUARD;
+  process.env.SPECIALISTS_PERMISSION_GUARD = '0';
 });
 afterEach(() => {
   if (savedPermissionGuardFlag === undefined) delete process.env.SPECIALISTS_PERMISSION_GUARD;
@@ -2339,7 +2339,7 @@ describe('permission-guard native surface', () => {
   });
 
   it('loads no guard and grants no bash when the flag is off', async () => {
-    delete process.env[GUARD_KEY];
+    process.env[GUARD_KEY] = '0';
     const { getPermissionGuardExtensionPath } = await import('../../../src/pi/permission-guard-extension.js');
     const record: { createArgs?: Record<string, unknown> } = {};
     const session = fakeSession({ record });

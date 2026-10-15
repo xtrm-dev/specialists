@@ -64,7 +64,7 @@ describe('runtime tool catalog fail-closed boundary', () => {
     canonicalDirMock.mockReturnValue(null);
     spawnMock.mockReset();
     savedPermissionGuardFlag = process.env.SPECIALISTS_PERMISSION_GUARD;
-    delete process.env.SPECIALISTS_PERMISSION_GUARD;
+    process.env.SPECIALISTS_PERMISSION_GUARD = '0';
   });
 
   afterEach(() => {
