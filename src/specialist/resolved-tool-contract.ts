@@ -44,6 +44,13 @@ export interface ResolvedToolContract {
 }
 
 interface BuildResolvedToolContractInput extends ResolverInput {
+  /**
+   * Phase-1 permission guard (SPECIALISTS-4285): grant sandboxed `bash` to
+   * READ_ONLY. Set ONLY by resolveRuntimeToolContract via
+   * shouldGrantGuardedBash (flag on AND guard artifact resolvable) — never
+   * set directly, so a surface that cannot load the guard cannot grant the tool.
+   */
+  grantGuardedBash?: boolean;
   extensionPackages?: Partial<Record<ToolCatalogName, ExtensionPackageRuntime>>;
   /** Enabled extension sources (execution.extensions[source] === true). On the legacy
    *  spawn path these switch the session to the tool-policy gate:
@@ -93,8 +100,22 @@ export function buildResolvedToolContract(input: BuildResolvedToolContractInput)
   const resolver = resolveManifestTools(input);
   const nativeCatalog = getCatalog(input.catalogs, 'native');
   const tierNativeTools = new Set(nativeCatalog?.source_tiers[input.tier] ?? []);
+  // Phase-1 permission guard (SPECIALISTS-4285): sandboxed bash for READ_ONLY.
+  // Granted here — never in a catalog file — so flag-off leaves every catalog
+  // byte-identical and a missing guard artifact withholds the tool. The grant
+  // only ADDS bash to a resolved contract: an empty/broken catalog still
+  // resolves empty (fail-closed), never conjures bash from nothing.
+  const guardedBashGranted =
+    input.grantGuardedBash === true && input.tier === 'READ_ONLY' && resolver.toolsList.length > 0;
+  if (guardedBashGranted) tierNativeTools.add('bash');
   const nativeTools = resolver.toolsList.filter((tool) => tierNativeTools.has(tool));
-  const extensionTools = resolver.toolsList.filter((tool) => !tierNativeTools.has(tool));
+  const toolsListWithGuard = guardedBashGranted && !resolver.toolsList.includes('bash')
+    ? [...resolver.toolsList, 'bash']
+    : resolver.toolsList;
+  const nativeToolsWithGuard = guardedBashGranted && !nativeTools.includes('bash')
+    ? [...nativeTools, 'bash']
+    : nativeTools;
+  const extensionTools = toolsListWithGuard.filter((tool) => !tierNativeTools.has(tool));
   const exposedExtensionSources = uniqueOrdered(input.extensionSources ?? []);
   const extensions = Object.fromEntries(
     input.catalogs
@@ -115,10 +136,10 @@ export function buildResolvedToolContract(input: BuildResolvedToolContractInput)
 
   return {
     effectiveTier: input.tier,
-    toolsFlag: resolver.tools,
+    toolsFlag: toolsListWithGuard.join(','),
     exposedExtensionSources,
-    toolsList: resolver.toolsList,
-    nativeTools,
+    toolsList: toolsListWithGuard,
+    nativeTools: nativeToolsWithGuard,
     extensionTools,
     deniedNativeTools: resolver.deniedNatives,
     deniedNativesMode: resolver.deniedNativesMode,

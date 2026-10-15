@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { execSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -284,6 +284,20 @@ afterEach(() => {
   while (hostWorkspaces.length > 0) {
     rmSync(hostWorkspaces.pop() as string, { recursive: true, force: true });
   }
+});
+
+// Exact-surface assertions in this file predate the phase-1 permission guard
+// (SPECIALISTS-4285) and must not float with the ambient environment: pin the
+// flag off file-wide. The guard's own describe block manages the flag itself
+// with nested save/restore, which composes with this outer pin.
+let savedPermissionGuardFlag: string | undefined;
+beforeEach(() => {
+  savedPermissionGuardFlag = process.env.SPECIALISTS_PERMISSION_GUARD;
+  delete process.env.SPECIALISTS_PERMISSION_GUARD;
+});
+afterEach(() => {
+  if (savedPermissionGuardFlag === undefined) delete process.env.SPECIALISTS_PERMISSION_GUARD;
+  else process.env.SPECIALISTS_PERMISSION_GUARD = savedPermissionGuardFlag;
 });
 
 const NO_CONTRACT_STATE = { readContractState: () => undefined };
@@ -2278,6 +2292,61 @@ describe('native resource isolation (SPECIALISTS-4)', () => {
 
     expect((refusal as DispatchRejectedError).reason).toBe('pi_sdk_resource_loader_unavailable');
     expect(record.createArgs).toBeUndefined();
+  });
+});
+
+/**
+ * Phase-1 permission guard, native surface (SPECIALISTS-4285). The same
+ * NativeActivationHost serves MCP specialist_dispatch (src/mcp/v2-server.ts)
+ * and the native-specialists Pi extension frontend — one host test covers
+ * both, since neither frontend loads extensions itself.
+ */
+describe('permission-guard native surface', () => {
+  const GUARD_KEY = 'SPECIALISTS_PERMISSION_GUARD';
+  let previousGuard: string | undefined;
+
+  beforeEach(() => {
+    previousGuard = process.env[GUARD_KEY];
+  });
+
+  afterEach(() => {
+    if (previousGuard === undefined) delete process.env[GUARD_KEY];
+    else process.env[GUARD_KEY] = previousGuard;
+  });
+
+  async function dispatchReadOnly(record: { createArgs?: Record<string, unknown> }, session: PiAgentSessionLike) {
+    const host = new NativeActivationHost({
+      loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => makeSdk(record, session),
+      cwd: hostWorkspace(),
+    });
+    return (await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    })).result;
+  }
+
+  it('loads the guard in the session extension set and grants bash when the flag is on', async () => {
+    process.env[GUARD_KEY] = '1';
+    const { getPermissionGuardExtensionPath } = await import('../../../src/pi/permission-guard-extension.js');
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record });
+    await dispatchReadOnly(record, session);
+    const loader = record.createArgs!.resourceLoader as FakeResourceLoader;
+    expect(loader.options.additionalExtensionPaths).toContain(getPermissionGuardExtensionPath());
+    expect((record.createArgs!.tools as string[])).toContain('bash');
+  });
+
+  it('loads no guard and grants no bash when the flag is off', async () => {
+    delete process.env[GUARD_KEY];
+    const { getPermissionGuardExtensionPath } = await import('../../../src/pi/permission-guard-extension.js');
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record });
+    await dispatchReadOnly(record, session);
+    const loader = record.createArgs!.resourceLoader as FakeResourceLoader;
+    expect(loader.options.additionalExtensionPaths).not.toContain(getPermissionGuardExtensionPath());
+    expect((record.createArgs!.tools as string[])).not.toContain('bash');
   });
 });
 

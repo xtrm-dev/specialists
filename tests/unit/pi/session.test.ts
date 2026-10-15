@@ -144,6 +144,20 @@ function getToolsArg(args: readonly string[]): string | undefined {
   return toolsIdx >= 0 ? args[toolsIdx + 1] : undefined;
 }
 
+// Exact-toolset assertions in this file predate the phase-1 permission guard
+// (SPECIALISTS-4285) and must not float with the ambient environment: pin the
+// flag off file-wide. The guard's own describe block below manages the flag
+// itself with nested save/restore, which composes with this outer pin.
+let savedPermissionGuardFlag: string | undefined;
+beforeEach(() => {
+  savedPermissionGuardFlag = process.env.SPECIALISTS_PERMISSION_GUARD;
+  delete process.env.SPECIALISTS_PERMISSION_GUARD;
+});
+afterEach(() => {
+  if (savedPermissionGuardFlag === undefined) delete process.env.SPECIALISTS_PERMISSION_GUARD;
+  else process.env.SPECIALISTS_PERMISSION_GUARD = savedPermissionGuardFlag;
+});
+
 async function withNpmGlobal<T>(setup: (npmGlobalDir: string) => void, run: (npmGlobalDir: string) => Promise<T>): Promise<T> {
   const npmGlobalDir = mkdtempSync(join(tmpdir(), 'pi-npm-global-'));
   const prevGlobalDir = process.env.PI_NPM_GLOBAL_DIR;
@@ -1688,6 +1702,61 @@ describe('sendCommand — ID dispatch edge cases', () => {
 
     // onEvent must not have been called with the unknown type
     expect(onEvent).not.toHaveBeenCalledWith('completely_unknown_event_xyz');
+  });
+});
+
+// ── permission-guard CLI surface (SPECIALISTS-4285) ─────────────────────────
+describe('permission-guard CLI surface', () => {
+  let previous: string | undefined;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    makeFakeProc();
+    previous = process.env.SPECIALISTS_PERMISSION_GUARD;
+  });
+
+  afterEach(() => {
+    if (previous === undefined) delete process.env.SPECIALISTS_PERMISSION_GUARD;
+    else process.env.SPECIALISTS_PERMISSION_GUARD = previous;
+  });
+
+  function extensionPaths(args: string[]): string[] {
+    return args
+      .map((arg, index) => (arg === '-e' ? args[index + 1] : null))
+      .filter((value): value is string => Boolean(value));
+  }
+
+  it('loads the guard -e with the tier channel for READ_ONLY when the flag is on', async () => {
+    process.env.SPECIALISTS_PERMISSION_GUARD = '1';
+    const { getPermissionGuardExtensionPath } = await import('../../../src/pi/permission-guard-extension.js');
+    const session = await PiAgentSession.create({ model: 'gemini', permissionLevel: 'READ_ONLY' });
+    await session.start();
+    const args: string[] = mockSpawn.mock.calls[0][1];
+    expect(extensionPaths(args)).toContain(getPermissionGuardExtensionPath());
+    const spawnOptions = mockSpawn.mock.calls[0][2];
+    expect(spawnOptions.env.PI_SPECIALIST_PERMISSION_TIER).toBe('READ_ONLY');
+    const toolsIdx = args.indexOf('--tools');
+    if (toolsIdx !== -1) expect(args[toolsIdx + 1].split(',')).toContain('bash');
+  });
+
+  it('loads nothing extra when the flag is off (byte-for-byte unchanged)', async () => {
+    delete process.env.SPECIALISTS_PERMISSION_GUARD;
+    const { getPermissionGuardExtensionPath } = await import('../../../src/pi/permission-guard-extension.js');
+    const session = await PiAgentSession.create({ model: 'gemini', permissionLevel: 'READ_ONLY' });
+    await session.start();
+    const args: string[] = mockSpawn.mock.calls[0][1];
+    expect(extensionPaths(args)).not.toContain(getPermissionGuardExtensionPath());
+    const spawnOptions = mockSpawn.mock.calls[0][2];
+    expect(spawnOptions.env?.PI_SPECIALIST_PERMISSION_TIER).toBeUndefined();
+  });
+
+  it('never loads the guard for non-READ_ONLY tiers even with the flag on', async () => {
+    process.env.SPECIALISTS_PERMISSION_GUARD = '1';
+    const { getPermissionGuardExtensionPath } = await import('../../../src/pi/permission-guard-extension.js');
+    const session = await PiAgentSession.create({ model: 'gemini', permissionLevel: 'LOW' });
+    await session.start();
+    const args: string[] = mockSpawn.mock.calls[0][1];
+    expect(extensionPaths(args)).not.toContain(getPermissionGuardExtensionPath());
   });
 });
 

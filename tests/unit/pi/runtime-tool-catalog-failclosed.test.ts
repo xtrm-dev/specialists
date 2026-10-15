@@ -55,14 +55,22 @@ const minimalCatalog = {
 };
 
 describe('runtime tool catalog fail-closed boundary', () => {
+  // Exact-selection assertions predate the phase-1 permission guard
+  // (SPECIALISTS-4285): pin the flag off so they do not float with the
+  // ambient environment.
+  let savedPermissionGuardFlag: string | undefined;
   beforeEach(() => {
     canonicalDirMock.mockReset();
     canonicalDirMock.mockReturnValue(null);
     spawnMock.mockReset();
+    savedPermissionGuardFlag = process.env.SPECIALISTS_PERMISSION_GUARD;
+    delete process.env.SPECIALISTS_PERMISSION_GUARD;
   });
 
   afterEach(() => {
     while (roots.length > 0) rmSync(roots.pop()!, { recursive: true, force: true });
+    if (savedPermissionGuardFlag === undefined) delete process.env.SPECIALISTS_PERMISSION_GUARD;
+    else process.env.SPECIALISTS_PERMISSION_GUARD = savedPermissionGuardFlag;
   });
 
   it('rejects a requested tier when no project or canonical catalog exists', () => {

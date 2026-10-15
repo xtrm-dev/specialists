@@ -15,6 +15,7 @@ import { homedir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { PiAgentSession, RuntimeToolCatalogResolutionError, applyExtensionToolPolicyGate, resolveExecutionExtensionSelection, resolveRuntimeToolContract } from '../pi/session.js';
 import { getReadLineNumbersExtensionPath } from '../pi/read-line-numbers-extension.js';
+import { resolvePermissionGuardForSpawn } from '../pi/permission-guard-extension.js';
 import { SpecialistLoader } from './loader.js';
 import { buildMandatoryRulesInjection } from './mandatory-rules.js';
 import { buildRequiredPlatformRulesBlock } from './required-platform-rules.js';
@@ -1084,6 +1085,7 @@ function appendExtensionArgs(
   spec: Specialist,
   resolvedToolContract?: ResolvedToolContract,
   extensionSources: readonly string[] = [],
+  guardTierEnv?: Record<string, string>,
 ): void {
   const permissionLevel = spec.specialist.execution.permission_required.toUpperCase();
   // Always-on: numbered read output. Safe for every permission level.
@@ -1104,6 +1106,14 @@ function appendExtensionArgs(
   }
   for (const source of extensionSources) {
     args.push('-e', source);
+  }
+  // Phase-1 permission guard (SPECIALISTS-4285): sandboxed bash for READ_ONLY
+  // when SPECIALISTS_PERMISSION_GUARD=1. Fail-closed (throws) when wanted but
+  // missing; the tier env channel is merged into policyEnv by the caller.
+  const guard = resolvePermissionGuardForSpawn(permissionLevel);
+  if (guard) {
+    args.push('-e', guard.path);
+    if (guardTierEnv) Object.assign(guardTierEnv, guard.tierEnv);
   }
 }
 
@@ -1270,12 +1280,13 @@ async function runSingleAttempt(
     args.push('--model', model);
     if (thinkingLevel) args.push('--thinking', thinkingLevel);
     if (systemPrompt) args.push(systemPromptMode === 'append' ? '--append-system-prompt' : '--system-prompt', systemPrompt);
-    appendExtensionArgs(args, spec, resolvedToolContract, extensionSelection.extensionSources);
-
     // Extension tool policy gate: appended LAST (-e) after every configured
     // source; activates granted natives + extension-registered tools under
     // --no-builtin-tools (unitAI-34pyf). No-op without enabled sources.
+    // The phase-1 permission guard tier channel (SPECIALISTS-4285) rides the
+    // same env when appendExtensionArgs loaded the guard above.
     const policyEnv: Record<string, string> = {};
+    appendExtensionArgs(args, spec, resolvedToolContract, extensionSelection.extensionSources, policyEnv);
     applyExtensionToolPolicyGate(args, resolvedToolContract, policyEnv);
 
     const pi = spawn('pi', args, {
