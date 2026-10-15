@@ -1349,7 +1349,7 @@ export class PiAgentSession {
 
     // Phase-1 permission guard tier channel (SPECIALISTS-4285): the -e comes
     // from the curated set above; the env tells the guard its tier.
-    // Fail-closed (throws) when wanted but missing.
+    // A missing artifact warns and withholds bash, never runs it unsandboxed.
     const policyEnv: Record<string, string> = {};
     const guard = resolvePermissionGuardForSpawn(this.options.permissionLevel);
     if (guard) Object.assign(policyEnv, guard.tierEnv);
