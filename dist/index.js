@@ -20384,7 +20384,7 @@ function formatVersionCheckNudge(result) {
     return null;
   if (result.cache.notified_for_tag === result.latestTag)
     return null;
-  return `specialists v${result.localVersion} is local; ${result.latestTag} published \u2014 consider /update-specialists before substantial work.`;
+  return `specialists v${result.localVersion} is local; ${result.latestTag} published \u2014 consider npm i -g @jaggerxtrm/specialists@${result.latestTag.slice(1)} before substantial work.`;
 }
 function formatListVersionAlert(result) {
   if (compareVersions(result.latestTag, `v${result.localVersion}`) <= 0)
@@ -59098,7 +59098,7 @@ async function runProbeOnly(args) {
 async function runInteractive(args) {
   const text = renderInteractiveWorkflow();
   if (args.json) {
-    console.log(JSON.stringify({ workflow: text, skill_reference: "setup-specialists" }, null, 2));
+    console.log(JSON.stringify({ workflow: text }, null, 2));
     return;
   }
   console.log(text);
@@ -59416,7 +59416,7 @@ function renderInteractiveWorkflow() {
     "  5. Run sp setup --apply <plan.json> [--dry-run]",
     "  6. Optional: sp setup --probe-only <model> <spec>",
     "",
-    `  Skill reference: ${dim15("setup-specialists")}`,
+    `  Skill reference: ${dim15("using-specialists")}`,
     ""
   ].join(`
 `);

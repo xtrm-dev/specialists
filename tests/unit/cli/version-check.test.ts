@@ -202,7 +202,7 @@ describe('version-check CLI', () => {
     const result = getVersionCheckResult();
 
     expect(result?.latestTag).toBe('v999.0.0');
-    expect(formatVersionCheckNudge(result!)).toBe(`specialists v${result!.localVersion} is local; v999.0.0 published — consider /update-specialists before substantial work.`);
+    expect(formatVersionCheckNudge(result!)).toBe(`specialists v${result!.localVersion} is local; v999.0.0 published — consider npm i -g @jaggerxtrm/specialists@999.0.0 before substantial work.`);
     expect(formatListVersionAlert(result!)).toBe('new version 999.0.0 available, run npm i -g @jaggerxtrm/specialists@999.0.0');
     expect(writes.length).toBeGreaterThan(0);
 
