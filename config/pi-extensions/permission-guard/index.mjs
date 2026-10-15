@@ -294,6 +294,13 @@ export default function permissionGuard(pi) {
 
   pi.on('tool_call', async (event, ctx) => {
     if (event.toolName !== 'bash') return undefined;
+    // Lazy self-check fallback (SPECIALISTS-4294): the session_start check above
+    // never runs on native in-process sessions — sdk.createAgentSession never calls
+    // session.bindExtensions, the sole startup-path session_start emitter (the CLI/RPC
+    // modes call it, the SDK path does not) — so without this every native bash call
+    // fails closed with 'self-check has not passed'. Cached, so a no-op where
+    // session_start already ran. Still fail-closed: a failing check keeps refusing.
+    if (!selfCheckState.checked) await bwrapSelfCheck();
     const refusal = bashRefusalReason();
     if (refusal) return { block: true, reason: refusal };
     // Pi's bash input is {command, timeout} only (pi bash.js): the run cwd

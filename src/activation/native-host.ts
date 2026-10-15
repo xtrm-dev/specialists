@@ -58,7 +58,7 @@ import {
   resolvePiVersion,
   BUILTIN_CODEMODE_EXTENSION,
 } from '../pi/session.js';
-import { getPermissionGuardExtensionPath } from '../pi/permission-guard-extension.js';
+import { getPermissionGuardExtensionPath, resolvePermissionGuardForSpawn } from '../pi/permission-guard-extension.js';
 import { formatResolvedToolContract, withDiscoveredExtensionTools, type ResolvedToolContract } from '../specialist/resolved-tool-contract.js';
 import { resolveModelChain } from '../specialist/model-chain.js';
 import { extractPurposeExcerpt } from './contract-sections.js';
@@ -1804,6 +1804,18 @@ export class NativeActivationHost {
           'the resolved contract grants READ_ONLY bash but the permission guard is not in the ' +
           'loaded extension set; refusing rather than running unsandboxed',
       });
+    }
+    // Tier channel, native surface (SPECIALISTS-4294): the CLI spawns merge
+    // guard.tierEnv into the child env (src/pi/session.ts); in-process there is no
+    // child env — the guard reads process.env — so merge it here, exactly when the
+    // guard is in the loaded set above. Sticky by design: only READ_ONLY sessions
+    // load the guard and all want the same value, writers never read it, and CLI
+    // spawns overwrite per spawn. Without this tierRefusal is dead natively.
+    // Opt-out preserved: resolvePermissionGuardForSpawn returns null when
+    // SPECIALISTS_PERMISSION_GUARD=0 (or non-READ_ONLY), setting nothing.
+    const nativeGuard = resolvePermissionGuardForSpawn(tier);
+    if (nativeGuard && curatedExtensions.all.includes(nativeGuard.path)) {
+      Object.assign(process.env, nativeGuard.tierEnv);
     }
     const resourceLoader = createActivationResourceLoader(sdk, {
       cwd: workspace.worktreePath,

@@ -7,7 +7,8 @@
 
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { pathToFileURL } from 'node:url';
-import { existsSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 vi.mock('@earendil-works/pi-coding-agent', () => ({
@@ -228,13 +229,22 @@ describe('permission-guard fail-closed behavior', () => {
   });
 
   it('blocks bash when the self-check has not passed', async () => {
-    const m = await loadGuard();
-    const fake = makeFakePi();
-    m.default(fake);
-    const event = { toolName: 'bash', input: { command: 'echo hi' } };
-    const verdict = await fake.emit('tool_call', event, makeCtx('/work'));
-    expect(verdict).toMatchObject({ block: true, reason: expect.stringContaining('self-check') });
-    expect((event.input as { command: string }).command).toBe('echo hi');
+    // No bwrap on PATH, so the lazy first-use self-check (SPECIALISTS-4294) fails
+    // fail-closed with 'bwrap not found on PATH' instead of running unsandboxed.
+    const previousPath = process.env.PATH;
+    process.env.PATH = '';
+    try {
+      const m = await loadGuard();
+      const fake = makeFakePi();
+      m.default(fake);
+      const event = { toolName: 'bash', input: { command: 'echo hi' } };
+      const verdict = await fake.emit('tool_call', event, makeCtx('/work'));
+      expect(verdict).toMatchObject({ block: true, reason: expect.stringContaining('self-check') });
+      expect((event.input as { command: string }).command).toBe('echo hi');
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
   });
 
   it('refuses when ctx.cwd is missing instead of falling back to process.cwd()', async () => {
@@ -340,5 +350,36 @@ describe('permission-guard fail-closed behavior', () => {
     expect(check.ok).toBe(false);
     expect(check.detail).toContain('command not found');
     expect(m.bashRefusalReason()).toContain('self-check failed');
+  });
+
+  it('runs the self-check lazily on first tool_call when session_start never fired (native SDK path)', async () => {
+    // SPECIALISTS-4294: sdk.createAgentSession never calls session.bindExtensions,
+    // the sole startup-path session_start emitter, so a native session never delivers
+    // session_start to the guard. The guard must self-check on first use, not refuse
+    // forever with 'self-check has not passed'. A hermetic fake bwrap (exit 0) stands
+    // in for the host binary so the test proves the TRIGGER runs, not that bwrap exists.
+    const binDir = mkdtempSync(join(tmpdir(), 'perm-guard-bwrap-'));
+    const fakeBwrap = join(binDir, 'bwrap');
+    writeFileSync(fakeBwrap, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    chmodSync(fakeBwrap, 0o755);
+    const previousPath = process.env.PATH;
+    const delimiter = process.platform === 'win32' ? ';' : ':';
+    process.env.PATH = `${binDir}${delimiter}${previousPath ?? ''}`;
+    try {
+      const m = await loadGuard();
+      const fake = makeFakePi();
+      m.default(fake);
+      // Deliberately NO session_start emit: this is the native wiring.
+      const event = { toolName: 'bash', toolCallId: '1', input: { command: 'cat /proc/1/comm' } };
+      const verdict = await fake.emit('tool_call', event, makeCtx('/work'));
+      expect(verdict).toBeUndefined();
+      const command = (event.input as { command: string }).command;
+      expect(command).toContain(fakeBwrap);
+      expect(command).toContain('--unshare-net');
+      expect(command).toContain(`'--chdir' '/work'`);
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
   });
 });

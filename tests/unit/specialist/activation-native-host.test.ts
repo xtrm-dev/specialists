@@ -2348,6 +2348,52 @@ describe('permission-guard native surface', () => {
     expect(loader.options.additionalExtensionPaths).not.toContain(getPermissionGuardExtensionPath());
     expect((record.createArgs!.tools as string[])).not.toContain('bash');
   });
+
+  it('propagates PI_SPECIALIST_PERMISSION_TIER=READ_ONLY into the native activation process', async () => {
+    // SPECIALISTS-4294: the CLI merges the tier env channel per spawn
+    // (src/pi/session.ts); the native in-process guard reads process.env, so the host
+    // must set it — otherwise tierRefusal is dead on the native surface.
+    const TIER_KEY = 'PI_SPECIALIST_PERMISSION_TIER';
+    const previousTier = process.env[TIER_KEY];
+    delete process.env[TIER_KEY];
+    try {
+      process.env[GUARD_KEY] = '1';
+      const record: { createArgs?: Record<string, unknown> } = {};
+      const session = fakeSession({ record });
+      await dispatchReadOnly(record, session);
+      expect(process.env[TIER_KEY]).toBe('READ_ONLY');
+    } finally {
+      if (previousTier === undefined) delete process.env[TIER_KEY];
+      else process.env[TIER_KEY] = previousTier;
+    }
+  });
+
+  it('leaves the tier channel unset for writer tiers (phase 1 is READ_ONLY only)', async () => {
+    const TIER_KEY = 'PI_SPECIALIST_PERMISSION_TIER';
+    const previousTier = process.env[TIER_KEY];
+    delete process.env[TIER_KEY];
+    try {
+      process.env[GUARD_KEY] = '1';
+      const spec = readOnlySpec();
+      (spec.specialist.execution as Record<string, unknown>).permission_required = 'HIGH';
+      const record: { createArgs?: Record<string, unknown> } = {};
+      const session = fakeSession({ record });
+      const host = new NativeActivationHost({
+        loader: loaderFor(spec),
+        workItems: fakeWorkItems(),
+        forensics: collectingSink(),
+        loadSdk: async () => makeSdk(record, session),
+        cwd: hostWorkspace(),
+      });
+      await (await host.start({
+        specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+      })).result;
+      expect(process.env[TIER_KEY]).toBeUndefined();
+    } finally {
+      if (previousTier === undefined) delete process.env[TIER_KEY];
+      else process.env[TIER_KEY] = previousTier;
+    }
+  });
 });
 
 
