@@ -151,7 +151,7 @@ function getToolsArg(args: readonly string[]): string | undefined {
 let savedPermissionGuardFlag: string | undefined;
 beforeEach(() => {
   savedPermissionGuardFlag = process.env.SPECIALISTS_PERMISSION_GUARD;
-  delete process.env.SPECIALISTS_PERMISSION_GUARD;
+  process.env.SPECIALISTS_PERMISSION_GUARD = '0';
 });
 afterEach(() => {
   if (savedPermissionGuardFlag === undefined) delete process.env.SPECIALISTS_PERMISSION_GUARD;
@@ -1739,8 +1739,21 @@ describe('permission-guard CLI surface', () => {
     if (toolsIdx !== -1) expect(args[toolsIdx + 1].split(',')).toContain('bash');
   });
 
-  it('loads nothing extra when the flag is off (byte-for-byte unchanged)', async () => {
+  it('loads the guard and grants bash for READ_ONLY with the variable unset (SPECIALISTS-4290 default-on)', async () => {
     delete process.env.SPECIALISTS_PERMISSION_GUARD;
+    const { getPermissionGuardExtensionPath } = await import('../../../src/pi/permission-guard-extension.js');
+    const session = await PiAgentSession.create({ model: 'gemini', permissionLevel: 'READ_ONLY' });
+    await session.start();
+    const args: string[] = mockSpawn.mock.calls[0][1];
+    expect(extensionPaths(args)).toContain(getPermissionGuardExtensionPath());
+    expect(mockSpawn.mock.calls[0][2].env.PI_SPECIALIST_PERMISSION_TIER).toBe('READ_ONLY');
+    const toolsIdx = args.indexOf('--tools');
+    expect(toolsIdx).not.toBe(-1);
+    expect(args[toolsIdx + 1].split(',')).toContain('bash');
+  });
+
+  it('loads nothing extra when opted out (byte-for-byte unchanged)', async () => {
+    process.env.SPECIALISTS_PERMISSION_GUARD = '0';
     const { getPermissionGuardExtensionPath } = await import('../../../src/pi/permission-guard-extension.js');
     const session = await PiAgentSession.create({ model: 'gemini', permissionLevel: 'READ_ONLY' });
     await session.start();

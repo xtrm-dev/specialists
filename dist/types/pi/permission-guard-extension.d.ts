@@ -1,4 +1,4 @@
-/** Flag that arms the phase-1 guard. Default off: flag-off behaviour is byte-for-byte unchanged. */
+/** Opt-out for the permission guard. Default on (SPECIALISTS-4290); '0' or 'false' disables it, restoring the pre-guard tool sets. */
 export declare const PERMISSION_GUARD_ENV_KEY = "SPECIALISTS_PERMISSION_GUARD";
 /** Bounded channel carrying the specialist tier to the guard inside the child session. */
 export declare const PERMISSION_GUARD_TIER_ENV_KEY = "PI_SPECIALIST_PERMISSION_TIER";
@@ -6,7 +6,7 @@ export declare function getPermissionGuardExtensionPath(): string | null;
 export declare function isPermissionGuardEnabled(env?: NodeJS.ProcessEnv): boolean;
 /**
  * Whether the resolver may grant sandboxed bash to a tier (SPECIALISTS-4285).
- * Phase 1 is READ_ONLY only. Both conditions must hold: the flag is on AND the
+ * Phase 1 is READ_ONLY only. Both conditions must hold: the guard is not opted out AND the
  * guard artifact resolves — a surface that cannot load the guard must not
  * grant READ_ONLY bash.
  */
@@ -21,11 +21,12 @@ export declare function __resetPermissionGuardExtensionPathCacheForTest(): void;
  * the native-specialists Pi extension).
  *
  * Returns the guard path plus the bounded tier env channel when the tier is
- * READ_ONLY and the flag is on. Throws when wanted but the artifact is
- * missing — a surface that cannot load the guard must fail closed, never
- * run with bash granted but unsandboxed. Returns null when the guard does
- * not apply (flag off or non-READ_ONLY tier): callers load nothing and the
- * resolver grants nothing, so behaviour is byte-for-byte unchanged.
+ * READ_ONLY and the guard is not opted out. Returns null (with a warning)
+ * when the artifact is missing: shouldGrantGuardedBash applies the same
+ * check, so the contract has already withheld bash and the launch proceeds
+ * without it — never with bash unsandboxed. Returns null when the guard does
+ * not apply (opted out or non-READ_ONLY tier): callers load nothing and the
+ * resolver grants nothing.
  */
 export declare function resolvePermissionGuardForSpawn(tier: string | undefined): {
     path: string;

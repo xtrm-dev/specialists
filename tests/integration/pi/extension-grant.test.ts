@@ -21,7 +21,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 let savedPermissionGuardFlag: string | undefined;
 beforeEach(() => {
   savedPermissionGuardFlag = process.env.SPECIALISTS_PERMISSION_GUARD;
-  delete process.env.SPECIALISTS_PERMISSION_GUARD;
+  process.env.SPECIALISTS_PERMISSION_GUARD = '0';
 });
 afterEach(() => {
   if (savedPermissionGuardFlag === undefined) delete process.env.SPECIALISTS_PERMISSION_GUARD;

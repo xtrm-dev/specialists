@@ -653,7 +653,7 @@ describe('permission-guard raw-spawn surface (SPECIALISTS-4285)', () => {
   });
 
   it('loads nothing extra when the flag is off', async () => {
-    delete process.env[GUARD_KEY];
+    process.env[GUARD_KEY] = '0';
     const { getPermissionGuardExtensionPath } = await import('../../../src/pi/permission-guard-extension.js');
     const { args, env } = await runRawSpawn();
     expect(extensionPaths(args)).not.toContain(getPermissionGuardExtensionPath());

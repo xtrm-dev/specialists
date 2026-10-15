@@ -23949,7 +23949,7 @@ function getPermissionGuardExtensionPath() {
 }
 function isPermissionGuardEnabled(env = process.env) {
   const raw = (env[PERMISSION_GUARD_ENV_KEY] ?? "").trim().toLowerCase();
-  return raw === "1" || raw === "true";
+  return raw !== "0" && raw !== "false";
 }
 function shouldGrantGuardedBash(tier, env = process.env) {
   if ((tier ?? "").toUpperCase() !== "READ_ONLY")
@@ -23965,7 +23965,8 @@ function resolvePermissionGuardForSpawn(tier) {
     return null;
   const path = getPermissionGuardExtensionPath();
   if (!path) {
-    throw new Error("[permission-guard] SPECIALISTS_PERMISSION_GUARD=1 for READ_ONLY but the guard artifact " + "config/pi-extensions/permission-guard is missing; refusing launch without the sandbox.");
+    console.warn("[permission-guard] guard artifact config/pi-extensions/permission-guard is missing; " + "READ_ONLY bash withheld.");
+    return null;
   }
   return { path, tierEnv: { [PERMISSION_GUARD_TIER_ENV_KEY]: "READ_ONLY" } };
 }
@@ -24881,7 +24882,7 @@ function resolveRuntimeToolContract(options) {
       ...contract,
       warnings: [
         ...contract.warnings,
-        "permission-guard: SPECIALISTS_PERMISSION_GUARD=1 but the guard artifact is missing; READ_ONLY bash withheld"
+        "permission-guard: guard enabled but the guard artifact is missing; READ_ONLY bash withheld"
       ]
     };
   }

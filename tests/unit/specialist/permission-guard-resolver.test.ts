@@ -1,7 +1,7 @@
 // Resolver gating for the phase-1 permission guard (SPECIALISTS-4285):
-// READ_ONLY gains sandboxed bash only when SPECIALISTS_PERMISSION_GUARD=1
-// AND the guard artifact resolves; every other combination leaves tool sets
-// byte-for-byte identical.
+// READ_ONLY gains sandboxed bash unless SPECIALISTS_PERMISSION_GUARD is 0/false
+// (SPECIALISTS-4290 default-on) AND the guard artifact resolves; otherwise
+// tool sets are identical to the pre-guard ones.
 
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { buildResolvedToolContract } from '../../../src/specialist/resolved-tool-contract.js';
@@ -32,15 +32,15 @@ afterEach(() => {
 });
 
 describe('permission-guard resolver gating', () => {
-  it('flag off: READ_ONLY has no bash (byte-for-byte unchanged)', () => {
-    delete process.env[PERMISSION_GUARD_ENV_KEY];
+  it('opted out: READ_ONLY has no bash (byte-for-byte unchanged)', () => {
+    process.env[PERMISSION_GUARD_ENV_KEY] = '0';
     const contract = buildResolvedToolContract({ tier: 'READ_ONLY', catalogs: CATALOGS });
     expect(contract.toolsList).not.toContain('bash');
     expect(contract.nativeTools).not.toContain('bash');
     expect(contract.toolsFlag.split(',')).not.toContain('bash');
   });
 
-  it('flag on: READ_ONLY gains bash in toolsList, nativeTools and toolsFlag', () => {
+  it('guard on: READ_ONLY gains bash in toolsList, nativeTools and toolsFlag', () => {
     process.env[PERMISSION_GUARD_ENV_KEY] = '1';
     const contract = buildResolvedToolContract({
       tier: 'READ_ONLY',
@@ -76,5 +76,28 @@ describe('permission-guard resolver gating', () => {
       const without = buildResolvedToolContract({ tier, catalogs: CATALOGS });
       expect(withGrant.toolsFlag).toBe(without.toolsFlag);
     }
+  });
+});
+
+// SPECIALISTS-4290: the guard is default-on; only an explicit '0'/'false' opts out.
+describe('isPermissionGuardEnabled default (SPECIALISTS-4290)', () => {
+  it.each([
+    [undefined, true],
+    ['', true],
+    ['1', true],
+    ['true', true],
+    ['0', false],
+    ['false', false],
+    [' FALSE ', false],
+  ])('%j -> %s', async (value, expected) => {
+    const { isPermissionGuardEnabled } = await import('../../../src/pi/permission-guard-extension.js');
+    const env: NodeJS.ProcessEnv = value === undefined ? {} : { [PERMISSION_GUARD_ENV_KEY]: value };
+    expect(isPermissionGuardEnabled(env)).toBe(expected);
+  });
+
+  it('grants READ_ONLY sandboxed bash with no env set', async () => {
+    const { shouldGrantGuardedBash } = await import('../../../src/pi/permission-guard-extension.js');
+    expect(shouldGrantGuardedBash('READ_ONLY', {})).toBe(true);
+    expect(shouldGrantGuardedBash('READ_ONLY', { [PERMISSION_GUARD_ENV_KEY]: '0' })).toBe(false);
   });
 });

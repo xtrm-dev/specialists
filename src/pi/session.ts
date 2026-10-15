@@ -419,7 +419,7 @@ export function resolveRuntimeToolContract(options: {
     contract = buildResolvedToolContract({
       tier,
       // Phase-1 permission guard (SPECIALISTS-4285): sandboxed bash for
-      // READ_ONLY only when the flag is on AND the guard artifact resolves.
+      // READ_ONLY only when the guard is not opted out AND its artifact resolves.
       grantGuardedBash: shouldGrantGuardedBash(tier),
       catalogs: runtimeCatalogs,
       catalogDefaultOverrides: catalogIndex.default_overrides,
@@ -455,13 +455,13 @@ export function resolveRuntimeToolContract(options: {
     isPermissionGuardEnabled() &&
     !contract.nativeTools.includes('bash')
   ) {
-    // Flag on but the grant withheld (guard artifact missing): say so on the
+    // Guard enabled but the grant withheld (guard artifact missing): say so on the
     // contract rather than silently running READ_ONLY without bash.
     contract = {
       ...contract,
       warnings: [
         ...contract.warnings,
-        'permission-guard: SPECIALISTS_PERMISSION_GUARD=1 but the guard artifact is missing; READ_ONLY bash withheld',
+        'permission-guard: guard enabled but the guard artifact is missing; READ_ONLY bash withheld',
       ],
     };
   }
@@ -739,7 +739,7 @@ export function resolveCuratedExtensionPaths(options: {
     all.push(BUILTIN_CODEMODE_EXTENSION);
   }
   // Phase-1 permission guard (SPECIALISTS-4285): sandboxed bash for READ_ONLY
-  // when SPECIALISTS_PERMISSION_GUARD=1. Owned here — the single curated set
+  // unless SPECIALISTS_PERMISSION_GUARD=0. Owned here — the single curated set
   // both runtimes consume (legacy CLI argv AND native loader extensionPaths)
   // — so the two surfaces cannot drift on whether the guard is loaded, and
   // the parity harness (which compiles the legacy profile from this helper)
@@ -1349,7 +1349,7 @@ export class PiAgentSession {
 
     // Phase-1 permission guard tier channel (SPECIALISTS-4285): the -e comes
     // from the curated set above; the env tells the guard its tier.
-    // Fail-closed (throws) when wanted but missing.
+    // A missing artifact warns and withholds bash, never runs it unsandboxed.
     const policyEnv: Record<string, string> = {};
     const guard = resolvePermissionGuardForSpawn(this.options.permissionLevel);
     if (guard) Object.assign(policyEnv, guard.tierEnv);

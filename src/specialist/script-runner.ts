@@ -1108,8 +1108,9 @@ function appendExtensionArgs(
     args.push('-e', source);
   }
   // Phase-1 permission guard (SPECIALISTS-4285): sandboxed bash for READ_ONLY
-  // when SPECIALISTS_PERMISSION_GUARD=1. Fail-closed (throws) when wanted but
-  // missing; the tier env channel is merged into policyEnv by the caller.
+  // unless SPECIALISTS_PERMISSION_GUARD=0. A missing artifact warns and withholds
+  // bash (never runs it unsandboxed); the tier env channel is merged into
+  // policyEnv by the caller.
   const guard = resolvePermissionGuardForSpawn(permissionLevel);
   if (guard) {
     args.push('-e', guard.path);

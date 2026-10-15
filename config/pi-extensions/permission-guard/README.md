@@ -2,8 +2,8 @@
 
 Sandboxed `bash` for READ_ONLY specialists. Loaded via `-e <this dir>`
 (legacy CLI spawns) or the resource loader's `extensionPaths` (native
-activation) when `SPECIALISTS_PERMISSION_GUARD=1` and the resolved contract
-grants READ_ONLY bash.
+activation) by default (SPECIALISTS-4290) whenever the resolved contract
+grants READ_ONLY bash. `SPECIALISTS_PERMISSION_GUARD=0` (or `false`) opts out.
 
 ## How it works
 
@@ -48,8 +48,9 @@ one handler covers both paths.
   other than READ_ONLY refuses. Unset (native in-process path, where
   curated-conditional loading is the authorization) proceeds sandboxed.
 - The resolver (`shouldGrantGuardedBash`) grants READ_ONLY bash only when
-  the flag is on AND this artifact resolves; every load site throws or
-  refuses when the grant exists but the artifact is missing.
+  the guard is not opted out AND this artifact resolves. When the artifact
+  is missing, CLI spawns warn and launch without bash; native activation
+  refuses if bash is granted but the guard is not loaded.
 
 ## Verify
 

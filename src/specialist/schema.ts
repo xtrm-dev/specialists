@@ -32,7 +32,7 @@ const ExecutionSchema = z.object({
   /** Semantic output archetype used for structured output contracts and schema extensions. */
   output_type: z.enum(['codegen', 'analysis', 'review', 'synthesis', 'orchestration', 'workflow', 'research', 'custom']).default('custom'),
   /** Controls which pi tools are available to the agent.
-   *  READ_ONLY : read, grep, find, ls        (no bash, no writes)
+   *  READ_ONLY : read, grep, find, ls        (+ bwrap-sandboxed bash unless opted out; no writes)
    *  LOW       : + bash                       (inspect/run, no file edits)
    *  MEDIUM    : + edit                       (can edit existing files)
    *  HIGH      : + write                      (full access — create new files)

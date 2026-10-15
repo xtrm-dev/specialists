@@ -70,7 +70,7 @@ The flat tool list emitted to `pi --tools` is the union of each catalog's `sourc
 
 | Tier | Native | GitNexus |
 |------|--------|----------|
-| `READ_ONLY` | read, grep, find, ls (+ bash sandboxed, flag-gated — see below) | read tools (query/context/impact/detect_changes/list_repos) |
+| `READ_ONLY` | read, grep, find, ls (+ bash sandboxed by default — see below) | read tools (query/context/impact/detect_changes/list_repos) |
 | `LOW` | + bash | same as READ_ONLY |
 | `MEDIUM` | + edit | + rename, cypher |
 | `HIGH` | + write | same as MEDIUM |
@@ -156,10 +156,10 @@ Why: explorer is meant to discover code through the symbol/process graph. GitNex
 
 ## Sandboxed bash for READ_ONLY (phase 1 permission guard)
 
-READ_ONLY specialists have no bash by default, so read-only roles cannot run
-deterministic read-only commands (`git diff`, `ocr delegate preview`,
-linters). With `SPECIALISTS_PERMISSION_GUARD=1`, READ_ONLY gains a `bash`
-tool whose every invocation — direct or nested from a codemode cell — runs
+Every specialist gets bash. READ_ONLY specialists get a sandboxed `bash`
+(default on since SPECIALISTS-4290; opt out with `SPECIALISTS_PERMISSION_GUARD=0`),
+so read-only roles can run deterministic read-only commands (`git diff`,
+`ocr delegate preview`, linters). That `bash` is a tool whose every invocation — direct or nested from a codemode cell — runs
 inside bubblewrap: whole filesystem read-only, a private writable `/tmp`,
 `/run` masked (no user bus / docker socket) with pid+ipc namespaces,
 network unshared, credential paths masked (`~/.ssh`, `~/.aws`, `~/.gnupg`,
@@ -172,8 +172,8 @@ by absolute path.
 
 The boundary is the OS sandbox, not command-pattern rules. If bwrap is
 unavailable or fails its startup self-check, bash is refused with a clear
-reason — never run raw. With the flag off, tool sets are byte-for-byte
-unchanged. The guard loads on all three launch surfaces (CLI spawn, raw CLI
+reason — never run raw. With `SPECIALISTS_PERMISSION_GUARD=0` (or `false`;
+no other value opts out), READ_ONLY has no bash. The guard loads on all three launch surfaces (CLI spawn, raw CLI
 spawn, native activation via MCP or the native-specialists extension); a
 surface that cannot load the guard withholds READ_ONLY bash. LOW/MEDIUM/HIGH
 write confinement and network allowlists are phase 2.
