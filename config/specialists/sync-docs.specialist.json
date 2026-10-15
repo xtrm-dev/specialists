@@ -2,10 +2,10 @@
   "specialist": {
     "metadata": {
       "name": "sync-docs",
-      "version": "3.3.0",
+      "version": "3.3.1",
       "description": "Single-document documentation synchronizer. Use when exactly one doc needs drift-aware updates from scoped report/commit context. MEDIUM; not for broad rewrites or multi-doc audits.",
       "category": "documentation",
-      "updated": "2026-09-20",
+      "updated": "2026-10-13",
       "tags": [
         "docs",
         "sync",
@@ -41,7 +41,8 @@
     },
     "skills": {
       "paths": [
-        "~/.xtrm/skills/optional/xtrm-maintenance/sync-docs/"
+        "~/.xtrm/skills/optional/xtrm-maintenance/sync-docs/",
+        "codemode"
       ],
       "scripts": [
         {

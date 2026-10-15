@@ -2,7 +2,7 @@
   "specialist": {
     "metadata": {
       "name": "xt-merge",
-      "version": "1.1.1",
+      "version": "1.1.2",
       "description": "xt PR queue merger. Use to drain xt worktree PRs in FIFO order with CI, rebase, push, and conflict handling. MEDIUM; not for specialist worktree merges or implementation.",
       "category": "workflow",
       "tags": [
@@ -14,7 +14,7 @@
         "rebase",
         "ci"
       ],
-      "updated": "2026-09-06"
+      "updated": "2026-10-13"
     },
     "execution": {
       "mode": "tool",
@@ -35,7 +35,9 @@
       "system_prompt_mode": "append"
     },
     "skills": {
-      "paths": [],
+      "paths": [
+        "codemode"
+      ],
       "scripts": []
     },
     "validation": {

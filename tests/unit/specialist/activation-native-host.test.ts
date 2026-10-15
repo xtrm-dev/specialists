@@ -45,7 +45,7 @@ vi.mock('node:child_process', async (importOriginal) => {
     },
   };
 });
-import { NativeActivationHost, resolveWorkspace, resolveDeclaredExtensionSources, resolveNpmExtensionSource, resolveGitExtensionSource, expectedRemoteExtensionLabels, formatSkippedExtensionSourceMessage, unresolvableNpmSources, type ActivationForensicSink } from '../../../src/activation/native-host.js';
+import { NativeActivationHost, createActivationResourceLoader, resolveWorkspace, resolveDeclaredExtensionSources, resolveNpmExtensionSource, resolveGitExtensionSource, expectedRemoteExtensionLabels, formatSkippedExtensionSourceMessage, unresolvableNpmSources, type ActivationForensicSink } from '../../../src/activation/native-host.js';
 import { ASK_TOOL, ESCALATE_TOOL } from '../../../src/activation/ask-tool.js';
 import { buildSystemPrompt } from '../../../src/specialist/system-prompt.js';
 import { resolveOutputContractSchema } from '../../../src/specialist/runner.js';
@@ -4173,5 +4173,66 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
     const discoveryCalls = calls.filter((c) => c.systemPrompt === 'extension-discovery (never prompted)');
     expect(discoveryCalls).toHaveLength(1);
     expect(discoveryCalls[0]!.paths).toEqual(['/fake/ext-a']);
+  });
+});
+
+/**
+ * Codemode builtin wiring (SPECIALISTS-4260 follow-up).
+ *
+ * The native path refused every dispatch with `tool_contract_unsatisfied · missing: [codemode]`
+ * because SDK sessions do not load pi's codemode builtin (pi docs/sdk.md). The curated set pushes
+ * `builtin:codemode` when the contract grants codemode, but that path only resolves against a
+ * factory supplied with `builtin: true`, so the loader also needs pi's own factory. These pin the
+ * gating: the factory appears exactly when the curated path asks for it, never otherwise, and the
+ * fence (`noExtensions: true`) is untouched.
+ */
+describe('createActivationResourceLoader codemode builtin', () => {
+  const CODEMODE_FACTORY = () => {};
+
+  function loaderSdk(withFactory: boolean): PiSdk {
+    return {
+      DefaultResourceLoader: FakeResourceLoader,
+      getAgentDir: () => FAKE_AGENT_DIR,
+      ...(withFactory ? { createCodemodeExtension: () => CODEMODE_FACTORY } : {}),
+    } as unknown as PiSdk;
+  }
+
+  it('supplies the named codemode builtin factory exactly when the curated path asks for it', () => {
+    const loader = createActivationResourceLoader(loaderSdk(true), {
+      cwd: '/tmp/x',
+      skillPaths: [],
+      // What resolveCuratedExtensionPaths yields for a tier whose catalog grants codemode.
+      extensionPaths: ['builtin:codemode'],
+    });
+    const options = (loader as unknown as FakeResourceLoader).options as Record<string, unknown>;
+    expect(options.noExtensions).toBe(true);
+    expect(options.additionalExtensionPaths).toContain('builtin:codemode');
+    const factories = options.extensionFactories as Array<Record<string, unknown>>;
+    expect(factories).toHaveLength(1);
+    // Named builtin form, mirroring the CLI's own registration: the plain form registers with
+    // registry source "inline" while the curated path still errors.
+    expect(factories[0]).toMatchObject({ name: 'codemode', builtin: true, replaceable: true });
+    expect(factories[0]!.factory).toBe(CODEMODE_FACTORY);
+  });
+
+  it('supplies no factory when no builtin path is passed (the path is the gate)', () => {
+    const loader = createActivationResourceLoader(loaderSdk(true), {
+      cwd: '/tmp/x',
+      skillPaths: [],
+      extensionPaths: [],
+    });
+    const options = (loader as unknown as FakeResourceLoader).options as Record<string, unknown>;
+    expect(options.extensionFactories).toBeUndefined();
+    expect(options.noExtensions).toBe(true);
+  });
+
+  it('omits the factory on an SDK without the export, leaving the fail-closed refusal to cover it', () => {
+    const loader = createActivationResourceLoader(loaderSdk(false), {
+      cwd: '/tmp/x',
+      skillPaths: [],
+      extensionPaths: ['builtin:codemode'],
+    });
+    const options = (loader as unknown as FakeResourceLoader).options as Record<string, unknown>;
+    expect(options.extensionFactories).toBeUndefined();
   });
 });

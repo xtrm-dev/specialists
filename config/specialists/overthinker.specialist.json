@@ -2,7 +2,7 @@
   "specialist": {
     "metadata": {
       "name": "overthinker",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "description": "READ_ONLY deep reasoning and critique specialist. Use for risky designs, tradeoffs, premortems, architecture choices, or plans that need devil's-advocate review. Not for direct implementation.",
       "category": "workflow",
       "tags": [
@@ -12,7 +12,7 @@
         "synthesis",
         "deep-analysis"
       ],
-      "updated": "2026-05-04"
+      "updated": "2026-10-13"
     },
     "execution": {
       "mode": "tool",
@@ -41,7 +41,9 @@
       "system_prompt_mode": "append"
     },
     "skills": {
-      "paths": [],
+      "paths": [
+        "codemode"
+      ],
       "scripts": []
     },
     "validation": {

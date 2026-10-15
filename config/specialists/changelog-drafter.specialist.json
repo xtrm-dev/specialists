@@ -2,10 +2,10 @@
   "specialist": {
     "metadata": {
       "name": "changelog-drafter",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "description": "READ_ONLY changelog drafting surface for xt release prepare. Use for bundle synthesis only; no publishing, tagging, commits, or file edits.",
       "category": "release",
-      "updated": "2026-05-05",
+      "updated": "2026-10-13",
       "tags": [
         "changelog",
         "release",
@@ -41,7 +41,11 @@
       "task_template": "$prompt\n\n$reused_worktree_awareness\n\nWorking directory: $cwd\n\n$bead_context\n\nInject xt report bundle first, then draft. Draft only; do not publish or mutate files. Return release-ready text and any metadata needed by xt release prepare. Proceed step-by-step.\n",
       "system_prompt_mode": "append"
     },
-    "skills": {},
+    "skills": {
+      "paths": [
+        "codemode"
+      ]
+    },
     "capabilities": {
       "external_commands": [
         "git",

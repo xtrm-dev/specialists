@@ -2,7 +2,7 @@
   "specialist": {
     "metadata": {
       "name": "transcriber",
-      "version": "1.6.0",
+      "version": "1.6.1",
       "description": "Deep YouTube technical transcription and documentation specialist. Extracts transcripts via yt-dlp and produces dense, evidence-rich structured reports: metadata, transcript pointer, chapters, topic map, exhaustive claims/quotes, speaker analysis, detailed technical section analysis, synthesis, and slide brief. Writes title-derived filenames section-by-section without accumulating output.",
       "category": "analysis",
       "tags": [
@@ -12,7 +12,7 @@
         "content-analysis",
         "narrative-reconstruction"
       ],
-      "updated": "2026-05-30"
+      "updated": "2026-10-13"
     },
     "execution": {
       "mode": "tool",
@@ -33,7 +33,9 @@
       "system_prompt_mode": "append"
     },
     "skills": {
-      "paths": [],
+      "paths": [
+        "codemode"
+      ],
       "scripts": []
     },
     "validation": {

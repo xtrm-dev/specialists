@@ -12,7 +12,7 @@ vi.mock('node:child_process', () => ({
 }));
 
 import { execFileSync, spawn } from 'node:child_process';
-import { PiAgentSession, StallTimeoutError, applyExtensionToolPolicyGate, deduplicateExtensionSources, resolveExecutionExtensionSelection, resolveRuntimeToolContract, validateWriteToolPathAgainstBoundary } from '../../../src/pi/session.js';
+import { PiAgentSession, StallTimeoutError, applyExtensionToolPolicyGate, deduplicateExtensionSources, resolveCuratedExtensionPaths, resolveExecutionExtensionSelection, resolveRuntimeToolContract, validateWriteToolPathAgainstBoundary } from '../../../src/pi/session.js';
 import { __resetPiExtensionsPythonKernelPathCacheForTest } from '../../../src/pi/python-kernel-extension.js';
 import { catalogVersion } from '../../utils/catalog-pin.js';
 import { getExtensionToolPolicyExtensionPath, NATIVE_TOOLS_ENV_KEY } from '../../../src/pi/extension-tool-policy-extension.js';
@@ -867,7 +867,7 @@ describe('PiAgentSession', () => {
   it('resolveRuntimeToolContract reports disabled special case for bare-style opt-out', async () => {
     await withGitnexusInstall(GITNEXUS_CATALOG_VERSION, async () => {
       const contract = resolveRuntimeToolContract({ level: 'READ_ONLY', excludeExtensions: ['pi-gitnexus'] });
-      expect(contract?.toolsFlag).toBe('read,grep,find,ls');
+      expect(contract?.toolsFlag).toBe('read,grep,find,ls,codemode');
       expect(contract?.extensions.gitnexus?.status).toBe('disabled');
       expect(contract?.downgradeReasons).toEqual(['restored native fallback for grep,find,ls due to disabled']);
     });
@@ -892,9 +892,9 @@ describe('PiAgentSession', () => {
       try {
         const contract = resolveRuntimeToolContract({ level: 'READ_ONLY', extensionSources: [dir] });
         expect(contract?.exposedExtensionSources).toEqual([dir]);
-        // Native allowlist unchanged: read,grep,find,ls stay the granted set
-        // (gitnexus not installed here, so hard deny cannot strip search).
-        expect(contract?.nativeTools).toEqual(['read', 'grep', 'find', 'ls']);
+        // Native allowlist unchanged: read,grep,find,ls stay the granted set, plus the
+        // builtin codemode tool (gitnexus not installed here, so hard deny cannot strip search).
+        expect(contract?.nativeTools).toEqual(['read', 'grep', 'find', 'ls', 'codemode']);
       } finally {
         cleanup();
       }
@@ -921,7 +921,7 @@ describe('PiAgentSession', () => {
         expect(args).toContain(dir); // configured source still -e'd
         // Bounded env channel carries exactly the granted natives.
         const spawnOptions = mockSpawn.mock.calls[0][2];
-        expect(spawnOptions.env[NATIVE_TOOLS_ENV_KEY]).toBe('read,grep,find,ls,bash,edit');
+        expect(spawnOptions.env[NATIVE_TOOLS_ENV_KEY]).toBe('read,grep,find,ls,bash,edit,codemode');
       } finally {
         cleanup();
       }
@@ -938,7 +938,7 @@ describe('PiAgentSession', () => {
           });
           await session.start();
           const spawnOptions = mockSpawn.mock.calls[0][2];
-          expect(spawnOptions.env[NATIVE_TOOLS_ENV_KEY]).toBe('read');
+          expect(spawnOptions.env[NATIVE_TOOLS_ENV_KEY]).toBe('read,codemode');
           const args: string[] = mockSpawn.mock.calls[0][1];
           expect(args).toContain('--no-builtin-tools');
           expect(args.indexOf('--tools')).toBe(-1);
@@ -946,6 +946,44 @@ describe('PiAgentSession', () => {
           cleanup();
         }
       });
+    });
+
+    // SPECIALISTS-4260: the resource fence passes --no-extensions, which also disables
+    // built-in extensions, so a builtin tool the contract grants never registers unless its
+    // extension is re-added. Without this the codemode skill was declared and loaded while
+    // the tool behind it could never activate, making the role prompts naming it inert.
+    it('loads builtin:codemode when the contract grants the codemode tool', async () => {
+      const session = await PiAgentSession.create({ model: 'gemini', permissionLevel: 'READ_ONLY' });
+      await session.start();
+      const args: string[] = mockSpawn.mock.calls[0][1];
+      const flagIndex = args.indexOf('builtin:codemode');
+      expect(flagIndex).toBeGreaterThan(-1);
+      expect(args[flagIndex - 1]).toBe('-e');
+      expect(getToolsArg(args)?.split(',')).toContain('codemode');
+    });
+
+    it('routes the granted codemode extension through the curated list the native loader uses', () => {
+      // The native activation builds its resource loader from resolveCuratedExtensionPaths, so a
+      // granted builtin tool must appear here or the loader never loads the extension that
+      // registers it — the allowlist cannot conjure a tool that was never loaded.
+      const granted = resolveRuntimeToolContract({ level: 'READ_ONLY' });
+      const curated = resolveCuratedExtensionPaths({ permissionLevel: 'READ_ONLY', resolvedToolContract: granted });
+      expect(curated.all).toContain('builtin:codemode');
+    });
+
+    it('does not load builtin:codemode when the resolved contract withholds it', async () => {
+      // No tier withholds codemode any more — READ_ONLY, LOW, MEDIUM and HIGH all grant it,
+      // because a codemode cell can only reach the session's already-active tools. The gate
+      // that still matters is the CONTRACT: a curated set built from a contract without
+      // codemode must not push the builtin path, and therefore must not load it.
+      const curated = resolveCuratedExtensionPaths({
+        permissionLevel: 'LOW',
+        resolvedToolContract: {
+          nativeTools: ['read', 'bash'],
+          extensions: { gitnexus: { status: 'disabled' } },
+        } as unknown as NonNullable<ReturnType<typeof resolveRuntimeToolContract>>,
+      });
+      expect(curated.all).not.toContain('builtin:codemode');
     });
 
     it('forwards malformed sources as -e so Pi surfaces the load failure', async () => {
@@ -999,7 +1037,7 @@ describe('PiAgentSession', () => {
       await session.start();
 
       const args: string[] = mockSpawn.mock.calls[0][1];
-      expect(getToolsArg(args)?.split(',')).toEqual(['read', 'grep', 'find', 'ls', 'bash']);
+      expect(getToolsArg(args)?.split(',')).toEqual(['read', 'grep', 'find', 'ls', 'bash', 'codemode']);
       expect(args).not.toContain(join(npmGlobalDir, 'pi-gitnexus'));
     });
   });

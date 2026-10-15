@@ -2,10 +2,10 @@
   "specialist": {
     "metadata": {
       "name": "changelog-keeper",
-      "version": "3.1.0",
+      "version": "3.1.1",
       "description": "CHANGELOG.md gap-filler. Reconciles [Unreleased] from xt reports + commit subjects in a tag range. Edits CHANGELOG.md only — does not bump version, build, commit, tag, push, or publish. Invoked from /releasing skill when [Unreleased] is empty or sparse.",
       "category": "release",
-      "updated": "2026-09-20",
+      "updated": "2026-10-13",
       "tags": [
         "changelog",
         "release",
@@ -43,7 +43,8 @@
     },
     "skills": {
       "paths": [
-        "~/.xtrm/skills/optional/xtrm-maintenance/releasing"
+        "~/.xtrm/skills/optional/xtrm-maintenance/releasing",
+        "codemode"
       ],
       "scripts": [
         {

@@ -47,6 +47,15 @@ export interface PiResourceLoaderOptions {
   additionalSkillPaths?: string[];
   noExtensions?: boolean;
   additionalExtensionPaths?: string[];
+  /**
+   * Inline/builtin extension code supplied explicitly (pi docs `sdk.md`): "Inline extension
+   * factories can be supplied through `DefaultResourceLoader`". The native host uses this for
+   * exactly one entry — the named codemode builtin — when the contract grants codemode.
+   *
+   * Typed `unknown[]` because pi is an optional runtime peer here, the same reason this file
+   * avoids importing pi's declarations.
+   */
+  extensionFactories?: unknown[];
   noContextFiles?: boolean;
   noPromptTemplates?: boolean;
   noThemes?: boolean;
@@ -79,6 +88,17 @@ export interface PiSdk {
     modelRuntime: PiModelRuntimeLike,
   ) => Promise<PiModelScopeResult> | PiModelScopeResult;
   defineTool: (definition: Record<string, unknown>) => unknown;
+  /**
+   * pi's codemode extension factory (pi `sdk.md`: "SDK sessions do not [load codemode]; add
+   * `createCodemodeExtension()` … to the `extensionFactories`"). Present on pi 1.0.0 and
+   * 1.2.0 (measured `typeof === 'function'` on both), and OPTIONAL on purpose: absent on an
+   * older SDK the host supplies no factory and the existing fail-closed
+   * `tool_contract_unsatisfied` refusal covers a contract that granted codemode.
+   *
+   * Deliberately NOT in REQUIRED_EXPORTS: requiring it would refuse every dispatch on an
+   * older SDK even when no contract grants codemode at all.
+   */
+  createCodemodeExtension?: () => unknown;
 }
 
 /** One entry of pi's tool registry, as returned by `getAllTools()`. */

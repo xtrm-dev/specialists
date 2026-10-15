@@ -2,7 +2,7 @@
   "specialist": {
     "metadata": {
       "name": "quant-methodologist",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "description": "Quant methodology and pipeline auditor/designer. Use for market-data formulas, units, conventions, numerical probes, model assumptions, and creative but conservative quant pipeline proposals. Not for implementation edits; LOW read/probe only.",
       "category": "quant-analysis",
       "tags": [
@@ -13,7 +13,7 @@
         "modeling",
         "oracles"
       ],
-      "updated": "2026-09-06"
+      "updated": "2026-10-13"
     },
     "execution": {
       "mode": "tool",
@@ -105,6 +105,12 @@
           }
         }
       }
+    },
+    "skills": {
+      "paths": [
+        "codemode"
+      ],
+      "scripts": []
     },
     "capabilities": {
       "required_tools": [

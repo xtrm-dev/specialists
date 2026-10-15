@@ -133,7 +133,10 @@ describe('selective loading: coordinator gets the router, not advanced reference
   const prompt = coordinator.specialist.prompt?.system ?? '';
 
   it('chain-coordinator eagerly injects only the root router', () => {
-    expect(declared).toEqual(['using-specialists']);
+    // codemode is the fleet-wide skill (every shipped definition wires it); this
+    // assertion still fails if an ADVANCED using-specialists reference is ever
+    // eagerly injected — see the root-router invariant below.
+    expect(declared).toEqual(['using-specialists', 'codemode']);
   });
 
   it('chain-coordinator prompt preserves runtime-aware communication invariants', () => {

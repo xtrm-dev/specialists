@@ -24618,7 +24618,7 @@ var init_session_metrics_contract = __esm(() => {
 // src/pi/session.ts
 import { createHash as createHash3 } from "crypto";
 import { spawn as spawn2, execFileSync as execFileSync2 } from "child_process";
-import { existsSync as existsSync19, lstatSync as lstatSync3, mkdirSync as mkdirSync10, readFileSync as readFileSync15, realpathSync as realpathSync2, statSync as statSync4, writeFileSync as writeFileSync9 } from "fs";
+import { existsSync as existsSync19, lstatSync as lstatSync3, mkdirSync as mkdirSync10, readdirSync as readdirSync7, readFileSync as readFileSync15, realpathSync as realpathSync2, statSync as statSync4, writeFileSync as writeFileSync9 } from "fs";
 import { homedir as homedir5, tmpdir } from "os";
 import { isAbsolute as isAbsolute2, resolve as resolve12, sep as sep3, join as join20, dirname as dirname13 } from "path";
 function toRuntimeToolCatalogs(catalogIndex) {
@@ -24940,6 +24940,9 @@ function resolveCuratedExtensionPaths(options) {
   if (gitnexusContract?.status === "available" && gitnexusContract.packagePath && existsSync19(gitnexusContract.packagePath)) {
     all.push(gitnexusContract.packagePath);
   }
+  if ((options.resolvedToolContract?.nativeTools ?? []).includes("codemode")) {
+    all.push(BUILTIN_CODEMODE_EXTENSION);
+  }
   return {
     all,
     dedupeAgainstDynamic: [
@@ -24975,15 +24978,35 @@ function resolvePiVersion() {
   } catch {}
   return;
 }
-function resolveGlobalNodeModulesDir2() {
+function resolveGlobalNodeModulesDirs(deps = {}) {
+  const env = deps.env ?? process.env;
+  const home = deps.home ?? homedir5();
+  const execPath = deps.execPath ?? process.execPath;
+  const exists = deps.exists ?? existsSync19;
+  const readDir = deps.readDir ?? ((path) => readdirSync7(path));
   const candidates = [
-    process.env.PI_NPM_GLOBAL_DIR,
-    process.env.NPM_CONFIG_PREFIX ? join20(process.env.NPM_CONFIG_PREFIX, "lib", "node_modules") : undefined,
-    process.env.npm_config_prefix ? join20(process.env.npm_config_prefix, "lib", "node_modules") : undefined,
-    process.env.NVM_BIN ? join20(dirname13(process.env.NVM_BIN), "lib", "node_modules") : undefined,
-    join20(homedir5(), ".nvm/versions/node", process.version, "lib", "node_modules")
+    env.PI_NPM_GLOBAL_DIR,
+    env.NPM_CONFIG_PREFIX ? join20(env.NPM_CONFIG_PREFIX, "lib", "node_modules") : undefined,
+    env.npm_config_prefix ? join20(env.npm_config_prefix, "lib", "node_modules") : undefined,
+    env.NVM_BIN ? join20(dirname13(env.NVM_BIN), "lib", "node_modules") : undefined,
+    join20(dirname13(dirname13(execPath)), "lib", "node_modules"),
+    env.BUN_INSTALL ? join20(env.BUN_INSTALL, "install", "global", "node_modules") : undefined,
+    join20(home, ".bun", "install", "global", "node_modules"),
+    join20(home, ".nvm/versions/node", process.version, "lib", "node_modules"),
+    ...nvmNodeModulesDirs(home, readDir)
   ].filter((candidate) => Boolean(candidate));
-  return candidates.find((candidate) => existsSync19(candidate));
+  return [...new Set(candidates)].filter((candidate) => exists(candidate));
+}
+function resolveGlobalNodeModulesDir2(deps = {}) {
+  return resolveGlobalNodeModulesDirs(deps)[0];
+}
+function nvmNodeModulesDirs(home, readDir) {
+  const root = join20(home, ".nvm", "versions", "node");
+  try {
+    return readDir(root).filter((version) => version.startsWith("v")).sort().reverse().map((version) => join20(root, version, "lib", "node_modules"));
+  } catch {
+    return [];
+  }
 }
 function asNumber(value) {
   if (typeof value === "number" && Number.isFinite(value))
@@ -25943,7 +25966,7 @@ ${stderrTail}` : ""}`;
     await this.waitForDone(timeout);
   }
 }
-var SessionKilledError, StallTimeoutError, TEST_COMMAND_STALL_TIMEOUT_MS = 300000, GITNEXUS_IMPACT_STALL_TIMEOUT_MS = 300000, TEST_COMMAND_PATTERNS, RUNTIME_TOOL_CATALOG_ERROR_MESSAGE = "Runtime tool catalog unavailable or invalid; refusing to launch with Pi default tools. Reinstall or rebuild Specialists and verify config/catalog/index.json.", RuntimeToolCatalogResolutionError, cachedPiVersion, piVersionResolved = false, WRITE_BOUNDARY_TOOL_NAMES, WORKTREE_BOUNDARY_ENV_KEY = "SPECIALISTS_WORKTREE_BOUNDARY";
+var SessionKilledError, StallTimeoutError, TEST_COMMAND_STALL_TIMEOUT_MS = 300000, GITNEXUS_IMPACT_STALL_TIMEOUT_MS = 300000, TEST_COMMAND_PATTERNS, RUNTIME_TOOL_CATALOG_ERROR_MESSAGE = "Runtime tool catalog unavailable or invalid; refusing to launch with Pi default tools. Reinstall or rebuild Specialists and verify config/catalog/index.json.", RuntimeToolCatalogResolutionError, BUILTIN_CODEMODE_EXTENSION = "builtin:codemode", cachedPiVersion, piVersionResolved = false, WRITE_BOUNDARY_TOOL_NAMES, WORKTREE_BOUNDARY_ENV_KEY = "SPECIALISTS_WORKTREE_BOUNDARY";
 var init_session = __esm(() => {
   init_read_line_numbers_extension();
   init_extension_tool_policy_extension();
@@ -36172,7 +36195,7 @@ var init_feed = __esm(() => {
 });
 
 // src/specialist/status-load.ts
-import { appendFileSync as appendFileSync4, existsSync as existsSync26, mkdirSync as mkdirSync13, readdirSync as readdirSync7, readFileSync as readFileSync20, renameSync as renameSync4, writeFileSync as writeFileSync13 } from "fs";
+import { appendFileSync as appendFileSync4, existsSync as existsSync26, mkdirSync as mkdirSync13, readdirSync as readdirSync8, readFileSync as readFileSync20, renameSync as renameSync4, writeFileSync as writeFileSync13 } from "fs";
 import { join as join27 } from "path";
 function hasStatusId(status) {
   return typeof status.id === "string" && status.id.trim().length > 0;
@@ -36181,7 +36204,7 @@ function readStatusesFromFiles(jobsDir) {
   if (!existsSync26(jobsDir))
     return [];
   const statuses = [];
-  for (const entry of readdirSync7(jobsDir)) {
+  for (const entry of readdirSync8(jobsDir)) {
     const statusPath = join27(jobsDir, entry, "status.json");
     if (!existsSync26(statusPath))
       continue;
@@ -37958,7 +37981,7 @@ function consoleHelpText() {
 }
 
 // src/specialist/process-health.ts
-import { existsSync as existsSync27, readdirSync as readdirSync8, readFileSync as readFileSync22, readlinkSync as readlinkSync2 } from "fs";
+import { existsSync as existsSync27, readdirSync as readdirSync9, readFileSync as readFileSync22, readlinkSync as readlinkSync2 } from "fs";
 import { join as join28 } from "path";
 function parseThreshold(raw, fallback) {
   if (!raw)
@@ -38059,7 +38082,7 @@ function listPids(procRoot) {
   if (!existsSync27(procRoot))
     return [];
   const pids = [];
-  for (const entry of readdirSync8(procRoot, { withFileTypes: true })) {
+  for (const entry of readdirSync9(procRoot, { withFileTypes: true })) {
     if (!entry.isDirectory())
       continue;
     const pid = Number(entry.name);
@@ -39228,7 +39251,7 @@ var init_repo_config = __esm(() => {
 });
 
 // src/cli/console/repo-discovery.ts
-import { existsSync as existsSync29, readdirSync as readdirSync9, statSync as statSync7 } from "fs";
+import { existsSync as existsSync29, readdirSync as readdirSync10, statSync as statSync7 } from "fs";
 import { homedir as homedir10 } from "os";
 import { join as join30 } from "path";
 function expandHomePath(p) {
@@ -39258,7 +39281,7 @@ function walk(dir, depth, seen, repos) {
     return;
   let entries;
   try {
-    entries = readdirSync9(dir);
+    entries = readdirSync10(dir);
   } catch {
     return;
   }
@@ -39748,7 +39771,7 @@ var init_config_source = __esm(() => {
 
 // src/cli/console/runtime.ts
 import { spawnSync as spawnSync16 } from "child_process";
-import { existsSync as existsSync31, readdirSync as readdirSync10, readFileSync as readFileSync25, statSync as statSync9 } from "fs";
+import { existsSync as existsSync31, readdirSync as readdirSync11, readFileSync as readFileSync25, statSync as statSync9 } from "fs";
 import { basename as basename7, dirname as dirname18, join as join32 } from "path";
 function createRuntimeClient(cwd = process.cwd()) {
   return new LocalRuntimeClient(cwd);
@@ -40334,7 +40357,7 @@ function scanSiblingsForRepos(repoRoot) {
     return [];
   let entries;
   try {
-    entries = readdirSync10(parent);
+    entries = readdirSync11(parent);
   } catch {
     return [];
   }
@@ -40536,7 +40559,7 @@ function readStatuses(repo) {
 function readFileStatuses(jobsDir) {
   if (!existsSync31(jobsDir))
     return [];
-  return readdirSync10(jobsDir).flatMap((entry) => {
+  return readdirSync11(jobsDir).flatMap((entry) => {
     const path = join32(jobsDir, entry, "status.json");
     if (!existsSync31(path))
       return [];
@@ -43063,7 +43086,7 @@ var init_epic_reconciler = __esm(() => {
 
 // src/cli/merge.ts
 import { spawnSync as spawnSync18 } from "child_process";
-import { existsSync as existsSync33, readFileSync as readFileSync27, readdirSync as readdirSync11 } from "fs";
+import { existsSync as existsSync33, readFileSync as readFileSync27, readdirSync as readdirSync12 } from "fs";
 import { join as join35 } from "path";
 function parseOptions(argv) {
   let target = "";
@@ -43307,7 +43330,7 @@ function readAllJobStatuses() {
   if (!existsSync33(jobsDir))
     return [];
   const statuses = [];
-  for (const jobId of readdirSync11(jobsDir)) {
+  for (const jobId of readdirSync12(jobsDir)) {
     const statusFile = join35(jobsDir, jobId, "status.json");
     if (!existsSync33(statusFile))
       continue;
@@ -43666,7 +43689,7 @@ ${conflicts.map((file) => `- ${file}`).join(`
   throw new Error(`Merge conflict while merging '${branch}'.${context}`);
 }
 function runTypecheckGate(cwd = process.cwd()) {
-  const hasTypeScriptConfig = existsSync33(join35(cwd, "tsconfig.json")) || readdirSync11(cwd).some((entry) => entry.startsWith("tsconfig") && entry.endsWith(".json"));
+  const hasTypeScriptConfig = existsSync33(join35(cwd, "tsconfig.json")) || readdirSync12(cwd).some((entry) => entry.startsWith("tsconfig") && entry.endsWith(".json"));
   if (!hasTypeScriptConfig) {
     console.log("TypeScript gate: skipped (no tsconfig \u2014 non-TS repo)");
     return;
@@ -44090,7 +44113,7 @@ function createPiJsonProjector(context) {
 
 // src/cli/run.ts
 import { dirname as dirname20, join as join36, resolve as resolve17, sep as sep4 } from "path";
-import { constants as fsConstants, existsSync as existsSync34, fstatSync as fstatSync2, openSync as openSync4, readFileSync as readFileSync28, readSync, readdirSync as readdirSync12, realpathSync as realpathSync4, statSync as statSync10, closeSync as closeSync3 } from "fs";
+import { constants as fsConstants, existsSync as existsSync34, fstatSync as fstatSync2, openSync as openSync4, readFileSync as readFileSync28, readSync, readdirSync as readdirSync13, realpathSync as realpathSync4, statSync as statSync10, closeSync as closeSync3 } from "fs";
 import { randomBytes } from "crypto";
 import { spawn as cpSpawn, execFileSync as execFileSync4, execSync as execSync5 } from "child_process";
 function formatBackgroundLaunchLine(opts) {
@@ -44363,7 +44386,7 @@ function resolveNewestJobIdFromDb(cwd, jobsDir, specialist, previousLatest, minS
 }
 function resolveNewestJobIdFromJobsDir(jobsDir, previousLatest, minMtimeMs) {
   try {
-    const entries = readdirSync12(jobsDir, { withFileTypes: true }).filter((entry) => entry.isDirectory() && /^[a-f0-9]{6}$/.test(entry.name) && entry.name !== previousLatest).map((entry) => {
+    const entries = readdirSync13(jobsDir, { withFileTypes: true }).filter((entry) => entry.isDirectory() && /^[a-f0-9]{6}$/.test(entry.name) && entry.name !== previousLatest).map((entry) => {
       const dirPath = join36(jobsDir, entry.name);
       const statusPath = join36(dirPath, "status.json");
       const stats = statSync10(dirPath);
@@ -47981,7 +48004,7 @@ var init_node_supervisor = __esm(() => {
 });
 
 // src/cli/node.ts
-import { existsSync as existsSync36, readFileSync as readFileSync30, readdirSync as readdirSync13 } from "fs";
+import { existsSync as existsSync36, readFileSync as readFileSync30, readdirSync as readdirSync14 } from "fs";
 import { randomUUID as randomUUID3 } from "crypto";
 import { basename as basename8, join as join38, resolve as resolve18 } from "path";
 function parseNodeArgs(argv) {
@@ -48175,7 +48198,7 @@ function discoverNodeConfigs(cwd) {
     const absoluteDir = resolve18(cwd, directory.path);
     if (!existsSync36(absoluteDir))
       continue;
-    const files = readdirSync13(absoluteDir).filter((fileName) => fileName.endsWith(NODE_CONFIG_SUFFIX));
+    const files = readdirSync14(absoluteDir).filter((fileName) => fileName.endsWith(NODE_CONFIG_SUFFIX));
     for (const fileName of files) {
       const path = join38(absoluteDir, fileName);
       const name = toNodeName(fileName);
@@ -52073,7 +52096,7 @@ var init_result = __esm(() => {
 });
 
 // src/specialist/timeline-query.ts
-import { existsSync as existsSync40, readdirSync as readdirSync14, readFileSync as readFileSync33 } from "fs";
+import { existsSync as existsSync40, readdirSync as readdirSync15, readFileSync as readFileSync33 } from "fs";
 import { basename as basename9, join as join42 } from "path";
 function readJobEvents(jobDir) {
   const jobId = basename9(jobDir);
@@ -52136,7 +52159,7 @@ function readAllJobEvents(jobsDir, jobId) {
   if (!existsSync40(jobsDir))
     return [];
   const batches = [];
-  const entries = readdirSync14(jobsDir);
+  const entries = readdirSync15(jobsDir);
   for (const entry of entries) {
     const jobDir = join42(jobsDir, entry);
     try {
@@ -52220,7 +52243,7 @@ import {
   existsSync as existsSync41,
   openSync as openSync5,
   readFileSync as readFileSync34,
-  readdirSync as readdirSync15,
+  readdirSync as readdirSync16,
   statSync as statSync11
 } from "fs";
 import { join as join43 } from "path";
@@ -52702,7 +52725,7 @@ function listMatchingJobIds(sqliteClient, jobsDir, options) {
     }
   } catch {}
   if (existsSync41(jobsDir)) {
-    for (const entry of readdirSync15(jobsDir)) {
+    for (const entry of readdirSync16(jobsDir)) {
       const jobDir = join43(jobsDir, entry);
       try {
         if (!statSync11(jobDir).isDirectory())
@@ -53860,7 +53883,7 @@ var init_metrics = __esm(() => {
 });
 
 // src/cli/log.ts
-import { existsSync as existsSync42, readdirSync as readdirSync16, statSync as statSync12 } from "fs";
+import { existsSync as existsSync42, readdirSync as readdirSync17, statSync as statSync12 } from "fs";
 import { basename as basename11, join as join44 } from "path";
 function parseSince4(value) {
   if (value.includes("T") || value.includes("-"))
@@ -53951,7 +53974,7 @@ function discoverDbTargets(cwd, repoFilter) {
   const targets = [];
   let entries = [];
   try {
-    entries = readdirSync16(cwd);
+    entries = readdirSync17(cwd);
   } catch {
     return [];
   }
@@ -54682,7 +54705,7 @@ async function run30() {
 }
 
 // src/specialist/worktree-gc.ts
-import { existsSync as existsSync43, readdirSync as readdirSync17, readFileSync as readFileSync35 } from "fs";
+import { existsSync as existsSync43, readdirSync as readdirSync18, readFileSync as readFileSync35 } from "fs";
 import { join as join45 } from "path";
 import { spawnSync as spawnSync24 } from "child_process";
 function readJobStatus2(jobDir) {
@@ -54727,7 +54750,7 @@ function collectWorktreeGcCandidates(jobsDir) {
   if (!existsSync43(jobsDir))
     return [];
   const candidates = [];
-  for (const entry of readdirSync17(jobsDir, { withFileTypes: true })) {
+  for (const entry of readdirSync18(jobsDir, { withFileTypes: true })) {
     if (!entry.isDirectory())
       continue;
     const status = readJobStatus2(join45(jobsDir, entry.name));
@@ -54782,7 +54805,7 @@ var init_worktree_gc = __esm(() => {
 });
 
 // src/cli/clean.ts
-import { existsSync as existsSync44, readFileSync as readFileSync36, readdirSync as readdirSync18, rmSync as rmSync7, statSync as statSync13 } from "fs";
+import { existsSync as existsSync44, readFileSync as readFileSync36, readdirSync as readdirSync19, rmSync as rmSync7, statSync as statSync13 } from "fs";
 import { join as join46 } from "path";
 function parseDuration2(raw) {
   const match = /^(\d+)(ms|s|m|h|d)$/i.exec(raw.trim());
@@ -54937,7 +54960,7 @@ function parseOptions2(argv) {
 }
 function readDirectorySizeBytes(directoryPath) {
   let totalBytes = 0;
-  for (const entry of readdirSync18(directoryPath, { withFileTypes: true })) {
+  for (const entry of readdirSync19(directoryPath, { withFileTypes: true })) {
     const entryPath = join46(directoryPath, entry.name);
     const stats = statSync13(entryPath);
     totalBytes += stats.isDirectory() ? readDirectorySizeBytes(entryPath) : stats.size;
@@ -54945,7 +54968,7 @@ function readDirectorySizeBytes(directoryPath) {
   return totalBytes;
 }
 function containsProtectedSqliteArtifact(directoryPath) {
-  for (const entry of readdirSync18(directoryPath, { withFileTypes: true })) {
+  for (const entry of readdirSync19(directoryPath, { withFileTypes: true })) {
     const entryPath = join46(directoryPath, entry.name);
     if (entry.isDirectory()) {
       if (containsProtectedSqliteArtifact(entryPath))
@@ -54998,7 +55021,7 @@ function collectCompletedJobs(jobsDirectoryPath) {
   }
   if (process.env.SPECIALISTS_JOB_FILE_OUTPUT !== "on")
     return [];
-  return readdirSync18(jobsDirectoryPath, { withFileTypes: true }).map((entry) => readCompletedJobDirectory(jobsDirectoryPath, entry)).filter((job) => job !== null);
+  return readdirSync19(jobsDirectoryPath, { withFileTypes: true }).map((entry) => readCompletedJobDirectory(jobsDirectoryPath, entry)).filter((job) => job !== null);
 }
 function selectJobsToRemove(completedJobs, options, protectedJobIds) {
   const jobsByNewest = [...completedJobs].sort((left, right) => {
@@ -55845,14 +55868,14 @@ var init_attach = __esm(() => {
 });
 
 // src/specialist/drift-detector.ts
-import { existsSync as existsSync45, readFileSync as readFileSync37, readdirSync as readdirSync19, rmSync as rmSync8 } from "fs";
+import { existsSync as existsSync45, readFileSync as readFileSync37, readdirSync as readdirSync20, rmSync as rmSync8 } from "fs";
 import { join as join47, resolve as resolve19, relative as relative4 } from "path";
 function listFiles(root) {
   if (!existsSync45(root))
     return [];
   const out = [];
   const visit = (dir) => {
-    for (const entry of readdirSync19(dir, { withFileTypes: true })) {
+    for (const entry of readdirSync20(dir, { withFileTypes: true })) {
       const full = join47(dir, entry.name);
       if (entry.isDirectory()) {
         visit(full);
@@ -55914,7 +55937,7 @@ function detectDriftUnderRoot(root) {
       repos.push({ root: dir, findings });
       return;
     }
-    for (const entry of readdirSync19(dir, { withFileTypes: true })) {
+    for (const entry of readdirSync20(dir, { withFileTypes: true })) {
       if (!entry.isDirectory())
         continue;
       if (entry.name === "node_modules" || entry.name === ".git")
@@ -56513,7 +56536,7 @@ var init_workspace_lease = __esm(() => {
 });
 
 // src/activation/workspace-reconcile.ts
-import { appendFileSync as appendFileSync7, existsSync as existsSync47, mkdirSync as mkdirSync19, readdirSync as readdirSync20, readFileSync as readFileSync39, unlinkSync as unlinkSync3 } from "fs";
+import { appendFileSync as appendFileSync7, existsSync as existsSync47, mkdirSync as mkdirSync19, readdirSync as readdirSync21, readFileSync as readFileSync39, unlinkSync as unlinkSync3 } from "fs";
 import { userInfo } from "os";
 import { join as join49 } from "path";
 function reconcile(workspace, request, options = {}) {
@@ -56642,7 +56665,7 @@ function projectUncertainWorkspaces(scope, probe = procLeaseProbe()) {
   if (!existsSync47(dir))
     return [];
   const out = [];
-  for (const entry of readdirSync20(dir)) {
+  for (const entry of readdirSync21(dir)) {
     if (!entry.endsWith(".json"))
       continue;
     const key = entry.slice(0, -".json".length);
@@ -57154,10 +57177,9 @@ function resolveSubstrateDir(explicit, resolveInstalled) {
   return resolveSubstrateFromGlobalPrefix();
 }
 function resolveSubstrateFromGlobalPrefix(libDirs) {
-  const globalModules = resolveGlobalNodeModulesDir2();
   const runtimePrefix = dirname23(dirname23(process.execPath));
   const candidates = uniqueExistingLibDirs(libDirs ?? [
-    globalModules ? dirname23(globalModules) : undefined,
+    ...resolveGlobalNodeModulesDirs().map((modulesDir) => dirname23(modulesDir)),
     join50(runtimePrefix, "lib"),
     join50(homedir13(), ".bun", "install", "global")
   ]);
@@ -57558,7 +57580,7 @@ var init_workitem_store = __esm(() => {
 // src/cli/doctor.ts
 import { createHash as createHash10 } from "crypto";
 import { spawnSync as spawnSync26 } from "child_process";
-import { existsSync as existsSync50, mkdirSync as mkdirSync20, readdirSync as readdirSync21, readFileSync as readFileSync41, writeFileSync as writeFileSync22 } from "fs";
+import { existsSync as existsSync50, mkdirSync as mkdirSync20, readdirSync as readdirSync22, readFileSync as readFileSync41, writeFileSync as writeFileSync22 } from "fs";
 import { homedir as homedir14 } from "os";
 import { join as join51, relative as relative5, resolve as resolve22 } from "path";
 import { fileURLToPath as fileURLToPath9 } from "url";
@@ -57843,7 +57865,7 @@ function hashFile(path) {
 function collectFileHashes(rootDir) {
   const hashes = new Map;
   const visit = (dir) => {
-    for (const entry of readdirSync21(dir, { withFileTypes: true })) {
+    for (const entry of readdirSync22(dir, { withFileTypes: true })) {
       const fullPath = join51(dir, entry.name);
       if (entry.isDirectory()) {
         visit(fullPath);
@@ -57909,7 +57931,7 @@ function checkUserOverlayDrift() {
     ok3("no user overlays present");
     return true;
   }
-  const overlays = readdirSync21(USER_SPECIALISTS_DIR).filter((name) => name.endsWith(".specialist.json"));
+  const overlays = readdirSync22(USER_SPECIALISTS_DIR).filter((name) => name.endsWith(".specialist.json"));
   if (overlays.length === 0) {
     ok3("no user overlays present");
     return true;
@@ -58312,7 +58334,7 @@ function cleanupProcesses(jobsDir, dryRun) {
   }
   let entries;
   try {
-    entries = readdirSync21(jobsDir);
+    entries = readdirSync22(jobsDir);
   } catch {
     entries = [];
   }
@@ -58811,7 +58833,7 @@ var init_benchmarks = __esm(() => {
 
 // src/specialist/model-probes.ts
 import { createHash as createHash11, randomUUID as randomUUID5 } from "crypto";
-import { mkdirSync as mkdirSync22, readdirSync as readdirSync22, readFileSync as readFileSync43, writeFileSync as writeFileSync24 } from "fs";
+import { mkdirSync as mkdirSync22, readdirSync as readdirSync23, readFileSync as readFileSync43, writeFileSync as writeFileSync24 } from "fs";
 import { homedir as homedir16 } from "os";
 import { dirname as dirname25, join as join53, resolve as resolve23 } from "path";
 async function runAgenticFollowthroughProbe(model, specName, opts = {}) {
@@ -58898,7 +58920,7 @@ function eventType(value) {
 function countFilesOutsideScope(probeDir) {
   const allowedFiles = new Set(["probe-notes.md", "events.jsonl", "probe-summary.json"]);
   try {
-    return readdirSync22(probeDir, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile()).filter((entry) => !allowedFiles.has(entry.name)).length;
+    return readdirSync23(probeDir, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile()).filter((entry) => !allowedFiles.has(entry.name)).length;
   } catch {
     return 0;
   }
@@ -59443,7 +59465,7 @@ var init_setup = __esm(() => {
 });
 
 // src/cli/serve-hot-reload.ts
-import { existsSync as existsSync52, readdirSync as readdirSync23, statSync as statSync14, watch as fsWatch } from "fs";
+import { existsSync as existsSync52, readdirSync as readdirSync24, statSync as statSync14, watch as fsWatch } from "fs";
 import { join as join54 } from "path";
 function specialistNameFromFile(file) {
   const match = file.match(/^(.+)\.specialist\.(json|yaml)$/);
@@ -59453,7 +59475,7 @@ function snapshotMtimes(dir) {
   const out = new Map;
   if (!existsSync52(dir))
     return out;
-  const entries = readdirSync23(dir).filter((name) => specialistNameFromFile(name) !== null);
+  const entries = readdirSync24(dir).filter((name) => specialistNameFromFile(name) !== null);
   for (const name of entries) {
     try {
       out.set(name, statSync14(join54(dir, name)).mtimeMs);
@@ -89824,7 +89846,7 @@ var init_specialist_lease_reconcile_tool = __esm(() => {
 });
 
 // src/activation/transport/pending-store.ts
-import { existsSync as existsSync55, mkdirSync as mkdirSync23, readdirSync as readdirSync24, readFileSync as readFileSync46, renameSync as renameSync8, unlinkSync as unlinkSync4, writeFileSync as writeFileSync25 } from "fs";
+import { existsSync as existsSync55, mkdirSync as mkdirSync23, readdirSync as readdirSync25, readFileSync as readFileSync46, renameSync as renameSync8, unlinkSync as unlinkSync4, writeFileSync as writeFileSync25 } from "fs";
 import { join as join56 } from "path";
 function projectDeliveryState(state) {
   if (state === "delivered")
@@ -89937,7 +89959,7 @@ function listForActivation(repoRoot, activationId) {
   if (!existsSync55(dir))
     return [];
   const views = [];
-  for (const entry of readdirSync24(dir)) {
+  for (const entry of readdirSync25(dir)) {
     if (!entry.endsWith(".json") || entry.endsWith(".reply.json") || entry.endsWith(".tmp"))
       continue;
     const record = readJson3(join56(dir, entry));
@@ -89951,7 +89973,7 @@ function listAll(repoRoot) {
   const root = interactionsRoot(repoRoot);
   if (!existsSync55(root))
     return [];
-  return readdirSync24(root).flatMap((activationId) => listForActivation(repoRoot, activationId)).sort((a, b) => a.createdAtMs - b.createdAtMs);
+  return readdirSync25(root).flatMap((activationId) => listForActivation(repoRoot, activationId)).sort((a, b) => a.createdAtMs - b.createdAtMs);
 }
 var KINDS_AWAITING_REPLY;
 var init_pending_store = __esm(() => {
@@ -90347,7 +90369,7 @@ var init_peer_bridge = __esm(() => {
 });
 
 // src/activation/transport/roster.ts
-import { existsSync as existsSync56, readdirSync as readdirSync25, readFileSync as readFileSync47 } from "fs";
+import { existsSync as existsSync56, readdirSync as readdirSync26, readFileSync as readFileSync47 } from "fs";
 import { homedir as homedir18 } from "os";
 import { join as join57 } from "path";
 function defaultRosterDir() {
@@ -90424,7 +90446,7 @@ function scanRoster(options = {}) {
   const rejected = [];
   if (!existsSync56(dir))
     return { live, rejected };
-  for (const file of readdirSync25(dir)) {
+  for (const file of readdirSync26(dir)) {
     if (!file.endsWith(".json"))
       continue;
     let registration;
@@ -91830,7 +91852,7 @@ var init_settlement_publication = __esm(() => {
 });
 
 // src/activation/settlement-store.ts
-import { mkdirSync as mkdirSync24, readFileSync as readFileSync48, readdirSync as readdirSync26, writeFileSync as writeFileSync26 } from "fs";
+import { mkdirSync as mkdirSync24, readFileSync as readFileSync48, readdirSync as readdirSync27, writeFileSync as writeFileSync26 } from "fs";
 import { join as join59 } from "path";
 function safeSegment(id) {
   const safe = id.replace(/[^A-Za-z0-9.:_-]/g, "_");
@@ -91870,7 +91892,7 @@ function createFileSettlementStore(root) {
     listAttempts(activationId) {
       let files;
       try {
-        files = readdirSync26(join59(root, safeSegment(activationId)));
+        files = readdirSync27(join59(root, safeSegment(activationId)));
       } catch {
         return [];
       }
@@ -91892,7 +91914,7 @@ function createFileSettlementStore(root) {
   function readAll() {
     let activations;
     try {
-      activations = readdirSync26(root);
+      activations = readdirSync27(root);
     } catch {
       return [];
     }
@@ -91906,7 +91928,7 @@ function createFileSettlementStore(root) {
   function readActivationDir(activation) {
     let files;
     try {
-      files = readdirSync26(join59(root, activation));
+      files = readdirSync27(join59(root, activation));
     } catch {
       return [];
     }
@@ -92123,6 +92145,9 @@ function resolveWorkspace(cwd) {
   return workspaceIdentityFor(cwd);
 }
 function createActivationResourceLoader(sdk, options) {
+  const wantsCodemode = (options.extensionPaths ?? []).includes(BUILTIN_CODEMODE_EXTENSION);
+  const codemodeFactory = wantsCodemode && typeof sdk.createCodemodeExtension === "function" ? sdk.createCodemodeExtension() : undefined;
+  const codemodeName = BUILTIN_CODEMODE_EXTENSION.replace("builtin:", "");
   return new sdk.DefaultResourceLoader({
     cwd: options.cwd,
     agentDir: sdk.getAgentDir(),
@@ -92130,6 +92155,7 @@ function createActivationResourceLoader(sdk, options) {
     additionalSkillPaths: options.skillPaths,
     noExtensions: true,
     additionalExtensionPaths: options.extensionPaths ?? [],
+    ...codemodeFactory !== undefined ? { extensionFactories: [{ name: codemodeName, factory: codemodeFactory, replaceable: true, builtin: true }] } : {},
     noContextFiles: true,
     noPromptTemplates: true,
     noThemes: true

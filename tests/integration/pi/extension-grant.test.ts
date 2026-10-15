@@ -128,7 +128,7 @@ describe('extension exposure sanity (no Pi needed)', () => {
       const withoutGitnexus = resolveRuntimeToolContract({ level: 'READ_ONLY', extensionSources: [dir] });
       expect(withoutGitnexus?.exposedExtensionSources).toEqual([dir]);
       // No healthy extension: nothing is hard-denied, so every granted native is unchanged.
-      expect(withoutGitnexus?.nativeTools).toEqual(['read', 'grep', 'find', 'ls']);
+      expect(withoutGitnexus?.nativeTools).toEqual(['read', 'grep', 'find', 'ls', 'codemode']);
 
       mkdirSync(join(npmGlobalDir, 'pi-gitnexus'), { recursive: true });
       writeFileSync(
@@ -139,8 +139,9 @@ describe('extension exposure sanity (no Pi needed)', () => {
       expect(withGitnexus?.exposedExtensionSources).toEqual([dir]);
       expect(withGitnexus?.extensions.gitnexus.status).toBe('available');
       // A healthy gitnexus hard-denies the native search tools, which is the whole point of
-      // the explorer contract; `read` survives, and stays the allowlist channel input.
-      expect(withGitnexus?.nativeTools).toEqual(['read']);
+      // the explorer contract; `read` and the builtin `codemode` survive, and stay the
+      // allowlist channel input.
+      expect(withGitnexus?.nativeTools).toEqual(['read', 'codemode']);
 
       const policyPath = getExtensionToolPolicyExtensionPath();
       expect(policyPath).toBeTruthy();

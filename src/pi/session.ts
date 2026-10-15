@@ -42,7 +42,7 @@ import { getReadLineNumbersExtensionPath } from './read-line-numbers-extension.j
 import { getExtensionToolPolicyExtensionPath, NATIVE_TOOLS_ENV_KEY, REQUIRED_EXTENSION_TOOLS_ENV_KEY } from './extension-tool-policy-extension.js';
 import { resolvePiExtensionsPythonKernelPath } from './python-kernel-extension.js';
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { isAbsolute, resolve, sep, join, dirname } from 'node:path';
 import { mapSpecialistBackend, getProviderArgs } from './backendMap.js';
@@ -592,6 +592,25 @@ export function sessionResourceFenceArgv(): { head: string[]; tail: string[] } {
   };
 }
 
+/** The built-in Pi extension carrying the `codemode` tool; a `builtin:<name>` loader path. */
+export const BUILTIN_CODEMODE_EXTENSION = 'builtin:codemode';
+
+/**
+ * Built-in Pi tools a resolved contract may grant, mapped to the built-in extension that
+ * registers them.
+ *
+ * The CLI fence passes `--no-extensions`, which also disables built-in extensions (see the Pi
+ * docs, `docs/cli.md`: "Disables discovered, configured, and built-in extensions"), and the
+ * native loader loads only the extension paths it is given. Either way a granted built-in tool
+ * registers only when its extension is named — `resolveCuratedExtensionPaths` owns that, so this
+ * map documents which built-in tools depend on it.
+ *
+ * Activation stays gated downstream: the tool-policy extension activates builtin-sourced tools
+ * only when the contract names them among the granted natives, and the native path's `tools`
+ * allowlist carries the same list. Loading the extension is a declaration, not an authorization.
+ */
+export const BUILTIN_TOOL_EXTENSIONS: Readonly<Record<string, string>> = { codemode: BUILTIN_CODEMODE_EXTENSION };
+
 /**
  * Which of the five discovery fences a session argv actually disables.
  *
@@ -690,6 +709,16 @@ export function resolveCuratedExtensionPaths(options: {
   if (gitnexusContract?.status === 'available' && gitnexusContract.packagePath && existsSync(gitnexusContract.packagePath)) {
     all.push(gitnexusContract.packagePath);
   }
+  // codemode: the built-in Pi extension that registers the `codemode` tool. Both spawn paths fence
+  // ambient discovery — the CLI via `--no-extensions`, the native loader by loading only what it
+  // is given — so a granted built-in tool never registers unless its extension is named here. The
+  // session's `tools` allowlist cannot conjure a tool that was never loaded, which is how the
+  // codemode guidance shipped in the role prompts while the tool stayed unreachable
+  // (SPECIALISTS-4260). The loader takes `builtin:<name>` paths directly (see the SDK's
+  // resource-loader.d.ts), so no package resolution is involved.
+  if ((options.resolvedToolContract?.nativeTools ?? []).includes('codemode')) {
+    all.push(BUILTIN_CODEMODE_EXTENSION);
+  }
   return {
     all,
     dedupeAgainstDynamic: [
@@ -751,16 +780,78 @@ export function __resetPiVersionCacheForTest(): void {
   piVersionResolved = false;
 }
 
-export function resolveGlobalNodeModulesDir(): string | undefined {
+/** Injectable surfaces so the prefix derivation can be tested without the host's real installs. */
+export interface GlobalNodeModulesDeps {
+  env?: NodeJS.ProcessEnv;
+  home?: string;
+  execPath?: string;
+  exists?: (path: string) => boolean;
+  readDir?: (path: string) => string[];
+}
+
+/**
+ * Every `lib/node_modules` / global-modules root this runtime could legitimately resolve from.
+ *
+ * The `process.version` candidate alone is not enough: a runtime that is not Node reports its own
+ * emulated version (bun reports e.g. `v26.3.0` while the box's Node is `v24.15.0`), so that path
+ * can name a directory which cannot exist. That is how a bun-hosted program — the Specialists
+ * Claude plugin spawns its MCP server with `bun` — failed to find `@jaggerxtrm/substrate` that was
+ * installed under Node, while the identical code found it when run under `node`.
+ *
+ * Order is precedence: explicit environment overrides first, then the running interpreter's own
+ * prefix, then package-manager globals (npm/bun), then every nvm Node version on the box, newest
+ * first. The nvm scan is the durable fallback — it does not depend on which interpreter is asking.
+ */
+export function resolveGlobalNodeModulesDirs(deps: GlobalNodeModulesDeps = {}): string[] {
+  const env = deps.env ?? process.env;
+  const home = deps.home ?? homedir();
+  const execPath = deps.execPath ?? process.execPath;
+  const exists = deps.exists ?? existsSync;
+  const readDir = deps.readDir ?? ((path: string) => readdirSync(path));
+
   const candidates = [
-    process.env.PI_NPM_GLOBAL_DIR,
-    process.env.NPM_CONFIG_PREFIX ? join(process.env.NPM_CONFIG_PREFIX, 'lib', 'node_modules') : undefined,
-    process.env.npm_config_prefix ? join(process.env.npm_config_prefix, 'lib', 'node_modules') : undefined,
-    process.env.NVM_BIN ? join(dirname(process.env.NVM_BIN), 'lib', 'node_modules') : undefined,
-    join(homedir(), '.nvm/versions/node', process.version, 'lib', 'node_modules'),
+    env.PI_NPM_GLOBAL_DIR,
+    env.NPM_CONFIG_PREFIX ? join(env.NPM_CONFIG_PREFIX, 'lib', 'node_modules') : undefined,
+    env.npm_config_prefix ? join(env.npm_config_prefix, 'lib', 'node_modules') : undefined,
+    env.NVM_BIN ? join(dirname(env.NVM_BIN), 'lib', 'node_modules') : undefined,
+    // The running interpreter's own install root: Node resolves this to its version's prefix;
+    // bun's `<bun>/lib` exists but holds bun's own globals.
+    join(dirname(dirname(execPath)), 'lib', 'node_modules'),
+    // Bun's global root, which is neither `<prefix>/lib` nor reachable by the Node walk.
+    env.BUN_INSTALL ? join(env.BUN_INSTALL, 'install', 'global', 'node_modules') : undefined,
+    join(home, '.bun', 'install', 'global', 'node_modules'),
+    join(home, '.nvm/versions/node', process.version, 'lib', 'node_modules'),
+    ...nvmNodeModulesDirs(home, readDir),
   ].filter((candidate): candidate is string => Boolean(candidate));
 
-  return candidates.find(candidate => existsSync(candidate));
+  return [...new Set(candidates)].filter(candidate => exists(candidate));
+}
+
+/**
+ * The highest-precedence global modules root that exists.
+ *
+ * Prefer `resolveGlobalNodeModulesDirs()` when the caller is looking for a specific package:
+ * existence of a *root* says nothing about the package being in it, and stopping at the first
+ * existing root is how a package installed under one interpreter (Substrate, under Node) became
+ * unresolvable to another (the Specialists Claude plugin spawns its MCP server with `bun`).
+ */
+export function resolveGlobalNodeModulesDir(deps: GlobalNodeModulesDeps = {}): string | undefined {
+  return resolveGlobalNodeModulesDirs(deps)[0];
+}
+
+/** `~/.nvm/versions/node/<version>/lib/node_modules`, newest version first. */
+function nvmNodeModulesDirs(home: string, readDir: (path: string) => string[]): string[] {
+  const root = join(home, '.nvm', 'versions', 'node');
+  try {
+    return readDir(root)
+      .filter(version => version.startsWith('v'))
+      .sort()
+      .reverse()
+      .map(version => join(root, version, 'lib', 'node_modules'));
+  } catch {
+    // No nvm tree: an ordinary state, not an error to surface from a resolver.
+    return [];
+  }
 }
 
 function asNumber(value: unknown): number | undefined {
@@ -1165,6 +1256,10 @@ export class PiAgentSession {
     if (resolvedToolContract?.toolsFlag && (resolvedToolContract.exposedExtensionSources?.length ?? 0) === 0) {
       args.push('--tools', resolvedToolContract.toolsFlag);
     }
+
+    // Built-in tools the contract grants are loaded through resolveCuratedExtensionPaths below
+    // (`builtin:<name>` loader paths), so the CLI and native spawn paths cannot disagree about
+    // whether the extension behind a granted tool is present.
 
     // Thinking level (models that don't support it ignore the flag)
     if (this.options.thinkingLevel) {

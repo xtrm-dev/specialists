@@ -172,6 +172,23 @@ export declare function sessionResourceFenceArgv(): {
     head: string[];
     tail: string[];
 };
+/** The built-in Pi extension carrying the `codemode` tool; a `builtin:<name>` loader path. */
+export declare const BUILTIN_CODEMODE_EXTENSION = "builtin:codemode";
+/**
+ * Built-in Pi tools a resolved contract may grant, mapped to the built-in extension that
+ * registers them.
+ *
+ * The CLI fence passes `--no-extensions`, which also disables built-in extensions (see the Pi
+ * docs, `docs/cli.md`: "Disables discovered, configured, and built-in extensions"), and the
+ * native loader loads only the extension paths it is given. Either way a granted built-in tool
+ * registers only when its extension is named — `resolveCuratedExtensionPaths` owns that, so this
+ * map documents which built-in tools depend on it.
+ *
+ * Activation stays gated downstream: the tool-policy extension activates builtin-sourced tools
+ * only when the contract names them among the granted natives, and the native path's `tools`
+ * allowlist carries the same list. Loading the extension is a declaration, not an authorization.
+ */
+export declare const BUILTIN_TOOL_EXTENSIONS: Readonly<Record<string, string>>;
 /**
  * Which of the five discovery fences a session argv actually disables.
  *
@@ -231,7 +248,37 @@ export declare function resolveCuratedExtensionPaths(options: {
 export declare function resolvePiVersion(): string | undefined;
 /** Test seam: drop the cached Pi version so a test can supply its own environment. */
 export declare function __resetPiVersionCacheForTest(): void;
-export declare function resolveGlobalNodeModulesDir(): string | undefined;
+/** Injectable surfaces so the prefix derivation can be tested without the host's real installs. */
+export interface GlobalNodeModulesDeps {
+    env?: NodeJS.ProcessEnv;
+    home?: string;
+    execPath?: string;
+    exists?: (path: string) => boolean;
+    readDir?: (path: string) => string[];
+}
+/**
+ * Every `lib/node_modules` / global-modules root this runtime could legitimately resolve from.
+ *
+ * The `process.version` candidate alone is not enough: a runtime that is not Node reports its own
+ * emulated version (bun reports e.g. `v26.3.0` while the box's Node is `v24.15.0`), so that path
+ * can name a directory which cannot exist. That is how a bun-hosted program — the Specialists
+ * Claude plugin spawns its MCP server with `bun` — failed to find `@jaggerxtrm/substrate` that was
+ * installed under Node, while the identical code found it when run under `node`.
+ *
+ * Order is precedence: explicit environment overrides first, then the running interpreter's own
+ * prefix, then package-manager globals (npm/bun), then every nvm Node version on the box, newest
+ * first. The nvm scan is the durable fallback — it does not depend on which interpreter is asking.
+ */
+export declare function resolveGlobalNodeModulesDirs(deps?: GlobalNodeModulesDeps): string[];
+/**
+ * The highest-precedence global modules root that exists.
+ *
+ * Prefer `resolveGlobalNodeModulesDirs()` when the caller is looking for a specific package:
+ * existence of a *root* says nothing about the package being in it, and stopping at the first
+ * existing root is how a package installed under one interpreter (Substrate, under Node) became
+ * unresolvable to another (the Specialists Claude plugin spawns its MCP server with `bun`).
+ */
+export declare function resolveGlobalNodeModulesDir(deps?: GlobalNodeModulesDeps): string | undefined;
 export declare function validateWriteToolPathAgainstBoundary(toolName: string, toolArgs: Record<string, unknown> | undefined, worktreeBoundary: string | undefined): string | undefined;
 export declare class PiAgentSession {
     private options;

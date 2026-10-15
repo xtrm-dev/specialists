@@ -63,7 +63,7 @@ async function seedMachinery(root: string): Promise<void> {
 describe('service-knowledge-sync v2 role binding', () => {
   it('validates and preserves the RC execution contract', async () => {
     expect(await validateSpecialist(CONFIG_TEXT)).toMatchObject({ valid: true, errors: [] });
-    expect(SPECIALIST.metadata).toMatchObject({ version: '1.11.2', updated: '2026-10-06' });
+    expect(SPECIALIST.metadata).toMatchObject({ version: '1.11.5', updated: '2026-10-15' });
     expect(SPECIALIST.execution.extensions).toEqual({ 'npm:@jaggerxtrm/pi-service-knowledge@1.0.0': true });
   });
 
@@ -75,7 +75,7 @@ describe('service-knowledge-sync v2 role binding', () => {
     expect(knowledgeKeys).toEqual(['npm:@jaggerxtrm/pi-service-knowledge@1.0.0']);
     expect(extensions['npm:@jaggerxtrm/pi-service-knowledge@1.0.0']).toBe(true);
     expect(CONFIG_TEXT).not.toContain('"npm:@jaggerxtrm/pi-service-knowledge":');
-    expect(SPECIALIST.skills?.paths).toEqual(['service-knowledge', 'gitnexus']);
+    expect(SPECIALIST.skills?.paths).toEqual(['service-knowledge', 'gitnexus', 'codemode']);
   });
 
   it.each(['infra', 'another-pack'])('resolves the canonical role through arbitrary project pack %s', async (pack) => {
@@ -84,7 +84,7 @@ describe('service-knowledge-sync v2 role binding', () => {
     const paths = resolved?.specialist.skills?.paths ?? [];
 
     expect(paths[0]).toBe(join(root, '.xtrm', 'skills', pack, 'service-knowledge'));
-    expect(paths.map((path) => path.split('/').at(-1))).toEqual(['service-knowledge', 'gitnexus']);
+    expect(paths.map((path) => path.split('/').at(-1))).toEqual(['service-knowledge', 'gitnexus', 'codemode']);
   });
 
   it('rejects an ambiguous project-pack binding at config load time', async () => {
@@ -100,8 +100,8 @@ describe('service-knowledge-sync v2 role binding', () => {
 
     const pi = buildSkillPrefix(resolved.specialist, 'pi');
     const claude = buildSkillPrefix(resolved.specialist, 'claude');
-    expect(pi).toBe('/skill:service-knowledge /skill:gitnexus\n\n');
-    expect(claude).toBe('/service-knowledge\n/gitnexus\n\n');
+    expect(pi).toBe('/skill:service-knowledge /skill:gitnexus /skill:codemode\n\n');
+    expect(claude).toBe('/service-knowledge\n/gitnexus\n/codemode\n\n');
     expect(pi.match(/service-knowledge/g)).toHaveLength(1);
     expect(claude.match(/service-knowledge/g)).toHaveLength(1);
   });

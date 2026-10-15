@@ -1585,7 +1585,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     expect(lines[1]).toContain('\x1b[2mISSUE-92\x1b[22m');
     expect(lines[1]).toContain('\x1b[3minspect native wake transport\x1b[23m');
     // Line 2: model · thinking, then elapsed • turns • tokens.
-    expect(plain(lines[2])).toBe('       gpt-5.6-sol · high  • 47s • 3t • 2.1k');
+    expect(plain(lines[2])).toBe('       gpt-5.6-sol · high  • 47s • 3 turns • 2.1k');
     expect(lines[2]).toContain('\x1b[38;2;154;139;255m\x1b[1mhigh\x1b[22m\x1b[39m');
     expect(lines.join('\n')).not.toContain('working'); // the glyph carries it
     expect(lines.join('\n')).not.toContain('spent');
@@ -1650,7 +1650,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
       elapsed_s: 47, turn_count: 4, token_usage: { input_tokens: 1500, output_tokens: 600 },
       last_activity_at: SPIN_CLOCK,
     }, [], SPIN_CLOCK);
-    expect(plain(lines[1])).toBe('       gpt-5.6-sol · high  • 47s • 4t • 2.1k');
+    expect(plain(lines[1])).toBe('       gpt-5.6-sol · high  • 47s • 4 turns • 2.1k');
     expect(plain(lines[0])).toBe('    ◐ researcher:x  ISSUE-92');
     expect(lines.join('\n')).not.toContain('working');
     expect(lines.join('\n')).not.toContain('spent');
@@ -1683,7 +1683,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     // Terminal states: one glyph, final metrics still visible.
     const settled = mod.renderFleetRowLines({ ...base, state: 'settled', elapsed_s: 134, turn_count: 5 }, [], SPIN_CLOCK);
     expect(plain(settled[0])).toBe('    ✓ explorer:x  bd-1');
-    expect(plain(settled[1])).toBe('       m  • 2m14s • 5t');
+    expect(plain(settled[1])).toBe('       m  • 2m14s • 5 turns');
     expect(plain(mod.renderFleetRowLines({ ...base, state: 'failed' }, [], SPIN_CLOCK)[0]))
       .toBe('    ✕ explorer:x  bd-1');
     // Blocked on the coordinator: `!` outranks the spinner, wait replaces the metrics.
@@ -1721,7 +1721,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     expect(lines[1]).toBe('    ! reviewer:ask  ISSUE-92');
     expect(lines[2]).toBe('       gpt-5.6-sol · high  • asked 31s');
     expect(lines[3]).toMatch(/^ {4}[◐◓◑◒] researcher:idle {2}ISSUE-92$/);
-    expect(lines[4]).toBe('       gpt-5.6-sol · high  • 47s • 2t • 2.1k');
+    expect(lines[4]).toBe('       gpt-5.6-sol · high  • 47s • 2 turns • 2.1k');
     // Rows carry only the short dispatch token (<specialist>:<id>); the full
     // forensic `act:` id stays out of the operator surface.
     expect(lines.join('\n')).not.toContain('act:ask');
@@ -2139,7 +2139,7 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
     expect(plain(cards[2]).split('\n')).toEqual([
       '● executor:act:aaaa  done  XTRM-241',
       '  Call specialist_result to read the complete result. · activation act:aaaa',
-      '  42s • 3t • 43k',
+      '  42s • 3 turns • 43k',
     ]);
     expect(plain(cards[3]).split('\n')).toEqual([
       '● executor:act:aaaa  failed  XTRM-241',
@@ -2159,8 +2159,13 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
     expect(cards[3]).toContain('\x1b[38;2;255;110;70mfailed');
     // Metadata lives in the dim footer now, never in the header.
     expect(cards[0].split('\n')).toHaveLength(3); // asks carry no metadata: no footer
-    expect(cards[2].split('\n')[2]).toBe('  \x1b[2m42s • 3t • 43k\x1b[22m');
+    expect(cards[2].split('\n')[2]).toBe('  \x1b[2m42s • 3 turns • 43k\x1b[22m');
     expect(plain(cards[3].split('\n')[3])).toContain('gpt-5.6-sol · high');
+    // Singular/plural: 1 turn, 2 turns.
+    const singular = mod.formatSettlementWake({
+      activationId: 'act:aaaa', specialist: 'executor', beadId: 'XTRM-241', outcome: 'completed',
+    }, { bead_id: 'XTRM-241', elapsed_s: 5, turn_count: 1 });
+    expect(plain(singular).split('\n')[2]).toBe('  5s • 1 turn');
     // Every line below the header indents two spaces: empty space under the dot.
     for (const line of cards[2].split('\n').slice(1)) expect(line.startsWith('  ')).toBe(true);
     // The purpose stays off the ask header: bead + specialist identify the work.
@@ -2199,13 +2204,13 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
 
     const collapsed = mod.formatSettlementWake(done, view, { resultText: output });
     const lines = collapsed.split('\n');
-    // header + 3 italic excerpt lines + hint + instruction + dim footer
-    expect(lines).toHaveLength(7);
-    expect(lines[6]).toBe('  \x1b[2m42s • 3t • 43k\x1b[22m');
-    expect(lines[1]).toContain('\x1b[3mline one\x1b[23m');
-    expect(lines[3]).toContain('\x1b[3mline three\x1b[23m');
-    expect(lines[4]).toContain('+2 lines');
-    expect(lines[4]).toContain('ctrl+o expands');
+    // header + adjudication marker + 3 italic excerpt lines + hint + instruction + dim footer
+    expect(lines).toHaveLength(8);
+    expect(lines[7]).toBe('  \x1b[2m42s • 3 turns • 43k\x1b[22m');
+    expect(lines[2]).toContain('\x1b[3mline one\x1b[23m');
+    expect(lines[4]).toContain('\x1b[3mline three\x1b[23m');
+    expect(lines[5]).toContain('+2 lines');
+    expect(lines[5]).toContain('ctrl+o expands');
     expect(collapsed).not.toContain('\x1b[3mline four');
 
     const expanded = mod.formatSettlementWake(done, view, { resultText: output, full: true });
@@ -2216,6 +2221,60 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
     // No output: header + instruction + footer.
     const plain = mod.formatSettlementWake(done, view);
     expect(plain.split('\n')).toHaveLength(3);
+  });
+
+  it('marks every rendered result as an unadjudicated self-report (SPECIALISTS-4280)', async () => {
+    const mod = await loadExtension();
+    const done = { activationId: 'act:aaaa', specialist: 'explorer', beadId: 'SPECIALISTS-4278', outcome: 'completed' };
+    const view = { bead_id: 'SPECIALISTS-4278' };
+
+    // The misreading this fixes: a headline conclusion rendered as settled truth.
+    const card = mod.formatSettlementWake(done, view, { resultText: 'CODEMODE TOOL: ABSENT' });
+    const lines = plain(card).split('\n');
+    expect(lines[1]).toContain('unadjudicated self-report');
+    expect(lines[1]).toContain('not verified');
+    // The adjudicated record is named on the card, so reaching it needs no search.
+    expect(lines[1]).toContain('SPECIALISTS-4278 journal/closure');
+    // The marker precedes the conclusion: a reader passes it to reach the headline.
+    expect(lines[2]).toBe('  CODEMODE TOOL: ABSENT');
+    // It is not the specialist's voice: the result body stays the only italic text.
+    expect(card).not.toContain('\x1b[3munadjudicated');
+    expect(card).toContain('\x1b[3mCODEMODE TOOL: ABSENT\x1b[23m');
+    // ctrl+o carries it too: one builder produces content and expandedContent.
+    const expanded = plain(mod.formatSettlementWake(done, view, { resultText: 'CODEMODE TOOL: ABSENT', full: true })).split('\n');
+    expect(expanded[1]).toContain('unadjudicated self-report');
+    // A card with no result body has no headline to misread and stays marker-free.
+    expect(plain(mod.formatSettlementWake(done, view))).not.toContain('unadjudicated');
+    // A failed card's body is the error, not a conclusion: still marker-free.
+    expect(plain(mod.formatSettlementWake(
+      { activationId: 'act:aaaa', specialist: 'executor', beadId: 'SPECIALISTS-4278', outcome: 'failed', error: 'rate limited' }, view,
+    ))).not.toContain('unadjudicated');
+    // Without an Issue ref the fallback still names where adjudication lives.
+    const anonymous = plain(mod.formatSettlementWake(
+      { activationId: 'act:aaaa', specialist: 'explorer', outcome: 'completed' }, null, { resultText: 'x' },
+    )).split('\n');
+    expect(anonymous[1]).toContain('adjudication: the Issue journal/closure');
+
+    // The fleet DETAIL carries the same marker, and outside the slice that trims the
+    // tail - a long result showing 12 lines must not hide it.
+    const detail = mod.renderDetailLines({ kind: 'result', id: 'act:aaaa' }, {
+      id: 'act:aaaa', kind: 'result', settled: true, lastSeq: null,
+      unadjudicated: true, issueRef: 'SPECIALISTS-4278',
+      lines: Array.from({ length: 20 }, (_, i) => `l${i}`),
+    }).map(plain);
+    expect(detail[1]).toContain('unadjudicated self-report');
+    expect(detail[1]).toContain('SPECIALISTS-4278');
+    expect(detail[2]).toBe('      l8');
+    expect(detail.join('\n')).toContain('l19');
+    // A live feed, and a result read that failed, assert nothing about a conclusion.
+    expect(mod.renderDetailLines(
+      { kind: 'feed', id: 'act:aaaa' },
+      { id: 'act:aaaa', kind: 'feed', lines: ['e1'], lastSeq: 2, settled: true },
+    ).map(plain).join('\n')).not.toContain('unadjudicated');
+    expect(mod.renderDetailLines(
+      { kind: 'result', id: 'act:aaaa' },
+      { id: 'act:aaaa', kind: 'result', lines: ['result unavailable · boom'], lastSeq: null, settled: true },
+    ).map(plain).join('\n')).not.toContain('unadjudicated');
   });
 
   it('the event card renderer switches to details.expandedContent when ctrl+o expands', async () => {
