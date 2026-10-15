@@ -27,8 +27,9 @@ type GuardModule = {
   default: (pi: unknown) => void;
   shq: (word: string) => string;
   buildCredentialMaskArgs: (home: string, fsHooks?: unknown) => Promise<string[]>;
-  buildBwrapPrefix: (opts: { maskArgs: string[]; secretUnsetArgs?: string[] }) => string[];
-  buildWrappedCommand: (opts: { command: string; cwd: string; maskArgs: string[]; bwrapBin?: string; secretEnv?: string[] }) => string;
+  buildBwrapPrefix: (opts: { maskArgs: string[]; clearenvArgs?: string[] }) => string[];
+  buildClearenvArgs: (env: Record<string, string | undefined> | null) => string[];
+  buildWrappedCommand: (opts: { command: string; cwd: string; maskArgs: string[]; bwrapBin?: string; env?: Record<string, string | undefined> | null }) => string;
   bwrapSelfCheck: (execFn?: unknown, fsHooks?: unknown) => Promise<{ checked: boolean; ok: boolean; detail: string; bwrapBin: string | null }>;
   resolveBwrapBin: (fsHooks?: unknown) => Promise<string | null>;
   secretEnvNames: (env: Record<string, string | undefined>) => string[];
@@ -94,7 +95,7 @@ describe('permission-guard pure builders', () => {
     expect(prefix.indexOf('TMPDIR') - prefix.indexOf('--setenv')).toBeGreaterThanOrEqual(0);
   });
 
-  it('secretEnvNames strips token/key/secret vars, keeps the rest', async () => {
+  it('secretEnvNames still flags secret-pattern names', async () => {
     const m = await loadGuard();
     expect(m.secretEnvNames({
       GH_TOKEN: 'x', AWS_SECRET_ACCESS_KEY: 'x', DB_PASSWORD: 'x', MY_AUTH: 'x',
@@ -102,13 +103,42 @@ describe('permission-guard pure builders', () => {
     }).sort()).toEqual(['AWS_SECRET_ACCESS_KEY', 'DB_PASSWORD', 'GH_TOKEN', 'MY_AUTH']);
   });
 
-  it('buildWrappedCommand emits secret --unsetenv pairs and the absolute bwrap path', async () => {
+  it('buildClearenvArgs passes the allowlist, drops secrets and strangers', async () => {
+    const m = await loadGuard();
+    const args = m.buildClearenvArgs({
+      PATH: '/bin', HOME: '/h', USER: 'u', LOGNAME: 'u', SHELL: '/bin/sh', LANG: 'C', LC_ALL: 'C',
+      TERM: 'x', PI_MODEL: 'm', OTHER: 'keep', HTTPS_PROXY: 'p',
+      DATABASE_URL: 'db', AWS_ACCESS_KEY_ID: 'k', SENTRY_DSN: 'd', GITHUB_PAT: 'p',
+      SLACK_WEBHOOK: 'w', TWITTER_CT0: 't', PI_AUTH_PAT: 'nope',
+    });
+    const pairs: Record<string, string> = {};
+    for (let i = 0; i < args.length; i += 1) {
+      if (args[i] === '--setenv') pairs[args[i + 1]] = args[i + 2];
+    }
+    expect(args[0]).toBe('--clearenv');
+    for (const k of ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL', 'TERM', 'PI_MODEL']) {
+      expect(pairs[k], k).toBeDefined();
+    }
+    // Proxies and other strangers are dropped: the review-scoped allowlist is
+    // PATH HOME USER LOGNAME SHELL LANG LC_* TERM + TMP/XDG + PI_* only.
+    expect(pairs['HTTPS_PROXY'], 'HTTPS_PROXY').toBeUndefined();
+    expect(pairs['OTHER'], 'OTHER').toBeUndefined();
+    for (const k of ['DATABASE_URL', 'AWS_ACCESS_KEY_ID', 'SENTRY_DSN', 'GITHUB_PAT', 'SLACK_WEBHOOK', 'TWITTER_CT0', 'PI_AUTH_PAT']) {
+      expect(pairs[k], k).toBeUndefined();
+    }
+    expect(args.join(' ')).not.toContain('supersecret');
+  });
+
+  it('buildWrappedCommand emits the allowlist and the absolute bwrap path', async () => {
     const m = await loadGuard();
     const wrapped = m.buildWrappedCommand({
-      command: 'env', cwd: '/work', maskArgs: [], bwrapBin: '/usr/bin/bwrap', secretEnv: ['GH_TOKEN'],
+      command: 'env', cwd: '/work', maskArgs: [], bwrapBin: '/usr/bin/bwrap',
+      env: { PATH: '/bin', DATABASE_URL: 'db' },
     });
     expect(wrapped.startsWith("'/usr/bin/bwrap'")).toBe(true);
-    expect(wrapped).toContain(`'--unsetenv' 'GH_TOKEN'`);
+    expect(wrapped).toContain(`'--clearenv'`);
+    expect(wrapped).toContain(`'--setenv' 'PATH' '/bin'`);
+    expect(wrapped).not.toContain('DATABASE_URL');
   });
 
   it('resolveBwrapBin finds an executable, ignores non-executable entries', async () => {
@@ -205,6 +235,24 @@ describe('permission-guard fail-closed behavior', () => {
     const verdict = await fake.emit('tool_call', event, makeCtx('/work'));
     expect(verdict).toMatchObject({ block: true, reason: expect.stringContaining('self-check') });
     expect((event.input as { command: string }).command).toBe('echo hi');
+  });
+
+  it('refuses when ctx.cwd is missing instead of falling back to process.cwd()', async () => {
+    const m = await loadGuard();
+    await m.bwrapSelfCheck((_bin: string, _args: string[], _opts: unknown, cb: (e: null) => void) => cb(null),
+    {
+      path: { delimiter: ':', join: (...parts: string[]) => parts.join('/') },
+      fs: { accessSync: () => {}, constants: { X_OK: 1 } },
+      pathEnv: '/fakebin',
+    });
+    const fake = makeFakePi();
+    m.default(fake);
+    const event = { toolName: 'bash', toolCallId: '1', input: { command: 'pwd' } };
+    for (const ctx of [undefined, {}, { cwd: '' }]) {
+      const verdict = await fake.emit('tool_call', event, ctx);
+      expect(verdict).toMatchObject({ block: true, reason: expect.stringContaining('no session cwd') });
+    }
+    expect((event.input as { command: string }).command).toBe('pwd');
   });
 
   it('uses ctx.cwd (the session worktree), never input.cwd or process.cwd()', async () => {

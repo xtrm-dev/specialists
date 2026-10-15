@@ -28,8 +28,7 @@ build_wrapped() {
   WRAP_CMD="$cmd" WRAP_CWD="$cwd" WRAP_MASK="$mask" WRAP_BIN="$BWRAP_BIN" node --input-type=module -e "
 import { buildWrappedCommand } from './$GUARD_MJS';
 const maskArgs = JSON.parse(process.env.WRAP_MASK);
-const secretEnv = (process.env.WRAP_SECRET ?? '').split(' ').filter((s) => s.length > 0);
-process.stdout.write(buildWrappedCommand({ command: process.env.WRAP_CMD, cwd: process.env.WRAP_CWD, maskArgs, bwrapBin: process.env.WRAP_BIN, secretEnv }));
+process.stdout.write(buildWrappedCommand({ command: process.env.WRAP_CMD, cwd: process.env.WRAP_CWD, maskArgs, bwrapBin: process.env.WRAP_BIN, env: process.env }));
 "
 }
 
@@ -87,14 +86,19 @@ check "tcp connect fails" 1 run_wrapped "bash -c 'exec 3<>/dev/tcp/1.1.1.1/443'"
 echo "--- probe: sandbox escape surface closed (/run bus, docker socket) ---"
 check "user bus unreachable" 1 run_wrapped "test -S /run/user/$(id -u)/bus" "$WORK"
 check "docker socket unreachable" 1 run_wrapped "test -S /var/run/docker.sock" "$WORK"
-echo "--- probe: secret env scrubbed, ordinary env kept ---"
-export WRAP_SECRET="GH_TOKEN MY_API_KEY"
-SECRET_OUT="$(GH_TOKEN=supersecret MY_API_KEY=key123 PI_MODEL=x OTHER=keep bash -c "$(build_wrapped 'env' "$WORK" "$MASK_JSON")")"
-unset WRAP_SECRET
-if printf '%s' "$SECRET_OUT" | grep -q "supersecret\|key123"; then FAIL=$((FAIL+1)); echo "FAIL: secret env leaked";
-else PASS=$((PASS+1)); echo "PASS: secret env scrubbed"; fi
-if printf '%s' "$SECRET_OUT" | grep -q "^PI_MODEL=x$" && printf '%s' "$SECRET_OUT" | grep -q "^OTHER=keep$"; then PASS=$((PASS+1)); echo "PASS: ordinary env kept";
-else FAIL=$((FAIL+1)); echo "FAIL: ordinary env dropped"; fi
+echo "--- probe: clearenv allowlist (named secrets absent, allowlist kept) ---"
+# The guard builds --clearenv from the live process env; export the secrets
+# here so the builder sees them, mirroring production.
+export DATABASE_URL="postgres://secret" AWS_ACCESS_KEY_ID="AKIASECRET" TWITTER_CT0="ct0secret"
+export GH_TOKEN="ghp_secret" PI_MODEL="test-model" OTHER_KEEP="no"
+SECRET_OUT="$(bash -c "$(build_wrapped 'env' "$WORK" "$MASK_JSON")")"
+for leaked in "postgres://secret" "AKIASECRET" "ct0secret" "ghp_secret"; do
+  if printf '%s' "$SECRET_OUT" | grep -qF "$leaked"; then FAIL=$((FAIL+1)); echo "FAIL: secret leaked ($leaked)";
+  else PASS=$((PASS+1)); echo "PASS: secret absent ($leaked)"; fi
+done
+unset DATABASE_URL AWS_ACCESS_KEY_ID TWITTER_CT0 GH_TOKEN PI_MODEL OTHER_KEEP
+if printf '%s' "$SECRET_OUT" | grep -q "^PATH="; then PASS=$((PASS+1)); echo "PASS: PATH allowlisted";
+else FAIL=$((FAIL+1)); echo "FAIL: PATH missing"; fi
 echo "--- probe: credential reads fail ---"
 check "read ~/.ssh fails" 1 run_wrapped 'cat "$HOME/.ssh/id_rsa"' "$WORK"
 check "read ~/.netrc fails" 1 run_wrapped 'cat "$HOME/.netrc"' "$WORK"
@@ -123,6 +127,13 @@ else FAIL=$((FAIL+1)); echo "FAIL: mutation control unshare-net"; fi
 MUT_RUN="$(build_wrapped "test -S /run/user/$(id -u)/bus" "$WORK" "$MASK_JSON" | sed "s/'--tmpfs' '\/run' //")"
 if bash -c "$MUT_RUN" >/dev/null 2>&1; then PASS=$((PASS+1)); echo "PASS: mutation control run-mask (unmasked /run exposes the bus)";
 else FAIL=$((FAIL+1)); echo "FAIL: mutation control run-mask"; fi
+# Control 4: drop --clearenv (keep the rest). The secrets must now LEAK,
+# proving the allowlist is what scrubs them.
+export DATABASE_URL="postgres://secret"
+MUT_ENV="$(build_wrapped 'env' "$WORK" "$MASK_JSON" | sed "s/'--clearenv' //")"
+if bash -c "$MUT_ENV" 2>/dev/null | grep -qF "postgres://secret"; then PASS=$((PASS+1)); echo "PASS: mutation control clearenv (no allowlist leaks secrets)";
+else FAIL=$((FAIL+1)); echo "FAIL: mutation control clearenv"; fi
+unset DATABASE_URL
 
 echo "=== $PASS passed, $FAIL failed ==="
 [ "$FAIL" = 0 ]

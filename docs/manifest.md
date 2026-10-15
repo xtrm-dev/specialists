@@ -164,8 +164,9 @@ inside bubblewrap: whole filesystem read-only, a private writable `/tmp`,
 `/run` masked (no user bus / docker socket) with pid+ipc namespaces,
 network unshared, credential paths masked (`~/.ssh`, `~/.aws`, `~/.gnupg`,
 `.config/gh`, `.config/gcloud`, `.config/glab-cli`, `.docker`, `.netrc`,
-`.npmrc`, `.git-credentials`, `.pi/agent*`, `.claude/.credentials*`),
-secret-pattern env vars stripped, `--die-with-parent --new-session`.
+`.npmrc`, `.git-credentials`, `.pi/agent*`, `.claude/.credentials*`), `--clearenv`
+with an allowlist (PATH HOME USER LOGNAME SHELL LANG LC_* TERM PI_*),
+`--die-with-parent --new-session`.
 The run cwd comes from the session (worktree) context, and bwrap is invoked
 by absolute path.
 

@@ -12,10 +12,13 @@
 //
 // Boundary per call: bwrap --ro-bind / / --proc /proc --dev /dev --tmpfs /tmp
 // --tmpfs /run --unshare-net --unshare-pid --unshare-ipc --cap-drop ALL
-// --die-with-parent --new-session --setenv TMPDIR/TEMP/TMP and XDG_CACHE_HOME
-// to /tmp (+ --unsetenv for secret-pattern env vars) --chdir <cwd> -- bash -c
-// <command>, plus credential masks (existing host paths only: dirs overmounted
-// with tmpfs, files bound to /dev/null read-only).
+// --die-with-parent --new-session --clearenv plus an allowlist passthrough
+// (PATH HOME USER LOGNAME SHELL LANG LC_* TERM PI_*, minus secret-pattern
+// names) --setenv TMPDIR/TEMP/TMP and XDG_CACHE_HOME to /tmp --chdir <cwd> --
+// bash -c <command>, plus credential masks (existing host paths only: dirs
+// overmounted with tmpfs, files bound to /dev/null read-only). A deny-list
+// cannot enumerate ambient secrets, so the environment boundary is
+// allowlist-shaped.
 //
 // NOT covered: user_bash (operator `!cmd`), `!` shell escapes, and pi.exec /
 // direct node:fs inside extension code never emit tool_call, so this guard
@@ -50,20 +53,47 @@ export const CREDENTIAL_PATHS = [
 ];
 export const CREDENTIAL_GLOBS = ['.pi/agent*', '.claude/.credentials*'];
 
-// Env vars matching any of these are stripped (--unsetenv) before the call.
-// Case-insensitive substring match on the NAME. Keeps documented behavior
-// (PI_* session metadata, ambient proxy/tool config) while removing the
-// token/key/secret material a prompt-injected agent must never see.
-export const SECRET_ENV_PATTERNS = ['token', 'secret', 'passwd', 'password', 'api_key', 'apikey', 'auth', 'credential', 'private_key'];
+// Env allowlist for --clearenv. Everything not named here is dropped — a
+// deny-list cannot enumerate ambient secrets (DATABASE_URL, *_DSN,
+// *_WEBHOOK, provider PATs). Secret-pattern names are excluded even when
+// allowlisted (a PI_* key ending in _PAT must not slip through).
+export const SECRET_ENV_PATTERNS = [
+  'token', 'secret', 'passwd', 'password', 'api_key', 'apikey', 'auth',
+  'credential', 'private_key', 'dsn', 'webhook', 'pat_', '_pat',
+];
+
+const PASSTHROUGH_ENV_EXACT = new Set(['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'TERM']);
+
+function isSecretName(name) {
+  const lower = name.toLowerCase();
+  return SECRET_ENV_PATTERNS.some((p) => lower.includes(p));
+}
+
+function isAllowlistedEnv(name) {
+  if (isSecretName(name)) return false;
+  if (PASSTHROUGH_ENV_EXACT.has(name)) return true;
+  if (name.startsWith('LC_')) return true;
+  if (name.startsWith('PI_')) return true;
+  return false;
+}
 
 /** Names from `env` matching SECRET_ENV_PATTERNS (case-insensitive). Pure. */
 export function secretEnvNames(env) {
-  const names = [];
-  for (const key of Object.keys(env ?? {})) {
-    const lower = key.toLowerCase();
-    if (SECRET_ENV_PATTERNS.some((p) => lower.includes(p))) names.push(key);
+  return Object.keys(env ?? {}).filter(isSecretName);
+}
+
+/**
+ * `--clearenv` + `--setenv` passthrough argv for the allowlisted names
+ * present in `env`. Pure and unit-tested.
+ */
+export function buildClearenvArgs(env) {
+  const args = ['--clearenv'];
+  for (const [key, value] of Object.entries(env ?? {})) {
+    if (typeof value !== 'string') continue;
+    if (!isAllowlistedEnv(key)) continue;
+    args.push('--setenv', key, value);
   }
-  return names;
+  return args;
 }
 
 /** POSIX shell-quote one argv word. */
@@ -128,9 +158,10 @@ export async function buildCredentialMaskArgs(home, fsHooks = null) {
 
 /**
  * bwrap argv prefix (everything up to `--`). Pure and unit-tested.
- * secretUnsetArgs are `--unsetenv NAME` pairs for secret-pattern env vars.
+ * clearenvArgs is the --clearenv + allowlist passthrough (the environment
+ * boundary); the /tmp setenvs below pin temp inside the private tmpfs.
  */
-export function buildBwrapPrefix({ maskArgs, secretUnsetArgs = [] }) {
+export function buildBwrapPrefix({ maskArgs, clearenvArgs = [] }) {
   return [
     '--ro-bind', '/', '/',
     '--proc', '/proc',
@@ -145,11 +176,11 @@ export function buildBwrapPrefix({ maskArgs, secretUnsetArgs = [] }) {
     '--cap-drop', 'ALL',
     '--die-with-parent',
     '--new-session',
+    ...clearenvArgs,
     '--setenv', 'TMPDIR', '/tmp',
     '--setenv', 'TEMP', '/tmp',
     '--setenv', 'TMP', '/tmp',
     '--setenv', 'XDG_CACHE_HOME', '/tmp/xdg-cache',
-    ...secretUnsetArgs,
     ...maskArgs,
   ];
 }
@@ -157,11 +188,10 @@ export function buildBwrapPrefix({ maskArgs, secretUnsetArgs = [] }) {
 /**
  * Full wrapped shell string for one bash call. Pure and unit-tested.
  * bwrapBin is the absolute bwrap path resolved by the self-check (never a
- * PATH lookup at call time); secretEnv lists env names to --unsetenv.
+ * PATH lookup at call time); env supplies the clearenv allowlist values.
  */
-export function buildWrappedCommand({ command, cwd, maskArgs, bwrapBin = 'bwrap', secretEnv = [] }) {
-  const secretUnsetArgs = secretEnv.flatMap((name) => ['--unsetenv', name]);
-  const prefix = buildBwrapPrefix({ maskArgs, secretUnsetArgs });
+export function buildWrappedCommand({ command, cwd, maskArgs, bwrapBin = 'bwrap', env = null }) {
+  const prefix = buildBwrapPrefix({ maskArgs, clearenvArgs: buildClearenvArgs(env) });
   const parts = [bwrapBin, ...prefix, '--chdir', cwd, '--', 'bash', '-c', command];
   return parts.map(shq).join(' ');
 }
@@ -219,7 +249,7 @@ export async function bwrapSelfCheck(execFn = null, fsHooks = null) {
       run(
         bin,
         ['--ro-bind', '/', '/', '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp',
-          '--tmpfs', '/run', '--unshare-net', '--unshare-pid', '--unshare-ipc',
+          '--tmpfs', '/run', ...buildClearenvArgs(null), '--unshare-net', '--unshare-pid', '--unshare-ipc',
           '--die-with-parent', '--new-session', 'true'],
         { timeout: 15000 },
         (error) => (error ? rejectPromise(error) : resolvePromise(undefined)),
@@ -266,19 +296,22 @@ export default function permissionGuard(pi) {
     if (event.toolName !== 'bash') return undefined;
     const refusal = bashRefusalReason();
     if (refusal) return { block: true, reason: refusal };
-    const maskArgs = await buildCredentialMaskArgs(homeDir());
     // Pi's bash input is {command, timeout} only (pi bash.js): the run cwd
     // comes from the handler context, which the session sets to the
-    // specialist worktree. Never input.cwd, never process.cwd() (on the
-    // native in-process path that is the HOST cwd, not the worktree).
-    const cwd = ctx?.cwd ?? process.cwd();
+    // specialist worktree. A missing ctx.cwd is a refusal, never a fallback
+    // to process.cwd() (on the native in-process path that is the HOST cwd,
+    // not the worktree) and never input.cwd (not part of the schema).
+    if (!ctx?.cwd) {
+      return { block: true, reason: 'permission-guard: refusing bash: no session cwd in handler context' };
+    }
+    const maskArgs = await buildCredentialMaskArgs(homeDir());
     const input = event.input;
     input.command = buildWrappedCommand({
       command: input.command,
-      cwd,
+      cwd: ctx.cwd,
       maskArgs,
       bwrapBin: selfCheckState.bwrapBin ?? 'bwrap',
-      secretEnv: secretEnvNames(process.env),
+      env: process.env,
     });
     return undefined;
   });

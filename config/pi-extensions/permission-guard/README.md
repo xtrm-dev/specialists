@@ -30,11 +30,11 @@ files get `--ro-bind /dev/null`): `.ssh`, `.aws`, `.gnupg`,
 `.config/gh`, `.config/gcloud`, `.config/glab-cli`, `.docker`, `.netrc`,
 `.npmrc`, `.git-credentials`, `.pi/agent*`, `.claude/.credentials*`.
 
-Environment: vars whose names match secret patterns (token, secret,
-passwd/password, api_key/apikey, auth, credential, private_key —
-case-insensitive) are stripped via `--unsetenv`. Everything else passes
-through, preserving documented behavior (notably `PI_*` session metadata)
-and ambient proxy/tool configuration.
+Environment: `--clearenv` plus an allowlist passthrough — PATH HOME USER
+LOGNAME SHELL LANG LC_* TERM PI_* (secret-pattern names excluded even when
+allowlisted), plus the TMPDIR/TEMP/TMP/XDG_CACHE_HOME pins. A deny-list
+cannot enumerate ambient secrets (DATABASE_URL, *_DSN, *_WEBHOOK, provider
+PATs), so the environment boundary is allowlist-shaped.
 
 Because the mechanism is a `tool_call` handler, codemode-nested calls
 (`ctx.executeTool`, carrying `parentToolCallId`) are wrapped identically —
