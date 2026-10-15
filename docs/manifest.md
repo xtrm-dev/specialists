@@ -161,9 +161,13 @@ deterministic read-only commands (`git diff`, `ocr delegate preview`,
 linters). With `SPECIALISTS_PERMISSION_GUARD=1`, READ_ONLY gains a `bash`
 tool whose every invocation — direct or nested from a codemode cell — runs
 inside bubblewrap: whole filesystem read-only, a private writable `/tmp`,
+`/run` masked (no user bus / docker socket) with pid+ipc namespaces,
 network unshared, credential paths masked (`~/.ssh`, `~/.aws`, `~/.gnupg`,
-`.config/gh`, `.netrc`, `.npmrc`, `.pi/agent/auth*`,
-`.claude/.credentials*`), `--die-with-parent --new-session`.
+`.config/gh`, `.config/gcloud`, `.config/glab-cli`, `.docker`, `.netrc`,
+`.npmrc`, `.git-credentials`, `.pi/agent*`, `.claude/.credentials*`),
+secret-pattern env vars stripped, `--die-with-parent --new-session`.
+The run cwd comes from the session (worktree) context, and bwrap is invoked
+by absolute path.
 
 The boundary is the OS sandbox, not command-pattern rules. If bwrap is
 unavailable or fails its startup self-check, bash is refused with a clear

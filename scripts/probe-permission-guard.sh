@@ -19,14 +19,17 @@ fi
 GUARD_MJS="config/pi-extensions/permission-guard/index.mjs"
 PASS=0
 FAIL=0
+BWRAP_BIN="$(command -v bwrap)"
 
 # Build the wrapped shell script for CMD in CWD; prints it to stdout.
+# Uses the absolute bwrap path, exactly as the guard does at call time.
 build_wrapped() {
   local cmd="$1" cwd="$2" mask="$3"
-  WRAP_CMD="$cmd" WRAP_CWD="$cwd" WRAP_MASK="$mask" node --input-type=module -e "
+  WRAP_CMD="$cmd" WRAP_CWD="$cwd" WRAP_MASK="$mask" WRAP_BIN="$BWRAP_BIN" node --input-type=module -e "
 import { buildWrappedCommand } from './$GUARD_MJS';
 const maskArgs = JSON.parse(process.env.WRAP_MASK);
-process.stdout.write(buildWrappedCommand({ command: process.env.WRAP_CMD, cwd: process.env.WRAP_CWD, maskArgs }));
+const secretEnv = (process.env.WRAP_SECRET ?? '').split(' ').filter((s) => s.length > 0);
+process.stdout.write(buildWrappedCommand({ command: process.env.WRAP_CMD, cwd: process.env.WRAP_CWD, maskArgs, bwrapBin: process.env.WRAP_BIN, secretEnv }));
 "
 }
 
@@ -53,8 +56,14 @@ check_out() { # $1=name $2=needle; rest: run_wrapped args
   else FAIL=$((FAIL+1)); echo "FAIL: $name (missing '$needle'; got: $(printf '%s' "$out" | head -c 300))"; fi
 }
 
-WORK="$(mktemp -d)"; HOME_FAKE="$(mktemp -d)"
-trap 'rm -rf "$WORK" "$HOME_FAKE"' EXIT
+# TMPDIR-independent: work outside /tmp so the probe does not depend on the
+# very directory the sandbox remounts. /var/tmp (NOT $XDG_RUNTIME_DIR: that is
+# /run/user/$UID, which the sandbox masks with --tmpfs /run).
+BASE="/var/tmp/perm-guard-probe-$$"
+mkdir -p "$BASE"
+WORK="$BASE/work"; HOME_FAKE="$BASE/home"
+mkdir -p "$WORK" "$HOME_FAKE"
+trap 'rm -rf "$BASE"' EXIT
 
 mkdir -p "$HOME_FAKE/.ssh" "$HOME_FAKE/.aws" "$HOME_FAKE/.pi/agent"
 echo secret > "$HOME_FAKE/.ssh/id_rsa"
@@ -75,6 +84,17 @@ echo "--- probe: private /tmp succeeds ---"
 check "private tmp write succeeds" 0 run_wrapped "echo ok > /tmp/ok.txt && cat /tmp/ok.txt" "$WORK"
 echo "--- probe: network fails ---"
 check "tcp connect fails" 1 run_wrapped "bash -c 'exec 3<>/dev/tcp/1.1.1.1/443'" "$WORK"
+echo "--- probe: sandbox escape surface closed (/run bus, docker socket) ---"
+check "user bus unreachable" 1 run_wrapped "test -S /run/user/$(id -u)/bus" "$WORK"
+check "docker socket unreachable" 1 run_wrapped "test -S /var/run/docker.sock" "$WORK"
+echo "--- probe: secret env scrubbed, ordinary env kept ---"
+export WRAP_SECRET="GH_TOKEN MY_API_KEY"
+SECRET_OUT="$(GH_TOKEN=supersecret MY_API_KEY=key123 PI_MODEL=x OTHER=keep bash -c "$(build_wrapped 'env' "$WORK" "$MASK_JSON")")"
+unset WRAP_SECRET
+if printf '%s' "$SECRET_OUT" | grep -q "supersecret\|key123"; then FAIL=$((FAIL+1)); echo "FAIL: secret env leaked";
+else PASS=$((PASS+1)); echo "PASS: secret env scrubbed"; fi
+if printf '%s' "$SECRET_OUT" | grep -q "^PI_MODEL=x$" && printf '%s' "$SECRET_OUT" | grep -q "^OTHER=keep$"; then PASS=$((PASS+1)); echo "PASS: ordinary env kept";
+else FAIL=$((FAIL+1)); echo "FAIL: ordinary env dropped"; fi
 echo "--- probe: credential reads fail ---"
 check "read ~/.ssh fails" 1 run_wrapped 'cat "$HOME/.ssh/id_rsa"' "$WORK"
 check "read ~/.netrc fails" 1 run_wrapped 'cat "$HOME/.netrc"' "$WORK"
@@ -98,6 +118,11 @@ rm -f "$WORK/mutated-ok"
 MUT_NET="$(build_wrapped "bash -c 'exec 3<>/dev/tcp/1.1.1.1/443'" "$WORK" "$MASK_JSON" | sed "s/'--unshare-net' //")"
 if bash -c "$MUT_NET" >/dev/null 2>&1; then PASS=$((PASS+1)); echo "PASS: mutation control unshare-net (shared net lets TCP through)";
 else FAIL=$((FAIL+1)); echo "FAIL: mutation control unshare-net"; fi
+# Control 3: drop --tmpfs /run (keep the rest). The user bus socket must now
+# be VISIBLE, proving the /run mask is what hides it.
+MUT_RUN="$(build_wrapped "test -S /run/user/$(id -u)/bus" "$WORK" "$MASK_JSON" | sed "s/'--tmpfs' '\/run' //")"
+if bash -c "$MUT_RUN" >/dev/null 2>&1; then PASS=$((PASS+1)); echo "PASS: mutation control run-mask (unmasked /run exposes the bus)";
+else FAIL=$((FAIL+1)); echo "FAIL: mutation control run-mask"; fi
 
 echo "=== $PASS passed, $FAIL failed ==="
 [ "$FAIL" = 0 ]

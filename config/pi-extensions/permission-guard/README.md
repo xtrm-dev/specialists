@@ -12,17 +12,29 @@ registered; before execution its `command` is rewritten to run inside
 bubblewrap:
 
 ```
-bwrap --ro-bind / / --proc /proc --dev /dev --tmpfs /tmp --unshare-net
+<abs-bwrap> --ro-bind / / --proc /proc --dev /dev --tmpfs /tmp --tmpfs /run
+  --unshare-net --unshare-pid --unshare-ipc --cap-drop ALL
   --die-with-parent --new-session
   --setenv TMPDIR /tmp --setenv TEMP /tmp --setenv TMP /tmp
   --setenv XDG_CACHE_HOME /tmp/xdg-cache
-  <credential masks> --chdir <cwd> -- bash -c <command>
+  <secret --unsetenv pairs> <credential masks> --chdir <cwd> -- bash -c <command>
 ```
+
+`--tmpfs /run` hides the user bus and the docker socket (systemd-run /
+docker escape); `--unshare-pid --unshare-ipc --cap-drop ALL` complete the
+isolation. bwrap is resolved to an absolute path once at self-check, and
+the self-check runs the real boundary argv shape.
 
 Credential masks cover existing host paths only (dirs get `--tmpfs`,
 files get `--ro-bind /dev/null`): `.ssh`, `.aws`, `.gnupg`,
-`.config/gh`, `.netrc`, `.npmrc`, `.pi/agent/auth*`,
-`.claude/.credentials*`.
+`.config/gh`, `.config/gcloud`, `.config/glab-cli`, `.docker`, `.netrc`,
+`.npmrc`, `.git-credentials`, `.pi/agent*`, `.claude/.credentials*`.
+
+Environment: vars whose names match secret patterns (token, secret,
+passwd/password, api_key/apikey, auth, credential, private_key —
+case-insensitive) are stripped via `--unsetenv`. Everything else passes
+through, preserving documented behavior (notably `PI_*` session metadata)
+and ambient proxy/tool configuration.
 
 Because the mechanism is a `tool_call` handler, codemode-nested calls
 (`ctx.executeTool`, carrying `parentToolCallId`) are wrapped identically —
@@ -49,6 +61,14 @@ one handler covers both paths.
   when bwrap is absent.
 - Mutation control: weakening `--ro-bind` or `--unshare-net` must flip the
   matching probe to fail-open — the flags are load-bearing, not decorative.
+
+## Not covered
+
+`user_bash` (operator `!cmd`), `!` shell escapes, and `pi.exec` / direct
+`node:fs` inside extension code never emit `tool_call`, so no `tool_call`
+handler — this guard included — can see them. The boundary covers the
+specialist MODEL's `bash` tool calls only, which is the whole of what a
+headless specialist can reach.
 
 ## Non-goals (phase 2)
 
