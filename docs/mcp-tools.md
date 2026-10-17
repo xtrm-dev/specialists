@@ -151,15 +151,29 @@ z.object({
     'A contract missing any section is refused and nothing is created.',
   ),
   title: z.string().optional().describe(
-    'Optional title for the record created from `contract` (default: derived from PROBLEM). ' +
-    'Ignored when a locator is given.',
+    'Optional title for the Substrate Issue created from `contract` (default: `<specialist>: <first PROBLEM line>`). ' +
+    'An explicit title wins; blank counts as absent. Ignored when issue_ref (or its bead_id alias) is given.',
+  ),
+  parent_ref: z.string().optional().describe(
+    'Parent locator for the Substrate Issue created from `contract` — any locator the shared ' +
+    'work boundary resolves. ONLY with contract: refused alongside issue_ref/bead_id, and ' +
+    'refused without contract. The parent must exist and not be terminal ' +
+    '(done/cancelled/archived; deferred is accepted); the check runs BEFORE anything is ' +
+    'created, and creation-with-parent is one atomic step.',
+  ),
+  kind: z.enum(['task', 'bug', 'research', 'decision', 'followup']).optional().describe(
+    'Substrate kind for the Substrate Issue created from `contract` (never epic — refused ' +
+    'structurally). ONLY with contract: refused alongside issue_ref/bead_id, and refused ' +
+    'without contract. Absent means the default from the Specialist output_type ' +
+    '(research/analysis give research, everything else gives task).',
   ),
   epic_context_depth: z.number().optional().describe(
-    'Walk issue.parent UP this many hops (1 = immediate parent epic, 2 = epic + ' +
-    "grand-epic) and render each ancestor contract into the turn-1 prompt as an '" +
+    'Walk Substrate parent_child edges UP this many hops (1 = immediate parent Issue, ' +
+    "2 = parent + grandparent) and render each ancestor contract into the turn-1 prompt as an '" +
     "'## Epic lineage' section. Must be 1 or 2; anything else is refused. Omit for " +
-    'single-issue dispatch with no lineage. Dropped for records auto-created from an ' +
-    'inline contract (a fresh record has no parent).',
+    'a single-Issue dispatch with no lineage. Honoured for an inline contract ONLY when ' +
+    'parent_ref is given (a parentless auto-created Issue has no lineage); still dropped ' +
+    'for parentless inline creates.',
   ),
   model_override: z.string().optional().describe(
     'Override the configured model for THIS activation only. An unavailable model is refused before the session is created, never silently replaced.',
