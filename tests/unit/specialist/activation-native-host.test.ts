@@ -329,6 +329,7 @@ function fakeWorkItems(options: { state?: string; blockers?: Array<{ ref: string
         issueId: `iss_${ref}`,
         revision: 1,
         contractHash: 'hash-test',
+        lifecycleState: 'open',
         title: 'Investigate the thing',
         contract,
         readinessState: state,

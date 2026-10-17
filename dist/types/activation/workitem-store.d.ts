@@ -90,6 +90,8 @@ export interface WorkItemView {
     issueId: string;
     revision: number;
     contractHash: string;
+    /** Substrate lifecycle state (`src/domain/issue.ts`): open|deferred|done|cancelled|archived. */
+    lifecycleState: string;
     title: string;
     contract: unknown;
     readinessState: string;
@@ -110,6 +112,23 @@ export interface BlockerIssue {
     currentRevision: number;
     lifecycleState: string;
 }
+/**
+ * Parent-openness rule for ad hoc dispatch (XT-108): mirrors Substrate
+ * `TERMINAL_STATES` (substrate `src/domain/issue.ts`: `done/cancelled/archived`).
+ * A parent in one of these refuses the dispatch BEFORE any issue is created;
+ * `deferred` is NOT terminal and is accepted. Never consult readiness here —
+ * openness is lifecycle only, dispatchability is never the test.
+ */
+export declare const INLINE_PARENT_TERMINAL_STATES: ReadonlySet<string>;
+/** Substrate issue kinds an ad hoc dispatch may create — never `epic`. */
+export declare const INLINE_ISSUE_KINDS: readonly ["task", "bug", "research", "decision", "followup"];
+export type InlineIssueKind = (typeof INLINE_ISSUE_KINDS)[number];
+/**
+ * Default kind for an auto-created issue, derived from the Specialist's
+ * `output_type` (`src/specialist/schema.ts`). Investigatory outputs (research,
+ * analysis) ask a question → `research`; everything else does work → `task`.
+ */
+export declare function defaultKindForOutputType(outputType: string | undefined): InlineIssueKind;
 /** Result of an inline-contract dispatch (§10): the created issue's identity. */
 export interface InlineIssueResult {
     ref: string;
@@ -233,6 +252,8 @@ export interface SpecialistWorkItemBoundary {
         title?: string;
         holder?: string;
         activationId?: string;
+        parentId?: string;
+        kind?: string;
     }): InlineIssueResult;
     /**
      * Release the claim an inline contract took, so a refused inline dispatch leaves an issue that is
@@ -244,9 +265,16 @@ export interface SpecialistWorkItemBoundary {
     releaseInlineClaim?(ref: string, opts?: {
         activationId?: string;
     }): boolean;
+    /**
+     * Append a journal entry on an issue. `summary` carries the ad hoc dispatch
+     * evidence note (XT-108: surface, specialist, requested_by, parent_ref, kind,
+     * title-source) as a `note` semantic summary; without it this is the plain
+     * store journal write it always was. Never a provenance receipt, never a new store.
+     */
     journal(ref: string, kind: string, opts?: {
         participantId?: string;
         activationId?: string;
+        summary?: string;
     }): void;
     /**
      * S1 settlement surface (ADR §§38–39). Optional so existing fakes keep
@@ -349,6 +377,8 @@ export interface IssueServicePort {
         contract: unknown;
         scrutiny: string;
         authoredBy: string;
+        /** Parent machine id, checked for existence with the link written atomically (never setParent). */
+        parentId?: string;
     }): {
         id: string;
     };
@@ -373,6 +403,7 @@ export interface IssueStorePort {
             currentRevision: number;
             currentContractHash: string;
             title: string;
+            lifecycleState: string;
         };
         contract: unknown;
         readinessState: string;
@@ -401,6 +432,10 @@ export interface JournalServicePort {
     appendEntry(issueId: string, input: {
         kind: string;
         result?: unknown;
+        /** Semantic summary for kinds that carry one (`note`): validated fail-closed by the producer. */
+        semantic?: {
+            summary: string;
+        };
         executionContext?: unknown;
         refs?: Array<{
             kind: string;

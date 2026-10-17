@@ -238,6 +238,8 @@ export interface WorkItemView {
   issueId: string;
   revision: number;
   contractHash: string;
+  /** Substrate lifecycle state (`src/domain/issue.ts`): open|deferred|done|cancelled|archived. */
+  lifecycleState: string;
   title: string;
   contract: unknown;
   readinessState: string;
@@ -263,6 +265,28 @@ export interface BlockerIssue {
 
 /** Lifecycle states that SATISFY a `blocks` edge (Substrate `isBlockerSatisfied`). */
 const SATISFIED_BLOCKER_STATES = new Set(['done', 'archived']);
+
+/**
+ * Parent-openness rule for ad hoc dispatch (XT-108): mirrors Substrate
+ * `TERMINAL_STATES` (substrate `src/domain/issue.ts`: `done/cancelled/archived`).
+ * A parent in one of these refuses the dispatch BEFORE any issue is created;
+ * `deferred` is NOT terminal and is accepted. Never consult readiness here —
+ * openness is lifecycle only, dispatchability is never the test.
+ */
+export const INLINE_PARENT_TERMINAL_STATES: ReadonlySet<string> = new Set(['done', 'cancelled', 'archived']);
+
+/** Substrate issue kinds an ad hoc dispatch may create — never `epic`. */
+export const INLINE_ISSUE_KINDS = ['task', 'bug', 'research', 'decision', 'followup'] as const;
+export type InlineIssueKind = (typeof INLINE_ISSUE_KINDS)[number];
+
+/**
+ * Default kind for an auto-created issue, derived from the Specialist's
+ * `output_type` (`src/specialist/schema.ts`). Investigatory outputs (research,
+ * analysis) ask a question → `research`; everything else does work → `task`.
+ */
+export function defaultKindForOutputType(outputType: string | undefined): InlineIssueKind {
+  return outputType === 'research' || outputType === 'analysis' ? 'research' : 'task';
+}
 
 /** Result of an inline-contract dispatch (§10): the created issue's identity. */
 export interface InlineIssueResult {
@@ -382,7 +406,7 @@ export interface SpecialistWorkItemBoundary {
   completedBlockers(ref: string, depth: number): EpicAncestor[];
   check(req: DispatchRequest): CheckResult;
   bind(req: DispatchRequest): ExecutionBindingView;
-  inlineCreate(contract: string, opts?: { title?: string; holder?: string; activationId?: string }): InlineIssueResult;
+  inlineCreate(contract: string, opts?: { title?: string; holder?: string; activationId?: string; parentId?: string; kind?: string }): InlineIssueResult;
   /**
    * Release the claim an inline contract took, so a refused inline dispatch leaves an issue that is
    * immediately re-dispatchable rather than one locked by an activation that never ran
@@ -391,7 +415,13 @@ export interface SpecialistWorkItemBoundary {
    * predate it.
    */
   releaseInlineClaim?(ref: string, opts?: { activationId?: string }): boolean;
-  journal(ref: string, kind: string, opts?: { participantId?: string; activationId?: string }): void;
+  /**
+   * Append a journal entry on an issue. `summary` carries the ad hoc dispatch
+   * evidence note (XT-108: surface, specialist, requested_by, parent_ref, kind,
+   * title-source) as a `note` semantic summary; without it this is the plain
+   * store journal write it always was. Never a provenance receipt, never a new store.
+   */
+  journal(ref: string, kind: string, opts?: { participantId?: string; activationId?: string; summary?: string }): void;
   /**
    * S1 settlement surface (ADR §§38–39). Optional so existing fakes keep
    * compiling; the host degrades to store-only publication when absent.
@@ -468,6 +498,8 @@ export interface IssueServicePort {
     contract: unknown;
     scrutiny: string;
     authoredBy: string;
+    /** Parent machine id, checked for existence with the link written atomically (never setParent). */
+    parentId?: string;
   }): { id: string };
   claimReady(
     issueId: string,
@@ -480,7 +512,7 @@ export interface IssueServicePort {
 /** Structural port over the producer's issue store (read + journal). */
 export interface IssueStorePort {
   get(ref: string): {
-    issue: { humanRef: string; id: string; currentRevision: number; currentContractHash: string; title: string };
+    issue: { humanRef: string; id: string; currentRevision: number; currentContractHash: string; title: string; lifecycleState: string };
     contract: unknown;
     readinessState: string;
     dispatchable: boolean;
@@ -500,6 +532,8 @@ export interface JournalServicePort {
   appendEntry(issueId: string, input: {
     kind: string;
     result?: unknown;
+    /** Semantic summary for kinds that carry one (`note`): validated fail-closed by the producer. */
+    semantic?: { summary: string };
     executionContext?: unknown;
     refs?: Array<{ kind: string; key: string; value?: unknown }>;
     participantId?: string;
@@ -562,6 +596,7 @@ export function createWorkItemBoundary(ports: WorkItemPorts): SpecialistWorkItem
       issueId: v.issue.id,
       revision: v.issue.currentRevision,
       contractHash: v.issue.currentContractHash,
+      lifecycleState: v.issue.lifecycleState,
       title: v.issue.title,
       contract: v.contract,
       readinessState: v.readinessState,
@@ -679,7 +714,7 @@ export function createWorkItemBoundary(ports: WorkItemPorts): SpecialistWorkItem
       return out.binding;
     },
 
-    inlineCreate(contract: string, opts: { title?: string; holder?: string; activationId?: string } = {}): InlineIssueResult {
+    inlineCreate(contract: string, opts: { title?: string; holder?: string; activationId?: string; parentId?: string; kind?: string } = {}): InlineIssueResult {
       // §10: structural validation BEFORE any Issue exists, so a refused
       // dispatch leaves the board unchanged. The shared contract-text gate is
       // the canonical reader; failures land here, never inside a worker prompt.
@@ -703,6 +738,15 @@ export function createWorkItemBoundary(ports: WorkItemPorts): SpecialistWorkItem
         output: splitLines(sections.get('OUTPUT')).map((artifact) => ({ artifact })),
       };
 
+      // Never an epic: the adapters exclude it structurally (zod enum), and this
+      // authoritative guard holds for programmatic callers that bypass them.
+      const kind = opts.kind ?? 'task';
+      if (!(INLINE_ISSUE_KINDS as readonly string[]).includes(kind)) {
+        throw new Error(
+          `inline contract kind '${kind}' is not creatable — an ad hoc dispatch creates one of ${INLINE_ISSUE_KINDS.join(', ')}, never epic`,
+        );
+      }
+
       // The dispatcher holds the created issue: the coordinator (or adapter)
       // that supplied the contract owns it until the activation settles.
       const holder = opts.holder ?? 'adapter::specialists';
@@ -710,10 +754,14 @@ export function createWorkItemBoundary(ports: WorkItemPorts): SpecialistWorkItem
       const issue = issues.createIssue({
         projectId,
         title: opts.title ?? (firstLine ?? 'Specialist dispatch contract').slice(0, 72),
-        kind: 'task',
+        kind,
         contract: contractObj,
         scrutiny,
         authoredBy: holder,
+        // Creation-with-parent is ONE atomic step: Substrate checks the parent's
+        // existence and writes the link inside the same transaction (XT-108).
+        // The host verifies openness BEFORE this call; never setParent after.
+        ...(opts.parentId ? { parentId: opts.parentId } : {}),
       });
       // claimReady attests + claims in one transaction (§10: readiness
       // attestation then claim, atomically, before the ExecutionBinding).
@@ -747,8 +795,24 @@ export function createWorkItemBoundary(ports: WorkItemPorts): SpecialistWorkItem
       return released !== null;
     },
 
-    journal(ref: string, kind: string, opts: { participantId?: string; activationId?: string } = {}): void {
-      store.addJournal(ref, kind, opts);
+    journal(ref: string, kind: string, opts: { participantId?: string; activationId?: string; summary?: string } = {}): void {
+      // Evidence with content cannot ride the store write: the producer's addJournal
+      // forwards kind/identity only, never a body. A summary routes through the journal
+      // service as a `note` semantic summary instead — the same append path the journal
+      // tool uses — and falls back to the plain store write when no journal service is
+      // wired (fakes, NULL boundary) so the call never fails a dispatch.
+      if (opts.summary !== undefined && journalService) {
+        const issueId = issues.resolveRef(ref).id;
+        journalService.appendEntry(issueId, {
+          kind,
+          semantic: { summary: opts.summary },
+          ...(opts.participantId ? { participantId: opts.participantId } : {}),
+          ...(opts.activationId ? { activationId: opts.activationId } : {}),
+        });
+        return;
+      }
+      const { summary: _evidence, ...storeOpts } = opts;
+      store.addJournal(ref, kind, storeOpts);
     },
 
     ...((journalService || provenanceService)

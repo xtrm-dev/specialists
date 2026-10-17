@@ -32,7 +32,7 @@ export function testWorkItems(options: {
   const reasons = missing.length > 0 ? [`missing required sections: ${missing.join(', ')}`] : [`issue is ${state}`];
   return {
     view(issueRef: string): WorkItemView {
-      return { ref: issueRef, issueId: `iss_${issueRef}`, revision: 1, contractHash: 'hash-test', title: options.title ?? 'A task', contract, readinessState: state, dispatchable: state === 'ready' || state === 'claimed', reasons };
+      return { ref: issueRef, issueId: `iss_${issueRef}`, revision: 1, contractHash: 'hash-test', lifecycleState: 'open', title: options.title ?? 'A task', contract, readinessState: state, dispatchable: state === 'ready' || state === 'claimed', reasons };
     },
     epicAncestors: () => [],
     completedBlockers: () => options.blockers ?? [],

@@ -1702,8 +1702,30 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
       ),
       title: Type.Optional(
         Type.String({
-          description: 'Optional title for the Substrate Issue created from `contract` (default: derived from PROBLEM).',
+          description: 'Optional title for the Substrate Issue created from `contract` (default: `<specialist>: <first PROBLEM line>`). An explicit title wins; blank counts as absent.',
         }),
+      ),
+      parent_ref: Type.Optional(
+        Type.String({
+          description:
+            'Parent locator for the Substrate Issue created from `contract` — any locator the shared ' +
+            'work boundary resolves. ONLY with contract: refused alongside issue_ref/bead_id, and ' +
+            'refused without contract. The parent must exist and not be terminal ' +
+            '(done/cancelled/archived; deferred is accepted); the check runs BEFORE anything is ' +
+            'created, and creation-with-parent is one atomic step.',
+        }),
+      ),
+      kind: Type.Optional(
+        Type.Union(
+          [Type.Literal('task'), Type.Literal('bug'), Type.Literal('research'), Type.Literal('decision'), Type.Literal('followup')],
+          {
+            description:
+              'Substrate kind for the Substrate Issue created from `contract` (never epic — refused ' +
+              'structurally). ONLY with contract: refused alongside issue_ref/bead_id, and refused ' +
+              'without contract. Absent means the default from the Specialist output_type ' +
+              '(research/analysis give research, everything else gives task).',
+          },
+        ),
       ),
       model_override: Type.Optional(
         Type.String({
@@ -1735,7 +1757,9 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
           description:
             'Walk the Substrate Issue parent relation UP this many hops (1 = immediate parent, ' +
             "2 = parent + grandparent) and render each ancestor contract into the turn-1 " +
-            "'## Epic lineage' section. Omit when no lineage is requested.",
+            "'## Epic lineage' section. Omit when no lineage is requested. Honoured for an " +
+            'inline contract ONLY when parent_ref is given (a parentless auto-created Issue has ' +
+            'no lineage); still dropped for parentless inline creates.',
           minimum: 1,
           maximum: 2,
         }),
@@ -1753,6 +1777,8 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
         const issueRef = (params.issue_ref ?? '').trim();
         const beadAlias = (params.bead_id ?? '').trim();
         const contract = (params.contract ?? '').trim();
+        const parentRef = (params.parent_ref ?? '').trim();
+        const kind = (params.kind ?? '').trim();
         if (issueRef && beadAlias) {
           return resultOf(inlineRejectionResult(
             'both issue_ref and bead_id were provided — bead_id is only an alias; provide one locator spelling',
@@ -1764,13 +1790,39 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
             'a work locator and contract were both provided — provide exactly one; silently preferring one would dispatch against work the coordinator did not mean',
           ));
         }
+        if (parentRef && workRef) {
+          return resultOf(inlineRejectionResult(
+            'parent_ref and issue_ref/bead_id were both provided — parent_ref only ' +
+            'parents an issue created from an inline contract; provide exactly one of ' +
+            'issue_ref, bead_id or contract',
+          ));
+        }
+        if (kind && workRef) {
+          return resultOf(inlineRejectionResult(
+            'kind and issue_ref/bead_id were both provided — kind only flavours an ' +
+            'issue created from an inline contract',
+          ));
+        }
+        if (parentRef && !contract) {
+          return resultOf(inlineRejectionResult(
+            'parent_ref was provided without contract — it only parents the issue ' +
+            'created from an inline contract',
+          ));
+        }
+        if (kind && !contract) {
+          return resultOf(inlineRejectionResult(
+            'kind was provided without contract — it only flavours the issue ' +
+            'created from an inline contract',
+          ));
+        }
         const epicContextDepth = params.epic_context_depth;
         if (epicContextDepth !== undefined && epicContextDepth !== 1 && epicContextDepth !== 2) {
           return resultOf(inlineRejectionResult(
             'epic_context_depth must be 1 or 2 — 1 walks to the immediate parent epic, 2 also includes the grand-epic',
           ));
         }
-        // Inline-contract dispatch creates a fresh issue with no parent: no lineage.
+        // Lineage needs a parent: an inline contract honours epic_context_depth only
+        // when parent_ref parents the created issue under an existing ancestor chain.
         const inline = !workRef && contract ? contract : undefined;
         if (!workRef && !inline) {
           return resultOf(inlineRejectionResult(
@@ -1793,9 +1845,17 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
           // The host owns creation: validate → create → attest → claim through
           // the work boundary, claiming WITH this activation's id.
           ...(inline
-            ? { contract: inline, ...(params.title ? { title: params.title } : {}) }
+            ? {
+              contract: inline,
+              ...(params.title ? { title: params.title } : {}),
+              ...(parentRef ? { parentRef } : {}),
+              ...(kind ? { kind } : {}),
+            }
             : {}),
-          ...(epicContextDepth !== undefined && !inline ? { epicContextDepth } : {}),
+          // Honoured for an existing issue always; for an inline contract only when
+          // parent_ref gives the created issue a lineage to walk.
+          ...(epicContextDepth !== undefined && (!inline || parentRef) ? { epicContextDepth } : {}),
+          surface: 'pi-extension',
           ...(params.model_override ? { modelOverride: params.model_override } : {}),
           ...(params.thinking_override ? { thinkingOverride: params.thinking_override } : {}),
           requestedByParticipantId: params.requested_by ?? DEFAULT_REQUESTED_BY,

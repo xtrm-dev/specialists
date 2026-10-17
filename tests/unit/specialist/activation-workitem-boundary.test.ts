@@ -36,7 +36,7 @@ function stubPorts(active: ActiveClaimView | null, released: Array<{ issueId: st
     provenance: {},
     store: {
       get: (ref) => ({
-        issue: { humanRef: ref, id: `iss_${ref}`, currentRevision: 1, currentContractHash: 'h', title: 'T' },
+        issue: { humanRef: ref, id: `iss_${ref}`, currentRevision: 1, currentContractHash: 'h', title: 'T', lifecycleState: 'open' },
         contract: {},
         readinessState: 'claimed',
         dispatchable: true,
@@ -394,7 +394,7 @@ describe('settlement reconciliation reads (SPECIALISTS-54)', () => {
       provenance: {},
       store: {
         get: (ref: string) => ({
-          issue: { humanRef: ref, id: `iss_${ref}`, currentRevision: 1, currentContractHash: 'h', title: 'T' },
+          issue: { humanRef: ref, id: `iss_${ref}`, currentRevision: 1, currentContractHash: 'h', title: 'T', lifecycleState: 'open' },
           contract: {},
           readinessState: 'claimed',
           dispatchable: true,
@@ -462,7 +462,7 @@ describe('settlement reconciliation reads (SPECIALISTS-54)', () => {
       provenance: {},
       store: {
         get: (ref: string) => ({
-          issue: { humanRef: ref, id: `iss_${ref}`, currentRevision: 1, currentContractHash: 'h', title: 'T' },
+          issue: { humanRef: ref, id: `iss_${ref}`, currentRevision: 1, currentContractHash: 'h', title: 'T', lifecycleState: 'open' },
           contract: {}, readinessState: 'claimed', dispatchable: true, reasons: [],
         }),
         addJournal: () => {},

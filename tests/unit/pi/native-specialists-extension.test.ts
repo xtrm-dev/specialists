@@ -400,6 +400,49 @@ describe('native-specialists extension (Pi coordinator surface)', () => {
     expect(calls.start[0]).not.toHaveProperty('epicContextDepth');
   });
 
+  it('inline contract with parent_ref forwards parent, kind, lineage and the pi surface (XT-108)', async () => {
+    const mod = await loadExtension();
+    const pi = makeFakePi();
+    const { host, calls } = makeFakeHost();
+    mod.default(pi, { createHost: () => host });
+    const dispatch = toolNamed(pi, 'specialist_dispatch');
+    expect(dispatch.parameters.properties).toHaveProperty('parent_ref');
+    expect(dispatch.parameters.properties).toHaveProperty('kind');
+    const out = resultText(await dispatch.execute('tc1', {
+      specialist: 'explorer',
+      contract: INLINE_CONTRACT,
+      parent_ref: 'THEME-1',
+      kind: 'research',
+      epic_context_depth: 2,
+    }));
+    expect(out.status).toBe('dispatched');
+    expect(calls.start[0]).toMatchObject({
+      contract: INLINE_CONTRACT,
+      parentRef: 'THEME-1',
+      kind: 'research',
+      epicContextDepth: 2,
+      surface: 'pi-extension',
+    });
+  });
+
+  it('parent_ref/kind conflicts are refused on the Pi surface without dispatching (XT-108)', async () => {
+    const mod = await loadExtension();
+    const pi = makeFakePi();
+    const { host } = makeFakeHost();
+    mod.default(pi, { createHost: () => host });
+    const dispatch = toolNamed(pi, 'specialist_dispatch');
+    for (const params of [
+      { specialist: 'explorer', bead_id: 'bd-1', parent_ref: 'THEME-1' },
+      { specialist: 'explorer', issue_ref: 'XTRM-1', kind: 'bug' },
+      { specialist: 'explorer', parent_ref: 'THEME-1' },
+      { specialist: 'explorer', kind: 'bug' },
+    ]) {
+      const out = resultText(await dispatch.execute('tc1', params));
+      expect(out.status).toBe('rejected');
+    }
+    expect(host.start).not.toHaveBeenCalled();
+  });
+
   it('renders a DispatchRejectedError as a structured result, preserving detail.missing', async () => {
     const mod = await loadExtension();
     const pi = makeFakePi();

@@ -17,3 +17,8 @@ Do not dispatch from a stale base because the previous job “said it finished.�
 
 If the next lane depends only on a durable result/report rather than source changes,
 verify that result exists and is the intended final version before launching the consumer.
+
+When the work belongs under a theme or epic, dispatch with `contract` + `parent_ref`
+so the created Issue lands as a child of that parent atomically — never dispatch
+parentless and reparent afterwards (no reparent command exists). Confirm the parent
+is not terminal first: done/cancelled/archived parents refuse the dispatch.
