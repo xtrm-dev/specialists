@@ -34,7 +34,6 @@
     "config/skills/",
     "config/catalog/",
     "config/nodes/",
-    "config/hooks/",
     "config/workflows/",
     "plugins/specialists/",
     "plugins/specialists-ui/",

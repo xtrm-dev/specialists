@@ -22682,6 +22682,79 @@ function validateInitPostconditions(cwd) {
   }
   return warnings;
 }
+function cleanupLegacyHookLinks(cwd) {
+  const hooksDir = join15(cwd, ".claude", "hooks");
+  if (!existsSync14(hooksDir))
+    return [];
+  const managedDir = join15(cwd, ".xtrm", "hooks", "specialists");
+  const removed = [];
+  for (const name of readdirSync5(hooksDir).filter((entry) => LEGACY_HOOK_NAME.test(entry))) {
+    const linkPath = join15(hooksDir, name);
+    if (!lstatSync2(linkPath).isSymbolicLink())
+      continue;
+    const target = resolve6(hooksDir, readlinkSync(linkPath));
+    if (existsSync14(linkPath) && !target.startsWith(managedDir + "/"))
+      continue;
+    unlinkSync(linkPath);
+    removed.push(name);
+  }
+  return removed;
+}
+function isStaleLegacyCommand(cwd, command) {
+  if (typeof command !== "string")
+    return false;
+  const match = LEGACY_HOOK_COMMAND.exec(command);
+  return match !== null && !existsSync14(join15(cwd, ".claude", "hooks", match[1]));
+}
+function cleanupLegacySettingsHooks(cwd) {
+  const settingsPath = join15(cwd, ".claude", "settings.json");
+  if (!existsSync14(settingsPath))
+    return 0;
+  const raw = readFileSync13(settingsPath, "utf-8");
+  let settings;
+  try {
+    settings = JSON.parse(raw);
+  } catch {
+    warn(".claude/settings.json is not valid JSON; skipped legacy hook cleanup");
+    return 0;
+  }
+  if (!settings.hooks || typeof settings.hooks !== "object")
+    return 0;
+  let dropped = 0;
+  for (const [event, entries] of Object.entries(settings.hooks)) {
+    if (!Array.isArray(entries))
+      continue;
+    const kept = entries.filter((entry) => {
+      const before = entry.hooks?.length ?? 0;
+      if (!Array.isArray(entry.hooks))
+        return true;
+      entry.hooks = entry.hooks.filter((hook) => !isStaleLegacyCommand(cwd, hook.command));
+      dropped += before - entry.hooks.length;
+      return entry.hooks.length > 0 || before === 0;
+    });
+    if (kept.length === entries.length && dropped === 0)
+      continue;
+    if (kept.length > 0)
+      settings.hooks[event] = kept;
+    else
+      delete settings.hooks[event];
+  }
+  if (dropped === 0)
+    return 0;
+  const indent = /^([ \t]+)"/m.exec(raw)?.[1] ?? 2;
+  writeFileSync7(settingsPath, JSON.stringify(settings, null, indent) + (raw.endsWith(`
+`) ? `
+` : ""), "utf-8");
+  return dropped;
+}
+function cleanupLegacyClaudeHooks(cwd) {
+  const links = cleanupLegacyHookLinks(cwd);
+  const entries = cleanupLegacySettingsHooks(cwd);
+  if (links.length > 0)
+    ok(`removed legacy .claude/hooks links: ${links.join(", ")}`);
+  if (entries > 0)
+    ok(`removed ${entries} stale specialists hook entr${entries === 1 ? "y" : "ies"} from .claude/settings.json`);
+}
 async function runGlobal() {
   console.log(`
 ${bold5("specialists init --global")}
@@ -22777,6 +22850,7 @@ ${bold5("specialists init")}
   ensureGitignore(cwd);
   ensureAgentsMd(cwd);
   ensureProjectMcp(cwd);
+  cleanupLegacyClaudeHooks(cwd);
   installProjectSkills(cwd, syncSkills);
   ensureObservabilityDb(cwd);
   const postconditionWarnings = validateInitPostconditions(cwd);
@@ -22809,7 +22883,7 @@ ${bold5("Done!")}
   console.log(`  3. Restart Claude Code or pi to pick up changes
 `);
 }
-var bold5 = (s) => `\x1B[1m${s}\x1B[0m`, green4 = (s) => `\x1B[32m${s}\x1B[0m`, yellow5 = (s) => `\x1B[33m${s}\x1B[0m`, dim5 = (s) => `\x1B[2m${s}\x1B[0m`, AGENTS_BLOCK, AGENTS_MARKER = "## Specialists", GITIGNORE_ENTRIES, MCP_FILE = ".mcp.json", MCP_SERVER_NAME = "specialists", MCP_SERVER_CONFIG;
+var bold5 = (s) => `\x1B[1m${s}\x1B[0m`, green4 = (s) => `\x1B[32m${s}\x1B[0m`, yellow5 = (s) => `\x1B[33m${s}\x1B[0m`, dim5 = (s) => `\x1B[2m${s}\x1B[0m`, AGENTS_BLOCK, AGENTS_MARKER = "## Specialists", GITIGNORE_ENTRIES, MCP_FILE = ".mcp.json", MCP_SERVER_NAME = "specialists", MCP_SERVER_CONFIG, LEGACY_HOOK_NAME, LEGACY_HOOK_COMMAND;
 var init_init = __esm(() => {
   init_observability_db();
   init_observability_sqlite();
@@ -22852,6 +22926,8 @@ Rules:
     ".specialists/db/*.db-shm"
   ];
   MCP_SERVER_CONFIG = { command: "specialists", args: [] };
+  LEGACY_HOOK_NAME = /^specialists-[\w.-]+\.mjs$/;
+  LEGACY_HOOK_COMMAND = /\.claude\/hooks\/(specialists-[\w.-]+\.mjs)/;
 });
 
 // src/cli/db.ts

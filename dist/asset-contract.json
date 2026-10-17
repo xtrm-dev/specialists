@@ -239,11 +239,7 @@
       "path": "config/nodes/research.node.json"
     }
   ],
-  "shipped_hooks": [
-    {
-      "path": "config/hooks/specialists-session-start.mjs"
-    }
-  ],
+  "shipped_hooks": [],
   "notes": [
     "Cross-repo expectation: xtrm-tools validates this manifest against shipped assets on fresh install.",
     "Any new skill, specialist, rule, catalog, node, or hook must appear here before release."

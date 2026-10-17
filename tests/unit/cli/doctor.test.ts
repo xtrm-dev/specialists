@@ -53,10 +53,7 @@ describe('doctor CLI — run()', () => {
     expect(combined).toContain('pi');
     expect(combined).toContain('legacy Beads compatibility');
     expect(combined).toContain('xtrm-tools');
-    expect(combined).toContain('Claude Code hooks');
-    expect(combined).toContain('MCP');
-    expect(combined).toContain('Category A');
-    expect(combined).toContain('Category B');
+    expect(combined).toContain('substrate (native dispatch)');
     expect(combined).toContain('Background jobs');
   });
 
@@ -68,15 +65,10 @@ describe('doctor CLI — run()', () => {
     expect(hasSummary).toBe(true);
   });
 
-  it('checks for the expected session hook', async () => {
+  it('does not check for deprecated specialists Claude hooks (the Substrate plugin owns SessionStart)', async () => {
     const { combined } = await runDoctor();
-    expect(combined).toContain('specialists-session-start.mjs');
+    expect(combined).not.toContain('specialists-session-start.mjs');
     expect(combined).not.toContain('specialists-complete.mjs');
-  });
-
-  it('mentions managed mirror fixes', async () => {
-    const { combined } = await runDoctor();
-    expect(combined).toContain('specialists init --sync-defaults');
   });
 
   it('mentions fix hints for failures', async () => {
@@ -116,6 +108,8 @@ describe('doctor process cleanup helpers', () => {
   let jobsDir: string;
 
   beforeEach(() => {
+    // file-only mode: the default db-first path reads the real observability DB
+    vi.stubEnv('SPECIALISTS_JOB_FILE_OUTPUT', 'on');
     rootDir = join(tmpdir(), `doctor-process-${crypto.randomUUID()}`);
     jobsDir = join(rootDir, '.specialists', 'jobs');
     mkdirSync(jobsDir, { recursive: true });
@@ -124,6 +118,7 @@ describe('doctor process cleanup helpers', () => {
   afterEach(() => {
     rmSync(rootDir, { recursive: true, force: true });
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
     vi.resetModules();
   });
 

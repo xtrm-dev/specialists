@@ -24,9 +24,7 @@ async function main() {
     shipped_nodes: await collectFiles('config/nodes', '.json', (filePath) => ({
       path: filePath,
     })),
-    shipped_hooks: await collectFiles('config/hooks', '.mjs', (filePath) => ({
-      path: filePath,
-    })),
+    shipped_hooks: [], // no hook scripts ship (SPECIALISTS-4309); key kept for the xtrm-tools consumer schema
     notes: [
       'Cross-repo expectation: xtrm-tools validates this manifest against shipped assets on fresh install.',
       'Any new skill, specialist, rule, catalog, node, or hook must appear here before release.',
