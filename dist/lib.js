@@ -6957,7 +6957,7 @@ import {
   readFileSync as readFileSync6,
   realpathSync as realpathSync2
 } from "node:fs";
-import { homedir as homedir4 } from "node:os";
+import { homedir as homedir3 } from "node:os";
 import { isAbsolute as isAbsolute2, join as join8, relative, resolve as resolve10 } from "node:path";
 
 // src/pi/session.ts
@@ -7073,33 +7073,18 @@ function resolvePermissionGuardForSpawn(tier) {
 import { existsSync as existsSync4 } from "node:fs";
 import { dirname as dirname4, join as join4, resolve as resolve4 } from "node:path";
 import { fileURLToPath as fileURLToPath4 } from "node:url";
-import { homedir } from "node:os";
 var HERE4 = dirname4(fileURLToPath4(import.meta.url));
 var PACKAGE_DIR = join4("@jaggerxtrm", "pi-extensions");
 var EXT_REL = join4("extensions", "python-kernel", "index.ts");
-function resolveGlobalNodeModulesDir() {
-  const candidates = [
-    process.env.PI_NPM_GLOBAL_DIR,
-    process.env.NPM_CONFIG_PREFIX ? join4(process.env.NPM_CONFIG_PREFIX, "lib", "node_modules") : undefined,
-    process.env.npm_config_prefix ? join4(process.env.npm_config_prefix, "lib", "node_modules") : undefined,
-    process.env.NVM_BIN ? join4(dirname4(process.env.NVM_BIN), "lib", "node_modules") : undefined,
-    join4(homedir(), ".nvm/versions/node", process.version, "lib", "node_modules")
-  ].filter((candidate) => Boolean(candidate));
-  return candidates.find((candidate) => existsSync4(candidate));
+function findGlobalEntry(...segments) {
+  const found = resolveGlobalNodeModulesDirs().map((root) => join4(root, ...segments)).find((candidate) => existsSync4(candidate));
+  return found ? resolve4(found) : null;
 }
 var cached4;
 function getPiExtensionsPythonKernelPath() {
   if (cached4 !== undefined)
     return cached4;
-  const globalDir = resolveGlobalNodeModulesDir();
-  if (globalDir) {
-    const candidate = join4(globalDir, PACKAGE_DIR, EXT_REL);
-    if (existsSync4(candidate)) {
-      cached4 = resolve4(candidate);
-      return cached4;
-    }
-  }
-  cached4 = null;
+  cached4 = findGlobalEntry(PACKAGE_DIR, EXT_REL);
   return cached4;
 }
 function resolvePiExtensionsPythonKernelPath() {
@@ -7110,7 +7095,7 @@ var SK_PACKAGE_DIR = join4("@jaggerxtrm", "pi-service-knowledge");
 // src/pi/session.ts
 import { spawn, execFileSync } from "node:child_process";
 import { existsSync as existsSync6, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
-import { homedir as homedir2, tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { isAbsolute, resolve as resolve5, sep, join as join5, dirname as dirname5 } from "node:path";
 
 // src/pi/backendMap.ts
@@ -11646,21 +11631,14 @@ function resolveGitnexusRuntime(options) {
       extensionState: { enabled: false, health: "disabled", catalogCompatible: true }
     };
   }
-  const globalDir = resolveGlobalNodeModulesDir2();
-  if (!globalDir) {
+  const packagePath = resolveGlobalPackageDir(packageName);
+  if (!packagePath) {
     return {
       packageName,
       extensionState: { enabled: true, health: "not_installed", catalogCompatible: false }
     };
   }
-  const packagePath = join5(globalDir, packageName);
   const packageJsonPath = join5(packagePath, "package.json");
-  if (!existsSync6(packageJsonPath)) {
-    return {
-      packageName,
-      extensionState: { enabled: true, health: "not_installed", catalogCompatible: false }
-    };
-  }
   const installedVersion = readPackageVersion(packageJsonPath);
   if (!installedVersion) {
     return {
@@ -11694,21 +11672,14 @@ function resolvePiExtensionsPythonKernelRuntime(options) {
       extensionState: { enabled: false, health: "disabled", catalogCompatible: true }
     };
   }
-  const globalDir = resolveGlobalNodeModulesDir2();
-  if (!globalDir) {
+  const packagePath = resolveGlobalPackageDir(packageName);
+  if (!packagePath) {
     return {
       packageName,
       extensionState: { enabled: true, health: "not_installed", catalogCompatible: false }
     };
   }
-  const packagePath = join5(globalDir, packageName);
   const packageJsonPath = join5(packagePath, "package.json");
-  if (!existsSync6(packageJsonPath)) {
-    return {
-      packageName,
-      extensionState: { enabled: true, health: "not_installed", catalogCompatible: false }
-    };
-  }
   const installedVersion = readPackageVersion(packageJsonPath);
   const extPath = join5(packagePath, "extensions", "python-kernel", "index.ts");
   if (!installedVersion || !existsSync6(extPath)) {
@@ -11893,7 +11864,7 @@ function resolveExecutionExtensionSelection(extensions) {
 }
 function resolveCuratedExtensionPaths(options) {
   const all = [];
-  const piExtDir = join5(homedir2(), ".pi", "agent", "extensions");
+  const piExtDir = join5(homedir(), ".pi", "agent", "extensions");
   const permLevel = (options.permissionLevel ?? "").toUpperCase();
   if (permLevel !== "READ_ONLY") {
     const qgPath = join5(piExtDir, "quality-gates");
@@ -11906,7 +11877,7 @@ function resolveCuratedExtensionPaths(options) {
   const cavemanPath = join5(piExtDir, "caveman");
   if (existsSync6(cavemanPath))
     all.push(cavemanPath);
-  const nvidiaNimPath = join5(homedir2(), ".pi", "agent", "git", "github.com", "xRyul", "pi-nvidia-nim");
+  const nvidiaNimPath = join5(homedir(), ".pi", "agent", "git", "github.com", "xRyul", "pi-nvidia-nim");
   if (existsSync6(nvidiaNimPath))
     all.push(nvidiaNimPath);
   const gitnexusContract = options.resolvedToolContract?.extensions.gitnexus;
@@ -11942,15 +11913,12 @@ function resolvePiVersion() {
     }
   } catch {}
   try {
-    const globalDir = resolveGlobalNodeModulesDir2();
-    if (globalDir) {
-      const pkgPath = join5(globalDir, "@earendil-works", "pi-coding-agent", "package.json");
-      if (existsSync6(pkgPath)) {
-        const parsed = JSON.parse(readFileSync(pkgPath, "utf-8"));
-        if (typeof parsed.version === "string" && parsed.version.length > 0) {
-          cachedPiVersion = parsed.version;
-          return cachedPiVersion;
-        }
+    const packageDir = resolveGlobalPackageDir("@earendil-works/pi-coding-agent");
+    if (packageDir) {
+      const parsed = JSON.parse(readFileSync(join5(packageDir, "package.json"), "utf-8"));
+      if (typeof parsed.version === "string" && parsed.version.length > 0) {
+        cachedPiVersion = parsed.version;
+        return cachedPiVersion;
       }
     }
   } catch {}
@@ -11958,7 +11926,7 @@ function resolvePiVersion() {
 }
 function resolveGlobalNodeModulesDirs(deps = {}) {
   const env = deps.env ?? process.env;
-  const home = deps.home ?? homedir2();
+  const home = deps.home ?? homedir();
   const execPath = deps.execPath ?? process.execPath;
   const exists = deps.exists ?? existsSync6;
   const readDir = deps.readDir ?? ((path) => readdirSync(path));
@@ -11975,8 +11943,9 @@ function resolveGlobalNodeModulesDirs(deps = {}) {
   ].filter((candidate) => Boolean(candidate));
   return [...new Set(candidates)].filter((candidate) => exists(candidate));
 }
-function resolveGlobalNodeModulesDir2(deps = {}) {
-  return resolveGlobalNodeModulesDirs(deps)[0];
+function resolveGlobalPackageDir(packageName, deps = {}) {
+  const exists = deps.exists ?? existsSync6;
+  return resolveGlobalNodeModulesDirs(deps).map((root) => join5(root, packageName)).find((dir) => exists(join5(dir, "package.json")));
 }
 function nvmNodeModulesDirs(home, readDir) {
   const root = join5(home, ".nvm", "versions", "node");
@@ -17626,7 +17595,7 @@ ${summaries.join(`
 import { execSync as execSync2, spawnSync as spawnSync3 } from "node:child_process";
 import { existsSync as existsSync11, readFileSync as readFileSync5 } from "node:fs";
 import { basename as basename2, resolve as resolve9 } from "node:path";
-import { homedir as homedir3 } from "node:os";
+import { homedir as homedir2 } from "node:os";
 function sanitizeScriptName(name) {
   const cleaned = name.replace(/[\u0000-\u001f\u007f-\u009f"\\<>]/g, "").slice(0, 128);
   return /^[A-Za-z0-9:][A-Za-z0-9._:-]{0,127}$/.test(cleaned) ? cleaned : "unknown";
@@ -17761,7 +17730,7 @@ ${blocks}
 </pre_flight_context>`;
 }
 function resolvePath2(p) {
-  return p.startsWith("~/") ? resolve9(homedir3(), p.slice(2)) : resolve9(p);
+  return p.startsWith("~/") ? resolve9(homedir2(), p.slice(2)) : resolve9(p);
 }
 function commandExists(cmd) {
   const result = spawnSync3("which", [cmd], { stdio: "ignore" });
@@ -19374,7 +19343,7 @@ function appendExtensionArgs(args, spec, resolvedToolContract, extensionSources 
   const readLineNumbersPath = getReadLineNumbersExtensionPath();
   if (readLineNumbersPath)
     args.push("-e", readLineNumbersPath);
-  const piExtDir = join8(homedir4(), ".pi", "agent", "extensions");
+  const piExtDir = join8(homedir3(), ".pi", "agent", "extensions");
   if (permissionLevel !== "READ_ONLY") {
     const qualityGatesPath = join8(piExtDir, "quality-gates");
     if (existsSync12(qualityGatesPath))
@@ -19959,11 +19928,11 @@ import {
   writeFileSync as writeFileSync3
 } from "node:fs";
 import { dirname as dirname8, join as join9 } from "node:path";
-import { homedir as homedir5 } from "node:os";
+import { homedir as homedir4 } from "node:os";
 var CONFIG_FILENAME = "user.json";
 var SPECIALISTS_SUBDIR = "specialists";
 function getGlobalUserConfigPath() {
-  const home = process.env.HOME?.trim() || homedir5();
+  const home = process.env.HOME?.trim() || homedir4();
   const xdgConfigHome = process.env.XDG_CONFIG_HOME?.trim();
   if (xdgConfigHome) {
     const xdgPath = join9(xdgConfigHome, SPECIALISTS_SUBDIR, CONFIG_FILENAME);
@@ -20220,7 +20189,7 @@ function formatReferenceLocation(specialist, fieldPath) {
 
 // src/specialist/project-pack-skill-resolver.ts
 import { accessSync as accessSync2, constants as constants2, readdirSync as readdirSync2, lstatSync as lstatSync3, realpathSync as realpathSync3 } from "node:fs";
-import { homedir as homedir6 } from "node:os";
+import { homedir as homedir5 } from "node:os";
 import { join as join11, relative as relative2, isAbsolute as isAbsolute3 } from "node:path";
 var RESERVED_SKILL_ROOTS = [
   "default",
@@ -20291,7 +20260,7 @@ function isPathInside(candidate, root) {
   return rel === "" || rel.length > 0 && !rel.startsWith("..") && !isAbsolute3(rel);
 }
 function globalDefaultCandidate(skillName) {
-  return join11(homedir6(), ".xtrm", "skills", "default", skillName);
+  return join11(homedir5(), ".xtrm", "skills", "default", skillName);
 }
 function probeCandidate(skillName, canonicalConsumer, canonicalSkillsRoot, candidate) {
   const candidateRel = relative2(canonicalConsumer, candidate);
@@ -20882,13 +20851,13 @@ import { existsSync as existsSync21 } from "node:fs";
 // src/activation/workitem-store.ts
 import { existsSync as existsSync16 } from "node:fs";
 import { createRequire as createRequire3 } from "node:module";
-import { homedir as homedir8 } from "node:os";
+import { homedir as homedir7 } from "node:os";
 import { dirname as dirname10, join as join14 } from "node:path";
 import { pathToFileURL } from "node:url";
 
 // src/activation/authority-store.ts
 import { createRequire as createRequire2 } from "node:module";
-import { homedir as homedir7 } from "node:os";
+import { homedir as homedir6 } from "node:os";
 import { dirname as dirname9, join as join13 } from "node:path";
 var require2 = createRequire2(import.meta.url);
 function resolveAuthorityDbPath(env = process.env) {
@@ -20898,7 +20867,7 @@ function resolveAuthorityDbPath(env = process.env) {
   const legacy = (env.XTRM_STATE_DB ?? "").trim();
   if (legacy)
     return legacy;
-  return join13(homedir7(), ".xtrm", "state.db");
+  return join13(homedir6(), ".xtrm", "state.db");
 }
 var NULL_AUTHORITY_WRITER = { record: () => {}, remove: () => {} };
 
@@ -20921,7 +20890,7 @@ function resolveSubstrateFromGlobalPrefix(libDirs) {
   const candidates = uniqueExistingLibDirs(libDirs ?? [
     ...resolveGlobalNodeModulesDirs().map((modulesDir) => dirname10(modulesDir)),
     join14(runtimePrefix, "lib"),
-    join14(homedir8(), ".bun", "install", "global")
+    join14(homedir7(), ".bun", "install", "global")
   ]);
   for (const libDir of candidates) {
     try {
@@ -21728,11 +21697,11 @@ import { connect, createServer } from "node:net";
 
 // src/activation/transport/roster.ts
 import { existsSync as existsSync18, readdirSync as readdirSync4, readFileSync as readFileSync10 } from "node:fs";
-import { homedir as homedir9 } from "node:os";
+import { homedir as homedir8 } from "node:os";
 import { join as join16 } from "node:path";
 var SUPPORTED_PEER_PROTOCOL = 1;
 function defaultRosterDir() {
-  return join16(homedir9(), ".claude", "sessions");
+  return join16(homedir8(), ".claude", "sessions");
 }
 function procProbe() {
   let bootSeconds;
@@ -22463,12 +22432,12 @@ ${attempted.map((p) => `  • ${p}`).join(`
   }
 }
 var cached5;
-function piSdkCandidates() {
+function piSdkCandidates(deps = {}) {
+  const exists = deps.exists ?? existsSync20;
   const candidates = [PI_SDK_PACKAGE];
-  const globalDir = resolveGlobalNodeModulesDir2();
-  if (globalDir) {
-    const entry = join18(globalDir, PI_SDK_PACKAGE, "dist", "index.js");
-    if (existsSync20(entry))
+  for (const root of resolveGlobalNodeModulesDirs(deps)) {
+    const entry = join18(root, PI_SDK_PACKAGE, "dist", "index.js");
+    if (exists(entry))
       candidates.push(pathToFileURL2(entry).href);
   }
   return candidates;
@@ -23645,7 +23614,7 @@ function isNonLocalExtensionSource(source) {
   return NON_LOCAL_EXTENSION_PREFIXES.some((prefix) => source.startsWith(prefix));
 }
 var defaultExtensionSourceResolutionEnv = {
-  globalNodeModulesDir: resolveGlobalNodeModulesDir2,
+  globalNodeModulesDirs: resolveGlobalNodeModulesDirs,
   manifestExists: (packagePath) => existsSync21(join20(packagePath, "package.json")),
   piAgentDir: () => {
     return;
@@ -23655,11 +23624,7 @@ function resolveNpmExtensionSource(source, env = defaultExtensionSourceResolutio
   const packageName = parseNpmSourceName(source);
   if (!packageName)
     return null;
-  const globalDir = env.globalNodeModulesDir();
-  if (!globalDir)
-    return null;
-  const packagePath = join20(globalDir, packageName);
-  return env.manifestExists(packagePath) ? packagePath : null;
+  return env.globalNodeModulesDirs().map((root) => join20(root, packageName)).find(env.manifestExists) ?? null;
 }
 function resolveGitExtensionSource(source, env = defaultExtensionSourceResolutionEnv) {
   if (!source.startsWith("git:"))

@@ -89,7 +89,7 @@ vi.mock('../../../src/pi/python-kernel-extension.js', () => ({
 const npmRoot = vi.hoisted(() => ({ dir: '' }));
 vi.mock('../../../src/pi/session.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../src/pi/session.js')>();
-  return { ...actual, resolveGlobalNodeModulesDir: () => npmRoot.dir || undefined };
+  return { ...actual, resolveGlobalNodeModulesDirs: () => (npmRoot.dir ? [npmRoot.dir] : []) };
 });
 const PARITY_NPM_SOURCE = 'npm:pi-parity-probe';
 const PARITY_NPM_PACKAGE = 'pi-parity-probe';
