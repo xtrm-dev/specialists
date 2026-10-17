@@ -67,9 +67,19 @@ claimed as a real Substrate Issue through the work boundary then bound at activa
 start. A draft or otherwise non-dispatchable Issue is refused before any model turn —
 fix the Issue, never route around the gate.
 
-Optional: `title`, `model_override`, `thinking_override`
+Optional: `title` (default `<specialist>: <first PROBLEM line>`, trimmed; explicit wins),
+`model_override`, `thinking_override`
 (`off|minimal|low|medium|high|xhigh`), `requested_by`, `coordinator_session_id`,
-`epic_context_depth` (1 walks to the parent epic, 2 also the grand-epic).
+`epic_context_depth` (1 walks to the parent epic, 2 also the grand-epic — works for an
+inline contract only with `parent_ref`; still dropped for parentless creates),
+`parent_ref` (with `contract` only; refused with `issue_ref`; the parent must exist and not
+be done/cancelled/archived — checked before anything is created),
+`kind` (with `contract` only; the default comes from the specialist's `output_type`,
+never epic).
+
+Creation writes a journal `note` recording surface, specialist, `requested_by`,
+`parent_ref`, kind, and title-source. Rule: dispatch under a parent; never parentless and
+then reparent — no reparent command exists.
 
 **Returns identity and admission only — never a result.** Read the result later from
 `specialist_result`. Never substitute a result for an interaction message.
