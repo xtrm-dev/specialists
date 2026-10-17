@@ -788,7 +788,6 @@ function cleanupLegacySettingsHooks(cwd: string): number {
   }
   if (dropped === 0) return 0;
 
-  if (Object.keys(settings.hooks).length === 0) delete settings.hooks;
   const indent = /^([ \t]+)"/m.exec(raw)?.[1] ?? 2;
   writeFileSync(settingsPath, JSON.stringify(settings, null, indent) + (raw.endsWith('\n') ? '\n' : ''), 'utf-8');
   return dropped;

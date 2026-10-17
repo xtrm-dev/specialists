@@ -73,11 +73,13 @@ describe('init CLI — run()', () => {
     const count = (content.match(/## Specialists/g) ?? []).length;
     expect(count).toBe(1);
   });
-  it('refreshes an existing ## Specialists section without duplicating it', async () => {
-    const existing = '# Project\n\n## Specialists\n\nCustom text here.\n';
+  it('refreshes an existing ## Specialists section without duplicating it or touching other content', async () => {
+    const existing = '# Project\n\nIntro text.\n\n## Specialists\n\nOld text.\n\n## Other\n\nKeep me.\n';
     await writeFile(join(tempDir, 'AGENTS.md'), existing, 'utf-8');
     await runInit(tempDir);
     const content = await readFile(join(tempDir, 'AGENTS.md'), 'utf-8');
+    expect(content).toContain('Intro text.');
+    expect(content).toContain('## Other\n\nKeep me.');
     expect((content.match(/## Specialists/g) ?? []).length).toBe(1);
   });
   it('creates project .mcp.json with specialists registration', async () => {
@@ -334,10 +336,40 @@ describe('init CLI — run()', () => {
       expect(await readFile(settingsPath(), 'utf-8')).toBe(expected);
     });
 
-    it('removes an emptied hooks key and leaves a settings file without stale entries untouched', async () => {
+    it('rewrites non-normalised settings semantically unchanged, keeping indent and hooks key, idempotently', async () => {
+      await mkdir(dirname(settingsPath()), { recursive: true });
+      const raw = [
+        '{',
+        '    "env": {"NAME": "caf\\u00e9"},',
+        '    "ratio": 1.0,',
+        '    "list": [1,2,3],',
+        '    "hooks": {',
+        '        "Stop": [{"hooks": [{"type": "command", "command": "echo stop"}]}],',
+        '        "SessionStart": [{"hooks": [{"type": "command", "command": "node .claude/hooks/specialists-session-start.mjs"}]}]',
+        '    }',
+        '}',
+        '',
+      ].join('\n');
+      await writeFile(settingsPath(), raw, 'utf-8');
+
+      await runInit(tempDir);
+
+      const first = await readFile(settingsPath(), 'utf-8');
+      const expected = JSON.parse(raw);
+      delete expected.hooks.SessionStart;
+      expect(JSON.parse(first)).toEqual(expected);
+      expect(first.startsWith('{\n    "env"')).toBe(true);
+      expect(first.endsWith('}\n')).toBe(true);
+      expect(first).toContain('"hooks"');
+
+      await runInit(tempDir);
+      expect(await readFile(settingsPath(), 'utf-8')).toBe(first);
+    });
+
+    it('keeps an emptied hooks key as {} and leaves a settings file without stale entries untouched', async () => {
       await writeSettings({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'node .claude/hooks/specialists-session-start.mjs' }] }] }, model: 'opus' });
       await runInit(tempDir);
-      expect(JSON.parse(await readFile(settingsPath(), 'utf-8'))).toEqual({ model: 'opus' });
+      expect(JSON.parse(await readFile(settingsPath(), 'utf-8'))).toEqual({ hooks: {}, model: 'opus' });
 
       const untouched = await writeSettings({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'echo   done' }] }] } }, 4);
       await runInit(tempDir);
